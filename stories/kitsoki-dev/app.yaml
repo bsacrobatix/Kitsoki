@@ -175,10 +175,9 @@ world:
 
   # ticket_repo — the canonical GitHub repo every host.gh.ticket call pins via
   # its `repo` arg, so the dogfood loop never silently resolves the operator's
-  # `origin` (a personal fork like bsacrobatix/Kitsoki). constructorfabric is
-  # canonical even from a fork; a downstream project overrides this default
-  # rather than editing Go. Consumed once iface.ticket rebinds to
-  # host.gh.ticket (see docs/proposals/github-issues-tracker.md slice #4).
+  # `origin` (a personal fork like bsacrobatix/Kitsoki). The checked-in project
+  # profile (.kitsoki/project-profile.yaml) is the source of truth for this repo;
+  # local dogfood runs can override via .kitsoki.local.yaml root.overrides.world.
   ticket_repo:  { type: string, default: "constructorfabric/Kitsoki" }
 
   # Judge polymorphism. Defaults: supervised + 0.8 confidence floor.

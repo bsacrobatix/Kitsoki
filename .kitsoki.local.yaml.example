@@ -21,6 +21,15 @@
 # Point new sessions at one of the profiles below by default (optional).
 # default_profile: codex-native
 
+# Project-local overrides can also replace checked-in project defaults from
+# .kitsoki/project-profile.yaml through root.overrides. For example, to dogfood
+# GitHub issues against a fork instead of the canonical constructorfabric repo:
+#
+# root:
+#   overrides:
+#     world:
+#       ticket_repo: bsacrobatix/Kitsoki
+
 harness_profiles:
   # claude-code pointed at synthetic.new (Anthropic-compatible endpoint).
   # claude-code appends /v1/messages, so the base URL omits /v1.

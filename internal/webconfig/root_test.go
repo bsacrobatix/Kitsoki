@@ -122,6 +122,7 @@ dev_story_profile:
     design_durable_path: docs/designs
     design_doc_filename: DESIGN
     design_ticket_dir: ""
+    ticket_repo: constructorfabric/Kitsoki
   bugfix:
     build_cmd: "make ci-build"
 `
@@ -144,6 +145,9 @@ dev_story_profile:
 	}
 	if spec.World["design_doc_filename"] != "DESIGN" {
 		t.Fatalf("docs profile not carried into RootSpec: %+v", spec.World)
+	}
+	if spec.World["ticket_repo"] != "constructorfabric/Kitsoki" {
+		t.Fatalf("profile ticket_repo not carried into RootSpec: %+v", spec.World)
 	}
 }
 
