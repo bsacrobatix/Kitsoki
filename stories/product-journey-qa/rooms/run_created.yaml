@@ -1,7 +1,7 @@
 states:
   run_created:
     description: "A product-journey QA run bundle exists; waiting for captured evidence."
-    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, scenario, evidence_kind, evidence_path, finding_kind, finding_title, review_status, review_summary, validation_status, validation_errors, validation_warnings, status]
+    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, driver_journal_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, scenario, evidence_kind, evidence_path, finding_kind, finding_title, driver_event_id, dispatch_mode, driver_status, driver_summary, review_status, review_summary, validation_status, validation_errors, validation_warnings, status]
     view:
       - banner:
           text: "RUN CREATED"
@@ -16,12 +16,14 @@ states:
             Deck: '{{ world.deck_path|default:"(pending)" }}'
             Execution plan: '{{ world.execution_plan_path|default:"(pending)" }}'
             Driver plan: '{{ world.driver_plan_path|default:"(pending)" }}'
+            Driver journal: '{{ world.driver_journal_path|default:"(pending)" }}'
             Agent brief: '{{ world.agent_brief_path|default:"(pending)" }}'
             Driver handoff: '{{ world.driver_handoff_path|default:"(pending)" }}'
             Media manifest: '{{ world.media_manifest_path|default:"(pending)" }}'
             Scenario outcomes: '{{ world.scenario_outcomes_path|default:"(pending)" }}'
             Last evidence: '{{ world.scenario|default:"(none)" }} / {{ world.evidence_kind|default:"" }}'
             Last finding: '{{ world.finding_kind|default:"(none)" }} / {{ world.finding_title|default:"" }}'
+            Last driver event: '{{ world.driver_event_id|default:"(none)" }} / {{ world.driver_status|default:"" }}'
             Review: '{{ world.review_status|default:"(not reviewed)" }}'
             Validation: '{{ world.validation_status|default:"(not validated)" }}'
             Validation errors: "{{ world.validation_errors }}"
@@ -40,6 +42,9 @@ states:
             - label: "blocker scenario=... title=... summary=..."
               hint: "mark a scenario attempted but blocked, with optional trace/frame evidence"
               intent: blocker
+            - label: "driver_event scenario=... summary=..."
+              hint: "append a reusable-driver attempt to driver-journal.md"
+              intent: driver_event
             - label: "seed_demo"
               hint: "populate representative evidence and findings for deck review"
               intent: seed_demo
@@ -97,6 +102,7 @@ states:
                 deck_path: "stdout_json.deck_path"
                 execution_plan_path: "stdout_json.execution_plan_path"
                 driver_plan_path: "stdout_json.driver_plan_path"
+                driver_journal_path: "stdout_json.driver_journal_path"
                 agent_brief_path: "stdout_json.agent_brief_path"
                 driver_handoff_path: "stdout_json.driver_handoff_path"
                 media_manifest_path: "stdout_json.media_manifest_path"
@@ -146,6 +152,7 @@ states:
                 deck_path: "stdout_json.deck_path"
                 execution_plan_path: "stdout_json.execution_plan_path"
                 driver_plan_path: "stdout_json.driver_plan_path"
+                driver_journal_path: "stdout_json.driver_journal_path"
                 agent_brief_path: "stdout_json.agent_brief_path"
                 driver_handoff_path: "stdout_json.driver_handoff_path"
                 media_manifest_path: "stdout_json.media_manifest_path"
@@ -191,6 +198,7 @@ states:
                 deck_path: "stdout_json.deck_path"
                 execution_plan_path: "stdout_json.execution_plan_path"
                 driver_plan_path: "stdout_json.driver_plan_path"
+                driver_journal_path: "stdout_json.driver_journal_path"
                 agent_brief_path: "stdout_json.agent_brief_path"
                 driver_handoff_path: "stdout_json.driver_handoff_path"
                 media_manifest_path: "stdout_json.media_manifest_path"
@@ -198,6 +206,58 @@ states:
               on_error: run_created
             - set:
                 status: "blocker_recorded"
+      driver_event:
+        - target: run_created
+          effects:
+            - set:
+                scenario: "{{ slots.scenario }}"
+                dispatch_mode: "{{ slots.dispatch_mode ?? 'replay' }}"
+                driver_status: "{{ slots.driver_status ?? 'attempted' }}"
+                driver_summary: "{{ slots.summary }}"
+                mcp_tools: "{{ slots.mcp_tools ?? '' }}"
+                evidence_refs: "{{ slots.evidence_refs ?? '' }}"
+                blockers: "{{ slots.blockers ?? '' }}"
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
+                status: "recording_driver_event"
+            - invoke: host.run
+              id: record_product_journey_driver_event
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --record-driver-event
+                  - --json-output
+                  - --run-dir
+                  - "{{ world.run_dir }}"
+                  - --scenario
+                  - "{{ slots.scenario }}"
+                  - --dispatch-mode
+                  - "{{ slots.dispatch_mode ?? 'replay' }}"
+                  - --driver-status
+                  - "{{ slots.driver_status ?? 'attempted' }}"
+                  - --mcp-tools
+                  - "{{ slots.mcp_tools ?? '' }}"
+                  - --evidence-refs
+                  - "{{ slots.evidence_refs ?? '' }}"
+                  - --blockers
+                  - "{{ slots.blockers ?? '' }}"
+                  - --summary
+                  - "{{ slots.summary }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                driver_event_id: "stdout_json.event_id"
+                scenario: "stdout_json.scenario"
+                dispatch_mode: "stdout_json.dispatch_mode"
+                driver_status: "stdout_json.driver_status"
+                deck_path: "stdout_json.deck_path"
+                driver_journal_path: "stdout_json.driver_journal_path"
+                driver_handoff_path: "stdout_json.driver_handoff_path"
+              on_error: run_created
+            - set:
+                status: "driver_event_recorded"
       seed_demo:
         - target: run_created
           effects:
@@ -222,6 +282,7 @@ states:
                 deck_path: "stdout_json.deck_path"
                 execution_plan_path: "stdout_json.execution_plan_path"
                 driver_plan_path: "stdout_json.driver_plan_path"
+                driver_journal_path: "stdout_json.driver_journal_path"
                 agent_brief_path: "stdout_json.agent_brief_path"
                 driver_handoff_path: "stdout_json.driver_handoff_path"
                 media_manifest_path: "stdout_json.media_manifest_path"
@@ -255,6 +316,7 @@ states:
                 deck_path: "stdout_json.deck_path"
                 execution_plan_path: "stdout_json.execution_plan_path"
                 driver_plan_path: "stdout_json.driver_plan_path"
+                driver_journal_path: "stdout_json.driver_journal_path"
                 agent_brief_path: "stdout_json.agent_brief_path"
                 driver_handoff_path: "stdout_json.driver_handoff_path"
                 media_manifest_path: "stdout_json.media_manifest_path"
@@ -283,6 +345,7 @@ states:
                 deck_path: "stdout_json.deck_path"
                 execution_plan_path: "stdout_json.execution_plan_path"
                 driver_plan_path: "stdout_json.driver_plan_path"
+                driver_journal_path: "stdout_json.driver_journal_path"
                 agent_brief_path: "stdout_json.agent_brief_path"
                 driver_handoff_path: "stdout_json.driver_handoff_path"
                 media_manifest_path: "stdout_json.media_manifest_path"

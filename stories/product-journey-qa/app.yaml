@@ -42,6 +42,7 @@ world:
   deck_path:      { type: string, default: "" }
   execution_plan_path: { type: string, default: "" }
   driver_plan_path: { type: string, default: "" }
+  driver_journal_path: { type: string, default: "" }
   agent_brief_path: { type: string, default: "" }
   driver_handoff_path: { type: string, default: "" }
   media_manifest_path: { type: string, default: "" }
@@ -54,6 +55,13 @@ world:
   finding_title:  { type: string, default: "" }
   finding_summary: { type: string, default: "" }
   finding_severity: { type: string, default: "" }
+  dispatch_mode:  { type: string, default: "" }
+  driver_status:  { type: string, default: "" }
+  driver_summary: { type: string, default: "" }
+  mcp_tools:      { type: string, default: "" }
+  evidence_refs:  { type: string, default: "" }
+  blockers:       { type: string, default: "" }
+  driver_event_id: { type: string, default: "" }
   review_status:  { type: string, default: "" }
   review_summary: { type: string, default: "" }
   validation_status: { type: string, default: "" }
@@ -134,6 +142,18 @@ intents:
       title: { type: string, required: true }
       summary: { type: string, required: true }
       evidence_path: { type: string, required: false }
+  driver_event:
+    description: "Record what the reusable driver actually attempted for a scenario."
+    examples: ["record driver event", "driver attempted bugfix", "journal visual observe"]
+    priority: 80
+    slots:
+      scenario: { type: string, required: true }
+      summary: { type: string, required: true }
+      dispatch_mode: { type: string, required: false }
+      driver_status: { type: string, required: false }
+      mcp_tools: { type: string, required: false }
+      evidence_refs: { type: string, required: false }
+      blockers: { type: string, required: false }
   seed_demo:
     description: "Attach deterministic demo evidence and findings to the current run."
     examples: ["seed demo evidence", "dogfood the demo bundle", "populate demo"]
@@ -164,7 +184,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, dogfood_smoke, validate_corpus, refresh_targets, rollup, validate_matrix, attach, record, blocker, seed_demo, handoff, review, validate, accept, quit, look]
+  intents: [start, matrix, dogfood_smoke, validate_corpus, refresh_targets, rollup, validate_matrix, attach, record, blocker, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
 
 root: idle
 

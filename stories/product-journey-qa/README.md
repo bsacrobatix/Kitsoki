@@ -30,6 +30,9 @@ It is intentionally no-LLM:
   when a scenario was attempted but cannot honestly proceed without live
   authorization, a missing cassette, unavailable repo state, or another
   external prerequisite.
+- `driver_event` calls `tools/product-journey/run.py --record-driver-event
+  --json-output` to append what the reusable driver actually attempted to
+  `driver-journal.md/json`.
 - `seed_demo` calls `tools/product-journey/run.py --seed-demo-evidence
   --json-output` to populate a no-LLM review bundle.
 - `handoff` calls `tools/product-journey/run.py --driver-handoff --json-output`
@@ -53,6 +56,9 @@ Use `driver-handoff.md` when handing the bundle to
 `.agents/agents/product-journey-qa-driver.md`; it names the run directory,
 driver inputs, dispatch modes, missing evidence, and final review/validation
 commands without spending live model calls.
+Use `driver-journal.md` to review the driver's attempted actions, MCP tools,
+evidence references, blockers, and per-scenario status before judging whether a
+run reflects natural product usage.
 Captured media is indexed in `media-manifest.json` so the generated Slidey deck
 can expose playback-ready videos and screenshots without scraping prose.
 Scenario-level evidence and finding summaries are written to

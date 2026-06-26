@@ -137,6 +137,9 @@ sequence and copy ready-to-fill `--attach-evidence` commands.
 Use `driver-handoff.md` when handing the run to the reusable driver agent; it
 names the run directory, driver inputs, dispatch modes, missing evidence, and
 final gates without launching a live LLM by itself.
+Use `driver-journal.md` after a driver pass to inspect what the reusable driver
+actually attempted, which MCP tools or retained references it used, which
+blockers it hit, and which scenarios were captured or skipped.
 For a live/cassette dogfood pass, delegate the bundle to
 `.agents/agents/product-journey-qa-driver.md`; that agent is scoped to consume
 the brief, drive Kitsoki Studio MCP and visual MCP, attach evidence, record
@@ -170,6 +173,19 @@ python3 tools/product-journey/run.py --attach-evidence \
 
 Use `--record-finding` on the same runner to summarize strengths, weaknesses,
 issues found, and fixes for the Slidey review deck.
+Use `--record-driver-event` to append the driver's actual attempt log without
+pretending that the attempt produced user-facing evidence:
+
+```sh
+python3 tools/product-journey/run.py --record-driver-event \
+  --run-dir .artifacts/product-journey/<run-id> \
+  --scenario bugfix \
+  --dispatch-mode replay \
+  --driver-status captured \
+  --mcp-tools visual.open,visual.observe \
+  --evidence-refs retained://image/bugfix \
+  --summary "Driver captured the bugfix path."
+```
 
 If a scenario was attempted but cannot honestly capture evidence without live
 authorization, a missing cassette, or unavailable repo state, record a blocker
