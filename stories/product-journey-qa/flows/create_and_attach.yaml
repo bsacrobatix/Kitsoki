@@ -260,6 +260,7 @@ host_handlers:
             checked_artifacts: 6
             errors: 0
             warnings: 0
+            validation_issue_summary: ""
             issues: []
       validate_product_journey_run:
         data:
@@ -271,6 +272,7 @@ host_handlers:
             checked_artifacts: 22
             errors: 0
             warnings: 0
+            validation_issue_summary: ""
             issues: []
 
 turns:
@@ -363,6 +365,7 @@ turns:
       validation_status: valid
       validation_errors: 0
       validation_warnings: 0
+      validation_issue_summary: ""
     expect_host_calls:
       - handler: host.run
         args: { call: validate_product_journey_matrix }
@@ -583,6 +586,7 @@ turns:
       validation_status: valid
       validation_errors: 0
       validation_warnings: 0
+      validation_issue_summary: ""
     expect_host_calls:
       - handler: host.run
         args: { call: validate_product_journey_run }

@@ -122,6 +122,11 @@ python3 tools/product-journey/run.py --validate-matrix \
   --matrix-dir .artifacts/product-journey/matrices/<matrix-id>
 ```
 
+`--validate-run --json-output` and `--validate-matrix --json-output` include a
+`validation_issue_summary` field that lists the first error or warning check IDs.
+The `--dogfood-smoke --json-output` path exposes separate run and matrix issue
+summaries so the Kitsoki story can show why warning counts are non-zero.
+
 This writes `.artifacts/product-journey/<run-id>/` with `run.json`,
 `journey.md`, `metrics.json`, `bugs.json`, `findings.json`,
 `scenario-outcomes.json`, `scenario-outcomes.md`, `evidence.json`,

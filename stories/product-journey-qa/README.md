@@ -70,5 +70,7 @@ marks a run ready when every scenario has evidence or an explicit blocker, while
 validation deliberately catches stale or inconsistent bundles. The story view
 surfaces review pass/total/fail/warn counts so operators can tell whether a run
 is progressing against the full review gate set without opening `review.json`.
+Validation views also show a compact issue summary, so the operator can see the
+first failing or warning check IDs before opening the raw validator output.
 `accept` is validation-gated in run, matrix, and dogfood rooms; if validation has
 not reported `valid`, the story stays put and sets `status=accept_needs_validation`.

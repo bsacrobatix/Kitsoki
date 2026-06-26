@@ -2965,6 +2965,31 @@ def add_validation_issue(issues: list[dict], severity: str, check_id: str, messa
     })
 
 
+def validation_issue_summary(issues: list[dict], limit: int = 4) -> str:
+    if not issues:
+        return ""
+    severity_rank = {"error": 0, "warn": 1}
+    ordered = sorted(
+        issues,
+        key=lambda issue: (
+            severity_rank.get(issue.get("severity", ""), 2),
+            issue.get("id", ""),
+            issue.get("detail", ""),
+        ),
+    )
+    parts = []
+    for issue in ordered[:limit]:
+        severity = issue.get("severity", "issue")
+        check_id = issue.get("id", "unknown")
+        detail = issue.get("detail", "")
+        if len(detail) > 160:
+            detail = f"{detail[:157]}..."
+        parts.append(f"{severity}: {check_id} ({detail})" if detail else f"{severity}: {check_id}")
+    if len(ordered) > limit:
+        parts.append(f"+{len(ordered) - limit} more validation issues")
+    return "; ".join(parts)
+
+
 def validate_required_keys(data: dict, required: list[str], issues: list[dict], check_id: str, label: str) -> None:
     missing = [key for key in required if key not in data]
     if missing:
@@ -3686,6 +3711,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
         "checked_artifacts": len(required_files),
         "errors": errors,
         "warnings": warnings,
+        "validation_issue_summary": validation_issue_summary(issues),
         "issues": issues,
     }
 
@@ -3976,6 +4002,7 @@ def validate_matrix_bundle(matrix_dir: Path) -> dict:
         "checked_artifacts": len(required_files) + len(present_rollup_files),
         "errors": errors,
         "warnings": warnings,
+        "validation_issue_summary": validation_issue_summary(issues),
         "issues": issues,
     }
 
@@ -5720,8 +5747,11 @@ def main() -> None:
                 "review_backlog_summary": report["review"].get("review_backlog_summary", ""),
                 "run_validation_status": report["validation"]["run"]["status"],
                 "run_validation_warnings": report["validation"]["run"]["warnings"],
+                "run_validation_issue_summary": report["validation"]["run"].get("validation_issue_summary", ""),
+                "validation_issue_summary": report["validation"]["run"].get("validation_issue_summary", ""),
                 "matrix_validation_status": report["validation"]["matrix"]["status"],
                 "matrix_validation_warnings": report["validation"]["matrix"]["warnings"],
+                "matrix_validation_issue_summary": report["validation"]["matrix"].get("validation_issue_summary", ""),
             }, sort_keys=True))
             append_log(f"Ran product journey dogfood smoke {report['dogfood_id']}: {report['status']}")
             if report["status"] != "passed":

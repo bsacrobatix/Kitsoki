@@ -1,7 +1,7 @@
 states:
   run_created:
     description: "A product-journey QA run bundle exists; waiting for captured evidence."
-    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, driver_journal_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, persona_starting_surface, persona_first_question, persona_evidence_emphasis, persona_escalation_trigger, persona_finding_bias, proof_evidence_count, demo_evidence_count, missing_evidence_count, missing_proof_evidence_count, proof_minimum_evidence_count, minimum_evidence_count, missing_proof_summary, scenario, evidence_kind, evidence_path, evidence_source, finding_kind, finding_title, driver_event_id, dispatch_mode, driver_status, driver_summary, review_status, review_summary, review_passed_count, review_failed_count, review_warning_count, review_total_count, review_backlog_summary, validation_status, validation_errors, validation_warnings, status]
+    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, driver_journal_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, persona_starting_surface, persona_first_question, persona_evidence_emphasis, persona_escalation_trigger, persona_finding_bias, proof_evidence_count, demo_evidence_count, missing_evidence_count, missing_proof_evidence_count, proof_minimum_evidence_count, minimum_evidence_count, missing_proof_summary, scenario, evidence_kind, evidence_path, evidence_source, finding_kind, finding_title, driver_event_id, dispatch_mode, driver_status, driver_summary, review_status, review_summary, review_passed_count, review_failed_count, review_warning_count, review_total_count, review_backlog_summary, validation_status, validation_errors, validation_warnings, validation_issue_summary, status]
     view:
       - banner:
           text: "RUN CREATED"
@@ -38,6 +38,7 @@ states:
             Validation: '{{ world.validation_status|default:"(not validated)" }}'
             Validation errors: "{{ world.validation_errors }}"
             Validation warnings: "{{ world.validation_warnings }}"
+            Validation issues: '{{ world.validation_issue_summary|default:"(none)" }}'
             Status: "{{ world.status }}"
       - prose: '{{ world.missing_proof_summary|default:"Open driver-handoff.md for the Missing Proof Evidence backlog." }}'
       - prose: '{{ world.review_backlog_summary|default:"Run review to see actionable review checks." }}'
@@ -90,6 +91,7 @@ states:
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
+                validation_issue_summary: ""
                 status: "attaching"
             - invoke: host.run
               id: attach_product_journey_evidence
@@ -151,6 +153,7 @@ states:
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
+                validation_issue_summary: ""
                 status: "recording_finding"
             - invoke: host.run
               id: record_product_journey_finding
@@ -213,6 +216,7 @@ states:
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
+                validation_issue_summary: ""
                 status: "recording_blocker"
             - invoke: host.run
               id: record_product_journey_blocker
@@ -272,6 +276,7 @@ states:
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
+                validation_issue_summary: ""
                 status: "recording_driver_event"
             - invoke: host.run
               id: record_product_journey_driver_event
@@ -329,6 +334,7 @@ states:
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
+                validation_issue_summary: ""
                 status: "seeding_demo"
             - invoke: host.run
               id: seed_product_journey_demo
@@ -373,6 +379,7 @@ states:
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
+                validation_issue_summary: ""
                 status: "reviewing"
             - invoke: host.run
               id: review_product_journey_run
@@ -421,6 +428,10 @@ states:
         - target: run_created
           effects:
             - set:
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
+                validation_issue_summary: ""
                 status: "preparing_handoff"
             - invoke: host.run
               id: prepare_product_journey_driver_handoff
@@ -479,6 +490,7 @@ states:
                 validation_status: "stdout_json.status"
                 validation_errors: "stdout_json.errors"
                 validation_warnings: "stdout_json.warnings"
+                validation_issue_summary: "stdout_json.validation_issue_summary"
               on_error: run_created
             - set:
                 status: "validated"

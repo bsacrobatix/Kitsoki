@@ -1,7 +1,7 @@
 states:
   done:
     description: "The product-journey QA bundle has passed its final validation gate."
-    relevant_world: [dogfood_id, dogfood_dir, dogfood_report_path, dogfood_deck_path, matrix_id, matrix_dir, rollup_deck_path, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, driver_journal_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, validation_status, validation_errors, validation_warnings, status]
+    relevant_world: [dogfood_id, dogfood_dir, dogfood_report_path, dogfood_deck_path, matrix_id, matrix_dir, rollup_deck_path, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, driver_journal_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, validation_status, validation_errors, validation_warnings, validation_issue_summary, status]
     view:
       - banner:
           text: "PRODUCT JOURNEY QA READY"
@@ -29,6 +29,7 @@ states:
             Validation: "{{ world.validation_status }}"
             Validation errors: "{{ world.validation_errors }}"
             Validation warnings: "{{ world.validation_warnings }}"
+            Validation issues: '{{ world.validation_issue_summary|default:"(none)" }}'
             Status: "{{ world.status }}"
       - choice:
           mode: single

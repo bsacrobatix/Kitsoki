@@ -1,7 +1,7 @@
 states:
   matrix_created:
     description: "A product-journey GitHub matrix exists; waiting for assignment runs."
-    relevant_world: [seed, matrix_id, matrix_dir, matrix_personas, target_proof_file, deck_path, rollup_path, rollup_deck_path, rollup_markdown_path, rollup_runs_found, rollup_assignments, rollup_reviewed_runs, rollup_ready_runs, rollup_missing_assignment_count, rollup_present_evidence_count, rollup_required_evidence_count, rollup_persona_outcomes, rollup_scenario_outcomes, rollup_driver_journal_rows, rollup_driver_journal_events, rollup_driver_journal_evidence_refs, rollup_driver_journal_blocked_events, rollup_quality_gate_satisfied_runs, rollup_quality_gate_total_runs, rollup_quality_gate_proof_minimum_evidence_count, rollup_quality_gate_minimum_evidence_count, rollup_missing_proof_evidence_rows, rollup_quality_gate_missing_proof_evidence_count, rollup_missing_proof_handoff_summary, validation_status, validation_errors, validation_warnings, status]
+    relevant_world: [seed, matrix_id, matrix_dir, matrix_personas, target_proof_file, deck_path, rollup_path, rollup_deck_path, rollup_markdown_path, rollup_runs_found, rollup_assignments, rollup_reviewed_runs, rollup_ready_runs, rollup_missing_assignment_count, rollup_present_evidence_count, rollup_required_evidence_count, rollup_persona_outcomes, rollup_scenario_outcomes, rollup_driver_journal_rows, rollup_driver_journal_events, rollup_driver_journal_evidence_refs, rollup_driver_journal_blocked_events, rollup_quality_gate_satisfied_runs, rollup_quality_gate_total_runs, rollup_quality_gate_proof_minimum_evidence_count, rollup_quality_gate_minimum_evidence_count, rollup_missing_proof_evidence_rows, rollup_quality_gate_missing_proof_evidence_count, rollup_missing_proof_handoff_summary, validation_status, validation_errors, validation_warnings, validation_issue_summary, status]
     view:
       - banner:
           text: "MATRIX CREATED"
@@ -26,6 +26,7 @@ states:
             Validation: '{{ world.validation_status|default:"(not validated)" }}'
             Validation errors: "{{ world.validation_errors }}"
             Validation warnings: "{{ world.validation_warnings }}"
+            Validation issues: '{{ world.validation_issue_summary|default:"(none)" }}'
             Status: "{{ world.status }}"
       - prose: "Use the matrix deck and matrix.json to launch one evidence-backed product-journey run per assignment, then roll up completed runs into the matrix review deck."
       - prose: '{{ world.rollup_missing_proof_handoff_summary|default:"After rollup, open rollup.md for affected run handoffs that still need proof evidence." }}'
@@ -63,6 +64,7 @@ states:
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
+                validation_issue_summary: ""
                 status: "creating_matrix"
             - invoke: host.run
               id: emit_product_journey_matrix
@@ -97,6 +99,7 @@ states:
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
+                validation_issue_summary: ""
                 status: "creating"
             - invoke: host.run
               id: emit_product_journey_run
@@ -148,6 +151,7 @@ states:
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
+                validation_issue_summary: ""
                 status: "rolling_up"
             - invoke: host.run
               id: rollup_product_journey_matrix
@@ -213,6 +217,7 @@ states:
                 validation_status: "stdout_json.status"
                 validation_errors: "stdout_json.errors"
                 validation_warnings: "stdout_json.warnings"
+                validation_issue_summary: "stdout_json.validation_issue_summary"
               on_error: matrix_created
             - set:
                 status: "matrix_validated"

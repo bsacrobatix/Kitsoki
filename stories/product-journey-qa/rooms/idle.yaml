@@ -97,6 +97,7 @@ states:
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
+                validation_issue_summary: ""
                 status: "creating_matrix"
             - invoke: host.run
               id: emit_product_journey_matrix
@@ -129,6 +130,7 @@ states:
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
+                validation_issue_summary: ""
                 review_status: ""
                 review_summary: ""
                 status: "dogfood_smoking"
@@ -167,8 +169,11 @@ states:
                 dogfood_review_backlog_summary: "stdout_json.review_backlog_summary"
                 validation_status: "stdout_json.run_validation_status"
                 validation_warnings: "stdout_json.run_validation_warnings"
+                validation_issue_summary: "stdout_json.run_validation_issue_summary"
                 dogfood_run_validation_warnings: "stdout_json.run_validation_warnings"
                 dogfood_matrix_validation_warnings: "stdout_json.matrix_validation_warnings"
+                dogfood_run_validation_issue_summary: "stdout_json.run_validation_issue_summary"
+                dogfood_matrix_validation_issue_summary: "stdout_json.matrix_validation_issue_summary"
               on_error: idle
             - set:
                 status: "dogfood_smoke_created"
@@ -182,6 +187,7 @@ states:
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
+                validation_issue_summary: ""
                 status: "creating"
             - invoke: host.run
               id: emit_product_journey_run

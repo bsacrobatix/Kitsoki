@@ -33,8 +33,10 @@ host_handlers:
             review_backlog_summary: "fail: quality-gates (bugfix (3/5)); warn: non-demo-evidence (proof=0, demo=25)"
             run_validation_status: valid
             run_validation_warnings: 1
+            run_validation_issue_summary: "warn: artifact-ref-exists (artifacts/bugfix.mp4)"
             matrix_validation_status: valid
             matrix_validation_warnings: 1
+            matrix_validation_issue_summary: "warn: matrix-target-proof (vscode, kubernetes)"
 
 turns:
   - intent:
@@ -67,12 +69,15 @@ turns:
       dogfood_review_backlog_summary: "fail: quality-gates (bugfix (3/5)); warn: non-demo-evidence (proof=0, demo=25)"
       validation_status: valid
       validation_warnings: 1
+      validation_issue_summary: "warn: artifact-ref-exists (artifacts/bugfix.mp4)"
       dogfood_run_validation_warnings: 1
       dogfood_matrix_validation_warnings: 1
+      dogfood_run_validation_issue_summary: "warn: artifact-ref-exists (artifacts/bugfix.mp4)"
+      dogfood_matrix_validation_issue_summary: "warn: matrix-target-proof (vscode, kubernetes)"
     expect_host_calls:
       - handler: host.run
         args: { call: dogfood_product_journey_smoke }
-    expect_view_matches: "Review checks[\\s\\S]*15 / 18 passed; 1 failed; 2 warnings[\\s\\S]*fail: quality-gates[\\s\\S]*warn: non-demo-evidence"
+    expect_view_matches: "Review checks[\\s\\S]*15 / 18 passed; 1 failed; 2 warnings[\\s\\S]*Run validation issues[\\s\\S]*artifact-ref-exists[\\s\\S]*Matrix validation issues[\\s\\S]*matrix-target-proof[\\s\\S]*fail: quality-gates[\\s\\S]*warn: non-demo-evidence"
 
   - intent: { name: look, slots: {} }
     expect_state: dogfood_created

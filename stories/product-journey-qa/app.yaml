@@ -58,6 +58,8 @@ world:
   dogfood_review_backlog_summary: { type: string, default: "" }
   dogfood_run_validation_warnings: { type: int, default: 0 }
   dogfood_matrix_validation_warnings: { type: int, default: 0 }
+  dogfood_run_validation_issue_summary: { type: string, default: "" }
+  dogfood_matrix_validation_issue_summary: { type: string, default: "" }
   corpus_validation_status: { type: string, default: "" }
   corpus_validation_errors: { type: int, default: 0 }
   corpus_validation_warnings: { type: int, default: 0 }
@@ -109,6 +111,7 @@ world:
   validation_status: { type: string, default: "" }
   validation_errors: { type: int, default: 0 }
   validation_warnings: { type: int, default: 0 }
+  validation_issue_summary: { type: string, default: "" }
   last_result:    { type: object, default: {} }
   status:         { type: string, default: "idle" }
 
