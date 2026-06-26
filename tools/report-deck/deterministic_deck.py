@@ -584,6 +584,77 @@ def eval_pilot(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str
     return title_deck("Eval Pilot Report", subtitle, scenes), refs
 
 
+def cost_report(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    stories = require_list(data, "stories", "cost-report")
+    story_rows = []
+    intent_rows = []
+    total_ops = 0
+    measured = 0
+    authored = 0
+    for row in stories[:18]:
+        baseline = row.get("baseline") or {}
+        if row.get("measured"):
+            measured += 1
+        if row.get("measured") and not row.get("recorded", True):
+            authored += 1
+        total_ops += int(baseline.get("ops_sampled") or 0)
+        story_rows.append({"cells": [
+            row.get("name", ""),
+            money(row.get("story_cost_usd")) if row.get("measured") else "unmeasured",
+            money(baseline.get("median_usd")) if baseline.get("ops_sampled") else "-",
+            money(baseline.get("p90_usd")) if baseline.get("ops_sampled") else "-",
+            money(row.get("savings_median_usd")) if row.get("measured") and baseline.get("ops_sampled") else "-",
+            num(baseline.get("ops_sampled")),
+            "authored" if row.get("measured") and not row.get("recorded", True) else "recorded" if row.get("measured") else "missing",
+        ]})
+        for intent in (row.get("intents") or [])[:4]:
+            intent_rows.append({"cells": [
+                row.get("name", ""),
+                intent.get("operation", ""),
+                num(intent.get("n")),
+                money(intent.get("median_usd")),
+                money(intent.get("p90_usd")),
+                num(intent.get("sessions")),
+            ]})
+
+    reproc = sum(int((row.get("baseline") or {}).get("reprocessing_tokens") or 0) for row in stories)
+    scenes = [
+        objectives_scene("Cost-report status", [
+            {"label": "Story numerators", "status": "done" if measured == len(stories) and stories else "pending", "detail": f"{measured} of {len(stories)} story cost(s) measured from cassettes."},
+            {"label": "Raw baseline", "status": "done" if total_ops else "pending", "detail": f"{total_ops} transcript operation(s) sampled."},
+            {"label": "Authored cassettes", "status": "pending" if authored else "done", "detail": f"{authored} measured story cost(s) came from record_mode none cassettes."},
+            {"label": "Reprocessing tax", "status": "done" if reproc else "pending", "detail": f"{reproc:,} cached input token(s) re-read by raw sessions."},
+        ]),
+        {
+            "type": "table",
+            "variant": "data",
+            "title": "Per-story savings",
+            "columns": ["Story", "Story cost", "Raw median", "Raw p90", "Savings", "Ops", "Cassette"],
+            "rows": story_rows or [{"cells": ["-", "-", "-", "-", "-", "0", "-"]}],
+            "caption": "Story cost comes from host cassettes; raw cost comes from recorded transcript telemetry.",
+            "hold": 3200,
+        },
+    ]
+    if intent_rows:
+        scenes.append({
+            "type": "table",
+            "variant": "data",
+            "title": "Intent distributions",
+            "columns": ["Story", "Operation", "n", "Median", "p90", "Sessions"],
+            "rows": intent_rows[:16],
+            "hold": 3000,
+        })
+    scenes.append(evidence_scene("Review artifacts", [
+        {"label": "Markdown report", "status": "done" if data.get("markdown_path") else "pending", "detail": "Human-readable cost report.", "ref": data.get("markdown_path", "")},
+        {"label": "Summary JSON", "status": "done", "detail": "Structured input for this deterministic deck.", "ref": str(data.get("_source", ""))},
+    ]))
+    refs = [
+        {"label": "Markdown report", "path": data.get("markdown_path", ""), "status": "done" if data.get("markdown_path") else "pending"},
+        {"label": "Summary JSON", "path": str(data.get("_source", "")), "status": "done"},
+    ]
+    return title_deck("Per-story Cost Report", f"{len(stories)} story(s), {total_ops} sampled raw operation(s)", scenes), refs
+
+
 def workflow(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
     title = data.get("title") or data.get("name") or "Workflow Report"
     objectives = data.get("objectives") or []
@@ -906,6 +977,7 @@ def dynamic_workflow(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[st
 BUILDERS = {
     "bakeoff-summary": bakeoff_summary,
     "bug-report": bug_report,
+    "cost-report": cost_report,
     "dynamic-workflow": dynamic_workflow,
     "eval-pilot": eval_pilot,
     "external-summary": external_summary,

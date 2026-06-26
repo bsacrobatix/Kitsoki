@@ -268,6 +268,34 @@ class DeterministicDeckTest(unittest.TestCase):
         matrix = [scene for scene in deck["scenes"] if scene.get("title") == "Candidate matrix"][0]
         self.assertEqual(matrix["rows"][0]["cells"][:3], ["route_gate", "synthetic-codex", "syn:small:text"])
 
+    def test_cost_report_deck_summarizes_savings(self):
+        _, deck = run_tool("cost-report", {
+            "markdown_path": ".artifacts/cost-report/cost-report.md",
+            "stories": [
+                {
+                    "name": "git-ops",
+                    "measured": True,
+                    "recorded": False,
+                    "story_cost_usd": 0.02,
+                    "savings_median_usd": 0.48,
+                    "baseline": {
+                        "ops_sampled": 7,
+                        "median_usd": 0.5,
+                        "p90_usd": 0.9,
+                        "reprocessing_tokens": 123456,
+                    },
+                    "intents": [
+                        {"operation": "git commit", "n": 4, "median_usd": 0.4, "p90_usd": 0.7, "sessions": 3},
+                    ],
+                }
+            ],
+        })
+        self.assertEqual(deck["meta"]["title"], "Per-story Cost Report")
+        savings = [scene for scene in deck["scenes"] if scene.get("title") == "Per-story savings"][0]
+        self.assertEqual(savings["rows"][0]["cells"], ["git-ops", "$0.02", "$0.50", "$0.90", "$0.48", "7", "authored"])
+        intents = [scene for scene in deck["scenes"] if scene.get("title") == "Intent distributions"][0]
+        self.assertEqual(intents["rows"][0]["cells"][:3], ["git-ops", "git commit", "4"])
+
 
 if __name__ == "__main__":
     unittest.main()

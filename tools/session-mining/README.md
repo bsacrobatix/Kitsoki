@@ -268,7 +268,9 @@ summed from its host cassette; routed/host steps are $0) against the real
 raw-agentic cost of the same operations in mined sessions — a per-intent
 median/p90 distribution, the reprocessing tax, and cold-resume re-warm — read
 from recorded `message.usage` via `cost_extract.py` + `pricing.py` (exact, no
-LLM). The narrative is the
+LLM). `make cost-report` writes the markdown report plus a structured summary
+and deterministic Slidey spec under `.artifacts/cost-report/`; the deck is built
+from those computed fields, not by asking an LLM to author slides. The narrative is the
 [git-ops cost case study](../../docs/case-studies/git-ops-cost.md). `make
 mining-test` runs every no-LLM invariant in this directory (the cost stack plus
 the intent-pipeline, outcomes, and git-ops coverage suites); `make test` and CI
