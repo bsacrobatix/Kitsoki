@@ -451,6 +451,139 @@ def model_harness(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, 
     return title_deck("Model Harness Evaluation", subtitle, scenes), refs
 
 
+def eval_pilot(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    candidates = data.get("candidates") or []
+    coverage = data.get("coverage") or []
+    intent_suites = data.get("intent_suites") or []
+    coverage_jobs = data.get("coverage_jobs") or []
+    readiness = data.get("readiness") or {}
+    failures = data.get("failures") or []
+    sweeps = data.get("confidence_sweeps") or []
+
+    def pct_cell(value: Any) -> str:
+        try:
+            return f"{float(value) * 100:.1f}%"
+        except (TypeError, ValueError):
+            return "-"
+
+    candidate_rows = []
+    for c in candidates[:12]:
+        candidate_rows.append({"cells": [
+            c.get("call", ""),
+            c.get("profile", ""),
+            c.get("model", ""),
+            pct_cell(c.get("pass_rate")),
+            pct_cell((c.get("comparator_pass_rate") or {}).get("median")),
+            num((c.get("p95_latency_ms") or {}).get("median")),
+            money((c.get("avg_cost_usd") or {}).get("median")),
+            "yes" if c.get("meets_declared_bar") else "no",
+        ]})
+    coverage_rows = []
+    for row in coverage[:12]:
+        coverage_rows.append({"cells": [
+            row.get("call", ""),
+            "yes" if row.get("has_report") else "no",
+            ", ".join(row.get("measured_profiles") or []),
+            ", ".join(row.get("missing_profiles") or []),
+        ]})
+    suite_rows = []
+    for row in intent_suites[:10]:
+        suite_rows.append({"cells": [
+            row.get("story", ""),
+            num(row.get("fixtures")),
+            num(row.get("fixtures_passed")),
+            num(row.get("inputs")),
+            num(row.get("skipped_inputs")),
+        ]})
+    job_rows = []
+    for row in coverage_jobs[:10]:
+        job_rows.append({"cells": [
+            row.get("story") or row.get("job", ""),
+            num(row.get("instances")),
+            num(row.get("corrected")),
+            num(row.get("grounding_validated")),
+            num(row.get("grounding_cited")),
+        ]})
+    sweep_rows = []
+    for row in sweeps[:8]:
+        precision = row.get("precision")
+        sweep_rows.append({"cells": [
+            row.get("call", ""),
+            row.get("profile", ""),
+            row.get("model", ""),
+            num(row.get("threshold")),
+            num(row.get("accepted")),
+            num(row.get("false_accepts")),
+            "-" if precision is None else pct_cell(precision),
+        ]})
+
+    readiness_gaps = []
+    for key in ("intent_suites", "mining_profiles"):
+        for row in (readiness.get(key) or [])[:8]:
+            has_report = row.get("has_report", row.get("has_coverage_job", True))
+            if not has_report:
+                readiness_gaps.append(row.get("story") or row.get("path") or key)
+
+    scenes = [
+        objectives_scene("Pilot status", [
+            {"label": "Eval datasets", "status": "done" if data.get("datasets") else "pending", "detail": f"{len(data.get('datasets') or [])} dataset(s) discovered."},
+            {"label": "Agent reports", "status": "done" if data.get("reports") else "pending", "detail": f"{len(data.get('reports') or [])} report row(s) loaded."},
+            {"label": "Candidates", "status": "done" if candidates else "pending", "detail": f"{len(candidates)} aggregate candidate(s)."},
+            {"label": "Readiness gaps", "status": "pending" if readiness_gaps else "done", "detail": f"{len(readiness_gaps)} gap(s)."},
+            {"label": "Failures", "status": "failed" if failures else "done", "detail": f"{len(failures)} failure sample(s)."},
+        ]),
+        {
+            "type": "table",
+            "variant": "data",
+            "title": "Candidate matrix",
+            "columns": ["Call", "Profile", "Model", "Pass", "Effectiveness", "p95 latency", "Avg cost", "Bar"],
+            "rows": candidate_rows or [{"cells": ["-", "-", "-", "-", "-", "-", "-", "-"]}],
+            "hold": 3200,
+        },
+        {
+            "type": "table",
+            "variant": "data",
+            "title": "Coverage by call",
+            "columns": ["Call", "Has report", "Measured", "Missing"],
+            "rows": coverage_rows or [{"cells": ["-", "no", "-", "-"]}],
+            "hold": 2600,
+        },
+    ]
+    if suite_rows:
+        scenes.append({
+            "type": "table",
+            "variant": "data",
+            "title": "Intent suites",
+            "columns": ["Story", "Fixtures", "Passed", "Inputs", "Skipped"],
+            "rows": suite_rows,
+            "hold": 2600,
+        })
+    if job_rows:
+        scenes.append({
+            "type": "table",
+            "variant": "data",
+            "title": "Coverage jobs",
+            "columns": ["Story", "Instances", "Corrected", "Grounded", "Cited"],
+            "rows": job_rows,
+            "hold": 2600,
+        })
+    if sweep_rows:
+        scenes.append({
+            "type": "table",
+            "variant": "data",
+            "title": "Confidence sweep",
+            "columns": ["Call", "Profile", "Model", "Threshold", "Accepted", "False accepts", "Precision"],
+            "rows": sweep_rows,
+            "hold": 2800,
+        })
+    scenes.append(evidence_scene("Review artifacts", [
+        {"label": "Summary JSON", "status": "done", "detail": "Machine-readable eval pilot rollup.", "ref": str(data.get("_source", ""))},
+    ]))
+    refs = [{"label": "Summary JSON", "path": str(data.get("_source", "")), "status": "done"}]
+    subtitle = f"{len(candidates)} candidate(s), {len(readiness_gaps)} readiness gap(s)"
+    return title_deck("Eval Pilot Report", subtitle, scenes), refs
+
+
 def workflow(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
     title = data.get("title") or data.get("name") or "Workflow Report"
     objectives = data.get("objectives") or []
@@ -774,6 +907,7 @@ BUILDERS = {
     "bakeoff-summary": bakeoff_summary,
     "bug-report": bug_report,
     "dynamic-workflow": dynamic_workflow,
+    "eval-pilot": eval_pilot,
     "external-summary": external_summary,
     "fanout": fanout,
     "feature-demo": feature_demo,

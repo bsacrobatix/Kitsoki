@@ -244,6 +244,30 @@ class DeterministicDeckTest(unittest.TestCase):
         labels = [item["label"] for item in evidence["items"]]
         self.assertIn("Report artifact", labels)
 
+    def test_eval_pilot_deck_summarizes_candidates_and_gaps(self):
+        _, deck = run_tool("eval-pilot", {
+            "datasets": [{"call": "route_gate"}],
+            "reports": [{"call": "route_gate"}],
+            "candidates": [
+                {
+                    "call": "route_gate",
+                    "profile": "synthetic-codex",
+                    "model": "syn:small:text",
+                    "pass_rate": 0.5,
+                    "comparator_pass_rate": {"median": 0.9},
+                    "p95_latency_ms": {"median": 3200},
+                    "avg_cost_usd": {"median": 0.001},
+                    "meets_declared_bar": False,
+                }
+            ],
+            "coverage": [{"call": "route_gate", "has_report": True, "measured_profiles": ["synthetic-codex"], "missing_profiles": ["codex-native"]}],
+            "readiness": {"intent_suites": [{"story": "pilot", "has_report": False}]},
+            "failures": [],
+        })
+        self.assertEqual(deck["meta"]["title"], "Eval Pilot Report")
+        matrix = [scene for scene in deck["scenes"] if scene.get("title") == "Candidate matrix"][0]
+        self.assertEqual(matrix["rows"][0]["cells"][:3], ["route_gate", "synthetic-codex", "syn:small:text"])
+
 
 if __name__ == "__main__":
     unittest.main()
