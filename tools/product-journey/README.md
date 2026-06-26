@@ -113,7 +113,8 @@ This writes `.artifacts/product-journey/<run-id>/` with `run.json`,
 `journey.md`, `metrics.json`, `bugs.json`, `findings.json`,
 `scenario-outcomes.json`, `scenario-outcomes.md`, `evidence.json`,
 `media-manifest.json`, `scenarios.json`, `execution-plan.json`,
-`execution-plan.md`, `driver-plan.json`, `driver-plan.md`, `agent-brief.json`,
+`execution-plan.md`, `driver-plan.json`, `driver-plan.md`,
+`driver-journal.json`, `driver-journal.md`, `agent-brief.json`,
 `agent-brief.md`, `driver-handoff.json`, `driver-handoff.md`, `review.json`,
 and `deck.slidey.json`.
 Add `--publish-deck` when the generated deck should replace
@@ -125,6 +126,7 @@ evidence without implying planned steps are validated. The brief names
 `.agents/agents/product-journey-qa-driver.md` as the reusable live/cassette
 driver for Kitsoki Studio MCP and visual MCP runs. Use `driver-plan.md` for the
 machine-readable harness, visual-surface, action-sequence, and gate contract,
+`driver-journal.md` for the auditable record of what the driver actually tried,
 `execution-plan.md` for the detailed evidence slots and ready-to-fill
 `--attach-evidence` commands, and `driver-handoff.md` as the operator handoff
 that names the driver agent, dispatch modes, missing evidence, and final gates
@@ -144,6 +146,20 @@ python3 tools/product-journey/run.py --attach-evidence \
   --evidence-kind key_interaction_video \
   --evidence-path media/bugfix.mp4 \
   --notes "visual MCP capture from bugfix handoff"
+```
+
+After each scenario attempt, append a driver journal event so the run records
+what was actually tried:
+
+```sh
+python3 tools/product-journey/run.py --record-driver-event \
+  --run-dir .artifacts/product-journey/<run-id> \
+  --scenario bugfix \
+  --dispatch-mode replay \
+  --driver-status captured \
+  --mcp-tools session.open,render.tui,visual.observe \
+  --evidence-refs traces/bugfix.jsonl,media/bugfix.mp4 \
+  --summary "Replayed the bugfix story through the oracle gate."
 ```
 
 Attachment updates `evidence.json`, `media-manifest.json`, `scenarios.json`,

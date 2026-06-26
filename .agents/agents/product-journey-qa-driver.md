@@ -94,6 +94,11 @@ For each scenario in the bundle:
    - use the blocker command when a scenario was genuinely attempted but cannot
      proceed without live authorization, a missing cassette, unavailable repo
      state, or another external prerequisite.
+6. Append a driver journal event for the scenario with
+   `tools/product-journey/run.py --record-driver-event`, naming the dispatch
+   mode, MCP tools used, evidence references produced, blockers observed, and a
+   short summary. This journal is the audit trail for what the driver actually
+   tried; do not rely on final findings alone.
 
 Prefer one high-signal finding over many vague notes. Every issue should include
 expected behavior, actual behavior, reproduction context, and the evidence
@@ -113,8 +118,10 @@ state whenever possible:
    `evidence_path`.
 4. Submit `blocker` for each attempted scenario that could not capture evidence:
    `scenario`, `title`, `summary`, `evidence_path`.
-5. Submit `review`.
-6. Submit `validate`.
+5. When using CLI fallback or when a story intent is not available, append
+   `--record-driver-event` after each scenario attempt.
+6. Submit `review`.
+7. Submit `validate`.
 
 If you cannot access the story session that owns the run, report the exact
 `tools/product-journey/run.py --attach-evidence` / `--record-finding` commands

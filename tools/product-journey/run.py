@@ -505,6 +505,60 @@ def evidence_plan(run_json: dict) -> dict:
     }
 
 
+def build_driver_journal(run_id: str, items: list[dict]) -> dict:
+    statuses = {}
+    modes = {}
+    scenarios = set()
+    for item in items:
+        status = item.get("status", "attempted")
+        mode = item.get("dispatch_mode", "")
+        statuses[status] = statuses.get(status, 0) + 1
+        if mode:
+            modes[mode] = modes.get(mode, 0) + 1
+        if item.get("scenario"):
+            scenarios.add(item["scenario"])
+    return {
+        "run_id": run_id,
+        "items": items,
+        "summary": {
+            "events": len(items),
+            "scenarios_attempted": len(scenarios),
+            "statuses": statuses,
+            "dispatch_modes": modes,
+        },
+    }
+
+
+def render_driver_journal(journal: dict) -> str:
+    lines = [
+        "# Product journey driver journal",
+        "",
+        f"- Run: `{journal['run_id']}`",
+        f"- Events: {journal['summary']['events']}",
+        f"- Scenarios attempted: {journal['summary']['scenarios_attempted']}",
+        "",
+    ]
+    if not journal["items"]:
+        lines.append("- (no driver events recorded)")
+        return "\n".join(lines) + "\n"
+    for item in journal["items"]:
+        lines.extend([
+            f"## {item['id']}",
+            "",
+            f"- Scenario: `{item['scenario']}`",
+            f"- Dispatch mode: `{item['dispatch_mode']}`",
+            f"- Status: `{item['status']}`",
+            f"- Created: {item['created_at']}",
+            f"- MCP tools: {', '.join(item.get('mcp_tools', [])) or '(none recorded)'}",
+            f"- Evidence refs: {', '.join(item.get('evidence_refs', [])) or '(none)'}",
+            f"- Blockers: {', '.join(item.get('blockers', [])) or '(none)'}",
+            "",
+            item.get("summary", ""),
+            "",
+        ])
+    return "\n".join(lines) + "\n"
+
+
 def build_run_bundle(
     catalog: dict,
     github_targets: dict,
@@ -562,6 +616,8 @@ def build_run_bundle(
             "execution_plan_markdown": "execution-plan.md",
             "driver_plan": "driver-plan.json",
             "driver_plan_markdown": "driver-plan.md",
+            "driver_journal": "driver-journal.json",
+            "driver_journal_markdown": "driver-journal.md",
             "agent_brief": "agent-brief.json",
             "agent_brief_markdown": "agent-brief.md",
             "driver_handoff": "driver-handoff.json",
@@ -584,6 +640,7 @@ def build_run_bundle(
     driver_plan = build_driver_plan(run_json, evidence, execution_plan)
     agent_brief = build_agent_brief(run_json, evidence, execution_plan)
     findings = {"run_id": run_id, "items": [], "summary": {"strength": 0, "weakness": 0, "issue": 0, "fix": 0}}
+    driver_journal = build_driver_journal(run_id, [])
     scenario_outcomes = build_scenario_outcomes(run_json, evidence, findings)
     metrics = {
         "run_id": run_id,
@@ -631,6 +688,8 @@ def build_run_bundle(
     (run_dir / "execution-plan.md").write_text(render_execution_plan(execution_plan), encoding="utf-8")
     write_json(run_dir / "driver-plan.json", driver_plan)
     (run_dir / "driver-plan.md").write_text(render_driver_plan(driver_plan), encoding="utf-8")
+    write_json(run_dir / "driver-journal.json", driver_journal)
+    (run_dir / "driver-journal.md").write_text(render_driver_journal(driver_journal), encoding="utf-8")
     write_json(run_dir / "agent-brief.json", agent_brief)
     (run_dir / "agent-brief.md").write_text(render_agent_brief(agent_brief), encoding="utf-8")
     write_json(run_dir / "driver-handoff.json", driver_handoff)
@@ -1605,6 +1664,7 @@ def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: 
         "inputs": {
             "agent_brief": "agent-brief.md",
             "driver_plan": "driver-plan.md",
+            "driver_journal": "driver-journal.md",
             "execution_plan": "execution-plan.md",
             "evidence": "evidence.json",
             "scenario_outcomes": "scenario-outcomes.md",
@@ -1794,6 +1854,7 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
     evidence = read_json(run_dir / "evidence.json")
     bugs = read_json(run_dir / "bugs.json")
     findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"run_id": run_json["run_id"], "items": []}
+    driver_journal = read_json(run_dir / "driver-journal.json") if (run_dir / "driver-journal.json").exists() else build_driver_journal(run_json["run_id"], [])
     review = read_json(run_dir / "review.json") if (run_dir / "review.json").exists() else {
         "run_id": run_json["run_id"],
         "status": "not_reviewed",
@@ -1856,6 +1917,7 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
         "issue_count": finding_summary["issue"],
         "fix_count": finding_summary["fix"],
         "blocked_count": finding_summary["blocked"],
+        "driver_event_count": len(driver_journal.get("items", [])),
         "review_status": review.get("status", "not_reviewed"),
         "review_passed_checks": review.get("summary_counts", {}).get("passed", 0),
         "review_total_checks": review.get("summary_counts", {}).get("total", 0),
@@ -1880,6 +1942,9 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
     driver_plan = build_driver_plan(run_json, evidence, execution_plan)
     write_json(run_dir / "driver-plan.json", driver_plan)
     (run_dir / "driver-plan.md").write_text(render_driver_plan(driver_plan), encoding="utf-8")
+    driver_journal = build_driver_journal(run_json["run_id"], driver_journal.get("items", []))
+    write_json(run_dir / "driver-journal.json", driver_journal)
+    (run_dir / "driver-journal.md").write_text(render_driver_journal(driver_journal), encoding="utf-8")
     agent_brief = build_agent_brief(run_json, evidence, execution_plan)
     write_json(run_dir / "agent-brief.json", agent_brief)
     (run_dir / "agent-brief.md").write_text(render_agent_brief(agent_brief), encoding="utf-8")
@@ -1907,6 +1972,7 @@ def prepare_driver_handoff(run_dir: Path, publish_deck: Optional[Path] = None) -
         "deck_path": str(run_dir / "deck.slidey.json"),
         "execution_plan_path": str(run_dir / "execution-plan.md"),
         "driver_plan_path": str(run_dir / "driver-plan.md"),
+        "driver_journal_path": str(run_dir / "driver-journal.md"),
         "agent_brief_path": str(run_dir / "agent-brief.md"),
         "driver_handoff_path": str(run_dir / "driver-handoff.md"),
         "media_manifest_path": str(run_dir / "media-manifest.json"),
@@ -2021,6 +2087,53 @@ def record_blocker(
     )
 
 
+def record_driver_event(
+    run_dir: Path,
+    scenario_id: str,
+    dispatch_mode: str,
+    status: str,
+    summary: str,
+    mcp_tools: str,
+    evidence_refs: str,
+    blockers: str,
+    publish_deck: Optional[Path],
+) -> dict:
+    run_json = read_json(run_dir / "run.json")
+    schema = read_json(SCHEMA)
+    known_scenarios = {scenario["id"] for scenario in run_json["scenarios"]}
+    if scenario_id and scenario_id not in known_scenarios:
+        known = ", ".join(sorted(known_scenarios))
+        raise SystemExit(f"Unknown scenario '{scenario_id}'. Known: {known}")
+    if dispatch_mode not in schema["driver_journal"]["dispatch_modes"]:
+        raise SystemExit("Driver dispatch mode must be replay, record, or live")
+    if status not in schema["driver_journal"]["statuses"]:
+        raise SystemExit("Driver event status must be attempted, captured, blocked, or validated")
+    journal_path = run_dir / "driver-journal.json"
+    journal = read_json(journal_path) if journal_path.exists() else build_driver_journal(run_json["run_id"], [])
+    items = journal.setdefault("items", [])
+    event = {
+        "id": f"driver-event-{len(items) + 1}",
+        "created_at": now_utc(),
+        "scenario": scenario_id,
+        "dispatch_mode": dispatch_mode,
+        "status": status,
+        "summary": summary,
+        "mcp_tools": split_csv(mcp_tools),
+        "evidence_refs": split_csv(evidence_refs),
+        "blockers": split_csv(blockers),
+    }
+    items.append(event)
+    journal = build_driver_journal(run_json["run_id"], items)
+    write_json(journal_path, journal)
+    (run_dir / "driver-journal.md").write_text(render_driver_journal(journal), encoding="utf-8")
+    update_derived_artifacts(run_dir, publish_deck=publish_deck)
+    return event
+
+
+def split_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 def demo_evidence_path(scenario: str, kind: str) -> str:
     paths = {
         "browser_screenshot": f"screens/{scenario}.png",
@@ -2089,6 +2202,7 @@ def seed_demo_evidence(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "deck_path": str(run_dir / "deck.slidey.json"),
         "execution_plan_path": str(run_dir / "execution-plan.md"),
         "driver_plan_path": str(run_dir / "driver-plan.md"),
+        "driver_journal_path": str(run_dir / "driver-journal.md"),
         "agent_brief_path": str(run_dir / "agent-brief.md"),
         "driver_handoff_path": str(run_dir / "driver-handoff.md"),
         "media_manifest_path": str(run_dir / "media-manifest.json"),
@@ -2124,6 +2238,8 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "execution-plan.md",
         "driver-plan.json",
         "driver-plan.md",
+        "driver-journal.json",
+        "driver-journal.md",
         "agent-brief.json",
         "agent-brief.md",
         "driver-handoff.json",
@@ -2294,6 +2410,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "deck_path": str(run_dir / "deck.slidey.json"),
         "execution_plan_path": str(run_dir / "execution-plan.md"),
         "driver_plan_path": str(run_dir / "driver-plan.md"),
+        "driver_journal_path": str(run_dir / "driver-journal.md"),
         "agent_brief_path": str(run_dir / "agent-brief.md"),
         "driver_handoff_path": str(run_dir / "driver-handoff.md"),
         "media_manifest_path": str(run_dir / "media-manifest.json"),
@@ -2426,6 +2543,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
     scenarios_json = load_json_for_validation(run_dir / "scenarios.json", issues)
     execution_plan = load_json_for_validation(run_dir / "execution-plan.json", issues)
     driver_plan = load_json_for_validation(run_dir / "driver-plan.json", issues)
+    driver_journal = load_json_for_validation(run_dir / "driver-journal.json", issues)
     agent_brief = load_json_for_validation(run_dir / "agent-brief.json", issues)
     driver_handoff = load_json_for_validation(run_dir / "driver-handoff.json", issues)
     scenario_outcomes = load_json_for_validation(run_dir / "scenario-outcomes.json", issues)
@@ -2450,6 +2568,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
         (agent_brief, "agent_brief", "agent-brief.json"),
         (execution_plan, "execution_plan", "execution-plan.json"),
         (driver_plan, "driver_plan", "driver-plan.json"),
+        (driver_journal, "driver_journal", "driver-journal.json"),
         (driver_handoff, "driver_handoff", "driver-handoff.json"),
         (scenario_outcomes, "scenario_outcomes", "scenario-outcomes.json"),
     ]:
@@ -2464,6 +2583,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
     outcome_items = scenario_outcomes.get("items", []) if scenario_outcomes else []
     execution_steps = execution_plan.get("steps", []) if execution_plan else []
     driver_scenarios = driver_plan.get("scenarios", []) if driver_plan else []
+    driver_events = driver_journal.get("items", []) if driver_journal else []
     brief_scenarios = agent_brief.get("scenario_order", []) if agent_brief else []
     handoff_missing_evidence = driver_handoff.get("missing_evidence", []) if driver_handoff else []
 
@@ -2548,6 +2668,38 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 invalid_gate_evidence.append(f"{scenario_id}: {', '.join(extra)}")
         if invalid_gate_evidence:
             add_validation_issue(issues, "error", "driver-plan-quality-gate-evidence", "Quality gate minimum evidence is not declared by the scenario", "; ".join(invalid_gate_evidence))
+    if driver_journal:
+        missing_event_keys = [
+            f"{event.get('id', f'event-{index}')}/{key}"
+            for index, event in enumerate(driver_events, start=1)
+            for key in schema["driver_journal"]["item_required"]
+            if key not in event
+        ]
+        if missing_event_keys:
+            add_validation_issue(issues, "error", "driver-journal-event-required-keys", "driver-journal.json events are missing required keys", ", ".join(missing_event_keys))
+        invalid_event_modes = sorted({
+            event.get("dispatch_mode", "")
+            for event in driver_events
+            if event.get("dispatch_mode", "") not in schema["driver_journal"]["dispatch_modes"]
+        })
+        if invalid_event_modes:
+            add_validation_issue(issues, "error", "driver-journal-dispatch-mode", "driver-journal.json events use unknown dispatch modes", ", ".join(invalid_event_modes))
+        invalid_event_statuses = sorted({
+            event.get("status", "")
+            for event in driver_events
+            if event.get("status", "") not in schema["driver_journal"]["statuses"]
+        })
+        if invalid_event_statuses:
+            add_validation_issue(issues, "error", "driver-journal-status", "driver-journal.json events use unknown statuses", ", ".join(invalid_event_statuses))
+        unknown_driver_scenarios = sorted({
+            event.get("scenario", "")
+            for event in driver_events
+            if event.get("scenario") and event.get("scenario") not in scenario_ids
+        })
+        if unknown_driver_scenarios:
+            add_validation_issue(issues, "error", "driver-journal-scenario", "driver-journal.json events reference unknown scenarios", ", ".join(unknown_driver_scenarios))
+        if driver_journal.get("summary", {}).get("events") != len(driver_events):
+            add_validation_issue(issues, "error", "driver-journal-summary", "driver-journal.json summary events is stale", f"expected={len(driver_events)}, actual={driver_journal.get('summary', {}).get('events')}")
     if agent_brief and len(brief_scenarios) != len(scenarios):
         add_validation_issue(
             issues,
@@ -3643,6 +3795,7 @@ def build_dogfood_smoke(
             "deck_path": str(run_dir / "deck.slidey.json"),
             "execution_plan_path": str(run_dir / "execution-plan.md"),
             "driver_plan_path": str(run_dir / "driver-plan.md"),
+            "driver_journal_path": str(run_dir / "driver-journal.md"),
             "agent_brief_path": str(run_dir / "agent-brief.md"),
             "driver_handoff_path": str(run_dir / "driver-handoff.md"),
             "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
@@ -4176,6 +4329,7 @@ def main() -> None:
     parser.add_argument("--attach-evidence", action="store_true", help="Attach one evidence artifact to an existing run bundle")
     parser.add_argument("--record-finding", action="store_true", help="Record one strength, weakness, issue, or fix in an existing run bundle")
     parser.add_argument("--record-blocker", action="store_true", help="Record an explicit blocked scenario as an issue finding")
+    parser.add_argument("--record-driver-event", action="store_true", help="Append one driver execution event to driver-journal.json")
     parser.add_argument("--seed-demo-evidence", action="store_true", help="Attach deterministic demo evidence and findings to an existing run bundle")
     parser.add_argument("--review-run", action="store_true", help="Review an existing run bundle for readiness")
     parser.add_argument("--driver-handoff", action="store_true", help="Refresh and print the product-journey QA driver handoff artifact")
@@ -4190,6 +4344,21 @@ def main() -> None:
         help="Status for --attach-evidence",
     )
     parser.add_argument("--notes", default="", help="Notes for --attach-evidence")
+    parser.add_argument(
+        "--dispatch-mode",
+        default="replay",
+        choices=["replay", "record", "live"],
+        help="Driver dispatch mode for --record-driver-event",
+    )
+    parser.add_argument(
+        "--driver-status",
+        default="attempted",
+        choices=["attempted", "captured", "blocked", "validated"],
+        help="Driver event status for --record-driver-event",
+    )
+    parser.add_argument("--mcp-tools", default="", help="Comma-separated MCP tools used for --record-driver-event")
+    parser.add_argument("--evidence-refs", default="", help="Comma-separated evidence refs produced for --record-driver-event")
+    parser.add_argument("--blockers", default="", help="Comma-separated blockers observed for --record-driver-event")
     parser.add_argument(
         "--finding-kind",
         default="issue",
@@ -4469,6 +4638,55 @@ def main() -> None:
         append_log(f"Prepared driver handoff for {run_dir.name}")
         return
 
+    if args.record_driver_event:
+        missing = []
+        for flag, value in {
+            "--run-dir": args.run_dir,
+            "--scenario": args.scenario,
+            "--summary": args.summary,
+        }.items():
+            if not value:
+                missing.append(flag)
+        if missing:
+            raise SystemExit(f"--record-driver-event requires {', '.join(missing)}")
+        publish_deck = DEFAULT_DECK if args.publish_deck else None
+        run_dir = run_dir_from_arg(args.run_dir)
+        event = record_driver_event(
+            run_dir,
+            args.scenario,
+            args.dispatch_mode,
+            args.driver_status,
+            args.summary,
+            args.mcp_tools,
+            args.evidence_refs,
+            args.blockers,
+            publish_deck,
+        )
+        if args.json_output:
+            print(json.dumps({
+                "status": "driver_event_recorded",
+                "run_dir": str(run_dir),
+                "event_id": event["id"],
+                "scenario": event["scenario"],
+                "dispatch_mode": event["dispatch_mode"],
+                "driver_status": event["status"],
+                "driver_journal_path": str(run_dir / "driver-journal.md"),
+                "driver_journal_json_path": str(run_dir / "driver-journal.json"),
+                "deck_path": str(run_dir / "deck.slidey.json"),
+                "driver_handoff_path": str(run_dir / "driver-handoff.md"),
+                "published_deck_path": str(publish_deck) if publish_deck is not None else "",
+            }, sort_keys=True))
+            append_log(f"Recorded driver event for {run_dir.name}: {event['scenario']} / {event['status']}")
+            return
+        print(f"Recorded driver event: {event['id']}")
+        print(f"Scenario: {event['scenario']}")
+        print(f"Driver journal: {run_dir / 'driver-journal.md'}")
+        print(f"Deck: {run_dir / 'deck.slidey.json'}")
+        if publish_deck is not None:
+            print(f"Published deck: {publish_deck}")
+        append_log(f"Recorded driver event for {run_dir.name}: {event['scenario']} / {event['status']}")
+        return
+
     if args.record_blocker:
         missing = []
         for flag, value in {
@@ -4493,6 +4711,7 @@ def main() -> None:
                 "deck_path": str(run_dir / "deck.slidey.json"),
                 "execution_plan_path": str(run_dir / "execution-plan.md"),
                 "driver_plan_path": str(run_dir / "driver-plan.md"),
+                "driver_journal_path": str(run_dir / "driver-journal.md"),
                 "agent_brief_path": str(run_dir / "agent-brief.md"),
                 "driver_handoff_path": str(run_dir / "driver-handoff.md"),
                 "media_manifest_path": str(run_dir / "media-manifest.json"),
@@ -4547,6 +4766,7 @@ def main() -> None:
                 "deck_path": str(run_dir / "deck.slidey.json"),
                 "execution_plan_path": str(run_dir / "execution-plan.md"),
                 "driver_plan_path": str(run_dir / "driver-plan.md"),
+                "driver_journal_path": str(run_dir / "driver-journal.md"),
                 "agent_brief_path": str(run_dir / "agent-brief.md"),
                 "driver_handoff_path": str(run_dir / "driver-handoff.md"),
                 "media_manifest_path": str(run_dir / "media-manifest.json"),
@@ -4600,6 +4820,7 @@ def main() -> None:
                 "deck_path": str(run_dir / "deck.slidey.json"),
                 "execution_plan_path": str(run_dir / "execution-plan.md"),
                 "driver_plan_path": str(run_dir / "driver-plan.md"),
+                "driver_journal_path": str(run_dir / "driver-journal.md"),
                 "agent_brief_path": str(run_dir / "agent-brief.md"),
                 "driver_handoff_path": str(run_dir / "driver-handoff.md"),
                 "media_manifest_path": str(run_dir / "media-manifest.json"),
@@ -4641,6 +4862,7 @@ def main() -> None:
                 "deck_path": str(run_dir / "deck.slidey.json"),
                 "execution_plan_path": str(run_dir / "execution-plan.md"),
                 "driver_plan_path": str(run_dir / "driver-plan.md"),
+                "driver_journal_path": str(run_dir / "driver-journal.md"),
                 "agent_brief_path": str(run_dir / "agent-brief.md"),
                 "driver_handoff_path": str(run_dir / "driver-handoff.md"),
                 "media_manifest_path": str(run_dir / "media-manifest.json"),
