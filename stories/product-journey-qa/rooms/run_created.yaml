@@ -1,7 +1,7 @@
 states:
   run_created:
     description: "A product-journey QA run bundle exists; waiting for captured evidence."
-    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, execution_plan_path, agent_brief_path, media_manifest_path, scenario_outcomes_path, scenario, evidence_kind, evidence_path, finding_kind, finding_title, review_status, review_summary, status]
+    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, execution_plan_path, agent_brief_path, media_manifest_path, scenario_outcomes_path, scenario, evidence_kind, evidence_path, finding_kind, finding_title, review_status, review_summary, validation_status, validation_errors, validation_warnings, status]
     view:
       - banner:
           text: "RUN CREATED"
@@ -21,6 +21,9 @@ states:
             Last evidence: '{{ world.scenario|default:"(none)" }} / {{ world.evidence_kind|default:"" }}'
             Last finding: '{{ world.finding_kind|default:"(none)" }} / {{ world.finding_title|default:"" }}'
             Review: '{{ world.review_status|default:"(not reviewed)" }}'
+            Validation: '{{ world.validation_status|default:"(not validated)" }}'
+            Validation errors: "{{ world.validation_errors }}"
+            Validation warnings: "{{ world.validation_warnings }}"
             Status: "{{ world.status }}"
       - choice:
           mode: single
@@ -38,6 +41,9 @@ states:
             - label: "review"
               hint: "score whether the bundle is ready for human review"
               intent: review
+            - label: "validate"
+              hint: "check schema and cross-file consistency without rewriting artifacts"
+              intent: validate
             - label: "accept"
               hint: "finish with the current run bundle"
               intent: accept
@@ -55,6 +61,9 @@ states:
                 evidence_kind: "{{ slots.evidence_kind }}"
                 evidence_path: "{{ slots.evidence_path }}"
                 notes: "{{ slots.notes ?? '' }}"
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
                 status: "attaching"
             - invoke: host.run
               id: attach_product_journey_evidence
@@ -95,6 +104,9 @@ states:
                 finding_severity: "{{ slots.severity ?? 'medium' }}"
                 scenario: "{{ slots.scenario ?? world.scenario }}"
                 evidence_path: "{{ slots.evidence_path ?? '' }}"
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
                 status: "recording_finding"
             - invoke: host.run
               id: record_product_journey_finding
@@ -133,6 +145,9 @@ states:
         - target: run_created
           effects:
             - set:
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
                 status: "seeding_demo"
             - invoke: host.run
               id: seed_product_journey_demo
@@ -159,6 +174,9 @@ states:
         - target: run_created
           effects:
             - set:
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
                 status: "reviewing"
             - invoke: host.run
               id: review_product_journey_run
@@ -183,6 +201,30 @@ states:
               on_error: run_created
             - set:
                 status: "reviewed"
+      validate:
+        - target: run_created
+          effects:
+            - set:
+                status: "validating"
+            - invoke: host.run
+              id: validate_product_journey_run
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --validate-run
+                  - --json-output
+                  - --run-dir
+                  - "{{ world.run_dir }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                validation_status: "stdout_json.status"
+                validation_errors: "stdout_json.errors"
+                validation_warnings: "stdout_json.warnings"
+              on_error: run_created
+            - set:
+                status: "validated"
       accept:
         - target: done
           effects:

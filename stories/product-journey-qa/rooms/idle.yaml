@@ -34,6 +34,9 @@ states:
             - set:
                 seed: "{{ slots.seed ?? world.seed }}"
                 matrix_personas: "{{ slots.matrix_personas ?? world.matrix_personas }}"
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
                 status: "creating_matrix"
             - invoke: host.run
               id: emit_product_journey_matrix
@@ -63,6 +66,9 @@ states:
                 project: "{{ slots.project ?? world.project }}"
                 persona: "{{ slots.persona ?? world.persona }}"
                 seed: "{{ slots.seed ?? world.seed }}"
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
                 status: "creating"
             - invoke: host.run
               id: emit_product_journey_run

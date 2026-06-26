@@ -37,6 +37,9 @@ world:
   finding_severity: { type: string, default: "" }
   review_status:  { type: string, default: "" }
   review_summary: { type: string, default: "" }
+  validation_status: { type: string, default: "" }
+  validation_errors: { type: int, default: 0 }
+  validation_warnings: { type: int, default: 0 }
   last_result:    { type: object, default: {} }
   status:         { type: string, default: "idle" }
 
@@ -62,6 +65,10 @@ intents:
     priority: 86
     slots:
       rollup_run_dir: { type: string, required: false }
+  validate_matrix:
+    description: "Validate the current GitHub matrix bundle without rewriting artifacts."
+    examples: ["validate matrix", "check matrix bundle", "verify matrix contract"]
+    priority: 84
   attach:
     description: "Attach captured evidence to the current product-journey run."
     examples: ["attach evidence", "add bugfix video", "record trace evidence"]
@@ -90,6 +97,10 @@ intents:
     description: "Review the current product-journey bundle for readiness."
     examples: ["review run", "check readiness", "is this bundle reviewable"]
     priority: 76
+  validate:
+    description: "Validate the current run bundle without rewriting artifacts."
+    examples: ["validate run", "check artifact contract", "verify bundle"]
+    priority: 74
   accept:
     description: "Accept the current report bundle and finish."
     examples: ["accept", "done", "looks good"]
@@ -104,7 +115,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, rollup, attach, record, seed_demo, review, accept, quit, look]
+  intents: [start, matrix, rollup, validate_matrix, attach, record, seed_demo, review, validate, accept, quit, look]
 
 root: idle
 
