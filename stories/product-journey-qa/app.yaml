@@ -19,6 +19,10 @@ world:
   evidence_kind:  { type: string, default: "" }
   evidence_path:  { type: string, default: "" }
   notes:          { type: string, default: "" }
+  finding_kind:   { type: string, default: "" }
+  finding_title:  { type: string, default: "" }
+  finding_summary: { type: string, default: "" }
+  finding_severity: { type: string, default: "" }
   last_result:    { type: object, default: {} }
   status:         { type: string, default: "idle" }
 
@@ -40,6 +44,17 @@ intents:
       evidence_kind: { type: string, required: true }
       evidence_path: { type: string, required: true }
       notes: { type: string, required: false }
+  record:
+    description: "Record a strength, weakness, issue, or fix for the run summary deck."
+    examples: ["record finding", "note a weakness", "record a fix", "add strength"]
+    priority: 82
+    slots:
+      finding_kind: { type: string, required: true }
+      title: { type: string, required: true }
+      summary: { type: string, required: true }
+      scenario: { type: string, required: false }
+      severity: { type: string, required: false }
+      evidence_path: { type: string, required: false }
   accept:
     description: "Accept the current report bundle and finish."
     examples: ["accept", "done", "looks good"]
@@ -54,7 +69,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, attach, accept, quit, look]
+  intents: [start, attach, record, accept, quit, look]
 
 root: idle
 

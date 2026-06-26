@@ -1,7 +1,7 @@
 states:
   run_created:
     description: "A product-journey QA run bundle exists; waiting for captured evidence."
-    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, scenario, evidence_kind, evidence_path, status]
+    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, scenario, evidence_kind, evidence_path, finding_kind, finding_title, status]
     view:
       - banner:
           text: "RUN CREATED"
@@ -15,6 +15,7 @@ states:
             Run dir: '{{ world.run_dir|default:"(pending)" }}'
             Deck: '{{ world.deck_path|default:"(pending)" }}'
             Last evidence: '{{ world.scenario|default:"(none)" }} / {{ world.evidence_kind|default:"" }}'
+            Last finding: '{{ world.finding_kind|default:"(none)" }} / {{ world.finding_title|default:"" }}'
             Status: "{{ world.status }}"
       - choice:
           mode: single
@@ -23,6 +24,9 @@ states:
             - label: "attach scenario=... evidence_kind=... evidence_path=..."
               hint: "mark one scenario evidence slot captured and regenerate the deck"
               intent: attach
+            - label: "record finding_kind=... title=... summary=..."
+              hint: "record a strength, weakness, issue, or fix for the review deck"
+              intent: record
             - label: "accept"
               hint: "finish with the current run bundle"
               intent: accept
@@ -66,6 +70,46 @@ states:
               on_error: run_created
             - set:
                 status: "evidence_attached"
+      record:
+        - target: run_created
+          effects:
+            - set:
+                finding_kind: "{{ slots.finding_kind }}"
+                finding_title: "{{ slots.title }}"
+                finding_summary: "{{ slots.summary }}"
+                finding_severity: "{{ slots.severity ?? 'medium' }}"
+                scenario: "{{ slots.scenario ?? world.scenario }}"
+                evidence_path: "{{ slots.evidence_path ?? '' }}"
+                status: "recording_finding"
+            - invoke: host.run
+              id: record_product_journey_finding
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --record-finding
+                  - --json-output
+                  - --run-dir
+                  - "{{ world.run_dir }}"
+                  - --finding-kind
+                  - "{{ slots.finding_kind }}"
+                  - --title
+                  - "{{ slots.title }}"
+                  - --summary
+                  - "{{ slots.summary }}"
+                  - --scenario
+                  - "{{ slots.scenario ?? '' }}"
+                  - --severity
+                  - "{{ slots.severity ?? 'medium' }}"
+                  - --evidence-path
+                  - "{{ slots.evidence_path ?? '' }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                deck_path: "stdout_json.deck_path"
+              on_error: run_created
+            - set:
+                status: "finding_recorded"
       accept:
         - target: done
           effects:

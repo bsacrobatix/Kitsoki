@@ -55,3 +55,6 @@ and success criteria.
 After a run captures evidence, attach references back to the bundle with
 `tools/product-journey/run.py --attach-evidence`. The command regenerates the
 journey summary, metrics, and Slidey deck.
+
+Use `tools/product-journey/run.py --record-finding` to summarize strengths,
+weaknesses, issues found, and fixes for the final deck.

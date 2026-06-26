@@ -256,6 +256,7 @@ def build_run_bundle(
             "journey": "journey.md",
             "metrics": "metrics.json",
             "bugs": "bugs.json",
+            "findings": "findings.json",
             "evidence": "evidence.json",
             "scenarios": "scenarios.json",
             "deck": "deck.slidey.json",
@@ -266,6 +267,7 @@ def build_run_bundle(
         ],
     }
     evidence = evidence_plan(run_json)
+    findings = {"run_id": run_id, "items": [], "summary": {"strength": 0, "weakness": 0, "issue": 0, "fix": 0}}
     metrics = {
         "run_id": run_id,
         "stage_count": len(stages),
@@ -276,6 +278,10 @@ def build_run_bundle(
         "present_evidence_count": evidence["summary"]["present"],
         "missing_evidence_count": evidence["summary"]["missing"],
         "product_bugs_found": 0,
+        "findings_count": 0,
+        "strength_count": 0,
+        "weakness_count": 0,
+        "fix_count": 0,
         "oracle_results": [],
         "checkpoint_ratings": [],
     }
@@ -287,6 +293,7 @@ def build_run_bundle(
     (run_dir / "journey.md").write_text(journey, encoding="utf-8")
     write_json(run_dir / "metrics.json", metrics)
     write_json(run_dir / "bugs.json", bugs)
+    write_json(run_dir / "findings.json", findings)
     write_json(run_dir / "evidence.json", evidence)
     write_json(run_dir / "scenarios.json", {"run_id": run_id, "items": scenario_items})
     write_json(run_dir / "deck.slidey.json", deck)
@@ -315,6 +322,7 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
     run_json = read_json(run_dir / "run.json")
     evidence = read_json(run_dir / "evidence.json")
     bugs = read_json(run_dir / "bugs.json")
+    findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"run_id": run_json["run_id"], "items": []}
 
     evidence_items = evidence.get("items", [])
     present_items = [item for item in evidence_items if item.get("status") in {"captured", "validated"}]
@@ -345,6 +353,14 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
         "present": len(present_items),
         "missing": len(evidence_items) - len(present_items),
     }
+    finding_items = findings.get("items", [])
+    finding_summary = {
+        "strength": sum(1 for item in finding_items if item.get("kind") == "strength"),
+        "weakness": sum(1 for item in finding_items if item.get("kind") == "weakness"),
+        "issue": sum(1 for item in finding_items if item.get("kind") == "issue"),
+        "fix": sum(1 for item in finding_items if item.get("kind") == "fix"),
+    }
+    findings["summary"] = finding_summary
     metrics = {
         "run_id": run_json["run_id"],
         "stage_count": len(run_json["stages"]),
@@ -356,16 +372,22 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
         "present_evidence_count": evidence["summary"]["present"],
         "missing_evidence_count": evidence["summary"]["missing"],
         "product_bugs_found": len(bugs.get("items", [])),
+        "findings_count": len(finding_items),
+        "strength_count": finding_summary["strength"],
+        "weakness_count": finding_summary["weakness"],
+        "issue_count": finding_summary["issue"],
+        "fix_count": finding_summary["fix"],
         "oracle_results": [],
         "checkpoint_ratings": [],
     }
 
     write_json(run_dir / "run.json", run_json)
     write_json(run_dir / "evidence.json", evidence)
+    write_json(run_dir / "findings.json", findings)
     write_json(run_dir / "metrics.json", metrics)
     write_json(run_dir / "scenarios.json", {"run_id": run_json["run_id"], "items": run_json["scenarios"]})
     (run_dir / "journey.md").write_text(render_journey(run_json), encoding="utf-8")
-    deck = render_deck(run_json, metrics, evidence)
+    deck = render_deck(run_json, metrics, evidence, findings)
     write_json(run_dir / "deck.slidey.json", deck)
     if publish_deck is not None:
         publish_deck.parent.mkdir(parents=True, exist_ok=True)
@@ -414,6 +436,45 @@ def attach_evidence(
     update_derived_artifacts(run_dir, publish_deck=publish_deck)
 
 
+def record_finding(
+    run_dir: Path,
+    kind: str,
+    title: str,
+    summary: str,
+    scenario_id: str,
+    severity: str,
+    evidence_path: str,
+    status: str,
+    publish_deck: Optional[Path],
+) -> None:
+    if kind not in {"strength", "weakness", "issue", "fix"}:
+        raise SystemExit("Finding kind must be strength, weakness, issue, or fix")
+    if status not in {"open", "fixed", "observed", "validated"}:
+        raise SystemExit("Finding status must be open, fixed, observed, or validated")
+    run_json = read_json(run_dir / "run.json")
+    known_scenarios = {scenario["id"] for scenario in run_json["scenarios"]}
+    if scenario_id and scenario_id not in known_scenarios:
+        known = ", ".join(sorted(known_scenarios))
+        raise SystemExit(f"Unknown scenario '{scenario_id}'. Known: {known}")
+    findings_path = run_dir / "findings.json"
+    findings = read_json(findings_path) if findings_path.exists() else {"run_id": run_json["run_id"], "items": []}
+    items = findings.setdefault("items", [])
+    item = {
+        "id": f"finding-{len(items) + 1}",
+        "kind": kind,
+        "title": title,
+        "summary": summary,
+        "scenario": scenario_id,
+        "severity": severity,
+        "evidence_path": evidence_path,
+        "status": status,
+        "created_at": now_utc(),
+    }
+    items.append(item)
+    write_json(findings_path, findings)
+    update_derived_artifacts(run_dir, publish_deck=publish_deck)
+
+
 def render_journey(run_json: dict) -> str:
     lines = [
         "# Product journey dry run",
@@ -459,7 +520,7 @@ def render_journey(run_json: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_deck(run_json: dict, metrics: dict, evidence: Optional[dict] = None) -> dict:
+def render_deck(run_json: dict, metrics: dict, evidence: Optional[dict] = None, findings: Optional[dict] = None) -> dict:
     stage_lines = [f"{stage['id']}: {stage['status']}" for stage in run_json["stages"]]
     scenario_lines = [
         f"{scenario['label']}: {scenario['stage']} ({', '.join(scenario['required_mcp'])})"
@@ -478,6 +539,12 @@ def render_deck(run_json: dict, metrics: dict, evidence: Optional[dict] = None) 
     else:
         video_body = "\n".join(video_lines)
     captured_body = "\n".join(captured[:12]) if captured else "No evidence attached yet."
+    finding_items = findings.get("items", []) if findings is not None else []
+    finding_lines = [
+        f"{item['kind']}: {item['title']} ({item.get('severity', 'n/a')})"
+        for item in finding_items[:12]
+    ]
+    findings_body = "\n".join(finding_lines) if finding_lines else "No strengths, weaknesses, issues, or fixes recorded yet."
     return {
         "meta": {
             "mode": "report",
@@ -510,8 +577,15 @@ def render_deck(run_json: dict, metrics: dict, evidence: Optional[dict] = None) 
                 "type": "narrative",
                 "eyebrow": "Metrics",
                 "title": "Current evidence",
-                "body": f"Validated stages: {metrics['validated_stage_count']} / {metrics['stage_count']}\nCaptured stages: {metrics.get('captured_stage_count', 0)}\nScenarios: {metrics['scenario_count']}\nEvidence present: {metrics['present_evidence_count']} / {metrics['required_evidence_count']}\nProduct bugs found: {metrics['product_bugs_found']}",
+                "body": f"Validated stages: {metrics['validated_stage_count']} / {metrics['stage_count']}\nCaptured stages: {metrics.get('captured_stage_count', 0)}\nScenarios: {metrics['scenario_count']}\nEvidence present: {metrics['present_evidence_count']} / {metrics['required_evidence_count']}\nFindings: {metrics.get('findings_count', 0)}\nStrengths: {metrics.get('strength_count', 0)} · Weaknesses: {metrics.get('weakness_count', 0)} · Fixes: {metrics.get('fix_count', 0)}\nProduct bugs found: {metrics['product_bugs_found']}",
                 "narration": "This report distinguishes validated evidence from planned stages.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Findings",
+                "title": "Strengths, weaknesses, issues, fixes",
+                "body": findings_body,
+                "narration": "The journey report records what worked, what failed, what was found, and what was fixed.",
             },
             {
                 "type": "narrative",
@@ -705,6 +779,7 @@ def main() -> None:
     parser.add_argument("--run-log", action="store_true", help="Force a timestamped run log entry")
     parser.add_argument("--emit-run", action="store_true", help="Write a no-LLM run artifact bundle and Slidey deck")
     parser.add_argument("--attach-evidence", action="store_true", help="Attach one evidence artifact to an existing run bundle")
+    parser.add_argument("--record-finding", action="store_true", help="Record one strength, weakness, issue, or fix in an existing run bundle")
     parser.add_argument("--run-dir", default="", help="Existing .artifacts/product-journey/<run-id> directory")
     parser.add_argument("--scenario", default="", help="Scenario id for --attach-evidence")
     parser.add_argument("--evidence-kind", default="", help="Evidence kind for --attach-evidence")
@@ -716,6 +791,21 @@ def main() -> None:
         help="Status for --attach-evidence",
     )
     parser.add_argument("--notes", default="", help="Notes for --attach-evidence")
+    parser.add_argument(
+        "--finding-kind",
+        default="issue",
+        choices=["strength", "weakness", "issue", "fix"],
+        help="Finding kind for --record-finding",
+    )
+    parser.add_argument("--title", default="", help="Finding title for --record-finding")
+    parser.add_argument("--summary", default="", help="Finding summary for --record-finding")
+    parser.add_argument("--severity", default="medium", help="Finding severity for --record-finding")
+    parser.add_argument(
+        "--finding-status",
+        default="observed",
+        choices=["open", "fixed", "observed", "validated"],
+        help="Finding status for --record-finding",
+    )
     parser.add_argument("--json-output", action="store_true", help="Print machine-readable JSON for story/host.run callers")
     parser.add_argument(
         "--publish-deck",
@@ -727,6 +817,50 @@ def main() -> None:
     catalog = load_catalog(CATALOG)
     personas = load_personas(PERSONAS)
     scenarios = load_scenarios(SCENARIOS)
+
+    if args.record_finding:
+        missing = []
+        for flag, value in {
+            "--run-dir": args.run_dir,
+            "--title": args.title,
+            "--summary": args.summary,
+        }.items():
+            if not value:
+                missing.append(flag)
+        if missing:
+            raise SystemExit(f"--record-finding requires {', '.join(missing)}")
+        publish_deck = DEFAULT_DECK if args.publish_deck else None
+        run_dir = run_dir_from_arg(args.run_dir)
+        record_finding(
+            run_dir,
+            args.finding_kind,
+            args.title,
+            args.summary,
+            args.scenario,
+            args.severity,
+            args.evidence_path,
+            args.finding_status,
+            publish_deck,
+        )
+        if args.json_output:
+            print(json.dumps({
+                "status": "recorded",
+                "run_dir": str(run_dir),
+                "finding_kind": args.finding_kind,
+                "title": args.title,
+                "scenario": args.scenario,
+                "deck_path": str(run_dir / "deck.slidey.json"),
+                "published_deck_path": str(publish_deck) if publish_deck is not None else "",
+            }, sort_keys=True))
+            append_log(f"Recorded {args.finding_kind} finding for {run_dir.name}: {args.title}")
+            return
+        print(f"Recorded finding: {args.finding_kind} / {args.title}")
+        print(f"Artifacts: {run_dir}")
+        print(f"Deck: {run_dir / 'deck.slidey.json'}")
+        if publish_deck is not None:
+            print(f"Published deck: {publish_deck}")
+        append_log(f"Recorded {args.finding_kind} finding for {run_dir.name}: {args.title}")
+        return
 
     if args.attach_evidence:
         missing = []

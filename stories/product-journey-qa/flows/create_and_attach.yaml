@@ -25,6 +25,17 @@ host_handlers:
             evidence_kind: key_interaction_video
             evidence_path: media/bugfix.mp4
             deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+      record_product_journey_finding:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            status: recorded
+            run_dir: .artifacts/product-journey/run-123
+            finding_kind: weakness
+            title: Onboarding hid next command
+            scenario: project-onboarding
+            deck_path: .artifacts/product-journey/run-123/deck.slidey.json
 
 turns:
   - intent:
@@ -60,6 +71,28 @@ turns:
     expect_host_calls:
       - handler: host.run
         args: { call: attach_product_journey_evidence }
+
+  - intent:
+      name: record
+      slots:
+        finding_kind: weakness
+        title: Onboarding hid next command
+        summary: The persona could not tell which Kitsoki story to launch after config generation.
+        scenario: project-onboarding
+        severity: medium
+        evidence_path: traces/onboarding.jsonl
+    expect_state: run_created
+    expect_world:
+      status: finding_recorded
+      finding_kind: weakness
+      finding_title: Onboarding hid next command
+      finding_summary: The persona could not tell which Kitsoki story to launch after config generation.
+      scenario: project-onboarding
+      evidence_path: traces/onboarding.jsonl
+      deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+    expect_host_calls:
+      - handler: host.run
+        args: { call: record_product_journey_finding }
 
   - intent: { name: accept, slots: {} }
     expect_state: done

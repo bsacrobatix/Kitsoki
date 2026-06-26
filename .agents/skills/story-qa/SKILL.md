@@ -83,3 +83,6 @@ python3 tools/product-journey/run.py --attach-evidence \
   --evidence-kind key_interaction_video \
   --evidence-path media/bugfix.mp4
 ```
+
+Use `--record-finding` on the same runner to summarize strengths, weaknesses,
+issues found, and fixes for the Slidey review deck.

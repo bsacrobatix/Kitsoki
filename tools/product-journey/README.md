@@ -31,9 +31,10 @@ python3 tools/product-journey/run.py --emit-run --project gears-rust --persona c
 ```
 
 This writes `.artifacts/product-journey/<run-id>/` with `run.json`,
-`journey.md`, `metrics.json`, `bugs.json`, `evidence.json`, `scenarios.json`,
-and `deck.slidey.json`. Add `--publish-deck` when the generated deck should replace
-`docs/decks/product-journey-eval.slidey.json` for review.
+`journey.md`, `metrics.json`, `bugs.json`, `findings.json`, `evidence.json`,
+`scenarios.json`, and `deck.slidey.json`. Add `--publish-deck` when the
+generated deck should replace `docs/decks/product-journey-eval.slidey.json` for
+review.
 
 Attach evidence captured by a live or cassette-backed MCP run:
 
@@ -48,6 +49,19 @@ python3 tools/product-journey/run.py --attach-evidence \
 
 Attachment updates `evidence.json`, `scenarios.json`, `metrics.json`,
 `journey.md`, and `deck.slidey.json`.
+
+Record a review finding for the deck summary:
+
+```sh
+python3 tools/product-journey/run.py --record-finding \
+  --run-dir .artifacts/product-journey/<run-id> \
+  --finding-kind weakness \
+  --scenario project-onboarding \
+  --title "Onboarding hid the next command" \
+  --summary "The persona could not tell which Kitsoki story to launch after config generation."
+```
+
+Finding kinds are `strength`, `weakness`, `issue`, and `fix`.
 
 For `gears-rust`, this prints the existing external-bakeoff readiness signal and
 the local-only verification command. If you have a local checkout, it also
