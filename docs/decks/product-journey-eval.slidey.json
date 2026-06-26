@@ -13,132 +13,153 @@
             "type": "title",
             "eyebrow": "Kitsoki evaluation",
             "title": "Product Journey Eval",
-            "subtitle": "Skeptical user path across site/docs/onboarding + three validated project oracles",
+            "subtitle": "Local harness complete; three project lanes validated; product-site journey remains next",
             "narration": "Pilot implementation landed in a worktree under .worktrees so the branch stays isolated and reviewable.",
             "hold": 2000
         },
         {
-            "type": "cards",
-            "variant": "grid",
-            "title": "Pilot state",
-            "narration": "The first milestone is runnable from a local checkout: one entrypoint, explicit project catalog, and validated local oracles for all three project lanes.",
-            "hold": 1700,
-            "cards": [
+            "type": "objectives",
+            "title": "Objective status",
+            "items": [
                 {
-                    "label": "Runner",
-                    "sub": "tools/product-journey/run.py",
-                    "style": "primary"
+                    "label": "Harness objective",
+                    "status": "done",
+                    "detail": "tools/product-journey/run.py gives one local entrypoint and project catalog."
                 },
                 {
-                    "label": "Corpus",
-                    "sub": "gears-rust (4 armable fixtures) via existing external grader, cached after a passing verify",
-                    "style": "secondary"
+                    "label": "Project lanes",
+                    "status": "done",
+                    "detail": "gears-rust, PostgreSQL, and Kubernetes each have deterministic local oracles."
                 },
                 {
-                    "label": "Local checks",
-                    "sub": "status/check commands are deterministic and no-LLM by default",
-                    "style": "default"
+                    "label": "No-cost automation",
+                    "status": "done",
+                    "detail": "Checks are no-LLM by default and rerunnable from a local checkout."
                 },
                 {
-                    "label": "Perspectives",
-                    "sub": "postgresql and kubernetes cloned under ~/code and validated with deterministic local oracle scripts",
-                    "style": "default"
-                }
-            ]
-        },
-        {
-            "type": "narrative",
-            "eyebrow": "Runner checks",
-            "lede": "What we verified",
-            "body": "`python3 tools/product-journey/run.py --project <project> --mode check` now reports validated for all three lanes: gears-rust is cached after a passing external-benchmark verify, PostgreSQL runs the ALTER DOMAIN VALIDATE CONSTRAINT oracle, and Kubernetes runs the nil-Memory guard oracle.",
-            "narration": "The check surface is the minimum viable control for orchestrator automation: deterministic readiness before any model-driven runs.",
-            "hold": 2200
-        },
-        {
-            "type": "table",
-            "title": "Latest check state",
-            "columns": [
-                "Target",
-                "Status",
-                "Next action"
-            ],
-            "rows": [
-                {
-                    "cells": [
-                        "gears-rust",
-                        "validated",
-                        "set GEARS_RUST_RECHECK=1 and run: GEARS_RUST_REPO=<path> make gears-bakeoff"
-                    ]
+                    "label": "Proposal cleanup",
+                    "status": "done",
+                    "detail": "Finished epic proposal was removed; durable evidence moved into docs and .context logs."
                 },
                 {
-                    "cells": [
-                        "postgresql",
-                        "validated",
-                        "bash tools/product-journey/checks/postgresql-oracle.sh"
-                    ]
-                },
-                {
-                    "cells": [
-                        "kubernetes",
-                        "validated",
-                        "bash tools/product-journey/checks/kubernetes-oracle.sh"
-                    ]
+                    "label": "Product-site journey",
+                    "status": "next",
+                    "detail": "Run the production web build and use it for skeptical-operator walkthroughs."
                 }
             ],
-            "variant": "data",
-            "caption": "Each perspective now has a concrete local oracle and a repeatable validation command.",
-            "hold": 2200
+            "caption": "Objective state: the local deterministic eval harness is complete; remaining work is the product-site journey.",
+            "narration": "The objective is complete for the local deterministic harness and project-lane oracles. The next product work is to run the site journey itself.",
+            "hold": 2600
         },
         {
-            "type": "table",
-            "title": "Local execution artifacts",
-            "columns": [
-                "Surface",
-                "State",
-                "Artifact/command"
-            ],
-            "rows": [
+            "type": "objectives",
+            "title": "Verified lanes",
+            "items": [
                 {
-                    "cells": [
-                        "Proposal",
-                        "implemented",
-                        "docs/proposals/product-journey-eval.md"
-                    ]
+                    "label": "gears-rust",
+                    "status": "done",
+                    "detail": "External benchmark fixtures: cached validated pass, with recheck available as an opt-in."
                 },
                 {
-                    "cells": [
-                        "Run log",
-                        "implemented",
-                        ".context/product-journey-runlog.md"
-                    ]
+                    "label": "PostgreSQL",
+                    "status": "done",
+                    "detail": "ALTER DOMAIN VALIDATE CONSTRAINT oracle: baseline red, fix green."
                 },
                 {
-                    "cells": [
-                        "Deck",
-                        "implemented",
-                        "docs/decks/product-journey-eval.slidey.json (preview in .artifacts/product-journey-eval/deck.html)"
-                    ]
+                    "label": "Kubernetes",
+                    "status": "done",
+                    "detail": "nil-Memory guard oracle: baseline panic, fix green."
                 }
             ],
-            "variant": "data",
-            "caption": "Deck is source-of-truth JSON in docs; rendered HTML stays in .artifacts/.",
+            "caption": "The report's headline is not 'we ran tools'; it is that every planned lane now has deterministic evidence.",
             "hold": 2300
         },
         {
-            "type": "narrative",
-            "eyebrow": "Execution discipline",
-            "lede": "Next moves",
-            "body": "With this baseline stable, stage the local production bundle with `make web` and serve it via `go run ./cmd/kitsoki web --addr 127.0.0.1:7777` for A/B experiments, then rerun any lane explicitly when you want fresh evidence (`GEARS_RUST_RECHECK=1` for the heavy external benchmark).",
-            "narration": "Evidence-first approach: every check emits to `.context` and every lane has a repeatable local command.",
-            "hold": 2000
+            "type": "evidence",
+            "title": "Latest check state",
+            "items": [
+                {
+                    "label": "gears-rust",
+                    "status": "validated",
+                    "detail": "Cached external benchmark pass; heavy recheck stays explicit.",
+                    "refType": "command",
+                    "ref": "GEARS_RUST_RECHECK=1 GEARS_RUST_REPO=<path> make gears-bakeoff",
+                    "note": "opt-in"
+                },
+                {
+                    "label": "PostgreSQL",
+                    "status": "validated",
+                    "detail": "ALTER DOMAIN VALIDATE CONSTRAINT oracle proves baseline red and fix green.",
+                    "refType": "command",
+                    "ref": "bash tools/product-journey/checks/postgresql-oracle.sh"
+                },
+                {
+                    "label": "Kubernetes",
+                    "status": "validated",
+                    "detail": "nil-Memory guard oracle proves baseline panic and fix green.",
+                    "refType": "command",
+                    "ref": "bash tools/product-journey/checks/kubernetes-oracle.sh"
+                }
+            ],
+            "caption": "Each lane has a concrete no-LLM check path; expensive refreshes remain operator-triggered.",
+            "hold": 2200
         },
         {
-            "type": "narrative",
-            "eyebrow": "Current run",
-            "lede": "Execution status",
-            "body": "Ran the harness path locally: `python3 tools/product-journey/run.py --project gears-rust --mode check` now returns a cached validation result, while the PostgreSQL and Kubernetes project checks run local oracle scripts that prove red@baseline and green@fix. The companion `tools/story-qa/run.py --project all` summary now reports all three lanes as validated, and writes the transient report under `.context/`.",
-            "narration": "The deck now reflects the actual runtime state: cached heavy benchmark plus two repeatable local oracles, all visible in the report surface.",
-            "hold": 2200
+            "type": "evidence",
+            "title": "Local execution artifacts",
+            "items": [
+                {
+                    "label": "Proposal",
+                    "status": "implemented",
+                    "detail": "The finished epic proposal was removed after the implementation landed.",
+                    "refType": "doc",
+                    "ref": "docs/proposals/product-journey-eval.md"
+                },
+                {
+                    "label": "Run log",
+                    "status": "implemented",
+                    "detail": "Chronological record of harness setup, lane validation, and cleanup.",
+                    "refType": "log",
+                    "ref": ".context/product-journey-runlog.md"
+                },
+                {
+                    "label": "Deck source",
+                    "status": "implemented",
+                    "detail": "Committed Slidey report source for VS Code preview and deterministic rendering.",
+                    "refType": "path",
+                    "ref": "docs/decks/product-journey-eval.slidey.json"
+                }
+            ],
+            "caption": "The finished proposal was removed; durable evidence is now docs plus .context logs.",
+            "hold": 2300
+        },
+        {
+            "type": "objectives",
+            "title": "Next moves",
+            "narration": "The remaining work is operational: run the product site from a production build for A/B journeys, refresh heavy evidence only on demand, and keep transient notes in dot-context.",
+            "hold": 2100,
+            "items": [
+                {
+                    "label": "Site journey",
+                    "status": "next",
+                    "detail": "Stage with make web, then serve 127.0.0.1:7777 for product-site A/B checks."
+                },
+                {
+                    "label": "Fresh evidence",
+                    "status": "next",
+                    "detail": "Re-run individual lanes when needed; keep gears-rust heavy recheck explicit."
+                },
+                {
+                    "label": "Review trail",
+                    "status": "done",
+                    "detail": ".context/product-journey-runlog.md records the chronological job state."
+                },
+                {
+                    "label": "QA summary",
+                    "status": "done",
+                    "detail": ".context/story-qa-run.md carries the latest per-lane verdicts."
+                }
+            ]
         }
     ]
 }
