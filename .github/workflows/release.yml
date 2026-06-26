@@ -68,8 +68,10 @@ jobs:
                 -o "build/kitsoki${ext}" ./cmd/kitsoki
             if [ "$os" = "windows" ]; then
               (cd build && zip -q "../dist/${name}.zip" "kitsoki${ext}")
+              cp "dist/${name}.zip" "dist/kitsoki_${os}_${arch}.zip"
             else
               tar -C build -czf "dist/${name}.tar.gz" "kitsoki${ext}"
+              cp "dist/${name}.tar.gz" "dist/kitsoki_${os}_${arch}.tar.gz"
             fi
             rm -f "build/kitsoki${ext}"
           done
@@ -86,14 +88,14 @@ jobs:
           rm -rf smoke
           mkdir -p smoke
 
-          for archive in dist/kitsoki_${{ github.ref_name }}_*.tar.gz; do
+          for archive in dist/*.tar.gz; do
             name="$(basename "$archive" .tar.gz)"
             mkdir -p "smoke/$name"
             tar -C "smoke/$name" -xzf "$archive"
             test -x "smoke/$name/kitsoki"
           done
 
-          for archive in dist/kitsoki_${{ github.ref_name }}_*.zip; do
+          for archive in dist/*.zip; do
             name="$(basename "$archive" .zip)"
             mkdir -p "smoke/$name"
             unzip -q "$archive" -d "smoke/$name"
@@ -101,7 +103,7 @@ jobs:
           done
 
           for arch in amd64 arm64; do
-            name="kitsoki_${{ github.ref_name }}_linux_${arch}"
+            name="kitsoki_linux_${arch}"
             docker run --rm --platform "linux/${arch}" \
               -v "$PWD/smoke/$name:/work:ro" \
               -w /work \
