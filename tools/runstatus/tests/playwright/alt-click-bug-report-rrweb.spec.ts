@@ -56,6 +56,61 @@ function diag(msg: string): void {
   fs.appendFileSync(DIAG_LOG, `[${new Date().toISOString()}] ${msg}\n`);
 }
 
+async function expectReplayCursorNear(framesDir: string, point: { x: number; y: number }): Promise<void> {
+  const frames = fs.existsSync(framesDir)
+    ? fs.readdirSync(framesDir).filter((f) => f.endsWith(".png")).sort()
+    : [];
+  expect(frames.length, "replay render should extract PNG frames").toBeGreaterThan(0);
+
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    for (const frame of frames) {
+      const framePath = path.join(framesDir, frame);
+      const frameURL = `data:image/png;base64,${fs.readFileSync(framePath).toString("base64")}`;
+      const counts = await page.evaluate(
+        async ({ url, x, y }) => {
+          const img = new Image();
+          img.src = url;
+          await img.decode();
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("2d canvas unavailable");
+          ctx.drawImage(img, 0, 0);
+          const sx = Math.max(0, x - 2);
+          const sy = Math.max(0, y - 2);
+          const data = ctx.getImageData(sx, sy, 40, 44).data;
+          let white = 0;
+          let black = 0;
+          let blue = 0;
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            const a = data[i + 3];
+            if (a > 200 && r > 245 && g > 245 && b > 245) white += 1;
+            if (a > 200 && r < 20 && g < 20 && b < 20) black += 1;
+            if (a > 120 && b > 150 && r < 120 && g < 170) blue += 1;
+          }
+          return { white, black, blue };
+        },
+        {
+          url: frameURL,
+          x: point.x,
+          y: point.y,
+        },
+      );
+      if (counts.white > 60 && counts.black > 30 && counts.blue > 50) return;
+    }
+  } finally {
+    await browser.close();
+  }
+
+  throw new Error(`rendered replay frames did not show a visible cursor near ${point.x},${point.y}`);
+}
+
 test.beforeAll(async () => {
   test.setTimeout(120000);
   fs.rmSync(ARTIFACT_DIR, { recursive: true, force: true });
@@ -165,4 +220,5 @@ test("Alt-right-click menu opens placed bug report modal and rrweb video evidenc
   });
   expect(render.mp4Path).toBeTruthy();
   expect(render.eventCount).toBeGreaterThan(10);
+  await expectReplayCursorNear(render.framesDir, { x: 461, y: 95 });
 });
