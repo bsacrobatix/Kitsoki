@@ -14,6 +14,7 @@ import subprocess
 import datetime
 import tempfile
 import shutil
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -968,13 +969,85 @@ def print_check(catalog, project_id):
     append_log(f"Checked {project_id}: {report['status']}")
 
 
+def build_report_payload(catalog: dict, generated_at: str, run_checks: bool) -> dict:
+    checks = {}
+    if run_checks:
+        for target in catalog["targets"]:
+            checks[target["id"]] = run_project_check(target)
+    return {
+        "program": catalog.get("program", "Product journey evaluator"),
+        "title": "Product Journey Eval",
+        "summary": "Local harness, project lanes, and next product-site work from structured catalog/check artifacts.",
+        "generated_at": generated_at,
+        "catalog": "tools/product-journey/catalog.json",
+        "run_log": ".context/product-journey-runlog.md",
+        "reference_deck": "docs/decks/product-journey-eval.slidey.json",
+        "next_site_journey": "Stage the local production web build and use it for skeptical-operator walkthroughs.",
+        "targets": catalog["targets"],
+        "perspectives": catalog["perspectives"],
+        "checks": checks,
+        "next_steps": [
+            {
+                "label": "Site journey",
+                "status": "next",
+                "detail": "Run make web, serve 127.0.0.1:7777, and capture deterministic product-site review evidence.",
+            },
+            {
+                "label": "Fresh evidence",
+                "status": "next",
+                "detail": "Use --run-checks when refreshing local oracle evidence; keep heavy gears-rust recheck explicit.",
+            },
+            {
+                "label": "Reference deck",
+                "status": "done",
+                "detail": "Preserve the hand-refined docs/decks/product-journey-eval.slidey.json as the narrative reference.",
+            },
+        ],
+    }
+
+
+def report_paths(generated_at: str, report_arg: str, deck_arg: str, markdown_arg: str) -> tuple[Path, Path, Path]:
+    run_id = generated_at.lower().replace(":", "-")
+    for ch in ("/", "\\", " "):
+        run_id = run_id.replace(ch, "-")
+    base = ARTIFACT_ROOT / run_id
+    return (
+        Path(report_arg) if report_arg else base / "report.json",
+        Path(deck_arg) if deck_arg else base / "deck.slidey.json",
+        Path(markdown_arg) if markdown_arg else base / "report.md",
+    )
+
+
+def write_report(catalog: dict, generated_at: str, report_path: Path, deck_path: Path, markdown_path: Path, run_checks: bool) -> None:
+    payload = build_report_payload(catalog, generated_at, run_checks)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+    builder = ROOT / "tools" / "report-deck" / "deterministic_deck.py"
+    result = shell([
+        sys.executable,
+        str(builder),
+        "--kind",
+        "product-journey",
+        "--input",
+        str(report_path),
+        "--out",
+        str(deck_path),
+        "--markdown",
+        str(markdown_path),
+    ], ROOT)
+    if result.returncode != 0:
+        raise SystemExit(result.stdout + result.stderr)
+    print(result.stdout.strip())
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", default="gears-rust", help="Project id from catalog")
     parser.add_argument(
         "--mode",
         default="status",
-        choices=["status", "check"],
+        choices=["status", "check", "report"],
         help="status: print catalog, check: validate a single project",
     )
     parser.add_argument("--persona", default="", help="Persona id from tools/product-journey/personas.json")
@@ -1017,6 +1090,11 @@ def main() -> None:
         action="store_true",
         help="Also update docs/decks/product-journey-eval.slidey.json with the generated deck",
     )
+    parser.add_argument("--generated-at", default="", help="required for --mode report; deterministic timestamp")
+    parser.add_argument("--report", default="", help="structured report JSON for --mode report; default is .artifacts/product-journey/<generated-at>/report.json")
+    parser.add_argument("--deck", default="", help="generated Slidey spec for --mode report; default is .artifacts/product-journey/<generated-at>/deck.slidey.json")
+    parser.add_argument("--markdown", default="", help="generated Markdown index for --mode report; default is .artifacts/product-journey/<generated-at>/report.md")
+    parser.add_argument("--run-checks", action="store_true", help="refresh target checks while building report")
     args = parser.parse_args()
 
     catalog = load_catalog(CATALOG)
@@ -1173,6 +1251,25 @@ def main() -> None:
     if args.mode == "status":
         print_status(catalog)
         append_log("Printed journey catalog and perspective status")
+        return
+
+    if args.mode == "report":
+        if not args.generated_at:
+            raise SystemExit("--generated-at is required for deterministic report generation")
+        report_path, deck_path, markdown_path = report_paths(
+            args.generated_at,
+            args.report,
+            args.deck,
+            args.markdown,
+        )
+        write_report(
+            catalog,
+            args.generated_at,
+            report_path,
+            deck_path,
+            markdown_path,
+            args.run_checks,
+        )
         return
 
     print_check(catalog, args.project)

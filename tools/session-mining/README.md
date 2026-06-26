@@ -83,13 +83,17 @@ python3 redact.py --report --names names.txt < combined.json > report.json
 # 7. share-gate — MUST pass before the report leaves your machine
 python3 redact.py --scan < report.json && echo "safe to share"
 
-# 8. turn the report into an actionable brief (what to build, which gates, first step)
-python3 report.py report.json --top 5 > BRIEF.md
+# 8. turn the report into actionable review artifacts
+python3 report.py report.json --top 5 \
+  --markdown .artifacts/session-mining/<job>/BRIEF.md \
+  --summary .artifacts/session-mining/<job>/brief.summary.json \
+  --slidey-spec .artifacts/session-mining/<job>/deck.slidey.json
 ```
 
 The raw transcripts and the distilled traces are the **private tier** — keep them
-in `/tmp`, never commit, never share. Only the scrubbed, gated `report.json` (and
-the `BRIEF.md` you derive from it) is shareable.
+in `/tmp`, never commit, never share. Only the scrubbed, gated `report.json` and
+the derived review artifacts (`BRIEF.md`, `brief.summary.json`,
+`deck.slidey.json`) are shareable.
 
 ---
 
@@ -220,6 +224,12 @@ python3 verify_link.py "$JOBDIR"
 # validate both reports against their JSON Schemas + the cross-link contract.
 # Needs jsonschema (`pip3 install --user jsonschema`); the spine above is stdlib-only.
 python3 validate_reports.py "$JOBDIR"
+
+# render review artifacts from the two linked reports
+python3 intent_brief.py "$JOBDIR" \
+  --markdown "$JOBDIR/BRIEF.md" \
+  --summary "$JOBDIR/intent.summary.json" \
+  --slidey-spec "$JOBDIR/deck.slidey.json"
 ```
 
 ### Testing (no LLM, ever)
@@ -268,7 +278,9 @@ summed from its host cassette; routed/host steps are $0) against the real
 raw-agentic cost of the same operations in mined sessions — a per-intent
 median/p90 distribution, the reprocessing tax, and cold-resume re-warm — read
 from recorded `message.usage` via `cost_extract.py` + `pricing.py` (exact, no
-LLM). The narrative is the
+LLM). `make cost-report` writes the markdown report plus a structured summary
+and deterministic Slidey spec under `.artifacts/cost-report/`; the deck is built
+from those computed fields, not by asking an LLM to author slides. The narrative is the
 [git-ops cost case study](../../docs/case-studies/git-ops-cost.md). `make
 mining-test` runs every no-LLM invariant in this directory (the cost stack plus
 the intent-pipeline, outcomes, and git-ops coverage suites); `make test` and CI
@@ -426,8 +438,15 @@ The aggregate JSON is a ranked *diagnostic*. `report.py` turns it into a
 *prescriptive* brief so the ranking drives decisions:
 
 ```sh
-python3 report.py report.json --top 5 > BRIEF.md
+python3 report.py report.json --top 5 \
+  --markdown .artifacts/session-mining/<job>/BRIEF.md \
+  --summary .artifacts/session-mining/<job>/brief.summary.json \
+  --slidey-spec .artifacts/session-mining/<job>/deck.slidey.json
 ```
+
+The Slidey deck is generated deterministically from the aggregate JSON plus the
+same computed verdicts used by the Markdown brief; it does not ask an LLM to
+write slides.
 
 For each top candidate the brief states:
 
@@ -482,8 +501,8 @@ merges mixed `vocab_version`s. The extractor prompt is a versioned artifact
 distill.jq              raw JSONL transcript -> compact action trace
 prep.py                 distill + (optional --redact) + bin-pack into byte-balanced batches; one command, all modes (--job targets .artifacts/ for intent mining). Drops dispatched headless agent/agent transcripts (entrypoint!=cli) by default; --keep-agent-sessions to include them
 redact.py               deterministic scrubber; `--report` scrubs a report's free-text, `--scan` is the share-gate
-report.py               render a pattern-mining aggregate into an actionable BRIEF.md (verdict + gates + skeleton + first step)
-focus_brief.py          render a focused idea-mining synthesis JSON into a ranked themed Markdown brief (idea-mining mode)
+report.py               render a pattern-mining aggregate into actionable BRIEF.md + brief.summary.json + deck.slidey.json artifacts
+focus_brief.py          render a focused idea-mining synthesis JSON into ranked Markdown + ideas.summary.json + deck.slidey.json artifacts
 prompts/extractor.md    the versioned extractor prompt (the reproducible core)
 vocab/core.yaml         controlled vocabulary (cross-user merge keys)
 vocab/overlay-go.yaml   Go/backend example signatures (copy per ecosystem)
@@ -499,6 +518,7 @@ ground.py               INTENT MINING step C — ground & validate agent output 
 tag_score.py            INTENT MINING steps D+E — tag/group + determinism scoring (deterministic)
 outcomes.py             INTENT MINING step E′ (optional) — recover per-tool-call outcomes (is_error/stdout/stderr/interrupted) from raw jsonl into a session-ordered intermediate
 emit.py                 INTENT MINING step F — emit the two linked reports; verbatim text from raw jsonl; --outcomes attaches per-action outcome + per-instance satisfaction
+intent_brief.py         render intents.json + analysis.json into BRIEF.md + intent.summary.json + deck.slidey.json review artifacts
 verify_link.py          check the intents.json <-> analysis.json cross-link contract
 validate_reports.py     validate both reports against their JSON Schemas (needs `jsonschema`)
 coverage_prep.py        STORY COVERAGE MINING data-prep — scope-filter + arg-aware dedup + candidate-room join + outcome/satisfaction inlining over a story's mining.profile.yaml; emits intents.git.json + a coverage.md worksheet skeleton (NO verdicts). See docs/stories/story-coverage-mining.md

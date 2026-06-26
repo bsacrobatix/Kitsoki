@@ -42,8 +42,13 @@ manual step and must be explicitly requested by an operator.
      --coverage-root .artifacts/eval-pilot \
      --markdown .context/model-harness-eval-pilot.md \
      --deck .artifacts/eval-pilot/index.html \
+     --slidey-spec .artifacts/eval-pilot/deck.slidey.json \
      --summary .artifacts/eval-pilot/summary.json
    ```
+
+   `--deck` preserves the older static HTML review artifact. `--slidey-spec`
+   writes the standardized deterministic Slidey source through
+   `tools/report-deck/deterministic_deck.py --kind eval-pilot`.
 
 ## What the report means
 
@@ -103,6 +108,7 @@ python3 tools/session-mining/eval_pilot_report.py \
   --coverage-root .artifacts/eval-pilot \
   --markdown .context/model-harness-eval-pilot-big.md \
   --deck .artifacts/eval-pilot-big/index.html \
+  --slidey-spec .artifacts/eval-pilot-big/deck.slidey.json \
   --summary .artifacts/eval-pilot-big/summary.json
 ```
 

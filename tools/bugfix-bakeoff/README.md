@@ -101,7 +101,9 @@ python3 score.py --bug $BUG --candidate $CAND --treatment $TREAT
 cd tools/bugfix-bakeoff
 python3 aggregate.py                       # merges results/cells/*.json -> results/summary.json
 python3 aggregate.py --emit-agenteval      # also writes results/agenteval/<bug>/latest.json
-python3 ../path/to/eval_pilot_report.py --markdown --deck   # regenerates the deck
+python3 aggregate.py --generated-at 2026-06-24T00:00:00Z \
+  --deck ../../.artifacts/bugfix-bakeoff/2026-06-24t00-00-00z/deck.slidey.json \
+  --markdown ../../.artifacts/bugfix-bakeoff/2026-06-24t00-00-00z/report.md
 ```
 
 `summary.json` and the per-bug `agenteval.Report` files are the durable

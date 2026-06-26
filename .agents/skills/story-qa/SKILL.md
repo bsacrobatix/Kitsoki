@@ -99,3 +99,9 @@ python3 tools/product-journey/run.py --review-run \
 
 The gate writes `review.json`, updates `metrics.json`, and adds a Slidey scene
 with hard failures and softer evidence-quality warnings.
+
+The `tools/story-qa/run.py` runner also writes a transient pointer report under
+`.context/` and a durable review bundle under `.artifacts/story-qa/<run>/`
+containing `report.md`, `summary.json`, and `deck.slidey.json`. The deck is
+generated deterministically from structured target/verification rows, so planned
+or blocked lanes stay visible without pretending they are validated.

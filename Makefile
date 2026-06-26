@@ -287,14 +287,20 @@ gears-bakeoff:
 # docs/case-studies/git-ops-cost.md): the deterministic story cost (agent spend
 # from each story's host cassette) vs the REAL raw-agentic cost of the same
 # operations, from telemetry already on disk. NO LLM, no cost. Writes a markdown
-# table to .artifacts/cost-report/ (gitignored — it reads your local transcripts).
+# table, summary JSON, and Slidey deck spec to .artifacts/cost-report/
+# (gitignored — it reads your local transcripts).
 # Override the transcript pool with PROJECTS='~/.claude/projects/<glob>*'.
 COST_REPORT_OUT ?= .artifacts/cost-report/cost-report.md
+COST_REPORT_SUMMARY ?= $(COST_REPORT_OUT:.md=.summary.json)
+COST_REPORT_DECK ?= $(COST_REPORT_OUT:.md=.slidey.json)
 PROJECTS ?=
 cost-report:
 	@python3 tools/session-mining/cost_report.py --all \
-		$(if $(PROJECTS),--projects '$(PROJECTS)',) --out $(COST_REPORT_OUT)
+		$(if $(PROJECTS),--projects '$(PROJECTS)',) --out $(COST_REPORT_OUT) \
+		--summary $(COST_REPORT_SUMMARY) --slidey-spec $(COST_REPORT_DECK)
 	@echo "report: $(COST_REPORT_OUT)"
+	@echo "summary: $(COST_REPORT_SUMMARY)"
+	@echo "deck: $(COST_REPORT_DECK)"
 
 # mining-test runs every no-LLM invariant in the session-mining stack: the
 # intent pipeline + parsers, outcome/satisfaction capture, the git-ops coverage

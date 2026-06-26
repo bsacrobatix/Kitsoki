@@ -11,6 +11,8 @@ contains:
 - `manifest.yaml` - the generated `punch-list/v1` worklist;
 - `launch.yaml` - the warp-basis file that seeds `manifest_path`;
 - `receipt.json` - the trackable receipt;
+- `deck.slidey.json` - the deterministic Slidey status deck linked from the
+  receipt;
 - `events.jsonl` - the lifecycle log for generated/validated/launched/exported
   workflow receipts;
 - `validation.json` - the deterministic validation report.
@@ -22,7 +24,9 @@ Exported runs also write:
 - `flows/generated.yaml` - the starter flow fixture mined from the run trace;
 - `flows/generated.cassette.yaml` - the starter host cassette when the trace
   recorded host calls;
-- `export-report.json` - the promotion summary, warnings, and TODOs.
+- `export-report.json` - the promotion summary, warnings, and TODOs;
+- `deck.slidey.json` - the deterministic export review deck with linked
+  artifacts.
 
 ## CLI
 

@@ -24,13 +24,17 @@ What the verdict means (thresholds are explicit so two runs are comparable):
 """
 import argparse
 import json
+import os
 import re
+import subprocess
 import sys
+from pathlib import Path
 
 PRIORITY_CUT = 0.50      # at/above this, a pattern is a "build" candidate
 CRISP_GATES = 4          # <= this many (unioned across contributors) reads as a clean gate set
 SOLVED_MECH = 0.90       # mechanical_fraction at/above which, with low pain, ROI to formalize is low
 PAIN_MARK = {"high": "🔴", "med": "🟠", "low": "⚪"}
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def load_vocab(path):
@@ -64,7 +68,8 @@ def load_vocab(path):
 
 
 def verdict(p, total_contributors, promote_min):
-    corroborated = p["contributors"] >= promote_min
+    contributors = p.get("contributors", p.get("sessions_seen", 1))
+    corroborated = contributors >= promote_min
     gates = len(p.get("decision_points", []))
     crisp = gates <= CRISP_GATES
     mech = p.get("mechanical_fraction", 0)
@@ -96,8 +101,8 @@ def brief_block(p, vocab, total, promote_min):
     out.append("")
     out.append(
         f"**Why:** priority **{p['determinism_priority']:.2f}** · "
-        f"seen by **{p['contributors']}/{total}** contributors · "
-        f"**{p['occurrences']}** occurrences · "
+        f"seen by **{p.get('contributors', p.get('sessions_seen', 1))}/{total}** contributors · "
+        f"**{p.get('occurrences', 0)}** occurrences · "
         f"pain {PAIN_MARK.get(p.get('pain','low'),'')} {p.get('pain','?')} · "
         f"{int(round(p.get('mechanical_fraction',0)*100))}% mechanical"
     )
@@ -125,63 +130,155 @@ def brief_block(p, vocab, total, promote_min):
     return "\n".join(out)
 
 
+def enriched_patterns(d, vocab):
+    total = d.get("contributors", 1)
+    promote_min = d.get("promote_min_contributors", 2)
+    rows = []
+    for p in d.get("patterns", []):
+        row = dict(p)
+        label, icon = verdict(p, total, promote_min)
+        row["verdict"] = label
+        row["verdict_icon"] = icon
+        row["contributors"] = row.get("contributors", row.get("sessions_seen", 1))
+        row["occurrences"] = row.get("occurrences", 0)
+        row["name"] = vocab.get(p["id"], {}).get("name", p["id"])
+        row["definition"] = vocab.get(p["id"], {}).get("definition", "")
+        row["ladder_target"] = vocab.get(p["id"], {}).get("ladder_target", p.get("ladder_target", "L2"))
+        rows.append(row)
+    return rows
+
+
+def summarize(d, vocab, top=0, source="", markdown_path="", summary_path=""):
+    inferred_total = max([p.get("contributors", p.get("sessions_seen", 1)) for p in d.get("patterns", [])] or [1])
+    total = d.get("contributors") or inferred_total
+    promote_min = d.get("promote_min_contributors", 2)
+    patterns = enriched_patterns(d, vocab)
+    candidates = [p for p in patterns if p["verdict"].startswith(("BUILD", "PROMISING"))]
+    if top:
+        candidates = candidates[:top]
+    out = dict(d)
+    out["_source"] = source
+    out["markdown_path"] = markdown_path
+    out["summary_path"] = summary_path
+    out["contributors"] = total
+    out["promote_min_contributors"] = promote_min
+    out["patterns"] = patterns
+    out["candidates"] = candidates
+    return out
+
+
+def render_markdown(summary, vocab):
+    lines = []
+    lines.append("# Session-mining action brief")
+    lines.append("")
+    vv = summary.get("vocab_version", "?")
+    lines.append(f"_{summary.get('reports_merged','?')} report(s) · {summary.get('contributors', 1)} contributor(s) · "
+                 f"vocab {vv} · promotion threshold {summary.get('promote_min_contributors', 2)} contributors._")
+    lines.append("")
+
+    lines.append("## Build these (ranked)")
+    lines.append("")
+    if summary["candidates"]:
+        for p in summary["candidates"]:
+            lines.append(brief_block(p, vocab, summary.get("contributors", 1), summary.get("promote_min_contributors", 2)))
+    else:
+        lines.append("_No pattern cleared the priority cut. Mine more sessions or contributors._")
+        lines.append("")
+
+    lines.append("")
+    lines.append("## Full ranking")
+    lines.append("")
+    lines.append("| Pattern | Verdict | Prio | Contrib | Occ | Pain | Gates |")
+    lines.append("|---|---|--:|--:|--:|:--:|--:|")
+    for p in summary["patterns"]:
+        lines.append(f"| {p['id']} | {p['verdict_icon']} {p['verdict']} | {p['determinism_priority']:.2f} "
+                     f"| {p.get('contributors', p.get('sessions_seen', 1))}/{summary.get('contributors', 1)} | {p.get('occurrences', 0)} | {p.get('pain','?')} "
+                     f"| {len(p.get('decision_points',[]))} |")
+    lines.append("")
+
+    quar = summary.get("novel_quarantine", [])
+    cand = summary.get("novel_promotion_candidates", [])
+    if cand:
+        lines.append("## Newly corroborated patterns (promote into the vocabulary)")
+        lines.append("")
+        for p in cand:
+            lines.append(f"- **{p['id']}** — {p.get('contributors', p.get('sessions_seen', 1))} contributors, "
+                         f"{p.get('occurrences', 0)} occ. Add to `vocab/core.yaml` (bump `vocab_version`).")
+        lines.append("")
+    if quar:
+        lines.append("## Watch list (novel, not yet corroborated)")
+        lines.append("")
+        lines.append("Each needs more independent contributors before it counts. Not actionable yet.")
+        lines.append("")
+        for p in sorted(quar, key=lambda x: x.get("contributors", x.get("sessions_seen", 1)), reverse=True):
+            contributors = p.get("contributors", p.get("sessions_seen", 1))
+            need = max(0, summary.get("promote_min_contributors", 2) - contributors)
+            lines.append(f"- `{p['id']}` — {contributors} contributor(s), "
+                         f"needs {need} more to promote")
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def write(path, content):
+    directory = os.path.dirname(os.path.abspath(path))
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(content)
+
+
+def write_json(path, value):
+    write(path, json.dumps(value, indent=2, sort_keys=True) + "\n")
+
+
+def write_slidey_spec(path, summary):
+    builder = ROOT / "tools" / "report-deck" / "deterministic_deck.py"
+    subprocess.run(
+        [
+            sys.executable,
+            str(builder),
+            "--kind",
+            "session-mining-action",
+            "--input-json",
+            json.dumps(summary, sort_keys=True),
+            "--out",
+            path,
+        ],
+        cwd=ROOT,
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+
+
 def main():
     ap = argparse.ArgumentParser(description="Render an aggregated report into an actionable brief.")
     ap.add_argument("report", help="aggregate.py output JSON")
     ap.add_argument("--vocab", default="vocab/core.yaml", help="controlled vocabulary (for names + ladder targets)")
     ap.add_argument("--top", type=int, default=0, help="limit the action shortlist to N (0 = all build candidates)")
+    ap.add_argument("--markdown", help="write Markdown brief here instead of only stdout")
+    ap.add_argument("--summary", help="write machine-readable summary with computed verdicts")
+    ap.add_argument("--slidey-spec", help="write deterministic Slidey JSON deck spec")
     args = ap.parse_args()
 
     d = json.load(open(args.report))
     vocab = load_vocab(args.vocab)
-    total = d.get("contributors", 1)
-    promote_min = d.get("promote_min_contributors", 2)
-    patterns = d.get("patterns", [])
-
-    candidates = [p for p in patterns
-                  if verdict(p, total, promote_min)[0].startswith(("BUILD", "PROMISING"))]
-    if args.top:
-        candidates = candidates[:args.top]
-
-    w = sys.stdout.write
-    w("# Session-mining action brief\n\n")
-    vv = d.get("vocab_version", "?")
-    w(f"_{d.get('reports_merged','?')} report(s) · {total} contributor(s) · "
-      f"vocab {vv} · promotion threshold {promote_min} contributors._\n\n")
-
-    w("## Build these (ranked)\n\n")
-    if candidates:
-        for p in candidates:
-            w(brief_block(p, vocab, total, promote_min))
+    summary = summarize(
+        d,
+        vocab,
+        top=args.top,
+        source=args.report,
+        markdown_path=args.markdown or "",
+        summary_path=args.summary or "",
+    )
+    md = render_markdown(summary, vocab)
+    if args.markdown:
+        write(args.markdown, md)
     else:
-        w("_No pattern cleared the priority cut. Mine more sessions or contributors._\n\n")
-
-    w("\n## Full ranking\n\n")
-    w("| Pattern | Verdict | Prio | Contrib | Occ | Pain | Gates |\n")
-    w("|---|---|--:|--:|--:|:--:|--:|\n")
-    for p in patterns:
-        label, icon = verdict(p, total, promote_min)
-        w(f"| {p['id']} | {icon} {label} | {p['determinism_priority']:.2f} "
-          f"| {p['contributors']}/{total} | {p['occurrences']} | {p.get('pain','?')} "
-          f"| {len(p.get('decision_points',[]))} |\n")
-    w("\n")
-
-    quar = d.get("novel_quarantine", [])
-    cand = d.get("novel_promotion_candidates", [])
-    if cand:
-        w("## Newly corroborated patterns (promote into the vocabulary)\n\n")
-        for p in cand:
-            w(f"- **{p['id']}** — {p['contributors']} contributors, "
-              f"{p['occurrences']} occ. Add to `vocab/core.yaml` (bump `vocab_version`).\n")
-        w("\n")
-    if quar:
-        w("## Watch list (novel, not yet corroborated)\n\n")
-        w("Each needs more independent contributors before it counts. Not actionable yet.\n\n")
-        for p in sorted(quar, key=lambda x: x["contributors"], reverse=True):
-            need = max(0, promote_min - p["contributors"])
-            w(f"- `{p['id']}` — {p['contributors']} contributor(s), "
-              f"needs {need} more to promote\n")
-        w("\n")
+        sys.stdout.write(md)
+    if args.summary:
+        write_json(args.summary, summary)
+    if args.slidey_spec:
+        write_slidey_spec(args.slidey_spec, summary)
 
 
 if __name__ == "__main__":

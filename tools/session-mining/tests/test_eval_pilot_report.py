@@ -3,6 +3,7 @@
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -259,6 +260,18 @@ fixtures:
         check("divergence" in md, "markdown flags a bar divergence")
         deck = epr.render_deck(summary, intent_summaries, coverage_summaries, readiness)
         check("<section" in deck and "Pilot loop" in deck, "deck renders slide sections")
+        slidey_path = os.path.join(d, "eval-pilot.slidey.json")
+        subprocess.run([
+            sys.executable,
+            os.path.join(TOOL, "eval_pilot_report.py"),
+            "--root", os.path.join(d, "stories"),
+            "--intent-root", os.path.join(d, "intent-reports"),
+            "--coverage-root", os.path.join(d, "coverage"),
+            "--slidey-spec", slidey_path,
+        ], check=True)
+        slidey = json.load(open(slidey_path, encoding="utf-8"))
+        check(slidey["meta"]["title"] == "Eval Pilot Report", "slidey spec title emitted")
+        check(any(s.get("title") == "Candidate matrix" for s in slidey["scenes"]), "slidey spec includes candidate matrix")
 
     if failures:
         print("FAIL (%d):" % len(failures))
