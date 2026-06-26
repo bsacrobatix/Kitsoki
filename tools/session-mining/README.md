@@ -224,6 +224,12 @@ python3 verify_link.py "$JOBDIR"
 # validate both reports against their JSON Schemas + the cross-link contract.
 # Needs jsonschema (`pip3 install --user jsonschema`); the spine above is stdlib-only.
 python3 validate_reports.py "$JOBDIR"
+
+# render review artifacts from the two linked reports
+python3 intent_brief.py "$JOBDIR" \
+  --markdown "$JOBDIR/BRIEF.md" \
+  --summary "$JOBDIR/intent.summary.json" \
+  --slidey-spec "$JOBDIR/deck.slidey.json"
 ```
 
 ### Testing (no LLM, ever)
@@ -512,6 +518,7 @@ ground.py               INTENT MINING step C — ground & validate agent output 
 tag_score.py            INTENT MINING steps D+E — tag/group + determinism scoring (deterministic)
 outcomes.py             INTENT MINING step E′ (optional) — recover per-tool-call outcomes (is_error/stdout/stderr/interrupted) from raw jsonl into a session-ordered intermediate
 emit.py                 INTENT MINING step F — emit the two linked reports; verbatim text from raw jsonl; --outcomes attaches per-action outcome + per-instance satisfaction
+intent_brief.py         render intents.json + analysis.json into BRIEF.md + intent.summary.json + deck.slidey.json review artifacts
 verify_link.py          check the intents.json <-> analysis.json cross-link contract
 validate_reports.py     validate both reports against their JSON Schemas (needs `jsonschema`)
 coverage_prep.py        STORY COVERAGE MINING data-prep — scope-filter + arg-aware dedup + candidate-room join + outcome/satisfaction inlining over a story's mining.profile.yaml; emits intents.git.json + a coverage.md worksheet skeleton (NO verdicts). See docs/stories/story-coverage-mining.md

@@ -785,6 +785,80 @@ def session_mining_action(data: dict[str, Any]) -> tuple[dict[str, Any], list[di
     return title_deck("Session-Mining Action Brief", subtitle, scenes), refs
 
 
+def session_mining_intent(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    intents = require_list(data, "intents", "session-mining-intent")
+    clusters = data.get("clusters") or []
+    det = data.get("determinism_counts") or {}
+    grounding = data.get("grounding") or {}
+    tag_rows = []
+    for dim, values in sorted((data.get("tags") or {}).items()):
+        if not isinstance(values, dict):
+            continue
+        top = sorted(values.items(), key=lambda kv: (-kv[1], kv[0]))[:8]
+        tag_rows.append({"cells": [dim, ", ".join(f"{k} {v}" for k, v in top)]})
+    intent_rows = []
+    for row in intents[:16]:
+        tags = row.get("tags") or {}
+        intent_rows.append({"cells": [
+            row.get("instance_id", ""),
+            row.get("determinism", ""),
+            ", ".join(tags.get("action") or []),
+            num((row.get("measured") or {}).get("tool_calls")),
+            "; ".join((row.get("agent_gates") or [])[:2]),
+            row.get("recipe", ""),
+        ]})
+    cluster_rows = [{"cells": [num(c.get("count")), c.get("key", "")]} for c in clusters[:10]]
+    scenes = [
+        objectives_scene("Intent-mining status", [
+            {"label": "Intent catalog", "status": "done" if intents else "pending", "detail": f"{len(intents)} intent(s)."},
+            {"label": "Deterministic", "status": "done" if det.get("deterministic") else "pending", "detail": f"{det.get('deterministic', 0)} pure tool sequence(s)."},
+            {"label": "Agent gated", "status": "next" if det.get("agent-gated") else "done", "detail": f"{det.get('agent-gated', 0)} strict-gate recipe(s)."},
+            {"label": "Irreducible LLM", "status": "blocked" if det.get("irreducible-llm") else "done", "detail": f"{det.get('irreducible-llm', 0)} open-ended generation case(s)."},
+            {"label": "Grounding", "status": "done" if grounding.get("valid") == grounding.get("cited") else "pending", "detail": f"{grounding.get('valid', 0)}/{grounding.get('cited', 0)} actions validated."},
+        ]),
+        {
+            "type": "table",
+            "variant": "data",
+            "title": "Intent recipes",
+            "columns": ["Instance", "Verdict", "Action tags", "Tools", "Gates", "Recipe"],
+            "rows": intent_rows or [{"cells": ["-", "-", "-", "-", "-", "-"]}],
+            "hold": 3400,
+        },
+    ]
+    if cluster_rows:
+        scenes.append({
+            "type": "table",
+            "variant": "data",
+            "title": "Recurring shapes",
+            "columns": ["Count", "Cluster"],
+            "rows": cluster_rows,
+            "hold": 2600,
+        })
+    if tag_rows:
+        scenes.append({
+            "type": "table",
+            "variant": "data",
+            "title": "Tag distribution",
+            "columns": ["Dimension", "Top tags"],
+            "rows": tag_rows,
+            "hold": 2600,
+        })
+    scenes.append(evidence_scene("Review artifacts", [
+        {"label": "Intents JSON", "status": "done", "detail": "Catalog report.", "ref": data.get("intents_path", "")},
+        {"label": "Analysis JSON", "status": "done", "detail": "Per-instance determinism recipes.", "ref": data.get("analysis_path", "")},
+        {"label": "Markdown brief", "status": "done" if data.get("markdown_path") else "pending", "detail": "Readable intent brief.", "ref": data.get("markdown_path", "")},
+        {"label": "Summary JSON", "status": "done" if data.get("summary_path") else "pending", "detail": "Structured deck input.", "ref": data.get("summary_path", "")},
+    ]))
+    refs = [
+        {"label": "Intents JSON", "path": data.get("intents_path", ""), "status": "done"},
+        {"label": "Analysis JSON", "path": data.get("analysis_path", ""), "status": "done"},
+        {"label": "Markdown brief", "path": data.get("markdown_path", ""), "status": "done" if data.get("markdown_path") else "pending"},
+        {"label": "Summary JSON", "path": data.get("summary_path", ""), "status": "done" if data.get("summary_path") else "pending"},
+    ]
+    subtitle = f"{len(intents)} intent(s), {det.get('agent-gated', 0)} agent-gated, {det.get('irreducible-llm', 0)} irreducible"
+    return title_deck("Session-Mining Intent Brief", subtitle, scenes), refs
+
+
 def workflow(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
     title = data.get("title") or data.get("name") or "Workflow Report"
     objectives = data.get("objectives") or []
@@ -1118,6 +1192,7 @@ BUILDERS = {
     "onboarding": onboarding,
     "product-journey": product_journey,
     "session-mining-action": session_mining_action,
+    "session-mining-intent": session_mining_intent,
     "story-qa": story_qa,
     "workflow": workflow,
 }

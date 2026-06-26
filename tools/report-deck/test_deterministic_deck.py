@@ -363,6 +363,34 @@ class DeterministicDeckTest(unittest.TestCase):
         ranking = [scene for scene in deck["scenes"] if scene.get("title") == "Full ranking"][0]
         self.assertEqual(ranking["rows"][0]["cells"][3], "2/3")
 
+    def test_session_mining_intent_deck_summarizes_recipes(self):
+        _, deck = run_tool("session-mining-intent", {
+            "job": "intent-job",
+            "intents_path": ".artifacts/session-mining/job/intents.json",
+            "analysis_path": ".artifacts/session-mining/job/analysis.json",
+            "markdown_path": ".artifacts/session-mining/job/BRIEF.md",
+            "summary_path": ".artifacts/session-mining/job/intent.summary.json",
+            "determinism_counts": {"deterministic": 1, "agent-gated": 1, "irreducible-llm": 0},
+            "grounding": {"valid": 3, "cited": 4, "percent": 75},
+            "tags": {"action": {"fix": 2}, "surface": {"cli": 1}},
+            "clusters": [{"count": 2, "key": "fix failing test"}],
+            "intents": [
+                {
+                    "instance_id": "i1",
+                    "determinism": "agent-gated",
+                    "tags": {"action": ["fix"], "surface": ["cli"]},
+                    "measured": {"tool_calls": 3},
+                    "agent_gates": ["code vs test"],
+                    "recipe": "go test -> edit",
+                }
+            ],
+        })
+        self.assertEqual(deck["meta"]["title"], "Session-Mining Intent Brief")
+        recipes = [scene for scene in deck["scenes"] if scene.get("title") == "Intent recipes"][0]
+        self.assertEqual(recipes["rows"][0]["cells"][:3], ["i1", "agent-gated", "fix"])
+        status = [scene for scene in deck["scenes"] if scene.get("title") == "Intent-mining status"][0]
+        self.assertEqual(status["items"][2]["status"], "next")
+
 
 if __name__ == "__main__":
     unittest.main()
