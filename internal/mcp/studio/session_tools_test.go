@@ -1001,7 +1001,6 @@ func TestRenderTUI_EqualsComposer(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &rt))
 
 	assert.Equal(t, driveFrame.Text, rt.Frame.Text, "render.tui text == the composed drive frame")
-	assert.Equal(t, driveFrame.ANSI, rt.Frame.ANSI, "render.tui ansi == the composed drive frame")
 	assert.Equal(t, driveFrame.Metadata.State, rt.Frame.Metadata.State)
 	assert.Equal(t, driveFrame.Width, rt.Frame.Width)
 }

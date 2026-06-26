@@ -140,6 +140,12 @@ type VisualObserveArgs struct {
 	VisualHandle string `json:"visual_handle"`
 	Cols         int    `json:"cols,omitempty"`
 	Rows         int    `json:"rows,omitempty"`
+	// IncludeSemantic opts into the web/vscode semantic enrichment (route/title/
+	// focused/actions/regions harvested from a live render). It costs an extra
+	// renderer call and inflates the payload, so it is OFF by default; the cheap
+	// structured observation (state, frame preview, allowed-intent actions) is
+	// always returned.
+	IncludeSemantic bool `json:"include_semantic,omitempty"`
 }
 
 // VisualObserveOK is the compact, JSON-only observation intended to be the
@@ -253,27 +259,28 @@ type VisualSnapshotArgs struct {
 
 // VisualSnapshotInfo is serialized into the text block that accompanies the
 // optional MCP image block.
+//
+// The request inputs (region/overlay/scale/query) are intentionally NOT echoed
+// back here — the caller already holds them in its own request, so echoing them
+// only inflates the MCP payload. Result-only metadata (image_id, geometry,
+// sha256, bytes) is kept so a follow-on visual.diff/act can address the image.
 type VisualSnapshotInfo struct {
-	OK           bool              `json:"ok"`
-	VisualHandle string            `json:"visual_handle"`
-	ImageID      string            `json:"image_id,omitempty"`
-	Kind         string            `json:"kind"`
-	Handle       string            `json:"handle"`
-	Region       string            `json:"region,omitempty"`
-	Overlay      string            `json:"overlay,omitempty"`
-	Scale        string            `json:"scale,omitempty"`
-	Format       string            `json:"format,omitempty"`
-	Width        int               `json:"width,omitempty"`
-	Height       int               `json:"height,omitempty"`
-	Original     VisualViewport    `json:"original,omitempty"`
-	CropBBox     *VisualBBox       `json:"crop_bbox,omitempty"`
-	ScaleFactor  float64           `json:"scale_factor,omitempty"`
-	MaxPixels    int               `json:"max_pixels,omitempty"`
-	Visible      []string          `json:"visible_action_handles,omitempty"`
-	Bytes        int               `json:"bytes,omitempty"`
-	SHA256       string            `json:"sha256,omitempty"`
-	Query        map[string]string `json:"query,omitempty"`
-	Semantic     map[string]any    `json:"semantic,omitempty"`
+	OK           bool           `json:"ok"`
+	VisualHandle string         `json:"visual_handle"`
+	ImageID      string         `json:"image_id,omitempty"`
+	Kind         string         `json:"kind"`
+	Handle       string         `json:"handle"`
+	Format       string         `json:"format,omitempty"`
+	Width        int            `json:"width,omitempty"`
+	Height       int            `json:"height,omitempty"`
+	Original     VisualViewport `json:"original,omitempty"`
+	CropBBox     *VisualBBox    `json:"crop_bbox,omitempty"`
+	ScaleFactor  float64        `json:"scale_factor,omitempty"`
+	MaxPixels    int            `json:"max_pixels,omitempty"`
+	Visible      []string       `json:"visible_action_handles,omitempty"`
+	Bytes        int            `json:"bytes,omitempty"`
+	SHA256       string         `json:"sha256,omitempty"`
+	Semantic     map[string]any `json:"semantic,omitempty"`
 }
 
 // VisualActArgs is the input to visual.act.
@@ -396,7 +403,7 @@ func (srv *Server) registerVisualTools() {
 	}, srv.handleVisualOpen)
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "visual.observe",
-		Description: "Return the cheap structured observation for a visual handle: state, compact frame preview, candidate deterministic actions, named regions, and whether a PNG snapshot is available. JSON only; use visual.snapshot for pixels.",
+		Description: "Return the cheap structured observation for a visual handle: state, compact frame preview, candidate deterministic actions, named regions, and whether a PNG snapshot is available. JSON only; use visual.snapshot for pixels. {visual_handle, cols?, rows?, include_semantic?}: include_semantic=true opts into the web/vscode semantic enrichment (extra render call; default false).",
 	}, srv.handleVisualObserve)
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "visual.snapshot",
@@ -527,7 +534,7 @@ func (srv *Server) handleVisualObserve(
 			Reasons:   []string{"structured state and deterministic actions are available; request visual.snapshot only for layout or ambiguity"},
 		},
 	}
-	if vh.Kind == VisualWeb || vh.Kind == VisualVSCode {
+	if args.IncludeSemantic && (vh.Kind == VisualWeb || vh.Kind == VisualVSCode) {
 		if semantic, errs := srv.visualWebSemantic(ctx, vh); semantic != nil || len(errs) > 0 {
 			applyVisualSemantic(&out, semantic, errs)
 		}
@@ -932,9 +939,6 @@ func (srv *Server) captureGitScene(ctx context.Context, shotResult WebShotResult
 		ImageID:      image.ID,
 		Kind:         string(VisualWeb),
 		Handle:       storyPath,
-		Region:       args.Region,
-		Overlay:      args.Overlay,
-		Scale:        args.Scale,
 		Format:       "png",
 		Width:        image.Width,
 		Height:       image.Height,
@@ -945,7 +949,6 @@ func (srv *Server) captureGitScene(ctx context.Context, shotResult WebShotResult
 		Visible:      visualImageActionHandles(image.Actions),
 		Bytes:        image.Bytes,
 		SHA256:       image.SHA256,
-		Query:        args.Query,
 		Semantic:     semantic,
 	}
 	return image, info, processed.PNG, nil
@@ -1143,9 +1146,6 @@ func (srv *Server) visualWebSnapshot(ctx context.Context, req *mcpsdk.CallToolRe
 			VisualHandle: vh.ID,
 			Kind:         string(vh.Kind),
 			Handle:       vh.Handle,
-			Region:       args.Region,
-			Overlay:      args.Overlay,
-			Scale:        args.Scale,
 		})+"\nvisual.snapshot: web image rendering needs a browser-capable host (none attached)", nil, ""), nil, nil
 	}
 	spec, rerr := srv.webSpec(RenderArgs{Handle: vh.Handle, Query: args.Query, AssertText: args.AssertText})
@@ -1171,9 +1171,6 @@ func (srv *Server) visualWebSnapshot(ctx context.Context, req *mcpsdk.CallToolRe
 		ImageID:      image.ID,
 		Kind:         string(vh.Kind),
 		Handle:       vh.Handle,
-		Region:       args.Region,
-		Overlay:      args.Overlay,
-		Scale:        args.Scale,
 		Format:       nonEmpty(args.Format, "png"),
 		Width:        image.Width,
 		Height:       image.Height,
@@ -1184,7 +1181,6 @@ func (srv *Server) visualWebSnapshot(ctx context.Context, req *mcpsdk.CallToolRe
 		Visible:      visualImageActionHandles(image.Actions),
 		Bytes:        image.Bytes,
 		SHA256:       image.SHA256,
-		Query:        args.Query,
 		Semantic:     semantic,
 	}
 	srv.recordVisualEvent(vh.ID, VisualRecordEvent{
@@ -1263,9 +1259,6 @@ func (srv *Server) visualTUISnapshot(ctx context.Context, req *mcpsdk.CallToolRe
 		VisualHandle: vh.ID,
 		Kind:         string(vh.Kind),
 		Handle:       vh.Handle,
-		Region:       args.Region,
-		Overlay:      args.Overlay,
-		Scale:        args.Scale,
 		Format:       "png",
 	})
 	var pngBytes []byte

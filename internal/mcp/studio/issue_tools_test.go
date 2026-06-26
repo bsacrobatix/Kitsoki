@@ -18,6 +18,7 @@ import (
 	"errors"
 	"image/png"
 	"os"
+	"path/filepath"
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -131,6 +132,17 @@ func TestIssueCreate_BundlesEvidenceAndFiles(t *testing.T) {
 	}
 	assert.Equal(t, out.Labels, filer.got.Labels, "filer got the final labels")
 	assert.Equal(t, "[MCP gap] session.drive cannot do X", filer.got.Title)
+
+	// Token-diet: bulky machine context (full world + full pretty trace) is spilled
+	// to sidecar files under the issue's artifacts dir, linked from the body, not
+	// inlined wholesale.
+	slugDir := filepath.Join(dir, "mcp-gap-session-drive-cannot-do-x")
+	assert.FileExists(t, filepath.Join(slugDir, "trace.json"), "full trace sidecar written")
+	assert.FileExists(t, filepath.Join(slugDir, "world.json"), "full world sidecar written")
+	assert.Contains(t, body, "trace.json", "body links the trace sidecar")
+	assert.Contains(t, body, "world.json", "body links the world sidecar")
+	// The inlined trace stays compact (one JSON object per line, not indented).
+	assert.NotContains(t, body, "\n    \"", "inlined trace is compact, not pretty-printed")
 }
 
 func TestIssueCreate_BundlesStoppedVisualRecording(t *testing.T) {

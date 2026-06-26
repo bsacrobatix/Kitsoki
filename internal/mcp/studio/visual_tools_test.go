@@ -100,7 +100,8 @@ func TestVisualObserve_WebUsesCompactSemanticSidecar(t *testing.T) {
 	visual := openVisual(ctx, t, cs, handle, "web")
 
 	res, err := callTool(ctx, cs, "visual.observe", map[string]any{
-		"visual_handle": visual,
+		"visual_handle":    visual,
+		"include_semantic": true,
 	})
 	require.NoError(t, err)
 	require.False(t, res.IsError, "visual.observe semantic: %s", contentText(res))
@@ -190,8 +191,7 @@ func TestVisualSnapshot_WebUsesStubWebShot(t *testing.T) {
 	assert.NotEmpty(t, info.ImageID)
 	assert.NotEmpty(t, info.SHA256)
 	assert.Equal(t, visual, info.VisualHandle)
-	assert.Equal(t, "chat", info.Region)
-	assert.Equal(t, "action_ids", info.Overlay)
+	// Echoed request inputs (region/overlay) are no longer returned — token diet.
 	assert.Equal(t, len(stubPNG), info.Bytes)
 }
 
@@ -573,7 +573,6 @@ func TestVisualSnapshot_TUIRasterisesFrame(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &info))
 	assert.True(t, info.OK)
 	assert.Equal(t, "tui", info.Kind)
-	assert.Equal(t, "tui", info.Region)
 }
 
 func TestVisualAct_SubmitAdvancesDeterministically(t *testing.T) {

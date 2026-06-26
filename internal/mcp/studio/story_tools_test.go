@@ -151,9 +151,16 @@ func TestStoryGraphMatchesEditor(t *testing.T) {
 	// graph.RoomList (cmd/kitsoki/registry.go EditorApp + editor.go dispatch).
 	def, err := app.Load(filepath.Join(dir, "app.yaml"))
 	require.NoError(t, err)
-	want := graph.RoomList(app.Compile(def))
+	editorRooms := graph.RoomList(app.Compile(def))
 
-	assert.Equal(t, want, got.Rooms, "story.graph rooms must equal the editor's RoomList")
+	// story.graph drops the UI-only Distance field (token diet) but otherwise
+	// returns the editor's exact RoomList in the same order: ID/Label/HasAgent
+	// agree element-for-element.
+	want := make([]studio.RoomSummaryItem, 0, len(editorRooms))
+	for _, r := range editorRooms {
+		want = append(want, studio.RoomSummaryItem{ID: r.ID, Label: r.Label, HasAgent: r.HasAgent})
+	}
+	assert.Equal(t, want, got.Rooms, "story.graph rooms must equal the editor's RoomList (sans Distance)")
 
 	// Sanity: the canonical bugfix rooms are present and idle is the entry (0).
 	assert.Equal(t, "idle", got.Rooms[0].ID, "idle is the initial room")

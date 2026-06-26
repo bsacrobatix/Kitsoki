@@ -396,6 +396,10 @@ func (srv *Server) issueContext(ctx context.Context, args IssueCreateArgs) (stri
 	if rerr != nil {
 		return "", rerr
 	}
+	// Bulky machine context (full world, full trace) is written to a sidecar file
+	// under the issue's artifacts dir; the body embeds only a compact summary so
+	// the GitHub issue (and the MCP result echoing it) stays readable.
+	sidecarDir := filepath.Join(srv.resolveArtifactsDir(), issueSlug(args.Title))
 	var b strings.Builder
 	if args.IncludeInspect {
 		if out, err := rt.inspect(ctx, 5, args.Handle); err == nil {
@@ -403,8 +407,17 @@ func (srv *Server) issueContext(ctx context.Context, args IssueCreateArgs) (stri
 			if len(out.AllowedIntents) > 0 {
 				fmt.Fprintf(&b, "- allowed intents: %s\n", strings.Join(out.AllowedIntents, ", "))
 			}
-			if w, err := json.MarshalIndent(out.World, "", "  "); err == nil {
-				fmt.Fprintf(&b, "- world:\n```json\n%s\n```\n", string(w))
+			// World can be large; write the pretty version to a sidecar and embed a
+			// compact one-liner (with a key count) in the body.
+			if w, err := json.Marshal(out.World); err == nil {
+				if pretty, perr := json.MarshalIndent(out.World, "", "  "); perr == nil {
+					if path, werr := writeIssueSidecar(sidecarDir, "world.json", pretty); werr == nil {
+						fmt.Fprintf(&b, "- world (%d keys, full: [%s](%s)):\n```json\n%s\n```\n",
+							len(out.World), filepath.Base(path), path, string(w))
+					} else {
+						fmt.Fprintf(&b, "- world (%d keys):\n```json\n%s\n```\n", len(out.World), string(w))
+					}
+				}
 			}
 		}
 	}
@@ -417,7 +430,22 @@ func (srv *Server) issueContext(ctx context.Context, args IssueCreateArgs) (stri
 		if len(events) > limit {
 			events = events[len(events)-limit:]
 		}
-		fmt.Fprintf(&b, "\n## Trace (last %d events)\n```\n", len(events))
+		// Full pretty trace → sidecar; body gets a compact one-line-per-event view.
+		var full bytes.Buffer
+		full.WriteByte('[')
+		for i, ev := range events {
+			if i > 0 {
+				full.WriteByte(',')
+			}
+			line, _ := json.MarshalIndent(ev, "", "  ")
+			full.Write(line)
+		}
+		full.WriteByte(']')
+		sidecarRef := ""
+		if path, werr := writeIssueSidecar(sidecarDir, "trace.json", full.Bytes()); werr == nil {
+			sidecarRef = fmt.Sprintf(" (full: [%s](%s))", filepath.Base(path), path)
+		}
+		fmt.Fprintf(&b, "\n## Trace (last %d events)%s\n```\n", len(events), sidecarRef)
 		for _, ev := range events {
 			line, _ := json.Marshal(ev)
 			b.Write(line)
@@ -426,6 +454,19 @@ func (srv *Server) issueContext(ctx context.Context, args IssueCreateArgs) (stri
 		b.WriteString("```\n")
 	}
 	return b.String(), nil
+}
+
+// writeIssueSidecar writes machine context too bulky for the issue body to a
+// file under the issue's artifacts dir, returning its path for a link.
+func writeIssueSidecar(dir, name string, data []byte) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // composeIssueBody assembles the final issue body: the agent's narrative, then

@@ -116,7 +116,7 @@ func (srv *Server) registerSessionTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.trace",
-		Description: "Read the handle's JSONL trace events. {handle, since?, until?, limit?, truncate_payload?, kinds?} → {events[], last_turn}. since/until filter by turn number; limit keeps the last N; truncate_payload:N caps each event payload to N chars; kinds filters to specific event kinds. Read-only.",
+		Description: "Read the handle's JSONL trace events. {handle, since?, until?, limit?, truncate_payload?, kinds?} → {events[], last_turn}. since/until filter by turn number; limit keeps the last N; truncate_payload:N caps each event payload to N chars (defaults to 500 when unset; pass 0 to disable); kinds filters to specific event kinds. Read-only.",
 	}, srv.handleSessionTrace)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
@@ -225,7 +225,7 @@ type SessionCommandArgs struct {
 // slots — so the agent can reason on metadata without re-parsing the screen.
 type TurnResult struct {
 	Mode           string         `json:"mode"`                      // transitioned|clarify|rejected|completed|offpath|cancelled
-	State          string         `json:"state"`                     // the state after the turn
+	State          string         `json:"state,omitempty"`           // the state after the turn (also in frame.metadata.state)
 	AllowedIntents []string       `json:"allowed_intents,omitempty"` // the next menu
 	SlotsNeeded    []SlotNeedItem `json:"slots_needed,omitempty"`    // missing required slots (ModeClarify)
 	PendingIntent  string         `json:"pending_intent,omitempty"`  // intent awaiting slot completion
@@ -233,7 +233,7 @@ type TurnResult struct {
 	ErrorMessage   string         `json:"error_message,omitempty"`   // human-readable rejection
 	GuardHint      string         `json:"guard_hint,omitempty"`      // author guard hint (ModeRejected)
 	HarnessError   string         `json:"harness_error,omitempty"`   // dispatch-loop failure, if any
-	TurnNumber     int64          `json:"turn_number"`               // the turn that just completed
+	TurnNumber     int64          `json:"turn_number,omitempty"`     // the turn that just completed
 	// Error is set when the turn itself failed (e.g. a replay miss). It is NOT a
 	// transport error — it rides back here so the agent sees the failure and the
 	// frame together. Mode is "error" in that case.
@@ -254,7 +254,6 @@ type SlotNeedItem struct {
 // return the identical screen the CLI does.
 type FrameResult struct {
 	Text     string        `json:"text"`
-	ANSI     string        `json:"ansi"`
 	Width    int           `json:"width"`
 	Height   int           `json:"height"`
 	Metadata FrameMetaItem `json:"metadata"`
@@ -590,7 +589,7 @@ type InspectResult struct {
 	World             map[string]any         `json:"world,omitempty"`
 	AllowedIntents    []string               `json:"allowed_intents"`
 	LastView          string                 `json:"last_view"`
-	Async             AsyncInspectSummary    `json:"async"`
+	Async             *AsyncInspectSummary   `json:"async,omitempty"`
 	Jobs              []JobInspectItem       `json:"jobs,omitempty"`
 	Notifications     []InboxInspectItem     `json:"notifications,omitempty"`
 	PendingDrives     []PendingDriveItem     `json:"pending_drives,omitempty"`
@@ -850,8 +849,9 @@ type SessionTraceArgs struct {
 	// Limit keeps only the last N matching events (0 = all).
 	Limit int `json:"limit,omitempty"`
 	// TruncatePayload caps each event's raw JSON payload to N bytes (appending
-	// "…" when truncated). Zero means no truncation.
-	TruncatePayload int `json:"truncate_payload,omitempty"`
+	// "…" when truncated). Unset defaults to 500 (raw payloads are token-heavy
+	// and rarely needed in full); pass an explicit 0 to opt out of truncation.
+	TruncatePayload *int `json:"truncate_payload,omitempty"`
 	// Kinds filters to events whose Kind is in this list. Empty means all kinds.
 	Kinds []string `json:"kinds,omitempty"`
 }
@@ -882,6 +882,11 @@ func (srv *Server) handleSessionTrace(
 			kindSet[k] = true
 		}
 	}
+	// Default truncation to 500 bytes when unset; an explicit 0 opts out.
+	truncatePayload := 500
+	if args.TruncatePayload != nil {
+		truncatePayload = *args.TruncatePayload
+	}
 	var filtered []store.Event
 	var lastTurn int64
 	for _, ev := range history {
@@ -898,10 +903,10 @@ func (srv *Server) handleSessionTrace(
 		if kindSet != nil && !kindSet[string(ev.Kind)] {
 			continue
 		}
-		if args.TruncatePayload > 0 && len(ev.Payload) > args.TruncatePayload {
+		if truncatePayload > 0 && len(ev.Payload) > truncatePayload {
 			// Encode the truncated portion as a valid JSON string (not a raw JSON
 			// fragment) so the result is always valid JSON when marshalled.
-			truncated := string(ev.Payload[:args.TruncatePayload]) + "…"
+			truncated := string(ev.Payload[:truncatePayload]) + "…"
 			encoded, merr := json.Marshal(truncated)
 			if merr == nil {
 				trunc := ev
@@ -1196,7 +1201,6 @@ func turnResponse(out *orchestrator.TurnOutcome, frame tui.Frame, turnErr error)
 func frameResult(f tui.Frame) FrameResult {
 	return FrameResult{
 		Text:   f.Text,
-		ANSI:   f.ANSI,
 		Width:  f.Width,
 		Height: f.Height,
 		Metadata: FrameMetaItem{
@@ -1323,7 +1327,7 @@ func (rt *sessionRuntime) inspect(ctx context.Context, lastTurns int, handle str
 		World:             j.World.Vars,
 		AllowedIntents:    allowedNames,
 		LastView:          view,
-		Async:             summarizeAsync(jobs, notifications, unreadNotifications, pendingDrives, backgroundedChats, operatorQuestions, miningProposals),
+		Async:             asyncSummaryOrNil(summarizeAsync(jobs, notifications, unreadNotifications, pendingDrives, backgroundedChats, operatorQuestions, miningProposals)),
 		Jobs:              jobs,
 		Notifications:     notifications,
 		PendingDrives:     pendingDrives,
@@ -1551,6 +1555,15 @@ func summarizeAsync(jobRows []JobInspectItem, notifications []InboxInspectItem, 
 		}
 	}
 	return out
+}
+
+// asyncSummaryOrNil returns a pointer to the summary, or nil when every count is
+// zero, so session.inspect omits the async block entirely when there's no work.
+func asyncSummaryOrNil(s AsyncInspectSummary) *AsyncInspectSummary {
+	if s == (AsyncInspectSummary{}) {
+		return nil
+	}
+	return &s
 }
 
 func pendingMiningProposals(handle string, history store.History) []MiningProposalItem {
