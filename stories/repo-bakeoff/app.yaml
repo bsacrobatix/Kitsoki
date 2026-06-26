@@ -22,7 +22,8 @@
 #   running    ORCHESTRATION STUB. The cost-bearing per-cell drive
 #              (external/drive_cell.sh --candidate <m> --score) is run MANUALLY,
 #              never in CI/auto (AGENTS.md no-LLM rule). Tracks the roster.
-#   scoring    deterministic: read the per-cell verdicts the harness wrote
+#   scoring    deterministic: run `bench.py completion` for an explicit evidence
+#              verdict, then read the per-cell verdicts the harness wrote
 #              (results/cells/*.json) into a summary. host.run, free.
 #   reporting  deterministic: present the generated markdown report + slidey
 #              deck spec from the summary.
@@ -79,6 +80,9 @@ world:
   # ── Scoring outputs ──────────────────────────────────────────────────────────
   summary:      { type: object, default: {} }
   summary_path: { type: string, default: "" }
+  completion:   { type: object, default: {} }
+  completion_status: { type: string, default: "" }
+  completion_markdown: { type: string, default: "" }
 
   # ── Report / deck ────────────────────────────────────────────────────────────
   deck:           { type: object, default: { spec_path: "stories/repo-bakeoff/baked/deck.json", summary: "External-repo bake-off report." } }

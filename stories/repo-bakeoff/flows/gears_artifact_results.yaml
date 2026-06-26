@@ -87,6 +87,36 @@ host_handlers:
               - bug: bug1
                 candidate: opus-4.8
                 command: "tools/bugfix-bakeoff/external/drive_cell.sh --project gears-rust --bug bug1 --candidate opus-4.8 --repo-dir /Users/brad/code/gears-rust --score"
+      completion_local:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            ok: true
+            project: gears-rust
+            status: complete
+            checks:
+              preflight_ok: true
+              arming_verified: true
+              no_cost_ready: true
+              ready_to_drive: true
+              result_evidence_complete: true
+              live_scored: true
+            results:
+              selected_cells: 1
+              prepared_cells: 1
+              unprepared_cells: 0
+              stale_prepared_cells: 0
+              result_cells: 1
+              missing_cells: 0
+              stale_result_cells: 0
+              attempted_cells: 1
+              pending_cells: 0
+              solved_cells: 1
+              partial_cells: 0
+              failed_cells: 0
+            blockers: []
+            markdown: .artifacts/external-bakeoff/report/completion.md
       summarize:
         data:
           ok: true
@@ -195,6 +225,34 @@ turns:
   - intent: { name: accept, slots: {} }
     expect_state: reporting
     expect_world:
+      completion_status: complete
+      completion_markdown: .artifacts/external-bakeoff/report/completion.md
+      completion:
+        ok: true
+        project: gears-rust
+        status: complete
+        checks:
+          preflight_ok: true
+          arming_verified: true
+          no_cost_ready: true
+          ready_to_drive: true
+          result_evidence_complete: true
+          live_scored: true
+        results:
+          selected_cells: 1
+          prepared_cells: 1
+          unprepared_cells: 0
+          stale_prepared_cells: 0
+          result_cells: 1
+          missing_cells: 0
+          stale_result_cells: 0
+          attempted_cells: 1
+          pending_cells: 0
+          solved_cells: 1
+          partial_cells: 0
+          failed_cells: 0
+        blockers: []
+        markdown: .artifacts/external-bakeoff/report/completion.md
       summary_path: .artifacts/external-bakeoff/results/summary.json
       deck:
         spec_path: .artifacts/external-bakeoff/report/deck.slidey.json

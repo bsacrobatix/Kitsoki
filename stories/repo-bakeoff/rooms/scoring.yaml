@@ -1,23 +1,81 @@
-# scoring — DETERMINISTIC (no LLM). Roll up the per-cell verdicts the harness
-# wrote (world.results_dir/cells/*.json) into a by-candidate summary via host.run →
-# `bench.py summarize` (free). It fails when no scored cell JSON exists, routing
-# back to running instead of producing a misleading 0-cell report. We call the
-# script; we never reimplement scoring. `once: true` keyed on summary →
+# scoring — DETERMINISTIC (no LLM). First run `bench.py completion` so the
+# operator sees whether the matrix is ready-to-drive, complete-with-pending, or
+# live-scored. Then roll up the per-cell verdicts the harness wrote
+# (world.results_dir/cells/*.json) into a by-candidate summary via host.run →
+# `bench.py summarize` (free). If no cell JSON exists, summarize routes back to
+# running instead of producing a misleading 0-cell report. We call the scripts;
+# we never reimplement scoring. `once: true` keyed on summary/completion →
 # reload-safe.
 states:
   scoring:
-    description: "Rolling up the cell verdicts into a summary (host.run → bench.py summarize)."
-    relevant_world: [summary, summary_path, harness_dir, results_dir, report_dir, deck]
+    description: "Checking completion evidence and rolling cell verdicts into a summary."
+    relevant_world: [completion, completion_status, completion_markdown, summary, summary_path, harness_dir, results_dir, report_dir, deck]
     view:
       - heading: "Bake-off · scoring"
       - kv:
           pairs:
+            Completion: '{{ world.completion_status|default:"(checking…)" }}'
+            Completion report: '{{ world.completion_markdown|default:"(not generated)" }}'
             Summary: '{{ world.summary_path|default:"(summarizing…)" }}'
             Results: '{{ world.results_dir }}'
             Report:  '{{ world.report_dir }}'
             Cells:   "{{ world.summary.cells|length }}"
-      - prose: "bench.py summarize rolls the per-cell verdicts from the live-driver artifact directory up by candidate and writes a project-specific Markdown report plus Slidey deck spec. If no scored cell JSON exists yet, scoring returns to running so the report cannot claim a 0-cell result. Deterministic — no LLM."
+      - prose: "bench.py completion first records whether the selected matrix has current result evidence and whether it is live-scored or pending-only. bench.py summarize then rolls the per-cell verdicts from the live-driver artifact directory up by candidate and writes a project-specific Markdown report plus Slidey deck spec. If no scored cell JSON exists yet, scoring returns to running so the report cannot claim a 0-cell result. Deterministic — no LLM."
     on_enter:
+      - when: "world.repo_dir == ''"
+        invoke: host.run
+        id: completion
+        once: true
+        with:
+          cmd: python3
+          args:
+            - "bench.py"
+            - "completion"
+            - "--project"
+            - "{{ world.project }}"
+            - "--bug"
+            - "{{ join(world.bugs, ',') }}"
+            - "--candidate"
+            - "{{ join(world.candidates, ',') }}"
+            - "--results"
+            - "{{ world.results_dir }}"
+            - "--armed"
+            - "--markdown"
+            - "{{ world.report_dir }}/completion.md"
+          cwd: "{{ world.harness_dir }}"
+        bind:
+          completion: stdout_json
+          completion_status: stdout_json.status
+          completion_markdown: stdout_json.markdown
+        on_error: running
+      - when: "world.repo_dir != ''"
+        invoke: host.run
+        id: completion_local
+        once: true
+        with:
+          cmd: python3
+          args:
+            - "bench.py"
+            - "completion"
+            - "--project"
+            - "{{ world.project }}"
+            - "--bug"
+            - "{{ join(world.bugs, ',') }}"
+            - "--candidate"
+            - "{{ join(world.candidates, ',') }}"
+            - "--repo-dir"
+            - "{{ world.repo_dir }}"
+            - "--results"
+            - "{{ world.results_dir }}"
+            - "--armed"
+            - "--markdown"
+            - "{{ world.report_dir }}/completion.md"
+          cwd: "{{ world.harness_dir }}"
+        bind:
+          completion: stdout_json
+          completion_status: stdout_json.status
+          completion_markdown: stdout_json.markdown
+        on_error: running
       - invoke: host.run
         id: summarize
         once: true
