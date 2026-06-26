@@ -953,6 +953,7 @@ def validate_story_driver_contract_bindings(issues: list[dict]) -> None:
         return
     missing_contract_binds = []
     missing_next_capture_binds = []
+    missing_next_attach_binds = []
     for path in sorted(rooms_dir.glob("*.yaml")):
         lines = path.read_text(encoding="utf-8").splitlines()
         in_bind = False
@@ -980,6 +981,11 @@ def validate_story_driver_contract_bindings(issues: list[dict]) -> None:
                     and 'next_driver_capture: "stdout_json.next_driver_capture"' not in block
                 ):
                     missing_next_capture_binds.append(f"{path.relative_to(ROOT)}:{bind_start}")
+                if (
+                    'next_driver_capture: "stdout_json.next_driver_capture"' in block
+                    and 'next_driver_attach_command: "stdout_json.next_driver_attach_command"' not in block
+                ):
+                    missing_next_attach_binds.append(f"{path.relative_to(ROOT)}:{bind_start}")
                 in_bind = False
             if in_bind:
                 bind_lines.append(line)
@@ -995,6 +1001,11 @@ def validate_story_driver_contract_bindings(issues: list[dict]) -> None:
                 and 'next_driver_capture: "stdout_json.next_driver_capture"' not in block
             ):
                 missing_next_capture_binds.append(f"{path.relative_to(ROOT)}:{bind_start}")
+            if (
+                'next_driver_capture: "stdout_json.next_driver_capture"' in block
+                and 'next_driver_attach_command: "stdout_json.next_driver_attach_command"' not in block
+            ):
+                missing_next_attach_binds.append(f"{path.relative_to(ROOT)}:{bind_start}")
     if missing_contract_binds:
         add_corpus_issue(
             issues,
@@ -1010,6 +1021,14 @@ def validate_story_driver_contract_bindings(issues: list[dict]) -> None:
             "story-next-driver-capture-bindings",
             "Run-result story binds must preserve next_driver_capture with driver_contract_summary",
             ", ".join(missing_next_capture_binds),
+        )
+    if missing_next_attach_binds:
+        add_corpus_issue(
+            issues,
+            "error",
+            "story-next-driver-attach-bindings",
+            "Run-result story binds must preserve next_driver_attach_command with next_driver_capture",
+            ", ".join(missing_next_attach_binds),
         )
 
 
@@ -2099,9 +2118,11 @@ def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: 
             f"Drive product journey QA for run_dir={run_dir_arg}. Open or attach "
             "stories/product-journey-qa/app.yaml, submit "
             f"`load run_dir={run_dir_arg}`, then inspect story world `last_result.driver_scenarios`, "
-            "`last_result.next_driver_capture`, `last_result.missing_proof_evidence`, and "
-            "`last_result.driver_final_gates`. Use Kitsoki Studio MCP and visual MCP "
-            "to capture proof-source evidence or blockers, record findings, then run review and validation."
+            "`last_result.next_driver_capture`, `last_result.next_driver_attach_command`, "
+            "`last_result.missing_proof_evidence`, and `last_result.driver_final_gates`. "
+            "Use `last_result.next_driver_attach_command` for the first proof attach when present, "
+            "then use Kitsoki Studio MCP and visual MCP to capture proof-source evidence or blockers, "
+            "record findings, then run review and validation."
         ),
         "finalize_commands": [
             f"python3 tools/product-journey/run.py --review-run --run-dir {run_dir_arg}",
@@ -2453,13 +2474,23 @@ def build_driver_contract_summary(driver_plan: dict, handoff: dict) -> str:
     )
 
 
-def build_next_driver_capture(handoff: dict) -> str:
+def next_driver_capture_slot(handoff: dict) -> dict:
     for row in handoff.get("missing_proof_evidence", []):
         scenario = row.get("scenario", "")
         slots = row.get("slots", [])
         if not scenario or not slots:
             continue
         slot = slots[0]
+        kind = slot.get("kind", "")
+        if kind:
+            return {"scenario": scenario, **slot}
+    return {}
+
+
+def build_next_driver_capture(handoff: dict) -> str:
+    slot = next_driver_capture_slot(handoff)
+    if slot:
+        scenario = slot.get("scenario", "")
         kind = slot.get("kind", "")
         hint = slot.get("capture_hint", "")
         if kind:
@@ -2517,6 +2548,7 @@ def summarize_run_bundle(run_dir: Path) -> dict:
         "missing_proof_evidence": missing_proof_evidence,
         "driver_contract_summary": driver_contract_summary,
         "next_driver_capture": build_next_driver_capture(handoff),
+        "next_driver_attach_command": next_driver_capture_slot(handoff).get("attach_command", ""),
         "suggested_prompt": handoff.get("suggested_prompt", ""),
     } | run_story_summary(run_dir)
 
@@ -2563,6 +2595,7 @@ def run_story_summary(run_dir: Path) -> dict:
         "missing_proof_summary": "; ".join(missing_proof_summary),
         "driver_contract_summary": build_driver_contract_summary(driver_plan, handoff) if driver_plan else "",
         "next_driver_capture": build_next_driver_capture(handoff),
+        "next_driver_attach_command": next_driver_capture_slot(handoff).get("attach_command", ""),
         "review_passed_count": review.get("summary_counts", {}).get("passed", 0),
         "review_failed_count": review.get("summary_counts", {}).get("failed", 0),
         "review_warning_count": review.get("summary_counts", {}).get("warned", 0),
@@ -3692,8 +3725,12 @@ def validate_run_bundle(run_dir: Path) -> dict:
             add_validation_issue(issues, "error", "driver-handoff-final-gates", "driver-handoff.json finalize commands do not match driver-plan final gates")
         if not driver_handoff.get("suggested_prompt", "").strip():
             add_validation_issue(issues, "error", "driver-handoff-prompt", "driver-handoff.json suggested_prompt is empty")
-        elif "last_result.next_driver_capture" not in driver_handoff.get("suggested_prompt", ""):
-            add_validation_issue(issues, "error", "driver-handoff-prompt", "driver-handoff.json suggested_prompt does not mention next_driver_capture")
+        else:
+            handoff_prompt = driver_handoff.get("suggested_prompt", "")
+            if "last_result.next_driver_capture" not in handoff_prompt:
+                add_validation_issue(issues, "error", "driver-handoff-prompt", "driver-handoff.json suggested_prompt does not mention next_driver_capture")
+            if "last_result.next_driver_attach_command" not in handoff_prompt:
+                add_validation_issue(issues, "error", "driver-handoff-prompt", "driver-handoff.json suggested_prompt does not mention next_driver_attach_command")
 
     if run_json and driver_plan and driver_handoff:
         summary = summarize_run_bundle(run_dir)
@@ -3702,6 +3739,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
         summary_final_gates = summary.get("driver_final_gates", [])
         summary_contract = summary.get("driver_contract_summary", "")
         summary_next_capture = summary.get("next_driver_capture", "")
+        summary_next_attach_command = summary.get("next_driver_attach_command", "")
         if len(summary_scenarios) != len(driver_scenarios):
             add_validation_issue(
                 issues,
@@ -3741,6 +3779,15 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 "loaded-driver-next-capture",
                 "summarize-run next_driver_capture does not match driver-handoff.json",
                 f"expected={expected_next_capture}, actual={summary_next_capture}",
+            )
+        expected_next_attach_command = next_driver_capture_slot(driver_handoff).get("attach_command", "")
+        if summary_next_attach_command != expected_next_attach_command:
+            add_validation_issue(
+                issues,
+                "error",
+                "loaded-driver-next-attach-command",
+                "summarize-run next_driver_attach_command does not match driver-handoff.json",
+                f"expected={expected_next_attach_command}, actual={summary_next_attach_command}",
             )
         missing_summary_tokens = [
             token for token in [

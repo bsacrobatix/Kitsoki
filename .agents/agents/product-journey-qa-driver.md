@@ -28,9 +28,10 @@ brief text to recover the scenario order. With MCP-only tools, open
 trying to attach evidence, record findings, or run gates. Then read the story
 world `last_result.driver_scenarios`, `last_result.missing_proof_evidence`, and
 `last_result.driver_final_gates`; those are the MCP-visible copy of the bundle
-contract. Use `last_result.next_driver_capture` as the first proof slot to
-attempt when it is present, then continue through `missing_proof_evidence`. Do
-not invent missing scenario contracts. If the bundle is missing the
+contract. Use `last_result.next_driver_capture` to identify the first proof slot
+and `last_result.next_driver_attach_command` as the first attach command when it
+is present, then continue through `missing_proof_evidence`. Do not invent
+missing scenario contracts. If the bundle is missing the
 brief/plan/evidence contract, record that as a blocker finding through the
 product-journey story if a story session exists.
 

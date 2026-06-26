@@ -171,6 +171,10 @@ quality gates are still unsatisfied. Each missing proof row includes slot-level
 capture hints plus ready-to-fill `--attach-evidence` commands, so the driver can
 work directly from the handoff instead of reverse-engineering commands from the
 generic evidence list.
+When the run is loaded through `stories/product-journey-qa/app.yaml`, the story
+also exposes `last_result.next_driver_capture` and
+`last_result.next_driver_attach_command` so a reusable driver can start with the
+first missing proof slot without reopening the markdown handoff.
 Each scenario also carries a `quality_gate` with `minimum_evidence`,
 `done_when`, and `block_if` rules. Live/cassette drivers should satisfy that
 gate before calling a scenario done, or record a blocker tied to the matching
