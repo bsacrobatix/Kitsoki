@@ -82,6 +82,10 @@ It should say:
 - `Arming: verified`
 - selected cells equal the intended matrix size
 - missing cells equal the live cells that still need model attempts
+- prepared cells equal the no-drive handoffs already written
+- unprepared cells are selected cells without handoff metadata yet; run the
+  listed `drive_cell.sh --no-drive` commands if you want every live cell
+  inspectable before spend
 
 ## 4. Rehearse Blocked-Provider Reporting
 

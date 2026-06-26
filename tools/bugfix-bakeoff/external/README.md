@@ -175,6 +175,10 @@ machine-readable handoff with the worktree, branch, trace, prompt, preflight,
 and future score-result paths. By default, `history-smoke` prepares the first
 selected cell; set `HISTORY_PREPARE_ALL_CELLS=1` to prepare the full selected
 matrix, or `HISTORY_PREPARE_FIRST_CELL=0` to skip preparation.
+The readiness report separates missing scored results from handoff prep:
+`Missing cells` still need `drive_cell.sh --score` or an honest `pending`
+record, while `Unprepared cells` only need `drive_cell.sh --no-drive` if you
+want their prompt/worktree/trace metadata reviewed before spend.
 
 For the full gears-rust reference corpus, run:
 
