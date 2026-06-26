@@ -176,6 +176,19 @@ def test_drive_plan_renders_exact_matrix_commands():
 def test_pending_cell_rolls_up_separately_from_failures():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
+        candidates = root / "candidates.yaml"
+        candidates.write_text(
+            "candidates:\n"
+            "  - key: cheap\n"
+            "    profile: cheap-profile\n"
+        )
+        (root / ".kitsoki.yaml").write_text(
+            "harness_profiles:\n"
+            "  cheap-profile:\n"
+            "    backend: replay\n"
+        )
+        (root / "oracles").mkdir()
+        (root / "oracles" / "bug1").write_text("oracle")
         manifest = {
             "project": {"id": "demo"},
             "bugs": [{"id": "bug1", "baseline_sha": "abc", "oracle_test": "oracles/bug1"}],
@@ -204,6 +217,31 @@ def test_pending_cell_rolls_up_separately_from_failures():
         assert "demo bake-off: 0/0 attempted solved; 1 pending" in text
         assert "| cheap | 1 | 0 | 0 | 0 | 1 | 0% |" in text
         assert "| bug1 | cheap | pending | pending |" in text
+
+        completion_out = io.StringIO()
+        old_root = bench.REPO_ROOT
+        bench.REPO_ROOT = root
+        try:
+            with redirect_stdout(completion_out):
+                rc = bench.completion(
+                    manifest,
+                    candidate="cheap",
+                    candidates_path=str(candidates),
+                    bug_ids="bug1",
+                    results_dir=rel,
+                    armed=True,
+                )
+        finally:
+            bench.REPO_ROOT = old_root
+        assert rc == 0
+        completion = json_load(completion_out.getvalue())
+        assert completion["ok"] is True
+        assert completion["status"] == "complete-with-pending"
+        assert completion["checks"]["result_evidence_complete"] is True
+        assert completion["checks"]["live_scored"] is False
+        assert completion["results"]["pending_cells"] == 1
+        assert completion["results"]["attempted_cells"] == 0
+        assert any("pending" in b for b in completion["blockers"])
 
 
 def test_readiness_reports_missing_and_scored_cells():

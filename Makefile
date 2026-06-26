@@ -366,9 +366,14 @@ history-pending-smoke:
 		python3 tools/bugfix-bakeoff/external/bench.py pending --project "$(HISTORY_PROJECT)" --bug "$$first_bug" --candidate "$$first_candidate" --reason "$(HISTORY_PENDING_REASON)" --out "$$cell"; \
 		rel="$$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], os.path.join(os.getcwd(), "tools/bugfix-bakeoff/external")))' "$$tmp/results")"; \
 		python3 tools/bugfix-bakeoff/external/bench.py summarize --project "$(HISTORY_PROJECT)" --results "$$rel" --deck "$$tmp/deck.slidey.json" --markdown "$$tmp/report.md"; \
+		if [ -n "$(HISTORY_REPO_DIR)" ]; then repo_arg="--repo-dir $(HISTORY_REPO_DIR)"; else repo_arg=""; fi; \
+		python3 tools/bugfix-bakeoff/external/bench.py completion --project "$(HISTORY_PROJECT)" --bug "$$first_bug" $$repo_arg --candidate "$$first_candidate" --results "$$rel" --armed --markdown "$$tmp/completion.md" > "$$tmp/completion.json"; \
+		python3 -c 'import json, sys; data = json.load(open(sys.argv[1])); checks = data["checks"]; results = data["results"]; assert data["status"] == "complete-with-pending", data; assert checks["result_evidence_complete"], data; assert not checks["live_scored"], data; assert results["pending_cells"] == 1, data; assert results["attempted_cells"] == 0, data' "$$tmp/completion.json"; \
 		python3 -m json.tool "$$tmp/deck.slidey.json" >/dev/null; \
 		echo "pending smoke report: $$tmp/report.md"; \
-		sed -n '1,120p' "$$tmp/report.md"
+		sed -n '1,120p' "$$tmp/report.md"; \
+		echo "pending completion: $$tmp/completion.md"; \
+		sed -n '1,80p' "$$tmp/completion.md"
 
 # gears-history-smoke is the reference private/heavy repo wrapper around the
 # generic history-smoke target. Override the bug/candidate matrix to match the
@@ -388,7 +393,7 @@ gears-history-smoke:
 gears-history-full-smoke:
 	@test -n "$(GEARS_RUST_REPO)" || (echo "GEARS_RUST_REPO must point at a local gears-rust checkout"; exit 1)
 	$(MAKE) history-smoke HISTORY_PROJECT=gears-rust HISTORY_REPO_DIR="$(GEARS_RUST_REPO)" HISTORY_BUGS="bug1,bug4,bug5,bug9" HISTORY_CANDIDATES="$(GEARS_HISTORY_CANDIDATES)" HISTORY_PREPARE_ALL_CELLS=1
-	$(MAKE) history-pending-smoke HISTORY_PROJECT=gears-rust HISTORY_BUGS="bug1,bug4,bug5,bug9" HISTORY_CANDIDATES="$(GEARS_HISTORY_CANDIDATES)" HISTORY_PENDING_REASON="provider/profile blocked before model attempt"
+	$(MAKE) history-pending-smoke HISTORY_PROJECT=gears-rust HISTORY_REPO_DIR="$(GEARS_RUST_REPO)" HISTORY_BUGS="bug1,bug4,bug5,bug9" HISTORY_CANDIDATES="$(GEARS_HISTORY_CANDIDATES)" HISTORY_PENDING_REASON="provider/profile blocked before model attempt"
 
 # cost-report builds the per-story cost-savings report (the reusable form of
 # docs/case-studies/git-ops-cost.md): the deterministic story cost (agent spend

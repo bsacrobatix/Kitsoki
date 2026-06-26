@@ -220,7 +220,9 @@ That uses the same generic smoke over the four armable fixtures
 that every selected cell has fresh prepared metadata and that stale/unprepared
 handoffs are zero. It then runs `history-pending-smoke`, which validates the
 deterministic Markdown + Slidey JSON report path from a pre-attempt pending
-result without touching the normal live results directory.
+result without touching the normal live results directory. That pending smoke
+also runs `bench.py completion` against the temp result and asserts that pending
+completes result evidence without becoming a live scored capability result.
 
 To regenerate that readiness report without rerunning RED/GREEN arming, call the
 harness directly. This is useful after adding scored or pending cell JSON:

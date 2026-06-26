@@ -190,6 +190,8 @@ make history-pending-smoke \
 ```
 
 This proves a pending cell rolls up into Markdown + Slidey JSON as `pending`.
+It also proves the completion verdict treats the pending result as complete
+evidence for accounting while still saying `Live scored capability result: no`.
 Use it only when no real model attempt happened; score real candidate worktrees
 with `drive_cell.sh --score`.
 The full gears smoke runs this rehearsal after the full readiness gate, so one

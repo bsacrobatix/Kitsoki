@@ -146,8 +146,10 @@ make history-pending-smoke \
 ```
 
 This writes a pending cell to a temp directory, summarizes it, and validates the
-generated Markdown + Slidey JSON. Use this only for pre-attempt blockers. If a
-model produced a candidate worktree, score that worktree instead.
+generated Markdown + Slidey JSON. It also runs `bench.py completion` against
+that temp result and asserts `Result evidence complete: yes` while
+`Live scored capability result: no`. Use this only for pre-attempt blockers. If
+a model produced a candidate worktree, score that worktree instead.
 For a reference repo wrapper, include this rehearsal in the full no-cost smoke
 after readiness so one command proves both the live-cell handoff path and the
 report/deck fallback.
