@@ -15,7 +15,13 @@ host_handlers:
         data: { exit_code: 1, ok: false, stdout: "--- FAIL: TestAmbiguous\nFAIL\n" }
         delay: "10ms"
       write_report:
-        data: { exit_code: 0, ok: true, stdout: ".artifacts/fix-tests/report-blocked.md" }
+        data:
+          exit_code: 0
+          ok: true
+          stdout_json:
+            report_path: ".artifacts/fix-tests/blocked/report.md"
+            summary_path: ".artifacts/fix-tests/blocked/summary.json"
+            deck_path: ".artifacts/fix-tests/blocked/deck.slidey.json"
   host.agent.task:
     by_call:
       fix:
@@ -40,6 +46,7 @@ turns:
     expect_world:
       outcome:     "blocked"
       cycle:       1
-      report_path: ".artifacts/fix-tests/report-blocked.md"
+      report_path: ".artifacts/fix-tests/blocked/report.md"
+      report_deck_path: ".artifacts/fix-tests/blocked/deck.slidey.json"
 
 expect_no_errors: true

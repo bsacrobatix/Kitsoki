@@ -559,6 +559,56 @@ def bug_report(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str
     return title_deck(title, data.get("summary", "Deterministic bug report deck"), scenes), refs
 
 
+def fix_tests(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    outcome = data.get("outcome", "unknown")
+    artifact = data.get("fix_artifact") or {}
+    tests_passed = bool(data.get("tests_passed"))
+    cycle = data.get("cycle", 0)
+    max_cycles = data.get("max_cycles", 0)
+    test_log = data.get("test_log", "")
+    status_detail = "green" if tests_passed else "red"
+    scenes = [
+        objectives_scene("Run status", [
+            {"label": "Final tests", "status": "done" if tests_passed else "failed", "detail": status_detail},
+            {"label": "Outcome", "status": status(outcome), "detail": outcome},
+            {"label": "Fix cycles", "status": "done" if tests_passed else "pending", "detail": f"{cycle} / {max_cycles}"},
+            {"label": "Human decision", "status": "blocked" if outcome == "blocked" else "done", "detail": "required" if outcome == "blocked" else "not required"},
+        ]),
+        evidence_scene("Review artifacts", [
+            {"label": "Markdown report", "status": "done", "detail": "Human-readable fix-tests report.", "ref": data.get("report_path", "")},
+            {"label": "Summary JSON", "status": "done", "detail": "Structured input for this deck.", "ref": str(data.get("_source", ""))},
+            {"label": "Test log", "status": "done" if test_log else "pending", "detail": "Newest captured test log.", "ref": test_log},
+        ]),
+    ]
+    if artifact:
+        scenes.append({
+            "type": "table",
+            "variant": "data",
+            "title": "Fix artifact",
+            "columns": ["Field", "Value"],
+            "rows": [
+                {"cells": ["Summary", artifact.get("summary_title", "")]},
+                {"cells": ["Files changed", ", ".join(artifact.get("files_changed") or []) or "-"]},
+                {"cells": ["Fixed tests", ", ".join(artifact.get("fixed_tests") or []) or "-"]},
+                {"cells": ["Remaining failures", ", ".join(artifact.get("remaining_failures") or []) or "-"]},
+                {"cells": ["Confidence", num(artifact.get("confidence"))]},
+            ],
+            "hold": 2600,
+        })
+        if artifact.get("open_questions"):
+            scenes.append(objectives_scene("Open questions", [
+                {"label": f"Question {idx + 1}", "status": "blocked", "detail": str(q)}
+                for idx, q in enumerate(artifact.get("open_questions", [])[:8])
+            ]))
+    refs = [
+        {"label": "Markdown report", "path": data.get("report_path", ""), "status": "done"},
+        {"label": "Summary JSON", "path": str(data.get("_source", "")), "status": "done"},
+    ]
+    if test_log:
+        refs.append({"label": "Test log", "path": test_log, "status": "done"})
+    return title_deck("fix-tests report", f"{outcome}; tests {status_detail}", scenes), refs
+
+
 def fanout(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
     title = data.get("title") or "Fan-out Job Report"
     items = require_list(data, "items", "fanout")
@@ -727,6 +777,7 @@ BUILDERS = {
     "external-summary": external_summary,
     "fanout": fanout,
     "feature-demo": feature_demo,
+    "fix-tests": fix_tests,
     "model-harness": model_harness,
     "onboarding": onboarding,
     "product-journey": product_journey,

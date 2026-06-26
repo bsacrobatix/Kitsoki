@@ -161,6 +161,27 @@ class DeterministicDeckTest(unittest.TestCase):
         table = [scene for scene in deck["scenes"] if scene.get("title") == "Fan-out items"][0]
         self.assertEqual(table["rows"][1]["cells"][:3], ["b", "failed", "2"])
 
+    def test_fix_tests_deck_surfaces_blocked_question(self):
+        _, deck = run_tool("fix-tests", {
+            "outcome": "blocked",
+            "tests_passed": False,
+            "cycle": 1,
+            "max_cycles": 3,
+            "report_path": ".artifacts/fix-tests/run/report.md",
+            "test_log": ".artifacts/test-reports/test-1.log",
+            "fix_artifact": {
+                "summary_title": "Ambiguous intended behaviour",
+                "files_changed": [],
+                "fixed_tests": [],
+                "remaining_failures": ["TestAmbiguous"],
+                "open_questions": ["Should Add() round half-up or half-even?"],
+                "confidence": 0,
+            },
+        })
+        self.assertEqual(deck["scenes"][0]["subtitle"], "blocked; tests red")
+        questions = [scene for scene in deck["scenes"] if scene.get("title") == "Open questions"][0]
+        self.assertEqual(questions["items"][0]["status"], "blocked")
+
     def test_product_journey_deck_preserves_reference_deck(self):
         _, deck = run_tool("product-journey", {
             "program": "Product journey evaluator",
