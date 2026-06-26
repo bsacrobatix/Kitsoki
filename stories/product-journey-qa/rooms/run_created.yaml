@@ -1,7 +1,7 @@
 states:
   run_created:
     description: "A product-journey QA run bundle exists; waiting for captured evidence."
-    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, scenario, evidence_kind, evidence_path, finding_kind, finding_title, review_status, review_summary, status]
+    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, execution_plan_path, scenario, evidence_kind, evidence_path, finding_kind, finding_title, review_status, review_summary, status]
     view:
       - banner:
           text: "RUN CREATED"
@@ -14,6 +14,7 @@ states:
             Persona: "{{ world.persona }}"
             Run dir: '{{ world.run_dir|default:"(pending)" }}'
             Deck: '{{ world.deck_path|default:"(pending)" }}'
+            Execution plan: '{{ world.execution_plan_path|default:"(pending)" }}'
             Last evidence: '{{ world.scenario|default:"(none)" }} / {{ world.evidence_kind|default:"" }}'
             Last finding: '{{ world.finding_kind|default:"(none)" }} / {{ world.finding_title|default:"" }}'
             Review: '{{ world.review_status|default:"(not reviewed)" }}'
@@ -74,6 +75,7 @@ states:
               bind:
                 last_result: stdout_json
                 deck_path: "stdout_json.deck_path"
+                execution_plan_path: "stdout_json.execution_plan_path"
               on_error: run_created
             - set:
                 status: "evidence_attached"
@@ -114,6 +116,7 @@ states:
               bind:
                 last_result: stdout_json
                 deck_path: "stdout_json.deck_path"
+                execution_plan_path: "stdout_json.execution_plan_path"
               on_error: run_created
             - set:
                 status: "finding_recorded"
@@ -136,6 +139,7 @@ states:
               bind:
                 last_result: stdout_json
                 deck_path: "stdout_json.deck_path"
+                execution_plan_path: "stdout_json.execution_plan_path"
               on_error: run_created
             - set:
                 status: "demo_seeded"
@@ -160,6 +164,7 @@ states:
                 review_status: "stdout_json.review_status"
                 review_summary: "stdout_json.summary"
                 deck_path: "stdout_json.deck_path"
+                execution_plan_path: "stdout_json.execution_plan_path"
               on_error: run_created
             - set:
                 status: "reviewed"

@@ -792,6 +792,7 @@ def seed_demo_evidence(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "status": "seeded",
         "run_dir": str(run_dir),
         "deck_path": str(run_dir / "deck.slidey.json"),
+        "execution_plan_path": str(run_dir / "execution-plan.md"),
         "evidence_added": len(demo_evidence),
         "findings_added": findings_added,
         "present_evidence_count": metrics.get("present_evidence_count", 0),
@@ -918,6 +919,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "run_dir": str(run_dir),
         "review_path": str(run_dir / "review.json"),
         "deck_path": str(run_dir / "deck.slidey.json"),
+        "execution_plan_path": str(run_dir / "execution-plan.md"),
         "passed": passed,
         "warnings": warned,
         "failed": failed,
@@ -1538,6 +1540,7 @@ def main() -> None:
         print(reviewed["summary"])
         print(f"Review: {reviewed['review_path']}")
         print(f"Deck: {reviewed['deck_path']}")
+        print(f"Execution plan: {reviewed['execution_plan_path']}")
         if publish_deck is not None:
             print(f"Published deck: {publish_deck}")
         append_log(f"Reviewed run bundle {run_dir.name}: {reviewed['review_status']}")
@@ -1556,6 +1559,7 @@ def main() -> None:
         print("Seeded demo evidence")
         print(f"Artifacts: {run_dir}")
         print(f"Deck: {run_dir / 'deck.slidey.json'}")
+        print(f"Execution plan: {run_dir / 'execution-plan.md'}")
         print(f"Evidence present: {seeded['present_evidence_count']}")
         print(f"Findings: {seeded['findings_count']}")
         if publish_deck is not None:
@@ -1595,6 +1599,7 @@ def main() -> None:
                 "title": args.title,
                 "scenario": args.scenario,
                 "deck_path": str(run_dir / "deck.slidey.json"),
+                "execution_plan_path": str(run_dir / "execution-plan.md"),
                 "published_deck_path": str(publish_deck) if publish_deck is not None else "",
             }, sort_keys=True))
             append_log(f"Recorded {args.finding_kind} finding for {run_dir.name}: {args.title}")
@@ -1602,6 +1607,7 @@ def main() -> None:
         print(f"Recorded finding: {args.finding_kind} / {args.title}")
         print(f"Artifacts: {run_dir}")
         print(f"Deck: {run_dir / 'deck.slidey.json'}")
+        print(f"Execution plan: {run_dir / 'execution-plan.md'}")
         if publish_deck is not None:
             print(f"Published deck: {publish_deck}")
         append_log(f"Recorded {args.finding_kind} finding for {run_dir.name}: {args.title}")
@@ -1638,6 +1644,7 @@ def main() -> None:
                 "evidence_kind": args.evidence_kind,
                 "evidence_path": args.evidence_path,
                 "deck_path": str(run_dir / "deck.slidey.json"),
+                "execution_plan_path": str(run_dir / "execution-plan.md"),
                 "published_deck_path": str(publish_deck) if publish_deck is not None else "",
             }, sort_keys=True))
             append_log(f"Attached evidence {args.scenario}/{args.evidence_kind} to {run_dir.name}")
@@ -1645,6 +1652,7 @@ def main() -> None:
         print(f"Attached evidence: {args.scenario}/{args.evidence_kind}")
         print(f"Artifacts: {run_dir}")
         print(f"Deck: {run_dir / 'deck.slidey.json'}")
+        print(f"Execution plan: {run_dir / 'execution-plan.md'}")
         if publish_deck is not None:
             print(f"Published deck: {publish_deck}")
         append_log(f"Attached evidence {args.scenario}/{args.evidence_kind} to {run_dir.name}")
@@ -1669,6 +1677,7 @@ def main() -> None:
                 "run_id": run_json["run_id"],
                 "run_dir": str(run_dir),
                 "deck_path": str(run_dir / "deck.slidey.json"),
+                "execution_plan_path": str(run_dir / "execution-plan.md"),
                 "published_deck_path": str(publish_deck) if publish_deck is not None else "",
             }, sort_keys=True))
             append_log(f"Emitted dry-run bundle {run_json['run_id']}")
@@ -1676,6 +1685,7 @@ def main() -> None:
         print(f"Product journey run: {run_json['run_id']}")
         print(f"Artifacts: {run_dir}")
         print(f"Deck: {run_dir / 'deck.slidey.json'}")
+        print(f"Execution plan: {run_dir / 'execution-plan.md'}")
         if publish_deck is not None:
             print(f"Published deck: {publish_deck}")
         append_log(f"Emitted dry-run bundle {run_json['run_id']}")

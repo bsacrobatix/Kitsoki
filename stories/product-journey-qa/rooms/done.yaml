@@ -1,7 +1,7 @@
 states:
   done:
     description: "The product-journey QA bundle is ready for review."
-    relevant_world: [run_id, run_dir, deck_path, status]
+    relevant_world: [run_id, run_dir, deck_path, execution_plan_path, status]
     view:
       - banner:
           text: "PRODUCT JOURNEY QA READY"
@@ -12,6 +12,7 @@ states:
             Run: "{{ world.run_id }}"
             Run dir: "{{ world.run_dir }}"
             Deck: "{{ world.deck_path }}"
+            Execution plan: "{{ world.execution_plan_path }}"
             Status: "{{ world.status }}"
       - choice:
           mode: single

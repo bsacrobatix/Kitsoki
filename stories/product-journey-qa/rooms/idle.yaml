@@ -84,6 +84,7 @@ states:
                 run_id: "stdout_json.run_id"
                 run_dir: "stdout_json.run_dir"
                 deck_path: "stdout_json.deck_path"
+                execution_plan_path: "stdout_json.execution_plan_path"
               on_error: idle
             - set:
                 status: "run_created"

@@ -14,6 +14,7 @@ host_handlers:
             run_id: run-123
             run_dir: .artifacts/product-journey/run-123
             deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+            execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
       emit_product_journey_matrix:
         data:
           ok: true
@@ -38,6 +39,7 @@ host_handlers:
             evidence_kind: key_interaction_video
             evidence_path: media/bugfix.mp4
             deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+            execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
       record_product_journey_finding:
         data:
           ok: true
@@ -49,6 +51,7 @@ host_handlers:
             title: Onboarding hid next command
             scenario: project-onboarding
             deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+            execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
       seed_product_journey_demo:
         data:
           ok: true
@@ -57,6 +60,7 @@ host_handlers:
             status: seeded
             run_dir: .artifacts/product-journey/run-123
             deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+            execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
             evidence_added: 6
             findings_added: 4
             present_evidence_count: 7
@@ -72,6 +76,7 @@ host_handlers:
             run_dir: .artifacts/product-journey/run-123
             review_path: .artifacts/product-journey/run-123/review.json
             deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+            execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
             passed: 8
             warnings: 0
             failed: 0
@@ -110,6 +115,7 @@ turns:
       run_id: run-123
       run_dir: .artifacts/product-journey/run-123
       deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+      execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
     expect_host_calls:
       - handler: host.run
         args: { call: emit_product_journey_run }
@@ -128,6 +134,7 @@ turns:
       evidence_kind: key_interaction_video
       evidence_path: media/bugfix.mp4
       deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+      execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
     expect_host_calls:
       - handler: host.run
         args: { call: attach_product_journey_evidence }
@@ -150,6 +157,7 @@ turns:
       scenario: project-onboarding
       evidence_path: traces/onboarding.jsonl
       deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+      execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
     expect_host_calls:
       - handler: host.run
         args: { call: record_product_journey_finding }
@@ -159,6 +167,7 @@ turns:
     expect_world:
       status: demo_seeded
       deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+      execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
     expect_host_calls:
       - handler: host.run
         args: { call: seed_product_journey_demo }
@@ -170,6 +179,7 @@ turns:
       review_status: ready
       review_summary: "ready: 8/8 checks passed, 0 warnings, 0 failures"
       deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+      execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
     expect_host_calls:
       - handler: host.run
         args: { call: review_product_journey_run }
@@ -178,5 +188,6 @@ turns:
     expect_state: done
     expect_world:
       status: done
+      execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
 
 expect_no_errors: true
