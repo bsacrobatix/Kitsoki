@@ -23,7 +23,8 @@
         "highlightLow": "#2f1f16",
         "highlightMuted": "#412518",
         "highlightHigh": "#7d2e1c"
-      }
+      },
+      "css": "#title-card{gap:24px !important;}#title-card-subtitle{display:flex;flex-direction:column;align-items:center;gap:14px;color:#f3ead8;}#title-card-subtitle img{display:block;height:auto;max-width:260px;width:100%;}#title-card-subtitle div.deck-subtitle{max-width:1500px;line-height:1.45;font-size:36px;color:#d9c9ad;}#title-card-subtitle .deck-subtitle-note{display:block;max-width:1300px;line-height:1.35;font-size:28px;color:#b29b7a;}"
     },
     "ticket": "",
     "phase": "demo",
@@ -40,18 +41,7 @@
     {
       "type": "title",
       "title": "Kitsoki",
-      "subtitle": "A conversational workflow engine built for reliable delivery"
-    },
-    {
-      "type": "image",
-      "title": "Brand mark",
-      "src": "assets/kitsoki-wordmark.svg",
-      "alt": "Kitsoki wordmark",
-      "fit": "contain",
-      "frameHeight": "320px",
-      "mediaBackground": "transparent",
-      "mediaPadding": "24px",
-      "caption": "The Mesa Sun lockup, built around a simple, recognisable mark and a readable palette."
+      "subtitleHtml": "<img src=\"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNjYgNjQiIHdpZHRoPSIxNjYiIGhlaWdodD0iNjQiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0ia2l0c29raSI+CiAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoLTIuNCAxLjkyKSBzY2FsZSgwLjMyKSI+CiAgICA8Y2lyY2xlIGN4PSIxMDAiIGN5PSI3MCIgcj0iMzAiIGZpbGw9IiNlMGEyM2EiLz4KICAgIDxnIHN0cm9rZT0iI2UwYTIzYSIgc3Ryb2tlLXdpZHRoPSI1IiBzdHJva2UtbGluZWNhcD0icm91bmQiPgogICAgICA8bGluZSB4MT0iMTUwIiB5MT0iNzAiIHgyPSIxMzgiIHkyPSI3MCIvPgogICAgICA8bGluZSB4MT0iMTM1IiB5MT0iMzUiIHgyPSIxMjciIHkyPSI0MyIvPgogICAgICA8bGluZSB4MT0iMTAwIiB5MT0iMjAiIHgyPSIxMDAiIHkyPSIzMiIvPgogICAgICA8bGluZSB4MT0iNjUiIHkxPSIzNSIgeDI9IjczIiB5Mj0iNDMiLz4KICAgICAgPGxpbmUgeDE9IjUwIiB5MT0iNzAiIHgyPSI2MiIgeTI9IjcwIi8+CiAgICA8L2c+CiAgICA8cGF0aCBkPSJNMjAgMTUwIEwyMCAxMjAgTDYwIDEyMCBMNjAgMTA1IEwxNDAgMTA1IEwxNDAgMTIwIEwxODAgMTIwIEwxODAgMTUwIFoiIGZpbGw9IiNhODQ5MmIiLz4KICAgIDxwYXRoIGQ9Ik0yMCAxNTAgTDE4MCAxNTAgTDE4MCAxNjggTDIwIDE2OCBaIiBmaWxsPSIjN2QyZTFjIi8+CiAgICA8cmVjdCB4PSI5MiIgeT0iMTIwIiB3aWR0aD0iMTYiIGhlaWdodD0iMzAiIGZpbGw9IiMzYTI0MTgiLz4KICA8L2c+CiAgPHRleHQgeD0iNjQiIHk9IjQxIiBmb250LWZhbWlseT0iLWFwcGxlLXN5c3RlbSxCbGlua01hY1N5c3RlbUZvbnQsJ1NlZ29lIFVJJyxSb2JvdG8sSGVsbmV0aWNhLEFyaWFsLHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjgiIGZvbnQtd2VpZ2h0PSI3MDAiIGxldHRlci1zcGFjaW5nPSIwLjUiPjx0c3BhbiBmaWxsPSIjZjNlYWQ4Ij5raXRzPC90c3Bhbj48dHNwYW4gZmlsbD0iI2Y0Y2Y5NSI+b2tpPC90c3Bhbj48L3RleHQ+Cjwvc3ZnPgo\" alt=\"Kitsoki\"/><span class=\"deck-subtitle\">A conversational workflow engine built for reliable delivery</span><span class=\"deck-subtitle-note\">Production-ready workflows. Evidence-first execution. Reliable handoff.</span>"
     },
     {
       "type": "image",
@@ -61,7 +51,7 @@
       "fit": "contain",
       "frameHeight": "360px",
       "mediaBackground": "#f6efe2",
-      "caption": "A practical application of the mark in product context."
+      "caption": "A practical logo in product context."
     },
     {
       "type": "narrative",

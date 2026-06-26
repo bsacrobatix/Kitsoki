@@ -13,5 +13,5 @@
     <path d="M20 150 L180 150 L180 168 L20 168 Z" fill="#7d2e1c"/>
     <rect x="92" y="120" width="16" height="30" fill="#3a2418"/>
   </g>
-  <text x="84" y="49" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="700" letter-spacing="0.5"><tspan fill="#241a12">kits</tspan><tspan fill="#a8492b">oki</tspan></text>
+  <text x="84" y="49" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="700" letter-spacing="0.5"><tspan fill="#f3ead8">kits</tspan><tspan fill="#f4cf95">oki</tspan></text>
 </svg>
