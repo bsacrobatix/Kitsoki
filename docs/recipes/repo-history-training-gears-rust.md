@@ -71,7 +71,7 @@ Use the same bug list you plan to run in the matrix. A one-bug smoke should pass
 For the full product-path smoke, run the bundled target. It delegates to the
 generic `history-smoke` gate and covers the harness unit checks,
 candidate/profile preflight, scoped RED/GREEN arming, drive-command rendering,
-first-cell worktree/prompt preparation via `drive_cell.sh --no-drive`, and the
+no-drive worktree/prompt preparation via `drive_cell.sh --no-drive`, and the
 `repo-bakeoff` story flows without calling a live model:
 
 ```sh
@@ -96,7 +96,7 @@ GEARS_RUST_REPO=/Users/brad/code/gears-rust make gears-history-full-smoke
 ```
 
 That verifies `bug1,bug4,bug5,bug9` RED@baseline/GREEN@fix, renders the full
-live command matrix, prepares the first cell prompt/worktree, writes readiness,
+live command matrix, prepares every selected prompt/worktree, writes readiness,
 and validates the `repo-bakeoff` story flows. It is still no-LLM, but it runs
 more cargo work than the one-bug smoke.
 
@@ -118,13 +118,15 @@ When it passes, it also writes a review artifact at
 `.artifacts/external-bakeoff/readiness/gears-rust.md` with preflight status,
 the selected live-cell commands, existing scored/pending cells, missing cells,
 pending-cell command templates for true provider/profile blockers, and the next
-action. The first selected cell is prepared under
+action. The prepared cells are under
 `.artifacts/external-bakeoff/cells/`, with the delegated MCP prompt under
 `.artifacts/external-bakeoff/drive-prompts/`. The same step writes
 `.artifacts/external-bakeoff/prepared/<project>-<bug>-<candidate>.json` with the
 worktree, branch, trace, prompt, preflight, and score-result paths, so the
 operator can inspect or hand off the exact setup before spending on a live
-drive. Set `HISTORY_PREPARE_FIRST_CELL=0` to skip that free preparation step.
+drive. `gears-history-smoke` prepares the first selected cell by default;
+`gears-history-full-smoke` prepares all four armable cells. Set
+`HISTORY_PREPARE_FIRST_CELL=0` to skip that free preparation step.
 
 Regenerate that readiness report after adding results without rerunning the
 cargo-backed RED/GREEN arming step:

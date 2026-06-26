@@ -60,9 +60,12 @@ make history-smoke \
 For public repos that the harness can clone, omit `HISTORY_REPO_DIR`.
 
 This gate is no-cost. It runs harness unit tests, preflight, RED/GREEN oracle
-arming, drive-command rendering, first-cell `drive_cell.sh --no-drive`
-preparation, readiness report generation, and `repo-bakeoff` flow validation.
-The first-cell preparation also writes
+arming, drive-command rendering, `drive_cell.sh --no-drive` preparation,
+readiness report generation, and `repo-bakeoff` flow validation.
+By default, the gate prepares the first selected cell; set
+`HISTORY_PREPARE_ALL_CELLS=1` to prepare the whole selected matrix before a
+live run, or `HISTORY_PREPARE_FIRST_CELL=0` to skip preparation. Preparation
+also writes
 `.artifacts/external-bakeoff/prepared/<project>-<bug>-<candidate>.json`, which
 records the worktree, branch, trace, prompt, preflight, and future score-result
 paths for review or handoff.

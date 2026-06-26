@@ -143,8 +143,8 @@ For a repo owner preparing a specific live matrix, use the generic product-path
 smoke. It is also deterministic and free: it runs the harness unit checks,
 preflights the selected project/bug/candidate matrix, verifies the selected
 oracles RED@baseline/GREEN@fix, renders exact `drive_cell.sh --score` commands,
-prepares the first selected cell with `drive_cell.sh --no-drive`, and validates
-the `repo-bakeoff` story flows.
+prepares selected cells with `drive_cell.sh --no-drive`, and validates the
+`repo-bakeoff` story flows.
 
 ```sh
 make history-smoke \
@@ -167,13 +167,14 @@ make history-smoke \
 generic smoke fails, fix that blocker before running cost-bearing cells.
 It also writes a review artifact under
 `.artifacts/external-bakeoff/readiness/<project>.md`.
-The free first-cell preparation writes the baseline worktree under
+The free preparation step writes baseline worktrees under
 `.artifacts/external-bakeoff/cells/` and the delegated Studio MCP prompt under
 `.artifacts/external-bakeoff/drive-prompts/`. It also writes
 `.artifacts/external-bakeoff/prepared/<project>-<bug>-<candidate>.json`, a
 machine-readable handoff with the worktree, branch, trace, prompt, preflight,
-and future score-result paths. Set
-`HISTORY_PREPARE_FIRST_CELL=0` to skip it.
+and future score-result paths. By default, `history-smoke` prepares the first
+selected cell; set `HISTORY_PREPARE_ALL_CELLS=1` to prepare the full selected
+matrix, or `HISTORY_PREPARE_FIRST_CELL=0` to skip preparation.
 
 For the full gears-rust reference corpus, run:
 
