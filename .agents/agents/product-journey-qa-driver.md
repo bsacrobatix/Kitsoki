@@ -67,7 +67,9 @@ story `blocker` intent. Do not silently substitute a fake pass.
 For each scenario in the bundle:
 
 1. Read the scenario task, primary story, required MCP tools, evidence slots, and
-   success criteria.
+   success criteria. Treat the scenario `quality_gate` in `driver-plan.json` as
+   the minimum proof contract: capture its `minimum_evidence`, satisfy
+   `done_when`, or record a blocker matching one of the `block_if` conditions.
 2. Open or attach the appropriate Kitsoki session:
    - product discovery: visual web surface for the local product site;
    - onboarding / PRD / design / feature: `stories/dev-story/app.yaml`;
@@ -124,6 +126,8 @@ A run is ready only when all of these are true:
 
 - each scenario has attempted evidence, or a blocker finding explains why it
   could not be captured;
+- each attempted scenario satisfies its `quality_gate.done_when`, and each
+  blocked scenario names the matching `quality_gate.block_if` condition;
 - at least one visual or TUI artifact proves the operator-visible behavior;
 - bugfix/feature claims have deterministic oracle or test output;
 - strengths, weaknesses/issues, and fixes are represented when observed;

@@ -699,6 +699,70 @@ def evidence_capture_hint(kind: str) -> str:
     return hints.get(kind, "Save this evidence artifact and attach it to the run.")
 
 
+def scenario_quality_gate(scenario_id: str) -> dict:
+    gates = {
+        "product-discovery": {
+            "minimum_evidence": ["browser_screenshot", "page_url", "navigation_trace", "checkpoint_rating"],
+            "done_when": "The persona can state what Kitsoki is, who it is for, and one credible next action from visible product-site evidence.",
+            "block_if": [
+                "The local product site cannot be opened or observed.",
+                "Navigation depends on private repo knowledge instead of visible page content.",
+                "A key page, demo, or link needed for the next action is unavailable.",
+            ],
+        },
+        "project-onboarding": {
+            "minimum_evidence": ["session_trace", "rendered_tui_frame", "generated_config_diff", "onboarding_smoke_result"],
+            "done_when": "The persona can identify the generated project profile, the relevant commands/files, and the next Kitsoki story to launch.",
+            "block_if": [
+                "The onboarding story cannot be opened or rendered.",
+                "The path requires live LLM authorization and no cassette exists.",
+                "Generated config or smoke output is unavailable for deterministic review.",
+            ],
+        },
+        "bugfix": {
+            "minimum_evidence": ["session_trace", "candidate_diff", "oracle_result", "full_suite_result", "key_interaction_video"],
+            "done_when": "A concrete bug candidate has a reviewable diff plus deterministic oracle/test output or a classified suite failure.",
+            "block_if": [
+                "No concrete bug/repro can be selected without live authorization.",
+                "The bugfix story cannot produce a candidate diff.",
+                "No deterministic oracle, targeted test, or classified full-suite result is available.",
+            ],
+        },
+        "prd-design": {
+            "minimum_evidence": ["session_trace", "prd_artifact", "design_artifact", "review_notes"],
+            "done_when": "The PRD/design artifact cites real repo files or commands, is reviewably scoped, and exposes open questions.",
+            "block_if": [
+                "The planning/design path requires live LLM authorization and no cassette exists.",
+                "The artifact cannot be grounded in repository files or commands.",
+                "The design output cannot be captured as a durable artifact.",
+            ],
+        },
+        "feature-implementation": {
+            "minimum_evidence": ["session_trace", "implementation_diff", "targeted_test_result", "review_summary"],
+            "done_when": "The implementation follows an accepted design slice and has a targeted deterministic test result or explicit blocker.",
+            "block_if": [
+                "No accepted design slice is available.",
+                "The implementation would require live LLM authorization without a cassette.",
+                "No diff or deterministic validation output can be captured.",
+            ],
+        },
+        "evidence-backed-product-bug": {
+            "minimum_evidence": ["bug_report_markdown", "screenshot_or_tui_png", "trace_reference", "reproduction_steps"],
+            "done_when": "A product bug report includes expected vs actual behavior, reproduction context, visual/TUI evidence, and trace reference.",
+            "block_if": [
+                "No product issue, weakness, or confusing behavior was observed.",
+                "The evidence needed to reproduce the issue cannot be captured or safely redacted.",
+                "The report would rely on memory rather than trace or visual evidence.",
+            ],
+        },
+    }
+    return gates.get(scenario_id, {
+        "minimum_evidence": [],
+        "done_when": "The scenario has captured evidence or an explicit blocker.",
+        "block_if": ["The scenario cannot capture evidence under the current harness."],
+    })
+
+
 def build_assignment_scenario_task(target: dict, persona: dict, scenario: dict) -> dict:
     repo = target["label"]
     stack = target.get("stack", "unknown stack")
@@ -994,6 +1058,7 @@ def build_execution_plan(run_json: dict, evidence: dict) -> dict:
                 for item in evidence_items
             ],
             "success_criteria": scenario["success_criteria"],
+            "quality_gate": scenario_quality_gate(scenario["id"]),
             "attach_commands": attach_commands,
             "record_blocker_command": record_blocker_command,
         })
@@ -1060,6 +1125,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
                 "mcp_tools": [mcp["tool"] for mcp in step["mcp_steps"]],
                 "success_criteria": step["success_criteria"],
                 "evidence": [item["kind"] for item in step["evidence"]],
+                "quality_gate": step.get("quality_gate", scenario_quality_gate(step["scenario"])),
             }
             for step in execution_plan.get("steps", [])
         ],
@@ -1110,6 +1176,7 @@ def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict) -> d
                 for item in evidence_items
             ],
             "success_criteria": scenario["success_criteria"],
+            "quality_gate": scenario_quality_gate(scenario_id),
             "attach_commands": step.get("attach_commands", []),
             "record_finding_command": (
                 "python3 tools/product-journey/run.py --record-finding "
@@ -1175,6 +1242,17 @@ def render_driver_plan(plan: dict) -> str:
             playback = " playback" if item["playback_candidate"] else ""
             path = item["path"] or "<path-or-retained-id>"
             lines.append(f"- `{item['kind']}`{playback}: {path} - {item['capture_hint']}")
+        gate = scenario.get("quality_gate", {})
+        lines.extend(["", "### Minimum Proof", ""])
+        lines.append(f"- Done when: {gate.get('done_when', 'The scenario has captured evidence or an explicit blocker.')}")
+        minimum = gate.get("minimum_evidence", [])
+        if minimum:
+            lines.append(f"- Minimum evidence: {', '.join(f'`{item}`' for item in minimum)}")
+        block_if = gate.get("block_if", [])
+        if block_if:
+            lines.append("- Block if:")
+            for condition in block_if:
+                lines.append(f"  - {condition}")
         lines.extend(["", "### Attach Commands", ""])
         for command in scenario["attach_commands"]:
             lines.append(f"```sh\n{command}\n```")
@@ -1229,6 +1307,18 @@ def render_agent_brief(brief: dict) -> str:
         ])
         for criterion in scenario["success_criteria"]:
             lines.append(f"- {criterion}")
+        gate = scenario.get("quality_gate", {})
+        if gate:
+            lines.extend(["", "Minimum proof:"])
+            lines.append(f"- Done when: {gate.get('done_when', 'The scenario has captured evidence or an explicit blocker.')}")
+            minimum = gate.get("minimum_evidence", [])
+            if minimum:
+                lines.append(f"- Minimum evidence: {', '.join(f'`{item}`' for item in minimum)}")
+            block_if = gate.get("block_if", [])
+            if block_if:
+                lines.append("- Block if:")
+                for condition in block_if:
+                    lines.append(f"  - {condition}")
         lines.append("")
     lines.extend(["## Missing Evidence", ""])
     if brief["missing_evidence"]:
@@ -1937,6 +2027,28 @@ def validate_run_bundle(run_dir: Path) -> dict:
         ]
         if missing_driver_scenario_keys:
             add_validation_issue(issues, "error", "driver-plan-scenario-required-keys", "driver-plan.json scenarios are missing required keys", ", ".join(missing_driver_scenario_keys))
+        missing_gate_keys = [
+            f"{scenario.get('scenario', f'driver-scenario-{index}')}/{key}"
+            for index, scenario in enumerate(driver_scenarios, start=1)
+            for key in schema["driver_plan"]["quality_gate_required"]
+            if key not in scenario.get("quality_gate", {})
+        ]
+        if missing_gate_keys:
+            add_validation_issue(issues, "error", "driver-plan-quality-gate", "driver-plan.json quality gates are missing required keys", ", ".join(missing_gate_keys))
+        invalid_gate_evidence = []
+        declared_by_scenario = {
+            scenario.get("id", ""): set(scenario.get("evidence", []))
+            for scenario in scenarios
+        }
+        for scenario in driver_scenarios:
+            scenario_id = scenario.get("scenario", "")
+            declared = declared_by_scenario.get(scenario_id, set())
+            minimum = set(scenario.get("quality_gate", {}).get("minimum_evidence", []))
+            extra = sorted(minimum - declared)
+            if extra:
+                invalid_gate_evidence.append(f"{scenario_id}: {', '.join(extra)}")
+        if invalid_gate_evidence:
+            add_validation_issue(issues, "error", "driver-plan-quality-gate-evidence", "Quality gate minimum evidence is not declared by the scenario", "; ".join(invalid_gate_evidence))
     if agent_brief and len(brief_scenarios) != len(scenarios):
         add_validation_issue(
             issues,

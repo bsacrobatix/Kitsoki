@@ -112,6 +112,10 @@ driver for Kitsoki Studio MCP and visual MCP runs. Use `driver-plan.md` for the
 machine-readable harness, visual-surface, action-sequence, and gate contract,
 and `execution-plan.md` for the detailed evidence slots and ready-to-fill
 `--attach-evidence` commands.
+Each scenario also carries a `quality_gate` with `minimum_evidence`,
+`done_when`, and `block_if` rules. Live/cassette drivers should satisfy that
+gate before calling a scenario done, or record a blocker tied to the matching
+condition.
 
 Attach evidence captured by a live or cassette-backed MCP run:
 

@@ -26,15 +26,16 @@
   },
   "agent_brief": {
     "required": ["run_id", "project", "persona", "mission", "persona_contract", "operating_rules", "scenario_order", "missing_evidence", "finalize_commands"],
-    "scenario_required": ["id", "label", "task", "primary_story", "mcp_tools", "success_criteria", "evidence"]
+    "scenario_required": ["id", "label", "task", "primary_story", "mcp_tools", "success_criteria", "evidence", "quality_gate"]
   },
   "execution_plan": {
     "required": ["run_id", "project", "persona", "summary", "steps", "finalize_commands"],
-    "step_required": ["scenario", "primary_story", "mcp_steps", "evidence", "success_criteria", "attach_commands", "record_blocker_command"]
+    "step_required": ["scenario", "primary_story", "mcp_steps", "evidence", "success_criteria", "quality_gate", "attach_commands", "record_blocker_command"]
   },
   "driver_plan": {
     "required": ["run_id", "driver_agent", "project", "persona", "scenarios", "final_gates"],
-    "scenario_required": ["scenario", "label", "primary_story", "harness", "visual_surface", "required_mcp", "evidence", "success_criteria", "attach_commands", "record_finding_command", "record_blocker_command"]
+    "scenario_required": ["scenario", "label", "primary_story", "harness", "visual_surface", "required_mcp", "evidence", "success_criteria", "quality_gate", "attach_commands", "record_finding_command", "record_blocker_command"],
+    "quality_gate_required": ["minimum_evidence", "done_when", "block_if"]
   },
   "matrix_result": {
     "required": ["matrix_id", "created_at", "seed", "selection_contract", "target_proof", "target_count", "assignment_count", "scenario_count", "targets", "assignments", "artifacts"],
