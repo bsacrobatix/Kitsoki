@@ -83,13 +83,17 @@ python3 redact.py --report --names names.txt < combined.json > report.json
 # 7. share-gate — MUST pass before the report leaves your machine
 python3 redact.py --scan < report.json && echo "safe to share"
 
-# 8. turn the report into an actionable brief (what to build, which gates, first step)
-python3 report.py report.json --top 5 > BRIEF.md
+# 8. turn the report into actionable review artifacts
+python3 report.py report.json --top 5 \
+  --markdown .artifacts/session-mining/<job>/BRIEF.md \
+  --summary .artifacts/session-mining/<job>/brief.summary.json \
+  --slidey-spec .artifacts/session-mining/<job>/deck.slidey.json
 ```
 
 The raw transcripts and the distilled traces are the **private tier** — keep them
-in `/tmp`, never commit, never share. Only the scrubbed, gated `report.json` (and
-the `BRIEF.md` you derive from it) is shareable.
+in `/tmp`, never commit, never share. Only the scrubbed, gated `report.json` and
+the derived review artifacts (`BRIEF.md`, `brief.summary.json`,
+`deck.slidey.json`) are shareable.
 
 ---
 
@@ -428,8 +432,15 @@ The aggregate JSON is a ranked *diagnostic*. `report.py` turns it into a
 *prescriptive* brief so the ranking drives decisions:
 
 ```sh
-python3 report.py report.json --top 5 > BRIEF.md
+python3 report.py report.json --top 5 \
+  --markdown .artifacts/session-mining/<job>/BRIEF.md \
+  --summary .artifacts/session-mining/<job>/brief.summary.json \
+  --slidey-spec .artifacts/session-mining/<job>/deck.slidey.json
 ```
+
+The Slidey deck is generated deterministically from the aggregate JSON plus the
+same computed verdicts used by the Markdown brief; it does not ask an LLM to
+write slides.
 
 For each top candidate the brief states:
 
@@ -484,7 +495,7 @@ merges mixed `vocab_version`s. The extractor prompt is a versioned artifact
 distill.jq              raw JSONL transcript -> compact action trace
 prep.py                 distill + (optional --redact) + bin-pack into byte-balanced batches; one command, all modes (--job targets .artifacts/ for intent mining). Drops dispatched headless agent/agent transcripts (entrypoint!=cli) by default; --keep-agent-sessions to include them
 redact.py               deterministic scrubber; `--report` scrubs a report's free-text, `--scan` is the share-gate
-report.py               render a pattern-mining aggregate into an actionable BRIEF.md (verdict + gates + skeleton + first step)
+report.py               render a pattern-mining aggregate into actionable BRIEF.md + brief.summary.json + deck.slidey.json artifacts
 focus_brief.py          render a focused idea-mining synthesis JSON into a ranked themed Markdown brief (idea-mining mode)
 prompts/extractor.md    the versioned extractor prompt (the reproducible core)
 vocab/core.yaml         controlled vocabulary (cross-user merge keys)

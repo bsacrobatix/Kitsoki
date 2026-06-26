@@ -326,6 +326,43 @@ class DeterministicDeckTest(unittest.TestCase):
         status = [scene for scene in deck["scenes"] if scene.get("title") == "QA status"][0]
         self.assertEqual(status["items"][2]["status"], "blocked")
 
+    def test_session_mining_action_deck_summarizes_candidates(self):
+        _, deck = run_tool("session-mining-action", {
+            "contributors": 3,
+            "promote_min_contributors": 2,
+            "markdown_path": ".artifacts/session-mining/job/BRIEF.md",
+            "summary_path": ".artifacts/session-mining/job/brief.summary.json",
+            "patterns": [
+                {
+                    "id": "fix-failing-tests",
+                    "verdict": "BUILD NOW",
+                    "determinism_priority": 0.75,
+                    "contributors": 2,
+                    "occurrences": 8,
+                    "pain": "high",
+                    "decision_points": ["fix code vs tests"],
+                    "example_signatures": ["go test -> edit -> go test"],
+                    "ladder_target": "L2",
+                }
+            ],
+            "candidates": [
+                {
+                    "id": "fix-failing-tests",
+                    "verdict": "BUILD NOW",
+                    "determinism_priority": 0.75,
+                    "decision_points": ["fix code vs tests"],
+                    "example_signatures": ["go test -> edit -> go test"],
+                    "ladder_target": "L2",
+                }
+            ],
+            "novel_quarantine": [{"id": "visual-qc", "contributors": 1, "occurrences": 2}],
+        })
+        self.assertEqual(deck["meta"]["title"], "Session-Mining Action Brief")
+        candidates = [scene for scene in deck["scenes"] if scene.get("title") == "Build candidates"][0]
+        self.assertEqual(candidates["rows"][0]["cells"][:2], ["fix-failing-tests", "BUILD NOW"])
+        ranking = [scene for scene in deck["scenes"] if scene.get("title") == "Full ranking"][0]
+        self.assertEqual(ranking["rows"][0]["cells"][3], "2/3")
+
 
 if __name__ == "__main__":
     unittest.main()

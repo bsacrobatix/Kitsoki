@@ -710,6 +710,81 @@ def story_qa(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]
     return title_deck("Story QA Report", subtitle, scenes), refs
 
 
+def session_mining_action(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    patterns = require_list(data, "patterns", "session-mining-action")
+    candidates = data.get("candidates") or []
+    novel = data.get("novel_promotion_candidates") or []
+    watch = data.get("novel_quarantine") or []
+    total = data.get("contributors", 1)
+    promote_min = data.get("promote_min_contributors", 2)
+
+    verdict_counts: dict[str, int] = {}
+    rows = []
+    for pattern in patterns[:18]:
+        label = pattern.get("verdict", "LATER")
+        verdict_counts[label] = verdict_counts.get(label, 0) + 1
+        rows.append({"cells": [
+            pattern.get("id", ""),
+            label,
+            num(pattern.get("determinism_priority")),
+            f"{pattern.get('contributors', 0)}/{total}",
+            num(pattern.get("occurrences")),
+            pattern.get("pain", ""),
+            num(len(pattern.get("decision_points") or [])),
+        ]})
+
+    candidate_rows = []
+    for pattern in candidates[:8]:
+        gates = pattern.get("decision_points") or []
+        signatures = pattern.get("example_signatures") or []
+        candidate_rows.append({"cells": [
+            pattern.get("id", ""),
+            pattern.get("verdict", ""),
+            num(pattern.get("determinism_priority")),
+            pattern.get("ladder_target", ""),
+            "; ".join(gates[:2]),
+            "; ".join(signatures[:1]),
+        ]})
+
+    scenes = [
+        objectives_scene("Mining status", [
+            {"label": "Aggregate loaded", "status": "done" if patterns else "pending", "detail": f"{len(patterns)} ranked pattern(s)."},
+            {"label": "Build candidates", "status": "next" if candidates else "pending", "detail": f"{len(candidates)} pattern(s) crossed the action threshold."},
+            {"label": "Promotion threshold", "status": "done", "detail": f"{promote_min} of {total} contributor(s)."},
+            {"label": "Vocabulary updates", "status": "next" if novel else "done", "detail": f"{len(novel)} newly corroborated pattern(s)."},
+            {"label": "Watch list", "status": "pending" if watch else "done", "detail": f"{len(watch)} novel pattern(s) awaiting corroboration."},
+        ]),
+        {
+            "type": "table",
+            "variant": "data",
+            "title": "Build candidates",
+            "columns": ["Pattern", "Verdict", "Priority", "Target", "Gates", "Skeleton"],
+            "rows": candidate_rows or [{"cells": ["-", "-", "-", "-", "-", "-"]}],
+            "hold": 3200,
+        },
+        {
+            "type": "table",
+            "variant": "data",
+            "title": "Full ranking",
+            "columns": ["Pattern", "Verdict", "Priority", "Contrib", "Occ", "Pain", "Gates"],
+            "rows": rows or [{"cells": ["-", "-", "-", "-", "-", "-", "-"]}],
+            "hold": 3200,
+        },
+        evidence_scene("Review artifacts", [
+            {"label": "Aggregate JSON", "status": "done", "detail": "Source ranking and evidence aggregate.", "ref": str(data.get("_source", ""))},
+            {"label": "Markdown brief", "status": "done" if data.get("markdown_path") else "pending", "detail": "Prescriptive action brief.", "ref": data.get("markdown_path", "")},
+            {"label": "Summary JSON", "status": "done" if data.get("summary_path") else "pending", "detail": "Computed verdicts used by this deck.", "ref": data.get("summary_path", "")},
+        ]),
+    ]
+    refs = [
+        {"label": "Aggregate JSON", "path": str(data.get("_source", "")), "status": "done"},
+        {"label": "Markdown brief", "path": data.get("markdown_path", ""), "status": "done" if data.get("markdown_path") else "pending"},
+        {"label": "Summary JSON", "path": data.get("summary_path", ""), "status": "done" if data.get("summary_path") else "pending"},
+    ]
+    subtitle = f"{len(candidates)} build candidate(s), {len(patterns)} ranked pattern(s)"
+    return title_deck("Session-Mining Action Brief", subtitle, scenes), refs
+
+
 def workflow(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
     title = data.get("title") or data.get("name") or "Workflow Report"
     objectives = data.get("objectives") or []
@@ -1042,6 +1117,7 @@ BUILDERS = {
     "model-harness": model_harness,
     "onboarding": onboarding,
     "product-journey": product_journey,
+    "session-mining-action": session_mining_action,
     "story-qa": story_qa,
     "workflow": workflow,
 }
