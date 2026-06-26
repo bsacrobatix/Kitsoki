@@ -104,7 +104,7 @@ fi
 # Keep drive_cell and the repo-bakeoff story on the same readiness contract. For
 # `--no-drive`, report preflight failures but still prepare the inspection prompt;
 # real drives fail here before a worktree or MCP session is created.
-preflight_args=(preflight --project "$project" --candidate "$cand")
+preflight_args=(preflight --project "$project" --bug "$bug" --candidate "$cand")
 [[ -n "${repo_dir:-}" ]] && preflight_args+=(--repo-dir "$repo_dir")
 if [[ -n "$local_only" && -z "${repo_dir:-}" ]]; then
   preflight_args+=(--repo-dir "$src")
