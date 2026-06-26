@@ -169,12 +169,13 @@ package, validates it, and can open a tracked studio session over the generated
 | `workflow.export` | `{workflow_id, target?, allow_base_story?} → {receipt}` | copy the draft to a reusable story package, starter flow/cassette artifacts, and an export report |
 
 The receipt carries the draft path, manifest path, launch basis, trace path,
-the lifecycle event log, and, after `workflow.launch`, the studio `session_id`
-/ handle plus the relative runstatus session route (`/s/<id>`). The trace path
-and launch command are the fallback anchors when no browser origin is
-available. `workflow.export` writes the promoted `README.md`, starter flow
-fixture, optional starter cassette, and `export-report.json` beside the
-promoted story package.
+the lifecycle event log, the deterministic `deck.slidey.json` status deck, and,
+after `workflow.launch`, the studio `session_id` / handle plus the relative
+runstatus session route (`/s/<id>`). The trace path and launch command are the
+fallback anchors when no browser origin is available. `workflow.export` writes
+the promoted `README.md`, starter flow fixture, optional starter cassette,
+`export-report.json`, and an export `deck.slidey.json` beside the promoted story
+package.
 
 ### `session.*` — drive & introspect
 
