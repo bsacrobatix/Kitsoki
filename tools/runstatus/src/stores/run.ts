@@ -132,11 +132,15 @@ export const useRunStore = defineStore("run", () => {
   // `embed:view` protocol — see lib/embedView.ts). `embedScope` is the opaque
   // token a refine carries as the `current_scene` slot so the edit targets the
   // slide/view the operator is actually looking at; `embedLabel` is for display.
+  // `embedStep` is the producer-native reveal/transition within that scope,
+  // used only to reopen annotation embeds at the exact same visual position.
   // Producer-neutral: kitsoki never interprets the scope.
   const embedScope = ref<string>("");
+  const embedStep = ref<string>("");
   const embedLabel = ref<string>("");
-  function setEmbedView(view: { scope: string; label?: string }): void {
+  function setEmbedView(view: { scope: string; step?: string; label?: string }): void {
     embedScope.value = view.scope;
+    embedStep.value = view.step ?? "";
     embedLabel.value = view.label ?? "";
   }
   // currentView is the latest TurnResult (the current room's view + menu).
@@ -878,6 +882,7 @@ export const useRunStore = defineStore("run", () => {
     pendingStream,
     busy,
     embedScope,
+    embedStep,
     embedLabel,
     setEmbedView,
     harnessProfiles,

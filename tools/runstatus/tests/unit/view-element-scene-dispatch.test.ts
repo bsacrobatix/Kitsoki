@@ -52,11 +52,12 @@ describe("ViewElement scene-aware refine dispatch", () => {
     // The live deck reports the operator navigated to scene 9 (Cat Wrangling).
     window.dispatchEvent(
       new MessageEvent("message", {
-        data: { type: "embed:view", producer: "slidey", scope: "9", label: "Cat Wrangling" },
+        data: { type: "embed:view", producer: "slidey", scope: "9", step: 2, label: "Cat Wrangling" },
       }),
     );
     await w.vm.$nextTick();
     expect(store.embedScope).toBe("9");
+    expect(store.embedStep).toBe("2");
 
     // Stage an anchor + instruction and send (drive the component's send path).
     (w.vm as unknown as { onAnchor: (a: unknown) => void }).onAnchor({
@@ -72,5 +73,36 @@ describe("ViewElement scene-aware refine dispatch", () => {
     const slots = submit.mock.calls[0][3] as Record<string, unknown>;
     expect(slots.feedback).toBe("swap the cat for a cowboy herding cats");
     expect(slots.current_scene).toBe("9"); // the viewed slide rode the refine
+  });
+
+  it("opens annotate on the same viewed scene transition", async () => {
+    const w = mountSlideshow();
+    const store = useRunStore();
+
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: { type: "embed:view", producer: "slidey", scope: "9", step: 2, label: "Cat Wrangling" },
+      }),
+    );
+    await w.vm.$nextTick();
+    expect(store.embedScope).toBe("9");
+    expect(store.embedStep).toBe("2");
+
+    await w.find('[data-testid="media-annotate"]').trigger("click");
+    await w.vm.$nextTick();
+
+    const frame = w.find('[data-testid="aa-slidey-embed"]');
+    expect(frame.exists()).toBe(true);
+    const post = vi.fn();
+    Object.defineProperty(frame.element, "contentWindow", {
+      value: { postMessage: post },
+      configurable: true,
+    });
+    await frame.trigger("load");
+
+    expect(post).toHaveBeenCalledWith(
+      { type: "embed:annotate", enabled: true, scope: "9", step: "2" },
+      "*",
+    );
   });
 });

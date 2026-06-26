@@ -22,6 +22,8 @@ export interface EmbedViewMessage {
   producer?: string;
   /** The opaque scope token the host round-trips back (e.g. a scene index). */
   scope: string;
+  /** Optional producer-native transition/reveal step within the scope. */
+  step?: string;
   /** Human label for the current view ("Scene 9 · Cat Wrangling"). */
   label?: string;
   /** Total number of views, when the producer knows it. */
@@ -45,6 +47,12 @@ export function parseEmbedView(data: unknown): EmbedViewMessage | null {
   return {
     producer: typeof m.producer === "string" ? m.producer : undefined,
     scope,
+    step:
+      typeof m.step === "number"
+        ? String(m.step)
+        : typeof m.step === "string" && m.step !== ""
+          ? m.step
+          : undefined,
     label: typeof m.label === "string" ? m.label : undefined,
     count: typeof m.count === "number" ? m.count : undefined,
   };
@@ -137,10 +145,11 @@ export function installEmbedPickListener(
 export function sendAnnotateMode(
   targetWindow: Pick<Window, "postMessage"> | null | undefined,
   enabled: boolean,
+  view?: { scope?: string; step?: string },
 ): void {
   if (!targetWindow) return;
   try {
-    targetWindow.postMessage({ type: "embed:annotate", enabled }, "*");
+    targetWindow.postMessage({ type: "embed:annotate", enabled, ...(view ?? {}) }, "*");
   } catch {
     /* cross-origin restriction — ignore */
   }

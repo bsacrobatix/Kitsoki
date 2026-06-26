@@ -631,6 +631,8 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
           :media-kind="annotateKind"
           :poster-handle="mediaHandle"
           :live-embed="isSlideshow"
+          :embed-scope="_run.embedScope"
+          :embed-step="_run.embedStep"
           @anchor="onAnchor"
         />
 

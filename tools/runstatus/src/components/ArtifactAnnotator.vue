@@ -60,6 +60,9 @@ const props = defineProps<{
   posterHandle?: string;
   /** Use the producer's live embedded picker instead of sidecar/poster overlay. */
   liveEmbed?: boolean;
+  /** Producer-native view state to restore before enabling live annotation. */
+  embedScope?: string;
+  embedStep?: string;
   /** The route the capture happens on (rides on the emitted anchor). */
   route?: string;
   /** Optional recorded rrweb events for the rrweb kind (else fetched lazily). */
@@ -261,7 +264,10 @@ const useLiveEmbed = computed<boolean>(() => props.mediaKind === "slidey" && pro
 
 function onEmbedLoad(): void {
   // Ask the deck to enter annotation mode once it has booted.
-  sendAnnotateMode(embedFrame.value?.contentWindow ?? null, true);
+  sendAnnotateMode(embedFrame.value?.contentWindow ?? null, true, {
+    ...(props.embedScope ? { scope: props.embedScope } : {}),
+    ...(props.embedStep ? { step: props.embedStep } : {}),
+  });
 }
 
 onMounted(() => {

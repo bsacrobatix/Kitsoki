@@ -19,13 +19,25 @@ function mountSlidey() {
       sessionId: "s1",
       mediaHandle: "slidey-edit#abc",
       mediaKind: "slidey",
+      liveEmbed: true,
     },
   });
 }
 
 describe("ArtifactAnnotator live-embed (slidey)", () => {
   it("renders the live deck iframe and enables annotation mode on load", async () => {
-    const w = mountSlidey();
+    const w = mount(ArtifactAnnotator, {
+      attachTo: document.body,
+      props: {
+        ds: ds as never,
+        sessionId: "s1",
+        mediaHandle: "slidey-edit#abc",
+        mediaKind: "slidey",
+        liveEmbed: true,
+        embedScope: "9",
+        embedStep: "2",
+      },
+    });
     const frame = w.find('[data-testid="aa-slidey-embed"]');
     expect(frame.exists()).toBe(true);
 
@@ -36,7 +48,10 @@ describe("ArtifactAnnotator live-embed (slidey)", () => {
       configurable: true,
     });
     await frame.trigger("load");
-    expect(post).toHaveBeenCalledWith({ type: "embed:annotate", enabled: true }, "*");
+    expect(post).toHaveBeenCalledWith(
+      { type: "embed:annotate", enabled: true, scope: "9", step: "2" },
+      "*",
+    );
   });
 
   it("turns an embed:pick into a precise semantic_element anchor", async () => {

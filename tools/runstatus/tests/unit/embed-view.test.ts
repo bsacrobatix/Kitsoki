@@ -15,8 +15,8 @@ import {
 describe("parseEmbedView", () => {
   it("parses a well-formed embed:view message", () => {
     expect(
-      parseEmbedView({ type: "embed:view", producer: "slidey", scope: "9", label: "Cat Wrangling", count: 35 }),
-    ).toEqual({ producer: "slidey", scope: "9", label: "Cat Wrangling", count: 35 });
+      parseEmbedView({ type: "embed:view", producer: "slidey", scope: "9", step: 2, label: "Cat Wrangling", count: 35 }),
+    ).toEqual({ producer: "slidey", scope: "9", step: "2", label: "Cat Wrangling", count: 35 });
   });
 
   it("coerces a numeric scope to a string (opaque round-trip token)", () => {
@@ -88,8 +88,11 @@ describe("installEmbedPickListener", () => {
 describe("sendAnnotateMode", () => {
   it("posts the host→producer enable message into the target window", () => {
     const post = vi.fn();
-    sendAnnotateMode({ postMessage: post }, true);
-    expect(post).toHaveBeenCalledWith({ type: "embed:annotate", enabled: true }, "*");
+    sendAnnotateMode({ postMessage: post }, true, { scope: "9", step: "2" });
+    expect(post).toHaveBeenCalledWith(
+      { type: "embed:annotate", enabled: true, scope: "9", step: "2" },
+      "*",
+    );
   });
   it("is a no-op without a target window", () => {
     expect(() => sendAnnotateMode(null, true)).not.toThrow();
