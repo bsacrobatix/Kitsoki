@@ -1,7 +1,7 @@
 states:
   run_created:
     description: "A product-journey QA run bundle exists; waiting for captured evidence."
-    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, scenario, evidence_kind, evidence_path, finding_kind, finding_title, status]
+    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, scenario, evidence_kind, evidence_path, finding_kind, finding_title, review_status, review_summary, status]
     view:
       - banner:
           text: "RUN CREATED"
@@ -16,6 +16,7 @@ states:
             Deck: '{{ world.deck_path|default:"(pending)" }}'
             Last evidence: '{{ world.scenario|default:"(none)" }} / {{ world.evidence_kind|default:"" }}'
             Last finding: '{{ world.finding_kind|default:"(none)" }} / {{ world.finding_title|default:"" }}'
+            Review: '{{ world.review_status|default:"(not reviewed)" }}'
             Status: "{{ world.status }}"
       - choice:
           mode: single
@@ -30,6 +31,9 @@ states:
             - label: "seed_demo"
               hint: "populate representative evidence and findings for deck review"
               intent: seed_demo
+            - label: "review"
+              hint: "score whether the bundle is ready for human review"
+              intent: review
             - label: "accept"
               hint: "finish with the current run bundle"
               intent: accept
@@ -135,6 +139,30 @@ states:
               on_error: run_created
             - set:
                 status: "demo_seeded"
+      review:
+        - target: run_created
+          effects:
+            - set:
+                status: "reviewing"
+            - invoke: host.run
+              id: review_product_journey_run
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --review-run
+                  - --json-output
+                  - --run-dir
+                  - "{{ world.run_dir }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                review_status: "stdout_json.review_status"
+                review_summary: "stdout_json.summary"
+                deck_path: "stdout_json.deck_path"
+              on_error: run_created
+            - set:
+                status: "reviewed"
       accept:
         - target: done
           effects:

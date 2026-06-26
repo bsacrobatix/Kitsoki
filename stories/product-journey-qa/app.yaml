@@ -23,6 +23,8 @@ world:
   finding_title:  { type: string, default: "" }
   finding_summary: { type: string, default: "" }
   finding_severity: { type: string, default: "" }
+  review_status:  { type: string, default: "" }
+  review_summary: { type: string, default: "" }
   last_result:    { type: object, default: {} }
   status:         { type: string, default: "idle" }
 
@@ -59,6 +61,10 @@ intents:
     description: "Attach deterministic demo evidence and findings to the current run."
     examples: ["seed demo evidence", "dogfood the demo bundle", "populate demo"]
     priority: 78
+  review:
+    description: "Review the current product-journey bundle for readiness."
+    examples: ["review run", "check readiness", "is this bundle reviewable"]
+    priority: 76
   accept:
     description: "Accept the current report bundle and finish."
     examples: ["accept", "done", "looks good"]
@@ -73,7 +79,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, attach, record, seed_demo, accept, quit, look]
+  intents: [start, attach, record, seed_demo, review, accept, quit, look]
 
 root: idle
 

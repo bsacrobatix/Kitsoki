@@ -32,7 +32,7 @@ python3 tools/product-journey/run.py --emit-run --project gears-rust --persona c
 
 This writes `.artifacts/product-journey/<run-id>/` with `run.json`,
 `journey.md`, `metrics.json`, `bugs.json`, `findings.json`, `evidence.json`,
-`scenarios.json`, and `deck.slidey.json`. Add `--publish-deck` when the
+`scenarios.json`, `review.json`, and `deck.slidey.json`. Add `--publish-deck` when the
 generated deck should replace `docs/decks/product-journey-eval.slidey.json` for
 review.
 
@@ -72,6 +72,18 @@ python3 tools/product-journey/run.py --seed-demo-evidence \
 
 This is not a substitute for real visual MCP capture, but it proves the report
 aggregation and Slidey deck shape before a live run.
+
+Review whether a bundle is ready for human discussion:
+
+```sh
+python3 tools/product-journey/run.py --review-run \
+  --run-dir .artifacts/product-journey/<run-id>
+```
+
+The review writes `review.json`, updates `metrics.json`, and adds a readiness
+scene to `deck.slidey.json`. Hard failures mean the bundle is still skeletal;
+warnings identify useful evidence quality improvements, such as missing key
+interaction video.
 
 For `gears-rust`, this prints the existing external-bakeoff readiness signal and
 the local-only verification command. If you have a local checkout, it also

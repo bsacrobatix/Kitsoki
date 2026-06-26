@@ -259,6 +259,7 @@ def build_run_bundle(
             "findings": "findings.json",
             "evidence": "evidence.json",
             "scenarios": "scenarios.json",
+            "review": "review.json",
             "deck": "deck.slidey.json",
         },
         "notes": [
@@ -282,6 +283,9 @@ def build_run_bundle(
         "strength_count": 0,
         "weakness_count": 0,
         "fix_count": 0,
+        "review_status": "not_reviewed",
+        "review_passed_checks": 0,
+        "review_total_checks": 0,
         "oracle_results": [],
         "checkpoint_ratings": [],
     }
@@ -296,6 +300,12 @@ def build_run_bundle(
     write_json(run_dir / "findings.json", findings)
     write_json(run_dir / "evidence.json", evidence)
     write_json(run_dir / "scenarios.json", {"run_id": run_id, "items": scenario_items})
+    write_json(run_dir / "review.json", {
+        "run_id": run_id,
+        "status": "not_reviewed",
+        "summary": "Run has not been reviewed for readiness yet.",
+        "checks": [],
+    })
     write_json(run_dir / "deck.slidey.json", deck)
     if publish_deck is not None:
         publish_deck.parent.mkdir(parents=True, exist_ok=True)
@@ -323,6 +333,12 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
     evidence = read_json(run_dir / "evidence.json")
     bugs = read_json(run_dir / "bugs.json")
     findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"run_id": run_json["run_id"], "items": []}
+    review = read_json(run_dir / "review.json") if (run_dir / "review.json").exists() else {
+        "run_id": run_json["run_id"],
+        "status": "not_reviewed",
+        "summary": "Run has not been reviewed for readiness yet.",
+        "checks": [],
+    }
 
     evidence_items = evidence.get("items", [])
     present_items = [item for item in evidence_items if item.get("status") in {"captured", "validated"}]
@@ -377,6 +393,9 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
         "weakness_count": finding_summary["weakness"],
         "issue_count": finding_summary["issue"],
         "fix_count": finding_summary["fix"],
+        "review_status": review.get("status", "not_reviewed"),
+        "review_passed_checks": review.get("summary_counts", {}).get("passed", 0),
+        "review_total_checks": review.get("summary_counts", {}).get("total", 0),
         "oracle_results": [],
         "checkpoint_ratings": [],
     }
@@ -384,10 +403,11 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
     write_json(run_dir / "run.json", run_json)
     write_json(run_dir / "evidence.json", evidence)
     write_json(run_dir / "findings.json", findings)
+    write_json(run_dir / "review.json", review)
     write_json(run_dir / "metrics.json", metrics)
     write_json(run_dir / "scenarios.json", {"run_id": run_json["run_id"], "items": run_json["scenarios"]})
     (run_dir / "journey.md").write_text(render_journey(run_json), encoding="utf-8")
-    deck = render_deck(run_json, metrics, evidence, findings)
+    deck = render_deck(run_json, metrics, evidence, findings, review)
     write_json(run_dir / "deck.slidey.json", deck)
     if publish_deck is not None:
         publish_deck.parent.mkdir(parents=True, exist_ok=True)
@@ -518,6 +538,127 @@ def seed_demo_evidence(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     }
 
 
+def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
+    update_derived_artifacts(run_dir, publish_deck=None)
+    run_json = read_json(run_dir / "run.json")
+    evidence = read_json(run_dir / "evidence.json")
+    findings = read_json(run_dir / "findings.json")
+    metrics = read_json(run_dir / "metrics.json")
+
+    required_files = [
+        "run.json",
+        "journey.md",
+        "metrics.json",
+        "bugs.json",
+        "findings.json",
+        "evidence.json",
+        "scenarios.json",
+        "review.json",
+        "deck.slidey.json",
+    ]
+    evidence_items = evidence.get("items", [])
+    present_items = [item for item in evidence_items if item.get("status") in {"captured", "validated"}]
+    rejected_items = [item for item in evidence_items if item.get("status") == "rejected"]
+    video_items = [
+        item for item in present_items
+        if "video" in item.get("kind", "") or "video" in item.get("path", "")
+    ]
+    finding_items = findings.get("items", [])
+    finding_kinds = {item.get("kind") for item in finding_items}
+
+    checks = [
+        {
+            "id": "required-files",
+            "status": "pass" if all((run_dir / name).exists() for name in required_files) else "fail",
+            "summary": "All required bundle files exist.",
+            "detail": ", ".join(name for name in required_files if not (run_dir / name).exists()),
+        },
+        {
+            "id": "scenario-contract",
+            "status": "pass" if len(run_json.get("scenarios", [])) >= 1 and len(evidence_items) >= len(run_json.get("scenarios", [])) else "fail",
+            "summary": "Scenario and evidence contracts are present.",
+            "detail": f"scenarios={len(run_json.get('scenarios', []))}, evidence_slots={len(evidence_items)}",
+        },
+        {
+            "id": "captured-evidence",
+            "status": "pass" if present_items else "fail",
+            "summary": "At least one captured or validated evidence artifact is attached.",
+            "detail": f"present={len(present_items)}, required={len(evidence_items)}",
+        },
+        {
+            "id": "key-video",
+            "status": "pass" if video_items else "warn",
+            "summary": "At least one key interaction video is attached for Slidey playback.",
+            "detail": f"video_items={len(video_items)}",
+        },
+        {
+            "id": "findings-summary",
+            "status": "pass" if finding_items else "fail",
+            "summary": "Strengths, weaknesses, issues, or fixes are recorded.",
+            "detail": f"findings={len(finding_items)}",
+        },
+        {
+            "id": "balanced-findings",
+            "status": "pass" if {"strength", "weakness"} <= finding_kinds and ("issue" in finding_kinds or "fix" in finding_kinds) else "warn",
+            "summary": "Findings include positive evidence and at least one gap or fix.",
+            "detail": ", ".join(sorted(kind for kind in finding_kinds if kind)) or "none",
+        },
+        {
+            "id": "no-rejected-evidence",
+            "status": "pass" if not rejected_items else "warn",
+            "summary": "No attached evidence is marked rejected.",
+            "detail": f"rejected={len(rejected_items)}",
+        },
+        {
+            "id": "deck-generated",
+            "status": "pass" if (run_dir / "deck.slidey.json").exists() else "fail",
+            "summary": "Slidey deck exists for review.",
+            "detail": "deck.slidey.json",
+        },
+    ]
+    passed = sum(1 for check in checks if check["status"] == "pass")
+    failed = sum(1 for check in checks if check["status"] == "fail")
+    warned = sum(1 for check in checks if check["status"] == "warn")
+    status = "ready" if failed == 0 else "needs_evidence"
+    summary = f"{status}: {passed}/{len(checks)} checks passed, {warned} warnings, {failed} failures"
+    review = {
+        "run_id": run_json["run_id"],
+        "status": status,
+        "summary": summary,
+        "reviewed_at": now_utc(),
+        "summary_counts": {
+            "passed": passed,
+            "warned": warned,
+            "failed": failed,
+            "total": len(checks),
+        },
+        "checks": checks,
+    }
+    write_json(run_dir / "review.json", review)
+    metrics["review_status"] = status
+    metrics["review_passed_checks"] = passed
+    metrics["review_total_checks"] = len(checks)
+    write_json(run_dir / "metrics.json", metrics)
+    deck = render_deck(run_json, metrics, evidence, findings, review)
+    write_json(run_dir / "deck.slidey.json", deck)
+    if publish_deck is not None:
+        publish_deck.parent.mkdir(parents=True, exist_ok=True)
+        write_json(publish_deck, deck)
+    return {
+        "status": "reviewed",
+        "review_status": status,
+        "summary": summary,
+        "run_dir": str(run_dir),
+        "review_path": str(run_dir / "review.json"),
+        "deck_path": str(run_dir / "deck.slidey.json"),
+        "passed": passed,
+        "warnings": warned,
+        "failed": failed,
+        "total": len(checks),
+        "published_deck_path": str(publish_deck) if publish_deck is not None else "",
+    }
+
+
 def render_journey(run_json: dict) -> str:
     lines = [
         "# Product journey dry run",
@@ -563,7 +704,13 @@ def render_journey(run_json: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_deck(run_json: dict, metrics: dict, evidence: Optional[dict] = None, findings: Optional[dict] = None) -> dict:
+def render_deck(
+    run_json: dict,
+    metrics: dict,
+    evidence: Optional[dict] = None,
+    findings: Optional[dict] = None,
+    review: Optional[dict] = None,
+) -> dict:
     stage_lines = [f"{stage['id']}: {stage['status']}" for stage in run_json["stages"]]
     scenario_lines = [
         f"{scenario['label']}: {scenario['stage']} ({', '.join(scenario['required_mcp'])})"
@@ -588,6 +735,12 @@ def render_deck(run_json: dict, metrics: dict, evidence: Optional[dict] = None, 
         for item in finding_items[:12]
     ]
     findings_body = "\n".join(finding_lines) if finding_lines else "No strengths, weaknesses, issues, or fixes recorded yet."
+    review_body = "Not reviewed yet."
+    if review is not None:
+        review_lines = [review.get("summary", "No review summary.")]
+        for check in review.get("checks", [])[:8]:
+            review_lines.append(f"{check.get('status', 'unknown')}: {check.get('id', 'check')} - {check.get('summary', '')}")
+        review_body = "\n".join(review_lines)
     return {
         "meta": {
             "mode": "report",
@@ -629,6 +782,13 @@ def render_deck(run_json: dict, metrics: dict, evidence: Optional[dict] = None, 
                 "title": "Strengths, weaknesses, issues, fixes",
                 "body": findings_body,
                 "narration": "The journey report records what worked, what failed, what was found, and what was fixed.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Review readiness",
+                "title": metrics.get("review_status", "not_reviewed"),
+                "body": review_body,
+                "narration": "The review gate checks whether the bundle has enough evidence and findings to discuss.",
             },
             {
                 "type": "narrative",
@@ -824,6 +984,7 @@ def main() -> None:
     parser.add_argument("--attach-evidence", action="store_true", help="Attach one evidence artifact to an existing run bundle")
     parser.add_argument("--record-finding", action="store_true", help="Record one strength, weakness, issue, or fix in an existing run bundle")
     parser.add_argument("--seed-demo-evidence", action="store_true", help="Attach deterministic demo evidence and findings to an existing run bundle")
+    parser.add_argument("--review-run", action="store_true", help="Review an existing run bundle for readiness")
     parser.add_argument("--run-dir", default="", help="Existing .artifacts/product-journey/<run-id> directory")
     parser.add_argument("--scenario", default="", help="Scenario id for --attach-evidence")
     parser.add_argument("--evidence-kind", default="", help="Evidence kind for --attach-evidence")
@@ -861,6 +1022,25 @@ def main() -> None:
     catalog = load_catalog(CATALOG)
     personas = load_personas(PERSONAS)
     scenarios = load_scenarios(SCENARIOS)
+
+    if args.review_run:
+        if not args.run_dir:
+            raise SystemExit("--review-run requires --run-dir")
+        publish_deck = DEFAULT_DECK if args.publish_deck else None
+        run_dir = run_dir_from_arg(args.run_dir)
+        reviewed = review_run_bundle(run_dir, publish_deck)
+        if args.json_output:
+            print(json.dumps(reviewed, sort_keys=True))
+            append_log(f"Reviewed run bundle {run_dir.name}: {reviewed['review_status']}")
+            return
+        print(f"Review status: {reviewed['review_status']}")
+        print(reviewed["summary"])
+        print(f"Review: {reviewed['review_path']}")
+        print(f"Deck: {reviewed['deck_path']}")
+        if publish_deck is not None:
+            print(f"Published deck: {publish_deck}")
+        append_log(f"Reviewed run bundle {run_dir.name}: {reviewed['review_status']}")
+        return
 
     if args.seed_demo_evidence:
         if not args.run_dir:

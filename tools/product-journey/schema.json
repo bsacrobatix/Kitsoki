@@ -12,7 +12,7 @@
   ],
   "run_result": {
     "required": ["run_id", "created_at", "mode", "project", "persona", "stages", "scenarios", "artifacts"],
-    "artifacts": ["run.json", "journey.md", "metrics.json", "bugs.json", "findings.json", "evidence.json", "scenarios.json", "deck.slidey.json"]
+    "artifacts": ["run.json", "journey.md", "metrics.json", "bugs.json", "findings.json", "evidence.json", "scenarios.json", "review.json", "deck.slidey.json"]
   },
   "stage_statuses": ["planned", "ready", "captured", "cached_validated", "validated", "blocked", "error"],
   "scenario": {
@@ -20,6 +20,8 @@
   },
   "evidence_statuses": ["missing", "captured", "validated", "rejected"],
   "finding_kinds": ["strength", "weakness", "issue", "fix"],
+  "review_statuses": ["not_reviewed", "needs_evidence", "ready"],
+  "review_check_statuses": ["pass", "warn", "fail"],
   "demo_seed": {
     "evidence_items": 6,
     "findings": 4

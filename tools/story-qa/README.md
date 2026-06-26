@@ -61,3 +61,13 @@ weaknesses, issues found, and fixes for the final deck.
 
 Use `tools/product-journey/run.py --seed-demo-evidence` only for deterministic
 no-LLM deck-shape dogfood before a live visual MCP run.
+
+Before treating a bundle as review-ready, run:
+
+```sh
+python3 tools/product-journey/run.py --review-run \
+  --run-dir .artifacts/product-journey/<run-id>
+```
+
+That writes `review.json`, updates deck metrics, and distinguishes hard missing
+evidence from softer quality warnings.

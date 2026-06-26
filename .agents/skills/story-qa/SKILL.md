@@ -89,3 +89,13 @@ issues found, and fixes for the Slidey review deck.
 
 Use `--seed-demo-evidence` only for deterministic no-LLM deck-shape dogfood
 before a live visual MCP run.
+
+Before presenting a bundle as review-ready, run the readiness gate:
+
+```sh
+python3 tools/product-journey/run.py --review-run \
+  --run-dir .artifacts/product-journey/<run-id>
+```
+
+The gate writes `review.json`, updates `metrics.json`, and adds a Slidey scene
+with hard failures and softer evidence-quality warnings.

@@ -48,6 +48,21 @@ host_handlers:
             findings_added: 4
             present_evidence_count: 7
             findings_count: 5
+      review_product_journey_run:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            status: reviewed
+            review_status: ready
+            summary: "ready: 8/8 checks passed, 0 warnings, 0 failures"
+            run_dir: .artifacts/product-journey/run-123
+            review_path: .artifacts/product-journey/run-123/review.json
+            deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+            passed: 8
+            warnings: 0
+            failed: 0
+            total: 8
 
 turns:
   - intent:
@@ -114,6 +129,17 @@ turns:
     expect_host_calls:
       - handler: host.run
         args: { call: seed_product_journey_demo }
+
+  - intent: { name: review, slots: {} }
+    expect_state: run_created
+    expect_world:
+      status: reviewed
+      review_status: ready
+      review_summary: "ready: 8/8 checks passed, 0 warnings, 0 failures"
+      deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+    expect_host_calls:
+      - handler: host.run
+        args: { call: review_product_journey_run }
 
   - intent: { name: accept, slots: {} }
     expect_state: done

@@ -11,6 +11,8 @@ It is intentionally no-LLM:
   for strengths, weaknesses, issues, and fixes.
 - `seed_demo` calls `tools/product-journey/run.py --seed-demo-evidence
   --json-output` to populate a no-LLM review bundle.
+- `review` calls `tools/product-journey/run.py --review-run --json-output` to
+  write `review.json` and score whether the bundle is ready for human review.
 - Flow fixtures stub `host.run`, so automated tests never call a live model or
   external service.
 
