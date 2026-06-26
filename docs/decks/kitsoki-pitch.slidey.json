@@ -558,8 +558,8 @@
     {
       "type": "narrative",
       "eyebrow": "Loop engineering, generalized",
-      "body": "Kitsoki is the same idea \u2014 a graph of these loops.",
-      "lede": "A Cherny loop solves one goal with one gate and one budget. Kitsoki turns each phase into a separate gated loop, then composes those loops into a durable workflow.",
+      "body": "Kitsoki the conclusion of this idea \u2014 a graph of these loops.",
+      "lede": "A Cherny loop solves one goal with one gate and one budget. Kitsoki turns each phase into a separate gated loop, then composes those loops into a durable workflow that can be reused and improved.",
       "hold": 210,
       "narration": "Kitsoki generalizes that loop: every phase gets a gate and budget, then composes into a graph."
     },
