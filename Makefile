@@ -312,6 +312,8 @@ history-smoke:
 		first_candidate="$(HISTORY_CANDIDATES)"; first_candidate="$${first_candidate%%,*}"; \
 		if [ -n "$(HISTORY_REPO_DIR)" ]; then repo_arg="--repo-dir $(HISTORY_REPO_DIR)"; else repo_arg=""; fi; \
 		tools/bugfix-bakeoff/external/drive_cell.sh --project "$(HISTORY_PROJECT)" --bug "$$first_bug" --candidate "$$first_candidate" $$repo_arg --no-drive; \
+		cache="$${EXTERNAL_BAKEOFF_CACHE:-.artifacts/external-bakeoff}"; \
+		python3 -c 'import json, sys; path, first_bug = sys.argv[1:3]; data = json.load(open(path)); assert data.get("bugs") == [first_bug], "first-cell preflight should be scoped to %s, got %r" % (first_bug, data.get("bugs"))' "$$cache/preflight/$(HISTORY_PROJECT)-$$first_bug-$$first_candidate.json" "$$first_bug"; \
 	fi
 	@mkdir -p .artifacts/external-bakeoff/readiness
 	@if [ -n "$(HISTORY_REPO_DIR)" ]; then repo_arg="--repo-dir $(HISTORY_REPO_DIR)"; else repo_arg=""; fi; \
