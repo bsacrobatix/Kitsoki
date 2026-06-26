@@ -703,6 +703,9 @@ world:
   # ── PR handoff (lifted from `pr` import's exits.merged.set) ───────
   last_pr_url:         { type: string, default: "" }
   status:              { type: string, default: "open" }   # open | merged | abandoned
+  human_review_reason: { type: string, default: "" }        # concise reason posted when autonomy needs a human
+  human_review_issue_comment_id: { type: string, default: "" }
+  human_review_pr_comment_ok:    { type: bool,   default: false }
 
   # ── Carry-fields for the bf → pr handoff projection ───────────────
   # bf's @exit:done writes done_artifact via `set:` (per the
@@ -1462,9 +1465,10 @@ imports:
           pr_title: "{{ world.bf__done_artifact.summary_title }}"
           pr_body:  "{{ world.bf__done_artifact.summary_markdown }}"
       abandoned:
-        to: landing
+        to: human_review_report
         set:
           status: "abandoned"
+          human_review_reason: "{{ world.bf__abandon_reason }}"
       # slice 4 added bf's direct-ship terminals (shipped / needs-human). This
       # hub pins bugfix_exit: open-PR, so neither fires in practice — but the
       # loader requires every child exit be mapped. shipped lands like a merge;
@@ -1474,18 +1478,21 @@ imports:
         set:
           status: "shipped"
       needs-human:
-        to: landing
+        to: human_review_report
         set:
           status: "needs-human"
+          last_error: "{{ world.bf__last_error }}"
+          human_review_reason: "{{ world.bf__last_error }}"
       # bf's repro RED-gate GREEN branch (bugfix-repro-gate slice): the bug's
       # repro_command passed on the unchanged worktree, so it does not currently
       # reproduce. Land back at the workbench carrying the gate output; a human
       # decides wontfix / cannot-reproduce or supplies a sharper repro.
       not-reproducible:
-        to: landing
+        to: human_review_report
         set:
           status:     "not-reproducible"
           last_error: "{{ world.bf__last_error }}"
+          human_review_reason: "{{ world.bf__last_error }}"
       # bf's triage-only mode (bugfix_mode: triage) ends here: a standardized
       # verdict was produced without attempting a fix. This hub runs bf in
       # full/open-PR mode so triaged never fires in practice, but the loader
@@ -1537,9 +1544,12 @@ imports:
           status:      "merged"
           last_pr_url: "{{ world.pr__pr_url }}"
       abandoned:
-        to: landing
+        to: human_review_report
         set:
           status: "abandoned"
+          pr_id: "{{ world.pr__pr_id != '' ? world.pr__pr_id : world.pr_id }}"
+          last_pr_url: "{{ world.pr__pr_url != '' ? world.pr__pr_url : world.last_pr_url }}"
+          human_review_reason: "{{ world.pr__refine_feedback }}"
       # pushback_resolved is declared by pr-refinement but Wave 2 does
       # not exercise it (Wave 3 may use it for re-review loops). Map to
       # main as a safety landing so the loader is happy.
