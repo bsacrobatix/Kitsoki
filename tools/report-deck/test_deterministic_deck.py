@@ -196,6 +196,33 @@ class DeterministicDeckTest(unittest.TestCase):
         artifacts = [scene for scene in deck["scenes"] if scene.get("title") == "Generated artifacts"][0]
         self.assertEqual(artifacts["rows"][0]["cells"][0], "app.yaml")
 
+    def test_model_harness_deck_uses_report_artifact(self):
+        _, deck = run_tool("model-harness", {
+            "question": "Which configured model should route this room?",
+            "status": "complete",
+            "markdown_path": ".context/model-harness-eval.md",
+            "summary_path": ".artifacts/model-harness-eval/summary.json",
+            "case_study_path": "docs/case-studies/model-harness-eval.md",
+            "configured_options": [
+                {"profile": "codex-native", "backend": "codex", "model": "gpt-5-codex", "effort": "medium", "source": "local"},
+            ],
+            "recommendations": {
+                "fastest": {"profile": "codex-native", "model": "gpt-5-codex", "evidence_status": "measured", "rationale": "fast"},
+                "cheapest": {"profile": "codex-native", "model": "gpt-5-codex", "evidence_status": "measured", "rationale": "cheap"},
+                "best": {"profile": "codex-native", "model": "gpt-5-codex", "evidence_status": "measured", "rationale": "best"},
+                "selected": {"profile": "codex-native", "model": "gpt-5-codex", "evidence_status": "measured", "rationale": "selected"},
+            },
+            "override": {"applied": True, "summary": "Applied local default."},
+            "evidence": {"eval_reports": 3, "readiness_gaps": 1},
+            "limitations": ["No live benchmark."],
+        })
+        self.assertEqual(deck["meta"]["title"], "Model Harness Evaluation")
+        recommendations = [scene for scene in deck["scenes"] if scene.get("title") == "Recommendations"][0]
+        self.assertEqual(recommendations["rows"][3]["cells"][:3], ["selected", "codex-native", "gpt-5-codex"])
+        evidence = [scene for scene in deck["scenes"] if scene.get("title") == "Review artifacts"][0]
+        labels = [item["label"] for item in evidence["items"]]
+        self.assertIn("Report artifact", labels)
+
 
 if __name__ == "__main__":
     unittest.main()

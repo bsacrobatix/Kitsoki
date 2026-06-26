@@ -356,6 +356,101 @@ def onboarding(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str
     return title_deck(title, f"Deterministic onboarding review for {target}", scenes), refs
 
 
+def model_harness(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    question = data.get("question") or "Model harness evaluation"
+    recs = data.get("recommendations") or {}
+    override = data.get("override") or {}
+    evidence = data.get("evidence") or {}
+    options = data.get("configured_options") or []
+    limitations = data.get("limitations") or []
+    commands = data.get("commands_run") or []
+
+    def rec_row(name: str) -> dict[str, list[str]]:
+        rec = recs.get(name) or {}
+        return {"cells": [
+            name,
+            rec.get("profile", ""),
+            rec.get("model", ""),
+            rec.get("effort", ""),
+            rec.get("evidence_status", ""),
+            rec.get("rationale", ""),
+        ]}
+
+    option_rows = []
+    for opt in options[:12]:
+        option_rows.append({"cells": [
+            opt.get("profile", ""),
+            opt.get("backend", ""),
+            opt.get("model", ""),
+            opt.get("effort", ""),
+            opt.get("source", ""),
+        ]})
+    evidence_rows = [{"cells": [key, num(value)]} for key, value in sorted(evidence.items())]
+    command_rows = [{"cells": [str(i + 1), cmd]} for i, cmd in enumerate(commands[:10])]
+
+    selected = recs.get("selected") or {}
+    scenes = [
+        objectives_scene("Recommendation status", [
+            {"label": "Reporter artifact", "status": status(data.get("status", "")), "detail": data.get("status", "pending")},
+            {"label": "Selected option", "status": status(selected.get("evidence_status", "")), "detail": f"{selected.get('profile', '')} / {selected.get('model', '')}"},
+            {"label": "Override", "status": "implemented" if override.get("applied") else "pending", "detail": override.get("summary", "")},
+            {"label": "Deck authoring", "status": "done", "detail": "This deck is deterministic from report_artifact.json."},
+        ]),
+        {
+            "type": "table",
+            "variant": "data",
+            "title": "Recommendations",
+            "columns": ["Type", "Profile", "Model", "Effort", "Evidence", "Rationale"],
+            "rows": [rec_row(name) for name in ["fastest", "cheapest", "best", "selected"]],
+            "hold": 3000,
+        },
+        {
+            "type": "table",
+            "variant": "data",
+            "title": "Configured options",
+            "columns": ["Profile", "Backend", "Model", "Effort", "Source"],
+            "rows": option_rows or [{"cells": ["-", "-", "-", "-", "-"]}],
+            "hold": 2600,
+        },
+        {
+            "type": "table",
+            "variant": "data",
+            "title": "Evidence counts",
+            "columns": ["Metric", "Value"],
+            "rows": evidence_rows or [{"cells": ["evidence", "missing"]}],
+            "hold": 2400,
+        },
+        evidence_scene("Review artifacts", [
+            {"label": "Markdown report", "status": "done", "detail": "Narrative report.", "ref": data.get("markdown_path", "")},
+            {"label": "Summary JSON", "status": "done", "detail": "Machine-readable rollup.", "ref": data.get("summary_path", "")},
+            {"label": "Case study", "status": "done", "detail": "Durable case-study doc.", "ref": data.get("case_study_path", "")},
+            {"label": "Report artifact", "status": "done", "detail": "Schema-validated input for this deterministic deck.", "ref": str(data.get("_source", ""))},
+        ]),
+    ]
+    if command_rows:
+        scenes.append({
+            "type": "table",
+            "variant": "data",
+            "title": "Commands run",
+            "columns": ["#", "Command"],
+            "rows": command_rows,
+            "hold": 3000,
+        })
+    if limitations:
+        scenes.append(objectives_scene("Limitations", [
+            {"label": f"Gap {i + 1}", "status": "pending", "detail": str(item)}
+            for i, item in enumerate(limitations[:8])
+        ]))
+    refs = [
+        {"label": "Markdown report", "path": data.get("markdown_path", ""), "status": "done"},
+        {"label": "Summary JSON", "path": data.get("summary_path", ""), "status": "done"},
+        {"label": "Case study", "path": data.get("case_study_path", ""), "status": "done"},
+        {"label": "Report artifact", "path": str(data.get("_source", "")), "status": "done"},
+    ]
+    subtitle = f"Selected {selected.get('profile', '(pending)')} / {selected.get('model', '')}"
+    return title_deck("Model Harness Evaluation", subtitle, scenes), refs
+
+
 def workflow(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
     title = data.get("title") or data.get("name") or "Workflow Report"
     objectives = data.get("objectives") or []
@@ -632,6 +727,7 @@ BUILDERS = {
     "external-summary": external_summary,
     "fanout": fanout,
     "feature-demo": feature_demo,
+    "model-harness": model_harness,
     "onboarding": onboarding,
     "product-journey": product_journey,
     "workflow": workflow,
