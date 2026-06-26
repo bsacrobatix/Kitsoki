@@ -15,6 +15,11 @@ world:
   matrix_id:      { type: string, default: "" }
   matrix_dir:     { type: string, default: "" }
   matrix_personas: { type: string, default: "primary" }
+  rollup_run_dir: { type: string, default: "" }
+  rollup_path:    { type: string, default: "" }
+  rollup_deck_path: { type: string, default: "" }
+  rollup_markdown_path: { type: string, default: "" }
+  rollup_summary: { type: object, default: {} }
   run_id:         { type: string, default: "" }
   run_dir:        { type: string, default: "" }
   deck_path:      { type: string, default: "" }
@@ -48,6 +53,12 @@ intents:
     slots:
       seed: { type: string, required: false }
       matrix_personas: { type: string, required: false }
+  rollup:
+    description: "Create or refresh the matrix rollup deck."
+    examples: ["rollup", "create rollup", "refresh matrix rollup"]
+    priority: 86
+    slots:
+      rollup_run_dir: { type: string, required: false }
   attach:
     description: "Attach captured evidence to the current product-journey run."
     examples: ["attach evidence", "add bugfix video", "record trace evidence"]
@@ -90,7 +101,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, attach, record, seed_demo, review, accept, quit, look]
+  intents: [start, matrix, rollup, attach, record, seed_demo, review, accept, quit, look]
 
 root: idle
 

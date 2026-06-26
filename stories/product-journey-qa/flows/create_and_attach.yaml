@@ -81,6 +81,25 @@ host_handlers:
             warnings: 0
             failed: 0
             total: 8
+      rollup_product_journey_matrix:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            status: rollup_created
+            matrix_id: matrix-123
+            matrix_dir: .artifacts/product-journey/matrices/matrix-123
+            rollup_path: .artifacts/product-journey/matrices/matrix-123/rollup.json
+            markdown_path: .artifacts/product-journey/matrices/matrix-123/rollup.md
+            deck_path: .artifacts/product-journey/matrices/matrix-123/rollup.slidey.json
+            runs_found: 1
+            assignments: 10
+            reviewed_runs: 1
+            ready_runs: 1
+            present_evidence_count: 6
+            required_evidence_count: 25
+            findings_count: 4
+            missing_assignment_count: 9
 
 turns:
   - intent:
@@ -99,6 +118,22 @@ turns:
     expect_host_calls:
       - handler: host.run
         args: { call: emit_product_journey_matrix }
+
+  - intent:
+      name: rollup
+      slots:
+        rollup_run_dir: .artifacts/product-journey/run-123
+    expect_state: matrix_created
+    expect_world:
+      status: rollup_created
+      rollup_run_dir: .artifacts/product-journey/run-123
+      rollup_path: .artifacts/product-journey/matrices/matrix-123/rollup.json
+      rollup_deck_path: .artifacts/product-journey/matrices/matrix-123/rollup.slidey.json
+      rollup_markdown_path: .artifacts/product-journey/matrices/matrix-123/rollup.md
+      deck_path: .artifacts/product-journey/matrices/matrix-123/rollup.slidey.json
+    expect_host_calls:
+      - handler: host.run
+        args: { call: rollup_product_journey_matrix }
 
   - intent:
       name: start

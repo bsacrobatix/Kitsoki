@@ -1048,6 +1048,7 @@ def render_matrix_deck(matrix: dict) -> dict:
 
 
 def collect_rollup_runs(matrix: dict, explicit_run_dirs: list[str]) -> list[Path]:
+    explicit_run_dirs = [value for value in explicit_run_dirs if value]
     if explicit_run_dirs:
         return [run_dir_from_arg(value) for value in explicit_run_dirs]
 

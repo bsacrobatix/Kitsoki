@@ -7,6 +7,8 @@ It is intentionally no-LLM:
 
 - `matrix` calls `tools/product-journey/run.py --emit-matrix --json-output` to
   create the 10-repo GitHub assignment plan.
+- `rollup` calls `tools/product-journey/run.py --rollup-matrix --json-output`
+  to create or refresh the matrix-level Slidey deck from reviewed run bundles.
 - `start` calls `tools/product-journey/run.py --emit-run --json-output`.
 - `attach` calls `tools/product-journey/run.py --attach-evidence --json-output`.
 - `record` calls `tools/product-journey/run.py --record-finding --json-output`

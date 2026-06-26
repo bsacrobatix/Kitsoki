@@ -1,7 +1,7 @@
 states:
   matrix_created:
     description: "A product-journey GitHub matrix exists; waiting for assignment runs."
-    relevant_world: [seed, matrix_id, matrix_dir, matrix_personas, deck_path, status]
+    relevant_world: [seed, matrix_id, matrix_dir, matrix_personas, deck_path, rollup_path, rollup_deck_path, rollup_markdown_path, status]
     view:
       - banner:
           text: "MATRIX CREATED"
@@ -14,8 +14,9 @@ states:
             Personas: "{{ world.matrix_personas }}"
             Matrix dir: '{{ world.matrix_dir|default:"(pending)" }}'
             Deck: '{{ world.deck_path|default:"(pending)" }}'
+            Rollup: '{{ world.rollup_deck_path|default:"(pending)" }}'
             Status: "{{ world.status }}"
-      - prose: "Use the matrix deck and matrix.json to launch one evidence-backed product-journey run per assignment."
+      - prose: "Use the matrix deck and matrix.json to launch one evidence-backed product-journey run per assignment, then roll up completed runs into the matrix review deck."
       - choice:
           mode: single
           prompt: "Actions"
@@ -23,6 +24,9 @@ states:
             - label: "start project=... persona=... seed=..."
               hint: "create a concrete run bundle for one matrix assignment"
               intent: start
+            - label: "rollup rollup_run_dir=..."
+              hint: "refresh the matrix rollup deck; omit the run dir to auto-discover matching runs"
+              intent: rollup
             - label: "accept"
               hint: "finish with the current matrix bundle"
               intent: accept
@@ -63,6 +67,35 @@ states:
               on_error: matrix_created
             - set:
                 status: "run_created"
+      rollup:
+        - target: .
+          effects:
+            - set:
+                rollup_run_dir: "{{ slots.rollup_run_dir ?? world.rollup_run_dir }}"
+                status: "rolling_up"
+            - invoke: host.run
+              id: rollup_product_journey_matrix
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --rollup-matrix
+                  - --json-output
+                  - --matrix-dir
+                  - "{{ world.matrix_dir }}"
+                  - --rollup-run-dir
+                  - "{{ slots.rollup_run_dir ?? world.rollup_run_dir }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                rollup_summary: stdout_json
+                rollup_path: "stdout_json.rollup_path"
+                rollup_deck_path: "stdout_json.deck_path"
+                rollup_markdown_path: "stdout_json.markdown_path"
+                deck_path: "stdout_json.deck_path"
+              on_error: matrix_created
+            - set:
+                status: "rollup_created"
       accept:
         - target: done
           effects:
