@@ -107,6 +107,10 @@ surface, required Kitsoki/visual MCP tools, expected evidence, and success
 criteria, while the brief states the persona and operating rules. Use
 `execution-plan.md` in the same bundle to follow the concrete MCP capture
 sequence and copy ready-to-fill `--attach-evidence` commands.
+For a live/cassette dogfood pass, delegate the bundle to
+`.agents/agents/product-journey-qa-driver.md`; that agent is scoped to consume
+the brief, drive Kitsoki Studio MCP and visual MCP, attach evidence, record
+findings, then run review and validation gates.
 Captured screenshots, videos, traces, and documents are indexed in
 `media-manifest.json`; the generated Slidey deck uses that manifest for
 playback-ready media entries.

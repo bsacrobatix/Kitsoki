@@ -707,6 +707,7 @@ def build_execution_plan(run_json: dict, evidence: dict) -> dict:
         "finalize_commands": [
             f"python3 tools/product-journey/run.py --record-finding --run-dir {run_dir_arg} --finding-kind <strength|weakness|issue|fix> --title <title> --summary <summary>",
             f"python3 tools/product-journey/run.py --review-run --run-dir {run_dir_arg}",
+            f"python3 tools/product-journey/run.py --validate-run --run-dir {run_dir_arg}",
         ],
     }
 
@@ -726,6 +727,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
             "Drive the product journey as this persona using Kitsoki MCP and visual MCP. "
             "Capture evidence, record concrete findings, and avoid treating planned steps as validated."
         ),
+        "recommended_agent": ".agents/agents/product-journey-qa-driver.md",
         "persona_contract": {
             "id": persona["id"],
             "label": persona["label"],
@@ -739,7 +741,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
             "Prefer MCP evidence over prose claims: screenshots, session traces, TUI frames, diffs, oracle output, and videos.",
             "Record strengths as well as weaknesses, issues, and fixes.",
             "If a live LLM or paid service would be required, stop and record the blocker instead of calling it from an automated test.",
-            "Attach every useful artifact with tools/product-journey/run.py --attach-evidence, then run --review-run.",
+            "Attach every useful artifact with tools/product-journey/run.py --attach-evidence, then run --review-run and --validate-run.",
         ],
         "scenario_order": [
             {
@@ -767,6 +769,7 @@ def render_agent_brief(brief: dict) -> str:
         f"- Persona: `{brief['persona_contract']['label']}`",
         f"- Surface preference: `{brief['persona_contract']['surface_preference']}`",
         f"- Risk focus: {', '.join(brief['persona_contract']['risk_focus'])}",
+        f"- Recommended driver: `{brief.get('recommended_agent', '.agents/agents/product-journey-qa-driver.md')}`",
         "",
         "## Mission",
         "",
