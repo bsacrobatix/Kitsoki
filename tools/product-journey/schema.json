@@ -57,7 +57,7 @@
   "review_statuses": ["not_reviewed", "needs_evidence", "ready"],
   "review_check_statuses": ["pass", "warn", "fail"],
   "demo_seed": {
-    "evidence_items": 6,
+    "evidence_items": 25,
     "findings": 4
   }
 }

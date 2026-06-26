@@ -22,7 +22,7 @@ host_handlers:
             run_deck_path: .artifacts/product-journey/run-123/deck.slidey.json
             rollup_deck_path: .artifacts/product-journey/matrices/matrix-123/rollup.slidey.json
             review_status: ready
-            review_summary: "ready: 11/12 checks passed, 1 warnings, 0 failures"
+            review_summary: "ready: 12/13 checks passed, 1 warnings, 0 failures"
             review_warnings: 1
             run_validation_status: valid
             run_validation_warnings: 1
@@ -49,7 +49,7 @@ turns:
       run_dir: .artifacts/product-journey/run-123
       deck_path: .artifacts/product-journey/dogfood/dogfood-123/deck.slidey.json
       review_status: ready
-      review_summary: "ready: 11/12 checks passed, 1 warnings, 0 failures"
+      review_summary: "ready: 12/13 checks passed, 1 warnings, 0 failures"
       dogfood_review_warnings: 1
       validation_status: valid
       validation_warnings: 1

@@ -180,7 +180,10 @@ python3 tools/product-journey/run.py --seed-demo-evidence \
 ```
 
 This is not a substitute for real visual MCP capture, but it proves the report
-aggregation and Slidey deck shape before a live run.
+aggregation, quality-gate accounting, and Slidey deck shape before a live run.
+It marks every required evidence slot captured with deterministic placeholder
+paths, so review gates can exercise the full artifact contract while validation
+still warns that those local paths do not resolve.
 
 Review whether a bundle is ready for human discussion:
 

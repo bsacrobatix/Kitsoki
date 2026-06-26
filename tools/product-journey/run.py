@@ -1645,14 +1645,45 @@ def record_blocker(
     )
 
 
+def demo_evidence_path(scenario: str, kind: str) -> str:
+    paths = {
+        "browser_screenshot": f"screens/{scenario}.png",
+        "screenshot_or_tui_png": f"screens/{scenario}.png",
+        "rendered_tui_frame": f"screens/{scenario}-tui.png",
+        "key_interaction_video": f"media/{scenario}-key-interaction.mp4",
+        "session_trace": f"traces/{scenario}.jsonl",
+        "trace_reference": f"traces/{scenario}.jsonl",
+        "navigation_trace": f"traces/{scenario}-navigation.json",
+        "page_url": f"artifacts/{scenario}-page-url.txt",
+        "checkpoint_rating": f"artifacts/{scenario}-checkpoint-rating.json",
+        "generated_config_diff": f"diffs/{scenario}-config.diff",
+        "candidate_diff": f"diffs/{scenario}-candidate.diff",
+        "implementation_diff": f"diffs/{scenario}-implementation.diff",
+        "onboarding_smoke_result": f"oracle-results/{scenario}-smoke.json",
+        "oracle_result": f"oracle-results/{scenario}-oracle.json",
+        "full_suite_result": f"oracle-results/{scenario}-full-suite.json",
+        "targeted_test_result": f"oracle-results/{scenario}-targeted-tests.json",
+        "prd_artifact": f"artifacts/{scenario}-prd.md",
+        "design_artifact": f"artifacts/{scenario}-design.md",
+        "review_notes": f"artifacts/{scenario}-review-notes.md",
+        "review_summary": f"artifacts/{scenario}-review-summary.md",
+        "bug_report_markdown": f"bug-reports/{scenario}.md",
+        "reproduction_steps": f"bug-reports/{scenario}-repro.md",
+    }
+    return paths.get(kind, f"artifacts/{scenario}-{kind}.txt")
+
+
 def seed_demo_evidence(run_dir: Path, publish_deck: Optional[Path]) -> dict:
+    evidence = read_json(run_dir / "evidence.json")
     demo_evidence = [
-        ("product-discovery", "browser_screenshot", "screens/product-discovery.png", "captured", "demo visual MCP screenshot placeholder"),
-        ("project-onboarding", "session_trace", "traces/onboarding.jsonl", "captured", "demo Studio MCP session trace placeholder"),
-        ("bugfix", "key_interaction_video", "media/bugfix-key-interaction.mp4", "captured", "demo key interaction video placeholder"),
-        ("prd-design", "design_artifact", "artifacts/design.md", "captured", "demo design artifact placeholder"),
-        ("feature-implementation", "targeted_test_result", "oracle-results/feature-tests.json", "captured", "demo targeted test result placeholder"),
-        ("evidence-backed-product-bug", "bug_report_markdown", "bug-reports/product-issue.md", "captured", "demo product bug report placeholder"),
+        (
+            item["scenario"],
+            item["kind"],
+            demo_evidence_path(item["scenario"], item["kind"]),
+            "captured",
+            f"demo placeholder: {evidence_capture_hint(item['kind'])}",
+        )
+        for item in evidence.get("items", [])
     ]
     for scenario, kind, path, status, notes in demo_evidence:
         attach_evidence(run_dir, scenario, kind, path, status, notes, publish_deck=None)
@@ -1746,6 +1777,13 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         if scenario.get("id", "") not in attempted_scenarios
     ]
     scenario_outcomes = build_scenario_outcomes(run_json, evidence, findings)
+    driver_plan = build_driver_plan(run_json, evidence, execution_plan)
+    quality_gates = summarize_quality_gates(evidence, scenario_outcomes, driver_plan)
+    unsatisfied_quality_gates = [
+        f"{gate['scenario']} ({gate['present_minimum_evidence_count']}/{gate['minimum_evidence_count']})"
+        for gate in quality_gates
+        if not gate.get("satisfied") and not gate.get("blocked")
+    ]
 
     checks = [
         {
@@ -1809,6 +1847,12 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             "detail": f"outcomes={scenario_outcomes['summary']['scenarios']}, with_findings={scenario_outcomes['summary']['with_findings']}",
         },
         {
+            "id": "quality-gates",
+            "status": "pass" if not unsatisfied_quality_gates else "fail",
+            "summary": "Every scenario satisfies its minimum proof gate or records an explicit blocker.",
+            "detail": ", ".join(unsatisfied_quality_gates),
+        },
+        {
             "id": "no-rejected-evidence",
             "status": "pass" if not rejected_items else "warn",
             "summary": "No attached evidence is marked rejected.",
@@ -1849,7 +1893,6 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     write_json(run_dir / "metrics.json", metrics)
     write_json(run_dir / "execution-plan.json", execution_plan)
     (run_dir / "execution-plan.md").write_text(render_execution_plan(execution_plan), encoding="utf-8")
-    driver_plan = build_driver_plan(run_json, evidence, execution_plan)
     write_json(run_dir / "driver-plan.json", driver_plan)
     (run_dir / "driver-plan.md").write_text(render_driver_plan(driver_plan), encoding="utf-8")
     agent_brief = build_agent_brief(run_json, evidence, execution_plan)
