@@ -69,12 +69,18 @@ python3 tools/product-journey/run.py --emit-run --project gears-rust --persona c
 For a 10-repo GitHub natural-usage sweep, start with the deterministic matrix:
 
 ```sh
+python3 tools/product-journey/run.py --refresh-github-targets --seed demo
 python3 tools/product-journey/run.py --emit-matrix --seed demo
+python3 tools/product-journey/run.py --emit-matrix --seed demo \
+  --target-proof-file .artifacts/product-journey/target-proofs/<proof-id>
 ```
 
 Use `--matrix-personas all` when every persona should run against every target.
 The matrix is a no-LLM assignment plan; before a live scored sweep, refresh each
-target's current open bug count from its `bug_query`.
+target's current open bug count from its `bug_query` with
+`--refresh-github-targets` and feed the proof into `--emit-matrix`. Validation
+warns when proof is missing and fails when proof shows a target below the
+100-open-bug floor.
 Launch an assignment run with the target `id` and persona from that matrix:
 
 ```sh
@@ -110,10 +116,11 @@ sequence and copy ready-to-fill `--attach-evidence` commands.
 For a live/cassette dogfood pass, delegate the bundle to
 `.agents/agents/product-journey-qa-driver.md`; that agent is scoped to consume
 the brief, drive Kitsoki Studio MCP and visual MCP, attach evidence, record
-findings, then run review and validation gates.
+findings or blockers, then run review and validation gates.
 `driver-plan.md` is the driver's machine-readable companion rendered for human
 review: it lists each scenario's harness, visual surface, action sequence,
-evidence slots, attach commands, finding command, and final gates.
+evidence slots, attach commands, finding command, blocker command, and final
+gates.
 Captured screenshots, videos, traces, and documents are indexed in
 `media-manifest.json`; the generated Slidey deck uses that manifest for
 playback-ready media entries.
@@ -132,6 +139,21 @@ python3 tools/product-journey/run.py --attach-evidence \
 
 Use `--record-finding` on the same runner to summarize strengths, weaknesses,
 issues found, and fixes for the Slidey review deck.
+
+If a scenario was attempted but cannot honestly capture evidence without live
+authorization, a missing cassette, or unavailable repo state, record a blocker
+instead of faking a pass:
+
+```sh
+python3 tools/product-journey/run.py --record-blocker \
+  --run-dir .artifacts/product-journey/<run-id> \
+  --scenario prd-design \
+  --title "Design path needs a cassette" \
+  --summary "No deterministic cassette exists and automated tests must stay no-LLM."
+```
+
+The review gate only treats the run as ready when each scenario has captured
+evidence or an explicit blocker.
 
 Use `--seed-demo-evidence` only for deterministic no-LLM deck-shape dogfood
 before a live visual MCP run.
