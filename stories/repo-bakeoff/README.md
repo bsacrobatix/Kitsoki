@@ -16,6 +16,12 @@ wraps the **external** harness (`bench.py` + `drive_cell.sh`) — onboard a real
 third-party repo, fix real filed-issue bugs through the bugfix pipeline, grade
 each fix against the PR's own hidden oracle, and deck it.
 
+For a private/heavy repo, seed `repo_dir` with a local checkout path. The story's
+`prepare` room passes it to `bench.py verify --repo-dir`, so the same RED/GREEN
+arming gate works for repos that cannot be cloned from the network. `gears-rust`
+is the reference case for this path; see
+[`docs/recipes/repo-history-training-gears-rust.md`](../../docs/recipes/repo-history-training-gears-rust.md).
+
 ## Rooms
 
 ```
@@ -26,8 +32,8 @@ idle ─start─▶ configure ─accept─▶ prepare ─accept─▶ running �
 | Room | Split | What it does |
 |---|---|---|
 | `idle` | deterministic | Park; `start` boots the bake-off. |
-| `configure` | deterministic | Declare the matrix (bugs × candidates); compute the cell roster. |
-| `prepare` | **deterministic · free · real** | `host.run → bench.py verify` arms every hidden oracle (RED@baseline / GREEN@real-fix) — proves the bake-off is valid **before** any LLM is spent. |
+| `configure` | deterministic | Declare the matrix (bugs × candidates); compute the cell roster; optionally carry `repo_dir` for private/local repos. |
+| `prepare` | **deterministic · free · real** | `host.run → bench.py verify [--repo-dir ...]` arms every hidden oracle (RED@baseline / GREEN@real-fix) — proves the bake-off is valid **before** any LLM is spent. |
 | `running` | stub | Tracks the roster. The cost-bearing per-cell drive (`drive_cell.sh --candidate <m> --score`) is run **manually** — the only cost-bearing step. |
 | `scoring` | deterministic | `host.run → bench.py summarize` rolls the per-cell verdicts (`results/cells/*.json`) up by candidate (solved/partial/failed + solve_rate). |
 | `reporting` | deterministic | Assemble the report + select the slidey deck spec (baked = a real deck). |
@@ -51,3 +57,11 @@ tools/bugfix-bakeoff/external/drive_cell.sh \
 ```
 Writes `results/cells/<bug>-<candidate>-kitsoki.json`, which `scoring` rolls up.
 See the [external harness README](../../tools/bugfix-bakeoff/external/README.md).
+
+For `gears-rust` or another local-only repo:
+
+```sh
+tools/bugfix-bakeoff/external/drive_cell.sh \
+    --project gears-rust --bug bug1 --candidate gpt-5.3-spark \
+    --repo-dir /Users/brad/code/gears-rust --score
+```

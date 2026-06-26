@@ -6,13 +6,14 @@
 states:
   configure:
     description: "Declare the bake-off matrix (bugs × candidates) for the project."
-    relevant_world: [project, repo, bugs, candidates, cells_total]
+    relevant_world: [project, repo, repo_dir, bugs, candidates, cells_total]
     view:
       - heading: "Bake-off · configure"
       - kv:
           pairs:
             Project:    '{{ world.project }}'
             Repo:       '{{ world.repo }}'
+            Local repo: '{{ world.repo_dir|default:"(none)" }}'
             Bugs:       "{{ world.bugs|join:', ' }}"
             Candidates: "{{ world.candidates|join:', ' }}"
             Cells:      "{{ world.cells_total }}"

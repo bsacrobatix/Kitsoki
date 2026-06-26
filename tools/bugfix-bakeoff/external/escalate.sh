@@ -7,6 +7,7 @@
 # cheapest model/effort that fixes my bugs?" — answered as one command.
 #
 #   escalate.sh --project <name> [--bugs b1,b2] [--ladder default] [--dry-run]
+#               [--repo-dir <local-checkout>]
 #               [--rungs k1,k2,...]   # explicit ladder, overrides --ladder
 #
 # COST-BEARING (drives real LLMs via drive_cell.sh) — operator-run, never CI.
@@ -21,18 +22,19 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-project=""; bugs_csv=""; ladder="default"; rungs_csv=""; dry=0
+project=""; bugs_csv=""; ladder="default"; rungs_csv=""; repo_dir=""; dry=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project) project="$2"; shift 2;;
     --bugs)    bugs_csv="$2"; shift 2;;
     --ladder)  ladder="$2"; shift 2;;
     --rungs)   rungs_csv="$2"; shift 2;;
+    --repo-dir) repo_dir="$2"; shift 2;;
     --dry-run) dry=1; shift;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
 done
-[[ -n "$project" ]] || { echo "usage: escalate.sh --project <name> [--bugs b1,b2] [--ladder default|--rungs k1,k2] [--dry-run]" >&2; exit 2; }
+[[ -n "$project" ]] || { echo "usage: escalate.sh --project <name> [--bugs b1,b2] [--ladder default|--rungs k1,k2] [--repo-dir <local-checkout>] [--dry-run]" >&2; exit 2; }
 
 # --- resolve bugs (default: all in the manifest) ------------------------------
 if [[ -z "$bugs_csv" ]]; then
@@ -61,12 +63,16 @@ if [[ "$dry" == 1 ]]; then
   echo "Plan — each bug climbs until 'solved':"
   for b in "${BUGS[@]}"; do
     echo "  $b:"
-    for r in "${RUNGS[@]}"; do echo "    → drive_cell.sh --project $project --bug $b --candidate $r --score"; done
+    for r in "${RUNGS[@]}"; do
+      line="    -> drive_cell.sh --project $project --bug $b --candidate $r --score"
+      [[ -n "$repo_dir" ]] && line="$line --repo-dir $repo_dir"
+      echo "$line"
+    done
   done
   exit 0
 fi
 
-CACHE_RESULTS="$(cd "$HERE" && git rev-parse --show-toplevel)/.artifacts/qs-bakeoff/results"
+CACHE_RESULTS="${EXTERNAL_BAKEOFF_CACHE:-$(cd "$HERE" && git rev-parse --show-toplevel)/.artifacts/external-bakeoff}/results"
 summary="$CACHE_RESULTS/escalation-$project.tsv"
 mkdir -p "$CACHE_RESULTS"
 : > "$summary"
@@ -90,7 +96,9 @@ for b in "${BUGS[@]}"; do
       best="solved"; solving="$r"; break
     fi
     echo "[escalate] $b @ rung $r …" >&2
-    "$HERE/drive_cell.sh" --project "$project" --bug "$b" --candidate "$r" --score || true
+    args=(--project "$project" --bug "$b" --candidate "$r" --score)
+    [[ -n "$repo_dir" ]] && args+=(--repo-dir "$repo_dir")
+    "$HERE/drive_cell.sh" "${args[@]}" || true
     q="$(quality_of "$out")"
     echo "[escalate]   $b @ $r -> $q" >&2
     case "$q" in

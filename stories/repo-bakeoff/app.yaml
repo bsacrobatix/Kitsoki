@@ -50,6 +50,7 @@ world:
   harness_dir:   { type: string, default: "tools/bugfix-bakeoff/external" }
   project:       { type: string, default: "query-string" }   # projects/<name>/manifest.yaml
   repo:          { type: string, default: "" }               # echoed from the manifest
+  repo_dir:      { type: string, default: "" }               # local checkout for private/local_only projects
   generated_at:  { type: string, default: "1970-01-01T00:00:00Z" }
 
   # ── The matrix (two axes) ────────────────────────────────────────────────────

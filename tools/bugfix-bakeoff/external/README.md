@@ -85,6 +85,14 @@ cost/tokens from the trace) + `model`/`effort`/`provider`, so it feeds
   GEARS_RUST_REPO=~/code/gears-rust make gears-bakeoff
   ```
 
+  The cost-bearing one-cell path uses the same local checkout explicitly:
+
+  ```sh
+  tools/bugfix-bakeoff/external/drive_cell.sh \
+    --project gears-rust --bug bug1 --candidate gpt-5.3-spark \
+    --repo-dir ~/code/gears-rust --score
+  ```
+
 The four armable fixtures (bug1/4/5/9) prove RED@baseline → GREEN@fix; the rest
 of the marathon + hard-case corpus is captured under `reference_only:` in the
 manifest (copy-in / overlay oracles, to be auto-armed once `bench.py` grows an
@@ -151,12 +159,17 @@ instance it drives is [`stories/bench-bugfix`](../../../stories/bench-bugfix).
 `--score` grades the worktree (`bench.py score`) and extracts the worker cost
 (`bench.py cost --trace …` → `cost_usd` for metered providers, token usage for
 subscription auth). Pipeline thread files are written under
-`.artifacts/qs-bakeoff/threads/`, alongside the other per-cell cache/log output,
+`.artifacts/external-bakeoff/threads/`, alongside the other per-cell cache/log output,
 so live runs do not create bare `bug*` files in the project root. The
 load-bearing knobs `drive_cell.sh` sets (each learned from a failure) are tabulated in the
 [`external-repo-bakeoff` skill](../../../.agents/skills/external-repo-bakeoff/SKILL.md);
 the key one is `workspace_id:""` so the implementer edits the prepared worktree
 directly instead of creating one against the wrong repo root.
+
+For private or heavy `local_only` projects, pass `--repo-dir <checkout>` or set
+`<PROJECT>_REPO` (for example `GEARS_RUST_REPO`). The harness creates disposable
+per-cell worktrees under `.artifacts/external-bakeoff/cells/` and leaves the
+source checkout untouched.
 
 See [`docs/case-studies/query-string-bakeoff.md`](../../../docs/case-studies/query-string-bakeoff.md)
 for the worked GPT-5.5-vs-GLM-5.2 study.

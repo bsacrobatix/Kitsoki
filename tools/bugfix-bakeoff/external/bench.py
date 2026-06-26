@@ -253,7 +253,17 @@ def verify(m, only_bug, repo_dir):
     proj = m["project"]
     tmp = None
     if repo_dir:
-        repo = Path(repo_dir)
+        # Never operate directly on a caller's checkout. The GREEN proof checks
+        # out the real fix's source paths through git; doing that against the
+        # source checkout can dirty its index/worktree. A local mirror is cheap
+        # and gives the verifier a private git directory to mutate.
+        src = Path(repo_dir)
+        tmp = Path(tempfile.mkdtemp(prefix="bench-repo-"))
+        repo = tmp / f"{proj['id']}-mirror"
+        r = sh(["git", "clone", "--local", "--no-checkout", "-q", str(src), str(repo)], cwd=tmp)
+        if r.returncode != 0:
+            sys.stderr.write(r.stdout[-2000:] + r.stderr[-2000:])
+            return 1
     else:
         tmp = Path(tempfile.mkdtemp(prefix="bench-repo-"))
         repo = tmp / proj["id"]

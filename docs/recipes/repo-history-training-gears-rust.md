@@ -1,0 +1,145 @@
+# Repo History Training With gears-rust
+
+Use this recipe when the goal is not just "can an agent fix this one bug?", but
+"can a repo owner use Kitsoki to turn their own history into a stable dev story
+that fixes future bugs reliably?"
+
+`gears-rust` is the reference private/heavy repo for that path. It exercises the
+parts a toy project does not: a large Rust workspace, per-bug cargo invocations,
+private local checkout access, hidden regression oracles, and no whole-workspace
+test suite shortcut.
+
+## What Product-Ready Means
+
+A repo-history training run is product-ready only when each layer has evidence:
+
+1. **Corpus:** historical fixes are captured as manifest rows with baseline,
+   real fix, ticket text, and hidden oracle.
+2. **Arming:** every promoted fixture proves RED at the historical baseline and
+   GREEN after the real fix before any model call.
+3. **Driving:** cost-bearing cells run through Kitsoki's bugfix story via Studio
+   MCP; the worker model edits a prepared external worktree.
+4. **Scoring:** the hidden oracle, not model self-report, decides solved /
+   partial / failed.
+5. **Learning:** failures become story, prompt, harness, or documentation fixes;
+   accepted examples remain deterministic fixtures.
+
+The current gears corpus lives at
+`tools/bugfix-bakeoff/external/projects/gears-rust/`.
+
+## One-Time Setup
+
+Start from a local checkout of the target repo:
+
+```sh
+GEARS_RUST_REPO=/Users/brad/code/gears-rust
+```
+
+For another private repo, use a dedicated manifest under
+`tools/bugfix-bakeoff/external/projects/<name>/` and pass
+`--repo-dir /path/to/repo` to the commands below.
+
+The target checkout may have unrelated dirty files, but the drive should never
+edit that checkout directly. The harness creates per-cell worktrees under
+`.artifacts/external-bakeoff/cells/`.
+
+## Deterministic Arming
+
+Before spending on a live model, prove the corpus:
+
+```sh
+GEARS_RUST_REPO=/Users/brad/code/gears-rust make gears-bakeoff
+```
+
+The same proof can run through the drivable `repo-bakeoff` story by seeding:
+
+```yaml
+project: gears-rust
+repo_dir: /Users/brad/code/gears-rust
+bugs: [bug1, bug4, bug5, bug9]
+candidates: [gpt-5.3-spark]
+```
+
+The `prepare` room calls:
+
+```sh
+python3 bench.py verify --project gears-rust --repo-dir /Users/brad/code/gears-rust
+```
+
+That is the gate. If any fixture is not RED at baseline and GREEN after the real
+fix, do not run live cells; fix or demote the fixture first.
+
+## Free Cell Preparation
+
+Inspect the exact Studio MCP drive prompt without spending:
+
+```sh
+tools/bugfix-bakeoff/external/drive_cell.sh \
+  --project gears-rust \
+  --bug bug1 \
+  --candidate gpt-5.3-spark \
+  --repo-dir /Users/brad/code/gears-rust \
+  --no-drive
+```
+
+This should prepare a worktree and print an artifact prompt path under
+`.artifacts/external-bakeoff/drive-prompts/`. It should not modify the source
+checkout.
+
+## Live Drive
+
+Run a single operator-approved cell:
+
+```sh
+tools/bugfix-bakeoff/external/drive_cell.sh \
+  --project gears-rust \
+  --bug bug1 \
+  --candidate gpt-5.3-spark \
+  --repo-dir /Users/brad/code/gears-rust \
+  --score
+```
+
+The delegated driver must act through Kitsoki Studio MCP only. The supervisor can
+inspect git state, traces, and oracle results afterward.
+
+For a cheapest-viable sweep:
+
+```sh
+tools/bugfix-bakeoff/external/escalate.sh \
+  --project gears-rust \
+  --bugs bug1,bug4,bug5,bug9 \
+  --ladder default \
+  --repo-dir /Users/brad/code/gears-rust
+```
+
+Use `--dry-run` first to review the cost-bearing plan.
+
+## Outputs
+
+The external harness writes generated artifacts under:
+
+```text
+.artifacts/external-bakeoff/
+  cells/<project>-<bug>-<candidate>/
+  traces/<project>-<bug>-<candidate>.jsonl
+  results/cells/<project>-<bug>-<candidate>-kitsoki.json
+  threads/<project>-<bug>-<candidate>.md
+```
+
+Do not commit those artifacts. Commit the durable improvements: manifests,
+oracles, story hardening, docs, deterministic flow fixtures, and result summaries
+only when they are intended to become part of the product evidence.
+
+## Promoting Learning
+
+A run improves the dev story only if the finding changes the reusable system:
+
+- weak reproducer -> prompt or gate hardening;
+- stuck maker call -> runtime watchdog or async status handling;
+- wrong worktree -> harness/workspace fix;
+- unclear repo setup -> onboarding docs or manifest schema improvement;
+- repeated successful fix pattern -> fixture, precedent example, or eval case.
+
+The gears corpus currently keeps four armable fixtures plus reference-only cases.
+Promote a reference-only case when it has a standalone oracle or the harness gains
+the injection mode it needs.

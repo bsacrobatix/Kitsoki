@@ -9,13 +9,14 @@
 states:
   prepare:
     description: "Arming the hidden oracles (host.run → bench.py verify; free, no LLM)."
-    relevant_world: [project, oracles_armed, harness_dir]
+    relevant_world: [project, repo_dir, oracles_armed, harness_dir]
     view:
       - heading: "Bake-off · prepare (arm oracles)"
       - kv:
           pairs:
             Project: '{{ world.project }}'
-            Armed:   '{{ world.oracles_armed|yesno:"yes,no,(verifying…)" }}'
+            Local repo: '{{ world.repo_dir|default:"(none)" }}'
+            Armed:   '{% if world.verify_log != "" %}yes{% else %}no{% endif %}'
       - prose: "bench.py verify clones each baseline, overlays the PR's regression test, and confirms RED@baseline / GREEN@real-fix. Deterministic and free — it proves the bake-off is valid before any cost is incurred."
       - choice:
           mode: single
@@ -28,7 +29,8 @@ states:
               hint:   "abandon"
               intent: quit
     on_enter:
-      - invoke: host.run
+      - when: "world.repo_dir == ''"
+        invoke: host.run
         id: verify_oracles
         once: true
         with:
@@ -43,13 +45,40 @@ states:
         bind:
           verify_log: stdout
         on_error: configure
-      - when: "world.verify_log != ''"
-        set:
-          oracles_armed: true
+      - when: "world.repo_dir != ''"
+        invoke: host.run
+        id: verify_oracles_local
+        once: true
+        with:
+          cmd: python3
+          args:
+            - "bench.py"
+            - "verify"
+            - "--project"
+            - "{{ world.project }}"
+            - "--repo-dir"
+            - "{{ world.repo_dir }}"
+          cwd: "{{ world.harness_dir }}"
+          fail_on_error: true
+        bind:
+          verify_log: stdout
+        on_error: configure
     on:
       accept:
-        - target: running
+        - when: "world.verify_log != ''"
+          target: prepared
+        - target: .
       quit:
         - target: "@exit:abandoned"
       look:
         - target: .
+
+  prepared:
+    description: "Mark verified oracles as armed before entering the live-cell roster."
+    on_enter:
+      - set:
+          oracles_armed: true
+      - emit_intent: accept
+    on:
+      accept:
+        - target: running
