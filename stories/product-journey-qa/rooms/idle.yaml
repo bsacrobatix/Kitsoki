@@ -30,10 +30,10 @@ states:
             - label: "dogfood_smoke seed=..."
               hint: "prove matrix, run, review, validation, rollup, and decks in one no-LLM loop"
               intent: dogfood_smoke
-            - label: "driver_replay_smoke scenario=... seed=..."
+            - label: "driver_replay_smoke scenario=... persona=... seed=..."
               hint: "prove one reusable-driver scenario with cassette evidence and journal-linked refs"
               intent: driver_replay_smoke
-            - label: "driver_replay_sweep seed=..."
+            - label: "driver_replay_sweep persona=... seed=..."
               hint: "prove every reusable-driver scenario with cassette evidence and playback refs"
               intent: driver_replay_sweep
             - label: "validate_corpus"
@@ -165,6 +165,8 @@ states:
                   - --json-output
                   - --seed
                   - "{{ slots.seed ?? world.seed }}"
+                  - --smoke-persona
+                  - "{{ slots.persona ?? world.persona }}"
                 cwd: "."
               bind:
                 last_result: stdout_json
@@ -231,6 +233,7 @@ states:
                 run_dir: "stdout_json.run_dir"
                 deck_path: "stdout_json.deck_path"
                 driver_replay_scenario: "stdout_json.scenario"
+                driver_replay_persona: "stdout_json.persona"
                 driver_replay_attached_evidence_count: "stdout_json.attached_evidence_count"
                 driver_replay_media_manifest_path: "stdout_json.media_manifest_path"
                 driver_replay_journal_path: "stdout_json.driver_journal_path"
@@ -270,6 +273,8 @@ states:
                   - --json-output
                   - --seed
                   - "{{ slots.seed ?? world.seed }}"
+                  - --smoke-persona
+                  - "{{ slots.persona ?? world.persona }}"
                 cwd: "."
               bind:
                 last_result: stdout_json
@@ -279,6 +284,7 @@ states:
                 dogfood_deck_path: "stdout_json.deck_path"
                 deck_path: "stdout_json.deck_path"
                 driver_replay_scenario: "stdout_json.status"
+                driver_replay_persona: "stdout_json.persona"
                 driver_replay_scenario_count: "stdout_json.scenario_count"
                 driver_replay_playback_scenarios: "stdout_json.playback_scenarios"
                 driver_replay_attached_evidence_count: "stdout_json.attached_evidence_count"

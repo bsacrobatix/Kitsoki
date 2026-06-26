@@ -70,6 +70,7 @@ world:
   dogfood_run_validation_issue_summary: { type: string, default: "" }
   dogfood_matrix_validation_issue_summary: { type: string, default: "" }
   driver_replay_scenario: { type: string, default: "" }
+  driver_replay_persona: { type: string, default: "" }
   driver_replay_attached_evidence_count: { type: int, default: 0 }
   driver_replay_scenario_count: { type: int, default: 0 }
   driver_replay_playback_scenarios: { type: int, default: 0 }
@@ -170,12 +171,14 @@ intents:
     slots:
       seed: { type: string, required: false }
       scenario: { type: string, required: false }
+      persona: { type: string, required: false }
   driver_replay_sweep:
     description: "Run deterministic no-LLM reusable-driver replays for every product-journey scenario."
     examples: ["driver replay sweep", "prove all driver replays", "run all cassette driver smokes"]
     priority: 87
     slots:
       seed: { type: string, required: false }
+      persona: { type: string, required: false }
   validate_corpus:
     description: "Validate the reusable personas, scenarios, and GitHub target catalog."
     examples: ["validate corpus", "check persona scenario catalog", "preflight journey corpus"]

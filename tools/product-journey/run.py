@@ -5317,6 +5317,7 @@ def render_driver_replay_smoke_summary(report: dict) -> str:
         f"- Smoke: `{report['smoke_id']}`",
         f"- Run: `{report['run']['run_id']}`",
         f"- Scenario: `{report['scenario']['id']}`",
+        f"- Persona: `{report['persona']['id']}`",
         f"- Run dir: `{report['run']['run_dir']}`",
         f"- Deck: `{report['run']['deck_path']}`",
         f"- Driver journal: `{report['run']['driver_journal_path']}`",
@@ -5356,7 +5357,7 @@ def render_driver_replay_smoke_deck(report: dict) -> dict:
             {
                 "type": "title",
                 "title": "Driver replay smoke",
-                "subtitle": report["scenario"]["id"],
+                "subtitle": f"{report['scenario']['id']} · {report['persona']['label']}",
                 "narration": "This deck summarizes a deterministic cassette-backed product journey driver replay.",
             },
             {
@@ -5393,6 +5394,7 @@ def render_driver_replay_sweep_summary(report: dict) -> str:
         "",
         f"- Status: `{report['status']}`",
         f"- Sweep: `{report['sweep_id']}`",
+        f"- Persona: `{report['persona']['id']}`",
         f"- Scenarios: {report['summary']['passed']} / {report['summary']['scenarios']} passed",
         f"- Playback scenarios: {report['summary']['playback_scenarios']} / {report['summary']['scenarios']}",
         f"- Validation errors: {report['summary']['validation_errors']}",
@@ -5433,7 +5435,7 @@ def render_driver_replay_sweep_deck(report: dict) -> dict:
             {
                 "type": "title",
                 "title": "Driver replay sweep",
-                "subtitle": f"{report['summary']['passed']} / {report['summary']['scenarios']} scenarios passed",
+                "subtitle": f"{report['summary']['passed']} / {report['summary']['scenarios']} scenarios passed · {report['persona']['label']}",
                 "narration": "This deck summarizes the deterministic cassette-backed replay sweep across every product journey scenario.",
             },
             {
@@ -5460,6 +5462,7 @@ def build_driver_replay_sweep(
     personas: list[dict],
     scenarios: list[dict],
     seed: str,
+    persona_id: str,
 ) -> dict:
     sweep_id = f"{slug_timestamp()}-driver-replay-sweep-{seed}"
     sweep_dir = DOGFOOD_ROOT / sweep_id
@@ -5475,6 +5478,7 @@ def build_driver_replay_sweep(
             scenarios,
             f"{seed}-{scenario_id}",
             scenario_id,
+            persona_id,
         )
         scenario_reports.append(report)
         media_manifest = read_json(Path(report["run"]["media_manifest_path"]))
@@ -5518,6 +5522,7 @@ def build_driver_replay_sweep(
         "sweep_id": sweep_id,
         "created_at": now_utc(),
         "seed": seed,
+        "persona": select_persona(personas, persona_id, seed),
         "sweep_dir": str(sweep_dir),
         "summary": summary,
         "scenarios": rows,
@@ -5555,6 +5560,7 @@ def build_driver_replay_smoke(
     scenarios: list[dict],
     seed: str,
     smoke_scenario: str,
+    persona_id: str,
 ) -> dict:
     scenario_slug = smoke_scenario or "bugfix"
     smoke_id = f"{slug_timestamp()}-driver-replay-{scenario_slug}-{seed}"
@@ -5566,13 +5572,14 @@ def build_driver_replay_smoke(
         known = ", ".join(sorted(scenario_ids))
         raise SystemExit(f"Unknown replay smoke scenario '{scenario_id}'. Known: {known}")
 
+    persona = select_persona(personas, persona_id, f"{seed}:{scenario_id}:driver-replay")
     run_dir, run_json = build_run_bundle(
         catalog,
         github_targets,
         personas,
         scenarios,
         "vscode",
-        "core-maintainer",
+        persona["id"],
         f"{seed}-{scenario_id}-driver-replay",
         "driver-replay-smoke",
         publish_deck=None,
@@ -5656,6 +5663,7 @@ def build_driver_replay_smoke(
         "smoke_id": smoke_id,
         "created_at": now_utc(),
         "seed": seed,
+        "persona": run_json["persona"],
         "smoke_dir": str(smoke_dir),
         "scenario": {
             "id": scenario_id,
@@ -6338,6 +6346,7 @@ def main() -> None:
     parser.add_argument("--persona", default="", help="Persona id from tools/product-journey/personas.json")
     parser.add_argument("--seed", default="default", help="Deterministic run seed")
     parser.add_argument("--smoke-scenario", default="bugfix", help="Scenario id for --driver-replay-smoke")
+    parser.add_argument("--smoke-persona", default="core-maintainer", help="Persona id for driver replay smoke/sweep")
     parser.add_argument("--run-log", action="store_true", help="Force a timestamped run log entry")
     parser.add_argument("--emit-run", action="store_true", help="Write a no-LLM run artifact bundle and Slidey deck")
     parser.add_argument("--emit-matrix", action="store_true", help="Write a no-LLM 10-repo GitHub journey matrix")
@@ -6510,7 +6519,7 @@ def main() -> None:
         return
 
     if args.driver_replay_smoke:
-        report = build_driver_replay_smoke(catalog, github_targets, personas, scenarios, args.seed, args.smoke_scenario)
+        report = build_driver_replay_smoke(catalog, github_targets, personas, scenarios, args.seed, args.smoke_scenario, args.smoke_persona)
         if args.json_output:
             reviewed = report["review"]
             validation = report["validation"]
@@ -6527,6 +6536,8 @@ def main() -> None:
                 "driver_handoff_path": report["run"]["driver_handoff_path"],
                 "media_manifest_path": report["run"]["media_manifest_path"],
                 "scenario": report["scenario"]["id"],
+                "persona": report["persona"]["id"],
+                "persona_label": report["persona"]["label"],
                 "attached_evidence_count": len(report["attached_evidence"]),
                 "review_status": reviewed.get("review_status"),
                 "review_summary": reviewed.get("summary"),
@@ -6545,6 +6556,7 @@ def main() -> None:
             return
         print(f"Product journey driver replay smoke: {report['smoke_id']}")
         print(f"Status: {report['status']}")
+        print(f"Persona: {report['persona']['label']}")
         print(f"Artifacts: {report['smoke_dir']}")
         print(f"Summary: {report['artifacts']['summary']}")
         print(f"Smoke deck: {report['artifacts']['deck']}")
@@ -6558,11 +6570,13 @@ def main() -> None:
         return
 
     if args.driver_replay_sweep:
-        report = build_driver_replay_sweep(catalog, github_targets, personas, scenarios, args.seed)
+        report = build_driver_replay_sweep(catalog, github_targets, personas, scenarios, args.seed, args.smoke_persona)
         if args.json_output:
             print(json.dumps({
                 "status": report["status"],
                 "sweep_id": report["sweep_id"],
+                "persona": report["persona"]["id"],
+                "persona_label": report["persona"]["label"],
                 "sweep_dir": report["sweep_dir"],
                 "report_path": report["artifacts"]["report"],
                 "summary_path": report["artifacts"]["summary"],
