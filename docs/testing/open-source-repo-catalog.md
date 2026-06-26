@@ -11,6 +11,10 @@ harness onboards a repo, prepares parent-commit bug baselines, hides the real
 PR's regression test as an oracle, drives a Kitsoki workflow, then grades the
 candidate tree deterministically with no LLM.
 
+For the operator recipe that turns a new repo's history into this manifest,
+readiness, and live-cell flow, see
+[`../recipes/repo-history-training-new-repo.md`](../recipes/repo-history-training-new-repo.md).
+
 ## Status legend
 
 | Status | Meaning |
@@ -65,6 +69,8 @@ real fix.
 | `python3 tools/bugfix-bakeoff/external/bench.py verify --project <id>` | Free | Project fixtures are armed: oracle RED at baseline and GREEN at the real fix. | `query-string`, plus Constructor Fabric/local references `gears-rust` and `kitsoki`. |
 | `make qs-bakeoff` | Free, gated | Query-string clone, dev-story onboarding, and fixture arming all work end to end. | Public reference path. |
 | `GEARS_RUST_REPO=... make gears-bakeoff` | Free, gated, local heavyweight | Rust oracle path works against a local mirror without dirtying the checkout. | Private/local reference only. |
+| `make history-smoke HISTORY_PROJECT=<id> ...` | Free | Project preflight, scoped RED/GREEN arming, live command rendering, first-cell no-drive prep, readiness report, and `repo-bakeoff` flow validation all pass. | Generic external-project product gate; `gears-history-full-smoke` covers all four armable gears-rust fixtures. |
+| `make history-pending-smoke HISTORY_PROJECT=<id> ...` | Free | Blocked-provider cells roll up as `pending` in Markdown + Slidey JSON without modifying normal live results. | Generic rehearsal path for pre-attempt provider/profile blockers. |
 | `POSTGRESQL_REPO=... bash tools/product-journey/checks/postgresql-oracle.sh` | Free, local heavyweight | PostgreSQL local oracle proves the real RED/GREEN split for the selected product-journey fixture. | Validated prototype; not yet an external-project manifest. |
 | `KUBERNETES_REPO=... bash tools/product-journey/checks/kubernetes-oracle.sh` | Free, local heavyweight | Kubernetes local oracle proves the real RED/GREEN split for the selected product-journey fixture. | Validated prototype; not yet an external-project manifest. |
 | `tools/bugfix-bakeoff/external/drive_cell.sh --project <id> --bug <bug> --candidate <candidate> --score` | Cost-bearing | A live model drives the Kitsoki workflow, then the hidden oracle grades the resulting tree. | Used for `query-string` GPT-5.5 cells. |
@@ -87,8 +93,10 @@ real fix.
 2. Mine at least 3 real bugs with linked issues or self-contained fixing PRs.
 3. For each bug, record `fix_sha`, `baseline_sha = fix_sha^`, `fix_source`,
    the isolated regression test, and the user-facing ticket text.
-4. Prove the isolated oracle is RED at baseline and GREEN at the real fix before
-   spending on model cells.
+4. Follow
+   [`../recipes/repo-history-training-new-repo.md`](../recipes/repo-history-training-new-repo.md):
+   run `make history-smoke ...` and prove the isolated oracles are RED at
+   baseline and GREEN at the real fix before spending on model cells.
 5. Commit `tools/bugfix-bakeoff/external/projects/<id>/manifest.yaml` plus
    `oracles/<bug>.<ext>`.
 6. Add or update the project row above with suite, harness, status, and gaps.

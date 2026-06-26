@@ -27,6 +27,10 @@ A repo-history training run is product-ready only when each layer has evidence:
 The current gears corpus lives at
 `tools/bugfix-bakeoff/external/projects/gears-rust/`.
 
+For a repo-agnostic version of this process, start with
+[`repo-history-training-new-repo.md`](repo-history-training-new-repo.md). This
+gears-rust recipe is the private/heavy Rust reference path.
+
 ## One-Time Setup
 
 Start from a local checkout of the target repo:
