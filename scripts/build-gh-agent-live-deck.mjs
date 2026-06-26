@@ -12,6 +12,8 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
+const RRWEB_SETTLE_START_SECONDS = 0.25;
+
 const CASES = [
   {
     slug: "bug-issue",
@@ -294,6 +296,7 @@ function mediaScenes(deckOut, c, evidence, files) {
     eyebrow: c.eyebrow,
     title: idx === 0 ? c.title : `${c.title}: ${file.title}`,
     rrweb: relativeMediaPath(deckOut, file.path),
+    ...(idx === 0 ? { start: RRWEB_SETTLE_START_SECONDS } : {}),
     chapters: "auto",
     caption: file.caption(c, evidence),
     narration: file.narration(c),

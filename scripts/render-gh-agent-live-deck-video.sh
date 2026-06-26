@@ -93,6 +93,91 @@ fi
 
 "${SLIDEY[@]}" "$DECK" --validate
 mkdir -p "$(dirname "$OUT")"
+node - "$DECK" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const { execFileSync } = require("child_process");
+
+const deckPath = process.argv[2];
+const deck = JSON.parse(fs.readFileSync(deckPath, "utf8"));
+const deckDir = path.dirname(path.resolve(deckPath));
+const fps = Number.isFinite(deck.fps) && deck.fps > 0 ? deck.fps : 30;
+
+function mediaDurationMs(scene) {
+  const rel = scene.src || scene.rrweb || "";
+  if (!rel) return 3000;
+  const file = path.resolve(deckDir, rel);
+  if (scene.rrweb) {
+    try {
+      const rrweb = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (Number.isFinite(rrweb.durationMs) && rrweb.durationMs > 0) return Math.round(rrweb.durationMs);
+      if (Number.isFinite(rrweb.startTime) && Number.isFinite(rrweb.endTime) && rrweb.endTime > rrweb.startTime) {
+        return Math.round(rrweb.endTime - rrweb.startTime);
+      }
+    } catch {}
+    return 10000;
+  }
+  try {
+    const raw = execFileSync("ffprobe", [
+      "-v", "error",
+      "-show_entries", "format=duration",
+      "-of", "default=noprint_wrappers=1:nokey=1",
+      file,
+    ], { encoding: "utf8" }).trim();
+    const seconds = Number.parseFloat(raw);
+    if (Number.isFinite(seconds) && seconds > 0) return Math.round(seconds * 1000);
+  } catch {}
+  return 10000;
+}
+
+function sceneDurationMs(scene) {
+  if (Number.isFinite(scene.duration) && scene.duration > 0) return Math.round(scene.duration * 1000);
+  if (scene.type === "video") {
+    const sourceDuration = mediaDurationMs(scene);
+    const startMs = Number.isFinite(scene.start) && scene.start > 0 ? Math.round(scene.start * 1000) : 0;
+    const endMs = Number.isFinite(scene.end) && scene.end > 0 ? Math.round(scene.end * 1000) : sourceDuration;
+    const speed = Number.isFinite(scene.speed) && scene.speed > 0 ? scene.speed : 1;
+    return Math.max(1, Math.round(Math.max(0, Math.min(endMs, sourceDuration) - startMs) / speed));
+  }
+  if (scene.type === "cta") return 8000;
+  return 3000;
+}
+
+function fmt(ms) {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
+}
+
+const scenes = Array.isArray(deck.scenes) ? deck.scenes : [];
+let videoMs = 0;
+let rrwebMs = 0;
+let rrwebScenes = 0;
+let rrwebFrames = 0;
+for (const scene of scenes) {
+  const duration = Math.max(1000, sceneDurationMs(scene));
+  videoMs += duration;
+  if (scene && scene.type === "video" && scene.rrweb) {
+    rrwebScenes += 1;
+    rrwebMs += duration;
+    rrwebFrames += Math.max(1, Math.round((duration / 1000) * fps));
+  }
+}
+const frames = Math.max(1, Math.round((videoMs / 1000) * fps));
+
+// Empirical, intentionally conservative. Most scenes are cheap; rrweb scenes pay
+// a browser seek+screenshot cost per rrweb frame before the final ffmpeg pass.
+// On this path the main deck frame count can sit still while a nested
+// slidey-rrweb-ras-* directory is being populated, so the upper bound is wide.
+const cheapFrames = Math.max(0, frames - rrwebFrames);
+const lowMs = 20000 + cheapFrames * 8 + rrwebFrames * 150 + rrwebScenes * 2000;
+const highMs = 45000 + cheapFrames * 16 + rrwebFrames * 650 + rrwebScenes * 7000;
+console.log(`[kitsoki] Render estimate: ${scenes.length} scenes, ${fmt(videoMs)} video, ~${frames} frames @ ${fps}fps.`);
+console.log(`[kitsoki] rrweb work: ${rrwebScenes} scenes, ${fmt(rrwebMs)} rrweb, ~${rrwebFrames} raster frames.`);
+console.log(`[kitsoki] Expected wall time: about ${fmt(lowMs)}-${fmt(highMs)} on this local render path.`);
+console.log(`[kitsoki] Note: during rrweb rasterization, main deck frames may pause while slidey-rrweb-ras-* temp frames advance; investigate only if both stop changing for several minutes.`);
+NODE
 "${SLIDEY[@]}" "$DECK" "$OUT"
 
 if [ ! -s "$OUT" ]; then
@@ -140,7 +225,13 @@ function mediaDurationMs(scene) {
 
 function sceneDurationMs(scene) {
   if (Number.isFinite(scene.duration) && scene.duration > 0) return Math.round(scene.duration * 1000);
-  if (scene.type === "video") return mediaDurationMs(scene);
+  if (scene.type === "video") {
+    const sourceDuration = mediaDurationMs(scene);
+    const startMs = Number.isFinite(scene.start) && scene.start > 0 ? Math.round(scene.start * 1000) : 0;
+    const endMs = Number.isFinite(scene.end) && scene.end > 0 ? Math.round(scene.end * 1000) : sourceDuration;
+    const speed = Number.isFinite(scene.speed) && scene.speed > 0 ? scene.speed : 1;
+    return Math.max(1, Math.round(Math.max(0, Math.min(endMs, sourceDuration) - startMs) / speed));
+  }
   if (scene.type === "cta") return 8000;
   return 3000;
 }
