@@ -12,6 +12,8 @@ Test install: the **`bsacrobatix`** org. Production is identical under
 **`constructorfabric`** later. See
 [`docs/proposals/kitsoki-github-agent.md`](../proposals/kitsoki-github-agent.md)
 shared decision #1 for the auth/permissions decision.
+The controlled live proof flow is
+[`docs/scenarios/github-agent-live-poc.md`](../scenarios/github-agent-live-poc.md).
 
 The live POC runs the hosted webhook service on the test VM:
 
@@ -200,8 +202,8 @@ scripts/run-gh-agent-live-poc.sh \
 The script deploys current code unless `--skip-deploy` is set, creates the bug,
 feature, and guidance issues, comments on the supplied PR, waits for the VM
 `gh_jobs` rows, writes `.context/live-poc-*.md`, builds capture plans, optionally
-records the clips, and builds, exports, renders, verifies, and prepares QA for
-the live deck when `--developer-arc-media` is supplied.
+records rrweb clips, builds the source Slidey deck, and verifies the live deck
+when `--developer-arc-media` is supplied.
 
 The ambiguous guidance case still writes a public run URL before posting its
 guidance comment. The GitHub thread should show both the request for direction
@@ -219,8 +221,7 @@ It also writes a run-level audit summary at
 ids, evidence notes, capture plans, and final review commands. For isolated
 smoke runs, set `KITSOKI_GH_AGENT_EVIDENCE_DIR`,
 `KITSOKI_GH_AGENT_MEDIA_ROOT`, `KITSOKI_GH_AGENT_DECK_JSON`,
-`KITSOKI_GH_AGENT_DECK_HTML`, `KITSOKI_GH_AGENT_DECK_VIDEO`, and
-`KITSOKI_GH_AGENT_LIVE_SUMMARY`.
+`KITSOKI_GH_AGENT_DECK_VIDEO`, and `KITSOKI_GH_AGENT_LIVE_SUMMARY`.
 
 After all four live case clips and the developer-arc media exist, build the
 Slidey deck scaffold from the evidence and media:
@@ -231,21 +232,18 @@ scripts/build-gh-agent-live-deck.mjs \
 ```
 
 The command is strict by default: it fails if required evidence notes, live URLs,
-case clips, or developer-arc media are missing.
+case clips, or developer-arc media are missing. The primary output is
+`.artifacts/github-agent-live/live-github-agent.slidey.json`. MP4 and HTML
+exports are optional review artifacts only; they are not produced by the default
+POC flow.
 
-Export the generated deck spec to the self-contained HTML artifact:
-
-```
-scripts/export-gh-agent-live-deck-html.sh
-```
-
-Render the same deck to an MP4 for the gated QA pass:
+If an MP4 review export is explicitly requested, render the same deck:
 
 ```
 scripts/render-gh-agent-live-deck-video.sh
 ```
 
-Finally, verify the whole proof bundle before sharing the deck:
+Finally, verify the whole proof bundle before sharing the deck source:
 
 ```
 scripts/verify-gh-agent-live-poc.mjs \
@@ -253,9 +251,9 @@ scripts/verify-gh-agent-live-poc.mjs \
 ```
 
 The verifier is read-only and strict by default. It checks the four `.context`
-evidence notes, `/api/run` JSON, read-only `gh_jobs` rows, capture plans, MP4
-clips, chapter sidecars, developer-arc media, generated Slidey deck, and
-self-contained HTML export, rendered deck MP4, and deck chapter sidecar.
+evidence notes, `/api/run` JSON, read-only `gh_jobs` rows, capture plans, rrweb
+clips, developer-arc media, and generated Slidey deck. HTML and MP4 exports are
+verified only when those optional paths are supplied.
 The evidence notes must show `/healthz` returned `ok`, `/run/<job-id>` returned
 HTTP 2xx, `/api/run/<job-id>` returned JSON, and the VM `gh_jobs` row was fetched
 successfully with `created_at` / `updated_at` timestamps.
@@ -267,10 +265,9 @@ scripts/write-gh-agent-live-qa-plan.mjs
 ```
 
 The script writes `.context/qa-gh-agent-live-feature.md` and
-`.context/qa-gh-agent-live-scenarios.yaml`, then prints the `qa.sh` command to
-run after the final deck MP4 or labeled frames exist. Do not wire that QA command
-into automated tests; it uses the local vision reviewer and must stay
-operator-gated.
+`.context/qa-gh-agent-live-scenarios.yaml`, then prints the `qa.sh` command for
+an explicitly rendered MP4 or labeled frame set. Do not wire that QA command into
+automated tests; it uses the local vision reviewer and must stay operator-gated.
 
 ## g. Production
 
