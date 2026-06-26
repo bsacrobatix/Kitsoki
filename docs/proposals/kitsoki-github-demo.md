@@ -1,4 +1,4 @@
-# Story: Demo — @kitsoki GitHub loop tour video + slidey composite
+# Story: Demo — @kitsoki GitHub loop slidey composite
 
 **Status:** Draft v1. Nothing implemented yet.
 **Kind:**   story
@@ -6,7 +6,7 @@
 
 > **`Kind: story` is the closest fit, not a literal one.** This slice ships a
 > *demo deliverable*, not new rooms or world. It is authored as a `features/`
-> tour spec (plus per-act Playwright capture specs) and a slidey deck JSON —
+> tour spec (plus per-act Playwright capture specs) and a `*.slidey.json` deck —
 > the "story sections" below are adapted accordingly: **Reuse inventory**, a
 > **Tour storyboard** (replacing per-room detail), **Net-new files**, and
 > **Flow/tour fixtures**. No `stories/` directory is created.
@@ -28,7 +28,7 @@ One **tour-driven, no-LLM demo deck**, built with `kitsoki-ui-demo` and gated by
 `kitsoki-ui-qa`, using **slidey itself as the worked case study** — kitsoki
 fixing/advancing slidey while slidey narrates. It is captured as **rrweb-backed
 acts**, each QA-gated, then **composited into one slidey presentation deck**
-(rendered via `host.slidey.render` → narrated QA/share MP4) with title/section
+(source `*.slidey.json` first; rendered MP4 only as an optional QA/share export) with title/section
 slides between acts. The deck source embeds rrweb logs, not pre-rendered MP4
 clips; MP4 is only the final rendered review artifact unless an act contains a
 surface rrweb cannot reconstruct (`<canvas>`, `<video>`, WebGL).
@@ -49,7 +49,7 @@ served from `baked/` files intercepted at the Playwright network edge.
 ## Impact
 
 - **Net-new:** 1 `features/` tour spec, 3 Playwright capture specs (+ a thin
-  composite spec), 1 slidey deck JSON, 1 thin demo instance (baked world), a
+  composite spec), 1 slidey deck JSON named `*.slidey.json`, 1 thin demo instance (baked world), a
   `baked/` artifact set, replay recordings + host/exec cassettes, QA feature +
   scenarios per act.
 - **Engine/host changes:** none — composes `kitsoki-ui-demo`, `kitsoki-ui-qa`,
@@ -135,7 +135,7 @@ docs/proposals/demo-assets/kitsoki-github/   # transient demo assets (per CLAUDE
 ├── instance/                         # thin baked-world instance (no new rooms)
 │   └── world-defaults.yaml           # demo world baked in (slots/initial_world unreachable to tours)
 ├── deck/
-│   └── kitsoki-github.deck.json      # slidey scene spec → composite narrated MP4
+│   └── kitsoki-github.slidey.json    # source slidey scene spec
 ├── baked/                            # artifacts served at the Playwright network edge
 │   ├── slidey-deck.mp4 + .poster.png + .semantic.json
 │   └── screenshots/*.png
@@ -148,7 +148,7 @@ docs/proposals/demo-assets/kitsoki-github/   # transient demo assets (per CLAUDE
 tools/runstatus/tests/playwright/
 ├── github-demo-issuepr.spec.ts       # Act 1 capture (fixture + portable captions)
 ├── github-demo-webviewer.spec.ts     # Act 2 capture (replay+host-cassette web drive)
-└── github-demo-composite.spec.ts     # thin: drives host.slidey.render of the deck, asserts the MP4
+└── github-demo-composite.spec.ts     # optional: drives host.slidey.render of the deck, asserts the MP4 export
 
 tools/runstatus/src/tour/
 └── github-demo-manifest.ts           # generated from the feature (make features)
@@ -175,7 +175,7 @@ gated by a QA verdict. No real GitHub, no real LLM (CLAUDE.md / shared decision 
   are intercepted at the network edge and served from `baked/`. Proves the kitsoki
   side (#4, #5). QA gate: `act2` scenarios (trace streams, gallery renders real
   media not a blank, operator turn lands, ack-back visible).
-- **`github-demo-composite.spec.ts`** — renders `deck/kitsoki-github.deck.json` via
+- **`github-demo-composite.spec.ts`** — optionally renders `deck/kitsoki-github.slidey.json` via
   `host.slidey.render` (format `mp4`) and asserts the deck uses rrweb act scenes,
   then asserts the output MP4 + its `.chapters.json` sidecar. QA gate:
   `composite` scenarios (both acts present, section slides between them,
@@ -205,8 +205,8 @@ gated by a QA verdict. No real GitHub, no real LLM (CLAUDE.md / shared decision 
 - [ ] 2.4 QA-gate act2: gallery shows real media (blank-scan clean), operator turn lands, ack-back visible
 
 ## 3. Composite
-- [ ] 3.1 Author deck/kitsoki-github.deck.json (T0 + section slides + rrweb-backed video scenes; no MP4/WebM act sources)
-- [ ] 3.2 github-demo-composite.spec.ts: host.slidey.render → MP4 + chapters sidecar
+- [ ] 3.1 Author deck/kitsoki-github.slidey.json (T0 + section slides + rrweb-backed video scenes; no MP4/WebM act sources)
+- [ ] 3.2 Optional github-demo-composite.spec.ts: host.slidey.render → MP4 + chapters sidecar when video QA/share export is requested
 - [ ] 3.3 QA-gate the composite: both acts + section slides present, default pace (pacing-scan clean)
 
 ## 4. Land

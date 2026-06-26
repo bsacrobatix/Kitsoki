@@ -21,9 +21,9 @@ WAIT_SECONDS="${KITSOKI_GH_AGENT_WAIT_SECONDS:-180}"
 POLL_SECONDS="${KITSOKI_GH_AGENT_POLL_SECONDS:-5}"
 EVIDENCE_DIR="${KITSOKI_GH_AGENT_EVIDENCE_DIR:-.context}"
 MEDIA_ROOT="${KITSOKI_GH_AGENT_MEDIA_ROOT:-.artifacts/github-agent-live}"
-DECK_JSON="${KITSOKI_GH_AGENT_DECK_JSON:-.artifacts/github-agent-live/live-github-agent.deck.json}"
-DECK_HTML="${KITSOKI_GH_AGENT_DECK_HTML:-.artifacts/github-agent-live/live-github-agent.html}"
+DECK_JSON="${KITSOKI_GH_AGENT_DECK_JSON:-.artifacts/github-agent-live/live-github-agent.slidey.json}"
 DECK_VIDEO="${KITSOKI_GH_AGENT_DECK_VIDEO:-.artifacts/github-agent-live/live-github-agent.mp4}"
+RENDER_MP4="${KITSOKI_GH_AGENT_RENDER_MP4:-0}"
 SUMMARY="${KITSOKI_GH_AGENT_LIVE_SUMMARY:-.context/live-poc-run-$RUN_STAMP.md}"
 
 YES=0
@@ -45,7 +45,8 @@ Options:
   --pr-url <url>             required in live mode for the PR-status case
   --skip-deploy              do not call scripts/deploy-gh-agent.sh --yes
   --capture                  after evidence, record each case with Playwright
-  --developer-arc-media <p>  after captures, build, export, render, verify, and prepare QA for the live Slidey deck
+  --developer-arc-media <p>  after captures, build/verify the live Slidey deck
+  --render-mp4              also render an optional MP4 export and QA plan
   -h, --help                 show this help
 
 Environment:
@@ -61,8 +62,8 @@ Environment:
   KITSOKI_GH_AGENT_EVIDENCE_DIR
   KITSOKI_GH_AGENT_MEDIA_ROOT
   KITSOKI_GH_AGENT_DECK_JSON
-  KITSOKI_GH_AGENT_DECK_HTML
   KITSOKI_GH_AGENT_DECK_VIDEO
+  KITSOKI_GH_AGENT_RENDER_MP4=1
   KITSOKI_GH_AGENT_LIVE_SUMMARY
   KITSOKI_GH_AGENT_PR_URL
   KITSOKI_GH_AGENT_DEVELOPER_ARC_MEDIA
@@ -94,6 +95,10 @@ while [ "$#" -gt 0 ]; do
 		--developer-arc-media)
 			DEVELOPER_ARC_MEDIA="${2:-}"
 			shift 2
+			;;
+		--render-mp4)
+			RENDER_MP4=1
+			shift
 			;;
 		-h|--help)
 			usage
@@ -265,10 +270,15 @@ finish_summary() {
 ## Final Artifacts
 
 - Deck spec: \`$DECK_JSON\`
-- Self-contained HTML: \`$DECK_HTML\`
+$(if [ "$RENDER_MP4" = "1" ]; then cat <<EOF2
 - Rendered deck MP4: \`$DECK_VIDEO\`
 - QA feature: \`.context/qa-gh-agent-live-feature.md\`
 - QA scenarios: \`.context/qa-gh-agent-live-scenarios.yaml\`
+EOF2
+else cat <<'EOF2'
+- Rendered deck MP4: not generated; source deck is the primary artifact.
+EOF2
+fi)
 
 EOF
 	else
@@ -283,9 +293,13 @@ EOF
 ## Gates
 
 \`\`\`sh
-scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --deck "$DECK_JSON" --html "$DECK_HTML" --deck-video "$DECK_VIDEO" --developer-arc-media ${DEVELOPER_ARC_MEDIA:-'<path-to-slidey-developer-arc-mp4-or-rrweb>'}
+scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --deck "$DECK_JSON" --developer-arc-media ${DEVELOPER_ARC_MEDIA:-'<path-to-slidey-developer-arc-mp4-or-rrweb>'}
+$(if [ "$RENDER_MP4" = "1" ]; then cat <<EOF2
+scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --deck "$DECK_JSON" --deck-video "$DECK_VIDEO" --developer-arc-media ${DEVELOPER_ARC_MEDIA:-'<path-to-slidey-developer-arc-mp4-or-rrweb>'}
 scripts/write-gh-agent-live-qa-plan.mjs
 .agents/skills/kitsoki-ui-qa/scripts/qa.sh "$DECK_VIDEO" --feature .context/qa-gh-agent-live-feature.md --scenarios .context/qa-gh-agent-live-scenarios.yaml --strict --pacing-strict
+EOF2
+fi)
 \`\`\`
 
 ## Review Notes
@@ -468,7 +482,6 @@ run-gh-agent-live-poc:
   evidence:    $EVIDENCE_DIR
   media:       $MEDIA_ROOT
   deck_json:   $DECK_JSON
-  deck_html:   $DECK_HTML
   deck_video:  $DECK_VIDEO
   summary:     $SUMMARY
 EOF
@@ -518,17 +531,22 @@ fi
 
 if [ -n "$DEVELOPER_ARC_MEDIA" ]; then
 	run_or_print scripts/build-gh-agent-live-deck.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --out "$DECK_JSON" --developer-arc-media "$DEVELOPER_ARC_MEDIA"
-	run_or_print scripts/export-gh-agent-live-deck-html.sh --deck "$DECK_JSON" --out "$DECK_HTML"
-	run_or_print scripts/render-gh-agent-live-deck-video.sh --deck "$DECK_JSON" --out "$DECK_VIDEO"
-	run_or_print scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --deck "$DECK_JSON" --html "$DECK_HTML" --deck-video "$DECK_VIDEO" --developer-arc-media "$DEVELOPER_ARC_MEDIA"
-	run_or_print scripts/write-gh-agent-live-qa-plan.mjs --video "$DECK_VIDEO"
+	if [ "$RENDER_MP4" = "1" ]; then
+		run_or_print scripts/render-gh-agent-live-deck-video.sh --deck "$DECK_JSON" --out "$DECK_VIDEO"
+		run_or_print scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --deck "$DECK_JSON" --deck-video "$DECK_VIDEO" --developer-arc-media "$DEVELOPER_ARC_MEDIA"
+		run_or_print scripts/write-gh-agent-live-qa-plan.mjs --video "$DECK_VIDEO"
+	else
+		run_or_print scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --deck "$DECK_JSON" --developer-arc-media "$DEVELOPER_ARC_MEDIA"
+	fi
 	finish_summary
 else
 	print_cmd scripts/build-gh-agent-live-deck.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --out "$DECK_JSON" --developer-arc-media "<path-to-slidey-developer-arc-mp4-or-rrweb>"
-	print_cmd scripts/export-gh-agent-live-deck-html.sh --deck "$DECK_JSON" --out "$DECK_HTML"
-	print_cmd scripts/render-gh-agent-live-deck-video.sh --deck "$DECK_JSON" --out "$DECK_VIDEO"
-	print_cmd scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --deck "$DECK_JSON" --html "$DECK_HTML" --deck-video "$DECK_VIDEO" --developer-arc-media "<path-to-slidey-developer-arc-mp4-or-rrweb>"
-	print_cmd scripts/write-gh-agent-live-qa-plan.mjs --video "$DECK_VIDEO"
+	print_cmd scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --deck "$DECK_JSON" --developer-arc-media "<path-to-slidey-developer-arc-mp4-or-rrweb>"
+	if [ "$RENDER_MP4" = "1" ]; then
+		print_cmd scripts/render-gh-agent-live-deck-video.sh --deck "$DECK_JSON" --out "$DECK_VIDEO"
+		print_cmd scripts/verify-gh-agent-live-poc.mjs --evidence-dir "$EVIDENCE_DIR" --media-root "$MEDIA_ROOT" --deck "$DECK_JSON" --deck-video "$DECK_VIDEO" --developer-arc-media "<path-to-slidey-developer-arc-mp4-or-rrweb>"
+		print_cmd scripts/write-gh-agent-live-qa-plan.mjs --video "$DECK_VIDEO"
+	fi
 	finish_summary
 fi
 
@@ -536,6 +554,6 @@ cat <<'EOF'
 
 Next manual review points:
   - Mark PASS/FAIL in each .context/live-poc-*.md evidence note.
-  - Inspect generated .artifacts/github-agent-live/* screenshots/MP4s.
-  - Run the printed gated kitsoki-ui-qa command after the rendered deck MP4 exists.
+  - Inspect the generated .slidey.json deck directly in VS Code.
+  - Render/run video QA only when an MP4 export was explicitly requested.
 EOF

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /*
  * Build the live @kitsoki GitHub-agent Slidey deck from collected evidence and
- * captured MP4 clips.
+ * captured rrweb clips.
  *
  * Strict mode is the default: all evidence notes and media files must exist,
  * and evidence URLs must point at the live bsacrobatix/Kitsoki + kitsoki-test
@@ -92,7 +92,7 @@ const STEPS = [
   },
 ];
 
-const DEFAULT_OUT = ".artifacts/github-agent-live/live-github-agent.deck.json";
+const DEFAULT_OUT = ".artifacts/github-agent-live/live-github-agent.slidey.json";
 const DEFAULT_EVIDENCE_DIR = ".context";
 const DEFAULT_MEDIA_ROOT = ".artifacts/github-agent-live";
 
@@ -100,7 +100,7 @@ function usage() {
   console.error(`usage: scripts/build-gh-agent-live-deck.mjs [options]
 
 Options:
-  --out <deck.json>              default ${DEFAULT_OUT}
+  --out <deck.slidey.json>       default ${DEFAULT_OUT}
   --evidence-dir <dir>           default ${DEFAULT_EVIDENCE_DIR}
   --media-root <dir>             default ${DEFAULT_MEDIA_ROOT}
   --developer-arc-media <path>   rrweb clip for Section 7

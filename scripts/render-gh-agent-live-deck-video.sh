@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 #
-# Render the live @kitsoki GitHub-agent Slidey deck JSON to an MP4 suitable for
-# the gated kitsoki-ui-qa pass.
+# Optionally render the live @kitsoki GitHub-agent Slidey source deck to an MP4
+# export. The .slidey.json deck is the primary review artifact; this script is
+# only for explicit video QA/share requests.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-DECK=".artifacts/github-agent-live/live-github-agent.deck.json"
+DECK=".artifacts/github-agent-live/live-github-agent.slidey.json"
 OUT=".artifacts/github-agent-live/live-github-agent.mp4"
 SLIDEY_HOME="${SLIDEY_HOME:-/Users/brad/code/slidey}"
 SLIDEY_CMD="${KITSOKI_SLIDEY_CMD:-}"
@@ -18,18 +19,18 @@ usage() {
 usage: scripts/render-gh-agent-live-deck-video.sh [options]
 
 Options:
-  --deck <deck.json>       default $DECK
+  --deck <deck.slidey.json> default $DECK
   --out <deck.mp4>         default $OUT
   --slidey-home <dir>      default \$SLIDEY_HOME or /Users/brad/code/slidey
   --slidey-cmd <path>      executable slidey-compatible command (tests)
   -h, --help               show this help
 
 The command runs:
-  slidey <deck.json> --validate
-  slidey <deck.json> <deck.mp4>
+  slidey <deck.slidey.json> --validate
+  slidey <deck.slidey.json> <deck.mp4>
 
-It also requires Slidey's <deck.mp4>.chapters.json sidecar for the final QA and
-proof verifier.
+The source .slidey.json deck is the primary output. The MP4 and chapter sidecar
+are optional rendered exports for video QA/share workflows.
 EOF
 }
 

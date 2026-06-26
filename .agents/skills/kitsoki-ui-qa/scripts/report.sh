@@ -11,6 +11,8 @@
 #                  (tour-popover in some frames AND banner/caption in others)
 #   --blank-scan   optional blank-scan.json (deterministic monochrome scan). Its
 #                  flags are ADVISORY (rendered, never block) unless --blank-strict.
+#   --edge-scan    optional edge-scan.json. Any flag blocks; content touching a
+#                  frame edge means text/UI is likely clipped in the final MP4.
 #   --pacing-scan  optional pacing-scan.json (deterministic chapter-duration scan).
 #                  Its flags are ADVISORY (rendered, never block) unless
 #                  --pacing-strict — a popover that flashes by too fast to read.
@@ -23,13 +25,14 @@ set -euo pipefail
 
 verdict="${1:?usage: report.sh <verdict.json> [--out report.md] [--strict]}"
 shift || true
-out="" strict=0 blank_scan="" blank_strict=0 pacing_scan="" pacing_strict=0
+out="" strict=0 blank_scan="" blank_strict=0 edge_scan="" pacing_scan="" pacing_strict=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --out)           out="$2"; shift 2 ;;
     --strict)        strict=1; shift ;;
     --blank-scan)    blank_scan="$2"; shift 2 ;;
     --blank-strict)  blank_strict=1; shift ;;
+    --edge-scan)     edge_scan="$2"; shift 2 ;;
     --pacing-scan)   pacing_scan="$2"; shift 2 ;;
     --pacing-strict) pacing_strict=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
@@ -41,14 +44,20 @@ command -v jq >/dev/null 2>&1 || { echo "jq not on PATH" >&2; exit 1; }
 jq -e . "$verdict" >/dev/null 2>&1 || { echo "verdict is not valid JSON: $verdict" >&2; exit 2; }
 [ -n "$out" ] || out="$(dirname "$verdict")/qa-report.md"
 
-bf="$(mktemp)"; pf="$(mktemp)"; vf="$(mktemp)"
-trap 'rm -f "$bf" "$pf" "$vf"' EXIT
+bf="$(mktemp)"; ef="$(mktemp)"; pf="$(mktemp)"; vf="$(mktemp)"
+trap 'rm -f "$bf" "$ef" "$pf" "$vf"' EXIT
 
 # A slurpable blank-scan file (empty object when absent/invalid → no warnings).
 if [ -n "$blank_scan" ] && jq -e . "$blank_scan" >/dev/null 2>&1; then
   cp "$blank_scan" "$bf"
 else
   echo '{}' > "$bf"
+fi
+
+if [ -n "$edge_scan" ] && jq -e . "$edge_scan" >/dev/null 2>&1; then
+  cp "$edge_scan" "$ef"
+else
+  echo '{}' > "$ef"
 fi
 
 # A slurpable pacing-scan file (empty object when absent/invalid → no warnings).
@@ -76,8 +85,10 @@ blockers="$(jq --argjson strict "$strict" '
 vis_block="$(jq '[ .visual_issues[]? ] | length' "$vf")"
 ann_block="$(jq '[ .annotation_issues[]? ] | length' "$vf")"
 blank_n="$(jq '(.flagged // []) | length' "$bf")"
+edge_n="$(jq '(.flagged // []) | length' "$ef")"
 pacing_n="$(jq '(.flagged // []) | length' "$pf")"
 blank_block=0;  [ "$blank_n"  -gt 0 ] && [ "$blank_strict"  -eq 1 ] && blank_block=1
+edge_block=0;   [ "$edge_n"   -gt 0 ] && edge_block=1
 pacing_block=0; [ "$pacing_n" -gt 0 ] && [ "$pacing_strict" -eq 1 ] && pacing_block=1
 adv_block=0
 if [ "$strict" -eq 1 ]; then
@@ -85,7 +96,7 @@ if [ "$strict" -eq 1 ]; then
   if [ "$adv_status" != "ok" ] && [ "$adv_status" != "absent" ]; then adv_block=1; fi
 fi
 gate_pass=1
-for n in "$blockers" "$vis_block" "$ann_block" "$blank_block" "$pacing_block" "$adv_block"; do
+for n in "$blockers" "$vis_block" "$ann_block" "$blank_block" "$edge_block" "$pacing_block" "$adv_block"; do
   [ "$n" -eq 0 ] || gate_pass=0
 done
 
@@ -93,7 +104,7 @@ done
 jq -r --argjson strict "$strict" --argjson blank_strict "$blank_strict" \
       --argjson pacing_strict "$pacing_strict" \
       --argjson gate_pass "$gate_pass" --argjson adv_block "$adv_block" \
-      --slurpfile blank "$bf" --slurpfile pacing "$pf" '
+      --slurpfile blank "$bf" --slurpfile edge "$ef" --slurpfile pacing "$pf" '
   def icon(s): if s=="pass" then "✅" elif s=="fail" then "❌" else "⚠️" end;
   def gated(sc): if $strict==1 then (sc.status=="pass")
                  else (sc.status=="pass" or (sc.required==false)) end;
@@ -101,6 +112,7 @@ jq -r --argjson strict "$strict" --argjson blank_strict "$blank_strict" \
   ( [ .visual_issues[]? ] ) as $vis |
   ( [ .annotation_issues[]? ] ) as $ann |
   ( ($blank[0].flagged // []) ) as $bl |
+  ( ($edge[0].flagged // []) ) as $ed |
   ( ($blank_strict==1) and (($bl|length) > 0) ) as $blank_block |
   ( ($pacing[0].flagged // []) ) as $pc |
   ( ($pacing_strict==1) and (($pc|length) > 0) ) as $pacing_block |
@@ -110,7 +122,7 @@ jq -r --argjson strict "$strict" --argjson blank_strict "$blank_strict" \
   "# UI demo QA report",
   "",
   ( if $pass then "**Gate: ✅ PASS**\([ (if ($bl|length)>0 then "\($bl|length) advisory blank-scan warning(s)" else empty end), (if ($pc|length)>0 then "\($pc|length) advisory pacing warning(s)" else empty end) ] | if length>0 then " — " + join(", ") else "" end)"
-    else "**Gate: ❌ FAIL** — \(($blockers|length)) blocking scenario(s), \(($vis|length)) visual issue(s), \(($ann|length)) annotation issue(s)\(if $adv_block==1 then ", adversarial verification incomplete" else "" end)\(if $blank_block then ", \($bl|length) blank-scan flag(s)" else "" end)\(if $pacing_block then ", \($pc|length) pacing flag(s)" else "" end)" end ),
+    else "**Gate: ❌ FAIL** — \(($blockers|length)) blocking scenario(s), \(($vis|length)) visual issue(s), \(($ann|length)) annotation issue(s)\(if ($ed|length)>0 then ", \($ed|length) edge-clipping issue(s)" else "" end)\(if $adv_block==1 then ", adversarial verification incomplete" else "" end)\(if $blank_block then ", \($bl|length) blank-scan flag(s)" else "" end)\(if $pacing_block then ", \($pc|length) pacing flag(s)" else "" end)" end ),
   "",
   "| metric | n |",
   "|---|---|",
@@ -121,6 +133,7 @@ jq -r --argjson strict "$strict" --argjson blank_strict "$blank_strict" \
   "| visual issues | \($vis|length) |",
   "| annotation issues | \($ann|length) |",
   "| blank-scan warnings | \($bl|length)\(if $blank_strict==1 then " (blocking)" else " (advisory)" end) |",
+  "| edge-clipping issues | \($ed|length) (blocking) |",
   "| pacing warnings | \($pc|length)\(if $pacing_strict==1 then " (blocking)" else " (advisory)" end) |",
   "| frames reviewed | \((.frames_reviewed // [])|length) |",
   "",
@@ -148,6 +161,14 @@ jq -r --argjson strict "$strict" --argjson blank_strict "$blank_strict" \
         ( $bl[]
           | (if (.block.coverage // 0) > 0 then .block else .background end) as $r
           | "| `\(.frame // "?")` | \($r.color // "?") @ \((($r.coverage // 0)*100)|floor)% | \(.issue // "") |" ),
+        "" )
+    else empty end ),
+  ( if ($ed|length) > 0 then
+      ( "## ❌ Edge-clipping issues (deterministic frame-edge scan)",
+        "",
+        "| frame | issue |",
+        "|---|---|",
+        ( $ed[] | "| `\(.frame // "?")` | \(.issue // "") |" ),
         "" )
     else empty end ),
   ( if ($pc|length) > 0 then
@@ -187,6 +208,7 @@ jq -r --argjson strict "$strict" --argjson blank_strict "$blank_strict" \
 # to run but did not complete (adversary.status present and != "ok") also blocks.
 [ "$vis_block"  -gt 0 ] && echo "gate: $vis_block visual issue(s) — blank/broken render where content was expected" >&2
 [ "$ann_block"  -gt 0 ] && echo "gate: $ann_block annotation issue(s) — mixed narration styles within one video" >&2
+[ "$edge_n"     -gt 0 ] && echo "gate: $edge_n edge-clipping issue(s) — content touches the rendered frame edge" >&2
 if [ "$blank_n" -gt 0 ]; then
   [ "$blank_strict" -eq 1 ] \
     && echo "gate: $blank_n blank-scan flag(s) blocking (--blank-strict)" >&2 \
@@ -199,5 +221,5 @@ if [ "$pacing_n" -gt 0 ]; then
 fi
 [ "$adv_block" -eq 1 ] && echo "strict gate: adversarial verification did not complete (adversary.status=${adv_status:-absent})" >&2
 
-echo "wrote $out  (blocking scenarios: $blockers, visual issues: $vis_block, annotation issues: $ann_block, blank-scan: $blank_n$([ "$blank_strict" -eq 1 ] && echo ' blocking' || echo ' advisory'), pacing: $pacing_n$([ "$pacing_strict" -eq 1 ] && echo ' blocking' || echo ' advisory'))"
+echo "wrote $out  (blocking scenarios: $blockers, visual issues: $vis_block, annotation issues: $ann_block, edge-clipping: $edge_n blocking, blank-scan: $blank_n$([ "$blank_strict" -eq 1 ] && echo ' blocking' || echo ' advisory'), pacing: $pacing_n$([ "$pacing_strict" -eq 1 ] && echo ' blocking' || echo ' advisory'))"
 [ "$gate_pass" -eq 1 ] || exit 1

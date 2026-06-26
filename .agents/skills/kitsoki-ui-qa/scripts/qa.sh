@@ -97,6 +97,13 @@ blank_args=( "$frames_dir" --out "$blank_scan" )
 [ -n "$blank_min_cov" ] && blank_args+=( --min-coverage "$blank_min_cov" )
 "$here/blank-scan.sh" "${blank_args[@]}" || true
 
+# 2b-2. Deterministic edge clipping scan (no LLM). This catches text/UI that
+# touches the rendered frame edge, which usually means the MP4 is shifted or
+# content was clipped off-canvas. Blocking by default; it is a visual integrity
+# failure, not a subjective warning.
+edge_scan="$outdir/edge-scan.json"
+"$here/edge-scan.sh" "$frames_dir" --out "$edge_scan" || true
+
 # 2c. Deterministic pacing scan (no LLM) over the chapter sidecar — flags
 #     narrated moments that flash by too fast to read (the WEB_CHAT_PACE=0
 #     fast-validation footgun). Auto-detects <video>.chapters.json beside the MP4
@@ -125,7 +132,7 @@ review_args=( --frames "$frames_dir" --feature "$feature" \
 # 4. Gated report — exit code propagates as the QA gate.
 echo
 report_args=( "$verdict" --out "$outdir/qa-report.md" $strict_flag \
-  --blank-scan "$blank_scan" $blank_strict_flag )
+  --blank-scan "$blank_scan" $blank_strict_flag --edge-scan "$edge_scan" )
 [ -n "$pacing_scan" ] && report_args+=( --pacing-scan "$pacing_scan" $pacing_strict_flag )
 "$here/report.sh" "${report_args[@]}"
 rc=$?

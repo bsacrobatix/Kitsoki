@@ -46,9 +46,10 @@ flow tests (see [[feedback_no_llm_tests]] and `docs/web/README.md` →
 > — see **[rrweb capture → replay-render](#rrweb-capture--replay-render-deterministic-server-free-mode)**.
 >
 > **Composite deck rule:** if the deliverable is a **slidey deck** with embedded
-> acts, the deck source should embed **rrweb logs** (`"rrweb": "clips/<act>.rrweb.json"`)
-> rather than rendered MP4/WebM clips (`"src": "*.mp4"`). MP4 is the rendered QA /
-> sharing output of the whole deck, not the source format for deck acts. Use MP4
+> acts, the primary artifact is the source deck named `*.slidey.json`, and it
+> should embed **rrweb logs** (`"rrweb": "clips/<act>.rrweb.json"`) rather than
+> rendered MP4/WebM clips (`"src": "*.mp4"`). MP4 is an optional rendered QA /
+> sharing export of the whole deck, not the source format for deck acts. Use MP4
 > `src` only for surfaces rrweb cannot reconstruct (`<canvas>`, `<video>`, WebGL)
 > or when the user explicitly requests a raw video splice.
 
@@ -727,12 +728,14 @@ live overlay, so only anchor to elements that exist there (e.g. `view-mode-tabs`
 surfaces, or kitsoki **plus** an external page — the deliverable should be **one
 narrated [slidey](../../../../../slidey) deck** that brackets the act clips with
 title / persona / section / CTA slides, not a bare ffmpeg concat of `.mp4`s. And
-the act clips should be embedded as **rrweb DOM-session logs**, not transcoded
-MP4: rrweb is compact JSON (not pixels), stays a clean app capture (no baked-in
-overlays), is frame-deterministic and re-renderable offline, carries its own
-chapter markers, and gives the slidey **web viewer** a live, scrubbable,
-chapter-aware player. The MP4-concat path below is the **legacy fallback** — use
-it only for a surface rrweb can't capture (`<canvas>`/`<video>`/WebGL).
+the source deck should be named `*.slidey.json` so VS Code and reviewers recognize
+it as the direct artifact to open. The act clips should be embedded as **rrweb
+DOM-session logs**, not transcoded MP4: rrweb is compact JSON (not pixels), stays
+a clean app capture (no baked-in overlays), is frame-deterministic and
+re-renderable offline, carries its own chapter markers, and gives the slidey
+**web viewer** a live, scrubbable, chapter-aware player. The MP4-concat path
+below is the **legacy fallback** — use it only for a surface rrweb can't capture
+(`<canvas>`/`<video>`/WebGL).
 
 **Never "fix" a slow or failing rrweb deck render by swapping the deck scenes to
 MP4 `src`.** That optimizes the wrong thing: it bloats artifacts, bakes pixels
@@ -745,7 +748,7 @@ screenshots or MP4s.
 
 > **Worked references — copy these, don't start blank:**
 > the **@kitsoki GitHub-loop** demo (deck
-> `docs/proposals/demo-assets/kitsoki-github/deck/kitsoki-github.deck.json`,
+> `docs/proposals/demo-assets/kitsoki-github/deck/kitsoki-github.slidey.json`,
 > 11 scenes, two rrweb acts) and the richer **dev-story-hybrid** deck
 > (`.artifacts/slidey-hybrid/dev-story-hybrid.json` — title → personas(cast) →
 > use-cases → embedded rrweb `video` per phase → CTA). Read both; the deck is
@@ -836,13 +839,15 @@ harness fork is the **fallback** for what an adapter still can't express.
   "eyebrow": "1 · The GitHub side", "title": "Mention → ack → run link",
   "caption": "…", "narration": "…" }           // narration may be a string or {at|chapter,text}[]
 ```
-`rrweb` paths resolve **relative to the deck file**. The baked render
+`rrweb` paths resolve **relative to the deck file**. Save source decks with the
+`.slidey.json` suffix; avoid generic `.deck.json` names for review artifacts.
+The baked render
 seek-rasterizes each log via `Replayer.goto(t)` — real motion, deterministic,
 **but slow** (minutes for a multi-act deck; budget for it / run in the
 background). PNG/PDF export still shows a poster frame, so the layout-iteration
 loop keeps working without rendering video.
 
-### 3. Render + gate
+### 3. Optional render + gate
 
 ```bash
 npm --prefix /Users/brad/code/slidey run build:render   # MANDATORY after any slidey UI/component change
@@ -850,6 +855,9 @@ node /Users/brad/code/slidey/src/index.js <deck>.json <out>.mp4   # → MP4 + <o
 ```
 (or `host.slidey.render` from a story — same engine; see
 `docs/architecture/hosts.md#hostslideyrender`).
+Only do this when a rendered video export or video QA gate was explicitly
+requested. For slidey-deck deliverables, the `*.slidey.json` source is the
+primary output and is directly reviewable.
 > **Slidey embed-staging trap (same class as the kitsoki go:embed one).** `slidey
 > src/index.js` renders off the **pre-built** `dist-render/render.html` bundle — it
 > does NOT recompile `web/` source per render. So a slidey component change
@@ -994,7 +1002,7 @@ make mcp-qa           # vision QA gate (GATED: local claude CLI)
   `tools/runstatus/tests/playwright/agent-actions-video.spec.ts` +
   `tools/runstatus/src/tour/agent-actions-manifest.ts`
 - **Slidey rrweb-embedded composite (preferred multi-act deliverable):**
-  `docs/proposals/demo-assets/kitsoki-github/deck/kitsoki-github.deck.json` +
+  `docs/proposals/demo-assets/kitsoki-github/deck/kitsoki-github.slidey.json` +
   `deck/clips/*.rrweb.json` + `deck/tours/act1-github.tour.json`;
   Act 2 via the **slidey tour adapter** —
   `tools/runstatus/src/tour/kitsoki-tour-adapter.cjs` +

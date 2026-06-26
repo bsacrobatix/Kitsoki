@@ -8,7 +8,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-DECK=".artifacts/github-agent-live/live-github-agent.deck.json"
+DECK=".artifacts/github-agent-live/live-github-agent.slidey.json"
 OUT=".artifacts/github-agent-live/live-github-agent.html"
 SLIDEY_HOME="${SLIDEY_HOME:-/Users/brad/code/slidey}"
 SLIDEY_CMD="${KITSOKI_SLIDEY_CMD:-}"
@@ -18,15 +18,15 @@ usage() {
 usage: scripts/export-gh-agent-live-deck-html.sh [options]
 
 Options:
-  --deck <deck.json>       default $DECK
+  --deck <deck.slidey.json> default $DECK
   --out <deck.html>        default $OUT
   --slidey-home <dir>      default \$SLIDEY_HOME or /Users/brad/code/slidey
   --slidey-cmd <path>      executable slidey-compatible command (tests)
   -h, --help               show this help
 
 The command runs:
-  slidey <deck.json> --validate
-  slidey bundle <deck.json> <deck.html>
+  slidey <deck.slidey.json> --validate
+  slidey bundle <deck.slidey.json> <deck.html>
 
 When --slidey-home is used, the command is:
   node <slidey-home>/src/index.js ...

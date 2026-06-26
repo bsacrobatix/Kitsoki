@@ -27,9 +27,9 @@ Writes:
   <feature>
   <scenarios>
 
-Then run the printed qa.sh command after the final deck MP4/frames exist. The
-QA command is intentionally not run automatically because kitsoki-ui-qa uses the
-local claude vision reviewer and is operator-gated.`);
+Then run the printed qa.sh command only after an optional MP4 export or labeled
+frames exist. The QA command is intentionally not run automatically because
+kitsoki-ui-qa uses the local claude vision reviewer and is operator-gated.`);
 }
 
 function parseArgs(argv) {
@@ -73,9 +73,8 @@ function featureMarkdown() {
 The final proof artifact is the live @kitsoki GitHub-agent Slidey deck produced
 from the current POC run:
 
-- deck spec: \`.artifacts/github-agent-live/live-github-agent.deck.json\`
-- self-contained HTML: \`.artifacts/github-agent-live/live-github-agent.html\`
-- review/render video: \`.artifacts/github-agent-live/live-github-agent.mp4\`
+- deck spec: \`.artifacts/github-agent-live/live-github-agent.slidey.json\`
+- optional review/render video: \`.artifacts/github-agent-live/live-github-agent.mp4\`
 - evidence notes: \`.context/live-poc-*.md\`
 
 The deck must prove the live GitHub App loop, not the old static GitHub fixture.
@@ -206,7 +205,7 @@ function main() {
   console.log(`wrote ${args.feature}`);
   console.log(`wrote ${args.scenarios}`);
   console.log("");
-  console.log("Run the gated QA command after the final deck MP4 or frames exist:");
+  console.log("Run the gated QA command after an optional deck MP4 or labeled frames exist:");
   console.log(qaCommand(args));
 }
 

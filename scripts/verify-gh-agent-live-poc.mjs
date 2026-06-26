@@ -50,9 +50,7 @@ const STEPS = [
 
 const DEFAULT_EVIDENCE_DIR = ".context";
 const DEFAULT_MEDIA_ROOT = ".artifacts/github-agent-live";
-const DEFAULT_DECK = ".artifacts/github-agent-live/live-github-agent.deck.json";
-const DEFAULT_HTML = ".artifacts/github-agent-live/live-github-agent.html";
-const DEFAULT_DECK_VIDEO = ".artifacts/github-agent-live/live-github-agent.mp4";
+const DEFAULT_DECK = ".artifacts/github-agent-live/live-github-agent.slidey.json";
 
 function usage() {
   console.error(`usage: scripts/verify-gh-agent-live-poc.mjs [options]
@@ -60,16 +58,16 @@ function usage() {
 Options:
   --evidence-dir <dir>           default ${DEFAULT_EVIDENCE_DIR}
   --media-root <dir>             default ${DEFAULT_MEDIA_ROOT}
-  --deck <deck.json>             default ${DEFAULT_DECK}
-  --html <deck.html>             default ${DEFAULT_HTML}
-  --deck-video <deck.mp4>        default ${DEFAULT_DECK_VIDEO}
+  --deck <deck.slidey.json>      default ${DEFAULT_DECK}
+  --html <deck.html>             optional exported HTML bundle to verify
+  --deck-video <deck.mp4>        optional rendered export to verify
   --developer-arc-media <path>   rrweb log required unless already referenced by deck
   --json-out <path>              write machine-readable report
   --allow-missing-db             do not require the gh_jobs row block
   --allow-missing-media          do not require rrweb logs or developer media
   --allow-missing-deck           do not require the generated Slidey deck
-  --allow-missing-html           do not require the exported self-contained HTML deck
-  --allow-missing-deck-video     do not require the rendered deck MP4/chapter sidecar
+  --allow-missing-html           accepted for old command lines; exported HTML is optional unless --html is set
+  --allow-missing-deck-video     accepted for old command lines; rendered MP4 is optional unless --deck-video is set
   --allow-nonlive-urls           skip live URL host validation (tests only)
   -h, --help                     show this help
 
@@ -85,7 +83,9 @@ Strict final proof inputs:
   <media-root>/<case>/03-run-page.rrweb.json
   <media-root>/<case>/04-run-api.rrweb.json
   <deck>
+  optionally, when --html is supplied:
   <html>
+  optionally, when --deck-video is supplied:
   <deck-video>
   <deck-video>.chapters.json`);
 }
@@ -95,8 +95,8 @@ function parseArgs(argv) {
     evidenceDir: DEFAULT_EVIDENCE_DIR,
     mediaRoot: DEFAULT_MEDIA_ROOT,
     deck: DEFAULT_DECK,
-    html: DEFAULT_HTML,
-    deckVideo: DEFAULT_DECK_VIDEO,
+    html: "",
+    deckVideo: "",
     developerArcMedia: "",
     jsonOut: "",
     allowMissingDB: false,
@@ -579,6 +579,10 @@ function checkDeck(args, report) {
 }
 
 function checkHTML(args, report) {
+  if (!args.html) {
+    report.html = { skipped: true, reason: "no --html supplied" };
+    return;
+  }
   if (!fs.existsSync(args.html)) {
     if (!args.allowMissingHTML) report.fail(`missing exported HTML deck ${args.html}`);
     return;
@@ -601,6 +605,10 @@ function checkHTML(args, report) {
 }
 
 function checkDeckVideo(args, report) {
+  if (!args.deckVideo) {
+    report.deckVideo = { skipped: true, reason: "no --deck-video supplied" };
+    return;
+  }
   const chapters = `${args.deckVideo}.chapters.json`;
   report.deckVideo = { path: args.deckVideo, chapters };
   if (!fs.existsSync(args.deckVideo)) {
