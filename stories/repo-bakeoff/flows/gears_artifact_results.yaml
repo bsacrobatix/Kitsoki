@@ -109,7 +109,7 @@ host_handlers:
             summary_path: .artifacts/external-bakeoff/results/summary.json
             deck:
               spec_path: .artifacts/external-bakeoff/report/deck.slidey.json
-              summary: "gears-rust bake-off: 1/1 solved"
+              summary: "gears-rust bake-off: 1/1 attempted solved"
             markdown: .artifacts/external-bakeoff/report/report.md
 
 turns:
@@ -162,7 +162,7 @@ turns:
       summary_path: .artifacts/external-bakeoff/results/summary.json
       deck:
         spec_path: .artifacts/external-bakeoff/report/deck.slidey.json
-        summary: "gears-rust bake-off: 1/1 solved"
+        summary: "gears-rust bake-off: 1/1 attempted solved"
       report_markdown: .artifacts/external-bakeoff/report/report.md
 
 expect_no_errors: true

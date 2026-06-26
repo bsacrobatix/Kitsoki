@@ -192,6 +192,23 @@ load-bearing knobs `drive_cell.sh` sets (each learned from a failure) are tabula
 the key one is `workspace_id:""` so the implementer edits the prepared worktree
 directly instead of creating one against the wrong repo root.
 
+If a provider/profile is blocked before a capability result exists (for example
+rate limits, missing API access, or a deliberately unavailable profile), record a
+pending cell instead of leaving a silent hole or marking the model failed:
+
+```sh
+python3 tools/bugfix-bakeoff/external/bench.py pending \
+  --project gears-rust \
+  --bug bug1 \
+  --candidate gpt-5.3-spark \
+  --reason "codex-spark profile not configured on this machine" \
+  --out .artifacts/external-bakeoff/results/cells/gears-rust-bug1-gpt-5.3-spark-kitsoki.json
+```
+
+Pending cells are included in reports as `pending`, counted separately from
+`failed`, and excluded from solve-rate denominator. Use them only when the oracle
+never ran; once a model produced a candidate worktree, grade it with `score`.
+
 For private or heavy `local_only` projects, pass `--repo-dir <checkout>` or set
 `<PROJECT>_REPO` (for example `GEARS_RUST_REPO`). The harness creates disposable
 per-cell worktrees under `.artifacts/external-bakeoff/cells/` and leaves the

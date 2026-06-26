@@ -1,0 +1,123 @@
+# scoring_reports_pending_results — provider-blocked cells report as pending.
+#
+# A provider/profile outage is not a model capability failure. If the operator
+# records a pending cell JSON, scoring should produce a report with a pending
+# bucket rather than route back to running or mark the cell failed.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: running
+initial_world:
+  project: gears-rust
+  repo_dir: /Users/brad/code/gears-rust
+  results_dir: ../../../.artifacts/external-bakeoff/results
+  report_dir: ../../../.artifacts/external-bakeoff/report
+  bugs: [bug1]
+  candidates: [gpt-5.3-spark]
+  cells_total: 1
+  cell_commands_markdown: "- `bug1` x `gpt-5.3-spark`: `tools/bugfix-bakeoff/external/drive_cell.sh --project gears-rust --bug bug1 --candidate gpt-5.3-spark --repo-dir /Users/brad/code/gears-rust --score`"
+  preflight_ready: true
+  oracles_armed: true
+
+host_handlers:
+  host.run:
+    by_call:
+      summarize:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            project: gears-rust
+            cells:
+              - project: gears-rust
+                bug: bug1
+                candidate: gpt-5.3-spark
+                treatment: kitsoki
+                outcome:
+                  oracle_pass: null
+                  oracle_status: absent
+                  build_pass: null
+                  suite_pass: null
+                  quality: pending
+                  adjudicated: false
+                  adjudication_note: ""
+                compliance:
+                  rate: null
+                  note: "pending cell; compliance not measured"
+                metrics:
+                  cost_usd: null
+                  total_tokens: null
+                  wall_time_s: null
+                  guidance_turns: 0
+                  agent_calls: null
+                trace_found: false
+                notes: "codex-spark profile not configured"
+                pending_reason: "codex-spark profile not configured"
+            rollup:
+              by_candidate:
+                gpt-5.3-spark:
+                  n: 1
+                  solved: 0
+                  partial: 0
+                  failed: 0
+                  pending: 1
+                  attempted: 0
+                  solve_rate: 0.0
+            summary_path: .artifacts/external-bakeoff/results/summary.json
+            deck:
+              spec_path: .artifacts/external-bakeoff/report/deck.slidey.json
+              summary: "gears-rust bake-off: 0/0 attempted solved; 1 pending"
+            markdown: .artifacts/external-bakeoff/report/report.md
+
+turns:
+  - intent: { name: accept, slots: {} }
+    expect_state: reporting
+    expect_world:
+      summary_path: .artifacts/external-bakeoff/results/summary.json
+      deck:
+        spec_path: .artifacts/external-bakeoff/report/deck.slidey.json
+        summary: "gears-rust bake-off: 0/0 attempted solved; 1 pending"
+      summary:
+        project: gears-rust
+        cells:
+          - project: gears-rust
+            bug: bug1
+            candidate: gpt-5.3-spark
+            treatment: kitsoki
+            outcome:
+              oracle_pass: null
+              oracle_status: absent
+              build_pass: null
+              suite_pass: null
+              quality: pending
+              adjudicated: false
+              adjudication_note: ""
+            compliance:
+              rate: null
+              note: "pending cell; compliance not measured"
+            metrics:
+              cost_usd: null
+              total_tokens: null
+              wall_time_s: null
+              guidance_turns: 0
+              agent_calls: null
+            trace_found: false
+            notes: "codex-spark profile not configured"
+            pending_reason: "codex-spark profile not configured"
+        rollup:
+          by_candidate:
+            gpt-5.3-spark:
+              n: 1
+              solved: 0
+              partial: 0
+              failed: 0
+              pending: 1
+              attempted: 0
+              solve_rate: 0.0
+        summary_path: .artifacts/external-bakeoff/results/summary.json
+        deck:
+          spec_path: .artifacts/external-bakeoff/report/deck.slidey.json
+          summary: "gears-rust bake-off: 0/0 attempted solved; 1 pending"
+        markdown: .artifacts/external-bakeoff/report/report.md
+
+expect_no_errors: true

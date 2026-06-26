@@ -170,6 +170,44 @@ def test_drive_plan_renders_exact_matrix_commands():
     assert '"commands": [' in text
 
 
+def test_pending_cell_rolls_up_separately_from_failures():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        manifest = {
+            "project": {"id": "demo"},
+            "bugs": [{"id": "bug1", "baseline_sha": "abc", "oracle_test": "oracles/bug1"}],
+            "_dir": root,
+        }
+        results = root / "results"
+        out_cell = results / "cells" / "demo-bug1-cheap-kitsoki.json"
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = bench.pending_cell(manifest, "bug1", "cheap", "provider rate limited", str(out_cell))
+        assert rc == 0
+        assert out_cell.exists()
+        summary_out = io.StringIO()
+        rel = os.path.relpath(results, bench.HERE)
+        markdown = root / "report.md"
+        with redirect_stdout(summary_out):
+            rc = bench.summarize(manifest, rel, markdown=str(markdown))
+        assert rc == 0
+        summary = json_load(summary_out.getvalue())
+        bucket = summary["rollup"]["by_candidate"]["cheap"]
+        assert bucket["pending"] == 1
+        assert bucket["failed"] == 0
+        assert bucket["attempted"] == 0
+        assert bucket["solve_rate"] == 0.0
+        text = markdown.read_text()
+        assert "demo bake-off: 0/0 attempted solved; 1 pending" in text
+        assert "| cheap | 1 | 0 | 0 | 0 | 1 | 0% |" in text
+        assert "| bug1 | cheap | pending | pending |" in text
+
+
+def json_load(raw):
+    import json
+    return json.loads(raw)
+
+
 def main():
     fails = 0
     for name, fn in sorted(globals().items()):

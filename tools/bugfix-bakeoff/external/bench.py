@@ -229,6 +229,50 @@ def drive_plan(m, bug_ids=None, candidate=None, repo_dir=None):
     return 0
 
 
+def pending_cell(m, bug_id, candidate, reason, out, candidates_path=None, treatment="kitsoki"):
+    """Write an honest pending cell for provider/profile/infrastructure blockers.
+
+    Pending is not a model capability result: the oracle never ran, so summaries
+    count it separately from solved/partial/failed and the report keeps the note.
+    """
+    bug = bug_of(m, bug_id)
+    cm = candidate_meta(candidates_path, candidate)
+    cell = {
+        "project": m["project"]["id"],
+        "bug": bug["id"],
+        "candidate": candidate,
+        "treatment": treatment,
+        "model": cm.get("model", ""),
+        "effort": cm.get("effort", ""),
+        "provider": cm.get("provider", ""),
+        "outcome": {
+            "oracle_pass": None,
+            "oracle_status": "absent",
+            "build_pass": None,
+            "suite_pass": None,
+            "quality": "pending",
+            "adjudicated": False,
+            "adjudication_note": "",
+        },
+        "compliance": {"rate": None, "note": "pending cell; compliance not measured"},
+        "metrics": {
+            "cost_usd": None,
+            "total_tokens": None,
+            "wall_time_s": None,
+            "guidance_turns": 0,
+            "agent_calls": None,
+        },
+        "trace_found": False,
+        "notes": reason,
+        "pending_reason": reason,
+    }
+    out_path = Path(out) if out else HERE / "results" / "cells" / f"{m['project']['id']}-{bug['id']}-{candidate}-{treatment}.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(cell, indent=2) + "\n")
+    print(json.dumps({"ok": True, "out": str(out_path), "cell": cell}))
+    return 0
+
+
 def configured_profiles(root=None):
     """Return harness profile names from the checked-in and local kitsoki config.
 
@@ -555,12 +599,14 @@ def summarize(m, results_dir, deck=None, markdown=None, allow_empty=False):
     for c in cells:
         cand = c.get("candidate", "?")
         q = (c.get("outcome", {}) or {}).get("quality", "?")
-        b = by.setdefault(cand, {"n": 0, "solved": 0, "partial": 0, "failed": 0})
+        b = by.setdefault(cand, {"n": 0, "solved": 0, "partial": 0, "failed": 0, "pending": 0})
         b["n"] += 1
         if q in b:
             b[q] += 1
     for cand, b in by.items():
-        b["solve_rate"] = round(b["solved"] / b["n"], 3) if b["n"] else 0.0
+        attempted = b["n"] - b.get("pending", 0)
+        b["attempted"] = attempted
+        b["solve_rate"] = round(b["solved"] / attempted, 3) if attempted else 0.0
     out = {"project": m["project"]["id"], "cells": cells, "rollup": {"by_candidate": by},
            "summary_path": str((HERE / results_dir / "summary.json"))}
     summary_path = HERE / results_dir / "summary.json"
@@ -572,6 +618,8 @@ def summarize(m, results_dir, deck=None, markdown=None, allow_empty=False):
             "spec_path": deck,
             "summary": external_headline(out),
         }
+    elif markdown:
+        write_external_markdown(out, Path(markdown))
     if markdown:
         out["markdown"] = markdown
     print(json.dumps(out))
@@ -580,9 +628,11 @@ def summarize(m, results_dir, deck=None, markdown=None, allow_empty=False):
 
 def external_headline(summary):
     by = summary.get("rollup", {}).get("by_candidate", {})
-    total = sum(v.get("n", 0) for v in by.values())
+    total = sum(v.get("attempted", v.get("n", 0)) for v in by.values())
     solved = sum(v.get("solved", 0) for v in by.values())
-    return f"{summary.get('project', 'project')} bake-off: {solved}/{total} solved"
+    pending = sum(v.get("pending", 0) for v in by.values())
+    suffix = f"; {pending} pending" if pending else ""
+    return f"{summary.get('project', 'project')} bake-off: {solved}/{total} attempted solved{suffix}"
 
 
 def write_external_deck(summary, deck_path, markdown=None):
@@ -599,20 +649,24 @@ def write_external_deck(summary, deck_path, markdown=None):
         solved = bucket.get("solved", 0)
         partial = bucket.get("partial", 0)
         failed = bucket.get("failed", 0)
+        pending = bucket.get("pending", 0)
         rate = bucket.get("solve_rate", 0)
-        rows.append({"cells": [cand, str(n), str(solved), str(partial), str(failed), f"{rate:.0%}"]})
+        rows.append({"cells": [cand, str(n), str(solved), str(partial), str(failed), str(pending), f"{rate:.0%}"]})
     bug_rows = []
     for c in sorted(cells, key=lambda item: (item.get("bug", ""), item.get("candidate", ""))):
         outcome = c.get("outcome", {}) or {}
         metrics = c.get("metrics", {}) or {}
         cost = metrics.get("cost_usd")
         cost_text = "subscription/unknown" if cost is None else f"${cost:.4f}"
+        oracle_status = outcome.get("oracle_status", "")
+        if outcome.get("quality") == "pending":
+            oracle_status = "pending"
         bug_rows.append({
             "cells": [
                 c.get("bug", ""),
                 c.get("candidate", ""),
                 outcome.get("quality", ""),
-                "pass" if outcome.get("oracle_pass") else "fail",
+                oracle_status if oracle_status else ("pass" if outcome.get("oracle_pass") else "fail"),
                 cost_text,
             ]
         })
@@ -644,7 +698,7 @@ def write_external_deck(summary, deck_path, markdown=None):
                 "type": "table",
                 "title": "Candidate rollup",
                 "variant": "data",
-                "columns": ["Candidate", "Cells", "Solved", "Partial", "Failed", "Solve rate"],
+                "columns": ["Candidate", "Cells", "Solved", "Partial", "Failed", "Pending", "Solve rate"],
                 "rows": rows,
             },
             {
@@ -659,29 +713,40 @@ def write_external_deck(summary, deck_path, markdown=None):
     deck_path.parent.mkdir(parents=True, exist_ok=True)
     deck_path.write_text(json.dumps(deck, indent=2) + "\n")
     if markdown:
-        markdown.parent.mkdir(parents=True, exist_ok=True)
-        lines = [
-            f"# {project} repo-history bake-off",
-            "",
-            headline,
-            "",
-            "## Candidate rollup",
-            "",
-            "| Candidate | Cells | Solved | Partial | Failed | Solve rate |",
-            "|---|---:|---:|---:|---:|---:|",
-        ]
-        for cand, bucket in sorted(by.items()):
-            lines.append(
-                f"| {cand} | {bucket.get('n', 0)} | {bucket.get('solved', 0)} | "
-                f"{bucket.get('partial', 0)} | {bucket.get('failed', 0)} | "
-                f"{bucket.get('solve_rate', 0):.0%} |"
-            )
-        lines.extend(["", "## Cell verdicts", "", "| Bug | Candidate | Quality | Oracle |", "|---|---|---|---|"])
-        for c in sorted(cells, key=lambda item: (item.get("bug", ""), item.get("candidate", ""))):
-            outcome = c.get("outcome", {}) or {}
-            oracle = "pass" if outcome.get("oracle_pass") else "fail"
-            lines.append(f"| {c.get('bug', '')} | {c.get('candidate', '')} | {outcome.get('quality', '')} | {oracle} |")
-        markdown.write_text("\n".join(lines) + "\n")
+        write_external_markdown(summary, markdown)
+
+
+def write_external_markdown(summary, markdown):
+    project = summary.get("project", "project")
+    cells = summary.get("cells", [])
+    by = summary.get("rollup", {}).get("by_candidate", {})
+    headline = external_headline(summary)
+    markdown.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f"# {project} repo-history bake-off",
+        "",
+        headline,
+        "",
+        "## Candidate rollup",
+        "",
+        "| Candidate | Cells | Solved | Partial | Failed | Pending | Solve rate |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    for cand, bucket in sorted(by.items()):
+        lines.append(
+            f"| {cand} | {bucket.get('n', 0)} | {bucket.get('solved', 0)} | "
+            f"{bucket.get('partial', 0)} | {bucket.get('failed', 0)} | "
+            f"{bucket.get('pending', 0)} | "
+            f"{bucket.get('solve_rate', 0):.0%} |"
+        )
+    lines.extend(["", "## Cell verdicts", "", "| Bug | Candidate | Quality | Oracle |", "|---|---|---|---|"])
+    for c in sorted(cells, key=lambda item: (item.get("bug", ""), item.get("candidate", ""))):
+        outcome = c.get("outcome", {}) or {}
+        oracle = outcome.get("oracle_status") or ("pass" if outcome.get("oracle_pass") else "fail")
+        if outcome.get("quality") == "pending":
+            oracle = "pending"
+        lines.append(f"| {c.get('bug', '')} | {c.get('candidate', '')} | {outcome.get('quality', '')} | {oracle} |")
+    markdown.write_text("\n".join(lines) + "\n")
 
 
 def trace_cost(trace):
@@ -742,6 +807,15 @@ def main():
     dp.add_argument("--candidate", action="append", required=True,
                     help="candidate key to drive; repeat or pass comma-separated keys")
     dp.add_argument("--repo-dir", help="local checkout for private/local_only projects")
+    pc = sub.add_parser("pending")
+    pc.add_argument("--project", required=True)
+    pc.add_argument("--bug", required=True)
+    pc.add_argument("--candidate", required=True)
+    pc.add_argument("--reason", required=True)
+    pc.add_argument("--out", help="cell JSON path to write; defaults under results/cells/")
+    pc.add_argument("--treatment", default="kitsoki")
+    pc.add_argument("--candidates", default=str(HERE / "candidates.yaml"),
+                    help="candidates.yaml for model/effort/provider lookup by --candidate")
     mt = sub.add_parser("meta")  # machine-readable project facts (for the Go runner)
     mt.add_argument("--project", required=True)
     mt.add_argument("--bug")     # optional: emit one bug's drive facts
@@ -769,6 +843,9 @@ def main():
     if a.cmd == "drive-plan":
         sys.exit(drive_plan(m, bug_ids=a.bug, candidate=a.candidate,
                             repo_dir=a.repo_dir))
+    if a.cmd == "pending":
+        sys.exit(pending_cell(m, a.bug, a.candidate, a.reason, a.out,
+                              candidates_path=a.candidates, treatment=a.treatment))
     if a.cmd == "score":
         sys.exit(score(m, bug_of(m, a.bug), a.tree, a.out, a.candidate, a.treatment,
                        trace=a.trace, candidates_path=a.candidates))

@@ -78,6 +78,9 @@ also writes `.artifacts/external-bakeoff/report/report.md` and
 before at least one `results/cells/*.json` exists returns to `running`; run a
 cell with `drive_cell.sh --score` or explicitly use `bench.py summarize
 --allow-empty` outside the story if you are testing empty-report rendering.
+If a provider/profile is blocked before a model actually attempts the bug, write
+a pending cell with `bench.py pending` and then score. Pending cells report as
+`pending`, not `failed`, and are excluded from the solve-rate denominator.
 
 The `running` room computes the copy-ready commands with:
 
