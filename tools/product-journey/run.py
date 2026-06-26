@@ -2126,6 +2126,8 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "driver-plan.md",
         "agent-brief.json",
         "agent-brief.md",
+        "driver-handoff.json",
+        "driver-handoff.md",
         "review.json",
         "deck.slidey.json",
     ]
@@ -2275,6 +2277,9 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     agent_brief = build_agent_brief(run_json, evidence, execution_plan)
     write_json(run_dir / "agent-brief.json", agent_brief)
     (run_dir / "agent-brief.md").write_text(render_agent_brief(agent_brief), encoding="utf-8")
+    driver_handoff = build_driver_handoff(run_json, metrics, evidence, review)
+    write_json(run_dir / "driver-handoff.json", driver_handoff)
+    (run_dir / "driver-handoff.md").write_text(render_driver_handoff(driver_handoff), encoding="utf-8")
     deck = render_deck(run_json, metrics, evidence, findings, review, execution_plan, media_manifest, scenario_outcomes, driver_plan)
     write_json(run_dir / "deck.slidey.json", deck)
     if publish_deck is not None:
@@ -2290,6 +2295,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "execution_plan_path": str(run_dir / "execution-plan.md"),
         "driver_plan_path": str(run_dir / "driver-plan.md"),
         "agent_brief_path": str(run_dir / "agent-brief.md"),
+        "driver_handoff_path": str(run_dir / "driver-handoff.md"),
         "media_manifest_path": str(run_dir / "media-manifest.json"),
         "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
         "passed": passed,
@@ -2351,6 +2357,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
     execution_plan = load_json_for_validation(run_dir / "execution-plan.json", issues)
     driver_plan = load_json_for_validation(run_dir / "driver-plan.json", issues)
     agent_brief = load_json_for_validation(run_dir / "agent-brief.json", issues)
+    driver_handoff = load_json_for_validation(run_dir / "driver-handoff.json", issues)
     scenario_outcomes = load_json_for_validation(run_dir / "scenario-outcomes.json", issues)
     review = load_json_for_validation(run_dir / "review.json", issues)
     deck = load_json_for_validation(run_dir / "deck.slidey.json", issues)
@@ -2373,6 +2380,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
         (agent_brief, "agent_brief", "agent-brief.json"),
         (execution_plan, "execution_plan", "execution-plan.json"),
         (driver_plan, "driver_plan", "driver-plan.json"),
+        (driver_handoff, "driver_handoff", "driver-handoff.json"),
         (scenario_outcomes, "scenario_outcomes", "scenario-outcomes.json"),
     ]:
         if payload:
@@ -2387,6 +2395,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
     execution_steps = execution_plan.get("steps", []) if execution_plan else []
     driver_scenarios = driver_plan.get("scenarios", []) if driver_plan else []
     brief_scenarios = agent_brief.get("scenario_order", []) if agent_brief else []
+    handoff_missing_evidence = driver_handoff.get("missing_evidence", []) if driver_handoff else []
 
     if scenarios_json and len(scenario_rows) != len(scenarios):
         add_validation_issue(
@@ -2477,6 +2486,56 @@ def validate_run_bundle(run_dir: Path) -> dict:
             "agent-brief.json scenario order count does not match run.json scenarios",
             f"scenario_order={len(brief_scenarios)}, scenarios={len(scenarios)}",
         )
+    if driver_handoff:
+        missing_status_keys = [
+            key for key in schema["driver_handoff"]["status_required"]
+            if key not in driver_handoff.get("status", {})
+        ]
+        if missing_status_keys:
+            add_validation_issue(issues, "error", "driver-handoff-status", "driver-handoff.json status is missing required keys", ", ".join(missing_status_keys))
+        missing_input_keys = [
+            key for key in schema["driver_handoff"]["inputs_required"]
+            if key not in driver_handoff.get("inputs", {})
+        ]
+        if missing_input_keys:
+            add_validation_issue(issues, "error", "driver-handoff-inputs", "driver-handoff.json inputs are missing required keys", ", ".join(missing_input_keys))
+        missing_input_files = [
+            f"{key}:{path}"
+            for key, path in driver_handoff.get("inputs", {}).items()
+            if path and not (run_dir / path).exists()
+        ]
+        if missing_input_files:
+            add_validation_issue(issues, "error", "driver-handoff-input-files", "driver-handoff.json inputs point at missing run files", ", ".join(missing_input_files))
+        dispatch_modes = [
+            item.get("mode", "")
+            for item in driver_handoff.get("dispatch_modes", [])
+            if isinstance(item, dict)
+        ]
+        missing_dispatch_modes = sorted(set(schema["driver_handoff"]["dispatch_modes"]) - set(dispatch_modes))
+        if missing_dispatch_modes:
+            add_validation_issue(issues, "error", "driver-handoff-dispatch-modes", "driver-handoff.json is missing required dispatch modes", ", ".join(missing_dispatch_modes))
+        if driver_plan and driver_handoff.get("driver_agent") != driver_plan.get("driver_agent"):
+            add_validation_issue(issues, "error", "driver-handoff-driver-agent", "driver-handoff.json driver does not match driver-plan.json", f"handoff={driver_handoff.get('driver_agent')}, driver_plan={driver_plan.get('driver_agent')}")
+        if run_json and driver_handoff.get("run_id") != run_json.get("run_id"):
+            add_validation_issue(issues, "error", "driver-handoff-run-id", "driver-handoff.json run_id does not match run.json", f"handoff={driver_handoff.get('run_id')}, run={run_json.get('run_id')}")
+        if review and driver_handoff.get("status", {}).get("review_status") != review.get("status"):
+            add_validation_issue(issues, "error", "driver-handoff-review-status", "driver-handoff.json review status is stale", f"handoff={driver_handoff.get('status', {}).get('review_status')}, review={review.get('status')}")
+        if metrics:
+            for key in ["present_evidence_count", "required_evidence_count", "findings_count"]:
+                if driver_handoff.get("status", {}).get(key) != metrics.get(key):
+                    add_validation_issue(issues, "error", "driver-handoff-metrics", f"driver-handoff.json {key} is stale or inconsistent", f"expected={metrics.get(key)}, actual={driver_handoff.get('status', {}).get(key)}")
+        actual_missing_count = len([
+            item for item in evidence_items
+            if item.get("status") == "missing"
+        ])
+        if driver_handoff.get("status", {}).get("missing_evidence_count") != actual_missing_count:
+            add_validation_issue(issues, "error", "driver-handoff-missing-count", "driver-handoff.json missing evidence count is stale", f"expected={actual_missing_count}, actual={driver_handoff.get('status', {}).get('missing_evidence_count')}")
+        if len(handoff_missing_evidence) != actual_missing_count:
+            add_validation_issue(issues, "error", "driver-handoff-missing-list", "driver-handoff.json missing evidence list is stale", f"expected={actual_missing_count}, actual={len(handoff_missing_evidence)}")
+        if driver_plan and driver_handoff.get("finalize_commands") != driver_plan.get("final_gates"):
+            add_validation_issue(issues, "error", "driver-handoff-final-gates", "driver-handoff.json finalize commands do not match driver-plan final gates")
+        if not driver_handoff.get("suggested_prompt", "").strip():
+            add_validation_issue(issues, "error", "driver-handoff-prompt", "driver-handoff.json suggested_prompt is empty")
 
     required_evidence = {
         (item.get("scenario", ""), item.get("kind", ""))
