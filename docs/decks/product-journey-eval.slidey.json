@@ -13,7 +13,7 @@
             "type": "title",
             "eyebrow": "Kitsoki evaluation",
             "title": "Product Journey Eval",
-            "subtitle": "Skeptical user path across site/docs/onboarding + real project bug corpus",
+            "subtitle": "Skeptical user path across site/docs/onboarding + three validated project oracles",
             "narration": "Pilot implementation landed in a worktree under .worktrees so the branch stays isolated and reviewable.",
             "hold": 2000
         },
@@ -21,7 +21,7 @@
             "type": "cards",
             "variant": "grid",
             "title": "Pilot state",
-            "narration": "The first milestone is runnable from local checkout: one entrypoint, explicit project catalog, and real local corpora for the planned lanes.",
+            "narration": "The first milestone is runnable from a local checkout: one entrypoint, explicit project catalog, and validated local oracles for all three project lanes.",
             "hold": 1700,
             "cards": [
                 {
@@ -31,7 +31,7 @@
                 },
                 {
                     "label": "Corpus",
-                    "sub": "gears-rust (4 armable fixtures) via existing external grader",
+                    "sub": "gears-rust (4 armable fixtures) via existing external grader, cached after a passing verify",
                     "style": "secondary"
                 },
                 {
@@ -41,7 +41,7 @@
                 },
                 {
                     "label": "Perspectives",
-                    "sub": "postgresql and kubernetes cloned under ~/code and tracked as planned follow-up lanes",
+                    "sub": "postgresql and kubernetes cloned under ~/code and validated with deterministic local oracle scripts",
                     "style": "default"
                 }
             ]
@@ -50,7 +50,7 @@
             "type": "narrative",
             "eyebrow": "Runner checks",
             "lede": "What we verified",
-            "body": "`python3 tools/product-journey/run.py --project gears-rust --mode check` succeeds for runner-mode targets and reports manifest-backed run command, while PostgreSQL and Kubernetes return planned-status checks for next-in-the-stack evidence capture.",
+            "body": "`python3 tools/product-journey/run.py --project <project> --mode check` now reports validated for all three lanes: gears-rust is cached after a passing external-benchmark verify, PostgreSQL runs the ALTER DOMAIN VALIDATE CONSTRAINT oracle, and Kubernetes runs the nil-Memory guard oracle.",
             "narration": "The check surface is the minimum viable control for orchestrator automation: deterministic readiness before any model-driven runs.",
             "hold": 2200
         },
@@ -66,27 +66,27 @@
                 {
                     "cells": [
                         "gears-rust",
-                        "runner-ready",
-                        "set GEARS_RUST_REPO and run: GEARS_RUST_REPO=<path> make gears-bakeoff"
+                        "validated",
+                        "set GEARS_RUST_RECHECK=1 and run: GEARS_RUST_REPO=<path> make gears-bakeoff"
                     ]
                 },
                 {
                     "cells": [
                         "postgresql",
-                        "planned",
-                        "local checkout exists under ~/code; define manifest + deterministic scoring/oracle contract"
+                        "validated",
+                        "bash tools/product-journey/checks/postgresql-oracle.sh"
                     ]
                 },
                 {
                     "cells": [
                         "kubernetes",
-                        "planned",
-                        "local checkout exists under ~/code; define size/CI constraints + manifest + perspective test harness"
+                        "validated",
+                        "bash tools/product-journey/checks/kubernetes-oracle.sh"
                     ]
                 }
             ],
             "variant": "data",
-            "caption": "Perspective checks stay explicit until each project gets a manifest/contract.",
+            "caption": "Each perspective now has a concrete local oracle and a repeatable validation command.",
             "hold": 2200
         },
         {
@@ -128,16 +128,16 @@
             "type": "narrative",
             "eyebrow": "Execution discipline",
             "lede": "Next moves",
-            "body": "With this baseline stable, stage the local production bundle with `make web` and serve it via `go run ./cmd/kitsoki web --addr 127.0.0.1:7777` for A/B experiments, then switch `--project` to PostgreSQL and Kubernetes as those perspectives move to runner-ready with manifest-backed check/grade contracts.",
-            "narration": "Evidence-first approach: every check emits to `.context` and every pilot step is represented in the deck.",
+            "body": "With this baseline stable, stage the local production bundle with `make web` and serve it via `go run ./cmd/kitsoki web --addr 127.0.0.1:7777` for A/B experiments, then rerun any lane explicitly when you want fresh evidence (`GEARS_RUST_RECHECK=1` for the heavy external benchmark).",
+            "narration": "Evidence-first approach: every check emits to `.context` and every lane has a repeatable local command.",
             "hold": 2000
         },
         {
             "type": "narrative",
             "eyebrow": "Current run",
             "lede": "Execution status",
-            "body": "Ran the harness path locally: `python3 tools/product-journey/run.py` plus `--project gears-rust --mode check` with `GEARS_RUST_REPO` set, and the runner now validates gears-rust through a no-local temp clone. PostgreSQL and Kubernetes are now cloned under `~/code`, so the runner and `tools/story-qa/run.py` can report those real local checkouts instead of abstract placeholders; they still remain planned until a corpus/manifest contract exists. The story-qa wrapper writes a transient report under `.context/`.",
-            "narration": "The deck stays reviewable even when some project corpora are not yet instrumented; those gaps are surfaced as explicit plan items instead of silent successes.",
+            "body": "Ran the harness path locally: `python3 tools/product-journey/run.py --project gears-rust --mode check` now returns a cached validation result, while the PostgreSQL and Kubernetes project checks run local oracle scripts that prove red@baseline and green@fix. The companion `tools/story-qa/run.py --project all` summary now reports all three lanes as validated, and writes the transient report under `.context/`.",
+            "narration": "The deck now reflects the actual runtime state: cached heavy benchmark plus two repeatable local oracles, all visible in the report surface.",
             "hold": 2200
         }
     ]

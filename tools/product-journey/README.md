@@ -32,6 +32,10 @@ emits the exact environment-required command for validation:
 GEARS_RUST_REPO=~/code/gears-rust make gears-bakeoff
 ```
 
+`postgresql` and `kubernetes` use local oracle scripts in
+`tools/product-journey/checks/` so the runner can prove the real red@baseline /
+green@fix split from the checked-out local repos.
+
 ### Local product site for deterministic A/B testing
 
 For all journey runs, use a local production build of the product site so no remote state is shared:

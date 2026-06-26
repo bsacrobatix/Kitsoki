@@ -28,3 +28,6 @@ always points at a deterministic, host-local surface:
 make web
 GOCACHE=$(mktemp -d) go run ./cmd/kitsoki web --addr 127.0.0.1:7777
 ```
+
+`gears-rust` is cached as validated in the summary path; set
+`GEARS_RUST_RECHECK=1` if you want the heavy external benchmark to rerun.

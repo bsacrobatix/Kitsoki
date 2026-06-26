@@ -83,7 +83,24 @@ def run(project: str) -> list[str]:
     for target in targets:
         pid = target["id"]
         lines.append(f"{pid}: {target['status']} - {target['notes']}")
+        validation_command = target.get("validation_command", "")
+        if validation_command:
+            result = shell(["bash", "-lc", validation_command], ROOT)
+            if result.returncode == 0:
+                lines.append("  verify: validated")
+                if result.stdout.strip():
+                    lines.extend(f"    {line}" for line in result.stdout.strip().splitlines())
+                continue
+            lines.append("  verify: error")
+            if result.stdout.strip():
+                lines.extend(f"    {line}" for line in result.stdout.strip().splitlines())
+            if result.stderr.strip():
+                lines.extend(f"    {line}" for line in result.stderr.strip().splitlines())
+            continue
         if pid == "gears-rust":
+            if target.get("status") == "validated" and not os.environ.get("GEARS_RUST_RECHECK"):
+                lines.append("  verify: validated (cached; set GEARS_RUST_RECHECK=1 to rerun)")
+                continue
             repo = os.environ.get(target.get("local_repo_env", "GEARS_RUST_REPO"), "")
             if not repo:
                 lines.append("  verify: blocked (set GEARS_RUST_REPO to a local checkout)")

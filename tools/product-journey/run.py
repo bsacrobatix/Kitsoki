@@ -107,6 +107,43 @@ def _meta_value(project):
 
 
 def run_project_check(project):
+    validation_command = project.get("validation_command", "")
+    if validation_command:
+        result = shell(["bash", "-lc", validation_command], ROOT)
+        if result.returncode != 0:
+            return {
+                "status": "error",
+                "notes": f"{project['id']}: local oracle validation failed",
+                "output": result.stdout + result.stderr,
+                "meta": _meta_value(project),
+                "next": [
+                    validation_command,
+                ],
+            }
+        return {
+            "status": "validated",
+            "notes": f"{project['id']}: local oracle validation passed",
+            "output": result.stdout + result.stderr,
+            "meta": _meta_value(project),
+            "next": [
+                validation_command,
+            ],
+        }
+
+    if (
+        project.get("run_mode") == "external-benchmark"
+        and project.get("status") == "validated"
+        and not os.environ.get("GEARS_RUST_RECHECK")
+    ):
+        return {
+            "status": "validated",
+            "notes": f"{project['id']}: cached validation; set GEARS_RUST_RECHECK=1 to rerun the heavy external benchmark",
+            "meta": _meta_value(project),
+            "next": [
+                "Set GEARS_RUST_RECHECK=1 to rerun the heavy external-benchmark verifier.",
+            ],
+        }
+
     if project["run_mode"] != "external-benchmark":
         return {
             "status": "planned",

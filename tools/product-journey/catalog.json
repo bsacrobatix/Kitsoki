@@ -10,7 +10,7 @@
       "run_command": "GEARS_RUST_REPO=<path> make gears-bakeoff",
       "run_mode": "external-benchmark",
       "pilot_bugs": ["bug1", "bug4", "bug5", "bug9"],
-      "status": "runner-ready",
+      "status": "validated",
       "notes": "Sister project and first production slice. Uses existing external manifest + suite."
     },
     {
@@ -19,9 +19,10 @@
       "stack": "c",
       "local_repo_env": "POSTGRESQL_REPO",
       "local_repo_path": "/Users/brad/code/postgresql",
-      "run_mode": "planned",
-      "status": "planned",
-      "notes": "Perspective check required: onboarding + at least one hidden-oracle-based journey scenario pending. Local checkout now exists under ~/code."
+      "validation_command": "bash tools/product-journey/checks/postgresql-oracle.sh",
+      "run_mode": "local-oracle",
+      "status": "validated",
+      "notes": "Perspective validated with a deterministic local oracle built from the real ALTER DOMAIN VALIDATE CONSTRAINT fix."
     },
     {
       "id": "kubernetes",
@@ -29,22 +30,23 @@
       "stack": "go",
       "local_repo_env": "KUBERNETES_REPO",
       "local_repo_path": "/Users/brad/code/kubernetes",
-      "run_mode": "planned",
-      "status": "planned",
-      "notes": "Perspective check required: project-size and CI-profile constraints not yet modeled in runner catalog. Local checkout now exists under ~/code."
+      "validation_command": "bash tools/product-journey/checks/kubernetes-oracle.sh",
+      "run_mode": "local-oracle",
+      "status": "validated",
+      "notes": "Perspective validated with a deterministic local oracle built from the real nil-Memory guard fix."
     }
   ],
   "perspectives": [
     {
       "id": "postgresql",
       "owner": "sre",
-      "status": "planned",
+      "status": "validated",
       "description": "Evaluate journey behavior for PostgreSQL project structures and docs + issue-to-fix corpus readiness"
     },
     {
       "id": "kubernetes",
       "owner": "platform",
-      "status": "planned",
+      "status": "validated",
       "description": "Evaluate journey behavior for Kubernetes-style repos (monorepo/docs+CRD complexity)"
     }
   ]
