@@ -152,6 +152,24 @@ def test_summarize_empty_results_fails_loudly_by_default():
         assert "drive_cell.sh --score" in text
 
 
+def test_drive_plan_renders_exact_matrix_commands():
+    manifest = {
+        "project": {"id": "demo"},
+        "bugs": [
+            {"id": "bug1", "baseline_sha": "abc", "oracle_test": "oracles/bug1"},
+            {"id": "bug2", "baseline_sha": "def", "oracle_test": "oracles/bug2"},
+        ],
+    }
+    out = io.StringIO()
+    with redirect_stdout(out):
+        rc = bench.drive_plan(manifest, bug_ids="bug1,bug2", candidate="cheap,strong", repo_dir="/tmp/demo")
+    assert rc == 0
+    text = out.getvalue()
+    assert "--bug bug1 --candidate cheap --repo-dir /tmp/demo --score" in text
+    assert "--bug bug2 --candidate strong --repo-dir /tmp/demo --score" in text
+    assert '"commands": [' in text
+
+
 def main():
     fails = 0
     for name, fn in sorted(globals().items()):

@@ -64,6 +64,7 @@ world:
   cells:       { type: object, default: { items: [] } }   # {key, bug, candidate, status, quality}
   cells_total: { type: int,    default: 0 }
   cells_ran:   { type: int,    default: 0 }
+  cell_commands_markdown: { type: string, default: "" } # exact drive_cell.sh commands for selected matrix
 
   # ── Prepare (arm oracles — the free deterministic proof) ─────────────────────
   preflight_ready: { type: bool,   default: false } # bench.py preflight exit 0

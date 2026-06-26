@@ -22,6 +22,10 @@ No LLM, no cost. Two subcommands:
       Check manifest, local checkout, oracles, baseline commits, and profile setup.
       Free/no-LLM. exit 0 ⇔ ready to arm/drive.
 
+  bench.py drive-plan --project <name> --bug <id[,id]> --candidate <key[,key]>
+      Print exact drive_cell.sh --score commands for the selected matrix.
+      Free/no-LLM.
+
 A project is described entirely by its manifest (see projects/query-string/
 manifest.yaml): project.{repo,install,test_cmd,oracle.{target,run}} and
 bugs[].{baseline_sha,fix_sha,fix_source,oracle_test,oracle_match}. To add a new
@@ -193,6 +197,36 @@ def candidate_by_key(candidates_path, key):
         if c.get("key") == key:
             return c
     return None
+
+
+def drive_plan(m, bug_ids=None, candidate=None, repo_dir=None):
+    bugs = selected_bugs(m, bug_ids)
+    candidates = split_csv(candidate)
+    if not candidates:
+        sys.exit("drive-plan needs at least one --candidate")
+    repo_arg = f" --repo-dir {Path(repo_dir).expanduser()}" if repo_dir else ""
+    commands = []
+    lines = []
+    for b in bugs:
+        for cand in candidates:
+            cmd = (
+                f"tools/bugfix-bakeoff/external/drive_cell.sh "
+                f"--project {m['project']['id']} --bug {b['id']} "
+                f"--candidate {cand}{repo_arg} --score"
+            )
+            commands.append({"bug": b["id"], "candidate": cand, "command": cmd})
+            lines.append(f"- `{b['id']}` x `{cand}`: `{cmd}`")
+    markdown = "\n".join(lines)
+    print(json.dumps({
+        "ok": True,
+        "project": m["project"]["id"],
+        "repo_dir": str(Path(repo_dir).expanduser()) if repo_dir else "",
+        "bugs": [b["id"] for b in bugs],
+        "candidates": candidates,
+        "commands": commands,
+        "markdown": markdown,
+    }))
+    return 0
 
 
 def configured_profiles(root=None):
@@ -701,6 +735,13 @@ def main():
                     help="candidate key from candidates.yaml to check profile readiness; repeat to check a matrix")
     pf.add_argument("--candidates", default=str(HERE / "candidates.yaml"),
                     help="candidates.yaml for candidate/profile lookup")
+    dp = sub.add_parser("drive-plan")
+    dp.add_argument("--project", required=True)
+    dp.add_argument("--bug", action="append", required=True,
+                    help="bug id to drive; repeat or pass comma-separated ids")
+    dp.add_argument("--candidate", action="append", required=True,
+                    help="candidate key to drive; repeat or pass comma-separated keys")
+    dp.add_argument("--repo-dir", help="local checkout for private/local_only projects")
     mt = sub.add_parser("meta")  # machine-readable project facts (for the Go runner)
     mt.add_argument("--project", required=True)
     mt.add_argument("--bug")     # optional: emit one bug's drive facts
@@ -725,6 +766,9 @@ def main():
     if a.cmd == "preflight":
         sys.exit(preflight(m, repo_dir=a.repo_dir, candidate=a.candidate,
                            candidates_path=a.candidates, bug_ids=a.bug))
+    if a.cmd == "drive-plan":
+        sys.exit(drive_plan(m, bug_ids=a.bug, candidate=a.candidate,
+                            repo_dir=a.repo_dir))
     if a.cmd == "score":
         sys.exit(score(m, bug_of(m, a.bug), a.tree, a.out, a.candidate, a.treatment,
                        trace=a.trace, candidates_path=a.candidates))

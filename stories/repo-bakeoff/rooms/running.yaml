@@ -16,7 +16,7 @@
 states:
   running:
     description: "Tracking the cell roster (cost-bearing cells run manually via drive_cell.sh)."
-    relevant_world: [project, repo_dir, cells, cells_total, cells_ran, harness_dir, results_dir]
+    relevant_world: [project, repo_dir, bugs, candidates, cells, cells_total, cells_ran, harness_dir, results_dir, cell_commands_markdown]
     view:
       - heading: "Bake-off · running (cell roster)"
       - kv:
@@ -25,7 +25,7 @@ states:
             Ran:     "{{ world.cells_ran }}"
             Harness: "{{ world.harness_dir }}"
             Results: "{{ world.results_dir }}"
-      - prose: "Each cell is run manually: `drive_cell.sh --project {{ world.project }} --bug <bug> --candidate <candidate> {% if world.repo_dir != \"\" %}--repo-dir {{ world.repo_dir }} {% endif %}--score` (the only cost-bearing step — it drives the live worker model). Accept once the cell verdicts are written to the results directory."
+      - prose: "Each cell is run manually; these are the exact cost-bearing commands for the selected matrix:\n{{ world.cell_commands_markdown|default:\"(commands pending)\" }}\nAccept once the cell verdicts are written to the results directory."
       - choice:
           mode: single
           prompt: "Actions"
@@ -37,6 +37,46 @@ states:
               hint:   "abandon"
               intent: quit
     on_enter:
+      - when: "world.repo_dir == ''"
+        invoke: host.run
+        id: drive_plan
+        once: true
+        with:
+          cmd: python3
+          args:
+            - "bench.py"
+            - "drive-plan"
+            - "--project"
+            - "{{ world.project }}"
+            - "--bug"
+            - "{{ join(world.bugs, ',') }}"
+            - "--candidate"
+            - "{{ join(world.candidates, ',') }}"
+          cwd: "{{ world.harness_dir }}"
+        bind:
+          cell_commands_markdown: stdout_json.markdown
+        on_error: .
+      - when: "world.repo_dir != ''"
+        invoke: host.run
+        id: drive_plan_local
+        once: true
+        with:
+          cmd: python3
+          args:
+            - "bench.py"
+            - "drive-plan"
+            - "--project"
+            - "{{ world.project }}"
+            - "--bug"
+            - "{{ join(world.bugs, ',') }}"
+            - "--candidate"
+            - "{{ join(world.candidates, ',') }}"
+            - "--repo-dir"
+            - "{{ world.repo_dir }}"
+          cwd: "{{ world.harness_dir }}"
+        bind:
+          cell_commands_markdown: stdout_json.markdown
+        on_error: .
       - set:
           cells_ran: "{{ len(world.cells.items) }}"
     on:

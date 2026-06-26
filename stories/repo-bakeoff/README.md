@@ -36,7 +36,7 @@ idle ─start─▶ configure ─accept─▶ prepare ─accept─▶ running �
 | `idle` | deterministic | Park; `start` boots the bake-off. |
 | `configure` | deterministic | Declare the matrix (bugs × candidates); compute the cell roster; optionally carry `repo_dir` for private/local repos. |
 | `prepare` | **deterministic · free · real** | `host.run → bench.py preflight --bug <world.bugs> [--repo-dir ...]` checks setup, then `bench.py verify --bug <world.bugs> [--repo-dir ...]` arms the selected hidden oracles (RED@baseline / GREEN@real-fix) — proves the bake-off is valid **before** any LLM is spent. |
-| `running` | stub | Tracks the roster. The cost-bearing per-cell drive (`drive_cell.sh --candidate <m> --score`) is run **manually** — the only cost-bearing step. |
+| `running` | stub | Tracks the roster and renders exact per-cell `drive_cell.sh --score` commands for the selected matrix. The commands are run **manually** — the only cost-bearing step. |
 | `scoring` | deterministic | `host.run → bench.py summarize --results <artifact-results-dir> --deck <report-dir>/deck.slidey.json --markdown <report-dir>/report.md` rolls the per-cell verdicts up and writes project-specific report artifacts. If no scored cell JSON exists, it routes back to `running` instead of producing a misleading 0-cell report. |
 | `reporting` | deterministic | Present the generated report markdown path and Slidey deck spec. |
 | `slideshow` | deterministic | `host.slidey.render` → static-HTML deck + sidecar to `host.artifacts_dir` (exactly slidey-edit's rendering room). |
@@ -78,3 +78,17 @@ also writes `.artifacts/external-bakeoff/report/report.md` and
 before at least one `results/cells/*.json` exists returns to `running`; run a
 cell with `drive_cell.sh --score` or explicitly use `bench.py summarize
 --allow-empty` outside the story if you are testing empty-report rendering.
+
+The `running` room computes the copy-ready commands with:
+
+```sh
+python3 bench.py drive-plan \
+  --project gears-rust \
+  --bug bug1,bug4 \
+  --candidate opus-4.8,gpt-5.3-spark \
+  --repo-dir /Users/brad/code/gears-rust
+```
+
+That command is deterministic and free. It does not prepare worktrees or call a
+model; it only mirrors the selected matrix into the exact commands the operator
+should run.

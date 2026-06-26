@@ -150,6 +150,20 @@ tools/bugfix-bakeoff/external/drive_cell.sh \
 #   --no-drive  prepares the worktree + prints the prompt only (free, for review)
 ```
 
+For a matrix, print the exact commands first:
+
+```sh
+python3 tools/bugfix-bakeoff/external/bench.py drive-plan \
+  --project gears-rust \
+  --bug bug1,bug4 \
+  --candidate opus-4.8,gpt-5.3-spark \
+  --repo-dir ~/code/gears-rust
+```
+
+`repo-bakeoff` renders the same plan in its `running` room after preflight and
+oracle arming, so the operator can run copy-ready cell commands instead of
+translating placeholders by hand.
+
 `drive_cell.sh` reads the manifest (`bench.py meta`) + [`candidates.yaml`](candidates.yaml)
 (the model/profile axis), runs the same `bench.py preflight` readiness gate the
 `repo-bakeoff` story uses, clones the repo once (reusing `node_modules`), bakes

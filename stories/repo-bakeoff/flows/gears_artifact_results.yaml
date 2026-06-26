@@ -53,6 +53,21 @@ host_handlers:
             [bench] gears-rust/bug1 oracle=fail suite=None -> failed
             [bench] gears-rust/bug1 oracle=pass suite=None -> solved
             OK  bug1: baseline=RED (want RED), real-fix=GREEN (want GREEN)
+      drive_plan_local:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            ok: true
+            project: gears-rust
+            repo_dir: /Users/brad/code/gears-rust
+            bugs: [bug1]
+            candidates: [opus-4.8]
+            markdown: "- `bug1` x `opus-4.8`: `tools/bugfix-bakeoff/external/drive_cell.sh --project gears-rust --bug bug1 --candidate opus-4.8 --repo-dir /Users/brad/code/gears-rust --score`"
+            commands:
+              - bug: bug1
+                candidate: opus-4.8
+                command: "tools/bugfix-bakeoff/external/drive_cell.sh --project gears-rust --bug bug1 --candidate opus-4.8 --repo-dir /Users/brad/code/gears-rust --score"
       summarize:
         data:
           ok: true
@@ -138,6 +153,8 @@ turns:
     expect_world:
       preflight_ready: true
       oracles_armed: true
+      cell_commands_markdown: "- `bug1` x `opus-4.8`: `tools/bugfix-bakeoff/external/drive_cell.sh --project gears-rust --bug bug1 --candidate opus-4.8 --repo-dir /Users/brad/code/gears-rust --score`"
+    expect_view_matches: "drive_cell.sh --project gears-rust --bug bug1 --candidate opus-4.8"
 
   - intent: { name: accept, slots: {} }
     expect_state: reporting

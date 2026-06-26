@@ -15,6 +15,7 @@ initial_world:
   bugs: [bug1]
   candidates: [opus-4.8]
   cells_total: 1
+  cell_commands_markdown: "- `bug1` x `opus-4.8`: `tools/bugfix-bakeoff/external/drive_cell.sh --project gears-rust --bug bug1 --candidate opus-4.8 --repo-dir /Users/brad/code/gears-rust --score`"
   preflight_ready: true
   oracles_armed: true
 
