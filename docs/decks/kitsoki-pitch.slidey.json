@@ -2314,9 +2314,9 @@
               "lines": [
                 "bug is present"
               ],
-              "x": 70,
+              "x": 205,
               "y": 70,
-              "w": 440,
+              "w": 390,
               "h": 150
             },
             {
@@ -2326,9 +2326,9 @@
               "lines": [
                 "real PR signal"
               ],
-              "x": 710,
+              "x": 625,
               "y": 70,
-              "w": 440,
+              "w": 390,
               "h": 150
             },
             {
@@ -2340,9 +2340,9 @@
                 "explicit trace"
               ],
               "x": 360,
-              "y": 300,
+              "y": 330,
               "w": 500,
-              "h": 180,
+              "h": 170,
               "style": "primary"
             },
             {
@@ -2353,24 +2353,25 @@
                 "solved / partial / failed"
               ],
               "x": 360,
-              "y": 580,
+              "y": 565,
               "w": 500,
-              "h": 150
+              "h": 135
             }
           ],
           "edges": [
             {
               "from": "baseline",
-              "to": "cell"
+              "to": "cell",
+              "side": "left"
             },
             {
               "from": "oracle",
-              "to": "cell"
+              "to": "cell",
+              "side": "right"
             },
             {
               "from": "cell",
-              "to": "score",
-              "label": "score"
+              "to": "score"
             }
           ]
         }
