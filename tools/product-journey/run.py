@@ -3954,7 +3954,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
 
     validate_slidey_deck_shape(deck, media_manifest, issues)
     scene_eyebrows = deck_scene_eyebrows(deck)
-    for expected in ["Persona lens", "Driver plan", "Driver contract", "Video playback", "Scenario outcomes", "Proof gates"]:
+    for expected in ["Persona lens", "Driver plan", "Driver contract", "Video playback", "Scenario outcomes", "Finding matrix", "Proof gates"]:
         if deck and expected not in scene_eyebrows:
             add_validation_issue(issues, "error", "deck-scene", "deck.slidey.json is missing a required review scene", expected)
     playback_count = media_manifest.get("summary", {}).get("playback_items", 0) if media_manifest else 0
@@ -5850,12 +5850,25 @@ def render_deck(
         f"Finding bias: {lens['finding_bias']}"
     )
     outcome_lines = []
+    finding_matrix_lines = []
     if scenario_outcomes is not None:
         outcome_lines = [
             f"{item['scenario']}: {item['outcome']} - evidence {item['present_evidence_count']}/{item['required_evidence_count']} - findings {sum(item['finding_counts'].get(kind, 0) for kind in ['strength', 'weakness', 'issue', 'fix'])}"
             for item in scenario_outcomes.get("items", [])
         ]
+        finding_matrix_lines = [
+            (
+                f"{item['scenario']}: "
+                f"strength {item['finding_counts'].get('strength', 0)}, "
+                f"weakness {item['finding_counts'].get('weakness', 0)}, "
+                f"issue {item['finding_counts'].get('issue', 0)}, "
+                f"fix {item['finding_counts'].get('fix', 0)}, "
+                f"blocked {item['finding_counts'].get('blocked', 0)}"
+            )
+            for item in scenario_outcomes.get("items", [])
+        ]
     outcomes_body = "\n".join(outcome_lines) if outcome_lines else "No scenario outcomes generated yet."
+    finding_matrix_body = "\n".join(finding_matrix_lines) if finding_matrix_lines else "No scenario finding counts generated yet."
     review_body = "Not reviewed yet."
     if review is not None:
         review_lines = [review.get("summary", "No review summary.")]
@@ -5988,6 +6001,13 @@ def render_deck(
             "title": "Strengths, weaknesses, issues, fixes",
             "body": findings_body,
             "narration": "The journey report records what worked, what failed, what was found, and what was fixed.",
+        },
+        {
+            "type": "narrative",
+            "eyebrow": "Finding matrix",
+            "title": "Findings by scenario",
+            "body": finding_matrix_body,
+            "narration": "This matrix shows which scenarios produced strengths, weaknesses, issues, fixes, or blockers.",
         },
         {
             "type": "narrative",
