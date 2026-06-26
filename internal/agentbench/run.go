@@ -61,6 +61,17 @@ func RunManifestCase(opts RunOptions) (RunReport, error) {
 		workdir = filepath.Join(filepath.Dir(opts.ManifestPath), workdir)
 	}
 
+	trace, traceErr := resolveCaseTrace(opts.ManifestPath, c, opts.Trace)
+	if traceErr != nil {
+		return RunReport{}, traceErr
+	}
+	if err := os.MkdirAll(filepath.Dir(trace), 0o755); err != nil {
+		return RunReport{}, fmt.Errorf("prepare trace dir: %w", err)
+	}
+	if err := os.Remove(trace); err != nil && !os.IsNotExist(err) {
+		return RunReport{}, fmt.Errorf("clean trace before run: %w", err)
+	}
+
 	start := time.Now()
 	command := exec.CommandContext(ctx, c.Run.Command[0], c.Run.Command[1:]...)
 	command.Dir = workdir
@@ -85,18 +96,6 @@ func RunManifestCase(opts RunOptions) (RunReport, error) {
 		err = fmt.Errorf("run timed out after %s", timeout)
 	}
 
-	trace := opts.Trace
-	traceFromManifest := false
-	if trace == "" {
-		trace = c.Trace
-		traceFromManifest = true
-	}
-	if trace == "" {
-		return RunReport{}, fmt.Errorf("case %q has no trace; pass --trace or set trace in manifest", c.ID)
-	}
-	if traceFromManifest && !filepath.IsAbs(trace) {
-		trace = filepath.Join(filepath.Dir(opts.ManifestPath), trace)
-	}
 	report, scoreErr := ScoreTrace(trace, c)
 	if scoreErr != nil {
 		if err != nil {

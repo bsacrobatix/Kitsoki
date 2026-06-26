@@ -96,6 +96,13 @@ If any budget or expectation fails, the command exits non-zero and prints the
 specific violated control. That makes a bad GLM run reproducible without
 spending another provider call.
 
+Reports also include agent-call lifecycle counters:
+`agent_calls_started`, `agent_calls_finished`, `agent_calls_errored`, and
+`agent_calls_in_flight`. A trace with an `agent.call.start` event but no
+terminal returned/error event fails explicitly as `agent_calls_in_flight`; this
+separates provider/runtime stalls from ordinary prompt failures such as too many
+tool calls or a missing structured submit.
+
 Live execution is explicit:
 
 ```sh
@@ -104,9 +111,11 @@ go run ./cmd/kitsoki agent-bench run stories/deliver/agent-bench/decompose_glm.y
 ```
 
 The manifest's `run.command` is argv-style, not shell text, and is refused
-unless `--live` is present. Keep live traces and reports under `.artifacts/`.
-Automated tests should use `agent-bench score` with checked-in or generated
-synthetic traces; they must not pass `--live`.
+unless `--live` is present. `agent-bench run` removes the target trace before
+executing the command so old failed attempts do not contaminate the score. Keep
+live traces and reports under `.artifacts/`. Automated tests should use
+`agent-bench score` with checked-in or generated synthetic traces; they must not
+pass `--live`.
 
 Bench manifests use `version: agent_bench/v1`:
 

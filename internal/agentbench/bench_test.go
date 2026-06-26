@@ -105,6 +105,87 @@ func TestScoreTraceFailsBudgetsAndForbiddenTools(t *testing.T) {
 	assertFailureContains(t, report.Failures, "required submit")
 }
 
+func TestScoreTraceFailsInFlightAgentCall(t *testing.T) {
+	trace := writeTrace(t,
+		event("2026-06-26T01:00:00Z", "agent.call.start", "rooms/decompose", map[string]any{
+			"agent": "decomposer",
+			"model": "hf:zai-org/GLM-5.2",
+		}),
+	)
+
+	report, err := ScoreTrace(trace, Case{ID: "glm-stall"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Passed {
+		t.Fatalf("expected in-flight call to fail")
+	}
+	if report.Metrics.AgentCallsStarted != 1 || report.Metrics.AgentCallsInFlight != 1 {
+		t.Fatalf("agent lifecycle metrics = %+v", report.Metrics)
+	}
+	assertFailureContains(t, report.Failures, "agent_calls_in_flight 1")
+}
+
+func TestScoreTraceTreatsAgentCallCompleteAsTerminal(t *testing.T) {
+	trace := writeTrace(t,
+		event("2026-06-26T01:00:00Z", "agent.call.start", "rooms/decompose", map[string]any{
+			"agent": "decomposer",
+		}),
+		event("2026-06-26T01:00:01Z", "agent.stream", "rooms/decompose", map[string]any{
+			"tool": "mcp__validator__submit",
+		}),
+		event("2026-06-26T01:00:02Z", "agent.call.complete", "rooms/decompose", map[string]any{
+			"model": "hf:zai-org/GLM-5.2",
+			"meta": map[string]any{
+				"cost_usd": 0.25,
+				"usage": map[string]any{
+					"input_tokens":  1000,
+					"output_tokens": 250,
+				},
+			},
+		}),
+	)
+
+	report, err := ScoreTrace(trace, Case{
+		ID:           "glm-complete",
+		Expectations: Expectations{RequireSubmit: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Passed {
+		t.Fatalf("expected pass, got failures: %v", report.Failures)
+	}
+	if report.Metrics.AgentCallsStarted != 1 || report.Metrics.AgentCallsFinished != 1 || report.Metrics.AgentCallsInFlight != 0 {
+		t.Fatalf("agent lifecycle metrics = %+v", report.Metrics)
+	}
+	if report.Metrics.InputTokens != 1000 || report.Metrics.OutputTokens != 250 || report.Metrics.CostUSD != 0.25 {
+		t.Fatalf("usage metrics = %+v", report.Metrics)
+	}
+}
+
+func TestScoreTraceDoesNotDoubleCountToolAndToolsArray(t *testing.T) {
+	trace := writeTrace(t,
+		event("2026-06-26T01:00:00Z", "agent.stream", "rooms/decompose", map[string]any{
+			"tool": "Read",
+			"tools": []any{
+				map[string]any{
+					"name":    "Read",
+					"preview": "docs/proposals/example.md",
+				},
+			},
+		}),
+	)
+
+	report, err := ScoreTrace(trace, Case{ID: "tool-count"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Metrics.ToolCallsTotal != 1 || report.Metrics.ReadCalls != 1 {
+		t.Fatalf("tool/read calls = %d/%d", report.Metrics.ToolCallsTotal, report.Metrics.ReadCalls)
+	}
+}
+
 func TestLoadManifestAndSelectCase(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "bench.yaml")
@@ -178,6 +259,41 @@ cases:
 	_, err := RunManifestCase(RunOptions{ManifestPath: manifest, CaseID: "one"})
 	if err == nil || !strings.Contains(err.Error(), "live-gated") {
 		t.Fatalf("expected live gate error, got %v", err)
+	}
+}
+
+func TestRunManifestCaseCleansTraceBeforeRun(t *testing.T) {
+	dir := t.TempDir()
+	trace := filepath.Join(dir, "trace.jsonl")
+	if err := os.WriteFile(trace, []byte(`{"ts":"2026-06-26T01:00:00Z","kind":"agent.call.start","state_path":"old","payload":{"agent":"stale"}}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := filepath.Join(dir, "bench.yaml")
+	if err := os.WriteFile(manifest, []byte(`version: agent_bench/v1
+cases:
+  - id: clean
+    trace: trace.jsonl
+    run:
+      command:
+        - sh
+        - -c
+        - "printf '%s\n' '{\"ts\":\"2026-06-26T01:00:00Z\",\"kind\":\"agent.stream\",\"state_path\":\"done\",\"payload\":{\"tool\":\"mcp__validator__submit\"}}' > trace.jsonl"
+    expectations:
+      require_submit: true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := RunManifestCase(RunOptions{ManifestPath: manifest, Live: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Passed {
+		t.Fatalf("expected clean run to pass: %v", report.Failures)
+	}
+	if report.Metrics.AgentCallsInFlight != 0 {
+		t.Fatalf("stale in-flight call was not cleaned: %+v", report.Metrics)
 	}
 }
 

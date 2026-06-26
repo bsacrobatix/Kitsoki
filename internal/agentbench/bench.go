@@ -71,6 +71,10 @@ type Report struct {
 type Metrics struct {
 	Events                   int            `json:"events"`
 	AgentStreamEvents        int            `json:"agent_stream_events"`
+	AgentCallsStarted        int            `json:"agent_calls_started,omitempty"`
+	AgentCallsFinished       int            `json:"agent_calls_finished,omitempty"`
+	AgentCallsErrored        int            `json:"agent_calls_errored,omitempty"`
+	AgentCallsInFlight       int            `json:"agent_calls_in_flight,omitempty"`
 	WallSeconds              float64        `json:"wall_seconds,omitempty"`
 	ToolCallsTotal           int            `json:"tool_calls_total"`
 	ToolCallsByName          map[string]int `json:"tool_calls_by_name,omitempty"`
@@ -138,6 +142,14 @@ func ScoreManifestCase(manifestPath, caseID, traceOverride string) (Report, erro
 	if err != nil {
 		return Report{}, err
 	}
+	trace, err := resolveCaseTrace(manifestPath, c, traceOverride)
+	if err != nil {
+		return Report{}, err
+	}
+	return ScoreTrace(trace, c)
+}
+
+func resolveCaseTrace(manifestPath string, c Case, traceOverride string) (string, error) {
 	trace := traceOverride
 	traceFromManifest := false
 	if trace == "" {
@@ -145,12 +157,12 @@ func ScoreManifestCase(manifestPath, caseID, traceOverride string) (Report, erro
 		traceFromManifest = true
 	}
 	if trace == "" {
-		return Report{}, fmt.Errorf("case %q has no trace; pass --trace or set trace in manifest", c.ID)
+		return "", fmt.Errorf("case %q has no trace; pass --trace or set trace in manifest", c.ID)
 	}
 	if traceFromManifest && !filepath.IsAbs(trace) {
 		trace = filepath.Join(filepath.Dir(manifestPath), trace)
 	}
-	return ScoreTrace(trace, c)
+	return trace, nil
 }
 
 func ScoreTrace(tracePath string, c Case) (Report, error) {
@@ -216,6 +228,16 @@ func ScoreTrace(tracePath string, c Case) (Report, error) {
 			}
 			accumulateUsage(&metrics, ev.Payload)
 		}
+		switch ev.Kind {
+		case "agent.call.start":
+			metrics.AgentCallsStarted++
+		case "agent.returned", "agent.call.returned", "agent.call.complete", "agent.call.end", "agent.task.complete":
+			metrics.AgentCallsFinished++
+			accumulateUsage(&metrics, ev.Payload)
+		case "agent.error", "agent.call.error":
+			metrics.AgentCallsErrored++
+			accumulateUsage(&metrics, ev.Payload)
+		}
 		if payloadHasSubmit(ev.Payload) {
 			metrics.Submitted = true
 		}
@@ -235,6 +257,10 @@ func ScoreTrace(tracePath string, c Case) (Report, error) {
 	}
 	if len(metrics.ToolCallsByName) == 0 {
 		metrics.ToolCallsByName = nil
+	}
+	terminalCalls := metrics.AgentCallsFinished + metrics.AgentCallsErrored
+	if metrics.AgentCallsStarted > terminalCalls {
+		metrics.AgentCallsInFlight = metrics.AgentCallsStarted - terminalCalls
 	}
 
 	failures := scoreFailures(c, metrics, tracePath)
@@ -262,9 +288,6 @@ type toolCall struct {
 
 func extractToolCalls(payload map[string]any) []toolCall {
 	var out []toolCall
-	if name := stringValue(payload, "tool", "name"); name != "" {
-		out = append(out, toolCall{Name: name, Preview: stringValue(payload, "preview", "text"), Input: payload["input"]})
-	}
 	if raw, ok := payload["tools"].([]any); ok {
 		for _, item := range raw {
 			m, ok := item.(map[string]any)
@@ -275,6 +298,12 @@ func extractToolCalls(payload map[string]any) []toolCall {
 				out = append(out, toolCall{Name: name, Preview: stringValue(m, "preview", "text"), Input: m["input"]})
 			}
 		}
+	}
+	if len(out) > 0 {
+		return out
+	}
+	if name := stringValue(payload, "tool", "name"); name != "" {
+		out = append(out, toolCall{Name: name, Preview: stringValue(payload, "preview", "text"), Input: payload["input"]})
 	}
 	return out
 }
@@ -339,6 +368,16 @@ func accumulateUsage(metrics *Metrics, payload map[string]any) {
 	metrics.CacheReadInputTokens = maxInt64(metrics.CacheReadInputTokens, int64Value(payload, "cache_read_input_tokens"))
 	metrics.TotalTokens = maxInt64(metrics.TotalTokens, int64Value(payload, "total_tokens"))
 	metrics.CostUSD = math.Max(metrics.CostUSD, floatValue(payload, "total_cost_usd", "cost_usd"))
+	if meta, ok := payload["meta"].(map[string]any); ok {
+		metrics.CostUSD = math.Max(metrics.CostUSD, floatValue(meta, "total_cost_usd", "cost_usd"))
+		if usage, ok := meta["usage"].(map[string]any); ok {
+			metrics.InputTokens = maxInt64(metrics.InputTokens, int64Value(usage, "input_tokens"))
+			metrics.OutputTokens = maxInt64(metrics.OutputTokens, int64Value(usage, "output_tokens"))
+			metrics.CacheCreationInputTokens = maxInt64(metrics.CacheCreationInputTokens, int64Value(usage, "cache_creation_input_tokens"))
+			metrics.CacheReadInputTokens = maxInt64(metrics.CacheReadInputTokens, int64Value(usage, "cache_read_input_tokens"))
+			metrics.TotalTokens = maxInt64(metrics.TotalTokens, int64Value(usage, "total_tokens"))
+		}
+	}
 }
 
 func scoreFailures(c Case, m Metrics, tracePath string) []string {
@@ -369,6 +408,9 @@ func scoreFailures(c Case, m Metrics, tracePath string) []string {
 	addMaxFloat("cost_usd", m.CostUSD, c.Budgets.MaxCostUSD)
 	for _, tool := range sortedKeys(m.ForbiddenToolCalls) {
 		failures = append(failures, fmt.Sprintf("forbidden tool %q called %d time(s)", tool, m.ForbiddenToolCalls[tool]))
+	}
+	if m.AgentCallsInFlight > 0 {
+		failures = append(failures, fmt.Sprintf("agent_calls_in_flight %d: trace has start event(s) without returned/error terminal event", m.AgentCallsInFlight))
 	}
 	if c.Expectations.RequireSubmit && !m.Submitted {
 		failures = append(failures, "required submit was not observed")

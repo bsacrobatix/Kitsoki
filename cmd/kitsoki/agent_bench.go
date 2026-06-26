@@ -132,6 +132,14 @@ func printAgentBenchReport(cmd *cobra.Command, report agentbench.Report) error {
 		report.Metrics.FinalState,
 		report.Metrics.Submitted,
 	)
+	if report.Metrics.AgentCallsStarted > 0 || report.Metrics.AgentCallsInFlight > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "agent_calls started=%d finished=%d errored=%d in_flight=%d\n",
+			report.Metrics.AgentCallsStarted,
+			report.Metrics.AgentCallsFinished,
+			report.Metrics.AgentCallsErrored,
+			report.Metrics.AgentCallsInFlight,
+		)
+	}
 	for _, failure := range report.Failures {
 		fmt.Fprintf(cmd.OutOrStdout(), "ERROR: %s\n", failure)
 	}

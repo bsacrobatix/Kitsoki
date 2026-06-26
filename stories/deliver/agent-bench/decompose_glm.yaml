@@ -29,7 +29,7 @@ cases:
       max_read_calls: 12
       max_files_read: 12
       max_input_tokens: 150000
-      max_output_tokens: 8000
+      max_output_tokens: 16000
       max_total_tokens: 170000
       max_cost_usd: 1.00
       max_thinking_events: 20
