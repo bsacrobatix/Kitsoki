@@ -153,9 +153,13 @@ states:
             - set:
                 status: "run_created"
       accept:
-        - target: done
+        - when: "world.validation_status == 'valid'"
+          target: done
           effects:
             - set: { status: "done" }
+        - target: dogfood_created
+          effects:
+            - set: { status: "accept_needs_validation" }
       quit:
         - target: abandoned
           effects:

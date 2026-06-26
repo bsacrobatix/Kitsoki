@@ -568,6 +568,14 @@ turns:
       - handler: host.run
         args: { call: prepare_product_journey_driver_handoff }
 
+  - intent: { name: accept, slots: {} }
+    expect_state: run_created
+    expect_world:
+      status: accept_needs_validation
+      validation_status: ""
+      run_id: run-123
+    expect_host_calls: []
+
   - intent: { name: validate, slots: {} }
     expect_state: run_created
     expect_world:

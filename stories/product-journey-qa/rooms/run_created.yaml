@@ -483,9 +483,13 @@ states:
             - set:
                 status: "validated"
       accept:
-        - target: done
+        - when: "world.validation_status == 'valid'"
+          target: done
           effects:
             - set: { status: "done" }
+        - target: run_created
+          effects:
+            - set: { status: "accept_needs_validation" }
       quit:
         - target: abandoned
           effects:
