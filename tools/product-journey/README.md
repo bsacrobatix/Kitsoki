@@ -147,6 +147,7 @@ python3 tools/product-journey/run.py --attach-evidence \
   --scenario bugfix \
   --evidence-kind key_interaction_video \
   --evidence-path media/bugfix.mp4 \
+  --evidence-source local \
   --notes "visual MCP capture from bugfix handoff"
 ```
 
@@ -175,15 +176,20 @@ key interactions instead of scraping paths from prose.
 Scenario outcomes summarize evidence coverage and finding counts per scenario
 so onboarding, bugfix, PRD/design, feature implementation, and product-bug gaps
 stay visible independently of the bundle-level review status.
-Use a real local path relative to the run bundle, an absolute path, a repo-root
-path, a URL, or a retained MCP reference such as `retained://...` or
-`image://...`. Review and validation warn when captured local paths do not
+Use `--evidence-source local`, `retained`, `external`, or `cassette` for proof
+evidence. `demo` is reserved for deterministic placeholder evidence, and
+captured `unknown` evidence does not count as proof evidence. Use a real local
+path relative to the run bundle, an absolute path, a repo-root path, a URL, or a
+retained MCP reference such as `retained://...` or `image://...`. Review and
+validation warn when captured local paths do not
 resolve, so placeholder media cannot silently look like real playback proof.
 Each evidence row also carries a `source`: `demo` for seeded placeholders,
-`retained` for MCP retained references, `external` for URLs, and `local` for
-file-backed captures. Review decks and readiness checks count proof evidence
-separately from demo evidence so a no-LLM smoke can exercise the artifact loop
-without passing as live product proof.
+`retained` for MCP retained references, `external` for URLs, `local` for
+file-backed captures, `cassette` for recorded deterministic replay artifacts,
+and `unknown` when a captured source cannot be inferred. Review decks and
+readiness checks count proof evidence separately from demo/unknown evidence so a
+no-LLM smoke can exercise the artifact loop without passing as live product
+proof.
 
 Record a review finding for the deck summary:
 

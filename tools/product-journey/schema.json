@@ -65,6 +65,7 @@
     "required": ["id", "label", "stage", "task", "task_prompt", "primary_story", "required_mcp", "evidence", "success_criteria"]
   },
   "evidence_statuses": ["missing", "captured", "validated", "rejected"],
+  "evidence_sources": ["demo", "retained", "external", "local", "cassette", "unknown"],
   "finding_kinds": ["strength", "weakness", "issue", "fix"],
   "review_statuses": ["not_reviewed", "needs_evidence", "ready"],
   "review_check_statuses": ["pass", "warn", "fail"],

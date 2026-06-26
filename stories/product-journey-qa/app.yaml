@@ -50,6 +50,7 @@ world:
   scenario:       { type: string, default: "" }
   evidence_kind:  { type: string, default: "" }
   evidence_path:  { type: string, default: "" }
+  evidence_source: { type: string, default: "" }
   notes:          { type: string, default: "" }
   finding_kind:   { type: string, default: "" }
   finding_title:  { type: string, default: "" }
@@ -121,6 +122,7 @@ intents:
       scenario: { type: string, required: true }
       evidence_kind: { type: string, required: true }
       evidence_path: { type: string, required: true }
+      source: { type: string, required: false }
       notes: { type: string, required: false }
   record:
     description: "Record a strength, weakness, issue, or fix for the run summary deck."

@@ -78,6 +78,7 @@ host_handlers:
             scenario: bugfix
             evidence_kind: key_interaction_video
             evidence_path: media/bugfix.mp4
+            evidence_source: local
             deck_path: .artifacts/product-journey/run-123/deck.slidey.json
             execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
             driver_plan_path: .artifacts/product-journey/run-123/driver-plan.md
@@ -347,6 +348,7 @@ turns:
         scenario: bugfix
         evidence_kind: key_interaction_video
         evidence_path: media/bugfix.mp4
+        source: local
         notes: visual MCP capture placeholder
     expect_state: run_created
     expect_world:
@@ -354,6 +356,7 @@ turns:
       scenario: bugfix
       evidence_kind: key_interaction_video
       evidence_path: media/bugfix.mp4
+      evidence_source: local
       deck_path: .artifacts/product-journey/run-123/deck.slidey.json
       execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
       driver_plan_path: .artifacts/product-journey/run-123/driver-plan.md

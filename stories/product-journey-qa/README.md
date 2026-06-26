@@ -23,7 +23,9 @@ It is intentionally no-LLM:
   --json-output` to check the matrix and rollup artifact contract without
   rewriting files.
 - `start` calls `tools/product-journey/run.py --emit-run --json-output`.
-- `attach` calls `tools/product-journey/run.py --attach-evidence --json-output`.
+- `attach` calls `tools/product-journey/run.py --attach-evidence --json-output`;
+  include `source` when the driver knows whether the artifact is `retained`,
+  `external`, `local`, or `cassette`.
 - `record` calls `tools/product-journey/run.py --record-finding --json-output`
   for strengths, weaknesses, issues, and fixes.
 - `blocker` calls `tools/product-journey/run.py --record-blocker --json-output`

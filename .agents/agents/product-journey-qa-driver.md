@@ -117,7 +117,9 @@ state whenever possible:
 1. Open or attach a product-journey QA story session seeded with the existing
    run.
 2. Submit `attach` for each evidence artifact:
-   `scenario`, `evidence_kind`, `evidence_path`, `notes`.
+   `scenario`, `evidence_kind`, `evidence_path`, `source`, `notes`.
+   Use `retained`, `external`, `local`, or `cassette` for real proof evidence;
+   reserve `demo` for deterministic placeholder evidence.
 3. Submit `record` for each finding:
    `finding_kind`, `title`, `summary`, `scenario`, `severity`,
    `evidence_path`.

@@ -34,6 +34,8 @@ MATRIX_ROOT = ARTIFACT_ROOT / "matrices"
 TARGET_PROOF_ROOT = ARTIFACT_ROOT / "target-proofs"
 DOGFOOD_ROOT = ARTIFACT_ROOT / "dogfood"
 DEFAULT_DECK = ROOT / "docs" / "decks" / "product-journey-eval.slidey.json"
+EVIDENCE_SOURCES = {"demo", "retained", "external", "local", "cassette", "unknown"}
+PROOF_EVIDENCE_SOURCES = {"retained", "external", "local", "cassette"}
 STAGES = [
     "discover_product",
     "follow_tutorial",
@@ -1203,6 +1205,8 @@ def evidence_source(artifact_path: str, notes: str = "") -> str:
     combined = f"{artifact_path} {notes}".lower()
     if "demo placeholder" in combined or "deterministic placeholder" in combined:
         return "demo"
+    if "cassette" in combined or artifact_path.startswith("cassette://") or "/cassettes/" in artifact_path:
+        return "cassette"
     if artifact_path.startswith(("retained://", "image://")):
         return "retained"
     if artifact_path.startswith(("http://", "https://")):
@@ -1210,6 +1214,21 @@ def evidence_source(artifact_path: str, notes: str = "") -> str:
     if artifact_path:
         return "local"
     return "unknown"
+
+
+def normalize_evidence_source(source: str, artifact_path: str, notes: str = "") -> str:
+    normalized = source.strip().lower() if source else evidence_source(artifact_path, notes)
+    if normalized not in EVIDENCE_SOURCES:
+        known = ", ".join(sorted(EVIDENCE_SOURCES))
+        raise SystemExit(f"Evidence source must be one of: {known}")
+    return normalized
+
+
+def is_proof_evidence(item: dict) -> bool:
+    if item.get("status") not in {"captured", "validated"}:
+        return False
+    source = item.get("source") or evidence_source(item.get("path", ""), item.get("notes", ""))
+    return source in PROOF_EVIDENCE_SOURCES
 
 
 def build_media_manifest(run_json: dict, evidence: dict) -> dict:
@@ -1225,7 +1244,7 @@ def build_media_manifest(run_json: dict, evidence: dict) -> dict:
             "media_kind": kind,
             "path": artifact_path,
             "status": item.get("status", ""),
-            "source": item.get("source") or evidence_source(artifact_path, item.get("notes", "")),
+            "source": normalize_evidence_source(item.get("source", ""), artifact_path, item.get("notes", "")),
             "notes": item.get("notes", ""),
             "playback": kind in {"video", "image"},
         })
@@ -1314,7 +1333,7 @@ def build_scenario_outcomes(run_json: dict, evidence: dict, findings: dict) -> d
         scenario_findings = findings_by_scenario.get(scenario["id"], [])
         present = [item for item in scenario_evidence if item.get("status") in {"captured", "validated"}]
         demo = [item for item in present if (item.get("source") or evidence_source(item.get("path", ""), item.get("notes", ""))) == "demo"]
-        proof = [item for item in present if (item.get("source") or evidence_source(item.get("path", ""), item.get("notes", ""))) != "demo"]
+        proof = [item for item in present if is_proof_evidence(item)]
         validated = [item for item in scenario_evidence if item.get("status") == "validated"]
         rejected = [item for item in scenario_evidence if item.get("status") == "rejected"]
         counts = {
@@ -1437,6 +1456,7 @@ def build_execution_plan(run_json: dict, evidence: dict) -> dict:
             f"--scenario {scenario['id']} "
             f"--evidence-kind {item['kind']} "
             f"--evidence-path <path-or-retained-id> "
+            "--evidence-source <retained|external|local|cassette> "
             f"--notes \"{evidence_capture_hint(item['kind'])}\""
             for item in evidence_items
         ]
@@ -1996,10 +2016,10 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
 
     evidence_items = evidence.get("items", [])
     for item in evidence_items:
-        item["source"] = item.get("source") or evidence_source(item.get("path", ""), item.get("notes", ""))
+        item["source"] = normalize_evidence_source(item.get("source", ""), item.get("path", ""), item.get("notes", ""))
     present_items = [item for item in evidence_items if item.get("status") in {"captured", "validated"}]
     demo_items = [item for item in present_items if item.get("source") == "demo"]
-    proof_items = [item for item in present_items if item.get("source") != "demo"]
+    proof_items = [item for item in present_items if is_proof_evidence(item)]
     scenario_status: dict[str, str] = {}
     for scenario in run_json["scenarios"]:
         items = [item for item in evidence_items if item.get("scenario") == scenario["id"]]
@@ -2127,6 +2147,7 @@ def attach_evidence(
     evidence_kind: str,
     artifact_path: str,
     status: str,
+    source: str,
     notes: str,
     publish_deck: Optional[Path],
 ) -> None:
@@ -2151,7 +2172,7 @@ def attach_evidence(
     target["status"] = status
     target["path"] = artifact_path
     target["notes"] = notes
-    target["source"] = evidence_source(artifact_path, notes)
+    target["source"] = normalize_evidence_source(source, artifact_path, notes)
     target["updated_at"] = now_utc()
 
     for scenario in run_json["scenarios"]:
@@ -2356,7 +2377,7 @@ def seed_demo_evidence(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         for item in evidence.get("items", [])
     ]
     for scenario, kind, path, status, notes in demo_evidence:
-        attach_evidence(run_dir, scenario, kind, path, status, notes, publish_deck=None)
+        attach_evidence(run_dir, scenario, kind, path, status, "demo", notes, publish_deck=None)
 
     demo_findings = [
         ("strength", "Scenario contract is explicit", "The bundle names persona, scenario, expected MCP tools, evidence slots, and success criteria before live execution.", "product-discovery", "low", "screens/product-discovery.png", "observed"),
@@ -2435,11 +2456,11 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     ]
     evidence_items = evidence.get("items", [])
     for item in evidence_items:
-        item["source"] = item.get("source") or evidence_source(item.get("path", ""), item.get("notes", ""))
+        item["source"] = normalize_evidence_source(item.get("source", ""), item.get("path", ""), item.get("notes", ""))
     media_manifest = build_media_manifest(run_json, evidence)
     present_items = [item for item in evidence_items if item.get("status") in {"captured", "validated"}]
     demo_items = [item for item in present_items if item.get("source") == "demo"]
-    proof_items = [item for item in present_items if item.get("source") != "demo"]
+    proof_items = [item for item in present_items if is_proof_evidence(item)]
     rejected_items = [item for item in evidence_items if item.get("status") == "rejected"]
     video_items = [item for item in media_manifest["items"] if item["media_kind"] == "video"]
     playback_items = [item for item in media_manifest["items"] if item["playback"]]
@@ -3001,6 +3022,22 @@ def validate_run_bundle(run_dir: Path) -> dict:
     if required_evidence - declared_evidence:
         extra = sorted(f"{scenario}/{kind}" for scenario, kind in required_evidence - declared_evidence)
         add_validation_issue(issues, "warn", "evidence-contract-extra", "evidence.json has slots not declared by run.json scenarios", ", ".join(extra))
+
+    schema_evidence_sources = set(schema["evidence_sources"])
+    invalid_evidence_sources = sorted({
+        item.get("source", "")
+        for item in evidence_items
+        if item.get("source", "") not in schema_evidence_sources
+    })
+    if invalid_evidence_sources:
+        add_validation_issue(issues, "error", "evidence-source", "evidence.json uses unknown evidence sources", ", ".join(invalid_evidence_sources))
+    unknown_present_evidence = sorted({
+        f"{item.get('scenario', '')}/{item.get('kind', '')}"
+        for item in evidence_items
+        if item.get("status") in {"captured", "validated"} and item.get("source", "") == "unknown"
+    })
+    if unknown_present_evidence:
+        add_validation_issue(issues, "warn", "evidence-source-unknown", "Captured evidence has unknown source and does not count as proof evidence", ", ".join(unknown_present_evidence))
 
     driver_ids = {item.get("scenario", "") for item in driver_scenarios}
     if driver_plan and driver_ids != scenario_ids:
@@ -4587,6 +4624,12 @@ def main() -> None:
         choices=["captured", "validated", "rejected"],
         help="Status for --attach-evidence",
     )
+    parser.add_argument(
+        "--evidence-source",
+        default="",
+        choices=["", *sorted(EVIDENCE_SOURCES)],
+        help="Evidence source for --attach-evidence; inferred from path when omitted",
+    )
     parser.add_argument("--notes", default="", help="Notes for --attach-evidence")
     parser.add_argument(
         "--dispatch-mode",
@@ -5051,9 +5094,11 @@ def main() -> None:
             args.evidence_kind,
             args.evidence_path,
             args.evidence_status,
+            args.evidence_source,
             args.notes,
             publish_deck,
         )
+        source = normalize_evidence_source(args.evidence_source, args.evidence_path, args.notes)
         if args.json_output:
             print(json.dumps({
                 "status": "attached",
@@ -5061,6 +5106,7 @@ def main() -> None:
                 "scenario": args.scenario,
                 "evidence_kind": args.evidence_kind,
                 "evidence_path": args.evidence_path,
+                "evidence_source": source,
                 "deck_path": str(run_dir / "deck.slidey.json"),
                 "execution_plan_path": str(run_dir / "execution-plan.md"),
                 "driver_plan_path": str(run_dir / "driver-plan.md"),

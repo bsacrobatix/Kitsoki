@@ -168,8 +168,13 @@ python3 tools/product-journey/run.py --attach-evidence \
   --run-dir .artifacts/product-journey/<run-id> \
   --scenario bugfix \
   --evidence-kind key_interaction_video \
-  --evidence-path media/bugfix.mp4
+  --evidence-path media/bugfix.mp4 \
+  --evidence-source local
 ```
+
+Use `--evidence-source retained`, `external`, `local`, or `cassette` for real
+proof evidence. `demo` is only for deterministic placeholder artifacts, and
+captured `unknown` evidence stays visible but does not count as proof evidence.
 
 Use `--record-finding` on the same runner to summarize strengths, weaknesses,
 issues found, and fixes for the Slidey review deck.
