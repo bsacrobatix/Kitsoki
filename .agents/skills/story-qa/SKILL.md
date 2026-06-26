@@ -102,6 +102,8 @@ sequence and copy ready-to-fill `--attach-evidence` commands.
 Captured screenshots, videos, traces, and documents are indexed in
 `media-manifest.json`; the generated Slidey deck uses that manifest for
 playback-ready media entries.
+Use `scenario-outcomes.md` to review evidence coverage and findings per
+scenario before treating a run as representative natural-usage proof.
 
 After capturing evidence, attach it back to the bundle:
 

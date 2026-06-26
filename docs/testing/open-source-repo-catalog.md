@@ -22,12 +22,6 @@ candidate tree deterministically with no LLM.
 | Driven | At least one live model/workflow cell has been run. |
 | Reported | Results have a durable case study, report, or deck. |
 
-## Public OSS inventory
-
-| Project | Repo type | Suites / harnesses | Implemented | Results |
-|---|---|---|---|---|
-| `query-string` | Public JavaScript library | AVA oracle plus full `npx ava` secondary suite; external bake-off; `make qs-bakeoff`; `drive_cell.sh`; `escalate.sh` | Manifested and armed with 3 bugs: `qs1`, `qs2`, `qs3` | GPT-5.5 / `codex-native` solved 3/3. GLM-5.2 pending because the provider was rate-limited. See [`docs/case-studies/query-string-bakeoff.md`](../case-studies/query-string-bakeoff.md). |
-
 ## Constructor Fabric inventory
 
 These projects are still important test targets, but they are Constructor Fabric
@@ -50,18 +44,18 @@ name real filed bugs, the fixing commits, isolated regression tests, the baselin
 commit, and a deterministic command that proves RED at baseline and GREEN at the
 real fix.
 
-| Rank | Project | Stack / suite | Why it is a good candidate | Current status | Next action |
-|---:|---|---|---|---|---|
-| 1 | `sindresorhus/query-string` | JavaScript, AVA | Small parser, mature history, fast install/test, already proves the full workflow. | Reported | Keep as the reference project and expand model cells when providers are available. |
-| 2 | `pillarjs/path-to-regexp` | JavaScript/TypeScript, Jest or project test runner | Compact routing/parser library with crisp behavioral bugs and small diffs. | Candidate | Mine 3 PRs that added parser/matcher regression tests. |
-| 3 | `ljharb/qs` | JavaScript, npm test suite | Query parsing domain similar to `query-string`, but different implementation and broader compatibility surface. | Candidate | Find encoding, nesting, or array-format bugs with added tests. |
-| 4 | `sindresorhus/globby` | JavaScript, AVA | File-pattern behavior creates easy-to-state bugs and fast focused tests. | Candidate | Mine ignore, cwd, gitignore, and Windows-path fixes. |
-| 5 | `mrmlnc/fast-glob` | TypeScript, npm test suite | Mature glob engine with many edge cases; good stressor for path/platform semantics. | Candidate | Identify small regression-test PRs that do not require slow fixture setup. |
-| 6 | `yargs/yargs-parser` | JavaScript, npm test suite | CLI parsing bugs are compact, user-visible, and easy to express as tickets. | Candidate | Mine coercion, aliases, arrays, config, and default-value fixes. |
-| 7 | `eemeli/yaml` | JavaScript/TypeScript, project test suite | Parser/emitter edge cases produce deterministic oracle tests and non-trivial root-cause fixes. | Candidate | Select fixtures that avoid large snapshot churn. |
-| 8 | `pallets/click` | Python, pytest | CLI framework with mature tests, many filed issues, and concise repros. | Candidate | Prove a Python project manifest: install, focused pytest oracle, full-suite secondary signal. |
-| 9 | `python-dateutil/python-dateutil` | Python, pytest | Date/time parser bugs exercise semantic reasoning beyond string manipulation. | Candidate | Mine parser/timezone regressions with narrow tests and stable baselines. |
-| 10 | `BurntSushi/ripgrep` | Rust, Cargo tests | Mature Rust CLI/library with real-world parser/search behavior; useful beyond JS/Python. | Candidate | Start with small library-level fixes; avoid fixtures needing platform-specific shell setup. |
+| Rank | Project | Stack / suite | Why it is a good candidate | Status | Implemented / results | Next action |
+|---:|---|---|---|---|---|---|
+| 1 | `sindresorhus/query-string` | JavaScript, AVA oracle plus full `npx ava` secondary suite | Small parser, mature history, fast install/test, already proves the full workflow. | Reported | Manifested and armed with 3 bugs: `qs1`, `qs2`, `qs3`. GPT-5.5 / `codex-native` solved 3/3; GLM-5.2 pending because the provider was rate-limited. See [`docs/case-studies/query-string-bakeoff.md`](../case-studies/query-string-bakeoff.md). | Keep as the reference project and expand model cells when providers are available. |
+| 2 | `pillarjs/path-to-regexp` | JavaScript/TypeScript, Jest or project test runner | Compact routing/parser library with crisp behavioral bugs and small diffs. | Candidate | Not implemented. | Mine 3 PRs that added parser/matcher regression tests. |
+| 3 | `ljharb/qs` | JavaScript, npm test suite | Query parsing domain similar to `query-string`, but different implementation and broader compatibility surface. | Candidate | Not implemented. | Find encoding, nesting, or array-format bugs with added tests. |
+| 4 | `sindresorhus/globby` | JavaScript, AVA | File-pattern behavior creates easy-to-state bugs and fast focused tests. | Candidate | Not implemented. | Mine ignore, cwd, gitignore, and Windows-path fixes. |
+| 5 | `mrmlnc/fast-glob` | TypeScript, npm test suite | Mature glob engine with many edge cases; good stressor for path/platform semantics. | Candidate | Not implemented. | Identify small regression-test PRs that do not require slow fixture setup. |
+| 6 | `yargs/yargs-parser` | JavaScript, npm test suite | CLI parsing bugs are compact, user-visible, and easy to express as tickets. | Candidate | Not implemented. | Mine coercion, aliases, arrays, config, and default-value fixes. |
+| 7 | `eemeli/yaml` | JavaScript/TypeScript, project test suite | Parser/emitter edge cases produce deterministic oracle tests and non-trivial root-cause fixes. | Candidate | Not implemented. | Select fixtures that avoid large snapshot churn. |
+| 8 | `pallets/click` | Python, pytest | CLI framework with mature tests, many filed issues, and concise repros. | Candidate | Not implemented. | Prove a Python project manifest: install, focused pytest oracle, full-suite secondary signal. |
+| 9 | `python-dateutil/python-dateutil` | Python, pytest | Date/time parser bugs exercise semantic reasoning beyond string manipulation. | Candidate | Not implemented. | Mine parser/timezone regressions with narrow tests and stable baselines. |
+| 10 | `BurntSushi/ripgrep` | Rust, Cargo tests | Mature Rust CLI/library with real-world parser/search behavior; useful beyond JS/Python. | Candidate | Not implemented. | Start with small library-level fixes; avoid fixtures needing platform-specific shell setup. |
 
 ## Harness catalog
 

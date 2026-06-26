@@ -26,3 +26,5 @@ Use `agent-brief.md` inside that bundle to drive the live persona session, then
 use `execution-plan.md` to copy the generated `--attach-evidence` commands.
 Captured media is indexed in `media-manifest.json` so the generated Slidey deck
 can expose playback-ready videos and screenshots without scraping prose.
+Scenario-level evidence and finding summaries are written to
+`scenario-outcomes.md` for review and matrix rollups.

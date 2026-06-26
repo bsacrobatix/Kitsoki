@@ -289,6 +289,8 @@ def build_run_bundle(
             "metrics": "metrics.json",
             "bugs": "bugs.json",
             "findings": "findings.json",
+            "scenario_outcomes": "scenario-outcomes.json",
+            "scenario_outcomes_markdown": "scenario-outcomes.md",
             "evidence": "evidence.json",
             "media_manifest": "media-manifest.json",
             "scenarios": "scenarios.json",
@@ -312,6 +314,7 @@ def build_run_bundle(
     execution_plan = build_execution_plan(run_json, evidence)
     agent_brief = build_agent_brief(run_json, evidence, execution_plan)
     findings = {"run_id": run_id, "items": [], "summary": {"strength": 0, "weakness": 0, "issue": 0, "fix": 0}}
+    scenario_outcomes = build_scenario_outcomes(run_json, evidence, findings)
     metrics = {
         "run_id": run_id,
         "stage_count": len(stages),
@@ -334,13 +337,15 @@ def build_run_bundle(
     }
     bugs = {"run_id": run_id, "items": []}
     journey = render_journey(run_json)
-    deck = render_deck(run_json, metrics, evidence=evidence, findings=findings, execution_plan=execution_plan, media_manifest=media_manifest)
+    deck = render_deck(run_json, metrics, evidence=evidence, findings=findings, execution_plan=execution_plan, media_manifest=media_manifest, scenario_outcomes=scenario_outcomes)
 
     write_json(run_dir / "run.json", run_json)
     (run_dir / "journey.md").write_text(journey, encoding="utf-8")
     write_json(run_dir / "metrics.json", metrics)
     write_json(run_dir / "bugs.json", bugs)
     write_json(run_dir / "findings.json", findings)
+    write_json(run_dir / "scenario-outcomes.json", scenario_outcomes)
+    (run_dir / "scenario-outcomes.md").write_text(render_scenario_outcomes(scenario_outcomes), encoding="utf-8")
     write_json(run_dir / "evidence.json", evidence)
     write_json(run_dir / "media-manifest.json", media_manifest)
     write_json(run_dir / "scenarios.json", {"run_id": run_id, "items": scenario_items})
@@ -528,6 +533,119 @@ def build_media_manifest(run_json: dict, evidence: dict) -> dict:
             "artifact": counts.get("artifact", 0),
         },
     }
+
+
+def build_scenario_outcomes(run_json: dict, evidence: dict, findings: dict) -> dict:
+    evidence_by_scenario: dict[str, list[dict]] = {}
+    for item in evidence.get("items", []):
+        evidence_by_scenario.setdefault(item.get("scenario", ""), []).append(item)
+    findings_by_scenario: dict[str, list[dict]] = {}
+    for item in findings.get("items", []):
+        findings_by_scenario.setdefault(item.get("scenario", ""), []).append(item)
+
+    outcomes = []
+    for scenario in run_json["scenarios"]:
+        scenario_evidence = evidence_by_scenario.get(scenario["id"], [])
+        scenario_findings = findings_by_scenario.get(scenario["id"], [])
+        present = [item for item in scenario_evidence if item.get("status") in {"captured", "validated"}]
+        validated = [item for item in scenario_evidence if item.get("status") == "validated"]
+        rejected = [item for item in scenario_evidence if item.get("status") == "rejected"]
+        counts = {
+            "strength": sum(1 for item in scenario_findings if item.get("kind") == "strength"),
+            "weakness": sum(1 for item in scenario_findings if item.get("kind") == "weakness"),
+            "issue": sum(1 for item in scenario_findings if item.get("kind") == "issue"),
+            "fix": sum(1 for item in scenario_findings if item.get("kind") == "fix"),
+        }
+        if scenario_evidence and len(validated) == len(scenario_evidence):
+            evidence_status = "validated"
+        elif present:
+            evidence_status = "captured"
+        elif rejected:
+            evidence_status = "rejected"
+        else:
+            evidence_status = "missing"
+
+        if counts["fix"]:
+            outcome = "fix_recorded"
+        elif counts["issue"]:
+            outcome = "issue_found"
+        elif counts["weakness"]:
+            outcome = "weakness_found"
+        elif counts["strength"]:
+            outcome = "strength_observed"
+        elif present:
+            outcome = "evidence_captured"
+        else:
+            outcome = "not_started"
+
+        outcomes.append({
+            "scenario": scenario["id"],
+            "label": scenario["label"],
+            "stage": scenario["stage"],
+            "primary_story": scenario["primary_story"],
+            "evidence_status": evidence_status,
+            "required_evidence_count": len(scenario_evidence),
+            "present_evidence_count": len(present),
+            "validated_evidence_count": len(validated),
+            "rejected_evidence_count": len(rejected),
+            "finding_counts": counts,
+            "findings": [
+                {
+                    "id": item.get("id", ""),
+                    "kind": item.get("kind", ""),
+                    "title": item.get("title", ""),
+                    "status": item.get("status", ""),
+                    "severity": item.get("severity", ""),
+                    "evidence_path": item.get("evidence_path", ""),
+                }
+                for item in scenario_findings
+            ],
+            "outcome": outcome,
+        })
+
+    return {
+        "run_id": run_json["run_id"],
+        "items": outcomes,
+        "summary": {
+            "scenarios": len(outcomes),
+            "started": sum(1 for item in outcomes if item["outcome"] != "not_started"),
+            "with_findings": sum(1 for item in outcomes if sum(item["finding_counts"].values()) > 0),
+            "with_issues": sum(1 for item in outcomes if item["finding_counts"]["issue"] or item["finding_counts"]["weakness"]),
+            "with_fixes": sum(1 for item in outcomes if item["finding_counts"]["fix"]),
+            "fully_validated": sum(1 for item in outcomes if item["evidence_status"] == "validated"),
+        },
+    }
+
+
+def render_scenario_outcomes(outcomes: dict) -> str:
+    lines = [
+        "# Product journey scenario outcomes",
+        "",
+        f"- Run: `{outcomes['run_id']}`",
+        f"- Scenarios: {outcomes['summary']['scenarios']}",
+        f"- Started: {outcomes['summary']['started']}",
+        f"- With findings: {outcomes['summary']['with_findings']}",
+        f"- With issues or weaknesses: {outcomes['summary']['with_issues']}",
+        f"- With fixes: {outcomes['summary']['with_fixes']}",
+        "",
+    ]
+    for item in outcomes["items"]:
+        lines.extend([
+            f"## {item['label']}",
+            "",
+            f"- Scenario: `{item['scenario']}`",
+            f"- Stage: `{item['stage']}`",
+            f"- Story: `{item['primary_story']}`",
+            f"- Evidence: {item['present_evidence_count']} / {item['required_evidence_count']} ({item['evidence_status']})",
+            f"- Outcome: `{item['outcome']}`",
+            f"- Findings: strength={item['finding_counts']['strength']}, weakness={item['finding_counts']['weakness']}, issue={item['finding_counts']['issue']}, fix={item['finding_counts']['fix']}",
+            "",
+        ])
+        for finding in item["findings"]:
+            lines.append(f"- {finding['kind']}: {finding['title']} ({finding['status']})")
+        if item["findings"]:
+            lines.append("")
+    return "\n".join(lines) + "\n"
 
 
 def build_execution_plan(run_json: dict, evidence: dict) -> dict:
@@ -822,6 +940,9 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
     media_manifest = build_media_manifest(run_json, evidence)
     write_json(run_dir / "media-manifest.json", media_manifest)
     write_json(run_dir / "findings.json", findings)
+    scenario_outcomes = build_scenario_outcomes(run_json, evidence, findings)
+    write_json(run_dir / "scenario-outcomes.json", scenario_outcomes)
+    (run_dir / "scenario-outcomes.md").write_text(render_scenario_outcomes(scenario_outcomes), encoding="utf-8")
     write_json(run_dir / "review.json", review)
     write_json(run_dir / "metrics.json", metrics)
     write_json(run_dir / "scenarios.json", {"run_id": run_json["run_id"], "items": run_json["scenarios"]})
@@ -832,7 +953,7 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
     write_json(run_dir / "agent-brief.json", agent_brief)
     (run_dir / "agent-brief.md").write_text(render_agent_brief(agent_brief), encoding="utf-8")
     (run_dir / "journey.md").write_text(render_journey(run_json), encoding="utf-8")
-    deck = render_deck(run_json, metrics, evidence, findings, review, execution_plan, media_manifest)
+    deck = render_deck(run_json, metrics, evidence, findings, review, execution_plan, media_manifest, scenario_outcomes)
     write_json(run_dir / "deck.slidey.json", deck)
     if publish_deck is not None:
         publish_deck.parent.mkdir(parents=True, exist_ok=True)
@@ -958,6 +1079,7 @@ def seed_demo_evidence(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "execution_plan_path": str(run_dir / "execution-plan.md"),
         "agent_brief_path": str(run_dir / "agent-brief.md"),
         "media_manifest_path": str(run_dir / "media-manifest.json"),
+        "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
         "evidence_added": len(demo_evidence),
         "findings_added": findings_added,
         "present_evidence_count": metrics.get("present_evidence_count", 0),
@@ -980,6 +1102,8 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "metrics.json",
         "bugs.json",
         "findings.json",
+        "scenario-outcomes.json",
+        "scenario-outcomes.md",
         "evidence.json",
         "media-manifest.json",
         "scenarios.json",
@@ -998,6 +1122,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     playback_items = [item for item in media_manifest["items"] if item["playback"]]
     finding_items = findings.get("items", [])
     finding_kinds = {item.get("kind") for item in finding_items}
+    scenario_outcomes = build_scenario_outcomes(run_json, evidence, findings)
 
     checks = [
         {
@@ -1043,6 +1168,12 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             "detail": ", ".join(sorted(kind for kind in finding_kinds if kind)) or "none",
         },
         {
+            "id": "scenario-outcomes",
+            "status": "pass" if scenario_outcomes["summary"]["scenarios"] == len(run_json.get("scenarios", [])) else "fail",
+            "summary": "Each scenario has an outcome row for review and matrix rollups.",
+            "detail": f"outcomes={scenario_outcomes['summary']['scenarios']}, with_findings={scenario_outcomes['summary']['with_findings']}",
+        },
+        {
             "id": "no-rejected-evidence",
             "status": "pass" if not rejected_items else "warn",
             "summary": "No attached evidence is marked rejected.",
@@ -1075,6 +1206,8 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     }
     write_json(run_dir / "review.json", review)
     write_json(run_dir / "media-manifest.json", media_manifest)
+    write_json(run_dir / "scenario-outcomes.json", scenario_outcomes)
+    (run_dir / "scenario-outcomes.md").write_text(render_scenario_outcomes(scenario_outcomes), encoding="utf-8")
     metrics["review_status"] = status
     metrics["review_passed_checks"] = passed
     metrics["review_total_checks"] = len(checks)
@@ -1084,7 +1217,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     agent_brief = build_agent_brief(run_json, evidence, execution_plan)
     write_json(run_dir / "agent-brief.json", agent_brief)
     (run_dir / "agent-brief.md").write_text(render_agent_brief(agent_brief), encoding="utf-8")
-    deck = render_deck(run_json, metrics, evidence, findings, review, execution_plan, media_manifest)
+    deck = render_deck(run_json, metrics, evidence, findings, review, execution_plan, media_manifest, scenario_outcomes)
     write_json(run_dir / "deck.slidey.json", deck)
     if publish_deck is not None:
         publish_deck.parent.mkdir(parents=True, exist_ok=True)
@@ -1099,6 +1232,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "execution_plan_path": str(run_dir / "execution-plan.md"),
         "agent_brief_path": str(run_dir / "agent-brief.md"),
         "media_manifest_path": str(run_dir / "media-manifest.json"),
+        "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
         "passed": passed,
         "warnings": warned,
         "failed": failed,
@@ -1467,6 +1601,7 @@ def render_deck(
     review: Optional[dict] = None,
     execution_plan: Optional[dict] = None,
     media_manifest: Optional[dict] = None,
+    scenario_outcomes: Optional[dict] = None,
 ) -> dict:
     stage_lines = [f"{stage['id']}: {stage['status']}" for stage in run_json["stages"]]
     scenario_lines = [
@@ -1498,6 +1633,13 @@ def render_deck(
         for item in finding_items[:12]
     ]
     findings_body = "\n".join(finding_lines) if finding_lines else "No strengths, weaknesses, issues, or fixes recorded yet."
+    outcome_lines = []
+    if scenario_outcomes is not None:
+        outcome_lines = [
+            f"{item['scenario']}: {item['outcome']} - evidence {item['present_evidence_count']}/{item['required_evidence_count']} - findings {sum(item['finding_counts'].values())}"
+            for item in scenario_outcomes.get("items", [])
+        ]
+    outcomes_body = "\n".join(outcome_lines) if outcome_lines else "No scenario outcomes generated yet."
     review_body = "Not reviewed yet."
     if review is not None:
         review_lines = [review.get("summary", "No review summary.")]
@@ -1559,6 +1701,13 @@ def render_deck(
                 "title": "Strengths, weaknesses, issues, fixes",
                 "body": findings_body,
                 "narration": "The journey report records what worked, what failed, what was found, and what was fixed.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Scenario outcomes",
+                "title": "Per-scenario status",
+                "body": outcomes_body,
+                "narration": "Each scenario is summarized separately so natural-use gaps remain visible after the bundle-level review passes.",
             },
             {
                 "type": "narrative",
@@ -2008,6 +2157,7 @@ def main() -> None:
                 "execution_plan_path": str(run_dir / "execution-plan.md"),
                 "agent_brief_path": str(run_dir / "agent-brief.md"),
                 "media_manifest_path": str(run_dir / "media-manifest.json"),
+                "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
                 "published_deck_path": str(publish_deck) if publish_deck is not None else "",
             }, sort_keys=True))
             append_log(f"Recorded {args.finding_kind} finding for {run_dir.name}: {args.title}")
@@ -2056,6 +2206,7 @@ def main() -> None:
                 "execution_plan_path": str(run_dir / "execution-plan.md"),
                 "agent_brief_path": str(run_dir / "agent-brief.md"),
                 "media_manifest_path": str(run_dir / "media-manifest.json"),
+                "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
                 "published_deck_path": str(publish_deck) if publish_deck is not None else "",
             }, sort_keys=True))
             append_log(f"Attached evidence {args.scenario}/{args.evidence_kind} to {run_dir.name}")
@@ -2092,6 +2243,7 @@ def main() -> None:
                 "execution_plan_path": str(run_dir / "execution-plan.md"),
                 "agent_brief_path": str(run_dir / "agent-brief.md"),
                 "media_manifest_path": str(run_dir / "media-manifest.json"),
+                "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
                 "published_deck_path": str(publish_deck) if publish_deck is not None else "",
             }, sort_keys=True))
             append_log(f"Emitted dry-run bundle {run_json['run_id']}")

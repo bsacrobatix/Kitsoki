@@ -12,7 +12,12 @@
   ],
   "run_result": {
     "required": ["run_id", "created_at", "mode", "project", "persona", "stages", "scenarios", "artifacts"],
-    "artifacts": ["run.json", "journey.md", "metrics.json", "bugs.json", "findings.json", "evidence.json", "media-manifest.json", "scenarios.json", "execution-plan.json", "execution-plan.md", "agent-brief.json", "agent-brief.md", "review.json", "deck.slidey.json"]
+    "artifacts": ["run.json", "journey.md", "metrics.json", "bugs.json", "findings.json", "scenario-outcomes.json", "scenario-outcomes.md", "evidence.json", "media-manifest.json", "scenarios.json", "execution-plan.json", "execution-plan.md", "agent-brief.json", "agent-brief.md", "review.json", "deck.slidey.json"]
+  },
+  "scenario_outcomes": {
+    "required": ["run_id", "items", "summary"],
+    "item_required": ["scenario", "label", "stage", "primary_story", "evidence_status", "required_evidence_count", "present_evidence_count", "finding_counts", "findings", "outcome"],
+    "outcomes": ["not_started", "evidence_captured", "strength_observed", "weakness_found", "issue_found", "fix_recorded"]
   },
   "media_manifest": {
     "required": ["run_id", "items", "summary"],

@@ -17,6 +17,7 @@ host_handlers:
             execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
             agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
             media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
+            scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
       emit_product_journey_matrix:
         data:
           ok: true
@@ -44,6 +45,7 @@ host_handlers:
             execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
             agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
             media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
+            scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
       record_product_journey_finding:
         data:
           ok: true
@@ -58,6 +60,7 @@ host_handlers:
             execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
             agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
             media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
+            scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
       seed_product_journey_demo:
         data:
           ok: true
@@ -69,6 +72,7 @@ host_handlers:
             execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
             agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
             media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
+            scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
             evidence_added: 6
             findings_added: 4
             present_evidence_count: 7
@@ -87,6 +91,7 @@ host_handlers:
             execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
             agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
             media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
+            scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
             passed: 8
             warnings: 0
             failed: 0
@@ -163,6 +168,7 @@ turns:
       execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
       agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
       media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
+      scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
     expect_host_calls:
       - handler: host.run
         args: { call: emit_product_journey_run }
@@ -184,6 +190,7 @@ turns:
       execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
       agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
       media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
+      scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
     expect_host_calls:
       - handler: host.run
         args: { call: attach_product_journey_evidence }
@@ -209,6 +216,7 @@ turns:
       execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
       agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
       media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
+      scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
     expect_host_calls:
       - handler: host.run
         args: { call: record_product_journey_finding }
@@ -221,6 +229,7 @@ turns:
       execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
       agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
       media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
+      scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
     expect_host_calls:
       - handler: host.run
         args: { call: seed_product_journey_demo }
@@ -235,6 +244,7 @@ turns:
       execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
       agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
       media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
+      scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
     expect_host_calls:
       - handler: host.run
         args: { call: review_product_journey_run }
@@ -246,5 +256,6 @@ turns:
       execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
       agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
       media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
+      scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
 
 expect_no_errors: true

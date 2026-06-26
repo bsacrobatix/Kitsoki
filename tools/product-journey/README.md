@@ -64,7 +64,8 @@ project, persona, and seed match matrix assignments. Use the assignment
 to pick up the run without extra flags.
 
 This writes `.artifacts/product-journey/<run-id>/` with `run.json`,
-`journey.md`, `metrics.json`, `bugs.json`, `findings.json`, `evidence.json`,
+`journey.md`, `metrics.json`, `bugs.json`, `findings.json`,
+`scenario-outcomes.json`, `scenario-outcomes.md`, `evidence.json`,
 `media-manifest.json`, `scenarios.json`, `execution-plan.json`, `execution-plan.md`,
 `agent-brief.json`, `agent-brief.md`, `review.json`, and `deck.slidey.json`.
 Add `--publish-deck` when the generated deck should replace
@@ -87,9 +88,13 @@ python3 tools/product-journey/run.py --attach-evidence \
 ```
 
 Attachment updates `evidence.json`, `media-manifest.json`, `scenarios.json`,
-`metrics.json`, `agent-brief.md`, `journey.md`, and `deck.slidey.json`.
+`scenario-outcomes.md`, `metrics.json`, `agent-brief.md`, `journey.md`, and
+`deck.slidey.json`.
 The manifest classifies captured artifacts as video, image, trace, document, or
 artifact and feeds the Slidey playback scene with structured media entries.
+Scenario outcomes summarize evidence coverage and finding counts per scenario
+so onboarding, bugfix, PRD/design, feature implementation, and product-bug gaps
+stay visible independently of the bundle-level review status.
 
 Record a review finding for the deck summary:
 

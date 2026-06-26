@@ -1,7 +1,7 @@
 states:
   run_created:
     description: "A product-journey QA run bundle exists; waiting for captured evidence."
-    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, execution_plan_path, agent_brief_path, media_manifest_path, scenario, evidence_kind, evidence_path, finding_kind, finding_title, review_status, review_summary, status]
+    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, execution_plan_path, agent_brief_path, media_manifest_path, scenario_outcomes_path, scenario, evidence_kind, evidence_path, finding_kind, finding_title, review_status, review_summary, status]
     view:
       - banner:
           text: "RUN CREATED"
@@ -17,6 +17,7 @@ states:
             Execution plan: '{{ world.execution_plan_path|default:"(pending)" }}'
             Agent brief: '{{ world.agent_brief_path|default:"(pending)" }}'
             Media manifest: '{{ world.media_manifest_path|default:"(pending)" }}'
+            Scenario outcomes: '{{ world.scenario_outcomes_path|default:"(pending)" }}'
             Last evidence: '{{ world.scenario|default:"(none)" }} / {{ world.evidence_kind|default:"" }}'
             Last finding: '{{ world.finding_kind|default:"(none)" }} / {{ world.finding_title|default:"" }}'
             Review: '{{ world.review_status|default:"(not reviewed)" }}'
@@ -80,6 +81,7 @@ states:
                 execution_plan_path: "stdout_json.execution_plan_path"
                 agent_brief_path: "stdout_json.agent_brief_path"
                 media_manifest_path: "stdout_json.media_manifest_path"
+                scenario_outcomes_path: "stdout_json.scenario_outcomes_path"
               on_error: run_created
             - set:
                 status: "evidence_attached"
@@ -123,6 +125,7 @@ states:
                 execution_plan_path: "stdout_json.execution_plan_path"
                 agent_brief_path: "stdout_json.agent_brief_path"
                 media_manifest_path: "stdout_json.media_manifest_path"
+                scenario_outcomes_path: "stdout_json.scenario_outcomes_path"
               on_error: run_created
             - set:
                 status: "finding_recorded"
@@ -148,6 +151,7 @@ states:
                 execution_plan_path: "stdout_json.execution_plan_path"
                 agent_brief_path: "stdout_json.agent_brief_path"
                 media_manifest_path: "stdout_json.media_manifest_path"
+                scenario_outcomes_path: "stdout_json.scenario_outcomes_path"
               on_error: run_created
             - set:
                 status: "demo_seeded"
@@ -175,6 +179,7 @@ states:
                 execution_plan_path: "stdout_json.execution_plan_path"
                 agent_brief_path: "stdout_json.agent_brief_path"
                 media_manifest_path: "stdout_json.media_manifest_path"
+                scenario_outcomes_path: "stdout_json.scenario_outcomes_path"
               on_error: run_created
             - set:
                 status: "reviewed"
