@@ -1,7 +1,7 @@
 states:
   matrix_created:
     description: "A product-journey GitHub matrix exists; waiting for assignment runs."
-    relevant_world: [seed, matrix_id, matrix_dir, matrix_personas, deck_path, rollup_path, rollup_deck_path, rollup_markdown_path, validation_status, validation_errors, validation_warnings, status]
+    relevant_world: [seed, matrix_id, matrix_dir, matrix_personas, target_proof_file, deck_path, rollup_path, rollup_deck_path, rollup_markdown_path, validation_status, validation_errors, validation_warnings, status]
     view:
       - banner:
           text: "MATRIX CREATED"
@@ -12,6 +12,7 @@ states:
             Matrix: '{{ world.matrix_id|default:"(pending)" }}'
             Seed: "{{ world.seed }}"
             Personas: "{{ world.matrix_personas }}"
+            Target proof: '{{ world.target_proof_file|default:"(not refreshed)" }}'
             Matrix dir: '{{ world.matrix_dir|default:"(pending)" }}'
             Deck: '{{ world.deck_path|default:"(pending)" }}'
             Rollup: '{{ world.rollup_deck_path|default:"(pending)" }}'
@@ -27,6 +28,9 @@ states:
             - label: "start project=... persona=... seed=..."
               hint: "create a concrete run bundle for one matrix assignment"
               intent: start
+            - label: "matrix seed=... target_proof_file=..."
+              hint: "regenerate the matrix with a refreshed proof artifact"
+              intent: matrix
             - label: "rollup rollup_run_dir=..."
               hint: "refresh the matrix rollup deck; omit the run dir to auto-discover matching runs"
               intent: rollup
@@ -41,6 +45,40 @@ states:
             - label: "look"
               intent: look
     on:
+      matrix:
+        - target: .
+          effects:
+            - set:
+                seed: "{{ slots.seed ?? world.seed }}"
+                matrix_personas: "{{ slots.matrix_personas ?? world.matrix_personas }}"
+                target_proof_file: "{{ slots.target_proof_file ?? world.target_proof_file }}"
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
+                status: "creating_matrix"
+            - invoke: host.run
+              id: emit_product_journey_matrix
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --emit-matrix
+                  - --json-output
+                  - --seed
+                  - "{{ slots.seed ?? world.seed }}"
+                  - --matrix-personas
+                  - "{{ slots.matrix_personas ?? world.matrix_personas }}"
+                  - --target-proof-file
+                  - "{{ slots.target_proof_file ?? world.target_proof_file }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                matrix_id: "stdout_json.matrix_id"
+                matrix_dir: "stdout_json.matrix_dir"
+                deck_path: "stdout_json.deck_path"
+              on_error: matrix_created
+            - set:
+                status: "matrix_created"
       start:
         - target: run_created
           effects:
