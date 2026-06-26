@@ -2224,6 +2224,47 @@ def split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def seed_demo_driver_journal(run_dir: Path, run_json: dict, evidence: dict) -> int:
+    journal_path = run_dir / "driver-journal.json"
+    journal = read_json(journal_path) if journal_path.exists() else build_driver_journal(run_json["run_id"], [])
+    items = journal.get("items", [])
+    demo_scenarios = {
+        item.get("scenario", "")
+        for item in items
+        if item.get("summary", "").startswith("Deterministic demo driver")
+    }
+    evidence_refs_by_scenario: dict[str, list[str]] = {}
+    for item in evidence.get("items", []):
+        if item.get("status") in {"captured", "validated"} and item.get("path"):
+            evidence_refs_by_scenario.setdefault(item["scenario"], []).append(item["path"])
+
+    added = 0
+    for scenario in run_json.get("scenarios", []):
+        scenario_id = scenario["id"]
+        if scenario_id in demo_scenarios:
+            continue
+        items.append({
+            "id": f"driver-event-{len(items) + 1}",
+            "created_at": now_utc(),
+            "scenario": scenario_id,
+            "dispatch_mode": "replay",
+            "status": "captured",
+            "summary": (
+                "Deterministic demo driver exercised the scenario contract with "
+                "placeholder evidence. This proves the journal path, not live product usage."
+            ),
+            "mcp_tools": scenario.get("required_mcp", []),
+            "evidence_refs": evidence_refs_by_scenario.get(scenario_id, []),
+            "blockers": [],
+        })
+        added += 1
+
+    journal = build_driver_journal(run_json["run_id"], items)
+    write_json(journal_path, journal)
+    (run_dir / "driver-journal.md").write_text(render_driver_journal(journal), encoding="utf-8")
+    return added
+
+
 def demo_evidence_path(scenario: str, kind: str) -> str:
     paths = {
         "browser_screenshot": f"screens/{scenario}.png",
@@ -2253,6 +2294,7 @@ def demo_evidence_path(scenario: str, kind: str) -> str:
 
 
 def seed_demo_evidence(run_dir: Path, publish_deck: Optional[Path]) -> dict:
+    run_json = read_json(run_dir / "run.json")
     evidence = read_json(run_dir / "evidence.json")
     demo_evidence = [
         (
@@ -2284,6 +2326,8 @@ def seed_demo_evidence(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         record_finding(run_dir, kind, title, summary, scenario, severity, evidence_path, status, publish_deck=None)
         findings_added += 1
 
+    evidence = read_json(run_dir / "evidence.json")
+    driver_events_added = seed_demo_driver_journal(run_dir, run_json, evidence)
     update_derived_artifacts(run_dir, publish_deck=publish_deck)
     metrics = read_json(run_dir / "metrics.json")
     return {
@@ -2299,6 +2343,8 @@ def seed_demo_evidence(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
         "evidence_added": len(demo_evidence),
         "findings_added": findings_added,
+        "driver_events_added": driver_events_added,
+        "driver_event_count": metrics.get("driver_event_count", 0),
         "present_evidence_count": metrics.get("present_evidence_count", 0),
         "findings_count": metrics.get("findings_count", 0),
         "published_deck_path": str(publish_deck) if publish_deck is not None else "",
@@ -2310,6 +2356,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     run_json = read_json(run_dir / "run.json")
     evidence = read_json(run_dir / "evidence.json")
     findings = read_json(run_dir / "findings.json")
+    driver_journal = read_json(run_dir / "driver-journal.json") if (run_dir / "driver-journal.json").exists() else build_driver_journal(run_json["run_id"], [])
     metrics = read_json(run_dir / "metrics.json")
     execution_plan = build_execution_plan(run_json, evidence)
 
@@ -2361,6 +2408,17 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         for scenario in run_json.get("scenarios", [])
         if scenario.get("id", "") not in attempted_scenarios
     ]
+    journaled_scenarios = {
+        item.get("scenario", "")
+        for item in driver_journal.get("items", [])
+        if item.get("scenario")
+    }
+    missing_driver_journal = [
+        scenario.get("id", "")
+        for scenario in run_json.get("scenarios", [])
+        if scenario.get("id", "") not in journaled_scenarios
+        and scenario.get("id", "") not in blocked_scenarios
+    ]
     scenario_outcomes = build_scenario_outcomes(run_json, evidence, findings)
     driver_plan = build_driver_plan(run_json, evidence, execution_plan)
     quality_gates = summarize_quality_gates(evidence, scenario_outcomes, driver_plan)
@@ -2388,6 +2446,12 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             "status": "pass" if not missing_attempts else "fail",
             "summary": "Every scenario has captured evidence or an explicit blocker.",
             "detail": ", ".join(missing_attempts),
+        },
+        {
+            "id": "driver-journal-coverage",
+            "status": "pass" if not missing_driver_journal else "fail",
+            "summary": "Every non-blocked scenario has a driver journal event.",
+            "detail": ", ".join(missing_driver_journal),
         },
         {
             "id": "captured-evidence",
@@ -3757,6 +3821,7 @@ def render_dogfood_smoke_summary(report: dict) -> str:
         "",
         f"- Corpus validation: {corpus['status']} ({corpus['errors']} errors, {corpus['warnings']} warnings)",
         f"- Review: {review['review_status']} - {review['summary']}",
+        f"- Driver journal events: {report['run'].get('driver_event_count', 0)}",
         f"- Run validation: {validation['run']['status']} ({validation['run']['errors']} errors, {validation['run']['warnings']} warnings)",
         f"- Matrix validation: {validation['matrix']['status']} ({validation['matrix']['errors']} errors, {validation['matrix']['warnings']} warnings)",
         f"- Rollup runs: {rollup['runs_found']} / {rollup['assignments']}",
@@ -3900,6 +3965,7 @@ def build_dogfood_smoke(
             "execution_plan_path": str(run_dir / "execution-plan.md"),
             "driver_plan_path": str(run_dir / "driver-plan.md"),
             "driver_journal_path": str(run_dir / "driver-journal.md"),
+            "driver_event_count": seeded.get("driver_event_count", 0),
             "agent_brief_path": str(run_dir / "agent-brief.md"),
             "driver_handoff_path": str(run_dir / "driver-handoff.md"),
             "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
@@ -3914,7 +3980,7 @@ def build_dogfood_smoke(
         "rollup": rollup,
         "notes": [
             "This smoke is deterministic and does not call a live LLM.",
-            "Demo evidence placeholders prove aggregation and deck shape only; live visual MCP or cassette evidence is still required for product claims.",
+            "Demo evidence and driver journal placeholders prove aggregation, audit-trail wiring, and deck shape only; live visual MCP or cassette evidence is still required for product claims.",
             "Matrix validation may warn when current GitHub target proof has not been refreshed with --refresh-github-targets.",
         ],
         "artifacts": {
@@ -4107,7 +4173,7 @@ def render_deck(
             "type": "narrative",
             "eyebrow": "Metrics",
             "title": "Current evidence",
-            "body": f"Validated stages: {metrics['validated_stage_count']} / {metrics['stage_count']}\nCaptured stages: {metrics.get('captured_stage_count', 0)}\nScenarios: {metrics['scenario_count']}\nEvidence present: {metrics['present_evidence_count']} / {metrics['required_evidence_count']}\nFindings: {metrics.get('findings_count', 0)}\nStrengths: {metrics.get('strength_count', 0)} · Weaknesses: {metrics.get('weakness_count', 0)} · Fixes: {metrics.get('fix_count', 0)} · Blocked: {metrics.get('blocked_count', 0)}\nProduct bugs found: {metrics['product_bugs_found']}",
+            "body": f"Validated stages: {metrics['validated_stage_count']} / {metrics['stage_count']}\nCaptured stages: {metrics.get('captured_stage_count', 0)}\nScenarios: {metrics['scenario_count']}\nEvidence present: {metrics['present_evidence_count']} / {metrics['required_evidence_count']}\nDriver events: {metrics.get('driver_event_count', 0)}\nFindings: {metrics.get('findings_count', 0)}\nStrengths: {metrics.get('strength_count', 0)} · Weaknesses: {metrics.get('weakness_count', 0)} · Fixes: {metrics.get('fix_count', 0)} · Blocked: {metrics.get('blocked_count', 0)}\nProduct bugs found: {metrics['product_bugs_found']}",
             "narration": "This report distinguishes validated evidence from planned stages.",
         },
         {
