@@ -46,7 +46,7 @@ bugs:
     fix_sha: 67ac5fb1
     baseline_sha: ea2ca55a
     fix_source: "."   # fix spans internal/host + internal/orchestrator; overlay whole tree for GREEN leg
-    oracle_test: oracles/bug9.go
+    oracle_test: testdata/bug9.go
     oracle_match: "TestRepro_ConcurrentSessionsShareCheckout_DestroysWIP"
     oracle:
       target: internal/host/concurrent_checkout_repro_test.go
@@ -66,7 +66,7 @@ bugs:
     fix_sha: ea2ca55a
     baseline_sha: 45276b88
     fix_source: "."   # fix spans internal/host + a root file; overlay whole tree for GREEN leg
-    oracle_test: oracles/bug12.go
+    oracle_test: testdata/bug12.go
     oracle_match: "TestRepro_PostCmdInfraFailureMisreportedAsSemanticRejection|TestRepro_PostCmdCwdIsDroppedOnDecidePath"
     oracle:
       target: internal/host/agent_decide_postcmd_captured_abandon_repro_test.go
@@ -86,7 +86,7 @@ bugs:
     fix_sha: 45276b88
     baseline_sha: 85ff4917
     fix_source: tools/runstatus
-    oracle_test: oracles/bug14.test.ts
+    oracle_test: testdata/bug14.test.ts
     oracle_match: "background_completion failure surfacing"
     oracle:
       # Polyglot: the JS package isn't at the repo root, so install it before the
