@@ -142,6 +142,18 @@ states:
               intent: go_bugfix
               hint:   "force the bugfix pipeline regardless of ticket type"
               when:   "world.ticket_id != '' && world.ticket_type != 'bug'"
+            - label:  "bugfix_to_pr"
+              intent: bugfix_open_pr
+              hint:   "fix the picked bug, then open a pull request"
+              when:   "world.ticket_id != ''"
+            - label:  "bugfix_to_worktree"
+              intent: bugfix_leave_worktree
+              hint:   "fix the picked bug and leave the worktree for review"
+              when:   "world.ticket_id != ''"
+            - label:  "bugfix_to_local_merge"
+              intent: bugfix_merge_local
+              hint:   "fix the picked bug and merge into the local base branch"
+              when:   "world.ticket_id != ''"
             - { label: "go_back", intent: go_back, hint: "return to the previous room" }
             - { label: "go_main", intent: go_main, hint: "back to the engineer's day landing" }
             - { label: "look",    intent: look,    hint: "re-render" }
@@ -273,6 +285,30 @@ states:
       go_bugfix:
         - when: "world.ticket_id != ''"
           target: bf
+        - default: true
+          target: ticket_search
+          guard_hint: "Pick a ticket first."
+      bugfix_open_pr:
+        - when: "world.ticket_id != ''"
+          target: bf
+          effects:
+            - set: { bugfix_destination: "open-pr" }
+        - default: true
+          target: ticket_search
+          guard_hint: "Pick a ticket first."
+      bugfix_leave_worktree:
+        - when: "world.ticket_id != ''"
+          target: bf
+          effects:
+            - set: { bugfix_destination: "leave-worktree" }
+        - default: true
+          target: ticket_search
+          guard_hint: "Pick a ticket first."
+      bugfix_merge_local:
+        - when: "world.ticket_id != ''"
+          target: bf
+          effects:
+            - set: { bugfix_destination: "local-merge" }
         - default: true
           target: ticket_search
           guard_hint: "Pick a ticket first."

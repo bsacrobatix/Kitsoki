@@ -462,6 +462,11 @@ world:
   judge_mode:                  { type: string, default: "human" }
   judge_confidence_threshold:  { type: float,  default: 0.8 }
   bugfix_mode:                 { type: string, default: "full" }
+  # bugfix_destination selects the post-fix landing:
+  #   open-pr        — hand the finished fix to pr-refinement and open a PR
+  #   leave-worktree — stop after the validated bugfix, preserving the worktree
+  #   local-merge    — use bugfix's direct-ship tail to merge into base_branch
+  bugfix_destination:          { type: string, default: "open-pr" }
   merge_strategy:              { type: string, default: "squash" }
   # build_cmd / test_cmd — the project's REAL build + test commands, projected
   # into the bf import so the bugfix testing/validating gates run them instead of
@@ -1117,6 +1122,21 @@ intents:
     description: "Start the bugfix path when the operator asks to fix, debug, investigate, or work on bugs. If no ticket is picked yet, the landing room will ask them to pick one first."
     examples: ["fix bug", "bugfix", "work on bug", "fix bugs", "i want to fix a bug", "i want to work on some bugs"]
     priority: 55
+  bugfix_open_pr:
+    title: "Fix Bug and Open PR"
+    description: "Run the bugfix pipeline, then open and refine a pull request."
+    examples: ["fix this and open a pr", "bugfix to pr", "open a pull request after fixing"]
+    priority: 56
+  bugfix_leave_worktree:
+    title: "Fix Bug and Leave Worktree"
+    description: "Run the bugfix pipeline and leave the completed local worktree for manual review."
+    examples: ["fix this and leave a worktree", "bugfix local worktree", "leave the worktree after fixing"]
+    priority: 56
+  bugfix_merge_local:
+    title: "Fix Bug and Merge Locally"
+    description: "Run the bugfix pipeline and merge the fix into the local base branch."
+    examples: ["fix this and merge locally", "merge to main after fixing", "bugfix to local main"]
+    priority: 56
   go_pr_refinement:
     title: "PR Refinement"
     description: "Hand off to the pr-refinement sub-story for an open PR."
@@ -1392,6 +1412,14 @@ intents:
     description: "(internal) the step landed — run the verify gate."
     examples: []
     priority: 1
+  bugfix_done_open_pr:
+    description: "(internal) completed bugfix should open a PR."
+    examples: []
+    priority: 1
+  bugfix_done_leave_worktree:
+    description: "(internal) completed bugfix should preserve the local worktree."
+    examples: []
+    priority: 1
 
 # Root state — the engineer's-day free-form workbench (rooms/landing.yaml).
 # Replaces the former `main` catalog as the landing. `main` is RETAINED as a
@@ -1438,9 +1466,11 @@ imports:
       # The picked bug's repro_command (bound by ticket_search.pick_ticket).
       # bf's `reproducing` room runs it RED-first; empty ⇒ LLM-only reproducer.
       gate_command:    "{{ world.gate_command }}"
-      # dev-story hands bf's @exit:done to the pr-refinement import — the PR
-      # tail, not slice 4's direct-ship-to-local-main tail. Pin open-PR.
-      bugfix_exit:     "open-PR"
+      # Destination is parent-controlled:
+      #   local-merge    -> bf's direct-ship tail (local base_branch merge)
+      #   open-pr        -> bf done -> pr-refinement
+      #   leave-worktree -> bf done -> landing, preserving workdir
+      bugfix_exit:     "{% if world.bugfix_destination == 'local-merge' %}direct-ship{% else %}open-PR{% endif %}"
       judge_mode:      "{{ world.judge_mode }}"
       judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
 
@@ -1454,29 +1484,28 @@ imports:
       import: [start, change_ticket]
 
     # Exit projections. bf's @exit:done writes done_artifact via the
-    # `set:` block on done_awaiting_reply.on.accept; we lift that
-    # artifact's presentation fields into the parent's pr_title /
-    # pr_body, then transition into the `pr` import (which projects
-    # those parent keys into the pr child's world via world_in:).
+    # `set:` block on done_awaiting_reply.on.accept. The parent chooses the
+    # destination: open-pr enters `pr`; leave-worktree lands back at the
+    # workbench with the local worktree preserved.
     exits:
       done:
-        to: pr
+        to: bugfix_done_router
         set:
           pr_title: "{{ world.bf__done_artifact.summary_title }}"
           pr_body:  "{{ world.bf__done_artifact.summary_markdown }}"
+          status:   "fixed"
       abandoned:
         to: human_review_report
         set:
           status: "abandoned"
           human_review_reason: "{{ world.bf__abandon_reason }}"
-      # slice 4 added bf's direct-ship terminals (shipped / needs-human). This
-      # hub pins bugfix_exit: open-PR, so neither fires in practice — but the
-      # loader requires every child exit be mapped. shipped lands like a merge;
-      # needs-human lands like an abandon (carrying the error).
+      # slice 4 added bf's direct-ship terminals (shipped / needs-human). The
+      # local-merge destination reaches shipped after bugfix's shared ship-it
+      # tail integrates into base_branch and verifies the merged commit.
       shipped:
         to: landing
         set:
-          status: "shipped"
+          status: "local-merged"
       needs-human:
         to: human_review_report
         set:

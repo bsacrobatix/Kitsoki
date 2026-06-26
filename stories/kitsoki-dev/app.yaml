@@ -50,7 +50,7 @@
 app:
   id: kitsoki-dev
   version: 0.1.0
-  title: "kitsoki-dev — work on kitsoki itself (and its stories) with local files"
+  title: "kitsoki-dev — work on kitsoki itself (and its stories) with GitHub issues"
   author: "Kitsoki"
   license: "CC0"
 
@@ -156,6 +156,7 @@ imports:
       judge_mode:                 "{{ world.judge_mode }}"
       judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
       ticket_repo:                "{{ world.ticket_repo }}"
+      bugfix_destination:         "{{ world.bugfix_destination }}"
 
 # Instance-level world. Provider-pointing keys plus judge-mode
 # defaults; the operator can override any of them at session start
@@ -179,6 +180,10 @@ world:
   # profile (.kitsoki/project-profile.yaml) is the source of truth for this repo;
   # local dogfood runs can override via .kitsoki.local.yaml root.overrides.world.
   ticket_repo:  { type: string, default: "constructorfabric/Kitsoki" }
+  # Default self-hosting destination: land fixes into the local base branch
+  # (main here) after the bugfix RED/GREEN gate and shared ship-it tail pass.
+  # Operators can still choose open-pr or leave-worktree from the dev-story UI.
+  bugfix_destination: { type: string, default: "local-merge" }
 
   # Judge polymorphism. Defaults: supervised + 0.8 confidence floor.
   # Flip judge_mode to `llm_then_human` for an unattended run.
