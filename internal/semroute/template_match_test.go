@@ -95,7 +95,7 @@ func TestTemplateMatch_DevStoryTicketPickRow(t *testing.T) {
 		intent string
 	}{
 		{name: "standalone", path: "../../stories/dev-story/app.yaml", intent: "pick_ticket"},
-		{name: "imported", path: "../../stories/kitsoki-dev/app.yaml", intent: "core__pick_ticket"},
+		{name: "imported", path: "../../.kitsoki/stories/kitsoki-dev/app.yaml", intent: "core__pick_ticket"},
 	}
 	for _, tc := range cases {
 		tc := tc

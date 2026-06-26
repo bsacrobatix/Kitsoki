@@ -9,7 +9,7 @@
 #
 # Usage (from kitsoki repo root):
 #
-#   kitsoki run stories/kitsoki-dev/app.yaml \
+#   kitsoki run .kitsoki/stories/kitsoki-dev/app.yaml \
 #       --warp scenarios/pickup_self_bug.yaml
 #
 # Then type `bugfix` (or `core__go_bugfix`) to dispatch the picked

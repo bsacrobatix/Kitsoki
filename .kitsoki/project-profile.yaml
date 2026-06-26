@@ -19,7 +19,7 @@ kitsoki:
   story: dev-story
   instance:
     id: kitsoki-dev
-    path: stories/kitsoki-dev/app.yaml
+    path: .kitsoki/stories/kitsoki-dev/app.yaml
     bindings:
       ticket: host.gh.ticket
       vcs: host.git

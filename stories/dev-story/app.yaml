@@ -109,7 +109,7 @@ hosts:
   # published PRD. Its decide/task/search/artifacts_dir/ide.open_file/run
   # needs are already covered above; converse + chat.resolve are unique to
   # it. An instance importing dev-story with `hosts: declared` must list
-  # both in its own allow-list (see stories/kitsoki-dev/app.yaml).
+  # both in its own allow-list (see .kitsoki/stories/kitsoki-dev/app.yaml).
   - host.agent.converse
   - host.chat.resolve
   # ── Ad-hoc structured plan (rooms/landing|applying|verifying.yaml) ─────

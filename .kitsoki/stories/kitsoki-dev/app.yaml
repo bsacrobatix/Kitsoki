@@ -11,13 +11,13 @@
 #
 # # Two-command quickstart
 #
-#   $ kitsoki run stories/kitsoki-dev/app.yaml
+#   $ kitsoki run .kitsoki/stories/kitsoki-dev/app.yaml
 #   # Lands in core.landing. Type `tickets` to search; `pick TKT` to pick;
 #   # `bugfix` to enter the pipeline.
 #
 # Autonomous variant (set judge_mode at boot via a warp scenario):
 #
-#   $ kitsoki run stories/kitsoki-dev/app.yaml \
+#   $ kitsoki run .kitsoki/stories/kitsoki-dev/app.yaml \
 #       --warp scenarios/autonomous_ready.yaml
 #
 # # ticket_globs — multi-glob coverage
@@ -120,7 +120,7 @@ hosts:
 # under the `core` alias.
 imports:
   core:
-    source: ../dev-story
+    source: ../../../stories/dev-story
     entry: landing
 
     # § 9 strict mode — every host the chain may use must be declared

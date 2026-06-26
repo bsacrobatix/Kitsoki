@@ -210,17 +210,12 @@ states:
         with:
           workdir: "{{ world.workdir }}"
           message: "{{ world.propose_fix_artifact.summary_title }}"
-          # Stage the agent's files explicitly. `git commit -a`
-          # picks up modifications to tracked files but does NOT
-          # stage new files — so a `Write`-based edit (agent
-          # creating a helper) would silently vanish without this
-          # explicit add. files_changed comes from the
-          # implementing artifact and is the agent's record of
-          # everything it touched.
-          # Include the synthesized reproducer test paths too. Args for later
-          # on_enter effects are evaluated before the implementer bind is visible,
-          # so use the already-bound proposal files plus the RED-test paths.
-          files: '{{ split(trim(join(world.propose_fix_artifact.affected_files ?? [], "\n") + "\n" + join(world.reproduction_artifact.repro_test_paths ?? [], "\n")), "\n") }}'
+          # Stage the agent's full worktree delta. The implementation artifact's
+          # files_changed list is bound by the previous on_enter effect, but
+          # same-room effect args may be rendered before that bind is visible.
+          # stage_all keeps new files from vanishing when the implementer creates
+          # helpers or tests that were not named by the proposal.
+          stage_all: true
         on_error: idle
 
       # Guard on a title being bound: during the autonomous auto-advance

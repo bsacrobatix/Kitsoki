@@ -9,7 +9,7 @@ free-form workbench [`landing`](#the-free-form-workbench-landing), which
 replaced the former `main` catalog.
 
 This app does **not** bind providers. Concrete bindings happen at the
-INSTANCE level: `stories/kitsoki-dev/` (Wave 3) for local-file
+INSTANCE level: `.kitsoki/stories/kitsoki-dev/` (Wave 3) for local-file
 providers; `cyber-repo/stories/devstory/` (Phase 7) for Jira /
 Bitbucket / Jenkins.
 

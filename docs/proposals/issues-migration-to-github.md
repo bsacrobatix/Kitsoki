@@ -42,7 +42,7 @@ deleted — so history and evidence stay reachable.
   `issues/README.md:63` reserved for exactly this) so re-running skips
   already-migrated files. `external:` is the one safe write into the
   otherwise-frozen pile.
-- **Rebind** — `stories/kitsoki-dev/app.yaml`
+- **Rebind** — `.kitsoki/stories/kitsoki-dev/app.yaml`
   `host_bindings: { ticket: host.gh.ticket }` (replacing
   `host.local_files.ticket`), with `ticket_repo: constructorfabric/Kitsoki`
   (slice #1) threaded into the provider args. This is the moment the dogfood
@@ -88,7 +88,7 @@ state, and evidence preserved), `kitsoki-dev` reads/writes GitHub, and
 
 - **Code:** a `kitsoki issues migrate` command (`cmd/kitsoki/`) reusing the
   localfiles reader + slice #1 ops + slice #2's attachment upload;
-  `stories/kitsoki-dev/app.yaml` (the `host_bindings` rebind + `ticket_repo`;
+  `.kitsoki/stories/kitsoki-dev/app.yaml` (the `host_bindings` rebind + `ticket_repo`;
   remove local-files `ticket_globs`).
 - **Repo:** `issues/DEPRECATED.md` + a banner on `issues/README.md`;
   `external:` blocks written into each migrated file (the only mutation to the

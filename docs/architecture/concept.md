@@ -278,7 +278,7 @@ the deterministic state machine: the user (or an LLM judge with
 confidence thresholds) reviews the artifact, accepts or refines it,
 and the conversation moves on to the next deterministic phase.
 
-This is the bug-fix pipeline in `stories/kitsoki-dev/`: reproduce →
+This is the bug-fix pipeline in `.kitsoki/stories/kitsoki-dev/`: reproduce →
 propose → implement → test → review → validate → done → PR refinement
 → merge. Each room can host as much LLM latitude as the author
 thinks the task deserves; the *boundaries between rooms* stay

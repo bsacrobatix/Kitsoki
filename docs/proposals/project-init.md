@@ -20,7 +20,7 @@ validated in §Verification).
 ## Why
 
 Today a project adopts kitsoki by **hand-authoring an instance**: someone copies
-`stories/kitsoki-dev/app.yaml` (or the gears team's external instance, which imports `@kitsoki/dev-story` from the gears repo), rebinds
+`.kitsoki/stories/kitsoki-dev/app.yaml` (or the gears team's external instance, which imports `@kitsoki/dev-story` from the gears repo), rebinds
 dev-story's five `host_interfaces:` to concrete providers, fills the
 External-target profile world keys, and figures out — from nothing — which dev
 server to run, which tests exist, what conventions to use, and what's safe to
@@ -137,7 +137,7 @@ This is the proof the feature is composition, not invention.
 | Re-check the report deterministically | pinned JSON Schema validator script (the validation sandwich) | `decompose_validate.py` pattern; proven in §Verification |
 | Checkpoint gate (accept/refine/quit) | `accept`/`refine(feedback)` + cycle budget, judge polymorphism | `dev-story-mining/rooms/mine.yaml:61-108`; `stories/bugfix` |
 | Propose-then-confirm | dry-run artifact, then a guarded `confirm` that runs the deterministic mutation | design publish; ideas `apply` gate (dev-story README §ideas) |
-| Compile profile → instance | render `.kitsoki/stories/<id>-dev/app.yaml` from the bindings | `stories/kitsoki-dev/app.yaml:131`; `gears-rust` External-target profile (`stories/dev-story/app.yaml:365-381`) |
+| Compile profile → instance | render `.kitsoki/stories/<id>-dev/app.yaml` from the bindings | `.kitsoki/stories/kitsoki-dev/app.yaml:131`; `gears-rust` External-target profile (`stories/dev-story/app.yaml:365-381`) |
 | Set up conventions + `.gitignore` | deterministic write script | `publish_design.py` / `ideas_reconcile.py` pattern |
 | Run readiness + tests | `host.run`, integrating the project's own `commands`/`testing` | `iface.ci.run_tests`/`build`; `make test` |
 | Classify a verify failure (regression vs pre-existing) | `host.agent.decide` over a baseline re-run | the "pre-existing vs regression" gate, [`dev-story-from-transcripts.md`](../../.context/dev-story-from-transcripts.md) theme A |

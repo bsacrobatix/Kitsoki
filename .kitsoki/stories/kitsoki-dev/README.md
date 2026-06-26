@@ -1,7 +1,7 @@
 # kitsoki-dev — the dogfood instance
 
 The dogfood instance described in the
-[bug-fix case study](../../docs/case-studies/bug-fix.md).
+[bug-fix case study](../../../docs/case-studies/bug-fix.md).
 This is the PoC milestone (★): **kitsoki working on kitsoki through
 its own UI**, with the bug file as both ticket and conversation log.
 
@@ -26,7 +26,7 @@ when the session ends.
 ## Two-command quickstart
 
 ```
-$ kitsoki run stories/kitsoki-dev/app.yaml
+$ kitsoki run .kitsoki/stories/kitsoki-dev/app.yaml
 ```
 
 Lands at `core.landing` — dev-story's engineer's-day landing room. From
@@ -53,7 +53,7 @@ Comment` block with the resolution sha.
 Flip the judge mode at boot via a warp scenario:
 
 ```
-$ kitsoki run stories/kitsoki-dev/app.yaml --warp scenarios/autonomous_ready.yaml
+$ kitsoki run .kitsoki/stories/kitsoki-dev/app.yaml --warp scenarios/autonomous_ready.yaml
 ```
 
 `judge_mode: llm_then_human` makes every checkpoint:
@@ -89,7 +89,7 @@ a flow fixture can be loaded as a warp basis verbatim.
 
 ## Flow fixtures (CI smoke)
 
-Run `kitsoki test flows stories/kitsoki-dev/app.yaml` to walk the
+Run `kitsoki test flows .kitsoki/stories/kitsoki-dev/app.yaml` to walk the
 canned closed-loop tests:
 
 | Fixture                                  | What it proves                                                                  |
@@ -137,7 +137,7 @@ the handler's `<root>` resolves to `pwd` and finds
 ## Manual walkthrough (the on-disk smoke)
 
 This is the loop that proves the dogfood acceptance per the
-[bug-fix case study](../../docs/case-studies/bug-fix.md):
+[bug-fix case study](../../../docs/case-studies/bug-fix.md):
 a kitsoki bug filed in one session is fixed via the dogfood
 instance in a second session, the diff lands as a real commit, the
 file's `status:` is `resolved`.
@@ -155,14 +155,14 @@ $ kitsoki bug create --target kitsoki \
     --severity med
 issues/bugs/2026-05-15T0407Z-tui-view-renders-before-on-enter-binds.md
 
-$ kitsoki run stories/kitsoki-dev/app.yaml
+$ kitsoki run .kitsoki/stories/kitsoki-dev/app.yaml
 # in the TUI: > tickets → > search "tui view" → > pick <id> → > bugfix → > start …
 ```
 
 The first command writes a markdown file under `$KITSOKI_REPO/issues/bugs/`
 with the frontmatter schema documented in
-[`docs/stories/bugs.md`](../../docs/stories/bugs.md) (and mirrored in
-[`../../issues/README.md`](../../issues/README.md)). The second command
+[`docs/stories/bugs.md`](../../../docs/stories/bugs.md) (and mirrored in
+[`../../../issues/README.md`](../../../issues/README.md)). The second command
 boots the dogfood instance, which scans the same directory via
 `host.local_files.ticket` and picks the file up as a ticket.
 
@@ -175,7 +175,7 @@ equivalent from the pipeline's perspective.
 ### Phase 1 — pick up the bug
 
 ```
-$ kitsoki run stories/kitsoki-dev/app.yaml
+$ kitsoki run .kitsoki/stories/kitsoki-dev/app.yaml
 ```
 
 You land at `core.landing`. The view shows your engineer's day
@@ -333,7 +333,7 @@ caveats:
    The bug-filing CLI (`kitsoki bug create`) ships on main and
    `/meta kitsoki bug` writes to `$KITSOKI_REPO/issues/bugs/`;
    `/meta story bug` writes to `<app-dir>/issues/bugs/`. Both use the
-   same on-disk format documented in [`docs/stories/bugs.md`](../../docs/stories/bugs.md).
+   same on-disk format documented in [`docs/stories/bugs.md`](../../../docs/stories/bugs.md).
    The dogfood loop reads + transitions the file the producer wrote;
    the loop is now closed end-to-end.
 
@@ -375,7 +375,7 @@ A fifth concession the flow fixtures take:
 ## File layout
 
 ```
-stories/kitsoki-dev/
+.kitsoki/stories/kitsoki-dev/
 ├── app.yaml                      — the ~50-line dogfood instance
 ├── README.md                     — this file
 ├── scenarios/                    — boot-time warp bases
@@ -398,15 +398,15 @@ needed.
 
 ## See also
 
-- [`../../docs/case-studies/bug-fix.md`](../../docs/case-studies/bug-fix.md)
+- [`../../../docs/case-studies/bug-fix.md`](../../../docs/case-studies/bug-fix.md)
   — the dogfood case study (kitsoki-dev shape, closed-loop
   walkthrough, acceptance).
-- [`../../docs/proposals/notes/dev-story-implementation-contract.md`](../../docs/proposals/notes/dev-story-implementation-contract.md)
+- [`../../../docs/proposals/notes/dev-story-implementation-contract.md`](../../../docs/proposals/notes/dev-story-implementation-contract.md)
   Wave 2 / Phase 3 appendix.
-- [`../dev-story/README.md`](../dev-story/README.md) — the hub this
+- [`../../../stories/dev-story/README.md`](../../../stories/dev-story/README.md) — the hub this
   instance imports.
-- [`../bugfix/README.md`](../bugfix/README.md),
-  [`../pr-refinement/README.md`](../pr-refinement/README.md) — the
+- [`../../../stories/bugfix/README.md`](../../../stories/bugfix/README.md),
+  [`../../../stories/pr-refinement/README.md`](../../../stories/pr-refinement/README.md) — the
   two sub-stories chained inside dev-story.
-- [`../../issues/README.md`](../../issues/README.md) — the bug-file
+- [`../../../issues/README.md`](../../../issues/README.md) — the bug-file
   schema and frontmatter contract.

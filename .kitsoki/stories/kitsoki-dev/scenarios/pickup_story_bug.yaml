@@ -5,7 +5,7 @@
 #
 # Usage (from kitsoki repo root):
 #
-#   kitsoki run stories/kitsoki-dev/app.yaml \
+#   kitsoki run .kitsoki/stories/kitsoki-dev/app.yaml \
 #       --warp scenarios/pickup_story_bug.yaml
 #
 # Then type `bugfix` to dispatch into the bf import. The bf pipeline

@@ -393,4 +393,4 @@ kitsoki run /Users/brad/code/Kitsoki/stories/<story>/app.yaml
 | [`docs/architecture/overview.md`](architecture/overview.md) | Layers, packages, data flow, persistence. |
 | [`docs/stories/authoring.md`](stories/authoring.md) | How to write your own `app.yaml`. |
 | [`docs/architecture/developer-guide.md`](architecture/developer-guide.md) | Build, test, debug, add features. |
-| [`stories/kitsoki-dev/README.md`](../stories/kitsoki-dev/README.md) | Dogfood mode — kitsoki fixing kitsoki. |
+| [`.kitsoki/stories/kitsoki-dev/README.md`](../.kitsoki/stories/kitsoki-dev/README.md) | Dogfood mode — kitsoki fixing kitsoki. |

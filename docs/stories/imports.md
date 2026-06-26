@@ -233,7 +233,7 @@ ultimately resolves to.
 
 ## The blank root that grows — the implicit project root
 
-`kitsoki-dev` (`stories/kitsoki-dev/app.yaml`) is a paragon: ~20 lines of
+`kitsoki-dev` (`.kitsoki/stories/kitsoki-dev/app.yaml`) is a paragon: ~20 lines of
 `imports:` + `host_bindings:` + `world:` that import dev-story under one alias,
 rebind its five `host_interfaces:` to local-files/git handlers, and pin a couple
 of world knobs. Most projects' first root is *exactly* "dev-story with a couple

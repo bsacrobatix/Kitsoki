@@ -82,7 +82,7 @@ EOF
 Then fire the turn:
 
 ```sh
-/tmp/kitsoki-fixed turn stories/kitsoki-dev/app.yaml \
+/tmp/kitsoki-fixed turn .kitsoki/stories/kitsoki-dev/app.yaml \
   --state core.bf.proposing \
   --intent core__bf__accept \
   --world @/tmp/world.json \
@@ -98,7 +98,7 @@ If `next_state` is the room the user expects, the bug is fixed (or never existed
 
 ### Gotchas with `kitsoki turn`
 
-- World keys are fully-qualified after import-folding: a bugfix-story var named `workspace_id` becomes `core__bf__workspace_id` when invoked through `stories/kitsoki-dev/app.yaml`. Get the names wrong and the room's `on_enter:` chain sees defaults.
+- World keys are fully-qualified after import-folding: a bugfix-story var named `workspace_id` becomes `core__bf__workspace_id` when invoked through `.kitsoki/stories/kitsoki-dev/app.yaml`. Get the names wrong and the room's `on_enter:` chain sees defaults.
 - Intent names are also import-folded: `core__bf__accept`, not `accept`.
 - Skipping a required `propose_fix_artifact` (etc.) on the world doesn't fail the intent — it fails some host call inside the target room's `on_enter:` with a confusing template render error. If you see `effect ... render` errors, your world is incomplete.
 - `--input "..."` routes through the real LLM harness (claude-cli) and burns budget. **Use `--intent` for diagnosis.**

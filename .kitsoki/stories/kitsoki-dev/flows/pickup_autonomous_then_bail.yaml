@@ -88,7 +88,7 @@ host_handlers:
         # `core__bf__accept`. As of the §W6.6 #1 fix the dispatcher
         # resolves bare emit names through the state's IntentAliases
         # map, so a live LLM-judge producing the bare `accept` works
-        # end-to-end (covered by stories/kitsoki-dev/flows/
+        # end-to-end (covered by .kitsoki/stories/kitsoki-dev/flows/
         # dogfood_autonomous_smoke.yaml). This fixture keeps the
         # fully-prefixed spelling as regression coverage that
         # already-prefixed names ALSO dispatch correctly.

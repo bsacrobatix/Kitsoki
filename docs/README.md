@@ -88,7 +88,7 @@ live in the sections above.
   prompt-driven agent loop became the multi-room `bugfix` pipeline.
 - **Per-story READMEs** — each story under `../stories/` ships its own
   authoritative reference. Notable ones:
-  [`../stories/kitsoki-dev/README.md`](../stories/kitsoki-dev/README.md)
+  [`../.kitsoki/stories/kitsoki-dev/README.md`](../.kitsoki/stories/kitsoki-dev/README.md)
   (dogfood operator walkthrough),
   [`../stories/bugfix/README.md`](../stories/bugfix/README.md)
   (the bugfix pipeline),

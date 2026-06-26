@@ -193,7 +193,7 @@ When you fix an MCP/runtime bug outside the strict driver, reload the MCP server
 
 ```sh
 make install
-kitsoki mcp-test --stories-dir ./stories --workspace stories/kitsoki-dev
+kitsoki mcp-test --stories-dir ./stories --workspace .kitsoki/stories/kitsoki-dev
 codex mcp list
 ```
 

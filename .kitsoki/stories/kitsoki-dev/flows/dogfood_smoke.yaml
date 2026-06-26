@@ -16,7 +16,7 @@
 # array of {id, title, status, …}); the flow doesn't run the real
 # provider against the on-disk seed bug because flows use stubs only.
 # A real-handler walk against the on-disk seeds is documented in
-# stories/kitsoki-dev/README.md under "Manual walkthrough".
+# .kitsoki/stories/kitsoki-dev/README.md under "Manual walkthrough".
 
 test_kind: flow
 app: ../app.yaml

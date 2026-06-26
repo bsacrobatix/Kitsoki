@@ -1817,7 +1817,7 @@ tour recorder mirrors the JSON shape in
 
 The `ticket` host_interface backed by the GitHub `gh` CLI. It mirrors the
 file-backed `host.local_files.ticket` surface so the dogfood app
-(`stories/kitsoki-dev`) rebinds `iface.ticket → host.gh.ticket` without touching
+(`.kitsoki/stories/kitsoki-dev`) rebinds `iface.ticket → host.gh.ticket` without touching
 room YAML. Auth rides the operator's existing `gh auth` — kitsoki handles no
 tokens. Every op degrades cleanly (a `Result.Error`, not a crash) when `gh` is
 missing/unauthenticated, so rooms route the `on_error:` arc. All shell-outs go
@@ -1838,7 +1838,7 @@ GitHub in tests). Implementation:
 
 **Repo pin.** Every call takes a `repo` arg (`owner/repo`); the dogfood pins it
 to `constructorfabric/Kitsoki` via the `ticket_repo` world key
-(`stories/kitsoki-dev/app.yaml`) so it never silently resolves the operator's
+(`.kitsoki/stories/kitsoki-dev/app.yaml`) so it never silently resolves the operator's
 `origin` (a personal fork). The slug is data, not a Go constant — a fork-of-a-
 fork or downstream project overrides the world key.
 

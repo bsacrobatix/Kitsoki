@@ -93,7 +93,7 @@ assume happens by hand. It reuses, rather than re-invents:
 |---|---|---|
 | [`agent-off-ramp.md`](agent-off-ramp.md) | free-text floor: no-match → `converse`, no advance | **worktree** `review/agent-off-ramp` (shipped, read-only v1); already declared on `dev-story/main` |
 | [`story-conformance-mining.md`](story-conformance-mining.md) | outcome + satisfaction capture (did the user undo it?) | **worktree** `feat/story-conformance-mining` (Phase 1) |
-| dev-story **imports/instance** model (`stories/dev-story/app.yaml` `imports:`, `stories/kitsoki-dev/`) | the project root story that extends dev-story and binds providers | landed; ideas.md "extensible stories" |
+| dev-story **imports/instance** model (`stories/dev-story/app.yaml` `imports:`, `.kitsoki/stories/kitsoki-dev/`) | the project root story that extends dev-story and binds providers | landed; ideas.md "extensible stories" |
 | `tools/session-mining/` + [`session-pattern-mining/`](session-pattern-mining/) | the stateless analyzer (distill → ground → score → emit) | landed (CLI, batch) |
 | [`dev-story-mining`](../../stories/dev-story-mining/) | the mine→map→decide→author→record gate pipeline | landed (manual, in-story) |
 | meta-mode ([`controller.go`](../../internal/metamode/controller.go)) | live YAML edit → tree-snapshot → **auto-reload, world preserved** | landed |
@@ -348,7 +348,7 @@ reconstructable datapoint.
 
 - **Code seams:**
   - Free-form landing: a new room + `root:` in `stories/dev-story/`; inherited
-    by `stories/kitsoki-dev/`.
+    by `.kitsoki/stories/kitsoki-dev/`.
   - Implicit root: the `.kitsoki.yaml` loader synthesizes a dev-story instance
     from the `root:` import + `overrides:` (the same loader that reads
     `story_dirs`); `kitsoki materialize` (new `cmd/kitsoki/materialize.go`)

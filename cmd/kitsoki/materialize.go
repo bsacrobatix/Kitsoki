@@ -31,7 +31,7 @@ func materializeCmd() *cobra.Command {
 loader synthesizes from .kitsoki.yaml 'root:' — to a real, hand-editable
 .kitsoki/stories/<slug>/app.yaml file (rung 2 of the blank-root ladder).
 
-The emitted file is a normal dev-story instance exactly like stories/kitsoki-dev:
+The emitted file is a normal dev-story instance exactly like .kitsoki/stories/kitsoki-dev:
 one import of dev-story, the host_bindings + world from your .kitsoki.yaml
 overrides, and a provenance header. Materialize refuses to overwrite an existing
 file (edit it directly once graduated) and re-loads its own output, aborting and

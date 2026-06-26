@@ -15,7 +15,7 @@ kitsoki run stories/bugfix/app.yaml
 ```
 
 Imported (see Wave 2's `stories/dev-story/app.yaml` or
-`stories/kitsoki-dev/app.yaml`).
+`.kitsoki/stories/kitsoki-dev/app.yaml`).
 
 ## Contract
 

@@ -5,7 +5,7 @@
 #
 # Usage (from kitsoki repo root):
 #
-#   kitsoki run stories/kitsoki-dev/app.yaml \
+#   kitsoki run .kitsoki/stories/kitsoki-dev/app.yaml \
 #       --warp scenarios/autonomous_ready.yaml
 #
 # In this mode, each `*_awaiting_reply` state's on_enter chain:

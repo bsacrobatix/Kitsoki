@@ -28,7 +28,7 @@
 #
 # Usage from kitsoki repo root:
 #
-#   kitsoki run stories/kitsoki-dev/app.yaml \
+#   kitsoki run .kitsoki/stories/kitsoki-dev/app.yaml \
 #       --warp scenarios/verify_autostart.yaml \
 #       --no-implicit-resume \
 #       --trace-pretty /tmp/kitsoki-verify.log
@@ -99,7 +99,7 @@ world:
       - "Type `bugfix`"
       - "Type `continue` repeatedly"
     evidence_paths:
-      - "stories/kitsoki-dev/scenarios/verify_autostart.yaml"
+      - ".kitsoki/stories/kitsoki-dev/scenarios/verify_autostart.yaml"
     involved_components:
       - name: "stories/bugfix/rooms/{reproducing,proposing,testing,validating,done}.yaml"
         reason: "merged rooms — accept arc posts the artifact and advances in one keystroke"

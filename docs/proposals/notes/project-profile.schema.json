@@ -259,7 +259,7 @@
 
     "kitsoki": {
       "type": "object",
-      "description": "How to instantiate dev-story for this project — the generalized, discovered form of stories/kitsoki-dev/ and stories/gears-rust/.",
+      "description": "How to instantiate dev-story for this project — the generalized, discovered form of .kitsoki/stories/kitsoki-dev/ and stories/gears-rust/.",
       "additionalProperties": false,
       "required": ["story", "instance"],
       "properties": {

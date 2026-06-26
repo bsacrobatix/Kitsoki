@@ -9,14 +9,14 @@ items:
   - id: load-bug
     title: Fix imported bf default expression load failure
     priority: 1
-    story: stories/kitsoki-dev/app.yaml
+    story: .kitsoki/stories/kitsoki-dev/app.yaml
     mode: drive
     prompt: "Start from the dogfood hub and reproduce the imported bf default-expression load failure."
     implementation_story: stories/cherny-loop/app.yaml
     implementation_prompt: "Apply the smallest runtime/story fix for the imported bf default-expression load failure."
     verify:
       - kind: story_validate
-        story: stories/kitsoki-dev/app.yaml
+        story: .kitsoki/stories/kitsoki-dev/app.yaml
 
   - id: capability-taxonomy
     title: Design the agent capability effect taxonomy
@@ -103,14 +103,14 @@ items:
   - id: multi-hop-routing
     title: Build multi-hop contextual routing
     priority: 9
-    story: stories/kitsoki-dev/app.yaml
+    story: .kitsoki/stories/kitsoki-dev/app.yaml
     mode: drive
     prompt: "Drive realistic cross-room hub requests and capture the route-plan gaps before implementation."
     implementation_story: stories/cherny-loop/app.yaml
     implementation_prompt: "Implement multi-hop route planning only after the base controls are observable and correct."
     verify:
       - kind: story_validate
-        story: stories/kitsoki-dev/app.yaml
+        story: .kitsoki/stories/kitsoki-dev/app.yaml
 
   - id: story-qa-workflow
     title: Productize story-qa skill workflow

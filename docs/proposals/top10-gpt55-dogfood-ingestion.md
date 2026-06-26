@@ -85,14 +85,14 @@ defaults:
 items:
   - id: load-bug
     title: Fix imported bf default expression load failure
-    story: stories/kitsoki-dev/app.yaml
+    story: .kitsoki/stories/kitsoki-dev/app.yaml
     mode: drive
     prompt: "Start from the dogfood hub and reproduce the project-init/bf load failure."
     implementation_story: stories/cherny-loop/app.yaml
     gate_command: "go test ./internal/app ./internal/orchestrator"
     verify:
       - kind: story_validate
-        story: stories/kitsoki-dev
+        story: .kitsoki/stories/kitsoki-dev
       - kind: command
         cmd: "go test ./internal/app ./internal/orchestrator"
 ```
@@ -106,15 +106,15 @@ example.
 
 | # | Backlog item | Right story entrypoint | How to drive it | Why this entrypoint |
 |---|---|---|---|---|
-| 1 | Fix imported `bf` `|default:` expression load failure | `stories/kitsoki-dev/app.yaml` first, then `stories/dev-story/app.yaml` for the isolated import | Open a Studio MCP session on `kitsoki-dev`; drive the human phrase that reaches bugfix/project-init; confirm the load failure in trace; then use a scoped `cherny-loop` or direct runtime fix run with `profile: codex-native` | The failure appears through the dogfood instance's imported `bf` path, so the first proof should be through the same operator surface that broke |
+| 1 | Fix imported `bf` `|default:` expression load failure | `.kitsoki/stories/kitsoki-dev/app.yaml` first, then `stories/dev-story/app.yaml` for the isolated import | Open a Studio MCP session on `kitsoki-dev`; drive the human phrase that reaches bugfix/project-init; confirm the load failure in trace; then use a scoped `cherny-loop` or direct runtime fix run with `profile: codex-native` | The failure appears through the dogfood instance's imported `bf` path, so the first proof should be through the same operator surface that broke |
 | 2 | Agent capability model: `effect:` taxonomy | `stories/dev-story/app.yaml` design pipeline (`idea`) for the design pass; `stories/cherny-loop/app.yaml` for the runtime slice | Drive a design proposal from the operator hub; once accepted, run cherny-loop with a deterministic Go-test gate over loader/agent packages | This is engine vocabulary, not a workflow story; cherny-loop is the smallest scoped implementation loop with a hard gate |
 | 3 | Toolbox/enforcement wiring | `stories/cherny-loop/app.yaml` | Configure goal + gate around `internal/host` and agent policy tests; drive live with `profile: codex-native`; inspect trace for actual model | This is a bounded runtime implementation after the taxonomy lands |
 | 4 | Strict cassette/toolbox conformance linting | `stories/cherny-loop/app.yaml`, with `stories/model-harness-eval/app.yaml` as the evidence consumer | Implement the lint path with a no-LLM gate; then drive model-harness-eval to prove the conformance result is visible where eval consumers need it | The work is runtime/tracing lint plus an eval-facing consumer |
-| 5 | Project-init hardening | `stories/dev-story/app.yaml` at the init/onboarding rooms; `stories/kitsoki-dev/app.yaml` for full dogfood | Drive project onboarding like a new operator; use `profile: codex-native`; validate with existing init flows after the load bug is fixed | The feature already lives inside dev-story and must be tested as a human onboarding flow |
+| 5 | Project-init hardening | `stories/dev-story/app.yaml` at the init/onboarding rooms; `.kitsoki/stories/kitsoki-dev/app.yaml` for full dogfood | Drive project onboarding like a new operator; use `profile: codex-native`; validate with existing init flows after the load bug is fixed | The feature already lives inside dev-story and must be tested as a human onboarding flow |
 | 6 | Session-mining productization | `stories/dev-story-mining/app.yaml` | Drive transcript/source selection through the mining story; use replay for deterministic mining checks; use live only for interpretation gates with `codex-native` | This story exists specifically to turn transcripts into dev-story gates and coverage |
 | 7 | Resolve `work-decomposition` vs `stories/deliver` | `stories/deliver/app.yaml` | Drive `deliver` over an accepted proposal and watch where it falls short versus the richer work-decomposition proposal; decide whether to document/delete or build `stories/decompose` | The shipped path is `deliver -> fleet -> ship-it`; the dogfood run should test whether it is enough |
-| 8 | Contextual routing operator controls | `stories/kitsoki-dev/app.yaml` and `stories/routing-demo/app.yaml` | Drive ambiguous/free-form operator phrases through the real dogfood hub, then isolate routing behavior in routing-demo with replay fixtures | The value is operator routing behavior; it must be felt in the hub and then reduced to fixtures |
-| 9 | Multi-hop contextual routing | `stories/kitsoki-dev/app.yaml` | Drive realistic cross-room requests from the hub, e.g. "check X in another room and come back"; capture trace gaps, then implement `route_plan` only after base controls are solid | Multi-hop is only meaningful from a persistent hub with real rooms to leave and return to |
+| 8 | Contextual routing operator controls | `.kitsoki/stories/kitsoki-dev/app.yaml` and `stories/routing-demo/app.yaml` | Drive ambiguous/free-form operator phrases through the real dogfood hub, then isolate routing behavior in routing-demo with replay fixtures | The value is operator routing behavior; it must be felt in the hub and then reduced to fixtures |
+| 9 | Multi-hop contextual routing | `.kitsoki/stories/kitsoki-dev/app.yaml` | Drive realistic cross-room requests from the hub, e.g. "check X in another room and come back"; capture trace gaps, then implement `route_plan` only after base controls are solid | Multi-hop is only meaningful from a persistent hub with real rooms to leave and return to |
 | 10 | `story-qa` skill workflow | `stories/dogfood-marathon/app.yaml` for process dogfood; `stories/dev-story/app.yaml` design pipeline for skill proposal refinement | Drive a small QA backlog through dogfood-marathon, using the future skill shape as the inner verification method; file studio/MCP gaps when the driver cannot capture evidence | The goal is a reusable QA process, so the marathon wrapper is the right surface to expose friction and reporting gaps |
 
 ## Sequencing
