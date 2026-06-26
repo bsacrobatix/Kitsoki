@@ -186,19 +186,21 @@ def github_issue_search_query(target: dict) -> str:
     return query
 
 
-def fetch_github_open_bug_count(target: dict) -> dict:
-    query = github_issue_search_query(target)
-    if not query:
-        return {
-            "target": target["id"],
-            "label": target["label"],
-            "status": "error",
-            "error": "missing bug_query search string",
-        }
-    url = "https://api.github.com/search/issues?" + urllib.parse.urlencode({
-        "q": query,
-        "per_page": "1",
-    })
+def github_repo_slug(target: dict) -> str:
+    label = target.get("label", "")
+    if label.count("/") == 1:
+        return label
+    parsed = urllib.parse.urlparse(target.get("repo", ""))
+    path = parsed.path.strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    parts = path.split("/")
+    if len(parts) >= 2:
+        return "/".join(parts[:2])
+    return ""
+
+
+def github_request_json(url: str) -> tuple[Optional[dict], str]:
     request = urllib.request.Request(
         url,
         headers={
@@ -211,36 +213,84 @@ def fetch_github_open_bug_count(target: dict) -> dict:
         request.add_header("Authorization", f"Bearer {token}")
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            return json.loads(response.read().decode("utf-8")), ""
     except urllib.error.HTTPError as exc:
-        return {
-            "target": target["id"],
-            "label": target["label"],
-            "status": "error",
-            "query": query,
-            "api_url": url,
-            "error": f"GitHub HTTP {exc.code}: {exc.reason}",
-        }
+        return None, f"GitHub HTTP {exc.code}: {exc.reason}"
     except (urllib.error.URLError, TimeoutError) as exc:
+        return None, str(exc)
+
+
+def fetch_github_target_proof(target: dict, selection_contract: dict) -> dict:
+    query = github_issue_search_query(target)
+    floor = int(target.get("open_bug_floor", selection_contract.get("open_bug_floor", 0)))
+    stargazer_floor = int(target.get("stargazer_floor", selection_contract.get("stargazer_floor", 0)))
+    repo_slug = github_repo_slug(target)
+    if not query:
+        return {
+            "target": target["id"],
+            "label": target["label"],
+            "status": "error",
+            "error": "missing bug_query search string",
+        }
+    issue_url = "https://api.github.com/search/issues?" + urllib.parse.urlencode({
+        "q": query,
+        "per_page": "1",
+    })
+    issue_payload, issue_error = github_request_json(issue_url)
+    if issue_error:
         return {
             "target": target["id"],
             "label": target["label"],
             "status": "error",
             "query": query,
-            "api_url": url,
-            "error": str(exc),
+            "api_url": issue_url,
+            "error": issue_error,
         }
-    count = int(payload.get("total_count", 0))
-    floor = int(target.get("open_bug_floor", 0))
+    if not repo_slug:
+        return {
+            "target": target["id"],
+            "label": target["label"],
+            "status": "error",
+            "query": query,
+            "api_url": issue_url,
+            "error": "missing GitHub owner/repo slug",
+        }
+    repo_url = f"https://api.github.com/repos/{repo_slug}"
+    repo_payload, repo_error = github_request_json(repo_url)
+    if repo_error:
+        return {
+            "target": target["id"],
+            "label": target["label"],
+            "status": "error",
+            "query": query,
+            "api_url": issue_url,
+            "repo_api_url": repo_url,
+            "error": repo_error,
+        }
+    count = int(issue_payload.get("total_count", 0))
+    stargazers = int(repo_payload.get("stargazers_count", 0))
+    forks = int(repo_payload.get("forks_count", 0))
+    watchers = int(repo_payload.get("subscribers_count", repo_payload.get("watchers_count", 0)))
+    license_info = repo_payload.get("license") or {}
+    bug_floor_ok = count >= floor
+    popularity_ok = stargazers >= stargazer_floor
     return {
         "target": target["id"],
         "label": target["label"],
-        "status": "pass" if count >= floor else "fail",
+        "status": "pass" if bug_floor_ok and popularity_ok else "fail",
         "query": query,
-        "api_url": url,
+        "api_url": issue_url,
+        "repo_api_url": repo_url,
         "bug_query": target.get("bug_query", ""),
         "open_bug_count": count,
         "open_bug_floor": floor,
+        "stargazers_count": stargazers,
+        "stargazer_floor": stargazer_floor,
+        "forks_count": forks,
+        "watchers_count": watchers,
+        "license": license_info.get("spdx_id") or license_info.get("key") or "",
+        "popularity_ok": popularity_ok,
+        "bug_floor_ok": bug_floor_ok,
         "checked_at": now_utc(),
     }
 
@@ -249,7 +299,7 @@ def refresh_github_target_proofs(github_targets: dict, seed: str) -> dict:
     proof_id = f"{slug_timestamp()}-github-target-proof-{seed}"
     proof_dir = TARGET_PROOF_ROOT / proof_id
     proof_dir.mkdir(parents=True, exist_ok=False)
-    checks = [fetch_github_open_bug_count(target) for target in github_targets["targets"]]
+    checks = [fetch_github_target_proof(target, github_targets["selection_contract"]) for target in github_targets["targets"]]
     passed = sum(1 for check in checks if check.get("status") == "pass")
     failed = sum(1 for check in checks if check.get("status") == "fail")
     errors = sum(1 for check in checks if check.get("status") == "error")
@@ -263,6 +313,7 @@ def refresh_github_target_proofs(github_targets: dict, seed: str) -> dict:
             "failed": failed,
             "errors": errors,
             "open_bug_floor": github_targets["selection_contract"].get("open_bug_floor", 100),
+            "stargazer_floor": github_targets["selection_contract"].get("stargazer_floor", 0),
         },
         "checks": checks,
         "artifacts": {
@@ -282,6 +333,8 @@ def refresh_github_target_proofs(github_targets: dict, seed: str) -> dict:
         "failed": failed,
         "errors": errors,
         "target_count": len(checks),
+        "open_bug_floor": proof["summary"]["open_bug_floor"],
+        "stargazer_floor": proof["summary"]["stargazer_floor"],
     }
 
 
@@ -292,6 +345,7 @@ def render_target_proof(proof: dict) -> str:
         f"- Proof: `{proof['proof_id']}`",
         f"- Created: {proof['created_at']}",
         f"- Open bug floor: {proof['summary']['open_bug_floor']}",
+        f"- Stargazer floor: {proof['summary'].get('stargazer_floor', 'unknown')}",
         f"- Passed: {proof['summary']['passed']} / {proof['summary']['targets']}",
         f"- Failed: {proof['summary']['failed']}",
         f"- Errors: {proof['summary']['errors']}",
@@ -305,6 +359,10 @@ def render_target_proof(proof: dict) -> str:
             "",
             f"- Status: {check['status']}",
             f"- Open bugs: {check.get('open_bug_count', 'unknown')} / floor {check.get('open_bug_floor', 'unknown')}",
+            f"- Stars: {check.get('stargazers_count', 'unknown')} / floor {check.get('stargazer_floor', 'unknown')}",
+            f"- Forks: {check.get('forks_count', 'unknown')}",
+            f"- Watchers: {check.get('watchers_count', 'unknown')}",
+            f"- License: {check.get('license', '')}",
             f"- Query: `{check.get('query', '')}`",
             f"- Checked: {check.get('checked_at', '')}",
             f"- Error: {check.get('error', '')}",
@@ -341,6 +399,13 @@ def merge_target_proofs(github_targets: dict, target_proof: dict) -> dict:
                 "status": check.get("status", "error"),
                 "open_bug_count": check.get("open_bug_count"),
                 "open_bug_floor": check.get("open_bug_floor", target.get("open_bug_floor")),
+                "stargazers_count": check.get("stargazers_count"),
+                "stargazer_floor": check.get("stargazer_floor", target.get("stargazer_floor")),
+                "forks_count": check.get("forks_count"),
+                "watchers_count": check.get("watchers_count"),
+                "license": check.get("license", ""),
+                "popularity_ok": check.get("popularity_ok"),
+                "bug_floor_ok": check.get("bug_floor_ok"),
                 "checked_at": check.get("checked_at", target_proof.get("created_at", "")),
                 "query": check.get("query", ""),
                 "source": target_proof.get("proof_id", ""),
@@ -2262,10 +2327,30 @@ def validate_matrix_bundle(matrix_dir: Path) -> dict:
                 f"{target.get('selection_proof', {}).get('open_bug_floor', target.get('open_bug_floor', 'unknown'))}"
             )
             for index, target in enumerate(matrix.get("targets", []), start=1)
-            if target.get("selection_proof", {}).get("status") == "fail"
+            if (
+                target.get("selection_proof", {}).get("bug_floor_ok") is False
+                or (
+                    "bug_floor_ok" not in target.get("selection_proof", {})
+                    and target.get("selection_proof", {}).get("status") == "fail"
+                )
+            )
         ]
         if targets_below_floor:
             add_validation_issue(issues, "error", "matrix-target-bug-floor", "GitHub proof shows targets below the open-bug floor", "; ".join(targets_below_floor))
+        targets_below_popularity_floor = [
+            (
+                f"{target.get('id', f'target-{index}')}: "
+                f"{target.get('selection_proof', {}).get('stargazers_count', 'unknown')} < "
+                f"{target.get('selection_proof', {}).get('stargazer_floor', matrix.get('selection_contract', {}).get('stargazer_floor', 'unknown'))}"
+            )
+            for index, target in enumerate(matrix.get("targets", []), start=1)
+            if (
+                target.get("selection_proof")
+                and target.get("selection_proof", {}).get("popularity_ok") is False
+            )
+        ]
+        if targets_below_popularity_floor:
+            add_validation_issue(issues, "error", "matrix-target-popularity-floor", "GitHub proof shows targets below the popularity floor", "; ".join(targets_below_popularity_floor))
         targets_with_proof_errors = [
             f"{target.get('id', f'target-{index}')}: {target.get('selection_proof', {}).get('error', '')}"
             for index, target in enumerate(matrix.get("targets", []), start=1)
@@ -2393,6 +2478,7 @@ def render_matrix_summary(matrix: dict) -> str:
         "",
         f"- Host: {matrix['selection_contract']['host']}",
         f"- Open bug floor: {matrix['selection_contract']['open_bug_floor']}",
+        f"- Stargazer floor: {matrix['selection_contract'].get('stargazer_floor', 'not set')}",
         f"- Refresh: {matrix['selection_contract']['refresh_note']}",
         f"- Target proof: {proof.get('proof_id', 'not refreshed')}",
         f"- Target proof checked: {proof.get('created_at', '')}",
@@ -2406,7 +2492,10 @@ def render_matrix_summary(matrix: dict) -> str:
             proof_line = (
                 f"{selection_proof.get('status')} - "
                 f"{selection_proof.get('open_bug_count')} open bugs "
-                f"(floor {selection_proof.get('open_bug_floor')}, checked {selection_proof.get('checked_at')})"
+                f"(floor {selection_proof.get('open_bug_floor')}), "
+                f"{selection_proof.get('stargazers_count', 'unknown')} stars "
+                f"(floor {selection_proof.get('stargazer_floor', matrix['selection_contract'].get('stargazer_floor', 'unknown'))}, "
+                f"checked {selection_proof.get('checked_at')})"
             )
         else:
             proof_line = "not refreshed"
@@ -2450,7 +2539,8 @@ def render_matrix_deck(matrix: dict) -> dict:
     target_lines = [
         (
             f"{target['label']} - {target['stack']} - "
-            f"{target.get('selection_proof', {}).get('open_bug_count', 'unrefreshed')} bugs / floor {target['open_bug_floor']}"
+            f"{target.get('selection_proof', {}).get('open_bug_count', 'unrefreshed')} bugs / floor {target['open_bug_floor']} - "
+            f"{target.get('selection_proof', {}).get('stargazers_count', 'unrefreshed')} stars / floor {matrix['selection_contract'].get('stargazer_floor', 'n/a')}"
         )
         for target in matrix["targets"]
     ]
@@ -2462,6 +2552,8 @@ def render_matrix_deck(matrix: dict) -> dict:
         f"Passed: {proof_summary.get('passed', 0)} / {proof_summary.get('targets', 0)}",
         f"Failed: {proof_summary.get('failed', 0)}",
         f"Errors: {proof_summary.get('errors', 0)}",
+        f"Bug floor: {proof_summary.get('open_bug_floor', matrix['selection_contract'].get('open_bug_floor', 'n/a'))}",
+        f"Star floor: {proof_summary.get('stargazer_floor', matrix['selection_contract'].get('stargazer_floor', 'n/a'))}",
     ]
     assignment_lines = [
         f"{assignment['target']['label']} / {assignment['persona']['label']}"
@@ -2500,9 +2592,9 @@ def render_matrix_deck(matrix: dict) -> dict:
             {
                 "type": "narrative",
                 "eyebrow": "Target proof",
-                "title": "Open bug count evidence",
+                "title": "Bug corpus and popularity evidence",
                 "body": "\n".join(proof_lines),
-                "narration": "Current GitHub proof is optional for no-LLM planning, but required before claiming the live matrix satisfies the open-bug floor.",
+                "narration": "Current GitHub proof is optional for no-LLM planning, but required before claiming the live matrix satisfies the bug-count and popularity floors.",
             },
             {
                 "type": "narrative",

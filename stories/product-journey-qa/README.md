@@ -7,7 +7,7 @@ It is intentionally no-LLM:
 
 - `refresh_targets` calls `tools/product-journey/run.py
   --refresh-github-targets --json-output` to write a GitHub target-proof
-  artifact for the 100-open-bug matrix contract.
+  artifact for the 100-open-bug and popularity matrix contract.
 - `matrix` calls `tools/product-journey/run.py --emit-matrix --json-output` to
   create the 10-repo GitHub assignment plan. Pass `target_proof_file=...` after
   `refresh_targets` when the matrix should embed current GitHub proof.

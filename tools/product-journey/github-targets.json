@@ -4,8 +4,9 @@
     "host": "github.com",
     "license": "open-source",
     "popularity": "heavily used public project",
+    "stargazer_floor": 10000,
     "open_bug_floor": 100,
-    "refresh_note": "Before a live scored sweep, refresh open_bug_count with the GitHub API or issue search for the target bug_query."
+    "refresh_note": "Before a live scored sweep, refresh open_bug_count and repository popularity metadata with the GitHub API."
   },
   "targets": [
     {
@@ -29,14 +30,14 @@
       "notes": "Large Go monorepo with operational personas, heavy test surfaces, and issue labels."
     },
     {
-      "id": "home-assistant",
-      "label": "home-assistant/core",
-      "repo": "https://github.com/home-assistant/core",
-      "stack": "python",
-      "bug_query": "https://github.com/home-assistant/core/issues?q=is%3Aissue+state%3Aopen+label%3Abug",
+      "id": "nextjs",
+      "label": "vercel/next.js",
+      "repo": "https://github.com/vercel/next.js",
+      "stack": "typescript",
+      "bug_query": "https://github.com/vercel/next.js/issues?q=is%3Aissue+state%3Aopen+label%3Abug",
       "open_bug_floor": 100,
       "status": "candidate",
-      "notes": "Large automation project with device integrations, operator workflows, and a bug-labeled issue queue."
+      "notes": "Large web framework with a visible bug-labeled issue queue, frontend workflows, and broad contributor usage."
     },
     {
       "id": "tensorflow",

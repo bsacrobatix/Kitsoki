@@ -30,7 +30,7 @@ states:
               hint: "prove matrix, run, review, validation, rollup, and decks in one no-LLM loop"
               intent: dogfood_smoke
             - label: "refresh_targets seed=..."
-              hint: "write a GitHub target-proof artifact for the 100-open-bug floor"
+              hint: "write a GitHub target-proof artifact for bug-count and popularity floors"
               intent: refresh_targets
             - label: "look"
               intent: look

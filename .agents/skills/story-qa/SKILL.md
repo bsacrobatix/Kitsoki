@@ -92,10 +92,10 @@ proof only; it does not replace live visual MCP or cassette evidence.
 
 Use `--matrix-personas all` when every persona should run against every target.
 The matrix is a no-LLM assignment plan; before a live scored sweep, refresh each
-target's current open bug count from its `bug_query` with
+target's current open bug count and repository popularity metadata with
 `--refresh-github-targets` and feed the proof into `--emit-matrix`. Validation
 warns when proof is missing and fails when proof shows a target below the
-100-open-bug floor.
+100-open-bug floor or configured stargazer floor.
 Launch an assignment run with the target `id` and persona from that matrix:
 
 ```sh
