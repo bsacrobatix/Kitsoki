@@ -36,6 +36,18 @@ host_handlers:
             title: Onboarding hid next command
             scenario: project-onboarding
             deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+      seed_product_journey_demo:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            status: seeded
+            run_dir: .artifacts/product-journey/run-123
+            deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+            evidence_added: 6
+            findings_added: 4
+            present_evidence_count: 7
+            findings_count: 5
 
 turns:
   - intent:
@@ -93,6 +105,15 @@ turns:
     expect_host_calls:
       - handler: host.run
         args: { call: record_product_journey_finding }
+
+  - intent: { name: seed_demo, slots: {} }
+    expect_state: run_created
+    expect_world:
+      status: demo_seeded
+      deck_path: .artifacts/product-journey/run-123/deck.slidey.json
+    expect_host_calls:
+      - handler: host.run
+        args: { call: seed_product_journey_demo }
 
   - intent: { name: accept, slots: {} }
     expect_state: done

@@ -58,3 +58,6 @@ journey summary, metrics, and Slidey deck.
 
 Use `tools/product-journey/run.py --record-finding` to summarize strengths,
 weaknesses, issues found, and fixes for the final deck.
+
+Use `tools/product-journey/run.py --seed-demo-evidence` only for deterministic
+no-LLM deck-shape dogfood before a live visual MCP run.

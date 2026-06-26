@@ -27,6 +27,9 @@ states:
             - label: "record finding_kind=... title=... summary=..."
               hint: "record a strength, weakness, issue, or fix for the review deck"
               intent: record
+            - label: "seed_demo"
+              hint: "populate representative evidence and findings for deck review"
+              intent: seed_demo
             - label: "accept"
               hint: "finish with the current run bundle"
               intent: accept
@@ -110,6 +113,28 @@ states:
               on_error: run_created
             - set:
                 status: "finding_recorded"
+      seed_demo:
+        - target: run_created
+          effects:
+            - set:
+                status: "seeding_demo"
+            - invoke: host.run
+              id: seed_product_journey_demo
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --seed-demo-evidence
+                  - --json-output
+                  - --run-dir
+                  - "{{ world.run_dir }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                deck_path: "stdout_json.deck_path"
+              on_error: run_created
+            - set:
+                status: "demo_seeded"
       accept:
         - target: done
           effects:

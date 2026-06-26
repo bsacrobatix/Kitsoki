@@ -475,6 +475,49 @@ def record_finding(
     update_derived_artifacts(run_dir, publish_deck=publish_deck)
 
 
+def seed_demo_evidence(run_dir: Path, publish_deck: Optional[Path]) -> dict:
+    demo_evidence = [
+        ("product-discovery", "browser_screenshot", "screens/product-discovery.png", "captured", "demo visual MCP screenshot placeholder"),
+        ("project-onboarding", "session_trace", "traces/onboarding.jsonl", "captured", "demo Studio MCP session trace placeholder"),
+        ("bugfix", "key_interaction_video", "media/bugfix-key-interaction.mp4", "captured", "demo key interaction video placeholder"),
+        ("prd-design", "design_artifact", "artifacts/design.md", "captured", "demo design artifact placeholder"),
+        ("feature-implementation", "targeted_test_result", "oracle-results/feature-tests.json", "captured", "demo targeted test result placeholder"),
+        ("evidence-backed-product-bug", "bug_report_markdown", "bug-reports/product-issue.md", "captured", "demo product bug report placeholder"),
+    ]
+    for scenario, kind, path, status, notes in demo_evidence:
+        attach_evidence(run_dir, scenario, kind, path, status, notes, publish_deck=None)
+
+    demo_findings = [
+        ("strength", "Scenario contract is explicit", "The bundle names persona, scenario, expected MCP tools, evidence slots, and success criteria before live execution.", "product-discovery", "low", "screens/product-discovery.png", "observed"),
+        ("weakness", "Onboarding still needs live visual proof", "The demo bundle shows the evidence contract, but a real visual MCP capture is still required to validate onboarding clarity.", "project-onboarding", "medium", "traces/onboarding.jsonl", "open"),
+        ("issue", "Operator handoff can lose context", "A persona should not need private repo knowledge to pick the next Kitsoki story after onboarding.", "project-onboarding", "medium", "bug-reports/product-issue.md", "open"),
+        ("fix", "Review deck now summarizes evidence and findings", "The product-journey runner regenerates metrics and Slidey scenes when evidence or findings are attached.", "evidence-backed-product-bug", "low", "deck.slidey.json", "fixed"),
+    ]
+    findings_path = run_dir / "findings.json"
+    existing_titles = set()
+    if findings_path.exists():
+        existing_titles = {item.get("title", "") for item in read_json(findings_path).get("items", [])}
+    findings_added = 0
+    for kind, title, summary, scenario, severity, evidence_path, status in demo_findings:
+        if title in existing_titles:
+            continue
+        record_finding(run_dir, kind, title, summary, scenario, severity, evidence_path, status, publish_deck=None)
+        findings_added += 1
+
+    update_derived_artifacts(run_dir, publish_deck=publish_deck)
+    metrics = read_json(run_dir / "metrics.json")
+    return {
+        "status": "seeded",
+        "run_dir": str(run_dir),
+        "deck_path": str(run_dir / "deck.slidey.json"),
+        "evidence_added": len(demo_evidence),
+        "findings_added": findings_added,
+        "present_evidence_count": metrics.get("present_evidence_count", 0),
+        "findings_count": metrics.get("findings_count", 0),
+        "published_deck_path": str(publish_deck) if publish_deck is not None else "",
+    }
+
+
 def render_journey(run_json: dict) -> str:
     lines = [
         "# Product journey dry run",
@@ -780,6 +823,7 @@ def main() -> None:
     parser.add_argument("--emit-run", action="store_true", help="Write a no-LLM run artifact bundle and Slidey deck")
     parser.add_argument("--attach-evidence", action="store_true", help="Attach one evidence artifact to an existing run bundle")
     parser.add_argument("--record-finding", action="store_true", help="Record one strength, weakness, issue, or fix in an existing run bundle")
+    parser.add_argument("--seed-demo-evidence", action="store_true", help="Attach deterministic demo evidence and findings to an existing run bundle")
     parser.add_argument("--run-dir", default="", help="Existing .artifacts/product-journey/<run-id> directory")
     parser.add_argument("--scenario", default="", help="Scenario id for --attach-evidence")
     parser.add_argument("--evidence-kind", default="", help="Evidence kind for --attach-evidence")
@@ -817,6 +861,26 @@ def main() -> None:
     catalog = load_catalog(CATALOG)
     personas = load_personas(PERSONAS)
     scenarios = load_scenarios(SCENARIOS)
+
+    if args.seed_demo_evidence:
+        if not args.run_dir:
+            raise SystemExit("--seed-demo-evidence requires --run-dir")
+        publish_deck = DEFAULT_DECK if args.publish_deck else None
+        run_dir = run_dir_from_arg(args.run_dir)
+        seeded = seed_demo_evidence(run_dir, publish_deck)
+        if args.json_output:
+            print(json.dumps(seeded, sort_keys=True))
+            append_log(f"Seeded demo evidence for {run_dir.name}")
+            return
+        print("Seeded demo evidence")
+        print(f"Artifacts: {run_dir}")
+        print(f"Deck: {run_dir / 'deck.slidey.json'}")
+        print(f"Evidence present: {seeded['present_evidence_count']}")
+        print(f"Findings: {seeded['findings_count']}")
+        if publish_deck is not None:
+            print(f"Published deck: {publish_deck}")
+        append_log(f"Seeded demo evidence for {run_dir.name}")
+        return
 
     if args.record_finding:
         missing = []

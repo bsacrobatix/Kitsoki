@@ -63,6 +63,16 @@ python3 tools/product-journey/run.py --record-finding \
 
 Finding kinds are `strength`, `weakness`, `issue`, and `fix`.
 
+For a no-LLM dogfood/demo bundle with representative evidence and findings:
+
+```sh
+python3 tools/product-journey/run.py --seed-demo-evidence \
+  --run-dir .artifacts/product-journey/<run-id>
+```
+
+This is not a substitute for real visual MCP capture, but it proves the report
+aggregation and Slidey deck shape before a live run.
+
 For `gears-rust`, this prints the existing external-bakeoff readiness signal and
 the local-only verification command. If you have a local checkout, it also
 emits the exact environment-required command for validation:

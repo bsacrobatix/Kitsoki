@@ -9,6 +9,8 @@ It is intentionally no-LLM:
 - `attach` calls `tools/product-journey/run.py --attach-evidence --json-output`.
 - `record` calls `tools/product-journey/run.py --record-finding --json-output`
   for strengths, weaknesses, issues, and fixes.
+- `seed_demo` calls `tools/product-journey/run.py --seed-demo-evidence
+  --json-output` to populate a no-LLM review bundle.
 - Flow fixtures stub `host.run`, so automated tests never call a live model or
   external service.
 

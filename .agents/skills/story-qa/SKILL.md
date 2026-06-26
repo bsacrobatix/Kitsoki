@@ -86,3 +86,6 @@ python3 tools/product-journey/run.py --attach-evidence \
 
 Use `--record-finding` on the same runner to summarize strengths, weaknesses,
 issues found, and fixes for the Slidey review deck.
+
+Use `--seed-demo-evidence` only for deterministic no-LLM deck-shape dogfood
+before a live visual MCP run.

@@ -19,5 +19,9 @@
     "required": ["id", "label", "stage", "task", "primary_story", "required_mcp", "evidence", "success_criteria"]
   },
   "evidence_statuses": ["missing", "captured", "validated", "rejected"],
-  "finding_kinds": ["strength", "weakness", "issue", "fix"]
+  "finding_kinds": ["strength", "weakness", "issue", "fix"],
+  "demo_seed": {
+    "evidence_items": 6,
+    "findings": 4
+  }
 }

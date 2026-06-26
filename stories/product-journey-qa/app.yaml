@@ -55,6 +55,10 @@ intents:
       scenario: { type: string, required: false }
       severity: { type: string, required: false }
       evidence_path: { type: string, required: false }
+  seed_demo:
+    description: "Attach deterministic demo evidence and findings to the current run."
+    examples: ["seed demo evidence", "dogfood the demo bundle", "populate demo"]
+    priority: 78
   accept:
     description: "Accept the current report bundle and finish."
     examples: ["accept", "done", "looks good"]
@@ -69,7 +73,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, attach, record, accept, quit, look]
+  intents: [start, attach, record, seed_demo, accept, quit, look]
 
 root: idle
 
