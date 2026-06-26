@@ -3,6 +3,7 @@
   "meta": {
     "mode": "pitch",
     "title": "Kitsoki",
+    "theme": "rose-pine-moon",
     "ticket": "",
     "phase": "demo",
     "resolution": {
@@ -18,7 +19,7 @@
     {
       "type": "title",
       "title": "Kitsoki",
-      "subtitle": "A conversational workflow engine with deterministic flow"
+      "subtitle": "A conversational workflow engine built for reliable delivery"
     },
     {
       "type": "narrative",
@@ -260,7 +261,7 @@
       "type": "narrative",
       "eyebrow": "Cat Wrangling",
       "lede": "Orchestrating agents without structure is exactly this.",
-      "body": "Each one follows a different interpretation. One invents extra steps. Another skips the gate. Kitsoki ends the wrangling: the runtime owns the plan, agents get bounded jobs, and every path can be tested from day one.",
+      "body": "Agents drift without shared structure. One invents extra steps. Another skips the gate. Kitsoki ends this by owning the plan in the runtime, assigning bounded jobs, and testing every path from day one.",
       "hold": 195,
       "narration": "Orchestrating agents without structure is cat wrangling. Kitsoki ends the wrangling by keeping the runtime in charge."
     },
@@ -483,7 +484,7 @@
       "type": "narrative",
       "eyebrow": "Loop engineering, generalized",
       "body": "Kitsoki is the same idea \u2014 a graph of these loops.",
-      "lede": "A Cherny loop solves one goal with one gate and one budget. Kitsoki makes every phase its own gated, budgeted loop and composes them \u2014 so the approach is more structured, scalable, repeatable, composable, extendable, traceable, and deterministic wherever a script can replace the model.",
+      "lede": "A Cherny loop solves one goal with one gate and one budget. Kitsoki turns each phase into a separate gated loop, then composes those loops into a durable workflow.",
       "hold": 210,
       "narration": "Kitsoki generalizes that loop: every phase gets a gate and budget, then composes into a graph."
     },
@@ -1577,7 +1578,7 @@
       "type": "narrative",
       "eyebrow": "Semantic routing",
       "body": "Three layers route most turns without the LLM.",
-      "lede": "Synonyms catch verbatim aliases. Slot templates catch common shapes. The LLM is called only when both layers miss \u2014 and 78% of turns don't reach it.",
+      "lede": "Synonyms catch common commands. Slot templates catch common shape patterns. The LLM is called only if both miss \u2014 and 78% of turns still don't reach it.",
       "hold": 195,
       "narration": "Three semantic layers route most turns. Synonyms first, slot templates next, the LLM only as fallback."
     },
@@ -1694,7 +1695,7 @@
       "type": "narrative",
       "eyebrow": "The dev loop",
       "body": "Author locally. Replay. Deploy.",
-      "lede": "Edit the YAML and the running machine hot-reloads. Every turn replays byte-for-byte with no LLM call \u2014 the spec is its own regression test. Attach to GitHub Issues or Jira with one config change.",
+      "lede": "Edit the YAML and the running machine hot-reloads. Each turn replays byte-for-byte without an LLM call \u2014 the spec itself is the regression test. Attach it to GitHub Issues or Jira with one config change.",
       "hold": 180,
       "narration": "Author locally. Edits hot-reload, turns replay without the LLM, then attach GitHub or Jira."
     },
@@ -1745,7 +1746,7 @@
       "type": "stat",
       "value": "78%",
       "label": "of turns route deterministically \u2014 without calling the LLM.",
-      "detail": "Measured across the cloak, oregon-trail and dev-story stories.",
+      "detail": "Measured across the cloak, oregon-trail, and dev-story stories.",
       "hold": 150,
       "narration": "Across our stories, seventy-eight percent of turns route without an LLM call."
     },
