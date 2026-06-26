@@ -1,0 +1,95 @@
+# gears_artifact_results — private/local repo path for repo-history training.
+#
+# Covers the no-cost product loop for a heavy local repo:
+# idle -> configure -> prepare (bench.py verify --repo-dir) -> running ->
+# scoring (bench.py summarize --results .artifacts/external-bakeoff/results) ->
+# reporting. Host calls are stubbed; the real gears-rust RED/GREEN proof is
+# covered by the gated gearsbakeoff test.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  project: gears-rust
+  repo_dir: /Users/brad/code/gears-rust
+  results_dir: ../../../.artifacts/external-bakeoff/results
+  bugs: [bug1]
+  candidates: [opus-4.8]
+
+host_handlers:
+  host.run:
+    by_call:
+      verify_oracles_local:
+        data:
+          ok: true
+          exit_code: 0
+          stdout: |
+            [bench] gears-rust/bug1 oracle=fail suite=None -> failed
+            [bench] gears-rust/bug1 oracle=pass suite=None -> solved
+            OK  bug1: baseline=RED (want RED), real-fix=GREEN (want GREEN)
+      summarize:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            project: gears-rust
+            cells:
+              - project: gears-rust
+                bug: bug1
+                candidate: opus-4.8
+                treatment: kitsoki
+                outcome:
+                  oracle_pass: true
+                  oracle_status: pass
+                  build_pass: null
+                  suite_pass: null
+                  quality: solved
+                  adjudicated: false
+                  adjudication_note: ""
+                compliance:
+                  rate: null
+                  note: "not measured by external grader"
+                metrics:
+                  cost_usd: null
+                  total_tokens: 1234
+                  wall_time_s: null
+                  guidance_turns: 0
+                  agent_calls: 3
+                trace_found: false
+                notes: "synthetic no-LLM scoring fixture"
+            rollup:
+              by_candidate:
+                opus-4.8:
+                  n: 1
+                  solved: 1
+                  partial: 0
+                  failed: 0
+                  solve_rate: 1.0
+            summary_path: .artifacts/external-bakeoff/results/summary.json
+
+turns:
+  - intent: { name: start, slots: {} }
+    expect_state: configure
+    expect_world:
+      cells_total: 1
+
+  - intent: { name: accept, slots: {} }
+    expect_state: prepare
+    expect_world:
+      verify_log: |
+        [bench] gears-rust/bug1 oracle=fail suite=None -> failed
+        [bench] gears-rust/bug1 oracle=pass suite=None -> solved
+        OK  bug1: baseline=RED (want RED), real-fix=GREEN (want GREEN)
+
+  - intent: { name: accept, slots: {} }
+    expect_state: running
+    expect_world:
+      oracles_armed: true
+
+  - intent: { name: accept, slots: {} }
+    expect_state: reporting
+    expect_world:
+      summary_path: .artifacts/external-bakeoff/results/summary.json
+      report_markdown: "External-repo bake-off · project gears-rust · 1 cells rolled up by candidate."
+
+expect_no_errors: true

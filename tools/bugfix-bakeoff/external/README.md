@@ -160,7 +160,11 @@ instance it drives is [`stories/bench-bugfix`](../../../stories/bench-bugfix).
 (`bench.py cost --trace …` → `cost_usd` for metered providers, token usage for
 subscription auth). Pipeline thread files are written under
 `.artifacts/external-bakeoff/threads/`, alongside the other per-cell cache/log output,
-so live runs do not create bare `bug*` files in the project root. The
+and results land in `.artifacts/external-bakeoff/results/cells/`. The
+`repo-bakeoff` story's default `results_dir` points at that artifact directory,
+so its deterministic scoring/reporting rooms summarize live-driver output
+without copying generated files into the repo. Live runs do not create bare
+`bug*` files in the project root. The
 load-bearing knobs `drive_cell.sh` sets (each learned from a failure) are tabulated in the
 [`external-repo-bakeoff` skill](../../../.agents/skills/external-repo-bakeoff/SKILL.md);
 the key one is `workspace_id:""` so the implementer edits the prepared worktree

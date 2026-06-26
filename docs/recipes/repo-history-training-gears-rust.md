@@ -114,6 +114,30 @@ tools/bugfix-bakeoff/external/escalate.sh \
 
 Use `--dry-run` first to review the cost-bearing plan.
 
+## Score And Report
+
+`drive_cell.sh --score` writes cell verdicts to
+`.artifacts/external-bakeoff/results/cells/`. The `repo-bakeoff` story's
+`results_dir` defaults to that same artifact directory, relative to the external
+harness directory:
+
+```yaml
+results_dir: ../../../.artifacts/external-bakeoff/results
+```
+
+After one or more cells have run, advance the story from `running` to `scoring`.
+That calls:
+
+```sh
+python3 bench.py summarize \
+  --project gears-rust \
+  --results ../../../.artifacts/external-bakeoff/results
+```
+
+The summary is deterministic and free. It rolls up whatever live-driver cell JSON
+exists into solved / partial / failed counts and stores
+`.artifacts/external-bakeoff/results/summary.json`.
+
 ## Outputs
 
 The external harness writes generated artifacts under:

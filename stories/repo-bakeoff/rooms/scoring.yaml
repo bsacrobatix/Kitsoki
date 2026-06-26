@@ -1,18 +1,19 @@
 # scoring — DETERMINISTIC (no LLM). Roll up the per-cell verdicts the harness
-# wrote (results/cells/*.json) into a by-candidate summary via host.run →
+# wrote (world.results_dir/cells/*.json) into a by-candidate summary via host.run →
 # `bench.py summarize` (free). We call the script; we never reimplement scoring.
 # `once: true` keyed on summary → reload-safe.
 states:
   scoring:
     description: "Rolling up the cell verdicts into a summary (host.run → bench.py summarize)."
-    relevant_world: [summary, summary_path, harness_dir]
+    relevant_world: [summary, summary_path, harness_dir, results_dir]
     view:
       - heading: "Bake-off · scoring"
       - kv:
           pairs:
             Summary: '{{ world.summary_path|default:"(summarizing…)" }}'
+            Results: '{{ world.results_dir }}'
             Cells:   "{{ world.summary.cells|length }}"
-      - prose: "bench.py summarize rolls the per-cell verdicts up by candidate (solved / partial / failed + solve_rate). Deterministic — no LLM."
+      - prose: "bench.py summarize rolls the per-cell verdicts from the live-driver artifact directory up by candidate (solved / partial / failed + solve_rate). Deterministic — no LLM."
     on_enter:
       - invoke: host.run
         id: summarize
@@ -24,6 +25,8 @@ states:
             - "summarize"
             - "--project"
             - "{{ world.project }}"
+            - "--results"
+            - "{{ world.results_dir }}"
           cwd: "{{ world.harness_dir }}"
         bind:
           summary:      stdout_json

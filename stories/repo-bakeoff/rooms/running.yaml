@@ -7,7 +7,8 @@
 #
 # which prepares the baseline worktree, drives the kitsoki bugfix pipeline LIVE
 # under the candidate's harness profile (the worker model), grades the fix against
-# the hidden oracle, and writes results/cells/<bug>-<candidate>-kitsoki.json.
+# the hidden oracle, and writes .artifacts/external-bakeoff/results/cells/
+# <project>-<bug>-<candidate>-kitsoki.json by default.
 #
 # This room TRACKS the roster + progress; on accept it advances to scoring, where
 # the harness's FREE bench.py summarize rolls up whatever cells the manual run
@@ -15,7 +16,7 @@
 states:
   running:
     description: "Tracking the cell roster (cost-bearing cells run manually via drive_cell.sh)."
-    relevant_world: [cells, cells_total, cells_ran, harness_dir]
+    relevant_world: [project, repo_dir, cells, cells_total, cells_ran, harness_dir, results_dir]
     view:
       - heading: "Bake-off · running (cell roster)"
       - kv:
@@ -23,7 +24,8 @@ states:
             Total:   "{{ world.cells_total }}"
             Ran:     "{{ world.cells_ran }}"
             Harness: "{{ world.harness_dir }}"
-      - prose: "Each cell is run manually: `drive_cell.sh --project <p> --bug <b> --candidate <c> --score` (the only cost-bearing step — it drives the live worker model). Accept once the cell verdicts are written to roll them up."
+            Results: "{{ world.results_dir }}"
+      - prose: "Each cell is run manually: `drive_cell.sh --project {{ world.project }} --bug <bug> --candidate <candidate> {% if world.repo_dir != \"\" %}--repo-dir {{ world.repo_dir }} {% endif %}--score` (the only cost-bearing step — it drives the live worker model). Accept once the cell verdicts are written to the results directory."
       - choice:
           mode: single
           prompt: "Actions"
