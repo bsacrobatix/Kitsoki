@@ -15,6 +15,7 @@ host_handlers:
             run_dir: .artifacts/product-journey/run-123
             deck_path: .artifacts/product-journey/run-123/deck.slidey.json
             execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
+            driver_plan_path: .artifacts/product-journey/run-123/driver-plan.md
             agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
             media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
             scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
@@ -43,6 +44,7 @@ host_handlers:
             evidence_path: media/bugfix.mp4
             deck_path: .artifacts/product-journey/run-123/deck.slidey.json
             execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
+            driver_plan_path: .artifacts/product-journey/run-123/driver-plan.md
             agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
             media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
             scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
@@ -58,6 +60,7 @@ host_handlers:
             scenario: project-onboarding
             deck_path: .artifacts/product-journey/run-123/deck.slidey.json
             execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
+            driver_plan_path: .artifacts/product-journey/run-123/driver-plan.md
             agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
             media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
             scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
@@ -70,6 +73,7 @@ host_handlers:
             run_dir: .artifacts/product-journey/run-123
             deck_path: .artifacts/product-journey/run-123/deck.slidey.json
             execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
+            driver_plan_path: .artifacts/product-journey/run-123/driver-plan.md
             agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
             media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
             scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
@@ -89,6 +93,7 @@ host_handlers:
             review_path: .artifacts/product-journey/run-123/review.json
             deck_path: .artifacts/product-journey/run-123/deck.slidey.json
             execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
+            driver_plan_path: .artifacts/product-journey/run-123/driver-plan.md
             agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
             media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
             scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
@@ -199,6 +204,7 @@ turns:
       run_dir: .artifacts/product-journey/run-123
       deck_path: .artifacts/product-journey/run-123/deck.slidey.json
       execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
+      driver_plan_path: .artifacts/product-journey/run-123/driver-plan.md
       agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
       media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
       scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
@@ -221,6 +227,7 @@ turns:
       evidence_path: media/bugfix.mp4
       deck_path: .artifacts/product-journey/run-123/deck.slidey.json
       execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
+      driver_plan_path: .artifacts/product-journey/run-123/driver-plan.md
       agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
       media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
       scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
@@ -247,6 +254,7 @@ turns:
       evidence_path: traces/onboarding.jsonl
       deck_path: .artifacts/product-journey/run-123/deck.slidey.json
       execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
+      driver_plan_path: .artifacts/product-journey/run-123/driver-plan.md
       agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
       media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
       scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
@@ -260,6 +268,7 @@ turns:
       status: demo_seeded
       deck_path: .artifacts/product-journey/run-123/deck.slidey.json
       execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
+      driver_plan_path: .artifacts/product-journey/run-123/driver-plan.md
       agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
       media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
       scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
@@ -275,6 +284,7 @@ turns:
       review_summary: "ready: 10/10 checks passed, 0 warnings, 0 failures"
       deck_path: .artifacts/product-journey/run-123/deck.slidey.json
       execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
+      driver_plan_path: .artifacts/product-journey/run-123/driver-plan.md
       agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
       media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
       scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
@@ -298,6 +308,7 @@ turns:
     expect_world:
       status: done
       execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
+      driver_plan_path: .artifacts/product-journey/run-123/driver-plan.md
       agent_brief_path: .artifacts/product-journey/run-123/agent-brief.md
       media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
       scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md

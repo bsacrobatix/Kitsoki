@@ -1,7 +1,7 @@
 states:
   done:
     description: "The product-journey QA bundle is ready for review."
-    relevant_world: [matrix_id, matrix_dir, rollup_deck_path, run_id, run_dir, deck_path, execution_plan_path, agent_brief_path, media_manifest_path, scenario_outcomes_path, validation_status, validation_errors, validation_warnings, status]
+    relevant_world: [matrix_id, matrix_dir, rollup_deck_path, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, agent_brief_path, media_manifest_path, scenario_outcomes_path, validation_status, validation_errors, validation_warnings, status]
     view:
       - banner:
           text: "PRODUCT JOURNEY QA READY"
@@ -16,6 +16,7 @@ states:
             Matrix rollup: "{{ world.rollup_deck_path }}"
             Deck: "{{ world.deck_path }}"
             Execution plan: "{{ world.execution_plan_path }}"
+            Driver plan: "{{ world.driver_plan_path }}"
             Agent brief: "{{ world.agent_brief_path }}"
             Media manifest: "{{ world.media_manifest_path }}"
             Scenario outcomes: "{{ world.scenario_outcomes_path }}"

@@ -24,6 +24,7 @@ world:
   run_dir:        { type: string, default: "" }
   deck_path:      { type: string, default: "" }
   execution_plan_path: { type: string, default: "" }
+  driver_plan_path: { type: string, default: "" }
   agent_brief_path: { type: string, default: "" }
   media_manifest_path: { type: string, default: "" }
   scenario_outcomes_path: { type: string, default: "" }

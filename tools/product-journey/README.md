@@ -74,8 +74,9 @@ python3 tools/product-journey/run.py --validate-matrix \
 This writes `.artifacts/product-journey/<run-id>/` with `run.json`,
 `journey.md`, `metrics.json`, `bugs.json`, `findings.json`,
 `scenario-outcomes.json`, `scenario-outcomes.md`, `evidence.json`,
-`media-manifest.json`, `scenarios.json`, `execution-plan.json`, `execution-plan.md`,
-`agent-brief.json`, `agent-brief.md`, `review.json`, and `deck.slidey.json`.
+`media-manifest.json`, `scenarios.json`, `execution-plan.json`,
+`execution-plan.md`, `driver-plan.json`, `driver-plan.md`, `agent-brief.json`,
+`agent-brief.md`, `review.json`, and `deck.slidey.json`.
 Add `--publish-deck` when the generated deck should replace
 `docs/decks/product-journey-eval.slidey.json` for review.
 
@@ -83,8 +84,10 @@ Use `agent-brief.md` as the live-driver handoff: it states the persona,
 operating rules, scenario order, MCP tools, success criteria, and missing
 evidence without implying planned steps are validated. The brief names
 `.agents/agents/product-journey-qa-driver.md` as the reusable live/cassette
-driver for Kitsoki Studio MCP and visual MCP runs. Use `execution-plan.md` for
-the detailed evidence slots and ready-to-fill `--attach-evidence` commands.
+driver for Kitsoki Studio MCP and visual MCP runs. Use `driver-plan.md` for the
+machine-readable harness, visual-surface, action-sequence, and gate contract,
+and `execution-plan.md` for the detailed evidence slots and ready-to-fill
+`--attach-evidence` commands.
 
 Attach evidence captured by a live or cassette-backed MCP run:
 

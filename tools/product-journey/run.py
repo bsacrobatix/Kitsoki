@@ -297,6 +297,8 @@ def build_run_bundle(
             "scenarios": "scenarios.json",
             "execution_plan": "execution-plan.json",
             "execution_plan_markdown": "execution-plan.md",
+            "driver_plan": "driver-plan.json",
+            "driver_plan_markdown": "driver-plan.md",
             "agent_brief": "agent-brief.json",
             "agent_brief_markdown": "agent-brief.md",
             "review": "review.json",
@@ -314,6 +316,7 @@ def build_run_bundle(
     evidence = evidence_plan(run_json)
     media_manifest = build_media_manifest(run_json, evidence)
     execution_plan = build_execution_plan(run_json, evidence)
+    driver_plan = build_driver_plan(run_json, evidence, execution_plan)
     agent_brief = build_agent_brief(run_json, evidence, execution_plan)
     findings = {"run_id": run_id, "items": [], "summary": {"strength": 0, "weakness": 0, "issue": 0, "fix": 0}}
     scenario_outcomes = build_scenario_outcomes(run_json, evidence, findings)
@@ -339,7 +342,7 @@ def build_run_bundle(
     }
     bugs = {"run_id": run_id, "items": []}
     journey = render_journey(run_json)
-    deck = render_deck(run_json, metrics, evidence=evidence, findings=findings, execution_plan=execution_plan, media_manifest=media_manifest, scenario_outcomes=scenario_outcomes)
+    deck = render_deck(run_json, metrics, evidence=evidence, findings=findings, execution_plan=execution_plan, media_manifest=media_manifest, scenario_outcomes=scenario_outcomes, driver_plan=driver_plan)
 
     write_json(run_dir / "run.json", run_json)
     (run_dir / "journey.md").write_text(journey, encoding="utf-8")
@@ -353,6 +356,8 @@ def build_run_bundle(
     write_json(run_dir / "scenarios.json", {"run_id": run_id, "items": scenario_items})
     write_json(run_dir / "execution-plan.json", execution_plan)
     (run_dir / "execution-plan.md").write_text(render_execution_plan(execution_plan), encoding="utf-8")
+    write_json(run_dir / "driver-plan.json", driver_plan)
+    (run_dir / "driver-plan.md").write_text(render_driver_plan(driver_plan), encoding="utf-8")
     write_json(run_dir / "agent-brief.json", agent_brief)
     (run_dir / "agent-brief.md").write_text(render_agent_brief(agent_brief), encoding="utf-8")
     write_json(run_dir / "review.json", {
@@ -487,6 +492,43 @@ def evidence_capture_hint(kind: str) -> str:
         "reproduction_steps": "Save deterministic reproduction steps.",
     }
     return hints.get(kind, "Save this evidence artifact and attach it to the run.")
+
+
+def driver_harness(primary_story: str) -> str:
+    if primary_story == "product-site":
+        return "browser"
+    if "bugfix" in primary_story:
+        return "record-or-live-with-deterministic-oracle"
+    return "replay-or-record"
+
+
+def driver_visual_surface(primary_story: str, required_mcp: list[str]) -> str:
+    if "visual.open" in required_mcp and primary_story == "product-site":
+        return "web"
+    if "render.tui" in required_mcp or "session.open" in required_mcp:
+        return "tui"
+    if "visual.observe" in required_mcp:
+        return "web-or-tui"
+    return "artifact"
+
+
+def driver_action_sequence(required_mcp: list[str]) -> list[str]:
+    sequence = []
+    if "session.open" in required_mcp:
+        sequence.append("session.new or session.attach using the scenario primary_story")
+    if "render.tui" in required_mcp:
+        sequence.append("render.tui or render.tui_png before and after meaningful turns")
+    if "visual.open" in required_mcp:
+        sequence.append("visual.open for the scenario visual surface")
+    if "visual.observe" in required_mcp:
+        sequence.append("visual.observe before acting and when capturing evidence")
+    if "visual.act" in required_mcp:
+        sequence.append("visual.act using advertised action handles or natural persona actions")
+    if "session.inspect" in required_mcp:
+        sequence.append("session.status/session.world first; session.inspect only when targeted reads are insufficient")
+    if not sequence:
+        sequence.append("capture the named evidence artifacts and record findings")
+    return sequence
 
 
 def media_kind(evidence_kind: str, artifact_path: str) -> str:
@@ -728,6 +770,8 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
             "Capture evidence, record concrete findings, and avoid treating planned steps as validated."
         ),
         "recommended_agent": ".agents/agents/product-journey-qa-driver.md",
+        "driver_plan": "driver-plan.json",
+        "driver_plan_markdown": "driver-plan.md",
         "persona_contract": {
             "id": persona["id"],
             "label": persona["label"],
@@ -760,6 +804,116 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
     }
 
 
+def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict) -> dict:
+    evidence_by_scenario: dict[str, list[dict]] = {}
+    for item in evidence.get("items", []):
+        evidence_by_scenario.setdefault(item["scenario"], []).append(item)
+    steps_by_scenario = {
+        step["scenario"]: step
+        for step in execution_plan.get("steps", [])
+    }
+    run_dir_arg = f".artifacts/product-journey/{run_json['run_id']}"
+    scenarios = []
+    for scenario in run_json["scenarios"]:
+        scenario_id = scenario["id"]
+        required_mcp = scenario.get("required_mcp", [])
+        evidence_items = evidence_by_scenario.get(scenario_id, [])
+        step = steps_by_scenario.get(scenario_id, {})
+        scenarios.append({
+            "scenario": scenario_id,
+            "label": scenario["label"],
+            "stage": scenario["stage"],
+            "primary_story": scenario["primary_story"],
+            "harness": driver_harness(scenario["primary_story"]),
+            "visual_surface": driver_visual_surface(scenario["primary_story"], required_mcp),
+            "required_mcp": required_mcp,
+            "action_sequence": driver_action_sequence(required_mcp),
+            "persona_prompts": [
+                f"Act as {run_json['persona']['label']}: {run_json['persona']['description']}",
+                f"Risk focus: {', '.join(run_json['persona'].get('risk_focus', []))}",
+                "Use natural operator phrasing where route quality or prompt quality is under test.",
+            ],
+            "evidence": [
+                {
+                    "kind": item["kind"],
+                    "status": item.get("status", "missing"),
+                    "path": item.get("path", ""),
+                    "capture_hint": evidence_capture_hint(item["kind"]),
+                    "playback_candidate": media_kind(item["kind"], item.get("path", "")) in {"video", "image"} or item["kind"] in {"browser_screenshot", "key_interaction_video", "screenshot_or_tui_png"},
+                }
+                for item in evidence_items
+            ],
+            "success_criteria": scenario["success_criteria"],
+            "attach_commands": step.get("attach_commands", []),
+            "record_finding_command": (
+                "python3 tools/product-journey/run.py --record-finding "
+                f"--run-dir {run_dir_arg} "
+                "--finding-kind <strength|weakness|issue|fix> "
+                f"--scenario {scenario_id} "
+                "--title <title> --summary <summary> --evidence-path <path-or-retained-id>"
+            ),
+        })
+    return {
+        "run_id": run_json["run_id"],
+        "driver_agent": ".agents/agents/product-journey-qa-driver.md",
+        "project": run_json["project"],
+        "persona": run_json["persona"],
+        "scenarios": scenarios,
+        "final_gates": [
+            f"python3 tools/product-journey/run.py --review-run --run-dir {run_dir_arg}",
+            f"python3 tools/product-journey/run.py --validate-run --run-dir {run_dir_arg}",
+        ],
+    }
+
+
+def render_driver_plan(plan: dict) -> str:
+    lines = [
+        "# Product journey driver plan",
+        "",
+        f"- Run: `{plan['run_id']}`",
+        f"- Driver: `{plan['driver_agent']}`",
+        f"- Project: `{plan['project']['label']}`",
+        f"- Persona: `{plan['persona']['label']}`",
+        "",
+    ]
+    for index, scenario in enumerate(plan["scenarios"], start=1):
+        lines.extend([
+            f"## {index}. {scenario['label']}",
+            "",
+            f"- Scenario: `{scenario['scenario']}`",
+            f"- Story: `{scenario['primary_story']}`",
+            f"- Harness: `{scenario['harness']}`",
+            f"- Visual surface: `{scenario['visual_surface']}`",
+            f"- MCP: {', '.join(scenario['required_mcp'])}",
+            "",
+            "### Action Sequence",
+            "",
+        ])
+        for action in scenario["action_sequence"]:
+            lines.append(f"- {action}")
+        lines.extend(["", "### Persona Prompts", ""])
+        for prompt in scenario["persona_prompts"]:
+            lines.append(f"- {prompt}")
+        lines.extend(["", "### Evidence", ""])
+        for item in scenario["evidence"]:
+            playback = " playback" if item["playback_candidate"] else ""
+            path = item["path"] or "<path-or-retained-id>"
+            lines.append(f"- `{item['kind']}`{playback}: {path} - {item['capture_hint']}")
+        lines.extend(["", "### Attach Commands", ""])
+        for command in scenario["attach_commands"]:
+            lines.append(f"```sh\n{command}\n```")
+        lines.extend(["", "### Finding Command", ""])
+        lines.append(f"```sh\n{scenario['record_finding_command']}\n```")
+        lines.extend(["", "### Success Criteria", ""])
+        for criterion in scenario["success_criteria"]:
+            lines.append(f"- {criterion}")
+        lines.append("")
+    lines.extend(["## Final Gates", ""])
+    for command in plan["final_gates"]:
+        lines.append(f"```sh\n{command}\n```")
+    return "\n".join(lines) + "\n"
+
+
 def render_agent_brief(brief: dict) -> str:
     lines = [
         "# Product journey QA agent brief",
@@ -770,6 +924,7 @@ def render_agent_brief(brief: dict) -> str:
         f"- Surface preference: `{brief['persona_contract']['surface_preference']}`",
         f"- Risk focus: {', '.join(brief['persona_contract']['risk_focus'])}",
         f"- Recommended driver: `{brief.get('recommended_agent', '.agents/agents/product-journey-qa-driver.md')}`",
+        f"- Driver plan: `{brief.get('driver_plan_markdown', 'driver-plan.md')}`",
         "",
         "## Mission",
         "",
@@ -954,11 +1109,14 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
     execution_plan = build_execution_plan(run_json, evidence)
     write_json(run_dir / "execution-plan.json", execution_plan)
     (run_dir / "execution-plan.md").write_text(render_execution_plan(execution_plan), encoding="utf-8")
+    driver_plan = build_driver_plan(run_json, evidence, execution_plan)
+    write_json(run_dir / "driver-plan.json", driver_plan)
+    (run_dir / "driver-plan.md").write_text(render_driver_plan(driver_plan), encoding="utf-8")
     agent_brief = build_agent_brief(run_json, evidence, execution_plan)
     write_json(run_dir / "agent-brief.json", agent_brief)
     (run_dir / "agent-brief.md").write_text(render_agent_brief(agent_brief), encoding="utf-8")
     (run_dir / "journey.md").write_text(render_journey(run_json), encoding="utf-8")
-    deck = render_deck(run_json, metrics, evidence, findings, review, execution_plan, media_manifest, scenario_outcomes)
+    deck = render_deck(run_json, metrics, evidence, findings, review, execution_plan, media_manifest, scenario_outcomes, driver_plan)
     write_json(run_dir / "deck.slidey.json", deck)
     if publish_deck is not None:
         publish_deck.parent.mkdir(parents=True, exist_ok=True)
@@ -1082,6 +1240,7 @@ def seed_demo_evidence(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "run_dir": str(run_dir),
         "deck_path": str(run_dir / "deck.slidey.json"),
         "execution_plan_path": str(run_dir / "execution-plan.md"),
+        "driver_plan_path": str(run_dir / "driver-plan.md"),
         "agent_brief_path": str(run_dir / "agent-brief.md"),
         "media_manifest_path": str(run_dir / "media-manifest.json"),
         "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
@@ -1114,6 +1273,8 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "scenarios.json",
         "execution-plan.json",
         "execution-plan.md",
+        "driver-plan.json",
+        "driver-plan.md",
         "agent-brief.json",
         "agent-brief.md",
         "review.json",
@@ -1219,10 +1380,13 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     write_json(run_dir / "metrics.json", metrics)
     write_json(run_dir / "execution-plan.json", execution_plan)
     (run_dir / "execution-plan.md").write_text(render_execution_plan(execution_plan), encoding="utf-8")
+    driver_plan = build_driver_plan(run_json, evidence, execution_plan)
+    write_json(run_dir / "driver-plan.json", driver_plan)
+    (run_dir / "driver-plan.md").write_text(render_driver_plan(driver_plan), encoding="utf-8")
     agent_brief = build_agent_brief(run_json, evidence, execution_plan)
     write_json(run_dir / "agent-brief.json", agent_brief)
     (run_dir / "agent-brief.md").write_text(render_agent_brief(agent_brief), encoding="utf-8")
-    deck = render_deck(run_json, metrics, evidence, findings, review, execution_plan, media_manifest, scenario_outcomes)
+    deck = render_deck(run_json, metrics, evidence, findings, review, execution_plan, media_manifest, scenario_outcomes, driver_plan)
     write_json(run_dir / "deck.slidey.json", deck)
     if publish_deck is not None:
         publish_deck.parent.mkdir(parents=True, exist_ok=True)
@@ -1235,6 +1399,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "review_path": str(run_dir / "review.json"),
         "deck_path": str(run_dir / "deck.slidey.json"),
         "execution_plan_path": str(run_dir / "execution-plan.md"),
+        "driver_plan_path": str(run_dir / "driver-plan.md"),
         "agent_brief_path": str(run_dir / "agent-brief.md"),
         "media_manifest_path": str(run_dir / "media-manifest.json"),
         "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
@@ -1295,6 +1460,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
     media_manifest = load_json_for_validation(run_dir / "media-manifest.json", issues)
     scenarios_json = load_json_for_validation(run_dir / "scenarios.json", issues)
     execution_plan = load_json_for_validation(run_dir / "execution-plan.json", issues)
+    driver_plan = load_json_for_validation(run_dir / "driver-plan.json", issues)
     agent_brief = load_json_for_validation(run_dir / "agent-brief.json", issues)
     scenario_outcomes = load_json_for_validation(run_dir / "scenario-outcomes.json", issues)
     review = load_json_for_validation(run_dir / "review.json", issues)
@@ -1317,6 +1483,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
         (media_manifest, "media_manifest", "media-manifest.json"),
         (agent_brief, "agent_brief", "agent-brief.json"),
         (execution_plan, "execution_plan", "execution-plan.json"),
+        (driver_plan, "driver_plan", "driver-plan.json"),
         (scenario_outcomes, "scenario_outcomes", "scenario-outcomes.json"),
     ]:
         if payload:
@@ -1329,6 +1496,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
     media_items = media_manifest.get("items", []) if media_manifest else []
     outcome_items = scenario_outcomes.get("items", []) if scenario_outcomes else []
     execution_steps = execution_plan.get("steps", []) if execution_plan else []
+    driver_scenarios = driver_plan.get("scenarios", []) if driver_plan else []
     brief_scenarios = agent_brief.get("scenario_order", []) if agent_brief else []
 
     if scenarios_json and len(scenario_rows) != len(scenarios):
@@ -1355,6 +1523,14 @@ def validate_run_bundle(run_dir: Path) -> dict:
             "execution-plan.json step count does not match run.json scenarios",
             f"steps={len(execution_steps)}, scenarios={len(scenarios)}",
         )
+    if driver_plan and len(driver_scenarios) != len(scenarios):
+        add_validation_issue(
+            issues,
+            "error",
+            "driver-plan-count",
+            "driver-plan.json scenario count does not match run.json scenarios",
+            f"scenarios={len(driver_scenarios)}, run.json={len(scenarios)}",
+        )
     if agent_brief and len(brief_scenarios) != len(scenarios):
         add_validation_issue(
             issues,
@@ -1379,6 +1555,15 @@ def validate_run_bundle(run_dir: Path) -> dict:
     if required_evidence - declared_evidence:
         extra = sorted(f"{scenario}/{kind}" for scenario, kind in required_evidence - declared_evidence)
         add_validation_issue(issues, "warn", "evidence-contract-extra", "evidence.json has slots not declared by run.json scenarios", ", ".join(extra))
+
+    driver_ids = {item.get("scenario", "") for item in driver_scenarios}
+    if driver_plan and driver_ids != scenario_ids:
+        missing = sorted(scenario_ids - driver_ids)
+        extra = sorted(driver_ids - scenario_ids)
+        detail = f"missing={', '.join(missing) or 'none'}; extra={', '.join(extra) or 'none'}"
+        add_validation_issue(issues, "error", "driver-plan-scenarios", "driver-plan.json scenarios do not match run.json scenarios", detail)
+    if driver_plan and not driver_plan.get("final_gates"):
+        add_validation_issue(issues, "error", "driver-plan-final-gates", "driver-plan.json has no final review/validation gates")
 
     unknown_scenario_refs = sorted({
         item.get("scenario", "")
@@ -1442,7 +1627,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
             add_validation_issue(issues, "error", "review-check-status", "review.json has unknown check statuses", ", ".join(invalid_check_statuses))
 
     scene_eyebrows = deck_scene_eyebrows(deck)
-    for expected in ["Video playback", "Scenario outcomes"]:
+    for expected in ["Driver plan", "Video playback", "Scenario outcomes"]:
         if deck and expected not in scene_eyebrows:
             add_validation_issue(issues, "error", "deck-scene", "deck.slidey.json is missing a required review scene", expected)
     playback_count = media_manifest.get("summary", {}).get("playback_items", 0) if media_manifest else 0
@@ -1963,6 +2148,7 @@ def render_deck(
     execution_plan: Optional[dict] = None,
     media_manifest: Optional[dict] = None,
     scenario_outcomes: Optional[dict] = None,
+    driver_plan: Optional[dict] = None,
 ) -> dict:
     stage_lines = [f"{stage['id']}: {stage['status']}" for stage in run_json["stages"]]
     scenario_lines = [
@@ -2014,6 +2200,13 @@ def render_deck(
             for step in execution_plan.get("steps", [])
         ]
     execution_body = "\n".join(execution_lines) if execution_lines else "Execution plan not generated yet."
+    driver_lines = []
+    if driver_plan is not None:
+        driver_lines = [
+            f"{scenario['scenario']}: {scenario['harness']} / {scenario['visual_surface']}"
+            for scenario in driver_plan.get("scenarios", [])
+        ]
+    driver_body = "\n".join(driver_lines) if driver_lines else "Driver plan not generated yet."
     return {
         "meta": {
             "mode": "report",
@@ -2048,6 +2241,13 @@ def render_deck(
                 "title": "MCP capture steps",
                 "body": execution_body,
                 "narration": "The execution plan turns each scenario into concrete MCP capture steps and attach commands.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Driver plan",
+                "title": "Harness and visual surfaces",
+                "body": driver_body,
+                "narration": "The driver plan gives the product-journey QA agent machine-readable harness, visual surface, and evidence instructions.",
             },
             {
                 "type": "narrative",
@@ -2503,6 +2703,7 @@ def main() -> None:
         print(f"Review: {reviewed['review_path']}")
         print(f"Deck: {reviewed['deck_path']}")
         print(f"Execution plan: {reviewed['execution_plan_path']}")
+        print(f"Driver plan: {reviewed['driver_plan_path']}")
         print(f"Agent brief: {reviewed['agent_brief_path']}")
         if publish_deck is not None:
             print(f"Published deck: {publish_deck}")
@@ -2523,6 +2724,7 @@ def main() -> None:
         print(f"Artifacts: {run_dir}")
         print(f"Deck: {run_dir / 'deck.slidey.json'}")
         print(f"Execution plan: {run_dir / 'execution-plan.md'}")
+        print(f"Driver plan: {run_dir / 'driver-plan.md'}")
         print(f"Agent brief: {run_dir / 'agent-brief.md'}")
         print(f"Evidence present: {seeded['present_evidence_count']}")
         print(f"Findings: {seeded['findings_count']}")
@@ -2564,6 +2766,7 @@ def main() -> None:
                 "scenario": args.scenario,
                 "deck_path": str(run_dir / "deck.slidey.json"),
                 "execution_plan_path": str(run_dir / "execution-plan.md"),
+                "driver_plan_path": str(run_dir / "driver-plan.md"),
                 "agent_brief_path": str(run_dir / "agent-brief.md"),
                 "media_manifest_path": str(run_dir / "media-manifest.json"),
                 "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
@@ -2575,6 +2778,7 @@ def main() -> None:
         print(f"Artifacts: {run_dir}")
         print(f"Deck: {run_dir / 'deck.slidey.json'}")
         print(f"Execution plan: {run_dir / 'execution-plan.md'}")
+        print(f"Driver plan: {run_dir / 'driver-plan.md'}")
         print(f"Agent brief: {run_dir / 'agent-brief.md'}")
         if publish_deck is not None:
             print(f"Published deck: {publish_deck}")
@@ -2613,6 +2817,7 @@ def main() -> None:
                 "evidence_path": args.evidence_path,
                 "deck_path": str(run_dir / "deck.slidey.json"),
                 "execution_plan_path": str(run_dir / "execution-plan.md"),
+                "driver_plan_path": str(run_dir / "driver-plan.md"),
                 "agent_brief_path": str(run_dir / "agent-brief.md"),
                 "media_manifest_path": str(run_dir / "media-manifest.json"),
                 "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
@@ -2624,6 +2829,7 @@ def main() -> None:
         print(f"Artifacts: {run_dir}")
         print(f"Deck: {run_dir / 'deck.slidey.json'}")
         print(f"Execution plan: {run_dir / 'execution-plan.md'}")
+        print(f"Driver plan: {run_dir / 'driver-plan.md'}")
         print(f"Agent brief: {run_dir / 'agent-brief.md'}")
         if publish_deck is not None:
             print(f"Published deck: {publish_deck}")
@@ -2650,6 +2856,7 @@ def main() -> None:
                 "run_dir": str(run_dir),
                 "deck_path": str(run_dir / "deck.slidey.json"),
                 "execution_plan_path": str(run_dir / "execution-plan.md"),
+                "driver_plan_path": str(run_dir / "driver-plan.md"),
                 "agent_brief_path": str(run_dir / "agent-brief.md"),
                 "media_manifest_path": str(run_dir / "media-manifest.json"),
                 "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
@@ -2661,6 +2868,7 @@ def main() -> None:
         print(f"Artifacts: {run_dir}")
         print(f"Deck: {run_dir / 'deck.slidey.json'}")
         print(f"Execution plan: {run_dir / 'execution-plan.md'}")
+        print(f"Driver plan: {run_dir / 'driver-plan.md'}")
         print(f"Agent brief: {run_dir / 'agent-brief.md'}")
         if publish_deck is not None:
             print(f"Published deck: {publish_deck}")

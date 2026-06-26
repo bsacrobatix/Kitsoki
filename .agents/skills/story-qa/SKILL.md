@@ -111,6 +111,9 @@ For a live/cassette dogfood pass, delegate the bundle to
 `.agents/agents/product-journey-qa-driver.md`; that agent is scoped to consume
 the brief, drive Kitsoki Studio MCP and visual MCP, attach evidence, record
 findings, then run review and validation gates.
+`driver-plan.md` is the driver's machine-readable companion rendered for human
+review: it lists each scenario's harness, visual surface, action sequence,
+evidence slots, attach commands, finding command, and final gates.
 Captured screenshots, videos, traces, and documents are indexed in
 `media-manifest.json`; the generated Slidey deck uses that manifest for
 playback-ready media entries.
