@@ -188,6 +188,7 @@ export type ReadableZoomOptions = {
   maxWidth?: string;
   maxHeight?: string;
   fontSize?: number;
+  minScale?: number;
   selectHoldMs?: number;
 };
 
@@ -383,7 +384,8 @@ export async function makeReadableZoom(page: Page): Promise<ReadableZoom> {
         const sourceColor = themeAdjusted && colorLuminance(rawSourceColor) < 0.55 ? "#e6edf3" : rawSourceColor;
         const baseFont = parseFloat(targetStyle.fontSize || style.fontSize) || 16;
         const requestedFont = opts.fontSize || Math.min(23, Math.max(18, baseFont * 1.28));
-        const requestedScale = Math.max(1.18, Math.min(1.8, requestedFont / baseFont));
+        const minScale = Math.max(1, opts.minScale ?? 1.18);
+        const requestedScale = Math.max(minScale, Math.min(1.8, requestedFont / baseFont));
         const viewportScale = Math.max(1, Math.min(maxWidth / rect.width, maxHeight / rect.height));
         const scale = Math.round(Math.max(1.05, Math.min(requestedScale, viewportScale)) * 100) / 100;
         const finalWidth = Math.round(rect.width * scale);
@@ -656,6 +658,12 @@ export async function makeReadableZoom(page: Page): Promise<ReadableZoom> {
             "margin-right",
             "margin-bottom",
             "margin-left",
+            "width",
+            "height",
+            "min-width",
+            "min-height",
+            "max-width",
+            "max-height",
             "padding-top",
             "padding-right",
             "padding-bottom",
@@ -663,6 +671,9 @@ export async function makeReadableZoom(page: Page): Promise<ReadableZoom> {
             "white-space",
             "word-break",
             "overflow-wrap",
+            "object-fit",
+            "object-position",
+            "vertical-align",
             "list-style-type",
             "list-style-position",
           ];

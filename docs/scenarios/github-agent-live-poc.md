@@ -130,6 +130,11 @@ A run is acceptable only when:
   Detached restyled overlays or dark-source-to-light-card transitions do not
   satisfy the scenario. Metadata targets such as `dt`/`dd` rows must expand as
   label/value evidence, not as a lone label strip.
+- GitHub comment evidence must expand whole comment boxes, not isolated mention
+  text, body paragraphs, or header anchors. The bug-issue thread must show the
+  opening bug report, the requester `@kitsoki` comment, and the
+  App-authenticated response with GitHub chrome intact: avatar, username, badges,
+  timestamp/edit context, complete body, and visible run link.
 - `scripts/verify-gh-agent-live-poc.mjs` passes without requiring an HTML viewer
   or MP4 export.
 - `pnpm -C tools/runstatus exec playwright test github-agent-live-zoom-qa --project=chromium`

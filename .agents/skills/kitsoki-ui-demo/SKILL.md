@@ -74,7 +74,11 @@ flow tests (see [[feedback_no_llm_tests]] and `docs/web/README.md` →
 > `animatedFromSource`, return-to-source markers, and source/final geometry when
 > the zoom is part of the evidence contract; a demo should not ask reviewers to
 > read 12px text from a full-page capture, and a detached restyled card is not
-> enough.
+> enough. For GitHub or review-system comments, select the whole rendered
+> comment container, not the mention text, a paragraph, or a header anchor. The
+> expanded box must preserve the comment's surrounding chrome — avatar, username,
+> badges, timestamp context, body, and links — so the viewer can trust it is the
+> actual comment and can read the complete handoff.
 > Before trusting a change to this helper, run the focused visual regression:
 > `pnpm -C tools/runstatus exec playwright test readable-zoom-visual --project=chromium`.
 > It captures selected/expanded/returned frames under

@@ -316,6 +316,163 @@ async function annotatedTextBeat(
   await caption(title, sub, holdMs);
 }
 
+async function markGithubCommentByText(
+  page: Page,
+  name: string,
+  needles: string[],
+): Promise<{ selector: string | null; fallback: boolean; textSample: string }> {
+  return await page
+    .evaluate(
+      ({ attr, targetName, values }) => {
+        const wanted = values.map((value: string) => value.trim().toLowerCase()).filter(Boolean);
+        const commentSelector = [
+          "[data-testid^='comment-viewer-outer-box-']",
+          "[data-testid^='timeline-row-border-']",
+          "[id^='discussion_r']",
+          ".js-timeline-item",
+          ".TimelineItem",
+          ".timeline-comment-group",
+          ".timeline-comment",
+          ".js-comment-container",
+          ".js-comment",
+          ".comment",
+        ].join(",");
+
+        const textOf = (el: HTMLElement): string => (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+        const containsAll = (text: string): boolean => wanted.every((value: string) => text.toLowerCase().includes(value));
+        const candidates = Array.from(document.querySelectorAll<HTMLElement>(commentSelector))
+          .map((el) => {
+            const text = textOf(el);
+            if (!containsAll(text)) return { el, score: 0, text };
+            const hasAvatar = Boolean(el.querySelector("img.avatar, img[alt*='@'], .avatar"));
+            const hasHeader = Boolean(el.querySelector(".TimelineItem-header, .timeline-comment-header, .comment-header, h3, h4"));
+            const hasBody = Boolean(el.querySelector(".comment-body, .js-comment-body, .markdown-body, [data-test-selector='issue-body']"));
+            const hasAnchor = /^issuecomment-|^discussion_r/.test(el.id);
+            const area = Math.max(1, Math.round(el.getBoundingClientRect().width * el.getBoundingClientRect().height));
+            const chromeScore = (hasAvatar ? 150 : 0) + (hasHeader ? 100 : 0) + (hasBody ? 100 : 0) + (hasAnchor ? 60 : 0);
+            return { el, score: chromeScore + Math.min(area / 1000, 220), text };
+          })
+          .filter((entry) => entry.score > 0)
+          .sort((a, b) => b.score - a.score);
+
+        let target = candidates[0]?.el || null;
+        if (!target) {
+          const leaves = Array.from(
+            document.querySelectorAll<HTMLElement>(
+              "a, button, h2, h3, dt, dd, pre, code, p, li, td, th, span, div.js-comment-body, div.markdown-body, div.comment-body",
+            ),
+          );
+          const leaf = leaves.find((el) => containsAll(textOf(el)));
+          target = leaf?.closest<HTMLElement>(commentSelector) || null;
+        }
+        if (!target) return { selector: null, fallback: true, textSample: "" };
+
+        target.setAttribute(attr, targetName);
+        target.scrollIntoView({ block: "center", inline: "nearest" });
+        const back = document.getElementById("demo-spot-back");
+        const box = document.getElementById("demo-spot");
+        if (back && box) {
+          const r = target.getBoundingClientRect();
+          const pad = 8;
+          box.style.top = `${Math.max(0, r.top - pad)}px`;
+          box.style.left = `${Math.max(0, r.left - pad)}px`;
+          box.style.width = `${Math.max(1, r.width + pad * 2)}px`;
+          box.style.height = `${Math.max(1, r.height + pad * 2)}px`;
+          back.classList.add("show");
+          box.classList.add("show");
+        }
+        return {
+          selector: `[${attr}="${targetName}"]`,
+          fallback: !target.matches(commentSelector),
+          textSample: textOf(target).slice(0, 400),
+        };
+      },
+      { attr: "data-kitsoki-demo-target", targetName: name, values: needles },
+    )
+    .catch(() => ({ selector: null, fallback: true, textSample: "" }));
+}
+
+async function markFirstGithubComment(page: Page, name: string): Promise<{ selector: string | null; fallback: boolean; textSample: string }> {
+  return await page
+    .evaluate(
+      ({ attr, targetName }) => {
+        const selectors = [
+          "[data-testid='issue-body']",
+          "#issue-body-viewer",
+          "[data-testid='issue-body-viewer']",
+          "[data-test-selector='issue-body']",
+          ".js-issue-body",
+        ];
+        const textOf = (el: HTMLElement): string => (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+        let target: HTMLElement | null = null;
+        for (const selector of selectors) {
+          const candidate = document.querySelector<HTMLElement>(selector);
+          if (!candidate) continue;
+          target = candidate.closest<HTMLElement>(
+            "[data-testid='issue-body'],[data-testid='issue-body-viewer'],#issue-body-viewer,.js-issue-body",
+          ) || candidate;
+          break;
+        }
+        if (!target) return { selector: null, fallback: true, textSample: "" };
+        target.setAttribute(attr, targetName);
+        target.scrollIntoView({ block: "center", inline: "nearest" });
+        const back = document.getElementById("demo-spot-back");
+        const box = document.getElementById("demo-spot");
+        if (back && box) {
+          const r = target.getBoundingClientRect();
+          const pad = 8;
+          box.style.top = `${Math.max(0, r.top - pad)}px`;
+          box.style.left = `${Math.max(0, r.left - pad)}px`;
+          box.style.width = `${Math.max(1, r.width + pad * 2)}px`;
+          box.style.height = `${Math.max(1, r.height + pad * 2)}px`;
+          back.classList.add("show");
+          box.classList.add("show");
+        }
+        return {
+          selector: `[${attr}="${targetName}"]`,
+          fallback: false,
+          textSample: textOf(target).slice(0, 400),
+        };
+      },
+      { attr: "data-kitsoki-demo-target", targetName: name },
+    )
+    .catch(() => ({ selector: null, fallback: true, textSample: "" }));
+}
+
+async function annotatedGithubCommentBeat(
+  page: Page,
+  caption: Beat,
+  needles: string[],
+  targetName: string,
+  title: string,
+  sub: string,
+  holdMs: number,
+): Promise<{ selector: string | null; fallback: boolean; textSample: string }> {
+  const shown = await markGithubCommentByText(page, targetName, needles);
+  await page.evaluate(
+    ({ tag, title: eventTitle, needles: eventNeedles, shownSelector, fallback, textSample }) => {
+      const rrweb = (window as unknown as { rrweb?: { record?: { addCustomEvent?: (tag: string, payload: unknown) => void } } }).rrweb;
+      rrweb?.record?.addCustomEvent?.(tag, {
+        title: eventTitle,
+        needles: eventNeedles,
+        shownSelector,
+        fallback,
+        textSample,
+      });
+    },
+    {
+      tag: ANNOTATION_TAG,
+      title,
+      needles,
+      shownSelector: shown.selector,
+      fallback: shown.fallback,
+      textSample: shown.textSample,
+    },
+  );
+  await caption(title, sub, holdMs);
+  return shown;
+}
+
 async function zoomBeat(
   page: Page,
   caption: Beat,
@@ -325,8 +482,13 @@ async function zoomBeat(
   sub: string,
   holdMs: number,
 ): Promise<void> {
+  const fullGithubComment = /bug report|requester comment|App response|App comment/i.test(title);
   const zoomResult = selector
-    ? await zoom(selector, { title, fontSize: selector.includes("api-json") ? 17 : 20 })
+    ? await zoom(selector, {
+        title,
+        fontSize: selector.includes("api-json") ? 17 : fullGithubComment ? 17 : 20,
+        minScale: fullGithubComment ? 1.05 : undefined,
+      })
     : { shown: false, animatedFromSource: false };
   await page.evaluate(
     ({ tag, title: eventTitle, selector: eventSelector, result }) => {
@@ -383,33 +545,56 @@ async function tourGithubThread(page: Page, step: CaptureStep, caption: Beat, sp
   await annotatedBeat(page, caption, spotlight, title, step.title, "Start where the requester worked: the live GitHub thread.", 2300);
   await dwell(page, 1500);
 
-  await annotatedTextBeat(
+  const issueComment = await markFirstGithubComment(page, "issue-opening-comment");
+  if (issueComment.selector) {
+    await zoomBeat(
+      page,
+      caption,
+      zoom,
+      issueComment.selector,
+      "Read the bug report",
+      "The opening GitHub comment stays intact: avatar, username, metadata, and full issue body travel together.",
+      3000,
+    );
+    await dwell(page, 1300);
+  }
+
+  const mentionComment = await annotatedGithubCommentBeat(
     page,
     caption,
-    "@kitsoki",
+    ["@kitsoki"],
     "request-mention",
     "Requester mentions @kitsoki",
-    "This is the user action that should create exactly one kitsoki job.",
+    "The whole requester comment is selected, not only the mention token.",
     2600,
+  );
+  await zoomBeat(
+    page,
+    caption,
+    zoom,
+    mentionComment.selector,
+    "Read the requester comment",
+    "The expanded box preserves the GitHub comment theme, author, avatar, timestamp context, and the complete text.",
+    3200,
   );
   await dwell(page, 1500);
 
-  await annotatedTextBeat(
+  const appComment = await annotatedGithubCommentBeat(
     page,
     caption,
-    "kitsoki-test.slothattax.me/run/",
+    ["kitsoki-test.slothattax.me/run/"],
     "app-comment",
     "kitsoki answers on the thread",
-    "The App-authenticated response is the handoff from GitHub into the hosted run.",
+    "The App-authenticated response is selected as a full GitHub comment box.",
     2800,
   );
   await zoomBeat(
     page,
     caption,
     zoom,
-    "[data-kitsoki-demo-target=\"app-comment\"]",
+    appComment.selector,
     "Read the App response",
-    "The zoomed copy makes the story, state, job id, and run URL readable without losing the live GitHub context.",
+    "The zoomed copy makes the story, state, job id, and run URL readable while keeping GitHub chrome accurate.",
     3200,
   );
   await dwell(page, 1800);
@@ -427,22 +612,22 @@ async function tourGithubThread(page: Page, step: CaptureStep, caption: Beat, sp
 }
 
 async function tourAppComment(page: Page, step: CaptureStep, caption: Beat, spotlight: Spotlight, zoom: ReadableZoom): Promise<void> {
-  await annotatedTextBeat(
+  const appComment = await annotatedGithubCommentBeat(
     page,
     caption,
-    "kitsoki-test.slothattax.me/run/",
+    ["kitsoki-test.slothattax.me/run/"],
     "app-comment-anchor",
     step.title,
-    "The URL opens directly on the App response, not just the original mention.",
+    "The URL opens directly on the full App response comment box.",
     2600,
   );
   await zoomBeat(
     page,
     caption,
     zoom,
-    "[data-kitsoki-demo-target=\"app-comment-anchor\"]",
+    appComment.selector,
     "Readable App comment",
-    "This is the exact GitHub comment a requester sees, enlarged for review.",
+    "This is the exact GitHub comment a requester sees, enlarged with author and GitHub styling intact.",
     3200,
   );
   await dwell(page, 1700);

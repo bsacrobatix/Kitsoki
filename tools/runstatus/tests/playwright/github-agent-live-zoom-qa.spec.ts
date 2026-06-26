@@ -19,6 +19,7 @@ type RrwebEvent = {
       sourceSelector?: string;
       sourceText?: string;
       resolvedSourceKind?: string;
+      sourceRect?: { width?: number; height?: number };
       styleSignature?: {
         pageBackgroundColor?: string;
         backgroundColor?: string;
@@ -35,6 +36,7 @@ type ZoomFrameState = {
   panelBackground: string;
   panelColor: string;
   panelTextSample: string;
+  panelText: string;
   sourceBackground: string;
   sourceColor: string;
   expectedBackground: string;
@@ -63,6 +65,7 @@ test("live GitHub readable zooms replay with correct colors", async ({ page }) =
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
   let checked = 0;
+  const bugThreadZooms = new Set<string>();
   for (const caseSlug of CASES) {
     const caseDir = path.join(MEDIA_ROOT, caseSlug);
     if (!fs.existsSync(caseDir)) continue;
@@ -100,6 +103,10 @@ test("live GitHub readable zooms replay with correct colors", async ({ page }) =
           state.annotationPaint,
           `${caseSlug}/${file} zoom ${i + 1}; screenshot ${out}`,
         );
+        if (caseSlug === "bug-issue" && /01-github-thread/.test(file)) {
+          bugThreadZooms.add(payload.title ?? "");
+          assertBugIssueCommentZoom(payload, state, `${caseSlug}/${file} zoom ${i + 1}; screenshot ${out}`);
+        }
         if (/job state/i.test(payload.title ?? "")) {
           expect(
             state.panelTextSample.toLowerCase(),
@@ -110,6 +117,12 @@ test("live GitHub readable zooms replay with correct colors", async ({ page }) =
     }
   }
 
+  for (const requiredTitle of ["Read the bug report", "Read the requester comment", "Read the App response"]) {
+    expect(
+      bugThreadZooms.has(requiredTitle),
+      `bug-issue thread rrweb must include full-comment zoom beat: ${requiredTitle}`,
+    ).toBeTruthy();
+  }
   expect(checked, "expected at least one readable zoom in live rrweb logs").toBeGreaterThan(0);
   console.log(`[github-agent-live-zoom-qa] checked ${checked} zoom frame(s); screenshots in ${OUT_DIR}`);
 });
@@ -191,6 +204,7 @@ async function readZoomFrameState(page: Page, payload: NonNullable<RrwebEvent["d
       panelBackground: panelStyle.backgroundColor,
       panelColor: contentStyle.color,
       panelTextSample: (panel.innerText || panel.textContent || "").replace(/\s+/g, " ").trim().slice(0, 160),
+      panelText: (panel.innerText || panel.textContent || "").replace(/\s+/g, " ").trim().slice(0, 1200),
       sourceBackground,
       sourceColor,
       expectedBackground,
@@ -282,6 +296,35 @@ function assertNonObscuringAnnotationPaint(state: AnnotationPaintState, label: s
   }
   if (state.spotBox.present) {
     expect(hasDarkScreenMask(state.spotBox.boxShadow), `${label}: spotlight outline must not dim the page outside the target`).toBeFalsy();
+  }
+}
+
+function assertBugIssueCommentZoom(
+  payload: NonNullable<RrwebEvent["data"]>["payload"],
+  state: ZoomFrameState,
+  label: string,
+): void {
+  const title = payload?.title ?? "";
+  const sourceText = (payload?.sourceText ?? "").replace(/\s+/g, " ").trim();
+  const panelText = state.panelText.replace(/\s+/g, " ").trim();
+  if (!/Read the (bug report|requester comment|App response)/.test(title)) return;
+
+  expect(sourceText.length, `${label}: comment zoom should capture a full GitHub comment, not a tiny text node`).toBeGreaterThan(80);
+  expect(payload?.resolvedSourceKind, `${label}: comment zoom should resolve the selected comment as one DOM element`).toBe("element");
+  expect(
+    Math.min(payload?.sourceRect?.width ?? 0, state.panelRect.width),
+    `${label}: comment zoom should use the wide GitHub comment box geometry`,
+  ).toBeGreaterThan(360);
+
+  if (/requester comment/.test(title)) {
+    expect(sourceText, `${label}: requester zoom must include the full mention comment`).toMatch(/@kitsoki/i);
+    expect(sourceText, `${label}: requester zoom must include GitHub comment author/context`).toMatch(/\b(brad|commented|maintainer|owner)\b/i);
+    expect(panelText, `${label}: panel should show more than only the mention token`).not.toMatch(/^@kitsoki\b\s*$/i);
+  }
+  if (/App response/.test(title)) {
+    expect(sourceText, `${label}: app-response zoom must include the run link`).toMatch(/kitsoki-test\.slothattax\.me\/run\//i);
+    expect(sourceText, `${label}: app-response zoom must include kitsoki/GitHub comment context`).toMatch(/\b(kitsoki|commented|bot)\b/i);
+    expect(panelText, `${label}: app-response replay panel must visibly include the run link`).toMatch(/run_url:\s*https:\/\/kitsoki-test\.slothattax\.me\/run\//i);
   }
 }
 
