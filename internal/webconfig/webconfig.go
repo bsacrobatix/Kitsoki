@@ -300,6 +300,8 @@ type QuotaControl struct {
 	TokensPerWindow int64  `yaml:"tokens_per_window,omitempty"`
 	MaxConcurrent   int    `yaml:"max_concurrent,omitempty"`
 	ReserveTokens   int64  `yaml:"reserve_tokens,omitempty"`
+	StatePath       string `yaml:"state_path,omitempty"`
+	LeaseTimeout    string `yaml:"lease_timeout,omitempty"`
 }
 
 var validBackends = map[string]bool{"": true, "claude": true, "copilot": true, "codex": true}
@@ -737,6 +739,11 @@ func (cfg *WebConfig) resolveHarnessProfiles() error {
 			if p.Quota.Window != "" {
 				if _, err := time.ParseDuration(p.Quota.Window); err != nil {
 					return fmt.Errorf("harness_profiles.%s: quota.window %q is not a valid duration: %w", name, p.Quota.Window, err)
+				}
+			}
+			if p.Quota.LeaseTimeout != "" {
+				if _, err := time.ParseDuration(p.Quota.LeaseTimeout); err != nil {
+					return fmt.Errorf("harness_profiles.%s: quota.lease_timeout %q is not a valid duration: %w", name, p.Quota.LeaseTimeout, err)
 				}
 			}
 			if p.Quota.TokensPerWindow < 0 {

@@ -2,6 +2,9 @@ package host
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -19,6 +22,7 @@ func TestProviderQuotaBlocksConcurrentReservations(t *testing.T) {
 			Window:        "1m",
 			MaxConcurrent: 1,
 			ReserveTokens: 1,
+			StatePath:     filepath.Join(t.TempDir(), "quota.json"),
 		},
 	})
 
@@ -61,6 +65,7 @@ func TestProviderQuotaBacksOffAfterRateLimitError(t *testing.T) {
 			Window:        "150ms",
 			MaxConcurrent: 1,
 			ReserveTokens: 1,
+			StatePath:     filepath.Join(t.TempDir(), "quota.json"),
 		},
 	})
 
@@ -79,4 +84,88 @@ func TestProviderQuotaBacksOffAfterRateLimitError(t *testing.T) {
 	if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
 		t.Fatalf("second reservation did not honor rate-limit backoff; elapsed=%s", elapsed)
 	}
+}
+
+func TestProviderQuotaPersistsObservedUsage(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "quota.json")
+	ctx := quotaTestContext(statePath, QuotaControl{
+		Window:        "1m",
+		ReserveTokens: 1,
+	})
+
+	first, err := reserveProviderQuota(ctx, claudeBackend{}, "tiny")
+	if err != nil {
+		t.Fatalf("first reserve: %v", err)
+	}
+	first.finish(map[string]any{"total_tokens": float64(9000)}, "")
+
+	st := readQuotaStateForTest(t, statePath)
+	profile := st.Profiles["synthetic-test|claude|hf:test|ambient"]
+	if profile == nil {
+		t.Fatalf("profile state missing: %+v", st.Profiles)
+	}
+	if profile.ObservedCalls != 1 || profile.ObservedTokens != 9000 {
+		t.Fatalf("observed usage = calls %d tokens %d, want 1 / 9000", profile.ObservedCalls, profile.ObservedTokens)
+	}
+
+	second, err := reserveProviderQuota(ctx, claudeBackend{}, "tiny")
+	if err != nil {
+		t.Fatalf("second reserve: %v", err)
+	}
+	defer second.finish(nil, "")
+
+	st = readQuotaStateForTest(t, statePath)
+	profile = st.Profiles["synthetic-test|claude|hf:test|ambient"]
+	var reserved int64
+	for _, r := range profile.Reservations {
+		reserved = r.Tokens
+	}
+	if reserved != 9000 {
+		t.Fatalf("reserved tokens = %d, want learned average 9000", reserved)
+	}
+}
+
+func TestProviderQuotaReapsExpiredReservations(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "quota.json")
+	ctx := quotaTestContext(statePath, QuotaControl{
+		Window:        "1m",
+		MaxConcurrent: 1,
+		ReserveTokens: 1,
+		LeaseTimeout:  "50ms",
+	})
+
+	first, err := reserveProviderQuota(ctx, claudeBackend{}, "first")
+	if err != nil {
+		t.Fatalf("first reserve: %v", err)
+	}
+	_ = first // simulate a crashed process that never calls finish.
+	time.Sleep(80 * time.Millisecond)
+
+	second, err := reserveProviderQuota(ctx, claudeBackend{}, "second")
+	if err != nil {
+		t.Fatalf("second reserve after lease expiry: %v", err)
+	}
+	second.finish(nil, "")
+}
+
+func quotaTestContext(statePath string, q QuotaControl) context.Context {
+	q.StatePath = statePath
+	return WithActiveProfile(context.Background(), ActiveProfile{
+		Name:     "synthetic-test",
+		Provider: Provider{Model: "hf:test"},
+		Quota:    q,
+	})
+}
+
+func readQuotaStateForTest(t *testing.T, path string) quotaStateFile {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	var st quotaStateFile
+	if err := json.Unmarshal(raw, &st); err != nil {
+		t.Fatalf("parse state: %v", err)
+	}
+	return st
 }

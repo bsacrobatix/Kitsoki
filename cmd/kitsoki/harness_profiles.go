@@ -42,5 +42,7 @@ func hostQuotaFromConfig(q webconfig.QuotaControl) host.QuotaControl {
 		TokensPerWindow: q.TokensPerWindow,
 		MaxConcurrent:   q.MaxConcurrent,
 		ReserveTokens:   q.ReserveTokens,
+		StatePath:       q.StatePath,
+		LeaseTimeout:    q.LeaseTimeout,
 	}
 }

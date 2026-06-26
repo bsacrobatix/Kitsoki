@@ -115,6 +115,8 @@ type QuotaControl struct {
 	TokensPerWindow int64
 	MaxConcurrent   int
 	ReserveTokens   int64
+	StatePath       string
+	LeaseTimeout    string
 }
 
 // providersKey is the unexported context key for the injected providers map.

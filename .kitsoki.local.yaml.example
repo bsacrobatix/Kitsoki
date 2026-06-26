@@ -50,6 +50,10 @@ harness_profiles:
       tokens_per_window: 120000
       max_concurrent: 1
       reserve_tokens: 30000
+      # Persistent, cross-process state. Leave shared across synthetic profiles
+      # that use the same key so parallel kitsoki processes coordinate.
+      state_path: .artifacts/quota/provider-state.json
+      lease_timeout: 45m
     env:
       ANTHROPIC_BASE_URL: https://api.synthetic.new/anthropic
       ANTHROPIC_AUTH_TOKEN: "${SYNTHETIC_API_KEY}"
@@ -69,6 +73,8 @@ harness_profiles:
       tokens_per_window: 120000
       max_concurrent: 1
       reserve_tokens: 30000
+      state_path: .artifacts/quota/provider-state.json
+      lease_timeout: 45m
     env:
       OPENAI_BASE_URL: https://api.synthetic.new/openai/v1
       OPENAI_API_KEY: "${SYNTHETIC_API_KEY}"

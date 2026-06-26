@@ -2,40 +2,70 @@ package host
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 const (
 	defaultQuotaWindow        = time.Minute
 	defaultQuotaReserveTokens = int64(12000)
+	defaultQuotaLeaseTimeout  = 45 * time.Minute
+	defaultQuotaStatePath     = ".artifacts/quota/provider-state.json"
 	quotaTokenChars           = 4
 )
 
 type quotaLimiter struct {
 	mu              sync.Mutex
+	statePath       string
 	window          time.Duration
 	tokensPerWindow int64
 	maxConcurrent   int
-	inFlight        int
-	windowStart     time.Time
-	windowTokens    int64
-	observedCalls   int64
-	observedTokens  int64
-	backoffUntil    time.Time
+	reserveTokens   int64
+	leaseTimeout    time.Duration
 	lastThrottleLog time.Time
 }
 
 type quotaReservation struct {
-	limiter   *quotaLimiter
-	key       string
-	estimate  int64
-	startTime time.Time
+	limiter       *quotaLimiter
+	key           string
+	reservationID string
+	estimate      int64
+	startTime     time.Time
 }
 
-var providerQuotaLimiters sync.Map
+type quotaStateFile struct {
+	Schema   string                       `json:"schema"`
+	Updated  time.Time                    `json:"updated"`
+	Profiles map[string]*quotaProfileStat `json:"profiles"`
+}
+
+type quotaProfileStat struct {
+	WindowStart          time.Time                `json:"window_start"`
+	WindowTokens         int64                    `json:"window_tokens"`
+	ObservedCalls        int64                    `json:"observed_calls"`
+	ObservedTokens       int64                    `json:"observed_tokens"`
+	LastObservedTokens   int64                    `json:"last_observed_tokens,omitempty"`
+	LastEstimatedTokens  int64                    `json:"last_estimated_tokens,omitempty"`
+	LastRateLimitedAt    time.Time                `json:"last_rate_limited_at,omitempty"`
+	BackoffUntil         time.Time                `json:"backoff_until,omitempty"`
+	Reservations         map[string]quotaInFlight `json:"reservations,omitempty"`
+	LastThrottleReason   string                   `json:"last_throttle_reason,omitempty"`
+	LastThrottleUntil    time.Time                `json:"last_throttle_until,omitempty"`
+	LastThrottleDuration int64                    `json:"last_throttle_duration_ms,omitempty"`
+}
+
+type quotaInFlight struct {
+	Tokens    int64     `json:"tokens"`
+	StartedAt time.Time `json:"started_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
 
 func providerQuotaKey(ctx context.Context, backend agentBackend) (string, QuotaControl, bool) {
 	prof, ok := ActiveProfileFromContext(ctx)
@@ -63,36 +93,31 @@ func providerEndpoint(env map[string]string) string {
 	return "ambient"
 }
 
-func estimatePromptTokens(stdin string, q QuotaControl) int64 {
-	est := int64(len(stdin)/quotaTokenChars) + 1
-	reserve := q.ReserveTokens
-	if reserve <= 0 {
-		reserve = defaultQuotaReserveTokens
-	}
-	if est < reserve {
-		return reserve
-	}
-	return est
-}
-
 func reserveProviderQuota(ctx context.Context, backend agentBackend, stdin string) (*quotaReservation, error) {
 	key, q, ok := providerQuotaKey(ctx, backend)
 	if !ok {
 		return nil, nil
 	}
-	lim := limiterForProvider(key, q)
-	est := estimatePromptTokens(stdin, q)
-	if err := lim.reserve(ctx, key, est); err != nil {
+	lim := limiterForProvider(q)
+	est := lim.estimatePromptTokens(stdin)
+	id := newUUID()
+	if err := lim.reserve(ctx, key, id, est); err != nil {
 		return nil, err
 	}
-	return &quotaReservation{limiter: lim, key: key, estimate: est, startTime: time.Now()}, nil
+	return &quotaReservation{limiter: lim, key: key, reservationID: id, estimate: est, startTime: time.Now()}, nil
 }
 
-func limiterForProvider(key string, q QuotaControl) *quotaLimiter {
-	v, _ := providerQuotaLimiters.LoadOrStore(key, &quotaLimiter{})
-	lim := v.(*quotaLimiter)
+func limiterForProvider(q QuotaControl) *quotaLimiter {
+	lim := &quotaLimiter{}
 	lim.configure(q)
 	return lim
+}
+
+func quotaStatePath(q QuotaControl) string {
+	if strings.TrimSpace(q.StatePath) != "" {
+		return q.StatePath
+	}
+	return defaultQuotaStatePath
 }
 
 func (l *quotaLimiter) configure(q QuotaControl) {
@@ -104,19 +129,38 @@ func (l *quotaLimiter) configure(q QuotaControl) {
 			window = parsed
 		}
 	}
+	lease := defaultQuotaLeaseTimeout
+	if q.LeaseTimeout != "" {
+		if parsed, err := time.ParseDuration(q.LeaseTimeout); err == nil && parsed > 0 {
+			lease = parsed
+		}
+	}
+	l.statePath = quotaStatePath(q)
 	l.window = window
 	l.tokensPerWindow = q.TokensPerWindow
 	l.maxConcurrent = q.MaxConcurrent
-	if l.windowStart.IsZero() {
-		l.windowStart = time.Now()
-	}
+	l.reserveTokens = q.ReserveTokens
+	l.leaseTimeout = lease
 }
 
-func (l *quotaLimiter) reserve(ctx context.Context, key string, tokens int64) error {
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
+func (l *quotaLimiter) estimatePromptTokens(stdin string) int64 {
+	est := int64(len(stdin)/quotaTokenChars) + 1
+	reserve := l.reserveTokens
+	if reserve <= 0 {
+		reserve = defaultQuotaReserveTokens
+	}
+	if est < reserve {
+		return reserve
+	}
+	return est
+}
+
+func (l *quotaLimiter) reserve(ctx context.Context, key, reservationID string, tokens int64) error {
 	for {
-		wait, ok := l.tryReserve(key, tokens)
+		wait, ok, err := l.tryReserve(key, reservationID, tokens)
+		if err != nil {
+			return err
+		}
 		if ok {
 			return nil
 		}
@@ -125,93 +169,164 @@ func (l *quotaLimiter) reserve(ctx context.Context, key string, tokens int64) er
 		case <-ctx.Done():
 			timer.Stop()
 			return ctx.Err()
-		case <-ticker.C:
-			timer.Stop()
 		case <-timer.C:
 		}
 	}
 }
 
-func (l *quotaLimiter) tryReserve(key string, tokens int64) (time.Duration, bool) {
+func (l *quotaLimiter) tryReserve(key, reservationID string, tokens int64) (time.Duration, bool, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
-	l.rollWindow(now)
-	if l.observedCalls > 0 {
-		if avg := l.observedTokens / l.observedCalls; avg > tokens {
-			tokens = avg
+	var wait time.Duration
+	var reason string
+	err := l.withState(func(st *quotaStateFile) error {
+		profile := st.profile(key)
+		profile.cleanup(now)
+		profile.rollWindow(now, l.window)
+		effective := profile.effectiveTokens(tokens)
+		if now.Before(profile.BackoffUntil) {
+			wait = profile.BackoffUntil.Sub(now)
+			reason = "backoff"
+			return nil
 		}
-	}
-	if now.Before(l.backoffUntil) {
-		wait := l.backoffUntil.Sub(now)
-		l.logThrottleLocked(now, key, wait, "backoff")
-		return wait, false
-	}
-	if l.maxConcurrent > 0 && l.inFlight >= l.maxConcurrent {
-		l.logThrottleLocked(now, key, time.Second, "concurrency")
-		return time.Second, false
-	}
-	if l.tokensPerWindow > 0 && l.windowTokens+tokens > l.tokensPerWindow {
-		wait := l.windowStart.Add(l.window).Sub(now)
-		if wait < 250*time.Millisecond {
-			wait = 250 * time.Millisecond
+		if l.maxConcurrent > 0 && len(profile.Reservations) >= l.maxConcurrent {
+			wait = shortestReservationWait(profile, now)
+			reason = "concurrency"
+			return nil
 		}
-		l.logThrottleLocked(now, key, wait, "tokens")
-		return wait, false
+		if l.tokensPerWindow > 0 && profile.WindowTokens+effective > l.tokensPerWindow {
+			wait = profile.WindowStart.Add(l.window).Sub(now)
+			reason = "tokens"
+			return nil
+		}
+		profile.WindowTokens += effective
+		if profile.Reservations == nil {
+			profile.Reservations = make(map[string]quotaInFlight)
+		}
+		profile.Reservations[reservationID] = quotaInFlight{
+			Tokens:    effective,
+			StartedAt: now,
+			ExpiresAt: now.Add(l.leaseTimeout),
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, false, err
 	}
-	l.inFlight++
-	l.windowTokens += tokens
-	return 0, true
+	if reason == "" {
+		return 0, true, nil
+	}
+	if wait < 250*time.Millisecond {
+		wait = 250 * time.Millisecond
+	}
+	l.recordThrottle(key, reason, wait)
+	return wait, false, nil
 }
 
-func (l *quotaLimiter) rollWindow(now time.Time) {
-	if l.window <= 0 {
-		l.window = defaultQuotaWindow
+func (l *quotaLimiter) recordThrottle(key, reason string, wait time.Duration) {
+	now := time.Now()
+	if now.Sub(l.lastThrottleLog) >= 5*time.Second {
+		l.lastThrottleLog = now
+		slog.Info("provider.quota.throttle",
+			"profile_key", key,
+			"reason", reason,
+			"wait_ms", wait.Milliseconds(),
+			"state_path", l.statePath,
+		)
 	}
-	if l.windowStart.IsZero() || now.Sub(l.windowStart) >= l.window {
-		l.windowStart = now
-		l.windowTokens = 0
+	_ = l.withState(func(st *quotaStateFile) error {
+		p := st.profile(key)
+		p.LastThrottleReason = reason
+		p.LastThrottleUntil = now.Add(wait)
+		p.LastThrottleDuration = wait.Milliseconds()
+		return nil
+	})
+}
+
+func (p *quotaProfileStat) effectiveTokens(estimate int64) int64 {
+	if p.ObservedCalls > 0 {
+		if avg := p.ObservedTokens / p.ObservedCalls; avg > estimate {
+			return avg
+		}
+	}
+	return estimate
+}
+
+func (p *quotaProfileStat) cleanup(now time.Time) {
+	for id, r := range p.Reservations {
+		if !r.ExpiresAt.IsZero() && now.After(r.ExpiresAt) {
+			delete(p.Reservations, id)
+		}
+	}
+	if len(p.Reservations) == 0 {
+		p.Reservations = nil
 	}
 }
 
-func (l *quotaLimiter) logThrottleLocked(now time.Time, key string, wait time.Duration, reason string) {
-	if now.Sub(l.lastThrottleLog) < 5*time.Second {
-		return
+func (p *quotaProfileStat) rollWindow(now time.Time, window time.Duration) {
+	if window <= 0 {
+		window = defaultQuotaWindow
 	}
-	l.lastThrottleLog = now
-	slog.Info("provider.quota.throttle",
-		"profile_key", key,
-		"reason", reason,
-		"wait_ms", wait.Milliseconds(),
-		"in_flight", l.inFlight,
-		"window_tokens", l.windowTokens,
-		"tokens_per_window", l.tokensPerWindow,
-	)
+	if p.WindowStart.IsZero() || now.Sub(p.WindowStart) >= window {
+		p.WindowStart = now
+		p.WindowTokens = 0
+	}
+}
+
+func shortestReservationWait(p *quotaProfileStat, now time.Time) time.Duration {
+	var shortest time.Duration
+	for _, r := range p.Reservations {
+		wait := r.ExpiresAt.Sub(now)
+		if wait <= 0 {
+			return 250 * time.Millisecond
+		}
+		if shortest == 0 || wait < shortest {
+			shortest = wait
+		}
+	}
+	if shortest == 0 || shortest > time.Second {
+		return time.Second
+	}
+	return shortest
 }
 
 func (r *quotaReservation) finish(usage map[string]any, errText string) {
 	if r == nil || r.limiter == nil {
 		return
 	}
-	r.limiter.finish(r.key, r.estimate, usage, errText, time.Since(r.startTime))
+	r.limiter.finish(r.key, r.reservationID, r.estimate, usage, errText, time.Since(r.startTime))
 }
 
-func (l *quotaLimiter) finish(key string, estimate int64, usage map[string]any, errText string, duration time.Duration) {
+func (l *quotaLimiter) finish(key, reservationID string, estimate int64, usage map[string]any, errText string, duration time.Duration) {
 	observed := usageTotalTokens(usage)
 	rateLimited := looksRateLimited(errText)
-	l.mu.Lock()
-	if l.inFlight > 0 {
-		l.inFlight--
+	now := time.Now()
+	var calls, tokens int64
+	var inFlight int
+	err := l.withState(func(st *quotaStateFile) error {
+		profile := st.profile(key)
+		profile.cleanup(now)
+		delete(profile.Reservations, reservationID)
+		if observed > 0 {
+			profile.ObservedCalls++
+			profile.ObservedTokens += observed
+			profile.LastObservedTokens = observed
+		}
+		profile.LastEstimatedTokens = estimate
+		if rateLimited {
+			profile.LastRateLimitedAt = now
+			profile.BackoffUntil = now.Add(l.window)
+		}
+		calls = profile.ObservedCalls
+		tokens = profile.ObservedTokens
+		inFlight = len(profile.Reservations)
+		return nil
+	})
+	if err != nil {
+		slog.Warn("provider.quota.finish", "profile_key", key, "state_path", l.statePath, "err", err)
+		return
 	}
-	if observed > 0 {
-		l.observedCalls++
-		l.observedTokens += observed
-	}
-	if rateLimited {
-		l.backoffUntil = time.Now().Add(l.window)
-	}
-	calls, tokens, inFlight := l.observedCalls, l.observedTokens, l.inFlight
-	l.mu.Unlock()
 	slog.Info("provider.quota.usage",
 		"profile_key", key,
 		"estimated_tokens", estimate,
@@ -221,7 +336,99 @@ func (l *quotaLimiter) finish(key string, estimate int64, usage map[string]any, 
 		"duration_ms", duration.Milliseconds(),
 		"in_flight", inFlight,
 		"rate_limited", rateLimited,
+		"state_path", l.statePath,
 	)
+}
+
+func (s *quotaStateFile) profile(key string) *quotaProfileStat {
+	if s.Profiles == nil {
+		s.Profiles = make(map[string]*quotaProfileStat)
+	}
+	p := s.Profiles[key]
+	if p == nil {
+		p = &quotaProfileStat{}
+		s.Profiles[key] = p
+	}
+	if p.Reservations == nil {
+		p.Reservations = make(map[string]quotaInFlight)
+	}
+	return p
+}
+
+func (l *quotaLimiter) withState(fn func(*quotaStateFile) error) error {
+	path := l.statePath
+	if strings.TrimSpace(path) == "" {
+		path = defaultQuotaStatePath
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("provider quota: create state dir: %w", err)
+	}
+	lockPath := path + ".lock"
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return fmt.Errorf("provider quota: open lock %s: %w", lockPath, err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("provider quota: lock %s: %w", lockPath, err)
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+
+	st, err := readQuotaState(path)
+	if err != nil {
+		return err
+	}
+	if err := fn(st); err != nil {
+		return err
+	}
+	st.Schema = "kitsoki/provider-quota/v1"
+	st.Updated = time.Now()
+	return writeQuotaState(path, st)
+}
+
+func readQuotaState(path string) (*quotaStateFile, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &quotaStateFile{Schema: "kitsoki/provider-quota/v1", Profiles: map[string]*quotaProfileStat{}}, nil
+		}
+		return nil, fmt.Errorf("provider quota: read state %s: %w", path, err)
+	}
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return &quotaStateFile{Schema: "kitsoki/provider-quota/v1", Profiles: map[string]*quotaProfileStat{}}, nil
+	}
+	var st quotaStateFile
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return nil, fmt.Errorf("provider quota: parse state %s: %w", path, err)
+	}
+	if st.Profiles == nil {
+		st.Profiles = map[string]*quotaProfileStat{}
+	}
+	return &st, nil
+}
+
+func writeQuotaState(path string, st *quotaStateFile) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".provider-state-*.tmp")
+	if err != nil {
+		return fmt.Errorf("provider quota: create temp state: %w", err)
+	}
+	enc := json.NewEncoder(tmp)
+	enc.SetIndent("", "  ")
+	encodeErr := enc.Encode(st)
+	closeErr := tmp.Close()
+	if encodeErr != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("provider quota: encode state: %w", encodeErr)
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("provider quota: close temp state: %w", closeErr)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("provider quota: replace state: %w", err)
+	}
+	return nil
 }
 
 func usageTotalTokens(usage map[string]any) int64 {

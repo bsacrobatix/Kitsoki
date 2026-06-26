@@ -82,6 +82,24 @@ harness_profiles:
 harness_profiles:
   p: { backend: claude, effort: max, efforts: [low, medium] }
 `,
+		"invalid quota window rejected": `
+harness_profiles:
+  p:
+    backend: claude
+    quota: { window: nope }
+`,
+		"invalid quota lease timeout rejected": `
+harness_profiles:
+  p:
+    backend: claude
+    quota: { lease_timeout: forever }
+`,
+		"negative quota tokens rejected": `
+harness_profiles:
+  p:
+    backend: claude
+    quota: { tokens_per_window: -1 }
+`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
