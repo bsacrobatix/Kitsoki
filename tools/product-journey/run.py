@@ -275,6 +275,19 @@ def build_run_bundle(
 
     stages = stage_plan(target, scenarios)
     scenario_items = scenario_plan(scenarios)
+    scenario_task_by_id = {
+        task["scenario"]: task
+        for task in (
+            build_assignment_scenario_task(target, persona, scenario)
+            for scenario in scenarios
+        )
+    }
+    for scenario in scenario_items:
+        task = scenario_task_by_id.get(scenario["id"], {})
+        scenario["task_prompt"] = task.get("task_prompt", scenario["task"])
+        scenario["evidence_dir"] = task.get("evidence_dir", f"evidence/{target['id']}--{persona['id']}/{scenario['id']}")
+        if task.get("bug_query"):
+            scenario["bug_query"] = task["bug_query"]
     run_json = {
         "run_id": run_id,
         "created_at": created_at,
@@ -398,11 +411,16 @@ def build_matrix_bundle(
         for persona in assigned_personas:
             assignment_id = f"{target['id']}--{persona['id']}"
             assignment_seed = f"{seed}-{index + 1:02d}-{persona['id']}"
+            scenario_tasks = [
+                build_assignment_scenario_task(target, persona, scenario)
+                for scenario in scenarios
+            ]
             assignments.append({
                 "id": assignment_id,
                 "target": target,
                 "persona": persona,
                 "scenarios": scenario_ids,
+                "scenario_tasks": scenario_tasks,
                 "seed": assignment_seed,
                 "status": "planned",
                 "evidence_dir": f"evidence/{assignment_id}",
@@ -492,6 +510,49 @@ def evidence_capture_hint(kind: str) -> str:
         "reproduction_steps": "Save deterministic reproduction steps.",
     }
     return hints.get(kind, "Save this evidence artifact and attach it to the run.")
+
+
+def build_assignment_scenario_task(target: dict, persona: dict, scenario: dict) -> dict:
+    repo = target["label"]
+    stack = target.get("stack", "unknown stack")
+    bug_query = target.get("bug_query", "")
+    persona_label = persona["label"]
+    risk_focus = ", ".join(persona.get("risk_focus", []))
+    base = {
+        "scenario": scenario["id"],
+        "label": scenario["label"],
+        "target": target["id"],
+        "persona": persona["id"],
+        "primary_story": scenario["primary_story"],
+        "required_mcp": scenario["required_mcp"],
+        "evidence": scenario["evidence"],
+        "success_criteria": scenario["success_criteria"],
+    }
+    prompts = {
+        "product-discovery": (
+            f"As a {persona_label}, start from the local Kitsoki product site and decide whether it credibly explains how to use Kitsoki on {repo} ({stack}). "
+            f"Focus on {risk_focus}. Capture the first confusing claim, missing prerequisite, or clear next action."
+        ),
+        "project-onboarding": (
+            f"Onboard {repo} using Kitsoki's documented project setup path. Confirm the generated project profile names plausible {stack} commands, repo files, and the next story to launch."
+        ),
+        "bugfix": (
+            f"Use the target bug queue for {repo}: {bug_query}. Pick or simulate one concrete bug candidate from that queue, drive the bugfix story, and require deterministic oracle/test evidence before calling the fix credible."
+        ),
+        "prd-design": (
+            f"Turn one small improvement idea for {repo} into a PRD/design artifact. The idea should be grounded in {repo}'s stack ({stack}), existing project conventions, and the {persona_label} risk focus: {risk_focus}."
+        ),
+        "feature-implementation": (
+            f"Implement or dry-run a small accepted design slice for {repo}. Keep the change reviewable for a {persona_label}, and validate with targeted deterministic tests or an explicit blocker."
+        ),
+        "evidence-backed-product-bug": (
+            f"File a Kitsoki product bug discovered while working on {repo}. Include expected vs actual behavior, reproduction context, visual/TUI evidence, and a trace reference."
+        ),
+    }
+    base["task_prompt"] = prompts.get(scenario["id"], scenario["task"])
+    base["evidence_dir"] = f"evidence/{target['id']}--{persona['id']}/{scenario['id']}"
+    base["bug_query"] = bug_query if scenario["id"] == "bugfix" else ""
+    return base
 
 
 def driver_harness(primary_story: str) -> str:
@@ -718,6 +779,7 @@ def build_execution_plan(run_json: dict, evidence: dict) -> dict:
             "persona": run_json["persona"]["id"],
             "project": run_json["project"]["id"],
             "task": scenario["task"],
+            "task_prompt": scenario.get("task_prompt", scenario["task"]),
             "primary_story": scenario["primary_story"],
             "mcp_steps": [
                 {"tool": tool, "instruction": mcp_step(tool)}
@@ -792,6 +854,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
                 "id": step["scenario"],
                 "label": step["label"],
                 "task": step["task"],
+                "task_prompt": step.get("task_prompt", step["task"]),
                 "primary_story": step["primary_story"],
                 "mcp_tools": [mcp["tool"] for mcp in step["mcp_steps"]],
                 "success_criteria": step["success_criteria"],
@@ -824,6 +887,8 @@ def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict) -> d
             "label": scenario["label"],
             "stage": scenario["stage"],
             "primary_story": scenario["primary_story"],
+            "task_prompt": scenario.get("task_prompt", scenario["task"]),
+            "evidence_dir": scenario.get("evidence_dir", f"evidence/{run_json['project']['id']}--{run_json['persona']['id']}/{scenario_id}"),
             "harness": driver_harness(scenario["primary_story"]),
             "visual_surface": driver_visual_surface(scenario["primary_story"], required_mcp),
             "required_mcp": required_mcp,
@@ -885,6 +950,9 @@ def render_driver_plan(plan: dict) -> str:
             f"- Harness: `{scenario['harness']}`",
             f"- Visual surface: `{scenario['visual_surface']}`",
             f"- MCP: {', '.join(scenario['required_mcp'])}",
+            f"- Evidence dir: `{scenario['evidence_dir']}`",
+            "",
+            scenario["task_prompt"],
             "",
             "### Action Sequence",
             "",
@@ -945,7 +1013,7 @@ def render_agent_brief(brief: dict) -> str:
             f"- MCP tools: {', '.join(scenario['mcp_tools'])}",
             f"- Evidence: {', '.join(scenario['evidence'])}",
             "",
-            scenario["task"],
+            scenario.get("task_prompt", scenario["task"]),
             "",
             "Success criteria:",
         ])
@@ -984,6 +1052,10 @@ def render_execution_plan(plan: dict) -> str:
             f"- Stage: `{step['stage']}`",
             "",
             step["task"],
+            "",
+            "Driver prompt:",
+            "",
+            step.get("task_prompt", step["task"]),
             "",
             "### MCP Steps",
             "",
@@ -1507,6 +1579,15 @@ def validate_run_bundle(run_dir: Path) -> dict:
             "scenarios.json item count does not match run.json scenarios",
             f"scenarios.json={len(scenario_rows)}, run.json={len(scenarios)}",
         )
+    if run_json:
+        missing_scenario_keys = [
+            f"{scenario.get('id', 'unknown')}/{key}"
+            for scenario in scenarios
+            for key in schema["scenario"]["required"]
+            if key not in scenario
+        ]
+        if missing_scenario_keys:
+            add_validation_issue(issues, "error", "scenario-required-keys", "run.json scenarios are missing required keys", ", ".join(missing_scenario_keys))
     if scenario_outcomes and len(outcome_items) != len(scenarios):
         add_validation_issue(
             issues,
@@ -1677,6 +1758,14 @@ def validate_matrix_bundle(matrix_dir: Path) -> dict:
         scenario_count = len(matrix.get("scenarios", []))
         if matrix.get("scenario_count") != scenario_count:
             add_validation_issue(issues, "error", "matrix-scenario-list", "matrix scenario_count does not match scenarios length", f"scenario_count={matrix.get('scenario_count')}, scenarios={scenario_count}")
+        missing_assignment_keys = [
+            f"{assignment.get('id', f'assignment-{index}')}/{key}"
+            for index, assignment in enumerate(matrix.get("assignments", []), start=1)
+            for key in schema["matrix_result"]["assignment_required"]
+            if key not in assignment
+        ]
+        if missing_assignment_keys:
+            add_validation_issue(issues, "error", "matrix-assignment-required-keys", "Matrix assignments are missing required keys", ", ".join(missing_assignment_keys))
         missing_commands = [
             assignment.get("id", f"assignment-{index}")
             for index, assignment in enumerate(matrix.get("assignments", []), start=1)
@@ -1684,6 +1773,30 @@ def validate_matrix_bundle(matrix_dir: Path) -> dict:
         ]
         if missing_commands:
             add_validation_issue(issues, "error", "matrix-emit-command", "Matrix assignments are missing emit_run_command", ", ".join(missing_commands))
+        missing_tasks = [
+            assignment.get("id", f"assignment-{index}")
+            for index, assignment in enumerate(matrix.get("assignments", []), start=1)
+            if len(assignment.get("scenario_tasks", [])) != scenario_count
+        ]
+        if missing_tasks:
+            add_validation_issue(issues, "error", "matrix-scenario-tasks", "Matrix assignments are missing per-scenario task prompts", ", ".join(missing_tasks))
+        missing_task_keys = [
+            f"{assignment.get('id', f'assignment-{index}')}/{task.get('scenario', f'task-{task_index}')}/{key}"
+            for index, assignment in enumerate(matrix.get("assignments", []), start=1)
+            for task_index, task in enumerate(assignment.get("scenario_tasks", []), start=1)
+            for key in schema["matrix_result"]["scenario_task_required"]
+            if key not in task
+        ]
+        if missing_task_keys:
+            add_validation_issue(issues, "error", "matrix-scenario-task-required-keys", "Matrix scenario tasks are missing required keys", ", ".join(missing_task_keys))
+        empty_prompts = [
+            f"{assignment.get('id', f'assignment-{index}')}/{task.get('scenario', 'unknown')}"
+            for index, assignment in enumerate(matrix.get("assignments", []), start=1)
+            for task in assignment.get("scenario_tasks", [])
+            if not task.get("task_prompt", "")
+        ]
+        if empty_prompts:
+            add_validation_issue(issues, "error", "matrix-empty-task-prompt", "Matrix scenario tasks include empty prompts", ", ".join(empty_prompts))
 
     if deck and len(deck.get("scenes", [])) < 3:
         add_validation_issue(issues, "warn", "matrix-deck-scenes", "Matrix deck has very few scenes", f"scenes={len(deck.get('scenes', []))}")
@@ -1759,6 +1872,8 @@ def render_matrix_summary(matrix: dict) -> str:
             f"{assignment['persona']['label']} ({len(assignment['scenarios'])} scenarios) - "
             f"`{assignment['emit_run_command']}`"
         )
+        for task in assignment.get("scenario_tasks", [])[:2]:
+            lines.append(f"  - `{task['scenario']}`: {task['task_prompt']}")
     lines.extend([
         "",
         "## Execution Loop",
@@ -1785,6 +1900,11 @@ def render_matrix_deck(matrix: dict) -> dict:
         f"{scenario['label']}: {', '.join(scenario['required_mcp'])}"
         for scenario in matrix["scenarios"]
     ]
+    task_lines = []
+    for assignment in matrix["assignments"][:5]:
+        first_task = assignment.get("scenario_tasks", [{}])[0]
+        if first_task:
+            task_lines.append(f"{assignment['target']['label']} / {assignment['persona']['label']}: {first_task.get('task_prompt', '')}")
     return {
         "meta": {
             "mode": "report",
@@ -1819,6 +1939,13 @@ def render_matrix_deck(matrix: dict) -> dict:
                 "title": "MCP evidence contract",
                 "body": "\n".join(scenario_lines),
                 "narration": "Every assignment uses the same scenario set and evidence contract.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Task prompts",
+                "title": "Natural-use seeds",
+                "body": "\n".join(task_lines) if task_lines else "No assignment task prompts generated.",
+                "narration": "Each matrix assignment includes deterministic task prompts so natural-use runs are repeatable.",
             },
             {
                 "type": "narrative",

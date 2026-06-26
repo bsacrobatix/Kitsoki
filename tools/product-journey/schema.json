@@ -39,7 +39,9 @@
   "matrix_result": {
     "required": ["matrix_id", "created_at", "seed", "target_count", "assignment_count", "scenario_count", "targets", "assignments", "artifacts"],
     "artifacts": ["matrix.json", "matrix.md", "deck.slidey.json"],
-    "target_count": 10
+    "target_count": 10,
+    "assignment_required": ["id", "target", "persona", "scenarios", "scenario_tasks", "seed", "status", "evidence_dir", "emit_run_command"],
+    "scenario_task_required": ["scenario", "label", "target", "persona", "primary_story", "required_mcp", "evidence", "success_criteria", "task_prompt", "evidence_dir"]
   },
   "matrix_rollup": {
     "required": ["matrix_id", "summary", "runs", "scenario_outcomes", "artifacts"],
@@ -47,7 +49,7 @@
   },
   "stage_statuses": ["planned", "ready", "captured", "cached_validated", "validated", "blocked", "error"],
   "scenario": {
-    "required": ["id", "label", "stage", "task", "primary_story", "required_mcp", "evidence", "success_criteria"]
+    "required": ["id", "label", "stage", "task", "task_prompt", "primary_story", "required_mcp", "evidence", "success_criteria"]
   },
   "evidence_statuses": ["missing", "captured", "validated", "rejected"],
   "finding_kinds": ["strength", "weakness", "issue", "fix"],

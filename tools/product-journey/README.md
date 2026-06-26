@@ -41,6 +41,10 @@ This writes `.artifacts/product-journey/matrices/<matrix-id>/` with
 `matrix.json`, `matrix.md`, and `deck.slidey.json`. The source target list lives
 in `github-targets.json`; refresh each target's `bug_query` before a live scored
 sweep so current open bug counts are recorded outside the no-LLM planner.
+Each matrix assignment includes deterministic `scenario_tasks` that specialize
+the shared scenarios for the target repository, persona, stack, and bug query;
+use those prompts to keep natural-use runs repeatable instead of inventing a new
+task shape per run.
 Every target `id` from `github-targets.json` is also accepted by `--emit-run`,
 so a matrix assignment can become a concrete run bundle:
 
