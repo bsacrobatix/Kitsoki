@@ -1,7 +1,7 @@
 states:
   dogfood_created:
     description: "A deterministic product-journey dogfood smoke exists for review."
-    relevant_world: [seed, dogfood_id, dogfood_dir, dogfood_report_path, dogfood_deck_path, dogfood_matrix_deck_path, dogfood_run_deck_path, dogfood_rollup_deck_path, matrix_dir, run_dir, driver_replay_scenario, driver_replay_attached_evidence_count, driver_replay_media_manifest_path, driver_replay_journal_path, driver_replay_handoff_path, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, review_status, review_summary, dogfood_review_passed, dogfood_review_total, dogfood_review_warnings, dogfood_review_failed, dogfood_review_backlog_summary, validation_status, dogfood_run_validation_warnings, dogfood_matrix_validation_warnings, dogfood_run_validation_issue_summary, dogfood_matrix_validation_issue_summary, status]
+    relevant_world: [seed, dogfood_id, dogfood_dir, dogfood_report_path, dogfood_deck_path, dogfood_matrix_deck_path, dogfood_run_deck_path, dogfood_rollup_deck_path, matrix_dir, run_dir, driver_replay_scenario, driver_replay_attached_evidence_count, driver_replay_scenario_count, driver_replay_playback_scenarios, driver_replay_media_manifest_path, driver_replay_journal_path, driver_replay_handoff_path, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, review_status, review_summary, dogfood_review_passed, dogfood_review_total, dogfood_review_warnings, dogfood_review_failed, dogfood_review_backlog_summary, validation_status, dogfood_run_validation_warnings, dogfood_matrix_validation_warnings, dogfood_run_validation_issue_summary, dogfood_matrix_validation_issue_summary, status]
     view:
       - banner:
           text: "DOGFOOD SMOKE CREATED"
@@ -21,6 +21,7 @@ states:
             Rollup deck: '{{ world.dogfood_rollup_deck_path|default:"(pending)" }}'
             Driver replay scenario: '{{ world.driver_replay_scenario|default:"(not a replay smoke)" }}'
             Driver replay evidence: "{{ world.driver_replay_attached_evidence_count }}"
+            Driver replay coverage: "{{ world.driver_replay_playback_scenarios }} / {{ world.driver_replay_scenario_count }} playback"
             Driver journal: '{{ world.driver_replay_journal_path|default:"(pending)" }}'
             Driver handoff: '{{ world.driver_replay_handoff_path|default:"(pending)" }}'
             Media manifest: '{{ world.driver_replay_media_manifest_path|default:"(pending)" }}'
@@ -47,6 +48,9 @@ states:
             - label: "driver_replay_smoke scenario=... seed=..."
               hint: "run the one-scenario cassette-backed driver replay smoke"
               intent: driver_replay_smoke
+            - label: "driver_replay_sweep seed=..."
+              hint: "run cassette-backed driver replay for every scenario"
+              intent: driver_replay_sweep
             - label: "start project=... persona=... seed=..."
               hint: "create a concrete live/cassette run bundle after reviewing the smoke"
               intent: start
@@ -165,6 +169,47 @@ states:
               on_error: dogfood_created
             - set:
                 status: "driver_replay_smoke_created"
+      driver_replay_sweep:
+        - target: .
+          effects:
+            - set:
+                seed: "{{ slots.seed ?? world.seed }}"
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
+                validation_issue_summary: ""
+                review_status: ""
+                review_summary: ""
+                status: "driver_replay_sweeping"
+            - invoke: host.run
+              id: driver_replay_product_journey_sweep
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --driver-replay-sweep
+                  - --json-output
+                  - --seed
+                  - "{{ slots.seed ?? world.seed }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                dogfood_id: "stdout_json.sweep_id"
+                dogfood_dir: "stdout_json.sweep_dir"
+                dogfood_report_path: "stdout_json.report_path"
+                dogfood_deck_path: "stdout_json.deck_path"
+                deck_path: "stdout_json.deck_path"
+                driver_replay_scenario: "stdout_json.status"
+                driver_replay_scenario_count: "stdout_json.scenario_count"
+                driver_replay_playback_scenarios: "stdout_json.playback_scenarios"
+                driver_replay_attached_evidence_count: "stdout_json.attached_evidence_count"
+                validation_status: "stdout_json.status"
+                validation_errors: "stdout_json.validation_errors"
+                validation_warnings: "stdout_json.validation_warnings"
+                validation_issue_summary: "stdout_json.failed_scenario_summary"
+              on_error: dogfood_created
+            - set:
+                status: "driver_replay_sweep_created"
       start:
         - target: run_created
           effects:

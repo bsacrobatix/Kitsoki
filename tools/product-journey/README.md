@@ -75,6 +75,7 @@ python3 tools/product-journey/run.py --driver-replay-smoke --seed demo
 python3 tools/product-journey/run.py --driver-replay-smoke \
   --smoke-scenario project-onboarding \
   --seed demo
+python3 tools/product-journey/run.py --driver-replay-sweep --seed demo
 ```
 
 This creates a normal run bundle, attaches all `bugfix` minimum-evidence slots
@@ -87,6 +88,10 @@ must pass and the `driver-evidence-linked` check must be satisfied for the
 captured scenario. Scenarios without a playback-capable minimum-evidence slot
 will still expose the missing playback proof in review; that is a contract gap
 to fix before calling that scenario representative.
+Use `--driver-replay-sweep` when you want a single no-LLM gate that every
+scenario can replay with cassette-backed proof evidence, a linked driver
+journal, clean validation, and at least one playback item for the generated
+Slidey deck.
 
 This writes `.artifacts/product-journey/matrices/<matrix-id>/` with
 `matrix.json`, `matrix.md`, and `deck.slidey.json`. The source target list lives

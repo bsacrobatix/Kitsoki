@@ -5357,6 +5357,158 @@ def render_driver_replay_smoke_deck(report: dict) -> dict:
     }
 
 
+def render_driver_replay_sweep_summary(report: dict) -> str:
+    lines = [
+        "# Product Journey Driver Replay Sweep",
+        "",
+        f"- Status: `{report['status']}`",
+        f"- Sweep: `{report['sweep_id']}`",
+        f"- Scenarios: {report['summary']['passed']} / {report['summary']['scenarios']} passed",
+        f"- Playback scenarios: {report['summary']['playback_scenarios']} / {report['summary']['scenarios']}",
+        f"- Validation errors: {report['summary']['validation_errors']}",
+        f"- Sweep dir: `{report['sweep_dir']}`",
+        "",
+        "## Scenarios",
+        "",
+    ]
+    for row in report["scenarios"]:
+        lines.extend([
+            f"### {row['scenario']}",
+            "",
+            f"- Status: `{row['status']}`",
+            f"- Review: `{row['review_status']}` - {row['review_summary']}",
+            f"- Validation: `{row['validation_status']}`",
+            f"- Evidence: {row['attached_evidence_count']}",
+            f"- Playback items: {row['playback_items']}",
+            f"- Run: `{row['run_dir']}`",
+            f"- Deck: `{row['run_deck_path']}`",
+            "",
+        ])
+    return "\n".join(lines)
+
+
+def render_driver_replay_sweep_deck(report: dict) -> dict:
+    rows = [
+        f"{row['scenario']}: {row['status']}, playback {row['playback_items']}, validation {row['validation_status']}"
+        for row in report["scenarios"]
+    ]
+    return {
+        "title": "Product Journey Driver Replay Sweep",
+        "description": "No-LLM cassette-backed proof that every reusable product-journey scenario can attach proof evidence, journal the driver attempt, provide playback, review, and validate.",
+        "slides": [
+            {
+                "type": "title",
+                "title": "Driver replay sweep",
+                "subtitle": f"{report['summary']['passed']} / {report['summary']['scenarios']} scenarios passed",
+                "narration": "This deck summarizes the deterministic cassette-backed replay sweep across every product journey scenario.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Coverage",
+                "title": "Scenario replay coverage",
+                "body": "\n".join(f"- {row}" for row in rows),
+                "narration": "Each scenario should have proof evidence, an attached driver journal, playback media, review output, and clean validation.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Artifacts",
+                "title": report["sweep_id"],
+                "body": f"Report: {report['artifacts']['report']}\nSummary: {report['artifacts']['summary']}",
+                "narration": "The sweep report links to each scenario run bundle and its normal Slidey review deck.",
+            },
+        ],
+    }
+
+
+def build_driver_replay_sweep(
+    catalog: dict,
+    github_targets: dict,
+    personas: list[dict],
+    scenarios: list[dict],
+    seed: str,
+) -> dict:
+    sweep_id = f"{slug_timestamp()}-driver-replay-sweep-{seed}"
+    sweep_dir = DOGFOOD_ROOT / sweep_id
+    sweep_dir.mkdir(parents=True, exist_ok=False)
+    rows = []
+    scenario_reports = []
+    for scenario in scenarios:
+        scenario_id = scenario["id"]
+        report = build_driver_replay_smoke(
+            catalog,
+            github_targets,
+            personas,
+            scenarios,
+            f"{seed}-{scenario_id}",
+            scenario_id,
+        )
+        scenario_reports.append(report)
+        media_manifest = read_json(Path(report["run"]["media_manifest_path"]))
+        row = {
+            "scenario": scenario_id,
+            "status": report["status"],
+            "smoke_id": report["smoke_id"],
+            "smoke_dir": report["smoke_dir"],
+            "run_dir": report["run"]["run_dir"],
+            "run_deck_path": report["run"]["deck_path"],
+            "driver_journal_path": report["run"]["driver_journal_path"],
+            "media_manifest_path": report["run"]["media_manifest_path"],
+            "attached_evidence_count": len(report["attached_evidence"]),
+            "playback_items": media_manifest.get("summary", {}).get("playback_items", 0),
+            "review_status": report["review"].get("review_status", ""),
+            "review_summary": report["review"].get("summary", ""),
+            "validation_status": report["validation"].get("status", ""),
+            "validation_errors": report["validation"].get("errors", 0),
+            "validation_warnings": report["validation"].get("warnings", 0),
+        }
+        rows.append(row)
+
+    failed = [
+        row for row in rows
+        if row["status"] != "passed"
+        or row["validation_status"] != "valid"
+        or row["validation_errors"]
+        or row["playback_items"] < 1
+    ]
+    summary = {
+        "scenarios": len(rows),
+        "passed": len(rows) - len(failed),
+        "failed": len(failed),
+        "playback_scenarios": sum(1 for row in rows if row["playback_items"] >= 1),
+        "validation_errors": sum(row["validation_errors"] for row in rows),
+        "validation_warnings": sum(row["validation_warnings"] for row in rows),
+        "attached_evidence_count": sum(row["attached_evidence_count"] for row in rows),
+    }
+    report = {
+        "status": "passed" if not failed else "failed",
+        "sweep_id": sweep_id,
+        "created_at": now_utc(),
+        "seed": seed,
+        "sweep_dir": str(sweep_dir),
+        "summary": summary,
+        "scenarios": rows,
+        "failed_scenarios": [row["scenario"] for row in failed],
+        "scenario_reports": [
+            {
+                "scenario": row["scenario"],
+                "report_path": scenario_report["artifacts"]["report"],
+                "summary_path": scenario_report["artifacts"]["summary"],
+                "deck_path": scenario_report["artifacts"]["deck"],
+            }
+            for row, scenario_report in zip(rows, scenario_reports)
+        ],
+        "artifacts": {
+            "report": str(sweep_dir / "driver-replay-sweep.json"),
+            "summary": str(sweep_dir / "driver-replay-sweep.md"),
+            "deck": str(sweep_dir / "driver-replay-sweep.slidey.json"),
+        },
+    }
+    write_json(sweep_dir / "driver-replay-sweep.json", report)
+    (sweep_dir / "driver-replay-sweep.md").write_text(render_driver_replay_sweep_summary(report), encoding="utf-8")
+    write_json(sweep_dir / "driver-replay-sweep.slidey.json", render_driver_replay_sweep_deck(report))
+    return report
+
+
 def build_driver_replay_smoke(
     catalog: dict,
     github_targets: dict,
@@ -6127,6 +6279,7 @@ def main() -> None:
     parser.add_argument("--emit-matrix", action="store_true", help="Write a no-LLM 10-repo GitHub journey matrix")
     parser.add_argument("--dogfood-smoke", action="store_true", help="Run a deterministic no-LLM matrix-to-rollup smoke and write review artifacts")
     parser.add_argument("--driver-replay-smoke", action="store_true", help="Run a deterministic no-LLM one-scenario driver replay smoke with cassette evidence")
+    parser.add_argument("--driver-replay-sweep", action="store_true", help="Run deterministic no-LLM driver replay smokes for every scenario")
     parser.add_argument("--validate-corpus", action="store_true", help="Validate personas, scenarios, and GitHub target catalog without writing artifacts")
     parser.add_argument("--refresh-github-targets", action="store_true", help="Query GitHub for current open bug counts and write a target-proof artifact")
     parser.add_argument("--target-proof-file", default="", help="target-proof.json or target-proof directory to merge into --emit-matrix")
@@ -6335,6 +6488,42 @@ def main() -> None:
         print(f"Review: {report['review']['summary']}")
         print(f"Validation: {report['validation']['status']} ({report['validation']['warnings']} warnings)")
         append_log(f"Ran product journey driver replay smoke {report['smoke_id']}: {report['status']}")
+        if report["status"] != "passed":
+            raise SystemExit(1)
+        return
+
+    if args.driver_replay_sweep:
+        report = build_driver_replay_sweep(catalog, github_targets, personas, scenarios, args.seed)
+        if args.json_output:
+            print(json.dumps({
+                "status": report["status"],
+                "sweep_id": report["sweep_id"],
+                "sweep_dir": report["sweep_dir"],
+                "report_path": report["artifacts"]["report"],
+                "summary_path": report["artifacts"]["summary"],
+                "deck_path": report["artifacts"]["deck"],
+                "scenario_count": report["summary"]["scenarios"],
+                "passed": report["summary"]["passed"],
+                "failed": report["summary"]["failed"],
+                "playback_scenarios": report["summary"]["playback_scenarios"],
+                "validation_errors": report["summary"]["validation_errors"],
+                "validation_warnings": report["summary"]["validation_warnings"],
+                "attached_evidence_count": report["summary"]["attached_evidence_count"],
+                "failed_scenarios": report["failed_scenarios"],
+                "failed_scenario_summary": ", ".join(report["failed_scenarios"]),
+            }, sort_keys=True))
+            append_log(f"Ran product journey driver replay sweep {report['sweep_id']}: {report['status']}")
+            if report["status"] != "passed":
+                raise SystemExit(1)
+            return
+        print(f"Product journey driver replay sweep: {report['sweep_id']}")
+        print(f"Status: {report['status']}")
+        print(f"Scenarios: {report['summary']['passed']} / {report['summary']['scenarios']} passed")
+        print(f"Playback: {report['summary']['playback_scenarios']} / {report['summary']['scenarios']}")
+        print(f"Artifacts: {report['sweep_dir']}")
+        print(f"Summary: {report['artifacts']['summary']}")
+        print(f"Deck: {report['artifacts']['deck']}")
+        append_log(f"Ran product journey driver replay sweep {report['sweep_id']}: {report['status']}")
         if report["status"] != "passed":
             raise SystemExit(1)
         return

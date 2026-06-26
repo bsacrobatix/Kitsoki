@@ -33,6 +33,9 @@ states:
             - label: "driver_replay_smoke scenario=... seed=..."
               hint: "prove one reusable-driver scenario with cassette evidence and journal-linked refs"
               intent: driver_replay_smoke
+            - label: "driver_replay_sweep seed=..."
+              hint: "prove every reusable-driver scenario with cassette evidence and playback refs"
+              intent: driver_replay_sweep
             - label: "validate_corpus"
               hint: "preflight personas, scenarios, quality gates, and the GitHub target catalog"
               intent: validate_corpus
@@ -235,6 +238,47 @@ states:
               on_error: idle
             - set:
                 status: "driver_replay_smoke_created"
+      driver_replay_sweep:
+        - target: dogfood_created
+          effects:
+            - set:
+                seed: "{{ slots.seed ?? world.seed }}"
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
+                validation_issue_summary: ""
+                review_status: ""
+                review_summary: ""
+                status: "driver_replay_sweeping"
+            - invoke: host.run
+              id: driver_replay_product_journey_sweep
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --driver-replay-sweep
+                  - --json-output
+                  - --seed
+                  - "{{ slots.seed ?? world.seed }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                dogfood_id: "stdout_json.sweep_id"
+                dogfood_dir: "stdout_json.sweep_dir"
+                dogfood_report_path: "stdout_json.report_path"
+                dogfood_deck_path: "stdout_json.deck_path"
+                deck_path: "stdout_json.deck_path"
+                driver_replay_scenario: "stdout_json.status"
+                driver_replay_scenario_count: "stdout_json.scenario_count"
+                driver_replay_playback_scenarios: "stdout_json.playback_scenarios"
+                driver_replay_attached_evidence_count: "stdout_json.attached_evidence_count"
+                validation_status: "stdout_json.status"
+                validation_errors: "stdout_json.validation_errors"
+                validation_warnings: "stdout_json.validation_warnings"
+                validation_issue_summary: "stdout_json.failed_scenario_summary"
+              on_error: idle
+            - set:
+                status: "driver_replay_sweep_created"
       start:
         - target: run_created
           effects:

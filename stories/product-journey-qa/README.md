@@ -30,6 +30,9 @@ It is intentionally no-LLM:
   manifest coverage, review, validation, and a compact Slidey smoke deck. Pass
   `scenario=project-onboarding`, `scenario=prd-design`, or another scenario id
   to exercise a specific journey path.
+- `driver_replay_sweep` calls `tools/product-journey/run.py
+  --driver-replay-sweep --json-output` to run the same replay proof for every
+  product-journey scenario and summarize playback/validation coverage.
 - `rollup` calls `tools/product-journey/run.py --rollup-matrix --json-output`
   to create or refresh the matrix-level Slidey deck from reviewed run bundles.
 - `validate_matrix` calls `tools/product-journey/run.py --validate-matrix
