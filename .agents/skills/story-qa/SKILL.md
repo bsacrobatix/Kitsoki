@@ -75,6 +75,11 @@ python3 tools/product-journey/run.py --emit-matrix --seed demo
 Use `--matrix-personas all` when every persona should run against every target.
 The matrix is a no-LLM assignment plan; before a live scored sweep, refresh each
 target's current open bug count from its `bug_query`.
+Launch an assignment run with the target `id` and persona from that matrix:
+
+```sh
+python3 tools/product-journey/run.py --emit-run --project vscode --persona docs-minded-contributor --seed demo-01
+```
 
 That writes `.artifacts/product-journey/<run-id>/`, including
 `deck.slidey.json`, without calling a live LLM. Add `--publish-deck` when you

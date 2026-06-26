@@ -41,6 +41,12 @@ This writes `.artifacts/product-journey/matrices/<matrix-id>/` with
 `matrix.json`, `matrix.md`, and `deck.slidey.json`. The source target list lives
 in `github-targets.json`; refresh each target's `bug_query` before a live scored
 sweep so current open bug counts are recorded outside the no-LLM planner.
+Every target `id` from `github-targets.json` is also accepted by `--emit-run`,
+so a matrix assignment can become a concrete run bundle:
+
+```sh
+python3 tools/product-journey/run.py --emit-run --project vscode --persona docs-minded-contributor --seed demo-01
+```
 
 This writes `.artifacts/product-journey/<run-id>/` with `run.json`,
 `journey.md`, `metrics.json`, `bugs.json`, `findings.json`, `evidence.json`,

@@ -98,12 +98,15 @@ turns:
   - intent:
       name: start
       slots:
-        project: gears-rust
-        persona: core-maintainer
-        seed: flow
+        project: vscode
+        persona: docs-minded-contributor
+        seed: flow-01-docs-minded-contributor
     expect_state: run_created
     expect_world:
       status: run_created
+      project: vscode
+      persona: docs-minded-contributor
+      seed: flow-01-docs-minded-contributor
       run_id: run-123
       run_dir: .artifacts/product-journey/run-123
       deck_path: .artifacts/product-journey/run-123/deck.slidey.json
