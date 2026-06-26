@@ -495,9 +495,17 @@ export async function makeReadableZoom(page: Page): Promise<ReadableZoom> {
         const sourceRadius = normalizeRadius(style.borderRadius);
         const rawSourceColor = source.color || targetStyle.color || style.color || "#0f172a";
         const rawSourceBackground = source.background || readableBackground(source.backgroundElement, rawSourceColor, pageBackground);
-        const themeAdjusted = shouldUseDarkFocusSurface(rawSourceBackground, pageBackground);
-        const sourceBackground = themeAdjusted ? "#0d1117" : rawSourceBackground;
-        const sourceColor = themeAdjusted && colorLuminance(rawSourceColor) < 0.55 ? "#e6edf3" : rawSourceColor;
+        // Faithful reproduction: the zoom is a magnified copy of the real
+        // element, so it must keep the element's own rendered colors. The clone
+        // already carries every descendant's computed background/color/border
+        // (copyTreeStyles). We must NOT coerce the panel to a flat #fff or a
+        // forced-dark #0d1117 surface — that flattens GitHub's comment chrome
+        // (gray header, white body, syntax/badge colors) and the kitsoki page's
+        // real theme. The panel background only shows through scroll/padding
+        // gaps, so it tracks the element's true resolved background.
+        const themeAdjusted = false;
+        const sourceBackground = rawSourceBackground;
+        const sourceColor = rawSourceColor;
         const baseFont = parseFloat(targetStyle.fontSize || style.fontSize) || 16;
         const requestedFont = opts.fontSize || Math.min(23, Math.max(18, baseFont * 1.28));
         const minScale = Math.max(1, opts.minScale ?? 1.18);
@@ -525,7 +533,6 @@ export async function makeReadableZoom(page: Page): Promise<ReadableZoom> {
         panel.style.height = `${rect.height}px`;
         stage.style.padding = "0px";
         applyFontScale(stage, 1);
-        if (themeAdjusted) retintForDarkFocusSurface(clone);
         back.classList.add("show");
         select.classList.add("show");
         panel.classList.add("show");
@@ -887,36 +894,6 @@ export async function makeReadableZoom(page: Page): Promise<ReadableZoom> {
           }
           if (isOpaqueColor(pageBg)) return pageBg;
           return colorLuminance(foreground) > 0.55 ? "#0d1117" : "#ffffff";
-        }
-        function shouldUseDarkFocusSurface(targetBg: string, pageBg: string): boolean {
-          return colorLuminance(pageBg) < 0.4 && colorLuminance(targetBg) > 0.72;
-        }
-        function retintForDarkFocusSurface(root: HTMLElement): void {
-          root.style.backgroundColor = "#0d1117";
-          root.style.color = "#e6edf3";
-          const els = [root, ...Array.from(root.querySelectorAll<HTMLElement>("*"))];
-          for (const el of els) {
-            const tag = el.tagName.toLowerCase();
-            const bg = el.style.backgroundColor;
-            const fg = el.style.color;
-            const hasOwnReadableBackground = bg && isOpaqueColor(bg) && colorLuminance(bg) > 0.72;
-            if (tag === "a") {
-              el.style.color = "#58a6ff";
-            } else if (!hasOwnReadableBackground && (!fg || colorLuminance(fg) < 0.55)) {
-              el.style.color = "#e6edf3";
-            }
-            if (el === root) continue;
-            if (hasOwnReadableBackground && !/\b(state|badge|pill)\b/i.test(el.className)) {
-              el.style.backgroundColor = "rgba(110, 118, 129, .24)";
-              if (!fg || colorLuminance(fg) < 0.55) el.style.color = "#e6edf3";
-            }
-            for (const side of ["Top", "Right", "Bottom", "Left"] as const) {
-              const borderColor = el.style[`border${side}Color` as "borderTopColor"];
-              if (borderColor && colorLuminance(borderColor) > 0.72) {
-                el.style[`border${side}Color` as "borderTopColor"] = "rgba(139, 148, 158, .45)";
-              }
-            }
-          }
         }
         function pageBackgroundColor(): string {
           const bodyBg = window.getComputedStyle(document.body).backgroundColor;

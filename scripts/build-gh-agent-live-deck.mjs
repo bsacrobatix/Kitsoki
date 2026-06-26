@@ -422,17 +422,21 @@ function buildDeck(args) {
       subtitle: c.subtitle,
     });
     scenes.push(...mediaScenes(args.out, c, evidence.get(c.slug), media.get(c.slug)));
-    // Per-phase deck link: points to the self-contained HTML deck on the server.
+    // Per-phase deck: show the self-contained slidey deck artifact opened on the
+    // hosted run page, with its live URL in the caption.
     const ev = evidence.get(c.slug);
     const deckBaseURL = args.publicBaseURL || ev.publicBaseURL || "";
-    if (deckBaseURL && ev.jobID) {
+    const poster = path.join(args.mediaRoot, c.slug, "deck-poster.png");
+    if (deckBaseURL && ev.jobID && (fs.existsSync(poster) || args.allowMissingMedia)) {
       const deckURL = `${deckBaseURL.replace(/\/+$/, "")}/run/${ev.jobID}/assets/deck.html`;
       scenes.push({
-        type: "narrative",
-        eyebrow: "Phase deck",
-        lede: `${c.title}: interactive deck`,
-        body: `Self-contained slidey deck for this phase: ${deckURL}`,
-        narration: `An interactive slidey deck for the ${c.title.toLowerCase()} phase is available on the kitsoki server.`,
+        type: "image",
+        title: `${c.title}: hosted slidey deck`,
+        src: relativeMediaPath(args.out, poster),
+        alt: `Per-phase slidey deck for the ${c.title.toLowerCase()} case, opened on the kitsoki run page`,
+        fit: "contain",
+        caption: `Opened live at ${deckURL}`,
+        narration: `Each phase also ships its own self-contained slidey deck, served on the kitsoki run page and opened here for the ${c.title.toLowerCase()} case.`,
       });
     }
   }

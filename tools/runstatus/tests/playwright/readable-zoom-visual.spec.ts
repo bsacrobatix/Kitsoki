@@ -37,7 +37,7 @@ type AnnotationPaintState = {
   readableBackdrop: OverlayPaint;
 };
 
-test("readable zoom keeps dark-theme colors and source proportions", async ({ page }) => {
+test("readable zoom faithfully matches source colors and proportions", async ({ page }) => {
   fs.rmSync(ARTIFACT_DIR, { recursive: true, force: true });
   const shot = makeShot(ARTIFACT_DIR);
   await page.setViewportSize({ width: 1000, height: 700 });
@@ -207,7 +207,11 @@ source: github.com/bsacrobatix/Kitsoki/issues/123</pre>
   await page.waitForTimeout(120);
   await shot(page, "09-light-pre-expanded");
   const preState = await readZoomState(page, "#light-pre");
-  assertDarkFocusSurface(preState);
+  // A light evidence block on a dark page must keep its own light surface — the
+  // zoom is a magnified copy, not a recolored card. (Regression guard: it was
+  // previously coerced to a forced-dark #0d1117 panel.)
+  assertFaithfulSource(preState);
+  expect(luminance(preState.panelBackground)).toBeGreaterThan(0.85);
   assertUniformExpansion(preState);
 
   await zoom(null);
@@ -225,7 +229,9 @@ source: github.com/bsacrobatix/Kitsoki/issues/123</pre>
   expect((stateResult.sourceText || "").toLowerCase()).toContain("state done");
   expect(definitionState.panelText).toMatch(/\bState\b\s*\bdone\b/);
   expect(stateResult.sourceRect?.height).toBeGreaterThan(35);
-  assertDarkFocusSurface(definitionState);
+  // The run-proof State row is a light surface; it must stay light and match.
+  assertFaithfulSource(definitionState);
+  expect(luminance(definitionState.panelBackground)).toBeGreaterThan(0.85);
   assertUniformExpansion({ ...definitionState, sourceRect: stateResult.sourceRect! });
 
   await zoom(null);
@@ -336,14 +342,20 @@ function assertNonObscuringAnnotationPaint(state: AnnotationPaintState): void {
   }
 }
 
-function assertDarkSourcePreserved(state: ZoomState): void {
+// The zoom panel is a magnified copy of the real element, so its background and
+// text colour must match the source's own rendered colours — never coerced to a
+// flat black or white. Works for both dark and light sources.
+function assertFaithfulSource(state: ZoomState): void {
   expect(state.panelVisible).toBeTruthy();
   expect(state.selectVisible).toBeTruthy();
-  expect(luminance(state.sourceBackground)).toBeLessThan(0.08);
-  expect(luminance(state.pageBackground)).toBeLessThan(0.08);
-  expect(luminance(state.panelBackground)).toBeLessThan(0.08);
   expect(colorDistance(state.panelBackground, state.sourceBackground)).toBeLessThan(64);
   expect(colorDistance(state.panelColor, state.sourceColor)).toBeLessThan(24);
+}
+
+function assertDarkSourcePreserved(state: ZoomState): void {
+  assertFaithfulSource(state);
+  expect(luminance(state.sourceBackground)).toBeLessThan(0.08);
+  expect(luminance(state.panelBackground)).toBeLessThan(0.08);
 }
 
 function assertUniformExpansion(state: ZoomState): void {
@@ -352,15 +364,6 @@ function assertUniformExpansion(state: ZoomState): void {
   expect(scaleX).toBeGreaterThan(1.04);
   expect(scaleY).toBeGreaterThan(1.04);
   expect(Math.abs(scaleX - scaleY) / Math.max(scaleX, scaleY)).toBeLessThan(0.12);
-}
-
-function assertDarkFocusSurface(state: ZoomState): void {
-  expect(state.panelVisible).toBeTruthy();
-  expect(state.selectVisible).toBeTruthy();
-  expect(luminance(state.sourceBackground)).toBeGreaterThan(0.85);
-  expect(luminance(state.pageBackground)).toBeLessThan(0.08);
-  expect(luminance(state.panelBackground)).toBeLessThan(0.08);
-  expect(luminance(state.panelColor)).toBeGreaterThan(0.70);
 }
 
 function isTransparent(value: string): boolean {
