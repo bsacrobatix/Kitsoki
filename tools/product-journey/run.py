@@ -834,6 +834,131 @@ def scenario_quality_gate(scenario_id: str) -> dict:
     })
 
 
+def add_corpus_issue(issues: list[dict], severity: str, check_id: str, message: str, detail: str = "") -> None:
+    issues.append({
+        "severity": severity,
+        "id": check_id,
+        "message": message,
+        "detail": detail,
+    })
+
+
+def duplicate_values(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for value in values:
+        if value in seen:
+            duplicates.add(value)
+        seen.add(value)
+    return sorted(duplicates)
+
+
+def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_targets: dict) -> dict:
+    schema = read_json(SCHEMA)
+    issues: list[dict] = []
+    targets = github_targets.get("targets", [])
+    persona_required = ["id", "label", "description", "surface_preference", "risk_focus"]
+    scenario_required = ["id", "label", "stage", "task", "primary_story", "required_mcp", "evidence", "success_criteria"]
+    target_required = ["id", "label", "repo", "stack", "bug_query", "open_bug_floor", "status", "notes"]
+    allowed_mcp = {"visual.open", "visual.observe", "visual.act", "session.open", "session.inspect", "render.tui"}
+    required_scenarios = {
+        "product-discovery",
+        "project-onboarding",
+        "bugfix",
+        "prd-design",
+        "feature-implementation",
+        "evidence-backed-product-bug",
+    }
+
+    persona_ids = [persona.get("id", "") for persona in personas]
+    scenario_ids = [scenario.get("id", "") for scenario in scenarios]
+    target_ids = [target.get("id", "") for target in targets]
+    for label, values in [("persona", persona_ids), ("scenario", scenario_ids), ("target", target_ids)]:
+        duplicates = duplicate_values(values)
+        if duplicates:
+            add_corpus_issue(issues, "error", f"duplicate-{label}-ids", f"Duplicate {label} ids", ", ".join(duplicates))
+        blanks = [f"{label}-{index}" for index, value in enumerate(values, start=1) if not value]
+        if blanks:
+            add_corpus_issue(issues, "error", f"blank-{label}-ids", f"Blank {label} ids", ", ".join(blanks))
+
+    if len(personas) < 4:
+        add_corpus_issue(issues, "warn", "persona-count", "Persona corpus is narrow for natural-use sweeps", f"personas={len(personas)}")
+    for persona in personas:
+        missing = [key for key in persona_required if key not in persona]
+        if missing:
+            add_corpus_issue(issues, "error", "persona-required-keys", "Persona is missing required keys", f"{persona.get('id', 'unknown')}: {', '.join(missing)}")
+        if not isinstance(persona.get("risk_focus", []), list) or not persona.get("risk_focus"):
+            add_corpus_issue(issues, "error", "persona-risk-focus", "Persona must name at least one risk focus", persona.get("id", "unknown"))
+
+    missing_required_scenarios = sorted(required_scenarios - set(scenario_ids))
+    if missing_required_scenarios:
+        add_corpus_issue(issues, "error", "required-scenarios", "Required natural-use scenarios are missing", ", ".join(missing_required_scenarios))
+    for scenario in scenarios:
+        scenario_id = scenario.get("id", "unknown")
+        missing = [key for key in scenario_required if key not in scenario]
+        if missing:
+            add_corpus_issue(issues, "error", "scenario-required-keys", "Scenario is missing required keys", f"{scenario_id}: {', '.join(missing)}")
+        if scenario.get("stage") not in STAGES:
+            add_corpus_issue(issues, "error", "scenario-stage", "Scenario uses an unknown stage", f"{scenario_id}: {scenario.get('stage', '')}")
+        unknown_mcp = sorted(set(scenario.get("required_mcp", [])) - allowed_mcp)
+        if unknown_mcp:
+            add_corpus_issue(issues, "error", "scenario-mcp", "Scenario requires unknown MCP tools", f"{scenario_id}: {', '.join(unknown_mcp)}")
+        if not scenario.get("success_criteria"):
+            add_corpus_issue(issues, "error", "scenario-success-criteria", "Scenario must have success criteria", scenario_id)
+        if not scenario.get("evidence"):
+            add_corpus_issue(issues, "error", "scenario-evidence", "Scenario must declare evidence slots", scenario_id)
+        unknown_evidence = [
+            kind for kind in scenario.get("evidence", [])
+            if evidence_capture_hint(kind) == "Save this evidence artifact and attach it to the run."
+        ]
+        if unknown_evidence:
+            add_corpus_issue(issues, "error", "scenario-evidence-kind", "Scenario uses evidence kinds without capture hints", f"{scenario_id}: {', '.join(unknown_evidence)}")
+        gate = scenario_quality_gate(scenario_id)
+        missing_gate_keys = [key for key in schema["driver_plan"]["quality_gate_required"] if key not in gate]
+        if missing_gate_keys:
+            add_corpus_issue(issues, "error", "scenario-quality-gate", "Scenario quality gate is missing required keys", f"{scenario_id}: {', '.join(missing_gate_keys)}")
+        minimum = set(gate.get("minimum_evidence", []))
+        declared = set(scenario.get("evidence", []))
+        extra = sorted(minimum - declared)
+        if extra:
+            add_corpus_issue(issues, "error", "scenario-quality-gate-evidence", "Quality gate evidence is not declared by scenario", f"{scenario_id}: {', '.join(extra)}")
+
+    expected_targets = schema["matrix_result"]["target_count"]
+    selection_contract = github_targets.get("selection_contract", {})
+    if selection_contract.get("host") != "github.com":
+        add_corpus_issue(issues, "error", "target-selection-host", "GitHub target selection contract must use github.com", selection_contract.get("host", ""))
+    if selection_contract.get("open_bug_floor", 0) < 100:
+        add_corpus_issue(issues, "error", "target-selection-bug-floor", "Selection open_bug_floor is below the natural-use floor", str(selection_contract.get("open_bug_floor", "")))
+    if len(targets) != expected_targets:
+        add_corpus_issue(issues, "error", "target-count", "GitHub target corpus must contain exactly 10 repositories", f"expected={expected_targets}, actual={len(targets)}")
+    for target in targets:
+        target_id = target.get("id", "unknown")
+        missing = [key for key in target_required if key not in target]
+        if missing:
+            add_corpus_issue(issues, "error", "target-required-keys", "GitHub target is missing required keys", f"{target_id}: {', '.join(missing)}")
+        repo = target.get("repo", "")
+        parsed_repo = urllib.parse.urlparse(repo)
+        if parsed_repo.netloc != "github.com" or len(parsed_repo.path.strip("/").split("/")) != 2:
+            add_corpus_issue(issues, "error", "target-repo", "GitHub target repo must be a github.com owner/name URL", f"{target_id}: {repo}")
+        if target.get("open_bug_floor", 0) < 100:
+            add_corpus_issue(issues, "error", "target-open-bug-floor", "GitHub target open_bug_floor is below the natural-use floor", f"{target_id}: {target.get('open_bug_floor')}")
+        issue_query = github_issue_search_query(target).lower()
+        if "bug" not in issue_query:
+            add_corpus_issue(issues, "warn", "target-bug-query", "GitHub target bug query does not include an explicit bug term or bug label", f"{target_id}: {target.get('bug_query', '')}")
+
+    errors = sum(1 for issue in issues if issue["severity"] == "error")
+    warnings = sum(1 for issue in issues if issue["severity"] == "warn")
+    return {
+        "status": "valid" if errors == 0 else "invalid",
+        "personas": len(personas),
+        "scenarios": len(scenarios),
+        "targets": len(targets),
+        "errors": errors,
+        "warnings": warnings,
+        "issues": issues,
+    }
+
+
 def build_assignment_scenario_task(target: dict, persona: dict, scenario: dict) -> dict:
     repo = target["label"]
     stack = target.get("stack", "unknown stack")
@@ -3886,6 +4011,7 @@ def main() -> None:
     parser.add_argument("--emit-run", action="store_true", help="Write a no-LLM run artifact bundle and Slidey deck")
     parser.add_argument("--emit-matrix", action="store_true", help="Write a no-LLM 10-repo GitHub journey matrix")
     parser.add_argument("--dogfood-smoke", action="store_true", help="Run a deterministic no-LLM matrix-to-rollup smoke and write review artifacts")
+    parser.add_argument("--validate-corpus", action="store_true", help="Validate personas, scenarios, and GitHub target catalog without writing artifacts")
     parser.add_argument("--refresh-github-targets", action="store_true", help="Query GitHub for current open bug counts and write a target-proof artifact")
     parser.add_argument("--target-proof-file", default="", help="target-proof.json or target-proof directory to merge into --emit-matrix")
     parser.add_argument("--rollup-matrix", action="store_true", help="Aggregate reviewed run bundles into a matrix rollup deck")
@@ -3948,6 +4074,28 @@ def main() -> None:
     personas = load_personas(PERSONAS)
     scenarios = load_scenarios(SCENARIOS)
     github_targets = load_github_targets(GITHUB_TARGETS)
+
+    if args.validate_corpus:
+        result = validate_journey_corpus(personas, scenarios, github_targets)
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Validated product journey corpus: {result['status']}")
+            if result["status"] != "valid":
+                raise SystemExit(1)
+            return
+        print(f"Corpus validation status: {result['status']}")
+        print(f"Personas: {result['personas']}")
+        print(f"Scenarios: {result['scenarios']}")
+        print(f"GitHub targets: {result['targets']}")
+        print(f"Errors: {result['errors']}")
+        print(f"Warnings: {result['warnings']}")
+        for issue in result["issues"]:
+            detail = f" ({issue['detail']})" if issue.get("detail") else ""
+            print(f"- {issue['severity']}: {issue['id']}: {issue['message']}{detail}")
+        append_log(f"Validated product journey corpus: {result['status']}")
+        if result["status"] != "valid":
+            raise SystemExit(1)
+        return
 
     if args.dogfood_smoke:
         report = build_dogfood_smoke(catalog, github_targets, personas, scenarios, args.seed)

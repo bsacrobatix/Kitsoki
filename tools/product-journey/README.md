@@ -30,6 +30,17 @@ Emit a repeatable no-LLM dry-run bundle and Slidey deck:
 python3 tools/product-journey/run.py --emit-run --project gears-rust --persona core-maintainer --seed demo
 ```
 
+Validate the reusable natural-use corpus before planning a sweep:
+
+```sh
+python3 tools/product-journey/run.py --validate-corpus
+```
+
+This checks that personas, scenarios, quality gates, evidence hints, and the
+10-repo GitHub target catalog still line up. Inside
+`stories/product-journey-qa/app.yaml`, submit `validate_corpus` for the same
+no-LLM preflight.
+
 Emit a repeatable 10-repo GitHub planning matrix:
 
 ```sh

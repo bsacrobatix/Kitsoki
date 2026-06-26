@@ -5,6 +5,9 @@ the standard persona/scenario evidence workflow inside Kitsoki.
 
 It is intentionally no-LLM:
 
+- `validate_corpus` calls `tools/product-journey/run.py --validate-corpus
+  --json-output` to preflight personas, scenarios, quality gates, evidence
+  hints, and the 10-repo GitHub target catalog before a sweep.
 - `refresh_targets` calls `tools/product-journey/run.py
   --refresh-github-targets --json-output` to write a GitHub target-proof
   artifact for the 100-open-bug and popularity matrix contract.

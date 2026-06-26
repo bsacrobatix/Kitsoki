@@ -54,7 +54,7 @@
       "label": "pytorch/pytorch",
       "repo": "https://github.com/pytorch/pytorch",
       "stack": "python/c++",
-      "bug_query": "https://github.com/pytorch/pytorch/issues?q=is%3Aissue+state%3Aopen+label%3Atriaged",
+      "bug_query": "https://github.com/pytorch/pytorch/issues?q=is%3Aissue+state%3Aopen+bug",
       "open_bug_floor": 100,
       "status": "candidate",
       "notes": "Large ML framework with complex test selection and contributor onboarding needs."

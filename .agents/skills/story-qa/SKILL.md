@@ -69,11 +69,15 @@ python3 tools/product-journey/run.py --emit-run --project gears-rust --persona c
 For a 10-repo GitHub natural-usage sweep, start with the deterministic matrix:
 
 ```sh
+python3 tools/product-journey/run.py --validate-corpus
 python3 tools/product-journey/run.py --refresh-github-targets --seed demo
 python3 tools/product-journey/run.py --emit-matrix --seed demo
 python3 tools/product-journey/run.py --emit-matrix --seed demo \
   --target-proof-file .artifacts/product-journey/target-proofs/<proof-id>
 ```
+
+Inside `stories/product-journey-qa/app.yaml`, submit `validate_corpus` for the
+same no-LLM preflight before refreshing targets or emitting a matrix.
 
 Before spending live operator time, run the no-LLM dogfood smoke:
 

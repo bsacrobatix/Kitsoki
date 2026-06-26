@@ -34,6 +34,9 @@ world:
   dogfood_review_warnings: { type: int, default: 0 }
   dogfood_run_validation_warnings: { type: int, default: 0 }
   dogfood_matrix_validation_warnings: { type: int, default: 0 }
+  corpus_validation_status: { type: string, default: "" }
+  corpus_validation_errors: { type: int, default: 0 }
+  corpus_validation_warnings: { type: int, default: 0 }
   run_id:         { type: string, default: "" }
   run_dir:        { type: string, default: "" }
   deck_path:      { type: string, default: "" }
@@ -82,6 +85,10 @@ intents:
     priority: 89
     slots:
       seed: { type: string, required: false }
+  validate_corpus:
+    description: "Validate the reusable personas, scenarios, and GitHub target catalog."
+    examples: ["validate corpus", "check persona scenario catalog", "preflight journey corpus"]
+    priority: 88
   refresh_targets:
     description: "Refresh GitHub open-bug proof for the 10-repo target catalog."
     examples: ["refresh github targets", "check target bug counts", "prove target matrix"]
@@ -157,7 +164,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, dogfood_smoke, refresh_targets, rollup, validate_matrix, attach, record, blocker, seed_demo, handoff, review, validate, accept, quit, look]
+  intents: [start, matrix, dogfood_smoke, validate_corpus, refresh_targets, rollup, validate_matrix, attach, record, blocker, seed_demo, handoff, review, validate, accept, quit, look]
 
 root: idle
 
