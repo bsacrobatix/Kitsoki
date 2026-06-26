@@ -152,6 +152,7 @@ intents:
     priority: 88
     slots:
       seed: { type: string, required: false }
+      scenario: { type: string, required: false }
   validate_corpus:
     description: "Validate the reusable personas, scenarios, and GitHub target catalog."
     examples: ["validate corpus", "check persona scenario catalog", "preflight journey corpus"]

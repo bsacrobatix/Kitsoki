@@ -21,8 +21,8 @@ host_handlers:
             driver_journal_path: .artifacts/product-journey/run-123/driver-journal.md
             driver_handoff_path: .artifacts/product-journey/run-123/driver-handoff.md
             media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
-            scenario: bugfix
-            attached_evidence_count: 5
+            scenario: project-onboarding
+            attached_evidence_count: 4
             review_status: needs_evidence
             review_summary: "needs_evidence: 15/18 checks passed, 0 warnings, 3 failures"
             review_passed: 15
@@ -38,6 +38,7 @@ turns:
   - intent:
       name: driver_replay_smoke
       slots:
+        scenario: project-onboarding
         seed: story-replay
     expect_state: dogfood_created
     expect_world:
@@ -49,8 +50,8 @@ turns:
       dogfood_deck_path: .artifacts/product-journey/dogfood/replay-123/driver-replay-smoke.slidey.json
       dogfood_run_deck_path: .artifacts/product-journey/run-123/deck.slidey.json
       run_dir: .artifacts/product-journey/run-123
-      driver_replay_scenario: bugfix
-      driver_replay_attached_evidence_count: 5
+      driver_replay_scenario: project-onboarding
+      driver_replay_attached_evidence_count: 4
       driver_replay_journal_path: .artifacts/product-journey/run-123/driver-journal.md
       driver_replay_handoff_path: .artifacts/product-journey/run-123/driver-handoff.md
       driver_replay_media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
@@ -64,6 +65,6 @@ turns:
     expect_host_calls:
       - handler: host.run
         args: { call: driver_replay_product_journey_smoke }
-    expect_view_matches: "DOGFOOD SMOKE CREATED[\\s\\S]*Driver replay scenario[\\s\\S]*bugfix[\\s\\S]*Driver replay evidence[\\s\\S]*5[\\s\\S]*driver-journal.md[\\s\\S]*media-manifest.json[\\s\\S]*15 / 18 passed; 3 failed; 0 warnings[\\s\\S]*fail: scenario-attempts"
+    expect_view_matches: "DOGFOOD SMOKE CREATED[\\s\\S]*Driver replay scenario[\\s\\S]*project-onboarding[\\s\\S]*Driver replay evidence[\\s\\S]*4[\\s\\S]*driver-journal.md[\\s\\S]*media-manifest.json[\\s\\S]*15 / 18 passed; 3 failed; 0 warnings[\\s\\S]*fail: scenario-attempts"
 
 expect_no_errors: true

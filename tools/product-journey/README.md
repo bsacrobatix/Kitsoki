@@ -72,15 +72,21 @@ Prove one reusable-driver scenario loop with cassette-backed proof evidence:
 
 ```sh
 python3 tools/product-journey/run.py --driver-replay-smoke --seed demo
+python3 tools/product-journey/run.py --driver-replay-smoke \
+  --smoke-scenario project-onboarding \
+  --seed demo
 ```
 
 This creates a normal run bundle, attaches all `bugfix` minimum-evidence slots
-with `cassette://` refs, records a matching `driver-journal` event, writes
-findings, reviews the run, validates the bundle, and emits a compact smoke
-report/deck under `.artifacts/product-journey/dogfood/<smoke-id>/`. The review
-is expected to stay `needs_evidence` because the other scenarios are incomplete,
-but validation must pass and the `driver-evidence-linked`, media manifest, and
-key-video checks must be satisfied for the captured scenario.
+or the selected scenario's minimum-evidence slots with `cassette://` refs,
+records a matching `driver-journal` event, writes findings, reviews the run,
+validates the bundle, and emits a compact smoke report/deck under
+`.artifacts/product-journey/dogfood/<smoke-id>/`. The review is expected to
+stay `needs_evidence` because the other scenarios are incomplete, but validation
+must pass and the `driver-evidence-linked` check must be satisfied for the
+captured scenario. Scenarios without a playback-capable minimum-evidence slot
+will still expose the missing playback proof in review; that is a contract gap
+to fix before calling that scenario representative.
 
 This writes `.artifacts/product-journey/matrices/<matrix-id>/` with
 `matrix.json`, `matrix.md`, and `deck.slidey.json`. The source target list lives
@@ -205,9 +211,10 @@ path. A valid bundle should be directly usable by the driver.
 `--review-run` includes the same contract as a hard review check and writes a
 `Driver contract` Slidey scene, so human review can spot drift in the reusable
 open/observe/act/capture/journal loop without opening the raw JSON.
-Use `--driver-replay-smoke` before a live pass when you want a cheap proof that
-the attach commands, driver journal refs, media manifest, review checks, and
-validation gates still compose around one cassette-backed scenario.
+Use `--driver-replay-smoke --smoke-scenario <scenario-id>` before a live pass
+when you want a cheap proof that the attach commands, driver journal refs, media
+manifest, review checks, and validation gates still compose around one
+cassette-backed scenario.
 
 Attach evidence captured by a live or cassette-backed MCP run:
 

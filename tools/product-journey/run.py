@@ -5270,7 +5270,15 @@ def driver_replay_review_is_expected_one_scenario(reviewed: dict) -> bool:
         for check in reviewed.get("checks", [])
         if check.get("status") == "fail"
     }
-    return failed_checks <= {"scenario-attempts", "driver-journal-coverage", "quality-gates"}
+    return failed_checks <= {"scenario-attempts", "driver-journal-coverage", "quality-gates", "playback-or-blocker"}
+
+
+def cassette_replay_path(run_id: str, scenario_id: str, evidence_kind: str) -> str:
+    return f"cassette://product-journey/{run_id}/{demo_evidence_path(scenario_id, evidence_kind)}"
+
+
+def scenario_minimum_evidence(scenario_id: str) -> list[str]:
+    return scenario_quality_gate(scenario_id).get("minimum_evidence", [])
 
 
 def render_driver_replay_smoke_summary(report: dict) -> str:
@@ -5355,10 +5363,17 @@ def build_driver_replay_smoke(
     personas: list[dict],
     scenarios: list[dict],
     seed: str,
+    smoke_scenario: str,
 ) -> dict:
-    smoke_id = f"{slug_timestamp()}-driver-replay-{seed}"
+    scenario_slug = smoke_scenario or "bugfix"
+    smoke_id = f"{slug_timestamp()}-driver-replay-{scenario_slug}-{seed}"
     smoke_dir = DOGFOOD_ROOT / smoke_id
     smoke_dir.mkdir(parents=True, exist_ok=False)
+    scenario_ids = {scenario.get("id", "") for scenario in scenarios}
+    scenario_id = scenario_slug
+    if scenario_id not in scenario_ids:
+        known = ", ".join(sorted(scenario_ids))
+        raise SystemExit(f"Unknown replay smoke scenario '{scenario_id}'. Known: {known}")
 
     run_dir, run_json = build_run_bundle(
         catalog,
@@ -5367,20 +5382,18 @@ def build_driver_replay_smoke(
         scenarios,
         "vscode",
         "core-maintainer",
-        f"{seed}-driver-replay",
+        f"{seed}-{scenario_id}-driver-replay",
         "driver-replay-smoke",
         publish_deck=None,
     )
-    scenario_id = "bugfix"
-    bugfix_evidence = [
-        ("session_trace", f"cassette://product-journey/{run_json['run_id']}/bugfix/session-trace.jsonl"),
-        ("candidate_diff", f"cassette://product-journey/{run_json['run_id']}/bugfix/candidate.diff"),
-        ("oracle_result", f"cassette://product-journey/{run_json['run_id']}/bugfix/oracle-result.json"),
-        ("full_suite_result", f"cassette://product-journey/{run_json['run_id']}/bugfix/full-suite.json"),
-        ("key_interaction_video", f"cassette://product-journey/{run_json['run_id']}/bugfix/key-interaction.mp4"),
+    replay_evidence = [
+        (kind, cassette_replay_path(run_json["run_id"], scenario_id, kind))
+        for kind in scenario_minimum_evidence(scenario_id)
     ]
+    if not replay_evidence:
+        raise SystemExit(f"Replay smoke scenario '{scenario_id}' has no minimum evidence contract")
     attached_evidence = []
-    for kind, path in bugfix_evidence:
+    for kind, path in replay_evidence:
         attach_evidence(
             run_dir,
             scenario_id,
@@ -5403,9 +5416,9 @@ def build_driver_replay_smoke(
         scenario_id,
         "replay",
         "captured",
-        "Deterministic driver replay followed the bugfix scenario contract and attached every cassette-backed proof ref.",
+        f"Deterministic driver replay followed the {scenario_id} scenario contract and attached every cassette-backed proof ref.",
         "session.open,session.trace,render.tui,visual.observe",
-        ",".join(path for _, path in bugfix_evidence),
+        ",".join(path for _, path in replay_evidence),
         "",
         publish_deck=None,
     )
@@ -5413,10 +5426,10 @@ def build_driver_replay_smoke(
         run_dir,
         "strength",
         "Replay driver can close one scenario loop",
-        "The driver replay attached every bugfix minimum-evidence slot and journaled the exact refs it produced.",
+        f"The driver replay attached every {scenario_id} minimum-evidence slot and journaled the exact refs it produced.",
         scenario_id,
         "low",
-        bugfix_evidence[-1][1],
+        replay_evidence[-1][1],
         "observed",
         publish_deck=None,
     )
@@ -5424,7 +5437,7 @@ def build_driver_replay_smoke(
         run_dir,
         "weakness",
         "Remaining scenarios still need live or cassette passes",
-        "The smoke proves one driver loop only; product discovery, onboarding, design, feature implementation, and product-bug reporting still need evidence or blockers.",
+        "The smoke proves one driver loop only; every other scenario still needs evidence or blockers before the run is representative.",
         scenario_id,
         "medium",
         str(run_dir / "driver-handoff.md"),
@@ -6108,6 +6121,7 @@ def main() -> None:
     )
     parser.add_argument("--persona", default="", help="Persona id from tools/product-journey/personas.json")
     parser.add_argument("--seed", default="default", help="Deterministic run seed")
+    parser.add_argument("--smoke-scenario", default="bugfix", help="Scenario id for --driver-replay-smoke")
     parser.add_argument("--run-log", action="store_true", help="Force a timestamped run log entry")
     parser.add_argument("--emit-run", action="store_true", help="Write a no-LLM run artifact bundle and Slidey deck")
     parser.add_argument("--emit-matrix", action="store_true", help="Write a no-LLM 10-repo GitHub journey matrix")
@@ -6278,7 +6292,7 @@ def main() -> None:
         return
 
     if args.driver_replay_smoke:
-        report = build_driver_replay_smoke(catalog, github_targets, personas, scenarios, args.seed)
+        report = build_driver_replay_smoke(catalog, github_targets, personas, scenarios, args.seed, args.smoke_scenario)
         if args.json_output:
             reviewed = report["review"]
             validation = report["validation"]

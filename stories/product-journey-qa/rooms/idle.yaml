@@ -30,7 +30,7 @@ states:
             - label: "dogfood_smoke seed=..."
               hint: "prove matrix, run, review, validation, rollup, and decks in one no-LLM loop"
               intent: dogfood_smoke
-            - label: "driver_replay_smoke seed=..."
+            - label: "driver_replay_smoke scenario=... seed=..."
               hint: "prove one reusable-driver scenario with cassette evidence and journal-linked refs"
               intent: driver_replay_smoke
             - label: "validate_corpus"
@@ -83,6 +83,8 @@ states:
                   - --json-output
                   - --seed
                   - "{{ slots.seed ?? world.seed }}"
+                  - --smoke-scenario
+                  - "{{ slots.scenario ?? 'bugfix' }}"
                 cwd: "."
               bind:
                 last_result: stdout_json

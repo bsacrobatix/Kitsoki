@@ -44,7 +44,7 @@ states:
             - label: "dogfood_smoke seed=..."
               hint: "run the deterministic smoke again with a new seed"
               intent: dogfood_smoke
-            - label: "driver_replay_smoke seed=..."
+            - label: "driver_replay_smoke scenario=... seed=..."
               hint: "run the one-scenario cassette-backed driver replay smoke"
               intent: driver_replay_smoke
             - label: "start project=... persona=... seed=..."
@@ -80,6 +80,8 @@ states:
                   - --json-output
                   - --seed
                   - "{{ slots.seed ?? world.seed }}"
+                  - --smoke-scenario
+                  - "{{ slots.scenario ?? 'bugfix' }}"
                 cwd: "."
               bind:
                 last_result: stdout_json

@@ -27,7 +27,9 @@ It is intentionally no-LLM:
 - `driver_replay_smoke` calls `tools/product-journey/run.py
   --driver-replay-smoke --json-output` to prove one reusable-driver scenario
   with cassette-backed proof evidence, linked driver journal refs, media
-  manifest coverage, review, validation, and a compact Slidey smoke deck.
+  manifest coverage, review, validation, and a compact Slidey smoke deck. Pass
+  `scenario=project-onboarding`, `scenario=prd-design`, or another scenario id
+  to exercise a specific journey path.
 - `rollup` calls `tools/product-journey/run.py --rollup-matrix --json-output`
   to create or refresh the matrix-level Slidey deck from reviewed run bundles.
 - `validate_matrix` calls `tools/product-journey/run.py --validate-matrix
