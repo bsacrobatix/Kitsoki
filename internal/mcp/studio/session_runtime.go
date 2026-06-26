@@ -292,6 +292,16 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 			orchestrator.WithChatsConcrete(chatStore),
 		)
 	}
+	// Honor the global semantic-routing toggle when explicitly set via env. The
+	// `kitsoki mcp` command exports KITSOKI_SEMANTIC_ROUTING from
+	// --semantic-routing (default false → LLM-only routing). When the env var is
+	// absent — the posture of flow/cassette tests that drive the studio
+	// directly — routing defers to the per-app routing.enabled config so the
+	// existing deterministic test fixtures keep matching. See
+	// docs/architecture/semantic-routing.md.
+	if opt, ok := semanticRoutingEnvOption(); ok {
+		orchOpts = append(orchOpts, opt)
+	}
 	// A non-empty profile map routes agent dispatch (host.agent.*) through the
 	// declared backend; selectedProfile becomes the session's initial selection.
 	// Empty leaves the legacy default-backend path untouched (the no-op contract

@@ -158,11 +158,15 @@ The system goes out of its way to keep the user out of that branch.
 It also goes out of its way to never let the LLM **cause** something
 the author didn't declare.
 
-A four-tier **semantic routing** stack — author-declared synonyms,
-synonym templates that capture typed slots, a per-session turncache,
-and the LLM — sits between the deterministic menu match and the
-LLM call. Every foreground turn runs the tiers in order and stops
-at the first that resolves:
+An optional **semantic routing** stack — author-declared synonyms,
+synonym templates that capture typed slots, and a per-session
+turncache — can sit between the deterministic menu match and the LLM
+call. It is **off by default** (free-text routing is an isolated
+main-model decision); enable it with `--semantic-routing` /
+`KITSOKI_SEMANTIC_ROUTING`. See
+[semantic-routing.md](semantic-routing.md) for the toggle and the full
+tier list. When enabled, every foreground turn runs the tiers in order
+and stops at the first that resolves:
 
 1. **Deterministic** (`TryDeterministic`) — input exactly matches a
    menu entry's display string or a unique intent example. Cost: a

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -146,6 +147,14 @@ docs land):
 			if dbPath == "" {
 				dbPath = defaultDBPath()
 			}
+
+			// Export the resolved semantic-routing toggle so the studio's
+			// per-session orchestrators (internal/mcp/studio) pick it up: the
+			// studio reads KITSOKI_SEMANTIC_ROUTING (it can't see the cmd-layer
+			// flag), and exporting it here makes the LLM-only default and the
+			// --semantic-routing override apply to MCP-driven sessions just like
+			// every other CLI surface. See docs/architecture/semantic-routing.md.
+			_ = os.Setenv("KITSOKI_SEMANTIC_ROUTING", strconv.FormatBool(semanticRoutingEnabled()))
 
 			// Build the studio session with the live-capable production builder:
 			// replay stays no-LLM (DefaultHarnessBuilder), and harness:live
