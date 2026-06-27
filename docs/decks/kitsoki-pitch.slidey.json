@@ -2615,7 +2615,7 @@
       "panels": [
         {
           "label": "",
-          "viewBox": "0 0 1420 560",
+          "viewBox": "0 0 1420 420",
           "nodes": [
             {
               "id": "runs",
@@ -2625,10 +2625,11 @@
                 "real repos",
                 "real failures"
               ],
-              "x": 40,
-              "y": 185,
-              "w": 400,
-              "h": 180
+              "x": 80,
+              "y": 110,
+              "w": 360,
+              "h": 180,
+              "style": "secondary"
             },
             {
               "id": "cases",
@@ -2638,9 +2639,9 @@
                 "failing baseline",
                 "hidden pass check"
               ],
-              "x": 510,
-              "y": 185,
-              "w": 400,
+              "x": 480,
+              "y": 110,
+              "w": 460,
               "h": 180,
               "style": "primary"
             },
@@ -2653,19 +2654,26 @@
                 "improve the story"
               ],
               "x": 980,
-              "y": 185,
-              "w": 400,
-              "h": 180
+              "y": 110,
+              "w": 360,
+              "h": 180,
+              "style": "secondary"
             }
           ],
           "edges": [
             {
               "from": "runs",
-              "to": "cases"
+              "to": "cases",
+              "label": "pin as fixture",
+              "bus": 290,
+              "lift": -24
             },
             {
               "from": "cases",
-              "to": "harness"
+              "to": "harness",
+              "label": "measure + score",
+              "bus": 290,
+              "lift": -24
             }
           ]
         }
