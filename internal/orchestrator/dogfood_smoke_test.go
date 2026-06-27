@@ -273,6 +273,32 @@ func seedDogfoodWorld(ticketID string) map[string]any {
 	}
 }
 
+// bugfixWorkdirRel reads the working folder bf.idle.on_enter derived for this
+// session from the journey's world. idle.on_enter derives it from ticket_id
+// AND session_id (appended so concurrent sessions on one ticket get DISTINCT
+// checkouts instead of sharing one — bug9glm2), so smoke tests can no longer
+// hardcode .worktrees/bf-<ticket>; they must read the actual value the story
+// set. Mirrors how TestDogfoodSmoke_ImplIdleProvisionsWorktree reads it.
+func bugfixWorkdirRel(t *testing.T, orch *orchestrator.Orchestrator, sid app.SessionID) string {
+	t.Helper()
+	journey, err := orch.LoadJourney(sid)
+	require.NoError(t, err)
+	rel, _ := journey.World.Vars["core__bf__workdir"].(string)
+	require.NotEmpty(t, rel, "core__bf__workdir must be set by bf.idle.on_enter after go_bugfix")
+	return rel
+}
+
+// bugfixWorkdirAbs is bugfixWorkdirRel resolved against repoRoot, for tests
+// that os.Stat / os.RemoveAll / exec against the worktree on disk.
+func bugfixWorkdirAbs(t *testing.T, orch *orchestrator.Orchestrator, sid app.SessionID, repoRoot string) string {
+	t.Helper()
+	abs := bugfixWorkdirRel(t, orch, sid)
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(repoRoot, abs)
+	}
+	return abs
+}
+
 // TestDogfoodSmoke_AutoStartThroughBugfix is the regression test for
 // the `go_bugfix` redirect-loop hang flagged in the dogfood-regression-
 // testing-gap proposal. The class of bug: an on_error: <sibling-room>
@@ -334,12 +360,14 @@ func TestDogfoodSmoke_AutoStartThroughBugfix(t *testing.T) {
 			out.NewState, out.View)
 	}
 
-	// Worktree must exist on disk at `.worktrees/<workspace_id>` —
-	// matching world.workdir (i.e. `bf-<ticket_id>`). idle.on_enter
-	// passes `id: workspace_id` to iface.workspace.create so the
-	// on-disk dir aligns with what `iface.workspace.sync` (and
-	// implementing.on_enter's commit) will later key on.
-	workdir := filepath.Join(repoRoot, ".worktrees", "bf-"+ticketID)
+	// Worktree must exist on disk at the path world.workdir points to.
+	// idle.on_enter derives it from ticket_id AND session_id (appended for
+	// per-session distinctness — bug9glm2), so read the actual derived path
+	// from world rather than hardcoding .worktrees/bf-<ticket>. idle.on_enter
+	// passes `id: workspace_id` to iface.workspace.create so the on-disk dir
+	// aligns with what `iface.workspace.sync` (and implementing.on_enter's
+	// commit) will later key on.
+	workdir := bugfixWorkdirAbs(t, orch, sid, repoRoot)
 	_, statErr := os.Stat(workdir)
 	require.NoError(t, statErr,
 		"worktree dir must exist after go_bugfix; expected %s", workdir)
@@ -626,7 +654,7 @@ func TestDogfoodSmoke_ContinueFromProposingReachesImplementing(t *testing.T) {
 	// Simulate the user's broken state: the worktree dir is gone but
 	// bf_autostart_attempted is pinned true. A re-entry to idle won't
 	// recreate the dir; an arc that depends on it will fail.
-	workdir := filepath.Join(repoRoot, ".worktrees", "bf-"+ticketID)
+	workdir := bugfixWorkdirAbs(t, orch, sid, repoRoot)
 	require.NoError(t, os.RemoveAll(workdir))
 	pruneCmd := exec.Command("git", "worktree", "prune")
 	pruneCmd.Dir = repoRoot
@@ -722,7 +750,7 @@ func TestDogfoodSmoke_ProposingAccept_RegisteredWorktreeDirtyTree(t *testing.T) 
 	// `git add <listed> && git commit -m` stages nothing and `git
 	// commit` exits non-zero with "no changes added to commit" on
 	// STDOUT (not stderr).
-	workdir := filepath.Join(repoRoot, ".worktrees", "bf-"+ticketID)
+	workdir := bugfixWorkdirAbs(t, orch, sid, repoRoot)
 	staleEvidence := filepath.Join(workdir, "stale_evidence.txt")
 	require.NoError(t, os.WriteFile(staleEvidence, []byte("dirty\n"), 0o644))
 
@@ -883,15 +911,10 @@ func TestDogfoodSmoke_DoneRefusesUncommittedWork(t *testing.T) {
 	// Assert it IS set before relying on the injection below. world.workdir is
 	// a repo-relative path (host.run executes in the repo-root cwd, so
 	// `git -C .worktrees/...` resolves); the absolute path is for file I/O here.
-	workdirRel := filepath.Join(".worktrees", "bf-"+ticketID)
+	// The path is now session-distinct (ticket_id + session_id — bug9glm2), so
+	// read it from the story's world rather than hardcoding bf-<ticket>.
+	workdirRel := bugfixWorkdirRel(t, orch, sid)
 	workdirAbs := filepath.Join(repoRoot, workdirRel)
-	{
-		journey, err := orch.LoadJourney(sid)
-		require.NoError(t, err)
-		require.Equal(t, workdirRel, journey.World.Vars["core__bf__workdir"],
-			"world.workdir must be the maker worktree for the clean-tree guard to fire; "+
-				"if empty the guard is dead in the dogfood path")
-	}
 
 	// Inject lost work: an UNTRACKED file no room committed. This is the
 	// incident — the working tree looks green to CI but the commit is partial.
@@ -1329,7 +1352,7 @@ func TestDogfoodSmoke_ImplementingActuallyEditsFiles(t *testing.T) {
 	step("proposing", "core__bf__accept", "core.bf.implementing")
 
 	// 1. The marker file must be committed on the feature branch.
-	workdir := filepath.Join(repoRoot, ".worktrees", "bf-"+ticketID)
+	workdir := bugfixWorkdirAbs(t, orch, sid, repoRoot)
 	showCmd := exec.Command("git", "show", "--name-only", "--format=%H", "HEAD")
 	showCmd.Dir = workdir
 	showOut, showErr := showCmd.CombinedOutput()
@@ -1748,7 +1771,10 @@ func TestDogfoodSmoke_AgentAlwaysReceivesWorkingDir(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, app.StatePath("core.bf.done"), out.NewState)
 
-	expected := filepath.Join(".worktrees", "bf-"+ticketID)
+	// The agent working_dir is the session-distinct workdir bf.idle.on_enter
+	// derived (ticket_id + session_id — bug9glm2); read it from world rather
+	// than hardcoding .worktrees/bf-<ticket>.
+	expected := bugfixWorkdirRel(t, orch, sid)
 
 	// For each phase-executing prompt, find the matching agent call and
 	// assert working_dir was set and points at the bugfix worktree.
