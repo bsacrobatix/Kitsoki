@@ -216,6 +216,10 @@ export async function startWebServer(opts: {
   hostCassette?: string;
   /** Optional .kitsoki.yaml path (--config), e.g. to declare harness_profiles. */
   config?: string;
+  /** Report-bug ticket target (--ticket-repo). Pass "" for LOCAL filing
+   *  (issues/bugs/<id>.md), or "owner/repo" to file a real GitHub issue via gh.
+   *  When undefined the flag is omitted and `kitsoki web`'s own default applies. */
+  ticketRepo?: string;
   /** Harness for free-text routing, e.g. "replay" (with `recording`). */
   harness?: string;
   /** Recording YAML for --harness replay (deterministic, hand-authorable). */
@@ -253,6 +257,7 @@ export async function startWebServer(opts: {
   if (opts.mode) args.push("--mode", opts.mode);
   if (opts.hostCassette) args.push("--host-cassette", opts.hostCassette);
   if (opts.config) args.push("--config", opts.config);
+  if (opts.ticketRepo !== undefined) args.push("--ticket-repo", opts.ticketRepo);
 
   // Slow-play passthrough (opt-in): when the RECORDING process has
   // KITSOKI_CASSETTE_SLOWPLAY set, forward it to the spawned server so a
