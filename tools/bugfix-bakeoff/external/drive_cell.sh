@@ -93,9 +93,10 @@ drive_with_retry() {
   local log_file="$1"; local err_file="$2"
   local attempt=1
   local wait_seconds="$BACKOFF_BASE"
+  local drive_path="/root/go/bin:$PATH"
   while true; do
     set +e
-    MCP_DRIVE_MODEL="$orch" "$REPO_ROOT/tools/mcp-drive/drive.sh" --prompt-file "$pf" >"$log_file" 2>"$err_file"
+    MCP_DRIVE_MODEL="$orch" PATH="$drive_path" "$REPO_ROOT/tools/mcp-drive/drive.sh" --prompt-file "$pf" >"$log_file" 2>"$err_file"
     local rc=$?
     set -e
     local payload
