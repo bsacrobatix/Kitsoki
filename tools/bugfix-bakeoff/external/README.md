@@ -127,6 +127,10 @@ GEARS_RUST_REPO=/path/to/gears-rust ./provision_repos.sh --project gears-rust
   /workspace/kitsoki/tools/bugfix-bakeoff/external/bench.py preflight \
     --project query-string --bug qs1 --candidate gpt-5.5
 ```
+`run_repo_docker.sh` always mounts the checkout at `/workspace/repo`; for
+local-only projects, pass `--repo-dir /workspace/repo` inside the containered
+`bench.py` command. `drive_cell.sh` already handles this via its host-side
+`--repo-dir` wiring.
 
 The image is built from:
 `tools/bugfix-bakeoff/external/docker/Dockerfile.repo-runtime` and includes
