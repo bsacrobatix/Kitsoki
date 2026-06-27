@@ -128,6 +128,20 @@ func rebaseEffectPaths(states map[string]*State, childDir string) {
 	if childDir == "" {
 		return
 	}
+	// Absolutize childDir so rebased paths become absolute. This is what makes
+	// the rebase idempotent across TRANSITIVE imports: when story A imports B
+	// which imports C, C's prompt paths are first rebased to C's dir, then B
+	// (with C folded in) is rebased again at A's level. If the first rebase
+	// left a RELATIVE path (which it does when the app was loaded via a relative
+	// path, e.g. `stories/pets-dev`), the second pass re-prefixes it with B's
+	// dir — producing `stories/A/stories/C/prompts/...`. Making the first rebase
+	// absolute means the second pass's filepath.IsAbs guard (in rebaseWithMap)
+	// skips the already-rebased path, so C's prompts resolve to C's real dir.
+	if !filepath.IsAbs(childDir) {
+		if abs, err := filepath.Abs(childDir); err == nil {
+			childDir = abs
+		}
+	}
 	for _, s := range states {
 		if s == nil {
 			continue

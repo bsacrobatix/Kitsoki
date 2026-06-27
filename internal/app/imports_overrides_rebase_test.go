@@ -110,6 +110,88 @@ states:
 	}
 }
 
+// TestImports_TransitiveRebaseNoDoublePrefix is the regression for the live
+// dogfood bug (#32): a grandchild's prompt path was double-prefixed across two
+// import levels — `gp/stories/parent/stories/child/prompts/...` instead of
+// `child/prompts/...` — but ONLY when the top app was loaded via a RELATIVE
+// path (so the first rebase produced a relative path the second pass re-rooted).
+// The deterministic flows hid it because they stub the agent call (prompt never
+// read from disk); it surfaced only on a live host.agent.decide. Loading via a
+// relative path here reproduces the original trigger.
+func TestImports_TransitiveRebaseNoDoublePrefix(t *testing.T) {
+	root := t.TempDir()
+	mustMkdirAll(t, filepath.Join(root, "gp"))
+	mustMkdirAll(t, filepath.Join(root, "parent"))
+	mustMkdirAll(t, filepath.Join(root, "child", "prompts"))
+	mustWriteFile(t, filepath.Join(root, "child", "prompts", "deep.md"), "child prompt")
+
+	mustWriteFile(t, filepath.Join(root, "gp", "app.yaml"), `
+app: {id: gp, title: gp}
+root: mid
+hosts: [host.agent.decide]
+imports:
+  mid:
+    source: ../parent
+    entry: main
+states:
+  shell: {view: gp}
+`)
+	mustWriteFile(t, filepath.Join(root, "parent", "app.yaml"), `
+app: {id: parent, title: parent}
+root: leaf
+hosts: [host.agent.decide]
+imports:
+  leaf:
+    source: ../child
+    entry: start
+states:
+  main: {view: parent}
+`)
+	mustWriteFile(t, filepath.Join(root, "child", "app.yaml"), `
+app: {id: child, title: child}
+root: start
+hosts: [host.agent.decide]
+states:
+  start:
+    view: child
+    on_enter:
+      - invoke: host.agent.decide
+        with:
+          prompt_path: prompts/deep.md
+`)
+
+	// Load via a RELATIVE path (the bug trigger): chdir into root, load "gp/app.yaml".
+	prevWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prevWd) })
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	def, err := Load(filepath.Join("gp", "app.yaml"))
+	if err != nil {
+		t.Fatalf("Load transitive app: %v", err)
+	}
+
+	// gp.mid -> parent.leaf -> child.start
+	start := def.States["mid"].States["leaf"].States["start"]
+	got := start.OnEnter[0].With["prompt_path"].(string)
+	want := filepath.Join(root, "child", "prompts", "deep.md")
+	// Normalize macOS /var -> /private/var symlink differences (filepath.Abs
+	// resolves the symlink; t.TempDir may not).
+	if g, err := filepath.EvalSymlinks(got); err == nil {
+		got = g
+	}
+	if w, err := filepath.EvalSymlinks(want); err == nil {
+		want = w
+	}
+	if got != want {
+		t.Fatalf("transitive prompt_path = %q, want %q (double-prefix regression)", got, want)
+	}
+}
+
 func mustMkdirAll(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {
