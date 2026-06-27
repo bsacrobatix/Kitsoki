@@ -376,6 +376,29 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 		if !hasFlagValue(cb.TranslateInvocation([]string{"-p"}, "p", wd).Args, "-C", wd) {
 			t.Errorf("codex exec (non-resume) must pass -C %s", wd)
 		}
+
+		// #33 regression: `codex exec resume` accepts ONLY
+		// `--json --skip-git-repo-check <id> [prompt]`. It rejects the
+		// sandbox/approval flag, -m, the `-c mcp_servers.*` overrides, and
+		// passthrough flags ("unexpected argument '--sandbox'"). A live converse
+		// follow-up died on this. Build a resume call carrying model + mcp-config
+		// + --add-dir and assert NONE of those leak onto the resume argv.
+		resumeFull := cb.TranslateInvocation([]string{
+			"-p", "--resume", "uuid-123",
+			"--model", "gpt-5", "--mcp-config", cfgPath, "--add-dir", "/x",
+		}, "p", wd)
+		resumeJoined := strings.Join(resumeFull.Args, " ")
+		for _, banned := range []string{"--dangerously-bypass-approvals-and-sandbox", "-m", "mcp_servers.", "--add-dir", "-C"} {
+			if strings.Contains(resumeJoined, banned) {
+				t.Errorf("codex exec resume must not carry %q (resume rejects it); args=%v", banned, resumeFull.Args)
+			}
+		}
+		// …but it MUST still carry the accepted flags.
+		for _, req := range []string{"resume", "uuid-123", "--json", "--skip-git-repo-check"} {
+			if !strings.Contains(resumeJoined, req) {
+				t.Errorf("codex exec resume missing required %q; args=%v", req, resumeFull.Args)
+			}
+		}
 		// -C MUST be absolute. The runner sets the child cwd to WorkingDir, so a
 		// RELATIVE -C would resolve against that cwd (workingDir/workingDir) →
 		// "No such file or directory" and every attempt fails. Verify a relative

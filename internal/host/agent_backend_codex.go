@@ -160,51 +160,63 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 
 	// Base exec invocation. `resume <id>` is prepended when re-engaging a
 	// recorded session across the decide/task/converse nudge rounds.
+	//
+	// `codex exec resume` is a DIFFERENT subcommand from `codex exec` with a
+	// much narrower arg surface: `codex exec resume --json --skip-git-repo-check
+	// <SESSION_ID> [PROMPT]`. It rejects the sandbox/approval flag, `-m`, `-C`,
+	// `-c` overrides, and any passthrough flag with "unexpected argument …".
+	// The recorded session already fixed the model, cwd, sandbox posture, and
+	// MCP wiring, so on a resume we emit ONLY the accepted flags. (Surfaced by a
+	// live converse follow-up failing with "unexpected argument '--sandbox'",
+	// dogfood issue #33.)
+	isResume := strings.TrimSpace(resumeID) != ""
 	args := []string{"exec"}
-	if id := strings.TrimSpace(resumeID); id != "" {
-		args = append(args, "resume", id)
+	if isResume {
+		args = append(args, "resume", strings.TrimSpace(resumeID))
 	}
 	args = append(args, "--json", "--skip-git-repo-check")
-	// `codex exec` auto-cancels EVERY MCP tool call ("user cancelled MCP tool
-	// call") in non-interactive mode — verified live (2026-06-11) against
-	// codex-cli 0.139.0 across approval_policy="never", every sandbox mode,
-	// per-server trust keys, and both ephemeral (-c) and persisted (`codex mcp
-	// add`) registration. The ONLY way to let the validator `submit` tool and
-	// the operator-ask/write-mode MCP bridge execute is to disable codex's
-	// approval+sandbox gate. Kitsoki's read-only posture is still expressed via
-	// --disallowedTools / Bash MCP policy; relying on Codex's read-only sandbox
-	// preempts Kitsoki's own write-mode opt-in and makes MCP-only dogfood unable
-	// to apply an operator-granted edit.
-	args = append(args, "--dangerously-bypass-approvals-and-sandbox")
+	if !isResume {
+		// `codex exec` auto-cancels EVERY MCP tool call ("user cancelled MCP tool
+		// call") in non-interactive mode — verified live (2026-06-11) against
+		// codex-cli 0.139.0 across approval_policy="never", every sandbox mode,
+		// per-server trust keys, and both ephemeral (-c) and persisted (`codex mcp
+		// add`) registration. The ONLY way to let the validator `submit` tool and
+		// the operator-ask/write-mode MCP bridge execute is to disable codex's
+		// approval+sandbox gate. Kitsoki's read-only posture is still expressed via
+		// --disallowedTools / Bash MCP policy; relying on Codex's read-only sandbox
+		// preempts Kitsoki's own write-mode opt-in and makes MCP-only dogfood unable
+		// to apply an operator-granted edit.
+		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 
-	// Forward the model ONLY when it is not a claude model id (reuse the shared
-	// helper). Stories/router specify claude model names; passing those to codex
-	// fails, so we drop them and let codex use its configured model. A genuine
-	// codex/OpenAI model name is forwarded as `-m`.
-	if m := strings.TrimSpace(model); m != "" && !isClaudeModelID(m) {
-		args = append(args, "-m", m)
-	}
-	// `-C/--cd <DIR>` is accepted by `codex exec` but NOT by `codex exec resume`
-	// (the resume subcommand rejects it: "unexpected argument '-C'"). On a
-	// resume the working root is fixed by the recorded session, so omit it.
-	//
-	// The value MUST be absolute. The runner sets the child process cwd to
-	// inv.WorkingDir (agent_runner.go: cmd.Dir = inv.WorkingDir), so codex
-	// already starts IN workingDir; a RELATIVE `-C workingDir` would then
-	// resolve against that cwd (workingDir/workingDir) → "No such file or
-	// directory (os error 2)" and every attempt fails. An absolute path is
-	// idempotent regardless of the inherited cwd.
-	if strings.TrimSpace(workingDir) != "" && strings.TrimSpace(resumeID) == "" {
-		cd := workingDir
-		if abs, err := filepath.Abs(workingDir); err == nil {
-			cd = abs
+		// Forward the model ONLY when it is not a claude model id (reuse the shared
+		// helper). Stories/router specify claude model names; passing those to codex
+		// fails, so we drop them and let codex use its configured model. A genuine
+		// codex/OpenAI model name is forwarded as `-m`.
+		if m := strings.TrimSpace(model); m != "" && !isClaudeModelID(m) {
+			args = append(args, "-m", m)
 		}
-		args = append(args, "-C", cd)
-	}
-	// Convert each MCP server in the --mcp-config file into codex `-c` overrides.
-	args = append(args, codexMCPConfigArgs(mcpConfig)...)
-	// Forwarded/passthrough flags (--add-dir and any unknown flag).
-	args = append(args, out...)
+		// `-C/--cd <DIR>` is accepted by `codex exec` but NOT by `codex exec resume`
+		// (the resume subcommand rejects it: "unexpected argument '-C'"). On a
+		// resume the working root is fixed by the recorded session, so omit it.
+		//
+		// The value MUST be absolute. The runner sets the child process cwd to
+		// inv.WorkingDir (agent_runner.go: cmd.Dir = inv.WorkingDir), so codex
+		// already starts IN workingDir; a RELATIVE `-C workingDir` would then
+		// resolve against that cwd (workingDir/workingDir) → "No such file or
+		// directory (os error 2)" and every attempt fails. An absolute path is
+		// idempotent regardless of the inherited cwd.
+		if strings.TrimSpace(workingDir) != "" && strings.TrimSpace(resumeID) == "" {
+			cd := workingDir
+			if abs, err := filepath.Abs(workingDir); err == nil {
+				cd = abs
+			}
+			args = append(args, "-C", cd)
+		}
+		// Convert each MCP server in the --mcp-config file into codex `-c` overrides.
+		args = append(args, codexMCPConfigArgs(mcpConfig)...)
+		// Forwarded/passthrough flags (--add-dir and any unknown flag).
+		args = append(args, out...)
+	} // end !isResume — resume rejects all of the above flags.
 
 	// Compose the stdin prompt: system prompt (if any) prepended to the user
 	// prompt claude would have piped on stdin. Unlike copilot, codex keeps the
