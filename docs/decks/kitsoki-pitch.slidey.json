@@ -74,7 +74,7 @@
       "type": "narrative",
       "eyebrow": "Kitsoki takeaway",
       "body": "Human processes are open systems.",
-      "lede": "The effectiveness of processes is in the structure, and the management of the relationship with the open environment.",
+      "lede": "Processes are built around analagous, systemic patterns.  The ability of that process to effectively interact with the environment to which it is connected drives its capability.",
       "hold": 180,
       "narration": "Kitsoki makes the boundary explicit: state in, artifacts out, feedback always attached."
     },
@@ -101,7 +101,7 @@
       "type": "narrative",
       "eyebrow": "Kitsoki takeaway",
       "body": "Flow beats chat.",
-      "lede": "Structured stories provide the channels that accelerate flow and can be reshaped over time.",
+      "lede": "Structured stories provide the channels that accelerate flow and can be reshaped over time - the flow media is product capability and user feedback.",
       "hold": 180,
       "narration": "Kitsoki makes flow visible so repeated friction can be removed instead of hidden."
     },
@@ -120,15 +120,15 @@
           "takeaway": "Knowing is enacted through a self-maintaining loop between agent and environment."
         }
       ],
-      "caption": "Maturana and Varela treat cognition as embodied action: a living system keeps itself going by coupling to its world. The observer is part of the system.",
+      "caption": "Maturana and Varela treat cognition as embodied action: a living system keeps itself going by coupling to its world. The observer is part of the system - this feedback between environment and organism or living system is the dynamic of life itself.",
       "hold": 210,
       "narration": "The Tree of Knowledge adds the third root: cognition is a self-maintaining loop."
     },
     {
       "type": "narrative",
       "eyebrow": "Kitsoki takeaway",
-      "body": "Cognition is a loop.",
-      "lede": "The agent, artifact, and environment keep shaping each other over time, so the runtime has to preserve continuity.",
+      "body": "Cognition is an open loop.",
+      "lede": "The agent, artifact, and environment keep shaping each other over time, so the runtime and framework provide the structure to preserve continuity.",
       "hold": 180,
       "narration": "Kitsoki preserves the loop so work can be inspected, replayed, tested, and improved."
     },
@@ -224,7 +224,21 @@
       "panels": [
         {
           "label": "",
-          "viewBox": "0 0 1480 560",
+          "viewBox": "0 0 1500 820",
+          "layout": "cycle",
+          "cycle": {
+            "center": {
+              "x": 750,
+              "y": 365
+            },
+            "rx": 335,
+            "ry": 215,
+            "arrowRx": 350,
+            "arrowRy": 230,
+            "variant": "recycle-logo",
+            "glyphY": 430,
+            "glyphSize": 920
+          },
           "nodes": [
             {
               "id": "define",
@@ -234,10 +248,9 @@
                 "goal",
                 "boundary"
               ],
-              "x": 30,
-              "y": 170,
-              "w": 240,
-              "h": 130,
+              "slot": "left",
+              "w": 330,
+              "h": 190,
               "style": "primary"
             },
             {
@@ -248,10 +261,9 @@
                 "trace",
                 "evidence"
               ],
-              "x": 320,
-              "y": 170,
-              "w": 240,
-              "h": 130
+              "slot": "top",
+              "w": 330,
+              "h": 190
             },
             {
               "id": "analyze",
@@ -261,10 +273,9 @@
                 "friction",
                 "variance"
               ],
-              "x": 610,
-              "y": 170,
-              "w": 240,
-              "h": 130
+              "slot": "right",
+              "w": 330,
+              "h": 190
             },
             {
               "id": "improve",
@@ -274,10 +285,9 @@
                 "story",
                 "gate"
               ],
-              "x": 900,
-              "y": 170,
-              "w": 240,
-              "h": 130
+              "slot": "bottom",
+              "w": 330,
+              "h": 190
             },
             {
               "id": "control",
@@ -287,37 +297,52 @@
                 "replay",
                 "tests"
               ],
-              "x": 1190,
-              "y": 170,
-              "w": 240,
-              "h": 130,
-              "style": "secondary"
+              "x": 1135,
+              "y": 365,
+              "w": 250,
+              "h": 190,
+              "style": "secondary",
+              "cycle": false
+            },
+            {
+              "id": "input",
+              "label": "Input",
+              "sub": "signal + tickets",
+              "lines": [
+                "goal",
+                "constraints"
+              ],
+              "x": 40,
+              "y": 365,
+              "w": 340,
+              "h": 190,
+              "style": "secondary",
+              "cycle": false
+            },
+            {
+              "id": "output",
+              "label": "Output",
+              "sub": "improvements",
+              "lines": [
+                "tuning",
+                "learning"
+              ],
+              "x": 1120,
+              "y": 570,
+              "w": 280,
+              "h": 190,
+              "style": "secondary",
+              "cycle": false
             }
           ],
           "edges": [
             {
-              "from": "define",
-              "to": "measure"
-            },
-            {
-              "from": "measure",
-              "to": "analyze"
-            },
-            {
-              "from": "analyze",
-              "to": "improve"
-            },
-            {
-              "from": "improve",
-              "to": "control"
+              "from": "input",
+              "to": "define"
             },
             {
               "from": "control",
-              "to": "define",
-              "style": "back",
-              "bus": 30,
-              "lift": -105,
-              "land": 30
+              "to": "output"
             }
           ]
         }
