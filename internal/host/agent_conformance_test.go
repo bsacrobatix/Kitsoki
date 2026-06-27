@@ -169,6 +169,16 @@ func TestConformance_ToolEventsClassified(t *testing.T) {
 			t.Errorf("codex command Tools = %+v, want one shell tool", ce.Tools)
 		}
 	})
+	t.Run("codex/command_execution_started", func(t *testing.T) {
+		ev := mustUnmarshal(t, `{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'echo hi'","aggregated_output":"","exit_code":null,"status":"in_progress"}}`)
+		ce := codexBackend{}.Classify(ev)
+		if ce.Type != "assistant" {
+			t.Errorf("codex command started type = %q, want assistant", ce.Type)
+		}
+		if ce.Tool != "shell" || ce.ToolArgs != "/bin/zsh -lc 'echo hi'" {
+			t.Errorf("codex command started classify = %q/%q, want shell/<command>", ce.Tool, ce.ToolArgs)
+		}
+	})
 	t.Run("codex/mcp_tool_call", func(t *testing.T) {
 		ev := mustUnmarshal(t, `{"type":"item.completed","item":{"type":"mcp_tool_call","tool":"kitsoki-validator__submit","arguments":{"answer":"hello"}}}`)
 		ce := codexBackend{}.Classify(ev)
@@ -177,6 +187,19 @@ func TestConformance_ToolEventsClassified(t *testing.T) {
 		}
 		if len(ce.Tools) != 1 || ce.Tools[0].Name != "kitsoki-validator__submit" {
 			t.Errorf("codex mcp_tool_call Tools = %+v, want one submit tool", ce.Tools)
+		}
+	})
+	t.Run("codex/mcp_tool_call_started", func(t *testing.T) {
+		ev := mustUnmarshal(t, `{"type":"item.started","item":{"id":"item_1","type":"mcp_tool_call","tool":"kitsoki-validator__submit","arguments":{"answer":"hello"}}}`)
+		ce := codexBackend{}.Classify(ev)
+		if ce.Type != "assistant" {
+			t.Errorf("codex mcp_tool_call started type = %q, want assistant", ce.Type)
+		}
+		if ce.Tool != "kitsoki-validator__submit" {
+			t.Errorf("codex mcp_tool_call started Tool = %q, want kitsoki-validator__submit", ce.Tool)
+		}
+		if len(ce.Tools) != 1 || ce.Tools[0].Name != "kitsoki-validator__submit" {
+			t.Errorf("codex mcp_tool_call started Tools = %+v, want one submit tool", ce.Tools)
 		}
 	})
 }
@@ -276,6 +299,7 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 			"--permission-mode", "bypassPermissions",
 			"--setting-sources", "project,local",
 			"--disable-slash-commands",
+			"--strict-mcp-config",
 			"--append-system-prompt", "SYS-PROMPT",
 			"--model", "some-model",
 			"--effort", "low",
@@ -302,6 +326,16 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 		if !hasFlagValue(inv.Args, "-C", wd) {
 			t.Errorf("codex missing -C %s; args=%v", wd, inv.Args)
 		}
+		readOnly := codexBackend{}.TranslateInvocation([]string{
+			"-p", "--permission-mode", "default", "--disallowedTools", "Write,Edit,Bash,AskUserQuestion",
+		}, "read only", wd)
+		readOnlyArgs := strings.Join(readOnly.Args, " ")
+		if hasFlagValue(readOnly.Args, "--sandbox", "read-only") {
+			t.Errorf("codex read-only invocation must not use codex's sandbox; Kitsoki owns write-mode mediation; args=%v", readOnly.Args)
+		}
+		if !strings.Contains(readOnlyArgs, "--dangerously-bypass-approvals-and-sandbox") {
+			t.Errorf("codex read-only invocation must bypass codex approvals so Kitsoki MCP submit/write-mode tools work; args=%v", readOnly.Args)
+		}
 		// MCP config converted to `-c mcp_servers.*` overrides.
 		mustContain(t, got, `mcp_servers.kitsoki-validator.command="/bin/kitsoki"`)
 		mustContain(t, got, `mcp_servers.kitsoki-validator.args=["mcp-validator","--schema","/tmp/s.json"]`)
@@ -317,7 +351,7 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 		}
 
 		// Claude-only flags must be gone.
-		for _, dropped := range []string{"--permission-mode", "--setting-sources", "--disable-slash-commands", "--effort", "--verbose", "--append-system-prompt", "--mcp-config", "stream-json", "--output-format"} {
+		for _, dropped := range []string{"--permission-mode", "--setting-sources", "--disable-slash-commands", "--effort", "--verbose", "--append-system-prompt", "--mcp-config", "stream-json", "--output-format", "--strict-mcp-config"} {
 			if strings.Contains(got, dropped) {
 				t.Errorf("codex args still contain dropped flag %q: %v", dropped, inv.Args)
 			}
@@ -327,6 +361,29 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 		resume := cb.TranslateInvocation([]string{"-p", "--resume", "uuid-123"}, "p", "")
 		if len(resume.Args) < 3 || resume.Args[0] != "exec" || resume.Args[1] != "resume" || resume.Args[2] != "uuid-123" {
 			t.Errorf("codex --resume not in `exec resume <id>` form; args=%v", resume.Args)
+		}
+		// `codex exec resume` rejects -C/--cd ("unexpected argument '-C'"), which
+		// failed every retry attempt. -C must be omitted when resuming (the
+		// working root is fixed by the recorded session).
+		resumeWithWD := cb.TranslateInvocation([]string{"-p", "--resume", "uuid-123"}, "p", wd)
+		for i, a := range resumeWithWD.Args {
+			if a == "-C" {
+				t.Errorf("codex exec resume must not pass -C; args=%v", resumeWithWD.Args)
+			}
+			_ = i
+		}
+		// Non-resume still passes -C (codex exec accepts it).
+		if !hasFlagValue(cb.TranslateInvocation([]string{"-p"}, "p", wd).Args, "-C", wd) {
+			t.Errorf("codex exec (non-resume) must pass -C %s", wd)
+		}
+		// -C MUST be absolute. The runner sets the child cwd to WorkingDir, so a
+		// RELATIVE -C would resolve against that cwd (workingDir/workingDir) →
+		// "No such file or directory" and every attempt fails. Verify a relative
+		// workingDir is made absolute for -C.
+		relArgs := cb.TranslateInvocation([]string{"-p"}, "p", "docs/decks").Args
+		absWD, _ := filepath.Abs("docs/decks")
+		if !hasFlagValue(relArgs, "-C", absWD) {
+			t.Errorf("codex -C must be absolute for a relative workingDir; want -C %s; args=%v", absWD, relArgs)
 		}
 	})
 }

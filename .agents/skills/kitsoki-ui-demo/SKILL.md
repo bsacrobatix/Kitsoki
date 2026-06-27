@@ -171,15 +171,81 @@ Once the flow + cassette exist, everything below (spec, pacing, MP4) is unchange
 — the source of the fixture (hand-authored vs trace-derived) is invisible to the
 recorder.
 
+## Start from a real dogfood trace (generate the flow + cassette — don't hand-author)
+
+A demo's no-LLM `--flow` fixture + `--host-cassette` do **not** have to be written
+by hand. If the scenario you want to film already happened as a **real,
+LLM-driven session** (a dogfood run, a bugfix pipeline, a live drive), convert
+its recorded trace into the replay artifacts deterministically — no LLM
+re-interpretation, no transcription by hand:
+
+```bash
+# 1. Find the recorded session trace (JSONL). Live/record sessions write one to:
+#      ~/.kitsoki/sessions/<app>/<session-id>.jsonl
+#    or capture a fresh one via the MCP `session.trace` tool / `--trace-out`.
+
+# 2. Convert the trace → a flow fixture (+ sibling host cassette) — a pure transform:
+kitsoki trace to-flow <trace.jsonl> \
+  --app ../app.yaml \
+  --out stories/<story>/flows/<scenario>.yaml
+#   → writes <scenario>.yaml and (when the trace had host calls)
+#     <scenario>.cassette.yaml beside it, referenced via host_cassette:.
+
+# 3. Verify it replays no-LLM and capture a fresh trace:
+kitsoki test flows stories/<story>/app.yaml --flows stories/<story>/flows/<scenario>.yaml \
+  --trace-out .artifacts/<scenario>/replay.jsonl
+```
+
+The generated flow is exactly what the recording pipeline already consumes — point
+`kitsoki web --flow stories/<story>/flows/<scenario>.yaml` (or a `*-video.spec.ts`
+spec's `--flow` arg) at it and record as below. Two properties make this a clean
+fit for demos:
+
+- **Each `machine.transition` → one turn** (resolved intent name + slots,
+  verbatim, in order). The LLM/semantic routing decision is *not* re-run on
+  replay — the resolved intent is re-driven directly, so it's deterministic and
+  free.
+- **`display_input:` preserves the operator's real free-text words** (from the
+  trace's `turn.input`), so a conversation demo's user bubbles — and the strings
+  you type into the composer — are the operator's actual utterance, not a
+  synthetic `[intent] <name>`. This is what makes a trace-derived conversation
+  video followable (see [Demoing human usage](#demoing-human-usage--the-conversation-must-be-followable)).
+
+**Caveats, all by design** (full discussion + the trace→fixture mapping table:
+[`docs/tracing/trace-format.md` §11](../../tracing/trace-format.md#11-kitsoki-trace-to-flow--trace--replayable-flow-fixture)):
+
+- The converter emits **no `expect_state` / `expect_world`** (story-drift
+  tolerance). Add expectations by hand only if you want to pin a known-drift-free
+  path.
+- Per-call-varying agent/host responses replay correctly because each recorded
+  call becomes one **ordered** cassette episode (not `replay:any`) — the i-th call
+  consumes the i-th episode.
+- If the *current* story routes a turn into a room that didn't exist when the
+  trace was recorded, that room's `on_enter` may need a host call the cassette
+  has no episode for → a hard cassette miss / `on_error` bounce. That's honest
+  drift, not a tooling fault: re-record the trace against the current story.
+
+Once the flow + cassette exist, everything below (spec, pacing, MP4) is unchanged
+— the source of the fixture (hand-authored vs trace-derived) is invisible to the
+recorder.
+
 ## Prerequisites (once)
 
 ```bash
-make build                                  # bundle the SPA into ./kitsoki + bin/kitsoki
-cp ./kitsoki bin/kitsoki                    # the specs spawn bin/kitsoki
+make build-bin                              # stage SPA/stories + build bin/kitsoki (the specs spawn it), ad-hoc signed
 pnpm -C tools/runstatus playwright:install  # chromium + ffmpeg for Playwright (once)
 ```
 
-`make build` is **mandatory before every recording** — the SPA is `go:embed`'d
+**Never `cp ./kitsoki bin/kitsoki`.** On macOS, copying a Go linker-signed
+Mach-O invalidates its ad-hoc code signature; macOS then SIGKILLs the spawned
+server the instant it faults in an affected code page (e.g. the story-load
+path), so `kitsoki web --stories-dir …` dies with **exit 137 and zero output** —
+a silent landmine. `make build-bin` builds straight to `bin/kitsoki` and ad-hoc
+re-signs it, so the signature stays valid. (Plain `make build` produces the
+signed `./kitsoki`; it's `make build-bin` that yields the spawn binary the specs
+need.)
+
+`make build-bin` is **mandatory before every recording** — the SPA is `go:embed`'d
 into the binary, so an un-rebuilt binary serves a stale UI. Rebuild after any
 change under `tools/runstatus/src/`.
 
@@ -329,6 +395,20 @@ conversation. `kitsoki-ui-qa` now **fails** a demo that breaks any of these
     Wrap EVERY turn in it: `reveal(action, settle, label)`. Fixed `dwell()`s
     between turns + the component's native snap is exactly what makes a demo
     "jumpy" — never record that way.
+  - **Already captured a snapped clip (rrweb)? Re-render it followable, don't
+    re-record.** A conversation clip captured WITHOUT the revealTurn discipline
+    (e.g. a trace-derived dogfood capture) bakes in the component's
+    snap-to-bottom scroll and reads as jumpy/unreadable — even though the
+    `rrweb-pacing-scan` (TIME) passes it, the QA `rrweb-scroll-scan` (SCROLL)
+    flags it `UNFOLLOWABLE`. `slidey rrweb-reveal <in> <out>` fixes it offline,
+    deterministically: it replaces each recorded snap with a hold + eased ramp
+    through the same scroll trajectory (the revealTurn choreography, synthesized
+    from the captured y-values — no browser, no geometry). Run it on the clip(s)
+    a deck embeds; the scroll-scan then reads them followable. It owns SCROLL;
+    `slidey rrweb-repace` owns TIME — run reveal first, repace after if any
+    content reveal is still rushed. This does NOT fix CONTENT defects (an
+    unnatural first utterance, a missing routing chip, questions shown
+    already-answered) — those still need a real re-drive/re-capture.
 - **No overlapping tour labels.** A coachmark/popover/tooltip must never sit on top
   of the chat. Dismiss any onboarding/tour overlay before driving, and keep
   spotlight popovers off the conversation.
@@ -536,7 +616,7 @@ What makes it the template:
 
 ```bash
 # 1. Rebuild the SPA into the binary (mandatory — go:embed)
-make build && cp ./kitsoki bin/kitsoki
+make build-bin   # build bin/kitsoki (ad-hoc signed; NEVER cp ./kitsoki — invalidates the sig → SIGKILL)
 
 # 2. Validate fast (assertions only, no dwells)
 cd tools/runstatus && WEB_CHAT_PACE=0 pnpm exec playwright test agent-actions-video --project=chromium
@@ -675,7 +755,7 @@ mutation-dense tours.
 ### Run it
 
 ```bash
-make build && cp ./kitsoki bin/kitsoki   # rebuild (go:embed) — capture drives a live server
+make build-bin   # stage + build bin/kitsoki (ad-hoc signed; NEVER cp — that SIGKILLs on macOS)
 
 # 1. CAPTURE (one live drive) → .artifacts/rrweb-eval/<tour>/<tour>.rrweb.json (+ .capture.json sidecar)
 cd tools/runstatus && pnpm exec playwright test agent-actions-rrweb-capture --project=chromium

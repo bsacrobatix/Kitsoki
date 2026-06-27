@@ -2,7 +2,7 @@
 #
 # run-tests.sh — concise runner for the full kitsoki test suite.
 #
-# Runs three suites and NEVER bails early — every failure across all is
+# Runs five suites and NEVER bails early — every failure across all is
 # collected before we exit:
 #   1. go test ./...                  (Go unit tests)
 #   2. story flow fixtures            (deterministic, no-LLM `kitsoki test flows`
@@ -10,6 +10,8 @@
 #   3. feature catalog                (features/*.yaml schema + generated tour
 #                                      manifests freshness; skipped with a
 #                                      warning when pnpm/node_modules absent)
+#   4. demo media contract            (no-LLM product-site/deck media layout)
+#   5. session-mining no-LLM invariants
 #
 # Output contract:
 #   - success → one terse line per suite, plus the report path.
@@ -47,6 +49,8 @@ go_failures=0
 flow_failures=0
 features_failures=0
 features_skipped=0
+media_failures=0
+media_skipped=0
 mining_failures=0
 mining_skipped=0
 mining_total=0
@@ -129,7 +133,28 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Suite 4: session-mining no-LLM invariants (stdlib python, committed fixtures)
+# Suite 4: demo media contract (source/staged product-site media + deck embeds)
+# ---------------------------------------------------------------------------
+section "demo media contract"
+if command -v node >/dev/null 2>&1 && command -v pnpm >/dev/null 2>&1 && [ -d tools/runstatus/node_modules ]; then
+	MEDIA_INDEX="$TMP/features-media"
+	mkdir -p "$MEDIA_INDEX"
+	if pnpm --dir tools/runstatus --silent exec tsx scripts/features/generate.ts --index --out "$MEDIA_INDEX" >"$TMP/media-index.out" 2>&1; then
+		node tools/site/scripts/check-media.mjs --index "$MEDIA_INDEX/features-index.json" >"$TMP/media.out" 2>&1
+		media_rc=$?
+		cat "$TMP/media-index.out" "$TMP/media.out" >>"$REPORT"
+		[ "$media_rc" -ne 0 ] && media_failures=1
+	else
+		cat "$TMP/media-index.out" >>"$REPORT"
+		media_failures=1
+	fi
+else
+	media_skipped=1
+	echo "skipped: node/pnpm or tools/runstatus/node_modules missing (run 'make setup' + 'make web')" >>"$REPORT"
+fi
+
+# ---------------------------------------------------------------------------
+# Suite 5: session-mining no-LLM invariants (stdlib python, committed fixtures)
 # ---------------------------------------------------------------------------
 # The intent pipeline, outcome capture, git-ops coverage, and the real-cost
 # stack are all pure-python and run against frozen agent JSON — NEVER a live
@@ -165,7 +190,7 @@ ls -1t "$REPORT_DIR"/test-*.log 2>/dev/null | tail -n +$((KEEP + 1)) | while rea
 # ---------------------------------------------------------------------------
 # Console summary
 # ---------------------------------------------------------------------------
-total_failures=$((go_failures + flow_failures + features_failures + mining_failures))
+total_failures=$((go_failures + flow_failures + features_failures + media_failures + mining_failures))
 
 if [ "$total_failures" -eq 0 ]; then
 	printf '%s✓%s go test ./...   %s%d packages%s\n' "$GREEN" "$RST" "$DIM" "$go_pkgs_total" "$RST"
@@ -174,6 +199,11 @@ if [ "$total_failures" -eq 0 ]; then
 		printf '%s-%s feature catalog %sskipped (pnpm/node_modules missing)%s\n' "$YELLOW" "$RST" "$DIM" "$RST"
 	else
 		printf '%s✓%s feature catalog\n' "$GREEN" "$RST"
+	fi
+	if [ "$media_skipped" -eq 1 ]; then
+		printf '%s-%s demo media      %sskipped (node/pnpm/node_modules missing)%s\n' "$YELLOW" "$RST" "$DIM" "$RST"
+	else
+		printf '%s✓%s demo media\n' "$GREEN" "$RST"
 	fi
 	if [ "$mining_skipped" -eq 1 ]; then
 		printf '%s-%s session-mining   %sskipped (python3 missing)%s\n' "$YELLOW" "$RST" "$DIM" "$RST"
@@ -243,6 +273,13 @@ fi
 if [ "$features_failures" -gt 0 ]; then
 	printf '\n%s✗ feature catalog%s — validation/freshness failed:\n' "$BOLD$RED" "$RST"
 	sed 's/^/  /' "$TMP/features.out"
+fi
+
+# --- Demo media failures -----------------------------------------------------
+if [ "$media_failures" -gt 0 ]; then
+	printf '\n%s✗ demo media contract%s — validation failed:\n' "$BOLD$RED" "$RST"
+	sed 's/^/  /' "$TMP/media-index.out" 2>/dev/null
+	sed 's/^/  /' "$TMP/media.out" 2>/dev/null
 fi
 
 # --- Session-mining failures --------------------------------------------------

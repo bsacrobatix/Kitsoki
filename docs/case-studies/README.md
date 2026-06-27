@@ -49,8 +49,18 @@ on prompt incantations to enforce structure.
   from its hermetic parent-commit baseline and graded against the fix's own
   regression test as a hidden oracle. Asks the headline question: **is
   structure worth more than a bigger model?** Framework at
-  [`tools/bugfix-bakeoff/`](../../tools/bugfix-bakeoff/). _(template — awaiting
-  live-run data.)_
+  [`tools/bugfix-bakeoff/`](../../tools/bugfix-bakeoff/). _(methodology
+  validated + first `bug9` results; full grid pending — structure proved
+  more thorough, not automatically cheaper.)_
+
+- **[query-string-bakeoff.md](query-string-bakeoff.md)** — *should I use
+  kitsoki for **my** project?* The bake-off pointed at a real third-party repo
+  ([`sindresorhus/query-string`](https://github.com/sindresorhus/query-string),
+  small/simple but mature — 274 commits, 90 releases): onboard it, fix 3
+  real filed-issue bugs, and grade each fix deterministically against the
+  regression test the real PR shipped. Gated reproducible scaffold at
+  [`tools/bugfix-bakeoff/external/`](../../tools/bugfix-bakeoff/external/)
+  (`make qs-bakeoff`); cost-vs-real-fix cells are operator-run.
 
 - **[routing-model-cost-study.md](routing-model-cost-study.md)** — the
   model-selection lever after deterministic routing has already done its
@@ -58,6 +68,12 @@ on prompt incantations to enforce structure.
   Haiku / synthetic-small / GPT-mini-style candidates, and argues for
   room-by-room cheap-router promotion with explicit hard-negative tests
   and fallback rather than a global model downgrade.
+
+- **[glm52-quota-dogfood.md](glm52-quota-dogfood.md)** — the provider
+  reliability lever. A live GLM-5.2 run through synthetic.new used the local
+  quota controller to serialize work and learn observed token usage without
+  hitting 429s, then used `agent-bench` to show the remaining failure was
+  task-shape performance: valid submit, but over wall/output/cost budgets.
 
 Future studies (planned, not yet written):
 

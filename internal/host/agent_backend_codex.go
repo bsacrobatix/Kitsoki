@@ -8,11 +8,13 @@
 //
 //   - the prompt is read from stdin (codex `exec` reads the instructions from
 //     stdin when no positional prompt is given) — same delivery as claude;
-//   - there is no permission flag, and `codex exec` auto-cancels every MCP tool
-//     call unless its approval+sandbox gate is disabled, so we run with
-//     `--dangerously-bypass-approvals-and-sandbox` — the only way the validator
+//   - codex does not accept Claude's allowed/disallowed tool flags. Calls that
+//     carry a mutator deny-list preserve the story's read-only posture via
+//     `--sandbox read-only`; other calls still use
+//     `--dangerously-bypass-approvals-and-sandbox`, the only way the validator
 //     submit tool can execute (verified live; see TranslateInvocation). This is
-//     why `--agent codex` requires a trusted/externally-sandboxed environment;
+//     why write-capable `--agent codex` paths require a trusted/externally
+//     sandboxed environment;
 //   - MCP config is not a file flag: the --mcp-config JSON is read and each
 //     server is converted to codex `-c mcp_servers.<name>.{command,args,env}`
 //     TOML config overrides;
@@ -30,8 +32,9 @@
 //
 // Flags claude understands but codex does not (--permission-mode,
 // --setting-sources, --effort, --exclude-dynamic-system-prompt-sections,
-// --no-session-persistence, --verbose, --allowedTools, --disallowedTools,
-// --output-format) are dropped during translation.
+// --no-session-persistence, --verbose, --allowedTools, --output-format) are
+// dropped during translation. --disallowedTools is interpreted only to select
+// Codex's sandbox for read-only story agents.
 package host
 
 import (
@@ -39,6 +42,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -104,12 +108,21 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 
 		switch flag {
 		case "-p", "--verbose", "--exclude-dynamic-system-prompt-sections", "--no-session-persistence",
-			"--disable-slash-commands":
+			"--disable-slash-commands", "--strict-mcp-config":
 			// Dropped: no codex equivalent (or supplied differently).
+			// `--strict-mcp-config` is a claude-only boolean (restrict MCP to the
+			// --mcp-config file). codex exec rejects it ("unexpected argument
+			// '--strict-mcp-config'", exit 2) — which silently burned every
+			// acceptance attempt in ~60ms and made codex-profile sessions
+			// "impossible" (validator submit never ran). codex registers the
+			// validator MCP via the `-c mcp_servers.*` overrides below instead.
 		case "--permission-mode", "--setting-sources", "--effort",
-			"--allowedTools", "--disallowedTools":
+			"--allowedTools":
 			// Dropped along with their value. (Tool-scoping is a parity gap;
 			// codex runs with the bypass flag set below.)
+		case "--disallowedTools":
+			// Codex has no direct equivalent. Kitsoki's read-only posture is
+			// enforced by the story/tooling layer; see the bypass rationale below.
 		case "--output-format":
 			// Always normalized to codex's --json below.
 		case "--session-id":
@@ -151,22 +164,18 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 	if id := strings.TrimSpace(resumeID); id != "" {
 		args = append(args, "resume", id)
 	}
-	args = append(args,
-		"--json",
-		"--skip-git-repo-check",
-		// `codex exec` auto-cancels EVERY MCP tool call ("user cancelled MCP
-		// tool call") in non-interactive mode — verified live (2026-06-11)
-		// against codex-cli 0.139.0 across approval_policy="never", every
-		// sandbox mode, per-server trust keys, and both ephemeral (-c) and
-		// persisted (`codex mcp add`) registration. The ONLY way to let the
-		// validator `submit` tool actually execute is to disable codex's
-		// approval+sandbox gate. Since the MCP-submit path is load-bearing for
-		// parity (schema validation + nudge/abandonment recovery + post_cmd
-		// verifiers), we run codex with the bypass flag. This is safe ONLY when
-		// kitsoki runs codex in a trusted/externally-sandboxed context; the
-		// operator opts in by selecting `--agent codex`.
-		"--dangerously-bypass-approvals-and-sandbox",
-	)
+	args = append(args, "--json", "--skip-git-repo-check")
+	// `codex exec` auto-cancels EVERY MCP tool call ("user cancelled MCP tool
+	// call") in non-interactive mode — verified live (2026-06-11) against
+	// codex-cli 0.139.0 across approval_policy="never", every sandbox mode,
+	// per-server trust keys, and both ephemeral (-c) and persisted (`codex mcp
+	// add`) registration. The ONLY way to let the validator `submit` tool and
+	// the operator-ask/write-mode MCP bridge execute is to disable codex's
+	// approval+sandbox gate. Kitsoki's read-only posture is still expressed via
+	// --disallowedTools / Bash MCP policy; relying on Codex's read-only sandbox
+	// preempts Kitsoki's own write-mode opt-in and makes MCP-only dogfood unable
+	// to apply an operator-granted edit.
+	args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 
 	// Forward the model ONLY when it is not a claude model id (reuse the shared
 	// helper). Stories/router specify claude model names; passing those to codex
@@ -175,8 +184,22 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 	if m := strings.TrimSpace(model); m != "" && !isClaudeModelID(m) {
 		args = append(args, "-m", m)
 	}
-	if strings.TrimSpace(workingDir) != "" {
-		args = append(args, "-C", workingDir)
+	// `-C/--cd <DIR>` is accepted by `codex exec` but NOT by `codex exec resume`
+	// (the resume subcommand rejects it: "unexpected argument '-C'"). On a
+	// resume the working root is fixed by the recorded session, so omit it.
+	//
+	// The value MUST be absolute. The runner sets the child process cwd to
+	// inv.WorkingDir (agent_runner.go: cmd.Dir = inv.WorkingDir), so codex
+	// already starts IN workingDir; a RELATIVE `-C workingDir` would then
+	// resolve against that cwd (workingDir/workingDir) → "No such file or
+	// directory (os error 2)" and every attempt fails. An absolute path is
+	// idempotent regardless of the inherited cwd.
+	if strings.TrimSpace(workingDir) != "" && strings.TrimSpace(resumeID) == "" {
+		cd := workingDir
+		if abs, err := filepath.Abs(workingDir); err == nil {
+			cd = abs
+		}
+		args = append(args, "-C", cd)
 	}
 	// Convert each MCP server in the --mcp-config file into codex `-c` overrides.
 	args = append(args, codexMCPConfigArgs(mcpConfig)...)
