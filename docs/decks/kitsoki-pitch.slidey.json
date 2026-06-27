@@ -3313,6 +3313,92 @@
       "instant": true
     },
     {
+      "type": "table",
+      "title": "Persona-driven journey QA in detail",
+      "columns": [
+        "Persona",
+        "Primary question",
+        "Evidence source",
+        "Gap status"
+      ],
+      "rows": [
+        {
+          "cells": [
+            "Developer",
+            "Can one developer complete a realistic journey using only evidence?",
+            "story.test + story.validate + trace artifacts",
+            "Covered for core paths; scaling to all target flows"
+          ]
+        },
+        {
+          "cells": [
+            "QA owner",
+            "Are claims reproducible before handoff?",
+            "mcp-drive logs + deterministic suite replays",
+            "In progress: remaining heuristics still manual"
+          ]
+        },
+        {
+          "cells": [
+            "Operator",
+            "Can stalled steps be resumed from trace context?",
+            "session.trace + artifacts + issue payloads",
+            "Partially delivered; recovery KPI rollout still pending"
+          ]
+        },
+        {
+          "cells": [
+            "Product owner",
+            "Does journey quality improve over repeated marathons?",
+            "scorecard, verdicts, corpus trend checks",
+            "In progress until the trend dashboard ships"
+          ]
+        }
+      ],
+      "variant": "data",
+      "caption": "The process maps each persona to reproducible evidence and tracks partial work explicitly, not just pass/fail.",
+      "hold": 250,
+      "narration": "Persona-driven QA tracks reproducibility and confidence by role: what developers need to execute, what QA needs to trust, what operators need for handoff, and what owners need for trend confidence.",
+      "instant": true
+    },
+    {
+      "type": "evidence",
+      "title": "Persona-driven journey QA",
+      "items": [
+        {
+          "label": "Developer persona",
+          "status": "progress",
+          "detail": "journey-level trace capture, proposal checkpoints, and bugfix evidence are being replayed from live runs in one coherent flow.",
+          "refType": "artifact",
+          "ref": "story trace + flow fixtures"
+        },
+        {
+          "label": "QA owner persona",
+          "status": "progress",
+          "detail": "skeptical review pass is partially automated; partial coverage still relies on manual judgment for UX evidence and edge-case interpretation.",
+          "refType": "test",
+          "ref": "journey-qa draft harness"
+        },
+        {
+          "label": "Operator persona",
+          "status": "progress",
+          "detail": "operator handoff artifacts are consistently surfaced, but multi-day cadence dashboards and alerting are still being rolled out.",
+          "refType": "doc",
+          "ref": "handoff + trace review notes"
+        },
+        {
+          "label": "Product owner persona",
+          "status": "progress",
+          "detail": "cross-repo persona scoring and trend reporting exist as design intent; remaining work is to wire them into a reusable weekly report.",
+          "refType": "artifact",
+          "ref": "persona QA scorecard draft"
+        }
+      ],
+      "caption": "Persona-driven QA is now a running process, with partial delivery across roles and explicit gaps tracked in the same evidence lane as product validation.",
+      "hold": 230,
+      "instant": true
+    },
+    {
       "type": "narrative",
       "eyebrow": "Phase 3: Large-scale training",
       "body": "Move from one repo check to reusable system training.",
