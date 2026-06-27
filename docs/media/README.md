@@ -78,6 +78,8 @@ Until a dedicated deck catalog exists, use this rule:
 Current committed rrweb deck clips:
 
 - `docs/decks/dev-story-hybrid.slidey.json`
+- `docs/decks/assets/dev-story-hybrid/report-bug.rrweb.json`
+- `docs/decks/assets/dev-story-hybrid/web-inbox.rrweb.json`
 - `docs/decks/assets/dev-story-hybrid/pm-idea.rrweb.json`
 - `docs/decks/assets/dev-story-hybrid/architect-design.rrweb.json`
 - `docs/decks/assets/dev-story-hybrid/decomposition.rrweb.json`
