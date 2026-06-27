@@ -3684,6 +3684,43 @@
       "instant": true
     },
     {
+      "type": "evidence",
+      "title": "Next: mockup and storyboard",
+      "items": [
+        {
+          "label": "Mockup first",
+          "status": "next",
+          "detail": "turn the proposal into concrete screens before the implementation gets expensive",
+          "refType": "artifact",
+          "ref": "static mockup"
+        },
+        {
+          "label": "Storyboard the tour",
+          "status": "next",
+          "detail": "make a video that looks basically like the final product video",
+          "refType": "artifact",
+          "ref": "mock video"
+        },
+        {
+          "label": "Tune the script",
+          "status": "next",
+          "detail": "refine annotations, narration, and agent instructions against the storyboard",
+          "refType": "doc",
+          "ref": "instructions"
+        },
+        {
+          "label": "Build to spec",
+          "status": "next",
+          "detail": "implement the feature once the screen, video, and story behavior are aligned",
+          "refType": "path",
+          "ref": "storyboard -> feature"
+        }
+      ],
+      "caption": "Move the first learning loop earlier: proposal to mockup to storyboard to instructions, then implementation. The feature gets built to a visible spec.",
+      "hold": 240,
+      "instant": true
+    },
+    {
       "type": "cta",
       "wordmark": "Kitsoki",
       "tagline": "Prove what the model did — and what it couldn't",
