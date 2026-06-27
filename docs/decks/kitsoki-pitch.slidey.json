@@ -3317,46 +3317,46 @@
       "title": "Persona-driven journey QA in detail",
       "columns": [
         "Persona",
-        "Primary question",
-        "Evidence source",
+        "Question",
+        "Evidence",
         "Gap status"
       ],
       "rows": [
         {
           "cells": [
             "Developer",
-            "Can one developer complete a realistic journey using only evidence?",
-            "story.test + story.validate + trace artifacts",
-            "Covered for core paths; scaling to all target flows"
+            "Can one developer complete a realistic journey from evidence?",
+            "story.test, story.validate, trace artifacts",
+            "Covered for core paths; expanding to all flows"
           ]
         },
         {
           "cells": [
             "QA owner",
             "Are claims reproducible before handoff?",
-            "mcp-drive logs + deterministic suite replays",
-            "In progress: remaining heuristics still manual"
+            "mcp-drive logs + suite replays",
+            "In progress: some heuristics are still manual"
           ]
         },
         {
           "cells": [
             "Operator",
-            "Can stalled steps be resumed from trace context?",
+            "Can stalled steps resume from trace context?",
             "session.trace + artifacts + issue payloads",
-            "Partially delivered; recovery KPI rollout still pending"
+            "Partially delivered; recovery KPI rollout pending"
           ]
         },
         {
           "cells": [
             "Product owner",
-            "Does journey quality improve over repeated marathons?",
-            "scorecard, verdicts, corpus trend checks",
-            "In progress until the trend dashboard ships"
+            "Does quality improve over repeated marathons?",
+            "scorecard, verdicts, trend checks",
+            "In progress until trend dashboard ships"
           ]
         }
       ],
       "variant": "data",
-      "caption": "The process maps each persona to reproducible evidence and tracks partial work explicitly, not just pass/fail.",
+      "caption": "Process mapping is by persona and evidence, with open gaps tracked explicitly.",
       "hold": 250,
       "narration": "Persona-driven QA tracks reproducibility and confidence by role: what developers need to execute, what QA needs to trust, what operators need for handoff, and what owners need for trend confidence.",
       "instant": true
