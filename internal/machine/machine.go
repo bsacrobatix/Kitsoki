@@ -497,6 +497,11 @@ func joinStatePath(prefix, name string) string {
 // Validate checks whether an intent call is permissible in the current state.
 // It does NOT apply any transition — that is Turn's job.
 func (m *machineImpl) Validate(cur app.StatePath, w world.World, call intent.IntentCall) ValidationResult {
+	resolvedIntent := m.resolveImportedIntentName(cur, call.Intent)
+	if resolvedIntent != call.Intent {
+		call = intent.IntentCall{Intent: resolvedIntent, Slots: call.Slots}
+	}
+
 	allowed := m.allowedIntentNames(cur)
 
 	// 1. Check intent is allowed in this state.
@@ -588,6 +593,8 @@ func (m *machineImpl) allowedIntentNames(cur app.StatePath) []string {
 			}
 			path = path[:idx]
 		}
+
+		m.addImportAliasesToAllowed(cur, seen)
 	}
 	names := make([]string, 0, len(seen))
 	for n := range seen {
@@ -595,6 +602,49 @@ func (m *machineImpl) allowedIntentNames(cur app.StatePath) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// addImportAliasesToAllowed adds user-facing imported intent aliases to the
+// allowed-intent set when their rewritten equivalent is already allowed at the
+// current location. This lets callers type a child intent as authored (for
+// example `start`) while transitions remain registered under the rewritten
+// import alias (for example `bf__start`).
+func (m *machineImpl) addImportAliasesToAllowed(cur app.StatePath, allowed map[string]struct{}) {
+	aliases := make(map[string][]string)
+	path := string(cur)
+	for {
+		cs, ok := m.states[path]
+		if ok {
+			for alias, rewritten := range cs.s.IntentAliases {
+				aliases[rewritten] = append(aliases[rewritten], alias)
+			}
+		}
+		idx := strings.LastIndexByte(path, '.')
+		if idx < 0 {
+			break
+		}
+		path = path[:idx]
+	}
+
+	if len(aliases) == 0 {
+		return
+	}
+
+	changed := true
+	for changed {
+		changed = false
+		for rewritten, aliasNames := range aliases {
+			if _, ok := allowed[rewritten]; !ok {
+				continue
+			}
+			for _, aliasName := range aliasNames {
+				if _, exists := allowed[aliasName]; !exists {
+					allowed[aliasName] = struct{}{}
+					changed = true
+				}
+			}
+		}
+	}
 }
 
 // isAllowed returns true if name is in the allowed list.
@@ -730,6 +780,7 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 			},
 		}, nil
 	}
+	call = vr.Accepted
 
 	// 2. Build eval env.
 	env := expr.Env{
@@ -1323,6 +1374,18 @@ func (m *machineImpl) resolveEmittedIntentName(leafPath, name string) string {
 		path = path[:idx]
 	}
 	return name
+}
+
+// resolveImportedIntentName resolves a user-provided intent name against
+// imported-child alias rewrites. In many imported stories, the runtime on:
+// handlers are rewritten to `<alias>__<intent>`, but MCP and UI callers may
+// still send the child-authored name. We reuse the alias map seeded during
+// imports folding to map bare names back to their rewritten handler names.
+//
+// This is equivalent to resolveEmittedIntentName, but keeps callers explicit
+// about intent source (LLM emit vs user input).
+func (m *machineImpl) resolveImportedIntentName(cur app.StatePath, name string) string {
+	return m.resolveEmittedIntentName(string(cur), name)
 }
 
 // findTransitionTraced is findTransition with trace.EvMachineGuardEval / Winner emission.
