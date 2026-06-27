@@ -2627,7 +2627,7 @@
               ],
               "x": 80,
               "y": 110,
-              "w": 360,
+              "w": 340,
               "h": 180,
               "style": "secondary"
             },
@@ -2639,7 +2639,7 @@
                 "failing baseline",
                 "hidden pass check"
               ],
-              "x": 480,
+              "x": 530,
               "y": 110,
               "w": 460,
               "h": 180,
@@ -2653,7 +2653,7 @@
                 "compare attempts",
                 "improve the story"
               ],
-              "x": 980,
+              "x": 1080,
               "y": 110,
               "w": 360,
               "h": 180,
@@ -2665,15 +2665,17 @@
               "from": "runs",
               "to": "cases",
               "label": "pin as fixture",
-              "bus": 290,
-              "lift": -24
+              "elbow": "H",
+              "labelX": 465,
+              "labelY": 85
             },
             {
               "from": "cases",
               "to": "harness",
               "label": "measure + score",
-              "bus": 290,
-              "lift": -24
+              "elbow": "H",
+              "labelX": 1035,
+              "labelY": 85
             }
           ]
         }
