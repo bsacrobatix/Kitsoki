@@ -26,9 +26,9 @@ host_handlers:
             persona_label: Hobbyist contributor
             attached_evidence_count: 4
             review_status: needs_evidence
-            review_summary: "needs_evidence: 15/18 checks passed, 0 warnings, 3 failures"
-            review_passed: 15
-            review_total: 18
+            review_summary: "needs_evidence: 16/19 checks passed, 0 warnings, 3 failures"
+            review_passed: 16
+            review_total: 19
             review_warnings: 0
             review_failed: 3
             review_backlog_summary: "fail: scenario-attempts (product-discovery, project-onboarding); fail: driver-journal-coverage (product-discovery, project-onboarding); fail: quality-gates (product-discovery (0/4))"
@@ -60,8 +60,8 @@ turns:
       driver_replay_handoff_path: .artifacts/product-journey/run-123/driver-handoff.md
       driver_replay_media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
       review_status: needs_evidence
-      dogfood_review_passed: 15
-      dogfood_review_total: 18
+      dogfood_review_passed: 16
+      dogfood_review_total: 19
       dogfood_review_warnings: 0
       dogfood_review_failed: 3
       validation_status: valid
@@ -69,6 +69,6 @@ turns:
     expect_host_calls:
       - handler: host.run
         args: { call: driver_replay_product_journey_smoke }
-    expect_view_matches: "DOGFOOD SMOKE CREATED[\\s\\S]*Driver replay scenario[\\s\\S]*project-onboarding[\\s\\S]*Driver replay persona[\\s\\S]*hobbyist-contributor[\\s\\S]*Driver replay evidence[\\s\\S]*4[\\s\\S]*driver-journal.md[\\s\\S]*media-manifest.json[\\s\\S]*15 / 18 passed; 3 failed; 0 warnings[\\s\\S]*fail: scenario-attempts"
+    expect_view_matches: "DOGFOOD SMOKE CREATED[\\s\\S]*Driver replay scenario[\\s\\S]*project-onboarding[\\s\\S]*Driver replay persona[\\s\\S]*hobbyist-contributor[\\s\\S]*Driver replay evidence[\\s\\S]*4[\\s\\S]*driver-journal.md[\\s\\S]*media-manifest.json[\\s\\S]*16 / 19 passed; 3 failed; 0 warnings[\\s\\S]*fail: scenario-attempts"
 
 expect_no_errors: true

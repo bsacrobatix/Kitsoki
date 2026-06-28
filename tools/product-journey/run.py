@@ -2744,11 +2744,14 @@ def record_finding(
     evidence_path: str,
     status: str,
     publish_deck: Optional[Path],
+    origin: str = "observed",
 ) -> None:
     if kind not in {"strength", "weakness", "issue", "fix"}:
         raise SystemExit("Finding kind must be strength, weakness, issue, or fix")
     if status not in {"open", "fixed", "observed", "validated", "blocked"}:
         raise SystemExit("Finding status must be open, fixed, observed, validated, or blocked")
+    if origin not in {"observed", "seeded"}:
+        raise SystemExit("Finding origin must be observed or seeded")
     run_json = read_json(run_dir / "run.json")
     known_scenarios = {scenario["id"] for scenario in run_json["scenarios"]}
     if scenario_id and scenario_id not in known_scenarios:
@@ -2766,6 +2769,7 @@ def record_finding(
         "severity": severity,
         "evidence_path": evidence_path,
         "status": status,
+        "origin": origin,
         "created_at": now_utc(),
     }
     items.append(item)
@@ -2942,7 +2946,7 @@ def seed_demo_evidence(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     for kind, title, summary, scenario, severity, evidence_path, status in demo_findings:
         if title in existing_titles:
             continue
-        record_finding(run_dir, kind, title, summary, scenario, severity, evidence_path, status, publish_deck=None)
+        record_finding(run_dir, kind, title, summary, scenario, severity, evidence_path, status, publish_deck=None, origin="seeded")
         findings_added += 1
 
     evidence = read_json(run_dir / "evidence.json")
@@ -3019,6 +3023,10 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     missing_playback_refs = missing_local_artifact_refs(run_dir, playback_items)
     finding_items = findings.get("items", [])
     finding_kinds = {item.get("kind") for item in finding_items}
+    # Legacy findings predate the origin field; treat them as observed so old
+    # bundles do not retroactively fail. New runs stamp origin explicitly.
+    observed_findings = [item for item in finding_items if item.get("origin", "observed") != "seeded"]
+    seeded_findings = [item for item in finding_items if item.get("origin", "observed") == "seeded"]
     blocked_scenarios = {
         item.get("scenario", "")
         for item in finding_items
@@ -3145,6 +3153,17 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             "status": "pass" if {"strength", "weakness"} <= finding_kinds and ("issue" in finding_kinds or "fix" in finding_kinds) else "warn",
             "summary": "Findings include positive evidence and at least one gap or fix.",
             "detail": ", ".join(sorted(kind for kind in finding_kinds if kind)) or "none",
+        },
+        {
+            # Accuracy / novelty gate: a run backed by real proof evidence must
+            # carry at least one *observed* finding. Seeded demo findings alone
+            # can satisfy every structural check yet describe only the harness,
+            # not the product. Pure seeded smokes (no proof evidence) stay a
+            # warning so the deterministic dogfood loop keeps passing.
+            "id": "observed-findings",
+            "status": "pass" if observed_findings else ("fail" if proof_items else "warn"),
+            "summary": "Runs with real proof evidence record at least one observed (non-seeded) finding.",
+            "detail": f"observed={len(observed_findings)}, seeded={len(seeded_findings)}, proof={len(proof_items)}",
         },
         {
             "id": "scenario-outcomes",
@@ -6415,6 +6434,52 @@ def write_report(catalog: dict, generated_at: str, report_path: Path, deck_path:
     print(result.stdout.strip())
 
 
+def prune_runs(keep: int, dry_run: bool) -> dict:
+    """Retention policy for the transient run-bundle sprawl.
+
+    Smoke iterations pile up hundreds of timestamped run dirs directly under
+    .artifacts/product-journey/. This keeps anything whose name contains
+    ``-final`` (curated keepers) plus the newest ``keep`` run dirs, and removes
+    the rest. The matrices/, dogfood/, and target-proofs/ subtrees are never
+    touched. Dry-run by default so callers see what would go before it goes.
+    """
+    import shutil
+
+    protected_names = {"matrices", "dogfood", "target-proofs"}
+    run_dirs = [
+        path
+        for path in ARTIFACT_ROOT.iterdir()
+        if path.is_dir() and path.name not in protected_names
+    ]
+    # Newest first by directory name (names are sortable UTC timestamps).
+    run_dirs.sort(key=lambda p: p.name, reverse=True)
+
+    kept: list[str] = []
+    removed: list[str] = []
+    survivors = 0
+    for path in run_dirs:
+        is_final = "-final" in path.name
+        within_keep = survivors < keep
+        if is_final or within_keep:
+            kept.append(path.name)
+            if not is_final:
+                survivors += 1
+            continue
+        removed.append(path.name)
+        if not dry_run:
+            shutil.rmtree(path)
+
+    return {
+        "status": "pruned" if not dry_run else "dry-run",
+        "root": str(ARTIFACT_ROOT),
+        "kept": kept,
+        "removed": removed,
+        "kept_count": len(kept),
+        "removed_count": len(removed),
+        "keep": keep,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", default="gears-rust", help="Project id from catalog or github-targets")
@@ -6515,12 +6580,28 @@ def main() -> None:
     parser.add_argument("--deck", default="", help="generated Slidey spec for --mode report; default is .artifacts/product-journey/<generated-at>/deck.slidey.json")
     parser.add_argument("--markdown", default="", help="generated Markdown index for --mode report; default is .artifacts/product-journey/<generated-at>/report.md")
     parser.add_argument("--run-checks", action="store_true", help="refresh target checks while building report")
+    parser.add_argument("--prune-runs", action="store_true", help="Remove transient run-bundle dirs, keeping *-final keepers and the newest --keep runs")
+    parser.add_argument("--keep", type=int, default=10, help="Number of newest non-final run dirs to keep with --prune-runs")
+    parser.add_argument("--apply", action="store_true", help="With --prune-runs, actually delete (default is dry-run)")
     args = parser.parse_args()
 
     catalog = load_catalog(CATALOG)
     personas = load_personas(PERSONAS)
     scenarios = load_scenarios(SCENARIOS)
     github_targets = load_github_targets(GITHUB_TARGETS)
+
+    if args.prune_runs:
+        result = prune_runs(keep=args.keep, dry_run=not args.apply)
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+        else:
+            print(f"Prune {result['status']}: kept {result['kept_count']}, removed {result['removed_count']} (keep={result['keep']})")
+            for name in result["removed"]:
+                print(f"- remove {name}")
+            if not args.apply:
+                print("(dry-run; re-run with --apply to delete)")
+        append_log(f"Pruned product journey runs: {result['status']} kept={result['kept_count']} removed={result['removed_count']}")
+        return
 
     if args.validate_corpus:
         result = validate_journey_corpus(personas, scenarios, github_targets)

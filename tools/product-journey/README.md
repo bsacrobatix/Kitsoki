@@ -286,6 +286,14 @@ readiness checks count proof evidence separately from demo/unknown evidence so a
 no-LLM smoke can exercise the artifact loop without passing as live product
 proof.
 
+Findings carry an `origin`: `observed` for findings a driver/operator recorded
+from a real interaction (the default for `--record-finding`), and `seeded` for
+the templated placeholders that `--seed-demo-evidence` attaches. The
+`observed-findings` review check enforces an accuracy floor: a run backed by real
+proof evidence but carrying *only* seeded findings **fails** (it describes the
+harness, not the product), while a pure no-LLM smoke with no proof evidence stays
+a warning so the deterministic dogfood loop keeps passing.
+
 Record a review finding for the deck summary:
 
 ```sh
@@ -424,6 +432,16 @@ onboarding, and bugfix surfaces.
 - `run.py` — entrypoint script used by the journey orchestrator.
 
 ## Output discipline
+
+Smoke iterations pile up hundreds of timestamped run dirs under
+`.artifacts/product-journey/`. Prune them with a retention policy that keeps any
+`*-final` curated keeper plus the newest `--keep` runs and never touches the
+`matrices/`, `dogfood/`, or `target-proofs/` subtrees. Dry-run by default:
+
+```sh
+python3 tools/product-journey/run.py --prune-runs --keep 12          # preview
+python3 tools/product-journey/run.py --prune-runs --keep 12 --apply  # delete
+```
 
 - `.context/product-journey-runlog.md` stores the run log in the worktree root.
 - `docs/decks/product-journey-eval.slidey.json` stores the hand-refined,

@@ -200,7 +200,7 @@ host_handlers:
           stdout_json:
             status: reviewed
             review_status: needs_evidence
-            summary: "needs_evidence: 15/18 checks passed, 2 warnings, 1 failures"
+            summary: "needs_evidence: 16/19 checks passed, 2 warnings, 1 failures"
             run_dir: .artifacts/product-journey/run-123
             review_path: .artifacts/product-journey/run-123/review.json
             deck_path: .artifacts/product-journey/run-123/deck.slidey.json
@@ -211,14 +211,14 @@ host_handlers:
             driver_handoff_path: .artifacts/product-journey/run-123/driver-handoff.md
             media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
             scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
-            passed: 15
+            passed: 16
             warnings: 2
             failed: 1
-            total: 18
-            review_passed_count: 15
+            total: 19
+            review_passed_count: 16
             review_failed_count: 1
             review_warning_count: 2
-            review_total_count: 18
+            review_total_count: 19
             review_backlog_summary: "fail: quality-gates (bugfix (3/5)); warn: non-demo-evidence (proof=0, demo=30); warn: playback-artifacts-resolve (artifacts/bugfix.mp4)"
       prepare_product_journey_driver_handoff:
         data:
@@ -580,11 +580,11 @@ turns:
     expect_world:
       status: reviewed
       review_status: needs_evidence
-      review_summary: "needs_evidence: 15/18 checks passed, 2 warnings, 1 failures"
-      review_passed_count: 15
+      review_summary: "needs_evidence: 16/19 checks passed, 2 warnings, 1 failures"
+      review_passed_count: 16
       review_failed_count: 1
       review_warning_count: 2
-      review_total_count: 18
+      review_total_count: 19
       review_backlog_summary: "fail: quality-gates (bugfix (3/5)); warn: non-demo-evidence (proof=0, demo=30); warn: playback-artifacts-resolve (artifacts/bugfix.mp4)"
       deck_path: .artifacts/product-journey/run-123/deck.slidey.json
       execution_plan_path: .artifacts/product-journey/run-123/execution-plan.md
@@ -594,7 +594,7 @@ turns:
       driver_handoff_path: .artifacts/product-journey/run-123/driver-handoff.md
       media_manifest_path: .artifacts/product-journey/run-123/media-manifest.json
       scenario_outcomes_path: .artifacts/product-journey/run-123/scenario-outcomes.md
-    expect_view_matches: "Review checks[\\s\\S]*15 / 18 passed; 1 failed; 2 warnings[\\s\\S]*fail: quality-gates[\\s\\S]*warn: non-demo-evidence"
+    expect_view_matches: "Review checks[\\s\\S]*16 / 19 passed; 1 failed; 2 warnings[\\s\\S]*fail: quality-gates[\\s\\S]*warn: non-demo-evidence"
     expect_host_calls:
       - handler: host.run
         args: { call: review_product_journey_run }
