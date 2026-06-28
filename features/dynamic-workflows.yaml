@@ -9,7 +9,6 @@ promo:
 docs:
   - docs/stories/dynamic-workflows.md
   - docs/architecture/mcp-studio.md
-  - docs/proposals/process-design.md
 demo:
   spec: tests/playwright/dynamic-workflows-video.spec.ts
   artifactDir: dynamic-workflows
