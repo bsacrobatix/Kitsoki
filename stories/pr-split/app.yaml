@@ -37,7 +37,7 @@ agents:
       buckets and never drop a commit — every input sha must appear in exactly one
       bucket. You MUST NOT run any git commands; you only return the grouping.
     model: claude-sonnet-4-6
-    tools: []
+    tools: [Read]   # reads the .git/kitsoki-prsplit-input.txt briefing; no writes
     external_side_effect: false
 
 world:

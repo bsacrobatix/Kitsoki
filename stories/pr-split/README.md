@@ -53,10 +53,10 @@ to the documented sequential pattern; the runtime does not fully honor it:
    guard on a later on_enter step has the same race (it reads pre-bind world) —
    gate on a scalar known before the room, never on a freshly-bound value.
 
-2. **A large multi-line JSON value does not survive being passed as a
-   `host.run` env var.** `world.buckets_json` (~3 KB, escaped newlines/backticks)
-   is correctly set, but the `splitting` bash receives it empty via
-   `env: { BUCKETS_JSON: "{{ world.buckets_json }}" }`. The dry-run plan is fully
-   visible in the `planning` room (its real value); the `splitting` execution
-   step needs a robust object→bash bridge (a file handle, or stdin) before real
-   (non-dry) PR creation is reliable. **Status: open.**
+2. **`host.run` has no `env:` support** — `RunHandler` runs the child with
+   `os.Environ()` only, so an `env:` block on the effect is silently dropped (the
+   first cut passed the plan as `env: { BUCKETS_JSON: … }` and the bash got
+   nothing). Fixed by passing the plan JSON as a POSITIONAL argv element
+   (`args: [-c, <script>, pr-split, "{{ world.buckets_json }}"]`, read as `$1`):
+   exec passes argv bytes verbatim, so the multi-line JSON survives. (Worth
+   adding real `env:` support to host.run, but argv is the robust bridge today.)
