@@ -248,7 +248,8 @@ The worked example is the dev-story ad-hoc plan's verify gate
 see [docs/stories/ad-hoc-plan.md](../stories/ad-hoc-plan.md) for the full
 propose → accept → apply → verify story it sits behind.
 
-Predeclared stdlib: `json` and `math` **only** (no `time`, no `random`).
+Predeclared stdlib: `json`, `math`, and decode-only `yaml` **only** (no
+`time`, no `random`).
 `FileOptions` are strict defaults (no `set` builtin, no global reassignment, no
 recursion); execution is capped at 10,000,000 steps to turn an accidental hot
 loop into a clean error.
