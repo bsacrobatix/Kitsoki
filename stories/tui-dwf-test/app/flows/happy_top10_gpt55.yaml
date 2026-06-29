@@ -69,6 +69,13 @@ host_handlers:
             summary: "10 passed, 0 partial, 0 failed, 0 skipped, 0 pending"
   host.starlark.run:
     by_call:
+      punch_load:
+        data:
+          manifest_path: "stories/punch-list/testdata/top10_gpt55.yaml"
+          state_path: ".artifacts/punch-list/top10_gpt55.state.json"
+          item_count: "10"
+          error: ""
+          items: []
       punch_board-0-:
         data:
           items: []

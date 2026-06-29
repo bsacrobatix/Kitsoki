@@ -44,6 +44,14 @@ host_handlers:
             error: ""
   host.starlark.run:
     by_call:
+      punch_load:
+        data:
+          manifest_path: "stories/punch-list/testdata/two_items.yaml"
+          state_path: ".artifacts/punch-list/two_items.state.json"
+          item_count: "1"
+          error: ""
+          items:
+            - { id: trace-demo, title: "Implementation trace must match", story: "stories/punch-list/app.yaml", mode: drive, profile: codex-native, model: gpt-5.5, implementation_story: "stories/cherny-loop/app.yaml", status: pending, verify: [ { kind: command, cmd: "true" } ], trace_path: ".artifacts/punch-list/traces/trace-demo.jsonl", implementation_trace_path: ".artifacts/punch-list/traces/trace-demo-implementation.jsonl" }
       punch_board-0-:
         data:
           items: []

@@ -45,6 +45,14 @@ host_handlers:
 
   host.starlark.run:
     by_call:
+      punch_load:
+        data:
+          manifest_path: "stories/punch-list/testdata/bad_model.yaml"
+          state_path: ".artifacts/punch-list/bad_model.state.json"
+          item_count: "1"
+          error: ""
+          items:
+            - { id: wrong-model, title: "This live item must be rejected", story: "stories/punch-list/app.yaml", mode: drive, profile: claude-native, model: claude-opus-4-8, implementation_story: "", status: pending, verify: [ { kind: command, cmd: "true" } ], trace_path: ".artifacts/punch-list/traces/wrong-model.jsonl" }
       punch_board-0-:
         data:
           items: []
