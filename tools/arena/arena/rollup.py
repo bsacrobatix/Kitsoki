@@ -74,7 +74,8 @@ def _markdown(rollup: dict[str, Any]) -> str:
         "|---|---|---|---|---|",
     ]
     for name, b in rollup["by_variant"].items():
-        lines.append(f"| {name} | {b['n']} | {b['win_rate']} | {b['avg_cost_usd']} | {b['verdicts']} |")
+        cost = "—" if b["avg_cost_usd"] is None else f"${b['avg_cost_usd']:.4f}"
+        lines.append(f"| {name} | {b['n']} | {b['win_rate']} | {cost} | {b['verdicts']} |")
     lines += ["", "## By target", "", "| target | n | win-rate | verdicts |", "|---|---|---|---|"]
     for name, b in rollup["by_target"].items():
         lines.append(f"| {name} | {b['n']} | {b['win_rate']} | {b['verdicts']} |")

@@ -72,9 +72,13 @@ unit-tested with `FakeBackend` (no docker, no LLM): `tools/arena/tests/`.
 Done: model + enumeration, plugin interface + bugfix plugin, container executor
 with the DI backend seam, local placement scheduler, rollup, CLI, no-LLM test.
 
-Requires a running Docker daemon + a provisioned repo-runtime image
-(`tools/bugfix-bakeoff/external/provision_repos.sh`) for the **real** containerized
-query-string arming run — the same plumbing the FakeBackend test proves.
+**Proven end-to-end** on `query-string` (2026-06-29): the 6-cell no-LLM arming
+sweep ran in real containers (`kitsoki-arena-repo/query-string:latest`, the
+repo-runtime image) and scored **6/6 armed · win-rate 1.0 · 0 infra failures** —
+each cell git-cloned the OSS repo, `npm install`ed, and proved the oracle
+RED@baseline → GREEN@fix inside its own container. Build the image once with
+`docker build -f tools/bugfix-bakeoff/external/docker/Dockerfile.repo-runtime \
+-t kitsoki-arena-repo/query-string:latest tools/bugfix-bakeoff/external/docker`.
 
 Next (see design doc): **P1** docker-context placement over a VM pool +
 completion-state polling; **P2** persona-qa plugin (score = the 19-check review
