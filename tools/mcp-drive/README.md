@@ -52,9 +52,26 @@ Retry order:
 
 Non-retryable failures (bad usage / config issues) fail fast.
 
+## Orchestrator backend (claude vs codex)
+
+`drive.sh` runs the orchestrator on one of two backends, picked by
+`MCP_DRIVE_BACKEND` or auto-detected from the model name:
+
+- **claude** (`sonnet`/`opus`/…): `claude -p --mcp-config … --strict-mcp-config`.
+- **codex** (`gpt-*`/`codex*`/`o3*`/`o4*`): `codex exec … -c mcp_servers.kitsoki.*`
+  on ChatGPT **subscription** auth — no API key. This is the bake-off default
+  (`MCP_DRIVE_MODEL=gpt-5.5`). The studio MCP is attached via `-c` overrides
+  (codex has no `--mcp-config`), and `--dangerously-bypass-approvals-and-sandbox`
+  is the unattended equivalent of claude's `acceptEdits` (the orchestrator only
+  clicks studio tools; the kitsoki MCP it spawns forks the worker harness, so the
+  process needs full access).
+
+Callers only depend on the **exit code** (drive_cell.sh checks rc + scans text
+for retryable errors); the on-stdout envelope is backend-specific.
+
 ## Orchestrator model vs worker model
 
-The **orchestrator** (`claude -p`) only *drives* the studio — it clicks
+The **orchestrator** only *drives* the studio — it clicks
 `session.new` / `session.drive` / `session.submit`. The model that actually does
 the work runs **inside** the kitsoki session and is chosen per session:
 
