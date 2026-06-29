@@ -131,7 +131,7 @@
       "eyebrow": "0 · GitHub front door",
       "title": "A labelled issue → @kitsoki claims it",
       "rrweb": "clips/pet-github-feature-kickoff.rrweb.json",
-      "start": 0.0,
+      "start": 0,
       "chapters": "auto",
       "caption": "A real @kitsoki mention on the labelled issue claims the job. Live: github.com/bsacrobatix/Kitsoki/issues/52",
       "narration": "A real at-kitsoki mention on the labelled issue claims the job — one mention, one claimed run. kitsoki goes to work; the artifacts land back on the thread at each step."
@@ -159,6 +159,17 @@
       ],
       "caption": "The PRD and mockup are the validated output of the product-manager phase.",
       "narration": "The product manager starts with a one-line idea: a little pet for the trace column. Kitsoki runs a conversation-driven intake — clarifying questions, a drafted PRD, and a mockup — and the PRD is the validated output."
+    },
+    {
+      "type": "video",
+      "mode": "embedded",
+      "eyebrow": "1 · Idea → PRD",
+      "title": "Talking the idea into a PRD",
+      "rrweb": "clips/pet-prd-dev.rrweb.json",
+      "start": 0,
+      "chapters": "auto",
+      "caption": "Conversation-driven intake: a one-line idea → discovery → clarifying questions → a drafted, published PRD.",
+      "narration": "Watch the PRD take shape. The product manager starts from a one-line idea — a tiny pet at the bottom of the trace column — kitsoki asks clarifying questions, the manager answers, and a validated PRD is drafted and published, every step in order."
     },
     {
       "type": "title",
@@ -246,6 +257,17 @@
       "narration": "The validated output: a published PRD and an HTML mockup of the pet in the real drive layout, ready for the architect to pick up."
     },
     {
+      "type": "video",
+      "mode": "embedded",
+      "eyebrow": "1 · Artifact · PRD",
+      "title": "The PRD, as published",
+      "rrweb": "clips/pet-prd-doc.rrweb.json",
+      "start": 0,
+      "chapters": "auto",
+      "caption": "The produced PRD — a published markdown document: problem & context, target users, goals, requirements, open questions.",
+      "narration": "And here is the artifact itself: the published PRD, a markdown document the architect picks up — the problem, the target users, the goals, and the requirements that keep the pet weightless."
+    },
+    {
       "type": "thread",
       "title": "Hand-off → Arden",
       "panels": [
@@ -270,16 +292,6 @@
       "caption": "Every hand-off is a notification where the work lives — mocked here for the story.",
       "hold": 260,
       "narration": "The PRD is published, and a design issue is assigned to the architect: requirements ready."
-    },
-    {
-      "type": "video",
-      "mode": "embedded",
-      "eyebrow": "2 · Design issue",
-      "title": "GitHub · Design Ticket #52",
-      "rrweb": "clips/pet-github-feature-thread.rrweb.json",
-      "chapters": "auto",
-      "caption": "@kitsoki on the design issue → kitsoki replies with the PRD + validated design deck, as GitHub release downloads. Live: issues/52",
-      "narration": "Here is that same issue, paid off: kitsoki has replied on the thread with the PRD and the validated design deck — attached as GitHub release downloads, ready to review without leaving GitHub."
     },
     {
       "type": "personas",
@@ -405,6 +417,17 @@
       "lede": "Design published — decomposition next.",
       "body": "A published design: three additive slices, a leaf data flow, and decisions that keep the feature deterministic and weightless — true to kitsoki's no-deps spirit. The validated output the developer decomposes into a sequenced work plan next.",
       "narration": "The validated output: a published design with three additive slices, a leaf data flow, and decisions that keep the feature deterministic and weightless — true to kitsoki's no-dependencies spirit. The developer decomposes this into a sequenced work plan next."
+    },
+    {
+      "type": "video",
+      "mode": "embedded",
+      "eyebrow": "2 · Artifact · Design",
+      "title": "The design, as published",
+      "rrweb": "clips/pet-design-doc.rrweb.json",
+      "start": 0,
+      "chapters": "auto",
+      "caption": "The produced design — a published markdown document: the sprite, the dock seam, the opt-in toggle, and the ADRs.",
+      "narration": "The architect's artifact, the same way: a published design document — three additive slices, a leaf data flow, and the decisions that keep the feature deterministic and weightless."
     },
     {
       "type": "thread",
@@ -585,6 +608,28 @@
       "narration": "The validated output: a sequenced, dependency-ordered plan where every task is small, additive, and independently verifiable — ready to implement in the background."
     },
     {
+      "type": "video",
+      "mode": "embedded",
+      "eyebrow": "3 · Artifact deck · Work plan",
+      "title": "The work-plan deck",
+      "rrweb": "clips/pet-decomposition-review.rrweb.json",
+      "start": 0,
+      "chapters": "auto",
+      "caption": "The decomposition, published as a self-contained slidey deck (HTML) — rendered live in kitsoki and opened full-screen for review.",
+      "narration": "The developer's output, published as a deck: the design sliced into sequenced, dependency-ordered tasks — rendered for real in kitsoki and reviewable full-screen."
+    },
+    {
+      "type": "video",
+      "mode": "embedded",
+      "eyebrow": "4 · Report a bug",
+      "title": "Filing the bug from the web UI",
+      "rrweb": "clips/pet-report-bug.rrweb.json",
+      "start": 0,
+      "chapters": "auto",
+      "caption": "Before it reaches GitHub: an operator opens Meta → Report a bug, reviews the auto-captured replay, describes the redundant Observe link, and files it.",
+      "narration": "Before the bug ever reaches GitHub, this is where it starts: a real operator opens the Meta menu, picks Report a bug, reviews the automatically-captured session replay, describes the confusable Observe link, and files it — capture, review, then file."
+    },
+    {
       "type": "thread",
       "title": "A bug lands",
       "panels": [
@@ -707,6 +752,17 @@
       "lede": "Repro captured; safe to one-shot.",
       "body": "The report ships an rrweb repro — a deterministic browser replay showing the two confusable controls in the live topbar. The recommended fix is trivial and self-contained: delete the link at InteractiveView.vue:85 and its CSS rule (~937–946). No behaviour depends on it; the observer route stays reachable elsewhere. Triage recommendation: one-shot, unsupervised.",
       "narration": "The report carries an rrweb repro that replays the confusable topbar. Because the fix is a self-contained deletion with nothing depending on it, this is a clean one-shot, unsupervised candidate."
+    },
+    {
+      "type": "video",
+      "mode": "embedded",
+      "eyebrow": "4 · Artifact deck · Bug report",
+      "title": "The bug-report deck",
+      "rrweb": "clips/pet-bug-report-review.rrweb.json",
+      "start": 0,
+      "chapters": "auto",
+      "caption": "The filed bug, published as a self-contained slidey deck (HTML) — the repro, the offending markup, and the triage recommendation.",
+      "narration": "The bug report kitsoki produces, as a deck: the captured repro, the offending markup, and the triage call — a clean one-shot, unsupervised fix."
     },
     {
       "type": "thread",
@@ -834,6 +890,17 @@
       "narration": "The clutter is gone, typecheck and build are green, and the replay shows a clean topbar. Minimal diff, ready to open the pull request."
     },
     {
+      "type": "video",
+      "mode": "embedded",
+      "eyebrow": "5 · Artifact deck · Fix report",
+      "title": "The fix-report deck",
+      "rrweb": "clips/pet-bugfix-report-review.rrweb.json",
+      "start": 0,
+      "chapters": "auto",
+      "caption": "The validated fix, published as a self-contained slidey deck (HTML) — the diff, the green checks, and the before/after.",
+      "narration": "And the fix, as a deck: the minimal diff, the green typecheck and build, and the replay that proves the clutter is gone — PR-ready."
+    },
+    {
       "type": "personas",
       "variant": "use-cases",
       "title": "6 · Ship the feature",
@@ -948,6 +1015,17 @@
       "lede": "A little life in the trace column.",
       "body": "Flip the 🐾 toggle in the State Diagram header and Kit wakes up at the bottom of your trace — wandering, blinking, and snacking through the wait. Opt-in, weightless, and never in the way.",
       "narration": "Flip the paw-print toggle and Kit wakes up at the bottom of your trace. A little life in the trace column — opt-in, weightless, and never in the way."
+    },
+    {
+      "type": "video",
+      "mode": "embedded",
+      "eyebrow": "6 · Artifact deck · Feature demo",
+      "title": "The feature-demo deck",
+      "rrweb": "clips/pet-feature-demo-review.rrweb.json",
+      "start": 0,
+      "chapters": "auto",
+      "caption": "The shipped feature, published as a self-contained slidey deck (HTML) — what Kit is, what it does, and how it landed in three slices.",
+      "narration": "The shipped feature, packaged as a demo deck: what Kit is, what it does, and how it landed in three small slices — the deck that rides along on the pull request."
     },
     {
       "type": "video",

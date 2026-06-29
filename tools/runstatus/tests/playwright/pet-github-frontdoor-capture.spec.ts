@@ -16,24 +16,25 @@ import { cameraContext } from "./_helpers/camera.js";
 // Captures the real GitHub @kitsoki threads for the trace-column pet scenario.
 //
 // Callout order within every clip (top-to-bottom, the way a reader scans the
-// page): the issue TITLE first, then each comment in DOM order.
+// page): the issue TITLE first, then EVERY comment in DOM order.
 //
-// Narration technique mirrors github-agent-live-capture.spec.ts (the original
-// live deck): the comment beats (1) BREATHE the literal "@kitsoki" token — a
-// brief bold/glow so the mention reads as the trigger — and (2) ZOOM the WHOLE
-// comment box (avatar, author, timestamp, full markdown body) into a readable
-// pop-out, then return it. Spotlighting only the #issuecomment-<id> anchor was
-// wrong: on GitHub's React layout that node is effectively the header bar, so
-// the outline framed only the chrome strip and never the message content.
+// The title beat ZOOMs the real on-page title (the <bdi data-testid=issue-title>)
+// BIG — a dramatic readable pop-out + glowing select border. A subtle 1.3× nudge
+// barely resized the single-line title and read as "not called out" next to the
+// comments' full-width pop-outs; a large minScale makes the title unmistakably
+// selected/expanded, exactly like the comments.
 //
-// Two clip shapes:
-//   - "kickoff": title + the human @kitsoki invocation only (NO artifact reveal).
-//     Used by the lean front door.
-//   - "thread":  title + invocation + the bsacrobatix-kitsoki-test[bot] reply
-//     that links the validated artifacts. Used by the per-phase ticket scenes
-//     (Design #52, Decomposition #53, Bug #54).
+// The comment beats mirror github-agent-live-capture.spec.ts (the original live
+// deck): (1) BREATHE the literal "@kitsoki" token on the comment that carries the
+// mention — a brief bold/glow so the mention reads as the trigger — and (2) ZOOM
+// the WHOLE comment box (avatar, author, timestamp, full markdown body) into a
+// readable pop-out, then return it. Spotlighting only the #issuecomment-<id>
+// anchor was wrong: on GitHub's React layout that node is effectively the header
+// bar, so the outline framed only the chrome strip and never the message content.
 //
-// Comment DOM ids come from the live issues (GET /issues/<n>/comments).
+// Comments are enumerated LIVE from the page ([id^='issuecomment-'] in DOM order)
+// so each clip always reflects the real thread — the requester's @kitsoki
+// invocation, kitsoki's reply with the validated artifacts, and any others.
 
 const OUT_DIR = path.join(repoRoot, "docs", "decks", "clips");
 
@@ -42,47 +43,31 @@ interface ThreadCase {
   url: string;
   title: string;
   route: string;
-  invocationId: string;
-  replyId: string;
-  reveal: "kickoff" | "thread";
 }
 
 const CASES: ThreadCase[] = [
   {
+    // The single #52 video: title + the full thread (the @kitsoki invocation AND
+    // kitsoki's reply with the artifacts). There used to be a second #52 clip
+    // (pet-github-feature-thread) for the design phase, but now that the kickoff
+    // enumerates EVERY comment it shows the same thread — so that duplicate clip
+    // and its deck scene were removed.
     clip: "pet-github-feature-kickoff",
     url: "https://github.com/bsacrobatix/Kitsoki/issues/52",
-    title: "GitHub · Issue #52",
+    title: "GitHub · Issue #52 · Design: trace-column pet (Kit)",
     route: "A labelled issue → a real @kitsoki mention claims the job",
-    invocationId: "issuecomment-4826046811",
-    replyId: "issuecomment-4826047171",
-    reveal: "kickoff",
-  },
-  {
-    clip: "pet-github-feature-thread",
-    url: "https://github.com/bsacrobatix/Kitsoki/issues/52",
-    title: "GitHub · Issue #52 · Design",
-    route: "kitsoki replies with the PRD + validated design deck",
-    invocationId: "issuecomment-4826046811",
-    replyId: "issuecomment-4826047171",
-    reveal: "thread",
   },
   {
     clip: "pet-github-decomp-thread",
     url: "https://github.com/bsacrobatix/Kitsoki/issues/53",
     title: "GitHub · Issue #53 · Decomposition",
     route: "kitsoki replies with the decomposition work plan",
-    invocationId: "issuecomment-4826046915",
-    replyId: "issuecomment-4826047236",
-    reveal: "thread",
   },
   {
     clip: "pet-github-bug-thread",
     url: "https://github.com/bsacrobatix/Kitsoki/issues/54",
     title: "GitHub · Issue #54 · Bug Report",
     route: "kitsoki replies with the bug report + fix report",
-    invocationId: "issuecomment-4826047020",
-    replyId: "issuecomment-4826047290",
-    reveal: "thread",
   },
 ];
 
@@ -141,6 +126,21 @@ async function markTitle(page: Page, name: string): Promise<string | null> {
     )
     .catch(() => false);
   return ok ? `[data-kitsoki-demo-target="${name}"]` : null;
+}
+
+// List every comment on the issue in DOM order, with whether it carries the
+// literal "@kitsoki" mention (the requester's invocation) vs not (kitsoki's
+// reply). Reads the FULL comment-box text (not just the anchor header bar) so a
+// mention in the body is detected.
+async function listComments(page: Page): Promise<{ id: string; hasMention: boolean }[]> {
+  return page.evaluate(() => {
+    const anchors = Array.from(document.querySelectorAll<HTMLElement>("[id^='issuecomment-']"));
+    return anchors.map((a) => {
+      const box = a.closest<HTMLElement>("[data-testid^='comment-viewer-outer-box']") || a;
+      const text = box.textContent || "";
+      return { id: a.id, hasMention: /@kitsoki/i.test(text) };
+    });
+  });
 }
 
 // One narration beat over a comment: breathe the @kitsoki mention (if present),
@@ -213,52 +213,48 @@ for (const c of CASES) {
       const zoom = await makeReadableZoom(page);
       const textBreath = await makeTextBreath(page);
 
-      // Callout order (top-to-bottom): the issue TITLE first, then each comment
-      // in DOM order.
+      // Callout order (top-to-bottom), the way a reader scans the page: the
+      // issue TITLE first, then EVERY comment in DOM order.
       //
-      // 1. The issue title — where the work enters. ZOOM it (same readable
-      //    pop-out the comments get) so the title is unmistakably called out; a
-      //    thin spotlight outline reads as "not called out" next to the comment
-      //    zooms.
+      // 1. The issue title — where the work enters. ZOOM it BIG (a dramatic
+      //    readable pop-out + glowing select border) so it is called out as
+      //    forcefully as the comments. The title is a single line, so a subtle
+      //    1.3× nudge barely changes its size and reads as "not called out" next
+      //    to the comments' full-width pop-outs; a large minScale makes
+      //    "Design: trace-column pet (Kit)" unmistakably selected/expanded.
       const titleSel = await markTitle(page, "issue-title");
       if (titleSel) {
-        await zoom(titleSel, { title: c.title, fontSize: 26, minScale: 1.3 });
-        await caption(c.title, c.route, 3000);
-        await dwell(page, 600);
+        await zoom(titleSel, { title: c.title, fontSize: 48, minScale: 2.4 });
+        await caption(c.title, c.route, 3200);
+        await dwell(page, 700);
         await zoom(null);
+        await dwell(page, 600);
       } else {
         await caption(c.title, c.route, 3000);
       }
 
-      // 2. The @kitsoki invocation comment — breathe the mention, zoom the box.
-      const invSel = await markComment(page, c.invocationId, "invocation");
-      await commentBeat(
-        page,
-        caption,
-        zoom,
-        textBreath,
-        invSel,
-        "Requester mentions @kitsoki",
-        "A real @kitsoki mention claims the job from where the work already lives — the whole comment, not just the token.",
-        4000,
-        { breathe: true },
-      );
-      await dwell(page, 1200);
-
-      // 3. (thread only) kitsoki's reply — the artifacts, straight from GitHub.
-      if (c.reveal === "thread") {
-        const replySel = await markComment(page, c.replyId, "reply");
-        await commentBeat(
-          page,
-          caption,
-          zoom,
-          textBreath,
-          replySel,
-          "Artifacts ready for review",
-          "kitsoki processes the issue and replies on the thread with the validated decks as GitHub release downloads.",
-          4500,
-        );
-        await dwell(page, 1200);
+      // 2. EVERY comment on the issue, in DOM order. Enumerate the thread live so
+      //    the clip always reflects the real comments (the requester's @kitsoki
+      //    invocation, then kitsoki's reply, and any others). Breathe the literal
+      //    "@kitsoki" token on the comment that carries the mention, then zoom the
+      //    whole comment box into a readable pop-out.
+      const comments = await listComments(page);
+      for (let i = 0; i < comments.length; i++) {
+        const cm = comments[i];
+        const sel = await markComment(page, cm.id, `comment-${i}`);
+        const [beatTitle, beatSub] = cm.hasMention
+          ? [
+              "Requester mentions @kitsoki",
+              "A real @kitsoki mention claims the job from where the work already lives — the whole comment, not just the token.",
+            ]
+          : [
+              "kitsoki reports back on the thread",
+              "The run finishes and kitsoki replies on the same thread with the validated artifacts, available straight from GitHub.",
+            ];
+        await commentBeat(page, caption, zoom, textBreath, sel, beatTitle, beatSub, cm.hasMention ? 4200 : 4500, {
+          breathe: cm.hasMention,
+        });
+        await dwell(page, 1100);
       }
 
       await zoom(null);
