@@ -72,6 +72,21 @@ states:
                 done | jq -s '.'
               )
               rendered=$(printf '%s' "$items" | jq -r '.[] | "- \(.sha[0:8]) [\(.concern)\(if .ambiguous then "/ambiguous" else "" end)] \(.subject)"')
+              # Write a self-contained briefing the bucketer READS (a Read tool),
+              # instead of passing commits through agent prompt ARGS — those render
+              # against a stale world snapshot and intermittently arrive empty
+              # (the on_enter host.run bind isn't reliably visible to the agent).
+              brief=".git/kitsoki-prsplit-input.txt"
+              {
+                echo "Source branch: $SRC"
+                echo "Integration branch: $INT"
+                echo ""
+                echo "Commits (oldest first) — sha [concern] subject:"
+                printf '%s\n' "$rendered"
+                echo ""
+                echo "Per-commit changed files:"
+                printf '%s' "$items" | jq -r '.[] | "\(.sha[0:8]): \(.files)"'
+              } > "$brief"
               jq -n --arg sb "$SRC" --argjson items "$items" --arg rendered "$rendered" \
                 '{source_branch:$sb, commit_count:($items|length), commits:{items:$items, rendered:$rendered}}'
           cwd: "{{ world.working_dir }}"
