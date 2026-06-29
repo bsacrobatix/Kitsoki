@@ -219,7 +219,7 @@ agents:
 
   # ── Ideas reviewer (rooms/ideas.yaml) ─────────────────────────────
   # Reconciles the hand-maintained ideas backlog against shipped work. READ-ONLY:
-  # it only PROPOSES section moves (the deterministic ideas_reconcile.py script
+  # it only PROPOSES section moves (the deterministic ideas_reconcile.star script
   # does the rewrite). Bash under the read-only profile is for `git log` /
   # `git show` (the proven combo used by stories/bugfix + stories/docs-review).
   ideas_reviewer:

@@ -399,7 +399,7 @@ root — it reads the backlog, the commit history (`git log`), and the docs
 concrete evidence, plus a few high-value **candidates** worth proposing next.
 
 The decide is interpretation; the mutation is deterministic. `apply` is a
-confirm gate: it hands the persisted report to `scripts/ideas_reconcile.py`,
+confirm gate: it hands the persisted report to `scripts/ideas_reconcile.star`,
 which rewrites the backlog file (the same decide→script discipline as the
 design slug step). `pick N` seeds `world.design_seed_idea` from candidate N
 and jumps into the `design` intake — so a blocked author flows straight into
