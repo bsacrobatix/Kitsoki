@@ -44,13 +44,6 @@ host_handlers:
             answers_block:       "Q1: platform engineers\nQ2: notes-saved-per-session\n"
             answered_ids_append: "|1||2|"
             matched_count:       2
-  host.run:
-    by_call:
-      publish:
-        data:
-          ok: true
-          exit_code: 0
-          stdout_json: { prd_file: "docs/prd/notes-service.md" }
   host.agent.task:
     by_call:
       # First draft (drafting on_enter, id: prd_author) — the full PRD body.

@@ -18,12 +18,12 @@ workspace shape the `dev-story` proposal pipeline uses. On `accept` the
 draft is **published** out of the gitignored workspace to its durable home
 (`docs/prd/<slug>.md` by default, collision-safe). This mirrors
 `dev-story`'s `design_workspace.py` / `publish_design.py` sandwich:
-`scripts/prd_slug.star` mints + uniquifies the slug, `scripts/prd_publish.py`
+`scripts/prd_slug.star` mints + uniquifies the slug, `scripts/prd_publish.star`
 moves the accepted draft.
 
 No engine / widget changes — everything composes existing mechanisms (a
 conversational chat room, `host.agent.*`, `host.artifacts_dir`,
-`host.starlark.run` / `host.run` for the deterministic slug/publish glue,
+`host.starlark.run` for the deterministic slug/publish glue,
 the cycle-budget refine loop, named agents, tracing).
 
 ## Using it
@@ -197,7 +197,7 @@ terminals so `kitsoki run` and `kitsoki test flows` terminate cleanly.
 | `clarifying` | `analyst` (`host.agent.decide`) → `clarifications` | no — operator answers in free text; `default_intent: answer` → `answer_matcher` (`host.agent.decide`) maps each reply to the question(s) it answers | `brief` (via `submit_answers` or `skip`) |
 | `brief` | `host.artifacts_dir` writes `<workspace>/001-brief.md` from `world.idea` + `world.clarification_log` (deterministic — no agent) | yes — operator `confirm`s the brief | `references` (via `confirm`); `clarify` re-questions keeping the record; `restart_from` discards |
 | `references` | `researcher` (`host.agent.decide`, docs-only) → `references`; `host.artifacts_dir` writes `<workspace>/003-references.md` | yes — operator `confirm`s the list | `drafting` (via `confirm`); `refine` revises the list in place; `regenerate` searches fresh (both budgeted); `clarify` re-questions keeping the record |
-| `drafting` | `author` (`host.agent.task`) writes `<workspace>/004-prd.md` → `prd_artifact` (reads the confirmed `references`); optional `judge` | yes — `prd_artifact` | `@exit:done` (via `accept`, which runs `prd_publish.py` to move the draft to `docs/prd/<slug>.md`) |
+| `drafting` | `author` (`host.agent.task`) writes `<workspace>/004-prd.md` → `prd_artifact` (reads the confirmed `references`); optional `judge` | yes — `prd_artifact` | `@exit:done` (via `accept`, which runs `prd_publish.star` to publish the draft to `docs/prd/<slug>.md`) |
 
 ### World contract
 
@@ -221,7 +221,7 @@ loads standalone for tests. Parent stories project the intake keys via
 | `prd_overlap_decision` | string | `new` (confirm / override_new) or `change_existing` — records the gate outcome for audit. | `""` |
 | `prd_change_target` | string | On the amend path, the existing doc the author edits in place (publish reuses it rather than moving the draft). | `""` |
 | `publish_durable_path` | string | Durable home the accepted PRD is published into, relative to `workdir`. | `"docs/prd"` |
-| `prd_file` | string | Published path, bound by `prd_publish.py` on `accept` (the deliverable, out of the workspace). | `""` |
+| `prd_file` | string | Published path, bound by `prd_publish.star` on `accept` (the deliverable, out of the workspace). | `""` |
 | `clarifications` | object | This round's `decide` result: `{ questions: [{id, question, why}] }`. | `{}` |
 | `clarification_answers` | string | This round's replies, accumulated one `Qn: …` line per answered question (newest last). | `""` |
 | `answered_count` | int | Questions answered this round; drives the "Answered so far (N/total)" readout. Reset on every new round. | `0` |
@@ -273,8 +273,7 @@ loads standalone for tests. Parent stories project the intake keys via
 | `host.agent.decide` | `search` (scout), `clarifying` (analyst), `references` (researcher), `drafting` (judge) | `internal/host/agent_decide.go` |
 | `host.agent.task` | `drafting` (author, writes the PRD) | `internal/host/agent_task.go` |
 | `host.artifacts_dir` | `brief` (001-brief.md), `references` (003-references.md), into the per-PRD workspace; `mode: replace` for `on_enter` idempotency | `internal/host/artifacts_dir_transport.go` |
-| `host.starlark.run` | `search` (`prd_slug.star` mints the slug + workspace with read-only collision checks) | `internal/host/starlark_run.go` |
-| `host.run` | `drafting` (`prd_publish.py` publishes the accepted draft) | `internal/host/handlers.go` |
+| `host.starlark.run` | `search` (`prd_slug.star` mints the slug + workspace), `drafting` (`prd_publish.star` publishes the accepted draft) | `internal/host/starlark_run.go` |
 
 `host.chat.*` needs a ChatStore wired into the session — `kitsoki run`
 provides one (via `--db`); standalone flow fixtures stub it.
@@ -363,7 +362,7 @@ From the original design note (now retired), resolved as implemented:
    `<prd_workspace>/004-prd.md` (a slug-named per-PRD workspace under
    `{{ workdir }}/.artifacts/prd/`, giving `files_changed` in the trace)
    and returns a `summary_markdown` for the checkpoint view. On `accept`,
-   `prd_publish.py` moves it out to the durable home
+   `prd_publish.star` publishes it out to the durable home
    `{{ workdir }}/{{ publish_durable_path }}/<slug>.md`. The slug + workspace
    are minted at the `search` gate by `prd_slug.star` — the same workspace /
    publish sandwich as `dev-story`'s proposal pipeline.
@@ -436,7 +435,7 @@ kitsoki test flows stories/prd/app.yaml
 | `prd_overlap_proposes_change.yaml` | The scout surfaces an overlap; `change_existing` captures `prd_change_target` (the amend doc) and still mints a workspace for the check artifacts. |
 | `prd_search_override.yaml` | `override_new` starts a NEW PRD despite a detected overlap (the discouraged escape hatch), recording `prd_overlap_decision=new`. |
 | `slug_collision.yaml` | The `search` gate's workspace mint is collision-suffixed: an existing `<slug>` workspace / published PRD pushes the new one to `<slug>-2` (`prd_slug.star` uniquify). |
-| `publish_to_durable.yaml` | `accept` runs `prd_publish.py` to MOVE `004-prd.md` out of the workspace to `docs/prd/<slug>.md`, binding `prd_file` to the durable path. |
+| `publish_to_durable.yaml` | `accept` runs `prd_publish.star` to publish `004-prd.md` out of the workspace to `docs/prd/<slug>.md`, binding `prd_file` to the durable path. |
 | `references_semantic_preseed.yaml` | The optional semantic pre-seed populates the researcher's `reference_hits` before it curates. |
 | `references_no_embeddings_fallback.yaml` | The semantic pre-seed fails cleanly (no embeddings configured) and the researcher still curates from scratch. |
 | `brief_ready_judge_passes.yaml` | The `brief_check` gate returns `continue` — the brief advances to `references`. |
@@ -477,7 +476,7 @@ stories/prd/
   scripts/
     prd_slug.star          — mint + uniquify the slug; return the workspace path (host.starlark.run, search room)
     prd_slug.star.yaml     — typed Starlark sidecar
-    prd_publish.py         — move the accepted 004-prd.md to docs/prd/<slug>.md (host.run, drafting room)
+    prd_publish.star       — publish the accepted 004-prd.md to docs/prd/<slug>.md (host.starlark.run, drafting room)
   views/base.pongo         — standalone base (rooms use flattened views)
   flows/                   — deterministic flow fixtures
 ```

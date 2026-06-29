@@ -1,0 +1,10 @@
+inputs:
+  workspace:     { type: string }
+  slug:          { type: string, required: true }
+  draft_path:    { type: string, required: true }
+  workdir:       { type: string }
+  durable:       { type: string }
+  change_target: { type: string }
+  doc_filename:  { type: string }
+outputs:
+  prd_file: { type: string }
