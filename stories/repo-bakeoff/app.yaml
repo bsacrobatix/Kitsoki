@@ -119,6 +119,19 @@ intents:
     description: "Re-render the current view."
     examples: ["look", "refresh", "?"]
     priority: 10
+  # ── deterministic, emit-only transitions (scoring ⇄ repair) ────────────────
+  # These are emitted by effects (emit_intent), never typed by an operator, so
+  # they carry no examples and the lowest priority — same shape as the internal
+  # drivers in stories/dogfood-marathon.
+  repair:
+    description: "(internal) completion is repairable without paid drives — run the free deterministic repair loop."
+    priority: 1
+  run_more:
+    description: "(internal) completion still needs manual cell drives — route back to running before rechecking."
+    priority: 1
+  repaired:
+    description: "(internal) the deterministic repair loop finished — recheck completion."
+    priority: 1
 
 exits:
   done:
