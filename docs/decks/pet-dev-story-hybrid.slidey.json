@@ -261,6 +261,17 @@
       "narration": "And the same PRD as a shareable deck: a self-contained slidey deck the team can flip through — the product output, packaged."
     },
     {
+      "type": "video",
+      "mode": "embedded",
+      "eyebrow": "1 · Artifact mockup · PRD",
+      "title": "The pet, mocked up",
+      "rrweb": "clips/pet-prd-mockup.rrweb.json",
+      "start": 0,
+      "chapters": false,
+      "caption": "The PRD ships with an HTML mockup: Kit docked at the bottom of the real drive layout (chat | trace), idling while a run works.",
+      "narration": "And the mockup the PRD ships with — a self-contained HTML preview of the pet in the real drive layout. Kit idles at the bottom of the trace column while the run works, taking no space from the trace itself."
+    },
+    {
       "type": "title",
       "eyebrow": "1 · Where work lives",
       "title": "It runs from GitHub",
