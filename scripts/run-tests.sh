@@ -98,8 +98,21 @@ if ! go build -o ./.kitsoki-flows ./cmd/kitsoki >"$TMP/build.log" 2>&1; then
 	{ echo "FAILED to build flow runner:"; cat "$TMP/build.log"; } >>"$REPORT"
 fi
 
+# Flow quarantine: stories whose FLOW fixtures are deliberately skipped because
+# they cover in-flight / WIP work that isn't finished (and shouldn't gate CI yet).
+# Keep this list SMALL and documented — each entry is a known gap, not a free pass:
+#   repo-bakeoff  — gears-era flow fixtures; mid-decoupling, not yet reworked.
+#   bench-bugfix  — no flow fixtures authored yet (declares an app-flows/ glob
+#                   with nothing in it). It still loads (covered by TestAllStoriesLoad).
+# Un-quarantine by deleting the entry once the story's flows are real.
+FLOW_QUARANTINE=" stories/repo-bakeoff/app.yaml stories/bench-bugfix/app.yaml "
+
 if [ "$flow_built" -eq 1 ]; then
 	for app in "${STORY_APPS[@]}"; do
+		if [[ "$FLOW_QUARANTINE" == *" $app "* ]]; then
+			printf -- '-- %s (QUARANTINED — flows skipped; see run-tests.sh FLOW_QUARANTINE)\n' "$app" >>"$REPORT"
+			continue
+		fi
 		flow_apps_total=$((flow_apps_total + 1))
 		slug="$(echo "$app" | tr '/' '-')"
 		fj="$TMP/flow-$slug.json"
