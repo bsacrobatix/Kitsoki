@@ -312,9 +312,10 @@ verdict = result["data"]["submitted"]
 print(verdict["verdict"], verdict["confidence"])
 ```
 
-A complete before/after example is in
-`stories/bugfix/scripts/judge_verdict_before.py` (the `claude -p` version)
-and `stories/bugfix/scripts/judge_verdict_after.py` (this agent-split version).
+This is the supported replacement for the old direct `claude -p` validator
+script pattern. Keep judge calls in the story graph via `host.agent.decide`
+or, for compatibility shims, through the `agent.decide` socket/CLI surface so
+the decision is schema-checked and traced.
 
 ---
 
