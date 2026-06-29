@@ -182,19 +182,18 @@ states:
               items:
                 - label: "look"
     on_enter:
-      - invoke: host.run
+      - invoke: host.starlark.run
         id: write_report
         with:
-          cmd: python3
-          args:
-            - "stories/fix-tests/scripts/write_report.py"
-            - "{{ world.outcome }}"
-            - "{{ world.cycle }}"
-            - "{{ world.max_cycles }}"
-            - "{{ world.fix_artifact }}"
-            - "true"
+          script: scripts/write_report.star
+          inputs:
+            outcome: "{{ world.outcome }}"
+            cycle: "{{ world.cycle }}"
+            max_cycles: "{{ world.max_cycles }}"
+            fix_artifact: "{{ world.fix_artifact }}"
+            tests_passed: true
         bind:
-          report_path: stdout
+          report_path: report_path
       - invoke: host.inbox.add
         with:
           kind:  checkpoint
@@ -225,19 +224,18 @@ states:
               items:
                 - label: "look"
     on_enter:
-      - invoke: host.run
+      - invoke: host.starlark.run
         id: write_report
         with:
-          cmd: python3
-          args:
-            - "stories/fix-tests/scripts/write_report.py"
-            - "{{ world.outcome }}"
-            - "{{ world.cycle }}"
-            - "{{ world.max_cycles }}"
-            - "{{ world.fix_artifact }}"
-            - "false"
+          script: scripts/write_report.star
+          inputs:
+            outcome: "{{ world.outcome }}"
+            cycle: "{{ world.cycle }}"
+            max_cycles: "{{ world.max_cycles }}"
+            fix_artifact: "{{ world.fix_artifact }}"
+            tests_passed: false
         bind:
-          report_path: stdout
+          report_path: report_path
       - invoke: host.inbox.add
         with:
           kind:  checkpoint
@@ -269,19 +267,18 @@ states:
               items:
                 - label: "look"
     on_enter:
-      - invoke: host.run
+      - invoke: host.starlark.run
         id: write_report
         with:
-          cmd: python3
-          args:
-            - "stories/fix-tests/scripts/write_report.py"
-            - "blocked"
-            - "{{ world.cycle }}"
-            - "{{ world.max_cycles }}"
-            - "{{ world.fix_artifact }}"
-            - "false"
+          script: scripts/write_report.star
+          inputs:
+            outcome: blocked
+            cycle: "{{ world.cycle }}"
+            max_cycles: "{{ world.max_cycles }}"
+            fix_artifact: "{{ world.fix_artifact }}"
+            tests_passed: false
         bind:
-          report_path: stdout
+          report_path: report_path
       - invoke: host.inbox.add
         with:
           kind:  checkpoint

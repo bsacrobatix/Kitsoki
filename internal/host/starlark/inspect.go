@@ -11,19 +11,19 @@ import (
 	"sync"
 )
 
-// Inspector is the sandbox's read-only filesystem + process I/O boundary, the
+// Inspector is the sandbox's filesystem + process I/O boundary, the
 // sibling of HTTPClient for ctx.fs and ctx.probe. Every ctx.fs.* and ctx.probe
-// call from a script funnels through exactly one of its four methods. Keeping
+// call from a script funnels through exactly one of its methods. Keeping
 // the surface this narrow means the whole inspection capability can be made
 // deterministic (for replay) or audited (for production) by swapping a single
 // implementation — there is no other way for a script to read a file or run a
 // process.
 //
-// Every method is read-only by contract: Read/Exists/Glob never mutate, and
-// Probe runs ONLY programs on a global allow-list (it is not a shell). A real
-// implementation roots paths at a working directory and rejects escape; the
-// deny-all default refuses every call so a misconfigured run fails loud rather
-// than silently reaching the disk.
+// Filesystem methods are explicit and rooted: Read/Exists/Glob inspect, Write
+// replaces one repo-relative file, and Probe runs ONLY programs on a global
+// allow-list (it is not a shell). A real implementation roots paths at a
+// working directory and rejects escape; the deny-all default refuses every call
+// so a misconfigured run fails loud rather than silently reaching the disk.
 //
 // An err is reserved for refusal (no inspector injected), an out-of-bounds path
 // (".." escape, oversize read), an unknown probe name, or a transport failure
@@ -40,6 +40,10 @@ type Inspector interface {
 	// Glob returns the repo-relative paths matching a glob pattern, sorted. An
 	// out-of-bounds pattern is an error.
 	Glob(ctx context.Context, pattern string) ([]string, error)
+	// Write replaces a repo-relative file with content, creating parent
+	// directories as needed. An out-of-bounds path or oversized write is an
+	// error. The returned path is normalized repo-relative slash form.
+	Write(ctx context.Context, path string, content []byte) (string, error)
 	// Probe runs an allow-listed read-only program and returns its exit code and
 	// combined output. An unknown name is an error; a non-zero exit is not.
 	Probe(ctx context.Context, name string, args []string) (ProbeResult, error)
@@ -60,7 +64,7 @@ type ProbeResult struct {
 // in-process (and, in replay, in cassettes). Run surfaces a slice of these the
 // same way it surfaces HTTPExchange (see ExchangesFromContext).
 //
-// Op is the call kind ("read", "exists", "glob", "probe"); Target is the path,
+// Op is the call kind ("read", "exists", "glob", "write", "probe"); Target is the path,
 // pattern, or probe name; Status is a short outcome ("ok", "missing",
 // "exit:0", "exit:1", or an error class) so the trace shows what happened
 // without leaking the payload.
@@ -74,6 +78,10 @@ type InspectExchange struct {
 // reads small metadata files (manifests, configs); this turns an accidental read
 // of a huge artifact into a clean error rather than ballooning memory.
 const maxInspectReadBytes = 1 << 20 // 1 MiB
+
+// maxInspectWriteBytes caps a single ctx.fs.write. Starlark is for small glue
+// artifacts, not bulk file generation.
+const maxInspectWriteBytes = 1 << 20 // 1 MiB
 
 // inspectorKey is the unexported context key for an injected Inspector.
 type inspectorKey struct{}
@@ -126,6 +134,10 @@ func (deniedInspector) Exists(_ context.Context, path string) (bool, error) {
 
 func (deniedInspector) Glob(_ context.Context, pattern string) ([]string, error) {
 	return nil, fmt.Errorf("starlark: no inspector injected for this run (attempted fs.glob %q); inject one with WithInspector", pattern)
+}
+
+func (deniedInspector) Write(_ context.Context, path string, _ []byte) (string, error) {
+	return "", fmt.Errorf("starlark: no inspector injected for this run (attempted fs.write %q); inject one with WithInspector", path)
 }
 
 func (deniedInspector) Probe(_ context.Context, name string, _ []string) (ProbeResult, error) {
@@ -280,6 +292,30 @@ func (p *productionInspector) Glob(_ context.Context, pattern string) ([]string,
 	sort.Strings(out)
 	p.record("glob", pattern, fmt.Sprintf("matched:%d", len(out)))
 	return out, nil
+}
+
+// Write replaces a rooted file, creating parent directories as needed.
+func (p *productionInspector) Write(_ context.Context, path string, content []byte) (string, error) {
+	if len(content) > maxInspectWriteBytes {
+		return "", fmt.Errorf("starlark fs.write %q: content exceeds %d-byte cap", path, maxInspectWriteBytes)
+	}
+	full, err := p.resolve(path)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		return "", fmt.Errorf("starlark fs.write %q: mkdir parent: %w", path, err)
+	}
+	if err := os.WriteFile(full, content, 0o644); err != nil {
+		return "", fmt.Errorf("starlark fs.write %q: %w", path, err)
+	}
+	rel, err := filepath.Rel(p.root, full)
+	if err != nil {
+		rel = path
+	}
+	rel = filepath.ToSlash(rel)
+	p.record("write", rel, "ok")
+	return rel, nil
 }
 
 // Probe runs an allow-listed program with positional args substituted into its
