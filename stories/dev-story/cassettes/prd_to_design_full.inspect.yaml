@@ -1,0 +1,20 @@
+kind: inspect_cassette
+interactions:
+  - op: exists
+    target: .artifacts/prd/a-self-serve-tour-subcommand-so
+    out: "false"
+  - op: exists
+    target: docs/prd/a-self-serve-tour-subcommand-so.md
+    out: "false"
+  - op: exists
+    target: docs/proposals/.workspace/tour-subcommand
+    out: "false"
+  - op: exists
+    target: docs/proposals/tour-subcommand.md
+    out: "false"
+  - op: exists
+    target: docs/proposals/.workspace/tour-subcommand
+    out: "false"
+  - op: exists
+    target: docs/proposals/tour-subcommand.md
+    out: "false"
