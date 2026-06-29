@@ -1,16 +1,10 @@
 kind: inspect_cassette
 interactions:
   - op: exists
-    target: .artifacts/prd/a-cli-for-x-that-helps
-    out: "false"
-  - op: exists
-    target: docs/prd/a-cli-for-x-that-helps.md
-    out: "false"
-  - op: exists
-    target: .artifacts/prd/example-cli/004-prd.md
+    target: .artifacts/prd.md
     out: "true"
   - op: read
-    target: .artifacts/prd/example-cli/004-prd.md
+    target: .artifacts/prd.md
     out: |
       ## PRD: Example CLI
 

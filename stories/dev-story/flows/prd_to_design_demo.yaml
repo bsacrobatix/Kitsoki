@@ -81,13 +81,6 @@ host_handlers:
         data:
           ok: true
           submitted: { verdict: "continue", reason: "Crisp why, clear metric, IDs threaded.", questions: [] }
-  host.run:
-    by_call:
-      publish:
-        data:
-          ok: true
-          exit_code: 0
-          stdout_json: { prd_file: "docs/prd/notes-service.md" }
   host.agent.task:
     by_call:
       # First draft (drafting on_enter, id: prd_author) — the full PRD body.

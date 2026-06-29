@@ -137,16 +137,14 @@ host_handlers:
             gaps:    ["Define the drive-action → DOM contract"]
   host.run:
     by_call:
-      # Both publish sites share the invoke id `publish`; the superset carries
-      # prd_file (bound by prd drafting) AND design_file/ticket_* (bound by
-      # design_draft). Each room binds only the keys it reads. Unlike gears,
-      # the ticket_* fields are populated — design_ticket_dir mints the ticket.
+      # Design publish still uses publish_design.py through host.run. PRD publish
+      # now runs prd_publish.star through host.starlark.run and is covered by
+      # the inspect cassette above.
       publish:
         data:
           ok: true
           exit_code: 0
           stdout_json:
-            prd_file:     "docs/prd/tour-subcommand.md"
             design_file:  "docs/proposals/tour-subcommand.md"
             ticket_id:    "F-2026-06-12T120000Z-tour-subcommand"
             ticket_path:  "issues/features/F-2026-06-12T120000Z-tour-subcommand.md"

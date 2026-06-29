@@ -39,7 +39,7 @@
 # workspace into a durable docs home. The mint is a small deterministic
 # script (no LLM) so it lives in the commit arcs' effects, not on_enter — it
 # fires exactly once per pipeline commit. prd_change_target (the amend doc) is
-# still captured for the publish step (prd_publish.py reuses it in place).
+# still captured for the publish step (prd_publish.star reuses it in place).
 
 states:
 
@@ -207,7 +207,7 @@ states:
           effects:
             # Even on the amend path a workspace is minted to hold the check
             # artifacts (001-brief, 003-references); publish reuses the amend
-            # target in place (prd_publish.py) rather than moving 004-prd.md.
+            # target in place (prd_publish.star) rather than moving 004-prd.md.
             - invoke: host.starlark.run
               id: mint_workspace
               with:
