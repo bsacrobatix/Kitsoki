@@ -69,6 +69,19 @@ host_handlers:
             summary: "10 passed, 0 partial, 0 failed, 0 skipped, 0 pending"
   host.starlark.run:
     by_call:
+      punch_policy-load-bug: &policy_ok_star
+        data:
+          policy_result: { status: ok, message: "profile/model/verifier policy passed" }
+          error: ""
+      punch_policy-capability-taxonomy: *policy_ok_star
+      punch_policy-toolbox-enforcement: *policy_ok_star
+      punch_policy-cassette-conformance: *policy_ok_star
+      punch_policy-project-init-hardening: *policy_ok_star
+      punch_policy-session-mining-productization: *policy_ok_star
+      punch_policy-deliver-decomposition-decision: *policy_ok_star
+      punch_policy-contextual-routing-controls: *policy_ok_star
+      punch_policy-multi-hop-routing: *policy_ok_star
+      punch_policy-story-qa-workflow: *policy_ok_star
       punch_report:
         data:
           report_path: ".artifacts/punch-list/report.md"

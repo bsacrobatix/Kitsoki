@@ -42,6 +42,12 @@ host_handlers:
           stdout_json:
             policy_result: { status: ok, message: "profile/model/verifier policy passed" }
             error: ""
+  host.starlark.run:
+    by_call:
+      punch_policy-validate-punch-list:
+        data:
+          policy_result: { status: ok, message: "profile/model/verifier policy passed" }
+          error: ""
   host.agent.task:
     by_call:
       punch_drive-validate-punch-list:

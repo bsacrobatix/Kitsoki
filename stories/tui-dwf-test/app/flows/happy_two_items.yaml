@@ -112,6 +112,14 @@ host_handlers:
             summary: "2 passed, 0 partial, 0 failed, 0 skipped, 0 pending"
   host.starlark.run:
     by_call:
+      punch_policy-validate-punch-list:
+        data:
+          policy_result: { status: ok, message: "profile/model/verifier policy passed" }
+          error: ""
+      punch_policy-policy-demo:
+        data:
+          policy_result: { status: ok, message: "profile/model/verifier policy passed" }
+          error: ""
       punch_report:
         data:
           report_path: ".artifacts/punch-list/report.md"

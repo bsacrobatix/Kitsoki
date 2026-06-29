@@ -43,6 +43,13 @@ host_handlers:
             policy_result: { status: fail, message: "live work must use profile codex-native; live work must use model gpt-5.5" }
             error: "live work must use profile codex-native; live work must use model gpt-5.5"
 
+  host.starlark.run:
+    by_call:
+      punch_policy-wrong-model:
+        data:
+          policy_result: { status: fail, message: "live work must use profile codex-native; live work must use model gpt-5.5" }
+          error: "live work must use profile codex-native; live work must use model gpt-5.5"
+
 turns:
   - intent: { name: start, slots: {} }
     expect_state: load
