@@ -79,6 +79,15 @@ on prompt incantations to enforce structure.
   hitting 429s, then used `agent-bench` to show the remaining failure was
   task-shape performance: valid submit, but over wall/output/cost budgets.
 
+- **[glm52-bakeoff-pass.md](glm52-bakeoff-pass.md)** — the harness-as-forcing-function
+  lever. Driving a GLM-5.2 worker end-to-end on a fresh root VM to a clean
+  `kitsoki/bug9` pass flushed out six *silent* infrastructure faults (verdict
+  leaked as an exit code, env not crossing the codex→MCP boundary, a tool
+  timeout shorter than a turn, a quota-limiter deadlock, a missing git
+  identity) plus an over-specified oracle. The lesson: the ticket steers the
+  fix layer, oracles must assert behavior not prose, and every real run pays
+  for itself in flushed-out bugs the green unit tests never saw.
+
 Future studies (planned, not yet written):
 
 - **PR refinement.** The `pr-refinement` tail: watching CI, resolving
