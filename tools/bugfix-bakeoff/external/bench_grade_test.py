@@ -757,6 +757,62 @@ def test_score_cli_exits_zero_on_failed_verdict():
     # RED/GREEN logic; here we only guard the CLI exit contract.
 
 
+def _write_trace(path, events):
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+
+
+def test_classify_cell_separates_infra_from_model():
+    bench = _load("bench_classify", os.path.join(HERE, "bench.py"))
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+
+        # Worker never ran: no streams, no completed calls.
+        never = tdp / "never.jsonl"
+        _write_trace(never, [
+            {"kind": "session.header", "payload": {}},
+            {"kind": "harness.dispatched", "payload": {}},
+        ])
+        assert bench.classify_cell(str(never))["class"] == "infra:worker-never-ran"
+
+        # Silent stall: a start with no matching complete, no terminal, ends there.
+        stall = tdp / "stall.jsonl"
+        _write_trace(stall, [
+            {"kind": "agent.call.start", "call_id": "r1", "state_path": "bf.reproducing", "payload": {"agent": "bf__reproducer"}},
+            {"kind": "agent.stream", "state_path": "bf.reproducing", "payload": {}},
+            {"kind": "agent.call.complete", "call_id": "r1", "state_path": "bf.reproducing", "payload": {"agent": "bf__reproducer"}},
+            {"kind": "agent.call.start", "call_id": "j1", "state_path": "bf.reproducing", "payload": {"agent": "bf__judge"}},
+        ])
+        st = bench.classify_cell(str(stall))
+        assert st["class"] == "infra:stall", st
+        assert st["evidence"]["stalled_agent"] == "bf__judge", st
+
+        # Host/env error: complete calls then a git-identity commit failure, no terminal.
+        host = tdp / "host.jsonl"
+        _write_trace(host, [
+            {"kind": "agent.call.start", "call_id": "i1", "state_path": "bf.implementing", "payload": {"agent": "bf__implementer"}},
+            {"kind": "agent.stream", "state_path": "bf.implementing", "payload": {}},
+            {"kind": "agent.call.complete", "call_id": "i1", "state_path": "bf.implementing", "payload": {"agent": "bf__implementer"}},
+            {"kind": "harness.returned", "state_path": "bf.idle", "payload": {"error": "git.commit: Author identity unknown\n*** Please tell me who you are."}},
+        ])
+        h = bench.classify_cell(str(host))
+        assert h["class"] == "infra:host-error", h
+        assert h["evidence"]["error_label"] == "git-identity-missing", h
+
+        # Real model result: reached a terminal state with completed work.
+        model = tdp / "model.jsonl"
+        _write_trace(model, [
+            {"kind": "agent.call.start", "call_id": "i1", "state_path": "bf.implementing", "payload": {"agent": "bf__implementer"}},
+            {"kind": "agent.stream", "state_path": "bf.implementing", "payload": {}},
+            {"kind": "agent.call.complete", "call_id": "i1", "state_path": "bf.implementing", "payload": {"agent": "bf__implementer"}},
+            {"kind": "machine.state_entered", "state_path": "bf.done", "payload": {}},
+            {"kind": "machine.state_entered", "state_path": "finished", "payload": {}},
+        ])
+        assert bench.classify_cell(str(model))["class"] == "model:result"
+
+        # Absent trace.
+        assert bench.classify_cell(str(tdp / "nope.jsonl"))["class"] == "infra:no-trace"
+
+
 def json_load(raw):
     import json
     return json.loads(raw)
