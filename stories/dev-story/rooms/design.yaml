@@ -49,15 +49,14 @@ states:
                 design_idea: "{{ world.design_seed_idea != '' ? world.design_seed_idea + ' — ' + slots.message : slots.message }}"
                 design_seed_idea: ""
                 last_error: ""
-            - invoke: host.run
+            - invoke: host.starlark.run
               id: name_slug
               with:
-                cmd: python3
-                args:
-                  - "stories/dev-story/scripts/design_workspace.py"
-                  - "{{ world.design_seed_idea != '' ? world.design_seed_idea + ' — ' + slots.message : slots.message }}"
+                script: scripts/design_workspace.star
+                inputs:
+                  proposed: "{{ world.design_seed_idea != '' ? world.design_seed_idea + ' — ' + slots.message : slots.message }}"
               bind:
-                design_slug: "stdout_json.slug"
+                design_slug: "slug"
               on_error: design
             # NB: the workspace folder is deliberately NOT minted here. The
             # scout (design_search.on_enter) runs FIRST, so an idea that

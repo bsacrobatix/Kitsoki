@@ -49,6 +49,8 @@ initial_world:
   design_doc_filename:  ""                            # "" ⇒ slug-named docs/proposals/<slug>.md
   design_ticket_dir:    "issues/features"            # MINT the linking feature ticket (gears uses "")
 
+starlark_inspect_cassette: ../cassettes/prd_to_design_full.inspect.yaml
+
 host_handlers:
   host.ide.open_file:
     data: { ok: true, connected: true }
@@ -135,16 +137,6 @@ host_handlers:
             gaps:    ["Define the drive-action → DOM contract"]
   host.run:
     by_call:
-      mint_workspace:
-        data:
-          ok: true
-          exit_code: 0
-          stdout_json: { slug: "tour-subcommand", workspace: ".artifacts/prd/tour-subcommand" }
-      uniquify:
-        data:
-          ok: true
-          exit_code: 0
-          stdout_json: { slug: "tour-subcommand", workspace: "docs/proposals/.workspace/tour-subcommand" }
       # Both publish sites share the invoke id `publish`; the superset carries
       # prd_file (bound by prd drafting) AND design_file/ticket_* (bound by
       # design_draft). Each room binds only the keys it reads. Unlike gears,
