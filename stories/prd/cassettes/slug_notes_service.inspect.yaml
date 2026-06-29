@@ -1,0 +1,8 @@
+kind: inspect_cassette
+interactions:
+  - op: exists
+    target: .artifacts/prd/a-notes-service-so-every-note
+    out: "false"
+  - op: exists
+    target: docs/prd/a-notes-service-so-every-note.md
+    out: "false"

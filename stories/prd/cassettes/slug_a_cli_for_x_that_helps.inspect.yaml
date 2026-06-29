@@ -1,0 +1,8 @@
+kind: inspect_cassette
+interactions:
+  - op: exists
+    target: .artifacts/prd/a-cli-for-x-that-helps
+    out: "false"
+  - op: exists
+    target: docs/prd/a-cli-for-x-that-helps.md
+    out: "false"
