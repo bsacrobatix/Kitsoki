@@ -21,7 +21,7 @@
 # search is the prior-art gate (the dev-story design_search analogue): a
 # read-only scout runs BEFORE any artifact is written, so a duplicate idea
 # is caught early. Committing (confirm / change_existing / override_new)
-# runs scripts/prd_slug.py to mint a unique per-PRD slug + workspace
+# runs scripts/prd_slug.star to mint a unique per-PRD slug + workspace
 # (.artifacts/prd/<slug>); every numbered artifact writes under it, and
 # accept publishes the draft out via scripts/prd_publish.py to
 # docs/prd/<slug>.md. brief + references are confirm-gated review rooms
@@ -37,7 +37,7 @@
 # rooms/clarifying.yaml). clarifying_budget caps the number of rounds.
 #
 # No engine / widget changes — everything composes existing mechanisms
-# (choice forms, host.agent.*, host.artifacts_dir, host.run for the
+# (choice forms, host.agent.*, host.artifacts_dir, host.run / host.starlark.run for the
 # deterministic slug/publish glue, the cycle-budget refine loop, named
 # agents, tracing). See README.md for the full
 # contract + design.
@@ -62,7 +62,8 @@ hosts:
   - host.artifacts_dir    # write the brief + reference-list artifacts into the per-PRD workspace under {{ workdir }}/.artifacts/prd/<slug> — see rooms/brief.yaml, rooms/references.yaml.
   - host.ide.open_file    # open the editable brief in the operator's editor on brief-room entry — see rooms/brief.yaml.
   - host.ide.open_diff    # show a refine as a native diff with an in-editor accept/reject verdict gate — see rooms/drafting.yaml.
-  - host.run              # deterministic glue scripts: mint the per-PRD workspace slug (scripts/prd_slug.py, search room) and publish the accepted PRD to its durable home (scripts/prd_publish.py, drafting room).
+  - host.run              # deterministic glue script that writes: publish the accepted PRD to its durable home (scripts/prd_publish.py, drafting room).
+  - host.starlark.run     # deterministic read-only glue: mint the per-PRD workspace slug (scripts/prd_slug.star, search room).
   - host.agent.search    # OPTIONAL semantic pre-seed for the references room: embeds the idea and retrieves close docs chunks to pre-rank the researcher (see rooms/references.yaml). Fails cleanly (on_error stays in references) when no embedding endpoint is configured.
 
 # Persona table — names a model + tool surface per step so the trace
@@ -147,14 +148,14 @@ world:
   # flow that seeds initial_state=drafting directly). Relative to workdir.
   output_path:     { type: string, default: ".artifacts/prd.md" }
 
-  # ── per-PRD workspace + publish (see scripts/prd_slug.py, prd_publish.py) ─
-  # The search gate mints a slug from the distilled idea (prd_slug.py — a
+  # ── per-PRD workspace + publish (see scripts/prd_slug.star, prd_publish.py) ─
+  # The search gate mints a slug from the distilled idea (prd_slug.star — a
   # deterministic kebab reduction, uniquified) so two PRDs authored in the
   # same tree never collide. Every artifact then lands under the per-PRD
   # workspace with a numbered spine (001-brief, 003-references, 004-prd.md),
   # and accept PUBLISHES the draft out of the gitignored workspace into a
   # durable docs home (prd_publish.py).
-  prd_slug:             { type: string, default: "" }   # kebab slug minted at the search gate (prd_slug.py)
+  prd_slug:             { type: string, default: "" }   # kebab slug minted at the search gate (prd_slug.star)
   prd_workspace:        { type: string, default: "" }   # per-PRD workspace, relative to workdir: .artifacts/prd/<slug> (empty until the gate mints it)
   prd_file:             { type: string, default: "" }   # durable published path bound on accept (prd_publish.py) — the real deliverable, out of .artifacts/
   publish_durable_path: { type: string, default: "docs/prd" }  # configurable durable home the accepted PRD is published into (relative to workdir)

@@ -31,7 +31,7 @@
 # A /reload that lands here with the scan already done skips the call.
 #
 # Workspace minting (Gap #4): committing to the pipeline (confirm /
-# change_existing / override_new) runs scripts/prd_slug.py via host.run to
+# change_existing / override_new) runs scripts/prd_slug.star via host.starlark.run to
 # mint a unique per-PRD slug + workspace (.artifacts/prd/<slug>) from the
 # distilled idea. Every downstream artifact (001-brief, 003-references,
 # 004-prd.md) then lands under that workspace instead of colliding at flat
@@ -180,18 +180,16 @@ states:
             # slug + uniquify). Binds prd_slug + prd_workspace; downstream rooms
             # write their numbered artifacts under prd_workspace. on_error holds
             # the operator in search so the failure is visible (last_error).
-            - invoke: host.run
+            - invoke: host.starlark.run
               id: mint_workspace
               with:
-                cmd: python3
-                args:
-                  - "stories/prd/scripts/prd_slug.py"
-                  - "{{ world.idea }}"
-                  - "{{ world.workdir }}"
-                  - "{{ world.publish_durable_path }}"
+                script: scripts/prd_slug.star
+                inputs:
+                  idea: "{{ world.idea }}"
+                  durable_path: "{{ world.publish_durable_path }}"
               bind:
-                prd_slug:      stdout_json.slug
-                prd_workspace: stdout_json.workspace
+                prd_slug:      slug
+                prd_workspace: workspace
               on_error: search
             - set:
                 prd_overlap_decision: "new"
@@ -210,18 +208,16 @@ states:
             # Even on the amend path a workspace is minted to hold the check
             # artifacts (001-brief, 003-references); publish reuses the amend
             # target in place (prd_publish.py) rather than moving 004-prd.md.
-            - invoke: host.run
+            - invoke: host.starlark.run
               id: mint_workspace
               with:
-                cmd: python3
-                args:
-                  - "stories/prd/scripts/prd_slug.py"
-                  - "{{ world.idea }}"
-                  - "{{ world.workdir }}"
-                  - "{{ world.publish_durable_path }}"
+                script: scripts/prd_slug.star
+                inputs:
+                  idea: "{{ world.idea }}"
+                  durable_path: "{{ world.publish_durable_path }}"
               bind:
-                prd_slug:      stdout_json.slug
-                prd_workspace: stdout_json.workspace
+                prd_slug:      slug
+                prd_workspace: workspace
               on_error: search
             - set:
                 prd_overlap_decision: "change_existing"
@@ -232,18 +228,16 @@ states:
       override_new:
         - target: clarifying
           effects:
-            - invoke: host.run
+            - invoke: host.starlark.run
               id: mint_workspace
               with:
-                cmd: python3
-                args:
-                  - "stories/prd/scripts/prd_slug.py"
-                  - "{{ world.idea }}"
-                  - "{{ world.workdir }}"
-                  - "{{ world.publish_durable_path }}"
+                script: scripts/prd_slug.star
+                inputs:
+                  idea: "{{ world.idea }}"
+                  durable_path: "{{ world.publish_durable_path }}"
               bind:
-                prd_slug:      stdout_json.slug
-                prd_workspace: stdout_json.workspace
+                prd_slug:      slug
+                prd_workspace: workspace
               on_error: search
             - set:
                 prd_overlap_decision: "new"
