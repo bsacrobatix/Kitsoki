@@ -133,4 +133,24 @@ describe("ViewElement scene-aware refine dispatch", () => {
     const frame = w.find('[data-testid="media-slideshow-frame"]');
     expect(frame.attributes("src")).toBe("/artifact/slidey-edit%23def?scene=9&step=2");
   });
+
+  it("keeps the iframe src stable across reveals on the same handle (no flicker)", async () => {
+    const w = mountSlideshow();
+
+    const frame = w.find('[data-testid="media-slideshow-frame"]');
+    const initialSrc = frame.attributes("src");
+
+    // Operator navigates the LOADED deck — the deck publishes new embed:view
+    // scope/step on each reveal. The main iframe src must NOT change, or the
+    // iframe reloads (a visible flicker) and the deck resets to slide 1.
+    for (const [scope, step] of [["3", 1], ["7", 2], ["9", 0]] as const) {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { type: "embed:view", producer: "slidey", scope, step },
+        }),
+      );
+      await w.vm.$nextTick();
+      expect(w.find('[data-testid="media-slideshow-frame"]').attributes("src")).toBe(initialSrc);
+    }
+  });
 });

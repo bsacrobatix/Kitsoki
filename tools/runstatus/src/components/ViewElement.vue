@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useRoute } from "vue-router";
 import { installEmbedViewListener } from "../lib/embedView.js";
 import type { ViewElement } from "../types.js";
@@ -114,10 +114,29 @@ const mediaMime = computed<string>(() => {
 const isSlideshow = computed<boolean>(
   () => (el.value.MediaKind ?? "").toLowerCase() === "slideshow"
 );
+// The scene/step the freshly mounted deck should boot at. Captured ONCE per
+// handle: when a re-rendered deck arrives with a new content-addressed handle,
+// we want it to open where the operator was last looking (the embed:view scope
+// carried over from the previous deck). We must NOT track embedScope/embedStep
+// reactively — those update on every reveal as the operator navigates the LOADED
+// deck, and rebinding the iframe `src` on each reveal reloads the iframe (a
+// visible flicker) and resets the deck back to slide 1 (which also corrupts the
+// annotation anchor and makes an edited deck look unchanged). So we snapshot the
+// scope at handle-change time and keep the URL stable while the handle holds.
+const _bootScene = ref<string>(_run.embedScope);
+const _bootStep = ref<string>(_run.embedStep);
+watch(
+  mediaHandle,
+  () => {
+    _bootScene.value = _run.embedScope;
+    _bootStep.value = _run.embedStep;
+  },
+  { flush: "sync" }
+);
 const slideshowUrl = computed<string>(() =>
   withQuery(artifactUrl(mediaHandle.value), {
-    scene: _run.embedScope,
-    step: _run.embedStep,
+    scene: _bootScene.value,
+    step: _bootStep.value,
   })
 );
 
