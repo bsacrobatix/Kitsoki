@@ -813,6 +813,21 @@ def test_classify_cell_separates_infra_from_model():
         assert bench.classify_cell(str(tdp / "nope.jsonl"))["class"] == "infra:no-trace"
 
 
+def test_oracle_linter_flags_brittle_prose_not_messages():
+    bench = _load("bench_lint", os.path.join(HERE, "bench.py"))
+    # A brittle match on exact error prose — must be flagged.
+    brittle = 'if !strings.Contains(resB.Error, "already checked out by session") {'
+    # A behavior-style match on short synonyms + a failure MESSAGE with %q — must NOT be flagged.
+    good = (
+        'ok := strings.Contains(e, "in use by") || strings.Contains(e, "owned by")\n'
+        't.Fatalf("session B error did not name the owning session as expected: %q", e)\n'
+        'if !strings.Contains(e, "session-A") { t.Fatal("missing owner") }'
+    )
+    bf = bench._brittle_prose_literals(brittle)
+    assert len(bf) == 1 and "already checked out by session" in bf[0][1], bf
+    assert bench._brittle_prose_literals(good) == [], bench._brittle_prose_literals(good)
+
+
 def json_load(raw):
     import json
     return json.loads(raw)

@@ -324,6 +324,80 @@ def classify_cell(trace):
             "evidence": evidence}
 
 
+# Containment/match calls (Go test / JS-TS test) where a string literal is
+# matched against program OUTPUT. A brittle oracle pins the candidate's exact
+# ERROR PROSE in one of these instead of asserting observable behavior. We match
+# only these call forms — NOT generic "assert"/"expect" — so a t.Fatalf(...)
+# failure-MESSAGE string (which legitimately reads like prose) isn't flagged.
+_MATCH_CALL_HINTS = ("strings.contains(", "strings.hasprefix(", "strings.hassuffix(",
+                     "strings.containsany(", ".contains(", ".includes(",
+                     "tocontain", "tomatch", "assertcontains", "containssubstring")
+_STR_LITERAL = None  # compiled lazily (avoid a module-level import-time cost)
+
+
+def _brittle_prose_literals(text):
+    """Heuristic: flag natural-language string literals used in assertions.
+    A literal of >=3 alphabetic words, >=18 chars, that is mostly letters/spaces
+    is almost certainly a human-readable sentence — pinning it asserts one
+    implementation's PROSE, not behavior, and wrongly fails equivalent fixes
+    (the bug9 oracle pinned "already checked out by session" and failed a fix
+    that said "in use by session"). Returns [(lineno, literal)]."""
+    import re
+    global _STR_LITERAL
+    if _STR_LITERAL is None:
+        _STR_LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
+    findings = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        low = line.lower()
+        if not any(h in low for h in _MATCH_CALL_HINTS):
+            continue
+        for mo in _STR_LITERAL.finditer(line):
+            lit = mo.group(1)
+            if "%" in lit:  # printf-format string → a message, not a match target
+                continue
+            words = [w for w in lit.replace("\\n", " ").replace("\\t", " ").split() if w]
+            alpha_words = [w for w in words if any(c.isalpha() for c in w)]
+            if len(alpha_words) < 3 or len(lit) < 18:
+                continue
+            naturalness = sum(c.isalpha() or c.isspace() for c in lit) / max(1, len(lit))
+            if naturalness > 0.7:
+                findings.append((lineno, lit))
+    return findings
+
+
+def lint_oracles(m, bug_ids=None, strict=False):
+    """Scan each bug's oracle test for brittle exact-prose assertions and report
+    them. Advisory by default (exit 0); --strict exits nonzero on any finding.
+    Complements `verify` (RED@baseline / GREEN@fix): RED/GREEN against ONE fix
+    can't reveal that the oracle would reject an EQUIVALENT correct fix."""
+    results = []
+    total = 0
+    for b in selected_bugs(m, bug_ids):
+        if b.get("reference_only"):
+            continue
+        oracle = m["_dir"] / b.get("oracle_test", "")
+        if not oracle.exists():
+            results.append({"bug": b.get("id"), "oracle": str(oracle), "error": "missing"})
+            continue
+        findings = _brittle_prose_literals(oracle.read_text())
+        total += len(findings)
+        results.append({
+            "bug": b.get("id"),
+            "oracle": str(oracle),
+            "brittle_prose": [{"line": ln, "literal": lit} for ln, lit in findings],
+        })
+    out = {
+        "ok": total == 0,
+        "total_brittle": total,
+        "results": results,
+        "guidance": ("Assert observable BEHAVIOR, not one implementation's exact "
+                     "error prose. Accept any equivalent wording (e.g. a set of "
+                     "synonyms) plus the load-bearing identifiers. See ORACLE_GUIDE.md."),
+    }
+    print(json.dumps(out, indent=2))
+    return 1 if (strict and total > 0) else 0
+
+
 def candidate_meta(candidates_path, key):
     """Look up model/effort/provider for a candidate key from candidates.yaml.
     Returns {} if the file or key is absent (back-compat for ad-hoc scoring)."""
@@ -1710,6 +1784,10 @@ def main():
     pc.add_argument("--treatment", default="kitsoki")
     pc.add_argument("--candidates", default=str(HERE / "candidates.yaml"),
                     help="candidates.yaml for model/effort/provider lookup by --candidate")
+    lo = sub.add_parser("lint-oracles")  # flag brittle exact-prose oracle assertions
+    lo.add_argument("--project", required=True)
+    lo.add_argument("--bug", action="append", help="bug id to lint; repeat or comma-separate; default all")
+    lo.add_argument("--strict", action="store_true", help="exit nonzero on any brittle-prose finding")
     mt = sub.add_parser("meta")  # machine-readable project facts (for the Go runner)
     mt.add_argument("--project", required=True)
     mt.add_argument("--bug")     # optional: emit one bug's drive facts
@@ -1736,6 +1814,8 @@ def main():
                            allow_empty=a.allow_empty))
 
     m = load(a.project)
+    if a.cmd == "lint-oracles":
+        sys.exit(lint_oracles(m, bug_ids=a.bug, strict=a.strict))
     if a.cmd == "preflight":
         sys.exit(preflight(m, repo_dir=a.repo_dir, candidate=a.candidate,
                            candidates_path=a.candidates, bug_ids=a.bug))
