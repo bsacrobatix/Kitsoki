@@ -813,6 +813,55 @@ def test_classify_cell_separates_infra_from_model():
         assert bench.classify_cell(str(tdp / "nope.jsonl"))["class"] == "infra:no-trace"
 
 
+def test_mine_failures_aggregates_and_prioritizes(capsys=None):
+    bench = _load("bench_mine", os.path.join(HERE, "bench.py"))
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        cells = tdp / "results" / "cells"
+        traces = tdp / "traces"
+        cells.mkdir(parents=True)
+        traces.mkdir()
+
+        def cell(bug, cand, oracle_pass):
+            (cells / f"demo-{bug}-{cand}-kitsoki.json").write_text(json.dumps({
+                "project": "demo", "bug": bug, "candidate": cand,
+                "outcome": {"oracle_pass": oracle_pass},
+            }))
+
+        def trace(bug, cand, events):
+            (traces / f"demo-{bug}-{cand}.jsonl").write_text(
+                "\n".join(json.dumps(e) for e in events) + "\n")
+
+        # A genuine model miss (terminal + oracle fail).
+        cell("bug1", "glm", False)
+        trace("bug1", "glm", [
+            {"kind": "agent.call.start", "call_id": "i", "payload": {"agent": "impl"}},
+            {"kind": "agent.call.complete", "call_id": "i", "payload": {"agent": "impl"}},
+            {"kind": "machine.state_entered", "state_path": "bf.done", "payload": {}},
+        ])
+        # An infra host-error cell (must not count against the model).
+        cell("bug2", "glm", False)
+        trace("bug2", "glm", [
+            {"kind": "agent.call.start", "call_id": "i", "payload": {"agent": "impl"}},
+            {"kind": "agent.call.complete", "call_id": "i", "payload": {"agent": "impl"}},
+            {"kind": "harness.returned", "payload": {"error": "git.commit: Author identity unknown"}},
+        ])
+
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = bench.mine_failures(str(tdp / "results"), str(traces))
+        assert rc == 0
+        rep = json.loads(buf.getvalue())
+        assert rep["cells_scanned"] == 2, rep
+        assert rep["by_class"].get("model:result") == 1, rep
+        assert rep["by_class"].get("infra:host-error") == 1, rep
+        assert len(rep["model_misses"]) == 1 and rep["model_misses"][0]["bug"] == "bug1", rep
+        assert rep["host_error_labels"].get("git-identity-missing") == 1, rep
+        assert any("INFRASTRUCTURE" in a for a in rep["feedback_actions"]), rep
+
+
 def test_oracle_linter_flags_brittle_prose_not_messages():
     bench = _load("bench_lint", os.path.join(HERE, "bench.py"))
     # A brittle match on exact error prose — must be flagged.
