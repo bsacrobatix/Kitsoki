@@ -14,5 +14,5 @@ states:
             "Dry run":   '{% if world.dry_run %}yes (no PRs opened){% else %}no{% endif %}'
       - heading: "Pull requests"
       - template: |
-          {% for p in world.opened_prs.items %}- [{{ p.concern }}] {{ p.branch }}{% if p.url %} → {{ p.url }}{% endif %}
+          {% for p in world.opened_prs.items %}- [{{ p.concern }}] {{ p.branch }} ({{ p.commits }} commits){% if p.url %} → {{ p.url }}{% endif %}
           {% empty %}(none){% endfor %}
