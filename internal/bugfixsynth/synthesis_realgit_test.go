@@ -89,6 +89,14 @@ func gitInit(t *testing.T, dir string) {
 		require.NoErrorf(t, err, "git %v: %s", args, out)
 	}
 	run("init", "-q", "-b", "main")
+	// Set the identity in the repo's LOCAL config, not just via env on the
+	// commands run() issues here. The synthesis commit under test is made by the
+	// production host.git.commit handler (real `git commit` in this workdir),
+	// which does NOT inherit run()'s GIT_AUTHOR_* env — so on a host with no
+	// global git identity (CI runners) it would fail with "empty ident name".
+	// Local config is picked up by every `git commit` in this repo, whoever runs it.
+	run("config", "user.email", "t@t")
+	run("config", "user.name", "t")
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "baseline.txt"), []byte("base\n"), 0o644))
 	// The owner sentinel the synthesis commit deliberately EXCLUDES (`git reset
 	// -q -- .kitsoki-owner`). Committing it in the baseline means a later stray
