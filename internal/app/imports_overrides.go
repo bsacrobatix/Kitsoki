@@ -115,7 +115,7 @@ func applyOverrides(child *AppDef, ov *ImportOverrides, file, alias, parentBaseD
 }
 
 // rebaseEffectPaths walks an imported child's state tree and rewrites
-// every relative `prompt:` / `schema:` arg in effect `with:` blocks to
+// every relative `prompt:` / `schema:` / `script:` arg in effect `with:` blocks to
 // an absolute path rooted at the child's directory. Without this, the
 // runtime joins the relative path against $KITSOKI_APP_DIR (the parent
 // app's directory) and fails to find files that live in the child
@@ -170,7 +170,7 @@ func rebaseEffectPathsInEffects(effs []Effect, childDir string) {
 }
 
 func rebaseWithMap(with map[string]any, childDir string) {
-	for _, key := range []string{"prompt", "prompt_path", "schema"} {
+	for _, key := range []string{"prompt", "prompt_path", "schema", "script"} {
 		raw, ok := with[key].(string)
 		if !ok || raw == "" {
 			continue
