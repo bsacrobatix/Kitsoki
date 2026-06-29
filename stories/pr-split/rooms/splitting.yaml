@@ -25,7 +25,11 @@ states:
               INT="{{ world.integration_branch }}"
               DRY="{{ world.dry_run }}"
               ROOT="$(git rev-parse --show-toplevel)"
-              BUCKETS_JSON="${BUCKETS_JSON:-}"
+              # The plan JSON arrives as a POSITIONAL ARG, not an env var:
+              # host.run (RunHandler) has no env support — it runs the child with
+              # os.Environ() only — so an env: block is silently dropped. argv
+              # passes the multi-line JSON verbatim (exec, no shell re-parse).
+              BUCKETS_JSON="${1:-}"
               if [ -z "$BUCKETS_JSON" ]; then
                 echo '{"opened_prs":{"items":[]}}'
                 exit 0
@@ -59,8 +63,8 @@ states:
                   '. + [{"concern":$c,"branch":$br,"url":$url,"commits":$n}]')
               done
               jq -n --argjson items "$out" '{opened_prs:{items:$items}}'
-          env:
-            BUCKETS_JSON: "{{ world.buckets_json }}"
+            - "pr-split"                      # $0
+            - "{{ world.buckets_json }}"       # $1 — the plan JSON (argv, not env)
           cwd: "{{ world.working_dir }}"
         bind:
           opened_prs: "stdout_json.opened_prs"

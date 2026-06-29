@@ -53,10 +53,6 @@ states:
         with:
           prompt: prompts/bucket_commits.md
           schema: schemas/pr_buckets.json
-          args:
-            commits_rendered:   "{{ world.commits.rendered }}"
-            source_branch:      "{{ world.source_branch }}"
-            integration_branch: "{{ world.integration_branch }}"
         bind:
           buckets: "submitted"
         on_error: planning
