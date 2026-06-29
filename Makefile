@@ -281,6 +281,18 @@ onboard-sisters:
 # real fix) — DETERMINISTIC, no LLM, no cost. NOT part of `make test`; needs
 # network + git + node/npm + an installed `kitsoki`. The cost-bearing LLM cells
 # stay operator-run. See tools/bugfix-bakeoff/external/ + the case study.
+# pr-split — group the current branch's commits into concern-grouped PRs (one PR
+# per concern). Pure story: all logic is in stories/pr-split (deterministic git +
+# one fenced bucketer agent); this target is just the entry point. Run from the
+# checkout whose branch you want to split.
+pr-split:
+	go run ./cmd/kitsoki run stories/pr-split/app.yaml
+
+# Flow-test the pr-split story (no LLM, no cost).
+pr-split-test:
+	go run ./cmd/kitsoki validate stories/pr-split/app.yaml
+	go run ./cmd/kitsoki test flows stories/pr-split/app.yaml
+
 qs-bakeoff: install
 	python3 tools/bugfix-bakeoff/external/bench_grade_test.py
 	python3 tools/bugfix-bakeoff/external/bench.py lint-oracles --project kitsoki --strict

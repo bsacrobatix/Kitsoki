@@ -1,0 +1,81 @@
+# planning — the one interpretive step. The agent groups commits into concern
+# buckets and authors each PR's title/body; a deterministic starlark step then
+# serializes the plan to a JSON string the splitting room can hand to git.
+
+states:
+
+  planning:
+    description: "Agent groups the commits into concern buckets and writes PR copy. Review and accept."
+    relevant_world: [commits, buckets, dry_run, source_branch, integration_branch]
+    view:
+      - kv:
+          pairs:
+            Source:      '{{ world.source_branch }}'
+            Integration: '{{ world.integration_branch }}'
+            "Dry run":   '{% if world.dry_run %}yes (plan only){% else %}no{% endif %}'
+      - heading: "Proposed PRs"
+      - template: |
+          {% for b in world.buckets.buckets %}### {{ b.title }}  [{{ b.concern }}]
+          {{ b.body }}
+          commits: {{ b.shas|length }}
+          {% empty %}(pending — the agent is grouping commits){% endfor %}
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "accept"
+              hint:  "open one PR per bucket{% if world.dry_run %} (dry-run: plan only){% endif %}"
+              intent: accept
+              when:  "world.buckets_json != ''"
+            - label: "regenerate"
+              hint:  "re-group the commits"
+              intent: regenerate
+            - label: "toggle_dry_run"
+              hint:  "currently {% if world.dry_run %}ON{% else %}OFF{% endif %}"
+              intent: toggle_dry_run
+            - label: "quit"
+              intent: quit
+            - label: "look"
+              intent: look
+    on_enter:
+      - invoke: host.agent.decide
+        once: true
+        id: bucket_commits
+        with:
+          prompt: prompts/bucket_commits.md
+          schema: schemas/pr_buckets.json
+          args:
+            commits_rendered:   "{{ world.commits.rendered }}"
+            source_branch:      "{{ world.source_branch }}"
+            integration_branch: "{{ world.integration_branch }}"
+        bind:
+          buckets: "submitted"
+        on_error: planning
+      # Deterministic bridge: serialize the agent's plan to a JSON string the
+      # splitting bash can consume (templates can't JSON-encode an object). Runs
+      # after the agent has bound `buckets`; serialize_plan.star tolerates empty.
+      - invoke: host.starlark.run
+        id: serialize_plan
+        with:
+          script: scripts/serialize_plan.star
+        bind:
+          buckets_json: buckets_json
+        on_error: planning
+    on:
+      accept:
+        - target: splitting
+      regenerate:
+        - target: planning
+          effects:
+            - set:
+                buckets:      {}
+                buckets_json: ""
+      toggle_dry_run:
+        - target: .
+          effects:
+            - set:
+                dry_run: "{% if world.dry_run %}false{% else %}true{% endif %}"
+      look:
+        - target: .
+      quit:
+        - target: done
