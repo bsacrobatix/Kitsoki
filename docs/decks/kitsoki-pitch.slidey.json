@@ -45,6 +45,93 @@
     },
     {
       "type": "narrative",
+      "eyebrow": "Prologue: Autonomous bug fixing",
+      "body": "It started with a simple question: can an agent fix a bug end to end? Can we get to 80/20 Autonomy?",
+      "lede": "It sounded simple and self-contained - so we chased autonomous bug fixing as the headline capability: take a report, reproduce, fix, verify, ship — no human in the loop.",
+      "hold": 180,
+      "narration": "FILLER narration — the journey began with autonomous bug fixing."
+    },
+    {
+      "type": "narrative",
+      "eyebrow": "What I learned",
+      "body": "The fix is the easy part! Everything upstream decides whether it can happen at all.",
+      "lede": "Success rate is a lagging indicator downstream of well-defined visual and behavioral expectations, good testing harnesses, good documentation, the ability to capture the regression, and the quality of the bug report itself.",
+      "hold": 210,
+      "narration": "FILLER narration — autonomous fix success is the outcome of effective upstream processes."
+    },
+    {
+      "type": "table",
+      "title": "Naïve Success Factors",
+      "columns": [
+        "Outcome",
+        "Share",
+        "What it took"
+      ],
+      "rows": [
+        {
+          "cells": [
+            "Solvable as-is",
+            "12.5%",
+            "Clear report, reproducible, expectations already explicit"
+          ]
+        },
+        {
+          "cells": [
+            "Solvable, hard-won",
+            "12.5%",
+            "Many rounds plus access to internal docs"
+          ]
+        },
+        {
+          "cells": [
+            "UI issue",
+            "25%",
+            "Visual/behavioral expectations, unclear navigation — a serious challenge"
+          ]
+        },
+        {
+          "cells": [
+            "Never solvable",
+            "50%",
+            "Ticket was incomplete — no amount of effort downstream helps"
+          ]
+        }
+      ],
+      "variant": "data",
+      "caption": "Only one in eight bugs was solvable as written. The rest were gated upstream — by docs, by UI expectations, and above all by incomplete reports.",
+      "hold": 300,
+      "narration": "Of eight bugs, only one was solvable as-is. One more took many rounds and internal docs, a quarter were hard UI issues, and half were never solvable because the ticket was incomplete."
+    },
+    {
+      "type": "narrative",
+      "eyebrow": "Prologue: Push the pain forward",
+      "body": "Improving bug fixing in a vacuum isn't beneficial.",
+      "lede": "It became clear that the overall SDLC quality is what drives bug fix efficiently - without good quality prompts, tools, and especially inputs - there's little to no chance to achieve 80% autonomous operation.",
+      "hold": 210,
+      "narration": "FILLER narration — push the pain forward into the upstream process."
+    },
+    {
+      "type": "meme",
+      "template": "db",
+      "fields": {
+        "text1": "Agentic development",
+        "text2": "Engineering Leadership",
+        "text3": "SDLC processes"
+      }
+    },
+    {
+      "type": "meme",
+      "template": "clown-makeup",
+      "fields": {
+        "step1": "I'll write a prompt to solve the bug",
+        "step2": "I'll write a script that does setup and checks the output",
+        "step3": "I'll write a 4-phase loop-driven pipeline in Python",
+        "step4": "Now I have 14 phases and 20 Python scripts"
+      },
+      "narration": "You start with a prompt. Then a script to set it up and check the output. Then a loop-driven pipeline. Before long you're maintaining fourteen phases and twenty Python scripts — full clown makeup."
+    },
+    {
+      "type": "narrative",
       "eyebrow": "The prologue",
       "body": "Processes are a complex adaptive system.",
       "lede": "People, agents, tools, artifacts, failures, and feedback loops keep perturbing each other.",
@@ -411,7 +498,7 @@
             },
             {
               "id": "feedback",
-              "label": "Feedback",
+              "label": "Artifacts",
               "sub": "attached evidence",
               "lines": [
                 "trace + failure reason"
@@ -2198,6 +2285,17 @@
       "hold": 240,
       "narration": "When the LLM is called, the runtime polices it. Off-contract decisions are rejected; valid ones hit the trace.",
       "instant": true
+    },
+    {
+      "type": "meme",
+      "template": "gb",
+      "fields": {
+        "text1": "Prompt engineering",
+        "text2": "Loop engineering",
+        "text3": "Context engineering",
+        "text4": "Kitsoki"
+      },
+      "narration": "Prompt engineering. Then loop engineering. Then context engineering. And finally — Kitsoki."
     },
     {
       "type": "narrative",
