@@ -63,7 +63,7 @@ go run . -r scripts/                          # a whole tree
 go run . -predeclared=world,http,secret f.star # only these builtins are granted
 
 # 2b. kitsoki glue script — pins the EXACT host.starlark.run sandbox surface
-#     (predeclared={json,math}, strict dialect, requires def main(ctx)):
+#     (predeclared={json,math,yaml}, strict dialect, requires def main(ctx)):
 go run . -kitsoki scripts/derive.star
 
 # format + starcheck over a path in one shot:
@@ -128,8 +128,9 @@ language gotchas above:
 2. **`ctx` is the whole world.** Exactly `ctx.inputs` (dict), `ctx.world.get(k)`
    (read-only), `ctx.http.get/post`. No `set`, no fs, no env, no clock, no
    random — `ctx.world` can't be written; outputs go through the return dict.
-3. **Only `json` + `math`** are predeclared. No `time`, no `random` (they'd
-   break determinism). `starcheck -kitsoki` enforces exactly this set.
+3. **Only `json` + `math` + decode-only `yaml`** are predeclared. No `time`, no
+   `random` (they'd break determinism). `starcheck -kitsoki` enforces exactly
+   this set.
 4. **`fail()` is your error channel.** There are no exceptions; `fail(msg)` sets
    `world.last_error` and fires the effect's `on_error:` arc. Validate up front.
 5. **Test with a cassette, never a live call.** A flow fixture replays the
