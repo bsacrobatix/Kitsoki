@@ -710,6 +710,53 @@ def test_audit_handoffs_rejects_oracle_and_real_fix_leaks():
         assert "prompt leaks hidden oracle content" in joined
 
 
+def test_score_cli_exits_zero_on_failed_verdict():
+    """A completed grade exits 0 whether the oracle PASSES or FAILS — the verdict
+    is DATA in the result JSON, not the process exit status. Regression for the
+    VM bake-off hang: score() returns 1 on oracle-fail (correct, for in-process
+    verify()), but the `score` CLI propagating that made a legitimate `failed`
+    cell look like a transient error to drive_cell.sh's run_with_retry, which
+    then burned the whole docker+host backoff ladder (~hours) on an
+    already-successful score."""
+    for run_cmd, want_oracle, want_quality in (("false", False, "failed"),
+                                               ("true", True, "solved")):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "oracles").mkdir()
+            # Trivial standalone oracle file (content is irrelevant — the `run`
+            # command decides pass/fail). inject: write drops it at `target`.
+            (root / "oracles" / "t.txt").write_text("oracle marker\n")
+            manifest = root / "manifest.yaml"
+            manifest.write_text(
+                "kind: bugfix_bakeoff_external\nversion: 1\n"
+                "project:\n  id: tinyproj\n  repo: .\n  local_only: true\n"
+                "  install: \"\"\n  suite: false\n"
+                "  oracle:\n    inject: write\n    target: t_oracle.txt\n"
+                f"    run: '{run_cmd}'\n"
+                "bugs:\n  - id: b1\n    title: tiny\n    fix_sha: \"\"\n"
+                "    baseline_sha: \"\"\n    fix_source: \".\"\n"
+                "    oracle_test: oracles/t.txt\n    oracle_match: \"\"\n"
+            )
+            tree = root / "tree"
+            tree.mkdir()
+            (tree / "keep.txt").write_text("candidate work\n")
+            out = root / "result.json"
+            r = subprocess.run(
+                [sys.executable, os.path.join(HERE, "bench.py"), "score",
+                 "--project", str(manifest), "--bug", "b1",
+                 "--tree", str(tree), "--out", str(out)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            assert r.returncode == 0, (
+                f"score CLI must exit 0 on a completed grade (run={run_cmd}); "
+                f"got {r.returncode}\nstderr:\n{r.stderr}")
+            res = json.loads(out.read_text())
+            assert res["outcome"]["oracle_pass"] is want_oracle, res["outcome"]
+            assert res["outcome"]["quality"] == want_quality, res["outcome"]
+    # The in-process function still surfaces the verdict for verify().
+    # (oracle_pass=False ⇒ returns 1) — covered implicitly by verify()'s
+    # RED/GREEN logic; here we only guard the CLI exit contract.
+
+
 def json_load(raw):
     import json
     return json.loads(raw)

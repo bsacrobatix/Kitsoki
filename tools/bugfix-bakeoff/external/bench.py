@@ -1629,8 +1629,19 @@ def main():
         sys.exit(pending_cell(m, a.bug, a.candidate, a.reason, a.out,
                               candidates_path=a.candidates, treatment=a.treatment))
     if a.cmd == "score":
-        sys.exit(score(m, bug_of(m, a.bug), a.tree, a.out, a.candidate, a.treatment,
-                       trace=a.trace, candidates_path=a.candidates))
+        # A completed grade exits 0 regardless of the oracle verdict — the
+        # pass/fail outcome is DATA in the result JSON, not an execution status.
+        # `score()` only RETURNS after scoring ran to completion (genuine
+        # execution failures — oracle-missing, etc. — already sys.exit(<msg>)
+        # earlier, and exceptions propagate as a nonzero traceback). Propagating
+        # the verdict as the exit code made a legitimate `failed` cell look like
+        # a transient error to drive_cell.sh's run_with_retry, which then burned
+        # the entire docker+host backoff ladder (~hours) on an already-successful
+        # score. The verdict still lives in score()'s return for in-process
+        # callers like verify().
+        score(m, bug_of(m, a.bug), a.tree, a.out, a.candidate, a.treatment,
+              trace=a.trace, candidates_path=a.candidates)
+        sys.exit(0)
     elif a.cmd == "meta":
         p = m["project"]
         if a.bug:
