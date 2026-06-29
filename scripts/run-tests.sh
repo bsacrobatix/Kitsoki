@@ -174,6 +174,9 @@ fi
 # LLM (AGENTS.md). `go test ./...` doesn't touch them, so they'd rot unguarded.
 # Gated on python3 like the feature catalog is gated on pnpm.
 section "python tool tests (session-mining + product-journey + arena + dev-story scripts)"
+if command -v python3 >/dev/null 2>&1; then
+	shopt -s nullglob
+	MINING_TESTS=(tools/session-mining/tests/test_*.py tools/product-journey/*_test.py tools/arena/tests/test_*.py stories/dev-story/scripts/*_test.py)
 	shopt -u nullglob
 	for t in "${MINING_TESTS[@]}"; do
 		mining_total=$((mining_total + 1))
