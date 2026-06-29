@@ -40,3 +40,23 @@ Then `session.drive {intent: proceed}` → review the proposed PRs →
 ## Tests (no LLM)
 `kitsoki test flows stories/pr-split/app.yaml` — `happy_path_two_prs` stubs the
 agent + every host call and asserts the full idle→…→done path opens two PRs.
+
+## Runtime issues this story exposes (per stories/AGENTS.md — to be fixed in the engine, not papered over)
+A live drive surfaced two ordering/serialization behaviors. The story is authored
+to the documented sequential pattern; the runtime does not fully honor it:
+
+1. **A same-turn on_enter `host.run` bind is not visible to a later on_enter
+   step in that turn.** `list_commits` + the bucketer agent in one on_enter left
+   the agent seeing zero commits (its args rendered pre-bind). Worked around
+   *correctly* by splitting across a turn boundary: `idle` lists commits and the
+   operator's `proceed` enters `planning`, so the bind has settled. A `when:`
+   guard on a later on_enter step has the same race (it reads pre-bind world) —
+   gate on a scalar known before the room, never on a freshly-bound value.
+
+2. **A large multi-line JSON value does not survive being passed as a
+   `host.run` env var.** `world.buckets_json` (~3 KB, escaped newlines/backticks)
+   is correctly set, but the `splitting` bash receives it empty via
+   `env: { BUCKETS_JSON: "{{ world.buckets_json }}" }`. The dry-run plan is fully
+   visible in the `planning` room (its real value); the `splitting` execution
+   step needs a robust object→bash bridge (a file handle, or stdin) before real
+   (non-dry) PR creation is reliable. **Status: open.**

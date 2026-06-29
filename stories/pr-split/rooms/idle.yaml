@@ -1,10 +1,13 @@
-# idle — detect the source/integration branch, list commits ahead, and map each
-# commit to a concern by file path (deterministic). Routes to planning.
+# idle — list the commits ahead of integration and classify each by file path
+# (deterministic). Does NOT auto-advance: the operator drives `proceed`, which
+# puts list_commits's bind a TURN BOUNDARY before planning's agent runs — an
+# on_enter host.run bind is not visible to a same-turn on_enter agent, so the
+# agent would otherwise see zero commits.
 
 states:
 
   idle:
-    description: "Detect the branch's commits ahead of integration and classify them by concern."
+    description: "Detect the commits ahead of integration and classify them by concern."
     relevant_world: [source_branch, integration_branch, commit_count, commits, dry_run]
     view:
       - kv:
@@ -13,14 +16,24 @@ states:
             Integration: '{{ world.integration_branch }}'
             Commits:     '{{ world.commit_count }} ahead'
             "Dry run":   '{% if world.dry_run %}yes (plan only){% else %}no{% endif %}'
-      - prose: "Detection failed: {{ world.last_op_output }}"
-        when: "world.last_op_ok == false"
       - heading: "Commits"
         when: "world.commit_count > 0"
       - template: '{{ world.commits.rendered|default:"(none)" }}'
         when: "world.commit_count > 0"
       - prose: "No commits ahead of {{ world.integration_branch }} — nothing to split."
         when: "world.commit_count == 0"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "proceed"
+              hint:  "group {{ world.commit_count }} commits into concern PRs"
+              intent: proceed
+              when:  "world.commit_count > 0"
+            - label: "quit"
+              intent: quit
+            - label: "look"
+              intent: look
     on_enter:
       - invoke: host.run
         once: true
@@ -68,8 +81,6 @@ states:
           commits:       "stdout_json.commits"
           last_op_ok:    ok
         on_error: idle
-      - when: "world.commit_count > 0"
-        emit_intent: proceed
     on:
       proceed:
         - target: planning

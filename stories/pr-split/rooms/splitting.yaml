@@ -25,6 +25,11 @@ states:
               INT="{{ world.integration_branch }}"
               DRY="{{ world.dry_run }}"
               ROOT="$(git rev-parse --show-toplevel)"
+              BUCKETS_JSON="${BUCKETS_JSON:-}"
+              if [ -z "$BUCKETS_JSON" ]; then
+                echo '{"opened_prs":{"items":[]}}'
+                exit 0
+              fi
               n=$(printf '%s' "$BUCKETS_JSON" | jq '.buckets | length')
               out='[]'
               for i in $(seq 0 $((n - 1))); do
@@ -35,18 +40,23 @@ states:
                 slug=$(printf '%s' "$concern" | tr '[:upper:] ' '[:lower:]-' | tr -cd '[:alnum:]-')
                 br="{{ world.source_branch }}-split-${slug}"
                 mapfile -t shas < <(printf '%s' "$b" | jq -r '.shas[]')
-                wt="$(mktemp -d)/wt"
-                git -C "$ROOT" worktree add -q --detach "$wt" "$INT"
-                git -C "$wt" switch -q -c "$br"
-                git -C "$wt" cherry-pick "${shas[@]}"
+                ncommits=${#shas[@]}
                 url=""
-                if [ "$DRY" != "true" ]; then
+                if [ "$DRY" = "true" ]; then
+                  # Dry run: report the plan only — no worktree, cherry-pick,
+                  # push, or PR. This is the safe "show me what you'd open" mode.
+                  :
+                else
+                  wt="$(mktemp -d)/wt"
+                  git -C "$ROOT" worktree add -q --detach "$wt" "$INT"
+                  git -C "$wt" switch -q -c "$br"
+                  git -C "$wt" cherry-pick "${shas[@]}"
                   git -C "$wt" push -q -u origin "$br"
                   url=$(cd "$wt" && gh pr create --base "$INT" --head "$br" --title "$title" --body "$body" 2>/dev/null || echo "")
+                  git -C "$ROOT" worktree remove --force "$wt" || true
                 fi
-                git -C "$ROOT" worktree remove --force "$wt" || true
-                out=$(printf '%s' "$out" | jq --arg c "$concern" --arg br "$br" --arg url "$url" \
-                  '. + [{"concern":$c,"branch":$br,"url":$url}]')
+                out=$(printf '%s' "$out" | jq --arg c "$concern" --arg br "$br" --arg url "$url" --argjson n "$ncommits" \
+                  '. + [{"concern":$c,"branch":$br,"url":$url,"commits":$n}]')
               done
               jq -n --argjson items "$out" '{opened_prs:{items:$items}}'
           env:

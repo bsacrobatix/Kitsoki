@@ -57,7 +57,7 @@ world:
 intents:
   accept:
     description: "Accept the proposed buckets and open the PRs."
-    examples: ["accept", "looks good", "open the PRs", "proceed", "ship it"]
+    examples: ["accept", "looks good", "open the PRs", "ship it", "do it"]
     priority: 60
   regenerate:
     description: "Ask the agent to re-bucket the commits."
@@ -77,6 +77,10 @@ intents:
     priority: 10
   proceed:
     description: "Internal routing token."
+    examples: []
+    priority: 95
+  empty:
+    description: "Internal routing: no commits to split."
     examples: []
     priority: 95
 
