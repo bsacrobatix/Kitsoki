@@ -1,11 +1,11 @@
 # lint — deterministic validation of the decomposition manifest (NO LLM).
 #
-# Runs stories/deliver/scripts/lint_decomposition.py against decomposition_path.
+# Runs stories/deliver/scripts/lint_decomposition.star against decomposition_path.
 # Checks: at least one brief; ids unique & non-empty; each brief has non-empty
 # brief + gate_command; every dep references an existing id; no dep cycle.
 #
-# stdout JSON: { "route": "ok"|"fail", "error": "<specific failure>" }
-# last_error is bound from stdout_json.error (empty string when route=="ok").
+# Output: { "route": "ok"|"fail", "error": "<specific failure>" }
+# last_error is bound from error (empty string when route=="ok").
 #
 # The lint_route reset at the top of on_enter follows the board.yaml pattern:
 # set to "" BEFORE the invoke so post-bind emit guards don't fire on the
@@ -35,16 +35,15 @@ states:
     on_enter:
       # Reset so post-bind guards defer to the fresh result (board.yaml pattern).
       - set: { lint_route: "" }
-      - invoke: host.run
+      - invoke: host.starlark.run
         id: lint
         with:
-          cmd: python3
-          args:
-            - "stories/deliver/scripts/lint_decomposition.py"
-            - "{{ world.decomposition_path }}"
+          script: scripts/lint_decomposition.star
+          inputs:
+            decomposition_path: "{{ world.decomposition_path }}"
         bind:
-          lint_route: "stdout_json.route"
-          last_error:  "stdout_json.error"
+          lint_route: "route"
+          last_error:  "error"
         on_error: lint
       - when: "world.lint_route == 'ok'"
         emit_intent: lint_passed

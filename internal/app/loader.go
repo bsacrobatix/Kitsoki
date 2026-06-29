@@ -2214,14 +2214,16 @@ func validateStarlarkEffects(file string, def *AppDef, errs *[]error) {
 			return
 		}
 
-		// Resolve against the app root and reject any path that escapes it via
-		// `../`. Both story-root and app-level scripts/ dirs are fine — only an
-		// escape outside BaseDir is rejected.
+		// Resolve relative paths against the app root and reject any relative path
+		// that escapes it via `../`. Imported stories have their `script:` values
+		// rebased to absolute child-story paths before folding; those are allowed
+		// because they have already been rooted by the import loader.
 		resolved := rawScript
-		if !filepath.IsAbs(resolved) && def.BaseDir != "" {
+		rawWasAbs := filepath.IsAbs(resolved)
+		if !rawWasAbs && def.BaseDir != "" {
 			resolved = filepath.Join(def.BaseDir, resolved)
 		}
-		if def.BaseDir != "" {
+		if def.BaseDir != "" && !rawWasAbs {
 			rel, relErr := filepath.Rel(def.BaseDir, filepath.Clean(resolved))
 			if relErr != nil || strings.HasPrefix(rel, "..") {
 				addErr(fmt.Sprintf("%s: host.starlark.run script %q resolves outside the app root", loc, rawScript))

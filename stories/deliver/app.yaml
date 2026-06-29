@@ -27,6 +27,7 @@ app:
 
 hosts:
   - host.run
+  - host.starlark.run
   - host.agent.task
   - host.artifacts_dir
 
