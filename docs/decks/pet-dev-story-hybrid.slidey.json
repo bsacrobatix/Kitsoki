@@ -250,17 +250,6 @@
       "narration": "And here is the artifact itself: the published PRD, a markdown document the architect picks up — the problem, the target users, the goals, and the requirements that keep the pet weightless."
     },
     {
-      "type": "video",
-      "mode": "embedded",
-      "eyebrow": "1 · Artifact deck · PRD",
-      "title": "The PRD, as a deck",
-      "rrweb": "clips/pet-prd-deck.rrweb.json",
-      "start": 0,
-      "chapters": "auto",
-      "caption": "The same requirements, published as a self-contained slidey deck (HTML) — rendered and played slide by slide.",
-      "narration": "And the same PRD as a shareable deck: a self-contained slidey deck the team can flip through — the product output, packaged."
-    },
-    {
       "type": "title",
       "eyebrow": "1 · Where work lives",
       "title": "It runs from GitHub",
@@ -439,17 +428,6 @@
       "chapters": "auto",
       "caption": "The produced design — a published markdown document: the sprite, the dock seam, the opt-in toggle, and the ADRs.",
       "narration": "The architect's artifact, the same way: a published design document — three additive slices, a leaf data flow, and the decisions that keep the feature deterministic and weightless."
-    },
-    {
-      "type": "video",
-      "mode": "embedded",
-      "eyebrow": "2 · Artifact deck · Design",
-      "title": "The design, as a deck",
-      "rrweb": "clips/pet-design-deck.rrweb.json",
-      "start": 0,
-      "chapters": "auto",
-      "caption": "The design, published as a self-contained slidey deck (HTML) — the slices, the data flow, and the ADRs, slide by slide.",
-      "narration": "And the design as a deck: the three slices, the leaf data flow, and the decisions — the architect's output as a self-contained slidey deck."
     },
     {
       "type": "thread",
@@ -632,17 +610,6 @@
     {
       "type": "video",
       "mode": "embedded",
-      "eyebrow": "3 · Artifact deck · Work plan",
-      "title": "The work-plan deck",
-      "rrweb": "clips/pet-decomposition-deck.rrweb.json",
-      "start": 0,
-      "chapters": "auto",
-      "caption": "The decomposition, published as a self-contained slidey deck (HTML) — rendered live in kitsoki and opened full-screen for review.",
-      "narration": "The developer's output, published as a deck: the design sliced into sequenced, dependency-ordered tasks — rendered for real in kitsoki and reviewable full-screen."
-    },
-    {
-      "type": "video",
-      "mode": "embedded",
       "eyebrow": "4 · Report a bug",
       "title": "Filing the bug from the web UI",
       "rrweb": "clips/pet-report-bug.rrweb.json",
@@ -776,17 +743,6 @@
       "narration": "The report carries an rrweb repro that replays the confusable topbar. Because the fix is a self-contained deletion with nothing depending on it, this is a clean one-shot, unsupervised candidate."
     },
     {
-      "type": "video",
-      "mode": "embedded",
-      "eyebrow": "4 · Artifact deck · Bug report",
-      "title": "The bug-report deck",
-      "rrweb": "clips/pet-bug-report-deck.rrweb.json",
-      "start": 0,
-      "chapters": "auto",
-      "caption": "The filed bug, published as a self-contained slidey deck (HTML) — the repro, the offending markup, and the triage recommendation.",
-      "narration": "The bug report kitsoki produces, as a deck: the captured repro, the offending markup, and the triage call — a clean one-shot, unsupervised fix."
-    },
-    {
       "type": "thread",
       "title": "Triaged → go",
       "panels": [
@@ -912,17 +868,6 @@
       "narration": "The clutter is gone, typecheck and build are green, and the replay shows a clean topbar. Minimal diff, ready to open the pull request."
     },
     {
-      "type": "video",
-      "mode": "embedded",
-      "eyebrow": "5 · Artifact deck · Fix report",
-      "title": "The fix-report deck",
-      "rrweb": "clips/pet-bugfix-report-deck.rrweb.json",
-      "start": 0,
-      "chapters": "auto",
-      "caption": "The validated fix, published as a self-contained slidey deck (HTML) — the diff, the green checks, and the before/after.",
-      "narration": "And the fix, as a deck: the minimal diff, the green typecheck and build, and the replay that proves the clutter is gone — PR-ready."
-    },
-    {
       "type": "personas",
       "variant": "use-cases",
       "title": "6 · Ship the feature",
@@ -1037,17 +982,6 @@
       "lede": "A little life in the trace column.",
       "body": "Flip the 🐾 toggle in the State Diagram header and Kit wakes up at the bottom of your trace — wandering, blinking, and snacking through the wait. Opt-in, weightless, and never in the way.",
       "narration": "Flip the paw-print toggle and Kit wakes up at the bottom of your trace. A little life in the trace column — opt-in, weightless, and never in the way."
-    },
-    {
-      "type": "video",
-      "mode": "embedded",
-      "eyebrow": "6 · Artifact deck · Feature demo",
-      "title": "The feature-demo deck",
-      "rrweb": "clips/pet-feature-demo-deck.rrweb.json",
-      "start": 0,
-      "chapters": "auto",
-      "caption": "The shipped feature, published as a self-contained slidey deck (HTML) — what Kit is, what it does, and how it landed in three slices.",
-      "narration": "The shipped feature, packaged as a demo deck: what Kit is, what it does, and how it landed in three small slices — the deck that rides along on the pull request."
     },
     {
       "type": "video",
