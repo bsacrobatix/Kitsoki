@@ -30,3 +30,5 @@ states:
         - target: overview
           effects:
             - set: { section: "overview" }
+      look:
+        - target: how_it_works
