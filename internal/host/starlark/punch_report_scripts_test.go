@@ -96,3 +96,57 @@ func TestPunchPolicyScript(t *testing.T) {
 		t.Fatalf("error = %#v, want empty", got)
 	}
 }
+
+func TestPunchBoardScript(t *testing.T) {
+	root := repoRoot(t)
+	src, err := os.ReadFile(filepath.Join(root, "stories/punch-list/scripts/punch_board.star"))
+	if err != nil {
+		t.Fatalf("read punch_board.star: %v", err)
+	}
+	sidecar, err := starlarkhost.LoadSidecar(filepath.Join(root, "stories/punch-list/scripts/punch_board.star.yaml"))
+	if err != nil {
+		t.Fatalf("LoadSidecar: %v", err)
+	}
+	casBytes, err := os.ReadFile(filepath.Join(root, "stories/punch-list/cassettes/punch_board.inspect.yaml"))
+	if err != nil {
+		t.Fatalf("read cassette: %v", err)
+	}
+	var cas starlarkhost.InspectCassette
+	if err := goyaml.Unmarshal(casBytes, &cas); err != nil {
+		t.Fatalf("unmarshal cassette: %v", err)
+	}
+
+	ctx := starlarkhost.WithInspector(context.Background(), starlarkhost.NewReplayInspector(&cas))
+	res, err := starlarkhost.Run(ctx, starlarkhost.Params{
+		Script:  "punch_board.star",
+		Source:  src,
+		Sidecar: sidecar,
+		Inputs: map[string]any{
+			"state_path":  ".artifacts/punch-list/board-fixture.state.json",
+			"mark_id":     "first",
+			"mark_status": "passed",
+			"mark_error":  "ok summary",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := res.Outputs["route"]; got != "dispatch" {
+		t.Fatalf("route = %#v, want dispatch", got)
+	}
+	if got := res.Outputs["processed_count"]; got != int64(1) {
+		t.Fatalf("processed_count = %#v, want 1", got)
+	}
+	if got := res.Outputs["passed_count"]; got != int64(1) {
+		t.Fatalf("passed_count = %#v, want 1", got)
+	}
+	if got := res.Outputs["pending_count"]; got != int64(1) {
+		t.Fatalf("pending_count = %#v, want 1", got)
+	}
+	if got := res.Outputs["next_item_id"]; got != "second" {
+		t.Fatalf("next_item_id = %#v, want second", got)
+	}
+	if len(res.Inspections) != 3 {
+		t.Fatalf("inspections = %d, want exists + read + write", len(res.Inspections))
+	}
+}
