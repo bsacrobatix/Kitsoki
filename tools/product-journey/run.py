@@ -867,12 +867,12 @@ def evidence_capture_hint(kind: str) -> str:
 def scenario_quality_gate(scenario_id: str) -> dict:
     gates = {
         "product-discovery": {
-            "minimum_evidence": ["browser_screenshot", "page_url", "navigation_trace", "checkpoint_rating", "key_interaction_video"],
-            "done_when": "The persona can state what Kitsoki is, who it is for, and one credible next action from visible product-site evidence.",
+            "minimum_evidence": ["rendered_tui_frame", "session_trace", "navigation_trace", "checkpoint_rating", "key_interaction_video"],
+            "done_when": "The persona can state what Kitsoki is, who it is for, and one credible next action after walking the product overview story.",
             "block_if": [
-                "The local product site cannot be opened or observed.",
-                "Navigation depends on private repo knowledge instead of visible page content.",
-                "A key page, demo, or link needed for the next action is unavailable.",
+                "The product-site story cannot be opened or rendered.",
+                "The walkthrough requires live LLM authorization and no cassette exists.",
+                "The discovery checkpoint (what it is + next action) cannot be reached deterministically.",
             ],
         },
         "project-onboarding": {
@@ -1404,11 +1404,21 @@ def normalize_evidence_source(source: str, artifact_path: str, notes: str = "") 
     return normalized
 
 
-def is_proof_evidence(item: dict) -> bool:
+def is_proof_evidence(item: dict, run_dir: Optional[Path] = None) -> bool:
     if item.get("status") not in {"captured", "validated"}:
         return False
     source = item.get("source") or evidence_source(item.get("path", ""), item.get("notes", ""))
-    return source in PROOF_EVIDENCE_SOURCES
+    if source not in PROOF_EVIDENCE_SOURCES:
+        return False
+    # When a run_dir is supplied (the gating call sites), file-backed proof
+    # sources (local, cassette) must actually RESOLVE to a backing artifact —
+    # an unbacked cassette://…/nothing.diff or a dangling local path is not
+    # proof. Remote/opaque sources (retained, external) can't be stat'd, so
+    # they stay proof on source alone. Reporting call sites pass no run_dir and
+    # keep the legacy source-only classification.
+    if run_dir is not None and source in {"local", "cassette"}:
+        return artifact_ref_exists(run_dir, item.get("path", ""))
+    return True
 
 
 def build_media_manifest(run_json: dict, evidence: dict) -> dict:
@@ -2337,9 +2347,47 @@ def is_external_artifact_ref(path: str) -> bool:
     return value.startswith(prefixes)
 
 
+def cassette_ref_relpath(value: str) -> Optional[str]:
+    """Map a cassette:// evidence URI to the run-relative artifact path it
+    claims to back. The minted form is
+    `cassette://product-journey/<run_id>/<rel>` (see cassette_replay_path); the
+    `<rel>` is a normal run-dir-relative path (e.g. `traces/foo.jsonl`). Returns
+    None for a non-cassette value."""
+    if value.startswith("cassette://"):
+        rest = value[len("cassette://"):]
+    elif value.startswith("cassette:"):
+        rest = value[len("cassette:"):]
+    else:
+        return None
+    parts = rest.split("/", 2)
+    if len(parts) == 3 and parts[0] == "product-journey":
+        return parts[2]
+    return rest
+
+
 def artifact_ref_exists(run_dir: Path, path: str) -> bool:
     value = path.strip()
-    if not value or is_external_artifact_ref(value):
+    if not value:
+        return True
+    # A cassette:// ref is a LOCAL recorded artifact, not a remote URL — it must
+    # resolve to a real backing file. Without this check an unbacked
+    # `cassette://…/nothing.diff` was treated as existing proof, letting the
+    # review gate read `ready` with nothing on disk.
+    if value.startswith(("cassette://", "cassette:")):
+        rel = cassette_ref_relpath(value)
+        if not rel:
+            return False
+        candidate = Path(rel)
+        if candidate.is_absolute():
+            return candidate.exists()
+        return (
+            (run_dir / candidate).exists()
+            or (run_dir / "cassettes" / candidate).exists()
+            or (ROOT / candidate).exists()
+        )
+    if is_external_artifact_ref(value):
+        # Genuinely remote/opaque schemes (http(s), retained, image, trace, mcp)
+        # cannot be stat'd here; treat as existing.
         return True
     candidate = Path(value)
     if candidate.is_absolute():
@@ -2395,7 +2443,7 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
         item["source"] = normalize_evidence_source(item.get("source", ""), item.get("path", ""), item.get("notes", ""))
     present_items = [item for item in evidence_items if item.get("status") in {"captured", "validated"}]
     demo_items = [item for item in present_items if item.get("source") == "demo"]
-    proof_items = [item for item in present_items if is_proof_evidence(item)]
+    proof_items = [item for item in present_items if is_proof_evidence(item, run_dir)]
     scenario_status: dict[str, str] = {}
     for scenario in run_json["scenarios"]:
         items = [item for item in evidence_items if item.get("scenario") == scenario["id"]]
@@ -3016,7 +3064,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     media_manifest = build_media_manifest(run_json, evidence)
     present_items = [item for item in evidence_items if item.get("status") in {"captured", "validated"}]
     demo_items = [item for item in present_items if item.get("source") == "demo"]
-    proof_items = [item for item in present_items if is_proof_evidence(item)]
+    proof_items = [item for item in present_items if is_proof_evidence(item, run_dir)]
     rejected_items = [item for item in evidence_items if item.get("status") == "rejected"]
     video_items = [item for item in media_manifest["items"] if item["media_kind"] == "video"]
     playback_items = [item for item in media_manifest["items"] if item["playback"]]
@@ -3056,7 +3104,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     missing_driver_evidence_refs = unattached_driver_evidence_refs(evidence, driver_journal)
     scenario_outcomes = build_scenario_outcomes(run_json, evidence, findings)
     driver_plan = build_driver_plan(run_json, evidence, execution_plan)
-    quality_gates = summarize_quality_gates(evidence, scenario_outcomes, driver_plan)
+    quality_gates = summarize_quality_gates(evidence, scenario_outcomes, driver_plan, run_dir)
     driver_action_contract = summarize_driver_action_contract(driver_plan, schema)
     unsatisfied_quality_gates = [
         f"{gate['scenario']} ({gate['present_minimum_evidence_count']}/{gate['minimum_evidence_count']})"
@@ -4620,7 +4668,7 @@ def summarize_run_for_rollup(run_dir: Path) -> dict:
     driver_plan = read_json(run_dir / "driver-plan.json") if (run_dir / "driver-plan.json").exists() else {"scenarios": []}
     driver_journal = read_json(run_dir / "driver-journal.json") if (run_dir / "driver-journal.json").exists() else build_driver_journal(run_json["run_id"], [])
     finding_summary = findings.get("summary", {})
-    quality_gates = summarize_quality_gates(evidence, outcomes, driver_plan)
+    quality_gates = summarize_quality_gates(evidence, outcomes, driver_plan, run_dir)
     return {
         "run_id": run_json["run_id"],
         "run_dir": str(run_dir),
@@ -4649,7 +4697,7 @@ def summarize_run_for_rollup(run_dir: Path) -> dict:
     }
 
 
-def summarize_quality_gates(evidence: dict, outcomes: dict, driver_plan: dict) -> list[dict]:
+def summarize_quality_gates(evidence: dict, outcomes: dict, driver_plan: dict, run_dir: Optional[Path] = None) -> list[dict]:
     captured_evidence = {
         (item.get("scenario", ""), item.get("kind", item.get("evidence_kind", "")))
         for item in evidence.get("items", [])
@@ -4658,7 +4706,7 @@ def summarize_quality_gates(evidence: dict, outcomes: dict, driver_plan: dict) -
     proof_evidence = {
         (item.get("scenario", ""), item.get("kind", item.get("evidence_kind", "")))
         for item in evidence.get("items", [])
-        if is_proof_evidence(item)
+        if is_proof_evidence(item, run_dir)
     }
     outcomes_by_scenario = {
         item.get("scenario", ""): item
@@ -5692,6 +5740,20 @@ def build_driver_replay_smoke(
         raise SystemExit(f"Replay smoke scenario '{scenario_id}' has no minimum evidence contract")
     attached_evidence = []
     for kind, path in replay_evidence:
+        # Write the real backing artifact the cassette:// ref points at. A
+        # cassette proof ref must resolve to a file on disk (see
+        # artifact_ref_exists / is_proof_evidence); minting the ref without
+        # backing it was the unbacked-cassette-proof bug this smoke used to
+        # exhibit. The content is a deterministic recorded-replay stub.
+        rel = cassette_ref_relpath(path)
+        if rel:
+            backing = run_dir / rel
+            backing.parent.mkdir(parents=True, exist_ok=True)
+            backing.write_text(
+                f"driver-replay cassette artifact\nscenario: {scenario_id}\nkind: {kind}\n"
+                f"run: {run_json['run_id']}\n",
+                encoding="utf-8",
+            )
         attach_evidence(
             run_dir,
             scenario_id,

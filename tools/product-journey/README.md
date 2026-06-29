@@ -286,6 +286,14 @@ readiness checks count proof evidence separately from demo/unknown evidence so a
 no-LLM smoke can exercise the artifact loop without passing as live product
 proof.
 
+**File-backed proof must resolve.** `local` and `cassette` proof must point at a
+real artifact on disk — a `cassette://product-journey/<run_id>/<rel>` URI is a
+LOCAL recorded artifact (it resolves to `<run_dir>/<rel>`), not a remote URL, so
+an unbacked `cassette://…/nothing.diff` neither resolves nor counts as proof
+toward the quality gate. Only genuinely remote/opaque schemes (`http(s)://`,
+`retained://`, `image://`, `trace://`, `mcp://`) are treated as present without a
+stat. Regression: `tools/product-journey/cassette_proof_test.py`.
+
 Findings carry an `origin`: `observed` for findings a driver/operator recorded
 from a real interaction (the default for `--record-finding`), and `seeded` for
 the templated placeholders that `--seed-demo-evidence` attaches. The

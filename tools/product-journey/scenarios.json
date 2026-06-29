@@ -2,14 +2,14 @@
   "scenarios": [
     {
       "id": "product-discovery",
-      "label": "Product discovery from local site",
+      "label": "Product discovery walkthrough",
       "stage": "discover_product",
-      "task": "Start from the locally hosted production product site and explain what Kitsoki does, who it is for, and what the first credible action should be.",
-      "primary_story": "product-site",
-      "required_mcp": ["visual.open", "visual.observe", "visual.act"],
+      "task": "Walk the Kitsoki product overview story end to end and explain what Kitsoki does, who it is for, and what the first credible action should be.",
+      "primary_story": "stories/product-site/app.yaml",
+      "required_mcp": ["session.open", "session.inspect", "render.tui"],
       "evidence": [
-        "browser_screenshot",
-        "page_url",
+        "rendered_tui_frame",
+        "session_trace",
         "navigation_trace",
         "checkpoint_rating",
         "key_interaction_video"
