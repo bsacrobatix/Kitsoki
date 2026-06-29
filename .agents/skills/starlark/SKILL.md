@@ -126,8 +126,9 @@ language gotchas above:
    returned key must be declared, or the run is an `on_error:` domain failure.
    The `INPUTS`/`OUTPUTS` dicts some scripts write are documentation only.
 2. **`ctx` is the whole world.** Exactly `ctx.inputs` (dict), `ctx.world.get(k)`
-   (read-only), `ctx.http.get/post`. No `set`, no fs, no env, no clock, no
-   random — `ctx.world` can't be written; outputs go through the return dict.
+   (read-only), `ctx.http.get/post`, `ctx.fs.read/exists/glob/write`, and
+   `ctx.probe`. No world `set`, no env, no clock, no random — `ctx.world` can't
+   be written; world outputs go through the return dict.
 3. **Only `json` + `math` + decode-only `yaml`** are predeclared. No `time`, no
    `random` (they'd break determinism). `starcheck -kitsoki` enforces exactly
    this set.

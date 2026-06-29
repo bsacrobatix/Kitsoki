@@ -61,8 +61,10 @@ These are kitsoki-specific traps on top of the general
 
 - **`ctx.inputs` is a dict**, keyed (`ctx.inputs["x"]`), not an attribute
   (`ctx.inputs.x`). `ctx.world` and `ctx.http` are method objects, not dicts.
-- **Outputs flow only through the return dict.** There is no `ctx.world.set`. If
-  a value isn't in the returned dict, the effect's `bind:` can't see it.
+- **Outputs flow through the return dict.** There is no `ctx.world.set`. If a
+  value isn't in the returned dict, the effect's `bind:` can't see it. For small
+  generated files, write through `ctx.fs.write(path, content)` and return the
+  written path.
 - **`fail(msg)` is the only error channel** — there are no exceptions. It maps to
   `Result.Error`, sets `world.last_error`, and fires `on_error:`. Validate inputs
   and branch on `resp.status` (a non-2xx is *not* an error; a response is truthy
