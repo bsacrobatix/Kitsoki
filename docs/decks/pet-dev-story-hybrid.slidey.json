@@ -119,24 +119,6 @@
       "narration": "Across the story, the product manager frames the pet idea, the architect designs it, and the developer decomposes it, fixes a bug, ships the feature, and opens the pull request with a demo of the live pet."
     },
     {
-      "type": "title",
-      "eyebrow": "0 · Where work lives",
-      "title": "It starts on GitHub",
-      "subtitle": "A real @kitsoki mention on a labelled issue claims the job — kitsoki runs the story and reports back on the thread",
-      "narration": "Before any of this reaches the kitsoki composer, it starts where the work already lives: a labelled GitHub issue. A real at-kitsoki mention claims the job, kitsoki runs the matching story, and it reports back on the same thread — with the validated artifacts attached, as we will see at each step."
-    },
-    {
-      "type": "video",
-      "mode": "embedded",
-      "eyebrow": "0 · GitHub front door",
-      "title": "A labelled issue → @kitsoki claims it",
-      "rrweb": "clips/pet-github-feature-kickoff.rrweb.json",
-      "start": 0,
-      "chapters": "auto",
-      "caption": "A real @kitsoki mention on the labelled issue claims the job. Live: github.com/bsacrobatix/Kitsoki/issues/52",
-      "narration": "A real at-kitsoki mention on the labelled issue claims the job — one mention, one claimed run. kitsoki goes to work; the artifacts land back on the thread at each step."
-    },
-    {
       "type": "personas",
       "variant": "use-cases",
       "title": "1 · Idea → PRD + mockup",
@@ -277,6 +259,24 @@
       "chapters": "auto",
       "caption": "The same requirements, published as a self-contained slidey deck (HTML) — rendered and played slide by slide.",
       "narration": "And the same PRD as a shareable deck: a self-contained slidey deck the team can flip through — the product output, packaged."
+    },
+    {
+      "type": "title",
+      "eyebrow": "1 · Where work lives",
+      "title": "It runs from GitHub",
+      "subtitle": "A real @kitsoki mention on the labelled issue claimed the job — and kitsoki reports back on the same thread with the validated PRD",
+      "narration": "All of this runs where the work already lives: a labelled GitHub issue. A real at-kitsoki mention claimed the job, kitsoki ran the matching story, and it reports back on the same thread — with the PRD we just watched it produce attached. The same pattern repeats at every phase."
+    },
+    {
+      "type": "video",
+      "mode": "embedded",
+      "eyebrow": "1 · GitHub thread",
+      "title": "@kitsoki claims it → reports back with the PRD",
+      "rrweb": "clips/pet-github-feature-kickoff.rrweb.json",
+      "start": 0,
+      "chapters": "auto",
+      "caption": "An @kitsoki mention on the labelled issue claimed the job; kitsoki replies with the validated PRD. Live: github.com/bsacrobatix/Kitsoki/issues/52",
+      "narration": "On the labelled issue, a real at-kitsoki mention claimed the job — one mention, one claimed run — and kitsoki reports back on the same thread with the validated PRD attached. The artifacts land back where the work lives, at every step."
     },
     {
       "type": "thread",
