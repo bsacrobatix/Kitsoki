@@ -65,6 +65,15 @@ host_handlers:
             error: ""
   host.starlark.run:
     by_call:
+      punch_load:
+        data:
+          manifest_path: "stories/punch-list/testdata/two_items.yaml"
+          state_path: ".artifacts/punch-list/two_items.state.json"
+          item_count: "2"
+          error: ""
+          items:
+            - { id: validate-punch-list, title: "Validate the punch-list story", story: "stories/punch-list/app.yaml", mode: drive, profile: codex-native, model: gpt-5.5, implementation_story: "stories/cherny-loop/app.yaml", status: pending, verify: [ { kind: story_validate, story: "stories/punch-list/app.yaml" } ], trace_path: ".artifacts/punch-list/traces/validate-punch-list.jsonl" }
+            - { id: policy-demo, title: "Exercise the policy check", story: "stories/punch-list/app.yaml", mode: drive, profile: codex-native, model: gpt-5.5, implementation_story: "", status: pending, verify: [ { kind: command, cmd: "true" } ], trace_path: ".artifacts/punch-list/traces/policy-demo.jsonl" }
       punch_board-0-:
         data:
           items: []

@@ -150,3 +150,84 @@ func TestPunchBoardScript(t *testing.T) {
 		t.Fatalf("inspections = %d, want exists + read + write", len(res.Inspections))
 	}
 }
+
+func TestPunchLoadScript(t *testing.T) {
+	root := repoRoot(t)
+	src, err := os.ReadFile(filepath.Join(root, "stories/punch-list/scripts/punch_load.star"))
+	if err != nil {
+		t.Fatalf("read punch_load.star: %v", err)
+	}
+	sidecar, err := starlarkhost.LoadSidecar(filepath.Join(root, "stories/punch-list/scripts/punch_load.star.yaml"))
+	if err != nil {
+		t.Fatalf("LoadSidecar: %v", err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(root, "stories/punch-list/testdata/two_items.yaml"))
+	if err != nil {
+		t.Fatalf("read fixture manifest: %v", err)
+	}
+
+	work := t.TempDir()
+	for _, dir := range []string{
+		"stories/punch-list/testdata",
+		"stories/punch-list",
+		"stories/cherny-loop",
+	} {
+		if err := os.MkdirAll(filepath.Join(work, dir), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(work, "stories/punch-list/testdata/two_items.yaml"), manifest, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	for _, app := range []string{
+		"stories/punch-list/app.yaml",
+		"stories/cherny-loop/app.yaml",
+	} {
+		if err := os.WriteFile(filepath.Join(work, app), []byte("name: fixture\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", app, err)
+		}
+	}
+
+	ctx := starlarkhost.WithInspector(context.Background(), starlarkhost.NewProductionInspector(work))
+	res, err := starlarkhost.Run(ctx, starlarkhost.Params{
+		Script:  "punch_load.star",
+		Source:  src,
+		Sidecar: sidecar,
+		Inputs: map[string]any{
+			"manifest_path": "two items",
+			"state_path":    ".artifacts/punch-list/load-fixture.state.json",
+			"run_id":        "test-run",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := res.Outputs["manifest_path"]; got != "stories/punch-list/testdata/two_items.yaml" {
+		t.Fatalf("manifest_path = %#v, want resolved testdata manifest", got)
+	}
+	if got := res.Outputs["item_count"]; got != "2" {
+		t.Fatalf("item_count = %#v, want 2", got)
+	}
+	if got := res.Outputs["error"]; got != "" {
+		t.Fatalf("error = %#v, want empty", got)
+	}
+
+	stateBytes, err := os.ReadFile(filepath.Join(work, ".artifacts/punch-list/load-fixture.state.json"))
+	if err != nil {
+		t.Fatalf("read written state: %v", err)
+	}
+	var state map[string]any
+	if err := goyaml.Unmarshal(stateBytes, &state); err != nil {
+		t.Fatalf("unmarshal written state: %v", err)
+	}
+	if got := state["run_id"]; got != "test-run" {
+		t.Fatalf("run_id = %#v, want test-run", got)
+	}
+	items, _ := state["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("items = %d, want 2", len(items))
+	}
+	if len(res.Inspections) < 5 {
+		t.Fatalf("inspections = %d, want read/exists/glob/write activity", len(res.Inspections))
+	}
+}
