@@ -106,6 +106,19 @@ To keep VM runs reproducible and reduce host drift, provision target repos and
 their checker image before spending. By default, scored cells now run inside the
 repo-runtime image for repo isolation (`--no-docker-score` disables this):
 
+For a fresh or stale bake-off VM, start by provisioning the harness checkout.
+The script is idempotent: it creates or refreshes `/opt/bakeoff/repos/kitsoki`
+from `https://github.com/bsacrobatix/kitsoki.git` on `main`, installs the
+`kitsoki` binary, and verifies the codex/claude worker prerequisites.
+
+```sh
+ssh root@<vm> 'bash -s' < tools/bugfix-bakeoff/external/provision_vm.sh
+```
+
+Use `KITSOKI_DIR`, `KITSOKI_REMOTE_URL`, and `KITSOKI_BRANCH` only when testing a
+nonstandard checkout. The default VM path should just pull from
+`bsacrobatix/kitsoki/main`.
+
 ```sh
 cd tools/bugfix-bakeoff/external
 
