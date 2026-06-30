@@ -59,6 +59,8 @@ world:
   rebase_base_sha:          { type: string, default: "" }
   conflict_origin:          { type: string, default: "" }
   conflict_files:           { type: string, default: "" }
+  conflict_scan_done:       { type: bool,   default: false }
+  conflict_agent_ready:     { type: bool,   default: false }
   conflict_verdict:         { type: object, default: {} }
   conflict_intent_guidance: { type: string, default: "" }
   merge_branch_name:        { type: string, default: "" }
@@ -147,6 +149,14 @@ intents:
     priority: 95
   gosum_fix:
     description: "Internal routing: only go.sum is conflicted — handle via go mod tidy."
+    examples: []
+    priority: 95
+  rebase_stuck:
+    description: "Internal routing: a rebase is in progress but no files are conflicted — rest for continue/abort."
+    examples: []
+    priority: 95
+  conflict_ready:
+    description: "Internal routing: conflict files have been scanned and the resolver can run."
     examples: []
     priority: 95
   pull_done:
