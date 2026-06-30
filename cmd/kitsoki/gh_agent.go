@@ -17,6 +17,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+var newGitHubAppTokenSource = func(cfg *githubapp.Config, client githubapp.Doer) (githubapp.TokenSource, error) {
+	return githubapp.NewAppTokenSource(cfg, client)
+}
+
 // newGHAgentCmd builds `kitsoki gh-agent`, whose single `poll` subcommand runs
 // ONE poll cycle of the @kitsoki mention -> dispatch -> run -> ack loop:
 // ListGitHubInboxItems (through the cliExec seam) -> FilterMentions -> for each
@@ -52,10 +56,10 @@ func newGHAgentPollCmd() *cobra.Command {
 
 			// Opt-in GitHub App auth: when --github-app is set (or the
 			// KITSOKI_GH_APP_* env is fully present), mint an installation
-			// token and export it as GH_TOKEN so every `gh` subprocess spawned
-			// under the dispatch (host.cliExec) authenticates as the App. When
-			// not configured, today's offline/mention-file path is unchanged.
-			restoreGHToken, err := setupGitHubAppAuth(ctx, useGitHubApp, appID, installationID, appKeyFile)
+			// token and attach it to the host CLI context so every `gh`
+			// subprocess spawned under dispatch authenticates as the App.
+			// When not configured, today's offline/mention-file path is unchanged.
+			ctx, restoreGHToken, err := setupGitHubAppAuth(ctx, useGitHubApp, appID, installationID, appKeyFile)
 			if err != nil {
 				return err
 			}
@@ -122,16 +126,16 @@ func newGHAgentPollCmd() *cobra.Command {
 // the KITSOKI_GH_APP_* env config is fully present. Flags override env. When
 // nothing is configured it is a no-op so the existing offline poll path and
 // its tests stay unchanged.
-func setupGitHubAppAuth(ctx context.Context, force bool, appID, installationID int64, keyFile string) (func(), error) {
+func setupGitHubAppAuth(ctx context.Context, force bool, appID, installationID int64, keyFile string) (context.Context, func(), error) {
 	noop := func() {}
 
 	cfg, err := githubapp.LoadConfigFromEnv()
 	if err != nil {
-		return noop, err
+		return ctx, noop, err
 	}
 	flagsGiven := appID != 0 || installationID != 0 || keyFile != ""
 	if cfg == nil && !force && !flagsGiven {
-		return noop, nil // offline path unchanged
+		return ctx, noop, nil // offline path unchanged
 	}
 	if cfg == nil {
 		cfg = &githubapp.Config{}
@@ -146,23 +150,27 @@ func setupGitHubAppAuth(ctx context.Context, force bool, appID, installationID i
 		cfg.PrivateKeyPath = keyFile
 	}
 	if err := cfg.Validate(); err != nil {
-		return noop, fmt.Errorf("gh-agent: --github-app requires app id, installation id, and key file: %w", err)
+		return ctx, noop, fmt.Errorf("gh-agent: --github-app requires app id, installation id, and key file: %w", err)
 	}
 
-	src, err := githubapp.NewAppTokenSource(cfg, nil)
+	src, err := newGitHubAppTokenSource(cfg, nil)
 	if err != nil {
-		return noop, err
+		return ctx, noop, err
 	}
 	token, _, err := src.InstallationToken(ctx)
 	if err != nil {
-		return noop, fmt.Errorf("gh-agent: mint installation token: %w", err)
+		return ctx, noop, fmt.Errorf("gh-agent: mint installation token: %w", err)
 	}
 
 	prev, had := os.LookupEnv("GH_TOKEN")
 	if err := os.Setenv("GH_TOKEN", token); err != nil {
-		return noop, fmt.Errorf("gh-agent: set GH_TOKEN: %w", err)
+		return ctx, noop, fmt.Errorf("gh-agent: set GH_TOKEN: %w", err)
 	}
-	return func() {
+	authedCtx := host.WithCLIExecEnv(ctx, map[string]string{
+		"GH_TOKEN":     token,
+		"GITHUB_TOKEN": token,
+	})
+	return authedCtx, func() {
 		if had {
 			_ = os.Setenv("GH_TOKEN", prev)
 		} else {

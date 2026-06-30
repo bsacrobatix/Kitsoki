@@ -329,6 +329,51 @@ func TestGitHubTicket_Comment_Happy(t *testing.T) {
 	}
 }
 
+func TestGitHubTicket_CommentReceivesCLIExecEnv(t *testing.T) {
+	var seen []map[string]string
+	restore := host.SetExecRunnerForTest(func(ctx context.Context, _ string, name string, args ...string) (string, string, int, error) {
+		seen = append(seen, host.CLIExecEnvFromCtx(ctx))
+		key := name + " " + strings.Join(args, " ")
+		switch {
+		case key == "gh --version":
+			return "gh version 2.x\n", "", 0, nil
+		case strings.HasPrefix(key, "gh issue comment 42"):
+			return "https://github.com/o/r/issues/42#issuecomment-1\n", "", 0, nil
+		default:
+			t.Fatalf("unexpected command: %s", key)
+			return "", "", 1, nil
+		}
+	})
+	defer restore()
+
+	ctx := host.WithCLIExecEnv(context.Background(), map[string]string{
+		"GH_TOKEN":     "app-token",
+		"GITHUB_TOKEN": "app-token",
+	})
+	res, err := host.GitHubTicketHandler(ctx, map[string]any{
+		"op":   "comment",
+		"id":   "42",
+		"body": "Repro confirmed.",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if len(seen) != 2 {
+		t.Fatalf("saw %d commands, want 2", len(seen))
+	}
+	for i, env := range seen {
+		if env["GH_TOKEN"] != "app-token" {
+			t.Fatalf("command %d GH_TOKEN=%q, want app-token", i, env["GH_TOKEN"])
+		}
+		if env["GITHUB_TOKEN"] != "app-token" {
+			t.Fatalf("command %d GITHUB_TOKEN=%q, want app-token", i, env["GITHUB_TOKEN"])
+		}
+	}
+}
+
 func TestGitHubTicket_Comment_BodyRequired(t *testing.T) {
 	fr := newFakeRunner()
 	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}

@@ -13,6 +13,7 @@ package host
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -26,6 +27,7 @@ func runRealCommand(ctx context.Context, dir, name string, args ...string) (stri
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	cmd.Env = envWithCLIExec(os.Environ(), CLIExecEnvFromCtx(ctx))
 	var stdoutBuf, stderrBuf strings.Builder
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
