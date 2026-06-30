@@ -1,13 +1,10 @@
 # clarifying — generate clarifying questions, collect answers (multi-round).
 #
 # on_enter runs the analyst (host.agent.decide) which reads the idea, the
-# upstream docs, and the accumulated clarification_log. In ordinary/headless
-# runs it returns { questions: [{id, question, why}] } — instructed to ask only
-# genuinely new questions (or an empty list) so round 2+ doesn't re-ask
-# resolved points. In a live operator-attached MCP run it may instead ask the
-# operator synchronously through mcp__operator__ask and return answered_log;
-# the room appends that Q&A to clarification_log and advances directly to the
-# brief.
+# upstream docs, and the accumulated clarification_log and returns
+# { questions: [{id, question, why}] } — instructed to ask only genuinely
+# new questions (or an empty list) so round 2+ doesn't re-ask resolved
+# points.
 #
 # The transcript ACCUMULATES. submit_answers appends this round's Q&A to
 # world.clarification_log (newest round first, so the block leads with a
@@ -142,11 +139,8 @@ states:
             clarification_log:  "{{ world.clarification_log }}"
             follow_up:          "{{ world.prd_artifact.follow_up_questions }}"
             feedback:           "{{ world.refine_feedback }}"
-            clarifying_cycle:   "{{ world.clarifying_cycle }}"
         bind:
           clarifications: submitted
-          clarification_log: "{{ result.submitted != nil && (result.submitted.answered_log ?? '') != '' ? (world.clarification_log != '' ? result.submitted.answered_log + \"\\n\\n\" + world.clarification_log : result.submitted.answered_log) : world.clarification_log }}"
-        emit_intent: "{{ (world.clarifications.answered_log ?? '') != '' ? 'submit_operator_answers' : '' }}"
         # Stay HERE on a failed analyst run (don't bounce all the way back
         # to idle's discovery chat) — the idea is already distilled, so the
         # operator just needs to retry. The runtime sets last_error; the
@@ -252,20 +246,6 @@ states:
                 clarifying_cycle: "{{ world.clarifying_cycle + 1 }}"
             # Leaving cleanly → clear any stale analyst error.
             - set:
-                last_error: ""
-
-      # The analyst already asked the operator through mcp__operator__ask and
-      # returned answered_log, so the Q&A is recorded during on_enter binding.
-      # Advance to the brief without forcing the operator to answer the same
-      # questions again through the story text-input loop.
-      submit_operator_answers:
-        - target: brief
-          effects:
-            - set:
-                clarifying_cycle: "{{ world.clarifying_cycle + 1 }}"
-                clarification_answers: ""
-                answered_count: 0
-                answered_ids: ""
                 last_error: ""
 
       # No answers this round — move on with what we have. No log append.

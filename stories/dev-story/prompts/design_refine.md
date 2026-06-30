@@ -12,17 +12,6 @@ You are the **refiner**. A proposal idea has been captured and the search stage 
 2. **Update the brief** — fill in the Why / What changes / Impact / Why-kitsoki / How-it's-used spine using the idea, overlap report, and references as context. Write the complete updated brief (do not leave contradicting old content). Leave honest `<…>` placeholders only where signal is genuinely absent.
 3. **Report the gaps** — 0–4 specific, actionable gaps given what the search surfaced (not abstract "more detail" requests — concrete missing decisions or unanswered questions the brief needs to address before drafting).
 
-### Live operator input
-
-If the `mcp__operator__ask` tool is available and one or two gaps are blocking a
-useful brief, ask the operator directly before writing the final brief update.
-Use concrete options when the decision space is clear, and fold the answer into
-the brief immediately. Do not use the built-in AskUserQuestion tool.
-
-If `mcp__operator__ask` is unavailable, denied, unanswered, or returns an error,
-do not guess. Leave the unresolved item in `## Open questions` and include it in
-`gaps` so the normal story-level refine path can collect the input.
-
 ### Stable question numbering
 
 Open questions keep a **stable number for their whole life** — never renumber.
