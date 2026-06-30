@@ -2,16 +2,17 @@
 #
 # run-tests.sh — concise runner for the full kitsoki test suite.
 #
-# Runs five suites and NEVER bails early — every failure across all is
+# Runs six suites and NEVER bails early — every failure across all is
 # collected before we exit:
 #   1. go test ./...                  (Go unit tests)
-#   2. story flow fixtures            (deterministic, no-LLM `kitsoki test flows`
+#   2. Starlark static validation     (host.starlark.run parse + resolve)
+#   3. story flow fixtures            (deterministic, no-LLM `kitsoki test flows`
 #                                      for each stories/*/app.yaml)
-#   3. feature catalog                (features/*.yaml schema + generated tour
+#   4. feature catalog                (features/*.yaml schema + generated tour
 #                                      manifests freshness; skipped with a
 #                                      warning when pnpm/node_modules absent)
-#   4. demo media contract            (no-LLM product-site/deck media layout)
-#   5. session-mining no-LLM invariants
+#   5. demo media contract            (no-LLM product-site/deck media layout)
+#   6. session-mining no-LLM invariants
 #
 # Output contract:
 #   - success → one terse line per suite, plus the report path.
@@ -46,6 +47,7 @@ fi
 section() { printf '\n========== %s ==========\n' "$1" >>"$REPORT"; }
 
 go_failures=0
+starlark_failures=0
 flow_failures=0
 features_failures=0
 features_skipped=0
@@ -80,7 +82,19 @@ if [ "$go_rc" -ne 0 ] && [ "$go_failures" -eq 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Suite 2: story flow fixtures
+# Suite 2: Starlark static validation
+# ---------------------------------------------------------------------------
+# Static parse/resolve against the exact host.starlark.run sandbox catches
+# missing main(ctx), undefined names, and ungranted builtins without executing
+# scripts or touching network/LLM/cost-bearing paths.
+section "starlark validation"
+make --no-print-directory starcheck-kitsoki >"$TMP/starlark.out" 2>&1
+starlark_rc=$?
+cat "$TMP/starlark.out" >>"$REPORT"
+[ "$starlark_rc" -ne 0 ] && starlark_failures=1
+
+# ---------------------------------------------------------------------------
+# Suite 3: story flow fixtures
 # ---------------------------------------------------------------------------
 section "story flows"
 shopt -s nullglob
@@ -203,10 +217,11 @@ ls -1t "$REPORT_DIR"/test-*.log 2>/dev/null | tail -n +$((KEEP + 1)) | while rea
 # ---------------------------------------------------------------------------
 # Console summary
 # ---------------------------------------------------------------------------
-total_failures=$((go_failures + flow_failures + features_failures + media_failures + mining_failures))
+total_failures=$((go_failures + starlark_failures + flow_failures + features_failures + media_failures + mining_failures))
 
 if [ "$total_failures" -eq 0 ]; then
 	printf '%s✓%s go test ./...   %s%d packages%s\n' "$GREEN" "$RST" "$DIM" "$go_pkgs_total" "$RST"
+	printf '%s✓%s starlark check\n' "$GREEN" "$RST"
 	printf '%s✓%s story flows     %s%d stories%s\n' "$GREEN" "$RST" "$DIM" "$flow_apps_total" "$RST"
 	if [ "$features_skipped" -eq 1 ]; then
 		printf '%s-%s feature catalog %sskipped (pnpm/node_modules missing)%s\n' "$YELLOW" "$RST" "$DIM" "$RST"
@@ -249,6 +264,12 @@ if [ "$go_failures" -gt 0 ]; then
 		printf '%sgo test exited %d with no package-level failure (build error?):%s\n' "$RED" "$go_rc" "$RST"
 		sed 's/^/  /' "$TMP/go.stderr"
 	fi
+fi
+
+# --- Starlark failures ------------------------------------------------------
+if [ "$starlark_failures" -gt 0 ]; then
+	printf '\n%s✗ starlark validation%s — host.starlark.run scripts failed static checks:\n' "$BOLD$RED" "$RST"
+	sed 's/^/  /' "$TMP/starlark.out"
 fi
 
 # --- Flow failures ----------------------------------------------------------

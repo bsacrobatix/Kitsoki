@@ -436,7 +436,7 @@ cost-report:
 # end-to-end, and the whole real-cost stack (pricing, extractor, estimator
 # fallback, report driver). All run against committed fixtures + frozen agent
 # JSON — NEVER a live LLM (AGENTS.md). `scripts/run-tests.sh` runs this as its
-# fourth suite so `make test` / CI guard it; run standalone for a fast loop.
+# sixth suite so `make test` / CI guard it; run standalone for a fast loop.
 mining-test:
 	@rc=0; for t in tools/session-mining/tests/test_*.py; do \
 		printf '\n-- %s\n' "$$t"; python3 "$$t" || rc=1; \
@@ -447,7 +447,7 @@ mining-test:
 cost-report-test: mining-test
 
 # starcheck-kitsoki is the static host.starlark.run pre-flight: it runs the
-# starcheck tool's -kitsoki profile (predeclared={json,math}, strict dialect,
+# starcheck tool's -kitsoki profile (predeclared={json,math,yaml}, strict dialect,
 # requires def main) over every story's *.star glue scripts. It parses +
 # resolves WITHOUT executing — so it is instant, safe, and catches scripts that
 # would fail to load (a missing main, a reference outside the sandbox surface)
