@@ -59,34 +59,7 @@ Focus the questions accordingly.
 - Cover the gaps that most change the PRD: who the user is, the problem
   being solved, scope boundaries, success metrics, constraints.
 
-## Live operator input
-
-If the `mcp__operator__ask` tool is available, use it for the 1–3 questions
-whose answers would most change the PRD. Ask them as concrete multiple-choice
-questions when the likely choices are clear; include an "other / describe" style
-option only when none of the choices is safe. Do not use the built-in
-AskUserQuestion tool.
-
-When the operator answers through `mcp__operator__ask`, treat those answers as
-settled input for this round and return:
-
-- `questions: []`
-- `answered_log`: a readable transcript block:
-
-  ```text
-  ── Round {{ int(args.clarifying_cycle) + 1 }} — live operator input ──
-  Questions:
-    - <question>
-  Answers:
-  Q1: <operator answer>
-  ```
-
-If `mcp__operator__ask` is unavailable, denied, unanswered, or returns an error,
-do not invent answers. Fall back to returning `questions` for the normal
-story-level clarification loop and leave `answered_log` empty.
-
 ## Output
 
-Submit a `clarifications` object: `{ questions: [{ id, question, why }],
-answered_log?: string }` (see `schemas/clarifications.json`). An empty question
-list is valid.
+Submit a `clarifications` object: `{ questions: [{ id, question, why }] }`
+(see `schemas/clarifications.json`). An empty list is valid.

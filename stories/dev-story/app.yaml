@@ -76,14 +76,6 @@ app:
     also the story kitsoki uses to improve itself, so correctness and clear,
     auditable reasoning matter more than speed.
 
-    When a live operator surface is attached, dispatched agents may receive the
-    `mcp__operator__ask` tool. Use it for material clarifications, missing
-    product/design decisions, and high-consequence choices that block a good
-    result. Do not use the built-in AskUserQuestion tool. If the operator-ask
-    tool is absent, denied, unanswered, or returns an error, continue through
-    the story's normal structured gaps/questions/refine paths instead of
-    inventing answers.
-
 # Local model for cheap, offline slug naming. Qwen2.5-1.5B-Instruct at Q4_K_M;
 # grammar: true enables constrained decoding so the JSON schema is satisfied on
 # the first decode without retries.

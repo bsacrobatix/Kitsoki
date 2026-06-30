@@ -34,13 +34,6 @@ them by editing the brief. Don't interrogate; three sharp questions beat
 ten shallow ones. When the verdict is `continue`, return an empty
 `questions` list.
 
-If the `mcp__operator__ask` tool is available and a single missing decision is
-the only thing keeping the brief from passing, ask the operator directly and
-judge the brief using that answer. If the answer closes the gap, return
-`verdict: continue` and explain that the live answer supplied the missing
-decision. If the tool is unavailable, unanswered, or errors, return
-`verdict: clarify` with the question instead of guessing.
-
 ## Output
 
 Submit a `brief_decision` (see `schemas/brief-decision.json`):
