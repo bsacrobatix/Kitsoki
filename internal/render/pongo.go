@@ -3,6 +3,7 @@ package render
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -422,6 +423,71 @@ func indexOfAny(s string, subs ...string) int {
 	return best
 }
 
+// jsonObject and jsonArray are named wrappers over the untyped map/slice
+// shapes that flow through the world snapshot. Their value-receiver
+// String() methods render the value as compact JSON, which pongo2's
+// Value.String() picks up via the fmt.Stringer check it runs BEFORE its
+// reflect-kind switch. Without these, a map/slice interpolated into a
+// string context (`{{ world.someObjectKey }}`) falls through pongo2's
+// switch to Go's reflect placeholder `<map[string]interface {} Value>` /
+// `<[]interface {} Value>` — useless to a downstream agent and the root
+// cause this fix addresses.
+//
+// Crucially the underlying kinds stay reflect.Map / reflect.Slice, so all
+// existing reflection-driven access continues to work: member access
+// (`.questions`), indexing (`.0`), `{% for %}` iteration, and the
+// slice/map filters (`reverse`, `default`).
+type jsonObject map[string]any
+
+// String renders the object as compact JSON. json.Marshal sorts map keys,
+// so the output is deterministic (important for replayable traces).
+func (o jsonObject) String() string {
+	b, err := json.Marshal(map[string]any(o))
+	if err != nil {
+		// Marshal of an arbitrary world value can fail (e.g. an
+		// unsupported type buried in the map); degrade to Go's default
+		// rather than panic at the render seam.
+		return fmt.Sprintf("%v", map[string]any(o))
+	}
+	return string(b)
+}
+
+type jsonArray []any
+
+// String renders the array as compact JSON. See jsonObject.String.
+func (a jsonArray) String() string {
+	b, err := json.Marshal([]any(a))
+	if err != nil {
+		return fmt.Sprintf("%v", []any(a))
+	}
+	return string(b)
+}
+
+// wrapNonScalar recursively converts every map[string]any to jsonObject and
+// every []any to jsonArray, leaving scalars (and all other types) untouched.
+// Applied to each env value at the render seam so any non-scalar leaf
+// interpolated into a string context stringifies as JSON instead of Go's
+// reflect placeholder. The recursion ensures nested objects/arrays render
+// usefully too (e.g. `{{ world.a.b }}` where b is itself an object).
+func wrapNonScalar(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(jsonObject, len(t))
+		for k, val := range t {
+			out[k] = wrapNonScalar(val)
+		}
+		return out
+	case []any:
+		out := make(jsonArray, len(t))
+		for i, val := range t {
+			out[i] = wrapNonScalar(val)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
 // ToContext converts an expr.Env into a pongo2.Context.
 //
 // Exposed keys mirror the expr.Env struct tags so author-visible variables
@@ -447,17 +513,17 @@ func ToContext(env expr.Env) pongo2.Context {
 		state = map[string]any{}
 	}
 	ctx := pongo2.Context{
-		"world": env.World,
-		"slots": env.Slots,
-		"event": env.Event,
+		"world": wrapNonScalar(env.World),
+		"slots": wrapNonScalar(env.Slots),
+		"event": wrapNonScalar(env.Event),
 		"run": map[string]any{
 			"id":   env.Run.ID,
 			"turn": env.Run.Turn,
 		},
-		"args":  env.Args,
-		"menu":  env.Menu,
-		"item":  env.Item,
-		"state": state,
+		"args":  wrapNonScalar(env.Args),
+		"menu":  wrapNonScalar(env.Menu),
+		"item":  wrapNonScalar(env.Item),
+		"state": wrapNonScalar(state),
 	}
 
 	if env.Available != nil {
