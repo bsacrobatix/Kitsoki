@@ -29,8 +29,27 @@ from arena.rollup import write_rollup
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _mounts_for(cell: Cell) -> dict[str, str]:
-    return {str(REPO_ROOT): "/workspace/kitsoki"}
+def _make_mounts_for(spec):
+    """Build a (cell, host) → mounts resolver from the spec's placement.
+
+    The kitsoki checkout (carrying bench.py + the bakeoff harness) mounts to
+    `/workspace/kitsoki`. A remote host resolves `-v` source paths on ITS OWN
+    daemon, so `placement.host_repo[host]` declares the checkout path on that
+    host; `local` defaults to this machine's REPO_ROOT.
+    """
+    host_repo = dict(spec.placement.host_repo)
+    host_repo.setdefault("local", str(REPO_ROOT))
+
+    def _mounts_for(cell: Cell, host: str) -> dict[str, str]:
+        src = host_repo.get(host)
+        if src is None:
+            raise SystemExit(
+                f"placement.host_repo has no checkout path for host '{host}'. "
+                f"Add it to the spec (e.g. host_repo:\n    {host}: /opt/bakeoff/repos/kitsoki)."
+            )
+        return {src: "/workspace/kitsoki"}
+
+    return _mounts_for
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
@@ -45,7 +64,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     spec = JobSpec.load(args.spec)
     backend = DockerBackend()
-    executor = CellExecutor(backend, mounts_for=_mounts_for)
+    executor = CellExecutor(backend, mounts_for=_make_mounts_for(spec))
     if args.live:
         print("LIVE run — this WILL spend on LLM calls.", file=sys.stderr)
     results = run_sweep(
