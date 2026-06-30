@@ -80,7 +80,16 @@ RED@baseline → GREEN@fix inside its own container. Build the image once with
 `docker build -f tools/bugfix-bakeoff/external/docker/Dockerfile.repo-runtime \
 -t kitsoki-arena-repo/query-string:latest tools/bugfix-bakeoff/external/docker`.
 
-Next (see design doc): **P1** docker-context placement over a VM pool +
-completion-state polling; **P2** persona-qa plugin (score = the 19-check review
-gate) + onboarding plugin; **P3** retire `escalate.sh`/matrix `emit_run`, single
-front door.
+**VM placement proven** (2026-06-30): the same bugfix sweep ran on a remote
+DigitalOcean droplet via a docker context over SSH (`vm-1`) — 3/3 armed,
+win-rate 1.0, 0 infra failures — and the persona-QA product-journey smokes ran
+in containers on that same VM (corpus valid; both smokes `passed`). The only new
+code was placement-aware mounts: `placement.host_repo[host]` declares the
+checkout path on each host's daemon (a remote `-v` source resolves on the VM, not
+locally). Spec: `specs/bugfix-query-string-vm.yaml`.
+
+Next (see design doc): **P1** a *pool* of VM hosts + completion-state polling
+(scheduler already round-robins `placement.hosts`); **P2** a first-class
+persona-qa plugin (score = the 19-check review gate) + onboarding plugin so
+persona QA runs through `arena run` rather than `run.py` directly; **P3** retire
+`escalate.sh`/matrix `emit_run`, single front door.

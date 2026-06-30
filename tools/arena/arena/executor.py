@@ -92,9 +92,11 @@ class FakeBackend:
 class CellExecutor:
     """Runs one cell: pick image → drive in container → plugin scores the output."""
 
-    def __init__(self, backend: ContainerBackend, *, mounts_for: Callable[[Cell], dict[str, str]] | None = None) -> None:
+    def __init__(self, backend: ContainerBackend, *, mounts_for: Callable[[Cell, str], dict[str, str]] | None = None) -> None:
         self._backend = backend
-        self._mounts_for = mounts_for or (lambda cell: {})
+        # mounts_for is (cell, host) — a remote host's `-v` paths resolve on that
+        # host's daemon, so the source side must be the checkout path ON the host.
+        self._mounts_for = mounts_for or (lambda cell, host: {})
 
     def execute(self, cell: Cell, *, host: str = "local", live: bool = False) -> CellResult:
         plugin = plugins.get(cell.job_type)
@@ -103,7 +105,7 @@ class CellExecutor:
         # Let FakeBackend route its responder by the current cell.
         if isinstance(self._backend, FakeBackend):
             self._backend._current_cell = cell
-        run = self._backend.run(host=host, image=image, argv=argv, mounts=self._mounts_for(cell))
+        run = self._backend.run(host=host, image=image, argv=argv, mounts=self._mounts_for(cell, host))
         result = plugin.score(cell, exit_code=run.exit_code, stdout=run.stdout, stderr=run.stderr)
         result.metrics.setdefault("host", run.host)
         return result
