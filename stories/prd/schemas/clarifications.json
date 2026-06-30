@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "clarifications",
-  "description": "The analyst's clarifying questions for ONE round. An empty list is valid and means nothing material remains to ask.",
+  "description": "The analyst's clarifying questions for ONE round. An empty list is valid and means nothing material remains to ask. In a live operator-attached agent run, the analyst may instead ask the operator through mcp__operator__ask and return answered_log.",
   "type": "object",
   "required": ["questions"],
   "properties": {
@@ -17,6 +17,10 @@
         },
         "additionalProperties": true
       }
+    },
+    "answered_log": {
+      "type": "string",
+      "description": "Optional Q&A transcript captured by mcp__operator__ask in a live operator-attached run. Leave empty when the operator-ask tool is unavailable or unanswered."
     }
   },
   "additionalProperties": true

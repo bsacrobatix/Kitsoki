@@ -1,0 +1,57 @@
+# operator_ask_answered_log — analyst captured live operator input.
+#
+# A live agent can call mcp__operator__ask while generating PRD clarifications.
+# When it returns answered_log, the clarifying room records the transcript and
+# advances directly to the brief instead of asking the same questions again as
+# story-level free text.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: search
+initial_world:
+  idea: "A CLI for X"
+  workdir: "."
+  output_path: ".artifacts/prd.md"
+  judge_mode: "human"
+  prd_existing_state:
+    roadmap_fit: "new PRD"
+    overlaps: []
+
+starlark_inspect_cassette: ../cassettes/slug_a_cli_for_x.inspect.yaml
+
+host_handlers:
+  host.agent.decide:
+    data:
+      ok: true
+      submitted:
+        questions: []
+        answered_log: |
+          ── Round 1 — live operator input ──
+          Questions:
+            - Who is the primary user?
+          Answers:
+          Q1: platform developers
+  host.artifacts_dir:
+    data: { ok: true, path: ".artifacts/prd/example-cli/001-brief.md", message_id: "001-brief#1" }
+  host.ide.open_file:
+    data: { ok: true, connected: true }
+
+turns:
+  - intent: { name: confirm, slots: {} }
+    expect_state: brief
+    expect_world:
+      clarifying_cycle: 1
+      clarification_log: |
+        ── Round 1 — live operator input ──
+        Questions:
+          - Who is the primary user?
+        Answers:
+        Q1: platform developers
+
+    expect_host_calls:
+      - handler: host.agent.decide
+        call: analyst_questions
+      - handler: host.artifacts_dir
+        args: { thread: "001-brief" }
+
+expect_no_errors: true
