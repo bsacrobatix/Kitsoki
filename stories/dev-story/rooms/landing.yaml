@@ -443,7 +443,10 @@ states:
             - set:
                 prev_state:          "landing"
                 last_error:          ""
-                init_request:        ""
+                # An explicit `target` slot lets a button-driven onboarding
+                # point at an external repo deterministically (no free-text
+                # routing); empty ⇒ parse_target falls back to the checkout.
+                init_request:        "{{ slots.target }}"
                 init_discovery:      {}
                 init_run_ok:         false
                 init_run_output:     ""
