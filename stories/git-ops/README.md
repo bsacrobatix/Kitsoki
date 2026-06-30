@@ -143,9 +143,12 @@ bash stories/git-ops/tests/lib/bad_git_repo.sh assert pull-rebase-conflict "$rep
 
 Current scenarios cover no upstream, pull/rebase conflicts, an in-progress
 rebase with no unmerged paths, a two-conflict rebase, branch ownership by a
-linked worktree, dirty linked worktrees, merge conflicts in progress, and
-detached HEAD. `stories/git-ops/tests/bad_git_repo_harness.sh` smoke-tests that
-each scenario materializes as claimed.
+linked worktree, dirty linked worktrees, merge conflicts in progress, detached
+HEAD, diverged clean upstreams, dirty pull blockers, untracked overwrite
+blockers, stale worktree entries, interrupted cherry-picks, bisects in progress,
+rename/delete conflicts, modify/delete conflicts, binary rebase conflicts, and
+local/remote tag disagreement. `stories/git-ops/tests/bad_git_repo_harness.sh`
+smoke-tests that each scenario materializes as claimed.
 
 ## `merge_into_main` guards
 
