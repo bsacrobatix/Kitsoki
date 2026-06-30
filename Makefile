@@ -283,6 +283,7 @@ onboard-sisters:
 # stay operator-run. See tools/bugfix-bakeoff/external/ + the case study.
 qs-bakeoff: install
 	python3 tools/bugfix-bakeoff/external/bench_grade_test.py
+	python3 tools/bugfix-bakeoff/external/bench.py lint-oracles --project kitsoki --strict
 	go test -tags qsbakeoff -run TestExternalBakeoff -count=1 -v ./tools/bugfix-bakeoff/external/
 
 # gears-bakeoff arms the gears-rust corpus (projects/gears-rust): prove each
