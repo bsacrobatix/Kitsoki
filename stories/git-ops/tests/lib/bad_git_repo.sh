@@ -22,6 +22,16 @@ linked-worktree-branch
 dirty-feature-worktree
 merge-conflict-in-progress
 detached-head
+diverged-upstream-clean
+dirty-main-before-pull
+untracked-overwrite-blocker
+stale-worktree-entry
+cherry-pick-in-progress
+bisect-in-progress
+rename-delete-conflict
+modify-delete-conflict
+binary-rebase-conflict
+local-tags-conflict
 CASES
 }
 
@@ -33,7 +43,7 @@ bad_git_note() {
 
 bad_git_require_case() {
   case "$1" in
-    no-upstream|pull-rebase-conflict|rebase-in-progress-clean|rebase-second-conflict|linked-worktree-branch|dirty-feature-worktree|merge-conflict-in-progress|detached-head)
+    no-upstream|pull-rebase-conflict|rebase-in-progress-clean|rebase-second-conflict|linked-worktree-branch|dirty-feature-worktree|merge-conflict-in-progress|detached-head|diverged-upstream-clean|dirty-main-before-pull|untracked-overwrite-blocker|stale-worktree-entry|cherry-pick-in-progress|bisect-in-progress|rename-delete-conflict|modify-delete-conflict|binary-rebase-conflict|local-tags-conflict)
       ;;
     *)
       printf 'unknown bad git scenario: %s\nknown scenarios:\n' "$1" >&2
@@ -183,6 +193,131 @@ bad_git_create() {
       first="$(git -C "$repo" rev-list --max-parents=0 HEAD)"
       git -C "$repo" checkout -q --detach "$first"
       ;;
+
+    diverged-upstream-clean)
+      mkdir -p "$root/remote.git"
+      git init -q --bare "$root/remote.git"
+      bad_git_init_repo "$root/seed"
+      git -C "$root/seed" remote add origin "$root/remote.git"
+      git -C "$root/seed" push -q -u origin main
+      git clone -q "$root/remote.git" "$repo"
+      git -C "$repo" checkout -q main
+      bad_git_commit_file "$root/seed" bravo.txt "remote independent change" "remote independent"
+      git -C "$root/seed" push -q origin main
+      bad_git_commit_file "$repo" alpha.txt "local independent change" "local independent"
+      git -C "$repo" fetch -q origin
+      ;;
+
+    dirty-main-before-pull)
+      mkdir -p "$root/remote.git"
+      git init -q --bare "$root/remote.git"
+      bad_git_init_repo "$root/seed"
+      git -C "$root/seed" remote add origin "$root/remote.git"
+      git -C "$root/seed" push -q -u origin main
+      git clone -q "$root/remote.git" "$repo"
+      git -C "$repo" checkout -q main
+      bad_git_commit_file "$root/seed" alpha.txt "remote dirty blocker" "remote dirty blocker"
+      git -C "$root/seed" push -q origin main
+      printf 'local unstaged dirty blocker\n' >"$repo/alpha.txt"
+      ;;
+
+    untracked-overwrite-blocker)
+      bad_git_init_repo "$repo"
+      git -C "$repo" checkout -q -b feature/untracked-blocker
+      bad_git_commit_file "$repo" generated/report.txt "feature wants tracked report" "track generated report"
+      git -C "$repo" checkout -q main
+      mkdir -p "$repo/generated"
+      printf 'operator local report\n' >"$repo/generated/report.txt"
+      ;;
+
+    stale-worktree-entry)
+      bad_git_init_repo "$repo"
+      git -C "$repo" worktree add -q -b feature/stale "$root/stale-feature"
+      rm -rf "$root/stale-feature"
+      ;;
+
+    cherry-pick-in-progress)
+      bad_git_init_repo "$repo"
+      git -C "$repo" checkout -q -b feature/cherry-source
+      bad_git_commit_file "$repo" alpha.txt "feature cherry alpha" "feature cherry alpha"
+      git -C "$repo" checkout -q main
+      bad_git_commit_file "$repo" alpha.txt "main cherry alpha" "main cherry alpha"
+      git -C "$repo" cherry-pick feature/cherry-source >/dev/null 2>&1 && {
+        printf 'expected cherry-pick to conflict, but it succeeded\n' >&2
+        return 1
+      }
+      ;;
+
+    bisect-in-progress)
+      bad_git_init_repo "$repo"
+      bad_git_commit_file "$repo" alpha.txt "first suspect" "suspect one"
+      bad_git_commit_file "$repo" bravo.txt "second suspect" "suspect two"
+      git -C "$repo" bisect start >/dev/null
+      git -C "$repo" bisect bad HEAD >/dev/null
+      git -C "$repo" bisect good "$(git -C "$repo" rev-list --max-parents=0 HEAD)" >/dev/null
+      ;;
+
+    rename-delete-conflict)
+      bad_git_init_repo "$repo"
+      git -C "$repo" checkout -q -b feature/rename-delete
+      git -C "$repo" mv alpha.txt renamed-alpha.txt
+      git -C "$repo" commit -qm "rename alpha"
+      git -C "$repo" checkout -q main
+      git -C "$repo" rm -q alpha.txt
+      git -C "$repo" commit -qm "delete alpha"
+      git -C "$repo" merge feature/rename-delete >/dev/null 2>&1 && {
+        printf 'expected rename/delete merge to conflict, but it succeeded\n' >&2
+        return 1
+      }
+      ;;
+
+    modify-delete-conflict)
+      bad_git_init_repo "$repo"
+      git -C "$repo" checkout -q -b feature/modify-delete
+      bad_git_commit_file "$repo" alpha.txt "feature modifies alpha before delete" "modify alpha"
+      git -C "$repo" checkout -q main
+      git -C "$repo" rm -q alpha.txt
+      git -C "$repo" commit -qm "delete alpha"
+      git -C "$repo" merge feature/modify-delete >/dev/null 2>&1 && {
+        printf 'expected modify/delete merge to conflict, but it succeeded\n' >&2
+        return 1
+      }
+      ;;
+
+    binary-rebase-conflict)
+      bad_git_init_repo "$repo"
+      printf 'base-binary\n' >"$repo/blob.bin"
+      git -C "$repo" add blob.bin
+      git -C "$repo" commit -qm "add binary"
+      git -C "$repo" checkout -q -b feature/binary-conflict
+      printf '\000feature-binary\n' >"$repo/blob.bin"
+      git -C "$repo" add blob.bin
+      git -C "$repo" commit -qm "feature binary"
+      git -C "$repo" checkout -q main
+      printf '\000main-binary\n' >"$repo/blob.bin"
+      git -C "$repo" add blob.bin
+      git -C "$repo" commit -qm "main binary"
+      git -C "$repo" checkout -q feature/binary-conflict
+      git -C "$repo" rebase main >/dev/null 2>&1 && {
+        printf 'expected binary rebase to conflict, but it succeeded\n' >&2
+        return 1
+      }
+      ;;
+
+    local-tags-conflict)
+      mkdir -p "$root/remote.git"
+      git init -q --bare "$root/remote.git"
+      bad_git_init_repo "$root/seed"
+      git -C "$root/seed" tag release
+      git -C "$root/seed" remote add origin "$root/remote.git"
+      git -C "$root/seed" push -q origin main release
+      git clone -q "$root/remote.git" "$repo"
+      bad_git_commit_file "$root/seed" charlie.txt "remote retag target" "remote retag target"
+      git -C "$root/seed" tag -f release HEAD >/dev/null
+      git -C "$root/seed" push -q --force origin release
+      bad_git_commit_file "$repo" alpha.txt "local tag target" "local tag target"
+      git -C "$repo" tag -f release HEAD >/dev/null
+      ;;
   esac
 
   bad_git_write_manifest "$repo" "$scenario"
@@ -268,6 +403,105 @@ bad_git_assert() {
     detached-head)
       [ "$(git -C "$repo" symbolic-ref -q --short HEAD || true)" = "" ] || {
         printf 'expected detached HEAD\n' >&2
+        return 1
+      }
+      ;;
+
+    diverged-upstream-clean)
+      git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name '@{u}' | grep -qx 'origin/main'
+      local ahead behind
+      ahead="$(git -C "$repo" rev-list --count '@{u}..HEAD')"
+      behind="$(git -C "$repo" rev-list --count 'HEAD..@{u}')"
+      [ "$ahead" -gt 0 ] && [ "$behind" -gt 0 ] || {
+        printf 'expected branch to be ahead and behind upstream, got ahead=%s behind=%s\n' "$ahead" "$behind" >&2
+        return 1
+      }
+      git -C "$repo" diff --quiet && git -C "$repo" diff --cached --quiet || {
+        printf 'expected no tracked worktree/index changes for diverged-upstream-clean\n' >&2
+        return 1
+      }
+      ;;
+
+    dirty-main-before-pull)
+      git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name '@{u}' | grep -qx 'origin/main'
+      git -C "$repo" status --porcelain | grep -q '^ M alpha.txt'
+      git -C "$repo" fetch -q origin
+      [ "$(git -C "$repo" rev-list --count 'HEAD..@{u}')" -gt 0 ] || {
+        printf 'expected upstream to be ahead for dirty-main-before-pull\n' >&2
+        return 1
+      }
+      ;;
+
+    untracked-overwrite-blocker)
+      git -C "$repo" status --porcelain | grep -q '^?? generated/'
+      local blocker_err
+      blocker_err="$(mktemp "${TMPDIR:-/tmp}/kitsoki-bad-git-blocker.XXXXXX")"
+      git -C "$repo" checkout feature/untracked-blocker >"$blocker_err" 2>&1 && {
+        rm -f "$blocker_err"
+        printf 'expected checkout to be blocked by untracked file\n' >&2
+        return 1
+      }
+      grep -qi 'untracked working tree files would be overwritten' "$blocker_err"
+      rm -f "$blocker_err"
+      ;;
+
+    stale-worktree-entry)
+      git -C "$repo" worktree list --porcelain | grep -q 'branch refs/heads/feature/stale'
+      git -C "$repo" worktree list --porcelain | grep -q 'prunable'
+      ;;
+
+    cherry-pick-in-progress)
+      [ -f "$repo/.git/CHERRY_PICK_HEAD" ] || {
+        printf 'expected CHERRY_PICK_HEAD in %s\n' "$repo" >&2
+        return 1
+      }
+      git -C "$repo" diff --diff-filter=U --name-only | grep -qx 'alpha.txt'
+      ;;
+
+    bisect-in-progress)
+      [ -f "$repo/.git/BISECT_LOG" ] || {
+        printf 'expected BISECT_LOG in %s\n' "$repo" >&2
+        return 1
+      }
+      git -C "$repo" bisect log | grep -q 'git bisect start'
+      ;;
+
+    rename-delete-conflict)
+      [ -f "$repo/.git/MERGE_HEAD" ] || {
+        printf 'expected MERGE_HEAD for rename/delete conflict\n' >&2
+        return 1
+      }
+      git -C "$repo" status --porcelain | grep -Eq '^(DU|UD|UA|AU) '
+      git -C "$repo" status --porcelain | grep -q 'renamed-alpha.txt'
+      ;;
+
+    modify-delete-conflict)
+      [ -f "$repo/.git/MERGE_HEAD" ] || {
+        printf 'expected MERGE_HEAD for modify/delete conflict\n' >&2
+        return 1
+      }
+      git -C "$repo" status --porcelain | grep -Eq '^(DU|UD) alpha.txt'
+      ;;
+
+    binary-rebase-conflict)
+      [ -d "$repo/.git/rebase-merge" ] || [ -d "$repo/.git/rebase-apply" ] || {
+        printf 'expected rebase metadata for binary conflict\n' >&2
+        return 1
+      }
+      git -C "$repo" diff --diff-filter=U --name-only | grep -qx 'blob.bin'
+      [ "$(git -C "$repo" ls-files -u -- blob.bin | wc -l | tr -d ' ')" = "3" ] || {
+        printf 'expected three unmerged index stages for binary conflict\n' >&2
+        return 1
+      }
+      ;;
+
+    local-tags-conflict)
+      local origin_tag local_tag
+      git -C "$repo" fetch -q origin '+refs/tags/release:refs/tags/origin-release-fixture'
+      origin_tag="$(git -C "$repo" rev-parse origin-release-fixture)"
+      local_tag="$(git -C "$repo" rev-parse release)"
+      [ "$origin_tag" != "$local_tag" ] || {
+        printf 'expected local release tag to differ from remote release tag\n' >&2
         return 1
       }
       ;;
