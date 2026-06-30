@@ -96,6 +96,11 @@ class Placement:
     hosts: list[str] = field(default_factory=lambda: ["local"])
     concurrency: int = 1
     retry: int = 0
+    # Where the kitsoki checkout lives on each host's daemon. A remote docker
+    # context resolves `-v` paths on the REMOTE filesystem, so a VM host must
+    # point at the checkout ON THE VM. `local` defaults to the local REPO_ROOT
+    # (filled in by the CLI); any host absent here falls back to that default.
+    host_repo: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -142,6 +147,7 @@ class JobSpec:
                 hosts=place.get("hosts", ["local"]),
                 concurrency=int(place.get("concurrency", 1)),
                 retry=int(place.get("retry", 0)),
+                host_repo=dict(place.get("host_repo", {}) or {}),
             ),
             options=data.get("options", {}) or {},
         )

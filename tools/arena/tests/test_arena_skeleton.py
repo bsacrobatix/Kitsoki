@@ -71,7 +71,7 @@ def responder(cell, host, argv):
 
 
 backend = FakeBackend(responder)
-executor = CellExecutor(backend, mounts_for=lambda c: {"/repo": "/workspace/kitsoki"})
+executor = CellExecutor(backend, mounts_for=lambda c, h: {"/repo": "/workspace/kitsoki"})
 results = run_sweep(spec, executor, live=False)
 
 check("result count", len(results), 6)
@@ -98,7 +98,7 @@ def flaky(cell, host, argv):
 
 spec_one = JobSpec.from_dict({**SPEC, "variants": [SPEC["variants"][0]], "axes": {"bug": ["qs1"]}, "placement": {"hosts": ["local"], "concurrency": 1, "retry": 1}})
 backend2 = FakeBackend(flaky)
-executor2 = CellExecutor(backend2, mounts_for=lambda c: {})
+executor2 = CellExecutor(backend2, mounts_for=lambda c, h: {})
 retry_results = run_sweep(spec_one, executor2, live=False)
 check("infra retried then armed", retry_results[0].verdict, "armed")
 check("retry note recorded", "infra" in retry_results[0].notes, True)
