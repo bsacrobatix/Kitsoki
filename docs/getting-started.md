@@ -145,7 +145,23 @@ codex mcp add kitsoki -- kitsoki mcp --stories-dir stories
 codex mcp list
 ```
 
-For story development and testing, start with the
+**Recommended: drive through the constrained driver agent.** The checked-in
+driver definition limits a session to the studio surface — its persona, model,
+and `mcp__kitsoki__*` tool allowlist:
+
+- **Claude Code** adopts it for the *whole* session via the native `--agent`
+  flag: `claude --agent kitsoki-mcp-driver` (or default it per-repo with
+  `{ "agent": "kitsoki-mcp-driver" }` in `.claude/settings.json`).
+- **Codex** has no whole-session `--agent` flag, but ships the mirrored
+  `.codex/agents/kitsoki-mcp-driver.toml` subagent (spawned by a parent
+  session) — or just use `tools/mcp-drive/drive.sh`, which wraps both backends
+  for headless runs.
+
+Caveats (attach-vs-constrain, the manual `--allowedTools` fallback, the Codex
+specifics) and the full loop:
+[Studio MCP dogfood recipe → Run A Pure Kitsoki Driver](recipes/studio-mcp-dogfood.md#run-a-pure-kitsoki-driver).
+
+For story development and testing, start with that same
 [Studio MCP dogfood recipe](recipes/studio-mcp-dogfood.md). It gives a
 practical loop for running a constrained driver agent that can only use
 `mcp__kitsoki__...` tools, then verifying the result with traces,

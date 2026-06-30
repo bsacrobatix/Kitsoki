@@ -138,7 +138,13 @@ kitsoki **studio** tools — author/validate/test stories, drive sessions, rende
 the TUI/web — all through one facade. See
 [architecture/mcp-studio.md](architecture/mcp-studio.md). The
 `kitsoki-mcp-driver` agent (installed into `.claude/agents/`) is purpose-built
-to orchestrate kitsoki entirely through that surface.
+to orchestrate kitsoki entirely through that surface — adopt it for a whole
+Claude Code session with `claude --agent kitsoki-mcp-driver` (or default it
+per-repo via `{ "agent": "kitsoki-mcp-driver" }` in `.claude/settings.json`).
+Codex ships the mirrored `.codex/agents/kitsoki-mcp-driver.toml` subagent (no
+whole-session flag); see the
+[Studio MCP dogfood recipe](recipes/studio-mcp-dogfood.md#run-a-pure-kitsoki-driver)
+for the Codex specifics and headless runbook.
 
 **Use the skills.** The installed skills (`.claude/skills/`) cover authoring,
 debugging, UI demos/QA, dogfooding, and more — your agent discovers them

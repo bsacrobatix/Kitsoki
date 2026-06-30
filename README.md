@@ -119,6 +119,27 @@ it's the suite CI runs and the [pre-PR gate](CONTRIBUTING.md) runs. Open PRs wit
 ./kitsoki viz testdata/apps/cloak/app.yaml --mermaid > /tmp/cloak.mmd
 ```
 
+### 6. Drive it from your coding agent (Studio MCP)
+
+The repo ships a [`.mcp.json`](.mcp.json) that attaches the kitsoki **studio MCP**
+— one control plane to author, validate, test, drive, and render stories from
+Claude Code, Codex, or any MCP client.
+
+The recommended way in is the checked-in driver agent, which constrains a session
+to that surface (its persona, model, and `mcp__kitsoki__*` tools):
+
+- **Claude Code** — adopt it for the *whole* session natively:
+  ```sh
+  claude --agent kitsoki-mcp-driver   # or per-repo default: { "agent": "kitsoki-mcp-driver" } in .claude/settings.json
+  ```
+- **Codex** — spawn the mirrored
+  [`.codex/agents/kitsoki-mcp-driver.toml`](.codex/agents/kitsoki-mcp-driver.toml)
+  subagent (Codex has no whole-session `--agent` flag), or use
+  `tools/mcp-drive/drive.sh`, which wraps both backends for headless runs.
+
+Full runbook, caveats, and the manual fallback:
+[`docs/recipes/studio-mcp-dogfood.md`](docs/recipes/studio-mcp-dogfood.md).
+
 ## Dogfood mode — fixing kitsoki with kitsoki
 
 `.kitsoki/stories/kitsoki-dev/` is the dogfood instance: kitsoki working on
