@@ -823,6 +823,8 @@ intents:
     description: "Discover a project profile and review it before onboarding writes happen."
     examples: ["onboard this project", "project onboarding", "init project", "set up kitsoki for this repo"]
     priority: 31
+    slots:
+      target: { type: string, required: false, description: "Path to the repository to onboard. Empty ⇒ the current checkout." }
   go_deploy:
     title: "Deploy"
     description: "Open the deploy room."
