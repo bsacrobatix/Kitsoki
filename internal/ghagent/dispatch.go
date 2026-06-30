@@ -142,7 +142,7 @@ func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *j
 			commentID, err = d.Comments.Post(ctx, mention.Item.Number, prose, meta)
 		}
 		if err != nil {
-			return nil, err
+			return d.failBeforeRun(ctx, job, "comment_ack_failed", err)
 		}
 		if commentID != "" {
 			if err := d.Jobs.SetComment(ctx, job.JobID, commentID); err != nil {
@@ -213,6 +213,31 @@ func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *j
 
 	job, _ = d.Jobs.GetJob(ctx, job.JobID)
 	return job, spawnErr
+}
+
+func (d *Dispatcher) failBeforeRun(ctx context.Context, job *jobs.GHJob, event string, cause error) (*jobs.GHJob, error) {
+	if job == nil {
+		return nil, cause
+	}
+	errMsg := cause.Error()
+	_ = d.Jobs.RecordEvent(ctx, job.JobID, event, errMsg)
+	if advanceErr := d.Jobs.Advance(ctx, job.JobID, jobs.GHFailed, errMsg); advanceErr != nil {
+		return job, advanceErr
+	}
+	job.State = jobs.GHFailed
+	job.ErrMsg = errMsg
+	if d.IncidentFn != nil {
+		if incidentURL, incidentErr := d.IncidentFn(ctx, job, errMsg); incidentErr == nil && strings.TrimSpace(incidentURL) != "" {
+			_ = d.Jobs.SetIncidentURL(ctx, job.JobID, incidentURL)
+			job.IncidentURL = incidentURL
+		} else if incidentErr != nil {
+			_ = d.Jobs.RecordEvent(ctx, job.JobID, "incident_failed", incidentErr.Error())
+		}
+	}
+	if latest, latestErr := d.Jobs.GetJob(ctx, job.JobID); latestErr == nil {
+		job = latest
+	}
+	return job, cause
 }
 
 func publicRunURL(baseURL, jobID string) string {
