@@ -587,6 +587,14 @@ func resolveAgentDecls(def *AppDef, file, baseDir string) []error {
 			addErr(msg)
 			continue
 		}
+		if decl.Permissions != nil {
+			switch decl.Permissions.Mode {
+			case "", "ask", "denyAll", "default", "bypassPermissions", "acceptEdits", "auto", "dontAsk", "plan":
+			default:
+				addErr(fmt.Sprintf("agent %q: permissions.mode %q is not valid", name, decl.Permissions.Mode))
+				continue
+			}
+		}
 
 		// Normalise tools to fully-qualified form. Logic duplicates
 		// metamode.NormaliseToolName here because internal/metamode imports
@@ -597,6 +605,13 @@ func resolveAgentDecls(def *AppDef, file, baseDir string) []error {
 				out[i] = normaliseAgentTool(t)
 			}
 			decl.Tools = out
+		}
+		if decl.MCP != nil && len(decl.MCP.Tools) > 0 {
+			out := make([]string, len(decl.MCP.Tools))
+			for i, t := range decl.MCP.Tools {
+				out[i] = normaliseAgentTool(t)
+			}
+			decl.MCP.Tools = out
 		}
 
 		// bash_profile validation: Bash in the tool surface requires a
@@ -705,7 +720,7 @@ func normaliseAgentTool(name string) string {
 	if name == "" {
 		return name
 	}
-	if strings.HasPrefix(name, "host.") {
+	if strings.HasPrefix(name, "host.") || strings.HasPrefix(name, "mcp__") {
 		return name
 	}
 	return "host." + name
