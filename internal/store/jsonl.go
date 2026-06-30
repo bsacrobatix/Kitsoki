@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 	"syscall"
 	"time"
 
@@ -57,6 +58,17 @@ type EventSink interface {
 // JSONLSink implements EventSink against an on-disk JSONL file.
 // Append is O(1) per event; OpenJSONL is O(N) once per session.
 type JSONLSink struct {
+	// mu guards every access to the mutable in-memory state below (hist,
+	// rawLines, seqByTurn) and the file handle. A session's trace sink is
+	// written by the foreground turn loop AND the background job listener
+	// (both under the orchestrator's per-session lock) but is ALSO read
+	// concurrently — without that lock — by session.inspect / history
+	// snapshots / runstatus projections. Append reallocating hist while a
+	// reader iterates the slice it got from History() is a live data race
+	// (the race detector flags Append at jsonl.go vs History/BuildJourney).
+	// Holding mu across each public method, and returning copies from the
+	// readers, keeps the sink self-consistent regardless of caller locking.
+	mu   sync.Mutex
 	// Path is the file path passed to OpenJSONL; exposed for diagnostics.
 	Path string
 	hist History
@@ -385,6 +397,8 @@ type traceEvent struct {
 //   - ts is normalised to UTC with explicit Z suffix
 //   - trace file has been replaced at path (inode changed since open)
 func (s *JSONLSink) Append(ev Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	// Inode check: detect file replacement between open and this append.
 	if s.openIno != 0 {
 		curIno, inoErr := pathInode(s.Path)
@@ -517,9 +531,17 @@ func rejectNFD(raw json.RawMessage) error {
 	return nil
 }
 
-// History returns the in-memory event history.
+// History returns a snapshot copy of the in-memory event history. The copy is
+// defensive: a caller may iterate it (e.g. BuildJourney during session.inspect)
+// while a concurrent Append on the foreground/background path grows the live
+// slice. The returned slice header is fresh; the Event values (including their
+// json.RawMessage payloads) are shared read-only.
 func (s *JSONLSink) History() History {
-	return s.hist
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(History, len(s.hist))
+	copy(out, s.hist)
+	return out
 }
 
 // Lines returns a defensive copy (slice header only) of the raw JSONL bytes
@@ -534,6 +556,8 @@ func (s *JSONLSink) History() History {
 // Memory: O(N) per session.  Acceptable for phase A scale; phase B can
 // revisit if memory pressure surfaces.
 func (s *JSONLSink) Lines() [][]byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	out := make([][]byte, len(s.rawLines))
 	copy(out, s.rawLines)
 	return out
@@ -542,6 +566,8 @@ func (s *JSONLSink) Lines() [][]byte {
 // Close releases the advisory flock and closes the underlying file.
 // The kernel also releases the lock on process exit (including abnormal exit).
 func (s *JSONLSink) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	// Release the flock before closing (best-effort; Close also releases it).
 	_ = syscall.Flock(int(s.f.Fd()), syscall.LOCK_UN)
 	return s.f.Close()
