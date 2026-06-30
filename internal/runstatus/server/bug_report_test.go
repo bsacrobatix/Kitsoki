@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/host"
+	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/harrec"
 	"kitsoki/internal/runstatus/harscrub"
 )
@@ -19,6 +21,20 @@ import (
 // only touches s.recorder and s.bugRoot, so tests construct a bare Server and
 // skip the SessionProvider machinery entirely.
 func bugTestRecorder() *harrec.Recorder { return harrec.New(8) }
+
+type bugTraceSource struct {
+	events []runstatus.TraceEvent
+}
+
+func (s bugTraceSource) Snapshot() (runstatus.Snapshot, error) {
+	return runstatus.Snapshot{
+		Session: runstatus.SessionHeader{SessionID: "sess-1", Turn: 1, CurrentState: "main.idle"},
+		Events:  s.events,
+	}, nil
+}
+
+func (s bugTraceSource) Events() ([]runstatus.TraceEvent, error) { return s.events, nil }
+func (s bugTraceSource) AppDef() *app.AppDef                     { return nil }
 
 // harMustMarshal marshals a held HAR to a string for substring assertions.
 func harMustMarshal(t *testing.T, h *harscrub.Har) string {
@@ -211,6 +227,89 @@ func TestBugReport_CaptureIDPath_WithEvidence(t *testing.T) {
 	// capture_id consumed: a second report with it falls back to fresh snapshot.
 	if _, ok := s.takeCapture(capID); ok {
 		t.Fatalf("capture should be consumed by report")
+	}
+}
+
+func TestBugReport_WritesRedactedTraceArtifact(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	t.Setenv("HOME", home)
+	diagnosticText := "email alice@example.com and read " + home + "/secret.txt"
+
+	s := NewWithSource(bugTraceSource{events: []runstatus.TraceEvent{
+		{
+			Msg:       "turn.input",
+			SessionID: "sess-1",
+			Turn:      1,
+			StatePath: "main.idle",
+			Attrs: map[string]any{
+				"input":  diagnosticText,
+				"intent": "report_bug",
+				"slots": map[string]any{
+					"description": diagnosticText,
+					"count":       float64(3),
+				},
+			},
+		},
+		{
+			Msg:       "machine.transition",
+			SessionID: "sess-1",
+			Turn:      1,
+			StatePath: "main.idle",
+			Attrs: map[string]any{
+				"from": "main.idle",
+				"to":   "main.done",
+			},
+		},
+	}}, WithBugRoot(root))
+
+	res, rerr := s.bugReport(map[string]any{
+		"title":     "trace privacy",
+		"body":      "attach the trace",
+		"trace_ref": "sess-1",
+	})
+	if rerr != nil {
+		t.Fatalf("bugReport error: %+v", rerr)
+	}
+	id := res.(map[string]any)["id"].(string)
+
+	traceData, err := os.ReadFile(filepath.Join(root, "issues", "bugs", id+".artifacts", "trace.redacted.jsonl"))
+	if err != nil {
+		t.Fatalf("read trace.redacted.jsonl: %v", err)
+	}
+	trace := string(traceData)
+	for _, leaked := range []string{"alice@example.com", home + "/secret.txt"} {
+		if strings.Contains(trace, leaked) {
+			t.Fatalf("redacted trace leaks %q: %s", leaked, trace)
+		}
+	}
+	for _, want := range []string{`"msg":"turn.input"`, `"intent":"report_bug"`, `"count":3`, `"to":"main.done"`} {
+		if !strings.Contains(trace, want) {
+			t.Fatalf("redacted trace missing %q: %s", want, trace)
+		}
+	}
+
+	var first map[string]any
+	firstLine := strings.Split(strings.TrimSpace(trace), "\n")[0]
+	if err := json.Unmarshal([]byte(firstLine), &first); err != nil {
+		t.Fatalf("parse first trace event: %v", err)
+	}
+	inputAlias, _ := first["input"].(string)
+	slots, _ := first["slots"].(map[string]any)
+	descAlias, _ := slots["description"].(string)
+	if inputAlias == "" || !strings.HasPrefix(inputAlias, "[TEXT#") {
+		t.Fatalf("input was not aliased: %#v in %s", first["input"], trace)
+	}
+	if inputAlias != descAlias {
+		t.Fatalf("same sensitive text should reuse alias, input=%q description=%q trace=%s", inputAlias, descAlias, trace)
+	}
+
+	md, err := os.ReadFile(filepath.Join(root, "issues", "bugs", id+".md"))
+	if err != nil {
+		t.Fatalf("read bug md: %v", err)
+	}
+	if !strings.Contains(string(md), "./"+id+".artifacts/trace.redacted.jsonl") {
+		t.Fatalf("bug md missing redacted trace artifact link: %s", md)
 	}
 }
 
