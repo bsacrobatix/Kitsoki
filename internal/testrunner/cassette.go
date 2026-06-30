@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -709,6 +710,19 @@ func buildCassetteDispatcherFull(
 
 		if mode == "none" || mode == "" {
 			if fallback != nil {
+				// Replay-mode MISS falling back to the LIVE handler. This is the
+				// seam behind the punch-list studio flake: a host.run that should
+				// have been served by the cassette instead shells out to a real
+				// subprocess, which can then fail transiently under CI fork load
+				// and trip the room's on_error: arc. Log loudly (handler + the
+				// reserved `call` id + the episodes that WERE available) so a
+				// recurrence shows up in the trace instead of being invisible.
+				callID, _ := args["call"].(string)
+				slog.WarnContext(ctx, "cassette.miss.fallback_live",
+					slog.String("handler", handlerName),
+					slog.String("call", callID),
+					slog.Any("available_episodes", miss.AvailableEpisodes),
+				)
 				return fallback(ctx, args)
 			}
 			return host.Result{}, miss
