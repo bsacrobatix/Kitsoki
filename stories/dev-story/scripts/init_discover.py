@@ -137,6 +137,17 @@ def discover(path: Path) -> dict:
             dev_command = "make dev"
         elif "example" in targets:
             dev_command = "make example"
+    elif (path / "go.mod").exists():
+        # Go has canonical build/test commands, so the deterministic profile
+        # should never leave them "(not yet inferred)" — a Makefile target
+        # still wins where one exists. (Go has no universal "dev server", so
+        # dev_command stays empty unless a make dev/run target is present.)
+        build_command = "make build" if "build" in targets else "go build ./..."
+        test_command = "make test" if "test" in targets else "go test ./..."
+        if "dev" in targets:
+            dev_command = "make dev"
+        elif "run" in targets:
+            dev_command = "make run"
 
     return {
         "target_path": str(path),
