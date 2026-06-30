@@ -6,7 +6,8 @@
 // request/response pairs recorded at the choke point in handleRPC) and scrubs it
 // with the LLM-free harscrub anonymizer. Local filing writes
 // <root>/issues/bugs/<id>.md plus a sibling <id>.artifacts/ dir; GitHub filing
-// creates the issue and writes developer-only evidence under .artifacts/.
+// creates the issue, saves a local .artifacts/ copy of the evidence, and uploads
+// that evidence as release assets so the issue links public, anyone-can-open URLs.
 //
 // Root resolution (least-surprising, deterministic):
 //
@@ -186,9 +187,10 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 }
 
 // fileBugToGitHub files the bug as a real GitHub issue on s.ticketRepo: it
-// writes the (already-scrubbed) evidence to .artifacts for developer-local
-// review, hands those paths to host.GitHubFileBug, and returns the issue url. No
-// local issues/bugs/*.md file is written in this mode.
+// writes the (already-scrubbed) evidence to .artifacts as a local copy, hands
+// those paths to host.GitHubFileBug with UploadArtifacts set so the evidence is
+// uploaded as release assets and linked by public URL in the issue, and returns
+// the issue url. No local issues/bugs/*.md file is written in this mode.
 func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, traceRef string, repro []string, harJSON, png, rrwebJSON, consoleJSON []byte) (any, *rpcError) {
 	prefix := "bug-" + time.Now().UTC().Format("20060102T150405.000000000Z")
 	artifactsRoot, displayRoot, err := s.githubBugArtifactsRoot()
@@ -209,7 +211,13 @@ func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, t
 		if err := os.WriteFile(p, data, 0o644); err != nil {
 			return err
 		}
-		ev = append(ev, host.EvidenceFile{Name: base, Path: filepath.ToSlash(filepath.Join(displayRoot, prefix, base)), Image: image, Label: label})
+		ev = append(ev, host.EvidenceFile{
+			Name:       base,
+			Path:       filepath.ToSlash(filepath.Join(displayRoot, prefix, base)), // display-only reference
+			SourcePath: p,                                                          // real file to upload
+			Image:      image,
+			Label:      label,
+		})
 		return nil
 	}
 	for _, artifact := range []struct {
@@ -249,6 +257,11 @@ func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, t
 		KitsokiRev: gitShortRev(s.bugRoot),
 		FiledBy:    stringParam(params, "filed_by"),
 		Evidence:   ev,
+		// We are already online and gh-authed to file the issue itself, so upload
+		// the evidence as release assets and link the public URLs — otherwise the
+		// issue body would point at developer-local paths nobody else can open.
+		// Upload failures degrade gracefully to those local paths.
+		UploadArtifacts: true,
 	})
 	if ferr != nil {
 		return nil, serverErr(fmt.Errorf("file bug to github (%s): %w", s.ticketRepo, ferr))
