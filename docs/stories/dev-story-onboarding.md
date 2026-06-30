@@ -29,7 +29,7 @@ Defined in [`stories/dev-story/rooms/init.yaml`](../../stories/dev-story/rooms/i
 
 | Room | Does |
 |---|---|
-| `init_discover` | `on_enter` runs [`scripts/init_discover.py`](../../stories/dev-story/scripts/init_discover.py) against the target and binds the discovered profile (`init_project_id`, `init_stack`, dev/test/build commands, …). Reads nothing it shouldn't — discovery is **read-only**. |
+| `init_discover` | `on_enter` runs [`scripts/init_discover.py`](../../stories/dev-story/scripts/init_discover.py) against the target and binds the discovered profile (`init_project_id`, `init_stack`, dev/test/build commands, …). Commands are **stack-aware**: npm scripts, Cargo (`cargo build`/`test`, or Makefile targets), and Go (`go build ./...`/`go test ./...`, Makefile targets winning) — so a recognised stack is never left command-less. Reads nothing it shouldn't — discovery is **read-only**. |
 | `init` | Operator **reviews** the discovered profile. `confirm_init` applies; `revise_init` records feedback; `quit` returns to the workbench. No writes happen until confirm. |
 | `init_apply` | `on_enter` runs two best-effort host steps (below) and surfaces the written paths + MCP registration. |
 | `init_done` | Read-out of the applied result; `go_main` returns to the workbench. |
@@ -40,7 +40,10 @@ Defined in [`stories/dev-story/rooms/init.yaml`](../../stories/dev-story/rooms/i
 Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
 `init_discover`:
 
-- **`go_init`** — the explicit "onboard" quick action; discovers `world.workdir`.
+- **`go_init`** — the explicit "onboard" quick action. Its optional `target`
+  slot points at an **external** repo deterministically (no free-text routing):
+  the slot value becomes `init_request`, which `init_discover.py` resolves like
+  any path. An empty slot (the bare button) falls back to the current checkout.
 - **`work`** with an onboarding utterance — `landing`'s default intent captures
   free text, and a narrow guard routes leading verbs
   (`onboard …` / `project onboarding …` / `init project …`) into onboarding,
