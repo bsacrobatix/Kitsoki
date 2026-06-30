@@ -98,8 +98,12 @@ func AgentTaskHandler(ctx context.Context, args map[string]any) (Result, error) 
 	// ── Mandatory: agent: ─────────────────────────────────────────────────
 	agentName, _ := args["agent"].(string)
 	agentName = strings.TrimSpace(agentName)
-	if agentName == "" {
+	_, hasInlineContract := agentContractArg(args)
+	if agentName == "" && !hasInlineContract {
 		return Result{Error: "host.agent.task: agent: argument is required — declare a named agent in the agents: block"}, nil
+	}
+	if agentName == "" {
+		agentName = "<inline>"
 	}
 
 	agent, agentOK := resolveAgent(ctx, args)
@@ -260,6 +264,14 @@ func AgentTaskHandler(ctx context.Context, args map[string]any) (Result, error) 
 		}
 		defer bashMCPCleanup()
 		baseCLIArgs = append(baseCLIArgs, "--mcp-config", bashMCPPath)
+	}
+	if contractServers := effectiveMCPServers(args, agent); len(contractServers) > 0 {
+		contractMCPPath, contractMCPCleanup, mErr := writeMCPConfigTempfile(contractServers, "kitsoki-task-contract-mcp")
+		if mErr != nil {
+			return Result{Error: "host.agent.task: write contract MCP config: " + mErr.Error()}, nil
+		}
+		defer contractMCPCleanup()
+		baseCLIArgs = append(baseCLIArgs, "--mcp-config", contractMCPPath)
 	}
 	if len(tools) > 0 {
 		baseCLIArgs = appendAllowedToolsFlag(baseCLIArgs, tools)
