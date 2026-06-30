@@ -757,6 +757,126 @@ def test_score_cli_exits_zero_on_failed_verdict():
     # RED/GREEN logic; here we only guard the CLI exit contract.
 
 
+def _write_trace(path, events):
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+
+
+def test_classify_cell_separates_infra_from_model():
+    bench = _load("bench_classify", os.path.join(HERE, "bench.py"))
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+
+        # Worker never ran: no streams, no completed calls.
+        never = tdp / "never.jsonl"
+        _write_trace(never, [
+            {"kind": "session.header", "payload": {}},
+            {"kind": "harness.dispatched", "payload": {}},
+        ])
+        assert bench.classify_cell(str(never))["class"] == "infra:worker-never-ran"
+
+        # Silent stall: a start with no matching complete, no terminal, ends there.
+        stall = tdp / "stall.jsonl"
+        _write_trace(stall, [
+            {"kind": "agent.call.start", "call_id": "r1", "state_path": "bf.reproducing", "payload": {"agent": "bf__reproducer"}},
+            {"kind": "agent.stream", "state_path": "bf.reproducing", "payload": {}},
+            {"kind": "agent.call.complete", "call_id": "r1", "state_path": "bf.reproducing", "payload": {"agent": "bf__reproducer"}},
+            {"kind": "agent.call.start", "call_id": "j1", "state_path": "bf.reproducing", "payload": {"agent": "bf__judge"}},
+        ])
+        st = bench.classify_cell(str(stall))
+        assert st["class"] == "infra:stall", st
+        assert st["evidence"]["stalled_agent"] == "bf__judge", st
+
+        # Host/env error: complete calls then a git-identity commit failure, no terminal.
+        host = tdp / "host.jsonl"
+        _write_trace(host, [
+            {"kind": "agent.call.start", "call_id": "i1", "state_path": "bf.implementing", "payload": {"agent": "bf__implementer"}},
+            {"kind": "agent.stream", "state_path": "bf.implementing", "payload": {}},
+            {"kind": "agent.call.complete", "call_id": "i1", "state_path": "bf.implementing", "payload": {"agent": "bf__implementer"}},
+            {"kind": "harness.returned", "state_path": "bf.idle", "payload": {"error": "git.commit: Author identity unknown\n*** Please tell me who you are."}},
+        ])
+        h = bench.classify_cell(str(host))
+        assert h["class"] == "infra:host-error", h
+        assert h["evidence"]["error_label"] == "git-identity-missing", h
+
+        # Real model result: reached a terminal state with completed work.
+        model = tdp / "model.jsonl"
+        _write_trace(model, [
+            {"kind": "agent.call.start", "call_id": "i1", "state_path": "bf.implementing", "payload": {"agent": "bf__implementer"}},
+            {"kind": "agent.stream", "state_path": "bf.implementing", "payload": {}},
+            {"kind": "agent.call.complete", "call_id": "i1", "state_path": "bf.implementing", "payload": {"agent": "bf__implementer"}},
+            {"kind": "machine.state_entered", "state_path": "bf.done", "payload": {}},
+            {"kind": "machine.state_entered", "state_path": "finished", "payload": {}},
+        ])
+        assert bench.classify_cell(str(model))["class"] == "model:result"
+
+        # Absent trace.
+        assert bench.classify_cell(str(tdp / "nope.jsonl"))["class"] == "infra:no-trace"
+
+
+def test_mine_failures_aggregates_and_prioritizes(capsys=None):
+    bench = _load("bench_mine", os.path.join(HERE, "bench.py"))
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        cells = tdp / "results" / "cells"
+        traces = tdp / "traces"
+        cells.mkdir(parents=True)
+        traces.mkdir()
+
+        def cell(bug, cand, oracle_pass):
+            (cells / f"demo-{bug}-{cand}-kitsoki.json").write_text(json.dumps({
+                "project": "demo", "bug": bug, "candidate": cand,
+                "outcome": {"oracle_pass": oracle_pass},
+            }))
+
+        def trace(bug, cand, events):
+            (traces / f"demo-{bug}-{cand}.jsonl").write_text(
+                "\n".join(json.dumps(e) for e in events) + "\n")
+
+        # A genuine model miss (terminal + oracle fail).
+        cell("bug1", "glm", False)
+        trace("bug1", "glm", [
+            {"kind": "agent.call.start", "call_id": "i", "payload": {"agent": "impl"}},
+            {"kind": "agent.call.complete", "call_id": "i", "payload": {"agent": "impl"}},
+            {"kind": "machine.state_entered", "state_path": "bf.done", "payload": {}},
+        ])
+        # An infra host-error cell (must not count against the model).
+        cell("bug2", "glm", False)
+        trace("bug2", "glm", [
+            {"kind": "agent.call.start", "call_id": "i", "payload": {"agent": "impl"}},
+            {"kind": "agent.call.complete", "call_id": "i", "payload": {"agent": "impl"}},
+            {"kind": "harness.returned", "payload": {"error": "git.commit: Author identity unknown"}},
+        ])
+
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = bench.mine_failures(str(tdp / "results"), str(traces))
+        assert rc == 0
+        rep = json.loads(buf.getvalue())
+        assert rep["cells_scanned"] == 2, rep
+        assert rep["by_class"].get("model:result") == 1, rep
+        assert rep["by_class"].get("infra:host-error") == 1, rep
+        assert len(rep["model_misses"]) == 1 and rep["model_misses"][0]["bug"] == "bug1", rep
+        assert rep["host_error_labels"].get("git-identity-missing") == 1, rep
+        assert any("INFRASTRUCTURE" in a for a in rep["feedback_actions"]), rep
+
+
+def test_oracle_linter_flags_brittle_prose_not_messages():
+    bench = _load("bench_lint", os.path.join(HERE, "bench.py"))
+    # A brittle match on exact error prose — must be flagged.
+    brittle = 'if !strings.Contains(resB.Error, "already checked out by session") {'
+    # A behavior-style match on short synonyms + a failure MESSAGE with %q — must NOT be flagged.
+    good = (
+        'ok := strings.Contains(e, "in use by") || strings.Contains(e, "owned by")\n'
+        't.Fatalf("session B error did not name the owning session as expected: %q", e)\n'
+        'if !strings.Contains(e, "session-A") { t.Fatal("missing owner") }'
+    )
+    bf = bench._brittle_prose_literals(brittle)
+    assert len(bf) == 1 and "already checked out by session" in bf[0][1], bf
+    assert bench._brittle_prose_literals(good) == [], bench._brittle_prose_literals(good)
+
+
 def json_load(raw):
     import json
     return json.loads(raw)

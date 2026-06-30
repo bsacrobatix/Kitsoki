@@ -324,6 +324,160 @@ def classify_cell(trace):
             "evidence": evidence}
 
 
+# Containment/match calls (Go test / JS-TS test) where a string literal is
+# matched against program OUTPUT. A brittle oracle pins the candidate's exact
+# ERROR PROSE in one of these instead of asserting observable behavior. We match
+# only these call forms — NOT generic "assert"/"expect" — so a t.Fatalf(...)
+# failure-MESSAGE string (which legitimately reads like prose) isn't flagged.
+_MATCH_CALL_HINTS = ("strings.contains(", "strings.hasprefix(", "strings.hassuffix(",
+                     "strings.containsany(", ".contains(", ".includes(",
+                     "tocontain", "tomatch", "assertcontains", "containssubstring")
+_STR_LITERAL = None  # compiled lazily (avoid a module-level import-time cost)
+
+
+def _brittle_prose_literals(text):
+    """Heuristic: flag natural-language string literals used in assertions.
+    A literal of >=3 alphabetic words, >=18 chars, that is mostly letters/spaces
+    is almost certainly a human-readable sentence — pinning it asserts one
+    implementation's PROSE, not behavior, and wrongly fails equivalent fixes
+    (the bug9 oracle pinned "already checked out by session" and failed a fix
+    that said "in use by session"). Returns [(lineno, literal)]."""
+    import re
+    global _STR_LITERAL
+    if _STR_LITERAL is None:
+        _STR_LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
+    findings = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        low = line.lower()
+        if not any(h in low for h in _MATCH_CALL_HINTS):
+            continue
+        for mo in _STR_LITERAL.finditer(line):
+            lit = mo.group(1)
+            if "%" in lit:  # printf-format string → a message, not a match target
+                continue
+            words = [w for w in lit.replace("\\n", " ").replace("\\t", " ").split() if w]
+            alpha_words = [w for w in words if any(c.isalpha() for c in w)]
+            if len(alpha_words) < 3 or len(lit) < 18:
+                continue
+            naturalness = sum(c.isalpha() or c.isspace() for c in lit) / max(1, len(lit))
+            if naturalness > 0.7:
+                findings.append((lineno, lit))
+    return findings
+
+
+def lint_oracles(m, bug_ids=None, strict=False):
+    """Scan each bug's oracle test for brittle exact-prose assertions and report
+    them. Advisory by default (exit 0); --strict exits nonzero on any finding.
+    Complements `verify` (RED@baseline / GREEN@fix): RED/GREEN against ONE fix
+    can't reveal that the oracle would reject an EQUIVALENT correct fix."""
+    results = []
+    total = 0
+    for b in selected_bugs(m, bug_ids):
+        if b.get("reference_only"):
+            continue
+        oracle = m["_dir"] / b.get("oracle_test", "")
+        if not oracle.exists():
+            results.append({"bug": b.get("id"), "oracle": str(oracle), "error": "missing"})
+            continue
+        findings = _brittle_prose_literals(oracle.read_text())
+        total += len(findings)
+        results.append({
+            "bug": b.get("id"),
+            "oracle": str(oracle),
+            "brittle_prose": [{"line": ln, "literal": lit} for ln, lit in findings],
+        })
+    out = {
+        "ok": total == 0,
+        "total_brittle": total,
+        "results": results,
+        "guidance": ("Assert observable BEHAVIOR, not one implementation's exact "
+                     "error prose. Accept any equivalent wording (e.g. a set of "
+                     "synonyms) plus the load-bearing identifiers. See ORACLE_GUIDE.md."),
+    }
+    print(json.dumps(out, indent=2))
+    return 1 if (strict and total > 0) else 0
+
+
+def mine_failures(results_dir, traces_dir, markdown=None):
+    """Turn a sweep into a prioritized feedback list. Classifies every scored
+    cell (via its trace) and aggregates the patterns that should flow BACK into
+    the harness and the stories:
+      - infra:* patterns (stalled agents, host-error labels) → fix provisioning
+        / the harness, NOT the model.
+      - model:result + oracle fail → real model misses; the states they reached
+        and the bug they missed are the signal for tightening the story
+        (room gates, ticket guidance) the model wandered in.
+    This is the loop that lets aggressive runs improve the stories instead of
+    just scoring models. Output is advisory (always exit 0)."""
+    results = Path(results_dir)
+    traces = Path(traces_dir)
+    cells_dir = results / "cells" if (results / "cells").is_dir() else results
+    by_class = {}
+    stalled_agents = {}
+    host_labels = {}
+    model_misses = []
+    cells = []
+    for cell_json in sorted(cells_dir.glob("*.json")):
+        try:
+            cell = json.loads(cell_json.read_text())
+        except Exception:
+            continue
+        proj, bug, cand = cell.get("project"), cell.get("bug"), cell.get("candidate")
+        if not (proj and bug and cand):
+            continue
+        trace = traces / f"{proj}-{bug}-{cand}.jsonl"
+        health = classify_cell(str(trace))
+        cls = health["class"]
+        by_class[cls] = by_class.get(cls, 0) + 1
+        ev = health.get("evidence", {})
+        if cls == "infra:stall" and ev.get("stalled_agent"):
+            stalled_agents[ev["stalled_agent"]] = stalled_agents.get(ev["stalled_agent"], 0) + 1
+        if cls == "infra:host-error" and ev.get("error_label"):
+            host_labels[ev["error_label"]] = host_labels.get(ev["error_label"], 0) + 1
+        oracle_pass = (cell.get("outcome", {}) or {}).get("oracle_pass")
+        if cls == "model:result" and oracle_pass is False:
+            model_misses.append({"bug": bug, "candidate": cand,
+                                 "states_reached": ev.get("states_visited", [])})
+        cells.append({"bug": bug, "candidate": cand, "class": cls,
+                      "oracle_pass": oracle_pass})
+
+    actions = []
+    infra_total = sum(v for k, v in by_class.items() if k.startswith("infra"))
+    if infra_total:
+        actions.append(f"{infra_total} cell(s) failed on INFRASTRUCTURE, not the model — "
+                       "these must not be scored against any candidate. Fix the harness/provisioning first.")
+    for label, n in sorted(host_labels.items(), key=lambda x: -x[1]):
+        actions.append(f"host-error '{label}' x{n} → bake the fix into provision_vm.sh / the harness.")
+    for agent, n in sorted(stalled_agents.items(), key=lambda x: -x[1]):
+        actions.append(f"agent '{agent}' stalled x{n} → suspect quota/timeout; check tool_timeout_sec + quota window.")
+    if model_misses:
+        actions.append(f"{len(model_misses)} genuine model miss(es) reached a terminal state — "
+                       "review the ticket's layer/behavior guidance and the room gate the model wandered in "
+                       "(this is the story-training signal). See ORACLE_GUIDE.md + the bugfix story.")
+
+    report = {
+        "ok": True,
+        "cells_scanned": len(cells),
+        "by_class": by_class,
+        "stalled_agents": stalled_agents,
+        "host_error_labels": host_labels,
+        "model_misses": model_misses,
+        "feedback_actions": actions,
+        "cells": cells,
+    }
+    if markdown:
+        lines = ["# Bake-off feedback — mined from a sweep", "",
+                 f"Scanned **{len(cells)}** scored cells.", "",
+                 "## Health breakdown", ""]
+        for cls, n in sorted(by_class.items(), key=lambda x: -x[1]):
+            lines.append(f"- `{cls}`: {n}")
+        lines += ["", "## Feedback actions (highest-leverage first)", ""]
+        lines += [f"{i+1}. {a}" for i, a in enumerate(actions)] or ["- (none — all cells healthy)"]
+        Path(markdown).write_text("\n".join(lines) + "\n")
+    print(json.dumps(report, indent=2))
+    return 0
+
+
 def candidate_meta(candidates_path, key):
     """Look up model/effort/provider for a candidate key from candidates.yaml.
     Returns {} if the file or key is absent (back-compat for ad-hoc scoring)."""
@@ -1710,6 +1864,16 @@ def main():
     pc.add_argument("--treatment", default="kitsoki")
     pc.add_argument("--candidates", default=str(HERE / "candidates.yaml"),
                     help="candidates.yaml for model/effort/provider lookup by --candidate")
+    mf = sub.add_parser("mine-failures")  # classify a sweep + emit feedback actions
+    mf.add_argument("--results", default="../../../.artifacts/external-bakeoff/results",
+                    help="results dir (cells/ under it)")
+    mf.add_argument("--traces", default="../../../.artifacts/external-bakeoff/traces",
+                    help="traces dir holding <project>-<bug>-<candidate>.jsonl")
+    mf.add_argument("--markdown", help="optional Markdown feedback report")
+    lo = sub.add_parser("lint-oracles")  # flag brittle exact-prose oracle assertions
+    lo.add_argument("--project", required=True)
+    lo.add_argument("--bug", action="append", help="bug id to lint; repeat or comma-separate; default all")
+    lo.add_argument("--strict", action="store_true", help="exit nonzero on any brittle-prose finding")
     mt = sub.add_parser("meta")  # machine-readable project facts (for the Go runner)
     mt.add_argument("--project", required=True)
     mt.add_argument("--bug")     # optional: emit one bug's drive facts
@@ -1731,11 +1895,15 @@ def main():
     if a.cmd == "classify":
         print(json.dumps(classify_cell(a.trace)))
         sys.exit(0)
+    if a.cmd == "mine-failures":
+        sys.exit(mine_failures(a.results, a.traces, markdown=a.markdown))
     if a.cmd == "summarize":
         sys.exit(summarize(load(a.project), a.results, a.deck, a.markdown,
                            allow_empty=a.allow_empty))
 
     m = load(a.project)
+    if a.cmd == "lint-oracles":
+        sys.exit(lint_oracles(m, bug_ids=a.bug, strict=a.strict))
     if a.cmd == "preflight":
         sys.exit(preflight(m, repo_dir=a.repo_dir, candidate=a.candidate,
                            candidates_path=a.candidates, bug_ids=a.bug))
