@@ -16,6 +16,8 @@ import (
 	"context"
 )
 
+type cliExecEnvKey struct{}
+
 // execRunner is the function signature used to run external commands.
 // Production code wires it to runRealCommand; tests substitute their
 // own via SetExecRunnerForTest.
@@ -34,4 +36,39 @@ func SetExecRunnerForTest(r execRunner) func() {
 	prev := cliExec
 	cliExec = r
 	return func() { cliExec = prev }
+}
+
+// WithCLIExecEnv returns a child context carrying per-command environment
+// overrides for host CLI calls. It is intentionally scoped to the context so
+// concurrent live GitHub/App operations do not race through process-global env.
+func WithCLIExecEnv(ctx context.Context, env map[string]string) context.Context {
+	if len(env) == 0 {
+		return ctx
+	}
+	copied := make(map[string]string, len(env))
+	for k, v := range env {
+		copied[k] = v
+	}
+	return context.WithValue(ctx, cliExecEnvKey{}, copied)
+}
+
+// CLIExecEnvFromCtx returns the per-command environment overrides installed by
+// WithCLIExecEnv, or nil when the caller wants the ambient environment.
+func CLIExecEnvFromCtx(ctx context.Context) map[string]string {
+	if ctx == nil {
+		return nil
+	}
+	env, _ := ctx.Value(cliExecEnvKey{}).(map[string]string)
+	if len(env) == 0 {
+		return nil
+	}
+	copied := make(map[string]string, len(env))
+	for k, v := range env {
+		copied[k] = v
+	}
+	return copied
+}
+
+func envWithCLIExec(env []string, override map[string]string) []string {
+	return envWithProvider(env, override)
 }

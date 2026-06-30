@@ -6,15 +6,23 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"kitsoki/internal/ghagent/githubapp"
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 
 	_ "modernc.org/sqlite"
 )
+
+type staticServeTokenSource struct{ token string }
+
+func (s staticServeTokenSource) InstallationToken(context.Context) (string, time.Time, error) {
+	return s.token, time.Now().Add(time.Hour), nil
+}
 
 func TestWebhookMentionIssueComment(t *testing.T) {
 	body := []byte(`{
@@ -50,6 +58,38 @@ func TestWebhookMentionIssueComment(t *testing.T) {
 	}
 	if len(labels) != 1 || labels[0] != "bug" {
 		t.Fatalf("labels=%v", labels)
+	}
+}
+
+func TestWithGHAgentAuthInstallsCLIExecEnv(t *testing.T) {
+	prevTokenSource := newGitHubAppTokenSource
+	newGitHubAppTokenSource = func(*githubapp.Config, githubapp.Doer) (githubapp.TokenSource, error) {
+		return staticServeTokenSource{token: "installation-token"}, nil
+	}
+	t.Cleanup(func() { newGitHubAppTokenSource = prevTokenSource })
+	t.Setenv("GH_TOKEN", "ambient-token")
+
+	var seen map[string]string
+	err := withGHAgentAuth(context.Background(), ghAgentServeOptions{
+		UseGitHubApp:   true,
+		AppID:          123,
+		InstallationID: 456,
+		AppKeyFile:     "unused-test-key.pem",
+	}, func(ctx context.Context) error {
+		seen = host.CLIExecEnvFromCtx(ctx)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("withGHAgentAuth: %v", err)
+	}
+	if seen["GH_TOKEN"] != "installation-token" {
+		t.Fatalf("GH_TOKEN=%q, want installation-token", seen["GH_TOKEN"])
+	}
+	if seen["GITHUB_TOKEN"] != "installation-token" {
+		t.Fatalf("GITHUB_TOKEN=%q, want installation-token", seen["GITHUB_TOKEN"])
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "ambient-token" {
+		t.Fatalf("ambient GH_TOKEN=%q, want restored ambient-token", got)
 	}
 }
 

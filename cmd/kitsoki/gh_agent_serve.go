@@ -86,7 +86,7 @@ func newGHAgentServeCmd() *cobra.Command {
 				InstallationID:    installationID,
 				AppKeyFile:        appKeyFile,
 			}
-			if err := withGHAgentAuth(ctx, opts, func() error { return nil }); err != nil {
+			if err := withGHAgentAuth(ctx, opts, func(context.Context) error { return nil }); err != nil {
 				return err
 			}
 			return runGHAgentServe(ctx, store, opts)
@@ -188,8 +188,8 @@ func runGHAgentReconcileLoop(ctx context.Context, store *jobs.GHJobStore, opts g
 }
 
 func runGHAgentReconcileOnce(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) error {
-	return withGHAgentAuth(ctx, opts, func() error {
-		return runGHAgentReconcileOnceAuthed(ctx, store, opts)
+	return withGHAgentAuth(ctx, opts, func(authedCtx context.Context) error {
+		return runGHAgentReconcileOnceAuthed(authedCtx, store, opts)
 	})
 }
 
@@ -244,13 +244,13 @@ func runGHAgentPollLoop(ctx context.Context, store *jobs.GHJobStore, opts ghAgen
 }
 
 func runGHAgentPollOnce(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) error {
-	return withGHAgentAuth(ctx, opts, func() error {
-		items, err := pollInboxItems(ctx, opts.Repo, "")
+	return withGHAgentAuth(ctx, opts, func(authedCtx context.Context) error {
+		items, err := pollInboxItems(authedCtx, opts.Repo, "")
 		if err != nil {
 			return err
 		}
 		for _, mention := range ghagent.FilterMentions(items, opts.Repo, opts.Trigger) {
-			if _, err := dispatchGHAgentMention(ctx, store, opts, mention, nil); err != nil {
+			if _, err := dispatchGHAgentMention(authedCtx, store, opts, mention, nil); err != nil {
 				fmt.Fprintf(os.Stderr, "gh-agent: dispatch %s: %v\n", mention.OriginRef, err)
 			}
 		}
@@ -284,9 +284,9 @@ func ghAgentWebhookHandler(store *jobs.GHJobStore, opts ghAgentServeOptions) htt
 			return
 		}
 		var job *jobs.GHJob
-		err = withGHAgentAuth(r.Context(), opts, func() error {
+		err = withGHAgentAuth(r.Context(), opts, func(authedCtx context.Context) error {
 			var dispatchErr error
-			job, dispatchErr = dispatchGHAgentMention(r.Context(), store, opts, mention, labels)
+			job, dispatchErr = dispatchGHAgentMention(authedCtx, store, opts, mention, labels)
 			return dispatchErr
 		})
 		if err != nil {
@@ -303,13 +303,13 @@ func ghAgentWebhookHandler(store *jobs.GHJobStore, opts ghAgentServeOptions) htt
 	}
 }
 
-func withGHAgentAuth(ctx context.Context, opts ghAgentServeOptions, fn func() error) error {
-	restoreGHToken, err := setupGitHubAppAuth(ctx, opts.UseGitHubApp, opts.AppID, opts.InstallationID, opts.AppKeyFile)
+func withGHAgentAuth(ctx context.Context, opts ghAgentServeOptions, fn func(context.Context) error) error {
+	authedCtx, restoreGHToken, err := setupGitHubAppAuth(ctx, opts.UseGitHubApp, opts.AppID, opts.InstallationID, opts.AppKeyFile)
 	if err != nil {
 		return err
 	}
 	defer restoreGHToken()
-	return fn()
+	return fn(authedCtx)
 }
 
 func dispatchGHAgentMention(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions, mention ghagent.Mention, labels []string) (*jobs.GHJob, error) {
