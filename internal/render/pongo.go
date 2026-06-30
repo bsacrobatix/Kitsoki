@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/flosch/pongo2/v6"
 	"github.com/muesli/reflow/wordwrap"
@@ -13,6 +14,24 @@ import (
 	"kitsoki/internal/expr"
 	"kitsoki/internal/render/sourcecolor"
 )
+
+// globalPongoMu serialises compilation against pongo2's package-level
+// DefaultSet (the set behind pongo2.FromString). That set caches compiled
+// templates in an unsynchronised map shared process-wide, so two goroutines
+// compiling inline templates concurrently — e.g. one session's foreground turn
+// and another session's background job listener both rendering a scalar view
+// leaf — race on the cache. Holding mu around FromString keeps the compile
+// single-threaded; Execute is left unlocked because these inline templates have
+// no loader-backed {% include %}/{% extends %}, so executing them never touches
+// the cache map. See AppRenderer.mu for the per-app twin of this guard.
+var globalPongoMu sync.Mutex
+
+// compileGlobal compiles src against pongo2's DefaultSet under globalPongoMu.
+func compileGlobal(src string) (*pongo2.Template, error) {
+	globalPongoMu.Lock()
+	defer globalPongoMu.Unlock()
+	return pongo2.FromString(src)
+}
 
 // TemplateErrorSnippetLength bounds the template source echoed in a wrapped
 // render error. Inline view leaves are usually short, but a multi-line
@@ -254,7 +273,7 @@ func PongoParse(src string) error {
 	if !hasDelims(src) {
 		return nil
 	}
-	if _, err := pongo2.FromString(preprocessCoalesce(src)); err != nil {
+	if _, err := compileGlobal(preprocessCoalesce(src)); err != nil {
 		return wrapTemplateError(src, err)
 	}
 	return nil
@@ -272,7 +291,7 @@ func Pongo(src string, env expr.Env) (out string, err error) {
 		return src, nil
 	}
 	src = preprocessCoalesce(src)
-	tpl, err := pongo2.FromString(src)
+	tpl, err := compileGlobal(src)
 	if err != nil {
 		return "", wrapTemplateError(src, err)
 	}
