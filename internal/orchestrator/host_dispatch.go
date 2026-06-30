@@ -374,7 +374,14 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			// route here", and "never registered" is a stronger failure
 			// than a non-zero exit.  Stop processing further calls.
 			if hc.OnError != "" {
-				o.logger.DebugContext(ctx, trace.EvHostOnErrorRedirect,
+				// WARN, not DEBUG: an INFRA host failure (the call could not run
+				// at all — handler missing, or a subprocess that failed to spawn
+				// under fork/memory load) routing to on_error is exactly the
+				// signal you need visible in CI to root-cause a flake like the
+				// punch-list studio test (host.run → needs_human). The error
+				// string carries the underlying cause (e.g. "exec: ... resource
+				// temporarily unavailable").
+				o.logger.WarnContext(ctx, trace.EvHostOnErrorRedirect,
 					slog.String("session_id", string(sid)),
 					slog.String("namespace", hc.Namespace),
 					slog.String("from", string(state)),
