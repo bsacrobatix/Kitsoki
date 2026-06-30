@@ -7,6 +7,14 @@
     "slidey": {
       "command": "node",
       "args": ["/Users/brad/code/slidey/src/mcp.js", "--root", "/Users/brad/code/Kitsoki"]
+    },
+    "stagehand": {
+      "command": "node",
+      "args": ["/Users/brad/code/Kitsoki/tools/stagehand-mcp/server.mjs"],
+      "env": {
+        "KITSOKI_REPO": "/Users/brad/code/Kitsoki",
+        "KITSOKI_AGENT_CMD": "kitsoki"
+      }
     }
   }
 }
