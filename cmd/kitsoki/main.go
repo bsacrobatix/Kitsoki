@@ -250,6 +250,14 @@ folder (walking up from cwd). Use 'kitsoki trace <path>' to pretty-print.
 See 'kitsoki docs llm-guide' for the full operator guide.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// `run` owns the terminal. Silence the process-wide default logger
+			// from the start of command execution so loader advisories and
+			// validation warnings cannot interleave with Cobra errors/usage
+			// before Bubble Tea has a chance to install its own rendering loop.
+			oldRunLogger := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+			defer slog.SetDefault(oldRunLogger)
+
 			// Restore terminal modes on any exit path so a panic before
 			// tea.Program.Run installs its own recovery — or a prior crash
 			// that already left the terminal in alt-screen / mouse-reporting
@@ -1333,9 +1341,12 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 //   - CSI ?1049 l — leave alternate screen buffer
 //
 // Written to stderr so it doesn't interleave with structured stdout output
-// (e.g. JSON traces piped to a file). A bare terminal will render the
-// sequence; a pipe (no terminal) will silently absorb it.
+// (e.g. JSON traces piped to a file). When stderr is not a terminal, skip the
+// sequence so captured startup errors stay readable.
 func restoreTerminal() {
+	if !isatty(os.Stderr) {
+		return
+	}
 	const seq = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1049l"
 	_, _ = fmt.Fprint(os.Stderr, seq)
 }

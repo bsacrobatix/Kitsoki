@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,5 +145,47 @@ func TestCLI_UnknownSubcommandFails(t *testing.T) {
 	_, err := execRoot(t, "nope-not-a-real-subcommand")
 	if err == nil {
 		t.Fatal("expected unknown subcommand to error")
+	}
+}
+
+func TestCLI_RunStartupErrorSuppressesLoaderWarnings(t *testing.T) {
+	appPath := filepath.Join(t.TempDir(), "app.yaml")
+	if err := os.WriteFile(appPath, []byte(`
+app:
+  id: warning-app
+  version: 0.1.0
+world:
+  feature_branch_diff: { type: string, default: "(pending)" }
+intents:
+  go: {}
+root: start
+states:
+  start:
+    on_enter:
+      - invoke: host.diff
+        bind:
+          feature_branch_diff: diff
+    view: "{{ world.feature_branch_diff }}"
+`), 0o644); err != nil {
+		t.Fatalf("write app: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	out, err := execRoot(t, "run", appPath, "--mode", "definitely-not-a-mode")
+	if err == nil {
+		t.Fatal("expected run to fail before launching TUI")
+	}
+	if strings.Contains(logBuf.String(), "view references an on_enter bind-target") {
+		t.Fatalf("loader advisory leaked to default slog during run startup:\n%s", logBuf.String())
+	}
+	if strings.Contains(out, "view references an on_enter bind-target") {
+		t.Fatalf("loader advisory leaked to cobra output:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "--mode") {
+		t.Fatalf("expected mode validation error, got %v", err)
 	}
 }
