@@ -175,9 +175,10 @@ func AgentDecideHandler(ctx context.Context, args map[string]any) (Result, error
 	_, validatorBlockPresent := args["validator"]
 
 	// Build merged mcp_servers map with auto-attached submit validator.
-	mcpServers := effectiveMCPServers(args, agent)
-	if mcpServers == nil {
-		mcpServers = make(map[string]any)
+	callerServers, _ := args["mcp_servers"].(map[string]any)
+	mcpServers := make(map[string]any, len(callerServers)+1)
+	for k, v := range callerServers {
+		mcpServers[k] = v
 	}
 
 	// Attach kitsoki-bash MCP server when Bash is in the tool list.

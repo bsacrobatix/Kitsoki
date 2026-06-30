@@ -210,8 +210,8 @@ func TestDispatchInitialAckFailureMarksJobFailed(t *testing.T) {
 	if got.State != jobs.GHFailed {
 		t.Fatalf("State = %q, want failed; job=%+v", got.State, got)
 	}
-	if got.Story != StoryPRBeat {
-		t.Fatalf("Story = %q, want %q", got.Story, StoryPRBeat)
+	if got.Story != StoryPRRebase {
+		t.Fatalf("Story = %q, want %q", got.Story, StoryPRRebase)
 	}
 	if !strings.Contains(got.ErrMsg, "Bad credentials") {
 		t.Fatalf("ErrMsg = %q, want Bad credentials", got.ErrMsg)
@@ -231,6 +231,119 @@ func TestDispatchInitialAckFailureMarksJobFailed(t *testing.T) {
 	}
 	if !hasEvent(events, jobs.GHFailed) {
 		t.Fatalf("events missing failed transition: %+v", events)
+	}
+}
+
+func TestDispatchTerminalPRStatusJobReroutesToRebaseRequest(t *testing.T) {
+	ctx := context.Background()
+	store := newGHJobStore(t)
+	initial, won, err := store.Claim(ctx, jobs.GHMention{
+		OriginRef:    "github:o/r/pr/56",
+		Repo:         "o/r",
+		ObjectKind:   "pr",
+		ObjectNumber: "56",
+	}, "worker-old")
+	if err != nil {
+		t.Fatalf("Claim initial: %v", err)
+	}
+	if !won {
+		t.Fatal("initial claim did not win")
+	}
+	if err := store.SetStory(ctx, initial.JobID, StoryPRBeat); err != nil {
+		t.Fatalf("SetStory: %v", err)
+	}
+	if err := store.Advance(ctx, initial.JobID, jobs.GHDone, ""); err != nil {
+		t.Fatalf("Advance done: %v", err)
+	}
+
+	var spawned Route
+	rec := &recordingComments{commentID: "https://github.com/o/r/pull/56#issuecomment-1"}
+	d := &Dispatcher{
+		Jobs:          store,
+		Routes:        DefaultLabelStoryMap(),
+		Comments:      &CommentStore{Exec: rec.handler, Repo: "o/r"},
+		WorkerID:      "worker-new",
+		PublicBaseURL: "https://agent.example",
+		SpawnFn: func(_ context.Context, route Route, _ *jobs.GHJob) (RunResult, error) {
+			spawned = route
+			return RunResult{FinalState: "pr_rebased", Turns: 1, Summary: "rebased"}, nil
+		},
+	}
+	job, err := d.Dispatch(ctx, Mention{
+		Item: host.GitHubInboxItem{Kind: "pr", Number: "56", Title: "@kitsoki resolve the merge conflicts"},
+		Repo: "o/r", OriginRef: "github:o/r/pr/56", Trigger: DefaultMentionTrigger,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if spawned.Story != StoryPRRebase {
+		t.Fatalf("spawned story=%q, want %q", spawned.Story, StoryPRRebase)
+	}
+	if job.JobID != initial.JobID {
+		t.Fatalf("reroute should reuse existing job id %q, got %q", initial.JobID, job.JobID)
+	}
+	if job.State != jobs.GHDone {
+		t.Fatalf("state=%q, want done", job.State)
+	}
+	if job.Story != StoryPRRebase {
+		t.Fatalf("job story=%q, want %q", job.Story, StoryPRRebase)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.bodies) == 0 || !strings.Contains(rec.bodies[len(rec.bodies)-1], "rebased") {
+		t.Fatalf("final comment bodies=%v, want rebased summary", rec.bodies)
+	}
+}
+
+func TestDispatchFailedPRRebaseRetriesRebaseRequest(t *testing.T) {
+	ctx := context.Background()
+	store := newGHJobStore(t)
+	initial, won, err := store.Claim(ctx, jobs.GHMention{
+		OriginRef:    "github:o/r/pr/56",
+		Repo:         "o/r",
+		ObjectKind:   "pr",
+		ObjectNumber: "56",
+	}, "worker-old")
+	if err != nil {
+		t.Fatalf("Claim initial: %v", err)
+	}
+	if !won {
+		t.Fatal("initial claim did not win")
+	}
+	if err := store.SetStory(ctx, initial.JobID, StoryPRRebase); err != nil {
+		t.Fatalf("SetStory: %v", err)
+	}
+	if err := store.Advance(ctx, initial.JobID, jobs.GHFailed, "previous auth failure"); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	spawnCalls := 0
+	d := &Dispatcher{
+		Jobs:          store,
+		Routes:        DefaultLabelStoryMap(),
+		Comments:      &CommentStore{Exec: (&recordingComments{commentID: "https://github.com/o/r/pull/56#issuecomment-1"}).handler, Repo: "o/r"},
+		WorkerID:      "worker-new",
+		PublicBaseURL: "https://agent.example",
+		SpawnFn: func(_ context.Context, route Route, _ *jobs.GHJob) (RunResult, error) {
+			spawnCalls++
+			if route.Story != StoryPRRebase {
+				t.Fatalf("route story=%q, want %q", route.Story, StoryPRRebase)
+			}
+			return RunResult{FinalState: "pr_rebased", Turns: 1, Summary: "rebased"}, nil
+		},
+	}
+	job, err := d.Dispatch(ctx, Mention{
+		Item: host.GitHubInboxItem{Kind: "pr", Number: "56", Title: "@kitsoki resolve the merge conflicts"},
+		Repo: "o/r", OriginRef: "github:o/r/pr/56", Trigger: DefaultMentionTrigger,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if spawnCalls != 1 {
+		t.Fatalf("spawnCalls=%d, want 1", spawnCalls)
+	}
+	if job.State != jobs.GHDone {
+		t.Fatalf("state=%q, want done", job.State)
 	}
 }
 

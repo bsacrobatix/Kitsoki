@@ -286,6 +286,37 @@ The built-in handlers (full reference in `docs/architecture/hosts.md`):
 | `host.inbox.add` | Mirror an artifact into the operator's local inbox. |
 | `host.chat.*` | Persistent multi-turn chat threads scoped by `(app, room, scope_key)`. |
 
+### Operator questions and MCP-aware asking
+
+When a story needs human input mid-flow, prefer the runtime/operator-aware ask
+path whenever one is available. The important constraint is that the ask remains
+part of the story graph: questions are data in `world`, the ask is an `invoke:`
+with an `id:`, answers are bound through ordinary effects, and flow fixtures can
+stub the same call.
+
+Use this shape for clarification gates:
+
+- Generate questions with an analyst/decide call or deterministic script, then
+  bind them into `world`.
+- Invoke the story-level operator ask host (for example `host.operator.ask`, once
+  available) only when questions remain unanswered. A live web/TUI/MCP Studio
+  surface answers through the shared `OperatorPrompter` seam; MCP Studio uses MCP
+  elicitation when possible and a `session.answer` fallback otherwise.
+- Treat no attached operator as a normal result, not a failure: stay in the same
+  clarification room, show the questions, and let the operator answer through the
+  ordinary typed intents, skip, regenerate, or exit needs-human.
+- Add flow coverage for both `answered` and `no_operator`/fallback results by
+  stubbing the ask call by `id:`. Cassettes should record/replay that same host
+  call shape.
+
+Do **not** hide story behavior in agent-only prompt instructions. In particular,
+never rely on Claude Code's `AskUserQuestion`: dispatched agents run headless,
+the tool auto-resolves with empty answers, and kitsoki hard-denies it. Likewise,
+do not make a branch that only exists when `mcp__operator__ask` is attached to an
+agent. If MCP-aware asking changes the outcome, expose it as a story-visible
+host/effect so headless, flows, cassettes, web, TUI, and MCP Studio exercise the
+same transition.
+
 ## 6. Views (the typed-element form)
 
 **Always `view: extends: "base"`. Never a `view: |` string** unless

@@ -109,16 +109,6 @@ func AgentConverseHandler(ctx context.Context, args map[string]any) (Result, err
 
 	permMode, _ := args["permission_mode"].(string)
 	if permMode == "" {
-		if p, ok := args["permissions"].(map[string]any); ok {
-			permMode, _ = p["mode"].(string)
-		}
-	}
-	if permMode == "" {
-		if a, ok := resolveAgent(ctx, args); ok {
-			permMode = a.Permissions.Mode
-		}
-	}
-	if permMode == "" {
 		permMode = "bypassPermissions"
 	}
 	if !validPermissionModes[permMode] {
@@ -211,16 +201,8 @@ func AgentConverseHandler(ctx context.Context, args map[string]any) (Result, err
 	var opAskCleanup func()
 	cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
 	defer opAskCleanup()
-	if contractServers := effectiveMCPServers(args, agent); len(contractServers) > 0 {
-		contractMCPPath, contractMCPCleanup, mErr := writeMCPConfigTempfile(contractServers, "kitsoki-converse-contract-mcp")
-		if mErr != nil {
-			return Result{Error: fmt.Sprintf("host.agent.converse: write contract MCP config: %v", mErr)}, nil
-		}
-		defer contractMCPCleanup()
-		cliArgs = append(cliArgs, "--mcp-config", contractMCPPath)
-	}
 	cliArgs = appendAllowedToolsFlag(cliArgs, tools)
-	cliArgs = appendDisallowedToolsFlag(cliArgs, append(disallowedTools, effectiveDisallowedTools(args, agent)...))
+	cliArgs = appendDisallowedToolsFlag(cliArgs, disallowedTools)
 
 	cr, _, runErr := AgentStreamer{
 		Bin:        bin,

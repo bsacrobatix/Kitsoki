@@ -76,12 +76,9 @@ type Agent struct {
 	// it per call; empty leaves the CLI default.
 	Effort             string
 	Tools              []string
-	MCPTools           []string
-	MCPServers         map[string]any
 	BashProfile        *BashProfile
 	DefaultCwd         string
 	ExternalSideEffect *bool
-	Permissions        AgentPermissions
 	// InheritClaudeDefault, when true, opts this agent out of the layered
 	// system prompt: its persona is appended (--append-system-prompt) onto
 	// Claude Code's default rather than composed under the kitsoki + project
@@ -94,15 +91,6 @@ type Agent struct {
 	// An effect's `with: { provider: <name> }` arg overrides this per call.
 	// Empty means the ambient environment (today's behavior).
 	Provider string
-	Harness  string
-}
-
-// AgentPermissions is the resolved permission posture for one agent contract.
-// Mode accepts the kitsoki-facing values ask, bypassPermissions, denyAll plus
-// Claude CLI permission modes. DisallowedTools are appended as a hard-deny set.
-type AgentPermissions struct {
-	Mode            string
-	DisallowedTools []string
 }
 
 // Provider is a backend profile applied to the `claude` subprocess for an
@@ -196,13 +184,7 @@ func AgentProviderEnvFromCtx(ctx context.Context) map[string]string {
 // a runtime miss only happens on test scaffolding that skips the app loader,
 // where falling back to ambient is the safe behavior.
 func applyProvider(ctx context.Context, args map[string]any, agent Agent) (context.Context, Agent) {
-	name, _ := args["harness"].(string)
-	if name == "" {
-		name, _ = args["provider"].(string)
-	}
-	if name == "" {
-		name = agent.Harness
-	}
+	name, _ := args["provider"].(string)
 	if name == "" {
 		name = agent.Provider
 	}
@@ -316,71 +298,15 @@ func AgentsFromContext(ctx context.Context) map[string]Agent {
 // happens on test scaffolding that skips the app loader.
 func resolveAgent(ctx context.Context, args map[string]any) (Agent, bool) {
 	name, _ := args["agent"].(string)
-	var base Agent
-	ok := false
-	if name != "" {
-		agents := AgentsFromContext(ctx)
-		if agents != nil {
-			base, ok = agents[name]
-		}
+	if name == "" {
+		return Agent{}, false
 	}
-	if contract, hasContract := agentContractArg(args); hasContract {
-		return mergeAgentContract(base, contract), true
+	agents := AgentsFromContext(ctx)
+	if agents == nil {
+		return Agent{}, false
 	}
-	return base, ok
-}
-
-func agentContractArg(args map[string]any) (map[string]any, bool) {
-	raw, ok := args["agent_contract"]
-	if !ok || raw == nil {
-		return nil, false
-	}
-	m, ok := raw.(map[string]any)
-	return m, ok
-}
-
-func mergeAgentContract(base Agent, c map[string]any) Agent {
-	if s, _ := c["system_prompt"].(string); s != "" {
-		base.SystemPrompt = s
-	}
-	if s, _ := c["model"].(string); s != "" {
-		base.Model = s
-	}
-	if s, _ := c["effort"].(string); s != "" {
-		base.Effort = s
-	}
-	if s, _ := c["cwd"].(string); s != "" {
-		base.DefaultCwd = s
-	}
-	if s, _ := c["provider"].(string); s != "" {
-		base.Provider = s
-	}
-	if s, _ := c["harness"].(string); s != "" {
-		base.Harness = s
-	}
-	if tools := stringSliceArg(c, "tools"); len(tools) > 0 {
-		base.Tools = tools
-	}
-	if mcp, ok := c["mcp"].(map[string]any); ok {
-		if servers, ok := mcp["servers"].(map[string]any); ok {
-			base.MCPServers = cloneAnyMap(servers)
-		}
-		if tools := stringSliceArg(mcp, "tools"); len(tools) > 0 {
-			base.MCPTools = tools
-		}
-	}
-	if perms, ok := c["permissions"].(map[string]any); ok {
-		if s, _ := perms["mode"].(string); s != "" {
-			base.Permissions.Mode = s
-		}
-		if tools := stringSliceArg(perms, "disallowed_tools"); len(tools) > 0 {
-			base.Permissions.DisallowedTools = tools
-		}
-	}
-	if v, ok := c["external_side_effect"].(bool); ok {
-		base.ExternalSideEffect = &v
-	}
-	return base
+	a, ok := agents[name]
+	return a, ok
 }
 
 // effectiveSystemPrompt merges the call-site `system_prompt` arg (when set)
@@ -437,72 +363,15 @@ func effectiveTools(ctx context.Context, args map[string]any, agent Agent) []str
 	if len(perCall) > 0 && len(agent.Tools) > 0 {
 		slog.WarnContext(ctx, "per-call tools: overrides agent.Tools (D5); agent.Tools ignored",
 			"per_call_tools", perCall, "agent_tools", agent.Tools)
-		return appendMCPTools(perCall, args, agent)
+		return perCall
 	}
 	if len(perCall) > 0 {
-		return appendMCPTools(perCall, args, agent)
+		return perCall
 	}
 	if len(agent.Tools) > 0 {
-		return appendMCPTools(agent.Tools, args, agent)
+		return agent.Tools
 	}
-	return appendMCPTools(nil, args, agent)
-}
-
-func appendMCPTools(tools []string, args map[string]any, agent Agent) []string {
-	out := append([]string(nil), tools...)
-	out = append(out, agent.MCPTools...)
-	if mcp, ok := args["mcp"].(map[string]any); ok {
-		out = append(out, stringSliceArg(mcp, "tools")...)
-	}
-	return dedupeStrings(out)
-}
-
-func effectiveMCPServers(args map[string]any, agent Agent) map[string]any {
-	out := cloneAnyMap(agent.MCPServers)
-	mergeServers := func(raw any) {
-		m, ok := raw.(map[string]any)
-		if !ok {
-			return
-		}
-		for k, v := range m {
-			out[k] = v
-		}
-	}
-	if mcp, ok := args["mcp"].(map[string]any); ok {
-		mergeServers(mcp["servers"])
-	}
-	mergeServers(args["mcp_servers"])
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func cloneAnyMap(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return map[string]any{}
-	}
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
-
-func dedupeStrings(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	seen := make(map[string]bool, len(in))
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		if s == "" || seen[s] {
-			continue
-		}
-		seen[s] = true
-		out = append(out, s)
-	}
-	return out
+	return nil
 }
 
 // appendAllowedToolsFlag appends --allowedTools <csv> to cliArgs when tools is
@@ -524,47 +393,6 @@ func appendDisallowedToolsFlag(cliArgs []string, tools []string) []string {
 		return cliArgs
 	}
 	return append(cliArgs, "--disallowedTools", strings.Join(tools, ","))
-}
-
-func effectivePermissionMode(args map[string]any, agent Agent, fallback string) string {
-	mode, _ := args["permission_mode"].(string)
-	if mode == "" {
-		if p, ok := args["permissions"].(map[string]any); ok {
-			mode, _ = p["mode"].(string)
-		}
-	}
-	if mode == "" {
-		mode = agent.Permissions.Mode
-	}
-	if mode == "" {
-		mode = fallback
-	}
-	switch mode {
-	case "ask":
-		return "default"
-	case "denyAll":
-		return "default"
-	default:
-		return mode
-	}
-}
-
-func effectiveDisallowedTools(args map[string]any, agent Agent) []string {
-	var out []string
-	out = append(out, agent.Permissions.DisallowedTools...)
-	if p, ok := args["permissions"].(map[string]any); ok {
-		out = append(out, stringSliceArg(p, "disallowed_tools")...)
-		if mode, _ := p["mode"].(string); mode == "denyAll" {
-			out = append(out, readOnlyDeniedTools...)
-		}
-	}
-	if mode, _ := args["permission_mode"].(string); mode == "denyAll" {
-		out = append(out, readOnlyDeniedTools...)
-	}
-	if agent.Permissions.Mode == "denyAll" {
-		out = append(out, readOnlyDeniedTools...)
-	}
-	return dedupeStrings(out)
 }
 
 // readOnlyDeniedTools are the repo-mutating / arbitrary-exec tools a converse
