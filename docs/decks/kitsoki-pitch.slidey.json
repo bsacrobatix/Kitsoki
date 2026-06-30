@@ -2287,6 +2287,19 @@
       "instant": true
     },
     {
+      "type": "image",
+      "title": "Permissions are policy, not vibes",
+      "src": "assets/claude-code-permissions-meme.png",
+      "alt": "Meme about an agent ignoring Claude Code permissions",
+      "fit": "contain",
+      "frameHeight": "760px",
+      "mediaBackground": "#f8fafc",
+      "mediaPadding": "28px",
+      "caption": "The runtime has to enforce the boundary. If permissions are only a prompt, the agent can negotiate with them.",
+      "hold": 180,
+      "narration": "This is the permissions version of the same point. Policy belongs in the runtime boundary, not in model vibes."
+    },
+    {
       "type": "meme",
       "template": "gb",
       "fields": {
