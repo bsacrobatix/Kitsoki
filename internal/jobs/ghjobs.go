@@ -189,6 +189,33 @@ func (s *GHJobStore) GetJob(ctx context.Context, jobID string) (*GHJob, error) {
 	return scanGHJob(ctx, s.db, "job_id", jobID)
 }
 
+// ListRecent returns recent GitHub-agent jobs ordered by most recent update.
+func (s *GHJobStore) ListRecent(ctx context.Context, limit int) ([]*GHJob, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+ghJobCols+` FROM gh_jobs
+		  ORDER BY updated_at DESC LIMIT ?`,
+		limit)
+	if err != nil {
+		return nil, fmt.Errorf("jobs.ListRecent: %w", err)
+	}
+	defer rows.Close()
+	var out []*GHJob
+	for rows.Next() {
+		job, err := scanGHJobScanner(rows)
+		if err != nil {
+			return nil, fmt.Errorf("jobs.ListRecent: scan: %w", err)
+		}
+		out = append(out, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("jobs.ListRecent: rows: %w", err)
+	}
+	return out, nil
+}
+
 // Advance transitions a job to newState, recording errMsg (typically only on
 // the failed transition).
 func (s *GHJobStore) Advance(ctx context.Context, jobID, newState, errMsg string) error {

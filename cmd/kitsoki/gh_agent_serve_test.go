@@ -251,6 +251,76 @@ func TestGHAgentRunHandlersShowUsefulJobSummary(t *testing.T) {
 	}
 }
 
+func TestGHAgentRunsHandlersListRecentJobs(t *testing.T) {
+	ctx := context.Background()
+	store := newServeTestGHJobStore(t)
+	job, won, err := store.Claim(ctx, jobs.GHMention{
+		OriginRef:    "github:o/r/pr/56",
+		Repo:         "o/r",
+		ObjectKind:   "pr",
+		ObjectNumber: "56",
+	}, "worker-test")
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if !won {
+		t.Fatal("first claim did not win")
+	}
+	if err := store.SetStory(ctx, job.JobID, "pr-beat"); err != nil {
+		t.Fatalf("SetStory: %v", err)
+	}
+	if err := store.Advance(ctx, job.JobID, jobs.GHFailed, "ghagent: post comment: Bad credentials"); err != nil {
+		t.Fatalf("Advance: %v", err)
+	}
+
+	htmlReq := httptest.NewRequest(http.MethodGet, "/runs", nil)
+	htmlRec := httptest.NewRecorder()
+	ghAgentRunsHandler(store).ServeHTTP(htmlRec, htmlReq)
+	if htmlRec.Code != http.StatusOK {
+		t.Fatalf("HTML status = %d, body:\n%s", htmlRec.Code, htmlRec.Body.String())
+	}
+	body := htmlRec.Body.String()
+	for _, want := range []string{
+		"kitsoki GitHub runs",
+		"github.com/o/r/pull/56",
+		"pr-beat",
+		string(jobs.GHFailed),
+		"Bad credentials",
+		"/run/" + job.JobID,
+		"/api/runs",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("runs HTML missing %q:\n%s", want, body)
+		}
+	}
+
+	apiReq := httptest.NewRequest(http.MethodGet, "/api/runs", nil)
+	apiRec := httptest.NewRecorder()
+	ghAgentRunsAPIHandler(store).ServeHTTP(apiRec, apiReq)
+	if apiRec.Code != http.StatusOK {
+		t.Fatalf("API status = %d, body:\n%s", apiRec.Code, apiRec.Body.String())
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(apiRec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode API JSON: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d jobs, want 1: %v", len(got), got)
+	}
+	if got[0]["origin_ref"] != "github:o/r/pr/56" {
+		t.Fatalf("origin_ref = %v", got[0]["origin_ref"])
+	}
+	if got[0]["source_url"] != "https://github.com/o/r/pull/56" {
+		t.Fatalf("source_url = %v", got[0]["source_url"])
+	}
+	if got[0]["state"] != jobs.GHFailed {
+		t.Fatalf("state = %v", got[0]["state"])
+	}
+	if !strings.Contains(got[0]["err_msg"].(string), "Bad credentials") {
+		t.Fatalf("err_msg = %v", got[0]["err_msg"])
+	}
+}
+
 func TestGHAgentReconcileEscalatesStuckJobs(t *testing.T) {
 	ctx := context.Background()
 	db, err := sql.Open("sqlite", ":memory:")

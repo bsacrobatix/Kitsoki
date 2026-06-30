@@ -164,3 +164,29 @@ func TestAdvanceAndSetters(t *testing.T) {
 		t.Errorf("unexpected job after lifecycle: %+v", got)
 	}
 }
+
+func TestListRecentOrdersByUpdatedAt(t *testing.T) {
+	ctx := context.Background()
+	s := newTestGHStore(t)
+	older, _, err := s.Claim(ctx, GHMention{OriginRef: "github:o/r/issue/1", Repo: "o/r", ObjectKind: "issue", ObjectNumber: "1"}, "w1")
+	if err != nil {
+		t.Fatalf("claim older: %v", err)
+	}
+	newer, _, err := s.Claim(ctx, GHMention{OriginRef: "github:o/r/pr/2", Repo: "o/r", ObjectKind: "pr", ObjectNumber: "2"}, "w1")
+	if err != nil {
+		t.Fatalf("claim newer: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE gh_jobs SET updated_at=? WHERE job_id=?`, time.Now().Add(-time.Hour).UnixMilli(), older.JobID); err != nil {
+		t.Fatalf("age older: %v", err)
+	}
+	recent, err := s.ListRecent(ctx, 1)
+	if err != nil {
+		t.Fatalf("ListRecent: %v", err)
+	}
+	if len(recent) != 1 {
+		t.Fatalf("recent len=%d, want 1", len(recent))
+	}
+	if recent[0].JobID != newer.JobID {
+		t.Fatalf("recent[0]=%s, want newer %s", recent[0].JobID, newer.JobID)
+	}
+}

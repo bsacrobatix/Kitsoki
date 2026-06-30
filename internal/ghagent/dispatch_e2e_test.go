@@ -155,6 +155,85 @@ func TestDispatchFailureFilesIncident(t *testing.T) {
 	}
 }
 
+func TestDispatchInitialAckFailureMarksJobFailed(t *testing.T) {
+	ctx := context.Background()
+	mention := Mention{
+		Item: host.GitHubInboxItem{Kind: "pr", Number: "56", Title: "@kitsoki resolve the conflicts"},
+		Repo: "o/r", OriginRef: "github:o/r/pr/56", Trigger: DefaultMentionTrigger,
+	}
+	store := newGHJobStore(t)
+	spawnCalls := 0
+	incidentCalls := 0
+	d := &Dispatcher{
+		Jobs:   store,
+		Routes: DefaultLabelStoryMap(),
+		Comments: &CommentStore{Repo: "o/r", Exec: func(_ context.Context, args map[string]any) (host.Result, error) {
+			if op, _ := args["op"].(string); op == "get" {
+				return host.Result{Data: map[string]any{"comments": []any{}}}, nil
+			}
+			return host.Result{Error: "Bad credentials"}, nil
+		}},
+		WorkerID:      "worker-pr",
+		PublicBaseURL: "https://agent.example",
+		SpawnFn: func(context.Context, Route, *jobs.GHJob) (RunResult, error) {
+			spawnCalls++
+			return RunResult{FinalState: "should-not-run", Turns: 1}, nil
+		},
+		IncidentFn: func(_ context.Context, job *jobs.GHJob, errMsg string) (string, error) {
+			incidentCalls++
+			if job.State != jobs.GHFailed {
+				t.Fatalf("incident saw job state %q, want failed", job.State)
+			}
+			if !strings.Contains(errMsg, "Bad credentials") {
+				t.Fatalf("incident errMsg = %q, want Bad credentials", errMsg)
+			}
+			return "https://github.com/o/r/issues/500", nil
+		},
+	}
+	job, err := d.Dispatch(ctx, mention, nil)
+	if err == nil {
+		t.Fatal("Dispatch succeeded despite failed initial ack")
+	}
+	if spawnCalls != 0 {
+		t.Fatalf("spawn ran %d time(s) after initial ack failed", spawnCalls)
+	}
+	if incidentCalls != 1 {
+		t.Fatalf("incident calls = %d, want 1", incidentCalls)
+	}
+	got, getErr := store.GetByOriginRef(ctx, "github:o/r/pr/56")
+	if getErr != nil {
+		t.Fatalf("GetByOriginRef: %v", getErr)
+	}
+	if got.JobID != job.JobID {
+		t.Fatalf("job id = %q, want %q", got.JobID, job.JobID)
+	}
+	if got.State != jobs.GHFailed {
+		t.Fatalf("State = %q, want failed; job=%+v", got.State, got)
+	}
+	if got.Story != StoryPRBeat {
+		t.Fatalf("Story = %q, want %q", got.Story, StoryPRBeat)
+	}
+	if !strings.Contains(got.ErrMsg, "Bad credentials") {
+		t.Fatalf("ErrMsg = %q, want Bad credentials", got.ErrMsg)
+	}
+	if got.CommentID != "" {
+		t.Fatalf("CommentID = %q, want empty after failed post", got.CommentID)
+	}
+	if got.IncidentURL != "https://github.com/o/r/issues/500" {
+		t.Fatalf("IncidentURL = %q", got.IncidentURL)
+	}
+	events, eventsErr := store.Events(ctx, got.JobID)
+	if eventsErr != nil {
+		t.Fatalf("Events: %v", eventsErr)
+	}
+	if !hasEvent(events, "comment_ack_failed") {
+		t.Fatalf("events missing comment_ack_failed: %+v", events)
+	}
+	if !hasEvent(events, jobs.GHFailed) {
+		t.Fatalf("events missing failed transition: %+v", events)
+	}
+}
+
 // recordingComments is a host.Handler bound as the CommentStore.Exec seam. It
 // captures every op=comment body (so the test can assert the fenced metadata
 // block) and returns a synthetic comment id. This is the DI seam in place of a
@@ -711,6 +790,15 @@ func TestDispatch_PRBeat(t *testing.T) {
 func containsString(values []string, want string) bool {
 	for _, v := range values {
 		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasEvent(events []jobs.GHJobEvent, state string) bool {
+	for _, event := range events {
+		if event.State == state {
 			return true
 		}
 	}
