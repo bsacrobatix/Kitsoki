@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -11,15 +13,17 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"kitsoki/internal/bugfile"
+	"kitsoki/internal/host"
 	"kitsoki/internal/runstatus/harscrub"
 	"kitsoki/internal/tui/blocks"
 )
 
 // BugCommand implements `/bug [description]` for the TUI.
 //
-// The web reporter can attach browser-only evidence (HAR, screenshot, rrweb).
-// The terminal equivalent files through the same bugfile backend and attaches
-// TUI-native evidence: a scrubbed transcript plus session metadata.
+// With no ticket repo configured it preserves the historical local
+// issues/bugs/ behavior. With a ticket repo configured it files through
+// host.GitHubFileBug with UploadArtifacts=true, so the TUI transcript and
+// context evidence follow the same uploaded-evidence path as web bug reports.
 type BugCommand struct{}
 
 func (BugCommand) Name() string { return "/bug" }
@@ -33,6 +37,11 @@ func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 	root, err := m.resolveBugRoot()
 	if err != nil {
 		return m.bugBlock(fmt.Sprintf("could not resolve target root: %v", err)), m, nil
+	}
+
+	if strings.TrimSpace(m.bugTicketRepo) != "" {
+		msg := m.fileGitHubBug(root, title, body)
+		return m.bugBlock(msg), m, nil
 	}
 
 	id, relPath, absPath, err := bugfile.Create(bugfile.CreateRequest{
@@ -65,6 +74,50 @@ func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 	return m.bugBlock(fmt.Sprintf("filed %s", filepath.ToSlash(relPath))), m, nil
 }
 
+func (m RootModel) fileGitHubBug(root, title, body string) string {
+	prefix := "tui-bug-" + time.Now().UTC().Format("20060102T150405.000000000Z")
+	artifactsDir := filepath.Join(root, ".artifacts", "bug-reports", prefix)
+	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
+		return fmt.Sprintf("could not create artifacts: %v", err)
+	}
+	if err := m.writeBugArtifacts(artifactsDir); err != nil {
+		return fmt.Sprintf("could not write artifacts: %v", err)
+	}
+
+	displayRoot := filepath.ToSlash(filepath.Join(".artifacts", "bug-reports", prefix))
+	evidence := []host.EvidenceFile{
+		{
+			Name:       "transcript.md",
+			Path:       filepath.ToSlash(filepath.Join(displayRoot, "transcript.md")),
+			SourcePath: filepath.Join(artifactsDir, "transcript.md"),
+			Label:      "TUI transcript (scrubbed)",
+		},
+		{
+			Name:       "context.json",
+			Path:       filepath.ToSlash(filepath.Join(displayRoot, "context.json")),
+			SourcePath: filepath.Join(artifactsDir, "context.json"),
+			Label:      "TUI session context",
+		},
+	}
+	res, err := host.GitHubFileBug(context.Background(), host.GitHubBugFiling{
+		Repo:            strings.TrimSpace(m.bugTicketRepo),
+		Title:           title,
+		Body:            body,
+		Severity:        "med",
+		Component:       "tui",
+		Target:          "kitsoki",
+		TraceRef:        scrubBugText(m.traceFilePath),
+		KitsokiRev:      gitShortRev(root),
+		FiledBy:         os.Getenv("USER"),
+		Evidence:        evidence,
+		UploadArtifacts: true,
+	})
+	if err != nil {
+		return fmt.Sprintf("could not file GitHub bug: %v", err)
+	}
+	return fmt.Sprintf("filed %s", res.URL)
+}
+
 func tuiBugTitle(desc string) string {
 	if desc == "" {
 		return "tui: bug report " + time.Now().UTC().Format("2006-01-02T15:04:05Z")
@@ -92,7 +145,7 @@ func tuiBugBody(m RootModel, desc string) string {
 	if m.traceFilePath != "" {
 		fmt.Fprintf(&sb, "- Trace: `%s`\n", filepath.ToSlash(m.traceFilePath))
 	}
-	sb.WriteString("\nSee the sibling `.artifacts/` directory for the scrubbed TUI transcript and metadata captured at filing time.\n")
+	sb.WriteString("\nSee the attached TUI transcript and context evidence captured at filing time.\n")
 	return scrubBugText(sb.String())
 }
 
@@ -178,4 +231,15 @@ func scrubBugText(s string) string {
 
 func (m RootModel) bugBlock(line string) string {
 	return blocks.New(m.transcript.width, m.currentTheme()).SlashOutput("bug: " + line)
+}
+
+func gitShortRev(dir string) string {
+	if strings.TrimSpace(dir) == "" {
+		return ""
+	}
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }

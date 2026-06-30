@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/harness"
+	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/orchestrator"
@@ -48,7 +50,7 @@ func TestHelpCommandLists(t *testing.T) {
 func TestBugCommandFilesReportAndArtifacts(t *testing.T) {
 	root := t.TempDir()
 	orch := testCloakOrchestrator(t)
-	m := NewRootModel(orch, app.SessionID("session-123"), "../../testdata/apps/cloak/app.yaml", "", WithBugRoot(root))
+	m := NewRootModel(orch, app.SessionID("session-123"), "../../testdata/apps/cloak/app.yaml", "", WithBugRoot(root), WithBugTicketRepo(""))
 	m.currentState = "foyer"
 	m.traceFilePath = filepath.Join(root, "trace.jsonl")
 	m.transcript.AppendTurn("look", "You are in /Users/example/project with token=sk-test-secret.")
@@ -122,10 +124,63 @@ func TestBugCommandFilesReportAndArtifacts(t *testing.T) {
 	}
 }
 
+func TestBugCommandGitHubUploadsArtifacts(t *testing.T) {
+	root := t.TempDir()
+	orch := testCloakOrchestrator(t)
+	m := NewRootModel(orch, app.SessionID("session-123"), "../../testdata/apps/cloak/app.yaml", "", WithBugRoot(root), WithBugTicketRepo("o/r"))
+	m.currentState = "foyer"
+	m.traceFilePath = filepath.Join(root, "trace.jsonl")
+	m.transcript.AppendTurn("look", "You are in /Users/example/project with token=sk-test-secret.")
+
+	var uploads int
+	var issueArgv string
+	restore := host.SetExecRunnerForTest(func(ctx context.Context, dir, name string, args ...string) (string, string, int, error) {
+		j := strings.Join(args, " ")
+		switch {
+		case len(args) > 0 && args[0] == "--version":
+			return "gh version 2.x\n", "", 0, nil
+		case strings.HasPrefix(j, "release view"):
+			return "", "", 0, nil
+		case strings.HasPrefix(j, "release upload"):
+			uploads++
+			return "", "", 0, nil
+		case strings.HasPrefix(j, "issue create"):
+			issueArgv = j
+			return "https://github.com/o/r/issues/88\n", "", 0, nil
+		}
+		return "", "unexpected: " + j, 1, nil
+	})
+	defer restore()
+
+	body, _, cmd := BugCommand{}.Run(m, []string{"button", "does", "nothing"})
+	if cmd != nil {
+		t.Fatal("bug command should be synchronous")
+	}
+	if !strings.Contains(body, "filed https://github.com/o/r/issues/88") {
+		t.Fatalf("unexpected command body: %s", body)
+	}
+	if uploads != 2 {
+		t.Fatalf("expected transcript + context uploads, got %d", uploads)
+	}
+	for _, want := range []string{
+		"uploaded as GitHub release assets",
+		"[TUI transcript (scrubbed)](https://github.com/o/r/releases/download/kitsoki-artifacts/",
+		"[TUI session context](https://github.com/o/r/releases/download/kitsoki-artifacts/",
+		"button does nothing",
+	} {
+		if !strings.Contains(issueArgv, want) {
+			t.Fatalf("issue create argv missing %q: %s", want, issueArgv)
+		}
+	}
+	if strings.Contains(issueArgv, "not uploaded to GitHub") {
+		t.Fatalf("upload path must not use local-only disclaimer: %s", issueArgv)
+	}
+}
+
 func TestBugCommandDispatcherAppendsBlock(t *testing.T) {
 	root := t.TempDir()
 	orch := testCloakOrchestrator(t)
-	m := NewRootModel(orch, app.SessionID("session-123"), "../../testdata/apps/cloak/app.yaml", "", WithBugRoot(root))
+	m := NewRootModel(orch, app.SessionID("session-123"), "../../testdata/apps/cloak/app.yaml", "", WithBugRoot(root), WithBugTicketRepo(""))
 
 	next, cmd := m.RunSlashCommand("/bug surprising state")
 	if cmd != nil {

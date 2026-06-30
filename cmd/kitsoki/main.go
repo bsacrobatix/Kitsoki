@@ -219,6 +219,7 @@ func runCmd() *cobra.Command {
 		warpBasisPath    string
 		execModeFlag     string
 		promptOverlay    string
+		ticketRepo       string
 	)
 
 	cmd := &cobra.Command{
@@ -631,6 +632,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 					tui.WithChatStore(rawChatStore),
 					tui.WithJournalWriter(jw),
 					tui.WithTraceHistory(func() (store.History, error) { return s.LoadHistory(sid) }),
+					tui.WithBugTicketRepo(ticketRepo),
 				}, tuiOptions...)
 				if tuiMetaTracePath != "" {
 					tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(tuiMetaTracePath))
@@ -801,6 +803,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				tui.WithJournalWriter(jw),
 				tui.WithInitialTypedView(initialTypedView, initialTypedEnv, initialTypedRR),
 				tui.WithTraceHistory(func() (store.History, error) { return s.LoadHistory(sid) }),
+				tui.WithBugTicketRepo(ticketRepo),
 			}
 			if freshMetaTracePath != "" {
 				tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(freshMetaTracePath))
@@ -885,6 +888,8 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 		`execution mode: "staged" (stop at each decision gate for the operator) or "one-shot" (auto-advance, LLM/default deciders)`)
 	cmd.Flags().StringVar(&warpBasisPath, "warp", "",
 		"path to a warp-basis YAML (state + world overrides); applied as the first action after session create. Same file the TUI's /warp file:<path> loads. See stories/oregon-trail/scenarios/ for examples.")
+	cmd.Flags().StringVar(&ticketRepo, "ticket-repo", "constructorfabric/Kitsoki",
+		"file TUI /bug reports as GitHub issues on this owner/repo with uploaded evidence; pass an empty string to write local issues/bugs/*.md files instead")
 
 	return cmd
 }
