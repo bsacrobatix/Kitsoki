@@ -117,6 +117,7 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 	rrwebJSON := decodeRRWebEvents(stringParam(params, "rrweb_events"), scrubOpts)
 	consoleJSON, consoleEntries := decodeConsoleLogs(stringParam(params, "console_logs"), scrubOpts)
 	errInfo := decodeErrorInfo(stringParam(params, "error_info"), scrubOpts)
+	traceJSON := s.decodeTraceEvidence(params, scrubOpts)
 
 	// Enrich the prose body with the captured error + console state.
 	body = body + errorStateSection(errInfo) + consoleSection(consoleEntries)
@@ -127,7 +128,7 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 	// evidence under .artifacts for developer-local review, instead of writing a
 	// local issues/bugs/<id>.md file.
 	if s.ticketRepo != "" {
-		return s.fileBugToGitHub(params, title, body, severity, traceRef, repro, harJSON, png, rrwebJSON, consoleJSON)
+		return s.fileBugToGitHub(params, title, body, severity, traceRef, repro, harJSON, png, rrwebJSON, consoleJSON, traceJSON)
 	}
 
 	id, relPath, absPath, err := bugfile.Create(bugfile.CreateRequest{
@@ -167,6 +168,11 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 				return nil, serverErr(fmt.Errorf("write console.json: %w", wErr))
 			}
 		}
+		if len(traceJSON) > 0 {
+			if wErr := os.WriteFile(filepath.Join(artifactsDir, "trace.redacted.jsonl"), traceJSON, 0o644); wErr != nil {
+				return nil, serverErr(fmt.Errorf("write trace.redacted.jsonl: %w", wErr))
+			}
+		}
 	} else {
 		return nil, serverErr(fmt.Errorf("mkdir artifacts: %w", mkErr))
 	}
@@ -177,6 +183,7 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 		hasScreenshot: wroteScreenshot,
 		hasRRWeb:      len(rrwebJSON) > 0,
 		hasConsole:    len(consoleJSON) > 0,
+		hasTrace:      len(traceJSON) > 0,
 	}
 	if appendErr := appendArtifactsSection(absPath, id, arts, depth, capacity); appendErr != nil {
 		return nil, serverErr(fmt.Errorf("append artifacts section: %w", appendErr))
@@ -189,7 +196,7 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 // writes the (already-scrubbed) evidence to .artifacts for developer-local
 // review, hands those paths to host.GitHubFileBug, and returns the issue url. No
 // local issues/bugs/*.md file is written in this mode.
-func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, traceRef string, repro []string, harJSON, png, rrwebJSON, consoleJSON []byte) (any, *rpcError) {
+func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, traceRef string, repro []string, harJSON, png, rrwebJSON, consoleJSON, traceJSON []byte) (any, *rpcError) {
 	prefix := "bug-" + time.Now().UTC().Format("20060102T150405.000000000Z")
 	artifactsRoot, displayRoot, err := s.githubBugArtifactsRoot()
 	if err != nil {
@@ -222,6 +229,7 @@ func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, t
 		{base: "har.json", data: harJSON, label: "HAR capture (scrubbed)"},
 		{base: "rrweb.json", data: rrwebJSON, label: "Session replay (rrweb)"},
 		{base: "console.json", data: consoleJSON, label: "Console log"},
+		{base: "trace.redacted.jsonl", data: traceJSON, label: "Session trace (redacted)"},
 	} {
 		if err := add(artifact.base, artifact.data, artifact.image, artifact.label); err != nil {
 			return nil, serverErr(fmt.Errorf("github bug: write artifact %s: %w", artifact.base, err))
@@ -341,6 +349,7 @@ type artifactLinks struct {
 	hasScreenshot bool
 	hasRRWeb      bool
 	hasConsole    bool
+	hasTrace      bool
 }
 
 // appendArtifactsSection appends a "## Artifacts" block to the bug markdown,
@@ -357,6 +366,9 @@ func appendArtifactsSection(absPath, id string, arts artifactLinks, depth, capac
 	}
 	if arts.hasConsole {
 		fmt.Fprintf(&sb, "- Console log: ./%s.artifacts/console.json\n", id)
+	}
+	if arts.hasTrace {
+		fmt.Fprintf(&sb, "- Session trace (redacted): ./%s.artifacts/trace.redacted.jsonl\n", id)
 	}
 	fmt.Fprintf(&sb, "\nThe HAR retains the %d most-recent /rpc exchange(s) (ring-buffer capacity %d).\n", depth, capacity)
 
