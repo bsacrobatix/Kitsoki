@@ -271,9 +271,14 @@ type RootModel struct {
 	// rows are simply absent and the miner-service queue remains authoritative.
 	traceHistory func() (store.History, error)
 
-	// bugRoot is the repo/story root where /bug writes issues/bugs/. When empty,
-	// /bug resolves the nearest git root above appPath, then falls back to cwd.
+	// bugRoot is the repo/story root where /bug writes local issues/bugs/ or
+	// .artifacts/bug-reports evidence. When empty, /bug resolves the nearest git
+	// root above appPath, then falls back to cwd.
 	bugRoot string
+
+	// bugTicketRepo, when set, routes /bug to a GitHub issue and uploads the TUI
+	// evidence through host.GitHubFileBug. Empty preserves local issues/bugs/.
+	bugTicketRepo string
 
 	// lastCtrlC is the time the most recent Ctrl+C was pressed, used to
 	// detect a double-tap quit. Zero means no recent press (or the window
@@ -501,11 +506,18 @@ func WithTraceHistory(fn func() (store.History, error)) RootModelOption {
 	return func(m *RootModel) { m.traceHistory = fn }
 }
 
-// WithBugRoot sets the root where TUI-filed /bug reports write issues/bugs/.
-// Tests use this to keep reports in a temp dir; production normally lets the
-// command resolve from appPath.
+// WithBugRoot sets the root where TUI-filed /bug reports write local
+// issues/bugs/ or .artifacts/bug-reports evidence. Tests use this to keep
+// reports in a temp dir; production normally lets the command resolve from
+// appPath.
 func WithBugRoot(root string) RootModelOption {
 	return func(m *RootModel) { m.bugRoot = root }
+}
+
+// WithBugTicketRepo routes /bug to a GitHub issue on repo and uploads scrubbed
+// TUI evidence as GitHub release assets. Empty keeps the local-file path.
+func WithBugTicketRepo(repo string) RootModelOption {
+	return func(m *RootModel) { m.bugTicketRepo = strings.TrimSpace(repo) }
 }
 
 // WithIDEDenyList seeds the kitsoki-side deny list that gates ambient editor
