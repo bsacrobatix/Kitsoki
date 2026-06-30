@@ -457,12 +457,15 @@ states:
         once: true
         id: validate_profile
         with:
-          cmd: bash
+          cmd: kitsoki
           args:
-            - "-lc"
-            - 'python3 "$KITSOKI_APP_DIR/scripts/init_validate_profile.py" "$@"'
-            - "init_validate_profile"
+            - "project-profile"
+            - "validate"
+            - "--json"
+            - "--envelope"
+            - "--repo-root"
             - "{{ world.init_target_path }}"
+            - "--profile-json"
             - "{{ world.init_profile_draft }}"
         bind:
           init_profile_validation: "stdout_json"
