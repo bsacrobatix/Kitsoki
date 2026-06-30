@@ -48,6 +48,15 @@ app:
   title: "PRD authoring"
   author: "Kitsoki"
   license: "CC0"
+  context: |
+    This story turns a rough product idea into a PRD through discovery,
+    clarification, brief review, reference selection, and drafting. When a live
+    operator surface is attached, dispatched agents may receive the
+    `mcp__operator__ask` tool. Use it for material product decisions and
+    clarification that would otherwise block a good PRD. Do not use the
+    built-in AskUserQuestion tool. If operator-ask is absent, denied,
+    unanswered, or errors, use the normal story-level questions, brief gates,
+    and clarify paths instead of inventing answers.
 
 # Host allow-list. The intake room is a conversation (converse + a
 # persistent chat); clarifying/references use decide, drafting uses task.
@@ -292,6 +301,9 @@ intents:
     # receive typed prose, the exact mis-route that sent a single answer
     # straight to the brief — and (b) re-open the swallow-the-utterance trap.
     # The operator submits with the explicit `submit` button / verb.
+  submit_operator_answers:
+    description: "Synthetic — emitted when the analyst already captured live operator answers through mcp__operator__ask."
+    priority: 5
   skip:
     description: "Skip answering this round; move on to the brief with what we have."
     examples: [skip, "no more questions", "just draft", "go ahead"]
@@ -357,7 +369,7 @@ intents:
 
 # Intents lifted into a parent story's table when prd is imported.
 exports:
-  intents: [discuss, capture_existing, start, change_existing, override_new, answer, submit_answers, skip, ready, advance_brief, seeded, confirm, regenerate, accept, refine, clarify, restart_from, quit, look]
+  intents: [discuss, capture_existing, start, change_existing, override_new, answer, submit_answers, submit_operator_answers, skip, ready, advance_brief, seeded, confirm, regenerate, accept, refine, clarify, restart_from, quit, look]
 
 # Named return points. Standalone load synthesises __exit__done /
 # __exit__abandoned terminals.

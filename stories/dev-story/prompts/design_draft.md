@@ -122,6 +122,12 @@ first if needed.
 
 ## Self-assessment (be honest)
 
+- If the `mcp__operator__ask` tool is available and one material decision is
+  missing, ask the operator directly before finalizing the proposal. Fold the
+  answer into the proposal. Do not use the built-in AskUserQuestion tool.
+- If `mcp__operator__ask` is unavailable, unanswered, or errors, do not guess.
+  Set `needs_clarification: true` and put the blocker in
+  `follow_up_questions` so the story routes back through the brief.
 - Set `needs_clarification: true` and populate `follow_up_questions` when
   the inputs left material gaps you had to guess at — the operator will
   route those back into a brief revision. Set it `false` only when the
