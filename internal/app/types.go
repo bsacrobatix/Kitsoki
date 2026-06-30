@@ -1330,22 +1330,6 @@ type AgentDecl struct {
 	Tools []string `yaml:"tools,omitempty"`
 	Cwd   string   `yaml:"cwd,omitempty"`
 
-	// MCP declares the explicit MCP surface this agent may use. Servers are
-	// materialized into the generated --mcp-config for host.agent.* calls; Tools
-	// are appended to the effective allowed-tools list (for example
-	// mcp__validator__submit or mcp__operator__ask).
-	MCP *AgentMCPDecl `yaml:"mcp,omitempty"`
-
-	// Permissions declares the first-class permission posture for this agent.
-	// It is resolved before the legacy bash_profile, which remains the Bash
-	// command policy used when Bash is exposed through kitsoki-bash.
-	Permissions *AgentPermissionsDecl `yaml:"permissions,omitempty"`
-
-	// Harness names the provider/harness profile this agent should use by
-	// default. A call-site harness/provider override wins. Empty preserves the
-	// session-selected active profile behavior.
-	Harness string `yaml:"harness,omitempty"`
-
 	// Effort, when non-empty, is forwarded to `claude --effort` for every agent
 	// invocation that resolves to this agent (ask, decide, task, ask_structured,
 	// converse). Valid values: low, medium, high, xhigh, max. An effect's
@@ -1382,16 +1366,6 @@ type AgentDecl struct {
 	// false. A disagreement between inferred and declared values produces a
 	// loader warn-line.
 	ExternalSideEffect *bool `yaml:"external_side_effect,omitempty"`
-}
-
-type AgentMCPDecl struct {
-	Servers map[string]any `yaml:"servers,omitempty"`
-	Tools   []string       `yaml:"tools,omitempty"`
-}
-
-type AgentPermissionsDecl struct {
-	Mode            string   `yaml:"mode,omitempty"`
-	DisallowedTools []string `yaml:"disallowed_tools,omitempty"`
 }
 
 // MetaModeDef declares one meta mode.

@@ -3128,27 +3128,9 @@ func agentsForContext(def *app.AppDef) map[string]host.Agent {
 			DefaultCwd:           a.Cwd,
 			InheritClaudeDefault: a.InheritClaudeDefault,
 			Provider:             a.Provider,
-			Harness:              a.Harness,
 		}
 		if len(a.Tools) > 0 {
 			agent.Tools = append([]string(nil), a.Tools...)
-		}
-		if a.MCP != nil {
-			if len(a.MCP.Tools) > 0 {
-				agent.MCPTools = append([]string(nil), a.MCP.Tools...)
-			}
-			if len(a.MCP.Servers) > 0 {
-				agent.MCPServers = make(map[string]any, len(a.MCP.Servers))
-				for k, v := range a.MCP.Servers {
-					agent.MCPServers[k] = v
-				}
-			}
-		}
-		if a.Permissions != nil {
-			agent.Permissions.Mode = a.Permissions.Mode
-			if len(a.Permissions.DisallowedTools) > 0 {
-				agent.Permissions.DisallowedTools = append([]string(nil), a.Permissions.DisallowedTools...)
-			}
 		}
 		if a.BashProfile != nil {
 			agent.BashProfile = convertBashProfile(a.BashProfile)

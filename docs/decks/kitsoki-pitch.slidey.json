@@ -3970,6 +3970,117 @@
       "instant": true
     },
     {
+      "type": "evidence",
+      "title": "Coming soon: done substrate",
+      "items": [
+        {
+          "label": "Local model agent",
+          "status": "validated",
+          "detail": "builtin.local_llm, managed sidecar, grammar gate, fallback, fetch/cache/inference, and docs are shipped; calibration and live A/B remain",
+          "refType": "doc",
+          "ref": "local-model-agent.md"
+        },
+        {
+          "label": "Offline agent evals",
+          "status": "validated",
+          "detail": "kitsoki eval list/show/run, selection metadata, pr-refinement pilot, compact reports, and docs are in place",
+          "refType": "doc",
+          "ref": "agent-contract-eval.md"
+        },
+        {
+          "label": "Mockup video loop",
+          "status": "validated",
+          "detail": "video frame seam, review panel, and mockup-video story shipped into narrative docs",
+          "refType": "doc",
+          "ref": "mockup-video-studio.md"
+        },
+        {
+          "label": "Runstatus foundation",
+          "status": "validated",
+          "detail": "self-contained artifacts and live trace serving shipped; polish and richer trace modes are the remaining roadmap",
+          "refType": "doc",
+          "ref": "runstatus-proposal.md"
+        }
+      ],
+      "caption": "The roadmap is not starting from zero: several proposal-era substrates have already moved into shipped behavior and now support the next product bets.",
+      "hold": 240,
+      "instant": true
+    },
+    {
+      "type": "evidence",
+      "title": "Coming soon: in progress",
+      "items": [
+        {
+          "label": "Project onboarding",
+          "status": "progress",
+          "detail": "go_init can discover and apply a profile, but mining, synthesis, schema validation, readiness, and flow-load fragility remain",
+          "refType": "doc",
+          "ref": "project-init.md"
+        },
+        {
+          "label": "Session mining corpus",
+          "status": "progress",
+          "detail": "canonical corpus, JSONL adapters, and kitsoki trace-pattern substrate exist; source registry, driver, CLI, and reports remain",
+          "refType": "doc",
+          "ref": "session-mining-backend-generalization.md"
+        },
+        {
+          "label": "Model task promotion",
+          "status": "progress",
+          "detail": "offline evals are shipped; strict cassette conformance, live matrix runs, runtime pin selection, and TUI/web dashboards remain",
+          "refType": "doc",
+          "ref": "agent-contract-eval.md"
+        },
+        {
+          "label": "GitHub + bug reports",
+          "status": "progress",
+          "detail": "proposal status is stale, but the current tree shows active work on GitHub-agent and evidence-backed bug reporting surfaces",
+          "refType": "path",
+          "ref": "cmd/kitsoki/gh_agent*.go"
+        }
+      ],
+      "caption": "These are partially real already: enough exists to prove the direction, but the proposal audit still leaves concrete gaps before each can be called shipped.",
+      "hold": 260,
+      "instant": true
+    },
+    {
+      "type": "evidence",
+      "title": "Coming soon: next bets",
+      "items": [
+        {
+          "label": "Capability sandbox",
+          "status": "next",
+          "detail": "unify effect taxonomy, named toolboxes, enforcement, filesystem sandboxing, and trace conformance for every agent kind",
+          "refType": "doc",
+          "ref": "agent-capability-model.md"
+        },
+        {
+          "label": "Feedback SDK",
+          "status": "next",
+          "detail": "extract browser feedback capture into a privacy-first framework-neutral SDK with reviewed Slidey reports and a generic sink",
+          "refType": "doc",
+          "ref": "generic-feedback-sdk-slidey-reports.md"
+        },
+        {
+          "label": "Artifact instances",
+          "status": "next",
+          "detail": "make draft, shared, published, and archived story artifacts resumable, inspectable, and garbage-collectable",
+          "refType": "doc",
+          "ref": "artifact-driven-stories.md"
+        },
+        {
+          "label": "Customer channels",
+          "status": "next",
+          "detail": "add LINE ingress, transport, commerce stories, merchant console, and operator handoff on the existing session engine",
+          "refType": "doc",
+          "ref": "line-messenger-channel.md"
+        }
+      ],
+      "caption": "The draft-only queue clusters around a clear product arc: safer agents, portable feedback, artifact-native workflows, and customer-facing channels.",
+      "hold": 260,
+      "instant": true
+    },
+    {
       "type": "cta",
       "wordmark": "Kitsoki",
       "tagline": "Prove what the model did — and what it couldn't",

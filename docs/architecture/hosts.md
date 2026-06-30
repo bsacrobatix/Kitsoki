@@ -768,7 +768,7 @@ gated:
   routes through the **write-mode gate** (`internal/host/write_mode_gate.go`),
   which classifies the call (`effect ≥ write`), short-circuits an active
   turn/session grant, else forwards an **action proposal** to the operator via
-  the [operator-ask bridge](operator-ask.md#second-consumer-the-write-mode-gates-action-proposals).
+  the [operator-ask bridge](operator-ask.md#other-consumer-the-write-mode-gates-action-proposals).
   With no operator attached the gate **denies** (headless) and the agent stays
   read-only;
 - the operator's opt-in (or denial) is recorded as a `machine.write_mode_granted`

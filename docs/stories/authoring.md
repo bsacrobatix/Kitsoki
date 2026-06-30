@@ -242,7 +242,49 @@ conventions, domain rubric, house tone); see
 [`prompts.md`](prompts.md) for the search path, the `spec_` convention,
 `--prompt-overlay`, and `kitsoki prompts spec`.
 
-### 5.5 Background job
+### 5.5 Operator clarification gates
+
+When a story needs fresh human input mid-flow, prefer the **story-visible
+operator-aware path** whenever the runtime provides one. The ask belongs in the
+state machine as an `invoke:`/transition that can be rendered, traced, stubbed,
+and replayed; it should not be hidden inside an agent prompt as
+`AskUserQuestion` or a live-only branch.
+
+The standard shape is:
+
+- The agent or deterministic step produces the questions as data and binds them
+  into `world`.
+- A story effect invokes the operator-aware ask handler (for example
+  `host.operator.ask`, once available) from the same room, guarded on there
+  being unanswered questions.
+- If a live operator surface is attached, the handler forwards through the
+  shared `OperatorPrompter` seam. That means web, TUI, and MCP Studio use the
+  same runtime path; Studio can route the prompt through MCP elicitation or its
+  `session.answer` fallback.
+- If no operator is attached (flow tests, cassettes, headless replay), the
+  handler returns a stable "not answered" result instead of blocking. The room
+  then falls back to its ordinary typed-answer UI, skip/regenerate verbs, or a
+  needs-human exit.
+- Flow fixtures stub the ask handler by invoke `id:` for both outcomes:
+  answered-by-operator and no-operator/fallback. Cassettes record the same host
+  call shape, not a separate prompt-only behavior.
+
+This keeps "real" and headless behavior close enough to test. The surface may
+change how the operator answers, but the story graph, world binds, trace events,
+and fallback room stay the same.
+
+Do not:
+
+- Re-enable or depend on `AskUserQuestion` inside dispatched agents. It is
+  headless-unsafe and hard-denied.
+- Add an agent-only MCP instruction that changes the story outcome when the
+  tool happens to be present. If MCP-aware asking is useful, expose it as a
+  story host call/effect so flows and cassettes can exercise it.
+- Replace an existing free-text clarification room with a live-only modal. The
+  modal is an acceleration path; the room remains the durable fallback and review
+  surface.
+
+### 5.6 Background job
 
 ```yaml
 hosts:
@@ -269,7 +311,7 @@ When the job finishes, the orchestrator fires the `on_complete:`
 effects in a synthetic turn and posts an inbox notification. Full
 lifecycle in [`background-jobs/`](background-jobs/README.md).
 
-### 5.6 Posting to a transport
+### 5.7 Posting to a transport
 
 ```yaml
 hosts:
@@ -288,7 +330,7 @@ effects:
 The transport handles markup conversion (Markdown → Jira wiki for
 Jira, etc.). See [`transports.md`](../architecture/transports.md) for the registry.
 
-### 5.7 Template interpolation: how complex values render
+### 5.8 Template interpolation: how complex values render
 
 `{{ ... }}` expressions inside YAML strings are evaluated by the
 `expr-lang` engine against `world` and `slots`. How the result is

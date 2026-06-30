@@ -59,6 +59,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, mention Mention, labels []str
 	}
 
 	if !won {
+		if route, ok := d.Routes.Classify(mention, labels); ok && shouldRerunTerminalPR(job, route) {
+			return d.dispatchRouted(ctx, mention, job, route)
+		}
 		if job.State == jobs.GHAwaitingGuidance {
 			if route, ok := d.Routes.Classify(mention, labels); ok {
 				return d.dispatchRouted(ctx, mention, job, route)
@@ -240,6 +243,19 @@ func (d *Dispatcher) failBeforeRun(ctx context.Context, job *jobs.GHJob, event s
 	return job, cause
 }
 
+func shouldRerunTerminalPR(job *jobs.GHJob, route Route) bool {
+	if job == nil || job.ObjectKind != "pr" {
+		return false
+	}
+	if route.Story == "" {
+		return false
+	}
+	if route.Story == job.Story {
+		return route.Story == StoryPRRebase && (job.State == jobs.GHDone || job.State == jobs.GHFailed)
+	}
+	return job.State == jobs.GHDone || job.State == jobs.GHFailed
+}
+
 func publicRunURL(baseURL, jobID string) string {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" || strings.TrimSpace(jobID) == "" {
@@ -256,6 +272,9 @@ func publicRunURL(baseURL, jobID string) string {
 func RunStorySession(ctx context.Context, route Route, job *jobs.GHJob) (RunResult, error) {
 	if route.Story == StoryPRBeat {
 		return RunPRStatusBeat(ctx, job)
+	}
+	if route.Story == StoryPRRebase {
+		return RunPRRebaseBeat(ctx, job)
 	}
 
 	root, err := repoRoot()
@@ -290,6 +309,32 @@ func RunStorySession(ctx context.Context, route Route, job *jobs.GHJob) (RunResu
 		RunURL:     "kitsoki://run/" + job.JobID,
 		FinalState: "passed",
 		Turns:      turns,
+	}, nil
+}
+
+// RunPRRebaseBeat is the production PR conflict-resolution path. It delegates
+// live git/gh work to host.git so tests can replace the CLI seam.
+func RunPRRebaseBeat(ctx context.Context, job *jobs.GHJob) (RunResult, error) {
+	res, err := host.GitVCSHandler(ctx, map[string]any{
+		"op":    "pr_rebase",
+		"repo":  job.Repo,
+		"pr_id": job.ObjectNumber,
+	})
+	if err != nil {
+		return RunResult{}, err
+	}
+	if res.Error != "" {
+		return RunResult{}, errors.New(res.Error)
+	}
+	summary, _ := res.Data["summary"].(string)
+	if strings.TrimSpace(summary) == "" {
+		summary = fmt.Sprintf("Rebased PR #%s onto its base branch and pushed the updated head.", job.ObjectNumber)
+	}
+	return RunResult{
+		RunURL:     "kitsoki://run/" + job.JobID,
+		FinalState: "pr_rebased",
+		Turns:      1,
+		Summary:    summary,
 	}, nil
 }
 
