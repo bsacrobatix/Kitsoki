@@ -1,0 +1,40 @@
+# push_fails — the git push fails (no remote / unauthenticated) → @exit:needs-human
+# carrying the real git output. Proves a delivery failure never silently "succeeds".
+#
+# MOCKS open_pr_exec (host.run) returning the push_failed outcome.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  repo:          bsacrobatix/Kitsoki
+  head_branch:   fix/template-object-interp-placeholder
+  base_branch:   main
+  remote:        bsacrobatix
+  worktree_path: .worktrees/bf-template-object-interp-placeholder
+  title:         "fix(render): render non-scalar template values as JSON"
+  body:          "..."
+
+host_handlers:
+  host.run:
+    by_call:
+      open_pr_exec:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            outcome: push_failed
+            url:     ""
+            number:  ""
+            last_error: "git push to remote \"bsacrobatix\" failed:\nfatal: 'bsacrobatix' does not appear to be a git repository"
+
+turns:
+  - intent: { name: open, slots: {} }
+    expect_state: __exit__needs-human
+    expect_world:
+      status:       needs-human
+      open_outcome: push_failed
+      pr_url:       ""
+      last_error:   "git push to remote \"bsacrobatix\" failed:\nfatal: 'bsacrobatix' does not appear to be a git repository"
+
+expect_terminal: true

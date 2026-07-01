@@ -1,0 +1,85 @@
+# open-pr — push a maker branch and open a pull request.
+#
+# The missing delivery seam (see constructorfabric/Kitsoki#36): the bugfix
+# open-PR exit lands a fix on a local worktree branch but the studio had no way
+# to PUBLISH it — `issue.create` files issues, not PRs, and there is no
+# `vcs.push` / `pr.create` tool. This story closes that loop entirely in YAML +
+# `host.run` (git + the `gh` CLI), no LLM, no new engine code. It is drivable
+# standalone (seed the branch/repo/title/body in initial_world, submit `open`)
+# and importable as a tail by bugfix's open-PR exit later (same handoff seam as
+# ../delivery-tail).
+#
+# Deterministic + provider-neutral: one host.run does `git push --set-upstream`
+# then `gh pr create`, emits a single JSON outcome (the integrate-room idiom),
+# and routes opened → @exit:opened / any failure → @exit:needs-human with the
+# real git/gh output in last_error. Auth/remote are the operator's environment
+# (the `gh` CLI's own auth, e.g. the bsacrobatix test App); a missing remote or
+# unauthenticated gh surfaces as a clean needs-human, never a silent success.
+
+app:
+  id: open-pr
+  version: 0.1.0
+  title: "Open a pull request"
+  author: "Kitsoki"
+  license: "CC0"
+
+hosts:
+  - host.run
+
+world:
+  repo:          { type: string, default: "" }     # owner/name; "" ⇒ gh infers from the pushed remote
+  head_branch:   { type: string, default: "" }     # the branch to PR (must exist in worktree_path)
+  base_branch:   { type: string, default: "main" } # PR target
+  remote:        { type: string, default: "origin" } # git remote to push the branch to
+  worktree_path: { type: string, default: "." }    # where the branch lives (the maker worktree)
+  title:         { type: string, default: "" }
+  body:          { type: string, default: "" }
+  draft:         { type: bool,   default: false }
+  pr_url:        { type: string, default: "" }
+  pr_number:     { type: string, default: "" }
+  open_outcome:  { type: string, default: "" }     # opened | push_failed | pr_failed | error
+  run_exit:      { type: string, default: "" }     # raw host.run exit marker (empty pre-bind)
+  run_stdout:    { type: string, default: "" }
+  last_error:    { type: string, default: "" }
+  status:        { type: string, default: "open" }
+
+intents:
+  open:
+    description: "Push the head branch to the remote and open the pull request."
+    examples: [open, "open pr", "open the pr", "push and pr", "raise a pr"]
+    priority: 90
+  opened:
+    description: "(internal) the PR was opened — emitted from the host.run outcome."
+    priority: 1
+  open_failed:
+    description: "(internal) the push or the PR creation failed."
+    priority: 1
+  open_aborted:
+    description: "(internal) the host.run produced no parseable result."
+    priority: 1
+  quit:
+    description: "Abandon without opening a PR."
+    examples: [quit, abort, cancel]
+    priority: 50
+  look:
+    description: "Re-render the current view."
+    examples: [look, "what now?"]
+    priority: 10
+
+exports:
+  intents: [open, quit, look]
+
+exits:
+  opened:
+    description: "The PR was opened; pr_url carries the URL."
+    requires: [pr_url]
+  needs-human:
+    description: "Push or PR creation failed (or produced no result); last_error carries the real git/gh output."
+    requires: [last_error]
+  abandoned:
+    description: "Operator bailed before opening a PR."
+
+root: idle
+
+include:
+  - rooms/*.yaml

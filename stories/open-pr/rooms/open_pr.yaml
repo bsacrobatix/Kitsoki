@@ -1,0 +1,191 @@
+# open_pr rooms — idle (parked) → publishing (push + gh pr create → exit).
+#
+# publishing.on_enter runs ONE host.run that pushes the branch and opens the PR,
+# emitting a single JSON outcome, then routes via post-bind emit_intent:
+#   opened       → @exit:opened       (pr_url set)
+#   push_failed|pr_failed|error → @exit:needs-human (last_error)
+#   no JSON       → @exit:needs-human (synthesized last_error)
+#
+# host.run cwd is LEFT DEFAULT (repo root); the script uses `git -C "$WT"` and
+# `(cd "$WT" && gh …)` with WT = worktree_path. We deliberately do NOT also set
+# `cwd: {{ world.worktree_path }}` — that double-applies the (relative) worktree
+# path and makes the in-script cd fail, the exact bug filed as
+# constructorfabric/Kitsoki#35 for the bugfix repro gate.
+#
+# Smart defaults (so the operator needn't know the plumbing):
+#   - remote defaults to `origin` (here origin already points at the target,
+#     e.g. the bsacrobatix repo).
+#   - repo, when blank, is AUTO-RESOLVED to owner/name from the remote's URL —
+#     so `gh pr create --repo` targets the right repo without being told. The
+#     resolved repo is bound back to world.repo for audit.
+#   - remote accepts a configured NAME (push --set-upstream) OR a full URL /
+#     scp-style ref (push without -u, which needs a named remote), so it works
+#     even before anyone `git remote add`ed a fork.
+
+states:
+
+  idle:
+    description: "Open-PR utility — parked. Submit `open` to push the branch and open the PR."
+    view:
+      - prose: "Open a PR for **{{ world.head_branch|default:'(no branch)' }}** → {{ world.base_branch }}{% if world.repo %} on {{ world.repo }}{% else %} (repo auto-resolved from {{ world.remote }}){% endif %}."
+      - kv:
+          pairs:
+            Branch: '{{ world.head_branch|default:"(none)" }}'
+            Base:   "{{ world.base_branch }}"
+            Remote: "{{ world.remote }}"
+            Repo:   '{{ world.repo|default:"(auto-resolve from remote)" }}'
+            Title:  '{{ world.title|default:"(none)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "open"
+              hint:   "push the branch and open the PR"
+              intent: open
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+            - label:  "quit"
+              hint:   "abandon without opening a PR"
+              intent: quit
+    relevant_world: [repo, head_branch, base_branch, remote, title, body, draft]
+    on:
+      open:
+        - target: publishing
+      look:
+        - target: .
+      quit:
+        - target: "@exit:abandoned"
+          effects:
+            - set:
+                status: "abandoned"
+
+  publishing:
+    description: "Push the branch to the remote and open the pull request."
+    view:
+      - prose: "Pushing {{ world.head_branch }} to {{ world.remote }} and opening the PR…"
+      - prose: "✅ Opened: {{ world.pr_url }}"
+        when: "world.open_outcome == 'opened'"
+      - prose: "⚠ Failed ({{ world.open_outcome }}): {{ world.last_error }}"
+        when: "world.open_outcome != '' && world.open_outcome != 'opened'"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "look"
+              intent: look
+    relevant_world: [repo, head_branch, base_branch, remote, worktree_path, title, body, draft, pr_url, pr_number, open_outcome, run_exit, run_stdout, last_error]
+    on_enter:
+      - invoke: host.run
+        id: open_pr_exec
+        with:
+          cmd: bash
+          args:
+            - "-c"
+            - |
+              set -e
+              export NO_COLOR=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat
+              # title/body arrive as positional params ($1/$2) so quotes and
+              # newlines in them survive verbatim — never interpolated into the
+              # script text. (#8 idiom from delivery-tail/integrate.yaml.)
+              TITLE="$1"
+              BODY="$2"
+              EMITTED=0
+              emit() { jq -n "$@"; EMITTED=1; exit 0; }
+              # Always emit JSON, even on a set -e abort, so the room never
+              # stalls with a blank last_error. The trap exits 0 → binds fire.
+              trap 'rc=$?; if [ "$EMITTED" != "1" ]; then jq -n --arg rc "$rc" "{outcome:\"error\",url:\"\",number:\"\",repo:\"\",last_error:(\"open-pr aborted before completing (exit \"+\$rc+\")\")}"; fi; exit 0' EXIT
+              WT="{{ world.worktree_path }}"
+              [ -z "$WT" ] && WT="."
+              BRANCH="{{ world.head_branch }}"
+              BASE="{{ world.base_branch }}"
+              REPO="{{ world.repo }}"
+              REMOTE="{{ world.remote }}"
+              [ -z "$REMOTE" ] && REMOTE="origin"
+              DRAFT="{{ world.draft }}"
+              if [ -z "$BRANCH" ]; then
+                emit --arg e "no head_branch to open a PR for" '{outcome:"error",url:"",number:"",repo:"",last_error:$e}'
+              fi
+              if [ -z "$TITLE" ]; then
+                emit --arg e "no title for the PR" '{outcome:"error",url:"",number:"",repo:"",last_error:$e}'
+              fi
+              # Smart repo resolution: when repo is blank, derive owner/name from
+              # the remote's URL so gh targets the right repo (handles https + scp
+              # URLs, with or without a trailing .git). If the remote isn't a
+              # name with a URL (e.g. it IS a URL), parse that directly.
+              if [ -z "$REPO" ]; then
+                case "$REMOTE" in
+                  *://*|*@*:*) RURL="$REMOTE" ;;
+                  *)           RURL=$(git -C "$WT" remote get-url "$REMOTE" 2>/dev/null || echo "") ;;
+                esac
+                REPO=$(printf '%s' "$RURL" | sed -E 's#\.git$##; s#^git@[^:]+:##; s#^[a-zA-Z]+://[^/]+/##')
+              fi
+              # Push the branch (idempotent). cwd is repo root, so `git -C "$WT"`
+              # targets the worktree where the branch lives. A URL / scp-style
+              # remote can't take --set-upstream (that needs a named remote).
+              PUSH_EXIT=0
+              case "$REMOTE" in
+                *://*|*@*:*)
+                  PUSH_OUT=$(git -C "$WT" push "$REMOTE" "$BRANCH" 2>&1) || PUSH_EXIT=$? ;;
+                *)
+                  PUSH_OUT=$(git -C "$WT" push --set-upstream "$REMOTE" "$BRANCH" 2>&1) || PUSH_EXIT=$? ;;
+              esac
+              if [ "$PUSH_EXIT" -ne 0 ]; then
+                emit --arg out "$PUSH_OUT" --arg r "$REMOTE" '{outcome:"push_failed",url:"",number:"",repo:"",last_error:("git push to remote \""+$r+"\" failed:\n"+$out)}'
+              fi
+              # Open the PR. Use the resolved repo when we have one, else let gh
+              # infer from the worktree's remotes.
+              REPO_ARGS=""
+              [ -n "$REPO" ] && REPO_ARGS="--repo $REPO"
+              DRAFT_ARGS=""
+              [ "$DRAFT" = "true" ] && DRAFT_ARGS="--draft"
+              PR_EXIT=0
+              PR_OUT=$( (cd "$WT" && gh pr create $REPO_ARGS --base "$BASE" --head "$BRANCH" --title "$TITLE" --body "$BODY" $DRAFT_ARGS) 2>&1 ) || PR_EXIT=$?
+              if [ "$PR_EXIT" -ne 0 ]; then
+                emit --arg out "$PR_OUT" --arg repo "$REPO" '{outcome:"pr_failed",url:"",number:"",repo:$repo,last_error:("gh pr create failed:\n"+$out)}'
+              fi
+              URL=$(printf '%s' "$PR_OUT" | grep -oE 'https://[^ ]+/pull/[0-9]+' | tail -1)
+              NUM=$(printf '%s' "$URL" | grep -oE '[0-9]+$')
+              emit --arg url "$URL" --arg num "$NUM" --arg repo "$REPO" '{outcome:"opened",url:$url,number:$num,repo:$repo,last_error:""}'
+            - "kitsoki-open-pr"
+            - "{{ world.title }}"
+            - "{{ world.body }}"
+        bind:
+          open_outcome: "stdout_json.outcome"
+          pr_url:       "stdout_json.url"
+          pr_number:    "stdout_json.number"
+          repo:         "stdout_json.repo"
+          last_error:   "stdout_json.last_error"
+          # Raw marker — empty pre-bind so the no-JSON guard doesn't fire on the
+          # default world during the on_enter walk (#9b idiom).
+          run_exit:     "{{ string(result.exit_code) }}"
+          run_stdout:   "stdout"
+        on_error: publishing
+      # Post-bind routing; all FALSE under the default (pre-bind) world.
+      - when: "world.open_outcome == 'opened'"
+        emit_intent: opened
+      - when: "world.open_outcome != '' && world.open_outcome != 'opened'"
+        emit_intent: open_failed
+      - when: "world.run_exit != '' && world.open_outcome == ''"
+        emit_intent: open_aborted
+    on:
+      opened:
+        - target: "@exit:opened"
+          effects:
+            - set:
+                status: "opened"
+                pr_url: "{{ world.pr_url }}"
+      open_failed:
+        - target: "@exit:needs-human"
+          effects:
+            - set:
+                status:     "needs-human"
+                last_error: "{{ world.last_error }}"
+      open_aborted:
+        - target: "@exit:needs-human"
+          effects:
+            - set:
+                status:     "needs-human"
+                last_error: "open-pr produced no result (exit {{ world.run_exit }}): {{ world.run_stdout }}"
+      look:
+        - target: .

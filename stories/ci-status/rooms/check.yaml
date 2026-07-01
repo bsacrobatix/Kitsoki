@@ -1,0 +1,99 @@
+# ci-status rooms — idle → checking (gh pr checks + gh run view --log-failed).
+#
+# checking.on_enter runs ONE host.run (cwd default = repo root; gh runs inside
+# worktree_path) that fetches the PR check summary and the latest run's failing
+# log tail, binding both to world. It does NOT exit — read the result with
+# session.world {checks_summary | failed_log | ci_conclusion}.
+
+states:
+
+  idle:
+    description: "CI status — parked. Submit `check` to fetch PR checks + failing logs."
+    view:
+      - prose: "Fetch CI for PR #{{ world.pr_number|default:'(none)' }} on {{ world.repo|default:'(infer)' }}."
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "check"
+              hint:   "fetch checks + failing logs"
+              intent: check
+            - label:  "look"
+              intent: look
+            - label:  "quit"
+              intent: quit
+    relevant_world: [repo, pr_number, branch]
+    on:
+      check:
+        - target: checking
+      look:
+        - target: .
+      quit:
+        - target: "@exit:abandoned"
+          effects:
+            - set:
+                status: "abandoned"
+
+  checking:
+    description: "Fetched CI checks + failing logs."
+    view:
+      - heading: "Checks"
+      - code: '{{ world.checks_summary|default:"(pending)" }}'
+      - heading: "Failing log (tail)"
+      - code: '{{ world.failed_log|default:"(none)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "recheck"
+              intent: check
+            - label:  "look"
+              intent: look
+            - label:  "quit"
+              intent: quit
+    relevant_world: [repo, pr_number, branch, worktree_path, checks_summary, failed_log, ci_conclusion, run_exit, run_stdout, last_error]
+    on_enter:
+      - invoke: host.run
+        id: ci_status_exec
+        with:
+          cmd: bash
+          args:
+            - "-c"
+            - |
+              set +e
+              export NO_COLOR=1 GH_PAGER=cat GIT_PAGER=cat GIT_TERMINAL_PROMPT=0
+              REPO="{{ world.repo }}"
+              PR="{{ world.pr_number }}"
+              BRANCH="{{ world.branch }}"
+              WT="{{ world.worktree_path }}"
+              [ -z "$WT" ] && WT="."
+              REPO_ARGS=""
+              [ -n "$REPO" ] && REPO_ARGS="--repo $REPO"
+              CHECKS=$( (cd "$WT" && gh pr checks "$PR" $REPO_ARGS) 2>&1 )
+              # Latest run for the branch → its conclusion + failing log tail.
+              RUN_ID=$( gh run list $REPO_ARGS --branch "$BRANCH" -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null )
+              CONC=$( gh run list $REPO_ARGS --branch "$BRANCH" -L 1 --json conclusion -q '.[0].conclusion' 2>/dev/null )
+              LOG=""
+              if [ -n "$RUN_ID" ]; then
+                LOG=$( gh run view "$RUN_ID" $REPO_ARGS --log-failed 2>&1 | tail -c 6000 )
+              fi
+              jq -n --arg c "$CHECKS" --arg l "$LOG" --arg k "$CONC" \
+                '{checks:$c, failed_log:$l, conclusion:$k}'
+            - "kitsoki-ci-status"
+        bind:
+          checks_summary: "stdout_json.checks"
+          failed_log:     "stdout_json.failed_log"
+          ci_conclusion:  "stdout_json.conclusion"
+          run_exit:       "{{ string(result.exit_code) }}"
+          run_stdout:     "stdout"
+        on_error: checking
+    on:
+      check:
+        - target: checking
+      look:
+        - target: .
+      quit:
+        - target: "@exit:abandoned"
+          effects:
+            - set:
+                status: "abandoned"

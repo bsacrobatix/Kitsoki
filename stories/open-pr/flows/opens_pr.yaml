@@ -1,0 +1,41 @@
+# opens_pr — happy path: `open` pushes + opens the PR → @exit:opened with pr_url.
+#
+# MOCKS open_pr_exec (host.run), so it proves the ROUTING contract (the JSON
+# outcome → opened → @exit:opened, pr_url bound). The real git/gh shell is
+# exercised by the operator's environment when driven live.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  repo:          bsacrobatix/Kitsoki
+  head_branch:   fix/template-object-interp-placeholder
+  base_branch:   main
+  remote:        origin
+  worktree_path: .worktrees/bf-template-object-interp-placeholder
+  title:         "fix(render): render non-scalar template values as JSON, not the Go placeholder"
+  body:          "Closes the object-in-string-template silent-data-loss bug."
+
+host_handlers:
+  host.run:
+    by_call:
+      open_pr_exec:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            outcome: opened
+            url:     "https://github.com/bsacrobatix/Kitsoki/pull/7"
+            number:  "7"
+            last_error: ""
+
+turns:
+  - intent: { name: open, slots: {} }
+    expect_state: __exit__opened
+    expect_world:
+      status:       opened
+      open_outcome: opened
+      pr_url:       "https://github.com/bsacrobatix/Kitsoki/pull/7"
+      pr_number:    "7"
+
+expect_terminal: true
