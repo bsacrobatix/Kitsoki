@@ -399,6 +399,16 @@ func TestSessionNew_HostCassetteBacksDirectSubmitRun(t *testing.T) {
 			break
 		}
 		t.Logf("stabilize: attempt %d start→%q (transient load-flake); retrying a fresh session", attempt, started.Outcome.State)
+		if attempt == 1 {
+			t.Logf("DIAGX mode=%q error=%q", started.Outcome.Mode, started.Outcome.Error)
+			t.Logf("DIAGX frame:\n%s", started.Frame.Text)
+			if wres, werr := callTool(ctx, cs, "session.world", map[string]any{"handle": ok.Handle}); werr == nil {
+				t.Logf("DIAGX world:\n%s", contentText(wres))
+			}
+			if tres, terr := callTool(ctx, cs, "session.trace", map[string]any{"handle": ok.Handle}); terr == nil {
+				t.Logf("DIAGX trace:\n%s", contentText(tres))
+			}
+		}
 		_, _ = callTool(ctx, cs, "session.close", map[string]any{"handle": ok.Handle})
 	}
 	require.Equal(t, "load", started.Outcome.State,
