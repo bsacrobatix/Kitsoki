@@ -210,6 +210,15 @@ type Server struct {
 	// review) INSTEAD of a local issues/bugs/<id>.md file.
 	ticketRepo string
 
+	// agentEvidenceDir, when set (WithAgentEvidenceDir / `kitsoki web
+	// --agent-evidence-dir`), is the kitsoki github agent's evidence store root.
+	// After a GitHub bug filing, the captured rrweb + HAR are ALSO deposited here
+	// under bugdeck.DeckID(ticketRepo, issueNumber) so the agent already holds the
+	// evidence when its issues.opened webhook fires — it never re-downloads the
+	// assets from GitHub. Point this and `kitsoki gh-agent serve --evidence-dir`
+	// at the same directory (co-located, or a shared volume).
+	agentEvidenceDir string
+
 	// workflowRoot is the repo root dynamic workflow drafts should use for
 	// their scratch package and promotion/export defaults. Empty means the
 	// workflow RPC family stays disabled on this surface.
@@ -264,12 +273,13 @@ type Option func(*serverConfig)
 // serverConfig collects the options before the Server is built. The single-entry
 // constructors fold driver into the adapter; NewMulti ignores it.
 type serverConfig struct {
-	poll         time.Duration
-	driver       Driver
-	defaultActor string
-	bugRoot      string
-	ticketRepo   string
-	workflowRoot string
+	poll             time.Duration
+	driver           Driver
+	defaultActor     string
+	bugRoot          string
+	ticketRepo       string
+	agentEvidenceDir string
+	workflowRoot     string
 }
 
 // WithBugRoot sets the repo root under which runstatus.bug.report writes
@@ -288,6 +298,16 @@ func WithBugRoot(dir string) Option {
 // --ticket-repo`. Empty (the default) keeps the local-file behaviour.
 func WithTicketRepo(repo string) Option {
 	return func(c *serverConfig) { c.ticketRepo = strings.TrimSpace(repo) }
+}
+
+// WithAgentEvidenceDir sets the kitsoki github agent's evidence store root. When
+// set (and a GitHub bug is filed via WithTicketRepo), the scrubbed rrweb + HAR
+// are deposited under <dir>/<DeckID(repo,issue)>/ so the agent already holds the
+// evidence when its issues.opened webhook fires — no GitHub asset re-download.
+// Wired by `kitsoki web --agent-evidence-dir`; point it at the agent's
+// `--evidence-dir`. Empty (the default) skips the deposit.
+func WithAgentEvidenceDir(dir string) Option {
+	return func(c *serverConfig) { c.agentEvidenceDir = strings.TrimSpace(dir) }
 }
 
 // WithWorkflowRoot sets the repo root dynamic workflow RPCs use for draft
@@ -368,21 +388,22 @@ func newConfig(opts []Option) serverConfig {
 
 func newServer(provider SessionProvider, cfg serverConfig) *Server {
 	return &Server{
-		provider:     provider,
-		poll:         cfg.poll,
-		defaultActor: cfg.defaultActor,
-		subs:         make(map[string]*subscription),
-		notifs:       newNotifBuffer(),
-		questions:    newQuestionBuffer(),
-		qreg:         newQuestionRegistry(),
-		current:      newCurrentBuffer(),
-		points:       newPointHandoff(),
-		recorder:     harrec.New(bugRecorderCapacity),
-		bugRoot:      cfg.bugRoot,
-		ticketRepo:   cfg.ticketRepo,
-		workflowRoot: cfg.workflowRoot,
-		captureStore: make(map[string]*capSnap),
-		activeTurns:  make(map[string]*activeTurn),
+		provider:         provider,
+		poll:             cfg.poll,
+		defaultActor:     cfg.defaultActor,
+		subs:             make(map[string]*subscription),
+		notifs:           newNotifBuffer(),
+		questions:        newQuestionBuffer(),
+		qreg:             newQuestionRegistry(),
+		current:          newCurrentBuffer(),
+		points:           newPointHandoff(),
+		recorder:         harrec.New(bugRecorderCapacity),
+		bugRoot:          cfg.bugRoot,
+		ticketRepo:       cfg.ticketRepo,
+		agentEvidenceDir: cfg.agentEvidenceDir,
+		workflowRoot:     cfg.workflowRoot,
+		captureStore:     make(map[string]*capSnap),
+		activeTurns:      make(map[string]*activeTurn),
 	}
 }
 
