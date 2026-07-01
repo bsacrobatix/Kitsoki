@@ -399,7 +399,12 @@ func TestSessionNew_HostCassetteBacksDirectSubmitRun(t *testing.T) {
 			break
 		}
 		t.Logf("stabilize: attempt %d start→%q (transient load-flake); retrying a fresh session", attempt, started.Outcome.State)
-		_, _ = callTool(ctx, cs, "session.close", map[string]any{"handle": ok.Handle})
+		// Leave the LAST stuck session open so the post-loop FLAKE-DIAG dump can
+		// still read its world + trace (a closed handle returns nothing); earlier
+		// attempts are closed to avoid piling up sessions.
+		if attempt < startAttempts {
+			_, _ = callTool(ctx, cs, "session.close", map[string]any{"handle": ok.Handle})
+		}
 	}
 	if started.Outcome.State != "load" {
 		// The load flake survived every retry — dump everything needed to root-
