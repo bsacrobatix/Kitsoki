@@ -30,7 +30,7 @@ For a reader-specific path through the docs, start at
 
 ```sh
 go build -o kitsoki ./cmd/kitsoki
-./kitsoki run testdata/apps/cloak/app.yaml
+./kitsoki run
 ```
 
 ## What kitsoki is good for
@@ -82,8 +82,8 @@ Requires Go 1.25+. Single static binary; no CGO, no system libraries.
 Force one:
 
 ```sh
-./kitsoki run testdata/apps/cloak/app.yaml --harness claude
-./kitsoki run testdata/apps/cloak/app.yaml --harness live
+./kitsoki run --harness claude
+./kitsoki run --harness live
 ./kitsoki run testdata/apps/cloak/app.yaml \
     --harness replay --recording testdata/apps/cloak/recording.yaml
 ```
@@ -91,12 +91,18 @@ Force one:
 ### 3. Play
 
 ```sh
-./kitsoki run testdata/apps/cloak/app.yaml
+./kitsoki run
 ```
 
-The TUI opens with a transcript pane, action menu, and inbox panel.
-Type free text or pick an action. Sessions persist in
-`$XDG_DATA_HOME/kitsoki/sessions.db`.
+With no app path, the TUI synthesizes the project's implicit dev-story root
+from `.kitsoki.yaml` and opens the project workbench. Type free text or pick an
+action. Sessions persist in `$XDG_DATA_HOME/kitsoki/sessions.db`.
+
+To run a specific story or example instead, pass its app path:
+
+```sh
+./kitsoki run testdata/apps/cloak/app.yaml
+```
 
 ### 4. Test
 
@@ -147,24 +153,22 @@ kitsoki itself (and on each of its stories) through its own UI, with
 the bug file as both ticket and conversation log.
 
 ```sh
-./kitsoki run .kitsoki/stories/kitsoki-dev/app.yaml
+./kitsoki run
 ```
 
-Lands at the engineer's-day landing room. From there: `tickets` to
-search `issues/bugs/`, `pick <id>` to pick a bug, `bugfix` to walk
-the supervised 8-room pipeline (idle → reproducing → proposing →
-implementing → testing → reviewing → validating → done). PR
-refinement is a separate story under `stories/pr-refinement/`.
-Every checkpoint appends a `## Comment <iso> by <author>` block to
-the bug file, so the file itself is the conversation log + audit
-trail.
+Lands at the engineer's-day landing room via the implicit root in `.kitsoki.yaml`.
+From there: `tickets` to search `issues/bugs/`, `pick <id>` to pick a bug,
+`bugfix` to walk the supervised 8-room pipeline (idle → reproducing → proposing
+→ implementing → testing → reviewing → validating → done). PR refinement is a
+separate story under `stories/pr-refinement/`. Every checkpoint appends a
+`## Comment <iso> by <author>` block to the bug file, so the file itself is the
+conversation log + audit trail.
 
 Autonomous variant (LLM-judge auto-fires confident verdicts, bails
 to human only on uncertainty):
 
 ```sh
-./kitsoki run .kitsoki/stories/kitsoki-dev/app.yaml \
-    --warp scenarios/autonomous_ready.yaml
+./kitsoki run --warp scenarios/autonomous_ready.yaml
 ```
 
 See **[`.kitsoki/stories/kitsoki-dev/README.md`](.kitsoki/stories/kitsoki-dev/README.md)**
