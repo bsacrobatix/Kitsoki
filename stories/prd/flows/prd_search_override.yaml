@@ -17,6 +17,8 @@ initial_world:
       - { path: "docs/prd-observability.md", kind: "accepted", summary: "Covers a metrics surface, but not a standalone dashboard.", recommendation: "new" }
     roadmap_fit: "Adjacent to the observability PRD; arguably separate."
 
+starlark_inspect_cassette: ../cassettes/slug_a_standalone_metrics_dashboard.inspect.yaml
+
 host_handlers:
   # references on_enter runs the optional semantic pre-seed; empty hits = no embeddings.
   host.agent.search:
@@ -28,13 +30,6 @@ host_handlers:
         questions:
           - { id: "q1", question: "Who is the primary user?", why: "scopes the persona" }
   # override_new mints the per-PRD workspace (it commits to a NEW PRD).
-  host.run:
-    by_call:
-      mint_workspace:
-        data:
-          ok: true
-          exit_code: 0
-          stdout_json: { slug: "metrics-dashboard", workspace: ".artifacts/prd/metrics-dashboard" }
 
 turns:
   # confirm bounces while the overlap remains (the guard).
@@ -49,6 +44,6 @@ turns:
     expect_world:
       prd_overlap_decision: "new"
       prd_change_target:    ""
-      prd_workspace:        ".artifacts/prd/metrics-dashboard"
+      prd_workspace:        ".artifacts/prd/a-standalone-metrics-dashboard"
 
 expect_no_errors: true

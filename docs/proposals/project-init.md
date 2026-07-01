@@ -138,7 +138,7 @@ This is the proof the feature is composition, not invention.
 | Checkpoint gate (accept/refine/quit) | `accept`/`refine(feedback)` + cycle budget, judge polymorphism | `dev-story-mining/rooms/mine.yaml:61-108`; `stories/bugfix` |
 | Propose-then-confirm | dry-run artifact, then a guarded `confirm` that runs the deterministic mutation | design publish; ideas `apply` gate (dev-story README §ideas) |
 | Compile profile → instance | render `.kitsoki/stories/<id>-dev/app.yaml` from the bindings | `.kitsoki/stories/kitsoki-dev/app.yaml:131`; `gears-rust` External-target profile (`stories/dev-story/app.yaml:365-381`) |
-| Set up conventions + `.gitignore` | deterministic write script | `publish_design.py` / `ideas_reconcile.py` pattern |
+| Set up conventions + `.gitignore` | deterministic write script | `publish_design.py` / `ideas_reconcile.star` pattern |
 | Run readiness + tests | `host.run`, integrating the project's own `commands`/`testing` | `iface.ci.run_tests`/`build`; `make test` |
 | Classify a verify failure (regression vs pre-existing) | `host.agent.decide` over a baseline re-run | the "pre-existing vs regression" gate, [`dev-story-from-transcripts.md`](../../.context/dev-story-from-transcripts.md) theme A |
 | Golden-path UI scenario | Playwright in the no-LLM `--flow`/`--host-cassette` posture | `features/` + qa; `feature.schema.json`; `tools/runstatus/tests/playwright/` |

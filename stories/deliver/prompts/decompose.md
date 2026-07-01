@@ -28,7 +28,7 @@ completion automatically.
    - Prefer vertical slices (end-to-end per feature) over horizontal layers.
 3. **Order** slices so that any `deps` are satisfied before their dependents.
 4. **Write** the decomposition manifest to `{{ args.decomposition_path }}` in this
-   exact YAML format (fleet's `fleet_load.py` parses this):
+   exact YAML format (fleet's `fleet_load.star` parses this):
 
 ```yaml
 briefs:

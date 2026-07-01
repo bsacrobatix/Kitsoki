@@ -21,6 +21,8 @@ initial_world:
   workdir:    "."
   judge_mode: "human"
 
+starlark_inspect_cassette: ../cassettes/prd_to_design.inspect.yaml
+
 host_handlers:
   host.ide.open_file:
     data: { ok: true, connected: true }
@@ -47,18 +49,6 @@ host_handlers:
             matched_count:       2
   host.artifacts_dir:
     data: { ok: true, path: ".artifacts/prd/example-cli/001-brief.md", message_id: "001-brief#1" }
-  host.run:
-    by_call:
-      mint_workspace:
-        data:
-          ok: true
-          exit_code: 0
-          stdout_json: { slug: "example-cli", workspace: ".artifacts/prd/example-cli" }
-      publish:
-        data:
-          ok: true
-          exit_code: 0
-          stdout_json: { prd_file: "docs/prd/example-cli.md" }
   host.agent.task:
     data:
       ok: true

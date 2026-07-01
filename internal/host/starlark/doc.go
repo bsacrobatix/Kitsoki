@@ -26,7 +26,7 @@
 // # The ctx surface (deliberately narrow)
 //
 // The single argument to main is a struct with exactly five attributes. No
-// environment, no clock, no randomness — and only a NARROW read-only filesystem
+// environment, no clock, no randomness — and only a NARROW filesystem
 // + allow-listed-probe surface, never a shell — so a recorded run replays
 // byte-for-byte:
 //
@@ -37,16 +37,18 @@
 //	ctx.fs.read(path)            read-only, repo-rooted, size-capped -> string
 //	ctx.fs.exists(path)          -> bool
 //	ctx.fs.glob(pattern)         -> [path] (sorted, repo-relative)
+//	ctx.fs.write(path, content)  write one repo-rooted, size-capped file -> path
 //	ctx.probe(name, args=[])     run an ALLOW-LISTED read-only probe -> {exit, out}
 //
 // An http response exposes .status (int), .headers (dict), .text() (string),
 // and .json() (parsed value). body on post may be a dict (JSON-encoded with an
 // application/json content-type) or a string (sent verbatim).
 //
-// ctx.fs / ctx.probe are the read-only inspection surface (see Inspector): a
-// verify gate can assert against the working tree and a few curated probes
-// without any way to write, delete, or escape the rooted working dir. ctx.probe
-// is a per-deployment read-only ALLOW-LIST (gh.issue.list, git.status,
+// ctx.fs / ctx.probe are the explicit inspection/persistence surface (see
+// Inspector): a glue script can assert against the working tree, write one
+// bounded file, and call a few curated probes without any way to delete, run a
+// shell, or escape the rooted working dir. ctx.probe is a per-deployment
+// read-only ALLOW-LIST (gh.issue.list, git.status,
 // git.ls_files) — a fixed argv template exec'd directly, NOT a shell. There is
 // no ctx.env. A non-zero probe exit is a result the script branches on, not an
 // error.
@@ -76,9 +78,9 @@
 //
 //   - No general-purpose plugin host: the ctx surface is fixed in this package,
 //     not extensible per-story.
-//   - No mutable world; no side effects beyond HTTP and READ-ONLY fs/probe.
+//   - No mutable world; no side effects beyond HTTP and explicit fs/probe.
 //   - No general ctx.run shell: ctx.probe is a fixed read-only allow-list, not
-//     arbitrary command execution; ctx.fs is read-only with no write/delete.
+//     arbitrary command execution; ctx.fs has no delete/chmod/rename.
 //   - No nondeterministic stdlib (time, random) — only json and math are enabled.
 //   - This package never imports internal/host; the host.Handler adapter lives
 //     in package host (internal/host/starlark_run.go) to avoid an import cycle.

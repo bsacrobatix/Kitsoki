@@ -35,6 +35,8 @@ initial_world:
   publish_durable_path: "docs/prd"
   prd_doc_filename:     ""
 
+starlark_inspect_cassette: ../cassettes/prd_notes_service.inspect.yaml
+
 host_handlers:
   # NOTE: host.ide.* and host.artifacts_dir are intentionally NOT stubbed — the
   # extension's IDE server fulfils them live (open the editor / show the diff),
@@ -79,18 +81,6 @@ host_handlers:
         data:
           ok: true
           submitted: { verdict: "continue", reason: "Crisp why, clear metric, IDs threaded.", questions: [] }
-  host.run:
-    by_call:
-      mint_workspace:
-        data:
-          ok: true
-          exit_code: 0
-          stdout_json: { slug: "notes-service", workspace: ".artifacts/prd/notes-service" }
-      publish:
-        data:
-          ok: true
-          exit_code: 0
-          stdout_json: { prd_file: "docs/prd/notes-service.md" }
   host.agent.task:
     by_call:
       # First draft (drafting on_enter, id: prd_author) — the full PRD body.

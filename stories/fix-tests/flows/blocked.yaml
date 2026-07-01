@@ -14,8 +14,6 @@ host_handlers:
       run_initial:
         data: { exit_code: 1, ok: false, stdout: "--- FAIL: TestAmbiguous\nFAIL\n" }
         delay: "10ms"
-      write_report:
-        data: { exit_code: 0, ok: true, stdout: ".artifacts/fix-tests/report-blocked.md" }
   host.agent.task:
     by_call:
       fix:

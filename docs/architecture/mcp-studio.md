@@ -153,6 +153,9 @@ uses, so the MCP surface can never disagree with them.
 | `story.validate` | `{dir?} → {ok, errors[]}` | `app.Load` → `[]ValidationError{File, Line, Column, Message}` — the full load-time invariant set |
 | `story.graph` | `{dir?, room?} → {rooms[] \| detail \| agents[]}` | `graph.RoomList` / `Detail` / `AgentContracts` (the pure functions behind `/editor`) |
 | `story.test` | `{dir?, flows?} → {report}` | `testrunner.RunFlows` (no LLM; honours `--recording`/`--host-cassette`) |
+| `story.list` | `{dir?, glob?} → {files[]}` | discover a story's files (the counterpart to `story.read`'s exact path) — [`story_search.go`](../../internal/mcp/studio/story_search.go) |
+| `story.search` | `{dir?, pattern, glob?, regex?} → {hits[{file, line, text}]}` | grep across a story (room ref / intent / host call / world key) without the host `Grep` |
+| `story.turn` | `{dir?, state, intent, slots?, world?} → {next_state, world_after, effects, host_calls[], host_errors, guard_hint, …}` | dry-run ONE transition (`orchestrator.OneShot`, persists nothing) — the debugging microscope; [`story_turn.go`](../../internal/mcp/studio/story_turn.go) |
 
 ### `workflow.*` — draft, validate, launch, export
 
@@ -403,12 +406,13 @@ image or accessibility-tree payload.
 
 ### `issue.*` — file a gap (with evidence bundled)
 
-The agent that drives kitsoki through this MCP has no shell and no write tools,
-so when the *studio surface itself* can't do something needed to develop, test,
-run, introspect, trace, or debug a story, it can't reach for `gh`. `issue.create`
-closes that gap from inside the MCP — and, because the studio already produces
-the evidence, it bundles it in.
-([`issue_tools.go`](../../internal/mcp/studio/issue_tools.go).)
+The agent that drives kitsoki through this MCP has no raw shell. When the *studio
+surface itself* can't do something needed to develop, test, run, introspect,
+trace, or debug a story, that gap must be **filed**. `issue.create` is the
+evidence-bundling path for that (distinct from `gh.*`, which is for everyday
+issue/PR reads + comments): because the studio already produces the evidence, it
+renders assets, folds in a handle's trace/inspect, and files the issue — all
+server-side. ([`issue_tools.go`](../../internal/mcp/studio/issue_tools.go).)
 
 | Tool | Shape | Wraps |
 |---|---|---|
@@ -441,6 +445,72 @@ Three things happen server-side so the agent never handles bytes:
   filer wired the tool returns a structured `ISSUE_UNAVAILABLE`. `issue.create`
   is allowed in `--read-only` mode (it mutates `.artifacts` + GitHub, not the
   story tree).
+
+### `host.*` — the standalone gate-runner
+
+`host.run` runs a command against a worktree directory and returns its exit code
++ combined output, OUTSIDE any live session — so the driver can independently
+re-confirm a committed tip is GREEN (`go test ./...`, a story's `gate_command`)
+rather than trust an agent's self-report. It reuses the same `host.RunHandler`
+a story's `host.run` *effect* uses, so gate semantics never drift.
+([`host_tools.go`](../../internal/mcp/studio/host_tools.go).)
+
+| Tool | Shape | Wraps |
+|---|---|---|
+| `host.run` | `{dir, cmd, args?, timeout?, truncate_output?} → {ok, exit_code, stdout, truncated?, output_path?}` | `host.RunHandler` (bash unless `args` ⇒ direct exec); a non-zero exit is data, not an error; stdout tail-truncated with the full output spilled to a sidecar |
+
+### `trace.*` — read a trace off disk; convert one to a flow
+
+`session.trace` reads an *open* handle's in-memory history and blocks while that
+handle is mid-turn. `trace.read` reads a trace **off disk** — a `kitsoki web`
+session journal under `~/.kitsoki/sessions`, a background-run trace, a maker
+worktree's trace — with a **lock-free** read that never collides with a live
+writer. `trace.to_flow` turns a recorded trace into a replayable flow fixture (+
+host cassette), closing the no-LLM test loop inside the MCP: dogfood live →
+`trace.to_flow` → `story.test`. ([`trace_tools.go`](../../internal/mcp/studio/trace_tools.go).)
+
+| Tool | Shape | Wraps |
+|---|---|---|
+| `trace.read` | `{path \| session_id \| app, root?, since?, until?, kinds?, limit?, truncate_payload?, errors_only?} → {source_path, events[], last_turn, summary:{by_kind, errors[]}}` | resolve + parse JSONL into `store.Event` (lock-free), filtered; mirrors `kitsoki trace` |
+| `trace.to_flow` | `{trace, app, out, recording?, app_id?, initial_state?} → {flow_path, cassette_path?, num_turns, num_episodes}` | `testrunner.ConvertTraceToFlow` (wraps `kitsoki trace to-flow`) |
+
+### `vcs.*` / `worktree.*` — a structured git surface
+
+Git was the single biggest reason a driver shelled out: worktree lifecycle,
+status/diff/log, and the squash-merge that lands a fix. These cover it with
+structure (all git runs through `host.RunHandler` in argv mode — no shell), and
+**`vcs.integrate` replaces the `reset --soft main` ritual that once destroyed
+main**: it runs a guarded 3-way squash merge *from the integration checkout*,
+which cannot revert work landed on `onto` since the branch's base.
+([`vcs_tools.go`](../../internal/mcp/studio/vcs_tools.go).)
+
+| Tool | Shape | Notes |
+|---|---|---|
+| `vcs.status` | `{dir} → {branch, upstream?, ahead, behind, clean, files[{xy, path}]}` | porcelain v1, structured. Read-only |
+| `vcs.diff` | `{dir, from?, to?, paths?, stat?, name_only?} → {diff, truncated?, output_path?}` | textual; full diff spills to a sidecar. Read-only |
+| `vcs.log` | `{dir, n?, paths?} → {commits[{hash, subject}]}` | Read-only |
+| `worktree.list` | `{dir} → {worktrees[{path, head, branch?, detached?}]}` | Read-only |
+| `worktree.create` | `{dir, branch, base?, path?} → {path, branch, base}` | `git worktree add -b`; lands under `.worktrees/` by convention |
+| `worktree.remove` | `{dir, path, force?} → {removed}` | `git worktree remove` |
+| `vcs.commit` | `{dir, message, paths?} → {commit, nothing_to_commit?}` | stage (`-A` or paths) + commit |
+| `vcs.integrate` | `{dir, branch, onto?, message, worktree_path?, delete_branch?} → {integrated, commit?, conflicts[]?, refused?}` | **guarded** squash-land: refuses unless `dir` is on `onto`, `onto`'s tree is clean, and `branch` has commits beyond its merge-base; conflicts restore the clean tip |
+
+The read tools stay available on a `--read-only` server; the mutating ones
+(`worktree.create/remove`, `vcs.commit`, `vcs.integrate`) are dropped there.
+
+### `gh.*` — read GitHub issues/PRs, post comments
+
+The everyday GitHub reads a developing agent needs — list open issues, view a
+PR's body + changed files + diff (the bake-off needs a filed bug's own
+regression test), comment — wrap `gh` (argv mode, via `host.RunHandler`). `gh`
+must be authenticated on the host (the same precondition `issue.create` /
+`inbox.sync_github` rely on). ([`gh_tools.go`](../../internal/mcp/studio/gh_tools.go).)
+
+| Tool | Shape | Notes |
+|---|---|---|
+| `gh.issues` | `{repo?, state?, assignee?, search?, limit?, dir?} → {issues[]}` | `gh issue list --json`, passed through. Read-only |
+| `gh.pr_view` | `{number, repo?, include_diff?, dir?} → {pr, diff?}` | `gh pr view --json` (+ `gh pr diff`). Read-only |
+| `gh.comment` | `{number, body, on?:issue\|pr, repo?, dir?} → {url}` | `gh issue/pr comment`. Mutating (dropped `--read-only`) |
 
 ## Operator-ask — the MCP client *is* the operator
 

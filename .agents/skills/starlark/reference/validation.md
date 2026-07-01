@@ -43,7 +43,7 @@ you want to prove *"a function can't reference `http`"*, run it with a
 
 `-kitsoki` pins the exact `host.starlark.run` sandbox surface so a single
 command answers *"would this load and dispatch in kitsoki?"* without booting an
-app. It is equivalent to `-predeclared=json,math -require-def=main` with every
+app. It is equivalent to `-predeclared=json,math,yaml -require-def=main` with every
 dialect relaxation off (strict), mirroring `internal/host/starlark/run.go`:
 
 ```bash

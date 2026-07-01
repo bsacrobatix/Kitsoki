@@ -47,6 +47,24 @@ func TestRun_TrivialScript(t *testing.T) {
 	}
 }
 
+func TestRun_YAMLDecode(t *testing.T) {
+	script := `
+def main(ctx):
+    doc = yaml.decode("items:\n  - id: one\n    count: 2\n")
+    return {"id": doc["items"][0]["id"], "count": doc["items"][0]["count"]}
+`
+	res, err := starlarkhost.Run(context.Background(), starlarkhost.Params{Script: "yaml.star", Source: []byte(script)})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := res.Outputs["id"]; got != "one" {
+		t.Fatalf("id = %v, want one", got)
+	}
+	if got := res.Outputs["count"]; got != int64(2) {
+		t.Fatalf("count = %v (%T), want int64(2)", got, got)
+	}
+}
+
 // TestRun_HTTPGet_ThroughFakeClient confirms ctx.http.get routes through the
 // injected HTTPClient (a fake, no network) and that .status / .json() work.
 func TestRun_HTTPGet_ThroughFakeClient(t *testing.T) {

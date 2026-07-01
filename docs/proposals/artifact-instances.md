@@ -9,7 +9,7 @@
 The design pipeline persists each phase's output to a per-run workspace and reads
 it back later, but the workspace plumbing is hand-rolled and **one-shot**:
 
-- `stories/dev-story/scripts/design_workspace.py` mints
+- `stories/dev-story/scripts/design_workspace.star` mints
   `docs/proposals/.workspace/<slug>/` fresh; the room calls it `once: true` keyed
   on `world.design_workspace` so a `/reload` doesn't re-mint — but there is no
   lookup of a workspace that *already existed before this run*.
@@ -52,7 +52,7 @@ operator surface is [slice 3](artifact-instance-console.md).
   `.list` host calls + a few world keys (table below). No new effect verbs.
 - **Stories affected:** none change behavior unless they adopt `artifacts:`. The
   design pipeline (`stories/dev-story/rooms/design*.yaml`) migrates onto it as the
-  worked example (task 3.1) — `design_workspace.py`'s mint-only logic becomes a
+  worked example (task 3.1) — `design_workspace.star`'s mint-only logic becomes a
   `resolve` (get-or-create), and `design_search`'s amend path becomes generic
   update-mode.
 - **Backward compat:** opt-in. A story with no `artifacts:` block is unchanged;
@@ -123,7 +123,7 @@ story load, not mid-run):
 ## Backward compatibility / migration
 
 Opt-in and mechanical. The design pipeline is the migration proof:
-`design_workspace.py`'s mint becomes `iface.instance.resolve` (get-or-create, so
+`design_workspace.star`'s mint becomes `iface.instance.resolve` (get-or-create, so
 re-entry re-joins instead of minting a second `<slug>/`); the `design_search` →
 `design_change_target` amend path becomes the generic back-step/update-mode gate.
 The numbered-artifact writes are untouched. Existing flow fixtures for the design
