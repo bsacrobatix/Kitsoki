@@ -497,12 +497,25 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 		// host scripts (the bugfix room's verifier, deploy, etc.)
 		// actually block the pipeline instead of silently advancing.
 		if res.Error != "" && hc.OnError != "" {
-			o.logger.DebugContext(ctx, trace.EvHostOnErrorRedirect,
+			// WARN, not DEBUG: a host call reporting a DOMAIN error (a non-zero
+			// exit / an explicit Result.Error) that routes to on_error is a
+			// signal worth surfacing in CI to root-cause flakes like the
+			// punch-list studio test (host.run → needs_human). exit_code/ok from
+			// the result are attached so a spurious error under load is
+			// diagnosable from the log alone.
+			exitCode, ok := "", ""
+			if res.Data != nil {
+				exitCode = fmt.Sprintf("%v", res.Data["exit_code"])
+				ok = fmt.Sprintf("%v", res.Data["ok"])
+			}
+			o.logger.WarnContext(ctx, trace.EvHostOnErrorRedirect,
 				slog.String("session_id", string(sid)),
 				slog.String("namespace", hc.Namespace),
 				slog.String("from", string(state)),
 				slog.String("to", hc.OnError),
 				slog.String("error", res.Error),
+				slog.String("exit_code", exitCode),
+				slog.String("ok", ok),
 				slog.String("phase", "domain"),
 			)
 			redirect = app.StatePath(hc.OnError)
