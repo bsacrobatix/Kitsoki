@@ -30,10 +30,15 @@ const ghArtifactsReleaseTag = "kitsoki-artifacts"
 // bug. The local file must already be written by the caller; Path is rendered
 // into the issue body as a developer-local reference.
 type EvidenceFile struct {
-	Name  string // evidence name; also the body label default
-	Path  string // developer-local path/reference to the saved artifact
-	Image bool   // true when the artifact is a screenshot/image
-	Label string // human label in the body (defaults to Name)
+	Name string // evidence name; also the body label default
+	Path string // developer-local path/reference rendered into the body
+	// SourcePath is the actual on-disk file to read when uploading the artifact
+	// as a release asset. When empty, Path is used (back-compat for callers whose
+	// Path is itself a readable path). Set this when Path is a display-only
+	// reference that does not resolve from the process cwd.
+	SourcePath string
+	Image      bool   // true when the artifact is a screenshot/image
+	Label      string // human label in the body (defaults to Name)
 }
 
 // GitHubBugFiling is the input to GitHubFileBug.
@@ -201,7 +206,12 @@ func ghUploadEvidence(ctx context.Context, repo, tag, issueRef string, files []E
 
 	out := map[string]string{}
 	for _, f := range files {
-		src := strings.TrimSpace(f.Path)
+		// Read from SourcePath (the real on-disk file) when set; otherwise Path is
+		// itself a readable path.
+		src := strings.TrimSpace(f.SourcePath)
+		if src == "" {
+			src = strings.TrimSpace(f.Path)
+		}
 		if src == "" {
 			continue
 		}

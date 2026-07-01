@@ -112,9 +112,9 @@ Run a small, author-supplied [Starlark](https://github.com/google/starlark-go)
 script in a tightly restricted, **deterministic** interpreter and bind its
 named outputs into world. This is the escape hatch for glue that is too fiddly
 for the expr-lang `with:`/guard vocabulary (shaping a payload, deriving several
-fields, calling a plain HTTP API) but too small to justify a bespoke Go
+fields, writing a small artifact, calling a plain HTTP API) but too small to justify a bespoke Go
 handler. Unlike `host.run` it is sandboxed, introspectable, and replayable: no
-environment, no clock, no randomness — and only a narrow read-only filesystem +
+environment, no clock, no randomness — and only a narrow filesystem +
 allow-listed-probe surface (`ctx.fs` / `ctx.probe`, below), never a shell — so a
 recorded run replays byte-for-byte.
 
@@ -192,6 +192,7 @@ ctx.http.post(url, body=..., headers={})    # -> response
 ctx.fs.read(path)                           # -> string (repo-relative, read-only, 1 MiB cap)
 ctx.fs.exists(path)                         # -> bool
 ctx.fs.glob(pattern)                        # -> [path] (sorted, repo-relative)
+ctx.fs.write(path, content)                 # -> path (repo-relative, replaces one file, 1 MiB cap)
 ctx.probe(name, args=[])                    # -> {exit: int, out: string} (allow-listed only)
 ```
 
@@ -209,20 +210,21 @@ ctx.probe(name, args=[])                    # -> {exit: int, out: string} (allow
   error is a Starlark error). A response is truthy iff its status is in
   `200..299`. A non-2xx status is **not** an error — branch on it in-script.
 
-#### Read-only inspection: `ctx.fs` and `ctx.probe`
+#### Filesystem/probe boundary: `ctx.fs` and `ctx.probe`
 
-`ctx.fs` and `ctx.probe` are the **read-only filesystem + allow-listed-process
-boundary** — the sibling of `ctx.http` for the working tree and a few curated
-probes. They exist so a verify gate can assert against reality ("does this file
-exist", "does `gh issue list` show ≥ N issues") while keeping the determinism +
-record/replay contract intact. `ctx.env` is still absent — there is deliberately
-no environment surface.
+`ctx.fs` and `ctx.probe` are the **filesystem + allow-listed-process boundary**
+— the sibling of `ctx.http` for the working tree and a few curated probes. They
+exist so a glue script can assert against reality ("does this file exist", "does
+`gh issue list` show ≥ N issues") and write small deterministic artifacts while
+keeping the record/replay contract intact. `ctx.env` is still absent — there is
+deliberately no environment surface.
 
-- `ctx.fs.read/exists/glob` are **read-only and repo-scoped**: every path is
-  resolved against the run's working directory, cleaned, and rejected if it
-  escapes via `..` or an absolute prefix. There is no write/delete — mutation
-  stays with a write-mode-gated agent step, never the gate. A read is capped at
-  1 MiB.
+- `ctx.fs.read/exists/glob/write` are **repo-scoped**: every path is resolved
+  against the run's working directory, cleaned, and rejected if it escapes via
+  `..` or an absolute prefix. Reads and writes are each capped at 1 MiB. `write`
+  replaces exactly one file, creating parent directories as needed, and returns
+  the normalized repo-relative path. There is no delete, chmod, rename, shell,
+  environment, or clock surface.
 - `ctx.probe(name, args=[])` is an **allow-list, not a shell.** `name` must be on
   a fixed global vocabulary of read-only probes; each maps to a static argv
   template exec'd directly (no shell, no word-splitting), with `args` substituted
@@ -232,7 +234,7 @@ no environment surface.
   script can branch on a clean failure, exactly like a non-2xx HTTP status; an
   unknown name is an error.
 
-Both funnel through one `Inspector` interface (`internal/host/starlark/inspect.go`)
+All filesystem/probe calls funnel through one `Inspector` interface (`internal/host/starlark/inspect.go`)
 — the inspection-side analogue of `HTTPClient`. It is injected via
 `WithInspector`/`InspectorFromContext` (mirroring `WithHTTP`); the default is a
 **deny-all** inspector so a script that touches the disk without an injected
@@ -248,7 +250,8 @@ The worked example is the dev-story ad-hoc plan's verify gate
 see [docs/stories/ad-hoc-plan.md](../stories/ad-hoc-plan.md) for the full
 propose → accept → apply → verify story it sits behind.
 
-Predeclared stdlib: `json` and `math` **only** (no `time`, no `random`).
+Predeclared stdlib: `json`, `math`, and decode-only `yaml` **only** (no
+`time`, no `random`).
 `FileOptions` are strict defaults (no `set` builtin, no global reassignment, no
 recursion); execution is capped at 10,000,000 steps to turn an accidental hot
 loop into a clean error.

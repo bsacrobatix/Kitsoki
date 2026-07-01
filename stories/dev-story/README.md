@@ -77,7 +77,7 @@ which confirms the published path and offers two arcs:
 - **`go_main`** → back to the hub.
 
 `prd_file` is a host **bind** in prd's drafting accept arc (it comes from
-`prd_publish.py` stdout), so it commits post-dispatch — too late for a
+`prd_publish.star`), so it commits post-dispatch — too late for a
 synchronous exit `set:` projection to carry it (contrast bf → pr, whose
 carried `done_artifact` is a synchronous `set:`). The flat world keeps
 `prd__prd_file` once the turn settles, so `prd_published` reads
@@ -126,11 +126,10 @@ into the author prompt (`prompts/design_draft.md` reads
 The placement seam is the two publish scripts, which take optional
 positional args:
 
-- [`stories/prd/scripts/prd_publish.py`](../prd/scripts/prd_publish.py)
-  `… [workdir] [durable] [change_target] [doc_filename]` — `durable` is
-  the publish home relative to `workdir`; a non-empty `doc_filename`
-  overwrites a **fixed** `<durable>/<doc_filename>.md` instead of
-  `<durable>/<slug>.md`.
+- [`stories/prd/scripts/prd_publish.star`](../prd/scripts/prd_publish.star)
+  publishes to the `durable` home relative to `workdir`; a non-empty
+  `doc_filename` overwrites a **fixed** `<durable>/<doc_filename>.md`
+  instead of `<durable>/<slug>.md`.
 - [`stories/dev-story/scripts/publish_design.py`](./scripts/publish_design.py)
   `… [workdir] [durable] [doc_filename] [ticket_dir]` — same `workdir` /
   `durable` / `doc_filename` contract, plus `ticket_dir`: a non-empty
@@ -400,7 +399,7 @@ root — it reads the backlog, the commit history (`git log`), and the docs
 concrete evidence, plus a few high-value **candidates** worth proposing next.
 
 The decide is interpretation; the mutation is deterministic. `apply` is a
-confirm gate: it hands the persisted report to `scripts/ideas_reconcile.py`,
+confirm gate: it hands the persisted report to `scripts/ideas_reconcile.star`,
 which rewrites the backlog file (the same decide→script discipline as the
 design slug step). `pick N` seeds `world.design_seed_idea` from candidate N
 and jumps into the `design` intake — so a blocked author flows straight into

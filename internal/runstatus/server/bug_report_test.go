@@ -232,7 +232,11 @@ func TestBugReport_NoScreenshot_SkipsFile(t *testing.T) {
 	}
 }
 
-func TestBugReport_GitHubModeSavesDeveloperLocalArtifacts(t *testing.T) {
+// TestBugReport_GitHubModeUploadsArtifacts proves the web GitHub-filing path
+// uploads the captured evidence as release assets and links the public URLs in
+// the issue (so anyone can open them), while still keeping a local .artifacts/
+// copy for developer review.
+func TestBugReport_GitHubModeUploadsArtifacts(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{recorder: bugTestRecorder(), bugRoot: root, ticketRepo: "o/r"}
 
@@ -246,13 +250,19 @@ func TestBugReport_GitHubModeSavesDeveloperLocalArtifacts(t *testing.T) {
 	)
 
 	var issueArgv string
+	var uploads int
 	runner := func(ctx context.Context, dir, name string, args ...string) (string, string, int, error) {
 		j := strings.Join(args, " ")
 		switch {
 		case len(args) > 0 && args[0] == "--version":
 			return "gh version 2.x\n", "", 0, nil
-		case strings.HasPrefix(j, "release"):
-			t.Fatalf("github bug evidence must not call gh release: %s", j)
+		case strings.HasPrefix(j, "release view"):
+			return "", "release not found", 1, nil // missing → triggers create
+		case strings.HasPrefix(j, "release create"):
+			return "", "", 0, nil
+		case strings.HasPrefix(j, "release upload"):
+			uploads++
+			return "", "", 0, nil
 		case strings.HasPrefix(j, "issue create"):
 			issueArgv = j
 			return "https://github.com/o/r/issues/77\n", "", 0, nil
@@ -264,7 +274,7 @@ func TestBugReport_GitHubModeSavesDeveloperLocalArtifacts(t *testing.T) {
 
 	pngBytes := []byte("\x89PNG\r\n\x1a\nFAKE")
 	res, rerr := s.bugReport(map[string]any{
-		"title":              "GitHub evidence stays local",
+		"title":              "GitHub evidence is uploaded",
 		"description":        "Captured from the browser.",
 		"screenshot_png_b64": base64.StdEncoding.EncodeToString(pngBytes),
 	})
@@ -276,6 +286,12 @@ func TestBugReport_GitHubModeSavesDeveloperLocalArtifacts(t *testing.T) {
 		t.Fatalf("unexpected github url: %+v", m)
 	}
 
+	// Both the HAR and the screenshot are uploaded as release assets.
+	if uploads != 2 {
+		t.Fatalf("expected 2 release uploads, got %d", uploads)
+	}
+
+	// A local .artifacts/ copy is still kept for developer review.
 	artifactsRoot := filepath.Join(root, ".artifacts", "bug-reports")
 	entries, err := os.ReadDir(artifactsRoot)
 	if err != nil {
@@ -298,14 +314,18 @@ func TestBugReport_GitHubModeSavesDeveloperLocalArtifacts(t *testing.T) {
 		t.Fatalf("har.json leaks Authorization token: %s", harData)
 	}
 
+	// The issue body links the public release-asset URLs, not local paths.
 	for _, want := range []string{
 		"## Artifacts",
-		"These files are not uploaded to GitHub.",
-		".artifacts/bug-reports/" + entries[0].Name() + "/har.json",
-		".artifacts/bug-reports/" + entries[0].Name() + "/screenshot.png",
+		"uploaded as GitHub release assets",
+		"![Screenshot](https://github.com/o/r/releases/download/kitsoki-artifacts/",
+		"(https://github.com/o/r/releases/download/kitsoki-artifacts/",
 	} {
 		if !strings.Contains(issueArgv, want) {
 			t.Fatalf("issue create argv missing %q: %s", want, issueArgv)
 		}
+	}
+	if strings.Contains(issueArgv, "not uploaded to GitHub") {
+		t.Fatalf("upload path must drop the not-uploaded disclaimer: %s", issueArgv)
 	}
 }
