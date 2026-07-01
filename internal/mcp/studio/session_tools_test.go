@@ -401,6 +401,21 @@ func TestSessionNew_HostCassetteBacksDirectSubmitRun(t *testing.T) {
 		t.Logf("stabilize: attempt %d start→%q (transient load-flake); retrying a fresh session", attempt, started.Outcome.State)
 		_, _ = callTool(ctx, cs, "session.close", map[string]any{"handle": ok.Handle})
 	}
+	if started.Outcome.State != "load" {
+		// The load flake survived every retry — dump everything needed to root-
+		// cause it from the CI log (this only executes on a genuinely stuck run):
+		// the turn outcome, the rendered frame, the full world (host_error /
+		// last_error / load_error), and the session trace (the HostDispatched /
+		// HostReturned events show whether punch_load hit the cassette or errored).
+		t.Logf("FLAKE-DIAG outcome: state=%q mode=%q error=%q ok=%v", started.Outcome.State, started.Outcome.Mode, started.Outcome.Error, started.OK)
+		t.Logf("FLAKE-DIAG frame:\n%s", started.Frame.Text)
+		if wres, werr := callTool(ctx, cs, "session.world", map[string]any{"handle": ok.Handle}); werr == nil {
+			t.Logf("FLAKE-DIAG world:\n%s", contentText(wres))
+		}
+		if tres, terr := callTool(ctx, cs, "session.trace", map[string]any{"handle": ok.Handle}); terr == nil {
+			t.Logf("FLAKE-DIAG trace:\n%s", contentText(tres))
+		}
+	}
 	require.Equal(t, "load", started.Outcome.State,
 		"start must reach load within %d fresh attempts", startAttempts)
 	require.Contains(t, started.Frame.Text, "Loaded 10 item(s).")
