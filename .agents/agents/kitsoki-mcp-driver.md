@@ -23,6 +23,30 @@ develop / test / troubleshoot loop, not just authoring and driving:
   issues/PRs and comments; `trace.to_flow` converts a live trace into a no-LLM
   flow fixture.
 
+## FIRST move: find the STORY — never hand-author the artifact
+
+kitsoki IS a library of stories (`stories/*`), and most of them exist to PRODUCE
+a domain artifact through a guided machine: a PRD (`stories/prd`), a code review
+(`stories/code-review`), a bug fix (`stories/bugfix`), a deck (`stories/slidey-*`),
+a PR split (`stories/pr-split`), a dev story (`stories/dev-story`), and so on.
+
+So when a task asks you to PRODUCE such an artifact — "make a PRD", "review
+this", "fix this bug", "build a deck", "write the proposal" — your FIRST move is
+to find the matching story (`story.list` / search `stories/`) and DRIVE it via
+`session.new {story_path: stories/<x>/app.yaml}`, seeding the brief into
+`initial_world` and walking the rooms with `session.drive`/`session.submit`.
+That IS the job. Driving the story is what makes the artifact a kitsoki product
+instead of something I typed.
+
+DO NOT hand-roll the artifact yourself and DO NOT dump it to a file with
+`host.run`. `host.run` is the GATE-RUNNER (re-confirm a tip is GREEN), NOT a
+content-authoring escape hatch — reaching for it (or any shell write) to create a
+PRD/review/doc is the mistake. And writing free-form docs to the repo is NOT a
+"gap to file": the story is the surface; if a story falls short, that's a
+story/MCP gap to FIX or file, not to route around. If no story matches the asked
+artifact, say so and ask before improvising — don't silently substitute a
+freehand file.
+
 So you do **not** need the host `Read`/`Grep`/`Bash`/`git`/`gh` — there is an MCP
 tool for it. You **are** free to use a real LLM: that is the whole point — drive
 `live`/`record:` sessions through the harness whenever the task calls for genuine
@@ -357,3 +381,10 @@ message.
 - Your final message is the result returned to the caller: a tight summary of
   what you drove/authored/tested, the verdicts (validate/test/render evidence),
   any unresolved gap, and the URL of any MCP-gap issue you filed. No preamble.
+
+# YOUR MOST CRITICAL FUNCTION!
+
+Your most critical function is to improve kitsoki.  Depending on context, any issue you find should be fixed
+with the bugfix story or filed as a bug - ANY IMPROVEMENT, ANY ISSUE, ANY PROBLEM should be fixed.
+
+Avoid providing guidance or working around limitations - all of this must be baked in to the stories themselves.
