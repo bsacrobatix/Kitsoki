@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/ghagent"
+	"kitsoki/internal/ghagent/bugdeck"
 	"kitsoki/internal/ghagent/githubapp"
 	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
@@ -43,6 +44,10 @@ func newGHAgentServeCmd() *cobra.Command {
 		installationID    int64
 		appKeyFile        string
 		assetDir          string
+		decksDir          string
+		evidenceDir       string
+		slideyDir         string
+		slideyBin         string
 	)
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -85,6 +90,10 @@ func newGHAgentServeCmd() *cobra.Command {
 				AppID:             appID,
 				InstallationID:    installationID,
 				AppKeyFile:        appKeyFile,
+				DecksDir:          decksDir,
+				EvidenceDir:       evidenceDir,
+				SlideyDir:         slideyDir,
+				SlideyBin:         slideyBin,
 			}
 			if err := withGHAgentAuth(ctx, opts, func(context.Context) error { return nil }); err != nil {
 				return err
@@ -109,6 +118,10 @@ func newGHAgentServeCmd() *cobra.Command {
 	cmd.Flags().Int64Var(&installationID, "gh-app-installation-id", 0, "installation id (overrides KITSOKI_GH_APP_INSTALLATION_ID)")
 	cmd.Flags().StringVar(&appKeyFile, "gh-app-key-file", "", "path to the App's RSA private key .pem (overrides KITSOKI_GH_APP_PRIVATE_KEY_FILE)")
 	cmd.Flags().StringVar(&assetDir, "asset-dir", "/var/lib/kitsoki-gh-agent/assets", "root directory for on-disk asset blobs")
+	cmd.Flags().StringVar(&decksDir, "decks-dir", "/var/lib/kitsoki-gh-agent/decks", "directory the agent hosts rendered bug-report decks from, served at /decks/<id>")
+	cmd.Flags().StringVar(&evidenceDir, "evidence-dir", "/var/lib/kitsoki-gh-agent/evidence", "directory the agent holds per-issue bug evidence (rrweb.json/har.json) under <deck-id>/")
+	cmd.Flags().StringVar(&slideyDir, "slidey-dir", "", "slidey project dir; enables the bug-report deck auto-trigger on issues.opened (or set --slidey-bin)")
+	cmd.Flags().StringVar(&slideyBin, "slidey-bin", "", "slidey binary/entrypoint (alternative to --slidey-dir)")
 	return cmd
 }
 
@@ -128,6 +141,10 @@ type ghAgentServeOptions struct {
 	AppID             int64
 	InstallationID    int64
 	AppKeyFile        string
+	DecksDir          string
+	EvidenceDir       string
+	SlideyDir         string
+	SlideyBin         string
 }
 
 func runGHAgentServe(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) error {
@@ -140,7 +157,18 @@ func runGHAgentServe(ctx context.Context, store *jobs.GHJobStore, opts ghAgentSe
 	mux.HandleFunc("/runs", ghAgentRunsHandler(store))
 	mux.HandleFunc("/api/run/", ghAgentRunAPIHandler(store))
 	mux.HandleFunc("/run/", ghAgentRunHandler(store))
-	mux.HandleFunc("/gh-agent/webhook", ghAgentWebhookHandler(store, opts))
+	// Deck hosting + the bug-report deck auto-trigger share a DeckStore. The
+	// trigger only engages when slidey + the evidence/decks dirs are configured;
+	// otherwise the agent still hosts any decks produced out-of-band.
+	deckTrigger := buildDeckTrigger(opts)
+	if strings.TrimSpace(opts.DecksDir) != "" {
+		if deckStore, err := ghagent.NewDeckStore(opts.DecksDir); err != nil {
+			fmt.Fprintf(os.Stderr, "gh-agent: deck hosting disabled: %v\n", err)
+		} else {
+			mux.HandleFunc("/decks/", deckStore.Handler())
+		}
+	}
+	mux.HandleFunc("/gh-agent/webhook", ghAgentWebhookHandler(store, opts, deckTrigger))
 
 	srv := &http.Server{Addr: opts.Addr, Handler: mux}
 	errc := make(chan error, 1)
@@ -258,7 +286,37 @@ func runGHAgentPollOnce(ctx context.Context, store *jobs.GHJobStore, opts ghAgen
 	})
 }
 
-func ghAgentWebhookHandler(store *jobs.GHJobStore, opts ghAgentServeOptions) http.HandlerFunc {
+// buildDeckTrigger assembles the bug-report deck auto-trigger from serve flags.
+// It returns nil (feature off) unless slidey and the evidence/decks dirs are all
+// configured, so existing deployments are unaffected until opted in.
+func buildDeckTrigger(opts ghAgentServeOptions) *ghagent.DeckTrigger {
+	if strings.TrimSpace(opts.SlideyDir) == "" && strings.TrimSpace(opts.SlideyBin) == "" {
+		return nil
+	}
+	if strings.TrimSpace(opts.DecksDir) == "" || strings.TrimSpace(opts.EvidenceDir) == "" {
+		return nil
+	}
+	deckStore, err := ghagent.NewDeckStore(opts.DecksDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gh-agent: deck auto-trigger disabled: %v\n", err)
+		return nil
+	}
+	evStore, err := ghagent.NewEvidenceStore(opts.EvidenceDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gh-agent: deck auto-trigger disabled: %v\n", err)
+		return nil
+	}
+	return &ghagent.DeckTrigger{
+		Evidence:      evStore,
+		Store:         deckStore,
+		Renderer:      bugdeck.SlideyRenderer{Dir: opts.SlideyDir, Bin: opts.SlideyBin},
+		Ticket:        host.GitHubTicketHandler,
+		PublicBaseURL: opts.PublicBaseURL,
+		FallbackRepo:  opts.Repo,
+	}
+}
+
+func ghAgentWebhookHandler(store *jobs.GHJobStore, opts ghAgentServeOptions, deckTrigger *ghagent.DeckTrigger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -279,6 +337,13 @@ func ghAgentWebhookHandler(store *jobs.GHJobStore, opts ghAgentServeOptions) htt
 			return
 		}
 		if !ok {
+			// Not an @kitsoki mention. A freshly-filed bug-report issue gets a
+			// hosted no-LLM deck instead — fire-and-forget so the webhook returns
+			// promptly (rendering takes seconds), gated on the agent already
+			// holding the issue's evidence.
+			if deckTrigger != nil && r.Header.Get("X-GitHub-Event") == "issues" {
+				fireDeckTrigger(opts, deckTrigger, body)
+			}
 			w.WriteHeader(http.StatusAccepted)
 			_, _ = io.WriteString(w, "ignored\n")
 			return
@@ -301,6 +366,29 @@ func ghAgentWebhookHandler(store *jobs.GHJobStore, opts ghAgentServeOptions) htt
 			"run_url": job.RunURL,
 		})
 	}
+}
+
+// fireDeckTrigger runs the bug-report deck pipeline for an issues webhook in the
+// background: it mints the App token (for the deck-link comment) and calls the
+// trigger, logging the outcome. It never blocks the webhook response — deck
+// rendering takes seconds — and swallows the "not applicable" case (no on-agent
+// evidence / wrong action) quietly.
+func fireDeckTrigger(opts ghAgentServeOptions, deckTrigger *ghagent.DeckTrigger, body []byte) {
+	go func() {
+		err := withGHAgentAuth(context.Background(), opts, func(authedCtx context.Context) error {
+			url, handled, herr := deckTrigger.Handle(authedCtx, body)
+			if herr != nil {
+				return herr
+			}
+			if handled {
+				fmt.Fprintf(os.Stdout, "gh-agent: hosted bug-report deck %s\n", url)
+			}
+			return nil
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "gh-agent: deck trigger failed: %v\n", err)
+		}
+	}()
 }
 
 func withGHAgentAuth(ctx context.Context, opts ghAgentServeOptions, fn func(context.Context) error) error {

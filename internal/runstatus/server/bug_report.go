@@ -6,7 +6,8 @@
 // request/response pairs recorded at the choke point in handleRPC) and scrubs it
 // with the LLM-free harscrub anonymizer. Local filing writes
 // <root>/issues/bugs/<id>.md plus a sibling <id>.artifacts/ dir; GitHub filing
-// creates the issue and writes developer-only evidence under .artifacts/.
+// creates the issue, saves a local .artifacts/ copy of the evidence, and uploads
+// scrubbed evidence as release assets for review.
 //
 // Root resolution (least-surprising, deterministic):
 //
@@ -31,6 +32,7 @@ import (
 	"time"
 
 	"kitsoki/internal/bugfile"
+	"kitsoki/internal/ghagent/bugdeck"
 	"kitsoki/internal/host"
 	"kitsoki/internal/runstatus/harscrub"
 )
@@ -193,9 +195,10 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 }
 
 // fileBugToGitHub files the bug as a real GitHub issue on s.ticketRepo: it
-// writes the (already-scrubbed) evidence to .artifacts for developer-local
-// review, hands those paths to host.GitHubFileBug, and returns the issue url. No
-// local issues/bugs/*.md file is written in this mode.
+// writes the (already-scrubbed) evidence to .artifacts as a local copy, hands
+// those paths to host.GitHubFileBug with UploadArtifacts set so the evidence is
+// uploaded as release assets and linked by public URL in the issue, and returns
+// the issue url. No local issues/bugs/*.md file is written in this mode.
 func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, traceRef string, repro []string, harJSON, png, rrwebJSON, consoleJSON, traceJSON []byte) (any, *rpcError) {
 	prefix := "bug-" + time.Now().UTC().Format("20060102T150405.000000000Z")
 	artifactsRoot, displayRoot, err := s.githubBugArtifactsRoot()
@@ -216,7 +219,13 @@ func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, t
 		if err := os.WriteFile(p, data, 0o644); err != nil {
 			return err
 		}
-		ev = append(ev, host.EvidenceFile{Name: base, Path: filepath.ToSlash(filepath.Join(displayRoot, prefix, base)), Image: image, Label: label})
+		ev = append(ev, host.EvidenceFile{
+			Name:       base,
+			Path:       filepath.ToSlash(filepath.Join(displayRoot, prefix, base)), // display-only reference
+			SourcePath: p,                                                          // real file to upload
+			Image:      image,
+			Label:      label,
+		})
 		return nil
 	}
 	for _, artifact := range []struct {
@@ -257,11 +266,39 @@ func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, t
 		KitsokiRev: gitShortRev(s.bugRoot),
 		FiledBy:    stringParam(params, "filed_by"),
 		Evidence:   ev,
+		// We are already online and gh-authed to file the issue itself, so upload
+		// the scrubbed evidence as release assets and link the public URLs —
+		// otherwise the issue body would point at developer-local paths nobody
+		// else can open. Upload failures degrade gracefully to those local paths.
+		UploadArtifacts: true,
 	})
 	if ferr != nil {
 		return nil, serverErr(fmt.Errorf("file bug to github (%s): %w", s.ticketRepo, ferr))
 	}
+
+	// Deposit the scrubbed rrweb + HAR onto the kitsoki github agent, keyed by the
+	// same DeckID the agent's issues.opened webhook will look up — so it produces
+	// the hosted no-LLM deck without re-downloading anything. Best-effort: a
+	// deposit failure must not fail the (already-filed) bug report.
+	s.depositAgentEvidence(res.Number, rrwebJSON, harJSON)
+
 	return map[string]any{"id": res.Number, "url": res.URL, "github": true}, nil
+}
+
+// depositAgentEvidence writes the scrubbed rrweb + HAR into the configured agent
+// evidence store under bugdeck.DeckID(ticketRepo, issueNumber). No-op when no
+// agent evidence dir is configured. Best-effort: errors are swallowed (the bug
+// is already filed; the agent simply skips deck generation if evidence is
+// absent).
+func (s *Server) depositAgentEvidence(issueNumber string, rrwebJSON, harJSON []byte) {
+	if strings.TrimSpace(s.agentEvidenceDir) == "" || strings.TrimSpace(issueNumber) == "" {
+		return
+	}
+	store, err := bugdeck.NewEvidenceStore(s.agentEvidenceDir)
+	if err != nil {
+		return
+	}
+	_ = store.Save(bugdeck.DeckID(s.ticketRepo, issueNumber), rrwebJSON, harJSON)
 }
 
 func (s *Server) githubBugArtifactsRoot() (absRoot, displayRoot string, err error) {

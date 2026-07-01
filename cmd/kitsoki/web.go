@@ -43,20 +43,21 @@ import (
 
 func webCmd() *cobra.Command {
 	var (
-		addr          string
-		harnessType   string
-		claudeModel   string
-		agentBackend  string
-		recordingPath string
-		recordPath    string
-		dbPath        string
-		execModeFlag  string
-		flowPath      string
-		hostCassette  string
-		configPath    string
-		storyDirs     []string
-		actor         string
-		ticketRepo    string
+		addr             string
+		harnessType      string
+		claudeModel      string
+		agentBackend     string
+		recordingPath    string
+		recordPath       string
+		dbPath           string
+		execModeFlag     string
+		flowPath         string
+		hostCassette     string
+		configPath       string
+		storyDirs        []string
+		actor            string
+		ticketRepo       string
+		agentEvidenceDir string
 	)
 
 	cmd := &cobra.Command{
@@ -266,6 +267,7 @@ authentication.`,
 				server.WithBugRoot(resolveWebBugRoot(dirs)),
 				server.WithWorkflowRoot(resolveWebBugRoot(dirs)),
 				server.WithTicketRepo(ticketRepo),
+				server.WithAgentEvidenceDir(agentEvidenceDir),
 			)
 			// Attach the cross-session notification relay sink so each new
 			// session's background-turn fan-out reaches the runstatus.notification
@@ -315,6 +317,7 @@ authentication.`,
 	cmd.Flags().StringVar(&hostCassette, "host-cassette", "", "host cassette file backing host.* calls (deterministic, no LLM); combinable with --flow")
 	cmd.Flags().StringVar(&actor, "actor", "", "operator identity recorded on browser-driven turns as slots.author (default: git config user.name; the X-Kitsoki-Actor header and an explicit actor RPC param override it)")
 	cmd.Flags().StringVar(&ticketRepo, "ticket-repo", "constructorfabric/Kitsoki", "file Report-bug reports as GitHub issues on this owner/repo (evidence saved under .artifacts/bug-reports for developer review) instead of a local issues/bugs/*.md file; requires gh auth. Pass an empty string to write local issues/bugs/*.md files instead")
+	cmd.Flags().StringVar(&agentEvidenceDir, "agent-evidence-dir", "", "after a GitHub bug filing, also deposit the scrubbed rrweb+HAR here under <DeckID>/ so the kitsoki gh-agent can auto-build a hosted deck without re-downloading; point at the agent's --evidence-dir")
 
 	return cmd
 }
