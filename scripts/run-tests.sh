@@ -7,7 +7,7 @@
 #   1. go test ./...                  (Go unit tests)
 #   2. Starlark static validation     (host.starlark.run parse + resolve)
 #   3. story flow fixtures            (deterministic, no-LLM `kitsoki test flows`
-#                                      for each stories/*/app.yaml)
+#                                      for each tracked stories/*/app.yaml)
 #   4. feature catalog                (features/*.yaml schema + generated tour
 #                                      manifests freshness; skipped with a
 #                                      warning when pnpm/node_modules absent)
@@ -97,9 +97,7 @@ cat "$TMP/starlark.out" >>"$REPORT"
 # Suite 3: story flow fixtures
 # ---------------------------------------------------------------------------
 section "story flows"
-shopt -s nullglob
-STORY_APPS=(stories/*/app.yaml)
-shopt -u nullglob
+mapfile -t STORY_APPS < <(git ls-files | grep -E '^stories/[^/]+/app\.yaml$' | sort)
 
 declare -a FLOW_FAILED_APPS
 flow_apps_total=0
