@@ -1,0 +1,146 @@
+---
+name: kitsoki-bug-filing
+description: File Kitsoki bug reports through the project-supported filing paths, preserving screenshots, HARs, rrweb replays, TUI transcripts, trace evidence, GitHub artifact links, and Kitsoki metadata. Use when the user asks to file/report a Kitsoki bug, turn captured evidence into a GitHub issue, attach or host bug artifacts through the GitHub agent, use the web/TUI Report Bug surfaces, or convert a finding from dogfood/debugging into a durable issue without bypassing Kitsoki's formatting and workflow logic.
+---
+
+# Kitsoki Bug Filing
+
+## Overview
+
+File bugs through Kitsoki's own entrypoints so the report carries the right
+frontmatter, metadata block, evidence links, redaction, and GitHub upload
+behavior. Do not use raw `gh issue create` as the normal filing path; use a
+Kitsoki story or command that applies the repo's bug-filing conventions.
+
+## Decision Tree
+
+1. **Live web UI bug with screenshot/HAR/rrweb/console evidence:** use the web
+   story surface and Meta -> Report bug with `kitsoki web --ticket-repo
+   <owner/repo>`. This routes `runstatus.bug.report` through
+   `host.GitHubFileBug(... UploadArtifacts: true)`, saves a local copy under
+   `.artifacts/bug-reports/`, uploads evidence as GitHub release assets, and
+   links those assets from the issue.
+2. **Live TUI bug with transcript/context evidence:** run the relevant Kitsoki
+   story in the TUI with `--ticket-repo <owner/repo>`, then use `/bug
+   <description>`. This writes scrubbed transcript/context artifacts and files
+   through the same GitHub bug orchestration with uploaded evidence.
+3. **Existing rrweb/HAR evidence that needs a hosted reviewer artifact:** after
+   the GitHub issue exists, use `kitsoki gh-agent deck` to produce the hosted
+   no-LLM replay deck and comment the link on the issue.
+4. **Text-only issue with no evidence:** `kitsoki bug create --github
+   <owner/repo>` is acceptable, but note that it captures no artifacts. Do not
+   use it when the user asked for artifacts.
+5. **Dogfood or debugging finding:** file via the live story/studio path when
+   available. In dogfood-marathon, findings normally become issues through the
+   studio `issue_create` tool; keep using that path instead of shelling out to
+   `gh`.
+
+## Filing Workflows
+
+### Web Report Bug
+
+Use this when the browser view itself is the evidence.
+
+```bash
+go run ./cmd/kitsoki web stories/<story>/app.yaml --ticket-repo <owner/repo>
+```
+
+Then use the web Meta launcher -> Report bug, review the captured evidence, and
+submit. The command path captures browser evidence, scrubs it, writes the local
+artifact copy, uploads evidence through the GitHub artifact release path, and
+creates the issue with links.
+
+Prefer this over hand-built markdown when the user says "file this with
+artifacts", "include the screenshot/HAR/replay", or "open the issue in GitHub
+linking to the evidence".
+
+### TUI `/bug`
+
+Use this when the bug is visible while operating a Kitsoki story in the TUI.
+
+```bash
+go run ./cmd/kitsoki run stories/<story>/app.yaml --ticket-repo <owner/repo>
+```
+
+In the TUI, run:
+
+```text
+/bug <one-line summary, then any useful detail>
+```
+
+With `--ticket-repo`, `/bug` stores scrubbed TUI evidence under
+`.artifacts/bug-reports/<id>/`, uploads it as GitHub release assets, and links it
+from the GitHub issue. Without `--ticket-repo`, it writes a local
+`issues/bugs/<id>.md` plus sibling `<id>.artifacts/`; only choose that local path
+when the user explicitly wants a local fixture.
+
+### Hosted GitHub Agent Deck
+
+Use this after a GitHub issue exists and the useful evidence is an rrweb/HAR
+bundle that should be reviewable through the GitHub agent's hosted deck:
+
+```bash
+go run ./cmd/kitsoki gh-agent deck \
+  --repo <owner/repo> \
+  --issue <number> \
+  --rrweb <path/to/rrweb.json> \
+  --har <path/to/har.json> \
+  --decks-dir .artifacts/gh-agent/decks \
+  --public-base-url <agent-public-url> \
+  --slidey-dir <path/to/slidey> \
+  --comment
+```
+
+If the evidence is already in the agent evidence store, pass `--evidence-dir`
+instead of `--rrweb`/`--har`. This is deterministic and no-LLM; it should be the
+entrypoint for "push artifacts to the GitHub agent and comment a replay link".
+
+### Text-Only Fallback
+
+Only when there are no artifacts to preserve:
+
+```bash
+go run ./cmd/kitsoki bug create \
+  --target kitsoki \
+  --github <owner/repo> \
+  --title "<short title>" \
+  --body "<expected / actual / impact>" \
+  --severity med \
+  --component <component>
+```
+
+This still uses Kitsoki's formatting and metadata path, but it is text-only.
+Never substitute it for the web/TUI artifact paths when evidence exists.
+
+## Report Shape
+
+Keep the title short and actionable, prefixed by the surface when useful
+(`web:`, `tui:`, `mcp:`, `story:`). The body should include:
+
+- What the operator expected.
+- What actually happened.
+- A minimal reproduction path or the story/session entrypoint.
+- Why it matters.
+- Links to captured artifacts, traces, decks, or local `.artifacts` paths.
+
+Let Kitsoki write the metadata/frontmatter where possible. Do not hand-copy the
+fenced `kitsoki` metadata block, issue labels, release asset URLs, or local
+artifact layout unless you are repairing a failed filing and have inspected the
+generated body.
+
+## Validation
+
+Before claiming the bug is filed, verify the artifact path that matters:
+
+- Web/TUI GitHub path: confirm the command returned a GitHub issue URL and the
+  issue body has an `## Artifacts` section with GitHub release asset links or a
+  hosted deck comment.
+- Local path: confirm `issues/bugs/<id>.md` exists and its sibling
+  `<id>.artifacts/` contains the expected evidence.
+- Hosted deck path: confirm `kitsoki gh-agent deck` printed the public deck URL
+  and, when `--comment` was used, the issue has the comment.
+
+Automated tests must not call real GitHub or real LLMs. Use fake `cliExec`,
+host cassettes, flow fixtures, or targeted unit tests around the Kitsoki
+orchestration (`internal/host`, `internal/runstatus/server`, `internal/tui`) for
+regressions.
