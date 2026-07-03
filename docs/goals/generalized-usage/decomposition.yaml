@@ -472,7 +472,10 @@ changes:
     goal_ref: [G6]
     title: reset_log clears the whole derived work_dir, not just log.jsonl
     kind: story
-    pipeline: bugfix
+    # implementation (not bugfix): this is an ENHANCEMENT (add clearing), not a
+    # reproducible runtime DEFECT — bugfix's reproduce-first phase can't anchor on it
+    # (live run Cycle 6: the reproducer flailed and latched onto an unrelated open_pr bug).
+    pipeline: implementation
     prior_work: "Surfaced live (Cycle 3). Correction to the reported framing: ledger.json/preamble.md self-heal every evaluate pass (regenerated, never read as carried-forward state), so they don't 'poison the fold'; the real hazard is that reset_log wipes ALL log history including every `integrated` fact, so it must stay a TEST-FIXTURE-ONLY affordance. ctx.fs has no delete (by design), so 'clear' means neutralize-known-files."
     scope: ["stories/goal-seeker/scripts/gs_init.star", "stories/goal-seeker/scripts/gs_init.star.yaml", "stories/goal-seeker/flows/reset_log_clears_derived_state.yaml"]
     depends_on: ["WM.0"]
