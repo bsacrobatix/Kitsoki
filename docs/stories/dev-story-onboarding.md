@@ -98,8 +98,10 @@ branch and remote fields.
 
 The generated `.kitsoki/check-readiness.py` is the explicit post-apply verifier.
 It mirrors `setup_plan.verifications`, supports `--list` for review, and writes
-`.artifacts/kitsoki-readiness.json` when run. Onboarding does not execute those
-commands automatically.
+`.artifacts/kitsoki-readiness.json` when run. With `--update-profile`, it also
+replaces the profile's top-level `readiness:` block with a schema-shaped summary
+of the pass/fail results. Onboarding does not execute those commands
+automatically.
 
 ## The external-target profile
 

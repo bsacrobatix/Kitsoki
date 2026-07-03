@@ -220,6 +220,19 @@ if readiness_path.exists():
     check("valid readiness list exit", list_proc.returncode == 0, list_proc.stdout + list_proc.stderr)
     check("valid readiness list has story", '"id": "story-load"' in list_proc.stdout)
     check("valid readiness list has tests", '"command": "go test ./..."' in list_proc.stdout)
+    update_proc = subprocess.run(
+        [sys.executable, str(readiness_path), "--json", "--update-profile", "--timeout", "5"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=repo,
+    )
+    check("valid readiness update exits red on failed required check", update_proc.returncode != 0)
+    updated_profile = profile_path.read_text(encoding="utf-8") if profile_path.exists() else ""
+    check("valid readiness profile status updated", "readiness:\n  status: \"fail\"" in updated_profile)
+    check("valid readiness profile check recorded", 'id: "story-load"' in updated_profile)
+    check("valid readiness profile detail recorded", "detail:" in updated_profile)
 
 # 4. Git metadata is preserved instead of assuming main/no remote.
 repo = mkgitrepo()
