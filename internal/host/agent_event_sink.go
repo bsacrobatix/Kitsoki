@@ -324,6 +324,12 @@ type AgentErrorPayload struct {
 	Agent      string `json:"agent,omitempty"`
 	DurationMS int64  `json:"duration_ms"`
 	Error      string `json:"error"`
+	// Meta mirrors AgentReturnedPayload.Meta for a failed call — today used
+	// only to carry the active harness-ladder rung (ladder_rung /
+	// ladder_failure_kind, see ladderMetaFields in ladder.go) so a rung's
+	// failing attempts are visible in the trace, not just its eventual
+	// winner. Omitted (nil) on every call with no ladder installed.
+	Meta map[string]any `json:"meta,omitempty"`
 	// Substitution mirrors AgentReturnedPayload.Substitution: when the
 	// local-model → agent.claude validation-reject fallback (step 4) was
 	// attempted but the fallback ALSO failed, the closing AgentError carries

@@ -93,6 +93,15 @@ exit the conversation without submitting.`
 //     validator: was declared).
 //   - claude_session_id (string): recorded in trace; not meant for YAML binding.
 func AgentDecideHandler(ctx context.Context, args map[string]any) (Result, error) {
+	return runAgentVerbWithLadder(ctx, args, "decide", agentDecideHandlerOnce)
+}
+
+// agentDecideHandlerOnce is the original AgentDecideHandler body: a single
+// dispatch attempt. runAgentVerbWithLadder calls it once directly when no
+// harness_ladder: is configured (today's behavior, unchanged), or repeatedly
+// — once per ladder rung, each with its own ctx via WithLadderRung — when one
+// is. See applyLadderRung for how a rung overrides the resolved agent.
+func agentDecideHandlerOnce(ctx context.Context, args map[string]any) (Result, error) {
 	if args == nil {
 		args = map[string]any{}
 	}
@@ -100,13 +109,13 @@ func AgentDecideHandler(ctx context.Context, args map[string]any) (Result, error
 	// schema: is mandatory for decide.
 	schemaArg, _ := args["schema"].(string)
 	if strings.TrimSpace(schemaArg) == "" {
-		return Result{Error: "host.agent.decide: schema: argument is required"}, nil
+		return Result{Error: "host.agent.decide: schema: argument is required", FailureKind: FailureFatal}, nil
 	}
 
 	// Resolve prompt.
 	rendered, errMsg := resolveDecidePrompt(ctx, args)
 	if errMsg != "" {
-		return Result{Error: errMsg}, nil
+		return Result{Error: errMsg, FailureKind: FailureFatal}, nil
 	}
 
 	// B-7: If an agent plugin registry is wired in context, route through
@@ -133,13 +142,17 @@ func AgentDecideHandler(ctx context.Context, args map[string]any) (Result, error
 	// Resolve agent and validate tools.
 	agent, _ := resolveAgent(ctx, args)
 	ctx, agent = applyProvider(ctx, args, agent)
+	ctx, agent = applyLadderRung(ctx, agent)
 	if errMsg := rejectMutationTools(ctx, args, agent); errMsg != "" {
-		return Result{Error: errMsg}, nil
+		return Result{Error: errMsg, FailureKind: FailureFatal}, nil
 	}
 
 	bin, err := resolveAgentBin(ctx)
 	if err != nil {
-		return Result{Error: err.Error()}, nil
+		// The selected backend's CLI binary is missing/unavailable — this is
+		// exactly the axis the ladder rotates on (a different rung may name a
+		// different backend), so classify as infra rather than fatal.
+		return Result{Error: err.Error(), FailureKind: FailureInfra}, nil
 	}
 
 	workingDir, _ := args["working_dir"].(string)
@@ -154,7 +167,7 @@ func AgentDecideHandler(ctx context.Context, args map[string]any) (Result, error
 	tools := effectiveTools(ctx, args, agent)
 	hasBash, bashErrMsg := validateBashProfile("host.agent.decide", tools, agent)
 	if bashErrMsg != "" {
-		return Result{Error: bashErrMsg}, nil
+		return Result{Error: bashErrMsg, FailureKind: FailureFatal}, nil
 	}
 	if hasBash {
 		tools = rewriteToolsForBashMCP(tools)
@@ -170,7 +183,7 @@ func AgentDecideHandler(ctx context.Context, args map[string]any) (Result, error
 	// Parse optional validator block.
 	vopts, vparseErr := parseValidatorOptions(args)
 	if vparseErr != "" {
-		return Result{Error: fmt.Sprintf("host.agent.decide: %s", vparseErr)}, nil
+		return Result{Error: fmt.Sprintf("host.agent.decide: %s", vparseErr), FailureKind: FailureFatal}, nil
 	}
 	_, validatorBlockPresent := args["validator"]
 
@@ -367,6 +380,7 @@ func emitDecideJournal(ctx context.Context, callID string, callStart time.Time, 
 			Agent:      agentName,
 			DurationMS: durationMS,
 			Error:      res.Error,
+			Meta:       ladderMetaFields(ctx, res.FailureKind),
 		})
 	} else {
 		// On a tool bypass, annotate the trace's agent.call.complete Meta so
@@ -381,6 +395,17 @@ func emitDecideJournal(ctx context.Context, callID string, callStart time.Time, 
 			}
 			meta["tool_bypassed"] = true
 			meta["verdict_recovered_from"] = "code_block"
+		}
+		if ladderMeta := ladderMetaFields(ctx, FailureNone); ladderMeta != nil {
+			if meta == nil {
+				meta = agentUsageMeta(ctx)
+			}
+			if meta == nil {
+				meta = map[string]any{}
+			}
+			for k, v := range ladderMeta {
+				meta[k] = v
+			}
 		}
 		appendAgentReturnedEvent(ctx, callEnd, callID, AgentReturnedPayload{
 			Verb:       "decide",
@@ -735,8 +760,12 @@ func runDecideWithValidatorRetryLoop(ctx context.Context, p decideLoopParams) Re
 					// fix a missing interpreter or dropped import root. Return a hard
 					// Result.Error immediately. The schema-valid captured payload is
 					// still surfaced via buildDecideResult so downstream sees it.
-					return buildDecideResult(lastStdout, lastExitCode, lastStderr, p.ValidatorOutputPath, sessionID,
+					// FailureFatal: a broken validator script is unrelated to which
+					// model/backend answered, so no ladder rung can fix it either.
+					res := buildDecideResult(lastStdout, lastExitCode, lastStderr, p.ValidatorOutputPath, sessionID,
 						fmt.Sprintf("post_cmd validator failed to start: %s", infraErr))
+					res.FailureKind = FailureFatal
+					return res
 				}
 				if rejection != "" {
 					// Semantic rejection — nudge and retry.
@@ -751,7 +780,9 @@ func runDecideWithValidatorRetryLoop(ctx context.Context, p decideLoopParams) Re
 			if strings.TrimSpace(msg) == "" {
 				msg = fmt.Sprintf("validator: max retries exhausted after %d attempts", attempts)
 			}
-			return buildDecideResult(lastStdout, lastExitCode, lastStderr, p.ValidatorOutputPath, sessionID, msg)
+			res := buildDecideResult(lastStdout, lastExitCode, lastStderr, p.ValidatorOutputPath, sessionID, msg)
+			res.FailureKind = FailureCapability
+			return res
 		case mcpOutcomeAbandoned:
 			continue
 		}
@@ -763,7 +794,7 @@ func runDecideWithValidatorRetryLoop(ctx context.Context, p decideLoopParams) Re
 		if s := strings.TrimSpace(lastStderr); s != "" {
 			msg = fmt.Sprintf("%s\nstderr: %s", msg, s)
 		}
-		return Result{Error: msg}
+		return Result{Error: msg, FailureKind: FailureInfra}
 	}
 
 	attempts, _, lastErr := kitsokimcp.ReadStateFile(p.ValidatorStatePath)
@@ -782,7 +813,12 @@ func runDecideWithValidatorRetryLoop(ctx context.Context, p decideLoopParams) Re
 			msg = fmt.Sprintf("validator: session abandoned without successful submit after %d outer iteration(s), %d attempt(s)", maxOuter, attempts)
 		}
 	}
-	return buildDecideResult(lastStdout, lastExitCode, lastStderr, p.ValidatorOutputPath, sessionID, msg)
+	// The model ran to completion for every outer iteration but never
+	// produced an accepted verdict — a capability failure the ladder can
+	// escalate (higher effort, then a stronger model), not an infra one.
+	res := buildDecideResult(lastStdout, lastExitCode, lastStderr, p.ValidatorOutputPath, sessionID, msg)
+	res.FailureKind = FailureCapability
+	return res
 }
 
 // runDecideSandboxValidator reads the captured payload from outputPath and
