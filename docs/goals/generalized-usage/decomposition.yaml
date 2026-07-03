@@ -853,7 +853,10 @@ changes:
     demo_video: "before/after — the first screen no longer advertises dead onboard/look actions"
     kind: story
     pipeline: bugfix
-    scope: ["stories/dev-story/rooms/get_started.yaml", "stories/dev-story/flows/get_started_actions.yaml"]
+    # scope fix (live run): the dev-story first screen is rooms/landing.yaml — there is no
+    # get_started.yaml room. "get_started" is the conceptual name; the actual quick-action
+    # advertising lives in landing.yaml.
+    scope: ["stories/dev-story/rooms/landing.yaml", "stories/dev-story/flows/get_started_actions.yaml"]
     depends_on: []
     acceptance:
       - "the first screen no longer advertises the dead `onboard`/`look` actions"
