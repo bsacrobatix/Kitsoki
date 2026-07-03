@@ -9,12 +9,27 @@ import { serializeAnchor } from "../lib/annotationAnchor.js";
 import MarkdownModal from "./MarkdownModal.vue";
 import ArtifactAnnotator from "./ArtifactAnnotator.vue";
 import { useRunStore } from "../stores/run.js";
+import { getActivePinia } from "pinia";
 
 // The live-run store owns the conversation transcript + turn streaming. Routing
 // an annotation dispatch through it (rather than calling the data source
 // directly) makes the annotation appear as a normal user message in the main
 // chat and streams the agent's edit + re-render back as the reply.
-const _run = useRunStore();
+const _run = getActivePinia()
+  ? useRunStore()
+  : {
+      embedScope: "",
+      embedStep: "",
+      embedLabel: "",
+      setEmbedView: (_view: { scope: string; step?: string; label?: string }) => {},
+      submitIntent: async (
+        _source: unknown,
+        _sessionId: string,
+        _intent: string,
+        _slots: Record<string, unknown>,
+        _displayLabel?: string,
+      ) => {},
+    };
 
 // Track which place the embedded artifact (e.g. the live deck) reports it is
 // showing, via the generic `embed:view` postMessage protocol. The latest scope
@@ -60,7 +75,7 @@ function artifactUrl(handle: string): string {
 }
 
 function withQuery(url: string, params: Record<string, string>): string {
-  const entries = Object.entries(params).filter(([, v]) => v !== "");
+  const entries = Object.entries(params).filter(([, v]) => typeof v === "string" && v !== "");
   if (entries.length === 0) return url;
   const sep = url.includes("?") ? "&" : "?";
   return `${url}${sep}${entries
@@ -88,6 +103,7 @@ const KIND_MIME: Record<string, string> = {
 };
 const mediaHandle = computed<string>(() => el.value.Handle ?? el.value.MediaHandle ?? "");
 const mediaCaption = computed<string>(() => el.value.Caption ?? el.value.MediaCaption ?? "");
+const mediaTitle = computed<string>(() => mediaCaption.value || mediaHandle.value || "Media artifact");
 // "Open in review" affordance: when a video renders inside a live session view,
 // link to the /review feedback surface for that handle. Absent off-session
 // (snapshot / artifact mode) where there is no sessionId to scrub against.
@@ -254,6 +270,19 @@ function shouldAutoOpenAnnotate(): boolean {
   const raw = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("visual_annotate");
   if (!raw) return false;
   return raw === "1" || raw === "true" || raw === mediaHandle.value;
+}
+
+function pinMedia(): void {
+  if (!mediaHandle.value) return;
+  window.dispatchEvent(
+    new CustomEvent("kitsoki:pin-media", {
+      detail: {
+        handle: mediaHandle.value,
+        title: mediaTitle.value,
+        kind: el.value.MediaKind || mediaMime.value,
+      },
+    }),
+  );
 }
 
 async function maybeAutoOpenAnnotate(): Promise<void> {
@@ -553,6 +582,16 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
 
   <!-- media: dispatch on MIME family; fall back to a labeled download link. -->
   <div v-else-if="el.Kind === 'media'" class="ve-media" data-testid="media-element">
+    <div v-if="mediaHandle" class="ve-media-toolbar" data-testid="media-toolbar">
+      <span class="ve-media-title" :title="mediaTitle">{{ mediaTitle }}</span>
+      <button
+        type="button"
+        class="ve-media-pin"
+        data-testid="media-pin-workbench"
+        title="Pin this artifact beside the chat"
+        @click="pinMedia"
+      >Pin</button>
+    </div>
     <!-- While annotating, the ArtifactAnnotator below renders the annotatable
          substrate for this same handle; suppress the standalone player/iframe so
          the deck is embedded ONCE (not stacked as a second instance). -->
@@ -946,6 +985,42 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
 
 .ve-media {
   margin: 0 0 0.85em;
+}
+
+.ve-media-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.4rem;
+  min-width: 0;
+}
+
+.ve-media-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  color: var(--k-fg-muted, #64748b);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ve-media-pin {
+  flex: 0 0 auto;
+  border: 1px solid var(--k-border, #cbd5e1);
+  background: var(--k-bg-widget, #f8fafc);
+  color: var(--k-button-bg, #1d4ed8);
+  border-radius: 4px;
+  padding: 0.16rem 0.45rem;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.ve-media-pin:hover {
+  border-color: var(--k-button-bg, #1d4ed8);
+  background: var(--k-bg-hover, #eff6ff);
 }
 
 .ve-media-video {
