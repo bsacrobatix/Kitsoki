@@ -105,6 +105,11 @@ under a non-force remove leaves the worktree gone and routes to a
 false-success bug and asserts `cleanup_noop_is_not_cleaned` then FAILS —
 proving the surfacing is load-bearing, not decorative.
 
+`stories/git-ops/tests/no_shared_stash_stack.sh` fails if any git-ops room
+reintroduces `git stash push` or `git stash pop`. Checkpoint restore may still
+use `git stash create` / `git stash apply <commit>` because those operate on
+explicit commit objects instead of the repository-global stash stack.
+
 ### `integrate` — lost-work-safe single-shot
 
 `integrate branch=<name>` (or the current branch) rebases the feature branch
