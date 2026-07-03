@@ -10,10 +10,10 @@ interactions:
 
       A sufficiently long summary body to satisfy the schema minimum length for the prd_artifact summary_markdown field, covering problem, users, goals, and metrics.
   - op: exists
-    target: docs/prd/example-cli.md
+    target: /tmp/kitsoki-prd-fixtures/example-cli.md
     out: "false"
   - op: write
-    target: docs/prd/example-cli.md
+    target: /tmp/kitsoki-prd-fixtures/example-cli.md
     out: |
       ## PRD: Example CLI
 

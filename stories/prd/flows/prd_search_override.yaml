@@ -11,6 +11,7 @@ initial_state: search
 initial_world:
   workdir:    "."
   judge_mode: "human"
+  publish_durable_path: "/tmp/kitsoki-prd-fixtures"
   idea:       "A standalone metrics dashboard."
   prd_existing_state:
     overlaps:

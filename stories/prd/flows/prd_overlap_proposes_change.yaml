@@ -12,6 +12,7 @@ initial_state: search
 initial_world:
   workdir:    "."
   judge_mode: "human"
+  publish_durable_path: "/tmp/kitsoki-prd-fixtures"
   idea:       "Add a local model agent sidecar."
   # Pre-populate the scout result so the confirm guard sees the overlap.
   prd_existing_state:

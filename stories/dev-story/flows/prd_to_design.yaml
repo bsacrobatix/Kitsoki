@@ -20,6 +20,7 @@ initial_state: landing
 initial_world:
   workdir:    "."
   judge_mode: "human"
+  publish_durable_path: "/tmp/kitsoki-prd-fixtures"
 
 starlark_inspect_cassette: ../cassettes/prd_to_design.inspect.yaml
 
@@ -92,13 +93,13 @@ turns:
   - intent: { name: prd__accept, slots: {} }
     expect_state: prd_published
     expect_world:
-      prd__prd_file: "docs/prd/example-cli.md"
+      prd__prd_file: "/tmp/kitsoki-prd-fixtures/example-cli.md"
 
   # continue → the design intake, seeded with a pointer to the published
-  # PRD. This is the PRD → Design baton.
+  # PRD. This is the PRD -> Design baton.
   - intent: { name: continue, slots: {} }
     expect_state: design
     expect_world:
-      design_seed_idea: "Author a design from the PRD at docs/prd/example-cli.md"
+      design_seed_idea: "Author a design from the PRD at /tmp/kitsoki-prd-fixtures/example-cli.md"
 
 expect_no_errors: true

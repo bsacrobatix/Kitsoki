@@ -35,7 +35,14 @@ def _published(slug, durable):
     return durable.rstrip("/") + "/" + slug + ".md"
 
 
+def _is_tmp_durable(durable):
+    durable = str(durable or "").strip()
+    return durable == "/tmp" or durable.startswith("/tmp/")
+
+
 def _taken(ctx, slug, durable):
+    if _is_tmp_durable(durable):
+        return ctx.fs.exists(_workspace(slug))
     return ctx.fs.exists(_workspace(slug)) or ctx.fs.exists(_published(slug, durable))
 
 

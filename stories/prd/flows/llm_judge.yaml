@@ -21,6 +21,7 @@ initial_world:
   workdir:     "."
   output_path: ".artifacts/prd.md"
   judge_mode:  "llm"
+  publish_durable_path: "/tmp/kitsoki-prd-fixtures"
 
 starlark_inspect_cassette: ../cassettes/slug_a_cli_for_x_that_helps.inspect.yaml
 

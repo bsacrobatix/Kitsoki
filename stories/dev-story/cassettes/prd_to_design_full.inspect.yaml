@@ -4,7 +4,7 @@ interactions:
     target: .artifacts/prd/a-self-serve-tour-subcommand-so
     out: "false"
   - op: exists
-    target: docs/prd/a-self-serve-tour-subcommand-so.md
+    target: .artifacts/prd/a-self-serve-tour-subcommand-so.md
     out: "false"
   - op: exists
     target: .artifacts/prd/tour-subcommand/004-prd.md
@@ -16,10 +16,10 @@ interactions:
 
       A sufficiently long summary body to satisfy the schema minimum length for the prd_artifact summary_markdown field, covering problem, actors, goals, and metrics for the binary-native tour renderer.
   - op: exists
-    target: docs/prd/tour-subcommand.md
+    target: /tmp/kitsoki-prd-fixtures/tour-subcommand.md
     out: "false"
   - op: write
-    target: docs/prd/tour-subcommand.md
+    target: /tmp/kitsoki-prd-fixtures/tour-subcommand.md
     out: |
       ## PRD: Tour Subcommand
 

@@ -216,11 +216,17 @@ func NewProductionInspector(root string) Inspector {
 }
 
 // resolve cleans a repo-relative path and confines it to root, rejecting any
-// path that escapes via ".." or an absolute prefix. It is the single chokepoint
-// every fs method passes through.
+// path that escapes via "..". Absolute paths are rejected except for temp-dir
+// paths, which flow fixtures use for durable outputs that should stay out of
+// the checkout and review artifact tree. It is the single chokepoint every fs
+// method passes through.
 func (p *productionInspector) resolve(rel string) (string, error) {
 	if filepath.IsAbs(rel) {
-		return "", fmt.Errorf("starlark fs: path %q must be repo-relative, not absolute", rel)
+		clean := filepath.Clean(rel)
+		if isTempPath(clean) {
+			return clean, nil
+		}
+		return "", fmt.Errorf("starlark fs: path %q must be repo-relative or under /tmp", rel)
 	}
 	full := filepath.Join(p.root, rel)
 	// The joined+cleaned path must still be within root; filepath.Join collapses
@@ -231,6 +237,15 @@ func (p *productionInspector) resolve(rel string) (string, error) {
 		return "", fmt.Errorf("starlark fs: path %q escapes the working directory", rel)
 	}
 	return full, nil
+}
+
+func isTempPath(path string) bool {
+	clean := filepath.Clean(path)
+	if clean == "/tmp" || strings.HasPrefix(clean, "/tmp"+string(filepath.Separator)) {
+		return true
+	}
+	tmp := filepath.Clean(os.TempDir())
+	return clean == tmp || strings.HasPrefix(clean, tmp+string(filepath.Separator))
 }
 
 // Read returns the bytes of a rooted file, capped at maxInspectReadBytes.
@@ -311,6 +326,8 @@ func (p *productionInspector) Write(_ context.Context, path string, content []by
 	}
 	rel, err := filepath.Rel(p.root, full)
 	if err != nil {
+		rel = path
+	} else if strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
 		rel = path
 	}
 	rel = filepath.ToSlash(rel)

@@ -15,7 +15,7 @@
 #
 #   main → prd → … → prd_published → continue → design → … → design_done → main
 #
-# publishing BOTH kitsoki docs into kitsoki's own tree and MINTING the linking
+# publishing both kitsoki docs in fixture-safe locations and MINTING the linking
 # feature ticket on design publish (the gears variant skips it). It is the
 # host-stub source the dev-story-prd-design tour video drives the UI against.
 #
@@ -40,10 +40,9 @@ initial_state: landing
 initial_world:
   judge_mode: "human"
   workdir:    "."
-  # Doc profile — kitsoki's own DEFAULTS (self-targeting). Stated explicitly so
-  # the contrast with the gears external-target override is legible in one place.
-  publish_durable_path: "docs/prd"                  # PRD home (projected into the prd import)
-  prd_doc_filename:     ""                           # "" ⇒ slug-named docs/prd/<slug>.md
+  # Doc profile — self-targeting, but PRD fixture writes stay out of the checkout.
+  publish_durable_path: "/tmp/kitsoki-prd-fixtures"  # PRD home (projected into the prd import)
+  prd_doc_filename:     ""                           # "" => slug-named /tmp/kitsoki-prd-fixtures/<slug>.md
   design_template_dir:  "docs/proposals/templates"   # kitsoki's own proposal templates
   design_durable_path:  "docs/proposals"             # DESIGN home
   design_doc_filename:  ""                            # "" ⇒ slug-named docs/proposals/<slug>.md
@@ -89,7 +88,7 @@ host_handlers:
           ok: true
           submitted:
             items:
-              - { path: "docs/prd/tour-subcommand.md", sections: "§5", rationale: "the PRD this design realizes" }
+              - { path: "/tmp/kitsoki-prd-fixtures/tour-subcommand.md", sections: "§5", rationale: "the PRD this design realizes" }
       brief_check:
         data:
           ok: true
@@ -182,13 +181,13 @@ turns:
   - intent: { name: prd__accept, slots: {} }
     expect_state: prd_published
     expect_world:
-      prd__prd_file: "docs/prd/tour-subcommand.md"
+      prd__prd_file: "/tmp/kitsoki-prd-fixtures/tour-subcommand.md"
 
   # ── The PRD → Design handoff ───────────────────────────────────────────────
   - intent: { name: continue, slots: {} }
     expect_state: design
     expect_world:
-      design_seed_idea: "Author a design from the PRD at docs/prd/tour-subcommand.md"
+      design_seed_idea: "Author a design from the PRD at /tmp/kitsoki-prd-fixtures/tour-subcommand.md"
 
   # ── Design half ────────────────────────────────────────────────────────────
   - intent: { name: discuss, slots: { message: "realize the tour-subcommand PRD as a kitsoki runtime design" } }
