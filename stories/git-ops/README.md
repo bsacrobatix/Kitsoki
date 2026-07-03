@@ -156,7 +156,9 @@ Three guards run in sequence before the merge:
 
 1. **Descendant check + stale-rebase check:** `git merge-base --is-ancestor integration HEAD`
    AND current merge-base == stored `rebase_base_sha`. Fails → `re_rebase_needed`.
-2. **Dirty-tree check on target worktree:** dirty → stash sandwich.
+2. **Dirty-tree check on target worktree:** dirty → stop and surface the dirty
+   file list. `git-ops` deliberately does not use `git stash` here because the
+   stash stack is shared across linked worktrees in the same repository.
    MERGE_HEAD present → `merge_in_progress` error.
 3. **Merge with `--no-ff`, `cwd: main_worktree_path`:** no `git checkout` required.
    Guard 1 guarantees the merge is fast-forwardable (no conflicts possible).
