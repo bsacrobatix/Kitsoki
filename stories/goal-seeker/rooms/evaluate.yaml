@@ -134,7 +134,14 @@ states:
           next_pipeline: submitted.next_instruction.pipeline
           next_action: submitted.next_instruction.action
           next_gate_cmd: submitted.next_instruction.gate.cmd
-        on_error: needs_human
+        # The decide gate is ADVISORY (the ledger's ready_id is authoritative); an
+        # evaluator FAILURE (crash / timeout / abandoned-without-submit) must NOT
+        # dead-end the whole loop. Degrade gracefully to the deterministic ready pick —
+        # exactly as the dispatch_next arc below falls back to ready_id when the advice
+        # merely disagrees. Only an explicit verdict=blocked (a decision, not a
+        # failure) escalates to needs_human. The failure still SURFACES: the
+        # agent.call.error is in the trace and the degrade note lands in the log.
+        on_error: deciding_degraded
       # A decide `done` is a FALSE done (ledger disagrees) — rejected; dispatch the
       # deterministic ready change anyway. `blocked` escalates. Guards read the decide
       # bind (settles in-cascade, unlike a starlark bind).
@@ -170,3 +177,48 @@ states:
           target: .
           effects:
             - say: "Deciding…"
+
+  # deciding_degraded — the decide gate is ADVISORY, so an evaluator FAILURE degrades
+  # here instead of dead-ending at needs_human. The ledger's ready_id is the
+  # authoritative pick; dispatch it, exactly as deciding_gate falls back to ready_id
+  # when the advice merely disagrees. This is graceful degradation, not error-hiding:
+  # the agent.call.error stays in the trace as ground truth, and we clear the terminal
+  # last_error precisely because a failed ADVISORY gate is non-terminal. Reaching this
+  # state on EVERY pass would still self-heal (each pass dispatches the next ready
+  # change deterministically); a genuine dead-end can only come from an explicit
+  # verdict=blocked or a deterministic-backbone (starlark) failure, both of which keep
+  # their own on_error: needs_human.
+  deciding_degraded:
+    description: "Decide gate failed — degrade to the deterministic ready pick (advisory only)."
+    relevant_world: [ready_id, summary]
+    on_enter:
+      - set:
+          summary: "decide gate failed; degraded to the deterministic ready pick {{ world.ready_id }}"
+          verdict: "not_done"
+          decide_change_id: ""
+          last_error: ""
+      - emit_intent: dispatch_next
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Ready: '{{ world.ready_id|default:"(none)" }}'
+          - prose: "Decide gate failed — degrading to the deterministic ready pick (advisory gate; the ledger is authoritative)."
+        choices:
+          - list:
+              items:
+                - { label: "look" }
+    on:
+      dispatch_next:
+        - target: dispatch
+          effects:
+            - set: { next_change_id: "{{ world.ready_id }}" }
+      look:
+        - target: .
+      "*":
+        - default: true
+          target: .
+          effects:
+            - say: "Degrading to the deterministic ready pick…"
