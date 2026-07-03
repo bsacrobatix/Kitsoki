@@ -202,8 +202,8 @@ implement them, not re-litigate them.
 ## Non-goals
 
 - **Other forges (Jira / Linear / GitLab).** GitHub only; the `ticket`/`vcs`
-  interface seams leave room for siblings later (cf.
-  [`external-project-targeting.md`](external-project-targeting.md)).
+  interface seams leave room for siblings later (cf. the adapter architecture
+  in dev-story README § provider-neutrality).
 - **Autonomous merging.** kitsoki prepares a PR (green CI, rebased, comments
   addressed) but **does not merge**; a human merges. Stated again per-slice.
 - **Replacing the local `kitsoki web` / `export-status` flow.** Those stay for

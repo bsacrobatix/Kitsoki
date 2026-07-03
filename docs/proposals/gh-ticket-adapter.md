@@ -1,8 +1,7 @@
 # Runtime: gh-backed ticket adapter
 
-**Status:** Draft v1. Nothing implemented yet.
+**Status:** Draft v1. Nothing implemented yet. Deferred pending real GitHub integration demand.
 **Kind:**   runtime
-**Epic:**   ../external-project-targeting.md
 
 ## Why
 

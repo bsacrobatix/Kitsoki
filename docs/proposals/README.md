@@ -176,24 +176,11 @@ thought.
   - [`qa-agent-skill.md`](qa-agent-skill.md) (tooling) — the `story-qa`
     subagent: persona + scenario → studio drive loop → scored UX rubric +
     report + screenshots + bug list.
-- [`external-project-targeting.md`](external-project-targeting.md) — **epic.**
-  Point `dev-story` at a **foreign repo** by filling a small **profile**
-  (ticket adapter + doc-template set + placement rule + commit/CI discipline)
-  rather than editing the pipeline; fold `prd` into `dev-story` and chain the
-  published PRD into the design pipeline (PRD→Design as one walk).
-  `constructorfabric/gears-rust` is the worked example (`gears-sdlc`
-  PRD/DESIGN docs under `gears/<gear>/docs/`, the copy-me template).
-  **Slices #1 (profile substrate), #3 (PRD→Design chain), and #4 (gears-rust
-  instance) shipped** — migrated to the
-  [dev-story README](../../stories/dev-story/README.md#doc-profile--targeting-an-external-project)
-  and the [gears-rust README](https://github.com/constructorfabric/gears-rust/blob/docs/kitsoki-integration/stories/gears-rust/README.md); their child
-  proposals are deleted. (#3 also renamed dev-story's "proposal" pipeline to
-  the **design** pipeline; per-gear placement shipped as a plain
-  `publish_durable_path` + `doc_filename` override, not the `doc_placement`
-  enum the children sketched.) The epic stays open to track the one **deferred**
-  slice (GitHub integration comes later):
-  - [`gh-ticket-adapter.md`](gh-ticket-adapter.md) (runtime, deferred) — a `gh`-backed
-    glue provider satisfying the `ticket` interface against GitHub issues.
+- [`gh-ticket-adapter.md`](gh-ticket-adapter.md) (runtime, deferred) — a `gh`-backed
+  glue provider satisfying the `ticket` interface against GitHub issues. Part of
+  the external-project-targeting epic (profile + instance now shipped and
+  documented in [dev-story README](../../stories/dev-story/README.md#doc-profile--targeting-an-external-project));
+  this adapter is deferred pending real GitHub integration demand.
 - [`issues-migration-to-github.md`](issues-migration-to-github.md) (runtime) —
   the GitHub Issues tracker substrate is shipped and documented in
   [`hosts.md → host.gh.ticket`](../architecture/hosts.md#hostghticket--github-issues-backed-tracker);
