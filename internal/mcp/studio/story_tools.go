@@ -56,7 +56,7 @@ func (srv *Server) registerStoryTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "story.graph",
-		Description: "Inspect the story's room graph (the same computation behind the web /editor). {dir?, room?, agents?}: room set → that room's detail; agents=true → that room's agent contracts; else the BFS room list. {dir?} defaults to the bound workspace.",
+		Description: "Inspect the story graph. {dir?, graph?, room?, agents?}: graph=true → renderer-neutral kitsoki.graph/v1 nodes/edges; room set → that room's detail; agents=true → that room's agent contracts; else the BFS room list. {dir?} defaults to the bound workspace.",
 	}, srv.handleStoryGraph)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
@@ -123,21 +123,24 @@ type ValidationItem struct {
 }
 
 // StoryGraphArgs is the input to story.graph. The mode is selected by params:
-// Room set → room detail; Agents=true → agent contracts; else the room list.
+// Graph=true → graph wire shape; Room set → room detail; Agents=true → agent
+// contracts; else the room list.
 type StoryGraphArgs struct {
 	Dir    string `json:"dir,omitempty"`
 	Room   string `json:"room,omitempty"`
 	Agents bool   `json:"agents,omitempty"`
+	Graph  bool   `json:"graph,omitempty"`
 }
 
 // StoryGraphOK is the story.graph result. Exactly one of Rooms / Detail /
 // Agents is populated, per the selected mode; Mode names which.
 type StoryGraphOK struct {
 	OK     bool                  `json:"ok"`               // always true on this branch
-	Mode   string                `json:"mode"`             // "rooms" | "detail" | "agents"
+	Mode   string                `json:"mode"`             // "rooms" | "detail" | "agents" | "graph"
 	Rooms  []RoomSummaryItem     `json:"rooms,omitempty"`  // mode == rooms
 	Detail *graph.RoomDetail     `json:"detail,omitempty"` // mode == detail
 	Agents []graph.AgentContract `json:"agents,omitempty"` // mode == agents
+	Graph  *graph.KitsokiGraph   `json:"graph,omitempty"`  // mode == graph
 }
 
 // RoomSummaryItem is the token-diet projection of graph.RoomSummary for the
@@ -271,9 +274,9 @@ func (srv *Server) handleStoryValidate(
 	return nil, validateStory(appPath, srv.importResolver), nil
 }
 
-// handleStoryGraph computes the room graph view. The mode is selected by the
-// params, mirroring the web editor's dispatch (editor.go): a room id selects
-// detail, the agents flag selects agent contracts, else the room list.
+// handleStoryGraph computes the story graph views. The mode is selected by the
+// params, mirroring the web editor's dispatch for legacy modes, with graph=true
+// returning the renderer-neutral Kitsoki graph API.
 func (srv *Server) handleStoryGraph(
 	ctx context.Context,
 	req *mcpsdk.CallToolRequest,
@@ -289,6 +292,9 @@ func (srv *Server) handleStoryGraph(
 	}
 
 	switch {
+	case args.Graph:
+		g := graph.RoomGraph(a, "story:"+appPath+"#rooms")
+		return nil, StoryGraphOK{OK: true, Mode: "graph", Graph: &g}, nil
 	case args.Room != "" && args.Agents:
 		return nil, StoryGraphOK{OK: true, Mode: "agents", Agents: graph.AgentContracts(a, args.Room)}, nil
 	case args.Agents:

@@ -199,6 +199,40 @@ func TestStoryGraphDetailAndAgents(t *testing.T) {
 	assert.Equal(t, wantDetail.Intents, detail.Detail.Intents)
 }
 
+func TestStoryGraphStructuredGraphMode(t *testing.T) {
+	ctx := context.Background()
+	dir := bugfixDir(t)
+	cs := newStudioWithWorkspace(ctx, t, dir)
+
+	var got studio.StoryGraphOK
+	callStory(ctx, t, cs, "story.graph", map[string]any{"graph": true}, &got)
+	assert.Equal(t, "graph", got.Mode)
+	require.NotNil(t, got.Graph)
+	assert.Equal(t, graph.SchemaV1, got.Graph.Schema)
+	assert.Equal(t, "room-state-machine", got.Graph.Kind)
+	assert.True(t, got.Graph.Directed)
+	assert.NotEmpty(t, got.Graph.Nodes)
+	assert.NotEmpty(t, got.Graph.Edges)
+
+	var hasIdle, hasDone, hasForwardEdge bool
+	for _, n := range got.Graph.Nodes {
+		if n.ID == "state:idle" {
+			hasIdle = true
+		}
+		if n.ID == "state:done" {
+			hasDone = true
+		}
+	}
+	for _, e := range got.Graph.Edges {
+		if e.Source == "state:idle" && e.Target != "" && e.Label != "" {
+			hasForwardEdge = true
+		}
+	}
+	assert.True(t, hasIdle, "entry room node present")
+	assert.True(t, hasDone, "terminal room node present")
+	assert.True(t, hasForwardEdge, "entry room has at least one labelled outgoing edge")
+}
+
 // ─── 2.4 test: RunFlows over bugfix flows reproduces `kitsoki test flows` ──────
 
 // TestStoryTestReproducesFlows runs story.test over stories/bugfix/flows and
