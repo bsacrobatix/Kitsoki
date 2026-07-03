@@ -119,7 +119,7 @@ func applyOverrides(child *AppDef, ov *ImportOverrides, file, alias, parentBaseD
 // an absolute path rooted at the child's directory. Without this, the
 // runtime joins the relative path against $KITSOKI_APP_DIR (the parent
 // app's directory) and fails to find files that live in the child
-// story's prompts/ or schemas/ tree.
+// story's prompts/, schemas/, or scripts/ tree.
 //
 // Idempotent: paths already absolute or containing template syntax
 // (`{{`) are left alone — the latter because we can't resolve them

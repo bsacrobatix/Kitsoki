@@ -26,7 +26,18 @@ Hard requirements:
 - Do not put project story customization under root `stories/`.
 - Preserve discovered `commands.dev`, `commands.test`, and `commands.build` unless repo evidence shows a better canonical command.
 - Prefer project/community conventions expressed as config values over custom story logic.
+- Include `dev_story_profile.docs`. For a generic project, default
+  `publish_durable_path` to `.context/prd`, `design_durable_path` to
+  `.context/designs`, `design_template_dir` to `""`, and both
+  `design_ticket_dir` and `ticket_repo` to `""` unless repo evidence shows a
+  project-owned docs or tracker convention.
 - Include `dev_story_profile.bugfix.build_cmd` and `dev_story_profile.bugfix.test_cmd` when build/test commands are known.
+- Include `onboarding.base_story`, `onboarding.base_story_title`, and
+  `onboarding.base_story_reason`; default to `dev-story` as the starter story
+  unless the repo evidence strongly says another embedded starter is better.
+- Include concise `onboarding.repo_patterns` evidence and
+  `onboarding.story_customizations` entries so future session mining can evolve
+  the project-local profile instead of patching the shared story.
 - Include `setup_plan.writes` for `.kitsoki/project-profile.yaml`, `.kitsoki/stories/<id>-dev/app.yaml`, `.kitsoki.yaml`, and `.gitignore`.
 - Include `setup_plan.verifications` for story-load, tests, and build when commands are known.
 

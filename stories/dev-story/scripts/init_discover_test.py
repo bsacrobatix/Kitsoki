@@ -15,6 +15,8 @@ Pure stdlib, runs against throwaway temp dirs — never a live LLM.
 from __future__ import annotations
 
 import importlib.util
+import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -42,6 +44,10 @@ def _mkrepo(files: dict[str, str]) -> Path:
     return root
 
 
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(repo), *args], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+
 # 1. Go repo, no Makefile → canonical go commands, no dev server.
 go_repo = _mkrepo({"go.mod": "module acme\ngo 1.22\n"})
 prof = mod.discover(go_repo)
@@ -49,6 +55,9 @@ check("go stack", prof["stack"], "go project")
 check("go build", prof["build_command"], "go build ./...")
 check("go test", prof["test_command"], "go test ./...")
 check("go dev (none)", prof["dev_command"], "")
+check("non-git vcs", prof["repo_vcs"], "none")
+check("non-git branch", prof["repo_default_branch"], "")
+check("non-git remote", prof["repo_remote"], "")
 
 # 2. Go repo WITH a Makefile → make targets win over the go defaults.
 go_make = _mkrepo({"go.mod": "module acme\ngo 1.22\n", "Makefile": "build:\n\t:\ntest:\n\t:\n"})
@@ -69,6 +78,81 @@ check("empty target fallback", fallback, base.resolve())
 # 5. Natural-language onboard request still extracts its path.
 nl = mod.parse_target(f"onboard {other}", "", str(base))
 check("onboard <path>", nl, other.resolve())
+
+# 6. Invalid targets are not treated as generic projects.
+missing = base / "does-not-exist"
+prof = mod.discover(missing)
+check("missing target id", prof["project_id"], "")
+check("missing target error", prof["error"], "target path does not exist")
+file_target = base / "README.md"
+file_target.write_text("# not a directory\n", encoding="utf-8")
+prof = mod.discover(file_target)
+check("file target id", prof["project_id"], "")
+check("file target error", prof["error"], "target path is not a directory")
+
+# 7. Python repos are first-class normal projects, not generic commandless
+# checkouts.
+py_repo = _mkrepo({
+    "pyproject.toml": '[project]\nname = "acme-py"\ndependencies = ["pytest", "fastapi"]\n',
+    "tests/test_smoke.py": "def test_smoke():\n    assert True\n",
+})
+prof = mod.discover(py_repo)
+check("python id", prof["project_id"], "acme-py")
+check("python stack", prof["stack"], "python/fastapi project")
+check("python test", prof["test_command"], "python -m pytest")
+check("python dev", prof["dev_command"], "uvicorn app:app --reload")
+check("python build (none)", prof["build_command"], "")
+
+# 8. Node repos honor the selected package manager instead of assuming npm.
+pnpm_repo = _mkrepo({
+    "package.json": '{"name":"acme-web","packageManager":"pnpm@9.12.0","scripts":{"dev":"vite","test":"vitest","build":"vite build"},"dependencies":{"vite":"latest"}}\n',
+    "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+})
+prof = mod.discover(pnpm_repo)
+check("pnpm id", prof["project_id"], "acme-web")
+check("pnpm manager", prof["node_package_manager"], "pnpm")
+check("pnpm dev", prof["dev_command"], "pnpm run dev")
+check("pnpm test", prof["test_command"], "pnpm test")
+check("pnpm build", prof["build_command"], "pnpm run build")
+
+# 9. Git metadata is inferred from the local checkout without network access.
+git_repo = _mkrepo({"go.mod": "module branchy\ngo 1.22\n"})
+subprocess.run(["git", "-C", str(git_repo), "init", "--quiet", "--initial-branch=trunk"], check=True)
+_git(git_repo, "remote", "add", "origin", "git@github.com:example/branchy.git")
+prof = mod.discover(git_repo)
+check("git vcs", prof["repo_vcs"], "git")
+check("git branch", prof["repo_default_branch"], "trunk")
+check("git remote", prof["repo_remote"], "git@github.com:example/branchy.git")
+
+# 10. Associated Claude/Codex transcript history is detected without running
+# the mining pipeline or touching the real home directory.
+home = _mkrepo({})
+repo_with_history = _mkrepo({"go.mod": "module hist\ngo 1.22\n"})
+old_home = os.environ.get("KITSOKI_INIT_HOME")
+os.environ["KITSOKI_INIT_HOME"] = str(home)
+try:
+    slug = mod.transcript_slug(repo_with_history.resolve())
+    claude_dir = home / ".claude" / "projects" / slug
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "claude-session.jsonl").write_text('{"type":"user","entrypoint":"cli"}\n', encoding="utf-8")
+    codex_dir = home / ".codex" / "sessions" / "2026" / "07" / "03"
+    codex_dir.mkdir(parents=True)
+    (codex_dir / "codex-session.jsonl").write_text(
+        '{"cwd":"' + str(repo_with_history.resolve()) + '","type":"turn_context"}\n',
+        encoding="utf-8",
+    )
+    prof = mod.discover(repo_with_history.resolve())
+finally:
+    if old_home is None:
+        os.environ.pop("KITSOKI_INIT_HOME", None)
+    else:
+        os.environ["KITSOKI_INIT_HOME"] = old_home
+
+check("transcript count", prof["transcript_count"], 2)
+check("mining status", prof["mining_recommendation"]["status"], "transcripts-found")
+check("mining sample", prof["mining_recommendation"]["sample"], "recency")
+check("mining first pass", prof["mining_recommendation"]["first_pass_sample"], 2)
+check("transcript source backends", [s["backend"] for s in prof["transcript_sources"]], ["claude-code", "codex"])
 
 if failures:
     print("FAIL: init_discover regression")

@@ -60,6 +60,7 @@ import (
 type entry struct {
 	StoryPath     string
 	Def           *app.AppDef
+	synthetic     bool
 	externalKey   string // transport:thread for store-attached sessions; "" for fresh ones
 	loadedContent []byte // raw app.yaml bytes at last load/reload, for staleness check
 	rt            *sessionRuntime
@@ -80,6 +81,15 @@ type entry struct {
 	// stay stable across RPCs for this session.
 	frames   *server.JournalFrameRecorder
 	feedback *server.JSONLFeedbackSink
+}
+
+type storyLoad struct {
+	path      string
+	def       *app.AppDef
+	raw       []byte
+	reloader  func() (*app.AppDef, error)
+	synthetic bool
+	repoRoot  string
 }
 
 // frameRecorderLocked returns the session's still recorder, building it on first
@@ -158,6 +168,62 @@ func NewRegistry(cfg webconfig.WebConfig, dirs []string, base runtimeBase) *Sess
 	}
 }
 
+func (r *SessionRegistry) implicitRootPath() (string, error) {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve implicit root cwd: %w", err)
+	}
+	return filepath.Join(repoRoot, ".kitsoki", "implicit-root.app.yaml"), nil
+}
+
+func (r *SessionRegistry) synthesizeImplicitRoot() (*storyLoad, error) {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("resolve implicit root cwd: %w", err)
+	}
+	path := filepath.Join(repoRoot, ".kitsoki", "implicit-root.app.yaml")
+	load := func() (*app.AppDef, error) {
+		return app.SynthesizeRootWithResolver(r.cfg.Root.RootSpec(), repoRoot, buildImportResolver())
+	}
+	def, err := load()
+	if err != nil {
+		return nil, err
+	}
+	return &storyLoad{
+		path:      path,
+		def:       def,
+		reloader:  load,
+		synthetic: true,
+		repoRoot:  repoRoot,
+	}, nil
+}
+
+func (r *SessionRegistry) loadStory(storyPath string) (*storyLoad, error) {
+	abs, err := filepath.Abs(storyPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve story path %q: %w", storyPath, err)
+	}
+	implicit, impErr := r.implicitRootPath()
+	if impErr != nil {
+		return nil, impErr
+	}
+	if abs == implicit {
+		return r.synthesizeImplicitRoot()
+	}
+
+	def, err := loadAppWithEnv(abs)
+	if err != nil {
+		return nil, err
+	}
+	rawContent, _ := os.ReadFile(abs)
+	return &storyLoad{
+		path:     abs,
+		def:      def,
+		raw:      rawContent,
+		repoRoot: filepath.Dir(abs),
+	}, nil
+}
+
 // SetNotifier injects the cross-session notification relay sink (the running
 // server). It must be called before the first NewSession so every live session
 // registers its relay. Idempotent-safe to call once at startup.
@@ -191,15 +257,12 @@ func (r *SessionRegistry) Close() {
 // structured error on an invalid story (app.Load / build / session errors) so
 // the UI can surface it before navigating — no session is registered on failure.
 func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (string, error) {
-	abs, err := filepath.Abs(storyPath)
-	if err != nil {
-		return "", fmt.Errorf("resolve story path %q: %w", storyPath, err)
-	}
-
-	def, err := loadAppWithEnv(abs)
+	loaded, err := r.loadStory(storyPath)
 	if err != nil {
 		return "", err
 	}
+	abs := loaded.path
+	def := loaded.def
 
 	// Fail fast (never silently no-op a guarded turn): if the story gates a turn
 	// on an author ACL but the server was started with no configured operator
@@ -209,7 +272,12 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 		return "", err
 	}
 
-	rt, err := buildSessionRuntime(r.base.config(abs, def))
+	rtCfg := r.base.config(abs, def)
+	if loaded.reloader != nil {
+		rtCfg.Reloader = loaded.reloader
+		rtCfg.MiningRepoPath = loaded.repoRoot
+	}
+	rt, err := buildSessionRuntime(rtCfg)
 	if err != nil {
 		return "", err
 	}
@@ -283,13 +351,12 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 		return "", fmt.Errorf("run initial on_enter: %w", err)
 	}
 
-	rawContent, _ := os.ReadFile(abs)
-
 	id := uuid.NewString()
 	e := &entry{
 		StoryPath:     abs,
 		Def:           def,
-		loadedContent: rawContent,
+		synthetic:     loaded.synthetic,
+		loadedContent: loaded.raw,
 		rt:            rt,
 		sid:           sid,
 		sessionDir:    filepath.Dir(tracePath),
@@ -345,10 +412,6 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 // live trace stream. That cross-process live-stream is the remaining engine work
 // noted in docs/architecture/transports.md.
 func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key string) (string, error) {
-	abs, err := filepath.Abs(storyPath)
-	if err != nil {
-		return "", fmt.Errorf("resolve story path %q: %w", storyPath, err)
-	}
 	transportID, thread, err := parseExternalKey(key)
 	if err != nil {
 		return "", err
@@ -370,15 +433,22 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 		return id, nil
 	}
 
-	def, err := loadAppWithEnv(abs)
+	loaded, err := r.loadStory(storyPath)
 	if err != nil {
 		return "", err
 	}
+	abs := loaded.path
+	def := loaded.def
 	if err := r.checkAuthorIdentity(def); err != nil {
 		return "", err
 	}
 
-	rt, err := buildSessionRuntime(r.base.config(abs, def))
+	rtCfg := r.base.config(abs, def)
+	if loaded.reloader != nil {
+		rtCfg.Reloader = loaded.reloader
+		rtCfg.MiningRepoPath = loaded.repoRoot
+	}
+	rt, err := buildSessionRuntime(rtCfg)
 	if err != nil {
 		return "", err
 	}
@@ -447,8 +517,6 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 		}
 	}
 
-	rawContent, _ := os.ReadFile(abs)
-
 	// The driver advances the session under the store's per-session writer lock,
 	// so co-driving (browser + bridge + a continue process) serialises.
 	lockedSID := sid
@@ -461,8 +529,9 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	e := &entry{
 		StoryPath:     abs,
 		Def:           def,
+		synthetic:     loaded.synthetic,
 		externalKey:   key,
-		loadedContent: rawContent,
+		loadedContent: loaded.raw,
 		rt:            rt,
 		sid:           sid,
 		source:        live,
@@ -633,7 +702,10 @@ func (r *SessionRegistry) Reload(ctx context.Context, sessionID string) (bool, e
 	// Keep the entry's display def in sync with the reloaded definition, and
 	// drop the cached meta controller so the next meta turn rebuilds against
 	// the reloaded AppDef (a story edit may have changed meta_modes).
-	freshContent, _ := os.ReadFile(e.StoryPath)
+	freshContent := e.loadedContent
+	if !e.synthetic {
+		freshContent, _ = os.ReadFile(e.StoryPath)
+	}
 	r.mu.Lock()
 	e.Def = res.Def
 	e.loadedContent = freshContent
@@ -672,7 +744,12 @@ func (r *SessionRegistry) Staleness(_ context.Context, sessionID string) (stale 
 	}
 	loaded := e.loadedContent
 	path := e.StoryPath
+	synthetic := e.synthetic
 	r.mu.Unlock()
+
+	if synthetic {
+		return false, "", nil
+	}
 
 	disk, readErr := os.ReadFile(path)
 	if readErr != nil {
@@ -712,12 +789,37 @@ func (r *SessionRegistry) Staleness(_ context.Context, sessionID string) (stale 
 func (r *SessionRegistry) Rescan() ([]server.StoryHeader, error) {
 	metas, err := webconfig.DiscoverStories(r.dirs, buildImportResolver())
 	if err != nil {
-		return nil, err
+		if !defaultStoryDirsMissing(r.dirs, err) {
+			return nil, err
+		}
+		metas = nil
+	}
+	if len(metas) == 0 && defaultStoryDirs(r.dirs) {
+		implicit, impErr := r.synthesizeImplicitRoot()
+		if impErr != nil {
+			return nil, fmt.Errorf("synthesize implicit root: %w", impErr)
+		}
+		metas = append(metas, webconfig.StoryMeta{Path: implicit.path, Def: implicit.def})
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.stories = metas
 	return r.storyHeadersLocked(), nil
+}
+
+func defaultStoryDirsMissing(dirs []string, err error) bool {
+	if !defaultStoryDirs(dirs) || !errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	return true
+}
+
+func defaultStoryDirs(dirs []string) bool {
+	if len(dirs) != 1 {
+		return false
+	}
+	clean := filepath.Clean(dirs[0])
+	return clean == "stories"
 }
 
 // storyHeadersLocked maps the cached StoryMeta catalogue onto server.StoryHeader,
@@ -794,11 +896,11 @@ func (r *SessionRegistry) EditorApp(storyPath string) (app.App, string, bool) {
 		return nil, "", false
 	}
 
-	def, err := loadAppWithEnv(abs)
+	loaded, err := r.loadStory(abs)
 	if err != nil {
 		return nil, "", false
 	}
-	return app.Compile(def), filepath.Dir(abs), true
+	return app.Compile(loaded.def), loaded.repoRoot, true
 }
 
 // ── Meta mode wiring ───────────────────────────────────────────────────────

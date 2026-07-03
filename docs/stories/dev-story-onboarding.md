@@ -22,6 +22,10 @@ flowchart LR
     init_discover --> init_discover_failed
     init -->|"confirm / review"| init_apply
     init_apply -->|"on_enter: init_apply.py<br/>+ project-tools install"| init_done
+    init_done -->|"customizations"| init_customizations
+    init_customizations -->|"continue"| init_done
+    init_done -->|"readiness"| init_readiness
+    init_readiness -->|"continue"| init_done
     init_apply --> init_apply_failed
 ```
 
@@ -29,10 +33,12 @@ Defined in [`stories/dev-story/rooms/init.yaml`](../../stories/dev-story/rooms/i
 
 | Room | Does |
 |---|---|
-| `init_discover` | `on_enter` runs [`scripts/init_discover.py`](../../stories/dev-story/scripts/init_discover.py) against the target and binds the discovered profile (`init_project_id`, `init_stack`, dev/test/build commands, …). Commands are **stack-aware**: npm scripts, Cargo (`cargo build`/`test`, or Makefile targets), and Go (`go build ./...`/`go test ./...`, Makefile targets winning) — so a recognised stack is never left command-less. Reads nothing it shouldn't — discovery is **read-only**. |
+| `init_discover` | `on_enter` runs [`scripts/init_discover.py`](../../stories/dev-story/scripts/init_discover.py) against the target and binds the discovered profile (`init_project_id`, `init_stack`, dev/test/build commands, repo metadata, …). Commands are **stack-aware**: Node scripts through the repo's selected package manager (`npm`, `pnpm`, `yarn`, or `bun`), Cargo (`cargo build`/`test`, or Makefile targets), Go (`go build ./...`/`go test ./...`, Makefile targets winning), and Python (`pytest`/`tox`, FastAPI/Flask dev hints) — so a recognised stack is never left command-less when it has canonical commands. Reads nothing it shouldn't — discovery is **read-only** and refuses missing or non-directory targets instead of creating them. |
 | `init` | Operator **reviews** the discovered profile. `confirm_init` applies; `revise_init` records feedback; `quit` returns to the workbench. No writes happen until confirm. |
-| `init_apply` | `on_enter` runs two best-effort host steps (below) and surfaces the written paths + MCP registration. |
-| `init_done` | Read-out of the applied result; `go_main` returns to the workbench. |
+| `init_apply` | `on_enter` runs the file apply and toolkit install host steps (below), then surfaces the written paths + MCP registration or a loud retry read-out. |
+| `init_done` | Read-out of the applied result; `review_customizations` promotes and reviews mined customization reports; `run_readiness` explicitly runs the generated verifier; `go_main` returns to the workbench. |
+| `init_customizations` | Runs `.kitsoki/promote-session-mining.py`, shows pending/accepted/refinement counts and entries, and lets the operator accept pending entries or record refinement feedback in the project profile. |
+| `init_readiness` | Runs `.kitsoki/check-readiness.py --json --update-profile` in the target checkout, captures pass/fail as report data, and returns to `init_done` for review. |
 | `init_discover_failed` / `init_apply_failed` | Error read-outs with retry arcs. |
 
 ## Entering onboarding
@@ -57,17 +63,23 @@ Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
 
 1. **`init_apply.py`** ([source](../../stories/dev-story/scripts/init_apply.py))
    — writes the checked-in onboarding files: `.kitsoki.yaml`,
-   `.kitsoki/project-profile.yaml`, `.kitsoki/stories/<id>-dev/app.yaml` (+
-   README), and appends the kitsoki runtime block to `.gitignore`. Binds
+   `.kitsoki/project-profile.yaml`, `.kitsoki/check-readiness.py`,
+   `.kitsoki/promote-session-mining.py`,
+   `.kitsoki/stories/<id>-dev/app.yaml` (+ README), and appends the kitsoki
+   runtime block to `.gitignore`. Binds
    `init_apply_result` (the JSON report); a failure routes to
-   `init_apply_failed`.
+   `init_apply_failed`. The generated profile's `onboarding` block records the
+   selected starter story, deterministic repo evidence, and initial
+   project-local customizations so later session mining can propose changes
+   without patching the shared story.
 
 2. **`kitsoki project-tools install --target <path>`** — installs the agent
    toolkit (skills + subagents) and registers the studio MCP, producing the
    `.agents/` sources, the `.claude/` symlinks, and `.mcp.json`. This is
-   **best-effort**: it has no `on_error` bounce, so a tools hiccup never fails
-   the file apply — the result (`init_tools_ok` / `init_tools_result`) is
-   surfaced read-only in the room view. The command is backed by
+   **loud and retryable**: a tools hiccup routes to `init_tools_failed` instead
+   of silently reporting a complete onboarding, while the file apply result is
+   preserved so the operator can continue with `applied-no-tools` if needed.
+   The command is backed by
    `internal/baseskills` (embedded toolkit; see
    [project-onboarding.md](../project-onboarding.md)).
 
@@ -77,24 +89,68 @@ providers to local implementations (`host.local_files.ticket`, `host.git`,
 `host.local`, `host.git_worktree`, `host.append_to_file`), so it runs
 standalone with only the `kitsoki` binary present.
 
+When deterministic discovery finds associated Claude/Codex transcript history,
+apply also writes `.context/kitsoki-session-mining-seed.md` and records a
+pending seed job in the profile's `mining` block. The generated `.kitsoki.yaml`
+also gets a disabled runtime `mining:` block (`enabled: false`, `cadence`,
+`first_pass_sample`, and the discovered `transcript_dirs`) so the operator can
+opt in later with `/mine resume` or `/mine now` without re-discovering scope.
+This is a review handoff only: no mining pass or LLM call runs during
+onboarding.
+
+The generated `.kitsoki/promote-session-mining.py` is the deterministic bridge
+from emitted mining reports to profile customizations. It scans
+`.artifacts/mining/jobs/*/analysis.json` (or explicit paths), ignores
+quarantined recipes, and appends pending `onboarding.story_customizations`
+entries for operator review. It never edits the shared base story and never
+calls an LLM. From `init_done`, the story's `customizations` action runs that
+helper, shows the reviewable entries, and lets the operator mark pending entries
+accepted or record refinement feedback back into `.kitsoki/project-profile.yaml`.
+
+Repo metadata is inferred locally as well. Git checkouts keep their current or
+origin default branch and origin remote in `repo.default_branch` /
+`repo.remote`; non-git directories are recorded as `repo.vcs: none` with empty
+branch and remote fields.
+
+The generated `.kitsoki/check-readiness.py` is the explicit post-apply verifier.
+It mirrors `setup_plan.verifications`, supports `--list` for review, and writes
+`.artifacts/kitsoki-readiness.json` when run. With `--update-profile`, it also
+replaces the profile's top-level `readiness:` block with a schema-shaped summary
+of the pass/fail results. Onboarding does not execute those commands
+automatically.
+
+The story exposes that verifier as an explicit `readiness` action from
+`init_done`. Red project checks are treated as data: the action stays in the
+onboarding flow, shows the failed check details, and lets the operator return to
+the applied result without turning a target-project failure into a Kitsoki
+runtime error.
+
 ## The external-target profile
 
 The instance `app.yaml` carries an **external-target profile**: a block of world
 keys (`publish_durable_path`, `prd_doc_filename`, `design_*`, `ticket_repo`, …)
-whose defaults reproduce kitsoki's own behaviour, and which an instance overrides
-to retarget doc placement, fixed filenames, or a GitHub-issue tracker. That
-profile is documented authoritatively in the dev-story README's
+that retargets doc placement, fixed filenames, or a GitHub-issue tracker.
+Generic generated projects default PRDs and design documents into `.context/`
+subdirectories and assume no project-specific design template directory. Known
+dogfood profiles, such as Slidey, can keep repo-native docs paths. That profile
+is documented authoritatively in the dev-story README's
 [Doc profile section](../../stories/dev-story/README.md#doc-profile--targeting-an-external-project)
 — onboarding seeds the defaults; tuning it is a per-instance edit.
 
 ## Testing — no LLM
 
-The whole walk is covered by
+The walk is covered by focused no-LLM flows such as
 [`flows/init_slidey_dogfood.yaml`](../../stories/dev-story/flows/init_slidey_dogfood.yaml),
-which stubs the discovery, apply, and toolkit-install `host.run` calls (by their
-`id`: `discover`, `apply`, `install_tools`) and asserts the routing,
-`init_apply_result.status == "applied"`, and `init_tools_ok` with a populated
-`init_tools_result` — all with no real LLM and without touching a real checkout:
+[`flows/init_customizations_review.yaml`](../../stories/dev-story/flows/init_customizations_review.yaml),
+[`flows/init_readiness_check.yaml`](../../stories/dev-story/flows/init_readiness_check.yaml),
+[`flows/init_git_metadata.yaml`](../../stories/dev-story/flows/init_git_metadata.yaml),
+[`flows/init_node_pnpm_project.yaml`](../../stories/dev-story/flows/init_node_pnpm_project.yaml),
+[`flows/init_python_project.yaml`](../../stories/dev-story/flows/init_python_project.yaml),
+and [`flows/init_transcript_seed.yaml`](../../stories/dev-story/flows/init_transcript_seed.yaml).
+They stub the discovery, apply, and toolkit-install `host.run` calls (by their
+`id`: `discover`, `apply`, `install_tools`) and assert routing, generated paths,
+tool commands, transcript seed handoff, and toolkit-install failure handling —
+all with no real LLM and without touching a real checkout:
 
 ```sh
 kitsoki test flows stories/dev-story/app.yaml
