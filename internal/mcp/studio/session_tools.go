@@ -351,6 +351,10 @@ func (srv *Server) handleSessionNew(
 	if err != nil {
 		return buildToolError(ErrBadRequest, err.Error()), nil, nil
 	}
+	// Publish KITSOKI_APP_DIR BEFORE the story loads so a relative
+	// host.starlark.run script (or any other ${KITSOKI_APP_DIR}-relative
+	// reference) resolves for this session — see app_dir.go.
+	publishAppDir(args.StoryPath)
 	sh, err := srv.sess.OpenDrivingSession(ctx, OpenDrivingSessionParams{
 		Key:            args.Key,
 		Mode:           HarnessMode(args.Harness),
@@ -396,6 +400,9 @@ func (srv *Server) handleSessionAttach(
 	if err != nil {
 		return buildToolError(ErrBadRequest, err.Error()), nil, nil
 	}
+	// Publish KITSOKI_APP_DIR BEFORE the story loads — see handleSessionNew /
+	// app_dir.go.
+	publishAppDir(args.StoryPath)
 	sh, err := srv.sess.OpenDrivingSession(ctx, OpenDrivingSessionParams{
 		Key:            args.Key,
 		Mode:           HarnessMode(args.Harness),
