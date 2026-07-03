@@ -1,8 +1,4 @@
-# pull_conflict — conflict with conflict_origin="pull" → auto-resolved → main_ops.
-# Uses guide intent to re-enter conflict (triggers on_enter with pre-seeded world).
-# The gather_conflict_files is the first unguarded on_enter effect — relies on
-# the real kitsoki repo having no conflicts (empty conflict_files → goes to gosum check → skip agent).
-# Asserts: conflict_origin="pull" routes back to main_ops after resolution.
+# conflict_rebase_stuck — entered with a rebase in progress but NO conflicted files.
 
 test_kind: flow
 app: ../app.yaml
@@ -14,9 +10,12 @@ initial_world:
   working_dir:              "."
   main_worktree_path:       "."
   conflict_origin:          pull
-  conflict_files:           "main.go "
+  conflict_files:           "stale.go "
+  conflict_scan_done:       false
+  conflict_agent_ready:     false
   conflict_verdict:         { resolved: false, confidence: 0.3, resolution_summary: "could not resolve" }
   conflict_intent_guidance: ""
+  last_op_output:           "fatal: It seems that there is already a rebase-merge directory"
   build_check_cmd:          "echo 'build ok'"
   rebase_done:              false
 
@@ -28,7 +27,7 @@ host_handlers:
           ok:        true
           exit_code: 0
           stdout_json:
-            conflict_files: "main.go "
+            conflict_files: ""
             gosum_only:     false
             conflict_scan_done: true
       rebase_continue_cmd:
@@ -38,6 +37,7 @@ host_handlers:
           stdout_json:
             output:       "Successfully rebased."
             ok:           true
+            outcome:      build_failed
             new_conflict: false
       build_check_after_rebase:
         data:
@@ -58,26 +58,16 @@ host_handlers:
             merge_in_progress:  false
             no_common_ancestor: false
             upstream_tracking:  false
-  host.agent.task:
-    data:
-      ok: true
-      submitted:
-        resolved:           true
-        confidence:         0.9
-        unresolvable_files: []
-        resolution_summary: "Took upstream version; re-applied local changes."
-        reason:             null
 
 turns:
-  - intent: { name: guide, slots: { intent: "use upstream" } }
+  - intent: { name: guide, slots: { intent: "noop" } }
     expect_state: conflict
-
-  - intent: { name: conflict_ready, slots: {} }
+    expect_world:
+      last_op_outcome: "no_conflict_files"
+      conflict_files:  ""
+  - intent: { name: rebase_continue, slots: {} }
     expect_state: main_ops
     expect_world:
       rebase_done: true
-
-  - intent: { name: look, slots: {} }
-    expect_state: main_ops
 
 expect_no_errors: true
