@@ -20,6 +20,13 @@ interpretation becomes slot templates. The trace records every
 decision, which is what makes the conversion incremental and
 auditable.
 
+Kitsoki does not bet against frontier agents. It makes them more
+productive by reserving their reasoning for oversight, synthesis, and
+long-horizon judgment, while high-leverage tools do the repeatable
+work: scripts execute checked actions, cheaper models handle narrow
+classification and extraction, and structured decomposition keeps long
+tasks moving through reviewable rooms, gates, artifacts, and handoffs.
+
 For the full thesis — control inversion, narrow LLM domains,
 progressive determinism, the spectrum from CLI wizards to free agent
 workflows — see [`docs/architecture/concept.md`](docs/architecture/concept.md).
@@ -44,6 +51,10 @@ go build -o kitsoki ./cmd/kitsoki
   human reply and resumes, all from declarative YAML.
 - Replayable, testable, demo-able LLM-driven flows. Mode 2 flow tests
   run with zero LLM cost and exit non-zero on regression.
+- Higher leverage agent work: frontier models focus on reasoning,
+  oversight, and long-task coordination while scripts, cassettes,
+  cheaper models, and typed host calls multiply the amount of reliable
+  work each model turn can supervise.
 - Fast on the common case: a four-tier semantic-routing stack
   (synonyms, slot templates, a turncache, and the LLM) resolves
   most user input in microseconds without calling the LLM. On the
