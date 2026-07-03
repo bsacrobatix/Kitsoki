@@ -196,20 +196,9 @@ states:
                       && echo "$OUTPUT" | grep -qi "must edit all merge conflicts" \
                       && ! git diff --diff-filter=U --name-only 2>/dev/null | grep -q . \
                       && git status --porcelain 2>/dev/null | grep -q .; then
-                      STASH_REF=""
-                      STASH_OUT=$(git stash push -u -m 'git-ops-rebase-continue-wip' 2>&1 || true)
-                      if ! echo "$STASH_OUT" | grep -qi "No local changes"; then
-                        STASH_REF=$(git stash list | head -1 | cut -d: -f1)
-                      fi
-                      EXIT=0
-                      CONTINUE_OUT=$(GIT_EDITOR=true git rebase --continue 2>&1) || EXIT=$?
-                      OUTPUT=$(printf '%s\n%s\n%s' "$OUTPUT" "$STASH_OUT" "$CONTINUE_OUT")
-                      if [ "$EXIT" -eq 0 ] && [ -n "$STASH_REF" ]; then
-                        POP_EXIT=0
-                        POP_OUT=$(git stash pop 2>&1) || POP_EXIT=$?
-                        OUTPUT=$(printf '%s\n%s' "$OUTPUT" "$POP_OUT")
-                        EXIT=$POP_EXIT
-                      fi
+                      DIRTY=$(git status --porcelain 2>/dev/null || true)
+                      OUTPUT=$(printf '%s\nRefusing to stash during rebase --continue because this repository has shared stash state. Review, stage, or checkpoint the remaining changes first:\n%s' "$OUTPUT" "$DIRTY")
+                      EXIT=1
                     fi
                     NEW_CONFLICT=false
                     OUTCOME="build_failed"

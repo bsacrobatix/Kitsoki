@@ -18,7 +18,7 @@ states:
             Worktrees:   '{{ world.worktree_list.raw|default:"(none)" }}'
       - prose: "Last operation failed: {{ world.last_op_output|default:'(no output)' }}"
         when: "world.last_op_ok == false"
-      - prose: "Post-merge build failed. Use retry to recheck or rollback to abort the merge."
+      - prose: "Post-merge build failed. The merge path resets the target worktree to its pre-merge commit before returning here. Fix the branch and retry, or clear the failure with rollback."
         when: "world.last_op_outcome == 'post_merge_test_fail'"
       - prose: "WARNING: this branch has no common ancestor with {{ world.integration_branch }}. Merge and rebase are unavailable."
         when: "world.no_common_ancestor == true"
@@ -63,7 +63,7 @@ states:
               intent: retry
               when:  "world.last_op_outcome == 'post_merge_test_fail'"
             - label: "rollback"
-              hint:  "abort the merge after build failure"
+              hint:  "clear the already-rolled-back failure"
               intent: rollback
               when:  "world.last_op_outcome == 'post_merge_test_fail'"
             - label: "quit"
@@ -184,11 +184,21 @@ states:
                 restore_label:   "{{ slots.label }}"
                 restore_outcome: ""
       retry:
+        - when: "world.last_op_outcome == 'post_merge_test_fail' && world.merge_branch_name != ''"
+          target: merge_exec
+          effects:
+            - set:
+                last_op_outcome: ""
         - when: "world.last_op_outcome == 'post_merge_test_fail'"
           target: merge_into_main
       rollback:
         - when: "world.last_op_outcome == 'post_merge_test_fail'"
-          target: merge_into_main
+          target: main_ops
+          effects:
+            - set:
+                last_op_outcome: ""
+                last_op_output:  ""
+                last_op_ok:      true
       quit:
         - target: done
       look:
