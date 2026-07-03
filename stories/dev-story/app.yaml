@@ -609,6 +609,7 @@ world:
   # profile for review, then apply the config only after explicit accept.
   init_request:          { type: string, default: "" }
   init_discovery:        { type: object, default: {} }
+  init_discovery_error:  { type: string, default: "" }
   init_run_ok:           { type: bool, default: false }
   init_run_output:       { type: string, default: "" }
   init_target_path:      { type: string, default: "" }

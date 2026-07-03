@@ -79,7 +79,18 @@ check("empty target fallback", fallback, base.resolve())
 nl = mod.parse_target(f"onboard {other}", "", str(base))
 check("onboard <path>", nl, other.resolve())
 
-# 6. Python repos are first-class normal projects, not generic commandless
+# 6. Invalid targets are not treated as generic projects.
+missing = base / "does-not-exist"
+prof = mod.discover(missing)
+check("missing target id", prof["project_id"], "")
+check("missing target error", prof["error"], "target path does not exist")
+file_target = base / "README.md"
+file_target.write_text("# not a directory\n", encoding="utf-8")
+prof = mod.discover(file_target)
+check("file target id", prof["project_id"], "")
+check("file target error", prof["error"], "target path is not a directory")
+
+# 7. Python repos are first-class normal projects, not generic commandless
 # checkouts.
 py_repo = _mkrepo({
     "pyproject.toml": '[project]\nname = "acme-py"\ndependencies = ["pytest", "fastapi"]\n',
@@ -92,7 +103,7 @@ check("python test", prof["test_command"], "python -m pytest")
 check("python dev", prof["dev_command"], "uvicorn app:app --reload")
 check("python build (none)", prof["build_command"], "")
 
-# 7. Node repos honor the selected package manager instead of assuming npm.
+# 8. Node repos honor the selected package manager instead of assuming npm.
 pnpm_repo = _mkrepo({
     "package.json": '{"name":"acme-web","packageManager":"pnpm@9.12.0","scripts":{"dev":"vite","test":"vitest","build":"vite build"},"dependencies":{"vite":"latest"}}\n',
     "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
@@ -104,7 +115,7 @@ check("pnpm dev", prof["dev_command"], "pnpm run dev")
 check("pnpm test", prof["test_command"], "pnpm test")
 check("pnpm build", prof["build_command"], "pnpm run build")
 
-# 8. Git metadata is inferred from the local checkout without network access.
+# 9. Git metadata is inferred from the local checkout without network access.
 git_repo = _mkrepo({"go.mod": "module branchy\ngo 1.22\n"})
 subprocess.run(["git", "-C", str(git_repo), "init", "--quiet", "--initial-branch=trunk"], check=True)
 _git(git_repo, "remote", "add", "origin", "git@github.com:example/branchy.git")
@@ -113,7 +124,7 @@ check("git vcs", prof["repo_vcs"], "git")
 check("git branch", prof["repo_default_branch"], "trunk")
 check("git remote", prof["repo_remote"], "git@github.com:example/branchy.git")
 
-# 9. Associated Claude/Codex transcript history is detected without running
+# 10. Associated Claude/Codex transcript history is detected without running
 # the mining pipeline or touching the real home directory.
 home = _mkrepo({})
 repo_with_history = _mkrepo({"go.mod": "module hist\ngo 1.22\n"})

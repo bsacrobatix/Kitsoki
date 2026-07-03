@@ -1019,6 +1019,13 @@ def main() -> int:
             data["dev_story_docs_profile"] = docs_profile
         ensure_draft_profile_defaults(draft_profile, data)
     root = Path(data["target_path"])
+    if not root.exists() or not root.is_dir():
+        print(json.dumps({
+            "status": "target-invalid",
+            "target_path": str(root),
+            "error": "target path does not exist" if not root.exists() else "target path is not a directory",
+        }, sort_keys=True))
+        return 1
     enrich_project_shape(data, root)
     makefile = root / "Makefile"
     if makefile.exists() and not data.get("check_command"):
