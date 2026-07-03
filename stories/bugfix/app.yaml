@@ -495,6 +495,29 @@ intents:
     description: "Begin the pipeline from idle."
     examples: [start, "begin", "kick off"]
     priority: 90
+  # NL ticket-id handoff for idle, when world.ticket_id is still empty. A
+  # headless dispatcher (goal-seeker/punch-list) whose maker doesn't reliably
+  # pass `initial_world` to session.new instead drives this as its first
+  # turn text — see stories/goal-seeker/scripts/gs_manifest.star and
+  # stories/punch-list/prompts/drive_item.md. Only "work ticket …" is
+  # declared (not a bare "ticket …" template): idle's own `change_ticket`
+  # intent declares "tickets" as a bare synonym, and a bare-string match
+  # ALWAYS outranks a template match regardless of intent (see
+  # internal/semroute doc.go "confidence bands") — a template on "ticket
+  # {ticket_id}" would lose to change_ticket for any input containing
+  # "ticket(s)" and silently drop the id. "work" collides with nothing
+  # declared on idle. The `titled` anchor is required: {ticket_id} is a
+  # trailing capture and without a literal after it, it would swallow the
+  # rest of the utterance (title + brief) instead of just the id.
+  work_ticket:
+    description: "State which ticket to work when none is loaded yet (NL ticket-id handoff from a headless driver)."
+    synonyms:
+      - "work ticket {ticket_id}"
+      - "work ticket {ticket_id} titled {ticket_title}"
+    priority: 89
+    slots:
+      ticket_id:    { type: string, required: true }
+      ticket_title: { type: string, required: false }
   accept:
     description: "Accept the current room's artifact and advance to the next phase. Posts the artifact to the transport as a side-effect."
     examples: ["continue", "proceed", "accept", "next", "deliver", "approve", "lgtm", "ship it", "ok"]

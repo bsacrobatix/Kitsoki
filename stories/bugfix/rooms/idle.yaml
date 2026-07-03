@@ -188,6 +188,16 @@ states:
     on:
       start:
         - target: reproducing
+      # NL ticket-id handoff — see the work_ticket intent doc in ../app.yaml.
+      # Re-targets idle EXPLICITLY (not `.`) so on_enter re-fires with
+      # ticket_id now set, falling into the same autostart chain above
+      # (Steps 0-4) that the structured-initial_world path already uses.
+      work_ticket:
+        - target: idle
+          effects:
+            - set:
+                ticket_id:    "{{ slots.ticket_id }}"
+                ticket_title: "{{ slots.ticket_title ?? world.ticket_title }}"
       # Walk the full 7-room pipeline. Explicit alias for `start` that
       # also pins bugfix_mode=full so a previously-set quick flag is
       # cleared. Autonomous callers prefer this for unambiguity.
