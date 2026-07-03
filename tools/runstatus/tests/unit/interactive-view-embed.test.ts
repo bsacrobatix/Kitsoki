@@ -108,6 +108,17 @@ describe("InteractiveView — embed (VS Code) layout", () => {
     wrapper.unmount();
   });
 
+  it("does not show a redundant Observe link next to the trace toggle", async () => {
+    setEmbeddedOverride(false);
+    const wrapper = mount(InteractiveView, mountOpts);
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="trace-column-toggle"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="observe-link"]').exists()).toBe(false);
+
+    wrapper.unmount();
+  });
+
   it("collapses and expands the browser trace column", async () => {
     setEmbeddedOverride(false);
     const wrapper = mount(InteractiveView, mountOpts);
