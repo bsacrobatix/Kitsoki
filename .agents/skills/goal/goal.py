@@ -49,7 +49,7 @@ except Exception as e:  # pragma: no cover
 STATES = ["blocked", "ready", "assigned", "in_flight", "reviewing", "verified",
           "integrated", "parked"]
 TERMINAL_OK = {"integrated"}
-PARK_REASONS = {"quota", "conflict", "escalation"}
+PARK_REASONS = {"quota", "conflict", "escalation", "gate_not_red"}
 
 
 def _die(msg: str, code: int = 2):
