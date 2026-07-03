@@ -34,6 +34,7 @@ except ImportError:
     yaml = None
 
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "..", "schemas", "decomposition.json")
+CHANGE_NODE_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "schemas", "change-node.schema.json")
 GLOB_CHARS = "*?["
 
 
@@ -59,6 +60,23 @@ def schema_errors(manifest):
     for err in sorted(validator.iter_errors(manifest), key=lambda e: list(e.path)):
         loc = "/".join(str(p) for p in err.path) or "(root)"
         out.append(f"schema: {loc}: {err.message}")
+
+    # Also validate individual briefs against the unified change-node schema
+    if os.path.exists(CHANGE_NODE_SCHEMA_PATH):
+        try:
+            with open(CHANGE_NODE_SCHEMA_PATH, encoding="utf-8") as fh:
+                change_node_schema = json.load(fh)
+            change_node_validator = jsonschema.Draft7Validator(change_node_schema)
+            briefs = manifest.get("briefs", []) if isinstance(manifest, dict) else []
+            for brief in briefs:
+                if isinstance(brief, dict):
+                    for err in change_node_validator.iter_errors(brief):
+                        bid = brief.get("id", "?")
+                        field = "/".join(str(p) for p in err.path) or "(root)"
+                        out.append(f"brief {bid!r} change-node: {field}: {err.message}")
+        except Exception:
+            pass  # If change-node schema not available, skip per-node validation
+
     return out
 
 
