@@ -30,6 +30,7 @@ It installs (and verifies versions of):
 | pnpm ≥ 11 | SPA package manager (via corepack) |
 | git, bash, curl | required; kitsoki also shells out to git + bash at runtime |
 | jq, ffmpeg, gh | optional; needed by some `make` targets (`fix-tests`, `demo-tour`, GitHub integration) |
+| python3 ≥ 3.9 | runtime: the agent toolkit shells out to Python — the goal-seeker/punch-list scripts and the decomposition/docs lints under `tools/*.py` |
 
 Project skills live under `.agents/skills/`, where Codex discovers
 them directly. Setup also symlinks them into `.claude/skills/` so
