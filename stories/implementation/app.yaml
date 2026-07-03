@@ -167,6 +167,11 @@ world:
   ticket_status:    { type: string, default: "" }
   ticket_url:       { type: string, default: "" }
   ticket_body:      { type: string, default: "" }
+  # Optional override for host.local_files.ticket's `root` arg (falls back to
+  # $KITSOKI_TICKETS_ROOT then cwd when empty — see internal/host/localfiles_ticket.go).
+  # Lets a headless dispatcher (goal-seeker/punch-list) point ticket.get at a
+  # scoped, self-written ticket store instead of the project's real issues/ tree.
+  tickets_root:     { type: string, default: "" }
   thread:           { type: string, default: "" }
   allowed_authors:  { type: string, default: "" }
 

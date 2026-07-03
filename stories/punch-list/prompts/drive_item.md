@@ -11,11 +11,26 @@ return only concrete handoff evidence; independent verification will decide pass
 
 ## Required drive
 
-1. Open the item story with Studio MCP:
+1. Open the item story with Studio MCP's `session.new`:
    - story: `{{ args.item.story }}`
    - harness: `{{ args.item.harness }}`
    - profile: `{{ args.item.profile }}`
    - trace: `{{ args.item.trace_path }}`
+   - If the item carries a `world_in` object, pass it verbatim as `session.new`'s
+     `initial_world` argument:
+     ```
+     {{ args.item.world_in }}
+     ```
+     This seeds the target story's world (e.g. `ticket_id`, `ticket_title`,
+     `tickets_root`) BEFORE its first on_enter runs, so it self-provisions
+     (workspace/branch/workdir, and — for stories that fetch a ticket record —
+     its `iface.ticket.get`) the same way it would for an operator who already
+     picked a real ticket. Do not invent or omit this: driving off the free-text
+     prompt alone, with no structured `initial_world`, is what strands the
+     session with an empty ticket_id and nothing to self-provision from. If
+     `world_in` is absent, proceed with the free-text prompt only (older/simpler
+     manifests may not carry one — punch-list itself is generic and never
+     requires this field).
 2. Drive it with natural operator text, using the item prompt:
    - `{{ args.item.prompt }}`
 3. Capture any story, MCP, routing, or usability friction as findings.

@@ -82,8 +82,23 @@ turns:
 
 # The log reflects the park: C1 parked with park_reason=gate_not_red (never
 # integrated — a green gate here is a triage signal, not a verified completion).
+#
+# SEAM PROOF (real gs_manifest.star, not stubbed — only host.agent.decide and
+# host.run are stubbed in this fixture): the punch-list manifest dispatch writes
+# for C1 (and, on the second pass, C2) must carry the change's ticket_id + a
+# `world_in` block, and a synthetic file-backed ticket record must exist for
+# `iface.ticket.get` — the seam that lets punch-list's driver seed the target
+# session's `initial_world` instead of driving off free text alone.
 expect_files:
   - path: ../../../.artifacts/goal/flow-gate-not-red/log.jsonl
     content_matches: '"change_id":"C1".*"park_reason":"gate_not_red".*"state":"parked"'
+  - path: ../../../.artifacts/goal/flow-gate-not-red/manifests/C1.json
+    content_matches: '"ticket_id":\s*"C1".*"world_in":\s*\{"ticket_id":\s*"C1"'
+  - path: ../../../.artifacts/goal/flow-gate-not-red/tickets/issues/features/C1.md
+    content_matches: 'title:\s*"First disjoint change"'
+  - path: ../../../.artifacts/goal/flow-gate-not-red/manifests/C2.json
+    content_matches: '"ticket_id":\s*"C2".*"world_in":\s*\{"ticket_id":\s*"C2"'
+  - path: ../../../.artifacts/goal/flow-gate-not-red/tickets/issues/features/C2.md
+    content_matches: 'title:\s*"Second disjoint change"'
 
 expect_no_errors: true

@@ -5,12 +5,83 @@
 # which punch-list's loader decodes). The change's pipeline picks the story punch-list
 # drives; its gate.cmd becomes the deterministic verify. Returns the manifest path +
 # the change object (bound into world.current_change for the integrate projection).
+#
+# The manifest item also carries structured target-story inputs (`ticket_id`,
+# `ticket_title`, and a generic `world_in` block) so punch-list's driver can seed
+# the target session's `initial_world` instead of relying on a free-text prompt
+# alone — both stories/implementation and stories/bugfix self-provision (workspace/
+# branch/workdir) from `world.ticket_id` in their `idle` rooms, but only when a
+# caller actually hands one over. See stories/punch-list/prompts/drive_item.md.
+#
+# stories/implementation additionally calls `iface.ticket.get {id}` (review_task
+# room), which — unlike the append-only transport — does NOT self-bootstrap: the
+# file-backed default handler (host.local_files.ticket) requires a REAL
+# `<root>/issues/<kind>/<id>.md` record to already exist. So this script also
+# writes a synthetic ticket file, scoped under the goal's own work_dir (never the
+# project's real, now-frozen `issues/` archive — see issues/DEPRECATED.md) and
+# points `world_in.tickets_root` at it so the target session's ticket.get resolves
+# there via its `root` arg instead of falling back to cwd.
 
 PIPELINE_STORY = {
     "bugfix": "stories/bugfix/app.yaml",
     "implementation": "stories/implementation/app.yaml",
     "docs": "stories/dev-story/app.yaml",
 }
+
+
+def _yaml_dq(s):
+    # Minimal YAML double-quoted-scalar escaping — enough for a ticket title;
+    # not a general YAML encoder.
+    s = _str(s).replace("\\", "\\\\").replace("\"", "\\\"")
+    return "\"" + s + "\""
+
+
+def _str(v):
+    if v == None:
+        return ""
+    return str(v)
+
+
+def _ticket_body_markdown(change, gate_cmd):
+    lines = []
+    brief = _str(change.get("agent_brief")).strip()
+    if brief != "":
+        lines.append(brief)
+        lines.append("")
+    scope = change.get("scope") or []
+    if len(scope) > 0:
+        lines.append("## Scope")
+        for s in scope:
+            lines.append("- " + _str(s))
+        lines.append("")
+    acceptance = change.get("acceptance") or []
+    if len(acceptance) > 0:
+        lines.append("## Acceptance")
+        for a in acceptance:
+            lines.append("- " + _str(a))
+        lines.append("")
+    if gate_cmd != "":
+        lines.append("## Gate")
+        lines.append("`" + gate_cmd + "`")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _write_ticket(ctx, tickets_root, change_id, title, change, gate_cmd):
+    # issues/<kind>/<id>.md is the on-disk contract host.local_files.ticket
+    # scans (findTicketPath); "features" is as good a bucket as any for a
+    # generic dispatched change (ticket.get's `type` field is not branched on
+    # by either target story).
+    slug = change_id.replace("/", "_")
+    ticket_path = tickets_root + "/issues/features/" + slug + ".md"
+    doc = "---\n"
+    doc += "title: " + _yaml_dq(title) + "\n"
+    doc += "status: open\n"
+    doc += "---\n\n"
+    doc += "# " + title + "\n\n"
+    doc += _ticket_body_markdown(change, gate_cmd)
+    ctx.fs.write(ticket_path, doc)
+    return ticket_path
 
 
 def main(ctx):
@@ -37,7 +108,11 @@ def main(ctx):
     gate_cmd = str(gate.get("cmd") or "true")
     pipeline = str(change.get("pipeline") or "implementation")
     story = PIPELINE_STORY.get(pipeline, "stories/implementation/app.yaml")
-    action = str(change.get("agent_brief") or change.get("title") or change_id)
+    title = str(change.get("title") or change_id)
+    action = str(change.get("agent_brief") or title or change_id)
+
+    tickets_root = work_dir + "/tickets"
+    ticket_path = _write_ticket(ctx, tickets_root, change_id, title, change, gate_cmd)
 
     manifest = {
         "version": "punch-list/v1",
@@ -49,17 +124,29 @@ def main(ctx):
         },
         "items": [{
             "id": change_id,
-            "title": str(change.get("title") or change_id),
+            "title": title,
             "priority": 1,
             "story": story,
             "mode": "drive",
             "prompt": action,
             "gate_command": gate_cmd,
             "verify": [{"kind": "command", "cmd": gate_cmd}],
+            # Structured target-story inputs the driver forwards as `initial_world`
+            # when it opens the target session (see stories/punch-list's
+            # prompts/drive_item.md) — the seam that lets a change actually LAND
+            # instead of being driven blind off free text alone. punch-list itself
+            # never reads these keys; it only carries the item through.
+            "ticket_id": change_id,
+            "ticket_title": title,
+            "world_in": {
+                "ticket_id": change_id,
+                "ticket_title": title,
+                "tickets_root": tickets_root,
+            },
         }],
     }
 
     slug = change_id.replace("/", "_")
     manifest_path = work_dir + "/manifests/" + slug + ".json"
     ctx.fs.write(manifest_path, json.encode(manifest) + "\n")
-    return {"manifest_path": manifest_path, "change": change, "gate_cmd": gate_cmd}
+    return {"manifest_path": manifest_path, "change": change, "gate_cmd": gate_cmd, "ticket_path": ticket_path}

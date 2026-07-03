@@ -12,6 +12,34 @@
 
 states:
 
+  # Surfaced failure state for review_task_executing's iface.ticket.get call
+  # (see the on_error comment there). `start` re-enters review_task_executing
+  # to retry — e.g. after an operator/parent story fixes ticket_id or provisions
+  # the missing ticket record; `quit` abandons like every other room here.
+  review_task_ticket_error:
+    description: "Could not fetch the ticket — the pipeline cannot proceed without it."
+    view:
+      - heading: "Ticket fetch failed"
+      - prose: "{{ world.last_error|default:'(no error detail)' }}"
+      - kv:
+          pairs:
+            Ticket: '{{ world.ticket_id|default:"(none)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "start", intent: start, hint: "retry fetching the ticket" }
+            - { label: "quit",  intent: quit,  hint: "abandon the pipeline" }
+            - { label: "look",  intent: look,  hint: "re-render" }
+    relevant_world: [ticket_id, last_error]
+    on:
+      start:
+        - target: review_task_executing
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .
+
   review_task_executing:
     description: "Reviewing the task and drafting a task-summary artifact."
     view:
@@ -46,13 +74,22 @@ states:
       # something to chew on.
       - invoke: iface.ticket.get
         with:
-          id: "{{ world.ticket_id }}"
+          id:   "{{ world.ticket_id }}"
           repo: "{{ world.ticket_repo }}"
+          root: "{{ world.tickets_root }}"
         bind:
           ticket_body:  body
           ticket_title: title
           ticket_url:   url
-        on_error: idle
+        # Genuine failure (empty/unknown ticket_id, missing record) — NOT the
+        # idempotent-reentry guard pattern idle.yaml's provisioning uses.
+        # Routing to idle here used to silently swallow it: idle's view has no
+        # ticket-fetch-failure affordance, so a headless driver bounced
+        # idle → review_task_executing → idle forever with no visible reason
+        # (G3 — errors must surface). review_task_ticket_error shows
+        # world.last_error (the engine-set failing-call message) and gives the
+        # operator/driver an explicit retry/quit choice instead.
+        on_error: review_task_ticket_error
       # Produce the structured task summary.
       # once: skip the regenerate when task_summary_artifact is already
       # bound (reload / self-re-entry safe). Every arc that re-enters
