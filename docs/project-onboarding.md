@@ -153,9 +153,12 @@ explicitly:
 ```sh
 python3 .kitsoki/check-readiness.py --list
 python3 .kitsoki/check-readiness.py --json
+python3 .kitsoki/check-readiness.py --json --update-profile
 ```
 
-The report is written to `.artifacts/kitsoki-readiness.json`.
+The report is written to `.artifacts/kitsoki-readiness.json`. Add
+`--update-profile` when you want the summarized readiness result persisted into
+`.kitsoki/project-profile.yaml`.
 
 **Drive kitsoki from your coding agent.** With `.mcp.json` registered, an MCP
 client (Claude Code, Cursor, Claude Desktop) attached to this repo gets the

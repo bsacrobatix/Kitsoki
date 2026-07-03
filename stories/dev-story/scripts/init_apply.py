@@ -1106,10 +1106,68 @@ def run_check(check: dict, root: Path, timeout: int) -> dict:
     return result
 
 
+def detail_for(item: dict) -> str:
+    parts = []
+    if item.get("exit_code") is not None:
+        parts.append(f"exit={{item.get('exit_code')}}")
+    if item.get("stderr"):
+        parts.append("stderr: " + str(item.get("stderr", "")).strip().splitlines()[0][:240])
+    elif item.get("stdout"):
+        parts.append("stdout: " + str(item.get("stdout", "")).strip().splitlines()[0][:240])
+    return "; ".join(parts) or "completed"
+
+
+def yaml_scalar(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return json.dumps(str(value))
+
+
+def readiness_yaml(report: dict) -> str:
+    lines = ["readiness:", f"  status: {{yaml_scalar(report.get('status', 'not-run'))}}"]
+    checks = report.get("checks") if isinstance(report.get("checks"), list) else []
+    if checks:
+        lines.append("  checks:")
+        for item in checks:
+            lines.append(f"    - id: {{yaml_scalar(item.get('id', ''))}}")
+            lines.append(f"      kind: {{yaml_scalar(item.get('kind', ''))}}")
+            lines.append(f"      ok: {{yaml_scalar(bool(item.get('ok')))}}")
+            detail = detail_for(item)
+            if detail:
+                lines.append(f"      detail: {{yaml_scalar(detail)}}")
+    return "\\n".join(lines) + "\\n"
+
+
+def replace_top_level_block(text: str, key: str, replacement: str) -> str:
+    lines = text.splitlines()
+    start = -1
+    for index, line in enumerate(lines):
+        if line == key + ":":
+            start = index
+            break
+    if start == -1:
+        return text.rstrip() + "\\n\\n" + replacement
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        if line and not line.startswith((" ", "\\t")):
+            end = index
+            break
+    return "\\n".join(lines[:start] + replacement.rstrip().splitlines() + lines[end:]) + "\\n"
+
+
+def update_profile(root: Path, report: dict) -> Path:
+    profile = root / ".kitsoki" / "project-profile.yaml"
+    text = profile.read_text(encoding="utf-8")
+    profile.write_text(replace_top_level_block(text, "readiness", readiness_yaml(report)), encoding="utf-8")
+    return profile
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run project onboarding readiness checks.")
     parser.add_argument("--list", action="store_true", help="print the checks without running them")
     parser.add_argument("--json", action="store_true", help="print the report JSON to stdout")
+    parser.add_argument("--update-profile", action="store_true", help="persist a readiness summary into .kitsoki/project-profile.yaml")
     parser.add_argument("--timeout", type=int, default=120, help="per-check timeout in seconds")
     parser.add_argument("--out", default=".artifacts/kitsoki-readiness.json", help="report path")
     args = parser.parse_args()
@@ -1138,10 +1196,15 @@ def main() -> int:
     out = root / args.out
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+    profile = None
+    if args.update_profile:
+        profile = update_profile(root, report)
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
         print(f"readiness {{status}}: {{out}}")
+        if profile is not None:
+            print(f"profile updated: {{profile}}")
         for item in results:
             mark = "PASS" if item.get("ok") else "FAIL"
             print(f"- {{mark}} {{item.get('id')}}: {{item.get('command')}}")
@@ -1293,9 +1356,12 @@ run them explicitly when you are ready:
 ```sh
 python3 .kitsoki/check-readiness.py --list
 python3 .kitsoki/check-readiness.py --json
+python3 .kitsoki/check-readiness.py --json --update-profile
 ```
 
-The report is written to `.artifacts/kitsoki-readiness.json`.
+The report is written to `.artifacts/kitsoki-readiness.json`. Add
+`--update-profile` when you want the summarized pass/fail result persisted into
+`.kitsoki/project-profile.yaml`.
 {mining_note}
 """
 
