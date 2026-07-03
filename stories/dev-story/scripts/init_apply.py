@@ -105,6 +105,40 @@ def validate_profile_yaml(content: str, root: Path) -> dict:
     }
 
 
+def git_output(path: Path, *args: str) -> str:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(path), *args],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, ValueError):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout.strip()
+
+
+def git_info(path: Path) -> dict:
+    inside = git_output(path, "rev-parse", "--is-inside-work-tree")
+    if inside != "true":
+        return {"vcs": "none", "default_branch": "", "remote": ""}
+    remote = git_output(path, "config", "--get", "remote.origin.url")
+    default_branch = git_output(path, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    if default_branch.startswith("origin/"):
+        default_branch = default_branch.split("/", 1)[1]
+    if not default_branch:
+        default_branch = git_output(path, "symbolic-ref", "--quiet", "--short", "HEAD")
+    if not default_branch:
+        for candidate in ("main", "master"):
+            if git_output(path, "show-ref", "--verify", f"refs/heads/{candidate}"):
+                default_branch = candidate
+                break
+    return {"vcs": "git", "default_branch": default_branch or "main", "remote": remote}
+
+
 def append_gitignore(path: Path, writes: list[str]) -> None:
     additions = [
         ".kitsoki.local.yaml",
@@ -227,6 +261,10 @@ def stack_kind(data: dict) -> str:
 
 
 def enrich_project_shape(data: dict, root: Path) -> None:
+    repo = git_info(root)
+    data["repo_vcs"] = repo["vcs"]
+    data["repo_default_branch"] = repo["default_branch"]
+    data["repo_remote"] = repo["remote"]
     data["has_makefile"] = (root / "Makefile").exists()
     cargo = root / "Cargo.toml"
     data["has_cargo"] = cargo.exists()
@@ -435,9 +473,9 @@ commands:
 
 repo:
   root: "."
-  vcs: git
-  default_branch: main
-  remote: ""
+  vcs: {data.get("repo_vcs", "git")}
+  default_branch: {q(data.get("repo_default_branch", "main"))}
+  remote: {q(data.get("repo_remote", ""))}
   monorepo: {str(bool(data.get("is_monorepo"))).lower()}
 
 stack:
@@ -512,9 +550,9 @@ generated:
 
 repo:
   root: "."
-  vcs: git
-  default_branch: main
-  remote: ""
+  vcs: {data.get("repo_vcs", "git")}
+  default_branch: {q(data.get("repo_default_branch", "main"))}
+  remote: {q(data.get("repo_remote", ""))}
   monorepo: false
 
 stack:

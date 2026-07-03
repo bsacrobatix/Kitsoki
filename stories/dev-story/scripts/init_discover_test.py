@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -43,6 +44,10 @@ def _mkrepo(files: dict[str, str]) -> Path:
     return root
 
 
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(repo), *args], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+
 # 1. Go repo, no Makefile → canonical go commands, no dev server.
 go_repo = _mkrepo({"go.mod": "module acme\ngo 1.22\n"})
 prof = mod.discover(go_repo)
@@ -50,6 +55,9 @@ check("go stack", prof["stack"], "go project")
 check("go build", prof["build_command"], "go build ./...")
 check("go test", prof["test_command"], "go test ./...")
 check("go dev (none)", prof["dev_command"], "")
+check("non-git vcs", prof["repo_vcs"], "none")
+check("non-git branch", prof["repo_default_branch"], "")
+check("non-git remote", prof["repo_remote"], "")
 
 # 2. Go repo WITH a Makefile → make targets win over the go defaults.
 go_make = _mkrepo({"go.mod": "module acme\ngo 1.22\n", "Makefile": "build:\n\t:\ntest:\n\t:\n"})
@@ -96,7 +104,16 @@ check("pnpm dev", prof["dev_command"], "pnpm run dev")
 check("pnpm test", prof["test_command"], "pnpm test")
 check("pnpm build", prof["build_command"], "pnpm run build")
 
-# 8. Associated Claude/Codex transcript history is detected without running
+# 8. Git metadata is inferred from the local checkout without network access.
+git_repo = _mkrepo({"go.mod": "module branchy\ngo 1.22\n"})
+subprocess.run(["git", "-C", str(git_repo), "init", "--quiet", "--initial-branch=trunk"], check=True)
+_git(git_repo, "remote", "add", "origin", "git@github.com:example/branchy.git")
+prof = mod.discover(git_repo)
+check("git vcs", prof["repo_vcs"], "git")
+check("git branch", prof["repo_default_branch"], "trunk")
+check("git remote", prof["repo_remote"], "git@github.com:example/branchy.git")
+
+# 9. Associated Claude/Codex transcript history is detected without running
 # the mining pipeline or touching the real home directory.
 home = _mkrepo({})
 repo_with_history = _mkrepo({"go.mod": "module hist\ngo 1.22\n"})
