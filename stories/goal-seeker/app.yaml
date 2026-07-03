@@ -35,7 +35,11 @@ hosts:
 agents:
   evaluator:
     system_prompt: "You are the goal-seeker's bounded-context evaluator. Read the projected preamble and emit ONE small {verdict, summary, next_instruction} JSON. Never restate the preamble; open a detail pointer only if genuinely unsure."
-    model: gpt-5.5
+    # opus (not gpt-5.5): the bare `claude` backend (subscription auth, no API key) serves
+    # opus but 404s on gpt-5.x — that mismatch was the live decide-gate failure. Until WM.2
+    # lands a per-invoke `backend:` override (so a codex-served gpt-5.5 second opinion is
+    # expressible), opus is the default evaluator that actually resolves on this box.
+    model: opus
     tools: [Read, Grep, Glob]
     external_side_effect: false
 
