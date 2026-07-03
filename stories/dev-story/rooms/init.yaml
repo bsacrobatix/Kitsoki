@@ -17,6 +17,8 @@ states:
       - init_target_path
       - init_profile_status
       - init_run_output
+      - init_transcript_count
+      - init_mining_recommendation
       - workdir
       - repo_root
     view:
@@ -81,6 +83,9 @@ states:
           init_build_command: "stdout_json.build_command"
           init_conventions:   "stdout_json.conventions"
           init_tracker:       "stdout_json.tracker"
+          init_transcript_count:      "stdout_json.transcript_count"
+          init_transcript_sources:    "stdout_json.transcript_sources"
+          init_mining_recommendation: "stdout_json.mining_recommendation"
         on_error: init_discover_failed
     on:
       init_discovered:
@@ -150,6 +155,9 @@ states:
                 init_discovery: {}
                 init_run_ok: false
                 init_run_output: ""
+                init_transcript_count: 0
+                init_transcript_sources: []
+                init_mining_recommendation: {}
                 init_profile_status: "discovering"
                 last_error: ""
       quit:
@@ -176,6 +184,8 @@ states:
       - init_build_command
       - init_conventions
       - init_tracker
+      - init_transcript_count
+      - init_mining_recommendation
       - init_profile_status
       - init_feedback
       - workdir
@@ -208,8 +218,19 @@ states:
           pairs:
             Conventions: "{{ world.init_conventions }}"
             Tracker:     "{{ world.init_tracker }}"
+            Transcripts: "{{ world.init_transcript_count|default:0 }}"
             Writes:      ".kitsoki.yaml, .kitsoki/project-profile.yaml, .kitsoki/stories/{{ world.init_project_id }}-dev/app.yaml"
             Mode:        "{{ world.init_profile_mode }}"
+      - heading: "Session Mining"
+        when: "world.init_transcript_count > 0"
+      - prose: "{{ world.init_mining_recommendation.note }}"
+        when: "world.init_transcript_count > 0"
+      - kv:
+          pairs:
+            Sample:   "{{ world.init_mining_recommendation.sample }}"
+            Sessions: "{{ world.init_mining_recommendation.transcript_count }}"
+            Sources:  "{{ world.init_mining_recommendation.sources }}"
+        when: "world.init_transcript_count > 0"
       - heading: "Profile Validation"
         when: "world.init_profile_validation.ok"
       - kv:
@@ -305,6 +326,9 @@ states:
                 init_profile_draft: {}
                 init_profile_validation: {}
                 init_profile_json: ""
+                init_transcript_count: 0
+                init_transcript_sources: []
+                init_mining_recommendation: {}
                 init_profile_status: "discovering"
                 last_error: ""
       quit:
@@ -578,6 +602,7 @@ states:
             - "{{ world.init_conventions }}"
             - "{{ world.init_tracker }}"
             - "{{ world.init_profile_json }}"
+            - "{{ world.init_mining_recommendation }}"
         bind:
           init_apply_ok: "ok"
           init_apply_output: "stdout"
