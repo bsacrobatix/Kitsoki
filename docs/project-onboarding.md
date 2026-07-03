@@ -140,12 +140,16 @@ When associated Claude/Codex history is found, onboarding also writes
 `mining.enabled: false`, the bounded first-pass sample, and the discovered
 transcript directories. Nothing mines or spends during onboarding; `/mine
 resume` or `/mine now` is the explicit opt-in. When mining emits
-`.artifacts/mining/jobs/<job>/analysis.json`, review and promote pending profile
-customizations explicitly:
+`.artifacts/mining/jobs/<job>/analysis.json`, use the `customizations` action
+from `init_done` to promote pending profile customizations, review them, accept
+the useful ones, or record refinement feedback. For headless or manual use, run
+the helper directly:
 
 ```sh
 python3 .kitsoki/promote-session-mining.py --dry-run
 python3 .kitsoki/promote-session-mining.py --json
+python3 .kitsoki/promote-session-mining.py --accept-pending --json
+python3 .kitsoki/promote-session-mining.py --refine-pending "feedback" --json
 ```
 
 For reusable onboarding tests, keep `onboarding.baseline_commit` pinned to the

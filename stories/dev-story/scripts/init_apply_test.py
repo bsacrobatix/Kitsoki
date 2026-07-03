@@ -262,6 +262,48 @@ if promote_path.exists():
     check("valid mining promotion pending id", 'id: "mined-session-1-003"' in promoted_profile)
     check("valid mining promotion pending status", 'status: "pending"' in promoted_profile)
     check("valid mining promotion evidence", "analysis.json#session-1#003" in promoted_profile)
+    accept_proc = subprocess.run(
+        [sys.executable, str(promote_path), "--accept-pending", "--json"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=repo,
+    )
+    check("valid mining acceptance exit", accept_proc.returncode == 0, accept_proc.stdout + accept_proc.stderr)
+    accepted_profile = profile_path.read_text(encoding="utf-8") if profile_path.exists() else ""
+    check("valid mining acceptance status", 'status: "accepted"' in accepted_profile)
+    check("valid mining acceptance json count", '"accepted":' in accept_proc.stdout)
+    # Add a second generated pending entry to prove the refinement path records operator feedback.
+    (analysis_dir / "analysis.json").write_text(json.dumps({
+        "instances": [{
+            "instance_id": "session-1#004",
+            "determinism": "deterministic",
+            "tags": {"action": ["add focused tests"]},
+            "grounding": {"quarantined": False},
+        }]
+    }), encoding="utf-8")
+    promote_proc = subprocess.run(
+        [sys.executable, str(promote_path), "--json"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=repo,
+    )
+    check("valid mining duplicate promote exit", promote_proc.returncode == 0, promote_proc.stdout + promote_proc.stderr)
+    refine_proc = subprocess.run(
+        [sys.executable, str(promote_path), "--refine-pending", "needs a project-specific test command", "--json"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=repo,
+    )
+    check("valid mining refinement exit", refine_proc.returncode == 0, refine_proc.stdout + refine_proc.stderr)
+    refined_profile = profile_path.read_text(encoding="utf-8") if profile_path.exists() else ""
+    check("valid mining refinement status", 'status: "needs-refinement"' in refined_profile)
+    check("valid mining refinement feedback", 'review_feedback: "needs a project-specific test command"' in refined_profile)
 
 # 4. Git metadata is preserved instead of assuming main/no remote.
 repo = mkgitrepo()
