@@ -309,6 +309,14 @@ func (ss *StudioSession) OpenSession(p OpenSessionParams) (*SessionHandle, error
 	return sh, nil
 }
 
+// takePendingSeed is the seam OpenDrivingSession uses to consume the deterministic
+// seed backstop for a story. It defaults to host.TakePendingSeedForStory (which
+// reads KITSOKI_SESSION_ID from the studio server's own env and pops the matching
+// on-disk seed, consume-once); a test overrides it to inject a seed without the
+// process env / filesystem. Returns (nil,false) when no seed is registered — the
+// no-op path that keeps a non-backstopped session.new byte-identical to today.
+var takePendingSeed = host.TakePendingSeedForStory
+
 // OpenDrivingSessionParams configures OpenDrivingSession.
 type OpenDrivingSessionParams struct {
 	// Key is the requested handle key. Empty auto-assigns a fresh "s<N>" key.
@@ -349,6 +357,25 @@ func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSe
 	ss.mu.Lock()
 
 	mode := p.Mode.normalize()
+
+	// Deterministic seed backstop: if the parent (goal-seeker) registered a
+	// pending seed for this story under our KITSOKI_SESSION_ID lineage, apply it
+	// so a maker that opened session.new WITHOUT initial_world still seeds the
+	// nested story. The explicit InitialWorld arg wins per-key (the seed only
+	// fills gaps), so behaviour is identical whether or not the maker cooperated.
+	// Consume-once: the seed is popped here so a sequential second open gets none.
+	// No lineage / no registered seed ⇒ takePendingSeed returns false and this is
+	// a byte-identical no-op. See internal/host/pending_seed.go.
+	if seed, ok := takePendingSeed(p.StoryPath); ok {
+		merged := make(map[string]any, len(seed)+len(p.InitialWorld))
+		for k, v := range seed {
+			merged[k] = v
+		}
+		for k, v := range p.InitialWorld {
+			merged[k] = v // explicit initial_world wins on conflicting keys
+		}
+		p.InitialWorld = merged
+	}
 
 	key := p.Key
 	if key == "" {

@@ -319,6 +319,14 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 	// concurrent callers don't race on the global env.
 	parentSessionID := kitsokiSessionIDFromCtx(ctx)
 
+	// Deterministic seed backstop: when this task's context.args carry a target
+	// story + a seed world (e.g. the punch-list maker's item.{story, world_in}),
+	// register a pending seed keyed by (parentSessionID, story) BEFORE spawning the
+	// maker. The maker's fresh studio server pops it in session.new even if the LLM
+	// omits initial_world, so the nested driven session is seeded deterministically
+	// rather than depending on the maker cooperating. See pending_seed.go.
+	RegisterPendingSeedFromTaskArgs(ctx, args)
+
 	// ── Run the acceptance loop ───────────────────────────────────────────
 	var (
 		lastSubmitted any
