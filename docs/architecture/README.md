@@ -51,6 +51,9 @@ these surfaces.
 - **[`agent-cli.md`](agent-cli.md)** — the `host.agent.*` verb
   surface as a standalone CLI (`kitsoki agent …`, `agent-serve`) for
   validators and CI outside a running state machine.
+- **[`agent-launch.md`](agent-launch.md)** — the `kitsoki agent launch`
+  resolver that turns a story `agents:` entry plus a harness profile into
+  a concrete Claude/Codex task-agent launch plan, with dry-run by default.
 - **[`mcp-studio.md`](mcp-studio.md)** — the `kitsoki mcp` studio server
   an external coding agent attaches to: the handle model and the
   `story.*` / `session.*` / `render.*` tool surface that let it author a

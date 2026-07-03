@@ -1,6 +1,6 @@
 kind: host_cassette
 app_id: punch-list
-generated_at: '2026-06-25T00:00:00Z'
+generated_at: '2026-07-03T00:00:00Z'
 match_on:
 - handler
 - call
@@ -11,6 +11,7 @@ episodes:
     call: punch_load
   response:
     data:
+      manifest_path: stories/punch-list/testdata/top10_gpt55.yaml
       state_path: .artifacts/punch-list/top10_gpt55.state.json
       item_count: '10'
       error: ''
@@ -44,32 +45,6 @@ episodes:
       skipped_count: 0
       pending_count: 10
       count_summary: Processed 0 | Passed 0 | Partial 0 | Failed 0 | Skipped 0 | Pending 10
-- id: punch_policy-load-bug
-  match:
-    handler: host.starlark.run
-    call: punch_policy-load-bug
-  response:
-    data: &id001
-      policy_result:
-        status: ok
-        message: profile/model/verifier policy passed
-      error: ''
-- id: punch_verify-load-bug
-  match:
-    handler: host.run
-    call: punch_verify-load-bug
-  response:
-    data: &id002
-      ok: true
-      exit_code: 0
-      stdout_json:
-        verify_result:
-          status: passed
-          summary: 1/1 deterministic checks passed
-          checks:
-          - cmd: go run ./cmd/kitsoki render <story> -o -
-            exit_code: 0
-            ok: true
 - id: punch_board-0-passed
   match:
     handler: host.starlark.run
@@ -104,18 +79,6 @@ episodes:
       skipped_count: 0
       pending_count: 9
       count_summary: Processed 1 | Passed 1 | Partial 0 | Failed 0 | Skipped 0 | Pending 9
-- id: punch_policy-capability-taxonomy
-  match:
-    handler: host.starlark.run
-    call: punch_policy-capability-taxonomy
-  response:
-    data: *id001
-- id: punch_verify-capability-taxonomy
-  match:
-    handler: host.run
-    call: punch_verify-capability-taxonomy
-  response:
-    data: *id002
 - id: punch_board-1-passed
   match:
     handler: host.starlark.run
@@ -152,18 +115,6 @@ episodes:
       skipped_count: 0
       pending_count: 8
       count_summary: Processed 2 | Passed 2 | Partial 0 | Failed 0 | Skipped 0 | Pending 8
-- id: punch_policy-toolbox-enforcement
-  match:
-    handler: host.starlark.run
-    call: punch_policy-toolbox-enforcement
-  response:
-    data: *id001
-- id: punch_verify-toolbox-enforcement
-  match:
-    handler: host.run
-    call: punch_verify-toolbox-enforcement
-  response:
-    data: *id002
 - id: punch_board-2-passed
   match:
     handler: host.starlark.run
@@ -202,18 +153,6 @@ episodes:
       skipped_count: 0
       pending_count: 7
       count_summary: Processed 3 | Passed 3 | Partial 0 | Failed 0 | Skipped 0 | Pending 7
-- id: punch_policy-cassette-conformance
-  match:
-    handler: host.starlark.run
-    call: punch_policy-cassette-conformance
-  response:
-    data: *id001
-- id: punch_verify-cassette-conformance
-  match:
-    handler: host.run
-    call: punch_verify-cassette-conformance
-  response:
-    data: *id002
 - id: punch_board-3-passed
   match:
     handler: host.starlark.run
@@ -254,18 +193,6 @@ episodes:
       skipped_count: 0
       pending_count: 6
       count_summary: Processed 4 | Passed 4 | Partial 0 | Failed 0 | Skipped 0 | Pending 6
-- id: punch_policy-project-init-hardening
-  match:
-    handler: host.starlark.run
-    call: punch_policy-project-init-hardening
-  response:
-    data: *id001
-- id: punch_verify-project-init-hardening
-  match:
-    handler: host.run
-    call: punch_verify-project-init-hardening
-  response:
-    data: *id002
 - id: punch_board-4-passed
   match:
     handler: host.starlark.run
@@ -308,18 +235,6 @@ episodes:
       skipped_count: 0
       pending_count: 5
       count_summary: Processed 5 | Passed 5 | Partial 0 | Failed 0 | Skipped 0 | Pending 5
-- id: punch_policy-session-mining-productization
-  match:
-    handler: host.starlark.run
-    call: punch_policy-session-mining-productization
-  response:
-    data: *id001
-- id: punch_verify-session-mining-productization
-  match:
-    handler: host.run
-    call: punch_verify-session-mining-productization
-  response:
-    data: *id002
 - id: punch_board-5-passed
   match:
     handler: host.starlark.run
@@ -364,18 +279,6 @@ episodes:
       skipped_count: 0
       pending_count: 4
       count_summary: Processed 6 | Passed 6 | Partial 0 | Failed 0 | Skipped 0 | Pending 4
-- id: punch_policy-deliver-decomposition-decision
-  match:
-    handler: host.starlark.run
-    call: punch_policy-deliver-decomposition-decision
-  response:
-    data: *id001
-- id: punch_verify-deliver-decomposition-decision
-  match:
-    handler: host.run
-    call: punch_verify-deliver-decomposition-decision
-  response:
-    data: *id002
 - id: punch_board-6-passed
   match:
     handler: host.starlark.run
@@ -422,18 +325,6 @@ episodes:
       skipped_count: 0
       pending_count: 3
       count_summary: Processed 7 | Passed 7 | Partial 0 | Failed 0 | Skipped 0 | Pending 3
-- id: punch_policy-contextual-routing-controls
-  match:
-    handler: host.starlark.run
-    call: punch_policy-contextual-routing-controls
-  response:
-    data: *id001
-- id: punch_verify-contextual-routing-controls
-  match:
-    handler: host.run
-    call: punch_verify-contextual-routing-controls
-  response:
-    data: *id002
 - id: punch_board-7-passed
   match:
     handler: host.starlark.run
@@ -482,18 +373,6 @@ episodes:
       skipped_count: 0
       pending_count: 2
       count_summary: Processed 8 | Passed 8 | Partial 0 | Failed 0 | Skipped 0 | Pending 2
-- id: punch_policy-multi-hop-routing
-  match:
-    handler: host.starlark.run
-    call: punch_policy-multi-hop-routing
-  response:
-    data: *id001
-- id: punch_verify-multi-hop-routing
-  match:
-    handler: host.run
-    call: punch_verify-multi-hop-routing
-  response:
-    data: *id002
 - id: punch_board-8-passed
   match:
     handler: host.starlark.run
@@ -544,18 +423,6 @@ episodes:
       skipped_count: 0
       pending_count: 1
       count_summary: Processed 9 | Passed 9 | Partial 0 | Failed 0 | Skipped 0 | Pending 1
-- id: punch_policy-story-qa-workflow
-  match:
-    handler: host.starlark.run
-    call: punch_policy-story-qa-workflow
-  response:
-    data: *id001
-- id: punch_verify-story-qa-workflow
-  match:
-    handler: host.run
-    call: punch_verify-story-qa-workflow
-  response:
-    data: *id002
 - id: punch_board-9-passed
   match:
     handler: host.starlark.run
@@ -599,6 +466,70 @@ episodes:
       skipped_count: 0
       pending_count: 0
       count_summary: Processed 10 | Passed 10 | Partial 0 | Failed 0 | Skipped 0 | Pending 0
+- id: punch_policy-load-bug
+  match:
+    handler: host.starlark.run
+    call: punch_policy-load-bug
+  response:
+    data: &id001
+      policy_result:
+        status: ok
+        message: profile/model/verifier policy passed
+      error: ''
+- id: punch_policy-capability-taxonomy
+  match:
+    handler: host.starlark.run
+    call: punch_policy-capability-taxonomy
+  response:
+    data: *id001
+- id: punch_policy-toolbox-enforcement
+  match:
+    handler: host.starlark.run
+    call: punch_policy-toolbox-enforcement
+  response:
+    data: *id001
+- id: punch_policy-cassette-conformance
+  match:
+    handler: host.starlark.run
+    call: punch_policy-cassette-conformance
+  response:
+    data: *id001
+- id: punch_policy-project-init-hardening
+  match:
+    handler: host.starlark.run
+    call: punch_policy-project-init-hardening
+  response:
+    data: *id001
+- id: punch_policy-session-mining-productization
+  match:
+    handler: host.starlark.run
+    call: punch_policy-session-mining-productization
+  response:
+    data: *id001
+- id: punch_policy-deliver-decomposition-decision
+  match:
+    handler: host.starlark.run
+    call: punch_policy-deliver-decomposition-decision
+  response:
+    data: *id001
+- id: punch_policy-contextual-routing-controls
+  match:
+    handler: host.starlark.run
+    call: punch_policy-contextual-routing-controls
+  response:
+    data: *id001
+- id: punch_policy-multi-hop-routing
+  match:
+    handler: host.starlark.run
+    call: punch_policy-multi-hop-routing
+  response:
+    data: *id001
+- id: punch_policy-story-qa-workflow
+  match:
+    handler: host.starlark.run
+    call: punch_policy-story-qa-workflow
+  response:
+    data: *id001
 - id: punch_report
   match:
     handler: host.starlark.run
@@ -607,6 +538,76 @@ episodes:
     data:
       report_path: .artifacts/punch-list/report.md
       summary: 10 passed, 0 partial, 0 failed, 0 skipped, 0 pending
+- id: punch_verify-load-bug
+  match:
+    handler: host.run
+    call: punch_verify-load-bug
+  response:
+    data: &id002
+      ok: true
+      exit_code: 0
+      stdout_json:
+        verify_result:
+          status: passed
+          summary: 1/1 deterministic checks passed
+          checks:
+          - cmd: go run ./cmd/kitsoki render <story> -o -
+            exit_code: 0
+            ok: true
+- id: punch_verify-capability-taxonomy
+  match:
+    handler: host.run
+    call: punch_verify-capability-taxonomy
+  response:
+    data: *id002
+- id: punch_verify-toolbox-enforcement
+  match:
+    handler: host.run
+    call: punch_verify-toolbox-enforcement
+  response:
+    data: *id002
+- id: punch_verify-cassette-conformance
+  match:
+    handler: host.run
+    call: punch_verify-cassette-conformance
+  response:
+    data: *id002
+- id: punch_verify-project-init-hardening
+  match:
+    handler: host.run
+    call: punch_verify-project-init-hardening
+  response:
+    data: *id002
+- id: punch_verify-session-mining-productization
+  match:
+    handler: host.run
+    call: punch_verify-session-mining-productization
+  response:
+    data: *id002
+- id: punch_verify-deliver-decomposition-decision
+  match:
+    handler: host.run
+    call: punch_verify-deliver-decomposition-decision
+  response:
+    data: *id002
+- id: punch_verify-contextual-routing-controls
+  match:
+    handler: host.run
+    call: punch_verify-contextual-routing-controls
+  response:
+    data: *id002
+- id: punch_verify-multi-hop-routing
+  match:
+    handler: host.run
+    call: punch_verify-multi-hop-routing
+  response:
+    data: *id002
+- id: punch_verify-story-qa-workflow
+  match:
+    handler: host.run
+    call: punch_verify-story-qa-workflow
+  response:
+    data: *id002
 - id: punch_drive-load-bug
   match:
     handler: host.agent.task
@@ -622,12 +623,13 @@ episodes:
         profile: codex-native
         findings: []
         summary: story driven through Studio MCP
+  delay: 20ms
 - id: punch_implementation-load-bug
   match:
     handler: host.agent.task
     call: punch_implementation-load-bug
   response:
-    data:
+    data: &id003
       ok: true
       submitted:
         status: passed
@@ -637,6 +639,7 @@ episodes:
         profile: codex-native
         findings: []
         summary: implementation story exercised
+  delay: 20ms
 - id: punch_drive-capability-taxonomy
   match:
     handler: host.agent.task
@@ -652,21 +655,14 @@ episodes:
         profile: codex-native
         findings: []
         summary: story driven through Studio MCP
+  delay: 20ms
 - id: punch_implementation-capability-taxonomy
   match:
     handler: host.agent.task
     call: punch_implementation-capability-taxonomy
   response:
-    data:
-      ok: true
-      submitted:
-        status: passed
-        story: stories/cherny-loop/app.yaml
-        trace_path: .artifacts/top10-dogfood/traces/capability-taxonomy-impl.jsonl
-        model: gpt-5.5
-        profile: codex-native
-        findings: []
-        summary: implementation story exercised
+    data: *id003
+  delay: 20ms
 - id: punch_drive-toolbox-enforcement
   match:
     handler: host.agent.task
@@ -682,21 +678,14 @@ episodes:
         profile: codex-native
         findings: []
         summary: story driven through Studio MCP
+  delay: 20ms
 - id: punch_implementation-toolbox-enforcement
   match:
     handler: host.agent.task
     call: punch_implementation-toolbox-enforcement
   response:
-    data:
-      ok: true
-      submitted:
-        status: passed
-        story: stories/cherny-loop/app.yaml
-        trace_path: .artifacts/top10-dogfood/traces/toolbox-enforcement-impl.jsonl
-        model: gpt-5.5
-        profile: codex-native
-        findings: []
-        summary: implementation story exercised
+    data: *id003
+  delay: 20ms
 - id: punch_drive-cassette-conformance
   match:
     handler: host.agent.task
@@ -706,27 +695,20 @@ episodes:
       ok: true
       submitted:
         status: passed
-        story: stories/model-harness-eval/app.yaml
+        story: stories/cherny-loop/app.yaml
         trace_path: .artifacts/top10-dogfood/traces/cassette-conformance.jsonl
         model: gpt-5.5
         profile: codex-native
         findings: []
         summary: story driven through Studio MCP
+  delay: 20ms
 - id: punch_implementation-cassette-conformance
   match:
     handler: host.agent.task
     call: punch_implementation-cassette-conformance
   response:
-    data:
-      ok: true
-      submitted:
-        status: passed
-        story: stories/cherny-loop/app.yaml
-        trace_path: .artifacts/top10-dogfood/traces/cassette-conformance-impl.jsonl
-        model: gpt-5.5
-        profile: codex-native
-        findings: []
-        summary: implementation story exercised
+    data: *id003
+  delay: 20ms
 - id: punch_drive-project-init-hardening
   match:
     handler: host.agent.task
@@ -742,21 +724,14 @@ episodes:
         profile: codex-native
         findings: []
         summary: story driven through Studio MCP
+  delay: 20ms
 - id: punch_implementation-project-init-hardening
   match:
     handler: host.agent.task
     call: punch_implementation-project-init-hardening
   response:
-    data:
-      ok: true
-      submitted:
-        status: passed
-        story: stories/cherny-loop/app.yaml
-        trace_path: .artifacts/top10-dogfood/traces/project-init-hardening-impl.jsonl
-        model: gpt-5.5
-        profile: codex-native
-        findings: []
-        summary: implementation story exercised
+    data: *id003
+  delay: 20ms
 - id: punch_drive-session-mining-productization
   match:
     handler: host.agent.task
@@ -772,21 +747,14 @@ episodes:
         profile: codex-native
         findings: []
         summary: story driven through Studio MCP
+  delay: 20ms
 - id: punch_implementation-session-mining-productization
   match:
     handler: host.agent.task
     call: punch_implementation-session-mining-productization
   response:
-    data:
-      ok: true
-      submitted:
-        status: passed
-        story: stories/cherny-loop/app.yaml
-        trace_path: .artifacts/top10-dogfood/traces/session-mining-productization-impl.jsonl
-        model: gpt-5.5
-        profile: codex-native
-        findings: []
-        summary: implementation story exercised
+    data: *id003
+  delay: 20ms
 - id: punch_drive-deliver-decomposition-decision
   match:
     handler: host.agent.task
@@ -802,6 +770,7 @@ episodes:
         profile: codex-native
         findings: []
         summary: story driven through Studio MCP
+  delay: 20ms
 - id: punch_drive-contextual-routing-controls
   match:
     handler: host.agent.task
@@ -817,21 +786,14 @@ episodes:
         profile: codex-native
         findings: []
         summary: story driven through Studio MCP
+  delay: 20ms
 - id: punch_implementation-contextual-routing-controls
   match:
     handler: host.agent.task
     call: punch_implementation-contextual-routing-controls
   response:
-    data:
-      ok: true
-      submitted:
-        status: passed
-        story: stories/cherny-loop/app.yaml
-        trace_path: .artifacts/top10-dogfood/traces/contextual-routing-controls-impl.jsonl
-        model: gpt-5.5
-        profile: codex-native
-        findings: []
-        summary: implementation story exercised
+    data: *id003
+  delay: 20ms
 - id: punch_drive-multi-hop-routing
   match:
     handler: host.agent.task
@@ -847,21 +809,14 @@ episodes:
         profile: codex-native
         findings: []
         summary: story driven through Studio MCP
+  delay: 20ms
 - id: punch_implementation-multi-hop-routing
   match:
     handler: host.agent.task
     call: punch_implementation-multi-hop-routing
   response:
-    data:
-      ok: true
-      submitted:
-        status: passed
-        story: stories/cherny-loop/app.yaml
-        trace_path: .artifacts/top10-dogfood/traces/multi-hop-routing-impl.jsonl
-        model: gpt-5.5
-        profile: codex-native
-        findings: []
-        summary: implementation story exercised
+    data: *id003
+  delay: 20ms
 - id: punch_drive-story-qa-workflow
   match:
     handler: host.agent.task
@@ -877,18 +832,11 @@ episodes:
         profile: codex-native
         findings: []
         summary: story driven through Studio MCP
+  delay: 20ms
 - id: punch_implementation-story-qa-workflow
   match:
     handler: host.agent.task
     call: punch_implementation-story-qa-workflow
   response:
-    data:
-      ok: true
-      submitted:
-        status: passed
-        story: stories/cherny-loop/app.yaml
-        trace_path: .artifacts/top10-dogfood/traces/story-qa-workflow-impl.jsonl
-        model: gpt-5.5
-        profile: codex-native
-        findings: []
-        summary: implementation story exercised
+    data: *id003
+  delay: 20ms

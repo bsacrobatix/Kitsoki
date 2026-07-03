@@ -128,6 +128,28 @@ After editing, the story runs `git rebase --continue --no-edit` and then
 `build_check_cmd`. A syntactically clean but build-breaking resolution is
 **rejected** — the operator sees the build output and can provide guidance.
 
+## Real-git bad-state harness
+
+Flow fixtures stub host calls, so they prove routing contracts but not every
+Git edge condition. `stories/git-ops/tests/lib/bad_git_repo.sh` is the reusable
+real-git fixture factory for those cases. It creates isolated temp repos using
+nonsense files only and supports named scenarios:
+
+```
+bash stories/git-ops/tests/lib/bad_git_repo.sh list
+repo=$(bash stories/git-ops/tests/lib/bad_git_repo.sh create pull-rebase-conflict)
+bash stories/git-ops/tests/lib/bad_git_repo.sh assert pull-rebase-conflict "$repo"
+```
+
+Current scenarios cover no upstream, pull/rebase conflicts, an in-progress
+rebase with no unmerged paths, a two-conflict rebase, branch ownership by a
+linked worktree, dirty linked worktrees, merge conflicts in progress, detached
+HEAD, diverged clean upstreams, dirty pull blockers, untracked overwrite
+blockers, stale worktree entries, interrupted cherry-picks, bisects in progress,
+rename/delete conflicts, modify/delete conflicts, binary rebase conflicts, and
+local/remote tag disagreement. `stories/git-ops/tests/bad_git_repo_harness.sh`
+smoke-tests that each scenario materializes as claimed.
+
 ## `merge_into_main` guards
 
 Three guards run in sequence before the merge:
