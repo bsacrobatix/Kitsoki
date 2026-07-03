@@ -168,3 +168,72 @@ states:
           target: .
           effects:
             - say: "Advance to re-evaluate."
+
+  # park_failed — sibling of `park`, for the OTHER way a change can fail to reach a
+  # verified completion: the change WAS genuinely RED (redcheck confirmed it), it was
+  # dispatched into the punch-list/pipeline, but the maker drive could not green the
+  # gate (punch-list's own needs-human retries were exhausted and the operator/driver
+  # quit, or the run was abandoned outright — see app.yaml's `punchlist:` import
+  # exits: both `needs-human` and `abandoned` now route HERE instead of straight to
+  # the outer needs_human). Without this escape the loop DEAD-ENDS exactly like the
+  # gate_not_red case: the next re-fold re-derives the SAME ready_id (nothing in the
+  # log says otherwise) and re-dispatches the same undrivable change forever. Park it
+  # (park_reason=drive_failed — NOT a completion, needs triage) and loop back to
+  # evaluate so the fold excludes it from ready_id and the loop advances to the next
+  # ready change. See flows/drive_failed_parks_and_advances.yaml.
+  park_failed:
+    description: "Park (failed) — the maker drive could not green the gate; log drive_failed and re-evaluate."
+    relevant_world: [next_change_id, last_error, last_seq]
+    on_enter:
+      - invoke: host.starlark.run
+        id: gs_append
+        with:
+          script: scripts/gs_append.star
+          inputs:
+            work_dir:    "{{ world.work_dir }}"
+            change_id:   "{{ world.next_change_id }}"
+            state:       "parked"
+            park_reason: "drive_failed"
+            summary:     "Maker drive could not green the gate: {{ world.last_error }}"
+            kind:        "park"
+            actor:       "system"
+        bind:
+          last_seq: seq
+        on_error: needs_human
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Change: '{{ world.next_change_id }}'
+                Reason: "drive_failed"
+                Error:  '{{ world.last_error }}'
+                Seq:    '{{ world.last_seq|default:"(pending)" }}'
+          - prose: "Parked (drive_failed) — the maker could not land this change. Advance to re-fold the ledger and pick the next ready change."
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - { label: "advance", hint: "re-fold the ledger and re-evaluate" }
+                - { label: "look" }
+    on:
+      # Same PAUSE/clear discipline as `park`'s advance arc.
+      advance:
+        - target: evaluate
+          effects:
+            - set:
+                verdict: ""
+                summary: ""
+                next_change_id: ""
+                next_pipeline: ""
+                next_action: ""
+                next_gate_cmd: ""
+                last_error: ""
+      look:
+        - target: .
+      "*":
+        - default: true
+          target: .
+          effects:
+            - say: "Advance to re-evaluate."

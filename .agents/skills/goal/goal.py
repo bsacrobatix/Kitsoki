@@ -49,7 +49,7 @@ except Exception as e:  # pragma: no cover
 STATES = ["blocked", "ready", "assigned", "in_flight", "reviewing", "verified",
           "integrated", "parked"]
 TERMINAL_OK = {"integrated"}
-PARK_REASONS = {"quota", "conflict", "escalation", "gate_not_red"}
+PARK_REASONS = {"quota", "conflict", "escalation", "gate_not_red", "drive_failed"}
 
 
 def _die(msg: str, code: int = 2):
@@ -258,7 +258,7 @@ def fold_ledger(decomp: dict, log: list[dict]) -> dict:
             "gate_class": (c.get("gate") or {}).get("class"),
             "last_summary": None,
             "last_detail": None,
-            "park_reason": None,    # {quota, conflict, escalation} when state==parked
+            "park_reason": None,    # {quota, conflict, escalation, gate_not_red, drive_failed} when state==parked
             "model": None,          # last model that worked this change (WM.5 cost-eval)
             "cost_usd": 0.0,        # accumulated across attempts (G4 cost visibility)
         }

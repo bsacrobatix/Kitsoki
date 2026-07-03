@@ -139,12 +139,19 @@ imports:
     exits:
       done:
         to: integrate
+      # A punch-list terminal that is NOT the verified-green `done` exit means the
+      # maker drive did not land the change — either punch-list's own needs-human
+      # retries were exhausted and the run quit, or it was abandoned outright. That
+      # is a park-and-advance signal (drive_failed), not a dead end: route to
+      # park_failed (a sibling of dispatch's gate_not_red `park`) instead of the
+      # outer needs_human, so the loop logs the park and advances to the next ready
+      # change rather than re-dispatching this same undrivable change forever.
       needs-human:
-        to: needs_human
+        to: park_failed
         set:
           last_error: "punch-list stopped on {{ world.next_change_id }}: {{ world.punchlist__last_error }}"
       abandoned:
-        to: needs_human
+        to: park_failed
         set:
           last_error: "punch-list abandoned change {{ world.next_change_id }}"
     # punch-list is NOT import-safe: its @exit:done (requires report_path) and

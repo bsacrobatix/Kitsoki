@@ -20,7 +20,9 @@ TERMINAL_OK = ["integrated"]
 GREEN_ACTORS = ["reviewer", "integrator"]
 # Parity with goal.py:PARK_REASONS. `gate_not_red` is the RED-first park (dispatch's
 # redcheck found the change's gate already green — not a completion, needs triage).
-PARK_REASONS = ["quota", "conflict", "escalation", "gate_not_red"]
+# `drive_failed` is the punch-list park (the maker drive could not green a genuinely
+# RED change's gate — punch-list exited needs-human/abandoned instead of done).
+PARK_REASONS = ["quota", "conflict", "escalation", "gate_not_red", "drive_failed"]
 
 
 def _seq(e):
@@ -58,7 +60,7 @@ def _fold(changes, log):
             "gate_status": "red",   # RED-first: nothing is green until independently proven
             "gate_class": gate.get("class"),
             "last_summary": None,
-            "park_reason": None,   # {quota, conflict, escalation, gate_not_red} when state==parked
+            "park_reason": None,   # {quota, conflict, escalation, gate_not_red, drive_failed} when state==parked
         }
 
     for e in log:
