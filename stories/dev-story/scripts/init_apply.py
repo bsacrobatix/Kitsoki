@@ -96,6 +96,14 @@ def ensure_draft_profile_defaults(profile: dict, data: dict) -> None:
     if data.get("test_command"):
         bugfix.setdefault("test_cmd", data["test_command"])
 
+    onboarding = profile.setdefault("onboarding", {})
+    if not isinstance(onboarding, dict):
+        onboarding = {}
+        profile["onboarding"] = onboarding
+    defaults = onboarding_profile(data)
+    for key, value in defaults.items():
+        onboarding.setdefault(key, value)
+
 
 def validate_profile_yaml(content: str, root: Path) -> dict:
     kitsoki_bin = os.environ.get("KITSOKI_BIN", "kitsoki")
@@ -343,6 +351,11 @@ def enrich_project_shape(data: dict, root: Path) -> None:
     data["has_requirements"] = (root / "requirements.txt").exists()
     data["has_uv_lock"] = (root / "uv.lock").exists()
     data["has_poetry_lock"] = (root / "poetry.lock").exists()
+    data["rules_files"] = [
+        name
+        for name in ("AGENTS.md", "CLAUDE.md", ".cursorrules", ".windsurfrules")
+        if (root / name).exists()
+    ]
     data["is_monorepo"] = False
     if cargo.exists():
         try:
@@ -414,6 +427,91 @@ def mining_profile_yaml(data: dict) -> str:
         )
         mining["note"] = f"{note}\n\n{review}".strip()
     return yaml_dump(mining, 2)
+
+
+def onboarding_profile(data: dict) -> dict:
+    kind = stack_kind(data)
+    patterns = [
+        {
+            "id": "selected-starter",
+            "source": "deterministic-init",
+            "evidence": f"Selected dev-story for a {data.get('stack') or 'local project'} checkout.",
+            "recommendation": "Start with the shared dev-story workflow and keep project-specific changes in `.kitsoki/project-profile.yaml` or the generated `.kitsoki/stories/<id>-dev/` wrapper.",
+        }
+    ]
+    managers = package_managers(data, kind)
+    if managers != "[]":
+        patterns.append({
+            "id": "toolchain",
+            "source": "repo-files",
+            "evidence": f"Stack kind `{kind}` with package/tool managers {managers}.",
+            "recommendation": "Project command gates are projected into dev-story from the profile rather than hardcoded in the shared story.",
+        })
+    if data.get("repo_vcs") != "none" or data.get("repo_default_branch") or data.get("repo_remote"):
+        patterns.append({
+            "id": "repo-metadata",
+            "source": "local-git",
+            "evidence": f"VCS `{data.get('repo_vcs', 'none')}`, default branch `{data.get('repo_default_branch', '')}`, remote `{data.get('repo_remote', '')}`.",
+            "recommendation": "Use local VCS metadata for worktree and handoff defaults; no network lookup is required during onboarding.",
+        })
+    rules_files = data.get("rules_files") if isinstance(data.get("rules_files"), list) else []
+    if rules_files:
+        patterns.append({
+            "id": "repo-rules",
+            "source": "rules-files",
+            "evidence": "Found project rule files: " + ", ".join(f"`{path}`" for path in rules_files) + ".",
+            "recommendation": "Treat these as the first customization source before mining older transcripts.",
+        })
+    mining = data.get("mining_recommendation") if isinstance(data.get("mining_recommendation"), dict) else {}
+    if int(mining.get("transcript_count") or 0) > 0:
+        patterns.append({
+            "id": "associated-transcripts",
+            "source": "local-transcripts",
+            "evidence": f"Found {mining.get('transcript_count')} associated Claude/Codex sessions.",
+            "recommendation": f"Review `{mining_seed_path()}` and run session mining in propose-only mode to evolve this profile.",
+        })
+
+    customizations = [
+        {
+            "id": "project-local-instance",
+            "status": "applied",
+            "summary": "Generate a thin project-owned dev-story wrapper under `.kitsoki/stories/<id>-dev/` that imports `@kitsoki/dev-story`.",
+            "evidence": f".kitsoki/stories/{data['project_id']}-dev/app.yaml",
+        },
+        {
+            "id": "project-doc-defaults",
+            "status": "applied",
+            "summary": "Retarget generated PRD/design outputs to project-local runtime docs paths instead of Kitsoki's own docs tree.",
+            "evidence": f"{dev_story_docs_profile(data)['publish_durable_path']}, {dev_story_docs_profile(data)['design_durable_path']}",
+        },
+    ]
+    if data.get("build_command") or data.get("test_command"):
+        customizations.append({
+            "id": "toolchain-gates",
+            "status": "applied",
+            "summary": "Project build/test commands are projected into dev-story bugfix gates.",
+            "evidence": f"build={data.get('build_command', '')}; test={data.get('test_command', '')}",
+        })
+    if mining_seed_enabled(data):
+        customizations.append({
+            "id": "session-mining-seed",
+            "status": "pending",
+            "summary": "Associated transcript history is captured as an operator-reviewed seed for future project customization.",
+            "evidence": mining_seed_path(),
+        })
+
+    return {
+        "base_story": "dev-story",
+        "base_story_title": "Dev-story project workflow",
+        "base_story_reason": "Default starter for normal software repositories: it supports project workbench, design/PRD, bugfix, git/worktree, and follow-up customization through a project-local wrapper.",
+        "repo_patterns": patterns,
+        "story_customizations": customizations,
+        "recording_policy": "no-llm-only",
+    }
+
+
+def onboarding_profile_yaml(data: dict, indent: int = 2) -> str:
+    return yaml_dump(onboarding_profile(data), indent)
 
 
 def generic_setup_plan_yaml(data: dict) -> str:
@@ -554,6 +652,8 @@ conventions:
     context:   {{ path: ".context",   use: local-runtime }}
     artifacts: {{ path: ".artifacts", use: local-runtime }}
     worktrees: {{ path: ".worktrees", use: local-runtime }}
+  rules_files:
+{yaml_dump(data.get("rules_files") or [], 4)}
   gitignore:
     manage: true
     additions:
@@ -592,6 +692,9 @@ dev_story_profile:
   bugfix:
     build_cmd: {q(data.get("build_command", ""))}
     test_cmd: {q(data.get("test_command", ""))}
+
+onboarding:
+{onboarding_profile_yaml(data)}
 
 mining:
 {mining_profile_yaml(data)}
@@ -796,6 +899,9 @@ dev_story_profile:
   bugfix:
     build_cmd: {q(data.get("build_command", ""))}
     test_cmd: {q(data.get("test_command", ""))}
+
+onboarding:
+{onboarding_profile_yaml(data)}
 
 mining:
 {mining_profile_yaml(data)}

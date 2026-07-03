@@ -28,7 +28,7 @@ travels with every clone and every collaborator.
 | Path | What | Why |
 |---|---|---|
 | `.kitsoki.yaml` | `story_dirs: [./.kitsoki/stories]` + `default_story` | so `kitsoki` discovers your instance |
-| `.kitsoki/project-profile.yaml` | declarative profile (stack, commands, conventions, dev-story profile, onboarding baseline) | the discovered description of your project and the source for the implicit dev-story root |
+| `.kitsoki/project-profile.yaml` | declarative profile (stack, commands, conventions, selected starter story, repo evidence, dev-story profile, onboarding baseline) | the discovered description of your project and the source for the implicit dev-story root |
 | `.kitsoki/stories/<id>-dev/app.yaml` | a materialized dev-story **instance** that imports `@kitsoki/dev-story` | an editable snapshot for web discovery and project-local story extensions |
 | `.kitsoki/stories/<id>-dev/README.md` | how to run the instance | — |
 | `.mcp.json` | registers the **kitsoki studio MCP** server | so Claude Code / Cursor / any MCP client can drive kitsoki here |
@@ -125,6 +125,12 @@ host-interface bindings, PRD/design placement, and ticket policy come from that
 single profile. The materialized `.kitsoki/stories/<id>-dev/app.yaml` is still
 checked in so teams can extend it deliberately, but the profile is the reusable
 convention source.
+
+The profile's `onboarding` block records why the starter story was selected
+(`base_story`), which repo patterns discovery used (`repo_patterns`), and which
+project-local story customizations were applied or queued
+(`story_customizations`). Session mining should add proposed changes there
+first, then only update the generated wrapper when an operator accepts them.
 
 For reusable onboarding tests, keep `onboarding.baseline_commit` pinned to the
 commit before Kitsoki files were introduced and `first_onboarding_commit` pinned
