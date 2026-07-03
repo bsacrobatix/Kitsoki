@@ -92,9 +92,11 @@ branch and remote fields.
 
 The instance `app.yaml` carries an **external-target profile**: a block of world
 keys (`publish_durable_path`, `prd_doc_filename`, `design_*`, `ticket_repo`, …)
-whose defaults reproduce kitsoki's own behaviour, and which an instance overrides
-to retarget doc placement, fixed filenames, or a GitHub-issue tracker. That
-profile is documented authoritatively in the dev-story README's
+that retargets doc placement, fixed filenames, or a GitHub-issue tracker.
+Generic generated projects default PRDs and design documents into `.context/`
+subdirectories and assume no project-specific design template directory. Known
+dogfood profiles, such as Slidey, can keep repo-native docs paths. That profile
+is documented authoritatively in the dev-story README's
 [Doc profile section](../../stories/dev-story/README.md#doc-profile--targeting-an-external-project)
 — onboarding seeds the defaults; tuning it is a per-instance edit.
 

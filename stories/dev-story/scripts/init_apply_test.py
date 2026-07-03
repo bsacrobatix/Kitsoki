@@ -91,6 +91,7 @@ def run_apply_with(
     dev: str,
     test: str,
     build: str,
+    draft: dict | None = None,
     mining: dict | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
@@ -108,8 +109,12 @@ def run_apply_with(
         "local defaults",
         "none",
     ]
+    if draft is not None:
+        args.append(json.dumps(draft))
     if mining is not None:
-        args.extend(["", json.dumps(mining)])
+        if draft is None:
+            args.append("")
+        args.append(json.dumps(mining))
     return subprocess.run(
         args,
         check=False,
@@ -153,9 +158,21 @@ if profile_path.exists():
     check("valid setup plan present", "setup_plan:" in profile_text)
     check("valid non-git vcs", "vcs: none" in profile_text)
     check("valid non-git branch empty", "default_branch: \"\"" in profile_text)
+    check("valid doc profile present", "dev_story_profile:" in profile_text)
+    check("valid prd local path", "publish_durable_path: \".context/prd\"" in profile_text)
+    check("valid design no template", "design_template_dir: \"\"" in profile_text)
+    check("valid design local path", "design_durable_path: \".context/designs\"" in profile_text)
     check("valid setup writes instance", ".kitsoki/stories/acme-dev/app.yaml" in profile_text)
+    check("valid setup creates prd dir", "- \".context/prd\"" in profile_text)
+    check("valid setup creates design dir", "- \".context/designs\"" in profile_text)
     check("valid setup gates build", "command: \"go build ./...\"" in profile_text)
     check("valid setup gates tests", "command: \"go test ./...\"" in profile_text)
+app_path = repo / ".kitsoki" / "stories" / "acme-dev" / "app.yaml"
+if app_path.exists():
+    app_text = app_path.read_text(encoding="utf-8")
+    check("valid app prd local path", 'publish_durable_path:       { type: string, default: ".context/prd" }' in app_text)
+    check("valid app design no template", 'design_template_dir:        { type: string, default: "" }' in app_text)
+    check("valid app design local path", 'design_durable_path:        { type: string, default: ".context/designs" }' in app_text)
 
 # 3. Git metadata is preserved instead of assuming main/no remote.
 repo = mkgitrepo()
@@ -227,6 +244,42 @@ if seed_path.exists():
     seed_text = seed_path.read_text(encoding="utf-8")
     check("mining seed mentions no cost", "no LLM cost" in seed_text)
     check("mining seed lists codex", "codex: 1 sessions" in seed_text)
+
+# 7. Sparse LLM-drafted profiles get the generated instance defaults injected
+# before validation and write.
+repo = mkrepo()
+draft = {
+    "schema": "project-profile/v1",
+    "id": "acme",
+    "title": "Acme",
+    "repo": {"root": ".", "vcs": "git"},
+    "stack": {"kind": "go", "languages": ["go"]},
+    "commands": {"test": "go test ./...", "build": "go build ./..."},
+    "kitsoki": {
+        "story": "dev-story",
+        "instance": {
+            "id": "acme-dev",
+            "path": ".kitsoki/stories/acme-dev/app.yaml",
+            "bindings": {
+                "ticket": "host.local_files.ticket",
+                "vcs": "host.git",
+                "ci": "host.local",
+                "workspace": "host.git_worktree",
+                "transport": "host.append_to_file",
+            },
+        },
+    },
+}
+proc = run_apply_with(repo, fake_kitsoki(True), "acme", "Acme", "go project", "", "go test ./...", "go build ./...", draft=draft)
+check("draft defaults exit", proc.returncode == 0, proc.stdout + proc.stderr)
+profile_path = repo / ".kitsoki" / "project-profile.yaml"
+if profile_path.exists():
+    profile_text = profile_path.read_text(encoding="utf-8")
+    check("draft doc defaults injected", "dev_story_profile:" in profile_text)
+    check("draft prd local path", "publish_durable_path: \".context/prd\"" in profile_text)
+    check("draft design local path", "design_durable_path: \".context/designs\"" in profile_text)
+    check("draft bugfix build", "build_cmd: \"go build ./...\"" in profile_text)
+    check("draft bugfix test", "test_cmd: \"go test ./...\"" in profile_text)
 
 if failures:
     print("FAIL: init_apply regression")
