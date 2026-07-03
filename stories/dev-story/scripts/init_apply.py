@@ -221,6 +221,8 @@ def stack_kind(data: dict) -> str:
         return "go"
     if "node" in stack:
         return "node"
+    if "python" in stack:
+        return "python"
     return "generic"
 
 
@@ -228,6 +230,10 @@ def enrich_project_shape(data: dict, root: Path) -> None:
     data["has_makefile"] = (root / "Makefile").exists()
     cargo = root / "Cargo.toml"
     data["has_cargo"] = cargo.exists()
+    data["has_pyproject"] = (root / "pyproject.toml").exists()
+    data["has_requirements"] = (root / "requirements.txt").exists()
+    data["has_uv_lock"] = (root / "uv.lock").exists()
+    data["has_poetry_lock"] = (root / "poetry.lock").exists()
     data["is_monorepo"] = False
     if cargo.exists():
         try:
@@ -245,6 +251,15 @@ def package_managers(data: dict, kind: str) -> str:
         managers.append("go")
     elif kind == "node":
         managers.append("npm")
+    elif kind == "python":
+        if data.get("has_uv_lock"):
+            managers.append("uv")
+        if data.get("has_poetry_lock"):
+            managers.append("poetry")
+        if data.get("has_pyproject"):
+            managers.append("pyproject")
+        if data.get("has_requirements") or not managers:
+            managers.append("pip")
     if data.get("has_makefile"):
         managers.append("make")
     return "[" + ", ".join(managers) + "]" if managers else "[]"
@@ -348,6 +363,7 @@ def generic_profile_yaml(data: dict) -> str:
         "rust": "[rust]",
         "go": "[go]",
         "node": "[javascript]",
+        "python": "[python]",
     }.get(kind, "[]")
     return f"""schema: project-profile/v1
 id: {data["project_id"]}

@@ -48,7 +48,7 @@
       "additionalProperties": false,
       "required": ["kind"],
       "properties": {
-        "kind": { "enum": ["frontend", "backend", "fullstack", "service", "cli", "library", "monorepo", "rust", "go", "node", "generic", "other"] },
+        "kind": { "enum": ["frontend", "backend", "fullstack", "service", "cli", "library", "monorepo", "rust", "go", "node", "python", "generic", "other"] },
         "languages": { "type": "array", "items": { "type": "string" } },
         "frameworks": { "type": "array", "items": { "type": "string" } },
         "package_managers": { "type": "array", "items": { "type": "string" } }

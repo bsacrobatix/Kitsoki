@@ -563,8 +563,13 @@ states:
       - kv:
           pairs:
             Profile validation: "{{ world.init_apply_result.profile_validation.ok|default:false }}"
-            Validation warnings: "{{ world.init_apply_result.profile_validation.warnings|default:'[]' }}"
         when: "world.init_apply_result.status == 'applied'"
+      - heading: "Validation Warnings"
+        when: "world.init_apply_result.profile_validation.warnings"
+      - code: |
+          {% for warning in world.init_apply_result.profile_validation.warnings %}- {{ warning }}
+          {% endfor %}
+        when: "world.init_apply_result.profile_validation.warnings"
       - kv:
           pairs:
             MCP: "{{ world.init_tools_result.mcp_path|default:'(pending)' }}"

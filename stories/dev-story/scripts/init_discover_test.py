@@ -71,7 +71,20 @@ check("empty target fallback", fallback, base.resolve())
 nl = mod.parse_target(f"onboard {other}", "", str(base))
 check("onboard <path>", nl, other.resolve())
 
-# 6. Associated Claude/Codex transcript history is detected without running
+# 6. Python repos are first-class normal projects, not generic commandless
+# checkouts.
+py_repo = _mkrepo({
+    "pyproject.toml": '[project]\nname = "acme-py"\ndependencies = ["pytest", "fastapi"]\n',
+    "tests/test_smoke.py": "def test_smoke():\n    assert True\n",
+})
+prof = mod.discover(py_repo)
+check("python id", prof["project_id"], "acme-py")
+check("python stack", prof["stack"], "python/fastapi project")
+check("python test", prof["test_command"], "python -m pytest")
+check("python dev", prof["dev_command"], "uvicorn app:app --reload")
+check("python build (none)", prof["build_command"], "")
+
+# 7. Associated Claude/Codex transcript history is detected without running
 # the mining pipeline or touching the real home directory.
 home = _mkrepo({})
 repo_with_history = _mkrepo({"go.mod": "module hist\ngo 1.22\n"})

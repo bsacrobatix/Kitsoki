@@ -71,6 +71,29 @@ def read_package(path: Path) -> dict:
         return {}
 
 
+def read_pyproject(path: Path) -> dict:
+    pyproject = path / "pyproject.toml"
+    if not pyproject.exists():
+        return {}
+    try:
+        text = pyproject.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    name = ""
+    in_project = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_project = stripped == "[project]"
+            continue
+        if in_project:
+            match = re.match(r"name\s*=\s*[\"']([^\"']+)[\"']", stripped)
+            if match:
+                name = match.group(1)
+                break
+    return {"name": name, "text": text}
+
+
 def command_from_scripts(package: dict, name: str) -> str:
     scripts = package.get("scripts") if isinstance(package, dict) else {}
     if isinstance(scripts, dict) and scripts.get(name):
@@ -97,13 +120,26 @@ def make_targets(path: Path) -> set[str]:
 def discover(path: Path) -> dict:
     package = read_package(path)
     package_name = package.get("name") if isinstance(package.get("name"), str) else ""
-    project_id = slug(package_name or path.name)
+    pyproject = read_pyproject(path)
+    pyproject_name = pyproject.get("name") if isinstance(pyproject.get("name"), str) else ""
+    project_id = slug(package_name or pyproject_name or path.name)
     targets = make_targets(path)
     deps = {}
     for key in ("dependencies", "devDependencies"):
         value = package.get(key)
         if isinstance(value, dict):
             deps.update(value)
+    py_text = (pyproject.get("text") or "").lower()
+    requirements = path / "requirements.txt"
+    if requirements.exists():
+        try:
+            py_text += "\n" + requirements.read_text(encoding="utf-8").lower()
+        except OSError:
+            pass
+    python_project = any(
+        (path / marker).exists()
+        for marker in ("pyproject.toml", "requirements.txt", "setup.py", "setup.cfg", "Pipfile", "poetry.lock", "uv.lock")
+    )
 
     if project_id == "slidey":
         stack = "node/vue/vite/puppeteer declarative deck engine with web, html, pdf, and mp4 outputs"
@@ -120,6 +156,12 @@ def discover(path: Path) -> dict:
         stack = "go project"
     elif (path / "Cargo.toml").exists():
         stack = "rust project"
+    elif python_project:
+        stack_bits = ["python"]
+        for name in ("django", "fastapi", "flask"):
+            if name in py_text:
+                stack_bits.append(name)
+        stack = "/".join(stack_bits) + " project"
     else:
         stack = "local project"
 
@@ -151,6 +193,22 @@ def discover(path: Path) -> dict:
             dev_command = "make dev"
         elif "run" in targets:
             dev_command = "make run"
+    elif python_project:
+        build_command = "make build" if "build" in targets else ""
+        if "test" in targets:
+            test_command = "make test"
+        elif (path / "tox.ini").exists():
+            test_command = "tox"
+        elif (path / "pytest.ini").exists() or (path / "tests").exists() or "pytest" in py_text:
+            test_command = "python -m pytest"
+        if "dev" in targets:
+            dev_command = "make dev"
+        elif "run" in targets:
+            dev_command = "make run"
+        elif "fastapi" in py_text or "uvicorn" in py_text:
+            dev_command = "uvicorn app:app --reload"
+        elif "flask" in py_text:
+            dev_command = "flask run"
 
     transcripts = transcript_evidence(path)
     return {

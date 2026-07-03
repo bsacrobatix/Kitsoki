@@ -32,6 +32,14 @@ def mkrepo() -> Path:
     return root
 
 
+def mkpyrepo() -> Path:
+    root = Path(tempfile.mkdtemp(prefix="kitsoki-apply-py-"))
+    (root / "pyproject.toml").write_text('[project]\nname = "acme-py"\n', encoding="utf-8")
+    (root / "tests").mkdir()
+    (root / "tests" / "test_smoke.py").write_text("def test_smoke():\n    assert True\n", encoding="utf-8")
+    return root
+
+
 def fake_kitsoki(ok: bool) -> Path:
     root = Path(tempfile.mkdtemp(prefix="kitsoki-bin-"))
     path = root / "kitsoki"
@@ -54,6 +62,19 @@ def fake_kitsoki(ok: bool) -> Path:
 
 
 def run_apply(repo: Path, validator: Path) -> subprocess.CompletedProcess[str]:
+    return run_apply_with(repo, validator, "acme", "Acme", "go project", "", "go test ./...", "go build ./...")
+
+
+def run_apply_with(
+    repo: Path,
+    validator: Path,
+    project_id: str,
+    title: str,
+    stack: str,
+    dev: str,
+    test: str,
+    build: str,
+) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["KITSOKI_BIN"] = str(validator)
     return subprocess.run(
@@ -61,12 +82,12 @@ def run_apply(repo: Path, validator: Path) -> subprocess.CompletedProcess[str]:
             sys.executable,
             str(SCRIPT),
             str(repo),
-            "acme",
-            "Acme",
-            "go project",
-            "",
-            "go test ./...",
-            "go build ./...",
+            project_id,
+            title,
+            stack,
+            dev,
+            test,
+            build,
             "local defaults",
             "none",
         ],
@@ -112,6 +133,19 @@ if profile_path.exists():
     check("valid setup writes instance", ".kitsoki/stories/acme-dev/app.yaml" in profile_text)
     check("valid setup gates build", "command: \"go build ./...\"" in profile_text)
     check("valid setup gates tests", "command: \"go test ./...\"" in profile_text)
+
+# 3. Python projects keep Python stack metadata and pytest verification.
+repo = mkpyrepo()
+proc = run_apply_with(repo, fake_kitsoki(True), "acme-py", "Acme Py", "python/fastapi project", "uvicorn app:app --reload", "python -m pytest", "")
+check("python valid exit", proc.returncode == 0, proc.stdout + proc.stderr)
+profile_path = repo / ".kitsoki" / "project-profile.yaml"
+if profile_path.exists():
+    profile_text = profile_path.read_text(encoding="utf-8")
+    check("python stack kind", "kind: \"python\"" in profile_text)
+    check("python language", "languages: [python]" in profile_text)
+    check("python package manager", "package_managers: [pyproject]" in profile_text)
+    check("python setup gates tests", "command: \"python -m pytest\"" in profile_text)
+    check("python setup gates dev advisory", "command: \"uvicorn app:app --reload\"" in profile_text)
 
 if failures:
     print("FAIL: init_apply regression")
