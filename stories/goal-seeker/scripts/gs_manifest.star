@@ -13,6 +13,28 @@
 # branch/workdir) from `world.ticket_id` in their `idle` rooms, but only when a
 # caller actually hands one over. See stories/punch-list/prompts/drive_item.md.
 #
+# LIVE PROOF (twice) showed the free-text maker driving the target session does
+# NOT reliably pass `initial_world` to `session.new` even when told to — it opens
+# the session with an empty world and drives off the prompt text alone, so
+# `world.ticket_id` stays empty and the target story can't self-provision. What
+# the maker DOES reliably do is drive the prompt text verbatim as its first turn.
+# So the prompt below LEADS with an explicit, verbatim-quotable ticket directive
+# ("Work ticket <id> titled \"<title>\". <brief>") that both stories/implementation
+# and stories/bugfix's `idle` rooms can extract via a semantic-router template
+# (`work_ticket` intent, `{ticket_id}`/`{ticket_title}` captures — see their
+# rooms/idle.yaml) even when initial_world never arrives. world_in stays as the
+# belt-and-suspenders structured path for a future maker that DOES honor it.
+#
+# "titled" is a deliberate literal anchor: the router's `{ticket_id}` capture is
+# a trailing run absorbing every token up to the next literal, so without an
+# anchor right after the id it would swallow the rest of the message (title +
+# brief) into ticket_id itself. "titled" bounds it cleanly. The `{ticket_title}`
+# capture after it is best-effort only (it trails to end-of-input, so it also
+# picks up the brief) — both target stories treat a noisy ticket_title as
+# harmless: implementation's review_task_executing immediately re-fetches the
+# authoritative title via iface.ticket.get, and bugfix only ever uses it as
+# human-facing display text.
+#
 # stories/implementation additionally calls `iface.ticket.get {id}` (review_task
 # room), which — unlike the append-only transport — does NOT self-bootstrap: the
 # file-backed default handler (host.local_files.ticket) requires a REAL
@@ -81,6 +103,24 @@ def _write_ticket(ctx, tickets_root, change_id, title, change, gate_cmd):
     doc += "# " + title + "\n\n"
     doc += _ticket_body_markdown(change, gate_cmd)
     ctx.fs.write(ticket_path, doc)
+
+    # The NL-extraction fallback (idle.yaml's `work_ticket` intent — see the
+    # module docstring) captures ticket_id through the semantic router's
+    # `{slot}` template mechanism, which lowercases captured string values
+    # (internal/lex.Tokenize normalises + lowercases BEFORE the matcher ever
+    # sees the text — see docs/architecture/semantic-routing.md §1.3's case-
+    # folding caveat). change_id is frequently mixed-case (e.g. "WM.9"), so a
+    # live NL-driven ticket_id would arrive lowercased ("wm.9") while this
+    # exact-case file is "WM.9.md" — findTicketPath's os.Stat lookup is
+    # case-sensitive on Linux (masked by APFS's case-insensitive default on
+    # macOS dev boxes, which is why this wouldn't show up locally). Mirror
+    # the ticket at the lowercased slug too so ticket.get resolves regardless
+    # of which path (structured world_in, exact case; or NL extraction,
+    # lowercased) produced world.ticket_id.
+    lower_slug = slug.lower()
+    if lower_slug != slug:
+        ctx.fs.write(tickets_root + "/issues/features/" + lower_slug + ".md", doc)
+
     return ticket_path
 
 
@@ -109,7 +149,11 @@ def main(ctx):
     pipeline = str(change.get("pipeline") or "implementation")
     story = PIPELINE_STORY.get(pipeline, "stories/implementation/app.yaml")
     title = str(change.get("title") or change_id)
-    action = str(change.get("agent_brief") or title or change_id)
+    agent_brief = str(change.get("agent_brief") or title or change_id)
+    # Lead with the verbatim-parseable ticket directive (see the module
+    # docstring): "titled" anchors the {ticket_id} template capture in the
+    # target story's idle room so it doesn't swallow the rest of this prompt.
+    action = "Work ticket " + change_id + " titled \"" + title + "\". " + agent_brief
 
     tickets_root = work_dir + "/tickets"
     ticket_path = _write_ticket(ctx, tickets_root, change_id, title, change, gate_cmd)

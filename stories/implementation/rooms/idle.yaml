@@ -39,6 +39,18 @@ states:
     # gets a real worktree. Guarded by impl_provision_attempted so an
     # on_error bounce or re-entry doesn't double-provision.
     on_enter:
+      # Step 0: derive a default reporting thread from ticket_id when the caller
+      # didn't supply one — mirrors stories/bugfix/rooms/idle.yaml's Step 0. A
+      # headless drive (goal-seeker/punch-list) hands over only ticket_id (+
+      # ticket_title/tickets_root); every checkpoint room's `iface.transport.post`
+      # (host.append_to_file behind it) HARD-FAILS on an empty thread ("thread
+      # argument is required") with no on_error, which otherwise strands the
+      # pipeline at the very first checkpoint (review_task_awaiting_reply).
+      # `issues/tasks/<ticket_id>.md` mirrors bugfix's `issues/bugs/<ticket_id>.md`
+      # convention; host.append_to_file self-bootstraps the file on first write.
+      - when: "world.ticket_id != '' && world.thread == '' && !world.impl_provision_attempted"
+        set:
+          thread: "issues/tasks/{{ world.ticket_id }}.md"
       # Step 1: derive workspace identity from ticket_id (only when the
       # parent hasn't already projected a workdir in via world_in:).
       - when: "world.ticket_id != '' && world.workdir == '' && !world.impl_provision_attempted"
@@ -61,13 +73,34 @@ states:
           name: "{{ world.feature_branch }}"
           base: "{{ world.base_branch }}"
         on_error: idle
-      # Step 3: pin "we provisioned once" so any re-entry skips the chain.
+      # Step 3: auto-start once provisioned. Mirrors stories/bugfix/rooms/
+      # idle.yaml's own autostart (its Step 3) — a headless dispatcher
+      # (goal-seeker/punch-list) that seeds ticket_id (via initial_world OR
+      # the work_ticket NL extraction below) has already decided to start;
+      # forcing a SECOND explicit `start` intent out of a driver whose only
+      # reliable channel is one prompt turn is exactly the gap that stranded
+      # a live drive at idle with nothing landed. emit_intent is queued and
+      # dispatched after this effect chain completes, so the flag-set step
+      # below still runs first.
+      - when: "world.ticket_id != '' && !world.impl_provision_attempted"
+        emit_intent: start
+      # Step 4: pin "we provisioned once" so any re-entry skips the chain.
       - when: "world.ticket_id != '' && !world.impl_provision_attempted"
         set:
           impl_provision_attempted: true
     on:
       start:
         - target: review_task_executing
+      # NL ticket-id handoff — see the work_ticket intent doc in ../app.yaml.
+      # Re-targets idle EXPLICITLY (not `.`) so on_enter re-fires with
+      # ticket_id now set, falling into the same provisioning + autostart
+      # chain above that the structured-initial_world path already uses.
+      work_ticket:
+        - target: idle
+          effects:
+            - set:
+                ticket_id:    "{{ slots.ticket_id }}"
+                ticket_title: "{{ slots.ticket_title ?? world.ticket_title }}"
       quit:
         - target: "@exit:abandoned"
       look:

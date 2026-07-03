@@ -33,6 +33,18 @@ return only concrete handoff evidence; independent verification will decide pass
      requires this field).
 2. Drive it with natural operator text, using the item prompt:
    - `{{ args.item.prompt }}`
+   - IMPORTANT: send the item prompt to the target session's FIRST turn
+     essentially VERBATIM — do not paraphrase or drop its leading sentence.
+     The prompt is authored to LEAD with an explicit ticket directive (e.g.
+     `Work ticket TKT-001 titled "Add a refresh endpoint". <brief>`). The
+     target story's `idle` room extracts `ticket_id` (and, best-effort,
+     `ticket_title`) from that EXACT leading phrase via a semantic-router
+     template — this is the ONLY reliable path when `initial_world` above
+     did not actually take (live drives have shown the maker opening the
+     session without it despite step 1's instruction). Rewording, summarizing,
+     or leading with your own framing instead of the literal ticket directive
+     will strand the session with an empty `ticket_id` and nothing to
+     self-provision from, exactly like skipping `initial_world`.
 3. Capture any story, MCP, routing, or usability friction as findings.
 4. Do not claim implementation success. This drive is observation and handoff only.
 5. If the target story was opened with the requested profile and explicit trace,
