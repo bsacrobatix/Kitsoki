@@ -29,9 +29,9 @@ Defined in [`stories/dev-story/rooms/init.yaml`](../../stories/dev-story/rooms/i
 
 | Room | Does |
 |---|---|
-| `init_discover` | `on_enter` runs [`scripts/init_discover.py`](../../stories/dev-story/scripts/init_discover.py) against the target and binds the discovered profile (`init_project_id`, `init_stack`, dev/test/build commands, …). Commands are **stack-aware**: npm scripts, Cargo (`cargo build`/`test`, or Makefile targets), and Go (`go build ./...`/`go test ./...`, Makefile targets winning) — so a recognised stack is never left command-less. Reads nothing it shouldn't — discovery is **read-only**. |
+| `init_discover` | `on_enter` runs [`scripts/init_discover.py`](../../stories/dev-story/scripts/init_discover.py) against the target and binds the discovered profile (`init_project_id`, `init_stack`, dev/test/build commands, …). Commands are **stack-aware**: Node scripts through the repo's selected package manager (`npm`, `pnpm`, `yarn`, or `bun`), Cargo (`cargo build`/`test`, or Makefile targets), Go (`go build ./...`/`go test ./...`, Makefile targets winning), and Python (`pytest`/`tox`, FastAPI/Flask dev hints) — so a recognised stack is never left command-less when it has canonical commands. Reads nothing it shouldn't — discovery is **read-only**. |
 | `init` | Operator **reviews** the discovered profile. `confirm_init` applies; `revise_init` records feedback; `quit` returns to the workbench. No writes happen until confirm. |
-| `init_apply` | `on_enter` runs two best-effort host steps (below) and surfaces the written paths + MCP registration. |
+| `init_apply` | `on_enter` runs the file apply and toolkit install host steps (below), then surfaces the written paths + MCP registration or a loud retry read-out. |
 | `init_done` | Read-out of the applied result; `go_main` returns to the workbench. |
 | `init_discover_failed` / `init_apply_failed` | Error read-outs with retry arcs. |
 
@@ -65,9 +65,10 @@ Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
 2. **`kitsoki project-tools install --target <path>`** — installs the agent
    toolkit (skills + subagents) and registers the studio MCP, producing the
    `.agents/` sources, the `.claude/` symlinks, and `.mcp.json`. This is
-   **best-effort**: it has no `on_error` bounce, so a tools hiccup never fails
-   the file apply — the result (`init_tools_ok` / `init_tools_result`) is
-   surfaced read-only in the room view. The command is backed by
+   **loud and retryable**: a tools hiccup routes to `init_tools_failed` instead
+   of silently reporting a complete onboarding, while the file apply result is
+   preserved so the operator can continue with `applied-no-tools` if needed.
+   The command is backed by
    `internal/baseskills` (embedded toolkit; see
    [project-onboarding.md](../project-onboarding.md)).
 
@@ -76,6 +77,11 @@ The generated `.kitsoki/stories/<id>-dev/app.yaml` imports
 providers to local implementations (`host.local_files.ticket`, `host.git`,
 `host.local`, `host.git_worktree`, `host.append_to_file`), so it runs
 standalone with only the `kitsoki` binary present.
+
+When deterministic discovery finds associated Claude/Codex transcript history,
+apply also writes `.context/kitsoki-session-mining-seed.md` and records a
+pending seed job in the profile's `mining` block. This is a review handoff only:
+no mining pass or LLM call runs during onboarding.
 
 ## The external-target profile
 
@@ -89,12 +95,15 @@ profile is documented authoritatively in the dev-story README's
 
 ## Testing — no LLM
 
-The whole walk is covered by
+The walk is covered by focused no-LLM flows such as
 [`flows/init_slidey_dogfood.yaml`](../../stories/dev-story/flows/init_slidey_dogfood.yaml),
-which stubs the discovery, apply, and toolkit-install `host.run` calls (by their
-`id`: `discover`, `apply`, `install_tools`) and asserts the routing,
-`init_apply_result.status == "applied"`, and `init_tools_ok` with a populated
-`init_tools_result` — all with no real LLM and without touching a real checkout:
+[`flows/init_node_pnpm_project.yaml`](../../stories/dev-story/flows/init_node_pnpm_project.yaml),
+[`flows/init_python_project.yaml`](../../stories/dev-story/flows/init_python_project.yaml),
+and [`flows/init_transcript_seed.yaml`](../../stories/dev-story/flows/init_transcript_seed.yaml).
+They stub the discovery, apply, and toolkit-install `host.run` calls (by their
+`id`: `discover`, `apply`, `install_tools`) and assert routing, generated paths,
+tool commands, transcript seed handoff, and toolkit-install failure handling —
+all with no real LLM and without touching a real checkout:
 
 ```sh
 kitsoki test flows stories/dev-story/app.yaml

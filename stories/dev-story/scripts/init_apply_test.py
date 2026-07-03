@@ -40,6 +40,16 @@ def mkpyrepo() -> Path:
     return root
 
 
+def mknoderepo() -> Path:
+    root = Path(tempfile.mkdtemp(prefix="kitsoki-apply-node-"))
+    (root / "package.json").write_text(
+        '{"name":"acme-web","packageManager":"pnpm@9.12.0","scripts":{"dev":"vite","test":"vitest","build":"vite build"}}\n',
+        encoding="utf-8",
+    )
+    (root / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
+    return root
+
+
 def fake_kitsoki(ok: bool) -> Path:
     root = Path(tempfile.mkdtemp(prefix="kitsoki-bin-"))
     path = root / "kitsoki"
@@ -151,7 +161,19 @@ if profile_path.exists():
     check("python setup gates tests", "command: \"python -m pytest\"" in profile_text)
     check("python setup gates dev advisory", "command: \"uvicorn app:app --reload\"" in profile_text)
 
-# 4. Associated transcripts create a durable seed-mining handoff without running
+# 4. Node projects keep their selected package manager instead of defaulting to npm.
+repo = mknoderepo()
+proc = run_apply_with(repo, fake_kitsoki(True), "acme-web", "Acme Web", "node/vite project", "pnpm run dev", "pnpm test", "pnpm run build")
+check("node valid exit", proc.returncode == 0, proc.stdout + proc.stderr)
+profile_path = repo / ".kitsoki" / "project-profile.yaml"
+if profile_path.exists():
+    profile_text = profile_path.read_text(encoding="utf-8")
+    check("node stack kind", "kind: \"node\"" in profile_text)
+    check("node package manager", "package_managers: [pnpm]" in profile_text)
+    check("node setup gates tests", "command: \"pnpm test\"" in profile_text)
+    check("node setup gates build", "command: \"pnpm run build\"" in profile_text)
+
+# 5. Associated transcripts create a durable seed-mining handoff without running
 # the mining pipeline.
 repo = mkrepo()
 mining = {

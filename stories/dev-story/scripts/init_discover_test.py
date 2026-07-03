@@ -84,7 +84,19 @@ check("python test", prof["test_command"], "python -m pytest")
 check("python dev", prof["dev_command"], "uvicorn app:app --reload")
 check("python build (none)", prof["build_command"], "")
 
-# 7. Associated Claude/Codex transcript history is detected without running
+# 7. Node repos honor the selected package manager instead of assuming npm.
+pnpm_repo = _mkrepo({
+    "package.json": '{"name":"acme-web","packageManager":"pnpm@9.12.0","scripts":{"dev":"vite","test":"vitest","build":"vite build"},"dependencies":{"vite":"latest"}}\n',
+    "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+})
+prof = mod.discover(pnpm_repo)
+check("pnpm id", prof["project_id"], "acme-web")
+check("pnpm manager", prof["node_package_manager"], "pnpm")
+check("pnpm dev", prof["dev_command"], "pnpm run dev")
+check("pnpm test", prof["test_command"], "pnpm test")
+check("pnpm build", prof["build_command"], "pnpm run build")
+
+# 8. Associated Claude/Codex transcript history is detected without running
 # the mining pipeline or touching the real home directory.
 home = _mkrepo({})
 repo_with_history = _mkrepo({"go.mod": "module hist\ngo 1.22\n"})
