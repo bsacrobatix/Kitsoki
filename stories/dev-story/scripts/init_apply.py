@@ -257,6 +257,91 @@ def convention_source(value: str) -> str:
     return "project"
 
 
+def generic_setup_plan_yaml(data: dict) -> str:
+    project_id = data["project_id"]
+    verifications = [
+        {
+            "id": "story-load",
+            "kind": "story",
+            "command": f"kitsoki validate .kitsoki/stories/{project_id}-dev/app.yaml",
+            "gate": "required",
+        },
+    ]
+    if data.get("build_command"):
+        verifications.append({
+            "id": "build",
+            "kind": "build",
+            "command": data["build_command"],
+            "gate": "required",
+        })
+    if data.get("test_command"):
+        verifications.append({
+            "id": "unit-tests",
+            "kind": "tests",
+            "command": data["test_command"],
+            "gate": "required",
+        })
+    if data.get("check_command"):
+        verifications.append({
+            "id": "check",
+            "kind": "tests",
+            "command": data["check_command"],
+            "gate": "recommended",
+        })
+    if data.get("dev_command"):
+        verifications.append({
+            "id": "dev-command",
+            "kind": "dev-server",
+            "command": data["dev_command"],
+            "gate": "advisory",
+        })
+    return yaml_dump({
+        "writes": [
+            {
+                "path": ".kitsoki/project-profile.yaml",
+                "action": "create",
+                "summary": "Declarative onboarding profile for this project.",
+            },
+            {
+                "path": f".kitsoki/stories/{project_id}-dev/app.yaml",
+                "action": "create",
+                "summary": "Thin project-owned dev-story instance importing @kitsoki/dev-story.",
+            },
+            {
+                "path": f".kitsoki/stories/{project_id}-dev/README.md",
+                "action": "create",
+                "summary": "Local operator handoff for running and extending the generated instance.",
+            },
+            {
+                "path": ".kitsoki.yaml",
+                "action": "create",
+                "summary": "Discover project-local Kitsoki stories and select the generated instance.",
+            },
+            {
+                "path": ".gitignore",
+                "action": "merge",
+                "summary": "Ignore local Kitsoki runtime, session, artifact, and worktree files.",
+            },
+        ],
+        "dirs_create": [
+            ".kitsoki",
+            ".kitsoki/stories",
+            f".kitsoki/stories/{project_id}-dev",
+            ".context",
+            ".artifacts",
+            ".worktrees",
+        ],
+        "gitignore_additions": [
+            ".kitsoki.local.yaml",
+            ".kitsoki/sessions/",
+            ".artifacts/",
+            ".context/",
+            ".worktrees/",
+        ],
+        "verifications": verifications,
+    }, 2)
+
+
 def generic_profile_yaml(data: dict) -> str:
     kind = stack_kind(data)
     languages = {
@@ -333,6 +418,9 @@ kitsoki:
 
 mining:
 {yaml_dump(data.get("mining_recommendation") or mining_recommendation(Path(data["target_path"])), 2)}
+
+setup_plan:
+{generic_setup_plan_yaml(data)}
 
 readiness:
   status: not-run

@@ -2238,12 +2238,9 @@ func validateStarlarkEffects(file string, def *AppDef, errs *[]error) {
 		if !rawWasAbs && def.BaseDir != "" {
 			resolved = filepath.Join(def.BaseDir, resolved)
 		}
-		if def.BaseDir != "" && !rawWasAbs {
-			rel, relErr := filepath.Rel(def.BaseDir, filepath.Clean(resolved))
-			if relErr != nil || strings.HasPrefix(rel, "..") {
-				addErr(fmt.Sprintf("%s: host.starlark.run script %q resolves outside the app root", loc, rawScript))
-				return
-			}
+		if def.BaseDir != "" && !pathWithinAnyStoryRoot(filepath.Clean(resolved), def) {
+			addErr(fmt.Sprintf("%s: host.starlark.run script %q resolves outside the app root or imported story roots", loc, rawScript))
+			return
 		}
 
 		if _, statErr := os.Stat(resolved); statErr != nil {
@@ -2302,6 +2299,26 @@ func validateStarlarkEffects(file string, def *AppDef, errs *[]error) {
 			}
 		}
 	})
+}
+
+func pathWithinAnyStoryRoot(path string, def *AppDef) bool {
+	if pathWithinRoot(path, def.BaseDir) {
+		return true
+	}
+	for _, manifest := range def.LoadedManifests {
+		if pathWithinRoot(path, filepath.Dir(manifest)) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathWithinRoot(path, root string) bool {
+	if root == "" {
+		return false
+	}
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // bareStarlarkInputRootRE matches a value that STARTS WITH a world-root accessor
