@@ -1022,8 +1022,11 @@ Returns the parsed object as `Result.Data`. Bind individual fields
 Git-worktree-backed `workspace` provider
 ([`internal/host/git_worktree.go`](../../internal/host/git_worktree.go)). A
 single prefix-fallback handler dispatches `list` / `get` / `create` / `sync` /
-`cleanup_scan` / `cleanup_apply` via the `op` arg. Worktrees live under
-`<repo>/.worktrees/<id>` where the id == the worktree dir basename.
+`cleanup_scan` / `cleanup_apply` / `clone_create` /
+`clone_cleanup_scan` / `clone_cleanup_apply` via the `op` arg. Linked
+worktrees live under `<repo>/.worktrees/<id>` where the id == the worktree dir
+basename. Isolated clones live under `<repo>/.worktrees/clones/<id>` by
+default.
 
 `create` args:
 
@@ -1062,6 +1065,38 @@ enhancement; it is not needed to close the destructive bug, which the sentinel
 already does.)
 
 Regression: [`concurrent_checkout_repro_test.go`](../../internal/host/concurrent_checkout_repro_test.go).
+
+### Isolated clones for high-concurrency agents
+
+Linked worktrees isolate files and indexes, but they still share refs, stash,
+reflogs, hooks/config, the worktree registry, and Git lock files. Use normal
+linked worktrees for human-supervised feature work. Use `clone_create` for
+high-concurrency or autonomous runs that may stash, rebase, fetch/prune, delete
+branches, or otherwise touch shared Git state.
+
+`clone_create` args:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | string | yes | On-disk clone dir basename under the clone root. Must be a single path segment. |
+| `name` | string | no | Local branch to create in the clone. When set, the handler runs `git checkout -b <name> [base]` inside the clone. |
+| `base` | string | no | Branch or commit to check out, or the start point for `name`. |
+| `root` | string | no | Clone root. Defaults to `<repo>/.worktrees/clones`. Relative paths are resolved under `repo`. |
+| `session_id` | string | no | Recorded in the clone sentinel for operator forensics. |
+
+Each managed clone gets a `.kitsoki-clone` sentinel with its id, source repo,
+branch/base, session id, and creation time. Cleanup only considers directories
+with that sentinel.
+
+`clone_cleanup_scan` returns candidates from the clone root. A clone is
+recommended only when it is Kitsoki-owned, clean (`git status --porcelain` is
+empty), and older than `min_age_hours` (default: `24`). `exclude` suppresses
+matching ids, paths, or branches for review refinement.
+
+`clone_cleanup_apply` deletes only candidates whose `recommended` field is
+`true`, whose path is still under the clone root, and whose `.kitsoki-clone`
+sentinel is still present. It does not delete branches in the source repo
+because clone refs are intentionally isolated.
 
 ---
 

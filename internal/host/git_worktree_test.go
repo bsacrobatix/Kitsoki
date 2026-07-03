@@ -2,8 +2,11 @@ package host_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"kitsoki/internal/host"
 )
@@ -29,6 +32,9 @@ func TestGitWorktree_RegisteredAsBuiltin(t *testing.T) {
 		"host.git_worktree.sync",
 		"host.git_worktree.cleanup_scan",
 		"host.git_worktree.cleanup_apply",
+		"host.git_worktree.clone_create",
+		"host.git_worktree.clone_cleanup_scan",
+		"host.git_worktree.clone_cleanup_apply",
 	} {
 		if _, ok := r.Get(n); !ok {
 			t.Fatalf("registry: %s missing", n)
@@ -560,4 +566,157 @@ func TestGitWorktree_CleanupApply_AcceptsJSONCandidateList(t *testing.T) {
 	if len(fr.calls) != 2 {
 		t.Fatalf("calls: %v", fr.calls)
 	}
+}
+
+func TestGitWorktree_CloneCreate_CreatesIsolatedCloneWithSentinel(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "case-1")
+	fr := newFakeRunner()
+	fr.responses["git clone /repo "+path] = fakeResp{}
+	fr.responses[path+"|git checkout -b fix/case-1 main"] = fakeResp{}
+	restore := host.SetExecRunnerForTest(func(ctx context.Context, dir, name string, args ...string) (string, string, int, error) {
+		if name == "git" && len(args) == 3 && args[0] == "clone" {
+			if err := os.MkdirAll(args[2], 0o755); err != nil {
+				return "", "", 1, err
+			}
+		}
+		return fr.run(ctx, dir, name, args...)
+	})
+	defer restore()
+
+	res, err := host.GitWorktreeHandler(context.Background(), map[string]any{
+		"op":         "clone_create",
+		"repo":       "/repo",
+		"root":       root,
+		"id":         "case-1",
+		"name":       "fix/case-1",
+		"base":       "main",
+		"session_id": "S1",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if res.Data["path"] != path {
+		t.Fatalf("path: %v", res.Data["path"])
+	}
+	b, err := os.ReadFile(filepath.Join(path, ".kitsoki-clone"))
+	if err != nil {
+		t.Fatalf("sentinel: %v", err)
+	}
+	if !strings.Contains(string(b), `"session_id": "S1"`) {
+		t.Fatalf("sentinel missing session id: %s", string(b))
+	}
+	for _, want := range []string{
+		"git clone /repo " + path,
+		"git checkout -b fix/case-1 main",
+	} {
+		var saw bool
+		for _, call := range fr.calls {
+			if call == want {
+				saw = true
+			}
+		}
+		if !saw {
+			t.Fatalf("missing call %q in %v", want, fr.calls)
+		}
+	}
+}
+
+func TestGitWorktree_CloneCleanupScan_RecommendsOnlyOwnedOldCleanClones(t *testing.T) {
+	root := t.TempDir()
+	oldClean := writeCloneTestDir(t, root, "old-clean", time.Now().Add(-48*time.Hour))
+	newClean := writeCloneTestDir(t, root, "new-clean", time.Now())
+	dirty := writeCloneTestDir(t, root, "dirty", time.Now().Add(-48*time.Hour))
+	if err := os.Mkdir(filepath.Join(root, "not-owned"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fr := newFakeRunner()
+	fr.responses[oldClean+"|git branch --show-current"] = fakeResp{stdout: "fix/old-clean\n"}
+	fr.responses[newClean+"|git branch --show-current"] = fakeResp{stdout: "fix/new-clean\n"}
+	fr.responses[dirty+"|git branch --show-current"] = fakeResp{stdout: "fix/dirty\n"}
+	fr.responses["git status --porcelain"] = fakeResp{}
+	fr.responses[dirty+"|git status --porcelain"] = fakeResp{stdout: " M file.go\n"}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitWorktreeHandler(context.Background(), map[string]any{
+		"op":            "clone_cleanup_scan",
+		"repo":          "/repo",
+		"root":          root,
+		"min_age_hours": "24",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if res.Data["recommended_count"] != 1 {
+		t.Fatalf("recommended_count: %v", res.Data["recommended_count"])
+	}
+	candidates, _ := res.Data["candidates"].([]map[string]any)
+	byID := map[string]map[string]any{}
+	for _, c := range candidates {
+		byID[c["id"].(string)] = c
+	}
+	if byID["old-clean"]["recommended"] != true {
+		t.Fatalf("old clean clone should be recommended: %#v", byID["old-clean"])
+	}
+	if byID["new-clean"]["recommended"] != false {
+		t.Fatalf("new clone should not be recommended: %#v", byID["new-clean"])
+	}
+	if byID["dirty"]["recommended"] != false {
+		t.Fatalf("dirty clone should not be recommended: %#v", byID["dirty"])
+	}
+	if _, ok := byID["not-owned"]; ok {
+		t.Fatalf("unowned dir should not be a candidate: %#v", byID["not-owned"])
+	}
+}
+
+func TestGitWorktree_CloneCleanupApply_RemovesOnlyRecommendedOwnedClones(t *testing.T) {
+	root := t.TempDir()
+	removeMe := writeCloneTestDir(t, root, "remove-me", time.Now().Add(-48*time.Hour))
+	keepMe := writeCloneTestDir(t, root, "keep-me", time.Now().Add(-48*time.Hour))
+	fr := newFakeRunner()
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitWorktreeHandler(context.Background(), map[string]any{
+		"op":   "clone_cleanup_apply",
+		"repo": "/repo",
+		"root": root,
+		"candidates": []any{
+			map[string]any{"id": "remove-me", "path": removeMe, "recommended": true},
+			map[string]any{"id": "keep-me", "path": keepMe, "recommended": false},
+			map[string]any{"id": "outside", "path": filepath.Join(root, "..", "outside"), "recommended": true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error == "" {
+		t.Fatalf("expected outside path error")
+	}
+	if _, err := os.Stat(removeMe); !os.IsNotExist(err) {
+		t.Fatalf("recommended clone should be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(keepMe); err != nil {
+		t.Fatalf("unrecommended clone should remain: %v", err)
+	}
+}
+
+func writeCloneTestDir(t *testing.T, root, id string, createdAt time.Time) string {
+	t.Helper()
+	path := filepath.Join(root, id)
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"id":"` + id + `","branch":"fix/` + id + `","created_at":"` + createdAt.UTC().Format(time.RFC3339) + `"}`
+	if err := os.WriteFile(filepath.Join(path, ".kitsoki-clone"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
