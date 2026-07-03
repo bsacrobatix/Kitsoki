@@ -1,6 +1,8 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -37,6 +39,31 @@ func TestSynthesizeRoot_Rung0(t *testing.T) {
 	// app.id is the repo basename (provenance).
 	if def.App.ID == "" {
 		t.Fatal("synthesized app.id is empty")
+	}
+}
+
+func TestSynthesizeRootWithResolver_Rung0ForeignRepo(t *testing.T) {
+	repoRoot := repoRootForTest(t)
+	foreign := t.TempDir()
+	if err := os.WriteFile(filepath.Join(foreign, "go.mod"), []byte("module example.com/plain\n"), 0o644); err != nil {
+		t.Fatalf("write foreign go.mod: %v", err)
+	}
+	resolver := func(name, _ string, override bool) (string, error) {
+		if override {
+			return "", nil
+		}
+		return filepath.Join(repoRoot, "stories", name, "app.yaml"), nil
+	}
+
+	def, err := SynthesizeRootWithResolver(nil, foreign, resolver)
+	if err != nil {
+		t.Fatalf("rung-0 synthesize in foreign repo: %v", err)
+	}
+	if def.App.ID != filepath.Base(foreign) {
+		t.Fatalf("app.id = %q, want repo basename %q", def.App.ID, filepath.Base(foreign))
+	}
+	if _, ok := def.States[RootAlias]; !ok {
+		t.Fatalf("expected folded wrapper state %q in states", RootAlias)
 	}
 }
 

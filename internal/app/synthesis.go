@@ -78,6 +78,14 @@ type RootSpec struct {
 // handler) is caught downstream by the same validators that catch a malformed
 // imports: block.
 func SynthesizeRoot(spec *RootSpec, repoRoot string) (*AppDef, error) {
+	return SynthesizeRootWithResolver(spec, repoRoot, nil)
+}
+
+// SynthesizeRootWithResolver is SynthesizeRoot plus the same injected
+// @kitsoki/<name> resolver used by file-backed app loads. CLI entrypoints pass
+// the embedded-story resolver here so a binary-only user can run an implicit
+// dev-story root from a foreign repo that has no Kitsoki checkout on disk.
+func SynthesizeRootWithResolver(spec *RootSpec, repoRoot string, resolver ImportResolver) (*AppDef, error) {
 	def, abs, err := BuildRootImporter(spec, repoRoot)
 	if err != nil {
 		return nil, err
@@ -85,7 +93,7 @@ func SynthesizeRoot(spec *RootSpec, repoRoot string) (*AppDef, error) {
 	// Run the identical fold pipeline a file-backed Load runs. The synthetic
 	// path has no file on disk; pass a sentinel so error messages read clearly
 	// and LoadedManifests is seeded with a stable canonical key.
-	return runLoadPipeline(def, syntheticRootPath(abs), abs, nil, nil)
+	return runLoadPipeline(def, syntheticRootPath(abs), abs, nil, resolver)
 }
 
 // BuildRootImporter constructs the UN-folded importer AppDef — a thin importer

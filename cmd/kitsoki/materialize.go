@@ -89,7 +89,7 @@ func runMaterialize(repoRoot, configPath, nameFlag string) (string, error) {
 	// Synthesize first — never emit an un-loadable tree. A bad root: block fails
 	// here before any file is touched.
 	rootSpec := webCfg.Root.RootSpec()
-	if _, synthErr := app.SynthesizeRoot(rootSpec, repoRoot); synthErr != nil {
+	if _, synthErr := app.SynthesizeRootWithResolver(rootSpec, repoRoot, buildImportResolver()); synthErr != nil {
 		return "", fmt.Errorf("synthesize implicit root: %w", synthErr)
 	}
 
