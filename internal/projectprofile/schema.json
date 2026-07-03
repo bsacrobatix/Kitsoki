@@ -343,7 +343,27 @@
       "additionalProperties": false,
       "properties": {
         "job": { "type": "string" },
+        "status": { "enum": ["no-transcripts-found", "transcripts-found", "mined"] },
         "sample": { "enum": ["recency", "all", "tagged", "none"] },
+        "first_pass_sample": { "type": "integer", "minimum": 0 },
+        "transcript_count": { "type": "integer", "minimum": 0 },
+        "sources": {
+          "type": "array",
+          "description": "Associated transcript sources found during deterministic discovery. Evidence only; mining still requires explicit consent/config.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["backend", "sessions"],
+            "properties": {
+              "backend": { "enum": ["claude-code", "codex", "kitsoki-trace", "other"] },
+              "dir": { "type": "string" },
+              "sessions": { "type": "integer", "minimum": 0 },
+              "latest_mtime": { "type": "integer", "minimum": 0 },
+              "include": { "enum": ["human", "agent", "both"] }
+            }
+          }
+        },
+        "note": { "type": "string", "contentMediaType": "text/markdown" },
         "intent_count": { "type": "integer", "minimum": 0 },
         "themes": {
           "type": "array",

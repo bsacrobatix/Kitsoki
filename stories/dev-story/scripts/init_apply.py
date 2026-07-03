@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -70,6 +73,36 @@ def yaml_dump(value, indent: int = 0) -> str:
 
 def profile_yaml_from_draft(profile: dict) -> str:
     return yaml_dump(profile).rstrip() + "\n"
+
+
+def validate_profile_yaml(content: str, root: Path) -> dict:
+    kitsoki_bin = os.environ.get("KITSOKI_BIN", "kitsoki")
+    with tempfile.TemporaryDirectory(prefix="kitsoki-profile-") as tmp:
+        path = Path(tmp) / "project-profile.yaml"
+        path.write_text(content, encoding="utf-8")
+        proc = subprocess.run(
+            [kitsoki_bin, "project-profile", "validate", "--json", "--repo-root", str(root), str(path)],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    report = {}
+    if proc.stdout.strip():
+        try:
+            report = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            report = {"ok": False, "schema": ["validator returned non-json stdout"]}
+    ok = bool(report.get("ok")) and proc.returncode == 0
+    return {
+        "ok": ok,
+        "schema": report.get("schema", []),
+        "semantic": report.get("semantic", []),
+        "warnings": report.get("warnings", []),
+        "validator_stdout": proc.stdout,
+        "validator_stderr": proc.stderr,
+        "validator_exit_code": proc.returncode,
+    }
 
 
 def append_gitignore(path: Path, writes: list[str]) -> None:
@@ -217,6 +250,13 @@ def package_managers(data: dict, kind: str) -> str:
     return "[" + ", ".join(managers) + "]" if managers else "[]"
 
 
+def convention_source(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in {"kitsoki", "project", "hybrid"}:
+        return normalized
+    return "project"
+
+
 def generic_profile_yaml(data: dict) -> str:
     kind = stack_kind(data)
     languages = {
@@ -260,7 +300,7 @@ testing:
       command: {q(data.get("build_command", ""))}
 
 conventions:
-  source: {data.get("conventions", "local defaults")}
+  source: {convention_source(data.get("conventions", "project"))}
   dirs:
     context:   {{ path: ".context",   use: local-runtime }}
     artifacts: {{ path: ".artifacts", use: local-runtime }}
@@ -634,6 +674,15 @@ def main() -> int:
                 data["check_command"] = "make check"
         except OSError:
             data["check_command"] = ""
+    profile_content = profile_yaml_from_draft(draft_profile) if draft_profile is not None else profile_yaml(data)
+    profile_validation = validate_profile_yaml(profile_content, root)
+    if not profile_validation["ok"]:
+        print(json.dumps({
+            "status": "profile-validation-failed",
+            "target_path": str(root),
+            "profile_validation": profile_validation,
+        }, sort_keys=True))
+        return 1
     writes: list[str] = []
     dirs = [".kitsoki", ".kitsoki/stories", ".context", ".artifacts", ".worktrees", f".kitsoki/stories/{data['project_id']}-dev"]
     for rel in dirs:
@@ -646,10 +695,7 @@ def main() -> int:
     gitignore_path = root / ".gitignore"
 
     write_text(config_path, config_yaml(data["project_id"]), writes)
-    if draft_profile is not None:
-        write_text(profile_path, profile_yaml_from_draft(draft_profile), writes)
-    else:
-        write_text(profile_path, profile_yaml(data), writes)
+    write_text(profile_path, profile_content, writes)
     write_text(instance_path, app_yaml(data), writes)
     write_text(readme_path, readme(data, str(profile_path)), writes)
     append_gitignore(gitignore_path, writes)
@@ -661,6 +707,7 @@ def main() -> int:
         "instance_path": str(instance_path),
         "gitignore_path": str(gitignore_path),
         "dirs_created": [str(root / rel) for rel in dirs],
+        "profile_validation": profile_validation,
         "writes": writes,
     }, sort_keys=True))
     return 0
