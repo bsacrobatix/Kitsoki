@@ -50,6 +50,12 @@ jobs:
 
       # github.ref_name is the tag (vX.Y.Z) on a tag push; for a manual
       # workflow_dispatch dry-run it's the branch name.
+      # Stage the agent toolkit (skills/agents) and the story library into the
+      # //go:embed dirs so every released binary can onboard a fresh clone
+      # (kitsoki project-tools install) with no kitsoki checkout present.
+      - name: Embed toolkit + stories
+        run: make embed-stories embed-skills
+
       - name: Cross-compile binaries
         env:
           VERSION: ${{ github.ref_name }}
