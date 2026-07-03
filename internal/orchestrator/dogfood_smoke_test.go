@@ -206,6 +206,28 @@ func newDogfoodRegistry(agentCalls *int) *host.Registry {
 	} {
 		reg.Replace(verb, stub)
 	}
+	// kitsoki-dev rebinds the `ticket` iface to host.gh.ticket (bug 44 fix:
+	// the base-name rebind now cascades onto the transitively-lifted
+	// bf__ticket / impl__ticket). So iface.ticket.get in the impl pipeline's
+	// review_task.on_enter resolves to the real gh CLI, which isn't available
+	// under test and would fail the on_enter → park the pipeline at idle.
+	// Stub host.gh.ticket.get to resolve any GitHub-issue-shaped numeric id to
+	// a canned issue so the pipeline advances deterministically without a live
+	// gh call. Only `get` is stubbed; search/comment/transition still fall
+	// through to the real host.gh.ticket handler (exact-name match wins over
+	// the longest-prefix fallback — see Registry.Get).
+	reg.Replace("host.gh.ticket.get", func(ctx context.Context, args map[string]any) (host.Result, error) {
+		id, _ := args["id"].(string)
+		return host.Result{Data: map[string]any{
+			"id":       id,
+			"number":   id,
+			"title":    "integration smoke — bug picked up by dogfood",
+			"body":     "Stubbed GitHub issue body for the dogfood smoke tests.",
+			"url":      "https://github.com/constructorfabric/Kitsoki/issues/" + id,
+			"state":    "open",
+			"comments": []any{},
+		}}, nil
+	})
 	return reg
 }
 
@@ -976,7 +998,12 @@ func TestDogfoodSmoke_FullImplementationPipeline(t *testing.T) {
 	// dev-story drive arc, but here we use go_implementation directly
 	// which only checks ticket_id != ''). Reusing the bug ticket is
 	// fine for transition exercise.
-	ticketID := "2026-05-17T111838Z-integration-smoke-bug-picked-up-by-dogfood"
+	//
+	// Bug 44: kitsoki-dev rebinds ticket → host.gh.ticket, so the id must be
+	// a GitHub-issue-shaped bare numeric id that the host.gh.ticket.get smoke
+	// stub (newDogfoodRegistry) can resolve; the old ISO-timestamp id is not a
+	// valid gh issue number and the on_enter fetch would fail.
+	ticketID := "44"
 	orch, _, sid, _ := newSmokeOrchestratorWithCIStub(t, repoRoot)
 
 	ctx := context.Background()
@@ -1043,7 +1070,11 @@ func TestDogfoodSmoke_FullImplementationPipeline(t *testing.T) {
 // live folded-story path.
 func TestDogfoodSmoke_ImplHandoffRefusesUncommittedWork(t *testing.T) {
 	repoRoot, _ := setupDogfoodRepo(t)
-	ticketID := "2026-05-17T111838Z-integration-smoke-bug-picked-up-by-dogfood"
+	// Bug 44: ticket → host.gh.ticket rebind means review_task.on_enter fetches
+	// via the gh CLI; use a GitHub-issue-shaped bare numeric id the
+	// host.gh.ticket.get smoke stub resolves (the ISO-timestamp id is not a
+	// valid gh issue number and would fail the fetch → park at idle).
+	ticketID := "44"
 	orch, _, sid, _ := newSmokeOrchestratorWithCIStub(t, repoRoot)
 
 	ctx := context.Background()
