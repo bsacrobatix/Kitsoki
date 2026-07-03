@@ -138,7 +138,7 @@ worker calls 429'd at dispatch. Its cells are withheld rather than reported as a
 capability result; they land once the throttle clears.
 
 Durable results: [`tools/bugfix-bakeoff/external/results/`](../../tools/bugfix-bakeoff/external/results).
-Narrated deck: [`docs/decks/query-string-bakeoff.slidey.html`](../decks/query-string-bakeoff.slidey.html).
+Narrated deck source: [`docs/decks/query-string-bakeoff.slidey.json`](../decks/query-string-bakeoff.slidey.json).
 
 ## The cost comparison (operator-run)
 

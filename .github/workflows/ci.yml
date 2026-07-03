@@ -42,3 +42,26 @@ jobs:
       # suites (no LLM, no cost).
       - name: Run tests
         run: make test
+
+  site:
+    name: Site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            tools/runstatus/pnpm-lock.yaml
+            tools/site/pnpm-lock.yaml
+
+      # Fast dead-link/docs/site-contract guard. It does not record demos or call
+      # any LLM; missing media degrades to posters/placeholders.
+      - name: Build site
+        run: make site

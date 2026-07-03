@@ -88,6 +88,11 @@ jobs:
       - name: Emit feature catalog contract
         run: make features-index && make site-data
 
+      # Catch docs/site dead links before spending the long demo-recording pass.
+      # This is intentionally media-light: missing videos degrade to placeholders.
+      - name: Build site preflight
+        run: make site
+
       # Restore previous recordings; the per-demo stamps decide what is stale.
       - uses: actions/cache@v4
         with:
