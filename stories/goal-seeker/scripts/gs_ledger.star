@@ -18,6 +18,9 @@
 STATES = ["blocked", "ready", "assigned", "in_flight", "reviewing", "verified", "integrated", "parked"]
 TERMINAL_OK = ["integrated"]
 GREEN_ACTORS = ["reviewer", "integrator"]
+# Parity with goal.py:PARK_REASONS. `gate_not_red` is the RED-first park (dispatch's
+# redcheck found the change's gate already green — not a completion, needs triage).
+PARK_REASONS = ["quota", "conflict", "escalation", "gate_not_red"]
 
 
 def _seq(e):
@@ -55,6 +58,7 @@ def _fold(changes, log):
             "gate_status": "red",   # RED-first: nothing is green until independently proven
             "gate_class": gate.get("class"),
             "last_summary": None,
+            "park_reason": None,   # {quota, conflict, escalation, gate_not_red} when state==parked
         }
 
     for e in log:
@@ -78,8 +82,13 @@ def _fold(changes, log):
                 r["gate_status"] = gstatus
         if e.get("summary"):
             r["last_summary"] = e["summary"]
+        if e.get("park_reason") in PARK_REASONS:
+            r["park_reason"] = e["park_reason"]
 
-    # derive blocked<->ready for anything still in the intake states.
+    # derive blocked<->ready for anything still in the intake states. A `parked` row
+    # is left alone here (its state is neither "blocked" nor "ready") so it stays
+    # parked — and therefore excluded from _ready_set below — until an explicit log
+    # entry moves it (goal.py: fold_ledger's deps_integrated pass has the same shape).
     for cid in rows:
         r = rows[cid]
         if r["state"] in ("blocked", "ready"):

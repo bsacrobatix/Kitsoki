@@ -38,6 +38,9 @@ def main(ctx):
         "state": state,
         "actor": actor,
     }
+    park_reason = str(ctx.inputs.get("park_reason") or "")
+    if park_reason != "":
+        entry["park_reason"] = park_reason
     sha = str(ctx.inputs.get("sha") or "")
     if sha != "":
         entry["sha"] = sha

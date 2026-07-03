@@ -75,6 +75,12 @@ world:
   workspace_id:     { type: string, default: "" }
   gate_command:     { type: string, default: "" }
   base_branch:      { type: string, default: "main" }
+  # "." resolves relative to whatever process is running the session (e.g. the MCP
+  # server's cwd), which is only correct when that process's cwd IS the goal's base
+  # worktree. This story carries no goal-specific info, so a caller driving a REAL
+  # (non-default) goal MUST override main_worktree_path via initial_world / the
+  # session launch to point at the goal's actual base worktree — used both by
+  # dispatch's redcheck (RED-first gate cwd) and by ship-it's integrate.
   main_worktree_path: { type: string, default: "." }
   shipped_sha:      { type: string, default: "" }
 

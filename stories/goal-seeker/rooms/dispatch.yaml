@@ -52,9 +52,11 @@ states:
   # redcheck — RED-first (goal.py's RED-before-GREEN). Run the change's gate on the
   # CURRENT tree (change_gate_cmd settled from dispatch's turn). A gate that ALREADY
   # PASSES (exit 0) is not RED — the bug isn't present / the work is already done — so
-  # the change REFUSES to start (needs_human) rather than dispatch a no-op. Only a
-  # failing (red) gate proceeds into punch-list. advance routes on the SETTLED exit
-  # code (a host.run bind, settled across this turn boundary).
+  # the change is PARKED (not dispatched as a no-op) and the loop self-escapes to the
+  # next ready change (`park`, below) rather than dead-ending at needs_human: a green
+  # gate here is a triage signal (weak gate or already-done work), never a verified
+  # completion. Only a failing (red) gate proceeds into punch-list. advance routes on
+  # the SETTLED exit code (a host.run bind, settled across this turn boundary).
   redcheck:
     description: "RED-first — is the change's gate actually red?"
     relevant_world: [next_change_id, change_gate_cmd, red_exit]
@@ -77,7 +79,7 @@ states:
                 Change: '{{ world.next_change_id }}'
                 Gate:   '{{ world.change_gate_cmd }}'
                 Exit:   '{{ world.red_exit }}'
-          - prose: "RED-first violation: the gate already passes — nothing to do."
+          - prose: "Gate already passes — not RED; parking for triage (not a completion)."
             when: "world.red_exit == 0"
           - prose: "Gate is red (bug present); advance to drive the change."
             when: "world.red_exit != 0"
@@ -90,9 +92,7 @@ states:
     on:
       advance:
         - when: "world.red_exit == 0"
-          target: needs_human
-          effects:
-            - set: { last_error: "RED-first violation: change {{ world.next_change_id }} gate already passes (exit 0) — it is not RED, so there is nothing to do. Refusing to dispatch a no-op." }
+          target: park
         - target: punchlist
       look:
         - target: .
@@ -101,3 +101,70 @@ states:
           target: .
           effects:
             - say: "Advance to drive the change."
+
+  # park — RED-first found the gate already green: this is NOT a verified completion
+  # (a green gate here means it's too weak or the change is already done either way it
+  # needs triage), so log a `parked`/`gate_not_red` entry via the same append-only
+  # mechanism record/integrate use, then loop back to evaluate so the fold treats the
+  # change as parked (excluded from ready_id) and the loop picks the NEXT ready change
+  # instead of dead-ending at needs_human or re-picking this same not-RED change
+  # forever (see flows/red_first_refuses.yaml, flows/gate_not_red_parks_and_advances.yaml).
+  park:
+    description: "Park — gate already green (not RED); log gate_not_red and re-evaluate."
+    relevant_world: [next_change_id, change_gate_cmd, last_seq]
+    on_enter:
+      - invoke: host.starlark.run
+        id: gs_append
+        with:
+          script: scripts/gs_append.star
+          inputs:
+            work_dir:    "{{ world.work_dir }}"
+            change_id:   "{{ world.next_change_id }}"
+            state:       "parked"
+            park_reason: "gate_not_red"
+            summary:     "RED-first: gate `{{ world.change_gate_cmd }}` already passes (exit 0) — parked for triage, not verified complete."
+            kind:        "park"
+            actor:       "system"
+        bind:
+          last_seq: seq
+        on_error: needs_human
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - kv:
+              pairs:
+                Change: '{{ world.next_change_id }}'
+                Reason: "gate_not_red"
+                Gate:   '{{ world.change_gate_cmd }}'
+                Seq:    '{{ world.last_seq|default:"(pending)" }}'
+          - prose: "Parked (gate_not_red) — not a completion. Advance to re-fold the ledger and pick the next ready change."
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - { label: "advance", hint: "re-fold the ledger and re-evaluate" }
+                - { label: "look" }
+    on:
+      # PAUSE before re-evaluating, same reason as record/needs_human.retry: the
+      # gs_append log WRITE settles across this turn boundary, so the next evaluate's
+      # gs_ledger folds the just-parked entry (a starlark write does not settle inside
+      # a synthetic emit cascade).
+      advance:
+        - target: evaluate
+          effects:
+            - set:
+                verdict: ""
+                summary: ""
+                next_change_id: ""
+                next_pipeline: ""
+                next_action: ""
+                next_gate_cmd: ""
+                last_error: ""
+      look:
+        - target: .
+      "*":
+        - default: true
+          target: .
+          effects:
+            - say: "Advance to re-evaluate."
