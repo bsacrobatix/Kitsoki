@@ -213,7 +213,7 @@ states:
                 # the n-based pick falls through to the row's own kind tag
                 # (emitted by the local-files provider's bugSummary).
                 ticket_type:   "{{ slots.type ?? (slots.n != nil ? world.ticket_results[int(slots.n) - 1].type : nil) ?? world.ticket_type }}"
-                thread:        "{{ slots.id ?? world.ticket_results[int(slots.n) - 1].id }}"
+                thread:        "{{ slots.id ?? (world.ticket_results[int(slots.n) - 1].url != '' ? world.ticket_results[int(slots.n) - 1].url : world.ticket_results[int(slots.n) - 1].id) }}"
             # iface.ticket.get returns the real human-readable
             # title from the ticket's frontmatter; bind it as
             # ticket_title so downstream rooms (bugfix phases,
@@ -225,6 +225,8 @@ states:
                 repo: "{{ world.ticket_repo }}"
               bind:
                 ticket_title: title
+                ticket_url:   url
+                ticket_type:  type
                 # The bug's optional `repro_command:` frontmatter. Projected
                 # into the bf import's world.gate_command (bugfix-repro-gate
                 # slice) so the `reproducing` room runs it RED-first. Absent ⇒
@@ -238,6 +240,8 @@ states:
                 ticket_source:    source
                 ticket_legacy_id: legacy_id
               on_error: idle
+            - set:
+                thread: "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
       # Hand off to the bugfix sub-story for the picked ticket.
       # bf.idle's on_enter auto-emits `start` when entered with a
       # ticket and no in-progress artifact, so the operator types
@@ -389,7 +393,7 @@ states:
                 ticket_id:    "{{ slots.id ?? world.ticket_results[int(slots.n) - 1].id }}"
                 ticket_title: "(picked from search)"
                 ticket_type:  "{{ slots.type ?? world.ticket_type }}"
-                thread:       "{{ slots.id ?? world.ticket_results[int(slots.n) - 1].id }}"
+                thread:       "{{ slots.id ?? (world.ticket_results[int(slots.n) - 1].url != '' ? world.ticket_results[int(slots.n) - 1].url : world.ticket_results[int(slots.n) - 1].id) }}"
       search_tickets:
         - target: ticket_searching
           effects:

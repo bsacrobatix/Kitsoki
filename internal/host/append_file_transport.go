@@ -65,11 +65,13 @@ func AppendFileTransportHandler(ctx context.Context, args map[string]any) (Resul
 	title, _ := args["title"].(string)
 	phaseID, _ := args["phase_id"].(string)
 
+	threadPath := appendFileThreadPath(thread)
+
 	// Make sure the directory exists.  Bug-file thread paths are
 	// always under issues/bugs/ which the bug-create CLI creates,
 	// but the transport itself shouldn't refuse a path that doesn't
 	// exist yet — the dogfood path needs to be self-bootstrapping.
-	if err := os.MkdirAll(filepath.Dir(thread), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(threadPath), 0o755); err != nil {
 		return Result{Error: fmt.Sprintf("host.append_to_file: mkdir: %v", err)}, nil
 	}
 
@@ -79,22 +81,22 @@ func AppendFileTransportHandler(ctx context.Context, args map[string]any) (Resul
 	// preamble so subsequent reads via host.local_files.ticket still
 	// see a well-formed file.
 	var bf *BugFile
-	if _, statErr := os.Stat(thread); statErr == nil {
+	if _, statErr := os.Stat(threadPath); statErr == nil {
 		var err error
-		bf, err = readBugFile(thread)
+		bf, err = readBugFile(threadPath)
 		if err != nil {
 			return Result{Error: fmt.Sprintf("host.append_to_file: read: %v", err)}, nil
 		}
 	} else {
 		bf = &BugFile{
-			ID:   strings.TrimSuffix(filepath.Base(thread), ".md"),
-			Path: thread,
+			ID:   strings.TrimSuffix(filepath.Base(threadPath), ".md"),
+			Path: threadPath,
 			Front: map[string]any{
-				"title":    strings.TrimSuffix(filepath.Base(thread), ".md"),
+				"title":    strings.TrimSuffix(filepath.Base(threadPath), ".md"),
 				"status":   "open",
 				"filed_at": time.Now().UTC().Format(time.RFC3339),
 			},
-			Body: "# " + strings.TrimSuffix(filepath.Base(thread), ".md") + "\n",
+			Body: "# " + strings.TrimSuffix(filepath.Base(threadPath), ".md") + "\n",
 		}
 	}
 
@@ -115,7 +117,7 @@ func AppendFileTransportHandler(ctx context.Context, args map[string]any) (Resul
 		Author:    author,
 		Body:      commentBody,
 	})
-	bf.Path = thread
+	bf.Path = threadPath
 	if err := writeBugFile(bf); err != nil {
 		return Result{Error: fmt.Sprintf("host.append_to_file: write: %v", err)}, nil
 	}
@@ -124,4 +126,51 @@ func AppendFileTransportHandler(ctx context.Context, args map[string]any) (Resul
 		"ok":         true,
 		"message_id": id,
 	}}, nil
+}
+
+func appendFileThreadPath(thread string) string {
+	thread = strings.TrimSpace(thread)
+	if isAppendFileLocalPath(thread) {
+		return thread
+	}
+	return filepath.Join(os.TempDir(), "kitsoki-append-to-file", sanitizeAppendThreadName(thread)+".md")
+}
+
+func isAppendFileLocalPath(thread string) bool {
+	if strings.Contains(thread, "://") {
+		return false
+	}
+	if filepath.IsAbs(thread) || strings.HasSuffix(thread, ".md") {
+		return true
+	}
+	return strings.ContainsAny(thread, `/\`)
+}
+
+func sanitizeAppendThreadName(thread string) string {
+	name := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return r
+		case r >= '0' && r <= '9':
+			return r
+		case r == '.', r == '_', r == '-':
+			return r
+		default:
+			return '-'
+		}
+	}, thread)
+	name = strings.Trim(name, "-.")
+	if name == "" {
+		name = "thread"
+	}
+	if len(name) > 120 {
+		name = name[:120]
+		name = strings.Trim(name, "-.")
+		if name == "" {
+			name = "thread"
+		}
+	}
+	return name
 }

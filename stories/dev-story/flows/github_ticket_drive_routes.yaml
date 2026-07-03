@@ -94,6 +94,8 @@ turns:
       ticket_id:    "19"
       ticket_type:  "bug"
       ticket_title: "Esc hangs the TUI"
+      ticket_url:   "https://github.com/acme/repo/issues/19"
+      thread:       "https://github.com/acme/repo/issues/19"
 
   # The headline `drive` affordance routes by ticket_type. Before the
   # provider fix this bounced in place (empty type → catch-all self-loop);
@@ -103,5 +105,6 @@ turns:
     expect_state: bf.reproducing
     expect_world:
       bf__ticket_id: "19"
+      bf__thread:    "https://github.com/acme/repo/issues/19"
 
 expect_no_errors: true
