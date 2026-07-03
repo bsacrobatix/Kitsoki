@@ -384,9 +384,52 @@
 
     "onboarding": {
       "type": "object",
-      "description": "Reusable onboarding-test anchors. Baseline commits let deterministic flow/cassette tests and gated live recordings replay init from a known pre-init state.",
+      "description": "Reusable onboarding anchors: which starter story was selected, what repo evidence drove adaptation, and the replay-test commits/fixtures.",
       "additionalProperties": false,
       "properties": {
+        "base_story": {
+          "type": "string",
+          "description": "Reusable starter story selected during onboarding, e.g. dev-story."
+        },
+        "base_story_title": {
+          "type": "string",
+          "description": "Human title for the selected starter story."
+        },
+        "base_story_reason": {
+          "type": "string",
+          "contentMediaType": "text/markdown",
+          "description": "Why this starter story was selected for the repo."
+        },
+        "repo_patterns": {
+          "type": "array",
+          "description": "Deterministic repo evidence used to adapt the starter story.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "source", "evidence"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+              "source": { "type": "string" },
+              "evidence": { "type": "string", "contentMediaType": "text/markdown" },
+              "recommendation": { "type": "string", "contentMediaType": "text/markdown" }
+            }
+          }
+        },
+        "story_customizations": {
+          "type": "array",
+          "description": "Starter-story adaptations applied or proposed for this project-local instance.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "status", "summary"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+              "status": { "enum": ["applied", "proposed", "pending", "deferred"] },
+              "summary": { "type": "string", "contentMediaType": "text/markdown" },
+              "evidence": { "type": "string", "contentMediaType": "text/markdown" }
+            }
+          }
+        },
         "baseline_commit": {
           "type": "string",
           "pattern": "^[0-9a-f]{7,40}$",

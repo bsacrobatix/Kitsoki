@@ -60,7 +60,10 @@ Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
    `.kitsoki/project-profile.yaml`, `.kitsoki/stories/<id>-dev/app.yaml` (+
    README), and appends the kitsoki runtime block to `.gitignore`. Binds
    `init_apply_result` (the JSON report); a failure routes to
-   `init_apply_failed`.
+   `init_apply_failed`. The generated profile's `onboarding` block records the
+   selected starter story, deterministic repo evidence, and initial
+   project-local customizations so later session mining can propose changes
+   without patching the shared story.
 
 2. **`kitsoki project-tools install --target <path>`** — installs the agent
    toolkit (skills + subagents) and registers the studio MCP, producing the

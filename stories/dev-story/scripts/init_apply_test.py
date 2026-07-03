@@ -29,6 +29,7 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 def mkrepo() -> Path:
     root = Path(tempfile.mkdtemp(prefix="kitsoki-apply-"))
     (root / "go.mod").write_text("module acme\ngo 1.22\n", encoding="utf-8")
+    (root / "AGENTS.md").write_text("# Agent rules\n", encoding="utf-8")
     return root
 
 
@@ -180,6 +181,12 @@ if profile_path.exists():
     check("valid setup creates design dir", "- \".context/designs\"" in profile_text)
     check("valid setup gates build", "command: \"go build ./...\"" in profile_text)
     check("valid setup gates tests", "command: \"go test ./...\"" in profile_text)
+    check("valid onboarding base story", "base_story: \"dev-story\"" in profile_text)
+    check("valid onboarding repo patterns", "repo_patterns:" in profile_text)
+    check("valid onboarding customizations", "story_customizations:" in profile_text)
+    check("valid onboarding toolchain customization", "id: \"toolchain-gates\"" in profile_text)
+    check("valid rules files", "rules_files:\n    - \"AGENTS.md\"" in profile_text)
+    check("valid repo rules evidence", "id: \"repo-rules\"" in profile_text)
 app_path = repo / ".kitsoki" / "stories" / "acme-dev" / "app.yaml"
 if app_path.exists():
     app_text = app_path.read_text(encoding="utf-8")
@@ -293,6 +300,8 @@ if profile_path.exists():
     check("draft design local path", "design_durable_path: \".context/designs\"" in profile_text)
     check("draft bugfix build", "build_cmd: \"go build ./...\"" in profile_text)
     check("draft bugfix test", "test_cmd: \"go test ./...\"" in profile_text)
+    check("draft onboarding defaults injected", "base_story: \"dev-story\"" in profile_text)
+    check("draft onboarding customizations injected", "story_customizations:" in profile_text)
 
 if failures:
     print("FAIL: init_apply regression")
