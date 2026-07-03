@@ -433,7 +433,7 @@
         <!-- Embed (VS Code): nothing beside the chat — Trace and Graph open as
              their own dockable windows via "Kitsoki: Open Trace" / "Open Graph". -->
         <button
-          v-if="workbenchEnabled && !embed && !traceCollapsed && devtoolsDock === 'right'"
+          v-if="workbenchEnabled && !embed && !traceCollapsed && devtoolsDock === 'right' && workbenchOrientation === 'vertical'"
           type="button"
           class="iv__resize-handle iv__resize-handle--column iv__resize-handle--workbench-devtools"
           data-testid="devtools-workbench-resizer"
@@ -447,7 +447,7 @@
           @keydown="onWorkbenchDevtoolsWidthResizeKeydown"
         ></button>
         <button
-          v-if="workbenchEnabled && !embed && !traceCollapsed && devtoolsDock === 'bottom'"
+          v-if="workbenchEnabled && !embed && !traceCollapsed && (devtoolsDock === 'bottom' || workbenchOrientation === 'horizontal')"
           type="button"
           class="iv__resize-handle iv__resize-handle--row iv__resize-handle--workbench-devtools-row"
           data-testid="devtools-workbench-row-resizer"
