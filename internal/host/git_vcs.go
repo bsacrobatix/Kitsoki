@@ -12,9 +12,12 @@ package host
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -44,7 +47,7 @@ func runRealCommand(ctx context.Context, dir, name string, args ...string) (stri
 // GitVCSHandler implements host.git (prefix-fallback for all 7 ops).
 //
 // Required args:
-//   - op (string): one of branch, diff, commit, push, open_pr, pr_status, pr_comment.
+//   - op (string): one of branch, diff, commit, push, open_pr, pr_status, pr_comment, pr_rebase.
 //
 // Common optional args:
 //   - workdir (string): working directory for the git command; defaults to cwd.
@@ -73,6 +76,8 @@ func GitVCSHandler(ctx context.Context, args map[string]any) (Result, error) {
 		return ghPRStatus(ctx, workdir, args)
 	case "pr_comment":
 		return ghPRComment(ctx, workdir, args)
+	case "pr_rebase":
+		return ghPRRebase(ctx, args)
 	default:
 		return Result{Error: fmt.Sprintf("host.git: unknown op %q", op)}, nil
 	}
@@ -350,6 +355,379 @@ func ghPRComment(ctx context.Context, workdir string, args map[string]any) (Resu
 		return Result{Error: fmt.Sprintf("git.pr_comment: %s", strings.TrimSpace(stderr))}, nil
 	}
 	return Result{Data: map[string]any{"ok": true}}, nil
+}
+
+func ghPRRebase(ctx context.Context, args map[string]any) (Result, error) {
+	if !ghAvailable(ctx) {
+		return Result{Error: "git.pr_rebase: gh CLI not available"}, nil
+	}
+	repo, _ := args["repo"].(string)
+	prID, _ := args["pr_id"].(string)
+	if strings.TrimSpace(repo) == "" || strings.TrimSpace(prID) == "" {
+		return Result{Error: "git.pr_rebase: repo and pr_id are required"}, nil
+	}
+	token := cliGitHubToken(ctx)
+	if token == "" {
+		return Result{Error: "git.pr_rebase: GH_TOKEN is required for authenticated fetch/push"}, nil
+	}
+
+	meta, errMsg := ghPRRebaseMetadata(ctx, repo, prID)
+	if errMsg != "" {
+		return Result{Error: errMsg}, nil
+	}
+	baseRef := strings.TrimSpace(meta.BaseRefName)
+	if baseRef == "" {
+		baseRef = "main"
+	}
+	headRef := strings.TrimSpace(meta.HeadRefName)
+	if headRef == "" {
+		return Result{Error: "git.pr_rebase: PR headRefName is empty"}, nil
+	}
+	headSHA := strings.TrimSpace(meta.HeadRefOID)
+	headRepo := strings.TrimSpace(meta.HeadRepository.NameWithOwner)
+	if headRepo == "" {
+		headRepo = repo
+	}
+
+	tmp, err := os.MkdirTemp("", "kitsoki-pr-rebase-*")
+	if err != nil {
+		return Result{Error: fmt.Sprintf("git.pr_rebase: tempdir: %v", err)}, nil
+	}
+	defer os.RemoveAll(tmp)
+
+	run := func(dir string, args ...string) (string, string, int, error) {
+		gitArgs := append([]string{
+			"-c", "http.extraheader=AUTHORIZATION: basic " + basicGitHubToken(token),
+			"-c", "user.name=kitsoki-gh-agent",
+			"-c", "user.email=kitsoki-gh-agent@users.noreply.github.com",
+		}, args...)
+		return cliExec(ctx, dir, "git", gitArgs...)
+	}
+	if _, stderr, code, err := run(tmp, "init"); err != nil || code != 0 {
+		return Result{Error: fmt.Sprintf("git.pr_rebase: git init: %s", cliErr(stderr, err, code))}, nil
+	}
+	if _, stderr, code, err := run(tmp, "remote", "add", "origin", "https://github.com/"+repo+".git"); err != nil || code != 0 {
+		return Result{Error: fmt.Sprintf("git.pr_rebase: add origin: %s", cliErr(stderr, err, code))}, nil
+	}
+	if _, stderr, code, err := run(tmp, "remote", "add", "head", "https://github.com/"+headRepo+".git"); err != nil || code != 0 {
+		return Result{Error: fmt.Sprintf("git.pr_rebase: add head: %s", cliErr(stderr, err, code))}, nil
+	}
+	baseRemoteRef := "refs/remotes/origin/" + baseRef
+	if _, stderr, code, err := run(tmp, "fetch", "--no-tags", "origin", baseRef+":"+baseRemoteRef); err != nil || code != 0 {
+		return Result{Error: fmt.Sprintf("git.pr_rebase: fetch base: %s", cliErr(stderr, err, code))}, nil
+	}
+	if _, stderr, code, err := run(tmp, "fetch", "--no-tags", "origin", "refs/pull/"+prID+"/head:pr-"+prID); err != nil || code != 0 {
+		return Result{Error: fmt.Sprintf("git.pr_rebase: fetch PR: %s", cliErr(stderr, err, code))}, nil
+	}
+	if _, stderr, code, err := run(tmp, "checkout", "pr-"+prID); err != nil || code != 0 {
+		return Result{Error: fmt.Sprintf("git.pr_rebase: checkout PR: %s", cliErr(stderr, err, code))}, nil
+	}
+
+	resolved, errMsg := runRebaseWithDeterministicResolvers(ctx, tmp, run, baseRemoteRef)
+	if errMsg != "" {
+		return Result{Error: errMsg}, nil
+	}
+	repairs, errMsg := repairKnownPRPostRebase(tmp, run)
+	if errMsg != "" {
+		return Result{Error: errMsg}, nil
+	}
+	resolved = append(resolved, repairs...)
+	pushArgs := []string{"push", "--force-with-lease", "head", "HEAD:" + headRef}
+	if headSHA != "" {
+		pushArgs = []string{"push", "--force-with-lease=" + headRef + ":" + headSHA, "head", "HEAD:" + headRef}
+	}
+	if _, stderr, code, err := run(tmp, pushArgs...); err != nil || code != 0 {
+		return Result{Error: fmt.Sprintf("git.pr_rebase: push: %s", cliErr(stderr, err, code))}, nil
+	}
+
+	newHeadSHA, _, _, _ := run(tmp, "rev-parse", "HEAD")
+	summary := fmt.Sprintf("Rebased PR #%s onto `%s` and pushed `%s`.", prID, baseRef, headRef)
+	if len(resolved) > 0 {
+		summary += "\n\nResolved conflicts:\n- " + strings.Join(resolved, "\n- ")
+	}
+	return Result{Data: map[string]any{
+		"ok":       true,
+		"sha":      strings.TrimSpace(newHeadSHA),
+		"summary":  summary,
+		"resolved": resolved,
+	}}, nil
+}
+
+type ghPRRebaseView struct {
+	HeadRefName    string `json:"headRefName"`
+	HeadRefOID     string `json:"headRefOid"`
+	BaseRefName    string `json:"baseRefName"`
+	HeadRepository struct {
+		NameWithOwner string `json:"nameWithOwner"`
+	} `json:"headRepository"`
+}
+
+func ghPRRebaseMetadata(ctx context.Context, repo, prID string) (ghPRRebaseView, string) {
+	var meta ghPRRebaseView
+	stdout, stderr, code, err := cliExec(ctx, "", "gh", "pr", "view", prID, "--repo", repo, "--json", "headRefName,headRefOid,baseRefName,headRepository")
+	if err != nil {
+		return meta, fmt.Sprintf("git.pr_rebase: gh pr view: %v", err)
+	}
+	if code != 0 {
+		return meta, fmt.Sprintf("git.pr_rebase: gh pr view: %s", strings.TrimSpace(stderr))
+	}
+	if err := json.Unmarshal([]byte(stdout), &meta); err != nil {
+		return meta, fmt.Sprintf("git.pr_rebase: parse gh pr view: %v", err)
+	}
+	return meta, ""
+}
+
+func runRebaseWithDeterministicResolvers(ctx context.Context, workdir string, run func(string, ...string) (string, string, int, error), baseRef string) ([]string, string) {
+	_, stderr, code, err := run(workdir, "rebase", baseRef)
+	if err == nil && code == 0 {
+		return nil, ""
+	}
+	var allResolved []string
+	for i := 0; i < 8; i++ {
+		conflicted, conflictedErr := unresolvedPaths(ctx, workdir)
+		if conflictedErr != "" {
+			return nil, conflictedErr
+		}
+		if len(conflicted) == 0 {
+			return nil, fmt.Sprintf("git.pr_rebase: rebase failed: %s", cliErr(stderr, err, code))
+		}
+		resolved, ok, resolveErr := resolveKnownPRConflict(workdir, conflicted)
+		if resolveErr != nil {
+			return nil, fmt.Sprintf("git.pr_rebase: resolve conflict: %v", resolveErr)
+		}
+		if !ok {
+			return nil, "git.pr_rebase: unresolved conflicts require operator attention: " + strings.Join(conflicted, ", ")
+		}
+		allResolved = append(allResolved, resolved...)
+		addArgs := append([]string{"add", "--"}, conflicted...)
+		if _, addStderr, addCode, addErr := run(workdir, addArgs...); addErr != nil || addCode != 0 {
+			return nil, fmt.Sprintf("git.pr_rebase: add resolved files: %s", cliErr(addStderr, addErr, addCode))
+		}
+		if _, contStderr, contCode, contErr := run(workdir, "-c", "core.editor=true", "rebase", "--continue"); contErr != nil || contCode != 0 {
+			stillConflicted, conflictedErr := unresolvedPaths(ctx, workdir)
+			if conflictedErr != "" {
+				return nil, conflictedErr
+			}
+			if len(stillConflicted) == 0 {
+				return nil, fmt.Sprintf("git.pr_rebase: rebase continue: %s", cliErr(contStderr, contErr, contCode))
+			}
+			continue
+		}
+		return allResolved, ""
+	}
+	return nil, "git.pr_rebase: too many conflict-resolution rounds"
+}
+
+func unresolvedPaths(ctx context.Context, workdir string) ([]string, string) {
+	stdout, stderr, code, err := cliExec(ctx, workdir, "git", "diff", "--name-only", "--diff-filter=U")
+	if err != nil || code != 0 {
+		return nil, fmt.Sprintf("git.pr_rebase: list conflicts: %s", cliErr(stderr, err, code))
+	}
+	var out []string
+	for _, line := range strings.Split(stdout, "\n") {
+		if s := strings.TrimSpace(line); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out, ""
+}
+
+func resolveKnownPRConflict(workdir string, paths []string) ([]string, bool, error) {
+	if len(paths) != 1 || paths[0] != "scripts/run-tests.sh" {
+		return nil, false, nil
+	}
+	path := filepath.Join(workdir, paths[0])
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false, err
+	}
+	resolved, ok := resolveRunTestsPythonSuiteConflict(string(raw))
+	if !ok {
+		return nil, false, nil
+	}
+	if err := os.WriteFile(path, []byte(resolved), 0o755); err != nil {
+		return nil, false, err
+	}
+	return []string{"scripts/run-tests.sh: kept arena tests from base and dev-story script tests from PR"}, true, nil
+}
+
+func resolveRunTestsPythonSuiteConflict(content string) (string, bool) {
+	out, changed, ok := resolveConflictBlocks(content, func(alts [][]string) ([]string, bool) {
+		joined := joinAltLines(alts)
+		switch {
+		case strings.Contains(joined, "section \"python tool tests") &&
+			strings.Contains(joined, "MINING_TESTS=(") &&
+			strings.Contains(joined, "arena") &&
+			strings.Contains(joined, "dev-story scripts"):
+			return runTestsPythonSuiteStanza(), true
+		case strings.Contains(joined, "section \"python tool tests") &&
+			strings.Contains(joined, "arena") &&
+			strings.Contains(joined, "dev-story scripts"):
+			return []string{`section "python tool tests (session-mining + product-journey + arena + dev-story scripts)"`}, true
+		case strings.Contains(joined, "MINING_TESTS=(") &&
+			strings.Contains(joined, "tools/arena/tests/test_*.py") &&
+			strings.Contains(joined, "stories/dev-story/scripts/*_test.py"):
+			return []string{`	MINING_TESTS=(tools/session-mining/tests/test_*.py tools/product-journey/*_test.py tools/arena/tests/test_*.py stories/dev-story/scripts/*_test.py)`}, true
+		default:
+			return nil, false
+		}
+	})
+	return out, changed && ok
+}
+
+func repairKnownPRPostRebase(workdir string, run func(string, ...string) (string, string, int, error)) ([]string, string) {
+	path := filepath.Join(workdir, "scripts/run-tests.sh")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ""
+		}
+		return nil, fmt.Sprintf("git.pr_rebase: read post-rebase run-tests.sh: %v", err)
+	}
+	repaired, changed := repairRunTestsPythonSuiteStanza(string(raw))
+	if !changed {
+		return nil, ""
+	}
+	if err := os.WriteFile(path, []byte(repaired), 0o755); err != nil {
+		return nil, fmt.Sprintf("git.pr_rebase: write post-rebase run-tests.sh: %v", err)
+	}
+	if _, stderr, code, err := run(workdir, "add", "--", "scripts/run-tests.sh"); err != nil || code != 0 {
+		return nil, fmt.Sprintf("git.pr_rebase: add post-rebase repair: %s", cliErr(stderr, err, code))
+	}
+	if _, stderr, code, err := run(workdir, "commit", "--amend", "--no-edit"); err != nil || code != 0 {
+		return nil, fmt.Sprintf("git.pr_rebase: amend post-rebase repair: %s", cliErr(stderr, err, code))
+	}
+	return []string{"scripts/run-tests.sh: repaired missing Python suite test list after rebase"}, ""
+}
+
+func repairRunTestsPythonSuiteStanza(content string) (string, bool) {
+	if strings.Contains(content, "MINING_TESTS=(tools/session-mining/tests/test_*.py tools/product-journey/*_test.py tools/arena/tests/test_*.py stories/dev-story/scripts/*_test.py)") {
+		return content, false
+	}
+	lines := strings.SplitAfter(content, "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.Contains(line, `section "python tool tests`) {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return content, false
+	}
+	end := -1
+	for i := start + 1; i < len(lines); i++ {
+		if strings.Contains(lines[i], `for t in "${MINING_TESTS[@]}"`) {
+			end = i
+			break
+		}
+	}
+	if end < 0 {
+		return content, false
+	}
+	var out []string
+	out = append(out, lines[:start]...)
+	for _, line := range runTestsPythonSuiteStanza() {
+		out = append(out, line+"\n")
+	}
+	out = append(out, lines[end:]...)
+	return strings.Join(out, ""), true
+}
+
+func runTestsPythonSuiteStanza() []string {
+	return []string{
+		`section "python tool tests (session-mining + product-journey + arena + dev-story scripts)"`,
+		`if command -v python3 >/dev/null 2>&1; then`,
+		`	shopt -s nullglob`,
+		`	MINING_TESTS=(tools/session-mining/tests/test_*.py tools/product-journey/*_test.py tools/arena/tests/test_*.py stories/dev-story/scripts/*_test.py)`,
+		`	shopt -u nullglob`,
+	}
+}
+
+func resolveConflictBlocks(content string, resolve func([][]string) ([]string, bool)) (string, bool, bool) {
+	lines := strings.SplitAfter(content, "\n")
+	var out []string
+	changed := false
+	for i := 0; i < len(lines); i++ {
+		if !strings.HasPrefix(lines[i], "<<<<<<< ") {
+			out = append(out, lines[i])
+			continue
+		}
+		i++
+		var ours, base, theirs []string
+		for i < len(lines) && !strings.HasPrefix(lines[i], "||||||| ") && !strings.HasPrefix(lines[i], "=======") {
+			ours = append(ours, strings.TrimSuffix(lines[i], "\n"))
+			i++
+		}
+		if i < len(lines) && strings.HasPrefix(lines[i], "||||||| ") {
+			i++
+			for i < len(lines) && !strings.HasPrefix(lines[i], "=======") {
+				base = append(base, strings.TrimSuffix(lines[i], "\n"))
+				i++
+			}
+		}
+		if i >= len(lines) || !strings.HasPrefix(lines[i], "=======") {
+			return content, changed, false
+		}
+		i++
+		for i < len(lines) && !strings.HasPrefix(lines[i], ">>>>>>> ") {
+			theirs = append(theirs, strings.TrimSuffix(lines[i], "\n"))
+			i++
+		}
+		if i >= len(lines) {
+			return content, changed, false
+		}
+		replacement, ok := resolve([][]string{ours, base, theirs})
+		if !ok {
+			return content, changed, false
+		}
+		for _, line := range replacement {
+			out = append(out, line+"\n")
+		}
+		changed = true
+	}
+	return strings.Join(out, ""), changed, true
+}
+
+func joinAltLines(alts [][]string) string {
+	var b strings.Builder
+	for _, alt := range alts {
+		for _, line := range alt {
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+func cliGitHubToken(ctx context.Context) string {
+	env := CLIExecEnvFromCtx(ctx)
+	for _, key := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
+		if token := strings.TrimSpace(env[key]); token != "" {
+			return token
+		}
+	}
+	for _, key := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
+		if token := strings.TrimSpace(os.Getenv(key)); token != "" {
+			return token
+		}
+	}
+	return ""
+}
+
+func basicGitHubToken(token string) string {
+	return base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+}
+
+func cliErr(stderr string, err error, code int) string {
+	msg := strings.TrimSpace(stderr)
+	if msg != "" {
+		return msg
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return fmt.Sprintf("git exited with code %d", code)
 }
 
 // prIDFromURL extracts the trailing `/pull/<N>` segment.  Returns "" on
