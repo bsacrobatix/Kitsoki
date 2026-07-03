@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
@@ -187,6 +188,56 @@ func TestHandleLifecycle(t *testing.T) {
 	require.Error(t, cerr)
 	ccode, _ := studio.AsToolError(cerr)
 	assert.Equal(t, studio.ErrUnknownHandle, ccode)
+}
+
+func TestSnapshotDoesNotBlockWhileDrivingSessionOpens(t *testing.T) {
+	enteredBuild := make(chan struct{})
+	releaseBuild := make(chan struct{})
+	buildErr := errors.New("release blocked builder")
+	sess := studio.NewStudioSession(func(mode studio.HarnessMode, recordingPath, _ string) (harness.Harness, error) {
+		close(enteredBuild)
+		<-releaseBuild
+		return nil, buildErr
+	})
+
+	openDone := make(chan error, 1)
+	go func() {
+		_, err := sess.OpenDrivingSession(context.Background(), studio.OpenDrivingSessionParams{
+			Mode:          studio.HarnessReplay,
+			RecordingPath: "recording.yaml",
+			StoryPath:     "stories/bugfix/app.yaml",
+			TracePath:     "trace.jsonl",
+		})
+		openDone <- err
+	}()
+
+	select {
+	case <-enteredBuild:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("OpenDrivingSession did not reach the blocking harness builder")
+	}
+
+	snapshotDone := make(chan studio.HandlesSnapshot, 1)
+	go func() {
+		snapshotDone <- sess.Snapshot()
+	}()
+
+	select {
+	case snap := <-snapshotDone:
+		require.Len(t, snap.Sessions, 1)
+		assert.Equal(t, "s1", snap.Sessions[0].Handle)
+		assert.Equal(t, "replay", snap.Sessions[0].Mode)
+		assert.Equal(t, "trace.jsonl", snap.Sessions[0].TracePath)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Snapshot blocked behind an in-progress session open")
+	}
+
+	close(releaseBuild)
+	err := <-openDone
+	require.Error(t, err)
+	code, msg := studio.AsToolError(err)
+	assert.Equal(t, studio.ErrHarness, code)
+	assert.Contains(t, msg, buildErr.Error())
 }
 
 // callHandles calls studio.handles and decodes the snapshot.

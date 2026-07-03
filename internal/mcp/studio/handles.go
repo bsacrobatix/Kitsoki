@@ -347,7 +347,6 @@ type OpenDrivingSessionParams struct {
 // test to assert no live harness is ever driven).
 func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSessionParams) (*SessionHandle, error) {
 	ss.mu.Lock()
-	defer ss.mu.Unlock()
 
 	mode := p.Mode.normalize()
 
@@ -356,8 +355,23 @@ func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSe
 		ss.nextID++
 		key = fmt.Sprintf("s%d", ss.nextID)
 	} else if _, exists := ss.sessions[key]; exists {
+		ss.mu.Unlock()
 		return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session handle %q is already open", key)}
 	}
+
+	sh := &SessionHandle{
+		Key:           key,
+		Mode:          mode,
+		RecordingPath: p.RecordingPath,
+		StoryPath:     p.StoryPath,
+		TracePath:     p.TracePath,
+	}
+	ss.sessions[key] = sh
+	harnessProfiles := cloneHarnessProfiles(ss.harnessProfiles)
+	defaultProfile := ss.defaultProfile
+	chatStore := ss.chatStore
+	configureHosts := ss.configureHosts
+	ss.mu.Unlock()
 
 	// A direct-submit replay session does not need a routing cassette: it can
 	// use the runtime's no-route harness and still accept session.submit calls.
@@ -370,6 +384,7 @@ func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSe
 		// def for prompt context (replay ignores it).
 		h, err = ss.build(mode, p.RecordingPath, p.StoryPath)
 		if err != nil {
+			ss.removeOpeningSession(key, sh)
 			return nil, &openError{Code: ErrHarness, Msg: fmt.Sprintf("build %s harness: %v", mode, err)}
 		}
 	}
@@ -385,44 +400,67 @@ func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSe
 	// profiles ARE declared, fail loud rather than fall back — the caller must
 	// name the backend they want. The legacy single-default path (no profiles
 	// declared, len==0) is untouched, and replay/default sessions are unaffected.
-	if mode == HarnessLive && p.Profile == "" && len(ss.harnessProfiles) > 0 {
+	if mode == HarnessLive && p.Profile == "" && len(harnessProfiles) > 0 {
+		ss.removeOpeningSession(key, sh)
+		if h != nil {
+			_ = h.Close()
+		}
 		return nil, &openError{
 			Code: ErrBadRequest,
 			Msg: fmt.Sprintf(
 				"harness:live requires an explicit profile= when backends are declared "+
 					"(no profile given; boot default is %q, which may be synthetic). "+
 					"Pass one of the declared profiles to select a real LLM backend.",
-				ss.defaultProfile,
+				defaultProfile,
 			),
 		}
 	}
 	selectedProfile := p.Profile
 	if selectedProfile == "" {
-		selectedProfile = ss.defaultProfile
+		selectedProfile = defaultProfile
 	}
 
 	// newSessionRuntime takes ownership of h: on a returned error h is already
 	// closed; on success rt.Close tears it down.
-	rt, err := newSessionRuntime(ctx, p.StoryPath, p.TracePath, h, ss.harnessProfiles, selectedProfile, p.InitialWorld, p.HostCassette, p.ImportResolver, ss.chatStore, ss.configureHosts)
+	rt, err := newSessionRuntime(ctx, p.StoryPath, p.TracePath, h, harnessProfiles, selectedProfile, p.InitialWorld, p.HostCassette, p.ImportResolver, chatStore, configureHosts)
 	if err != nil {
 		// h was already closed inside newSessionRuntime on error.
+		ss.removeOpeningSession(key, sh)
 		return nil, err
 	}
 
-	sh := &SessionHandle{
-		Key:           key,
-		SID:           rt.sid,
-		Mode:          mode,
-		RecordingPath: p.RecordingPath,
-		StoryPath:     p.StoryPath,
-		TracePath:     p.TracePath,
-		Harness:       h,
-		Driver:        rt.driver,
-		Runtime:       rt,
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	if ss.sessions[key] != sh {
+		rt.releaseWorktreeOwners()
+		rt.Close()
+		return nil, &openError{Code: ErrUnknownHandle, Msg: fmt.Sprintf("no open session handle %q", key)}
 	}
-	ss.sessions[key] = sh
+	sh.SID = rt.sid
+	sh.Harness = h
+	sh.Driver = rt.driver
+	sh.Runtime = rt
 	ss.currentSID = string(rt.sid)
 	return sh, nil
+}
+
+func (ss *StudioSession) removeOpeningSession(key string, sh *SessionHandle) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	if ss.sessions[key] == sh {
+		delete(ss.sessions, key)
+	}
+}
+
+func cloneHarnessProfiles(in map[string]orchestrator.HarnessProfile) map[string]orchestrator.HarnessProfile {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]orchestrator.HarnessProfile, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // ResolveSession returns the handle for key, or a structured tool error
