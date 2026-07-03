@@ -635,6 +635,9 @@ world:
   init_tools_result:     { type: object, default: {} }
   init_tools_ok:         { type: bool, default: false }
   init_tools_output:     { type: string, default: "" }
+  init_readiness_result: { type: object, default: {} }
+  init_readiness_ok:     { type: bool, default: false }
+  init_readiness_output: { type: string, default: "" }
   init_profile_mode:     { type: string, default: "deterministic" }
   init_profile_draft:    { type: object, default: {} }
   init_profile_validation: { type: object, default: {} }
@@ -1056,6 +1059,15 @@ intents:
     priority: 1
   init_applied:
     description: "(internal) onboarding apply completed — show the result."
+    examples: []
+    priority: 1
+  run_readiness:
+    title: "Run Onboarding Readiness"
+    description: "Run the generated post-apply readiness verifier and update the project profile with the result."
+    examples: ["run readiness", "verify onboarding", "check onboarding"]
+    priority: 45
+  readiness_checked:
+    description: "(internal) onboarding readiness verifier completed — show the applied result."
     examples: []
     priority: 1
 
