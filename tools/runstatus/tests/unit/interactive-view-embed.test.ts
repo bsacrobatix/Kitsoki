@@ -210,6 +210,10 @@ describe("InteractiveView — embed (VS Code) layout", () => {
     );
 
     await wrapper.find('[data-testid="workbench-orient-horizontal"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-testid="devtools-workbench-resizer"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="devtools-workbench-row-resizer"]').exists()).toBe(true);
+
     await wrapper.find('[data-testid="devtools-dock-bottom"]').trigger("click");
     await flushPromises();
     await wrapper.find('[data-testid="devtools-workbench-row-resizer"]').trigger("keydown", { key: "ArrowUp" });

@@ -53,6 +53,24 @@ async function resolveTarget(page: Page, step: TourStep): Promise<Locator> {
   return page.getByTestId(step.target!).first();
 }
 
+async function dragSplitter(page: Page, target: Locator, deltaX: number, deltaY: number): Promise<void> {
+  const box = await target.boundingBox();
+  if (!box) throw new Error("splitter target has no bounding box");
+  const startX = box.x + box.width / 2;
+  const startY = box.y + box.height / 2;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 8 });
+  await page.mouse.up();
+}
+
+async function workbenchGrid(page: Page): Promise<string> {
+  return page.locator(".iv__main--workbench").evaluate((el) => {
+    const style = getComputedStyle(el as HTMLElement);
+    return `${style.gridTemplateColumns} / ${style.gridTemplateRows}`;
+  });
+}
+
 test.beforeAll(async () => {
   if (!fs.existsSync(REAL_VIDEO) || !fs.existsSync(REAL_VIDEO + ".chapters.json")) {
     throw new Error(
@@ -118,7 +136,17 @@ test("session media workbench tour video", async () => {
       } else {
         const target = await resolveTarget(page, step);
         await target.scrollIntoViewIfNeeded().catch(() => undefined);
-        await target.evaluate((el) => (el as HTMLElement).click());
+        if (step.id === "smw-resize-media") {
+          const before = await workbenchGrid(page);
+          await dragSplitter(page, target, 160, 0);
+          await expect.poll(() => workbenchGrid(page)).not.toBe(before);
+        } else if (step.id === "smw-resize-bottom") {
+          const before = await workbenchGrid(page);
+          await dragSplitter(page, target, 0, -80);
+          await expect.poll(() => workbenchGrid(page)).not.toBe(before);
+        } else {
+          await target.evaluate((el) => (el as HTMLElement).click());
+        }
         await dwell(page, 1000);
       }
     }

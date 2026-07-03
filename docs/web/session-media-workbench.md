@@ -19,8 +19,11 @@ the transcript.
 - The observability pane behaves like devtools. It can show Graph or Trace, dock
   right, dock bottom, float in the window, or pop out to a separate browser
   window through the existing `?surface=graph` / `?surface=trace` entrypoints.
-- The layout can switch between vertical and horizontal arrangements and uses
-  browser-resizable panes where the user needs extra room.
+- The layout can switch between vertical and horizontal arrangements. Explicit
+  splitter controls resize media/chat, chat/devtools, and bottom-docked devtools
+  panes with pointer drag or keyboard arrows.
+- Workbench layout preferences are saved in browser `localStorage`: orientation,
+  devtools dock, active devtools tab, and splitter sizes.
 
 The workbench is browser-only. The VS Code integration keeps its existing
 single-surface decomposition: chat, trace, and graph remain separate dockable
@@ -37,6 +40,10 @@ The transcript suppression is intentionally handle-based. It only hides the
 currently pinned artifact handle, and only in workbench mode. This preserves
 other typed view elements and keeps older or alternate media visible unless the
 operator selects them.
+
+The splitter sizes are stored as percentages rather than pixel widths. That
+keeps the workbench usable across window sizes while preserving the operator's
+intent: media gets more room, chat gets more room, or devtools gets more room.
 
 ## Verification
 

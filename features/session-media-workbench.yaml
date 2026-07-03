@@ -3,7 +3,7 @@ id: session-media-workbench
 kind: feature
 title: Session Media Workbench
 tagline: Pin the artifact, keep the conversation, move the devtools.
-summary: "A browser session can now pin a produced markdown/html/slidey/video artifact into a stable media pane while the chat remains beside it and trace/graph devtools can dock right, dock bottom, float, or pop out."
+summary: "A browser session can now pin a produced markdown/html/slidey/video artifact into a stable resizable media pane while the chat remains beside it and trace/graph devtools can dock right, dock bottom, float, or pop out."
 promo:
   order: 27
 docs:
@@ -61,6 +61,16 @@ tour:
       advance: next
       waitForTarget: media-devtools-pane
       dwellMs: 5500
+    - id: smw-resize-media
+      route: interactive
+      target: media-workbench-resizer
+      title: Resize the workbench
+      body: Drag the splitter between media and chat when the artifact needs more room. The split is stored with the rest of the workbench layout so the session feels stable after reloads.
+      placement: right
+      kind: action
+      advance: click-target
+      waitForTarget: media-workbench-resizer
+      dwellMs: 4200
     - id: smw-trace-tab
       route: interactive
       target: devtools-tab-trace
@@ -81,6 +91,16 @@ tour:
       advance: click-target
       waitForTarget: workbench-orient-horizontal
       dwellMs: 4500
+    - id: smw-resize-bottom
+      route: interactive
+      target: devtools-workbench-row-resizer
+      title: Resize docked devtools
+      body: When devtools moves below the media and chat, the horizontal splitter controls how much height the trace gets without unpinning the artifact or interrupting the conversation.
+      placement: top
+      kind: action
+      advance: click-target
+      waitForTarget: devtools-workbench-row-resizer
+      dwellMs: 4200
     - id: smw-float
       route: interactive
       target: devtools-dock-float
