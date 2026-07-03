@@ -1546,6 +1546,16 @@ imports:
           pr_title: "{{ world.bf__done_artifact.summary_title }}"
           pr_body:  "{{ world.bf__done_artifact.summary_markdown }}"
           status:   "fixed"
+          # Lift the bugfix child's self-provisioned worktree into the parent's
+          # bare keys. bf.idle.on_enter provisions the worktree into CHILD scope
+          # (bf__workspace_id / bf__feature_branch / bf__workdir) when the
+          # operator doesn't pre-seed one; without this projection the parent's
+          # world.workdir / world.feature_branch / world.workspace_id stay "",
+          # and imports.pr.world_in (which reads them in parent scope) would open
+          # the PR child against no worktree and no branch (bug 51).
+          workdir:        "{{ world.bf__workdir }}"
+          feature_branch: "{{ world.bf__feature_branch }}"
+          workspace_id:   "{{ world.bf__workspace_id }}"
       abandoned:
         to: human_review_report
         set:
