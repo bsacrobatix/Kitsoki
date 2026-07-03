@@ -219,11 +219,13 @@ exist so a glue script can assert against reality ("does this file exist", "does
 keeping the record/replay contract intact. `ctx.env` is still absent — there is
 deliberately no environment surface.
 
-- `ctx.fs.read/exists/glob/write` are **repo-scoped**: every path is resolved
-  against the run's working directory, cleaned, and rejected if it escapes via
-  `..` or an absolute prefix. Reads and writes are each capped at 1 MiB. `write`
-  replaces exactly one file, creating parent directories as needed, and returns
-  the normalized repo-relative path. There is no delete, chmod, rename, shell,
+- `ctx.fs.read/exists/glob/write` are **repo-scoped** by default: every relative
+  path is resolved against the run's working directory, cleaned, and rejected if
+  it escapes via `..`. Absolute paths are rejected except for paths under `/tmp`
+  or the platform temp dir, used by flow fixtures for disposable outputs that
+  should stay out of the checkout. Reads and writes are each capped at 1 MiB.
+  `write` replaces exactly one file, creating parent directories as needed, and
+  returns the normalized path. There is no delete, chmod, rename, shell,
   environment, or clock surface.
 - `ctx.probe(name, args=[])` is an **allow-list, not a shell.** `name` must be on
   a fixed global vocabulary of read-only probes; each maps to a static argv

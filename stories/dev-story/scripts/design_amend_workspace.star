@@ -49,6 +49,11 @@ def _stem(path):
     return base
 
 
+def _is_tmp_path(path):
+    path = str(path or "")
+    return path == "/tmp" or path.startswith("/tmp/")
+
+
 def _workspace(slug):
     return WORKSPACE_ROOT + "/" + slug
 
@@ -75,6 +80,10 @@ def main(ctx):
     target = ctx.inputs.get("target", "")
     proposed_slug = ctx.inputs.get("proposed_slug", "")
     normalized = _rstrip_slash(target)
+
+    if _is_tmp_path(normalized):
+        slug = _sanitize(_stem(normalized))
+        return {"slug": slug, "workspace": _workspace(slug)}
 
     if str(target or "").endswith("/") or (normalized != "" and not normalized.endswith(".md")):
         slug = _sanitize(_basename(normalized))

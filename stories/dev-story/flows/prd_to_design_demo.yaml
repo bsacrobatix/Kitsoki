@@ -30,9 +30,9 @@ initial_state: landing
 initial_world:
   judge_mode: "human"
   workdir:    "."
-  # Self-targeting defaults — slug-named docs/prd/<slug>.md. Projected into the
-  # prd import via its world_in (publish_durable_path + prd_doc_filename).
-  publish_durable_path: "docs/prd"
+  # Self-targeting demo, but automated fixtures must publish into gitignored
+  # artifacts rather than the tracked docs tree.
+  publish_durable_path: "/tmp/kitsoki-prd-fixtures"
   prd_doc_filename:     ""
 
 starlark_inspect_cassette: ../cassettes/prd_notes_service.inspect.yaml
@@ -76,7 +76,7 @@ host_handlers:
           ok: true
           submitted:
             items:
-              - { path: "docs/prd/notes-service.md", sections: "§5", rationale: "the PRD this design realizes" }
+              - { path: "/tmp/kitsoki-prd-fixtures/notes-service.md", sections: "§5", rationale: "the PRD this design realizes" }
       brief_check:
         data:
           ok: true
@@ -181,6 +181,6 @@ turns:
   - intent: { name: prd__accept, slots: {} }
     expect_state: prd_published
     expect_world:
-      prd__prd_file: "docs/prd/notes-service.md"
+      prd__prd_file: "/tmp/kitsoki-prd-fixtures/notes-service.md"
 
 expect_no_errors: true

@@ -4,5 +4,5 @@ interactions:
     target: .artifacts/prd/add-a-local-model-agent-sidecar
     out: "false"
   - op: exists
-    target: docs/prd/add-a-local-model-agent-sidecar.md
+    target: /tmp/kitsoki-prd-fixtures/add-a-local-model-agent-sidecar.md
     out: "false"

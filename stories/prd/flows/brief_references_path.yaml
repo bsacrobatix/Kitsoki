@@ -16,6 +16,7 @@ initial_world:
   idea:              "A CLI for X that helps developers do Y."
   workdir:           "."
   judge_mode:        "human"
+  publish_durable_path: "/tmp/kitsoki-prd-fixtures"
   prd_slug:          "example-cli"
   prd_workspace:     ".artifacts/prd/example-cli"
   clarification_log: "── Round 1 ──\nQuestions: {\"questions\":[{\"id\":\"q1\",\"question\":\"Who is the primary user?\"}]}\nAnswers: platform developers\n\n"
@@ -83,7 +84,7 @@ turns:
     expect_state: __exit__done
     expect_world:
       status:   "done"
-      prd_file: "docs/prd/example-cli.md"
+      prd_file: "/tmp/kitsoki-prd-fixtures/example-cli.md"
 
 expect_terminal: true
 expect_no_errors: true

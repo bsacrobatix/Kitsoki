@@ -2,6 +2,7 @@ package starlark_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,6 +115,35 @@ def main(ctx):
 	}
 	if got, err := os.ReadFile(filepath.Join(root, ".artifacts", "demo", "report.md")); err != nil || string(got) != "hello\n" {
 		t.Fatalf("file on disk = %q, %v", string(got), err)
+	}
+}
+
+func TestProductionInspector_TempAbsolutePath(t *testing.T) {
+	root := t.TempDir()
+	outPath := filepath.Join(os.TempDir(), "kitsoki-starlark-inspect-test", "report.md")
+	t.Cleanup(func() { _ = os.Remove(outPath) })
+	in := starlarkhost.NewProductionInspector(root)
+
+	out := runInspect(t, in, fmt.Sprintf(`
+def main(ctx):
+    path = ctx.fs.write(%q, "hello\n")
+    return {
+        "path": path,
+        "body": ctx.fs.read(path),
+    }
+`, outPath))
+	if out["path"] != outPath {
+		t.Errorf("write path: got %q", out["path"])
+	}
+	if out["body"] != "hello\n" {
+		t.Errorf("read after write: got %q", out["body"])
+	}
+
+	msg := runErr(t, in, `def main(ctx):
+    return {"v": ctx.fs.exists("/etc/passwd")}
+`)
+	if !strings.Contains(msg, "repo-relative or under /tmp") {
+		t.Errorf("expected absolute path boundary error, got %q", msg)
 	}
 }
 

@@ -20,6 +20,7 @@ initial_state: search
 initial_world:
   workdir:    "."
   judge_mode: "human"
+  publish_durable_path: "/tmp/kitsoki-prd-fixtures"
   idea:       "A CLI for X that helps developers do Y."
   prd_existing_state:
     overlaps: []

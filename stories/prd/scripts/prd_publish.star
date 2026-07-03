@@ -52,11 +52,18 @@ def _title_from_draft(draft):
 
 def _trim_slashes(path):
     out = str(path or "").strip()
+    if out == "/tmp" or out.startswith("/tmp/"):
+        for _ in range(len(out)):
+            if out.endswith("/") and len(out) > 1:
+                out = out[:-1]
+            else:
+                break
+        return out
     for _ in range(len(out)):
         if out.startswith("./"):
             out = out[2:]
         elif out.startswith("/"):
-            fail("prd_publish: absolute paths are not supported by host.starlark.run: " + out)
+            fail("prd_publish: only /tmp absolute paths are supported for test fixtures: " + out)
         elif out.endswith("/") and len(out) > 1:
             out = out[:-1]
         else:

@@ -4,7 +4,7 @@ interactions:
     target: .artifacts/prd/a-notes-service-so-every-note
     out: "false"
   - op: exists
-    target: docs/prd/a-notes-service-so-every-note.md
+    target: /tmp/kitsoki-prd-fixtures/a-notes-service-so-every-note.md
     out: "false"
   - op: exists
     target: .artifacts/prd/notes-service/004-prd.md
@@ -33,10 +33,10 @@ interactions:
       ## Open Questions
       - Should a note be private by default or shared with the room?
   - op: exists
-    target: docs/prd/notes-service.md
+    target: /tmp/kitsoki-prd-fixtures/notes-service.md
     out: "false"
   - op: write
-    target: docs/prd/notes-service.md
+    target: /tmp/kitsoki-prd-fixtures/notes-service.md
     out: |
       # PRD: Notes Service
 
@@ -89,10 +89,10 @@ interactions:
       ## Open Questions
       - Should a note be private by default or shared with the room?
   - op: exists
-    target: docs/prd/notes-service.md
+    target: /tmp/kitsoki-prd-fixtures/notes-service.md
     out: "false"
   - op: write
-    target: docs/prd/notes-service.md
+    target: /tmp/kitsoki-prd-fixtures/notes-service.md
     out: |
       # PRD: Notes Service
 

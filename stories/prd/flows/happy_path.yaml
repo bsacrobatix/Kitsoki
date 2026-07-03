@@ -20,6 +20,7 @@ initial_world:
   workdir:     "."
   output_path: ".artifacts/prd.md"
   judge_mode:  "human"
+  publish_durable_path: "/tmp/kitsoki-prd-fixtures"
 
 starlark_inspect_cassette: ../cassettes/slug_a_cli_for_x_that_helps.inspect.yaml
 
@@ -129,7 +130,7 @@ turns:
     expect_state: __exit__done
     expect_world:
       status:   "done"
-      prd_file: "docs/prd/example-cli.md"
+      prd_file: "/tmp/kitsoki-prd-fixtures/example-cli.md"
     expect_host_calls:
       - handler: host.starlark.run
         args: { call: "publish" }
