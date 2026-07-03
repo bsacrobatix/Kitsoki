@@ -662,6 +662,11 @@ def generic_setup_plan_yaml(data: dict) -> str:
                 "summary": "Explicit post-apply verifier for the profile-declared checks.",
             },
             {
+                "path": ".kitsoki/promote-session-mining.py",
+                "action": "create",
+                "summary": "Promote emitted session-mining recipes into pending profile customizations.",
+            },
+            {
                 "path": ".kitsoki.yaml",
                 "action": "create",
                 "summary": "Discover project-local Kitsoki stories and select the generated instance.",
@@ -1008,6 +1013,9 @@ setup_plan:
     - path: ".kitsoki/check-readiness.py"
       action: create
       summary: "Explicit post-apply verifier for the profile-declared checks."
+    - path: ".kitsoki/promote-session-mining.py"
+      action: create
+      summary: "Promote emitted session-mining recipes into pending profile customizations."
     - path: ".kitsoki.yaml"
       action: create
       summary: "Discover project-local stories under ./.kitsoki/stories."
@@ -1216,6 +1224,164 @@ if __name__ == "__main__":
 '''
 
 
+def mining_promotion_script() -> str:
+    return r'''#!/usr/bin/env python3
+"""Promote session-mining recipe reports into pending profile customizations.
+
+This is deterministic and local-only. It does not run mining, call an LLM, or
+edit the shared dev-story. It reads already-emitted analysis.json files and
+adds pending entries under onboarding.story_customizations for operator review.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+
+def slug(value: str) -> str:
+    value = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return value or "recipe"
+
+
+def find_analysis(root: Path, explicit: list[str]) -> list[Path]:
+    if explicit:
+        return [Path(item).expanduser().resolve() for item in explicit]
+    jobs = root / ".artifacts" / "mining" / "jobs"
+    if not jobs.exists():
+        return []
+    return sorted(jobs.glob("*/analysis.json"))
+
+
+def load_recipes(path: Path) -> list[dict]:
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as err:
+        return [{"id": slug(str(path)), "status": "error", "summary": f"Could not read {path}: {err}", "evidence": str(path)}]
+    out: list[dict] = []
+    for inst in doc.get("instances", []):
+        if not isinstance(inst, dict):
+            continue
+        grounding = inst.get("grounding") if isinstance(inst.get("grounding"), dict) else {}
+        if grounding.get("quarantined"):
+            continue
+        instance_id = str(inst.get("instance_id") or "")
+        if not instance_id:
+            continue
+        determinism = str(inst.get("determinism") or "unknown")
+        tags = inst.get("tags") if isinstance(inst.get("tags"), dict) else {}
+        actions = tags.get("action") if isinstance(tags.get("action"), list) else []
+        action_text = ", ".join(str(item) for item in actions[:4]) or "session-mined workflow"
+        out.append({
+            "id": "mined-" + slug(instance_id)[-48:],
+            "status": "pending",
+            "summary": f"Review session-mined {determinism} recipe: {action_text}.",
+            "evidence": f"{path}#{instance_id}",
+        })
+    return out
+
+
+def yaml_quote(value: str) -> str:
+    return json.dumps(str(value))
+
+
+def entry_yaml(entry: dict) -> list[str]:
+    return [
+        f"    - id: {yaml_quote(entry['id'])}",
+        f"      status: {yaml_quote(entry['status'])}",
+        f"      summary: {yaml_quote(entry['summary'])}",
+        f"      evidence: {yaml_quote(entry['evidence'])}",
+    ]
+
+
+def existing_ids(text: str) -> set[str]:
+    return set(re.findall(r'^\s+id:\s+"([^"]+)"\s*$', text, flags=re.MULTILINE))
+
+
+def insert_customizations(text: str, entries: list[dict]) -> str:
+    if not entries:
+        return text
+    ids = existing_ids(text)
+    new_entries = [entry for entry in entries if entry["id"] not in ids]
+    if not new_entries:
+        return text
+    lines = text.splitlines()
+    start = -1
+    for index, line in enumerate(lines):
+        if line == "  story_customizations:":
+            start = index
+            break
+    block: list[str] = []
+    for entry in new_entries:
+        block.extend(entry_yaml(entry))
+    if start == -1:
+        onboarding = -1
+        for index, line in enumerate(lines):
+            if line == "onboarding:":
+                onboarding = index
+                break
+        if onboarding == -1:
+            return text.rstrip() + "\n\nonboarding:\n  story_customizations:\n" + "\n".join(block) + "\n"
+        insert_at = len(lines)
+        for index in range(onboarding + 1, len(lines)):
+            if lines[index] and not lines[index].startswith((" ", "\t")):
+                insert_at = index
+                break
+        return "\n".join(lines[:insert_at] + ["  story_customizations:"] + block + lines[insert_at:]) + "\n"
+    insert_at = len(lines)
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        if line.startswith("  ") and not line.startswith("    ") and line.strip():
+            insert_at = index
+            break
+        if line and not line.startswith((" ", "\t")):
+            insert_at = index
+            break
+    return "\n".join(lines[:insert_at] + block + lines[insert_at:]) + "\n"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Promote session-mining analysis into pending Kitsoki customizations.")
+    parser.add_argument("analysis", nargs="*", help="analysis.json path(s); defaults to .artifacts/mining/jobs/*/analysis.json")
+    parser.add_argument("--profile", default=".kitsoki/project-profile.yaml", help="project profile to update")
+    parser.add_argument("--dry-run", action="store_true", help="print proposed entries without writing")
+    parser.add_argument("--json", action="store_true", help="print machine-readable summary")
+    args = parser.parse_args()
+
+    root = Path.cwd()
+    analyses = find_analysis(root, args.analysis)
+    entries: list[dict] = []
+    for path in analyses:
+        entries.extend(load_recipes(path))
+    entries = [entry for entry in entries if entry.get("status") == "pending"]
+    summary = {"analysis_files": [str(path) for path in analyses], "entries": entries, "updated": False}
+    if args.dry_run:
+        print(json.dumps(summary, indent=2, sort_keys=True))
+        return 0
+    profile = root / args.profile
+    if not profile.exists():
+        print(f"profile not found: {profile}", file=sys.stderr)
+        return 2
+    text = profile.read_text(encoding="utf-8")
+    updated = insert_customizations(text, entries)
+    if updated != text:
+        profile.write_text(updated, encoding="utf-8")
+        summary["updated"] = True
+    if args.json:
+        print(json.dumps(summary, indent=2, sort_keys=True))
+    else:
+        print(f"promoted {len(entries)} pending customization(s); updated={summary['updated']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
+
 def mining_seed_markdown(data: dict) -> str:
     mining = data.get("mining_recommendation") if isinstance(data.get("mining_recommendation"), dict) else {}
     sources = mining.get("sources") if isinstance(mining, dict) else []
@@ -1328,6 +1494,7 @@ profile, command defaults, and any project-specific extensions.
 
 Project profile: `{Path(profile_path).relative_to(Path(data["target_path"]))}`
 Readiness verifier: `.kitsoki/check-readiness.py`
+Session mining promotion helper: `.kitsoki/promote-session-mining.py`
 
 Generated PRDs publish under `{docs["publish_durable_path"]}` and design drafts
 publish under `{docs["design_durable_path"]}`. Update
@@ -1362,6 +1529,19 @@ python3 .kitsoki/check-readiness.py --json --update-profile
 The report is written to `.artifacts/kitsoki-readiness.json`. Add
 `--update-profile` when you want the summarized pass/fail result persisted into
 `.kitsoki/project-profile.yaml`.
+
+Session-mining customization:
+
+When a mining pass emits `.artifacts/mining/jobs/<job>/analysis.json`, review the
+candidate profile customizations and promote the pending ones explicitly:
+
+```sh
+python3 .kitsoki/promote-session-mining.py --dry-run
+python3 .kitsoki/promote-session-mining.py --json
+```
+
+The helper updates `onboarding.story_customizations` only; it does not edit the
+shared `@kitsoki/dev-story` or run an LLM.
 {mining_note}
 """
 
@@ -1445,6 +1625,7 @@ def main() -> int:
     instance_path = root / ".kitsoki" / "stories" / f"{data['project_id']}-dev" / "app.yaml"
     readme_path = root / ".kitsoki" / "stories" / f"{data['project_id']}-dev" / "README.md"
     readiness_path = root / ".kitsoki" / "check-readiness.py"
+    mining_promote_path = root / ".kitsoki" / "promote-session-mining.py"
     gitignore_path = root / ".gitignore"
 
     write_text(config_path, config_yaml(data), writes)
@@ -1452,8 +1633,10 @@ def main() -> int:
     write_text(instance_path, app_yaml(data), writes)
     write_text(readme_path, readme(data, str(profile_path)), writes)
     write_text(readiness_path, readiness_script(data), writes)
+    write_text(mining_promote_path, mining_promotion_script(), writes)
     try:
         readiness_path.chmod(0o755)
+        mining_promote_path.chmod(0o755)
     except OSError:
         pass
     mining_seed_note = ""
@@ -1468,6 +1651,7 @@ def main() -> int:
         "profile_path": str(profile_path),
         "instance_path": str(instance_path),
         "readiness_path": str(readiness_path),
+        "mining_promote_path": str(mining_promote_path),
         "gitignore_path": str(gitignore_path),
         "mining_seed_path": mining_seed_note,
         "dirs_created": [str(root / rel) for rel in dirs],
