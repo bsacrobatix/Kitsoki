@@ -30,7 +30,7 @@ For a reader-specific path through the docs, start at
 
 ```sh
 go build -o kitsoki ./cmd/kitsoki
-./kitsoki run
+./kitsoki
 ```
 
 ## What kitsoki is good for
@@ -71,7 +71,7 @@ Requires Go 1.25+. Single static binary; no CGO, no system libraries.
 
 ### 2. Pick a harness
 
-`kitsoki run` auto-selects:
+`kitsoki` auto-selects:
 
 | Available | Harness | What |
 |---|---|---|
@@ -82,8 +82,8 @@ Requires Go 1.25+. Single static binary; no CGO, no system libraries.
 Force one:
 
 ```sh
-./kitsoki run --harness claude
-./kitsoki run --harness live
+./kitsoki --harness claude
+./kitsoki --harness live
 ./kitsoki run testdata/apps/cloak/app.yaml \
     --harness replay --recording testdata/apps/cloak/recording.yaml
 ```
@@ -91,7 +91,7 @@ Force one:
 ### 3. Play
 
 ```sh
-./kitsoki run
+./kitsoki
 ```
 
 With no app path, the TUI synthesizes the project's implicit dev-story root
@@ -153,7 +153,7 @@ kitsoki itself (and on each of its stories) through its own UI, with
 the bug file as both ticket and conversation log.
 
 ```sh
-./kitsoki run
+./kitsoki
 ```
 
 Lands at the engineer's-day landing room via the implicit root in `.kitsoki.yaml`.
@@ -168,7 +168,7 @@ Autonomous variant (LLM-judge auto-fires confident verdicts, bails
 to human only on uncertainty):
 
 ```sh
-./kitsoki run --warp scenarios/autonomous_ready.yaml
+./kitsoki --warp scenarios/autonomous_ready.yaml
 ```
 
 See **[`.kitsoki/stories/kitsoki-dev/README.md`](.kitsoki/stories/kitsoki-dev/README.md)**

@@ -148,6 +148,49 @@ func TestCLI_UnknownSubcommandFails(t *testing.T) {
 	}
 }
 
+func TestCLI_NoArgsDelegatesToRun(t *testing.T) {
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	tmp := t.TempDir()
+	t.Cleanup(func() {
+		if chdirErr := os.Chdir(oldWd); chdirErr != nil {
+			t.Fatalf("restore cwd: %v", chdirErr)
+		}
+	})
+	if err := os.WriteFile(filepath.Join(tmp, ".kitsoki.yaml"), []byte("root:\n  import: definitely-not-a-story\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	out, err := execRoot(t)
+	if err == nil {
+		t.Fatal("expected bare kitsoki to fail on invalid run config")
+	}
+	if strings.Contains(out, "Usage:") {
+		t.Fatalf("bare kitsoki printed help instead of entering run startup:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "definitely-not-a-story") {
+		t.Fatalf("expected run config error, got %v", err)
+	}
+}
+
+func TestCLI_NoArgsAcceptsRunFlags(t *testing.T) {
+	out, err := execRoot(t, "--mode", "definitely-not-a-mode")
+	if err == nil {
+		t.Fatal("expected bare kitsoki to parse --mode and fail validation")
+	}
+	if strings.Contains(out, "Usage:") {
+		t.Fatalf("bare kitsoki --mode printed help instead of entering run startup:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "--mode") {
+		t.Fatalf("expected mode validation error, got %v", err)
+	}
+}
+
 func TestCLI_RunStartupErrorSuppressesLoaderWarnings(t *testing.T) {
 	appPath := filepath.Join(t.TempDir(), "app.yaml")
 	if err := os.WriteFile(appPath, []byte(`
