@@ -85,11 +85,14 @@
              click away (matching the live bubble it replaces). -->
         <ActivityDisclosure v-if="entry.stream?.length" :items="entry.stream" />
         <div
-          v-if="suppressedMediaCount(entry) > 0"
+          v-if="suppressedMediaHandlesForEntry(entry).length > 0"
           class="chat-media-receipt"
           data-testid="chat-media-receipt"
         >
-          Media is pinned in the workbench.
+          <span class="chat-media-receipt__label">
+            {{ mediaReceiptLabel(suppressedMediaHandlesForEntry(entry)) }}
+          </span>
+          <span class="chat-media-receipt__hint">Pinned in the workbench</span>
         </div>
         <div
           v-if="entry.role === 'agent' && hasDisplayElements(entry)"
@@ -254,8 +257,15 @@ function routeReceiptTitle(r: ContextRouteInfo): string {
 }
 
 const props = withDefaults(
-  defineProps<{ transcript: ChatEntry[]; suppressedMediaHandles?: string[] }>(),
-  { suppressedMediaHandles: () => [] },
+  defineProps<{
+    transcript: ChatEntry[];
+    suppressedMediaHandles?: string[];
+    suppressedMediaLabels?: Record<string, string>;
+  }>(),
+  {
+    suppressedMediaHandles: () => [],
+    suppressedMediaLabels: () => ({}),
+  },
 );
 
 // 'rewind' is emitted with the receipt's decision_id when the operator clicks
@@ -302,9 +312,17 @@ function hasDisplayElements(entry: ChatEntry): boolean {
   return Array.isArray(els) && els.length > 0;
 }
 
-function suppressedMediaCount(entry: ChatEntry): number {
+function suppressedMediaHandlesForEntry(entry: ChatEntry): string[] {
   const els = entry.typedView?.Elements;
-  return Array.isArray(els) ? els.filter(isSuppressedMedia).length : 0;
+  if (!Array.isArray(els)) return [];
+  return els.filter(isSuppressedMedia).map(elementMediaHandle);
+}
+
+function mediaReceiptLabel(handles: string[]): string {
+  const labels = handles.map((handle) => props.suppressedMediaLabels[handle] || handle);
+  if (labels.length === 0) return "Media";
+  if (labels.length === 1) return labels[0];
+  return `${labels[0]} + ${labels.length - 1} more`;
 }
 
 // renderView prepares the engine's rendered room view for display. Verbatim
@@ -746,6 +764,24 @@ watch(
   background: var(--k-bg-hover, #f3f4f6);
   color: var(--k-fg-muted, #4b5563);
   font-size: 0.78rem;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.chat-media-receipt__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--k-paper-fg, #1f2937);
+  font-weight: 650;
+}
+
+.chat-media-receipt__hint {
+  flex: 0 0 auto;
+  color: var(--k-fg-muted, #6b7280);
 }
 
 /* The collapsed activity feed (the turn's preserved thinking/tool stream)

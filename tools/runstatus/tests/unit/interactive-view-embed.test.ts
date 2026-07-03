@@ -80,6 +80,7 @@ describe("InteractiveView — embed (VS Code) layout", () => {
     setActivePinia(createPinia());
     setEmbeddedOverride(true);
     sessionStorage.clear();
+    localStorage.clear();
   });
   afterEach(() => {
     setEmbeddedOverride(null);
@@ -163,6 +164,7 @@ describe("InteractiveView — embed (VS Code) layout", () => {
 
   it("pins a media artifact into the browser workbench and can rearrange devtools", async () => {
     setEmbeddedOverride(false);
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     const wrapper = mount(InteractiveView, mountOpts);
     await flushPromises();
 
@@ -189,15 +191,46 @@ describe("InteractiveView — embed (VS Code) layout", () => {
 
     expect(wrapper.find('[data-testid="media-workbench-pane"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="media-workbench-stage"]').text()).toContain("Checkout mockup");
+    expect(wrapper.find('[data-testid="media-workbench-stage"] [data-testid="media-pin-workbench"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="media-devtools-pane"]').exists()).toBe(true);
+    expect(wrapper.find(".iv__main").attributes("style")).toContain("42%");
+
+    await wrapper.find('[data-testid="media-workbench-resizer"]').trigger("keydown", { key: "ArrowRight" });
+    await wrapper.find('[data-testid="devtools-workbench-resizer"]').trigger("keydown", { key: "ArrowLeft" });
+    await flushPromises();
+
+    expect(wrapper.find(".iv__main").attributes("style")).toContain("46%");
+    expect(wrapper.find(".iv__main").attributes("style")).toContain("32%");
+
+    await wrapper.find('[data-testid="devtools-popout"]').trigger("click");
+    expect(openSpy).toHaveBeenCalledWith(
+      expect.stringContaining("?surface=graph"),
+      "kitsoki-graph-s1",
+      "popup,width=760,height=760",
+    );
 
     await wrapper.find('[data-testid="workbench-orient-horizontal"]').trigger("click");
-    await wrapper.find('[data-testid="devtools-dock-float"]').trigger("click");
+    await wrapper.find('[data-testid="devtools-dock-bottom"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-testid="devtools-workbench-row-resizer"]').trigger("keydown", { key: "ArrowUp" });
     await flushPromises();
 
     expect(wrapper.find(".iv__main--workbench-horizontal").exists()).toBe(true);
+    expect(wrapper.find(".iv__main").attributes("style")).toContain("38%");
+    expect(JSON.parse(localStorage.getItem("kitsoki:mediaWorkbench") || "{}")).toMatchObject({
+      orientation: "horizontal",
+      devtoolsDock: "bottom",
+      mediaWidthPercent: 46,
+      devtoolsWidthPercent: 32,
+      devtoolsHeightPercent: 38,
+    });
+
+    await wrapper.find('[data-testid="devtools-dock-float"]').trigger("click");
+    await flushPromises();
+
     expect(wrapper.find('[data-testid="floating-devtools-pane"]').exists()).toBe(true);
 
     wrapper.unmount();
+    openSpy.mockRestore();
   });
 });
