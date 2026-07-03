@@ -43,6 +43,12 @@ except Exception as e:  # pragma: no cover
     yaml = None
     _YAML_ERR = e
 
+try:
+    import jsonschema
+except Exception as e:  # pragma: no cover
+    jsonschema = None
+    _JSONSCHEMA_ERR = e
+
 # ---- state machine -----------------------------------------------------------
 # Order matters: a later state never silently regresses to an earlier one in a fold
 # unless the log explicitly says so.
@@ -134,6 +140,36 @@ def _reachable(graph: dict) -> dict:
     return {n: go(n, set()) for n in graph}
 
 
+def _load_change_node_schema() -> dict | None:
+    """Load the unified change-node.schema.json (v1.0.0) from repo root."""
+    schema_path = Path("schemas/change-node.schema.json")
+    if not schema_path.exists():
+        return None
+    try:
+        with schema_path.open() as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _validate_change_node(change: dict, schema: dict | None) -> list[str]:
+    """Validate a single change against the change-node schema. Returns list of errors."""
+    if schema is None or jsonschema is None:
+        return []  # schema validation optional if schema or jsonschema unavailable
+
+    errors = []
+    try:
+        # Validate the change against the base schema
+        jsonschema.validate(instance=change, schema=schema)
+    except jsonschema.ValidationError as e:
+        cid = change.get("id", "<unknown>")
+        errors.append(f"{cid}: schema validation failed: {e.message}")
+    except jsonschema.SchemaError as e:
+        errors.append(f"schema validation error: {e.message}")
+
+    return errors
+
+
 # ---- lint (the structural gate) ----------------------------------------------
 def cmd_lint(decomp: dict, goal_dir: Path | None = None) -> int:
     changes = decomp["changes"]
@@ -141,8 +177,14 @@ def cmd_lint(decomp: dict, goal_dir: Path | None = None) -> int:
     ids = [str(c.get("id", "")) for c in changes]
     gset = _goal_gset(goal_dir) if goal_dir else set()
 
+    # Load and validate against the unified change-node schema
+    schema = _load_change_node_schema()
+
     for c in changes:
         cid = str(c.get("id", "<missing>"))
+        # Validate change against change-node.schema.json
+        schema_errors = _validate_change_node(c, schema)
+        errors.extend(schema_errors)
         if not c.get("id"):
             errors.append("a change is missing `id`")
         if not (c.get("acceptance") or []):
