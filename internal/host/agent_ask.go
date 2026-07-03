@@ -233,10 +233,14 @@ func AgentAskHandler(ctx context.Context, args map[string]any) (Result, error) {
 	defer opAskCleanup()
 	cliArgs = appendAllowedToolsFlag(cliArgs, tools)
 
-	// Build the MCP servers map. When Bash is in use we attach the kitsoki-bash
+	// Build the MCP servers map. Contract-level servers are the floor; per-call
+	// mcp/mcp_servers entries override by server name. When Bash is in use we attach the kitsoki-bash
 	// server; when a schema: is given we attach the submit validator. Both can
 	// coexist in the same --mcp-config file.
-	mcpServers := make(map[string]any)
+	mcpServers := effectiveMCPServers(args, agent)
+	if mcpServers == nil {
+		mcpServers = make(map[string]any)
+	}
 
 	if hasBash {
 		bashEntry, bashConfigPath, bashErr := BuildBashMCPEntry(agent.BashProfile, workingDir)

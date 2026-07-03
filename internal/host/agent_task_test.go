@@ -54,6 +54,59 @@ func TestAgentTask_UnknownAgent(t *testing.T) {
 	}
 }
 
+func TestAgentTask_InlineAgentContract(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	schemaPath := filepath.Join(dir, "ok.schema.json")
+	if err := os.WriteFile(schemaPath, []byte(`{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}}`), 0o644); err != nil {
+		t.Fatalf("write schema: %v", err)
+	}
+
+	var captured []string
+	runner := func(_ context.Context, args []string, _, _ string) (host.ClaudeRun, error) {
+		captured = append([]string(nil), args...)
+		if outputPath := host.ParseMCPConfigSubmitOutput(args); outputPath != "" {
+			_ = os.WriteFile(outputPath, []byte(`{"ok":true}`), 0o600)
+		}
+		return host.ClaudeRun{Stdout: `{"ok":true}`}, nil
+	}
+	ctx := host.WithClaudeRunner(context.Background(), runner)
+
+	res, err := host.AgentTaskHandler(ctx, map[string]any{
+		"working_dir": dir,
+		"context":     map[string]any{"prompt": "do it"},
+		"acceptance":  map[string]any{"schema": schemaPath, "max_retries": 1},
+		"agent_contract": map[string]any{
+			"system_prompt": "inline maker",
+			"model":         "claude-sonnet-4-6",
+			"tools":         []any{"host.Read"},
+			"permissions":   map[string]any{"mode": "ask"},
+			"mcp": map[string]any{
+				"tools": []any{"mcp__custom__lookup"},
+				"servers": map[string]any{
+					"custom": map[string]any{"command": "true"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected Result.Error: %s", res.Error)
+	}
+	joined := strings.Join(captured, " ")
+	if !strings.Contains(joined, "claude-sonnet-4-6") {
+		t.Fatalf("inline model was not forwarded; args=%v", captured)
+	}
+	if !strings.Contains(joined, "--permission-mode default") {
+		t.Fatalf("inline permissions.mode ask must map to CLI default; args=%v", captured)
+	}
+	if !strings.Contains(joined, "mcp__custom__lookup") {
+		t.Fatalf("inline MCP tool was not forwarded; args=%v", captured)
+	}
+}
+
 // ── Missing acceptance.schema ─────────────────────────────────────────────
 
 // TestAgentTask_MissingSchema verifies that the handler rejects calls without

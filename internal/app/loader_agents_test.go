@@ -27,6 +27,43 @@ func TestAgents_InlinePrompt(t *testing.T) {
 	require.Equal(t, []string{"host.Edit", "host.Write", "host.Read"}, a.Tools)
 }
 
+func TestAgents_ContractFields(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `app:
+  id: agent-contract
+  version: 0.1.0
+root: start
+states:
+  start:
+    view: Start
+agents:
+  maker:
+    system_prompt: make changes
+    model: claude-sonnet-4-6
+    harness: codex-native
+    tools: [Read]
+    mcp:
+      servers:
+        fs:
+          command: node
+          args: [server.js]
+      tools: [mcp__fs__read_file]
+    permissions:
+      mode: ask
+      disallowed_tools: [WebFetch]
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(yaml), 0o644))
+	def, err := Load(filepath.Join(dir, "app.yaml"))
+	require.NoError(t, err)
+	a := def.Agents["maker"]
+	require.Equal(t, "codex-native", a.Harness)
+	require.Equal(t, []string{"host.Read"}, a.Tools)
+	require.Equal(t, []string{"mcp__fs__read_file"}, a.MCP.Tools)
+	require.Contains(t, a.MCP.Servers, "fs")
+	require.Equal(t, "ask", a.Permissions.Mode)
+	require.Equal(t, []string{"WebFetch"}, a.Permissions.DisallowedTools)
+}
+
 // TestAgents_FilePrompt covers the file-ref happy path: the loader reads the
 // file relative to the app YAML directory, lands its contents in
 // SystemPrompt, and clears SystemPromptPath.
