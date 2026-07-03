@@ -21,10 +21,10 @@ states:
         with:
           script: scripts/punch_board.star
           inputs:
-            state_path:  "{{ world.state_path }}"
-            mark_id:     "{{ world.current_item_id }}"
-            mark_status: "{{ world._record_status }}"
-            mark_error:  "{{ world._record_error }}"
+            state_path:  "{{ world.state_path ?? '' }}"
+            mark_id:     "{{ world.current_item_id ?? '' }}"
+            mark_status: "{{ world._record_status ?? '' }}"
+            mark_error:  "{{ world._record_error ?? '' }}"
         bind:
           punch_items: "items"
           current_item: "next_item"

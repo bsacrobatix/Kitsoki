@@ -465,8 +465,10 @@ func (o jsonObject) String() string {
 	if err != nil {
 		// Marshal of an arbitrary world value can fail (e.g. an
 		// unsupported type buried in the map); degrade to Go's default
-		// rather than panic at the render seam.
-		return fmt.Sprintf("%v", map[string]any(o))
+		// rather than panic at the render seam. Do not fmt the value here:
+		// fmt can recurse forever on cycles, the same class of failure we are
+		// containing.
+		return "<unrenderable object>"
 	}
 	return string(b)
 }
@@ -477,7 +479,7 @@ type jsonArray []any
 func (a jsonArray) String() string {
 	b, err := json.Marshal([]any(a))
 	if err != nil {
-		return fmt.Sprintf("%v", []any(a))
+		return "<unrenderable array>"
 	}
 	return string(b)
 }
@@ -489,17 +491,24 @@ func (a jsonArray) String() string {
 // reflect placeholder. The recursion ensures nested objects/arrays render
 // usefully too (e.g. `{{ world.a.b }}` where b is itself an object).
 func wrapNonScalar(v any) any {
+	return wrapNonScalarDepth(v, 0)
+}
+
+func wrapNonScalarDepth(v any, depth int) any {
+	if depth > 64 {
+		return v
+	}
 	switch t := v.(type) {
 	case map[string]any:
 		out := make(jsonObject, len(t))
 		for k, val := range t {
-			out[k] = wrapNonScalar(val)
+			out[k] = wrapNonScalarDepth(val, depth+1)
 		}
 		return out
 	case []any:
 		out := make(jsonArray, len(t))
 		for i, val := range t {
-			out[i] = wrapNonScalar(val)
+			out[i] = wrapNonScalarDepth(val, depth+1)
 		}
 		return out
 	default:
