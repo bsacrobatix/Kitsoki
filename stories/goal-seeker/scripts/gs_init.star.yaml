@@ -1,0 +1,5 @@
+inputs:
+  work_dir: { type: string, required: true }   # .artifacts/goal/<slug>/ — where log.jsonl lives
+  reset:    { type: bool }                      # true ⇒ truncate the log (fresh goal run); default preserves it
+outputs:
+  log_path: { type: string }   # the ensured log path

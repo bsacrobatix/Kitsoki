@@ -1,0 +1,56 @@
+# red_first_refuses — DETERMINISM GUARANTEE 3: RED-first. A change whose gate ALREADY
+# PASSES (exit 0) is not RED — the bug isn't present / the work is already done — so
+# dispatch must REFUSE to start rather than dispatch a no-op. Here the RED-first
+# pre-check (host.run) is stubbed to exit 0 (green); dispatch routes to needs_human
+# with a RED-first violation error instead of entering punch-list.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: bootstrap
+initial_world:
+  goal_slug: goal-seeker-test
+  goal_dir:  stories/goal-seeker/testdata/goal
+  work_dir:  .artifacts/goal/flow-red
+  reset_log: true
+
+host_handlers:
+  host.agent.decide:
+    by_call:
+      evaluate:
+        data:
+          ok: true
+          submitted:
+            verdict: not_done
+            summary: "C1 ready."
+            next_instruction:
+              change_id: "C1"
+              action: "implement C1"
+              pipeline: "implementation"
+              gate: { class: "G-FLOW", cmd: "true" }
+  # The gate ALREADY PASSES (exit 0) — the change is not RED.
+  host.run:
+    by_call:
+      redcheck: { data: { ok: true, exit_code: 0, stdout: "PASS" } }
+
+turns:
+  - intent: { name: look, slots: {} }
+    expect_state: bootstrap
+  - intent: { name: advance, slots: {} }        # bootstrap → lint_check
+    expect_state: lint_check
+  - intent: { name: advance, slots: {} }        # lint ok → evaluate
+    expect_state: evaluate
+  - intent: { name: advance, slots: {} }        # evaluate → deciding
+    expect_state: deciding
+  - intent: { name: advance, slots: {} }        # decide (not_done) → dispatch
+    expect_state: dispatch
+  - intent: { name: advance, slots: {} }        # gs_manifest → RED-first check
+    expect_state: redcheck
+  # The gate already passes (exit 0) — RED-first refuses; no punch-list drive.
+  - intent: { name: advance, slots: {} }
+    expect_state: needs_human
+    expect_not_state: punchlist.load
+    expect_world: { red_exit: 0 }
+  - intent: { name: look, slots: {} }
+    expect_view_matches: "RED-first violation"
+
+expect_no_errors: true
