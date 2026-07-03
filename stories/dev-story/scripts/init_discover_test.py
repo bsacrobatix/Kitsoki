@@ -15,6 +15,7 @@ Pure stdlib, runs against throwaway temp dirs — never a live LLM.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -69,6 +70,36 @@ check("empty target fallback", fallback, base.resolve())
 # 5. Natural-language onboard request still extracts its path.
 nl = mod.parse_target(f"onboard {other}", "", str(base))
 check("onboard <path>", nl, other.resolve())
+
+# 6. Associated Claude/Codex transcript history is detected without running
+# the mining pipeline or touching the real home directory.
+home = _mkrepo({})
+repo_with_history = _mkrepo({"go.mod": "module hist\ngo 1.22\n"})
+old_home = os.environ.get("KITSOKI_INIT_HOME")
+os.environ["KITSOKI_INIT_HOME"] = str(home)
+try:
+    slug = mod.transcript_slug(repo_with_history.resolve())
+    claude_dir = home / ".claude" / "projects" / slug
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "claude-session.jsonl").write_text('{"type":"user","entrypoint":"cli"}\n', encoding="utf-8")
+    codex_dir = home / ".codex" / "sessions" / "2026" / "07" / "03"
+    codex_dir.mkdir(parents=True)
+    (codex_dir / "codex-session.jsonl").write_text(
+        '{"cwd":"' + str(repo_with_history.resolve()) + '","type":"turn_context"}\n',
+        encoding="utf-8",
+    )
+    prof = mod.discover(repo_with_history.resolve())
+finally:
+    if old_home is None:
+        os.environ.pop("KITSOKI_INIT_HOME", None)
+    else:
+        os.environ["KITSOKI_INIT_HOME"] = old_home
+
+check("transcript count", prof["transcript_count"], 2)
+check("mining status", prof["mining_recommendation"]["status"], "transcripts-found")
+check("mining sample", prof["mining_recommendation"]["sample"], "recency")
+check("mining first pass", prof["mining_recommendation"]["first_pass_sample"], 2)
+check("transcript source backends", [s["backend"] for s in prof["transcript_sources"]], ["claude-code", "codex"])
 
 if failures:
     print("FAIL: init_discover regression")
