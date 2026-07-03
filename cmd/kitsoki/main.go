@@ -178,6 +178,9 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(projectToolsCmd())
 	root.AddCommand(validateCmd())
 	root.AddCommand(workflowCmd())
+	root.AddCommand(doctorCmd())
+	root.AddCommand(initCmd())
+	tierHelp(root)
 
 	return root
 }
