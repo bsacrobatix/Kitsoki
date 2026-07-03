@@ -11,8 +11,8 @@ is loud and retryable, and associated Claude/Codex transcript history is written
 as an operator-review seed with a disabled runtime mining scope. Onboarding also
 writes an explicit `.kitsoki/check-readiness.py` verifier for the declared
 post-apply checks; the verifier can persist a summarized `readiness:` result
-back into the profile when the operator passes `--update-profile`, but does not
-run project commands automatically. Emitted session-mining recipe reports can
+back into the profile from the explicit `init_done` readiness action, but does
+not run project commands automatically. Emitted session-mining recipe reports can
 also be promoted into pending profile customizations with
 `.kitsoki/promote-session-mining.py`. This proposal now tracks only the
 remaining completion work before deletion.
@@ -22,20 +22,17 @@ remaining completion work before deletion.
 ## Why
 
 Project onboarding is now usable as the front door for a normal repository, but
-two parts of the original project-init ambition intentionally remain outside
+one part of the original project-init ambition intentionally remains outside
 the shipped baseline:
 
 - transcript history is detected, scoped in `.kitsoki.yaml`, and handed off; an
   explicit helper can promote emitted mining reports into pending
   profile/story customizations, but onboarding still needs a first-class
-  in-story review surface for that loop;
-- apply validates the profile and generated story instance and writes an
-  explicit verifier that can feed results back into the profile's `readiness`
-  block, but onboarding still needs a more integrated operator surface for
-  deciding when to run it.
+  in-story review surface for that loop.
 
-Those are useful follow-up slices, but they should not keep stale design text
-describing the already-shipped first-run path in `docs/proposals/`.
+The explicit readiness action is now part of the shipped baseline, so this file
+should not keep stale design text describing that already-shipped first-run
+path in `docs/proposals/`.
 
 ## What Changes
 
@@ -62,22 +59,16 @@ Add only the remaining tail work:
    entries from emitted recipe reports; remaining work is the in-story review
    and accept/refine UX. Tests must use recorded or synthetic fixtures, never a
    live LLM.
-2. **Post-apply readiness verification.** Add a deterministic optional verify
-   path that runs the target profile's declared local checks and clearly
-   distinguishes pre-existing project failures from onboarding regressions. The
-   generated verifier script exists and can update the profile explicitly;
-   remaining work is an in-story operator action around that script.
-3. **Completion audit.** Once those two slices ship or are explicitly deferred
+2. **Completion audit.** Once transcript promotion ships or is explicitly deferred
    elsewhere, migrate any lasting behavior to narrative docs and delete this
    proposal.
 
 ## Impact
 
 - **Story layer:** likely one small continuation room or action from
-  `init_done` for transcript seed review, plus a verify action that reuses the
-  existing profile command fields.
-- **Scripts:** deterministic helpers may be needed to render seed evidence,
-  update the profile, and run the declared checks with bounded timeouts.
+  `init_done` for transcript seed review.
+- **Scripts:** deterministic helpers may be needed to render seed evidence and
+  update the profile.
 - **Docs:** update `docs/project-onboarding.md` and
   `docs/stories/dev-story-onboarding.md` with any new operator path. Do not add
   another shipped-feature doc under `docs/proposals/`.
@@ -103,19 +94,16 @@ Add only the remaining tail work:
 - [x] Generate an explicit `.kitsoki/check-readiness.py` verifier for
   profile-declared checks without running project commands during onboarding.
 - [x] Let explicit readiness runs update the profile's `readiness:` summary.
+- [x] Add an in-story operator action for running and reviewing readiness
+  checks.
 - [x] Move shipped behavior into narrative onboarding docs.
 - [ ] Add an in-story operator review/accept/refine path for promoted
   transcript-mined customizations.
-- [ ] Add an in-story operator action for running and reviewing readiness
-  checks.
 - [ ] Delete this proposal after the remaining tail is shipped or split into
   narrower active proposals.
 
 ## Open Questions
 
-- Should readiness verification run automatically after apply, or remain an
-  explicit action from `init_done` so onboarding never surprises a target repo by
-  running project commands?
 - Should accepted transcript-mined customizations update only
   `.kitsoki/project-profile.yaml`, or also regenerate the materialized local
   story wrapper when the customization affects story behavior?

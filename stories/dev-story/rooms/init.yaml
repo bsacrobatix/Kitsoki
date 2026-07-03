@@ -2,6 +2,7 @@
 #
 # The flow is deliberately boring and auditable:
 #   landing -> init_discover -> init(review) -> init_apply -> init_done
+#   init_done -> init_readiness -> init_done
 #
 # Discovery and apply are host.run scripts that emit JSON. Flow fixtures stub
 # both calls, so this remains no-LLM and cost-free in tests. The review room is
@@ -321,6 +322,9 @@ states:
                 init_apply_result: {}
                 init_apply_ok: false
                 init_apply_output: ""
+                init_readiness_result: {}
+                init_readiness_ok: false
+                init_readiness_output: ""
                 last_error: ""
       revise_init:
         - target: .
@@ -835,6 +839,9 @@ states:
                 init_tools_result: {}
                 init_tools_ok: false
                 init_tools_output: ""
+                init_readiness_result: {}
+                init_readiness_ok: false
+                init_readiness_output: ""
                 init_profile_status: "applying"
                 last_error: ""
       init_applied:
@@ -860,6 +867,9 @@ states:
       - init_project_id
       - init_project_title
       - init_profile_status
+      - init_readiness_result
+      - init_readiness_ok
+      - init_readiness_output
     view:
       - banner:
           text:     "PROJECT ONBOARDING"
@@ -875,17 +885,32 @@ states:
             Profile valid: "{{ world.init_apply_result.profile_validation.ok|default:false }}"
             Instance:      "{{ world.init_apply_result.instance_path|default:'' }}"
             Gitignore:     "{{ world.init_apply_result.gitignore_path|default:'' }}"
+            Readiness:     "{{ world.init_readiness_result.status|default:'not-run' }}"
       - heading: "Writes"
         when: "world.init_apply_result.writes"
       - template: |
           {% for path in world.init_apply_result.writes %}- {{ path }}
           {% endfor %}
         when: "world.init_apply_result.writes"
+      - heading: "Readiness"
+        when: "world.init_readiness_result.status != ''"
+      - kv:
+          pairs:
+            Status: "{{ world.init_readiness_result.status|default:'unknown' }}"
+            Report: "{{ world.init_readiness_result.out|default:'.artifacts/kitsoki-readiness.json' }}"
+        when: "world.init_readiness_result.status != ''"
+      - template: |
+          {% for check in world.init_readiness_result.checks %}- {{ check.id }}: {{ check.status }} — {{ check.detail }}
+          {% endfor %}
+        when: "world.init_readiness_result.checks"
       - heading: "Actions"
       - choice:
           mode: single
           prompt: ""
           items:
+            - label:  "readiness"
+              hint:   "run declared post-apply checks and update the profile readiness summary"
+              intent: run_readiness
             - label:  "workbench"
               hint:   "return to the dev-story workbench"
               intent: go_main
@@ -893,11 +918,112 @@ states:
               hint:   "re-render"
               intent: look
     on:
+      run_readiness:
+        - target: init_readiness
+          effects:
+            - set:
+                init_readiness_result: {}
+                init_readiness_ok: false
+                init_readiness_output: ""
+                init_profile_status: "checking-readiness"
+                last_error: ""
       go_main:
         - target: landing
           effects:
             - set:
                 prev_state: "init_done"
                 last_error: "project onboarding complete"
+      look:
+        - target: .
+
+  init_readiness:
+    description: "Run the generated post-apply readiness verifier for an onboarded target."
+    relevant_world:
+      - init_target_path
+      - init_project_title
+      - init_profile_status
+      - init_readiness_result
+      - init_readiness_ok
+      - init_readiness_output
+    view:
+      - banner:
+          text:     "PROJECT ONBOARDING"
+          subtitle: "readiness check"
+          color:    "#0EA5E9"
+      - prose: "Running the generated readiness verifier against the target checkout. Project command failures are captured as report data."
+        when: "world.init_readiness_result.status == ''"
+      - kv:
+          pairs:
+            Target: "{{ world.init_target_path }}"
+            Project: "{{ world.init_project_title }}"
+            Status: "{{ world.init_readiness_result.status|default:world.init_profile_status }}"
+            Report: "{{ world.init_readiness_result.out|default:'.artifacts/kitsoki-readiness.json' }}"
+      - heading: "Checks"
+        when: "world.init_readiness_result.checks"
+      - template: |
+          {% for check in world.init_readiness_result.checks %}- {{ check.id }}: {{ check.status }} — {{ check.detail }}
+          {% endfor %}
+        when: "world.init_readiness_result.checks"
+      - heading: "Output"
+        when: "world.init_readiness_output != ''"
+      - code: "{{ world.init_readiness_output|default:'' }}"
+        when: "world.init_readiness_output != ''"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "continue"
+              hint:   "return to the applied onboarding result"
+              intent: readiness_checked
+            - label:  "retry"
+              hint:   "rerun readiness checks"
+              intent: run_readiness
+            - label:  "workbench"
+              hint:   "return to the dev-story workbench"
+              intent: go_main
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    on_enter:
+      - invoke: host.run
+        once: true
+        id: readiness
+        with:
+          cmd: bash
+          cwd: "{{ world.init_target_path }}"
+          args:
+            - "-lc"
+            - |
+              if [ ! -f .kitsoki/check-readiness.py ]; then
+                printf '{"schema":"kitsoki-readiness/v1","status":"error","out":".artifacts/kitsoki-readiness.json","checks":[{"id":"readiness-script","status":"fail","detail":".kitsoki/check-readiness.py was not found"}]}\n'
+                exit 0
+              fi
+              python3 .kitsoki/check-readiness.py --json --update-profile
+          timeout: "10m"
+        bind:
+          init_readiness_ok: "ok"
+          init_readiness_output: "stdout"
+          init_readiness_result: "stdout_json"
+    on:
+      readiness_checked:
+        - target: init_done
+          effects:
+            - set:
+                init_profile_status: "{{ world.init_apply_result.status ?? 'applied' }}"
+                last_error: ""
+      run_readiness:
+        - target: .
+          effects:
+            - set:
+                init_readiness_result: {}
+                init_readiness_ok: false
+                init_readiness_output: ""
+                last_error: ""
+      go_main:
+        - target: landing
+          effects:
+            - set:
+                prev_state: "init_readiness"
+                last_error: "project onboarding readiness checked"
       look:
         - target: .

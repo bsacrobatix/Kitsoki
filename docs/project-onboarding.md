@@ -155,8 +155,9 @@ with no LLM; real-LLM recording runs should be explicit and gated by the
 profile's `recording_policy`.
 
 **Verify when ready.** Onboarding records build/test/story-load checks in the
-profile but does not run project commands automatically. Review and run them
-explicitly:
+profile but does not run project commands automatically. From `init_done`, use
+the `readiness` action to run the generated verifier and review the pass/fail
+report in the story. For headless or manual use, run it directly:
 
 ```sh
 python3 .kitsoki/check-readiness.py --list
