@@ -4306,6 +4306,43 @@
       "instant": true
     },
     {
+      "type": "evidence",
+      "title": "High leverage tools",
+      "items": [
+        {
+          "label": "Frontier reasoning",
+          "status": "validated",
+          "detail": "spend the strongest model on synthesis, oversight, risk calls, and long-horizon coordination instead of every mechanical step",
+          "refType": "doc",
+          "ref": "docs/architecture/concept.md"
+        },
+        {
+          "label": "Script delegation",
+          "status": "validated",
+          "detail": "turn repeated action into commands, tests, renderers, and validators the agent can call instead of re-reasoning",
+          "refType": "path",
+          "ref": "host.run / flow tests / cassettes"
+        },
+        {
+          "label": "Model ladders",
+          "status": "validated",
+          "detail": "push narrow extraction, classification, and review tasks down to cheaper models when the harness proves they pass",
+          "refType": "command",
+          "ref": "external/escalate.sh"
+        },
+        {
+          "label": "Structured decomposition",
+          "status": "validated",
+          "detail": "rooms, gates, artifacts, and handoffs preserve context across long tasks while keeping action auditable",
+          "refType": "doc",
+          "ref": "docs/stories/architecture.md"
+        }
+      ],
+      "caption": "Kitsoki is a productivity multiplier for frontier agents: keep their reasoning and oversight, but give them higher-leverage tools than raw tool calls.",
+      "hold": 245,
+      "instant": true
+    },
+    {
       "type": "narrative",
       "eyebrow": "Close the loop",
       "body": "The demo becomes an operating system for improvement.",

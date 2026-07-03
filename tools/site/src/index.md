@@ -32,6 +32,8 @@ hero:
 
 **Testable like software, because it is.** Flow fixtures replay whole conversations with zero LLM cost; cassettes pin agent responses byte-for-byte; the demos on this site are generated from those same deterministic runs.
 
+**High leverage tools for frontier agents.** Kitsoki keeps the strongest models focused on reasoning, oversight, and long-horizon judgment. Scripts, typed host calls, cheaper model ladders, cassettes, and structured handoffs do the repeatable work so each frontier turn supervises more useful action.
+
 ## The features
 
 Start with the proof demos: the runtime rejecting and nudging a model mid-call, a turn that routes without any model call, operator questions that block instead of silently defaulting, and real bug-fix runs replayed from cassettes. Then browse the full catalog.
