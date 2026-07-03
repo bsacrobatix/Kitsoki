@@ -182,19 +182,38 @@ changes:
     title: Cross-provider model override on a host.agent.decide gate (opus + gpt-5.5 high)
     kind: runtime
     pipeline: bugfix
-    scope: ["internal/host/agent/**"]
-    depends_on: []
+    scope: ["internal/host/agents.go", "internal/host/agent_decide.go", "internal/app/types.go", "internal/orchestrator/orchestrator.go", "stories/goal-seeker/flows/evaluate_multiprovider.yaml"]
+    depends_on: ["WS.2", "WM.0"]
+    # depends_on WM.0: WM.2 authors flows/evaluate_multiprovider.yaml under the
+    # goal-seeker story WM.0 owns (scope overlap → must chain).
+    # depends_on WS.2: the real fix site (internal/host/agents.go applyProvider,
+    # internal/app/types.go ProviderDecl, internal/host/agent_decide.go) is the same
+    # surface WS.1->WS.2 reshape; sequencing WM.2 after WS.2 avoids a real merge hazard,
+    # not just the disjoint-scope lint. Live decide-gate stays degraded-but-functional
+    # (cf299206) until then; the interim unblock is pinning the evaluator to model: opus
+    # (bare claude backend serves it) — see stories/goal-seeker/app.yaml.
     acceptance:
-      - "the evaluate decide-gate can run on opus OR gpt-5.5 (high thinking) via profile/model override, with an optional second-opinion on `done` verdicts"
+      - "a named `providers:` entry can declare a `backend:` (claude|codex|copilot) alongside model/effort/env"
+      - "a single host.agent.decide invoke's `with: { provider: <name> }` routes THAT call to the named provider's backend, independent of the session's active harness profile — the evaluate decide-gate can run on opus (claude) or gpt-5.5 high (codex) per-gate"
+      - "a replay flow (stories/goal-seeker/flows/evaluate_multiprovider.yaml) drives two decide invokes under two different provider overrides and asserts the journaled model/backend differ accordingly, with no live LLM call"
     gate:
       class: "G-LIVE+REPLAY"
-      red_now: "unknown if per-decide cross-provider model + a second-opinion pass is expressible; verify against the profile seam"
-      green_when: "a replay flow exercises the decide gate under two provider profiles"
+      red_now: "host.Provider / app.ProviderDecl carry only {Model, Effort, Env} — no Backend field (internal/host/agents.go:114, internal/app/types.go:184); the CLI backend is resolved once per session dispatch (internal/orchestrator/host_dispatch.go:126-132), not per-call, so no host.agent.decide invoke can pin a different backend than the session's; flows/evaluate_multiprovider.yaml does not exist"
+      green_when: "the replay flow exercises two decide invokes under two provider overrides (one backend: claude, one backend: codex) and the journaled per-call model differs accordingly with no live LLM call"
       replay_cmd: "kitsoki test flows stories/goal-seeker/flows/evaluate_multiprovider.yaml"
     agent_brief: >
-      Discovered-gap for WM.0: the goal-seeker evaluator wants opus by default and a
-      gpt-5.5 high-thinking second opinion on `done`. Confirm per-gate model override
-      works across providers (ties to the portability wall); a recorded replay gates CI.
+      Add a Backend field to host.Provider / app.ProviderDecl (yaml `backend:`) and
+      wire it through applyProvider (internal/host/agents.go) so a per-invoke
+      `with: { provider: <name> }` on host.agent.decide can install a different CLI
+      backend (WithAgentBackendNamed) than the session's active harness profile,
+      independent of the operator's session-wide selection. Also wire the field through
+      providersForContext (internal/orchestrator/orchestrator.go). Author
+      flows/evaluate_multiprovider.yaml as a no-LLM replay flow proving two decide calls
+      resolve to two different backends/models (stub the CLI exec at the backend-runner
+      boundary; assert via the agent.decide.complete journal that already stamps model).
+      Do NOT wire a "second opinion on done" re-ask loop in this change — that's a
+      follow-up once the override plumbing lands; keep this slice to the override
+      mechanism + the flow.
 
   - id: "2.7"
     wall: WM
@@ -415,6 +434,68 @@ changes:
       unified decompose/story-forge/dynamic-workflow runtime or
       impact-analysis/dirty-edges traversal (WM.6's deferrals stand); this
       change is only the managed-update transaction.
+
+  - id: "WM.8"
+    wall: WM
+    goal_ref: [G2, G6]
+    title: host.starlark.run's default fs-inspector root ignores KITSOKI_APP_DIR (MCP-driven flow suites fail off the worktree)
+    kind: runtime
+    pipeline: bugfix
+    prior_work: "Surfaced live (Cycle 2/3, .context/goal-seeker-fallback-log.md): the goal-seeker flow suite scores 1/9 via the studio MCP story.test {dir:.worktrees/...} but 9/9 via `kitsoki test flows` from the worktree root. Same KITSOKI_APP_DIR root as 2.7 (issue #37), but one layer lower and more general — the shared host.starlark.run adapter, so it fixes every cwd-detached story driver, not just MCP."
+    scope: ["internal/host/starlark_run.go"]
+    depends_on: []
+    acceptance:
+      - "when no world.workdir and no starlark_inspect_cassette are set, the production fs-inspector installed by host.starlark.run roots at KITSOKI_APP_DIR (when published) before falling back to the process cwd"
+      - "a story's flow suite driven via the MCP studio's story.test/story.turn from a worktree other than the server's own cwd resolves relative ctx.fs paths (e.g. goal_dir) against the target worktree, not the MCP server's checkout"
+    gate:
+      class: G-GOTEST
+      red_now: "internal/host/starlark_run.go's default-inspector fallback (the block right after \"Root at world.workdir when present, else the process cwd\") never references AppDirEnv/KITSOKI_APP_DIR — `grep -q AppDirEnv internal/host/starlark_run.go` fails today even though the sibling script-path resolution (~line 52) already consults it"
+      green_when: "the fallback consults KITSOKI_APP_DIR between world.workdir and os.Getwd(), proven by a new go test (TestStarlarkRunDefaultInspector_PrefersAppDir) AND by the grep; go test ./internal/host/... stays green"
+      cmd: "grep -q AppDirEnv internal/host/starlark_run.go && go test ./internal/host/..."
+    agent_brief: >
+      internal/host/starlark_run.go's default-inspector-injection block (~line 121)
+      falls back to os.Getwd() when world.workdir is unset, but never checks
+      KITSOKI_APP_DIR (AppDirEnv, agent_ask.go) first — even though the adjacent
+      script-path resolution in the same file already does. This makes any cwd-detached
+      driver of a story (MCP studio's story.test/story.turn chief among them) resolve
+      ctx.fs.* against the driving PROCESS's cwd instead of the target app's directory,
+      producing spurious "file not found" failures (reproduced against stories/goal-seeker
+      driven from a worktree: gs_ledger.star can't find decomposition.yaml). Add a
+      KITSOKI_APP_DIR fallback between world.workdir and os.Getwd(); add a go test locking
+      the resolution order (AppDirEnv->dirA, process cwd->dirB, assert ctx.fs.exists
+      resolves against A). Ship the reproducer test + fix together (the grep half of the
+      gate keeps RED-first honest before the test exists — a bare go test would silently
+      stay green today and wrongly park this change, exactly what happened to 2.3).
+
+  - id: "WM.9"
+    wall: WM
+    goal_ref: [G6]
+    title: reset_log clears the whole derived work_dir, not just log.jsonl
+    kind: story
+    pipeline: bugfix
+    prior_work: "Surfaced live (Cycle 3). Correction to the reported framing: ledger.json/preamble.md self-heal every evaluate pass (regenerated, never read as carried-forward state), so they don't 'poison the fold'; the real hazard is that reset_log wipes ALL log history including every `integrated` fact, so it must stay a TEST-FIXTURE-ONLY affordance. ctx.fs has no delete (by design), so 'clear' means neutralize-known-files."
+    scope: ["stories/goal-seeker/scripts/gs_init.star", "stories/goal-seeker/scripts/gs_init.star.yaml", "stories/goal-seeker/flows/reset_log_clears_derived_state.yaml"]
+    depends_on: ["WM.0"]
+    acceptance:
+      - "bootstrap's reset_log:true branch also resets ledger.json to the empty-ledger shape, blanks preamble.md, and clears every manifests/*.json left from a prior run — using only ctx.fs.write/ctx.fs.glob (no new Inspector capability)"
+      - "a flow seeds a prior run's derived files (a stale ledger.json, preamble.md, and a manifests/<id>.json), drives bootstrap with reset_log:true, and asserts all three are cleared before the next evaluate pass"
+      - "the doc comment on gs_init.star's reset branch states plainly that reset_log is TEST-FIXTURE-ONLY (log history — and therefore all `integrated` facts — is discarded), and that un-parking a specific stuck change in a real run must go through a targeted goal.py append/log entry, never reset_log"
+    gate:
+      class: G-FLOW
+      red_now: "gs_init.star's reset branch only truncates log.jsonl; ledger.json/preamble.md/manifests/*.json surviving from a prior run are left on disk untouched by reset"
+      green_when: "the flow seeds stale ledger.json/preamble.md/a manifests/*.json entry, drives bootstrap with reset_log:true, and asserts all are cleared"
+      cmd: "kitsoki test flows stories/goal-seeker/flows/reset_log_clears_derived_state.yaml"
+    agent_brief: >
+      Extend gs_init.star's reset branch (currently only ctx.fs.write(log_path, "")) to
+      also: ctx.fs.write the ledger.json path to the empty-ledger JSON shape, ctx.fs.write
+      preamble.md to "", and ctx.fs.glob("<work_dir>/manifests/*.json") then ctx.fs.write
+      each matched path to "{}" — ctx.fs has no delete, so this is "neutralize", not
+      "remove". Add flows/reset_log_clears_derived_state.yaml seeding the three stale
+      files first. IMPORTANT: also correct the surrounding comments — reset_log wipes ALL
+      log history (including every `integrated` fact), so it must stay a test-fixture-only
+      affordance; do not present it as safe to run against a real work_dir to clear a
+      stuck park. A surgical "unpark" log-append primitive is the right tool for that and
+      is out of scope here (flag as a possible WM.x follow-up if the live driver needs it).
 
   # ---- WS — Sandbox / capability enforcement (clears G3) ----
   # Lands docs/proposals/agent-capability-model.md (epic) + its 3 slices +
