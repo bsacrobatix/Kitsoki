@@ -936,7 +936,7 @@ changes:
     prior_work: "PARTIAL on branch fix-onboarding-defaults — the project-init loop is hardened (project-init.md proposal deleted; init_apply.py +1239; many init_* flow fixtures). BUT that branch touches internal/app + the story, NOT internal/story/expr — the |default EXPR-engine load bug (this change's scope) may still be open. Re-verify the expr bug specifically after merge."
     kind: runtime
     pipeline: bugfix
-    scope: ["internal/story/expr/**"]
+    scope: ["internal/expr/**"]
     depends_on: []
     acceptance:
       - "the |default: expression loads correctly (no load-time error)"
@@ -945,7 +945,7 @@ changes:
       class: G-GOTEST
       red_now: "the |default: expression fails to load (bf-default-expression-load-bug-reproduction)"
       green_when: "go test reproduces the load bug RED then GREEN"
-      cmd: "go test ./internal/story/expr/..."
+      cmd: "go test ./internal/expr/..."
     agent_brief: >
       Fix the |default: expression load bug (see .context/bf-default-expression-load-bug-reproduction.md)
       and harden the project-init loop (docs/proposals/project-init.md).
