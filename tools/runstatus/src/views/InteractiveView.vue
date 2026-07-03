@@ -82,7 +82,6 @@
         >
           {{ traceCollapsed ? 'Show trace' : 'Hide trace' }}
         </button>
-        <router-link :to="`/s/${sessionId}`" class="iv__observe-link" data-testid="observe-link">Observe ↗</router-link>
         <MetaButton v-if="embed" placement="topbar" />
       </header>
 
@@ -964,17 +963,6 @@ function onEventSelect(index: number): void {
 .iv__harness-select:hover {
   border-color: #3b82f6;
 }
-.iv__observe-link {
-  margin-left: auto;
-  color: var(--k-fg-muted, #94a3b8);
-  text-decoration: none;
-  font-size: 0.75rem;
-}
-.iv__observe-link:hover {
-  color: #cbd5e1;
-  text-decoration: underline;
-}
-
 .iv__trace-toggle {
   display: inline-flex;
   align-items: center;
