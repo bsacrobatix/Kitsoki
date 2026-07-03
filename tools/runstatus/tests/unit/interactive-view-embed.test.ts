@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 import { setActivePinia, createPinia } from "pinia";
 import type { TurnResult } from "../../src/types.js";
 
@@ -24,6 +25,8 @@ const dataSource = {
   getApp: vi.fn().mockResolvedValue({ id: "demo", name: "Demo", root: "lobby", states: {} }),
   getMermaid: vi.fn().mockResolvedValue({ source: "graph TD;", node_map: {} }),
   getTrace: vi.fn().mockResolvedValue({ events: [], last_turn: 0 }),
+  artifactUrl: vi.fn((handle: string) => `/artifact/${handle}`),
+  artifactPosterUrl: vi.fn((handle: string) => `/artifact/${handle}/poster`),
   subscribe: vi.fn().mockReturnValue(() => {}),
   view: vi.fn(
     (id: string): Promise<TurnResult> =>
@@ -49,6 +52,7 @@ vi.mock("vue-router", () => ({
 
 import InteractiveView from "../../src/views/InteractiveView.vue";
 import { setEmbeddedOverride } from "../../src/lib/embed.js";
+import { useRunStore } from "../../src/stores/run.js";
 
 const mountOpts = {
   props: { sessionId: "s1" },
@@ -153,6 +157,46 @@ describe("InteractiveView — embed (VS Code) layout", () => {
 
     expect(wrapper.find('[aria-label="Trace"]').attributes("style")).toContain("58%");
     expect(wrapper.find('[data-testid="trace-diagram"]').attributes("style")).toContain("49%");
+
+    wrapper.unmount();
+  });
+
+  it("pins a media artifact into the browser workbench and can rearrange devtools", async () => {
+    setEmbeddedOverride(false);
+    const wrapper = mount(InteractiveView, mountOpts);
+    await flushPromises();
+
+    const store = useRunStore();
+    store.transcript.push({
+      role: "agent",
+      text: "Rendered mockup",
+      typedView: {
+        Source: "",
+        Elements: [
+          {
+            Kind: "media",
+            MediaHandle: "mockup.html",
+            MediaKind: "html",
+            MediaCaption: "Checkout mockup",
+          },
+        ],
+      },
+    });
+    await nextTick();
+
+    await wrapper.find('[data-testid="media-workbench-toggle"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="media-workbench-pane"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="media-workbench-stage"]').text()).toContain("Checkout mockup");
+    expect(wrapper.find('[data-testid="media-devtools-pane"]').exists()).toBe(true);
+
+    await wrapper.find('[data-testid="workbench-orient-horizontal"]').trigger("click");
+    await wrapper.find('[data-testid="devtools-dock-float"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".iv__main--workbench-horizontal").exists()).toBe(true);
+    expect(wrapper.find('[data-testid="floating-devtools-pane"]').exists()).toBe(true);
 
     wrapper.unmount();
   });

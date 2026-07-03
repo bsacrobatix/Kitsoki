@@ -82,6 +82,18 @@
         >
           {{ traceCollapsed ? 'Show trace' : 'Hide trace' }}
         </button>
+        <button
+          v-if="!embed && mediaItems.length > 0"
+          type="button"
+          class="iv__workbench-toggle"
+          data-testid="media-workbench-toggle"
+          :aria-pressed="workbenchEnabled"
+          :title="workbenchEnabled ? 'Return media to the chat transcript' : 'Pin media beside the chat'"
+          @click="toggleWorkbench"
+        >
+          {{ workbenchEnabled ? 'Close media pane' : 'Open media pane' }}
+        </button>
+        <router-link :to="`/s/${sessionId}`" class="iv__observe-link" data-testid="observe-link">Observe ↗</router-link>
         <MetaButton v-if="embed" placement="topbar" />
       </header>
 
@@ -112,7 +124,99 @@
            Embed (VS Code): chat ONLY — trace + graph live in their own dockable
            windows (the "Kitsoki Surfaces" panels), so the chat panel never repeats
            them. -->
-      <div class="iv__main" :class="{ 'iv__main--embed': embed, 'iv__main--trace-collapsed': traceCollapsed }">
+      <div
+        v-if="workbenchEnabled && !embed"
+        class="iv__workbench-bar"
+        data-testid="media-workbench-bar"
+      >
+        <label class="iv__workbench-field">
+          <span>Media</span>
+          <select
+            v-model="selectedMediaKey"
+            class="iv__workbench-select"
+            data-testid="media-workbench-select"
+          >
+            <option v-for="item in mediaItems" :key="item.key" :value="item.key">
+              {{ item.title }}
+            </option>
+          </select>
+        </label>
+        <span class="iv__segmented" role="group" aria-label="Workbench orientation">
+          <button
+            type="button"
+            class="iv__segmented-btn"
+            data-testid="workbench-orient-vertical"
+            :aria-pressed="workbenchOrientation === 'vertical'"
+            @click="workbenchOrientation = 'vertical'"
+          >Vertical</button>
+          <button
+            type="button"
+            class="iv__segmented-btn"
+            data-testid="workbench-orient-horizontal"
+            :aria-pressed="workbenchOrientation === 'horizontal'"
+            @click="workbenchOrientation = 'horizontal'"
+          >Horizontal</button>
+        </span>
+        <span class="iv__segmented" role="group" aria-label="Devtools dock">
+          <button
+            type="button"
+            class="iv__segmented-btn"
+            data-testid="devtools-dock-right"
+            :aria-pressed="devtoolsDock === 'right'"
+            @click="devtoolsDock = 'right'"
+          >Dock right</button>
+          <button
+            type="button"
+            class="iv__segmented-btn"
+            data-testid="devtools-dock-bottom"
+            :aria-pressed="devtoolsDock === 'bottom'"
+            @click="devtoolsDock = 'bottom'"
+          >Dock bottom</button>
+          <button
+            type="button"
+            class="iv__segmented-btn"
+            data-testid="devtools-dock-float"
+            :aria-pressed="devtoolsDock === 'floating'"
+            @click="devtoolsDock = 'floating'"
+          >Float</button>
+        </span>
+        <button
+          type="button"
+          class="iv__workbench-action"
+          data-testid="devtools-popout"
+          title="Open the selected devtools surface in a separate browser window"
+          @click="popOutDevtools"
+        >Pop out</button>
+      </div>
+
+      <div
+        class="iv__main"
+        :class="{
+          'iv__main--embed': embed,
+          'iv__main--trace-collapsed': traceCollapsed,
+          'iv__main--workbench': workbenchEnabled && !embed,
+          'iv__main--workbench-vertical': workbenchEnabled && !embed && workbenchOrientation === 'vertical',
+          'iv__main--workbench-horizontal': workbenchEnabled && !embed && workbenchOrientation === 'horizontal',
+          'iv__main--devtools-bottom': workbenchEnabled && !embed && devtoolsDock === 'bottom',
+          'iv__main--devtools-floating': workbenchEnabled && !embed && devtoolsDock === 'floating',
+        }"
+      >
+        <section
+          v-if="workbenchEnabled && !embed"
+          class="iv__media-pane"
+          aria-label="Pinned media"
+          data-testid="media-workbench-pane"
+        >
+          <div class="iv__pane-header">
+            <span>{{ selectedMedia?.title || 'Media' }}</span>
+            <span v-if="store.embedLabel" class="iv__pane-subtitle">{{ store.embedLabel }}</span>
+          </div>
+          <div class="iv__media-stage" data-testid="media-workbench-stage">
+            <ViewElement v-if="selectedMedia?.element" :element="selectedMedia.element" />
+            <div v-else class="iv__empty">No media selected.</div>
+          </div>
+        </section>
+
         <!-- LEFT: conversation -->
         <section
           class="iv__chat"
@@ -162,6 +266,7 @@
           <ChatTranscript
             class="iv__transcript"
             :transcript="store.chatEntries"
+            :suppressed-media-handles="suppressedMediaHandles"
             @rewind="onRewind"
           />
           <!-- Streaming thinking bubble: visible while a turn is in flight -->
@@ -208,7 +313,7 @@
 
         <!-- RIGHT (browser): live trace (diagram over timeline) -->
         <button
-          v-if="!embed && !traceCollapsed"
+          v-if="!embed && !traceCollapsed && !workbenchEnabled"
           type="button"
           class="iv__resize-handle iv__resize-handle--column"
           data-testid="trace-column-resizer"
@@ -222,7 +327,7 @@
           @keydown="onColumnResizeKeydown"
         ></button>
         <section
-          v-if="!embed && !traceCollapsed"
+          v-if="!embed && !traceCollapsed && !workbenchEnabled"
           class="iv__trace"
           aria-label="Trace"
           :style="traceColumnStyle"
@@ -307,7 +412,107 @@
 
         <!-- Embed (VS Code): nothing beside the chat — Trace and Graph open as
              their own dockable windows via "Kitsoki: Open Trace" / "Open Graph". -->
+        <section
+          v-if="workbenchEnabled && !embed && !traceCollapsed && devtoolsDock !== 'floating'"
+          class="iv__devtools"
+          aria-label="Devtools"
+          data-testid="media-devtools-pane"
+        >
+          <div class="iv__pane-header">
+            <span class="iv__devtools-tabs" role="tablist">
+              <button
+                type="button"
+                class="iv__devtools-tab"
+                data-testid="devtools-tab-graph"
+                :aria-selected="devtoolsTab === 'graph'"
+                @click="devtoolsTab = 'graph'"
+              >Graph</button>
+              <button
+                type="button"
+                class="iv__devtools-tab"
+                data-testid="devtools-tab-trace"
+                :aria-selected="devtoolsTab === 'trace'"
+                @click="devtoolsTab = 'trace'"
+              >Trace</button>
+            </span>
+            <button type="button" class="iv__pane-action" @click="toggleTraceColumn">hide</button>
+          </div>
+          <div class="iv__devtools-body">
+            <StateDiagram
+              v-if="devtoolsTab === 'graph' && store.mermaid"
+              :mermaid-source="store.mermaid.source"
+              :node-map="store.mermaid.node_map"
+              :current-state-path="store.currentStatePath"
+              :highlighted-state-paths="store.highlightedStatePaths"
+              :events="store.events"
+              :selected-event-index="store.selectedEventIndex"
+              :intents="store.currentView?.intents ?? []"
+              @select="onNodeSelect"
+              @select-phase="onPhaseSelect"
+              @select-event="onEventSelect"
+            />
+            <TraceTimeline
+              v-else-if="devtoolsTab === 'trace'"
+              :events="store.events"
+              :selected-event-index="store.selectedEventIndex"
+              :highlighted-state-paths="store.highlightedStatePaths"
+              :highlight-tick="store.highlightTick"
+              :mermaid-source="store.mermaid?.source ?? null"
+              @select="onEventSelect"
+            />
+            <div v-else class="iv__empty">No diagram.</div>
+          </div>
+        </section>
       </div>
+      <section
+        v-if="workbenchEnabled && !embed && !traceCollapsed && devtoolsDock === 'floating'"
+        class="iv__floating-devtools"
+        aria-label="Floating devtools"
+        data-testid="floating-devtools-pane"
+      >
+        <div class="iv__pane-header">
+          <span class="iv__devtools-tabs" role="tablist">
+            <button
+              type="button"
+              class="iv__devtools-tab"
+              :aria-selected="devtoolsTab === 'graph'"
+              @click="devtoolsTab = 'graph'"
+            >Graph</button>
+            <button
+              type="button"
+              class="iv__devtools-tab"
+              :aria-selected="devtoolsTab === 'trace'"
+              @click="devtoolsTab = 'trace'"
+            >Trace</button>
+          </span>
+          <button type="button" class="iv__pane-action" @click="devtoolsDock = 'right'">dock</button>
+        </div>
+        <div class="iv__devtools-body">
+          <StateDiagram
+            v-if="devtoolsTab === 'graph' && store.mermaid"
+            :mermaid-source="store.mermaid.source"
+            :node-map="store.mermaid.node_map"
+            :current-state-path="store.currentStatePath"
+            :highlighted-state-paths="store.highlightedStatePaths"
+            :events="store.events"
+            :selected-event-index="store.selectedEventIndex"
+            :intents="store.currentView?.intents ?? []"
+            @select="onNodeSelect"
+            @select-phase="onPhaseSelect"
+            @select-event="onEventSelect"
+          />
+          <TraceTimeline
+            v-else-if="devtoolsTab === 'trace'"
+            :events="store.events"
+            :selected-event-index="store.selectedEventIndex"
+            :highlighted-state-paths="store.highlightedStatePaths"
+            :highlight-tick="store.highlightTick"
+            :mermaid-source="store.mermaid?.source ?? null"
+            @select="onEventSelect"
+          />
+          <div v-else class="iv__empty">No diagram.</div>
+        </div>
+      </section>
     </template>
   </div>
 </template>
@@ -328,6 +533,7 @@ import InputBar from "../components/InputBar.vue";
 import StateDiagram from "../components/StateDiagram.vue";
 import TraceTimeline from "../components/TraceTimeline.vue";
 import TracePet from "../components/TracePet.vue";
+import ViewElement from "../components/ViewElement.vue";
 import StoryFreshness from "../components/StoryFreshness.vue";
 import MetaButton from "../components/meta/MetaButton.vue";
 import ProposalsBadge from "../components/ProposalsBadge.vue";
@@ -335,7 +541,7 @@ import { useProposalsStore } from "../stores/proposals.js";
 import type { Proposal } from "../stores/proposals.js";
 import { fmtTokens, fmtCost } from "../components/agent/lib.js";
 import { isEmbedded } from "../lib/embed.js";
-import type { NodeRef } from "../types.js";
+import type { NodeRef, ViewElement as ViewElementT } from "../types.js";
 
 const GITHUB_INBOX_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const TRACE_WIDTH_DEFAULT = 54;
@@ -344,6 +550,13 @@ const TRACE_WIDTH_MAX = 75;
 const DIAGRAM_HEIGHT_DEFAULT = 45;
 const DIAGRAM_HEIGHT_MIN = 18;
 const DIAGRAM_HEIGHT_MAX = 82;
+
+type MediaWorkbenchItem = {
+  key: string;
+  handle: string;
+  title: string;
+  element: ViewElementT;
+};
 
 const props = defineProps<{ sessionId: string }>();
 const store = useRunStore();
@@ -372,6 +585,11 @@ const error = ref<string | null>(null);
 const traceCollapsed = ref(false);
 const traceWidthPercent = ref(TRACE_WIDTH_DEFAULT);
 const diagramHeightPercent = ref(DIAGRAM_HEIGHT_DEFAULT);
+const workbenchEnabled = ref(false);
+const selectedMediaKey = ref("");
+const workbenchOrientation = ref<"vertical" | "horizontal">("vertical");
+const devtoolsDock = ref<"right" | "bottom" | "floating">("right");
+const devtoolsTab = ref<"graph" | "trace">("graph");
 
 // Opt-in decorative trace-column pet (off by default). Persisted in localStorage
 // so the choice sticks across reloads. See TracePet.vue.
@@ -405,6 +623,66 @@ const diagramPanelStyle = computed(() => ({
 const timelinePanelStyle = computed(() => ({
   flex: `1 1 ${100 - diagramHeightPercent.value}%`,
 }));
+
+function mediaHandle(el: ViewElementT): string {
+  return el.Handle ?? el.MediaHandle ?? "";
+}
+
+function mediaTitle(el: ViewElementT, index: number): string {
+  return el.Caption ?? el.MediaCaption ?? mediaHandle(el) ?? `Media ${index + 1}`;
+}
+
+const mediaItems = computed<MediaWorkbenchItem[]>(() => {
+  const items: MediaWorkbenchItem[] = [];
+  for (const entry of store.chatEntries) {
+    for (const el of entry.typedView?.Elements ?? []) {
+      if (el.Kind !== "media") continue;
+      const handle = mediaHandle(el);
+      if (!handle) continue;
+      items.push({
+        key: `${handle}:${items.length}`,
+        handle,
+        title: mediaTitle(el, items.length),
+        element: el,
+      });
+    }
+  }
+  return items;
+});
+
+const selectedMedia = computed<MediaWorkbenchItem | null>(() => {
+  return mediaItems.value.find((item) => item.key === selectedMediaKey.value) ?? mediaItems.value.at(-1) ?? null;
+});
+
+const suppressedMediaHandles = computed<string[]>(() => {
+  return workbenchEnabled.value && selectedMedia.value ? [selectedMedia.value.handle] : [];
+});
+
+function selectLatestMedia(): void {
+  const latest = mediaItems.value.at(-1);
+  selectedMediaKey.value = latest?.key ?? "";
+}
+
+function toggleWorkbench(): void {
+  if (!workbenchEnabled.value) selectLatestMedia();
+  workbenchEnabled.value = !workbenchEnabled.value;
+}
+
+function onPinMedia(ev: Event): void {
+  const detail = (ev as CustomEvent<{ handle?: string }>).detail;
+  const handle = detail?.handle;
+  const match = handle
+    ? [...mediaItems.value].reverse().find((item) => item.handle === handle)
+    : mediaItems.value.at(-1);
+  selectedMediaKey.value = match?.key ?? "";
+  workbenchEnabled.value = !!match;
+}
+
+function popOutDevtools(): void {
+  const surface = devtoolsTab.value === "graph" ? "graph" : "trace";
+  const url = `${location.origin}${location.pathname}?surface=${surface}`;
+  window.open(url, `kitsoki-${surface}-${props.sessionId}`, "popup,width=760,height=760");
+}
 
 // ── Harness picker (mirrors RunView) ─────────────────────────────────────────
 const activeProfileObj = computed(() => store.harnessProfiles.find((p) => p.active));
@@ -683,6 +961,7 @@ onMounted(() => {
   // right after starting a session), the home screen must NOT later bounce the
   // user back in when they click "← Stories" with one live session.
   markAutoNavDone();
+  window.addEventListener("kitsoki:pin-media", onPinMedia);
   void loadSession(props.sessionId);
 
   // Demo / tour test hook: submit an explicit intent through THIS view's own
@@ -709,7 +988,11 @@ onMounted(() => {
     displayLabel?: string,
   ) => {
     if (!source) return;
-    await runTurn(() => store.submitIntent(source!, props.sessionId, name, slots, displayLabel));
+    await runTurn(() =>
+      displayLabel === undefined
+        ? store.submitIntent(source!, props.sessionId, name, slots)
+        : store.submitIntent(source!, props.sessionId, name, slots, displayLabel),
+    );
   };
 
   // __kitsokiSendText drives a FREE-TEXT turn through the store's sendText
@@ -758,7 +1041,23 @@ watch(
   }
 );
 
+watch(
+  mediaItems,
+  (items) => {
+    if (items.length === 0) {
+      workbenchEnabled.value = false;
+      selectedMediaKey.value = "";
+      return;
+    }
+    if (!items.some((item) => item.key === selectedMediaKey.value)) {
+      selectedMediaKey.value = items.at(-1)?.key ?? "";
+    }
+  },
+  { flush: "post" },
+);
+
 onUnmounted(() => {
+  window.removeEventListener("kitsoki:pin-media", onPinMedia);
   stopResizeListeners();
   stopGitHubInboxPolling();
   store.teardown();
@@ -830,7 +1129,11 @@ function onSend(text: string, _intentName: string): void {
 
 function onIntent(name: string, slots: Record<string, unknown>, displayLabel?: string): void {
   if (!source) return;
-  void runTurn(() => store.submitIntent(source!, props.sessionId, name, slots, displayLabel));
+  void runTurn(() =>
+    displayLabel === undefined
+      ? store.submitIntent(source!, props.sessionId, name, slots)
+      : store.submitIntent(source!, props.sessionId, name, slots, displayLabel),
+  );
 }
 
 // Rewind one CRR decision from its route-receipt chip (re-dispatch under the
@@ -983,6 +1286,28 @@ function onEventSelect(index: number): void {
   border-color: #3b82f6;
 }
 
+.iv__workbench-toggle,
+.iv__workbench-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #10251f;
+  color: #bbf7d0;
+  border: 1px solid #166534;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-family: inherit;
+  padding: 0.18rem 0.5rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.iv__workbench-toggle:hover,
+.iv__workbench-action:hover {
+  background: #123626;
+  border-color: #22c55e;
+}
+
 /* ---- Main row ---- */
 .iv__reload-warning {
   flex-shrink: 0;
@@ -1028,6 +1353,200 @@ function onEventSelect(index: number): void {
   flex: 1;
   min-height: 0;
   gap: 0;
+}
+
+.iv__workbench-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.75rem;
+  background: #0c1627;
+  border-bottom: 1px solid var(--k-border, #1e293b);
+  min-width: 0;
+}
+
+.iv__workbench-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 16rem;
+  color: var(--k-fg-muted, #94a3b8);
+  font-size: 0.74rem;
+}
+
+.iv__workbench-select {
+  min-width: 0;
+  width: 100%;
+  max-width: 22rem;
+  background: #111c33;
+  color: #e2e8f0;
+  border: 1px solid #2b3a55;
+  border-radius: 4px;
+  font-size: 0.74rem;
+  padding: 0.18rem 0.35rem;
+}
+
+.iv__segmented {
+  display: inline-flex;
+  border: 1px solid #2b3a55;
+  border-radius: 5px;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.iv__segmented-btn,
+.iv__devtools-tab,
+.iv__pane-action {
+  background: #111c33;
+  color: #cbd5e1;
+  border: 0;
+  border-right: 1px solid #2b3a55;
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.22rem 0.45rem;
+  cursor: pointer;
+}
+
+.iv__segmented-btn:last-child,
+.iv__devtools-tab:last-child {
+  border-right: 0;
+}
+
+.iv__segmented-btn[aria-pressed="true"],
+.iv__devtools-tab[aria-selected="true"] {
+  background: #1d4ed8;
+  color: #eff6ff;
+}
+
+.iv__main--workbench {
+  display: grid;
+  grid-template-columns: minmax(22rem, 44%) minmax(20rem, 1fr) minmax(18rem, 28%);
+}
+
+.iv__main--workbench-horizontal,
+.iv__main--devtools-bottom {
+  grid-template-columns: minmax(20rem, 1fr) minmax(20rem, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(12rem, 32%);
+}
+
+.iv__main--workbench-horizontal .iv__devtools,
+.iv__main--devtools-bottom .iv__devtools {
+  grid-column: 1 / -1;
+}
+
+.iv__main--devtools-floating {
+  grid-template-columns: minmax(22rem, 48%) minmax(20rem, 1fr);
+}
+
+.iv__media-pane,
+.iv__devtools {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border-right: 1px solid var(--k-border, #1e293b);
+  background: #0b1220;
+}
+
+.iv__media-pane {
+  resize: horizontal;
+  overflow: auto;
+}
+
+.iv__main--workbench-horizontal .iv__media-pane {
+  resize: both;
+}
+
+.iv__pane-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2.25rem;
+  padding: 0.42rem 0.6rem;
+  border-bottom: 1px solid var(--k-border, #1e293b);
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.iv__pane-subtitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--k-fg-muted, #94a3b8);
+  font-weight: 500;
+}
+
+.iv__media-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.75rem;
+}
+
+.iv__media-stage :deep(.ve-media),
+.iv__media-stage :deep(.ve-media-video),
+.iv__media-stage :deep(.ve-media-image),
+.iv__media-stage :deep(.ve-media-iframe) {
+  height: 100%;
+  max-height: none;
+}
+
+.iv__media-stage :deep(.ve-media-iframe) {
+  min-height: 36rem;
+}
+
+.iv__devtools {
+  resize: horizontal;
+  overflow: auto;
+}
+
+.iv__devtools-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.iv__devtools-body :deep(.state-diagram),
+.iv__devtools-body :deep(.trace-timeline) {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+}
+
+.iv__devtools-tabs {
+  display: inline-flex;
+  border: 1px solid #2b3a55;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.iv__pane-action {
+  margin-left: auto;
+  border: 1px solid #2b3a55;
+  border-radius: 4px;
+}
+
+.iv__floating-devtools {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 850;
+  width: min(44rem, calc(100vw - 2rem));
+  height: min(34rem, calc(100vh - 6rem));
+  display: flex;
+  flex-direction: column;
+  resize: both;
+  overflow: auto;
+  background: #0b1220;
+  border: 1px solid #2b3a55;
+  border-radius: 6px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
 }
 
 .iv__main--trace-collapsed .iv__chat {
