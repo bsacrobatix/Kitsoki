@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -934,14 +935,43 @@ func setHarnessLogger(h harness.Harness, l *slog.Logger) {
 //     resolveAnthropicCredential for the credential chain.
 //  3. Otherwise                  → use "replay" (requires --recording) or error.
 func autoSelectHarness() string {
+	claude := false
 	if _, err := exec.LookPath("claude"); err == nil {
+		claude = true
+	}
+	cred := hasAnthropicCredential()
+	if hint := firstRunProviderHint(claude, cred); hint != "" {
+		firstRunHintOnce.Do(func() { fmt.Fprint(os.Stderr, hint) })
+	}
+	if claude {
 		return "claude"
 	}
-	if hasAnthropicCredential() {
+	if cred {
 		return "live"
 	}
 	// Fall back to replay; the caller will error if --recording is not set.
 	return "replay"
+}
+
+// firstRunHintOnce ensures the no-provider first-run hint is printed at most
+// once per process, no matter how many times autoSelectHarness runs.
+var firstRunHintOnce sync.Once
+
+// firstRunProviderHint returns an actionable message when NO agent provider is
+// configured (no `claude` binary on PATH and no Anthropic credential), so a
+// fresh `kitsoki` run does not silently fall back to the replay harness and
+// then fail cryptically on a missing --recording. Returns "" when a provider
+// exists. Change 0.4 (G1: "no silent replay fallback on first run").
+func firstRunProviderHint(hasClaude, hasCred bool) string {
+	if hasClaude || hasCred {
+		return ""
+	}
+	return "kitsoki: no agent provider found — falling back to the no-LLM replay harness.\n" +
+		"To run kitsoki live, configure one of:\n" +
+		"  \u2022 install the `claude` CLI (Claude Code) so it is on your PATH, or\n" +
+		"  \u2022 set ANTHROPIC_API_KEY (direct Anthropic SDK), or\n" +
+		"  \u2022 select a harness profile in .kitsoki.local.yaml (see docs/architecture/harness-profiles.md).\n" +
+		"Without one, only --harness replay (needs --recording) and deterministic flow tests will run.\n"
 }
 
 // resolveAgentBackend resolves the agent backend selector with precedence
