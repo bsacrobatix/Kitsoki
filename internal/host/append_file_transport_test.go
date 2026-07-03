@@ -94,6 +94,34 @@ func TestAppendFileTransport_BootstrapsNewFile(t *testing.T) {
 	}
 }
 
+func TestAppendFileTransport_BareThreadUsesTempMirror(t *testing.T) {
+	t.Chdir(t.TempDir())
+	tmpPath := filepath.Join(os.TempDir(), "kitsoki-append-to-file", "47.md")
+	_ = os.Remove(tmpPath)
+	t.Cleanup(func() { _ = os.Remove(tmpPath) })
+
+	res, err := host.AppendFileTransportHandler(context.Background(), map[string]any{
+		"thread": "47",
+		"body":   "Comment for a GitHub issue-number thread.",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if _, err := os.Stat("47"); !os.IsNotExist(err) {
+		t.Fatalf("bare thread should not create a repo-root file, stat err=%v", err)
+	}
+	raw, err := os.ReadFile(tmpPath)
+	if err != nil {
+		t.Fatalf("temp mirror not written: %v", err)
+	}
+	if !strings.Contains(string(raw), "Comment for a GitHub issue-number thread.") {
+		t.Fatalf("temp mirror missing body: %s", raw)
+	}
+}
+
 func TestAppendFileTransport_RequiresThread(t *testing.T) {
 	res, err := host.AppendFileTransportHandler(context.Background(), map[string]any{
 		"body": "x",
