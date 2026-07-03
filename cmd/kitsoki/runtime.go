@@ -142,6 +142,15 @@ type runtimeConfig struct {
 	HarnessProfiles map[string]orchestrator.HarnessProfile
 	DefaultProfile  string
 
+	// HarnessLadder carries the operator-declared `.kitsoki.yaml`
+	// `harness_ladder:` block (automatic multi-provider fallback +
+	// effort/model escalation for every host.agent.decide / host.agent.task
+	// dispatch — see internal/host/ladder.go and
+	// internal/webconfig.HarnessLadder). Zero value (Enabled() == false, the
+	// default when no harness_ladder: is declared) leaves every dispatch on
+	// today's single-attempt behavior.
+	HarnessLadder host.LadderConfig
+
 	// WantRoomEnterSink allocates a TUI room-enter sink and wires it into the
 	// orchestrator. `kitsoki run` sets this; `kitsoki web` does not.
 	RoomEnterSink orchestrator.RoomEnterSink
@@ -204,6 +213,9 @@ type runtimeBase struct {
 	// .kitsoki.yaml and inherited by every session the registry spins up.
 	HarnessProfiles map[string]orchestrator.HarnessProfile
 	DefaultProfile  string
+	// HarnessLadder mirrors runtimeConfig.HarnessLadder, inherited by every
+	// session the registry spins up.
+	HarnessLadder host.LadderConfig
 
 	// Mining is the resolved .kitsoki.yaml `mining:` block, inherited by every
 	// session. Default-zero (no block / enabled:false) ⇒ no miner — every flow
@@ -268,6 +280,7 @@ func (b runtimeBase) config(storyPath string, def *app.AppDef) runtimeConfig {
 		AgentBackend:      b.AgentBackend,
 		HarnessProfiles:   b.HarnessProfiles,
 		DefaultProfile:    b.DefaultProfile,
+		HarnessLadder:     b.HarnessLadder,
 		Flow:              b.Flow,
 		FlowFilePath:      b.FlowFilePath,
 		HostCassette:      b.HostCassette,
@@ -485,6 +498,9 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 	}
 	if len(cfg.HarnessProfiles) > 0 {
 		runOpts = append(runOpts, orchestrator.WithHarnessProfiles(cfg.HarnessProfiles, cfg.DefaultProfile))
+	}
+	if cfg.HarnessLadder.Enabled() {
+		runOpts = append(runOpts, orchestrator.WithHarnessLadderConfig(cfg.HarnessLadder))
 	}
 	if d := def.Decider; d != nil {
 		runOpts = append(runOpts, orchestrator.WithDecider(orchestrator.DeciderConfig{

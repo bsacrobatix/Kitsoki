@@ -7,6 +7,19 @@ import (
 	"kitsoki/internal/host"
 )
 
+// WithHarnessLadderConfig installs cfg as the session's harness ladder: the
+// automatic multi-provider fallback + effort/model escalation applied to
+// every host.agent.decide / host.agent.task dispatch. A disabled cfg
+// (cfg.Enabled() == false — the zero value) is the default and leaves every
+// dispatch on today's single-attempt behavior, so passing a zero value is
+// always safe. See internal/webconfig.HarnessLadder for the `.kitsoki.yaml`
+// surface that produces cfg, and internal/host/ladder.go for the design.
+func WithHarnessLadderConfig(cfg host.LadderConfig) Option {
+	return func(o *Orchestrator) {
+		o.harnessLadder = cfg
+	}
+}
+
 // HarnessProfile is the orchestrator-side runtime form of an operator-declared
 // harness profile (webconfig.HarnessProfile, ${VAR} already expanded). It is a
 // named bundle of the agent-selection axes a live session can switch between:

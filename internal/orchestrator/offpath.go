@@ -162,6 +162,7 @@ func (o *Orchestrator) askOffPathVoiced(ctx context.Context, sid app.SessionID, 
 	backendName, activeProfile := o.resolveSelection(o.agentBackendName)
 	ctx = host.WithAgentBackendNamed(ctx, backendName)
 	ctx = host.WithActiveProfile(ctx, activeProfile)
+	ctx = host.WithHarnessLadder(ctx, o.harnessLadder)
 	ctx = host.WithPromptRenderer(ctx, o.promptRenderer)
 	ctx = host.WithProjectContext(ctx, projectContextFor(o.def))
 	// Inject the live IDE link (nil-safe) so the off-path agent subprocess
