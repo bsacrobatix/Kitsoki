@@ -4,7 +4,7 @@
 branch `kitsoki-as-dependency`; the gears team's own instance lives zero-config
 in the gears repo under `stories/gears-rust/`, importing `@kitsoki/dev-story`
 (PR #4082). Narrative moved to the
-dev-story README, the `kitsoki-ui-demo` SKILL.md, `external-project-targeting.md`,
+dev-story README, the `kitsoki-ui-demo` SKILL.md,
 and the new [`kitsoki tour` reference](../web/tour.md). The dev-story PRD → Design
 demo now renders binary-native (`kitsoki tour --feature dev-story-prd-design`) —
 148s MP4, 11 chapters, validated by a `kitsoki-ui-qa` pass (8/9 beats proven from
@@ -35,10 +35,10 @@ binary present**: that repo carries its own tiny instance that does
 `import: { source: "@kitsoki/dev-story" }`, the kitsoki story library ships
 **inside the binary** (overridable to a local kitsoki checkout via a CLI flag),
 and the demo video **renders from the binary** (`kitsoki tour …`) with no
-pnpm/Playwright. This resolves
-[`external-project-targeting.md`](external-project-targeting.md) open question #1
+pnpm/Playwright. This resolves the open question
 (instance in the kitsoki repo vs owned by the target repo) in favour of
-*the target repo owns its instance and imports the base from the binary*.
+*the target repo owns its instance and imports the base from the binary* —
+documented in the dev-story README § external-target section.
 
 ## What changes
 
@@ -199,10 +199,9 @@ with `kitsoki web` (discovers the instance under `stories/`) and
 In the **kitsoki repo**: delete `stories/gears-rust/**`,
 `tools/runstatus/tests/playwright/gears-prd-design.spec.ts`,
 `tools/runstatus/src/tour/gears-prd-design-manifest.ts`, and
-`features/gears-prd-design.yaml`; update
-[`external-project-targeting.md`](external-project-targeting.md) and the
-dev-story README to point at the gears repo as the worked external example, with
-a one-paragraph "external targets live in their own repo" note.
+`features/gears-prd-design.yaml`; the dev-story README now points at the gears
+repo as the worked external example, with the "external targets live in their own
+repo" note under the doc-profile section.
 
 ## Slice 4 — Dev-story golden video (conversational development)
 
