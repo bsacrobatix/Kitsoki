@@ -50,6 +50,14 @@ agents:
 
 world:
   # ── Goal identity + locations ──────────────────────────────────────────────
+  # workdir defaults to "." (repo root) so host.starlark.run's inspector root
+  # resolves goal_dir/work_dir (both repo-root-relative by convention) against
+  # the checkout, not KITSOKI_APP_DIR (the app's OWN directory, stories/goal-
+  # seeker/ — the fallback internal/host/starlark_run.go consults when workdir
+  # is absent, which otherwise double-joins every repo-root-relative testdata
+  # path and breaks every flow's fixture lookup). Same convention several
+  # other stories already declare (e.g. stories/prd, stories/harness-parity-qa).
+  workdir:          { type: string, default: "." }
   goal_slug:        { type: string, default: "generalized-usage" }
   goal_dir:         { type: string, default: "docs/goals/generalized-usage" }   # GOAL.md + decomposition.yaml
   work_dir:         { type: string, default: ".artifacts/goal/generalized-usage" } # log.jsonl + ledger.json
