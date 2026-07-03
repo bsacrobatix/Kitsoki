@@ -24,9 +24,10 @@ Kitsoki story or command that applies the repo's bug-filing conventions.
    story in the TUI with `--ticket-repo <owner/repo>`, then use `/bug
    <description>`. This writes scrubbed transcript/context artifacts and files
    through the same GitHub bug orchestration with uploaded evidence.
-3. **Existing rrweb/HAR evidence that needs a hosted reviewer artifact:** after
-   the GitHub issue exists, use `kitsoki gh-agent deck` to produce the hosted
-   no-LLM replay deck and comment the link on the issue.
+3. **Existing rrweb/HAR evidence that needs a hosted reviewer artifact:** push
+   the evidence into the deployed GitHub agent's evidence store, then trigger the
+   agent with a signed `kitsoki gh-agent replay` webhook. The hosted deck comment
+   must be authored by the GitHub App bot, not by the operator's `gh` identity.
 4. **Text-only issue with no evidence:** `kitsoki bug create --github
    <owner/repo>` is acceptable, but note that it captures no artifacts. Do not
    use it when the user asked for artifacts.
@@ -77,23 +78,35 @@ when the user explicitly wants a local fixture.
 ### Hosted GitHub Agent Deck
 
 Use this after a GitHub issue exists and the useful evidence is an rrweb/HAR
-bundle that should be reviewable through the GitHub agent's hosted deck:
+bundle that should be reviewable through the GitHub agent's hosted deck. The
+normal path is the deployed agent webhook trigger:
 
 ```bash
-go run ./cmd/kitsoki gh-agent deck \
+# 1. Put the evidence where the deployed agent reads it. The destination id is:
+#    $(kitsoki-internal formula) bugdeck.DeckID(<owner/repo>, <issue>)
+#    For bsacrobatix/Kitsoki#68, for example: bsacrobatix-Kitsoki-68.
+scp -r <local-evidence-dir>/<deck-id> \
+  <agent-host>:<agent-evidence-dir>/
+
+# 2. Re-deliver a signed issue webhook so the deployed agent renders, hosts, and
+#    comments as the GitHub App installation.
+go run ./cmd/kitsoki gh-agent replay \
   --repo <owner/repo> \
   --issue <number> \
-  --rrweb <path/to/rrweb.json> \
-  --har <path/to/har.json> \
-  --decks-dir .artifacts/gh-agent/decks \
-  --public-base-url <agent-public-url> \
-  --slidey-dir <path/to/slidey> \
-  --comment
+  --action opened \
+  --url <agent-public-url>/gh-agent/webhook \
+  --secret "$KITSOKI_GH_WEBHOOK_SECRET"
 ```
 
-If the evidence is already in the agent evidence store, pass `--evidence-dir`
-instead of `--rrweb`/`--har`. This is deterministic and no-LLM; it should be the
-entrypoint for "push artifacts to the GitHub agent and comment a replay link".
+When filing from `kitsoki web`, prefer starting it with `--agent-evidence-dir`
+pointed at the agent's evidence store when that path is mounted locally. If the
+agent is off-box, copy the deposited `<deck-id>/har.json` and/or
+`<deck-id>/rrweb.json` directory to the agent before replaying the webhook.
+
+`kitsoki gh-agent deck` is a diagnostic/off-box renderer for local proof or
+repair. Do not use `kitsoki gh-agent deck --comment` as the normal filing path:
+that posts through the caller's local `gh` authentication, so the issue comment
+will be authored by the user instead of the GitHub App.
 
 ### Text-Only Fallback
 
