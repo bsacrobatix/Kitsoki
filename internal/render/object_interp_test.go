@@ -81,3 +81,16 @@ func TestPongo_SliceInterpolatedIntoString(t *testing.T) {
 		t.Fatalf("expected 3 elements, got %d: %q", len(decoded), out)
 	}
 }
+
+func TestPongo_CyclicObjectDoesNotOverflowStack(t *testing.T) {
+	cyclic := map[string]any{"name": "loop"}
+	cyclic["self"] = cyclic
+
+	out, err := Pongo("{{ world.cyclic }}", expr.Env{World: map[string]any{"cyclic": cyclic}})
+	if err != nil {
+		t.Fatalf("Pongo returned error: %v", err)
+	}
+	if out == "" {
+		t.Fatal("cyclic object rendered empty")
+	}
+}

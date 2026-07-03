@@ -24,9 +24,9 @@ states:
         with:
           script: scripts/punch_load.star
           inputs:
-            manifest_path: "{{ world.manifest_path }}"
-            state_path: "{{ world.state_path }}"
-            run_id: "{{ world.trace_run_id }}"
+            manifest_path: "{{ world.manifest_path ?? '' }}"
+            state_path: "{{ world.state_path ?? '' }}"
+            run_id: "{{ world.trace_run_id ?? '' }}"
         bind:
           punch_items: "items"
           item_count: "item_count"
