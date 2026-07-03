@@ -253,6 +253,111 @@ states:
 	}
 }
 
+// TestImports_KitsokiRepoOverrideRelativeNoDoublePrefix is the precise
+// regression for the live dogfood trigger behind issue #32: `app.Load`'s own
+// top-level baseDir is ALWAYS absolutized (see LoadWithResolver), so a plain
+// relative `source: ../x` import chain (TestImports_TransitiveRebaseNoDoublePrefix
+// above) can never actually observe a non-absolute childDir — that test passes
+// even with rebaseEffectPaths's absolutize step removed. The REAL trigger is
+// the `@kitsoki/<name>` override-resolver branch: cmd/kitsoki/resolver.go's
+// buildImportResolver joins `$KITSOKI_REPO` onto the story name WITHOUT
+// absolutizing it first (`filepath.Join(repo, "stories", name, "app.yaml")`),
+// so a relative KITSOKI_REPO/--kitsoki-repo value hands loadImportedChild a
+// RELATIVE baseDir for the `@kitsoki/`-resolved child — and loadImportedChild
+// (unlike the top-level LoadWithResolver) never re-absolutizes it. This is
+// exactly the pets-dev → `@kitsoki/dev-story` → `../prd` shape from the bug
+// report. The injected resolver here mirrors buildImportResolver's override
+// branch verbatim (relative repo, no Abs call) to reproduce it deterministically.
+func TestImports_KitsokiRepoOverrideRelativeNoDoublePrefix(t *testing.T) {
+	root := t.TempDir()
+	mustMkdirAll(t, filepath.Join(root, "gp"))
+	mustMkdirAll(t, filepath.Join(root, "mid"))
+	mustMkdirAll(t, filepath.Join(root, "child", "prompts"))
+	mustWriteFile(t, filepath.Join(root, "child", "prompts", "deep.md"), "child prompt")
+
+	// gp imports "mid" via `@kitsoki/mid` — resolved through the injected
+	// override resolver, NOT plain relative `source:`. mid then imports
+	// "leaf" via a plain relative `../child`, exactly mirroring dev-story's
+	// own `../prd` / `../implementation` shape one level further in.
+	mustWriteFile(t, filepath.Join(root, "gp", "app.yaml"), `
+app: {id: gp, title: gp}
+root: mid
+hosts: [host.agent.decide]
+imports:
+  mid:
+    source: "@kitsoki/mid"
+    entry: main
+states:
+  shell: {view: gp}
+`)
+	mustWriteFile(t, filepath.Join(root, "mid", "app.yaml"), `
+app: {id: mid, title: mid}
+root: leaf
+hosts: [host.agent.decide]
+imports:
+  leaf:
+    source: ../child
+    entry: start
+states:
+  main: {view: mid}
+`)
+	mustWriteFile(t, filepath.Join(root, "child", "app.yaml"), `
+app: {id: child, title: child}
+root: start
+hosts: [host.agent.decide]
+states:
+  start:
+    view: child
+    on_enter:
+      - invoke: host.agent.decide
+        with:
+          prompt_path: prompts/deep.md
+`)
+
+	prevWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prevWd) })
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Mirrors buildImportResolver's override branch: `repo` is a RELATIVE
+	// value (as $KITSOKI_REPO would be if set relative to the process CWD)
+	// and the candidate is joined WITHOUT ever calling filepath.Abs.
+	repo := "."
+	resolver := func(name, _ string, override bool) (string, error) {
+		if !override {
+			return "", nil
+		}
+		candidate := filepath.Join(repo, name, "app.yaml")
+		if _, statErr := os.Stat(candidate); statErr != nil {
+			return "", statErr
+		}
+		return candidate, nil
+	}
+
+	def, err := LoadWithResolver(filepath.Join("gp", "app.yaml"), nil, resolver)
+	if err != nil {
+		t.Fatalf("Load transitive app: %v", err)
+	}
+
+	// gp.mid -> mid.leaf -> child.start
+	start := def.States["mid"].States["leaf"].States["start"]
+	got := start.OnEnter[0].With["prompt_path"].(string)
+	want := filepath.Join(root, "child", "prompts", "deep.md")
+	if g, evalErr := filepath.EvalSymlinks(got); evalErr == nil {
+		got = g
+	}
+	if w, evalErr := filepath.EvalSymlinks(want); evalErr == nil {
+		want = w
+	}
+	if got != want {
+		t.Fatalf("transitive prompt_path = %q, want %q (double-prefix regression via relative $KITSOKI_REPO override)", got, want)
+	}
+}
+
 func mustMkdirAll(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {
