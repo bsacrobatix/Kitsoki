@@ -134,7 +134,7 @@ changes:
       class: G-FLOW
       red_now: "decks carry no embedded demo videos; the demo_video-annotated changes have no produced tour"
       green_when: "a flow asserts a video-demonstrable change's deck embeds a playable rrweb tour (no LLM) and the exec summary links it"
-      cmd: "kitsoki test flows stories/goal-seeker/flows/deck_video_embed.yaml"
+      cmd: "kitsoki test flows stories/goal-seeker/app.yaml --flows stories/goal-seeker/flows/deck_video_embed.yaml"
     agent_brief: >
       Own tour-driven demo-video production for the goal-seeker. Using the established
       no-LLM rrweb pipeline (kitsoki-ui-demo skill + slidey rrweb embeds; see memory
@@ -164,7 +164,7 @@ changes:
       class: "G-LIVE+REPLAY"
       red_now: "the goal-seeker loop is single-model/serial; no cheap-first routing, no quota spread, no graceful exhaustion, no model-selection feedback"
       green_when: "a flow drives K disjoint workers with policy-assigned models; a simulated quota-exhaustion case rotates profile then parks-with-ref (no lost work); a replay exercises synthetic.new + a fallback rung"
-      replay_cmd: "kitsoki test flows stories/goal-seeker/flows/worker_pool_quota.yaml"
+      replay_cmd: "kitsoki test flows stories/goal-seeker/app.yaml --flows stories/goal-seeker/flows/worker_pool_quota.yaml"
     agent_brief: >
       Build the goal-seeker's parallel worker pool + model policy. Default to
       synthetic.new (basically free) wherever a step tolerates it; escalate to
@@ -223,7 +223,7 @@ changes:
       class: "G-LIVE+REPLAY"
       red_now: "host.Provider / app.ProviderDecl carry only {Model, Effort, Env} — no Backend field (internal/host/agents.go:114, internal/app/types.go:184); the CLI backend is resolved once per session dispatch (internal/orchestrator/host_dispatch.go:126-132), not per-call, so no host.agent.decide invoke can pin a different backend than the session's; flows/evaluate_multiprovider.yaml does not exist"
       green_when: "the replay flow exercises two decide invokes under two provider overrides (one backend: claude, one backend: codex) and the journaled per-call model differs accordingly with no live LLM call"
-      replay_cmd: "kitsoki test flows stories/goal-seeker/flows/evaluate_multiprovider.yaml"
+      replay_cmd: "kitsoki test flows stories/goal-seeker/app.yaml --flows stories/goal-seeker/flows/evaluate_multiprovider.yaml"
     agent_brief: >
       Add a Backend field to host.Provider / app.ProviderDecl (yaml `backend:`) and
       wire it through applyProvider (internal/host/agents.go) so a per-invoke
@@ -275,7 +275,7 @@ changes:
       class: "G-LIVE+REPLAY"
       red_now: "imported prompt_path resolves to the wrong root live; dev-story can't run live on a foreign checkout"
       green_when: "recorded replay flow of a dev-story imported room passes; live acceptance capture archived"
-      replay_cmd: "kitsoki test flows stories/dev-story/flows/imported_prompt_path.yaml"
+      replay_cmd: "kitsoki test flows stories/dev-story/app.yaml --flows stories/dev-story/flows/imported_prompt_path.yaml"
     agent_brief: >
       Fix issue #32: imported base-story prompt_path resolution uses the wrong root
       under live dispatch, breaking dev-story on foreign repos. Fix the resolver in
@@ -340,7 +340,7 @@ changes:
       class: G-FLOW
       red_now: "the goal-seeker has no report surface; status lives only in log.jsonl/ledger.json — not navigable, not PM-legible"
       green_when: "a flow drives two cycles + one integration and asserts (a) a per-change deck+doc exists for the integrated change, (b) the exec summary links to it, (c) it links to the artifacts — all with no LLM call"
-      cmd: "kitsoki test flows stories/goal-seeker/flows/report_deck.yaml"
+      cmd: "kitsoki test flows stories/goal-seeker/app.yaml --flows stories/goal-seeker/flows/report_deck.yaml"
     agent_brief: >
       Build the goal-seeker's reporting as a DETERMINISTIC PM DECK HIERARCHY (Brad's
       project-management view). Three levels, all built via host.starlark.run from
@@ -369,7 +369,7 @@ changes:
       class: G-FLOW
       red_now: "no closeout retrospective exists; a finished goal would leave no case-study, only scattered traces"
       green_when: "a flow warps the goal-seeker to an all-integrated state, drives the done→retrospective arc, and asserts the case-study doc + deck are produced and linked from the exec summary (no LLM in the deterministic assembly; any narrative synthesis is a single gated decide, cassette-backed)"
-      cmd: "kitsoki test flows stories/goal-seeker/flows/retrospective.yaml"
+      cmd: "kitsoki test flows stories/goal-seeker/app.yaml --flows stories/goal-seeker/flows/retrospective.yaml"
     agent_brief: >
       Add the closeout retrospective to the goal-seeker. On verdict=done, route to a
       `retrospective` room that assembles a CASE-STUDY review (docs/case-studies/, the
@@ -431,7 +431,7 @@ changes:
       class: G-FLOW
       red_now: "the plan is updated today by dispatching an agent to hand-edit decomposition.yaml directly (this session's own WS/WP/WM.7 fold-in) — no trigger/provenance recording, no delta-lint gate, no adversarial review, no graph versioning, no observable plan-evolution event"
       green_when: "a flow applies the 'add the WS wall' delta through the transaction and asserts lint-stays-green + provenance-recorded + prior-version-retained + no-in-flight-change-orphaned; a corrupted delta (injected cycle/scope-overlap/missing-gate) is rejected with no partial apply"
-      cmd: "kitsoki test flows stories/decompose-update/flows/managed_delta.yaml"
+      cmd: "kitsoki test flows stories/decompose-update/app.yaml --flows stories/decompose-update/flows/managed_delta.yaml"
     agent_brief: >
       Build the managed-update transaction for decomposition.yaml itself — the
       write seam that replaces "dispatch an agent to hand-edit the YAML" (what
@@ -510,7 +510,7 @@ changes:
       class: G-FLOW
       red_now: "gs_init.star's reset branch only truncates log.jsonl; ledger.json/preamble.md/manifests/*.json surviving from a prior run are left on disk untouched by reset"
       green_when: "the flow seeds stale ledger.json/preamble.md/a manifests/*.json entry, drives bootstrap with reset_log:true, and asserts all are cleared"
-      cmd: "kitsoki test flows stories/goal-seeker/flows/reset_log_clears_derived_state.yaml"
+      cmd: "kitsoki test flows stories/goal-seeker/app.yaml --flows stories/goal-seeker/flows/reset_log_clears_derived_state.yaml"
     agent_brief: >
       Extend gs_init.star's reset branch (currently only ctx.fs.write(log_path, "")) to
       also: ctx.fs.write the ledger.json path to the empty-ledger JSON shape, ctx.fs.write
@@ -865,7 +865,7 @@ changes:
       class: G-FLOW
       red_now: "get_started advertises `onboard` (missing) and `look` (rejected) — the literal first screen lies"
       green_when: "a flow asserts advertised-action == existing-intent; goes green"
-      cmd: "kitsoki test flows stories/dev-story/flows/get_started_actions.yaml"
+      cmd: "kitsoki test flows stories/dev-story/app.yaml --flows stories/dev-story/flows/get_started_actions.yaml"
     agent_brief: >
       Fix the first-screen dead actions (product-journey-runlog): either implement or
       stop advertising `onboard`/`look`. Add a flow that asserts advertised actions exist.
@@ -924,7 +924,7 @@ changes:
       class: G-FLOW
       red_now: "stories/prd/app.yaml:160 publishes demo PRDs into real docs/prd/ (12 byte-identical dupes exist)"
       green_when: "a flow asserts demo publish target is .artifacts/ and no dupe is emitted"
-      cmd: "kitsoki test flows stories/prd/flows/publish_target.yaml"
+      cmd: "kitsoki test flows stories/prd/app.yaml --flows stories/prd/flows/publish_target.yaml"
     agent_brief: >
       Redirect prd demo publish to .artifacts/, dedupe-on-identical in the publisher,
       delete the 12 duplicate docs/prd/*.md. Add a flow asserting the target.
