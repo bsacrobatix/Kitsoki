@@ -60,6 +60,21 @@ thought.
 
 ## Current proposals
 
+- [`human-action-workflows.md`](human-action-workflows.md) — **epic.** Make
+  human-dependent work a first-class workflow executor beside agents:
+  `host.human.*` verbs create/await/complete person-owned tasks through a
+  pluggable backend, with GitHub Issues as v1, trace/replay/cassette support,
+  a roadmap/portfolio taxonomy, and mixed human/agent work decomposition. Six
+  slices: runtime contract
+  ([`human-action-runtime.md`](human-action-runtime.md)), GitHub backend
+  ([`github-human-action-backend.md`](github-human-action-backend.md)), tracing
+  + replay ([`human-action-tracing.md`](human-action-tracing.md)), roadmap and
+  portfolio work ([`roadmap-portfolio-work.md`](roadmap-portfolio-work.md)),
+  task-scoped assistance rooms
+  ([`human-task-assistance-rooms.md`](human-task-assistance-rooms.md)), and
+  decomposition adoption
+  ([`human-work-decomposition.md`](human-work-decomposition.md)). Nothing
+  implemented yet.
 - [`kitsoki-github-agent.md`](kitsoki-github-agent.md) — **epic.** `@kitsoki` in
   a GitHub issue or PR dispatches a kitsoki run, observable + driveable through a
   public trace/artifact web service, with kitsoki reporting progress back to the
