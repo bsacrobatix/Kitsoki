@@ -107,7 +107,16 @@ func knownType(t string) bool {
 func (sc *Sidecar) validateInputs(inputs map[string]any) error {
 	for name, spec := range sc.Inputs {
 		v, present := inputs[name]
-		if !present {
+		// A present-but-nil value is indistinguishable, for validation purposes,
+		// from an absent one: an effect's with.inputs block commonly threads an
+		// optional value straight from a template expression (e.g.
+		// `"{{ world.trace_run_id }}"`), and an undefined world var renders as
+		// Go nil rather than omitting the key. Treating that the same as "the
+		// author didn't pass this input" matches the documented contract for a
+		// non-required field (the script defaults it via ctx.inputs.get(name,
+		// default)) instead of hard-failing on a type mismatch the author never
+		// intended to assert.
+		if !present || v == nil {
 			if spec.Required {
 				return &DomainError{msg: fmt.Sprintf("missing required input %q", name)}
 			}

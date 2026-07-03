@@ -35,6 +35,13 @@ agents:
 world:
   manifest_path:        { type: string, default: "" }
   state_path:           { type: string, default: "" }
+  # Threaded into punch_load.star's optional `run_id` input (rooms/load.yaml);
+  # declared here (rather than left implicit) so `{{ world.trace_run_id }}`
+  # always resolves to a typed default instead of an undefined-var nil, and so
+  # an importer (e.g. goal-seeker) can override it via world_in for a
+  # deterministic trace_root layout. Empty default → punch_load.star falls
+  # back to its own "deterministic" run id.
+  trace_run_id:         { type: string, default: "" }
   punch_items:          { type: list,   default: [] }
   item_count:           { type: string, default: "0" }
   current_item:         { type: object, default: {} }
