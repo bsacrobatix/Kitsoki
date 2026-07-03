@@ -41,6 +41,10 @@ __pycache__/
 # profiles; start from .kitsoki.local.yaml.example. See webconfig.LocalConfigPath.
 .kitsoki.local.yaml
 
+# Runtime worktree ownership marker; written by host.git_worktree and local to a
+# checkout/worktree.
+.kitsoki-owner
+
 # Per-repo session traces auto-dropped by `kitsoki run` into the nearest
 # .kitsoki/ folder. The rest of `.kitsoki/` is reserved for local state
 # we may want to keep around; only the auto-traces are guaranteed
