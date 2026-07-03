@@ -12,6 +12,7 @@ import (
 	goyaml "github.com/goccy/go-yaml"
 
 	"kitsoki/internal/bashprofile"
+	"kitsoki/internal/effect"
 )
 
 // BashProfileDecl is the YAML representation of a bash_profile: field on an
@@ -631,6 +632,27 @@ type HostInterfaceDef struct {
 type HostInterfaceOp struct {
 	Input  map[string]any `yaml:"input,omitempty"`
 	Output map[string]any `yaml:"output,omitempty"`
+
+	// Effect overrides the builtin classification (internal/effect's
+	// ClassifyVerb table) for the concrete handler this op eventually binds
+	// to — the "host_interfaces: override" escape hatch named in
+	// agent-capability-model.md's cross-cutting open question 1. Empty means
+	// "use the builtin default"; when set, it must be one of
+	// pure|read|write|external (loader-validated).
+	Effect effect.Effect `yaml:"effect,omitempty"`
+	// Deterministic overrides the builtin default's determinism bit
+	// alongside Effect. Nil means "use the builtin default"; see
+	// DeterministicOrDefault.
+	Deterministic *bool `yaml:"deterministic,omitempty"`
+}
+
+// DeterministicOrDefault returns the op's declared Deterministic value, or
+// true (the taxonomy's default) when unset.
+func (o *HostInterfaceOp) DeterministicOrDefault() bool {
+	if o == nil || o.Deterministic == nil {
+		return true
+	}
+	return *o.Deterministic
 }
 
 // PhaseTemplate is a reusable phase shape. It declares a parameter schema and
@@ -1375,12 +1397,37 @@ type AgentDecl struct {
 	// by the loader). Ignored for host.agent.task and host.agent.converse.
 	BashProfile *BashProfileDecl `yaml:"bash_profile,omitempty"`
 
-	// ExternalSideEffect, when non-nil, declares whether the agent may
-	// mutate external state (Mode C — read-write external side effects).
-	// When nil, the loader infers the value from the tool surface:
-	// WebFetch/WebSearch or any non-read_only MCP server → true; otherwise
-	// false. A disagreement between inferred and declared values produces a
-	// loader warn-line.
+	// Effect declares this agent's effect class — pure|read|write|external
+	// (see internal/effect and docs/proposals/effect-taxonomy.md). When
+	// empty, the loader resolves it as the JOIN over the agent's tool
+	// surface (effect.FromTools) — the most-privileged tool wins. When set,
+	// the loader checks it against that same join: a declared effect of
+	// read/pure whose tool surface actually includes a mutator/network tool
+	// is a load-time HARD ERROR (the teeth the old ExternalSideEffect
+	// boolean never had); any other disagreement is a warn-line. Either way
+	// the resolved value — declared-and-valid, or inferred — is written back
+	// onto this field, so it is always populated after a successful load.
+	Effect effect.Effect `yaml:"effect,omitempty"`
+
+	// Deterministic is reserved for forward compatibility with
+	// docs/proposals/effect-taxonomy.md's second axis. It is NOT enforced
+	// for agents: every agent invocation is an LLM call, so its effective
+	// determinism is always false regardless of this field's value. Host-call
+	// operations (HostInterfaceOp.Deterministic) are where this axis
+	// actually varies.
+	Deterministic *bool `yaml:"deterministic,omitempty"`
+
+	// ExternalSideEffect is a DEPRECATED alias for Effect, kept for one
+	// release so existing story YAML keeps loading. When non-nil and Effect
+	// is unset, the loader maps it through effect.FromLegacyBool (true ->
+	// external; false -> write when the tool surface has a mutator, else
+	// read) and emits a warn-line pointing authors at effect:. After
+	// resolution the loader mirrors the FINAL resolved Effect back onto this
+	// field (true iff Effect == external) so pre-taxonomy consumers that
+	// still read the boolean directly (e.g. the write_mode: read_only
+	// contradiction check) keep working unchanged for both old- and
+	// new-style declarations. Declaring both effect: and
+	// external_side_effect: on the same agent is a load error.
 	ExternalSideEffect *bool `yaml:"external_side_effect,omitempty"`
 }
 

@@ -3165,6 +3165,7 @@ func agentsForContext(def *app.AppDef) map[string]host.Agent {
 			v := *a.ExternalSideEffect
 			agent.ExternalSideEffect = &v
 		}
+		agent.Effect = a.Effect
 		out[name] = agent
 	}
 	return out

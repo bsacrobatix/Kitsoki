@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"kitsoki/internal/effect"
 )
 
 // hostRunForkRetries bounds how many times RunHandler re-attempts a child
@@ -43,6 +45,24 @@ func isTransientSpawnError(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "resource temporarily unavailable") ||
 		strings.Contains(msg, "cannot allocate memory")
+}
+
+// ClassifyDispatchedCall returns the default (effect, deterministic) pair
+// for a dispatched host verb — the builtin classification table
+// (internal/effect.ClassifyVerb), consulted with the call's args so
+// multi-op verbs (host.git, host.gh.ticket, host.local, and the other
+// prefix-fallback handlers registered below) resolve per-op.
+//
+// This is the SAME table internal/machine uses to stamp the HostInvoked
+// event before a handler is ever looked up; exporting it here (rather than
+// duplicating a second lookup) keeps namespace -> classification a single
+// definition, per the effect package's own leaf-package rationale. Callers
+// that need the effect class for recording on HostDispatched/HostReturned
+// (internal/orchestrator/host_dispatch.go) use this rather than reaching into
+// internal/effect directly, so the "consult args for an op" convention lives
+// in one place.
+func ClassifyDispatchedCall(namespace string, args map[string]any) (effect.Effect, bool) {
+	return effect.ClassifyVerb(namespace, args)
 }
 
 // WorkspaceManagerGetHandler implements host.workspace_manager.get.
