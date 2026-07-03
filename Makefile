@@ -58,7 +58,7 @@ BASESTORIES_STAMP := internal/basestories/.embed-stamp
 BASESKILLS_DIR    := internal/baseskills/assets
 BASESKILLS_STAMP  := internal/baseskills/.embed-stamp
 
-.PHONY: all setup build install uninstall test test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff history-smoke history-pending-smoke gears-history-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
+.PHONY: all setup build build-lean install uninstall test test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff history-smoke history-pending-smoke gears-history-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
 	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local
 
@@ -106,6 +106,15 @@ build-bin: web embed-stories embed-skills
 	@mkdir -p bin
 	go build -o bin/kitsoki $(PKG)
 	$(call codesign_adhoc,bin/kitsoki)
+
+# build-lean — headless build for users who don't need the web UI. Unlike
+# `build`, it does NOT depend on `web` (the pnpm/node SPA build) or check-deps'
+# node/pnpm requirement: the committed //go:embed .gitkeep stub keeps the embed
+# pattern matching, so the binary compiles and everything except `kitsoki web`
+# works. Toolkit + story library are still embedded. Change 4.6.
+build-lean: embed-stories embed-skills
+	go build -o $(BINARY) $(PKG)
+	$(call codesign_adhoc,$(BINARY))
 
 install: check-deps web embed-stories embed-skills
 	@mkdir -p $(INSTALLDIR)
