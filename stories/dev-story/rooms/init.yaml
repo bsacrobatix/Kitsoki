@@ -562,6 +562,11 @@ states:
         when: "world.init_tools_ok"
       - kv:
           pairs:
+            Profile validation: "{{ world.init_apply_result.profile_validation.ok|default:false }}"
+            Validation warnings: "{{ world.init_apply_result.profile_validation.warnings|default:'[]' }}"
+        when: "world.init_apply_result.status == 'applied'"
+      - kv:
+          pairs:
             MCP: "{{ world.init_tools_result.mcp_path|default:'(pending)' }}"
         when: "world.init_tools_ok"
       - choice:
@@ -603,6 +608,7 @@ states:
             - "{{ world.init_tracker }}"
             - "{{ world.init_profile_json }}"
             - "{{ world.init_mining_recommendation }}"
+          fail_on_error: true
         bind:
           init_apply_ok: "ok"
           init_apply_output: "stdout"
@@ -820,6 +826,7 @@ states:
             Status:        "{{ world.init_profile_status }}"
             Config:        "{{ world.init_apply_result.config_path|default:'' }}"
             Profile:       "{{ world.init_apply_result.profile_path|default:'' }}"
+            Profile valid: "{{ world.init_apply_result.profile_validation.ok|default:false }}"
             Instance:      "{{ world.init_apply_result.instance_path|default:'' }}"
             Gitignore:     "{{ world.init_apply_result.gitignore_path|default:'' }}"
       - heading: "Writes"
