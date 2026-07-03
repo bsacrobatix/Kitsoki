@@ -29,6 +29,7 @@ travels with every clone and every collaborator.
 |---|---|---|
 | `.kitsoki.yaml` | `story_dirs`, `project_profile`, `root.import: dev-story`, and a disabled `mining:` scope when associated transcripts are found | so `kitsoki run` starts the profile-driven implicit root, `kitsoki web` discovers editable project stories, and transcript mining is ready for explicit opt-in |
 | `.kitsoki/project-profile.yaml` | declarative profile (stack, commands, conventions, selected starter story, repo evidence, dev-story profile, onboarding baseline) | the discovered description of your project and the source for the implicit dev-story root |
+| `.kitsoki/check-readiness.py` | explicit verifier for the profile's `setup_plan.verifications` | so a human can run build/test/story-load checks after apply without onboarding surprising the repo |
 | `.kitsoki/stories/<id>-dev/app.yaml` | a materialized dev-story **instance** that imports `@kitsoki/dev-story` | an editable snapshot for web discovery and project-local story extensions |
 | `.kitsoki/stories/<id>-dev/README.md` | how to run the instance | — |
 | `.mcp.json` | registers the **kitsoki studio MCP** server | so Claude Code / Cursor / any MCP client can drive kitsoki here |
@@ -144,6 +145,17 @@ commit before Kitsoki files were introduced and `first_onboarding_commit` pinned
 to the first onboarding commit. Flow/cassette tests can replay from the baseline
 with no LLM; real-LLM recording runs should be explicit and gated by the
 profile's `recording_policy`.
+
+**Verify when ready.** Onboarding records build/test/story-load checks in the
+profile but does not run project commands automatically. Review and run them
+explicitly:
+
+```sh
+python3 .kitsoki/check-readiness.py --list
+python3 .kitsoki/check-readiness.py --json
+```
+
+The report is written to `.artifacts/kitsoki-readiness.json`.
 
 **Drive kitsoki from your coding agent.** With `.mcp.json` registered, an MCP
 client (Claude Code, Cursor, Claude Desktop) attached to this repo gets the

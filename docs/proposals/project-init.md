@@ -8,8 +8,10 @@ unconfigured project, the `init` rooms discover and apply a checked-in
 `.kitsoki` setup, generated profiles are schema-validated, the generated config
 uses `root.import: dev-story`, stack defaults are inferred, toolkit + MCP setup
 is loud and retryable, and associated Claude/Codex transcript history is written
-as an operator-review seed with a disabled runtime mining scope. This proposal
-now tracks only the remaining completion work before deletion.
+as an operator-review seed with a disabled runtime mining scope. Onboarding also
+writes an explicit `.kitsoki/check-readiness.py` verifier for the declared
+post-apply checks, but does not run project commands automatically. This
+proposal now tracks only the remaining completion work before deletion.
 **Kind:**   story
 **Epic:**   standalone
 
@@ -22,8 +24,9 @@ the shipped baseline:
 - transcript history is detected, scoped in `.kitsoki.yaml`, and handed off, but
   there is not yet an operator-controlled path that promotes the seed into
   concrete, reviewed profile/story customizations;
-- apply validates the profile and generated story instance, but it does not yet
-  prove the target project's own readiness loop after writing files.
+- apply validates the profile and generated story instance and writes a
+  runnable verifier, but it does not yet feed verifier results back into the
+  profile's `readiness` block.
 
 Those are useful follow-up slices, but they should not keep stale design text
 describing the already-shipped first-run path in `docs/proposals/`.
@@ -51,9 +54,11 @@ Add only the remaining tail work:
    `onboarding.story_customizations`, profile commands, rules, or docs
    placement. Tests must use recorded or synthetic fixtures, never a live LLM.
 2. **Post-apply readiness verification.** Add a deterministic optional verify
-   step that runs the target profile's declared local checks, records the
-   outcome in the profile or onboarding report, and clearly distinguishes
-   pre-existing project failures from onboarding regressions.
+   path that runs the target profile's declared local checks and clearly
+   distinguishes pre-existing project failures from onboarding regressions. The
+   generated verifier script exists; remaining work is recording accepted
+   results back into the profile/onboarding report through an operator-visible
+   action.
 3. **Completion audit.** Once those two slices ship or are explicitly deferred
    elsewhere, migrate any lasting behavior to narrative docs and delete this
    proposal.
@@ -85,10 +90,12 @@ Add only the remaining tail work:
   handoff without running live mining.
 - [x] Pre-fill disabled runtime mining scope for the discovered transcript
   sources.
+- [x] Generate an explicit `.kitsoki/check-readiness.py` verifier for
+  profile-declared checks without running project commands during onboarding.
 - [x] Move shipped behavior into narrative onboarding docs.
 - [ ] Add an operator-controlled, no-live-LLM-tested transcript promotion path.
-- [ ] Add deterministic post-apply readiness verification for profile-declared
-  checks.
+- [ ] Record explicit readiness-run results back into the profile or onboarding
+  report.
 - [ ] Delete this proposal after the remaining tail is shipped or split into
   narrower active proposals.
 
