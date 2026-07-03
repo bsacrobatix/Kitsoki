@@ -97,7 +97,8 @@ repo = mkrepo()
 proc = run_apply(repo, fake_kitsoki(True))
 check("valid exit", proc.returncode == 0, proc.stdout + proc.stderr)
 check("valid config write", (repo / ".kitsoki.yaml").exists())
-check("valid profile write", (repo / ".kitsoki" / "project-profile.yaml").exists())
+profile_path = repo / ".kitsoki" / "project-profile.yaml"
+check("valid profile write", profile_path.exists())
 try:
     valid_report = json.loads(proc.stdout)
 except json.JSONDecodeError as err:
@@ -105,6 +106,12 @@ except json.JSONDecodeError as err:
 else:
     check("valid status", valid_report.get("status") == "applied", str(valid_report))
     check("valid profile validation", valid_report.get("profile_validation", {}).get("ok") is True)
+if profile_path.exists():
+    profile_text = profile_path.read_text(encoding="utf-8")
+    check("valid setup plan present", "setup_plan:" in profile_text)
+    check("valid setup writes instance", ".kitsoki/stories/acme-dev/app.yaml" in profile_text)
+    check("valid setup gates build", "command: \"go build ./...\"" in profile_text)
+    check("valid setup gates tests", "command: \"go test ./...\"" in profile_text)
 
 if failures:
     print("FAIL: init_apply regression")
