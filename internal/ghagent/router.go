@@ -18,8 +18,11 @@ const StoryPRRebase = "pr-rebase"
 // sentinel) plus world seed keys merged into the spawned session's
 // initial_world.
 type Route struct {
-	Story string
-	World map[string]any
+	Story       string
+	World       map[string]any
+	AppPath     string
+	ProjectRoot string
+	BeatFixture string
 }
 
 // LabelStoryMap is the configured router (epic: "configured, not hard-coded").

@@ -22,6 +22,10 @@ The hosted webhook service is parameterized by environment:
 - Webhook URL: `$KITSOKI_GH_AGENT_PUBLIC_BASE_URL/gh-agent/webhook`
 - Systemd service: `kitsoki-gh-agent.service`
 - Durable job DB: `/var/lib/kitsoki-gh-agent/gh-jobs.sqlite`
+- Optional project checkout: `$KITSOKI_GH_AGENT_PROJECT_ROOT` points at the
+  installed repo's local checkout. When that checkout has `.kitsoki.yaml` and an
+  onboarded `.kitsoki/stories/.../app.yaml`, labelled issue routes use that
+  project-local app; otherwise they fall back to Kitsoki's built-in routes.
 
 ## a. Create the App
 
@@ -94,6 +98,7 @@ go run ./cmd/kitsoki gh-agent serve \
   --db /var/lib/kitsoki-gh-agent/gh-jobs.sqlite \
   --addr 127.0.0.1:8787 \
   --public-base-url "$KITSOKI_GH_AGENT_PUBLIC_BASE_URL" \
+  --project-root "$KITSOKI_GH_AGENT_PROJECT_ROOT" \
   --poll-interval 0 \
   --github-app
 ```
@@ -101,6 +106,10 @@ go run ./cmd/kitsoki gh-agent serve \
 This mints an installation token, sets `GH_TOKEN`, serves `/healthz`,
 `/gh-agent/webhook`, `/run/<job-id>`, and `/api/run/<job-id>`, and dispatches
 accepted `@kitsoki` issue/PR comments to the configured no-LLM story route.
+Without `--project-root`, issue mentions use the service checkout's default
+Kitsoki routes (`stories/bugfix`, `stories/dev-story`). With `--project-root`,
+bug/feature issue mentions prefer the target repo's onboarded Kitsoki app and
+only fall back when the checkout is not onboarded or no app is discoverable.
 
 For local single-shot testing, `gh-agent poll` still exists and uses the same
 dispatcher path:
@@ -109,6 +118,7 @@ dispatcher path:
 go run ./cmd/kitsoki gh-agent poll \
   --repo "$KITSOKI_GH_AGENT_REPO" \
   --public-base-url "$KITSOKI_GH_AGENT_PUBLIC_BASE_URL" \
+  --project-root "$KITSOKI_GH_AGENT_PROJECT_ROOT" \
   --github-app
 ```
 

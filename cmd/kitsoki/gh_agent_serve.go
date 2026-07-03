@@ -38,6 +38,7 @@ func newGHAgentServeCmd() *cobra.Command {
 		stuckAfter        time.Duration
 		maxAttempts       int
 		incidentRepo      string
+		projectRoot       string
 		webhookSecret     string
 		useGitHubApp      bool
 		appID             int64
@@ -86,6 +87,7 @@ func newGHAgentServeCmd() *cobra.Command {
 				StuckAfter:        stuckAfter,
 				MaxAttempts:       maxAttempts,
 				IncidentRepo:      incidentRepo,
+				ProjectRoot:       projectRoot,
 				UseGitHubApp:      useGitHubApp,
 				AppID:             appID,
 				InstallationID:    installationID,
@@ -112,6 +114,7 @@ func newGHAgentServeCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&stuckAfter, "stuck-after", 15*time.Minute, "active job age without updates before retry/escalation")
 	cmd.Flags().IntVar(&maxAttempts, "max-attempts", 2, "stuck-job retries before marking failed and filing an incident")
 	cmd.Flags().StringVar(&incidentRepo, "incident-repo", "", "owner/repo for gh-agent incidents; defaults to --repo")
+	cmd.Flags().StringVar(&projectRoot, "project-root", os.Getenv("KITSOKI_GH_AGENT_PROJECT_ROOT"), "local checkout root for --repo; when onboarded, issue routes use its .kitsoki app")
 	cmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "GitHub webhook secret; defaults to KITSOKI_GH_WEBHOOK_SECRET")
 	cmd.Flags().BoolVar(&useGitHubApp, "github-app", false, "authenticate as a GitHub App installation (mints GH_TOKEN)")
 	cmd.Flags().Int64Var(&appID, "gh-app-id", 0, "GitHub App id (overrides KITSOKI_GH_APP_ID)")
@@ -137,6 +140,7 @@ type ghAgentServeOptions struct {
 	StuckAfter        time.Duration
 	MaxAttempts       int
 	IncidentRepo      string
+	ProjectRoot       string
 	UseGitHubApp      bool
 	AppID             int64
 	InstallationID    int64
@@ -407,6 +411,7 @@ func dispatchGHAgentMention(ctx context.Context, store *jobs.GHJobStore, opts gh
 		Comments:      &ghagent.CommentStore{Exec: host.GitHubTicketHandler, Repo: mention.Repo},
 		WorkerID:      opts.Worker,
 		PublicBaseURL: opts.PublicBaseURL,
+		ProjectRoutes: ghagent.ProjectRouteResolver{Root: opts.ProjectRoot},
 		SpawnFn:       ghagent.RunStorySession,
 		IncidentFn: func(ctx context.Context, job *jobs.GHJob, errMsg string) (string, error) {
 			return fileGHAgentIncident(ctx, opts, job, errMsg)
