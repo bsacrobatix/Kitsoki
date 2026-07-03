@@ -39,8 +39,7 @@ func SetExecRunnerForTest(r execRunner) func() {
 }
 
 // WithCLIExecEnv returns a child context carrying per-command environment
-// overrides for host CLI calls. It is intentionally scoped to the context so
-// concurrent live GitHub/App operations do not race through process-global env.
+// overrides for host CLI calls.
 func WithCLIExecEnv(ctx context.Context, env map[string]string) context.Context {
 	if len(env) == 0 {
 		return ctx
@@ -53,7 +52,7 @@ func WithCLIExecEnv(ctx context.Context, env map[string]string) context.Context 
 }
 
 // CLIExecEnvFromCtx returns the per-command environment overrides installed by
-// WithCLIExecEnv, or nil when the caller wants the ambient environment.
+// WithCLIExecEnv, or nil when no overrides are installed.
 func CLIExecEnvFromCtx(ctx context.Context) map[string]string {
 	if ctx == nil {
 		return nil
