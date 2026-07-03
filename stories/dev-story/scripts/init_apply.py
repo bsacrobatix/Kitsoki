@@ -272,6 +272,41 @@ def convention_source(value: str) -> str:
     return "project"
 
 
+def mining_seed_enabled(data: dict) -> bool:
+    mining = data.get("mining_recommendation")
+    if not isinstance(mining, dict):
+        return False
+    return int(mining.get("transcript_count") or 0) > 0 or mining.get("status") == "transcripts-found"
+
+
+def mining_seed_path() -> str:
+    return ".context/kitsoki-session-mining-seed.md"
+
+
+def mining_setup_writes(data: dict) -> list[dict]:
+    if not mining_seed_enabled(data):
+        return []
+    return [{
+        "path": mining_seed_path(),
+        "action": "create",
+        "summary": "Operator review note for seeding project customization from associated Claude/Codex transcripts.",
+    }]
+
+
+def mining_profile_yaml(data: dict) -> str:
+    mining = data.get("mining_recommendation") or mining_recommendation(Path(data["target_path"]))
+    if mining_seed_enabled({"mining_recommendation": mining}):
+        mining = dict(mining)
+        mining["job"] = mining.get("job") or "seed-pending-operator-review"
+        note = mining.get("note") or ""
+        review = (
+            f"Seed review note: `{mining_seed_path()}`. "
+            "Run the first mining pass in propose-only mode after operator review."
+        )
+        mining["note"] = f"{note}\n\n{review}".strip()
+    return yaml_dump(mining, 2)
+
+
 def generic_setup_plan_yaml(data: dict) -> str:
     project_id = data["project_id"]
     verifications = [
@@ -337,7 +372,7 @@ def generic_setup_plan_yaml(data: dict) -> str:
                 "action": "merge",
                 "summary": "Ignore local Kitsoki runtime, session, artifact, and worktree files.",
             },
-        ],
+        ] + mining_setup_writes(data),
         "dirs_create": [
             ".kitsoki",
             ".kitsoki/stories",
@@ -433,7 +468,7 @@ kitsoki:
   autonomy: supervised
 
 mining:
-{yaml_dump(data.get("mining_recommendation") or mining_recommendation(Path(data["target_path"])), 2)}
+{mining_profile_yaml(data)}
 
 setup_plan:
 {generic_setup_plan_yaml(data)}
@@ -623,7 +658,7 @@ kitsoki:
   autonomy: supervised
 
 mining:
-{yaml_dump(data.get("mining_recommendation") or mining_recommendation(Path(data["target_path"])), 2)}
+{mining_profile_yaml(data)}
 
 setup_plan:
   writes:
@@ -639,6 +674,7 @@ setup_plan:
     - path: ".gitignore"
       action: merge
       summary: "Ignore local Kitsoki runtime/session artifacts."
+{yaml_dump(mining_setup_writes(data), 4) if mining_seed_enabled(data) else ""}
   dirs_create: [".context", ".artifacts", ".worktrees", ".kitsoki"]
   gitignore_additions:
     - ".kitsoki.local.yaml"
@@ -686,6 +722,56 @@ project_profile: .kitsoki/project-profile.yaml
 """
 
 
+def mining_seed_markdown(data: dict) -> str:
+    mining = data.get("mining_recommendation") if isinstance(data.get("mining_recommendation"), dict) else {}
+    sources = mining.get("sources") if isinstance(mining, dict) else []
+    if not isinstance(sources, list):
+        sources = []
+    source_lines = []
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        backend = source.get("backend", "unknown")
+        sessions = source.get("sessions", 0)
+        path = source.get("dir", "")
+        source_lines.append(f"- {backend}: {sessions} sessions at `{path}`")
+    if not source_lines:
+        source_lines.append("- No transcript source details were recorded.")
+    first_pass = mining.get("first_pass_sample", 0) if isinstance(mining, dict) else 0
+    sample = mining.get("sample", "recency") if isinstance(mining, dict) else "recency"
+    note = mining.get("note", "") if isinstance(mining, dict) else ""
+    return f"""# Kitsoki Session Mining Seed
+
+Kitsoki found existing Claude/Codex transcript history associated with this
+checkout during first-run onboarding. No mining pass has run yet and no LLM cost
+was incurred by onboarding.
+
+Review goal:
+
+- Seed project-local customization from prior real usage.
+- Prefer proposed `.kitsoki/` profile or root-instance changes over changes to
+  the shared `@kitsoki/dev-story`.
+- Keep generated proposals under `.artifacts/session-mining/` until an operator
+  accepts them.
+
+Discovered sources:
+
+{chr(10).join(source_lines)}
+
+Seed pass defaults:
+
+- trigger: `seed`
+- sample: `{sample}`
+- first pass sample: `{first_pass}`
+- target: `root-instance`
+- apply mode: `propose-only`
+
+Discovery note:
+
+{note or "(none)"}
+"""
+
+
 def readme(data: dict, profile_path: str) -> str:
     title = data["project_title"]
     story_id = f"{data['project_id']}-dev"
@@ -703,6 +789,16 @@ def readme(data: dict, profile_path: str) -> str:
         "Use the imported dev-story fixtures in the Kitsoki checkout for hub coverage, "
         "and add project-local flows when this repo needs its own story-specific assertions."
     )
+    mining_note = ""
+    if mining_seed_enabled(data):
+        mining_note = f"""
+Session mining seed:
+
+Kitsoki found associated Claude/Codex transcript history during onboarding and
+wrote `{mining_seed_path()}` as an operator review note. Treat it as a proposed
+seed pass for project-local customization; no mining pass or LLM call ran during
+onboarding.
+"""
     return f"""# {story_id}
 
 Kitsoki dev-story instance for the {title} checkout.
@@ -738,6 +834,7 @@ Command map:
 Testing:
 
 {flow_note}
+{mining_note}
 """
 
 
@@ -802,6 +899,10 @@ def main() -> int:
     write_text(profile_path, profile_content, writes)
     write_text(instance_path, app_yaml(data), writes)
     write_text(readme_path, readme(data, str(profile_path)), writes)
+    mining_seed_note = ""
+    if mining_seed_enabled(data):
+        mining_seed_note = str(root / mining_seed_path())
+        write_text(root / mining_seed_path(), mining_seed_markdown(data), writes)
     append_gitignore(gitignore_path, writes)
 
     print(json.dumps({
@@ -810,6 +911,7 @@ def main() -> int:
         "profile_path": str(profile_path),
         "instance_path": str(instance_path),
         "gitignore_path": str(gitignore_path),
+        "mining_seed_path": mining_seed_note,
         "dirs_created": [str(root / rel) for rel in dirs],
         "profile_validation": profile_validation,
         "writes": writes,

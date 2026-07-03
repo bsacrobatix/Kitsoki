@@ -74,23 +74,27 @@ def run_apply_with(
     dev: str,
     test: str,
     build: str,
+    mining: dict | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["KITSOKI_BIN"] = str(validator)
+    args = [
+        sys.executable,
+        str(SCRIPT),
+        str(repo),
+        project_id,
+        title,
+        stack,
+        dev,
+        test,
+        build,
+        "local defaults",
+        "none",
+    ]
+    if mining is not None:
+        args.extend(["", json.dumps(mining)])
     return subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT),
-            str(repo),
-            project_id,
-            title,
-            stack,
-            dev,
-            test,
-            build,
-            "local defaults",
-            "none",
-        ],
+        args,
         check=False,
         text=True,
         stdout=subprocess.PIPE,
@@ -146,6 +150,41 @@ if profile_path.exists():
     check("python package manager", "package_managers: [pyproject]" in profile_text)
     check("python setup gates tests", "command: \"python -m pytest\"" in profile_text)
     check("python setup gates dev advisory", "command: \"uvicorn app:app --reload\"" in profile_text)
+
+# 4. Associated transcripts create a durable seed-mining handoff without running
+# the mining pipeline.
+repo = mkrepo()
+mining = {
+    "status": "transcripts-found",
+    "sample": "recency",
+    "first_pass_sample": 2,
+    "transcript_count": 2,
+    "sources": [
+        {"backend": "claude-code", "dir": "/home/u/.claude/projects/acme", "sessions": 1, "include": "human"},
+        {"backend": "codex", "dir": "/home/u/.codex/sessions", "sessions": 1, "include": "human"},
+    ],
+    "note": "Seed project customization from recent associated transcripts after operator consent.",
+}
+proc = run_apply_with(repo, fake_kitsoki(True), "acme", "Acme", "go project", "", "go test ./...", "go build ./...", mining=mining)
+check("mining seed exit", proc.returncode == 0, proc.stdout + proc.stderr)
+try:
+    mining_report = json.loads(proc.stdout)
+except json.JSONDecodeError as err:
+    failures.append(f"mining json: {err}: {proc.stdout!r}")
+else:
+    check("mining seed path reported", mining_report.get("mining_seed_path", "").endswith(".context/kitsoki-session-mining-seed.md"))
+seed_path = repo / ".context" / "kitsoki-session-mining-seed.md"
+check("mining seed note written", seed_path.exists())
+profile_path = repo / ".kitsoki" / "project-profile.yaml"
+if profile_path.exists():
+    profile_text = profile_path.read_text(encoding="utf-8")
+    check("mining profile seed job", "job: \"seed-pending-operator-review\"" in profile_text)
+    check("mining profile review path", "Seed review note: `.context/kitsoki-session-mining-seed.md`" in profile_text)
+    check("mining setup write", "path: \".context/kitsoki-session-mining-seed.md\"" in profile_text)
+if seed_path.exists():
+    seed_text = seed_path.read_text(encoding="utf-8")
+    check("mining seed mentions no cost", "no LLM cost" in seed_text)
+    check("mining seed lists codex", "codex: 1 sessions" in seed_text)
 
 if failures:
     print("FAIL: init_apply regression")
