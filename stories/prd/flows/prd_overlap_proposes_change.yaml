@@ -19,6 +19,8 @@ initial_world:
       - { path: "docs/prd-local-model-agent.md", kind: "accepted", summary: "Already specifies a llama.cpp sidecar for routing / small-decide.", recommendation: "amend" }
     roadmap_fit: "Duplicates the accepted local-model-agent PRD."
 
+starlark_inspect_cassette: ../cassettes/slug_add_a_local_model_agent_sidecar.inspect.yaml
+
 host_handlers:
   # Stubs for clarifying's on_enter analyst decide (advanced to by both arcs).
   # references on_enter runs the optional semantic pre-seed; empty hits = no embeddings.
@@ -32,13 +34,6 @@ host_handlers:
           - { id: "q1", question: "Who is the primary user?", why: "scopes the persona" }
   # change_existing mints a workspace too (holds the check artifacts; publish
   # reuses the amend target in place).
-  host.run:
-    by_call:
-      mint_workspace:
-        data:
-          ok: true
-          exit_code: 0
-          stdout_json: { slug: "local-model-agent", workspace: ".artifacts/prd/local-model-agent" }
 
 turns:
   # confirm is guarded on an empty overlap list — with an overlap present it
@@ -58,6 +53,6 @@ turns:
     expect_world:
       prd_overlap_decision: "change_existing"
       prd_change_target:    "docs/prd-local-model-agent.md"
-      prd_workspace:        ".artifacts/prd/local-model-agent"
+      prd_workspace:        ".artifacts/prd/add-a-local-model-agent-sidecar"
 
 expect_no_errors: true

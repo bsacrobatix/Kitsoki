@@ -96,7 +96,7 @@ workspace mint, world reset — are story-layer (`host.run` + `set:`), so:
 
 | Pipeline step | Mechanism | Reference |
 |---|---|---|
-| Load proposal / epic + children | `host.run` reader script (reads `docs/proposals/<slug>.md`, parses an epic Slices table) | mirror `stories/dev-story/scripts/design_workspace.py` |
+| Load proposal / epic + children | `host.run` reader script (reads `docs/proposals/<slug>.md`, parses an epic Slices table) | mirror `stories/dev-story/scripts/design_workspace.star` |
 | Mint per-session workspace + editable scope note | `host.run` workspace mint + `host.artifacts_dir` scaffold + `host.ide.open_file` | `stories/dev-story/rooms/design.yaml` (001-brief mint arm) |
 | Interactive discovery | `mode: conversational` + `host.agent.converse` + a scope-note writer `host.agent.task` | `stories/dev-story/rooms/design.yaml` discuss arc |
 | **Structural verification of the brief manifest** | `host.agent.decide` with `schema:` → MCP submit validator forces a schema-valid `submit()` | `docs/architecture/hosts.md` § `host.agent.decide`; `stories/dev-story/rooms/proposal_idea_completeness.yaml` |
@@ -104,7 +104,7 @@ workspace mint, world reset — are story-layer (`host.run` + `set:`), so:
 | **Adversarial feasibility + completeness review** | `host.agent.decide` skeptic agent → `{verdict, reason, questions}` | `stories/code-review/rooms/review_pr.yaml`; `brief-decision.json` verdict shape |
 | Checkpoint / iterate on a failing gate | `accept` / `revise(feedback)` + cycle budget → `@exit:abandoned` | `stories/bugfix/rooms/proposing.yaml`; `stories/dev-story/rooms/design_draft.yaml` refine arc |
 | **Materialise a brief as a ticket** the pipeline can read | `host.run` writes a local ticket (id/title/body = brief) the default `iface.ticket.get` resolves | `stories/implementation/rooms/review_task.yaml` (`iface.ticket.get`); `host.local_files.ticket` default |
-| Mint a fresh worktree/branch per brief | `host.run` workspace + branch mint | `stories/dev-story/scripts/design_workspace.py`; `stories/dev-story/rooms/workspace_manager.yaml` |
+| Mint a fresh worktree/branch per brief | `host.run` workspace + branch mint | `stories/dev-story/scripts/design_workspace.star`; `stories/dev-story/rooms/workspace_manager.yaml` |
 | Dispatch one brief into build+test | reset `impl__*` keys (`set:`), then enter the `impl` import; its `@exit:done` returns to the board | `stories/dev-story/app.yaml:768` (impl import, `entry: idle`, `world_in:`); `internal/app/imports.go:6` (single fold) |
 
 ## Story graph

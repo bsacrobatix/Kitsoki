@@ -13,8 +13,6 @@ host_handlers:
       run_initial:
         data: { exit_code: 0, ok: true, stdout: "ok\tall packages\n" }
         delay: "20ms"
-      write_report:
-        data: { exit_code: 0, ok: true, stdout: ".artifacts/fix-tests/report-clean.md" }
   host.inbox.add:
     data: { ok: true }
 

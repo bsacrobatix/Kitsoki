@@ -92,7 +92,7 @@ func AsDomainError(err error) (string, bool) {
 // Run evaluates a Starlark script deterministically and returns its outputs.
 //
 // Sequence: validate inputs against the sidecar → exec the file in a sandboxed
-// thread with only json+math predeclared → resolve and call main(ctx) →
+// thread with deterministic json/math/yaml helpers predeclared → resolve and call main(ctx) →
 // convert and validate the returned dict against the sidecar. Any script-level
 // problem (parse error, runtime error, missing main, wrong shapes) is a
 // *DomainError; only a Go-internal failure (which should not normally happen)
@@ -117,6 +117,7 @@ func Run(ictx context.Context, p Params) (*Result, error) {
 	predeclared := starlark.StringDict{
 		"json": starlarkjson.Module,
 		"math": math.Module,
+		"yaml": yamlModule,
 	}
 
 	src := p.Source

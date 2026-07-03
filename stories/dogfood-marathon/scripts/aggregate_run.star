@@ -54,11 +54,12 @@ def main(ctx):
     if counts["skipped"] > 0:
         didnt.append("%d case(s) dropped (ALREADY-FIXED degenerate baseline)" % counts["skipped"])
 
-    headline = ("Processed %d case(s): %d solved, %d failed, %d needs-human, %d skipped. "
-                "Structure isn't automatically cheaper, but it's more thorough — "
-                "regression test, safe gate-parking, refine loop — and catches bad fixes a naive prompt would ship."
-                ) % (counts["processed"], counts["solved"], counts["failed"],
-                     counts["needs_human"], counts["skipped"])
+    headline = (
+        "Processed %d case(s): %d solved, %d failed, %d needs-human, %d skipped. " +
+        "Structure isn't automatically cheaper, but it's more thorough - " +
+        "regression test, safe gate-parking, refine loop - and catches bad fixes a naive prompt would ship."
+    ) % (counts["processed"], counts["solved"], counts["failed"],
+         counts["needs_human"], counts["skipped"])
 
     return {
         "rollup": {

@@ -561,6 +561,11 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 	// Register host_handlers: stubs via the shared registration path so the
 	// flow-test runner and `kitsoki web --flow` resolve a stub identically.
 	RegisterHostStubs(reg, fixture.HostHandlers)
+	if appDeclaresHost(def, "host.starlark.run") {
+		if _, ok := reg.Get("host.starlark.run"); !ok {
+			reg.Register("host.starlark.run", host.StarlarkRunHandler)
+		}
+	}
 
 	// Allocate the rig pointer early so the cassette dispatcher's stateOf closure
 	// can hold a reference to &rig.currentStatePath that the turn loop updates
@@ -889,6 +894,18 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 		return st.Close()
 	}
 	return &rig, nil
+}
+
+func appDeclaresHost(def *app.AppDef, name string) bool {
+	if def == nil {
+		return false
+	}
+	for _, h := range def.Hosts {
+		if h == name {
+			return true
+		}
+	}
+	return false
 }
 
 // lookupAgentCallByVerb queries the journal for the most recently written

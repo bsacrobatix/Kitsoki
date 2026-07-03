@@ -217,28 +217,27 @@ states:
         - target: "@exit:done"
           effects:
             # Publish the accepted PRD out of the gitignored per-PRD workspace
-            # into its durable docs home (prd_publish.py moves 004-prd.md to
+            # into its durable docs home (prd_publish.star copies 004-prd.md to
             # <publish_durable_path>/<slug>.md, collision-safe; on the amend
             # path it reuses prd_change_target in place). Binds prd_file = the
             # durable path so the run ends with the deliverable OUT of
             # .artifacts/. NOT once-guarded — a single accept fires it once.
             # on_error: drafting holds the operator here (with last_error) so a
             # publish failure is visible rather than silently exiting "done".
-            - invoke: host.run
+            - invoke: host.starlark.run
               id: publish
               with:
-                cmd: python3
-                args:
-                  - "stories/prd/scripts/prd_publish.py"
-                  - "{{ world.prd_workspace }}"
-                  - "{{ world.prd_slug }}"
-                  - "{{ world.prd_artifact.file_path }}"
-                  - "{{ world.workdir }}"
-                  - "{{ world.publish_durable_path }}"
-                  - "{{ world.prd_change_target }}"
-                  - "{{ world.prd_doc_filename }}"
+                script: scripts/prd_publish.star
+                inputs:
+                  workspace: "{{ world.prd_workspace }}"
+                  slug: "{{ world.prd_slug }}"
+                  draft_path: "{{ world.prd_artifact.file_path ?? '' }}"
+                  workdir: "{{ world.workdir }}"
+                  durable: "{{ world.publish_durable_path }}"
+                  change_target: "{{ world.prd_change_target }}"
+                  doc_filename: "{{ world.prd_doc_filename }}"
               bind:
-                prd_file: stdout_json.prd_file
+                prd_file: prd_file
               on_error: drafting
             - set:
                 status:        "done"

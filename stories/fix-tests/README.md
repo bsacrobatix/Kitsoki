@@ -38,7 +38,7 @@ idle ──start──▶ running_executing ──green──▶ done_clean     
    budget left → another `fixing_executing` cycle; red with the budget
    exhausted → `done_exhausted`.
 4. The three terminals write a report to `.artifacts/fix-tests/report-*.md`
-   (via [`scripts/write_report.py`](./scripts/write_report.py)) and mirror a
+   (via [`scripts/write_report.star`](./scripts/write_report.star)) and mirror a
    checkpoint into the operator inbox.
 
 It "one-shots" by default — there is no human in the loop. The single point
@@ -74,7 +74,7 @@ kitsoki session continue --app stories/fix-tests/app.yaml --id <sid> \
 This story is **not importable** — it has no `exits:`, `host_interfaces:`, or
 `world_in:` contract. It is a top-level app driven by `make fix-tests`.
 
-Hosts used: `host.run`, `host.agent.task`, `host.inbox.add`.
+Hosts used: `host.run`, `host.starlark.run`, `host.agent.task`, `host.inbox.add`.
 
 ## Tests
 

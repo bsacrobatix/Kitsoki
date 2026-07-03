@@ -219,7 +219,7 @@ agents:
 
   # ── Ideas reviewer (rooms/ideas.yaml) ─────────────────────────────
   # Reconciles the hand-maintained ideas backlog against shipped work. READ-ONLY:
-  # it only PROPOSES section moves (the deterministic ideas_reconcile.py script
+  # it only PROPOSES section moves (the deterministic ideas_reconcile.star script
   # does the rewrite). Bash under the read-only profile is for `git log` /
   # `git show` (the proven combo used by stories/bugfix + stories/docs-review).
   ideas_reviewer:
@@ -1710,7 +1710,7 @@ imports:
 
   # PRD discovery — the front of the PRD → Design walk. Reached from main
   # via `go_prd`. prd runs discovery → clarifying → brief → references →
-  # drafting and publishes a PRD to docs/prd/<slug>.md (prd_publish.py
+  # drafting and publishes a PRD to docs/prd/<slug>.md (prd_publish.star
   # returns prd_file). On @exit:done we lift prd_file into the parent and
   # land in `prd_published` (rooms/prd_published.yaml), which tells the
   # operator the PRD shipped and offers `continue` (into the design
@@ -1751,7 +1751,7 @@ imports:
 
     exits:
       # No `set:` projection for prd_file: it is a host BIND in prd's
-      # drafting accept arc (prd_publish.py stdout), so it commits
+      # drafting accept arc (prd_publish.star), so it commits
       # post-dispatch — AFTER an exit `set:` (a synchronous effect) would
       # read it. The flat world keeps prd__prd_file once the turn settles,
       # so the prd_published landing room reads world.prd__prd_file

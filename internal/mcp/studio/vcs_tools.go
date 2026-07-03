@@ -1,0 +1,631 @@
+package studio
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"kitsoki/internal/host"
+)
+
+// vcs_tools.go — a structured git / worktree surface.
+//
+// Git is the single biggest reason an MCP-driving agent shells out (worktree
+// create/remove, status/diff/log, and the squash-merge that lands a fix). The
+// driver agent has no git tool at all, so a fix's whole lifecycle escapes the
+// MCP. Worse, the by-hand squash ritual
+//
+//	git -C wt add -A && git -C wt reset --soft main && git -C wt commit \
+//	  && git merge --ff-only && git worktree remove …
+//
+// is the exact pattern that once DESTROYED main: `reset --soft main` inside a
+// stale worktree commits that worktree's stale tree, reverting everything landed
+// on main since the worktree's base.
+//
+// These tools cover the lifecycle with structure, and vcs.integrate replaces the
+// footgun ritual with a guarded 3-way squash merge run FROM the main checkout —
+// which cannot revert post-base work. All git runs through host.RunHandler in
+// argv mode (no shell), so there is no word-splitting/glob surface. Read tools
+// (status/diff/log, worktree.list) stay available on a read-only server; the
+// mutating tools (worktree.create/remove, vcs.commit, vcs.integrate) are omitted
+// there. No LLM.
+
+// vcsDiffTruncate caps vcs.diff's returned text; the full diff spills to a
+// sidecar (reusing host.run's spill) so nothing is lost.
+const vcsDiffTruncate = 16384
+
+// registerVCSTools wires the vcs.* / worktree.* tools.
+func (srv *Server) registerVCSTools() {
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "vcs.status",
+		Description: "Read a worktree's git status, structured. {dir (required, the worktree/repo path)} → {ok, branch, upstream?, ahead, behind, clean, files[{xy, path}]} (porcelain v1; xy is the two-letter status code). Read-only.",
+	}, srv.handleVCSStatus)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "vcs.diff",
+		Description: "Read a git diff, textual. {dir (required), from? (a rev), to? (a rev), paths? ([]path to limit), stat? (--stat summary), name_only? (just file names)} → {ok, diff, truncated?, output_path?}. With no from/to, the working-tree diff; with from only, from..working; with both, from..to. Read-only.",
+	}, srv.handleVCSDiff)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "vcs.log",
+		Description: "Read recent commits. {dir (required), n? (max commits, default 20), paths? ([]path to limit)} → {ok, commits[{hash, subject}]}. Read-only.",
+	}, srv.handleVCSLog)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "worktree.list",
+		Description: "List a repo's git worktrees. {dir (required, any path inside the repo)} → {ok, worktrees[{path, head, branch?, detached?}]}. Read-only.",
+	}, srv.handleWorktreeList)
+
+	if srv.readOnly {
+		return
+	}
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "worktree.create",
+		Description: "Create a git worktree on a new branch — the structured `git worktree add -b`. {dir (required, the main repo), branch (required, the new branch), base? (the start point; default \"main\"), path? (the worktree dir; default .worktrees/<branch>)} → {ok, path, branch, base}. The worktree lands under .worktrees/ by convention.",
+	}, srv.handleWorktreeCreate)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "worktree.remove",
+		Description: "Remove a git worktree — the structured `git worktree remove`. {dir (required, the main repo), path (required, the worktree path), force? (discard a dirty worktree)} → {ok, removed}. ",
+	}, srv.handleWorktreeRemove)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "vcs.commit",
+		Description: "Stage and commit in a worktree. {dir (required), message (required), paths? ([]path to stage; default: all changes via `git add -A`)} → {ok, commit, nothing_to_commit?}. Mutating.",
+	}, srv.handleVCSCommit)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name: "vcs.integrate",
+		Description: "Land a worktree's feature branch onto the integration branch SAFELY — the guarded replacement for the `reset --soft main` squash ritual that once destroyed main. Runs FROM the main checkout: {dir (required, the main checkout, which MUST be on `onto`), branch (required, the feature branch to integrate), onto? (the integration branch; default \"main\"), message (required, the squash commit message), worktree_path? (remove this worktree on success), delete_branch? (delete `branch` on success)} → {ok, integrated, commit?, conflicts[]?, refused?}. " +
+			"Guards (refuses, never forces): `dir` must be on `onto`; `dir`'s tree must be clean; `branch` must have commits beyond its merge-base with `onto`. On clean success it does `git merge --squash <branch>` (a real 3-way merge against the CURRENT onto tip — it cannot revert work landed since the branch's base) + commit. On conflict it restores the clean tip and returns the conflicting paths. Mutating.",
+	}, srv.handleVCSIntegrate)
+}
+
+// ── vcs.status ────────────────────────────────────────────────────────────────
+
+// VCSStatusArgs is the input to vcs.status.
+type VCSStatusArgs struct {
+	Dir string `json:"dir"`
+}
+
+// VCSStatusOK is the vcs.status result.
+type VCSStatusOK struct {
+	OK       bool             `json:"ok"`
+	Branch   string           `json:"branch"`
+	Upstream string           `json:"upstream,omitempty"`
+	Ahead    int              `json:"ahead"`
+	Behind   int              `json:"behind"`
+	Clean    bool             `json:"clean"`
+	Files    []VCSStatusEntry `json:"files"`
+}
+
+// VCSStatusEntry is one porcelain status line: the two-letter XY code and path.
+type VCSStatusEntry struct {
+	XY   string `json:"xy"`
+	Path string `json:"path"`
+}
+
+func (srv *Server) handleVCSStatus(ctx context.Context, req *mcpsdk.CallToolRequest, args VCSStatusArgs) (*mcpsdk.CallToolResult, any, error) {
+	if rerr := requireDir(args.Dir, "vcs.status"); rerr != nil {
+		return rerr, nil, nil
+	}
+	out, exit, err := gitRun(ctx, args.Dir, "status", "--porcelain", "--branch")
+	if rerr := gitErr("vcs.status", out, exit, err); rerr != nil {
+		return rerr, nil, nil
+	}
+	res := VCSStatusOK{OK: true, Clean: true, Files: []VCSStatusEntry{}}
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "## ") {
+			parseStatusBranch(strings.TrimPrefix(line, "## "), &res)
+			continue
+		}
+		res.Clean = false
+		xy := line
+		path := ""
+		if len(line) >= 3 {
+			xy = line[:2]
+			path = strings.TrimSpace(line[3:])
+		}
+		res.Files = append(res.Files, VCSStatusEntry{XY: xy, Path: path})
+	}
+	return nil, res, nil
+}
+
+// parseStatusBranch parses a porcelain `## ` branch header, e.g.
+// "feat...origin/feat [ahead 2, behind 1]" or "main".
+func parseStatusBranch(s string, res *VCSStatusOK) {
+	// Trailing "[ahead N, behind M]".
+	if i := strings.Index(s, " ["); i >= 0 {
+		tail := strings.Trim(s[i+2:], "[]")
+		for _, part := range strings.Split(tail, ", ") {
+			if n, ok := parseCount(part, "ahead "); ok {
+				res.Ahead = n
+			}
+			if n, ok := parseCount(part, "behind "); ok {
+				res.Behind = n
+			}
+		}
+		s = s[:i]
+	}
+	// "branch...upstream".
+	if i := strings.Index(s, "..."); i >= 0 {
+		res.Branch = s[:i]
+		res.Upstream = s[i+3:]
+		return
+	}
+	res.Branch = s
+}
+
+func parseCount(part, prefix string) (int, bool) {
+	if !strings.HasPrefix(part, prefix) {
+		return 0, false
+	}
+	var n int
+	if _, err := fmt.Sscanf(strings.TrimPrefix(part, prefix), "%d", &n); err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// ── vcs.diff ──────────────────────────────────────────────────────────────────
+
+// VCSDiffArgs is the input to vcs.diff.
+type VCSDiffArgs struct {
+	Dir      string   `json:"dir"`
+	From     string   `json:"from,omitempty"`
+	To       string   `json:"to,omitempty"`
+	Paths    []string `json:"paths,omitempty"`
+	Stat     bool     `json:"stat,omitempty"`
+	NameOnly bool     `json:"name_only,omitempty"`
+}
+
+// VCSDiffOK is the vcs.diff result.
+type VCSDiffOK struct {
+	OK         bool   `json:"ok"`
+	Diff       string `json:"diff"`
+	Truncated  bool   `json:"truncated,omitempty"`
+	OutputPath string `json:"output_path,omitempty"`
+}
+
+func (srv *Server) handleVCSDiff(ctx context.Context, req *mcpsdk.CallToolRequest, args VCSDiffArgs) (*mcpsdk.CallToolResult, any, error) {
+	if rerr := requireDir(args.Dir, "vcs.diff"); rerr != nil {
+		return rerr, nil, nil
+	}
+	gitArgs := []string{"diff"}
+	if args.Stat {
+		gitArgs = append(gitArgs, "--stat")
+	}
+	if args.NameOnly {
+		gitArgs = append(gitArgs, "--name-only")
+	}
+	if args.From != "" {
+		gitArgs = append(gitArgs, args.From)
+	}
+	if args.To != "" {
+		gitArgs = append(gitArgs, args.To)
+	}
+	if len(args.Paths) > 0 {
+		gitArgs = append(gitArgs, "--")
+		gitArgs = append(gitArgs, args.Paths...)
+	}
+	out, exit, err := gitRun(ctx, args.Dir, gitArgs...)
+	if rerr := gitErr("vcs.diff", out, exit, err); rerr != nil {
+		return rerr, nil, nil
+	}
+	res := VCSDiffOK{OK: true, Diff: out}
+	if len(out) > vcsDiffTruncate {
+		res.Truncated = true
+		if path, werr := writeHostRunOutput(out); werr == nil {
+			res.OutputPath = path
+		}
+		res.Diff = out[:vcsDiffTruncate] + "\n… diff truncated (full: " + res.OutputPath + ") …\n"
+	}
+	return nil, res, nil
+}
+
+// ── vcs.log ───────────────────────────────────────────────────────────────────
+
+// VCSLogArgs is the input to vcs.log.
+type VCSLogArgs struct {
+	Dir   string   `json:"dir"`
+	N     int      `json:"n,omitempty"`
+	Paths []string `json:"paths,omitempty"`
+}
+
+// VCSLogOK is the vcs.log result.
+type VCSLogOK struct {
+	OK      bool        `json:"ok"`
+	Commits []VCSCommit `json:"commits"`
+}
+
+// VCSCommit is one commit: its full hash and subject line.
+type VCSCommit struct {
+	Hash    string `json:"hash"`
+	Subject string `json:"subject"`
+}
+
+func (srv *Server) handleVCSLog(ctx context.Context, req *mcpsdk.CallToolRequest, args VCSLogArgs) (*mcpsdk.CallToolResult, any, error) {
+	if rerr := requireDir(args.Dir, "vcs.log"); rerr != nil {
+		return rerr, nil, nil
+	}
+	n := args.N
+	if n <= 0 {
+		n = 20
+	}
+	// %x1f is the unit-separator: a delimiter that cannot appear in a hash/subject.
+	gitArgs := []string{"log", fmt.Sprintf("--max-count=%d", n), "--pretty=format:%H%x1f%s"}
+	if len(args.Paths) > 0 {
+		gitArgs = append(gitArgs, "--")
+		gitArgs = append(gitArgs, args.Paths...)
+	}
+	out, exit, err := gitRun(ctx, args.Dir, gitArgs...)
+	if rerr := gitErr("vcs.log", out, exit, err); rerr != nil {
+		return rerr, nil, nil
+	}
+	res := VCSLogOK{OK: true, Commits: []VCSCommit{}}
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\x1f", 2)
+		c := VCSCommit{Hash: parts[0]}
+		if len(parts) == 2 {
+			c.Subject = parts[1]
+		}
+		res.Commits = append(res.Commits, c)
+	}
+	return nil, res, nil
+}
+
+// ── worktree.list ─────────────────────────────────────────────────────────────
+
+// WorktreeListArgs is the input to worktree.list.
+type WorktreeListArgs struct {
+	Dir string `json:"dir"`
+}
+
+// WorktreeListOK is the worktree.list result.
+type WorktreeListOK struct {
+	OK        bool           `json:"ok"`
+	Worktrees []WorktreeItem `json:"worktrees"`
+}
+
+// WorktreeItem is one worktree from `git worktree list --porcelain`.
+type WorktreeItem struct {
+	Path     string `json:"path"`
+	Head     string `json:"head,omitempty"`
+	Branch   string `json:"branch,omitempty"`
+	Detached bool   `json:"detached,omitempty"`
+}
+
+func (srv *Server) handleWorktreeList(ctx context.Context, req *mcpsdk.CallToolRequest, args WorktreeListArgs) (*mcpsdk.CallToolResult, any, error) {
+	if rerr := requireDir(args.Dir, "worktree.list"); rerr != nil {
+		return rerr, nil, nil
+	}
+	out, exit, err := gitRun(ctx, args.Dir, "worktree", "list", "--porcelain")
+	if rerr := gitErr("worktree.list", out, exit, err); rerr != nil {
+		return rerr, nil, nil
+	}
+	res := WorktreeListOK{OK: true, Worktrees: []WorktreeItem{}}
+	var cur *WorktreeItem
+	flush := func() {
+		if cur != nil {
+			res.Worktrees = append(res.Worktrees, *cur)
+			cur = nil
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			flush()
+			cur = &WorktreeItem{Path: strings.TrimPrefix(line, "worktree ")}
+		case cur == nil:
+			// skip
+		case strings.HasPrefix(line, "HEAD "):
+			cur.Head = strings.TrimPrefix(line, "HEAD ")
+		case strings.HasPrefix(line, "branch "):
+			cur.Branch = strings.TrimPrefix(strings.TrimPrefix(line, "branch "), "refs/heads/")
+		case line == "detached":
+			cur.Detached = true
+		}
+	}
+	flush()
+	return nil, res, nil
+}
+
+// ── worktree.create ───────────────────────────────────────────────────────────
+
+// WorktreeCreateArgs is the input to worktree.create.
+type WorktreeCreateArgs struct {
+	Dir    string `json:"dir"`
+	Branch string `json:"branch"`
+	Base   string `json:"base,omitempty"`
+	Path   string `json:"path,omitempty"`
+}
+
+// WorktreeCreateOK is the worktree.create result.
+type WorktreeCreateOK struct {
+	OK     bool   `json:"ok"`
+	Path   string `json:"path"`
+	Branch string `json:"branch"`
+	Base   string `json:"base"`
+}
+
+func (srv *Server) handleWorktreeCreate(ctx context.Context, req *mcpsdk.CallToolRequest, args WorktreeCreateArgs) (*mcpsdk.CallToolResult, any, error) {
+	if rerr := requireDir(args.Dir, "worktree.create"); rerr != nil {
+		return rerr, nil, nil
+	}
+	if args.Branch == "" {
+		return buildToolError(ErrBadRequest, "worktree.create: branch is required"), nil, nil
+	}
+	base := args.Base
+	if base == "" {
+		base = "main"
+	}
+	path := args.Path
+	if path == "" {
+		// Convention (AGENTS.md): worktrees live under .worktrees/ in the repo root.
+		path = filepath.Join(".worktrees", strings.ReplaceAll(args.Branch, "/", "-"))
+	}
+	out, exit, err := gitRun(ctx, args.Dir, "worktree", "add", "-b", args.Branch, path, base)
+	if rerr := gitErr("worktree.create", out, exit, err); rerr != nil {
+		return rerr, nil, nil
+	}
+	// Resolve the worktree path to absolute for the caller's later use.
+	abs := path
+	if !filepath.IsAbs(path) {
+		abs = filepath.Join(args.Dir, path)
+	}
+	return nil, WorktreeCreateOK{OK: true, Path: abs, Branch: args.Branch, Base: base}, nil
+}
+
+// ── worktree.remove ───────────────────────────────────────────────────────────
+
+// WorktreeRemoveArgs is the input to worktree.remove.
+type WorktreeRemoveArgs struct {
+	Dir   string `json:"dir"`
+	Path  string `json:"path"`
+	Force bool   `json:"force,omitempty"`
+}
+
+// WorktreeRemoveOK is the worktree.remove result.
+type WorktreeRemoveOK struct {
+	OK      bool   `json:"ok"`
+	Removed string `json:"removed"`
+}
+
+func (srv *Server) handleWorktreeRemove(ctx context.Context, req *mcpsdk.CallToolRequest, args WorktreeRemoveArgs) (*mcpsdk.CallToolResult, any, error) {
+	if rerr := requireDir(args.Dir, "worktree.remove"); rerr != nil {
+		return rerr, nil, nil
+	}
+	if args.Path == "" {
+		return buildToolError(ErrBadRequest, "worktree.remove: path is required"), nil, nil
+	}
+	gitArgs := []string{"worktree", "remove"}
+	if args.Force {
+		gitArgs = append(gitArgs, "--force")
+	}
+	gitArgs = append(gitArgs, args.Path)
+	out, exit, err := gitRun(ctx, args.Dir, gitArgs...)
+	if rerr := gitErr("worktree.remove", out, exit, err); rerr != nil {
+		return rerr, nil, nil
+	}
+	return nil, WorktreeRemoveOK{OK: true, Removed: args.Path}, nil
+}
+
+// ── vcs.commit ────────────────────────────────────────────────────────────────
+
+// VCSCommitArgs is the input to vcs.commit.
+type VCSCommitArgs struct {
+	Dir     string   `json:"dir"`
+	Message string   `json:"message"`
+	Paths   []string `json:"paths,omitempty"`
+}
+
+// VCSCommitOK is the vcs.commit result.
+type VCSCommitOK struct {
+	OK              bool   `json:"ok"`
+	Commit          string `json:"commit,omitempty"`
+	NothingToCommit bool   `json:"nothing_to_commit,omitempty"`
+}
+
+func (srv *Server) handleVCSCommit(ctx context.Context, req *mcpsdk.CallToolRequest, args VCSCommitArgs) (*mcpsdk.CallToolResult, any, error) {
+	if rerr := requireDir(args.Dir, "vcs.commit"); rerr != nil {
+		return rerr, nil, nil
+	}
+	if args.Message == "" {
+		return buildToolError(ErrBadRequest, "vcs.commit: message is required"), nil, nil
+	}
+	// Stage.
+	if len(args.Paths) > 0 {
+		addArgs := append([]string{"add", "--"}, args.Paths...)
+		if out, exit, err := gitRun(ctx, args.Dir, addArgs...); gitErr("vcs.commit (add)", out, exit, err) != nil {
+			return gitErr("vcs.commit (add)", out, exit, err), nil, nil
+		}
+	} else {
+		if out, exit, err := gitRun(ctx, args.Dir, "add", "-A"); gitErr("vcs.commit (add)", out, exit, err) != nil {
+			return gitErr("vcs.commit (add)", out, exit, err), nil, nil
+		}
+	}
+	// Nothing staged → report rather than fail.
+	if _, exit, err := gitRun(ctx, args.Dir, "diff", "--cached", "--quiet"); err == nil && exit == 0 {
+		return nil, VCSCommitOK{OK: true, NothingToCommit: true}, nil
+	}
+	if out, exit, err := gitRun(ctx, args.Dir, "commit", "-m", args.Message); gitErr("vcs.commit", out, exit, err) != nil {
+		return gitErr("vcs.commit", out, exit, err), nil, nil
+	}
+	head, _, _ := gitRun(ctx, args.Dir, "rev-parse", "HEAD")
+	return nil, VCSCommitOK{OK: true, Commit: strings.TrimSpace(head)}, nil
+}
+
+// ── vcs.integrate ─────────────────────────────────────────────────────────────
+
+// VCSIntegrateArgs is the input to vcs.integrate.
+type VCSIntegrateArgs struct {
+	Dir          string `json:"dir"`
+	Branch       string `json:"branch"`
+	Onto         string `json:"onto,omitempty"`
+	Message      string `json:"message"`
+	WorktreePath string `json:"worktree_path,omitempty"`
+	DeleteBranch bool   `json:"delete_branch,omitempty"`
+}
+
+// VCSIntegrateOK is the vcs.integrate result. Exactly one of integrated /
+// refused / conflicts is meaningful: refused names a precondition that failed
+// (the guard fired), conflicts lists the paths a squash merge could not auto-
+// resolve (the tip was restored), commit is the squash commit on success.
+type VCSIntegrateOK struct {
+	OK         bool     `json:"ok"`
+	Integrated bool     `json:"integrated"`
+	Commit     string   `json:"commit,omitempty"`
+	Conflicts  []string `json:"conflicts,omitempty"`
+	Refused    string   `json:"refused,omitempty"`
+}
+
+func (srv *Server) handleVCSIntegrate(ctx context.Context, req *mcpsdk.CallToolRequest, args VCSIntegrateArgs) (*mcpsdk.CallToolResult, any, error) {
+	if rerr := requireDir(args.Dir, "vcs.integrate"); rerr != nil {
+		return rerr, nil, nil
+	}
+	if args.Branch == "" {
+		return buildToolError(ErrBadRequest, "vcs.integrate: branch is required"), nil, nil
+	}
+	if args.Message == "" {
+		return buildToolError(ErrBadRequest, "vcs.integrate: message is required (the squash commit message)"), nil, nil
+	}
+	onto := args.Onto
+	if onto == "" {
+		onto = "main"
+	}
+
+	// Guard 1: `dir` must be ON `onto` — we integrate FROM the integration
+	// branch's checkout. We never switch branches under the caller.
+	head, _, herr := gitRun(ctx, args.Dir, "symbolic-ref", "--short", "HEAD")
+	if herr != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("vcs.integrate: read HEAD: %v", herr)), nil, nil
+	}
+	if cur := strings.TrimSpace(head); cur != onto {
+		return nil, integrateRefused(fmt.Sprintf("dir is on %q, not the integration branch %q — check out %q first (this guard is why main survives)", cur, onto, onto)), nil
+	}
+
+	// Guard 2: the integration tree must be clean, so the squash-conflict undo
+	// (reset --hard to the tip) can never discard a caller's unrelated work.
+	st, _, _ := gitRun(ctx, args.Dir, "status", "--porcelain")
+	if strings.TrimSpace(st) != "" {
+		return nil, integrateRefused(fmt.Sprintf("%q has uncommitted changes; commit or stash them before integrating", onto)), nil
+	}
+
+	// Guard 3: `branch` must carry commits beyond its merge-base with onto.
+	cnt, _, _ := gitRun(ctx, args.Dir, "rev-list", "--count", onto+".."+args.Branch)
+	if strings.TrimSpace(cnt) == "0" {
+		return nil, integrateRefused(fmt.Sprintf("%q has no commits beyond %q — nothing to integrate", args.Branch, onto)), nil
+	}
+
+	// The safe land: a real 3-way squash merge against the CURRENT onto tip.
+	// Unlike `reset --soft <onto>` from a stale worktree, this cannot revert work
+	// landed on onto since the branch's base.
+	mout, mexit, merr := gitRun(ctx, args.Dir, "merge", "--squash", args.Branch)
+	if merr != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("vcs.integrate: merge: %v", merr)), nil, nil
+	}
+	if mexit != 0 {
+		// Conflict: collect the unmerged paths, then restore the clean tip. The
+		// clean-tree guard above makes `reset --hard` a safe, total undo.
+		conflicts := unmergedPaths(ctx, args.Dir)
+		_, _, _ = gitRun(ctx, args.Dir, "reset", "--hard", "HEAD")
+		res := VCSIntegrateOK{OK: true, Integrated: false, Conflicts: conflicts}
+		if len(conflicts) == 0 {
+			// Non-conflict non-zero (rare): surface the merge output.
+			return buildToolError(ErrBadRequest, fmt.Sprintf("vcs.integrate: merge --squash failed: %s", strings.TrimSpace(mout))), nil, nil
+		}
+		return nil, res, nil
+	}
+
+	if out, exit, err := gitRun(ctx, args.Dir, "commit", "-m", args.Message); gitErr("vcs.integrate (commit)", out, exit, err) != nil {
+		return gitErr("vcs.integrate (commit)", out, exit, err), nil, nil
+	}
+	commit, _, _ := gitRun(ctx, args.Dir, "rev-parse", "HEAD")
+	res := VCSIntegrateOK{OK: true, Integrated: true, Commit: strings.TrimSpace(commit)}
+
+	// Optional cleanup — only after a successful land.
+	if args.WorktreePath != "" {
+		_, _, _ = gitRun(ctx, args.Dir, "worktree", "remove", "--force", args.WorktreePath)
+	}
+	if args.DeleteBranch {
+		_, _, _ = gitRun(ctx, args.Dir, "branch", "-D", args.Branch)
+	}
+	return nil, res, nil
+}
+
+// integrateRefused builds the structured result whose Refused field names the
+// guard that fired. A refusal is a normal outcome, not a tool error — the caller
+// reads {refused} and fixes the precondition. Returned as the structured content
+// (the handler's second return value), so it rides the same {ok:true} envelope
+// as a successful integrate.
+func integrateRefused(reason string) VCSIntegrateOK {
+	return VCSIntegrateOK{OK: true, Integrated: false, Refused: reason}
+}
+
+// unmergedPaths returns the paths git reports as conflicted (`diff --name-only
+// --diff-filter=U`).
+func unmergedPaths(ctx context.Context, dir string) []string {
+	out, _, _ := gitRun(ctx, dir, "diff", "--name-only", "--diff-filter=U")
+	var paths []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line != "" {
+			paths = append(paths, line)
+		}
+	}
+	return paths
+}
+
+// ── git execution + small helpers ─────────────────────────────────────────────
+
+// gitRun runs git in argv mode (no shell) via the shared host.RunHandler, the
+// same primitive host.run uses, and returns combined stdout, the exit code, and
+// an infra error (exec could not start). A non-zero exit is data, not err.
+func gitRun(ctx context.Context, dir string, args ...string) (stdout string, exit int, err error) {
+	anyArgs := make([]any, len(args))
+	for i, a := range args {
+		anyArgs[i] = a
+	}
+	res, err := host.RunHandler(ctx, map[string]any{"cmd": "git", "args": anyArgs, "cwd": dir})
+	if err != nil {
+		return "", -1, err
+	}
+	if res.Error != "" && res.Data == nil {
+		return "", -1, errors.New(res.Error)
+	}
+	exit, _ = res.Data["exit_code"].(int)
+	stdout, _ = res.Data["stdout"].(string)
+	return stdout, exit, nil
+}
+
+// requireDir validates the dir arg points at an accessible directory.
+func requireDir(dir, tool string) *mcpsdk.CallToolResult {
+	if dir == "" {
+		return buildToolError(ErrBadRequest, tool+": dir is required")
+	}
+	return nil
+}
+
+// gitErr maps a git invocation to a tool error when it could not start (err) or
+// exited non-zero (exit). It returns nil when the command succeeded. The git
+// output is included so the caller sees the real message ("not a git repository",
+// a merge conflict, etc.).
+func gitErr(tool, out string, exit int, err error) *mcpsdk.CallToolResult {
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("%s: %v", tool, err))
+	}
+	if exit != 0 {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("%s: git exited %d: %s", tool, exit, strings.TrimSpace(out)))
+	}
+	return nil
+}

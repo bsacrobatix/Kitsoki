@@ -29,6 +29,7 @@ app:
 
 hosts:
   - host.run
+  - host.starlark.run
   - host.agent.task
   - host.inbox.add
 
