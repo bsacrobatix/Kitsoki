@@ -65,7 +65,7 @@ host_interfaces:
         input:  { query: string, limit: int }
         output: { tickets: list }
       get:
-        input:  { id: string }
+        input:  { id: string, repo: string }
         output: { id: string, title: string, body: string, status: string,
                   priority: string, assignee: string, url: string, comments: list }
       comment:

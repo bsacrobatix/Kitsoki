@@ -47,6 +47,7 @@ states:
       - invoke: iface.ticket.get
         with:
           id: "{{ world.ticket_id }}"
+          repo: "{{ world.ticket_repo }}"
         bind:
           ticket_body:  body
           ticket_title: title
