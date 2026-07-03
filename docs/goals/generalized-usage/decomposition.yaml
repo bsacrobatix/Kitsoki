@@ -150,31 +150,34 @@ changes:
   - id: "WM.5"
     wall: WM
     goal_ref: [G4]
-    title: Parallel worker pool — cheap-first model routing (synthetic.new default), quota-spread + graceful exhaustion, ongoing model-selection eval
+    title: Harness ladder — systematic {backend,provider,model,effort} rung with effort-first capability escalation + infra fallback (ENGINE landed; story-level pool consumes it)
     kind: runtime
     pipeline: implementation
     critical: true
     depends_on: ["WM.0", "2.2", "2.3"]
-    scope: ["stories/goal-seeker/scripts/model_policy.star", "stories/goal-seeker/rooms/dispatch_pool.yaml", "docs/goals/generalized-usage/model-selection.md"]
+    scope: ["internal/host/ladder.go", "internal/webconfig/webconfig.go", "stories/goal-seeker/scripts/model_policy.star", "stories/goal-seeker/rooms/dispatch_pool.yaml", "docs/goals/generalized-usage/model-selection.md"]
     acceptance:
-      - "the goal-seeker dispatches MANY disjoint workers in parallel (the ready-set), each assigned a model by a CHEAP-FIRST policy: synthetic.new by default (≈free — use it wherever it can carry the step), then claude-native / codex at LOW effort, frontier only when a step provably needs it"
-      - "load is spread across MULTIPLE provider quotas; on quota exhaustion a worker rotates to another profile/quota, and if none is available the change PARKS gracefully (no hard fail, no lost work) and the evaluator surfaces it"
-      - "an ONGOING model-selection evaluation records per-change (model × outcome × cost) and steers future assignments toward the cheapest model that still solves each archetype — spending the least of the subscription limits (ties into WB / model-task-engineering)"
+      - "ENGINE (LANDED 79c310e9 — internal/host/ladder.go): host.agent.decide/task dispatch walks a SYSTEMATIC 4-axis rung {backend,provider,model,effort}; a CAPABILITY failure escalates EFFORT-FIRST (low→max on the same model) THEN the next stronger model (model-outer/effort-inner); an INFRA failure (down/429/quota/5xx/timeout/model_not_found) rotates PROVIDER + backs the dead one off (reuses quota_control.go), SEPARATELY from the capability ladder; opt-in via webconfig harness_ladder: (nil = today's behavior byte-identical). Default rung GLM-5.2→gpt-5.5→spark→sonnet→opus, effort [low..max]. 18 no-LLM stub tests green."
+      - "INSTRUMENTED: every attempt tags backend/provider/model/effort/failure_kind + escalated_by (effort|model) into the trace Meta so effort-vs-model efficacy is study-able (feeds the model-selection eval)"
+      - "STORY POOL (remaining): the goal-seeker configures the engine ladder for its maker dispatch (cheap-first: GLM/synthetic default → escalate) so live workers distribute across multiple provider quotas with graceful exhaustion (park-with-ref, no lost work); an ongoing model-selection eval records (change × model × outcome × cost) and steers toward the cheapest model that solves each archetype"
     gate:
-      class: "G-LIVE+REPLAY"
-      red_now: "the goal-seeker loop is single-model/serial; no cheap-first routing, no quota spread, no graceful exhaustion, no model-selection feedback"
-      green_when: "a flow drives K disjoint workers with policy-assigned models; a simulated quota-exhaustion case rotates profile then parks-with-ref (no lost work); a replay exercises synthetic.new + a fallback rung"
+      class: "G-GOTEST"
+      red_now: "the ladder ENGINE is landed+green; the story-level pool (goal-seeker maker dispatch configured with the ladder + model-selection eval) is not yet wired"
+      green_when: "the ladder engine tests pass AND the goal-seeker live maker dispatch is configured with harness_ladder (cheap-first + escalation), proven by a flow/replay that exercises a fallback rung without lost work"
+      cmd: "go test ./internal/host/ -run Ladder ./internal/webconfig/"
       replay_cmd: "kitsoki test flows stories/goal-seeker/app.yaml --flows stories/goal-seeker/flows/worker_pool_quota.yaml"
     agent_brief: >
-      Build the goal-seeker's parallel worker pool + model policy. Default to
-      synthetic.new (basically free) wherever a step tolerates it; escalate to
-      claude-native / codex at LOW effort, frontier only on proven need (escalation
-      ladder). Spread across multiple provider quotas; handle quota exhaustion
-      GRACEFULLY — rotate profile/quota (memory: rotate backends on 5xx; quota-limiter
-      deadlock; spark daily cap), and if none free, park-with-ref (never hard-fail, never
-      lose work). Add an ongoing model-selection evaluation that records
-      (change × model × outcome × cost) and steers assignments to the cheapest model
-      that solves each archetype (ties into WB H2 + the model-task-engineering skill).
+      The ENGINE half is DONE (internal/host/ladder.go, 79c310e9): a generalized,
+      reusable harness ladder wrapping host.agent.decide/task — systematic
+      {backend,provider,model,effort} rung, effort-first capability escalation
+      (low→max same model, then next model), infra fallback (rotate provider +
+      backoff) kept SEPARATE, and per-attempt escalated_by instrumentation. Remaining:
+      wire the goal-seeker's live maker dispatch to a cheap-first harness_ladder
+      (GLM/synthetic default → claude/codex low effort → frontier on proven need),
+      spread across provider quotas with graceful exhaustion (park-with-ref, never
+      lose work), and add the ongoing model-selection eval that records
+      (change × model × outcome × cost) and steers toward the cheapest model per
+      archetype (ties into WB H2 + the model-task-engineering skill).
 
   # --- kitsoki gaps the goal-seeker STORY surfaces (added per "limitations → plan") ---
   - id: "WM.1"
