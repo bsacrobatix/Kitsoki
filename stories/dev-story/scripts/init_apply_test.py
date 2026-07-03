@@ -158,6 +158,10 @@ repo = mkrepo()
 proc = run_apply(repo, fake_kitsoki(True))
 check("valid exit", proc.returncode == 0, proc.stdout + proc.stderr)
 check("valid config write", (repo / ".kitsoki.yaml").exists())
+config_text = (repo / ".kitsoki.yaml").read_text(encoding="utf-8") if (repo / ".kitsoki.yaml").exists() else ""
+check("valid config project profile", "project_profile: .kitsoki/project-profile.yaml" in config_text)
+check("valid config root import", "root:\n  import: dev-story" in config_text)
+check("valid config no stale default story", "default_story:" not in config_text)
 profile_path = repo / ".kitsoki" / "project-profile.yaml"
 check("valid profile write", profile_path.exists())
 try:
@@ -193,6 +197,11 @@ if app_path.exists():
     check("valid app prd local path", 'publish_durable_path:       { type: string, default: ".context/prd" }' in app_text)
     check("valid app design no template", 'design_template_dir:        { type: string, default: "" }' in app_text)
     check("valid app design local path", 'design_durable_path:        { type: string, default: ".context/designs" }' in app_text)
+readme_path = repo / ".kitsoki" / "stories" / "acme-dev" / "README.md"
+if readme_path.exists():
+    readme_text = readme_path.read_text(encoding="utf-8")
+    check("valid readme no arg run", "kitsoki run\n```" in readme_text)
+    check("valid readme explicit wrapper optional", "Use the materialized wrapper explicitly only after editing it" in readme_text)
 
 # 4. Git metadata is preserved instead of assuming main/no remote.
 repo = mkgitrepo()

@@ -27,7 +27,7 @@ travels with every clone and every collaborator.
 
 | Path | What | Why |
 |---|---|---|
-| `.kitsoki.yaml` | `story_dirs: [./.kitsoki/stories]` + `default_story` | so `kitsoki` discovers your instance |
+| `.kitsoki.yaml` | `story_dirs`, `project_profile`, and `root.import: dev-story` | so `kitsoki run` starts the profile-driven implicit root and `kitsoki web` discovers editable project stories |
 | `.kitsoki/project-profile.yaml` | declarative profile (stack, commands, conventions, selected starter story, repo evidence, dev-story profile, onboarding baseline) | the discovered description of your project and the source for the implicit dev-story root |
 | `.kitsoki/stories/<id>-dev/app.yaml` | a materialized dev-story **instance** that imports `@kitsoki/dev-story` | an editable snapshot for web discovery and project-local story extensions |
 | `.kitsoki/stories/<id>-dev/README.md` | how to run the instance | — |
