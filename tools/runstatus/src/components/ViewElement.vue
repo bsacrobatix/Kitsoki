@@ -83,7 +83,13 @@ function withQuery(url: string, params: Record<string, string>): string {
     .join("&")}`;
 }
 
-const props = defineProps<{ element: ViewElement }>();
+const props = withDefaults(
+  defineProps<{
+    element: ViewElement;
+    showPin?: boolean;
+  }>(),
+  { showPin: true },
+);
 
 const el = computed(() => props.element);
 
@@ -582,7 +588,7 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
 
   <!-- media: dispatch on MIME family; fall back to a labeled download link. -->
   <div v-else-if="el.Kind === 'media'" class="ve-media" data-testid="media-element">
-    <div v-if="mediaHandle" class="ve-media-toolbar" data-testid="media-toolbar">
+    <div v-if="mediaHandle && showPin" class="ve-media-toolbar" data-testid="media-toolbar">
       <span class="ve-media-title" :title="mediaTitle">{{ mediaTitle }}</span>
       <button
         type="button"

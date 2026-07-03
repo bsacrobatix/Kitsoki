@@ -200,6 +200,7 @@
           'iv__main--devtools-bottom': workbenchEnabled && !embed && devtoolsDock === 'bottom',
           'iv__main--devtools-floating': workbenchEnabled && !embed && devtoolsDock === 'floating',
         }"
+        :style="workbenchMainStyle"
       >
         <section
           v-if="workbenchEnabled && !embed"
@@ -212,10 +213,28 @@
             <span v-if="store.embedLabel" class="iv__pane-subtitle">{{ store.embedLabel }}</span>
           </div>
           <div class="iv__media-stage" data-testid="media-workbench-stage">
-            <ViewElement v-if="selectedMedia?.element" :element="selectedMedia.element" />
+            <ViewElement
+              v-if="selectedMedia?.element"
+              :element="selectedMedia.element"
+              :show-pin="false"
+            />
             <div v-else class="iv__empty">No media selected.</div>
           </div>
         </section>
+        <button
+          v-if="workbenchEnabled && !embed"
+          type="button"
+          class="iv__resize-handle iv__resize-handle--column iv__resize-handle--workbench-media"
+          data-testid="media-workbench-resizer"
+          role="separator"
+          aria-label="Resize pinned media and chat panes"
+          aria-orientation="vertical"
+          :aria-valuenow="Math.round(workbenchMediaWidthPercent)"
+          aria-valuemin="24"
+          aria-valuemax="68"
+          @pointerdown="startWorkbenchMediaResize"
+          @keydown="onWorkbenchMediaResizeKeydown"
+        ></button>
 
         <!-- LEFT: conversation -->
         <section
@@ -267,6 +286,7 @@
             class="iv__transcript"
             :transcript="store.chatEntries"
             :suppressed-media-handles="suppressedMediaHandles"
+            :suppressed-media-labels="suppressedMediaLabels"
             @rewind="onRewind"
           />
           <!-- Streaming thinking bubble: visible while a turn is in flight -->
@@ -412,6 +432,34 @@
 
         <!-- Embed (VS Code): nothing beside the chat — Trace and Graph open as
              their own dockable windows via "Kitsoki: Open Trace" / "Open Graph". -->
+        <button
+          v-if="workbenchEnabled && !embed && !traceCollapsed && devtoolsDock === 'right'"
+          type="button"
+          class="iv__resize-handle iv__resize-handle--column iv__resize-handle--workbench-devtools"
+          data-testid="devtools-workbench-resizer"
+          role="separator"
+          aria-label="Resize chat and devtools panes"
+          aria-orientation="vertical"
+          :aria-valuenow="Math.round(workbenchDevtoolsWidthPercent)"
+          aria-valuemin="20"
+          aria-valuemax="50"
+          @pointerdown="startWorkbenchDevtoolsWidthResize"
+          @keydown="onWorkbenchDevtoolsWidthResizeKeydown"
+        ></button>
+        <button
+          v-if="workbenchEnabled && !embed && !traceCollapsed && devtoolsDock === 'bottom'"
+          type="button"
+          class="iv__resize-handle iv__resize-handle--row iv__resize-handle--workbench-devtools-row"
+          data-testid="devtools-workbench-row-resizer"
+          role="separator"
+          aria-label="Resize main workbench and devtools rows"
+          aria-orientation="horizontal"
+          :aria-valuenow="Math.round(workbenchDevtoolsHeightPercent)"
+          aria-valuemin="22"
+          aria-valuemax="55"
+          @pointerdown="startWorkbenchDevtoolsHeightResize"
+          @keydown="onWorkbenchDevtoolsHeightResizeKeydown"
+        ></button>
         <section
           v-if="workbenchEnabled && !embed && !traceCollapsed && devtoolsDock !== 'floating'"
           class="iv__devtools"
@@ -550,6 +598,16 @@ const TRACE_WIDTH_MAX = 75;
 const DIAGRAM_HEIGHT_DEFAULT = 45;
 const DIAGRAM_HEIGHT_MIN = 18;
 const DIAGRAM_HEIGHT_MAX = 82;
+const WORKBENCH_PREF_KEY = "kitsoki:mediaWorkbench";
+const WORKBENCH_MEDIA_WIDTH_DEFAULT = 42;
+const WORKBENCH_MEDIA_WIDTH_MIN = 24;
+const WORKBENCH_MEDIA_WIDTH_MAX = 68;
+const WORKBENCH_DEVTOOLS_WIDTH_DEFAULT = 28;
+const WORKBENCH_DEVTOOLS_WIDTH_MIN = 20;
+const WORKBENCH_DEVTOOLS_WIDTH_MAX = 50;
+const WORKBENCH_DEVTOOLS_HEIGHT_DEFAULT = 34;
+const WORKBENCH_DEVTOOLS_HEIGHT_MIN = 22;
+const WORKBENCH_DEVTOOLS_HEIGHT_MAX = 55;
 
 type MediaWorkbenchItem = {
   key: string;
@@ -557,6 +615,35 @@ type MediaWorkbenchItem = {
   title: string;
   element: ViewElementT;
 };
+type WorkbenchPrefs = {
+  orientation?: "vertical" | "horizontal";
+  devtoolsDock?: "right" | "bottom" | "floating";
+  devtoolsTab?: "graph" | "trace";
+  mediaWidthPercent?: number;
+  devtoolsWidthPercent?: number;
+  devtoolsHeightPercent?: number;
+};
+
+function loadWorkbenchPrefs(): WorkbenchPrefs {
+  try {
+    const raw = localStorage.getItem(WORKBENCH_PREF_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as WorkbenchPrefs;
+    return {
+      orientation: parsed.orientation === "horizontal" ? "horizontal" : parsed.orientation === "vertical" ? "vertical" : undefined,
+      devtoolsDock:
+        parsed.devtoolsDock === "bottom" || parsed.devtoolsDock === "floating" || parsed.devtoolsDock === "right"
+          ? parsed.devtoolsDock
+          : undefined,
+      devtoolsTab: parsed.devtoolsTab === "trace" ? "trace" : parsed.devtoolsTab === "graph" ? "graph" : undefined,
+      mediaWidthPercent: Number.isFinite(parsed.mediaWidthPercent) ? parsed.mediaWidthPercent : undefined,
+      devtoolsWidthPercent: Number.isFinite(parsed.devtoolsWidthPercent) ? parsed.devtoolsWidthPercent : undefined,
+      devtoolsHeightPercent: Number.isFinite(parsed.devtoolsHeightPercent) ? parsed.devtoolsHeightPercent : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
 
 const props = defineProps<{ sessionId: string }>();
 const store = useRunStore();
@@ -587,9 +674,19 @@ const traceWidthPercent = ref(TRACE_WIDTH_DEFAULT);
 const diagramHeightPercent = ref(DIAGRAM_HEIGHT_DEFAULT);
 const workbenchEnabled = ref(false);
 const selectedMediaKey = ref("");
-const workbenchOrientation = ref<"vertical" | "horizontal">("vertical");
-const devtoolsDock = ref<"right" | "bottom" | "floating">("right");
-const devtoolsTab = ref<"graph" | "trace">("graph");
+const savedWorkbenchPrefs = loadWorkbenchPrefs();
+const workbenchOrientation = ref<"vertical" | "horizontal">(savedWorkbenchPrefs.orientation ?? "vertical");
+const devtoolsDock = ref<"right" | "bottom" | "floating">(savedWorkbenchPrefs.devtoolsDock ?? "right");
+const devtoolsTab = ref<"graph" | "trace">(savedWorkbenchPrefs.devtoolsTab ?? "graph");
+const workbenchMediaWidthPercent = ref(
+  clamp(savedWorkbenchPrefs.mediaWidthPercent ?? WORKBENCH_MEDIA_WIDTH_DEFAULT, WORKBENCH_MEDIA_WIDTH_MIN, WORKBENCH_MEDIA_WIDTH_MAX),
+);
+const workbenchDevtoolsWidthPercent = ref(
+  clamp(savedWorkbenchPrefs.devtoolsWidthPercent ?? WORKBENCH_DEVTOOLS_WIDTH_DEFAULT, WORKBENCH_DEVTOOLS_WIDTH_MIN, WORKBENCH_DEVTOOLS_WIDTH_MAX),
+);
+const workbenchDevtoolsHeightPercent = ref(
+  clamp(savedWorkbenchPrefs.devtoolsHeightPercent ?? WORKBENCH_DEVTOOLS_HEIGHT_DEFAULT, WORKBENCH_DEVTOOLS_HEIGHT_MIN, WORKBENCH_DEVTOOLS_HEIGHT_MAX),
+);
 
 // Opt-in decorative trace-column pet (off by default). Persisted in localStorage
 // so the choice sticks across reloads. See TracePet.vue.
@@ -623,6 +720,51 @@ const diagramPanelStyle = computed(() => ({
 const timelinePanelStyle = computed(() => ({
   flex: `1 1 ${100 - diagramHeightPercent.value}%`,
 }));
+const workbenchMainStyle = computed((): Record<string, string> => {
+  if (!workbenchEnabled.value || embed.value) return {};
+  const mediaTrack = `minmax(18rem, ${workbenchMediaWidthPercent.value}%)`;
+  const chatTrack = "minmax(20rem, 1fr)";
+  if (devtoolsDock.value === "floating") {
+    return { gridTemplateColumns: `${mediaTrack} 0.55rem ${chatTrack}` };
+  }
+  if (devtoolsDock.value === "bottom" || workbenchOrientation.value === "horizontal") {
+    return {
+      gridTemplateColumns: `${mediaTrack} 0.55rem ${chatTrack}`,
+      gridTemplateRows: `minmax(0, 1fr) 0.55rem minmax(12rem, ${workbenchDevtoolsHeightPercent.value}%)`,
+    };
+  }
+  return {
+    gridTemplateColumns: `${mediaTrack} 0.55rem ${chatTrack} 0.55rem minmax(16rem, ${workbenchDevtoolsWidthPercent.value}%)`,
+  };
+});
+
+watch(
+  [
+    workbenchOrientation,
+    devtoolsDock,
+    devtoolsTab,
+    workbenchMediaWidthPercent,
+    workbenchDevtoolsWidthPercent,
+    workbenchDevtoolsHeightPercent,
+  ],
+  () => {
+    try {
+      localStorage.setItem(
+        WORKBENCH_PREF_KEY,
+        JSON.stringify({
+          orientation: workbenchOrientation.value,
+          devtoolsDock: devtoolsDock.value,
+          devtoolsTab: devtoolsTab.value,
+          mediaWidthPercent: workbenchMediaWidthPercent.value,
+          devtoolsWidthPercent: workbenchDevtoolsWidthPercent.value,
+          devtoolsHeightPercent: workbenchDevtoolsHeightPercent.value,
+        } satisfies WorkbenchPrefs),
+      );
+    } catch {
+      /* ignore persistence failure */
+    }
+  },
+);
 
 function mediaHandle(el: ViewElementT): string {
   return el.Handle ?? el.MediaHandle ?? "";
@@ -656,6 +798,11 @@ const selectedMedia = computed<MediaWorkbenchItem | null>(() => {
 
 const suppressedMediaHandles = computed<string[]>(() => {
   return workbenchEnabled.value && selectedMedia.value ? [selectedMedia.value.handle] : [];
+});
+const suppressedMediaLabels = computed<Record<string, string>>(() => {
+  return workbenchEnabled.value && selectedMedia.value
+    ? { [selectedMedia.value.handle]: selectedMedia.value.title }
+    : {};
 });
 
 function selectLatestMedia(): void {
@@ -759,11 +906,41 @@ function resizeRowFromClientY(clientY: number): void {
   diagramHeightPercent.value = clamp(next, DIAGRAM_HEIGHT_MIN, DIAGRAM_HEIGHT_MAX);
 }
 
+function resizeWorkbenchMediaFromClientX(clientX: number): void {
+  const main = document.querySelector<HTMLElement>(".iv__main--workbench");
+  if (!main) return;
+  const rect = main.getBoundingClientRect();
+  if (rect.width <= 0) return;
+  const next = ((clientX - rect.left) / rect.width) * 100;
+  workbenchMediaWidthPercent.value = clamp(next, WORKBENCH_MEDIA_WIDTH_MIN, WORKBENCH_MEDIA_WIDTH_MAX);
+}
+
+function resizeWorkbenchDevtoolsWidthFromClientX(clientX: number): void {
+  const main = document.querySelector<HTMLElement>(".iv__main--workbench");
+  if (!main) return;
+  const rect = main.getBoundingClientRect();
+  if (rect.width <= 0) return;
+  const next = ((rect.right - clientX) / rect.width) * 100;
+  workbenchDevtoolsWidthPercent.value = clamp(next, WORKBENCH_DEVTOOLS_WIDTH_MIN, WORKBENCH_DEVTOOLS_WIDTH_MAX);
+}
+
+function resizeWorkbenchDevtoolsHeightFromClientY(clientY: number): void {
+  const main = document.querySelector<HTMLElement>(".iv__main--workbench");
+  if (!main) return;
+  const rect = main.getBoundingClientRect();
+  if (rect.height <= 0) return;
+  const next = ((rect.bottom - clientY) / rect.height) * 100;
+  workbenchDevtoolsHeightPercent.value = clamp(next, WORKBENCH_DEVTOOLS_HEIGHT_MIN, WORKBENCH_DEVTOOLS_HEIGHT_MAX);
+}
+
 function stopResizeListeners(): void {
   document.removeEventListener("pointermove", onColumnResizeMove);
   document.removeEventListener("pointerup", stopResizeListeners);
   document.removeEventListener("pointercancel", stopResizeListeners);
   document.removeEventListener("pointermove", onRowResizeMove);
+  document.removeEventListener("pointermove", onWorkbenchMediaResizeMove);
+  document.removeEventListener("pointermove", onWorkbenchDevtoolsWidthResizeMove);
+  document.removeEventListener("pointermove", onWorkbenchDevtoolsHeightResizeMove);
 }
 
 function onColumnResizeMove(e: PointerEvent): void {
@@ -772,6 +949,18 @@ function onColumnResizeMove(e: PointerEvent): void {
 
 function onRowResizeMove(e: PointerEvent): void {
   resizeRowFromClientY(e.clientY);
+}
+
+function onWorkbenchMediaResizeMove(e: PointerEvent): void {
+  resizeWorkbenchMediaFromClientX(e.clientX);
+}
+
+function onWorkbenchDevtoolsWidthResizeMove(e: PointerEvent): void {
+  resizeWorkbenchDevtoolsWidthFromClientX(e.clientX);
+}
+
+function onWorkbenchDevtoolsHeightResizeMove(e: PointerEvent): void {
+  resizeWorkbenchDevtoolsHeightFromClientY(e.clientY);
 }
 
 function startColumnResize(e: PointerEvent): void {
@@ -788,6 +977,33 @@ function startRowResize(e: PointerEvent): void {
   (e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId);
   resizeRowFromClientY(e.clientY);
   document.addEventListener("pointermove", onRowResizeMove);
+  document.addEventListener("pointerup", stopResizeListeners, { once: true });
+  document.addEventListener("pointercancel", stopResizeListeners, { once: true });
+}
+
+function startWorkbenchMediaResize(e: PointerEvent): void {
+  e.preventDefault();
+  (e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId);
+  resizeWorkbenchMediaFromClientX(e.clientX);
+  document.addEventListener("pointermove", onWorkbenchMediaResizeMove);
+  document.addEventListener("pointerup", stopResizeListeners, { once: true });
+  document.addEventListener("pointercancel", stopResizeListeners, { once: true });
+}
+
+function startWorkbenchDevtoolsWidthResize(e: PointerEvent): void {
+  e.preventDefault();
+  (e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId);
+  resizeWorkbenchDevtoolsWidthFromClientX(e.clientX);
+  document.addEventListener("pointermove", onWorkbenchDevtoolsWidthResizeMove);
+  document.addEventListener("pointerup", stopResizeListeners, { once: true });
+  document.addEventListener("pointercancel", stopResizeListeners, { once: true });
+}
+
+function startWorkbenchDevtoolsHeightResize(e: PointerEvent): void {
+  e.preventDefault();
+  (e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId);
+  resizeWorkbenchDevtoolsHeightFromClientY(e.clientY);
+  document.addEventListener("pointermove", onWorkbenchDevtoolsHeightResizeMove);
   document.addEventListener("pointerup", stopResizeListeners, { once: true });
   document.addEventListener("pointercancel", stopResizeListeners, { once: true });
 }
@@ -822,6 +1038,81 @@ function onRowResizeKeydown(e: KeyboardEvent): void {
     e.preventDefault();
   } else if (e.key === "End") {
     diagramHeightPercent.value = DIAGRAM_HEIGHT_MAX;
+    e.preventDefault();
+  }
+}
+
+function onWorkbenchMediaResizeKeydown(e: KeyboardEvent): void {
+  const step = e.shiftKey ? 10 : 4;
+  if (e.key === "ArrowLeft") {
+    workbenchMediaWidthPercent.value = clamp(
+      workbenchMediaWidthPercent.value - step,
+      WORKBENCH_MEDIA_WIDTH_MIN,
+      WORKBENCH_MEDIA_WIDTH_MAX,
+    );
+    e.preventDefault();
+  } else if (e.key === "ArrowRight") {
+    workbenchMediaWidthPercent.value = clamp(
+      workbenchMediaWidthPercent.value + step,
+      WORKBENCH_MEDIA_WIDTH_MIN,
+      WORKBENCH_MEDIA_WIDTH_MAX,
+    );
+    e.preventDefault();
+  } else if (e.key === "Home") {
+    workbenchMediaWidthPercent.value = WORKBENCH_MEDIA_WIDTH_MIN;
+    e.preventDefault();
+  } else if (e.key === "End") {
+    workbenchMediaWidthPercent.value = WORKBENCH_MEDIA_WIDTH_MAX;
+    e.preventDefault();
+  }
+}
+
+function onWorkbenchDevtoolsWidthResizeKeydown(e: KeyboardEvent): void {
+  const step = e.shiftKey ? 10 : 4;
+  if (e.key === "ArrowLeft") {
+    workbenchDevtoolsWidthPercent.value = clamp(
+      workbenchDevtoolsWidthPercent.value + step,
+      WORKBENCH_DEVTOOLS_WIDTH_MIN,
+      WORKBENCH_DEVTOOLS_WIDTH_MAX,
+    );
+    e.preventDefault();
+  } else if (e.key === "ArrowRight") {
+    workbenchDevtoolsWidthPercent.value = clamp(
+      workbenchDevtoolsWidthPercent.value - step,
+      WORKBENCH_DEVTOOLS_WIDTH_MIN,
+      WORKBENCH_DEVTOOLS_WIDTH_MAX,
+    );
+    e.preventDefault();
+  } else if (e.key === "Home") {
+    workbenchDevtoolsWidthPercent.value = WORKBENCH_DEVTOOLS_WIDTH_MAX;
+    e.preventDefault();
+  } else if (e.key === "End") {
+    workbenchDevtoolsWidthPercent.value = WORKBENCH_DEVTOOLS_WIDTH_MIN;
+    e.preventDefault();
+  }
+}
+
+function onWorkbenchDevtoolsHeightResizeKeydown(e: KeyboardEvent): void {
+  const step = e.shiftKey ? 10 : 4;
+  if (e.key === "ArrowUp") {
+    workbenchDevtoolsHeightPercent.value = clamp(
+      workbenchDevtoolsHeightPercent.value + step,
+      WORKBENCH_DEVTOOLS_HEIGHT_MIN,
+      WORKBENCH_DEVTOOLS_HEIGHT_MAX,
+    );
+    e.preventDefault();
+  } else if (e.key === "ArrowDown") {
+    workbenchDevtoolsHeightPercent.value = clamp(
+      workbenchDevtoolsHeightPercent.value - step,
+      WORKBENCH_DEVTOOLS_HEIGHT_MIN,
+      WORKBENCH_DEVTOOLS_HEIGHT_MAX,
+    );
+    e.preventDefault();
+  } else if (e.key === "Home") {
+    workbenchDevtoolsHeightPercent.value = WORKBENCH_DEVTOOLS_HEIGHT_MAX;
+    e.preventDefault();
+  } else if (e.key === "End") {
+    workbenchDevtoolsHeightPercent.value = WORKBENCH_DEVTOOLS_HEIGHT_MIN;
     e.preventDefault();
   }
 }
@@ -1421,22 +1712,23 @@ function onEventSelect(index: number): void {
 
 .iv__main--workbench {
   display: grid;
-  grid-template-columns: minmax(22rem, 44%) minmax(20rem, 1fr) minmax(18rem, 28%);
+  grid-template-columns: minmax(18rem, 42%) 0.55rem minmax(20rem, 1fr) 0.55rem minmax(16rem, 28%);
 }
 
 .iv__main--workbench-horizontal,
 .iv__main--devtools-bottom {
-  grid-template-columns: minmax(20rem, 1fr) minmax(20rem, 1fr);
-  grid-template-rows: minmax(0, 1fr) minmax(12rem, 32%);
+  grid-template-columns: minmax(18rem, 42%) 0.55rem minmax(20rem, 1fr);
+  grid-template-rows: minmax(0, 1fr) 0.55rem minmax(12rem, 34%);
 }
 
 .iv__main--workbench-horizontal .iv__devtools,
 .iv__main--devtools-bottom .iv__devtools {
+  grid-row: 3;
   grid-column: 1 / -1;
 }
 
 .iv__main--devtools-floating {
-  grid-template-columns: minmax(22rem, 48%) minmax(20rem, 1fr);
+  grid-template-columns: minmax(18rem, 42%) 0.55rem minmax(20rem, 1fr);
 }
 
 .iv__media-pane,
@@ -1450,12 +1742,7 @@ function onEventSelect(index: number): void {
 }
 
 .iv__media-pane {
-  resize: horizontal;
-  overflow: auto;
-}
-
-.iv__main--workbench-horizontal .iv__media-pane {
-  resize: both;
+  overflow: hidden;
 }
 
 .iv__pane-header {
@@ -1501,8 +1788,7 @@ function onEventSelect(index: number): void {
 }
 
 .iv__devtools {
-  resize: horizontal;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .iv__devtools-body {
@@ -1753,6 +2039,49 @@ function onEventSelect(index: number): void {
   right: 0;
   top: calc(50% - 1px);
   height: 1px;
+}
+
+.iv__main--workbench .iv__resize-handle--workbench-media {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.iv__main--workbench .iv__resize-handle--workbench-devtools {
+  grid-column: 4;
+  grid-row: 1;
+}
+
+.iv__main--workbench .iv__resize-handle--workbench-devtools-row {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+.iv__main--workbench .iv__chat,
+.iv__main--workbench .iv__media-pane,
+.iv__main--workbench .iv__devtools {
+  min-width: 0;
+  min-height: 0;
+}
+
+.iv__main--workbench .iv__media-pane {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.iv__main--workbench .iv__chat {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.iv__main--workbench .iv__devtools {
+  grid-column: 5;
+  grid-row: 1;
+}
+
+.iv__main--workbench-horizontal .iv__chat,
+.iv__main--devtools-bottom .iv__chat,
+.iv__main--devtools-floating .iv__chat {
+  grid-column: 3;
 }
 
 .iv__panel {
