@@ -93,6 +93,24 @@ states:
       # but breaking the YAML cycle here means the failure is
       # reported once and the operator stays at idle to inspect.
 
+      # Step 0: derive a default reporting thread from ticket_id when the caller
+      # didn't supply one — e.g. a headless drive (goal-seeker/punch-list, a bench
+      # cell, `kitsoki turn`) that hands over only a ticket_id + item text, no
+      # operator-chosen thread path. Every checkpoint's `iface.transport.post` (and
+      # the default host.append_to_file handler behind it) HARD-FAILS on an empty
+      # thread ("thread argument is required"), which otherwise dead-ends the whole
+      # pipeline at the very first checkpoint post. `issues/bugs/<ticket_id>.md` is
+      # the same self-bootstrapping bug-file convention host.append_to_file already
+      # documents ("the bug file IS the conversation thread") — it creates the file
+      # on first write, so this is safe even when no such file exists yet. Applies
+      # in triage mode too (triaging's `accept` posts to the transport as well), so
+      # this is NOT gated on bugfix_mode. Runs once per autostart attempt, same as
+      # the workspace-identity derivation below; never overrides an explicit thread
+      # a caller already projected in via world_in.
+      - when: "world.ticket_id != '' && world.thread == '' && !world.bf_autostart_attempted"
+        set:
+          thread: "issues/bugs/{{ world.ticket_id }}.md"
+
       # Step 1: derive workspace identity from ticket_id. Skipped in triage
       # mode — triage is read-only against the current tree, so it needs no
       # worktree (and creating one would be wasted side-effect).
