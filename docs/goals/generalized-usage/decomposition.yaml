@@ -37,6 +37,29 @@ definition_of_done: >
   no-lost-work for the graph), never a silent hand edit — see WM.7.
 
 changes:
+  # 0.2 pulled to the FRONT: install-critical G1 (a stranger's fresh clone gets 2 broken
+  # MCP servers from hardcoded /Users/brad paths), no deps, single-file, simple end-state
+  # gate — the right first change to LAND (install-before-engine prioritization + the
+  # end-to-end landing proof for the goal-seeker loop).
+  - id: "0.2"
+    wall: W1
+    goal_ref: [G1]
+    title: Repo .mcp.json has no hardcoded /Users/brad paths
+    kind: docs
+    pipeline: implementation
+    scope: [".mcp.json"]
+    depends_on: []
+    acceptance:
+      - "a fresh clone gets zero broken MCP servers (slidey/stagehand entries portable or optional)"
+    gate:
+      class: G-LINT
+      red_now: ".mcp.json hardcodes /Users/brad/... for slidey+stagehand; every cloner gets 2 broken servers"
+      green_when: "a path-scan lint over .mcp.json exits 0"
+      cmd: "! grep -q '/Users/brad' .mcp.json"
+    agent_brief: >
+      Make the repo .mcp.json portable: remove hardcoded /Users/brad slidey+stagehand
+      entries (make them optional or path-relative). Add the grep to the lint gate.
+
   # ---- WM — Meta / dogfood-enablement (do first; each is also a G2/G6 item) ----
   - id: "WM.0"
     wall: WM
@@ -822,25 +845,6 @@ changes:
       The single highest-ROI change. Teach .github/workflows/release.yml to embed
       stories+skills before cross-compile, and add a smoke script that runs the BUILT
       binary in a scratch repo through `project-tools install` and bare onboarding.
-
-  - id: "0.2"
-    wall: W1
-    goal_ref: [G1]
-    title: Repo .mcp.json has no hardcoded /Users/brad paths
-    kind: docs
-    pipeline: implementation
-    scope: [".mcp.json"]
-    depends_on: []
-    acceptance:
-      - "a fresh clone gets zero broken MCP servers (slidey/stagehand entries portable or optional)"
-    gate:
-      class: G-LINT
-      red_now: ".mcp.json hardcodes /Users/brad/... for slidey+stagehand; every cloner gets 2 broken servers"
-      green_when: "a path-scan lint over .mcp.json exits 0"
-      cmd: "! grep -q '/Users/brad' .mcp.json"
-    agent_brief: >
-      Make the repo .mcp.json portable: remove hardcoded /Users/brad slidey+stagehand
-      entries (make them optional or path-relative). Add the grep to the lint gate.
 
   - id: "0.3"
     wall: W1
