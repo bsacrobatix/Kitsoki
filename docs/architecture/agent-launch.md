@@ -1,0 +1,70 @@
+# Agent Launch CLI
+
+`kitsoki agent launch` turns a reusable story `agents:` declaration into a
+concrete task-agent CLI launch for Claude, Codex, or another supported backend.
+It is intentionally a resolver over existing story and harness-profile config,
+not a second agent schema.
+
+## Contract
+
+The command requires a story app and agent name:
+
+```sh
+kitsoki agent launch --app stories/git-ops/app.yaml --agent conflict_resolver --task "Resolve the listed conflicts"
+```
+
+By default it is a no-provider dry run. It prints a JSON launch plan with:
+
+- the selected backend and binary,
+- the concrete argv after backend translation,
+- the resolved working directory,
+- the effective model and effort,
+- the resolved tool surface,
+- redacted provider environment keys,
+- the stdin prompt that will be sent to the backend.
+
+Pass `--exec` to actually run the selected CLI:
+
+```sh
+kitsoki agent launch --app stories/prd/app.yaml --agent author --profile synthetic-codex --task-file .context/prd-task.md --exec
+```
+
+Tests and normal dry-run inspection do not call live LLMs.
+
+## Resolution
+
+The command composes three existing layers:
+
+1. Story `agents:` supplies the persona, default cwd, tools, model, effort, and
+   provider name.
+2. `.kitsoki.yaml` / `.kitsoki.local.yaml` `harness_profiles` supply backend,
+   model, effort, and provider env. `--profile` selects one; otherwise the
+   config `default_profile` is used when present.
+3. Task flags supply per-launch overrides such as `--working-dir`, `--model`,
+   `--effort`, `--backend`, `--add-dir`, and `--env KEY=VALUE`.
+
+Profile model and effort override story-local defaults so a Codex or
+synthetic.new profile does not inherit a Claude-only model id from the room
+agent. Extra env values are merged last and are redacted in dry-run output.
+
+## Backends
+
+The command builds the same neutral Claude-shaped invocation used by host agent
+handlers, then asks the host backend translator for the concrete invocation.
+That means Codex dry-runs show the real `codex exec ...` argv, including model
+and working-directory translation, while Claude dry-runs show the direct Claude
+argv.
+
+`--exec` uses the same host runner as the existing harness path, with the
+selected backend installed on context and provider env applied to the child
+process.
+
+## Safety
+
+Read-only agents (`external_side_effect: false`) launch with Claude's enforcing
+`default` permission mode and a hard deny-list for mutation tools. All launches
+deny headless escape tools such as `AskUserQuestion`, `Agent`, and `Task`.
+
+OS sandbox policy is not applied by this command yet. Until that lands, only run
+`--exec` in a trusted working tree. The launch plan is the intended extension
+point for future sandbox policy, extension overlays, and HTTP/network rules.
