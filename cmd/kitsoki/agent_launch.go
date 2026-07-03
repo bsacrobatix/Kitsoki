@@ -20,6 +20,7 @@ import (
 
 type agentLaunchOptions struct {
 	AppPath        string
+	AgentFile      string
 	ConfigPath     string
 	AgentName      string
 	Profile        string
@@ -33,10 +34,12 @@ type agentLaunchOptions struct {
 	AddDirs        []string
 	Env            []string
 	Exec           bool
+	Interactive    bool
 }
 
 type agentLaunchPlan struct {
 	App         string            `json:"app,omitempty"`
+	AgentFile   string            `json:"agent_file,omitempty"`
 	Agent       string            `json:"agent"`
 	Profile     string            `json:"profile,omitempty"`
 	Backend     string            `json:"backend"`
@@ -49,28 +52,49 @@ type agentLaunchPlan struct {
 	Command     []string          `json:"command"`
 	Stdin       string            `json:"stdin,omitempty"`
 	DryRun      bool              `json:"dry_run"`
+	Interactive bool              `json:"interactive,omitempty"`
 	FutureNotes []string          `json:"future_notes,omitempty"`
 
 	providerEnv map[string]string
 	claudeArgs  []string
+	cleanups    []func()
+}
+
+type standaloneCodexAgent struct {
+	Name                  string
+	Description           string
+	DeveloperInstructions string
+	Model                 string
+	Effort                string
+	SandboxMode           string
+	MCPServers            map[string]any
 }
 
 func agentLaunchCmd() *cobra.Command {
 	var opts agentLaunchOptions
 	cmd := &cobra.Command{
-		Use:   "launch --app <app.yaml> --agent <name> [--task <text>|--task-file <path>]",
-		Short: "Launch a Claude/Codex CLI from a story agent definition",
-		Long: `Resolve a reusable story agents: entry plus an optional harness profile
-and turn it into a concrete Claude/Codex task-agent launch.
+		Use:   "launch --agent <name> [--app <app.yaml>] [--task <text>|--task-file <path>]",
+		Short: "Launch a Claude/Codex CLI from an agent definition",
+		Long: `Resolve an agent definition plus an optional harness profile and turn it
+into a concrete Claude/Codex task-agent launch.
 
-By default this prints a redacted JSON launch plan and does not call a provider.
-Pass --exec to run the selected external CLI.`,
+When --app is set, the agent comes from that story's top-level agents: block.
+When --app is omitted, the agent is resolved as a freestanding Codex agent from
+.codex/agents/<name>.toml (or --agent-file). Freestanding Codex agents may
+declare [mcp_servers.*] blocks; launch attaches them exactly like a Claude
+--mcp-config, then the Codex backend translates them to codex -c overrides.
+
+By default this prints a redacted JSON launch plan for task-backed launches.
+Freestanding Codex launch with no task opens Codex interactively.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			plan, err := buildAgentLaunchPlan(opts)
 			if err != nil {
 				return err
 			}
-			if !opts.Exec {
+			for _, cleanup := range plan.cleanups {
+				defer cleanup()
+			}
+			if !opts.Exec && !plan.Interactive {
 				plan.DryRun = true
 				return writeAgentLaunchPlan(cmd.OutOrStdout(), plan)
 			}
@@ -79,33 +103,27 @@ Pass --exec to run the selected external CLI.`,
 				ctx = host.WithAgentProviderEnv(ctx, plan.providerEnv)
 			}
 			ctx = host.WithAgentBackendNamed(ctx, plan.Backend)
-			out, err := host.RunClaudeOneShotForHarness(ctx, plan.Binary, plan.claudeArgs, plan.Stdin, plan.WorkingDir)
-			if err != nil {
-				return err
-			}
-			if strings.TrimSpace(out) != "" {
-				_, err = fmt.Fprintln(cmd.OutOrStdout(), out)
-			}
-			return err
+			return runAgentLaunchPlan(ctx, cmd, plan)
 		},
 	}
 
-	cmd.Flags().StringVar(&opts.AppPath, "app", "", "story app.yaml whose top-level agents: block declares --agent (required)")
+	cmd.Flags().StringVar(&opts.AppPath, "app", "", "optional story app.yaml whose top-level agents: block declares --agent")
+	cmd.Flags().StringVar(&opts.AgentFile, "agent-file", "", "freestanding agent definition file; defaults to .codex/agents/<agent>.toml when --app is omitted")
 	cmd.Flags().StringVar(&opts.ConfigPath, "config", webconfig.DefaultConfigFile, "kitsoki config file for harness profiles")
-	cmd.Flags().StringVar(&opts.AgentName, "agent", "", "agent name from the story agents: block (required)")
+	cmd.Flags().StringVar(&opts.AgentName, "agent", "", "agent name to launch")
 	cmd.Flags().StringVar(&opts.Profile, "profile", "", "harness profile name; defaults to config default_profile when set")
 	cmd.Flags().StringVar(&opts.Backend, "backend", "", "override backend: claude|codex|copilot")
 	cmd.Flags().StringVar(&opts.Model, "model", "", "override model for this task")
 	cmd.Flags().StringVar(&opts.Effort, "effort", "", "override reasoning effort for this task")
-	cmd.Flags().StringVar(&opts.WorkingDir, "working-dir", "", "override agent cwd; defaults to agent cwd then app directory")
+	cmd.Flags().StringVar(&opts.WorkingDir, "working-dir", "", "override agent cwd; story mode defaults to agent cwd then app directory; freestanding mode defaults to the current directory")
 	cmd.Flags().StringVar(&opts.Task, "task", "", "task instructions")
 	cmd.Flags().StringVar(&opts.TaskFile, "task-file", "", "file containing task instructions")
 	cmd.Flags().StringVar(&opts.PermissionMode, "permission-mode", "", "permission mode: ask|bypassPermissions|denyAll")
 	cmd.Flags().StringArrayVar(&opts.AddDirs, "add-dir", nil, "additional directory made available to the launched agent")
 	cmd.Flags().StringArrayVar(&opts.Env, "env", nil, "extra environment override KEY=VALUE; values are redacted from dry-run output")
 	cmd.Flags().BoolVar(&opts.Exec, "exec", false, "actually run the external CLI; default is a no-provider dry run")
+	cmd.Flags().BoolVar(&opts.Interactive, "interactive", false, "force an interactive Codex session instead of one-shot codex exec; implied when freestanding launch has no task")
 
-	_ = cmd.MarkFlagRequired("app")
 	_ = cmd.MarkFlagRequired("agent")
 	return cmd
 }
@@ -113,6 +131,12 @@ Pass --exec to run the selected external CLI.`,
 func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 	if strings.TrimSpace(opts.Task) != "" && strings.TrimSpace(opts.TaskFile) != "" {
 		return agentLaunchPlan{}, fmt.Errorf("use only one of --task or --task-file")
+	}
+	if opts.Interactive && strings.TrimSpace(opts.AppPath) != "" {
+		return agentLaunchPlan{}, fmt.Errorf("--interactive is only supported for freestanding Codex agents; omit --app")
+	}
+	if strings.TrimSpace(opts.AppPath) == "" {
+		return buildStandaloneAgentLaunchPlan(opts)
 	}
 	def, err := loadAppWithEnv(opts.AppPath)
 	if err != nil {
@@ -168,6 +192,15 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 		return agentLaunchPlan{}, err
 	}
 	cliArgs := buildLaunchClaudeArgs(decl, model, effort, opts.PermissionMode, opts.AddDirs)
+	var cleanups []func()
+	if decl.MCP != nil && len(decl.MCP.Servers) > 0 {
+		mcpConfigPath, cleanup, cfgErr := writeLaunchMCPConfigTempfile(decl.MCP.Servers, "kitsoki-agent-launch-mcp")
+		if cfgErr != nil {
+			return agentLaunchPlan{}, cfgErr
+		}
+		cleanups = append(cleanups, cleanup)
+		cliArgs = append(cliArgs, "--mcp-config", mcpConfigPath)
+	}
 	planCtx := context.Background()
 	if len(providerEnv) > 0 {
 		planCtx = host.WithAgentProviderEnv(planCtx, providerEnv)
@@ -189,11 +222,223 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 		Stdin:       inv.Stdin,
 		providerEnv: providerEnv,
 		claudeArgs:  cliArgs,
+		cleanups:    cleanups,
 		FutureNotes: []string{
 			"OS sandbox policy is not applied by this command yet; pass --exec only in a trusted working tree.",
 			"Extension overlays and HTTP rules should be modeled as future agent/profile fields and resolved into this launch plan.",
 		},
 	}, nil
+}
+
+func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
+	agentPath, err := resolveStandaloneAgentFile(opts.AgentName, opts.AgentFile)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	agent, err := loadStandaloneCodexAgent(agentPath)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	if agent.Name != "" && agent.Name != opts.AgentName {
+		return agentLaunchPlan{}, fmt.Errorf("agent file %s declares name %q, not %q", agentPath, agent.Name, opts.AgentName)
+	}
+
+	profiles, defaultProfile, err := loadLaunchProfiles(opts.ConfigPath)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	profileName := firstLaunchNonEmpty(opts.Profile, defaultProfile)
+	profile, hasProfile := profiles[profileName]
+	if profileName != "" && !hasProfile {
+		return agentLaunchPlan{}, fmt.Errorf("unknown harness profile %q", profileName)
+	}
+	task, err := readLaunchTask(opts)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	interactive := opts.Interactive || strings.TrimSpace(task) == ""
+	workingDir, err := resolveStandaloneLaunchWorkingDir(opts.WorkingDir)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	backend := firstLaunchNonEmpty(opts.Backend, profile.Backend, "codex")
+	if _, ok := host.ResolveAgentBackendName(backend); !ok && backend != "claude" {
+		return agentLaunchPlan{}, fmt.Errorf("unknown backend %q", backend)
+	}
+	model := firstLaunchNonEmpty(opts.Model, profile.Model, agent.Model)
+	effort := firstLaunchNonEmpty(opts.Effort, profile.Effort, agent.Effort)
+	providerEnv := map[string]string{}
+	for k, v := range profile.Env {
+		providerEnv[k] = v
+	}
+	extraEnv, err := parseLaunchEnv(opts.Env)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	for k, v := range extraEnv {
+		providerEnv[k] = v
+	}
+
+	bin, err := resolveLaunchBin(backend, opts.Exec || interactive)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	if interactive && backend != "codex" {
+		return agentLaunchPlan{}, fmt.Errorf("interactive freestanding launch currently supports --backend codex, got %q", backend)
+	}
+	decl := &app.AgentDecl{
+		SystemPrompt: agent.DeveloperInstructions,
+		Model:        model,
+		Effort:       effort,
+	}
+	cliArgs := buildLaunchClaudeArgs(decl, model, effort, opts.PermissionMode, opts.AddDirs)
+	var cleanups []func()
+	if len(agent.MCPServers) > 0 {
+		mcpConfigPath, cleanup, cfgErr := writeLaunchMCPConfigTempfile(agent.MCPServers, "kitsoki-agent-launch-mcp")
+		if cfgErr != nil {
+			return agentLaunchPlan{}, cfgErr
+		}
+		cleanups = append(cleanups, cleanup)
+		cliArgs = append(cliArgs, "--mcp-config", mcpConfigPath)
+	}
+	planCtx := context.Background()
+	if len(providerEnv) > 0 {
+		planCtx = host.WithAgentProviderEnv(planCtx, providerEnv)
+	}
+	if interactive {
+		prompt := composeLaunchPrompt(agent.DeveloperInstructions, task)
+		command := append([]string{bin}, buildInteractiveCodexArgs(model, workingDir, opts.AddDirs, agent.MCPServers, prompt)...)
+		return agentLaunchPlan{
+			AgentFile:   agentPath,
+			Agent:       opts.AgentName,
+			Profile:     profileName,
+			Backend:     backend,
+			Binary:      bin,
+			WorkingDir:  workingDir,
+			Model:       model,
+			Effort:      effort,
+			Env:         redactEnv(providerEnv),
+			Command:     command,
+			Interactive: true,
+			providerEnv: providerEnv,
+			cleanups:    cleanups,
+			FutureNotes: []string{
+				"Interactive Codex launch uses top-level `codex`, not `codex exec`, so it opens the TUI with the freestanding agent instructions as the initial prompt.",
+				"Codex has no hard --agent-style per-tool allowlist in this launch path; the MCP-only posture comes from the freestanding agent instructions plus the attached MCP server set.",
+			},
+		}, nil
+	}
+	inv := host.TranslateAgentInvocationForBackend(planCtx, backend, cliArgs, task, workingDir)
+	command := append([]string{bin}, inv.Args...)
+	return agentLaunchPlan{
+		AgentFile:   agentPath,
+		Agent:       opts.AgentName,
+		Profile:     profileName,
+		Backend:     backend,
+		Binary:      bin,
+		WorkingDir:  workingDir,
+		Model:       model,
+		Effort:      effort,
+		Env:         redactEnv(providerEnv),
+		Command:     command,
+		Stdin:       inv.Stdin,
+		providerEnv: providerEnv,
+		claudeArgs:  cliArgs,
+		cleanups:    cleanups,
+		FutureNotes: []string{
+			"Codex has no hard --agent-style per-tool allowlist in this launch path; the MCP-only posture comes from the freestanding agent instructions plus the attached MCP server set.",
+			"Codex exec currently requires --dangerously-bypass-approvals-and-sandbox for MCP calls to run non-interactively.",
+		},
+	}, nil
+}
+
+func runAgentLaunchPlan(ctx context.Context, cmd *cobra.Command, plan agentLaunchPlan) error {
+	if plan.Interactive {
+		if len(plan.Command) == 0 {
+			return fmt.Errorf("interactive launch has no command")
+		}
+		run := exec.CommandContext(ctx, plan.Command[0], plan.Command[1:]...)
+		run.Dir = plan.WorkingDir
+		run.Stdin = os.Stdin
+		run.Stdout = cmd.OutOrStdout()
+		run.Stderr = cmd.ErrOrStderr()
+		run.Env = os.Environ()
+		for k, v := range plan.providerEnv {
+			run.Env = append(run.Env, k+"="+v)
+		}
+		return run.Run()
+	}
+	out, err := host.RunClaudeOneShotForHarness(ctx, plan.Binary, plan.claudeArgs, plan.Stdin, plan.WorkingDir)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(out) != "" {
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), out)
+	}
+	return err
+}
+
+func buildInteractiveCodexArgs(model, workingDir string, addDirs []string, mcpServers map[string]any, prompt string) []string {
+	args := []string{"--dangerously-bypass-approvals-and-sandbox"}
+	if strings.TrimSpace(model) != "" {
+		args = append(args, "-m", model)
+	}
+	if strings.TrimSpace(workingDir) != "" {
+		args = append(args, "-C", workingDir)
+	}
+	for _, dir := range addDirs {
+		if strings.TrimSpace(dir) != "" {
+			args = append(args, "--add-dir", dir)
+		}
+	}
+	args = append(args, codexConfigArgsForMCPServers(mcpServers)...)
+	if strings.TrimSpace(prompt) != "" {
+		args = append(args, prompt)
+	}
+	return args
+}
+
+func composeLaunchPrompt(systemPrompt, task string) string {
+	systemPrompt = strings.TrimSpace(systemPrompt)
+	task = strings.TrimSpace(task)
+	switch {
+	case systemPrompt == "":
+		return task
+	case task == "":
+		return systemPrompt
+	default:
+		return systemPrompt + "\n\n---\n\n" + task
+	}
+}
+
+func codexConfigArgsForMCPServers(mcpServers map[string]any) []string {
+	if len(mcpServers) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(mcpServers))
+	for name := range mcpServers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var out []string
+	for _, name := range names {
+		server, ok := mcpServers[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		base := "mcp_servers." + name + "."
+		if command, _ := server["command"].(string); strings.TrimSpace(command) != "" {
+			out = append(out, "-c", base+"command="+launchTOMLString(command))
+		}
+		if args, ok := stringSliceFromAny(server["args"]); ok && len(args) > 0 {
+			out = append(out, "-c", base+"args="+launchTOMLStringArray(args))
+		}
+		if env, ok := stringMapFromAny(server["env"]); ok && len(env) > 0 {
+			out = append(out, "-c", base+"env="+launchTOMLStringTable(env))
+		}
+	}
+	return out
 }
 
 func loadLaunchProfiles(configPath string) (map[string]orchestrator.HarnessProfile, string, error) {
@@ -228,6 +473,306 @@ func resolveLaunchWorkingDir(dir, appDir string) (string, error) {
 		return "", err
 	}
 	return abs, nil
+}
+
+func resolveStandaloneLaunchWorkingDir(dir string) (string, error) {
+	if strings.TrimSpace(dir) == "" {
+		dir = "."
+	}
+	if filepath.IsAbs(dir) {
+		return filepath.Clean(dir), nil
+	}
+	return filepath.Abs(dir)
+}
+
+func resolveStandaloneAgentFile(agentName, explicit string) (string, error) {
+	if strings.TrimSpace(explicit) != "" {
+		return filepath.Abs(explicit)
+	}
+	candidates := []string{
+		filepath.Join(".codex", "agents", agentName+".toml"),
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		candidates = append(candidates, filepath.Join(home, ".codex", "agents", agentName+".toml"))
+	}
+	for _, candidate := range candidates {
+		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+			return filepath.Abs(candidate)
+		}
+	}
+	return "", fmt.Errorf("freestanding agent %q not found; pass --app for a story agents: entry or --agent-file for a .codex/agents/*.toml file", agentName)
+}
+
+func loadStandaloneCodexAgent(path string) (standaloneCodexAgent, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return standaloneCodexAgent{}, fmt.Errorf("read agent file: %w", err)
+	}
+	agent, err := parseStandaloneCodexAgentTOML(string(raw))
+	if err != nil {
+		return standaloneCodexAgent{}, fmt.Errorf("parse agent file %s: %w", path, err)
+	}
+	if strings.TrimSpace(agent.DeveloperInstructions) == "" {
+		return standaloneCodexAgent{}, fmt.Errorf("agent file %s must set developer_instructions", path)
+	}
+	if strings.TrimSpace(agent.Name) == "" {
+		agent.Name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	}
+	return agent, nil
+}
+
+func parseStandaloneCodexAgentTOML(src string) (standaloneCodexAgent, error) {
+	var agent standaloneCodexAgent
+	agent.MCPServers = map[string]any{}
+	section := ""
+	currentServer := ""
+	lines := strings.Split(src, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(stripLaunchTOMLComment(lines[i]))
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			section = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "["), "]"))
+			currentServer = ""
+			if strings.HasPrefix(section, "mcp_servers.") {
+				currentServer = strings.TrimPrefix(section, "mcp_servers.")
+				if currentServer == "" || strings.Contains(currentServer, ".") {
+					return standaloneCodexAgent{}, fmt.Errorf("unsupported section [%s]", section)
+				}
+				if _, ok := agent.MCPServers[currentServer]; !ok {
+					agent.MCPServers[currentServer] = map[string]any{}
+				}
+			}
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			return standaloneCodexAgent{}, fmt.Errorf("line %d: expected key = value", i+1)
+		}
+		key = strings.TrimSpace(key)
+		val = strings.TrimSpace(val)
+		if strings.HasPrefix(val, `"""`) {
+			var text string
+			text, i = collectLaunchTOMLMultilineString(lines, i, val)
+			val = text
+		}
+		if currentServer != "" {
+			server := agent.MCPServers[currentServer].(map[string]any)
+			switch key {
+			case "command":
+				server["command"] = parseLaunchTOMLString(val)
+			case "args":
+				server["args"] = parseLaunchTOMLStringArray(val)
+			default:
+				return standaloneCodexAgent{}, fmt.Errorf("line %d: unsupported mcp server key %q", i+1, key)
+			}
+			continue
+		}
+		if section != "" {
+			return standaloneCodexAgent{}, fmt.Errorf("line %d: unsupported section [%s]", i+1, section)
+		}
+		switch key {
+		case "name":
+			agent.Name = parseLaunchTOMLString(val)
+		case "description":
+			agent.Description = parseLaunchTOMLString(val)
+		case "developer_instructions":
+			agent.DeveloperInstructions = parseLaunchTOMLString(val)
+		case "model":
+			agent.Model = parseLaunchTOMLString(val)
+		case "model_reasoning_effort":
+			agent.Effort = parseLaunchTOMLString(val)
+		case "sandbox_mode":
+			agent.SandboxMode = parseLaunchTOMLString(val)
+		default:
+			// Ignore Codex-agent fields that are useful to Codex itself but not
+			// needed for launch planning, such as description variants.
+		}
+	}
+	if len(agent.MCPServers) == 0 {
+		agent.MCPServers = nil
+	}
+	return agent, nil
+}
+
+func stripLaunchTOMLComment(line string) string {
+	inString := false
+	escaped := false
+	for i, r := range line {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' && inString {
+			escaped = true
+			continue
+		}
+		if r == '"' {
+			inString = !inString
+			continue
+		}
+		if r == '#' && !inString {
+			return line[:i]
+		}
+	}
+	return line
+}
+
+func collectLaunchTOMLMultilineString(lines []string, start int, firstVal string) (string, int) {
+	rest := strings.TrimPrefix(firstVal, `"""`)
+	if end := strings.Index(rest, `"""`); end >= 0 {
+		return rest[:end], start
+	}
+	var b strings.Builder
+	b.WriteString(rest)
+	for i := start + 1; i < len(lines); i++ {
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		line := lines[i]
+		if end := strings.Index(line, `"""`); end >= 0 {
+			b.WriteString(line[:end])
+			return b.String(), i
+		}
+		b.WriteString(line)
+	}
+	return b.String(), len(lines) - 1
+}
+
+func parseLaunchTOMLString(val string) string {
+	val = strings.TrimSpace(val)
+	if strings.HasPrefix(val, `"`) && strings.HasSuffix(val, `"`) && len(val) >= 2 {
+		val = strings.TrimSuffix(strings.TrimPrefix(val, `"`), `"`)
+		repl := strings.NewReplacer(`\"`, `"`, `\\`, `\`, `\n`, "\n", `\t`, "\t", `\r`, "\r")
+		return repl.Replace(val)
+	}
+	return val
+}
+
+func parseLaunchTOMLStringArray(val string) []string {
+	val = strings.TrimSpace(val)
+	if !strings.HasPrefix(val, "[") || !strings.HasSuffix(val, "]") {
+		return nil
+	}
+	inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(val, "["), "]"))
+	if inner == "" {
+		return nil
+	}
+	var out []string
+	var b strings.Builder
+	inString := false
+	escaped := false
+	for _, r := range inner {
+		switch {
+		case escaped:
+			b.WriteRune(r)
+			escaped = false
+		case r == '\\' && inString:
+			escaped = true
+		case r == '"':
+			inString = !inString
+		case r == ',' && !inString:
+			out = append(out, parseLaunchTOMLString(strings.TrimSpace(b.String())))
+			b.Reset()
+		default:
+			b.WriteRune(r)
+		}
+	}
+	if strings.TrimSpace(b.String()) != "" {
+		out = append(out, parseLaunchTOMLString(strings.TrimSpace(b.String())))
+	}
+	return out
+}
+
+func stringSliceFromAny(v any) ([]string, bool) {
+	switch typed := v.(type) {
+	case []string:
+		return typed, true
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			s, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, s)
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func stringMapFromAny(v any) (map[string]string, bool) {
+	switch typed := v.(type) {
+	case map[string]string:
+		return typed, true
+	case map[string]any:
+		out := make(map[string]string, len(typed))
+		for k, item := range typed {
+			s, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			out[k] = s
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func launchTOMLString(s string) string {
+	repl := strings.NewReplacer(
+		`\`, `\\`,
+		`"`, `\"`,
+		"\n", `\n`,
+		"\t", `\t`,
+		"\r", `\r`,
+	)
+	return `"` + repl.Replace(s) + `"`
+}
+
+func launchTOMLStringArray(xs []string) string {
+	parts := make([]string, len(xs))
+	for i, x := range xs {
+		parts[i] = launchTOMLString(x)
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+func launchTOMLStringTable(m map[string]string) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = launchTOMLString(k) + "=" + launchTOMLString(m[k])
+	}
+	return "{" + strings.Join(parts, ",") + "}"
+}
+
+func writeLaunchMCPConfigTempfile(mcpServers map[string]any, prefix string) (string, func(), error) {
+	mcpConfig := map[string]any{"mcpServers": mcpServers}
+	mcpBytes, err := json.Marshal(mcpConfig)
+	if err != nil {
+		return "", nil, fmt.Errorf("marshal mcp config: %w", err)
+	}
+	f, err := os.CreateTemp("", prefix+"-*.json")
+	if err != nil {
+		return "", nil, fmt.Errorf("create mcp config tempfile: %w", err)
+	}
+	if _, err := f.Write(mcpBytes); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return "", nil, fmt.Errorf("write mcp config: %w", err)
+	}
+	_ = f.Close()
+	path := f.Name()
+	return path, func() { _ = os.Remove(path) }, nil
 }
 
 func backendForAgentProvider(def *app.AppDef, provider string) string {
