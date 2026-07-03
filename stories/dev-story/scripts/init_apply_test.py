@@ -182,6 +182,7 @@ if profile_path.exists():
     check("valid design no template", "design_template_dir: \"\"" in profile_text)
     check("valid design local path", "design_durable_path: \".context/designs\"" in profile_text)
     check("valid setup writes instance", ".kitsoki/stories/acme-dev/app.yaml" in profile_text)
+    check("valid setup writes readiness verifier", ".kitsoki/check-readiness.py" in profile_text)
     check("valid setup creates prd dir", "- \".context/prd\"" in profile_text)
     check("valid setup creates design dir", "- \".context/designs\"" in profile_text)
     check("valid setup gates build", "command: \"go build ./...\"" in profile_text)
@@ -203,6 +204,22 @@ if readme_path.exists():
     readme_text = readme_path.read_text(encoding="utf-8")
     check("valid readme no arg run", "kitsoki run\n```" in readme_text)
     check("valid readme explicit wrapper optional", "Use the materialized wrapper explicitly only after editing it" in readme_text)
+    check("valid readme readiness command", "python3 .kitsoki/check-readiness.py --json" in readme_text)
+readiness_path = repo / ".kitsoki" / "check-readiness.py"
+check("valid readiness verifier write", readiness_path.exists())
+if readiness_path.exists():
+    check("valid readiness executable", os.access(readiness_path, os.X_OK))
+    list_proc = subprocess.run(
+        [sys.executable, str(readiness_path), "--list"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=repo,
+    )
+    check("valid readiness list exit", list_proc.returncode == 0, list_proc.stdout + list_proc.stderr)
+    check("valid readiness list has story", '"id": "story-load"' in list_proc.stdout)
+    check("valid readiness list has tests", '"command": "go test ./..."' in list_proc.stdout)
 
 # 4. Git metadata is preserved instead of assuming main/no remote.
 repo = mkgitrepo()

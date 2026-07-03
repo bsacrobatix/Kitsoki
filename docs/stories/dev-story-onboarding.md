@@ -57,8 +57,9 @@ Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
 
 1. **`init_apply.py`** ([source](../../stories/dev-story/scripts/init_apply.py))
    — writes the checked-in onboarding files: `.kitsoki.yaml`,
-   `.kitsoki/project-profile.yaml`, `.kitsoki/stories/<id>-dev/app.yaml` (+
-   README), and appends the kitsoki runtime block to `.gitignore`. Binds
+   `.kitsoki/project-profile.yaml`, `.kitsoki/check-readiness.py`,
+   `.kitsoki/stories/<id>-dev/app.yaml` (+ README), and appends the kitsoki
+   runtime block to `.gitignore`. Binds
    `init_apply_result` (the JSON report); a failure routes to
    `init_apply_failed`. The generated profile's `onboarding` block records the
    selected starter story, deterministic repo evidence, and initial
@@ -94,6 +95,11 @@ Repo metadata is inferred locally as well. Git checkouts keep their current or
 origin default branch and origin remote in `repo.default_branch` /
 `repo.remote`; non-git directories are recorded as `repo.vcs: none` with empty
 branch and remote fields.
+
+The generated `.kitsoki/check-readiness.py` is the explicit post-apply verifier.
+It mirrors `setup_plan.verifications`, supports `--list` for review, and writes
+`.artifacts/kitsoki-readiness.json` when run. Onboarding does not execute those
+commands automatically.
 
 ## The external-target profile
 
