@@ -403,7 +403,7 @@ turns: []
 		Repo:         "o/r",
 		ObjectKind:   "pr",
 		ObjectNumber: "77",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("materializeJobFlowFixture: %v", err)
 	}

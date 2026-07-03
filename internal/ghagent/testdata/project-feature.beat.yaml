@@ -1,0 +1,29 @@
+# project-feature.beat.yaml — drives an onboarded project dev-story instance
+# from a feature-labelled GitHub mention. The service supplies appPath from the
+# target checkout; this fixture only seeds mention-derived world and proves the
+# project-local route enters the implementation pipeline without live LLM.
+test_kind: flow
+app: ../../../stories/dev-story/app.yaml
+initial_state: landing
+initial_world:
+  ticket_id: "99"
+  ticket_title: "Feature request from GitHub"
+  ticket_type: "feature"
+  ticket_url: "https://github.com/o/r/issues/99"
+  thread: "github:o/r/issue/99"
+  workdir: "."
+  workspace_id: "ws-gh-feature-poc"
+  base_branch: "main"
+  feature_branch: "task/gh-feature-poc"
+  judge_mode: "human"
+  gh_job_id: "job-stub"
+  gh_origin_ref: "github:o/r/issue/99"
+  repo: "o/r"
+
+turns:
+  - intent: { name: drive, slots: {} }
+    expect_state: impl.idle
+    expect_world:
+      ticket_type: "feature"
+
+expect_no_errors: true

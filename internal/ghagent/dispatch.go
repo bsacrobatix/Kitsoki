@@ -34,6 +34,9 @@ type Dispatcher struct {
 	// PublicBaseURL, when set, replaces the local kitsoki:// run placeholder
 	// with a browser-openable URL: <base>/run/<job_id>.
 	PublicBaseURL string
+	// ProjectRoutes, when configured, maps eligible issue mentions onto the
+	// onboarded project checkout before spawning the route.
+	ProjectRoutes ProjectRouteResolver
 	// SpawnFn runs the mapped story for a claimed job in no-LLM posture.
 	// Defaults to RunStorySession (testrunner.RunFlows-backed); injectable for
 	// tests (spy / assertion).
@@ -59,11 +62,15 @@ func (d *Dispatcher) Dispatch(ctx context.Context, mention Mention, labels []str
 	}
 
 	if !won {
-		if route, ok := d.Routes.Classify(mention, labels); ok && shouldRerunTerminalPR(job, route) {
+		if route, ok, err := d.classifyRoute(mention, labels); err != nil {
+			return nil, err
+		} else if ok && shouldRerunTerminalPR(job, route) {
 			return d.dispatchRouted(ctx, mention, job, route)
 		}
 		if job.State == jobs.GHAwaitingGuidance {
-			if route, ok := d.Routes.Classify(mention, labels); ok {
+			if route, ok, err := d.classifyRoute(mention, labels); err != nil {
+				return nil, err
+			} else if ok {
 				return d.dispatchRouted(ctx, mention, job, route)
 			}
 		}
@@ -84,7 +91,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, mention Mention, labels []str
 	}
 
 	// Won: classify + post the initial ack.
-	route, ok := d.Routes.Classify(mention, labels)
+	route, ok, classifyErr := d.classifyRoute(mention, labels)
+	if classifyErr != nil {
+		return d.failBeforeRun(ctx, job, "route_classify_failed", classifyErr)
+	}
 	if !ok {
 		if err := d.Jobs.Advance(ctx, job.JobID, jobs.GHAwaitingGuidance, "unclassifiable mention"); err != nil {
 			return nil, err
@@ -123,6 +133,19 @@ func (d *Dispatcher) Dispatch(ctx context.Context, mention Mention, labels []str
 	job.Story = route.Story
 
 	return d.dispatchRouted(ctx, mention, job, route)
+}
+
+func (d *Dispatcher) classifyRoute(mention Mention, labels []string) (Route, bool, error) {
+	route, ok := d.Routes.Classify(mention, labels)
+	if !ok {
+		return Route{}, false, nil
+	}
+	if projectRoute, applied, err := d.ProjectRoutes.Apply(route, mention); err != nil {
+		return Route{}, false, err
+	} else if applied {
+		return projectRoute, true, nil
+	}
+	return route, true, nil
 }
 
 func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *jobs.GHJob, route Route) (*jobs.GHJob, error) {
@@ -283,11 +306,19 @@ func RunStorySession(ctx context.Context, route Route, job *jobs.GHJob) (RunResu
 	}
 
 	var appPath, beatFixture string
-	appPath = filepath.Join(root, route.Story, "app.yaml")
-	base := filepath.Base(route.Story) // e.g. "bugfix"
-	beatFixture = filepath.Join(root, "internal", "ghagent", "testdata", base+".beat.yaml")
+	if strings.TrimSpace(route.AppPath) != "" {
+		appPath = route.AppPath
+	} else {
+		appPath = filepath.Join(root, route.Story, "app.yaml")
+	}
+	if strings.TrimSpace(route.BeatFixture) != "" {
+		beatFixture = route.BeatFixture
+	} else {
+		base := filepath.Base(route.Story) // e.g. "bugfix"
+		beatFixture = filepath.Join(root, "internal", "ghagent", "testdata", base+".beat.yaml")
+	}
 
-	flowFixture, cleanup, err := materializeJobFlowFixture(beatFixture, job)
+	flowFixture, cleanup, err := materializeJobFlowFixture(beatFixture, job, route.World)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -428,7 +459,7 @@ func summarizeFlowFailures(report *testrunner.FlowReport) string {
 	return strings.Join(parts, "; ")
 }
 
-func materializeJobFlowFixture(fixturePath string, job *jobs.GHJob) (string, func(), error) {
+func materializeJobFlowFixture(fixturePath string, job *jobs.GHJob, routeWorld map[string]any) (string, func(), error) {
 	raw, err := os.ReadFile(fixturePath)
 	if err != nil {
 		return "", func() {}, fmt.Errorf("ghagent: read flow fixture %q: %w", fixturePath, err)
@@ -446,6 +477,9 @@ func materializeJobFlowFixture(fixturePath string, job *jobs.GHJob) (string, fun
 		if strings.TrimSpace(v) != "" {
 			initialWorld[k] = v
 		}
+	}
+	for k, v := range routeWorld {
+		initialWorld[k] = v
 	}
 	out, err := yaml.Marshal(doc)
 	if err != nil {

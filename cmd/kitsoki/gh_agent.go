@@ -46,6 +46,7 @@ func newGHAgentPollCmd() *cobra.Command {
 		trigger        string
 		worker         string
 		publicBaseURL  string
+		projectRoot    string
 		useGitHubApp   bool
 		appID          int64
 		installationID int64
@@ -94,6 +95,7 @@ func newGHAgentPollCmd() *cobra.Command {
 				Comments:      &ghagent.CommentStore{Exec: host.GitHubTicketHandler, Repo: repo},
 				WorkerID:      worker,
 				PublicBaseURL: publicBaseURL,
+				ProjectRoutes: ghagent.ProjectRouteResolver{Root: projectRoot},
 				SpawnFn:       ghagent.RunStorySession,
 			}
 
@@ -114,6 +116,7 @@ func newGHAgentPollCmd() *cobra.Command {
 	cmd.Flags().StringVar(&trigger, "trigger", ghagent.DefaultMentionTrigger, "mention trigger literal")
 	cmd.Flags().StringVar(&worker, "worker", "gh-agent-1", "worker id holding the claim")
 	cmd.Flags().StringVar(&publicBaseURL, "public-base-url", "", "public URL base used in ack run links, e.g. https://kitsoki-test.slothattax.me")
+	cmd.Flags().StringVar(&projectRoot, "project-root", os.Getenv("KITSOKI_GH_AGENT_PROJECT_ROOT"), "local checkout root for --repo; when onboarded, issue routes use its .kitsoki app")
 	cmd.Flags().BoolVar(&useGitHubApp, "github-app", false, "authenticate as a GitHub App installation (mints GH_TOKEN); off keeps the offline path")
 	cmd.Flags().Int64Var(&appID, "gh-app-id", 0, "GitHub App id (overrides KITSOKI_GH_APP_ID)")
 	cmd.Flags().Int64Var(&installationID, "gh-app-installation-id", 0, "installation id (overrides KITSOKI_GH_APP_INSTALLATION_ID)")
