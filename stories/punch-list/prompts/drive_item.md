@@ -25,12 +25,17 @@ return only concrete handoff evidence; independent verification will decide pass
      `tickets_root`) BEFORE its first on_enter runs, so it self-provisions
      (workspace/branch/workdir, and — for stories that fetch a ticket record —
      its `iface.ticket.get`) the same way it would for an operator who already
-     picked a real ticket. Do not invent or omit this: driving off the free-text
-     prompt alone, with no structured `initial_world`, is what strands the
-     session with an empty ticket_id and nothing to self-provision from. If
-     `world_in` is absent, proceed with the free-text prompt only (older/simpler
-     manifests may not carry one — punch-list itself is generic and never
-     requires this field).
+     picked a real ticket. You SHOULD still pass `initial_world` — it is the
+     clean, explicit path. If `world_in` is absent, proceed with the free-text
+     prompt only (older/simpler manifests may not carry one — punch-list itself
+     is generic and never requires this field).
+   - Deterministic backstop (no action needed from you): the studio server now
+     ALSO injects this seed into your `session.new` automatically, keyed by the
+     parent session lineage, EVEN IF you forget `initial_world`. Your explicit
+     `initial_world` still wins on any conflicting key (the backstop only fills
+     gaps), so the outcome is identical whether or not you pass it. The loop no
+     longer strands on an empty `ticket_id` just because the arg was omitted —
+     but passing it remains the correct, legible thing to do.
 2. Drive it with natural operator text, using the item prompt:
    - `{{ args.item.prompt }}`
    - IMPORTANT: send the item prompt to the target session's FIRST turn
