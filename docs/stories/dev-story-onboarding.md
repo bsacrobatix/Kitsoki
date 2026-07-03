@@ -83,8 +83,12 @@ standalone with only the `kitsoki` binary present.
 
 When deterministic discovery finds associated Claude/Codex transcript history,
 apply also writes `.context/kitsoki-session-mining-seed.md` and records a
-pending seed job in the profile's `mining` block. This is a review handoff only:
-no mining pass or LLM call runs during onboarding.
+pending seed job in the profile's `mining` block. The generated `.kitsoki.yaml`
+also gets a disabled runtime `mining:` block (`enabled: false`, `cadence`,
+`first_pass_sample`, and the discovered `transcript_dirs`) so the operator can
+opt in later with `/mine resume` or `/mine now` without re-discovering scope.
+This is a review handoff only: no mining pass or LLM call runs during
+onboarding.
 
 Repo metadata is inferred locally as well. Git checkouts keep their current or
 origin default branch and origin remote in `repo.default_branch` /

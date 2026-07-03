@@ -405,6 +405,41 @@ def mining_seed_path() -> str:
     return ".context/kitsoki-session-mining-seed.md"
 
 
+def mining_transcript_dirs(data: dict) -> list[str]:
+    mining = data.get("mining_recommendation") if isinstance(data.get("mining_recommendation"), dict) else {}
+    sources = mining.get("sources") if isinstance(mining, dict) else []
+    if not isinstance(sources, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        path = str(source.get("dir") or "").strip()
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        out.append(path)
+    return out
+
+
+def mining_config(data: dict) -> dict:
+    mining = data.get("mining_recommendation") if isinstance(data.get("mining_recommendation"), dict) else {}
+    first_pass = int(mining.get("first_pass_sample") or 0) if isinstance(mining, dict) else 0
+    return {
+        "enabled": False,
+        "cadence": "30s",
+        "first_pass_sample": first_pass or 12,
+        "transcript_dirs": mining_transcript_dirs(data),
+    }
+
+
+def mining_config_yaml(data: dict) -> str:
+    if not mining_seed_enabled(data):
+        return ""
+    return "\nmining:\n" + yaml_dump(mining_config(data), 2) + "\n"
+
+
 def mining_setup_writes(data: dict) -> list[dict]:
     if not mining_seed_enabled(data):
         return []
@@ -959,7 +994,7 @@ readiness:
 """
 
 
-def config_yaml(project_id: str) -> str:
+def config_yaml(data: dict) -> str:
     return f"""story_dirs:
   - ./.kitsoki/stories
 
@@ -967,7 +1002,7 @@ project_profile: .kitsoki/project-profile.yaml
 
 root:
   import: dev-story
-"""
+{mining_config_yaml(data)}"""
 
 
 def mining_seed_markdown(data: dict) -> str:
@@ -1013,6 +1048,9 @@ Seed pass defaults:
 - first pass sample: `{first_pass}`
 - target: `root-instance`
 - apply mode: `propose-only`
+- runtime config: `.kitsoki.yaml` contains `mining.enabled: false` plus the
+  discovered `transcript_dirs`; use `/mine resume` or `/mine now` only after
+  reviewing this note.
 
 Discovery note:
 
@@ -1046,7 +1084,9 @@ Session mining seed:
 Kitsoki found associated Claude/Codex transcript history during onboarding and
 wrote `{mining_seed_path()}` as an operator review note. Treat it as a proposed
 seed pass for project-local customization; no mining pass or LLM call ran during
-onboarding.
+onboarding. `.kitsoki.yaml` has `mining.enabled: false` with the discovered
+transcript scope prefilled; use `/mine resume` or `/mine now` after review to
+opt in.
 """
     return f"""# {story_id}
 
@@ -1179,7 +1219,7 @@ def main() -> int:
     readme_path = root / ".kitsoki" / "stories" / f"{data['project_id']}-dev" / "README.md"
     gitignore_path = root / ".gitignore"
 
-    write_text(config_path, config_yaml(data["project_id"]), writes)
+    write_text(config_path, config_yaml(data), writes)
     write_text(profile_path, profile_content, writes)
     write_text(instance_path, app_yaml(data), writes)
     write_text(readme_path, readme(data, str(profile_path)), writes)
