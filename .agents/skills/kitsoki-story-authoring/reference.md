@@ -3,9 +3,9 @@
 A "story" is a directory the engine loads as one app: `app.yaml` (the
 manifest), `rooms/*.yaml` (state definitions, glued in via `include:`),
 `prompts/*.md` (LLM templates), `views/*.pongo` (typed-element base
-templates), `flows/*.yaml` (Mode-2 deterministic tests), optional
-`schemas/*.json` (typed-JSON contracts for `decide`/`task`/`ask`), and an
-optional `README.md`.
+templates), `scripts/*.star` + `scripts/*.star.yaml` (deterministic Starlark
+glue), `flows/*.yaml` (Mode-2 deterministic tests), optional `schemas/*.json`
+(typed-JSON contracts for `decide`/`task`/`ask`), and an optional `README.md`.
 
 The gold-standard reference stories live in this repo. Read them in
 this order — most authoring questions resolve by mimicking the closest
@@ -37,6 +37,8 @@ stories/<name>/
 ├── views/                    optional; typed-element base templates
 │   ├── base.pongo            block contract: status / heading / body / choices / footer
 │   └── partials/             reusable {% include %}-able fragments
+├── scripts/*.star             deterministic glue for ad hoc scripting
+├── scripts/*.star.yaml        sidecar contracts for each Starlark script
 ├── schemas/*.json            JSON-schema contracts for decide/task/ask
 ├── flows/*.yaml              Mode-2 deterministic test fixtures
 ├── scenarios/*.yaml          optional; warp bases for operator smoke tests
@@ -272,11 +274,68 @@ Rules:
   `on_complete:` (an effect list) for the completion turn. Result lands
   in `world.last_job_result` only inside `on_complete:`.
 
+### Default scripting choice: Starlark first
+
+For ad hoc procedural glue, make `host.starlark.run` the default choice. It is
+the smallest escape hatch between declarative YAML effects and bespoke Go host
+code: deterministic, sandboxed, sidecar-typed, trace-visible, and flow-testable
+without an LLM, network, or local shell. Use it for parsing, shaping data,
+branching on structured host/API responses, generating small review artifacts,
+or replacing fragile inline shell/Pongo logic.
+
+Reach for the alternatives only when their capability is specifically needed:
+
+- Use `set`/`increment`/guards when the work is a trivial world update.
+- Use `host.run` only for real local commands or repo/tool execution. Do not use
+  shell as the general scripting language for string munging, JSON shaping, or
+  HTTP glue; it is harder to sandbox, trace, and cassette.
+- Add a Go host handler when the behavior is shared infrastructure, needs strong
+  Go types, or belongs behind a stable provider-neutral interface.
+- Use `host.oracle.*` only when the step genuinely requires an LLM. Automated
+  tests must stub or cassette those calls; they must not spend tokens.
+
+The canonical shape is:
+
+```yaml
+hosts:
+  - host.starlark.run
+
+# ...
+- invoke: host.starlark.run
+  id: derive_widget
+  with:
+    script: scripts/derive_widget.star
+    inputs:
+      widget_id: "{{ world.widget_id }}"
+      mode: "{{ world.mode }}"
+  bind:
+    summary: summary
+    artifact_path: artifact_path
+  on_error: needs_human
+  once: true
+```
+
+Every script travels with a same-path sidecar, e.g.
+`scripts/derive_widget.star.yaml`, declaring the authoritative `inputs:` and
+`outputs:` contract. Validate with:
+
+```sh
+.agents/skills/starlark/tools/validate.sh stories/<name>/scripts/derive_widget.star -kitsoki
+kitsoki test flows stories/<name>/app.yaml --flows flows/<case>.yaml --v
+```
+
+If the script calls HTTP, add a flow fixture with `starlark_http_cassette:` so
+the real script runs against replayed responses. Starlark HTTP summaries appear
+in trace events under `__http_exchanges`; bodies stay in the cassette. For the
+full contract and pitfalls, use the `starlark` skill and
+`.agents/skills/starlark/reference/kitsoki.md`.
+
 The built-in handlers (full reference in `docs/architecture/hosts.md`):
 
 | Handler | Use for |
 |---|---|
 | `host.run` | Shell out (argv mode preferred when args come from world). Returns `{stdout, exit_code, ok, stdout_json}`. |
+| `host.starlark.run` | Primary ad hoc scripting/glue path. Runs `scripts/*.star` with a typed sidecar, sandboxed inputs, cassette-backed HTTP, and trace summaries. |
 | `host.oracle.extract` | Tiered resolver: synonyms → slot_template → llm. Returns typed JSON + `resolved_by`. |
 | `host.oracle.decide` | Typed LLM verdict; schema required; `submit` auto-attached; read-only tools. The canonical pattern for "Claude produces a structured artifact." |
 | `host.oracle.ask` | Read-only one-shot prose call; schema optional. |
@@ -698,12 +757,25 @@ The renderer / runtime traps — invisible until a user hits them:
   renders blank — the operator sees a featureless dead-end (and an
   `@exit:needs-human` with `requires:[last_error]` is "satisfied" by `""`). Always
   capture a non-empty diagnostic on failure: exit code + a note, never blank.
+- **Using shell as the default ad hoc scripting language.** If the logic is data
+  shaping, validation, HTTP glue, small artifact generation, or branching that
+  does not need a real local command, use `host.starlark.run` instead. Starlark
+  gives you a typed sidecar, sandboxed capabilities, deterministic replay,
+  trace-visible HTTP summaries, and no-LLM flow coverage. Shell belongs at the
+  boundary where the story really needs an external command.
+- **Forgetting the Starlark sidecar or cassette.** The `.star.yaml` sidecar is
+  the enforced interface; in-script comments or `INPUTS`/`OUTPUTS` dicts are not
+  authoritative. If the script uses `ctx.http`, the proof should include a
+  `starlark_http_cassette:` flow so `kitsoki test flows` runs the real script
+  without network.
 - **Trusting a flow fixture to test logic INSIDE a `host.run` script.** Flow
   fixtures mock `host.run` WHOLESALE — the whole call returns a canned result — so
   they cannot exercise what the script body computes (which template var lands in
   which shell var, what a `grep`/`jq` decides). To guard logic inside the script,
-  assert on the RENDERED script text (a structural test) or run it for real against
-  a temp fixture; a green mocked flow is NOT coverage of the script body.
+  prefer moving that logic into `host.starlark.run`, where flow fixtures execute
+  the real script. If shell is truly required, assert on the RENDERED script text
+  (a structural test) or run it for real against a temp fixture; a green mocked
+  flow is NOT coverage of the script body.
 - **A maker-style loop that hands off a DIRTY worktree.** If you author a loop
   whose terminal handoff is "the branch is ready to integrate," it must COMMIT the
   work first — a dirty worktree has no commit for an integrator to rebase/merge.
@@ -718,7 +790,12 @@ The order most authors settle into:
 
 1. **Sketch the graph** in `app.yaml` + `rooms/`. Placeholder views are
    fine; typed `extends: "base"` from the start saves migration work.
-2. **`kitsoki turn`** to probe one state-shape at a time. Stateless,
+2. **Move ad hoc procedural glue into Starlark early.** If a room starts to grow
+   inline shell, dense Pongo, JSON munging, HTTP glue, or computed artifacts,
+   add `scripts/<name>.star` plus `scripts/<name>.star.yaml`, invoke it through
+   `host.starlark.run`, and bind declared outputs back into world. Validate it
+   with `.agents/skills/starlark/tools/validate.sh ... -kitsoki`.
+3. **`kitsoki turn`** to probe one state-shape at a time. Stateless,
    JSON output, no DB:
    ```sh
    kitsoki turn stories/<name>/app.yaml \
@@ -726,12 +803,14 @@ The order most authors settle into:
      --intent <intent_name> \
      --world '@/tmp/world.json'
    ```
-3. **Write a flow fixture** for the path you just probed; lock it with
-   `kitsoki test flows`.
-4. **`kitsoki viz stories/<name>/app.yaml`** to sanity-check the graph
+4. **Write a flow fixture** for the path you just probed; lock it with
+   `kitsoki test flows`. For `host.starlark.run`, assert the bound outputs and
+   include `starlark_http_cassette:` for any `ctx.http` use so the real script is
+   exercised deterministically.
+5. **`kitsoki viz stories/<name>/app.yaml`** to sanity-check the graph
    shape (or `kitsoki viz --mermaid`).
-5. **`kitsoki render -o APP.md`** for review-friendly docs.
-6. **`kitsoki run stories/<name>/app.yaml`** to play it for real.
+6. **`kitsoki render -o APP.md`** for review-friendly docs.
+7. **`kitsoki run stories/<name>/app.yaml`** to play it for real.
    Hot-reload picks up edits as you go.
 
 If a user reports a runtime misbehaviour (silent bounce, wrong target,
