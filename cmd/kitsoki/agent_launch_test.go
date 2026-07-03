@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -101,6 +102,97 @@ states:
 	require.Contains(t, denied, "AskUserQuestion")
 	require.Contains(t, denied, "Bash")
 	require.Contains(t, denied, "Write")
+}
+
+func TestAgentLaunchPlan_FreestandingCodexAgentAttachesMCP(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".codex", "agents"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".codex", "agents", "kitsoki-mcp-driver.toml"), []byte(`
+name = "kitsoki-mcp-driver"
+description = "Drive kitsoki through MCP."
+developer_instructions = """
+Use ONLY the kitsoki studio MCP.
+Start with studio.ping.
+"""
+model = "gpt-5.5"
+model_reasoning_effort = "medium"
+sandbox_mode = "read-only"
+
+[mcp_servers.kitsoki]
+command = "kitsoki"
+args = ["mcp", "--stories-dir", "stories"]
+`), 0644))
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		AgentName: "kitsoki-mcp-driver",
+		Task:      "Call studio.ping and report the version.",
+	})
+	require.NoError(t, err)
+	for _, cleanup := range plan.cleanups {
+		t.Cleanup(cleanup)
+	}
+	require.False(t, plan.Interactive)
+	require.Empty(t, plan.App)
+	wantAgentFile, err := filepath.Abs(filepath.Join(dir, ".codex", "agents", "kitsoki-mcp-driver.toml"))
+	require.NoError(t, err)
+	wantAgentFile, err = filepath.EvalSymlinks(wantAgentFile)
+	require.NoError(t, err)
+	require.Equal(t, wantAgentFile, plan.AgentFile)
+	require.Equal(t, "codex", plan.Backend)
+	require.Equal(t, "/bin/codex-test", plan.Binary)
+	require.Equal(t, "gpt-5.5", plan.Model)
+	require.Equal(t, "medium", plan.Effort)
+	wantWorkingDir, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+	require.Equal(t, wantWorkingDir, plan.WorkingDir)
+	require.Contains(t, plan.Stdin, "tool_search")
+	require.Contains(t, plan.Stdin, "Use ONLY the kitsoki studio MCP.")
+	require.Contains(t, plan.Stdin, "Call studio.ping")
+	joined := strings.Join(plan.Command, " ")
+	require.Contains(t, joined, "mcp_servers.kitsoki.command=\"kitsoki\"")
+	require.Contains(t, joined, "mcp_servers.kitsoki.args=[\"mcp\",\"--stories-dir\",\"stories\"]")
+	require.Contains(t, plan.Command, "--dangerously-bypass-approvals-and-sandbox")
+}
+
+func TestAgentLaunchPlan_FreestandingCodexAgentInteractive(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".codex", "agents"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".codex", "agents", "kitsoki-mcp-driver.toml"), []byte(`
+name = "kitsoki-mcp-driver"
+developer_instructions = "Use ONLY the kitsoki studio MCP."
+model = "gpt-5.5"
+
+[mcp_servers.kitsoki]
+command = "kitsoki"
+args = ["mcp", "--stories-dir", "stories"]
+`), 0644))
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		AgentName: "kitsoki-mcp-driver",
+	})
+	require.NoError(t, err)
+	require.True(t, plan.Interactive)
+	require.Equal(t, "codex", plan.Backend)
+	require.Equal(t, "/bin/codex-test", plan.Binary)
+	require.Empty(t, plan.Stdin)
+	require.NotContains(t, plan.Command, "exec", "interactive launch must use top-level codex, not codex exec")
+	require.Contains(t, plan.Command, "--dangerously-bypass-approvals-and-sandbox")
+	require.Contains(t, plan.Command, "-m")
+	require.Contains(t, plan.Command, "gpt-5.5")
+	joined := strings.Join(plan.Command, " ")
+	require.Contains(t, joined, "mcp_servers.kitsoki.command=\"kitsoki\"")
+	require.Contains(t, joined, "mcp_servers.kitsoki.args=[\"mcp\",\"--stories-dir\",\"stories\"]")
+	require.Contains(t, plan.Command[len(plan.Command)-1], "Use ONLY the kitsoki studio MCP.")
 }
 
 func flagValue(t *testing.T, args []string, flag string) string {

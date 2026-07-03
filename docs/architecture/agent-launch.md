@@ -1,17 +1,43 @@
 # Agent Launch CLI
 
-`kitsoki agent launch` turns a reusable story `agents:` declaration into a
-concrete task-agent CLI launch for Claude, Codex, or another supported backend.
-It is intentionally a resolver over existing story and harness-profile config,
-not a second agent schema.
+`kitsoki agent launch` turns either a reusable story `agents:` declaration or a
+freestanding Codex agent file into a concrete task-agent CLI launch for Claude,
+Codex, or another supported backend. It is intentionally a resolver over
+existing agent and harness-profile config, not a second agent schema.
 
 ## Contract
 
-The command requires a story app and agent name:
+Story-backed launch uses a story app and agent name:
 
 ```sh
 kitsoki agent launch --app stories/git-ops/app.yaml --agent conflict_resolver --task "Resolve the listed conflicts"
 ```
+
+Freestanding Codex launch omits `--app` and resolves
+`.codex/agents/<name>.toml` from the current project, or the file passed with
+`--agent-file`:
+
+```sh
+kitsoki agent launch --agent kitsoki-mcp-driver --backend codex --task-file .context/drive.md
+```
+
+To open an interactive Codex session with the same freestanding agent and MCP
+attachment, omit the task; no task file is required:
+
+```sh
+kitsoki agent launch --agent kitsoki-mcp-driver --backend codex
+```
+
+For freestanding Codex agents, `[mcp_servers.*]` blocks are materialized into
+the same `--mcp-config` shape Claude uses, then translated into Codex
+`-c mcp_servers...` overrides. This is the Codex analogue of launching a
+Claude Code agent with the studio MCP attached, for example
+`claude --agent kitsoki-mcp-driver`.
+
+Task-backed freestanding launch uses `codex exec`. Freestanding launch with no
+task uses top-level `codex [OPTIONS] [PROMPT]`, so the terminal opens the Codex
+TUI with the agent instructions as the initial prompt. Pass `--interactive` only
+when you want to force the interactive path despite other launch inputs.
 
 By default it is a no-provider dry run. It prints a JSON launch plan with:
 
@@ -33,7 +59,7 @@ Tests and normal dry-run inspection do not call live LLMs.
 
 ## Resolution
 
-The command composes three existing layers:
+For story-backed launch, the command composes three existing layers:
 
 1. Story `agents:` supplies the persona, default cwd, tools, model, effort, and
    provider name.
@@ -46,6 +72,11 @@ The command composes three existing layers:
 Profile model and effort override story-local defaults so a Codex or
 synthetic.new profile does not inherit a Claude-only model id from the room
 agent. Extra env values are merged last and are redacted in dry-run output.
+
+For freestanding launch, `.codex/agents/<name>.toml` supplies developer
+instructions, model, effort, and MCP servers. The harness profile, when
+selected, still wins for backend/model/effort/env so the operator can reuse the
+same profile names as story sessions.
 
 ## Backends
 
