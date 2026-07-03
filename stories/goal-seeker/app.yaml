@@ -35,11 +35,16 @@ hosts:
 agents:
   evaluator:
     system_prompt: "You are the goal-seeker's bounded-context evaluator. Read the projected preamble and emit ONE small {verdict, summary, next_instruction} JSON. Never restate the preamble; open a detail pointer only if genuinely unsure."
-    # opus (not gpt-5.5): the bare `claude` backend (subscription auth, no API key) serves
-    # opus but 404s on gpt-5.x — that mismatch was the live decide-gate failure. Until WM.2
-    # lands a per-invoke `backend:` override (so a codex-served gpt-5.5 second opinion is
-    # expressible), opus is the default evaluator that actually resolves on this box.
-    model: opus
+    # gpt-5.5 (codex-served), NOT opus: the whole live session must run codex-native so the
+    # nested punch-list MAKER sub-agent inherits the codex backend that attaches Studio MCP
+    # (its Studio surface is wired for codex, not claude — see gs_manifest.star profile:
+    # codex-native). Pinning the evaluator to opus forced the session to claude-native, which
+    # stripped the maker's Studio MCP → the maker couldn't drive and fabricated a handoff from
+    # a stale trace (Cycle 3 block). gpt-5.5 resolves on codex (intermittent 404s degrade via
+    # cf299206). WM.2 (per-invoke backend override) is the real fix — evaluator opus(claude) +
+    # maker gpt-5.5(codex) coexisting; until it lands (behind WS.2), one codex-native backend
+    # for both is the correct trade (the decide gate is advisory; the maker is load-bearing).
+    model: gpt-5.5
     tools: [Read, Grep, Glob]
     external_side_effect: false
 
