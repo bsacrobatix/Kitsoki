@@ -22,6 +22,8 @@ flowchart LR
     init_discover --> init_discover_failed
     init -->|"confirm / review"| init_apply
     init_apply -->|"on_enter: init_apply.py<br/>+ project-tools install"| init_done
+    init_done -->|"customizations"| init_customizations
+    init_customizations -->|"continue"| init_done
     init_done -->|"readiness"| init_readiness
     init_readiness -->|"continue"| init_done
     init_apply --> init_apply_failed
@@ -34,7 +36,8 @@ Defined in [`stories/dev-story/rooms/init.yaml`](../../stories/dev-story/rooms/i
 | `init_discover` | `on_enter` runs [`scripts/init_discover.py`](../../stories/dev-story/scripts/init_discover.py) against the target and binds the discovered profile (`init_project_id`, `init_stack`, dev/test/build commands, repo metadata, …). Commands are **stack-aware**: Node scripts through the repo's selected package manager (`npm`, `pnpm`, `yarn`, or `bun`), Cargo (`cargo build`/`test`, or Makefile targets), Go (`go build ./...`/`go test ./...`, Makefile targets winning), and Python (`pytest`/`tox`, FastAPI/Flask dev hints) — so a recognised stack is never left command-less when it has canonical commands. Reads nothing it shouldn't — discovery is **read-only** and refuses missing or non-directory targets instead of creating them. |
 | `init` | Operator **reviews** the discovered profile. `confirm_init` applies; `revise_init` records feedback; `quit` returns to the workbench. No writes happen until confirm. |
 | `init_apply` | `on_enter` runs the file apply and toolkit install host steps (below), then surfaces the written paths + MCP registration or a loud retry read-out. |
-| `init_done` | Read-out of the applied result; `run_readiness` explicitly runs the generated verifier; `go_main` returns to the workbench. |
+| `init_done` | Read-out of the applied result; `review_customizations` promotes and reviews mined customization reports; `run_readiness` explicitly runs the generated verifier; `go_main` returns to the workbench. |
+| `init_customizations` | Runs `.kitsoki/promote-session-mining.py`, shows pending/accepted/refinement counts and entries, and lets the operator accept pending entries or record refinement feedback in the project profile. |
 | `init_readiness` | Runs `.kitsoki/check-readiness.py --json --update-profile` in the target checkout, captures pass/fail as report data, and returns to `init_done` for review. |
 | `init_discover_failed` / `init_apply_failed` | Error read-outs with retry arcs. |
 
@@ -100,7 +103,9 @@ from emitted mining reports to profile customizations. It scans
 `.artifacts/mining/jobs/*/analysis.json` (or explicit paths), ignores
 quarantined recipes, and appends pending `onboarding.story_customizations`
 entries for operator review. It never edits the shared base story and never
-calls an LLM.
+calls an LLM. From `init_done`, the story's `customizations` action runs that
+helper, shows the reviewable entries, and lets the operator mark pending entries
+accepted or record refinement feedback back into `.kitsoki/project-profile.yaml`.
 
 Repo metadata is inferred locally as well. Git checkouts keep their current or
 origin default branch and origin remote in `repo.default_branch` /
@@ -136,6 +141,7 @@ is documented authoritatively in the dev-story README's
 
 The walk is covered by focused no-LLM flows such as
 [`flows/init_slidey_dogfood.yaml`](../../stories/dev-story/flows/init_slidey_dogfood.yaml),
+[`flows/init_customizations_review.yaml`](../../stories/dev-story/flows/init_customizations_review.yaml),
 [`flows/init_readiness_check.yaml`](../../stories/dev-story/flows/init_readiness_check.yaml),
 [`flows/init_git_metadata.yaml`](../../stories/dev-story/flows/init_git_metadata.yaml),
 [`flows/init_node_pnpm_project.yaml`](../../stories/dev-story/flows/init_node_pnpm_project.yaml),

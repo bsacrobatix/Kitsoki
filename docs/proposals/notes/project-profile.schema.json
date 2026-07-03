@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://kitsoki.dev/schemas/project-profile/v1.json",
   "title": "Project profile (project-profile/v1)",
-  "description": "The schema-validated YAML report kitsoki's dev-story init phase emits: how to instantiate dev-story for THIS project. The declarative source the generated .kitsoki/stories/<id>-dev/ instance compiles from. See docs/proposals/project-init.md.",
+  "description": "The schema-validated YAML report kitsoki's dev-story init phase emits: how to instantiate dev-story for THIS project. The declarative source the generated .kitsoki/stories/<id>-dev/ instance compiles from. See docs/project-onboarding.md.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "id", "title", "repo", "stack", "kitsoki"],

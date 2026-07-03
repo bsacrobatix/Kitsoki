@@ -3,6 +3,7 @@
 # The flow is deliberately boring and auditable:
 #   landing -> init_discover -> init(review) -> init_apply -> init_done
 #   init_done -> init_readiness -> init_done
+#   init_done -> init_customizations -> init_done
 #
 # Discovery and apply are host.run scripts that emit JSON. Flow fixtures stub
 # both calls, so this remains no-LLM and cost-free in tests. The review room is
@@ -325,6 +326,11 @@ states:
                 init_readiness_result: {}
                 init_readiness_ok: false
                 init_readiness_output: ""
+                init_customization_result: {}
+                init_customization_ok: false
+                init_customization_output: ""
+                init_customization_action: "promote"
+                init_customization_feedback: ""
                 last_error: ""
       revise_init:
         - target: .
@@ -842,6 +848,11 @@ states:
                 init_readiness_result: {}
                 init_readiness_ok: false
                 init_readiness_output: ""
+                init_customization_result: {}
+                init_customization_ok: false
+                init_customization_output: ""
+                init_customization_action: "promote"
+                init_customization_feedback: ""
                 init_profile_status: "applying"
                 last_error: ""
       init_applied:
@@ -870,6 +881,9 @@ states:
       - init_readiness_result
       - init_readiness_ok
       - init_readiness_output
+      - init_customization_result
+      - init_customization_ok
+      - init_customization_output
     view:
       - banner:
           text:     "PROJECT ONBOARDING"
@@ -886,6 +900,7 @@ states:
             Instance:      "{{ world.init_apply_result.instance_path|default:'' }}"
             Gitignore:     "{{ world.init_apply_result.gitignore_path|default:'' }}"
             Readiness:     "{{ world.init_readiness_result.status|default:'not-run' }}"
+            Customizations: "{{ world.init_customization_result.counts.pending|default:0 }} pending"
       - heading: "Writes"
         when: "world.init_apply_result.writes"
       - template: |
@@ -903,11 +918,20 @@ states:
           {% for check in world.init_readiness_result.checks %}- {{ check.id }}: {{ check.status }} — {{ check.detail }}
           {% endfor %}
         when: "world.init_readiness_result.checks"
+      - heading: "Mined Customizations"
+        when: "world.init_customization_result.entries"
+      - template: |
+          {% for entry in world.init_customization_result.entries %}- {{ entry.id }}: {{ entry.status }} — {{ entry.summary }}
+          {% endfor %}
+        when: "world.init_customization_result.entries"
       - heading: "Actions"
       - choice:
           mode: single
           prompt: ""
           items:
+            - label:  "customizations"
+              hint:   "promote and review session-mined project customizations"
+              intent: review_customizations
             - label:  "readiness"
               hint:   "run declared post-apply checks and update the profile readiness summary"
               intent: run_readiness
@@ -918,6 +942,17 @@ states:
               hint:   "re-render"
               intent: look
     on:
+      review_customizations:
+        - target: init_customizations
+          effects:
+            - set:
+                init_customization_result: {}
+                init_customization_ok: false
+                init_customization_output: ""
+                init_customization_action: "promote"
+                init_customization_feedback: ""
+                init_profile_status: "reviewing-customizations"
+                last_error: ""
       run_readiness:
         - target: init_readiness
           effects:
@@ -933,6 +968,162 @@ states:
             - set:
                 prev_state: "init_done"
                 last_error: "project onboarding complete"
+      look:
+        - target: .
+
+  init_customizations:
+    description: "Review session-mined project customizations after onboarding."
+    relevant_world:
+      - init_target_path
+      - init_project_title
+      - init_profile_status
+      - init_customization_result
+      - init_customization_ok
+      - init_customization_output
+      - init_customization_action
+      - init_customization_feedback
+    view:
+      - banner:
+          text:     "PROJECT ONBOARDING"
+          subtitle: "customization review"
+          color:    "#A855F7"
+      - prose: "Promoting emitted session-mining reports into pending profile customizations for operator review."
+        when: "world.init_customization_result.action == ''"
+      - kv:
+          pairs:
+            Target: "{{ world.init_target_path }}"
+            Project: "{{ world.init_project_title }}"
+            Action: "{{ world.init_customization_result.action|default:world.init_customization_action }}"
+            Pending: "{{ world.init_customization_result.counts.pending|default:0 }}"
+            Accepted: "{{ world.init_customization_result.counts.accepted|default:0 }}"
+            Needs refinement: "{{ world.init_customization_result.counts.needs_refinement|default:0 }}"
+      - heading: "Entries"
+        when: "world.init_customization_result.entries"
+      - template: |
+          {% for entry in world.init_customization_result.entries %}- {{ entry.id }}: {{ entry.status }} — {{ entry.summary }}
+            evidence: {{ entry.evidence }}
+          {% endfor %}
+        when: "world.init_customization_result.entries"
+      - heading: "Changed"
+        when: "world.init_customization_result.changed"
+      - template: |
+          {% for entry in world.init_customization_result.changed %}- {{ entry.id }}: {{ entry.status }} — {{ entry.summary }}
+          {% endfor %}
+        when: "world.init_customization_result.changed"
+      - heading: "Feedback"
+        when: "world.init_customization_feedback != ''"
+      - prose: "{{ world.init_customization_feedback }}"
+        when: "world.init_customization_feedback != ''"
+      - heading: "Output"
+        when: "world.init_customization_output != ''"
+      - code: "{{ world.init_customization_output|default:'' }}"
+        when: "world.init_customization_output != ''"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "accept"
+              hint:   "mark pending customizations accepted in the profile"
+              intent: accept_customizations
+            - label:  "refine"
+              hint:   "record feedback on pending customizations"
+              intent: refine_customizations
+              param:
+                slot: feedback
+                type: string
+                placeholder: "what should change"
+                required: true
+            - label:  "refresh"
+              hint:   "promote newly emitted mining reports"
+              intent: review_customizations
+            - label:  "continue"
+              hint:   "return to the applied onboarding result"
+              intent: customizations_reviewed
+            - label:  "workbench"
+              hint:   "return to the dev-story workbench"
+              intent: go_main
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    on_enter:
+      - invoke: host.run
+        once: true
+        id: customizations
+        with:
+          cmd: bash
+          cwd: "{{ world.init_target_path }}"
+          args:
+            - "-lc"
+            - |
+              if [ ! -f .kitsoki/promote-session-mining.py ]; then
+                printf '{"action":"missing-helper","entries":[],"changed":[],"counts":{},"updated":false,"error":".kitsoki/promote-session-mining.py was not found"}\n'
+                exit 0
+              fi
+              case "$1" in
+                accept)
+                  python3 .kitsoki/promote-session-mining.py --accept-pending --json
+                  ;;
+                refine)
+                  python3 .kitsoki/promote-session-mining.py --refine-pending "$2" --json
+                  ;;
+                list)
+                  python3 .kitsoki/promote-session-mining.py --list --json
+                  ;;
+                *)
+                  python3 .kitsoki/promote-session-mining.py --json
+                  ;;
+              esac
+            - "customizations"
+            - "{{ world.init_customization_action }}"
+            - "{{ world.init_customization_feedback }}"
+          timeout: "2m"
+        bind:
+          init_customization_ok: "ok"
+          init_customization_output: "stdout"
+          init_customization_result: "stdout_json"
+    on:
+      accept_customizations:
+        - target: .
+          effects:
+            - set:
+                init_customization_result: {}
+                init_customization_ok: false
+                init_customization_output: ""
+                init_customization_action: "accept"
+                init_customization_feedback: ""
+                last_error: ""
+      refine_customizations:
+        - target: .
+          effects:
+            - set:
+                init_customization_result: {}
+                init_customization_ok: false
+                init_customization_output: ""
+                init_customization_action: "refine"
+                init_customization_feedback: "{{ slots.feedback }}"
+                last_error: ""
+      review_customizations:
+        - target: .
+          effects:
+            - set:
+                init_customization_result: {}
+                init_customization_ok: false
+                init_customization_output: ""
+                init_customization_action: "promote"
+                init_customization_feedback: ""
+                last_error: ""
+      customizations_reviewed:
+        - target: init_done
+          effects:
+            - set:
+                init_profile_status: "{{ world.init_apply_result.status ?? 'applied' }}"
+                last_error: ""
+      go_main:
+        - target: landing
+          effects:
+            - set:
+                prev_state: "init_customizations"
+                last_error: "project onboarding customizations reviewed"
       look:
         - target: .
 

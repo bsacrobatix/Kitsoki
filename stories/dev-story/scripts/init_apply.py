@@ -1301,6 +1301,110 @@ def existing_ids(text: str) -> set[str]:
     return set(re.findall(r'^\s+id:\s+"([^"]+)"\s*$', text, flags=re.MULTILINE))
 
 
+def parse_scalar(raw: str) -> str:
+    raw = raw.strip()
+    if not raw:
+        return ""
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    return str(value)
+
+
+def customization_ranges(lines: list[str]) -> list[tuple[int, int, dict]]:
+    start = -1
+    for index, line in enumerate(lines):
+        if line == "  story_customizations:":
+            start = index
+            break
+    if start == -1:
+        return []
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        if line.startswith("  ") and not line.startswith("    ") and line.strip():
+            end = index
+            break
+        if line and not line.startswith((" ", "\t")):
+            end = index
+            break
+    starts: list[int] = []
+    for index in range(start + 1, end):
+        if re.match(r"^\s*-\s*(?:\w+:.*)?$", lines[index]):
+            starts.append(index)
+    ranges: list[tuple[int, int, dict]] = []
+    for pos, item_start in enumerate(starts):
+        item_end = starts[pos + 1] if pos + 1 < len(starts) else end
+        entry: dict[str, str] = {}
+        for line in lines[item_start:item_end]:
+            match = re.match(r"^\s*(?:-\s*)?([A-Za-z_][\w-]*):\s*(.*)$", line)
+            if match:
+                entry[match.group(1)] = parse_scalar(match.group(2))
+        ranges.append((item_start, item_end, entry))
+    return ranges
+
+
+def list_customizations(text: str) -> list[dict]:
+    lines = text.splitlines()
+    return [entry for _, _, entry in customization_ranges(lines) if entry.get("id")]
+
+
+def status_counts(entries: list[dict]) -> dict:
+    counts: dict[str, int] = {}
+    for entry in entries:
+        status = str(entry.get("status") or "unknown")
+        counts[status] = counts.get(status, 0) + 1
+        alias = status.replace("-", "_")
+        if alias != status:
+            counts[alias] = counts.get(alias, 0) + 1
+    return counts
+
+
+def replace_or_insert_key(block: list[str], key: str, value: str) -> list[str]:
+    rendered = f"      {key}: {yaml_quote(value)}"
+    pattern = re.compile(rf"^(\s*(?:-\s*)?{re.escape(key)}:\s*).*$")
+    out = list(block)
+    for index, line in enumerate(out):
+        if pattern.match(line):
+            prefix = pattern.match(line).group(1)
+            out[index] = f"{prefix}{yaml_quote(value)}"
+            return out
+    insert_at = len(out)
+    for index, line in enumerate(out):
+        if re.match(r"^\s*(?:-\s*)?evidence:\s*", line):
+            insert_at = index + 1
+            break
+    out.insert(insert_at, rendered)
+    return out
+
+
+def update_pending_customizations(text: str, status: str, feedback: str = "") -> tuple[str, list[dict]]:
+    lines = text.splitlines()
+    ranges = customization_ranges(lines)
+    if not ranges:
+        return text, []
+    out: list[str] = []
+    cursor = 0
+    changed: list[dict] = []
+    for start, end, entry in ranges:
+        out.extend(lines[cursor:start])
+        block = lines[start:end]
+        if entry.get("status") == "pending":
+            block = replace_or_insert_key(block, "status", status)
+            if feedback:
+                block = replace_or_insert_key(block, "review_feedback", feedback)
+            updated = dict(entry)
+            updated["status"] = status
+            if feedback:
+                updated["review_feedback"] = feedback
+            changed.append(updated)
+        out.extend(block)
+        cursor = end
+    out.extend(lines[cursor:])
+    return "\n".join(out) + "\n", changed
+
+
 def insert_customizations(text: str, entries: list[dict]) -> str:
     if not entries:
         return text
@@ -1349,19 +1453,48 @@ def main() -> int:
     parser.add_argument("--profile", default=".kitsoki/project-profile.yaml", help="project profile to update")
     parser.add_argument("--dry-run", action="store_true", help="print proposed entries without writing")
     parser.add_argument("--json", action="store_true", help="print machine-readable summary")
+    parser.add_argument("--list", action="store_true", help="list current profile customizations")
+    parser.add_argument("--accept-pending", action="store_true", help="mark pending profile customizations accepted")
+    parser.add_argument("--refine-pending", metavar="FEEDBACK", help="mark pending profile customizations as needing refinement")
     args = parser.parse_args()
 
     root = Path.cwd()
+    profile = root / args.profile
+    if args.list or args.accept_pending or args.refine_pending is not None:
+        if not profile.exists():
+            print(f"profile not found: {profile}", file=sys.stderr)
+            return 2
+        text = profile.read_text(encoding="utf-8")
+        updated = text
+        changed: list[dict] = []
+        action = "list"
+        if args.accept_pending:
+            action = "accept"
+            updated, changed = update_pending_customizations(text, "accepted")
+        elif args.refine_pending is not None:
+            action = "refine"
+            updated, changed = update_pending_customizations(text, "needs-refinement", args.refine_pending)
+        if updated != text and not args.dry_run:
+            profile.write_text(updated, encoding="utf-8")
+        summary = {
+            "action": action,
+            "entries": list_customizations(updated if not args.dry_run else text),
+            "changed": changed,
+            "counts": status_counts(list_customizations(updated if not args.dry_run else text)),
+            "updated": updated != text and not args.dry_run,
+        }
+        print(json.dumps(summary, indent=2, sort_keys=True) if args.json or args.dry_run else f"{action} {len(changed)} pending customization(s); updated={summary['updated']}")
+        return 0
+
     analyses = find_analysis(root, args.analysis)
     entries: list[dict] = []
     for path in analyses:
         entries.extend(load_recipes(path))
     entries = [entry for entry in entries if entry.get("status") == "pending"]
-    summary = {"analysis_files": [str(path) for path in analyses], "entries": entries, "updated": False}
+    summary = {"action": "promote", "analysis_files": [str(path) for path in analyses], "entries": entries, "updated": False}
     if args.dry_run:
         print(json.dumps(summary, indent=2, sort_keys=True))
         return 0
-    profile = root / args.profile
     if not profile.exists():
         print(f"profile not found: {profile}", file=sys.stderr)
         return 2
@@ -1370,6 +1503,8 @@ def main() -> int:
     if updated != text:
         profile.write_text(updated, encoding="utf-8")
         summary["updated"] = True
+    summary["entries"] = list_customizations(updated)
+    summary["counts"] = status_counts(summary["entries"])
     if args.json:
         print(json.dumps(summary, indent=2, sort_keys=True))
     else:

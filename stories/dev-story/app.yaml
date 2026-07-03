@@ -638,6 +638,11 @@ world:
   init_readiness_result: { type: object, default: {} }
   init_readiness_ok:     { type: bool, default: false }
   init_readiness_output: { type: string, default: "" }
+  init_customization_result: { type: object, default: {} }
+  init_customization_ok:     { type: bool, default: false }
+  init_customization_output: { type: string, default: "" }
+  init_customization_action: { type: string, default: "promote" }
+  init_customization_feedback: { type: string, default: "" }
   init_profile_mode:     { type: string, default: "deterministic" }
   init_profile_draft:    { type: object, default: {} }
   init_profile_validation: { type: object, default: {} }
@@ -1068,6 +1073,30 @@ intents:
     priority: 45
   readiness_checked:
     description: "(internal) onboarding readiness verifier completed — show the applied result."
+    examples: []
+    priority: 1
+  review_customizations:
+    title: "Review Mined Customizations"
+    description: "Promote emitted session-mining reports and review pending project customizations."
+    examples: ["review customizations", "review mined customizations", "check session mining proposals"]
+    priority: 44
+  accept_customizations:
+    title: "Accept Mined Customizations"
+    description: "Mark pending session-mined project customizations accepted."
+    examples: ["accept customizations", "accept mined customizations"]
+    priority: 44
+  refine_customizations:
+    title: "Refine Mined Customizations"
+    description: "Record feedback on pending session-mined project customizations."
+    examples: ["refine customizations", "revise mined customizations"]
+    priority: 44
+    slots:
+      feedback:
+        type: string
+        required: true
+        description: "What should change before accepting the mined customizations."
+  customizations_reviewed:
+    description: "(internal) mined customization review completed — show the applied result."
     examples: []
     priority: 1
 

@@ -362,16 +362,6 @@ thought.
     `stories/mockup-video/`: brief → author HTML+tour *or* slidey deck
     (`medium: tour | deck`) → render (chapter sidecar) → review → refine-loop
     on each flag → gallery.
-- [`project-init.md`](project-init.md) — **story, trimmed tail.** The first-run
-  project onboarding stack shipped and is documented in
-  [`docs/project-onboarding.md`](../project-onboarding.md) and
-  [`docs/stories/dev-story-onboarding.md`](../stories/dev-story-onboarding.md):
-  no-arg `kitsoki run` / `kitsoki web` start the embedded dev-story root in an
-  unconfigured repo, the `init` rooms discover and apply a checked-in `.kitsoki`
-  setup, generated profiles and wrappers are validated, stack defaults are
-  inferred, and transcript history is persisted as a review seed. The remaining
-  active tail is an operator-controlled transcript promotion path plus optional
-  post-apply readiness verification.
 - [`work-decomposition.md`](work-decomposition.md) — **story.** A new
   `stories/decompose/` sub-story imported into dev-story: hand it an accepted
   proposal (or epic + children) and an interactive discovery conversation
