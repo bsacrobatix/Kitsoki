@@ -220,6 +220,15 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 	}
 	rt.def = def
 
+	// Publish KITSOKI_APP_DIR so host.starlark.run's env-only prompt-path
+	// resolver joins story-relative `script:` paths against the story
+	// directory instead of the studio server's cwd. Mirrors publishAppDir in
+	// cmd/kitsoki/session.go and the loadfiles.go loader sequence. Set only
+	// after a successful load so a failed load does not mutate the global.
+	if absDir, aerr := filepath.Abs(filepath.Dir(storyPath)); aerr == nil {
+		_ = os.Setenv(host.AppDirEnv, absDir)
+	}
+
 	m, err := machine.New(def)
 	if err != nil {
 		rt.Close()
