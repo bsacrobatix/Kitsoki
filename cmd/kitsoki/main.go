@@ -334,7 +334,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 					return fmt.Errorf("resolve working directory for implicit root: %w", rrErr)
 				}
 				rootSpec := webCfg.Root.RootSpec()
-				def, err = app.SynthesizeRoot(rootSpec, repoRoot)
+				def, err = app.SynthesizeRootWithResolver(rootSpec, repoRoot, buildImportResolver())
 				if err != nil {
 					return fmt.Errorf("synthesize implicit root: %w", err)
 				}
@@ -347,7 +347,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 					if cfgErr != nil {
 						return nil, cfgErr
 					}
-					return app.SynthesizeRoot(cfg.Root.RootSpec(), repoRoot)
+					return app.SynthesizeRootWithResolver(cfg.Root.RootSpec(), repoRoot, buildImportResolver())
 				}
 			}
 

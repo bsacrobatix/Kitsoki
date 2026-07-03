@@ -10,10 +10,10 @@ kitsoki skill/agent toolkit installed.
 > **The 30-second version.** From your project root, with only the `kitsoki`
 > binary on PATH (no kitsoki checkout needed):
 > ```sh
-> kitsoki run @kitsoki/dev-story      # → type: onboard .
+> kitsoki run                         # → type: onboard .
 > ```
-> `@kitsoki/dev-story` resolves the onboarding app from the binary's **embedded**
-> story library. Walk the four onboarding rooms (review → apply) and you're done.
+> With no app path, Kitsoki starts the embedded dev-story root for the current
+> project. Walk the four onboarding rooms (review → apply) and you're done.
 > The rest of this page explains what that produces and the standalone command
 > behind it.
 
@@ -54,17 +54,19 @@ dependency.
 
 The [dev-story](../stories/dev-story/README.md) hub ships a four-room onboarding
 pipeline that **discovers** your project, lets you **review** the profile, then
-**applies** everything above. Run the **embedded** dev-story from your project
-root — no kitsoki checkout required, only the binary on PATH — and type an
-onboarding request:
+**applies** everything above. Run from your project root — no kitsoki checkout
+required, only the binary on PATH — and type an onboarding request:
 
 ```sh
 cd ~/code/my-project
-kitsoki run @kitsoki/dev-story
+kitsoki run
 #   > onboard .                 # or: onboard ~/code/my-project
 #   > continue                  # review the discovered profile
 #   > continue (confirm)        # apply: writes config + instance + toolkit + MCP
 ```
+
+`kitsoki run @kitsoki/dev-story` remains equivalent if you want to name the
+embedded base story explicitly.
 
 If the toolkit + MCP install fails (e.g. the binary was built without `make
 embed-skills`), onboarding routes to a loud `init_tools_failed` read-out — it
