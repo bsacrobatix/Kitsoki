@@ -19,6 +19,9 @@ states:
       - init_run_output
       - init_transcript_count
       - init_mining_recommendation
+      - init_repo_vcs
+      - init_repo_default_branch
+      - init_repo_remote
       - workdir
       - repo_root
     view:
@@ -81,6 +84,9 @@ states:
           init_dev_command:   "stdout_json.dev_command"
           init_test_command:  "stdout_json.test_command"
           init_build_command: "stdout_json.build_command"
+          init_repo_vcs:      "stdout_json.repo_vcs"
+          init_repo_default_branch: "stdout_json.repo_default_branch"
+          init_repo_remote:   "stdout_json.repo_remote"
           init_conventions:   "stdout_json.conventions"
           init_tracker:       "stdout_json.tracker"
           init_transcript_count:      "stdout_json.transcript_count"
@@ -155,6 +161,9 @@ states:
                 init_discovery: {}
                 init_run_ok: false
                 init_run_output: ""
+                init_repo_vcs: "none"
+                init_repo_default_branch: ""
+                init_repo_remote: ""
                 init_transcript_count: 0
                 init_transcript_sources: []
                 init_mining_recommendation: {}
@@ -182,6 +191,9 @@ states:
       - init_dev_command
       - init_test_command
       - init_build_command
+      - init_repo_vcs
+      - init_repo_default_branch
+      - init_repo_remote
       - init_conventions
       - init_tracker
       - init_transcript_count
@@ -213,6 +225,12 @@ states:
             Dev server:  "{{ world.init_dev_command|default:'(not yet inferred)' }}"
             Test:        "{{ world.init_test_command|default:'(not yet inferred)' }}"
             Build:       "{{ world.init_build_command|default:'(not yet inferred)' }}"
+      - heading: "Repository"
+      - kv:
+          pairs:
+            VCS:            "{{ world.init_repo_vcs|default:'none' }}"
+            Default branch: "{{ world.init_repo_default_branch|default:'(none)' }}"
+            Remote:         "{{ world.init_repo_remote|default:'(none)' }}"
       - heading: "Setup"
       - kv:
           pairs:
@@ -325,6 +343,9 @@ states:
                 init_apply_result: {}
                 init_apply_ok: false
                 init_apply_output: ""
+                init_repo_vcs: "none"
+                init_repo_default_branch: ""
+                init_repo_remote: ""
                 init_profile_mode: "deterministic"
                 init_profile_draft: {}
                 init_profile_validation: {}

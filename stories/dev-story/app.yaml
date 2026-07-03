@@ -618,6 +618,9 @@ world:
   init_dev_command:      { type: string, default: "" }
   init_test_command:     { type: string, default: "" }
   init_build_command:    { type: string, default: "" }
+  init_repo_vcs:         { type: string, default: "none" }
+  init_repo_default_branch: { type: string, default: "" }
+  init_repo_remote:      { type: string, default: "" }
   init_conventions:      { type: string, default: "hybrid" }
   init_tracker:          { type: string, default: "none" }
   init_transcript_count: { type: int, default: 0 }

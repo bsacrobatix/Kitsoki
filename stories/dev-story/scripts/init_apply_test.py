@@ -32,6 +32,13 @@ def mkrepo() -> Path:
     return root
 
 
+def mkgitrepo() -> Path:
+    root = mkrepo()
+    subprocess.run(["git", "-C", str(root), "init", "--quiet", "--initial-branch=trunk"], check=True)
+    subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://github.com/example/acme.git"], check=True)
+    return root
+
+
 def mkpyrepo() -> Path:
     root = Path(tempfile.mkdtemp(prefix="kitsoki-apply-py-"))
     (root / "pyproject.toml").write_text('[project]\nname = "acme-py"\n', encoding="utf-8")
@@ -144,11 +151,24 @@ else:
 if profile_path.exists():
     profile_text = profile_path.read_text(encoding="utf-8")
     check("valid setup plan present", "setup_plan:" in profile_text)
+    check("valid non-git vcs", "vcs: none" in profile_text)
+    check("valid non-git branch empty", "default_branch: \"\"" in profile_text)
     check("valid setup writes instance", ".kitsoki/stories/acme-dev/app.yaml" in profile_text)
     check("valid setup gates build", "command: \"go build ./...\"" in profile_text)
     check("valid setup gates tests", "command: \"go test ./...\"" in profile_text)
 
-# 3. Python projects keep Python stack metadata and pytest verification.
+# 3. Git metadata is preserved instead of assuming main/no remote.
+repo = mkgitrepo()
+proc = run_apply(repo, fake_kitsoki(True))
+check("git metadata exit", proc.returncode == 0, proc.stdout + proc.stderr)
+profile_path = repo / ".kitsoki" / "project-profile.yaml"
+if profile_path.exists():
+    profile_text = profile_path.read_text(encoding="utf-8")
+    check("git metadata vcs", "vcs: git" in profile_text)
+    check("git metadata branch", "default_branch: \"trunk\"" in profile_text)
+    check("git metadata remote", "remote: \"https://github.com/example/acme.git\"" in profile_text)
+
+# 4. Python projects keep Python stack metadata and pytest verification.
 repo = mkpyrepo()
 proc = run_apply_with(repo, fake_kitsoki(True), "acme-py", "Acme Py", "python/fastapi project", "uvicorn app:app --reload", "python -m pytest", "")
 check("python valid exit", proc.returncode == 0, proc.stdout + proc.stderr)
@@ -161,7 +181,7 @@ if profile_path.exists():
     check("python setup gates tests", "command: \"python -m pytest\"" in profile_text)
     check("python setup gates dev advisory", "command: \"uvicorn app:app --reload\"" in profile_text)
 
-# 4. Node projects keep their selected package manager instead of defaulting to npm.
+# 5. Node projects keep their selected package manager instead of defaulting to npm.
 repo = mknoderepo()
 proc = run_apply_with(repo, fake_kitsoki(True), "acme-web", "Acme Web", "node/vite project", "pnpm run dev", "pnpm test", "pnpm run build")
 check("node valid exit", proc.returncode == 0, proc.stdout + proc.stderr)
@@ -173,7 +193,7 @@ if profile_path.exists():
     check("node setup gates tests", "command: \"pnpm test\"" in profile_text)
     check("node setup gates build", "command: \"pnpm run build\"" in profile_text)
 
-# 5. Associated transcripts create a durable seed-mining handoff without running
+# 6. Associated transcripts create a durable seed-mining handoff without running
 # the mining pipeline.
 repo = mkrepo()
 mining = {

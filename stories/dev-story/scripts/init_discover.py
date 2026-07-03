@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -144,6 +145,40 @@ def make_targets(path: Path) -> set[str]:
     return targets
 
 
+def git_output(path: Path, *args: str) -> str:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(path), *args],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, ValueError):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout.strip()
+
+
+def git_info(path: Path) -> dict:
+    inside = git_output(path, "rev-parse", "--is-inside-work-tree")
+    if inside != "true":
+        return {"vcs": "none", "default_branch": "", "remote": ""}
+    remote = git_output(path, "config", "--get", "remote.origin.url")
+    default_branch = git_output(path, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    if default_branch.startswith("origin/"):
+        default_branch = default_branch.split("/", 1)[1]
+    if not default_branch:
+        default_branch = git_output(path, "symbolic-ref", "--quiet", "--short", "HEAD")
+    if not default_branch:
+        for candidate in ("main", "master"):
+            if git_output(path, "show-ref", "--verify", f"refs/heads/{candidate}"):
+                default_branch = candidate
+                break
+    return {"vcs": "git", "default_branch": default_branch or "main", "remote": remote}
+
+
 def discover(path: Path) -> dict:
     package = read_package(path)
     package_name = package.get("name") if isinstance(package.get("name"), str) else ""
@@ -239,6 +274,7 @@ def discover(path: Path) -> dict:
             dev_command = "flask run"
 
     transcripts = transcript_evidence(path)
+    repo = git_info(path)
     return {
         "target_path": str(path),
         "project_id": project_id,
@@ -248,6 +284,9 @@ def discover(path: Path) -> dict:
         "test_command": test_command,
         "build_command": build_command,
         "node_package_manager": node_manager,
+        "repo_vcs": repo["vcs"],
+        "repo_default_branch": repo["default_branch"],
+        "repo_remote": repo["remote"],
         "conventions": "hybrid" if project_id == "slidey" or (path / "AGENTS.md").exists() or (path / "CLAUDE.md").exists() else "local defaults",
         "tracker": "none",
         "transcript_slug": transcripts["slug"],
