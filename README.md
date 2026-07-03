@@ -256,7 +256,7 @@ sources, logo, palette, and usage.
 
 ## Status
 
-PoC. The core platform is stable: orchestrator, state machine, harness
+Beta. The core platform is stable and dogfooded daily: orchestrator, state machine, harness
 abstraction, persistent SQLite store, MCP server, multi-transport
 output, background jobs with mid-flight clarifications, persistent
 chat threads, virtual clock, deterministic flow tests, intent
