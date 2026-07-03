@@ -963,8 +963,10 @@ def config_yaml(project_id: str) -> str:
     return f"""story_dirs:
   - ./.kitsoki/stories
 
-default_story: .kitsoki/stories/{project_id}-dev/app.yaml
 project_profile: .kitsoki/project-profile.yaml
+
+root:
+  import: dev-story
 """
 
 
@@ -1053,10 +1055,17 @@ Kitsoki dev-story instance for the {title} checkout.
 Run from the {title} repo root:
 
 ```sh
+kitsoki run
+```
+
+`kitsoki run` starts the profile-driven implicit dev-story root for this
+checkout. Use the materialized wrapper explicitly only after editing it:
+
+```sh
 kitsoki run .kitsoki/stories/{story_id}/app.yaml
 ```
 
-Or start the browser UI:
+Start the browser UI:
 
 ```sh
 kitsoki web
