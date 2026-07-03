@@ -160,6 +160,16 @@ func WithAgentBackendNamed(ctx context.Context, name string) context.Context {
 	return WithAgentBackend(ctx, b)
 }
 
+// TranslateAgentInvocationForBackend exposes the backend translation step for
+// CLI planning surfaces. It does not resolve or execute a binary; it only maps
+// the neutral claude-shaped argv/stdin/working-dir triple onto the concrete
+// backend invocation that runClaudeOneShot would execute with the same backend
+// installed on ctx.
+func TranslateAgentInvocationForBackend(ctx context.Context, name string, claudeArgs []string, stdin, workingDir string) Invocation {
+	ctx = WithAgentBackendNamed(ctx, name)
+	return AgentBackendFromContext(ctx).TranslateInvocation(claudeArgs, stdin, workingDir)
+}
+
 // ResolveAgentBackendName maps a user-facing backend name ("", "claude",
 // "copilot") to a backend, defaulting to claude on empty/unknown so a typo
 // degrades safely to the battle-tested path. ok reports whether name was a

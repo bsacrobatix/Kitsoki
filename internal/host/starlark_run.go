@@ -49,26 +49,27 @@ func StarlarkRunHandler(ctx context.Context, args map[string]any) (Result, error
 		return Result{Error: "host.starlark.run: script argument is required"}, nil
 	}
 
-	// Resolve a relative script path against KITSOKI_APP_DIR (the directory of
-	// app.yaml, published by loaders), mirroring the agent prompt/schema path
-	// convention (resolvePromptPath). The loader's validateStarlarkEffects
+	// Resolve a relative script path against the per-session story search path,
+	// falling back to KITSOKI_APP_DIR (the directory of app.yaml, published by
+	// loaders) when no renderer is in ctx. The loader's validateStarlarkEffects
 	// resolves against def.BaseDir at load time but does NOT rewrite the
 	// effect's with.script to absolute, so by dispatch the arg is still the
 	// author-relative path — resolve it here so the read succeeds regardless of
 	// the process working directory.
 	rawScript := scriptPath
-	scriptPath = resolvePromptPath(scriptPath)
+	scriptPath = resolvePromptPathCtx(ctx, scriptPath)
 
 	src, err := os.ReadFile(scriptPath)
 	if err != nil && !filepath.IsAbs(rawScript) {
 		// Robustness for an ad-hoc plan whose `verify.script` was authored
 		// repo-root-relative (e.g. "stories/dev-story/verify/x.star") rather
-		// than app-relative ("verify/x.star"): resolvePromptPath prepends the
-		// app dir, which doubles the prefix and misses. If the raw path exists
-		// as-is (relative to the process cwd / repo root), use it. Principle of
-		// least surprise: a script that exists on disk should be found whether
-		// the plan named it app- or repo-relative. (The plan's script value is
-		// interpretive — proposed by an LLM — so the runtime must tolerate both.)
+		// than app-relative ("verify/x.star"): story-root resolution prepends
+		// the app dir, which doubles the prefix and misses. If the raw path
+		// exists as-is (relative to the process cwd / repo root), use it.
+		// Principle of least surprise: a script that exists on disk should be
+		// found whether the plan named it app- or repo-relative. (The plan's
+		// script value is interpretive — proposed by an LLM — so the runtime
+		// must tolerate both.)
 		if _, statErr := os.Stat(rawScript); statErr == nil {
 			scriptPath = rawScript
 			src, err = os.ReadFile(scriptPath)
@@ -122,11 +123,14 @@ func StarlarkRunHandler(ctx context.Context, args map[string]any) (Result, error
 	// caller already installed one (the testrunner installs a replay inspector
 	// for flow fixtures). Mirrors the HTTP default-injection block above; the
 	// safe deny-all default is applied by InspectorFromContext when nothing is
-	// injected. Root at world.workdir when present, else the process cwd.
+	// injected. Root at world.workdir when present, else the repo containing the
+	// resolved story script, else the process cwd.
 	if !starlarkhost.HasInspector(runCtx) {
 		root, _ := worldSnapshot["workdir"].(string)
 		if root == "" {
-			if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+			if inferred := inferRepoRootForScript(scriptPath); inferred != "" {
+				root = inferred
+			} else if cwd, cwdErr := os.Getwd(); cwdErr == nil {
 				root = cwd
 			}
 		}
@@ -178,6 +182,25 @@ func StarlarkRunHandler(ctx context.Context, args map[string]any) (Result, error
 	}
 
 	return Result{Data: data}, nil
+}
+
+func inferRepoRootForScript(scriptPath string) string {
+	dir := filepath.Dir(scriptPath)
+	for {
+		if fileExists(filepath.Join(dir, "go.mod")) || fileExists(filepath.Join(dir, ".kitsoki-root")) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // toStringMap coerces a YAML/JSON-decoded value into a map[string]any. Accepts

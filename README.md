@@ -255,11 +255,13 @@ under 10 seconds.
 
 Recent frontier work:
 
-- **Agent plugin system** (`docs/architecture/agent-plugin.md`,
-  `docs/architecture/agent-cli.md`) — pluggable agent transports declared under
-  `agent_plugins:`, dispatched through `host.agent.<verb>` effects
-  with schema validation, subprocess / MCP-over-HTTP transports, and
-  a registry/dispatch seam audited end-to-end.
+- **Agent plugin and launch system** (`docs/architecture/agent-plugin.md`,
+  `docs/architecture/agent-cli.md`, `docs/architecture/agent-launch.md`) —
+  pluggable agent transports declared under `agent_plugins:`, dispatched through
+  `host.agent.<verb>` effects with schema validation, subprocess /
+  MCP-over-HTTP transports, and a `kitsoki agent launch` dry-run resolver that
+  turns reusable story `agents:` entries plus harness profiles into concrete
+  Claude/Codex task-agent launch plans.
 - **JSONL trace as authoritative state**
   (`docs/tracing/trace-format.md`) — the unified event log (`agent.call.start`
   / `.complete` / `.error`, `EventSink`, deterministic `call_id`) is
