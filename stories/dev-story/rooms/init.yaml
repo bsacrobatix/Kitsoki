@@ -17,6 +17,7 @@ states:
       - init_target_path
       - init_profile_status
       - init_run_output
+      - init_discovery_error
       - init_transcript_count
       - init_mining_recommendation
       - init_repo_vcs
@@ -36,6 +37,8 @@ states:
             Status:  "{{ world.init_profile_status }}"
       - prose: "Inspecting local project files to infer commands, stack, and the Kitsoki instance shape."
         when: "world.init_project_id == ''"
+      - prose: "{{ world.init_discovery_error|default:'' }}"
+        when: "world.init_discovery_error != ''"
       - kv:
           pairs:
             Project: "{{ world.init_project_title }}"
@@ -77,6 +80,7 @@ states:
           init_run_ok:        "ok"
           init_run_output:    "stdout"
           init_discovery:     "stdout_json"
+          init_discovery_error: "stdout_json.error"
           init_target_path:   "stdout_json.target_path"
           init_project_id:    "stdout_json.project_id"
           init_project_title: "stdout_json.project_title"
@@ -100,6 +104,7 @@ states:
           effects:
             - set:
                 init_profile_status: "draft"
+                init_discovery_error: ""
                 last_error: ""
         - default: true
           target: init_discover_failed
@@ -123,6 +128,7 @@ states:
       - init_target_path
       - init_profile_status
       - init_run_output
+      - init_discovery_error
       - workdir
       - repo_root
     view:
@@ -140,6 +146,10 @@ states:
         when: "world.init_run_output != ''"
       - code: "{{ world.init_run_output }}"
         when: "world.init_run_output != ''"
+      - heading: "Error"
+        when: "world.init_discovery_error != ''"
+      - prose: "{{ world.init_discovery_error|default:'' }}"
+        when: "world.init_discovery_error != ''"
       - choice:
           mode: single
           prompt: "Actions"
@@ -161,6 +171,7 @@ states:
                 init_discovery: {}
                 init_run_ok: false
                 init_run_output: ""
+                init_discovery_error: ""
                 init_repo_vcs: "none"
                 init_repo_default_branch: ""
                 init_repo_remote: ""
@@ -184,6 +195,7 @@ states:
     relevant_world:
       - init_request
       - init_discovery
+      - init_discovery_error
       - init_target_path
       - init_project_id
       - init_project_title
@@ -340,6 +352,7 @@ states:
                 init_discovery: {}
                 init_run_ok: false
                 init_run_output: ""
+                init_discovery_error: ""
                 init_apply_result: {}
                 init_apply_ok: false
                 init_apply_output: ""

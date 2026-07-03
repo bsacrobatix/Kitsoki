@@ -179,7 +179,36 @@ def git_info(path: Path) -> dict:
     return {"vcs": "git", "default_branch": default_branch or "main", "remote": remote}
 
 
+def invalid_discovery(path: Path, error: str) -> dict:
+    transcripts = transcript_evidence(path)
+    return {
+        "target_path": str(path),
+        "project_id": "",
+        "project_title": "",
+        "stack": "",
+        "dev_command": "",
+        "test_command": "",
+        "build_command": "",
+        "node_package_manager": "",
+        "repo_vcs": "none",
+        "repo_default_branch": "",
+        "repo_remote": "",
+        "conventions": "local defaults",
+        "tracker": "none",
+        "transcript_slug": transcripts["slug"],
+        "transcript_count": transcripts["count"],
+        "transcript_sources": transcripts["sources"],
+        "mining_recommendation": transcripts["mining"],
+        "error": error,
+    }
+
+
 def discover(path: Path) -> dict:
+    if not path.exists():
+        return invalid_discovery(path, "target path does not exist")
+    if not path.is_dir():
+        return invalid_discovery(path, "target path is not a directory")
+
     package = read_package(path)
     package_name = package.get("name") if isinstance(package.get("name"), str) else ""
     pyproject = read_pyproject(path)

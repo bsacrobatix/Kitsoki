@@ -139,7 +139,20 @@ else:
     check("invalid status", invalid_report.get("status") == "profile-validation-failed", str(invalid_report))
     check("invalid carries diagnostics", invalid_report.get("profile_validation", {}).get("schema") == ["forced invalid profile"])
 
-# 2. Validation success writes files and carries the validation report.
+# 2. Invalid targets are refused before validation and are not created by apply.
+missing_parent = Path(tempfile.mkdtemp(prefix="kitsoki-apply-missing-parent-"))
+missing_repo = missing_parent / "missing-project"
+proc = run_apply(missing_repo, fake_kitsoki(True))
+check("missing target exit", proc.returncode != 0, proc.stdout + proc.stderr)
+check("missing target not created", not missing_repo.exists())
+try:
+    missing_report = json.loads(proc.stdout)
+except json.JSONDecodeError as err:
+    failures.append(f"missing target json: {err}: {proc.stdout!r}")
+else:
+    check("missing target status", missing_report.get("status") == "target-invalid", str(missing_report))
+
+# 3. Validation success writes files and carries the validation report.
 repo = mkrepo()
 proc = run_apply(repo, fake_kitsoki(True))
 check("valid exit", proc.returncode == 0, proc.stdout + proc.stderr)
@@ -174,7 +187,7 @@ if app_path.exists():
     check("valid app design no template", 'design_template_dir:        { type: string, default: "" }' in app_text)
     check("valid app design local path", 'design_durable_path:        { type: string, default: ".context/designs" }' in app_text)
 
-# 3. Git metadata is preserved instead of assuming main/no remote.
+# 4. Git metadata is preserved instead of assuming main/no remote.
 repo = mkgitrepo()
 proc = run_apply(repo, fake_kitsoki(True))
 check("git metadata exit", proc.returncode == 0, proc.stdout + proc.stderr)
@@ -185,7 +198,7 @@ if profile_path.exists():
     check("git metadata branch", "default_branch: \"trunk\"" in profile_text)
     check("git metadata remote", "remote: \"https://github.com/example/acme.git\"" in profile_text)
 
-# 4. Python projects keep Python stack metadata and pytest verification.
+# 5. Python projects keep Python stack metadata and pytest verification.
 repo = mkpyrepo()
 proc = run_apply_with(repo, fake_kitsoki(True), "acme-py", "Acme Py", "python/fastapi project", "uvicorn app:app --reload", "python -m pytest", "")
 check("python valid exit", proc.returncode == 0, proc.stdout + proc.stderr)
@@ -198,7 +211,7 @@ if profile_path.exists():
     check("python setup gates tests", "command: \"python -m pytest\"" in profile_text)
     check("python setup gates dev advisory", "command: \"uvicorn app:app --reload\"" in profile_text)
 
-# 5. Node projects keep their selected package manager instead of defaulting to npm.
+# 6. Node projects keep their selected package manager instead of defaulting to npm.
 repo = mknoderepo()
 proc = run_apply_with(repo, fake_kitsoki(True), "acme-web", "Acme Web", "node/vite project", "pnpm run dev", "pnpm test", "pnpm run build")
 check("node valid exit", proc.returncode == 0, proc.stdout + proc.stderr)
@@ -210,7 +223,7 @@ if profile_path.exists():
     check("node setup gates tests", "command: \"pnpm test\"" in profile_text)
     check("node setup gates build", "command: \"pnpm run build\"" in profile_text)
 
-# 6. Associated transcripts create a durable seed-mining handoff without running
+# 7. Associated transcripts create a durable seed-mining handoff without running
 # the mining pipeline.
 repo = mkrepo()
 mining = {
@@ -245,7 +258,7 @@ if seed_path.exists():
     check("mining seed mentions no cost", "no LLM cost" in seed_text)
     check("mining seed lists codex", "codex: 1 sessions" in seed_text)
 
-# 7. Sparse LLM-drafted profiles get the generated instance defaults injected
+# 8. Sparse LLM-drafted profiles get the generated instance defaults injected
 # before validation and write.
 repo = mkrepo()
 draft = {

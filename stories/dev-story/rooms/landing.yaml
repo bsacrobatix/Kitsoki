@@ -313,6 +313,7 @@ states:
                 init_discovery:      {}
                 init_run_ok:         false
                 init_run_output:     ""
+                init_discovery_error: ""
                 init_apply_result:   {}
                 init_apply_ok:       false
                 init_apply_output:   ""
@@ -450,6 +451,7 @@ states:
                 init_discovery:      {}
                 init_run_ok:         false
                 init_run_output:     ""
+                init_discovery_error: ""
                 init_apply_result:   {}
                 init_apply_ok:       false
                 init_apply_output:   ""
