@@ -289,6 +289,18 @@ func ghOpenPR(ctx context.Context, workdir string, args map[string]any) (Result,
 	if strings.TrimSpace(title) == "" {
 		return Result{Error: "git.open_pr: title argument is required"}, nil
 	}
+	// `gh pr create` refuses to open a PR unless the head branch has been
+	// published to the remote.  Publish the current HEAD first, mirroring the
+	// sibling gitPush handler (`git push -u origin HEAD`).
+	remote, _ := args["remote"].(string)
+	if remote == "" {
+		remote = "origin"
+	}
+	if _, pushStderr, pushCode, pushErr := cliExec(ctx, workdir, "git", "push", "-u", remote, "HEAD"); pushErr != nil {
+		return Result{Error: fmt.Sprintf("git.open_pr: push: exec: %v", pushErr)}, nil
+	} else if pushCode != 0 {
+		return Result{Error: fmt.Sprintf("git.open_pr: push: %s", strings.TrimSpace(pushStderr))}, nil
+	}
 	ghArgs := []string{"pr", "create", "--title", title, "--body", body}
 	if base != "" {
 		ghArgs = append(ghArgs, "--base", base)
