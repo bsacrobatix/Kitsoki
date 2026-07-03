@@ -271,6 +271,10 @@ type RootModel struct {
 	// rows are simply absent and the miner-service queue remains authoritative.
 	traceHistory func() (store.History, error)
 
+	// bugRoot is the repo/story root where /bug writes issues/bugs/. When empty,
+	// /bug resolves the nearest git root above appPath, then falls back to cwd.
+	bugRoot string
+
 	// lastCtrlC is the time the most recent Ctrl+C was pressed, used to
 	// detect a double-tap quit. Zero means no recent press (or the window
 	// has expired).
@@ -495,6 +499,13 @@ func WithChatStore(cs *chats.Store) RootModelOption {
 // service snapshot is not available.
 func WithTraceHistory(fn func() (store.History, error)) RootModelOption {
 	return func(m *RootModel) { m.traceHistory = fn }
+}
+
+// WithBugRoot sets the root where TUI-filed /bug reports write issues/bugs/.
+// Tests use this to keep reports in a temp dir; production normally lets the
+// command resolve from appPath.
+func WithBugRoot(root string) RootModelOption {
+	return func(m *RootModel) { m.bugRoot = root }
 }
 
 // WithIDEDenyList seeds the kitsoki-side deny list that gates ambient editor
@@ -2015,6 +2026,13 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "/help":
 		body, next, cmd := HelpCommand{}.Run(m, parts[1:])
 		next.transcript.AppendBlock(body)
+		return next, cmd
+
+	case "/bug":
+		body, next, cmd := BugCommand{}.Run(m, parts[1:])
+		if body != "" {
+			next.transcript.AppendBlock(body)
+		}
 		return next, cmd
 
 	case "/intents":

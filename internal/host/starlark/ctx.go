@@ -13,7 +13,7 @@ import (
 // struct with exactly five attributes — inputs, world, http, fs, probe — and
 // nothing else, which is what keeps the sandbox honest: a script cannot reach
 // any capability that buildCtx does not put here. http is the network boundary;
-// fs and probe are the read-only filesystem + allow-listed-process boundary
+// fs and probe are the filesystem + allow-listed-process boundary
 // (see Inspector).
 //
 // ictx is the Go context carrying the injected HTTPClient and Inspector

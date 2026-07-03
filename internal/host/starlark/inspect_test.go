@@ -94,6 +94,29 @@ def main(ctx):
 	}
 }
 
+func TestProductionInspector_Write(t *testing.T) {
+	root := t.TempDir()
+	in := starlarkhost.NewProductionInspector(root)
+
+	out := runInspect(t, in, `
+def main(ctx):
+    path = ctx.fs.write(".artifacts/demo/report.md", "hello\n")
+    return {
+        "path": path,
+        "body": ctx.fs.read(path),
+    }
+`)
+	if out["path"] != ".artifacts/demo/report.md" {
+		t.Errorf("write path: got %q", out["path"])
+	}
+	if out["body"] != "hello\n" {
+		t.Errorf("read after write: got %q", out["body"])
+	}
+	if got, err := os.ReadFile(filepath.Join(root, ".artifacts", "demo", "report.md")); err != nil || string(got) != "hello\n" {
+		t.Fatalf("file on disk = %q, %v", string(got), err)
+	}
+}
+
 func TestProductionInspector_RejectsEscape(t *testing.T) {
 	root := t.TempDir()
 	in := starlarkhost.NewProductionInspector(root)
@@ -103,6 +126,7 @@ func TestProductionInspector_RejectsEscape(t *testing.T) {
 		`ctx.fs.read("../../etc/passwd")`,
 		`ctx.fs.exists("sub/../../x")`,
 		`ctx.fs.glob("../*")`,
+		`ctx.fs.write("../secret", "x")`,
 	} {
 		msg := runErr(t, in, "def main(ctx):\n    return {\"v\": "+expr+"}\n")
 		if !strings.Contains(msg, "escapes the working directory") {
@@ -165,6 +189,7 @@ func TestDeniedInspector_Default(t *testing.T) {
 		`ctx.fs.read("go.mod")`,
 		`ctx.fs.exists("go.mod")`,
 		`ctx.fs.glob("*.go")`,
+		`ctx.fs.write("out.txt", "x")`,
 		`ctx.probe("git.status")`,
 	} {
 		msg := runErr(t, nil, "def main(ctx):\n    return {\"v\": "+expr+"}\n")
@@ -183,6 +208,7 @@ func TestReplayInspector_ServesRecorded(t *testing.T) {
 			{Op: "read", Target: "go.mod", Out: "module kitsoki\n"},
 			{Op: "exists", Target: "MISSING", Out: "false"},
 			{Op: "glob", Target: "*.go", Out: "a.go\nb.go"},
+			{Op: "write", Target: ".artifacts/out.txt", Out: "ok\n"},
 			{Op: "probe", Target: "gh.issue.list", Exit: 0, Out: `[{"number":1}]`},
 		},
 	}
@@ -194,6 +220,7 @@ def main(ctx):
         "body": ctx.fs.read("go.mod"),
         "absent": ctx.fs.exists("MISSING"),
         "matches": ctx.fs.glob("*.go"),
+        "written": ctx.fs.write(".artifacts/out.txt", "ok\n"),
         "probe_exit": r["exit"],
         "probe_out": r["out"],
     }
@@ -207,6 +234,9 @@ def main(ctx):
 	matches, _ := out["matches"].([]any)
 	if len(matches) != 2 || matches[0] != "a.go" {
 		t.Errorf("glob: got %v", out["matches"])
+	}
+	if out["written"] != ".artifacts/out.txt" {
+		t.Errorf("write replay: got %v", out["written"])
 	}
 }
 
@@ -222,6 +252,21 @@ def main(ctx):
 `)
 	if !strings.Contains(msg, "no interaction matched") {
 		t.Errorf("expected replay miss, got %q", msg)
+	}
+}
+
+func TestReplayInspector_WriteMismatchFailsLoud(t *testing.T) {
+	cas := &starlarkhost.InspectCassette{
+		Kind:         "inspect_cassette",
+		Interactions: []starlarkhost.InspectInteraction{{Op: "write", Target: "out.txt", Out: "expected"}},
+	}
+	in := starlarkhost.NewReplayInspector(cas)
+	msg := runErr(t, in, `
+def main(ctx):
+    return {"v": ctx.fs.write("out.txt", "actual")}
+`)
+	if !strings.Contains(msg, "content mismatch") {
+		t.Errorf("expected replay write mismatch, got %q", msg)
 	}
 }
 

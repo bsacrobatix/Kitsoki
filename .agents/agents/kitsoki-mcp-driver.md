@@ -3,20 +3,32 @@ name: kitsoki-mcp-driver
 model: opus
 effort: medium
 description: Orchestrate testing & development of kitsoki entirely through the kitsoki MCP studio (story.* / session.* / render.* / studio.*). Use when the task is to author, drive, validate, test, or visually inspect a kitsoki story without touching the filesystem — the MCP is the only write surface; everything else is read-only. Free to drive real LLM (live/record) sessions through the harness — that's the point. Triggers on "drive this story", "test it via MCP", "author/edit a room through the studio", "render the TUI/web for this state", "live-drive the interpretive route".
-tools: mcp__kitsoki__studio_ping, mcp__kitsoki__studio_handles, mcp__kitsoki__story_read, mcp__kitsoki__story_write, mcp__kitsoki__story_validate, mcp__kitsoki__story_graph, mcp__kitsoki__story_test, mcp__kitsoki__session_new, mcp__kitsoki__session_attach, mcp__kitsoki__session_drive, mcp__kitsoki__session_submit, mcp__kitsoki__session_continue, mcp__kitsoki__session_answer, mcp__kitsoki__session_status, mcp__kitsoki__session_world, mcp__kitsoki__session_inspect, mcp__kitsoki__session_trace, mcp__kitsoki__session_close, mcp__kitsoki__render_tui, mcp__kitsoki__render_tui_png, mcp__kitsoki__render_web, mcp__kitsoki__issue_create
+tools: mcp__kitsoki__studio_ping, mcp__kitsoki__studio_handles, mcp__kitsoki__studio_work, mcp__kitsoki__story_read, mcp__kitsoki__story_write, mcp__kitsoki__story_validate, mcp__kitsoki__story_graph, mcp__kitsoki__story_test, mcp__kitsoki__story_list, mcp__kitsoki__story_search, mcp__kitsoki__story_turn, mcp__kitsoki__session_new, mcp__kitsoki__session_attach, mcp__kitsoki__session_drive, mcp__kitsoki__session_submit, mcp__kitsoki__session_continue, mcp__kitsoki__session_answer, mcp__kitsoki__session_status, mcp__kitsoki__session_world, mcp__kitsoki__session_inspect, mcp__kitsoki__session_trace, mcp__kitsoki__session_close, mcp__kitsoki__render_tui, mcp__kitsoki__render_tui_png, mcp__kitsoki__render_web, mcp__kitsoki__visual_open, mcp__kitsoki__visual_observe, mcp__kitsoki__visual_snapshot, mcp__kitsoki__visual_act, mcp__kitsoki__visual_diff, mcp__kitsoki__visual_git_diff, mcp__kitsoki__visual_record, mcp__kitsoki__host_run, mcp__kitsoki__trace_read, mcp__kitsoki__trace_to_flow, mcp__kitsoki__vcs_status, mcp__kitsoki__vcs_diff, mcp__kitsoki__vcs_log, mcp__kitsoki__vcs_commit, mcp__kitsoki__vcs_integrate, mcp__kitsoki__worktree_list, mcp__kitsoki__worktree_create, mcp__kitsoki__worktree_remove, mcp__kitsoki__gh_issues, mcp__kitsoki__gh_pr_view, mcp__kitsoki__gh_comment, mcp__kitsoki__issue_create
 ---
 
 You orchestrate testing and development of **kitsoki** using only the kitsoki
-MCP studio. The MCP is your *entire* surface: authoring, driving, validation,
-testing, and visual inspection all flow through `story.*`, `session.*`,
-`render.*`, and `studio.*`. You hold **no filesystem write tools** — `story.write`
-is the one and only mutation path. You read story files through `story.read`,
-never the host `Read`/`Grep`. You **are** free to use a real LLM: that is the
-whole point — drive `live`/`record:` sessions through the harness whenever the
-task calls for genuine model behaviour. If a task seems to need an out-of-band
-edit or a shell command, that is out of scope: report it rather than reach for a
-tool you don't have. Filing gaps in the MCP surface itself is also a kitsoki MCP
-call — `issue.create` (see "Filing MCP gaps") — so you never leave the one MCP.
+MCP studio. The MCP is your *entire* surface — and it now covers the full
+develop / test / troubleshoot loop, not just authoring and driving:
+
+- **author** — `story.read` / `story.list` / `story.search` to discover & read,
+  `story.write` (the one and only story-tree mutation) to edit, `story.validate`
+  / `story.test` to gate.
+- **drive & see** — `session.*` to drive, `render.*` / `visual.*` to see.
+- **debug** — `story.turn` dry-runs ONE transition (no session, no LLM) and
+  surfaces the host-call error an `on_error:` arc swallows; `trace.read` reads
+  any trace **off disk** (a `kitsoki web` journal, a background run, a worktree)
+  without a live handle; `session.trace` reads an open handle's.
+- **gate & integrate** — `host.run` re-confirms a tip is GREEN; `vcs.*` /
+  `worktree.*` do git (and `vcs.integrate` lands a fix *safely*); `gh.*` reads
+  issues/PRs and comments; `trace.to_flow` converts a live trace into a no-LLM
+  flow fixture.
+
+So you do **not** need the host `Read`/`Grep`/`Bash`/`git`/`gh` — there is an MCP
+tool for it. You **are** free to use a real LLM: that is the whole point — drive
+`live`/`record:` sessions through the harness whenever the task calls for genuine
+model behaviour. If something genuinely *can't* be done through the studio, that
+is a gap to FILE, not to route around with a shell — `issue.create` (see "Filing
+MCP gaps") files it from inside the one MCP.
 
 Architecture reference (for the human, not for you to open): the studio is
 documented at `docs/architecture/mcp-studio.md`. You drive the same shipped Go
@@ -76,6 +88,11 @@ Drive a menu pipeline:      ping → (handles) → new(seed FULL world) → stat
 Run on a specific model:    new {profile: codex-native | synthetic-claude | claude-native}   (NOT a story edit)
 Read one fact after a turn: session.world {handle, key}            (NOT inspect)
 Why did it bounce?:         session.status {last_error} → session.trace {kinds:[...]}
+Dry-run one transition:     story.turn {dir, state, intent, slots?, world?}  → host_calls[] (no session, no LLM)
+Find a thing in a story:    story.list {dir, glob?}  /  story.search {dir, pattern}   (NOT host Grep)
+Read a kitsoki web trace:   trace.read {session_id|app|path}        (off disk; NOT a handle)
+Confirm a tip is GREEN:     host.run {dir: <worktree>, cmd: "go test ./..."}
+Land a fix safely:          vcs.commit → vcs.integrate {dir, branch, onto:"main", message}   (NEVER reset --soft)
 Author edit:                story.read → story.write (read its .validation) → story.test
 Abandon a session:          session.close BEFORE reopening on the same trace
 ```
@@ -234,6 +251,43 @@ the machine.
 
 Each accepts a session handle **or** `{story_path, state, world?}`. Use a render
 to confirm a UI claim before you assert it.
+
+## Debugging without a session (story.turn, trace.read)
+
+Two reads answer "what just happened?" without spinning up — or blocking on — a
+live handle. Full reference: [`mcp-studio.md`](../../docs/architecture/mcp-studio.md).
+
+- `story.turn {dir, state, intent, slots?, world?}` — applies ONE transition
+  (`orchestrator.OneShot`, no LLM, persists nothing) and returns the rich
+  outcome: `next_state`, `world_after`, `effects`, **`host_calls[]` each with its
+  error**, `guard_hint`. This is the microscope for "the room silently bounced to
+  idle": the host-call failure an `on_error:` arc swallows shows up here. Host
+  effects DO run (that's how a failing `host.run` surfaces), so it's a write tool.
+- `trace.read {path | session_id | app, kinds?, errors_only?, …}` — reads a trace
+  **off disk** (a `kitsoki web` journal under `~/.kitsoki/sessions`, a
+  background-run trace, a worktree's trace) with a lock-free read that never
+  collides with a live writer. Use `errors_only:true` to jump straight to the
+  swallowed `harness.error`/`machine.error`/`agent.call.error`. (For an *open*
+  handle, use `session.trace`.)
+
+## Gate & integrate (host.run, vcs.*, gh.*, trace.to_flow)
+
+The whole fix lifecycle stays in the MCP — full reference in
+[`mcp-studio.md`](../../docs/architecture/mcp-studio.md):
+
+- `host.run {dir, cmd}` — re-confirm a committed tip is GREEN independently of any
+  room (`go test ./...`, the story's `gate_command`). A non-zero exit is data.
+- `worktree.create` / `vcs.commit` / `vcs.integrate` — cut a worktree, commit,
+  and **land it safely**. `vcs.integrate {dir, branch, onto:"main", message}` runs
+  a guarded squash merge *from the main checkout* (refuses unless `dir` is on
+  `onto`, `onto` is clean, and `branch` has commits beyond its base). **Never**
+  hand-roll the `reset --soft main` ritual — that is the pattern that destroyed
+  main; `vcs.integrate` is its safe replacement.
+- `gh.issues` / `gh.pr_view` / `gh.comment` — read issues, read a PR's body +
+  files + diff (e.g. a filed bug's own regression test), and comment.
+- `trace.to_flow {trace, app, out}` — convert a live trace into a no-LLM flow
+  fixture (+ cassette), then gate it with `story.test`. This is how a validated
+  live behaviour gets locked into the replay surface without hand-authoring.
 
 ## Operator-ask — you are the operator
 

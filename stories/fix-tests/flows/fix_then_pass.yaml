@@ -18,8 +18,6 @@ host_handlers:
       verify_run:
         data: { exit_code: 0, ok: true, stdout: "ok\n" }
         delay: "20ms"
-      write_report:
-        data: { exit_code: 0, ok: true, stdout: ".artifacts/fix-tests/report-fixed.md" }
   host.agent.task:
     by_call:
       fix:

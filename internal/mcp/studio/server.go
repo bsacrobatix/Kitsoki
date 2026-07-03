@@ -148,6 +148,13 @@ func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 	// story.* — the deterministic, LLM-free authoring tools (slice 6).
 	srv.registerStoryTools()
 
+	// story.list / story.search — discover and grep a story's files (the
+	// read/grep surface that lets a driver stay off the host Read/Grep).
+	srv.registerStorySearchTools()
+
+	// story.turn — dry-run one transition (the debugging microscope).
+	srv.registerStoryTurnTool()
+
 	// workflow.* — dynamic-workflow create/validate/export receipts.
 	srv.registerWorkflowTools()
 
@@ -167,6 +174,18 @@ func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 	// host.* — the standalone gate-runner: run a command against a worktree
 	// (e.g. go test) outside any live session, to gate on the real deliverable.
 	srv.registerHostTools()
+
+	// trace.* — read a session trace OFF DISK (no live handle) and convert one
+	// to a replayable flow fixture (the no-LLM test loop, closed in MCP).
+	srv.registerTraceTools()
+
+	// vcs.* / worktree.* — a structured git surface: status/diff/log, worktree
+	// lifecycle, and the guarded squash-merge that replaces the main-destroying
+	// `reset --soft` ritual.
+	srv.registerVCSTools()
+
+	// gh.* — read GitHub issues/PRs and post comments from inside the studio.
+	srv.registerGHTools()
 
 	// visual.* — token-efficient visual interaction over web/TUI/VS Code-like
 	// surfaces, built on existing session/render seams.

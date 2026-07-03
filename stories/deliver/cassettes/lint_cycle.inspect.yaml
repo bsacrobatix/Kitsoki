@@ -1,0 +1,14 @@
+kind: inspect_cassette
+interactions:
+  - op: read
+    target: .artifacts/deliver/decomposition.yaml
+    out: |
+      briefs:
+        - id: slice-a
+          brief: Implement slice A so that go test ./... passes.
+          gate_command: go test ./...
+          deps: [slice-b]
+        - id: slice-b
+          brief: Implement slice B so that go test ./... passes.
+          gate_command: go test ./...
+          deps: [slice-a]

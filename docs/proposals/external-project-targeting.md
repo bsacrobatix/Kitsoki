@@ -14,7 +14,7 @@ comes later. This epic stays open to track #2.
 > pipeline was renamed to the **design pipeline** — rooms `design` /
 > `design_search` / `design_materialize` / `design_refine` / `design_draft` /
 > `design_done`, world keys `design_*`, personas `design_*`, scripts
-> `design_workspace.py` / `publish_design.py`. The repo's `docs/proposals/`
+> `design_workspace.star` / `publish_design.py`. The repo's `docs/proposals/`
 > output directory, the `docs/proposals/templates/`, and the
 > `proposal-authoring` skill/discipline keep their names (the pipeline still
 > emits proposal-shaped design docs into `docs/proposals/`). The

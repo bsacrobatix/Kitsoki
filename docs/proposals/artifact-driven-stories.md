@@ -11,7 +11,7 @@ agent/host output straight to disk as a named, shareable yaml/markdown file,
 and the run-through is really the accretion of those files. The **design
 pipeline** (`stories/dev-story/rooms/design*.yaml`) is the worked example — it
 materializes a per-run workspace at `docs/proposals/.workspace/<slug>/`
-(`stories/dev-story/scripts/design_workspace.py`), writes numbered check
+(`stories/dev-story/scripts/design_workspace.star`), writes numbered check
 artifacts into it as they're produced (`001-brief` … `005-proposal.md`, each via
 `host.artifacts_dir` keyed by `thread:`), then promotes the final one to the
 canonical `docs/proposals/<slug>.md` and mints a feature ticket

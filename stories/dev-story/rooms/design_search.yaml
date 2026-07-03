@@ -182,17 +182,16 @@ states:
                 design_overlap_decision: "change_existing"
                 design_change_target:    "{{ slots.target }}"
                 last_error: ""
-            - invoke: host.run
+            - invoke: host.starlark.run
               id: amend_workspace
               with:
-                cmd: python3
-                args:
-                  - "stories/dev-story/scripts/design_amend_workspace.py"
-                  - "{{ slots.target }}"
-                  - "{{ world.design_slug }}"
+                script: scripts/design_amend_workspace.star
+                inputs:
+                  target: "{{ slots.target }}"
+                  proposed_slug: "{{ world.design_slug }}"
               bind:
-                design_slug:      "stdout_json.slug"
-                design_workspace: "stdout_json.workspace"
+                design_slug:      "slug"
+                design_workspace: "workspace"
               on_error: design_search
 
       # Override: create a new proposal despite the overlap (recorded for audit).

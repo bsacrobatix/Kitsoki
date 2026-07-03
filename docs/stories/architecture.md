@@ -1043,7 +1043,7 @@ flowchart TD
       direction TB
       idea(["operator: free-text idea"]):::human
       namer["design_namer<br/>agent.decide"]:::llm
-      uniq["design_workspace.py<br/>slug collision-proof"]:::det
+      uniq["design_workspace.star<br/>slug collision-proof"]:::det
       interv["proposal_interviewer<br/>agent.converse · ONE persistent thread"]:::llm
       writer["proposal_brief_writer<br/>agent.task · fresh session/turn"]:::llm
       brief[/"001-brief.md"/]:::art
@@ -1119,7 +1119,7 @@ Read it as the §12.2 inversion in practice:
   *same* discovery room (interviewer + brief-writer) are deliberately
   separate conversations with separate jobs.
 - **The glue between agents is deterministic and recorded.** Slug
-  uniqueness (`design_workspace.py`) and publish (`publish_design.py`)
+  uniqueness (`design_workspace.star`) and publish (`publish_design.py`)
   are plain `host.run` scripts, not LLM calls; the human gates resolve
   *enumerated* intents recorded as `GateDecided`. Nothing an agent emits
   advances the pipeline until a deterministic step or a declared gate

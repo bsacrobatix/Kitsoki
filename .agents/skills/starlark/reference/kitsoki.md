@@ -61,15 +61,17 @@ These are kitsoki-specific traps on top of the general
 
 - **`ctx.inputs` is a dict**, keyed (`ctx.inputs["x"]`), not an attribute
   (`ctx.inputs.x`). `ctx.world` and `ctx.http` are method objects, not dicts.
-- **Outputs flow only through the return dict.** There is no `ctx.world.set`. If
-  a value isn't in the returned dict, the effect's `bind:` can't see it.
+- **Outputs flow through the return dict.** There is no `ctx.world.set`. If a
+  value isn't in the returned dict, the effect's `bind:` can't see it. For small
+  generated files, write through `ctx.fs.write(path, content)` and return the
+  written path.
 - **`fail(msg)` is the only error channel** — there are no exceptions. It maps to
   `Result.Error`, sets `world.last_error`, and fires `on_error:`. Validate inputs
   and branch on `resp.status` (a non-2xx is *not* an error; a response is truthy
   iff 2xx) before you reach for the data.
-- **Only `json` and `math`** are predeclared. Reaching for `time`/`random` (or
-  any other module) is a resolve error — by design, so a recorded run replays
-  byte-for-byte.
+- **Only `json`, `math`, and decode-only `yaml`** are predeclared. Reaching for
+  `time`/`random` (or any other module) is a resolve error — by design, so a
+  recorded run replays byte-for-byte.
 - **No `%.2f`.** Starlark's `%` has no precision specifier. Round with `math`
   and assemble strings yourself — see the `fixed()` helper in
   [`stories/weather-report/scripts/weather_report.star`](../../../../stories/weather-report/scripts/weather_report.star).
@@ -82,7 +84,7 @@ These are kitsoki-specific traps on top of the general
    ```bash
    .agents/skills/starlark/tools/starcheck/  →  go run . -kitsoki scripts/derive.star
    ```
-   The `-kitsoki` profile pins the real surface: `predeclared={json,math}`,
+   The `-kitsoki` profile pins the real surface: `predeclared={json,math,yaml}`,
    strict dialect (no `set`/`while`/recursion/global-reassign), and requires a
    top-level `def main`. It parses + resolves **without executing**, so it is
    safe and instant. Catches the common mistakes the general resolver passes:
