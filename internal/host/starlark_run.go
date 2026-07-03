@@ -123,10 +123,17 @@ func StarlarkRunHandler(ctx context.Context, args map[string]any) (Result, error
 	// caller already installed one (the testrunner installs a replay inspector
 	// for flow fixtures). Mirrors the HTTP default-injection block above; the
 	// safe deny-all default is applied by InspectorFromContext when nothing is
-	// injected. Root at world.workdir when present, else the repo containing the
-	// resolved story script, else the process cwd.
+	// injected. Root at world.workdir when present, else KITSOKI_APP_DIR (the
+	// target app's directory, published by loaders — see AppDirEnv in
+	// agent_ask.go), else the repo containing the resolved story script, else
+	// the process cwd. Without the AppDirEnv fallback, a driver whose own
+	// process cwd differs from the app being driven can resolve ctx.fs.* paths
+	// against the wrong directory.
 	if !starlarkhost.HasInspector(runCtx) {
 		root, _ := worldSnapshot["workdir"].(string)
+		if root == "" {
+			root = os.Getenv(AppDirEnv)
+		}
 		if root == "" {
 			if inferred := inferRepoRootForScript(scriptPath); inferred != "" {
 				root = inferred
