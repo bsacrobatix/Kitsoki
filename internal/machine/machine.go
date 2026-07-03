@@ -1271,9 +1271,34 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 		}
 
 		// Fire on_enter of newly-entered ancestors. Mirror Turn's logic.
+		//
+		// Self-transition (resolvedTarget == state): normally an emit that loops
+		// back to the same state does NOT re-fire on_enter — a passive `look`
+		// (target: ., no effects) must not re-run side effects. But a self-arc
+		// that CHANGED the world (has effects) is the kitsoki idiom for "I just
+		// enabled the next on_enter step" — e.g. git-ops's conflict room sets
+		// conflict_agent_ready=true via a `conflict_ready` self-arc precisely so
+		// the re-entered on_enter dispatches the resolver host.agent.task. Without
+		// re-firing on_enter here, that resolver never runs and DriveToRest stalls
+		// at `conflict`. Re-firing is bounded: `once:` invokes skip via
+		// allBindTargetsSet, the guard that fired this emit flips false after its
+		// effect, and EmitIntentMaxDepth / OrchestratorPostBindMaxDepth cap any
+		// residual loop.
 		var enterEmits []emittedIntent
-		if resolvedTarget != state {
-			entered := stateEnterPathsAware(state, resolvedTarget)
+		// Self-reentry is scoped to a synchronous intercept drive (DriveToRest):
+		// a normal operator turn / flow drive must still REST at an
+		// `intercept_drive: rest` room (e.g. git-ops's conflict room shows the
+		// scan and waits), so re-firing its on_enter only happens when the
+		// orchestrator is driving the room THROUGH to a real rest.
+		selfReentry := resolvedTarget == state && len(winningTr.tr.Effects) > 0 &&
+			InterceptDriveActive(ctx)
+		if resolvedTarget != state || selfReentry {
+			var entered []string
+			if selfReentry {
+				entered = []string{resolvedTarget}
+			} else {
+				entered = stateEnterPathsAware(state, resolvedTarget)
+			}
 			for _, enteredPath := range entered {
 				cs, ok := m.states[enteredPath]
 				if !ok || cs.s == nil || len(cs.s.OnEnter) == 0 {
@@ -1297,7 +1322,17 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 					hopSay.WriteString(sb3.String())
 				}
 				ev2 = append(ev2, ev3...)
-				enterEmits = append(enterEmits, em3...)
+				// On a self-reentry we want the newly-eligible on_enter HOST CALLS
+				// (e.g. the conflict resolver) to dispatch, but NOT its emit_intents:
+				// those must be re-evaluated FRESH by the orchestrator's post-bind
+				// settle recursion after those host calls bind their results.
+				// Collecting them here instead snapshots them against the pre-host
+				// world and can leak a stale guard (e.g. conflict's `rebase_stuck`
+				// when conflict_files is momentarily empty) that then fires at the
+				// wrong state. Real (non-self) entries keep the original behaviour.
+				if !selfReentry {
+					enterEmits = append(enterEmits, em3...)
+				}
 			}
 		}
 
