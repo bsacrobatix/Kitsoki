@@ -43,6 +43,18 @@
 # project's real, now-frozen `issues/` archive — see issues/DEPRECATED.md) and
 # points `world_in.tickets_root` at it so the target session's ticket.get resolves
 # there via its `root` arg instead of falling back to cwd.
+#
+# WM.1 (bounded-context worker brief): the dispatch prompt below is the
+# router-anchor directive ("Work ticket <id> titled ...") FOLLOWED by the SLIM
+# worker-brief projection (Task/Gate/in-scope-files/referenced-docs) from
+# scripts/gs_worker_brief.star's `worker_brief_sections` — so a fresh worker
+# gets exactly the spec + gate + small in-scope files inline + pointers into
+# large ones, instead of the bare agent_brief that used to send it exploring
+# the whole decomposition. worker_brief_sections (and its small helpers) are
+# DUPLICATED verbatim from gs_worker_brief.star rather than `load`ed: this
+# sandbox's host.starlark.run wires no Starlark loader (see
+# internal/host/starlark/run.go), so cross-.star imports aren't available.
+# gs_worker_brief.star is the canonical copy — keep this one in sync with it.
 
 PIPELINE_STORY = {
     "bugfix": "stories/bugfix/app.yaml",
@@ -87,6 +99,124 @@ def _ticket_body_markdown(change, gate_cmd):
         lines.append("`" + gate_cmd + "`")
         lines.append("")
     return "\n".join(lines)
+
+
+# ─── worker-brief projection (duplicated from gs_worker_brief.star; see the
+# module docstring for why) ──────────────────────────────────────────────────
+
+
+def _wb_join(repo, entry):
+    r = _str(repo).rstrip("/")
+    if r == "" or r == ".":
+        return entry
+    return r + "/" + entry
+
+
+def _wb_lang_for(rel):
+    if rel.endswith(".go"):
+        return "go"
+    if rel.endswith(".yaml") or rel.endswith(".yml"):
+        return "yaml"
+    if rel.endswith(".py"):
+        return "python"
+    if rel.endswith(".star"):
+        return "python"
+    return ""
+
+
+def _wb_file_block(ctx, path, max_inline):
+    text = ctx.fs.read(path)
+    n = text.count("\n") + 1
+    if n <= max_inline:
+        return ("### `" + path + "` (" + str(n) + " lines) — full content:\n```" +
+                _wb_lang_for(path) + "\n" + text + "\n```")
+    return ("### `" + path + "` (" + str(n) +
+            " lines) — LARGE; read only the slice you need (see the pointers in the Task above).")
+
+
+def _wb_is_pathchar(c):
+    return c.isalnum() or c == "-" or c == "_" or c == "."
+
+
+def _wb_find_proposal_refs(text):
+    marker = "docs/proposals/"
+    parts = text.split(marker)
+    refs = []
+    if len(parts) <= 1:
+        return refs
+    for part in parts[1:]:
+        end = len(part)
+        for i in range(len(part)):
+            if not _wb_is_pathchar(part[i]):
+                end = i
+                break
+        candidate = marker + part[:end]
+        if end > 0 and candidate.endswith(".md") and candidate not in refs:
+            refs.append(candidate)
+    return refs
+
+
+def worker_brief_sections(ctx, change, repo, max_inline_lines):
+    gate = change.get("gate") or {}
+    scope = change.get("scope") or []
+    brief = _str(change.get("agent_brief")).strip()
+    accept = change.get("acceptance") or []
+    cmd = _str(gate.get("cmd") or gate.get("replay_cmd") or "(no runnable gate)")
+
+    o = []
+    o.append("## Task")
+    o.append(brief if brief != "" else "(no agent_brief)")
+    if len(accept) > 0:
+        o.append("")
+        o.append("**Acceptance criteria:**")
+        for a in accept:
+            o.append("- " + _str(a))
+
+    o.append("")
+    o.append("## Gate — must be GREEN *for the right reason*")
+    o.append("- class: `" + _str(gate.get("class")) + "`")
+    o.append("- **command:** `" + cmd + "`")
+    if gate.get("red_now"):
+        o.append("- expected RED-now: " + _str(gate.get("red_now")))
+    o.append(
+        "- Verify RED **before** your change and GREEN **after** (RED-first). If the gate is already GREEN " +
+        "and the behavior already exists, the change is ALREADY-SATISFIED — report that with file:line evidence, " +
+        "do NOT fabricate work. If the gate is weak (passes without the feature), still deliver the real brief " +
+        "and self-verify the actual behavior."
+    )
+
+    o.append("")
+    o.append("## In-scope files (edit ONLY these)")
+    if len(scope) == 0:
+        o.append("(none declared)")
+    for entry in scope:
+        joined = _wb_join(repo, entry)
+        if "**" in joined:
+            o.append("- glob `" + entry + "` — recursive scope; see/create files here (not expanded).")
+        elif "*" in joined:
+            matches = ctx.fs.glob(joined)
+            if len(matches) > 0:
+                shown = matches[:20]
+                listing = ", ".join(["`" + m + "`" for m in shown])
+            else:
+                listing = "(none yet — you may create files here)"
+            o.append("- glob `" + entry + "` → " + listing)
+        elif ctx.fs.exists(joined):
+            o.append(_wb_file_block(ctx, joined, max_inline_lines))
+        else:
+            o.append("- `" + entry + "` — does NOT exist yet; you create it.")
+
+    refs = _wb_find_proposal_refs(brief)
+    if len(refs) > 0:
+        o.append("")
+        o.append("## Referenced design docs")
+        for r in refs:
+            if ctx.fs.exists(r):
+                o.append(_wb_file_block(ctx, r, max_inline_lines))
+            else:
+                o.append("- `" + r + "` — read it in your worktree.")
+
+    return o
 
 
 def _write_ticket(ctx, tickets_root, change_id, title, change, gate_cmd):
@@ -153,7 +283,12 @@ def main(ctx):
     # Lead with the verbatim-parseable ticket directive (see the module
     # docstring): "titled" anchors the {ticket_id} template capture in the
     # target story's idle room so it doesn't swallow the rest of this prompt.
-    action = "Work ticket " + change_id + " titled \"" + title + "\". " + agent_brief
+    # Then fold in the WM.1 slim worker-brief projection (Task/Gate/in-scope
+    # files/referenced docs) so the dispatched worker gets a bounded, complete
+    # context instead of just the bare agent_brief.
+    ticket_directive = "Work ticket " + change_id + " titled \"" + title + "\". " + agent_brief
+    brief_sections = worker_brief_sections(ctx, change, ".", 180)
+    action = ticket_directive + "\n\n" + "\n".join(brief_sections)
 
     tickets_root = work_dir + "/tickets"
     ticket_path = _write_ticket(ctx, tickets_root, change_id, title, change, gate_cmd)
