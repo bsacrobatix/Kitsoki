@@ -1,13 +1,19 @@
 package tui
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/chats"
+	"kitsoki/internal/harness"
 	"kitsoki/internal/jobs"
+	"kitsoki/internal/machine"
+	"kitsoki/internal/orchestrator"
+	"kitsoki/internal/store"
 )
 
 // TestHelpCommandLists confirms /help renders all four sections and
@@ -25,6 +31,7 @@ func TestHelpCommandLists(t *testing.T) {
 		"room switches",
 		"system",
 		"/help",
+		"/bug [description]",
 		"/chat show",
 		"/intents",
 		"/work [--all]",
@@ -36,6 +43,119 @@ func TestHelpCommandLists(t *testing.T) {
 			t.Errorf("/help missing %q in output\n---\n%s", want, body)
 		}
 	}
+}
+
+func TestBugCommandFilesReportAndArtifacts(t *testing.T) {
+	root := t.TempDir()
+	orch := testCloakOrchestrator(t)
+	m := NewRootModel(orch, app.SessionID("session-123"), "../../testdata/apps/cloak/app.yaml", "", WithBugRoot(root))
+	m.currentState = "foyer"
+	m.traceFilePath = filepath.Join(root, "trace.jsonl")
+	m.transcript.AppendTurn("look", "You are in /Users/example/project with token=sk-test-secret.")
+
+	body, next, cmd := BugCommand{}.Run(m, []string{"button", "does", "nothing"})
+	if cmd != nil {
+		t.Fatal("bug command should be synchronous")
+	}
+	if !strings.Contains(body, "filed issues/bugs/") {
+		t.Fatalf("unexpected command body: %s", body)
+	}
+	if next.transcript.EntryCount() != m.transcript.EntryCount() {
+		t.Fatal("bug command should not mutate transcript until dispatcher appends the returned block")
+	}
+
+	bugsDir := filepath.Join(root, "issues", "bugs")
+	entries, err := os.ReadDir(bugsDir)
+	if err != nil {
+		t.Fatalf("read bugs dir: %v", err)
+	}
+	var mdEntries []os.DirEntry
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
+			mdEntries = append(mdEntries, entry)
+		}
+	}
+	if len(mdEntries) != 1 {
+		t.Fatalf("bug files = %d, want 1", len(mdEntries))
+	}
+	id := strings.TrimSuffix(mdEntries[0].Name(), ".md")
+	mdPath := filepath.Join(bugsDir, mdEntries[0].Name())
+	md, err := os.ReadFile(mdPath)
+	if err != nil {
+		t.Fatalf("read bug md: %v", err)
+	}
+	for _, want := range []string{
+		`target: "story"`,
+		`app_id: "cloak-of-darkness"`,
+		`state_path: "foyer"`,
+		"button does nothing",
+		"./" + id + ".artifacts/transcript.md",
+		"./" + id + ".artifacts/context.json",
+	} {
+		if !strings.Contains(string(md), want) {
+			t.Fatalf("bug markdown missing %q\n---\n%s", want, md)
+		}
+	}
+
+	artifactsDir := filepath.Join(bugsDir, id+".artifacts")
+	transcript, err := os.ReadFile(filepath.Join(artifactsDir, "transcript.md"))
+	if err != nil {
+		t.Fatalf("read transcript artifact: %v", err)
+	}
+	if strings.Contains(string(transcript), "sk-test-secret") {
+		t.Fatalf("transcript artifact was not scrubbed:\n%s", transcript)
+	}
+	if !strings.Contains(string(transcript), "[REDACTED]") {
+		t.Fatalf("transcript artifact should contain redaction marker:\n%s", transcript)
+	}
+
+	contextData, err := os.ReadFile(filepath.Join(artifactsDir, "context.json"))
+	if err != nil {
+		t.Fatalf("read context artifact: %v", err)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(contextData, &meta); err != nil {
+		t.Fatalf("context artifact json: %v", err)
+	}
+	if meta["app_id"] != "cloak-of-darkness" || meta["state_path"] != "foyer" || meta["session_id"] != "session-123" || meta["surface"] != "tui" {
+		t.Fatalf("unexpected context metadata: %#v", meta)
+	}
+}
+
+func TestBugCommandDispatcherAppendsBlock(t *testing.T) {
+	root := t.TempDir()
+	orch := testCloakOrchestrator(t)
+	m := NewRootModel(orch, app.SessionID("session-123"), "../../testdata/apps/cloak/app.yaml", "", WithBugRoot(root))
+
+	next, cmd := m.RunSlashCommand("/bug surprising state")
+	if cmd != nil {
+		t.Fatal("bug slash command should be synchronous")
+	}
+	if !strings.Contains(next.transcript.AllContent(), "bug: filed issues/bugs/") {
+		t.Fatalf("transcript missing bug result:\n%s", next.transcript.AllContent())
+	}
+}
+
+func testCloakOrchestrator(t *testing.T) *orchestrator.Orchestrator {
+	t.Helper()
+	def, err := app.Load("../../testdata/apps/cloak/app.yaml")
+	if err != nil {
+		t.Fatalf("load cloak app: %v", err)
+	}
+	mach, err := machine.New(def)
+	if err != nil {
+		t.Fatalf("build machine: %v", err)
+	}
+	s, err := store.OpenMemory()
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	h, err := harness.NewReplay("../../testdata/apps/cloak/recording.yaml")
+	if err != nil {
+		t.Fatalf("open harness: %v", err)
+	}
+	return orchestrator.New(def, mach, s, h)
 }
 
 func TestChatScopeDisplayStripsSessionPrefix(t *testing.T) {
