@@ -95,10 +95,37 @@ def read_pyproject(path: Path) -> dict:
 
 
 def command_from_scripts(package: dict, name: str) -> str:
+    return command_from_scripts_with_manager(package, name, "npm")
+
+
+def command_from_scripts_with_manager(package: dict, name: str, manager: str) -> str:
     scripts = package.get("scripts") if isinstance(package, dict) else {}
     if isinstance(scripts, dict) and scripts.get(name):
-        return f"npm run {name}" if name != "test" else "npm test"
+        if manager == "npm":
+            return f"npm run {name}" if name != "test" else "npm test"
+        if manager == "pnpm":
+            return f"pnpm run {name}" if name != "test" else "pnpm test"
+        if manager == "yarn":
+            return f"yarn {name}"
+        if manager == "bun":
+            return f"bun run {name}"
+        return f"{manager} run {name}"
     return ""
+
+
+def node_package_manager(path: Path, package: dict) -> str:
+    package_manager = package.get("packageManager") if isinstance(package.get("packageManager"), str) else ""
+    if package_manager:
+        name = package_manager.split("@", 1)[0].strip().lower()
+        if name in {"npm", "pnpm", "yarn", "bun"}:
+            return name
+    if (path / "pnpm-lock.yaml").exists():
+        return "pnpm"
+    if (path / "yarn.lock").exists():
+        return "yarn"
+    if (path / "bun.lock").exists() or (path / "bun.lockb").exists():
+        return "bun"
+    return "npm"
 
 
 def make_targets(path: Path) -> set[str]:
@@ -123,6 +150,7 @@ def discover(path: Path) -> dict:
     pyproject = read_pyproject(path)
     pyproject_name = pyproject.get("name") if isinstance(pyproject.get("name"), str) else ""
     project_id = slug(package_name or pyproject_name or path.name)
+    node_manager = node_package_manager(path, package) if package else ""
     targets = make_targets(path)
     deps = {}
     for key in ("dependencies", "devDependencies"):
@@ -165,9 +193,9 @@ def discover(path: Path) -> dict:
     else:
         stack = "local project"
 
-    dev_command = command_from_scripts(package, "dev")
-    test_command = command_from_scripts(package, "test")
-    build_command = command_from_scripts(package, "build")
+    dev_command = command_from_scripts_with_manager(package, "dev", node_manager or "npm")
+    test_command = command_from_scripts_with_manager(package, "test", node_manager or "npm")
+    build_command = command_from_scripts_with_manager(package, "build", node_manager or "npm")
     if project_id == "slidey" and (path / "src" / "index.js").exists():
         examples = list((path / "examples").glob("*.slidey.json")) if (path / "examples").exists() else []
         example = "examples/hello.slidey.json" if (path / "examples" / "hello.slidey.json").exists() else ""
@@ -219,6 +247,7 @@ def discover(path: Path) -> dict:
         "dev_command": dev_command,
         "test_command": test_command,
         "build_command": build_command,
+        "node_package_manager": node_manager,
         "conventions": "hybrid" if project_id == "slidey" or (path / "AGENTS.md").exists() or (path / "CLAUDE.md").exists() else "local defaults",
         "tracker": "none",
         "transcript_slug": transcripts["slug"],

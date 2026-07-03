@@ -230,6 +230,25 @@ def enrich_project_shape(data: dict, root: Path) -> None:
     data["has_makefile"] = (root / "Makefile").exists()
     cargo = root / "Cargo.toml"
     data["has_cargo"] = cargo.exists()
+    package_json = root / "package.json"
+    data["has_package_json"] = package_json.exists()
+    data["node_package_manager"] = "npm"
+    if package_json.exists():
+        try:
+            package = json.loads(package_json.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            package = {}
+        package_manager = package.get("packageManager") if isinstance(package.get("packageManager"), str) else ""
+        if package_manager:
+            name = package_manager.split("@", 1)[0].strip().lower()
+            if name in {"npm", "pnpm", "yarn", "bun"}:
+                data["node_package_manager"] = name
+    if (root / "pnpm-lock.yaml").exists():
+        data["node_package_manager"] = "pnpm"
+    elif (root / "yarn.lock").exists():
+        data["node_package_manager"] = "yarn"
+    elif (root / "bun.lock").exists() or (root / "bun.lockb").exists():
+        data["node_package_manager"] = "bun"
     data["has_pyproject"] = (root / "pyproject.toml").exists()
     data["has_requirements"] = (root / "requirements.txt").exists()
     data["has_uv_lock"] = (root / "uv.lock").exists()
@@ -250,7 +269,7 @@ def package_managers(data: dict, kind: str) -> str:
     elif kind == "go":
         managers.append("go")
     elif kind == "node":
-        managers.append("npm")
+        managers.append(data.get("node_package_manager") or "npm")
     elif kind == "python":
         if data.get("has_uv_lock"):
             managers.append("uv")
