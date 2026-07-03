@@ -151,7 +151,7 @@ uses, so the MCP surface can never disagree with them.
 | `story.read` | `{path} → {content}` | workspace-scoped file read |
 | `story.write` | `{path, content} → {written, validation}` | write, then **auto-validate** in one round-trip; path-escape rejected |
 | `story.validate` | `{dir?} → {ok, errors[]}` | `app.Load` → `[]ValidationError{File, Line, Column, Message}` — the full load-time invariant set |
-| `story.graph` | `{dir?, room?} → {rooms[] \| detail \| agents[]}` | `graph.RoomList` / `Detail` / `AgentContracts` (the pure functions behind `/editor`) |
+| `story.graph` | `{dir?, graph?, room?, agents?} → {graph \| rooms[] \| detail \| agents[]}` | `graph=true` returns renderer-neutral `kitsoki.graph/v1` nodes/edges; legacy modes still wrap `graph.RoomList` / `Detail` / `AgentContracts` |
 | `story.test` | `{dir?, flows?} → {report}` | `testrunner.RunFlows` (no LLM; honours `--recording`/`--host-cassette`) |
 | `story.list` | `{dir?, glob?} → {files[]}` | discover a story's files (the counterpart to `story.read`'s exact path) — [`story_search.go`](../../internal/mcp/studio/story_search.go) |
 | `story.search` | `{dir?, pattern, glob?, regex?} → {hits[{file, line, text}]}` | grep across a story (room ref / intent / host call / world key) without the host `Grep` |
