@@ -100,3 +100,42 @@ func TestRegisterPendingSeedFromTaskArgs_FlatShape(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "9", got["ticket_id"])
 }
+
+// TestTakePendingSeed_SessionlessConsumerFallsBack is the codex path: the parent
+// registers a seed tagged with its own session id, but the maker's studio server
+// is a codex-spawned `kitsoki mcp` that never inherited KITSOKI_SESSION_ID, so it
+// consumes with an EMPTY session id. The oldest-fallback must still hand it the
+// seed — otherwise every gpt-5.5/codex maker strands with an empty ticket_id.
+func TestTakePendingSeed_SessionlessConsumerFallsBack(t *testing.T) {
+	t.Setenv("KITSOKI_PENDING_SEED_DIR", t.TempDir())
+	story := "stories/implementation/app.yaml"
+	require.NoError(t, RegisterPendingSeed("goal-seeker-7", story, map[string]any{"ticket_id": "0.2"}))
+
+	got, ok := TakePendingSeed("", story) // codex consumer: no forwarded session id
+	require.True(t, ok, "a session-less consumer must still resolve the story's seed")
+	require.Equal(t, "0.2", got["ticket_id"])
+
+	_, ok2 := TakePendingSeed("", story)
+	require.False(t, ok2, "still consume-once")
+}
+
+// TestTakePendingSeed_PrefersMatchingLineage proves a session-aware consumer
+// (claude/GLM maker whose env forwarded the parent id) picks its OWN seed even
+// when another parent's seed for the same story sits ahead of it in the FIFO —
+// preserving cross-parent isolation the story-only key would otherwise lose.
+func TestTakePendingSeed_PrefersMatchingLineage(t *testing.T) {
+	t.Setenv("KITSOKI_PENDING_SEED_DIR", t.TempDir())
+	story := "stories/implementation/app.yaml"
+	require.NoError(t, RegisterPendingSeed("parent-A", story, map[string]any{"ticket_id": "A"}))
+	require.NoError(t, RegisterPendingSeed("parent-B", story, map[string]any{"ticket_id": "B"}))
+
+	// Consumer B matches the second (younger) entry despite A being oldest.
+	got, ok := TakePendingSeed("parent-B", story)
+	require.True(t, ok)
+	require.Equal(t, "B", got["ticket_id"], "must prefer the lineage-matching entry, not the oldest")
+
+	// A's seed is untouched and still resolvable.
+	gotA, okA := TakePendingSeed("parent-A", story)
+	require.True(t, okA)
+	require.Equal(t, "A", gotA["ticket_id"])
+}

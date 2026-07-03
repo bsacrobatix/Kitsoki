@@ -18,25 +18,35 @@ package host
 // must be on disk. This mirrors quota_control.go's lock-guarded state-file pattern.
 //
 // Channel & keying. The parent (the process running host.agent.task) writes a
-// pending seed keyed by (KITSOKI_SESSION_ID [+ target story path]) before it
-// spawns the maker. KITSOKI_SESSION_ID is the parent (goal-seeker) session id and
-// is already injected into the maker subprocess env for trace continuity
-// (agent_runner.go / envWithSessionID); the maker's fresh studio server inherits
-// it and reads it from ITS OWN env in TakePendingSeedForStory. The seed is
-// consumed once — the first matching session.new pops it — so a sequential second
-// maker does not reuse a stale seed. The parent drives targets serially, so a
-// FIFO list per (session,story) key is sufficient (single-flight-per-key).
+// pending seed keyed by the target STORY PATH, tagging the entry with its own
+// session id (KITSOKI_SESSION_ID, the goal-seeker session, read from ctx). The
+// maker's fresh studio server pops it in TakePendingSeedForStory, PREFERRING an
+// entry whose session id matches its OWN KITSOKI_SESSION_ID env (the lineage the
+// maker subprocess inherits — agent_runner.go / envWithSessionID) but FALLING BACK
+// to the oldest entry when it has no session id to match on. That fallback is
+// load-bearing: a codex-spawned studio MCP does NOT inherit the parent env (codex
+// only forwards the statically-declared [mcp_servers.kitsoki.env] block, and the
+// dynamic per-session id cannot be declared there), so its consumer sees an empty
+// KITSOKI_SESSION_ID. Keying by session+story would strand every codex maker;
+// keying by story with a session-preference keeps claude/GLM makers isolated
+// (their env forwards, so they exact-match) while still seeding codex makers. The
+// seed is consumed once — the first matching session.new pops it. The parent
+// drives targets serially, so a FIFO list per story is sufficient
+// (single-flight-per-story; concurrent same-story drives with a session-less
+// consumer is the one case the fallback cannot disambiguate — documented, not our
+// loop).
 //
 // Merge semantics live at the consumer (studio.OpenDrivingSession): an explicit
 // initial_world arg wins per-key and the pending seed only fills the gaps, so
 // behaviour is identical whether or not the maker cooperated.
 //
 // Well-known location. Both the parent and the maker's fresh studio server must
-// resolve the SAME directory. The default is process-independent —
-// <os.TempDir>/kitsoki-pending-seeds — so any two processes on the same machine
-// agree without coordination. KITSOKI_PENDING_SEED_DIR overrides it (inherited by
-// the maker subprocess through os.Environ(), so a parent that sets it is honoured
-// on both ends); tests point it at a temp dir for isolation.
+// resolve the SAME directory. The default is $HOME-anchored
+// (~/.kitsoki/pending-seeds) — see pendingSeedDir for why $HOME and not $TMPDIR —
+// so any two processes for the same user agree without coordination.
+// KITSOKI_PENDING_SEED_DIR overrides it (honoured on both ends only when the
+// parent's value actually reaches the maker's MCP env); tests point it at a temp
+// dir for isolation.
 
 import (
 	"context"
@@ -61,30 +71,51 @@ const pendingSeedEnvDir = "KITSOKI_PENDING_SEED_DIR"
 // detectable rather than silently misparsed.
 const pendingSeedSchema = "kitsoki/pending-seed/v1"
 
-// pendingSeedFile is one (session, story) key's FIFO of pending seeds. A list
-// (not a single value) so a re-registration before the first is consumed does
-// not silently drop the earlier seed; the parent drives serially so in practice
-// this holds at most one entry (the single-flight-per-key assumption).
+// pendingSeedEntry is one registered seed: the world to merge plus the session id
+// of the parent that registered it (so a session-aware consumer can prefer its
+// own lineage). SessionID may be empty.
+type pendingSeedEntry struct {
+	SessionID string         `json:"session_id"`
+	World     map[string]any `json:"world"`
+}
+
+// pendingSeedFile is one story key's FIFO of pending seeds. A list (not a single
+// value) so a re-registration before the first is consumed does not silently drop
+// the earlier seed; the parent drives serially so in practice this holds at most
+// one entry (the single-flight-per-story assumption).
 type pendingSeedFile struct {
-	Schema  string           `json:"schema"`
-	Updated time.Time        `json:"updated"`
-	Seeds   []map[string]any `json:"seeds"`
+	Schema  string             `json:"schema"`
+	Updated time.Time          `json:"updated"`
+	Seeds   []pendingSeedEntry `json:"seeds"`
 }
 
 // pendingSeedDir resolves the seed-store directory: KITSOKI_PENDING_SEED_DIR when
-// set, else a process-independent default under the OS temp dir.
+// set, else a $HOME-anchored default the writer and reader compute identically.
+//
+// The default deliberately anchors on $HOME, NOT os.TempDir(): the two ends run in
+// separate processes and os.TempDir() reads $TMPDIR, which a codex-spawned studio
+// MCP does not inherit (codex hands the MCP a clean env), so on macOS the parent
+// would resolve /var/folders/…/T while the maker's MCP falls back to /tmp — a
+// silent rendezvous miss. $HOME is essential and reliably present in even a
+// stripped child env, so both ends agree without any config. Falls back to the OS
+// temp dir only when $HOME is somehow unavailable.
 func pendingSeedDir() string {
 	if v := strings.TrimSpace(os.Getenv(pendingSeedEnvDir)); v != "" {
 		return v
 	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		return filepath.Join(home, ".kitsoki", "pending-seeds")
+	}
 	return filepath.Join(os.TempDir(), "kitsoki-pending-seeds")
 }
 
-// pendingSeedPath is the JSON file for one (sessionID, storyPath) key. The name
-// is a hash of the two so an arbitrary story path (which may contain slashes) is
-// a safe single filename and the two components can never collide across keys.
-func pendingSeedPath(sessionID, storyPath string) string {
-	sum := sha256.Sum256([]byte(sessionID + "\x00" + storyPath))
+// pendingSeedPath is the JSON file for one storyPath key. The name is a hash of
+// the story path so an arbitrary path (which may contain slashes) is a safe
+// single filename. Keyed by story alone (not session) so a session-less consumer
+// (a codex-spawned studio MCP) can still resolve the seed; the session id lives
+// on each entry for a session-aware consumer to prefer.
+func pendingSeedPath(storyPath string) string {
+	sum := sha256.Sum256([]byte(storyPath))
 	return filepath.Join(pendingSeedDir(), hex.EncodeToString(sum[:16])+".json")
 }
 
@@ -171,15 +202,15 @@ func writePendingSeedFile(path string, st *pendingSeedFile) error {
 }
 
 // RegisterPendingSeed records a pending seed the maker's studio server will apply
-// to its session.new for storyPath, keyed by (sessionID, storyPath). An empty
-// sessionID, empty storyPath, or empty world is a no-op (there is nothing to key
-// on or nothing to seed) — so a task with no seed leaves today's behaviour
-// byte-identical. Appends (FIFO) so a re-registration never drops an unconsumed
-// seed.
+// to its session.new for storyPath, keyed by storyPath and tagged with sessionID.
+// An empty storyPath or empty world is a no-op (nothing to key on or nothing to
+// seed) — so a task with no seed leaves today's behaviour byte-identical. An empty
+// sessionID is allowed (the entry is then only reachable by the oldest-fallback
+// path). Appends (FIFO) so a re-registration never drops an unconsumed seed.
 func RegisterPendingSeed(sessionID, storyPath string, world map[string]any) error {
 	sessionID = strings.TrimSpace(sessionID)
 	storyPath = strings.TrimSpace(storyPath)
-	if sessionID == "" || storyPath == "" || len(world) == 0 {
+	if storyPath == "" || len(world) == 0 {
 		return nil
 	}
 	// Copy so a later mutation of the caller's map cannot alter what we persist.
@@ -187,31 +218,43 @@ func RegisterPendingSeed(sessionID, storyPath string, world map[string]any) erro
 	for k, v := range world {
 		seed[k] = v
 	}
-	return withPendingSeedFile(pendingSeedPath(sessionID, storyPath), func(st *pendingSeedFile) (bool, error) {
-		st.Seeds = append(st.Seeds, seed)
+	return withPendingSeedFile(pendingSeedPath(storyPath), func(st *pendingSeedFile) (bool, error) {
+		st.Seeds = append(st.Seeds, pendingSeedEntry{SessionID: sessionID, World: seed})
 		return false, nil
 	})
 }
 
-// TakePendingSeed pops (consume-once) the oldest seed registered for
-// (sessionID, storyPath), returning (nil,false) when none is registered. When the
-// FIFO drains the key file is removed. A read/parse error is treated as "no seed"
-// (returns false) rather than failing the caller's open — the backstop must never
-// break an otherwise-valid session.new.
+// TakePendingSeed pops (consume-once) a seed registered for storyPath, returning
+// (nil,false) when none is registered. Selection PREFERS the oldest entry whose
+// SessionID matches the caller's sessionID (lineage isolation for a consumer whose
+// env forwarded the parent id); when sessionID is empty or matches nothing it
+// falls back to the oldest entry (the codex-spawned consumer that never saw the
+// parent id). When the FIFO drains the key file is removed. A read/parse error is
+// treated as "no seed" (returns false) rather than failing the caller's open — the
+// backstop must never break an otherwise-valid session.new.
 func TakePendingSeed(sessionID, storyPath string) (map[string]any, bool) {
 	sessionID = strings.TrimSpace(sessionID)
 	storyPath = strings.TrimSpace(storyPath)
-	if sessionID == "" || storyPath == "" {
+	if storyPath == "" {
 		return nil, false
 	}
 	var popped map[string]any
-	err := withPendingSeedFile(pendingSeedPath(sessionID, storyPath), func(st *pendingSeedFile) (bool, error) {
+	err := withPendingSeedFile(pendingSeedPath(storyPath), func(st *pendingSeedFile) (bool, error) {
 		if len(st.Seeds) == 0 {
 			// Nothing to consume; remove the (empty) file so it does not linger.
 			return true, nil
 		}
-		popped = st.Seeds[0]
-		st.Seeds = st.Seeds[1:]
+		idx := 0 // oldest-fallback
+		if sessionID != "" {
+			for i, e := range st.Seeds {
+				if e.SessionID == sessionID {
+					idx = i // prefer the oldest lineage-matching entry
+					break
+				}
+			}
+		}
+		popped = st.Seeds[idx].World
+		st.Seeds = append(st.Seeds[:idx], st.Seeds[idx+1:]...)
 		// Drain → delete the file so a stale key never accumulates.
 		return len(st.Seeds) == 0, nil
 	})
