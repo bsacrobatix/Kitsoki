@@ -6,13 +6,13 @@
     },
     "slidey": {
       "command": "node",
-      "args": ["/Users/brad/code/slidey/src/mcp.js", "--root", "/Users/brad/code/Kitsoki"]
+      "args": ["../slidey/src/mcp.js", "--root", "."]
     },
     "stagehand": {
       "command": "node",
-      "args": ["/Users/brad/code/Kitsoki/tools/stagehand-mcp/server.mjs"],
+      "args": ["tools/stagehand-mcp/server.mjs"],
       "env": {
-        "KITSOKI_REPO": "/Users/brad/code/Kitsoki",
+        "KITSOKI_REPO": ".",
         "KITSOKI_AGENT_CMD": "kitsoki"
       }
     }
