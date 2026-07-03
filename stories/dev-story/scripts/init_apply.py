@@ -75,6 +75,28 @@ def profile_yaml_from_draft(profile: dict) -> str:
     return yaml_dump(profile).rstrip() + "\n"
 
 
+def ensure_draft_profile_defaults(profile: dict, data: dict) -> None:
+    dev_story_profile = profile.setdefault("dev_story_profile", {})
+    if not isinstance(dev_story_profile, dict):
+        dev_story_profile = {}
+        profile["dev_story_profile"] = dev_story_profile
+    docs = dev_story_profile.setdefault("docs", {})
+    if not isinstance(docs, dict):
+        docs = {}
+        dev_story_profile["docs"] = docs
+    for key, value in dev_story_docs_profile(data).items():
+        docs.setdefault(key, value)
+
+    bugfix = dev_story_profile.setdefault("bugfix", {})
+    if not isinstance(bugfix, dict):
+        bugfix = {}
+        dev_story_profile["bugfix"] = bugfix
+    if data.get("build_command"):
+        bugfix.setdefault("build_cmd", data["build_command"])
+    if data.get("test_command"):
+        bugfix.setdefault("test_cmd", data["test_command"])
+
+
 def validate_profile_yaml(content: str, root: Path) -> dict:
     kitsoki_bin = os.environ.get("KITSOKI_BIN", "kitsoki")
     with tempfile.TemporaryDirectory(prefix="kitsoki-profile-") as tmp:
@@ -158,9 +180,39 @@ def append_gitignore(path: Path, writes: list[str]) -> None:
     writes.append(str(path))
 
 
+def dev_story_docs_profile(data: dict) -> dict:
+    if data["project_id"] == "slidey":
+        defaults = {
+            "publish_durable_path": "docs/prd",
+            "prd_doc_filename": "",
+            "design_template_dir": "docs/proposals/templates",
+            "design_durable_path": "docs/proposals",
+            "design_doc_filename": "",
+            "design_ticket_dir": "",
+            "ticket_repo": "",
+        }
+    else:
+        defaults = {
+            "publish_durable_path": ".context/prd",
+            "prd_doc_filename": "",
+            "design_template_dir": "",
+            "design_durable_path": ".context/designs",
+            "design_doc_filename": "",
+            "design_ticket_dir": "",
+            "ticket_repo": "",
+        }
+    override = data.get("dev_story_docs_profile")
+    if isinstance(override, dict):
+        for key in defaults:
+            if key in override and override[key] is not None:
+                defaults[key] = str(override[key])
+    return defaults
+
+
 def app_yaml(data: dict) -> str:
     project_id = data["project_id"]
     title = data["project_title"]
+    docs = dev_story_docs_profile(data)
     return f"""app:
   id: {project_id}-dev
   version: 0.1.0
@@ -228,12 +280,12 @@ world:
   judge_mode:                 {{ type: string, default: "human" }}
   judge_confidence_threshold: {{ type: float, default: 0.8 }}
 
-  publish_durable_path:       {{ type: string, default: "docs/prd" }}
-  prd_doc_filename:           {{ type: string, default: "" }}
-  design_template_dir:        {{ type: string, default: "docs/proposals/templates" }}
-  design_durable_path:        {{ type: string, default: "docs/proposals" }}
-  design_doc_filename:        {{ type: string, default: "" }}
-  design_ticket_dir:          {{ type: string, default: "" }}
+  publish_durable_path:       {{ type: string, default: {q(docs["publish_durable_path"])} }}
+  prd_doc_filename:           {{ type: string, default: {q(docs["prd_doc_filename"])} }}
+  design_template_dir:        {{ type: string, default: {q(docs["design_template_dir"])} }}
+  design_durable_path:        {{ type: string, default: {q(docs["design_durable_path"])} }}
+  design_doc_filename:        {{ type: string, default: {q(docs["design_doc_filename"])} }}
+  design_ticket_dir:          {{ type: string, default: {q(docs["design_ticket_dir"])} }}
   build_cmd:                  {{ type: string, default: {q(data.get("build_command", ""))} }}
   test_cmd:                   {{ type: string, default: {q(data.get("test_command", ""))} }}
 
@@ -366,6 +418,7 @@ def mining_profile_yaml(data: dict) -> str:
 
 def generic_setup_plan_yaml(data: dict) -> str:
     project_id = data["project_id"]
+    docs = dev_story_docs_profile(data)
     verifications = [
         {
             "id": "story-load",
@@ -435,6 +488,8 @@ def generic_setup_plan_yaml(data: dict) -> str:
             ".kitsoki/stories",
             f".kitsoki/stories/{project_id}-dev",
             ".context",
+            docs["publish_durable_path"],
+            docs["design_durable_path"],
             ".artifacts",
             ".worktrees",
         ],
@@ -451,6 +506,7 @@ def generic_setup_plan_yaml(data: dict) -> str:
 
 def generic_profile_yaml(data: dict) -> str:
     kind = stack_kind(data)
+    docs = dev_story_docs_profile(data)
     languages = {
         "rust": "[rust]",
         "go": "[go]",
@@ -524,6 +580,19 @@ kitsoki:
   judge_mode: human
   autonomy: supervised
 
+dev_story_profile:
+  docs:
+    publish_durable_path: {q(docs["publish_durable_path"])}
+    prd_doc_filename: {q(docs["prd_doc_filename"])}
+    design_template_dir: {q(docs["design_template_dir"])}
+    design_durable_path: {q(docs["design_durable_path"])}
+    design_doc_filename: {q(docs["design_doc_filename"])}
+    design_ticket_dir: {q(docs["design_ticket_dir"])}
+    ticket_repo: {q(docs["ticket_repo"])}
+  bugfix:
+    build_cmd: {q(data.get("build_command", ""))}
+    test_cmd: {q(data.get("test_command", ""))}
+
 mining:
 {mining_profile_yaml(data)}
 
@@ -536,6 +605,7 @@ readiness:
 
 
 def slidey_profile_yaml(data: dict) -> str:
+    docs = dev_story_docs_profile(data)
     return f"""schema: project-profile/v1
 id: slidey
 title: Slidey
@@ -714,6 +784,19 @@ kitsoki:
   judge_mode: human
   autonomy: supervised
 
+dev_story_profile:
+  docs:
+    publish_durable_path: {q(docs["publish_durable_path"])}
+    prd_doc_filename: {q(docs["prd_doc_filename"])}
+    design_template_dir: {q(docs["design_template_dir"])}
+    design_durable_path: {q(docs["design_durable_path"])}
+    design_doc_filename: {q(docs["design_doc_filename"])}
+    design_ticket_dir: {q(docs["design_ticket_dir"])}
+    ticket_repo: {q(docs["ticket_repo"])}
+  bugfix:
+    build_cmd: {q(data.get("build_command", ""))}
+    test_cmd: {q(data.get("test_command", ""))}
+
 mining:
 {mining_profile_yaml(data)}
 
@@ -832,6 +915,7 @@ Discovery note:
 def readme(data: dict, profile_path: str) -> str:
     title = data["project_title"]
     story_id = f"{data['project_id']}-dev"
+    docs = dev_story_docs_profile(data)
     commands = []
     if data.get("dev_command"):
         commands.append(("dev", data["dev_command"]))
@@ -878,6 +962,11 @@ profile, command defaults, and any project-specific extensions.
 
 Project profile: `{Path(profile_path).relative_to(Path(data["target_path"]))}`
 
+Generated PRDs publish under `{docs["publish_durable_path"]}` and design drafts
+publish under `{docs["design_durable_path"]}`. Update
+`.kitsoki/project-profile.yaml` and `.kitsoki/stories/{story_id}/app.yaml`
+together if this project later adopts a different documentation layout.
+
 Inferred project commands:
 
 ```sh
@@ -923,6 +1012,12 @@ def main() -> int:
         data["mining_recommendation"] = json.loads(sys.argv[11])
     if draft_profile is not None and "mining" not in draft_profile:
         draft_profile["mining"] = data.get("mining_recommendation") or mining_recommendation(Path(data["target_path"]))
+    if isinstance(draft_profile, dict):
+        dev_story_profile = draft_profile.get("dev_story_profile")
+        docs_profile = dev_story_profile.get("docs") if isinstance(dev_story_profile, dict) else None
+        if isinstance(docs_profile, dict):
+            data["dev_story_docs_profile"] = docs_profile
+        ensure_draft_profile_defaults(draft_profile, data)
     root = Path(data["target_path"])
     enrich_project_shape(data, root)
     makefile = root / "Makefile"
@@ -942,7 +1037,17 @@ def main() -> int:
         }, sort_keys=True))
         return 1
     writes: list[str] = []
-    dirs = [".kitsoki", ".kitsoki/stories", ".context", ".artifacts", ".worktrees", f".kitsoki/stories/{data['project_id']}-dev"]
+    docs = dev_story_docs_profile(data)
+    dirs = [
+        ".kitsoki",
+        ".kitsoki/stories",
+        ".context",
+        docs["publish_durable_path"],
+        docs["design_durable_path"],
+        ".artifacts",
+        ".worktrees",
+        f".kitsoki/stories/{data['project_id']}-dev",
+    ]
     for rel in dirs:
         (root / rel).mkdir(parents=True, exist_ok=True)
 
