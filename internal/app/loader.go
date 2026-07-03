@@ -18,6 +18,7 @@ import (
 
 	"kitsoki/internal/agent/grammar"
 	"kitsoki/internal/agents"
+	"kitsoki/internal/effect"
 	starlarkhost "kitsoki/internal/host/starlark"
 
 	goyaml "github.com/goccy/go-yaml"
@@ -625,17 +626,14 @@ func resolveAgentDecls(def *AppDef, file, baseDir string) []error {
 			addErr(fmt.Sprintf("agent %q declares Bash but no bash_profile; required when the agent is referenced by host.agent.ask or host.agent.decide (those verbs run every Bash command through a profile allowlist)", name))
 		}
 
-		// external_side_effect inference: infer from the tool surface when
-		// the field is absent, and warn when declared value disagrees with
-		// the inferred value.
-		inferred := inferExternalSideEffect(decl.Tools)
-		if decl.ExternalSideEffect == nil {
-			// No explicit declaration — store the inferred value.
-			decl.ExternalSideEffect = &inferred
-		} else if *decl.ExternalSideEffect != inferred {
-			slog.Warn("agent external_side_effect declaration disagrees with inferred value from tool surface",
-				"agent", name, "file", file,
-				"declared", *decl.ExternalSideEffect, "inferred", inferred)
+		// Effect taxonomy resolution (effect-taxonomy.md): resolve the
+		// agent's effect class from its declared `effect:` (or the
+		// deprecated `external_side_effect:` alias) against the JOIN
+		// computed over its tool surface, enforcing the taxonomy's
+		// invariants. See resolveAgentEffect.
+		if msg := resolveAgentEffect(name, decl); msg != "" {
+			addErr(msg)
+			continue
 		}
 	}
 	return errs
@@ -651,20 +649,71 @@ func hasTool(tools []string, name string) bool {
 	return false
 }
 
-// inferExternalSideEffect returns true when the tool surface includes
-// WebFetch, WebSearch, or any MCP server that isn't known to be read-only.
-// The MCP read_only check is best-effort here — full cross-checking against
-// declared mcp_servers blocks requires the effect graph and is deferred to
-// later phases. For now: any tool named "host.WebFetch" or "host.WebSearch"
-// in the tool list implies external side effects.
-func inferExternalSideEffect(tools []string) bool {
-	for _, t := range tools {
-		switch t {
-		case "host.WebFetch", "host.WebSearch":
-			return true
-		}
+// resolveAgentEffect resolves decl's effect class in place (mirroring the
+// pattern resolveAgentDecls already uses for tools/bash_profile), enforcing
+// effect-taxonomy.md's invariants:
+//
+//   - `effect:` must be one of pure|read|write|external when set.
+//   - `effect:` and the deprecated `external_side_effect:` are mutually
+//     exclusive — declaring both is a load error.
+//   - A declared value (via effect: or, mapped through
+//     effect.FromLegacyBool, via external_side_effect:) that is <= read
+//     while the tool-surface join is > read is a HARD ERROR: the agent
+//     claims a posture its own tools contradict (the teeth the old
+//     boolean never had — it would have caught the dead proposal_author
+//     declaration).
+//   - Any other declared/joined disagreement is a warn-line, not an error
+//     (over-declaring privilege is a safe, if noisy, author mistake).
+//   - No declaration resolves silently to the tool-surface join.
+//
+// After resolution decl.Effect is always populated with a valid class, and
+// decl.ExternalSideEffect is mirrored from it (true iff Effect == external)
+// so pre-taxonomy consumers that still read the boolean directly (the
+// write_mode: read_only contradiction check in validateWriteMode) keep
+// working unchanged for both old- and new-style declarations.
+//
+// Returns a non-empty error message on a hard-fail; decl is left unmodified
+// in that case (the caller aborts the whole load).
+func resolveAgentEffect(name string, decl *AgentDecl) string {
+	if decl.Effect != "" && !decl.Effect.Valid() {
+		return fmt.Sprintf("agent %q: effect %q is not one of pure|read|write|external", name, decl.Effect)
 	}
-	return false
+	if decl.Effect != "" && decl.ExternalSideEffect != nil {
+		return fmt.Sprintf("agent %q: declares both effect: and the deprecated external_side_effect: — remove external_side_effect (use effect: only)", name)
+	}
+
+	joined := effect.FromTools(decl.Tools)
+
+	var declared effect.Effect
+	switch {
+	case decl.Effect != "":
+		declared = decl.Effect
+	case decl.ExternalSideEffect != nil:
+		declared = effect.FromLegacyBool(*decl.ExternalSideEffect, decl.Tools)
+		slog.Warn("agent external_side_effect: is deprecated; use effect: instead",
+			"agent", name)
+	}
+
+	if declared != "" {
+		if declared.LessEqual(effect.Read) && !joined.LessEqual(effect.Read) {
+			return fmt.Sprintf(
+				"agent %q: declares effect %q but its tool surface %v joins to %q (includes a write/external-tier tool) — "+
+					"these contradict each other; an agent with that tool surface cannot be %s. "+
+					"Remove the declaration or the tool.",
+				name, declared, decl.Tools, joined, declared)
+		}
+		if declared != joined {
+			slog.Warn("agent effect declaration disagrees with inferred value from tool surface",
+				"agent", name, "declared", declared, "inferred", joined)
+		}
+		decl.Effect = declared
+	} else {
+		decl.Effect = joined
+	}
+
+	mirrored := decl.Effect == effect.External
+	decl.ExternalSideEffect = &mirrored
+	return ""
 }
 
 // collectAskDecideAgents walks the full effect graph and returns the set of
@@ -958,6 +1007,12 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	// Enforces: ask/decide/extract → no mutation tools; task → acceptance.schema
 	// required; task + external_side_effect:false + WebFetch/WebSearch → error.
 	validateAgentVerbCrossChecks(file, def, &errs)
+
+	// ── 9d'. host_interfaces op effect: override validation (effect-taxonomy.md).
+	// A declared `effect:` must be one of pure|read|write|external; the
+	// builtin classification table (internal/effect.ClassifyVerb) is the
+	// default for every op that doesn't set this override.
+	validateHostInterfaceEffects(file, def, &errs)
 
 	// ── 9e. grammar-subset check for builtin.local_llm grammar:true effects.
 	// Every decide effect whose `agent:` alias resolves to a builtin.local_llm
@@ -1985,6 +2040,39 @@ var readOnlyArgv0s = map[string]bool{
 // declare a validator.post_cmd whose argv0 is not on the known-read-only
 // allowlist — the runtime sandbox catches actual mutations, but the warning
 // surfaces the potential problem at app-load.
+// validateHostInterfaceEffects rejects a declared HostInterfaceOp.Effect
+// outside the four recognised taxonomy tiers (effect-taxonomy.md). It does
+// NOT cross-check the override against the eventual bound handler's builtin
+// classification — host_interfaces bindings resolve to a concrete handler
+// only through the import/dev-story synthesis machinery, well after this
+// validation pass, so that check is deferred (see the epic's cross-cutting
+// open question 1: the builtin table is the default, this override is an
+// escape hatch the author is trusted to use correctly).
+func validateHostInterfaceEffects(file string, def *AppDef, errs *[]error) {
+	if def == nil {
+		return
+	}
+	for _, ifaceName := range sortedKeys(def.HostInterfaces) {
+		iface := def.HostInterfaces[ifaceName]
+		if iface == nil {
+			continue
+		}
+		for _, opName := range sortedKeys(iface.Operations) {
+			op := iface.Operations[opName]
+			if op == nil || op.Effect == "" {
+				continue
+			}
+			if !op.Effect.Valid() {
+				*errs = append(*errs, &ValidationError{
+					File: file,
+					Message: fmt.Sprintf("host_interfaces %q op %q: effect %q is not one of pure|read|write|external",
+						ifaceName, opName, op.Effect),
+				})
+			}
+		}
+	}
+}
+
 func validateAgentVerbCrossChecks(file string, def *AppDef, errs *[]error) {
 	if def == nil {
 		return

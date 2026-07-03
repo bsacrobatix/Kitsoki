@@ -22,6 +22,18 @@ import (
 	"kitsoki/internal/world"
 )
 
+// effectFields returns the resolved (effect, deterministic) pair for a host
+// call, ready to merge into a HostDispatched/HostReturned event payload
+// (effect-taxonomy.md's decision-recording consumer) so a trace is
+// self-describing without re-deriving the class from the story. Backed by
+// the builtin classification table (internal/effect via
+// host.ClassifyDispatchedCall), consulted with the call's resolved args so
+// multi-op verbs (host.git, host.gh.ticket, host.local, ...) resolve per-op.
+func effectFields(namespace string, args map[string]any) (string, bool) {
+	class, det := host.ClassifyDispatchedCall(namespace, args)
+	return string(class), det
+}
+
 // dispatchHostCalls invokes each HostInvocation, applies bindings to world,
 // and re-renders the view. Returns the new events, the updated world, the
 // refreshed view (empty if no changes), an override state path (non-empty
@@ -281,11 +293,14 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 		// Stamp it with the foreground turn (existing.Turn, inherited from the
 		// turn entry point via AgentCallCtx) so the live JSONL write buckets it
 		// under the turn it actually belongs to, not turn 0.
+		callEffect, callDeterministic := effectFields(hc.Namespace, invokeArgs)
 		hostDispatchedEv := newOrchestratorEvent(store.HostDispatched, map[string]any{
 			"namespace":          hc.Namespace,
 			"args":               invokeArgs,
 			"rerender_fell_back": fellBack,
 			"background":         hc.Background,
+			"effect":             callEffect,
+			"deterministic":      callDeterministic,
 		}, existing.Turn)
 		// Flush HostDispatched to the JSONL sink LIVE, before the (possibly
 		// long-blocking) Invoke below — otherwise the whole turn's event batch
@@ -366,8 +381,10 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 				"set": map[string]any{"host_error": herr},
 			}, 0))
 			events = append(events, newOrchestratorEvent(store.HostReturned, map[string]any{
-				"namespace": hc.Namespace,
-				"error":     err.Error(),
+				"namespace":     hc.Namespace,
+				"error":         err.Error(),
+				"effect":        callEffect,
+				"deterministic": callDeterministic,
 			}, 0))
 			applied = true
 			// Honour on_error even on infrastructure failure: the
@@ -483,7 +500,7 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			applied = true
 		}
 
-		payload := map[string]any{"namespace": hc.Namespace}
+		payload := map[string]any{"namespace": hc.Namespace, "effect": callEffect, "deterministic": callDeterministic}
 		if res.Error != "" {
 			payload["error"] = res.Error
 		}
@@ -860,11 +877,14 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 		// earlier args — see dispatchRerenderWorld / rerenderHostArgs above.
 		invokeArgs, fellBack := rerenderHostArgs(hc, dispatchRerenderWorld(hc, dispatchBinds, w))
 		summary := HostCallSummary{Namespace: hc.Namespace, Args: invokeArgs}
+		callEffect, callDeterministic := effectFields(hc.Namespace, invokeArgs)
 		events = append(events, newOrchestratorEvent(store.HostDispatched, map[string]any{
 			"namespace":          hc.Namespace,
 			"args":               invokeArgs,
 			"rerender_fell_back": fellBack,
 			"background":         hc.Background,
+			"effect":             callEffect,
+			"deterministic":      callDeterministic,
 		}, 0))
 		// B-7: inject agent plugin alias for summary dispatch path.
 		invokeCtx2 := host.WithWorldSnapshot(ctx, w.Vars)
@@ -882,8 +902,10 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 				"set": map[string]any{"last_error": err.Error()},
 			}, 0))
 			events = append(events, newOrchestratorEvent(store.HostReturned, map[string]any{
-				"namespace": hc.Namespace,
-				"error":     err.Error(),
+				"namespace":     hc.Namespace,
+				"error":         err.Error(),
+				"effect":        callEffect,
+				"deterministic": callDeterministic,
 			}, 0))
 			applied = true
 			if hc.OnError != "" {
@@ -930,7 +952,7 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 			applied = true
 		}
 
-		payload := map[string]any{"namespace": hc.Namespace}
+		payload := map[string]any{"namespace": hc.Namespace, "effect": callEffect, "deterministic": callDeterministic}
 		if res.Error != "" {
 			payload["error"] = res.Error
 		}

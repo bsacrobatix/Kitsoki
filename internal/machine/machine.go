@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/effect"
 	"kitsoki/internal/expr"
 	"kitsoki/internal/intent"
 	"kitsoki/internal/render"
@@ -1206,7 +1207,6 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 			continue
 		}
 
-
 		// Resolve the emitted name through the import alias map of the
 		// active state's ancestor chain. When the LLM-judge emits a
 		// bare intent name (e.g. `accept`) inside an imported child
@@ -1234,7 +1234,6 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 		if winningTr == nil {
 			return "", world.World{}, nil, "", nil, fmt.Errorf("emit_intent %q at %q: no transition arm matched (intent has no on: handler, or all guards failed)", emit.Name, state)
 		}
-
 
 		// Resolve target.
 		rawTarget := winningTr.tr.Target
@@ -1776,10 +1775,21 @@ func (m *machineImpl) applyEffectsTracedWithOptions(ctx context.Context, effects
 				slog.String("type", "invoke"),
 				slog.String("namespace", eff.Invoke),
 			)
+			// Stamp the resolved effect/deterministic pair (effect-taxonomy.md)
+			// using the builtin classification table, consulted against
+			// resolvedArgs so a multi-op verb (host.git, host.gh.ticket,
+			// host.local, ...) resolves per-op. This is the STATIC,
+			// story-author-invisible default — deliberately NOT the precise
+			// per-agent tool-surface join for host.agent.* verbs (that
+			// precision already lives on task.end's replay_mode, unchanged).
+			// See internal/effect.ClassifyVerb.
+			invokedEffect, invokedDeterministic := effect.ClassifyVerb(eff.Invoke, resolvedArgs)
 			effectEvents = append(effectEvents, newEvent(store.HostInvoked, map[string]any{
-				"namespace":  eff.Invoke,
-				"args":       resolvedArgs,
-				"background": eff.Background,
+				"namespace":     eff.Invoke,
+				"args":          resolvedArgs,
+				"background":    eff.Background,
+				"effect":        string(invokedEffect),
+				"deterministic": invokedDeterministic,
 			}))
 		}
 

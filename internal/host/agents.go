@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"kitsoki/internal/bashprofile"
+	"kitsoki/internal/effect"
 )
 
 // BashProfileKind is an alias for bashprofile.Kind. The canonical enum lives in
@@ -64,10 +65,18 @@ type BashProfile struct {
 // DefaultCwd, when non-empty, is used as the working directory for claude when
 // the effect's working_dir arg is absent.
 //
-// ExternalSideEffect declares whether this agent may mutate external state
-// (Mode C). Nil means the value was inferred
-// from the tool surface at loader time. True → Mode C (not replayable);
-// false → Mode A/B (deterministically replayable from diff).
+// Effect carries the agent's RESOLVED effect class (internal/app's loader
+// populates this from AgentDecl.Effect after resolving the taxonomy's
+// declared-vs-tool-surface-join invariants — see resolveAgentEffect).
+// Empty means "not populated by the loader" (a hand-constructed Agent, e.g.
+// in a unit test); resolveAgentEffect falls back to ExternalSideEffect and
+// then to a Write default in that case — see resolveAgentEffect below.
+//
+// ExternalSideEffect is a DEPRECATED alias mirroring whether this agent may
+// mutate external state (Mode C). Nil means neither Effect nor
+// ExternalSideEffect was populated. True ⟺ Effect == external (Mode C, not
+// replayable); false ⟺ Effect <= write (Mode A/B, deterministically
+// replayable from diff).
 type Agent struct {
 	SystemPrompt string
 	Model        string
@@ -80,6 +89,7 @@ type Agent struct {
 	MCPServers         map[string]any
 	BashProfile        *BashProfile
 	DefaultCwd         string
+	Effect             effect.Effect
 	ExternalSideEffect *bool
 	Permissions        AgentPermissions
 	// InheritClaudeDefault, when true, opts this agent out of the layered
@@ -620,11 +630,40 @@ func withAlwaysDenied(disallowed []string) []string {
 	return out
 }
 
-// agentIsReadOnly reports whether an agent has explicitly declared
-// external_side_effect: false. Unset (nil) is treated as write-capable so the
-// posture only tightens for agents that opted into read-only.
+// resolveAgentEffect returns a's classified effect for enforcement decisions
+// that only see the Agent value itself (no separately-resolved call-site tool
+// list — contrast inferReplayMode in agent_task_replay.go, which does get one
+// and uses effect.FromTools directly on it). Precedence:
+//
+//  1. a.Effect, when the loader populated it (every agent loaded through
+//     internal/app's resolveAgentEffect always sets this — see the Effect
+//     field doc on the Agent struct above).
+//  2. The deprecated a.ExternalSideEffect, mapped through
+//     effect.FromLegacyBool against a.Tools.
+//  3. effect.Write — the safe "no classification info at all" default this
+//     package used before the taxonomy existed (a hand-constructed Agent in
+//     a unit test, or legacy test scaffolding that bypasses the loader
+//     entirely). This deliberately does NOT fall back to effect.FromTools:
+//     an agent with no tools declared is not necessarily an agent with no
+//     capability (host.agent.task, for one, runs unrestricted regardless of
+//     Tools), so "unknown" defaults to write-capable, not to the taxonomy's
+//     formal (and here misleading) tool-less-surface-is-Pure join.
+func resolveAgentEffect(a Agent) effect.Effect {
+	if a.Effect != "" && a.Effect.Valid() {
+		return a.Effect
+	}
+	if a.ExternalSideEffect != nil {
+		return effect.FromLegacyBool(*a.ExternalSideEffect, a.Tools)
+	}
+	return effect.Write
+}
+
+// agentIsReadOnly reports whether an agent's resolved effect class is
+// read-only (pure or read). Unclassified agents default to write-capable (see
+// resolveAgentEffect) so the posture only tightens for agents that are
+// actually read/pure.
 func agentIsReadOnly(a Agent) bool {
-	return a.ExternalSideEffect != nil && !*a.ExternalSideEffect
+	return resolveAgentEffect(a).LessEqual(effect.Read)
 }
 
 // converseToolPolicy computes the CLI permission posture for a converse call:

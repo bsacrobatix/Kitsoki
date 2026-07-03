@@ -26,6 +26,7 @@ package host
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -136,6 +137,21 @@ func (r *Registry) getWithName(name string) (Handler, string, bool) {
 			return h, cur, true
 		}
 	}
+}
+
+// Names returns the sorted set of verb names currently registered. Used by
+// the effect-taxonomy builtin-classification coverage test (handlers_test.go)
+// to assert every verb RegisterBuiltins registers has a default effect
+// classification in internal/effect, so a new verb can't ship unclassified.
+func (r *Registry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.handlers))
+	for name := range r.handlers {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // lastDot returns the index of the last '.' in s, or -1 if absent.
