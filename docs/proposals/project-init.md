@@ -12,8 +12,10 @@ as an operator-review seed with a disabled runtime mining scope. Onboarding also
 writes an explicit `.kitsoki/check-readiness.py` verifier for the declared
 post-apply checks; the verifier can persist a summarized `readiness:` result
 back into the profile when the operator passes `--update-profile`, but does not
-run project commands automatically. This proposal now tracks only the remaining
-completion work before deletion.
+run project commands automatically. Emitted session-mining recipe reports can
+also be promoted into pending profile customizations with
+`.kitsoki/promote-session-mining.py`. This proposal now tracks only the
+remaining completion work before deletion.
 **Kind:**   story
 **Epic:**   standalone
 
@@ -23,9 +25,10 @@ Project onboarding is now usable as the front door for a normal repository, but
 two parts of the original project-init ambition intentionally remain outside
 the shipped baseline:
 
-- transcript history is detected, scoped in `.kitsoki.yaml`, and handed off, but
-  there is not yet an operator-controlled path that promotes the seed into
-  concrete, reviewed profile/story customizations;
+- transcript history is detected, scoped in `.kitsoki.yaml`, and handed off; an
+  explicit helper can promote emitted mining reports into pending
+  profile/story customizations, but onboarding still needs a first-class
+  in-story review surface for that loop;
 - apply validates the profile and generated story instance and writes an
   explicit verifier that can feed results back into the profile's `readiness`
   block, but onboarding still needs a more integrated operator surface for
@@ -55,7 +58,10 @@ Add only the remaining tail work:
 1. **Consent-backed transcript promotion.** Turn the seed note into a normal
    operator-reviewed mining path that can propose changes to
    `onboarding.story_customizations`, profile commands, rules, or docs
-   placement. Tests must use recorded or synthetic fixtures, never a live LLM.
+   placement. The generated promotion helper can record pending customization
+   entries from emitted recipe reports; remaining work is the in-story review
+   and accept/refine UX. Tests must use recorded or synthetic fixtures, never a
+   live LLM.
 2. **Post-apply readiness verification.** Add a deterministic optional verify
    path that runs the target profile's declared local checks and clearly
    distinguishes pre-existing project failures from onboarding regressions. The
@@ -92,11 +98,14 @@ Add only the remaining tail work:
   handoff without running live mining.
 - [x] Pre-fill disabled runtime mining scope for the discovered transcript
   sources.
+- [x] Generate a deterministic promotion helper that records emitted mining
+  recipes as pending profile customizations.
 - [x] Generate an explicit `.kitsoki/check-readiness.py` verifier for
   profile-declared checks without running project commands during onboarding.
 - [x] Let explicit readiness runs update the profile's `readiness:` summary.
 - [x] Move shipped behavior into narrative onboarding docs.
-- [ ] Add an operator-controlled, no-live-LLM-tested transcript promotion path.
+- [ ] Add an in-story operator review/accept/refine path for promoted
+  transcript-mined customizations.
 - [ ] Add an in-story operator action for running and reviewing readiness
   checks.
 - [ ] Delete this proposal after the remaining tail is shipped or split into

@@ -58,6 +58,7 @@ Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
 1. **`init_apply.py`** ([source](../../stories/dev-story/scripts/init_apply.py))
    — writes the checked-in onboarding files: `.kitsoki.yaml`,
    `.kitsoki/project-profile.yaml`, `.kitsoki/check-readiness.py`,
+   `.kitsoki/promote-session-mining.py`,
    `.kitsoki/stories/<id>-dev/app.yaml` (+ README), and appends the kitsoki
    runtime block to `.gitignore`. Binds
    `init_apply_result` (the JSON report); a failure routes to
@@ -90,6 +91,13 @@ also gets a disabled runtime `mining:` block (`enabled: false`, `cadence`,
 opt in later with `/mine resume` or `/mine now` without re-discovering scope.
 This is a review handoff only: no mining pass or LLM call runs during
 onboarding.
+
+The generated `.kitsoki/promote-session-mining.py` is the deterministic bridge
+from emitted mining reports to profile customizations. It scans
+`.artifacts/mining/jobs/*/analysis.json` (or explicit paths), ignores
+quarantined recipes, and appends pending `onboarding.story_customizations`
+entries for operator review. It never edits the shared base story and never
+calls an LLM.
 
 Repo metadata is inferred locally as well. Git checkouts keep their current or
 origin default branch and origin remote in `repo.default_branch` /

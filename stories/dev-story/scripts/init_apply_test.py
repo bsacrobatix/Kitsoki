@@ -183,6 +183,7 @@ if profile_path.exists():
     check("valid design local path", "design_durable_path: \".context/designs\"" in profile_text)
     check("valid setup writes instance", ".kitsoki/stories/acme-dev/app.yaml" in profile_text)
     check("valid setup writes readiness verifier", ".kitsoki/check-readiness.py" in profile_text)
+    check("valid setup writes mining promotion helper", ".kitsoki/promote-session-mining.py" in profile_text)
     check("valid setup creates prd dir", "- \".context/prd\"" in profile_text)
     check("valid setup creates design dir", "- \".context/designs\"" in profile_text)
     check("valid setup gates build", "command: \"go build ./...\"" in profile_text)
@@ -205,6 +206,7 @@ if readme_path.exists():
     check("valid readme no arg run", "kitsoki run\n```" in readme_text)
     check("valid readme explicit wrapper optional", "Use the materialized wrapper explicitly only after editing it" in readme_text)
     check("valid readme readiness command", "python3 .kitsoki/check-readiness.py --json" in readme_text)
+    check("valid readme mining promote command", "python3 .kitsoki/promote-session-mining.py --dry-run" in readme_text)
 readiness_path = repo / ".kitsoki" / "check-readiness.py"
 check("valid readiness verifier write", readiness_path.exists())
 if readiness_path.exists():
@@ -233,6 +235,33 @@ if readiness_path.exists():
     check("valid readiness profile status updated", "readiness:\n  status: \"fail\"" in updated_profile)
     check("valid readiness profile check recorded", 'id: "story-load"' in updated_profile)
     check("valid readiness profile detail recorded", "detail:" in updated_profile)
+promote_path = repo / ".kitsoki" / "promote-session-mining.py"
+check("valid mining promotion helper write", promote_path.exists())
+if promote_path.exists():
+    check("valid mining promotion executable", os.access(promote_path, os.X_OK))
+    analysis_dir = repo / ".artifacts" / "mining" / "jobs" / "seed"
+    analysis_dir.mkdir(parents=True)
+    (analysis_dir / "analysis.json").write_text(json.dumps({
+        "instances": [{
+            "instance_id": "session-1#003",
+            "determinism": "deterministic",
+            "tags": {"action": ["run tests", "open diff"]},
+            "grounding": {"quarantined": False},
+        }]
+    }), encoding="utf-8")
+    promote_proc = subprocess.run(
+        [sys.executable, str(promote_path), "--json"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=repo,
+    )
+    check("valid mining promotion exit", promote_proc.returncode == 0, promote_proc.stdout + promote_proc.stderr)
+    promoted_profile = profile_path.read_text(encoding="utf-8") if profile_path.exists() else ""
+    check("valid mining promotion pending id", 'id: "mined-session-1-003"' in promoted_profile)
+    check("valid mining promotion pending status", 'status: "pending"' in promoted_profile)
+    check("valid mining promotion evidence", "analysis.json#session-1#003" in promoted_profile)
 
 # 4. Git metadata is preserved instead of assuming main/no remote.
 repo = mkgitrepo()

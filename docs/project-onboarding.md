@@ -30,6 +30,7 @@ travels with every clone and every collaborator.
 | `.kitsoki.yaml` | `story_dirs`, `project_profile`, `root.import: dev-story`, and a disabled `mining:` scope when associated transcripts are found | so `kitsoki run` starts the profile-driven implicit root, `kitsoki web` discovers editable project stories, and transcript mining is ready for explicit opt-in |
 | `.kitsoki/project-profile.yaml` | declarative profile (stack, commands, conventions, selected starter story, repo evidence, dev-story profile, onboarding baseline) | the discovered description of your project and the source for the implicit dev-story root |
 | `.kitsoki/check-readiness.py` | explicit verifier for the profile's `setup_plan.verifications` | so a human can run build/test/story-load checks after apply without onboarding surprising the repo |
+| `.kitsoki/promote-session-mining.py` | deterministic promotion helper for emitted session-mining recipes | so reviewed mining output can become pending `onboarding.story_customizations` entries |
 | `.kitsoki/stories/<id>-dev/app.yaml` | a materialized dev-story **instance** that imports `@kitsoki/dev-story` | an editable snapshot for web discovery and project-local story extensions |
 | `.kitsoki/stories/<id>-dev/README.md` | how to run the instance | — |
 | `.mcp.json` | registers the **kitsoki studio MCP** server | so Claude Code / Cursor / any MCP client can drive kitsoki here |
@@ -138,7 +139,14 @@ When associated Claude/Codex history is found, onboarding also writes
 `.context/kitsoki-session-mining-seed.md` and pre-fills `.kitsoki.yaml` with
 `mining.enabled: false`, the bounded first-pass sample, and the discovered
 transcript directories. Nothing mines or spends during onboarding; `/mine
-resume` or `/mine now` is the explicit opt-in.
+resume` or `/mine now` is the explicit opt-in. When mining emits
+`.artifacts/mining/jobs/<job>/analysis.json`, review and promote pending profile
+customizations explicitly:
+
+```sh
+python3 .kitsoki/promote-session-mining.py --dry-run
+python3 .kitsoki/promote-session-mining.py --json
+```
 
 For reusable onboarding tests, keep `onboarding.baseline_commit` pinned to the
 commit before Kitsoki files were introduced and `first_onboarding_commit` pinned
