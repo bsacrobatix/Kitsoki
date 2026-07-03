@@ -97,6 +97,51 @@ func TestSidecar_Inputs_WrongType(t *testing.T) {
 	}
 }
 
+// TestSidecar_Inputs_PresentNilOptional_TreatedAsAbsent asserts that a
+// non-required input passed as an explicit nil (the shape produced when an
+// effect's with.inputs block templates an undefined world var, e.g.
+// `"{{ world.trace_run_id }}"`) does NOT fail type validation. This is a
+// regression test for a real bug found via stories/goal-seeker/flows/loop.yaml:
+// punch-list's punch_load.star declares an optional `run_id: { type: string }`
+// input and defaults it internally via ctx.inputs.get("run_id", ""), but the
+// boundary check rejected the present-but-nil value with "expected string, got
+// <nil>" before the script ever ran.
+func TestSidecar_Inputs_PresentNilOptional_TreatedAsAbsent(t *testing.T) {
+	res, err := runWith(t,
+		"inputs:\n  run_id: { type: string }\noutputs:\n  seen: { type: string }\n",
+		"def main(ctx):\n    v = ctx.inputs.get(\"run_id\", \"fallback\")\n    if v == None:\n        v = \"was-none\"\n    return {\"seen\": v}\n",
+		map[string]any{"run_id": nil}, // present key, nil value
+	)
+	if err != nil {
+		t.Fatalf("Run: %v (want nil input to be treated as absent, not a type error)", err)
+	}
+	if got := res.Outputs["seen"]; got != "was-none" {
+		t.Fatalf("seen = %v, want %q (ctx.inputs.get should see the key present with None)", got, "was-none")
+	}
+}
+
+// TestSidecar_Inputs_PresentNilRequired_StillFailsAsMissing asserts a
+// required input passed as an explicit nil still fails — just with the
+// "missing required input" message rather than a type-mismatch message, since
+// nil is functionally indistinguishable from "not provided".
+func TestSidecar_Inputs_PresentNilRequired_StillFailsAsMissing(t *testing.T) {
+	_, err := runWith(t,
+		"inputs:\n  n: { type: string, required: true }\n",
+		"def main(ctx):\n    return {}\n",
+		map[string]any{"n": nil},
+	)
+	if err == nil {
+		t.Fatal("expected error for required input passed as nil")
+	}
+	msg, ok := starlarkhost.AsDomainError(err)
+	if !ok {
+		t.Fatalf("expected DomainError, got %T: %v", err, err)
+	}
+	if !strings.Contains(msg, "missing required input") || !strings.Contains(msg, `"n"`) {
+		t.Fatalf("error %q should say missing required input \"n\"", msg)
+	}
+}
+
 // TestSidecar_Outputs_MissingDeclared asserts that omitting a declared output is
 // a DomainError naming the missing output.
 func TestSidecar_Outputs_MissingDeclared(t *testing.T) {
