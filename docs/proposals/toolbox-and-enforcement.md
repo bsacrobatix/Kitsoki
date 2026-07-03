@@ -55,10 +55,10 @@ Two coupled additions:
 > classifies that toolbox once (slice 1) and enforces the same allowlist +
 > mutator-deny on every agent kind — no verb gets a private rulebook.
 
-The kernel layer beneath this — confining the `write`/`external` tiers so a
+The process layer beneath this — confining the `write`/`external` tiers so a
 `Bash`-holding agent can't `python -c 'open(...).write()'` past the
 allowlist — is [slice 3](task-fs-sandbox.md). This slice is the tool-layer
-boundary; slice 3 is the OS boundary under it.
+boundary; slice 3 is the secure runtime boundary under it.
 
 ## Impact
 
@@ -117,8 +117,9 @@ agent ─▶ resolve toolbox (named + add/remove) ─▶ tool surface
   *default* for a `task` whose toolbox is read-only.
 - `write`/`external` → the allowlist is the toolbox; the operator's
   `permission_mode` still governs prompting. Confinement of the actual writes
-  is slice 3's OS sandbox; without it, a `write` toolbox is tool-allowlisted
-  but not kernel-jailed (a loud load-time note when `write`+no `sandbox:`).
+  is slice 3's secure runtime; without it, a `write` toolbox is
+  tool-allowlisted but not process-confined (a loud load-time note when
+  `write`+no `sandbox:`).
 
 No interpretive decision is added — the policy is a deterministic function of
 the resolved class. The moat is untouched.
@@ -215,7 +216,7 @@ unit tests. Flow fixtures (inline-tools stories) must stay green unmodified.
 
 - The effect taxonomy itself — [`effect-taxonomy.md`](effect-taxonomy.md)
   (slice 1) owns the classes; this slice consumes them.
-- Kernel-level confinement of the `write`/`external` tiers —
+- Runtime-level confinement of the `write`/`external` tiers —
   [`task-fs-sandbox.md`](task-fs-sandbox.md) (slice 3); this slice stops at the
   tool allowlist.
 - Per-tool argument-level policy (e.g. "Bash but only `git`") — coarser than
