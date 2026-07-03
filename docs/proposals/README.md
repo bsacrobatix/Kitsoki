@@ -189,8 +189,8 @@ thought.
   task), unifying three ad-hoc restrictions and an overloaded boolean. Four
   cooperating layers — **toolbox** (a named, reusable tool grant) → **effect
   class** (`pure | read | write | external` + `deterministic`) → **layered
-  enforcement** (tool allowlist for pure/read; OS sandbox for write/external) →
-  **conformance** (the trace proves the box held). The proposal slices are not
+  enforcement** (tool allowlist for pure/read; secure runtime boundary for
+  write/external) → **conformance** (the trace proves the box held). The proposal slices are not
   implemented as proposed; adjacent safety work exists (`write_mode: read_only`,
   bash profiles, validator sandboxing, converse/read-only tool policy), while
   `external_side_effect` remains the real vocabulary. Decomposed into three
@@ -203,10 +203,12 @@ thought.
     named `toolboxes:` + `tools_add:`; one effect-derived tool-layer policy for
     all four agent kinds, collapsing the `mutationTools` deny, the converse
     read-only branch, and task's unrestricted spawn into one path.
-  - [`task-fs-sandbox.md`](task-fs-sandbox.md) (runtime) — the kernel boundary
-    beneath the tools: `sandbox:` (bwrap/Landlock) confines the write/external
-    tiers so no tool — Write, Bash, python, sed — escapes the workspace; engine
-    validates + persists the diff. PoC proven on this host.
+  - [`task-fs-sandbox.md`](task-fs-sandbox.md) (runtime) — the process boundary
+    beneath the tools: `sandbox:` routes write/external agents through a
+    pluggable runtime ladder (`supervised` → filesystem confinement →
+    namespace/jail → VM). Landlock is the first no-daemon Linux backend, macOS
+    gets honest best-effort local confinement, and hosted/proprietary runtimes
+    can provide Firecracker/Kubernetes/nsjail backends.
   - conformance check folded into
     [`agent-contract-eval.md`](agent-contract-eval.md) (§Layer 1b) — offline
     lint that recorded tool uses never exceeded the declared toolbox/effect.

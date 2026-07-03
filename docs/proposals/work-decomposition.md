@@ -420,9 +420,10 @@ every dep is in the done set).
 ## Non-goals
 
 - **Parallel autonomous fan-out** (spawn an implementer per brief, run them
-  concurrently, auto-integrate). Deferred — needs the write/git sandboxing and
-  staged-mode deciders from `project_execution_modes_gate_deciders` /
-  `task-fs-sandbox.md`. v1 is sequential, gated dispatch.
+  concurrently, auto-integrate). Deferred — needs secure runtime confinement for
+  write/git agents and staged-mode deciders from
+  `project_execution_modes_gate_deciders` / `task-fs-sandbox.md`. v1 is
+  sequential, gated dispatch.
 - **Authoring the proposal.** That's the existing `proposal*` pipeline; this
   story starts from an *accepted* proposal/epic.
 - **A new runtime primitive for "iterate over a list of sub-tasks."** v1 models

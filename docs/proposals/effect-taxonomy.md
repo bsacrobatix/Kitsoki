@@ -65,8 +65,9 @@ cannot be one enum.
 
 This slice owns the **classification**. The vocabulary that *grants* the tool
 surface a class is computed over (named `toolboxes:`) and the *enforcement*
-keyed on the class are [slice 2](toolbox-and-enforcement.md); the OS sandbox
-that jails the `write`/`external` tiers is [slice 3](task-fs-sandbox.md).
+keyed on the class are [slice 2](toolbox-and-enforcement.md); the secure agent
+runtime that confines the `write`/`external` tiers is
+[slice 3](task-fs-sandbox.md).
 
 ## Impact
 
@@ -222,9 +223,9 @@ value change), so flow fixtures pass unmodified.
 
 - The toolbox vocabulary and the uniform enforcement keyed on these classes —
   [`toolbox-and-enforcement.md`](toolbox-and-enforcement.md) (slice 2).
-- OS-level write confinement — [`task-fs-sandbox.md`](task-fs-sandbox.md)
+- Runtime-level write confinement — [`task-fs-sandbox.md`](task-fs-sandbox.md)
   (slice 3); the taxonomy *declares* intent (`write` is exactly the class the
-  sandbox jails), the sandbox *enforces* it.
+  runtime confines), the runtime *enforces* it.
 - Building the result cache itself — this slice supplies the classification a
   cache would key on; the cache is a future consumer.
 - Per-tool permission grading finer than the four-tier ladder.
