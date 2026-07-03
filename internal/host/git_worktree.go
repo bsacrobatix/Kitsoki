@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ownerSentinelFile is the basename of the per-worktree sentinel that records
@@ -26,6 +27,8 @@ import (
 // host-side safety net for the destructive shared-checkout bug
 // (2026-06-03T121409Z-concurrent-dogfood-sessions-share-checkout-destructive-git).
 const ownerSentinelFile = ".kitsoki-owner"
+
+const cloneSentinelFile = ".kitsoki-clone"
 
 // writeOwnerSentinel records sid as the owning session of the worktree at path.
 // Empty sid is a no-op (callers that omit the session dimension leave no
@@ -87,6 +90,12 @@ func GitWorktreeHandler(ctx context.Context, args map[string]any) (Result, error
 		return worktreeCleanupScan(ctx, repo, args)
 	case "cleanup_apply":
 		return worktreeCleanupApply(ctx, repo, args)
+	case "clone_create":
+		return cloneCreate(ctx, repo, args)
+	case "clone_cleanup_scan":
+		return cloneCleanupScan(ctx, repo, args)
+	case "clone_cleanup_apply":
+		return cloneCleanupApply(ctx, repo, args)
 	default:
 		return Result{Error: fmt.Sprintf("host.git_worktree: unknown op %q", op)}, nil
 	}
@@ -496,6 +505,163 @@ func worktreeCleanupApply(ctx context.Context, repo string, args map[string]any)
 	return Result{Data: data}, nil
 }
 
+func cloneCreate(ctx context.Context, repo string, args map[string]any) (Result, error) {
+	id := strings.TrimSpace(worktreeStringArg(args, "id"))
+	if id == "" {
+		return Result{Error: "workspace.clone_create: id argument is required"}, nil
+	}
+	if strings.Contains(id, "/") || strings.Contains(id, string(filepath.Separator)) || id == "." || id == ".." {
+		return Result{Error: fmt.Sprintf("workspace.clone_create: invalid id %q", id)}, nil
+	}
+	source, repoErr := resolveWorktreeRepo(ctx, repo)
+	if repoErr != "" {
+		return Result{Error: "workspace.clone_create: " + repoErr}, nil
+	}
+	root := cloneRoot(source, worktreeStringArg(args, "root"))
+	path := filepath.Join(root, id)
+	if _, err := os.Stat(path); err == nil {
+		return Result{Error: fmt.Sprintf("workspace.clone_create: clone %q already exists at %s", id, path)}, nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return Result{Error: fmt.Sprintf("workspace.clone_create: stat %s: %v", path, err)}, nil
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return Result{Error: fmt.Sprintf("workspace.clone_create: mkdir %s: %v", root, err)}, nil
+	}
+	_, stderr, code, err := cliExec(ctx, source, "git", "clone", source, path)
+	if err != nil {
+		return Result{Error: fmt.Sprintf("workspace.clone_create: exec: %v", err)}, nil
+	}
+	if code != 0 {
+		return Result{Error: fmt.Sprintf("workspace.clone_create: %s", strings.TrimSpace(stderr))}, nil
+	}
+
+	base := strings.TrimSpace(worktreeStringArg(args, "base"))
+	name := strings.TrimSpace(worktreeStringArg(args, "name"))
+	if name != "" {
+		checkoutArgs := []string{"checkout", "-b", name}
+		if base != "" {
+			checkoutArgs = append(checkoutArgs, base)
+		}
+		if _, checkoutStderr, checkoutCode, checkoutErr := cliExec(ctx, path, "git", checkoutArgs...); checkoutErr != nil {
+			return Result{Error: fmt.Sprintf("workspace.clone_create: checkout: %v", checkoutErr)}, nil
+		} else if checkoutCode != 0 {
+			return Result{Error: fmt.Sprintf("workspace.clone_create: checkout: %s", strings.TrimSpace(checkoutStderr))}, nil
+		}
+	} else if base != "" {
+		if _, checkoutStderr, checkoutCode, checkoutErr := cliExec(ctx, path, "git", "checkout", base); checkoutErr != nil {
+			return Result{Error: fmt.Sprintf("workspace.clone_create: checkout: %v", checkoutErr)}, nil
+		} else if checkoutCode != 0 {
+			return Result{Error: fmt.Sprintf("workspace.clone_create: checkout: %s", strings.TrimSpace(checkoutStderr))}, nil
+		}
+	}
+	if err := writeCloneSentinel(path, map[string]any{
+		"id":         id,
+		"source":     source,
+		"branch":     name,
+		"base":       base,
+		"session_id": strings.TrimSpace(worktreeStringArg(args, "session_id")),
+		"created_at": time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		return Result{Error: fmt.Sprintf("workspace.clone_create: write sentinel: %v", err)}, nil
+	}
+	return Result{Data: map[string]any{"ok": true, "id": id, "path": path, "branch": name, "root": root}}, nil
+}
+
+func cloneCleanupScan(ctx context.Context, repo string, args map[string]any) (Result, error) {
+	source, repoErr := resolveWorktreeRepo(ctx, repo)
+	if repoErr != "" {
+		return Result{Error: "workspace.clone_cleanup_scan: " + repoErr}, nil
+	}
+	root := cloneRoot(source, worktreeStringArg(args, "root"))
+	minAge := cloneMinAge(args)
+	exclude := strings.TrimSpace(worktreeStringArg(args, "exclude"))
+	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return Result{Data: map[string]any{"ok": true, "root": root, "candidates": []map[string]any{}, "recommended_count": 0}}, nil
+	}
+	if err != nil {
+		return Result{Error: fmt.Sprintf("workspace.clone_cleanup_scan: read %s: %v", root, err)}, nil
+	}
+	candidates := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
+		meta, ok := readCloneSentinel(path)
+		if !ok {
+			continue
+		}
+		candidates = append(candidates, cloneCleanupCandidate(ctx, path, entry.Name(), meta, minAge, exclude))
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i]["recommended"] != candidates[j]["recommended"] {
+			return candidates[i]["recommended"] == true
+		}
+		return fmt.Sprint(candidates[i]["id"]) < fmt.Sprint(candidates[j]["id"])
+	})
+	recommended := 0
+	for _, c := range candidates {
+		if c["recommended"] == true {
+			recommended++
+		}
+	}
+	return Result{Data: map[string]any{
+		"ok":                true,
+		"root":              root,
+		"min_age_hours":     minAge.Hours(),
+		"exclude":           exclude,
+		"candidates":        candidates,
+		"recommended_count": recommended,
+	}}, nil
+}
+
+func cloneCleanupApply(ctx context.Context, repo string, args map[string]any) (Result, error) {
+	source, repoErr := resolveWorktreeRepo(ctx, repo)
+	if repoErr != "" {
+		return Result{Error: "workspace.clone_cleanup_apply: " + repoErr}, nil
+	}
+	root := cloneRoot(source, worktreeStringArg(args, "root"))
+	candidates, parseErr := cleanupCandidatesArg(args["candidates"])
+	if parseErr != "" {
+		return Result{Error: "workspace.clone_cleanup_apply: " + parseErr}, nil
+	}
+	var deleted []map[string]any
+	var skipped []map[string]any
+	var errs []string
+	for _, raw := range candidates {
+		c, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := strings.TrimSpace(fmt.Sprint(c["id"]))
+		path := strings.TrimSpace(fmt.Sprint(c["path"]))
+		if c["recommended"] != true {
+			skipped = append(skipped, map[string]any{"id": id, "path": path, "reason": "not recommended"})
+			continue
+		}
+		if err := validateCloneCleanupPath(root, path); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", id, err))
+			continue
+		}
+		if _, ok := readCloneSentinel(path); !ok {
+			errs = append(errs, fmt.Sprintf("%s: missing %s sentinel", id, cloneSentinelFile))
+			continue
+		}
+		if err := os.RemoveAll(path); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: remove: %v", id, err))
+			continue
+		}
+		deleted = append(deleted, map[string]any{"id": id, "path": path})
+	}
+	data := map[string]any{"ok": len(errs) == 0, "deleted": deleted, "skipped": skipped}
+	if len(errs) > 0 {
+		data["errors"] = errs
+		return Result{Data: data, Error: "workspace.clone_cleanup_apply: " + strings.Join(errs, "; ")}, nil
+	}
+	return Result{Data: data}, nil
+}
+
 func cleanupCandidate(ctx context.Context, repo string, wt worktreeInfo, base string, protected map[string]bool, exclude string, kind string) map[string]any {
 	branch := wt.Branch
 	id := filepath.Base(wt.Path)
@@ -551,6 +717,110 @@ func cleanupCandidateMatches(wt worktreeInfo, needle string) bool {
 	}
 	hay := strings.ToLower(filepath.Base(wt.Path) + " " + wt.Path + " " + wt.Branch)
 	return strings.Contains(hay, needle)
+}
+
+func cloneRoot(repo, override string) string {
+	if strings.TrimSpace(override) != "" {
+		if filepath.IsAbs(override) {
+			return filepath.Clean(override)
+		}
+		return filepath.Join(repo, override)
+	}
+	return filepath.Join(repo, ".worktrees", "clones")
+}
+
+func writeCloneSentinel(path string, meta map[string]any) error {
+	b, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	return os.WriteFile(filepath.Join(path, cloneSentinelFile), b, 0o644)
+}
+
+func readCloneSentinel(path string) (map[string]any, bool) {
+	b, err := os.ReadFile(filepath.Join(path, cloneSentinelFile))
+	if err != nil {
+		return nil, false
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
+func cloneMinAge(args map[string]any) time.Duration {
+	v := strings.TrimSpace(worktreeStringArg(args, "min_age_hours"))
+	if v == "" {
+		return 24 * time.Hour
+	}
+	var hours float64
+	if _, err := fmt.Sscanf(v, "%f", &hours); err != nil || hours < 0 {
+		return 24 * time.Hour
+	}
+	return time.Duration(hours * float64(time.Hour))
+}
+
+func cloneCleanupCandidate(ctx context.Context, path, id string, meta map[string]any, minAge time.Duration, exclude string) map[string]any {
+	branchOut, _, branchCode, branchErr := cliExec(ctx, path, "git", "branch", "--show-current")
+	branch := strings.TrimSpace(branchOut)
+	if branchErr != nil || branchCode != 0 {
+		branch = strings.TrimSpace(fmt.Sprint(meta["branch"]))
+	}
+	dirty := worktreeDirty(ctx, path)
+	createdAt, _ := time.Parse(time.RFC3339, strings.TrimSpace(fmt.Sprint(meta["created_at"])))
+	age := time.Duration(0)
+	if !createdAt.IsZero() {
+		age = time.Since(createdAt)
+	}
+	recommended := true
+	reason := "clone is clean and older than minimum age"
+	switch {
+	case dirty:
+		recommended, reason = false, "clone has uncommitted changes"
+	case createdAt.IsZero():
+		recommended, reason = false, "clone sentinel has no valid created_at"
+	case age < minAge:
+		recommended, reason = false, "clone is newer than minimum age"
+	case exclude != "" && strings.Contains(strings.ToLower(id+" "+path+" "+branch), strings.ToLower(exclude)):
+		recommended, reason = false, "excluded by refinement"
+	}
+	return map[string]any{
+		"id":            id,
+		"kind":          "clone",
+		"path":          path,
+		"branch":        branch,
+		"dirty":         dirty,
+		"created_at":    createdAt.Format(time.RFC3339),
+		"age_hours":     age.Hours(),
+		"recommended":   recommended,
+		"reason":        reason,
+		"actions":       []string{"clone_remove"},
+		"isolated_refs": true,
+	}
+}
+
+func validateCloneCleanupPath(root, path string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("empty clone path")
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("resolve root: %v", err)
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("resolve path: %v", err)
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return fmt.Errorf("compare path: %v", err)
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("path %s is outside clone root %s", path, root)
+	}
+	return nil
 }
 
 func branchMerged(ctx context.Context, repo, branch, base string) bool {
