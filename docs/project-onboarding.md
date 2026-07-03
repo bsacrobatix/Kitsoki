@@ -27,7 +27,7 @@ travels with every clone and every collaborator.
 
 | Path | What | Why |
 |---|---|---|
-| `.kitsoki.yaml` | `story_dirs`, `project_profile`, and `root.import: dev-story` | so `kitsoki run` starts the profile-driven implicit root and `kitsoki web` discovers editable project stories |
+| `.kitsoki.yaml` | `story_dirs`, `project_profile`, `root.import: dev-story`, and a disabled `mining:` scope when associated transcripts are found | so `kitsoki run` starts the profile-driven implicit root, `kitsoki web` discovers editable project stories, and transcript mining is ready for explicit opt-in |
 | `.kitsoki/project-profile.yaml` | declarative profile (stack, commands, conventions, selected starter story, repo evidence, dev-story profile, onboarding baseline) | the discovered description of your project and the source for the implicit dev-story root |
 | `.kitsoki/stories/<id>-dev/app.yaml` | a materialized dev-story **instance** that imports `@kitsoki/dev-story` | an editable snapshot for web discovery and project-local story extensions |
 | `.kitsoki/stories/<id>-dev/README.md` | how to run the instance | — |
@@ -133,6 +133,11 @@ The profile's `onboarding` block records why the starter story was selected
 project-local story customizations were applied or queued
 (`story_customizations`). Session mining should add proposed changes there
 first, then only update the generated wrapper when an operator accepts them.
+When associated Claude/Codex history is found, onboarding also writes
+`.context/kitsoki-session-mining-seed.md` and pre-fills `.kitsoki.yaml` with
+`mining.enabled: false`, the bounded first-pass sample, and the discovered
+transcript directories. Nothing mines or spends during onboarding; `/mine
+resume` or `/mine now` is the explicit opt-in.
 
 For reusable onboarding tests, keep `onboarding.baseline_commit` pinned to the
 commit before Kitsoki files were introduced and `first_onboarding_commit` pinned

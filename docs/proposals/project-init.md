@@ -8,8 +8,8 @@ unconfigured project, the `init` rooms discover and apply a checked-in
 `.kitsoki` setup, generated profiles are schema-validated, the generated config
 uses `root.import: dev-story`, stack defaults are inferred, toolkit + MCP setup
 is loud and retryable, and associated Claude/Codex transcript history is written
-as an operator-review seed. This proposal now tracks only the remaining
-completion work before deletion.
+as an operator-review seed with a disabled runtime mining scope. This proposal
+now tracks only the remaining completion work before deletion.
 **Kind:**   story
 **Epic:**   standalone
 
@@ -19,9 +19,9 @@ Project onboarding is now usable as the front door for a normal repository, but
 two parts of the original project-init ambition intentionally remain outside
 the shipped baseline:
 
-- transcript history is detected and handed off, but there is not yet an
-  operator-controlled path that promotes the seed into concrete, reviewed
-  profile/story customizations;
+- transcript history is detected, scoped in `.kitsoki.yaml`, and handed off, but
+  there is not yet an operator-controlled path that promotes the seed into
+  concrete, reviewed profile/story customizations;
 - apply validates the profile and generated story instance, but it does not yet
   prove the target project's own readiness loop after writing files.
 
@@ -40,8 +40,9 @@ Keep the shipped onboarding spine as the base:
   checked-in `.kitsoki` setup without a real LLM in tests.
 - generated profiles record the selected starter story, deterministic repo
   evidence, and queued project-local customizations under `onboarding`.
-- transcript discovery writes `.context/kitsoki-session-mining-seed.md` and a
-  pending `mining` job, but does not run a mining agent during onboarding.
+- transcript discovery writes `.context/kitsoki-session-mining-seed.md`, a
+  pending profile `mining` job, and disabled `.kitsoki.yaml` mining scope, but
+  does not run a mining agent during onboarding.
 
 Add only the remaining tail work:
 
@@ -82,6 +83,8 @@ Add only the remaining tail work:
 - [x] Infer common Go, Rust, Node, Python, Makefile, git, and non-git defaults.
 - [x] Persist associated Claude/Codex transcript discovery as a reviewable seed
   handoff without running live mining.
+- [x] Pre-fill disabled runtime mining scope for the discovered transcript
+  sources.
 - [x] Move shipped behavior into narrative onboarding docs.
 - [ ] Add an operator-controlled, no-live-LLM-tested transcript promotion path.
 - [ ] Add deterministic post-apply readiness verification for profile-declared

@@ -162,6 +162,7 @@ config_text = (repo / ".kitsoki.yaml").read_text(encoding="utf-8") if (repo / ".
 check("valid config project profile", "project_profile: .kitsoki/project-profile.yaml" in config_text)
 check("valid config root import", "root:\n  import: dev-story" in config_text)
 check("valid config no stale default story", "default_story:" not in config_text)
+check("valid config no mining without transcripts", "\nmining:" not in config_text)
 profile_path = repo / ".kitsoki" / "project-profile.yaml"
 check("valid profile write", profile_path.exists())
 try:
@@ -263,6 +264,14 @@ else:
     check("mining seed path reported", mining_report.get("mining_seed_path", "").endswith(".context/kitsoki-session-mining-seed.md"))
 seed_path = repo / ".context" / "kitsoki-session-mining-seed.md"
 check("mining seed note written", seed_path.exists())
+config_path = repo / ".kitsoki.yaml"
+if config_path.exists():
+    config_text = config_path.read_text(encoding="utf-8")
+    check("mining config stays disabled", "enabled: false" in config_text)
+    check("mining config cadence", "cadence: \"30s\"" in config_text)
+    check("mining config sample", "first_pass_sample: 2" in config_text)
+    check("mining config claude scope", "- \"/home/u/.claude/projects/acme\"" in config_text)
+    check("mining config codex scope", "- \"/home/u/.codex/sessions\"" in config_text)
 profile_path = repo / ".kitsoki" / "project-profile.yaml"
 if profile_path.exists():
     profile_text = profile_path.read_text(encoding="utf-8")
@@ -273,6 +282,8 @@ if seed_path.exists():
     seed_text = seed_path.read_text(encoding="utf-8")
     check("mining seed mentions no cost", "no LLM cost" in seed_text)
     check("mining seed lists codex", "codex: 1 sessions" in seed_text)
+    check("mining seed mentions disabled runtime config", "mining.enabled: false" in seed_text)
+    check("mining seed mentions opt in", "/mine resume" in seed_text)
 
 # 8. Sparse LLM-drafted profiles get the generated instance defaults injected
 # before validation and write.
