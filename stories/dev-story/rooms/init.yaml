@@ -2,6 +2,8 @@
 #
 # The flow is deliberately boring and auditable:
 #   landing -> init_discover -> init(review) -> init_apply -> init_done
+#   init_done -> init_readiness -> init_done
+#   init_done -> init_customizations -> init_done
 #
 # Discovery and apply are host.run scripts that emit JSON. Flow fixtures stub
 # both calls, so this remains no-LLM and cost-free in tests. The review room is
@@ -17,6 +19,12 @@ states:
       - init_target_path
       - init_profile_status
       - init_run_output
+      - init_discovery_error
+      - init_transcript_count
+      - init_mining_recommendation
+      - init_repo_vcs
+      - init_repo_default_branch
+      - init_repo_remote
       - workdir
       - repo_root
     view:
@@ -31,6 +39,8 @@ states:
             Status:  "{{ world.init_profile_status }}"
       - prose: "Inspecting local project files to infer commands, stack, and the Kitsoki instance shape."
         when: "world.init_project_id == ''"
+      - prose: "{{ world.init_discovery_error|default:'' }}"
+        when: "world.init_discovery_error != ''"
       - kv:
           pairs:
             Project: "{{ world.init_project_title }}"
@@ -72,6 +82,7 @@ states:
           init_run_ok:        "ok"
           init_run_output:    "stdout"
           init_discovery:     "stdout_json"
+          init_discovery_error: "stdout_json.error"
           init_target_path:   "stdout_json.target_path"
           init_project_id:    "stdout_json.project_id"
           init_project_title: "stdout_json.project_title"
@@ -79,8 +90,14 @@ states:
           init_dev_command:   "stdout_json.dev_command"
           init_test_command:  "stdout_json.test_command"
           init_build_command: "stdout_json.build_command"
+          init_repo_vcs:      "stdout_json.repo_vcs"
+          init_repo_default_branch: "stdout_json.repo_default_branch"
+          init_repo_remote:   "stdout_json.repo_remote"
           init_conventions:   "stdout_json.conventions"
           init_tracker:       "stdout_json.tracker"
+          init_transcript_count:      "stdout_json.transcript_count"
+          init_transcript_sources:    "stdout_json.transcript_sources"
+          init_mining_recommendation: "stdout_json.mining_recommendation"
         on_error: init_discover_failed
     on:
       init_discovered:
@@ -89,6 +106,7 @@ states:
           effects:
             - set:
                 init_profile_status: "draft"
+                init_discovery_error: ""
                 last_error: ""
         - default: true
           target: init_discover_failed
@@ -112,6 +130,7 @@ states:
       - init_target_path
       - init_profile_status
       - init_run_output
+      - init_discovery_error
       - workdir
       - repo_root
     view:
@@ -129,6 +148,10 @@ states:
         when: "world.init_run_output != ''"
       - code: "{{ world.init_run_output }}"
         when: "world.init_run_output != ''"
+      - heading: "Error"
+        when: "world.init_discovery_error != ''"
+      - prose: "{{ world.init_discovery_error|default:'' }}"
+        when: "world.init_discovery_error != ''"
       - choice:
           mode: single
           prompt: "Actions"
@@ -150,6 +173,13 @@ states:
                 init_discovery: {}
                 init_run_ok: false
                 init_run_output: ""
+                init_discovery_error: ""
+                init_repo_vcs: "none"
+                init_repo_default_branch: ""
+                init_repo_remote: ""
+                init_transcript_count: 0
+                init_transcript_sources: []
+                init_mining_recommendation: {}
                 init_profile_status: "discovering"
                 last_error: ""
       quit:
@@ -167,6 +197,7 @@ states:
     relevant_world:
       - init_request
       - init_discovery
+      - init_discovery_error
       - init_target_path
       - init_project_id
       - init_project_title
@@ -174,8 +205,13 @@ states:
       - init_dev_command
       - init_test_command
       - init_build_command
+      - init_repo_vcs
+      - init_repo_default_branch
+      - init_repo_remote
       - init_conventions
       - init_tracker
+      - init_transcript_count
+      - init_mining_recommendation
       - init_profile_status
       - init_feedback
       - workdir
@@ -203,13 +239,33 @@ states:
             Dev server:  "{{ world.init_dev_command|default:'(not yet inferred)' }}"
             Test:        "{{ world.init_test_command|default:'(not yet inferred)' }}"
             Build:       "{{ world.init_build_command|default:'(not yet inferred)' }}"
+      - heading: "Repository"
+      - kv:
+          pairs:
+            VCS:            "{{ world.init_repo_vcs|default:'none' }}"
+            Default branch: "{{ world.init_repo_default_branch|default:'(none)' }}"
+            Remote:         "{{ world.init_repo_remote|default:'(none)' }}"
       - heading: "Setup"
       - kv:
           pairs:
             Conventions: "{{ world.init_conventions }}"
             Tracker:     "{{ world.init_tracker }}"
+            Transcripts: "{{ world.init_transcript_count|default:0 }}"
             Writes:      ".kitsoki.yaml, .kitsoki/project-profile.yaml, .kitsoki/stories/{{ world.init_project_id }}-dev/app.yaml"
             Mode:        "{{ world.init_profile_mode }}"
+      - heading: "Session Mining"
+        when: "world.init_transcript_count > 0"
+      - prose: "{{ world.init_mining_recommendation.note }}"
+        when: "world.init_transcript_count > 0"
+      - kv:
+          pairs:
+            Sample:   "{{ world.init_mining_recommendation.sample }}"
+            Sessions: "{{ world.init_mining_recommendation.transcript_count }}"
+        when: "world.init_transcript_count > 0"
+      - code: |
+          {% for source in world.init_mining_recommendation.sources %}- {{ source.backend }}: {{ source.sessions }} sessions at {{ source.dir }}
+          {% endfor %}
+        when: "world.init_transcript_count > 0"
       - heading: "Profile Validation"
         when: "world.init_profile_validation.ok"
       - kv:
@@ -267,6 +323,14 @@ states:
                 init_apply_result: {}
                 init_apply_ok: false
                 init_apply_output: ""
+                init_readiness_result: {}
+                init_readiness_ok: false
+                init_readiness_output: ""
+                init_customization_result: {}
+                init_customization_ok: false
+                init_customization_output: ""
+                init_customization_action: "promote"
+                init_customization_feedback: ""
                 last_error: ""
       revise_init:
         - target: .
@@ -298,13 +362,20 @@ states:
                 init_discovery: {}
                 init_run_ok: false
                 init_run_output: ""
+                init_discovery_error: ""
                 init_apply_result: {}
                 init_apply_ok: false
                 init_apply_output: ""
+                init_repo_vcs: "none"
+                init_repo_default_branch: ""
+                init_repo_remote: ""
                 init_profile_mode: "deterministic"
                 init_profile_draft: {}
                 init_profile_validation: {}
                 init_profile_json: ""
+                init_transcript_count: 0
+                init_transcript_sources: []
+                init_mining_recommendation: {}
                 init_profile_status: "discovering"
                 last_error: ""
       quit:
@@ -534,8 +605,22 @@ states:
             Profile:  "{{ world.init_apply_result.profile_path|default:'' }}"
             Instance: "{{ world.init_apply_result.instance_path|default:'' }}"
         when: "world.init_apply_result.status == 'applied'"
+      - kv:
+          pairs:
+            Mining seed: "{{ world.init_apply_result.mining_seed_path }}"
+        when: "world.init_apply_result.mining_seed_path != ''"
       - prose: "Installed the kitsoki agent toolkit (skills + subagents) and registered the studio MCP."
         when: "world.init_tools_ok"
+      - kv:
+          pairs:
+            Profile validation: "{{ world.init_apply_result.profile_validation.ok|default:false }}"
+        when: "world.init_apply_result.status == 'applied'"
+      - heading: "Validation Warnings"
+        when: "world.init_apply_result.profile_validation.warnings"
+      - code: |
+          {% for warning in world.init_apply_result.profile_validation.warnings %}- {{ warning }}
+          {% endfor %}
+        when: "world.init_apply_result.profile_validation.warnings"
       - kv:
           pairs:
             MCP: "{{ world.init_tools_result.mcp_path|default:'(pending)' }}"
@@ -578,6 +663,8 @@ states:
             - "{{ world.init_conventions }}"
             - "{{ world.init_tracker }}"
             - "{{ world.init_profile_json }}"
+            - "{{ world.init_mining_recommendation }}"
+          fail_on_error: true
         bind:
           init_apply_ok: "ok"
           init_apply_output: "stdout"
@@ -758,6 +845,14 @@ states:
                 init_tools_result: {}
                 init_tools_ok: false
                 init_tools_output: ""
+                init_readiness_result: {}
+                init_readiness_ok: false
+                init_readiness_output: ""
+                init_customization_result: {}
+                init_customization_ok: false
+                init_customization_output: ""
+                init_customization_action: "promote"
+                init_customization_feedback: ""
                 init_profile_status: "applying"
                 last_error: ""
       init_applied:
@@ -783,6 +878,12 @@ states:
       - init_project_id
       - init_project_title
       - init_profile_status
+      - init_readiness_result
+      - init_readiness_ok
+      - init_readiness_output
+      - init_customization_result
+      - init_customization_ok
+      - init_customization_output
     view:
       - banner:
           text:     "PROJECT ONBOARDING"
@@ -795,19 +896,45 @@ states:
             Status:        "{{ world.init_profile_status }}"
             Config:        "{{ world.init_apply_result.config_path|default:'' }}"
             Profile:       "{{ world.init_apply_result.profile_path|default:'' }}"
+            Profile valid: "{{ world.init_apply_result.profile_validation.ok|default:false }}"
             Instance:      "{{ world.init_apply_result.instance_path|default:'' }}"
             Gitignore:     "{{ world.init_apply_result.gitignore_path|default:'' }}"
+            Readiness:     "{{ world.init_readiness_result.status|default:'not-run' }}"
+            Customizations: "{{ world.init_customization_result.counts.pending|default:0 }} pending"
       - heading: "Writes"
         when: "world.init_apply_result.writes"
       - template: |
           {% for path in world.init_apply_result.writes %}- {{ path }}
           {% endfor %}
         when: "world.init_apply_result.writes"
+      - heading: "Readiness"
+        when: "world.init_readiness_result.status != ''"
+      - kv:
+          pairs:
+            Status: "{{ world.init_readiness_result.status|default:'unknown' }}"
+            Report: "{{ world.init_readiness_result.out|default:'.artifacts/kitsoki-readiness.json' }}"
+        when: "world.init_readiness_result.status != ''"
+      - template: |
+          {% for check in world.init_readiness_result.checks %}- {{ check.id }}: {{ check.status }} — {{ check.detail }}
+          {% endfor %}
+        when: "world.init_readiness_result.checks"
+      - heading: "Mined Customizations"
+        when: "world.init_customization_result.entries"
+      - template: |
+          {% for entry in world.init_customization_result.entries %}- {{ entry.id }}: {{ entry.status }} — {{ entry.summary }}
+          {% endfor %}
+        when: "world.init_customization_result.entries"
       - heading: "Actions"
       - choice:
           mode: single
           prompt: ""
           items:
+            - label:  "customizations"
+              hint:   "promote and review session-mined project customizations"
+              intent: review_customizations
+            - label:  "readiness"
+              hint:   "run declared post-apply checks and update the profile readiness summary"
+              intent: run_readiness
             - label:  "workbench"
               hint:   "return to the dev-story workbench"
               intent: go_main
@@ -815,11 +942,279 @@ states:
               hint:   "re-render"
               intent: look
     on:
+      review_customizations:
+        - target: init_customizations
+          effects:
+            - set:
+                init_customization_result: {}
+                init_customization_ok: false
+                init_customization_output: ""
+                init_customization_action: "promote"
+                init_customization_feedback: ""
+                init_profile_status: "reviewing-customizations"
+                last_error: ""
+      run_readiness:
+        - target: init_readiness
+          effects:
+            - set:
+                init_readiness_result: {}
+                init_readiness_ok: false
+                init_readiness_output: ""
+                init_profile_status: "checking-readiness"
+                last_error: ""
       go_main:
         - target: landing
           effects:
             - set:
                 prev_state: "init_done"
                 last_error: "project onboarding complete"
+      look:
+        - target: .
+
+  init_customizations:
+    description: "Review session-mined project customizations after onboarding."
+    relevant_world:
+      - init_target_path
+      - init_project_title
+      - init_profile_status
+      - init_customization_result
+      - init_customization_ok
+      - init_customization_output
+      - init_customization_action
+      - init_customization_feedback
+    view:
+      - banner:
+          text:     "PROJECT ONBOARDING"
+          subtitle: "customization review"
+          color:    "#A855F7"
+      - prose: "Promoting emitted session-mining reports into pending profile customizations for operator review."
+        when: "world.init_customization_result.action == ''"
+      - kv:
+          pairs:
+            Target: "{{ world.init_target_path }}"
+            Project: "{{ world.init_project_title }}"
+            Action: "{{ world.init_customization_result.action|default:world.init_customization_action }}"
+            Pending: "{{ world.init_customization_result.counts.pending|default:0 }}"
+            Accepted: "{{ world.init_customization_result.counts.accepted|default:0 }}"
+            Needs refinement: "{{ world.init_customization_result.counts.needs_refinement|default:0 }}"
+      - heading: "Entries"
+        when: "world.init_customization_result.entries"
+      - template: |
+          {% for entry in world.init_customization_result.entries %}- {{ entry.id }}: {{ entry.status }} — {{ entry.summary }}
+            evidence: {{ entry.evidence }}
+          {% endfor %}
+        when: "world.init_customization_result.entries"
+      - heading: "Changed"
+        when: "world.init_customization_result.changed"
+      - template: |
+          {% for entry in world.init_customization_result.changed %}- {{ entry.id }}: {{ entry.status }} — {{ entry.summary }}
+          {% endfor %}
+        when: "world.init_customization_result.changed"
+      - heading: "Feedback"
+        when: "world.init_customization_feedback != ''"
+      - prose: "{{ world.init_customization_feedback }}"
+        when: "world.init_customization_feedback != ''"
+      - heading: "Output"
+        when: "world.init_customization_output != ''"
+      - code: "{{ world.init_customization_output|default:'' }}"
+        when: "world.init_customization_output != ''"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "accept"
+              hint:   "mark pending customizations accepted in the profile"
+              intent: accept_customizations
+            - label:  "refine"
+              hint:   "record feedback on pending customizations"
+              intent: refine_customizations
+              param:
+                slot: feedback
+                type: string
+                placeholder: "what should change"
+                required: true
+            - label:  "refresh"
+              hint:   "promote newly emitted mining reports"
+              intent: review_customizations
+            - label:  "continue"
+              hint:   "return to the applied onboarding result"
+              intent: customizations_reviewed
+            - label:  "workbench"
+              hint:   "return to the dev-story workbench"
+              intent: go_main
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    on_enter:
+      - invoke: host.run
+        once: true
+        id: customizations
+        with:
+          cmd: bash
+          cwd: "{{ world.init_target_path }}"
+          args:
+            - "-lc"
+            - |
+              if [ ! -f .kitsoki/promote-session-mining.py ]; then
+                printf '{"action":"missing-helper","entries":[],"changed":[],"counts":{},"updated":false,"error":".kitsoki/promote-session-mining.py was not found"}\n'
+                exit 0
+              fi
+              case "$1" in
+                accept)
+                  python3 .kitsoki/promote-session-mining.py --accept-pending --json
+                  ;;
+                refine)
+                  python3 .kitsoki/promote-session-mining.py --refine-pending "$2" --json
+                  ;;
+                list)
+                  python3 .kitsoki/promote-session-mining.py --list --json
+                  ;;
+                *)
+                  python3 .kitsoki/promote-session-mining.py --json
+                  ;;
+              esac
+            - "customizations"
+            - "{{ world.init_customization_action }}"
+            - "{{ world.init_customization_feedback }}"
+          timeout: "2m"
+        bind:
+          init_customization_ok: "ok"
+          init_customization_output: "stdout"
+          init_customization_result: "stdout_json"
+    on:
+      accept_customizations:
+        - target: .
+          effects:
+            - set:
+                init_customization_result: {}
+                init_customization_ok: false
+                init_customization_output: ""
+                init_customization_action: "accept"
+                init_customization_feedback: ""
+                last_error: ""
+      refine_customizations:
+        - target: .
+          effects:
+            - set:
+                init_customization_result: {}
+                init_customization_ok: false
+                init_customization_output: ""
+                init_customization_action: "refine"
+                init_customization_feedback: "{{ slots.feedback }}"
+                last_error: ""
+      review_customizations:
+        - target: .
+          effects:
+            - set:
+                init_customization_result: {}
+                init_customization_ok: false
+                init_customization_output: ""
+                init_customization_action: "promote"
+                init_customization_feedback: ""
+                last_error: ""
+      customizations_reviewed:
+        - target: init_done
+          effects:
+            - set:
+                init_profile_status: "{{ world.init_apply_result.status ?? 'applied' }}"
+                last_error: ""
+      go_main:
+        - target: landing
+          effects:
+            - set:
+                prev_state: "init_customizations"
+                last_error: "project onboarding customizations reviewed"
+      look:
+        - target: .
+
+  init_readiness:
+    description: "Run the generated post-apply readiness verifier for an onboarded target."
+    relevant_world:
+      - init_target_path
+      - init_project_title
+      - init_profile_status
+      - init_readiness_result
+      - init_readiness_ok
+      - init_readiness_output
+    view:
+      - banner:
+          text:     "PROJECT ONBOARDING"
+          subtitle: "readiness check"
+          color:    "#0EA5E9"
+      - prose: "Running the generated readiness verifier against the target checkout. Project command failures are captured as report data."
+        when: "world.init_readiness_result.status == ''"
+      - kv:
+          pairs:
+            Target: "{{ world.init_target_path }}"
+            Project: "{{ world.init_project_title }}"
+            Status: "{{ world.init_readiness_result.status|default:world.init_profile_status }}"
+            Report: "{{ world.init_readiness_result.out|default:'.artifacts/kitsoki-readiness.json' }}"
+      - heading: "Checks"
+        when: "world.init_readiness_result.checks"
+      - template: |
+          {% for check in world.init_readiness_result.checks %}- {{ check.id }}: {{ check.status }} — {{ check.detail }}
+          {% endfor %}
+        when: "world.init_readiness_result.checks"
+      - heading: "Output"
+        when: "world.init_readiness_output != ''"
+      - code: "{{ world.init_readiness_output|default:'' }}"
+        when: "world.init_readiness_output != ''"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label:  "continue"
+              hint:   "return to the applied onboarding result"
+              intent: readiness_checked
+            - label:  "retry"
+              hint:   "rerun readiness checks"
+              intent: run_readiness
+            - label:  "workbench"
+              hint:   "return to the dev-story workbench"
+              intent: go_main
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    on_enter:
+      - invoke: host.run
+        once: true
+        id: readiness
+        with:
+          cmd: bash
+          cwd: "{{ world.init_target_path }}"
+          args:
+            - "-lc"
+            - |
+              if [ ! -f .kitsoki/check-readiness.py ]; then
+                printf '{"schema":"kitsoki-readiness/v1","status":"error","out":".artifacts/kitsoki-readiness.json","checks":[{"id":"readiness-script","status":"fail","detail":".kitsoki/check-readiness.py was not found"}]}\n'
+                exit 0
+              fi
+              python3 .kitsoki/check-readiness.py --json --update-profile
+          timeout: "10m"
+        bind:
+          init_readiness_ok: "ok"
+          init_readiness_output: "stdout"
+          init_readiness_result: "stdout_json"
+    on:
+      readiness_checked:
+        - target: init_done
+          effects:
+            - set:
+                init_profile_status: "{{ world.init_apply_result.status ?? 'applied' }}"
+                last_error: ""
+      run_readiness:
+        - target: .
+          effects:
+            - set:
+                init_readiness_result: {}
+                init_readiness_ok: false
+                init_readiness_output: ""
+                last_error: ""
+      go_main:
+        - target: landing
+          effects:
+            - set:
+                prev_state: "init_readiness"
+                last_error: "project onboarding readiness checked"
       look:
         - target: .

@@ -40,6 +40,19 @@ dev_story_profile:
     build_cmd: "make build"
     test_cmd: "make test"
 onboarding:
+  base_story: dev-story
+  base_story_title: Dev-story project workflow
+  base_story_reason: Default starter for a normal Rust project.
+  repo_patterns:
+    - id: toolchain
+      source: repo-files
+      evidence: Cargo.toml and Makefile were detected.
+      recommendation: Reuse make build/test as dev-story gates.
+  story_customizations:
+    - id: toolchain-gates
+      status: applied
+      summary: Project build/test commands are projected into dev-story.
+      evidence: "build=make build; test=make test"
   baseline_commit: d8513b0
   deterministic_flow: stories/dev-story/flows/init_rust_project.yaml
   recording_policy: gated-live-allowed

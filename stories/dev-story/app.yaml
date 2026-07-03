@@ -609,6 +609,7 @@ world:
   # profile for review, then apply the config only after explicit accept.
   init_request:          { type: string, default: "" }
   init_discovery:        { type: object, default: {} }
+  init_discovery_error:  { type: string, default: "" }
   init_run_ok:           { type: bool, default: false }
   init_run_output:       { type: string, default: "" }
   init_target_path:      { type: string, default: "" }
@@ -618,8 +619,14 @@ world:
   init_dev_command:      { type: string, default: "" }
   init_test_command:     { type: string, default: "" }
   init_build_command:    { type: string, default: "" }
+  init_repo_vcs:         { type: string, default: "none" }
+  init_repo_default_branch: { type: string, default: "" }
+  init_repo_remote:      { type: string, default: "" }
   init_conventions:      { type: string, default: "hybrid" }
   init_tracker:          { type: string, default: "none" }
+  init_transcript_count: { type: int, default: 0 }
+  init_transcript_sources: { type: list, default: [] }
+  init_mining_recommendation: { type: object, default: {} }
   init_profile_status:   { type: string, default: "draft" }
   init_feedback:         { type: string, default: "" }
   init_apply_result:     { type: object, default: {} }
@@ -628,6 +635,14 @@ world:
   init_tools_result:     { type: object, default: {} }
   init_tools_ok:         { type: bool, default: false }
   init_tools_output:     { type: string, default: "" }
+  init_readiness_result: { type: object, default: {} }
+  init_readiness_ok:     { type: bool, default: false }
+  init_readiness_output: { type: string, default: "" }
+  init_customization_result: { type: object, default: {} }
+  init_customization_ok:     { type: bool, default: false }
+  init_customization_output: { type: string, default: "" }
+  init_customization_action: { type: string, default: "promote" }
+  init_customization_feedback: { type: string, default: "" }
   init_profile_mode:     { type: string, default: "deterministic" }
   init_profile_draft:    { type: object, default: {} }
   init_profile_validation: { type: object, default: {} }
@@ -1049,6 +1064,39 @@ intents:
     priority: 1
   init_applied:
     description: "(internal) onboarding apply completed — show the result."
+    examples: []
+    priority: 1
+  run_readiness:
+    title: "Run Onboarding Readiness"
+    description: "Run the generated post-apply readiness verifier and update the project profile with the result."
+    examples: ["run readiness", "verify onboarding", "check onboarding"]
+    priority: 45
+  readiness_checked:
+    description: "(internal) onboarding readiness verifier completed — show the applied result."
+    examples: []
+    priority: 1
+  review_customizations:
+    title: "Review Mined Customizations"
+    description: "Promote emitted session-mining reports and review pending project customizations."
+    examples: ["review customizations", "review mined customizations", "check session mining proposals"]
+    priority: 44
+  accept_customizations:
+    title: "Accept Mined Customizations"
+    description: "Mark pending session-mined project customizations accepted."
+    examples: ["accept customizations", "accept mined customizations"]
+    priority: 44
+  refine_customizations:
+    title: "Refine Mined Customizations"
+    description: "Record feedback on pending session-mined project customizations."
+    examples: ["refine customizations", "revise mined customizations"]
+    priority: 44
+    slots:
+      feedback:
+        type: string
+        required: true
+        description: "What should change before accepting the mined customizations."
+  customizations_reviewed:
+    description: "(internal) mined customization review completed — show the applied result."
     examples: []
     priority: 1
 

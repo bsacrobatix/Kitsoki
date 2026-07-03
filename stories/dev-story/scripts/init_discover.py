@@ -7,8 +7,12 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from init_transcripts import transcript_evidence, transcript_slug  # noqa: E402
 
 
 def slug(value: str) -> str:
@@ -68,11 +72,61 @@ def read_package(path: Path) -> dict:
         return {}
 
 
+def read_pyproject(path: Path) -> dict:
+    pyproject = path / "pyproject.toml"
+    if not pyproject.exists():
+        return {}
+    try:
+        text = pyproject.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    name = ""
+    in_project = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_project = stripped == "[project]"
+            continue
+        if in_project:
+            match = re.match(r"name\s*=\s*[\"']([^\"']+)[\"']", stripped)
+            if match:
+                name = match.group(1)
+                break
+    return {"name": name, "text": text}
+
+
 def command_from_scripts(package: dict, name: str) -> str:
+    return command_from_scripts_with_manager(package, name, "npm")
+
+
+def command_from_scripts_with_manager(package: dict, name: str, manager: str) -> str:
     scripts = package.get("scripts") if isinstance(package, dict) else {}
     if isinstance(scripts, dict) and scripts.get(name):
-        return f"npm run {name}" if name != "test" else "npm test"
+        if manager == "npm":
+            return f"npm run {name}" if name != "test" else "npm test"
+        if manager == "pnpm":
+            return f"pnpm run {name}" if name != "test" else "pnpm test"
+        if manager == "yarn":
+            return f"yarn {name}"
+        if manager == "bun":
+            return f"bun run {name}"
+        return f"{manager} run {name}"
     return ""
+
+
+def node_package_manager(path: Path, package: dict) -> str:
+    package_manager = package.get("packageManager") if isinstance(package.get("packageManager"), str) else ""
+    if package_manager:
+        name = package_manager.split("@", 1)[0].strip().lower()
+        if name in {"npm", "pnpm", "yarn", "bun"}:
+            return name
+    if (path / "pnpm-lock.yaml").exists():
+        return "pnpm"
+    if (path / "yarn.lock").exists():
+        return "yarn"
+    if (path / "bun.lock").exists() or (path / "bun.lockb").exists():
+        return "bun"
+    return "npm"
 
 
 def make_targets(path: Path) -> set[str]:
@@ -91,16 +145,93 @@ def make_targets(path: Path) -> set[str]:
     return targets
 
 
+def git_output(path: Path, *args: str) -> str:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(path), *args],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, ValueError):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout.strip()
+
+
+def git_info(path: Path) -> dict:
+    inside = git_output(path, "rev-parse", "--is-inside-work-tree")
+    if inside != "true":
+        return {"vcs": "none", "default_branch": "", "remote": ""}
+    remote = git_output(path, "config", "--get", "remote.origin.url")
+    default_branch = git_output(path, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    if default_branch.startswith("origin/"):
+        default_branch = default_branch.split("/", 1)[1]
+    if not default_branch:
+        default_branch = git_output(path, "symbolic-ref", "--quiet", "--short", "HEAD")
+    if not default_branch:
+        for candidate in ("main", "master"):
+            if git_output(path, "show-ref", "--verify", f"refs/heads/{candidate}"):
+                default_branch = candidate
+                break
+    return {"vcs": "git", "default_branch": default_branch or "main", "remote": remote}
+
+
+def invalid_discovery(path: Path, error: str) -> dict:
+    transcripts = transcript_evidence(path)
+    return {
+        "target_path": str(path),
+        "project_id": "",
+        "project_title": "",
+        "stack": "",
+        "dev_command": "",
+        "test_command": "",
+        "build_command": "",
+        "node_package_manager": "",
+        "repo_vcs": "none",
+        "repo_default_branch": "",
+        "repo_remote": "",
+        "conventions": "local defaults",
+        "tracker": "none",
+        "transcript_slug": transcripts["slug"],
+        "transcript_count": transcripts["count"],
+        "transcript_sources": transcripts["sources"],
+        "mining_recommendation": transcripts["mining"],
+        "error": error,
+    }
+
+
 def discover(path: Path) -> dict:
+    if not path.exists():
+        return invalid_discovery(path, "target path does not exist")
+    if not path.is_dir():
+        return invalid_discovery(path, "target path is not a directory")
+
     package = read_package(path)
     package_name = package.get("name") if isinstance(package.get("name"), str) else ""
-    project_id = slug(package_name or path.name)
+    pyproject = read_pyproject(path)
+    pyproject_name = pyproject.get("name") if isinstance(pyproject.get("name"), str) else ""
+    project_id = slug(package_name or pyproject_name or path.name)
+    node_manager = node_package_manager(path, package) if package else ""
     targets = make_targets(path)
     deps = {}
     for key in ("dependencies", "devDependencies"):
         value = package.get(key)
         if isinstance(value, dict):
             deps.update(value)
+    py_text = (pyproject.get("text") or "").lower()
+    requirements = path / "requirements.txt"
+    if requirements.exists():
+        try:
+            py_text += "\n" + requirements.read_text(encoding="utf-8").lower()
+        except OSError:
+            pass
+    python_project = any(
+        (path / marker).exists()
+        for marker in ("pyproject.toml", "requirements.txt", "setup.py", "setup.cfg", "Pipfile", "poetry.lock", "uv.lock")
+    )
 
     if project_id == "slidey":
         stack = "node/vue/vite/puppeteer declarative deck engine with web, html, pdf, and mp4 outputs"
@@ -117,12 +248,18 @@ def discover(path: Path) -> dict:
         stack = "go project"
     elif (path / "Cargo.toml").exists():
         stack = "rust project"
+    elif python_project:
+        stack_bits = ["python"]
+        for name in ("django", "fastapi", "flask"):
+            if name in py_text:
+                stack_bits.append(name)
+        stack = "/".join(stack_bits) + " project"
     else:
         stack = "local project"
 
-    dev_command = command_from_scripts(package, "dev")
-    test_command = command_from_scripts(package, "test")
-    build_command = command_from_scripts(package, "build")
+    dev_command = command_from_scripts_with_manager(package, "dev", node_manager or "npm")
+    test_command = command_from_scripts_with_manager(package, "test", node_manager or "npm")
+    build_command = command_from_scripts_with_manager(package, "build", node_manager or "npm")
     if project_id == "slidey" and (path / "src" / "index.js").exists():
         examples = list((path / "examples").glob("*.slidey.json")) if (path / "examples").exists() else []
         example = "examples/hello.slidey.json" if (path / "examples" / "hello.slidey.json").exists() else ""
@@ -148,7 +285,25 @@ def discover(path: Path) -> dict:
             dev_command = "make dev"
         elif "run" in targets:
             dev_command = "make run"
+    elif python_project:
+        build_command = "make build" if "build" in targets else ""
+        if "test" in targets:
+            test_command = "make test"
+        elif (path / "tox.ini").exists():
+            test_command = "tox"
+        elif (path / "pytest.ini").exists() or (path / "tests").exists() or "pytest" in py_text:
+            test_command = "python -m pytest"
+        if "dev" in targets:
+            dev_command = "make dev"
+        elif "run" in targets:
+            dev_command = "make run"
+        elif "fastapi" in py_text or "uvicorn" in py_text:
+            dev_command = "uvicorn app:app --reload"
+        elif "flask" in py_text:
+            dev_command = "flask run"
 
+    transcripts = transcript_evidence(path)
+    repo = git_info(path)
     return {
         "target_path": str(path),
         "project_id": project_id,
@@ -157,8 +312,16 @@ def discover(path: Path) -> dict:
         "dev_command": dev_command,
         "test_command": test_command,
         "build_command": build_command,
+        "node_package_manager": node_manager,
+        "repo_vcs": repo["vcs"],
+        "repo_default_branch": repo["default_branch"],
+        "repo_remote": repo["remote"],
         "conventions": "hybrid" if project_id == "slidey" or (path / "AGENTS.md").exists() or (path / "CLAUDE.md").exists() else "local defaults",
         "tracker": "none",
+        "transcript_slug": transcripts["slug"],
+        "transcript_count": transcripts["count"],
+        "transcript_sources": transcripts["sources"],
+        "mining_recommendation": transcripts["mining"],
     }
 
 

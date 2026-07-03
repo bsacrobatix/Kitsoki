@@ -110,6 +110,67 @@ states:
 	}
 }
 
+// TestImports_RebasesStarlarkScriptPath proves an imported child's
+// host.starlark.run script is resolved from the child story directory. This is
+// the Starlark counterpart to prompt/schema rebasing: generated project-owned
+// dev-story instances import @kitsoki/dev-story, whose rooms reference
+// scripts/*.star. Those scripts live with the imported story, not the thin
+// project instance.
+func TestImports_RebasesStarlarkScriptPath(t *testing.T) {
+	root := t.TempDir()
+	parentDir := filepath.Join(root, "parent")
+	childDir := filepath.Join(root, "child")
+	mustMkdirAll(t, parentDir)
+	mustMkdirAll(t, filepath.Join(childDir, "scripts"))
+
+	mustWriteFile(t, filepath.Join(parentDir, "app.yaml"), `
+app: {id: parent, title: parent}
+root: sub
+hosts: [host.starlark.run]
+imports:
+  sub:
+    source: ../child
+    entry: start
+    hosts: declared
+`)
+	mustWriteFile(t, filepath.Join(childDir, "app.yaml"), `
+app: {id: child, title: child}
+root: start
+hosts: [host.starlark.run]
+states:
+  start:
+    view: child
+    on_enter:
+      - invoke: host.starlark.run
+        with:
+          script: scripts/derive.star
+        bind:
+          result: result
+world:
+  result: {type: string, default: ""}
+`)
+	mustWriteFile(t, filepath.Join(childDir, "scripts", "derive.star"), `
+def main(ctx):
+    return {"result": "ok"}
+`)
+	mustWriteFile(t, filepath.Join(childDir, "scripts", "derive.star.yaml"), `
+inputs: {}
+outputs:
+  result: {type: string}
+`)
+
+	def, err := Load(filepath.Join(parentDir, "app.yaml"))
+	if err != nil {
+		t.Fatalf("Load imported Starlark app: %v", err)
+	}
+	start := def.States["sub"].States["start"]
+	got := start.OnEnter[0].With["script"].(string)
+	want := filepath.Join(childDir, "scripts", "derive.star")
+	if got != want {
+		t.Fatalf("starlark script = %q, want child story path %q", got, want)
+	}
+}
+
 // TestImports_TransitiveRebaseNoDoublePrefix is the regression for the live
 // dogfood bug (#32): a grandchild's prompt path was double-prefixed across two
 // import levels — `gp/stories/parent/stories/child/prompts/...` instead of

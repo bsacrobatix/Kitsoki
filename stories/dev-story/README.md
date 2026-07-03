@@ -105,6 +105,12 @@ The profile is the "External-target profile" world block in
 a default that reproduces kitsoki's own behaviour — **overriding them is
 the profile**:
 
+Project-onboarding generated instances override these shared defaults for
+generic repositories: PRDs go to `.context/prd`, design documents go to
+`.context/designs`, `design_template_dir` is empty, and no feature ticket is
+minted unless the local profile opts in. Dogfood profiles can still keep
+repo-native docs paths such as `docs/prd` and `docs/proposals`.
+
 | World key | Default | Effect |
 |---|---|---|
 | `repo_root` | `""` | external checkout root (forward-compat; ticket passthrough is the deferred gh-adapter slice) |

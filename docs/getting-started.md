@@ -93,8 +93,16 @@ Or run the whole Go suite (finishes in under ~10s):
 make test
 ```
 
-**c. Launch an example app.** `kitsoki run` opens the TUI — transcript
-pane, action menu, inbox:
+**c. Launch the default project root.** `kitsoki run` opens the TUI —
+transcript pane, action menu, inbox:
+
+```sh
+kitsoki run
+```
+
+With no app path, Kitsoki starts the embedded dev-story root for the current
+project. Type `onboard .` to create a project-local `.kitsoki/` instance, or
+run a fixture app explicitly while exploring:
 
 ```sh
 kitsoki run testdata/apps/cloak/app.yaml
