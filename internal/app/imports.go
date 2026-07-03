@@ -637,7 +637,19 @@ func foldChild(parent *AppDef, alias string, imp *ImportDef, child *AppDef, file
 		// rest are read-only metadata.
 		clone := *src
 		if handler, ok := imp.HostBindings[ifaceName]; ok {
+			// Explicit prefixed override wins (e.g. host_bindings:
+			// { bf__ticket: host.X }).
 			clone.Default = handler
+		} else if terminal := ifaceTerminalName(ifaceName); terminal != ifaceName {
+			// Base-name fallback: a binding keyed on the terminal
+			// capability name (e.g. `ticket: host.gh.ticket`) cascades
+			// to every transitively-lifted `*__ticket` iface that has no
+			// explicit prefixed override. This is what lets an instance
+			// rebind a capability once and have it apply across
+			// all nested folds. See bug 44.
+			if handler, ok := imp.HostBindings[terminal]; ok {
+				clone.Default = handler
+			}
 		}
 		parent.HostInterfaces[newName] = &clone
 	}
