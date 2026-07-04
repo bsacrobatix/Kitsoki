@@ -403,7 +403,7 @@ changes:
     kind: docs
     pipeline: implementation
     depends_on: ["WM.0"]
-    scope: ["docs/schemas/decomposition-graph.schema.json", "docs/architecture/decomposition-graph.md", "tools/validate-decomposition-graph.py"]
+    scope: ["docs/schemas/decomposition-graph.schema.json", "docs/architecture/decomposition-graph.md", "tools/validate-decomposition-graph.py", "stories/deliver/testdata/two_briefs*.yaml"]
     acceptance:
       - "the decomposition node schema (id/wall/goal_ref/gate{class,red_now,green_when,cmd|replay_cmd}/scope/depends_on/acceptance/agent_brief) is a versioned, JSON-Schema-pinned artifact that BOTH goal.py's lint AND stories/deliver|decompose's decomposition lint validate against — one schema, two consumers (unification proven by a shared CONTRACT, not a shared runtime)"
       - "docs/architecture/decomposition-graph.md names the two-graph model ONCE (acyclic depends_on DAG + cyclic process graph + goal_ref traceability edges) and reserves but EXPLICITLY DEFERS impact-analysis/dirty-edges (supersedes/dirtied_by), artifact-versioning, and the decompose/story-forge/dynamic-workflow runtime unification to named follow-on proposals — no build"
@@ -411,8 +411,8 @@ changes:
     gate:
       class: G-LINT
       red_now: "the decomposition shape is duplicated across goal.py, work-decomposition.json, and deliver with no shared schema; the two-graph model is described only in .context/ transients"
-      green_when: "the shared schema validates both manifests and the architecture doc exists with the deferrals stated"
-      cmd: "python3 tools/validate-decomposition-graph.py docs/goals/generalized-usage/decomposition.yaml stories/deliver/testdata/two_briefs.yaml && test -f docs/architecture/decomposition-graph.md"
+      green_when: "the shared schema validates both manifests, rejects a deliberate cyclic manifest, and the architecture doc exists with the deferrals stated"
+      cmd: "python3 tools/validate-decomposition-graph.py docs/goals/generalized-usage/decomposition.yaml stories/deliver/testdata/two_briefs.yaml && ! python3 tools/validate-decomposition-graph.py stories/deliver/testdata/two_briefs_cycle.yaml && test -f docs/architecture/decomposition-graph.md"
     agent_brief: >
       Make the decomposition-graph SHAPE first-class WITHOUT building a new runtime.
       (1) Pin a versioned JSON-Schema for the change-node (the fields goal.py lints +
