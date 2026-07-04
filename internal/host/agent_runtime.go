@@ -183,10 +183,13 @@ func appendAgentRuntimeStartEvent(ctx context.Context, callID string, policy age
 
 func appendAgentRuntimeEndEvent(ctx context.Context, callID string, policy agentruntime.AppliedPolicy, res agentruntime.Result, err error) {
 	payload := map[string]any{
-		"backend":     policy.Backend,
-		"strength":    policy.Strength,
-		"exit_code":   res.ExitCode,
-		"killed":      res.Killed,
+		"backend":   policy.Backend,
+		"strength":  policy.Strength,
+		"exit_code": res.ExitCode,
+		"killed":    res.Killed,
+		"resources": map[string]any{
+			"usage_unavailable": true,
+		},
 		"duration_ms": res.Duration.Milliseconds(),
 	}
 	if res.FinalDiff != "" {

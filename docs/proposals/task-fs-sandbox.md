@@ -354,7 +354,7 @@ should remain pragmatic and visible rather than surprising.
 ## Phase 5 — Adopt and prove
 - [x] 5.1 Adopt `sandbox:` in a high-risk write-agent path such as design
         authoring or implementation worktrees.
-- [ ] 5.2 Add flow fixtures with fake agents proving denied repo writes and
+- [x] 5.2 Add flow fixtures with fake agents proving denied repo writes and
         accepted workspace writes.
 - [ ] 5.3 Run one explicitly requested live e2e only after the no-LLM gates pass.
 
