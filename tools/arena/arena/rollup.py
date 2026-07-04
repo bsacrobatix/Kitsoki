@@ -1,83 +1,47 @@
-"""Job-type-agnostic rollup: aggregate CellResults into a leaderboard.
+"""Arena's rollup — a thin delegating shim over the shared reporting module.
 
-Buckets results by variant, by target, and by job_type (mirrors bakeoff's
-by_candidate / by_treatment and product-journey's per-target/persona rollup).
-Deterministic, no LLM. A later phase swaps the markdown for a Slidey deck via the
-existing product-journey rollup deck builder.
+The bucket/build_rollup/write_rollup logic used to live here as a private copy
+that mirrored product-journey's own rollup implementation without importing
+it — two rollup brains drifting independently. It has been extracted to
+`tools/persona_qa/reporting.py` as the single shared implementation
+(generalized over completion-state-shaped records for both the bugfix and
+persona-qa shapes); this module now only adapts arena's call sites to it,
+keeping arena's title ("Arena rollup") and default axes for byte-compatible
+output. See tools/persona_qa/tests/test_shared_rollup.py for the golden test
+proving that byte-compatibility.
 """
 
 from __future__ import annotations
 
-import json
-from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+import sys
+
+# tools/arena/arena/rollup.py -> parents[3] is the repo root, where
+# tools/persona_qa lives as a sibling package to tools/arena.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from tools.persona_qa.reporting import build_rollup as _shared_build_rollup  # noqa: E402
+from tools.persona_qa.reporting import write_rollup as _shared_write_rollup  # noqa: E402
+from tools.persona_qa.reporting import _markdown as _shared_markdown  # noqa: E402
+
 from .model import CellResult
 
-_SOLVED = {"solved", "armed"}   # "armed" is the no-LLM skeleton's success state
-
-
-def _bucket(results: list[CellResult]) -> dict[str, Any]:
-    n = len(results)
-    counts: dict[str, int] = defaultdict(int)
-    for r in results:
-        counts[r.verdict] += 1
-    costs = [r.metrics.get("cost_usd") for r in results if isinstance(r.metrics.get("cost_usd"), (int, float))]
-    won = sum(1 for r in results if r.verdict in _SOLVED)
-    infra = sum(1 for r in results if r.health.startswith("infra:"))
-    return {
-        "n": n,
-        "verdicts": dict(counts),
-        "win_rate": round(won / n, 4) if n else None,
-        "infra_failures": infra,
-        "avg_cost_usd": round(sum(costs) / len(costs), 6) if costs else None,
-    }
-
-
-def _group(results: list[CellResult], key) -> dict[str, Any]:
-    groups: dict[str, list[CellResult]] = defaultdict(list)
-    for r in results:
-        groups[key(r)].append(r)
-    return {name: _bucket(rs) for name, rs in sorted(groups.items())}
+_TITLE = "Arena rollup"
 
 
 def build_rollup(results: list[CellResult]) -> dict[str, Any]:
-    return {
-        "summary": _bucket(results),
-        "by_variant": _group(results, lambda r: r.variant_id),
-        "by_target": _group(results, lambda r: r.target_id),
-        "by_job_type": _group(results, lambda r: r.job_type),
-        "cells": [r.to_dict() for r in results],
-    }
+    return _shared_build_rollup(results)
 
 
 def write_rollup(results: list[CellResult], out_dir: str | Path) -> dict[str, str]:
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    rollup = build_rollup(results)
-    (out / "rollup.json").write_text(json.dumps(rollup, indent=2, sort_keys=True), encoding="utf-8")
-    (out / "rollup.md").write_text(_markdown(rollup), encoding="utf-8")
-    return {"rollup": str(out / "rollup.json"), "summary": str(out / "rollup.md")}
+    return _shared_write_rollup(results, out_dir, title=_TITLE)
 
 
 def _markdown(rollup: dict[str, Any]) -> str:
-    s = rollup["summary"]
-    lines = [
-        "# Arena rollup",
-        "",
-        f"- cells: **{s['n']}**  · win-rate: **{s['win_rate']}**  · infra failures: {s['infra_failures']}",
-        "",
-        "## By variant",
-        "",
-        "| variant | n | win-rate | avg cost | verdicts |",
-        "|---|---|---|---|---|",
-    ]
-    for name, b in rollup["by_variant"].items():
-        cost = "—" if b["avg_cost_usd"] is None else f"${b['avg_cost_usd']:.4f}"
-        lines.append(f"| {name} | {b['n']} | {b['win_rate']} | {cost} | {b['verdicts']} |")
-    lines += ["", "## By target", "", "| target | n | win-rate | verdicts |", "|---|---|---|---|"]
-    for name, b in rollup["by_target"].items():
-        lines.append(f"| {name} | {b['n']} | {b['win_rate']} | {b['verdicts']} |")
-    lines.append("")
-    return "\n".join(lines)
+    # Kept for any existing direct callers/tests of arena's private markdown
+    # helper; delegates to the shared renderer with arena's title.
+    return _shared_markdown(rollup, title=_TITLE)
