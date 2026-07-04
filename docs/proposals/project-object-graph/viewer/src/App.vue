@@ -7,14 +7,8 @@ type EdgeValue = string | string[] | null | undefined;
 
 interface TypeDef {
   id: string;
-  schema: string;
   derives_from: string | null;
   summary: string;
-  edge_fields?: Array<{
-    id: string;
-    target_type: string;
-    cardinality: string;
-  }>;
 }
 
 interface GraphNode {
@@ -25,12 +19,15 @@ interface GraphNode {
   visibility: string;
   summary?: string;
   statement?: string;
+  rationale?: string;
   desired_outcome?: string;
+  trigger?: string;
   goal?: string;
   evidence_kind?: string;
   proposal_kind?: string;
   implementation_kind?: string;
   executor?: string;
+  actor?: string;
   sources?: string[];
   edges?: Record<string, EdgeValue>;
 }
@@ -51,73 +48,66 @@ interface SeedCatalog {
 
 const data = parse(seedYaml) as SeedCatalog;
 const selectedId = ref("feature-project-object-graph");
-const filterText = ref("");
-const activeType = ref("all");
+const query = ref("");
+const selectedFamily = ref("all");
 
 const nodeById = computed(() => new Map(data.nodes.map((node) => [node.id, node])));
+const typeById = computed(() => new Map(data.type_registry.map((type) => [type.id, type])));
 const sourceById = computed(
   () => new Map(data.catalog.source_window.inputs.map((source) => [source.id, source])),
 );
-const typeById = computed(() => new Map(data.type_registry.map((type) => [type.id, type])));
 
-const typeCounts = computed(() => {
+const selectedNode = computed(() => nodeById.value.get(selectedId.value) ?? data.nodes[0]);
+const selectedType = computed(() => typeById.value.get(nodeType(selectedNode.value)));
+
+const families = computed(() => {
   const counts = new Map<string, number>();
-  for (const node of data.nodes) {
-    counts.set(nodeType(node), (counts.get(nodeType(node)) ?? 0) + 1);
-  }
-  return counts;
+  for (const node of data.nodes) counts.set(nodeType(node), (counts.get(nodeType(node)) ?? 0) + 1);
+  return [...counts.entries()]
+    .sort(([a], [b]) => familyOrder(a) - familyOrder(b) || a.localeCompare(b))
+    .map(([id, count]) => ({ id, label: typeLabel(id), count }));
 });
 
 const filteredNodes = computed(() => {
-  const needle = filterText.value.trim().toLowerCase();
-  return data.nodes.filter((node) => {
-    const typeMatch = activeType.value === "all" || nodeType(node) === activeType.value;
-    if (!typeMatch) return false;
-    if (!needle) return true;
-    return [node.id, node.title, node.status, node.visibility, node.summary, node.statement, node.goal]
-      .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(needle));
-  });
+  const needle = query.value.trim().toLowerCase();
+  return data.nodes
+    .filter((node) => selectedFamily.value === "all" || nodeType(node) === selectedFamily.value)
+    .filter((node) => {
+      if (!needle) return true;
+      return [node.title, node.id, node.summary, node.statement, node.goal, node.desired_outcome]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(needle));
+    })
+    .sort((a, b) => familyOrder(nodeType(a)) - familyOrder(nodeType(b)) || a.title.localeCompare(b.title));
 });
 
-const groupedNodes = computed(() => {
-  const groups = new Map<string, GraphNode[]>();
-  for (const node of filteredNodes.value) {
-    const type = nodeType(node);
-    if (!groups.has(type)) groups.set(type, []);
-    groups.get(type)?.push(node);
-  }
-  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
-});
+const outgoingGroups = computed(() => groupEdges(selectedNode.value.edges ?? {}));
 
-const selectedNode = computed(() => nodeById.value.get(selectedId.value) ?? filteredNodes.value[0]);
-const selectedType = computed(() => selectedNode.value ? typeById.value.get(nodeType(selectedNode.value)) : undefined);
-
-const outgoingEdges = computed(() => {
-  const node = selectedNode.value;
-  if (!node?.edges) return [];
-  return Object.entries(node.edges)
-    .flatMap(([label, value]) => edgeTargets(value).map((target) => ({ label, target })))
-    .filter((edge) => edge.target);
-});
-
-const incomingEdges = computed(() => {
-  const current = selectedNode.value?.id;
-  if (!current) return [];
-  const edges: Array<{ from: string; label: string }> = [];
+const incomingGroups = computed(() => {
+  const currentId = selectedNode.value.id;
+  const grouped = new Map<string, GraphNode[]>();
   for (const node of data.nodes) {
-    for (const [label, value] of Object.entries(node.edges ?? {})) {
-      if (edgeTargets(value).includes(current)) edges.push({ from: node.id, label });
+    for (const [edgeName, value] of Object.entries(node.edges ?? {})) {
+      if (!edgeTargets(value).includes(currentId)) continue;
+      if (!grouped.has(edgeName)) grouped.set(edgeName, []);
+      grouped.get(edgeName)?.push(node);
     }
   }
-  return edges;
+  return [...grouped.entries()].map(([name, nodes]) => ({ name, label: edgeLabel(name), nodes }));
 });
 
-const typeLinks = computed(() => {
-  return data.type_registry.map((type) => ({
-    ...type,
-    children: data.type_registry.filter((candidate) => candidate.derives_from === type.id),
-  }));
+const typeChain = computed(() => {
+  const chain: TypeDef[] = [];
+  let current = selectedType.value;
+  while (current) {
+    chain.unshift(current);
+    current = current.derives_from ? typeById.value.get(current.derives_from) : undefined;
+  }
+  return chain;
+});
+
+const sourceRows = computed(() => {
+  return (selectedNode.value.sources ?? []).map((sourceId) => sourceById.value.get(sourceId)).filter(Boolean);
 });
 
 function nodeType(node: GraphNode): string {
@@ -129,173 +119,182 @@ function edgeTargets(value: EdgeValue): string[] {
   return Array.isArray(value) ? value : [value];
 }
 
+function groupEdges(edges: Record<string, EdgeValue>) {
+  return Object.entries(edges)
+    .map(([name, value]) => ({
+      name,
+      label: edgeLabel(name),
+      nodes: edgeTargets(value)
+        .map((id) => nodeById.value.get(id))
+        .filter((node): node is GraphNode => Boolean(node)),
+    }))
+    .filter((group) => group.nodes.length > 0);
+}
+
 function selectNode(id: string) {
-  if (nodeById.value.has(id)) selectedId.value = id;
+  selectedId.value = id;
 }
 
-function selectType(type: string) {
-  activeType.value = type;
+function typeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    feature: "Features",
+    requirement: "Requirements",
+    "use-case": "Use cases",
+    proposal: "Proposals",
+    evidence: "Evidence",
+    implementation: "Implementations",
+    change: "Work items",
+  };
+  return labels[type] ?? type;
 }
 
-function nodeDescription(node: GraphNode): string {
-  return node.summary ?? node.statement ?? node.desired_outcome ?? node.goal ?? "No description field on this node.";
+function edgeLabel(edge: string): string {
+  const labels: Record<string, string> = {
+    requirements: "must satisfy",
+    use_cases: "used by",
+    evidence: "proved by",
+    proposed_by: "proposed by",
+    implemented_by: "implemented by",
+    required_by: "required by",
+    motivated_by: "motivated by",
+    verified_by: "verified by",
+    exercises: "exercises",
+    acceptance: "acceptance",
+    demonstrates: "demonstrates",
+    verifies: "verifies",
+    implements: "implements",
+    creates_requirements: "creates requirements",
+    creates_use_cases: "creates use cases",
+    proposes: "proposes",
+    decomposes_to: "breaks into",
+    satisfies: "satisfies",
+  };
+  return labels[edge] ?? edge.replaceAll("_", " ");
+}
+
+function familyOrder(type: string): number {
+  return ["feature", "requirement", "use-case", "proposal", "change", "evidence", "implementation"].indexOf(type);
+}
+
+function nodeText(node: GraphNode): string {
+  return node.summary ?? node.statement ?? node.desired_outcome ?? node.goal ?? node.rationale ?? "No description yet.";
 }
 </script>
 
 <template>
-  <main class="app-shell">
-    <header class="topbar">
+  <main class="page">
+    <header class="masthead">
       <div>
-        <p class="eyebrow">{{ data.catalog.purpose }} / {{ data.catalog.status }}</p>
-        <h1>{{ data.catalog.title }}</h1>
+        <p class="kicker">Data object graph seed</p>
+        <h1>What is connected to what?</h1>
+        <p class="intro">
+          This is the first object-graph fixture rendered as data. Pick an object, then follow its typed
+          relationships. The prose is just a field on the object.
+        </p>
       </div>
-      <div class="stats" aria-label="Catalog statistics">
-        <span>{{ data.nodes.length }} nodes</span>
-        <span>{{ data.type_registry.length }} types</span>
-        <span>{{ data.catalog.source_window.inputs.length }} sources</span>
+      <div class="metric-strip">
+        <div><strong>{{ data.nodes.length }}</strong><span>objects</span></div>
+        <div><strong>{{ families.length }}</strong><span>object types</span></div>
+        <div><strong>{{ data.catalog.source_window.inputs.length }}</strong><span>source files</span></div>
       </div>
     </header>
 
-    <section class="toolbar" aria-label="Filters">
-      <label class="search">
-        <span>Search</span>
-        <input v-model="filterText" type="search" placeholder="node id, title, requirement text" />
-      </label>
-      <div class="type-tabs" aria-label="Node type filter">
-        <button :class="{ active: activeType === 'all' }" @click="selectType('all')">
-          All <span>{{ data.nodes.length }}</span>
-        </button>
-        <button
-          v-for="type in data.type_registry.filter((entry) => typeCounts.has(entry.id))"
-          :key="type.id"
-          :class="{ active: activeType === type.id }"
-          @click="selectType(type.id)"
-        >
-          {{ type.id }} <span>{{ typeCounts.get(type.id) }}</span>
-        </button>
-      </div>
+    <section class="map-strip" aria-label="Catalog map">
+      <button
+        v-for="family in families"
+        :key="family.id"
+        :class="{ active: selectedFamily === family.id }"
+        @click="selectedFamily = selectedFamily === family.id ? 'all' : family.id"
+      >
+        <span>{{ family.label }}</span>
+        <strong>{{ family.count }}</strong>
+      </button>
     </section>
 
-    <section class="layout">
-      <aside class="panel type-panel">
-        <h2>Types</h2>
-        <div class="type-list">
-          <article v-for="type in typeLinks" :key="type.id" class="type-card">
-            <button class="type-name" @click="selectType(type.id)">
-              {{ type.id }}
-            </button>
-            <p>{{ type.summary }}</p>
-            <div v-if="type.derives_from" class="type-relation">
-              extends
-              <button @click="selectType(type.derives_from)">{{ type.derives_from }}</button>
-            </div>
-            <div v-if="type.children.length" class="type-relation">
-              composed by
-              <button v-for="child in type.children" :key="child.id" @click="selectType(child.id)">
-                {{ child.id }}
-              </button>
-            </div>
-          </article>
+    <section class="workspace">
+      <aside class="object-picker">
+        <div class="picker-head">
+          <h2>Objects</h2>
+          <button v-if="selectedFamily !== 'all'" @click="selectedFamily = 'all'">Clear type</button>
+        </div>
+        <input v-model="query" type="search" placeholder="Search objects" aria-label="Search objects" />
+        <div class="object-list">
+          <button
+            v-for="node in filteredNodes"
+            :key="node.id"
+            :class="{ selected: selectedNode.id === node.id }"
+            @click="selectNode(node.id)"
+          >
+            <span class="object-kind">{{ typeLabel(nodeType(node)) }}</span>
+            <strong>{{ node.title }}</strong>
+            <small>{{ node.id }}</small>
+          </button>
         </div>
       </aside>
 
-      <section class="panel node-panel">
-        <h2>Nodes</h2>
-        <div v-if="!filteredNodes.length" class="empty">No nodes match the current filters.</div>
-        <section v-for="[type, nodes] in groupedNodes" :key="type" class="node-group">
-          <div class="group-heading">
-            <h3>{{ type }}</h3>
-            <span>{{ nodes.length }}</span>
-          </div>
-          <button
-            v-for="node in nodes"
-            :key="node.id"
-            class="node-row"
-            :class="{ selected: selectedNode?.id === node.id }"
-            @click="selectNode(node.id)"
-          >
-            <span class="node-title">{{ node.title }}</span>
-            <span class="node-meta">{{ node.id }}</span>
-            <span class="badges">
-              <span>{{ node.status }}</span>
-              <span>{{ node.visibility }}</span>
-            </span>
-          </button>
-        </section>
-      </section>
-
-      <section class="panel detail-panel" aria-live="polite">
-        <template v-if="selectedNode">
-          <div class="detail-heading">
+      <section class="focus">
+        <article class="focus-card">
+          <div class="focus-top">
             <div>
-              <p class="eyebrow">{{ selectedNode.schema }}</p>
+              <p class="kicker">{{ typeLabel(nodeType(selectedNode)) }}</p>
               <h2>{{ selectedNode.title }}</h2>
             </div>
-            <span class="status">{{ selectedNode.status }}</span>
+            <div class="chips">
+              <span>{{ selectedNode.status }}</span>
+              <span>{{ selectedNode.visibility }}</span>
+            </div>
           </div>
-          <p class="description">{{ nodeDescription(selectedNode) }}</p>
 
-          <dl class="facts">
-            <div>
-              <dt>ID</dt>
-              <dd>{{ selectedNode.id }}</dd>
-            </div>
-            <div>
-              <dt>Visibility</dt>
-              <dd>{{ selectedNode.visibility }}</dd>
-            </div>
-            <div v-if="selectedType">
-              <dt>Type</dt>
-              <dd>
-                <button class="inline-link" @click="selectType(selectedType.id)">{{ selectedType.id }}</button>
-                <span v-if="selectedType.derives_from">
-                  extends
-                  <button class="inline-link" @click="selectType(selectedType.derives_from)">
-                    {{ selectedType.derives_from }}
-                  </button>
-                </span>
-              </dd>
-            </div>
-          </dl>
+          <p class="body-text">{{ nodeText(selectedNode) }}</p>
 
-          <section class="edge-section">
-            <h3>Outgoing edges</h3>
-            <div v-if="!outgoingEdges.length" class="empty compact">No outgoing edges.</div>
-            <button
-              v-for="edge in outgoingEdges"
-              :key="`${edge.label}:${edge.target}`"
-              class="edge-row"
-              @click="selectNode(edge.target)"
-            >
-              <span>{{ edge.label }}</span>
-              <strong>{{ nodeById.get(edge.target)?.title ?? edge.target }}</strong>
-              <small>{{ edge.target }}</small>
+          <div v-if="selectedNode.trigger || selectedNode.actor || selectedNode.executor" class="fact-row">
+            <div v-if="selectedNode.actor"><span>Actor</span><strong>{{ selectedNode.actor }}</strong></div>
+            <div v-if="selectedNode.executor"><span>Executor</span><strong>{{ selectedNode.executor }}</strong></div>
+            <div v-if="selectedNode.trigger"><span>Trigger</span><strong>{{ selectedNode.trigger }}</strong></div>
+          </div>
+
+          <div class="type-chain">
+            <span>Type chain</span>
+            <button v-for="type in typeChain" :key="type.id" @click="selectedFamily = type.id">
+              {{ type.id }}
             </button>
+          </div>
+        </article>
+
+        <div class="relationship-board">
+          <section>
+            <h3>Links out from this object</h3>
+            <div v-if="!outgoingGroups.length" class="empty">No outgoing relationships.</div>
+            <article v-for="group in outgoingGroups" :key="group.name" class="relationship-group">
+              <p>{{ group.label }}</p>
+              <button v-for="node in group.nodes" :key="node.id" @click="selectNode(node.id)">
+                <span>{{ typeLabel(nodeType(node)) }}</span>
+                <strong>{{ node.title }}</strong>
+              </button>
+            </article>
           </section>
 
-          <section class="edge-section">
-            <h3>Incoming edges</h3>
-            <div v-if="!incomingEdges.length" class="empty compact">No incoming edges.</div>
-            <button
-              v-for="edge in incomingEdges"
-              :key="`${edge.from}:${edge.label}`"
-              class="edge-row reverse"
-              @click="selectNode(edge.from)"
-            >
-              <span>{{ edge.label }}</span>
-              <strong>{{ nodeById.get(edge.from)?.title ?? edge.from }}</strong>
-              <small>{{ edge.from }}</small>
-            </button>
+          <section>
+            <h3>Links into this object</h3>
+            <div v-if="!incomingGroups.length" class="empty">No incoming relationships.</div>
+            <article v-for="group in incomingGroups" :key="group.name" class="relationship-group incoming">
+              <p>{{ group.label }}</p>
+              <button v-for="node in group.nodes" :key="node.id" @click="selectNode(node.id)">
+                <span>{{ typeLabel(nodeType(node)) }}</span>
+                <strong>{{ node.title }}</strong>
+              </button>
+            </article>
           </section>
+        </div>
 
-          <section class="sources">
-            <h3>Sources</h3>
-            <div v-for="sourceId in selectedNode.sources ?? []" :key="sourceId" class="source-row">
-              <span>{{ sourceById.get(sourceId)?.kind ?? "source" }}</span>
-              <code>{{ sourceById.get(sourceId)?.path ?? sourceId }}</code>
-            </div>
-          </section>
-        </template>
+        <section class="sources">
+          <h3>Where this came from</h3>
+          <div v-if="!sourceRows.length" class="empty">No source refs.</div>
+          <div v-for="source in sourceRows" :key="source?.id" class="source-row">
+            <span>{{ source?.kind }}</span>
+            <code>{{ source?.path }}</code>
+          </div>
+        </section>
       </section>
     </section>
   </main>
