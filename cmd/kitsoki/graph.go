@@ -2,10 +2,14 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/graph"
+	"kitsoki/internal/graph/proposalsadapter"
 )
 
 // graphCmd — W1.1: `kitsoki graph lint <dir>` loads a project object graph
@@ -23,7 +27,9 @@ func graphCmd() *cobra.Command {
 }
 
 func graphLintCmd() *cobra.Command {
-	return &cobra.Command{
+	var checkIndex bool
+	var proposalsDir string
+	cmd := &cobra.Command{
 		Use:   "lint <catalog-path>",
 		Short: "Validate a project object graph catalog's cross-node invariants",
 		Long: `Loads the catalog at <catalog-path> (a bundle directory, or a single
@@ -31,7 +37,14 @@ catalog file such as docs/proposals/project-object-graph/seed-objects.yaml)
 and reports every dangling edge reference, edge target type mismatch, cycle
 on an acyclic-marked edge, and internal node reachable from a public edge.
 
-Exit code 0 when the catalog loads and lints clean; non-zero otherwise.`,
+With --check-index (W6.0), also regenerates each graph-sourced proposal's
+docs/proposals/README.md "Current proposals" index entry and byte-compares
+it against --proposals-dir/README.md (default: docs/proposals), failing on
+any drift — the machine-checkable-docs principle: a hand-maintained index
+next to graph-sourced data rots.
+
+Exit code 0 when the catalog loads and lints clean (and the index doesn't
+drift, if checked); non-zero otherwise.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := args[0]
@@ -43,16 +56,57 @@ Exit code 0 when the catalog loads and lints clean; non-zero otherwise.`,
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
 			}
 			issues := graph.Lint(cat)
-			if len(issues) == 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "graph lint: %d nodes, clean\n", len(cat.Nodes))
+			out := cmd.OutOrStdout()
+			for _, iss := range issues {
+				fmt.Fprintln(out, iss.Error())
+			}
+
+			var indexErrs []string
+			if checkIndex {
+				indexErrs = checkProposalsIndex(cat, proposalsDir)
+				for _, e := range indexErrs {
+					fmt.Fprintln(out, "index-drift:", e)
+				}
+			}
+
+			if len(issues) == 0 && len(indexErrs) == 0 {
+				fmt.Fprintf(out, "graph lint: %d nodes, clean\n", len(cat.Nodes))
 				return nil
 			}
-			for _, iss := range issues {
-				fmt.Fprintln(cmd.OutOrStdout(), iss.Error())
-			}
-			return fmt.Errorf("graph lint: %d issue(s) found", len(issues))
+			return fmt.Errorf("graph lint: %d issue(s), %d index-drift error(s) found", len(issues), len(indexErrs))
 		},
 	}
+	cmd.Flags().BoolVar(&checkIndex, "check-index", false, "also check docs/proposals/README.md's generated index for drift (W6.0)")
+	cmd.Flags().StringVar(&proposalsDir, "proposals-dir", "docs/proposals", "directory containing README.md for --check-index")
+	return cmd
+}
+
+// checkProposalsIndex regenerates every graph-sourced proposal's README
+// index entry and reports any that don't byte-match a line in
+// <proposalsDir>/README.md.
+func checkProposalsIndex(cat *graph.Catalog, proposalsDir string) []string {
+	readmePath := filepath.Join(proposalsDir, "README.md")
+	raw, err := os.ReadFile(readmePath)
+	if err != nil {
+		return []string{fmt.Sprintf("read %s: %v", readmePath, err)}
+	}
+	lines := map[string]bool{}
+	for _, l := range strings.Split(string(raw), "\n") {
+		lines[l] = true
+	}
+
+	var errs []string
+	for _, node := range proposalsadapter.GraphSourcedProposals(cat) {
+		entry, err := proposalsadapter.RenderIndexEntry(node)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", node.ID, err))
+			continue
+		}
+		if !lines[entry] {
+			errs = append(errs, fmt.Sprintf("%s: generated entry not found in %s (regenerate and update the index): %s", node.ID, readmePath, entry))
+		}
+	}
+	return errs
 }
 
 func graphApplyCmd() *cobra.Command {

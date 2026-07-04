@@ -122,3 +122,36 @@ func TestGraphApplyCmd_RejectsUnauthorized(t *testing.T) {
 		t.Fatalf("graph apply must exit non-zero on an unauthorized changeset; output:\n%s", out)
 	}
 }
+
+func runGraphLintCmdWithArgs(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	root := newRootCmd()
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs(append([]string{"graph", "lint"}, args...))
+	err := root.Execute()
+	return stdout.String(), err
+}
+
+func TestGraphLintCmd_CheckIndexCleanOnRealRepo(t *testing.T) {
+	out, err := runGraphLintCmdWithArgs(t,
+		"../../docs/proposals/project-object-graph/seed-objects.yaml",
+		"--check-index", "--proposals-dir", "../../docs/proposals")
+	if err != nil {
+		t.Fatalf("--check-index must be clean against the real committed README: %v\n%s", err, out)
+	}
+}
+
+func TestGraphLintCmd_CheckIndexCatchesDrift(t *testing.T) {
+	proposalsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proposalsDir, "README.md"), []byte("# stale index, no matching entry\n"), 0o644); err != nil {
+		t.Fatalf("write stale README: %v", err)
+	}
+	out, err := runGraphLintCmdWithArgs(t,
+		"../../docs/proposals/project-object-graph/seed-objects.yaml",
+		"--check-index", "--proposals-dir", proposalsDir)
+	if err == nil {
+		t.Fatalf("--check-index must fail against a README missing the generated entry; output:\n%s", out)
+	}
+}
