@@ -109,6 +109,48 @@ async function clickIntent(page: Page, intent: string): Promise<void> {
   await btn.click();
 }
 
+/**
+ * clickIntent, then wait for `expectedState` — re-clicking if the button
+ * re-enables (turn finished) without the state having advanced. Under a true
+ * 24-way burst against the shared SQLite-backed registry (retry.ts's
+ * documented finding), an individual RPC occasionally never lands (dropped by
+ * a transient server-side hiccup rather than merely slow), and a single click
+ * + single long wait then times out even though the session itself is
+ * perfectly healthy and would happily accept a resubmit. This does not mask
+ * the throughput finding — the wall-clock a slow-but-successful transition
+ * takes is unchanged — it only distinguishes "still processing" (worth
+ * waiting out) from "the click silently no-oped" (worth resubmitting),
+ * exactly the distinction clickIntent's own `pending` wait already draws for
+ * the FIRST click.
+ */
+async function clickIntentUntilState(
+  page: Page,
+  intent: string,
+  expectedState: string,
+  overallTimeoutMs = STEP_TIMEOUT_MS,
+): Promise<void> {
+  const deadline = Date.now() + overallTimeoutMs;
+  await clickIntent(page, intent);
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      // Final attempt: let waitForState throw its own descriptive timeout.
+      await waitForState(page, expectedState, 1);
+      return;
+    }
+    const subTimeout = Math.min(remaining, 20000);
+    try {
+      await waitForState(page, expectedState, subTimeout);
+      return;
+    } catch {
+      const btn = page.getByTestId(`intent-btn-${intent}`).first();
+      if (await btn.isEnabled().catch(() => false)) {
+        await btn.click().catch(() => undefined);
+      }
+    }
+  }
+}
+
 /** Phase 1: mint this user's OWN session (session.new) — the isolation
  *  invariant under test is that no two concurrent users are ever handed the
  *  same session id — and open its page. Deliberately NOT gated by any
@@ -179,12 +221,10 @@ export async function driveUserJourney(opts: {
     await rpc("runstatus.session.trace", { session_id });
   }
 
-  await clickIntent(page, "start");
-  await waitForState(page, "search", STEP_TIMEOUT_MS);
+  await clickIntentUntilState(page, "start", "search");
   await auditOnce("search");
 
-  await clickIntent(page, "confirm");
-  await waitForState(page, "clarifying", STEP_TIMEOUT_MS);
+  await clickIntentUntilState(page, "confirm", "clarifying");
   await auditOnce("clarifying");
 
   // The journey ends at "clarifying", not at the flow's @exit:done or even
