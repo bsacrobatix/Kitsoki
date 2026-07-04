@@ -130,14 +130,32 @@ const filteredNodes = computed(() => {
     .sort((a, b) => typeOrder(nodeType(a)) - typeOrder(nodeType(b)) || a.title.localeCompare(b.title));
 });
 
+// Personas nest under the actor they profile (persona derives_from actor);
+// they only fall back to a flat peer group when their parent actor is
+// filtered out of the current list (e.g. the Personas type chip).
 const groupedNodes = computed(() => {
-  const grouped = new Map<string, GraphNode[]>();
-  for (const node of filteredNodes.value) {
-    const type = nodeType(node);
-    if (!grouped.has(type)) grouped.set(type, []);
-    grouped.get(type)?.push(node);
+  const nodes = filteredNodes.value;
+  const listedIds = new Set(nodes.map((node) => node.id));
+  const personasByActor = new Map<string, GraphNode[]>();
+  const orphanPersonas = new Set<string>();
+  for (const node of nodes) {
+    if (nodeType(node) !== "persona") continue;
+    const parent = edgeTargets(node.edges?.persona_of)[0];
+    if (parent && listedIds.has(parent)) {
+      if (!personasByActor.has(parent)) personasByActor.set(parent, []);
+      personasByActor.get(parent)?.push(node);
+    } else {
+      orphanPersonas.add(node.id);
+    }
   }
-  return [...grouped.entries()].map(([type, nodes]) => ({ type, label: typeLabel(type), nodes }));
+  const grouped = new Map<string, Array<{ node: GraphNode; children: GraphNode[] }>>();
+  for (const node of nodes) {
+    const type = nodeType(node);
+    if (type === "persona" && !orphanPersonas.has(node.id)) continue;
+    if (!grouped.has(type)) grouped.set(type, []);
+    grouped.get(type)?.push({ node, children: personasByActor.get(node.id) ?? [] });
+  }
+  return [...grouped.entries()].map(([type, entries]) => ({ type, label: typeLabel(type), entries }));
 });
 
 const outgoingGroups = computed(() => groupEdges(selectedNode.value.edges ?? {}));
@@ -395,19 +413,34 @@ function selectNode(id: string) {
         <div class="object-list">
           <section v-for="group in groupedNodes" :key="group.type" class="object-group">
             <h3>{{ group.label }}</h3>
-            <button
-              v-for="node in group.nodes"
-              :key="node.id"
-              :class="{ selected: selectedNode.id === node.id }"
-              @click="selectNode(node.id)"
-            >
-              <strong>{{ node.title }}</strong>
-              <small>{{ node.id }}</small>
-              <span class="node-badges">
-                <span :class="['status-badge', `life-${lifecycleBucket(node)}`]">{{ lifecycleLabel(lifecycleBucket(node)) }}</span>
-                <span :class="['visibility-badge', `visibility-${node.visibility}`]">{{ node.visibility }}</span>
-              </span>
-            </button>
+            <template v-for="entry in group.entries" :key="entry.node.id">
+              <button
+                :class="{ selected: selectedNode.id === entry.node.id }"
+                @click="selectNode(entry.node.id)"
+              >
+                <strong>{{ entry.node.title }}</strong>
+                <small>{{ entry.node.id }}</small>
+                <span class="node-badges">
+                  <span :class="['status-badge', `life-${lifecycleBucket(entry.node)}`]">{{ lifecycleLabel(lifecycleBucket(entry.node)) }}</span>
+                  <span :class="['visibility-badge', `visibility-${entry.node.visibility}`]">{{ entry.node.visibility }}</span>
+                </span>
+              </button>
+              <button
+                v-for="child in entry.children"
+                :key="child.id"
+                class="object-child"
+                :class="{ selected: selectedNode.id === child.id }"
+                @click="selectNode(child.id)"
+              >
+                <strong>{{ child.title }}</strong>
+                <small>{{ child.id }}</small>
+                <span class="node-badges">
+                  <span class="type-badge">persona</span>
+                  <span :class="['status-badge', `life-${lifecycleBucket(child)}`]">{{ lifecycleLabel(lifecycleBucket(child)) }}</span>
+                  <span :class="['visibility-badge', `visibility-${child.visibility}`]">{{ child.visibility }}</span>
+                </span>
+              </button>
+            </template>
           </section>
         </div>
       </aside>
@@ -432,7 +465,7 @@ function selectNode(id: string) {
         <p class="body-text">{{ nodeText(selectedNode) }}</p>
 
           <div
-            v-if="selectedNode.actor_kind || selectedNode.trigger || selectedNode.actor || selectedNode.executor || selectedNode.site_route || selectedNode.page_kind || selectedNode.edit_surface || selectedNode.implementation_kind || selectedNode.evidence_kind"
+            v-if="selectedNode.actor_kind || selectedNode.trigger || selectedNode.actor || selectedNode.executor || selectedNode.site_route || selectedNode.page_kind || selectedNode.edit_surface || selectedNode.implementation_kind || selectedNode.evidence_kind || selectedNode.experience || selectedNode.surface_preference || selectedNode.preferred_tools || selectedNode.risk_focus"
             class="fact-row"
           >
             <div v-if="selectedNode.actor_kind"><span>Actor kind</span><strong>{{ selectedNode.actor_kind }}</strong></div>
@@ -444,6 +477,10 @@ function selectNode(id: string) {
             <div v-if="selectedNode.implementation_kind"><span>Implementation</span><strong>{{ selectedNode.implementation_kind }}</strong></div>
             <div v-if="selectedNode.evidence_kind"><span>Evidence</span><strong>{{ selectedNode.evidence_kind }}</strong></div>
             <div v-if="selectedNode.trigger"><span>Trigger</span><strong>{{ selectedNode.trigger }}</strong></div>
+            <div v-if="selectedNode.experience"><span>Experience</span><strong>{{ selectedNode.experience }}</strong></div>
+            <div v-if="selectedNode.surface_preference"><span>Surface</span><strong>{{ selectedNode.surface_preference }}</strong></div>
+            <div v-if="selectedNode.preferred_tools?.length"><span>Preferred tools</span><strong>{{ selectedNode.preferred_tools.join(", ") }}</strong></div>
+            <div v-if="selectedNode.risk_focus?.length"><span>Risk focus</span><strong>{{ selectedNode.risk_focus.join(", ") }}</strong></div>
           </div>
 
           <div class="type-chain">

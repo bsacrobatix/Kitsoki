@@ -559,6 +559,12 @@ pre {
   border-color: #00a7db;
 }
 
+/* persona derives_from actor: same hue family, dashed to read as a profile */
+.vue-flow__node.k-node--persona {
+  border-color: #0284c7;
+  border-style: dashed;
+}
+
 .vue-flow__node.k-node--site-page {
   border-color: #2b6cb0;
 }
