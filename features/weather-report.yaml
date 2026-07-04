@@ -4,6 +4,9 @@ kind: story-demo
 title: Weather & Climate (Starlark host)
 tagline: Deterministic HTTP workflows in a sandboxed Starlark hook.
 summary: "The host.starlark.run example story: the lobby intent picker, a free-text forecast producing a 5-day report, the live trace lighting up with the real Starlark call and its replayed GETs, a climate-mode look-up, and the clean fail() path on an unknown place."
+docs:
+  - docs/architecture/hosts/local.md
+  - docs/architecture/hosts.md
 demo:
   spec: tests/playwright/weather-report-tour.spec.ts
   artifactDir: weather-report-tour

@@ -249,7 +249,11 @@ func ghEnsureRelease(ctx context.Context, repo, tag string) error {
 	_, stderr, code, err := cliExec(ctx, "", "gh", "release", "create", tag,
 		"--repo", repo,
 		"--title", "kitsoki bug artifacts",
-		"--notes", "Evidence assets uploaded by kitsoki bug filing. Linked from individual issues.")
+		"--notes", "Evidence assets uploaded by kitsoki bug filing. Linked from individual issues.",
+		// This release exists solely to host evidence-file asset URLs; it is
+		// not a product release and must never claim the repo's "Latest"
+		// slot away from a real tagged release (e.g. v0.1.0).
+		"--prerelease")
 	if err != nil {
 		return fmt.Errorf("ensure release: exec: %w", err)
 	}

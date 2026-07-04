@@ -20,7 +20,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -688,23 +687,6 @@ If no lock row exists, exits 0 with {"detached":false}.`,
 	cmd.Flags().StringVar(&idFlag, "id", "", "session ID")
 	cmd.Flags().StringVar(&keyFlag, "key", "", "external key transport:thread")
 	return cmd
-}
-
-// pidAlive uses signal 0 to check whether a process with the given PID is
-// alive on this host. Mirrors the logic in internal/store/external_keys.go.
-func pidAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	if err == nil {
-		return true
-	}
-	if errors.Is(err, syscall.EPERM) {
-		// EPERM means the process exists but we lack permission to signal it.
-		return true
-	}
-	return false
 }
 
 // ─── session create ───────────────────────────────────────────────────────────
