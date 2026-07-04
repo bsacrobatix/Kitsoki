@@ -192,19 +192,18 @@ thought.
   cooperating layers — **toolbox** (a named, reusable tool grant) → **effect
   class** (`pure | read | write | external` + `deterministic`) → **layered
   enforcement** (tool allowlist for pure/read; secure runtime boundary for
-  write/external) → **conformance** (the trace proves the box held). The proposal slices are not
-  implemented as proposed; adjacent safety work exists (`write_mode: read_only`,
-  bash profiles, validator sandboxing, converse/read-only tool policy), while
-  `external_side_effect` remains the real vocabulary. Decomposed into three
-  runtime slices + a conformance check:
+  write/external) → **conformance** (the trace proves the box held). The
+  effect taxonomy and toolbox/tool-layer enforcement slices have shipped;
+  secure runtime confinement and offline conformance remain proposed.
+  Decomposed into three runtime slices + a conformance check:
   - [`effect-taxonomy.md`](effect-taxonomy.md) (runtime) — the classification
     substrate: `effect`/`deterministic` on host calls **and** agents, replacing
     `external_side_effect`; a load-time hard-fail for a read-only call holding a
     mutator. (Modelled on Acronis DTS's `deterministic_behavior` enum.)
-  - [`toolbox-and-enforcement.md`](toolbox-and-enforcement.md) (runtime) —
+  - shipped in [`hosts.md`](../architecture/hosts.md#agent-declaration) and
+    [`state-machine.md`](../stories/state-machine.md#agent-toolboxes) —
     named `toolboxes:` + `tools_add:`; one effect-derived tool-layer policy for
-    all four agent kinds, collapsing the `mutationTools` deny, the converse
-    read-only branch, and task's unrestricted spawn into one path.
+    all four agent kinds.
   - [`task-fs-sandbox.md`](task-fs-sandbox.md) (runtime) — the process boundary
     beneath the tools: `sandbox:` routes write/external agents through a
     pluggable runtime ladder (`supervised` → filesystem confinement →

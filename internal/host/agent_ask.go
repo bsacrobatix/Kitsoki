@@ -36,16 +36,6 @@ import (
 	"kitsoki/internal/sysprompt"
 )
 
-// mutationTools is the set of tool names that are never permitted in a
-// read-only agent call (ask, decide, extract LLM tier). The loader rejects
-// these at app-load; the handler is a safety net so a manually assembled call
-// cannot sneak mutation tools through.
-var mutationTools = map[string]bool{
-	"Edit":         true,
-	"Write":        true,
-	"NotebookEdit": true,
-}
-
 // AgentAskHandler implements host.agent.ask — the read-only inspection verb.
 //
 // Required args (one of):
@@ -186,17 +176,11 @@ func AgentAskHandler(ctx context.Context, args map[string]any) (Result, error) {
 	// Resolve the agent (optional) and compute effective tools.
 	agent, _ := resolveAgent(ctx, args)
 	ctx, agent = applyProvider(ctx, args, agent)
-	tools := effectiveTools(ctx, args, agent)
-
-	// Safety net: reject mutation tools regardless of source.
-	for _, t := range tools {
-		if mutationTools[t] {
-			return Result{Error: fmt.Sprintf(
-				"host.agent.ask: tool %q is not permitted in a read-only ask call (use host.agent.task for mutation tools)",
-				t,
-			)}, nil
-		}
-	}
+	policy := enforceToolbox(ctx, args, agent, "default", ToolboxEnforcementOptions{
+		EffectCeiling:       "read",
+		ReadOnlyDeniedTools: readOnlyAgentVerbDeniedTools,
+	})
+	tools := policy.AllowedTools
 
 	// Bash gate: if Bash is in the effective tool list, the agent must declare
 	// a BashProfile. When no profile is set we deny the call rather than
@@ -227,10 +211,13 @@ func AgentAskHandler(ctx context.Context, args map[string]any) (Result, error) {
 	}
 
 	cliArgs := buildBaseCLIArgs(ctx, sysprompt.Ask, args, agent)
+	cliArgs = setPermissionMode(cliArgs, policy.CLIMode)
+	cliArgs = appendDisallowedToolsFlag(cliArgs, policy.DeniedTools)
 	// Forward operator questions into kitsoki when a live surface is attached.
 	var opAskCleanup func()
 	cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
 	defer opAskCleanup()
+	policy = policy.WithAllowed(tools)
 	cliArgs = appendAllowedToolsFlag(cliArgs, tools)
 
 	// Build the MCP servers map. Contract-level servers are the floor; per-call
@@ -312,7 +299,7 @@ func AgentAskHandler(ctx context.Context, args map[string]any) (Result, error) {
 	} else if hasVisual {
 		askInput["visual"] = visualBlock
 	}
-	appendAgentCalledEvent(ctx, callStart, callID, rendered, AgentCalledPayload{
+	appendAgentCalledEvent(ctx, callStart, callID, rendered, policy.AgentCalledFields(AgentCalledPayload{
 		Verb:           "ask",
 		Agent:          agentNameFromArgs(args),
 		Model:          agent.Model,
@@ -320,7 +307,7 @@ func AgentAskHandler(ctx context.Context, args map[string]any) (Result, error) {
 		PromptOverlay:  promptOverlay,
 		SpecDefaulted:  specDefaulted,
 		SpecOverridden: specOverridden,
-	})
+	}))
 
 	cr, _, runErr := AgentStreamer{
 		Bin:        bin,

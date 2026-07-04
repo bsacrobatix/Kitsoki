@@ -584,7 +584,7 @@ changes:
     title: Toolboxes + one enforcement policy for ask/decide/converse/task
     kind: runtime
     pipeline: implementation
-    prior_work: "Implements docs/proposals/toolbox-and-enforcement.md (agent-capability-model.md slice 2)."
+    prior_work: "Implements agent-capability-model.md slice 2; shipped docs live in docs/architecture/hosts.md and docs/stories/state-machine.md."
     scope: ["internal/app/types.go", "internal/app/loader.go", "internal/host/agents.go", "internal/host/agent_ask.go", "internal/host/agent_decide.go", "internal/host/agent_task.go"]
     depends_on: ["WS.1"]
     acceptance:
@@ -598,7 +598,7 @@ changes:
       green_when: "an enforceToolbox table test ({pure,read,write,external} x {ask,decide,converse,task}) is green and a behavior-preserving snapshot proves the unified policy reproduces each verb's current effective allowlist"
       cmd: "go test ./internal/app/... ./internal/host/..."
     agent_brief: >
-      Implement toolbox-and-enforcement.md (slice 2). Add `Toolboxes` top-level
+      Implement agent-capability-model.md slice 2. Add `Toolboxes` top-level
       map + `Toolbox`/`ToolsAdd`/`ToolsRemove` agent fields (types.go); resolve
       toolbox in effectiveTools (agents.go:144, precedence: named box ->
       tools_add/remove -> per-call tools: override, unchanged); generalize
@@ -611,7 +611,7 @@ changes:
       allowlist before/after. No LLM — pure table-driven Go tests. On ship:
       optionally dedupe the four read-only judge/extract agents onto a shared
       `read_only` box; update docs/stories/state-machine.md + hosts.md; trim/delete
-      toolbox-and-enforcement.md per WP.1.
+      the shipped slice proposal per WP.1.
 
   - id: "WS.3"
     wall: WS
