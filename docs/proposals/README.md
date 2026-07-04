@@ -238,7 +238,22 @@ thought.
   per-state decider. Engine core, CLI/flow surface, and docs-review
   migration shipped; pre-bind staging and the bugfix-story migration
   remain (§8).
-- [`lifecycle-taxonomy.md`](lifecycle-taxonomy.md) — **runtime.** A YAML
+- [`project-object-graph.md`](project-object-graph.md) — **epic.** Unify the
+  loose ends of project representation (lifecycle taxonomy, the shipped
+  change-node/two-graph substrate, the roadmap/portfolio taxonomy, the
+  `features/` product-site catalog, the goal spine) into one typed,
+  extensible **object graph**: nodes are schema-pinned YAML documents
+  (GTS-style type derivation), edges are typed references, change management
+  is **delta operations** (changesets) on the graph, and the roadmap is the
+  computed delta between current and desired state — prioritized with the
+  existing two-graph tools and executed via deliver/fleet + `host.human.*`.
+  Dogfood #1: the kitsoki capability catalog driving the product site with a
+  public/internal visibility split; later, ISO-style management systems as
+  type packs. Six slices (0/6): slice 1 is
+  [`lifecycle-taxonomy.md`](lifecycle-taxonomy.md) (re-parented); the rest
+  are not yet cut.
+- [`lifecycle-taxonomy.md`](lifecycle-taxonomy.md) — **runtime** (slice 1 of
+  [`project-object-graph.md`](project-object-graph.md)). A YAML
   domain model for the early project lifecycle: composable **Features**
   (media / help / tutorials / acceptance criteria at every level) →
   **Proposals** (the spine as data) → **Plans** (tasks with expected files +

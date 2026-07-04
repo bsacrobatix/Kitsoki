@@ -1,8 +1,11 @@
 # Runtime: a YAML lifecycle taxonomy (features → proposals → plans → test specs)
 
 **Status:** Draft v1. Initial design for review — nothing implemented yet.
+Now slice 1 of the [`project-object-graph.md`](project-object-graph.md) epic;
+amend toward the shared node envelope + GTS-style derivation per that epic's
+Shared decisions 1–2.
 **Kind:**   runtime
-**Epic:**   — standalone (expected to become an epic once the object model is agreed)
+**Epic:**   [`project-object-graph.md`](project-object-graph.md)
 
 ## Why
 
