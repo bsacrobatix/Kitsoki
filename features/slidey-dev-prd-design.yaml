@@ -9,7 +9,6 @@ docs:
   - stories/slidey-dev/app.yaml
   - stories/dev-story/README.md
 related:
-  - dev-story-prd-design
   - slidey-architect-design
 demo:
   spec: tests/playwright/slidey-pm-idea-video.spec.ts
@@ -18,6 +17,9 @@ demo:
   posterStep: spm-intro-home
   story: stories/slidey-dev
   flow: stories/slidey-dev/flows/pm_idea.yaml
+  embed:
+    deck: docs/decks/dev-story-hybrid.slidey.json
+    rrweb: assets/dev-story-hybrid/pm-idea.rrweb.json
 tour:
   export: SLIDEY_PM_IDEA_TOUR_STEPS
   steps:
