@@ -578,6 +578,13 @@ features:
 features-check:
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:check
 
+# vitest-check runs the runstatus (web UI) component/unit test suite. Split out
+# from `make test` (which stays Go-only + no-LLM deterministic story/tool
+# suites) because it needs pnpm/node_modules; wired into CI's `site` job,
+# which already installs them for features-check/site.
+vitest-check:
+	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm test
+
 features-index:
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:index
 
