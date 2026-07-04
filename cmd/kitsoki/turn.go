@@ -245,12 +245,13 @@ Examples:
 			}
 			defer func() { _ = agentReg.Close() }()
 
-			orch := orchestrator.New(def, m, s, h,
+			orchOpts := []orchestrator.Option{
 				orchestrator.WithHostRegistry(hostReg),
 				orchestrator.WithChatStore(chatAdapter),
 				orchestrator.WithAgentRegistry(agentReg),
-				semanticRoutingOption(),
-			)
+			}
+			orchOpts = append(orchOpts, semanticRoutingOptions()...)
+			orch := orchestrator.New(def, m, s, h, orchOpts...)
 
 			result, err := orch.OneShot(cmd.Context(), orchestrator.OneShotInput{
 				State:  app.StatePath(state),
