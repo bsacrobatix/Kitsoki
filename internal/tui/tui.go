@@ -1047,7 +1047,7 @@ func (m RootModel) pollInbox(syncGitHub bool) tea.Msg {
 func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	nm, cmd := m.updateInner(msg)
 	if rm, ok := nm.(RootModel); ok {
-		if flush := rm.transcript.FlushPending(); flush != nil {
+		if flush := rm.flushPendingWhenStable(); flush != nil {
 			if cmd == nil {
 				cmd = flush
 			} else {
@@ -1057,6 +1057,19 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return rm, cmd
 	}
 	return nm, cmd
+}
+
+// flushPendingWhenStable emits queued scrollback unless the bottom live region
+// is actively redrawing an awaiting-turn routing line. tea.Println scrolls above
+// Bubble Tea's live region; doing that while the routing line is still changing
+// can leave prior frames stamped into scrollback. Once the live line settles or
+// cancels, the normal flush path resumes and emits the queued input echo plus the
+// resolved routing row together.
+func (m *RootModel) flushPendingWhenStable() tea.Cmd {
+	if m.mode == ModeAwaitingLLM && m.transcript.hasLive() {
+		return nil
+	}
+	return m.transcript.FlushPending()
 }
 
 func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
