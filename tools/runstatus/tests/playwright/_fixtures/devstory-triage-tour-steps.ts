@@ -1,9 +1,18 @@
-// Code generated from features/devstory-triage.yaml by scripts/features/generate.ts. DO NOT EDIT.
-// Edit the YAML and run `make features` to regenerate.
+// Frozen copy of the tour manifest formerly code-generated (by
+// scripts/features/generate.ts) from features/devstory-triage.yaml.
+//
+// devstory-triage was de-listed from the feature catalog: it's an external
+// stub (its story lives in a cyber-repo checkout outside this repo, never
+// recordable here) that features/AGENTS.md's completeness rules can no longer
+// justify keeping cataloged. devstory-triage-video.spec.ts is kept intact per
+// the de-listing decision, so this array is frozen here (no longer regenerated
+// from YAML) purely to keep that spec's driving logic working. Do not "fix"
+// drift against a YAML that no longer exists — if the spec needs new steps,
+// edit this file directly.
 
-import { type TourStep } from "../types.js";
+import { type TourStep } from "../../src/tour/types.js";
 
-// Re-export so a Playwright spec can import the step type alongside the array.
+// Re-export so the Playwright spec can import the step type alongside the array.
 export type { TourStep };
 
 export const DEVSTORY_TRIAGE_TOUR_STEPS: readonly TourStep[] = [
