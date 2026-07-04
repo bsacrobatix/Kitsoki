@@ -5,6 +5,11 @@ box, a thinner structured-output wrapper, or a friendlier CI script. It is a
 workflow engine where the **runtime owns the process** and the LLM is called
 only at named, traceable decision points.
 
+This page is about verifying the claim for yourself: what to watch a real
+run do, and where kitsoki's structure stops paying for itself. For a
+side-by-side against specific tools — Claude Code/Codex-style agents,
+LangGraph, Temporal — see [How kitsoki compares](comparison.md).
+
 That distinction matters because most agent systems put the model in the
 driver's seat. The model holds the plan, picks tools, decides when to ask a
 human, mutates state through tool calls, and leaves you with logs after the
@@ -96,6 +101,10 @@ The moat is not a single feature. It is the combination: one story definition
 drives the runtime, web UI, TUI, MCP surface, traces, demos, and tests. Every new
 story compounds the same substrate instead of creating another bespoke agent
 prompt.
+
+For the fuller argument against each row above — including why "LangGraph
+plus a convention" isn't the same product — see
+[How kitsoki compares](comparison.md).
 
 ## The adoption path
 

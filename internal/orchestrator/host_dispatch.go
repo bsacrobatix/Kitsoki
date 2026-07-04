@@ -131,6 +131,7 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	backendName, activeProfile := o.resolveSelection(o.agentBackendName)
 	ctx = host.WithAgentBackendNamed(ctx, backendName)
 	ctx = host.WithActiveProfile(ctx, activeProfile)
+	ctx = host.WithHarnessLadder(ctx, o.harnessLadder)
 	// Inject the prompt renderer so agent handlers resolve and render prompt
 	// files through the story's overlay → story search path. nil is safe
 	// (handlers use the legacy path).
@@ -821,6 +822,7 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	backendName, activeProfile := o.resolveSelection(o.agentBackendName)
 	ctx = host.WithAgentBackendNamed(ctx, backendName)
 	ctx = host.WithActiveProfile(ctx, activeProfile)
+	ctx = host.WithHarnessLadder(ctx, o.harnessLadder)
 	// Inject the prompt renderer so agent handlers resolve and render prompt
 	// files through the story's overlay → story search path. nil is safe
 	// (handlers use the legacy path).

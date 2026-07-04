@@ -95,12 +95,21 @@ type taskAcceptanceOptions struct {
 
 // AgentTaskHandler implements host.agent.task.
 func AgentTaskHandler(ctx context.Context, args map[string]any) (Result, error) {
+	return runAgentVerbWithLadder(ctx, args, "task", agentTaskHandlerOnce)
+}
+
+// agentTaskHandlerOnce is the original AgentTaskHandler body: a single
+// dispatch attempt. See agentDecideHandlerOnce's doc for how
+// runAgentVerbWithLadder drives this once per ladder rung when one is
+// configured, and applyLadderRung for how a rung overrides the resolved
+// agent.
+func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, error) {
 	// ── Mandatory: agent: ─────────────────────────────────────────────────
 	agentName, _ := args["agent"].(string)
 	agentName = strings.TrimSpace(agentName)
 	_, hasInlineContract := agentContractArg(args)
 	if agentName == "" && !hasInlineContract {
-		return Result{Error: "host.agent.task: agent: argument is required — declare a named agent in the agents: block"}, nil
+		return Result{Error: "host.agent.task: agent: argument is required — declare a named agent in the agents: block", FailureKind: FailureFatal}, nil
 	}
 	if agentName == "" {
 		agentName = "<inline>"
@@ -108,9 +117,10 @@ func AgentTaskHandler(ctx context.Context, args map[string]any) (Result, error) 
 
 	agent, agentOK := resolveAgent(ctx, args)
 	if !agentOK {
-		return Result{Error: fmt.Sprintf("host.agent.task: unknown agent %q — check the agents: block in app.yaml", agentName)}, nil
+		return Result{Error: fmt.Sprintf("host.agent.task: unknown agent %q — check the agents: block in app.yaml", agentName), FailureKind: FailureFatal}, nil
 	}
 	ctx, agent = applyProvider(ctx, args, agent)
+	ctx, agent = applyLadderRung(ctx, agent)
 
 	// Resolve the worktree up front so the durability barrier below can run on
 	// either dispatch path (plugin or subprocess).
@@ -140,10 +150,10 @@ func AgentTaskHandler(ctx context.Context, args map[string]any) (Result, error) 
 	// ── Acceptance block ──────────────────────────────────────────────────
 	acceptance, acceptErr := parseTaskAcceptance(args)
 	if acceptErr != "" {
-		return Result{Error: "host.agent.task: " + acceptErr}, nil
+		return Result{Error: "host.agent.task: " + acceptErr, FailureKind: FailureFatal}, nil
 	}
 	if acceptance.SchemaPath == "" {
-		return Result{Error: "host.agent.task: acceptance.schema is required"}, nil
+		return Result{Error: "host.agent.task: acceptance.schema is required", FailureKind: FailureFatal}, nil
 	}
 
 	maxRetries := acceptance.MaxRetries
@@ -157,7 +167,9 @@ func AgentTaskHandler(ctx context.Context, args map[string]any) (Result, error) 
 	// ── Resolve binary ────────────────────────────────────────────────────
 	bin, binErr := resolveAgentBin(ctx)
 	if binErr != nil {
-		return Result{Error: binErr.Error()}, nil
+		// Same reasoning as agent_decide.go: the selected backend's binary is
+		// the axis the ladder rotates on, so classify as infra, not fatal.
+		return Result{Error: binErr.Error(), FailureKind: FailureInfra}, nil
 	}
 
 	// ── Context prompt (optional) ─────────────────────────────────────────
@@ -307,6 +319,14 @@ func AgentTaskHandler(ctx context.Context, args map[string]any) (Result, error) 
 	// concurrent callers don't race on the global env.
 	parentSessionID := kitsokiSessionIDFromCtx(ctx)
 
+	// Deterministic seed backstop: when this task's context.args carry a target
+	// story + a seed world (e.g. the punch-list maker's item.{story, world_in}),
+	// register a pending seed keyed by (parentSessionID, story) BEFORE spawning the
+	// maker. The maker's fresh studio server pops it in session.new even if the LLM
+	// omits initial_world, so the nested driven session is seeded deterministically
+	// rather than depending on the maker cooperating. See pending_seed.go.
+	RegisterPendingSeedFromTaskArgs(ctx, args)
+
 	// ── Run the acceptance loop ───────────────────────────────────────────
 	var (
 		lastSubmitted any
@@ -378,7 +398,7 @@ func AgentTaskHandler(ctx context.Context, args map[string]any) (Result, error) 
 			return Result{}, runErr
 		}
 		if cr.Infra != nil {
-			return Result{Error: fmt.Sprintf("host.agent.task: claude exec failed: %v", cr.Infra)}, nil
+			return Result{Error: fmt.Sprintf("host.agent.task: claude exec failed: %v", cr.Infra), FailureKind: FailureInfra}, nil
 		}
 
 		// Observe tool calls in the output for tracing.
@@ -422,9 +442,14 @@ func AgentTaskHandler(ctx context.Context, args map[string]any) (Result, error) 
 				Agent:      agentName,
 				DurationMS: exhaustedDurationMS,
 				Error:      exhaustedErr,
+				Meta:       ladderMetaFields(ctx, FailureCapability),
 			})
+			// The agent ran every acceptance attempt to completion; it simply
+			// never produced a passing submission. Capability failure: the
+			// ladder escalates effort (same model) before trying a stronger one.
 			return Result{
-				Error: exhaustedErr,
+				Error:       exhaustedErr,
+				FailureKind: FailureCapability,
 				Data: map[string]any{
 					"task_trace_id": taskTraceID,
 					"files_changed": filesChanged,
@@ -473,12 +498,23 @@ func AgentTaskHandler(ctx context.Context, args map[string]any) (Result, error) 
 		"initial_state_hash", initialHash,
 	)
 
+	var taskMeta map[string]any
+	if ladderMeta := ladderMetaFields(ctx, FailureNone); ladderMeta != nil {
+		taskMeta = agentUsageMeta(ctx)
+		if taskMeta == nil {
+			taskMeta = map[string]any{}
+		}
+		for k, v := range ladderMeta {
+			taskMeta[k] = v
+		}
+	}
 	appendAgentReturnedEvent(ctx, time.Now(), callID, AgentReturnedPayload{
 		Verb:       "task",
 		Agent:      agentName,
 		Model:      agent.Model,
 		DurationMS: taskDurationMS,
 		Response:   marshalResponse(map[string]any{"text": lastStdout}),
+		Meta:       taskMeta,
 	})
 
 	return Result{
