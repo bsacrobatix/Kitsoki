@@ -244,6 +244,15 @@
           :style="chatColumnStyle"
         >
           <div
+            v-if="workbenchEnabled && selectedMedia"
+            class="iv__chat-media-context"
+            data-testid="chat-pinned-context"
+          >
+            <span class="iv__chat-media-context-label">Working on</span>
+            <strong :title="selectedMedia.title">{{ selectedMedia.title }}</strong>
+            <span class="iv__chat-media-context-hint">Pinned in the workbench</span>
+          </div>
+          <div
             v-if="focusedChat || focusedChatLoading || focusedChatError"
             class="iv__focused-chat"
             data-testid="focused-chat"
@@ -533,7 +542,12 @@
               @click="devtoolsTab = 'trace'"
             >Trace</button>
           </span>
-          <button type="button" class="iv__pane-action" @click="devtoolsDock = 'right'">dock</button>
+          <button
+            type="button"
+            class="iv__pane-action"
+            data-testid="floating-devtools-dock"
+            @click="devtoolsDock = 'right'"
+          >dock</button>
         </div>
         <div class="iv__devtools-body">
           <StateDiagram
@@ -1855,6 +1869,33 @@ function onEventSelect(index: number): void {
   min-height: 0;
 }
 
+.iv__chat-media-context {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.48rem 0.75rem;
+  background: #0d1b2a;
+  border-bottom: 1px solid #1f3a5f;
+  color: var(--k-fg, #e2e8f0);
+  font-size: 0.76rem;
+}
+
+.iv__chat-media-context-label,
+.iv__chat-media-context-hint {
+  color: var(--k-fg-muted, #94a3b8);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.iv__chat-media-context strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .iv__focused-chat {
   flex-shrink: 0;
   padding: 0.55rem 0.8rem;
@@ -2076,6 +2117,12 @@ function onEventSelect(index: number): void {
 .iv__main--workbench .iv__devtools {
   grid-column: 5;
   grid-row: 1;
+}
+
+.iv__main--workbench-horizontal .iv__devtools,
+.iv__main--devtools-bottom .iv__devtools {
+  grid-column: 1 / -1;
+  grid-row: 3;
 }
 
 .iv__main--workbench-horizontal .iv__chat,
