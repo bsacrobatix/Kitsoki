@@ -816,3 +816,82 @@ code {
     grid-template-columns: 1fr;
   }
 }
+
+/* --- Graph view (merged from the .artifacts graph-viewer-library-research mockup) --- */
+
+.view-toggle {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.view-toggle button {
+  background: #fff;
+  border: 1px solid #d8ddd6;
+  border-radius: 999px;
+  color: #46534d;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 7px 18px;
+}
+
+.view-toggle button.active {
+  background: #1d2a24;
+  border-color: #1d2a24;
+  color: #f4f7f3;
+}
+
+.graph-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.graph-toolbar {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.graph-toolbar .select-control {
+  min-width: 280px;
+}
+
+.graph-canvas {
+  background: #fbfcfa;
+  border: 1px solid #d8ddd6;
+  border-radius: 14px;
+  height: 620px;
+  overflow: hidden;
+  position: relative;
+}
+
+.graph-canvas-host {
+  height: 100%;
+  position: relative;
+  width: 100%;
+}
+
+.graph-canvas-host .vue-flow {
+  height: 100%;
+  width: 100%;
+}
+
+.graph-detail pre {
+  background: #1d2a24;
+  border-radius: 10px;
+  color: #d9f2e4;
+  font-size: 12px;
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 12px 14px;
+}
+
+.graph-detail .muted {
+  color: #6a756f;
+  font-size: 13px;
+  margin: 0;
+}

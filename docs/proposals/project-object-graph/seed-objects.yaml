@@ -42,6 +42,9 @@ catalog:
       - id: source-project-object-graph-scratch
         kind: context_note
         path: .context/project-object-graph-proposal-2026-07-04.md
+      - id: source-graph-viewer-prototype
+        kind: prototype
+        path: docs/proposals/project-object-graph/viewer
 
 type_registry:
   - id: core-node
@@ -263,8 +266,10 @@ nodes:
     edges:
       uses:
         - feature-project-object-graph
+        - feature-graph-viewer
       participates_in:
         - usecase-product-owner-computes-roadmap-delta
+        - usecase-pm-scans-roadmap-delta
       owns: []
       assigned_changes: []
 
@@ -284,7 +289,9 @@ nodes:
         - feature-agent-actions
         - feature-trace-introspection
         - feature-meta-mode
-      participates_in: []
+        - feature-graph-viewer
+      participates_in:
+        - usecase-developer-traces-requirement-to-proof
       owns: []
       assigned_changes:
         - change-object-graph-substrate
@@ -1099,6 +1106,7 @@ nodes:
         - actor-product-owner
       proposes:
         - feature-project-object-graph
+        - feature-graph-viewer
       creates_requirements:
         - req-project-objects-data-primary
         - req-project-objects-typed-edges
@@ -1220,3 +1228,152 @@ nodes:
       satisfies:
         - req-project-objects-delta-roadmap
         - req-project-objects-provenance
+
+  # --- Dogfood meta cycle: the viewer itself as graph objects -------------
+
+  - schema: graph/feature/v0
+    id: feature-graph-viewer
+    title: Project object graph viewer
+    status: active
+    visibility: internal
+    summary: One Vue app over the object graph with two projections of the same catalog - a catalog (list/detail/change-request) view and a Vue Flow + ELK graph canvas with layer filtering, focus neighborhoods, and edge navigation.
+    sources:
+      - source-graph-viewer-prototype
+      - source-project-object-graph-proposal
+    edges:
+      requirements:
+        - req-viewer-multi-actor-lenses
+        - req-viewer-permission-visibility
+        - req-viewer-full-graph-traversal
+      use_cases:
+        - usecase-pm-scans-roadmap-delta
+        - usecase-developer-traces-requirement-to-proof
+      evidence:
+        - evidence-graph-viewer-rendering-audits
+      proposed_by:
+        - proposal-project-object-graph
+      implemented_by:
+        - impl-graph-viewer-vue
+
+  - schema: graph/requirement/v0
+    id: req-viewer-multi-actor-lenses
+    title: Each actor role gets a lens onto its part of the lifecycle
+    status: proposed
+    visibility: internal
+    statement: The viewer must let each actor kind (product manager, developer, maintainer, agent) start from the layers that match its concerns - capabilities and delta for PMs, proof and implementation for developers - without forking into per-role apps.
+    rationale: PMs and developers care about different lifecycle stages of the same objects; one shared graph with role lenses keeps them coherent instead of maintaining parallel views of the truth.
+    sources:
+      - source-graph-viewer-prototype
+      - source-docs-strategic-review
+    edges:
+      required_by:
+        - feature-graph-viewer
+      motivated_by:
+        - usecase-pm-scans-roadmap-delta
+        - usecase-developer-traces-requirement-to-proof
+      verified_by: []
+
+  - schema: graph/requirement/v0
+    id: req-viewer-permission-visibility
+    title: Visibility is permission-managed but the graph stays whole
+    status: proposed
+    visibility: internal
+    statement: Every rendered object passes through the visibility model (public/internal today, per-role permissions later); actors keep navigable visibility across the full graph, and objects outside their permission are absent from every projection rather than greyed out or leaked through edges.
+    rationale: Shared decision 5 of the epic - one system holds public promo surface and proprietary inner workings; the viewer is the first surface that must enforce reachability filtering, not just node filtering.
+    sources:
+      - source-project-object-graph-proposal
+      - source-graph-viewer-prototype
+    edges:
+      required_by:
+        - feature-graph-viewer
+      motivated_by:
+        - usecase-pm-scans-roadmap-delta
+      verified_by: []
+
+  - schema: graph/requirement/v0
+    id: req-viewer-full-graph-traversal
+    title: Any object is reachable from any other by walking typed edges
+    status: satisfied
+    visibility: internal
+    statement: From any selected object, incoming and outgoing edge groups are walkable in both the catalog view and the graph canvas, and selection stays in sync when switching projections.
+    sources:
+      - source-graph-viewer-prototype
+    edges:
+      required_by:
+        - feature-graph-viewer
+      motivated_by:
+        - usecase-developer-traces-requirement-to-proof
+      verified_by: []
+
+  - schema: graph/use-case/v0
+    id: usecase-pm-scans-roadmap-delta
+    title: Product manager reviews the open roadmap delta
+    status: supported
+    visibility: internal
+    actor: product-manager
+    trigger: A planning pass needs to answer what work is open, why it exists, and which capability gaps it closes.
+    desired_outcome: The PM filters to the delta layer, walks proposals and work items back to the requirements and use cases that motivate them, and never has to read implementation-level objects to do it.
+    sources:
+      - source-graph-viewer-prototype
+      - source-docs-strategic-review
+    edges:
+      actor:
+        - actor-product-manager
+      exercises:
+        - feature-graph-viewer
+      acceptance:
+        - req-viewer-multi-actor-lenses
+        - req-viewer-permission-visibility
+
+  - schema: graph/use-case/v0
+    id: usecase-developer-traces-requirement-to-proof
+    title: Developer traces a requirement to its implementation and proof
+    status: supported
+    visibility: internal
+    actor: developer
+    trigger: A developer picks up a change and needs to see what already implements or verifies the touched requirements.
+    desired_outcome: The developer focuses the requirement in the graph canvas, expands the neighborhood, and lands on the implementing code paths and verifying evidence without leaving the viewer.
+    sources:
+      - source-graph-viewer-prototype
+    edges:
+      actor:
+        - actor-developer
+      exercises:
+        - feature-graph-viewer
+      acceptance:
+        - req-viewer-full-graph-traversal
+
+  - schema: graph/implementation/v0
+    id: impl-graph-viewer-vue
+    title: Merged Vue viewer (catalog + Vue Flow/ELK graph canvas)
+    status: current
+    visibility: internal
+    implementation_kind: prototype-web
+    source_paths:
+      - docs/proposals/project-object-graph/viewer
+    sources:
+      - source-graph-viewer-prototype
+    edges:
+      implements:
+        - feature-graph-viewer
+
+  - schema: graph/evidence/v0
+    id: evidence-graph-viewer-rendering-audits
+    title: Graph rendering audits (label visibility, edge motion, edge routes)
+    status: current
+    visibility: internal
+    evidence_kind: deterministic_audit
+    producers:
+      - docs/proposals/project-object-graph/viewer/scripts/audit-label-visibility.mjs
+      - docs/proposals/project-object-graph/viewer/scripts/audit-edge-motion.mjs
+      - docs/proposals/project-object-graph/viewer/scripts/audit-edge-routes.mjs
+    artifacts:
+      - artifactDir: .artifacts/graph-viewer-library-research
+        note: screenshot corpus from the library-research spike (smoke, focus, label, motion, route audits)
+    sources:
+      - source-graph-viewer-prototype
+    edges:
+      demonstrates:
+        - feature-graph-viewer
+      verifies:
+        - req-viewer-full-graph-traversal

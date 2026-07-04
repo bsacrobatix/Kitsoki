@@ -2,56 +2,26 @@
 import { computed, ref, watch } from "vue";
 import { parse } from "yaml";
 import seedYaml from "../../seed-objects.yaml?raw";
-
-type EdgeValue = string | string[] | null | undefined;
-
-interface TypeDef {
-  id: string;
-  derives_from: string | null;
-  summary: string;
-}
-
-interface GraphNode {
-  schema: string;
-  id: string;
-  title: string;
-  status: string;
-  visibility: string;
-  summary?: string;
-  statement?: string;
-  rationale?: string;
-  desired_outcome?: string;
-  trigger?: string;
-  goal?: string;
-  executor?: string;
-  actor?: string;
-  actor_kind?: string;
-  site_route?: string;
-  page_kind?: string;
-  edit_surface?: string;
-  tagline?: string;
-  content_fields?: Record<string, string>;
-  media?: Record<string, string>;
-  implementation_kind?: string;
-  evidence_kind?: string;
-  artifacts?: Array<Record<string, string>>;
-  sources?: string[];
-  edges?: Record<string, EdgeValue>;
-}
-
-interface SeedCatalog {
-  catalog: {
-    title: string;
-    status: string;
-    purpose: string;
-    source_window: {
-      sampled_at: string;
-      inputs: Array<{ id: string; kind: string; path: string }>;
-    };
-  };
-  type_registry: TypeDef[];
-  nodes: GraphNode[];
-}
+import GraphCanvas from "./graph/GraphCanvas.vue";
+import { seedWireGraph } from "./graph/seed-graph";
+// @ts-ignore -- research mock graphs kept as plain JS
+import { graphExamples } from "./graph/mock-graphs.js";
+import {
+  layers,
+  nodeType,
+  nodeLayerId,
+  edgeTargets,
+  typeLabel,
+  edgeLabel,
+  typeOrder,
+  lifecycleBucket,
+  lifecycleLabel,
+  nodeText,
+  type EdgeValue,
+  type GraphNode,
+  type SeedCatalog,
+  type TypeDef,
+} from "./catalog-model";
 
 const data = parse(seedYaml) as SeedCatalog;
 const selectedId = ref("sitepage-feature-agent-actions");
@@ -61,43 +31,40 @@ const query = ref("");
 const draftFields = ref({ title: "", tagline: "", summary: "" });
 const requestStarted = ref(false);
 
-const layers = [
-  {
-    id: "actors",
-    title: "Actors, agents, and responsibilities",
-    short: "Actors",
-    description: "Who uses, owns, plans, implements, reviews, or automates the work represented in the graph.",
-    types: ["actor", "agent"],
-  },
-  {
-    id: "site",
-    title: "Public product site",
-    short: "Site",
-    description: "Editable public pages generated from graph-backed capability copy, demo media, and consistency rules.",
-    types: ["site-page"],
-  },
-  {
-    id: "capabilities",
-    title: "Product capabilities and requirements",
-    short: "Capabilities",
-    description: "What exists or is desired: product features, requirements, and the user scenarios they support.",
-    types: ["feature", "requirement", "use-case"],
-  },
-  {
-    id: "delta",
-    title: "Change and roadmap work",
-    short: "Delta",
-    description: "How the project moves from current state to desired state: proposals and work items.",
-    types: ["proposal", "change"],
-  },
-  {
-    id: "proof",
-    title: "Implementation and proof",
-    short: "Proof",
-    description: "Where shipped capabilities live and what verifies them: code, stories, demos, fixtures, and evidence.",
-    types: ["evidence", "implementation"],
-  },
-];
+const viewMode = ref<"catalog" | "graph">("catalog");
+const graphSourceKey = ref("seed");
+const graphDirection = ref("RIGHT");
+const graphRadius = ref(2);
+const graphSelection = ref<Record<string, unknown> | null>(null);
+const exampleFocusId = ref("");
+
+const seedGraph = computed(() => seedWireGraph(data));
+const graphSources = computed(() => [
+  { key: "seed", title: data.catalog.title, family: "Seed catalog", graph: seedGraph.value },
+  ...graphExamples.map((item: { key: string; title: string; family: string; graph: object }) => ({
+    key: item.key,
+    title: item.title,
+    family: item.family,
+    graph: item.graph,
+  })),
+]);
+const activeGraphSource = computed(
+  () => graphSources.value.find((source) => source.key === graphSourceKey.value) ?? graphSources.value[0],
+);
+const graphFocusId = computed(() => (graphSourceKey.value === "seed" ? selectedId.value : exampleFocusId.value));
+
+watch(graphSourceKey, () => {
+  exampleFocusId.value = "";
+  graphSelection.value = null;
+});
+
+function onGraphFocus(id: string) {
+  if (graphSourceKey.value === "seed") {
+    selectNode(id);
+  } else {
+    exampleFocusId.value = id;
+  }
+}
 
 const nodeById = computed(() => new Map(data.nodes.map((node) => [node.id, node])));
 const typeById = computed(() => new Map(data.type_registry.map((type) => [type.id, type])));
@@ -297,19 +264,6 @@ watch(changedFields, () => {
   requestStarted.value = false;
 });
 
-function nodeType(node: GraphNode): string {
-  return node.schema.split("/")[1] ?? node.schema;
-}
-
-function nodeLayerId(node: GraphNode): string {
-  return layers.find((layer) => layer.types.includes(nodeType(node)))?.id ?? "capabilities";
-}
-
-function edgeTargets(value: EdgeValue): string[] {
-  if (!value) return [];
-  return Array.isArray(value) ? value : [value];
-}
-
 function groupEdges(edges: Record<string, EdgeValue>) {
   return Object.entries(edges)
     .map(([name, value]) => ({
@@ -333,86 +287,12 @@ function selectLayerType(layerId: string, typeId: string) {
 }
 
 function selectNode(id: string) {
+  graphSourceKey.value = "seed";
   selectedId.value = id;
   selectedLayerId.value = nodeLayerId(nodeById.value.get(id) ?? selectedNode.value);
   selectedTypeId.value = "all";
 }
 
-function typeLabel(type: string): string {
-  const labels: Record<string, string> = {
-    actor: "Actors",
-    agent: "Agents",
-    "site-page": "Site pages",
-    feature: "Features",
-    requirement: "Requirements",
-    "use-case": "Use cases",
-    proposal: "Proposals",
-    evidence: "Evidence",
-    implementation: "Implementations",
-    change: "Work items",
-  };
-  return labels[type] ?? type;
-}
-
-function edgeLabel(edge: string): string {
-  const labels: Record<string, string> = {
-    actor: "actor",
-    uses: "uses",
-    owns: "owns",
-    participates_in: "participates in",
-    assigned_changes: "assigned changes",
-    owned_by: "owned by",
-    assigned_to: "assigned to",
-    requirements: "must satisfy",
-    use_cases: "used by",
-    evidence: "proved by",
-    proposed_by: "proposed by",
-    implemented_by: "implemented by",
-    required_by: "required by",
-    motivated_by: "motivated by",
-    verified_by: "verified by",
-    exercises: "exercises",
-    acceptance: "acceptance",
-    demonstrates: "demonstrates",
-    verifies: "verifies",
-    implements: "implements",
-    creates_requirements: "creates requirements",
-    creates_use_cases: "creates use cases",
-    proposes: "proposes",
-    decomposes_to: "breaks into",
-    satisfies: "satisfies",
-  };
-  return labels[edge] ?? edge.replaceAll("_", " ");
-}
-
-function typeOrder(type: string): number {
-  const index = ["actor", "agent", "site-page", "feature", "requirement", "use-case", "proposal", "change", "evidence", "implementation"].indexOf(type);
-  return index === -1 ? 99 : index;
-}
-
-function lifecycleBucket(node: GraphNode): string {
-  if (["shipped", "satisfied", "supported"].includes(node.status)) return "available";
-  if (node.status === "active") return "active";
-  if (node.status === "current") return "proof";
-  if (node.status === "proposed") return "roadmap";
-  if (node.status === "draft") return "candidate";
-  return "candidate";
-}
-
-function lifecycleLabel(bucket: string): string {
-  const labels: Record<string, string> = {
-    available: "Available",
-    active: "Active",
-    proof: "Proof",
-    roadmap: "Roadmap",
-    candidate: "Candidate",
-  };
-  return labels[bucket] ?? bucket;
-}
-
-function nodeText(node: GraphNode): string {
-  return node.summary ?? node.statement ?? node.desired_outcome ?? node.goal ?? node.rationale ?? "No description yet.";
-}
 </script>
 
 <template>
@@ -442,6 +322,11 @@ function nodeText(node: GraphNode): string {
       >
         {{ entry.label }} {{ entry.count }}
       </span>
+    </section>
+
+    <section class="view-toggle" aria-label="View mode">
+      <button type="button" :class="{ active: viewMode === 'catalog' }" @click="viewMode = 'catalog'">Catalog</button>
+      <button type="button" :class="{ active: viewMode === 'graph' }" @click="viewMode = 'graph'">Graph</button>
     </section>
 
     <section class="layer-map" aria-label="Project object graph layers">
@@ -527,7 +412,7 @@ function nodeText(node: GraphNode): string {
         </div>
       </aside>
 
-      <section class="focus">
+      <section v-if="viewMode === 'catalog'" class="focus">
         <article class="focus-card">
           <div class="focus-top">
             <div>
@@ -671,6 +556,53 @@ function nodeText(node: GraphNode): string {
             <code>{{ source?.path }}</code>
           </div>
         </section>
+      </section>
+
+      <section v-else class="focus graph-pane">
+        <div class="graph-toolbar">
+          <label class="select-control">
+            <span>Graph source</span>
+            <select v-model="graphSourceKey">
+              <option v-for="source in graphSources" :key="source.key" :value="source.key">
+                {{ source.family }} — {{ source.title }}
+              </option>
+            </select>
+          </label>
+          <div class="segmented" aria-label="Layout direction">
+            <button type="button" :class="{ active: graphDirection === 'RIGHT' }" @click="graphDirection = 'RIGHT'">LR</button>
+            <button type="button" :class="{ active: graphDirection === 'LEFT' }" @click="graphDirection = 'LEFT'">RL</button>
+            <button type="button" :class="{ active: graphDirection === 'DOWN' }" @click="graphDirection = 'DOWN'">TB</button>
+            <button type="button" :class="{ active: graphDirection === 'UP' }" @click="graphDirection = 'UP'">BT</button>
+          </div>
+          <div class="segmented" aria-label="Visible neighborhood">
+            <button type="button" :class="{ active: graphRadius === 1 }" @click="graphRadius = 1">1 edge</button>
+            <button type="button" :class="{ active: graphRadius === 2 }" @click="graphRadius = 2">2 edges</button>
+            <button type="button" :class="{ active: graphRadius === 3 }" @click="graphRadius = 3">3 edges</button>
+            <button type="button" :class="{ active: graphRadius === Infinity }" @click="graphRadius = Infinity">All</button>
+          </div>
+          <div class="stat-row" aria-label="Topology summary">
+            <span>{{ activeGraphSource.graph.nodes.length }} nodes</span>
+            <span>{{ activeGraphSource.graph.edges.length }} edges</span>
+          </div>
+        </div>
+
+        <div class="graph-canvas">
+          <GraphCanvas
+            :graph="activeGraphSource.graph"
+            :direction="graphDirection"
+            :radius="graphRadius"
+            :focus-id="graphFocusId"
+            @update:focus-id="onGraphFocus"
+            @element-selected="graphSelection = $event"
+          />
+        </div>
+
+        <div class="graph-detail">
+          <pre v-if="graphSelection">{{ JSON.stringify(graphSelection, null, 2) }}</pre>
+          <p v-else class="muted">
+            Click a node or edge for raw details. Picking a catalog object on the left focuses it in the seed graph.
+          </p>
+        </div>
       </section>
     </section>
   </main>

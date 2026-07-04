@@ -43,9 +43,11 @@ itself driven through kitsoki-dev sessions.
   fixture pair (current, desired) whose computed delta equals a golden
   work-graph file.*
 - **G5 — The graph is visible.** One graph viewer in `kitsoki web`
-  (tools/runstatus), consolidating the branch's proposal-local Vue prototype
-  and the Vue Flow + ELK mockup in `.artifacts/graph-viewer-library-research/`
-  (main checkout) — typed-layer filtering, node detail, edge navigation.
+  (tools/runstatus) — typed-layer filtering, node detail, edge navigation.
+  The two prototypes are already consolidated into one Vue app at
+  `docs/proposals/project-object-graph/viewer/` (catalog view + Vue Flow/ELK
+  graph canvas over the seed catalog, shared selection); remaining work is
+  porting that surface into tools/runstatus fed by the G1 loader.
   *Gate: a deterministic no-LLM Playwright spec over the seeded catalog.*
 - **G6 — Dogfooded throughout (cross-cutting).** Design/decomposition steps
   for this goal run as kitsoki-dev story sessions through the studio MCP with
