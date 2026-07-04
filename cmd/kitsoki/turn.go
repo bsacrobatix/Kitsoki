@@ -135,7 +135,7 @@ func turnCmd() *cobra.Command {
 
 Stateless probe (original):
   kitsoki turn <app.yaml> --state <path> --intent <name> [--slots JSON] [--world JSON]
-  kitsoki turn <app.yaml> --state <path> --input "free text" [--harness claude]
+  kitsoki turn <app.yaml> --state <path> --input "free text" [--harness replay|claude|live]
 
   Runs a single stateless turn without persisting anything.  Outputs a JSON
   document describing the state transition, world diff, and view.
@@ -215,7 +215,12 @@ Examples:
 			}
 			defer func() { _ = s.Close() }()
 
-			h, err := buildTurnHarness(harnessType, recordingPath, def, intentName != "")
+			resolvedHarnessType := harnessType
+			if resolvedHarnessType == "" {
+				resolvedHarnessType = autoSelectHarness()
+			}
+
+			h, err := buildTurnHarness(resolvedHarnessType, recordingPath, def, intentName != "")
 			if err != nil {
 				return err
 			}
@@ -250,7 +255,7 @@ Examples:
 				orchestrator.WithChatStore(chatAdapter),
 				orchestrator.WithAgentRegistry(agentReg),
 			}
-			orchOpts = append(orchOpts, semanticRoutingOptions()...)
+			orchOpts = append(orchOpts, turnSemanticRoutingOptions(resolvedHarnessType, recordingPath, intentName != "")...)
 			orch := orchestrator.New(def, m, s, h, orchOpts...)
 
 			result, err := orch.OneShot(cmd.Context(), orchestrator.OneShotInput{
@@ -276,7 +281,7 @@ Examples:
 	cmd.Flags().StringVar(&slotsFlag, "slots", "", `intent slots as JSON or @file (stateless probe only; use --slot for the trace path)`)
 	cmd.Flags().StringVar(&inputText, "input", "", "free-text input routed through the harness (stateless probe only)")
 	cmd.Flags().StringVar(&harnessType, "harness", "", "harness type for --input: claude|live|replay (default auto)")
-	cmd.Flags().StringVar(&recordingPath, "recording", "", "recording YAML for --harness replay")
+	cmd.Flags().StringVar(&recordingPath, "recording", "", "recording YAML for --harness replay; omit to fail closed if routing reaches the harness")
 
 	// Shared.
 	cmd.Flags().StringVar(&intentName, "intent", "", "intent name to invoke directly (both modes)")
@@ -399,14 +404,12 @@ func decodeJSONFlag(raw, fieldName string) (map[string]any, error) {
 	return out, nil
 }
 
-// buildTurnHarness chooses a harness for `kitsoki turn`. When --intent is set
-// the harness is never invoked, so we hand back a no-op replay-ish harness
-// that errors loudly if anything tries to call it.
+// buildTurnHarness chooses a harness for `kitsoki turn`. When --intent is set,
+// or when --harness replay is used without a recording, the harness must never
+// be invoked. Return a no-run harness so deterministic and semantic routes can
+// still be probed while any LLM-tier fallthrough fails closed before spending.
 func buildTurnHarness(harnessType, recordingPath string, def *app.AppDef, directIntent bool) (harness.Harness, error) {
 	if directIntent {
-		// Cheap stub: a replay harness with no recording path will error if
-		// invoked, which is exactly what we want — the direct path must
-		// not call it.
 		return &noRunHarness{}, nil
 	}
 	if harnessType == "" {
@@ -415,7 +418,7 @@ func buildTurnHarness(harnessType, recordingPath string, def *app.AppDef, direct
 	switch harnessType {
 	case "replay":
 		if recordingPath == "" {
-			return nil, fmt.Errorf("--recording is required when --harness replay is set")
+			return &noRunHarness{}, nil
 		}
 		return harness.NewReplay(recordingPath)
 	case "claude":
@@ -431,11 +434,28 @@ func buildTurnHarness(harnessType, recordingPath string, def *app.AppDef, direct
 	}
 }
 
-// noRunHarness is a placeholder harness used when --intent is set: it never
-// gets called, but the orchestrator constructor requires a non-nil harness.
+// turnSemanticRoutingOptions returns the semantic-routing options for the
+// stateless turn command. Explicit --semantic-routing / env overrides still win.
+// When the operator chooses replay without a recording, the only useful posture
+// is a no-LLM deterministic probe: enable the semantic stack so authored
+// examples/default_intents can resolve, and let noRunHarness fail loudly if the
+// route actually needs a model.
+func turnSemanticRoutingOptions(harnessType, recordingPath string, directIntent bool) []orchestrator.Option {
+	if opts := semanticRoutingOptions(); opts != nil {
+		return opts
+	}
+	if !directIntent && harnessType == "replay" && recordingPath == "" {
+		return []orchestrator.Option{orchestrator.WithSemanticRouting(true)}
+	}
+	return nil
+}
+
+// noRunHarness is a fail-closed placeholder harness for no-LLM probe paths. It
+// never gets called on deterministic/semantic/direct routes, but the
+// orchestrator constructor requires a non-nil harness.
 type noRunHarness struct{}
 
 func (n *noRunHarness) RunTurn(context.Context, harness.TurnInput) (mcp.CallToolParams, error) {
-	return mcp.CallToolParams{}, fmt.Errorf("noRunHarness: RunTurn called unexpectedly (--intent path should not invoke the harness)")
+	return mcp.CallToolParams{}, fmt.Errorf("noRunHarness: RunTurn called unexpectedly (no-LLM probe reached the harness)")
 }
 func (n *noRunHarness) Close() error { return nil }

@@ -63,6 +63,47 @@ func TestTurn_RoutedInput(t *testing.T) {
 	assert.Equal(t, app.StatePath("cloakroom"), out.NextState)
 }
 
+func TestTurn_ReplayWithoutRecordingRoutesSemanticProbe(t *testing.T) {
+	resetSemanticRoutingGlobals(t)
+
+	stdout, err := runKitsoki(t,
+		"turn", "../../stories/dev-story/app.yaml",
+		"--state", "prd.idle",
+		"--input", "what's the state of our local main vs origin",
+		"--harness", "replay",
+	)
+	require.NoError(t, err)
+
+	var out struct {
+		Mode      string        `json:"mode"`
+		Intent    string        `json:"intent"`
+		NextState app.StatePath `json:"next_state"`
+		HostCalls []struct {
+			Namespace string `json:"namespace"`
+		} `json:"host_calls"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &out))
+	require.Equal(t, "transitioned", out.Mode)
+	require.Equal(t, "prd__go_gitops", out.Intent)
+	require.Equal(t, app.StatePath("gitops.intercept"), out.NextState)
+	require.Len(t, out.HostCalls, 1)
+	require.Equal(t, "host.run", out.HostCalls[0].Namespace)
+}
+
+func TestTurn_ReplayWithoutRecordingFailsClosedOnHarnessMiss(t *testing.T) {
+	resetSemanticRoutingGlobals(t)
+
+	_, err := runKitsoki(t,
+		"turn", "../../testdata/apps/cloak/app.yaml",
+		"--state", "foyer",
+		"--input", "this should require the harness",
+		"--harness", "replay",
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "noRunHarness")
+	require.NotContains(t, err.Error(), "--recording is required")
+}
+
 // TestTurn_HostDispatchVisible confirms that one-shot turns dispatch host
 // calls and surface the binding effects in WorldAfter and View, the same as
 // the live orchestrator path does. We cover this with hang_cloak, which
