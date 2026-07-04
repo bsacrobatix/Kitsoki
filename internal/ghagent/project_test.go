@@ -7,9 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/goccy/go-yaml"
-
-	"kitsoki/internal/app"
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 )
@@ -23,18 +20,20 @@ func TestProjectRouteResolverUsesOnboardedProjectStory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".kitsoki.yaml"), []byte("story_dirs:\n  - .kitsoki/stories\nproject_profile: .kitsoki/project-profile.yaml\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	def, _, err := app.BuildRootImporter(&app.RootSpec{
-		World: map[string]any{"workdir": ".", "repo_root": ".", "ticket_repo": "o/r"},
-	}, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, err := yaml.Marshal(def)
-	if err != nil {
-		t.Fatal(err)
-	}
 	appPath := filepath.Join(root, ".kitsoki", "stories", "sample-dev", "app.yaml")
-	if err := os.WriteFile(appPath, body, 0o644); err != nil {
+	if err := os.WriteFile(appPath, []byte(`app:
+  id: sample-dev
+  version: 0.1.0
+world:
+  repo_root: { type: string, default: "." }
+  workdir: { type: string, default: "." }
+  ticket_repo: { type: string, default: "o/r" }
+root: idle
+states:
+  idle:
+    description: "Idle."
+    view: "Idle."
+`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
