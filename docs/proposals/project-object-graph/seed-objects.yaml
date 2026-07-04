@@ -1,0 +1,529 @@
+schema: project-object-graph/seed-catalog/v0
+catalog:
+  id: kitsoki-project-object-graph-seed
+  title: Kitsoki project object graph seed
+  status: draft
+  visibility: internal
+  purpose: review-fixture
+  source_window:
+    branch: main
+    sampled_at: "2026-07-04"
+    inputs:
+      - id: source-project-object-graph-proposal
+        kind: proposal
+        path: docs/proposals/project-object-graph.md
+      - id: source-lifecycle-taxonomy
+        kind: proposal
+        path: docs/proposals/lifecycle-taxonomy.md
+      - id: source-human-action-workflows
+        kind: proposal
+        path: docs/proposals/human-action-workflows.md
+      - id: source-operator-ask-feature
+        kind: feature_catalog
+        path: features/operator-ask.yaml
+      - id: source-docs-strategic-review
+        kind: context_note
+        path: .context/docs-review-and-strategic-plan-2026-07-04.md
+      - id: source-project-object-graph-scratch
+        kind: context_note
+        path: .context/project-object-graph-proposal-2026-07-04.md
+
+type_registry:
+  - id: core-node
+    schema: graph-type/v0
+    derives_from: null
+    summary: Shared envelope for every project object graph node.
+    required_fields:
+      - id
+      - schema
+      - title
+      - status
+      - visibility
+      - sources
+      - edges
+    edge_fields:
+      - id: sources
+        target_type: source
+        cardinality: many
+  - id: feature
+    schema: graph-type/v0
+    derives_from: core-node
+    summary: Durable product capability or capability group.
+    edge_fields:
+      - id: requirements
+        target_type: requirement
+        cardinality: many
+      - id: use_cases
+        target_type: use-case
+        cardinality: many
+      - id: evidence
+        target_type: evidence
+        cardinality: many
+      - id: implemented_by
+        target_type: implementation
+        cardinality: many
+      - id: proposed_by
+        target_type: proposal
+        cardinality: many
+  - id: requirement
+    schema: graph-type/v0
+    derives_from: core-node
+    summary: Durable, testable statement the project must satisfy.
+    edge_fields:
+      - id: required_by
+        target_type: feature
+        cardinality: many
+      - id: verified_by
+        target_type: evidence
+        cardinality: many
+      - id: motivated_by
+        target_type: use-case
+        cardinality: many
+  - id: use-case
+    schema: graph-type/v0
+    derives_from: core-node
+    summary: Actor goal and scenario that motivates requirements.
+    edge_fields:
+      - id: exercises
+        target_type: feature
+        cardinality: many
+      - id: acceptance
+        target_type: requirement
+        cardinality: many
+  - id: proposal
+    schema: graph-type/v0
+    derives_from: core-node
+    summary: Transient design or change proposal represented as graph data.
+    edge_fields:
+      - id: proposes
+        target_type: feature
+        cardinality: many
+      - id: creates_requirements
+        target_type: requirement
+        cardinality: many
+      - id: creates_use_cases
+        target_type: use-case
+        cardinality: many
+      - id: decomposes_to
+        target_type: change
+        cardinality: many
+  - id: evidence
+    schema: graph-type/v0
+    derives_from: core-node
+    summary: Deterministic proof artifact, fixture, trace, media, or lint result.
+    edge_fields:
+      - id: verifies
+        target_type: requirement
+        cardinality: many
+      - id: demonstrates
+        target_type: feature
+        cardinality: many
+  - id: implementation
+    schema: graph-type/v0
+    derives_from: core-node
+    summary: Shipped code, docs, story files, or runtime surfaces implementing a feature.
+    edge_fields:
+      - id: implements
+        target_type: feature
+        cardinality: many
+  - id: change
+    schema: graph-type/v0
+    derives_from: core-node
+    summary: Transient work node compatible with the existing change-node decomposition contract.
+    edge_fields:
+      - id: implements
+        target_type: feature
+        cardinality: many
+      - id: satisfies
+        target_type: requirement
+        cardinality: many
+
+nodes:
+  - schema: graph/feature/v0
+    id: feature-operator-ask
+    title: Operator questions forwarded from headless agents
+    status: shipped
+    visibility: public
+    summary: Dispatched agent questions become blocking operator UI questions instead of silent empty-answer defaults.
+    sources:
+      - source-operator-ask-feature
+    edges:
+      requirements:
+        - req-operator-ask-no-silent-default
+        - req-operator-ask-blocking-round-trip
+        - req-operator-ask-multi-select
+      use_cases:
+        - usecase-maintainer-answers-blocked-agent
+      evidence:
+        - evidence-operator-ask-tour
+      proposed_by: []
+      implemented_by:
+        - impl-operator-ask-runtime-web
+
+  - schema: graph/requirement/v0
+    id: req-operator-ask-no-silent-default
+    title: Headless agents must not silently answer their own operator questions
+    status: satisfied
+    visibility: public
+    statement: A dispatched agent question must block or be forwarded; empty auto-resolution is forbidden for live operator workflows.
+    rationale: AskUserQuestion in headless dispatched agents silently resolves with empty answers, which can move a workflow through an unreviewed fork.
+    sources:
+      - source-operator-ask-feature
+    edges:
+      required_by:
+        - feature-operator-ask
+      motivated_by:
+        - usecase-maintainer-answers-blocked-agent
+      verified_by:
+        - evidence-operator-ask-tour
+
+  - schema: graph/requirement/v0
+    id: req-operator-ask-blocking-round-trip
+    title: Operator answer must unblock the exact parked agent question
+    status: satisfied
+    visibility: public
+    statement: The UI answer is keyed to the original question id and resumes that parked agent turn only after the operator sends a complete answer.
+    sources:
+      - source-operator-ask-feature
+    edges:
+      required_by:
+        - feature-operator-ask
+      motivated_by:
+        - usecase-maintainer-answers-blocked-agent
+      verified_by:
+        - evidence-operator-ask-tour
+
+  - schema: graph/requirement/v0
+    id: req-operator-ask-multi-select
+    title: Forwarded questions support single-select and multi-select answers
+    status: satisfied
+    visibility: public
+    statement: Operator forwarding must preserve the agent's single-select or multi-select answer shape and return the selected option set.
+    sources:
+      - source-operator-ask-feature
+    edges:
+      required_by:
+        - feature-operator-ask
+      motivated_by:
+        - usecase-maintainer-answers-blocked-agent
+      verified_by:
+        - evidence-operator-ask-tour
+
+  - schema: graph/use-case/v0
+    id: usecase-maintainer-answers-blocked-agent
+    title: Maintainer answers a blocked implementation agent
+    status: supported
+    visibility: public
+    actor: maintainer
+    trigger: A dispatched bugfix or implementation agent reaches a decision it cannot safely make alone.
+    desired_outcome: The maintainer sees the exact question and options, answers in web or TUI, and the parked agent resumes with that answer recorded.
+    sources:
+      - source-operator-ask-feature
+    edges:
+      exercises:
+        - feature-operator-ask
+      acceptance:
+        - req-operator-ask-no-silent-default
+        - req-operator-ask-blocking-round-trip
+        - req-operator-ask-multi-select
+
+  - schema: graph/evidence/v0
+    id: evidence-operator-ask-tour
+    title: Operator-ask deterministic video tour and flow fixture
+    status: current
+    visibility: public
+    evidence_kind: deterministic_demo
+    producers:
+      - tests/playwright/operator-ask-video.spec.ts
+    artifacts:
+      - artifactDir: operator-ask
+        videoBase: operator-ask-demo
+        posterStep: oa-intro-home
+      - story: stories/bugfix
+        flow: stories/bugfix/flows/happy_llm.yaml
+        hostCassette: stories/bugfix/flows/demo.cassette.yaml
+    sources:
+      - source-operator-ask-feature
+    edges:
+      demonstrates:
+        - feature-operator-ask
+      verifies:
+        - req-operator-ask-no-silent-default
+        - req-operator-ask-blocking-round-trip
+        - req-operator-ask-multi-select
+
+  - schema: graph/implementation/v0
+    id: impl-operator-ask-runtime-web
+    title: Operator-ask runtime bridge and web modal
+    status: shipped
+    visibility: internal
+    implementation_kind: runtime-and-web
+    source_paths:
+      - docs/architecture/operator-ask.md
+      - features/operator-ask.yaml
+    sources:
+      - source-operator-ask-feature
+    edges:
+      implements:
+        - feature-operator-ask
+
+  - schema: graph/feature/v0
+    id: feature-project-object-graph
+    title: Project object graph
+    status: proposed
+    visibility: internal
+    summary: Typed YAML project objects and typed edges make features, requirements, proposals, plans, tests, evidence, and roadmap deltas walkable by tools.
+    sources:
+      - source-project-object-graph-proposal
+      - source-project-object-graph-scratch
+      - source-lifecycle-taxonomy
+    edges:
+      requirements:
+        - req-project-objects-data-primary
+        - req-project-objects-typed-edges
+        - req-project-objects-delta-roadmap
+        - req-project-objects-provenance
+      use_cases:
+        - usecase-product-owner-computes-roadmap-delta
+        - usecase-agent-mines-backlog-into-graph
+      evidence: []
+      proposed_by:
+        - proposal-project-object-graph
+      implemented_by: []
+
+  - schema: graph/requirement/v0
+    id: req-project-objects-data-primary
+    title: Project objects are structured data, not markdown free text
+    status: proposed
+    visibility: internal
+    statement: Features, requirements, use cases, proposals, changesets, tests, and evidence must be schema-pinned records with markdown only inside typed fields.
+    rationale: Tools must traverse and validate the project state without parsing arbitrary prose conventions.
+    sources:
+      - source-project-object-graph-proposal
+      - source-lifecycle-taxonomy
+    edges:
+      required_by:
+        - feature-project-object-graph
+      motivated_by:
+        - usecase-agent-mines-backlog-into-graph
+      verified_by:
+        - evidence-project-object-graph-seed-catalog
+
+  - schema: graph/requirement/v0
+    id: req-project-objects-typed-edges
+    title: Relationships use typed edge fields and resolvable ids
+    status: proposed
+    visibility: internal
+    statement: Every relationship must be declared in a typed edge field with a target node type, and catalog lint must reject dangling ids and invalid edge targets.
+    sources:
+      - source-project-object-graph-proposal
+      - source-lifecycle-taxonomy
+    edges:
+      required_by:
+        - feature-project-object-graph
+      motivated_by:
+        - usecase-agent-mines-backlog-into-graph
+      verified_by:
+        - evidence-project-object-graph-seed-catalog
+
+  - schema: graph/requirement/v0
+    id: req-project-objects-delta-roadmap
+    title: Roadmap is computed from current-state and desired-state graph deltas
+    status: proposed
+    visibility: internal
+    statement: Roadmap views must be derived from durable desired/current objects plus transient changesets, not maintained as prose or a parallel hand-authored roadmap.
+    sources:
+      - source-project-object-graph-proposal
+      - source-human-action-workflows
+      - source-docs-strategic-review
+    edges:
+      required_by:
+        - feature-project-object-graph
+      motivated_by:
+        - usecase-product-owner-computes-roadmap-delta
+      verified_by: []
+
+  - schema: graph/requirement/v0
+    id: req-project-objects-provenance
+    title: Graph nodes retain source provenance from proposals and context notes
+    status: proposed
+    visibility: internal
+    statement: Nodes produced from backlog mining must carry structured source references so reviewers can trace every requirement or use case back to its proposal, feature catalog entry, or context note.
+    sources:
+      - source-docs-strategic-review
+      - source-project-object-graph-scratch
+    edges:
+      required_by:
+        - feature-project-object-graph
+      motivated_by:
+        - usecase-agent-mines-backlog-into-graph
+      verified_by:
+        - evidence-project-object-graph-seed-catalog
+
+  - schema: graph/use-case/v0
+    id: usecase-agent-mines-backlog-into-graph
+    title: Agent converts proposal backlog and context notes into graph objects
+    status: proposed
+    visibility: internal
+    actor: planning-agent
+    trigger: The repo contains many proposals plus transient .context notes that describe features, requirements, decisions, and cleanup work in prose.
+    desired_outcome: The agent emits typed feature, requirement, use-case, proposal, evidence, and change nodes with source refs and edges, then deterministic lint reports gaps for human review.
+    sources:
+      - source-docs-strategic-review
+      - source-project-object-graph-scratch
+    edges:
+      exercises:
+        - feature-project-object-graph
+      acceptance:
+        - req-project-objects-data-primary
+        - req-project-objects-typed-edges
+        - req-project-objects-provenance
+
+  - schema: graph/use-case/v0
+    id: usecase-product-owner-computes-roadmap-delta
+    title: Product owner computes roadmap work from desired-state gaps
+    status: proposed
+    visibility: internal
+    actor: product-owner
+    trigger: A strategic review identifies desired capabilities, shipped capabilities, and proposal debt across docs/proposals and .context.
+    desired_outcome: The product owner sees a computed work graph with dependencies, ready sets, evidence gaps, and transient changesets needed to close the gap.
+    sources:
+      - source-project-object-graph-proposal
+      - source-docs-strategic-review
+      - source-human-action-workflows
+    edges:
+      exercises:
+        - feature-project-object-graph
+      acceptance:
+        - req-project-objects-delta-roadmap
+        - req-project-objects-typed-edges
+        - req-project-objects-provenance
+
+  - schema: graph/proposal/v0
+    id: proposal-project-object-graph
+    title: Project object graph epic
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/project-object-graph.md
+    sources:
+      - source-project-object-graph-proposal
+      - source-project-object-graph-scratch
+    edges:
+      proposes:
+        - feature-project-object-graph
+      creates_requirements:
+        - req-project-objects-data-primary
+        - req-project-objects-typed-edges
+        - req-project-objects-delta-roadmap
+        - req-project-objects-provenance
+      creates_use_cases:
+        - usecase-agent-mines-backlog-into-graph
+        - usecase-product-owner-computes-roadmap-delta
+      decomposes_to:
+        - change-object-graph-substrate
+        - change-capability-catalog-dogfood
+        - change-roadmap-delta-view
+
+  - schema: graph/evidence/v0
+    id: evidence-project-object-graph-seed-catalog
+    title: Review seed catalog for project object graph shape
+    status: draft
+    visibility: internal
+    evidence_kind: static_fixture
+    artifact_path: docs/proposals/project-object-graph/seed-objects.yaml
+    checks:
+      - all source refs resolve to catalog.source_window.inputs ids
+      - every typed edge target resolves to a node id in this file
+      - feature to requirement to use-case to evidence paths can be walked without reading markdown body text
+    sources:
+      - source-project-object-graph-proposal
+      - source-docs-strategic-review
+    edges:
+      demonstrates:
+        - feature-project-object-graph
+      verifies:
+        - req-project-objects-data-primary
+        - req-project-objects-typed-edges
+        - req-project-objects-provenance
+
+  - schema: graph/change/v0
+    id: change-object-graph-substrate
+    title: Implement object graph substrate
+    status: proposed
+    visibility: internal
+    executor: agent
+    depends_on: []
+    goal: Add the node envelope, type registry, loader, schema validation, and catalog lint used by every later object graph slice.
+    scope:
+      - internal/graph/
+      - schemas/project-object-graph/
+      - docs/proposals/lifecycle-taxonomy.md
+    acceptance:
+      - loader reads seed objects as typed data records
+      - catalog lint rejects duplicate ids, dangling ids, and invalid typed edge targets
+      - markdown is allowed only in declared string fields
+    sources:
+      - source-project-object-graph-proposal
+      - source-lifecycle-taxonomy
+    edges:
+      implements:
+        - feature-project-object-graph
+      satisfies:
+        - req-project-objects-data-primary
+        - req-project-objects-typed-edges
+
+  - schema: graph/change/v0
+    id: change-capability-catalog-dogfood
+    title: Re-type the shipped capability catalog as graph nodes
+    status: proposed
+    visibility: internal
+    executor: agent
+    depends_on:
+      - change-object-graph-substrate
+    goal: Use the existing features catalog as the first dogfood path for feature, requirement, use-case, evidence, and visibility nodes.
+    scope:
+      - features/
+      - docs/site/
+      - tools/runstatus/
+    acceptance:
+      - site generation keeps working from existing feature records or a lossless adapter
+      - capability nodes gain requirements, use cases, evidence, and visibility fields
+      - public generation fails on internal nodes reachable from public edges
+    sources:
+      - source-project-object-graph-proposal
+      - source-operator-ask-feature
+    edges:
+      implements:
+        - feature-project-object-graph
+      satisfies:
+        - req-project-objects-data-primary
+        - req-project-objects-typed-edges
+
+  - schema: graph/change/v0
+    id: change-roadmap-delta-view
+    title: Compute roadmap from graph deltas
+    status: proposed
+    visibility: internal
+    executor: agent
+    depends_on:
+      - change-object-graph-substrate
+    goal: Derive prioritized roadmap work from desired-state and current-state graph differences instead of maintaining a parallel roadmap document.
+    scope:
+      - internal/graph/
+      - docs/proposals/roadmap-portfolio-work.md
+      - .agents/skills/goal/
+    acceptance:
+      - roadmap view lists open deltas and dependency-ready sets
+      - roadmap items retain source refs to proposals and context notes
+      - generated work nodes reuse the change-node contract where possible
+    sources:
+      - source-project-object-graph-proposal
+      - source-human-action-workflows
+      - source-docs-strategic-review
+    edges:
+      implements:
+        - feature-project-object-graph
+      satisfies:
+        - req-project-objects-delta-roadmap
+        - req-project-objects-provenance
