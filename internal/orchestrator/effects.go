@@ -87,6 +87,17 @@ func (o *Orchestrator) dispatchBackground(
 		},
 	}
 
+	// Thread the parent session id onto the job's context. The scheduler derives
+	// the handler ctx via context.WithoutCancel(ctx), which preserves values — so
+	// stamping it here makes host.WithKitsokiSessionID visible inside the background
+	// handler. Without this a background host.agent.task (background: true) runs with
+	// an empty kitsokiSessionIDFromCtx (the studio process env has no
+	// KITSOKI_SESSION_ID), which silently disabled the deterministic maker-seed
+	// backstop and dropped trace-continuity/lineage for the spawned subprocess. The
+	// foreground turn already carries this seam (session_runtime.go); background
+	// dispatch must too — principle of least surprise.
+	ctx = host.WithKitsokiSessionID(ctx, string(sid))
+
 	jobID, err := o.scheduler.Submit(ctx, spec)
 	if err != nil {
 		return nil, w, fmt.Errorf("dispatchBackground: scheduler.Submit: %w", err)

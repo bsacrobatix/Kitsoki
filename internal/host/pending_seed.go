@@ -283,8 +283,19 @@ func TakePendingSeedForStory(storyPath string) (map[string]any, bool) {
 func RegisterPendingSeedFromTaskArgs(ctx context.Context, args map[string]any) {
 	sessionID := kitsokiSessionIDFromCtx(ctx)
 	if sessionID == "" {
-		return
+		// Background-job dispatch (host.agent.task background: true) runs the handler
+		// on a scheduler ctx that carries AgentCallCtx (stamped by the orchestrator's
+		// host dispatch with the parent session id) but historically NOT the
+		// WithKitsokiSessionID key, and the studio process env has no
+		// KITSOKI_SESSION_ID — so kitsokiSessionIDFromCtx is empty there. Fall back to
+		// the AgentCallCtx session id, which is always present on both dispatch paths.
+		sessionID = strings.TrimSpace(string(AgentCallCtxFrom(ctx).SessionID))
 	}
+	// NOTE: do NOT early-return on an empty sessionID. RegisterPendingSeed permits an
+	// empty id (the entry stays reachable via the consumer's oldest-fallback, which is
+	// exactly how a codex-spawned studio MCP — no forwarded session env — resolves it).
+	// Gating registration on a non-empty id defeats the backstop precisely in that
+	// codex case. The (story, world) extraction below is the real no-op gate.
 	contextArgs := taskContextArgs(args)
 	if contextArgs == nil {
 		return
