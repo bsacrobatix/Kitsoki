@@ -235,3 +235,64 @@ lists both). One cell = one `(target, persona, scenario)` triple:
 
 Not yet wired: the browser cell image (`arena-browser-image`) and the swarm job
 type build on this plugin but are separate changes.
+
+## Status — swarm job type landed (swarm-arena-job)
+
+`swarm` is a third job type alongside `bugfix`/`persona-qa` (`arena plugins`
+lists all three). Unlike persona-qa's "one cell per persona", **one swarm cell
+IS the whole tier-1 swarm run** — the shared `kitsoki web` server plus its
+N scripted Playwright users, from `tools/swarm/` +
+`tools/runstatus/tests/playwright/swarm-replay-users.spec.ts` (`swarm-tier1`).
+The swarm itself is arena's unit of placement; the users inside it are not
+separate cells, so scaling the swarm out just means placing more swarm cells
+(more targets/variants/axis combos, or more hosts), the same way any other
+job type scales.
+
+- **image()** always requests the browser-capable image
+  (`kitsoki-arena-repo-runtime-browser:latest`, from `arena-browser-image`,
+  the first job type to actually use it) unless a spec pins
+  `target.meta.image`/`variant.meta.image` to an override.
+- **No separate `--live` path.** The tier-1 harness never calls an LLM — every
+  user is a scripted replay driven from `tools/product-journey/personas.json`
+  lenses over a flow fixture — so `drive_command` runs the identical
+  `cd tools/runstatus && npx playwright test tests/playwright/swarm-replay-users.spec.ts`
+  command whether or not `--live` is passed. `live` is accepted only for
+  interface parity with `bugfix`/`persona-qa`.
+- **Axis-driven knobs:** `axis.users` maps onto the harness's own `SWARM_USERS`
+  env var and `axis.interactive_concurrency` onto
+  `SWARM_INTERACTIVE_CONCURRENCY` (both already read by
+  `swarm-replay-users.spec.ts`). `axis.persona_mix` / `axis.fixture` are
+  threaded onto the command line as `SWARM_PERSONA_MIX`/`SWARM_FIXTURE` for
+  forward-compat, but the standing harness does not read them yet (it always
+  rotates every persona in `personas.json` and always drives the hardcoded
+  `happy_path.yaml` fixture) — wiring the harness itself to honor those two
+  knobs is a follow-up to `swarm-tier1`, out of this change's scope
+  (`tools/arena/arena/plugins/swarm.py` + `tools/arena/tests/test_swarm_plugin.py`
+  only; it never touches `tools/swarm/**` or the spec file).
+- **score()** never regexes stdout for a verdict. The ONE thing read from
+  stdout is the harness's own `[swarm] wrote <path> (...)` line
+  (`swarm-replay-users.spec.ts`'s final `console.log`, right after
+  `tools/swarm/results.ts`'s `writeResults` returns) — a path, not a verdict —
+  mirroring `persona_qa.py`'s `_extract_run_dir` convention. That path is
+  mapped from its container form (`KITSOKI_MNT/...`) back to the host path
+  (`REPO_ROOT/...`, for `local` placement) and the real `SwarmResults` JSON is
+  read off disk. The **aggregate rule**: `all_completed` AND `all_isolated`
+  AND `all_console_clean` AND `all_audit_clean` AND (the negative control,
+  if it ran, actually detected the seeded cross-talk fault) => `solved`;
+  zero completions, or a negative control that ran but failed to detect the
+  fault (the isolation gate itself is broken), => `failed`; anything else
+  partially clean => `partial`. A results file that was never written at all
+  (harness crashed before `writeResults` ran) is reported as an explicit
+  `infra:*` health (`infra:missing-results-path`, `infra:harness`,
+  `infra:results-malformed`), never guessed as a model verdict.
+- Tests: `tools/arena/tests/test_swarm_plugin.py` proves registration,
+  image selection (default + override), full argv/env composition (users /
+  interactive_concurrency / persona_mix / fixture axes all reaching the
+  command line, defaults when axes are absent), scoring against real on-disk
+  `SwarmResults` JSON (solved / partial / zero-completions-failed /
+  negative-control-failed / negative-control-unexercised / infra-missing /
+  infra-crash), the container<->host results-path mapping, and a
+  2-concurrent `FakeBackend` sweep across a `users` axis with axis coords
+  carried through to `CellResult`/rollup — all with zero docker, zero LLM
+  spend. A real docker-gated run (the actual swarm inside the browser image)
+  is manual acceptance only, out of this test gate's scope.
