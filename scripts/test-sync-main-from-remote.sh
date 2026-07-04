@@ -32,6 +32,31 @@ assert_contains() {
   fi
 }
 
+write_stub_agents() {
+  local dir="$1"
+  cat >"$dir/resolve.sh" <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+test -f "$KITSOKI_SYNC_PROMPT_FILE"
+printf '%s\n' "$KITSOKI_SYNC_CONFLICT_FILES" | grep -q README.md
+{
+  echo local-conflict
+  echo remote-conflict
+} > README.md
+git add README.md
+EOS
+  cat >"$dir/review.sh" <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+test -f "$KITSOKI_SYNC_PROMPT_FILE"
+test -z "$(git diff --name-only --diff-filter=U)"
+grep -q local-conflict README.md
+grep -q remote-conflict README.md
+printf 'reviewed %s\n' "$KITSOKI_SYNC_BRANCH" > .artifacts/sync-main/review-marker.txt
+EOS
+  chmod +x "$dir/resolve.sh" "$dir/review.sh"
+}
+
 bare="$tmp/origin.git"
 seed="$tmp/seed"
 repo="$tmp/repo"
@@ -39,6 +64,7 @@ repo="$tmp/repo"
 git init -q --bare "$bare"
 git_init "$seed"
 commit_file "$seed" README.md base
+commit_file "$seed" .gitignore .artifacts/
 git -C "$seed" branch -M main
 git -C "$seed" remote add origin "$bare"
 git -C "$seed" push -q -u origin main
@@ -96,5 +122,27 @@ set -e
 [ "$status" -ne 0 ] || { echo "expected conflict status" >&2; exit 1; }
 assert_contains "$tmp/conflict.out" "Merge conflicts are isolated"
 git -C "$conflict/.worktrees/conflict-sync" ls-files -u | grep -q README.md
+git -C "$conflict" worktree remove --force .worktrees/conflict-sync
+git -C "$conflict" branch -D "$(git -C "$conflict" branch --list 'sync/main-origin-main-*' --format='%(refname:short)')" >/dev/null
+
+agents="$tmp/agents"
+mkdir -p "$agents"
+write_stub_agents "$agents"
+auto_out="$tmp/auto.out"
+(
+  cd "$conflict"
+  scripts/sync-main-from-remote.sh \
+    --name auto-sync \
+    --auto-resolve \
+    --resolver-command "$agents/resolve.sh" \
+    --review-command "$agents/review.sh"
+) >"$auto_out"
+assert_contains "$auto_out" "Integration branch:"
+assert_contains "$auto_out" "scripts/merge-to-main.sh"
+auto_branch="$(awk '/Integration branch:/ { print $3 }' "$auto_out")"
+[ -z "$(git -C "$conflict/.worktrees/auto-sync" diff --name-only --diff-filter=U)" ] ||
+  { git -C "$conflict/.worktrees/auto-sync" status --short >&2; exit 1; }
+test -f "$conflict/.worktrees/auto-sync/.artifacts/sync-main/review-marker.txt"
+git -C "$conflict" merge-base --is-ancestor main "$auto_branch"
 
 echo "sync-main-from-remote tests passed"
