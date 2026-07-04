@@ -44,10 +44,10 @@ expect_files:
   - path: ../../../.artifacts/goal/flow-report/reports/exec-summary.md
     content_matches: 'C1: `.artifacts/goal/flow-report/reports/changes/C1.slidey.json`'
   - path: ../../../.artifacts/goal/flow-report/reports/exec-summary.slidey.json
-    content_matches: '"lede":"C1: .artifacts/goal/flow-report/reports/changes/C1.slidey.json"'
+    content_matches: '"rrweb":"stories/goal-seeker/testdata/goal/clips/C1.rrweb.json"'
   - path: ../../../.artifacts/goal/flow-report/reports/changes/C1.md
     content_matches: "Summary: integrated C1 at abc1234"
   - path: ../../../.artifacts/goal/flow-report/reports/changes/C1.slidey.json
-    content_matches: '"lede":"seq 1 by integrator: integrated C1 at abc1234"'
+    content_matches: '"rrweb":"stories/goal-seeker/testdata/goal/clips/C1.rrweb.json".*"title":"Goal loop demo".*"type":"video"'
 
 expect_no_errors: true

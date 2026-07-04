@@ -55,6 +55,67 @@ def _latest_log_for(log, change_id):
     return latest
 
 
+def _split_md_row(line):
+    stripped = line.strip()
+    if not stripped.startswith("|") or not stripped.endswith("|"):
+        return []
+    cells = []
+    for cell in stripped.strip("|").split("|"):
+        cells.append(cell.strip())
+    return cells
+
+
+def _read_video_catalog(ctx, goal_dir):
+    # Authoritative WM.4 catalog. Markdown keeps it reviewable; this parser only
+    # consumes the stable table shape used by docs/goals/*/video-catalog.md.
+    path = goal_dir.rstrip("/") + "/video-catalog.md"
+    if not ctx.fs.exists(path):
+        return {}
+    rows = {}
+    header = []
+    for line in ctx.fs.read(path).split("\n"):
+        cells = _split_md_row(line)
+        if len(cells) == 0:
+            continue
+        if len(header) == 0:
+            header = [c.lower().replace(" ", "_") for c in cells]
+            continue
+        # Skip Markdown separator rows.
+        sep = True
+        for c in cells:
+            for ch in c.elems():
+                if ch != "-" and ch != ":":
+                    sep = False
+        if sep:
+            continue
+        rec = {}
+        for i in range(min(len(header), len(cells))):
+            rec[header[i]] = cells[i]
+        cid = _str(rec.get("change"))
+        if cid != "":
+            rows[cid] = rec
+    return rows
+
+
+def _video_for(ctx, catalog, change_id):
+    rec = catalog.get(change_id)
+    if rec == None:
+        return None
+    clip = _str(rec.get("rrweb_clip"))
+    if clip == "":
+        return None
+    if not ctx.fs.exists(clip):
+        fail("report_deck: video catalog row for " + change_id + " points at missing clip " + clip)
+    if ctx.fs.read(clip).strip() == "":
+        fail("report_deck: video catalog row for " + change_id + " points at empty clip " + clip)
+    return {
+        "clip": clip,
+        "title": _str(rec.get("title") or ("Demo for " + change_id)),
+        "compendium": _str(rec.get("compendium")).lower() == "yes",
+        "shows": _str(rec.get("shows")),
+    }
+
+
 def _goal_title(ctx, goal_dir, fallback):
     path = goal_dir.rstrip("/") + "/GOAL.md"
     if not ctx.fs.exists(path):
@@ -105,7 +166,7 @@ def _change_markdown(goal_title, change, log_entry, deck_path):
     return "\n".join(lines) + "\n"
 
 
-def _summary_markdown(goal_title, ledger, integrated, change_paths):
+def _summary_markdown(goal_title, ledger, integrated, change_paths, videos):
     counts = ledger.get("counts") or {}
     lines = []
     lines.append("# " + goal_title + " - execution summary")
@@ -127,10 +188,22 @@ def _summary_markdown(goal_title, ledger, integrated, change_paths):
         cid = _str(c.get("change_id"))
         p = change_paths.get(cid) or {}
         lines.append("- " + cid + ": `" + _str(p.get("deck")) + "` (`" + _str(p.get("markdown")) + "`)")
+    lines.append("")
+    lines.append("## Demo videos")
+    any_video = False
+    for c in integrated:
+        cid = _str(c.get("change_id"))
+        v = videos.get(cid)
+        if v == None:
+            continue
+        any_video = True
+        lines.append("- " + cid + ": `" + _str(v.get("clip")) + "` - " + _str(v.get("shows")))
+    if not any_video:
+        lines.append("(none linked)")
     return "\n".join(lines) + "\n"
 
 
-def _exec_deck(goal_title, ledger, summary_path, integrated, change_paths):
+def _exec_deck(goal_title, ledger, summary_path, integrated, change_paths, videos):
     counts = ledger.get("counts") or {}
     rows = []
     for c in ledger.get("changes") or []:
@@ -141,76 +214,101 @@ def _exec_deck(goal_title, ledger, summary_path, integrated, change_paths):
             "SHA": _str(c.get("sha") or ""),
         })
     links = []
+    video_cards = []
     for c in integrated:
         cid = _str(c.get("change_id"))
         p = change_paths.get(cid) or {}
         links.append(cid + ": " + _str(p.get("deck")))
+        v = videos.get(cid)
+        if v != None:
+            video_cards.append({
+                "title": cid + " - " + _str(v.get("title")),
+                "body": _str(v.get("shows")),
+                "rrweb": _str(v.get("clip")),
+            })
+    scenes = [
+        {
+            "type": "title",
+            "title": goal_title,
+            "subtitle": "Goal-seeker execution summary",
+        },
+        {
+            "type": "cards",
+            "title": "Current ledger",
+            "cards": [
+                {"title": "Integrated", "body": _str(counts.get("integrated", 0))},
+                {"title": "Remaining", "body": _str(ledger.get("remaining"))},
+                {"title": "Ready", "body": _str(counts.get("ready", 0))},
+                {"title": "Parked", "body": _str(counts.get("parked", 0))},
+            ],
+        },
+    ]
+    if len(video_cards) > 0:
+        scenes.append({
+            "type": "cards",
+            "title": "Demo compendium",
+            "cards": video_cards,
+        })
+    scenes.extend([
+        {
+            "type": "table",
+            "title": "Change status",
+            "rows": rows,
+        },
+        {
+            "type": "narrative",
+            "eyebrow": "Artifacts",
+            "body": "Summary: " + summary_path,
+            "lede": "\n".join(links),
+        },
+    ])
     return {
         "meta": {
             "title": goal_title + " execution summary",
             "mode": "report",
             "source": "goal-seeker",
         },
-        "scenes": [
-            {
-                "type": "title",
-                "title": goal_title,
-                "subtitle": "Goal-seeker execution summary",
-            },
-            {
-                "type": "cards",
-                "title": "Current ledger",
-                "cards": [
-                    {"title": "Integrated", "body": _str(counts.get("integrated", 0))},
-                    {"title": "Remaining", "body": _str(ledger.get("remaining"))},
-                    {"title": "Ready", "body": _str(counts.get("ready", 0))},
-                    {"title": "Parked", "body": _str(counts.get("parked", 0))},
-                ],
-            },
-            {
-                "type": "table",
-                "title": "Change status",
-                "rows": rows,
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Artifacts",
-                "body": "Summary: " + summary_path,
-                "lede": "\n".join(links),
-            },
-        ],
+        "scenes": scenes,
     }
 
 
-def _change_deck(goal_title, change, markdown_path, log_entry):
+def _change_deck(goal_title, change, markdown_path, log_entry, video):
     cid = _str(change.get("change_id"))
     evidence = "No log entry found."
     if log_entry != None:
         evidence = "seq " + _str(log_entry.get("seq")) + " by " + _str(log_entry.get("actor")) + ": " + _str(log_entry.get("summary"))
+    scenes = [
+        {
+            "type": "title",
+            "title": "Change " + cid,
+            "subtitle": _str(change.get("title")),
+        },
+        {
+            "type": "narrative",
+            "eyebrow": goal_title,
+            "body": "State " + _str(change.get("state")) + " with gate " + _str(change.get("gate_status")),
+            "lede": evidence,
+        },
+    ]
+    if video != None:
+        scenes.append({
+            "type": "video",
+            "title": _str(video.get("title")),
+            "body": _str(video.get("shows")),
+            "rrweb": _str(video.get("clip")),
+        })
+    scenes.append({
+        "type": "narrative",
+        "eyebrow": "Artifact",
+        "body": markdown_path,
+    })
     return {
         "meta": {
             "title": "Change " + cid + ": " + _str(change.get("title")),
             "mode": "report",
             "source": "goal-seeker",
         },
-        "scenes": [
-            {
-                "type": "title",
-                "title": "Change " + cid,
-                "subtitle": _str(change.get("title")),
-            },
-            {
-                "type": "narrative",
-                "eyebrow": goal_title,
-                "body": "State " + _str(change.get("state")) + " with gate " + _str(change.get("gate_status")),
-                "lede": evidence,
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Artifact",
-                "body": markdown_path,
-            },
-        ],
+        "scenes": scenes,
     }
 
 
@@ -224,6 +322,7 @@ def main(ctx):
 
     ledger = json.decode(ctx.fs.read(ledger_path))
     goal_title = _goal_title(ctx, goal_dir, goal_slug if goal_slug != "" else "goal")
+    catalog = _read_video_catalog(ctx, goal_dir)
     report_dir = work_dir + "/reports"
     changes_dir = report_dir + "/changes"
     summary_path = report_dir + "/exec-summary.md"
@@ -236,23 +335,28 @@ def main(ctx):
             integrated.append(c)
 
     change_paths = {}
+    videos = {}
     for c in integrated:
         cid = _str(c.get("change_id"))
         slug = _slug(cid)
         md_path = changes_dir + "/" + slug + ".md"
         change_deck_path = changes_dir + "/" + slug + ".slidey.json"
         entry = _latest_log_for(log, cid)
+        video = _video_for(ctx, catalog, cid)
+        if video != None:
+            videos[cid] = video
         change_paths[cid] = {"markdown": md_path, "deck": change_deck_path}
         ctx.fs.write(md_path, _change_markdown(goal_title, c, entry, change_deck_path))
-        ctx.fs.write(change_deck_path, json.encode(_change_deck(goal_title, c, md_path, entry)) + "\n")
+        ctx.fs.write(change_deck_path, json.encode(_change_deck(goal_title, c, md_path, entry, video)) + "\n")
 
-    ctx.fs.write(summary_path, _summary_markdown(goal_title, ledger, integrated, change_paths))
-    ctx.fs.write(deck_path, json.encode(_exec_deck(goal_title, ledger, summary_path, integrated, change_paths)) + "\n")
+    ctx.fs.write(summary_path, _summary_markdown(goal_title, ledger, integrated, change_paths, videos))
+    ctx.fs.write(deck_path, json.encode(_exec_deck(goal_title, ledger, summary_path, integrated, change_paths, videos)) + "\n")
 
     return {
         "status": "written",
         "summary_path": summary_path,
         "deck_path": deck_path,
         "change_count": len(integrated),
+        "video_count": len(videos),
         "change_paths": change_paths,
     }
