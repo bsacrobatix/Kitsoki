@@ -216,7 +216,7 @@ h3 {
   align-self: start;
   display: grid;
   gap: 12px;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
   max-height: calc(100vh - 36px);
   overflow: hidden;
   padding: 14px;
@@ -270,12 +270,13 @@ input {
 }
 
 .object-list {
+  border-top: 1px solid #e3e9e5;
   display: grid;
   gap: 12px;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  padding-right: 4px;
+  padding: 10px 4px 0 0;
 }
 
 .object-group {
