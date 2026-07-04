@@ -33,6 +33,18 @@ type EdgeFieldDecl struct {
 	TargetType  string
 	Cardinality Cardinality
 	Storage     EdgeStorage
+	// Acyclic marks an edge field whose targets must not form a cycle
+	// (e.g. change.depends_on) — checked by W1.1's catalog lint.
+	Acyclic bool
+	// Renders marks an edge field that public site codegen (G3) actually
+	// walks to build rendered output — e.g. a site-page's `presents`. Only
+	// Renders edges are checked for the internal-node-reachable-from-a-
+	// public-edge leak; most edges (implemented_by, verified_by,
+	// assigned_to, proposed_by, ...) are traceability cross-references a
+	// generator never recurses into, so an internal target there is not a
+	// leak. W3 (the site conversion) is what decides which edges are
+	// Renders when it wires the real generator.
+	Renders bool
 }
 
 // TypeDef is one type-registry entry: a node type's schema pin, optional

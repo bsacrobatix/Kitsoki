@@ -65,6 +65,40 @@ type Node struct {
 	TypeID string
 }
 
+// EdgeTargets returns the target node ids for decl, reading from Edges or
+// from Fields depending on decl.Storage — the one place that knows how to
+// read a top_level-storage edge (e.g. change.depends_on) the same way as a
+// normal Edges-storage one.
+func (n *Node) EdgeTargets(decl EdgeFieldDecl) []NodeID {
+	if decl.Storage == StorageTopLevel {
+		raw, ok := n.Fields[string(decl.ID)]
+		if !ok || raw == nil {
+			return nil
+		}
+		switch v := raw.(type) {
+		case []any:
+			ids := make([]NodeID, 0, len(v))
+			for _, item := range v {
+				if s, ok := item.(string); ok {
+					ids = append(ids, NodeID(s))
+				}
+			}
+			return ids
+		case []string:
+			ids := make([]NodeID, 0, len(v))
+			for _, s := range v {
+				ids = append(ids, NodeID(s))
+			}
+			return ids
+		case string:
+			return []NodeID{NodeID(v)}
+		default:
+			return nil
+		}
+	}
+	return n.Edges[decl.ID]
+}
+
 // kebabPattern matches the kebab-case id convention (lifecycle-taxonomy.md
 // container conventions): lowercase, starts with a letter, hyphens allowed.
 var kebabPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
