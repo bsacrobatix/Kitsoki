@@ -126,6 +126,10 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 	// either dispatch path (plugin or subprocess).
 	workingDir, _ := args["working_dir"].(string)
 	workingDir = appendDefaultCwd(workingDir, agent)
+	sandbox, sandboxErr := parseAgentSandbox(args)
+	if sandboxErr != "" {
+		return Result{Error: "host.agent.task: " + sandboxErr, FailureKind: FailureFatal}, nil
+	}
 
 	// Deterministic seed backstop: when this task's context.args carry a target
 	// story + a seed world (e.g. the punch-list maker's item.{story, world_in}),
@@ -150,6 +154,9 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 	}
 	// Try plugin dispatch before processing acceptance/tools (which subprocess needs).
 	if pluginRes, handled, pluginErr := TryDispatchVerb(ctx, "task", taskPromptForPlugin, "", agentName, "", withArgs, nil); handled {
+		if sandbox != nil {
+			return Result{Error: "host.agent.task: sandbox is not supported by plugin-dispatched agents; use the subprocess backend or remove sandbox", FailureKind: FailureFatal}, nil
+		}
 		if pluginErr != nil {
 			return Result{Error: pluginErr.Error()}, nil
 		}
@@ -399,6 +406,7 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 			Stdin:      contextPrompt,
 			WorkingDir: workingDir,
 			SessionID:  parentSessionID,
+			Sandbox:    sandbox,
 		}.Run(ctx)
 		// H5: capture the claude session ID returned from system.init so
 		// --resume works correctly across iterations (mirrors decide's pattern).

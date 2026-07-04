@@ -74,14 +74,16 @@ Claude-only flags (`--setting-sources`, `--effort`,
 > with the bypass flag so the tool can execute.
 >
 > This does **not** make Codex's sandbox the write-mode boundary. For Kitsoki
-> hosted work, the boundary is the story/tooling layer: read-only agent rooms
-> deny mutating tools, Bash MCP applies its profile, validators run through the
-> validator sandbox, and read-only write attempts are mediated by the Kitsoki
-> write-mode gate / operator-ask bridge. In other words, the Codex CLI sandbox is
+> hosted work, the boundary is the story/tooling/runtime layer: read-only agent
+> rooms deny mutating tools, Bash MCP applies its profile, validators run through
+> the validator sandbox, read-only write attempts are mediated by the Kitsoki
+> write-mode gate / operator-ask bridge, and opt-in `with.sandbox` calls run the
+> backend CLI through the agent runtime. In other words, the Codex CLI sandbox is
 > bypassed so MCP tools are callable; Kitsoki still owns whether a hosted agent
 > may mutate the target workspace. **Select `--agent codex` only in a trusted /
-> externally-sandboxed environment**, since the bypass flag disables Codex's own
-> sandbox and approval gate for the whole run.
+> externally-sandboxed environment unless the story also declares an appropriate
+> Kitsoki `sandbox:` policy**, since the bypass flag disables Codex's own sandbox
+> and approval gate for the whole run.
 
 ### Session resume & usage
 

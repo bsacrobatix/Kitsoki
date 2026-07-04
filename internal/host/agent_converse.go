@@ -127,6 +127,11 @@ func AgentConverseHandler(ctx context.Context, args map[string]any) (Result, err
 
 	chatID, _ := args["chat_id"].(string)
 
+	sandbox, sandboxErr := parseAgentSandbox(args)
+	if sandboxErr != "" {
+		return Result{Error: "host.agent.converse: " + sandboxErr}, nil
+	}
+
 	if chatID != "" {
 		cs := ChatStoreFromContext(ctx)
 		if cs != nil {
@@ -227,6 +232,7 @@ func AgentConverseHandler(ctx context.Context, args map[string]any) (Result, err
 		CLIArgs:    cliArgs,
 		Stdin:      question,
 		WorkingDir: workingDir,
+		Sandbox:    sandbox,
 	}.Run(ctx)
 	durationMS := time.Since(callStart).Milliseconds()
 
@@ -329,7 +335,12 @@ func runConverseWithChat(ctx context.Context, cs ChatStore, chatID, question, pe
 
 	var out Result
 	lockErr := cs.WithLock(ctx, chatID, func(ctx context.Context) error {
-		inner, runErr := doConverseChatTurn(ctx, cs, chatID, question, workingDir, systemPrompt, model, effort, permMode, tools, disallowedTools, agent.InheritClaudeDefault, policy)
+		sandbox, sandboxErr := parseAgentSandbox(args)
+		if sandboxErr != "" {
+			out = Result{Error: "host.agent.converse: " + sandboxErr}
+			return nil
+		}
+		inner, runErr := doConverseChatTurn(ctx, cs, chatID, question, workingDir, systemPrompt, model, effort, permMode, tools, disallowedTools, agent.InheritClaudeDefault, policy, sandbox)
 		out = inner
 		return runErr
 	})
@@ -346,7 +357,7 @@ func runConverseWithChat(ctx context.Context, cs ChatStore, chatID, question, pe
 //
 // Step ordering: allocate/persist the Claude session ID BEFORE appending the
 // user message to prevent orphan transcript rows on session-write failures.
-func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, workingDir, systemPrompt, model, effort, permMode string, tools, disallowedTools []string, inheritDefault bool, policy ToolboxEnforcement) (Result, error) {
+func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, workingDir, systemPrompt, model, effort, permMode string, tools, disallowedTools []string, inheritDefault bool, policy ToolboxEnforcement, sandbox *AgentSandboxSpec) (Result, error) {
 	callID := newUUID()
 	callStart := time.Now()
 	// Install the active call_id so the claude transport tees its stream-json
@@ -437,6 +448,7 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 		CLIArgs:    cliArgs,
 		Stdin:      question,
 		WorkingDir: workingDir,
+		Sandbox:    sandbox,
 	}.Run(ctx)
 	durationMS := time.Since(callStart).Milliseconds()
 
@@ -470,6 +482,7 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 				CLIArgs:    retry,
 				Stdin:      question,
 				WorkingDir: workingDir,
+				Sandbox:    sandbox,
 			}.Run(ctx)
 			durationMS = time.Since(callStart).Milliseconds()
 			if runErr != nil {

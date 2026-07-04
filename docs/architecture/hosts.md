@@ -705,6 +705,7 @@ tool allowlist or working directory; the loader rejects it at app-load time.
 | `acceptance.max_retries` | int | no | Retry budget for the acceptance loop (default: 5). |
 | `context.prompt` | string | no | Prompt text or path injected into the agent's first turn as stdin. |
 | `context.args` | map | no | Template variables for `context.prompt`. |
+| `sandbox` | map | no | Runtime policy for the agent subprocess. See [`sandbox:` runtime policy](#sandbox-runtime-policy). |
 
 ### Return values
 
@@ -790,6 +791,46 @@ cassette is affected. The classification today keys on the
 `readOnlyDeniedTools` set and the read-only `bash_profile` verdict (the static
 signals that exist) and upgrades to the full `pure | read | write | external`
 effect class when the effect-taxonomy slice lands.
+
+### `sandbox:` Runtime Policy
+
+`host.agent.task` and write-capable `host.agent.converse` can opt into the agent
+runtime layer with `with.sandbox`. The current OSS backend is `supervised`: it
+does process-group launch/kill, timeout/cancel cleanup, a temporary HOME/XDG
+environment, provider/Kitsoki env allowlisting, and final diff capture. It is
+not filesystem confinement; repo/rw/hidden/network policy is recorded as
+degraded when the selected backend cannot enforce it.
+
+```yaml
+invoke: host.agent.task
+with:
+  agent: implementer
+  working_dir: "{{ world.worktree }}"
+  sandbox:
+    min_strength: supervised
+    repo: read_only
+    rw: ["{{ world.work_dir }}", ".worktrees"]
+    hidden: [".env", ".git/config"]
+    network: inherit
+    degrade: warn
+    resources:
+      timeout: 8m
+  acceptance:
+    schema: schemas/result.json
+```
+
+Trace events make the boundary auditable:
+
+- `agent.runtime.start` records backend, strength, requested minimum strength,
+  repo/rw/hidden/network policy, and `degraded[]`.
+- `agent.runtime.end` records exit code, whether Kitsoki killed the process
+  tree, duration, and final diff byte count.
+
+`degrade: fail` aborts before launch when no backend satisfies
+`min_strength`. `degrade: warn` may run the strongest available backend, but the
+trace must show the degradation; a degraded start must not look like a confined
+run. Plugin-dispatched `host.agent.task` calls currently fail closed when
+`sandbox:` is present because the process boundary is outside the local runtime.
 
 ### Built-in sub-agent MCP tools
 

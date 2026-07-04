@@ -322,12 +322,13 @@ should remain pragmatic and visible rather than surprising.
         cgroup-v2 detection on Linux.
 
 ## Phase 1 — Runtime substrate
-- [ ] 1.1 Add `internal/host/agentruntime` interface, registry, capability probe,
+- [x] 1.1 Add `internal/host/agentruntime` interface, registry, capability probe,
         and fake backend.
-- [ ] 1.2 Implement `supervised` backend: env allowlist, temp HOME/XDG/cache,
-        process group, timeout/cancel, rlimits where available.
-- [ ] 1.3 Emit `agent.runtime.start/end` from the fake/supervised path.
-- [ ] 1.4 Unit tests with fake agent scripts; no LLM and no external services.
+- [x] 1.2 Implement `supervised` backend: env allowlist, temp HOME/XDG/cache,
+        process group, timeout/cancel, and final diff capture. Rlimits remain
+        a deferred backend-strength enhancement.
+- [x] 1.3 Emit `agent.runtime.start/end` from the sandboxed agent path.
+- [x] 1.4 Unit tests with fake agent scripts; no LLM and no external services.
 
 ## Phase 2 — Linux filesystem confinement
 - [ ] 2.1 Implement `linux-landlock` backend behind build tags.
@@ -337,10 +338,10 @@ should remain pragmatic and visible rather than surprising.
         degradation when unavailable.
 
 ## Phase 3 — Schema and host wiring
-- [ ] 3.1 Add `sandbox:` schema/types/load validation.
-- [ ] 3.2 Wrap `host.agent.task` launches after backend translation.
-- [ ] 3.3 Wrap write-capable `host.agent.converse` launches where applicable.
-- [ ] 3.4 Replay/cassette assertions: sandbox metadata replays; no live sandbox
+- [x] 3.1 Add `sandbox:` schema/types/load validation.
+- [x] 3.2 Wrap `host.agent.task` launches after backend translation.
+- [x] 3.3 Wrap write-capable `host.agent.converse` launches where applicable.
+- [x] 3.4 Replay/cassette assertions: sandbox metadata replays; no live sandbox
         or LLM is invoked.
 
 ## Phase 4 — Local platform backends
@@ -351,7 +352,7 @@ should remain pragmatic and visible rather than surprising.
         making either required for normal startup.
 
 ## Phase 5 — Adopt and prove
-- [ ] 5.1 Adopt `sandbox:` in a high-risk write-agent path such as design
+- [x] 5.1 Adopt `sandbox:` in a high-risk write-agent path such as design
         authoring or implementation worktrees.
 - [ ] 5.2 Add flow fixtures with fake agents proving denied repo writes and
         accepted workspace writes.
