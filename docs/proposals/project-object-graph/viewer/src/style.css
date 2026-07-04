@@ -103,10 +103,11 @@ h3 {
 }
 
 .layer-map {
-  display: grid;
+  display: flex;
   gap: 14px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-bottom: 16px;
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
 
 .layer-map article {
@@ -115,6 +116,7 @@ h3 {
   border-radius: 8px;
   color: #253037;
   display: grid;
+  flex: 1 0 260px;
   gap: 7px;
   min-height: 150px;
   padding: 14px;
@@ -129,20 +131,6 @@ h3 {
   position: absolute;
   right: -13px;
   top: 58px;
-}
-
-.layer-map article:nth-child(2)::after {
-  bottom: -18px;
-  content: "v";
-  left: 50%;
-  right: auto;
-  top: auto;
-}
-
-.layer-map article:nth-child(3)::after {
-  content: "<-";
-  left: -13px;
-  right: auto;
 }
 
 .layer-map article:last-child::after {
@@ -457,21 +445,8 @@ code {
 @media (max-width: 1180px) {
   .masthead,
   .workspace,
-  .relationship-board,
-  .layer-map {
+  .relationship-board {
     grid-template-columns: 1fr;
-  }
-
-  .layer-map article::after {
-    bottom: -18px;
-    content: "v";
-    left: auto;
-    right: 50%;
-    top: auto;
-  }
-
-  .layer-map article:last-child::after {
-    content: "";
   }
 
   .metric-strip {
