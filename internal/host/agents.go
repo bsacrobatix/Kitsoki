@@ -116,14 +116,14 @@ type AgentPermissions struct {
 	DisallowedTools []string
 }
 
-// Provider is a backend profile applied to the `claude` subprocess for an
-// agent invocation: Env entries are merged onto the process environment
-// (overriding ambient values of the same key) and Model, when non-empty,
-// supplies the --model default for an invocation whose agent declares no
-// explicit model. It is the host-side translation of app.ProviderDecl, kept
-// here so the host package needs no app import.
+// Provider is a backend profile applied to one agent invocation. Backend
+// selects the coding-agent CLI adapter, Env entries are merged onto the process
+// environment, and Model/Effort supply defaults unless the call explicitly
+// selected this provider. It is the host-side translation of app.ProviderDecl,
+// kept here so the host package needs no app import.
 type Provider struct {
-	Model string
+	Backend string
+	Model   string
 	// Effort supplies the --effort default for an invocation whose agent (and
 	// effect) declare no explicit effort. Empty leaves the agent/CLI default.
 	Effort string
@@ -207,9 +207,17 @@ func AgentProviderEnvFromCtx(ctx context.Context) map[string]string {
 // a runtime miss only happens on test scaffolding that skips the app loader,
 // where falling back to ambient is the safe behavior.
 func applyProvider(ctx context.Context, args map[string]any, agent Agent) (context.Context, Agent) {
+	explicitProvider := false
 	name, _ := args["harness"].(string)
-	if name == "" {
+	if strings.TrimSpace(name) != "" {
+		explicitProvider = true
+	}
+	if strings.TrimSpace(name) == "" {
 		name, _ = args["provider"].(string)
+	}
+	if strings.TrimSpace(name) != "" {
+		name = strings.TrimSpace(name)
+		explicitProvider = true
 	}
 	if name == "" {
 		name = agent.Harness
@@ -241,10 +249,13 @@ func applyProvider(ctx context.Context, args map[string]any, agent Agent) (conte
 	if !ok {
 		return ctx, agent
 	}
-	if strings.TrimSpace(agent.Model) == "" && strings.TrimSpace(prov.Model) != "" {
+	if strings.TrimSpace(prov.Backend) != "" {
+		ctx = WithAgentBackendNamed(ctx, prov.Backend)
+	}
+	if (explicitProvider || strings.TrimSpace(agent.Model) == "") && strings.TrimSpace(prov.Model) != "" {
 		agent.Model = prov.Model
 	}
-	if strings.TrimSpace(agent.Effort) == "" && strings.TrimSpace(prov.Effort) != "" {
+	if (explicitProvider || strings.TrimSpace(agent.Effort) == "") && strings.TrimSpace(prov.Effort) != "" {
 		agent.Effort = prov.Effort
 	}
 	ctx = WithAgentProviderEnv(ctx, prov.Env)

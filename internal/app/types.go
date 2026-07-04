@@ -175,14 +175,15 @@ type AgentPluginDecl struct {
 
 // ProviderDecl declares one named LLM backend profile (see AppDef.Providers).
 //
-// A provider is a thin, transport-agnostic override applied to the `claude`
-// subprocess: Env entries are merged onto the process environment for the
-// invocation (overriding any ambient value of the same key), and Model, when
-// set, supplies the --model default for an invocation whose agent declares no
-// explicit model. Both fields are optional — a provider with only Env keeps
-// each call's own model; a provider with only Model just retargets the model
-// against the ambient backend.
+// A provider is a thin per-invocation backend profile. Backend selects the
+// coding-agent CLI adapter, Env entries are merged onto the process environment
+// for the invocation, and Model/Effort supply defaults unless the call
+// explicitly selected this provider.
 type ProviderDecl struct {
+	// Backend selects the host agent backend for invocations that select this
+	// provider. Valid values: claude, codex, copilot. Optional; empty keeps the
+	// ambient/session backend.
+	Backend string `yaml:"backend,omitempty"`
 	// Model is the --model value used for invocations that select this provider
 	// and whose agent (and effect) declare no explicit model. Optional.
 	Model string `yaml:"model,omitempty"`

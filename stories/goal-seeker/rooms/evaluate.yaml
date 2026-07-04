@@ -127,6 +127,7 @@ states:
           prompt: prompts/evaluate.md
           schema: schemas/verdict.json
           agent: evaluator
+          provider: "{{ world.evaluator_provider }}"
           args:
             preamble: "{{ world.preamble }}"
         bind:

@@ -829,6 +829,7 @@ func writeCassetteAgentEvents(ctx context.Context, sink store.EventSink, cas *Ca
 		Verb:       o.Verb,
 		Agent:      o.Agent,
 		Model:      model,
+		Backend:    host.AgentBackendFromContext(ctx).Name(),
 		Profile:    profileName,
 		Effort:     effort,
 		Prompt:     inlinePrompt,
