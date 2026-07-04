@@ -61,6 +61,14 @@ jobs:
             tools/runstatus/pnpm-lock.yaml
             tools/site/pnpm-lock.yaml
 
+      # Feature catalog checks: generated-manifest staleness, the demo-spec
+      # recording invariants (demos:lint), and the tour target <-> data-testid
+      # drift check (tour-targets:lint) — catches a UI commit silently
+      # breaking a tour step's target/waitForTarget before it ever reaches a
+      # recording. No LLM, no browser; fast and deterministic.
+      - name: Feature catalog checks
+        run: make features-check
+
       # Fast dead-link/docs/site-contract guard. It does not record demos or call
       # any LLM; missing media degrades to posters/placeholders.
       - name: Build site
