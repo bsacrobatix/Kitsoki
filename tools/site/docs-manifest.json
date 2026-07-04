@@ -45,6 +45,7 @@
       "items": [
         { "from": "docs/web/README.md", "to": "guide/web/index.md" },
         { "from": "docs/web/tour.md", "to": "guide/web/tour.md" },
+        { "from": "docs/web/session-media-workbench.md", "to": "guide/web/session-media-workbench.md" },
         { "from": "docs/tui/*.md", "to": "guide/tui/" }
       ]
     },

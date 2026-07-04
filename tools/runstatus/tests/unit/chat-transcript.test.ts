@@ -122,6 +122,38 @@ describe("ChatTranscript", () => {
     expect(wrapper.find("[data-testid='chat-activity']").exists()).toBe(false);
   });
 
+  it("replaces a pinned media embed with a named workbench receipt", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: {
+        suppressedMediaHandles: ["mockup.html"],
+        suppressedMediaLabels: { "mockup.html": "Checkout mockup" },
+        transcript: [
+          {
+            role: "agent",
+            text: "Rendered mockup.",
+            typedView: {
+              Source: "",
+              Elements: [
+                {
+                  Kind: "media",
+                  MediaHandle: "mockup.html",
+                  MediaKind: "html",
+                  MediaCaption: "Checkout mockup",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    const receipt = wrapper.find("[data-testid='chat-media-receipt']");
+    expect(receipt.exists()).toBe(true);
+    expect(receipt.text()).toContain("Checkout mockup");
+    expect(receipt.text()).toContain("Pinned in the workbench");
+    expect(wrapper.find("[data-testid='media-element']").exists()).toBe(false);
+  });
+
   it("marks an off-ramp agent bubble distinctly (chip + data-mode), but renders the answer verbatim", () => {
     const wrapper = mount(ChatTranscript, {
       props: {
