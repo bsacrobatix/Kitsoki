@@ -1,0 +1,46 @@
+app:
+  id: decompose-update
+  version: 0.1.0
+  title: "Managed decomposition updates"
+  author: "Kitsoki"
+  license: "CC0"
+
+hosts:
+  - host.run
+
+world:
+  workdir: { type: string, default: "." }
+  status: { type: string, default: "idle" }
+  result_stdout: { type: string, default: "" }
+  result_exit_code: { type: int, default: 0 }
+  result_ok: { type: bool, default: false }
+
+intents:
+  run:
+    description: "Run the deterministic managed-delta transaction gate."
+    examples: ["run", "test managed delta", "apply delta"]
+    priority: 90
+  accept:
+    description: "Accept the managed-update result."
+    examples: ["accept", "done"]
+    priority: 80
+  quit:
+    description: "Exit the story."
+    examples: ["quit", "stop"]
+    priority: 40
+  look:
+    description: "Re-render the current view."
+    examples: ["look", "status"]
+    priority: 10
+
+exports:
+  intents: [run, accept, quit, look]
+
+exits:
+  done: {}
+  abandoned: {}
+
+root: idle
+
+include:
+  - rooms/*.yaml

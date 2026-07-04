@@ -1,0 +1,36 @@
+states:
+  failed:
+    description: "The managed-delta gate failed."
+    view:
+      - banner:
+          text: "Failed"
+          subtitle: "The managed decomposition-update transaction did not pass."
+          color: "#B91C1C"
+      - kv:
+          pairs:
+            Status: "{{ world.status }}"
+            Exit code: "{{ world.result_exit_code }}"
+      - code: '{{ world.result_stdout|default:"(no output)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "run"
+              intent: run
+            - label: "quit"
+              intent: quit
+            - label: "look"
+              intent: look
+    on:
+      run:
+        - target: running
+          effects:
+            - set:
+                status: "running"
+                result_stdout: ""
+                result_exit_code: 0
+                result_ok: false
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .

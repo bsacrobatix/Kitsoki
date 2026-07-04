@@ -1,0 +1,27 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  workdir: "."
+
+host_handlers:
+  host.run:
+    by_call:
+      managed_delta_gate:
+        data:
+          ok: true
+          exit_code: 0
+          stdout: "PASS: decomposition-update managed delta transaction"
+
+turns:
+  - intent: { name: run, slots: {} }
+    expect_state: running
+    expect_world:
+      status: "ready"
+      result_ok: true
+      result_exit_code: 0
+    expect_view_matches: "PASS: decomposition-update managed delta transaction"
+  - intent: { name: accept, slots: {} }
+    expect_terminal: true
+
+expect_no_errors: true
