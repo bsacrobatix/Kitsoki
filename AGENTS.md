@@ -1,5 +1,18 @@
 make your worktrees in the project root folder .worktrees
 
+The primary checkout is protected as read-mostly. Do implementation work in a
+branch worktree under `.worktrees`, commit it there, then land it onto local
+`main` from the primary checkout with:
+
+```
+scripts/merge-to-main.sh <branch>
+```
+
+That helper only accepts fast-forward merges. If it refuses because `main`
+advanced, rebase the branch in its worktree onto local `main`, rerun focused
+validation, and then run the helper again. Do not manually chmod the primary
+checkout except to repair the guard itself.
+
 Project skills live in the Codex-standard `.agents/skills/<name>/SKILL.md` location. Claude Code does not auto-discover that directory, so `make setup` links every `.agents/skills/*/SKILL.md` into `.claude/skills/` (relative symlinks; `.claude/` is gitignored). After adding a new skill, re-run:
 
 ```
