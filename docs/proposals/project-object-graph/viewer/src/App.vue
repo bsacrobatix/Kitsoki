@@ -190,6 +190,11 @@ function selectLayer(layerId: string) {
   selectedTypeId.value = "all";
 }
 
+function selectLayerType(layerId: string, typeId: string) {
+  selectedLayerId.value = layerId;
+  selectedTypeId.value = typeId;
+}
+
 function selectNode(id: string) {
   selectedId.value = id;
   selectedLayerId.value = nodeLayerId(nodeById.value.get(id) ?? selectedNode.value);
@@ -272,9 +277,15 @@ function nodeText(node: GraphNode): string {
         <strong>{{ layer.title }}</strong>
         <small>{{ layer.description }}</small>
         <span class="type-summary">
-          <span v-for="entry in layer.typeCounts" :key="entry.type">
+          <button
+            v-for="entry in layer.typeCounts"
+            :key="entry.type"
+            type="button"
+            :class="{ active: selectedLayerId === layer.id && selectedTypeId === entry.type }"
+            @click.stop="selectLayerType(layer.id, entry.type)"
+          >
             {{ typeLabel(entry.type) }} {{ entry.count }}
-          </span>
+          </button>
         </span>
       </button>
     </section>
