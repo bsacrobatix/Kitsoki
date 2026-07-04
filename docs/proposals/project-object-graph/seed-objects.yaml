@@ -65,6 +65,23 @@ type_registry:
       - id: proposed_by
         target_type: proposal
         cardinality: many
+  - id: actor
+    schema: graph-type/v0
+    derives_from: core-node
+    summary: A human role, agent role, or automated executor that owns, uses, reviews, or implements graph objects.
+    edge_fields:
+      - id: uses
+        target_type: feature
+        cardinality: many
+      - id: owns
+        target_type: feature
+        cardinality: many
+      - id: participates_in
+        target_type: use-case
+        cardinality: many
+      - id: assigned_changes
+        target_type: change
+        cardinality: many
   - id: requirement
     schema: graph-type/v0
     derives_from: core-node
@@ -84,6 +101,9 @@ type_registry:
     derives_from: core-node
     summary: Actor goal and scenario that motivates requirements.
     edge_fields:
+      - id: actor
+        target_type: actor
+        cardinality: one
       - id: exercises
         target_type: feature
         cardinality: many
@@ -95,6 +115,9 @@ type_registry:
     derives_from: core-node
     summary: Transient design or change proposal represented as graph data.
     edge_fields:
+      - id: owned_by
+        target_type: actor
+        cardinality: one
       - id: proposes
         target_type: feature
         cardinality: many
@@ -131,6 +154,9 @@ type_registry:
     derives_from: core-node
     summary: Transient work node compatible with the existing change-node decomposition contract.
     edge_fields:
+      - id: assigned_to
+        target_type: actor
+        cardinality: one
       - id: implements
         target_type: feature
         cardinality: many
@@ -139,6 +165,100 @@ type_registry:
         cardinality: many
 
 nodes:
+  - schema: graph/actor/v0
+    id: actor-maintainer
+    title: Maintainer
+    status: active
+    visibility: public
+    actor_kind: human
+    summary: Person responsible for answering project-specific decisions, approving risky forks, and steering implementation agents when automation cannot decide safely.
+    sources:
+      - source-operator-ask-feature
+      - source-human-action-workflows
+    edges:
+      uses:
+        - feature-operator-ask
+      participates_in:
+        - usecase-maintainer-answers-blocked-agent
+      owns: []
+      assigned_changes: []
+
+  - schema: graph/actor/v0
+    id: actor-product-owner
+    title: Product owner
+    status: active
+    visibility: internal
+    actor_kind: human
+    summary: Person accountable for desired-state gaps, roadmap priority, and whether graph deltas represent the right product direction.
+    sources:
+      - source-project-object-graph-proposal
+      - source-docs-strategic-review
+    edges:
+      uses:
+        - feature-project-object-graph
+      participates_in:
+        - usecase-product-owner-computes-roadmap-delta
+      owns:
+        - feature-project-object-graph
+      assigned_changes: []
+
+  - schema: graph/actor/v0
+    id: actor-product-manager
+    title: Product manager
+    status: draft
+    visibility: internal
+    actor_kind: human
+    summary: Role that turns backlog signals, context notes, proposal overlap, and customer scenarios into requirements and prioritized roadmap deltas.
+    sources:
+      - source-docs-strategic-review
+      - source-project-object-graph-scratch
+    edges:
+      uses:
+        - feature-project-object-graph
+      participates_in:
+        - usecase-product-owner-computes-roadmap-delta
+      owns: []
+      assigned_changes: []
+
+  - schema: graph/actor/v0
+    id: actor-developer
+    title: Developer
+    status: active
+    visibility: internal
+    actor_kind: human
+    summary: Person who implements scoped graph substrate, adapters, catalog migrations, and deterministic validation gates.
+    sources:
+      - source-project-object-graph-proposal
+      - source-lifecycle-taxonomy
+    edges:
+      uses:
+        - feature-project-object-graph
+      participates_in: []
+      owns: []
+      assigned_changes:
+        - change-object-graph-substrate
+        - change-capability-catalog-dogfood
+        - change-roadmap-delta-view
+
+  - schema: graph/actor/v0
+    id: actor-planning-agent
+    title: Planning agent
+    status: proposed
+    visibility: internal
+    actor_kind: agent
+    summary: Automated planner that mines proposals, feature catalog entries, and .context notes into typed graph objects with source provenance.
+    sources:
+      - source-docs-strategic-review
+      - source-project-object-graph-scratch
+    edges:
+      uses:
+        - feature-project-object-graph
+      participates_in:
+        - usecase-agent-mines-backlog-into-graph
+      owns: []
+      assigned_changes:
+        - change-object-graph-substrate
+
   - schema: graph/feature/v0
     id: feature-operator-ask
     title: Operator questions forwarded from headless agents
@@ -220,6 +340,8 @@ nodes:
     sources:
       - source-operator-ask-feature
     edges:
+      actor:
+        - actor-maintainer
       exercises:
         - feature-operator-ask
       acceptance:
@@ -372,6 +494,8 @@ nodes:
       - source-docs-strategic-review
       - source-project-object-graph-scratch
     edges:
+      actor:
+        - actor-planning-agent
       exercises:
         - feature-project-object-graph
       acceptance:
@@ -392,6 +516,8 @@ nodes:
       - source-docs-strategic-review
       - source-human-action-workflows
     edges:
+      actor:
+        - actor-product-owner
       exercises:
         - feature-project-object-graph
       acceptance:
@@ -410,6 +536,8 @@ nodes:
       - source-project-object-graph-proposal
       - source-project-object-graph-scratch
     edges:
+      owned_by:
+        - actor-product-owner
       proposes:
         - feature-project-object-graph
       creates_requirements:
@@ -467,6 +595,8 @@ nodes:
       - source-project-object-graph-proposal
       - source-lifecycle-taxonomy
     edges:
+      assigned_to:
+        - actor-developer
       implements:
         - feature-project-object-graph
       satisfies:
@@ -494,6 +624,8 @@ nodes:
       - source-project-object-graph-proposal
       - source-operator-ask-feature
     edges:
+      assigned_to:
+        - actor-developer
       implements:
         - feature-project-object-graph
       satisfies:
@@ -522,6 +654,8 @@ nodes:
       - source-human-action-workflows
       - source-docs-strategic-review
     edges:
+      assigned_to:
+        - actor-product-manager
       implements:
         - feature-project-object-graph
       satisfies:

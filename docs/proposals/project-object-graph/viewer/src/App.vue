@@ -25,6 +25,7 @@ interface GraphNode {
   goal?: string;
   executor?: string;
   actor?: string;
+  actor_kind?: string;
   sources?: string[];
   edges?: Record<string, EdgeValue>;
 }
@@ -50,6 +51,13 @@ const selectedTypeId = ref("all");
 const query = ref("");
 
 const layers = [
+  {
+    id: "actors",
+    title: "Actors and responsibilities",
+    short: "Actors",
+    description: "Who uses, owns, plans, implements, reviews, or automates the work represented in the graph.",
+    types: ["actor"],
+  },
   {
     id: "intent",
     title: "Desired product state",
@@ -203,6 +211,7 @@ function selectNode(id: string) {
 
 function typeLabel(type: string): string {
   const labels: Record<string, string> = {
+    actor: "Actors",
     feature: "Features",
     requirement: "Requirements",
     "use-case": "Use cases",
@@ -216,6 +225,13 @@ function typeLabel(type: string): string {
 
 function edgeLabel(edge: string): string {
   const labels: Record<string, string> = {
+    actor: "actor",
+    uses: "uses",
+    owns: "owns",
+    participates_in: "participates in",
+    assigned_changes: "assigned changes",
+    owned_by: "owned by",
+    assigned_to: "assigned to",
     requirements: "must satisfy",
     use_cases: "used by",
     evidence: "proved by",
@@ -239,7 +255,7 @@ function edgeLabel(edge: string): string {
 }
 
 function typeOrder(type: string): number {
-  const index = ["feature", "requirement", "use-case", "proposal", "change", "evidence", "implementation"].indexOf(type);
+  const index = ["actor", "feature", "requirement", "use-case", "proposal", "change", "evidence", "implementation"].indexOf(type);
   return index === -1 ? 99 : index;
 }
 
@@ -253,10 +269,10 @@ function nodeText(node: GraphNode): string {
     <header class="masthead">
       <div>
         <p class="kicker">Project object graph</p>
-        <h1>Desired state, change work, and proof.</h1>
+        <h1>Actors, desired state, change work, and proof.</h1>
         <p class="intro">
-          The graph is organized into three layers. Start with the desired product state, follow the
-          change work that creates it, then inspect the proof and implementation nodes that verify it.
+          The graph is organized by actors, desired product state, change work, and proof. Start with who
+          cares, follow what they need, then inspect the work and evidence behind it.
         </p>
       </div>
       <div class="metric-strip">
@@ -350,7 +366,8 @@ function nodeText(node: GraphNode): string {
 
           <p class="body-text">{{ nodeText(selectedNode) }}</p>
 
-          <div v-if="selectedNode.trigger || selectedNode.actor || selectedNode.executor" class="fact-row">
+          <div v-if="selectedNode.actor_kind || selectedNode.trigger || selectedNode.actor || selectedNode.executor" class="fact-row">
+            <div v-if="selectedNode.actor_kind"><span>Actor kind</span><strong>{{ selectedNode.actor_kind }}</strong></div>
             <div v-if="selectedNode.actor"><span>Actor</span><strong>{{ selectedNode.actor }}</strong></div>
             <div v-if="selectedNode.executor"><span>Executor</span><strong>{{ selectedNode.executor }}</strong></div>
             <div v-if="selectedNode.trigger"><span>Trigger</span><strong>{{ selectedNode.trigger }}</strong></div>
