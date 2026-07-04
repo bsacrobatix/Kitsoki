@@ -1277,6 +1277,8 @@ nodes:
     visibility: internal
     proposal_kind: epic
     path: docs/proposals/project-object-graph.md
+    status_line: Draft v1. Substrate (slice 1), changeset apply (slice 2, partial), the capability-catalog pilot (slice 3, one feature), and the computed roadmap (slice 4, partial) all have real, tested code; slices 5-6 remain design only.
+    index_blurb: Build one typed project graph for durable product state and transient change - features, requirements, use cases, proposals, plans, tests, evidence, changesets, and roadmap deltas as schema-pinned YAML objects with typed edges. First review fixture `project-object-graph/seed-objects.yaml`. Six slices are sketched; substrate, changesets, one dogfooded feature, and the computed-roadmap mechanism are implemented and tested.
     sources:
       - source-project-object-graph-proposal
       - source-project-object-graph-scratch
@@ -1296,8 +1298,11 @@ nodes:
         - usecase-product-owner-computes-roadmap-delta
       decomposes_to:
         - change-object-graph-substrate
+        - change-changeset-delta-ops
         - change-capability-catalog-dogfood
         - change-roadmap-delta-view
+        - change-producer-consumer-adoption
+        - change-iso-management-packs
 
   - schema: graph/evidence/v0
     id: evidence-project-object-graph-seed-catalog
@@ -1407,6 +1412,85 @@ nodes:
       satisfies:
         - req-project-objects-delta-roadmap
         - req-project-objects-provenance
+
+  - schema: graph/change/v0
+    id: change-changeset-delta-ops
+    title: Changeset node type and deterministic apply/merge
+    status: proposed
+    visibility: internal
+    executor: agent
+    depends_on:
+      - change-object-graph-substrate
+    goal: Add the changeset node type and deterministic yaml.Node apply/merge, plus a kitsoki graph diff/apply CLI, so durable nodes change only through recorded changesets.
+    scope:
+      - internal/graph/
+      - cmd/kitsoki/
+    acceptance:
+      - changeset apply rewrites target YAML via yaml.Node and re-lints the result
+      - a rejected changeset leaves the catalog untouched
+    sources:
+      - source-project-object-graph-proposal
+    edges:
+      assigned_to:
+        - actor-developer
+      implements:
+        - feature-project-object-graph
+      satisfies:
+        - req-project-objects-typed-edges
+
+  - schema: graph/change/v0
+    id: change-producer-consumer-adoption
+    title: Design pipeline and decomposition tools unify on change nodes
+    status: proposed
+    visibility: internal
+    executor: agent
+    depends_on:
+      - change-object-graph-substrate
+      - change-changeset-delta-ops
+    goal: The design pipeline emits Proposal nodes and decompose/deliver/goal.py unify on the shared change-node contract, retiring parallel ad hoc schemas.
+    scope:
+      - stories/dev-story/
+      - stories/deliver/
+      - .agents/skills/goal/
+    acceptance:
+      - design pipeline output is a graph-loadable Proposal node
+      - deliver/goal.py read change nodes without a translation shim
+    sources:
+      - source-project-object-graph-proposal
+    edges:
+      assigned_to:
+        - actor-developer
+      implements:
+        - feature-project-object-graph
+      satisfies:
+        - req-project-objects-provenance
+
+  - schema: graph/change/v0
+    id: change-iso-management-packs
+    title: ISO 9001-shaped type pack proving generality beyond software
+    status: proposed
+    visibility: internal
+    executor: agent
+    depends_on:
+      - change-object-graph-substrate
+      - change-changeset-delta-ops
+      - change-capability-catalog-dogfood
+    goal: Prove the type-pack mechanism generalizes beyond software by modeling an ISO 9001 clause pack (requirement derivation) and an audit/CAPA story on the same substrate.
+    scope:
+      - internal/graph/
+      - docs/proposals/project-object-graph/
+    acceptance:
+      - an iso9001.clause type derives from the core requirement type
+      - generic catalog lints apply to the derived type unchanged
+    sources:
+      - source-project-object-graph-proposal
+    edges:
+      assigned_to:
+        - actor-developer
+      implements:
+        - feature-project-object-graph
+      satisfies:
+        - req-project-objects-typed-edges
 
   # --- Dogfood meta cycle: the viewer itself as graph objects -------------
 
