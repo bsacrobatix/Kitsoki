@@ -1,0 +1,145 @@
+# sync_main - protected-main remote reconciliation.
+#
+# This is the story entrypoint for scripts/sync-main-from-remote.sh. It keeps
+# the hardened shell helper as the implementation boundary while letting
+# recipes and routing say "sync_main remote=origin" instead of invoking a
+# repo-local script directly.
+
+states:
+
+  sync_main:
+    description: "Reconcile protected local main with a remote main via an integration worktree."
+    relevant_world: [sync_remote, sync_remote_branch, sync_name, sync_continue_branch,
+                     sync_auto_resolve, sync_result]
+    view:
+      - kv:
+          pairs:
+            Remote:        '{{ world.sync_remote|default:"origin" }}'
+            "Remote ref":  '{{ world.sync_remote_branch|default:"main" }}'
+            "Name":        '{{ world.sync_name|default:"(auto)" }}'
+            "Continue":    '{{ world.sync_continue_branch|default:"(prepare new sync)" }}'
+            "Auto resolve": '{% if world.sync_auto_resolve %}yes{% else %}no{% endif %}'
+      - heading: "Already current"
+        when: "world.sync_result.outcome == 'up_to_date'"
+      - prose: "{{ world.integration_branch }} already contains {{ world.sync_remote }}/{{ world.sync_remote_branch }}."
+        when: "world.sync_result.outcome == 'up_to_date'"
+      - heading: "Integration branch ready"
+        when: "world.sync_result.outcome == 'prepared'"
+      - when: "world.sync_result.outcome == 'prepared'"
+        kv:
+          pairs:
+            Branch:   '{{ world.sync_result.branch }}'
+            Worktree: '{{ world.sync_result.worktree }}'
+      - prose: "Validate in the integration worktree, then land from the protected checkout with merge-to-main."
+        when: "world.sync_result.outcome == 'prepared'"
+      - heading: "Manual conflict resolution needed"
+        when: "world.sync_result.outcome == 'conflicts'"
+      - when: "world.sync_result.outcome == 'conflicts'"
+        kv:
+          pairs:
+            Branch:   '{{ world.sync_result.branch|default:"(see output)" }}'
+            Worktree: '{{ world.sync_result.worktree|default:"(see output)" }}'
+      - prose: "Resolve conflicts in the integration worktree, then run sync_main continue_branch={{ world.sync_result.branch|default:'<branch>' }}."
+        when: "world.sync_result.outcome == 'conflicts'"
+      - heading: "Sync failed"
+        when: "world.sync_result.outcome == 'error'"
+      - prose: "{{ world.sync_result.output|default:'(no output)' }}"
+        when: "world.sync_result.outcome == 'error'"
+      - heading: "Helper output"
+        when: "world.sync_result.output != '' && world.sync_result.outcome != 'error'"
+      - template: "{{ world.sync_result.output }}"
+        when: "world.sync_result.output != '' && world.sync_result.outcome != 'error'"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "retry"
+              hint:  "run the remote sync helper again"
+              intent: retry
+              when:  "world.sync_result.outcome == 'error'"
+            - label: "back"
+              hint:  "return to hub"
+              intent: back
+            - label: "look"
+              intent: look
+    on_enter:
+      - invoke: host.run
+        once: true
+        id: sync_main_exec
+        with:
+          cmd: bash
+          args:
+            - "-c"
+            - |
+              set -e
+              export NO_COLOR=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat
+              REMOTE="$1"
+              REMOTE_BRANCH="$2"
+              NAME="$3"
+              AUTO_RESOLVE="$4"
+              CONTINUE_BRANCH="$5"
+              REPO_ROOT=$(git -C "{{ world.working_dir }}" rev-parse --show-toplevel 2>/dev/null || pwd)
+              if [ -n "$CONTINUE_BRANCH" ]; then
+                CMD=(scripts/sync-main-from-remote.sh --continue "$CONTINUE_BRANCH")
+              else
+                CMD=(scripts/sync-main-from-remote.sh --remote "$REMOTE" --remote-branch "$REMOTE_BRANCH")
+              fi
+              if [ -z "$CONTINUE_BRANCH" ] && [ -n "$NAME" ]; then
+                CMD+=(--name "$NAME")
+              fi
+              if [ -z "$CONTINUE_BRANCH" ] && [ "$AUTO_RESOLVE" = "true" ]; then
+                CMD+=(--auto-resolve)
+              fi
+
+              EXIT=0
+              OUTPUT=$(cd "$REPO_ROOT" && "${CMD[@]}" 2>&1) || EXIT=$?
+              BRANCH=$(printf '%s\n' "$OUTPUT" | sed -n 's/^Integration branch: //p' | tail -1)
+              if [ -z "$BRANCH" ]; then
+                BRANCH=$(printf '%s\n' "$OUTPUT" | sed -n 's/^  scripts\/sync-main-from-remote.sh --continue //p' | tail -1)
+              fi
+              WORKTREE=$(printf '%s\n' "$OUTPUT" | sed -n 's/^Integration worktree: //p' | tail -1)
+              if [ -z "$WORKTREE" ]; then
+                WORKTREE=$(printf '%s\n' "$OUTPUT" | awk '/Merge conflicts are isolated in:/{getline; sub(/^  /,""); print; exit}')
+              fi
+
+              OUTCOME=error
+              OK=false
+              if [ "$EXIT" -eq 0 ] && printf '%s\n' "$OUTPUT" | grep -q "already contains"; then
+                OUTCOME=up_to_date
+                OK=true
+              elif [ "$EXIT" -eq 0 ] && [ -n "$BRANCH" ]; then
+                OUTCOME=prepared
+                OK=true
+              elif [ "$EXIT" -ne 0 ] && printf '%s\n' "$OUTPUT" | grep -q "Merge conflicts are isolated in:"; then
+                OUTCOME=conflicts
+              fi
+
+              jq -n \
+                --arg outcome "$OUTCOME" \
+                --arg branch "$BRANCH" \
+                --arg worktree "$WORKTREE" \
+                --arg output "$OUTPUT" \
+                --argjson ok "$OK" \
+                '{outcome:$outcome, branch:$branch, worktree:$worktree, output:$output, ok:$ok}'
+            - "kitsoki-sync-main"
+            - "{{ world.sync_remote }}"
+            - "{{ world.sync_remote_branch }}"
+            - "{{ world.sync_name }}"
+            - "{{ world.sync_auto_resolve }}"
+            - "{{ world.sync_continue_branch }}"
+          cwd: "{{ world.working_dir }}"
+        bind:
+          sync_result: "stdout_json"
+        on_error: sync_main
+    on:
+      retry:
+        - target: sync_main
+          effects:
+            - set:
+                sync_result:   {}
+      back:
+        - when: "world.on_integration == true"
+          target: main_ops
+        - target: branch_ops
+      look:
+        - target: .
