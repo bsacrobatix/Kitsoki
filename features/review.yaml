@@ -6,6 +6,8 @@ tagline: Chaptered playback with frame-anchored feedback flags.
 summary: "The /review surface for produced videos: a chapter timeline synced to playback, a flag list for frame-anchored feedback, and a detail pane per flag — the feedback half of the produce → review → refine loop."
 promo:
   order: 70
+docs:
+  - docs/tui/video-review.md
 related:
   - mockup-video
 demo:
