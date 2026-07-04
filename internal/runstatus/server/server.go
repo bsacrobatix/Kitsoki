@@ -1650,6 +1650,10 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if result, rerr, handled := s.dispatchEditor(method, params); handled {
 			return result, rerr
 		}
+		// ── Project object graph catalogs (W5.0, no story/session) ───────────
+		if result, rerr, handled := s.dispatchObjectGraph(method, params); handled {
+			return result, rerr
+		}
 		return nil, &rpcError{Code: codeMethodMissing, Message: "unknown method: " + method}
 	}
 }
