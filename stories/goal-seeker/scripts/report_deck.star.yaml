@@ -7,4 +7,5 @@ outputs:
   summary_path: { type: string }
   deck_path: { type: string }
   change_count: { type: int }
+  video_count: { type: int }
   change_paths: { type: object }
