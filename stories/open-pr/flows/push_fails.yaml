@@ -9,15 +9,29 @@ initial_state: idle
 initial_world:
   repo:          bsacrobatix/Kitsoki
   head_branch:   fix/template-object-interp-placeholder
+  branch_kind:   bug
   base_branch:   main
   remote:        bsacrobatix
   worktree_path: .worktrees/bf-template-object-interp-placeholder
   title:         "fix(render): render non-scalar template values as JSON"
-  body:          "..."
+  feature_description: "Fixes the object-in-string-template silent-data-loss bug."
+  product_site_paths: "features/trace-features.yaml"
+  product_feature_id: trace-features
+  demo_source_path: "tools/runstatus/tests/playwright/trace-features-video.spec.ts"
 
 host_handlers:
   host.run:
     by_call:
+      prepare_pr_package:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            outcome: prepared
+            body: "## Summary\n\nFixes the object-in-string-template silent-data-loss bug.\n"
+            package_path: ".context/open-pr/fix-template-object-interp-placeholder.md"
+            demo_video_path: ".artifacts/trace-features/trace-features.mp4"
+            last_error: ""
       open_pr_exec:
         data:
           ok: true
@@ -33,6 +47,7 @@ turns:
     expect_state: __exit__needs-human
     expect_world:
       status:       needs-human
+      prepare_outcome: prepared
       open_outcome: push_failed
       pr_url:       ""
       last_error:   "git push to remote \"bsacrobatix\" failed:\nfatal: 'bsacrobatix' does not appear to be a git repository"
