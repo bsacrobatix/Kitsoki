@@ -219,15 +219,15 @@ changes:
     scope: ["docs/proposals/**", "internal/graph/**"]
     depends_on: ["W2.0"]
     acceptance:
-      - "a proposal node type wraps existing markdown proposals (body via !include, structured fields grown incrementally); this goal's epic + children are converted first and round-trip"
-      - "docs/proposals/README.md 'Current proposals' section is GENERATED from the catalog with a lint that fails on drift (hand-maintained indexes rot)"
-      - "the epic's slice table is a generated view of the same nodes"
-      - "new proposals are authored as nodes from here on (proposal-authoring skill + templates updated)"
+      - "a proposal node type wraps existing markdown proposals (structured fields grown incrementally, body stays a plain `path:` field — no `!include` loader feature; W6.0 design session found the loader has zero custom-tag machinery and a plain path field is sufficient); this goal's epic is converted first and round-trips (pilot only; lifecycle-taxonomy.md and the epic's other narrative-slice reconciliation are follow-on, not W6.0 itself)"
+      - "docs/proposals/README.md 'Current proposals' section is GENERATED from the catalog with a lint that fails on drift (hand-maintained indexes rot) — checked as a byte-diff, not semantic equality (opposite of W3.0's featuresadapter, because the README index has no downstream re-parser: its exact bytes are the contract)"
+      - "the epic's slice table is a generated view of decomposes_to edges to change nodes, whose own status is the single source of truth (no proposal-local status snapshot)"
+      - "new proposals are authored as nodes from here on (proposal-authoring skill + templates updated) — DEFERRED past this pilot, tracked as follow-on work"
     gate:
       class: G-LINT
       red_now: "docs/proposals/README.md is a ~400-line hand-maintained index; proposal status lives only in prose Status lines"
       green_when: "the index-drift lint exits 0 and is wired into make test"
-      cmd: "kitsoki graph lint docs/proposals --check-index"
+      cmd: "kitsoki graph lint docs/proposals/project-object-graph/seed-objects.yaml --check-index"
 
   - id: "W4.0"
     wall: W4
