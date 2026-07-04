@@ -424,9 +424,13 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 			return nil, fmt.Errorf("validate hosts: %w", err)
 		}
 
-		h, err = buildHarness(cfg.HarnessType, cfg.ClaudeModel, cfg.AgentBackend, cfg.RecordingPath, cfg.RecordPath, def)
-		if err != nil {
-			return nil, fmt.Errorf("build harness: %w", err)
+		if len(cfg.HarnessProfiles) > 0 {
+			h = newSelectableRoutingHarness(cfg.HarnessType, cfg.ClaudeModel, cfg.AgentBackend, cfg.RecordingPath, cfg.RecordPath, def, cfg.HarnessProfiles, cfg.DefaultProfile, nil)
+		} else {
+			h, err = buildHarness(cfg.HarnessType, cfg.ClaudeModel, cfg.AgentBackend, cfg.RecordingPath, cfg.RecordPath, def)
+			if err != nil {
+				return nil, fmt.Errorf("build harness: %w", err)
+			}
 		}
 		rt.Harness = h
 		setHarnessLogger(h, logger)
@@ -513,6 +517,9 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 	// submissions.
 	var harnessArg harness.Harness = h
 	orch := orchestrator.New(def, m, s, harnessArg, runOpts...)
+	if selectable, ok := h.(*selectableRoutingHarness); ok {
+		selectable.SetSelectionResolver(orch.Selection)
+	}
 	if perr := orchestrator.PromptValidationError(orch.ValidatePromptExtensions()); perr != nil {
 		return nil, perr
 	}
