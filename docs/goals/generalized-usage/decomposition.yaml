@@ -374,7 +374,7 @@ changes:
     demo_video: "closeout tour — walk the case-study: per-wall what-changed, the cost result, the trained-process story"
     kind: docs
     pipeline: implementation
-    depends_on: ["WM.0", "WM.3"]
+    depends_on: ["WM.0", "WM.3", "WS.4", "WB.5", "WP.3"]
     scope: ["docs/case-studies/generalized-usage.md", "stories/goal-seeker/rooms/retrospective.yaml", "stories/goal-seeker/scripts/retrospective.star"]
     acceptance:
       - "when the goal reaches verdict=done, the goal-seeker runs a `retrospective` closeout room that produces a CASE-STUDY style review (docs/case-studies/generalized-usage.md) + a retrospective slidey deck linked from the exec summary"
