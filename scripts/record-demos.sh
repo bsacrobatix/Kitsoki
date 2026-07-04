@@ -17,7 +17,11 @@
 # outside this repo). Exit nonzero if any recording ultimately failed.
 #
 # Used by `make demos` / `make demos-force`; CI runs it behind an actions/cache
-# over .artifacts so unchanged demos cost nothing.
+# over .artifacts so unchanged demos cost nothing. CI also runs this step with
+# `continue-on-error: true` — a stale cached video may ship on failure — so a
+# failure list is written to $GITHUB_STEP_SUMMARY (when set) in addition to
+# stderr, and a separate hard gate (`make media-check-promo`) fails the build
+# outright if a promo-grid feature ends up with no staged media at all.
 
 set -uo pipefail
 
@@ -126,5 +130,16 @@ done
 echo "record-demos: $recorded recorded, $skipped fresh (skipped), $fail_count failed"
 if [ "$fail_count" -gt 0 ]; then
 	printf 'record-demos: FAILED: %s\n' "${FAILED[*]}" >&2
+	if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+		{
+			echo "### record-demos: $fail_count of $((recorded + skipped + fail_count)) demo(s) failed"
+			echo
+			for f in "${FAILED[@]}"; do
+				echo "- \`$f\`"
+			done
+			echo
+			echo "This step is \`continue-on-error\` — a stale cached video may have shipped instead. The subsequent promo-media presence gate fails the build outright if a promo-grid feature ends up with no staged media at all."
+		} >>"$GITHUB_STEP_SUMMARY"
+	fi
 	exit 1
 fi
