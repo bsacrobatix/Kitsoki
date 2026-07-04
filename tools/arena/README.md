@@ -200,7 +200,38 @@ checkout path on each host's daemon (a remote `-v` source resolves on the VM, no
 locally). Spec: `specs/bugfix-query-string-vm.yaml`.
 
 Next (see design doc): **P1** a *pool* of VM hosts + completion-state polling
-(scheduler already round-robins `placement.hosts`); **P2** a first-class
-persona-qa plugin (score = the 19-check review gate) + onboarding plugin so
-persona QA runs through `arena run` rather than `run.py` directly; **P3** retire
+(scheduler already round-robins `placement.hosts`); **P3** retire
 `escalate.sh`/matrix `emit_run`, single front door.
+
+## Status — P2 (persona-qa plugin landed)
+
+`persona-qa` is now a first-class job type alongside `bugfix` (`arena plugins`
+lists both). One cell = one `(target, persona, scenario)` triple:
+
+- **Non-live** drives the existing deterministic
+  `tools/product-journey/run.py --driver-replay-smoke` path — cassette-backed
+  evidence, zero LLM spend, real run bundle on disk (`review.json`,
+  `scenario-outcomes.json`, `driver-handoff.json`, decks).
+- **Live** (gated behind `--live`, cost-bearing, never run in CI) instead emits
+  a fresh run bundle with `--emit-run` and dispatches the
+  `product-journey-qa-driver` agent headlessly against it
+  (`.agents/agents/product-journey-qa-driver.md`) before reviewing it.
+- **score()** never regexes stdout for a verdict. It only reads the `run_dir`
+  pointer out of the container's structured JSON output, then hands that
+  directory to `tools.persona_qa.load_product_journey_run` — the same
+  completion-state bridge `bugfix.py` reads its `--completion-state` file
+  through — which derives verdict/health/metrics from the run bundle's real
+  `review.json` on disk. Stdout/stderr text is only an INFRA fallback for a
+  harness crash before any JSON was ever printed.
+- **unify-corpora** wiring: `tools/arena/specs/persona-qa-onboarding.yaml`
+  loads its target from the inline shape and its persona axis from
+  `persona_axis_from: tools/product-journey/personas.json`, enumerating one
+  cell per persona and completing a no-LLM sweep with `placement.concurrency: 2`.
+- Tests: `tools/arena/tests/test_persona_qa_plugin.py` proves registration,
+  argv shape for both drive paths, scoring against a real on-disk review.json
+  bundle (partial + solved + missing-run_dir + infra-crash cases), and a
+  2-concurrent `FakeBackend` sweep across 3 personas with axis coords carried
+  through to `CellResult`/rollup.
+
+Not yet wired: the browser cell image (`arena-browser-image`) and the swarm job
+type build on this plugin but are separate changes.
