@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-yaml"
 
@@ -188,6 +189,8 @@ func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *j
 		spawn = RunStorySession
 	}
 	result, spawnErr := spawn(ctx, route, job)
+	persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancelPersist()
 	if url := publicRunURL(d.PublicBaseURL, job.JobID); url != "" {
 		result.RunURL = url
 	}
@@ -199,19 +202,19 @@ func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *j
 		errMsg = spawnErr.Error()
 	}
 	if result.RunURL != "" {
-		_ = d.Jobs.SetRunURL(ctx, job.JobID, job.JobID, result.RunURL)
+		_ = d.Jobs.SetRunURL(persistCtx, job.JobID, job.JobID, result.RunURL)
 		job.RunURL = result.RunURL
 	}
-	if err := d.Jobs.Advance(ctx, job.JobID, finalState, errMsg); err != nil {
+	if err := d.Jobs.Advance(persistCtx, job.JobID, finalState, errMsg); err != nil {
 		return nil, err
 	}
 	job.State = finalState
 	if spawnErr != nil && d.IncidentFn != nil {
-		if incidentURL, incidentErr := d.IncidentFn(ctx, job, errMsg); incidentErr == nil && strings.TrimSpace(incidentURL) != "" {
-			_ = d.Jobs.SetIncidentURL(ctx, job.JobID, incidentURL)
+		if incidentURL, incidentErr := d.IncidentFn(persistCtx, job, errMsg); incidentErr == nil && strings.TrimSpace(incidentURL) != "" {
+			_ = d.Jobs.SetIncidentURL(persistCtx, job.JobID, incidentURL)
 			job.IncidentURL = incidentURL
 		} else if incidentErr != nil {
-			_ = d.Jobs.RecordEvent(ctx, job.JobID, "incident_failed", incidentErr.Error())
+			_ = d.Jobs.RecordEvent(persistCtx, job.JobID, "incident_failed", incidentErr.Error())
 		}
 	}
 
@@ -227,17 +230,17 @@ func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *j
 				prose += "\n\nIncident: " + job.IncidentURL
 			}
 		}
-		nextID, updateErr := d.Comments.Update(ctx, mention.Item.Number, job.CommentID, prose, meta)
+		nextID, updateErr := d.Comments.Update(persistCtx, mention.Item.Number, job.CommentID, prose, meta)
 		if updateErr != nil {
-			_ = d.Jobs.RecordEvent(ctx, job.JobID, "comment_update_failed", updateErr.Error())
+			_ = d.Jobs.RecordEvent(persistCtx, job.JobID, "comment_update_failed", updateErr.Error())
 		}
 		if nextID != "" && nextID != job.CommentID {
-			_ = d.Jobs.SetComment(ctx, job.JobID, nextID)
+			_ = d.Jobs.SetComment(persistCtx, job.JobID, nextID)
 			job.CommentID = nextID
 		}
 	}
 
-	job, _ = d.Jobs.GetJob(ctx, job.JobID)
+	job, _ = d.Jobs.GetJob(persistCtx, job.JobID)
 	return job, spawnErr
 }
 
