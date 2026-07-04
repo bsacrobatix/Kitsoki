@@ -18,6 +18,7 @@ func graphCmd() *cobra.Command {
 		Short: "Project object graph catalog tools",
 	}
 	cmd.AddCommand(graphLintCmd())
+	cmd.AddCommand(graphApplyCmd())
 	return cmd
 }
 
@@ -52,4 +53,49 @@ Exit code 0 when the catalog loads and lints clean; non-zero otherwise.`,
 			return fmt.Errorf("graph lint: %d issue(s) found", len(issues))
 		},
 	}
+}
+
+func graphApplyCmd() *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "apply <changeset-id> <catalog-path>",
+		Short: "Apply an authorized changeset node's operations to a catalog",
+		Long: `Loads the catalog at <catalog-path>, finds the changeset node
+<changeset-id>, and — dry-run-first — builds a candidate catalog on a scratch
+copy, re-loads and re-lints it, and only if that comes back clean commits the
+changed files. A rejected changeset (failing pre-apply validation or
+post-apply lint) never touches the real catalog.
+
+The changeset's status must be "authorized" to apply for real; pass --dry-run
+to preview a changeset in any status without requiring authorization or
+committing anything.
+
+Exit code 0 on a successful apply (or a clean dry-run); non-zero on rejection.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			changesetID, path := graph.NodeID(args[0]), args[1]
+			res, err := graph.Apply(path, changesetID, dryRun)
+			if err != nil {
+				return fmt.Errorf("graph apply: %w", err)
+			}
+			out := cmd.OutOrStdout()
+			for _, r := range res.RejectReasons {
+				fmt.Fprintln(out, "reject:", r)
+			}
+			for _, iss := range res.LintIssues {
+				fmt.Fprintln(out, "reject (post-apply lint):", iss.Error())
+			}
+			if res.Rejected() {
+				return fmt.Errorf("graph apply: changeset %q rejected, catalog untouched", changesetID)
+			}
+			verb := "applied"
+			if dryRun {
+				verb = "dry-run clean"
+			}
+			fmt.Fprintf(out, "graph apply: %s, %d file(s) changed: %v\n", verb, len(res.ChangedFiles), res.ChangedFiles)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview the changeset without requiring authorization or committing")
+	return cmd
 }
