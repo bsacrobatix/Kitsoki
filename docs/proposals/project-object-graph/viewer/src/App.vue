@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { parse } from "yaml";
 import seedYaml from "../../seed-objects.yaml?raw";
 
@@ -27,8 +27,14 @@ interface GraphNode {
   actor?: string;
   actor_kind?: string;
   site_route?: string;
+  page_kind?: string;
+  edit_surface?: string;
+  tagline?: string;
+  content_fields?: Record<string, string>;
+  media?: Record<string, string>;
   implementation_kind?: string;
   evidence_kind?: string;
+  artifacts?: Array<Record<string, string>>;
   sources?: string[];
   edges?: Record<string, EdgeValue>;
 }
@@ -48,10 +54,12 @@ interface SeedCatalog {
 }
 
 const data = parse(seedYaml) as SeedCatalog;
-const selectedId = ref("feature-agent-actions");
-const selectedLayerId = ref("capabilities");
+const selectedId = ref("sitepage-feature-agent-actions");
+const selectedLayerId = ref("site");
 const selectedTypeId = ref("all");
 const query = ref("");
+const draftFields = ref({ title: "", tagline: "", summary: "" });
+const requestStarted = ref(false);
 
 const layers = [
   {
@@ -60,6 +68,13 @@ const layers = [
     short: "Actors",
     description: "Who uses, owns, plans, implements, reviews, or automates the work represented in the graph.",
     types: ["actor", "agent"],
+  },
+  {
+    id: "site",
+    title: "Public product site",
+    short: "Site",
+    description: "Editable public pages generated from graph-backed capability copy, demo media, and consistency rules.",
+    types: ["site-page"],
   },
   {
     id: "capabilities",
@@ -186,12 +201,108 @@ const sourceRows = computed(() => {
   return (selectedNode.value.sources ?? []).map((sourceId) => sourceById.value.get(sourceId)).filter(Boolean);
 });
 
+const sitePageForSelection = computed(() => {
+  if (nodeType(selectedNode.value) === "site-page") return selectedNode.value;
+  const selected = selectedNode.value.id;
+  return data.nodes.find((node) => nodeType(node) === "site-page" && edgeTargets(node.edges?.presents).includes(selected));
+});
+
+const demoEvidenceForSelection = computed(() => {
+  const page = sitePageForSelection.value;
+  const mediaEvidenceId = edgeTargets(page?.edges?.has_media)[0];
+  if (mediaEvidenceId) return nodeById.value.get(mediaEvidenceId);
+  const evidenceId = edgeTargets(selectedNode.value.edges?.evidence)[0];
+  return evidenceId ? nodeById.value.get(evidenceId) : undefined;
+});
+
+const originalSiteFields = computed(() => {
+  const page = sitePageForSelection.value;
+  return {
+    title: page?.content_fields?.title ?? page?.title ?? selectedNode.value.title,
+    tagline: page?.content_fields?.tagline ?? page?.tagline ?? "",
+    summary: page?.content_fields?.summary ?? page?.summary ?? nodeText(selectedNode.value),
+  };
+});
+
+const changedFields = computed(() => {
+  return (["title", "tagline", "summary"] as const).filter(
+    (field) => draftFields.value[field].trim() !== originalSiteFields.value[field].trim(),
+  );
+});
+
+const changeEvaluation = computed(() => {
+  const combined = Object.values(draftFields.value).join(" ").toLowerCase();
+  const changed = changedFields.value;
+  const checks = [
+    {
+      id: "content",
+      label: "Product-site content",
+      state: changed.length ? "changed" : "unchanged",
+      detail: changed.length ? `${changed.length} structured field changes` : "No page field changed yet",
+    },
+    {
+      id: "feature",
+      label: "Feature impact",
+      state: /\b(new|add|adds|support|supports|integrat|automate|launch|workflow)\b/.test(combined)
+        ? "review"
+        : "clear",
+      detail: "Flags copy that appears to promise a new or expanded capability.",
+    },
+    {
+      id: "consistency",
+      label: "Graph consistency",
+      state: sitePageForSelection.value && demoEvidenceForSelection.value ? "clear" : "review",
+      detail: sitePageForSelection.value
+        ? "Page is linked to a feature and demo evidence object."
+        : "No site-page object is linked to the selected record.",
+    },
+    {
+      id: "policy",
+      label: "Non-negotiable review",
+      state: /\b(guarantee|compliance|regulation|regulated|privacy|security|legal|hipaa|gdpr|soc2|soc 2)\b/.test(combined)
+        ? "review"
+        : "clear",
+      detail: "Flags legal, privacy, security, compliance, or absolute claims.",
+    },
+  ];
+  const route = checks.some((check) => check.state === "review")
+    ? "Evaluate before delivery"
+    : changed.length
+      ? "Content-only site update"
+      : "No change request";
+  return { route, checks };
+});
+
+const generatedChangeRequest = computed(() => ({
+  schema: "graph/change-request/v0",
+  target: sitePageForSelection.value?.id ?? selectedNode.value.id,
+  changed_fields: changedFields.value,
+  route: changeEvaluation.value.route,
+  checks: changeEvaluation.value.checks.map((check) => ({
+    id: check.id,
+    state: check.state,
+  })),
+}));
+
+watch(
+  originalSiteFields,
+  (fields) => {
+    draftFields.value = { ...fields };
+    requestStarted.value = false;
+  },
+  { immediate: true },
+);
+
+watch(changedFields, () => {
+  requestStarted.value = false;
+});
+
 function nodeType(node: GraphNode): string {
   return node.schema.split("/")[1] ?? node.schema;
 }
 
 function nodeLayerId(node: GraphNode): string {
-  return layers.find((layer) => layer.types.includes(nodeType(node)))?.id ?? "intent";
+  return layers.find((layer) => layer.types.includes(nodeType(node)))?.id ?? "capabilities";
 }
 
 function edgeTargets(value: EdgeValue): string[] {
@@ -231,6 +342,7 @@ function typeLabel(type: string): string {
   const labels: Record<string, string> = {
     actor: "Actors",
     agent: "Agents",
+    "site-page": "Site pages",
     feature: "Features",
     requirement: "Requirements",
     "use-case": "Use cases",
@@ -274,7 +386,7 @@ function edgeLabel(edge: string): string {
 }
 
 function typeOrder(type: string): number {
-  const index = ["actor", "agent", "feature", "requirement", "use-case", "proposal", "change", "evidence", "implementation"].indexOf(type);
+  const index = ["actor", "agent", "site-page", "feature", "requirement", "use-case", "proposal", "change", "evidence", "implementation"].indexOf(type);
   return index === -1 ? 99 : index;
 }
 
@@ -310,9 +422,9 @@ function nodeText(node: GraphNode): string {
         <p class="kicker">Project object graph</p>
         <h1>Current capabilities, gaps, work, and proof.</h1>
         <p class="intro">
-          The graph is organized by actors, product capabilities, change work, and proof. Start with the
-          shipped/public capabilities to see what already exists, then follow requirements, implementation,
-          evidence, and open work.
+          The graph is organized by actors, public site pages, product capabilities, change work, and proof. Start
+          with the shipped product-site pages to see public copy, demo media, linked capabilities, requirements,
+          evidence, and the change-request checks behind an edit.
         </p>
       </div>
       <div class="metric-strip">
@@ -432,16 +544,18 @@ function nodeText(node: GraphNode): string {
             </div>
           </div>
 
-          <p class="body-text">{{ nodeText(selectedNode) }}</p>
+        <p class="body-text">{{ nodeText(selectedNode) }}</p>
 
           <div
-            v-if="selectedNode.actor_kind || selectedNode.trigger || selectedNode.actor || selectedNode.executor || selectedNode.site_route || selectedNode.implementation_kind || selectedNode.evidence_kind"
+            v-if="selectedNode.actor_kind || selectedNode.trigger || selectedNode.actor || selectedNode.executor || selectedNode.site_route || selectedNode.page_kind || selectedNode.edit_surface || selectedNode.implementation_kind || selectedNode.evidence_kind"
             class="fact-row"
           >
             <div v-if="selectedNode.actor_kind"><span>Actor kind</span><strong>{{ selectedNode.actor_kind }}</strong></div>
             <div v-if="selectedNode.actor"><span>Actor</span><strong>{{ selectedNode.actor }}</strong></div>
             <div v-if="selectedNode.executor"><span>Executor</span><strong>{{ selectedNode.executor }}</strong></div>
             <div v-if="selectedNode.site_route"><span>Product site</span><strong>{{ selectedNode.site_route }}</strong></div>
+            <div v-if="selectedNode.page_kind"><span>Page kind</span><strong>{{ selectedNode.page_kind }}</strong></div>
+            <div v-if="selectedNode.edit_surface"><span>Edit surface</span><strong>{{ selectedNode.edit_surface }}</strong></div>
             <div v-if="selectedNode.implementation_kind"><span>Implementation</span><strong>{{ selectedNode.implementation_kind }}</strong></div>
             <div v-if="selectedNode.evidence_kind"><span>Evidence</span><strong>{{ selectedNode.evidence_kind }}</strong></div>
             <div v-if="selectedNode.trigger"><span>Trigger</span><strong>{{ selectedNode.trigger }}</strong></div>
@@ -458,6 +572,68 @@ function nodeText(node: GraphNode): string {
             </button>
           </div>
         </article>
+
+        <section v-if="sitePageForSelection" class="site-workbench">
+          <article class="site-preview">
+            <div>
+              <p class="kicker">Product site projection</p>
+              <h3>{{ originalSiteFields.title }}</h3>
+              <strong>{{ originalSiteFields.tagline }}</strong>
+              <p>{{ originalSiteFields.summary }}</p>
+            </div>
+            <div class="media-box">
+              <span>Demo video</span>
+              <strong>{{ sitePageForSelection.media?.videoBase ?? demoEvidenceForSelection?.artifacts?.[0]?.videoBase }}</strong>
+              <code>{{ sitePageForSelection.media?.expectedPath ?? "No staged media path recorded" }}</code>
+              <small v-if="sitePageForSelection.media?.posterStep">Poster step: {{ sitePageForSelection.media.posterStep }}</small>
+            </div>
+          </article>
+
+          <article class="change-editor">
+            <div class="editor-head">
+              <div>
+                <p class="kicker">Edit structured fields</p>
+                <h3>Change request preview</h3>
+              </div>
+              <span :class="['request-route', changedFields.length ? 'route-active' : 'route-idle']">
+                {{ changeEvaluation.route }}
+              </span>
+            </div>
+
+            <label>
+              <span>Title</span>
+              <input v-model="draftFields.title" />
+            </label>
+            <label>
+              <span>Tagline</span>
+              <input v-model="draftFields.tagline" />
+            </label>
+            <label>
+              <span>Summary</span>
+              <textarea v-model="draftFields.summary" rows="4" />
+            </label>
+
+            <div class="evaluation-grid">
+              <div
+                v-for="check in changeEvaluation.checks"
+                :key="check.id"
+                :class="['evaluation-check', `check-${check.state}`]"
+              >
+                <span>{{ check.label }}</span>
+                <strong>{{ check.state }}</strong>
+                <p>{{ check.detail }}</p>
+              </div>
+            </div>
+
+            <div class="request-actions">
+              <button type="button" :disabled="!changedFields.length" @click="requestStarted = true">
+                Start change request
+              </button>
+              <code v-if="requestStarted">{{ JSON.stringify(generatedChangeRequest) }}</code>
+              <small v-else>Edits stay as structured draft fields until a change request is started.</small>
+            </div>
+          </article>
+        </section>
 
         <div class="relationship-board">
           <section>

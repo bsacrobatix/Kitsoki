@@ -33,6 +33,9 @@ catalog:
       - id: source-dev-story-bugfix-feature
         kind: feature_catalog
         path: features/dev-story-bugfix.yaml
+      - id: source-product-site-docs
+        kind: docs
+        path: docs/site/README.md
       - id: source-docs-strategic-review
         kind: context_note
         path: .context/docs-review-and-strategic-plan-2026-07-04.md
@@ -76,6 +79,23 @@ type_registry:
         cardinality: many
       - id: proposed_by
         target_type: proposal
+        cardinality: many
+  - id: site-page
+    schema: graph-type/v0
+    derives_from: core-node
+    summary: Public product-site page generated from graph-backed capability, demo, and copy fields.
+    edge_fields:
+      - id: presents
+        target_type: feature
+        cardinality: one
+      - id: has_media
+        target_type: evidence
+        cardinality: many
+      - id: governed_by
+        target_type: requirement
+        cardinality: many
+      - id: changed_by
+        target_type: change
         cardinality: many
   - id: actor
     schema: graph-type/v0
@@ -441,6 +461,38 @@ nodes:
       implemented_by:
         - impl-agent-actions-run-status-ui
 
+  - schema: graph/site-page/v0
+    id: sitepage-feature-agent-actions
+    title: Agent action transcripts feature page
+    status: shipped
+    visibility: public
+    page_kind: feature_detail
+    site_route: /features/agent-actions.html
+    edit_surface: product_site_admin
+    tagline: Every agent call's full tool-use stream, captured once and replayed byte-identically.
+    summary: Product-site page for the shipped agent-action transcripts capability, including promotional copy and its deterministic demo video.
+    content_fields:
+      title: Agent action transcripts
+      tagline: Every agent call's full tool-use stream, captured once and replayed byte-identically.
+      summary: Every agent call captures and replays its native tool-use stream as typed action rows, guardrail arcs, waterfall timing, token/cost accrual, and cassette-vs-live drift.
+    media:
+      artifactDir: agent-actions
+      videoBase: agent-actions-demo
+      posterStep: aa-intro-home
+      expectedPath: public/media/agent-actions/agent-actions-demo.mp4
+    sources:
+      - source-agent-actions-feature
+      - source-product-site-docs
+    edges:
+      presents:
+        - feature-agent-actions
+      has_media:
+        - evidence-agent-actions-demo
+      governed_by:
+        - req-product-site-change-review
+        - req-public-site-claim-consistency
+      changed_by: []
+
   - schema: graph/requirement/v0
     id: req-agent-actions-byte-stable-stream
     title: Agent calls expose byte-stable tool-use transcripts
@@ -529,6 +581,38 @@ nodes:
       proposed_by: []
       implemented_by:
         - impl-trace-introspection-observer
+
+  - schema: graph/site-page/v0
+    id: sitepage-feature-trace-introspection
+    title: Decision-first trace detail feature page
+    status: shipped
+    visibility: public
+    page_kind: feature_detail
+    site_route: /features/trace-introspection.html
+    edit_surface: product_site_admin
+    tagline: Verdicts, confidence, evidence, and replay on a frozen trace.
+    summary: Product-site page for decision-first trace inspection, backed by a deterministic frozen-run demo.
+    content_fields:
+      title: Decision-first trace detail
+      tagline: Verdicts, confidence, evidence, and replay on a frozen trace.
+      summary: Frozen traces expose observation filters, decision verdicts, confidence, evidence, replay, tree, waterfall, and state-graph views.
+    media:
+      artifactDir: trace-introspection-demo
+      videoBase: trace-introspection-demo
+      posterStep: ti-welcome
+      expectedPath: public/media/trace-introspection-demo/trace-introspection-demo.mp4
+    sources:
+      - source-trace-introspection-feature
+      - source-product-site-docs
+    edges:
+      presents:
+        - feature-trace-introspection
+      has_media:
+        - evidence-trace-introspection-demo
+      governed_by:
+        - req-product-site-change-review
+        - req-public-site-claim-consistency
+      changed_by: []
 
   - schema: graph/requirement/v0
     id: req-trace-introspection-decision-first
@@ -619,6 +703,38 @@ nodes:
       proposed_by: []
       implemented_by:
         - impl-meta-mode-web-story-author
+
+  - schema: graph/site-page/v0
+    id: sitepage-feature-meta-mode
+    title: Meta-mode feature page
+    status: shipped
+    visibility: public
+    page_kind: feature_detail
+    site_route: /features/meta-mode.html
+    edit_surface: product_site_admin
+    tagline: Ask the running FSM about its own graph, then have it rewrite and hot-reload its YAML live.
+    summary: Product-site page for meta-mode story explanation and editing, with its deterministic self-edit demo.
+    content_fields:
+      title: Meta-mode edits and explains stories
+      tagline: Ask the running FSM about its own graph, then have it rewrite and hot-reload its YAML live.
+      summary: The running app can answer questions about kitsoki or a live story, then edit story YAML and hot-reload the session with the change recorded in the trace.
+    media:
+      artifactDir: meta-mode
+      videoBase: meta-mode-demo
+      posterStep: meta-mode-demo
+      expectedPath: public/media/meta-mode/meta-mode-demo.mp4
+    sources:
+      - source-meta-mode-feature
+      - source-product-site-docs
+    edges:
+      presents:
+        - feature-meta-mode
+      has_media:
+        - evidence-meta-mode-demo
+      governed_by:
+        - req-product-site-change-review
+        - req-public-site-claim-consistency
+      changed_by: []
 
   - schema: graph/requirement/v0
     id: req-meta-mode-story-aware-edit
@@ -821,6 +937,40 @@ nodes:
         - evidence-project-object-graph-seed-catalog
 
   - schema: graph/requirement/v0
+    id: req-product-site-change-review
+    title: Product-site edits produce evaluated change requests
+    status: proposed
+    visibility: internal
+    statement: Editing public product-site fields must create a structured change request classified as content-only, feature-affecting, consistency-risk, or policy-review work before delivery.
+    rationale: The product site is the public projection of the graph; changing it can be harmless copy, a new feature claim, an inconsistency, or a non-negotiable review issue.
+    sources:
+      - source-project-object-graph-proposal
+      - source-product-site-docs
+    edges:
+      required_by:
+        - feature-project-object-graph
+      motivated_by:
+        - usecase-product-owner-edits-site-feature-page
+      verified_by:
+        - evidence-project-object-graph-seed-catalog
+
+  - schema: graph/requirement/v0
+    id: req-public-site-claim-consistency
+    title: Public product-site claims match shipped graph capabilities
+    status: proposed
+    visibility: public
+    statement: Public site copy and media must not claim a capability unless the linked feature, requirements, implementation, and evidence objects support that claim.
+    sources:
+      - source-project-object-graph-proposal
+      - source-product-site-docs
+    edges:
+      required_by:
+        - feature-project-object-graph
+      motivated_by:
+        - usecase-product-owner-edits-site-feature-page
+      verified_by: []
+
+  - schema: graph/requirement/v0
     id: req-project-objects-typed-edges
     title: Relationships use typed edge fields and resolvable ids
     status: proposed
@@ -891,6 +1041,26 @@ nodes:
         - req-project-objects-data-primary
         - req-project-objects-typed-edges
         - req-project-objects-provenance
+
+  - schema: graph/use-case/v0
+    id: usecase-product-owner-edits-site-feature-page
+    title: Product owner edits a public feature page and requests delivery
+    status: proposed
+    visibility: internal
+    actor: product-owner
+    trigger: The product owner sees stale or incomplete product-site copy while reviewing shipped capabilities.
+    desired_outcome: The owner edits structured page fields, starts a change request, and sees whether the graph classifies it as content-only, feature-affecting, consistency-risk, or requiring policy review.
+    sources:
+      - source-project-object-graph-proposal
+      - source-product-site-docs
+    edges:
+      actor:
+        - actor-product-owner
+      exercises:
+        - feature-project-object-graph
+      acceptance:
+        - req-product-site-change-review
+        - req-public-site-claim-consistency
 
   - schema: graph/use-case/v0
     id: usecase-product-owner-computes-roadmap-delta
