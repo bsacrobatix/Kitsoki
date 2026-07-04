@@ -130,13 +130,24 @@ call_claude_json() { # <promptfile> <label>
         result="$(cat "$codex_out" 2>/dev/null || true)"
         ;;
       *)
+        local claude_err="${out%.json}.${label}.claude.stderr.txt"
+        local claude_status=0
         raw="$(claude -p \
                 --output-format json \
                 --model "$model" \
                 --permission-mode bypassPermissions \
                 --allowedTools "Read" \
                 --add-dir "$frames" \
-                < "$pf" 2>/dev/null)" || { echo "  ($label) claude invocation failed (attempt $attempt)" >&2; continue; }
+                < "$pf" 2>"$claude_err")" || claude_status=$?
+        if [ "$claude_status" -ne 0 ]; then
+          printf '%s' "$raw" > "${out%.json}.${label}.claude.raw.json" 2>/dev/null || true
+          local claude_msg
+          claude_msg="$(printf '%s' "$raw" | jq -r '.result // .error.message // empty' 2>/dev/null || true)"
+          [ -n "$claude_msg" ] || claude_msg="$(cat "$claude_err" 2>/dev/null || true)"
+          [ -n "$claude_msg" ] || claude_msg="exit $claude_status"
+          echo "  ($label) claude invocation failed (attempt $attempt): $claude_msg" >&2
+          continue
+        fi
         result="$(printf '%s' "$raw" | jq -r '.result // .text // empty')"
         [ -n "$result" ] || result="$raw"          # tolerate a bare-JSON CLI build
         ;;
