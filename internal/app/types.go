@@ -228,6 +228,9 @@ type AppDef struct {
 	// no provider preserves today's behavior (ambient environment). Env values
 	// support ${VAR} interpolation, resolved at load time.
 	Providers map[string]*ProviderDecl `yaml:"providers,omitempty"`
+	// Toolboxes declares reusable named agent tool surfaces. Agents may
+	// reference one with toolbox: and specialize it with tools_add/tools_remove.
+	Toolboxes map[string]*ToolboxDecl `yaml:"toolboxes,omitempty"`
 	// Proposals declares named proposal kinds.
 	Proposals map[string]*ProposalKind `yaml:"proposals,omitempty"`
 	// Include lists glob patterns for additional YAML files to merge.
@@ -1352,6 +1355,13 @@ type AgentDecl struct {
 	Tools []string `yaml:"tools,omitempty"`
 	Cwd   string   `yaml:"cwd,omitempty"`
 
+	// Toolbox names an entry in the top-level toolboxes: map. When set, Tools
+	// must be empty; the loader resolves the named toolbox plus ToolsAdd /
+	// ToolsRemove into Tools before effect classification.
+	Toolbox     string   `yaml:"toolbox,omitempty"`
+	ToolsAdd    []string `yaml:"tools_add,omitempty"`
+	ToolsRemove []string `yaml:"tools_remove,omitempty"`
+
 	// MCP declares the explicit MCP surface this agent may use. Servers are
 	// materialized into the generated --mcp-config for host.agent.* calls; Tools
 	// are appended to the effective allowed-tools list (for example
@@ -1429,6 +1439,14 @@ type AgentDecl struct {
 	// new-style declarations. Declaring both effect: and
 	// external_side_effect: on the same agent is a load error.
 	ExternalSideEffect *bool `yaml:"external_side_effect,omitempty"`
+}
+
+// ToolboxDecl is one entry in top-level toolboxes:. Tools are normalized by the
+// loader to the same host.* form as AgentDecl.Tools. Effect, when set, asserts
+// the joined tool-surface class and is checked at load time.
+type ToolboxDecl struct {
+	Tools  []string      `yaml:"tools,omitempty"`
+	Effect effect.Effect `yaml:"effect,omitempty"`
 }
 
 type AgentMCPDecl struct {

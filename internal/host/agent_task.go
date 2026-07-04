@@ -192,7 +192,8 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 	}
 
 	// ── Effective tools ───────────────────────────────────────────────────
-	tools := effectiveTools(ctx, args, agent)
+	policy := enforceToolbox(ctx, args, agent, "bypassPermissions")
+	tools := policy.AllowedTools
 
 	// ── Replay mode ───────────────────────────────────────────────────────
 	replayMode := inferReplayMode(agent, tools)
@@ -217,14 +218,14 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 		taskPromptRef, _ = cm["prompt"].(string)
 	}
 	tOverlay, tDefaulted, tOverridden := promptTraceProvenance(ctx, taskPromptRef)
-	appendAgentCalledEvent(ctx, callStart, callID, contextPrompt, AgentCalledPayload{
+	appendAgentCalledEvent(ctx, callStart, callID, contextPrompt, policy.AgentCalledFields(AgentCalledPayload{
 		Verb:           "task",
 		Agent:          agentName,
 		Model:          agent.Model,
 		PromptOverlay:  tOverlay,
 		SpecDefaulted:  tDefaulted,
 		SpecOverridden: tOverridden,
-	})
+	}))
 
 	slog.InfoContext(ctx, "task.start",
 		"agent", agentName,
@@ -255,6 +256,8 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 
 	// ── Build CLI args ────────────────────────────────────────────────────
 	baseCLIArgs := buildBaseCLIArgs(ctx, sysprompt.Task, args, agent)
+	baseCLIArgs = setPermissionMode(baseCLIArgs, policy.CLIMode)
+	baseCLIArgs = appendDisallowedToolsFlag(baseCLIArgs, policy.DeniedTools)
 	if writeModeReadOnly {
 		baseCLIArgs = applyReadOnlyFloorCLIArgs(baseCLIArgs)
 		tools = rewriteToolsForBashMCP(tools)
@@ -272,6 +275,7 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 	var opAskCleanup func()
 	baseCLIArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, baseCLIArgs, tools)
 	defer opAskCleanup()
+	policy = policy.WithAllowed(tools)
 	// Read-only floor: route Bash (if requested) through the kitsoki-bash MCP
 	// wrapper under a read-only profile so the subprocess can only run read-only
 	// commands; a mutating command is denied by the profile (the gate's operator
@@ -549,7 +553,7 @@ const defaultWorktreeDurabilityWaitMS = 15000
 // to the worktree, so the durability barrier skips them.
 func agentHasWriteTools(agent Agent) bool {
 	for _, t := range agent.Tools {
-		if mutationTools[t] {
+		if fileMutationTools[t] {
 			return true
 		}
 	}

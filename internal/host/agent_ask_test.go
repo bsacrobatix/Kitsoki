@@ -4,7 +4,7 @@ package host_test
 //
 // Coverage:
 //   - Verb contract: prompt_path required; prompt alias accepted.
-//   - Tool surface: mutation tools (Edit, Write) rejected at handler level.
+//   - Tool surface: mutation tools (Edit, Write) hard-denied by toolbox policy.
 //   - Bash gate: Bash in tools without bash_profile is rejected.
 //   - Bash profile enforcement: read-only profile blocks rm; commands profile
 //     blocks unlisted argv0; sandboxed-write allows any command.
@@ -78,20 +78,25 @@ func TestAgentAsk_AgentOptional(t *testing.T) {
 	}
 }
 
-// ── Tool surface safety net ───────────────────────────────────────────────────
+// ── Tool surface enforcement ──────────────────────────────────────────────────
 
-func TestAgentAsk_RejectsMutationTool_Edit(t *testing.T) {
+func TestAgentAsk_HardDeniesMutationTool_Edit(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	p := filepath.Join(dir, "p.md")
 	if err := os.WriteFile(p, []byte("hello"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
+	var captured []string
+	runner := host.FakeAsk("ok")
 	ctx := host.WithClaudeRunner(
 		host.WithAgents(context.Background(), map[string]host.Agent{
 			"mutator": {Tools: []string{"Read", "Edit"}},
 		}),
-		host.FakeAsk("should not reach"),
+		func(ctx context.Context, args []string, stdin, workingDir string) (host.ClaudeRun, error) {
+			captured = append([]string(nil), args...)
+			return runner(ctx, args, stdin, workingDir)
+		},
 	)
 	res, err := host.AgentAskHandler(ctx, map[string]any{
 		"prompt_path": p,
@@ -100,23 +105,32 @@ func TestAgentAsk_RejectsMutationTool_Edit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
-	if !strings.Contains(res.Error, "Edit") || !strings.Contains(res.Error, "not permitted") {
-		t.Fatalf("expected Edit rejection, got %q", res.Error)
+	if res.Error != "" {
+		t.Fatalf("unexpected handler error: %q", res.Error)
+	}
+	denied, ok := hostTestFlagValue(captured, "--disallowedTools")
+	if !ok || !strings.Contains(denied, "Edit") {
+		t.Fatalf("expected Edit in --disallowedTools, got args=%v", captured)
 	}
 }
 
-func TestAgentAsk_RejectsMutationTool_Write(t *testing.T) {
+func TestAgentAsk_HardDeniesMutationTool_Write(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	p := filepath.Join(dir, "p.md")
 	if err := os.WriteFile(p, []byte("hello"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
+	var captured []string
+	runner := host.FakeAsk("ok")
 	ctx := host.WithClaudeRunner(
 		host.WithAgents(context.Background(), map[string]host.Agent{
 			"mutator": {Tools: []string{"Write"}},
 		}),
-		host.FakeAsk("should not reach"),
+		func(ctx context.Context, args []string, stdin, workingDir string) (host.ClaudeRun, error) {
+			captured = append([]string(nil), args...)
+			return runner(ctx, args, stdin, workingDir)
+		},
 	)
 	res, err := host.AgentAskHandler(ctx, map[string]any{
 		"prompt_path": p,
@@ -125,19 +139,28 @@ func TestAgentAsk_RejectsMutationTool_Write(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
-	if !strings.Contains(res.Error, "Write") || !strings.Contains(res.Error, "not permitted") {
-		t.Fatalf("expected Write rejection, got %q", res.Error)
+	if res.Error != "" {
+		t.Fatalf("unexpected handler error: %q", res.Error)
+	}
+	denied, ok := hostTestFlagValue(captured, "--disallowedTools")
+	if !ok || !strings.Contains(denied, "Write") {
+		t.Fatalf("expected Write in --disallowedTools, got args=%v", captured)
 	}
 }
 
-func TestAgentAsk_PerCallTools_RejectsMutation(t *testing.T) {
+func TestAgentAsk_PerCallTools_HardDeniesMutation(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	p := filepath.Join(dir, "p.md")
 	if err := os.WriteFile(p, []byte("hello"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	ctx := host.WithClaudeRunner(context.Background(), host.FakeAsk("nope"))
+	var captured []string
+	runner := host.FakeAsk("ok")
+	ctx := host.WithClaudeRunner(context.Background(), func(ctx context.Context, args []string, stdin, workingDir string) (host.ClaudeRun, error) {
+		captured = append([]string(nil), args...)
+		return runner(ctx, args, stdin, workingDir)
+	})
 	res, err := host.AgentAskHandler(ctx, map[string]any{
 		"prompt_path": p,
 		"tools":       []any{"Read", "Edit"},
@@ -145,8 +168,12 @@ func TestAgentAsk_PerCallTools_RejectsMutation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
-	if !strings.Contains(res.Error, "Edit") {
-		t.Fatalf("expected Edit rejection via per-call tools, got %q", res.Error)
+	if res.Error != "" {
+		t.Fatalf("unexpected handler error: %q", res.Error)
+	}
+	denied, ok := hostTestFlagValue(captured, "--disallowedTools")
+	if !ok || !strings.Contains(denied, "Edit") {
+		t.Fatalf("expected Edit in --disallowedTools, got args=%v", captured)
 	}
 }
 
@@ -587,4 +614,17 @@ func TestAgentStreamer_CLIArgs_PanicsOnPositionalArgInTests(t *testing.T) {
 	}
 	// Should panic because "POSITIONAL" follows a flag value, not a flag name.
 	_, _, _ = streamer.Run(context.Background())
+}
+
+func hostTestFlagValue(args []string, flag string) (string, bool) {
+	var values []string
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			values = append(values, args[i+1])
+		}
+	}
+	if len(values) == 0 {
+		return "", false
+	}
+	return strings.Join(values, ","), true
 }

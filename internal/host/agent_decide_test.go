@@ -10,7 +10,7 @@ package host_test
 //  2. Validator: reject-with-reason triggers re-submit; success on retry.
 //  3. Validator sandbox: mutating validator rejected.
 //  4. Streaming: tokens flow through AgentStreamer.
-//  5. Loader/runtime: mutation tools on agent rejected at call time.
+//  5. Loader/runtime: mutation tools on agent hard-denied by toolbox policy.
 //  6. Alias: ask_with_mcp (no mutations) → decide with warn (checked via Result).
 //  7. Alias: ask_with_mcp + chat_id → error pointing at converse.
 //  8. Agent fields: system_prompt / model / tools forwarded.
@@ -360,13 +360,15 @@ func (s *collectingSink) OnStreamEvent(_ context.Context, e host.StreamEvent) {
 	s.fn(e)
 }
 
-// ── 5. Mutation tool rejection ────────────────────────────────────────────────
+// ── 5. Mutation tool enforcement ──────────────────────────────────────────────
 
-// TestAgentDecide_MutationTool_Edit_Rejected verifies that the runtime
-// safety net rejects an agent declaring Edit.
-func TestAgentDecide_MutationTool_Edit_Rejected(t *testing.T) {
+// TestAgentDecide_MutationTool_Edit_HardDenied verifies that the shared toolbox
+// policy hard-denies an agent declaring Edit.
+func TestAgentDecide_MutationTool_Edit_HardDenied(t *testing.T) {
 	t.Parallel()
 	schemaPath := makeSchemaFile(t)
+	var captured []string
+	runner := host.FakeDecide("verdict")
 	ctx := host.WithClaudeRunner(
 		host.WithAgents(context.Background(), map[string]host.Agent{
 			"mutator": {
@@ -374,7 +376,10 @@ func TestAgentDecide_MutationTool_Edit_Rejected(t *testing.T) {
 				Tools:        []string{"Edit", "Read"},
 			},
 		}),
-		host.FakeDecide("verdict"),
+		func(ctx context.Context, args []string, stdin, workingDir string) (host.ClaudeRun, error) {
+			captured = append([]string(nil), args...)
+			return runner(ctx, args, stdin, workingDir)
+		},
 	)
 	res, err := host.AgentDecideHandler(ctx, map[string]any{
 		"prompt": "decide",
@@ -384,21 +389,30 @@ func TestAgentDecide_MutationTool_Edit_Rejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
-	if !strings.Contains(res.Error, "mutation tool") {
-		t.Fatalf("expected mutation-tool error; got %q", res.Error)
+	if res.Error != "" {
+		t.Fatalf("unexpected handler error: %q", res.Error)
+	}
+	denied, ok := hostTestFlagValue(captured, "--disallowedTools")
+	if !ok || !strings.Contains(denied, "Edit") {
+		t.Fatalf("expected Edit in --disallowedTools, got args=%v", captured)
 	}
 }
 
-// TestAgentDecide_MutationTool_Write_Rejected mirrors TestAgentDecide_MutationTool_Edit_Rejected
+// TestAgentDecide_MutationTool_Write_HardDenied mirrors TestAgentDecide_MutationTool_Edit_HardDenied
 // for Write.
-func TestAgentDecide_MutationTool_Write_Rejected(t *testing.T) {
+func TestAgentDecide_MutationTool_Write_HardDenied(t *testing.T) {
 	t.Parallel()
 	schemaPath := makeSchemaFile(t)
+	var captured []string
+	runner := host.FakeDecide("v")
 	ctx := host.WithClaudeRunner(
 		host.WithAgents(context.Background(), map[string]host.Agent{
 			"writer": {Tools: []string{"Write"}},
 		}),
-		host.FakeDecide("v"),
+		func(ctx context.Context, args []string, stdin, workingDir string) (host.ClaudeRun, error) {
+			captured = append([]string(nil), args...)
+			return runner(ctx, args, stdin, workingDir)
+		},
 	)
 	res, err := host.AgentDecideHandler(ctx, map[string]any{
 		"prompt": "decide",
@@ -408,17 +422,26 @@ func TestAgentDecide_MutationTool_Write_Rejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
-	if !strings.Contains(res.Error, "mutation tool") {
-		t.Fatalf("expected mutation-tool error for Write; got %q", res.Error)
+	if res.Error != "" {
+		t.Fatalf("unexpected handler error: %q", res.Error)
+	}
+	denied, ok := hostTestFlagValue(captured, "--disallowedTools")
+	if !ok || !strings.Contains(denied, "Write") {
+		t.Fatalf("expected Write in --disallowedTools, got args=%v", captured)
 	}
 }
 
-// TestAgentDecide_PerCallMutationTool_Rejected verifies that a per-call
-// tools: list containing a mutation tool is rejected.
-func TestAgentDecide_PerCallMutationTool_Rejected(t *testing.T) {
+// TestAgentDecide_PerCallMutationTool_HardDenied verifies that a per-call
+// tools: list containing a mutation tool is hard-denied.
+func TestAgentDecide_PerCallMutationTool_HardDenied(t *testing.T) {
 	t.Parallel()
 	schemaPath := makeSchemaFile(t)
-	ctx := host.WithClaudeRunner(context.Background(), host.FakeDecide("v"))
+	var captured []string
+	runner := host.FakeDecide("v")
+	ctx := host.WithClaudeRunner(context.Background(), func(ctx context.Context, args []string, stdin, workingDir string) (host.ClaudeRun, error) {
+		captured = append([]string(nil), args...)
+		return runner(ctx, args, stdin, workingDir)
+	})
 	res, err := host.AgentDecideHandler(ctx, map[string]any{
 		"prompt": "decide",
 		"schema": schemaPath,
@@ -427,8 +450,12 @@ func TestAgentDecide_PerCallMutationTool_Rejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
-	if !strings.Contains(res.Error, "mutation tool") {
-		t.Fatalf("expected mutation-tool rejection; got %q", res.Error)
+	if res.Error != "" {
+		t.Fatalf("unexpected handler error: %q", res.Error)
+	}
+	denied, ok := hostTestFlagValue(captured, "--disallowedTools")
+	if !ok || !strings.Contains(denied, "Edit") {
+		t.Fatalf("expected Edit in --disallowedTools, got args=%v", captured)
 	}
 }
 

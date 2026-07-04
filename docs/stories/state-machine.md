@@ -1089,6 +1089,32 @@ the declarative `agents:` block — see [`meta-mode.md`](meta-mode.md).
 Meta mode is what most authors should reach for today; off-path remains
 the simple banner-only escape hatch.
 
+### Agent toolboxes
+
+Stories may declare reusable tool grants with top-level `toolboxes:` and
+reference them from `agents:`:
+
+```yaml
+toolboxes:
+  read_only: { tools: [Read, Grep, Glob], effect: read }
+  repo_writer: { tools: [Read, Grep, Glob, Edit, Write, Bash], effect: write }
+
+agents:
+  reviewer:
+    system_prompt: "Review the current state."
+    toolbox: read_only
+  implementer:
+    system_prompt: "Make the requested change."
+    toolbox: repo_writer
+    tools_remove: [Bash]
+```
+
+`toolbox:` and inline `tools:` are mutually exclusive on an agent. Use
+`tools_add:` and `tools_remove:` to specialize a named box. The loader resolves
+the final tool surface before effect classification, checks an asserted toolbox
+`effect:` against the joined tools, and records the resolved toolbox/effect plus
+allowed/denied tool sets on agent-call trace events.
+
 ### The agent off-ramp — the automatic no-match door
 
 One voice, two entrances. Off-path is reached through a *typed-trigger*

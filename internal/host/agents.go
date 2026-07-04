@@ -85,6 +85,7 @@ type Agent struct {
 	// it per call; empty leaves the CLI default.
 	Effort             string
 	Tools              []string
+	Toolbox            string
 	MCPTools           []string
 	MCPServers         map[string]any
 	BashProfile        *BashProfile
@@ -371,6 +372,9 @@ func mergeAgentContract(base Agent, c map[string]any) Agent {
 	if tools := stringSliceArg(c, "tools"); len(tools) > 0 {
 		base.Tools = tools
 	}
+	if s, _ := c["toolbox"].(string); s != "" {
+		base.Toolbox = s
+	}
 	if mcp, ok := c["mcp"].(map[string]any); ok {
 		if servers, ok := mcp["servers"].(map[string]any); ok {
 			base.MCPServers = cloneAnyMap(servers)
@@ -536,6 +540,20 @@ func appendDisallowedToolsFlag(cliArgs []string, tools []string) []string {
 	return append(cliArgs, "--disallowedTools", strings.Join(tools, ","))
 }
 
+func setPermissionMode(cliArgs []string, mode string) []string {
+	if strings.TrimSpace(mode) == "" {
+		return cliArgs
+	}
+	out := append([]string(nil), cliArgs...)
+	for i := 0; i < len(out)-1; i++ {
+		if out[i] == "--permission-mode" {
+			out[i+1] = mode
+			return out
+		}
+	}
+	return append(out, "--permission-mode", mode)
+}
+
 func effectivePermissionMode(args map[string]any, agent Agent, fallback string) string {
 	mode, _ := args["permission_mode"].(string)
 	if mode == "" {
@@ -585,6 +603,21 @@ func effectiveDisallowedTools(args map[string]any, agent Agent) []string {
 // denied: they read external state, which a read-only agent may legitimately
 // do.
 var readOnlyDeniedTools = []string{"Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"}
+
+// readOnlyAgentVerbDeniedTools are denied for ask/decide's read-only posture.
+// Unlike converse, ask/decide may allow Bash when the agent declares a
+// BashProfile; the Bash MCP wrapper applies the profile before any shell runs.
+var readOnlyAgentVerbDeniedTools = []string{"Write", "Edit", "MultiEdit", "NotebookEdit"}
+
+// fileMutationTools are the built-in durable file mutators. They are not the
+// ask/decide enforcement path; enforceToolbox owns that. The task durability
+// barrier and the extract LLM tier still need this small classifier.
+var fileMutationTools = map[string]bool{
+	"Edit":         true,
+	"Write":        true,
+	"MultiEdit":    true,
+	"NotebookEdit": true,
+}
 
 // alwaysDeniedTools are tools denied on EVERY agent subprocess regardless of
 // agent posture or permission mode.
@@ -666,6 +699,70 @@ func agentIsReadOnly(a Agent) bool {
 	return resolveAgentEffect(a).LessEqual(effect.Read)
 }
 
+type ToolboxEnforcement struct {
+	CLIMode      string
+	AllowedTools []string
+	DeniedTools  []string
+	Toolbox      string
+	Effect       effect.Effect
+}
+
+type ToolboxEnforcementOptions struct {
+	// EffectCeiling, when set, caps the enforced effect class for verbs whose
+	// contract is narrower than the agent's full capability. ask/decide use
+	// this to stay read-only even if legacy per-call tools try to widen them.
+	EffectCeiling effect.Effect
+	// ReadOnlyDeniedTools overrides the default read-only deny set. ask/decide
+	// use the Bash-profile-aware set; converse uses the stricter default.
+	ReadOnlyDeniedTools []string
+}
+
+func enforceToolbox(ctx context.Context, args map[string]any, agent Agent, fallbackMode string, opts ...ToolboxEnforcementOptions) ToolboxEnforcement {
+	var opt ToolboxEnforcementOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	allowed := effectiveTools(ctx, args, agent)
+	class := effect.Join(resolveAgentEffect(agent), effect.FromTools(allowed))
+	if opt.EffectCeiling.Valid() && !class.LessEqual(opt.EffectCeiling) {
+		class = opt.EffectCeiling
+	}
+	mode := effectivePermissionMode(args, agent, fallbackMode)
+	var denied []string
+	if class.LessEqual(effect.Read) {
+		readOnlyDeny := readOnlyDeniedTools
+		if opt.ReadOnlyDeniedTools != nil {
+			readOnlyDeny = opt.ReadOnlyDeniedTools
+		}
+		mode = "default"
+		denied = withAlwaysDenied(readOnlyDeny)
+	} else {
+		denied = withAlwaysDenied(effectiveDisallowedTools(args, agent))
+	}
+	return ToolboxEnforcement{
+		CLIMode:      mode,
+		AllowedTools: allowed,
+		DeniedTools:  denied,
+		Toolbox:      agent.Toolbox,
+		Effect:       class,
+	}
+}
+
+func (p ToolboxEnforcement) WithAllowed(tools []string) ToolboxEnforcement {
+	p.AllowedTools = dedupeStrings(tools)
+	return p
+}
+
+func (p ToolboxEnforcement) AgentCalledFields(payload AgentCalledPayload) AgentCalledPayload {
+	payload.Toolbox = p.Toolbox
+	payload.AllowedTools = append([]string(nil), p.AllowedTools...)
+	payload.DeniedTools = append([]string(nil), p.DeniedTools...)
+	if p.Effect != "" {
+		payload.Effect = string(p.Effect)
+	}
+	return payload
+}
+
 // converseToolPolicy computes the CLI permission posture for a converse call:
 // the --permission-mode value the `claude` binary actually receives and the
 // --disallowedTools backstop. It does two jobs.
@@ -693,26 +790,8 @@ func agentIsReadOnly(a Agent) bool {
 // A write-capable agent (external_side_effect unset or true) gets only the
 // vocabulary translation.
 func converseToolPolicy(permMode string, agent Agent) (cliMode string, disallowed []string) {
-	switch permMode {
-	case "denyAll":
-		cliMode, disallowed = "default", readOnlyDeniedTools
-	case "ask":
-		cliMode = "default"
-	default: // bypassPermissions
-		cliMode = permMode
-	}
-
-	if agentIsReadOnly(agent) {
-		if cliMode == "bypassPermissions" {
-			cliMode = "default"
-		}
-		disallowed = readOnlyDeniedTools
-	}
-	// AskUserQuestion is denied on every converse turn too — same headless
-	// auto-resolve hazard (see alwaysDeniedTools). Merge so we never emit a
-	// duplicate --disallowedTools entry alongside readOnlyDeniedTools.
-	disallowed = withAlwaysDenied(disallowed)
-	return cliMode, disallowed
+	policy := enforceToolbox(context.Background(), map[string]any{"permission_mode": permMode}, agent, permMode)
+	return policy.CLIMode, policy.DeniedTools
 }
 
 // agentSettingSources is the --setting-sources value applied to every agent

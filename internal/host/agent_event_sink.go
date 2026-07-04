@@ -243,9 +243,13 @@ func EventSinkFromAgentCtx(ctx context.Context) store.EventSink {
 // This ensures deterministic replay while staying under atomic write limits.
 // See agent_dispatch.go appendAgentCalledEventWithEpisode for details.
 type AgentCalledPayload struct {
-	Verb  string `json:"verb"`
-	Agent string `json:"agent,omitempty"`
-	Model string `json:"model,omitempty"`
+	Verb         string   `json:"verb"`
+	Agent        string   `json:"agent,omitempty"`
+	Model        string   `json:"model,omitempty"`
+	Toolbox      string   `json:"toolbox,omitempty"`
+	AllowedTools []string `json:"allowed_tools,omitempty"`
+	DeniedTools  []string `json:"denied_tools,omitempty"`
+	Effect       string   `json:"effect,omitempty"`
 	// Profile is the active harness profile name in effect for this call, when a
 	// session selected one (TUI /provider, web picker). It records which
 	// operator-selected backend/endpoint answered — never the env secrets behind

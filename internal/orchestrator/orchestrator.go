@@ -3141,6 +3141,7 @@ func agentsForContext(def *app.AppDef) map[string]host.Agent {
 		if len(a.Tools) > 0 {
 			agent.Tools = append([]string(nil), a.Tools...)
 		}
+		agent.Toolbox = a.Toolbox
 		if a.MCP != nil {
 			if len(a.MCP.Tools) > 0 {
 				agent.MCPTools = append([]string(nil), a.MCP.Tools...)

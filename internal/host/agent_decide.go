@@ -42,8 +42,6 @@ import (
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// mutationTools is shared with agent_ask.go and now covers decide too.
-
 // decideDefaultMaxRetries is the per-submission retry budget for the decide
 // validator. Mirrors validatorDefaultMaxRetries in agent_ask_with_mcp.go.
 const decideDefaultMaxRetries = 5
@@ -143,9 +141,6 @@ func agentDecideHandlerOnce(ctx context.Context, args map[string]any) (Result, e
 	agent, _ := resolveAgent(ctx, args)
 	ctx, agent = applyProvider(ctx, args, agent)
 	ctx, agent = applyLadderRung(ctx, agent)
-	if errMsg := rejectMutationTools(ctx, args, agent); errMsg != "" {
-		return Result{Error: errMsg, FailureKind: FailureFatal}, nil
-	}
 
 	bin, err := resolveAgentBin(ctx)
 	if err != nil {
@@ -158,13 +153,17 @@ func agentDecideHandlerOnce(ctx context.Context, args map[string]any) (Result, e
 	workingDir, _ := args["working_dir"].(string)
 	workingDir = appendDefaultCwd(workingDir, agent)
 
-	// Build base CLI args.
-	cliArgs := buildBaseCLIArgs(ctx, sysprompt.Decide, args, agent)
-
 	// Resolve effective tools and apply Bash MCP rewrite if Bash is present.
 	// For decide calls, Bash must have a BashProfile (enforced by the loader;
 	// the runtime check below is a safety net).
-	tools := effectiveTools(ctx, args, agent)
+	policy := enforceToolbox(ctx, args, agent, "default", ToolboxEnforcementOptions{
+		EffectCeiling:       "read",
+		ReadOnlyDeniedTools: readOnlyAgentVerbDeniedTools,
+	})
+	tools := policy.AllowedTools
+	// Build base CLI args.
+	cliArgs := buildBaseCLIArgs(ctx, sysprompt.Decide, args, agent)
+	cliArgs = setPermissionMode(cliArgs, policy.CLIMode)
 	hasBash, bashErrMsg := validateBashProfile("host.agent.decide", tools, agent)
 	if bashErrMsg != "" {
 		return Result{Error: bashErrMsg, FailureKind: FailureFatal}, nil
@@ -172,10 +171,12 @@ func agentDecideHandlerOnce(ctx context.Context, args map[string]any) (Result, e
 	if hasBash {
 		tools = rewriteToolsForBashMCP(tools)
 	}
+	cliArgs = appendDisallowedToolsFlag(cliArgs, policy.DeniedTools)
 	// Forward operator questions into kitsoki when a live surface is attached.
 	var opAskCleanup func()
 	cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
 	defer opAskCleanup()
+	policy = policy.WithAllowed(tools)
 	if len(tools) > 0 {
 		cliArgs = appendAllowedToolsFlag(cliArgs, tools)
 	}
@@ -280,7 +281,7 @@ func agentDecideHandlerOnce(ctx context.Context, args map[string]any) (Result, e
 	// Wave 3-agent: write AgentCalled to the JSONL sink at dispatch time.
 	decidePromptRef, _ := args["prompt_path"].(string)
 	dOverlay, dDefaulted, dOverridden := promptTraceProvenance(ctx, decidePromptRef)
-	appendAgentCalledEvent(ctx, callStart, callID, rendered, AgentCalledPayload{
+	appendAgentCalledEvent(ctx, callStart, callID, rendered, policy.AgentCalledFields(AgentCalledPayload{
 		Verb:           "decide",
 		Agent:          agentNameFromArgs(args),
 		Model:          agent.Model,
@@ -288,7 +289,7 @@ func agentDecideHandlerOnce(ctx context.Context, args map[string]any) (Result, e
 		PromptOverlay:  dOverlay,
 		SpecDefaulted:  dDefaulted,
 		SpecOverridden: dOverridden,
-	})
+	}))
 
 	// Always use the retry loop so the abandonment-nudge cycle fires for every
 	// decide call, not just those with an explicit validator: block.
@@ -471,19 +472,6 @@ func resolveDecidePrompt(ctx context.Context, args map[string]any) (string, stri
 		return "", fmt.Sprintf("host.agent.decide: render prompt: %v", err)
 	}
 	return rendered, ""
-}
-
-// rejectMutationTools checks that neither per-call tools nor agent tools contain
-// mutation capabilities. Returns an error message if any mutation tool is found.
-// This is the runtime safety net; the loader is the primary enforcement.
-func rejectMutationTools(ctx context.Context, args map[string]any, agent Agent) string {
-	tools := effectiveTools(ctx, args, agent)
-	for _, t := range tools {
-		if mutationTools[t] {
-			return fmt.Sprintf("host.agent.decide: mutation tool %q is not permitted on decide calls; use host.agent.task for agentic work", t)
-		}
-	}
-	return ""
 }
 
 // errValidatorExceededContract is the sentinel returned when RunValidatorSandboxed

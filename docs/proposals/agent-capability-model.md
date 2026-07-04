@@ -1,14 +1,12 @@
 # Epic: a unified capability model for every agent
 
-**Status:** Draft v1. No slices implemented as proposed. Adjacent safety work
-has shipped (`write_mode: read_only`, bash profiles including sandboxed-write,
-validator sandboxing, converse/read-only tool policy, and load-time
-`external_side_effect` cross-checks), but the proposed `effect:` taxonomy,
-named `toolboxes:`, `tools_add:`/`tools_remove:`, unified enforcement surface,
-and secure agent runtime are not present. `external_side_effect` remains the
-real story vocabulary.
+**Status:** Draft v1. Slices 1 and 2 have shipped into narrative docs and
+runtime code: the `effect:` taxonomy, named `toolboxes:`,
+`tools_add:`/`tools_remove:`, and unified tool-layer enforcement are present.
+The secure agent runtime slice remains proposed. `external_side_effect` is
+kept as a deprecated alias during migration.
 **Kind:**   epic
-**Slices:** 3 (0/3 shipped) + a conformance check folded into `agent-contract-eval.md`
+**Slices:** 3 (2/3 shipped) + a conformance check folded into `agent-contract-eval.md`
 
 ## Why
 
@@ -23,15 +21,12 @@ to *propose* it.
 
 Today the three restrictions don't share a model:
 
-- `agent.ask` / `agent.decide` — a hardcoded `mutationTools` deny set
-  (`internal/host/agent_ask.go:42`, shared into decide at
-  `agent_decide.go:42`); read-only by construction.
-- `agent.converse` — a `readOnlyDeniedTools` backstop
-  (`internal/host/agents.go:206`) applied by `converseToolPolicy`
-  (`agents.go:215`), gated on the overloaded `external_side_effect: false`
-  boolean via `agentIsReadOnly` (`agents.go:208`).
-- `agent.task` — fully unrestricted `bypassPermissions`
-  (`agent_task.go:191`); nothing reins it in.
+- `agent.ask` / `agent.decide` now enter the shared `enforceToolbox` path with
+  a read-only verb ceiling.
+- `agent.converse` keeps the compatibility `converseToolPolicy` wrapper, but
+  it delegates to `enforceToolbox`.
+- `agent.task` now resolves the same policy before building CLI permissions;
+  process-level confinement remains slice 3.
 
 And `external_side_effect` (`internal/app/types.go:999`) is one bit meaning
 two things: the task **replay mode** (`inferReplayMode`,
@@ -100,19 +95,19 @@ held. The three ad-hoc mechanisms collapse into one.
 
 | # | Slice | Kind | Scope (one line) | Depends on | Status | File |
 |---|---|---|---|---|---|---|
-| 1 | effect taxonomy | runtime | `effect: pure\|read\|write\|external` + `deterministic`; classify host calls **and** agents; replace the overloaded boolean | — | Draft | [`effect-taxonomy.md`](effect-taxonomy.md) |
-| 2 | toolbox + uniform enforcement | runtime | named `toolboxes:` + `tools_add:`; one effect-derived tool-layer policy for **all four** agent kinds, replacing the three ad-hoc mechanisms | 1 | Draft | [`toolbox-and-enforcement.md`](toolbox-and-enforcement.md) |
+| 1 | effect taxonomy | runtime | `effect: pure\|read\|write\|external` + `deterministic`; classify host calls **and** agents; replace the overloaded boolean | — | Shipped | [`effect-taxonomy.md`](effect-taxonomy.md) |
+| 2 | toolbox + uniform enforcement | runtime | named `toolboxes:` + `tools_add:`; one effect-derived tool-layer policy for **all four** agent kinds, replacing the three ad-hoc mechanisms | 1 | Shipped | [`hosts.md`](../architecture/hosts.md#agent-declaration), [`state-machine.md`](../stories/state-machine.md#agent-toolboxes) |
 | 3 | secure agent runtime | runtime | `sandbox:` routes write/external agents through a pluggable runtime boundary: supervised floor, Landlock/macOS filesystem confinement, optional namespace/VM backends, and recorded degradation | 1, 2 | Draft | [`task-fs-sandbox.md`](task-fs-sandbox.md) |
 | — | effect/toolbox conformance | tracing | offline check that a recorded call's tool uses never exceeded its toolbox/effect (a new Layer-1 sibling) | 1 | Draft | [`agent-contract-eval.md`](agent-contract-eval.md) (§Conformance) |
 
 ## Sequencing
 
 Slice 1 is the substrate — the classification every other slice keys on.
-Slice 2 adds the toolbox vocabulary and folds the three enforcement
+Slice 2 has added the toolbox vocabulary and folded the three enforcement
 mechanisms into one effect-derived policy at the tool layer. Slice 3 adds the
 runtime/process boundary beneath the tools for the `write`/`external` tiers. The
-conformance check rides on slice 1's recorded effect class and can land in
-parallel with 2/3 once events carry the class.
+conformance check rides on the recorded effect class and can land in parallel
+with slice 3.
 
 ```
 #1 effect-taxonomy ──▶ #2 toolbox + enforcement ──▶ #3 secure runtime

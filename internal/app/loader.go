@@ -507,6 +507,16 @@ func mergeInto(dst, src *AppDef, srcFile string) []error {
 		}
 		dst.Providers[k] = v
 	}
+	for k, v := range src.Toolboxes {
+		if _, exists := dst.Toolboxes[k]; exists {
+			addErr(fmt.Sprintf("include: toolbox %q is already declared", k))
+			continue
+		}
+		if dst.Toolboxes == nil {
+			dst.Toolboxes = make(map[string]*ToolboxDecl)
+		}
+		dst.Toolboxes[k] = v
+	}
 
 	return errs
 }
@@ -522,12 +532,19 @@ func mergeInto(dst, src *AppDef, srcFile string) []error {
 // A nil or empty Agents map is a no-op. The function reports all problems
 // it finds rather than stopping at the first.
 func resolveAgentDecls(def *AppDef, file, baseDir string) []error {
-	if def == nil || len(def.Agents) == 0 {
+	if def == nil {
 		return nil
 	}
 	var errs []error
 	addErr := func(msg string) {
 		errs = append(errs, &ValidationError{File: file, Message: msg})
+	}
+
+	if boxErrs := resolveToolboxes(def, file); len(boxErrs) > 0 {
+		errs = append(errs, boxErrs...)
+	}
+	if len(def.Agents) == 0 {
+		return errs
 	}
 
 	// Set of agents referenced by a read-only agent verb (ask/decide), where
@@ -597,6 +614,11 @@ func resolveAgentDecls(def *AppDef, file, baseDir string) []error {
 			}
 		}
 
+		if decl.Toolbox != "" && len(decl.Tools) > 0 {
+			addErr(fmt.Sprintf("agent %q: toolbox and tools are mutually exclusive; use toolbox with tools_add/tools_remove or inline tools, not both", name))
+			continue
+		}
+
 		// Normalise tools to fully-qualified form. Logic duplicates
 		// metamode.NormaliseToolName here because internal/metamode imports
 		// internal/app already; importing back would create a cycle.
@@ -606,6 +628,28 @@ func resolveAgentDecls(def *AppDef, file, baseDir string) []error {
 				out[i] = normaliseAgentTool(t)
 			}
 			decl.Tools = out
+		}
+		if len(decl.ToolsAdd) > 0 {
+			out := make([]string, len(decl.ToolsAdd))
+			for i, t := range decl.ToolsAdd {
+				out[i] = normaliseAgentTool(t)
+			}
+			decl.ToolsAdd = out
+		}
+		if len(decl.ToolsRemove) > 0 {
+			out := make([]string, len(decl.ToolsRemove))
+			for i, t := range decl.ToolsRemove {
+				out[i] = normaliseAgentTool(t)
+			}
+			decl.ToolsRemove = out
+		}
+		if decl.Toolbox != "" {
+			box := def.Toolboxes[decl.Toolbox]
+			if box == nil {
+				addErr(fmt.Sprintf("agent %q: toolbox %q is not declared in toolboxes", name, decl.Toolbox))
+				continue
+			}
+			decl.Tools = applyToolboxSpecialization(box.Tools, decl.ToolsAdd, decl.ToolsRemove)
 		}
 		if decl.MCP != nil && len(decl.MCP.Tools) > 0 {
 			out := make([]string, len(decl.MCP.Tools))
@@ -637,6 +681,67 @@ func resolveAgentDecls(def *AppDef, file, baseDir string) []error {
 		}
 	}
 	return errs
+}
+
+func resolveToolboxes(def *AppDef, file string) []error {
+	if def == nil || len(def.Toolboxes) == 0 {
+		return nil
+	}
+	var errs []error
+	for _, name := range sortedKeys(def.Toolboxes) {
+		box := def.Toolboxes[name]
+		if box == nil {
+			errs = append(errs, &ValidationError{File: file, Message: fmt.Sprintf("toolbox %q: empty definition", name)})
+			continue
+		}
+		out := make([]string, len(box.Tools))
+		for i, t := range box.Tools {
+			out[i] = normaliseAgentTool(t)
+		}
+		box.Tools = out
+		if box.Effect != "" {
+			if !box.Effect.Valid() {
+				errs = append(errs, &ValidationError{File: file, Message: fmt.Sprintf("toolbox %q: effect %q is not one of pure|read|write|external", name, box.Effect)})
+				continue
+			}
+			joined := effect.FromTools(box.Tools)
+			if box.Effect != joined {
+				errs = append(errs, &ValidationError{File: file, Message: fmt.Sprintf("toolbox %q: declares effect %q but tools %v join to %q", name, box.Effect, box.Tools, joined)})
+			}
+		}
+	}
+	return errs
+}
+
+func applyToolboxSpecialization(base, add, remove []string) []string {
+	removed := make(map[string]bool, len(remove))
+	for _, t := range remove {
+		removed[t] = true
+	}
+	var out []string
+	for _, t := range base {
+		if !removed[t] {
+			out = append(out, t)
+		}
+	}
+	out = append(out, add...)
+	return dedupeAgentTools(out)
+}
+
+func dedupeAgentTools(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, t := range in {
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	return out
 }
 
 // hasTool reports whether tools contains name (exact match after normalisation).

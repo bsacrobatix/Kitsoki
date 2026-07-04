@@ -1439,27 +1439,34 @@ Source: [`internal/host/diff_open.go`](../../internal/host/diff_open.go).
 ## Agent declaration
 
 Named agents live in the top-level `agents:` block of `app.yaml`.
-Each entry bundles the system prompt, model, tool surface, and (for
-the new agent verbs) the Bash restriction profile and external-side-effect
-flag into a reusable persona that any `host.agent.*` call can reference
-by name via `agent: <name>` in the effect's `with:` block.
+Each entry bundles the system prompt, model, tool surface, effect class,
+and (for the new agent verbs) the Bash restriction profile into a reusable
+persona that any `host.agent.*` call can reference by name via `agent:
+<name>` in the effect's `with:` block. Reusable tool grants may live in
+top-level `toolboxes:` and be referenced by `toolbox:`.
 
 ```yaml
+toolboxes:
+  read_only: { tools: [Read, Grep, Glob], effect: read }
+  research:  { tools: [Read, Grep, Glob, WebFetch], effect: external }
+  writer:   { tools: [Read, Edit, Write, Bash], effect: write }
+
 agents:
   failure-explainer:
     system_prompt_path: prompts/explain_failure.md
     model: claude-sonnet-4-6
-    tools: [Read, Grep, Glob, Bash, WebFetch]
+    toolbox: research
     bash_profile:
       commands: [git, jq, grep, kubectl]   # required when Bash is in tools + ask/decide
-    external_side_effect: true             # WebFetch → inferred true; explicit confirms
+    effect: external                       # optional when it matches the toolbox join
 
   file-only-implementer:
     system_prompt_path: prompts/implementer.md
     model: claude-sonnet-4-6
-    tools: [Read, Edit, Write, Bash]
+    toolbox: writer
+    tools_remove: [Bash]
     # No bash_profile needed — Bash is unrestricted in task/converse verbs.
-    external_side_effect: false            # file mutations only — no network
+    effect: write                          # file mutations only — no network
 ```
 
 ### Fields
@@ -1470,9 +1477,12 @@ agents:
 | `model` | No | Forwarded as `--model` to claude. Defaults to the engine model when absent. |
 | `inherit_claude_default` | No | Escape hatch: `true` opts the agent out of layering and back to `--append-system-prompt` onto Claude Code's default (no kitsoki/project grounding). Default `false`. See [system-prompt.md](system-prompt.md). |
 | `tools` | No | Forwarded as `--allowedTools <csv>`. Normalised to `host.X` form by the loader. |
+| `toolbox` | No | Name of a top-level `toolboxes:` entry. Mutually exclusive with inline `tools`. |
+| `tools_add` / `tools_remove` | No | Specialize a named toolbox before effect classification. |
 | `cwd` | No | Default working directory for claude when the effect omits `working_dir:`. Env vars (`$VAR`, `${VAR}`) are expanded at load time. |
 | `bash_profile` | Conditional | Required when `Bash` is in `tools` and the agent is used with `host.agent.ask` or `host.agent.decide`. Three forms (see below). |
-| `external_side_effect` | No | Declares whether the agent touches external state (network, remote APIs). The loader infers a default from the tool surface and emits a warn-line when declared and inferred values disagree. |
+| `effect` | No | Declares the resolved class: `pure`, `read`, `write`, or `external`. If absent, the loader joins the tool surface. A declared `pure`/`read` class with write/external tools is a load error. |
+| `external_side_effect` | No | Deprecated alias for `effect`; kept for old stories during the migration window. |
 
 ### `bash_profile` forms
 
@@ -1499,17 +1509,24 @@ when it detects the conflict so accidental overrides surface in the trace.
 chain is: effect `working_dir:` > `agent.cwd` > prompt-file directory
 (for `host.agent.ask`).
 
-### `external_side_effect` inference
+### Toolboxes and enforcement
 
-The loader infers `external_side_effect` from the tool list when the
-field is absent:
+Toolboxes are resolved at load time. An agent may use a named box plus
+`tools_add:` / `tools_remove:`, or it may use inline `tools:`, but not both.
+If a toolbox declares `effect:`, that assertion must equal the join over its
+tools.
 
-- `host.WebFetch` or `host.WebSearch` in `tools` → inferred `true`
-- all other tool combinations → inferred `false`
+Every agent verb uses the same tool-layer policy:
 
-An explicit declaration overrides the inference. A mismatch (e.g.
-declaring `false` on an agent with `WebFetch`) is a warn-line at load
-time, not an error — the author's explicit value wins.
+- `pure` / `read`: `--permission-mode default`, the resolved tools are the
+  allowlist, and write/exec mutators are hard-denied.
+- `write` / `external`: the resolved tools are the allowlist and the caller's
+  permission mode is honored. Runtime filesystem confinement is the separate
+  sandbox layer.
+
+Agent-call trace events include the resolved `toolbox`, `effect`,
+`allowed_tools`, and `denied_tools` fields so offline conformance checks can
+verify the call stayed within its declared grant.
 
 ---
 

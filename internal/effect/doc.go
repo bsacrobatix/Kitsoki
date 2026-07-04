@@ -58,7 +58,8 @@
 //     validates declarations against them. Keeping enforcement out keeps the
 //     enum importable by every layer without dragging in runtime machinery.
 //   - No per-tool permission grading finer than the four-tier ladder.
-//   - No toolbox vocabulary or unified enforcement — that is
-//     docs/proposals/toolbox-and-enforcement.md (epic slice 2), which reads
-//     the class this package computes.
+//   - No toolbox vocabulary or unified enforcement. Those live in the app/host
+//     layers and are documented in docs/architecture/hosts.md and
+//     docs/stories/state-machine.md; this package only supplies the class they
+//     read.
 package effect

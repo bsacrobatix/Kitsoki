@@ -64,6 +64,91 @@ agents:
 	require.Equal(t, []string{"WebFetch"}, a.Permissions.DisallowedTools)
 }
 
+func TestAgents_ToolboxResolution(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `app:
+  id: toolbox-resolution
+  version: 0.1.0
+root: start
+states:
+  start: { view: Start }
+toolboxes:
+  read_only:
+    tools: [Read, Grep, Glob]
+    effect: read
+agents:
+  judge:
+    system_prompt: judge
+    toolbox: read_only
+    tools_add: [WebFetch]
+    tools_remove: [Glob]
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(yaml), 0o644))
+	def, err := Load(filepath.Join(dir, "app.yaml"))
+	require.NoError(t, err)
+	require.Equal(t, []string{"host.Read", "host.Grep", "host.WebFetch"}, def.Agents["judge"].Tools)
+	require.Equal(t, "read_only", def.Agents["judge"].Toolbox)
+	require.Equal(t, "external", string(def.Agents["judge"].Effect))
+}
+
+func TestAgents_ToolboxValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "unknown toolbox",
+			body: `toolboxes: {}
+agents:
+  a:
+    system_prompt: a
+    toolbox: missing
+`,
+			want: `toolbox "missing" is not declared`,
+		},
+		{
+			name: "toolbox plus tools",
+			body: `toolboxes:
+  ro: { tools: [Read], effect: read }
+agents:
+  a:
+    system_prompt: a
+    toolbox: ro
+    tools: [Grep]
+`,
+			want: "toolbox and tools are mutually exclusive",
+		},
+		{
+			name: "effect assertion mismatch",
+			body: `toolboxes:
+  bad: { tools: [Write], effect: read }
+agents:
+  a:
+    system_prompt: a
+    toolbox: bad
+`,
+			want: `declares effect "read" but tools [host.Write] join to "write"`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			yaml := `app:
+  id: toolbox-invalid
+  version: 0.1.0
+root: start
+states:
+  start: { view: Start }
+` + tc.body
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(yaml), 0o644))
+			_, err := Load(filepath.Join(dir, "app.yaml"))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
 // TestAgents_FilePrompt covers the file-ref happy path: the loader reads the
 // file relative to the app YAML directory, lands its contents in
 // SystemPrompt, and clears SystemPromptPath.

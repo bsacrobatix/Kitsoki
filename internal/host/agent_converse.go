@@ -146,11 +146,10 @@ func AgentConverseHandler(ctx context.Context, args map[string]any) (Result, err
 	ctx, agent = applyProvider(ctx, args, agent)
 	systemPrompt := effectiveSystemPrompt(args, agent)
 	workingDir = appendDefaultCwd(workingDir, agent)
-	tools := effectiveTools(ctx, args, agent)
-	// Enforce a read-only agent's declared posture: drop bypassPermissions so
-	// the allowlist binds, and hard-deny the mutating tool set. See
-	// converseToolPolicy.
-	permMode, disallowedTools := converseToolPolicy(permMode, agent)
+	policy := enforceToolbox(ctx, args, agent, permMode)
+	permMode = policy.CLIMode
+	tools := policy.AllowedTools
+	disallowedTools := policy.DeniedTools
 
 	callID := newUUID()
 	callStart := time.Now()
@@ -190,7 +189,7 @@ func AgentConverseHandler(ctx context.Context, args map[string]any) (Result, err
 	}
 
 	// Wave 3-agent: write AgentCalled to the JSONL sink at dispatch time.
-	appendAgentCalledEvent(ctx, callStart, callID, question, calledPayload)
+	appendAgentCalledEvent(ctx, callStart, callID, question, policy.AgentCalledFields(calledPayload))
 
 	cliArgs := []string{
 		"-p",
@@ -211,6 +210,7 @@ func AgentConverseHandler(ctx context.Context, args map[string]any) (Result, err
 	var opAskCleanup func()
 	cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
 	defer opAskCleanup()
+	policy = policy.WithAllowed(tools)
 	if contractServers := effectiveMCPServers(args, agent); len(contractServers) > 0 {
 		contractMCPPath, contractMCPCleanup, mErr := writeMCPConfigTempfile(contractServers, "kitsoki-converse-contract-mcp")
 		if mErr != nil {
@@ -322,15 +322,14 @@ func runConverseWithChat(ctx context.Context, cs ChatStore, chatID, question, pe
 	model := agent.Model
 	effort := effectiveEffort(args, agent)
 	workingDir = appendDefaultCwd(workingDir, agent)
-	tools := effectiveTools(ctx, args, agent)
-	// Enforce a read-only agent's declared posture (see converseToolPolicy):
-	// this is the path the proposal_interviewer takes (it passes a chat_id),
-	// so without this a read-only discovery agent could Write to the repo.
-	permMode, disallowedTools := converseToolPolicy(permMode, agent)
+	policy := enforceToolbox(ctx, args, agent, permMode)
+	permMode = policy.CLIMode
+	tools := policy.AllowedTools
+	disallowedTools := policy.DeniedTools
 
 	var out Result
 	lockErr := cs.WithLock(ctx, chatID, func(ctx context.Context) error {
-		inner, runErr := doConverseChatTurn(ctx, cs, chatID, question, workingDir, systemPrompt, model, effort, permMode, tools, disallowedTools, agent.InheritClaudeDefault)
+		inner, runErr := doConverseChatTurn(ctx, cs, chatID, question, workingDir, systemPrompt, model, effort, permMode, tools, disallowedTools, agent.InheritClaudeDefault, policy)
 		out = inner
 		return runErr
 	})
@@ -347,7 +346,7 @@ func runConverseWithChat(ctx context.Context, cs ChatStore, chatID, question, pe
 //
 // Step ordering: allocate/persist the Claude session ID BEFORE appending the
 // user message to prevent orphan transcript rows on session-write failures.
-func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, workingDir, systemPrompt, model, effort, permMode string, tools, disallowedTools []string, inheritDefault bool) (Result, error) {
+func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, workingDir, systemPrompt, model, effort, permMode string, tools, disallowedTools []string, inheritDefault bool, policy ToolboxEnforcement) (Result, error) {
 	callID := newUUID()
 	callStart := time.Now()
 	// Install the active call_id so the claude transport tees its stream-json
@@ -374,7 +373,7 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 	}
 
 	// Wave 3-agent: write AgentCalled to the JSONL sink at dispatch time.
-	appendAgentCalledEvent(ctx, callStart, callID, question, calledPayload)
+	appendAgentCalledEvent(ctx, callStart, callID, question, policy.AgentCalledFields(calledPayload))
 
 	chat, err := cs.GetOrEnsure(ctx, chatID)
 	if err != nil {
@@ -429,6 +428,7 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 	var opAskCleanup func()
 	cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
 	defer opAskCleanup()
+	policy = policy.WithAllowed(tools)
 	cliArgs = appendAllowedToolsFlag(cliArgs, tools)
 	cliArgs = appendDisallowedToolsFlag(cliArgs, disallowedTools)
 
