@@ -149,6 +149,39 @@ def materialize(tree, dest, node_modules=None):
         os.symlink(nm, dest / "node_modules")
 
 
+# The shared arena/persona-QA scoring contract — schemas/completion-state.schema.json.
+# Keep this literal in sync with tools/persona_qa/completion.py's SCHEMA_VERSION;
+# both write against the same versioned contract so arena's bugfix plugin can
+# read either workload's output with one parser.
+COMPLETION_STATE_SCHEMA_VERSION = "1.0.0"
+
+
+def write_completion_state(path, *, verdict, health, metrics=None, evidence_refs=None,
+                            **extra):
+    """Write a schema-conformant completion-state file (the unified arena contract).
+
+    `path` may be None, in which case this is a no-op — callers pass the CLI's
+    optional --completion-state through unconditionally. Extra job-specific
+    fields (cell_id, job_type, notes, summary, …) are merged in verbatim; the
+    schema keeps additionalProperties so this stays forward-compatible with new
+    job-type plugins without a schema fork.
+    """
+    if not path:
+        return None
+    payload = {
+        "schema_version": COMPLETION_STATE_SCHEMA_VERSION,
+        "verdict": verdict,
+        "health": health,
+        "metrics": metrics or {},
+        "evidence_refs": evidence_refs or [],
+    }
+    payload.update({k: v for k, v in extra.items() if v is not None})
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return payload
+
+
 def decide_quality(oracle_pass, suite_pass, suite_enabled):
     """The deterministic cell grade.
 
@@ -1427,7 +1460,8 @@ def write_completion_markdown(report, markdown):
     markdown.write_text("\n".join(lines) + "\n")
 
 
-def score(m, bug, tree, out, candidate, treatment, trace=None, candidates_path=None):
+def score(m, bug, tree, out, candidate, treatment, trace=None, candidates_path=None,
+          completion_state=None):
     proj = m["project"]
     # Per-bug `oracle:` overrides the project default (target/run/match/inject).
     # A heterogeneous repo (gears-rust: per-bug crate + cargo features +
@@ -1527,12 +1561,34 @@ def score(m, bug, tree, out, candidate, treatment, trace=None, candidates_path=N
                          "(a correct fix may legitimately update one pre-existing test)",
             }, indent=2))
             sys.stderr.write(f"[bench] wrote {out}\n")
+
+        if completion_state:
+            tm = tm if out else read_trace_metrics(trace)
+            write_completion_state(
+                completion_state,
+                verdict=quality,
+                health="model:result",
+                metrics={
+                    "cost_usd": tm["cost_usd"],
+                    "total_tokens": tm["total_tokens"],
+                    "agent_calls": tm["agent_calls"],
+                },
+                evidence_refs=[trace] if trace else [],
+                cell_id=f"{m['project']['id']}-{bug['id']}-{candidate}",
+                job_type="bugfix",
+                target_id=m["project"]["id"],
+                variant_id=candidate,
+                axis={"bug": bug["id"]},
+                trace_ref=trace or "",
+                notes="external oracle; suite_pass is the SECONDARY signal",
+            )
+            sys.stderr.write(f"[bench] wrote completion-state {completion_state}\n")
         return 0 if oracle_pass else 1
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
 
-def verify(m, only_bug, repo_dir):
+def verify(m, only_bug, repo_dir, completion_state=None):
     """Clone (or reuse), and for each fixture assert RED@baseline, GREEN@fix."""
     proj = m["project"]
     bugs = selected_bugs(m, only_bug)
@@ -1548,6 +1604,12 @@ def verify(m, only_bug, repo_dir):
         r = sh(["git", "clone", "--local", "--no-checkout", "-q", str(src), str(repo)], cwd=tmp)
         if r.returncode != 0:
             sys.stderr.write(r.stdout[-2000:] + r.stderr[-2000:])
+            if completion_state:
+                write_completion_state(
+                    completion_state, verdict="blocked", health="infra:clone-failed",
+                    job_type="bugfix", target_id=proj["id"],
+                    notes=(r.stdout[-500:] + r.stderr[-500:]).strip(),
+                )
             return 1
     else:
         tmp = Path(tempfile.mkdtemp(prefix="bench-repo-"))
@@ -1594,6 +1656,17 @@ def verify(m, only_bug, repo_dir):
     finally:
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)
+    if completion_state:
+        write_completion_state(
+            completion_state,
+            verdict="armed" if ok else "failed",
+            health="model:result",
+            job_type="bugfix",
+            target_id=proj["id"],
+            axis={"bug": ",".join(b["id"] for b in bugs)},
+            notes="RED@baseline/GREEN@fix arming proof" if ok else
+                  "one or more fixtures failed to arm (see stdout for per-bug OK/BAD)",
+        )
     return 0 if ok else 1
 
 
@@ -1793,11 +1866,17 @@ def main():
     s.add_argument("--trace", help="live trace to read worker cost/tokens from (for the cell metrics)")
     s.add_argument("--candidates", default=str(HERE / "candidates.yaml"),
                    help="candidates.yaml for model/effort/provider lookup by --candidate")
+    s.add_argument("--completion-state",
+                   help="write a schema-conformant completion-state JSON here "
+                        "(schemas/completion-state.schema.json) for arena's bugfix plugin to read")
     v = sub.add_parser("verify")
     v.add_argument("--project", required=True)
     v.add_argument("--bug", action="append",
                    help="bug id to verify; repeat or pass comma-separated ids to scope the matrix")
     v.add_argument("--repo-dir", help="prebuilt clone with node_modules to reuse")
+    v.add_argument("--completion-state",
+                   help="write a schema-conformant completion-state JSON here "
+                        "(schemas/completion-state.schema.json) for arena's bugfix plugin to read")
     pf = sub.add_parser("preflight")
     pf.add_argument("--project", required=True)
     pf.add_argument("--bug", action="append",
@@ -1940,7 +2019,8 @@ def main():
         # score. The verdict still lives in score()'s return for in-process
         # callers like verify().
         score(m, bug_of(m, a.bug), a.tree, a.out, a.candidate, a.treatment,
-              trace=a.trace, candidates_path=a.candidates)
+              trace=a.trace, candidates_path=a.candidates,
+              completion_state=a.completion_state)
         sys.exit(0)
     elif a.cmd == "meta":
         p = m["project"]
@@ -1962,7 +2042,7 @@ def main():
             }))
         sys.exit(0)
     else:
-        sys.exit(verify(m, a.bug, a.repo_dir))
+        sys.exit(verify(m, a.bug, a.repo_dir, completion_state=a.completion_state))
 
 
 if __name__ == "__main__":
