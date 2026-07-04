@@ -346,6 +346,14 @@ intents:
     priority: 60
     slots:
       stage: { type: string, required: false }
+  go_gitops:
+    title: "Git commands"
+    description: "Leave PRD discovery for the git command hub: repository status, main-vs-origin checks, commits, merges, rebases, and worktrees."
+    # Button-only locally. When PRD is imported into dev-story, the parent
+    # go_gitops alias carries the free-text examples; duplicating them here
+    # makes semantic routing ambiguous between go_gitops and prd__go_gitops.
+    examples: []
+    priority: 90
   quit:
     description: "Abandon PRD authoring."
     examples: [quit, abort, bail, cancel]
@@ -357,7 +365,7 @@ intents:
 
 # Intents lifted into a parent story's table when prd is imported.
 exports:
-  intents: [discuss, capture_existing, start, change_existing, override_new, answer, submit_answers, skip, ready, advance_brief, seeded, confirm, regenerate, accept, refine, clarify, restart_from, quit, look]
+  intents: [discuss, capture_existing, start, change_existing, override_new, answer, submit_answers, skip, ready, advance_brief, seeded, confirm, regenerate, accept, refine, clarify, restart_from, go_gitops, quit, look]
 
 # Named return points. Standalone load synthesises __exit__done /
 # __exit__abandoned terminals.
@@ -365,6 +373,8 @@ exits:
   done:
     description: "PRD accepted; prd_artifact is final."
     requires: [prd_artifact]
+  gitops:
+    description: "Operator left PRD discovery for the git command hub."
   abandoned:
     description: "Operator or LLM bailed."
 
