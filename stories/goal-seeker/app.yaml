@@ -104,6 +104,12 @@ world:
   # ── Record ─────────────────────────────────────────────────────────────────
   last_seq:         { type: string, default: "" }
 
+  # ── Report / PM deck hierarchy ─────────────────────────────────────────────
+  report_summary_path: { type: string, default: "" }
+  report_deck_path:    { type: string, default: "" }
+  report_change_count: { type: int,    default: 0 }
+  report_status:       { type: string, default: "" }
+
   # ── Terminal / error ───────────────────────────────────────────────────────
   last_error:       { type: string, default: "" }
 
@@ -121,6 +127,10 @@ intents:
     description: "Close out the goal from the retrospective room."
     examples: ["close", "close out", "finish"]
     priority: 60
+  report:
+    description: "Build deterministic goal report/deck artifacts from the current ledger."
+    examples: ["report", "build report", "deck", "summary deck"]
+    priority: 55
   quit:
     description: "Abandon the loop → needs-human."
     examples: ["quit", "abandon", "stop"]

@@ -108,6 +108,21 @@ catch a residue-masked flow.
 | `gs_preamble` | bounded projection (`build_preamble`) |
 | `gs_manifest` | single-item `punch-list/v1` manifest for a change |
 | `gs_append` | append one structured log entry (`append_entry`) |
+| `report_deck` | deterministic PM report/deck hierarchy from `ledger.json` + `log.jsonl` |
+
+## Report artifacts
+
+From `evaluate` or `retrospective`, use `report` to rebuild the deterministic PM
+summary artifacts under `<work_dir>/reports/`:
+
+- `exec-summary.md`
+- `exec-summary.slidey.json`
+- `changes/<change_id>.md`
+- `changes/<change_id>.slidey.json`
+
+The report room re-folds the ledger with `gs_ledger` and then projects only
+`ledger.json`, `log.jsonl`, and `GOAL.md`. It does not call an LLM, render a deck, or
+inspect conversational history.
 
 ## Limitations (surfaced by building this — for the plan, per the "limitations → plan" rule)
 
