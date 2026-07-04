@@ -97,8 +97,8 @@ tickets, GitHub issues, or no follow-up ticket at all. External targets live in
 their **own** repo as a zero-config `stories/<name>/` instance, discovered by
 the default `./stories` walk, importing this base via `@kitsoki/dev-story` from
 the binary's embedded story library — see
-[`kitsoki-as-dependency.md`](../../docs/proposals/kitsoki-as-dependency.md)
-for the broader dependency story.
+[`docs/web/tour.md`](../../docs/web/tour.md) for the broader
+kitsoki-as-a-dependency story (shipped; the design proposal was retired).
 
 The profile is the "External-target profile" world block in
 [`app.yaml`](./app.yaml) (search `External-target profile`). Every key has
@@ -554,8 +554,9 @@ this one is kitsoki's self-targeting parallel — **"kitsoki on kitsoki"**.
   — 11 narrated steps that walk every beat of the loop: discovery chat,
   clarification rounds, PRD draft review and publish, design intake handoff,
   design brief refinement, design publish, feature-ticket auto-mint. With
-  slice 2 of the [kitsoki-as-dependency](../../docs/proposals/kitsoki-as-dependency.md)
-  epic, this renders via `kitsoki tour --feature dev-story-prd-design`
+  slice 2 of the kitsoki-as-dependency epic (shipped; see
+  [`docs/web/tour.md`](../../docs/web/tour.md)), this renders via
+  `kitsoki tour --feature dev-story-prd-design`
   (binary-native MP4, no Playwright). Pre-slice-2 the bound spec is a skipped
   stub; the flow fixture's *content* is already verified no-LLM under
   `kitsoki test flows stories/dev-story/app.yaml`.

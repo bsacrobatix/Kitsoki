@@ -30,7 +30,7 @@
 // # Non-goals
 //
 //   - No remote/git fetch: the mechanism is embed + local-override, never a
-//     fetcher (see docs/proposals/kitsoki-as-dependency.md).
+//     fetcher (see stories/dev-story/README.md).
 //   - No fs.FS plumbing through the loader/runtime: deliberately rejected in
 //     favour of the cache (above).
 //   - This package does NOT decide WHEN to fall back to the embedded library;

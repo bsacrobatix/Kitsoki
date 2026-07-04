@@ -68,8 +68,8 @@ type RootSpec struct {
 // repoRoot is the directory the synthetic importer resolves @kitsoki/dev-story
 // against (it becomes the AppDef.BaseDir); it must contain a .kitsoki-root
 // marker or a go.mod declaring module kitsoki so findRepoRoot resolves the
-// in-repo dev-story (the downstream installed-dependency path is deferred to
-// kitsoki-as-dependency.md). The synthetic app.id is the repo basename so a
+// in-repo dev-story (the downstream installed-dependency path is documented
+// in stories/dev-story/README.md). The synthetic app.id is the repo basename so a
 // trace shows where the implicit root came from.
 //
 // A malformed spec (unknown import / unknown binding iface) is rejected here

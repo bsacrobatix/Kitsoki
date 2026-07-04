@@ -1,5 +1,16 @@
 # Unified comparison-job runner — design
 
+**Status:** v1 trimmed. `tools/arena/` ships the walking skeleton (P0:
+model, job-type plugin interface, bugfix plugin, container executor with
+a DI backend seam, local placement, rollup, CLI, no-LLM tests) plus VM
+placement (proven on a remote docker context, 2026-06-30) — see
+[`tools/arena/README.md`](../../tools/arena/README.md). Remaining: a
+*pool* of VM hosts + completion-state polling (P1), a first-class
+persona-qa plugin + onboarding plugin (P2), and retiring
+`escalate.sh`/matrix `emit_run` behind one front door (P3). This doc
+keeps the architecture rationale and the P2/P3 phasing; drop it once P3
+lands.
+
 **Goal:** one tool that runs any large comparison/sweep job — bug-fixing,
 onboarding, persona QA, … — with every cell executing **in a Docker container**,
 and containers placed on **either the local Docker host or a remote VM** (the VM
@@ -117,46 +128,28 @@ variant axis.
   (`provision_vm.sh` → install Docker + register as a remote context) and then
   holds N concurrent cell containers.
 
-## Locked decisions (2026-06-29)
+## Decisions locked and shipped (2026-06-29 / 2026-06-30)
 
 - **Shape:** Python, extending product-journey's matrix/rollup brain.
-- **Home/name:** new `tools/arena/`; port bugfix + persona-qa on as the first two
-  plugins; retire `escalate.sh` + matrix `emit_run` later.
-- **First slice (P0):** bugfix job-type + container-at-drive + **local** placement
-  + rollup, proven on `query-string`.
-- **No-LLM skeleton proof:** the P0 cell runs the oracle **arming** path
-  (`bench.py verify`: RED@baseline → GREEN@fix) *inside a container* — exercises
-  enumerate → container exec → score → rollup with **zero spend**. The paid
-  `live` drive (drive.sh) is the same plumbing, gated behind an explicit flag.
+- **Home/name:** `tools/arena/`.
+- **P0 (walking skeleton):** bugfix job-type + container-at-drive + local
+  placement + rollup, proven on `query-string` (6/6 armed, 0 infra failures).
+- **VM placement:** proven on a remote docker context (2026-06-30), same
+  `drive.sh`/completion-state plumbing, placement-aware host mounts.
+- **No-LLM skeleton proof:** `run` defaults to the oracle **arming** path
+  (`bench.py verify`: RED@baseline → GREEN@fix) inside a container — zero
+  spend; `--live` is the only way to spend.
 - **DI:** the container layer is a `ContainerBackend` interface (DockerBackend |
-  FakeBackend) so the whole pipeline is unit-testable with no real docker/LLM.
+  FakeBackend), unit-tested with no real docker/LLM.
 
-## Open decisions (deferred to later phases)
+## Remaining phasing
 
-1. **Language/shape of the new tool.** (a) Python orchestrator extending
-   `product-journey/run.py`'s matrix code (fastest reuse of the rollup brain), or
-   (b) a Go `cmd/` (first-class, typed, embeds with kitsoki), or (c) thin bash
-   over the existing scripts. Reuse favours **Python**; longevity favours **Go**.
-2. **Name + home.** e.g. `tools/arena/`, promote `tools/bakeoff/` as the umbrella,
-   or a `kitsoki compare` subcommand. (Leaning `tools/arena/` to avoid clobbering
-   the proven bugfix-bakeoff during migration.)
-3. **Migration vs greenfield.** Build the new runner and port bugfix + persona-qa
-   onto it as the first two plugins (retiring `escalate.sh` / matrix `emit_run`),
-   or leave both harnesses and only add the container/placement layer under them.
-4. **Scope of first slice.** Recommend: **one job-type (bugfix) + container drive
-   + local placement + rollup**, proven against the existing query-string project,
-   THEN add persona-qa plugin + VM placement. (Walking skeleton first.)
-
-## Recommended phasing
-
-- **P0 — walking skeleton:** Cell + JobSpec model; job-type plugin interface;
-  bugfix plugin wrapping today's oracle; container-at-drive (local placement
-  only); rollup reusing product-journey aggregation. Prove on `query-string`.
-- **P1 — placement:** docker-context scheduler (local + 1 VM), concurrency,
-  completion-state polling, INFRA-vs-MODEL retry.
-- **P2 — second plugin:** persona-qa as a plugin (its score = the 19-check review
-  gate) over the same 10 github-targets; onboarding plugin third.
-- **P3 — consolidate:** retire `escalate.sh` + matrix `emit_run`; one CLI; docs.
+- **P1 — VM pool:** a *pool* of VM hosts + completion-state polling (the
+  scheduler already round-robins `placement.hosts`; needs multi-host proof).
+- **P2 — second plugin:** persona-qa as a plugin (its score = the 19-check
+  review gate) over the same 10 github-targets; onboarding plugin third —
+  so persona QA runs through `arena run` rather than `run.py` directly.
+- **P3 — consolidate:** retire `escalate.sh` + matrix `emit_run`; one CLI.
 
 ## No-LLM / cost discipline
 
