@@ -132,8 +132,11 @@ Targets: `make site` (build, base `/Kitsoki/`), `make site-dev` (HMR),
   (`make media-check-promo`, no `continue-on-error`) fails the build if any
   promo-grid feature ends up with no staged media at all, so silent all-stale
   ships can't happen. Any recording failures are also written to the job's
-  step summary. Manual dispatch has a `rerecord` input. One-time setup: repo
-  Settings → Pages → Source: GitHub Actions.
+  step summary. `scripts/check-download-links.mjs` HEAD-checks download.md's
+  `releases/latest/download/...` links (temporarily non-blocking until the
+  v0.1.0 release assets publish — see the TODO in site.yml). Manual dispatch
+  has a `rerecord` input. One-time setup: repo Settings → Pages → Source:
+  GitHub Actions.
 - **In the binary**: `make site-embed` builds the embedded variant
   (base `/help/`, posters only — never MP4s, ~5MB) into
   `internal/helpdocs/assets/`; the next `make build` embeds it and
