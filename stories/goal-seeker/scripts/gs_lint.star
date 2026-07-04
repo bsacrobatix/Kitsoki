@@ -78,6 +78,22 @@ def main(ctx):
         return {"route": "fail", "error": "decomposition.yaml has no `changes`"}
 
     errors = []
+
+    # Optional top-level `runtime:` block (the goal's declared execution context;
+    # bootstrap's gs_resolve.star reads it). Absent is fine; present must be well-
+    # formed — parity with goal.py:_validate_runtime.
+    runtime = doc.get("runtime")
+    if runtime != None:
+        if type(runtime) != "dict":
+            errors.append("runtime must be a mapping (base_branch + worktree_path)")
+        else:
+            if _text(runtime.get("base_branch")) == "":
+                errors.append("runtime.base_branch must be a non-empty string")
+            wt = _text(runtime.get("worktree_path"))
+            if wt == "":
+                errors.append("runtime.worktree_path must be a non-empty string")
+            elif wt.startswith("/"):
+                errors.append("runtime.worktree_path must be repo-root-relative, not absolute: " + wt)
     ids = {}
     ids_order = []
     for i, c in enumerate(changes):
