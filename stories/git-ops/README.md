@@ -70,6 +70,16 @@ importing git-ops. See
 | `worktree_list` | List and classify existing worktrees. |
 | `cleanup` | Remove worktree and branch. |
 
+### `rebase` - feature branch sync
+
+Use `rebase` from `branch_ops` or the `intercept` command hub to replace direct
+rebasing-helper recipes. It delegates to `scripts/rebase-current-branch.sh`,
+rebases the current branch onto the local `integration_branch`, creates a
+pre-rebase backup tag when the branch is more than one commit ahead, and tries
+`git rerere` before routing unresolved conflicts to the conflict room. It does
+not fetch or pull; use `sync_main remote=origin` or `pull` on the integration
+branch first when remote freshness is required.
+
 ### Integration branch (`main_ops`)
 
 | Intent | Description |
