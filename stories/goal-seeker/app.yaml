@@ -32,19 +32,23 @@ hosts:
   - host.agent.decide
   - host.run          # the RED-first gate pre-check (dispatch)
 
+providers:
+  evaluator_claude:
+    backend: claude
+    model: opus
+    effort: high
+  evaluator_codex:
+    backend: codex
+    model: gpt-5.5
+    effort: high
+
 agents:
   evaluator:
     system_prompt: "You are the goal-seeker's bounded-context evaluator. Read the projected preamble and emit ONE small {verdict, summary, next_instruction} JSON. Never restate the preamble; open a detail pointer only if genuinely unsure."
-    # gpt-5.5 (codex-served), NOT opus: the whole live session must run codex-native so the
-    # nested punch-list MAKER sub-agent inherits the codex backend that attaches Studio MCP
-    # (its Studio surface is wired for codex, not claude — see gs_manifest.star profile:
-    # codex-native). Pinning the evaluator to opus forced the session to claude-native, which
-    # stripped the maker's Studio MCP → the maker couldn't drive and fabricated a handoff from
-    # a stale trace (Cycle 3 block). gpt-5.5 resolves on codex (intermittent 404s degrade via
-    # cf299206). WM.2 (per-invoke backend override) is the real fix — evaluator opus(claude) +
-    # maker gpt-5.5(codex) coexisting; until it lands (behind WS.2), one codex-native backend
-    # for both is the correct trade (the decide gate is advisory; the maker is load-bearing).
-    model: gpt-5.5
+    # The decide gate's with.provider selects one of the evaluator_* profiles per
+    # invocation. The default remains codex so live sessions keep the maker's
+    # Studio MCP wiring; flows can override world.evaluator_provider to prove
+    # backend switching without changing the session harness.
     tools: [Read, Grep, Glob]
     external_side_effect: false
 
@@ -72,6 +76,7 @@ world:
   remaining:        { type: int,    default: 1 }    # changes not yet integrated; 0 ⇒ done (deterministic)
   ready_id:         { type: string, default: "" }   # ledger's authoritative next ready change
   preamble:         { type: string, default: "" }
+  evaluator_provider: { type: string, default: "evaluator_codex" }
   verdict:          { type: string, default: "" }    # tri-state: "" pre-bind, then done|not_done|blocked
   summary:          { type: string, default: "" }
   decide_change_id: { type: string, default: "" }    # the evaluator's ADVISED pick (not trusted for done)

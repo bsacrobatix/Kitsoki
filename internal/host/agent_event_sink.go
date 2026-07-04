@@ -250,6 +250,10 @@ type AgentCalledPayload struct {
 	AllowedTools []string `json:"allowed_tools,omitempty"`
 	DeniedTools  []string `json:"denied_tools,omitempty"`
 	Effect       string   `json:"effect,omitempty"`
+	// Backend is the selected coding-agent backend for this call. It is stamped
+	// centrally from the context so live, plugin, and cassette traces expose the
+	// same provenance field.
+	Backend string `json:"backend,omitempty"`
 	// Profile is the active harness profile name in effect for this call, when a
 	// session selected one (TUI /provider, web picker). It records which
 	// operator-selected backend/endpoint answered — never the env secrets behind
@@ -376,6 +380,9 @@ func appendAgentCalledEvent(ctx context.Context, ts time.Time, callID string, pr
 		if payload.Effort == "" {
 			payload.Effort = ap.Provider.Effort
 		}
+	}
+	if payload.Backend == "" {
+		payload.Backend = AgentBackendFromContext(ctx).Name()
 	}
 
 	// Guarantee a prompt reference: offload large prompts to a sidecar file,
