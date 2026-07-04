@@ -301,11 +301,9 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 			orchestrator.WithChatsConcrete(chatStore),
 		)
 	}
-	// Honor the global semantic-routing toggle when explicitly set via env. The
-	// `kitsoki mcp` command exports KITSOKI_SEMANTIC_ROUTING only when
-	// --semantic-routing or the env override is explicit. When the env var is
-	// absent, routing defers to the per-app routing.enabled config. See
-	// docs/architecture/semantic-routing.md.
+	// Honor the global semantic-routing toggle. When the env var is absent,
+	// studio sessions use the same simple default as the CLI: exact
+	// deterministic first, then the selected harness/model.
 	if opt, ok := semanticRoutingEnvOption(); ok {
 		orchOpts = append(orchOpts, opt)
 	}

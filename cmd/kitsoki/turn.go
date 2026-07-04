@@ -406,8 +406,8 @@ func decodeJSONFlag(raw, fieldName string) (map[string]any, error) {
 
 // buildTurnHarness chooses a harness for `kitsoki turn`. When --intent is set,
 // or when --harness replay is used without a recording, the harness must never
-// be invoked. Return a no-run harness so deterministic and semantic routes can
-// still be probed while any LLM-tier fallthrough fails closed before spending.
+// be invoked. Return a no-run harness so exact deterministic routes can still be
+// probed while any LLM-tier fallthrough fails closed before spending.
 func buildTurnHarness(harnessType, recordingPath string, def *app.AppDef, directIntent bool) (harness.Harness, error) {
 	if directIntent {
 		return &noRunHarness{}, nil
@@ -435,19 +435,11 @@ func buildTurnHarness(harnessType, recordingPath string, def *app.AppDef, direct
 }
 
 // turnSemanticRoutingOptions returns the semantic-routing options for the
-// stateless turn command. Explicit --semantic-routing / env overrides still win.
-// When the operator chooses replay without a recording, the only useful posture
-// is a no-LLM deterministic probe: enable the semantic stack so authored
-// examples/default_intents can resolve, and let noRunHarness fail loudly if the
-// route actually needs a model.
+// stateless turn command. Replay-without-recording remains a no-LLM probe: exact
+// deterministic routes can resolve, while anything that needs the model fails
+// closed through noRunHarness.
 func turnSemanticRoutingOptions(harnessType, recordingPath string, directIntent bool) []orchestrator.Option {
-	if opts := semanticRoutingOptions(); opts != nil {
-		return opts
-	}
-	if !directIntent && harnessType == "replay" && recordingPath == "" {
-		return []orchestrator.Option{orchestrator.WithSemanticRouting(true)}
-	}
-	return nil
+	return semanticRoutingOptions()
 }
 
 // noRunHarness is a fail-closed placeholder harness for no-LLM probe paths. It
