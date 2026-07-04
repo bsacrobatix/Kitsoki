@@ -58,6 +58,7 @@ func webCmd() *cobra.Command {
 		actor            string
 		ticketRepo       string
 		agentEvidenceDir string
+		maxSessions      int
 	)
 
 	cmd := &cobra.Command{
@@ -251,6 +252,9 @@ authentication.`,
 
 			// ── Registry + initial story catalogue ──────────────────────────
 			registry := NewRegistry(cfg, dirs, base)
+			if maxSessions > 0 {
+				registry.SetMaxSessions(maxSessions)
+			}
 			defer registry.Close()
 			stories, err := registry.Rescan()
 			if err != nil {
@@ -319,6 +323,7 @@ authentication.`,
 	cmd.Flags().StringVar(&actor, "actor", "", "operator identity recorded on browser-driven turns as slots.author (default: git config user.name; the X-Kitsoki-Actor header and an explicit actor RPC param override it)")
 	cmd.Flags().StringVar(&ticketRepo, "ticket-repo", "constructorfabric/Kitsoki", "file Report-bug reports as GitHub issues on this owner/repo (evidence saved under .artifacts/bug-reports for developer review) instead of a local issues/bugs/*.md file; requires gh auth. Pass an empty string to write local issues/bugs/*.md files instead")
 	cmd.Flags().StringVar(&agentEvidenceDir, "agent-evidence-dir", "", "after a GitHub bug filing, also deposit the scrubbed rrweb+HAR here under <DeckID>/ so the kitsoki gh-agent can auto-build a hosted deck without re-downloading; point at the agent's --evidence-dir")
+	cmd.Flags().IntVar(&maxSessions, "max-sessions", 0, "cap on concurrently live in-memory sessions before idle eviction kicks in (default: $KITSOKI_WEB_MAX_SESSIONS or a generous built-in default; 0 means use that default)")
 
 	return cmd
 }
