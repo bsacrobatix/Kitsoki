@@ -70,6 +70,8 @@ def _fold(changes, log):
         r = rows[cid]
         if e.get("state") in STATES:
             r["state"] = e["state"]
+            if e["state"] != "parked":
+                r["park_reason"] = None
         if e.get("branch"):
             r["branch"] = e["branch"]
         if e.get("sha"):
