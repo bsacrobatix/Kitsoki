@@ -82,6 +82,20 @@ type_registry:
       - id: assigned_changes
         target_type: change
         cardinality: many
+  - id: agent
+    schema: graph-type/v0
+    derives_from: actor
+    summary: Automated actor that mines, plans, implements, validates, or reviews graph work under story/runtime control.
+    edge_fields:
+      - id: uses
+        target_type: feature
+        cardinality: many
+      - id: participates_in
+        target_type: use-case
+        cardinality: many
+      - id: assigned_changes
+        target_type: change
+        cardinality: many
   - id: requirement
     schema: graph-type/v0
     derives_from: core-node
@@ -240,7 +254,7 @@ nodes:
         - change-capability-catalog-dogfood
         - change-roadmap-delta-view
 
-  - schema: graph/actor/v0
+  - schema: graph/agent/v0
     id: actor-planning-agent
     title: Planning agent
     status: proposed

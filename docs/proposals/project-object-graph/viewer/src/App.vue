@@ -53,10 +53,10 @@ const query = ref("");
 const layers = [
   {
     id: "actors",
-    title: "Actors and responsibilities",
+    title: "Actors, agents, and responsibilities",
     short: "Actors",
     description: "Who uses, owns, plans, implements, reviews, or automates the work represented in the graph.",
-    types: ["actor"],
+    types: ["actor", "agent"],
   },
   {
     id: "intent",
@@ -212,6 +212,7 @@ function selectNode(id: string) {
 function typeLabel(type: string): string {
   const labels: Record<string, string> = {
     actor: "Actors",
+    agent: "Agents",
     feature: "Features",
     requirement: "Requirements",
     "use-case": "Use cases",
@@ -255,7 +256,7 @@ function edgeLabel(edge: string): string {
 }
 
 function typeOrder(type: string): number {
-  const index = ["actor", "feature", "requirement", "use-case", "proposal", "change", "evidence", "implementation"].indexOf(type);
+  const index = ["actor", "agent", "feature", "requirement", "use-case", "proposal", "change", "evidence", "implementation"].indexOf(type);
   return index === -1 ? 99 : index;
 }
 
