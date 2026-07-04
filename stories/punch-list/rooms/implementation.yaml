@@ -33,6 +33,7 @@ states:
         background: true
         with:
           agent: implementer
+          harness_ladder: "{{ world.current_item.harness_ladder }}"
           acceptance:
             schema: schemas/drive_result.json
           context:

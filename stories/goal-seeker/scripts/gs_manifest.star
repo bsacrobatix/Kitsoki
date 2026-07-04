@@ -62,6 +62,19 @@ PIPELINE_STORY = {
     "docs": "stories/dev-story/app.yaml",
 }
 
+MAKER_LADDER = {
+    "models": [
+        {"backend": "codex", "provider": "synthetic-codex", "model": "hf:zai-org/GLM-5.2"},
+        {"backend": "codex", "provider": "codex-native", "model": "gpt-5.5"},
+        {"backend": "codex", "provider": "codex-spark", "model": "gpt-5.3-codex-spark"},
+        {"backend": "claude", "provider": "claude-sonnet", "model": "sonnet"},
+        {"backend": "claude", "provider": "claude-native", "model": "opus"},
+    ],
+    "efforts": ["low", "medium", "high", "xhigh", "max"],
+    "max_attempts": 12,
+    "backoff": "5m",
+}
+
 
 def _yaml_dq(s):
     # Minimal YAML double-quoted-scalar escaping — enough for a ticket title;
@@ -296,10 +309,12 @@ def main(ctx):
     manifest = {
         "version": "punch-list/v1",
         "defaults": {
-            "harness": "live",
-            "profile": "codex-native",
-            "model": "gpt-5.5",
+            "harness": "ladder",
+            "profile": "synthetic-codex",
+            "model": "hf:zai-org/GLM-5.2",
+            "harness_ladder": MAKER_LADDER,
             "trace_root": work_dir + "/traces",
+            "require_trace_model": False,
         },
         "items": [{
             "id": change_id,
