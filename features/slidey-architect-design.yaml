@@ -9,7 +9,6 @@ docs:
   - stories/slidey-dev/app.yaml
   - stories/dev-story/README.md
 related:
-  - dev-story-prd-design
   - slidey-dev-prd-design
 demo:
   spec: tests/playwright/slidey-architect-design-video.spec.ts
@@ -18,6 +17,9 @@ demo:
   posterStep: sad-prd-published
   story: stories/slidey-dev
   flow: stories/slidey-dev/flows/architect_design.yaml
+  embed:
+    deck: docs/decks/dev-story-hybrid.slidey.json
+    rrweb: assets/dev-story-hybrid/architect-design.rrweb.json
 tour:
   export: SLIDEY_ARCHITECT_DESIGN_TOUR_STEPS
   steps:

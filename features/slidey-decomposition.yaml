@@ -16,6 +16,9 @@ demo:
   posterStep: sdc-configure
   story: stories/deliver
   flow: stories/deliver/flows/slidey_decomposition.yaml
+  embed:
+    deck: docs/decks/dev-story-hybrid.slidey.json
+    rrweb: assets/dev-story-hybrid/decomposition.rrweb.json
 tour:
   export: SLIDEY_DECOMPOSITION_TOUR_STEPS
   steps:

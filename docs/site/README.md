@@ -125,9 +125,18 @@ Targets: `make site` (build, base `/Kitsoki/`), `make site-dev` (HMR),
 - **GitHub Pages**: `.github/workflows/site.yml` builds the binary, records
   stale demos (two-level cache: `actions/cache` over `.artifacts` + the
   per-demo stamps), stitches the master product tour, builds, deploys. Docs-only pushes deploy in minutes with 0
-  recordings; a cold run records ~14 demos (30–50 min). Manual dispatch has a
-  `rerecord` input. One-time setup: repo Settings → Pages → Source: GitHub
-  Actions.
+  recordings; a cold run records every recordable feature in the catalog
+  (30–50 min). Recording (`Record demos`) and stitching
+  (`Stitch master product tour`) are `continue-on-error` — cached media from a
+  prior run can ship if either fails — but a subsequent hard gate
+  (`make media-check-promo`, no `continue-on-error`) fails the build if any
+  promo-grid feature ends up with no staged media at all, so silent all-stale
+  ships can't happen. Any recording failures are also written to the job's
+  step summary. `scripts/check-download-links.mjs` HEAD-checks download.md's
+  `releases/latest/download/...` links (temporarily non-blocking until the
+  v0.1.0 release assets publish — see the TODO in site.yml). Manual dispatch
+  has a `rerecord` input. One-time setup: repo Settings → Pages → Source:
+  GitHub Actions.
 - **In the binary**: `make site-embed` builds the embedded variant
   (base `/help/`, posters only — never MP4s, ~5MB) into
   `internal/helpdocs/assets/`; the next `make build` embeds it and

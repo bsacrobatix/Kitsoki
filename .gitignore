@@ -106,6 +106,7 @@ tools/site/.vitepress/dist-embedded/
 tools/site/.vitepress/cache/
 tools/site/src/guide/
 tools/site/src/public/media/
+tools/site/src/public/decks/
 
 # Embedded help-docs staging (make site-embed); only the .gitkeep placeholder
 # is committed so //go:embed matches on a fresh checkout.
