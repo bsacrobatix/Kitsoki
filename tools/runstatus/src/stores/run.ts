@@ -670,7 +670,9 @@ export const useRunStore = defineStore("run", () => {
         capturedStream = out.streamedText;
         capturedItems = out.stream;
       } else {
-        result = await source.submit(sessionId, intent, slots, opts?.anchor);
+        result = opts?.anchor
+          ? await source.submit(sessionId, intent, slots, opts.anchor)
+          : await source.submit(sessionId, intent, slots);
       }
       if (typeof result.turn_number === "number") {
         await backfillTurnTrace(source, sessionId, result.turn_number);
