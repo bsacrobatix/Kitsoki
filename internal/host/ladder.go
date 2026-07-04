@@ -485,6 +485,11 @@ outer:
 // attempt's own AgentReturned/AgentError trace Meta via ladderMetaFields,
 // applied by the verb handler itself).
 func runAgentVerbWithLadder(ctx context.Context, args map[string]any, verb string, once LadderAttemptFunc) (Result, error) {
+	if cfg, ok, err := ladderConfigFromArgs(args); err != nil {
+		return Result{Error: fmt.Sprintf("host.agent.%s: harness_ladder: %v", verb, err), FailureKind: FailureFatal}, nil
+	} else if ok {
+		ctx = WithHarnessLadder(ctx, cfg)
+	}
 	cfg, ok := HarnessLadderFromContext(ctx)
 	if !ok || !cfg.Enabled() {
 		return once(ctx, args)
@@ -506,6 +511,118 @@ func runAgentVerbWithLadder(ctx context.Context, args map[string]any, verb strin
 	}
 	slog.InfoContext(ctx, "agent.ladder.complete", attrs...)
 	return res, err
+}
+
+func ladderConfigFromArgs(args map[string]any) (LadderConfig, bool, error) {
+	if args == nil {
+		return LadderConfig{}, false, nil
+	}
+	raw, ok := args["harness_ladder"]
+	if !ok || raw == nil {
+		return LadderConfig{}, false, nil
+	}
+	if s, ok := raw.(string); ok && strings.TrimSpace(s) == "" {
+		return LadderConfig{}, false, nil
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return LadderConfig{}, true, fmt.Errorf("must be a mapping")
+	}
+	modelsRaw, ok := m["models"]
+	if !ok {
+		return LadderConfig{}, true, fmt.Errorf("models is required")
+	}
+	modelsList, ok := modelsRaw.([]any)
+	if !ok || len(modelsList) == 0 {
+		return LadderConfig{}, true, fmt.Errorf("models must be a non-empty list")
+	}
+	models := make([]LadderModel, 0, len(modelsList))
+	for i, rawModel := range modelsList {
+		mm, ok := rawModel.(map[string]any)
+		if !ok {
+			return LadderConfig{}, true, fmt.Errorf("models[%d] must be a mapping", i)
+		}
+		model := strings.TrimSpace(anyString(mm["model"]))
+		if model == "" {
+			return LadderConfig{}, true, fmt.Errorf("models[%d].model is required", i)
+		}
+		backend := strings.TrimSpace(anyString(mm["backend"]))
+		if _, ok := ResolveAgentBackendName(backend); backend != "" && !ok {
+			return LadderConfig{}, true, fmt.Errorf("models[%d].backend %q is invalid", i, backend)
+		}
+		models = append(models, LadderModel{
+			Backend:  backend,
+			Provider: strings.TrimSpace(anyString(mm["provider"])),
+			Model:    model,
+		})
+	}
+	efforts, err := ladderStringList(m["efforts"])
+	if err != nil {
+		return LadderConfig{}, true, err
+	}
+	for _, e := range efforts {
+		if e != "low" && e != "medium" && e != "high" && e != "xhigh" && e != "max" {
+			return LadderConfig{}, true, fmt.Errorf("efforts contains invalid value %q", e)
+		}
+	}
+	maxAttempts, err := ladderInt(m["max_attempts"])
+	if err != nil {
+		return LadderConfig{}, true, err
+	}
+	if maxAttempts < 0 {
+		return LadderConfig{}, true, fmt.Errorf("max_attempts must not be negative")
+	}
+	cfg := LadderConfig{
+		Models:      models,
+		Efforts:     efforts,
+		MaxAttempts: maxAttempts,
+		Backoff:     strings.TrimSpace(anyString(m["backoff"])),
+		StatePath:   strings.TrimSpace(anyString(m["state_path"])),
+	}
+	return cfg, true, nil
+}
+
+func anyString(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+func ladderStringList(v any) ([]string, error) {
+	if v == nil {
+		return nil, nil
+	}
+	raw, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("efforts must be a list")
+	}
+	out := make([]string, 0, len(raw))
+	for i, item := range raw {
+		s := strings.TrimSpace(anyString(item))
+		if s == "" {
+			return nil, fmt.Errorf("efforts[%d] must be a non-empty string", i)
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+func ladderInt(v any) (int, error) {
+	if v == nil {
+		return 0, nil
+	}
+	switch n := v.(type) {
+	case int:
+		return n, nil
+	case int64:
+		return int(n), nil
+	case float64:
+		if n != float64(int(n)) {
+			return 0, fmt.Errorf("max_attempts must be an integer")
+		}
+		return int(n), nil
+	default:
+		return 0, fmt.Errorf("max_attempts must be an integer")
+	}
 }
 
 // ── failure classification ──────────────────────────────────────────────

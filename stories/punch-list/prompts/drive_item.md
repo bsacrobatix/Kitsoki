@@ -1,7 +1,7 @@
 You are driving ONE punch-list item through Kitsoki Studio MCP like a human operator.
 
-This is real live dogfood. Do not use Claude. Use the requested Codex/GPT profile and
-return only concrete handoff evidence; independent verification will decide pass/fail.
+This is real live dogfood. Use the requested model policy and return only concrete
+handoff evidence; independent verification will decide pass/fail.
 
 ## Item
 
@@ -15,6 +15,7 @@ return only concrete handoff evidence; independent verification will decide pass
    - story: `{{ args.item.story }}`
    - harness: `{{ args.item.harness }}`
    - profile: `{{ args.item.profile }}`
+   - ladder: `{{ args.item.harness_ladder }}`
    - trace: `{{ args.item.trace_path }}`
    - If the item carries a `world_in` object, pass it verbatim as `session.new`'s
      `initial_world` argument:
@@ -54,9 +55,9 @@ return only concrete handoff evidence; independent verification will decide pass
 4. Do not claim implementation success. This drive is observation and handoff only.
 5. If the target story was opened with the requested profile and explicit trace,
    and the trace contains the driven turns, use the requested item model in the
-   submitted payload. The outer punch-list `host.agent.task` trace records the
-   concrete driver model; the nested Studio trace may only expose profile/session
-   metadata.
+   submitted payload. When `harness` is `ladder`, that item model is the
+   cheap-first starting rung; the outer punch-list `host.agent.task` trace records
+   the concrete driver model and ladder rung used for the actual attempt.
 6. If a nested Studio MCP call times out, do not wait indefinitely for the
    underlying turn. Inspect status/trace once or twice, record whether late work
    is still writing, close or abandon the nested session if needed, and submit a

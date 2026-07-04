@@ -144,6 +144,27 @@ def _is_llm_spending_command(cmd):
     return False
 
 
+def _valid_ladder_policy(value):
+    ladder = _dict(value)
+    models = _list(ladder.get("models", []))
+    if len(models) == 0:
+        return False, "harness_ladder.models must be a non-empty list"
+    idx = 0
+    for raw in models:
+        model = _dict(raw)
+        if _str(model.get("model", "")).strip() == "":
+            return False, "harness_ladder.models[" + str(idx) + "].model is required"
+        backend = _str(model.get("backend", "")).strip()
+        if backend not in {"": True, "claude": True, "codex": True, "copilot": True}:
+            return False, "harness_ladder.models[" + str(idx) + "].backend is invalid: " + backend
+        idx += 1
+    for effort in _list(ladder.get("efforts", [])):
+        e = _str(effort)
+        if e not in {"low": True, "medium": True, "high": True, "xhigh": True, "max": True}:
+            return False, "harness_ladder.efforts contains invalid value: " + e
+    return True, ""
+
+
 def _trace_path(trace_root, reuse, run_id, item_id, suffix):
     trace_dir = trace_root
     if not reuse:
@@ -239,8 +260,13 @@ def _normalize_manifest(ctx, doc, run_id):
         if impl_story and not _story_path_exists(ctx, impl_story):
             errors.append(item_id + ": implementation_story path does not exist: " + impl_story)
 
-        live_impl = normalized.get("harness") == "live" and (impl_story or normalized.get("mode") == "drive")
-        if live_impl and normalized.get("require_gpt55", True):
+        harness = normalized.get("harness")
+        live_impl = harness in {"live": True, "ladder": True} and (impl_story or normalized.get("mode") == "drive")
+        if live_impl and harness == "ladder":
+            ok, msg = _valid_ladder_policy(normalized.get("harness_ladder", {}))
+            if not ok:
+                errors.append(item_id + ": " + msg)
+        if live_impl and harness == "live" and normalized.get("require_gpt55", True):
             if normalized.get("profile") != "codex-native":
                 errors.append(item_id + ": live work must use profile codex-native")
             if normalized.get("model") != "gpt-5.5":

@@ -176,3 +176,55 @@ func TestAgentTask_Ladder_CapabilityEscalatesToStrongerModel(t *testing.T) {
 		t.Fatalf("expected strong-model's submission surfaced, got %+v", res.Data["submitted"])
 	}
 }
+
+// TestAgentTask_Ladder_PerCallConfig proves a story can opt a single
+// host.agent.task invocation into the ladder with with.harness_ladder, without
+// relying on an operator-global WithHarnessLadder context.
+func TestAgentTask_Ladder_PerCallConfig(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	schemaPath := filepath.Join(dir, "ok.schema.json")
+	if err := os.WriteFile(schemaPath, []byte(`{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}}`), 0o644); err != nil {
+		t.Fatalf("write schema: %v", err)
+	}
+
+	var modelsSeen []string
+	runner := func(_ context.Context, args []string, _, _ string) (host.ClaudeRun, error) {
+		model := modelFlag(args)
+		modelsSeen = append(modelsSeen, model)
+		if model == "cheap-model" {
+			return host.ClaudeRun{Stdout: "not enough"}, nil
+		}
+		if outputPath := host.ParseMCPConfigSubmitOutput(args); outputPath != "" {
+			_ = os.WriteFile(outputPath, []byte(`{"ok":true}`), 0o600)
+		}
+		return host.ClaudeRun{Stdout: `{"ok":true}`}, nil
+	}
+
+	ctx := host.WithAgents(context.Background(), map[string]host.Agent{
+		"worker": {SystemPrompt: "do the work"},
+	})
+	ctx = host.WithClaudeRunner(ctx, runner)
+
+	res, err := host.AgentTaskHandler(ctx, map[string]any{
+		"agent":       "worker",
+		"working_dir": dir,
+		"context":     map[string]any{"prompt": "do it"},
+		"acceptance":  map[string]any{"schema": schemaPath, "max_retries": 1},
+		"harness_ladder": map[string]any{
+			"models": []any{
+				map[string]any{"backend": "claude", "model": "cheap-model"},
+				map[string]any{"backend": "claude", "model": "strong-model"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("expected per-call ladder to reach strong-model, got Result.Error=%q", res.Error)
+	}
+	if len(modelsSeen) != 2 || modelsSeen[0] != "cheap-model" || modelsSeen[1] != "strong-model" {
+		t.Fatalf("expected per-call ladder cheap-model then strong-model, got %v", modelsSeen)
+	}
+}

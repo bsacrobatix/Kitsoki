@@ -40,6 +40,27 @@ def _is_llm_spending_command(cmd):
     return False
 
 
+def _valid_ladder_policy(value):
+    ladder = _dict(value)
+    models = _list(ladder.get("models", []))
+    if len(models) == 0:
+        return False, "harness_ladder.models must be a non-empty list"
+    idx = 0
+    for raw in models:
+        model = _dict(raw)
+        if _str(model.get("model", "")).strip() == "":
+            return False, "harness_ladder.models[" + str(idx) + "].model is required"
+        backend = _str(model.get("backend", "")).strip()
+        if backend not in {"": True, "claude": True, "codex": True, "copilot": True}:
+            return False, "harness_ladder.models[" + str(idx) + "].backend is invalid: " + backend
+        idx += 1
+    for effort in _list(ladder.get("efforts", [])):
+        e = _str(effort)
+        if e not in {"low": True, "medium": True, "high": True, "xhigh": True, "max": True}:
+            return False, "harness_ladder.efforts contains invalid value: " + e
+    return True, ""
+
+
 def _story_path_exists(ctx, path):
     p = _str(path).strip()
     if p == "":
@@ -101,10 +122,15 @@ def main(ctx):
     if impl_story and not _story_path_exists(ctx, impl_story):
         errors.append("implementation_story path missing: " + impl_story)
 
-    live = item.get("harness", "") == "live"
-    if live and item.get("profile", "") != "codex-native":
+    harness = item.get("harness", "")
+    live = harness in {"live": True, "ladder": True}
+    if live and harness == "ladder":
+        ok, msg = _valid_ladder_policy(item.get("harness_ladder", {}))
+        if not ok:
+            errors.append(msg)
+    if live and harness == "live" and item.get("profile", "") != "codex-native":
         errors.append("live work must use profile codex-native")
-    if live and item.get("model", "") != "gpt-5.5":
+    if live and harness == "live" and item.get("model", "") != "gpt-5.5":
         errors.append("live work must use model gpt-5.5")
     if impl_story and len(_list(item.get("verify", []))) == 0 and not item.get("gate_command", ""):
         errors.append("implementation item has no deterministic verifier")
