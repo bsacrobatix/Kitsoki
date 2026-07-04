@@ -4,6 +4,7 @@ import RunView from "./views/RunView.vue";
 import InteractiveView from "./views/InteractiveView.vue";
 import EditorPage from "./views/EditorPage.vue";
 import ReviewPage from "./views/ReviewPage.vue";
+import ObjectGraphPage from "./views/ObjectGraphPage.vue";
 
 const router = createRouter({
   // Hash history: works fine for both live and file:// artifact mode.
@@ -24,6 +25,8 @@ const router = createRouter({
     { path: "/editor", component: EditorPage },
     // /review/:sessionId?video=<handle> — the video feedback surface.
     { path: "/review/:sessionId", component: ReviewPage, props: true },
+    // /graph?catalog=<path> — the project object graph viewer (W5.0).
+    { path: "/graph", component: ObjectGraphPage },
   ],
 });
 
