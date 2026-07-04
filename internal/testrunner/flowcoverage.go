@@ -12,6 +12,7 @@ import (
 	"github.com/goccy/go-yaml"
 
 	"kitsoki/internal/app"
+	starlarkhost "kitsoki/internal/host/starlark"
 )
 
 // FlowCoverageOptions configures static flow fixture coverage analysis.
@@ -34,6 +35,21 @@ type FlowCoverageOptions struct {
 	// RequireHostAssertions fails the gate when a covered invoke effect is not
 	// backed by expect_host_calls or a host cassette.
 	RequireHostAssertions bool
+	// StarlarkCoverage runs deterministic flow fixtures with host.starlark.run
+	// instrumentation and reports statement/branch coverage for .star scripts.
+	StarlarkCoverage bool
+	// MinStarlarkStatementCoverage fails when instrumented statement coverage is
+	// below this percentage. Zero disables the threshold.
+	MinStarlarkStatementCoverage float64
+	// MinStarlarkBranchCoverage fails when instrumented Starlark branch-outcome
+	// coverage is below this percentage. Zero disables the threshold.
+	MinStarlarkBranchCoverage float64
+	// RequireAllStarlarkBranches fails when any authored Starlark if/elif branch
+	// outcome lacks coverage.
+	RequireAllStarlarkBranches bool
+	// RequireRealStarlark fails when a covered host.starlark.run effect was only
+	// stubbed at the handler layer instead of executing the real script.
+	RequireRealStarlark bool
 	// MaxCombinations caps enum slot product expansion per state+intent. Larger
 	// products are reported as skipped so authors can opt into a narrower check.
 	MaxCombinations int
@@ -43,17 +59,20 @@ type FlowCoverageOptions struct {
 
 // FlowCoverageReport is the static coverage ledger for one app's flow fixtures.
 type FlowCoverageReport struct {
-	App             string                  `json:"app"`
-	AppPath         string                  `json:"app_path"`
-	FlowsGlob       string                  `json:"flows_glob"`
-	BranchCoverage  CoverageSummary         `json:"branch_coverage"`
-	EffectCoverage  CoverageSummary         `json:"effect_coverage"`
-	Branches        []FlowBranchCoverage    `json:"branches"`
-	Effects         []FlowEffectCoverage    `json:"effects,omitempty"`
-	ParameterChecks []FlowParameterCoverage `json:"parameter_checks,omitempty"`
-	FlowFiles       []string                `json:"flow_files"`
-	Problems        []string                `json:"problems,omitempty"`
-	Passed          bool                    `json:"passed"`
+	App                       string                        `json:"app"`
+	AppPath                   string                        `json:"app_path"`
+	FlowsGlob                 string                        `json:"flows_glob"`
+	BranchCoverage            CoverageSummary               `json:"branch_coverage"`
+	EffectCoverage            CoverageSummary               `json:"effect_coverage"`
+	StarlarkStatementCoverage CoverageSummary               `json:"starlark_statement_coverage,omitempty"`
+	StarlarkBranchCoverage    CoverageSummary               `json:"starlark_branch_coverage,omitempty"`
+	Branches                  []FlowBranchCoverage          `json:"branches"`
+	Effects                   []FlowEffectCoverage          `json:"effects,omitempty"`
+	StarlarkScripts           []starlarkhost.ScriptCoverage `json:"starlark_scripts,omitempty"`
+	ParameterChecks           []FlowParameterCoverage       `json:"parameter_checks,omitempty"`
+	FlowFiles                 []string                      `json:"flow_files"`
+	Problems                  []string                      `json:"problems,omitempty"`
+	Passed                    bool                          `json:"passed"`
 }
 
 // CoverageSummary is a compact pass/fail metric for one coverage dimension.
@@ -78,19 +97,20 @@ type FlowBranchCoverage struct {
 
 // FlowEffectCoverage describes one authored state-machine effect site.
 type FlowEffectCoverage struct {
-	ID           string         `json:"id"`
-	State        string         `json:"state"`
-	Origin       string         `json:"origin"`
-	Intent       string         `json:"intent,omitempty"`
-	BranchIndex  int            `json:"branch_index,omitempty"`
-	EffectIndex  string         `json:"effect_index"`
-	Kind         string         `json:"kind"`
-	When         string         `json:"when,omitempty"`
-	Invoke       string         `json:"invoke,omitempty"`
-	HostRun      *HostRunEffect `json:"host_run,omitempty"`
-	Covered      bool           `json:"covered"`
-	HostAsserted bool           `json:"host_asserted,omitempty"`
-	FlowFiles    []string       `json:"flow_files,omitempty"`
+	ID             string         `json:"id"`
+	State          string         `json:"state"`
+	Origin         string         `json:"origin"`
+	Intent         string         `json:"intent,omitempty"`
+	BranchIndex    int            `json:"branch_index,omitempty"`
+	EffectIndex    string         `json:"effect_index"`
+	Kind           string         `json:"kind"`
+	When           string         `json:"when,omitempty"`
+	Invoke         string         `json:"invoke,omitempty"`
+	HostRun        *HostRunEffect `json:"host_run,omitempty"`
+	StarlarkScript string         `json:"starlark_script,omitempty"`
+	Covered        bool           `json:"covered"`
+	HostAsserted   bool           `json:"host_asserted,omitempty"`
+	FlowFiles      []string       `json:"flow_files,omitempty"`
 }
 
 // HostRunEffect records the high-risk shape of a host.run call site.
@@ -120,7 +140,6 @@ type FlowParameterCoverage struct {
 // flow fixtures that claim to drive them. It does not execute flows; pair this
 // with RunFlows for behavioral correctness.
 func RunFlowCoverage(ctx context.Context, appPath string, opts FlowCoverageOptions) (*FlowCoverageReport, error) {
-	_ = ctx
 	if opts.FlowsGlob == "" {
 		return nil, fmt.Errorf("flow coverage: FlowsGlob is required")
 	}
@@ -148,10 +167,20 @@ func RunFlowCoverage(ctx context.Context, appPath string, opts FlowCoverageOptio
 		byKey[branches[i].ID] = &branches[i]
 	}
 	effects := collectFlowEffects(def)
+	starlarkRecorder := starlarkhost.NewCoverageRecorder()
 	effectsByBranch := make(map[string][]*FlowEffectCoverage)
 	onEnterByState := make(map[string][]*FlowEffectCoverage)
+	var problems []string
 	for i := range effects {
 		eff := &effects[i]
+		if eff.Invoke == "host.starlark.run" && eff.StarlarkScript != "" {
+			resolved, rerr := resolveStarlarkCoverageScript(def, eff.StarlarkScript)
+			if rerr != nil {
+				problems = append(problems, rerr.Error())
+			} else {
+				eff.StarlarkScript = resolved
+			}
+		}
 		switch eff.Origin {
 		case "transition":
 			key := branchID(eff.State, eff.Intent, eff.BranchIndex)
@@ -162,7 +191,7 @@ func RunFlowCoverage(ctx context.Context, appPath string, opts FlowCoverageOptio
 	}
 
 	param := newParameterLedger(def, opts.MaxCombinations)
-	var problems []string
+	registerStarlarkScripts(starlarkRecorder, effects, &problems)
 	for _, file := range files {
 		fixtures, ferr := loadFlowCoverageFixtures(file)
 		if ferr != nil {
@@ -244,6 +273,19 @@ func RunFlowCoverage(ctx context.Context, appPath string, opts FlowCoverageOptio
 	if effectSummary.Total > 0 {
 		effectSummary.Percent = float64(effectSummary.Covered) * 100 / float64(effectSummary.Total)
 	}
+	if opts.StarlarkCoverage || opts.MinStarlarkStatementCoverage > 0 || opts.MinStarlarkBranchCoverage > 0 || opts.RequireAllStarlarkBranches || opts.RequireRealStarlark {
+		flowReport, ferr := RunFlows(ctx, appPath, opts.FlowsGlob, FlowOptions{
+			ImportResolver:   opts.ImportResolver,
+			StarlarkCoverage: starlarkRecorder,
+		})
+		if ferr != nil {
+			problems = append(problems, fmt.Sprintf("starlark coverage flow run failed: %v", ferr))
+		} else if flowReport.Failed > 0 {
+			problems = append(problems, fmt.Sprintf("starlark coverage flow run had %d failing fixture(s)", flowReport.Failed))
+		}
+	}
+	starlarkScripts := starlarkRecorder.Snapshot()
+	starlarkStatementSummary, starlarkBranchSummary := summarizeStarlarkCoverage(starlarkScripts)
 
 	paramChecks := param.results()
 	passed := true
@@ -262,21 +304,36 @@ func RunFlowCoverage(ctx context.Context, appPath string, opts FlowCoverageOptio
 	if opts.RequireHostAssertions && hostAssertionMissing {
 		passed = false
 	}
+	if opts.MinStarlarkStatementCoverage > 0 && starlarkStatementSummary.Percent+1e-9 < opts.MinStarlarkStatementCoverage {
+		passed = false
+	}
+	if opts.MinStarlarkBranchCoverage > 0 && starlarkBranchSummary.Percent+1e-9 < opts.MinStarlarkBranchCoverage {
+		passed = false
+	}
+	if opts.RequireAllStarlarkBranches && starlarkBranchSummary.Covered != starlarkBranchSummary.Total {
+		passed = false
+	}
+	if opts.RequireRealStarlark && coveredStarlarkEffectMissingRealRun(effects, starlarkScripts) {
+		passed = false
+	}
 
 	report := &FlowCoverageReport{
-		App:             def.App.ID,
-		AppPath:         appPath,
-		FlowsGlob:       opts.FlowsGlob,
-		BranchCoverage:  summary,
-		EffectCoverage:  effectSummary,
-		Branches:        branches,
-		Effects:         effects,
-		ParameterChecks: paramChecks,
-		FlowFiles:       files,
-		Problems:        problems,
-		Passed:          passed,
+		App:                       def.App.ID,
+		AppPath:                   appPath,
+		FlowsGlob:                 opts.FlowsGlob,
+		BranchCoverage:            summary,
+		EffectCoverage:            effectSummary,
+		StarlarkStatementCoverage: starlarkStatementSummary,
+		StarlarkBranchCoverage:    starlarkBranchSummary,
+		Branches:                  branches,
+		Effects:                   effects,
+		StarlarkScripts:           starlarkScripts,
+		ParameterChecks:           paramChecks,
+		FlowFiles:                 files,
+		Problems:                  problems,
+		Passed:                    passed,
 	}
-	if len(problems) > 0 && (opts.RequireAllBranches || opts.RequireAllEffects || opts.RequireHostAssertions) {
+	if len(problems) > 0 && (opts.RequireAllBranches || opts.RequireAllEffects || opts.RequireHostAssertions || opts.StarlarkCoverage || opts.MinStarlarkStatementCoverage > 0 || opts.MinStarlarkBranchCoverage > 0 || opts.RequireAllStarlarkBranches || opts.RequireRealStarlark) {
 		report.Passed = false
 	}
 	if opts.JSONOut != "" {
@@ -377,6 +434,11 @@ func collectEffectSites(state, originKind, intent string, branchIdx int, effects
 					Bind: eff.Bind,
 				}
 			}
+			if eff.Invoke == "host.starlark.run" {
+				if script, ok := eff.With["script"].(string); ok {
+					site.StarlarkScript = script
+				}
+			}
 			out = append(out, site)
 			if len(eff.OnComplete) > 0 {
 				walk(eff.OnComplete, effectIndex+".on_complete.")
@@ -444,6 +506,88 @@ func fixtureCassetteHandlers(flowFile string, fixture FlowFixture) (map[string]b
 		}
 	}
 	return handlers, nil
+}
+
+func resolveStarlarkCoverageScript(def *app.AppDef, script string) (string, error) {
+	script = strings.TrimSpace(script)
+	if script == "" {
+		return "", fmt.Errorf("host.starlark.run effect has empty script")
+	}
+	if strings.Contains(script, "{{") {
+		return "", fmt.Errorf("host.starlark.run script %q is templated; starlark coverage cannot statically register it", script)
+	}
+	if filepath.IsAbs(script) {
+		return filepath.Clean(script), nil
+	}
+	if def.BaseDir != "" {
+		return filepath.Clean(filepath.Join(def.BaseDir, script)), nil
+	}
+	return filepath.Clean(script), nil
+}
+
+func registerStarlarkScripts(recorder *starlarkhost.CoverageRecorder, effects []FlowEffectCoverage, problems *[]string) {
+	seen := map[string]bool{}
+	for _, eff := range effects {
+		if eff.Invoke != "host.starlark.run" || eff.StarlarkScript == "" || seen[eff.StarlarkScript] {
+			continue
+		}
+		seen[eff.StarlarkScript] = true
+		src, err := os.ReadFile(eff.StarlarkScript)
+		if err != nil {
+			*problems = append(*problems, fmt.Sprintf("read starlark script %q: %v", eff.StarlarkScript, err))
+			continue
+		}
+		if err := recorder.RegisterScript(eff.StarlarkScript, src); err != nil {
+			*problems = append(*problems, fmt.Sprintf("parse starlark script %q for coverage: %v", eff.StarlarkScript, err))
+		}
+	}
+}
+
+func summarizeStarlarkCoverage(scripts []starlarkhost.ScriptCoverage) (CoverageSummary, CoverageSummary) {
+	var statements CoverageSummary
+	var branches CoverageSummary
+	for _, script := range scripts {
+		for _, stmt := range script.Statements {
+			if strings.HasPrefix(stmt.Kind, "instrumentation_error:") {
+				continue
+			}
+			statements.Total++
+			if stmt.Covered {
+				statements.Covered++
+			}
+		}
+		for _, branch := range script.Branches {
+			branches.Total += 2
+			if branch.TrueHits > 0 {
+				branches.Covered++
+			}
+			if branch.FalseHits > 0 {
+				branches.Covered++
+			}
+		}
+	}
+	if statements.Total > 0 {
+		statements.Percent = float64(statements.Covered) * 100 / float64(statements.Total)
+	}
+	if branches.Total > 0 {
+		branches.Percent = float64(branches.Covered) * 100 / float64(branches.Total)
+	}
+	return statements, branches
+}
+
+func coveredStarlarkEffectMissingRealRun(effects []FlowEffectCoverage, scripts []starlarkhost.ScriptCoverage) bool {
+	ran := map[string]bool{}
+	for _, script := range scripts {
+		if len(script.FlowFiles) > 0 {
+			ran[script.Script] = true
+		}
+	}
+	for _, eff := range effects {
+		if eff.Invoke == "host.starlark.run" && eff.Covered && eff.StarlarkScript != "" && !ran[eff.StarlarkScript] {
+			return true
+		}
+	}
+	return false
 }
 
 func markBranchEffects(byBranch map[string][]*FlowEffectCoverage, branchID, file string, turn FlowTurn, cassetteHandlers map[string]bool) {
