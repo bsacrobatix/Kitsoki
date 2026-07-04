@@ -67,7 +67,7 @@ class PairedTaskPlugin:
         if payload:
             verdict = str(payload.get("verdict") or payload.get("grade") or "pending")
             result.verdict = _normalize_verdict(verdict)
-            result.health = "model:result"
+            result.health = "infra:harness" if result.verdict == "blocked" else "model:result"
             result.metrics.update(_metrics(payload))
             refs = payload.get("evidence_refs")
             if isinstance(refs, list):
