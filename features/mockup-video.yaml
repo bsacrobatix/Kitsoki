@@ -4,6 +4,8 @@ kind: story-demo
 title: Mockup Video Studio
 tagline: Produce, review, and refine a rendered video — room by room.
 summary: "The mockup-video story's produce → review → refine loop: brief discovery in intake, the authored deck, a deterministic render, inline playback with the /review feedback pointer, and the final gallery with the scenarios it covers."
+docs:
+  - docs/stories/mockup-video.md
 related:
   - review
 demo:

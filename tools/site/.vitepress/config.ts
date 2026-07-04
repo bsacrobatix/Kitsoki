@@ -71,6 +71,16 @@ export default defineConfig({
   cleanUrls: false,
   lang: locales.en.lang,
 
+  // th/ja are registered in the shared i18n data (locales, below) and their
+  // page trees + overlays are kept on disk, but the VitePress locale entries
+  // themselves are commented out: only 1 of 27 feature cards has translation
+  // overlays today, so publishing the switcher would mostly serve English
+  // content inside a th/ja shell. srcExclude drops the now-unlinked src/th//
+  // src/ja page trees from this build so they don't ship as orphaned,
+  // locale-config-less pages. Re-enable both blocks (and drop srcExclude) once
+  // `stories/product-site-localization/` has produced enough overlays to be
+  // worth publishing.
+  srcExclude: ["th/**", "ja/**"],
   locales: {
     root: {
       label: locales.en.label,
@@ -78,20 +88,20 @@ export default defineConfig({
       title: locales.en.title,
       description: locales.en.description,
     },
-    th: {
-      label: locales.th.label,
-      lang: locales.th.lang,
-      title: locales.th.title,
-      description: locales.th.description,
-      themeConfig: localizedThemeConfig("th"),
-    },
-    ja: {
-      label: locales.ja.label,
-      lang: locales.ja.lang,
-      title: locales.ja.title,
-      description: locales.ja.description,
-      themeConfig: localizedThemeConfig("ja"),
-    },
+    // th: {
+    //   label: locales.th.label,
+    //   lang: locales.th.lang,
+    //   title: locales.th.title,
+    //   description: locales.th.description,
+    //   themeConfig: localizedThemeConfig("th"),
+    // },
+    // ja: {
+    //   label: locales.ja.label,
+    //   lang: locales.ja.lang,
+    //   title: locales.ja.title,
+    //   description: locales.ja.description,
+    //   themeConfig: localizedThemeConfig("ja"),
+    // },
   },
 
   markdown: {
