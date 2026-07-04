@@ -13,6 +13,19 @@ advanced, rebase the branch in its worktree onto local `main`, rerun focused
 validation, and then run the helper again. Do not manually chmod the primary
 checkout except to repair the guard itself.
 
+When local `main` must be reconciled with `origin/main` or `upstream/main`, do
+not pull into the protected primary checkout. From the primary checkout, run:
+
+```
+scripts/sync-main-from-remote.sh --remote origin
+```
+
+or `--remote upstream`. The sync helper fetches, creates an integration worktree
+under `.worktrees`, and attempts the remote merge there. Resolve any conflicts
+inside that integration worktree, rerun the helper with `--continue <branch>`,
+validate there, and only then land the integration branch with
+`scripts/merge-to-main.sh <branch>`.
+
 Project skills live in the Codex-standard `.agents/skills/<name>/SKILL.md` location. Claude Code does not auto-discover that directory, so `make setup` links every `.agents/skills/*/SKILL.md` into `.claude/skills/` (relative symlinks; `.claude/` is gitignored). After adding a new skill, re-run:
 
 ```
