@@ -9,6 +9,7 @@ states:
       - kv:
           pairs:
             Status: "{{ world.status }}"
+            Review: "{{ world.review_summary }}"
             Exit code: "{{ world.result_exit_code }}"
             OK: "{{ world.result_ok }}"
       - heading: "Output"

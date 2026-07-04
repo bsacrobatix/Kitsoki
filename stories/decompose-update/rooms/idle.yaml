@@ -22,10 +22,13 @@ states:
               intent: look
     on:
       run:
-        - target: running
+        - target: review
           effects:
             - set:
-                status: "running"
+                status: "reviewing"
+                review_approved: false
+                review_summary: ""
+                review_findings: []
                 result_stdout: ""
                 result_exit_code: 0
                 result_ok: false

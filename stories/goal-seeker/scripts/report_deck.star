@@ -42,6 +42,19 @@ def _read_log(ctx, work_dir):
     return out
 
 
+def _read_plan_events(ctx, work_dir):
+    path = work_dir + "/plan-evolution.jsonl"
+    if not ctx.fs.exists(path):
+        return []
+    out = []
+    for line in ctx.fs.read(path).split("\n"):
+        line = line.strip()
+        if line == "":
+            continue
+        out.append(json.decode(line))
+    return out
+
+
 def _latest_log_for(log, change_id):
     latest = None
     latest_seq = -1
@@ -138,6 +151,26 @@ def _status_table(changes):
     return "\n".join(lines)
 
 
+def _plan_event_label(event):
+    added = event.get("added") or []
+    added_s = ", ".join([_str(a) for a in added])
+    parts = []
+    trigger = _str(event.get("trigger"))
+    provenance = _str(event.get("provenance"))
+    if trigger != "":
+        parts.append("trigger `" + trigger + "`")
+    if provenance != "":
+        parts.append("provenance `" + provenance + "`")
+    if added_s != "":
+        parts.append("added `" + added_s + "`")
+    version_path = _str(event.get("version_path"))
+    if version_path != "":
+        parts.append("version `" + version_path + "`")
+    if len(parts) == 0:
+        return _str(event)
+    return "; ".join(parts)
+
+
 def _change_markdown(goal_title, change, log_entry, deck_path):
     cid = _str(change.get("change_id"))
     lines = []
@@ -166,7 +199,7 @@ def _change_markdown(goal_title, change, log_entry, deck_path):
     return "\n".join(lines) + "\n"
 
 
-def _summary_markdown(goal_title, ledger, integrated, change_paths, videos):
+def _summary_markdown(goal_title, ledger, integrated, change_paths, videos, plan_events):
     counts = ledger.get("counts") or {}
     lines = []
     lines.append("# " + goal_title + " - execution summary")
@@ -200,10 +233,16 @@ def _summary_markdown(goal_title, ledger, integrated, change_paths, videos):
         lines.append("- " + cid + ": `" + _str(v.get("clip")) + "` - " + _str(v.get("shows")))
     if not any_video:
         lines.append("(none linked)")
+    lines.append("")
+    lines.append("## Plan evolution")
+    if len(plan_events) == 0:
+        lines.append("(none recorded)")
+    for event in plan_events:
+        lines.append("- " + _plan_event_label(event))
     return "\n".join(lines) + "\n"
 
 
-def _exec_deck(goal_title, ledger, summary_path, integrated, change_paths, videos):
+def _exec_deck(goal_title, ledger, summary_path, integrated, change_paths, videos, plan_events):
     counts = ledger.get("counts") or {}
     rows = []
     for c in ledger.get("changes") or []:
@@ -248,6 +287,20 @@ def _exec_deck(goal_title, ledger, summary_path, integrated, change_paths, video
             "type": "cards",
             "title": "Demo compendium",
             "cards": video_cards,
+        })
+    if len(plan_events) > 0:
+        event_rows = []
+        for event in plan_events:
+            event_rows.append({
+                "Trigger": _str(event.get("trigger")),
+                "Provenance": _str(event.get("provenance")),
+                "Added": ", ".join([_str(a) for a in (event.get("added") or [])]),
+                "Version": _str(event.get("version_path")),
+            })
+        scenes.append({
+            "type": "table",
+            "title": "Plan evolution",
+            "rows": event_rows,
         })
     scenes.extend([
         {
@@ -329,6 +382,7 @@ def main(ctx):
     deck_path = report_dir + "/exec-summary.slidey.json"
 
     log = _read_log(ctx, work_dir)
+    plan_events = _read_plan_events(ctx, work_dir)
     integrated = []
     for c in ledger.get("changes") or []:
         if c.get("state") == "integrated":
@@ -349,8 +403,8 @@ def main(ctx):
         ctx.fs.write(md_path, _change_markdown(goal_title, c, entry, change_deck_path))
         ctx.fs.write(change_deck_path, json.encode(_change_deck(goal_title, c, md_path, entry, video)) + "\n")
 
-    ctx.fs.write(summary_path, _summary_markdown(goal_title, ledger, integrated, change_paths, videos))
-    ctx.fs.write(deck_path, json.encode(_exec_deck(goal_title, ledger, summary_path, integrated, change_paths, videos)) + "\n")
+    ctx.fs.write(summary_path, _summary_markdown(goal_title, ledger, integrated, change_paths, videos, plan_events))
+    ctx.fs.write(deck_path, json.encode(_exec_deck(goal_title, ledger, summary_path, integrated, change_paths, videos, plan_events)) + "\n")
 
     return {
         "status": "written",
@@ -358,5 +412,6 @@ def main(ctx):
         "deck_path": deck_path,
         "change_count": len(integrated),
         "video_count": len(videos),
+        "plan_event_count": len(plan_events),
         "change_paths": change_paths,
     }
