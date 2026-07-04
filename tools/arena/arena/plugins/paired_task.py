@@ -27,13 +27,14 @@ class PairedTaskPlugin:
 
     def drive_command(self, cell: Cell, *, live: bool) -> list[str]:
         task = cell.axis.get("task", "")
+        treatment = str(cell.variant.meta.get("treatment") or cell.variant.id)
         argv = [
             "python3",
             RUNNER,
             "--task",
             task,
             "--treatment",
-            cell.variant.id,
+            treatment,
             "--target",
             cell.target.id,
         ]
