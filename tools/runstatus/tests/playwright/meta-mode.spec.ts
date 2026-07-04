@@ -338,9 +338,13 @@ test.describe("meta mode (live, no-LLM)", () => {
       // ── Scene 6: persistence across navigation ─────────────────────────────
       await page.getByTestId("meta-close").click();
       await expect(page.getByTestId("meta-overlay")).toHaveCount(0);
-      // Hop to the read-only observer.
+      // Hop to the read-only observer via the story library (the topbar
+      // Observe link was removed as redundant — commit 0227386d): back to
+      // home, then open the active session from the list.
       chapters.open("meta-persistence", "Conversation persists", CHAPTER_SOURCE);
-      await page.getByTestId("observe-link").click();
+      await page.getByTestId("back-stories").click();
+      await expect(page.getByTestId("home-view")).toBeVisible({ timeout: 15000 });
+      await page.getByTestId("session-open").first().click();
       await page.waitForURL(/#\/s\/[0-9a-f-]{36}$/, { timeout: 15000 });
       await expect(page.getByTestId("breadcrumb")).toBeVisible();
       await page.waitForTimeout(BEFORE_ACT);

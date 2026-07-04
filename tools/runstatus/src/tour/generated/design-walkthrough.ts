@@ -58,13 +58,13 @@ export const DESIGN_WALKTHROUGH_TOUR_STEPS: readonly TourStep[] = [
   {
     id: "pw-idea-input",
     route: "interactive",
-    target: "text-floor-input",
+    target: "composer-input",
     title: "Entering the idea",
     body: "We type the idea into the chat composer: a tamagotchi-style virtual pet widget for the session UI. Submitting mints a slug and kicks off the scout search for overlapping work.",
     placement: "top",
     kind: "explain",
     advance: "next",
-    waitForTarget: "text-floor-input",
+    waitForTarget: "composer-input",
     dwellMs: 5500,
   },
   {
@@ -118,13 +118,13 @@ export const DESIGN_WALKTHROUGH_TOUR_STEPS: readonly TourStep[] = [
   {
     id: "pw-judge",
     route: "interactive",
-    target: "intent-actions",
+    target: "chat-section",
     title: "Brief approved",
-    body: "The brief judge's verdict is \"continue\": clear why, scoped change, kind is story. \"advance to draft\" is now the primary action — proceed to draft authoring.",
-    placement: "top",
+    body: "The brief judge's verdict is \"continue\": clear why, scoped change, kind is story. The passing verdict auto-advances the pipeline straight into draft authoring — no extra click needed.",
+    placement: "right",
     kind: "explain",
     advance: "next",
-    waitForTarget: "intent-btn-advance_brief",
+    waitForTarget: "current-state",
     dwellMs: 5500,
   },
   {

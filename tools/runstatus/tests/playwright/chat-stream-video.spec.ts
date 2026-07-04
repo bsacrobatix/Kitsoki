@@ -73,7 +73,11 @@ const CHAPTER_SOURCE = "features/chat-stream.yaml";
 // parallel specs never race on a bind.
 const ADDR = demoAddr(7758);
 const STORY_DIR = path.join(repoRoot, "stories", "bugfix");
-const FLOW = path.join(STORY_DIR, "flows", "happy_llm.yaml");
+// chat_stream_demo (NOT happy_llm): no ticket in initial_world, so the fresh
+// web session parks at idle and the tour can click `start` on camera. With
+// happy_llm, `kitsoki web --flow` seeds the ticket and idle's auto-start fires
+// during session creation — the live stream is spent before the camera arrives.
+const FLOW = path.join(STORY_DIR, "flows", "chat_stream_demo.yaml");
 const HOST_CASSETTE = path.join(STORY_DIR, "flows", "demo.cassette.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "chat-stream");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");

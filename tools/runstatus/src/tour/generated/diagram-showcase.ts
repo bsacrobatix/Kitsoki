@@ -60,7 +60,7 @@ export const DIAGRAM_SHOWCASE_TOUR_STEPS: readonly TourStep[] = [
     route: "any",
     target: "diagram-metro-station",
     title: "Where you've been",
-    body: "The bright leg is ground truth from the trace — each stop labelled with the intent that got you there (via go_idea, via discuss …).",
+    body: "The bright leg is ground truth from the trace — each stop labelled with the intent that got you there (via discuss, via confirm …).",
     placement: "right",
     kind: "explain",
     advance: "next",

@@ -161,16 +161,16 @@ test("design pipeline walkthrough — tamagotchi pets", async () => {
         await dwell(page, SETTLE_MS);
       }
       if (step.id === "pw-judge") {
-        // Press ready → brief judge fires (verdict: continue) → advance_brief
-        // appears as a choice item for the operator.
+        // Press ready → brief judge fires (verdict: continue) → the room's
+        // `decider: llm` pin auto-fires the advance_brief emit even in STAGED
+        // mode (see design_refine.yaml), so the turn lands directly in
+        // design_draft — there is no operator "advance to draft" click.
         await page.getByTestId("intent-btn-ready").first().click();
-        await waitForState(page, "design_refine", 15000);
-        await expect(page.getByTestId("intent-btn-advance_brief").first()).toBeVisible({ timeout: 15000 });
+        await waitForState(page, "design_draft", 20000);
         await dwell(page, SETTLE_MS);
       }
       if (step.id === "pw-draft") {
-        // Advance to draft → draft author writes the design document.
-        await page.getByTestId("intent-btn-advance_brief").first().click();
+        // Already at design_draft: the passing verdict auto-advanced (above).
         await waitForState(page, "design_draft", 20000);
         await dwell(page, SETTLE_MS);
       }

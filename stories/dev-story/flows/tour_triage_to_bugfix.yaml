@@ -95,6 +95,14 @@ host_handlers:
       branch: "fix/AA-13268"
   host.local:
     data: { ok: true, state: "success", log: "PASS", passed: 4, failed: 0 }
+  # done room's lost-work guards (done_clean_tree_check / done_fixed_in_commit):
+  # report a clean worktree so bf__accept reaches @exit:done → pr.open_pr.
+  # Without this stub, `kitsoki web --flow` (unlike `kitsoki test flows`) runs
+  # the REAL host.run — `git -C testdata/projects/cake status` resolves to the
+  # enclosing kitsoki repo, so any local dirtiness bounces the close-out to
+  # @exit:needs-human (human_review_report) and the tour never reaches the PR.
+  host.run:
+    data: { ok: true, exit_code: 0, stdout_json: { dirty: false, files: "", commit: "deadbeef0000" } }
 
   # ── Agent judge stubs: a confident PASS verdict at every checkpoint ─────
   host.agent.task: &judge

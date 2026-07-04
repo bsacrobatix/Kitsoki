@@ -46,13 +46,13 @@ export const DEV_STORY_BUGFIX_TOUR_STEPS: readonly TourStep[] = [
   {
     id: "ds-intro-observe",
     route: "interactive",
-    target: "observe-link",
-    title: "Drive here, observe there",
-    body: "We're on the drive view: pick intents, submit turns, and watch the state badge advance one room at a time. The Observe link opens the read-only observer for this same run — the trace tree, timeline, and graph. We'll drive the whole pipeline from here.",
+    target: "trace-column-toggle",
+    title: "Drive here, trace alongside",
+    body: "We're on the drive view: pick intents, submit turns, and watch the state badge advance one room at a time. Show trace opens the same trace tree, timeline, and graph right beside the conversation. We'll drive the whole pipeline from here.",
     placement: "bottom",
     kind: "explain",
     advance: "next",
-    waitForTarget: "observe-link",
+    waitForTarget: "trace-column-toggle",
     dwellMs: 5000,
   },
   {

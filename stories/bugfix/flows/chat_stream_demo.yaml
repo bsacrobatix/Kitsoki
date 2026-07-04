@@ -1,0 +1,163 @@
+# chat_stream_demo — the chat-stream demo's web fixture: happy_llm's stubs
+# and judge posture, but with NO ticket identity in initial_world.
+#
+# Why it exists: `kitsoki web --flow` seeds a NEW browser session from the
+# fixture's initial_state/initial_world and then runs the room's on_enter
+# normally. With happy_llm's seeded ticket_id, bugfix idle's auto-start guard
+# fires during session creation, so the run is already mid-pipeline (the live
+# stream already spent) before the camera arrives — and the chat-stream demo's
+# whole point is filming the operator's `start` click and the agent turn
+# streaming live. This fixture parks the fresh session at idle; the recording
+# spec patches the ticket/worktree identity via RPC off-camera, then the tour
+# clicks `start` on camera.
+#
+# The turns: block is the Mode-2 proof that the stubs cover the same
+# start→cascade path even WITHOUT a pre-seeded ticket (the flow harness
+# bypasses idle's on_enter, exactly like happy_llm).
+#
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  # NO ticket identity — the point of this fixture. A `kitsoki web --flow`
+  # session seeds initial_world and runs idle's on_enter, whose auto-start
+  # guard fires on a non-empty ticket_id (see rooms/idle.yaml). Leaving the
+  # ticket unseeded parks the fresh session at idle so the demo can click
+  # `start` ON CAMERA and film the live turn stream. The spec patches the
+  # ticket/worktree identity off-camera via RPC before that click.
+  bugfix_exit: "open-PR"
+  bugfix_mode:     "full"
+  judge_mode:      "llm"
+  judge_confidence_threshold: 0.8
+
+host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.git_worktree:
+    data: { ok: true, log: "synced" }
+  host.git:
+    data: { ok: true, sha: "abc123", diff: "diff --git a/x b/x\n", files: [] }
+  host.local:
+    data: { ok: true, log: "PASS: 12 tests", passed: 12, failed: 0 }
+  # done room's lost-work clean-tree check (host.run done_clean_tree_check):
+  # report a clean worktree so accept reaches @exit:done. A dirty tree would
+  # route to @exit:needs-human — see flows/done_refuses_dirty_tree.yaml.
+  host.run:
+    data: { ok: true, exit_code: 0, stdout_json: { dirty: false, files: "" } }
+
+  # In `llm` mode every merged room ALSO fires host.agent.decide
+  # via the `judge_<phase>.md` prompt from on_enter. The runtime can't
+  # branch the stub response on prompt (it returns the SAME Data for
+  # every call). So our stub returns a submitted: payload that
+  # satisfies BOTH the artifact schema AND the judge_verdict schema
+  # (verdict/intent/reason/confidence are additional fields the artifact
+  # schema ignores via additionalProperties: true).
+  host.agent.task:
+    data:
+      stdout: ""
+      ok: true
+      submitted:
+        # Artifact fields
+        summary_title:    "Confident artifact"
+        summary_markdown: "An artifact body sufficient for state-machine testing."
+        bug_verified:     true
+        involved_components: [{ name: "tui", reason: "the foyer renders here" }]
+        fix_description:     "Render the banner with `truncate=false` so the title isn't clipped at small widths."
+        root_cause:          "The foyer's renderWidth() returns terminal-width-2 instead of terminal-width, which clips one-character titles."
+        affected_files:      ["internal/tui/foyer.go"]
+        confidence:          0.9
+        reasoning:           "Resize trace shows the off-by-one on terminal-width-2; the fix is well-established in similar renderer code in this repo."
+        status:              "passed"
+        tests_run:           { passed: 4, failed: 0, log: "PASS 4 tests" }
+        outcome:             "pass"
+        evidence:            { build: "ok", api: "n/a", ui: "ok" }
+        lessons:
+          - { category: "renderer-bugs", description: "Off-by-one rendering bugs need at least one regression test asserting on the exact width.", severity: "medium" }
+        # Judge fields (additionalProperties: true on artifact schemas
+        # tolerates these; the orchestrator doesn't validate either way
+        # because flow fixtures don't run the validator subprocess).
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Artifact looks complete and the confidence is high enough to advance."
+
+  host.agent.ask:
+    data:
+      stdout: ""
+      ok: true
+      submitted:
+        # Artifact fields
+        summary_title:    "Confident artifact"
+        summary_markdown: "An artifact body sufficient for state-machine testing."
+        bug_verified:     true
+        involved_components: [{ name: "tui", reason: "the foyer renders here" }]
+        fix_description:     "Render the banner with `truncate=false` so the title isn't clipped at small widths."
+        root_cause:          "The foyer's renderWidth() returns terminal-width-2 instead of terminal-width, which clips one-character titles."
+        affected_files:      ["internal/tui/foyer.go"]
+        confidence:          0.9
+        reasoning:           "Resize trace shows the off-by-one on terminal-width-2; the fix is well-established in similar renderer code in this repo."
+        status:              "passed"
+        tests_run:           { passed: 4, failed: 0, log: "PASS 4 tests" }
+        outcome:             "pass"
+        evidence:            { build: "ok", api: "n/a", ui: "ok" }
+        lessons:
+          - { category: "renderer-bugs", description: "Off-by-one rendering bugs need at least one regression test asserting on the exact width.", severity: "medium" }
+        # Judge fields (additionalProperties: true on artifact schemas
+        # tolerates these; the orchestrator doesn't validate either way
+        # because flow fixtures don't run the validator subprocess).
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Artifact looks complete and the confidence is high enough to advance."
+
+  host.agent.decide:
+    data:
+      stdout: ""
+      ok: true
+      submitted:
+        # Artifact fields
+        summary_title:    "Confident artifact"
+        summary_markdown: "An artifact body sufficient for state-machine testing."
+        bug_verified:     true
+        involved_components: [{ name: "tui", reason: "the foyer renders here" }]
+        fix_description:     "Render the banner with `truncate=false` so the title isn't clipped at small widths."
+        root_cause:          "The foyer's renderWidth() returns terminal-width-2 instead of terminal-width, which clips one-character titles."
+        affected_files:      ["internal/tui/foyer.go"]
+        confidence:          0.9
+        reasoning:           "Resize trace shows the off-by-one on terminal-width-2; the fix is well-established in similar renderer code in this repo."
+        status:              "passed"
+        tests_run:           { passed: 4, failed: 0, log: "PASS 4 tests" }
+        outcome:             "pass"
+        evidence:            { build: "ok", api: "n/a", ui: "ok" }
+        lessons:
+          - { category: "renderer-bugs", description: "Off-by-one rendering bugs need at least one regression test asserting on the exact width.", severity: "medium" }
+        # Judge fields (additionalProperties: true on artifact schemas
+        # tolerates these; the orchestrator doesn't validate either way
+        # because flow fixtures don't run the validator subprocess).
+        verdict:    "pass"
+        intent:     "accept"
+        reason:     "Artifact looks complete and the confidence is high enough to advance."
+
+turns:
+  # start fires idle → reproducing. reproducing.on_enter binds the
+  # artifact, fires the judge, and emit_intent accept. That cascades:
+  #   accept → proposing → on_enter → judge → emit accept →
+  #   implementing → on_enter (no judge, no emit) → STOP.
+  # Net: one user turn lands at implementing.
+  - intent: { name: start, slots: {} }
+    expect_state: implementing
+
+  # accept advances implementing → testing → on_enter → judge →
+  # emit accept → reviewing → on_enter (no judge) → STOP.
+  - intent: { name: accept, slots: {} }
+    expect_state: reviewing
+
+  # accept advances reviewing → validating → judge → emit accept →
+  # done → judge → emit accept → @exit:done.
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__done
+    expect_world:
+      status: "fixed"
+
+expect_terminal: true
+expect_no_errors: true

@@ -65,10 +65,16 @@ const CHAPTER_SOURCE = "features/trace-introspection.yaml";
 // Playwright stdout, so ERROR.txt is the only failure trail).
 let markScene: (label: string) => void = () => {};
 
-/** Take a labeled screenshot into ARTIFACT_DIR. */
+/** Take a labeled screenshot into ARTIFACT_DIR, named `NN-<label>.png` — the
+ * staging convention (tools/site/scripts/stage-media.mjs matches
+ * /^\d+-.+\.png$/ and picks poster.png by the `-<posterStep>.png` suffix, so
+ * un-numbered `ti-*.png` frames were invisible to the site build). Mirrors
+ * _helpers/server.ts makeShot. */
+let shotIdx = 0;
 async function shot(page: Page, label: string): Promise<void> {
   markScene(label);
-  const file = path.join(ARTIFACT_DIR, `${label}.png`);
+  const n = String(++shotIdx).padStart(2, "0");
+  const file = path.join(ARTIFACT_DIR, `${n}-${label}.png`);
   await page.screenshot({ path: file, fullPage: false });
   console.log(`[demo] screenshot: ${file}`);
 }

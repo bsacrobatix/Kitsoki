@@ -110,6 +110,20 @@ test.beforeAll(async () => {
   }
   prepareVideoDir(VIDEO_DIR); // clears stale .webm files; must run before context creation
 
+  // Pre-create the PRD draft the fixture's stubbed host.agent.task CLAIMS to
+  // have written. The drafting accept arc runs the REAL prd_publish.star
+  // (deliberately — the fixture proves the publish integration), and under
+  // `kitsoki web --flow` the starlark ctx.fs is the REAL filesystem (the
+  // harness's starlark_inspect_cassette is not consulted), so the script
+  // fails "no draft at …" unless the file exists. The publish destination is
+  // the fixture's /tmp/kitsoki-prd-fixtures, so nothing lands in the checkout.
+  const draftPath = path.join(repoRoot, ".artifacts", "prd", "example-cli", "004-prd.md");
+  fs.mkdirSync(path.dirname(draftPath), { recursive: true });
+  fs.writeFileSync(
+    draftPath,
+    "# PRD: Example CLI\n\nA CLI for X that helps developers do Y.\n\n## Problem\n\nDevelopers lack a fast path to Y.\n\n## Success metric\n\nTime-to-first-success.\n",
+  );
+
   tmpDbDir = fs.mkdtempSync(path.join(os.tmpdir(), "kitsoki-multi-story-"));
   const dbPath = path.join(tmpDbDir, "s.db");
 

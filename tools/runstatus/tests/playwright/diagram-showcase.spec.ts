@@ -185,6 +185,19 @@ test("state-diagram four-view showcase (dev-story, no-LLM)", async () => {
         // reload would tear it down. The driving page is already on /chat
         // watching THIS session, so SSE pushes the state updates live.
         await waitForState(page, "design_search", 15000);
+        // One more hop (confirm → design_refine) so the TRAVELED leg is
+        // non-empty. The `kitsoki web --flow` session seeds initial_state
+        // directly into `design` with a synthetic turn-0 transition that emits
+        // no machine.state_entered, so the seeded room never counts as
+        // traveled — with only discuss driven, the route would be
+        // [current: design_search] and dsg-metro-traveled would have no
+        // station to spotlight.
+        await server.rpc("runstatus.session.submit", {
+          session_id: sid,
+          intent: "confirm",
+          slots: {},
+        });
+        await waitForState(page, "design_refine", 20000);
         await stageDiagram(page);
         await dwell(page, SETTLE_MS);
       }

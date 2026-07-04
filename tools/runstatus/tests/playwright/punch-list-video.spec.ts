@@ -103,14 +103,14 @@ test.describe("punch-list tour video", () => {
         if (step.id === "pl-first-item") {
           await clickIntent(page, "next_item");
           await waitForState(page, "board");
-          await expect(page.getByText(/Processed 1/)).toBeVisible({ timeout: 15000 });
+          await expect(page.getByText(/Processed 1/).first()).toBeVisible({ timeout: 15000 });
         }
         if (step.id === "pl-midpoint") {
           for (let i = 0; i < 4; i++) {
             await clickIntent(page, "next_item");
             await waitForState(page, "board");
           }
-          await expect(page.getByText(/Processed 5/)).toBeVisible({ timeout: 15000 });
+          await expect(page.getByText(/Processed 5/).first()).toBeVisible({ timeout: 15000 });
         }
         if (step.id === "pl-final-pending") {
           for (let i = 0; i < 4; i++) {
@@ -118,17 +118,17 @@ test.describe("punch-list tour video", () => {
             await waitForState(page, "board");
           }
           await waitForState(page, "board");
-          await expect(page.getByText(/Processed 9/)).toBeVisible({ timeout: 15000 });
-          await expect(page.getByText(/story-qa-workflow/)).toBeVisible({ timeout: 15000 });
+          await expect(page.getByText(/Processed 9/).first()).toBeVisible({ timeout: 15000 });
+          await expect(page.getByText(/story-qa-workflow/).first()).toBeVisible({ timeout: 15000 });
         }
         if (step.id === "pl-report") {
           await clickIntent(page, "next_item");
           await waitForState(page, "board");
-          await expect(page.getByText(/Processed 10/)).toBeVisible({ timeout: 15000 });
-          await expect(page.getByText(/Pending 0/)).toBeVisible({ timeout: 15000 });
+          await expect(page.getByText(/Processed 10/).first()).toBeVisible({ timeout: 15000 });
+          await expect(page.getByText(/Pending 0/).first()).toBeVisible({ timeout: 15000 });
           await clickIntent(page, "next_item");
           await waitForState(page, "report");
-          await expect(page.getByText(/10 passed/)).toBeVisible({ timeout: 15000 });
+          await expect(page.getByText(/10 passed/).first()).toBeVisible({ timeout: 15000 });
         }
 
         if (step.waitForTarget) {

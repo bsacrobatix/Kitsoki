@@ -53,16 +53,27 @@ tour:
       advanceRoute: interactive
       waitForTarget: new-session-btn
       dwellMs: 3500
-    - id: trace-intro-observe
+    - id: trace-intro-back
       route: interactive
-      target: observe-link
-      title: Switch to the observer
-      body: The trace tools live in the read-only observer view — built for inspecting a run while it's live or after it's finished. Switch to it to introspect this run.
+      target: back-stories
+      title: Back to the story library
+      body: The trace tools live in the read-only observer view — built for inspecting a run while it's live or after it's finished. Head back to the story library to open this run there.
       placement: bottom
       kind: action
       advance: route-match
+      advanceRoute: home
+      waitForTarget: back-stories
+      dwellMs: 3500
+    - id: trace-intro-open
+      route: home
+      target: session-open
+      title: Open the run in the observer
+      body: This run is now listed as active. Open it to switch into the read-only observer and introspect it.
+      placement: left
+      kind: action
+      advance: route-match
       advanceRoute: any
-      waitForTarget: observe-link
+      waitForTarget: session-open
       dwellMs: 4000
     - id: trace-welcome
       route: any

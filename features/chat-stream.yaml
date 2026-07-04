@@ -17,7 +17,11 @@ demo:
   videoBase: chat-stream-demo
   posterStep: cs-intro-home
   story: stories/bugfix
-  flow: stories/bugfix/flows/happy_llm.yaml
+  # chat_stream_demo (NOT happy_llm): no ticket in initial_world, so the fresh
+  # web session parks at idle and the tour can click `start` on camera — with
+  # happy_llm, session creation auto-starts the pipeline and the live stream is
+  # already spent before the camera arrives. See the fixture's header comment.
+  flow: stories/bugfix/flows/chat_stream_demo.yaml
   hostCassette: stories/bugfix/flows/demo.cassette.yaml
 tour:
   export: CHAT_STREAM_TOUR_STEPS
