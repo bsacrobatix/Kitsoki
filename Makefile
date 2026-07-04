@@ -47,7 +47,7 @@ STORY_APPS := $(wildcard stories/*/app.yaml)
 # gitignored; a committed stories/.gitkeep keeps the //go:embed pattern
 # matching on a fresh checkout. internal/basestories.Materialize extracts it
 # to a content-addressed cache at runtime so `@kitsoki/<name>` resolves with
-# only the binary present. See docs/proposals/kitsoki-as-dependency.md (slice 1).
+# only the binary present. See docs/web/tour.md and stories/dev-story/README.md.
 BASESTORIES_DIR   := internal/basestories/stories
 BASESTORIES_STAMP := internal/basestories/.embed-stamp
 
