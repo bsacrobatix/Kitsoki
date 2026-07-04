@@ -19,6 +19,9 @@ narrative: >-
   closing argument.
 promo:
   order: 5
+docs:
+  - docs/evaluate-kitsoki.md
+  - docs/site/README.md
 # Stitched, not recorded: the video is composed by `make render-tour` from the
 # section clips below, so this demo has no `spec`. record-demos skips it.
 demo:

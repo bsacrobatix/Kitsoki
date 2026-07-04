@@ -9,13 +9,15 @@
         { "from": "docs/evaluate-kitsoki.md", "to": "guide/evaluate-kitsoki.md" },
         { "from": "docs/comparison.md", "to": "guide/comparison.md" },
         { "from": "docs/start-here.md", "to": "guide/start-here.md" },
-        { "from": "docs/getting-started.md", "to": "guide/getting-started.md" }
+        { "from": "docs/getting-started.md", "to": "guide/getting-started.md" },
+        { "from": "docs/project-onboarding.md", "to": "guide/project-onboarding.md" }
       ]
     },
     {
       "title": "Authoring stories",
       "items": [
-        { "from": "docs/stories/*.md", "to": "guide/stories/" }
+        { "from": "docs/stories/*.md", "to": "guide/stories/" },
+        { "from": "docs/stories/background-jobs/*.md", "to": "guide/stories/background-jobs/" }
       ]
     },
     {
@@ -27,7 +29,8 @@
     {
       "title": "Architecture",
       "items": [
-        { "from": "docs/architecture/*.md", "to": "guide/architecture/" }
+        { "from": "docs/architecture/*.md", "to": "guide/architecture/" },
+        { "from": "docs/architecture/hosts/*.md", "to": "guide/architecture/hosts/" }
       ]
     },
     {
@@ -41,6 +44,7 @@
       "title": "User interfaces",
       "items": [
         { "from": "docs/web/README.md", "to": "guide/web/index.md" },
+        { "from": "docs/web/tour.md", "to": "guide/web/tour.md" },
         { "from": "docs/tui/*.md", "to": "guide/tui/" }
       ]
     },
