@@ -34,6 +34,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/host"
 )
 
 // DefaultConfigFile is the checked-in, shared config file Load looks for in the
@@ -66,6 +67,17 @@ type WebConfig struct {
 	// flag-derived static default (today's --agent/--model path). Must name a
 	// declared profile when set.
 	DefaultProfile string `yaml:"default_profile,omitempty"`
+
+	// HarnessLadder declares the operator-level automatic multi-provider
+	// fallback + effort/model escalation ladder applied to every
+	// host.agent.decide / host.agent.task dispatch — no per-story YAML wiring
+	// required. Nil (the field absent) means no ladder is installed: every
+	// dispatch stays on today's single-attempt behavior, which is why this is
+	// opt-in rather than defaulted on for every deployment (see
+	// docs/architecture/harness-ladder.md and internal/host/ladder.go's
+	// package doc for the full design). Validated in Load via
+	// resolveHarnessLadder.
+	HarnessLadder *HarnessLadder `yaml:"harness_ladder,omitempty"`
 
 	// Intercept binds the `kitsoki intercept` pre-LLM gate (the Stage-3
 	// UserPromptSubmit hook) to a story room: app.yaml + starting state +
@@ -304,6 +316,65 @@ type QuotaControl struct {
 	LeaseTimeout    string `yaml:"lease_timeout,omitempty"`
 }
 
+// HarnessLadder is the `.kitsoki.yaml` `harness_ladder:` block: an ordered,
+// cheap-first list of {backend, provider, model} slots (Models — the
+// availability axis) crossed with an ordered effort catalog (Efforts — the
+// capability axis, swept low→max on each model before the next one is
+// tried). Mirrors internal/host.LadderConfig field-for-field; ToHostLadderConfig
+// does the (trivial, lossless) conversion. See the package doc on
+// internal/host/ladder.go for the full infra-vs-capability routing design.
+type HarnessLadder struct {
+	// Models is the ordered model axis, cheapest first. At least one entry is
+	// required when harness_ladder: is declared at all.
+	Models []HarnessLadderModel `yaml:"models"`
+	// Efforts is the ordered effort axis, cheapest first (e.g.
+	// [low, medium, high, xhigh, max]). Empty ⇒ no effort sweep (each model is
+	// tried once, at its own default effort).
+	Efforts []string `yaml:"efforts,omitempty"`
+	// MaxAttempts caps the total dispatch count across the whole model×effort
+	// grid. Zero ⇒ no cap beyond len(Models)*len(Efforts).
+	MaxAttempts int `yaml:"max_attempts,omitempty"`
+	// Backoff is a Go duration string for how long an infra-failing model is
+	// skipped after one failure (e.g. "5m"). Empty ⇒ internal/host's default
+	// (5 minutes).
+	Backoff string `yaml:"backoff,omitempty"`
+}
+
+// HarnessLadderModel is one {backend, provider, model} slot in a
+// HarnessLadder's Models list.
+type HarnessLadderModel struct {
+	// Backend selects the coding-agent CLI: claude|copilot|codex. Empty ⇒
+	// claude.
+	Backend string `yaml:"backend,omitempty"`
+	// Provider optionally names an entry the operator exposes to
+	// host.agent.* via the same provider-resolution map effects already use
+	// with `with: { provider: <name> }` — supplying this rung's env overrides
+	// (API keys, base URLs). Empty ⇒ ambient env for Backend.
+	Provider string `yaml:"provider,omitempty"`
+	// Model is the --model value for this rung. Required.
+	Model string `yaml:"model,omitempty"`
+}
+
+// ToHostLadderConfig converts h into the runtime internal/host.LadderConfig
+// the orchestrator installs on ctx (host.WithHarnessLadder). A nil h yields a
+// disabled LadderConfig{} (Enabled() == false), so callers can convert
+// unconditionally without a nil check.
+func (h *HarnessLadder) ToHostLadderConfig() host.LadderConfig {
+	if h == nil {
+		return host.LadderConfig{}
+	}
+	models := make([]host.LadderModel, 0, len(h.Models))
+	for _, m := range h.Models {
+		models = append(models, host.LadderModel{Backend: m.Backend, Provider: m.Provider, Model: m.Model})
+	}
+	return host.LadderConfig{
+		Models:      models,
+		Efforts:     append([]string(nil), h.Efforts...),
+		MaxAttempts: h.MaxAttempts,
+		Backoff:     h.Backoff,
+	}
+}
+
 var validBackends = map[string]bool{"": true, "claude": true, "copilot": true, "codex": true}
 
 // validEfforts mirrors the engine's --effort levels (internal/app loader).
@@ -336,6 +407,9 @@ func Load(path string) (WebConfig, error) {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if err := cfg.resolveHarnessProfiles(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := cfg.resolveHarnessLadder(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if err := cfg.resolveIntercept(); err != nil {
@@ -518,6 +592,11 @@ func mergeConfig(base, local WebConfig) WebConfig {
 			merged[k] = v
 		}
 		out.HarnessProfiles = merged
+	}
+	// A single coherent block, like Intercept — the local file replaces it
+	// whole rather than field-merging.
+	if local.HarnessLadder != nil {
+		out.HarnessLadder = local.HarnessLadder
 	}
 	return out
 }
@@ -872,6 +951,47 @@ func (cfg *WebConfig) resolveHarnessProfiles() error {
 	if cfg.DefaultProfile != "" {
 		if _, ok := cfg.HarnessProfiles[cfg.DefaultProfile]; !ok {
 			return fmt.Errorf("default_profile %q names no declared harness profile", cfg.DefaultProfile)
+		}
+	}
+	return nil
+}
+
+// resolveHarnessLadder validates the `harness_ladder:` block, fail-fast at
+// load, mirroring resolveHarnessProfiles. A nil block (the common case: no
+// ladder declared) is a no-op — every host.agent.decide / host.agent.task
+// dispatch stays on today's single-dispatch behavior. A DECLARED block must
+// name at least one model (an empty models: list is almost certainly a typo,
+// not an intentional "disable the ladder" — omit the whole harness_ladder:
+// key for that instead) with a non-empty model: and a valid backend; efforts
+// (if any) must be recognized levels; max_attempts must not be negative;
+// backoff (if set) must parse as a Go duration.
+func (cfg *WebConfig) resolveHarnessLadder() error {
+	l := cfg.HarnessLadder
+	if l == nil {
+		return nil
+	}
+	if len(l.Models) == 0 {
+		return fmt.Errorf("harness_ladder.models: at least one model is required when harness_ladder: is declared")
+	}
+	for i, m := range l.Models {
+		if !validBackends[m.Backend] {
+			return fmt.Errorf("harness_ladder.models[%d]: backend %q is invalid (want claude|copilot|codex)", i, m.Backend)
+		}
+		if strings.TrimSpace(m.Model) == "" {
+			return fmt.Errorf("harness_ladder.models[%d]: model is required", i)
+		}
+	}
+	for _, e := range l.Efforts {
+		if !validEfforts[e] {
+			return fmt.Errorf("harness_ladder.efforts: %q is invalid (valid: low, medium, high, xhigh, max)", e)
+		}
+	}
+	if l.MaxAttempts < 0 {
+		return fmt.Errorf("harness_ladder.max_attempts must not be negative")
+	}
+	if l.Backoff != "" {
+		if _, err := time.ParseDuration(l.Backoff); err != nil {
+			return fmt.Errorf("harness_ladder.backoff %q is not a valid duration: %w", l.Backoff, err)
 		}
 	}
 	return nil

@@ -98,6 +98,14 @@ type Orchestrator struct {
 	selection       ProfileSelection
 	selMu           sync.RWMutex
 
+	// harnessLadder is the operator-declared automatic multi-provider
+	// fallback + effort/model escalation ladder (`.kitsoki.yaml`
+	// `harness_ladder:`, see internal/webconfig.HarnessLadder /
+	// internal/host/ladder.go). Zero value (Enabled() == false) is the
+	// default and leaves every host.agent.decide / host.agent.task dispatch
+	// on today's single-attempt behavior — set via WithHarnessLadderConfig.
+	harnessLadder host.LadderConfig
+
 	// modelCache memoises the always-on model ids fetched from a profile's
 	// ModelsEndpoint (keyed by profile name), guarded by its own mutex so a fetch
 	// never blocks the dispatch-hot selMu.
