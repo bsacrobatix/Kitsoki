@@ -4,10 +4,12 @@
 # integrated facts. It exists only to make flow fixtures hermetic; live sessions
 # should keep reset_log:false and preserve log.jsonl as the source of truth.
 #
-# The reset must neutralize every derived file that can outlive the wiped log:
+# The reset must neutralize derived files that can outlive the wiped log:
 # ledger.json becomes the empty-ledger JSON shape, preamble.md becomes blank,
-# and every stale manifests/*.json match becomes "{}". A surgical unpark path
-# for stale parked work is a possible WM.x follow-up, but is out of scope here.
+# and every existing manifests/*.json match becomes "{}". This clean-workdir
+# fixture also asserts reset does not invent a placeholder manifest. A surgical
+# unpark path for stale parked work is a possible WM.x follow-up, but is out of
+# scope here.
 
 test_kind: flow
 app: ../app.yaml
@@ -44,6 +46,6 @@ expect_files:
   - path: ../../../.artifacts/goal/flow-reset-log/preamble.md
     content_matches: "^$"
   - path: ../../../.artifacts/goal/flow-reset-log/manifests/C1.json
-    content_matches: '^\{\}\n?$'
+    must_not_exist: true
 
 expect_no_errors: true
