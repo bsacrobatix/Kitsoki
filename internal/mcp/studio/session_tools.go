@@ -88,17 +88,17 @@ func (srv *Server) registerSessionTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.submit",
-		Description: "Submit a chosen intent (a menu pick) directly, with no routing. {handle, intent, slots?, cols?, rows?}. Returns {outcome, frame}. The frame does NOT carry world — read it with session.world (one value or the key list) or session.inspect (full snapshot).",
+		Description: "Submit a chosen intent (a menu pick) directly, with no routing. {handle, intent, slots?, cols?, rows?, async_after_ms?}. Returns {outcome, frame}, {awaiting_operator}, or {running}; when running is returned, poll session.status until running disappears. The frame does NOT carry world — read it with session.world (one value or the key list) or session.inspect (full snapshot).",
 	}, srv.handleSessionSubmit)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.continue",
-		Description: "Supply missing slots for a pending clarification. {handle, slots, cols?, rows?}. Returns {outcome, frame}. The frame does NOT carry world — read it with session.world (one value or the key list) or session.inspect (full snapshot).",
+		Description: "Supply missing slots for a pending clarification. {handle, slots, cols?, rows?, async_after_ms?}. Returns {outcome, frame}, {awaiting_operator}, or {running}; when running is returned, poll session.status until running disappears. The frame does NOT carry world — read it with session.world (one value or the key list) or session.inspect (full snapshot).",
 	}, srv.handleSessionContinue)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.answer",
-		Description: "Answer a parked operator-ask (the suspend/resume fallback for clients without MCP elicitation). {handle, question_id, answers} where answers is keyed by each question's text → a chosen option label (string) or labels ([]string). Resumes the turn; returns {outcome, frame} or another awaiting_operator.",
+		Description: "Answer a parked operator-ask (the suspend/resume fallback for clients without MCP elicitation). {handle, question_id, answers, async_after_ms?} where answers is keyed by each question's text → a chosen option label (string) or labels ([]string). Resumes the turn; returns {outcome, frame}, {running}, or another awaiting_operator.",
 	}, srv.handleSessionAnswer)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
@@ -209,19 +209,21 @@ type SessionDriveArgs struct {
 
 // SessionSubmitArgs is the input to session.submit.
 type SessionSubmitArgs struct {
-	Handle string         `json:"handle"`
-	Intent string         `json:"intent"`
-	Slots  map[string]any `json:"slots,omitempty"`
-	Cols   int            `json:"cols,omitempty"`
-	Rows   int            `json:"rows,omitempty"`
+	Handle       string         `json:"handle"`
+	Intent       string         `json:"intent"`
+	Slots        map[string]any `json:"slots,omitempty"`
+	Cols         int            `json:"cols,omitempty"`
+	Rows         int            `json:"rows,omitempty"`
+	AsyncAfterMS int            `json:"async_after_ms,omitempty"`
 }
 
 // SessionContinueArgs is the input to session.continue.
 type SessionContinueArgs struct {
-	Handle string         `json:"handle"`
-	Slots  map[string]any `json:"slots"`
-	Cols   int            `json:"cols,omitempty"`
-	Rows   int            `json:"rows,omitempty"`
+	Handle       string         `json:"handle"`
+	Slots        map[string]any `json:"slots"`
+	Cols         int            `json:"cols,omitempty"`
+	Rows         int            `json:"rows,omitempty"`
+	AsyncAfterMS int            `json:"async_after_ms,omitempty"`
 }
 
 // SessionCommandArgs is the input to session.command.
@@ -319,11 +321,12 @@ type RunningDrive struct {
 
 // SessionAnswerArgs is the input to session.answer (the fallback resume).
 type SessionAnswerArgs struct {
-	Handle     string         `json:"handle"`
-	QuestionID string         `json:"question_id"`
-	Answers    map[string]any `json:"answers"`
-	Cols       int            `json:"cols,omitempty"`
-	Rows       int            `json:"rows,omitempty"`
+	Handle       string         `json:"handle"`
+	QuestionID   string         `json:"question_id"`
+	Answers      map[string]any `json:"answers"`
+	Cols         int            `json:"cols,omitempty"`
+	Rows         int            `json:"rows,omitempty"`
+	AsyncAfterMS int            `json:"async_after_ms,omitempty"`
 }
 
 // SessionTeleportArgs is the input to session.teleport.
@@ -498,13 +501,17 @@ func (srv *Server) handleSessionAnswer(
 	if rerr != nil {
 		return rerr, nil, nil
 	}
-	res, pq, turnDone, ok, err := rt.resumeSuspendable(ctx, args.QuestionID, args.Answers)
+	wait := driveAsyncAfter(args.AsyncAfterMS)
+	res, pq, turnDone, running, ok, err := rt.resumeSuspendable(ctx, args.QuestionID, args.Answers, wait)
 	if err != nil {
 		progress.Error(ctx, args.Handle, err)
 		return buildToolError(ErrBadRequest, fmt.Sprintf("session.answer: %v", err)), nil, nil
 	}
 	if !ok {
 		return buildToolError(ErrBadRequest, fmt.Sprintf("session.answer: no turn awaiting question_id %q on this handle", args.QuestionID)), nil, nil
+	}
+	if running != nil {
+		return nil, runningResponse(args.Handle, "answer:"+args.QuestionID, running), nil
 	}
 	if !turnDone {
 		progress.AwaitingOperator(ctx, args.Handle)
@@ -562,9 +569,21 @@ func (srv *Server) handleSessionSubmit(
 		return rerr, nil, nil
 	}
 	cols, rows := geometry(args.Cols, args.Rows)
-	out, frame := rt.submit(ctx, args.Intent, args.Slots, cols, rows)
-	progress.Done(ctx, args.Handle, turnOutcomeState(out))
-	return nil, turnResponse(out, frame, rt.lastTurnErr), nil
+	wait := driveAsyncAfter(args.AsyncAfterMS)
+	res, pq, turnDone, running, err := rt.submitSuspendable(ctx, args.Intent, args.Slots, cols, rows, wait)
+	if err != nil {
+		progress.Error(ctx, args.Handle, err)
+		return buildToolError(ErrBadRequest, fmt.Sprintf("session.submit: %v", err)), nil, nil
+	}
+	if running != nil {
+		return nil, runningResponse(args.Handle, "intent:"+args.Intent, running), nil
+	}
+	if !turnDone {
+		progress.AwaitingOperator(ctx, args.Handle)
+		return nil, awaitingResponse(pq), nil
+	}
+	progress.Done(ctx, args.Handle, turnOutcomeState(res.outcome))
+	return nil, turnResponse(res.outcome, res.frame, res.err), nil
 }
 
 func (srv *Server) handleSessionContinue(
@@ -582,9 +601,21 @@ func (srv *Server) handleSessionContinue(
 		return rerr, nil, nil
 	}
 	cols, rows := geometry(args.Cols, args.Rows)
-	out, frame := rt.cont(ctx, args.Slots, cols, rows)
-	progress.Done(ctx, args.Handle, turnOutcomeState(out))
-	return nil, turnResponse(out, frame, rt.lastTurnErr), nil
+	wait := driveAsyncAfter(args.AsyncAfterMS)
+	res, pq, turnDone, running, err := rt.continueSuspendable(ctx, args.Slots, cols, rows, wait)
+	if err != nil {
+		progress.Error(ctx, args.Handle, err)
+		return buildToolError(ErrBadRequest, fmt.Sprintf("session.continue: %v", err)), nil, nil
+	}
+	if running != nil {
+		return nil, runningResponse(args.Handle, "continue", running), nil
+	}
+	if !turnDone {
+		progress.AwaitingOperator(ctx, args.Handle)
+		return nil, awaitingResponse(pq), nil
+	}
+	progress.Done(ctx, args.Handle, turnOutcomeState(res.outcome))
+	return nil, turnResponse(res.outcome, res.frame, res.err), nil
 }
 
 func (srv *Server) handleSessionTeleport(
