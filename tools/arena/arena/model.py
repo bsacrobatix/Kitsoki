@@ -18,6 +18,16 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
 
+# tools/arena/arena/model.py -> parents[3] is the repo root. `targets_from` /
+# `persona_axis_from` / `target_proof_from` paths in a spec are resolved
+# relative to this so specs stay portable regardless of cwd.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _resolve_repo_path(path: str | Path) -> Path:
+    p = Path(path)
+    return p if p.is_absolute() else REPO_ROOT / p
+
 
 @dataclass(frozen=True)
 class Target:
@@ -103,6 +113,49 @@ class Placement:
     host_repo: dict[str, str] = field(default_factory=dict)
 
 
+def _target_from_dict(t: dict[str, Any]) -> Target:
+    return Target(
+        id=t["id"],
+        label=t.get("label", t["id"]),
+        repo=t.get("repo", ""),
+        stack=t.get("stack", ""),
+        meta={k: v for k, v in t.items() if k not in {"id", "label", "repo", "stack"}},
+    )
+
+
+def load_targets_from_corpus(path: str | Path) -> list[Target]:
+    """Materialize Targets from a github-targets.json-shaped file.
+
+    Read-only over the corpus: product-journey remains its owner. Shape is
+    `{"targets": [{"id", "label", "repo", "stack", ...}, ...]}` — the same
+    per-target fields `_target_from_dict` already knows how to parse.
+    """
+    data = json.loads(_resolve_repo_path(path).read_text(encoding="utf-8"))
+    return [_target_from_dict(t) for t in data.get("targets", [])]
+
+
+def load_target_proof_checks(path: str | Path) -> dict[str, dict[str, Any]]:
+    """Load a product-journey target-proof.json's per-target checks by target id.
+
+    Accepts either the proof file itself or its containing directory (the
+    proof dir convention used by `.artifacts/product-journey/target-proofs/<id>/`).
+    Returns {} if no proof is found — proof is optional metadata, never required.
+    """
+    p = _resolve_repo_path(path)
+    if p.is_dir():
+        p = p / "target-proof.json"
+    if not p.exists():
+        return {}
+    data = json.loads(p.read_text(encoding="utf-8"))
+    return {c["target"]: c for c in data.get("checks", []) if "target" in c}
+
+
+def load_persona_axis_values(path: str | Path) -> list[str]:
+    """Load persona ids from a personas.json-shaped file for use as axis values."""
+    data = json.loads(_resolve_repo_path(path).read_text(encoding="utf-8"))
+    return [p["id"] for p in data.get("personas", [])]
+
+
 @dataclass
 class JobSpec:
     """Declarative comparison job. Enumerates into cells (target × variant × axes)."""
@@ -113,20 +166,40 @@ class JobSpec:
     axes: dict[str, list[str]] = field(default_factory=dict)   # extra per-job axes
     placement: Placement = field(default_factory=Placement)
     options: dict[str, Any] = field(default_factory=dict)      # job-type-specific knobs
+    # Corpus provenance (informational; the fields above are already resolved).
+    targets_from: str = ""
+    persona_axis_from: str = ""
+    target_proof_from: str = ""
 
     # ---- loading -------------------------------------------------------------
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "JobSpec":
-        targets = [
-            Target(
-                id=t["id"],
-                label=t.get("label", t["id"]),
-                repo=t.get("repo", ""),
-                stack=t.get("stack", ""),
-                meta={k: v for k, v in t.items() if k not in {"id", "label", "repo", "stack"}},
-            )
-            for t in data.get("targets", [])
-        ]
+        targets_from = data.get("targets_from", "") or ""
+        if data.get("targets"):
+            # Hand-inlined targets take precedence and keep working unchanged.
+            targets = [_target_from_dict(t) for t in data["targets"]]
+        elif targets_from:
+            targets = load_targets_from_corpus(targets_from)
+        else:
+            targets = []
+
+        target_proof_from = data.get("target_proof_from", "") or ""
+        if target_proof_from:
+            proof_checks = load_target_proof_checks(target_proof_from)
+            if proof_checks:
+                targets = [
+                    Target(
+                        id=t.id,
+                        label=t.label,
+                        repo=t.repo,
+                        stack=t.stack,
+                        meta={**t.meta, "target_proof": proof_checks[t.id]}
+                        if t.id in proof_checks
+                        else t.meta,
+                    )
+                    for t in targets
+                ]
+
         variants = [
             Variant(
                 id=v["id"],
@@ -137,12 +210,20 @@ class JobSpec:
             )
             for v in data.get("variants", [])
         ]
+
+        axes = dict(data.get("axes", {}) or {})
+        persona_axis_from = data.get("persona_axis_from", "") or ""
+        if persona_axis_from and "persona" not in axes:
+            # Hand-inlined `axes.persona` (if any) always wins — this only
+            # fills in the axis when the spec didn't hand-copy persona ids.
+            axes["persona"] = load_persona_axis_values(persona_axis_from)
+
         place = data.get("placement", {}) or {}
         return JobSpec(
             job_type=data["job_type"],
             targets=targets,
             variants=variants,
-            axes=data.get("axes", {}) or {},
+            axes=axes,
             placement=Placement(
                 hosts=place.get("hosts", ["local"]),
                 concurrency=int(place.get("concurrency", 1)),
@@ -150,6 +231,9 @@ class JobSpec:
                 host_repo=dict(place.get("host_repo", {}) or {}),
             ),
             options=data.get("options", {}) or {},
+            targets_from=targets_from,
+            persona_axis_from=persona_axis_from,
+            target_proof_from=target_proof_from,
         )
 
     @staticmethod

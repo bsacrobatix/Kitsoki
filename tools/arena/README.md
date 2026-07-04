@@ -45,6 +45,47 @@ JobSpec ──enumerate──▶ Cell[] ──execute(container)──▶ CellRe
 | `specs/*.yaml` | example job specs |
 | `tests/test_*.py` | no-LLM, no-docker end-to-end (FakeBackend) |
 
+## Corpora: targets and personas from product-journey
+
+`tools/product-journey/` owns two reusable corpora: `github-targets.json` (the
+vetted OSS repo list, with a `selection_contract` and optional refreshed
+`target-proof.json` metadata) and `personas.json` (the persona lens catalog).
+Rather than hand-copying ids into a spec, a `JobSpec` can load them directly —
+read-only; product-journey stays the owner and arena never writes to either
+file.
+
+```yaml
+job_type: persona-qa
+
+# Materializes Target[] from the corpus instead of hand-inlining `targets:`.
+# Path is resolved relative to the repo root.
+targets_from: tools/product-journey/github-targets.json
+
+# Optional: merge a refreshed target-proof.json's per-target checks into each
+# Target's meta (meta.target_proof.status/open_bug_count/…). Accepts the proof
+# file or its containing proof dir. Targets absent from the proof are untouched.
+target_proof_from: .artifacts/product-journey/target-proofs/<proof-id>
+
+variants:
+  - id: kitsoki-gpt-5.5
+    backend: codex
+    model: gpt-5.5
+
+axes:
+  scenario: [fix_bug, file_product_issue]
+
+# Loads axes.persona = [persona ids...] from personas.json — only fills the
+# axis in when the spec doesn't already hand-inline `axes.persona` (that
+# always wins, so existing specs are unaffected).
+persona_axis_from: tools/product-journey/personas.json
+```
+
+Hand-inlined `targets:` / `variants:` / `axes:` keep working completely
+unchanged — `targets_from` only applies when `targets:` is absent, and
+`persona_axis_from` only fills in the `persona` axis when it isn't already
+hand-specified. See `tools/arena/tests/test_corpus_loading.py` for the
+parsing contract (pure file parsing, no docker/LLM).
+
 ## Usage
 
 ```bash
