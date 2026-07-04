@@ -32,6 +32,8 @@ endef
 RUNSTATUS_DIR := tools/runstatus
 VSCODE_DIR    := tools/vscode-kitsoki
 EMBED_INDEX   := internal/runstatus/web/assets/index.html
+TEMP_DIR      := .temp
+RUNSTATUS_TEMP_ENV := TMPDIR="$(abspath $(TEMP_DIR))" KITSOKI_TEMP_ROOT="$(abspath $(TEMP_DIR))"
 # features/*.yaml is part of the SPA's sources: the tour manifests the bundle
 # ships are code-generated from the feature catalog (see `make features`).
 SPA_SOURCES   := $(shell find $(RUNSTATUS_DIR)/src $(RUNSTATUS_DIR)/index.html \
@@ -175,7 +177,9 @@ $(EMBED_INDEX): $(SPA_SOURCES)
 		echo "error: pnpm not found — needed to build the runstatus SPA." >&2; \
 		echo "       run 'make setup' to install Node + pnpm, or 'make web-clean' if a bundle is already staged." >&2; \
 		exit 1; }
-	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile && pnpm features:check && pnpm build
+	@mkdir -p $(TEMP_DIR)
+	@chmod u+rwx $(TEMP_DIR)
+	cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) pnpm install --frozen-lockfile && $(RUNSTATUS_TEMP_ENV) pnpm features:check && $(RUNSTATUS_TEMP_ENV) pnpm build
 	@mkdir -p $(dir $(EMBED_INDEX))
 	cp $(RUNSTATUS_DIR)/dist/index.html $(EMBED_INDEX)
 	@echo "staged runstatus SPA -> $(EMBED_INDEX)"
