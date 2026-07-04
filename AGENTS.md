@@ -30,10 +30,20 @@ scripts/sync-main-from-remote.sh --remote origin
 ```
 
 or `--remote upstream`. The sync helper fetches, creates an integration worktree
-under `.worktrees`, and attempts the remote merge there. Resolve any conflicts
-inside that integration worktree, rerun the helper with `--continue <branch>`,
-validate there, and only then land the integration branch with
-`scripts/merge-to-main.sh <branch>`.
+under `.worktrees`, and attempts the remote merge there. If conflicts occur,
+prefer:
+
+```
+scripts/sync-main-from-remote.sh --remote origin --auto-resolve
+```
+
+with `KITSOKI_SYNC_RESOLVE_CMD` set to the LLM/agent command that resolves and
+stages conflicts, and `KITSOKI_SYNC_REVIEW_CMD` set to a separate read/check
+agent command that verifies no local or remote work was dropped. For manual
+resolution, resolve conflicts inside that integration worktree, rerun the helper
+with `--continue <branch>` and `KITSOKI_SYNC_REVIEW_CMD` set, validate there,
+and only then land the integration branch with `scripts/merge-to-main.sh
+<branch>`.
 
 Project skills live in the Codex-standard `.agents/skills/<name>/SKILL.md` location. Claude Code does not auto-discover that directory, so `make setup` links every `.agents/skills/*/SKILL.md` into `.claude/skills/` (relative symlinks; `.claude/` is gitignored). After adding a new skill, re-run:
 
