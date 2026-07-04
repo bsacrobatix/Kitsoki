@@ -81,12 +81,7 @@ thought.
   `usable-kitsoki-release-gate.md` deleted per lifecycle guidance). Supersedes
   `ad-hoc-workbench.md` (via S1) and absorbs
   `conversation-driven-development.md` slice 1 (via S4).
-- [`project-object-graph.md`](project-object-graph.md) — **epic.** Build one
-  typed project graph for durable product state and transient change: features,
-  requirements, use cases, proposals, plans, tests, evidence, changesets, and
-  roadmap deltas as schema-pinned YAML objects with typed edges. First review
-  fixture: [`project-object-graph/seed-objects.yaml`](project-object-graph/seed-objects.yaml).
-  Six slices are sketched; none implemented yet.
+- [`project-object-graph.md`](project-object-graph.md) — **epic.** Build one typed project graph for durable product state and transient change - features, requirements, use cases, proposals, plans, tests, evidence, changesets, and roadmap deltas as schema-pinned YAML objects with typed edges. First review fixture `project-object-graph/seed-objects.yaml`. Six slices are sketched; substrate, changesets, one dogfooded feature, and the computed-roadmap mechanism are implemented and tested.
 - [`human-action-workflows.md`](human-action-workflows.md) — **epic.** Make
   human-dependent work a first-class workflow executor beside agents:
   `host.human.*` verbs create/await/complete person-owned tasks through a
