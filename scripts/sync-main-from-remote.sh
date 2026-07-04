@@ -10,7 +10,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 usage:
-  scripts/sync-main-from-remote.sh [--remote origin] [--remote-branch main] [--base main] [--name NAME] [--no-fetch] [--auto-resolve]
+  scripts/sync-main-from-remote.sh [--remote origin] [--remote-branch main] [--base main] [--name NAME] [--no-fetch] [--auto-resolve] [--no-known-resolutions]
   scripts/sync-main-from-remote.sh --continue <branch> [--review-command CMD]
 
 Prepare mode:
@@ -26,15 +26,20 @@ Prepare mode:
     scripts/sync-main-from-remote.sh --continue <branch>
 
   With --auto-resolve, the helper runs a resolver command after conflicts and
-  then runs the --continue path. The resolver command defaults to
-  KITSOKI_SYNC_RESOLVE_CMD, and the reviewer command defaults to
-  KITSOKI_SYNC_REVIEW_CMD. Both commands run with cwd set to the integration
+  then runs the --continue path. Before calling an external resolver, the helper
+  applies known deterministic resolutions, such as keeping local deletion for
+  retired proposal files under docs/proposals/. The resolver command defaults
+  to KITSOKI_SYNC_RESOLVE_CMD, and the reviewer command defaults to
+  KITSOKI_SYNC_REVIEW_CMD. Agent commands run with cwd set to the integration
   worktree and receive KITSOKI_SYNC_* environment variables plus a prompt file.
+  If no reviewer command is configured, a built-in no-LLM review checks for
+  unresolved conflicts, whitespace errors, and staged scratch artifacts.
 
 Continue mode:
-  Verifies the integration branch has no unresolved conflicts, runs a second
-  reviewer command to check that no local or remote work was lost, commits an
-  in-progress merge if needed, and prints validation and landing commands.
+  Applies the same known deterministic resolutions, verifies the integration
+  branch has no unresolved conflicts, runs the built-in or configured review
+  gate, commits an in-progress merge if needed, and prints validation and
+  landing commands.
 EOF
 }
 
@@ -50,6 +55,7 @@ name=
 do_fetch=1
 continue_branch=
 auto_resolve=0
+known_resolutions=1
 resolve_command="${KITSOKI_SYNC_RESOLVE_CMD:-}"
 review_command="${KITSOKI_SYNC_REVIEW_CMD:-}"
 
@@ -77,6 +83,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --auto-resolve)
       auto_resolve=1
+      shift
+      ;;
+    --no-known-resolutions)
+      known_resolutions=0
       shift
       ;;
     --resolver-command)
@@ -147,6 +157,22 @@ EOF
 
 conflict_files_for_worktree() {
   git -C "$1" diff --name-only --diff-filter=U | sort -u
+}
+
+apply_known_resolutions() {
+  wt="$1"
+  [ "$known_resolutions" -eq 1 ] || return 0
+
+  conflict_files_for_worktree "$wt" | while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    status="$(git -C "$wt" status --short -- "$path" | sed -n '1s/^\(..\).*/\1/p')"
+    case "$status:$path" in
+      DU:docs/proposals/*.md)
+        git -C "$wt" rm -- "$path" >/dev/null
+        echo "known resolution: kept local retirement of $path"
+        ;;
+    esac
+  done
 }
 
 write_sync_metadata() {
@@ -252,6 +278,16 @@ run_review_gate() {
   wt="$1"
   branch_name="$2"
   remote_ref_name="$3"
+  if [ -z "$review_command" ]; then
+    if [ -n "$(git -C "$wt" ls-files -u)" ]; then
+      die "unresolved conflicts remain in $wt"
+    fi
+    git -C "$wt" diff --check
+    if git -C "$wt" diff --cached --name-only | grep -E '^(\.artifacts/|\.context/)' >/dev/null; then
+      die "scratch artifacts are staged in $wt"
+    fi
+    return 0
+  fi
   prompt="$(write_review_prompt "$wt" "$branch_name" "$remote_ref_name")"
   run_agent_command REVIEW "$review_command" "$wt" "$branch_name" "$remote_ref_name" "$prompt"
 }
@@ -262,6 +298,7 @@ if [ -n "$continue_branch" ]; then
   wt="$(find_worktree_for_branch "$continue_branch")" ||
     die "no worktree found for branch: $continue_branch"
 
+  apply_known_resolutions "$wt"
   if [ -n "$(git -C "$wt" ls-files -u)" ]; then
     die "unresolved conflicts remain in $wt"
   fi
@@ -328,10 +365,24 @@ if [ "$merge_status" -eq 0 ]; then
   exit 0
 fi
 
+wt="$repo_root/$worktree"
+apply_known_resolutions "$wt"
+
+if [ -z "$(git -C "$wt" ls-files -u)" ]; then
+  run_review_gate "$wt" "$branch" "$remote_ref"
+  git_dir="$(git -C "$wt" rev-parse --git-dir)"
+  if [ -e "$git_dir/MERGE_HEAD" ]; then
+    git -C "$wt" commit --no-edit
+  fi
+  print_next_steps "$branch" "$wt"
+  exit 0
+fi
+
 if [ "$auto_resolve" -eq 1 ]; then
-  wt="$repo_root/$worktree"
-  prompt="$(write_resolve_prompt "$wt" "$branch" "$remote_ref")"
-  run_agent_command RESOLVE "$resolve_command" "$wt" "$branch" "$remote_ref" "$prompt"
+  if [ -n "$(git -C "$wt" ls-files -u)" ]; then
+    prompt="$(write_resolve_prompt "$wt" "$branch" "$remote_ref")"
+    run_agent_command RESOLVE "$resolve_command" "$wt" "$branch" "$remote_ref" "$prompt"
+  fi
   if [ -n "$(git -C "$wt" ls-files -u)" ]; then
     die "resolver command completed but unresolved conflicts remain in $wt"
   fi

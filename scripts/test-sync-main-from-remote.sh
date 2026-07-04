@@ -17,6 +17,7 @@ commit_file() {
   local repo="$1"
   local file="$2"
   local content="$3"
+  mkdir -p "$(dirname "$repo/$file")"
   printf '%s\n' "$content" > "$repo/$file"
   git -C "$repo" add "$file"
   git -C "$repo" commit -q -m "$content"
@@ -144,5 +145,45 @@ auto_branch="$(awk '/Integration branch:/ { print $3 }' "$auto_out")"
   { git -C "$conflict/.worktrees/auto-sync" status --short >&2; exit 1; }
 test -f "$conflict/.worktrees/auto-sync/.artifacts/sync-main/review-marker.txt"
 git -C "$conflict" merge-base --is-ancestor main "$auto_branch"
+
+known_bare="$tmp/known-origin.git"
+known_seed="$tmp/known-seed"
+known_repo="$tmp/known-repo"
+
+git init -q --bare "$known_bare"
+git_init "$known_seed"
+commit_file "$known_seed" README.md base
+commit_file "$known_seed" .gitignore .artifacts/
+commit_file "$known_seed" docs/proposals/retired.md proposal
+git -C "$known_seed" branch -M main
+git -C "$known_seed" remote add origin "$known_bare"
+git -C "$known_seed" push -q -u origin main
+
+git clone -q "$known_bare" "$known_repo"
+git -C "$known_repo" config user.name "Test User"
+git -C "$known_repo" config user.email "test@example.invalid"
+mkdir -p "$known_repo/scripts"
+cp "$script" "$known_repo/scripts/sync-main-from-remote.sh"
+cp "$script_dir/merge-to-main.sh" "$known_repo/scripts/merge-to-main.sh"
+chmod +x "$known_repo/scripts/"*.sh
+git -C "$known_repo" rm -q docs/proposals/retired.md
+git -C "$known_repo" commit -q -m "retire proposal"
+
+git -C "$known_seed" reset -q --hard origin/main
+commit_file "$known_seed" docs/proposals/retired.md "stale remote edit"
+git -C "$known_seed" push -q origin main
+
+known_out="$tmp/known.out"
+(
+  cd "$known_repo"
+  scripts/sync-main-from-remote.sh --name known-sync
+) >"$known_out"
+assert_contains "$known_out" "known resolution: kept local retirement of docs/proposals/retired.md"
+assert_contains "$known_out" "Integration branch:"
+known_branch="$(awk '/Integration branch:/ { print $3 }' "$known_out")"
+[ -z "$(git -C "$known_repo/.worktrees/known-sync" ls-files -u)" ] ||
+  { git -C "$known_repo/.worktrees/known-sync" status --short >&2; exit 1; }
+test ! -e "$known_repo/.worktrees/known-sync/docs/proposals/retired.md"
+git -C "$known_repo" merge-base --is-ancestor main "$known_branch"
 
 echo "sync-main-from-remote tests passed"
