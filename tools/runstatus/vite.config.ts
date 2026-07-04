@@ -48,7 +48,7 @@ export default defineConfig({
   },
   build: {
     target: "es2020",
-    outDir: "dist",
+    outDir: path.join(tempRoot, "runstatus", "dist"),
     emptyOutDir: true,
   },
 });
