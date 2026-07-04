@@ -131,3 +131,60 @@ func TestSupervisedCapturesFinalDiff(t *testing.T) {
 		t.Fatalf("missing final diff, got:\n%s", res.FinalDiff)
 	}
 }
+
+func TestFakeEnforceFSAllowsDeclaredRWAndDeniesRepoWrite(t *testing.T) {
+	repo := t.TempDir()
+	fake := &Fake{
+		Backend:   "fake-fs",
+		Strength:  StrengthFSConfined,
+		EnforceFS: true,
+		Writes: []FakeWriteAttempt{
+			{Path: "allowed/out.txt", Content: "ok"},
+		},
+	}
+	running, policy, err := fake.Launch(context.Background(), LaunchSpec{
+		Dir:      repo,
+		RepoRoot: repo,
+		Min:      StrengthFSConfined,
+		Repo:     RepoReadOnly,
+		RW:       []string{"allowed"},
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if policy.Strength != StrengthFSConfined {
+		t.Fatalf("strength = %s", policy.Strength)
+	}
+	res, err := running.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if res.ExitCode != 0 {
+		t.Fatalf("allowed write failed: %#v", res)
+	}
+	if got, err := os.ReadFile(filepath.Join(repo, "allowed/out.txt")); err != nil || string(got) != "ok" {
+		t.Fatalf("allowed write not present, got %q err=%v", got, err)
+	}
+
+	fake.Writes = []FakeWriteAttempt{{Path: "outside.txt", Content: "nope"}}
+	running, _, err = fake.Launch(context.Background(), LaunchSpec{
+		Dir:      repo,
+		RepoRoot: repo,
+		Min:      StrengthFSConfined,
+		Repo:     RepoReadOnly,
+		RW:       []string{"allowed"},
+	})
+	if err != nil {
+		t.Fatalf("Launch denied case: %v", err)
+	}
+	res, err = running.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("Wait denied case: %v", err)
+	}
+	if res.ExitCode == 0 || !strings.Contains(res.Stderr, "repo is read_only") {
+		t.Fatalf("repo write was not denied loudly: %#v", res)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "outside.txt")); !os.IsNotExist(err) {
+		t.Fatalf("denied write created outside.txt, err=%v", err)
+	}
+}
