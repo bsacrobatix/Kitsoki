@@ -38,6 +38,7 @@ JobSpec ──enumerate──▶ Cell[] ──execute(container)──▶ CellRe
 | `arena/model.py` | `JobSpec`, `Cell`, `CellResult`, enumeration |
 | `arena/plugins/base.py` | `JobTypePlugin` protocol + registry |
 | `arena/plugins/bugfix.py` | bugfix plugin — wraps `bench.py` oracle (verify / drive) |
+| `arena/plugins/paired_task.py` | paired-task plugin — one task through multiple treatments with shared oracle JSON |
 | `arena/executor.py` | `CellExecutor` + `ContainerBackend` seam (`DockerBackend` \| `FakeBackend`) |
 | `arena/placement.py` | sweep scheduler (concurrency, INFRA-vs-MODEL retry) |
 | `arena/rollup.py` | job-agnostic leaderboard → `rollup.json` + `rollup.md` |
@@ -59,6 +60,12 @@ python3 tools/arena/arena.py run --spec tools/arena/specs/bugfix-query-string.ya
 python3 tools/arena/arena.py run --spec … --out … --live
 ```
 
+WB.2 paired-task gate:
+
+```bash
+python3 tools/arena/tests/run_no_llm.py
+```
+
 ## Cost discipline
 
 `run` defaults to the **no-LLM** path: for bugfix that is `bench.py verify`
@@ -66,6 +73,10 @@ python3 tools/arena/arena.py run --spec … --out … --live
 container — exercising enumerate → container → score → rollup with **zero spend**.
 `--live` is the only way to spend and is always explicit. The pipeline is fully
 unit-tested with `FakeBackend` (no docker, no LLM): `tools/arena/tests/`.
+
+For `paired-task`, the no-LLM path uses fixture oracle JSON for every treatment
+arm and still exercises the same enumerate -> drive -> score -> aggregate ->
+report path. A live run only happens with `arena run --live`.
 
 ## Status — P0 (walking skeleton)
 
