@@ -105,7 +105,7 @@ h3 {
 .layer-map {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-bottom: 16px;
 }
 
@@ -448,14 +448,14 @@ code {
     grid-template-columns: 1fr;
   }
 
-  .layer-map button::after {
+  .layer-map article::after {
     bottom: -18px;
     content: "v";
     right: 50%;
     top: auto;
   }
 
-  .layer-map button:last-child::after {
+  .layer-map article:last-child::after {
     content: "";
   }
 
