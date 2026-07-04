@@ -16,6 +16,15 @@ type Catalog struct {
 	Registry *Registry
 	Nodes    map[NodeID]*Node
 
+	// RootPath is the path LoadCatalog was called with (a bundle dir or a
+	// single catalog file).
+	RootPath string
+	// NodeFile maps each node id to the file it was loaded from — for a
+	// single-file catalog every node maps to RootPath; for a bundle, to
+	// whichever nodes/*.yaml file declared it. Apply (W2.0) uses this to
+	// know which file to rewrite for a given node.
+	NodeFile map[NodeID]string
+
 	// Warnings collects non-fatal issues surfaced during load, e.g. a type
 	// def using the deprecated `derives_from:` alias instead of `extends:`.
 	Warnings []string
@@ -138,7 +147,11 @@ func loadSingleFile(path string) (*Catalog, error) {
 	if err := yaml.Unmarshal(raw, &file); err != nil {
 		return nil, fmt.Errorf("graph: parse %s: %w", path, err)
 	}
-	return buildCatalog(SchemaPin(file.Schema), file.TypeRegistry, file.Nodes)
+	sources := make([]nodeSource, len(file.Nodes))
+	for i, n := range file.Nodes {
+		sources[i] = nodeSource{node: n, file: path}
+	}
+	return buildCatalog(path, SchemaPin(file.Schema), file.TypeRegistry, sources)
 }
 
 func loadBundle(dir string) (*Catalog, error) {
@@ -170,7 +183,7 @@ func loadBundle(dir string) (*Catalog, error) {
 	}
 	sort.Strings(nodeFiles)
 
-	var nodes []fileNode
+	var sources []nodeSource
 	for _, nf := range nodeFiles {
 		raw, err := os.ReadFile(nf)
 		if err != nil {
@@ -180,17 +193,28 @@ func loadBundle(dir string) (*Catalog, error) {
 		if err := yaml.Unmarshal(raw, &batch); err != nil {
 			return nil, fmt.Errorf("graph: parse %s: %w", nf, err)
 		}
-		nodes = append(nodes, batch...)
+		for _, n := range batch {
+			sources = append(sources, nodeSource{node: n, file: nf})
+		}
 	}
 
-	return buildCatalog(SchemaPin(schema), typeDefs, nodes)
+	return buildCatalog(dir, SchemaPin(schema), typeDefs, sources)
 }
 
-func buildCatalog(schema SchemaPin, typeDefs []fileTypeDef, nodes []fileNode) (*Catalog, error) {
+// nodeSource pairs a decoded node with the file it came from, so Apply
+// (W2.0) knows which file to rewrite for a given node id.
+type nodeSource struct {
+	node fileNode
+	file string
+}
+
+func buildCatalog(rootPath string, schema SchemaPin, typeDefs []fileTypeDef, sources []nodeSource) (*Catalog, error) {
 	cat := &Catalog{
 		Schema:   schema,
 		Registry: NewRegistry(),
 		Nodes:    map[NodeID]*Node{},
+		NodeFile: map[NodeID]string{},
+		RootPath: rootPath,
 	}
 
 	for _, ft := range typeDefs {
@@ -209,8 +233,8 @@ func buildCatalog(schema SchemaPin, typeDefs []fileTypeDef, nodes []fileNode) (*
 		return nil, err
 	}
 
-	for _, fn := range nodes {
-		node, err := buildNode(fn, cat.Registry)
+	for _, src := range sources {
+		node, err := buildNode(src.node, cat.Registry)
 		if err != nil {
 			return nil, err
 		}
@@ -218,6 +242,7 @@ func buildCatalog(schema SchemaPin, typeDefs []fileTypeDef, nodes []fileNode) (*
 			return nil, fmt.Errorf("graph: duplicate node id %q", node.ID)
 		}
 		cat.Nodes[node.ID] = node
+		cat.NodeFile[node.ID] = src.file
 	}
 
 	return cat, nil
