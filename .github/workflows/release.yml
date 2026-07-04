@@ -153,7 +153,7 @@ jobs:
               ./smoke/kitsoki version
               ./smoke/kitsoki --help >/dev/null
           - target: darwin-amd64
-            runs-on: macos-13
+            runs-on: macos-15-intel
             archive: kitsoki_darwin_amd64.tar.gz
             command: |
               set -euo pipefail
@@ -178,10 +178,21 @@ jobs:
           name: kitsoki-binaries
           path: dist
 
-      - name: Smoke packaged binary
+      # `shell:` cannot reference the matrix context — GitHub rejects the whole
+      # workflow file at parse time (every run showed "workflow file issue" at
+      # 0s) — so the unix/windows split is two guarded steps instead.
+      - name: Smoke packaged binary (unix)
+        if: ${{ !startsWith(matrix.target, 'windows') }}
         env:
           ARCHIVE: ${{ matrix.archive }}
-        shell: ${{ startsWith(matrix.target, 'windows') && 'pwsh' || 'bash' }}
+        shell: bash
+        run: ${{ matrix.command }}
+
+      - name: Smoke packaged binary (windows)
+        if: ${{ startsWith(matrix.target, 'windows') }}
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+        shell: pwsh
         run: ${{ matrix.command }}
 
   publish:
