@@ -63,13 +63,28 @@ func TestTurn_RoutedInput(t *testing.T) {
 	assert.Equal(t, app.StatePath("cloakroom"), out.NextState)
 }
 
-func TestTurn_ReplayWithoutRecordingRoutesSemanticProbe(t *testing.T) {
+func TestTurn_ReplayWithoutRecordingFallsThroughWhenSemanticDefaultOff(t *testing.T) {
 	resetSemanticRoutingGlobals(t)
 
-	stdout, err := runKitsoki(t,
+	_, err := runKitsoki(t,
 		"turn", "../../stories/dev-story/app.yaml",
 		"--state", "prd.idle",
 		"--input", "what's the state of our local main vs origin",
+		"--harness", "replay",
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "noRunHarness")
+}
+
+func TestTurn_SemanticRoutingOptInStillRoutesProbe(t *testing.T) {
+	resetSemanticRoutingGlobals(t)
+	t.Setenv("KITSOKI_SEMANTIC_ROUTING", "true")
+	appPath := writeSemanticTurnApp(t)
+
+	stdout, err := runKitsoki(t,
+		"turn", appPath,
+		"--state", "start",
+		"--input", "wade",
 		"--harness", "replay",
 	)
 	require.NoError(t, err)
@@ -83,11 +98,10 @@ func TestTurn_ReplayWithoutRecordingRoutesSemanticProbe(t *testing.T) {
 		} `json:"host_calls"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(stdout), &out))
-	require.Equal(t, "transitioned", out.Mode)
-	require.Equal(t, "prd__go_gitops", out.Intent)
-	require.Equal(t, app.StatePath("gitops.intercept"), out.NextState)
-	require.Len(t, out.HostCalls, 1)
-	require.Equal(t, "host.run", out.HostCalls[0].Namespace)
+	require.Equal(t, "completed", out.Mode)
+	require.Equal(t, "go_west", out.Intent)
+	require.Equal(t, app.StatePath("ended"), out.NextState)
+	require.Empty(t, out.HostCalls)
 }
 
 func TestTurn_ReplayWithoutRecordingFailsClosedOnHarnessMiss(t *testing.T) {
@@ -102,6 +116,36 @@ func TestTurn_ReplayWithoutRecordingFailsClosedOnHarnessMiss(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "noRunHarness")
 	require.NotContains(t, err.Error(), "--recording is required")
+}
+
+func writeSemanticTurnApp(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "app.yaml")
+	yml := []byte(`
+app:
+  id: turn-semantic-opt-in-test
+  version: 0.1.0
+routing:
+  enabled: true
+world: {}
+intents:
+  go_west:
+    title: "Go west"
+    examples: ["go west"]
+    synonyms: ["wade"]
+root: start
+states:
+  start:
+    view: "start"
+    on:
+      go_west:
+        - target: ended
+  ended:
+    terminal: true
+    view: "done"
+`)
+	require.NoError(t, os.WriteFile(path, yml, 0o644))
+	return path
 }
 
 // TestTurn_HostDispatchVisible confirms that one-shot turns dispatch host

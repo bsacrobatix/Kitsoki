@@ -19,21 +19,21 @@ var (
 )
 
 // semanticRoutingOptions resolves the semantic-routing toggle and returns the
-// orchestrator option that wires it when an operator explicitly set one.
+// orchestrator option that wires the process-level default.
 // Precedence (highest first):
 //
 //  1. --semantic-routing (when the operator passed it explicitly)
 //  2. KITSOKI_SEMANTIC_ROUTING (1/true/on / 0/false/off, case-insensitive)
-//  3. default: no process override — defer to the app's routing.enabled config
+//  3. default: disabled; keep only exact deterministic routing, then LLM
 //
-// When neither flag nor env is set, callers must pass no option at all. That
-// lets apps such as dev-story/kitsoki-dev use their authored default_intent and
-// free-form fallback routing without the main model guessing first. See
-// docs/architecture/semantic-routing.md.
+// The per-app routing.enabled config is still available to lower-level
+// orchestrator callers that do not pass this option. The CLI defaults to the
+// simpler deterministic-then-LLM route until the semantic/default-intent stack
+// is stable enough to opt back in by default.
 func semanticRoutingOptions() []orchestrator.Option {
 	enabled, ok := semanticRoutingOverride()
 	if !ok {
-		return nil
+		enabled = false
 	}
 	return []orchestrator.Option{orchestrator.WithSemanticRouting(enabled)}
 }

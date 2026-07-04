@@ -26,15 +26,15 @@ func resetSemanticRoutingGlobals(t *testing.T) {
 	})
 }
 
-func TestSemanticRoutingOverrideUnsetDefersToAppConfig(t *testing.T) {
+func TestSemanticRoutingOverrideUnsetDisablesStack(t *testing.T) {
 	resetSemanticRoutingGlobals(t)
 
 	_, ok := semanticRoutingOverride()
 	if ok {
 		t.Fatal("unset flag/env should not force an orchestrator override")
 	}
-	if got := semanticRoutingOptions(); got != nil {
-		t.Fatalf("unset flag/env should produce no options, got %d", len(got))
+	if got := semanticRoutingOptions(); len(got) != 1 {
+		t.Fatalf("unset flag/env should produce one default-off option, got %d", len(got))
 	}
 }
 

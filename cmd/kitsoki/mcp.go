@@ -148,12 +148,14 @@ docs land):
 				dbPath = defaultDBPath()
 			}
 
-			// Export only an explicit semantic-routing override so the studio's
-			// per-session orchestrators can see cmd-layer flags. When neither the
-			// flag nor env is set, leave the env unset and let each app's
-			// routing.enabled config decide.
+			// Export the semantic-routing default so the studio's per-session
+			// orchestrators match the CLI: exact deterministic first, then the
+			// selected harness/model unless the operator opts the semantic stack
+			// back in.
 			if enabled, ok := semanticRoutingOverride(); ok {
 				_ = os.Setenv("KITSOKI_SEMANTIC_ROUTING", strconv.FormatBool(enabled))
+			} else if _, hadEnv := os.LookupEnv("KITSOKI_SEMANTIC_ROUTING"); !hadEnv {
+				_ = os.Setenv("KITSOKI_SEMANTIC_ROUTING", "false")
 			}
 
 			// Build the studio session with the live-capable production builder:

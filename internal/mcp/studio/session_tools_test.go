@@ -369,7 +369,7 @@ func TestSessionNew_ReplayWithoutCassetteAllowsDirectSubmitOnly(t *testing.T) {
 
 	res, err = callTool(ctx, cs, "session.drive", map[string]any{
 		"handle": ok.Handle,
-		"input":  "go east",
+		"input":  "this should require the harness",
 	})
 	require.NoError(t, err)
 	driven := driveResult(t, res)
