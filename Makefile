@@ -34,6 +34,9 @@ VSCODE_DIR    := tools/vscode-kitsoki
 EMBED_INDEX   := internal/runstatus/web/assets/index.html
 TEMP_DIR      := .temp
 RUNSTATUS_TEMP_ENV := TMPDIR="$(abspath $(TEMP_DIR))" KITSOKI_TEMP_ROOT="$(abspath $(TEMP_DIR))"
+RUNSTATUS_LOCKFILE := $(RUNSTATUS_DIR)/pnpm-lock.yaml
+RUNSTATUS_MODULES  := $(RUNSTATUS_DIR)/node_modules/.modules.yaml
+RUNSTATUS_DIST     := $(TEMP_DIR)/runstatus/dist
 # features/*.yaml is part of the SPA's sources: the tour manifests the bundle
 # ships are code-generated from the feature catalog (see `make features`).
 SPA_SOURCES   := $(shell find $(RUNSTATUS_DIR)/src $(RUNSTATUS_DIR)/index.html \
@@ -179,9 +182,14 @@ $(EMBED_INDEX): $(SPA_SOURCES)
 		exit 1; }
 	@mkdir -p $(TEMP_DIR)
 	@chmod u+rwx $(TEMP_DIR)
-	cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) pnpm install --frozen-lockfile && $(RUNSTATUS_TEMP_ENV) pnpm features:check && $(RUNSTATUS_TEMP_ENV) pnpm build
+	@if [ ! -f "$(RUNSTATUS_MODULES)" ] || [ "$(RUNSTATUS_LOCKFILE)" -nt "$(RUNSTATUS_MODULES)" ]; then \
+		cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) pnpm install --frozen-lockfile; \
+	else \
+		echo "runstatus deps already installed for $(RUNSTATUS_LOCKFILE)"; \
+	fi
+	cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) pnpm features:check && $(RUNSTATUS_TEMP_ENV) pnpm build
 	@mkdir -p $(dir $(EMBED_INDEX))
-	cp $(RUNSTATUS_DIR)/dist/index.html $(EMBED_INDEX)
+	cp $(RUNSTATUS_DIST)/index.html $(EMBED_INDEX)
 	@echo "staged runstatus SPA -> $(EMBED_INDEX)"
 
 # web-clean removes the staged bundle (the binary then reports the SPA as
