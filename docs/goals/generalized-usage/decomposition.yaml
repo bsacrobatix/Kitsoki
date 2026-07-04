@@ -731,6 +731,7 @@ changes:
       class: "G-LIVE+REPLAY"
       red_now: "no frozen corpus; task selection would be curated-to-flatter-kitsoki (selection-bias threat)"
       green_when: "bench.py verify is green on every task (RED@baseline, GREEN@fix); the one schema-validated mining LLM pass is recorded; split frozen"
+      cmd: "python3 tools/arena/tests/validate_corpus.py tools/arena/corpus/cost-bench.manifest.yaml"
       replay_cmd: "python3 tools/bugfix-bakeoff/external/bench.py verify tools/arena/corpus/cost-bench.manifest.yaml"
     agent_brief: >
       M1: mine real task archetypes from this repo's transcripts (tools/session-mining
