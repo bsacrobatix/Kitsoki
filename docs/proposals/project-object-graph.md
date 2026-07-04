@@ -210,6 +210,44 @@ mechanism on kitsoki itself.
    repo. Everything stays reviewable as diffs, and parallel agents/humans
    coordinate through ordinary VCS.
 
+## Prior art, anchors, and "why not just use X"
+
+Full cited survey (two adversarially-verified research passes + gap-fill):
+[`../competitive-analysis/project-object-graph-research.md`](../competitive-analysis/project-object-graph-research.md).
+The design anchors, ranked:
+
+1. **OpenSpec** — the closest working precedent for the whole shape: durable
+   current-state specs + transient delta change folders
+   (ADDED/MODIFIED/REMOVED) archived into the source of truth. Cite the
+   mechanism; its delta vocabulary is *not* a documented closed set.
+2. **Backstage software catalog** — production-proven YAML node/edge
+   mechanics (`apiVersion/kind` envelope, per-kind JSON Schemas, typed
+   entity-reference edges) and, critically, **authored facts vs. computed
+   relations kept separate** — external validation of Shared decision 4
+   (roadmap is computed, never authored).
+3. **eQMS drift-delta loop (Drata/Vanta)** — the live commercial
+   instantiation of roadmap-as-delta: controls as shared nodes mapped
+   many-to-many to 30+ frameworks, machine-populated evidence edges,
+   continuous desired-vs-observed drift detection. What they don't capture is
+   *why* a control was scoped in/out — the interpretive decision.
+4. **XTDB bitemporal facts** — the citable audit substrate: as-at
+   reconstruction of the whole graph, retroactive correction without
+   destroying provenance (what auditors and CAPA loops require).
+5. **Digital-thread literature** (Hedberg et al. 2020, peer-reviewed, NIST
+   lineage) — the generality claim beyond software: typed-edge graph
+   federation cut cross-domain traceability from hours to seconds; PLM's
+   ad-hoc hard-coded links are the documented failure mode a typed edge
+   schema fixes (independently echoed by 2025 MBSE/openCAESAR-lineage work).
+
+The competitive claim to hold: adversarial search across trackers, RM suites,
+eQMS, PLM, and spec-as-code tools found **no system that records interpretive
+decision provenance as first-class graph data** (existing systems record
+execution provenance and artifact state only), and no general
+roadmap-as-state-delta (nearest neighbors — Drata/Vanta drift, Jama coverage
+gaps — are scoped to compliance/trace coverage). Those two capabilities,
+which fall out of the kitsoki moat rather than being features to build, are
+what this epic can own; per-tool rebuttals live in the research doc §4.
+
 ## Cross-cutting open questions
 
 1. **Re-parent `roadmap-portfolio-work.md`?** It is currently slice 4 of
