@@ -26,6 +26,9 @@ interface GraphNode {
   executor?: string;
   actor?: string;
   actor_kind?: string;
+  site_route?: string;
+  implementation_kind?: string;
+  evidence_kind?: string;
   sources?: string[];
   edges?: Record<string, EdgeValue>;
 }
@@ -45,8 +48,8 @@ interface SeedCatalog {
 }
 
 const data = parse(seedYaml) as SeedCatalog;
-const selectedId = ref("feature-project-object-graph");
-const selectedLayerId = ref("intent");
+const selectedId = ref("feature-agent-actions");
+const selectedLayerId = ref("capabilities");
 const selectedTypeId = ref("all");
 const query = ref("");
 
@@ -59,10 +62,10 @@ const layers = [
     types: ["actor", "agent"],
   },
   {
-    id: "intent",
-    title: "Desired product state",
-    short: "Intent",
-    description: "What the product should be: capabilities, requirements, and the scenarios they serve.",
+    id: "capabilities",
+    title: "Product capabilities and requirements",
+    short: "Capabilities",
+    description: "What exists or is desired: product features, requirements, and the user scenarios they support.",
     types: ["feature", "requirement", "use-case"],
   },
   {
@@ -74,9 +77,9 @@ const layers = [
   },
   {
     id: "proof",
-    title: "Proof and current state",
+    title: "Implementation and proof",
     short: "Proof",
-    description: "What exists now, and what verifies it: implementations, demos, fixtures, and evidence.",
+    description: "Where shipped capabilities live and what verifies them: code, stories, demos, fixtures, and evidence.",
     types: ["evidence", "implementation"],
   },
 ];
@@ -270,10 +273,11 @@ function nodeText(node: GraphNode): string {
     <header class="masthead">
       <div>
         <p class="kicker">Project object graph</p>
-        <h1>Actors, desired state, change work, and proof.</h1>
+        <h1>Current capabilities, gaps, work, and proof.</h1>
         <p class="intro">
-          The graph is organized by actors, desired product state, change work, and proof. Start with who
-          cares, follow what they need, then inspect the work and evidence behind it.
+          The graph is organized by actors, product capabilities, change work, and proof. Start with the
+          shipped/public capabilities to see what already exists, then follow requirements, implementation,
+          evidence, and open work.
         </p>
       </div>
       <div class="metric-strip">
@@ -347,6 +351,7 @@ function nodeText(node: GraphNode): string {
             >
               <strong>{{ node.title }}</strong>
               <small>{{ node.id }}</small>
+              <span class="node-meta">{{ node.status }} / {{ node.visibility }}</span>
             </button>
           </section>
         </div>
@@ -367,10 +372,16 @@ function nodeText(node: GraphNode): string {
 
           <p class="body-text">{{ nodeText(selectedNode) }}</p>
 
-          <div v-if="selectedNode.actor_kind || selectedNode.trigger || selectedNode.actor || selectedNode.executor" class="fact-row">
+          <div
+            v-if="selectedNode.actor_kind || selectedNode.trigger || selectedNode.actor || selectedNode.executor || selectedNode.site_route || selectedNode.implementation_kind || selectedNode.evidence_kind"
+            class="fact-row"
+          >
             <div v-if="selectedNode.actor_kind"><span>Actor kind</span><strong>{{ selectedNode.actor_kind }}</strong></div>
             <div v-if="selectedNode.actor"><span>Actor</span><strong>{{ selectedNode.actor }}</strong></div>
             <div v-if="selectedNode.executor"><span>Executor</span><strong>{{ selectedNode.executor }}</strong></div>
+            <div v-if="selectedNode.site_route"><span>Product site</span><strong>{{ selectedNode.site_route }}</strong></div>
+            <div v-if="selectedNode.implementation_kind"><span>Implementation</span><strong>{{ selectedNode.implementation_kind }}</strong></div>
+            <div v-if="selectedNode.evidence_kind"><span>Evidence</span><strong>{{ selectedNode.evidence_kind }}</strong></div>
             <div v-if="selectedNode.trigger"><span>Trigger</span><strong>{{ selectedNode.trigger }}</strong></div>
           </div>
 

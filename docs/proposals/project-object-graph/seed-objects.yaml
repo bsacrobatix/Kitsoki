@@ -21,6 +21,18 @@ catalog:
       - id: source-operator-ask-feature
         kind: feature_catalog
         path: features/operator-ask.yaml
+      - id: source-agent-actions-feature
+        kind: feature_catalog
+        path: features/agent-actions.yaml
+      - id: source-trace-introspection-feature
+        kind: feature_catalog
+        path: features/trace-introspection.yaml
+      - id: source-meta-mode-feature
+        kind: feature_catalog
+        path: features/meta-mode.yaml
+      - id: source-dev-story-bugfix-feature
+        kind: feature_catalog
+        path: features/dev-story-bugfix.yaml
       - id: source-docs-strategic-review
         kind: context_note
         path: .context/docs-review-and-strategic-plan-2026-07-04.md
@@ -192,6 +204,8 @@ nodes:
     edges:
       uses:
         - feature-operator-ask
+        - feature-agent-actions
+        - feature-trace-introspection
       participates_in:
         - usecase-maintainer-answers-blocked-agent
       owns: []
@@ -247,6 +261,9 @@ nodes:
     edges:
       uses:
         - feature-project-object-graph
+        - feature-agent-actions
+        - feature-trace-introspection
+        - feature-meta-mode
       participates_in: []
       owns: []
       assigned_changes:
@@ -267,6 +284,7 @@ nodes:
     edges:
       uses:
         - feature-project-object-graph
+        - feature-dev-story-bugfix
       participates_in:
         - usecase-agent-mines-backlog-into-graph
       owns: []
@@ -402,6 +420,363 @@ nodes:
     edges:
       implements:
         - feature-operator-ask
+
+  - schema: graph/feature/v0
+    id: feature-agent-actions
+    title: Agent action transcripts
+    status: shipped
+    visibility: public
+    summary: Every agent call captures and replays its native tool-use stream as typed action rows, guardrail arcs, waterfall timing, token/cost accrual, and cassette-vs-live drift.
+    site_route: /features/agent-actions.html
+    sources:
+      - source-agent-actions-feature
+    edges:
+      requirements:
+        - req-agent-actions-byte-stable-stream
+      use_cases:
+        - usecase-maintainer-inspects-agent-call
+      evidence:
+        - evidence-agent-actions-demo
+      proposed_by: []
+      implemented_by:
+        - impl-agent-actions-run-status-ui
+
+  - schema: graph/requirement/v0
+    id: req-agent-actions-byte-stable-stream
+    title: Agent calls expose byte-stable tool-use transcripts
+    status: satisfied
+    visibility: public
+    statement: Agent task, decide, ask, and converse calls must expose the captured tool-use stream with enough structure to replay, inspect, and compare it deterministically.
+    sources:
+      - source-agent-actions-feature
+    edges:
+      required_by:
+        - feature-agent-actions
+      motivated_by:
+        - usecase-maintainer-inspects-agent-call
+      verified_by:
+        - evidence-agent-actions-demo
+
+  - schema: graph/use-case/v0
+    id: usecase-maintainer-inspects-agent-call
+    title: Maintainer inspects why an agent call behaved the way it did
+    status: supported
+    visibility: public
+    actor: maintainer
+    trigger: A run contains a costly, surprising, rejected, or drift-prone agent call.
+    desired_outcome: The maintainer opens the call transcript, sees each tool call and guardrail step in order, and can compare deterministic replay against live drift.
+    sources:
+      - source-agent-actions-feature
+    edges:
+      actor:
+        - actor-maintainer
+      exercises:
+        - feature-agent-actions
+      acceptance:
+        - req-agent-actions-byte-stable-stream
+
+  - schema: graph/evidence/v0
+    id: evidence-agent-actions-demo
+    title: Agent-actions deterministic product-site demo
+    status: current
+    visibility: public
+    evidence_kind: deterministic_demo
+    producers:
+      - tests/playwright/agent-actions-video.spec.ts
+    artifacts:
+      - artifactDir: agent-actions
+        videoBase: agent-actions-demo
+        posterStep: aa-intro-home
+    sources:
+      - source-agent-actions-feature
+    edges:
+      demonstrates:
+        - feature-agent-actions
+      verifies:
+        - req-agent-actions-byte-stable-stream
+
+  - schema: graph/implementation/v0
+    id: impl-agent-actions-run-status-ui
+    title: Run-status agent action drawer and trace sidecars
+    status: shipped
+    visibility: internal
+    implementation_kind: web-and-tracing
+    source_paths:
+      - features/agent-actions.yaml
+      - docs/tracing/run-status-ui.md
+    sources:
+      - source-agent-actions-feature
+    edges:
+      implements:
+        - feature-agent-actions
+
+  - schema: graph/feature/v0
+    id: feature-trace-introspection
+    title: Decision-first trace detail
+    status: shipped
+    visibility: public
+    summary: Frozen traces expose observation filters, decision verdicts, confidence, evidence, replay, tree, waterfall, and state-graph views.
+    site_route: /features/trace-introspection.html
+    sources:
+      - source-trace-introspection-feature
+    edges:
+      requirements:
+        - req-trace-introspection-decision-first
+      use_cases:
+        - usecase-maintainer-audits-frozen-run
+      evidence:
+        - evidence-trace-introspection-demo
+      proposed_by: []
+      implemented_by:
+        - impl-trace-introspection-observer
+
+  - schema: graph/requirement/v0
+    id: req-trace-introspection-decision-first
+    title: Trace detail must lead with decisions and provenance
+    status: satisfied
+    visibility: public
+    statement: Decision events must show verdict, confidence, evidence, and replay affordances before raw trace payloads.
+    sources:
+      - source-trace-introspection-feature
+    edges:
+      required_by:
+        - feature-trace-introspection
+      motivated_by:
+        - usecase-maintainer-audits-frozen-run
+      verified_by:
+        - evidence-trace-introspection-demo
+
+  - schema: graph/use-case/v0
+    id: usecase-maintainer-audits-frozen-run
+    title: Maintainer audits a frozen run without spending model calls
+    status: supported
+    visibility: public
+    actor: maintainer
+    trigger: A recorded run needs review, explanation, or regression comparison.
+    desired_outcome: The maintainer filters the trace by observation kind, opens a decision, reads the verdict and evidence, and inspects the same trace through tree, waterfall, and state-graph views.
+    sources:
+      - source-trace-introspection-feature
+    edges:
+      actor:
+        - actor-maintainer
+      exercises:
+        - feature-trace-introspection
+      acceptance:
+        - req-trace-introspection-decision-first
+
+  - schema: graph/evidence/v0
+    id: evidence-trace-introspection-demo
+    title: Trace-introspection frozen-run demo
+    status: current
+    visibility: public
+    evidence_kind: deterministic_demo
+    producers:
+      - tests/playwright/trace-introspection-demo.spec.ts
+    artifacts:
+      - artifactDir: trace-introspection-demo
+        videoBase: trace-introspection-demo
+        posterStep: ti-welcome
+    sources:
+      - source-trace-introspection-feature
+    edges:
+      demonstrates:
+        - feature-trace-introspection
+      verifies:
+        - req-trace-introspection-decision-first
+
+  - schema: graph/implementation/v0
+    id: impl-trace-introspection-observer
+    title: Observer trace detail surfaces
+    status: shipped
+    visibility: internal
+    implementation_kind: web-and-tracing
+    source_paths:
+      - features/trace-introspection.yaml
+      - docs/tracing/trace-format.md
+      - docs/tracing/run-status-ui.md
+    sources:
+      - source-trace-introspection-feature
+    edges:
+      implements:
+        - feature-trace-introspection
+
+  - schema: graph/feature/v0
+    id: feature-meta-mode
+    title: Meta-mode edits and explains stories
+    status: shipped
+    visibility: public
+    summary: The running app can answer questions about kitsoki or a live story, then edit story YAML and hot-reload the session with the change recorded in the trace.
+    site_route: /features/meta-mode.html
+    sources:
+      - source-meta-mode-feature
+    edges:
+      requirements:
+        - req-meta-mode-story-aware-edit
+      use_cases:
+        - usecase-developer-edits-running-story
+      evidence:
+        - evidence-meta-mode-demo
+      proposed_by: []
+      implemented_by:
+        - impl-meta-mode-web-story-author
+
+  - schema: graph/requirement/v0
+    id: req-meta-mode-story-aware-edit
+    title: Running stories can be explained, edited, and hot-reloaded
+    status: satisfied
+    visibility: public
+    statement: Meta mode must support cross-app help, story-specific explanation, story YAML edits, and in-place reload of an active session.
+    sources:
+      - source-meta-mode-feature
+    edges:
+      required_by:
+        - feature-meta-mode
+      motivated_by:
+        - usecase-developer-edits-running-story
+      verified_by:
+        - evidence-meta-mode-demo
+
+  - schema: graph/use-case/v0
+    id: usecase-developer-edits-running-story
+    title: Developer asks a running story to explain or edit itself
+    status: supported
+    visibility: public
+    actor: developer
+    trigger: A story needs explanation or a small change while a session is running.
+    desired_outcome: The developer asks meta mode for story context, requests a YAML edit, and sees the live session reload against the changed story.
+    sources:
+      - source-meta-mode-feature
+    edges:
+      actor:
+        - actor-developer
+      exercises:
+        - feature-meta-mode
+      acceptance:
+        - req-meta-mode-story-aware-edit
+
+  - schema: graph/evidence/v0
+    id: evidence-meta-mode-demo
+    title: Meta-mode self-edit demo and QA scenarios
+    status: current
+    visibility: public
+    evidence_kind: deterministic_demo
+    producers:
+      - tests/playwright/meta-mode.spec.ts
+    artifacts:
+      - artifactDir: meta-mode
+        videoBase: meta-mode-demo
+    sources:
+      - source-meta-mode-feature
+    edges:
+      demonstrates:
+        - feature-meta-mode
+      verifies:
+        - req-meta-mode-story-aware-edit
+
+  - schema: graph/implementation/v0
+    id: impl-meta-mode-web-story-author
+    title: Web meta-mode story explanation and edit path
+    status: shipped
+    visibility: internal
+    implementation_kind: web-and-story-authoring
+    source_paths:
+      - features/meta-mode.yaml
+      - docs/tracing/trace-format.md
+    sources:
+      - source-meta-mode-feature
+    edges:
+      implements:
+        - feature-meta-mode
+
+  - schema: graph/feature/v0
+    id: feature-dev-story-bugfix
+    title: Bug triage to autonomous fix
+    status: shipped
+    visibility: public
+    summary: "The dev-story routes a ticket through triage and into the autonomous bugfix pipeline: reproduce, propose, implement, test, review, validate, and open a PR."
+    site_route: /features/dev-story-bugfix.html
+    sources:
+      - source-dev-story-bugfix-feature
+    edges:
+      requirements:
+        - req-dev-story-bugfix-end-to-end
+      use_cases:
+        - usecase-developer-runs-bugfix-pipeline
+      evidence:
+        - evidence-dev-story-bugfix-demo
+      proposed_by: []
+      implemented_by:
+        - impl-dev-story-bugfix
+
+  - schema: graph/requirement/v0
+    id: req-dev-story-bugfix-end-to-end
+    title: Bugfix story must carry a ticket through reproducible delivery
+    status: satisfied
+    visibility: public
+    statement: The story must triage a ticket and then run the autonomous bugfix sequence through reproduction, proposal, implementation, tests, review, validation, and PR creation.
+    sources:
+      - source-dev-story-bugfix-feature
+    edges:
+      required_by:
+        - feature-dev-story-bugfix
+      motivated_by:
+        - usecase-developer-runs-bugfix-pipeline
+      verified_by:
+        - evidence-dev-story-bugfix-demo
+
+  - schema: graph/use-case/v0
+    id: usecase-developer-runs-bugfix-pipeline
+    title: Developer hands a selected bug to the autonomous fix pipeline
+    status: supported
+    visibility: public
+    actor: developer
+    trigger: A triage queue contains a fixable bug that should move through implementation without ad hoc prompting.
+    desired_outcome: The developer selects the ticket, watches each deterministic room advance, and receives a validated PR-ready fix with trace evidence.
+    sources:
+      - source-dev-story-bugfix-feature
+    edges:
+      actor:
+        - actor-developer
+      exercises:
+        - feature-dev-story-bugfix
+      acceptance:
+        - req-dev-story-bugfix-end-to-end
+
+  - schema: graph/evidence/v0
+    id: evidence-dev-story-bugfix-demo
+    title: Dev-story bugfix deterministic tour
+    status: current
+    visibility: public
+    evidence_kind: deterministic_demo
+    producers:
+      - tests/playwright/dev-story-bugfix-video.spec.ts
+    artifacts:
+      - artifactDir: dev-story-bugfix
+        videoBase: dev-story-bugfix-demo
+        posterStep: ds-intro-home
+    sources:
+      - source-dev-story-bugfix-feature
+    edges:
+      demonstrates:
+        - feature-dev-story-bugfix
+      verifies:
+        - req-dev-story-bugfix-end-to-end
+
+  - schema: graph/implementation/v0
+    id: impl-dev-story-bugfix
+    title: Dev-story triage to bugfix pipeline
+    status: shipped
+    visibility: internal
+    implementation_kind: story
+    source_paths:
+      - features/dev-story-bugfix.yaml
+      - stories/dev-story
+      - docs/case-studies/bug-fix.md
+    sources:
+      - source-dev-story-bugfix-feature
+    edges:
+      implements:
+        - feature-dev-story-bugfix
 
   - schema: graph/feature/v0
     id: feature-project-object-graph
