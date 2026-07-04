@@ -9,6 +9,7 @@ targets:
   - id: cost-bench-pilot
     label: "cost-efficiency pilot"
     image: kitsoki-arena/paired-task:latest
+    dockerfile: tools/arena/docker/Dockerfile.paired-task
 
 variants:
   - id: kitsoki-codex-native
