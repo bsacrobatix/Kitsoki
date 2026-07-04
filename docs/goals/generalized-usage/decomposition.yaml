@@ -8,8 +8,10 @@ goal_slug: generalized-usage
 # repo-root-relative (resolved against the checkout the MCP runs from). An explicit
 # initial_world workdir seed still wins — this is the default, not an override.
 runtime:
-  base_branch:   stabilize/generalized-usage      # the branch dispatch/integrate target
-  worktree_path: .worktrees/generalized-usage      # where docs/goals/<slug>/ + the code live
+  base_branch:   stabilize/generalized-usage-rebase  # 2026-07-04 ~23:10: corrected to match the branch
+                                                       # this worktree/live run is actually on — see the
+                                                       # Operator note in GOAL.md (two-branch reconcile TODO)
+  worktree_path: .worktrees/generalized-usage-rebase  # where docs/goals/<slug>/ + the code live
 
 # First slice: the meta/dogfood-enablement wall (WM) + the Install wall (W1).
 # Walls W2-W5 + hygiene follow once this slice is proven. Every change carries a
