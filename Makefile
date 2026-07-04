@@ -134,19 +134,28 @@ uninstall:
 # internal/basestories/stories/, disjoint trees) so there is no embed-of-cwd /
 # recursive-embed footgun.
 embed-stories:
-	@tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/kitsoki-basestories.XXXXXX"); \
-	trap 'rm -rf "$$tmp"' EXIT; \
+	@mkdir -p $(TEMP_DIR); chmod u+rwx $(TEMP_DIR); \
+	tmp=$$(mktemp -d "$(abspath $(TEMP_DIR))/kitsoki-basestories.XXXXXX"); \
+	trap 'chmod -R u+w "$$tmp" 2>/dev/null || true; rm -rf "$$tmp"' EXIT; \
 	mkdir -p "$$tmp/stories"; \
 	cp -R stories/. "$$tmp/stories"/; \
+	chmod -R u+w "$$tmp"; \
 	touch "$$tmp/stories/.gitkeep"; \
 	if [ -d "$(BASESTORIES_DIR)" ] && diff -qr "$$tmp/stories" "$(BASESTORIES_DIR)" >/dev/null; then \
-		touch "$(BASESTORIES_STAMP)"; \
+		relock_stamp=0; \
+		if ! touch "$(BASESTORIES_STAMP)" 2>/dev/null; then chmod u+w "$(dir $(BASESTORIES_STAMP))" "$(BASESTORIES_STAMP)" 2>/dev/null || true; relock_stamp=1; touch "$(BASESTORIES_STAMP)"; fi; \
+		if [ "$$relock_stamp" = 1 ]; then chmod u-w "$(BASESTORIES_STAMP)" "$(dir $(BASESTORIES_STAMP))" 2>/dev/null || true; fi; \
 		echo "stories/ already staged in $(BASESTORIES_DIR)"; \
 	else \
+		relock=0; \
+		probe="$(BASESTORIES_DIR)/.kitsoki-write-probe"; \
+		if [ -e "$(BASESTORIES_DIR)" ] && ! ( touch "$$probe" && rm -f "$$probe" ) 2>/dev/null; then chmod -R u+w "$(BASESTORIES_DIR)" && chmod u+w "$(dir $(BASESTORIES_DIR))" && relock=1; fi; \
+		if [ ! -e "$(BASESTORIES_DIR)" ] && ! ( touch "$(dir $(BASESTORIES_DIR))/.kitsoki-write-probe" && rm -f "$(dir $(BASESTORIES_DIR))/.kitsoki-write-probe" ) 2>/dev/null; then chmod u+w "$(dir $(BASESTORIES_DIR))" && relock=1; fi; \
 		rm -rf "$(BASESTORIES_DIR)"; \
 		mkdir -p "$(BASESTORIES_DIR)"; \
 		cp -R "$$tmp/stories"/. "$(BASESTORIES_DIR)"/; \
 		touch "$(BASESTORIES_STAMP)"; \
+		if [ "$$relock" = 1 ]; then chmod -R u-w "$(BASESTORIES_DIR)"; fi; \
 		echo "staged stories/ -> $(BASESTORIES_DIR)"; \
 	fi
 
@@ -154,20 +163,29 @@ embed-stories:
 # dir (as assets/skills + assets/agents) so //go:embed ships the agent toolkit.
 # Same content-compare/one-directional-copy discipline as embed-stories.
 embed-skills:
-	@tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/kitsoki-baseskills.XXXXXX"); \
-	trap 'rm -rf "$$tmp"' EXIT; \
+	@mkdir -p $(TEMP_DIR); chmod u+rwx $(TEMP_DIR); \
+	tmp=$$(mktemp -d "$(abspath $(TEMP_DIR))/kitsoki-baseskills.XXXXXX"); \
+	trap 'chmod -R u+w "$$tmp" 2>/dev/null || true; rm -rf "$$tmp"' EXIT; \
 	mkdir -p "$$tmp/assets/skills" "$$tmp/assets/agents"; \
 	cp -R .agents/skills/. "$$tmp/assets/skills"/; \
 	cp -R .agents/agents/. "$$tmp/assets/agents"/; \
+	chmod -R u+w "$$tmp"; \
 	touch "$$tmp/assets/.gitkeep"; \
 	if [ -d "$(BASESKILLS_DIR)" ] && diff -qr "$$tmp/assets" "$(BASESKILLS_DIR)" >/dev/null; then \
-		touch "$(BASESKILLS_STAMP)"; \
+		relock_stamp=0; \
+		if ! touch "$(BASESKILLS_STAMP)" 2>/dev/null; then chmod u+w "$(dir $(BASESKILLS_STAMP))" "$(BASESKILLS_STAMP)" 2>/dev/null || true; relock_stamp=1; touch "$(BASESKILLS_STAMP)"; fi; \
+		if [ "$$relock_stamp" = 1 ]; then chmod u-w "$(BASESKILLS_STAMP)" "$(dir $(BASESKILLS_STAMP))" 2>/dev/null || true; fi; \
 		echo "agent toolkit already staged in $(BASESKILLS_DIR)"; \
 	else \
+		relock=0; \
+		probe="$(BASESKILLS_DIR)/.kitsoki-write-probe"; \
+		if [ -e "$(BASESKILLS_DIR)" ] && ! ( touch "$$probe" && rm -f "$$probe" ) 2>/dev/null; then chmod -R u+w "$(BASESKILLS_DIR)" && chmod u+w "$(dir $(BASESKILLS_DIR))" && relock=1; fi; \
+		if [ ! -e "$(BASESKILLS_DIR)" ] && ! ( touch "$(dir $(BASESKILLS_DIR))/.kitsoki-write-probe" && rm -f "$(dir $(BASESKILLS_DIR))/.kitsoki-write-probe" ) 2>/dev/null; then chmod u+w "$(dir $(BASESKILLS_DIR))" && relock=1; fi; \
 		rm -rf "$(BASESKILLS_DIR)"; \
 		mkdir -p "$(BASESKILLS_DIR)"; \
 		cp -R "$$tmp/assets"/. "$(BASESKILLS_DIR)"/; \
 		touch "$(BASESKILLS_STAMP)"; \
+		if [ "$$relock" = 1 ]; then chmod -R u-w "$(BASESKILLS_DIR)"; fi; \
 		echo "staged .agents/{skills,agents} -> $(BASESKILLS_DIR)"; \
 	fi
 
