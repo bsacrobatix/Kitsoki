@@ -140,27 +140,12 @@ jobs:
       - name: Check promo media presence
         run: make media-check-promo
 
-      # Liveness check over download.md's releases/latest/download/... links
-      # (the page 404'd for weeks with zero signal when no release existed).
-      # TEMPORARILY continue-on-error: the v0.1.0 release workflow is being
-      # fixed (PR #87) and its assets are not published yet, so a hard gate
-      # would block every deploy today. TODO(release-v0.1.0): once the release
-      # assets are live, delete continue-on-error + the report step below so a
-      # dead download page fails the build outright.
+      # Hard gate: every releases/latest/download/... link in download.md must
+      # resolve (the page 404'd for weeks with zero signal when no release
+      # existed — v0.1.0's assets are live now, so a dead download page fails
+      # the build outright).
       - name: Check download links
-        id: check-download-links
-        continue-on-error: true
         run: node tools/site/scripts/check-download-links.mjs
-
-      - name: Report dead download links
-        if: ${{ steps.check-download-links.outcome == 'failure' }}
-        run: |
-          {
-            echo "### :rotating_light: download.md links are DEAD"
-            echo
-            echo "One or more \`releases/latest/download/...\` links in tools/site/src/download.md do not resolve — the deployed download page 404s for visitors. Expected until the v0.1.0 release assets publish; unacceptable after."
-          } >>"$GITHUB_STEP_SUMMARY"
-          echo "::error::download.md release asset links are dead (see check-download-links output)"
 
       - uses: actions/upload-pages-artifact@v3
         with:
