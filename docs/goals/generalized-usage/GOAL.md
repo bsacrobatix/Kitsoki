@@ -1,8 +1,38 @@
 # GOAL — Kitsoki is usable by a stranger, generally
 
-**Status:** Active target for the `stabilize/generalized-usage` line of work.
+**Status:** Active target for the `stabilize/generalized-usage` line of work,
+currently executing on branch `stabilize/generalized-usage-rebase` (this
+worktree) — see Operator note below.
 Read by `/goal` (the goal-seeker) from this location. Provenance:
 `.context/state-vs-target-generalized-usage-2026-07-03.md` §1 (target) + §3 (walls).
+
+## Operator note (Brad, 2026-07-04 ~23:10, read this first)
+
+Brad is directly overseeing this run and gave it carte blanche — **live-spend
+work on the WB wall (WB.1/WB.3 cost-bench-pilot, paired-task docker cells) is
+authorized, keep going.** Three housekeeping items surfaced by an external
+audit pass, for whoever is steering next:
+
+1. **Two branches now both look like "the GU base."** `stabilize/generalized-usage`
+   (the original base worktree, `.worktrees/generalized-usage`) has not moved
+   since the workdir-from-goal commit (`33651d86`); all of today's WS/WM/WB/WP
+   work landed instead on `stabilize/generalized-usage-rebase` (this worktree),
+   which itself is NOT rebased onto current `main` (merge-base is `0fb8a423`,
+   `main` tip is `ae90a0c2`). Decide which branch is canonical going forward and
+   fold the other in — don't let them fork further.
+2. **`log.jsonl`'s tail has a schema split.** The last two entries (WB.1
+   `fold_integrated`, WB.3 `parked`) use `event`/`ts`/`branch` keys instead of
+   the `kind`/`state`/`seq` schema every other line uses, and have no `seq`. The
+   `goal.py ledger` fold does not recognize them, so it still reports WB.1 as
+   `ready`/red even though the raw log claims it's done. If WB.1 is really
+   integrated, land that through the normal `gs_append.star`/`goal.py append`
+   path (or `decompose-update`'s managed-delta tooling) so the fold agrees with
+   the raw log — don't leave the ledger tool telling a different story than the
+   log it's supposed to summarize.
+3. `runtime.base_branch` in `decomposition.yaml` still points at
+   `stabilize/generalized-usage` — updated below to the branch this worktree is
+   actually on; re-check it stays correct if you fold the two branches back
+   together.
 
 **One line:** A stranger — *not Brad, not this machine* — can download Kitsoki,
 run the flagship pipelines live on their own repo and their own provider, trust
