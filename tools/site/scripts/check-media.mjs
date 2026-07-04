@@ -7,6 +7,15 @@
  *   - feature demos derive their source paths from the feature catalog index;
  *   - staged site media uses only the generated public/media/<feature>/ shape;
  *   - Slidey decks reference rrweb clips from a deck-local asset folder.
+ *
+ * --require-promo-media additionally turns this into a PRESENCE gate (run
+ * AFTER recording + staging, never behind continue-on-error): every
+ * promo-grid feature (`promo:` block in its features/<id>.yaml — the
+ * FeatureGrid/HeroDemo landing-page set) must have its declared media staged
+ * under src/public/media/<id>/, or the check fails. Non-promo features
+ * missing media only warn — plenty of features are demo-less by design.
+ * Without the flag, this script never fails on missing media (0 mp4s passes),
+ * which keeps docs-only local iteration and `make media-check` unchanged.
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -28,8 +37,33 @@ const indexPath = path.resolve(
 const mediaDir = path.resolve(repoRoot, argValue("--media", path.join(siteDir, "src", "public", "media")));
 const decksDir = path.resolve(repoRoot, argValue("--decks", path.join(repoRoot, "docs", "decks")));
 
+const requirePromoMedia = process.argv.includes("--require-promo-media");
+
 const problems = [];
 const warnings = [];
+
+/**
+ * Known demo.renderer -> primary staged media filename. `stage-media.mjs`
+ * currently normalizes every recorded video to `demo.mp4` regardless of
+ * renderer, so both known renderers map there today. Extend this table (or
+ * set an explicit `demo.mediaKind` in the feature YAML, checked first below)
+ * when a new renderer/embed kind ships its own staged-media shape — e.g. the
+ * slidey-* deck/rrweb conversion — rather than hardcoding "demo.mp4" at each
+ * call site.
+ */
+const RENDERER_MEDIA = {
+  playwright: "demo.mp4",
+  binary: "demo.mp4",
+};
+
+/** The staged filename a feature's demo should produce, or null if the
+ * renderer/kind is unrecognized (in which case presence is checked
+ * loosely — any staged file besides poster.png counts). */
+function expectedMediaFile(f) {
+  if (f.demo?.mediaKind) return f.demo.mediaKind;
+  const renderer = f.demo?.renderer ?? "playwright";
+  return Object.prototype.hasOwnProperty.call(RENDERER_MEDIA, renderer) ? RENDERER_MEDIA[renderer] : null;
+}
 
 function rel(p) {
   return path.relative(repoRoot, p) || ".";
@@ -101,12 +135,65 @@ function checkFeatureDemos() {
   }
 
   checkStagedMedia(idsWithMedia);
+  if (requirePromoMedia) checkPromoMedia(index);
   return ids;
+}
+
+/**
+ * The presence gate: every promo-grid feature (has a `promo:` block — the
+ * FeatureGrid/HeroDemo landing-page set, see tools/site/.vitepress/data/
+ * features.ts) must have its declared media actually staged. A promo feature
+ * with no local demo binding at all (missing/external) is itself a problem —
+ * it can never show media on the landing page. Non-promo features missing
+ * media only warn: most features are optional/undemoed by design.
+ */
+function checkPromoMedia(index) {
+  const nonPromoMissing = [];
+
+  for (const f of index.features ?? []) {
+    const isPromo = Boolean(f.promo);
+    const dir = path.join(mediaDir, f.id);
+
+    if (!f.demo || f.demo.external) {
+      if (isPromo) {
+        problems.push(`promo feature ${f.id}: has a promo: block but no local demo binding (demo missing or external)`);
+      }
+      continue;
+    }
+
+    const posterOk = fs.existsSync(path.join(dir, "poster.png"));
+    const primary = expectedMediaFile(f);
+    const primaryOk = primary
+      ? fs.existsSync(path.join(dir, primary))
+      : fs.existsSync(dir) && fs.readdirSync(dir).some((n) => n !== "poster.png" && n !== "chapters.json");
+
+    const missing = [];
+    if (!posterOk) missing.push("poster.png");
+    if (!primaryOk) missing.push(primary ?? "renderer-appropriate media");
+    if (missing.length === 0) continue;
+
+    if (isPromo) {
+      problems.push(
+        `promo feature ${f.id}: missing staged ${missing.join(" + ")} under ${rel(dir)} ` +
+          `(record with: make demo-feature FEATURE=${f.id}, then make site)`,
+      );
+    } else {
+      nonPromoMissing.push(`${f.id} (missing ${missing.join(" + ")})`);
+    }
+  }
+
+  if (nonPromoMissing.length > 0) {
+    warnings.push(`non-promo feature(s) missing staged media: ${nonPromoMissing.join(", ")}`);
+  }
 }
 
 function checkStagedMedia(idsWithMedia) {
   if (!fs.existsSync(mediaDir)) {
-    warnings.push(`staged site media absent: ${rel(mediaDir)} (ok before make site/stage-media)`);
+    if (requirePromoMedia) {
+      problems.push(`staged site media directory missing entirely: ${rel(mediaDir)} (run make site/stage-media before --require-promo-media)`);
+    } else {
+      warnings.push(`staged site media absent: ${rel(mediaDir)} (ok before make site/stage-media)`);
+    }
     return;
   }
 
