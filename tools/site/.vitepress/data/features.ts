@@ -29,6 +29,10 @@ export interface FeatureMedia {
   posterUrl: string | null;
   chaptersUrl: string | null;
   videoAvailable: boolean;
+  /** A rrweb-native story-demo: an embedded Slidey deck clip (see
+   *  demo.embed in features/*.yaml), opened at its scene via `?scene=N`.
+   *  Null unless the bundled deck html is staged under src/public/decks/. */
+  embedUrl: string | null;
 }
 
 export interface SiteFeatureStep {
@@ -117,6 +121,11 @@ export function loadFeatures(locale: LocaleCode = "en"): SiteFeature[] {
     const stepsDir = path.join(staged, "steps");
     const shots = fs.existsSync(stepsDir) ? fs.readdirSync(stepsDir) : [];
 
+    // demo.embed: staged once, shared, under src/public/decks/ (not per-feature
+    // media/<id>/ — several features can point at the same bundled deck).
+    const embedRel = f.demo?.embed ? path.join("decks", path.basename(f.demo.embed.deckHtml)) : null;
+    const hasEmbed = !!embedRel && fs.existsSync(path.join(siteDir, "src", "public", embedRel));
+
     const steps: SiteFeatureStep[] = (f.tour?.steps ?? []).map((s: Record<string, string>) => {
       const shot = shots.find((n) => n.endsWith(`-${s.id}.png`));
       const st = stepTranslations.get(s.id);
@@ -146,6 +155,7 @@ export function loadFeatures(locale: LocaleCode = "en"): SiteFeature[] {
         posterUrl: hasPoster ? `/media/${f.id}/poster.png` : null,
         chaptersUrl: hasChapters ? `/media/${f.id}/chapters.json` : null,
         videoAvailable: hasVideo,
+        embedUrl: hasEmbed ? `/${embedRel}?scene=${f.demo.embed.sceneIndex}` : null,
       },
       steps,
       demoSpec: f.demo?.spec ?? null,

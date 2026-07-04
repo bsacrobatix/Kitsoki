@@ -15,6 +15,12 @@ the render runs one-shot (not staged) so `emit_intent` chains settle; and a
 relative `--out` no longer breaks the ffmpeg stitch. **Remaining (release, not
 implementation):** push the branch + the gears side and update PR #4082; delete
 this file on merge (its narrative now lives in the docs above).
+**Post-script:** `features/dev-story-prd-design.yaml` was later **de-listed**
+from the catalog — the binary renderer advances the imported PRD state but the
+chat surface doesn't remount into the imported PRD room reliably enough for
+Pages CI, so its site page shipped as a permanent placeholder. The flow fixture
+and stub spec remain; re-catalog the feature (git history has the tour) once
+that renderer gap closes.
 **Kind:**   epic
 **Slices:** 4 (4/4 shipped and validated)
 

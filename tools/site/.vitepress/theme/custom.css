@@ -23,6 +23,16 @@
 .kv__placeholder {
   position: relative;
 }
+/* rrweb-native story-demo: the embedded Slidey deck clip. The deck canvas is
+   1920x1080, so the frame keeps 16:9 and scales with the page column. */
+.kv__embed {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+}
 .kv__badge {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;

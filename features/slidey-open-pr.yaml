@@ -17,6 +17,9 @@ demo:
   posterStep: sop-intro-home
   story: stories/pr-refinement
   flow: stories/pr-refinement/flows/slidey_open_pr.yaml
+  embed:
+    deck: docs/decks/dev-story-hybrid.slidey.json
+    rrweb: assets/dev-story-hybrid/open-pr.rrweb.json
 tour:
   export: SLIDEY_OPEN_PR_TOUR_STEPS
   steps:

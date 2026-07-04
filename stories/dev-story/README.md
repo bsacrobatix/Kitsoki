@@ -549,15 +549,18 @@ this one is kitsoki's self-targeting parallel — **"kitsoki on kitsoki"**.
   valid no-LLM flow. Driven by
   [`tools/vscode-kitsoki/tests/vscode-prd-demo.e2e.spec.ts`](../../tools/vscode-kitsoki/tests/vscode-prd-demo.e2e.spec.ts).
 
-- **Tour manifest + catalog:**
-  [`features/dev-story-prd-design.yaml`](../../features/dev-story-prd-design.yaml)
-  — 11 narrated steps that walk every beat of the loop: discovery chat,
+- **Tour manifest + catalog:** the `dev-story-prd-design` catalog entry — 11
+  narrated steps that walked every beat of the loop (discovery chat,
   clarification rounds, PRD draft review and publish, design intake handoff,
-  design brief refinement, design publish, feature-ticket auto-mint. With
-  slice 2 of the [kitsoki-as-dependency](../../docs/proposals/kitsoki-as-dependency.md)
-  epic, this renders via `kitsoki tour --feature dev-story-prd-design`
-  (binary-native MP4, no Playwright). Pre-slice-2 the bound spec is a skipped
-  stub; the flow fixture's *content* is already verified no-LLM under
+  design brief refinement, design publish, feature-ticket auto-mint) — was
+  **de-listed** from `features/`: the binary `kitsoki tour` renderer it needed
+  (slice 2 of the [kitsoki-as-dependency](../../docs/proposals/kitsoki-as-dependency.md)
+  epic) can advance the imported PRD state but doesn't remount the chat surface
+  reliably enough for Pages CI, so the page shipped as a permanent placeholder.
+  The stub spec
+  [`dev-story-prd-design-video.spec.ts`](../../tools/runstatus/tests/playwright/dev-story-prd-design-video.spec.ts)
+  is kept for reviving it once that renderer gap closes; the flow fixture's
+  *content* is already verified no-LLM under
   `kitsoki test flows stories/dev-story/app.yaml`.
 
 **The canonical conversation-driven-development loop:**

@@ -20,7 +20,13 @@ const props = defineProps<{
     id: string;
     title: string;
     summary: string;
-    media: { videoUrl: string | null; posterUrl: string | null; chaptersUrl: string | null; videoAvailable: boolean };
+    media: {
+      videoUrl: string | null;
+      posterUrl: string | null;
+      chaptersUrl: string | null;
+      videoAvailable: boolean;
+      embedUrl: string | null;
+    };
     steps: Array<{ id: string; title: string; body: string; shotUrl: string | null }>;
     docLinks: Link[];
     related: Link[];
