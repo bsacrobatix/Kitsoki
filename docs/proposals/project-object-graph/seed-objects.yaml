@@ -45,6 +45,12 @@ catalog:
       - id: source-graph-viewer-prototype
         kind: prototype
         path: docs/proposals/project-object-graph/viewer
+      - id: source-product-journey-personas
+        kind: qa_tooling
+        path: tools/product-journey/personas.json
+      - id: source-product-journey-qa
+        kind: qa_tooling
+        path: tools/product-journey/README.md
 
 type_registry:
   - id: core-node
@@ -131,6 +137,20 @@ type_registry:
       - id: assigned_changes
         target_type: change
         cardinality: many
+  - id: persona
+    schema: graph-type/v0
+    derives_from: actor
+    summary: Concrete profile of an actor role - experience level, preferred tools and tech stack, surface preference, risk focus - used to drive persona-based QA journeys through use cases from that perspective.
+    edge_fields:
+      - id: persona_of
+        target_type: actor
+        cardinality: one
+      - id: participates_in
+        target_type: use-case
+        cardinality: many
+      - id: qa_evidence
+        target_type: evidence
+        cardinality: many
   - id: requirement
     schema: graph-type/v0
     derives_from: core-node
@@ -190,6 +210,12 @@ type_registry:
       - id: demonstrates
         target_type: feature
         cardinality: many
+      - id: exercises
+        target_type: use-case
+        cardinality: many
+      - id: from_persona
+        target_type: persona
+        cardinality: one
   - id: implementation
     schema: graph-type/v0
     derives_from: core-node
@@ -1377,3 +1403,166 @@ nodes:
         - feature-graph-viewer
       verifies:
         - req-viewer-full-graph-traversal
+
+  # --- Personas and persona-driven QA -------------------------------------
+  # Personas are concrete profiles of actor roles (persona derives_from
+  # actor). They mirror tools/product-journey/personas.json - the profiles
+  # that drive the persona-QA journey runs - and their evidence is those runs:
+  # a persona walks a use case / scenario from its own perspective (experience,
+  # preferred tools, surface preference, risk focus) and leaves a run bundle.
+
+  - schema: graph/persona/v0
+    id: persona-core-maintainer
+    title: Core maintainer
+    status: active
+    visibility: internal
+    actor_kind: human
+    experience: Senior; maintains a mature repository and is skeptical of bot-generated churn.
+    surface_preference: terminal-first
+    preferred_tools:
+      - terminal
+      - git
+    risk_focus:
+      - reviewability
+      - house-style
+      - minimal diffs
+    summary: Maintainer persona that judges every journey by whether the resulting change is reviewable, house-style, and minimally invasive.
+    sources:
+      - source-product-journey-personas
+    edges:
+      persona_of:
+        - actor-maintainer
+      participates_in:
+        - usecase-maintainer-answers-blocked-agent
+        - usecase-maintainer-audits-frozen-run
+      qa_evidence:
+        - evidence-persona-qa-journeys
+
+  - schema: graph/persona/v0
+    id: persona-dependency-debugger
+    title: Dependency debugger
+    status: active
+    visibility: internal
+    actor_kind: human
+    experience: Experienced developer using Kitsoki to fix a bug in a dependency blocking their own project.
+    surface_preference: web-first
+    preferred_tools:
+      - kitsoki web
+      - browser devtools
+    risk_focus:
+      - time-to-repro
+      - test confidence
+      - handoff artifacts
+    summary: Developer persona optimizing for fast reproduction and a credible handoff, not long-term ownership of the repo being fixed.
+    sources:
+      - source-product-journey-personas
+    edges:
+      persona_of:
+        - actor-developer
+      participates_in:
+        - usecase-developer-runs-bugfix-pipeline
+      qa_evidence:
+        - evidence-persona-qa-journeys
+
+  - schema: graph/persona/v0
+    id: persona-docs-minded-contributor
+    title: Docs-minded contributor
+    status: active
+    visibility: internal
+    actor_kind: human
+    experience: Values clear onboarding and follows documented paths before improvising.
+    surface_preference: docs-first
+    preferred_tools:
+      - docs site
+      - guided tours
+    risk_focus:
+      - stale docs
+      - missing prerequisites
+      - broken demos
+    summary: Developer persona whose journeys fail when documentation, prerequisites, or demos drift from the shipped behavior.
+    sources:
+      - source-product-journey-personas
+    edges:
+      persona_of:
+        - actor-developer
+      participates_in:
+        - usecase-developer-traces-requirement-to-proof
+      qa_evidence:
+        - evidence-persona-qa-journeys
+
+  - schema: graph/persona/v0
+    id: persona-ide-first-engineer
+    title: IDE-first engineer
+    status: active
+    visibility: internal
+    actor_kind: human
+    experience: Expects editor and visual surfaces to explain state without terminal archaeology.
+    surface_preference: vscode-first
+    preferred_tools:
+      - VS Code
+      - kitsoki IDE bridge
+    risk_focus:
+      - visual state
+      - operator questions
+      - navigation clarity
+    summary: Developer persona that exercises the editor and visual surfaces and blocks on anything that requires dropping to the terminal to understand state.
+    sources:
+      - source-product-journey-personas
+    edges:
+      persona_of:
+        - actor-developer
+      participates_in:
+        - usecase-developer-edits-running-story
+      qa_evidence:
+        - evidence-persona-qa-journeys
+
+  - schema: graph/persona/v0
+    id: persona-hobbyist-contributor
+    title: Hobbyist contributor
+    status: active
+    visibility: internal
+    actor_kind: human
+    experience: Contributes in spare time and needs a low-context path from issue selection to a credible small change.
+    surface_preference: docs-and-web-first
+    preferred_tools:
+      - docs site
+      - kitsoki web
+    risk_focus:
+      - time budget
+      - setup friction
+      - clear next step
+    summary: Developer persona with a hard time budget; journeys fail on setup friction or an unclear next step, not on capability depth.
+    sources:
+      - source-product-journey-personas
+    edges:
+      persona_of:
+        - actor-developer
+      participates_in:
+        - usecase-developer-runs-bugfix-pipeline
+      qa_evidence:
+        - evidence-persona-qa-journeys
+
+  - schema: graph/evidence/v0
+    id: evidence-persona-qa-journeys
+    title: Persona-driven QA journey runs
+    status: current
+    visibility: internal
+    evidence_kind: persona_qa_run
+    producers:
+      - tools/product-journey/run.py
+      - tools/product-journey/personas.json
+      - tools/product-journey/scenarios.json
+    artifacts:
+      - artifactDir: .artifacts/product-journey
+        note: per-run bundles keyed by persona x scenario (evidence captures, findings, review verdicts) - e.g. 20260626T*-vscode-core-maintainer-* runs
+    sources:
+      - source-product-journey-personas
+      - source-product-journey-qa
+    edges:
+      demonstrates:
+        - feature-dev-story-bugfix
+      exercises:
+        - usecase-developer-runs-bugfix-pipeline
+        - usecase-developer-edits-running-story
+        - usecase-maintainer-answers-blocked-agent
+      verifies: []
