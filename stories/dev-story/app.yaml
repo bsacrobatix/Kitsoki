@@ -799,8 +799,8 @@ intents:
     priority: 20
   go_gitops:
     title: "Git commands"
-    description: "Open the git command hub — rebase, commit, merge, worktrees."
-    examples: [git, "git ops", "git commands", "version control"]
+    description: "Open the git command hub — status, rebase, commit, merge, worktrees."
+    examples: [git, "git ops", "git commands", "version control", "git status", "repo status", "what's the status of local main vs origin", "what is the state of our local main vs origin"]
     priority: 20
   go_agent:
     title: "Ask Agent"

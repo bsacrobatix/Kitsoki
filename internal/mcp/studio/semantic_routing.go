@@ -12,10 +12,10 @@ import (
 // from KITSOKI_SEMANTIC_ROUTING. It returns (option, true) only when the env var
 // is explicitly set; when absent it returns ok=false so the caller leaves the
 // orchestrator to defer to the per-app routing.enabled config. The `kitsoki mcp`
-// command exports this env var from the global --semantic-routing flag (default
-// false → free-text routing is an isolated main-model decision); flow/cassette
-// tests that open the studio directly leave it unset and keep their deterministic
-// routing fixtures. See docs/architecture/semantic-routing.md.
+// command exports this env var only when the global --semantic-routing flag or
+// env override is explicit; flow/cassette tests that open the studio directly
+// leave it unset and keep their deterministic routing fixtures. See
+// docs/architecture/semantic-routing.md.
 func semanticRoutingEnvOption() (orchestrator.Option, bool) {
 	v, ok := os.LookupEnv("KITSOKI_SEMANTIC_ROUTING")
 	if !ok {

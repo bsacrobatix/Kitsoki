@@ -138,10 +138,9 @@ type Orchestrator struct {
 	// semantic-routing stack (semroute + turn-cache + default_intent sink +
 	// free-form fallback). nil means "no override — defer to the per-app
 	// routing.enabled config"; a non-nil value overrides it. Set via
-	// WithSemanticRouting from the CLI (--semantic-routing / KITSOKI_SEMANTIC_ROUTING),
-	// which defaults it to false so production routing is an isolated main-model
-	// decision (harness.RunTurn). The zero-cost exact display/example match
-	// (TryDeterministic) runs regardless of this gate. See
+	// WithSemanticRouting from explicit CLI/env overrides
+	// (--semantic-routing / KITSOKI_SEMANTIC_ROUTING). The zero-cost exact
+	// display/example match (TryDeterministic) runs regardless of this gate. See
 	// semanticStackEnabled and docs/architecture/semantic-routing.md.
 	semanticOverride *bool
 
@@ -632,9 +631,8 @@ func WithAgentRegistry(reg *agent.Registry) Option {
 // the turn-cache, the default_intent sink, and the app free-form fallback; the
 // zero-cost exact display/example match still runs. Passing true forces the
 // full stack on regardless of per-app config. Not calling this option at all
-// leaves routing deferred to the per-app routing.enabled config (the posture
-// used by tests and the flow runner). The CLI wires this from
-// --semantic-routing / KITSOKI_SEMANTIC_ROUTING, defaulting to false.
+// leaves routing deferred to the per-app routing.enabled config. The CLI wires
+// this only when --semantic-routing or KITSOKI_SEMANTIC_ROUTING is explicit.
 func WithSemanticRouting(enabled bool) Option {
 	return func(o *Orchestrator) { o.semanticOverride = &enabled }
 }
