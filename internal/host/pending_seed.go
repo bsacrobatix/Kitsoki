@@ -58,7 +58,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -135,10 +134,10 @@ func withPendingSeedFile(path string, fn func(*pendingSeedFile) (remove bool, er
 		return fmt.Errorf("pending seed: open lock %s: %w", lockPath, err)
 	}
 	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+	if err := flockExclusive(lock); err != nil {
 		return fmt.Errorf("pending seed: lock %s: %w", lockPath, err)
 	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	defer flockRelease(lock)
 
 	st, err := readPendingSeedFile(path)
 	if err != nil {
