@@ -13,8 +13,17 @@ advanced, rebase the branch in its worktree onto local `main`, rerun focused
 validation, and then run the helper again. Do not manually chmod the primary
 checkout except to repair the guard itself.
 
+Prefer GitHub PRs for review and landing, but do not burn CI on every
+work-in-progress agent branch. The CI workflow is configured so `pull_request`
+runs target `main`; GitHub branch filters on `pull_request` match the PR base
+branch, not the source branch. Open draft or staging PRs against a non-main
+base branch prefix such as `agent/*`, `integration/*`, or `staging/*` when the
+PR is not ready for CI. Retarget or promote the finished PR to `main` only when
+it is ready for the required CI gate and GitHub merge.
+
 When local `main` must be reconciled with `origin/main` or `upstream/main`, do
-not pull into the protected primary checkout. From the primary checkout, run:
+not run `git pull` in the protected primary checkout. From the primary checkout,
+run:
 
 ```
 scripts/sync-main-from-remote.sh --remote origin
