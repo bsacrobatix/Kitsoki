@@ -1253,8 +1253,9 @@ func testCmd() *cobra.Command {
 		Use:   "test",
 		Short: "Run Mode 1 and Mode 2 tests for an app",
 		Long: `Test sub-commands:
-  kitsoki test flows   <app.yaml>   — Mode 2: deterministic flow tests (no LLM)
-  kitsoki test intents <app.yaml>   — Mode 1: intent pass-rate tests
+  kitsoki test flows         <app.yaml>   — Mode 2: deterministic flow tests (no LLM)
+  kitsoki test flow-coverage <app.yaml>   — static flow fixture coverage ledger
+  kitsoki test intents       <app.yaml>   — Mode 1: intent pass-rate tests
 
 Fixture layout (defaults):
   <app-dir>/flows/*.yaml      — flow fixtures (run under 'test flows')
@@ -1264,6 +1265,7 @@ Fixture layout (defaults):
 See 'kitsoki docs llm-guide' §7 for fixture shape.`,
 	}
 	cmd.AddCommand(testFlowsCmd())
+	cmd.AddCommand(testFlowCoverageCmd())
 	cmd.AddCommand(testIntentsCmd())
 	return cmd
 }
