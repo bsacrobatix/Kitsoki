@@ -100,6 +100,14 @@ const typeCounts = computed(() => {
   return counts;
 });
 
+const lifecycleSummaries = computed(() => {
+  return ["available", "active", "proof", "roadmap", "candidate"].map((bucket) => ({
+    bucket,
+    label: lifecycleLabel(bucket),
+    count: data.nodes.filter((node) => lifecycleBucket(node) === bucket).length,
+  }));
+});
+
 const layerSummaries = computed(() => {
   return layers.map((layer) => {
     const nodes = data.nodes.filter((node) => layer.types.includes(nodeType(node)));
@@ -109,6 +117,13 @@ const layerSummaries = computed(() => {
       count: nodes.length,
       selected,
       typeCounts: layer.types.map((type) => ({ type, count: typeCounts.value.get(type) ?? 0 })),
+      lifecycleCounts: ["available", "active", "proof", "roadmap", "candidate"]
+        .map((bucket) => ({
+          bucket,
+          label: lifecycleLabel(bucket),
+          count: nodes.filter((node) => lifecycleBucket(node) === bucket).length,
+        }))
+        .filter((entry) => entry.count > 0),
     };
   });
 });
@@ -263,6 +278,26 @@ function typeOrder(type: string): number {
   return index === -1 ? 99 : index;
 }
 
+function lifecycleBucket(node: GraphNode): string {
+  if (["shipped", "satisfied", "supported"].includes(node.status)) return "available";
+  if (node.status === "active") return "active";
+  if (node.status === "current") return "proof";
+  if (node.status === "proposed") return "roadmap";
+  if (node.status === "draft") return "candidate";
+  return "candidate";
+}
+
+function lifecycleLabel(bucket: string): string {
+  const labels: Record<string, string> = {
+    available: "Available",
+    active: "Active",
+    proof: "Proof",
+    roadmap: "Roadmap",
+    candidate: "Candidate",
+  };
+  return labels[bucket] ?? bucket;
+}
+
 function nodeText(node: GraphNode): string {
   return node.summary ?? node.statement ?? node.desired_outcome ?? node.goal ?? node.rationale ?? "No description yet.";
 }
@@ -287,6 +322,16 @@ function nodeText(node: GraphNode): string {
       </div>
     </header>
 
+    <section class="status-legend" aria-label="Lifecycle status summary">
+      <span
+        v-for="entry in lifecycleSummaries"
+        :key="entry.bucket"
+        :class="['status-badge', `life-${entry.bucket}`]"
+      >
+        {{ entry.label }} {{ entry.count }}
+      </span>
+    </section>
+
     <section class="layer-map" aria-label="Project object graph layers">
       <article
         v-for="layer in layerSummaries"
@@ -298,6 +343,16 @@ function nodeText(node: GraphNode): string {
           <strong>{{ layer.title }}</strong>
           <small>{{ layer.description }}</small>
         </button>
+        <span class="layer-statuses">
+          <span
+            v-for="entry in layer.lifecycleCounts"
+            :key="entry.bucket"
+            :class="['status-dot', `life-${entry.bucket}`]"
+            :title="`${entry.label}: ${entry.count}`"
+          >
+            {{ entry.count }}
+          </span>
+        </span>
         <span class="type-summary">
           <button
             v-for="entry in layer.typeCounts"
@@ -351,7 +406,10 @@ function nodeText(node: GraphNode): string {
             >
               <strong>{{ node.title }}</strong>
               <small>{{ node.id }}</small>
-              <span class="node-meta">{{ node.status }} / {{ node.visibility }}</span>
+              <span class="node-badges">
+                <span :class="['status-badge', `life-${lifecycleBucket(node)}`]">{{ lifecycleLabel(lifecycleBucket(node)) }}</span>
+                <span :class="['visibility-badge', `visibility-${node.visibility}`]">{{ node.visibility }}</span>
+              </span>
             </button>
           </section>
         </div>
@@ -365,8 +423,12 @@ function nodeText(node: GraphNode): string {
               <h2>{{ selectedNode.title }}</h2>
             </div>
             <div class="chips">
-              <span>{{ selectedNode.status }}</span>
-              <span>{{ selectedNode.visibility }}</span>
+              <span :class="['status-badge', `life-${lifecycleBucket(selectedNode)}`]">
+                {{ lifecycleLabel(lifecycleBucket(selectedNode)) }} / {{ selectedNode.status }}
+              </span>
+              <span :class="['visibility-badge', `visibility-${selectedNode.visibility}`]">
+                {{ selectedNode.visibility }}
+              </span>
             </div>
           </div>
 
@@ -406,6 +468,7 @@ function nodeText(node: GraphNode): string {
               <button v-for="node in group.nodes" :key="node.id" @click="selectNode(node.id)">
                 <span>{{ typeLabel(nodeType(node)) }}</span>
                 <strong>{{ node.title }}</strong>
+                <em :class="['relationship-state', `life-${lifecycleBucket(node)}`]">{{ lifecycleLabel(lifecycleBucket(node)) }}</em>
               </button>
             </article>
           </section>
@@ -418,6 +481,7 @@ function nodeText(node: GraphNode): string {
               <button v-for="node in group.nodes" :key="node.id" @click="selectNode(node.id)">
                 <span>{{ typeLabel(nodeType(node)) }}</span>
                 <strong>{{ node.title }}</strong>
+                <em :class="['relationship-state', `life-${lifecycleBucket(node)}`]">{{ lifecycleLabel(lifecycleBucket(node)) }}</em>
               </button>
             </article>
           </section>

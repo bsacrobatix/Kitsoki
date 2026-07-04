@@ -102,6 +102,13 @@ h3 {
   font-weight: 750;
 }
 
+.status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
 .layer-map {
   display: flex;
   gap: 14px;
@@ -139,7 +146,7 @@ h3 {
 
 .layer-map article.active {
   border-color: #1f5f55;
-  box-shadow: inset 0 -4px 0 #1f5f55;
+  box-shadow: inset 0 -4px 0 #1f5f55, 0 8px 22px rgb(31 95 85 / 12%);
 }
 
 .layer-map article.contains:not(.active) {
@@ -173,6 +180,24 @@ h3 {
   font-size: 13px;
 }
 
+.layer-statuses {
+  display: flex;
+  gap: 5px;
+}
+
+.status-dot {
+  align-items: center;
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 900;
+  height: 20px;
+  justify-content: center;
+  min-width: 24px;
+  padding: 0 7px;
+}
+
 .type-summary {
   display: flex;
   flex-wrap: wrap;
@@ -181,7 +206,6 @@ h3 {
 }
 
 .type-summary button,
-.chips span,
 .type-filter button,
 .type-chain button {
   background: #eef3ef;
@@ -197,6 +221,86 @@ h3 {
   background: #1f5f55;
   border-color: #1f5f55;
   color: #fff;
+}
+
+.status-badge,
+.visibility-badge {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  padding: 6px 8px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.life-available {
+  background: #1f7a55;
+  border-color: #176443;
+  color: #fff;
+}
+
+.status-badge.life-available {
+  background: #dff4e9;
+  color: #11583a;
+}
+
+.life-active {
+  background: #2868b7;
+  border-color: #1d5394;
+  color: #fff;
+}
+
+.status-badge.life-active {
+  background: #e2efff;
+  color: #174c88;
+}
+
+.life-proof {
+  background: #7856b8;
+  border-color: #61429d;
+  color: #fff;
+}
+
+.status-badge.life-proof {
+  background: #eee7fb;
+  color: #57398e;
+}
+
+.life-roadmap {
+  background: #b96515;
+  border-color: #95500f;
+  color: #fff;
+}
+
+.status-badge.life-roadmap {
+  background: #fff0dc;
+  color: #81420a;
+}
+
+.life-candidate {
+  background: #6b7280;
+  border-color: #555c68;
+  color: #fff;
+}
+
+.status-badge.life-candidate {
+  background: #eef0f3;
+  color: #4b5563;
+}
+
+.visibility-public {
+  background: #e0f2fe;
+  border-color: #99d7f6;
+  color: #075985;
+}
+
+.visibility-internal {
+  background: #f4e8d8;
+  border-color: #dfc29d;
+  color: #794b19;
 }
 
 .workspace {
@@ -304,11 +408,30 @@ input {
   text-align: left;
 }
 
-.node-meta {
-  color: #66716d;
-  font-size: 11px;
-  font-weight: 850;
-  text-transform: uppercase;
+.object-list button:has(.life-available) {
+  border-left: 5px solid #1f7a55;
+}
+
+.object-list button:has(.life-active) {
+  border-left: 5px solid #2868b7;
+}
+
+.object-list button:has(.life-proof) {
+  border-left: 5px solid #7856b8;
+}
+
+.object-list button:has(.life-roadmap) {
+  border-left: 5px solid #b96515;
+}
+
+.object-list button:has(.life-candidate) {
+  border-left: 5px solid #6b7280;
+}
+
+.node-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
 }
 
 .object-list button.selected {
@@ -424,6 +547,17 @@ code {
   padding: 10px;
   text-align: left;
   width: 100%;
+}
+
+.relationship-state {
+  border-radius: 999px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+  justify-self: start;
+  line-height: 1;
+  padding: 5px 7px;
+  text-transform: uppercase;
 }
 
 .sources {
