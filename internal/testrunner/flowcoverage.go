@@ -26,6 +26,14 @@ type FlowCoverageOptions struct {
 	// RequireAllBranches fails the gate when any authored transition branch is
 	// uncovered.
 	RequireAllBranches bool
+	// MinEffectCoverage fails the gate when authored effect coverage is below
+	// this percentage. Zero disables the threshold.
+	MinEffectCoverage float64
+	// RequireAllEffects fails the gate when any authored effect is uncovered.
+	RequireAllEffects bool
+	// RequireHostAssertions fails the gate when a covered invoke effect is not
+	// backed by expect_host_calls or a host cassette.
+	RequireHostAssertions bool
 	// MaxCombinations caps enum slot product expansion per state+intent. Larger
 	// products are reported as skipped so authors can opt into a narrower check.
 	MaxCombinations int
@@ -39,7 +47,9 @@ type FlowCoverageReport struct {
 	AppPath         string                  `json:"app_path"`
 	FlowsGlob       string                  `json:"flows_glob"`
 	BranchCoverage  CoverageSummary         `json:"branch_coverage"`
+	EffectCoverage  CoverageSummary         `json:"effect_coverage"`
 	Branches        []FlowBranchCoverage    `json:"branches"`
+	Effects         []FlowEffectCoverage    `json:"effects,omitempty"`
 	ParameterChecks []FlowParameterCoverage `json:"parameter_checks,omitempty"`
 	FlowFiles       []string                `json:"flow_files"`
 	Problems        []string                `json:"problems,omitempty"`
@@ -64,6 +74,31 @@ type FlowBranchCoverage struct {
 	Default   bool     `json:"default,omitempty"`
 	Covered   bool     `json:"covered"`
 	FlowFiles []string `json:"flow_files,omitempty"`
+}
+
+// FlowEffectCoverage describes one authored state-machine effect site.
+type FlowEffectCoverage struct {
+	ID           string         `json:"id"`
+	State        string         `json:"state"`
+	Origin       string         `json:"origin"`
+	Intent       string         `json:"intent,omitempty"`
+	BranchIndex  int            `json:"branch_index,omitempty"`
+	EffectIndex  string         `json:"effect_index"`
+	Kind         string         `json:"kind"`
+	When         string         `json:"when,omitempty"`
+	Invoke       string         `json:"invoke,omitempty"`
+	HostRun      *HostRunEffect `json:"host_run,omitempty"`
+	Covered      bool           `json:"covered"`
+	HostAsserted bool           `json:"host_asserted,omitempty"`
+	FlowFiles    []string       `json:"flow_files,omitempty"`
+}
+
+// HostRunEffect records the high-risk shape of a host.run call site.
+type HostRunEffect struct {
+	Cmd  any `json:"cmd,omitempty"`
+	Args any `json:"args,omitempty"`
+	Cwd  any `json:"cwd,omitempty"`
+	Bind any `json:"bind,omitempty"`
 }
 
 // FlowParameterCoverage describes bounded enum-slot coverage for one
@@ -112,6 +147,19 @@ func RunFlowCoverage(ctx context.Context, appPath string, opts FlowCoverageOptio
 	for i := range branches {
 		byKey[branches[i].ID] = &branches[i]
 	}
+	effects := collectFlowEffects(def)
+	effectsByBranch := make(map[string][]*FlowEffectCoverage)
+	onEnterByState := make(map[string][]*FlowEffectCoverage)
+	for i := range effects {
+		eff := &effects[i]
+		switch eff.Origin {
+		case "transition":
+			key := branchID(eff.State, eff.Intent, eff.BranchIndex)
+			effectsByBranch[key] = append(effectsByBranch[key], eff)
+		case "on_enter":
+			onEnterByState[eff.State] = append(onEnterByState[eff.State], eff)
+		}
+	}
 
 	param := newParameterLedger(def, opts.MaxCombinations)
 	var problems []string
@@ -126,10 +174,16 @@ func RunFlowCoverage(ctx context.Context, appPath string, opts FlowCoverageOptio
 				problems = append(problems, fmt.Sprintf("%s: flow fixture missing initial_state", file))
 				continue
 			}
+			cassetteHandlers, cerr := fixtureCassetteHandlers(file, fixture)
+			if cerr != nil {
+				problems = append(problems, cerr.Error())
+			}
+			markOnEnterEffects(onEnterByState, state, file, cassetteHandlers)
 			for i, turn := range fixture.Turns {
 				if turn.Intent == nil {
 					if turn.ExpectState != "" {
 						state = turn.ExpectState
+						markOnEnterEffects(onEnterByState, state, file, cassetteHandlers)
 					}
 					continue
 				}
@@ -150,11 +204,13 @@ func RunFlowCoverage(ctx context.Context, appPath string, opts FlowCoverageOptio
 						got.Covered = true
 						got.FlowFiles = appendUnique(got.FlowFiles, file)
 					}
+					markBranchEffects(effectsByBranch, branch.ID, file, turn, cassetteHandlers)
 				}
 
 				nextState := inferNextState(candidates, state, turn)
 				if nextState != "" {
 					state = nextState
+					markOnEnterEffects(onEnterByState, state, file, cassetteHandlers)
 				}
 			}
 		}
@@ -172,6 +228,22 @@ func RunFlowCoverage(ctx context.Context, appPath string, opts FlowCoverageOptio
 	if summary.Total > 0 {
 		summary.Percent = float64(summary.Covered) * 100 / float64(summary.Total)
 	}
+	sort.Slice(effects, func(i, j int) bool { return effects[i].ID < effects[j].ID })
+	effectCovered := 0
+	hostAssertionMissing := false
+	for i := range effects {
+		sort.Strings(effects[i].FlowFiles)
+		if effects[i].Covered {
+			effectCovered++
+		}
+		if effects[i].Covered && effects[i].Invoke != "" && !effects[i].HostAsserted {
+			hostAssertionMissing = true
+		}
+	}
+	effectSummary := CoverageSummary{Covered: effectCovered, Total: len(effects)}
+	if effectSummary.Total > 0 {
+		effectSummary.Percent = float64(effectSummary.Covered) * 100 / float64(effectSummary.Total)
+	}
 
 	paramChecks := param.results()
 	passed := true
@@ -181,19 +253,30 @@ func RunFlowCoverage(ctx context.Context, appPath string, opts FlowCoverageOptio
 	if opts.MinBranchCoverage > 0 && summary.Percent+1e-9 < opts.MinBranchCoverage {
 		passed = false
 	}
+	if opts.RequireAllEffects && effectSummary.Covered != effectSummary.Total {
+		passed = false
+	}
+	if opts.MinEffectCoverage > 0 && effectSummary.Percent+1e-9 < opts.MinEffectCoverage {
+		passed = false
+	}
+	if opts.RequireHostAssertions && hostAssertionMissing {
+		passed = false
+	}
 
 	report := &FlowCoverageReport{
 		App:             def.App.ID,
 		AppPath:         appPath,
 		FlowsGlob:       opts.FlowsGlob,
 		BranchCoverage:  summary,
+		EffectCoverage:  effectSummary,
 		Branches:        branches,
+		Effects:         effects,
 		ParameterChecks: paramChecks,
 		FlowFiles:       files,
 		Problems:        problems,
 		Passed:          passed,
 	}
-	if len(problems) > 0 && opts.RequireAllBranches {
+	if len(problems) > 0 && (opts.RequireAllBranches || opts.RequireAllEffects || opts.RequireHostAssertions) {
 		report.Passed = false
 	}
 	if opts.JSONOut != "" {
@@ -252,6 +335,172 @@ func collectFlowBranches(def *app.AppDef) []FlowBranchCoverage {
 		}
 	})
 	return out
+}
+
+func collectFlowEffects(def *app.AppDef) []FlowEffectCoverage {
+	var out []FlowEffectCoverage
+	walkStates("", def.States, func(path string, st *app.State) {
+		out = append(out, collectEffectSites(path, "on_enter", "", 0, st.OnEnter, "on_enter")...)
+		for intentName, transitions := range st.On {
+			for branchIdx, tr := range transitions {
+				origin := fmt.Sprintf("%s#%s[%d]", path, intentName, branchIdx)
+				out = append(out, collectEffectSites(path, "transition", intentName, branchIdx, tr.Effects, origin)...)
+			}
+		}
+	})
+	return out
+}
+
+func collectEffectSites(state, originKind, intent string, branchIdx int, effects []app.Effect, origin string) []FlowEffectCoverage {
+	var out []FlowEffectCoverage
+	var walk func([]app.Effect, string)
+	walk = func(list []app.Effect, prefix string) {
+		for idx, eff := range list {
+			effectIndex := fmt.Sprintf("%s%d", prefix, idx)
+			id := fmt.Sprintf("%s:%s.effects[%s]", origin, originKind, effectIndex)
+			site := FlowEffectCoverage{
+				ID:          id,
+				State:       state,
+				Origin:      originKind,
+				Intent:      intent,
+				BranchIndex: branchIdx,
+				EffectIndex: effectIndex,
+				Kind:        effectKind(eff),
+				When:        eff.When,
+				Invoke:      eff.Invoke,
+			}
+			if eff.Invoke == "host.run" {
+				site.HostRun = &HostRunEffect{
+					Cmd:  eff.With["cmd"],
+					Args: eff.With["args"],
+					Cwd:  eff.With["cwd"],
+					Bind: eff.Bind,
+				}
+			}
+			out = append(out, site)
+			if len(eff.OnComplete) > 0 {
+				walk(eff.OnComplete, effectIndex+".on_complete.")
+			}
+			if len(eff.Effects) > 0 {
+				walk(eff.Effects, effectIndex+".effects.")
+			}
+		}
+	}
+	walk(effects, "")
+	return out
+}
+
+func effectKind(eff app.Effect) string {
+	var kinds []string
+	if eff.Invoke != "" {
+		kinds = append(kinds, "invoke")
+	}
+	if len(eff.Set) > 0 {
+		kinds = append(kinds, "set")
+	}
+	if len(eff.Increment) > 0 {
+		kinds = append(kinds, "increment")
+	}
+	if eff.Say != "" {
+		kinds = append(kinds, "say")
+	}
+	if eff.Emit != "" {
+		kinds = append(kinds, "emit")
+	}
+	if eff.EmitIntent != "" {
+		kinds = append(kinds, "emit_intent")
+	}
+	if eff.Target != "" {
+		kinds = append(kinds, "target")
+	}
+	if len(eff.OnComplete) > 0 {
+		kinds = append(kinds, "on_complete")
+	}
+	if len(eff.Effects) > 0 {
+		kinds = append(kinds, "effects")
+	}
+	if len(kinds) == 0 {
+		return "noop"
+	}
+	return strings.Join(kinds, "+")
+}
+
+func fixtureCassetteHandlers(flowFile string, fixture FlowFixture) (map[string]bool, error) {
+	if fixture.HostCassette == "" {
+		return nil, nil
+	}
+	cassettePath := fixture.HostCassette
+	if !filepath.IsAbs(cassettePath) {
+		cassettePath = filepath.Join(filepath.Dir(flowFile), cassettePath)
+	}
+	cas, err := LoadCassette(cassettePath)
+	if err != nil {
+		return nil, fmt.Errorf("%s: load host_cassette %q: %w", flowFile, fixture.HostCassette, err)
+	}
+	handlers := make(map[string]bool)
+	for _, episode := range cas.Episodes {
+		if handler, ok := episode.Match["handler"]; ok {
+			handlers[fmt.Sprint(handler)] = true
+		}
+	}
+	return handlers, nil
+}
+
+func markBranchEffects(byBranch map[string][]*FlowEffectCoverage, branchID, file string, turn FlowTurn, cassetteHandlers map[string]bool) {
+	for _, eff := range byBranch[branchID] {
+		markEffect(eff, file, turnHostAsserted(turn, eff.Invoke) || cassetteHandlers[eff.Invoke])
+	}
+}
+
+func markOnEnterEffects(byState map[string][]*FlowEffectCoverage, state, file string, cassetteHandlers map[string]bool) {
+	for _, eff := range byState[state] {
+		markEffect(eff, file, cassetteHandlers[eff.Invoke])
+	}
+}
+
+func markEffect(eff *FlowEffectCoverage, file string, hostAsserted bool) {
+	eff.Covered = true
+	eff.FlowFiles = appendUnique(eff.FlowFiles, file)
+	if eff.Invoke != "" && hostAsserted {
+		eff.HostAsserted = true
+	}
+}
+
+func turnHostAsserted(turn FlowTurn, invoke string) bool {
+	if invoke == "" {
+		return false
+	}
+	for _, call := range turn.ExpectHostCalls {
+		if call.Handler == invoke {
+			return true
+		}
+	}
+	for _, ev := range turn.ExpectEvents {
+		if eventMatchesHandler(ev, invoke) {
+			return true
+		}
+	}
+	for _, ev := range turn.ExpectEventsExact {
+		if eventMatchesHandler(ev, invoke) {
+			return true
+		}
+	}
+	return false
+}
+
+func eventMatchesHandler(ev FlowEvent, handler string) bool {
+	if ev.Kind != "" && ev.Kind != "HostDispatched" {
+		return false
+	}
+	if ev.Effect == nil {
+		return false
+	}
+	for _, key := range []string{"handler", "invoke"} {
+		if got, ok := ev.Effect[key]; ok && fmt.Sprint(got) == handler {
+			return true
+		}
+	}
+	return false
 }
 
 func walkStates(prefix string, states map[string]*app.State, visit func(string, *app.State)) {
