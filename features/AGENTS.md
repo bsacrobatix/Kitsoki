@@ -49,6 +49,12 @@ file-based — see `schema.ts`):
   `videoBase` must match the spec's `ARTIFACT_DIR` / `saveVideoAsMp4` values.
   `external: true` marks demos that depend on paths outside this repo — they
   are excluded from recording and path validation.
+- `demo.embed`: presents a rrweb-native story-demo (its video spec is a
+  permanent stub) as an embedded Slidey deck clip instead of an mp4 — set
+  `{ deck, rrweb }` to the source deck JSON and the clip's `rrweb` path as
+  written in that deck; codegen derives the scene index. The deck's committed
+  self-contained bundle (`docs/decks/bundled/<deck-id>.html`) must exist.
+  Full contract: `docs/media/README.md` § Deck embeds on the product site.
 - `tour.export`: the generated const name. Specs import it from
   `src/tour/generated/<id>.js`; renaming it breaks the import (the bijection
   check will tell you).

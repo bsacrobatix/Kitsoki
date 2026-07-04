@@ -81,6 +81,26 @@ export const DemoSchema = z.strictObject({
    * tests/playwright/_helpers/camera.ts.
    */
   profiles: z.array(z.enum(["desktop", "tablet", "mobile"])).nonempty().optional(),
+  /**
+   * Renders this story-demo as an EMBEDDED Slidey deck clip instead of an mp4 —
+   * for a rrweb-native tour whose demo.spec is a PERMANENT stub (see the spec
+   * file's STATUS header: captured by a companion *-rrweb-capture.spec.ts,
+   * never an mp4). `deck` is the repo-relative SOURCE deck spec (JSON) that
+   * already carries this feature's clip as one scene; `rrweb` is that scene's
+   * `rrweb` path exactly as written in the deck JSON, used to resolve the scene
+   * index at codegen time (never hand-picked in YAML, so a reordered deck can't
+   * silently point the page at the wrong scene — see findEmbedScene below).
+   * The deck is bundled ONCE, offline (`slidey bundle <deck> <html>`), to
+   * docs/decks/bundled/<deck-stem>.html — a committed, self-contained
+   * interactive HTML asset (see embedHtmlPath) — and staged into the site
+   * verbatim at build time; no slidey CLI is required in CI.
+   */
+  embed: z
+    .strictObject({
+      deck: z.string().min(1),
+      rrweb: z.string().min(1),
+    })
+    .optional(),
 });
 
 export const QaScenarioSchema = z.strictObject({
@@ -238,6 +258,44 @@ export type Feature = z.infer<typeof FeatureSchema>;
 export type TourStepData = z.infer<typeof TourStepSchema>;
 
 /**
+ * Resolve a `demo.embed` binding to a scene index by matching `rrweb` against
+ * the SOURCE deck JSON's scenes — the index is always derived, never authored,
+ * so a reordered/edited deck can't silently strand the embed on the wrong
+ * scene. Shared by validateCatalog (existence/shape) and generate.ts's
+ * buildDemoIndex (the computed `sceneIndex` the site consumes).
+ */
+export function findEmbedScene(
+  repoRoot: string,
+  embed: { deck: string; rrweb: string },
+): { sceneIndex: number } | { error: string } {
+  const deckPath = path.join(repoRoot, embed.deck);
+  if (!fs.existsSync(deckPath)) return { error: `deck "${embed.deck}" does not exist` };
+  let deck: { scenes?: Array<Record<string, unknown>> };
+  try {
+    deck = JSON.parse(fs.readFileSync(deckPath, "utf8"));
+  } catch (e) {
+    return { error: `deck "${embed.deck}" is not valid JSON: ${e instanceof Error ? e.message : e}` };
+  }
+  const idx = (deck.scenes ?? []).findIndex((s) => s.rrweb === embed.rrweb);
+  if (idx < 0) return { error: `deck "${embed.deck}" has no scene with rrweb "${embed.rrweb}"` };
+  return { sceneIndex: idx };
+}
+
+/**
+ * docs/decks/<stem>.slidey.json → docs/decks/bundled/<stem>.html — the
+ * committed, self-contained Slidey bundle a `demo.embed` serves. Bundled
+ * offline (`slidey bundle`); see DemoSchema.embed's doc comment for why this
+ * isn't rebuilt in CI.
+ */
+export function embedHtmlPath(deck: string): string {
+  const stem = path
+    .basename(deck)
+    .replace(/\.slidey\.json$/, "")
+    .replace(/\.json$/, "");
+  return path.join(path.dirname(deck), "bundled", `${stem}.html`);
+}
+
+/**
  * Match a docs-manifest `from` pattern against a repo-relative path. The
  * manifest globs are deliberately simple — an exact path or a single `*`
  * standing in for one path segment (e.g. `docs/architecture/*.md`). We model
@@ -347,10 +405,24 @@ export function validateCatalog(
         if (f.demo.flow) mustExist.push(["demo.flow", f.demo.flow]);
         if (f.demo.hostCassette) mustExist.push(["demo.hostCassette", f.demo.hostCassette]);
       }
+      if (f.demo.embed) mustExist.push(["demo.embed.deck", f.demo.embed.deck]);
     }
     for (const [what, rel] of mustExist) {
       if (!fs.existsSync(path.join(repoRoot, rel))) {
         problems.push(`${file}: ${what} path "${rel}" does not exist`);
+      }
+    }
+    if (f.demo?.embed) {
+      const embed = f.demo.embed;
+      if (fs.existsSync(path.join(repoRoot, embed.deck))) {
+        const res = findEmbedScene(repoRoot, embed);
+        if ("error" in res) problems.push(`${file}: demo.embed ${res.error}`);
+        const html = embedHtmlPath(embed.deck);
+        if (!fs.existsSync(path.join(repoRoot, html))) {
+          problems.push(
+            `${file}: demo.embed bundled html "${html}" does not exist — bundle it once: slidey bundle ${embed.deck} ${html}`,
+          );
+        }
       }
     }
   }

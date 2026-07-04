@@ -21,7 +21,14 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { parse } from "yaml";
 import { z } from "zod";
-import { FeatureObjectSchema, FeatureSchema, validateCatalog, type Feature } from "./schema.js";
+import {
+  FeatureObjectSchema,
+  FeatureSchema,
+  validateCatalog,
+  findEmbedScene,
+  embedHtmlPath,
+  type Feature,
+} from "./schema.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // scripts/features → scripts → runstatus → tools → repo root
@@ -245,6 +252,23 @@ function buildDemoIndex(d: NonNullable<Feature["demo"]>) {
     flow: d.flow ?? null,
     hostCassette: d.hostCassette ?? null,
     external: d.external ?? false,
+    embed: buildEmbedIndex(d.embed),
+  };
+}
+
+/**
+ * Resolve a `demo.embed` binding to the computed site contract: the committed
+ * bundled-html path plus the scene index derived from its `rrweb` match. The
+ * catalog is already validated (validateCatalog) by the time this runs, so a
+ * bad binding here would be a codegen bug, not a content error.
+ */
+function buildEmbedIndex(embed: NonNullable<Feature["demo"]>["embed"]) {
+  if (!embed) return null;
+  const res = findEmbedScene(repoRoot, embed);
+  if ("error" in res) throw new Error(`demo.embed: ${res.error}`);
+  return {
+    deckHtml: embedHtmlPath(embed.deck),
+    sceneIndex: res.sceneIndex,
   };
 }
 
