@@ -72,25 +72,21 @@ Each has an adversarial flow fixture, cross-checked against `goal.py`'s golden v
 ## Testing — the gate command wipes `.artifacts/goal/flow-*` first
 
 ```
-rm -rf .artifacts/goal/flow-* && go run ./cmd/kitsoki test flows stories/goal-seeker/app.yaml
+find .artifacts/goal -maxdepth 1 -name 'flow-*' -exec rm -rf {} + &&
+go run ./cmd/kitsoki test flows stories/goal-seeker/app.yaml
 ```
 
-`reset_log: true` (every `flows/*.yaml` fixture that runs the real backbone) only
-truncates `<work_dir>/log.jsonl` (`gs_init.star`, mirroring `goal.py:init` — a fresh
-*log* is the goal.py-parity affordance). `ledger.json`/`preamble.md` are safe to leave:
-`gs_ledger`/`gs_preamble` fully overwrite them every fold from the log + decomposition,
-so a stale copy can never be read. `<work_dir>/manifests/<change_id>.json`
-(`gs_manifest.star`, written from `dispatch`) is **not** self-healing the same way — it
-is written once per change and only overwritten if `dispatch` is re-entered for that
-*same* change, so a stale manifest left over from a previous run (or from a run that
-died before `dispatch` finished) can silently stand in for a fresh one and turn a real
-regression into a false pass. `ctx.fs` (the Starlark sandbox) deliberately has no
-delete, and every `flows/*.yaml` fixture here stubs `host.run` wholesale (so a
-bootstrap-time `rm -rf` invoke would silently no-op under `test flows` and only take
-effect on a live run) — so there is no in-story way to make a flow run self-wipe.
+`reset_log: true` is a TEST-FIXTURE-ONLY destructive reset. It truncates
+`<work_dir>/log.jsonl`, which discards all append-only history and therefore every
+`integrated` fact. To keep hermetic flow fixtures from reading stale derived state,
+`gs_init.star` also writes the empty `ledger.json` shape, blanks `preamble.md`, and
+neutralizes existing `<work_dir>/manifests/*.json` files with `{}`. Real sessions must
+leave `reset_log:false`; targeted unpark/reopen work should append a precise log entry
+instead of wiping the run.
 **Always wipe before invoking `test flows`** (per-fixture `work_dir`s already live under
-`.artifacts/goal/flow-*`, so the one `rm -rf` above covers all of them); the two-clean-runs
-check in this story's plan record exists specifically to catch a residue-masked flow.
+`.artifacts/goal/flow-*`, so the `find` cleanup above covers all of them even under zsh
+`nomatch`); the two-clean-runs check in this story's plan record exists specifically to
+catch a residue-masked flow.
 
 ## Importer contract
 
