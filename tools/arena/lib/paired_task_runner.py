@@ -31,6 +31,23 @@ KITSOKI_ROOT = Path(os.environ.get("KITSOKI_ROOT", "/workspace/kitsoki")).resolv
 CORPUS = KITSOKI_ROOT / "tools/arena/corpus/cost-bench.manifest.yaml"
 BENCH = KITSOKI_ROOT / "tools/bugfix-bakeoff/external/bench.py"
 
+sys.path.insert(0, str(KITSOKI_ROOT / "tools/session-mining"))
+from pricing import price_for  # noqa: E402  (path set above; single price table for the repo)
+
+
+def blended_cost_usd(model: str, tokens: int) -> tuple[float, bool]:
+    """Rough USD cost from a TOTAL token count only.
+
+    codex exec's summary reports one combined "tokens used" figure with no
+    input/output split, so this can't be the exact per-bucket price_for()/
+    message_cost() computation the mining tools use on real usage blocks.
+    Blend input+output at 1:1 as a documented approximation; is_exact always
+    false here regardless of the model's own is_estimate flag.
+    """
+    price, _ = price_for(model)
+    blended_rate = (price.input + price.output) / 2
+    return round(tokens * blended_rate / 1e6, 6), False
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -42,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--effort", default="")
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--arm-only", action="store_true")
-    parser.add_argument("--work-root", default=os.environ.get("ARENA_PAIRED_TASK_WORK_ROOT", "/workspace/arena-paired-task"))
+    parser.add_argument("--work-root", default=os.environ.get("ARENA_PAIRED_TASK_WORK_ROOT", "/workspace/kitsoki/.artifacts/arena/paired-task-work"))
     args = parser.parse_args(argv)
 
     if args.live == args.arm_only:
@@ -139,7 +156,7 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
         tokens=tokens,
         wall_s=elapsed(started),
         evidence_refs=[str(CORPUS) + "#" + str(task["id"]), score.get("evidence", "")],
-        trace_ref=trace_ref,
+        trace_ref=container_path(trace_ref),
         notes="; ".join(part for part in [dispatch.get("notes", ""), score.get("notes", "")] if part),
         exit_code=0,
     )
@@ -189,11 +206,11 @@ def dispatch_worker(args: argparse.Namespace, task: dict[str, Any], tree: Path, 
     cmd = [
         "codex",
         "exec",
-        "--cd",
+        "-C",
         str(tree),
-        "--ask-for-approval",
-        "never",
-        "--sandbox",
+        "--skip-git-repo-check",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "-s",
         "danger-full-access",
     ]
     if args.model:
@@ -206,10 +223,13 @@ def dispatch_worker(args: argparse.Namespace, task: dict[str, Any], tree: Path, 
         "stdout_tail": proc.stdout[-4000:],
         "stderr_tail": proc.stderr[-4000:],
     }, indent=2), encoding="utf-8")
+    tokens = parse_tokens(proc.stdout + "\n" + proc.stderr)
+    cost_usd, cost_exact = blended_cost_usd(args.model or "gpt-5.5", tokens)
     return {
         "blocked": proc.returncode != 0,
-        "notes": f"codex exit={proc.returncode}: {first_line(proc.stdout + chr(10) + proc.stderr)}",
-        "metrics": {"cost_usd": 0.0, "tokens": 0},
+        "notes": f"codex exit={proc.returncode}: {first_line(proc.stdout + chr(10) + proc.stderr)}"
+        + (f"; cost_usd={cost_usd} (blended estimate, not exact)" if not cost_exact else ""),
+        "metrics": {"cost_usd": cost_usd, "tokens": tokens},
     }
 
 
@@ -233,11 +253,11 @@ def score_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:
         green = str(oracle["required_text"]) in text
         return {
             "verdict": "solved" if green else "failed",
-            "evidence": str(target),
+            "evidence": container_path(target),
             "notes": f"github_content oracle green={green}",
         }
     if oracle.get("kind") == "external_bakeoff":
-        out = Path(tempfile.mkdtemp(prefix="arena-score-")) / "cell.json"
+        out = tree.parent / f"{tree.name}-score.json"
         cmd = [
             "python3",
             str(BENCH),
@@ -262,7 +282,7 @@ def score_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:
             cell = json.loads(out.read_text(encoding="utf-8"))
             verdict = str(((cell.get("outcome") or {}).get("quality")) or verdict)
             notes = notes or json.dumps(cell.get("outcome", {}), sort_keys=True)
-        return {"verdict": verdict, "evidence": str(out), "notes": notes}
+        return {"verdict": verdict, "evidence": container_path(out), "notes": notes}
     return {"verdict": "blocked", "evidence": "", "notes": f"unknown oracle kind {oracle.get('kind')!r}"}
 
 
@@ -320,8 +340,35 @@ def first_line(blob: str) -> str:
     return ""
 
 
+def parse_tokens(blob: str) -> int:
+    lines = [line.strip() for line in blob.splitlines()]
+    for idx, line in enumerate(lines):
+        if line.lower() == "tokens used" and idx + 1 < len(lines):
+            try:
+                return int(lines[idx + 1].replace(",", ""))
+            except ValueError:
+                return 0
+    return 0
+
+
 def safe_name(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in value)[:180]
+
+
+def container_path(path: str | Path) -> str:
+    """Translate a /workspace/kitsoki-rooted path to its host-visible path.
+
+    Cell JSONs are read back on the host after the container exits; without
+    this they'd carry a container-only prefix nothing on the host can open.
+    ARENA_HOST_REPO_ROOT is the host side of the same bind mount (set by
+    DockerBackend.run from the cell's own mounts, so it's exact per-run — no
+    guessing at the mount source).
+    """
+    text = str(path)
+    host_root = os.environ.get("ARENA_HOST_REPO_ROOT")
+    if host_root and text.startswith(str(KITSOKI_ROOT)):
+        return host_root.rstrip("/") + text[len(str(KITSOKI_ROOT)):]
+    return text
 
 
 def redact_cmd(cmd: list[str]) -> list[str]:

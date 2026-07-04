@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -47,7 +48,11 @@ def _make_mounts_for(spec):
                 f"placement.host_repo has no checkout path for host '{host}'. "
                 f"Add it to the spec (e.g. host_repo:\n    {host}: /opt/bakeoff/repos/kitsoki)."
             )
-        return {src: "/workspace/kitsoki"}
+        mounts = {src: "/workspace/kitsoki"}
+        codex_home = os.environ.get("ARENA_CODEX_HOME_SRC")
+        if codex_home:
+            mounts[codex_home] = "/workspace/codex-home"
+        return mounts
 
     return _mounts_for
 

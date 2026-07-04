@@ -1,0 +1,23 @@
+{
+  "axis": {
+    "task": "query-string-qs1-bugfix-test-repair"
+  },
+  "cell_id": "cost-bench-pilot--kitsoki-codex-native--task:query-string-qs1-bugfix-test-repair",
+  "evidence_refs": [
+    "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/tools/arena/corpus/cost-bench.manifest.yaml#query-string-qs1-bugfix-test-repair",
+    "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/.artifacts/arena/paired-task-work/query-string-qs1-bugfix-test-repair--kitsoki--codex--gpt-5.5-score.json"
+  ],
+  "health": "model:result",
+  "job_type": "paired-task",
+  "metrics": {
+    "cost_usd": 0.477878,
+    "host": "local",
+    "tokens": 84956,
+    "wall_s": 201.758
+  },
+  "notes": "codex exit=0: Implemented the issue 336 fix.; [bench] query-string/qs1 oracle=pass suite=True -> solved; cost_usd=0.477878 (blended estimate, not exact)",
+  "target_id": "cost-bench-pilot",
+  "trace_ref": "",
+  "variant_id": "kitsoki-codex-native",
+  "verdict": "solved"
+}

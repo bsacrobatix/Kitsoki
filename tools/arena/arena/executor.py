@@ -9,6 +9,7 @@ is the local daemon, `vm-N` a remote VM's daemon (a later phase registers those)
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 from typing import Callable, Protocol
@@ -57,6 +58,18 @@ class DockerBackend:
         cmd += ["run", "--rm"]
         for src, dst in mounts.items():
             cmd += ["-v", f"{src}:{dst}"]
+            if dst == "/workspace/kitsoki":
+                cmd += ["-e", f"ARENA_HOST_REPO_ROOT={src}"]
+        if os.environ.get("ARENA_CODEX_HOME_SRC"):
+            cmd += ["-e", "CODEX_HOME=/workspace/codex-home"]
+        for name in (
+            "ARENA_PAIRED_TASK_ENABLE_CODEX",
+            "ARENA_CODEX_TIMEOUT_S",
+            "ARENA_PAIRED_TASK_WORK_ROOT",
+        ):
+            value = os.environ.get(name)
+            if value is not None:
+                cmd += ["-e", f"{name}={value}"]
         cmd += [image, *argv]
         proc = self._runner(cmd, capture_output=True, text=True)
         return ContainerRun(

@@ -1,0 +1,23 @@
+{
+  "axis": {
+    "task": "vscode-01-docs-site-release"
+  },
+  "cell_id": "cost-bench-pilot--kitsoki-codex-native--task:vscode-01-docs-site-release",
+  "evidence_refs": [
+    "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/tools/arena/corpus/cost-bench.manifest.yaml#vscode-01-docs-site-release",
+    "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/.artifacts/arena/paired-task-work/vscode-01-docs-site-release--kitsoki--codex--gpt-5.5/src/vs/sessions/LAYOUT_CONTROLLER.md"
+  ],
+  "health": "model:result",
+  "job_type": "paired-task",
+  "metrics": {
+    "cost_usd": 0.373883,
+    "host": "local",
+    "tokens": 66468,
+    "wall_s": 90.732
+  },
+  "notes": "codex exit=0: Applied the documentation-only slice from microsoft/vscode commit `7317e60` ([upstream patch](https://github.com/microsoft/vscode/commit/7317e60fe47bea256caf45ef830427365e4e6b3d.patch)).; github_content oracle green=True; cost_usd=0.373883 (blended estimate, not exact)",
+  "target_id": "cost-bench-pilot",
+  "trace_ref": "",
+  "variant_id": "kitsoki-codex-native",
+  "verdict": "solved"
+}
