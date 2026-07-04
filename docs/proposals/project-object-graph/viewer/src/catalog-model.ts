@@ -24,6 +24,10 @@ export interface GraphNode {
   executor?: string;
   actor?: string;
   actor_kind?: string;
+  experience?: string;
+  surface_preference?: string;
+  preferred_tools?: string[];
+  risk_focus?: string[];
   site_route?: string;
   page_kind?: string;
   edit_surface?: string;
@@ -65,8 +69,8 @@ export const layers: Layer[] = [
     id: "actors",
     title: "Actors, agents, and responsibilities",
     short: "Actors",
-    description: "Who uses, owns, plans, implements, reviews, or automates the work represented in the graph.",
-    types: ["actor", "agent"],
+    description: "Who uses, owns, plans, implements, reviews, or automates the work represented in the graph — and the concrete personas that drive persona-based QA.",
+    types: ["actor", "agent", "persona"],
   },
   {
     id: "site",
@@ -115,6 +119,7 @@ export function typeLabel(type: string): string {
   const labels: Record<string, string> = {
     actor: "Actors",
     agent: "Agents",
+    persona: "Personas",
     "site-page": "Site pages",
     feature: "Features",
     requirement: "Requirements",
@@ -154,12 +159,15 @@ export function edgeLabel(edge: string): string {
     proposes: "proposes",
     decomposes_to: "breaks into",
     satisfies: "satisfies",
+    persona_of: "persona of",
+    qa_evidence: "QA evidence",
+    from_persona: "from persona",
   };
   return labels[edge] ?? edge.replaceAll("_", " ");
 }
 
 export function typeOrder(type: string): number {
-  const index = ["actor", "agent", "site-page", "feature", "requirement", "use-case", "proposal", "change", "evidence", "implementation"].indexOf(type);
+  const index = ["actor", "agent", "persona", "site-page", "feature", "requirement", "use-case", "proposal", "change", "evidence", "implementation"].indexOf(type);
   return index === -1 ? 99 : index;
 }
 

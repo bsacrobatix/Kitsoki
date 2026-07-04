@@ -36,7 +36,11 @@ pnpm audit:routes   # forward/loop/backtrack lanes route as declared
 
 The viewer is itself described in the seed catalog (`feature-graph-viewer`
 and its requirements/use-cases/implementation/evidence nodes) — the dogfood
-meta cycle. This prototype informs goal G5
+meta cycle. Actors also carry **personas** (`persona` derives from `actor`;
+nested under their actor in the picker, not a peer group): concrete profiles
+mirroring `tools/product-journey/personas.json`, whose evidence is the
+persona-driven QA journey runs that walk a use case from that persona's
+perspective. This prototype informs goal G5
 (`docs/goals/project-object-graph/GOAL.md`): the production destination is a
 graph surface in `kitsoki web` (tools/runstatus) fed by the Go loader, not
 this standalone app.
