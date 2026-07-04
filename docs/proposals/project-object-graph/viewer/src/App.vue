@@ -267,15 +267,16 @@ function nodeText(node: GraphNode): string {
     </header>
 
     <section class="layer-map" aria-label="Project object graph layers">
-      <button
+      <article
         v-for="layer in layerSummaries"
         :key="layer.id"
         :class="{ active: selectedLayerId === layer.id, contains: layer.selected }"
-        @click="selectLayer(layer.id)"
       >
-        <span class="step">{{ layer.short }}</span>
-        <strong>{{ layer.title }}</strong>
-        <small>{{ layer.description }}</small>
+        <button class="layer-main" type="button" @click="selectLayer(layer.id)">
+          <span class="step">{{ layer.short }}</span>
+          <strong>{{ layer.title }}</strong>
+          <small>{{ layer.description }}</small>
+        </button>
         <span class="type-summary">
           <button
             v-for="entry in layer.typeCounts"
@@ -287,7 +288,7 @@ function nodeText(node: GraphNode): string {
             {{ typeLabel(entry.type) }} {{ entry.count }}
           </button>
         </span>
-      </button>
+      </article>
     </section>
 
     <section class="workspace">
