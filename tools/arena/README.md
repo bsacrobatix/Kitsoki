@@ -31,13 +31,30 @@ JobSpec ──enumerate──▶ Cell[] ──execute(container)──▶ CellRe
 - **Job-type plugin** is the only thing that knows what a comparison *means*:
   `image(cell)` · `drive_command(cell, live)` · `score(cell, …) → CellResult`.
 
+## The shared completion-state contract
+
+`bugfix.py`'s `score()` no longer regexes the container's stdout/stderr. Whatever
+runs inside the container (`bench.py verify`/`score`, and eventually
+`drive_cell.sh`) writes one **versioned completion-state JSON** —
+[`schemas/completion-state.schema.json`](../../schemas/completion-state.schema.json)
+(`verdict` / `health` / `metrics` / `evidence_refs`) — that this plugin reads back
+from the shared repo mount (`KITSOKI_MNT` inside the container == `REPO_ROOT`
+outside it, for `local` placement) instead of parsing text. The same contract
+backs the product-journey side: `tools/persona_qa/completion.py` builds a
+schema-conformant completion-state from a `review.json`/`scenario-outcomes.json`
+run bundle, so any future persona-qa arena plugin scores from the identical
+shape a bugfix cell does. A missing or malformed file is reported as an explicit
+`infra:*` health (`infra:missing-completion-state`,
+`infra:completion-state-malformed`) — stdout/stderr infra-signal regexing (e.g.
+`"connection refused"`) survives ONLY as a fallback for when the file is absent.
+
 ## Layout
 
 | File | Role |
 |---|---|
 | `arena/model.py` | `JobSpec`, `Cell`, `CellResult`, enumeration |
 | `arena/plugins/base.py` | `JobTypePlugin` protocol + registry |
-| `arena/plugins/bugfix.py` | bugfix plugin — wraps `bench.py` oracle (verify / drive) |
+| `arena/plugins/bugfix.py` | bugfix plugin — wraps `bench.py` oracle (verify / drive), scores from the completion-state file |
 | `arena/executor.py` | `CellExecutor` + `ContainerBackend` seam (`DockerBackend` \| `FakeBackend`) |
 | `arena/placement.py` | sweep scheduler (concurrency, INFRA-vs-MODEL retry) |
 | `arena/rollup.py` | job-agnostic leaderboard → `rollup.json` + `rollup.md` |
