@@ -14,7 +14,7 @@ No LLM, no cost. Two subcommands:
       Overlay the hidden oracle on the candidate tree and run it.
       exit 0 ⇔ oracle GREEN (good fix); exit 1 ⇔ RED (bug remains).
 
-  bench.py verify --project <name> [--bug <id>] [--repo-dir <prebuilt clone>]
+  bench.py verify <manifest.yaml>|--project <name> [--bug <id>] [--repo-dir <prebuilt clone>]
       Prove each fixture: RED at baseline_sha, GREEN after the real fix's source.
       exit 0 ⇔ all checked fixtures armed.
 
@@ -39,7 +39,7 @@ manifest.yaml): project.{repo,install,test_cmd,oracle.{target,run}} and
 bugs[].{baseline_sha,fix_sha,fix_source,oracle_test,oracle_match}. To add a new
 repo, drop in a manifest + the isolated oracle test files — no code changes.
 """
-import argparse, json, os, shutil, subprocess, sys, tempfile
+import argparse, json, os, shutil, subprocess, sys, tempfile, urllib.parse, urllib.request
 from pathlib import Path
 
 try:
@@ -1534,6 +1534,9 @@ def score(m, bug, tree, out, candidate, treatment, trace=None, candidates_path=N
 
 def verify(m, only_bug, repo_dir):
     """Clone (or reuse), and for each fixture assert RED@baseline, GREEN@fix."""
+    if m.get("kind") == "arena_cost_corpus":
+        return verify_arena_corpus(m)
+
     proj = m["project"]
     bugs = selected_bugs(m, only_bug)
     tmp = None
@@ -1595,6 +1598,71 @@ def verify(m, only_bug, repo_dir):
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)
     return 0 if ok else 1
+
+
+def verify_arena_corpus(m):
+    """Verify the frozen arena corpus manifest.
+
+    The corpus can mix heavyweight external-bakeoff bug fixtures with cheap
+    repo-history content oracles. Keep this in bench.py because WB.1's replay
+    gate calls this verifier directly.
+    """
+    tasks = m.get("tasks") or []
+    ok = True
+    for task in tasks:
+        task_id = task.get("id", "<missing-id>")
+        oracle = task.get("oracle") or {}
+        kind = oracle.get("kind")
+        if kind == "github_content":
+            armed = verify_github_content_task(task, oracle)
+        elif kind == "external_bakeoff":
+            project = oracle.get("project")
+            bug = oracle.get("bug")
+            if not project or not bug:
+                print(f"BAD {task_id}: external_bakeoff oracle needs project and bug")
+                armed = False
+            else:
+                pm = load(project)
+                repo = str(pm.get("project", {}).get("repo", ""))
+                local_only = bool(pm.get("project", {}).get("local_only")) or repo in ("", ".")
+                armed = verify(pm, bug, str(REPO_ROOT) if local_only else None) == 0
+        else:
+            print(f"BAD {task_id}: unknown oracle kind {kind!r}")
+            armed = False
+        ok = ok and armed
+    return 0 if ok else 1
+
+
+def verify_github_content_task(task, oracle):
+    task_id = task.get("id", "<missing-id>")
+    repo = oracle.get("repo")
+    file_path = oracle.get("file")
+    required = oracle.get("required_text")
+    baseline_sha = task.get("baseline_sha")
+    fix_sha = task.get("fix_sha")
+    if not all([repo, file_path, required, baseline_sha, fix_sha]):
+        print(f"BAD {task_id}: github_content oracle needs repo, file, required_text, baseline_sha, fix_sha")
+        return False
+    baseline = fetch_github_raw(repo, baseline_sha, file_path)
+    fixed = fetch_github_raw(repo, fix_sha, file_path)
+    red = baseline is None or required not in baseline
+    green = fixed is not None and required in fixed
+    armed = red and green
+    print(f"{'OK ' if armed else 'BAD'} {task_id}: "
+          f"baseline={'RED' if red else 'GREEN'} (want RED), "
+          f"real-fix={'GREEN' if green else 'RED'} (want GREEN)")
+    return armed
+
+
+def fetch_github_raw(repo, sha, file_path):
+    quoted = urllib.parse.quote(str(file_path))
+    url = f"https://raw.githubusercontent.com/{repo}/{sha}/{quoted}"
+    req = urllib.request.Request(url, headers={"User-Agent": "kitsoki-bench-corpus"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return None
 
 
 def summarize(m, results_dir, deck=None, markdown=None, allow_empty=False):
@@ -1794,7 +1862,10 @@ def main():
     s.add_argument("--candidates", default=str(HERE / "candidates.yaml"),
                    help="candidates.yaml for model/effort/provider lookup by --candidate")
     v = sub.add_parser("verify")
-    v.add_argument("--project", required=True)
+    v.add_argument("manifest", nargs="?",
+                   help="direct project or arena corpus manifest path")
+    v.add_argument("--project",
+                   help="project id under projects/<id>/, or direct manifest path")
     v.add_argument("--bug", action="append",
                    help="bug id to verify; repeat or pass comma-separated ids to scope the matrix")
     v.add_argument("--repo-dir", help="prebuilt clone with node_modules to reuse")
@@ -1901,7 +1972,10 @@ def main():
         sys.exit(summarize(load(a.project), a.results, a.deck, a.markdown,
                            allow_empty=a.allow_empty))
 
-    m = load(a.project)
+    project_ref = getattr(a, "project", None) or getattr(a, "manifest", None)
+    if not project_ref:
+        sys.exit(f"{a.cmd} needs --project or a manifest path")
+    m = load(project_ref)
     if a.cmd == "lint-oracles":
         sys.exit(lint_oracles(m, bug_ids=a.bug, strict=a.strict))
     if a.cmd == "preflight":
