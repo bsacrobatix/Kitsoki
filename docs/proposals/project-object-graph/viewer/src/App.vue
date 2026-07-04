@@ -23,9 +23,6 @@ interface GraphNode {
   desired_outcome?: string;
   trigger?: string;
   goal?: string;
-  evidence_kind?: string;
-  proposal_kind?: string;
-  implementation_kind?: string;
   executor?: string;
   actor?: string;
   sources?: string[];
@@ -48,8 +45,33 @@ interface SeedCatalog {
 
 const data = parse(seedYaml) as SeedCatalog;
 const selectedId = ref("feature-project-object-graph");
+const selectedLayerId = ref("intent");
+const selectedTypeId = ref("all");
 const query = ref("");
-const selectedFamily = ref("all");
+
+const layers = [
+  {
+    id: "intent",
+    title: "Desired product state",
+    short: "Intent",
+    description: "What the product should be: capabilities, requirements, and the scenarios they serve.",
+    types: ["feature", "requirement", "use-case"],
+  },
+  {
+    id: "delta",
+    title: "Change and roadmap work",
+    short: "Delta",
+    description: "How the project moves from current state to desired state: proposals and work items.",
+    types: ["proposal", "change"],
+  },
+  {
+    id: "proof",
+    title: "Proof and current state",
+    short: "Proof",
+    description: "What exists now, and what verifies it: implementations, demos, fixtures, and evidence.",
+    types: ["evidence", "implementation"],
+  },
+];
 
 const nodeById = computed(() => new Map(data.nodes.map((node) => [node.id, node])));
 const typeById = computed(() => new Map(data.type_registry.map((type) => [type.id, type])));
@@ -59,30 +81,58 @@ const sourceById = computed(
 
 const selectedNode = computed(() => nodeById.value.get(selectedId.value) ?? data.nodes[0]);
 const selectedType = computed(() => typeById.value.get(nodeType(selectedNode.value)));
+const selectedLayer = computed(() => layers.find((layer) => layer.id === selectedLayerId.value) ?? layers[0]);
 
-const families = computed(() => {
+const typeCounts = computed(() => {
   const counts = new Map<string, number>();
   for (const node of data.nodes) counts.set(nodeType(node), (counts.get(nodeType(node)) ?? 0) + 1);
-  return [...counts.entries()]
-    .sort(([a], [b]) => familyOrder(a) - familyOrder(b) || a.localeCompare(b))
-    .map(([id, count]) => ({ id, label: typeLabel(id), count }));
+  return counts;
+});
+
+const layerSummaries = computed(() => {
+  return layers.map((layer) => {
+    const nodes = data.nodes.filter((node) => layer.types.includes(nodeType(node)));
+    const selected = nodes.some((node) => node.id === selectedNode.value.id);
+    return {
+      ...layer,
+      count: nodes.length,
+      selected,
+      typeCounts: layer.types.map((type) => ({ type, count: typeCounts.value.get(type) ?? 0 })),
+    };
+  });
+});
+
+const availableTypes = computed(() => {
+  return selectedLayer.value.types
+    .filter((type) => typeCounts.value.has(type))
+    .map((type) => ({ type, label: typeLabel(type), count: typeCounts.value.get(type) ?? 0 }));
 });
 
 const filteredNodes = computed(() => {
   const needle = query.value.trim().toLowerCase();
   return data.nodes
-    .filter((node) => selectedFamily.value === "all" || nodeType(node) === selectedFamily.value)
+    .filter((node) => selectedLayer.value.types.includes(nodeType(node)))
+    .filter((node) => selectedTypeId.value === "all" || nodeType(node) === selectedTypeId.value)
     .filter((node) => {
       if (!needle) return true;
       return [node.title, node.id, node.summary, node.statement, node.goal, node.desired_outcome]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(needle));
     })
-    .sort((a, b) => familyOrder(nodeType(a)) - familyOrder(nodeType(b)) || a.title.localeCompare(b.title));
+    .sort((a, b) => typeOrder(nodeType(a)) - typeOrder(nodeType(b)) || a.title.localeCompare(b.title));
+});
+
+const groupedNodes = computed(() => {
+  const grouped = new Map<string, GraphNode[]>();
+  for (const node of filteredNodes.value) {
+    const type = nodeType(node);
+    if (!grouped.has(type)) grouped.set(type, []);
+    grouped.get(type)?.push(node);
+  }
+  return [...grouped.entries()].map(([type, nodes]) => ({ type, label: typeLabel(type), nodes }));
 });
 
 const outgoingGroups = computed(() => groupEdges(selectedNode.value.edges ?? {}));
-
 const incomingGroups = computed(() => {
   const currentId = selectedNode.value.id;
   const grouped = new Map<string, GraphNode[]>();
@@ -114,6 +164,10 @@ function nodeType(node: GraphNode): string {
   return node.schema.split("/")[1] ?? node.schema;
 }
 
+function nodeLayerId(node: GraphNode): string {
+  return layers.find((layer) => layer.types.includes(nodeType(node)))?.id ?? "intent";
+}
+
 function edgeTargets(value: EdgeValue): string[] {
   if (!value) return [];
   return Array.isArray(value) ? value : [value];
@@ -131,8 +185,15 @@ function groupEdges(edges: Record<string, EdgeValue>) {
     .filter((group) => group.nodes.length > 0);
 }
 
+function selectLayer(layerId: string) {
+  selectedLayerId.value = layerId;
+  selectedTypeId.value = "all";
+}
+
 function selectNode(id: string) {
   selectedId.value = id;
+  selectedLayerId.value = nodeLayerId(nodeById.value.get(id) ?? selectedNode.value);
+  selectedTypeId.value = "all";
 }
 
 function typeLabel(type: string): string {
@@ -172,8 +233,9 @@ function edgeLabel(edge: string): string {
   return labels[edge] ?? edge.replaceAll("_", " ");
 }
 
-function familyOrder(type: string): number {
-  return ["feature", "requirement", "use-case", "proposal", "change", "evidence", "implementation"].indexOf(type);
+function typeOrder(type: string): number {
+  const index = ["feature", "requirement", "use-case", "proposal", "change", "evidence", "implementation"].indexOf(type);
+  return index === -1 ? 99 : index;
 }
 
 function nodeText(node: GraphNode): string {
@@ -185,50 +247,79 @@ function nodeText(node: GraphNode): string {
   <main class="page">
     <header class="masthead">
       <div>
-        <p class="kicker">Data object graph seed</p>
-        <h1>What is connected to what?</h1>
+        <p class="kicker">Project object graph</p>
+        <h1>Desired state, change work, and proof.</h1>
         <p class="intro">
-          This is the first object-graph fixture rendered as data. Pick an object, then follow its typed
-          relationships. The prose is just a field on the object.
+          The graph is organized into three layers. Start with the desired product state, follow the
+          change work that creates it, then inspect the proof and implementation nodes that verify it.
         </p>
       </div>
       <div class="metric-strip">
         <div><strong>{{ data.nodes.length }}</strong><span>objects</span></div>
-        <div><strong>{{ families.length }}</strong><span>object types</span></div>
-        <div><strong>{{ data.catalog.source_window.inputs.length }}</strong><span>source files</span></div>
+        <div><strong>{{ data.type_registry.length }}</strong><span>types</span></div>
+        <div><strong>{{ data.catalog.source_window.inputs.length }}</strong><span>sources</span></div>
       </div>
     </header>
 
-    <section class="map-strip" aria-label="Catalog map">
+    <section class="layer-map" aria-label="Project object graph layers">
       <button
-        v-for="family in families"
-        :key="family.id"
-        :class="{ active: selectedFamily === family.id }"
-        @click="selectedFamily = selectedFamily === family.id ? 'all' : family.id"
+        v-for="layer in layerSummaries"
+        :key="layer.id"
+        :class="{ active: selectedLayerId === layer.id, contains: layer.selected }"
+        @click="selectLayer(layer.id)"
       >
-        <span>{{ family.label }}</span>
-        <strong>{{ family.count }}</strong>
+        <span class="step">{{ layer.short }}</span>
+        <strong>{{ layer.title }}</strong>
+        <small>{{ layer.description }}</small>
+        <span class="type-summary">
+          <span v-for="entry in layer.typeCounts" :key="entry.type">
+            {{ typeLabel(entry.type) }} {{ entry.count }}
+          </span>
+        </span>
       </button>
     </section>
 
     <section class="workspace">
       <aside class="object-picker">
         <div class="picker-head">
-          <h2>Objects</h2>
-          <button v-if="selectedFamily !== 'all'" @click="selectedFamily = 'all'">Clear type</button>
+          <div>
+            <p class="kicker">{{ selectedLayer.short }}</p>
+            <h2>{{ selectedLayer.title }}</h2>
+          </div>
+          <button v-if="selectedTypeId !== 'all'" @click="selectedTypeId = 'all'">All types</button>
         </div>
-        <input v-model="query" type="search" placeholder="Search objects" aria-label="Search objects" />
-        <div class="object-list">
-          <button
-            v-for="node in filteredNodes"
-            :key="node.id"
-            :class="{ selected: selectedNode.id === node.id }"
-            @click="selectNode(node.id)"
-          >
-            <span class="object-kind">{{ typeLabel(nodeType(node)) }}</span>
-            <strong>{{ node.title }}</strong>
-            <small>{{ node.id }}</small>
+
+        <p class="picker-context">{{ selectedLayer.description }}</p>
+
+        <div class="type-filter" aria-label="Type filter">
+          <button :class="{ active: selectedTypeId === 'all' }" @click="selectedTypeId = 'all'">
+            All {{ selectedLayer.short.toLowerCase() }}
           </button>
+          <button
+            v-for="entry in availableTypes"
+            :key="entry.type"
+            :class="{ active: selectedTypeId === entry.type }"
+            @click="selectedTypeId = entry.type"
+          >
+            {{ entry.label }} {{ entry.count }}
+          </button>
+        </div>
+
+        <input v-model="query" type="search" placeholder="Search this layer" aria-label="Search objects" />
+
+        <div class="object-list">
+          <section v-for="group in groupedNodes" :key="group.type" class="object-group">
+            <h3>{{ group.label }}</h3>
+            <button
+              v-for="node in group.nodes"
+              :key="node.id"
+              :class="{ selected: selectedNode.id === node.id }"
+              @click="selectNode(node.id)"
+            >
+              <strong>{{ node.title }}</strong>
+              <small>{{ node.id }}</small>
+            </button>
+          </section>
         </div>
       </aside>
 
@@ -236,7 +327,7 @@ function nodeText(node: GraphNode): string {
         <article class="focus-card">
           <div class="focus-top">
             <div>
-              <p class="kicker">{{ typeLabel(nodeType(selectedNode)) }}</p>
+              <p class="kicker">{{ typeLabel(nodeType(selectedNode)) }} / {{ selectedNode.schema }}</p>
               <h2>{{ selectedNode.title }}</h2>
             </div>
             <div class="chips">
@@ -254,8 +345,12 @@ function nodeText(node: GraphNode): string {
           </div>
 
           <div class="type-chain">
-            <span>Type chain</span>
-            <button v-for="type in typeChain" :key="type.id" @click="selectedFamily = type.id">
+            <span>Type inheritance</span>
+            <button
+              v-for="type in typeChain"
+              :key="type.id"
+              @click="selectedTypeId = type.id; selectedLayerId = layers.find((layer) => layer.types.includes(type.id))?.id ?? selectedLayerId"
+            >
               {{ type.id }}
             </button>
           </div>
@@ -263,7 +358,7 @@ function nodeText(node: GraphNode): string {
 
         <div class="relationship-board">
           <section>
-            <h3>Links out from this object</h3>
+            <h3>What this object points to</h3>
             <div v-if="!outgoingGroups.length" class="empty">No outgoing relationships.</div>
             <article v-for="group in outgoingGroups" :key="group.name" class="relationship-group">
               <p>{{ group.label }}</p>
@@ -275,7 +370,7 @@ function nodeText(node: GraphNode): string {
           </section>
 
           <section>
-            <h3>Links into this object</h3>
+            <h3>What points here</h3>
             <div v-if="!incomingGroups.length" class="empty">No incoming relationships.</div>
             <article v-for="group in incomingGroups" :key="group.name" class="relationship-group incoming">
               <p>{{ group.label }}</p>
@@ -288,7 +383,7 @@ function nodeText(node: GraphNode): string {
         </div>
 
         <section class="sources">
-          <h3>Where this came from</h3>
+          <h3>Source records</h3>
           <div v-if="!sourceRows.length" class="empty">No source refs.</div>
           <div v-for="source in sourceRows" :key="source?.id" class="source-row">
             <span>{{ source?.kind }}</span>
