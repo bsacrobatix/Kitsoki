@@ -6,6 +6,8 @@ tagline: Watch the agent think and act, streamed live into the conversation.
 summary: While an agent turn runs, the main chat streams its reasoning and tool calls live in a thinking bubble; when the turn finishes, the same interleaved activity feed stays reviewable — collapsed inside the agent's bubble, expandable to the exact feed you watched. The meta overlay renders agent work with the same shared components.
 promo:
   order: 30
+docs:
+  - docs/web/README.md
 related:
   - agent-actions
 demo:

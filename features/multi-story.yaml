@@ -6,6 +6,8 @@ tagline: Catalogue to live session to reload-survival — end to end.
 summary: "The end-to-end product demo: the story catalogue, a fresh PRD run narrated turn-by-turn on the chat surface, then the product's defining seam — a full page reload that the active session survives — landing back on the home active-sessions table."
 promo:
   order: 10
+docs:
+  - docs/web/README.md
 demo:
   spec: tests/playwright/multi-story.spec.ts
   artifactDir: multi-story
