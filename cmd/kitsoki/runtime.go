@@ -146,9 +146,9 @@ type runtimeConfig struct {
 	// `harness_ladder:` block (automatic multi-provider fallback +
 	// effort/model escalation for every host.agent.decide / host.agent.task
 	// dispatch — see internal/host/ladder.go and
-	// internal/webconfig.HarnessLadder). Zero value (Enabled() == false, the
-	// default when no harness_ladder: is declared) leaves every dispatch on
-	// today's single-attempt behavior.
+	// internal/webconfig.HarnessLadder). Zero value means the live runtime uses
+	// host.DefaultLadderConfig; flow/cassette postures stay single-attempt
+	// unless they explicitly install a ladder.
 	HarnessLadder host.LadderConfig
 
 	// WantRoomEnterSink allocates a TUI room-enter sink and wires it into the
@@ -503,8 +503,12 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 	if len(cfg.HarnessProfiles) > 0 {
 		runOpts = append(runOpts, orchestrator.WithHarnessProfiles(cfg.HarnessProfiles, cfg.DefaultProfile))
 	}
-	if cfg.HarnessLadder.Enabled() {
-		runOpts = append(runOpts, orchestrator.WithHarnessLadderConfig(cfg.HarnessLadder))
+	harnessLadder := cfg.HarnessLadder
+	if !harnessLadder.Enabled() && cfg.Flow == nil {
+		harnessLadder = host.DefaultLadderConfig()
+	}
+	if harnessLadder.Enabled() {
+		runOpts = append(runOpts, orchestrator.WithHarnessLadderConfig(harnessLadder))
 	}
 	if d := def.Decider; d != nil {
 		runOpts = append(runOpts, orchestrator.WithDecider(orchestrator.DeciderConfig{

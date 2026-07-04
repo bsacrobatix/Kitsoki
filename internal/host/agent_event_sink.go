@@ -541,6 +541,41 @@ func appendAgentStreamEvent(ctx context.Context, ts time.Time, callID string, ev
 	})
 }
 
+type storeAgentNotice struct {
+	Type     string `json:"type"`
+	Subtype  string `json:"subtype,omitempty"`
+	Text     string `json:"text"`
+	Backend  string `json:"backend,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Effort   string `json:"effort,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+// appendAgentNoticeEvent records an operator-facing agent breadcrumb that is
+// not tied to a provider stream event. It is deliberately stored as
+// agent.stream so existing timeline surfaces show the notice without a new
+// trace vocabulary.
+func appendAgentNoticeEvent(ctx context.Context, ts time.Time, notice storeAgentNotice) {
+	sink := EventSinkFromAgentCtx(ctx)
+	if sink == nil || notice.Text == "" {
+		return
+	}
+	oc := AgentCallCtxFrom(ctx)
+	raw, err := json.Marshal(notice)
+	if err != nil {
+		return
+	}
+	_ = sink.Append(store.Event{
+		Turn:      oc.Turn,
+		Ts:        ts,
+		Kind:      store.AgentStreamEvent,
+		StatePath: oc.StatePath,
+		CallID:    CallIDFrom(ctx),
+		Payload:   raw,
+	})
+}
+
 func truncateTraceText(s string, max int) string {
 	if max <= 0 || len(s) <= max {
 		return s

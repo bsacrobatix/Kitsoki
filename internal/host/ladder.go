@@ -157,10 +157,12 @@ func (c LadderConfig) efforts() []string {
 	return c.Efforts
 }
 
-// DefaultLadderConfig is the sane cheap-first default: GLM-5.2 (via the
-// synthetic endpoint, forked through the codex backend) → gpt-5.5
-// (codex-native) → gpt-5.3-codex-spark → claude sonnet → claude opus
-// (claude-native), each swept low→max effort before the next model. The
+// DefaultLadderConfig is the shipped availability-first default:
+// claude-native → codex-native → synthetic-claude → synthetic-codex, each
+// swept low→max effort before the next model. synthetic-codex is intentionally
+// last: keeping it in the ladder preserves the profile/catalog contract for
+// operators, but normal automatic fallback should prefer synthetic through the
+// claude backend before trying the codex retarget path. The
 // Provider names match the harness_profiles convention used by
 // .kitsoki.yaml / .kitsoki.local.yaml (see docs/architecture/harness-profiles.md)
 // so a deployment that declares those profiles (folded into the providers map
@@ -171,11 +173,10 @@ func (c LadderConfig) efforts() []string {
 func DefaultLadderConfig() LadderConfig {
 	return LadderConfig{
 		Models: []LadderModel{
-			{Backend: "codex", Provider: "synthetic-codex", Model: "hf:zai-org/GLM-5.2"},
-			{Backend: "codex", Provider: "codex-native", Model: "gpt-5.5"},
-			{Backend: "codex", Provider: "codex-spark", Model: "gpt-5.3-codex-spark"},
-			{Backend: "claude", Provider: "claude-sonnet", Model: "sonnet"},
 			{Backend: "claude", Provider: "claude-native", Model: "opus"},
+			{Backend: "codex", Provider: "codex-native", Model: "gpt-5.5"},
+			{Backend: "claude", Provider: "synthetic-claude", Model: "hf:zai-org/GLM-5.2"},
+			{Backend: "codex", Provider: "synthetic-codex", Model: "hf:zai-org/GLM-5.2"},
 		},
 		Efforts: []string{"low", "medium", "high", "xhigh", "max"},
 	}
@@ -447,6 +448,7 @@ outer:
 				return res, err, summary
 			}
 			if kind == FailureInfra {
+				emitLadderFallbackNotice(ctx, rung, kind, errText)
 				markLadderBackoff(statePath, key, backoff)
 				break // abandon remaining efforts for this model; next model.
 			}
@@ -506,6 +508,32 @@ func runAgentVerbWithLadder(ctx context.Context, args map[string]any, verb strin
 	}
 	slog.InfoContext(ctx, "agent.ladder.complete", attrs...)
 	return res, err
+}
+
+func emitLadderFallbackNotice(ctx context.Context, rung LadderRung, kind FailureKind, errText string) {
+	text := fmt.Sprintf("Provider fallback: %s/%s (%s) hit %s; backing it off and trying the next configured profile.",
+		rung.Provider, rung.Model, rung.Backend, kind)
+	if errText != "" {
+		text += " Error: " + errText
+	}
+	slog.WarnContext(ctx, "agent.ladder.fallback",
+		"backend", rung.Backend,
+		"provider", rung.Provider,
+		"model", rung.Model,
+		"effort", rung.Effort,
+		"failure_kind", string(kind),
+		"error", errText,
+	)
+	appendAgentNoticeEvent(ctx, time.Now(), storeAgentNotice{
+		Type:     "ladder_fallback",
+		Subtype:  string(kind),
+		Text:     text,
+		Backend:  rung.Backend,
+		Provider: rung.Provider,
+		Model:    rung.Model,
+		Effort:   rung.Effort,
+		Error:    errText,
+	})
 }
 
 // ── failure classification ──────────────────────────────────────────────
