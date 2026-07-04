@@ -108,6 +108,59 @@ container — exercising enumerate → container → score → rollup with **zer
 `--live` is the only way to spend and is always explicit. The pipeline is fully
 unit-tested with `FakeBackend` (no docker, no LLM): `tools/arena/tests/`.
 
+## Image selection
+
+Every job-type plugin implements `image(cell) -> str` (see
+`arena/plugins/base.py`) — that's the only place a cell's container image is
+decided. The bugfix plugin's convention (`arena/plugins/bugfix.py`):
+
+```python
+def image(self, cell: Cell) -> str:
+    return cell.target.meta.get("image") or f"kitsoki-arena-repo/{cell.target.id}:latest"
+```
+
+i.e. a target can pin an explicit image via `target.meta.image` in the spec;
+otherwise the plugin falls back to a per-project default tag. Follow this same
+pattern for any plugin that needs the browser-capable image: either hard-code
+the browser tag in `image()` for job types that always need a browser (e.g. a
+future swarm plugin), or read it from `cell.target.meta["image"]` /
+`cell.variant.meta["image"]` when a spec should be able to opt in per-target.
+
+### Browser-capable image (`Dockerfile.repo-runtime-browser`)
+
+`tools/arena/Dockerfile.repo-runtime-browser` layers Chromium + Playwright
+(pinned to `tools/runstatus/package.json`'s `@playwright/test` version) on top
+of the existing repo-runtime image, for cells that need to drive a real
+browser (persona-qa web surfaces today; the swarm job type later). The base
+repo-runtime image is untouched — plain bugfix cells never pay the extra
+Chromium weight; only a plugin that explicitly requests this image does.
+
+Build it (two steps — base first, then the browser layer):
+
+```bash
+docker build -f tools/bugfix-bakeoff/external/docker/Dockerfile.repo-runtime \
+    -t kitsoki-arena-repo-runtime:latest tools/bugfix-bakeoff/external/docker
+
+docker build -f tools/arena/Dockerfile.repo-runtime-browser \
+    --build-arg BASE_IMAGE=kitsoki-arena-repo-runtime:latest \
+    -t kitsoki-arena-repo-runtime-browser:latest tools/arena
+```
+
+or run the one-shot build+smoke script (docker-gated, **not** part of the
+standing no-docker CI check — run it by hand when the Dockerfile or the
+pinned Playwright version changes):
+
+```bash
+tools/arena/scripts/smoke-browser-image.sh
+```
+
+It builds both images and proves `npx playwright --version` and a real
+headless Chromium page-render inside a container run of the image. This
+change does **not** wire any plugin to the browser image — that's
+`swarm-arena-job` (and any future persona-qa-via-arena plugin), which should
+set `image()` to return `kitsoki-arena-repo-runtime-browser:latest` (or a
+project-tagged variant of it) once they need one.
+
 ## Status — P0 (walking skeleton)
 
 Done: model + enumeration, plugin interface + bugfix plugin, container executor
