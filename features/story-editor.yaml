@@ -6,6 +6,8 @@ tagline: Rooms, hooks, domain model, and the Agent Workbench — one inspector.
 summary: "The per-story editor surface: the BFS-ordered room list, room detail with hook and domain model and IDE deep-link, the meta-chat column, and the Agent Workbench's contract cards and cassette browser."
 promo:
   order: 60
+docs:
+  - docs/tui/story-editor.md
 demo:
   spec: tests/playwright/story-editor-video.spec.ts
   artifactDir: story-editor

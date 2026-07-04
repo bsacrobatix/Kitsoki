@@ -4,6 +4,8 @@ kind: story-demo
 title: Bug triage to autonomous fix
 tagline: Triage a ticket, hand it to the pipeline, watch it land.
 summary: "The dev-story triage → autonomous-bugfix path, one room per beat: survey the ticket queue, pick a ticket, review the triage report, then hand off into the bugfix pipeline — reproducing, proposing, implementing, testing, reviewing, validating, done, and the opened PR."
+docs:
+  - docs/case-studies/bug-fix.md
 demo:
   spec: tests/playwright/dev-story-bugfix-video.spec.ts
   artifactDir: dev-story-bugfix

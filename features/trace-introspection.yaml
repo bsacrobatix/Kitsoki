@@ -4,6 +4,9 @@ kind: feature
 title: Decision-first trace detail
 tagline: Verdicts, confidence, evidence, and replay — on a frozen trace.
 summary: "Trace introspection against a frozen bugfix-trace snapshot: observation-kind filter chips, the decide verdict block with confidence bar and collapsible evidence drawer, the deterministic-replay affordance, and the tree / waterfall / state-graph view modes."
+docs:
+  - docs/tracing/trace-format.md
+  - docs/tracing/run-status-ui.md
 related:
   - trace-features
 demo:
