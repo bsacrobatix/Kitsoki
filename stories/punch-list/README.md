@@ -44,6 +44,10 @@ defaults:
 The policy checker validates the ladder shape and the drive/implementation rooms
 pass it through to the maker `host.agent.task` call as `with.harness_ladder`.
 
+Manifests may also carry `sandbox:` on defaults or an item. The drive and
+implementation rooms pass that policy to `host.agent.task`; malformed runtime
+strength/degrade/path settings fail at story load or host-call parse time.
+
 ## Live driver evidence
 
 The live `drive` and `implementation` rooms require the driver handoff to include

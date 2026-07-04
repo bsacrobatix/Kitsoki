@@ -60,3 +60,5 @@ expect_files:
     content_matches: '"harness_ladder":\{"backoff":"5m".*"model":"hf:zai-org/GLM-5\.2","provider":"synthetic-codex"'
   - path: ../../../.artifacts/goal/flow-worker-pool-quota/manifests/C1.json
     content_matches: '"model":"opus","provider":"claude-native"'
+  - path: ../../../.artifacts/goal/flow-worker-pool-quota/manifests/C1.json
+    content_matches: '"sandbox":\{"degrade":"warn".*"min_strength":"supervised".*"repo":"read_only"'

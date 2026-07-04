@@ -345,6 +345,14 @@ The built-in handlers (full reference in `docs/architecture/hosts.md`):
 | `host.inbox.add` | Mirror an artifact into the operator's local inbox. |
 | `host.chat.*` | Persistent multi-turn chat threads scoped by `(app, room, scope_key)`. |
 
+For risky `host.agent.task` / write-capable `host.agent.converse` calls, add
+`with.sandbox` at the effect call site. `sandbox:` is separate from an agent's
+toolbox/effect: toolbox/effect says what tools the model may request; sandbox
+selects the subprocess runtime boundary and records `agent.runtime.start/end`
+events. Current OSS strength is `supervised` (process/env/timeout/diff capture);
+it records filesystem/network policy as degraded unless a stronger backend is
+available.
+
 ### Operator questions and MCP-aware asking
 
 When a story needs human input mid-flow, prefer the runtime/operator-aware ask

@@ -36,6 +36,7 @@ states:
         with:
           agent: driver
           harness_ladder: "{{ world.current_item.harness_ladder }}"
+          sandbox: "{{ world.current_item.sandbox }}"
           acceptance:
             schema: schemas/drive_result.json
           context:

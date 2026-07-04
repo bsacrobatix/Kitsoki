@@ -677,9 +677,28 @@ agents:
 ```
 
 For `host.agent.task` and `host.agent.converse`, `bash_profile` is
-not consulted — those verbs allow unrestricted Bash by design; the
-blast-radius contract comes from the explicit `agent:` declaration and
-the `external_side_effect:` field.
+not consulted — those verbs allow unrestricted Bash by design. Use the
+effect-level `sandbox:` block when the subprocess itself needs runtime
+supervision:
+
+```yaml
+- invoke: host.agent.task
+  with:
+    agent: implementer
+    sandbox:
+      min_strength: supervised
+      repo: read_only
+      rw: [".artifacts/my-run", ".worktrees"]
+      hidden: [".env", ".git/config"]
+      degrade: warn
+    acceptance: { schema: schemas/result.json }
+```
+
+The shippable `supervised` backend gives process-group cleanup, timeout/cancel,
+temporary HOME/XDG dirs, provider/Kitsoki env allowlisting, and trace-visible
+policy. It records filesystem/network policy as degraded when it cannot enforce
+it; stronger `fs_confined`/`os_confined`/`vm_confined` backends are future
+runtime implementations.
 
 ---
 

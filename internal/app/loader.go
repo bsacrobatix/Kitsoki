@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"kitsoki/internal/agent/grammar"
 	"kitsoki/internal/agents"
@@ -2261,6 +2262,11 @@ func checkAgentEffect(file, loc string, eff Effect, agents map[string]*AgentDecl
 	addErr := func(msg string) {
 		*errs = append(*errs, &ValidationError{File: file, Message: msg})
 	}
+	if shortVerb == "task" || shortVerb == "converse" {
+		if msg := validateSandboxBlock(loc, eff.With["sandbox"]); msg != "" {
+			addErr(msg)
+		}
+	}
 
 	switch shortVerb {
 	case "ask", "decide", "extract":
@@ -2320,6 +2326,80 @@ func checkAgentEffect(file, loc string, eff Effect, agents map[string]*AgentDecl
 			}
 		}
 	}
+}
+
+func validateSandboxBlock(loc string, raw any) string {
+	if raw == nil {
+		return ""
+	}
+	if s, ok := raw.(string); ok && strings.Contains(s, "{{") {
+		return ""
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Sprintf("%s: sandbox must be a mapping", loc)
+	}
+	if v, _ := m["min_strength"].(string); strings.TrimSpace(v) != "" {
+		switch v {
+		case "none", "supervised", "fs_confined", "os_confined", "vm_confined":
+		default:
+			return fmt.Sprintf("%s: sandbox.min_strength %q is not one of none|supervised|fs_confined|os_confined|vm_confined", loc, v)
+		}
+	}
+	if v, _ := m["repo"].(string); strings.TrimSpace(v) != "" {
+		switch v {
+		case "none", "read_only":
+		default:
+			return fmt.Sprintf("%s: sandbox.repo %q is not one of none|read_only", loc, v)
+		}
+	}
+	if v, _ := m["network"].(string); strings.TrimSpace(v) != "" {
+		switch v {
+		case "inherit", "deny", "model_only", "allowlist":
+		default:
+			return fmt.Sprintf("%s: sandbox.network %q is not one of inherit|deny|model_only|allowlist", loc, v)
+		}
+	}
+	if v, _ := m["degrade"].(string); strings.TrimSpace(v) != "" {
+		switch v {
+		case "fail", "warn":
+		default:
+			return fmt.Sprintf("%s: sandbox.degrade %q is not one of fail|warn", loc, v)
+		}
+	}
+	for _, key := range []string{"rw", "hidden"} {
+		if msg := validateSandboxPathList(loc, key, m[key]); msg != "" {
+			return msg
+		}
+	}
+	if resources, ok := m["resources"].(map[string]any); ok {
+		if timeout, _ := resources["timeout"].(string); strings.TrimSpace(timeout) != "" {
+			if _, err := time.ParseDuration(timeout); err != nil {
+				return fmt.Sprintf("%s: sandbox.resources.timeout: %v", loc, err)
+			}
+		}
+	}
+	return ""
+}
+
+func validateSandboxPathList(loc, key string, raw any) string {
+	if raw == nil {
+		return ""
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return fmt.Sprintf("%s: sandbox.%s must be a list", loc, key)
+	}
+	for _, item := range items {
+		s, ok := item.(string)
+		if !ok {
+			return fmt.Sprintf("%s: sandbox.%s entries must be strings", loc, key)
+		}
+		if strings.TrimSpace(s) == "" {
+			return fmt.Sprintf("%s: sandbox.%s entries must be non-empty", loc, key)
+		}
+	}
+	return ""
 }
 
 // validateLocalLLMGrammarSubset enforces, at load time, that every decide

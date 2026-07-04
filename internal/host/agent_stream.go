@@ -25,6 +25,7 @@ package host
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -64,6 +65,10 @@ type AgentStreamer struct {
 	// preferred propagation path for trace continuity; callers obtain the value
 	// from extractSessionIDCtx(ctx) or a parent_session_id param.
 	SessionID string
+	// Sandbox, when non-nil, routes the subprocess through the agent runtime
+	// registry and emits agent.runtime.start/end trace events. Nil preserves
+	// the historical direct transport path.
+	Sandbox *AgentSandboxSpec
 }
 
 // Run dispatches the claude invocation. "stream-json everywhere": every agent
@@ -109,5 +114,39 @@ func (s AgentStreamer) Run(ctx context.Context) (ClaudeRun, string, error) {
 	// captures usage. sessionID is threaded so the subprocess inherits
 	// KITSOKI_SESSION_ID.
 	args := append(s.CLIArgs, "--output-format", "stream-json", "--verbose")
+	if s.Sandbox != nil {
+		return s.runWithRuntime(ctx, args)
+	}
 	return runClaudeStreamJSON(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)
+}
+
+func (s AgentStreamer) runWithRuntime(ctx context.Context, args []string) (ClaudeRun, string, error) {
+	backend := AgentBackendFromContext(ctx)
+	inv := backend.TranslateInvocation(args, s.Stdin, s.WorkingDir)
+	spec := s.Sandbox.launchSpec(ctx, s.Bin, inv.Args, inv.Stdin, inv.WorkingDir, s.SessionID)
+	running, policy, err := agentRuntimeRegistryFrom(ctx).Launch(ctx, spec)
+	if err != nil {
+		return ClaudeRun{Infra: fmt.Errorf("agent runtime launch: %w", err)}, "", nil
+	}
+	callID := CallIDFrom(ctx)
+	appendAgentRuntimeStartEvent(ctx, callID, policy)
+	res, waitErr := running.Wait(ctx)
+	appendAgentRuntimeEndEvent(ctx, callID, policy, res, waitErr)
+	if waitErr != nil {
+		return ClaudeRun{Infra: fmt.Errorf("agent runtime wait: %w", waitErr)}, "", nil
+	}
+	reply, parsedSID, rawEvs, usage, cost := parseStreamJSONOutput(ctx, res.Stdout)
+	if strings.TrimSpace(reply) == "" {
+		reply = res.Stdout
+	}
+	cr := ClaudeRun{
+		Stdout:    strings.TrimRight(reply, "\n"),
+		Stderr:    res.Stderr,
+		ExitCode:  res.ExitCode,
+		RawEvents: rawEvs,
+		Usage:     usage,
+		CostUSD:   cost,
+	}
+	recordAgentUsage(ctx, usage, cost)
+	return cr, parsedSID, nil
 }

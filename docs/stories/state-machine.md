@@ -1115,6 +1115,12 @@ the final tool surface before effect classification, checks an asserted toolbox
 `effect:` against the joined tools, and records the resolved toolbox/effect plus
 allowed/denied tool sets on agent-call trace events.
 
+Toolboxes describe the agent tool surface. `sandbox:` describes the runtime
+subprocess boundary for a specific `host.agent.task` / write-capable
+`host.agent.converse` effect. Use both on risky write-agent paths: toolbox/effect
+sets what the model may ask for; sandbox records and applies the process/env
+policy around the backend CLI.
+
 ### The agent off-ramp — the automatic no-match door
 
 One voice, two entrances. Off-path is reached through a *typed-trigger*
