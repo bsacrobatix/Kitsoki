@@ -289,6 +289,166 @@ episodes:
 	require.True(t, report.Effects[0].HostAsserted)
 }
 
+func TestRunFlowCoverage_ReportsStarlarkStatementAndBranchCoverage(t *testing.T) {
+	dir := t.TempDir()
+	appYAML := `
+app:
+  id: coverage_starlark_test
+  version: 0.1.0
+  title: "coverage starlark test"
+  author: a
+  license: CC0
+hosts:
+  - host.starlark.run
+world:
+  name: { type: string, default: "" }
+root: idle
+intents:
+  enrich: {}
+states:
+  idle:
+    on:
+      enrich:
+        - target: done
+          effects:
+            - invoke: host.starlark.run
+              with:
+                script: scripts/enrich.star
+              bind:
+                name: name
+  done:
+    terminal: true
+`
+	flowYAML := `
+test_kind: flow
+initial_state: idle
+starlark_http_cassette: ok.http.yaml
+turns:
+  - intent: { name: enrich }
+    expect_state: done
+---
+test_kind: flow
+initial_state: idle
+starlark_http_cassette: missing.http.yaml
+turns:
+  - intent: { name: enrich }
+    expect_state: done
+`
+	appPath, flowPath := writeFixture(t, dir, appYAML, flowYAML)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "scripts"), 0o755))
+	script := `
+def main(ctx):
+    resp = ctx.http.get("https://api.example.test/user")
+    if resp:
+        body = resp.json()
+        return {"name": body["name"]}
+    return {"name": "missing"}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "scripts", "enrich.star"), []byte(script), 0o644))
+	sidecar := `
+outputs:
+  name: { type: string, required: true }
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "scripts", "enrich.star.yaml"), []byte(sidecar), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "ok.http.yaml"), []byte(`
+kind: http_cassette
+exchanges:
+  - match: { method: GET, url: "https://api.example.test/user" }
+    response:
+      status: 200
+      headers: { Content-Type: application/json }
+      body: '{"name":"Ada"}'
+`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "missing.http.yaml"), []byte(`
+kind: http_cassette
+exchanges:
+  - match: { method: GET, url: "https://api.example.test/user" }
+    response:
+      status: 404
+      body: '{}'
+`), 0o644))
+
+	report, err := testrunner.RunFlowCoverage(t.Context(), appPath, testrunner.FlowCoverageOptions{
+		FlowsGlob:                    flowPath,
+		StarlarkCoverage:             true,
+		MinStarlarkStatementCoverage: 100,
+		MinStarlarkBranchCoverage:    100,
+		RequireAllStarlarkBranches:   true,
+		RequireRealStarlark:          true,
+	})
+	require.NoError(t, err)
+	require.True(t, report.Passed, "both fixtures should cover success and error branches")
+	require.Equal(t, report.StarlarkStatementCoverage.Total, report.StarlarkStatementCoverage.Covered)
+	require.Equal(t, 2, report.StarlarkBranchCoverage.Total)
+	require.Equal(t, 2, report.StarlarkBranchCoverage.Covered)
+	require.Len(t, report.StarlarkScripts, 1)
+	require.Equal(t, []string{flowPath}, report.StarlarkScripts[0].FlowFiles)
+}
+
+func TestRunFlowCoverage_RequireRealStarlarkRejectsHostStub(t *testing.T) {
+	dir := t.TempDir()
+	appYAML := `
+app:
+  id: coverage_starlark_stub_test
+  version: 0.1.0
+  title: "coverage starlark stub test"
+  author: a
+  license: CC0
+hosts:
+  - host.starlark.run
+world:
+  name: { type: string, default: "" }
+root: idle
+intents:
+  enrich: {}
+states:
+  idle:
+    on:
+      enrich:
+        - target: done
+          effects:
+            - invoke: host.starlark.run
+              with:
+                script: scripts/enrich.star
+              bind:
+                name: name
+  done:
+    terminal: true
+`
+	flowYAML := `
+test_kind: flow
+initial_state: idle
+host_cassette: starlark.cassette.yaml
+turns:
+  - intent: { name: enrich }
+    expect_state: done
+`
+	appPath, flowPath := writeFixture(t, dir, appYAML, flowYAML)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "scripts"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "scripts", "enrich.star"), []byte("def main(ctx):\n    return {\"name\": \"real\"}\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "scripts", "enrich.star.yaml"), []byte("outputs:\n  name: { type: string }\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "starlark.cassette.yaml"), []byte(`
+kind: host_cassette
+app_id: coverage_starlark_stub_test
+match_on: [handler]
+episodes:
+  - id: starlark
+    match: { handler: host.starlark.run }
+    response:
+      data: { name: stubbed }
+`), 0o644))
+
+	report, err := testrunner.RunFlowCoverage(t.Context(), appPath, testrunner.FlowCoverageOptions{
+		FlowsGlob:           flowPath,
+		StarlarkCoverage:    true,
+		RequireRealStarlark: true,
+	})
+	require.NoError(t, err)
+	require.False(t, report.Passed, "host_cassette stubs must not satisfy real Starlark coverage")
+	require.Equal(t, 1, report.StarlarkStatementCoverage.Total)
+	require.Equal(t, 0, report.StarlarkStatementCoverage.Covered)
+}
+
 func TestRunFlowCoverage_WritesJSONReport(t *testing.T) {
 	dir := t.TempDir()
 	appYAML := `
