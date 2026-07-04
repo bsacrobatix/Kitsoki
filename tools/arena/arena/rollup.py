@@ -55,10 +55,17 @@ def build_rollup(results: list[CellResult]) -> dict[str, Any]:
 def write_rollup(results: list[CellResult], out_dir: str | Path) -> dict[str, str]:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    cells_dir = out / "cells"
+    cells_dir.mkdir(parents=True, exist_ok=True)
+    for result in results:
+        (cells_dir / f"{_safe_cell_id(result.cell_id)}.json").write_text(
+            json.dumps(result.to_dict(), indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
     rollup = build_rollup(results)
     (out / "rollup.json").write_text(json.dumps(rollup, indent=2, sort_keys=True), encoding="utf-8")
     (out / "rollup.md").write_text(_markdown(rollup), encoding="utf-8")
-    return {"rollup": str(out / "rollup.json"), "summary": str(out / "rollup.md")}
+    return {"rollup": str(out / "rollup.json"), "summary": str(out / "rollup.md"), "cells": str(cells_dir)}
 
 
 def _markdown(rollup: dict[str, Any]) -> str:
@@ -81,3 +88,7 @@ def _markdown(rollup: dict[str, Any]) -> str:
         lines.append(f"| {name} | {b['n']} | {b['win_rate']} | {b['verdicts']} |")
     lines.append("")
     return "\n".join(lines)
+
+
+def _safe_cell_id(cell_id: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in cell_id)

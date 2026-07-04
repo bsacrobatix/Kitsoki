@@ -1,0 +1,352 @@
+{
+  "by_job_type": {
+    "paired-task": {
+      "avg_cost_usd": 0.222323,
+      "infra_failures": 0,
+      "n": 12,
+      "verdicts": {
+        "failed": 6,
+        "solved": 6
+      },
+      "win_rate": 0.5
+    }
+  },
+  "by_target": {
+    "cost-bench-pilot": {
+      "avg_cost_usd": 0.222323,
+      "infra_failures": 0,
+      "n": 12,
+      "verdicts": {
+        "failed": 6,
+        "solved": 6
+      },
+      "win_rate": 0.5
+    }
+  },
+  "by_variant": {
+    "kitsoki-codex-native": {
+      "avg_cost_usd": 0.413117,
+      "infra_failures": 0,
+      "n": 3,
+      "verdicts": {
+        "solved": 3
+      },
+      "win_rate": 1.0
+    },
+    "kitsoki-synthetic-claude": {
+      "avg_cost_usd": 0.0,
+      "infra_failures": 0,
+      "n": 3,
+      "verdicts": {
+        "failed": 3
+      },
+      "win_rate": 0.0
+    },
+    "single-briefed-codex-native": {
+      "avg_cost_usd": 0.476173,
+      "infra_failures": 0,
+      "n": 3,
+      "verdicts": {
+        "solved": 3
+      },
+      "win_rate": 1.0
+    },
+    "single-briefed-synthetic-claude": {
+      "avg_cost_usd": 0.0,
+      "infra_failures": 0,
+      "n": 3,
+      "verdicts": {
+        "failed": 3
+      },
+      "win_rate": 0.0
+    }
+  },
+  "cells": [
+    {
+      "axis": {
+        "task": "nextjs-05-story-runtime"
+      },
+      "cell_id": "cost-bench-pilot--kitsoki-codex-native--task:nextjs-05-story-runtime",
+      "evidence_refs": [
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/tools/arena/corpus/cost-bench.manifest.yaml#nextjs-05-story-runtime",
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/.artifacts/arena/paired-task-work/nextjs-05-story-runtime--kitsoki--codex--gpt-5.5/packages/next/src/build/define-env.ts"
+      ],
+      "health": "model:result",
+      "job_type": "paired-task",
+      "metrics": {
+        "cost_usd": 0.387591,
+        "host": "local",
+        "tokens": 68905,
+        "wall_s": 162.717
+      },
+      "notes": "codex exit=0: Implemented the repo-history change from vercel/next.js commit [`422c93e`](https://github.com/vercel/next.js/commit/422c93e): added and plumbed `experimental.serverComponentsHmrCancellation` through config schema/defaults/runtime config, define-env, app render options, edge SSR template, CI env setu; github_content oracle green=True; cost_usd=0.387591 (blended estimate, not exact)",
+      "target_id": "cost-bench-pilot",
+      "trace_ref": "",
+      "variant_id": "kitsoki-codex-native",
+      "verdict": "solved"
+    },
+    {
+      "axis": {
+        "task": "query-string-qs1-bugfix-test-repair"
+      },
+      "cell_id": "cost-bench-pilot--kitsoki-codex-native--task:query-string-qs1-bugfix-test-repair",
+      "evidence_refs": [
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/tools/arena/corpus/cost-bench.manifest.yaml#query-string-qs1-bugfix-test-repair",
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/.artifacts/arena/paired-task-work/query-string-qs1-bugfix-test-repair--kitsoki--codex--gpt-5.5-score.json"
+      ],
+      "health": "model:result",
+      "job_type": "paired-task",
+      "metrics": {
+        "cost_usd": 0.477878,
+        "host": "local",
+        "tokens": 84956,
+        "wall_s": 201.758
+      },
+      "notes": "codex exit=0: Implemented the issue 336 fix.; [bench] query-string/qs1 oracle=pass suite=True -> solved; cost_usd=0.477878 (blended estimate, not exact)",
+      "target_id": "cost-bench-pilot",
+      "trace_ref": "",
+      "variant_id": "kitsoki-codex-native",
+      "verdict": "solved"
+    },
+    {
+      "axis": {
+        "task": "vscode-01-docs-site-release"
+      },
+      "cell_id": "cost-bench-pilot--kitsoki-codex-native--task:vscode-01-docs-site-release",
+      "evidence_refs": [
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/tools/arena/corpus/cost-bench.manifest.yaml#vscode-01-docs-site-release",
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/.artifacts/arena/paired-task-work/vscode-01-docs-site-release--kitsoki--codex--gpt-5.5/src/vs/sessions/LAYOUT_CONTROLLER.md"
+      ],
+      "health": "model:result",
+      "job_type": "paired-task",
+      "metrics": {
+        "cost_usd": 0.373883,
+        "host": "local",
+        "tokens": 66468,
+        "wall_s": 90.732
+      },
+      "notes": "codex exit=0: Applied the documentation-only slice from microsoft/vscode commit `7317e60` ([upstream patch](https://github.com/microsoft/vscode/commit/7317e60fe47bea256caf45ef830427365e4e6b3d.patch)).; github_content oracle green=True; cost_usd=0.373883 (blended estimate, not exact)",
+      "target_id": "cost-bench-pilot",
+      "trace_ref": "",
+      "variant_id": "kitsoki-codex-native",
+      "verdict": "solved"
+    },
+    {
+      "axis": {
+        "task": "nextjs-05-story-runtime"
+      },
+      "cell_id": "cost-bench-pilot--kitsoki-synthetic-claude--task:nextjs-05-story-runtime",
+      "evidence_refs": [
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/tools/arena/corpus/cost-bench.manifest.yaml#nextjs-05-story-runtime",
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/.artifacts/arena/paired-task-work/nextjs-05-story-runtime--kitsoki--synthetic--claude-synthetic/packages/next/src/build/define-env.ts"
+      ],
+      "health": "model:result",
+      "job_type": "paired-task",
+      "metrics": {
+        "cost_usd": 0.0,
+        "host": "local",
+        "tokens": 0,
+        "wall_s": 21.841
+      },
+      "notes": "synthetic backend: no live model call; baseline scored directly; github_content oracle green=False",
+      "target_id": "cost-bench-pilot",
+      "trace_ref": "",
+      "variant_id": "kitsoki-synthetic-claude",
+      "verdict": "failed"
+    },
+    {
+      "axis": {
+        "task": "query-string-qs1-bugfix-test-repair"
+      },
+      "cell_id": "cost-bench-pilot--kitsoki-synthetic-claude--task:query-string-qs1-bugfix-test-repair",
+      "evidence_refs": [
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/tools/arena/corpus/cost-bench.manifest.yaml#query-string-qs1-bugfix-test-repair",
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/.artifacts/arena/paired-task-work/query-string-qs1-bugfix-test-repair--kitsoki--synthetic--claude-synthetic-score.json"
+      ],
+      "health": "model:result",
+      "job_type": "paired-task",
+      "metrics": {
+        "cost_usd": 0.0,
+        "host": "local",
+        "tokens": 0,
+        "wall_s": 9.935
+      },
+      "notes": "synthetic backend: no live model call; baseline scored directly; [bench] query-string/qs1 oracle=fail suite=False -> failed",
+      "target_id": "cost-bench-pilot",
+      "trace_ref": "",
+      "variant_id": "kitsoki-synthetic-claude",
+      "verdict": "failed"
+    },
+    {
+      "axis": {
+        "task": "vscode-01-docs-site-release"
+      },
+      "cell_id": "cost-bench-pilot--kitsoki-synthetic-claude--task:vscode-01-docs-site-release",
+      "evidence_refs": [
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/tools/arena/corpus/cost-bench.manifest.yaml#vscode-01-docs-site-release",
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/.artifacts/arena/paired-task-work/vscode-01-docs-site-release--kitsoki--synthetic--claude-synthetic/src/vs/sessions/LAYOUT_CONTROLLER.md"
+      ],
+      "health": "model:result",
+      "job_type": "paired-task",
+      "metrics": {
+        "cost_usd": 0.0,
+        "host": "local",
+        "tokens": 0,
+        "wall_s": 22.347
+      },
+      "notes": "synthetic backend: no live model call; baseline scored directly; github_content oracle green=False",
+      "target_id": "cost-bench-pilot",
+      "trace_ref": "",
+      "variant_id": "kitsoki-synthetic-claude",
+      "verdict": "failed"
+    },
+    {
+      "axis": {
+        "task": "nextjs-05-story-runtime"
+      },
+      "cell_id": "cost-bench-pilot--single-briefed-codex-native--task:nextjs-05-story-runtime",
+      "evidence_refs": [
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/tools/arena/corpus/cost-bench.manifest.yaml#nextjs-05-story-runtime",
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/.artifacts/arena/paired-task-work/nextjs-05-story-runtime--single-briefed--codex--gpt-5.5/packages/next/src/build/define-env.ts"
+      ],
+      "health": "model:result",
+      "job_type": "paired-task",
+      "metrics": {
+        "cost_usd": 0.679894,
+        "host": "local",
+        "tokens": 120870,
+        "wall_s": 217.129
+      },
+      "notes": "codex exit=0: Implemented the `422c93e` flag plumbing for `experimental.serverComponentsHmrCancellation`.; github_content oracle green=True; cost_usd=0.679894 (blended estimate, not exact)",
+      "target_id": "cost-bench-pilot",
+      "trace_ref": "",
+      "variant_id": "single-briefed-codex-native",
+      "verdict": "solved"
+    },
+    {
+      "axis": {
+        "task": "query-string-qs1-bugfix-test-repair"
+      },
+      "cell_id": "cost-bench-pilot--single-briefed-codex-native--task:query-string-qs1-bugfix-test-repair",
+      "evidence_refs": [
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/tools/arena/corpus/cost-bench.manifest.yaml#query-string-qs1-bugfix-test-repair",
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/.artifacts/arena/paired-task-work/query-string-qs1-bugfix-test-repair--single-briefed--codex--gpt-5.5-score.json"
+      ],
+      "health": "model:result",
+      "job_type": "paired-task",
+      "metrics": {
+        "cost_usd": 0.481624,
+        "host": "local",
+        "tokens": 85622,
+        "wall_s": 178.095
+      },
+      "notes": "codex exit=0: Implemented the fix for query-string issue 336: separator array parsing now splits only on literal raw separators, then decodes each segment. Encoded separators like `%7C` or `%2C` stay inside a single decoded value.; [bench] query-string/qs1 oracle=pass suite=True -> solved; cost_usd=0.481624 (blended estimate, not exact)",
+      "target_id": "cost-bench-pilot",
+      "trace_ref": "",
+      "variant_id": "single-briefed-codex-native",
+      "verdict": "solved"
+    },
+    {
+      "axis": {
+        "task": "vscode-01-docs-site-release"
+      },
+      "cell_id": "cost-bench-pilot--single-briefed-codex-native--task:vscode-01-docs-site-release",
+      "evidence_refs": [
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/tools/arena/corpus/cost-bench.manifest.yaml#vscode-01-docs-site-release",
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/.artifacts/arena/paired-task-work/vscode-01-docs-site-release--single-briefed--codex--gpt-5.5/src/vs/sessions/LAYOUT_CONTROLLER.md"
+      ],
+      "health": "model:result",
+      "job_type": "paired-task",
+      "metrics": {
+        "cost_usd": 0.267002,
+        "host": "local",
+        "tokens": 47467,
+        "wall_s": 113.722
+      },
+      "notes": "codex exit=0: Recreated the markdown portion of microsoft/vscode commit `7317e60` in:; github_content oracle green=True; cost_usd=0.267002 (blended estimate, not exact)",
+      "target_id": "cost-bench-pilot",
+      "trace_ref": "",
+      "variant_id": "single-briefed-codex-native",
+      "verdict": "solved"
+    },
+    {
+      "axis": {
+        "task": "nextjs-05-story-runtime"
+      },
+      "cell_id": "cost-bench-pilot--single-briefed-synthetic-claude--task:nextjs-05-story-runtime",
+      "evidence_refs": [
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/tools/arena/corpus/cost-bench.manifest.yaml#nextjs-05-story-runtime",
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/.artifacts/arena/paired-task-work/nextjs-05-story-runtime--single-briefed--synthetic--claude-synthetic/packages/next/src/build/define-env.ts"
+      ],
+      "health": "model:result",
+      "job_type": "paired-task",
+      "metrics": {
+        "cost_usd": 0.0,
+        "host": "local",
+        "tokens": 0,
+        "wall_s": 28.15
+      },
+      "notes": "synthetic backend: no live model call; baseline scored directly; github_content oracle green=False",
+      "target_id": "cost-bench-pilot",
+      "trace_ref": "",
+      "variant_id": "single-briefed-synthetic-claude",
+      "verdict": "failed"
+    },
+    {
+      "axis": {
+        "task": "query-string-qs1-bugfix-test-repair"
+      },
+      "cell_id": "cost-bench-pilot--single-briefed-synthetic-claude--task:query-string-qs1-bugfix-test-repair",
+      "evidence_refs": [
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/tools/arena/corpus/cost-bench.manifest.yaml#query-string-qs1-bugfix-test-repair",
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/.artifacts/arena/paired-task-work/query-string-qs1-bugfix-test-repair--single-briefed--synthetic--claude-synthetic-score.json"
+      ],
+      "health": "model:result",
+      "job_type": "paired-task",
+      "metrics": {
+        "cost_usd": 0.0,
+        "host": "local",
+        "tokens": 0,
+        "wall_s": 7.71
+      },
+      "notes": "synthetic backend: no live model call; baseline scored directly; [bench] query-string/qs1 oracle=fail suite=False -> failed",
+      "target_id": "cost-bench-pilot",
+      "trace_ref": "",
+      "variant_id": "single-briefed-synthetic-claude",
+      "verdict": "failed"
+    },
+    {
+      "axis": {
+        "task": "vscode-01-docs-site-release"
+      },
+      "cell_id": "cost-bench-pilot--single-briefed-synthetic-claude--task:vscode-01-docs-site-release",
+      "evidence_refs": [
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/tools/arena/corpus/cost-bench.manifest.yaml#vscode-01-docs-site-release",
+        "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/.artifacts/arena/paired-task-work/vscode-01-docs-site-release--single-briefed--synthetic--claude-synthetic/src/vs/sessions/LAYOUT_CONTROLLER.md"
+      ],
+      "health": "model:result",
+      "job_type": "paired-task",
+      "metrics": {
+        "cost_usd": 0.0,
+        "host": "local",
+        "tokens": 0,
+        "wall_s": 36.821
+      },
+      "notes": "synthetic backend: no live model call; baseline scored directly; github_content oracle green=False",
+      "target_id": "cost-bench-pilot",
+      "trace_ref": "",
+      "variant_id": "single-briefed-synthetic-claude",
+      "verdict": "failed"
+    }
+  ],
+  "summary": {
+    "avg_cost_usd": 0.222323,
+    "infra_failures": 0,
+    "n": 12,
+    "verdicts": {
+      "failed": 6,
+      "solved": 6
+    },
+    "win_rate": 0.5
+  }
+}
