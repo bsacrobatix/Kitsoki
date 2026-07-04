@@ -535,7 +535,7 @@ fetch-llama-server:
 #                   (runs inside `make build` and `make test` — a stale manifest
 #                   can never be embedded into the binary)
 #   features-index  emit the site/QA contract to .artifacts/features/
-.PHONY: features features-check features-index media-check demo-feature feature-qa
+.PHONY: features features-check features-index media-check media-check-promo demo-feature feature-qa
 features:
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:gen
 
@@ -547,6 +547,14 @@ features-index:
 
 media-check: features-index
 	node $(SITE_DIR)/scripts/check-media.mjs --index .artifacts/features/features-index.json
+
+# media-check-promo is the hard presence gate: run AFTER `make site` (which
+# stages src/public/media/ via its prebuild step) so every promo-grid feature
+# (a `promo:` block in features/<id>.yaml — the landing-page set) is proven to
+# have real staged media, not just shape-valid paths. Non-promo features
+# missing media only warn. CI wires this in as a non-continue-on-error step.
+media-check-promo: features-index
+	node $(SITE_DIR)/scripts/check-media.mjs --index .artifacts/features/features-index.json --require-promo-media
 
 # demo-feature records ONE feature's demo video at watch-speed and renders the
 # GIF + contact sheet. Spec + artifact paths come from the feature catalog.

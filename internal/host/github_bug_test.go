@@ -24,6 +24,7 @@ func TestGitHubFileBug_UploadSuccess(t *testing.T) {
 	}
 
 	var releaseCreated bool
+	var releaseCreateArgv string
 	var uploads int
 	var issueArgv string
 	runner := func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
@@ -35,6 +36,7 @@ func TestGitHubFileBug_UploadSuccess(t *testing.T) {
 			return "", "release not found", 1, nil // missing → triggers create
 		case strings.HasPrefix(j, "release create"):
 			releaseCreated = true
+			releaseCreateArgv = j
 			return "", "", 0, nil
 		case strings.HasPrefix(j, "release upload"):
 			uploads++
@@ -64,6 +66,11 @@ func TestGitHubFileBug_UploadSuccess(t *testing.T) {
 	}
 	if !releaseCreated {
 		t.Error("expected release create when release missing")
+	}
+	// The evidence release must never claim the repo's "Latest" slot away from
+	// a real tagged product release.
+	if !strings.Contains(releaseCreateArgv, "--prerelease") {
+		t.Errorf("expected release create to pass --prerelease, argv = %q", releaseCreateArgv)
 	}
 	if uploads != 2 {
 		t.Errorf("expected 2 uploads, got %d", uploads)
