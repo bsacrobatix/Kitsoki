@@ -281,8 +281,12 @@ what this epic can own; per-tool rebuttals live in the research doc §4.
 - **Not a runtime datastore.** No server, no DB; execution state stays in
   goal.py-style ledgers and traces, not in durable nodes (the
   no-pass/fail-in-files rule from `lifecycle-taxonomy.md`).
-- **No mass migration** of the ~30 existing markdown proposals or of live
-  goal.py ledgers; wrapper/adapter first, new-work-first.
+- **No big-bang rewrite.** Converting the product site catalog and the
+  `docs/proposals/` queue into the graph is **in scope — it is the payoff
+  and the dogfood** (goal G3/G7 in
+  [`../goals/project-object-graph/GOAL.md`](../goals/project-object-graph/GOAL.md)) —
+  but it proceeds wrapper/adapter-first and incrementally, never as a
+  flag-day rewrite; live goal.py ledgers are not migrated.
 - **Not replacing flow fixtures, cassettes, or the trace format** — those are
   execution artifacts; the graph sits upstream and points at them as
   evidence.
