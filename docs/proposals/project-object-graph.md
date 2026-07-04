@@ -114,6 +114,14 @@ flowchart TB
   nodes (retiring the parallel brief shapes — `lifecycle-taxonomy.md` Open
   question 2, decided here); the punch-list and goal.py read the same graph.
 
+The first review fixture is data, not prose:
+[`project-object-graph/seed-objects.yaml`](project-object-graph/seed-objects.yaml)
+contains a small typed catalog mined from the current proposal backlog,
+`features/operator-ask.yaml`, and `.context` strategy notes. It seeds the
+feature / requirement / use-case layer with explicit typed edges and source
+provenance so the graph shape can be reviewed before the loader and schemas
+exist.
+
 ## Impact
 
 - **Spans:** runtime (substrate, delta ops, lint), story (catalog authoring,
