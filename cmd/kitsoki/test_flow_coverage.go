@@ -18,6 +18,9 @@ func testFlowCoverageCmd() *cobra.Command {
 		jsonOut            string
 		minBranchCoverage  float64
 		requireAllBranches bool
+		minEffectCoverage  float64
+		requireAllEffects  bool
+		requireHostAsserts bool
 		maxCombinations    int
 	)
 
@@ -38,12 +41,15 @@ expect_state / expect_state_in that matches the branch target.`,
 				flowsGlob = defaultFlowsGlob(appPath)
 			}
 			report, err := testrunner.RunFlowCoverage(context.Background(), appPath, testrunner.FlowCoverageOptions{
-				FlowsGlob:          flowsGlob,
-				JSONOut:            jsonOut,
-				MinBranchCoverage:  minBranchCoverage,
-				RequireAllBranches: requireAllBranches,
-				MaxCombinations:    maxCombinations,
-				ImportResolver:     buildImportResolver(),
+				FlowsGlob:             flowsGlob,
+				JSONOut:               jsonOut,
+				MinBranchCoverage:     minBranchCoverage,
+				RequireAllBranches:    requireAllBranches,
+				MinEffectCoverage:     minEffectCoverage,
+				RequireAllEffects:     requireAllEffects,
+				RequireHostAssertions: requireHostAsserts,
+				MaxCombinations:       maxCombinations,
+				ImportResolver:        buildImportResolver(),
 			})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "kitsoki test flow-coverage: %v\n", err)
@@ -61,6 +67,9 @@ expect_state / expect_state_in that matches the branch target.`,
 	cmd.Flags().StringVar(&jsonOut, "json", "", "write JSON report to this file")
 	cmd.Flags().Float64Var(&minBranchCoverage, "min-branch", 0, "minimum authored branch coverage percentage required to pass")
 	cmd.Flags().BoolVar(&requireAllBranches, "require-all-branches", false, "fail when any authored transition branch is uncovered")
+	cmd.Flags().Float64Var(&minEffectCoverage, "min-effect", 0, "minimum authored effect coverage percentage required to pass")
+	cmd.Flags().BoolVar(&requireAllEffects, "require-all-effects", false, "fail when any authored effect is uncovered")
+	cmd.Flags().BoolVar(&requireHostAsserts, "require-host-assertions", false, "fail when a covered invoke lacks expect_host_calls or a host cassette")
 	cmd.Flags().IntVar(&maxCombinations, "max-combinations", 64, "maximum enum-slot combination product to expand per state+intent")
 	return cmd
 }
@@ -85,6 +94,30 @@ func printFlowCoverageReport(report *testrunner.FlowCoverageReport) {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\n", status, branch.State, branch.Intent, branch.Index, target)
 	}
 	_ = w.Flush()
+
+	if len(report.Effects) > 0 {
+		fmt.Println("\nEffect coverage gaps:")
+		w = tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+		fmt.Fprintf(w, "STATUS\tASSERT\tSITE\tKIND\tINVOKE\n")
+		for _, effect := range report.Effects {
+			if effect.Covered && (effect.Invoke == "" || effect.HostAsserted) {
+				continue
+			}
+			status := "MISS"
+			if effect.Covered {
+				status = "HIT"
+			}
+			assertStatus := ""
+			if effect.Invoke != "" {
+				assertStatus = "unasserted"
+				if effect.HostAsserted {
+					assertStatus = "asserted"
+				}
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", status, assertStatus, effect.ID, effect.Kind, effect.Invoke)
+		}
+		_ = w.Flush()
+	}
 
 	if len(report.ParameterChecks) > 0 {
 		fmt.Println("\nParameter coverage gaps:")
@@ -118,6 +151,8 @@ func printFlowCoverageReport(report *testrunner.FlowCoverageReport) {
 	total := report.BranchCoverage.Total
 	fmt.Printf("\nSummary: %d/%d authored branches covered (%.1f%%)\n",
 		report.BranchCoverage.Covered, total, report.BranchCoverage.Percent)
+	fmt.Printf("Effects: %d/%d authored effects covered (%.1f%%)\n",
+		report.EffectCoverage.Covered, report.EffectCoverage.Total, report.EffectCoverage.Percent)
 	if report.Passed {
 		fmt.Println("PASS")
 	} else {

@@ -1,6 +1,7 @@
 package testrunner_test
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -135,6 +136,157 @@ turns:
 	require.Equal(t, []string{"manual"}, check.MissingValues["mode"])
 	require.Equal(t, 4, check.RequiredCombinations)
 	require.Len(t, check.MissingCombinations, 3)
+}
+
+func TestRunFlowCoverage_ReportsHostRunEffectCoverageAndAssertions(t *testing.T) {
+	dir := t.TempDir()
+	appYAML := `
+app:
+  id: coverage_effect_test
+  version: 0.1.0
+  title: "coverage effect test"
+  author: a
+  license: CC0
+hosts:
+  - host.run
+world:
+  boot: { type: string, default: "" }
+  ran:  { type: string, default: "" }
+root: idle
+intents:
+  start: {}
+  stop: {}
+states:
+  idle:
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: echo
+          args: ["boot"]
+          cwd: "/tmp"
+        bind:
+          boot: stdout
+    on:
+      start:
+        - target: done
+          effects:
+            - set: { ran: "yes" }
+            - invoke: host.run
+              with:
+                cmd: echo
+                args: ["start"]
+              bind:
+                ran: stdout
+      stop:
+        - target: done
+          effects:
+            - invoke: host.run
+              with:
+                cmd: echo
+                args: ["stop"]
+  done:
+    terminal: true
+`
+	flowYAML := `
+test_kind: flow
+initial_state: idle
+turns:
+  - intent: { name: start }
+    expect_state: done
+    expect_host_calls:
+      - handler: host.run
+`
+	appPath, flowPath := writeFixture(t, dir, appYAML, flowYAML)
+
+	report, err := testrunner.RunFlowCoverage(t.Context(), appPath, testrunner.FlowCoverageOptions{
+		FlowsGlob:             flowPath,
+		RequireAllEffects:     true,
+		RequireHostAssertions: true,
+	})
+	require.NoError(t, err)
+	require.False(t, report.Passed, "uncovered stop effect and unasserted on_enter host.run should fail strict gates")
+	require.Equal(t, 3, report.EffectCoverage.Covered)
+	require.Equal(t, 4, report.EffectCoverage.Total)
+
+	var onEnterRun, startRun, stopRun testrunner.FlowEffectCoverage
+	for _, effect := range report.Effects {
+		if effect.Invoke != "host.run" {
+			continue
+		}
+		switch {
+		case effect.Origin == "on_enter":
+			onEnterRun = effect
+		case effect.Intent == "start":
+			startRun = effect
+		case effect.Intent == "stop":
+			stopRun = effect
+		}
+	}
+	require.True(t, onEnterRun.Covered)
+	require.False(t, onEnterRun.HostAsserted)
+	require.NotNil(t, onEnterRun.HostRun)
+	require.Equal(t, "echo", onEnterRun.HostRun.Cmd)
+	require.True(t, startRun.Covered)
+	require.True(t, startRun.HostAsserted)
+	require.False(t, stopRun.Covered)
+}
+
+func TestRunFlowCoverage_CassetteBacksOnEnterHostAssertion(t *testing.T) {
+	dir := t.TempDir()
+	appYAML := `
+app:
+  id: coverage_cassette_effect_test
+  version: 0.1.0
+  title: "coverage cassette effect test"
+  author: a
+  license: CC0
+hosts:
+  - host.run
+root: idle
+intents:
+  start: {}
+states:
+  idle:
+    on_enter:
+      - invoke: host.run
+        with: { cmd: echo, args: ["boot"] }
+    on:
+      start:
+        - target: done
+  done:
+    terminal: true
+`
+	flowYAML := `
+test_kind: flow
+initial_state: idle
+host_cassette: boot.cassette.yaml
+turns:
+  - intent: { name: start }
+    expect_state: done
+`
+	appPath, flowPath := writeFixture(t, dir, appYAML, flowYAML)
+	cassetteYAML := `
+kind: host_cassette
+app_id: coverage_cassette_effect_test
+match_on: [handler]
+episodes:
+  - id: boot
+    match: { handler: host.run }
+    response:
+      data: { ok: true }
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "boot.cassette.yaml"), []byte(cassetteYAML), 0o644))
+
+	report, err := testrunner.RunFlowCoverage(t.Context(), appPath, testrunner.FlowCoverageOptions{
+		FlowsGlob:             flowPath,
+		RequireAllEffects:     true,
+		RequireHostAssertions: true,
+	})
+	require.NoError(t, err)
+	require.True(t, report.Passed)
+	require.Len(t, report.Effects, 1)
+	require.True(t, report.Effects[0].Covered)
+	require.True(t, report.Effects[0].HostAsserted)
 }
 
 func TestRunFlowCoverage_WritesJSONReport(t *testing.T) {
