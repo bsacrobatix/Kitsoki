@@ -10,6 +10,9 @@ the transcript.
 
 - Each media element exposes a `Pin` affordance.
 - Pinning opens a stable media pane in the live session view.
+- The chat pane gets a persistent `Working on` context strip naming the pinned
+  artifact, so the operator can always tell what the conversation is acting on
+  even after the transcript scrolls.
 - The selected media handle is suppressed from the transcript while pinned and
   replaced with a compact receipt, so the conversation keeps chronology without
   mounting duplicate embeds.
@@ -35,6 +38,10 @@ webviews selected by `window.__KITSOKI_SURFACE`.
 `kitsoki:pin-media` browser event with the media handle; `InteractiveView.vue`
 selects the matching media element from `store.chatEntries` and renders that same
 `ViewElement` in the media pane.
+
+Video media uses the artifact poster endpoint when available. This keeps pinned
+videos legible in screenshots, tours, and QA frames before the browser has played
+or seeked the media.
 
 The transcript suppression is intentionally handle-based. It only hides the
 currently pinned artifact handle, and only in workbench mode. This preserves

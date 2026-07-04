@@ -192,6 +192,7 @@ describe("InteractiveView — embed (VS Code) layout", () => {
     expect(wrapper.find('[data-testid="media-workbench-pane"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="media-workbench-stage"]').text()).toContain("Checkout mockup");
     expect(wrapper.find('[data-testid="media-workbench-stage"] [data-testid="media-pin-workbench"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="chat-pinned-context"]').text()).toContain("Checkout mockup");
     expect(wrapper.find('[data-testid="media-devtools-pane"]').exists()).toBe(true);
     expect(wrapper.find(".iv__main").attributes("style")).toContain("42%");
 

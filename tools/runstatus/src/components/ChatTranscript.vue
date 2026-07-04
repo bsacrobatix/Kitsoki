@@ -759,10 +759,10 @@ watch(
 .chat-media-receipt {
   margin: 0.35rem 0;
   padding: 0.38rem 0.5rem;
-  border: 1px solid var(--k-border, #d1d5db);
+  border: 1px solid #334155;
   border-radius: 5px;
-  background: var(--k-bg-hover, #f3f4f6);
-  color: var(--k-fg-muted, #4b5563);
+  background: #1e293b;
+  color: #cbd5e1;
   font-size: 0.78rem;
   display: flex;
   align-items: center;
@@ -775,13 +775,13 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--k-paper-fg, #1f2937);
+  color: #f8fafc;
   font-weight: 650;
 }
 
 .chat-media-receipt__hint {
   flex: 0 0 auto;
-  color: var(--k-fg-muted, #6b7280);
+  color: #94a3b8;
 }
 
 /* The collapsed activity feed (the turn's preserved thinking/tool stream)

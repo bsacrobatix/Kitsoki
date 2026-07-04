@@ -73,6 +73,9 @@ const _ds = createDataSource();
 function artifactUrl(handle: string): string {
   return _ds.artifactUrl(handle);
 }
+function artifactPosterUrl(handle: string): string {
+  return _ds.artifactPosterUrl?.(handle) ?? "";
+}
 
 function withQuery(url: string, params: Record<string, string>): string {
   const entries = Object.entries(params).filter(([, v]) => typeof v === "string" && v !== "");
@@ -128,6 +131,9 @@ const mediaMime = computed<string>(() => {
   // common case: a rendered walkthrough is an mp4. A wrong guess only changes
   // which player branch renders; /artifact/{id} sets the real Content-Type.
   return "video/mp4";
+});
+const mediaPosterUrl = computed<string>(() => {
+  return mediaHandle.value ? artifactPosterUrl(mediaHandle.value) : "";
 });
 
 // A `slideshow` media kind is a multi-scene deck (e.g. a slidey deck rendered to
@@ -611,6 +617,7 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
         controls
         preload="metadata"
         :src="artifactUrl(mediaHandle)"
+        :poster="mediaPosterUrl || undefined"
       >
         <span class="ve-media-fallback">
           Your browser does not support video playback.

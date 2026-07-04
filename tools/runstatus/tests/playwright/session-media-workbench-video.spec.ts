@@ -9,6 +9,7 @@
 import { test, expect, chromium, type Browser, type BrowserContext, type Page, type Locator } from "@playwright/test";
 import path from "path";
 import fs from "fs";
+import { execFileSync } from "child_process";
 import {
   startWebServer,
   repoRoot,
@@ -38,6 +39,7 @@ const CHAPTER_SOURCE = "features/session-media-workbench.yaml";
 const DIAG_LOG = path.join(ARTIFACT_DIR, "diagnostic.log");
 const ERROR_TXT = path.join(ARTIFACT_DIR, "ERROR.txt");
 const REAL_VIDEO = path.join(repoRoot, ".artifacts", "review-video", "render", "walkthrough.mp4");
+const REAL_POSTER = path.join(repoRoot, ".artifacts", "review-video", "render", "walkthrough.poster.png");
 
 let server: WebServer;
 
@@ -71,12 +73,124 @@ async function workbenchGrid(page: Page): Promise<string> {
   });
 }
 
+async function settleMediaPreviews(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const videos = Array.from(document.querySelectorAll<HTMLVideoElement>('[data-testid="media-video"]'));
+    await Promise.all(videos.map(async (video) => {
+      if (Number.isFinite(video.duration) && video.duration > 4 && video.currentTime < 2) {
+        await new Promise<void>((resolve) => {
+          const done = () => resolve();
+          video.addEventListener("seeked", done, { once: true });
+          window.setTimeout(done, 800);
+          video.currentTime = Math.min(3, video.duration - 0.25);
+        });
+      }
+    }));
+  });
+}
+
+async function hideTourForProofFrame(page: Page, hidden: boolean): Promise<void> {
+  await page.evaluate((hide) => {
+    document.documentElement.toggleAttribute("data-qa-product-frame", hide);
+  }, hidden);
+}
+
+async function productShot(
+  page: Page,
+  shot: (page: Page, label: string) => Promise<string>,
+  label: string,
+): Promise<void> {
+  await hideTourForProofFrame(page, true);
+  await dwell(page, 350);
+  await shot(page, label);
+  await hideTourForProofFrame(page, false);
+}
+
+function useProductShot(step: TourStep): boolean {
+  return new Set([
+    "smw-media-pane",
+    "smw-chat-pane",
+    "smw-media-receipt",
+    "smw-devtools-graph",
+    "smw-resize-media",
+    "smw-trace-tab",
+    "smw-resize-bottom",
+    "smw-popout",
+  ]).has(step.id);
+}
+
+async function revealPinnedReceipt(page: Page): Promise<void> {
+  const receipt = page.getByTestId("chat-media-receipt").first();
+  if ((await receipt.count()) === 0) return;
+  await receipt.evaluate((el) => {
+    (el.closest(".chat-row") ?? el).scrollIntoView({ block: "start", inline: "nearest" });
+  }).catch(() => undefined);
+}
+
+async function ensureReviewVideo(): Promise<void> {
+  const outDir = path.dirname(REAL_VIDEO);
+  fs.mkdirSync(outDir, { recursive: true });
+  const posterBrowser = await chromium.launch({ headless: true });
+  const posterPage = await posterBrowser.newPage({ viewport: { width: 1280, height: 720 } });
+  await posterPage.setContent(`
+    <html>
+      <body style="margin:0;background:#020617;color:#f8fafc;font-family:Inter,Arial,sans-serif;">
+        <main style="box-sizing:border-box;width:1280px;height:720px;padding:40px;background:#020617;">
+          <section style="height:640px;border-radius:22px;background:#0b1220;border:3px solid #38bdf8;padding:44px;box-sizing:border-box;">
+            <div style="display:inline-block;background:#14532d;border-radius:10px;padding:18px 28px;font-size:46px;font-weight:800;">
+              Kitsoki architecture walkthrough
+            </div>
+            <div style="margin-top:48px;font-size:38px;color:#dbeafe;">Story -> Room -> Host call -> Artifact</div>
+            <div style="display:flex;gap:40px;margin-top:58px;">
+              <div style="width:260px;height:150px;border-radius:14px;background:#1d4ed8;display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:750;">Brief</div>
+              <div style="width:260px;height:150px;border-radius:14px;background:#0f766e;display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:750;">Render</div>
+              <div style="width:260px;height:150px;border-radius:14px;background:#7c3aed;display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:750;">Review</div>
+            </div>
+            <div style="margin-top:76px;font-size:30px;color:#f8fafc;">
+              Trace and graph stay dockable while media remains pinned.
+            </div>
+          </section>
+        </main>
+      </body>
+    </html>
+  `);
+  await posterPage.screenshot({ path: REAL_POSTER });
+  await posterBrowser.close();
+  execFileSync("ffmpeg", [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-loop",
+    "1",
+    "-framerate",
+    "30",
+    "-i",
+    REAL_POSTER,
+    "-t",
+    "15",
+    "-pix_fmt",
+    "yuv420p",
+    REAL_VIDEO,
+  ]);
+  fs.writeFileSync(
+    `${REAL_VIDEO}.chapters.json`,
+    JSON.stringify(
+      [
+        { index: 0, id: "scene-0", label: "Architecture overview", start_ms: 0, end_ms: 3000 },
+        { index: 1, id: "scene-1", label: "Story anatomy", start_ms: 3000, end_ms: 6000 },
+        { index: 2, id: "scene-2", label: "Render and review", start_ms: 6000, end_ms: 9000 },
+        { index: 3, id: "scene-3", label: "Traceability", start_ms: 9000, end_ms: 12000 },
+        { index: 4, id: "scene-4", label: "Pinned media workflow", start_ms: 12000, end_ms: 15000 },
+      ],
+      null,
+      2,
+    ),
+  );
+}
+
 test.beforeAll(async () => {
-  if (!fs.existsSync(REAL_VIDEO) || !fs.existsSync(REAL_VIDEO + ".chapters.json")) {
-    throw new Error(
-      `missing real render at ${REAL_VIDEO}(.chapters.json) — run the review-video render setup first.`,
-    );
-  }
+  await ensureReviewVideo();
   fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
   prepareVideoDir(VIDEO_DIR);
   fs.writeFileSync(DIAG_LOG, "");
@@ -101,6 +215,13 @@ test("session media workbench tour video", async () => {
     await installCurtain(page, "Session Media Workbench");
     diag("navigating home behind curtain");
     await cinematicGoto(page, `${server.base}/#/`, { waitForTestId: "home-view" });
+    await page.addStyleTag({
+      content: `
+        html[data-qa-product-frame] [data-testid="tour-overlay"] {
+          visibility: hidden !important;
+        }
+      `,
+    });
     await page.getByTestId("new-session-btn").first().click();
     await page.waitForURL(/#\/s\/[0-9a-f-]{36}\/chat$/, { timeout: 15000 });
 
@@ -126,9 +247,38 @@ test("session media workbench tour video", async () => {
       }
 
       await expect(page.getByTestId("tour-title")).toHaveText(step.title, { timeout: 12000 });
-      chapters.open(step.id, step.title, CHAPTER_SOURCE);
-      await dwell(page, step.dwellMs ?? 3000);
-      await shot(page, step.id);
+      if (step.id === "smw-resize-media") {
+        const target = await resolveTarget(page, step);
+        const before = await workbenchGrid(page);
+        await settleMediaPreviews(page);
+        chapters.open(step.id, step.title, CHAPTER_SOURCE);
+        await dwell(page, 800);
+        await productShot(page, shot, `${step.id}-before`);
+        await dragSplitter(page, target, 160, 0);
+        await expect.poll(() => workbenchGrid(page)).not.toBe(before);
+        await settleMediaPreviews(page);
+        await dwell(page, (step.dwellMs ?? 3000) - 800);
+        await productShot(page, shot, `${step.id}-after`);
+      } else if (step.id === "smw-resize-bottom") {
+        const target = await resolveTarget(page, step);
+        const before = await workbenchGrid(page);
+        await settleMediaPreviews(page);
+        chapters.open(step.id, step.title, CHAPTER_SOURCE);
+        await dwell(page, 800);
+        await productShot(page, shot, `${step.id}-before`);
+        await dragSplitter(page, target, 0, -80);
+        await expect.poll(() => workbenchGrid(page)).not.toBe(before);
+        await settleMediaPreviews(page);
+        await dwell(page, (step.dwellMs ?? 3000) - 800);
+        await productShot(page, shot, `${step.id}-after`);
+      } else {
+        await settleMediaPreviews(page);
+        chapters.open(step.id, step.title, CHAPTER_SOURCE);
+        if (step.id === "smw-media-receipt") await revealPinnedReceipt(page);
+        await dwell(page, step.dwellMs ?? 3000);
+        if (useProductShot(step)) await productShot(page, shot, step.id);
+        else await shot(page, step.id);
+      }
 
       if (step.kind === "explain") {
         await page.getByTestId("tour-next").click();
@@ -136,16 +286,15 @@ test("session media workbench tour video", async () => {
       } else {
         const target = await resolveTarget(page, step);
         await target.scrollIntoViewIfNeeded().catch(() => undefined);
-        if (step.id === "smw-resize-media") {
-          const before = await workbenchGrid(page);
-          await dragSplitter(page, target, 160, 0);
-          await expect.poll(() => workbenchGrid(page)).not.toBe(before);
-        } else if (step.id === "smw-resize-bottom") {
-          const before = await workbenchGrid(page);
-          await dragSplitter(page, target, 0, -80);
-          await expect.poll(() => workbenchGrid(page)).not.toBe(before);
-        } else {
+        if (step.id !== "smw-resize-media" && step.id !== "smw-resize-bottom") {
           await target.evaluate((el) => (el as HTMLElement).click());
+        }
+        if (step.id === "smw-float") {
+          await expect(page.getByTestId("floating-devtools-pane")).toBeVisible({ timeout: 5000 });
+          await settleMediaPreviews(page);
+          await productShot(page, shot, `${step.id}-after`);
+          await page.getByTestId("floating-devtools-dock").evaluate((el) => (el as HTMLElement).click());
+          await expect(page.getByTestId("media-devtools-pane")).toBeVisible({ timeout: 5000 });
         }
         await dwell(page, 1000);
       }

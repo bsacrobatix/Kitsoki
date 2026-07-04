@@ -44,6 +44,18 @@ export const SESSION_MEDIA_WORKBENCH_TOUR_STEPS: readonly TourStep[] = [
     dwellMs: 5000,
   },
   {
+    id: "smw-media-receipt",
+    route: "interactive",
+    target: "chat-pinned-context",
+    title: "Pinned media receipt",
+    body: "The chat pane keeps the artifact's place in the session with a compact working-on receipt instead of mounting a duplicate media player beside the pinned pane.",
+    placement: "bottom",
+    kind: "explain",
+    advance: "next",
+    waitForTarget: "chat-pinned-context",
+    dwellMs: 4200,
+  },
+  {
     id: "smw-devtools-graph",
     route: "interactive",
     target: "media-devtools-pane",
