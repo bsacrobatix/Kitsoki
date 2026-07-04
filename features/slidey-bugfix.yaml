@@ -18,6 +18,9 @@ demo:
   story: stories/slidey-bugfix
   flow: stories/slidey-bugfix/flows/tour.yaml
   hostCassette: stories/slidey-bugfix/cassettes/tour.cassette.yaml
+  embed:
+    deck: docs/decks/dev-story-hybrid.slidey.json
+    rrweb: assets/dev-story-hybrid/slidey-bugfix.rrweb.json
 tour:
   export: SLIDEY_BUGFIX_TOUR_STEPS
   steps:

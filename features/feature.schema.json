@@ -113,6 +113,24 @@
               "mobile"
             ]
           }
+        },
+        "embed": {
+          "type": "object",
+          "properties": {
+            "deck": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rrweb": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "deck",
+            "rrweb"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

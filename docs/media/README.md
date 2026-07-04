@@ -71,9 +71,36 @@ Until a dedicated deck catalog exists, use this rule:
 - Any committed rrweb clip it references must live under
   `docs/decks/assets/<deck-id>/`.
 - Generated deck renders, MP4s, HTML bundles, screenshots, and throwaway clips
-  belong under `.artifacts/<deck-id>/`.
+  belong under `.artifacts/<deck-id>/` — with ONE exception:
+  `docs/decks/bundled/<deck-id>.html`, the committed self-contained bundle
+  (`slidey bundle <deck> <html>`) that a feature's `demo.embed` serves as its
+  site demo (below). It is committed because the Pages build cannot run the
+  slidey CLI; re-bundle it whenever the source deck or its clips change.
 - Decks produced by stories for runtime use belong with the story, such as
   `stories/<story>/baked/`, not in `docs/decks/`.
+
+### Deck embeds on the product site (`demo.embed`)
+
+A rrweb-native story-demo (its `*-video.spec.ts` is a permanent stub — the
+walk is captured by a companion `*-rrweb-capture.spec.ts` and consumed by a
+Slidey deck, never rendered to MP4) presents on its `/features/<id>` page as an
+embedded deck clip instead of a video:
+
+- `features/<id>.yaml` sets `demo.embed: { deck, rrweb }` — the source deck
+  JSON plus the clip's `rrweb` path as written in that deck. Codegen resolves
+  the scene index from the deck (never authored by hand) and emits
+  `demo.embed.{deckHtml,sceneIndex}` into the features index.
+- The committed `docs/decks/bundled/<deck-id>.html` is staged verbatim to
+  `tools/site/src/public/decks/` (shared — several features can embed different
+  scenes of one deck) and the page renders it in an iframe at `?scene=N`.
+- `make features-check` validates the binding (deck exists, rrweb scene
+  resolves, bundled html present); `make media-check` re-checks the index side.
+  The embedded (binary `/help/`) variant excludes deck bundles like it excludes
+  MP4s.
+
+Current `demo.embed` features: `slidey-dev-prd-design`,
+`slidey-architect-design`, `slidey-decomposition`, `slidey-bugfix`, and
+`slidey-open-pr`, all scenes of `docs/decks/dev-story-hybrid.slidey.json`.
 
 Current committed rrweb deck clips:
 

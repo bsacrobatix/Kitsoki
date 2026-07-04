@@ -6,7 +6,9 @@
  * validates the contracts that keep generated media organized:
  *   - feature demos derive their source paths from the feature catalog index;
  *   - staged site media uses only the generated public/media/<feature>/ shape;
- *   - Slidey decks reference rrweb clips from a deck-local asset folder.
+ *   - Slidey decks reference rrweb clips from a deck-local asset folder;
+ *   - a rrweb-native story-demo's `demo.embed` points at a committed, bundled
+ *     Slidey deck html under docs/decks/bundled/ with a valid scene index.
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -63,6 +65,30 @@ function checkFeatureDemos() {
   for (const f of index.features ?? []) {
     ids.add(f.id);
     if (!f.demo || f.demo.external) continue;
+
+    // demo.embed: a rrweb-native story-demo, permanently mp4-less. Its
+    // pre-bundled deck html is COMMITTED source (docs/decks/bundled/, unlike
+    // an mp4 that's a live recording), so a missing one is a broken reference,
+    // not "not yet recorded" — it's checked here, not warned about in
+    // stage-media. It's staged into the shared src/public/decks/ tree, not
+    // media/<id>/, so it's exempt from idsWithMedia / checkStagedMedia below.
+    if (f.demo.embed) {
+      const deckHtml = path.resolve(repoRoot, f.demo.embed.deckHtml);
+      const bundledDir = path.join(repoRoot, "docs", "decks", "bundled");
+      if (!fs.existsSync(deckHtml)) {
+        problems.push(`${f.id}: demo.embed.deckHtml does not exist: ${f.demo.embed.deckHtml}`);
+      } else if (!inside(deckHtml, bundledDir)) {
+        problems.push(`${f.id}: demo.embed.deckHtml must live under docs/decks/bundled/, got ${f.demo.embed.deckHtml}`);
+      }
+      if (!Number.isInteger(f.demo.embed.sceneIndex) || f.demo.embed.sceneIndex < 0) {
+        problems.push(`${f.id}: demo.embed.sceneIndex must be a non-negative integer`);
+      }
+      if (f.demo.renderer === "playwright" && f.demo.spec && !fs.existsSync(path.resolve(repoRoot, f.demo.spec))) {
+        problems.push(`${f.id}: demo spec path does not exist: ${f.demo.spec}`);
+      }
+      continue;
+    }
+
     idsWithMedia.add(f.id);
 
     const artifactDir = path.resolve(repoRoot, f.demo.artifactDir);
