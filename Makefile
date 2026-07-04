@@ -187,7 +187,8 @@ $(EMBED_INDEX): $(SPA_SOURCES)
 	else \
 		echo "runstatus deps already installed for $(RUNSTATUS_LOCKFILE)"; \
 	fi
-	cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) pnpm features:check && $(RUNSTATUS_TEMP_ENV) pnpm build
+	cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) ./node_modules/.bin/tsx scripts/features/generate.ts --check && $(RUNSTATUS_TEMP_ENV) ./node_modules/.bin/tsx scripts/features/lint-demos.ts
+	cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) ./node_modules/.bin/vite --configLoader runner build
 	@mkdir -p $(dir $(EMBED_INDEX))
 	cp $(RUNSTATUS_DIST)/index.html $(EMBED_INDEX)
 	@echo "staged runstatus SPA -> $(EMBED_INDEX)"
