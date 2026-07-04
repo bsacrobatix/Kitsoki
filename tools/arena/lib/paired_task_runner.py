@@ -30,9 +30,20 @@ except ModuleNotFoundError:
 KITSOKI_ROOT = Path(os.environ.get("KITSOKI_ROOT", "/workspace/kitsoki")).resolve()
 CORPUS = KITSOKI_ROOT / "tools/arena/corpus/cost-bench.manifest.yaml"
 BENCH = KITSOKI_ROOT / "tools/bugfix-bakeoff/external/bench.py"
+DRIVE_SH = KITSOKI_ROOT / "tools/mcp-drive/drive.sh"
+BENCH_BUGFIX_STORY = KITSOKI_ROOT / "stories/bench-bugfix/app.yaml"
 
 sys.path.insert(0, str(KITSOKI_ROOT / "tools/session-mining"))
 from pricing import price_for  # noqa: E402  (path set above; single price table for the repo)
+
+# Paired-task's `--model` axis names a WORKER model the same way
+# bugfix-bakeoff/external/candidates.yaml does; this is the one place that
+# maps that model name to the kitsoki harness `profile` bench-bugfix needs, so
+# the kitsoki arm and the single-briefed arm use the IDENTICAL worker model —
+# only the process (kitsoki pipeline vs raw codex exec) differs.
+MODEL_TO_PROFILE = {
+    "gpt-5.5": "codex-native",
+}
 
 
 def blended_cost_usd(model: str, tokens: int) -> tuple[float, bool]:
@@ -202,6 +213,13 @@ def dispatch_worker(args: argparse.Namespace, task: dict[str, Any], tree: Path, 
             "notes": "codex live dispatch disabled; set ARENA_PAIRED_TASK_ENABLE_CODEX=1 to spend",
             "metrics": {"cost_usd": 0.0, "tokens": 0},
         }
+    if args.treatment == "kitsoki":
+        return dispatch_kitsoki(args, task, tree, trace_ref)
+    return dispatch_single_prompt(args, task, tree, trace_ref)
+
+
+def dispatch_single_prompt(args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> dict[str, Any]:
+    """The naive baseline: one raw `codex exec` call, no kitsoki pipeline at all."""
     prompt = build_prompt(args, task)
     cmd = [
         "codex",
@@ -231,6 +249,207 @@ def dispatch_worker(args: argparse.Namespace, task: dict[str, Any], tree: Path, 
         + (f"; cost_usd={cost_usd} (blended estimate, not exact)" if not cost_exact else ""),
         "metrics": {"cost_usd": cost_usd, "tokens": tokens},
     }
+
+
+def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> dict[str, Any]:
+    """Drive the REAL kitsoki bugfix pipeline (stories/bench-bugfix/app.yaml) via
+    a headless codex orchestrator + the studio MCP — the same live-delegation
+    primitive tools/bugfix-bakeoff/external/drive_cell.sh already proved out for
+    the internal bake-off. `trace_ref` becomes the kitsoki session's own trace
+    (session_new {trace: ...}), so cost/tokens below are read off REAL recorded
+    agent-call usage, not a codex stdout summary line."""
+    model = args.model or "gpt-5.5"
+    profile = MODEL_TO_PROFILE.get(model)
+    if not profile:
+        return {
+            "blocked": True,
+            "notes": f"no kitsoki harness profile mapped for model {model!r}; add one to MODEL_TO_PROFILE",
+            "metrics": {"cost_usd": 0.0, "tokens": 0},
+        }
+    try:
+        bin_dir = ensure_kitsoki_binary()
+        branch = f"paired-task-{safe_name(task['id'])}"
+        run(["git", "checkout", "-q", "-B", branch], cwd=tree)
+        test_cmd = test_cmd_for(task)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 - report, don't crash the sweep
+        return {
+            "blocked": True,
+            "notes": f"kitsoki dispatch setup failed: {exc}",
+            "metrics": {"cost_usd": 0.0, "tokens": 0},
+        }
+
+    thread = Path(trace_ref).with_suffix(".thread.md")
+    prompt = build_kitsoki_prompt(args, task, tree, trace_ref, thread, profile, branch, test_cmd)
+    prompt_file = Path(trace_ref).with_suffix(".prompt.md")
+    prompt_file.write_text(prompt, encoding="utf-8")
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["MCP_DRIVE_BACKEND"] = "codex"
+    env["MCP_DRIVE_MODEL"] = os.environ.get("ARENA_PAIRED_TASK_ORCHESTRATOR_MODEL", "gpt-5.5")
+    # codex does not forward the parent env to the MCP servers it spawns; the
+    # kitsoki MCP process forks the WORKER (codex-native) and needs the same
+    # ChatGPT-subscription auth the orchestrator itself is using.
+    env["MCP_DRIVE_FORWARD_ENV"] = "CODEX_HOME,HOME"
+
+    cmd = [str(DRIVE_SH), "--prompt-file", str(prompt_file)]
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=KITSOKI_ROOT,
+            text=True,
+            capture_output=True,
+            env=env,
+            timeout=int(os.environ.get("ARENA_CODEX_TIMEOUT_S", "1800")),
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "blocked": True,
+            "notes": f"drive.sh timed out after {exc.timeout}s",
+            "metrics": {"cost_usd": 0.0, "tokens": 0},
+        }
+
+    drive_log = Path(trace_ref).with_suffix(".drive-log.json")
+    drive_log.write_text(json.dumps({
+        "cmd": redact_cmd(cmd),
+        "returncode": proc.returncode,
+        "stdout_tail": proc.stdout[-4000:],
+        "stderr_tail": proc.stderr[-4000:],
+    }, indent=2), encoding="utf-8")
+
+    try:
+        metrics = real_trace_metrics(trace_ref, model)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 - trace may be absent on an early failure
+        metrics = {"cost_usd": 0.0, "tokens": 0, "cost_note": f"trace metrics unavailable: {exc}"}
+    notes = f"drive.sh exit={proc.returncode}: {first_line(proc.stdout + chr(10) + proc.stderr)}"
+    if metrics.get("cost_note"):
+        notes += f"; {metrics['cost_note']}"
+    return {
+        "blocked": proc.returncode != 0,
+        "notes": notes,
+        "metrics": {"cost_usd": metrics["cost_usd"], "tokens": metrics["tokens"]},
+    }
+
+
+def ensure_kitsoki_binary() -> Path:
+    """Build the kitsoki CLI once and return its containing directory.
+
+    The paired-task image is built ONCE (Dockerfile.paired-task), but the repo
+    checkout is bind-mounted at container-RUN time — whatever's on the host at
+    that moment, not what was baked into the image. So the binary has to be
+    built at run time, not image-build time. `make build-bin` writes to the
+    checkout's own (gitignored) bin/, which lives on the host side of the bind
+    mount, so a build here is naturally cached across ephemeral `--rm`
+    containers as long as they share the same mounted checkout — no cp of a
+    locally-built binary (see MEMORY cp-binary-invalidates-codesign; that
+    specific failure is macOS ad-hoc-signing, not applicable to this Linux
+    image, but building fresh in-place sidesteps the whole class of problem).
+    """
+    which = shutil.which("kitsoki")
+    if which:
+        return Path(which).parent
+    binary = KITSOKI_ROOT / "bin" / "kitsoki"
+    if binary.exists():
+        return binary.parent
+    run(["make", "build-bin"], cwd=KITSOKI_ROOT)
+    if not binary.exists():
+        raise RuntimeError("make build-bin did not produce bin/kitsoki")
+    return binary.parent
+
+
+def test_cmd_for(task: dict[str, Any]) -> str:
+    """The real test command for this task's tree, or a deliberate no-op.
+
+    github_content tasks arm a repo-history content oracle (no test suite is
+    part of the corpus for those repos); "true" is an explicit always-pass
+    no-op, NOT an empty string — an empty test_cmd falls back to `go test
+    ./...` in stories/bugfix (internal/host/local_ci.go), which is wrong (and
+    slow/broken) for a non-Go tree. external_bakeoff tasks DO have a real
+    project test_cmd (bench.py meta), the same one bugfix-bakeoff drives.
+    """
+    oracle = task.get("oracle") or {}
+    if oracle.get("kind") == "external_bakeoff":
+        meta = json.loads(
+            run(
+                ["python3", str(BENCH), "meta", "--project", str(oracle["project"]), "--bug", str(oracle["bug"])],
+                cwd=KITSOKI_ROOT,
+                capture=True,
+            ).stdout
+        )
+        return meta.get("test_cmd") or "true"
+    return "true"
+
+
+def build_kitsoki_prompt(
+    args: argparse.Namespace,
+    task: dict[str, Any],
+    tree: Path,
+    trace_ref: str,
+    thread: Path,
+    profile: str,
+    branch: str,
+    test_cmd: str,
+) -> str:
+    """Adapted from drive_cell.sh's "Drive ONE kitsoki bug-fix pipeline cell"
+    template — same shape, but paired-task tasks come from cost-bench.manifest
+    (no candidates.yaml/manifest.yaml plumbing to thread through)."""
+    ticket_title = f"{task['id']} ({task['archetype']}): {task.get('ticket', '')}"
+    return "\n".join([
+        "Drive ONE kitsoki bug-fix pipeline cell to completion via the kitsoki studio MCP.",
+        f"The fix MUST be generated by the live worker model inside the session (profile "
+        f"**{profile}**); you (orchestrator) only click studio tools — do NOT edit source.",
+        "",
+        "1. studio_ping.",
+        "2. session_new EXACTLY:",
+        f'   - story_path: "{BENCH_BUGFIX_STORY}"',
+        '   - harness: "live"',
+        f'   - profile: "{profile}"',
+        f'   - trace: "{trace_ref}"',
+        "   - initial_world:",
+        f'       ticket_id: "{task["id"]}"',
+        f'       thread: "{thread}"',
+        f'       ticket_title: "{ticket_title}"',
+        f'       workdir: "{tree}"',
+        '       workspace_id: ""',
+        f'       feature_branch: "{branch}"',
+        f'       base_branch: "{branch}"',
+        '       bugfix_mode: "full"',
+        '       judge_mode: "llm"',
+        f'       test_cmd: "{test_cmd}"',
+        "       bf_autostart_attempted: true",
+        "       escalate_low_value: true",
+        "   (workspace_id EMPTY ⇒ implementer edits the prepared workdir directly + commits.)",
+        "3. Drive **full_pipeline** ONCE, then only advance explicit gates (accept/continue/",
+        "   confirm/proceed) and answer ask-gates affirmatively (\"looks correct, proceed\").",
+        "   Do NOT re-drive start — the LLM judge auto-emits accept/refine. Give each",
+        "   on_enter step time (the worker profile does the real work there).",
+        "4. STOP at a terminal state, ~25 forward turns, or a repeated stuck state. If a",
+        "   host_error bounces you to idle, read world.last_error, report it verbatim, STOP.",
+        "5. Then inspect the session status/world/trace through MCP. Do not use shell,",
+        "   filesystem, git, GitHub, or non-kitsoki tools during the delegated drive.",
+        "Report: final state; trace path; source modified (y/n) + fix SHA; 1-line fix;",
+        "reproduction bug_verified (t/f); forward turns; last_error if any.",
+    ])
+
+
+def real_trace_metrics(trace_ref: str, model: str) -> dict[str, Any]:
+    """Cost/tokens off the REAL kitsoki session trace via bench.py's shared
+    `read_trace_metrics` (payload.meta.cost_usd / usage on every agent call) —
+    the same reader bugfix-bakeoff uses for `bench.py cost`. codex-native runs
+    on ChatGPT-subscription auth (unmetered: cost_usd stays 0 even though
+    tokens are real), so when tokens are recorded but no metered cost is, fall
+    back to the same blended per-token estimate the single-briefed arm uses —
+    disclosed as an estimate, so both arms are held to the identical standard."""
+    proc = run(["python3", str(BENCH), "cost", "--trace", trace_ref], cwd=KITSOKI_ROOT, capture=True)
+    payload = json.loads(proc.stdout) if proc.stdout.strip() else {}
+    tokens = int((payload.get("input_tokens") or 0) + (payload.get("output_tokens") or 0))
+    cost_usd = payload.get("cost_usd")
+    if isinstance(cost_usd, (int, float)) and cost_usd > 0:
+        return {"cost_usd": round(cost_usd, 6), "tokens": tokens, "cost_note": "cost_usd from real recorded trace usage (metered)"}
+    if tokens > 0:
+        blended, _ = blended_cost_usd(model, tokens)
+        return {"cost_usd": blended, "tokens": tokens, "cost_note": f"cost_usd={blended} (blended estimate over REAL trace tokens; subscription auth reports no metered cost)"}
+    return {"cost_usd": 0.0, "tokens": 0, "cost_note": "no trace usage recorded"}
 
 
 def build_prompt(args: argparse.Namespace, task: dict[str, Any]) -> str:
