@@ -170,10 +170,35 @@ def _validate_change_node(change: dict, schema: dict | None) -> list[str]:
     return errors
 
 
+def _validate_runtime(decomp: dict) -> list[str]:
+    """Validate the optional top-level `runtime:` block (the goal's declared
+    execution context: base_branch + worktree_path). Absent is fine — it only
+    means the goal-seeker falls back to convention-locating / an operator seed.
+    When present it must be well-formed so bootstrap's gs_resolve.star can trust
+    it: both fields non-empty strings, worktree_path repo-root-RELATIVE (an
+    absolute path is machine-specific and can't be committed / rejected by the
+    inspector's root confinement)."""
+    rt = decomp.get("runtime")
+    if rt is None:
+        return []
+    errors: list[str] = []
+    if not isinstance(rt, dict):
+        return ["`runtime` must be a mapping (base_branch + worktree_path)"]
+    base_branch = rt.get("base_branch")
+    if not (isinstance(base_branch, str) and base_branch.strip()):
+        errors.append("runtime.base_branch must be a non-empty string")
+    wt = rt.get("worktree_path")
+    if not (isinstance(wt, str) and wt.strip()):
+        errors.append("runtime.worktree_path must be a non-empty string")
+    elif os.path.isabs(wt):
+        errors.append(f"runtime.worktree_path must be repo-root-relative, not absolute: {wt!r}")
+    return errors
+
+
 # ---- lint (the structural gate) ----------------------------------------------
 def cmd_lint(decomp: dict, goal_dir: Path | None = None) -> int:
     changes = decomp["changes"]
-    errors: list[str] = []
+    errors: list[str] = _validate_runtime(decomp)
     ids = [str(c.get("id", "")) for c in changes]
     gset = _goal_gset(goal_dir) if goal_dir else set()
 

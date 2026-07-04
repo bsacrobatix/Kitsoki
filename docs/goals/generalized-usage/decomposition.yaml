@@ -1,4 +1,16 @@
 goal_slug: generalized-usage
+
+# runtime — the goal's EXECUTION CONTEXT, declared once so opening the goal-seeker
+# needs zero operator seed. The story's bootstrap reads this (scripts/gs_resolve.star)
+# and derives world.workdir + world.main_worktree_path from worktree_path and
+# world.base_branch from base_branch, so lint/dispatch/integrate root at the goal's
+# own worktree instead of the MCP process cwd (the main checkout). worktree_path is
+# repo-root-relative (resolved against the checkout the MCP runs from). An explicit
+# initial_world workdir seed still wins — this is the default, not an override.
+runtime:
+  base_branch:   stabilize/generalized-usage      # the branch dispatch/integrate target
+  worktree_path: .worktrees/generalized-usage      # where docs/goals/<slug>/ + the code live
+
 # First slice: the meta/dogfood-enablement wall (WM) + the Install wall (W1).
 # Walls W2-W5 + hygiene follow once this slice is proven. Every change carries a
 # deterministic gate (RED now, GREEN when it lands); scope globs are the write
