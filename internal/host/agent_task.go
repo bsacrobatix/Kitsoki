@@ -127,6 +127,19 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 	workingDir, _ := args["working_dir"].(string)
 	workingDir = appendDefaultCwd(workingDir, agent)
 
+	// Deterministic seed backstop: when this task's context.args carry a target
+	// story + a seed world (e.g. the punch-list maker's item.{story, world_in}),
+	// register a pending seed keyed by (parentSessionID, story) BEFORE spawning the
+	// maker. The maker's fresh studio server pops it in session.new even if the LLM
+	// omits initial_world, so the nested driven session is seeded deterministically
+	// rather than depending on the maker cooperating. This MUST run before the
+	// plugin dispatch below: the codex-native punch-list maker routes through the
+	// plugin path, which early-returns at line ~147 — so registering only on the
+	// subprocess path stranded every plugin-dispatched maker with an empty seed.
+	// Runs on BOTH paths for the same reason the worktree resolve above does. See
+	// pending_seed.go.
+	RegisterPendingSeedFromTaskArgs(ctx, args)
+
 	// B-7: If an agent plugin registry is wired in context, route through
 	// host.Dispatch. For task the prompt is the context.prompt field.
 	withArgs, _ := args["with"].(map[string]any)
@@ -319,13 +332,8 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 	// concurrent callers don't race on the global env.
 	parentSessionID := kitsokiSessionIDFromCtx(ctx)
 
-	// Deterministic seed backstop: when this task's context.args carry a target
-	// story + a seed world (e.g. the punch-list maker's item.{story, world_in}),
-	// register a pending seed keyed by (parentSessionID, story) BEFORE spawning the
-	// maker. The maker's fresh studio server pops it in session.new even if the LLM
-	// omits initial_world, so the nested driven session is seeded deterministically
-	// rather than depending on the maker cooperating. See pending_seed.go.
-	RegisterPendingSeedFromTaskArgs(ctx, args)
+	// (The deterministic seed backstop is registered up front, before the plugin
+	// dispatch, so it fires on both the plugin and subprocess paths — see above.)
 
 	// ── Run the acceptance loop ───────────────────────────────────────────
 	var (
