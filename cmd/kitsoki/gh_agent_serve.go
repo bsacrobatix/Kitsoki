@@ -277,17 +277,87 @@ func runGHAgentPollLoop(ctx context.Context, store *jobs.GHJobStore, opts ghAgen
 
 func runGHAgentPollOnce(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) error {
 	return withGHAgentAuth(ctx, opts, func(authedCtx context.Context) error {
+		if err := drainQueuedGHAgentJobs(authedCtx, store, opts); err != nil {
+			return err
+		}
 		items, err := pollInboxItems(authedCtx, opts.Repo, "")
 		if err != nil {
 			return err
 		}
 		for _, mention := range ghagent.FilterMentions(items, opts.Repo, opts.Trigger) {
-			if _, err := dispatchGHAgentMention(authedCtx, store, opts, mention, nil); err != nil {
+			if _, err := ghAgentDispatchMention(authedCtx, store, opts, mention, nil); err != nil {
 				fmt.Fprintf(os.Stderr, "gh-agent: dispatch %s: %v\n", mention.OriginRef, err)
 			}
 		}
 		return nil
 	})
+}
+
+func drainQueuedGHAgentJobs(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) error {
+	queued, err := store.ListQueued(ctx, 20)
+	if err != nil {
+		return err
+	}
+	for _, job := range queued {
+		mention := mentionFromQueuedJob(job, opts.Trigger)
+		labels := labelsFromQueuedJob(job)
+		if _, err := ghAgentDispatchMention(ctx, store, opts, mention, labels); err != nil {
+			fmt.Fprintf(os.Stderr, "gh-agent: queued dispatch %s: %v\n", job.OriginRef, err)
+		}
+	}
+	return nil
+}
+
+func mentionFromQueuedJob(job *jobs.GHJob, trigger string) ghagent.Mention {
+	if strings.TrimSpace(trigger) == "" {
+		trigger = ghagent.DefaultMentionTrigger
+	}
+	title := trigger
+	if job == nil {
+		return ghagent.Mention{Trigger: trigger}
+	}
+	if job.Story == ghagent.StoryPRRebase {
+		title += " rebase"
+	}
+	return ghagent.Mention{
+		Item: host.GitHubInboxItem{
+			Kind:   job.ObjectKind,
+			Number: job.ObjectNumber,
+			Title:  title,
+			URL:    githubObjectURL(job),
+		},
+		Repo:      job.Repo,
+		OriginRef: job.OriginRef,
+		Trigger:   trigger,
+	}
+}
+
+func labelsFromQueuedJob(job *jobs.GHJob) []string {
+	if job == nil {
+		return nil
+	}
+	switch job.Story {
+	case "stories/bugfix":
+		return []string{"bug"}
+	case "stories/dev-story":
+		return []string{"feature"}
+	default:
+		return nil
+	}
+}
+
+func githubObjectURL(job *jobs.GHJob) string {
+	if job == nil || strings.TrimSpace(job.Repo) == "" || strings.TrimSpace(job.ObjectNumber) == "" {
+		return ""
+	}
+	switch job.ObjectKind {
+	case "pr":
+		return "https://github.com/" + job.Repo + "/pull/" + job.ObjectNumber
+	case "issue":
+		return "https://github.com/" + job.Repo + "/issues/" + job.ObjectNumber
+	default:
+		return ""
+	}
 }
 
 // buildDeckTrigger assembles the bug-report deck auto-trigger from serve flags.
@@ -403,6 +473,8 @@ func withGHAgentAuth(ctx context.Context, opts ghAgentServeOptions, fn func(cont
 	defer restoreGHToken()
 	return fn(authedCtx)
 }
+
+var ghAgentDispatchMention = dispatchGHAgentMention
 
 func dispatchGHAgentMention(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions, mention ghagent.Mention, labels []string) (*jobs.GHJob, error) {
 	d := &ghagent.Dispatcher{

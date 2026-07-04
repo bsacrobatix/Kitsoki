@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"kitsoki/internal/ghagent"
 	"kitsoki/internal/ghagent/githubapp"
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
@@ -421,6 +422,66 @@ func TestGHAgentReconcileEscalatesStuckJobs(t *testing.T) {
 	}
 	if got.IncidentURL != "https://github.com/o/r/issues/501" {
 		t.Fatalf("IncidentURL=%q", got.IncidentURL)
+	}
+}
+
+func TestDrainQueuedGHAgentJobsRedispatchesStoredPRRebase(t *testing.T) {
+	ctx := context.Background()
+	store := newServeTestGHJobStore(t)
+	job, _, err := store.Claim(ctx, jobs.GHMention{
+		OriginRef:    "github:o/r/pr/98",
+		Repo:         "o/r",
+		ObjectKind:   "pr",
+		ObjectNumber: "98",
+	}, "worker-test")
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if err := store.SetStory(ctx, job.JobID, ghagent.StoryPRRebase); err != nil {
+		t.Fatalf("SetStory: %v", err)
+	}
+	if err := store.SetComment(ctx, job.JobID, "https://github.com/o/r/pull/98#issuecomment-1"); err != nil {
+		t.Fatalf("SetComment: %v", err)
+	}
+	if err := store.Advance(ctx, job.JobID, jobs.GHQueued, "stuck job queued for retry after 15m0s"); err != nil {
+		t.Fatalf("Advance queued: %v", err)
+	}
+
+	prev := ghAgentDispatchMention
+	t.Cleanup(func() { ghAgentDispatchMention = prev })
+	var dispatched ghagent.Mention
+	ghAgentDispatchMention = func(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions, mention ghagent.Mention, labels []string) (*jobs.GHJob, error) {
+		dispatched = mention
+		if mention.OriginRef != "github:o/r/pr/98" {
+			t.Fatalf("OriginRef=%q", mention.OriginRef)
+		}
+		if mention.Item.Kind != "pr" || mention.Item.Number != "98" {
+			t.Fatalf("Item=%+v", mention.Item)
+		}
+		if !strings.Contains(strings.ToLower(mention.Item.Title), "rebase") {
+			t.Fatalf("Title=%q, want rebase routing signal", mention.Item.Title)
+		}
+		if len(labels) != 0 {
+			t.Fatalf("labels=%v, want none for PR retry", labels)
+		}
+		if err := store.Advance(ctx, job.JobID, jobs.GHDone, ""); err != nil {
+			return nil, err
+		}
+		return store.GetJob(ctx, job.JobID)
+	}
+
+	if err := drainQueuedGHAgentJobs(ctx, store, ghAgentServeOptions{Trigger: "@kitsoki"}); err != nil {
+		t.Fatalf("drainQueuedGHAgentJobs: %v", err)
+	}
+	if dispatched.OriginRef == "" {
+		t.Fatal("queued job was not dispatched")
+	}
+	got, err := store.GetJob(ctx, job.JobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if got.State != jobs.GHDone {
+		t.Fatalf("State=%q, want done", got.State)
 	}
 }
 
