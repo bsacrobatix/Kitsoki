@@ -190,7 +190,12 @@ $(EMBED_INDEX): $(SPA_SOURCES)
 	cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) ./node_modules/.bin/tsx scripts/features/generate.ts --check && $(RUNSTATUS_TEMP_ENV) ./node_modules/.bin/tsx scripts/features/lint-demos.ts
 	cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) ./node_modules/.bin/vite --configLoader runner build
 	@mkdir -p $(dir $(EMBED_INDEX))
-	cp $(RUNSTATUS_DIST)/index.html $(EMBED_INDEX)
+	@embed_dir="$(dir $(EMBED_INDEX))"; relock_dir=0; relock_file=0; \
+	if [ -e "$(EMBED_INDEX)" ] && [ ! -w "$(EMBED_INDEX)" ]; then chmod u+w "$(EMBED_INDEX)" && relock_file=1; fi; \
+	if [ ! -e "$(EMBED_INDEX)" ] && [ ! -w "$$embed_dir" ]; then chmod u+w "$$embed_dir" && relock_dir=1; fi; \
+	cp $(RUNSTATUS_DIST)/index.html $(EMBED_INDEX); \
+	if [ "$$relock_file" = 1 ]; then chmod u-w "$(EMBED_INDEX)"; fi; \
+	if [ "$$relock_dir" = 1 ]; then chmod u-w "$$embed_dir"; fi
 	@echo "staged runstatus SPA -> $(EMBED_INDEX)"
 
 # web-clean removes the staged bundle (the binary then reports the SPA as
