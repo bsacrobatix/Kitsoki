@@ -23,12 +23,15 @@ states:
           - list:
               items:
                 - { label: "close", hint: "close out the goal → done" }
+                - { label: "report", hint: "build deterministic summary/decks" }
                 - { label: "look" }
     on:
       close:
         - target: "@exit:done"
       close_out:
         - target: "@exit:done"
+      report:
+        - target: report
       look:
         - target: .
       "*":
