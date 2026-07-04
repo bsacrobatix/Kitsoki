@@ -9,11 +9,16 @@
  * .artifacts/devstory-triage/.
  *
  * Runs ONLY the DEVSTORY_TRIAGE_TOUR_STEPS from
- * src/tour/generated/devstory-triage.ts via window.__startTourWithSteps. The
+ * _fixtures/devstory-triage-tour-steps.ts via window.__startTourWithSteps. The
  * tour drives the whole video: it opens on the home story library, its
  * route-match action step navigates home → new session → the drive view, then
  * the explain beats narrate the triage + handoff while the spec drives the
  * matching intents between beats.
+ *
+ * NOTE: devstory-triage was de-listed from features/*.yaml (an external stub,
+ * never recordable in this repo — see features/AGENTS.md's completeness
+ * rules), so this manifest is no longer code-generated; it's a frozen copy
+ * kept alongside this spec (see _fixtures/devstory-triage-tour-steps.ts).
  *
  * Driving mechanics:
  *   - Slotless intents (go_triage, triage__scan, triage__accept,
@@ -49,11 +54,13 @@ import {
   type WebServer,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
-import { DEVSTORY_TRIAGE_TOUR_STEPS } from "../../src/tour/generated/devstory-triage.js";
+import { DEVSTORY_TRIAGE_TOUR_STEPS } from "./_fixtures/devstory-triage-tour-steps.js";
 
 // The feature-catalog source of truth for this spec's tour steps: each step
 // becomes a chapter (source_ref kind=tour) in the MP4's sidecar.
-const CHAPTER_SOURCE = "features/devstory-triage.yaml";
+// Was "features/devstory-triage.yaml" before the feature was de-listed from
+// the catalog; the frozen fixture is now the source of truth for these steps.
+const CHAPTER_SOURCE = "tools/runstatus/tests/playwright/_fixtures/devstory-triage-tour-steps.ts";
 
 // 7762 — the stage-1 port (matches the cassette-validation server). Distinct
 // from every other spec's port so parallel runs never race on the same bind.

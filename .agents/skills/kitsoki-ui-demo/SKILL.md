@@ -30,10 +30,10 @@ flow tests (see [[feedback_no_llm_tests]] and `docs/web/README.md` →
 >   video — the spec template](#feature-tour-demo-video--the-golden-example)**.
 > - **The golden example of conversation-driven development** (iterative
 >   clarification, brief refinement, multi-document publication in one session) →
->   the **dev-story PRD → Design** demo (`features/dev-story-prd-design.yaml` +
->   `stories/dev-story/flows/prd_to_design_full.yaml`). When slice 2 ships it
->   renders via `kitsoki tour --feature dev-story-prd-design` (binary-native, no
->   Playwright). See **[Dev-story PRD → Design](#dev-story-prd--design-golden-conversation-driven-example)**.
+>   the **dev-story PRD → Design** demo (de-listed from the feature catalog —
+>   the yaml is gone, but `stories/dev-story/flows/prd_to_design_full.yaml` and
+>   the stub spec remain; re-catalog it before recording). See
+>   **[Dev-story PRD → Design](#dev-story-prd--design-golden-conversation-driven-example)**.
 > - **The generic onboarding tour** → `tour-video.spec.ts` + `src/tour/manifest.ts`.
 > - **A full-product walkthrough** (home → new session → drive/observe → reload →
 >   active sessions) → `multi-story.spec.ts`. The single-purpose chat drive lives
@@ -640,12 +640,17 @@ spec name. Anchor every `target` to a `data-testid` the feature actually ships.
 
 When the ask is **making a demo of conversation-driven development** (iterative
 clarification, brief refinement, multi-document publication in one session),
-copy the **dev-story PRD → Design** demo — it is the golden, maintained reference:
+copy the **dev-story PRD → Design** demo — it is the golden reference:
 
-- feature:  `features/dev-story-prd-design.yaml`
-- manifest: `tools/runstatus/src/tour/generated/dev-story-prd-design.ts` (generated — `make features`)
-- flow:     `stories/dev-story/flows/prd_to_design_full.yaml` (no-LLM, cassette-driven)
-- spec (Playwright, stub until slice 2):
+> **De-listed from the catalog.** `features/dev-story-prd-design.yaml` (and its
+> generated manifest) were removed — the binary tour renderer's chat surface
+> doesn't remount into the imported PRD room reliably enough for Pages CI, so
+> the site page shipped as a permanent placeholder. The flow and the stub spec
+> below remain; re-author the feature yaml (git history has the 11-step tour)
+> and run `make features` before recording.
+
+- flow: `stories/dev-story/flows/prd_to_design_full.yaml` (no-LLM, cassette-driven)
+- spec (Playwright, stub):
   `tools/runstatus/tests/playwright/dev-story-prd-design-video.spec.ts`
 
 What makes it the golden example:
@@ -664,12 +669,12 @@ What makes it the golden example:
   kitsoki itself — the cleanest proof that the system can improve itself.
 - **Binary-rendered.** This demo renders straight from the binary with
   `kitsoki tour --feature dev-story-prd-design` (no Playwright, no Node —
-  headless Chrome + ffmpeg alone), the proof that the binary-native tour renderer
-  works end-to-end. The flow fixture is no-LLM (cassette-driven) and passes under
+  headless Chrome + ffmpeg alone) once re-cataloged (see the de-listing note
+  above). The flow fixture is no-LLM (cassette-driven) and passes under
   `kitsoki test flows stories/dev-story/app.yaml`, so the *content* is verified
   independently of the recording.
 
-**Record via the binary:**
+**Record via the binary (after re-cataloging the feature):**
 
 ```bash
 kitsoki tour --feature dev-story-prd-design --out .artifacts/dev-story-prd-design/
