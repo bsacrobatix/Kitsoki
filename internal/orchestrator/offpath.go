@@ -156,7 +156,7 @@ func (o *Orchestrator) askOffPathVoiced(ctx context.Context, sid app.SessionID, 
 	// by the off-path-via-agent path above when Model is set on the
 	// resolved agent) without having to import the app package.
 	ctx = host.WithAgents(ctx, agentsForContext(o.def))
-	ctx = host.WithProviders(ctx, providersForContext(o.def))
+	ctx = host.WithProviders(ctx, o.providersForDispatch())
 	// Off-path agent calls honor the live harness selection too (see
 	// host_dispatch.go).
 	backendName, activeProfile := o.resolveSelection(o.agentBackendName)

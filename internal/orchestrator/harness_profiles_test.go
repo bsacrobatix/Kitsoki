@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"testing"
+
+	"kitsoki/internal/app"
 )
 
 // profiles mirrors the .kitsoki.yaml example: a claude-native, a synthetic-claude
@@ -123,6 +125,33 @@ func TestResolveSelection_LegacyNoProfiles(t *testing.T) {
 	}
 	if err := o.SetSelection("anything", "", ""); err == nil {
 		t.Fatalf("SetSelection should error when no profiles declared")
+	}
+}
+
+func TestProvidersForDispatchIncludesHarnessProfiles(t *testing.T) {
+	o := newProfileOrch(t, "claude-native")
+	o.def = &app.AppDef{
+		Providers: map[string]*app.ProviderDecl{
+			"synthetic-codex": {
+				Model: "story-model",
+				Env:   map[string]string{"OPENAI_BASE_URL": "story-wins"},
+			},
+			"story-only": {
+				Model: "story-only-model",
+				Env:   map[string]string{"STORY_ONLY": "1"},
+			},
+		},
+	}
+
+	providers := o.providersForDispatch()
+	if providers["synthetic-claude"].Env["ANTHROPIC_BASE_URL"] != "https://api.synthetic.new/anthropic" {
+		t.Fatalf("synthetic-claude harness profile env not merged: %+v", providers["synthetic-claude"])
+	}
+	if got := providers["synthetic-codex"].Env["OPENAI_BASE_URL"]; got != "story-wins" {
+		t.Fatalf("story provider should win profile name collision, got %q", got)
+	}
+	if got := providers["story-only"].Model; got != "story-only-model" {
+		t.Fatalf("story-only provider missing: %+v", providers["story-only"])
 	}
 }
 
