@@ -9,3 +9,4 @@
       target_type: change
       cardinality: many
       storage: top_level
+      acyclic: true

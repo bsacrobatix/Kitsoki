@@ -48,6 +48,8 @@ type fileEdgeField struct {
 	TargetType  string `yaml:"target_type"`
 	Cardinality string `yaml:"cardinality"`
 	Storage     string `yaml:"storage"`
+	Acyclic     bool   `yaml:"acyclic"`
+	Renders     bool   `yaml:"renders"`
 }
 
 type fileTypeDef struct {
@@ -85,6 +87,8 @@ func (ft fileTypeDef) toTypeDef() (TypeDef, string, error) {
 			TargetType:  fe.TargetType,
 			Cardinality: Cardinality(fe.Cardinality),
 			Storage:     EdgeStorage(fe.Storage),
+			Acyclic:     fe.Acyclic,
+			Renders:     fe.Renders,
 		})
 	}
 	return def, warning, nil
@@ -287,10 +291,7 @@ func buildNode(fn fileNode, reg *Registry) (*Node, error) {
 // needs the whole catalog assembled first.
 func checkEdgeCardinality(node *Node, eff EffectiveType) error {
 	for _, decl := range eff.EdgeFields {
-		if decl.Storage == StorageTopLevel {
-			continue // top-level fields (e.g. change.depends_on) aren't in Edges
-		}
-		targets := node.Edges[decl.ID]
+		targets := node.EdgeTargets(decl)
 		if decl.Cardinality == CardinalityOne && len(targets) > 1 {
 			return fmt.Errorf("graph: node %q edge %q has cardinality \"one\" but %d targets", node.ID, decl.ID, len(targets))
 		}
