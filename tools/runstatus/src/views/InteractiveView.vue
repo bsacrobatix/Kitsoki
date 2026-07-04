@@ -93,7 +93,6 @@
         >
           {{ workbenchEnabled ? 'Close media pane' : 'Open media pane' }}
         </button>
-        <router-link :to="`/s/${sessionId}`" class="iv__observe-link" data-testid="observe-link">Observe ↗</router-link>
         <MetaButton v-if="embed" placement="topbar" />
       </header>
 
