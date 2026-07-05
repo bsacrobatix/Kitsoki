@@ -169,10 +169,16 @@ def main() -> int:
               and result.get("gh_agent_missing_verify_count") == 0
               and "independent-verify.md" in result.get("gh_agent_independent_verify_summary", ""),
               failures)
+        check("triage verdict artifact is required and present",
+              result.get("gh_agent_triage_evidence_count") == 1
+              and result.get("gh_agent_missing_triage_count") == 0
+              and "triage-verdict.md" in result.get("gh_agent_triage_evidence_summary", ""),
+              failures)
         check("human report links issue, run, fix report, and independent verification",
               "https://github.com/o/r/issues/" in report_text
               and "https://agent.example/run/job-" in report_text
               and "fix-report.md" in report_text
+              and "triage-verdict.md" in report_text
               and "independent-verify.md" in report_text,
               failures)
         check("human report links gh-agent claim evidence",
@@ -186,6 +192,8 @@ def main() -> int:
               and "https://agent.example/run/job-" in gh_scene_body
               and "autonomous-fix-report.md" in gh_scene_body
               and "fix-report.md" in gh_scene_body
+              and "triage=" in gh_scene_body
+              and "triage-verdict.md" in gh_scene_body
               and "independent_verify=" in gh_scene_body
               and "independent-verify.md" in gh_scene_body,
               failures)

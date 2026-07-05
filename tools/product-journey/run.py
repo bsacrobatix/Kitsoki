@@ -3814,6 +3814,8 @@ def run_story_summary(run_dir: Path) -> dict:
         review_backlog.append(f"+{len(actionable_review) - 4} more review checks")
     gh_agent_fix_evidence = gh_agent_fix_evidence_links(gh_agent)
     gh_agent_missing_evidence = gh_agent_missing_fix_evidence(gh_agent)
+    gh_agent_triage_evidence = gh_agent_triage_evidence_links(gh_agent)
+    gh_agent_missing_triage = gh_agent_missing_triage_evidence(gh_agent)
     gh_agent_independent_verify = gh_agent_independent_verify_links(gh_agent)
     gh_agent_missing_verify = gh_agent_missing_independent_verify(gh_agent)
     missing_run_urls = gh_agent_missing_run_urls(gh_agent)
@@ -3874,6 +3876,10 @@ def run_story_summary(run_dir: Path) -> dict:
         "gh_agent_missing_evidence_count": len(gh_agent_missing_evidence),
         "gh_agent_fix_evidence_summary": summarize_gh_agent_fix_evidence(gh_agent),
         "gh_agent_missing_evidence_summary": "; ".join(gh_agent_missing_evidence[:4]) + (f"; +{len(gh_agent_missing_evidence) - 4} more" if len(gh_agent_missing_evidence) > 4 else ""),
+        "gh_agent_triage_evidence_count": len(gh_agent_triage_evidence),
+        "gh_agent_missing_triage_count": len(gh_agent_missing_triage),
+        "gh_agent_triage_evidence_summary": "; ".join(gh_agent_triage_evidence[:4]) + (f"; +{len(gh_agent_triage_evidence) - 4} more" if len(gh_agent_triage_evidence) > 4 else ""),
+        "gh_agent_missing_triage_summary": "; ".join(gh_agent_missing_triage[:4]) + (f"; +{len(gh_agent_missing_triage) - 4} more" if len(gh_agent_missing_triage) > 4 else ""),
         "gh_agent_independent_verify_count": len(gh_agent_independent_verify),
         "gh_agent_missing_verify_count": len(gh_agent_missing_verify),
         "gh_agent_independent_verify_summary": "; ".join(gh_agent_independent_verify[:4]) + (f"; +{len(gh_agent_independent_verify) - 4} more" if len(gh_agent_independent_verify) > 4 else ""),
@@ -4236,6 +4242,21 @@ def gh_agent_job_independent_verify_links(job: dict) -> list[str]:
     return links
 
 
+def gh_agent_job_triage_evidence_links(job: dict) -> list[str]:
+    links: list[str] = []
+    for asset in job.get("assets", []) or []:
+        if not isinstance(asset, dict):
+            continue
+        if gh_agent_asset_name(asset) != "triage-verdict.md":
+            continue
+        for key in ("url", "href", "path"):
+            value = str(asset.get(key, "")).strip()
+            if value:
+                links.append(value)
+                break
+    return links
+
+
 def gh_agent_missing_fix_evidence(gh_agent: dict) -> list[str]:
     missing: list[str] = []
     for job in gh_agent.get("drained_jobs", []) or []:
@@ -4244,6 +4265,29 @@ def gh_agent_missing_fix_evidence(gh_agent: dict) -> list[str]:
         if not gh_agent_job_evidence_links(job):
             missing.append(str(job.get("origin_ref") or job.get("job_id") or "unknown"))
     return missing
+
+
+def gh_agent_missing_triage_evidence(gh_agent: dict) -> list[str]:
+    missing: list[str] = []
+    for job in gh_agent.get("drained_jobs", []) or []:
+        if not isinstance(job, dict) or job.get("state") != "done":
+            continue
+        if not gh_agent_job_triage_evidence_links(job):
+            missing.append(str(job.get("origin_ref") or job.get("job_id") or "unknown"))
+    return missing
+
+
+def gh_agent_triage_evidence_links(gh_agent: dict) -> list[str]:
+    links: list[str] = []
+    seen: set[str] = set()
+    for job in gh_agent.get("drained_jobs", []) or []:
+        if not isinstance(job, dict) or job.get("state") != "done":
+            continue
+        for link in gh_agent_job_triage_evidence_links(job):
+            if link not in seen:
+                seen.add(link)
+                links.append(link)
+    return links
 
 
 def gh_agent_missing_run_urls(gh_agent: dict) -> list[str]:
@@ -4680,6 +4724,7 @@ def autonomous_fix_loop(
         and int(filed.get("gh_agent_active_count", 0) or 0) == 0
         and gh_agent_done >= gh_agent_enqueued
         and int(story_summary.get("gh_agent_missing_evidence_count", 0) or 0) == 0
+        and int(story_summary.get("gh_agent_missing_triage_count", 0) or 0) == 0
         and int(story_summary.get("gh_agent_missing_verify_count", 0) or 0) == 0
         and int(story_summary.get("gh_agent_missing_run_url_count", 0) or 0) == 0
     )
@@ -5613,6 +5658,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     gh_agent_active = int(gh_agent.get("active_count", 0) or 0)
     gh_agent_drain_status = gh_agent.get("drain_status", "")
     gh_agent_missing_evidence = gh_agent_missing_fix_evidence(gh_agent)
+    gh_agent_missing_triage = gh_agent_missing_triage_evidence(gh_agent)
     gh_agent_missing_verify = gh_agent_missing_independent_verify(gh_agent)
     gh_agent_missing_run_url = gh_agent_missing_run_urls(gh_agent)
     autonomous_fix_report_missing = missing_autonomous_fix_report_tokens(run_dir, findings)
@@ -5627,6 +5673,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         )
     )
     gh_agent_fix_evidence_complete = (not gh_agent_requested) or not gh_agent_missing_evidence
+    gh_agent_triage_evidence_complete = (not gh_agent_requested) or not gh_agent_missing_triage
     gh_agent_independent_verify_complete = (not gh_agent_requested) or not gh_agent_missing_verify
     gh_agent_run_urls_complete = (not gh_agent_requested) or not gh_agent_missing_run_url
     issue_closeout_ok, issue_closeout_detail = issue_closeout_gate(findings, gh_agent_requested, credible_findings)
@@ -5806,6 +5853,20 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
                     f"missing: {', '.join(gh_agent_missing_evidence)}"
                     if gh_agent_missing_evidence
                     else f"evidence_links={len(gh_agent_fix_evidence_links(gh_agent))}"
+                )
+            ),
+        },
+        {
+            "id": "gh-agent-triage-evidence",
+            "status": "pass" if gh_agent_triage_evidence_complete else "fail",
+            "summary": "Completed gh-agent fix jobs expose the triage preflight verdict artifact.",
+            "detail": (
+                "gh-agent fixing not requested"
+                if not gh_agent_requested
+                else (
+                    f"missing: {', '.join(gh_agent_missing_triage)}"
+                    if gh_agent_missing_triage
+                    else f"triage_links={len(gh_agent_triage_evidence_links(gh_agent))}"
                 )
             ),
         },
@@ -6952,6 +7013,15 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 "Completed gh-agent fix jobs are missing reviewable fix evidence assets",
                 ", ".join(missing_evidence[:5]),
             )
+        missing_triage = gh_agent_missing_triage_evidence(gh_agent)
+        if missing_triage:
+            add_validation_issue(
+                issues,
+                "error",
+                "gh-agent-triage-evidence",
+                "Completed gh-agent fix jobs are missing triage preflight verdict artifacts",
+                ", ".join(missing_triage[:5]),
+            )
         missing_verify = gh_agent_missing_independent_verify(gh_agent)
         if missing_verify:
             add_validation_issue(
@@ -7012,6 +7082,8 @@ def validate_run_bundle(run_dir: Path) -> dict:
             if isinstance(job, dict)
             for link in gh_agent_job_evidence_links(job)
         )
+        if gh_agent_triage_evidence_links(gh_agent):
+            expected_tokens.append("triage=")
         if gh_agent_independent_verify_links(gh_agent):
             expected_tokens.append("independent_verify=")
         issue_closeout = findings_json.get("issue_closeout", {}) if isinstance(findings_json.get("issue_closeout", {}), dict) else {}
@@ -9135,9 +9207,14 @@ def render_deck(
             details.append(f"error={job.get('err_msg')}")
         evidence_links = gh_agent_job_evidence_links(job)
         if evidence_links:
-            details.append("evidence=" + ", ".join(evidence_links[:3]))
+            details.append("evidence=" + ", ".join(evidence_links))
         elif job.get("state") == "done":
             details.append("evidence=missing")
+        triage_links = gh_agent_job_triage_evidence_links(job)
+        if triage_links:
+            details.append("triage=" + ", ".join(triage_links[:3]))
+        elif job.get("state") == "done":
+            details.append("triage=missing")
         independent_verify_links = gh_agent_job_independent_verify_links(job)
         if independent_verify_links:
             details.append("independent_verify=" + ", ".join(independent_verify_links[:3]))
