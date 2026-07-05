@@ -55,11 +55,13 @@ parser.add_argument("--public-base-url", default="")
 parser.add_argument("--project-root", default="")
 parser.add_argument("--incident-repo", default="")
 parser.add_argument("--asset-dir", default="")
+parser.add_argument("--comment-mode", default="")
 parser.add_argument("--json", action="store_true")
 args = parser.parse_args()
 if (args.verb1, args.verb2) == ("gh-agent", "drain"):
     assert args.db
     assert args.asset_dir, "product-journey must pass --asset-dir to gh-agent drain"
+    assert args.comment_mode == "none", "product-journey drain tests must stay offline with --comment-mode none"
     db_path = Path(args.db)
     rows = json.loads(db_path.read_text()) if db_path.exists() else []
     jobs = []
@@ -396,6 +398,7 @@ def main():
             "",
             "",
             "",
+            "none",
             None,
         )
         _check("autonomous loop validates bundle", result["autonomous_fix_status"] == "autonomous_fix_valid")
@@ -427,6 +430,7 @@ def main():
                 "",
                 "",
                 "",
+                "none",
                 None,
             )
         finally:

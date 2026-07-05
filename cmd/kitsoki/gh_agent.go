@@ -147,6 +147,7 @@ func newGHAgentDrainCmd() *cobra.Command {
 		projectRoot    string
 		incidentRepo   string
 		assetDir       string
+		commentMode    string
 		useGitHubApp   bool
 		appID          int64
 		installationID int64
@@ -178,6 +179,7 @@ func newGHAgentDrainCmd() *cobra.Command {
 				Worker:         worker,
 				IncidentRepo:   incidentRepo,
 				ProjectRoot:    projectRoot,
+				CommentMode:    commentMode,
 				UseGitHubApp:   useGitHubApp,
 				AppID:          appID,
 				InstallationID: installationID,
@@ -211,6 +213,7 @@ func newGHAgentDrainCmd() *cobra.Command {
 	cmd.Flags().StringVar(&projectRoot, "project-root", os.Getenv("KITSOKI_GH_AGENT_PROJECT_ROOT"), "local checkout root for --repo; when onboarded, issue routes use its .kitsoki app")
 	cmd.Flags().StringVar(&incidentRepo, "incident-repo", "", "owner/repo for gh-agent incidents; defaults to --repo")
 	cmd.Flags().StringVar(&assetDir, "asset-dir", "", "root directory for on-disk asset blobs; defaults to <db-dir>/assets")
+	cmd.Flags().StringVar(&commentMode, "comment-mode", "github", "comment mode for drained jobs: github or none")
 	cmd.Flags().BoolVar(&useGitHubApp, "github-app", false, "authenticate as a GitHub App installation (mints GH_TOKEN)")
 	cmd.Flags().Int64Var(&appID, "gh-app-id", 0, "GitHub App id (overrides KITSOKI_GH_APP_ID)")
 	cmd.Flags().Int64Var(&installationID, "gh-app-installation-id", 0, "installation id (overrides KITSOKI_GH_APP_INSTALLATION_ID)")

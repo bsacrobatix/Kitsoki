@@ -3180,6 +3180,7 @@ def drain_gh_agent_fixes(
     project_root: str,
     incident_repo: str,
     asset_dir: str = "",
+    comment_mode: str = "none",
 ) -> dict:
     if not db_path:
         return {
@@ -3205,6 +3206,8 @@ def drain_gh_agent_fixes(
         cmd += ["--incident-repo", incident_repo]
     if asset_dir:
         cmd += ["--asset-dir", asset_dir]
+    if comment_mode:
+        cmd += ["--comment-mode", comment_mode]
     proc = shell(cmd, ROOT)
     if proc.returncode != 0:
         detail = proc.stderr.strip() or proc.stdout.strip()
@@ -3312,6 +3315,7 @@ def file_findings(
     gh_agent_project_root: str = "",
     gh_agent_incident_repo: str = "",
     gh_agent_asset_dir: str = "",
+    gh_agent_comment_mode: str = "none",
 ) -> dict:
     """File the bundle's credible issue findings as GitHub issues.
 
@@ -3397,6 +3401,7 @@ def file_findings(
                 gh_agent_project_root,
                 gh_agent_incident_repo,
                 asset_dir,
+                gh_agent_comment_mode,
             ))
         else:
             result.update({
@@ -3442,6 +3447,7 @@ def autonomous_fix_loop(
     gh_agent_project_root: str,
     gh_agent_incident_repo: str,
     gh_agent_asset_dir: str,
+    gh_agent_comment_mode: str,
     publish_deck: Optional[Path],
 ) -> dict:
     """Run the autonomous product-journey issue-to-fix gate.
@@ -3463,6 +3469,7 @@ def autonomous_fix_loop(
         gh_agent_project_root,
         gh_agent_incident_repo,
         gh_agent_asset_dir,
+        gh_agent_comment_mode,
     )
     reviewed = review_run_bundle(run_dir, publish_deck)
     validation = validate_run_bundle(run_dir)
@@ -7629,6 +7636,7 @@ def main() -> None:
     parser.add_argument("--gh-agent-project-root", default="", help="Local checkout root used by gh-agent drain for onboarded target repos")
     parser.add_argument("--gh-agent-incident-repo", default="", help="Repo for gh-agent incident tickets during drain; defaults to --ticket-repo")
     parser.add_argument("--gh-agent-asset-dir", default="", help="Root directory for gh-agent drain artifacts; defaults to <run-dir>/gh-agent-assets")
+    parser.add_argument("--gh-agent-comment-mode", default="none", choices=["none", "github"], help="Comment mode for gh-agent drain; none keeps deterministic gates offline")
     parser.add_argument("--dry-run", action="store_true", help="With --file-findings, render what would be filed without calling GitHub")
     parser.add_argument(
         "--filing-mode",
@@ -8056,6 +8064,7 @@ def main() -> None:
             args.gh_agent_project_root,
             args.gh_agent_incident_repo,
             args.gh_agent_asset_dir,
+            args.gh_agent_comment_mode,
         )
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
@@ -8104,6 +8113,7 @@ def main() -> None:
             args.gh_agent_project_root,
             args.gh_agent_incident_repo,
             args.gh_agent_asset_dir,
+            args.gh_agent_comment_mode,
             publish_deck,
         )
         if args.json_output:

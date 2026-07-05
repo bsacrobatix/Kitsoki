@@ -309,6 +309,7 @@ intents:
       gh_agent_project_root: { type: string, required: false }
       gh_agent_incident_repo: { type: string, required: false }
       gh_agent_asset_dir: { type: string, required: false }
+      gh_agent_comment_mode: { type: string, required: false }
   autonomous_fix:
     description: "File credible issue findings, drain gh-agent fixes, review, and validate as one no-operator reliability gate."
     examples: ["autonomous fix", "run autonomous fix ticket_repo=bsacrobatix/Kitsoki", "file and fix findings", "auto fix findings"]
@@ -321,6 +322,7 @@ intents:
       gh_agent_project_root: { type: string, required: false }
       gh_agent_incident_repo: { type: string, required: false }
       gh_agent_asset_dir: { type: string, required: false }
+      gh_agent_comment_mode: { type: string, required: false }
   stats:
     description: "Derive filed/fixed/reopened/similar issue stats from product-journey run bundles and cached GitHub issue state."
     examples: ["stats", "derive issue stats", "stats issue_state_file=.artifacts/product-journey/issues.json"]
