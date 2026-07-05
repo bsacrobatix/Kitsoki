@@ -3759,6 +3759,13 @@ def run_story_summary(run_dir: Path) -> dict:
         "gh_agent_enqueued_count": gh_agent.get("enqueued_count", 0),
         "gh_agent_skipped_count": gh_agent.get("skipped_count", 0),
         "gh_agent_job_summary": gh_agent.get("job_summary", ""),
+        "gh_agent_claim_status": gh_agent.get("claim_status", ""),
+        "gh_agent_claim_count": gh_agent.get("claim_count", 0),
+        "gh_agent_claim_summary": "; ".join(
+            str(item.get("comment_url", ""))
+            for item in gh_agent.get("claims", [])[:4]
+            if isinstance(item, dict) and item.get("comment_url")
+        ),
         "gh_agent_drain_status": gh_agent.get("drain_status", ""),
         "gh_agent_drained_count": gh_agent.get("drained_count", 0),
         "gh_agent_done_count": gh_agent.get("done_count", 0),

@@ -62,7 +62,8 @@ It is intentionally no-LLM:
   --json-output` to append what the reusable driver actually attempted to
   `driver-journal.md/json`.
 - `autonomous_fix` calls the native `kitsoki gitops autonomous-fix` facade to
-  file credible issue findings, drain gh-agent fixes, refresh review artifacts,
+  file credible issue findings, claim each queued GitHub issue with a
+  `kitsoki-autofix-claim` comment, drain gh-agent fixes, refresh review artifacts,
   require each completed fix run to publish `independent-verify.md`, post a
   `kitsoki-fixed-in` close-out comment, close the GitHub issue, write
   `autonomous-fix-report.md`, and validate the bundle without exposing raw

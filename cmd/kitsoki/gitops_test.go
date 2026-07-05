@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"kitsoki/internal/host"
+	"kitsoki/internal/jobs"
 )
 
 func TestGitopsGHAgentGateRequiresIndependentVerify(t *testing.T) {
@@ -30,6 +32,101 @@ func TestGitopsGHAgentGateRequiresIndependentVerify(t *testing.T) {
 	result["gh_agent_missing_verify_count"] = 1
 	if gitopsGHAgentGateOK(result) {
 		t.Fatalf("missing independent verification must fail the gh-agent gate")
+	}
+}
+
+func TestGitopsEnqueueFixesClaimsGitHubIssueAndPersistsState(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	runDir := t.TempDir()
+	findings := map[string]any{
+		"run_id": "run-claim",
+		"items": []any{
+			map[string]any{
+				"id":       "finding-claim",
+				"kind":     "issue",
+				"title":    "Parallel agents should see in-flight work",
+				"status":   "open",
+				"origin":   "observed",
+				"severity": "high",
+				"github_issue": map[string]any{
+					"url":    "https://github.com/o/r/issues/77",
+					"repo":   "o/r",
+					"number": "77",
+				},
+			},
+		},
+	}
+	if err := gitopsWriteJSONFile(filepath.Join(runDir, "findings.json"), findings); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+
+	var commentBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/o/r/issues/77/comments":
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode comment: %v", err)
+			}
+			commentBody, _ = payload["body"].(string)
+			writeJSON(w, map[string]any{"html_url": "https://github.com/o/r/issues/77#issuecomment-claim"})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("gitops enqueue claim must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
+
+	dbPath := filepath.Join(runDir, "gh-agent.sqlite")
+	result, err := gitopsEnqueueFixes(context.Background(), runDir, dbPath, "o/r", "stories/bugfix")
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if intValue(result, "gh_agent_enqueued_count") != 1 || intValue(result, "gh_agent_claim_count") != 1 {
+		t.Fatalf("enqueue result = %+v", result)
+	}
+	if stringValue(result, "gh_agent_claim_status") != "claimed" {
+		t.Fatalf("claim status = %q", stringValue(result, "gh_agent_claim_status"))
+	}
+	for _, want := range []string{"kitsoki-autofix-claim", "finding-claim", "stories/bugfix", "github:o/r/issue/77"} {
+		if !strings.Contains(commentBody, want) {
+			t.Fatalf("claim body missing %q:\n%s", want, commentBody)
+		}
+	}
+
+	updated, err := gitopsReadJSONFile(filepath.Join(runDir, "findings.json"))
+	if err != nil {
+		t.Fatalf("read findings: %v", err)
+	}
+	issue := mapValue(gitopsFindingsItems(updated)[0], "github_issue")
+	if stringValue(issue, "claim_comment_url") != "https://github.com/o/r/issues/77#issuecomment-claim" {
+		t.Fatalf("claim URL not persisted: %+v", issue)
+	}
+	if stringValue(issue, "claim_job_id") == "" || stringValue(issue, "claimed_by") != "kitsoki gitops autonomous-fix" {
+		t.Fatalf("claim metadata not persisted: %+v", issue)
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	store, err := jobs.NewGHJobStore(db)
+	if err != nil {
+		t.Fatalf("job store: %v", err)
+	}
+	job, err := store.GetJob(context.Background(), stringValue(mapSliceValue(result, "gh_agent_jobs")[0], "job_id"))
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if job.OriginRef != "github:o/r/issue/77" || job.Story != "stories/bugfix" {
+		t.Fatalf("job = %+v", job)
 	}
 }
 

@@ -50,6 +50,9 @@ host_handlers:
             gh_agent_enqueued_count: 2
             gh_agent_skipped_count: 0
             gh_agent_job_summary: "github:bsacrobatix/Kitsoki/issue/201; github:bsacrobatix/Kitsoki/issue/202"
+            gh_agent_claim_status: claimed
+            gh_agent_claim_count: 2
+            gh_agent_claim_summary: "https://github.com/bsacrobatix/Kitsoki/issues/201#issuecomment-claim; https://github.com/bsacrobatix/Kitsoki/issues/202#issuecomment-claim"
             gh_agent_drain_status: drained
             gh_agent_drained_count: 2
             gh_agent_done_count: 2
@@ -136,6 +139,8 @@ turns:
       findings_filed_count: 2
       findings_unfiled_count: 0
       gh_agent_enqueue_status: queued
+      gh_agent_claim_status: claimed
+      gh_agent_claim_count: 2
       gh_agent_drain_status: drained
       gh_agent_done_count: 2
       gh_agent_failed_count: 0
@@ -150,7 +155,7 @@ turns:
       review_failed_count: 0
       validation_status: valid
       validation_errors: 0
-    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous fix[\\s\\S]*autonomous_fix_valid[\\s\\S]*Autonomous report[\\s\\S]*autonomous-fix-report.md[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, review=pass, validation=pass[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 2[\\s\\S]*Issue filing[\\s\\S]*findings_filed: filed 2[\\s\\S]*GH-agent drain[\\s\\S]*drained: drained 2, done 2, failed 0, active 0[\\s\\S]*GH-agent evidence[\\s\\S]*4 attached; 0 missing[\\s\\S]*Review checks[\\s\\S]*25 / 25 passed[\\s\\S]*Validation[\\s\\S]*valid"
+    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous fix[\\s\\S]*autonomous_fix_valid[\\s\\S]*Autonomous report[\\s\\S]*autonomous-fix-report.md[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, review=pass, validation=pass[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 2[\\s\\S]*Issue filing[\\s\\S]*findings_filed: filed 2[\\s\\S]*GH-agent claims[\\s\\S]*claimed: claimed 2[\\s\\S]*GH-agent drain[\\s\\S]*drained: drained 2, done 2, failed 0, active 0[\\s\\S]*GH-agent evidence[\\s\\S]*4 attached; 0 missing[\\s\\S]*Review checks[\\s\\S]*25 / 25 passed[\\s\\S]*Validation[\\s\\S]*valid"
     expect_host_calls:
       - handler: host.run
         args:
