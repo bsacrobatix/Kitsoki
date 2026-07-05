@@ -8,7 +8,8 @@ Body assembly and the real GitHub orchestration live in Go
 with a stubbed gh runner). This test covers the runner side with a fake
 KITSOKI_BIN so nothing calls gh, GitHub, or an LLM:
 
-  1. dry-run leaves the bundle untouched and reports candidates,
+  1. dry-run leaves the bundle untouched, reports candidates, and keeps
+     credible issue findings blocked from final review,
   2. filing records issue URLs + the filing block and refreshes derived
      artifacts,
   3. a re-run skips already-filed findings (idempotent),
@@ -269,7 +270,7 @@ def main():
         run.record_finding(run_dir, "strength", "nice deck", "deck renders",
                            scenario_id, "low", "", "observed", None)
 
-        # 1. Dry-run: candidates reported, bundle untouched, gates unarmed.
+        # 1. Dry-run: candidates reported, bundle untouched, gates fail closed.
         before = (run_dir / "findings.json").read_text()
         result = run.file_findings(run_dir, "o/r", True, None)
         _check("dry-run status", result["status"] == "findings_dry_run")
@@ -278,9 +279,22 @@ def main():
         _check("dry-run leaves findings.json untouched",
                (run_dir / "findings.json").read_text() == before)
         reviewed = run.review_run_bundle(run_dir, None)
-        _check("filing gate unarmed before filing",
-               review_check(reviewed, "findings-filed")["status"] == "pass"
-               and review_check(reviewed, "findings-filed")["detail"] == "filing not requested")
+        _check("credible findings require filing before review",
+               review_check(reviewed, "findings-filed")["status"] == "fail"
+               and "unfiled:" in review_check(reviewed, "findings-filed")["detail"])
+        _check("credible findings require autonomous fixes before review",
+               review_check(reviewed, "gh-agent-fixes")["status"] == "fail"
+               and "require autonomous_fix" in review_check(reviewed, "gh-agent-fixes")["detail"])
+        _check("credible findings require autonomous report before review",
+               review_check(reviewed, "autonomous-fix-report")["status"] == "fail"
+               and "require autonomous_fix" in review_check(reviewed, "autonomous-fix-report")["detail"])
+        validated = run.validate_run_bundle(run_dir)
+        _check("validate blocks unfiled credible findings",
+               any(i["id"] == "findings-filed" and i["severity"] == "error"
+                   for i in validated["issues"]))
+        _check("validate blocks missing autonomous fixes",
+               any(i["id"] == "gh-agent-fixes" and i["severity"] == "error"
+                   for i in validated["issues"]))
 
         # 2. Filing: URLs + filing block recorded, derived artifacts refreshed.
         gh_agent_db = tmp / "gh-agent-jobs.json"
