@@ -662,6 +662,14 @@ stateDiagram-v2
     state render: render view; post to transports
 ```
 
+`acquire` reads the session's event log exactly once per turn:
+`loadJourney` replays the log into `store.JourneyState` (via
+`store.BuildJourney`, both the SQLite/dual-write and pure-JSONL branches),
+and `RecentTurns` is sliced from that same replayed `JourneyState.History`
+rather than a second `LoadHistory` query — a prior duplicate-read tax was
+removed at `internal/orchestrator/orchestrator.go`'s `Turn()`/`loadJourney`
+(`RecentTurnsLimit` truncation semantics unchanged).
+
 Asynchronous off-ramps — also run by the orchestrator, also serialized
 through the same lock:
 

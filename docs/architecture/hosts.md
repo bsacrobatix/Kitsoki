@@ -445,6 +445,58 @@ persona table pattern — one named agent per role, declared in `agents:` — is
 documented with worked examples in `stories/bugfix/AGENT-BRIEF.md` and
 `stories/bugfix/README.md`.
 
+### Cache-usage visibility and the pre-dispatch budget gate
+
+Every `host.agent.*` call already gets a byte-stable, cache-eligible system
+prompt for free (see [system-prompt.md](system-prompt.md)'s layering order).
+Two more things ride on top of that: **what caching actually bought** (visible
+after the call) and **whether an oversized call should even be sent**
+(decided before it).
+
+**Cache-usage visibility.** The claude CLI's `stream-json` terminal `result`
+event already reports `cache_read_input_tokens` / `cache_creation_input_tokens`
+alongside `input_tokens` / `output_tokens` — kitsoki parses the whole usage
+object onto `agent.call.complete`'s `Meta.usage` map unchanged, and additionally
+derives a small typed view, `Meta.cache` (`host.CacheUsage{ReadTokens,
+CreationTokens, Hit}`, `internal/host/agent_event_sink.go`), mirroring the
+`UsageInfo` shape `LiveHarness` already reports for routing calls
+(`internal/harness/live.go`). `Hit` is true only when `ReadTokens > 0` — a
+call that merely writes a new cache-eligible prefix (first call after a
+prompt-shape change) is a miss, not a hit. `Meta.cache` is omitted entirely
+(not a false all-zero struct) for a transport that reports no cache
+accounting at all (e.g. `copilot`). No new event kind — this is an additive
+field on the event every dispatch already emits.
+
+**Pre-dispatch budget gate.** `host.agent.decide` and `host.agent.task` route
+through a shared wrap point, `runAgentVerbWithLadder` (`internal/host/ladder.go`),
+before any rung is dispatched. That wrap now runs a deterministic, LLM-free
+size check (`internal/host/budget_gate.go`): marshal the call's args + the
+resolved agent's system-prompt body, divide by a fixed chars-per-token ratio,
+and compare against a `BudgetThresholds{WarnTokens, RefuseTokens}` pair
+resolved per-agent (`agents: <name>: token_budget: {warn_tokens,
+refuse_tokens}`, `internal/app/types.go`'s `TokenBudgetDecl`) → else a
+per-verb default → else a generic fallback. Three outcomes:
+
+| Estimate vs. thresholds | Outcome | Effect |
+|---|---|---|
+| ≤ WarnTokens | `proceed` | dispatch unchanged |
+| > WarnTokens, ≤ RefuseTokens | `escalate` | ladder's walk starts one rung up (skips the cheapest tier) |
+| > RefuseTokens, or an invalid agent-declared override | `refuse` | terminal `FailureFatal` **before any `claude` subprocess is spawned** — never metered |
+
+Every decision — proceed, escalate, or refuse — is recorded as a new trace
+event, `agent.dispatch.budget_checked` (`internal/store/event.go`), carrying
+`{verb, estimated_tokens, budget_warn_tokens, budget_refuse_tokens, decision,
+reason, rung}`, so a reviewer can reconstruct why a call was allowed,
+escalated, or refused without re-running it. Shipped per-verb defaults are
+generous (300k warn / 1M refuse — well above the largest single call observed
+in the token-bloat finding) so the gate is present and recording from day one
+without any existing story refusing or escalating calls on rollout; an author
+tightens it deliberately via the per-agent `token_budget:` override, validated
+both at story-load time (`internal/app/loader.go`) and again at runtime
+(fail-closed if invalid either way). `host.agent.ask`/`.converse` don't route
+through `runAgentVerbWithLadder` today and so aren't covered by the gate yet —
+extending it there means extending the ladder wrap to those verbs first.
+
 ### Ambient context — editor and screen
 
 The operator-facing read-only verbs (`ask`, `ask_with_mcp`, `converse`) receive
@@ -1524,6 +1576,7 @@ agents:
 | `bash_profile` | Conditional | Required when `Bash` is in `tools` and the agent is used with `host.agent.ask` or `host.agent.decide`. Three forms (see below). |
 | `effect` | No | Declares the resolved class: `pure`, `read`, `write`, or `external`. If absent, the loader joins the tool surface. A declared `pure`/`read` class with write/external tools is a load error. |
 | `external_side_effect` | No | Deprecated alias for `effect`; kept for old stories during the migration window. |
+| `token_budget` | No | `{warn_tokens, refuse_tokens}` override of the pre-dispatch budget gate's per-verb defaults for `decide`/`task` calls through this agent. See [Cache-usage visibility and the pre-dispatch budget gate](#cache-usage-visibility-and-the-pre-dispatch-budget-gate). |
 
 ### `bash_profile` forms
 
