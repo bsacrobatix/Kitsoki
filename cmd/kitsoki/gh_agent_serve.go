@@ -35,6 +35,7 @@ func newGHAgentServeCmd() *cobra.Command {
 		worker            string
 		pollInterval      time.Duration
 		reconcileInterval time.Duration
+		drainInterval     time.Duration
 		stuckAfter        time.Duration
 		maxAttempts       int
 		incidentRepo      string
@@ -84,6 +85,7 @@ func newGHAgentServeCmd() *cobra.Command {
 				PollInterval:      pollInterval,
 				WebhookSecret:     webhookSecret,
 				ReconcileInterval: reconcileInterval,
+				DrainInterval:     drainInterval,
 				StuckAfter:        stuckAfter,
 				MaxAttempts:       maxAttempts,
 				IncidentRepo:      incidentRepo,
@@ -111,6 +113,7 @@ func newGHAgentServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&worker, "worker", "gh-agent-1", "worker id holding the claim")
 	cmd.Flags().DurationVar(&pollInterval, "poll-interval", 30*time.Second, "poll fallback interval; set 0 to disable polling")
 	cmd.Flags().DurationVar(&reconcileInterval, "reconcile-interval", 1*time.Minute, "interval for stuck-job reconciliation; set 0 to disable")
+	cmd.Flags().DurationVar(&drainInterval, "drain-interval", 30*time.Second, "interval for draining queued jobs (retries/re-mentions parked while the queue starved); runs independent of --poll-interval so a webhook-only deployment (--poll-interval=0) still drains; set 0 to disable")
 	cmd.Flags().DurationVar(&stuckAfter, "stuck-after", 15*time.Minute, "active job age without updates before retry/escalation")
 	cmd.Flags().IntVar(&maxAttempts, "max-attempts", 2, "stuck-job retries before marking failed and filing an incident")
 	cmd.Flags().StringVar(&incidentRepo, "incident-repo", "", "owner/repo for gh-agent incidents; defaults to --repo")
@@ -137,6 +140,7 @@ type ghAgentServeOptions struct {
 	PollInterval      time.Duration
 	WebhookSecret     string
 	ReconcileInterval time.Duration
+	DrainInterval     time.Duration
 	StuckAfter        time.Duration
 	MaxAttempts       int
 	IncidentRepo      string
@@ -194,6 +198,17 @@ func runGHAgentServe(ctx context.Context, store *jobs.GHJobStore, opts ghAgentSe
 	}
 	if opts.ReconcileInterval > 0 && opts.StuckAfter > 0 {
 		go runGHAgentReconcileLoop(ctx, store, opts)
+	}
+	// The drain loop runs on its own ticker, independent of PollInterval:
+	// queued jobs (stuck-job retries the reconcile loop parks in GHQueued,
+	// or re-mentions the dispatcher couldn't route) previously only drained
+	// as a side effect of runGHAgentPollOnce, so a webhook-only deployment
+	// (--poll-interval=0, relying solely on GitHub push webhooks) never
+	// drained them at all — they sat in GHQueued until an operator manually
+	// intervened or polling was turned on. See
+	// docs/proposals/gh-agent-honest-issues.md task 3.
+	if opts.DrainInterval > 0 {
+		go runGHAgentDrainLoop(ctx, store, opts)
 	}
 	fmt.Fprintf(os.Stdout, "gh-agent: serving %s (public %s)\n", opts.Addr, opts.PublicBaseURL)
 	select {
@@ -277,9 +292,6 @@ func runGHAgentPollLoop(ctx context.Context, store *jobs.GHJobStore, opts ghAgen
 
 func runGHAgentPollOnce(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) error {
 	return withGHAgentAuth(ctx, opts, func(authedCtx context.Context) error {
-		if err := drainQueuedGHAgentJobs(authedCtx, store, opts); err != nil {
-			return err
-		}
 		items, err := pollInboxItems(authedCtx, opts.Repo, "")
 		if err != nil {
 			return err
@@ -290,6 +302,35 @@ func runGHAgentPollOnce(ctx context.Context, store *jobs.GHJobStore, opts ghAgen
 			}
 		}
 		return nil
+	})
+}
+
+// runGHAgentDrainLoop periodically redispatches jobs parked in GHQueued
+// (reconcile-loop retries, or classify-then-retry re-mentions) on its own
+// ticker, independent of runGHAgentPollLoop/PollInterval. Draining used to
+// only happen as a side effect of runGHAgentPollOnce, so any deployment that
+// relies purely on the GitHub webhook (--poll-interval=0, no scheduled poll)
+// never drained the queue at all. Splitting it out means a webhook-only
+// deployment still guarantees forward progress on a stuck/queued job within
+// one DrainInterval, without paying for (or requiring) inbox polling.
+func runGHAgentDrainLoop(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) {
+	ticker := time.NewTicker(opts.DrainInterval)
+	defer ticker.Stop()
+	for {
+		if err := runGHAgentDrainOnce(ctx, store, opts); err != nil {
+			fmt.Fprintf(os.Stderr, "gh-agent: drain: %v\n", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func runGHAgentDrainOnce(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) error {
+	return withGHAgentAuth(ctx, opts, func(authedCtx context.Context) error {
+		return drainQueuedGHAgentJobs(authedCtx, store, opts)
 	})
 }
 

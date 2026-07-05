@@ -528,6 +528,74 @@ func TestDrainQueuedGHAgentJobsRedispatchesStoredPRRebase(t *testing.T) {
 	}
 }
 
+// TestGHAgentDrainLoopRunsWithPollDisabled proves task 3's fix: draining
+// queued jobs no longer depends on runGHAgentPollLoop. A webhook-only
+// deployment sets --poll-interval=0 (poll disabled) but must still make
+// forward progress on a job the reconcile loop parked in GHQueued — this
+// drives runGHAgentDrainLoop directly (the loop runGHAgentServe wires
+// unconditionally on --poll-interval, keyed only on --drain-interval) and
+// asserts the job drains within one DrainInterval tick, with no poll loop
+// running at all.
+func TestGHAgentDrainLoopRunsWithPollDisabled(t *testing.T) {
+	ctx := context.Background()
+	store := newServeTestGHJobStore(t)
+	job, _, err := store.Claim(ctx, jobs.GHMention{
+		OriginRef:    "github:o/r/issue/7",
+		Repo:         "o/r",
+		ObjectKind:   "issue",
+		ObjectNumber: "7",
+	}, "worker-test")
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if err := store.Advance(ctx, job.JobID, jobs.GHQueued, "stuck job queued for retry"); err != nil {
+		t.Fatalf("Advance queued: %v", err)
+	}
+
+	prev := ghAgentDispatchMention
+	t.Cleanup(func() { ghAgentDispatchMention = prev })
+	dispatched := make(chan string, 1)
+	ghAgentDispatchMention = func(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions, mention ghagent.Mention, labels []string) (*jobs.GHJob, error) {
+		if err := store.Advance(ctx, job.JobID, jobs.GHDone, ""); err != nil {
+			return nil, err
+		}
+		got, err := store.GetJob(ctx, job.JobID)
+		if err == nil {
+			dispatched <- got.OriginRef
+		}
+		return got, err
+	}
+
+	loopCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	opts := ghAgentServeOptions{
+		Trigger: "@kitsoki",
+		// PollInterval is intentionally left zero (poll disabled, e.g. a
+		// webhook-only deployment) — runGHAgentDrainLoop must not depend on
+		// it.
+		PollInterval:  0,
+		DrainInterval: 10 * time.Millisecond,
+	}
+	go runGHAgentDrainLoop(loopCtx, store, opts)
+
+	select {
+	case ref := <-dispatched:
+		if ref != "github:o/r/issue/7" {
+			t.Fatalf("dispatched OriginRef=%q", ref)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued job was not drained within the drain interval; poll being disabled must not block draining")
+	}
+
+	got, err := store.GetJob(ctx, job.JobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if got.State != jobs.GHDone {
+		t.Fatalf("State=%q, want done", got.State)
+	}
+}
+
 func newServeTestGHJobStore(t *testing.T) *jobs.GHJobStore {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
