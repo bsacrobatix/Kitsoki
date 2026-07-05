@@ -165,20 +165,12 @@ thought.
 - [`gh-ticket-adapter.md`](gh-ticket-adapter.md) — **runtime.** a `gh`-backed glue provider satisfying the `ticket` interface against GitHub issues. Part of the external-project-targeting epic (profile + instance now shipped and documented in [dev-story README](../../stories/dev-story/README.md#doc-profile--targeting-an-external-project)); this adapter is deferred pending real GitHub integration demand.
 - [`issues-migration-to-github.md`](issues-migration-to-github.md) — **runtime.** the GitHub Issues tracker substrate is shipped and documented in [`hosts.md → host.gh.ticket`](../architecture/hosts.md#hostghticket--github-issues-backed-tracker); the only remaining step is the maintainer-triggered real bulk migration of the frozen `issues/` archive onto `constructorfabric/Kitsoki`.
 - [`agent-capability-model.md`](agent-capability-model.md) — **epic.** One capability model governing **every** agent (decide / ask / converse / task), unifying three ad-hoc restrictions and an overloaded boolean. Four cooperating layers — **toolbox** (a named, reusable tool grant) → **effect class** (`pure | read | write | external` + `deterministic`) → **layered enforcement** (tool allowlist for pure/read; secure runtime boundary for write/external) → **conformance** (the trace proves the box held). The effect taxonomy and toolbox/tool-layer enforcement slices have shipped; secure runtime confinement and offline conformance remain proposed. Decomposed into three runtime slices + a conformance check:
-  - [`effect-taxonomy.md`](effect-taxonomy.md) (runtime) — the classification
-    substrate: `effect`/`deterministic` on host calls **and** agents, replacing
-    `external_side_effect`; a load-time hard-fail for a read-only call holding a
-    mutator. (Modelled on Acronis DTS's `deterministic_behavior` enum.)
+  - [`effect-taxonomy.md`](effect-taxonomy.md) (runtime) — the classification substrate: `effect`/`deterministic` on host calls **and** agents, replacing `external_side_effect`; a load-time hard-fail for a read-only call holding a mutator. (Modelled on Acronis DTS's `deterministic_behavior` enum.)
   - shipped in [`hosts.md`](../architecture/hosts.md#agent-declaration) and
     [`state-machine.md`](../stories/state-machine.md#agent-toolboxes) —
     named `toolboxes:` + `tools_add:`; one effect-derived tool-layer policy for
     all four agent kinds.
-  - [`task-fs-sandbox.md`](task-fs-sandbox.md) (runtime) — the process boundary
-    beneath the tools: `sandbox:` routes write/external agents through a
-    pluggable runtime ladder (`supervised` → filesystem confinement →
-    namespace/jail → VM). Landlock is the first no-daemon Linux backend, macOS
-    gets honest best-effort local confinement, and hosted/proprietary runtimes
-    can provide Firecracker/Kubernetes/nsjail backends.
+  - [`task-fs-sandbox.md`](task-fs-sandbox.md) (runtime) — the process boundary beneath the tools: `sandbox:` routes write/external agents through a pluggable runtime ladder (`supervised` → filesystem confinement → namespace/jail → VM). Landlock is the first no-daemon Linux backend, macOS gets honest best-effort local confinement, and hosted/proprietary runtimes can provide Firecracker/Kubernetes/nsjail backends.
   - conformance check folded into
     [`agent-contract-eval.md`](agent-contract-eval.md) (§Layer 1b) — offline
     lint that recorded tool uses never exceeded the declared toolbox/effect.

@@ -45,12 +45,14 @@ func RenderIndexEntry(proposalNode *graph.Node) (string, error) {
 	return fmt.Sprintf("- [`%s`](%s) — **%s.** %s", relPath, relPath, kind, blurb), nil
 }
 
-// GraphSourcedProposals returns every `proposal`-typed node in cat that
-// carries the fields RenderIndexEntry needs (index_blurb) — i.e. the
+// GraphSourcedProposals returns every top-level `proposal`-typed node in cat
+// that carries the fields RenderIndexEntry needs (index_blurb) — i.e. the
 // proposals that have actually been converted so far. Wrapper-first
 // migration means most proposals in docs/proposals/ are NOT yet graph
 // nodes at all; this only reports the ones that are, so drift-checking
-// stays scoped to what's actually been converted.
+// stays scoped to what's actually been converted. Nodes with a `child_of`
+// edge are nested child proposals, not top-level index entries — see
+// GraphSourcedChildProposals.
 func GraphSourcedProposals(cat *graph.Catalog) []*graph.Node {
 	var proposals []*graph.Node
 	for _, id := range cat.SortedNodeIDs() {
@@ -61,7 +63,69 @@ func GraphSourcedProposals(cat *graph.Catalog) []*graph.Node {
 		if _, ok := node.Fields["index_blurb"]; !ok {
 			continue
 		}
+		if childOfEdge(node) != "" {
+			continue
+		}
 		proposals = append(proposals, node)
 	}
 	return proposals
+}
+
+// GraphSourcedChildProposals returns every `proposal`-typed node in cat that
+// is a nested child of another proposal (via `child_of`) and carries the
+// fields RenderChildEntry needs. These render as an indented sub-bullet
+// under their parent's README entry rather than a top-level bullet.
+func GraphSourcedChildProposals(cat *graph.Catalog) []*graph.Node {
+	var children []*graph.Node
+	for _, id := range cat.SortedNodeIDs() {
+		node := cat.Nodes[id]
+		if node.TypeID != "proposal" {
+			continue
+		}
+		if _, ok := node.Fields["index_blurb"]; !ok {
+			continue
+		}
+		if childOfEdge(node) == "" {
+			continue
+		}
+		children = append(children, node)
+	}
+	return children
+}
+
+func childOfEdge(node *graph.Node) string {
+	targets, ok := node.Edges["child_of"]
+	if !ok || len(targets) == 0 {
+		return ""
+	}
+	return string(targets[0])
+}
+
+// RenderChildEntry renders a nested child proposal's docs/proposals/README.md
+// sub-bullet: `  - [\`path\`](path) (kind[, note]) — blurb`, indented two
+// spaces under its parent's top-level entry. child_note is an optional extra
+// parenthetical (e.g. "partially implemented"); omitted when blank.
+func RenderChildEntry(node *graph.Node) (string, error) {
+	path, _ := node.Fields["path"].(string)
+	if path == "" {
+		return "", fmt.Errorf("proposalsadapter: node %q missing \"path\"", node.ID)
+	}
+	relPath := strings.TrimPrefix(path, "docs/proposals/")
+
+	kind, _ := node.Fields["proposal_kind"].(string)
+	if kind == "" {
+		return "", fmt.Errorf("proposalsadapter: node %q missing \"proposal_kind\"", node.ID)
+	}
+
+	blurb, _ := node.Fields["index_blurb"].(string)
+	if blurb == "" {
+		return "", fmt.Errorf("proposalsadapter: node %q missing \"index_blurb\"", node.ID)
+	}
+
+	paren := kind
+	if note, _ := node.Fields["child_note"].(string); note != "" {
+		paren = kind + ", " + note
+	}
+
+	return fmt.Sprintf("  - [`%s`](%s) (%s) — %s", relPath, relPath, paren, blurb), nil
 }
