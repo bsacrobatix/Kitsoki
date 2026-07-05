@@ -184,6 +184,18 @@ func emitRootYAML(spec *app.RootSpec, slug string) ([]byte, error) {
 	}
 
 	importDef := imp.Imports[app.RootAlias]
+
+	// Root-spec bindings are always plain handler names (never scripts —
+	// see RootSpec.Bindings), so this is a lossless flatten back to the
+	// YAML-authoring shape for re-emission.
+	var hostBindings map[string]string
+	if len(importDef.HostBindings) > 0 {
+		hostBindings = make(map[string]string, len(importDef.HostBindings))
+		for k, v := range importDef.HostBindings {
+			hostBindings[k] = v.Handler
+		}
+	}
+
 	doc := rootYAMLDoc{
 		App: rootYAMLApp{
 			ID:      slug,
@@ -200,7 +212,7 @@ func emitRootYAML(spec *app.RootSpec, slug string) ([]byte, error) {
 				Source:       "@kitsoki/" + app.RootStoryName,
 				Entry:        importDef.Entry,
 				Hosts:        importDef.Hosts,
-				HostBindings: importDef.HostBindings,
+				HostBindings: hostBindings,
 				WorldIn:      importDef.WorldIn,
 			},
 		},
