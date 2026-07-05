@@ -308,16 +308,26 @@ job type scales.
   spend. A real docker-gated run (the actual swarm inside the browser image)
   is manual acceptance only, out of this test gate's scope.
 
-## Status — usable-kitsoki-gate job type registered (usable-kitsoki-release-gate, Task 2)
+## Status — usable-kitsoki-gate job type registered (usable-kitsoki-release-gate, Tasks 2 + 3.1/3.2)
 
 `usable-kitsoki-gate` is a fourth job type alongside `bugfix`/`persona-qa`/
 `swarm` (`arena plugins` lists all four). Per
-`docs/proposals/usable-kitsoki-release-gate.md`, one cell drives the whole
-mined scenario corpus for one `persona x surface` combination (the parity
-verdict record — `arena/plugins/usable_kitsoki_gate_schema.json`, Task 1 — is
-emitted once per scenario within that cell, not once per cell), the same
-"the cell is the unit of placement, not the individual run inside it"
-convention `swarm.py` established.
+`docs/proposals/usable-kitsoki-release-gate.md`, one cell now drives one
+scenario x surface combination (Task 3.1 — enumeration is wired to S4's real
+scenario-foundry IR corpus, no bespoke logic in the plugin): a spec's
+`targets_from` points at a *directory* of scenario IR documents (default
+`tools/session-mining/calibration/`, S4's committed 18-scenario calibration
+set — `specs/usable-kitsoki-gate-calibration.yaml`), and
+`arena.model.load_targets_from_corpus`'s directory branch (generic, not
+scenario-specific) turns each `scn-*.json` document into one `Target` whose
+`id` is the scenario id and whose `meta` carries `persona`/`goal`/
+`expected_effects`/`abandoned`/`provenance` verbatim. Crossed with
+`axes.surface`, that's 18 x 3 = 54 cells against the calibration set — `arena
+plan --spec tools/arena/specs/usable-kitsoki-gate-calibration.yaml` prints
+`cells=54`. `persona` is deliberately NOT a separate axis to cross-multiply
+(a mined scenario's persona is a fixed property of that scenario); `_coords()`
+falls back to `target.meta["persona"]` when no explicit persona axis/meta
+override is given.
 
 - **image()** dispatches on `axis.surface`: `web`/`tui` request the
   browser-capable image (`kitsoki-arena-repo-runtime-browser:latest`); `mcp`
@@ -327,17 +337,17 @@ convention `swarm.py` established.
 - **drive_command()** dispatches on `axis.surface` too: `web` reuses the
   swarm-style convention (`cd tools/runstatus && npx playwright test ...`);
   `tui`/`mcp` shell into their own stub runner script under
-  `tools/usable-kitsoki-gate/`. `GATE_SURFACE`/`GATE_PERSONA`/
-  `GATE_SCENARIO_CORPUS`/`GATE_RUN_ID`/`GATE_RESULTS_PATH` env vars carry the
-  cell's coords through either path. **None of the three concrete harness
-  entry points exist yet** (`tests/playwright/usable-kitsoki-gate-web.spec.ts`,
-  `tools/usable-kitsoki-gate/run_tui_gate.py`,
-  `tools/usable-kitsoki-gate/run_mcp_gate.py`) — S1 (workbench producer
-  contract) and S4 (scenario foundry / mined corpus) are separate proposals
-  that haven't landed. This plugin's job today is the argv/env composition
-  and scoring contract, proven by test, so S1/S4 land against an already-
-  stable seam. No separate `--live` path exists yet either, for the same
-  reason (mirrors `swarm.py`'s `live` no-op).
+  `tools/usable-kitsoki-gate/`. `GATE_SURFACE`/`GATE_SCENARIO_ID`/
+  `GATE_PERSONA`/`GATE_SCENARIO_CORPUS`/`GATE_RUN_ID`/`GATE_RESULTS_PATH` env
+  vars carry the cell's coords through either path. **The three concrete
+  harness entry points still don't exist** (`tests/playwright/
+  usable-kitsoki-gate-web.spec.ts`, `tools/usable-kitsoki-gate/
+  run_tui_gate.py`, `tools/usable-kitsoki-gate/run_mcp_gate.py`) — that's
+  Task 3.3 (swarm tier 1/2 concurrency wiring), still gated. S1 (workbench
+  producer contract, `internal/orchestrator/workbench_gate_signal.go`) and
+  S4 (scenario foundry, `tools/session-mining/scenario_compiler.py` +
+  `calibration/`) have both landed. No separate `--live` path exists yet
+  either (mirrors `swarm.py`'s `live` no-op).
 - An empty scenario corpus (no targets/variants/axes) enumerates to **zero
   cells**, not an error — `JobSpec.cells()` already returns `[]` for empty
   `targets`/`variants`/any axis with an empty value list; no special-casing
@@ -346,8 +356,21 @@ convention `swarm.py` established.
 - **score()** never regexes stdout for a verdict. The ONE thing read from
   stdout is the harness's own `[usable-kitsoki-gate] wrote <path> (...)`
   line, mirroring `swarm.py`'s `[swarm] wrote <path>` convention. The bundle
-  at that path (`{"run_id", "records": [...]}`) is mapped from its container
-  path back to the host path and every record is validated against
+  at that path accepts either of two shapes (Task 3.2): an already-built
+  `{"run_id", "records": [...]}` bundle (unchanged — what the golden
+  fixtures and any harness that does its own join would write), or a raw S1
+  signal bundle (`{"turn_signals": [...]}` / `{"trace_events": [...]}`) —
+  the turn-level `usable_kitsoki_gate` payload(s) off a real session trace,
+  with NO pre-built parity record at all. For the raw-signal shape,
+  `score()` performs the actual S1 (candidate) x S4 (source) join itself
+  (`build_parity_record` / `extract_turn_signals`): `source_completed` is
+  read off `cell.target.meta["abandoned"]` — the exact IR document
+  `targets_from` loaded THIS cell from, never re-derived, never re-judged by
+  an LLM — `candidate_completed`/`silent_bounce`/`misroute_adjacent` are
+  reduced across the turn signals, and every honestly-incomplete field (full
+  `expected_effects` coverage; `misroute_adjacent`, hard-false from S1
+  today) is called out in the record's own `notes` rather than fabricated.
+  Either way, every record is validated against
   `usable_kitsoki_gate_schema.json` — a record that fails validation blocks
   the cell (`infra:results-malformed`) rather than silently scoring past it.
   Clean records are reduced into the three `GATE_CONDITIONS`
@@ -375,6 +398,16 @@ convention `swarm.py` established.
   / misroute-fails / below-threshold-fails / at-threshold-boundary-solves /
   empty-records-solves / schema-violation-blocks / missing-pointer-infra /
   crash-infra), plus the container<->host results-path mapping — all with
+  zero docker, zero LLM spend. `tools/arena/tests/
+  test_usable_kitsoki_gate_corpus.py` (Task 3.1/3.2) proves cell enumeration
+  off the real calibration set (18 x 3 = 54 cells, persona/scenario_id
+  fallback threading), a configured non-default corpus directory loading
+  identically, `extract_turn_signals` pulling the one workbench turn's
+  signal out of a synthetic raw trace, `build_parity_record`'s join
+  (source_completed from `abandoned`, candidate_completed/silent_bounce
+  reduced across turns, honesty notes, and a hard rejection of empty
+  `evidence_refs`), and `score()` performing that join end-to-end from a raw
+  `trace_events`/`turn_signals` bundle through to a rolled-up `CellResult` —
   zero docker, zero LLM spend.
 - **Golden regression fixtures** (Task 4.1 — offline proof the gate has
   teeth): `tools/arena/tests/fixtures/usable-kitsoki-gate/clean-pass.json`

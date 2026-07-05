@@ -124,13 +124,34 @@ def _target_from_dict(t: dict[str, Any]) -> Target:
 
 
 def load_targets_from_corpus(path: str | Path) -> list[Target]:
-    """Materialize Targets from a github-targets.json-shaped file.
+    """Materialize Targets from a corpus, in either of two shapes.
 
-    Read-only over the corpus: product-journey remains its owner. Shape is
-    `{"targets": [{"id", "label", "repo", "stack", ...}, ...]}` — the same
-    per-target fields `_target_from_dict` already knows how to parse.
+    - A single file: the github-targets.json shape,
+      `{"targets": [{"id", "label", "repo", "stack", ...}, ...]}` (product-
+      journey remains its owner, read-only here).
+    - A directory: one JSON document per file, each document itself already
+      target-shaped (requires an `"id"` field; everything else — however
+      many extra keys — folds into `Target.meta` via `_target_from_dict`,
+      same as an inlined target would). This is how `usable-kitsoki-gate`
+      (S6) consumes S4's scenario-foundry IR corpus
+      (`tools/session-mining/calibration/`, schema
+      `tools/session-mining/schema/scenario_ir.schema.json`) as its cell
+      enumeration: each `scn-*.json` scenario IR doc becomes one Target
+      (`id` = the scenario id, `meta` carries `persona`, `goal`,
+      `expected_effects`, `abandoned`, `provenance`, etc. verbatim) without
+      this module needing any scenario-IR-specific parsing — it is already
+      a generic "directory of target-shaped JSON docs" loader. Non-`.json`
+      siblings (e.g. a `MANIFEST.md`) and subdirectories (e.g. a `flows/`
+      compiled-fixture dir) are ignored; files are read in sorted order so
+      enumeration is deterministic.
     """
-    data = json.loads(_resolve_repo_path(path).read_text(encoding="utf-8"))
+    p = _resolve_repo_path(path)
+    if p.is_dir():
+        docs = [
+            json.loads(f.read_text(encoding="utf-8")) for f in sorted(p.glob("*.json"))
+        ]
+        return [_target_from_dict(t) for t in docs]
+    data = json.loads(p.read_text(encoding="utf-8"))
     return [_target_from_dict(t) for t in data.get("targets", [])]
 
 

@@ -1,16 +1,19 @@
 # Tracing: usable-kitsoki release gate — the realism bar
 
 **Status:** Tasks 1 (parity-metric spec, `4205c5af`), 2 (plugin skeleton,
-`606a5181`), and 4.1 (golden regression fixtures, `e4f55ffb`) are shipped —
-the parity verdict schema, gate constants, the registered
-`usable-kitsoki-gate` arena plugin, and the offline golden-regression proof
-that the gate flips PASS→FAIL on each condition all exist and are tested,
-zero LLM spend. See `docs/tracing/usable-kitsoki-gate.md` for the narrative
-doc this content has moved to. Tasks 3 (wire real S1/S4 inputs) and 4.2
-(calibration-set run) are gated on S1 (workbench) and S4 (scenario foundry)
-landing; Task 5 (stand it up as the CI release gate) is gated on Task 3.
-This proposal stays open, trimmed to the remaining gated work, until S1/S4
-land.
+`606a5181`), 3.1 + 3.2 (wire the real scenario corpus + S1 completion signal
+into cell enumeration/`score()`), and 4.1 (golden regression fixtures,
+`e4f55ffb`) are shipped — the parity verdict schema, gate constants, the
+registered `usable-kitsoki-gate` arena plugin (now enumerating one cell per
+S4 scenario x surface off the committed calibration set, and joining S1's
+raw per-turn signal into `candidate_completed`/`source_completed` in
+`score()`), and the offline golden-regression proof that the gate flips
+PASS→FAIL on each condition all exist and are tested, zero LLM spend. See
+`docs/tracing/usable-kitsoki-gate.md` for the narrative doc this content has
+moved to. Task 3.3 (swarm tier 1/2 concurrency + the three concrete harness
+entry points), 4.2 (calibration-set run), and Task 5 (stand it up as the CI
+release gate) remain gated on 3.3 landing. This proposal stays open, trimmed
+to the remaining gated work, until 3.3 lands.
 **Kind:**   tracing (tooling spillover — the deliverable is an arena job type; see Impact)
 **Epic:**   usable-kitsoki.md
 
@@ -173,8 +176,22 @@ test.
       `test_swarm_plugin.py`
 
 ## 3. Wire the real inputs (after S1 and S4 land)
-- [ ] 3.1 Consume S4's scenario IR output as the cell corpus
-- [ ] 3.2 Consume S1's workbench completion trace as `candidate_completed`
+- [x] 3.1 Consume S4's scenario IR output as the cell corpus — `targets_from`
+      + `arena.model.load_targets_from_corpus`'s directory branch turns each
+      `scn-*.json` IR doc into a `Target` (default corpus
+      `tools/session-mining/calibration/`); one cell per scenario x surface
+      (`tools/arena/specs/usable-kitsoki-gate-calibration.yaml`,
+      `tools/arena/tests/test_usable_kitsoki_gate_corpus.py`)
+- [x] 3.2 Consume S1's workbench completion trace as `candidate_completed`
+      — `score()` accepts a raw S1 signal bundle (`turn_signals`/
+      `trace_events`) alongside the existing pre-built `records` shape and
+      performs the real join itself (`build_parity_record` /
+      `extract_turn_signals`, `tools/arena/arena/plugins/
+      usable_kitsoki_gate.py`): `source_completed` reads `cell.target.meta
+      ["abandoned"]` (the hidden oracle, never re-derived); every
+      honestly-incomplete S1 field (full `expected_effects` coverage,
+      `misroute_adjacent`) is called out in the record's `notes`, never
+      fabricated
 - [ ] 3.3 Wire swarm tier 1/2 concurrency for the no-LLM path; a gated live
       path for the release-candidate cadence (mirrors swarm tier 3's
       manual-only gating)
