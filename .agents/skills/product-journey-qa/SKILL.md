@@ -35,9 +35,9 @@ The durable surfaces are:
 - Every scenario attempt needs a driver journal event, even when it ends in a
   blocker.
 - A bundle is not discussion-ready until the story-owned final gates have run:
-  `autonomous_fix` when credible issue findings exist, then `review` and
-  `validate`. The deck must have playback media or an explicit playback
-  blocker.
+  `autonomous_watchdog`, `autonomous_fix` when credible issue findings exist,
+  then `review` and `validate`. The deck must have playback media or an
+  explicit playback blocker.
 
 ## No-LLM Gates
 
@@ -115,7 +115,10 @@ Then hand it to the reusable driver:
    `--record-blocker` or `last_result.next_driver_blocker_command`.
 5. Record each attempt with `--record-driver-event` or the story `driver_event`
    intent.
-6. For the full issue-to-fix loop, submit the story-owned final gate:
+6. For the full issue-to-fix loop, submit the watchdog gate first:
+   `autonomous_watchdog`. It fails stale standing-loop heartbeats closed before
+   filing or fixing can spend anything.
+7. Then submit the story-owned issue-to-fix gate:
    `autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<url>`.
    This files credible `issue` findings with uploaded evidence, enqueues and
    drains gh-agent fixes, refreshes the deck/review artifacts, and validates the
@@ -164,7 +167,7 @@ Then hand it to the reusable driver:
    disappearing behind a host error. Use default
    `autonomous_driver_mode=pending` when a live budgeted driver still needs to
    capture evidence first.
-7. If there are no credible issue findings, or after `autonomous_fix` reports
+8. If there are no credible issue findings, or after `autonomous_fix` reports
    the bundle valid, submit `review` and `validate` through the story. Use
    `file_findings` or the CLI `--file-findings`/`--review-run`/`--validate-run`
    commands only as fallback/debug surfaces when a story session is unavailable,
@@ -194,6 +197,7 @@ Useful intents:
 - `record`
 - `blocker`
 - `file_findings ticket_repo=owner/repo mode=file|dry-run`
+- `autonomous_watchdog`
 - `autonomous_fix ticket_repo=owner/repo gh_agent_public_base_url=<url>`
 - `driver_event`
 - `validate_matrix_strict`

@@ -2548,12 +2548,21 @@ def autonomous_fix_cli_command(run_dir_arg: str) -> str:
     )
 
 
+def autonomous_watchdog_cli_command(run_dir_arg: str) -> str:
+    return f"python3 tools/product-journey/run.py --autonomous-marathon-watchdog --run-dir {run_dir_arg}"
+
+
 def autonomous_fix_story_command() -> str:
     return "autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<public-gh-agent-url>"
 
 
+def autonomous_watchdog_story_command() -> str:
+    return "autonomous_watchdog"
+
+
 def final_story_gate_commands() -> list[str]:
     return [
+        autonomous_watchdog_story_command(),
         autonomous_fix_story_command(),
         "review",
         "validate",
@@ -2712,7 +2721,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
             "Prefer MCP evidence over prose claims: screenshots, session traces, TUI frames, diffs, oracle output, and videos.",
             "Record strengths as well as weaknesses, issues, and fixes.",
             "If a live LLM or paid service would be required, stop and record the blocker instead of calling it from an automated test.",
-            "Attach every useful artifact, then submit autonomous_fix when credible issue findings exist, review, and validate through the story session. Use the CLI fallback commands only when the story session is unavailable.",
+            "Attach every useful artifact, then submit autonomous_watchdog before autonomous_fix when credible issue findings exist, review, and validate through the story session. Use the CLI fallback commands only when the story session is unavailable.",
         ],
         "scenario_order": [
             {
@@ -3212,8 +3221,8 @@ def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: 
             "Use `last_result.next_driver_attach_command` for the first proof attach when present, "
             "or `last_result.next_driver_blocker_command` when the slot is attempted but blocked, "
             "then use Kitsoki Studio MCP and visual MCP to capture proof-source evidence or blockers, "
-            "record findings, then run the autonomous issue-to-fix gate when credible issue findings exist. "
-            "If the autonomous gate is not armed with ticket_repo and gh_agent_public_base_url, leave those "
+            "record findings, run autonomous_watchdog, then run the autonomous issue-to-fix gate when credible issue findings exist. "
+            "If the autonomous fix gate is not armed with ticket_repo and gh_agent_public_base_url, leave those "
             "parameters explicit for the operator instead of silently skipping the gate. Finish with review and validation."
         ),
         "finalize_commands": [
@@ -3222,6 +3231,7 @@ def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: 
         "missing_evidence": missing_evidence,
         "missing_proof_evidence": missing_proof_evidence,
         "cli_fallback_finalize_commands": [
+            autonomous_watchdog_cli_command(run_dir_arg),
             autonomous_fix_cli_command(run_dir_arg),
             f"python3 tools/product-journey/run.py --review-run --run-dir {run_dir_arg}",
             f"python3 tools/product-journey/run.py --validate-run --run-dir {run_dir_arg}",

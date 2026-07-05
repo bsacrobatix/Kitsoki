@@ -112,8 +112,9 @@ use `driver-plan.md` for the scenario harness/visual-surface/action contract and
 `--record-blocker` commands.
 Use `driver-handoff.md` when handing the bundle to
 `.agents/agents/product-journey-qa-driver.md`; it names the run directory,
-driver inputs, dispatch modes, missing evidence, and final autonomous-fix,
-review, and validation commands without spending live model calls.
+driver inputs, dispatch modes, missing evidence, and final watchdog,
+autonomous-fix, review, and validation commands without spending live model
+calls.
 Loaded runs expose `last_result.next_driver_capture`,
 `last_result.next_driver_attach_command`, and
 `last_result.next_driver_blocker_command` so the reusable driver can begin with

@@ -122,7 +122,7 @@ host_handlers:
             missing_proof_evidence_count: 0
             proof_minimum_evidence_count: 5
             minimum_evidence_count: 5
-            driver_contract_summary: "Driver contract: 1 scenarios (bugfix); 0 missing-proof rows; 3 final gates."
+            driver_contract_summary: "Driver contract: 1 scenarios (bugfix); 0 missing-proof rows; 4 final gates."
             next_driver_capture: ""
             next_driver_attach_command: ""
             next_driver_blocker_command: ""

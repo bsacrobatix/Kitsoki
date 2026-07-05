@@ -63,7 +63,7 @@ host_handlers:
             missing_proof_evidence_count: 0
             proof_minimum_evidence_count: 3
             minimum_evidence_count: 3
-            driver_contract_summary: "Driver contract: 1 scenarios (bugfix); 0 missing-proof rows; 3 final gates."
+            driver_contract_summary: "Driver contract: 1 scenarios (bugfix); 0 missing-proof rows; 4 final gates."
 
 turns:
   - intent:
