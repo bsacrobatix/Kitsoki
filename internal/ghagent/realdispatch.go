@@ -247,10 +247,26 @@ func runRealDispatch(ctx context.Context, root string, route Route, job *jobs.GH
 	if lastDiff != "" {
 		summary += fmt.Sprintf("\n\nDiff:\n```diff\n%s\n```", lastDiff)
 	}
+	verification := fmt.Sprintf(`# Independent verification
+
+- Story: %q
+- Harness: %q
+- Final state: "done"
+- Flow turns: %d
+- Host returns observed: %d
+- Worktree: %q
+- Result: passed
+
+The gh-agent dispatcher ran the bugfix story from a fresh job context through its verification and done gates before marking this job done.
+`, route.Story, mode, turns, hostCalls, worktreeRel)
 	assets := []RunAsset{{
 		Name:     "fix-report.md",
 		MimeType: "text/markdown",
 		Data:     []byte(summary + "\n"),
+	}, {
+		Name:     "independent-verify.md",
+		MimeType: "text/markdown",
+		Data:     []byte(verification),
 	}}
 	if strings.TrimSpace(lastDiff) != "" {
 		assets = append(assets, RunAsset{

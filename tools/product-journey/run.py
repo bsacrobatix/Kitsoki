@@ -3479,6 +3479,8 @@ def run_story_summary(run_dir: Path) -> dict:
         review_backlog.append(f"+{len(actionable_review) - 4} more review checks")
     gh_agent_fix_evidence = gh_agent_fix_evidence_links(gh_agent)
     gh_agent_missing_evidence = gh_agent_missing_fix_evidence(gh_agent)
+    gh_agent_independent_verify = gh_agent_independent_verify_links(gh_agent)
+    gh_agent_missing_verify = gh_agent_missing_independent_verify(gh_agent)
     missing_run_urls = gh_agent_missing_run_urls(gh_agent)
     return {
         "persona_starting_surface": lens.get("starting_surface", ""),
@@ -3524,6 +3526,10 @@ def run_story_summary(run_dir: Path) -> dict:
         "gh_agent_missing_evidence_count": len(gh_agent_missing_evidence),
         "gh_agent_fix_evidence_summary": summarize_gh_agent_fix_evidence(gh_agent),
         "gh_agent_missing_evidence_summary": "; ".join(gh_agent_missing_evidence[:4]) + (f"; +{len(gh_agent_missing_evidence) - 4} more" if len(gh_agent_missing_evidence) > 4 else ""),
+        "gh_agent_independent_verify_count": len(gh_agent_independent_verify),
+        "gh_agent_missing_verify_count": len(gh_agent_missing_verify),
+        "gh_agent_independent_verify_summary": "; ".join(gh_agent_independent_verify[:4]) + (f"; +{len(gh_agent_independent_verify) - 4} more" if len(gh_agent_independent_verify) > 4 else ""),
+        "gh_agent_missing_verify_summary": "; ".join(gh_agent_missing_verify[:4]) + (f"; +{len(gh_agent_missing_verify) - 4} more" if len(gh_agent_missing_verify) > 4 else ""),
         "gh_agent_missing_run_url_count": len(missing_run_urls),
     }
 
@@ -3830,6 +3836,25 @@ def gh_agent_job_evidence_links(job: dict) -> list[str]:
     return links
 
 
+def gh_agent_asset_name(asset: dict) -> str:
+    return Path(str(asset.get("name") or asset.get("path") or asset.get("url") or "")).name
+
+
+def gh_agent_job_independent_verify_links(job: dict) -> list[str]:
+    links: list[str] = []
+    for asset in job.get("assets", []) or []:
+        if not isinstance(asset, dict):
+            continue
+        if gh_agent_asset_name(asset) != "independent-verify.md":
+            continue
+        for key in ("url", "href", "path"):
+            value = str(asset.get(key, "")).strip()
+            if value:
+                links.append(value)
+                break
+    return links
+
+
 def gh_agent_missing_fix_evidence(gh_agent: dict) -> list[str]:
     missing: list[str] = []
     for job in gh_agent.get("drained_jobs", []) or []:
@@ -3857,6 +3882,29 @@ def gh_agent_fix_evidence_links(gh_agent: dict) -> list[str]:
         if not isinstance(job, dict) or job.get("state") != "done":
             continue
         for link in gh_agent_job_evidence_links(job):
+            if link not in seen:
+                seen.add(link)
+                links.append(link)
+    return links
+
+
+def gh_agent_missing_independent_verify(gh_agent: dict) -> list[str]:
+    missing: list[str] = []
+    for job in gh_agent.get("drained_jobs", []) or []:
+        if not isinstance(job, dict) or job.get("state") != "done":
+            continue
+        if not gh_agent_job_independent_verify_links(job):
+            missing.append(str(job.get("origin_ref") or job.get("job_id") or "unknown"))
+    return missing
+
+
+def gh_agent_independent_verify_links(gh_agent: dict) -> list[str]:
+    links: list[str] = []
+    seen: set[str] = set()
+    for job in gh_agent.get("drained_jobs", []) or []:
+        if not isinstance(job, dict) or job.get("state") != "done":
+            continue
+        for link in gh_agent_job_independent_verify_links(job):
             if link not in seen:
                 seen.add(link)
                 links.append(link)
@@ -4181,6 +4229,7 @@ def autonomous_fix_loop(
         and int(filed.get("gh_agent_active_count", 0) or 0) == 0
         and gh_agent_done >= gh_agent_enqueued
         and int(story_summary.get("gh_agent_missing_evidence_count", 0) or 0) == 0
+        and int(story_summary.get("gh_agent_missing_verify_count", 0) or 0) == 0
         and int(story_summary.get("gh_agent_missing_run_url_count", 0) or 0) == 0
     )
     status = "autonomous_fix_valid" if review_ok and validation_ok and filing_ok and gh_agent_ok else "autonomous_fix_invalid"
@@ -4664,6 +4713,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     gh_agent_active = int(gh_agent.get("active_count", 0) or 0)
     gh_agent_drain_status = gh_agent.get("drain_status", "")
     gh_agent_missing_evidence = gh_agent_missing_fix_evidence(gh_agent)
+    gh_agent_missing_verify = gh_agent_missing_independent_verify(gh_agent)
     gh_agent_missing_run_url = gh_agent_missing_run_urls(gh_agent)
     autonomous_fix_report_missing = missing_autonomous_fix_report_tokens(run_dir, findings)
     gh_agent_jobs_terminal = (
@@ -4677,6 +4727,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         )
     )
     gh_agent_fix_evidence_complete = (not gh_agent_requested) or not gh_agent_missing_evidence
+    gh_agent_independent_verify_complete = (not gh_agent_requested) or not gh_agent_missing_verify
     gh_agent_run_urls_complete = (not gh_agent_requested) or not gh_agent_missing_run_url
 
     checks = [
@@ -4844,6 +4895,20 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
                     f"missing: {', '.join(gh_agent_missing_evidence)}"
                     if gh_agent_missing_evidence
                     else f"evidence_links={len(gh_agent_fix_evidence_links(gh_agent))}"
+                )
+            ),
+        },
+        {
+            "id": "gh-agent-independent-verify",
+            "status": "pass" if gh_agent_independent_verify_complete else "fail",
+            "summary": "Completed gh-agent fix jobs expose story-owned independent verification artifacts.",
+            "detail": (
+                "gh-agent fixing not requested"
+                if not gh_agent_requested
+                else (
+                    f"missing: {', '.join(gh_agent_missing_verify)}"
+                    if gh_agent_missing_verify
+                    else f"independent_verify_links={len(gh_agent_independent_verify_links(gh_agent))}"
                 )
             ),
         },
@@ -5900,6 +5965,15 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 "gh-agent-fix-evidence",
                 "Completed gh-agent fix jobs are missing reviewable fix evidence assets",
                 ", ".join(missing_evidence[:5]),
+            )
+        missing_verify = gh_agent_missing_independent_verify(gh_agent)
+        if missing_verify:
+            add_validation_issue(
+                issues,
+                "error",
+                "gh-agent-independent-verify",
+                "Completed gh-agent fix jobs are missing story-owned independent verification artifacts",
+                ", ".join(missing_verify[:5]),
             )
         missing_run_urls = gh_agent_missing_run_urls(gh_agent)
         if missing_run_urls:

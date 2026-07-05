@@ -91,6 +91,12 @@ if (args.verb1, args.verb2) == ("gh-agent", "drain"):
                     "size_bytes": 128,
                     "url": f"https://agent.example/run/job-{i}/artifacts/fix-report.md",
                 },
+                *([] if os.environ.get("KITSOKI_FAKE_GH_AGENT_NO_VERIFY") else [{
+                    "name": "independent-verify.md",
+                    "mime_type": "text/markdown",
+                    "size_bytes": 192,
+                    "url": f"https://agent.example/run/job-{i}/artifacts/independent-verify.md",
+                }]),
                 {
                     "name": "fix.patch",
                     "mime_type": "text/x-diff",
@@ -294,9 +300,12 @@ def main():
         _check("gh-agent run summary surfaces review links",
                "https://agent.example/run/job-1" in result["gh_agent_run_summary"])
         _check("gh-agent fix evidence fields are reported",
-               result["gh_agent_fix_evidence_count"] == 4
+               result["gh_agent_fix_evidence_count"] == 6
                and result["gh_agent_missing_evidence_count"] == 0
-               and "https://agent.example/run/job-1/artifacts/fix-report.md" in result["gh_agent_fix_evidence_summary"])
+               and "https://agent.example/run/job-1/artifacts/fix-report.md" in result["gh_agent_fix_evidence_summary"]
+               and result["gh_agent_independent_verify_count"] == 2
+               and result["gh_agent_missing_verify_count"] == 0
+               and "https://agent.example/run/job-1/artifacts/independent-verify.md" in result["gh_agent_independent_verify_summary"])
         queued_rows = json.loads(gh_agent_db.read_text())
         _check("gh-agent queue uses issue origin refs",
                sorted(row["origin_ref"] for row in queued_rows)
@@ -330,20 +339,22 @@ def main():
         # 4. Gates: review counts the filing check; a new credible finding
         # after filing trips review + validate until re-filed.
         reviewed = run.review_run_bundle(run_dir, None)
-        _check("review has 26 checks", reviewed["total"] == 26)
+        _check("review has 27 checks", reviewed["total"] == 27)
         _check("findings-filed passes when fully filed",
                review_check(reviewed, "findings-filed")["status"] == "pass")
         _check("gh-agent-fixes passes when drained",
                review_check(reviewed, "gh-agent-fixes")["status"] == "pass")
         _check("gh-agent-fix-evidence passes when assets are present",
                review_check(reviewed, "gh-agent-fix-evidence")["status"] == "pass")
+        _check("gh-agent-independent-verify passes when verify artifacts are present",
+               review_check(reviewed, "gh-agent-independent-verify")["status"] == "pass")
         _check("gh-agent-run-url passes when run URLs are present",
                review_check(reviewed, "gh-agent-run-url")["status"] == "pass")
         validated = run.validate_run_bundle(run_dir)
         _check("validate has no findings-filed error",
                not any(i["id"] == "findings-filed" for i in validated["issues"]))
         _check("validate has no gh-agent evidence error",
-               not any(i["id"] in {"gh-agent-fixes", "gh-agent-fix-evidence", "gh-agent-run-url", "gh-agent-fix-deck"} for i in validated["issues"]))
+               not any(i["id"] in {"gh-agent-fixes", "gh-agent-fix-evidence", "gh-agent-independent-verify", "gh-agent-run-url", "gh-agent-fix-deck"} for i in validated["issues"]))
         saved_findings = run.read_json(run_dir / "findings.json")
         missing_asset_findings = json.loads(json.dumps(saved_findings))
         for job in missing_asset_findings["gh_agent"]["drained_jobs"]:
@@ -356,6 +367,20 @@ def main():
         _check("validate catches done gh-agent jobs without evidence assets",
                any(i["id"] == "gh-agent-fix-evidence" and i["severity"] == "error"
                    for i in missing_asset_validated["issues"]))
+        missing_verify_findings = json.loads(json.dumps(saved_findings))
+        for job in missing_verify_findings["gh_agent"]["drained_jobs"]:
+            job["assets"] = [
+                asset for asset in job.get("assets", [])
+                if asset.get("name") != "independent-verify.md"
+            ]
+        run.write_json(run_dir / "findings.json", missing_verify_findings)
+        reviewed_missing_verify = run.review_run_bundle(run_dir, None)
+        _check("review fails done gh-agent jobs without independent verification",
+               review_check(reviewed_missing_verify, "gh-agent-independent-verify")["status"] == "fail")
+        missing_verify_validated = run.validate_run_bundle(run_dir)
+        _check("validate catches done gh-agent jobs without independent verification",
+               any(i["id"] == "gh-agent-independent-verify" and i["severity"] == "error"
+                   for i in missing_verify_validated["issues"]))
         missing_run_url_findings = json.loads(json.dumps(saved_findings))
         for job in missing_run_url_findings["gh_agent"]["drained_jobs"]:
             job["run_url"] = ""
@@ -427,15 +452,18 @@ def main():
         _check("autonomous loop preserves filing status", result["filing_status"] == "findings_filed")
         _check("autonomous loop drained gh-agent", result["gh_agent_drain_status"] == "drained" and result["gh_agent_done_count"] == 1)
         _check("autonomous loop exposes fix evidence assets",
-               result["gh_agent_fix_evidence_count"] == 2
-               and result["gh_agent_missing_evidence_count"] == 0)
+               result["gh_agent_fix_evidence_count"] == 3
+               and result["gh_agent_missing_evidence_count"] == 0
+               and result["gh_agent_independent_verify_count"] == 1
+               and result["gh_agent_missing_verify_count"] == 0)
         report = Path(result["autonomous_fix_report_path"])
         report_text = report.read_text()
         _check("autonomous loop writes complete review report",
                "https://github.com/o/r/issues/101" in report_text
                and "https://agent.example/run/job-1" in report_text
-               and "https://agent.example/run/job-1/artifacts/fix-report.md" in report_text)
-        _check("autonomous loop reviewed and validated", result["review_total_count"] == 26 and result["validation_status"] == "valid")
+               and "https://agent.example/run/job-1/artifacts/fix-report.md" in report_text
+               and "https://agent.example/run/job-1/artifacts/independent-verify.md" in report_text)
+        _check("autonomous loop reviewed and validated", result["review_total_count"] == 27 and result["validation_status"] == "valid")
 
         run_dir_facade, run_json_facade = run.build_run_bundle(
             catalog, run.load_github_targets(run.GITHUB_TARGETS),
@@ -507,6 +535,38 @@ def main():
         _check("autonomous loop reports failing gates for missing evidence",
                result["autonomous_gate_summary"] == "filing=pass, gh_agent=fail, review=fail, validation=fail"
                and any(i["id"] == "gh-agent-fix-evidence" for i in result["validation_issues"]))
+
+        run_dir6, run_json6 = run.build_run_bundle(
+            catalog, run.load_github_targets(run.GITHUB_TARGETS),
+            personas, stable_scenarios, "vscode", "", "autonomous-missing-verify-test", "dry-run", None,
+        )
+        scenario6 = run_json6["scenarios"][0]["id"]
+        attach_bugfix_proof(run_dir6, scenario6)
+        run.record_finding(run_dir6, "issue", "autonomous missing verify", "observed problem",
+                           scenario6, "high", "", "open", None)
+        os.environ["KITSOKI_FAKE_GH_AGENT_NO_VERIFY"] = "1"
+        try:
+            result = run.autonomous_fix_loop(
+                run_dir6,
+                "o/r",
+                str(tmp / "gh-agent-autonomous-no-verify.json"),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                None,
+            )
+        finally:
+            os.environ.pop("KITSOKI_FAKE_GH_AGENT_NO_VERIFY", None)
+        _check("autonomous loop rejects done fixes without independent verification",
+               result["autonomous_fix_status"] == "autonomous_fix_invalid"
+               and result["gh_agent_fix_evidence_count"] == 2
+               and result["gh_agent_missing_verify_count"] == 1)
+        _check("autonomous loop reports failing gates for missing independent verification",
+               result["autonomous_gate_summary"] == "filing=pass, gh_agent=fail, review=fail, validation=fail"
+               and any(i["id"] == "gh-agent-independent-verify" for i in result["validation_issues"]))
 
         run_dir5, run_json5 = run.build_run_bundle(
             catalog, run.load_github_targets(run.GITHUB_TARGETS),

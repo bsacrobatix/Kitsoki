@@ -110,7 +110,9 @@ Then hand it to the reusable driver:
    issue gets an `## Artifacts` section + kitsoki metadata block, and the issue
    URL is written back into `findings.json` (`item.github_issue`) so re-runs
    are idempotent. If the pre-file search fails, the gate fails closed rather
-   than creating a possible duplicate. Never file these findings with raw `gh
+   than creating a possible duplicate. Completed gh-agent jobs must publish an
+   `independent-verify.md` asset from the story run; a fix report or patch alone
+   does not satisfy the autonomous gate. Never file these findings with raw `gh
    issue create` or text-only `issue_create` — that drops the evidence.
 7. If there are no credible issue findings, or after `autonomous_fix` reports
    the bundle valid, submit `review` and `validate` through the story. Use

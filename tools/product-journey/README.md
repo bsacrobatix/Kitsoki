@@ -391,7 +391,10 @@ filing gate closed instead of silently creating a duplicate. In both the related
 and newly-filed paths, the command writes `item.github_issue` plus
 `findings.filing` back into `findings.json`. Native gh-agent queue state
 defaults to `<run_dir>/gh-agent-jobs.sqlite`; pass `gh_agent_db=<sqlite>` only
-to override that run-local path.
+to override that run-local path. Completed gh-agent fix jobs must expose both
+reviewable fix evidence and an `independent-verify.md` asset produced by the
+story dispatcher; the autonomous review and validation gates fail closed when a
+job only provides a fix report or patch.
 
 The lower-level `file_findings ticket_repo=<owner/repo> [mode=dry-run]` story
 intent and the CLI `--file-findings` command remain useful for previewing or
