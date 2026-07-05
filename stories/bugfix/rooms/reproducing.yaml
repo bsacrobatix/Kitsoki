@@ -253,6 +253,7 @@ states:
         invoke: iface.transport.post
         with:
           thread:   "{{ world.thread }}"
+          workdir:  "{{ world.workdir }}"
           title:    "Repro gate (GREEN→RED): {{ world.ticket_id }}"
           body:     "{{ world.repro_gate_summary }}\n\n{{ world.repro_gate_log }}"
           phase_id: "repro_gate_{{ world.ticket_id }}_{{ world.cycle }}"
@@ -318,6 +319,7 @@ states:
             - invoke: iface.transport.post
               with:
                 thread:   "{{ world.thread }}"
+                workdir:  "{{ world.workdir }}"
                 title:    "Reproduction artifact: {{ world.ticket_id }}"
                 body:     "{{ world.reproduction_artifact.summary_markdown }}"
                 phase_id: "reproducing_{{ world.ticket_id }}_{{ world.cycle }}"

@@ -91,6 +91,7 @@ states:
             - invoke: iface.transport.post
               with:
                 thread:   "{{ world.thread }}"
+                workdir:  "{{ world.workdir }}"
                 title:    "Triage verdict [{{ world.triage_verdict.verdict }}]: {{ world.ticket_id }}"
                 body:     "{{ world.triage_verdict.summary_markdown }}"
                 phase_id: "triaging_{{ world.ticket_id }}"

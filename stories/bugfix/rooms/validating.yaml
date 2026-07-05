@@ -234,6 +234,7 @@ states:
             - invoke: iface.transport.post
               with:
                 thread:   "{{ world.thread }}"
+                workdir:  "{{ world.workdir }}"
                 title:    "Validation: {{ world.ticket_id }}"
                 body:     "{{ world.validate_artifact.summary_markdown }}"
                 phase_id: "validating_{{ world.ticket_id }}_{{ world.cycle }}"
