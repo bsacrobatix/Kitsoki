@@ -1042,9 +1042,11 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	// strings / unique examples) survives so typed menu labels and canonical
 	// command text still resolve without an LLM hop; everything else falls
 	// straight through to the main-model interpreter (harness.RunTurn) as an
-	// isolated routing decision. The TUI already runs MatchDeterministic before
-	// Turn, so for it this is a cheap no-op; other surfaces (kitsoki turn, MCP
-	// drive/submit) gain the same fast path here. Set --semantic-routing /
+	// isolated routing decision. Every surface (TUI, kitsoki turn, MCP
+	// drive/submit, web) calls Turn directly and gains this fast path here;
+	// the TUI no longer runs a separate MatchDeterministic pre-pass (it used
+	// to, but that duplicated this exact check and could drift from it — see
+	// tui.go's dispatchInput). Set --semantic-routing /
 	// KITSOKI_SEMANTIC_ROUTING (or per-app routing.enabled when no override is
 	// wired) to develop/test the full stack. See
 	// docs/architecture/semantic-routing.md.
