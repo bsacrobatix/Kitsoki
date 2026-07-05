@@ -1,7 +1,7 @@
 states:
   idle:
     description: "Waiting to create a product-journey QA run bundle."
-    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_status, autonomous_marathon_report_path, autonomous_driver_mode, autonomous_driver_status, autonomous_driver_evidence_count, status]
+    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_status, autonomous_marathon_report_path, autonomous_driver_mode, autonomous_driver_status, autonomous_driver_evidence_count, autonomous_gate_summary, validation_status, validation_errors, validation_issue_summary, status]
     view:
       - banner:
           text: "PRODUCT JOURNEY QA"
@@ -22,6 +22,9 @@ states:
             Autonomous marathon smoke: '{{ world.autonomous_marathon_smoke_status|default:"(not checked)" }}'
             Autonomous marathon: '{{ world.autonomous_marathon_status|default:"(not started)" }}'
             Autonomous driver: '{{ world.autonomous_driver_mode|default:"pending" }} / {{ world.autonomous_driver_status|default:"(not run)" }}'
+            Autonomous gates: '{{ world.autonomous_gate_summary|default:"(not run)" }}'
+            Validation: '{{ world.validation_status|default:"(not validated)" }}'
+            Validation issues: '{{ world.validation_issue_summary|default:"(none)" }}'
             Status: "{{ world.status }}"
       - prose: "Create a no-LLM run bundle or a 10-repo GitHub matrix, then attach visual/MCP evidence as scenarios play out."
       - choice:
@@ -236,6 +239,56 @@ states:
             - set:
                 status: "autonomous_marathon_smoke_checked"
       autonomous_marathon:
+        - when: "(slots.autonomous_driver_mode ?? 'pending') == 'replay' && (slots.ticket_repo == nil || slots.ticket_repo == '')"
+          target: .
+          effects:
+            - set:
+                project: "{{ slots.project ?? world.project }}"
+                persona: "{{ slots.persona ?? world.persona }}"
+                seed: "{{ slots.seed ?? world.seed }}"
+                scenario_scope: "{{ slots.scenarios ?? world.scenario_scope }}"
+                autonomous_marathon_status: "autonomous_marathon_invalid"
+                autonomous_marathon_summary: "Replay autonomous marathon requires ticket_repo so credible findings can be filed with evidence before gh-agent repair."
+                autonomous_driver_mode: "replay"
+                autonomous_driver_status: "invalid"
+                autonomous_driver_summary: "ticket_repo is required"
+                autonomous_driver_evidence_count: 0
+                autonomous_driver_issue_count: 0
+                autonomous_fix_status: "not_run"
+                autonomous_gate_summary: "filing=fail, gh_agent=fail, review=not_run, validation=fail"
+                validation_status: "invalid"
+                validation_errors: 1
+                validation_warnings: 0
+                validation_issue_summary: "ticket-repo-required"
+                filing_summary: "ticket_repo is required for replay autonomous marathon"
+                gh_agent_missing_evidence_summary: "ticket_repo is required"
+                gh_agent_missing_verify_summary: "ticket_repo is required"
+                status: "autonomous_marathon_invalid"
+        - when: "(slots.autonomous_driver_mode ?? 'pending') == 'replay' && (slots.gh_agent_public_base_url == nil || slots.gh_agent_public_base_url == '')"
+          target: .
+          effects:
+            - set:
+                project: "{{ slots.project ?? world.project }}"
+                persona: "{{ slots.persona ?? world.persona }}"
+                seed: "{{ slots.seed ?? world.seed }}"
+                scenario_scope: "{{ slots.scenarios ?? world.scenario_scope }}"
+                autonomous_marathon_status: "autonomous_marathon_invalid"
+                autonomous_marathon_summary: "Replay autonomous marathon requires gh_agent_public_base_url so gh-agent run evidence is reviewable."
+                autonomous_driver_mode: "replay"
+                autonomous_driver_status: "invalid"
+                autonomous_driver_summary: "gh_agent_public_base_url is required"
+                autonomous_driver_evidence_count: 0
+                autonomous_driver_issue_count: 0
+                autonomous_fix_status: "not_run"
+                autonomous_gate_summary: "filing=not_run, gh_agent=fail, review=not_run, validation=fail"
+                validation_status: "invalid"
+                validation_errors: 1
+                validation_warnings: 0
+                validation_issue_summary: "gh-agent-public-base-url"
+                filing_summary: "gh_agent_public_base_url is required for replay autonomous marathon"
+                gh_agent_missing_evidence_summary: "gh_agent_public_base_url is required"
+                gh_agent_missing_verify_summary: "gh_agent_public_base_url is required"
+                status: "autonomous_marathon_invalid"
         - target: run_created
           effects:
             - set:

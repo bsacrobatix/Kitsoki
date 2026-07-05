@@ -502,6 +502,38 @@ states:
             - set:
                 status: "findings_filing_complete"
       autonomous_marathon:
+        - when: "world.issue_count > 0 && (slots.ticket_repo == nil || slots.ticket_repo == '') && (world.ticket_repo == nil || world.ticket_repo == '')"
+          target: run_created
+          effects:
+            - set:
+                autonomous_marathon_status: "autonomous_marathon_invalid"
+                autonomous_marathon_summary: "Autonomous marathon finalization requires ticket_repo while credible issue findings are present."
+                autonomous_fix_status: "not_run"
+                autonomous_gate_summary: "filing=fail, gh_agent=fail, review=not_run, validation=fail"
+                validation_status: "invalid"
+                validation_errors: 1
+                validation_warnings: 0
+                validation_issue_summary: "ticket-repo-required"
+                filing_summary: "ticket_repo is required for autonomous marathon finalization"
+                gh_agent_missing_evidence_summary: "ticket_repo is required"
+                gh_agent_missing_verify_summary: "ticket_repo is required"
+                status: "autonomous_marathon_invalid"
+        - when: "world.issue_count > 0 && (slots.gh_agent_public_base_url == nil || slots.gh_agent_public_base_url == '')"
+          target: run_created
+          effects:
+            - set:
+                autonomous_marathon_status: "autonomous_marathon_invalid"
+                autonomous_marathon_summary: "Autonomous marathon finalization requires gh_agent_public_base_url while credible issue findings are present."
+                autonomous_fix_status: "not_run"
+                autonomous_gate_summary: "filing=not_run, gh_agent=fail, review=not_run, validation=fail"
+                validation_status: "invalid"
+                validation_errors: 1
+                validation_warnings: 0
+                validation_issue_summary: "gh-agent-public-base-url"
+                filing_summary: "gh_agent_public_base_url is required for autonomous marathon finalization"
+                gh_agent_missing_evidence_summary: "gh_agent_public_base_url is required"
+                gh_agent_missing_verify_summary: "gh_agent_public_base_url is required"
+                status: "autonomous_marathon_invalid"
         - target: run_created
           effects:
             - set:
