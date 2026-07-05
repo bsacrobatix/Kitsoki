@@ -543,6 +543,7 @@ nodes:
       participates_in:
         - usecase-maintainer-answers-blocked-agent
       owns: []
+      owns_area: []
       assigned_changes: []
 
   - schema: graph/actor/v0
@@ -562,6 +563,8 @@ nodes:
         - usecase-product-owner-computes-roadmap-delta
       owns:
         - feature-project-object-graph
+      owns_area:
+        - area-kitsoki
       assigned_changes: []
 
   - schema: graph/actor/v0
@@ -582,6 +585,9 @@ nodes:
         - usecase-product-owner-computes-roadmap-delta
         - usecase-pm-scans-roadmap-delta
       owns: []
+      owns_area:
+        - area-media-and-demos
+        - area-web-experience
       assigned_changes: []
 
   - schema: graph/actor/v0
@@ -604,6 +610,11 @@ nodes:
       participates_in:
         - usecase-developer-traces-requirement-to-proof
       owns: []
+      owns_area:
+        - area-agent-execution
+        - area-observability
+        - area-dev-workflow
+        - area-platform-install
       assigned_changes:
         - change-object-graph-substrate
         - change-capability-catalog-dogfood
@@ -638,6 +649,8 @@ nodes:
     sources:
       - source-operator-ask-feature
     edges:
+      in_area:
+        - area-agent-execution
       requirements:
         - req-operator-ask-no-silent-default
         - req-operator-ask-blocking-round-trip
@@ -920,6 +933,8 @@ nodes:
     sources:
       - source-agent-actions-feature
     edges:
+      in_area:
+        - area-observability
       requirements:
         - req-agent-actions-byte-stable-stream
       use_cases:
@@ -1256,6 +1271,8 @@ nodes:
     sources:
       - source-trace-introspection-feature
     edges:
+      in_area:
+        - area-observability
       requirements:
         - req-trace-introspection-decision-first
       use_cases:
@@ -1482,6 +1499,8 @@ nodes:
     sources:
       - source-meta-mode-feature
     edges:
+      in_area:
+        - area-agent-execution
       requirements:
         - req-meta-mode-story-aware-edit
       use_cases:
@@ -1634,6 +1653,8 @@ nodes:
     sources:
       - source-dev-story-bugfix-feature
     edges:
+      in_area:
+        - area-dev-workflow
       requirements:
         - req-dev-story-bugfix-end-to-end
       use_cases:
@@ -1727,6 +1748,9 @@ nodes:
       - source-project-object-graph-scratch
       - source-lifecycle-taxonomy
     edges:
+      in_area:
+        - area-dev-workflow
+        - area-web-experience
       requirements:
         - req-project-objects-data-primary
         - req-project-objects-typed-edges
@@ -2140,6 +2164,8 @@ nodes:
       - source-graph-viewer-prototype
       - source-project-object-graph-proposal
     edges:
+      in_area:
+        - area-dev-workflow
       requirements:
         - req-viewer-multi-actor-lenses
         - req-viewer-permission-visibility
@@ -2487,6 +2513,8 @@ nodes:
     sources:
       - source-chat-stream-feature
     edges:
+      in_area:
+        - area-observability
       requirements:
         - req-chat-stream-behavior
       use_cases: []
@@ -2735,6 +2763,8 @@ nodes:
     sources:
       - source-complete-product-tour-feature
     edges:
+      in_area:
+        - area-media-and-demos
       requirements:
         - req-complete-product-tour-behavior
       use_cases: []
@@ -2908,6 +2938,8 @@ nodes:
     sources:
       - source-design-walkthrough-feature
     edges:
+      in_area:
+        - area-media-and-demos
       requirements:
         - req-design-walkthrough-behavior
       use_cases: []
@@ -3126,6 +3158,8 @@ nodes:
     sources:
       - source-diagram-showcase-feature
     edges:
+      in_area:
+        - area-media-and-demos
       requirements:
         - req-diagram-showcase-behavior
       use_cases: []
@@ -3327,6 +3361,8 @@ nodes:
     sources:
       - source-dynamic-workflows-feature
     edges:
+      in_area:
+        - area-agent-execution
       requirements:
         - req-dynamic-workflows-behavior
       use_cases: []
@@ -3526,6 +3562,8 @@ nodes:
     sources:
       - source-first-run-message-feature
     edges:
+      in_area:
+        - area-web-experience
       requirements:
         - req-first-run-message-behavior
       use_cases: []
@@ -3578,6 +3616,8 @@ nodes:
     sources:
       - source-get-started-actions-feature
     edges:
+      in_area:
+        - area-web-experience
       requirements:
         - req-get-started-actions-behavior
       use_cases: []
@@ -3630,6 +3670,8 @@ nodes:
     sources:
       - source-goal-seeker-feature
     edges:
+      in_area:
+        - area-dev-workflow
       requirements:
         - req-goal-seeker-behavior
       use_cases: []
@@ -3705,6 +3747,8 @@ nodes:
     sources:
       - source-harness-picker-feature
     edges:
+      in_area:
+        - area-platform-install
       requirements:
         - req-harness-picker-behavior
       use_cases: []
@@ -3778,6 +3822,8 @@ nodes:
     sources:
       - source-kitsoki-doctor-feature
     edges:
+      in_area:
+        - area-platform-install
       requirements:
         - req-kitsoki-doctor-behavior
       use_cases: []
@@ -3852,6 +3898,8 @@ nodes:
     sources:
       - source-mockup-video-feature
     edges:
+      in_area:
+        - area-media-and-demos
       requirements:
         - req-mockup-video-behavior
       use_cases: []
@@ -4054,6 +4102,8 @@ nodes:
     sources:
       - source-multi-story-feature
     edges:
+      in_area:
+        - area-dev-workflow
       requirements:
         - req-multi-story-behavior
       use_cases: []
@@ -4257,6 +4307,8 @@ nodes:
     sources:
       - source-onboarding-tour-feature
     edges:
+      in_area:
+        - area-web-experience
       requirements:
         - req-onboarding-tour-behavior
       use_cases: []
@@ -4504,6 +4556,8 @@ nodes:
     sources:
       - source-punch-list-feature
     edges:
+      in_area:
+        - area-dev-workflow
       requirements:
         - req-punch-list-behavior
       use_cases: []
@@ -4716,6 +4770,8 @@ nodes:
     sources:
       - source-review-feature
     edges:
+      in_area:
+        - area-dev-workflow
       requirements:
         - req-review-behavior
       use_cases: []
@@ -4900,6 +4956,8 @@ nodes:
     sources:
       - source-slidey-architect-design-feature
     edges:
+      in_area:
+        - area-media-and-demos
       requirements:
         - req-slidey-architect-design-behavior
       use_cases: []
@@ -5109,6 +5167,8 @@ nodes:
     sources:
       - source-slidey-bugfix-feature
     edges:
+      in_area:
+        - area-media-and-demos
       requirements:
         - req-slidey-bugfix-behavior
       use_cases: []
@@ -5379,6 +5439,8 @@ nodes:
     sources:
       - source-slidey-decomposition-feature
     edges:
+      in_area:
+        - area-media-and-demos
       requirements:
         - req-slidey-decomposition-behavior
       use_cases: []
@@ -5540,6 +5602,8 @@ nodes:
     sources:
       - source-slidey-dev-prd-design-feature
     edges:
+      in_area:
+        - area-media-and-demos
       requirements:
         - req-slidey-dev-prd-design-behavior
       use_cases: []
@@ -5774,6 +5838,9 @@ nodes:
     sources:
       - source-slidey-open-pr-feature
     edges:
+      in_area:
+        - area-dev-workflow
+        - area-media-and-demos
       requirements:
         - req-slidey-open-pr-behavior
       use_cases: []
@@ -5993,6 +6060,8 @@ nodes:
     sources:
       - source-story-editor-feature
     edges:
+      in_area:
+        - area-web-experience
       requirements:
         - req-story-editor-behavior
       use_cases: []
@@ -6190,6 +6259,8 @@ nodes:
     sources:
       - source-stranger-install-feature
     edges:
+      in_area:
+        - area-platform-install
       requirements:
         - req-stranger-install-behavior
       use_cases: []
@@ -6265,6 +6336,8 @@ nodes:
     sources:
       - source-trace-features-feature
     edges:
+      in_area:
+        - area-observability
       requirements:
         - req-trace-features-behavior
       use_cases: []
@@ -6522,6 +6595,8 @@ nodes:
     sources:
       - source-weather-report-feature
     edges:
+      in_area:
+        - area-agent-execution
       requirements:
         - req-weather-report-behavior
       use_cases: []
@@ -6712,6 +6787,8 @@ nodes:
     sources:
       - source-web-inbox-feature
     edges:
+      in_area:
+        - area-web-experience
       requirements:
         - req-web-inbox-behavior
       use_cases: []
@@ -8011,3 +8088,122 @@ nodes:
       creates_requirements: []
       creates_use_cases: []
       decomposes_to: []
+
+  # --- Product/functional areas (design doc §5 seed cut) ------------------
+
+  - schema: graph/area/v0
+    id: area-kitsoki
+    title: Kitsoki
+    status: active
+    visibility: public
+    summary: Root product area — the single-product anchor every other area is part_of until a second product justifies promotion (design doc §4.1).
+    sources:
+      - source-project-object-graph-proposal
+    edges:
+      part_of: []
+      owned_by:
+        - actor-product-owner
+
+  - schema: graph/area/v0
+    id: area-agent-execution
+    title: Agent execution
+    status: active
+    visibility: public
+    summary: Story/harness runtime substrate — running stories, host.starlark.run scripting, operator-ask forwarding, and dynamic workflow authoring.
+    sources:
+      - source-project-object-graph-proposal
+    edges:
+      part_of: [area-kitsoki]
+      owned_by:
+        - actor-developer
+
+  - schema: graph/area/v0
+    id: area-observability
+    title: Observability
+    status: active
+    visibility: public
+    summary: Trace, decision, and action introspection — trace views, agent action transcripts, live chat streaming, and trace-features on a live run.
+    sources:
+      - source-project-object-graph-proposal
+    edges:
+      part_of: [area-kitsoki]
+      owned_by:
+        - actor-developer
+
+  - schema: graph/area/v0
+    id: area-media-and-demos
+    title: Media and demos
+    status: active
+    visibility: public
+    summary: Produced tour, mockup, diagram, and slidey-pipeline demo surfaces used to show the product working end to end.
+    sources:
+      - source-project-object-graph-proposal
+    edges:
+      part_of: [area-kitsoki]
+      owned_by:
+        - actor-product-manager
+
+  - schema: graph/area/v0
+    id: area-web-experience
+    title: Web experience
+    status: active
+    visibility: public
+    summary: The kitsoki web UI itself — onboarding, first screens, the story editor, and the async inbox.
+    sources:
+      - source-project-object-graph-proposal
+    edges:
+      part_of: [area-kitsoki]
+      owned_by:
+        - actor-product-manager
+
+  - schema: graph/area/v0
+    id: area-dev-workflow
+    title: Dev workflow
+    status: active
+    visibility: public
+    summary: The pipelines developers and agents use to plan, review, land, and track their own work, including the project object graph tooling itself.
+    sources:
+      - source-project-object-graph-proposal
+    edges:
+      part_of: [area-kitsoki]
+      owned_by:
+        - actor-developer
+
+  - schema: graph/area/v0
+    id: area-platform-install
+    title: Platform install
+    status: active
+    visibility: public
+    summary: Getting kitsoki onto a machine and confirming it is healthy — release install, doctor preflight, and harness/operator selection.
+    sources:
+      - source-project-object-graph-proposal
+    edges:
+      part_of: [area-kitsoki]
+      owned_by:
+        - actor-developer
+
+  # --- Initiatives (design doc §4.1/§5 step 5) -----------------------------
+
+  - schema: graph/initiative/v0
+    id: initiative-project-object-graph
+    title: Project object graph
+    status: active
+    visibility: internal
+    summary: This branch's own remaining work — modeling features, requirements, proposals, plans, tests, evidence, and roadmap deltas as a typed graph, and dogfooding the result on the shipped capability catalog.
+    sources:
+      - source-project-object-graph-proposal
+      - source-lifecycle-taxonomy
+    edges:
+      targets:
+        - area-dev-workflow
+        - area-web-experience
+      includes:
+        - change-object-graph-substrate
+        - change-capability-catalog-dogfood
+        - change-roadmap-delta-view
+        - change-changeset-delta-ops
+        - change-producer-consumer-adoption
+        - change-iso-management-packs
+      proposals: []
+      owned_by:
+        - actor-developer
