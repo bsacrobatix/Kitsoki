@@ -2,17 +2,82 @@ package studio_test
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"kitsoki/internal/host"
+	studio "kitsoki/internal/mcp/studio"
 )
 
-// gh_tools_test.go — verification for the gh.* surface. The happy paths call the
-// real `gh` CLI (auth + network), so they are NOT exercised here; these tests
-// pin the argument-validation guards that short-circuit BEFORE any gh
-// invocation, which is the deterministic, offline-safe contract.
+// gh_tools_test.go — verification for the gh.* surface. gh.issues is native and
+// covered with a fake GitHub HTTP API; the remaining gh.pr_view/comment happy
+// paths call the real `gh` CLI, so these tests pin their offline-safe validation
+// guards instead.
+
+func TestGHIssuesUsesNativeTicketProvider(t *testing.T) {
+	ctx := context.Background()
+	cs := newStudioNoWorkspace(ctx, t)
+
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("PATH", t.TempDir())
+
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, "/search/issues", r.URL.Path)
+		assert.Equal(t, "2", r.URL.Query().Get("per_page"))
+		gotQuery = r.URL.Query().Get("q")
+		writeGHToolsJSON(t, w, map[string]any{"items": []map[string]any{{
+			"number":    12,
+			"title":     "Native issue",
+			"state":     "open",
+			"html_url":  "https://github.com/acme/repo/issues/12",
+			"assignees": []map[string]any{{"login": "brad"}},
+			"labels":    []map[string]any{{"name": "bug"}},
+		}}})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+
+	res, err := callTool(ctx, cs, "gh.issues", map[string]any{
+		"repo":     "acme/repo",
+		"state":    "open",
+		"assignee": "@me",
+		"search":   "label:bug",
+		"limit":    2,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "gh.issues: %s", contentText(res))
+	require.Contains(t, gotQuery, "repo:acme/repo")
+	require.Contains(t, gotQuery, "is:issue")
+	require.Contains(t, gotQuery, "is:open")
+	require.Contains(t, gotQuery, "assignee:@me")
+	require.Contains(t, gotQuery, "label:bug")
+
+	var out studio.GHIssuesOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &out))
+	require.True(t, out.OK)
+	rawIssues, ok := out.Issues.([]any)
+	require.True(t, ok, "issues should decode as an array: %#v", out.Issues)
+	require.Len(t, rawIssues, 1)
+	issue := rawIssues[0].(map[string]any)
+	assert.Equal(t, "12", issue["id"])
+	assert.Equal(t, "Native issue", issue["title"])
+	assert.Equal(t, "github", issue["source"])
+}
+
+func writeGHToolsJSON(t *testing.T, w http.ResponseWriter, v any) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	require.NoError(t, json.NewEncoder(w).Encode(v))
+}
 
 func TestGH_ArgValidation(t *testing.T) {
 	ctx := context.Background()
