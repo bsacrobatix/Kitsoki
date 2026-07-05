@@ -56,6 +56,10 @@ hosts:
   - host.agent.ask
   - host.agent.decide
   - host.agent.task
+  # host.agent.codeact — triaging's bounded read-only code-act loop (inspect
+  # tree + git history, emit a schema-gated triage_verdict). See
+  # stories/bugfix/rooms/triaging.yaml.
+  - host.agent.codeact
   # Review-diff: open the committed fix (feature_branch vs base_branch) in the
   # operator's editor (with a captured accept/reject verdict) or a view-only
   # system difftool. The reviewing room's `review_externally` arc drives it; the

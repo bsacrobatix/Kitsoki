@@ -31,6 +31,7 @@ hosts:
   - host.agent.ask
   - host.agent.decide
   - host.agent.task
+  - host.agent.codeact
   - host.diff.open
   - host.run
   - host.artifacts_dir

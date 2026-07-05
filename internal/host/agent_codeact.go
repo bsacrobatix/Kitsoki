@@ -15,7 +15,12 @@
 //     internal/app/loader.go's codeactCapabilityAllowlist). Not yet enforced
 //     at runtime by this handler — see TODO below.
 //   - budget: (int) — max steps before TerminatedBudgetExhausted.
-//   - schema: (string) — path to the JSON schema validating done() payloads.
+//   - schema: (string) — path to the JSON schema validating done() payloads,
+//     resolved overlay-first via resolvePromptPathCtx (same convention as
+//     host.agent.task's acceptance.schema). When set, a schema-invalid done()
+//     payload is rejected and fed back to the agent as an ErrorEnvelope
+//     instead of terminating the loop. Optional — when omitted, done()
+//     payloads are accepted unvalidated.
 //
 // Returns Result.Data with:
 //   - terminated (string): "done" | "budget_exhausted".
@@ -38,8 +43,12 @@ package host
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+
+	kitsokimcp "kitsoki/internal/mcp"
 
 	"kitsoki/internal/host/codeact"
 )
@@ -93,6 +102,15 @@ func AgentCodeactHandler(ctx context.Context, args map[string]any) (Result, erro
 
 	worldArg, _ := args["world"].(map[string]any)
 
+	var schemaFn func(payload map[string]any) error
+	if schemaPath, _ := args["schema"].(string); strings.TrimSpace(schemaPath) != "" {
+		fn, err := compileCodeactSchema(ctx, schemaPath)
+		if err != nil {
+			return Result{Error: fmt.Sprintf("host.agent.codeact: %v", err), FailureKind: FailureFatal}, nil
+		}
+		schemaFn = fn
+	}
+
 	agentImpl, cleanup, err := newRealCodeactAgent(ctx, args, goal, budget, capabilities)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("host.agent.codeact: %v", err), FailureKind: FailureInfra}, nil
@@ -103,6 +121,7 @@ func AgentCodeactHandler(ctx context.Context, args map[string]any) (Result, erro
 		Budget: budget,
 		World:  worldArg,
 		Agent:  agentImpl,
+		Schema: schemaFn,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("host.agent.codeact: %w", err)
@@ -126,5 +145,38 @@ func AgentCodeactHandler(ctx context.Context, args map[string]any) (Result, erro
 			"payload":    res.Payload,
 			"steps":      steps,
 		},
+	}, nil
+}
+
+// compileCodeactSchema loads and compiles the JSON schema at schemaPath
+// (resolved overlay-first via resolvePromptPathCtx, the same convention
+// host.agent.task's acceptance.schema and host.agent.decide's schema use) and
+// returns a codeact.Params.Schema validator func. The returned func marshals
+// the candidate done() payload to JSON and validates it against the compiled
+// schema, so a schema-invalid payload is rejected and fed back to the agent
+// as an ErrorEnvelope instead of silently terminating the loop.
+func compileCodeactSchema(ctx context.Context, schemaPath string) (func(map[string]any) error, error) {
+	resolved := resolvePromptPathCtx(ctx, schemaPath)
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("schema %q not found: %w", resolved, err)
+	}
+	compiled, err := kitsokimcp.CompileSchema(data)
+	if err != nil {
+		return nil, fmt.Errorf("compile schema %q: %w", resolved, err)
+	}
+	return func(payload map[string]any) error {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshal payload: %w", err)
+		}
+		var doc any
+		if err := json.Unmarshal(b, &doc); err != nil {
+			return fmt.Errorf("unmarshal payload: %w", err)
+		}
+		if err := compiled.Validate(doc); err != nil {
+			return fmt.Errorf("%s", kitsokimcp.FormatValidationError(err))
+		}
+		return nil
 	}, nil
 }
