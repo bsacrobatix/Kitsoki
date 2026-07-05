@@ -613,7 +613,10 @@ def build_run_bundle(
     seed: str,
     mode: str,
     publish_deck: Optional[Path],
+    live_budget_minutes: int = 20,
 ) -> tuple[Path, dict]:
+    if live_budget_minutes < 0:
+        raise SystemExit("--live-budget-minutes must be >= 0")
     target = resolve_project(catalog, github_targets, project_id)
     persona = select_persona(personas, persona_id, f"{project_id}:{seed}")
     created_at = now_utc()
@@ -641,6 +644,7 @@ def build_run_bundle(
         "created_at": created_at,
         "mode": mode,
         "seed": seed,
+        "live_budget_minutes": live_budget_minutes,
         "project": _meta_value(target),
         "persona": persona,
         "stages": stages,
@@ -1403,6 +1407,33 @@ def driver_action_sequence(required_mcp: list[str]) -> list[str]:
     return sequence
 
 
+def scenario_live_budget(run_json: dict, scenario_id: str) -> dict:
+    minutes = int(run_json.get("live_budget_minutes", 20))
+    remaining_action = "record_blocker"
+    if minutes == 0:
+        summary = (
+            "Live/model dispatch is disabled for this run. Use replay/cassette paths, "
+            "or record a blocker before any live call."
+        )
+    else:
+        summary = (
+            f"Spend at most {minutes} live minutes on this scenario. When the budget is "
+            "reached, stop live exploration, record the blocker or partial evidence, "
+            "and journal the attempt before moving to the next scenario."
+        )
+    return {
+        "scenario": scenario_id,
+        "max_live_minutes": minutes,
+        "remaining_action": remaining_action,
+        "summary": summary,
+        "blocker_title": "Live budget exhausted",
+        "blocker_summary": (
+            "The scenario reached its per-scenario live budget before enough proof evidence "
+            "could be captured. Preserve trace/frame evidence and continue with the next scenario."
+        ),
+    }
+
+
 def resolve_mcp_tools(capability: str) -> list[str]:
     mapping = {
         "visual.open": ["mcp__kitsoki__visual_open"],
@@ -1800,6 +1831,7 @@ def build_execution_plan(run_json: dict, evidence: dict) -> dict:
             "task": scenario["task"],
             "task_prompt": scenario.get("task_prompt", scenario["task"]),
             "primary_story": scenario["primary_story"],
+            "live_budget": scenario_live_budget(run_json, scenario["id"]),
             "mcp_steps": [
                 {"tool": tool, "instruction": mcp_step(tool)}
                 for tool in scenario["required_mcp"]
@@ -1884,6 +1916,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
                 "success_criteria": step["success_criteria"],
                 "evidence": [item["kind"] for item in step["evidence"]],
                 "quality_gate": step.get("quality_gate", scenario_quality_gate(step["scenario"])),
+                "live_budget": step.get("live_budget", scenario_live_budget(run_json, step["scenario"])),
             }
             for step in execution_plan.get("steps", [])
         ],
@@ -1917,6 +1950,7 @@ def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict) -> d
             "evidence_dir": scenario.get("evidence_dir", f"evidence/{run_json['project']['id']}--{run_json['persona']['id']}/{scenario_id}"),
             "harness": driver_harness(scenario["primary_story"]),
             "visual_surface": driver_visual_surface(scenario["primary_story"], required_mcp),
+            "live_budget": scenario_live_budget(run_json, scenario_id),
             "required_mcp": required_mcp,
             "resolved_mcp_tools": resolved_mcp_tools(required_mcp),
             "action_sequence": driver_action_sequence(required_mcp),
@@ -2049,6 +2083,7 @@ def render_driver_plan(plan: dict) -> str:
             f"- Story: `{scenario['primary_story']}`",
             f"- Harness: `{scenario['harness']}`",
             f"- Visual surface: `{scenario['visual_surface']}`",
+            f"- Live budget: {scenario.get('live_budget', {}).get('summary', '')}",
             f"- MCP: {', '.join(scenario['required_mcp'])}",
             f"- MCP tools: {', '.join(scenario.get('resolved_mcp_tools', [])) or '(none)'}",
             f"- Evidence dir: `{scenario['evidence_dir']}`",
@@ -2166,6 +2201,7 @@ def render_agent_brief(brief: dict) -> str:
             f"- Story: `{scenario['primary_story']}`",
             f"- MCP tools: {', '.join(scenario['mcp_tools'])}",
             f"- Evidence: {', '.join(scenario['evidence'])}",
+            f"- Live budget: {scenario.get('live_budget', {}).get('summary', '')}",
             "",
             scenario.get("task_prompt", scenario["task"]),
             "",
@@ -2325,6 +2361,8 @@ def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: 
             "`last_result.next_driver_capture`, `last_result.next_driver_attach_command`, "
             "`last_result.next_driver_blocker_command`, `last_result.missing_proof_evidence`, "
             "and `last_result.driver_final_gates`. "
+            "Respect each scenario's `live_budget` from driver-plan.json; when the live budget is exhausted, "
+            "record the blocker, journal the attempt, and move to the next scenario. "
             "Use `last_result.next_driver_attach_command` for the first proof attach when present, "
             "or `last_result.next_driver_blocker_command` when the slot is attempted but blocked, "
             "then use Kitsoki Studio MCP and visual MCP to capture proof-source evidence or blockers, "
@@ -2812,6 +2850,7 @@ def summarize_run_bundle(run_dir: Path) -> dict:
 
 
 def run_story_summary(run_dir: Path) -> dict:
+    run_json = read_json(run_dir / "run.json") if (run_dir / "run.json").exists() else {}
     metrics = read_json(run_dir / "metrics.json") if (run_dir / "metrics.json").exists() else {}
     findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"summary": {}}
     handoff = read_json(run_dir / "driver-handoff.json") if (run_dir / "driver-handoff.json").exists() else {}
@@ -2846,6 +2885,7 @@ def run_story_summary(run_dir: Path) -> dict:
         "persona_evidence_emphasis": lens.get("evidence_emphasis", ""),
         "persona_escalation_trigger": lens.get("escalation_trigger", ""),
         "persona_finding_bias": lens.get("finding_bias", ""),
+        "live_budget_minutes": run_json.get("live_budget_minutes", 0),
         "scenario_count": metrics.get("scenario_count", 0),
         "proof_evidence_count": metrics.get("proof_evidence_count", 0),
         "demo_evidence_count": metrics.get("demo_evidence_count", 0),
@@ -4024,6 +4064,22 @@ def validate_run_bundle(run_dir: Path) -> dict:
         ]
         if missing_driver_scenario_keys:
             add_validation_issue(issues, "error", "driver-plan-scenario-required-keys", "driver-plan.json scenarios are missing required keys", ", ".join(missing_driver_scenario_keys))
+        invalid_live_budgets = []
+        for index, scenario in enumerate(driver_scenarios, start=1):
+            scenario_id = scenario.get("scenario", f"driver-scenario-{index}")
+            budget = scenario.get("live_budget", {})
+            minutes = budget.get("max_live_minutes")
+            if not isinstance(budget, dict):
+                invalid_live_budgets.append(f"{scenario_id}: not an object")
+                continue
+            if not isinstance(minutes, int) or minutes < 0:
+                invalid_live_budgets.append(f"{scenario_id}: max_live_minutes={minutes!r}")
+            if not str(budget.get("summary", "")).strip():
+                invalid_live_budgets.append(f"{scenario_id}: missing summary")
+            if budget.get("remaining_action") != "record_blocker":
+                invalid_live_budgets.append(f"{scenario_id}: remaining_action={budget.get('remaining_action', '')!r}")
+        if invalid_live_budgets:
+            add_validation_issue(issues, "error", "driver-plan-live-budget", "driver-plan.json scenarios have invalid live budget metadata", "; ".join(invalid_live_budgets))
         missing_driver_lens_keys = [
             f"{scenario.get('scenario', f'driver-scenario-{index}')}/{key}"
             for index, scenario in enumerate(driver_scenarios, start=1)
@@ -4194,6 +4250,14 @@ def validate_run_bundle(run_dir: Path) -> dict:
         ]
         if missing_brief_lens_keys:
             add_validation_issue(issues, "error", "agent-brief-persona-lens", "agent-brief.json persona_contract is missing lens keys", ", ".join(missing_brief_lens_keys))
+        missing_brief_scenario_keys = [
+            f"{scenario.get('id', f'brief-scenario-{index}')}/{key}"
+            for index, scenario in enumerate(brief_scenarios, start=1)
+            for key in schema["agent_brief"]["scenario_required"]
+            if key not in scenario
+        ]
+        if missing_brief_scenario_keys:
+            add_validation_issue(issues, "error", "agent-brief-scenario-required-keys", "agent-brief.json scenarios are missing required keys", ", ".join(missing_brief_scenario_keys))
     if driver_handoff:
         validate_final_commands(
             driver_handoff.get("finalize_commands", []),
@@ -7003,6 +7067,7 @@ def main() -> None:
     parser.add_argument("--seed", default="default", help="Deterministic run seed")
     parser.add_argument("--smoke-scenario", default="bugfix", help="Scenario id for --driver-replay-smoke")
     parser.add_argument("--smoke-persona", default="core-maintainer", help="Persona id for driver replay smoke/sweep")
+    parser.add_argument("--live-budget-minutes", type=int, default=20, help="Per-scenario live/model budget written into emitted run contracts")
     parser.add_argument("--run-log", action="store_true", help="Force a timestamped run log entry")
     parser.add_argument("--emit-run", action="store_true", help="Write a no-LLM run artifact bundle and Slidey deck")
     parser.add_argument("--scenarios", default="", help="Comma-separated scenario ids to include with --emit-run")
@@ -7782,6 +7847,7 @@ def main() -> None:
             args.seed,
             "dry-run",
             publish_deck,
+            args.live_budget_minutes,
         )
         if args.json_output:
             result = {
