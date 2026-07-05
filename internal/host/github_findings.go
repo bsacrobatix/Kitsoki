@@ -1,0 +1,527 @@
+// github_findings.go — file product-journey QA `issue` findings as GitHub
+// issues through the SAME artifact-preserving orchestration the web Report-bug
+// and TUI /bug paths use (GitHubFileBug + release-asset evidence upload).
+//
+// A product-journey run bundle (tools/product-journey) records findings in
+// <run-dir>/findings.json with attached evidence in <run-dir>/evidence.json and
+// a driver journal of what was actually attempted. This orchestration walks the
+// credible `issue` findings (observed, not seeded demo data), assembles an
+// expected/actual/reproduction body from the finding + scenario contract +
+// journal, uploads locally-resolvable evidence as release assets, and files one
+// issue per finding. Filed issue URLs are written back into findings.json
+// (item.github_issue) so re-runs are idempotent, and a findings.filing block
+// records that filing was requested so the runner's review/validate gates can
+// require "issues filed for all credible findings".
+//
+// Everything shells through the one cliExec seam, so tests stub the runner and
+// never touch real GitHub.
+package host
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// FindingsFilingInput is the input to GitHubFileFindings.
+type FindingsFilingInput struct {
+	RunDir   string // product-journey run bundle directory (findings.json et al)
+	RepoRoot string // repo root used to resolve relative evidence refs ("" = cwd)
+	Repo     string // owner/repo ticket target
+
+	// DryRun renders every issue that WOULD be filed (title/body/evidence) and
+	// makes no gh calls and no bundle writes.
+	DryRun bool
+
+	KitsokiRev string // short HEAD sha recorded in the kitsoki metadata block
+	FiledBy    string // filed_by recorded in the kitsoki metadata block
+
+	now func() time.Time // test seam; nil = time.Now
+}
+
+// FindingFilingOutcome is the per-finding result row.
+type FindingFilingOutcome struct {
+	FindingID   string   `json:"finding_id"`
+	Title       string   `json:"title"`
+	Scenario    string   `json:"scenario,omitempty"`
+	Status      string   `json:"status"` // filed | skipped | failed | dry-run
+	IssueURL    string   `json:"issue_url,omitempty"`
+	IssueNumber string   `json:"issue_number,omitempty"`
+	Error       string   `json:"error,omitempty"`
+	Evidence    []string `json:"evidence,omitempty"`
+	Body        string   `json:"body,omitempty"` // rendered body (dry-run only)
+}
+
+// FindingsFilingResult is what GitHubFileFindings returns. Per-finding failures
+// are recorded in Outcomes/Failed (the run completes); only bundle-level
+// problems (unreadable bundle, gh missing for a non-dry run) return an error.
+type FindingsFilingResult struct {
+	Status   string                 `json:"status"` // findings_filed | findings_dry_run
+	Repo     string                 `json:"ticket_repo"`
+	RunDir   string                 `json:"run_dir"`
+	DryRun   bool                   `json:"dry_run"`
+	Filed    int                    `json:"filed"`
+	Skipped  int                    `json:"skipped"`
+	Failed   int                    `json:"failed"`
+	Outcomes []FindingFilingOutcome `json:"outcomes"`
+}
+
+// GitHubFileFindings files one GitHub issue per credible unfiled `issue`
+// finding in the run bundle. See the file comment for the full contract.
+func GitHubFileFindings(ctx context.Context, in FindingsFilingInput) (FindingsFilingResult, error) {
+	res := FindingsFilingResult{Repo: in.Repo, RunDir: in.RunDir, DryRun: in.DryRun}
+	res.Status = "findings_filed"
+	if in.DryRun {
+		res.Status = "findings_dry_run"
+	}
+	if strings.TrimSpace(in.Repo) == "" {
+		return res, fmt.Errorf("file findings: ticket repo is required (owner/repo)")
+	}
+	runDir := strings.TrimSpace(in.RunDir)
+	if runDir == "" {
+		return res, fmt.Errorf("file findings: run dir is required")
+	}
+	repoRoot := in.RepoRoot
+	if repoRoot == "" {
+		repoRoot, _ = os.Getwd()
+	}
+	nowFn := in.now
+	if nowFn == nil {
+		nowFn = time.Now
+	}
+
+	findingsPath := filepath.Join(runDir, "findings.json")
+	findings, err := readJSONMap(findingsPath)
+	if err != nil {
+		return res, fmt.Errorf("file findings: %w", err)
+	}
+	runJSON, err := readJSONMap(filepath.Join(runDir, "run.json"))
+	if err != nil {
+		return res, fmt.Errorf("file findings: %w", err)
+	}
+	// Optional context sources — a partially-built bundle still files.
+	driverPlan, _ := readJSONMap(filepath.Join(runDir, "driver-plan.json"))
+	journal, _ := readJSONMap(filepath.Join(runDir, "driver-journal.json"))
+	evidence, _ := readJSONMap(filepath.Join(runDir, "evidence.json"))
+
+	if !in.DryRun && !ghAvailable(ctx) {
+		return res, fmt.Errorf("gh CLI not available — install github.com/cli/cli and run `gh auth login`")
+	}
+
+	items, _ := findings["items"].([]any)
+	changed := false
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if !credibleIssueFinding(item) {
+			continue
+		}
+		out := FindingFilingOutcome{
+			FindingID: str(item["id"]),
+			Title:     str(item["title"]),
+			Scenario:  str(item["scenario"]),
+		}
+		if url := filedIssueURL(item); url != "" {
+			out.Status = "skipped"
+			out.IssueURL = url
+			res.Skipped++
+			res.Outcomes = append(res.Outcomes, out)
+			continue
+		}
+
+		body, files, refs := assembleFindingIssue(runDir, repoRoot, runJSON, driverPlan, journal, evidence, item)
+		title := findingIssueTitle(item)
+		for _, f := range files {
+			out.Evidence = append(out.Evidence, f.Path)
+		}
+		out.Evidence = append(out.Evidence, refs...)
+
+		if in.DryRun {
+			out.Status = "dry-run"
+			out.Body = body
+			res.Outcomes = append(res.Outcomes, out)
+			continue
+		}
+
+		filed, err := GitHubFileBug(ctx, GitHubBugFiling{
+			Repo:            in.Repo,
+			Title:           title,
+			Body:            body,
+			Severity:        str(item["severity"]),
+			Component:       "product-journey",
+			Target:          "kitsoki",
+			TraceRef:        fmt.Sprintf("product-journey://%s/%s", str(runJSON["run_id"]), str(item["id"])),
+			KitsokiRev:      in.KitsokiRev,
+			FiledBy:         in.FiledBy,
+			Evidence:        files,
+			UploadArtifacts: true,
+		})
+		if err != nil {
+			out.Status = "failed"
+			out.Error = err.Error()
+			res.Failed++
+			res.Outcomes = append(res.Outcomes, out)
+			continue
+		}
+		out.Status = "filed"
+		out.IssueURL = filed.URL
+		out.IssueNumber = filed.Number
+		item["github_issue"] = map[string]any{
+			"url":      filed.URL,
+			"number":   filed.Number,
+			"repo":     in.Repo,
+			"filed_at": nowFn().UTC().Format(time.RFC3339),
+		}
+		changed = true
+		res.Filed++
+		res.Outcomes = append(res.Outcomes, out)
+	}
+
+	// Record that filing was requested (and its latest tallies) so the runner's
+	// review/validate gates can require every credible finding to be filed.
+	if !in.DryRun {
+		findings["filing"] = map[string]any{
+			"requested":   true,
+			"ticket_repo": in.Repo,
+			"updated_at":  nowFn().UTC().Format(time.RFC3339),
+			"filed":       res.Filed,
+			"skipped":     res.Skipped,
+			"failed":      res.Failed,
+		}
+		if err := writeJSONMap(findingsPath, findings); err != nil {
+			return res, fmt.Errorf("file findings: record results: %w", err)
+		}
+		_ = changed // findings.json is always rewritten to stamp the filing block
+	}
+	return res, nil
+}
+
+// credibleIssueFinding reports whether a finding should be filed: an `issue`
+// (including blocked scenarios, which are recorded as issue findings) that was
+// observed rather than seeded demo data. Legacy findings predate the origin
+// field and count as observed.
+func credibleIssueFinding(item map[string]any) bool {
+	if str(item["kind"]) != "issue" {
+		return false
+	}
+	origin := str(item["origin"])
+	return origin == "" || origin != "seeded"
+}
+
+// filedIssueURL returns the already-filed issue URL recorded on the finding
+// ("" when the finding has not been filed).
+func filedIssueURL(item map[string]any) string {
+	gi, _ := item["github_issue"].(map[string]any)
+	return strings.TrimSpace(str(gi["url"]))
+}
+
+// findingIssueTitle renders the issue title: surface prefix + scenario + the
+// finding's own title.
+func findingIssueTitle(item map[string]any) string {
+	title := strings.TrimSpace(str(item["title"]))
+	scenario := strings.TrimSpace(str(item["scenario"]))
+	if scenario == "" {
+		return "product-journey: " + title
+	}
+	return fmt.Sprintf("product-journey %s: %s", scenario, title)
+}
+
+// assembleFindingIssue builds the issue body (expected / actual / reproduction /
+// run-bundle context) plus the locally-resolvable evidence files to upload and
+// the non-local evidence refs listed in the body.
+func assembleFindingIssue(runDir, repoRoot string, runJSON, driverPlan, journal, evidence map[string]any, item map[string]any) (string, []EvidenceFile, []string) {
+	scenario := str(item["scenario"])
+	var sb strings.Builder
+
+	sb.WriteString(strings.TrimSpace(str(item["summary"])))
+
+	// Expected: the scenario's success criteria from the driver plan (the
+	// contract the persona was driving against), with a generic fallback.
+	sb.WriteString("\n\n## Expected\n\n")
+	criteria := scenarioSuccessCriteria(driverPlan, scenario)
+	if len(criteria) == 0 {
+		if scenario != "" {
+			fmt.Fprintf(&sb, "- The %s journey completes without the problem described below.\n", scenario)
+		} else {
+			sb.WriteString("- The journey completes without the problem described below.\n")
+		}
+	} else {
+		for _, c := range criteria {
+			fmt.Fprintf(&sb, "- %s\n", c)
+		}
+	}
+
+	// Actual: what the QA driver observed.
+	sb.WriteString("\n## Actual\n\n")
+	fmt.Fprintf(&sb, "%s\n", strings.TrimSpace(str(item["summary"])))
+	if status := str(item["status"]); status == "blocked" {
+		sb.WriteString("\nThe scenario was attempted but blocked before evidence capture could complete.\n")
+	}
+	fmt.Fprintf(&sb, "\nSeverity: %s\n", orDefault(str(item["severity"]), "medium"))
+
+	// Reproduction: run context + the scenario task + the driver journal of
+	// what was actually attempted.
+	sb.WriteString("\n## Reproduction\n\n")
+	project, persona := runProjectPersona(runJSON)
+	step := 1
+	fmt.Fprintf(&sb, "%d. Product-journey QA run `%s` (project `%s`, persona `%s`, seed `%s`).\n",
+		step, str(runJSON["run_id"]), project, persona, str(runJSON["seed"]))
+	step++
+	if task := scenarioTaskPrompt(runJSON, driverPlan, scenario); task != "" {
+		fmt.Fprintf(&sb, "%d. Scenario `%s`: %s\n", step, scenario, task)
+		step++
+	}
+	for _, ev := range journalEventsForScenario(journal, scenario) {
+		line := str(ev["summary"])
+		if tools := strList(ev["mcp_tools"]); len(tools) > 0 {
+			line = fmt.Sprintf("%s (tools: %s)", line, strings.Join(tools, ", "))
+		}
+		fmt.Fprintf(&sb, "%d. %s\n", step, line)
+		step++
+	}
+
+	// Run-bundle pointer so a reviewer can open the full journal/deck.
+	sb.WriteString("\n## Run bundle\n\n")
+	fmt.Fprintf(&sb, "- Run dir: `%s`\n", displayPath(runDir, repoRoot))
+	fmt.Fprintf(&sb, "- Finding: `%s` (kind issue, status %s)\n", str(item["id"]), orDefault(str(item["status"]), "open"))
+
+	files, refs := collectFindingEvidence(runDir, repoRoot, evidence, item)
+	if len(refs) > 0 {
+		sb.WriteString("\n## Additional evidence references\n\n")
+		sb.WriteString("_These references are not local files and could not be uploaded; resolve them via the run bundle._\n\n")
+		for _, r := range refs {
+			fmt.Fprintf(&sb, "- `%s`\n", r)
+		}
+	}
+	return sb.String(), files, refs
+}
+
+// collectFindingEvidence gathers the finding's own evidence_path plus every
+// captured/validated evidence artifact attached to the same scenario. Refs that
+// resolve to a local file become uploadable EvidenceFiles; the rest are
+// returned as body-only references.
+func collectFindingEvidence(runDir, repoRoot string, evidence map[string]any, item map[string]any) ([]EvidenceFile, []string) {
+	scenario := str(item["scenario"])
+	type ref struct{ label, path string }
+	var ordered []ref
+	seen := map[string]bool{}
+	add := func(label, path string) {
+		path = strings.TrimSpace(path)
+		if path == "" || seen[path] {
+			return
+		}
+		seen[path] = true
+		ordered = append(ordered, ref{label, path})
+	}
+	add("finding evidence", str(item["evidence_path"]))
+	items, _ := evidence["items"].([]any)
+	for _, raw := range items {
+		ev, ok := raw.(map[string]any)
+		if !ok || str(ev["scenario"]) != scenario {
+			continue
+		}
+		status := str(ev["status"])
+		if status != "captured" && status != "validated" {
+			continue
+		}
+		add(str(ev["kind"]), str(ev["path"]))
+	}
+
+	var files []EvidenceFile
+	var bodyRefs []string
+	usedNames := map[string]bool{}
+	for _, r := range ordered {
+		src := resolveEvidencePath(runDir, repoRoot, r.path)
+		if src == "" {
+			bodyRefs = append(bodyRefs, r.path)
+			continue
+		}
+		name := filepath.Base(src)
+		// Keep release-asset names unique within the filing.
+		for usedNames[name] {
+			name = "x-" + name
+		}
+		usedNames[name] = true
+		files = append(files, EvidenceFile{
+			Name:       name,
+			Path:       r.path,
+			SourcePath: src,
+			Image:      isImagePath(src),
+			Label:      r.label,
+		})
+	}
+	return files, bodyRefs
+}
+
+// resolveEvidencePath maps an evidence ref (possibly a cassette:// URI or a
+// bundle-relative path) to a readable local file, mirroring the runner's
+// artifact_ref_exists resolution roots: run dir, run dir/cassettes, repo root.
+// Returns "" when the ref does not resolve to a local file.
+func resolveEvidencePath(runDir, repoRoot, ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	if strings.Contains(ref, "://") || strings.HasPrefix(ref, "retained:") ||
+		strings.HasPrefix(ref, "image:") || strings.HasPrefix(ref, "trace:") ||
+		strings.HasPrefix(ref, "mcp:") {
+		// cassette:// URIs are local recordings addressed by trailing path.
+		if strings.HasPrefix(ref, "cassette://") {
+			parts := strings.SplitN(strings.TrimPrefix(ref, "cassette://"), "/", 2)
+			if len(parts) == 2 {
+				return resolveEvidencePath(runDir, repoRoot, parts[1])
+			}
+		}
+		return ""
+	}
+	if filepath.IsAbs(ref) {
+		if regularFileExists(ref) {
+			return ref
+		}
+		return ""
+	}
+	for _, base := range []string{runDir, filepath.Join(runDir, "cassettes"), repoRoot} {
+		p := filepath.Join(base, ref)
+		if regularFileExists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+// scenarioSuccessCriteria pulls the driver-plan success criteria for a scenario.
+func scenarioSuccessCriteria(driverPlan map[string]any, scenario string) []string {
+	rows, _ := driverPlan["scenarios"].([]any)
+	for _, raw := range rows {
+		row, ok := raw.(map[string]any)
+		if !ok || str(row["scenario"]) != scenario {
+			continue
+		}
+		return strList(row["success_criteria"])
+	}
+	return nil
+}
+
+// scenarioTaskPrompt prefers the driver-plan task prompt, then run.json's.
+func scenarioTaskPrompt(runJSON, driverPlan map[string]any, scenario string) string {
+	rows, _ := driverPlan["scenarios"].([]any)
+	for _, raw := range rows {
+		if row, ok := raw.(map[string]any); ok && str(row["scenario"]) == scenario {
+			if t := strings.TrimSpace(str(row["task_prompt"])); t != "" {
+				return t
+			}
+		}
+	}
+	scens, _ := runJSON["scenarios"].([]any)
+	for _, raw := range scens {
+		if row, ok := raw.(map[string]any); ok && str(row["id"]) == scenario {
+			if t := strings.TrimSpace(str(row["task_prompt"])); t != "" {
+				return t
+			}
+			return strings.TrimSpace(str(row["task"]))
+		}
+	}
+	return ""
+}
+
+// journalEventsForScenario returns the driver-journal events for a scenario in
+// recorded order.
+func journalEventsForScenario(journal map[string]any, scenario string) []map[string]any {
+	items, _ := journal["items"].([]any)
+	var out []map[string]any
+	for _, raw := range items {
+		if ev, ok := raw.(map[string]any); ok && str(ev["scenario"]) == scenario {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// runProjectPersona extracts the project and persona ids from run.json.
+func runProjectPersona(runJSON map[string]any) (string, string) {
+	proj, _ := runJSON["project"].(map[string]any)
+	pers, _ := runJSON["persona"].(map[string]any)
+	return str(proj["id"]), str(pers["id"])
+}
+
+// displayPath renders a path relative to the repo root when possible (stable
+// across machines in issue bodies).
+func displayPath(p, repoRoot string) string {
+	if repoRoot != "" {
+		if rel, err := filepath.Rel(repoRoot, p); err == nil && !strings.HasPrefix(rel, "..") {
+			return rel
+		}
+	}
+	return p
+}
+
+// --- tiny JSON/map helpers (bundle files are runner-owned free-form JSON) ---
+
+func readJSONMap(path string) (map[string]any, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
+	}
+	return m, nil
+}
+
+// writeJSONMap matches the runner's write_json format (2-space indent, sorted
+// keys — Go sorts map keys natively — trailing newline) so mixed Go/Python
+// writers do not churn the bundle diff.
+func writeJSONMap(path string, m map[string]any) error {
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+func str(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+func strList(v any) []string {
+	raw, _ := v.([]any)
+	var out []string
+	for _, r := range raw {
+		if s, ok := r.(string); ok && strings.TrimSpace(s) != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func orDefault(v, def string) string {
+	if strings.TrimSpace(v) == "" {
+		return def
+	}
+	return v
+}
+
+// isImagePath reports whether the evidence file renders inline in an issue
+// body (screenshot/image extensions).
+func isImagePath(p string) bool {
+	switch strings.ToLower(filepath.Ext(p)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
+		return true
+	}
+	return false
+}
+
+// regularFileExists reports whether p is an existing regular file (evidence
+// refs must never resolve to directories).
+func regularFileExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && !info.IsDir()
+}
