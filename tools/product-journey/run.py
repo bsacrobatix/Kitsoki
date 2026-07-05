@@ -43,6 +43,7 @@ DEFAULT_DECK = ROOT / "docs" / "decks" / "product-journey-eval.slidey.json"
 NATIVE_GHAGENT_SMOKE = ROOT / "tools" / "product-journey" / "native_ghagent_test.py"
 AUTONOMOUS_FIX_SMOKE = ROOT / "tools" / "product-journey" / "file_findings_test.py"
 PERSONA_AUTOFIX_SMOKE = ROOT / "tools" / "product-journey" / "persona_autofix_smoke_test.py"
+AUTONOMOUS_MARATHON_SMOKE = ROOT / "tools" / "product-journey" / "autonomous_marathon_smoke_test.py"
 EVIDENCE_SOURCES = {"demo", "retained", "external", "local", "cassette", "unknown"}
 PROOF_EVIDENCE_SOURCES = {"retained", "external", "local", "cassette"}
 # Playback-capable evidence: a typed slot every natural-use scenario declares
@@ -246,6 +247,24 @@ def persona_autofix_smoke() -> dict:
     return {
         "status": "passed",
         "summary": "persona replay autonomous issue-to-fix smoke passed",
+        "exit_code": result.returncode,
+        "output": output,
+    }
+
+
+def autonomous_marathon_smoke() -> dict:
+    result = shell([sys.executable, str(AUTONOMOUS_MARATHON_SMOKE)], ROOT)
+    output = (result.stdout + result.stderr).strip()
+    if result.returncode != 0:
+        return {
+            "status": "failed",
+            "summary": "autonomous product-QA marathon smoke failed",
+            "exit_code": result.returncode,
+            "output": output,
+        }
+    return {
+        "status": "passed",
+        "summary": "autonomous product-QA marathon smoke passed",
         "exit_code": result.returncode,
         "output": output,
     }
@@ -8811,6 +8830,7 @@ def main() -> None:
     parser.add_argument("--native-ghagent-smoke", action="store_true", help="Run no-LLM native gh-agent enqueue/drain smoke through kitsoki commands")
     parser.add_argument("--autonomous-fix-smoke", action="store_true", help="Run no-LLM full autonomous issue filing and gh-agent fix smoke")
     parser.add_argument("--persona-autofix-smoke", action="store_true", help="Run no-LLM persona replay issue-to-fix smoke through the gitops autonomous gate")
+    parser.add_argument("--autonomous-marathon-smoke", action="store_true", help="Run no-LLM scoped persona-QA marathon smoke through native autonomous fix and stats")
     parser.add_argument("--preflight-command", default="", help="Override the webshot smoke command for --capture-preflight tests")
     parser.add_argument("--preflight-studio-command", default="", help="Override the studio.ping smoke command for --capture-preflight tests")
     parser.add_argument("--preflight-quota-state", default="", help="Override provider quota state file for --capture-preflight tests")
@@ -9044,6 +9064,23 @@ def main() -> None:
         if result["output"]:
             print(result["output"])
         append_log(f"Ran persona autofix smoke: {result['status']}")
+        if result["status"] != "passed":
+            raise SystemExit(1)
+        return
+
+    if args.autonomous_marathon_smoke:
+        result = autonomous_marathon_smoke()
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Ran autonomous marathon smoke: {result['status']}")
+            if result["status"] != "passed":
+                raise SystemExit(1)
+            return
+        print(f"Autonomous marathon smoke: {result['status']}")
+        print(result["summary"])
+        if result["output"]:
+            print(result["output"])
+        append_log(f"Ran autonomous marathon smoke: {result['status']}")
         if result["status"] != "passed":
             raise SystemExit(1)
         return

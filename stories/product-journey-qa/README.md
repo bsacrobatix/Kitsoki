@@ -38,6 +38,11 @@ It is intentionally no-LLM:
   with an observed issue finding enters the native `kitsoki gitops
   autonomous-fix` gate and produces filed issue, gh-agent run, fix evidence,
   and `independent-verify.md` artifacts without live GitHub or LLM work.
+- `autonomous_marathon_smoke` calls `tools/product-journey/run.py
+  --autonomous-marathon-smoke --json-output` to prove the standing-loop shell:
+  scoped persona run, replayed driver proof, credible issue filing, gh-agent
+  fix, independent verification, human-review artifacts, and mechanically
+  derived found/filed/fixed stats.
 - `rollup` calls `tools/product-journey/run.py --rollup-matrix --json-output`
   to create or refresh the matrix-level Slidey deck from reviewed run bundles.
 - `validate_matrix` calls `tools/product-journey/run.py --validate-matrix
