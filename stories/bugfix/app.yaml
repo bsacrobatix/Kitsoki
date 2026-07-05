@@ -262,6 +262,9 @@ world:
   ticket_status:    { type: string, default: "" }
   ticket_url:       { type: string, default: "" }
   ticket_repo:      { type: string, default: "" }   # owner/repo for GitHub issue close-out; empty keeps local ticket provider
+  ticket_source_mode: { type: string, default: "local" } # local | remote; triage prompt contract
+  ticket_source_ref:  { type: string, default: "" }      # local path or remote issue URL/ref for triage evidence
+  ticket_body:        { type: string, default: "" }      # remote issue body or pre-read local issue body
   thread:           { type: string, default: "" }
   allowed_authors:  { type: string, default: "" }   # CSV — list not yet a first-class scalar type
 
