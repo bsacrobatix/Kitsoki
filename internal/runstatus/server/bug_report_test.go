@@ -1,11 +1,13 @@
 package server
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -349,28 +351,8 @@ func TestBugReport_GitHubModeUploadsArtifacts(t *testing.T) {
 		time.Now().UTC(), 1.0,
 	)
 
-	var issueArgv string
-	var uploads int
-	runner := func(ctx context.Context, dir, name string, args ...string) (string, string, int, error) {
-		j := strings.Join(args, " ")
-		switch {
-		case len(args) > 0 && args[0] == "--version":
-			return "gh version 2.x\n", "", 0, nil
-		case strings.HasPrefix(j, "release view"):
-			return "", "release not found", 1, nil // missing → triggers create
-		case strings.HasPrefix(j, "release create"):
-			return "", "", 0, nil
-		case strings.HasPrefix(j, "release upload"):
-			uploads++
-			return "", "", 0, nil
-		case strings.HasPrefix(j, "issue create"):
-			issueArgv = j
-			return "https://github.com/o/r/issues/77\n", "", 0, nil
-		}
-		return "", "unexpected: " + j, 1, nil
-	}
-	restore := host.SetExecRunnerForTest(runner)
-	defer restore()
+	issueBody, uploads, restoreAPI := stubBugReportGitHubAPI(t, "77")
+	defer restoreAPI()
 
 	pngBytes := []byte("\x89PNG\r\n\x1a\nFAKE")
 	res, rerr := s.bugReport(map[string]any{
@@ -387,8 +369,8 @@ func TestBugReport_GitHubModeUploadsArtifacts(t *testing.T) {
 	}
 
 	// Both the HAR and the screenshot are uploaded as release assets.
-	if uploads != 2 {
-		t.Fatalf("expected 2 release uploads, got %d", uploads)
+	if *uploads != 2 {
+		t.Fatalf("expected 2 release uploads, got %d", *uploads)
 	}
 
 	// A local .artifacts/ copy is still kept for developer review.
@@ -421,12 +403,12 @@ func TestBugReport_GitHubModeUploadsArtifacts(t *testing.T) {
 		"![Screenshot](https://github.com/o/r/releases/download/kitsoki-artifacts/",
 		"(https://github.com/o/r/releases/download/kitsoki-artifacts/",
 	} {
-		if !strings.Contains(issueArgv, want) {
-			t.Fatalf("issue create argv missing %q: %s", want, issueArgv)
+		if !strings.Contains(*issueBody, want) {
+			t.Fatalf("issue body missing %q: %s", want, *issueBody)
 		}
 	}
-	if strings.Contains(issueArgv, "not uploaded to GitHub") {
-		t.Fatalf("upload path must drop the not-uploaded disclaimer: %s", issueArgv)
+	if strings.Contains(*issueBody, "not uploaded to GitHub") {
+		t.Fatalf("upload path must drop the not-uploaded disclaimer: %s", *issueBody)
 	}
 }
 
@@ -446,20 +428,8 @@ func TestBugReport_GitHubModeDepositsAgentEvidence(t *testing.T) {
 		time.Now().UTC(), 1.0,
 	)
 
-	runner := func(_ context.Context, _, _ string, args ...string) (string, string, int, error) {
-		j := strings.Join(args, " ")
-		switch {
-		case len(args) > 0 && args[0] == "--version":
-			return "gh version 2.x\n", "", 0, nil
-		case strings.HasPrefix(j, "release"):
-			return "", "", 0, nil
-		case strings.HasPrefix(j, "issue create"):
-			return "https://github.com/o/r/issues/77\n", "", 0, nil
-		}
-		return "", "unexpected: " + j, 1, nil
-	}
-	restore := host.SetExecRunnerForTest(runner)
-	defer restore()
+	_, _, restoreAPI := stubBugReportGitHubAPI(t, "77")
+	defer restoreAPI()
 
 	if _, rerr := s.bugReport(map[string]any{
 		"title":        "deposit me",
@@ -488,5 +458,50 @@ func TestBugReport_GitHubModeDepositsAgentEvidence(t *testing.T) {
 	}
 	if len(ev.RRWeb) == 0 || len(ev.HAR) == 0 {
 		t.Fatalf("deposited evidence incomplete: rrweb=%d har=%d", len(ev.RRWeb), len(ev.HAR))
+	}
+}
+
+func stubBugReportGitHubAPI(t *testing.T, issueNumber string) (*string, *int, func()) {
+	t.Helper()
+	t.Setenv("GH_TOKEN", "test-token")
+	n, err := strconv.Atoi(issueNumber)
+	if err != nil {
+		t.Fatalf("bad issue number fixture: %v", err)
+	}
+	var issueBody string
+	var uploads int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/releases/tags/kitsoki-artifacts":
+			writeBugReportJSON(t, w, map[string]any{"id": 1, "upload_url": "http://" + r.Host + "/uploads/assets{?name,label}"})
+		case r.Method == http.MethodPost && r.URL.Path == "/uploads/assets":
+			uploads++
+			writeBugReportJSON(t, w, map[string]any{"id": uploads})
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/o/r/issues":
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode issue payload: %v", err)
+			}
+			issueBody, _ = payload["body"].(string)
+			writeBugReportJSON(t, w, map[string]any{
+				"number":   n,
+				"html_url": "https://github.com/o/r/issues/" + issueNumber,
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	restore := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	return &issueBody, &uploads, func() {
+		restore()
+		srv.Close()
+	}
+}
+
+func writeBugReportJSON(t *testing.T, w http.ResponseWriter, v any) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		t.Fatalf("write json: %v", err)
 	}
 }

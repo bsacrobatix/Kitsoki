@@ -1,10 +1,12 @@
 package tui
 
 import (
-	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -132,25 +134,8 @@ func TestBugCommandGitHubUploadsArtifacts(t *testing.T) {
 	m.traceFilePath = filepath.Join(root, "trace.jsonl")
 	m.transcript.AppendTurn("look", "You are in /Users/example/project with token=sk-test-secret.")
 
-	var uploads int
-	var issueArgv string
-	restore := host.SetExecRunnerForTest(func(ctx context.Context, dir, name string, args ...string) (string, string, int, error) {
-		j := strings.Join(args, " ")
-		switch {
-		case len(args) > 0 && args[0] == "--version":
-			return "gh version 2.x\n", "", 0, nil
-		case strings.HasPrefix(j, "release view"):
-			return "", "", 0, nil
-		case strings.HasPrefix(j, "release upload"):
-			uploads++
-			return "", "", 0, nil
-		case strings.HasPrefix(j, "issue create"):
-			issueArgv = j
-			return "https://github.com/o/r/issues/88\n", "", 0, nil
-		}
-		return "", "unexpected: " + j, 1, nil
-	})
-	defer restore()
+	issueBody, uploads, restoreAPI := stubTUIBugGitHubAPI(t, "88")
+	defer restoreAPI()
 
 	body, _, cmd := BugCommand{}.Run(m, []string{"button", "does", "nothing"})
 	if cmd != nil {
@@ -159,8 +144,8 @@ func TestBugCommandGitHubUploadsArtifacts(t *testing.T) {
 	if !strings.Contains(body, "filed https://github.com/o/r/issues/88") {
 		t.Fatalf("unexpected command body: %s", body)
 	}
-	if uploads != 2 {
-		t.Fatalf("expected transcript + context uploads, got %d", uploads)
+	if *uploads != 2 {
+		t.Fatalf("expected transcript + context uploads, got %d", *uploads)
 	}
 	for _, want := range []string{
 		"uploaded as GitHub release assets",
@@ -168,12 +153,57 @@ func TestBugCommandGitHubUploadsArtifacts(t *testing.T) {
 		"[TUI session context](https://github.com/o/r/releases/download/kitsoki-artifacts/",
 		"button does nothing",
 	} {
-		if !strings.Contains(issueArgv, want) {
-			t.Fatalf("issue create argv missing %q: %s", want, issueArgv)
+		if !strings.Contains(*issueBody, want) {
+			t.Fatalf("issue body missing %q: %s", want, *issueBody)
 		}
 	}
-	if strings.Contains(issueArgv, "not uploaded to GitHub") {
-		t.Fatalf("upload path must not use local-only disclaimer: %s", issueArgv)
+	if strings.Contains(*issueBody, "not uploaded to GitHub") {
+		t.Fatalf("upload path must not use local-only disclaimer: %s", *issueBody)
+	}
+}
+
+func stubTUIBugGitHubAPI(t *testing.T, issueNumber string) (*string, *int, func()) {
+	t.Helper()
+	t.Setenv("GH_TOKEN", "test-token")
+	n, err := strconv.Atoi(issueNumber)
+	if err != nil {
+		t.Fatalf("bad issue number fixture: %v", err)
+	}
+	var issueBody string
+	var uploads int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/releases/tags/kitsoki-artifacts":
+			writeTUICommandJSON(t, w, map[string]any{"id": 1, "upload_url": "http://" + r.Host + "/uploads/assets{?name,label}"})
+		case r.Method == http.MethodPost && r.URL.Path == "/uploads/assets":
+			uploads++
+			writeTUICommandJSON(t, w, map[string]any{"id": uploads})
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/o/r/issues":
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode issue payload: %v", err)
+			}
+			issueBody, _ = payload["body"].(string)
+			writeTUICommandJSON(t, w, map[string]any{
+				"number":   n,
+				"html_url": "https://github.com/o/r/issues/" + issueNumber,
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	restore := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	return &issueBody, &uploads, func() {
+		restore()
+		srv.Close()
+	}
+}
+
+func writeTUICommandJSON(t *testing.T, w http.ResponseWriter, v any) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		t.Fatalf("write json: %v", err)
 	}
 }
 
