@@ -63,6 +63,7 @@ states:
                 persona: "{{ slots.persona ?? world.persona }}"
                 target: "{{ slots.target ?? world.target }}"
                 seed: "{{ slots.seed ?? world.seed }}"
+                live_profile: "{{ slots.profile ?? world.live_profile }}"
                 mode: "{{ (slots.description ?? '') != '' ? 'adhoc' : 'catalog' }}"
                 last_error: ""
                 status: "planning"

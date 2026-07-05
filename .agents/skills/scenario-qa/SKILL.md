@@ -70,7 +70,11 @@ go run ./cmd/kitsoki test flows stories/scenario-qa/app.yaml
 
 Open `stories/scenario-qa/app.yaml`. Intents:
 
-- `check scenario=<catalog-id> transport=tui|web|vscode|all persona=... target=... seed=...`
+- `check scenario=<catalog-id> transport=tui|web|vscode|all persona=... target=... seed=... profile=...`
+  — `profile=` names the harness profile (e.g. `claude-native`) the driver
+  passes to nested LIVE `session.new` calls when the scenario's flow needs
+  interpretive behavior no cassette covers; omit it and the driver stays
+  replay-only, reporting missing-cassette blockers as `degraded-evidence`
 - `check description="<free text>" transport=...` — ad-hoc scenario
 - `next_leg` — drive the next transport leg (one leg per turn; the loop
   pauses at `recording` between legs so the internal emit chain never
