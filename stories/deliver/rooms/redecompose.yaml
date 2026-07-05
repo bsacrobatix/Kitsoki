@@ -144,7 +144,13 @@ states:
     on_enter:
       - emit_intent: bail
     on:
+      # See stories/deliver/rooms/decompose.yaml decompose_error for why the
+      # pass-through set: is needed once deliver is imported (dev-story's
+      # `deliver` import).
       bail:
         - target: "@exit:needs-human"
+          effects:
+            - set:
+                last_error: "{{ world.last_error }}"
       look:
         - target: .

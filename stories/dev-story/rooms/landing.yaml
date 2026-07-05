@@ -52,7 +52,7 @@ states:
 
   landing:
     description: "dev-story — the free-form workbench. Describe what you want, or pick a quick action."
-    relevant_world: [ticket_id, ticket_title, ticket_type, last_pr_url, status, inbox_unread, workdir, feature_branch, captured, landing_request, landing_note]
+    relevant_world: [ticket_id, ticket_title, ticket_type, design_file, last_pr_url, status, inbox_unread, workdir, feature_branch, captured, landing_request, landing_note]
 
     # Free-text sink (docs/architecture/semantic-routing.md §1.5). Prose
     # the match tiers don't claim — a fresh request — routes
@@ -249,6 +249,10 @@ states:
             - label:  "implement"
               hint:   "drive the picked task through the implementation pipeline"
               intent: go_implementation
+            - label:  "decompose"
+              hint:   "fan a published proposal out into briefs, review, and fleet"
+              intent: go_deliver
+              when:   "world.design_file != ''"
             - label:  "cypilot"
               hint:   "drive the picked epic through the SDLC waterfall"
               intent: go_cypilot
@@ -650,6 +654,28 @@ states:
                   Suggestions:
                   - `tickets` — search and pick a ticket
                   - `workspaces` — resume an in-progress workspace
+
+      # decompose-vs-direct (proposal deliver-canonical-decomposition.md, task
+      # B3): the operator-choice alternative to go_implementation, offered here
+      # too so a proposal published earlier (design_file already set) can be
+      # picked up for decomposition without re-visiting design_done. Gated on
+      # design_file, not ticket_id — deliver's world_in: only needs the
+      # published proposal path.
+      go_deliver:
+        - when: "world.design_file != ''"
+          target: deliver
+          effects:
+            - set: { last_error: "" }
+        - default: true
+          target: landing
+          guard_hint: "No published proposal to decompose — publish a design first."
+          effects:
+            - set:
+                last_error: |
+                  No published proposal to decompose.
+
+                  Suggestions:
+                  - `idea` — draft and publish a proposal, then decompose it
 
       go_gitops:
         - target: gitops

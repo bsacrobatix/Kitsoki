@@ -11,11 +11,34 @@ above fleet; fleet never imports deliver.
 
 > **Target shape:** deliver is the decided canonical decomposition story. It
 > has absorbed the work-decomposition skill's richer manifest schema (B2a),
-> the budgeted refine loop + adversarial review gate (B2b), and managed
-> re-decompose via the decompose-update transaction (B2c, below); dev-story
-> reachability is still to come. See
+> the budgeted refine loop + adversarial review gate (B2b), managed
+> re-decompose via the decompose-update transaction (B2c), and dev-story
+> reachability (B3, below). See
 > [`docs/proposals/deliver-canonical-decomposition.md`](../../docs/proposals/deliver-canonical-decomposition.md).
 > This README documents what ships **today**.
+
+## Reachable from dev-story (B3)
+
+[`stories/dev-story/`](../dev-story/) imports `deliver` (alias `deliver`,
+entry `configure`; `world_in: epic_path` reads the child's `design_file`) and
+offers it as the **decompose-vs-direct** sibling to the `impl` import — an
+operator choice, never a size heuristic (proposal Open Question 3):
+
+- **`design_done`** (right after a proposal publish): `implement`
+  (`go_implementation`) drives the freshly-filed ticket straight into
+  `impl`; `decompose` (`go_deliver`) drives the just-published proposal
+  straight into `deliver.configure` instead.
+- **`landing`** (picking up a proposal published earlier): the `decompose`
+  quick action / `go_deliver` intent is offered whenever `design_file` is
+  already set.
+
+Both arcs land on `@exit:done` → `landing` (`status="delivered"`,
+`delivery_summary` lifted from the child) or `@exit:needs-human` → `landing`
+(`status="needs-human"`, `last_error` lifted). See
+[`stories/dev-story/flows/design_to_decompose_to_impl.yaml`](../dev-story/flows/design_to_decompose_to_impl.yaml)
+(the full publish → decompose → review → fleet fan-out walk) and
+[`stories/dev-story/flows/deliver_router_picks_arc.yaml`](../dev-story/flows/deliver_router_picks_arc.yaml)
+(both arcs routing correctly from the same published proposal).
 
 ## Pipeline
 
