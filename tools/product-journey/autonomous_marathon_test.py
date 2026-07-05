@@ -82,17 +82,34 @@ def main() -> int:
                 0.82,
                 25,
                 "pending",
+                24,
+                15,
+                45,
                 None,
             )
             run_dir = Path(created["run_dir"])
             run_json = run.read_json(run_dir / "run.json")
             scenario_id = run_json["scenarios"][0]["id"]
+            control_path = Path(created["autonomous_control_path"])
+            control_markdown_path = Path(created["autonomous_control_markdown_path"])
+            control = run.read_json(control_path)
 
             check("autonomous marathon creates a bounded run",
                   created["autonomous_marathon_status"] == "autonomous_marathon_ready_for_driver"
                   and run_json["mode"] == "autonomous-marathon"
                   and len(run_json["scenarios"]) == 1
                   and created["live_budget_minutes"] == 7,
+                  failures)
+            check("creation writes standing-loop control metadata",
+                  created["autonomous_control_status"] == "ready_for_driver"
+                  and control_path.exists()
+                  and control_markdown_path.exists()
+                  and "Autonomous Marathon Control" in control_markdown_path.read_text(encoding="utf-8")
+                  and control["cadence"]["hours"] == 24
+                  and control["budget"]["per_scenario_live_minutes"] == 7
+                  and control["budget"]["manual_glue_steps_target"] == 0
+                  and control["watchdog"]["heartbeat_minutes"] == 15
+                  and control["watchdog"]["watchdog_minutes"] == 45,
                   failures)
             check("creation writes a human-reviewable marathon report",
                   Path(created["autonomous_marathon_report_path"]).exists()
@@ -159,6 +176,9 @@ def main() -> int:
                 0.82,
                 25,
                 "pending",
+                24,
+                15,
+                45,
                 None,
             )
             report = Path(finalized["autonomous_marathon_report_path"])
@@ -207,6 +227,9 @@ def main() -> int:
                 0.82,
                 25,
                 "replay",
+                24,
+                15,
+                45,
                 None,
             )
             check("marathon fails closed when derived stats do not cover the run",
@@ -267,6 +290,9 @@ def main() -> int:
                 0.82,
                 25,
                 "replay",
+                24,
+                15,
+                45,
                 None,
             )
             check("marathon fails closed when aggregate stats omit the current run",
@@ -304,6 +330,9 @@ def main() -> int:
                 0.82,
                 25,
                 "replay",
+                24,
+                15,
+                45,
                 None,
             )
             replay_dir = Path(replay["run_dir"])
@@ -315,6 +344,11 @@ def main() -> int:
                   and replay["autonomous_driver_evidence_count"] >= 5
                   and replay["autonomous_fix_status"] == "autonomous_fix_valid"
                   and replay["stats_filed_count"] >= 1,
+                  failures)
+            check("replay mode records armed marathon control",
+                  replay["autonomous_control_status"] == "armed"
+                  and Path(replay["autonomous_control_path"]).exists()
+                  and "manual_glue_steps_target" in Path(replay["autonomous_control_path"]).read_text(encoding="utf-8"),
                   failures)
             check("replay mode leaves human-reviewable driver and fix artifacts",
                   (replay_dir / "driver-journal.md").exists()

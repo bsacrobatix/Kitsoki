@@ -62,6 +62,11 @@ Use `--driver-replay-smoke --smoke-scenario <scenario-id>` when narrowing a
 single scenario. Use `--dogfood-smoke` when checking matrix-to-rollup artifact
 composition.
 
+`--autonomous-marathon` writes `autonomous-marathon-control.json` and
+`autonomous-marathon-control.md` beside the run. Those artifacts record cadence,
+per-scenario live budget, human role, heartbeat/watchdog timing, and final gates
+so the standing loop can be reviewed without relying on operator glue.
+
 ## Matrix Workflow
 
 For the 10 popular GitHub repositories with at least 100 open bugs:

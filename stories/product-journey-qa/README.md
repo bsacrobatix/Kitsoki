@@ -76,6 +76,9 @@ It is intentionally no-LLM:
   closed in the story view as `autonomous_marathon_invalid` so the operator can
   review the invalid gate state without reading host errors. Omit the mode, or
   use `pending`, when a live driver should capture evidence before finalization.
+  Each marathon run also writes `autonomous-marathon-control.json/md` with the
+  cadence, per-scenario live budget, human role, heartbeat/watchdog timing, and
+  final gates, and the story view surfaces that control state for review.
 - `seed_demo` calls `tools/product-journey/run.py --seed-demo-evidence
   --json-output` to populate a no-LLM review bundle.
 - `handoff` calls `tools/product-journey/run.py --driver-handoff --json-output`

@@ -4845,6 +4845,105 @@ def gitops_autonomous_fix(
         raise SystemExit(f"kitsoki gitops autonomous-fix printed invalid JSON: {exc}\n{proc.stdout}") from exc
 
 
+def autonomous_marathon_control_path(run_dir: Path) -> Path:
+    return run_dir / "autonomous-marathon-control.json"
+
+
+def autonomous_marathon_control_markdown_path(run_dir: Path) -> Path:
+    return run_dir / "autonomous-marathon-control.md"
+
+
+def render_autonomous_marathon_control(control: dict) -> str:
+    budget = control.get("budget", {})
+    cadence = control.get("cadence", {})
+    watchdog = control.get("watchdog", {})
+    lines = [
+        "# Autonomous Marathon Control",
+        "",
+        f"- Run: `{control.get('run_id', '')}`",
+        f"- Status: `{control.get('status', '')}`",
+        f"- Driver mode: `{control.get('driver_mode', '')}`",
+        f"- Cadence: every {cadence.get('hours', 0)} hour(s)",
+        f"- Next due: `{cadence.get('next_due_at', '')}`",
+        f"- Per-scenario live budget: {budget.get('per_scenario_live_minutes', 0)} minute(s)",
+        f"- Human role: {control.get('human_role', '')}",
+        f"- Heartbeat: every {watchdog.get('heartbeat_minutes', 0)} minute(s)",
+        f"- Watchdog: escalate after {watchdog.get('watchdog_minutes', 0)} minute(s)",
+        "",
+        "## Final Gates",
+        "",
+    ]
+    for gate in control.get("final_gates", []):
+        lines.append(f"- `{gate}`")
+    return "\n".join(lines) + "\n"
+
+
+def autonomous_marathon_control_summary(control: dict) -> str:
+    cadence = control.get("cadence", {})
+    budget = control.get("budget", {})
+    watchdog = control.get("watchdog", {})
+    return (
+        f"cadence={cadence.get('hours', 0)}h, "
+        f"next_due={cadence.get('next_due_at', '')}, "
+        f"budget={budget.get('per_scenario_live_minutes', 0)}m/scenario, "
+        f"heartbeat={watchdog.get('heartbeat_minutes', 0)}m, "
+        f"watchdog={watchdog.get('watchdog_minutes', 0)}m"
+    )
+
+
+def write_autonomous_marathon_control(
+    run_dir: Path,
+    run_json: dict,
+    driver_mode: str,
+    cadence_hours: int,
+    heartbeat_minutes: int,
+    watchdog_minutes: int,
+) -> dict:
+    if cadence_hours <= 0:
+        raise SystemExit("--autonomous-cadence-hours must be > 0")
+    if heartbeat_minutes <= 0:
+        raise SystemExit("--autonomous-heartbeat-minutes must be > 0")
+    if watchdog_minutes <= 0:
+        raise SystemExit("--autonomous-watchdog-minutes must be > 0")
+    if watchdog_minutes < heartbeat_minutes:
+        raise SystemExit("--autonomous-watchdog-minutes must be >= --autonomous-heartbeat-minutes")
+    created = datetime.datetime.fromisoformat(str(run_json.get("created_at", now_utc())))
+    next_due = created + datetime.timedelta(hours=cadence_hours)
+    scenarios = [scenario.get("id", "") for scenario in run_json.get("scenarios", []) if scenario.get("id")]
+    control = {
+        "schema": "kitsoki/product-journey-autonomous-marathon-control/v1",
+        "run_id": run_json.get("run_id", ""),
+        "status": "armed" if driver_mode == "replay" else "ready_for_driver",
+        "driver_mode": driver_mode,
+        "scenario_scope": scenarios,
+        "cadence": {
+            "hours": cadence_hours,
+            "created_at": run_json.get("created_at", ""),
+            "next_due_at": next_due.isoformat(timespec="seconds"),
+        },
+        "budget": {
+            "per_scenario_live_minutes": int(run_json.get("live_budget_minutes", 0) or 0),
+            "budget_setter": "operator",
+            "manual_glue_steps_target": 0,
+        },
+        "watchdog": {
+            "heartbeat_minutes": heartbeat_minutes,
+            "watchdog_minutes": watchdog_minutes,
+            "on_missed_heartbeat": "record_blocker_and_stop_before_spend",
+        },
+        "human_role": "review outcomes and set budget; no issue filing, fix dispatch, close-out, or stats glue",
+        "final_gates": [
+            "autonomous_fix",
+            "review",
+            "validate",
+            "stats",
+        ],
+    }
+    write_json(autonomous_marathon_control_path(run_dir), control)
+    autonomous_marathon_control_markdown_path(run_dir).write_text(render_autonomous_marathon_control(control), encoding="utf-8")
+    return control
+
+
 def autonomous_marathon_report_path(run_dir: Path) -> Path:
     return run_dir / "autonomous-marathon-report.md"
 
@@ -4858,6 +4957,8 @@ def render_autonomous_marathon_report(run_dir: Path, result: dict) -> str:
         f"- Summary: {result.get('autonomous_marathon_summary', '')}",
         f"- Autonomous driver: `{result.get('autonomous_driver_mode', 'pending')}` / `{result.get('autonomous_driver_status', 'pending')}`",
         f"- Driver proof: {result.get('autonomous_driver_summary', '')}",
+        f"- Control: `{result.get('autonomous_control_path', '') or '(not generated)'}`",
+        f"- Control status: `{result.get('autonomous_control_status', '') or '(unknown)'}` - {result.get('autonomous_control_summary', '')}",
         f"- Driver handoff: `{result.get('driver_handoff_path', run_dir / 'driver-handoff.md')}`",
         f"- Autonomous fix report: `{result.get('autonomous_fix_report_path', '') or '(not generated)'}`",
         f"- Stats output: `{result.get('stats_output', '') or '(not generated)'}`",
@@ -5013,6 +5114,9 @@ def autonomous_marathon(
     similarity_threshold: float,
     similar_pair_limit: int,
     autonomous_driver_mode: str,
+    autonomous_cadence_hours: int,
+    autonomous_heartbeat_minutes: int,
+    autonomous_watchdog_minutes: int,
     publish_deck: Optional[Path],
 ) -> dict:
     """Create or finalize a standing persona-QA marathon bundle.
@@ -5036,6 +5140,14 @@ def autonomous_marathon(
             publish_deck,
             live_budget_minutes,
             [],
+        )
+        control = write_autonomous_marathon_control(
+            created_dir,
+            run_json,
+            autonomous_driver_mode,
+            autonomous_cadence_hours,
+            autonomous_heartbeat_minutes,
+            autonomous_watchdog_minutes,
         )
         if autonomous_driver_mode == "replay":
             if not ticket_repo:
@@ -5068,9 +5180,16 @@ def autonomous_marathon(
                 similarity_threshold,
                 similar_pair_limit,
                 "pending",
+                autonomous_cadence_hours,
+                autonomous_heartbeat_minutes,
+                autonomous_watchdog_minutes,
                 publish_deck,
             )
             finalized.update(driver_result)
+            finalized["autonomous_control_path"] = str(autonomous_marathon_control_path(created_dir))
+            finalized["autonomous_control_markdown_path"] = str(autonomous_marathon_control_markdown_path(created_dir))
+            finalized["autonomous_control_status"] = control.get("status", "")
+            finalized["autonomous_control_summary"] = autonomous_marathon_control_summary(control)
             finalized["autonomous_marathon_report_path"] = str(write_autonomous_marathon_report(created_dir, finalized))
             return finalized
         result = {
@@ -5101,6 +5220,10 @@ def autonomous_marathon(
             "independent_verify_status": "not_run",
             "independent_verify_summary": "independent verification not run",
             "autonomous_gate_summary": "filing=not_run, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=not_run",
+            "autonomous_control_path": str(autonomous_marathon_control_path(created_dir)),
+            "autonomous_control_markdown_path": str(autonomous_marathon_control_markdown_path(created_dir)),
+            "autonomous_control_status": control.get("status", ""),
+            "autonomous_control_summary": autonomous_marathon_control_summary(control),
         }
         result.update(run_story_summary(created_dir))
         result["autonomous_marathon_report_path"] = str(write_autonomous_marathon_report(created_dir, result))
@@ -5211,6 +5334,8 @@ def autonomous_marathon(
         "driver_handoff_path": str(run_dir / "driver-handoff.md"),
         "media_manifest_path": str(run_dir / "media-manifest.json"),
         "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
+        "autonomous_control_path": str(autonomous_marathon_control_path(run_dir)) if autonomous_marathon_control_path(run_dir).exists() else "",
+        "autonomous_control_markdown_path": str(autonomous_marathon_control_markdown_path(run_dir)) if autonomous_marathon_control_markdown_path(run_dir).exists() else "",
         "stats_status": stats.get("status", ""),
         "stats_root": stats.get("stats_root", ""),
         "stats_output": stats.get("stats_output", ""),
@@ -5226,6 +5351,10 @@ def autonomous_marathon(
         "stats_unknown_state_count": stats.get("issues_unknown_state_count", 0),
         "stats_similar_pair_count": stats.get("similar_pair_count", 0),
     }
+    if result["autonomous_control_path"]:
+        control = read_json(autonomous_marathon_control_path(run_dir))
+        result["autonomous_control_status"] = control.get("status", "")
+        result["autonomous_control_summary"] = autonomous_marathon_control_summary(control)
     result.update(run_story_summary(run_dir))
     result["autonomous_marathon_report_path"] = str(write_autonomous_marathon_report(run_dir, result))
     return result
@@ -9918,6 +10047,9 @@ def main() -> None:
         choices=["pending", "replay"],
         help="With --autonomous-marathon creation, pending emits a driver handoff; replay attaches cassette-backed proof and runs the native final gates",
     )
+    parser.add_argument("--autonomous-cadence-hours", type=int, default=24, help="Cadence recorded in autonomous marathon control artifacts")
+    parser.add_argument("--autonomous-heartbeat-minutes", type=int, default=15, help="Heartbeat interval recorded in autonomous marathon control artifacts")
+    parser.add_argument("--autonomous-watchdog-minutes", type=int, default=45, help="Watchdog escalation interval recorded in autonomous marathon control artifacts")
     parser.add_argument("--report-invalid-autonomous-fix", action="store_true", help="With --autonomous-fix-loop, print invalid gate JSON and exit 0 so story callers can bind failure evidence")
     parser.add_argument("--report-invalid-autonomous-marathon", action="store_true", help="With --autonomous-marathon, print invalid marathon JSON and exit 0 so story callers can bind failure evidence")
     parser.add_argument("--stats", action="store_true", help="Derive product-journey issue stats from run bundles and cached issue state")
@@ -10488,6 +10620,9 @@ def main() -> None:
             args.similarity_threshold,
             args.similar_pair_limit,
             args.autonomous_driver_mode,
+            args.autonomous_cadence_hours,
+            args.autonomous_heartbeat_minutes,
+            args.autonomous_watchdog_minutes,
             publish_deck,
         )
         if args.json_output:
