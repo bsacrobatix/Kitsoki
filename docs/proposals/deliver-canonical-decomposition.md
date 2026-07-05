@@ -1,11 +1,17 @@
 # Story: deliver — the canonical decomposition story
 
 **Status:** Draft v1. Decision made (2026-07-05, dev-workflows plan WS-B B1):
-`stories/deliver` is the canonical decomposition story. Nothing from this
-proposal is implemented yet — today's `stories/deliver` is the thin
-configure → decompose → lint → fleet pipeline documented in
-[`stories/deliver/README.md`](../../stories/deliver/README.md) (5 no-LLM
-flows, no adversarial review, no dev-story entry). Supersedes
+`stories/deliver` is the canonical decomposition story. **B2a shipped**
+(schema + lint absorption, deliver-local, no graph change — see Task 1
+below): `stories/deliver/schemas/decomposition.json` and
+`scripts/lint_decomposition.star` now carry the work-decomposition skill's
+richer optional fields (`coverage_note`, per-brief `title/kind/scope/
+acceptance/risk`) and scope-bound/acceptance checks, and the skill's schema is
+retargeted to be a manual copy of deliver's. **B2b/B2c/B3/B4 are not yet
+implemented** — today's `stories/deliver` is still the thin configure →
+decompose → lint → fleet pipeline documented in
+[`stories/deliver/README.md`](../../stories/deliver/README.md) (no refine
+loop, no adversarial review, no dev-story entry). Supersedes
 [`work-decomposition.md`](work-decomposition.md).
 **Kind:**   story
 **Epic:**   — standalone (slice B1 of the dev-workflows surface-matrix plan)
@@ -214,10 +220,10 @@ Sequenced as implementable slices (B2 → B3 → B4 of the plan's WS-B):
 
 ```
 ## 1. B2a — schema + lint absorption (deliver-local, no graph change)
-- [ ] 1.1 Fold skill schema fields into stories/deliver/schemas/decomposition.json (coverage_note; optional title/kind/scope/acceptance/risk)
-- [ ] 1.2 Extend lint_decomposition.star (scope-path bounds, acceptance non-empty when present); keep {route,error}
-- [ ] 1.3 Reconcile .agents/skills/work-decomposition schema + SKILL.md to point at deliver as canonical
-- [ ] 1.4 rich_schema_happy flow; existing 5 flows stay green
+- [x] 1.1 Fold skill schema fields into stories/deliver/schemas/decomposition.json (coverage_note; optional title/kind/scope/acceptance/risk)
+- [x] 1.2 Extend lint_decomposition.star (scope-path bounds, acceptance non-empty when present); keep {route,error}
+- [x] 1.3 Reconcile .agents/skills/work-decomposition schema + SKILL.md to point at deliver as canonical
+- [x] 1.4 rich_schema_happy flow; existing 5 flows stay green
 
 ## 2. B2b — refine loop + adversarial review
 - [ ] 2.1 lint fail → decompose refine edge with refine_feedback + budget; budget exhausted → @exit:needs-human
