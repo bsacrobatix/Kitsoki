@@ -8,9 +8,7 @@
 // Why a separate handler?  GitHub Issues is the obvious "next provider after
 // local files" surface for the dogfood loop. Issue creation and bug evidence
 // filing use the native GitHub REST API with GH_TOKEN/GITHUB_TOKEN so headless
-// autonomous runs do not depend on a locally logged-in gh binary. Older
-// search/list operations still use the gh CLI through cliExec until they
-// are migrated behind the same native transport.
+// autonomous runs do not depend on a locally logged-in gh binary.
 //
 // The companion `gh pr ...` family already lives in `internal/host/git_vcs.go`
 // — that file's `host.git` handler dispatches PR ops (open_pr / pr_status /
@@ -19,16 +17,13 @@
 // `host.gh.ticket` for tickets and keeps `host.git` (which already routes to
 // `gh pr` under the hood) for vcs.
 //
-// CLI-backed operations go through the same `cliExec` seam declared in
-// `cli_exec.go` so tests can substitute a deterministic runner without
-// shelling out to the real `gh` binary. Native operations use an injectable HTTP
-// client. Auth and transport failures return clean Result.Error values rather
-// than crashing, so authors can route YAML `on_error:` arcs.
+// Native operations use an injectable HTTP client. Auth and transport failures
+// return clean Result.Error values rather than crashing, so authors can route
+// YAML `on_error:` arcs.
 package host
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -44,9 +39,8 @@ import (
 //     transition, list_mine.
 //
 // Optional args (all ops except create):
-//   - repo (string): the `owner/repo` slug for the `--repo` flag.  For
-//     CLI-backed ops, omitted repo lets `gh` fall back to the current
-//     directory's git remote.
+//   - repo (string): the `owner/repo` slug. Required for native operations
+//     whose id/comment_id does not already include a GitHub repository.
 //
 // Required args (create):
 //   - repo (string): the `owner/repo` slug. Native create does not infer a
@@ -64,9 +58,6 @@ func GitHubTicketHandler(ctx context.Context, args map[string]any) (Result, erro
 	case "create":
 		return ghTicketCreate(ctx, args)
 	case "search":
-		if !ghAvailable(ctx) {
-			return Result{Error: "host.gh.ticket: gh CLI not available — install github.com/cli/cli and run `gh auth login`"}, nil
-		}
 		return ghTicketSearch(ctx, args)
 	case "get":
 		return ghTicketGet(ctx, args)
@@ -77,58 +68,37 @@ func GitHubTicketHandler(ctx context.Context, args map[string]any) (Result, erro
 	case "transition":
 		return ghTicketTransition(ctx, args)
 	case "list_mine":
-		if !ghAvailable(ctx) {
-			return Result{Error: "host.gh.ticket: gh CLI not available — install github.com/cli/cli and run `gh auth login`"}, nil
-		}
 		return ghTicketListMine(ctx, args)
 	default:
 		return Result{Error: fmt.Sprintf("host.gh.ticket: unknown op %q", op)}, nil
 	}
 }
 
-// repoFlag returns `["--repo", v]` when args["repo"] is a non-empty string,
-// or an empty slice otherwise.  Letting the caller decide is friendlier than
-// hard-coding a default: in CI dogfood mode the operator runs `kitsoki run`
-// from the repo directory and `gh` picks the remote up; in autonomous mode
-// the world is seeded with the slug explicitly.
-func repoFlag(args map[string]any) []string {
-	if r, _ := args["repo"].(string); strings.TrimSpace(r) != "" {
-		return []string{"--repo", r}
-	}
-	return nil
-}
-
 // ─── Op dispatchers ─────────────────────────────────────────────────────────
 
-// ghTicketSearch implements ticket.search via `gh issue list --search`.
+// ghTicketSearch implements ticket.search via the native GitHub Search API.
 //
-// Input  args: query (string), limit (int, optional), repo (string, optional).
+// Input  args: query (string), limit (int, optional), repo (string, required).
 // Output Data: tickets ([]{id,title,status,priority,assignee,url}).
 func ghTicketSearch(ctx context.Context, args map[string]any) (Result, error) {
 	query, _ := args["query"].(string)
 	limit := optInt(args, "limit", 30)
-	ghArgs := append([]string{"issue", "list"}, repoFlag(args)...)
-	ghArgs = append(ghArgs,
-		"--state", "all",
-		"--limit", fmt.Sprintf("%d", limit),
-		"--json", "number,title,state,labels,assignees,url",
-	)
-	if q := strings.TrimSpace(query); q != "" {
-		ghArgs = append(ghArgs, "--search", q)
+	repo := strings.TrimSpace(ghStr(args["repo"]))
+	if repo == "" {
+		return Result{Error: "ticket.search: repo argument is required for native GitHub issue search"}, nil
 	}
-	stdout, stderr, code, err := cliExec(ctx, "", "gh", ghArgs...)
+	q := githubIssueSearchQuery(repo, "is:issue", strings.TrimSpace(query))
+	var raw githubIssueSearchResponse
+	code, resp, err := githubAPIJSON(ctx, "GET", "search/issues?q="+url.QueryEscape(q)+"&per_page="+fmt.Sprintf("%d", limit), nil, &raw)
 	if err != nil {
-		return Result{Error: fmt.Sprintf("ticket.search: exec: %v", err)}, nil
+		return Result{Error: fmt.Sprintf("ticket.search: %v", err)}, nil
 	}
-	if code != 0 {
-		return Result{Error: fmt.Sprintf("ticket.search: %s", strings.TrimSpace(stderr))}, nil
+	if code >= 300 {
+		return Result{Error: fmt.Sprintf("ticket.search: %s", githubAPIError(resp))}, nil
 	}
-	var raw []map[string]any
-	if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
-		return Result{Error: fmt.Sprintf("ticket.search: parse JSON: %v", err)}, nil
-	}
-	tickets := make([]map[string]any, 0, len(raw))
-	for _, r := range raw {
+	tickets := make([]map[string]any, 0, len(raw.Items))
+	for _, r := range raw.Items {
+		ghNormalizeIssueURL(r)
 		tickets = append(tickets, ghIssueSummary(r))
 	}
 	return Result{Data: map[string]any{"tickets": tickets}}, nil
@@ -164,11 +134,7 @@ func ghTicketGet(ctx context.Context, args map[string]any) (Result, error) {
 	if code >= 300 {
 		return Result{Error: fmt.Sprintf("ticket.get: %s", githubAPIError(resp))}, nil
 	}
-	if _, ok := raw["url"]; !ok {
-		if html, _ := raw["html_url"].(string); strings.TrimSpace(html) != "" {
-			raw["url"] = html
-		}
-	}
+	ghNormalizeIssueURL(raw)
 	data := ghIssueSummary(raw)
 	if body, ok := raw["body"].(string); ok {
 		data["body"] = body
@@ -333,11 +299,11 @@ func ghTicketTransition(ctx context.Context, args map[string]any) (Result, error
 	}}, nil
 }
 
-// ghTicketListMine implements ticket.list_mine via `gh issue list --assignee`.
+// ghTicketListMine implements ticket.list_mine via the native GitHub Search API.
 //
 // Input  args: filter (string — GitHub login of the assignee; defaults to
 //
-//	"@me"), repo (string, optional).
+//	"@me"), repo (string, required).
 //
 // Output Data: tickets ([]).
 func ghTicketListMine(ctx context.Context, args map[string]any) (Result, error) {
@@ -346,34 +312,55 @@ func ghTicketListMine(ctx context.Context, args map[string]any) (Result, error) 
 	if filter == "" {
 		filter = "@me"
 	}
-	ghArgs := append([]string{"issue", "list"}, repoFlag(args)...)
-	ghArgs = append(ghArgs,
-		"--state", "open",
-		"--assignee", filter,
-		"--limit", "100",
-		"--json", "number,title,state,labels,assignees,url",
-	)
-	stdout, stderr, code, err := cliExec(ctx, "", "gh", ghArgs...)
+	repo := strings.TrimSpace(ghStr(args["repo"]))
+	if repo == "" {
+		return Result{Error: "ticket.list_mine: repo argument is required for native GitHub issue listing"}, nil
+	}
+	q := githubIssueSearchQuery(repo, "is:issue", "is:open", "assignee:"+filter)
+	var raw githubIssueSearchResponse
+	code, resp, err := githubAPIJSON(ctx, "GET", "search/issues?q="+url.QueryEscape(q)+"&per_page=100", nil, &raw)
 	if err != nil {
-		return Result{Error: fmt.Sprintf("ticket.list_mine: exec: %v", err)}, nil
+		return Result{Error: fmt.Sprintf("ticket.list_mine: %v", err)}, nil
 	}
-	if code != 0 {
-		return Result{Error: fmt.Sprintf("ticket.list_mine: %s", strings.TrimSpace(stderr))}, nil
+	if code >= 300 {
+		return Result{Error: fmt.Sprintf("ticket.list_mine: %s", githubAPIError(resp))}, nil
 	}
-	var raw []map[string]any
-	if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
-		return Result{Error: fmt.Sprintf("ticket.list_mine: parse JSON: %v", err)}, nil
-	}
-	tickets := make([]map[string]any, 0, len(raw))
-	for _, r := range raw {
+	tickets := make([]map[string]any, 0, len(raw.Items))
+	for _, r := range raw.Items {
+		ghNormalizeIssueURL(r)
 		tickets = append(tickets, ghIssueSummary(r))
 	}
 	return Result{Data: map[string]any{"tickets": tickets}}, nil
 }
 
+type githubIssueSearchResponse struct {
+	Items []map[string]any `json:"items"`
+}
+
+func githubIssueSearchQuery(repo string, parts ...string) string {
+	var out []string
+	out = append(out, "repo:"+strings.TrimSpace(repo))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, " ")
+}
+
+func ghNormalizeIssueURL(raw map[string]any) {
+	if _, ok := raw["url"]; ok {
+		return
+	}
+	if html, _ := raw["html_url"].(string); strings.TrimSpace(html) != "" {
+		raw["url"] = html
+	}
+}
+
 // ─── Field projections ─────────────────────────────────────────────────────
 
-// ghIssueSummary projects a `gh issue list --json` row into the
+// ghIssueSummary projects a GitHub issue JSON object into the
 // provider-neutral ticket summary the contract pins: id / title /
 // status / priority / assignee / url, plus the kitsoki-routing fields
 // type (classified from labels — see ghClassifyType) and source
