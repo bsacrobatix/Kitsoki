@@ -8156,6 +8156,8 @@ def main() -> None:
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
             append_log(f"Ran autonomous fix loop for {run_dir.name}: {result['status']}")
+            if result["status"] != "autonomous_fix_valid":
+                raise SystemExit(1)
             return
         print(f"Status: {result['status']}")
         print(result["filing_summary"])
@@ -8169,6 +8171,8 @@ def main() -> None:
         print(f"Review: {result['review_summary']}")
         print(f"Validation: {result['validation_status']} ({result['validation_errors']} errors, {result['validation_warnings']} warnings)")
         append_log(f"Ran autonomous fix loop for {run_dir.name}: {result['status']}")
+        if result["status"] != "autonomous_fix_valid":
+            raise SystemExit(1)
         return
 
     if args.stats:
