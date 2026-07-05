@@ -2959,6 +2959,7 @@ def run_story_summary(run_dir: Path) -> dict:
         review_backlog.append(f"+{len(actionable_review) - 4} more review checks")
     gh_agent_fix_evidence = gh_agent_fix_evidence_links(gh_agent)
     gh_agent_missing_evidence = gh_agent_missing_fix_evidence(gh_agent)
+    missing_run_urls = gh_agent_missing_run_urls(gh_agent)
     return {
         "persona_starting_surface": lens.get("starting_surface", ""),
         "persona_first_question": lens.get("first_question", ""),
@@ -3003,6 +3004,7 @@ def run_story_summary(run_dir: Path) -> dict:
         "gh_agent_missing_evidence_count": len(gh_agent_missing_evidence),
         "gh_agent_fix_evidence_summary": summarize_gh_agent_fix_evidence(gh_agent),
         "gh_agent_missing_evidence_summary": "; ".join(gh_agent_missing_evidence[:4]) + (f"; +{len(gh_agent_missing_evidence) - 4} more" if len(gh_agent_missing_evidence) > 4 else ""),
+        "gh_agent_missing_run_url_count": len(missing_run_urls),
     }
 
 
@@ -3318,6 +3320,16 @@ def gh_agent_missing_fix_evidence(gh_agent: dict) -> list[str]:
     return missing
 
 
+def gh_agent_missing_run_urls(gh_agent: dict) -> list[str]:
+    missing: list[str] = []
+    for job in gh_agent.get("drained_jobs", []) or []:
+        if not isinstance(job, dict) or job.get("state") != "done":
+            continue
+        if not str(job.get("run_url", "")).strip():
+            missing.append(str(job.get("origin_ref") or job.get("job_id") or "unknown"))
+    return missing
+
+
 def gh_agent_fix_evidence_links(gh_agent: dict) -> list[str]:
     links: list[str] = []
     seen: set[str] = set()
@@ -3533,6 +3545,7 @@ def autonomous_fix_loop(
         and int(filed.get("gh_agent_active_count", 0) or 0) == 0
         and gh_agent_done >= gh_agent_enqueued
         and int(story_summary.get("gh_agent_missing_evidence_count", 0) or 0) == 0
+        and int(story_summary.get("gh_agent_missing_run_url_count", 0) or 0) == 0
     )
     status = "autonomous_fix_valid" if review_ok and validation_ok and filing_ok and gh_agent_ok else "autonomous_fix_invalid"
     result = {
@@ -3999,6 +4012,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     gh_agent_active = int(gh_agent.get("active_count", 0) or 0)
     gh_agent_drain_status = gh_agent.get("drain_status", "")
     gh_agent_missing_evidence = gh_agent_missing_fix_evidence(gh_agent)
+    gh_agent_missing_run_url = gh_agent_missing_run_urls(gh_agent)
     gh_agent_fix_complete = (
         not gh_agent_requested
         or (
@@ -4008,6 +4022,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             and gh_agent_active == 0
             and gh_agent_done >= gh_agent_enqueued
             and not gh_agent_missing_evidence
+            and not gh_agent_missing_run_url
         )
     )
 
@@ -4150,7 +4165,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             "detail": (
                 "gh-agent fixing not requested"
                 if not gh_agent_requested
-                else f"enqueue={gh_agent.get('enqueue_status', '')}, drain={gh_agent_drain_status}, enqueued={gh_agent_enqueued}, done={gh_agent_done}, failed={gh_agent_failed}, active={gh_agent_active}, missing_evidence={len(gh_agent_missing_evidence)}; {gh_agent.get('run_summary', '')}"
+                else f"enqueue={gh_agent.get('enqueue_status', '')}, drain={gh_agent_drain_status}, enqueued={gh_agent_enqueued}, done={gh_agent_done}, failed={gh_agent_failed}, active={gh_agent_active}, missing_evidence={len(gh_agent_missing_evidence)}, missing_run_urls={len(gh_agent_missing_run_url)}; {gh_agent.get('run_summary', '')}"
             ),
         },
         {
@@ -5113,6 +5128,15 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 "gh-agent-fix-evidence",
                 "Completed gh-agent fix jobs are missing reviewable fix evidence assets",
                 ", ".join(missing_evidence[:5]),
+            )
+        missing_run_urls = gh_agent_missing_run_urls(gh_agent)
+        if missing_run_urls:
+            add_validation_issue(
+                issues,
+                "error",
+                "gh-agent-run-url",
+                "Completed gh-agent fix jobs are missing reviewable run URLs",
+                ", ".join(missing_run_urls[:5]),
             )
         scene_bodies = [
             str(scene.get("body", ""))

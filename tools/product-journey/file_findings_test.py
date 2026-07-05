@@ -67,7 +67,10 @@ if (args.verb1, args.verb2) == ("gh-agent", "drain"):
     jobs = []
     for i, row in enumerate(rows, start=1):
         row["state"] = "done"
-        row["run_url"] = f"https://agent.example/run/job-{i}"
+        if os.environ.get("KITSOKI_FAKE_GH_AGENT_NO_RUN_URL"):
+            row["run_url"] = ""
+        else:
+            row["run_url"] = f"https://agent.example/run/job-{i}"
         row.setdefault("job_id", f"job-{i}")
         jobs.append({
             "job_id": row["job_id"],
@@ -334,7 +337,7 @@ def main():
         _check("validate has no findings-filed error",
                not any(i["id"] == "findings-filed" for i in validated["issues"]))
         _check("validate has no gh-agent evidence error",
-               not any(i["id"] in {"gh-agent-fixes", "gh-agent-fix-evidence", "gh-agent-fix-deck"} for i in validated["issues"]))
+               not any(i["id"] in {"gh-agent-fixes", "gh-agent-fix-evidence", "gh-agent-run-url", "gh-agent-fix-deck"} for i in validated["issues"]))
         saved_findings = run.read_json(run_dir / "findings.json")
         missing_asset_findings = json.loads(json.dumps(saved_findings))
         for job in missing_asset_findings["gh_agent"]["drained_jobs"]:
@@ -347,6 +350,17 @@ def main():
         _check("validate catches done gh-agent jobs without evidence assets",
                any(i["id"] == "gh-agent-fix-evidence" and i["severity"] == "error"
                    for i in missing_asset_validated["issues"]))
+        missing_run_url_findings = json.loads(json.dumps(saved_findings))
+        for job in missing_run_url_findings["gh_agent"]["drained_jobs"]:
+            job["run_url"] = ""
+        run.write_json(run_dir / "findings.json", missing_run_url_findings)
+        reviewed_missing_run_url = run.review_run_bundle(run_dir, None)
+        _check("review fails done gh-agent jobs without run URLs",
+               review_check(reviewed_missing_run_url, "gh-agent-fixes")["status"] == "fail")
+        missing_run_url_validated = run.validate_run_bundle(run_dir)
+        _check("validate catches done gh-agent jobs without run URLs",
+               any(i["id"] == "gh-agent-run-url" and i["severity"] == "error"
+                   for i in missing_run_url_validated["issues"]))
         run.write_json(run_dir / "findings.json", saved_findings)
         run.update_derived_artifacts(run_dir, None)
         deck_path = run_dir / "deck.slidey.json"
@@ -441,6 +455,37 @@ def main():
         _check("autonomous loop reports failing gates for missing evidence",
                result["autonomous_gate_summary"] == "filing=pass, gh_agent=fail, review=fail, validation=fail"
                and any(i["id"] == "gh-agent-fix-evidence" for i in result["validation_issues"]))
+
+        run_dir5, run_json5 = run.build_run_bundle(
+            catalog, run.load_github_targets(run.GITHUB_TARGETS),
+            personas, stable_scenarios, "vscode", "", "autonomous-missing-run-url-test", "dry-run", None,
+        )
+        scenario5 = run_json5["scenarios"][0]["id"]
+        attach_bugfix_proof(run_dir5, scenario5)
+        run.record_finding(run_dir5, "issue", "autonomous missing run URL", "observed problem",
+                           scenario5, "high", "", "open", None)
+        os.environ["KITSOKI_FAKE_GH_AGENT_NO_RUN_URL"] = "1"
+        try:
+            result = run.autonomous_fix_loop(
+                run_dir5,
+                "o/r",
+                str(tmp / "gh-agent-autonomous-no-run-url.json"),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                None,
+            )
+        finally:
+            os.environ.pop("KITSOKI_FAKE_GH_AGENT_NO_RUN_URL", None)
+        _check("autonomous loop rejects done fixes without run URLs",
+               result["autonomous_fix_status"] == "autonomous_fix_invalid"
+               and result["gh_agent_missing_run_url_count"] == 1)
+        _check("autonomous loop reports failing gates for missing run URLs",
+               result["autonomous_gate_summary"] == "filing=pass, gh_agent=fail, review=fail, validation=fail"
+               and any(i["id"] == "gh-agent-run-url" for i in result["validation_issues"]))
 
         run_dir4, run_json4 = run.build_run_bundle(
             catalog, run.load_github_targets(run.GITHUB_TARGETS),
