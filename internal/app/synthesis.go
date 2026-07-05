@@ -343,6 +343,14 @@ type KitImportSpec struct {
 // a def built here folds identically to hand-writing a thin importer of the
 // kit's story on disk.
 func BuildKitImporter(manifest *kit.Def, storyName, alias string, spec *KitImportSpec) (def *AppDef, abs string, err error) {
+	return buildKitImporter(manifest, storyName, alias, spec, nil)
+}
+
+// buildKitImporter is BuildKitImporter plus an injected ImportResolver used
+// for the exit-discovery load of the child story below, so that a kit story's
+// own imports resolve through the same resolver SynthesizeKitWithResolver's
+// caller supplied — matching that function's documented contract.
+func buildKitImporter(manifest *kit.Def, storyName, alias string, spec *KitImportSpec, resolver ImportResolver) (def *AppDef, abs string, err error) {
 	if manifest == nil {
 		return nil, "", fmt.Errorf("kit importer: nil manifest")
 	}
@@ -399,7 +407,13 @@ func BuildKitImporter(manifest *kit.Def, storyName, alias string, spec *KitImpor
 	// never fails with "child uses @exit:X but parent does not map it"
 	// regardless of which story/kit is imported.
 	childPath := filepath.Join(imp.Source, "app.yaml")
-	childDef, loadErr := Load(childPath)
+	var childDef *AppDef
+	var loadErr error
+	if resolver != nil {
+		childDef, loadErr = LoadWithResolver(childPath, nil, resolver)
+	} else {
+		childDef, loadErr = Load(childPath)
+	}
 	if loadErr != nil {
 		return nil, "", fmt.Errorf("kit importer: %q story %q must be standalone-loadable: %w", manifest.Identity(), storyName, loadErr)
 	}
@@ -433,7 +447,7 @@ func SynthesizeKit(manifest *kit.Def, storyName, alias string, spec *KitImportSp
 // mirroring SynthesizeRootWithResolver. A kit story's own imports (if any)
 // resolve through this resolver exactly as a file-backed load's would.
 func SynthesizeKitWithResolver(manifest *kit.Def, storyName, alias string, spec *KitImportSpec, resolver ImportResolver) (*AppDef, error) {
-	def, abs, err := BuildKitImporter(manifest, storyName, alias, spec)
+	def, abs, err := buildKitImporter(manifest, storyName, alias, spec, resolver)
 	if err != nil {
 		return nil, err
 	}

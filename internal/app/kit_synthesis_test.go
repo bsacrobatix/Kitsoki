@@ -148,7 +148,7 @@ func TestKitImporterRoundTrip(t *testing.T) {
 		t.Fatalf("synthesize: %v", err)
 	}
 
-	unfolded, abs, err := BuildKitImporter(manifest, "greeter", "greet", spec)
+	unfolded, _, err := BuildKitImporter(manifest, "greeter", "greet", spec)
 	if err != nil {
 		t.Fatalf("BuildKitImporter: %v", err)
 	}
@@ -173,7 +173,6 @@ func TestKitImporterRoundTrip(t *testing.T) {
 			synth.Root, len(synth.States), len(synth.World), len(synth.Hosts),
 			loaded.Root, len(loaded.States), len(loaded.World), len(loaded.Hosts))
 	}
-	_ = abs
 }
 
 // normalizeKitDef strips load-provenance fields that legitimately differ
