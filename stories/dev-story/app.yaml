@@ -484,6 +484,11 @@ world:
   judge_mode:                  { type: string, default: "human" }
   judge_confidence_threshold:  { type: float,  default: 0.8 }
   bugfix_mode:                 { type: string, default: "full" }
+  # Pass-through for bf's Step-0w isolation guard (stories/bugfix/rooms/idle.yaml):
+  # true declares "this workspace identity is deliberately prepared — keep it"
+  # (flow fixtures walking a demo project, prepared handoffs). Default false so
+  # live runs always re-derive an isolated .worktrees/bf-* checkout.
+  workspace_prepared:          { type: bool, default: false }
   # bugfix_destination selects the post-fix landing:
   #   open-pr        — hand the finished fix to pr-refinement and open a PR
   #   leave-worktree — stop after the validated bugfix, preserving the worktree
@@ -1563,6 +1568,7 @@ imports:
       base_branch:     "{{ world.base_branch }}"
       feature_branch:  "{{ world.feature_branch }}"
       bugfix_mode:     "{{ world.bugfix_mode }}"
+      workspace_prepared: "{{ world.workspace_prepared }}"
       # Project the project's real build/test commands into bf so its
       # testing/validating gates use the right toolchain (empty ⇒ Go defaults).
       build_cmd:       "{{ world.build_cmd }}"

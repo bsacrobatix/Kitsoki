@@ -113,10 +113,12 @@ states:
 
       # Step 0w: autostart owns maker workspace identity. A headless caller can
       # safely seed ticket metadata, but it must not be able to steer maker rooms
-      # onto "." or another non-isolated checkout by also seeding workspace_id /
-      # feature_branch / workdir. Triage is the explicit read-only exception
-      # below; every mutating bugfix run re-derives a .worktrees/bf-* checkout.
-      - when: "world.ticket_id != '' && world.bugfix_mode != 'triage' && !world.bf_autostart_attempted && (world.workspace_id != '' || world.feature_branch != '' || world.workdir != '')"
+      # onto "." or another non-isolated checkout via a seeded workdir. Triage is
+      # the explicit read-only exception below. A workdir already under the
+      # repo-relative .worktrees/ isolation (flow fixtures, prepared handoffs)
+      # is legitimate and keeps its seeded identity; anything else is cleared so
+      # the mutating run re-derives a .worktrees/bf-* checkout.
+      - when: "world.ticket_id != '' && world.bugfix_mode != 'triage' && !world.bf_autostart_attempted && !world.workspace_prepared && world.workdir != '' && !hasPrefix(world.workdir, '.worktrees/')"
         set:
           workspace_id: ""
           feature_branch: ""

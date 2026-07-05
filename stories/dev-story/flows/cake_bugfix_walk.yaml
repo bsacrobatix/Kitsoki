@@ -28,6 +28,10 @@ initial_world:
   ticket_url:     "issues/bugs/B-2026-05-18-list-broken.md"
   thread:         "B-2026-05-18-list-broken"
   workdir:        "testdata/projects/cake"
+  # This walk deliberately runs in a prepared demo-project workspace; declare
+  # it so bugfix's Step-0w isolation guard (idle.yaml) keeps the seeded
+  # identity instead of re-deriving a .worktrees/bf-* one.
+  workspace_prepared: true
   workspace_id:   "ws-cake-bug"
   base_branch:    "main"
   feature_branch: "fix/B-2026-05-18-list-broken"
