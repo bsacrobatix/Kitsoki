@@ -504,6 +504,7 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.agent.decide", AgentDecideHandler)
 	r.Register("host.agent.task", AgentTaskHandler)
 	r.Register("host.agent.converse", AgentConverseHandler)
+	r.Register("host.agent.codeact", AgentCodeactHandler)
 
 	// IDE link (host.ide.*) — editor awareness over the MCP-over-ws Link.
 	// Resolve the link from ctx; a nil/disconnected link returns the typed

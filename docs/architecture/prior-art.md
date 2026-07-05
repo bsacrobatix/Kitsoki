@@ -666,7 +666,7 @@ feedback in under a second.
 | **Sub-story imports w/ capability rebinding** | flow link | none | subgraph (no rebind) | ✓ `host_bindings` |
 | **World isolation + projection per import** | none | none | partial | ✓ `world_in:` / per-exit `set:` |
 | **`emit_intent` resolution across import depth** | n/a | n/a | n/a | ✓ `IntentAliases` walk |
-| **Agent-verb blast-radius taxonomy** | one action type | webhook | one node | ✓ ask / decide / task / extract / converse |
+| **Agent-verb blast-radius taxonomy** | one action type | webhook | one node | ✓ ask / decide / task / extract / converse / codeact |
 | **Sandbox-enforced read-only LLM call** | DIY | none | DIY | ✓ verb-level |
 | **Semantic routing tiers before LLM** | NLU adapter | route matcher | DIY | ✓ four tiers |
 | **Multi-surface transport (TUI / MCP / Jira / file)** | channels DIY | CX channels | LangServe | ✓ first-class |

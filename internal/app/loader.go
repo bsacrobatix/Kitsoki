@@ -2283,8 +2283,43 @@ func checkAgentEffect(file, loc string, eff Effect, agents map[string]*AgentDecl
 			addErr(msg)
 		}
 	}
+	if shortVerb == "codeact" {
+		if eff.With["sandbox"] != nil {
+			addErr(fmt.Sprintf(
+				"%s: sandbox: is not valid for host.agent.codeact — sandbox is a task/converse-only knob; codeact uses its own bounded-Starlark-loop sandboxing (internal/host/codeact)",
+				loc,
+			))
+		}
+	}
 
 	switch shortVerb {
+	case "codeact":
+		// M6d: with.capabilities must be a list drawn from the sanctioned
+		// v1 builtin capability allowlist.
+		rawCaps, present := eff.With["capabilities"]
+		if present {
+			var capList []any
+			switch v := rawCaps.(type) {
+			case []any:
+				capList = v
+			case []string:
+				for _, s := range v {
+					capList = append(capList, s)
+				}
+			}
+			for _, c := range capList {
+				capStr, _ := c.(string)
+				if capStr == "" || strings.Contains(capStr, "{{") {
+					continue
+				}
+				if !codeactCapabilityAllowlist[capStr] {
+					addErr(fmt.Sprintf(
+						"%s: with.capabilities entry %q is not a recognized capability — sanctioned host.agent.codeact capabilities are: world, vcs, http",
+						loc, capStr,
+					))
+				}
+			}
+		}
 	case "ask", "decide", "extract":
 		// M6a: reject mutation tools.
 		if decl != nil {
@@ -2342,6 +2377,15 @@ func checkAgentEffect(file, loc string, eff Effect, agents map[string]*AgentDecl
 			}
 		}
 	}
+}
+
+// codeactCapabilityAllowlist is the sanctioned v1 set of host.agent.codeact
+// with.capabilities entries. See docs/goals/codeact/GOAL.md and
+// internal/host/codeact/executor.go for the engine these proxy.
+var codeactCapabilityAllowlist = map[string]bool{
+	"world": true,
+	"vcs":   true,
+	"http":  true,
 }
 
 func validateSandboxBlock(loc string, raw any) string {
