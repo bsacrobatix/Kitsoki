@@ -88,7 +88,7 @@ Every cell carries two proof-class verdicts from `schemas/completion-state.schem
 
 | Workflow | TUI | Web | VS Code | gh-agent |
 |---|---|---|---|---|
-| **Onboard** | 🔴 gap | 🔴 gap | 🔴 gap | ⬜ out-of-scope |
+| **Onboard** | ✅ works | 🔴 gap | 🔴 gap | ⬜ out-of-scope |
 | **PRD / proposal** | 🔴 gap | 🔴 gap | 🔴 gap | 🔴 gap |
 | **Decompose → implement** | 🔴 gap | 🔴 gap | 🔴 gap | 🔴 gap |
 | **File a bug** | 🔴 gap | 🔴 gap | 🔴 gap | 🔴 gap |
@@ -96,8 +96,8 @@ Every cell carries two proof-class verdicts from `schemas/completion-state.schem
 
 ### Cell detail
 
-- **Onboard × TUI** — 🔴 gap: not yet exercised on gears-rust (WS-A exit: stranger-shaped onboard replayable no-LLM)
-  - mechanical: no standing verdict
+- **Onboard × TUI** — ✅ works: WS-A A3: a real onboard of a fresh gears-rust clone recorded through the dev-story onboard path (kitsoki session create/continue, live harness) and converted to a committed no-LLM flow+cassette (stories/dev-story/flows/onboard_gears_rust.yaml); replays green via `kitsoki test flows`. A2 external-ticket passthrough proven: discovery auto-binds tracker=github/ticket_repo=bsacrobatix/gears-rust from the real remote. See .context/dwf3-a3-recording-notes.md.
+  - mechanical: **solved** (replay, as of 2026-07-06)
   - experience: no standing verdict
 - **Onboard × Web** — 🔴 gap: not yet exercised on gears-rust; also no web onboarding entry at all
   - mechanical: no standing verdict

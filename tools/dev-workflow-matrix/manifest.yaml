@@ -162,8 +162,12 @@ cells:
   - workflow: onboard
     surface: tui
     repo: gears-rust
-    status: gap
-    reason: "not yet exercised on gears-rust (WS-A exit: stranger-shaped onboard replayable no-LLM)"
+    status: works
+    reason: "WS-A A3: a real onboard of a fresh gears-rust clone recorded through the dev-story onboard path (kitsoki session create/continue, live harness) and converted to a committed no-LLM flow+cassette (stories/dev-story/flows/onboard_gears_rust.yaml); replays green via `kitsoki test flows`. A2 external-ticket passthrough proven: discovery auto-binds tracker=github/ticket_repo=bsacrobatix/gears-rust from the real remote. See .context/dwf3-a3-recording-notes.md."
+    verdicts:
+      mechanical:
+        check_type: replay
+        path: tools/dev-workflow-matrix/verdicts/onboard-tui-gears-rust.replay.json
   - workflow: onboard
     surface: web
     repo: gears-rust
