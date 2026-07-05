@@ -27,6 +27,37 @@ The hosted webhook service is parameterized by environment:
   onboarded `.kitsoki/stories/.../app.yaml`, labelled issue routes use that
   project-local app; otherwise they fall back to Kitsoki's built-in routes.
 
+## Zero-copy setup: `kitsoki gh-agent setup` (preferred)
+
+The manifest wizard collapses sections **a–d** into two GitHub consent clicks
+with no settings-page copy/paste (packaging plan §2A — the Probot
+manifest-wizard pattern, in Go):
+
+```
+kitsoki gh-agent setup app --name <app-name> --public-base-url https://agent.example.com
+```
+
+serves a local page that auto-POSTs the App manifest (permission floor from
+shared decision #1 baked in), catches GitHub's redirect, exchanges the code at
+`/app-manifests/{code}/conversions`, and writes `kitsoki.env` + `gh-app.pem`
+(0600) with the App id, client id/secret, and webhook secret — then opens the
+install page and records the installation id once you approve it.
+
+Attaching further repositories later never touches the settings page again:
+
+```
+kitsoki gh-agent setup attach --repo owner/name --env-file ~/.config/kitsoki/gh-app/<name>/kitsoki.env
+```
+
+mints a user-to-server token (OAuth web flow when the client secret is on
+hand — first run costs one Authorize click, then it's cached — or the device
+flow with `--device`) and `PUT`s the repo into the installation;
+`--list` shows the installation's current repos. For a hand-made App, copy its
+Client ID (and generate a client secret or enable Device Flow) once, then
+`attach` works the same.
+
+Sections a–g remain the manual path and the reference for what the wizard does.
+
 ## a. Create the App
 
 Target org → **Settings → Developer settings → GitHub Apps → New GitHub
