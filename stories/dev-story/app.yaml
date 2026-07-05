@@ -720,6 +720,12 @@ world:
   design_file:           { type: string, default: "" }   # final published path docs/proposals/<slug>.md
   design_ticket_path:    { type: string, default: "" }   # feature ticket minted at publish, links back to design_file
 
+  # ── deliver handoff (lifted from `deliver` import's exits) ────────
+  # decompose-vs-direct alternative to the impl import: go_deliver drives the
+  # just-published proposal (design_file) through deliver's decompose → lint →
+  # review → fleet chain instead of a single ticket's implementation pipeline.
+  delivery_summary:      { type: string, default: "" }   # deliver's @exit:done summary (lifted from deliver__delivery_summary)
+
   # feedback + per-phase cycle budgets
   design_refine_feedback:   { type: string, default: "" }
   design_cycle:             { type: int, default: 0 }    # global audit counter for the proposal flow
@@ -1241,6 +1247,11 @@ intents:
     description: "Hand off to the cypilot sub-story (SDLC waterfall) for the picked epic."
     examples: ["cypilot", "drive epic", "waterfall"]
     priority: 55
+  go_deliver:
+    title: "Decompose"
+    description: "Hand off to the deliver sub-story: decompose a published proposal into briefs, review them, and fan ship-it over every brief. The decompose-vs-direct alternative to go_implementation for epic-sized work."
+    examples: ["decompose", "decompose the epic", "deliver the proposal", "break this into briefs"]
+    priority: 55
   go_code_review_story:
     title: "Review PR"
     description: "Hand off to the code-review sub-story (teammate PR review)."
@@ -1755,6 +1766,50 @@ imports:
         to: landing
         set:
           status: "abandoned"
+
+  # deliver — epic decomposition + fan-out chain (proposal
+  # deliver-canonical-decomposition.md, task B3). The decompose-vs-direct
+  # ALTERNATIVE to impl: `go_implementation` drives ONE ticket through the
+  # implementation pipeline directly; `go_deliver` decomposes an epic-sized
+  # proposal into independently-shippable briefs (decompose → lint →
+  # adversarial review → fleet fan-out of ship-it, behind a merge lock) and
+  # is offered as a labelled sibling arc, never chosen automatically (proposal
+  # Open Question 3 — operator choice, no size heuristic). Reached from
+  # `design_done` (a freshly-published proposal) and from `landing` (any
+  # already-published proposal picked up later).
+  #
+  # deliver's own root is `configure`, which gates on a non-empty epic_path
+  # and an explicit `start` before decomposition begins — unlike impl.idle
+  # (which self-provisions on entry), landing in deliver.configure still
+  # needs one more `deliver__start` turn to kick off the walk (world_in below
+  # only satisfies the epic_path gate, it does not auto-advance).
+  deliver:
+    source: ../deliver
+    entry: configure
+
+    world_in:
+      epic_path:          "{{ world.design_file }}"
+      base_branch:         "{{ world.base_branch }}"
+      main_worktree_path:  "{{ world.workdir != '' ? world.workdir : '.' }}"
+
+    # `start` collides with bf's already-lifted bare `start` (and `look` with
+    # the parent's bare `look`) — stays prefixed; the operator types
+    # `deliver__start` inside the compound.
+    intents:
+      import: []
+
+    exits:
+      done:
+        to: landing
+        set:
+          status:           "delivered"
+          delivery_summary: "{{ world.deliver__delivery_summary }}"
+          last_error:       ""
+      needs-human:
+        to: landing
+        set:
+          status:     "needs-human"
+          last_error: "{{ world.deliver__last_error }}"
 
   # Wave 4 — cypilot SDLC waterfall for epic-track tickets. Routed
   # from main when the picked ticket's type is "epic". cypilot is

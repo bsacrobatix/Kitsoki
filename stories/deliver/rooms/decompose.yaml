@@ -152,7 +152,16 @@ states:
     on_enter:
       - emit_intent: bail
     on:
+      # The engine's on_error handling already set last_error before this
+      # room was entered; the pass-through set: below makes that explicit at
+      # the exit arc itself so the static import-time check
+      # (checkExitRequires — requires exits.needs-human.requires: [last_error])
+      # can see it. Standalone deliver never triggers this check (only
+      # imported children are validated); dev-story's `deliver` import does.
       bail:
         - target: "@exit:needs-human"
+          effects:
+            - set:
+                last_error: "{{ world.last_error }}"
       look:
         - target: .
