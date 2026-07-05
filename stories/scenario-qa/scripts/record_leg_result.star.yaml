@@ -1,0 +1,10 @@
+inputs:
+  leg:           { type: object, required: false }
+  drive_result:  { type: object, required: false }
+  judge_result:  { type: object, required: false }
+
+outputs:
+  leg_results:     { type: object }
+  pass_count:      { type: int }
+  fail_count:      { type: int }
+  degraded_count:  { type: int }

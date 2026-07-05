@@ -1,0 +1,181 @@
+# check_all_transports — a transport=all check resolves to THREE legs, so the
+# per-leg loop must PAUSE at recording after each leg (one leg per turn keeps
+# the internal emit chain under EmitIntentMaxDepth) and require an explicit
+# "next_leg" to continue, draining to report only after the third leg.
+#
+# host.starlark.run's pick_leg / record_leg_result stubs are static per call
+# id (the flow harness stubs by invoke id, not by loop iteration — same
+# convention as stories/dogfood-marathon's pick_case/record_case), so this
+# flow asserts the LOOP MECHANICS (leg_index/leg_count-driven state
+# transitions, pacing) rather than asserting fabricated per-leg accumulation
+# content.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+
+host_handlers:
+  host.run:
+    by_call:
+      emit_scenario_qa_run:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            run_id: scenario-qa-run-all
+            run_dir: /repo/.artifacts/product-journey/scenario-qa-run-all
+            driver_plan_path: /repo/.artifacts/product-journey/scenario-qa-run-all/driver-plan.json
+            execution_plan_path: /repo/.artifacts/product-journey/scenario-qa-run-all/execution-plan.json
+            agent_brief_path: /repo/.artifacts/product-journey/scenario-qa-run-all/agent-brief.md
+      build_scenario_qa_deck:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            status: scenario_qa_deck_built
+            run_dir: /repo/.artifacts/product-journey/scenario-qa-run-all
+            deck_path: /repo/.artifacts/product-journey/scenario-qa-run-all/deck.slidey.json
+            leg_count: 3
+            pass_count: 2
+            fail_count: 0
+            degraded_count: 1
+            summary: "2 / 3 transport legs passed, 1 degraded-evidence."
+
+  host.starlark.run:
+    by_call:
+      plan_legs:
+        data:
+          legs:
+            items:
+              - leg_id: "bugfix::tui"
+                scenario: "bugfix"
+                transport: "tui"
+                visual_surface: "tui"
+                evidence_dir: "evidence/gears-rust--core-maintainer/bugfix"
+                transport_evidence_contract:
+                  primary_tool: "render.tui_png"
+                  evidence_kind: "rendered_tui_frame"
+                  level: "frame-level"
+              - leg_id: "bugfix::web"
+                scenario: "bugfix"
+                transport: "web"
+                visual_surface: "web"
+                evidence_dir: "evidence/gears-rust--core-maintainer/bugfix"
+                transport_evidence_contract:
+                  primary_tool: "visual.snapshot"
+                  evidence_kind: "browser_screenshot"
+                  level: "frame-level"
+              - leg_id: "bugfix::vscode"
+                scenario: "bugfix"
+                transport: "vscode"
+                visual_surface: "vscode"
+                evidence_dir: "evidence/gears-rust--core-maintainer/bugfix"
+                transport_evidence_contract:
+                  primary_tool: "visual.open (kind=vscode)"
+                  evidence_kind: "screenshot_or_tui_png"
+                  level: "bridge-level"
+          leg_count: 3
+          driver_agent: ".agents/agents/product-journey-qa-driver.md"
+          run_dir_rel: ".artifacts/product-journey/scenario-qa-run-all"
+          plan_status: { resolved: true }
+      pick_leg:
+        data:
+          current_leg:
+            leg_id: "bugfix::tui"
+            scenario: "bugfix"
+            transport: "tui"
+            visual_surface: "tui"
+          current_leg_id: "bugfix::tui"
+      record_leg_result:
+        data:
+          leg_results:
+            items:
+              - { leg_id: "bugfix::tui", scenario: "bugfix", transport: "tui", evidence_level: "frame-level", driver_status: "captured", verdict: "pass", verdict_summary: "ok" }
+              - { leg_id: "bugfix::web", scenario: "bugfix", transport: "web", evidence_level: "frame-level", driver_status: "captured", verdict: "pass", verdict_summary: "ok" }
+              - { leg_id: "bugfix::vscode", scenario: "bugfix", transport: "vscode", evidence_level: "bridge-level", driver_status: "degraded-evidence", verdict: "degraded-evidence", verdict_summary: "vscode bridge JSON-degraded" }
+          pass_count: 2
+          fail_count: 0
+          degraded_count: 1
+      build_report:
+        data:
+          report_path: ".artifacts/product-journey/scenario-qa-run-all/report.md"
+          report_summary: "2 / 3 transport legs passed, 1 degraded-evidence."
+
+  host.agent.task:
+    by_call:
+      drive_leg:
+        data:
+          ok: true
+          submitted:
+            status: "captured"
+            evidence_refs: ["evidence-1"]
+            frames_dir: "evidence/gears-rust--core-maintainer/bugfix"
+            summary: "Captured evidence for this leg."
+      judge_leg:
+        data:
+          ok: true
+          submitted:
+            verdict: "pass"
+            summary: "Evidence supports the scenario."
+            cited_frames: ["frame-1.png"]
+
+turns:
+  # `check transport=all` auto-drives the FIRST leg (tui) through execute →
+  # judge → recording, then PAUSES at recording (2 legs remain).
+  - intent:
+      name: check
+      slots:
+        scenario: bugfix
+        transport: all
+        persona: core-maintainer
+        target: gears-rust
+        seed: story-flow-all
+    expect_state: recording
+    expect_world:
+      mode: catalog
+      run_id: scenario-qa-run-all
+      leg_count: 3
+      leg_index: 0
+    expect_host_calls:
+      - handler: host.run
+        args: { call: emit_scenario_qa_run }
+      - handler: host.starlark.run
+        args: { call: plan_legs }
+      - handler: host.agent.task
+        args: { call: drive_leg }
+      - handler: host.agent.task
+        args: { call: judge_leg }
+      - handler: host.starlark.run
+        args: { call: record_leg_result }
+    expect_view_matches: "recording[\\s\\S]*next_leg"
+
+  # `next_leg` drives the SECOND leg (web), pauses again (1 leg remains).
+  - intent: { name: next_leg, slots: {} }
+    expect_state: recording
+    expect_world:
+      leg_index: 1
+      leg_count: 3
+
+  # `next_leg` drives the THIRD (final) leg (vscode); the loop drains straight
+  # to report without another pause.
+  - intent: { name: next_leg, slots: {} }
+    expect_state: report
+    expect_world:
+      leg_index: 2
+      leg_count: 3
+      report_path: ".artifacts/product-journey/scenario-qa-run-all/report.md"
+      report_summary: "2 / 3 transport legs passed, 1 degraded-evidence."
+      deck_path: "/repo/.artifacts/product-journey/scenario-qa-run-all/deck.slidey.json"
+    expect_host_calls:
+      - handler: host.starlark.run
+        args: { call: build_report }
+      - handler: host.run
+        args: { call: build_scenario_qa_deck }
+    expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*2 / 3 transport legs passed, 1 degraded-evidence[\\s\\S]*vscode / bugfix[\\s\\S]*driver=degraded-evidence verdict=degraded-evidence[\\s\\S]*\\[bridge-level\\]"
+
+  - intent: { name: report, slots: {} }
+    expect_state: report
+    expect_world:
+      report_path: ".artifacts/product-journey/scenario-qa-run-all/report.md"
+
+expect_no_errors: true
