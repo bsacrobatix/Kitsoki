@@ -18,16 +18,35 @@ func ObjectCatalogGraph(cat *objectgraph.Catalog, graphID string) KitsokiGraph {
 	}
 	for _, id := range cat.SortedNodeIDs() {
 		node := cat.Nodes[id]
+		sources := make([]string, 0, len(node.Sources))
+		for _, s := range node.Sources {
+			sources = append(sources, string(s))
+		}
+		attrs := map[string]any{
+			"visibility": string(node.Visibility),
+			"sources":    sources,
+			// fields carries every type-specific value the shared envelope
+			// doesn't promote (summary, statement, goal, content_fields,
+			// media, ...) so catalog-style clients (CatalogPanel.vue) can
+			// render node detail generically, without the Go side
+			// hardcoding a per-type field list.
+			"fields": node.Fields,
+		}
+
+		eff, ok := cat.Registry.Effective(node.TypeID)
+		if ok {
+			attrs["type_chain"] = eff.Ancestry
+		}
+
 		g.Nodes = append(g.Nodes, GraphNode{
 			ID:     string(node.ID),
 			Kind:   node.TypeID,
 			Label:  node.Title,
 			Ref:    GraphRef{Kind: "object-graph-node", Ref: string(node.ID)},
 			Status: node.Status,
-			Attrs:  map[string]any{"visibility": string(node.Visibility)},
+			Attrs:  attrs,
 		})
 
-		eff, ok := cat.Registry.Effective(node.TypeID)
 		if !ok {
 			continue
 		}
