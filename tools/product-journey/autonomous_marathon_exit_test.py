@@ -25,7 +25,7 @@ def fake_autonomous_marathon(*_args, **_kwargs):
         "validation_status": "invalid",
         "validation_errors": 1,
         "validation_warnings": 0,
-        "autonomous_gate_summary": "filing=pass, gh_agent=fail, review=pass, validation=fail",
+        "autonomous_gate_summary": "filing=pass, gh_agent=fail, independent_verify=fail, review=pass, validation=fail",
     }
 
 

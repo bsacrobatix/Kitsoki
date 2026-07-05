@@ -604,7 +604,9 @@ def main():
         _check("legacy autonomous loop requires native close-out",
                result["autonomous_fix_status"] == "autonomous_fix_invalid")
         _check("legacy autonomous loop reports missing close-out gates",
-               result["autonomous_gate_summary"] == "filing=pass, gh_agent=pass, review=fail, validation=fail"
+               result["autonomous_gate_summary"] == "filing=pass, gh_agent=pass, independent_verify=pass, review=fail, validation=fail"
+               and result["independent_verify_status"] == "pass"
+               and result["independent_verify_summary"] == "verified=1/1"
                and any(i["id"] == "issue-closeout" for i in result["validation_issues"]))
         _check("autonomous loop preserves filing status", result["filing_status"] == "findings_filed")
         _check("autonomous loop drained gh-agent", result["gh_agent_drain_status"] == "drained" and result["gh_agent_done_count"] == 1)
@@ -697,7 +699,7 @@ def main():
                result["autonomous_fix_status"] == "autonomous_fix_invalid"
                and result["gh_agent_missing_evidence_count"] == 1)
         _check("autonomous loop reports failing gates for missing evidence",
-               result["autonomous_gate_summary"] == "filing=pass, gh_agent=fail, review=fail, validation=fail"
+               result["autonomous_gate_summary"] == "filing=pass, gh_agent=fail, independent_verify=fail, review=fail, validation=fail"
                and any(i["id"] == "gh-agent-fix-evidence" for i in result["validation_issues"]))
 
         run_dir6, run_json6 = run.build_run_bundle(
@@ -729,7 +731,9 @@ def main():
                and result["gh_agent_fix_evidence_count"] == 3
                and result["gh_agent_missing_verify_count"] == 1)
         _check("autonomous loop reports failing gates for missing independent verification",
-               result["autonomous_gate_summary"] == "filing=pass, gh_agent=fail, review=fail, validation=fail"
+               result["autonomous_gate_summary"] == "filing=pass, gh_agent=pass, independent_verify=fail, review=fail, validation=fail"
+               and result["independent_verify_status"] == "fail"
+               and result["independent_verify_summary"] == "missing=1, verified=0/1"
                and any(i["id"] == "gh-agent-independent-verify" for i in result["validation_issues"]))
 
         run_dir5, run_json5 = run.build_run_bundle(
@@ -760,7 +764,7 @@ def main():
                result["autonomous_fix_status"] == "autonomous_fix_invalid"
                and result["gh_agent_missing_run_url_count"] == 1)
         _check("autonomous loop reports failing gates for missing run URLs",
-               result["autonomous_gate_summary"] == "filing=pass, gh_agent=fail, review=fail, validation=fail"
+               result["autonomous_gate_summary"] == "filing=pass, gh_agent=fail, independent_verify=pass, review=fail, validation=fail"
                and any(i["id"] == "gh-agent-run-url" for i in result["validation_issues"]))
 
         run_dir4, run_json4 = run.build_run_bundle(
@@ -788,7 +792,7 @@ def main():
                and result["findings_filed_count"] == 0
                and result["gh_agent_enqueued_count"] == 0)
         _check("autonomous loop requires at least one drained fix job",
-               result["autonomous_gate_summary"] == "filing=fail, gh_agent=fail, review=fail, validation=fail"
+               result["autonomous_gate_summary"] == "filing=fail, gh_agent=fail, independent_verify=fail, review=fail, validation=fail"
                and any(i["id"] == "gh-agent-fixes" for i in result["validation_issues"]))
 
     print("PASS")

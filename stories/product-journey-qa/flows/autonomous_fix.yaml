@@ -71,7 +71,9 @@ host_handlers:
             gh_agent_missing_verify_count: 0
             gh_agent_independent_verify_summary: "https://agent.example/api/run/job-201/assets/independent-verify.md; https://agent.example/api/run/job-202/assets/independent-verify.md"
             gh_agent_missing_verify_summary: ""
-            autonomous_gate_summary: "filing=pass, gh_agent=pass, review=pass, validation=pass"
+            autonomous_gate_summary: "filing=pass, gh_agent=pass, independent_verify=pass, review=pass, validation=pass"
+            independent_verify_status: pass
+            independent_verify_summary: "verified=2/2"
             issue_closeout_status: closed
             issue_closeout_count: 2
             issue_closeout_summary: "Closed 2 fixed GitHub issue(s)."
@@ -154,14 +156,16 @@ turns:
       gh_agent_missing_triage_count: 0
       gh_agent_independent_verify_count: 2
       gh_agent_missing_verify_count: 0
-      autonomous_gate_summary: "filing=pass, gh_agent=pass, review=pass, validation=pass"
+      autonomous_gate_summary: "filing=pass, gh_agent=pass, independent_verify=pass, review=pass, validation=pass"
+      independent_verify_status: pass
+      independent_verify_summary: "verified=2/2"
       issue_closeout_status: closed
       issue_closeout_count: 2
       review_status: ready
       review_failed_count: 0
       validation_status: valid
       validation_errors: 0
-    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous fix[\\s\\S]*autonomous_fix_valid[\\s\\S]*Autonomous report[\\s\\S]*autonomous-fix-report.md[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, review=pass, validation=pass[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 2[\\s\\S]*Issue filing[\\s\\S]*findings_filed: filed 2[\\s\\S]*GH-agent claims[\\s\\S]*claimed: claimed 2[\\s\\S]*GH-agent drain[\\s\\S]*drained: drained 2, done 2, failed 0, active 0[\\s\\S]*GH-agent evidence[\\s\\S]*4 attached; 0 missing; triage 2 attached / 0 missing[\\s\\S]*triage-verdict.md[\\s\\S]*Review checks[\\s\\S]*25 / 25 passed[\\s\\S]*Validation[\\s\\S]*valid"
+    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous fix[\\s\\S]*autonomous_fix_valid[\\s\\S]*Autonomous report[\\s\\S]*autonomous-fix-report.md[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, independent_verify=pass,[\\s\\S]*review=pass, validation=pass[\\s\\S]*Independent verify[\\s\\S]*pass: verified=2/2[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 2[\\s\\S]*Issue filing[\\s\\S]*findings_filed: filed 2[\\s\\S]*GH-agent claims[\\s\\S]*claimed: claimed 2[\\s\\S]*GH-agent drain[\\s\\S]*drained: drained 2, done 2, failed 0, active 0[\\s\\S]*GH-agent evidence[\\s\\S]*4 attached; 0 missing; triage 2 attached / 0 missing[\\s\\S]*triage-verdict.md[\\s\\S]*Review checks[\\s\\S]*25 / 25 passed[\\s\\S]*Validation[\\s\\S]*valid"
     expect_host_calls:
       - handler: host.run
         args:
