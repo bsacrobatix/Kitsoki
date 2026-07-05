@@ -4997,6 +4997,13 @@ def gitops_autonomous_fix(
         raise SystemExit(f"kitsoki gitops autonomous-fix printed invalid JSON: {exc}\n{proc.stdout}") from exc
 
 
+def legacy_autonomous_fix_loop_cli_allowed() -> bool:
+    return (
+        os.environ.get("KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE") == "1"
+        or os.environ.get("KITSOKI_PRODUCT_JOURNEY_ALLOW_LEGACY_AUTOFIX_LOOP") == "1"
+    )
+
+
 def autonomous_marathon_control_path(run_dir: Path) -> Path:
     return run_dir / "autonomous-marathon-control.json"
 
@@ -10577,7 +10584,7 @@ def main() -> None:
     parser.add_argument("--record-driver-event", action="store_true", help="Append one driver execution event to driver-journal.json")
     parser.add_argument("--seed-demo-evidence", action="store_true", help="Attach deterministic demo evidence and findings to an existing run bundle")
     parser.add_argument("--file-findings", action="store_true", help="File the bundle's credible issue findings as GitHub issues via the kitsoki bug orchestration")
-    parser.add_argument("--autonomous-fix-loop", action="store_true", help="File findings, enqueue/drain gh-agent fixes, review, and validate as one no-operator reliability gate")
+    parser.add_argument("--autonomous-fix-loop", action="store_true", help="Internal legacy test backend for kitsoki gitops autonomous-fix")
     parser.add_argument("--autonomous-marathon", action="store_true", help="Create or finalize a standing persona-QA marathon through native autonomous fix, review, validation, and stats")
     parser.add_argument("--autonomous-marathon-watchdog", action="store_true", help="Check a standing persona-QA marathon heartbeat against its watchdog control artifact")
     parser.add_argument(
@@ -10590,7 +10597,7 @@ def main() -> None:
     parser.add_argument("--autonomous-heartbeat-minutes", type=int, default=15, help="Heartbeat interval recorded in autonomous marathon control artifacts")
     parser.add_argument("--autonomous-watchdog-minutes", type=int, default=45, help="Watchdog escalation interval recorded in autonomous marathon control artifacts")
     parser.add_argument("--watchdog-now", default="", help="Deterministic ISO timestamp for --autonomous-marathon-watchdog tests")
-    parser.add_argument("--report-invalid-autonomous-fix", action="store_true", help="With --autonomous-fix-loop, print invalid gate JSON and exit 0 so story callers can bind failure evidence")
+    parser.add_argument("--report-invalid-autonomous-fix", action="store_true", help="With internal autonomous-fix backends, print invalid gate JSON and exit 0 so story callers can bind failure evidence")
     parser.add_argument("--report-invalid-autonomous-marathon", action="store_true", help="With --autonomous-marathon, print invalid marathon JSON and exit 0 so story callers can bind failure evidence")
     parser.add_argument("--report-blocked-autonomous-watchdog", action="store_true", help="With --autonomous-marathon-watchdog, print blocked watchdog JSON and exit 0 so story callers can bind failure evidence")
     parser.add_argument("--stats", action="store_true", help="Derive product-journey issue stats from run bundles and cached issue state")
@@ -11257,6 +11264,11 @@ def main() -> None:
         return
 
     if args.autonomous_fix_loop:
+        if not legacy_autonomous_fix_loop_cli_allowed():
+            raise SystemExit(
+                "--autonomous-fix-loop is an internal test backend; use "
+                "kitsoki gitops autonomous-fix or the product-journey story autonomous_fix intent"
+            )
         if not args.run_dir:
             raise SystemExit("--autonomous-fix-loop requires --run-dir")
         if not args.gh_agent_db:

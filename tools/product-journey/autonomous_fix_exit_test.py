@@ -11,6 +11,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -72,15 +73,42 @@ def main():
     original_argv = sys.argv
     original_loop = run.autonomous_fix_loop
     original_run_dir_from_arg = run.run_dir_from_arg
+    old_fake = os.environ.get("KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE")
     try:
         run.autonomous_fix_loop = fake_autonomous_fix_loop
         run.run_dir_from_arg = lambda value: Path(value)
+        os.environ.pop("KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE", None)
+        sys.argv = [
+            "run.py",
+            "--autonomous-fix-loop",
+            "--json-output",
+            "--run-dir",
+            "/tmp/product-journey-run",
+            "--ticket-repo",
+            "o/r",
+            "--gh-agent-db",
+            "/tmp/gh-agent.sqlite",
+        ]
+        try:
+            run.main()
+        except SystemExit as exc:
+            if "--autonomous-fix-loop is an internal test backend" not in str(exc):
+                print(f"FAIL: direct autonomous-fix-loop should point callers at gitops, got {exc}")
+                raise SystemExit(1)
+        else:
+            print("FAIL: direct autonomous-fix-loop unexpectedly succeeded")
+            raise SystemExit(1)
+        os.environ["KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE"] = "1"
         run_case([], 1)
         run_case(["--report-invalid-autonomous-fix"], 0)
     finally:
         sys.argv = original_argv
         run.autonomous_fix_loop = original_loop
         run.run_dir_from_arg = original_run_dir_from_arg
+        if old_fake is None:
+            os.environ.pop("KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE", None)
+        else:
+            os.environ["KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE"] = old_fake
 
     print("PASS")
 
