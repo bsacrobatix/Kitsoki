@@ -82,6 +82,43 @@ func TestLoadCatalog_SeedCorpusRegression(t *testing.T) {
 	}
 }
 
+// TestLoadCatalog_NestsUnderEdgeMarker is the W6.2 follow-up's regression
+// check: proposal.child_of and persona.persona_of must both parse with
+// NestsUnder set, so a generic UI list projection can derive "which edges
+// mean nest me under my target" from the type registry instead of a
+// hand-maintained kind->edge table that silently drifts (the bug the
+// marker replaces).
+func TestLoadCatalog_NestsUnderEdgeMarker(t *testing.T) {
+	cat, err := LoadCatalog("../../docs/proposals/project-object-graph/seed-objects.yaml")
+	if err != nil {
+		t.Fatalf("LoadCatalog: %v", err)
+	}
+	for _, tc := range []struct {
+		typeID, edgeID string
+	}{
+		{"proposal", "child_of"},
+		{"persona", "persona_of"},
+	} {
+		eff, ok := cat.Registry.Effective(tc.typeID)
+		if !ok {
+			t.Fatalf("type %q not found", tc.typeID)
+		}
+		found := false
+		for _, decl := range eff.EdgeFields {
+			if decl.ID != EdgeField(tc.edgeID) {
+				continue
+			}
+			found = true
+			if !decl.NestsUnder {
+				t.Errorf("%s.%s: NestsUnder = false, want true", tc.typeID, tc.edgeID)
+			}
+		}
+		if !found {
+			t.Errorf("%s: edge field %q not found", tc.typeID, tc.edgeID)
+		}
+	}
+}
+
 func TestLoadCatalog_BadFixtures(t *testing.T) {
 	cases := []struct {
 		name       string

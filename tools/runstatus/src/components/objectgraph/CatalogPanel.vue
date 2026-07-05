@@ -107,32 +107,34 @@ const filteredNodes = computed(() => {
     .sort((a, b) => typeOrder(a.kind) - typeOrder(b.kind) || a.label.localeCompare(b.label));
 });
 
-// Some node kinds nest under a same-or-different-kind parent rather than
+// Some nodes nest under a same-or-different-kind parent rather than
 // standing as their own peer entry: a persona nests under the actor it
 // profiles (persona_of), and a proposal slice nests under the epic it
-// decomposes (child_of, W6.2). Nesting only applies when the parent is
-// present in the current filtered list (e.g. the type chip narrows to just
-// "Personas" or just the children's own kind) — otherwise the node falls
-// back to a flat peer entry so it's never silently hidden.
-const NEST_EDGE: Record<string, string> = {
-  persona: "persona_of",
-  proposal: "child_of",
-};
-
+// decomposes (child_of, W6.2). Which edges mean "nest me under my target"
+// is read straight off the wire graph's edge.attrs.nests_under — set by
+// ObjectCatalogGraph from the type registry's `nests_under: true` edge-field
+// marker (internal/graph/registry.go's EdgeFieldDecl.NestsUnder) — rather
+// than a hand-maintained kind->edge table here that silently drifts from
+// the type registry whenever a new nesting relationship is added (the bug
+// this replaces: W6.2 shipped 21 new child proposals before this table
+// existed, and they all rendered as flat peers until it was added by hand).
+// Nesting only applies when the parent is present in the current filtered
+// list (e.g. the type chip narrows to just "Personas") — otherwise the
+// node falls back to a flat peer entry so it's never silently hidden.
 const groupedNodes = computed(() => {
   const nodes = filteredNodes.value;
   const listedIds = new Set(nodes.map((node) => node.id));
+  const nodeById = new Map(props.graph.nodes.map((node) => [node.id, node]));
   const childrenByParent = new Map<string, ObjectGraphNode[]>();
   const nestedIds = new Set<string>();
-  for (const node of nodes) {
-    const edgeKind = NEST_EDGE[node.kind];
-    if (!edgeKind) continue;
-    const parent = edgeTargetsByKind(props.graph, node.id, edgeKind)[0];
-    if (parent && listedIds.has(parent.id)) {
-      if (!childrenByParent.has(parent.id)) childrenByParent.set(parent.id, []);
-      childrenByParent.get(parent.id)?.push(node);
-      nestedIds.add(node.id);
-    }
+  for (const edge of props.graph.edges) {
+    if (!edge.attrs?.nests_under) continue;
+    if (!listedIds.has(edge.source) || !listedIds.has(edge.target)) continue;
+    const child = nodeById.get(edge.source);
+    if (!child) continue;
+    if (!childrenByParent.has(edge.target)) childrenByParent.set(edge.target, []);
+    childrenByParent.get(edge.target)?.push(child);
+    nestedIds.add(edge.source);
   }
   const grouped = new Map<string, Array<{ node: ObjectGraphNode; children: ObjectGraphNode[] }>>();
   for (const node of nodes) {

@@ -396,6 +396,7 @@ type_registry:
       - id: persona_of
         target_type: actor
         cardinality: one
+        nests_under: true
       - id: participates_in
         target_type: use-case
         cardinality: many
@@ -450,6 +451,7 @@ type_registry:
       - id: child_of
         target_type: proposal
         cardinality: one
+        nests_under: true
       - id: decomposes_to
         target_type: change
         cardinality: many
