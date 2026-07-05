@@ -3286,11 +3286,6 @@ def file_findings(
     except json.JSONDecodeError as exc:
         raise SystemExit(f"kitsoki bug file-findings printed invalid JSON ({exc}): {proc.stdout[:400]}")
 
-    if not dry_run:
-        # The Go side rewrote findings.json (issue URLs + the filing block);
-        # refresh every derived artifact so decks/metrics/handoff stay honest.
-        update_derived_artifacts(run_dir, publish_deck=publish_deck)
-
     findings = read_json(run_dir / "findings.json")
     credible = credible_issue_findings(findings)
     filed_urls = [
@@ -3371,6 +3366,11 @@ def file_findings(
             "gh_agent_run_summary": "",
             "gh_agent_drained_jobs": [],
         })
+    if not dry_run:
+        # The Go side rewrote findings.json (issue URLs + the filing block), and
+        # the gh-agent handoff may have added fix-run lifecycle evidence. Refresh
+        # derived artifacts after both writes so decks/metrics/handoff stay honest.
+        update_derived_artifacts(run_dir, publish_deck=publish_deck)
     result.update(run_story_summary(run_dir))
     return result
 
@@ -4897,9 +4897,46 @@ def validate_run_bundle(run_dir: Path) -> dict:
 
     validate_slidey_deck_shape(deck, media_manifest, issues)
     scene_eyebrows = deck_scene_eyebrows(deck)
-    for expected in ["Persona lens", "Driver plan", "Driver contract", "Video playback", "Scenario outcomes", "Finding matrix", "Proof gates"]:
+    for expected in ["Persona lens", "Driver plan", "Driver contract", "Video playback", "Scenario outcomes", "Finding matrix", "GH-agent fixes", "Proof gates"]:
         if deck and expected not in scene_eyebrows:
             add_validation_issue(issues, "error", "deck-scene", "deck.slidey.json is missing a required review scene", expected)
+    gh_agent = findings_json.get("gh_agent", {}) if isinstance(findings_json.get("gh_agent", {}), dict) else {}
+    gh_agent_requested = gh_agent.get("enqueue_status", "") not in {"", "disabled", "dry-run"}
+    if gh_agent_requested:
+        enqueued = int(gh_agent.get("enqueued_count", 0) or 0)
+        done = int(gh_agent.get("done_count", 0) or 0)
+        failed = int(gh_agent.get("failed_count", 0) or 0)
+        active = int(gh_agent.get("active_count", 0) or 0)
+        if gh_agent.get("drain_status") != "drained" or failed or active or done < enqueued:
+            add_validation_issue(
+                issues,
+                "error",
+                "gh-agent-fixes",
+                "gh-agent fixing was requested but queued fixes did not drain to successful reviewable runs",
+                f"enqueue={gh_agent.get('enqueue_status', '')}, drain={gh_agent.get('drain_status', '')}, enqueued={enqueued}, done={done}, failed={failed}, active={active}",
+            )
+        scene_bodies = [
+            str(scene.get("body", ""))
+            for scene in deck.get("scenes", [])
+            if isinstance(scene, dict) and scene.get("eyebrow") == "GH-agent fixes"
+        ] if deck else []
+        expected_tokens = [
+            job.get("run_url", "")
+            for job in gh_agent.get("drained_jobs", [])
+            if isinstance(job, dict) and job.get("run_url")
+        ]
+        missing_tokens = [
+            token for token in expected_tokens
+            if token and not any(token in body for body in scene_bodies)
+        ]
+        if missing_tokens:
+            add_validation_issue(
+                issues,
+                "error",
+                "gh-agent-fix-deck",
+                "GH-agent fix run URLs are missing from the review deck",
+                ", ".join(missing_tokens[:5]),
+            )
     playback_count = media_manifest.get("summary", {}).get("playback_items", 0) if media_manifest else 0
     video_scenes = [
         scene for scene in deck.get("scenes", [])
@@ -6824,6 +6861,47 @@ def render_deck(
         for item in finding_items[:12]
     ]
     findings_body = "\n".join(finding_lines) if finding_lines else "No strengths, weaknesses, issues, or fixes recorded yet."
+    filed_issue_lines = [
+        f"{item.get('id', item.get('title', 'finding'))}: {item.get('github_issue', {}).get('url', '')}"
+        for item in finding_items
+        if item.get("github_issue", {}).get("url")
+    ]
+    gh_agent = findings.get("gh_agent", {}) if isinstance(findings, dict) and isinstance(findings.get("gh_agent", {}), dict) else {}
+    gh_agent_job_lines = []
+    for job in gh_agent.get("drained_jobs", []) or gh_agent.get("jobs", []):
+        if not isinstance(job, dict):
+            continue
+        details = [
+            f"{job.get('origin_ref', '')}",
+            f"state={job.get('state', '')}",
+        ]
+        if job.get("run_url"):
+            details.append(f"run={job.get('run_url')}")
+        if job.get("incident_url"):
+            details.append(f"incident={job.get('incident_url')}")
+        if job.get("err_msg"):
+            details.append(f"error={job.get('err_msg')}")
+        gh_agent_job_lines.append(" · ".join(part for part in details if part))
+    gh_agent_lines = [
+        f"Filing: {len(filed_issue_lines)} issue URL(s)",
+        *filed_issue_lines[:8],
+        (
+            "Queue: "
+            f"{gh_agent.get('enqueue_status', 'not requested')} · "
+            f"enqueued {gh_agent.get('enqueued_count', 0)}, skipped {gh_agent.get('skipped_count', 0)}"
+        ),
+        (
+            "Drain: "
+            f"{gh_agent.get('drain_status', 'not requested')} · "
+            f"drained {gh_agent.get('drained_count', 0)}, done {gh_agent.get('done_count', 0)}, "
+            f"failed {gh_agent.get('failed_count', 0)}, active {gh_agent.get('active_count', 0)}"
+        ),
+    ]
+    if gh_agent_job_lines:
+        gh_agent_lines.extend(gh_agent_job_lines[:8])
+    else:
+        gh_agent_lines.append("No gh-agent fix runs have been recorded yet.")
+    gh_agent_body = "\n".join(gh_agent_lines)
     lens = persona_lens(run_json["persona"])
     persona_body = (
         f"Starting surface: {lens['starting_surface']}\n"
@@ -6984,6 +7062,13 @@ def render_deck(
             "title": "Strengths, weaknesses, issues, fixes",
             "body": findings_body,
             "narration": "The journey report records what worked, what failed, what was found, and what was fixed.",
+        },
+        {
+            "type": "narrative",
+            "eyebrow": "GH-agent fixes",
+            "title": "Filed issues and autonomous fix runs",
+            "body": gh_agent_body,
+            "narration": "Filed product-journey issues and gh-agent fix runs are kept together so reviewers can inspect both the original evidence and the autonomous repair evidence.",
         },
         {
             "type": "narrative",

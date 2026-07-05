@@ -162,6 +162,13 @@ def review_check(review_result, check_id):
     return None
 
 
+def deck_scene(deck, eyebrow):
+    for scene in deck.get("scenes", []):
+        if scene.get("eyebrow") == eyebrow:
+            return scene
+    return {}
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
@@ -230,6 +237,12 @@ def main():
         findings = run.read_json(run_dir / "findings.json")
         _check("filing block recorded", findings["filing"]["requested"] is True
                and findings["filing"]["ticket_repo"] == "o/r")
+        deck = run.read_json(run_dir / "deck.slidey.json")
+        gh_scene = deck_scene(deck, "GH-agent fixes")
+        _check("deck has gh-agent fix review scene", bool(gh_scene))
+        _check("deck includes filed issues and fix run URLs",
+               "https://github.com/o/r/issues/101" in gh_scene.get("body", "")
+               and "https://agent.example/run/job-1" in gh_scene.get("body", ""))
         seeded = [i for i in findings["items"] if i.get("origin") == "seeded"]
         _check("seeded finding not filed", not seeded[0].get("github_issue"))
 
@@ -255,6 +268,20 @@ def main():
         validated = run.validate_run_bundle(run_dir)
         _check("validate has no findings-filed error",
                not any(i["id"] == "findings-filed" for i in validated["issues"]))
+        _check("validate has no gh-agent evidence error",
+               not any(i["id"] in {"gh-agent-fixes", "gh-agent-fix-deck"} for i in validated["issues"]))
+        deck_path = run_dir / "deck.slidey.json"
+        stale_deck = run.read_json(deck_path)
+        for scene in stale_deck["scenes"]:
+            if scene.get("eyebrow") == "GH-agent fixes":
+                scene["body"] = scene.get("body", "").replace("https://agent.example/run/job-1", "")
+                break
+        run.write_json(deck_path, stale_deck)
+        stale_validated = run.validate_run_bundle(run_dir)
+        _check("validate catches missing gh-agent run URL in deck",
+               any(i["id"] == "gh-agent-fix-deck" and i["severity"] == "error"
+                   for i in stale_validated["issues"]))
+        run.update_derived_artifacts(run_dir, None)
 
         run.record_finding(run_dir, "issue", "late credible", "found after filing",
                            scenario_id, "high", "", "open", None)
