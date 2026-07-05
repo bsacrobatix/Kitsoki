@@ -12,8 +12,9 @@ KITSOKI_BIN so nothing calls go, gh, GitHub, or an LLM:
   2. filing records issue URLs + the filing block and refreshes derived
      artifacts,
   3. a re-run skips already-filed findings (idempotent),
-  4. once filing was requested, review gains a findings-filed check (20 checks
-     total) and validate errors on credible-but-unfiled findings.
+  4. once filing was requested, review gains native filing and gh-agent gates
+     and validate errors on credible-but-unfiled findings or missing fix
+     evidence.
 """
 
 import importlib.util
@@ -37,7 +38,7 @@ Mirrors the Go orchestration's bundle contract: file each credible unfiled
 issue finding (record github_issue), stamp findings.filing, print the JSON
 result. --dry-run touches nothing.
 """
-import argparse, json, sys
+import argparse, json, os, sys
 from pathlib import Path
 
 parser = argparse.ArgumentParser()
@@ -75,6 +76,20 @@ if (args.verb1, args.verb2) == ("gh-agent", "drain"):
             "run_url": row["run_url"],
             "incident_url": "",
             "err_msg": "",
+            "assets": [] if os.environ.get("KITSOKI_FAKE_GH_AGENT_NO_ASSETS") else [
+                {
+                    "name": "fix-report.md",
+                    "mime_type": "text/markdown",
+                    "size_bytes": 128,
+                    "url": f"https://agent.example/run/job-{i}/artifacts/fix-report.md",
+                },
+                {
+                    "name": "fix.patch",
+                    "mime_type": "text/x-diff",
+                    "size_bytes": 256,
+                    "url": f"https://agent.example/run/job-{i}/artifacts/fix.patch",
+                },
+            ],
         })
     db_path.write_text(json.dumps(rows, indent=2, sort_keys=True) + "\n")
     print(json.dumps({
@@ -243,6 +258,9 @@ def main():
         _check("deck includes filed issues and fix run URLs",
                "https://github.com/o/r/issues/101" in gh_scene.get("body", "")
                and "https://agent.example/run/job-1" in gh_scene.get("body", ""))
+        _check("deck includes gh-agent fix evidence links",
+               "https://agent.example/run/job-1/artifacts/fix-report.md" in gh_scene.get("body", "")
+               and "https://agent.example/run/job-1/artifacts/fix.patch" in gh_scene.get("body", ""))
         seeded = [i for i in findings["items"] if i.get("origin") == "seeded"]
         _check("seeded finding not filed", not seeded[0].get("github_issue"))
 
@@ -269,16 +287,30 @@ def main():
         _check("validate has no findings-filed error",
                not any(i["id"] == "findings-filed" for i in validated["issues"]))
         _check("validate has no gh-agent evidence error",
-               not any(i["id"] in {"gh-agent-fixes", "gh-agent-fix-deck"} for i in validated["issues"]))
+               not any(i["id"] in {"gh-agent-fixes", "gh-agent-fix-evidence", "gh-agent-fix-deck"} for i in validated["issues"]))
+        saved_findings = run.read_json(run_dir / "findings.json")
+        missing_asset_findings = json.loads(json.dumps(saved_findings))
+        for job in missing_asset_findings["gh_agent"]["drained_jobs"]:
+            job["assets"] = []
+        run.write_json(run_dir / "findings.json", missing_asset_findings)
+        reviewed_missing_assets = run.review_run_bundle(run_dir, None)
+        _check("review fails done gh-agent jobs without evidence assets",
+               review_check(reviewed_missing_assets, "gh-agent-fixes")["status"] == "fail")
+        missing_asset_validated = run.validate_run_bundle(run_dir)
+        _check("validate catches done gh-agent jobs without evidence assets",
+               any(i["id"] == "gh-agent-fix-evidence" and i["severity"] == "error"
+                   for i in missing_asset_validated["issues"]))
+        run.write_json(run_dir / "findings.json", saved_findings)
+        run.update_derived_artifacts(run_dir, None)
         deck_path = run_dir / "deck.slidey.json"
         stale_deck = run.read_json(deck_path)
         for scene in stale_deck["scenes"]:
             if scene.get("eyebrow") == "GH-agent fixes":
-                scene["body"] = scene.get("body", "").replace("https://agent.example/run/job-1", "")
+                scene["body"] = scene.get("body", "").replace("https://agent.example/run/job-1/artifacts/fix-report.md", "")
                 break
         run.write_json(deck_path, stale_deck)
         stale_validated = run.validate_run_bundle(run_dir)
-        _check("validate catches missing gh-agent run URL in deck",
+        _check("validate catches missing gh-agent evidence URL in deck",
                any(i["id"] == "gh-agent-fix-deck" and i["severity"] == "error"
                    for i in stale_validated["issues"]))
         run.update_derived_artifacts(run_dir, None)

@@ -54,7 +54,7 @@ host_handlers:
             gh_agent_done_count: 2
             gh_agent_failed_count: 0
             gh_agent_active_count: 0
-            gh_agent_run_summary: "github:bsacrobatix/Kitsoki/issue/201=done https://agent.example/run/job-201; github:bsacrobatix/Kitsoki/issue/202=done https://agent.example/run/job-202"
+            gh_agent_run_summary: "github:bsacrobatix/Kitsoki/issue/201=done https://agent.example/run/job-201 evidence=https://agent.example/api/run/job-201/assets/fix-report.md; github:bsacrobatix/Kitsoki/issue/202=done https://agent.example/run/job-202 evidence=https://agent.example/api/run/job-202/assets/fix-report.md"
             review_status: ready
             review_summary: "ready: 21/21 checks passed, 0 warnings, 0 failures"
             review_passed_count: 21

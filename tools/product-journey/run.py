@@ -3245,6 +3245,29 @@ def record_gh_agent_findings_status(run_dir: Path, status: dict) -> None:
     write_json(findings_path, findings)
 
 
+def gh_agent_job_evidence_links(job: dict) -> list[str]:
+    links: list[str] = []
+    for asset in job.get("assets", []) or []:
+        if not isinstance(asset, dict):
+            continue
+        for key in ("url", "href", "path"):
+            value = str(asset.get(key, "")).strip()
+            if value:
+                links.append(value)
+                break
+    return links
+
+
+def gh_agent_missing_fix_evidence(gh_agent: dict) -> list[str]:
+    missing: list[str] = []
+    for job in gh_agent.get("drained_jobs", []) or []:
+        if not isinstance(job, dict) or job.get("state") != "done":
+            continue
+        if not gh_agent_job_evidence_links(job):
+            missing.append(str(job.get("origin_ref") or job.get("job_id") or "unknown"))
+    return missing
+
+
 def file_findings(
     run_dir: Path,
     ticket_repo: str,
@@ -3864,6 +3887,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     gh_agent_failed = int(gh_agent.get("failed_count", 0) or 0)
     gh_agent_active = int(gh_agent.get("active_count", 0) or 0)
     gh_agent_drain_status = gh_agent.get("drain_status", "")
+    gh_agent_missing_evidence = gh_agent_missing_fix_evidence(gh_agent)
     gh_agent_fix_complete = (
         not gh_agent_requested
         or gh_agent_enqueued == 0
@@ -3872,6 +3896,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             and gh_agent_failed == 0
             and gh_agent_active == 0
             and gh_agent_done >= gh_agent_enqueued
+            and not gh_agent_missing_evidence
         )
     )
 
@@ -4014,7 +4039,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             "detail": (
                 "gh-agent fixing not requested"
                 if not gh_agent_requested
-                else f"enqueue={gh_agent.get('enqueue_status', '')}, drain={gh_agent_drain_status}, enqueued={gh_agent_enqueued}, done={gh_agent_done}, failed={gh_agent_failed}, active={gh_agent_active}; {gh_agent.get('run_summary', '')}"
+                else f"enqueue={gh_agent.get('enqueue_status', '')}, drain={gh_agent_drain_status}, enqueued={gh_agent_enqueued}, done={gh_agent_done}, failed={gh_agent_failed}, active={gh_agent_active}, missing_evidence={len(gh_agent_missing_evidence)}; {gh_agent.get('run_summary', '')}"
             ),
         },
         {
@@ -4969,6 +4994,15 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 "gh-agent fixing was requested but queued fixes did not drain to successful reviewable runs",
                 f"enqueue={gh_agent.get('enqueue_status', '')}, drain={gh_agent.get('drain_status', '')}, enqueued={enqueued}, done={done}, failed={failed}, active={active}",
             )
+        missing_evidence = gh_agent_missing_fix_evidence(gh_agent)
+        if missing_evidence:
+            add_validation_issue(
+                issues,
+                "error",
+                "gh-agent-fix-evidence",
+                "Completed gh-agent fix jobs are missing reviewable fix evidence assets",
+                ", ".join(missing_evidence[:5]),
+            )
         scene_bodies = [
             str(scene.get("body", ""))
             for scene in deck.get("scenes", [])
@@ -4979,6 +5013,12 @@ def validate_run_bundle(run_dir: Path) -> dict:
             for job in gh_agent.get("drained_jobs", [])
             if isinstance(job, dict) and job.get("run_url")
         ]
+        expected_tokens.extend(
+            link
+            for job in gh_agent.get("drained_jobs", [])
+            if isinstance(job, dict)
+            for link in gh_agent_job_evidence_links(job)
+        )
         missing_tokens = [
             token for token in expected_tokens
             if token and not any(token in body for body in scene_bodies)
@@ -4988,7 +5028,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 issues,
                 "error",
                 "gh-agent-fix-deck",
-                "GH-agent fix run URLs are missing from the review deck",
+                "GH-agent fix run and evidence links are missing from the review deck",
                 ", ".join(missing_tokens[:5]),
             )
     playback_count = media_manifest.get("summary", {}).get("playback_items", 0) if media_manifest else 0
@@ -6935,6 +6975,11 @@ def render_deck(
             details.append(f"incident={job.get('incident_url')}")
         if job.get("err_msg"):
             details.append(f"error={job.get('err_msg')}")
+        evidence_links = gh_agent_job_evidence_links(job)
+        if evidence_links:
+            details.append("evidence=" + ", ".join(evidence_links[:3]))
+        elif job.get("state") == "done":
+            details.append("evidence=missing")
         gh_agent_job_lines.append(" · ".join(part for part in details if part))
     gh_agent_lines = [
         f"Filing: {len(filed_issue_lines)} issue URL(s)",
