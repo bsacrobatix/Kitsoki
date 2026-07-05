@@ -36,6 +36,7 @@ ARTIFACT_ROOT = ROOT / ".artifacts" / "product-journey"
 MATRIX_ROOT = ARTIFACT_ROOT / "matrices"
 TARGET_PROOF_ROOT = ARTIFACT_ROOT / "target-proofs"
 DOGFOOD_ROOT = ARTIFACT_ROOT / "dogfood"
+PREFLIGHT_ROOT = ARTIFACT_ROOT / "preflights"
 DEFAULT_DECK = ROOT / "docs" / "decks" / "product-journey-eval.slidey.json"
 EVIDENCE_SOURCES = {"demo", "retained", "external", "local", "cassette", "unknown"}
 PROOF_EVIDENCE_SOURCES = {"retained", "external", "local", "cassette"}
@@ -755,6 +756,118 @@ def build_run_bundle(
         publish_deck.parent.mkdir(parents=True, exist_ok=True)
         write_json(publish_deck, deck)
     return run_dir, run_json
+
+
+def render_capture_preflight_markdown(result: dict) -> str:
+    lines = [
+        "# Product Journey Capture Preflight",
+        "",
+        f"- Status: `{result['status']}`",
+        f"- Preflight: `{result['preflight_id']}`",
+        f"- Created: {result['created_at']}",
+        f"- Output: `{result['webshot_output']}`",
+        "",
+        "## Checks",
+        "",
+    ]
+    for check in result["checks"]:
+        lines.append(f"- `{check['id']}`: {check['status']} - {check['summary']}")
+    if result.get("stderr"):
+        lines.extend(["", "## stderr", "", "```", result["stderr"][-4000:], "```"])
+    if result.get("stdout"):
+        lines.extend(["", "## stdout", "", "```", result["stdout"][-4000:], "```"])
+    return "\n".join(lines) + "\n"
+
+
+def capture_preflight(seed: str, command: str = "", timeout: int = 90) -> dict:
+    preflight_id = f"{slug_timestamp()}-capture-{seed}"
+    preflight_dir = PREFLIGHT_ROOT / preflight_id
+    preflight_dir.mkdir(parents=True, exist_ok=False)
+    output = preflight_dir / "webshot-smoke.png"
+    helper = ROOT / "tools" / "runstatus" / "web-shot.ts"
+    flow = ROOT / "testdata" / "apps" / "choice_smoke" / "flows" / "intro_begin.yaml"
+    story = ROOT / "testdata" / "apps" / "choice_smoke"
+    checks = []
+
+    def add_check(check_id: str, passed: bool, summary: str) -> None:
+        checks.append({
+            "id": check_id,
+            "status": "passed" if passed else "failed",
+            "summary": summary,
+        })
+
+    add_check("webshot-helper", helper.exists(), str(helper))
+    add_check("webshot-flow", flow.exists(), str(flow))
+
+    if command:
+        cmd = shlex.split(command)
+    else:
+        cmd = [
+            "go",
+            "run",
+            "./cmd/kitsoki",
+            "web-shot",
+            str(story.relative_to(ROOT)),
+            "--flow",
+            str(flow.relative_to(ROOT)),
+            "--state",
+            "single_basic",
+            "--viewport",
+            "800x600",
+            "--kitsoki-repo",
+            str(ROOT),
+            "-o",
+            str(output),
+        ]
+
+    env = os.environ.copy()
+    env.setdefault("GOCACHE", "/private/tmp/kitsoki-gocache")
+    env["KITSOKI_CAPTURE_PREFLIGHT_OUT"] = str(output)
+    env["KITSOKI_CAPTURE_PREFLIGHT_DIR"] = str(preflight_dir)
+    started_at = now_utc()
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        stdout = proc.stdout
+        stderr = proc.stderr
+        returncode = proc.returncode
+        add_check("webshot-command", returncode == 0, f"exit_code={returncode}; command={shlex.join(cmd)}")
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or ""
+        stderr = exc.stderr or ""
+        returncode = 124
+        add_check("webshot-command", False, f"timed out after {timeout}s; command={shlex.join(cmd)}")
+
+    output_ok = output.exists() and output.stat().st_size > 0
+    add_check("webshot-output", output_ok, str(output))
+    status = "passed" if all(check["status"] == "passed" for check in checks) else "failed"
+    stdout_tail = stdout[-4000:] if isinstance(stdout, str) else str(stdout)[-4000:]
+    stderr_tail = stderr[-4000:] if isinstance(stderr, str) else str(stderr)[-4000:]
+    result = {
+        "status": status,
+        "preflight_id": preflight_id,
+        "preflight_dir": str(preflight_dir),
+        "preflight_path": str(preflight_dir / "preflight.json"),
+        "markdown_path": str(preflight_dir / "preflight.md"),
+        "created_at": started_at,
+        "webshot_output": str(output),
+        "command": cmd,
+        "exit_code": returncode,
+        "stdout": stdout_tail,
+        "stderr": stderr_tail,
+        "checks": checks,
+        "passed": sum(1 for check in checks if check["status"] == "passed"),
+        "failed": sum(1 for check in checks if check["status"] == "failed"),
+    }
+    write_json(preflight_dir / "preflight.json", result)
+    (preflight_dir / "preflight.md").write_text(render_capture_preflight_markdown(result), encoding="utf-8")
+    return result
 
 
 def build_matrix_bundle(
@@ -6897,6 +7010,9 @@ def main() -> None:
     parser.add_argument("--dogfood-smoke", action="store_true", help="Run a deterministic no-LLM matrix-to-rollup smoke and write review artifacts")
     parser.add_argument("--driver-replay-smoke", action="store_true", help="Run a deterministic no-LLM one-scenario driver replay smoke with cassette evidence")
     parser.add_argument("--driver-replay-sweep", action="store_true", help="Run deterministic no-LLM driver replay smokes for every scenario")
+    parser.add_argument("--capture-preflight", action="store_true", help="Run no-LLM capture-toolchain preflight checks")
+    parser.add_argument("--preflight-command", default="", help="Override the webshot smoke command for --capture-preflight tests")
+    parser.add_argument("--preflight-timeout", type=int, default=90, help="Timeout in seconds for --capture-preflight webshot smoke")
     parser.add_argument("--validate-corpus", action="store_true", help="Validate personas, scenarios, and GitHub target catalog without writing artifacts")
     parser.add_argument("--refresh-github-targets", action="store_true", help="Query GitHub for current open bug counts and write a target-proof artifact")
     parser.add_argument("--target-proof-file", default="", help="target-proof.json or target-proof directory to merge into --emit-matrix")
@@ -7036,6 +7152,22 @@ def main() -> None:
         append_log(f"Validated product journey corpus: {result['status']}")
         if result["status"] != "valid":
             raise SystemExit(1)
+        return
+
+    if args.capture_preflight:
+        result = capture_preflight(args.seed, args.preflight_command, args.preflight_timeout)
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Ran capture preflight {result['preflight_id']}: {result['status']}")
+            return
+        print(f"Product journey capture preflight: {result['preflight_id']}")
+        print(f"Status: {result['status']}")
+        print(f"Artifacts: {result['preflight_dir']}")
+        print(f"Webshot: {result['webshot_output']}")
+        print(f"Checks: {result['passed']} passed, {result['failed']} failed")
+        for check in result["checks"]:
+            print(f"- {check['status']}: {check['id']} ({check['summary']})")
+        append_log(f"Ran capture preflight {result['preflight_id']}: {result['status']}")
         return
 
     if args.dogfood_smoke:

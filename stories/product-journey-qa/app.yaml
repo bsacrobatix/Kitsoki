@@ -29,6 +29,14 @@ world:
   target_proof_failed: { type: int, default: 0 }
   target_proof_errors: { type: int, default: 0 }
   target_proof_ready: { type: string, default: "" }
+  capture_preflight_status: { type: string, default: "" }
+  capture_preflight_id: { type: string, default: "" }
+  capture_preflight_dir: { type: string, default: "" }
+  capture_preflight_path: { type: string, default: "" }
+  capture_preflight_markdown_path: { type: string, default: "" }
+  capture_preflight_webshot_output: { type: string, default: "" }
+  capture_preflight_passed: { type: int, default: 0 }
+  capture_preflight_failed: { type: int, default: 0 }
   rollup_run_dir: { type: string, default: "" }
   rollup_path:    { type: string, default: "" }
   rollup_deck_path: { type: string, default: "" }
@@ -207,6 +215,12 @@ intents:
     description: "Validate the reusable personas, scenarios, and GitHub target catalog."
     examples: ["validate corpus", "check persona scenario catalog", "preflight journey corpus"]
     priority: 88
+  capture_preflight:
+    description: "Run no-LLM capture-toolchain preflight checks before live persona evidence capture."
+    examples: ["capture preflight", "check webshot capture", "preflight browser capture"]
+    priority: 88
+    slots:
+      seed: { type: string, required: false }
   refresh_targets:
     description: "Refresh GitHub open-bug proof for the 10-repo target catalog."
     examples: ["refresh github targets", "check target bug counts", "prove target matrix"]
