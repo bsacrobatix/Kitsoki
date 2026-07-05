@@ -27,9 +27,13 @@ states:
 
   intercept:
     description: "Command hub — say a git command in your own words; it runs with no LLM."
-    default_intent: discuss
+    # Conversational lane: unmatched free text falls into ONE persistent
+    # per-room conversation, engine-owned (per-room chat, room context in
+    # the prompt, no re-render). See docs/architecture/room-workbench.md
+    # §"The conversational lane".
+    agent_off_ramp: { agent: git_assistant, capture_free_text: true }
     relevant_world: [current_branch, integration_branch, rebase_done, commits_ahead,
-                     commits_behind, has_uncommitted, on_integration, git_answer]
+                     commits_behind, has_uncommitted, on_integration]
     view:
       - prose: "Say a git command in your own words — it's matched and run without a model."
       - kv:
@@ -50,10 +54,6 @@ states:
         when: "world.issue_warning != ''"
       - prose: "Last operation failed: {{ world.last_op_output|default:'(no output)' }}"
         when: "world.last_op_ok == false"
-      - heading: "Assistant"
-        when: "world.git_answer != ''"
-      - prose: "{{ world.git_answer }}"
-        when: "world.git_answer != ''"
       - choice:
           mode: single
           prompt: "Commands"
@@ -138,31 +138,6 @@ states:
           no_common_ancestor: "stdout_json.no_common_ancestor"
         on_error: intercept
     on:
-      discuss:
-        - target: .
-          effects:
-            - set:
-                git_message: "{{ slots.message }}"
-                git_answer:  ""
-            - invoke: host.chat.resolve
-              with:
-                app:       "git-ops"
-                room:      "intercept"
-                scope_key: "{{ world.working_dir }}"
-                title:     "Git operations"
-              bind:
-                git_chat_id:    "chat_id"
-                git_chat_title: "title"
-            - invoke: host.agent.converse
-              with:
-                chat_id:         "{{ world.git_chat_id }}"
-                agent:           git_assistant
-                working_dir:     "{{ world.working_dir }}"
-                question:        "{{ slots.message }}"
-              bind:
-                git_answer:     "answer"
-                git_chat_id:    "chat_id"
-                git_session_id: "claude_session_id"
       rebase:
         - target: rebase
           effects:

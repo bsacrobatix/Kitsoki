@@ -1,5 +1,18 @@
-# workbench_discuss — ambiguous/free-form prose stays in the hub and is answered
-# by the assistant lane instead of re-entering a command room.
+# workbench_discuss — the machine-level invariant under the conversational
+# lane: driving the synthesized `main_ops_discuss` intent through the bare
+# machine takes the no-op self-arc and leaves the hub resting exactly where
+# it was.
+#
+# On LIVE surfaces (web / TUI / MCP) this intent never reaches the machine:
+# the orchestrator diverts it to a persistent per-room converse turn
+# (ModeOffPath — no transition, no world mutation, no room re-render), with
+# the room's purpose/commands/relevant world composed into the agent's
+# prompt by the engine. That converse behavior is the genuinely-LLM step and
+# is exercised by internal/orchestrator/offramp_conversation_test.go, not by
+# a flow fixture — the same split dev-story's landing_off_ramp.yaml
+# documents. What a flow CAN pin — and this one does — is the floor the lane
+# rests on: a conversational turn is structurally incapable of corrupting
+# the room.
 
 test_kind: flow
 app: ../app.yaml
@@ -29,36 +42,15 @@ host_handlers:
             merge_in_progress:  false
             no_common_ancestor: false
             upstream_tracking:  true
-  host.chat.resolve:
-    data:
-      chat_id: git-main-chat
-      title: Git operations
-      is_new: true
-  host.agent.converse:
-    data:
-      answer: "You are on main. Use pull for upstream sync; use rebase only from a feature branch."
-      chat_id: git-main-chat
-      claude_session_id: claude-git-main-chat
 
 turns:
+  # The synthesized conversational intent self-loops the hub — the machine
+  # never mutates world off it (the on_enter refresh re-binds the same
+  # stubbed git state), and the room's menu is intact for the next turn.
   - intent:
-      name: discuss
+      name: main_ops_discuss
       slots:
         message: "fix it - i just want to rebase main again"
     expect_state: main_ops
-    expect_world:
-      git_message: "fix it - i just want to rebase main again"
-      git_answer: "You are on main. Use pull for upstream sync; use rebase only from a feature branch."
-      git_chat_id: git-main-chat
-      git_session_id: claude-git-main-chat
-    expect_host_calls:
-      - handler: host.chat.resolve
-        args:
-          app: git-ops
-          room: main_ops
-      - handler: host.agent.converse
-        args:
-          chat_id: git-main-chat
-          agent: git_assistant
 
 expect_no_errors: true
