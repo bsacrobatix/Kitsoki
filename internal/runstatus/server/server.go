@@ -17,7 +17,10 @@
 //
 // # Endpoints
 //
-//	GET  /                                     → the bundled SPA (index.html)
+//	GET  /                                     → the bundled SPA (index.html;
+//	                                              installed-kit registry +
+//	                                              import map injected, S3c)
+//	GET  /kit/<namespace>/<kit>/ui/<rest...>   → an installed kit's UI assets (S3c)
 //	POST /rpc                                  → JSON-RPC 2.0 control
 //	GET  /rpc/events?subscription_id=<id>      → text/event-stream notifications
 //
@@ -575,6 +578,8 @@ func (s *Server) Handler() http.Handler {
 	// Embedded help-docs site (make site-embed). Serves an actionable
 	// placeholder when not staged — never an error (see internal/helpdocs).
 	mux.Handle("/help/", http.StripPrefix("/help/", helpdocs.Handler()))
+	// Installed-kit UI static assets (S3c vertical slice — see kit_ui.go).
+	mux.HandleFunc("/kit/", s.handleKitUI)
 	mux.HandleFunc("/", s.handleIndex)
 	return mux
 }
@@ -592,6 +597,10 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
+	// S3c: splice the installed-kit registry + a minimal import map into
+	// <head> when any kits are installed. See kit_ui.go's package doc for
+	// what this is (and is not) a vertical slice of.
+	index = s.injectKitRegistry(index)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(index)
 }
