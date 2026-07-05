@@ -1161,6 +1161,27 @@ already does.)
 
 Regression: [`concurrent_checkout_repro_test.go`](../../internal/host/concurrent_checkout_repro_test.go).
 
+### Worktree cleanup
+
+`cleanup_scan` returns reviewable candidates for two independent cleanup
+classes:
+
+- Whole linked worktrees and branch-only leftovers. These are recommended only
+  when the branch is merged into `base` (default `main`), not protected, not
+  dirty, and not excluded by the `exclude` refinement string.
+- Generated cache directories inside linked worktrees. These use `kind:
+  "cache"`, `actions: ["cache_remove"]`, and `preserves_branch: true`; they are
+  recommended even when the containing worktree is dirty or unmerged because
+  compiler/module caches do not carry branch state. The recognized generated
+  directory basenames are `.cache`, `go-cache`, `go-build-cache`,
+  `go-mod-cache`, `bf-73-go-build`, and `paired-task-work`.
+
+`cleanup_apply` still deletes only candidates whose `recommended` field is
+`true`. For `kind: "cache"` candidates it validates that the path is under
+`<repo>/.worktrees` and has a recognized generated-cache basename, makes the
+tree owner-writable, and removes only that cache directory; it does not delete
+the branch or containing worktree.
+
 ### Isolated clones for high-concurrency agents
 
 Linked worktrees isolate files and indexes, but they still share refs, stash,

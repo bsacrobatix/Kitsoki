@@ -545,6 +545,102 @@ func TestGitWorktree_CleanupApply_RemovesOnlyRecommendedCandidates(t *testing.T)
 	}
 }
 
+func TestGitWorktree_CleanupScan_RecommendsGeneratedCachesInDirtyWorktree(t *testing.T) {
+	repo := t.TempDir()
+	wtPath := filepath.Join(repo, ".worktrees", "dirty")
+	cachePath := filepath.Join(wtPath, ".artifacts", "go-cache")
+	if err := os.MkdirAll(cachePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cachePath, "obj"), []byte("cached"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	porcelain := "worktree " + repo + "\nHEAD aaaaaaaa\nbranch refs/heads/main\n\n" +
+		"worktree " + wtPath + "\nHEAD bbbbbbbb\nbranch refs/heads/feature/dirty\n\n"
+	fr := newFakeRunner()
+	fr.responses["git worktree list --porcelain"] = fakeResp{stdout: porcelain}
+	fr.responses["git status --porcelain"] = fakeResp{}
+	fr.responses[wtPath+"|git status --porcelain"] = fakeResp{stdout: " M file.go\n"}
+	fr.responses["git branch --format=%(refname:short)"] = fakeResp{stdout: "main\nfeature/dirty\n"}
+	fr.responses["git merge-base --is-ancestor feature/dirty main"] = fakeResp{}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitWorktreeHandler(context.Background(), map[string]any{
+		"op":   "cleanup_scan",
+		"repo": repo,
+		"base": "main",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	candidates, _ := res.Data["candidates"].([]map[string]any)
+	var sawDirtyWorktree, sawCache bool
+	for _, c := range candidates {
+		if c["kind"] == "worktree" && c["branch"] == "feature/dirty" {
+			sawDirtyWorktree = true
+			if c["recommended"] != false {
+				t.Fatalf("dirty worktree itself should not be recommended: %#v", c)
+			}
+		}
+		if c["kind"] == "cache" && c["path"] == cachePath {
+			sawCache = true
+			if c["recommended"] != true || c["preserves_branch"] != true {
+				t.Fatalf("cache should be independently recommended: %#v", c)
+			}
+			if c["size_bytes"].(int64) == 0 {
+				t.Fatalf("cache size should be measured: %#v", c)
+			}
+		}
+	}
+	if !sawDirtyWorktree || !sawCache {
+		t.Fatalf("expected dirty worktree and cache candidates, got %#v", candidates)
+	}
+}
+
+func TestGitWorktree_CleanupApply_RemovesCacheWithoutDeletingBranch(t *testing.T) {
+	repo := t.TempDir()
+	cachePath := filepath.Join(repo, ".worktrees", "dirty", ".cache")
+	if err := os.MkdirAll(cachePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	locked := filepath.Join(cachePath, "readonly")
+	if err := os.WriteFile(locked, []byte("cached"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(cachePath, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	fr := newFakeRunner()
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitWorktreeHandler(context.Background(), map[string]any{
+		"op":   "cleanup_apply",
+		"repo": repo,
+		"candidates": []any{
+			map[string]any{"kind": "cache", "branch": "feature/dirty", "path": cachePath, "recommended": true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+		t.Fatalf("cache still exists or stat failed unexpectedly: %v", err)
+	}
+	for _, call := range fr.calls {
+		if strings.Contains(call, "branch -d") {
+			t.Fatalf("cache cleanup must not delete branches: %v", fr.calls)
+		}
+	}
+}
+
 func TestGitWorktree_CleanupApply_AcceptsJSONCandidateList(t *testing.T) {
 	fr := newFakeRunner()
 	fr.responses["git worktree remove /repo/.worktrees/merged-clean"] = fakeResp{}

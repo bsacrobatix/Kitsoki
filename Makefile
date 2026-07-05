@@ -34,6 +34,7 @@ VSCODE_DIR    := tools/vscode-kitsoki
 EMBED_INDEX   := internal/runstatus/web/assets/index.html
 TEMP_DIR      := .temp
 RUNSTATUS_TEMP_ENV := TMPDIR="$(abspath $(TEMP_DIR))" KITSOKI_TEMP_ROOT="$(abspath $(TEMP_DIR))"
+KITSOKI_GOCACHE ?= $(shell if [ -d /private/tmp ]; then printf '%s' /private/tmp/kitsoki-gocache; else printf '%s' /tmp/kitsoki-gocache; fi)
 RUNSTATUS_LOCKFILE := $(RUNSTATUS_DIR)/pnpm-lock.yaml
 RUNSTATUS_MODULES  := $(RUNSTATUS_DIR)/node_modules/.modules.yaml
 RUNSTATUS_DIST     := $(TEMP_DIR)/runstatus/dist
@@ -239,8 +240,8 @@ web-clean:
 # Playwright spec.
 bootstrap-worktree: embed-stories web
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
-	@echo "bootstrap-worktree: warming the Go build cache (first compile is slow)…"
-	@go run $(PKG) --help >/dev/null
+	@echo "bootstrap-worktree: warming shared Go build cache at $(KITSOKI_GOCACHE) (first compile is slow)…"
+	@GOCACHE="$(KITSOKI_GOCACHE)" go run $(PKG) --help >/dev/null
 	@echo "worktree bootstrapped — go run/Playwright specs should work now"
 
 # web-dev starts the kitsoki Go backend and the Vite HMR dev server in
@@ -430,8 +431,8 @@ history-smoke:
 		if [ "$(HISTORY_PREPARE_ALL_CELLS)" = "1" ]; then \
 			python3 -c 'import json, sys; data = json.load(open(sys.argv[1])); checks = data["checks"]; assert checks["ready_to_drive"], data' "$$completion_json"; \
 		fi
-	GOCACHE=$$(pwd)/.cache/go-build go run ./cmd/kitsoki validate stories/repo-bakeoff/app.yaml
-	GOCACHE=$$(pwd)/.cache/go-build go run ./cmd/kitsoki test flows stories/repo-bakeoff/app.yaml
+	GOCACHE="$(KITSOKI_GOCACHE)" go run ./cmd/kitsoki validate stories/repo-bakeoff/app.yaml
+	GOCACHE="$(KITSOKI_GOCACHE)" go run ./cmd/kitsoki test flows stories/repo-bakeoff/app.yaml
 
 # history-pending-smoke proves the no-cost blocked-provider path without
 # modifying the normal live results dir: write one pending cell in a temp result

@@ -71,6 +71,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--arm-only", action="store_true")
     parser.add_argument("--work-root", default=os.environ.get("ARENA_PAIRED_TASK_WORK_ROOT", "/workspace/kitsoki/.artifacts/arena/paired-task-work"))
+    parser.add_argument(
+        "--keep-workdir",
+        action="store_true",
+        default=os.environ.get("ARENA_PAIRED_TASK_KEEP_WORKDIR") == "1",
+        help="keep the per-cell checkout under --work-root for debugging; default removes it after scoring",
+    )
     args = parser.parse_args(argv)
 
     if args.live == args.arm_only:
@@ -161,6 +167,10 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
     verdict = score["verdict"]
     if dispatch.get("blocked"):
         verdict = "blocked"
+    notes = "; ".join(part for part in [dispatch.get("notes", ""), score.get("notes", "")] if part)
+    if not args.keep_workdir:
+        cleanup_cell_workdir(tree)
+        notes = "; ".join(part for part in [notes, f"removed scratch workdir {container_path(str(tree))}"] if part)
     return emit(
         verdict=verdict,
         cost_usd=cost_usd,
@@ -168,9 +178,35 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
         wall_s=elapsed(started),
         evidence_refs=[str(CORPUS) + "#" + str(task["id"]), score.get("evidence", "")],
         trace_ref=container_path(trace_ref),
-        notes="; ".join(part for part in [dispatch.get("notes", ""), score.get("notes", "")] if part),
+        notes=notes,
         exit_code=0,
     )
+
+
+def cleanup_cell_workdir(tree: Path) -> None:
+    if not tree.exists():
+        return
+    for root, dirs, files in os.walk(tree):
+        for name in dirs:
+            if (Path(root) / name).is_symlink():
+                continue
+            try:
+                os.chmod(Path(root) / name, 0o700)
+            except OSError:
+                pass
+        for name in files:
+            if (Path(root) / name).is_symlink():
+                continue
+            try:
+                os.chmod(Path(root) / name, 0o600)
+            except OSError:
+                pass
+    shutil.rmtree(tree, onerror=remove_readonly)
+
+
+def remove_readonly(func: Any, path: str, _exc_info: Any) -> None:
+    os.chmod(path, 0o700)
+    func(path)
 
 
 def materialize_baseline(task: dict[str, Any], tree: Path) -> None:

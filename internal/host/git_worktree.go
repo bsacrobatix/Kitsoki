@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -410,6 +411,7 @@ func worktreeCleanupScan(ctx context.Context, repo string, args map[string]any) 
 		c := cleanupCandidate(ctx, repo, wt, base, protected, exclude, "worktree")
 		c["actions"] = []string{"worktree_remove", "branch_delete"}
 		out = append(out, c)
+		out = append(out, cleanupCacheCandidates(wt, exclude)...)
 	}
 
 	branchOut, branchErr, branchCode, branchExecErr := cliExec(ctx, repo, "git", "branch", "--format=%(refname:short)")
@@ -474,14 +476,31 @@ func worktreeCleanupApply(ctx context.Context, repo string, args map[string]any)
 			continue
 		}
 		if path != "" {
-			_, stderr, code, err := cliExec(ctx, repo, "git", "worktree", "remove", path)
-			if err != nil {
-				errs = append(errs, fmt.Sprintf("%s: worktree remove: %v", branch, err))
+			if fmt.Sprint(c["kind"]) == "cache" {
+				if err := validateCacheCleanupPath(repo, path); err != nil {
+					errs = append(errs, fmt.Sprintf("%s: cache remove: %v", path, err))
+					continue
+				}
+				if err := makeTreeWritable(path); err != nil {
+					errs = append(errs, fmt.Sprintf("%s: cache chmod: %v", path, err))
+					continue
+				}
+				if err := os.RemoveAll(path); err != nil {
+					errs = append(errs, fmt.Sprintf("%s: cache remove: %v", path, err))
+					continue
+				}
+				deleted = append(deleted, map[string]any{"branch": branch, "path": path, "kind": "cache"})
 				continue
-			}
-			if code != 0 {
-				errs = append(errs, fmt.Sprintf("%s: worktree remove: %s", branch, strings.TrimSpace(stderr)))
-				continue
+			} else {
+				_, stderr, code, err := cliExec(ctx, repo, "git", "worktree", "remove", path)
+				if err != nil {
+					errs = append(errs, fmt.Sprintf("%s: worktree remove: %v", branch, err))
+					continue
+				}
+				if code != 0 {
+					errs = append(errs, fmt.Sprintf("%s: worktree remove: %s", branch, strings.TrimSpace(stderr)))
+					continue
+				}
 			}
 		}
 		if branch != "" {
@@ -694,6 +713,119 @@ func cleanupCandidate(ctx context.Context, repo string, wt worktreeInfo, base st
 		"recommended": recommended,
 		"reason":      reason,
 	}
+}
+
+func cleanupCacheCandidates(wt worktreeInfo, exclude string) []map[string]any {
+	if wt.Path == "" {
+		return nil
+	}
+	var out []map[string]any
+	_ = filepath.WalkDir(wt.Path, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if name == ".git" || name == ".worktrees" {
+			return filepath.SkipDir
+		}
+		if !isDisposableCacheDir(name) {
+			return nil
+		}
+		rel, _ := filepath.Rel(wt.Path, path)
+		id := filepath.Base(wt.Path) + ":" + rel
+		recommended := true
+		reason := "generated cache directory"
+		if exclude != "" && strings.Contains(strings.ToLower(id+" "+path+" "+wt.Branch), strings.ToLower(exclude)) {
+			recommended, reason = false, "excluded by refinement"
+		}
+		out = append(out, map[string]any{
+			"id":               id,
+			"kind":             "cache",
+			"path":             path,
+			"branch":           wt.Branch,
+			"worktree_path":    wt.Path,
+			"relative_path":    rel,
+			"size_bytes":       dirSize(path),
+			"recommended":      recommended,
+			"reason":           reason,
+			"actions":          []string{"cache_remove"},
+			"preserves_branch": true,
+		})
+		return filepath.SkipDir
+	})
+	return out
+}
+
+func isDisposableCacheDir(name string) bool {
+	switch name {
+	case ".cache", "go-cache", "go-build-cache", "go-mod-cache", "bf-73-go-build", "paired-task-work":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateCacheCleanupPath(repo, path string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("empty cache path")
+	}
+	if !isDisposableCacheDir(filepath.Base(path)) {
+		return fmt.Errorf("path %s is not a known generated cache directory", path)
+	}
+	root := filepath.Join(repo, ".worktrees")
+	if strings.TrimSpace(repo) == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("resolve cwd: %v", err)
+		}
+		root = filepath.Join(cwd, ".worktrees")
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("resolve worktree root: %v", err)
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("resolve cache path: %v", err)
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return fmt.Errorf("compare path: %v", err)
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("path %s is outside worktree root %s", path, root)
+	}
+	return nil
+}
+
+func makeTreeWritable(path string) error {
+	return filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		if d.IsDir() {
+			return os.Chmod(p, 0o700)
+		}
+		return os.Chmod(p, 0o600)
+	})
+}
+
+func dirSize(path string) int64 {
+	var total int64
+	_ = filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err == nil {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
 }
 
 func cleanupProtectedBranches(extra string) map[string]bool {
