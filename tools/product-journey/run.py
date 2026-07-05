@@ -188,6 +188,16 @@ def now_utc() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
 
+def parse_iso_datetime(value: str) -> datetime.datetime:
+    try:
+        parsed = datetime.datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise SystemExit(f"Invalid ISO datetime: {value}") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed.astimezone(datetime.timezone.utc)
+
+
 def slug_timestamp() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -3914,6 +3924,8 @@ def run_story_summary(run_dir: Path) -> dict:
     review = read_json(run_dir / "review.json") if (run_dir / "review.json").exists() else {}
     weakness_routes = read_json(run_dir / "weakness-routes.json") if (run_dir / "weakness-routes.json").exists() else {"summary": {}, "items": []}
     prd_design_intake = read_json(run_dir / "prd-design-intake.json") if (run_dir / "prd-design-intake.json").exists() else {"summary": {}, "items": []}
+    control = read_json(autonomous_marathon_control_path(run_dir)) if autonomous_marathon_control_path(run_dir).exists() else {}
+    watchdog = read_json(autonomous_marathon_watchdog_path(run_dir)) if autonomous_marathon_watchdog_path(run_dir).exists() else {}
     finding_summary = findings.get("summary", {})
     gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
     issue_closeout = findings.get("issue_closeout", {}) if isinstance(findings.get("issue_closeout", {}), dict) else {}
@@ -4021,6 +4033,15 @@ def run_story_summary(run_dir: Path) -> dict:
         "issue_closeout_status": issue_closeout.get("status", ""),
         "issue_closeout_count": issue_closeout.get("count", 0),
         "issue_closeout_summary": issue_closeout.get("summary", ""),
+        "autonomous_control_path": str(autonomous_marathon_control_path(run_dir)) if control else "",
+        "autonomous_control_markdown_path": str(autonomous_marathon_control_markdown_path(run_dir)) if control else "",
+        "autonomous_control_status": control.get("status", ""),
+        "autonomous_control_summary": autonomous_marathon_control_summary(control) if control else "",
+        "autonomous_watchdog_status": watchdog.get("autonomous_watchdog_status", ""),
+        "autonomous_watchdog_summary": watchdog.get("autonomous_watchdog_summary", ""),
+        "autonomous_watchdog_path": watchdog.get("autonomous_watchdog_path", str(autonomous_marathon_watchdog_path(run_dir)) if watchdog else ""),
+        "autonomous_watchdog_markdown_path": watchdog.get("autonomous_watchdog_markdown_path", str(autonomous_marathon_watchdog_markdown_path(run_dir)) if watchdog else ""),
+        "autonomous_watchdog_age_minutes": watchdog.get("heartbeat_age_minutes", 0),
     }
 
 
@@ -4974,6 +4995,14 @@ def autonomous_marathon_control_markdown_path(run_dir: Path) -> Path:
     return run_dir / "autonomous-marathon-control.md"
 
 
+def autonomous_marathon_watchdog_path(run_dir: Path) -> Path:
+    return run_dir / "autonomous-marathon-watchdog.json"
+
+
+def autonomous_marathon_watchdog_markdown_path(run_dir: Path) -> Path:
+    return run_dir / "autonomous-marathon-watchdog.md"
+
+
 def render_autonomous_marathon_control(control: dict) -> str:
     budget = control.get("budget", {})
     cadence = control.get("cadence", {})
@@ -5065,6 +5094,129 @@ def write_autonomous_marathon_control(
     return control
 
 
+def latest_driver_heartbeat(run_dir: Path) -> dict:
+    journal_path = run_dir / "driver-journal.json"
+    if not journal_path.exists():
+        return {}
+    journal = read_json(journal_path)
+    events = [
+        event for event in journal.get("items", [])
+        if isinstance(event, dict) and event.get("created_at")
+    ]
+    if not events:
+        return {}
+    return max(events, key=lambda event: parse_iso_datetime(str(event.get("created_at", ""))))
+
+
+def render_autonomous_marathon_watchdog(result: dict) -> str:
+    lines = [
+        "# Autonomous Marathon Watchdog",
+        "",
+        f"- Run: `{result.get('run_id', '')}`",
+        f"- Status: `{result.get('autonomous_watchdog_status', result.get('status', ''))}`",
+        f"- Summary: {result.get('autonomous_watchdog_summary', '')}",
+        f"- Checked at: `{result.get('checked_at', '')}`",
+        f"- Control: `{result.get('autonomous_control_path', '') or '(missing)'}`",
+        f"- Driver journal: `{result.get('driver_journal_path', '') or '(missing)'}`",
+        f"- Heartbeat: every {result.get('heartbeat_minutes', 0)} minute(s)",
+        f"- Watchdog: escalate after {result.get('watchdog_minutes', 0)} minute(s)",
+        f"- Latest heartbeat: `{result.get('latest_heartbeat_at', '') or '(none)'}`",
+        f"- Heartbeat age: {result.get('heartbeat_age_minutes', 0)} minute(s)",
+        f"- On missed heartbeat: `{result.get('on_missed_heartbeat', '')}`",
+        "",
+        "## Blocker",
+        "",
+    ]
+    if result.get("blocker_summary"):
+        lines.append(result["blocker_summary"])
+    else:
+        lines.append("No watchdog blocker is active.")
+    return "\n".join(lines) + "\n"
+
+
+def autonomous_marathon_watchdog(run_dir: Path, checked_at: str = "") -> dict:
+    control_path = autonomous_marathon_control_path(run_dir)
+    markdown_path = autonomous_marathon_watchdog_markdown_path(run_dir)
+    checked = parse_iso_datetime(checked_at) if checked_at else parse_iso_datetime(now_utc())
+    run_json = read_json(run_dir / "run.json") if (run_dir / "run.json").exists() else {}
+    result = {
+        "schema": "kitsoki/product-journey-autonomous-marathon-watchdog/v1",
+        "status": "autonomous_watchdog_blocked",
+        "autonomous_watchdog_status": "autonomous_watchdog_blocked",
+        "run_id": run_json.get("run_id", run_dir.name),
+        "run_dir": str(run_dir),
+        "checked_at": checked.isoformat(timespec="seconds"),
+        "autonomous_control_path": str(control_path) if control_path.exists() else "",
+        "autonomous_watchdog_path": str(autonomous_marathon_watchdog_path(run_dir)),
+        "autonomous_watchdog_markdown_path": str(markdown_path),
+        "driver_journal_path": str(run_dir / "driver-journal.md"),
+        "latest_heartbeat_at": "",
+        "heartbeat_age_minutes": 0,
+        "heartbeat_minutes": 0,
+        "watchdog_minutes": 0,
+        "on_missed_heartbeat": "",
+        "blocker_summary": "",
+    }
+    if not control_path.exists():
+        result["autonomous_watchdog_summary"] = "missing autonomous-marathon-control.json; stop before spend"
+        result["blocker_summary"] = "Missing autonomous-marathon-control.json, so the standing loop cannot prove its cadence, budget, or watchdog contract."
+        write_json(autonomous_marathon_watchdog_path(run_dir), result)
+        markdown_path.write_text(render_autonomous_marathon_watchdog(result), encoding="utf-8")
+        return result
+
+    control = read_json(control_path)
+    watchdog = control.get("watchdog", {})
+    heartbeat_minutes = int(watchdog.get("heartbeat_minutes", 0) or 0)
+    watchdog_minutes = int(watchdog.get("watchdog_minutes", 0) or 0)
+    result["heartbeat_minutes"] = heartbeat_minutes
+    result["watchdog_minutes"] = watchdog_minutes
+    result["on_missed_heartbeat"] = watchdog.get("on_missed_heartbeat", "")
+
+    if watchdog_minutes <= 0:
+        result["autonomous_watchdog_summary"] = "invalid watchdog interval; stop before spend"
+        result["blocker_summary"] = "autonomous-marathon-control.json has no positive watchdog interval."
+        write_json(autonomous_marathon_watchdog_path(run_dir), result)
+        markdown_path.write_text(render_autonomous_marathon_watchdog(result), encoding="utf-8")
+        return result
+
+    latest = latest_driver_heartbeat(run_dir)
+    if latest:
+        baseline_at = parse_iso_datetime(str(latest.get("created_at", "")))
+        result["latest_heartbeat_at"] = baseline_at.isoformat(timespec="seconds")
+        baseline_label = f"latest driver event {latest.get('id', '')}".strip()
+    else:
+        created_at = (
+            control.get("cadence", {}).get("created_at")
+            or run_json.get("created_at")
+            or checked.isoformat(timespec="seconds")
+        )
+        baseline_at = parse_iso_datetime(str(created_at))
+        result["latest_heartbeat_at"] = ""
+        baseline_label = "run creation"
+    age_minutes = max(0, int((checked - baseline_at).total_seconds() // 60))
+    result["heartbeat_age_minutes"] = age_minutes
+
+    if age_minutes > watchdog_minutes:
+        result["autonomous_watchdog_summary"] = (
+            f"stale heartbeat: {age_minutes}m since {baseline_label}; "
+            f"watchdog={watchdog_minutes}m; stop before spend"
+        )
+        result["blocker_summary"] = (
+            f"Missed heartbeat after {age_minutes} minute(s). "
+            f"Policy is {result['on_missed_heartbeat'] or 'record_blocker_and_stop_before_spend'}."
+        )
+    else:
+        result["status"] = "autonomous_watchdog_ok"
+        result["autonomous_watchdog_status"] = "autonomous_watchdog_ok"
+        result["autonomous_watchdog_summary"] = (
+            f"heartbeat age {age_minutes}m within watchdog={watchdog_minutes}m"
+        )
+
+    write_json(autonomous_marathon_watchdog_path(run_dir), result)
+    markdown_path.write_text(render_autonomous_marathon_watchdog(result), encoding="utf-8")
+    return result
+
+
 def autonomous_marathon_report_path(run_dir: Path) -> Path:
     return run_dir / "autonomous-marathon-report.md"
 
@@ -5080,6 +5232,8 @@ def render_autonomous_marathon_report(run_dir: Path, result: dict) -> str:
         f"- Driver proof: {result.get('autonomous_driver_summary', '')}",
         f"- Control: `{result.get('autonomous_control_path', '') or '(not generated)'}`",
         f"- Control status: `{result.get('autonomous_control_status', '') or '(unknown)'}` - {result.get('autonomous_control_summary', '')}",
+        f"- Watchdog: `{result.get('autonomous_watchdog_status', '') or '(not checked)'}` - {result.get('autonomous_watchdog_summary', '')}",
+        f"- Watchdog report: `{result.get('autonomous_watchdog_markdown_path', '') or '(not generated)'}`",
         f"- Driver handoff: `{result.get('driver_handoff_path', run_dir / 'driver-handoff.md')}`",
         f"- Autonomous fix report: `{result.get('autonomous_fix_report_path', '') or '(not generated)'}`",
         f"- Stats output: `{result.get('stats_output', '') or '(not generated)'}`",
@@ -10225,6 +10379,7 @@ def main() -> None:
     parser.add_argument("--file-findings", action="store_true", help="File the bundle's credible issue findings as GitHub issues via the kitsoki bug orchestration")
     parser.add_argument("--autonomous-fix-loop", action="store_true", help="File findings, enqueue/drain gh-agent fixes, review, and validate as one no-operator reliability gate")
     parser.add_argument("--autonomous-marathon", action="store_true", help="Create or finalize a standing persona-QA marathon through native autonomous fix, review, validation, and stats")
+    parser.add_argument("--autonomous-marathon-watchdog", action="store_true", help="Check a standing persona-QA marathon heartbeat against its watchdog control artifact")
     parser.add_argument(
         "--autonomous-driver-mode",
         default="pending",
@@ -10234,8 +10389,10 @@ def main() -> None:
     parser.add_argument("--autonomous-cadence-hours", type=int, default=24, help="Cadence recorded in autonomous marathon control artifacts")
     parser.add_argument("--autonomous-heartbeat-minutes", type=int, default=15, help="Heartbeat interval recorded in autonomous marathon control artifacts")
     parser.add_argument("--autonomous-watchdog-minutes", type=int, default=45, help="Watchdog escalation interval recorded in autonomous marathon control artifacts")
+    parser.add_argument("--watchdog-now", default="", help="Deterministic ISO timestamp for --autonomous-marathon-watchdog tests")
     parser.add_argument("--report-invalid-autonomous-fix", action="store_true", help="With --autonomous-fix-loop, print invalid gate JSON and exit 0 so story callers can bind failure evidence")
     parser.add_argument("--report-invalid-autonomous-marathon", action="store_true", help="With --autonomous-marathon, print invalid marathon JSON and exit 0 so story callers can bind failure evidence")
+    parser.add_argument("--report-blocked-autonomous-watchdog", action="store_true", help="With --autonomous-marathon-watchdog, print blocked watchdog JSON and exit 0 so story callers can bind failure evidence")
     parser.add_argument("--stats", action="store_true", help="Derive product-journey issue stats from run bundles and cached issue state")
     parser.add_argument("--stats-root", default="", help="Root containing product-journey run bundles for --stats; defaults to .artifacts/product-journey")
     parser.add_argument("--issue-state-file", default="", help="Optional JSON fixture/cache with GitHub issue state for --stats")
@@ -10774,6 +10931,26 @@ def main() -> None:
         print(f"Deck: {deck_path}")
         print(summary)
         append_log(f"Built scenario-qa deck for {run_dir.name}: {summary}")
+        return
+
+    if args.autonomous_marathon_watchdog:
+        if not args.run_dir:
+            raise SystemExit("--autonomous-marathon-watchdog requires --run-dir")
+        run_dir = run_dir_from_arg(args.run_dir)
+        result = autonomous_marathon_watchdog(run_dir, args.watchdog_now)
+        result.update(run_story_summary(run_dir))
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Checked autonomous marathon watchdog for {run_dir.name}: {result['status']}")
+            if result["status"] != "autonomous_watchdog_ok" and not args.report_blocked_autonomous_watchdog:
+                raise SystemExit(1)
+            return
+        print(f"Status: {result['status']}")
+        print(result["autonomous_watchdog_summary"])
+        print(f"Report: {result['autonomous_watchdog_markdown_path']}")
+        append_log(f"Checked autonomous marathon watchdog for {run_dir.name}: {result['status']}")
+        if result["status"] != "autonomous_watchdog_ok" and not args.report_blocked_autonomous_watchdog:
+            raise SystemExit(1)
         return
 
     if args.autonomous_marathon:

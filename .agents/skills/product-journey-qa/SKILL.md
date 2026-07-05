@@ -66,6 +66,11 @@ composition.
 `autonomous-marathon-control.md` beside the run. Those artifacts record cadence,
 per-scenario live budget, human role, heartbeat/watchdog timing, and final gates
 so the standing loop can be reviewed without relying on operator glue.
+`--autonomous-marathon-watchdog --run-dir <run>` checks that control file against
+`driver-journal.json` and writes `autonomous-marathon-watchdog.json/md`; stale
+heartbeats fail closed before spend. Story callers should include
+`--report-blocked-autonomous-watchdog` so the blocked report binds into the
+Kitsoki view instead of disappearing as a host error.
 
 ## Matrix Workflow
 

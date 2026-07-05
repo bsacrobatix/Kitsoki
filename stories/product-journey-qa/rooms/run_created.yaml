@@ -1,7 +1,7 @@
 states:
   run_created:
     description: "A product-journey QA run bundle exists; waiting for captured evidence."
-    relevant_world: [project, persona, seed, scenario_scope, run_scenario_count, live_budget_minutes, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, driver_journal_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, persona_starting_surface, persona_first_question, persona_evidence_emphasis, persona_escalation_trigger, persona_finding_bias, proof_evidence_count, demo_evidence_count, finding_total_count, strength_count, weakness_count, weakness_route_count, weakness_route_summary, prd_design_intake_path, prd_design_intake_count, prd_design_intake_summary, issue_count, fix_count, blocked_count, missing_evidence_count, missing_proof_evidence_count, proof_minimum_evidence_count, minimum_evidence_count, missing_proof_summary, driver_contract_summary, next_driver_capture, next_driver_attach_command, next_driver_blocker_command, scenario, evidence_kind, evidence_path, evidence_source, finding_kind, finding_title, ticket_repo, filing_status, filing_dry_run, findings_filed_count, findings_skipped_count, findings_failed_count, findings_unfiled_count, filed_issue_summary, filing_summary, autonomous_marathon_status, autonomous_marathon_summary, autonomous_marathon_report_path, autonomous_driver_mode, autonomous_driver_status, autonomous_driver_summary, autonomous_driver_evidence_count, autonomous_driver_issue_count, autonomous_control_status, autonomous_control_summary, autonomous_control_path, autonomous_control_markdown_path, autonomous_fix_status, autonomous_fix_report_path, autonomous_gate_summary, independent_verify_status, independent_verify_summary, issue_closeout_status, issue_closeout_count, issue_closeout_summary, gh_agent_enqueue_status, gh_agent_enqueued_count, gh_agent_skipped_count, gh_agent_job_summary, gh_agent_claim_status, gh_agent_claim_count, gh_agent_claim_summary, gh_agent_drain_status, gh_agent_drained_count, gh_agent_done_count, gh_agent_failed_count, gh_agent_active_count, gh_agent_run_summary, gh_agent_fix_evidence_count, gh_agent_missing_evidence_count, gh_agent_triage_evidence_count, gh_agent_missing_triage_count, gh_agent_independent_verify_count, gh_agent_missing_verify_count, gh_agent_missing_run_url_count, gh_agent_fix_evidence_summary, gh_agent_missing_evidence_summary, gh_agent_triage_evidence_summary, gh_agent_missing_triage_summary, gh_agent_independent_verify_summary, gh_agent_missing_verify_summary, stats_status, stats_root, stats_output, stats_summary, issue_state_status, issue_state_output, issue_state_count, issue_state_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, stats_runs_scanned, stats_found_count, stats_filed_count, stats_fixed_count, stats_reopened_count, stats_unknown_state_count, stats_similar_pair_count, driver_event_id, dispatch_mode, driver_status, driver_summary, review_status, review_summary, review_passed_count, review_failed_count, review_warning_count, review_total_count, review_backlog_summary, validation_status, validation_errors, validation_warnings, validation_issue_summary, status]
+    relevant_world: [project, persona, seed, scenario_scope, run_scenario_count, live_budget_minutes, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, driver_journal_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, persona_starting_surface, persona_first_question, persona_evidence_emphasis, persona_escalation_trigger, persona_finding_bias, proof_evidence_count, demo_evidence_count, finding_total_count, strength_count, weakness_count, weakness_route_count, weakness_route_summary, prd_design_intake_path, prd_design_intake_count, prd_design_intake_summary, issue_count, fix_count, blocked_count, missing_evidence_count, missing_proof_evidence_count, proof_minimum_evidence_count, minimum_evidence_count, missing_proof_summary, driver_contract_summary, next_driver_capture, next_driver_attach_command, next_driver_blocker_command, scenario, evidence_kind, evidence_path, evidence_source, finding_kind, finding_title, ticket_repo, filing_status, filing_dry_run, findings_filed_count, findings_skipped_count, findings_failed_count, findings_unfiled_count, filed_issue_summary, filing_summary, autonomous_marathon_status, autonomous_marathon_summary, autonomous_marathon_report_path, autonomous_driver_mode, autonomous_driver_status, autonomous_driver_summary, autonomous_driver_evidence_count, autonomous_driver_issue_count, autonomous_control_status, autonomous_control_summary, autonomous_control_path, autonomous_control_markdown_path, autonomous_watchdog_status, autonomous_watchdog_summary, autonomous_watchdog_path, autonomous_watchdog_markdown_path, autonomous_watchdog_age_minutes, autonomous_fix_status, autonomous_fix_report_path, autonomous_gate_summary, independent_verify_status, independent_verify_summary, issue_closeout_status, issue_closeout_count, issue_closeout_summary, gh_agent_enqueue_status, gh_agent_enqueued_count, gh_agent_skipped_count, gh_agent_job_summary, gh_agent_claim_status, gh_agent_claim_count, gh_agent_claim_summary, gh_agent_drain_status, gh_agent_drained_count, gh_agent_done_count, gh_agent_failed_count, gh_agent_active_count, gh_agent_run_summary, gh_agent_fix_evidence_count, gh_agent_missing_evidence_count, gh_agent_triage_evidence_count, gh_agent_missing_triage_count, gh_agent_independent_verify_count, gh_agent_missing_verify_count, gh_agent_missing_run_url_count, gh_agent_fix_evidence_summary, gh_agent_missing_evidence_summary, gh_agent_triage_evidence_summary, gh_agent_missing_triage_summary, gh_agent_independent_verify_summary, gh_agent_missing_verify_summary, stats_status, stats_root, stats_output, stats_summary, issue_state_status, issue_state_output, issue_state_count, issue_state_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, stats_runs_scanned, stats_found_count, stats_filed_count, stats_fixed_count, stats_reopened_count, stats_unknown_state_count, stats_similar_pair_count, driver_event_id, dispatch_mode, driver_status, driver_summary, review_status, review_summary, review_passed_count, review_failed_count, review_warning_count, review_total_count, review_backlog_summary, validation_status, validation_errors, validation_warnings, validation_issue_summary, status]
     view:
       - banner:
           text: "RUN CREATED"
@@ -49,6 +49,9 @@ states:
             Autonomous driver: '{{ world.autonomous_driver_mode|default:"pending" }} / {{ world.autonomous_driver_status|default:"(not run)" }}: evidence {{ world.autonomous_driver_evidence_count }}, issues {{ world.autonomous_driver_issue_count }}'
             Marathon control: '{{ world.autonomous_control_status|default:"(not armed)" }}: {{ world.autonomous_control_summary|default:"" }}'
             Control artifact: '{{ world.autonomous_control_path|default:"(not generated)" }}'
+            Marathon watchdog: '{{ world.autonomous_watchdog_status|default:"(not checked)" }}: {{ world.autonomous_watchdog_summary|default:"" }}'
+            Watchdog age: "{{ world.autonomous_watchdog_age_minutes }} min"
+            Watchdog report: '{{ world.autonomous_watchdog_markdown_path|default:"(not generated)" }}'
             Issue filing: '{{ world.filing_status|default:"(not filed)" }}: filed {{ world.findings_filed_count }}, skipped {{ world.findings_skipped_count }}, failed {{ world.findings_failed_count }}, unfiled {{ world.findings_unfiled_count }}'
             GH-agent fixes: '{{ world.gh_agent_enqueue_status|default:"(not queued)" }}: queued {{ world.gh_agent_enqueued_count }}, skipped {{ world.gh_agent_skipped_count }}'
             GH-agent claims: '{{ world.gh_agent_claim_status|default:"(not claimed)" }}: claimed {{ world.gh_agent_claim_count }}'
@@ -109,6 +112,9 @@ states:
             - label: "autonomous_marathon ticket_repo=owner/repo gh_agent_public_base_url=<url>"
               hint: "finalize this run through autonomous fix, review, validation, weakness routing, and stats"
               intent: autonomous_marathon
+            - label: "autonomous_watchdog"
+              hint: "check marathon heartbeat and fail closed before spend when stale"
+              intent: autonomous_watchdog
             - label: "file_findings ticket_repo=owner/repo"
               hint: "preview or debug issue filing without making it the full autonomous fix gate"
               intent: file_findings
@@ -750,6 +756,63 @@ states:
               on_error: run_created
             - set:
                 status: "autonomous_marathon_complete"
+      autonomous_watchdog:
+        - target: run_created
+          effects:
+            - set:
+                autonomous_watchdog_status: "running"
+                autonomous_watchdog_summary: ""
+                autonomous_watchdog_path: ""
+                autonomous_watchdog_markdown_path: ""
+                autonomous_watchdog_age_minutes: 0
+                status: "checking_autonomous_watchdog"
+            - invoke: host.run
+              id: autonomous_product_journey_marathon_watchdog
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --autonomous-marathon-watchdog
+                  - --json-output
+                  - --report-blocked-autonomous-watchdog
+                  - --run-dir
+                  - "{{ slots.run_dir ?? world.run_dir }}"
+                  - --watchdog-now
+                  - "{{ slots.watchdog_now ?? '' }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                autonomous_watchdog_status: "stdout_json.autonomous_watchdog_status"
+                autonomous_watchdog_summary: "stdout_json.autonomous_watchdog_summary"
+                autonomous_watchdog_path: "stdout_json.autonomous_watchdog_path"
+                autonomous_watchdog_markdown_path: "stdout_json.autonomous_watchdog_markdown_path"
+                autonomous_watchdog_age_minutes: "stdout_json.autonomous_watchdog_age_minutes"
+                driver_journal_path: "stdout_json.driver_journal_path"
+                proof_evidence_count: "stdout_json.proof_evidence_count"
+                demo_evidence_count: "stdout_json.demo_evidence_count"
+                finding_total_count: "stdout_json.finding_total_count"
+                strength_count: "stdout_json.strength_count"
+                weakness_count: "stdout_json.weakness_count"
+                weakness_route_count: "stdout_json.weakness_route_count"
+                weakness_route_summary: "stdout_json.weakness_route_summary"
+                prd_design_intake_path: "stdout_json.prd_design_intake_path"
+                prd_design_intake_count: "stdout_json.prd_design_intake_count"
+                prd_design_intake_summary: "stdout_json.prd_design_intake_summary"
+                issue_count: "stdout_json.issue_count"
+                fix_count: "stdout_json.fix_count"
+                blocked_count: "stdout_json.blocked_count"
+                missing_evidence_count: "stdout_json.missing_evidence_count"
+                missing_proof_evidence_count: "stdout_json.missing_proof_evidence_count"
+                proof_minimum_evidence_count: "stdout_json.proof_minimum_evidence_count"
+                minimum_evidence_count: "stdout_json.minimum_evidence_count"
+                missing_proof_summary: "stdout_json.missing_proof_summary"
+                driver_contract_summary: "stdout_json.driver_contract_summary"
+                next_driver_capture: "stdout_json.next_driver_capture"
+                next_driver_attach_command: "stdout_json.next_driver_attach_command"
+                next_driver_blocker_command: "stdout_json.next_driver_blocker_command"
+              on_error: run_created
+            - set:
+                status: "autonomous_watchdog_checked"
       autonomous_fix:
         - when: "slots.ticket_repo == nil || slots.ticket_repo == ''"
           target: run_created
