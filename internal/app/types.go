@@ -887,6 +887,18 @@ type State struct {
 	// Rejected at load time on terminal: true or mode: conversational states.
 	AgentOffRamp *OffRampDef `yaml:"agent_off_ramp,omitempty"`
 
+	// Workbench declares this room a governed free-form work floor: instead
+	// of hand-rolling write_mode + agent_off_ramp + an on_enter
+	// host.agent.task + a free-text capture arc, the author names an agent
+	// and a prompt/acceptance contract and the loader's expandWorkbenches
+	// pass (workbench.go) desugars it into those four already-shipped
+	// primitives at load time, before the roomDispatchesAgent / write-mode
+	// precondition pass runs. Nil — the default — means no workbench; the
+	// state's WriteMode/AgentOffRamp/OnEnter/DefaultIntent are whatever the
+	// author wrote by hand (or nothing). See
+	// docs/proposals/room-workbench.md.
+	Workbench *WorkbenchDecl `yaml:"workbench,omitempty"`
+
 	// ContextualRouting opts this room into the contextual-routing final tier:
 	// a router that fires AFTER deterministic and LLM tiers miss, classifying
 	// free-text input into one of four classes (intent, help, room_request,
@@ -1274,6 +1286,45 @@ type OffRampDef struct {
 // disabled case, so runtime callers normally just nil-check the pointer; this
 // accessor exists for the loader's own normalization pass and for tests.
 func (d *OffRampDef) Enabled() bool { return d != nil && d.enabled }
+
+// WorkbenchDecl is the `workbench:` state block — see docs/proposals/room-workbench.md.
+// The loader's expandWorkbenches pass (workbench.go) desugars a non-nil
+// WorkbenchDecl into write_mode: read_only, agent_off_ramp, a synthesized
+// on_enter host.agent.task, and a synthesized catch-all capture intent set as
+// the room's default_intent — the same four primitives
+// stories/dev-story/rooms/landing.yaml hand-rolls today.
+type WorkbenchDecl struct {
+	// Agent names the entry in AppDef.Agents dispatched by the synthesized
+	// on_enter host.agent.task. Required; must declare WS toolbox:+effect:
+	// with effect in {write, external} (enforced by the load-time
+	// invariant pass, alongside this desugaring).
+	Agent string `yaml:"agent"`
+	// Prompt is the prompt template path passed as with.context.prompt to
+	// the synthesized host.agent.task call (mirrors landing.yaml's
+	// prompts/landing.md).
+	Prompt string `yaml:"prompt"`
+	// AcceptanceSchema is the JSON schema path passed as
+	// with.acceptance.schema (the M6b host.agent.task contract every task
+	// dispatch already requires).
+	AcceptanceSchema string `yaml:"acceptance_schema"`
+	// CaptureSlot names the free-text world key the synthesized capture
+	// intent's single required string slot binds into (and the on_enter
+	// dispatch's guard/request arg reads from). Empty defaults to
+	// "<room>_request", mirroring landing.yaml's landing_request.
+	CaptureSlot string `yaml:"capture_slot,omitempty"`
+	// OffRampAgent names the agent backing the synthesized agent_off_ramp.
+	// Empty defaults to Agent itself — the workbench agent's own persona
+	// answers genuine Q&A that never reaches the capture intent.
+	OffRampAgent string `yaml:"off_ramp_agent,omitempty"`
+	// Plan, when true, requires AcceptanceSchema to declare a top-level
+	// "plan" property matching the shared plan.json contract
+	// (stories/dev-story/schemas/plan.json's goal/step/verify shape),
+	// checked at load time. The propose/accept/apply/verify sub-loop rooms
+	// themselves stay hand-authored — this only guards the contract the
+	// planner and those rooms must agree on (open question 2 in the
+	// proposal: code-generating the sub-loop is out of scope for v1).
+	Plan bool `yaml:"plan,omitempty"`
+}
 
 // ContextualRoutingConfig opts a room into the contextual-routing final tier.
 // When Enabled is true, the orchestrator fires a contextual router on every

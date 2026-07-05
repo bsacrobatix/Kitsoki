@@ -167,6 +167,14 @@ func runLoadPipeline(merged *AppDef, path, baseDir string, ifaceOverrides map[st
 		return nil, errors.Join(expandErrs...)
 	}
 
+	// Expand `workbench:` blocks into write_mode/agent_off_ramp/on_enter/
+	// default_intent before the roomDispatchesAgent / write-mode
+	// precondition pass (inside validateDef below) and agent
+	// effect-taxonomy resolution see them — see workbench.go.
+	if workbenchErrs := expandWorkbenches(merged, path); len(workbenchErrs) > 0 {
+		return nil, errors.Join(workbenchErrs...)
+	}
+
 	// Inject builtin meta_modes (`self`, `bug`) that the app didn't
 	// declare itself. Done before validation so trigger collisions and
 	// missing-env-var diagnostics fire the same way as for app-declared
