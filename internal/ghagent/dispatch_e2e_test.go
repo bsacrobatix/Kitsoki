@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -504,6 +505,61 @@ func TestRepoRootPrefersKitsokiRepoEnv(t *testing.T) {
 	}
 	if got != dir {
 		t.Fatalf("repoRoot = %q, want KITSOKI_REPO %q", got, dir)
+	}
+}
+
+// TestConcurrentDispatch_NoAppDirCrossContamination drives two DIFFERENT
+// stories' RunStorySession spawns concurrently in the same process (task 1.2,
+// docs/proposals/gh-agent-honest-issues.md). Before the appDirLoadMu fix
+// (internal/testrunner/flows.go), two concurrent RunFlows calls racing to
+// setenv KITSOKI_APP_DIR before their own app.Load could cross-contaminate:
+// whichever call's Load ran while the OTHER job's app dir was published could
+// silently resolve `${KITSOKI_APP_DIR}`-templated fields (e.g.
+// meta_modes[*].cwd) against the wrong story's directory. Run with -race to
+// also catch any unsynchronized access to the global env var directly.
+func TestConcurrentDispatch_NoAppDirCrossContamination(t *testing.T) {
+	ctx := context.Background()
+	routes := []Route{
+		DefaultLabelStoryMap()["bug"],     // stories/bugfix
+		DefaultLabelStoryMap()["feature"], // stories/dev-story
+	}
+
+	results := make([]RunResult, len(routes))
+	errs := make([]error, len(routes))
+	var wg sync.WaitGroup
+	for i, route := range routes {
+		i, route := i, route
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			job := &jobs.GHJob{
+				JobID:        fmt.Sprintf("job-%d", i),
+				OriginRef:    fmt.Sprintf("github:o/r/issue/%d", 100+i),
+				Repo:         "o/r",
+				ObjectKind:   "issue",
+				ObjectNumber: fmt.Sprintf("%d", 100+i),
+			}
+			results[i], errs[i] = RunStorySession(ctx, route, job)
+		}()
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("route %d (%s) RunStorySession: %v", i, routes[i].Story, err)
+		}
+	}
+	for i, res := range results {
+		wantRunURL := fmt.Sprintf("kitsoki://run/job-%d", i)
+		if res.RunURL != wantRunURL {
+			t.Errorf("route %d (%s) RunURL = %q, want %q — job identity crossed streams", i, routes[i].Story, res.RunURL, wantRunURL)
+		}
+		if res.Turns < 1 {
+			t.Errorf("route %d (%s) ran %d turns, want >=1 (app dir may have resolved against the other job's story)", i, routes[i].Story, res.Turns)
+		}
+		if !res.Stubbed {
+			t.Errorf("route %d (%s) Stubbed = false, want true (beat-fixture spawn path)", i, routes[i].Story)
+		}
 	}
 }
 
