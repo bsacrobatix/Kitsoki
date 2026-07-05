@@ -145,6 +145,12 @@ world:
   gh_agent_enqueued_count: { type: int, default: 0 }
   gh_agent_skipped_count: { type: int, default: 0 }
   gh_agent_job_summary: { type: string, default: "" }
+  gh_agent_drain_status: { type: string, default: "" }
+  gh_agent_drained_count: { type: int, default: 0 }
+  gh_agent_done_count: { type: int, default: 0 }
+  gh_agent_failed_count: { type: int, default: 0 }
+  gh_agent_active_count: { type: int, default: 0 }
+  gh_agent_run_summary: { type: string, default: "" }
   stats_status:   { type: string, default: "" }
   stats_root:     { type: string, default: "" }
   stats_output:   { type: string, default: "" }
@@ -292,6 +298,10 @@ intents:
       mode: { type: string, required: false }
       gh_agent_db: { type: string, required: false }
       gh_agent_story: { type: string, required: false }
+      gh_agent_drain: { type: string, required: false }
+      gh_agent_public_base_url: { type: string, required: false }
+      gh_agent_project_root: { type: string, required: false }
+      gh_agent_incident_repo: { type: string, required: false }
   stats:
     description: "Derive filed/fixed/reopened/similar issue stats from product-journey run bundles and cached GitHub issue state."
     examples: ["stats", "derive issue stats", "stats issue_state_file=.artifacts/product-journey/issues.json"]

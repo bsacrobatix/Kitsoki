@@ -105,6 +105,72 @@ func TestGHAgentEnqueueCmdQueuesIssue(t *testing.T) {
 	}
 }
 
+func TestGHAgentDrainCmdDrainsQueuedIssue(t *testing.T) {
+	dbPath := t.TempDir() + "/gh-jobs.sqlite"
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	store, err := jobs.NewGHJobStore(db)
+	if err != nil {
+		t.Fatalf("NewGHJobStore: %v", err)
+	}
+	job, _, err := store.Enqueue(context.Background(), jobs.GHMention{
+		OriginRef:    "github:o/r/issue/106",
+		Repo:         "o/r",
+		ObjectKind:   "issue",
+		ObjectNumber: "106",
+	}, "stories/bugfix")
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close setup db: %v", err)
+	}
+
+	prev := ghAgentDispatchMention
+	t.Cleanup(func() { ghAgentDispatchMention = prev })
+	ghAgentDispatchMention = func(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions, mention ghagent.Mention, labels []string) (*jobs.GHJob, error) {
+		if mention.OriginRef != "github:o/r/issue/106" {
+			t.Fatalf("OriginRef=%q", mention.OriginRef)
+		}
+		if len(labels) != 1 || labels[0] != "bug" {
+			t.Fatalf("labels=%v, want bug label from queued bugfix story", labels)
+		}
+		if err := store.SetStory(ctx, job.JobID, "stories/bugfix"); err != nil {
+			return nil, err
+		}
+		if err := store.SetRunURL(ctx, job.JobID, job.JobID, "https://agent.example/run/"+job.JobID); err != nil {
+			return nil, err
+		}
+		if err := store.Advance(ctx, job.JobID, jobs.GHDone, ""); err != nil {
+			return nil, err
+		}
+		return store.GetJob(ctx, job.JobID)
+	}
+
+	cmd := newGHAgentCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{
+		"drain",
+		"--db", dbPath,
+		"--repo", "o/r",
+		"--public-base-url", "https://agent.example",
+		"--json",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("drain command: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("decode drain JSON %q: %v", out.String(), err)
+	}
+	if payload["status"] != "drained" || payload["drained_count"].(float64) != 1 || payload["done_count"].(float64) != 1 {
+		t.Fatalf("unexpected drain payload: %#v", payload)
+	}
+}
+
 func TestWithGHAgentAuthInstallsCLIExecEnv(t *testing.T) {
 	prevTokenSource := newGitHubAppTokenSource
 	newGitHubAppTokenSource = func(*githubapp.Config, githubapp.Doer) (githubapp.TokenSource, error) {
@@ -513,8 +579,12 @@ func TestDrainQueuedGHAgentJobsRedispatchesStoredPRRebase(t *testing.T) {
 		return store.GetJob(ctx, job.JobID)
 	}
 
-	if err := drainQueuedGHAgentJobs(ctx, store, ghAgentServeOptions{Trigger: "@kitsoki"}); err != nil {
+	drained, err := drainQueuedGHAgentJobs(ctx, store, ghAgentServeOptions{Trigger: "@kitsoki"})
+	if err != nil {
 		t.Fatalf("drainQueuedGHAgentJobs: %v", err)
+	}
+	if len(drained) != 1 || drained[0].OriginRef != "github:o/r/pr/98" {
+		t.Fatalf("drained=%+v", drained)
 	}
 	if dispatched.OriginRef == "" {
 		t.Fatal("queued job was not dispatched")

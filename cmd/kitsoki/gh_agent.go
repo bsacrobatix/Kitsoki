@@ -39,6 +39,7 @@ func newGHAgentCmd() *cobra.Command {
 	cmd.AddCommand(newGHAgentCommentCmd())
 	cmd.AddCommand(newGHAgentSetupCmd())
 	cmd.AddCommand(newGHAgentEnqueueCmd())
+	cmd.AddCommand(newGHAgentDrainCmd())
 	return cmd
 }
 
@@ -131,6 +132,129 @@ func newGHAgentEnqueueCmd() *cobra.Command {
 	cmd.Flags().StringVar(&story, "story", "stories/bugfix", "story path or gh-agent sentinel to run")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print a JSON result")
 	return cmd
+}
+
+func newGHAgentDrainCmd() *cobra.Command {
+	var (
+		dbPath         string
+		repo           string
+		trigger        string
+		worker         string
+		publicBaseURL  string
+		projectRoot    string
+		incidentRepo   string
+		useGitHubApp   bool
+		appID          int64
+		installationID int64
+		appKeyFile     string
+		jsonOut        bool
+	)
+	cmd := &cobra.Command{
+		Use:   "drain",
+		Short: "Drain queued gh-agent jobs from the durable job DB",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
+			if strings.TrimSpace(dbPath) == "" {
+				return fmt.Errorf("gh-agent drain: --db is required")
+			}
+			db, err := sql.Open("sqlite", dbPath)
+			if err != nil {
+				return fmt.Errorf("gh-agent drain: open db %q: %w", dbPath, err)
+			}
+			defer db.Close()
+			store, err := jobs.NewGHJobStore(db)
+			if err != nil {
+				return err
+			}
+			opts := ghAgentServeOptions{
+				Repo:           repo,
+				PublicBaseURL:  publicBaseURL,
+				Trigger:        trigger,
+				Worker:         worker,
+				IncidentRepo:   incidentRepo,
+				ProjectRoot:    projectRoot,
+				UseGitHubApp:   useGitHubApp,
+				AppID:          appID,
+				InstallationID: installationID,
+				AppKeyFile:     appKeyFile,
+			}
+			var drained []*jobs.GHJob
+			err = withGHAgentAuth(ctx, opts, func(authedCtx context.Context) error {
+				var drainErr error
+				drained, drainErr = drainQueuedGHAgentJobs(authedCtx, store, opts)
+				return drainErr
+			})
+			if err != nil {
+				return err
+			}
+			result := ghAgentDrainResult(drained)
+			if jsonOut {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetEscapeHTML(false)
+				return enc.Encode(result)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "drained %d queued gh-agent job(s): done %d, failed %d, active %d\n",
+				result["drained_count"], result["done_count"], result["failed_count"], result["active_count"])
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&dbPath, "db", "", "sqlite path for durable gh_jobs state")
+	cmd.Flags().StringVar(&repo, "repo", "", "fallback owner/repo for comments and incidents")
+	cmd.Flags().StringVar(&trigger, "trigger", ghagent.DefaultMentionTrigger, "mention trigger literal")
+	cmd.Flags().StringVar(&worker, "worker", "gh-agent-1", "worker id holding the claim")
+	cmd.Flags().StringVar(&publicBaseURL, "public-base-url", "", "public URL base used in ack run links")
+	cmd.Flags().StringVar(&projectRoot, "project-root", os.Getenv("KITSOKI_GH_AGENT_PROJECT_ROOT"), "local checkout root for --repo; when onboarded, issue routes use its .kitsoki app")
+	cmd.Flags().StringVar(&incidentRepo, "incident-repo", "", "owner/repo for gh-agent incidents; defaults to --repo")
+	cmd.Flags().BoolVar(&useGitHubApp, "github-app", false, "authenticate as a GitHub App installation (mints GH_TOKEN)")
+	cmd.Flags().Int64Var(&appID, "gh-app-id", 0, "GitHub App id (overrides KITSOKI_GH_APP_ID)")
+	cmd.Flags().Int64Var(&installationID, "gh-app-installation-id", 0, "installation id (overrides KITSOKI_GH_APP_INSTALLATION_ID)")
+	cmd.Flags().StringVar(&appKeyFile, "gh-app-key-file", "", "path to the App's RSA private key .pem (overrides KITSOKI_GH_APP_PRIVATE_KEY_FILE)")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print a JSON result")
+	return cmd
+}
+
+func ghAgentDrainResult(drained []*jobs.GHJob) map[string]any {
+	jobsOut := make([]map[string]any, 0, len(drained))
+	done, failed, active := 0, 0, 0
+	for _, job := range drained {
+		if job == nil {
+			continue
+		}
+		switch job.State {
+		case jobs.GHDone:
+			done++
+		case jobs.GHFailed:
+			failed++
+		default:
+			active++
+		}
+		jobsOut = append(jobsOut, map[string]any{
+			"job_id":        job.JobID,
+			"origin_ref":    job.OriginRef,
+			"repo":          job.Repo,
+			"object_kind":   job.ObjectKind,
+			"object_number": job.ObjectNumber,
+			"story":         job.Story,
+			"state":         job.State,
+			"run_url":       job.RunURL,
+			"incident_url":  job.IncidentURL,
+			"err_msg":       job.ErrMsg,
+		})
+	}
+	status := "drained"
+	if failed > 0 {
+		status = "failed"
+	} else if active > 0 {
+		status = "active"
+	}
+	return map[string]any{
+		"status":        status,
+		"drained_count": len(jobsOut),
+		"done_count":    done,
+		"failed_count":  failed,
+		"active_count":  active,
+		"jobs":          jobsOut,
+	}
 }
 
 func newGHAgentPollCmd() *cobra.Command {

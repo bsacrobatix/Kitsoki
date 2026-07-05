@@ -50,8 +50,42 @@ parser.add_argument("--db")
 parser.add_argument("--issue")
 parser.add_argument("--kind", default="issue")
 parser.add_argument("--story", default="stories/bugfix")
+parser.add_argument("--public-base-url", default="")
+parser.add_argument("--project-root", default="")
+parser.add_argument("--incident-repo", default="")
 parser.add_argument("--json", action="store_true")
 args = parser.parse_args()
+if (args.verb1, args.verb2) == ("gh-agent", "drain"):
+    assert args.db
+    db_path = Path(args.db)
+    rows = json.loads(db_path.read_text()) if db_path.exists() else []
+    jobs = []
+    for i, row in enumerate(rows, start=1):
+        row["state"] = "done"
+        row["run_url"] = f"https://agent.example/run/job-{i}"
+        row.setdefault("job_id", f"job-{i}")
+        jobs.append({
+            "job_id": row["job_id"],
+            "origin_ref": row["origin_ref"],
+            "repo": row["origin_ref"].split("/issue/")[0].removeprefix("github:"),
+            "object_kind": "issue",
+            "object_number": row["origin_ref"].split("/")[-1],
+            "story": row["story"],
+            "state": row["state"],
+            "run_url": row["run_url"],
+            "incident_url": "",
+            "err_msg": "",
+        })
+    db_path.write_text(json.dumps(rows, indent=2, sort_keys=True) + "\n")
+    print(json.dumps({
+        "status": "drained",
+        "drained_count": len(jobs),
+        "done_count": len(jobs),
+        "failed_count": 0,
+        "active_count": 0,
+        "jobs": jobs,
+    }))
+    sys.exit(0)
 if (args.verb1, args.verb2) == ("gh-agent", "enqueue"):
     assert args.db and args.repo and args.issue
     origin = f"github:{args.repo}/{args.kind}/{args.issue}"
@@ -62,7 +96,7 @@ if (args.verb1, args.verb2) == ("gh-agent", "enqueue"):
         rows = json.loads(db_path.read_text())
     created = origin not in [row["origin_ref"] for row in rows]
     if created:
-        rows.append({"origin_ref": origin, "story": args.story, "state": "queued"})
+        rows.append({"job_id": "job-" + args.issue, "origin_ref": origin, "story": args.story, "state": "queued"})
         db_path.write_text(json.dumps(rows, indent=2, sort_keys=True) + "\n")
     print(json.dumps({
         "status": "queued",
@@ -174,7 +208,7 @@ def main():
 
         # 2. Filing: URLs + filing block recorded, derived artifacts refreshed.
         gh_agent_db = tmp / "gh-agent-jobs.json"
-        result = run.file_findings(run_dir, "o/r", False, None, str(gh_agent_db), "stories/bugfix")
+        result = run.file_findings(run_dir, "o/r", False, None, str(gh_agent_db), "stories/bugfix", True, "https://agent.example", "", "")
         _check("filed 2 credible findings", result["findings_filed_count"] == 2)
         _check("no credible finding left unfiled", result["findings_unfiled_count"] == 0)
         _check("filed urls surface", len(result["filed_issue_urls"]) == 2
@@ -183,6 +217,12 @@ def main():
                result["gh_agent_enqueue_status"] == "queued"
                and result["gh_agent_enqueued_count"] == 2
                and result["gh_agent_skipped_count"] == 0)
+        _check("queued fixes drained by gh-agent",
+               result["gh_agent_drain_status"] == "drained"
+               and result["gh_agent_done_count"] == 2
+               and result["gh_agent_failed_count"] == 0)
+        _check("gh-agent run summary surfaces review links",
+               "https://agent.example/run/job-1" in result["gh_agent_run_summary"])
         queued_rows = json.loads(gh_agent_db.read_text())
         _check("gh-agent queue uses issue origin refs",
                sorted(row["origin_ref"] for row in queued_rows)
@@ -194,7 +234,7 @@ def main():
         _check("seeded finding not filed", not seeded[0].get("github_issue"))
 
         # 3. Idempotence: a re-run files nothing new.
-        result = run.file_findings(run_dir, "o/r", False, None, str(gh_agent_db), "stories/bugfix")
+        result = run.file_findings(run_dir, "o/r", False, None, str(gh_agent_db), "stories/bugfix", True, "https://agent.example", "", "")
         _check("re-run files nothing", result["findings_filed_count"] == 0)
         _check("re-run skips already-filed", result["findings_skipped_count"] == 2)
         _check("re-run attaches to queued fix jobs",
@@ -207,9 +247,11 @@ def main():
         # 4. Gates: review counts the filing check; a new credible finding
         # after filing trips review + validate until re-filed.
         reviewed = run.review_run_bundle(run_dir, None)
-        _check("review has 20 checks", reviewed["total"] == 20)
+        _check("review has 21 checks", reviewed["total"] == 21)
         _check("findings-filed passes when fully filed",
                review_check(reviewed, "findings-filed")["status"] == "pass")
+        _check("gh-agent-fixes passes when drained",
+               review_check(reviewed, "gh-agent-fixes")["status"] == "pass")
         validated = run.validate_run_bundle(run_dir)
         _check("validate has no findings-filed error",
                not any(i["id"] == "findings-filed" for i in validated["issues"]))
@@ -225,7 +267,7 @@ def main():
                    for i in validated["issues"]))
 
         # Re-file closes the gate again.
-        run.file_findings(run_dir, "o/r", False, None, str(gh_agent_db), "stories/bugfix")
+        run.file_findings(run_dir, "o/r", False, None, str(gh_agent_db), "stories/bugfix", True, "https://agent.example", "", "")
         reviewed = run.review_run_bundle(run_dir, None)
         _check("re-filing closes the gate",
                review_check(reviewed, "findings-filed")["status"] == "pass")
