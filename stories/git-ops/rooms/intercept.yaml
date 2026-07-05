@@ -49,6 +49,7 @@ states:
             Status: '{{ world.issue_status|default:"(unknown)" }}'
             URL:    '{{ world.issue_url|default:"(none)" }}'
             Source: '{{ world.issue_source|default:"ticket provider" }}{% if world.issue_legacy_id %} (legacy {{ world.issue_legacy_id }}){% endif %}'
+            Comment: '{{ world.issue_comment_url|default:"(none)" }}'
         when: "world.issue_id != ''"
       - prose: "Issue warning: {{ world.issue_warning }}"
         when: "world.issue_warning != ''"
@@ -85,6 +86,22 @@ states:
                 slot:        title
                 type:        string
                 placeholder: "issue title"
+                required:    true
+            - label: "issue_comment"
+              hint:  "comment on an issue/ticket through the configured ticket provider"
+              intent: issue_comment
+              param:
+                slot:        id
+                type:        string
+                placeholder: "issue id (e.g. 105)"
+                required:    true
+            - label: "issue_transition"
+              hint:  "transition an issue/ticket through the configured ticket provider"
+              intent: issue_transition
+              param:
+                slot:        id
+                type:        string
+                placeholder: "issue id (e.g. 105)"
                 required:    true
             - { label: "undo",            hint: "undo the last commit",                                        intent: undo }
             - { label: "worktree_create", hint: "create a linked worktree under .worktrees/",                 intent: worktree_create }
@@ -230,6 +247,55 @@ states:
               on_error: intercept
             - set:
                 issue_status: "created"
+                issue_source: "ticket provider"
+      issue_comment:
+        - when: "slots.id == nil || slots.id == ''"
+          target: .
+          guard_hint: "Provide id=<issue-number-or-ticket-id>."
+        - when: "slots.body == nil || slots.body == ''"
+          target: .
+          guard_hint: "Provide body=<comment-body>."
+        - target: .
+          effects:
+            - set:
+                issue_id:          "{{ slots.id }}"
+                issue_comment_url: ""
+                issue_warning:     ""
+                last_op_ok:        true
+                last_op_output:    ""
+            - invoke: iface.ticket.comment
+              with:
+                id:   "{{ slots.id }}"
+                repo: "{{ world.ticket_repo }}"
+                body: "{{ slots.body }}"
+              bind:
+                issue_comment_url: url
+              on_error: intercept
+            - set:
+                issue_status: "commented"
+                issue_source: "ticket provider"
+      issue_transition:
+        - when: "slots.id == nil || slots.id == ''"
+          target: .
+          guard_hint: "Provide id=<issue-number-or-ticket-id>."
+        - target: .
+          effects:
+            - set:
+                issue_id:          "{{ slots.id }}"
+                issue_status:      ""
+                issue_comment_url: ""
+                issue_warning:     ""
+                last_op_ok:        true
+                last_op_output:    ""
+            - invoke: iface.ticket.transition
+              with:
+                id:   "{{ slots.id }}"
+                repo: "{{ world.ticket_repo }}"
+                to:   "{{ slots.to ?? 'resolved' }}"
+              bind:
+                issue_status: status
+              on_error: intercept
+            - set:
                 issue_source: "ticket provider"
       undo:
         - target: undo

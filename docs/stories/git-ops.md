@@ -56,11 +56,14 @@ the merge is always fast-forwardable and can never itself conflict.
 deterministic effects.
 
 **Native ticket operations.** When kitsoki-dev needs GitHub issue state or
-issue creation from the git-ops hub, it routes through the `ticket` interface
-bound to `host.gh.ticket`; agents should not shell out to `gh issue ...`.
+issue creation/comment/transition from the git-ops hub, it routes through the
+`ticket` interface bound to `host.gh.ticket`; agents should not shell out to
+`gh issue ...`.
 The CLI mirrors that native surface for automation and debugging:
 `kitsoki gitops issue-status --repo owner/repo --id N --json` and
-`kitsoki gitops issue-create --repo owner/repo --title ... --body ... --json`.
+`kitsoki gitops issue-create --repo owner/repo --title ... --body ... --json`,
+plus `kitsoki gitops issue-comment --repo owner/repo --id N --body ... --json`
+and `kitsoki gitops issue-transition --repo owner/repo --id N --to resolved --json`.
 Product-journey stats refreshes use
 `kitsoki gitops issue-state-cache --findings-root .artifacts/product-journey --repo owner/repo --output .artifacts/product-journey/stats/issue-state.json --json`
 to scan filed findings and build the issue-state cache through the same native

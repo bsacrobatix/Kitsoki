@@ -32,6 +32,12 @@ host_interfaces:
         output: { id: string, title: string, body: string, status: string,
                   priority: string, assignee: string, url: string, comments: list,
                   source: string, legacy_id: string }
+      comment:
+        input:  { id: string, repo: string, body: string }
+        output: { ok: bool, comment_id: string, url: string }
+      transition:
+        input:  { id: string, repo: string, to: string }
+        output: { ok: bool, status: string }
     default: host.local_files.ticket
 
 # conflict_resolver is declared with tools: [Read, Edit] and NO Bash —
@@ -162,6 +168,7 @@ world:
   issue_legacy_id:          { type: string, default: "" }
   issue_body:               { type: string, default: "" }
   issue_warning:            { type: string, default: "" }
+  issue_comment_url:        { type: string, default: "" }
 
 intents:
   # ── Routing (internal; emitted by on_enter) ─────────────────────────
@@ -251,6 +258,20 @@ intents:
       title: { type: string, required: false }
       body: { type: string, required: false }
       labels: { type: string, required: false }
+  issue_comment:
+    description: "Comment on an issue/ticket through the configured ticket provider."
+    examples: ["comment on issue", "add issue comment", "post issue comment", "comment issue 105"]
+    priority: 82
+    slots:
+      id: { type: string, required: false }
+      body: { type: string, required: false }
+  issue_transition:
+    description: "Transition an issue/ticket through the configured ticket provider."
+    examples: ["close issue", "resolve issue", "reopen issue", "mark issue resolved"]
+    priority: 82
+    slots:
+      id: { type: string, required: false }
+      to: { type: string, required: false }
 
   commit:
     description: "Stage and commit changes with an agent-authored message."

@@ -139,6 +139,89 @@ func TestGitopsIssueCreateUsesNativeTicketProvider(t *testing.T) {
 	}
 }
 
+func TestGitopsIssueCommentUsesNativeTicketProvider(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/repos/o/r/issues/105/comments" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		body, _ = payload["body"].(string)
+		writeJSON(w, map[string]any{"html_url": "https://github.com/o/r/issues/105#issuecomment-2"})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("gitops issue-comment must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
+
+	cmd := gitopsCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"issue-comment", "--repo", "o/r", "--id", "105", "--body", "Fixed in 60867ddb.", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("issue-comment: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out.String())
+	}
+	if got["status"] != "issue_commented" || got["comment_url"] != "https://github.com/o/r/issues/105#issuecomment-2" {
+		t.Fatalf("comment output = %+v", got)
+	}
+	if body != "Fixed in 60867ddb." {
+		t.Fatalf("comment body = %q", body)
+	}
+}
+
+func TestGitopsIssueTransitionUsesNativeTicketProvider(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	var state string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/repos/o/r/issues/105" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		state, _ = payload["state"].(string)
+		writeJSON(w, map[string]any{"state": state})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("gitops issue-transition must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
+
+	cmd := gitopsCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"issue-transition", "--repo", "o/r", "--id", "105", "--to", "resolved", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("issue-transition: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out.String())
+	}
+	if got["status"] != "issue_transitioned" || got["issue_state"] != "closed" || state != "closed" {
+		t.Fatalf("transition output = %+v, state=%q", got, state)
+	}
+}
+
 func TestGitopsIssueStateCacheUsesNativeTicketProvider(t *testing.T) {
 	t.Setenv("GH_TOKEN", "test-token")
 	root := t.TempDir()
