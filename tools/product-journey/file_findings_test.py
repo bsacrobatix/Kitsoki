@@ -31,7 +31,7 @@ run = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(run)
 
 FAKE_KITSOKI = r'''#!/usr/bin/env python3
-"""Fake `kitsoki bug file-findings` used by file_findings_test.py.
+"""Fake `kitsoki bug file-findings` / `gh-agent enqueue` used by file_findings_test.py.
 
 Mirrors the Go orchestration's bundle contract: file each credible unfiled
 issue finding (record github_issue), stamp findings.filing, print the JSON
@@ -43,11 +43,41 @@ from pathlib import Path
 parser = argparse.ArgumentParser()
 parser.add_argument("verb1")
 parser.add_argument("verb2")
-parser.add_argument("--run-dir", required=True)
-parser.add_argument("--repo", required=True)
+parser.add_argument("--run-dir")
+parser.add_argument("--repo")
 parser.add_argument("--dry-run", action="store_true")
+parser.add_argument("--db")
+parser.add_argument("--issue")
+parser.add_argument("--kind", default="issue")
+parser.add_argument("--story", default="stories/bugfix")
+parser.add_argument("--json", action="store_true")
 args = parser.parse_args()
+if (args.verb1, args.verb2) == ("gh-agent", "enqueue"):
+    assert args.db and args.repo and args.issue
+    origin = f"github:{args.repo}/{args.kind}/{args.issue}"
+    db_path = Path(args.db)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = []
+    if db_path.exists():
+        rows = json.loads(db_path.read_text())
+    created = origin not in [row["origin_ref"] for row in rows]
+    if created:
+        rows.append({"origin_ref": origin, "story": args.story, "state": "queued"})
+        db_path.write_text(json.dumps(rows, indent=2, sort_keys=True) + "\n")
+    print(json.dumps({
+        "status": "queued",
+        "created": created,
+        "job_id": "job-" + args.issue,
+        "origin_ref": origin,
+        "repo": args.repo,
+        "object_kind": args.kind,
+        "object_number": args.issue,
+        "story": args.story,
+        "state": "queued",
+    }))
+    sys.exit(0)
 assert (args.verb1, args.verb2) == ("bug", "file-findings"), (args.verb1, args.verb2)
+assert args.run_dir and args.repo
 
 path = Path(args.run_dir) / "findings.json"
 findings = json.loads(path.read_text())
@@ -143,11 +173,20 @@ def main():
                and review_check(reviewed, "findings-filed")["detail"] == "filing not requested")
 
         # 2. Filing: URLs + filing block recorded, derived artifacts refreshed.
-        result = run.file_findings(run_dir, "o/r", False, None)
+        gh_agent_db = tmp / "gh-agent-jobs.json"
+        result = run.file_findings(run_dir, "o/r", False, None, str(gh_agent_db), "stories/bugfix")
         _check("filed 2 credible findings", result["findings_filed_count"] == 2)
         _check("no credible finding left unfiled", result["findings_unfiled_count"] == 0)
         _check("filed urls surface", len(result["filed_issue_urls"]) == 2
                and all(u.startswith("https://github.com/o/r/issues/") for u in result["filed_issue_urls"]))
+        _check("filed findings queued for gh-agent fixes",
+               result["gh_agent_enqueue_status"] == "queued"
+               and result["gh_agent_enqueued_count"] == 2
+               and result["gh_agent_skipped_count"] == 0)
+        queued_rows = json.loads(gh_agent_db.read_text())
+        _check("gh-agent queue uses issue origin refs",
+               sorted(row["origin_ref"] for row in queued_rows)
+               == ["github:o/r/issue/101", "github:o/r/issue/102"])
         findings = run.read_json(run_dir / "findings.json")
         _check("filing block recorded", findings["filing"]["requested"] is True
                and findings["filing"]["ticket_repo"] == "o/r")
@@ -155,9 +194,12 @@ def main():
         _check("seeded finding not filed", not seeded[0].get("github_issue"))
 
         # 3. Idempotence: a re-run files nothing new.
-        result = run.file_findings(run_dir, "o/r", False, None)
+        result = run.file_findings(run_dir, "o/r", False, None, str(gh_agent_db), "stories/bugfix")
         _check("re-run files nothing", result["findings_filed_count"] == 0)
         _check("re-run skips already-filed", result["findings_skipped_count"] == 2)
+        _check("re-run attaches to queued fix jobs",
+               result["gh_agent_enqueued_count"] == 2
+               and not any(job["created"] for job in result["gh_agent_jobs"]))
         findings2 = run.read_json(run_dir / "findings.json")
         urls = sorted(i["github_issue"]["url"] for i in findings2["items"] if i.get("github_issue"))
         _check("urls stable across re-runs", len(urls) == 2 and len(set(urls)) == 2)
@@ -183,7 +225,7 @@ def main():
                    for i in validated["issues"]))
 
         # Re-file closes the gate again.
-        run.file_findings(run_dir, "o/r", False, None)
+        run.file_findings(run_dir, "o/r", False, None, str(gh_agent_db), "stories/bugfix")
         reviewed = run.review_run_bundle(run_dir, None)
         _check("re-filing closes the gate",
                review_check(reviewed, "findings-filed")["status"] == "pass")

@@ -170,6 +170,50 @@ func TestListQueuedReturnsOnlyQueuedJobs(t *testing.T) {
 	}
 }
 
+func TestEnqueueCreatesQueuedJobIdempotently(t *testing.T) {
+	ctx := context.Background()
+	s := newTestGHStore(t)
+	m := GHMention{
+		OriginRef:    "github:o/r/issue/105",
+		Repo:         "o/r",
+		ObjectKind:   "issue",
+		ObjectNumber: "105",
+	}
+
+	job1, created1, err := s.Enqueue(ctx, m, "stories/bugfix")
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if !created1 {
+		t.Fatal("first enqueue should create a job")
+	}
+	if job1.State != GHQueued || job1.Story != "stories/bugfix" {
+		t.Fatalf("job after enqueue = %+v, want queued stories/bugfix", job1)
+	}
+
+	job2, created2, err := s.Enqueue(ctx, m, "stories/dev-story")
+	if err != nil {
+		t.Fatalf("second Enqueue: %v", err)
+	}
+	if created2 {
+		t.Fatal("second enqueue should attach to existing job")
+	}
+	if job2.JobID != job1.JobID {
+		t.Fatalf("second enqueue minted new job %s, want %s", job2.JobID, job1.JobID)
+	}
+	if job2.Story != "stories/bugfix" {
+		t.Fatalf("second enqueue overwrote story: %q", job2.Story)
+	}
+
+	queued, err := s.ListQueued(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListQueued: %v", err)
+	}
+	if len(queued) != 1 || queued[0].JobID != job1.JobID {
+		t.Fatalf("queued=%+v, want only %s", queued, job1.JobID)
+	}
+}
+
 func TestAdvanceAndSetters(t *testing.T) {
 	ctx := context.Background()
 	s := newTestGHStore(t)

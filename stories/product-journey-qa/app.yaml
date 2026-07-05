@@ -141,6 +141,10 @@ world:
   findings_unfiled_count: { type: int, default: 0 }
   filed_issue_summary: { type: string, default: "" }
   filing_summary: { type: string, default: "" }
+  gh_agent_enqueue_status: { type: string, default: "" }
+  gh_agent_enqueued_count: { type: int, default: 0 }
+  gh_agent_skipped_count: { type: int, default: 0 }
+  gh_agent_job_summary: { type: string, default: "" }
   stats_status:   { type: string, default: "" }
   stats_root:     { type: string, default: "" }
   stats_output:   { type: string, default: "" }
@@ -286,6 +290,8 @@ intents:
     slots:
       ticket_repo: { type: string, required: true }
       mode: { type: string, required: false }
+      gh_agent_db: { type: string, required: false }
+      gh_agent_story: { type: string, required: false }
   stats:
     description: "Derive filed/fixed/reopened/similar issue stats from product-journey run bundles and cached GitHub issue state."
     examples: ["stats", "derive issue stats", "stats issue_state_file=.artifacts/product-journey/issues.json"]
