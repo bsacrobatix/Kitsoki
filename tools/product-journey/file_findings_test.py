@@ -260,7 +260,8 @@ def main():
         )
         scenario_id = run_json["scenarios"][0]["id"]
 
-        # Two credible issue findings + one seeded issue + one strength.
+        # Two credible issue findings + one seeded issue + one strength +
+        # one weakness routed to PRD/design instead of the bugfix queue.
         run.record_finding(run_dir, "issue", "credible one", "observed problem one",
                            scenario_id, "high", "", "open", None)
         run.record_finding(run_dir, "issue", "credible two", "observed problem two",
@@ -269,6 +270,8 @@ def main():
                            scenario_id, "low", "", "open", None, origin="seeded")
         run.record_finding(run_dir, "strength", "nice deck", "deck renders",
                            scenario_id, "low", "", "observed", None)
+        run.record_finding(run_dir, "weakness", "confusing design prompt", "The persona could not tell which PRD path to use.",
+                           scenario_id, "medium", "driver-plan.md", "open", None)
 
         # 1. Dry-run: candidates reported, bundle untouched, gates fail closed.
         before = (run_dir / "findings.json").read_text()
@@ -340,6 +343,15 @@ def main():
         _check("deck includes gh-agent fix evidence links",
                "https://agent.example/run/job-1/artifacts/fix-report.md" in gh_scene.get("body", "")
                and "https://agent.example/run/job-1/artifacts/fix.patch" in gh_scene.get("body", ""))
+        routes = run.read_json(run_dir / "weakness-routes.json")
+        _check("weakness finding routes to PRD/design",
+               routes["summary"]["routed"] == 1
+               and routes["items"][0]["target_story"] == "stories/prd"
+               and routes["items"][0]["target_pipeline"] == "prd-design")
+        route_scene = deck_scene(deck, "PRD/design routes")
+        _check("deck includes PRD/design route scene",
+               "confusing design prompt" in route_scene.get("body", "")
+               and "stories/prd" in route_scene.get("body", ""))
         seeded = [i for i in findings["items"] if i.get("origin") == "seeded"]
         _check("seeded finding not filed", not seeded[0].get("github_issue"))
 
@@ -357,7 +369,9 @@ def main():
         # 4. Gates: review counts the filing check; a new credible finding
         # after filing trips review + validate until re-filed.
         reviewed = run.review_run_bundle(run_dir, None)
-        _check("review has 27 checks", reviewed["total"] == 27)
+        _check("review has 28 checks", reviewed["total"] == 28)
+        _check("weakness-routing passes when weakness has PRD route",
+               review_check(reviewed, "weakness-routing")["status"] == "pass")
         _check("findings-filed passes when fully filed",
                review_check(reviewed, "findings-filed")["status"] == "pass")
         _check("gh-agent-fixes passes when drained",
@@ -503,7 +517,7 @@ def main():
                and "https://agent.example/run/job-1" in report_text
                and "https://agent.example/run/job-1/artifacts/fix-report.md" in report_text
                and "https://agent.example/run/job-1/artifacts/independent-verify.md" in report_text)
-        _check("autonomous loop reviewed and validated", result["review_total_count"] == 27 and result["validation_status"] == "valid")
+        _check("autonomous loop reviewed and validated", result["review_total_count"] == 28 and result["validation_status"] == "valid")
 
         run_dir_facade, run_json_facade = run.build_run_bundle(
             catalog, run.load_github_targets(run.GITHUB_TARGETS),
