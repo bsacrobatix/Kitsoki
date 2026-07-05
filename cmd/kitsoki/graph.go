@@ -110,6 +110,16 @@ func checkProposalsIndex(cat *graph.Catalog, proposalsDir string) []string {
 			errs = append(errs, fmt.Sprintf("%s: generated entry not found in %s (regenerate and update the index): %s", node.ID, readmePath, entry))
 		}
 	}
+	for _, node := range proposalsadapter.GraphSourcedChildProposals(cat) {
+		entry, err := proposalsadapter.RenderChildEntry(node)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", node.ID, err))
+			continue
+		}
+		if !lines[entry] {
+			errs = append(errs, fmt.Sprintf("%s: generated child entry not found in %s (regenerate and update the index): %s", node.ID, readmePath, entry))
+		}
+	}
 	return errs
 }
 
