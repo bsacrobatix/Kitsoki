@@ -4,10 +4,72 @@ usable-kitsoki-release-gate.md). The gated, cost-bearing counterpart to
 `flow_gate_runner.py`'s no-LLM flow-replay path: instead of replaying a
 compiled flow fixture through `stories/scenario-foundry-harness`'s stub
 `ask` room, this drives a mined scenario's turns into a REAL `workbench:`
-room (`stories/dev-story`'s `landing` room, migrated onto `workbench:` by
-room-workbench Task 3.1) via a REAL spawned agent process, closing the
-"honest gap" `flow_gate_runner.py`'s docstring documents for the no-LLM
-path.
+room via a REAL live kitsoki session, closing the "honest gap"
+`flow_gate_runner.py`'s docstring documents for the no-LLM path.
+
+## Which real workbench room (epic-finalization: multi-target)
+
+Any of `flow_gate_runner.WORKBENCH_TARGETS` (`dev-story` / `pets-dev` /
+`slidey-dev` -- the three real `workbench:` rooms this project ships, see
+`tools/session-mining/flow_fixture_compiler.py`'s registry) may be driven,
+selected by the `GATE_TARGET` env var -- the SAME optional env var
+`_gate_cli.py` already reads for the no-LLM path (`GATE_TARGET` unset
+defaults to `dev-story`, this module's original single-target behavior).
+The app path and session slug are both derived from the registry entry
+(`app_id`), never hardcoded to `dev-story` alone -- driving `pets-dev` or
+`slidey-dev` used to silently look for the new trace file in `dev-story`'s
+`~/.kitsoki/sessions/dev-story/` directory regardless of which app was
+actually driven (a real bug fixed at epic-finalization time; see git
+history for the single-target constant this replaced).
+
+## Mechanism: `tools/mcp-drive/drive.sh`, not a bespoke `claude -p` spawn
+
+Earlier revisions of this module spawned a raw `claude -p <prompt>`
+subprocess with no `--mcp-config`, no `--permission-mode`, and no
+`--allowedTools` -- i.e. a headless agent that had no reliable way to reach
+the kitsoki studio MCP at all (an in-process/ad-hoc `claude -p` does not
+attach any MCP server unless told to) and would have hung or silently
+no-opped on the very first `session.new` tool call. `tools/mcp-drive/
+drive.sh` is this repo's own already-battle-tested primitive for exactly
+this shape of delegation (`--mcp-config tools/mcp-drive/kitsoki-mcp.json
+--strict-mcp-config --permission-mode acceptEdits --allowedTools <studio
+tools>`, plus retry/backoff over transient provider errors) -- reusing it
+here means this module inherits a real, working MCP attachment instead of
+re-deriving (and re-breaking) one.
+
+Direct-API `--harness live` (`kitsoki drive --harness live`,
+`cmd/kitsoki/credential.go`) was considered and rejected for THIS role: it
+requires an `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`/on-disk primary-key
+credential, which an ambient Claude Code subscription (the auth `kitsoki
+doctor` reports ready) does not expose as a portable key. The studio MCP's
+own `session.new {harness: "live"}` resolves live differently
+(`cmd/kitsoki/mcp.go`'s `studioHarnessBuilder` builds the CLAUDE-CLI-backed
+harness -- subscription auth, no direct API key -- the same one `kitsoki
+web`/`kitsoki run` use), which is why driving through the MCP (via
+`drive.sh`'s spawned orchestrator agent calling `session.new`/
+`session.drive`) is the mechanism that actually works with only an ambient
+`claude` CLI login, not a second, incompatible live path.
+
+## Trace path is explicit, not inferred
+
+An earlier revision of this module snapshotted the mtimes of every file
+under `~/.kitsoki/sessions/<app_id>/` before spawning the agent and diffed
+them afterward to find "the trace file the run just wrote" -- mirroring
+`kitsoki run`/`kitsoki drive`'s on-disk convention
+(`internal/store/trace_path.go`'s `DefaultTracePath`). That convention does
+NOT apply to a studio-MCP-driven session: `internal/mcp/studio/
+session_tools.go`'s `resolveTracePath` writes to a **fresh
+`os.CreateTemp("", "kitsoki-studio-*.jsonl")` file** whenever `session_new`'s
+`trace` argument is omitted -- i.e. every prior invocation of this module
+would have looked in the wrong directory entirely and always reported "no
+new session trace file was found", never actually joining a real trace. The
+fix is not a better heuristic: `session_new` accepts an explicit `trace`
+path (`internal/mcp/studio/session_runtime.go`'s `newSessionRuntime` calls
+`os.MkdirAll` on its directory and `store.OpenJSONL` on the path directly,
+no different from the CLI's own `--trace`), so this module picks the path
+itself, tells the agent to pass it verbatim, and reads it back from the
+exact location it named -- no directory-diffing, no ambiguity, no race with
+any of this machine's many OTHER concurrent kitsoki sessions.
 
 ## Structural gating (mirrors tools/swarm/tiers/liveExplorerCli.ts exactly)
 
@@ -34,23 +96,30 @@ file's `main()`.
 ## What ONE live cell does (only reachable via `--live-gate`, manual only)
 
 1. Loads the scenario IR document (`GATE_SCENARIO_CORPUS`/`GATE_SCENARIO_ID`,
-   the identical env contract `_gate_cli.py` reads for the no-LLM path).
-2. Snapshots the mtimes of every trace file already sitting under this
-   app's `~/.kitsoki/sessions/<app-slug>/` directory
-   (`internal/store/trace_path.go`'s `SessionsDir()`/`DefaultTracePath`
-   convention) so a freshly-written trace can be told apart from a stale one
-   without needing the spawned agent to report its own session id reliably.
+   the identical env contract `_gate_cli.py` reads for the no-LLM path) and
+   resolves the target workbench room (`GATE_TARGET`, default `dev-story`).
+2. Picks a KNOWN, deterministic trace path under `evidence_dir` (never a
+   sessions-directory mtime-diff heuristic -- see "Trace path is explicit,
+   not inferred" below for why an earlier revision's approach was broken)
+   and threads it into the briefing prompt as `session_new`'s own `trace`
+   argument, so the orchestrator agent writes the session's JSONL exactly
+   where this script already knows to read it back from.
 3. Builds a briefing prompt (mirrors `liveExplorerCli.ts`'s `buildPrompt`)
-   instructing the agent to mint a real kitsoki session against
-   `LIVE_TARGET_APP` via the studio MCP toolbox (`session_new`,
-   `session_submit`/`session_drive`) and submit the scenario's mined turns,
-   IN ORDER, as free text -- real routing, real dispatch, real LLM spend.
-   `AskUserQuestion` is hard-denied for headless agents (AGENTS.md); the
-   prompt tells the agent to proceed on its own judgment rather than stall.
-4. Spawns that agent (`--agent-cmd`, default `claude -p`) via
-   `subprocess.run` -- real LLM spend happens here, exactly once per cell.
-5. Diffs the sessions directory's mtimes to find the trace file the run
-   just wrote, parses it as the SAME raw `store.Event` JSONL
+   instructing the agent to call the kitsoki studio MCP's `session_new`
+   (`story_path`, `harness: "live"`, `profile: "claude-native"`, `trace`)
+   then `session_drive` once per mined turn, IN ORDER, as free text -- real
+   routing, real dispatch, real LLM spend. `AskUserQuestion` is hard-denied
+   for headless agents (AGENTS.md); the prompt tells the agent to proceed on
+   its own judgment rather than stall.
+4. Spawns that agent via `tools/mcp-drive/drive.sh` (`--agent-cmd` selects
+   the ORCHESTRATOR backend, `claude` (default) or `codex`, via
+   `MCP_DRIVE_BACKEND`) -- real LLM spend happens here, exactly once per
+   cell for the orchestrator, plus once more per turn for the workbench's
+   own `host.agent.task` dispatch (a SEPARATE real agent the kitsoki engine
+   itself spawns -- `internal/host/agent_backend.go`'s default `claude`
+   backend -- when the room's `on_enter` fires).
+5. Reads that same known trace path back (once the agent process exits),
+   parses it as the SAME raw `store.Event` JSONL
    `flow_gate_runner.run_scenario_flow`'s `--trace-out` produces (one line
    per event, `{"kind": "turn.end", "payload": {...}}` for the ones that
    matter), and re-uses `usable_kitsoki_gate.py`'s `extract_turn_signals` /
@@ -65,15 +134,16 @@ file's `main()`.
 
 ## Why this is not run in CI, ever
 
-Every invocation costs real LLM tokens (a spawned `claude -p` process) and
-depends on an operator's own `claude`/agent credentials being present in the
-environment -- exactly the two properties AGENTS.md's "Automated testing
-should never use a real LLM or incur costs" rule forbids in any CI job. The
-release-candidate workflow (`.github/workflows/usable-kitsoki-gate.yml`'s
-`release-candidate-live-gate` job) documents the intended cadence (an
-explicit tag or `workflow_dispatch`, never `pull_request`/`push: main`) but
-still never actually invokes this file with `--live-gate` from within the
-repo -- that remains an operator's own `arena run --live` invocation per
+Every invocation costs real LLM tokens (an orchestrator agent, PLUS one real
+workbench dispatch per turn) and depends on an operator's own `claude`/agent
+credentials being present in the environment -- exactly the two properties
+AGENTS.md's "Automated testing should never use a real LLM or incur costs"
+rule forbids in any CI job. The release-candidate workflow (`.github/
+workflows/usable-kitsoki-gate.yml`'s `release-candidate-live-gate` job)
+documents the intended cadence (an explicit tag or `workflow_dispatch`,
+never `pull_request`/`push: main`) but still never actually invokes this
+file with `--live-gate` from within the repo -- that remains an operator's
+own `arena run --live` invocation (or a direct, deliberate manual run) per
 `tools/arena/README.md`'s existing "Live... never run in CI" convention.
 """
 
@@ -97,16 +167,37 @@ if str(_ARENA_ROOT) not in sys.path:
 
 from arena.plugins import usable_kitsoki_gate as gate_plugin  # noqa: E402
 
-# The real `workbench:` room this live path drives -- unlike the no-LLM
-# path's `stories/scenario-foundry-harness` stub, `stories/dev-story`'s
-# `landing` room IS a `workbench:` room (room-workbench Task 3.1: "app:
-# migrate dev-story's landing.yaml onto workbench:"), so
-# `workbenchGateSignal` actually fires for real turns driven here.
-LIVE_TARGET_APP = runner.REPO_ROOT / "stories" / "dev-story" / "app.yaml"
-LIVE_TARGET_APP_SLUG = "dev-story"
+# The real `workbench:` rooms this live path can drive -- reuses the SAME
+# registry `flow_gate_runner.py` (no-LLM path) and `flow_fixture_compiler.py`
+# already treat as the single source of truth, so a live and a no-LLM record
+# for the same `target` can never silently disagree on which app/app_id they
+# mean. See flow_fixture_compiler.WORKBENCH_TARGETS for the full contract.
+WORKBENCH_TARGETS = runner.WORKBENCH_TARGETS
+DEFAULT_TARGET = "dev-story"
+
+# tools/mcp-drive/drive.sh — this repo's own headless kitsoki-MCP delegation
+# primitive (see module docstring's "Mechanism" section for why this, not a
+# bespoke claude -p spawn or `kitsoki drive --harness live`).
+DRIVE_SH = runner.REPO_ROOT / "tools" / "mcp-drive" / "drive.sh"
 
 DEFAULT_AGENT_CMD = "claude"
 LIVE_AGENT_TIMEOUT_SECONDS = 1800  # 30 minutes -- a real multi-turn agent drive, not a flow replay
+
+# The orchestrator agent `drive.sh` spawns only ever needs to click these four
+# studio tools for this module's job (mint a session, submit turns, poll,
+# close) -- never Bash/Read/Glob/Grep, which `drive.sh`'s own default
+# MCP_DRIVE_TOOLS allowlist otherwise grants (useful for its OTHER callers
+# that stage/verify a worktree between turns, not needed or wanted here).
+# Narrowing the allowlist means a wandering orchestrator turn cannot touch
+# this repo's files itself; the workbench's own real tool use happens in a
+# SEPARATE agent process the kitsoki engine spawns for host.agent.task,
+# governed by that room's own WS toolbox + write_mode gate, not by this list.
+ORCHESTRATOR_TOOLS = (
+    "mcp__kitsoki__session_new,"
+    "mcp__kitsoki__session_drive,"
+    "mcp__kitsoki__session_status,"
+    "mcp__kitsoki__session_close"
+)
 
 
 class LiveGateNotAllowedError(Exception):
@@ -137,67 +228,51 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--live-gate", action="store_true", dest="live_gate",
         help="required: opt in to real LLM spend for this cell (never set this from CI)",
     )
-    parser.add_argument("--agent-cmd", default=DEFAULT_AGENT_CMD, help="agent binary to spawn (default: claude)")
     parser.add_argument(
-        "--target-app", default=str(LIVE_TARGET_APP),
-        help="path to the app.yaml whose workbench room this cell drives (default: stories/dev-story/app.yaml)",
+        "--agent-cmd", default=DEFAULT_AGENT_CMD,
+        help="orchestrator backend drive.sh spawns to drive the MCP: claude|codex (default: claude)",
     )
     return parser.parse_args(argv)
 
 
-def _sessions_dir_for(app_slug: str) -> Path:
-    home = Path(os.environ.get("HOME") or Path.home())
-    return home / ".kitsoki" / "sessions" / app_slug
-
-
-def _snapshot_trace_files(sessions_dir: Path) -> dict[Path, float]:
-    if not sessions_dir.is_dir():
-        return {}
-    return {p: p.stat().st_mtime for p in sessions_dir.glob("*.jsonl")}
-
-
-def _find_new_trace_file(sessions_dir: Path, before: dict[Path, float]) -> Path | None:
-    """The trace file the just-completed agent run wrote: newly created, or
-    modified more recently than every file that already existed before the
-    agent was spawned. Ties broken by newest mtime -- exactly one real
-    session should have been minted per live cell."""
-    if not sessions_dir.is_dir():
-        return None
-    candidates: list[tuple[float, Path]] = []
-    for p in sessions_dir.glob("*.jsonl"):
-        prior_mtime = before.get(p)
-        mtime = p.stat().st_mtime
-        if prior_mtime is None or mtime > prior_mtime:
-            candidates.append((mtime, p))
-    if not candidates:
-        return None
-    candidates.sort()
-    return candidates[-1][1]
-
-
-def build_live_prompt(scenario: dict[str, Any], target_app: Path) -> str:
+def build_live_prompt(scenario: dict[str, Any], target_app: Path, trace_path: Path) -> str:
     """Mirrors `liveExplorerCli.ts`'s `buildPrompt` -- a persona-briefed,
-    scenario-grounded prompt telling the spawned agent exactly what real
-    turns to submit and reminding it `AskUserQuestion` is unavailable
-    headless (AGENTS.md)."""
+    scenario-grounded prompt telling the spawned orchestrator agent exactly
+    which kitsoki studio MCP tool calls to make and in what order, so driving
+    the session is a mechanical transcription of the scenario's own mined
+    turns rather than something requiring the orchestrator's own judgment
+    (the workbench's real judgment is exercised separately, inside the
+    engine's own `host.agent.task` dispatch). `trace_path` is threaded into
+    `session_new`'s own `trace` argument so this module reads the session
+    back from a path IT chose, never a directory-mtime guess (see the module
+    docstring's "Trace path is explicit, not inferred" section)."""
     turns = scenario.get("turns") or []
     turn_lines = "\n".join(
         f"  {i + 1}. {t.get('text', '')}" for i, t in enumerate(turns) if isinstance(t, dict)
     )
     return "\n".join([
-        f"You are driving a real kitsoki session against {target_app} as part of the",
-        "usable-kitsoki-gate live parity harness (docs/proposals/usable-kitsoki-release-gate.md).",
+        "You are driving ONE real kitsoki session as part of the usable-kitsoki-gate",
+        "live parity harness (docs/tracing/usable-kitsoki-gate.md). Use the kitsoki",
+        "studio MCP tools ONLY, in exactly this order, and do nothing else:",
+        "",
+        f"1. Call session_new with story_path=\"{target_app}\", harness=\"live\", "
+        f"profile=\"claude-native\", trace=\"{trace_path}\". Remember the returned handle.",
+        "2. For each numbered turn below, IN ORDER, call session_drive with that",
+        "   handle and input set to the turn's verbatim text -- do not skip, reorder,",
+        "   paraphrase, or combine turns. If a call returns {running: true}, call",
+        "   session_status with the same handle repeatedly (a few seconds apart) until",
+        "   running clears before moving to the next turn.",
+        "3. After the last turn has been submitted and settled, call session_close",
+        "   with the handle. Do not delete or otherwise touch the session before that.",
+        "",
         f"Persona: {scenario.get('persona', '')}",
         f"Goal: {scenario.get('goal', '')}",
         "",
-        "Use kitsoki's MCP tools (session_new against the app above, then session_submit /",
-        "session_drive) to mint ONE new session and submit the following turns, IN ORDER,",
-        "as free text -- do not skip, reorder, or paraphrase them:",
+        "Turns:",
         turn_lines,
         "",
-        "AskUserQuestion is not available to you headless -- proceed on your own judgment",
-        "for anything ambiguous rather than stopping to ask.",
-        "When every turn has been submitted, stop; do not close or delete the session.",
+        "AskUserQuestion is not available to you headless -- proceed on your own",
+        "judgment for anything ambiguous rather than stopping to ask.",
     ])
 
 
@@ -206,40 +281,55 @@ def run_live_cell(
     corpus_dir: Path,
     surface: str,
     *,
+    target: str,
     agent_cmd: str,
-    target_app: Path,
     evidence_dir: Path,
 ) -> dict[str, Any]:
     """The real work `main()` performs once `--live-gate` has been checked.
     Never called from anywhere else in this repo (see module docstring)."""
-    scenario = runner.load_scenario(corpus_dir, scenario_id)
-    sessions_dir = _sessions_dir_for(LIVE_TARGET_APP_SLUG)
-    before = _snapshot_trace_files(sessions_dir)
+    if target not in WORKBENCH_TARGETS:
+        raise ValueError(
+            f"run_live_gate: unknown target {target!r} (known: {', '.join(sorted(WORKBENCH_TARGETS))})"
+        )
+    target_app = runner.REPO_ROOT / "stories" / target / "app.yaml"
 
-    prompt = build_live_prompt(scenario, target_app)
+    scenario = runner.load_scenario(corpus_dir, scenario_id)
+
+    # A known, deterministic path THIS process chose -- never a directory-
+    # mtime guess (see module docstring's "Trace path is explicit, not
+    # inferred" section). session_new's own `trace` argument (threaded via
+    # the prompt below) writes here; newSessionRuntime creates the parent
+    # dir + file itself, so this script does not need to pre-create it.
+    trace_path = evidence_dir / f"{scenario_id}.{target}.{surface}.live.session-trace.jsonl"
+
+    prompt = build_live_prompt(scenario, target_app, trace_path)
+
+    env = dict(os.environ)
+    env["MCP_DRIVE_BACKEND"] = agent_cmd if agent_cmd in ("claude", "codex") else "claude"
+    env["MCP_DRIVE_TOOLS"] = ORCHESTRATOR_TOOLS
     proc = subprocess.run(
-        [agent_cmd, "-p", prompt],
+        [str(DRIVE_SH), prompt],
         cwd=str(runner.REPO_ROOT),
         capture_output=True,
         text=True,
         timeout=LIVE_AGENT_TIMEOUT_SECONDS,
+        env=env,
     )
 
     # Give the trace writer a moment to flush after the agent process exits
     # (best-effort; a real operator run is not latency-sensitive here).
     time.sleep(0.5)
-    trace_path = _find_new_trace_file(sessions_dir, before)
 
     trace_events: list[dict[str, Any]] = []
     notes_parts: list[str] = []
     if proc.returncode != 0:
         blob = (proc.stdout + "\n" + proc.stderr).strip()
         notes_parts.append(f"live agent exited {proc.returncode}: {blob[:300]}")
-    if trace_path is None:
+    if not trace_path.is_file():
         notes_parts.append(
-            "no new session trace file was found under "
-            f"{sessions_dir} after the live agent run -- treating as no signal captured, "
-            "not fabricating one"
+            f"no session trace was found at {trace_path} after the live agent run "
+            "(the agent may not have called session_new with the requested trace path) "
+            "-- treating as no signal captured, not fabricating one"
         )
     else:
         for line in trace_path.read_text(encoding="utf-8").splitlines():
@@ -250,15 +340,7 @@ def run_live_cell(
     turn_signals = gate_plugin.extract_turn_signals(trace_events)
 
     evidence_dir.mkdir(parents=True, exist_ok=True)
-    evidence_path = evidence_dir / f"{scenario_id}.{surface}.live.trace.jsonl"
-    evidence_path.write_text(
-        "\n".join(json.dumps(e, sort_keys=True) for e in trace_events)
-        + ("\n" if trace_events else ""),
-        encoding="utf-8",
-    )
-    evidence_refs = [str(evidence_path)]
-    if trace_path is not None:
-        evidence_refs.append(str(trace_path))
+    evidence_refs = [str(trace_path)] if trace_path.is_file() else []
 
     return gate_plugin.build_parity_record(
         scenario=scenario,
@@ -288,6 +370,7 @@ def main(argv: list[str]) -> int:
         return 2
 
     surface = os.environ.get("GATE_SURFACE") or gate_plugin.DEFAULT_SURFACE
+    target = os.environ.get("GATE_TARGET") or DEFAULT_TARGET
     run_id = os.environ.get("GATE_RUN_ID") or "local-live"
     results_path_env = os.environ.get("GATE_RESULTS_PATH")
     if results_path_env:
@@ -298,16 +381,16 @@ def main(argv: list[str]) -> int:
         results_path = runner.REPO_ROOT / ".artifacts" / "usable-kitsoki-gate" / run_id / "parity-records.json"
 
     evidence_dir = results_path.parent / "evidence"
-    target_app = Path(args.target_app)
-    if not target_app.is_absolute():
-        target_app = runner.REPO_ROOT / target_app
 
     try:
         record = run_live_cell(
             scenario_id, corpus_dir, surface,
-            agent_cmd=args.agent_cmd, target_app=target_app, evidence_dir=evidence_dir,
+            target=target, agent_cmd=args.agent_cmd, evidence_dir=evidence_dir,
         )
     except runner.ScenarioNotFound as exc:
+        print(f"[usable-kitsoki-gate] {exc}", file=sys.stderr)
+        return 2
+    except ValueError as exc:
         print(f"[usable-kitsoki-gate] {exc}", file=sys.stderr)
         return 2
 
