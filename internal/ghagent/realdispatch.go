@@ -247,6 +247,18 @@ func runRealDispatch(ctx context.Context, root string, route Route, job *jobs.GH
 	if lastDiff != "" {
 		summary += fmt.Sprintf("\n\nDiff:\n```diff\n%s\n```", lastDiff)
 	}
+	assets := []RunAsset{{
+		Name:     "fix-report.md",
+		MimeType: "text/markdown",
+		Data:     []byte(summary + "\n"),
+	}}
+	if strings.TrimSpace(lastDiff) != "" {
+		assets = append(assets, RunAsset{
+			Name:     "fix.patch",
+			MimeType: "text/x-diff",
+			Data:     []byte(lastDiff),
+		})
+	}
 
 	return RunResult{
 		RunURL:        "kitsoki://run/" + job.JobID,
@@ -257,6 +269,7 @@ func runRealDispatch(ctx context.Context, root string, route Route, job *jobs.GH
 		Harness:       mode,
 		Worktree:      worktreeAbs,
 		RealHostCalls: hostCalls,
+		Assets:        assets,
 	}, nil
 }
 

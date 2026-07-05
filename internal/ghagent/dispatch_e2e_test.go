@@ -235,6 +235,55 @@ func TestDispatchInitialAckFailureMarksJobFailed(t *testing.T) {
 	}
 }
 
+func TestDispatchPersistsRunAssets(t *testing.T) {
+	ctx := context.Background()
+	mention := Mention{
+		Item:      host.GitHubInboxItem{Kind: "issue", Number: "77", Title: "@kitsoki bug: broken"},
+		Repo:      "o/r",
+		OriginRef: "github:o/r/issue/77",
+		Trigger:   DefaultMentionTrigger,
+	}
+	store := newGHJobStore(t)
+	d := &Dispatcher{
+		Jobs:     store,
+		Routes:   DefaultLabelStoryMap(),
+		WorkerID: "worker-assets",
+		SpawnFn: func(context.Context, Route, *jobs.GHJob) (RunResult, error) {
+			return RunResult{
+				RunURL:     "kitsoki://run/assets",
+				FinalState: "done",
+				Turns:      1,
+				Summary:    "done with assets",
+				Assets: []RunAsset{
+					{Name: "fix-report.md", MimeType: "text/markdown", Data: []byte("# Fix report\n")},
+					{Name: "fix.patch", MimeType: "text/x-diff", Data: []byte("diff --git a/a b/a\n")},
+				},
+			}, nil
+		},
+	}
+	job, err := d.Dispatch(ctx, mention, []string{"bug"})
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if job.State != jobs.GHDone {
+		t.Fatalf("State=%q, want done", job.State)
+	}
+	assets, err := store.ListAssets(ctx, job.JobID)
+	if err != nil {
+		t.Fatalf("ListAssets: %v", err)
+	}
+	if len(assets) != 2 {
+		t.Fatalf("assets len=%d, want 2: %+v", len(assets), assets)
+	}
+	patch, mimeType, err := store.GetAssetData(ctx, job.JobID, "fix.patch")
+	if err != nil {
+		t.Fatalf("GetAssetData(fix.patch): %v", err)
+	}
+	if mimeType != "text/x-diff" || !strings.Contains(string(patch), "diff --git") {
+		t.Fatalf("unexpected patch asset mime=%q body=%q", mimeType, string(patch))
+	}
+}
+
 func TestDispatchTerminalPRStatusJobReroutesToRebaseRequest(t *testing.T) {
 	ctx := context.Background()
 	store := newGHJobStore(t)
@@ -440,6 +489,7 @@ func newGHJobStore(t *testing.T) *jobs.GHJobStore {
 	if err != nil {
 		t.Fatalf("NewGHJobStore: %v", err)
 	}
+	store.DataDir = t.TempDir()
 	return store
 }
 
@@ -675,6 +725,24 @@ func TestDispatch_MentionToAckLoop(t *testing.T) {
 	}
 	if !strings.Contains(last, "Ran `stories/bugfix` end-to-end via the replay harness") {
 		t.Fatalf("real-dispatch run's ack missing the real-dispatch summary:\n%s", last)
+	}
+	assets, assetErr := store.ListAssets(ctx, got.JobID)
+	if assetErr != nil {
+		t.Fatalf("ListAssets: %v", assetErr)
+	}
+	assetNames := make(map[string]bool, len(assets))
+	for _, asset := range assets {
+		assetNames[asset.Name] = true
+	}
+	if !assetNames["fix-report.md"] {
+		t.Fatalf("real-dispatch assets = %+v, want fix-report.md", assets)
+	}
+	reportData, reportMime, reportErr := store.GetAssetData(ctx, got.JobID, "fix-report.md")
+	if reportErr != nil {
+		t.Fatalf("GetAssetData(fix-report.md): %v", reportErr)
+	}
+	if reportMime != "text/markdown" || !strings.Contains(string(reportData), "Ran `stories/bugfix` end-to-end via the replay harness") {
+		t.Fatalf("unexpected fix-report asset mime=%q body=%q", reportMime, string(reportData))
 	}
 
 	// Assertion D: idempotency. A second Dispatch of the same mention ATTACHES
