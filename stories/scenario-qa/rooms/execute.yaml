@@ -57,6 +57,7 @@ states:
               run_id: "{{ world.run_id }}"
               run_dir: "{{ world.run_dir }}"
               transport: "{{ world.current_leg.transport }}"
+              live_profile: "{{ world.live_profile }}"
         bind:
           drive_result: submitted
         on_error: judge
