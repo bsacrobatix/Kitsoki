@@ -250,6 +250,7 @@ func synthesizedRootHosts() []string {
 		"host.local_files.ticket",
 		"host.gh.ticket",
 		"host.gh.ticket.comment",
+		"host.gh.ticket.get",
 		"host.gh.ticket.transition",
 		"host.git",
 		"host.local",
