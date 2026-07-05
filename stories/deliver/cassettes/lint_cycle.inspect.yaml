@@ -1,5 +1,8 @@
 kind: inspect_cassette
 interactions:
+  - op: exists
+    target: .artifacts/deliver/decomposition.yaml
+    out: "false"
   # 1. First lint invoke: slice-a and slice-b depend on each other — a cycle.
   - op: read
     target: .artifacts/deliver/decomposition.yaml

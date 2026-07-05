@@ -54,6 +54,18 @@ world:
   refine_feedback:      { type: string, default: "" }   # fed into the decomposer's prompt on a re-entry
   refine_cycle:         { type: int,    default: 0 }    # shared by the lint-fail and review-revise refine loops
   refine_budget:        { type: int,    default: 3 }
+  # Managed re-decompose (B2c) — a prior decomposition.yaml routes through the
+  # decompose-update transaction instead of a blind decomposer overwrite.
+  decompose_route:          { type: string, default: "" }   # "" | "fresh" | "redecompose" — detect_prior_decomposition.star's verdict
+  redecompose_checked:      { type: bool,   default: false } # detection runs at most once per run (see decompose.yaml)
+  redecompose_delta_path:   { type: string, default: "" }   # delta document the decomposer authors (apply_delta.py's --delta)
+  redecompose_versions_dir: { type: string, default: "" }   # versioned prior-graph snapshots (apply_delta.py's --versions-dir)
+  redecompose_event_log:    { type: string, default: "" }   # plan-evolution.jsonl (apply_delta.py's --event-log)
+  redecompose_trigger:      { type: string, default: "" }   # the delta's one-line trigger, echoed by the decomposer's confirmation
+  redecompose_added:        { type: list,   default: [] }   # brief ids the delta adds, echoed by the decomposer's confirmation
+  redecompose_apply_ok:     { type: bool,   default: false } # apply_delta.py's exit-0 verdict
+  redecompose_apply_stdout: { type: string, default: "" }
+  redecompose_apply_route:  { type: string, default: "" }   # "" | "ok" | "fail" — apply_delta.py's stdout_json.route (tri-state; never branch on a bool default)
 
 intents:
   start:
@@ -84,6 +96,26 @@ intents:
     priority: 1
   refine_budget_exhausted:
     description: "(internal) refine cycle budget exhausted → needs-human."
+    examples: []
+    priority: 1
+  decompose_route_fresh:
+    description: "(internal) no prior decomposition exists → proceed to a fresh decompose."
+    examples: []
+    priority: 1
+  redecompose_needed:
+    description: "(internal) a prior decomposition already exists → route to the managed-delta transaction."
+    examples: []
+    priority: 1
+  redecompose_delta_authored:
+    description: "(internal) the delta document was authored → apply it via the decompose-update transaction."
+    examples: []
+    priority: 1
+  redecompose_applied:
+    description: "(internal) the managed delta applied cleanly → proceed to lint."
+    examples: []
+    priority: 1
+  redecompose_apply_failed:
+    description: "(internal) the decompose-update transaction rejected the delta → needs-human."
     examples: []
     priority: 1
   bail:

@@ -4,6 +4,9 @@
 # fleet.load read: the run exits to needs-human before ever reaching fleet.
 kind: inspect_cassette
 interactions:
+  - op: exists
+    target: .artifacts/deliver/decomposition.yaml
+    out: "false"
   - op: read
     target: .artifacts/deliver/decomposition.yaml
     out: |
