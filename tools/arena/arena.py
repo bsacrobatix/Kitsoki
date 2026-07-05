@@ -49,12 +49,44 @@ def _make_mounts_for(spec):
                 f"Add it to the spec (e.g. host_repo:\n    {host}: /opt/bakeoff/repos/kitsoki)."
             )
         mounts = {src: "/workspace/kitsoki"}
+        primary_git_dir = _primary_git_dir_for_worktree(Path(src))
+        if primary_git_dir is not None:
+            # A git-worktree checkout's `.git` is a FILE pointing at an absolute
+            # host path (the primary checkout's `.git/worktrees/<name>`, whose
+            # own `commondir` then points back at the primary `.git` for shared
+            # objects/refs). Verified live: any git command run against a
+            # worktree mount fails inside the container with "fatal: not a git
+            # repository: <that absolute path>" unless the SAME absolute path
+            # also resolves inside the container — so mount the primary
+            # checkout's .git at its own identical path (read-only: cells only
+            # need to read history, e.g. `git clone --local` for project=kitsoki
+            # tasks; never write back into the primary checkout).
+            mounts[primary_git_dir] = f"{primary_git_dir}:ro"
         codex_home = os.environ.get("ARENA_CODEX_HOME_SRC")
         if codex_home:
             mounts[codex_home] = "/workspace/codex-home"
         return mounts
 
     return _mounts_for
+
+
+def _primary_git_dir_for_worktree(checkout: Path) -> str | None:
+    """If `checkout` is a git WORKTREE (`.git` is a file, not a dir), return the
+    primary checkout's `.git` directory path (absolute, host-side) so the
+    caller can mount it at the identical path inside the container. Returns
+    None for an ordinary checkout (`.git` already a directory) — nothing extra
+    to mount."""
+    git_path = checkout / ".git"
+    if git_path.is_dir() or not git_path.is_file():
+        return None
+    text = git_path.read_text(encoding="utf-8").strip()
+    if not text.startswith("gitdir:"):
+        return None
+    worktree_git_dir = Path(text[len("gitdir:"):].strip())
+    # worktree_git_dir looks like <primary>/.git/worktrees/<name>; the primary
+    # .git dir is two levels up.
+    primary_git_dir = worktree_git_dir.parent.parent
+    return str(primary_git_dir) if primary_git_dir.is_dir() else None
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
