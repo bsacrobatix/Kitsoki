@@ -842,6 +842,7 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 
 			hostReg := host.NewRegistry()
 			host.RegisterBuiltins(hostReg)
+			host.RegisterStarlarkBindings(hostReg, def.StarlarkHostBindings)
 			if err := hostReg.ValidateAllowList(def.Hosts); err != nil {
 				return fmt.Errorf("validate hosts: %w", err)
 			}

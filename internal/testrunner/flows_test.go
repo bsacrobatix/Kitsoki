@@ -17,6 +17,36 @@ const (
 	cloakFlowsGlob = "../../testdata/apps/cloak/flows/*.yaml"
 )
 
+// TestFlowsHostBindingStarlark exercises S3a (kits-implementation-plan.md
+// D2.1): a `host_bindings` entry naming a starlark script instead of a
+// concrete handler. The child's `greeter` host_interface gets rebound onto
+// scripts/greet.star; iface.greeter.hello must resolve through the
+// synthesized StarlarkBindingHandler and actually run the script, proving
+// both that the effect's `with:` args reach ctx.inputs and that the
+// dispatched op is injected into ctx.inputs.op. No LLM, no HTTP.
+func TestFlowsHostBindingStarlark(t *testing.T) {
+	ctx := context.Background()
+	report, err := testrunner.RunFlows(ctx,
+		"../../testdata/apps/host_binding_starlark/parent/app.yaml",
+		"../../testdata/apps/host_binding_starlark/parent/flows/*.yaml",
+		testrunner.FlowOptions{})
+	require.NoError(t, err)
+	require.Len(t, report.Results, 1)
+
+	for _, r := range report.Results {
+		if !r.Passed {
+			for _, turn := range r.Turns {
+				for _, f := range turn.Failures {
+					t.Logf("flow=%s turn=%d failure: %s", filepath.Base(r.File), turn.TurnIndex+1, f)
+				}
+			}
+		}
+		require.True(t, r.Passed, "flow %q should pass", filepath.Base(r.File))
+	}
+	require.Equal(t, 1, report.Passed)
+	require.Equal(t, 0, report.Failed)
+}
+
 // TestFlowsCloak runs all three Cloak of Darkness flow fixtures end-to-end.
 // This is the primary acceptance test for Stage 7 Mode 2.
 func TestFlowsCloak(t *testing.T) {

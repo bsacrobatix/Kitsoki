@@ -343,6 +343,15 @@ type AppDef struct {
 	// {% include %} references in pongo2 templates locate per-app
 	// .pongo files (see docs/stories/story-style.md).
 	BaseDir string `yaml:"-"`
+
+	// StarlarkHostBindings maps a synthetic handler name (introduced by a
+	// script-form host_bindings entry, S3a/D2.1) to the absolute path of the
+	// starlark script it should delegate to. Populated by resolveHostBindingScripts
+	// during import fold and never set by YAML authors. The runtime wires
+	// these into the host.Registry via host.RegisterStarlarkBindings
+	// alongside RegisterBuiltins, before the allow-list check runs (def.Hosts
+	// already includes every synthetic name — see resolveAllInterfaces).
+	StarlarkHostBindings map[string]string `yaml:"-"`
 }
 
 // PromptsConfig declares a story's prompt search roots for prompt extension.
@@ -587,9 +596,61 @@ type ImportDef struct {
 	Intents *ImportIntents `yaml:"intents,omitempty"`
 	// Overrides patches child states/intents/prompts at import time.
 	Overrides *ImportOverrides `yaml:"overrides,omitempty"`
-	// HostBindings rebinds named child host_interfaces onto concrete
-	// handler names.
-	HostBindings map[string]string `yaml:"host_bindings,omitempty"`
+	// HostBindings rebinds named child host_interfaces onto either a
+	// concrete handler name or a starlark script (S3a, D2.1 — see
+	// HostBindingSpec).
+	HostBindings map[string]HostBindingSpec `yaml:"host_bindings,omitempty"`
+}
+
+// HostBindingSpec is the value type for one `host_bindings.<name>` entry.
+// Three author forms are supported:
+//
+//	host_bindings:
+//	  ticket: host.gh.ticket              # plain handler name (unchanged v1 form)
+//	  graph: scripts/graph_glue.star       # bare .star-suffixed script path
+//	  graph2:
+//	    script: scripts/graph_glue2.star   # explicit {script: ...} form
+//
+// Exactly one of Handler / Script is set after decode. A handler name binds
+// the interface straight to an existing registered host.* handler exactly as
+// before. A script path (either form) tells the import fold to synthesize a
+// Handler that closes over the script and delegates to host.starlark.run,
+// injecting the interface op into ctx.inputs.op (see
+// resolveHostBindingScripts / StarlarkBindingHandler in imports.go).
+type HostBindingSpec struct {
+	// Handler is a concrete host name to bind directly, e.g. "host.gh.ticket".
+	Handler string `yaml:"-"`
+	// Script is a starlark script path (author-relative to the app.yaml
+	// declaring the host_bindings entry) that synthesizes a Handler.
+	Script string `yaml:"-"`
+}
+
+// UnmarshalYAML implements goccy/go-yaml's BytesUnmarshaler. Accepts a plain
+// scalar string (a handler name, or a bare `.star`-suffixed script path) or a
+// `{script: <path>}` mapping.
+func (h *HostBindingSpec) UnmarshalYAML(data []byte) error {
+	var s string
+	if err := goyaml.Unmarshal(data, &s); err == nil {
+		s = strings.TrimSpace(s)
+		if strings.HasSuffix(s, ".star") {
+			*h = HostBindingSpec{Script: s}
+		} else {
+			*h = HostBindingSpec{Handler: s}
+		}
+		return nil
+	}
+
+	var raw struct {
+		Script string `yaml:"script"`
+	}
+	if err := goyaml.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.Script == "" {
+		return fmt.Errorf("host_bindings: value must be a handler name, a .star script path, or {script: <path>}")
+	}
+	*h = HostBindingSpec{Script: raw.Script}
+	return nil
 }
 
 // ImportExit declares how a child exit maps to a parent state.
