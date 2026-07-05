@@ -104,18 +104,19 @@ changes:
       validation pattern; the taxonomy docs gain the row.
     kind: story
     pipeline: implementation
-    scope: ["internal/agent/**", "internal/effect/**", "docs/architecture/prior-art.md"]
+    scope: ["internal/app/**", "internal/effect/**", "internal/sysprompt/**", "internal/host/**", "internal/testrunner/**", "docs/architecture/prior-art.md"]
     depends_on: [s1-engine-core]
     acceptance:
-      - "AskRequest.Verb (or equivalent) gains a codeact case alongside ask/decide/task"
+      - "sysprompt.Verb (or equivalent) gains a codeact case alongside ask/decide/task"
       - "invoke schema supports capabilities:, budget:, goal:, schema:, bind: per the design sketch"
       - "loader validates declared capabilities against the registered builtin set at load time; an unknown capability is a load-time error, not a runtime one"
+      - "task/converse-only knobs (e.g. sandbox:) are rejected at load time when declared on a codeact effect"
       - "docs/architecture/prior-art.md §6.4's taxonomy table gains the codeact row"
     gate:
       class: G-FLOW
-      red_now: "no verb: codeact exists in the invoke schema; the taxonomy table has no codeact row"
-      green_when: "a story flow fixture exercising a codeact room (stubbed agent) passes, plus loader-validation unit tests reject an unknown capability at load time"
-      cmd: "go test ./internal/agent/... && kitsoki test flows stories/ --filter codeact 2>/dev/null || go test ./internal/agent/..."
+      red_now: "no verb: codeact exists in the invoke schema; internal/app/loader_codeact_test.go's two load-rejection tests fail (unknown capability and sandbox-on-codeact both silently accepted today)"
+      green_when: "internal/app/loader_codeact_test.go's load-rejection tests pass, plus internal/testrunner's codeact flow fixture passes end-to-end"
+      cmd: "go test ./internal/app/... ./internal/testrunner/... -run Codeact"
     agent_brief: >
       Wire verb: codeact into the invoke schema and loader validation per
       .context/codeact-implementation-brief.md Slice 2. Match the existing
