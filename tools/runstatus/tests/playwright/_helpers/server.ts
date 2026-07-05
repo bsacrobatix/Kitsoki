@@ -15,6 +15,7 @@ import { fileURLToPath } from "url";
 import path from "path";
 import fs from "fs";
 import os from "os";
+import net from "net";
 import { expect, type Page, type Video, type Locator } from "@playwright/test";
 import { profileSuffix, activeProfile } from "./camera.js";
 
@@ -204,6 +205,162 @@ async function waitForHealthy(
   );
 }
 
+/**
+ * Fast "is this TCP port free" probe (no shelling out) — tries to bind it and
+ * immediately releases it. Resolves `true` iff the bind+listen succeeded.
+ * Any bind error (EADDRINUSE or otherwise) is treated as "not free"; callers
+ * that need to know WHY fall back to `lsof` (see `reapStaleKitsokiOnPort`).
+ */
+function isPortFree(host: string, port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once("error", () => resolve(false));
+    srv.once("listening", () => srv.close(() => resolve(true)));
+    srv.listen(port, host);
+  });
+}
+
+/** Split a `host:port` addr (this repo always uses bare loopback IPv4, e.g.
+ *  `127.0.0.1:7799` — no IPv6/hostname support needed here). */
+function parseAddr(addr: string): { host: string; port: number } {
+  const idx = addr.lastIndexOf(":");
+  return { host: addr.slice(0, idx), port: Number(addr.slice(idx + 1)) };
+}
+
+/** Poll until `pid` no longer exists (via the zero-signal `kill` probe), or
+ *  `timeoutMs` elapses. Returns whether it died in time. */
+async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true; // ESRCH: no such process — it's gone.
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Before spawning, check whether `addr`'s port is already held by a leftover
+ * `kitsoki web` process from a prior (usually failed/killed) test run.
+ *
+ * Rationale: Playwright's own process-kill on a failed run doesn't always reap
+ * the full `go run` → compiled-binary process tree, so the NEXT run against
+ * the same fixed port sees either a bind failure or a hung/non-matching
+ * server — both of which read exactly like a bug in the feature under test.
+ * This makes that specific failure mode self-healing (best-effort) and, when
+ * it can't be safely healed, gives an unambiguous error instead of a
+ * misleading one.
+ *
+ * Safety: this will ONLY ever signal a process whose command line matches
+ * `kitsoki web` as an executable+subcommand pair — i.e. the token "kitsoki"
+ * immediately followed by the "web" subcommand (covers `go run ./cmd/kitsoki
+ * web ...`, the built `bin/kitsoki web`, and go's `go-build` temp
+ * "exe/kitsoki web" compiled-child path). This is deliberately NARROWER than a
+ * bare substring match on "kitsoki" — this repo's own checkout directory is
+ * named "Kitsoki", so anything spawned from inside it (including the test
+ * runner's own process) has that word in its command line; matching just the
+ * word would risk mistaking an unrelated process (or the test runner itself)
+ * for a stale server. Any occupant that doesn't match this pair, or a PID we
+ * can't confidently identify, is left alone.
+ *
+ * Returns a human-readable note describing the recovery action taken (to be
+ * prepended to a later health-check error for context), or `null` when the
+ * port was already free and nothing happened.
+ *
+ * Throws when the port is occupied and cannot be (or should not be) reaped,
+ * so the caller never proceeds to spawn against a still-busy port.
+ */
+async function reapStaleKitsokiOnPort(addr: string): Promise<string | null> {
+  const { host, port } = parseAddr(addr);
+  if (await isPortFree(host, port)) return null;
+
+  const lsof = spawnSync("lsof", ["-i", `:${port}`, "-sTCP:LISTEN", "-t"], { encoding: "utf8" });
+  const pids = (lsof.stdout ?? "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (pids.length === 0) {
+    throw new Error(
+      `startWebServer: port ${port} (${addr}) is already in use, but the occupying ` +
+        `process could not be identified via 'lsof -i :${port}'. This is likely a leftover ` +
+        `process from a previous test run (or another process squatting the port) — ` +
+        `NOT a bug in the code under test. Find and stop it manually (e.g. ` +
+        `'lsof -i :${port}') and re-run.`,
+    );
+  }
+
+  const notes: string[] = [];
+  let killedAny = false;
+  for (const pidStr of pids) {
+    const pid = Number(pidStr);
+    if (!Number.isFinite(pid)) continue;
+    const ps = spawnSync("ps", ["-p", pidStr, "-o", "command="], { encoding: "utf8" });
+    const cmd = (ps.stdout ?? "").trim();
+    // Require "kitsoki" immediately followed by the "web" subcommand, not a
+    // bare substring — this repo's checkout directory is itself named
+    // "Kitsoki", so any process spawned from inside it (including the test
+    // runner) would otherwise false-positive-match.
+    const looksLikeKitsokiWeb = /(^|[/\s])kitsoki(\.exe)?\s+web(\s|$)/.test(cmd);
+    if (!cmd || !looksLikeKitsokiWeb) {
+      // Doesn't look kitsoki-related (or we couldn't read its command line at
+      // all) — never touch it. Surface exactly what we found so a human
+      // immediately knows to look elsewhere rather than at their own code.
+      throw new Error(
+        `startWebServer: port ${port} (${addr}) is already in use by pid ${pidStr}` +
+          `${cmd ? ` (${cmd})` : " (command line unreadable)"}, which does not look like a ` +
+          `kitsoki process — refusing to kill it. This is a port conflict with an unrelated ` +
+          `process, NOT a bug in the code under test. Free the port manually and re-run.`,
+      );
+    }
+    // Looks like our own leftover — reap it.
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // already gone
+    }
+    let died = await waitForPidExit(pid, 2000);
+    if (!died) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // already gone
+      }
+      died = await waitForPidExit(pid, 1000);
+    }
+    const note = `startWebServer: killed stale kitsoki process ${pid} holding port ${port} from a previous run`;
+    console.warn(note);
+    notes.push(note);
+    killedAny = true;
+  }
+
+  if (!killedAny) {
+    // Shouldn't be reachable (the loop above throws before falling through
+    // for any non-kitsoki pid), but keep the invariant explicit.
+    throw new Error(
+      `startWebServer: port ${port} (${addr}) is already in use and no occupant could be reaped.`,
+    );
+  }
+
+  if (!(await isPortFree(host, port))) {
+    throw new Error(
+      `startWebServer: port ${port} (${addr}) is STILL in use after attempting to kill ` +
+        `stale kitsoki process(es) (${notes.join("; ")}). It may not have died in time, or ` +
+        `another process has since claimed the port.`,
+    );
+  }
+
+  return notes.join("; ");
+}
+
 /** Spawn `kitsoki web` with a story flow fixture and wait until it's healthy. */
 export async function startWebServer(opts: {
   addr: string;
@@ -245,6 +402,11 @@ export async function startWebServer(opts: {
       throw new Error(`missing required path: ${p}${hint}`);
     }
   }
+
+  // Self-heal the "previous run's server still holds this port" failure mode
+  // (see reapStaleKitsokiOnPort doc) before spawning. Fast no-op when the
+  // port is already free (the common/success case).
+  const staleNote = await reapStaleKitsokiOnPort(opts.addr);
 
   const tmpDbDir = fs.mkdtempSync(path.join(os.tmpdir(), "kitsoki-pw-"));
   const dbPath = path.join(tmpDbDir, "s.db");
@@ -289,7 +451,15 @@ export async function startWebServer(opts: {
   proc.on("exit", (code, sig) => (serverLog += `\n[server exited code=${code} sig=${sig}]\n`));
 
   const base = `http://${opts.addr}`;
-  await waitForHealthy(base, GO_RUN ? 90000 : 20000, () => serverLog);
+  try {
+    await waitForHealthy(base, GO_RUN ? 90000 : 20000, () => serverLog);
+  } catch (e) {
+    if (staleNote) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`${staleNote}\n${msg}`);
+    }
+    throw e;
+  }
 
   return {
     base,
