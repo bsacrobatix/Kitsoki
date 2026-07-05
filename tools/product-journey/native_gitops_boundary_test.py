@@ -25,12 +25,27 @@ def main():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         good = root / "good.md"
-        bad = root / "bad.md"
         readme = root / "readme.md"
         story_readme = root / "story-readme.md"
-        good.write_text("Never file findings with raw `gh issue create`; use kitsoki gitops autonomous-fix.\n", encoding="utf-8")
-        bad.write_text("File the finding with `gh issue create` after capture.\n", encoding="utf-8")
-        readme.write_text("Use kitsoki gitops autonomous-fix for issue-to-fix gates.\n", encoding="utf-8")
+        good.write_text(
+            "Never file findings with raw `gh issue create`; use kitsoki gitops autonomous-fix.\n"
+            "Do not run `gh issue comment` or `gh issue close`; use kitsoki gitops issue-comment "
+            "and kitsoki gitops issue-transition.\n",
+            encoding="utf-8",
+        )
+        bad_create = root / "bad-create.md"
+        bad_comment = root / "bad-comment.md"
+        bad_close = root / "bad-close.md"
+        bad_intent = root / "bad-intent.md"
+        bad_create.write_text("File the finding with `gh issue create` after capture.\n", encoding="utf-8")
+        bad_comment.write_text("Post the closeout with `gh issue comment` after the fix lands.\n", encoding="utf-8")
+        bad_close.write_text("Close the issue with `gh issue close` after verification.\n", encoding="utf-8")
+        bad_intent.write_text("Use issue_comment and issue_transition directly from the driver.\n", encoding="utf-8")
+        readme.write_text(
+            "Use kitsoki gitops autonomous-fix for issue-to-fix gates, or kitsoki gitops "
+            "issue-comment / issue-transition for explicit native ticket mutations.\n",
+            encoding="utf-8",
+        )
         story_readme.write_text("Use the product-journey story autonomous_fix gate.\n", encoding="utf-8")
 
         original_driver = run.DRIVER_AGENT
@@ -44,14 +59,21 @@ def main():
             run.validate_native_gitops_boundaries(issues)
             check("explicit raw gh prohibition is allowed", not issues, failures)
 
-            run.DRIVER_AGENT = bad
-            issues = []
-            run.validate_native_gitops_boundaries(issues)
-            check(
-                "raw gh filing guidance fails the corpus boundary",
-                any(issue.get("id") == "native-gitops-boundary" for issue in issues),
-                failures,
-            )
+            cases = [
+                ("raw gh filing guidance fails the corpus boundary", bad_create),
+                ("raw gh comment guidance fails the corpus boundary", bad_comment),
+                ("raw gh close guidance fails the corpus boundary", bad_close),
+                ("standalone mutation intent guidance fails the corpus boundary", bad_intent),
+            ]
+            for label, path in cases:
+                run.DRIVER_AGENT = path
+                issues = []
+                run.validate_native_gitops_boundaries(issues)
+                check(
+                    label,
+                    any(issue.get("id") == "native-gitops-boundary" for issue in issues),
+                    failures,
+                )
         finally:
             run.DRIVER_AGENT = original_driver
             run.PRODUCT_JOURNEY_SKILL = original_skill

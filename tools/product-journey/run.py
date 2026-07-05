@@ -1386,8 +1386,16 @@ def validate_native_gitops_boundaries(issues: list[dict]) -> None:
     ]
     forbidden_prose_tokens = [
         "gh issue create",
+        "gh issue comment",
+        "gh issue close",
+        "gh issue edit",
+        "gh issue reopen",
         "issue_create",
+        "issue_comment",
+        "issue_transition",
         "mcp__kitsoki__issue_create",
+        "mcp__kitsoki__issue_comment",
+        "mcp__kitsoki__issue_transition",
     ]
     for path in prose_paths:
         if not path.exists():
