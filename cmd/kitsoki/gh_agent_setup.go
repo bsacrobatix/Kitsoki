@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -41,16 +40,6 @@ func newGHAgentSetupCmd() *cobra.Command {
 	cmd.AddCommand(newGHAgentSetupAppCmd())
 	cmd.AddCommand(newGHAgentSetupAttachCmd())
 	return cmd
-}
-
-// defaultSetupDir is where wizard credentials and the user-token cache live
-// unless overridden: ~/.config/kitsoki/gh-app[/<name>].
-func defaultSetupDir(parts ...string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
-	}
-	return filepath.Join(append([]string{home, ".config", "kitsoki", "gh-app"}, parts...)...)
 }
 
 // openBrowser best-effort opens url locally; the URL is always printed too,
@@ -91,7 +80,7 @@ func newGHAgentSetupAppCmd() *cobra.Command {
 				webhookURL = strings.TrimSuffix(publicBaseURL, "/") + "/gh-agent/webhook"
 			}
 			if outDir == "" {
-				outDir = defaultSetupDir(name)
+				outDir = githubapp.AppProfileDir(name)
 			}
 
 			ctx := cmd.Context()
@@ -195,7 +184,17 @@ func newGHAgentSetupAppCmd() *cobra.Command {
 			if err := githubapp.UpdateEnvInstallationID(envPath, iid); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Installation %d recorded.\nNext:\n  source %s   # or copy into /etc/kitsoki/gh-agent.env\n  kitsoki gh-agent serve --github-app --repo <owner/repo> ...\n  kitsoki gh-agent setup attach --repo <owner/repo> --env-file %s\n", iid, envPath, envPath)
+			// Make this profile the store's default so later commands
+			// (setup attach, wire scripts) find it with zero flags —
+			// only when it lives inside the store's gh-app/ layout.
+			if filepath.Dir(outDir) == filepath.Join(githubapp.CredentialsDir(), "gh-app") {
+				if err := githubapp.SetDefaultProfile(filepath.Base(outDir)); err != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "warning: %v\n", err)
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "default profile -> %s\n", filepath.Base(outDir))
+				}
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Installation %d recorded.\nNext:\n  kitsoki gh-agent setup attach --repo <owner/repo>   # uses the default profile\n  source %s   # or copy into /etc/kitsoki/gh-agent.env for the serve daemon\n", iid, envPath)
 			return nil
 		},
 	}
@@ -231,37 +230,22 @@ func newGHAgentSetupAttachCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			setup := &githubapp.SetupClient{Out: out}
 
-			if envFile != "" {
-				vals, err := parseEnvFile(envFile)
-				if err != nil {
-					return err
-				}
-				if clientID == "" {
-					clientID = vals[githubapp.EnvClientID]
-				}
-				if clientSecret == "" {
-					clientSecret = vals[githubapp.EnvClientSecret]
-				}
-				if installationID == 0 {
-					if v := vals[githubapp.EnvInstallationID]; v != "" {
-						fmt.Sscanf(v, "%d", &installationID)
-					}
-				}
-			}
-			if clientID == "" {
-				clientID = os.Getenv(githubapp.EnvClientID)
-			}
-			if clientSecret == "" {
-				clientSecret = os.Getenv(githubapp.EnvClientSecret)
-			}
 			if !listOnly && repo == "" {
 				return fmt.Errorf("gh-agent setup attach: --repo owner/name is required (or use --list)")
 			}
-			if clientID == "" {
-				return fmt.Errorf("gh-agent setup attach: no client id — pass --client-id/--env-file or set %s (a wizard-created App records it; for a hand-made App it is on the App's settings page)", githubapp.EnvClientID)
+			// Credential-store precedence: flags > env > env file > default
+			// profile (docs/architecture/credentials.md).
+			cc, err := githubapp.ResolveAppClient(clientID, clientSecret, installationID, envFile)
+			if err != nil {
+				return err
 			}
+			if cc.ClientID == "" {
+				return fmt.Errorf("gh-agent setup attach: no client id — run `kitsoki gh-agent setup app` once (writes the default profile), or pass --client-id/--env-file/$%s (a hand-made App's client id is on its settings page)", githubapp.EnvClientID)
+			}
+			fmt.Fprintf(out, "credentials: %s\n", cc.Source)
+			clientID, clientSecret, installationID = cc.ClientID, cc.ClientSecret, cc.InstallationID
 			if tokenCache == "" {
-				tokenCache = defaultSetupDir("user-token.json")
+				tokenCache = githubapp.TokenCachePath(clientID)
 			}
 
 			token := githubapp.LoadUserToken(tokenCache)
@@ -281,11 +265,6 @@ func newGHAgentSetupAttachCmd() *cobra.Command {
 				fmt.Fprintf(out, "user token cached at %s\n", tokenCache)
 			}
 
-			if installationID == 0 {
-				if v := os.Getenv(githubapp.EnvInstallationID); v != "" {
-					fmt.Sscanf(v, "%d", &installationID)
-				}
-			}
 			if installationID == 0 {
 				installs, err := setup.UserInstallations(ctx, token.AccessToken)
 				if err != nil {
@@ -330,9 +309,9 @@ func newGHAgentSetupAttachCmd() *cobra.Command {
 	cmd.Flags().StringVar(&repo, "repo", "", "owner/name to attach to the App installation")
 	cmd.Flags().StringVar(&clientID, "client-id", "", "App OAuth client id (default $"+githubapp.EnvClientID+")")
 	cmd.Flags().StringVar(&clientSecret, "client-secret", "", "App OAuth client secret; enables the web flow (default $"+githubapp.EnvClientSecret+")")
-	cmd.Flags().StringVar(&envFile, "env-file", "", "kitsoki.env written by `setup app` to read ids/secrets from")
+	cmd.Flags().StringVar(&envFile, "env-file", "", "profile env file (default $"+githubapp.EnvAppEnvFile+", else the store's default profile)")
 	cmd.Flags().Int64Var(&installationID, "installation-id", 0, "installation id (default $"+githubapp.EnvInstallationID+", else auto when unambiguous)")
-	cmd.Flags().StringVar(&tokenCache, "token-cache", "", "user-token cache path (default ~/.config/kitsoki/gh-app/user-token.json)")
+	cmd.Flags().StringVar(&tokenCache, "token-cache", "", "user-token cache path (default <credential store>/gh-app/tokens/<client-id>.json)")
 	cmd.Flags().BoolVar(&useDevice, "device", false, "force the device flow even when a client secret is available")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "print the authorize URL instead of opening the browser")
 	cmd.Flags().BoolVar(&listOnly, "list", false, "only list the installation's current repositories")
@@ -387,23 +366,4 @@ func webFlowToken(ctx context.Context, setup *githubapp.SetupClient, clientID, c
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-}
-
-// parseEnvFile reads KEY=VALUE lines (comments and blanks skipped).
-func parseEnvFile(path string) (map[string]string, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("gh-agent setup: read env file: %w", err)
-	}
-	vals := map[string]string{}
-	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if k, v, ok := strings.Cut(line, "="); ok {
-			vals[strings.TrimSpace(k)] = strings.TrimSpace(v)
-		}
-	}
-	return vals, nil
 }
