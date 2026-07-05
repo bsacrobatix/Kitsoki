@@ -198,14 +198,21 @@ ships without breaking `arena plugins`.
 
 ```
 ## 1. Parity metric spec (day-one deliverable — S1 develops against this)
-- [ ] 1.1 Write the parity verdict record schema (this doc's Event/format
+- [x] 1.1 Write the parity verdict record schema (this doc's Event/format
       model) as a versioned JSON Schema under
       `tools/arena/arena/plugins/usable_kitsoki_gate_schema.json`
-- [ ] 1.2 Define and document the three gate conditions + the parity
+      (`tools/arena/tests/test_usable_kitsoki_gate_schema.py` validates the
+      example above + rejects malformed records)
+- [x] 1.2 Define and document the three gate conditions + the parity
       threshold X (see Open questions #1) as constants, not prose, so S1
       and S6 read the same number
-- [ ] 1.3 Specify the completion signal S1 must emit per scenario turn
+      (`tools/arena/arena/plugins/usable_kitsoki_gate_constants.py`;
+      `PARITY_THRESHOLD_PERCENT = 90.0` is a placeholder pending the
+      calibration run in Task 4.2)
+- [x] 1.3 Specify the completion signal S1 must emit per scenario turn
       (the producer contract S1's proposal links back to)
+      (`docs/tracing/usable-kitsoki-gate.md#producer-contract---what-s1-must-emit`,
+      marked partial until S1's concrete trace-event shape lands)
 
 ## 2. Plugin skeleton (no scenarios required yet)
 - [ ] 2.1 Register `usable-kitsoki-gate` in `tools/arena/arena/plugins/`
