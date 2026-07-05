@@ -392,6 +392,82 @@ so the LLM sees them and can self-correct
    plans. Kitsoki wants a one-shot extraction: free text → intent. If
    the user needs multi-step, the state graph models it, not the LLM.
 
+### 4c. CodeAct / OpenHands (executable-code-as-action)
+
+CodeAct ("Executable Code Actions Elicit Better LLM Agents", Wang et al.,
+ICML 2024 — the paradigm behind OpenHands/OpenDevin and HuggingFace
+`smolagents`' `CodeAgent`) makes the opposite control-level bet from every
+other framework in this document: instead of a constrained tool-call format,
+the agent's action space is **executable code**. A live interpreter runs the
+emitted Python, stdout/stderr/return values come back as observations, the
+model self-debugs from execution errors and loops until it decides it's
+done. The claim is capability — code gives loops, conditionals, and
+composition in one action, so agents do more in fewer steps than a
+JSON-tool-call format allows.
+
+Kitsoki's `transition` tool (§5) is exactly the constrained format CodeAct
+argues against — deliberately: CodeAct wants a more capable autonomous
+agent, kitsoki wants a workflow where "the model probably does the right
+thing" isn't enough (`concept.md` §1). But kitsoki doesn't reject
+code-as-action wholesale — it already embeds a fully-controlled code
+runtime, Starlark (`host.starlark.run`, go.starlark.net), and the
+**`agent.codeact` verb** (`internal/host/codeact`) is CodeAct's loop
+re-admitted on top of it: the LLM emits Starlark snippets against an
+author-declared capability allowlist, each step executed in a traced,
+budget-bounded thread, observations (a return dict or a structured error
+envelope) feed back, and a final `done(payload)` is schema-gated before
+control returns to the state machine. It slots into the agent-verb taxonomy
+(§6.4) between the finite intent alphabet (max control, min expressivity)
+and `task` (max expressivity, min control) — composable like `task`, but
+every action traced, deterministic-by-construction, bounded, and
+no-LLM-replayable.
+
+Starlark beats a raw Python REPL as the substrate precisely because kitsoki
+owns the interpreter, so CodeAct's central trade — expressivity *for*
+auditability — disappears:
+
+| | CodeAct (Python) | `agent.codeact` (Starlark) |
+|---|---|---|
+| Sandbox | bolted-on (containers/seccomp); blast radius = whatever the model imports | intrinsic — no ambient I/O; the action space **is** the set of Go builtins the author exposes, loader-checked like every other verb's blast radius |
+| Tracing | none by default | every builtin call + step journaled (same event log every other verb writes to) |
+| Errors | raw tracebacks | a structured error envelope, the same contract as the validation-feedback retry loop (§4b) |
+| Termination | unbounded | no `while`/recursion is free in Starlark; a step budget bounds the outer loop too |
+| Replay | none — rerunning yields a new trajectory | pure interpreter + cassette'd HTTP/builtin calls → a recorded trajectory replays with zero LLM and zero live side effects (provable in CI, per the no-real-LLM-in-tests rule this whole document's `Steal`/`Avoid` sections assume) |
+
+The payoff is a **promotion ratchet** (`concept.md` §4, "code as artifact"):
+`agent.codeact` and `host.starlark.run` share one interpreter and one
+capability model, differing only in authorship — a live trajectory can be
+extracted (`internal/host/codeact.ExtractTrajectory`) and frozen into a
+committed `.star` file, swapping the exploratory `agent.codeact` invoke for
+a deterministic `host.starlark.run` call with zero further agent dispatch.
+This only applies when a call's answer is genuinely a fixed function of its
+inputs — a first dogfood pass tried to promote `stories/bugfix`'s
+ticket-triage room and correctly refused: a triage verdict is
+ticket-specific, so freezing one trajectory would silently give every
+future ticket the same stale answer. The ratchet is real, but it isn't a
+substitute for judgment about what's actually reusable.
+
+**Steal:**
+
+1. Code as the action for compositional, capability-scoped tasks — CodeAct's
+   core insight, kept, with the interpreter's ambient I/O sealed off by
+   default so the insight doesn't cost the auditability the rest of this
+   document argues for.
+2. Two-tier cassetting an agent loop: the LLM's emitted decisions
+   (episode-level, like every other agent verb) and the interpreter's own
+   I/O (exchange-level, generalizing the existing HTTP-cassette format) are
+   recorded and replayed independently — necessary because a code-acting
+   loop has two distinct sources of nondeterminism, not one.
+
+**Avoid:**
+
+1. An unsandboxed, Turing-complete action space. CodeAct's Python REPL
+   trades away exactly the properties (determinism, replay, a loader-checked
+   blast radius) this document's `Steal` sections keep collecting from every
+   other framework.
+2. Promoting a trajectory whose answer isn't actually a fixed function of
+   its inputs — the ratchet's refusal case above, not a hypothetical.
+
 ---
 
 ## 5. Why one generic MCP tool, not per-state typed tools
