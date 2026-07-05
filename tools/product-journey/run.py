@@ -2129,7 +2129,7 @@ def render_scenario_outcomes(outcomes: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def autonomous_fix_command(run_dir_arg: str) -> str:
+def autonomous_fix_cli_command(run_dir_arg: str) -> str:
     return (
         "python3 tools/product-journey/run.py --autonomous-fix-loop "
         f"--run-dir {run_dir_arg} "
@@ -2137,6 +2137,18 @@ def autonomous_fix_command(run_dir_arg: str) -> str:
         f"--gh-agent-db {run_dir_arg}/gh-agent-jobs.sqlite "
         "--gh-agent-public-base-url <public-gh-agent-url>"
     )
+
+
+def autonomous_fix_story_command() -> str:
+    return "autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<public-gh-agent-url>"
+
+
+def final_story_gate_commands() -> list[str]:
+    return [
+        autonomous_fix_story_command(),
+        "review",
+        "validate",
+    ]
 
 
 def _execution_plan_step(
@@ -2253,9 +2265,7 @@ def build_execution_plan(run_json: dict, evidence: dict, transports: Optional[li
         "finalize_commands": [
             f"python3 tools/product-journey/run.py --record-finding --run-dir {run_dir_arg} --finding-kind <strength|weakness|issue|fix> --title <title> --summary <summary>",
             f"python3 tools/product-journey/run.py --record-blocker --run-dir {run_dir_arg} --scenario <scenario> --title <title> --summary <summary>",
-            autonomous_fix_command(run_dir_arg),
-            f"python3 tools/product-journey/run.py --review-run --run-dir {run_dir_arg}",
-            f"python3 tools/product-journey/run.py --validate-run --run-dir {run_dir_arg}",
+            *final_story_gate_commands(),
         ],
     }
 
@@ -2293,7 +2303,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
             "Prefer MCP evidence over prose claims: screenshots, session traces, TUI frames, diffs, oracle output, and videos.",
             "Record strengths as well as weaknesses, issues, and fixes.",
             "If a live LLM or paid service would be required, stop and record the blocker instead of calling it from an automated test.",
-            "Attach every useful artifact with tools/product-journey/run.py --attach-evidence, then run --autonomous-fix-loop when credible issue findings exist, --review-run, and --validate-run.",
+            "Attach every useful artifact, then submit autonomous_fix when credible issue findings exist, review, and validate through the story session. Use the CLI fallback commands only when the story session is unavailable.",
         ],
         "scenario_order": [
             {
@@ -2453,9 +2463,7 @@ def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict, tran
         "persona": run_json["persona"],
         "scenarios": scenarios,
         "final_gates": [
-            autonomous_fix_command(run_dir_arg),
-            f"python3 tools/product-journey/run.py --review-run --run-dir {run_dir_arg}",
-            f"python3 tools/product-journey/run.py --validate-run --run-dir {run_dir_arg}",
+            *final_story_gate_commands(),
         ],
     }
 
@@ -2800,12 +2808,15 @@ def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: 
             "parameters explicit for the operator instead of silently skipping the gate. Finish with review and validation."
         ),
         "finalize_commands": [
-            autonomous_fix_command(run_dir_arg),
-            f"python3 tools/product-journey/run.py --review-run --run-dir {run_dir_arg}",
-            f"python3 tools/product-journey/run.py --validate-run --run-dir {run_dir_arg}",
+            *final_story_gate_commands(),
         ],
         "missing_evidence": missing_evidence,
         "missing_proof_evidence": missing_proof_evidence,
+        "cli_fallback_finalize_commands": [
+            autonomous_fix_cli_command(run_dir_arg),
+            f"python3 tools/product-journey/run.py --review-run --run-dir {run_dir_arg}",
+            f"python3 tools/product-journey/run.py --validate-run --run-dir {run_dir_arg}",
+        ],
     }
 
 
@@ -4718,15 +4729,28 @@ def load_json_for_validation(path: Path, issues: list[dict]) -> dict:
 
 def validate_final_commands(commands: list[str], issues: list[dict], check_id: str, label: str) -> None:
     if not commands:
-        add_validation_issue(issues, "error", check_id, f"{label} has no final autonomous-fix/review/validation commands")
+        add_validation_issue(issues, "error", check_id, f"{label} has no final story-owned autonomous-fix/review/validation commands")
         return
-    required = ["--autonomous-fix-loop", "--review-run", "--validate-run"]
+    required = final_story_gate_commands()
     missing = [
-        token for token in required
-        if not any(token in command for command in commands)
+        command for command in required
+        if command not in commands
     ]
     if missing:
-        add_validation_issue(issues, "error", check_id, f"{label} is missing final autonomous-fix/review/validation commands", ", ".join(missing))
+        add_validation_issue(issues, "error", check_id, f"{label} is missing final story-owned autonomous-fix/review/validation commands", ", ".join(missing))
+    fallback_tokens = ["--autonomous-fix-loop", "--review-run", "--validate-run"]
+    fallback_commands = [
+        command for command in commands
+        if any(token in command for token in fallback_tokens)
+    ]
+    if fallback_commands:
+        add_validation_issue(
+            issues,
+            "error",
+            check_id,
+            f"{label} exposes CLI fallback commands as primary final gates",
+            "; ".join(fallback_commands),
+        )
 
 
 def deck_scene_eyebrows(deck: dict) -> set[str]:
