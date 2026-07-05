@@ -24,8 +24,8 @@ host_handlers:
           stdout_json:
             run_id: scenario-qa-run-all
             run_dir: /repo/.artifacts/product-journey/scenario-qa-run-all
-            driver_plan_path: /repo/.artifacts/product-journey/scenario-qa-run-all/driver-plan.json
-            execution_plan_path: /repo/.artifacts/product-journey/scenario-qa-run-all/execution-plan.json
+            driver_plan_path: /repo/.artifacts/product-journey/scenario-qa-run-all/driver-plan.md
+            execution_plan_path: /repo/.artifacts/product-journey/scenario-qa-run-all/execution-plan.md
             agent_brief_path: /repo/.artifacts/product-journey/scenario-qa-run-all/agent-brief.md
       build_scenario_qa_deck:
         data:

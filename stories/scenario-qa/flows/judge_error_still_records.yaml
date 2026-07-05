@@ -1,12 +1,12 @@
-# check_single_transport — idle → plan → execute → judge → recording →
-# report, all within ONE turn: a single-transport check (transport=tui)
-# resolves to exactly ONE leg, so the internal emit chain (legs_ready →
-# leg_driven → leg_judged → legs_drained) auto-drains straight to report
-# without needing an operator-paced "next_leg" — see check_all_transports.yaml
-# for the multi-leg pacing gate.
-#
-# Every host call is stubbed by invoke id (no real run.py / LLM / ctx.fs call
-# runs here); this exercises the room-to-room control flow only.
+# judge_error_still_records — the driver captured real evidence, but the
+# JUDGE dispatch itself dies (host.agent.task: judge_leg errors). judge.yaml's
+# on_error: recording still routes forward so the leg's outcome is journaled
+# honestly (driver_status intact, verdict "unjudged") instead of stranding
+# the loop. record_leg_result.star's G7 guard deliberately leaves an
+# "unjudged" verdict alone (see scripts/record_leg_result.star) — a dead
+# judge dispatch is a distinct, already-honest failure mode from a judge
+# that rendered a verdict over inadequate evidence, so it must not be
+# recorded as "degraded-evidence" either. Exercises judge.yaml:39.
 
 test_kind: flow
 app: ../app.yaml
@@ -20,24 +20,24 @@ host_handlers:
           ok: true
           exit_code: 0
           stdout_json:
-            run_id: scenario-qa-run-1
-            run_dir: /repo/.artifacts/product-journey/scenario-qa-run-1
-            driver_plan_path: /repo/.artifacts/product-journey/scenario-qa-run-1/driver-plan.md
-            execution_plan_path: /repo/.artifacts/product-journey/scenario-qa-run-1/execution-plan.md
-            agent_brief_path: /repo/.artifacts/product-journey/scenario-qa-run-1/agent-brief.md
+            run_id: scenario-qa-run-judge-error
+            run_dir: /repo/.artifacts/product-journey/scenario-qa-run-judge-error
+            driver_plan_path: /repo/.artifacts/product-journey/scenario-qa-run-judge-error/driver-plan.md
+            execution_plan_path: /repo/.artifacts/product-journey/scenario-qa-run-judge-error/execution-plan.md
+            agent_brief_path: /repo/.artifacts/product-journey/scenario-qa-run-judge-error/agent-brief.md
       build_scenario_qa_deck:
         data:
           ok: true
           exit_code: 0
           stdout_json:
             status: scenario_qa_deck_built
-            run_dir: /repo/.artifacts/product-journey/scenario-qa-run-1
-            deck_path: /repo/.artifacts/product-journey/scenario-qa-run-1/deck.slidey.json
+            run_dir: /repo/.artifacts/product-journey/scenario-qa-run-judge-error
+            deck_path: /repo/.artifacts/product-journey/scenario-qa-run-judge-error/deck.slidey.json
             leg_count: 1
-            pass_count: 1
+            pass_count: 0
             fail_count: 0
             degraded_count: 0
-            summary: "1 / 1 transport legs passed."
+            summary: "0 / 1 transport legs judged (1 unjudged)."
 
   host.starlark.run:
     by_call:
@@ -58,7 +58,7 @@ host_handlers:
                   level: "frame-level"
           leg_count: 1
           driver_agent: ".agents/agents/product-journey-qa-driver.md"
-          run_dir_rel: ".artifacts/product-journey/scenario-qa-run-1"
+          run_dir_rel: ".artifacts/product-journey/scenario-qa-run-judge-error"
           plan_status: { resolved: true }
       pick_leg:
         data:
@@ -79,16 +79,16 @@ host_handlers:
                 visual_surface: "tui"
                 driver_status: "captured"
                 evidence_refs: ["render_tui_png:frame-1"]
-                verdict: "pass"
-                verdict_summary: "TUI frame confirms the fix state."
+                verdict: "unjudged"
+                verdict_summary: ""
                 frames_dir: "evidence/gears-rust--core-maintainer/bugfix"
-          pass_count: 1
+          pass_count: 0
           fail_count: 0
           degraded_count: 0
       build_report:
         data:
-          report_path: ".artifacts/product-journey/scenario-qa-run-1/report.md"
-          report_summary: "1 / 1 transport legs passed."
+          report_path: ".artifacts/product-journey/scenario-qa-run-judge-error/report.md"
+          report_summary: "0 / 1 transport legs judged (1 unjudged)."
 
   host.agent.task:
     by_call:
@@ -102,13 +102,7 @@ host_handlers:
             blockers: []
             summary: "Captured a render.tui_png frame showing the fixed state."
       judge_leg:
-        data:
-          ok: true
-          submitted:
-            verdict: "pass"
-            summary: "TUI frame confirms the fix state."
-            cited_frames: ["frame-1.png"]
-            frames_dir: "evidence/gears-rust--core-maintainer/bugfix"
+        error: "host.agent.task: judge session abandoned without successful submit"
 
 turns:
   - intent:
@@ -122,15 +116,12 @@ turns:
     expect_state: report
     expect_world:
       mode: catalog
-      run_id: scenario-qa-run-1
+      run_id: scenario-qa-run-judge-error
       leg_count: 1
-      leg_index: 0
-      pass_count: 1
+      pass_count: 0
       fail_count: 0
       degraded_count: 0
-      report_path: ".artifacts/product-journey/scenario-qa-run-1/report.md"
-      report_summary: "1 / 1 transport legs passed."
-      deck_path: "/repo/.artifacts/product-journey/scenario-qa-run-1/deck.slidey.json"
+      last_error: "host.agent.task: judge session abandoned without successful submit"
     expect_host_calls:
       - handler: host.run
         args: { call: emit_scenario_qa_run }
@@ -146,18 +137,6 @@ turns:
         args: { call: record_leg_result }
       - handler: host.starlark.run
         args: { call: build_report }
-      - handler: host.run
-        args: { call: build_scenario_qa_deck }
-    expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*1 / 1 transport legs passed[\\s\\S]*tui / bugfix[\\s\\S]*driver=captured verdict=pass"
-
-  - intent: { name: status, slots: {} }
-    expect_state: report
-    expect_world:
-      pass_count: 1
-
-  - intent: { name: report, slots: {} }
-    expect_state: report
-    expect_world:
-      report_path: ".artifacts/product-journey/scenario-qa-run-1/report.md"
+    expect_view_matches: "judge session abandoned without successful submit[\\s\\S]*tui / bugfix[\\s\\S]*driver=captured verdict=unjudged"
 
 expect_no_errors: true

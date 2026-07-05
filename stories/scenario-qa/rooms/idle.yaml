@@ -69,6 +69,10 @@ states:
                 leg_index: 0
                 leg_count: 0
                 legs: {}
+                current_leg: {}
+                current_leg_id: ""
+                drive_result: {}
+                judge_result: {}
                 leg_results: { items: [] }
                 pass_count: 0
                 fail_count: 0
