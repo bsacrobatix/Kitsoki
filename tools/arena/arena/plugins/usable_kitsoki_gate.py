@@ -30,18 +30,27 @@ from there when no explicit `persona` axis/meta override is present.
 S1 (workbench producer contract) has landed (`internal/orchestrator/
 workbench_gate_signal.go`) and S4 (scenario foundry / mined corpus) has
 landed (`tools/session-mining/scenario_compiler.py` +
-`tools/session-mining/calibration/`), but the three concrete harness entry
-points referenced below (`tests/playwright/usable-kitsoki-gate-web.spec.ts`,
-`tools/usable-kitsoki-gate/run_tui_gate.py`,
-`tools/usable-kitsoki-gate/run_mcp_gate.py`) still do not exist on disk
-(Task 3.3, gated separately) — this plugin's cell enumeration and scoring
-contract are proven by test against the REAL corpus and a REAL (synthetic,
-no-LLM) S1-shaped trace so the eventual harness lands against an
-already-tested seam. `arena plan`/`arena run` will fail to find those
-scripts until Task 3.3 wires them in — that failure mode is
-indistinguishable from any other "harness script missing" infra failure and
-is handled the same way `score()` handles any other harness crash: an
-`infra:*` health, never a fabricated model verdict.
+`tools/session-mining/calibration/`). Task 3.3's no-LLM half has now landed
+two of the three harness entry points: `tools/usable-kitsoki-gate/
+run_tui_gate.py` and `run_mcp_gate.py` both exist, reading this plugin's
+exact `GATE_*` env var contract off `drive_command()` and driving each
+scenario's compiled flow fixture through a real `kitsoki test flows` replay
+(see `tools/usable-kitsoki-gate/flow_gate_runner.py`'s module docstring for
+the mechanics and its documented honest gap: `stories/scenario-foundry-
+harness` is not a `workbench:` room, so `candidate_completed` reads False
+for every scenario today — a harness/join wiring proof, not yet a real
+workbench-parity measurement; see `usable_kitsoki_gate_constants.py`'s
+calibration-contact note). `tests/playwright/usable-kitsoki-gate-web.spec.ts`
+(the real browser-driven web surface) still does not exist on disk — that
+remains separately gated, larger, browser-specific work; `arena plan`/
+`arena run` will fail to find it until it lands, which `score()` handles the
+same way it handles any other harness crash: an `infra:*` health, never a
+fabricated model verdict. `tools/usable-kitsoki-gate/run_calibration_gate.py`
+is the standalone (non-arena, non-docker) sweep tool Task 4.2's checked-in
+calibration report (`tests/fixtures/usable-kitsoki-gate/calibration-
+report.json`) was produced from — it drives the same scenario x surface
+cells at bounded concurrency without going through a container executor,
+since the no-LLM contract needs no docker isolation.
 
 Scoring never regexes stdout for a verdict. It only reads the
 `[usable-kitsoki-gate] wrote <path>` pointer line the harness is expected to

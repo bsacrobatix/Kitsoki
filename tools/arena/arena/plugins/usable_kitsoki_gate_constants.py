@@ -31,6 +31,26 @@ from typing import Final
 # checked") must revisit this constant, cite the run that justified it in the
 # comment right here, and get Brad's sign-off before it gates a real release
 # decision instead of a placeholder for wiring the plugin.
+#
+# CALIBRATION CONTACT (Task 4.2, first no-LLM calibration run,
+# tools/arena/tests/fixtures/usable-kitsoki-gate/calibration-report.json):
+# the 18-scenario calibration set measured worst_surface_parity_percent =
+# 0.0% against this 90.0% placeholder — the threshold does NOT survive
+# calibration contact as measured. Brad's sign-off: DO NOT lower this
+# constant on the strength of that number — the 0.0% is an honest artifact
+# of what the no-LLM harness can drive TODAY, not a workbench quality
+# regression: `stories/scenario-foundry-harness`'s `desk` room (the only app
+# the S4->flow-fixture compiler currently projects mined turns onto) is not a
+# `workbench:` room, so `internal/orchestrator/workbench_gate_signal.go`
+# never fires for it and `candidate_completed` is honestly False for every
+# one of the 54 swept (scenario, surface) cells (see
+# tools/usable-kitsoki-gate/flow_gate_runner.py's module docstring for the
+# exact mechanics). Recalibrating this constant needs a no-LLM harness that
+# actually projects a mined scenario's turns onto a REAL `workbench:` room
+# (not scenario-foundry-harness's stand-in `ask` intent) — that harness does
+# not exist yet. Until it does, treat this calibration run as proof the
+# JOIN/ROLLUP/SCHEMA machinery works end to end (Task 3.3/4.2's actual scope),
+# not as evidence about real workbench parity.
 # ---------------------------------------------------------------------------
 PARITY_THRESHOLD_PERCENT: Final[float] = 90.0
 
