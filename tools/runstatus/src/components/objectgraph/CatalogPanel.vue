@@ -25,6 +25,8 @@ import {
   typeLabel,
   typeOrder,
 } from "./catalog-model.js";
+import GraphView from "./GraphView.vue";
+import { neighborhood } from "./graph-elements.js";
 
 const props = defineProps<{ graph: ObjectGraph; selectedId: string }>();
 const emit = defineEmits<{ "update:selectedId": [id: string] }>();
@@ -127,6 +129,12 @@ const groupedNodes = computed(() => {
 
 const outgoing = computed(() => (selectedNode.value ? outgoingGroups(props.graph, selectedNode.value.id) : []));
 const incoming = computed(() => (selectedNode.value ? incomingGroups(props.graph, selectedNode.value.id) : []));
+// The relationship graph is the selected object's own 1-hop neighborhood —
+// the same "points to" / "points here" edges as the text groups below,
+// drawn as a graph rather than restated as another data source.
+const relationshipGraph = computed(() =>
+  selectedNode.value ? neighborhood(props.graph, selectedNode.value.id) : { ...props.graph, nodes: [], edges: [] },
+);
 const typeChain = computed(() => (selectedNode.value ? nodeTypeChain(selectedNode.value) : []));
 const sourceIds = computed(() => (selectedNode.value ? nodeSources(selectedNode.value) : []));
 
@@ -431,6 +439,16 @@ function selectNode(id: string) {
               <small v-else>Edits stay as structured draft fields until a change request is started.</small>
             </div>
           </article>
+        </section>
+
+        <section class="relationship-graph" data-testid="relationship-graph">
+          <h3>Relationships, visualized</h3>
+          <GraphView
+            :graph="relationshipGraph"
+            :focus-id="selectedNode.id"
+            class="relationship-graph__view"
+            @update:focus-id="selectNode"
+          />
         </section>
 
         <div class="relationship-board">
