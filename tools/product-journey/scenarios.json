@@ -6,7 +6,11 @@
       "stage": "discover_product",
       "task": "Walk the Kitsoki product overview story end to end and explain what Kitsoki does, who it is for, and what the first credible action should be.",
       "primary_story": "stories/product-site/app.yaml",
-      "required_mcp": ["session.open", "session.inspect", "render.tui"],
+      "required_mcp": [
+        "session.open",
+        "session.inspect",
+        "render.tui"
+      ],
       "evidence": [
         "rendered_tui_frame",
         "session_trace",
@@ -26,7 +30,12 @@
       "stage": "onboard_project",
       "task": "Use the documented Kitsoki onboarding path to configure the assigned repository and explain how bugfix/design work should be launched.",
       "primary_story": "stories/dev-story/app.yaml",
-      "required_mcp": ["session.open", "session.inspect", "render.tui", "visual.observe"],
+      "required_mcp": [
+        "session.open",
+        "session.inspect",
+        "render.tui",
+        "visual.observe"
+      ],
       "evidence": [
         "session_trace",
         "rendered_tui_frame",
@@ -46,7 +55,12 @@
       "stage": "fix_bug",
       "task": "Start from public issue/repro material, drive Kitsoki's bugfix workflow, and score the resulting worktree with the project's deterministic oracle.",
       "primary_story": "stories/bugfix/app.yaml",
-      "required_mcp": ["session.open", "session.inspect", "render.tui", "visual.observe"],
+      "required_mcp": [
+        "session.open",
+        "session.inspect",
+        "render.tui",
+        "visual.observe"
+      ],
       "evidence": [
         "session_trace",
         "candidate_diff",
@@ -66,7 +80,12 @@
       "stage": "plan_project_work",
       "task": "Use Kitsoki to turn a project improvement idea into a PRD/design artifact grounded in repository files, conventions, and tests.",
       "primary_story": "stories/dev-story/app.yaml",
-      "required_mcp": ["session.open", "session.inspect", "render.tui", "visual.observe"],
+      "required_mcp": [
+        "session.open",
+        "session.inspect",
+        "render.tui",
+        "visual.observe"
+      ],
       "evidence": [
         "session_trace",
         "prd_artifact",
@@ -86,7 +105,12 @@
       "stage": "plan_project_work",
       "task": "Use Kitsoki to implement a small accepted design slice and validate it with project tests.",
       "primary_story": "stories/dev-story/app.yaml",
-      "required_mcp": ["session.open", "session.inspect", "render.tui", "visual.observe"],
+      "required_mcp": [
+        "session.open",
+        "session.inspect",
+        "render.tui",
+        "visual.observe"
+      ],
       "evidence": [
         "session_trace",
         "implementation_diff",
@@ -106,7 +130,11 @@
       "stage": "file_product_issue",
       "task": "Convert any confusing or broken Kitsoki behavior observed during the journey into a useful product bug report with visual and trace evidence.",
       "primary_story": "stories/dev-story/app.yaml",
-      "required_mcp": ["visual.observe", "session.inspect", "render.tui"],
+      "required_mcp": [
+        "visual.observe",
+        "session.inspect",
+        "render.tui"
+      ],
       "evidence": [
         "bug_report_markdown",
         "screenshot_or_tui_png",
@@ -119,6 +147,380 @@
         "Report includes deterministic reproduction context.",
         "Sensitive local data is redacted or explicitly marked local-only."
       ]
+    },
+    {
+      "id": "mined-scn-1b4ace86-f192-43b0-ab86-16142fec0079-0001",
+      "label": "Mined: resolve the red gate test that's already written but not committed",
+      "stage": "mined_from_sessions",
+      "task": "resolve the red gate test that's already written but not committed",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Grounded actions from the source session are reproducible: Bash: echo <val> && git ls-files internal/mcp/studio/session_live_ completed; Bash: echo <val> && git status --short && echo <val> && for wt in completed"
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "claude-code",
+        "session_id": "1b4ace86-f192-43b0-ab86-16142fec0079",
+        "span_idx": 1
+      }
+    },
+    {
+      "id": "mined-scn-240464bf-3da7-4c55-b22b-540edc34afc0-0000",
+      "label": "Mined: just file the ticket, we'll handle it async, need to commit the bugs to the repo",
+      "stage": "mined_from_sessions",
+      "task": "just file the ticket, we'll handle it async, need to commit the bugs to the repo for now - we'll evolve it before we release widely",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Grounded actions from the source session are reproducible: Edit: <path> completed"
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "claude-code",
+        "session_id": "240464bf-3da7-4c55-b22b-540edc34afc0",
+        "span_idx": 0
+      }
+    },
+    {
+      "id": "mined-scn-2e107a60-10e3-4d70-afe5-ea995adc4d6f-0000",
+      "label": "Mined: i want to dogfood kitsoki to build a critical new feature - we need to create a ",
+      "stage": "mined_from_sessions",
+      "task": "i want to dogfood kitsoki to build a critical new feature - we need to create a standardized per-agent definition that can provide mcp, permissions, prompt, etc... some of that is already in the room, but each agent invocation (like agent.task for example) needs the ability to specify an agent with an exact set of mcps (tools too), permissions, model/harness, etc...",
+      "primary_story": "",
+      "required_mcp": [
+        "mcp__kitsoki__story_graph",
+        "mcp__kitsoki__story_read",
+        "mcp__kitsoki__studio_handles",
+        "mcp__kitsoki__studio_ping"
+      ],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Grounded actions from the source session are reproducible: mcp__kitsoki__story_graph: {<val>:<val>} completed; mcp__kitsoki__story_read: {<val>:<val>,<val>:<val>} completed; mcp__kitsoki__studio_handles: {} completed; mcp__kitsoki__studio_ping: {} completed"
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "claude-code",
+        "session_id": "2e107a60-10e3-4d70-afe5-ea995adc4d6f",
+        "span_idx": 0
+      }
+    },
+    {
+      "id": "mined-scn-687e848b-baa7-4050-aaeb-d38a340fef5a-0000",
+      "label": "Mined: why do we keep losing the mcp tools - i updated .<file> a few times an apparentl",
+      "stage": "mined_from_sessions",
+      "task": "why do we keep losing the mcp tools - i updated .<file> a few times an apparently it's gone again",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "A correction occurred in the source session (Bash: cd <path> git add .<file> && git commit); the workbench should not silently re-diverge the same way.",
+        "Grounded actions from the source session are reproducible: Bash: cat <path><file> 2>/dev/null; echo <va completed; Bash: cd <path> echo <val>; grep -nE <val> .git completed; Bash: cd <path> echo <val>; kitsoki mcp --help completed; Bash: cd <path> echo <val>; ls -la .<file> 2> completed; Bash: cd <path> git add .<file> && git commit completed; Write: <path><file> completed"
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "claude-code",
+        "session_id": "687e848b-baa7-4050-aaeb-d38a340fef5a",
+        "span_idx": 0
+      }
+    },
+    {
+      "id": "mined-scn-74252840-25f6-4449-85a0-8ad99f7c97d5-0000",
+      "label": "Mined: this repo is fresh on this machine - i want make install to run cleanly, there s",
+      "stage": "mined_from_sessions",
+      "task": "this repo is fresh on this machine - i want make install to run cleanly, there should be some make setup job that will install everything necessary so users don't have to do it - cover mac, rockylinux and debian/ubuntu style",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Grounded actions from the source session are reproducible: Bash: git add scripts/<file> Makefile && git status --short && g completed; Bash: git commit -m <val>EOF' build: add `make setup` to install d completed; Bash: ls -la && cat Makefile 2>/dev/null | head -100 completed; Bash: ls test/e2e; echo <val>; find test/e2e -name <val> -exec cat completed; Bash: make install 2>&1 | tail -15 completed; Bash: make setup 2>&1 | tail -25 completed; Bash: tail -n +100 Makefile; echo <val>; head -5 go.mod; echo <val completed; Edit: <path> completed; Write: <path> completed"
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "claude-code",
+        "session_id": "74252840-25f6-4449-85a0-8ad99f7c97d5",
+        "span_idx": 0
+      }
+    },
+    {
+      "id": "mined-scn-74252840-25f6-4449-85a0-8ad99f7c97d5-0001",
+      "label": "Mined: so make install will work now?",
+      "stage": "mined_from_sessions",
+      "task": "so make install will work now?",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Persona can restate the goal and the real actions it required."
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "claude-code",
+        "session_id": "74252840-25f6-4449-85a0-8ad99f7c97d5",
+        "span_idx": 1
+      }
+    },
+    {
+      "id": "mined-scn-74252840-25f6-4449-85a0-8ad99f7c97d5-0002",
+      "label": "Mined: if make install fails, give a message that maybe make setup is needed",
+      "stage": "mined_from_sessions",
+      "task": "if make install fails, give a message that maybe make setup is needed",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Grounded actions from the source session are reproducible: Bash: git add Makefile && git commit -m <val>EOF' build: hint `mak completed; Bash: make check-deps && echo <val>; PATH=<val> make check-deps; e completed; Edit: <path> completed; Read: <path> completed"
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "claude-code",
+        "session_id": "74252840-25f6-4449-85a0-8ad99f7c97d5",
+        "span_idx": 2
+      }
+    },
+    {
+      "id": "mined-scn-c4d281a2-30e4-4002-9152-59d28d824abc-0000",
+      "label": "Mined: we have some .kitsoki-owner problem that's preventing us from merging some bug f",
+      "stage": "mined_from_sessions",
+      "task": "we have some .kitsoki-owner problem that's preventing us from merging some bug fixes - i was using bug fix in a previous session but it somehow got corrupted and stopped working - check into .kitsoki owner and local worktrees or PRs that are open for bugs 51, 52, etc...",
+      "primary_story": "",
+      "required_mcp": [
+        "mcp__kitsoki__gh_issues",
+        "mcp__kitsoki__gh_pr_view",
+        "mcp__kitsoki__host_run",
+        "mcp__kitsoki__story_search",
+        "mcp__kitsoki__studio_ping",
+        "mcp__kitsoki__vcs_log",
+        "mcp__kitsoki__worktree_list"
+      ],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Grounded actions from the source session are reproducible: mcp__kitsoki__gh_issues: {<val>:<val>,<val>:<val>,<val>:<val>,<val>:30} completed; mcp__kitsoki__gh_issues: {<val>:<val>,<val>:<val>,<val>:<val>} completed; mcp__kitsoki__gh_pr_view: {<val>:51,<val>:<val>} completed; mcp__kitsoki__host_run: {<val>:<val>,<val>:<val>.kitsoki-owner<val>.kitsoki-owner' 2 completed; mcp__kitsoki__host_run: {<val>:<val>,<val>:<val>} completed; mcp__kitsoki__story_search: {<val>:<val>,<val>:<val>,<val>:50} completed; mcp__kitsoki__studio_ping: {} completed; mcp__kitsoki__vcs_log: {<val>:<val>,<val>:10} completed; mcp__kitsoki__worktree_list: {<val>:<val>} completed"
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "claude-code",
+        "session_id": "c4d281a2-30e4-4002-9152-59d28d824abc",
+        "span_idx": 0
+      }
+    },
+    {
+      "id": "mined-scn-c4d281a2-30e4-4002-9152-59d28d824abc-0001",
+      "label": "Mined: file the bug, then land the fixes",
+      "stage": "mined_from_sessions",
+      "task": "file the bug, then land the fixes",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Persona can restate the goal and the real actions it required."
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "claude-code",
+        "session_id": "c4d281a2-30e4-4002-9152-59d28d824abc",
+        "span_idx": 1
+      }
+    },
+    {
+      "id": "mined-scn-c4ef173f-2335-4490-a2f4-a035a6ae3d85-0000",
+      "label": "Mined: check the .worktrees for things that are either garbage or already merged - i wa",
+      "stage": "mined_from_sessions",
+      "task": "check the .worktrees for things that are either garbage or already merged - i want to clean up to focus on real work",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Grounded actions from the source session are reproducible: Bash: cd <path> echo <val> git cherry main web-b completed; Bash: cd <path> echo <val> git diff --stat main. completed; Bash: cd <path> echo <val>; git merge-base --is- completed; Bash: cd <path> for wt in bf-B-x bf-F-2026-06-11 completed; Bash: cd <path> git worktree add .worktrees/merg completed; Bash: cd <path> git worktree remove --force .wor completed; Bash: ls -la .worktrees/ 2>/dev/null && echo <val> && git worktree completed"
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "claude-code",
+        "session_id": "c4ef173f-2335-4490-a2f4-a035a6ae3d85",
+        "span_idx": 0
+      }
+    },
+    {
+      "id": "mined-scn-f7b1da36-dd82-4111-93d8-706bf032e786-0000",
+      "label": "Mined: i have a VM for the kitsoki-github-agent - gracefully shut it down",
+      "stage": "mined_from_sessions",
+      "task": "i have a VM for the kitsoki-github-agent - gracefully shut it down",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Grounded actions from the source session are reproducible: Bash: ls cmd/kitsoki/gh_agent* && echo <val> && grep -rl <val> --i completed; Bash: ssh -o ConnectTimeout=10 -o BatchMode=yes root@<IP> completed; Bash: ssh root@<IP> <val>--- stopping service (graceful completed; Bash: ssh root@<IP> <val>syncing disks<val>scheduling po completed; Read: <path> completed"
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "claude-code",
+        "session_id": "f7b1da36-dd82-4111-93d8-706bf032e786",
+        "span_idx": 0
+      }
+    },
+    {
+      "id": "mined-scn-f7b1da36-dd82-4111-93d8-706bf032e786-0001",
+      "label": "Mined: ok it has been resized - i turned it on, check that it starts up properly",
+      "stage": "mined_from_sessions",
+      "task": "ok it has been resized - i turned it on, check that it starts up properly",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Grounded actions from the source session are reproducible: Bash: for i in $(seq 1 6); do ssh -o ConnectTimeout=8 -o BatchMode completed; Bash: ssh root@<IP> <val>=== local listener ===<val> [lo completed; Bash: ssh root@<IP> <val>=== resources (post-resize) === completed"
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "claude-code",
+        "session_id": "f7b1da36-dd82-4111-93d8-706bf032e786",
+        "span_idx": 1
+      }
+    },
+    {
+      "id": "mined-scn-f7b1da36-dd82-4111-93d8-706bf032e786-0002",
+      "label": "Mined: delete them - it's a testing node so it's ok",
+      "stage": "mined_from_sessions",
+      "task": "delete them - it's a testing node so it's ok",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Grounded actions from the source session are reproducible: Bash: ssh root@<IP> <val> import sqlite3 conn=sqlite3.co completed"
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "claude-code",
+        "session_id": "f7b1da36-dd82-4111-93d8-706bf032e786",
+        "span_idx": 2
+      }
+    },
+    {
+      "id": "mined-scn-rollout-2026-06-20t12-11-15-019ee370-b72b-78b2-90df-425f1252c365-0000",
+      "label": "Mined: this folder is supposed to be pinned to the main branch - it somehow got checked",
+      "stage": "mined_from_sessions",
+      "task": "this folder is supposed to be pinned to the main branch - it somehow got checked out to a different branch - get me back on main and make sure everything from this branch is merged in",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Grounded actions from the source session are reproducible: exec_command: git log --oneline -n 3 completed; exec_command: git merge --ff-only fix/vscode-chat-story-picker completed; exec_command: git rev-parse --short HEAD completed; exec_command: git status --short --branch completed; exec_command: git switch main completed"
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "codex",
+        "session_id": "rollout-2026-06-20T12-11-15-019ee370-b72b-78b2-90df-425f1252c365",
+        "span_idx": 0
+      }
+    },
+    {
+      "id": "mined-scn-rollout-2026-06-20t13-01-55-019ee39f-18dc-73f1-9f35-859bb770bfd2-0000",
+      "label": "Mined: somehow main got checked out to a fix branch - this keeps happening despite inte",
+      "stage": "mined_from_sessions",
+      "task": "somehow main got checked out to a fix branch - this keeps happening despite intended guards - get back to main and make sure anything on this branch moves over to main",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Grounded actions from the source session are reproducible: exec_command: git branch --merged main completed; exec_command: git branch -d fix/vscode-embed-compact-scaling completed; exec_command: git merge --ff-only fix/vscode-embed-compact-scaling completed; exec_command: git status --short --branch completed; exec_command: git switch main completed"
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "codex",
+        "session_id": "rollout-2026-06-20T13-01-55-019ee39f-18dc-73f1-9f35-859bb770bfd2",
+        "span_idx": 0
+      }
+    },
+    {
+      "id": "mined-scn-rollout-2026-06-22t14-52-39-019eee51-34a1-77e3-af6a-9c82cc702370-0000",
+      "label": "Mined: is the agent-contract-eval worktree already merged? can it be removed?",
+      "stage": "mined_from_sessions",
+      "task": "is the agent-contract-eval worktree already merged? can it be removed?",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Grounded actions from the source session are reproducible: exec_command: git -C .worktrees/agent-contract-eval status --short --branc completed; exec_command: git branch --contains a77549c47291d2cb6c542ea1e340a28fef2449 completed; exec_command: git merge-base --is-ancestor a77549c47291d2cb6c542ea1e340a28 completed; exec_command: rg -n <val> <path> completed"
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "codex",
+        "session_id": "rollout-2026-06-22T14-52-39-019eee51-34a1-77e3-af6a-9c82cc702370",
+        "span_idx": 0
+      }
+    },
+    {
+      "id": "mined-scn-rollout-2026-06-22t17-54-26-019eeef7-9fdf-7060-86d0-1b1c25348cd5-0000",
+      "label": "Mined: what does it take to get an extension uploaded to vs code marketplace?",
+      "stage": "mined_from_sessions",
+      "task": "what does it take to get an extension uploaded to vs code marketplace?",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Persona can restate the goal and the real actions it required."
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "codex",
+        "session_id": "rollout-2026-06-22T17-54-26-019eeef7-9fdf-7060-86d0-1b1c25348cd5",
+        "span_idx": 0
+      }
+    },
+    {
+      "id": "mined-scn-rollout-2026-06-26t15-21-48-019f0305-531e-7510-a890-14cc41e8491f-0000",
+      "label": "Mined: is there an rrweb viewer extension for vs code?",
+      "stage": "mined_from_sessions",
+      "task": "is there an rrweb viewer extension for vs code?",
+      "primary_story": "",
+      "required_mcp": [],
+      "evidence": [
+        "session_trace"
+      ],
+      "success_criteria": [
+        "Persona can restate the goal and the real actions it required."
+      ],
+      "source": "mined",
+      "provenance": {
+        "corpus": "codex",
+        "session_id": "rollout-2026-06-26T15-21-48-019f0305-531e-7510-a890-14cc41e8491f",
+        "span_idx": 0
+      }
     }
   ]
 }

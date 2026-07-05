@@ -5,35 +5,109 @@
       "label": "Core maintainer",
       "description": "Maintains a mature repository and is skeptical of bot-generated churn.",
       "surface_preference": "terminal-first",
-      "risk_focus": ["reviewability", "house-style", "minimal diffs"]
+      "risk_focus": [
+        "reviewability",
+        "house-style",
+        "minimal diffs"
+      ]
     },
     {
       "id": "dependency-debugger",
       "label": "Dependency debugger",
       "description": "Uses Kitsoki to fix a bug in a dependency blocking their own project.",
       "surface_preference": "web-first",
-      "risk_focus": ["time-to-repro", "test confidence", "handoff artifacts"]
+      "risk_focus": [
+        "time-to-repro",
+        "test confidence",
+        "handoff artifacts"
+      ]
     },
     {
       "id": "docs-minded-contributor",
       "label": "Docs-minded contributor",
       "description": "Values clear onboarding and follows documented paths before improvising.",
       "surface_preference": "docs-first",
-      "risk_focus": ["stale docs", "missing prerequisites", "broken demos"]
+      "risk_focus": [
+        "stale docs",
+        "missing prerequisites",
+        "broken demos"
+      ]
     },
     {
       "id": "ide-first-engineer",
       "label": "IDE-first engineer",
       "description": "Expects editor and visual surfaces to explain state without terminal archaeology.",
       "surface_preference": "vscode-first",
-      "risk_focus": ["visual state", "operator questions", "navigation clarity"]
+      "risk_focus": [
+        "visual state",
+        "operator questions",
+        "navigation clarity"
+      ]
     },
     {
       "id": "hobbyist-contributor",
       "label": "Hobbyist contributor",
       "description": "Contributes in spare time and needs a low-context path from issue selection to a credible small change.",
       "surface_preference": "docs-and-web-first",
-      "risk_focus": ["time budget", "setup friction", "clear next step"]
+      "risk_focus": [
+        "time budget",
+        "setup friction",
+        "clear next step"
+      ]
+    },
+    {
+      "id": "bugfix-contributor",
+      "label": "Bugfix Contributor",
+      "description": "Clustered from 3 mined session span(s). Sample goal(s): why do we keep losing the mcp tools - i updated .<file> a few times an apparently it's gone again | we have some .kitsoki-owner problem that's preventing us from merging some bug fixes - i was using bug fix in a previous | file the bug, then land the fixes",
+      "surface_preference": "unspecified",
+      "risk_focus": [],
+      "source": "mined",
+      "sample_count": 3
+    },
+    {
+      "id": "docs-writer",
+      "label": "Docs Writer",
+      "description": "Clustered from 1 mined session span(s). Sample goal(s): just file the ticket, we'll handle it async, need to commit the bugs to the repo for now - we'll evolve it before we rel",
+      "surface_preference": "unspecified",
+      "risk_focus": [],
+      "source": "mined",
+      "sample_count": 1
+    },
+    {
+      "id": "explorer",
+      "label": "Explorer",
+      "description": "Clustered from 3 mined session span(s). Sample goal(s): i want to dogfood kitsoki to build a critical new feature - we need to create a standardized per-agent definition that c | what does it take to get an extension uploaded to vs code marketplace? | is there an rrweb viewer extension for vs code?",
+      "surface_preference": "unspecified",
+      "risk_focus": [],
+      "source": "mined",
+      "sample_count": 3
+    },
+    {
+      "id": "feature-implementer",
+      "label": "Feature Implementer",
+      "description": "Clustered from 2 mined session span(s). Sample goal(s): this repo is fresh on this machine - i want make install to run cleanly, there should be some make setup job that will i | if make install fails, give a message that maybe make setup is needed",
+      "surface_preference": "unspecified",
+      "risk_focus": [],
+      "source": "mined",
+      "sample_count": 2
+    },
+    {
+      "id": "maintainer",
+      "label": "Maintainer",
+      "description": "Clustered from 1 mined session span(s). Sample goal(s): delete them - it's a testing node so it's ok",
+      "surface_preference": "unspecified",
+      "risk_focus": [],
+      "source": "mined",
+      "sample_count": 1
+    },
+    {
+      "id": "verifier",
+      "label": "Verifier",
+      "description": "Clustered from 4 mined session span(s). Sample goal(s): resolve the red gate test that's already written but not committed | so make install will work now? | i have a VM for the kitsoki-github-agent - gracefully shut it down",
+      "surface_preference": "unspecified",
+      "risk_focus": [],
+      "source": "mined",
+      "sample_count": 4
     }
   ]
 }
