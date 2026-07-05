@@ -431,6 +431,12 @@ func TestGitVCS_PRStatus_FailedChecks(t *testing.T) {
 	if len(checks) != 1 || checks[0]["name"] != "unit" {
 		t.Fatalf("checks: %#v", res.Data["checks"])
 	}
+	if summary, _ := res.Data["checks_summary"].(string); !strings.Contains(summary, "state: failure") || !strings.Contains(summary, "unit") {
+		t.Fatalf("checks_summary: %q", summary)
+	}
+	if failedLog, _ := res.Data["failed_log"].(string); !strings.Contains(failedLog, "unit") || !strings.Contains(failedLog, "https://ci.example/unit") {
+		t.Fatalf("failed_log: %q", failedLog)
+	}
 }
 
 func TestGitVCS_PRStatus_InfersRepoFromGitRemote(t *testing.T) {

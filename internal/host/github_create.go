@@ -82,7 +82,8 @@ func ghTicketCreate(ctx context.Context, args map[string]any) (Result, error) {
 	//   2. only if that still fails (a real triage-permission wall) drop labels
 	//      and warn — a fork contributor can still file the issue unlabelled.
 	//
-	// This mirrors the old gh CLI behavior while keeping issue filing native.
+	// This preserves the legacy "retry without labels when label creation is
+	// blocked" behavior while keeping issue filing native.
 	if code >= 300 && len(labels) > 0 && ghLooksLikeLabelErr(resp) {
 		ghEnsureLabels(ctx, repo, labels)
 		code, resp, err = githubAPIJSON(ctx, http.MethodPost, "repos/"+repo+"/issues", build(true), &created)

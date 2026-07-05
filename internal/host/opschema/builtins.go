@@ -69,7 +69,7 @@ func Builtins() *Registry {
 	})
 	r.Register("host.git", "pr_status", Op{
 		Input:  fields("pr_id", "string"),
-		Output: fields("state", "string", "checks", "list", "comments", "list"),
+		Output: fields("state", "string", "checks", "list", "checks_summary", "string", "failed_log", "string", "comments", "list"),
 	})
 	r.Register("host.git", "pr_comment", Op{
 		Input:  fields("pr_id", "string", "body", "string"),

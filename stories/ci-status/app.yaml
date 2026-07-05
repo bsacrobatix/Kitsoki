@@ -1,10 +1,10 @@
-# ci-status — fetch a PR's CI check results + failing logs via the gh CLI.
+# ci-status — fetch a PR's CI check status via native GitHub API.
 #
-# Diagnostic companion to stories/open-pr: after a PR is opened, this pulls
-# `gh pr checks` (the per-check pass/fail summary) and `gh run view --log-failed`
-# (the failing job log tail) so a driver can see WHY CI is red without leaving
-# the studio. No LLM — pure host.run. Read the result with session.world
-# (checks_summary / failed_log).
+# Diagnostic companion to stories/open-pr: after a PR is opened, this asks the
+# native host.git provider for the PR's combined status/check-run rollup so a
+# driver can see WHY CI is red without leaving the studio or depending on a
+# local gh binary. No LLM. Read the result with session.world (checks_summary /
+# failed_log).
 
 app:
   id: ci-status
@@ -14,16 +14,16 @@ app:
   license: "CC0"
 
 hosts:
-  - host.run
+  - host.git
 
 world:
-  repo:           { type: string, default: "" }     # owner/name; "" ⇒ gh infers from cwd's remote
+  repo:           { type: string, default: "" }     # owner/name; "" ⇒ host.git infers from cwd's remote
   pr_number:      { type: string, default: "" }      # PR to read checks for
-  branch:         { type: string, default: "" }      # branch whose latest run's failing log to pull
-  worktree_path:  { type: string, default: "." }     # cwd for gh (a checkout of the repo)
-  checks_summary: { type: string, default: "" }      # `gh pr checks` output
-  failed_log:     { type: string, default: "" }      # `gh run view --log-failed` tail
-  ci_conclusion:  { type: string, default: "" }      # latest run conclusion (success|failure|…)
+  branch:         { type: string, default: "" }      # compatibility field; status is keyed by PR head SHA
+  worktree_path:  { type: string, default: "." }     # cwd for repo inference when repo is empty
+  checks_summary: { type: string, default: "" }      # native PR status/check-run summary
+  failed_log:     { type: string, default: "" }      # native failed-check details/links
+  ci_conclusion:  { type: string, default: "" }      # success|failure|pending|…
   run_exit:       { type: string, default: "" }
   run_stdout:     { type: string, default: "" }
   last_error:     { type: string, default: "" }
@@ -31,7 +31,7 @@ world:
 
 intents:
   check:
-    description: "Fetch the PR's CI checks and failing logs."
+    description: "Fetch the PR's CI checks through the native GitHub provider."
     examples: [check, "ci status", "why did ci fail", "check ci"]
     priority: 90
   quit:
