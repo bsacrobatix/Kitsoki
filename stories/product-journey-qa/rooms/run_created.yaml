@@ -365,6 +365,8 @@ states:
                   - "{{ slots.gh_agent_incident_repo ?? '' }}"
                   - --gh-agent-asset-dir
                   - "{{ slots.gh_agent_asset_dir ?? '' }}"
+                  - --gh-agent-comment-mode
+                  - "{{ slots.gh_agent_comment_mode ?? 'none' }}"
                 cwd: "."
               bind:
                 last_result: stdout_json
@@ -459,6 +461,8 @@ states:
                   - "{{ slots.gh_agent_incident_repo ?? '' }}"
                   - --gh-agent-asset-dir
                   - "{{ slots.gh_agent_asset_dir ?? '' }}"
+                  - --gh-agent-comment-mode
+                  - "{{ slots.gh_agent_comment_mode ?? 'none' }}"
                 cwd: "."
               bind:
                 last_result: stdout_json

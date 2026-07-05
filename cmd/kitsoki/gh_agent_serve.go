@@ -145,6 +145,7 @@ type ghAgentServeOptions struct {
 	MaxAttempts       int
 	IncidentRepo      string
 	ProjectRoot       string
+	CommentMode       string
 	UseGitHubApp      bool
 	AppID             int64
 	InstallationID    int64
@@ -530,17 +531,25 @@ func withGHAgentAuth(ctx context.Context, opts ghAgentServeOptions, fn func(cont
 var ghAgentDispatchMention = dispatchGHAgentMention
 
 func dispatchGHAgentMention(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions, mention ghagent.Mention, labels []string) (*jobs.GHJob, error) {
+	var comments *ghagent.CommentStore
+	if strings.TrimSpace(opts.CommentMode) != "none" {
+		comments = &ghagent.CommentStore{Exec: host.GitHubTicketHandler, Repo: mention.Repo}
+	}
+	var incidentFn func(context.Context, *jobs.GHJob, string) (string, error)
+	if comments != nil {
+		incidentFn = func(ctx context.Context, job *jobs.GHJob, errMsg string) (string, error) {
+			return fileGHAgentIncident(ctx, opts, job, errMsg)
+		}
+	}
 	d := &ghagent.Dispatcher{
 		Jobs:          store,
 		Routes:        ghagent.DefaultLabelStoryMap(),
-		Comments:      &ghagent.CommentStore{Exec: host.GitHubTicketHandler, Repo: mention.Repo},
+		Comments:      comments,
 		WorkerID:      opts.Worker,
 		PublicBaseURL: opts.PublicBaseURL,
 		ProjectRoutes: ghagent.ProjectRouteResolver{Root: opts.ProjectRoot},
 		SpawnFn:       ghagent.RunStorySession,
-		IncidentFn: func(ctx context.Context, job *jobs.GHJob, errMsg string) (string, error) {
-			return fileGHAgentIncident(ctx, opts, job, errMsg)
-		},
+		IncidentFn:    incidentFn,
 	}
 	return d.Dispatch(ctx, mention, labels)
 }
