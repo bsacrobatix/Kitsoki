@@ -294,6 +294,19 @@ toward the quality gate. Only genuinely remote/opaque schemes (`http(s)://`,
 `retained://`, `image://`, `trace://`, `mcp://`) are treated as present without a
 stat. Regression: `tools/product-journey/cassette_proof_test.py`.
 
+**Every scenario carries one playback-capable evidence slot.** Alongside its
+free-form evidence kinds, each active (non-mined) scenario declares exactly one
+kind from `rrweb`, `trace-replay`, `flow-fixture`, or `png-sequence` — the four
+kinds that can actually be *replayed* (an rrweb viewer, `kitsoki test flows`, a
+PNG frame sequence) rather than merely referenced. This slot is held to a
+stricter bar than general proof evidence: a `cassette://`, `http(s)://`,
+`retained://`, or other opaque/indirect URI is **never** accepted, even though
+those same URIs count as proof elsewhere — see the memory note that a
+`cassette://` reference is unbacked/fake proof for replay purposes. The
+`playback-evidence-backed` review check and the `scenario-playback-evidence`
+(corpus) / `playback-evidence-unbacked` (bundle) validation checks enforce
+this. Regression: `tools/product-journey/playback_evidence_test.py`.
+
 Findings carry an `origin`: `observed` for findings a driver/operator recorded
 from a real interaction (the default for `--record-finding`), and `seeded` for
 the templated placeholders that `--seed-demo-evidence` attaches. The
