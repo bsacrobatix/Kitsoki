@@ -350,6 +350,13 @@ func ghPRStatus(ctx context.Context, workdir string, args map[string]any) (Resul
 	}}, nil
 }
 
+func repoFlag(args map[string]any) []string {
+	if r, _ := args["repo"].(string); strings.TrimSpace(r) != "" {
+		return []string{"--repo", r}
+	}
+	return nil
+}
+
 func ghPRComment(ctx context.Context, workdir string, args map[string]any) (Result, error) {
 	if !ghAvailable(ctx) {
 		return Result{Error: "git.pr_comment: gh CLI not available"}, nil

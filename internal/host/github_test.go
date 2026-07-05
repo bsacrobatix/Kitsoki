@@ -3,7 +3,6 @@ package host_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,12 +41,7 @@ func TestGitHubTicket_MissingOp(t *testing.T) {
 	}
 }
 
-func TestGitHubTicket_GhMissing(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{err: fmt.Errorf("gh not on PATH")}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
-
+func TestGitHubTicket_Search_RequiresRepo(t *testing.T) {
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
 		"op": "search",
 	})
@@ -55,28 +49,56 @@ func TestGitHubTicket_GhMissing(t *testing.T) {
 		t.Fatalf("infra: %v", err)
 	}
 	if res.Error == "" {
-		t.Fatal("expected domain error when gh missing")
+		t.Fatal("expected domain error when repo missing")
 	}
-	if !strings.Contains(res.Error, "gh CLI") {
-		t.Fatalf("error should mention gh CLI: %s", res.Error)
+	if !strings.Contains(res.Error, "repo argument is required") {
+		t.Fatalf("error should mention repo requirement: %s", res.Error)
 	}
 }
 
 func TestGitHubTicket_Search_Happy(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	// `gh issue list ... --search "esc"` returns a JSON list. The fake
-	// runner's prefix-fallback matches the longest registered key, so we
-	// pin the list invocation under a stable prefix.
-	fr.responses["gh issue list --state all --limit 30 --json number,title,state,labels,assignees,url --search esc"] = fakeResp{
-		stdout: `[{"number":42,"title":"Esc hangs the TUI","state":"OPEN","url":"https://github.com/o/r/issues/42","assignees":[{"login":"brad"}]}]`,
-	}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
+	t.Setenv("GH_TOKEN", "test-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/search/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		if got := r.URL.Query().Get("per_page"); got != "30" {
+			t.Fatalf("per_page = %q", got)
+		}
+		q := r.URL.Query().Get("q")
+		for _, want := range []string{"repo:o/r", "is:issue", "esc"} {
+			if !strings.Contains(q, want) {
+				t.Fatalf("query %q missing %q", q, want)
+			}
+		}
+		writeJSON(w, map[string]any{
+			"items": []map[string]any{{
+				"number":   42,
+				"title":    "Esc hangs the TUI",
+				"state":    "OPEN",
+				"html_url": "https://github.com/o/r/issues/42",
+				"assignees": []map[string]any{
+					{"login": "brad"},
+				},
+			}},
+		})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("ticket.search must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
 		"op":    "search",
 		"query": "esc",
+		"repo":  "o/r",
 	})
 	if err != nil {
 		t.Fatalf("infra: %v", err)
@@ -159,15 +181,21 @@ func TestListGitHubInboxItems_CustomFilters(t *testing.T) {
 }
 
 func TestGitHubTicket_Search_BadJSON(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	fr.defaultResp = fakeResp{stdout: "not-json"}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
+	t.Setenv("GH_TOKEN", "test-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/search/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		_, _ = w.Write([]byte("not-json"))
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
 		"op":    "search",
 		"query": "x",
+		"repo":  "o/r",
 	})
 	if err != nil {
 		t.Fatalf("infra: %v", err)
@@ -239,21 +267,32 @@ func TestGitHubTicket_Get_Happy(t *testing.T) {
 // (never ""), so dev-story's type-guarded `drive` arc never falls through to its
 // no-op self-loop. Every row also carries source="github" for the P5 mapping.
 func TestGitHubTicket_Search_ClassifiesType(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	fr.defaultResp = fakeResp{
-		stdout: `[
-			{"number":42,"title":"Esc hangs","state":"OPEN","url":"u42","labels":[{"name":"bug"},{"name":"P1"}]},
-			{"number":43,"title":"Add export","state":"OPEN","url":"u43","labels":[{"name":"enhancement"}]},
-			{"number":44,"title":"Tracker epic","state":"OPEN","url":"u44","labels":[{"name":"epic"}]},
-			{"number":45,"title":"Unlabelled defect","state":"OPEN","url":"u45","labels":[]}
-		]`,
-	}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
+	t.Setenv("GH_TOKEN", "test-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/search/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		writeJSON(w, map[string]any{
+			"items": []map[string]any{
+				{"number": 42, "title": "Esc hangs", "state": "OPEN", "html_url": "u42", "labels": []map[string]any{{"name": "bug"}, {"name": "P1"}}},
+				{"number": 43, "title": "Add export", "state": "OPEN", "html_url": "u43", "labels": []map[string]any{{"name": "enhancement"}}},
+				{"number": 44, "title": "Tracker epic", "state": "OPEN", "html_url": "u44", "labels": []map[string]any{{"name": "epic"}}},
+				{"number": 45, "title": "Unlabelled defect", "state": "OPEN", "html_url": "u45", "labels": []map[string]any{}},
+			},
+		})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("ticket.search must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
-		"op": "search",
+		"op":   "search",
+		"repo": "o/r",
 	})
 	if err != nil {
 		t.Fatalf("infra: %v", err)
@@ -651,16 +690,39 @@ func TestGitHubTicket_Transition_RequiresTo(t *testing.T) {
 }
 
 func TestGitHubTicket_ListMine_DefaultsToMe(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	fr.responses["gh issue list --state open --assignee @me --limit 100 --json number,title,state,labels,assignees,url"] = fakeResp{
-		stdout: `[{"number":1,"title":"One","state":"OPEN","url":"u1","assignees":[]},{"number":2,"title":"Two","state":"OPEN","url":"u2","assignees":[]}]`,
-	}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
+	t.Setenv("GH_TOKEN", "test-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/search/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		q := r.URL.Query().Get("q")
+		for _, want := range []string{"repo:o/r", "is:issue", "is:open", "assignee:@me"} {
+			if !strings.Contains(q, want) {
+				t.Fatalf("query %q missing %q", q, want)
+			}
+		}
+		if got := r.URL.Query().Get("per_page"); got != "100" {
+			t.Fatalf("per_page = %q", got)
+		}
+		writeJSON(w, map[string]any{
+			"items": []map[string]any{
+				{"number": 1, "title": "One", "state": "OPEN", "html_url": "u1", "assignees": []map[string]any{}},
+				{"number": 2, "title": "Two", "state": "OPEN", "html_url": "u2", "assignees": []map[string]any{}},
+			},
+		})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("ticket.list_mine must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
-		"op": "list_mine",
+		"op":   "list_mine",
+		"repo": "o/r",
 	})
 	if err != nil {
 		t.Fatalf("infra: %v", err)
@@ -675,23 +737,26 @@ func TestGitHubTicket_ListMine_DefaultsToMe(t *testing.T) {
 }
 
 func TestGitHubTicket_ListMine_ErrorPropagates(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	fr.defaultResp = fakeResp{stderr: "auth: token expired", code: 4}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
+	t.Setenv("GH_TOKEN", "test-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"token expired"}`, http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
-		"op": "list_mine",
+		"op":   "list_mine",
+		"repo": "o/r",
 	})
 	if err != nil {
 		t.Fatalf("infra: %v", err)
 	}
 	if res.Error == "" {
-		t.Fatal("expected domain error when gh exit != 0")
+		t.Fatal("expected domain error when GitHub API rejects the request")
 	}
 	if !strings.Contains(res.Error, "token expired") {
-		t.Fatalf("error should propagate stderr: %s", res.Error)
+		t.Fatalf("error should propagate API message: %s", res.Error)
 	}
 }
 
