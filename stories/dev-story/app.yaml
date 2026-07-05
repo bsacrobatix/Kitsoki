@@ -1550,6 +1550,8 @@ imports:
   gitops:
     source: ../git-ops
     entry: intercept
+    world_in:
+      ticket_repo: "{{ world.ticket_repo }}"
 
   bf:
     source: ../bugfix

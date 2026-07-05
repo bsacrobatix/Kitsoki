@@ -38,6 +38,13 @@ states:
             Uncommitted: '{% if world.has_uncommitted %}yes{% else %}clean{% endif %}'
             Ahead:       '{{ world.commits_ahead }} ahead'
             Behind:      '{{ world.commits_behind }} behind'
+      - kv:
+          pairs:
+            Issue:  '#{{ world.issue_id }} — {{ world.issue_title|default:"(untitled)" }}'
+            Status: '{{ world.issue_status|default:"(unknown)" }}'
+            URL:    '{{ world.issue_url|default:"(none)" }}'
+            Source: '{{ world.issue_source|default:"ticket provider" }}{% if world.issue_legacy_id %} (legacy {{ world.issue_legacy_id }}){% endif %}'
+        when: "world.issue_id != ''"
       - prose: "Last operation failed: {{ world.last_op_output|default:'(no output)' }}"
         when: "world.last_op_ok == false"
       - choice:
@@ -56,6 +63,14 @@ states:
               hint:  "reconcile protected {{ world.integration_branch }} with origin/main via .worktrees/"
               intent: sync_main
               slots: { remote: "origin", remote_branch: "main" }
+            - label: "issue_status"
+              hint:  "fetch an issue/ticket through the configured ticket provider"
+              intent: issue_status
+              param:
+                slot:        id
+                type:        string
+                placeholder: "issue id (e.g. 105)"
+                required:    true
             - { label: "undo",            hint: "undo the last commit",                                        intent: undo }
             - { label: "worktree_create", hint: "create a linked worktree under .worktrees/",                 intent: worktree_create }
             - { label: "worktree_list",   hint: "list and classify existing worktrees",                       intent: worktree_list }
@@ -141,6 +156,34 @@ states:
                 sync_continue_branch: "{{ slots.continue_branch ?? slots.branch ?? '' }}"
                 sync_auto_resolve:  "{{ slots.auto_resolve ?? false }}"
                 sync_result:        {}
+      issue_status:
+        - when: "slots.id == nil || slots.id == ''"
+          target: .
+          guard_hint: "Provide id=<issue-number-or-ticket-id>."
+        - target: .
+          effects:
+            - set:
+                issue_id:        "{{ slots.id }}"
+                issue_title:     ""
+                issue_status:    ""
+                issue_url:       ""
+                issue_source:    ""
+                issue_legacy_id: ""
+                issue_body:      ""
+                last_op_ok:      true
+                last_op_output:  ""
+            - invoke: iface.ticket.get
+              with:
+                id:   "{{ slots.id }}"
+                repo: "{{ world.ticket_repo }}"
+              bind:
+                issue_title:     title
+                issue_status:    status
+                issue_url:       url
+                issue_source:    source
+                issue_legacy_id: legacy_id
+                issue_body:      body
+              on_error: intercept
       undo:
         - target: undo
       worktree_create:
