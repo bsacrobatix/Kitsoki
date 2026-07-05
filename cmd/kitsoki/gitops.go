@@ -255,6 +255,7 @@ func gitopsCloseoutFixedIssues(ctx context.Context, runDir, ticketRepo string, s
 		}
 	}
 	var closed []map[string]any
+	alreadyClosed := 0
 	var failed []string
 	closeoutRev := gitShortRevCWD()
 	for _, item := range gitopsFindingsItems(findings) {
@@ -269,6 +270,12 @@ func gitopsCloseoutFixedIssues(ctx context.Context, runDir, ticketRepo string, s
 		job := jobsByOrigin[origin]
 		if job == nil {
 			failed = append(failed, fmt.Sprintf("%s missing done gh-agent job", issueURL))
+			continue
+		}
+		issue := mapValue(item, "github_issue")
+		if existing := gitopsExistingCloseout(item, repo, number, issueURL, job); existing != nil {
+			closed = append(closed, existing)
+			alreadyClosed++
 			continue
 		}
 		body := gitopsFixedInCommentBody(runDir, item, job, closeoutRev)
@@ -309,7 +316,6 @@ func gitopsCloseoutFixedIssues(ctx context.Context, runDir, ticketRepo string, s
 			"job_id":      stringValue(job, "job_id"),
 			"closed":      true,
 		})
-		issue := mapValue(item, "github_issue")
 		if issue == nil {
 			issue = map[string]any{}
 			item["github_issue"] = issue
@@ -335,28 +341,58 @@ func gitopsCloseoutFixedIssues(ctx context.Context, runDir, ticketRepo string, s
 		closeoutStatus = "failed"
 	}
 	summary := fmt.Sprintf("Closed %d fixed GitHub issue(s).", len(closed))
+	if alreadyClosed > 0 {
+		summary = fmt.Sprintf("Closed %d fixed GitHub issue(s) (%d already closed).", len(closed), alreadyClosed)
+	}
 	if len(failed) > 0 {
 		summary = fmt.Sprintf("%s %d close-out failure(s): %s", summary, len(failed), strings.Join(firstStrings(failed, 3), "; "))
 	}
 	findings["issue_closeout"] = map[string]any{
-		"updated_at": time.Now().UTC().Format(time.RFC3339),
-		"status":     closeoutStatus,
-		"count":      len(closed),
-		"summary":    summary,
-		"items":      closed,
-		"errors":     failed,
+		"updated_at":           time.Now().UTC().Format(time.RFC3339),
+		"status":               closeoutStatus,
+		"count":                len(closed),
+		"already_closed_count": alreadyClosed,
+		"summary":              summary,
+		"items":                closed,
+		"errors":               failed,
 	}
 	if err := gitopsWriteJSONFile(findingsPath, findings); err != nil {
 		return nil, err
 	}
 	return map[string]any{
-		"issue_closeout_status":  closeoutStatus,
-		"issue_closeout_count":   len(closed),
-		"issue_closeout_summary": summary,
-		"closed_issue_urls":      closeoutIssueURLs(closed),
-		"issue_closeouts":        closed,
-		"issue_closeout_errors":  failed,
+		"issue_closeout_status":      closeoutStatus,
+		"issue_closeout_count":       len(closed),
+		"issue_already_closed_count": alreadyClosed,
+		"issue_closeout_summary":     summary,
+		"closed_issue_urls":          closeoutIssueURLs(closed),
+		"issue_closeouts":            closed,
+		"issue_closeout_errors":      failed,
 	}, nil
+}
+
+func gitopsExistingCloseout(item map[string]any, repo, number, issueURL string, job map[string]any) map[string]any {
+	issue := mapValue(item, "github_issue")
+	if issue == nil {
+		return nil
+	}
+	if stringValue(issue, "closeout_comment_url") == "" {
+		return nil
+	}
+	state := firstNonBlank(stringValue(issue, "state"), stringValue(issue, "status"))
+	if state != "closed" {
+		return nil
+	}
+	return map[string]any{
+		"finding_id":     stringValue(item, "id"),
+		"issue_url":      firstNonBlank(issueURL, stringValue(issue, "url"), "https://github.com/"+repo+"/issues/"+number),
+		"repo":           repo,
+		"number":         number,
+		"comment_url":    stringValue(issue, "closeout_comment_url"),
+		"run_url":        stringValue(job, "run_url"),
+		"job_id":         stringValue(job, "job_id"),
+		"closed":         true,
+		"already_closed": true,
+	}
 }
 
 func gitopsFixedInCommentBody(runDir string, finding, job map[string]any, closeoutRev string) string {
