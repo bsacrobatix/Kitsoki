@@ -6,7 +6,13 @@ var contract `usable_kitsoki_gate.py`'s `drive_command()` threads to a cell's
 container: `GATE_SURFACE`, `GATE_SCENARIO_CORPUS`, `GATE_SCENARIO_ID`,
 `GATE_RUN_ID`, `GATE_RESULTS_PATH` (`GATE_PERSONA` is accepted but not
 consulted -- persona is a fixed property of the scenario IR document, not a
-runner input, per `usable_kitsoki_gate.py`'s own module docstring).
+runner input, per `usable_kitsoki_gate.py`'s own module docstring). `GATE_TARGET`
+is optional (S6 "no-llm-parity") -- one of `flow_gate_runner.WORKBENCH_TARGETS`
+(`dev-story`/`pets-dev`/`slidey-dev`) to replay that target's real
+`workbench:` room instead of the harness-stub default; unset reproduces the
+prior harness-stub behavior byte-for-byte (`usable_kitsoki_gate.py`'s
+`drive_command()` does not set this today, so a live `arena run` sweep is
+unaffected by this addition until that wiring is extended separately).
 
 Drives exactly ONE (scenario, surface) cell via `flow_gate_runner.py`,
 writes `{"records": [<record>]}` to `GATE_RESULTS_PATH`, and prints the
@@ -49,10 +55,11 @@ def main(surface: str) -> int:
         )
 
     evidence_dir = results_path.parent / "evidence"
+    target = os.environ.get("GATE_TARGET") or None
 
     try:
         record = runner.build_record_for_cell(
-            scenario_id, corpus_dir, surface, evidence_dir=evidence_dir,
+            scenario_id, corpus_dir, surface, evidence_dir=evidence_dir, target=target,
         )
     except runner.ScenarioNotFound as exc:
         print(f"[usable-kitsoki-gate] {exc}", file=sys.stderr)

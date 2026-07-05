@@ -32,25 +32,54 @@ from typing import Final
 # comment right here, and get Brad's sign-off before it gates a real release
 # decision instead of a placeholder for wiring the plugin.
 #
-# CALIBRATION CONTACT (Task 4.2, first no-LLM calibration run,
-# tools/arena/tests/fixtures/usable-kitsoki-gate/calibration-report.json):
+# CALIBRATION CONTACT, round 2 (S6 "no-llm-parity", supersedes the round-1
+# note below): tools/arena/tests/fixtures/usable-kitsoki-gate/
+# calibration-report.json now sweeps the 18-scenario calibration set against
+# the THREE real `workbench:` rooms this project ships (dev-story, the
+# hand-authored primary, and its thin inheritors pets-dev/slidey-dev — see
+# tools/session-mining/flow_fixture_compiler.py's WORKBENCH_TARGETS), not the
+# non-workbench harness stub round 1 measured against. Measured result: 162
+# records (18 scenarios x 3 surfaces x 3 targets), silent_bounce_count = 0,
+# misroute_adjacent_count = 0 (still hard-false — S1 does not compute this;
+# see GATE_CONDITIONS doc below), worst_surface_parity_percent = 100.0% —
+# ABOVE this 90.0% placeholder, so the gate PASSES on the calibration set as
+# measured (unlike round 1's 0.0%, this number does not disagree with the
+# threshold; nothing needed lowering).
+#
+# DO NOT read 100.0% as proof real workbench answer quality is perfect,
+# though — flag this honestly rather than banking it: the calibration set's
+# 18 scenarios are ALL non-abandoned (`abandoned: false` on every one; grep
+# confirmed, none exercise the failure branch), and
+# `flow_fixture_compiler.py`'s `canned_answer()` derives each stubbed
+# `host.agent.task` response's content DETERMINISTICALLY FROM the scenario's
+# own `expected_effects`/`abandoned` fields — the same oracle
+# `workbenchGateSignal`'s real expected_effects join then checks the note
+# against. For a non-abandoned scenario the stub is engineered to state its
+# expected_effects verbatim, so the join is close to tautological by
+# construction on this corpus; it proves the JOIN/ROLLUP/SCHEMA machinery
+# and the real per-target app wiring (import-folding included) work
+# end to end, and — separately, via
+# internal/testrunner/flows_workbench_smoke_expected_effects_test.go's
+# explicit "unsatisfied" case — that the join CAN report false when a note
+# omits an expected effect. It is not yet a measurement of whether a REAL
+# (LLM-driven) workbench agent's own answers would satisfy those effects; that
+# would need either abandoned/near-miss scenarios added to the calibration
+# corpus (to exercise the false branch through this harness, not just the
+# direct testrunner test) or a live-gate run (`run_live_gate.py --live-gate`)
+# driving a real agent instead of a canned cassette answer.
+#
+# Round 1 (Task 4.2, first no-LLM calibration run, pre-workbench-target):
 # the 18-scenario calibration set measured worst_surface_parity_percent =
-# 0.0% against this 90.0% placeholder — the threshold does NOT survive
-# calibration contact as measured. Brad's sign-off: DO NOT lower this
-# constant on the strength of that number — the 0.0% is an honest artifact
-# of what the no-LLM harness can drive TODAY, not a workbench quality
-# regression: `stories/scenario-foundry-harness`'s `desk` room (the only app
-# the S4->flow-fixture compiler currently projects mined turns onto) is not a
-# `workbench:` room, so `internal/orchestrator/workbench_gate_signal.go`
-# never fires for it and `candidate_completed` is honestly False for every
-# one of the 54 swept (scenario, surface) cells (see
-# tools/usable-kitsoki-gate/flow_gate_runner.py's module docstring for the
-# exact mechanics). Recalibrating this constant needs a no-LLM harness that
-# actually projects a mined scenario's turns onto a REAL `workbench:` room
-# (not scenario-foundry-harness's stand-in `ask` intent) — that harness does
-# not exist yet. Until it does, treat this calibration run as proof the
-# JOIN/ROLLUP/SCHEMA machinery works end to end (Task 3.3/4.2's actual scope),
-# not as evidence about real workbench parity.
+# 0.0% against this 90.0% placeholder — the threshold did NOT survive
+# calibration contact as measured. Brad's sign-off at the time: DO NOT lower
+# this constant on the strength of that number — the 0.0% was an honest
+# artifact of what the no-LLM harness could drive THEN, not a workbench
+# quality regression: `stories/scenario-foundry-harness`'s `desk` room (the
+# only app the S4->flow-fixture compiler projected mined turns onto at that
+# point) is not a `workbench:` room, so
+# `internal/orchestrator/workbench_gate_signal.go` never fired for it and
+# `candidate_completed` was honestly False for every one of the 54 swept
+# (scenario, surface) cells. That gap is what round 2 above closes.
 # ---------------------------------------------------------------------------
 PARITY_THRESHOLD_PERCENT: Final[float] = 90.0
 
