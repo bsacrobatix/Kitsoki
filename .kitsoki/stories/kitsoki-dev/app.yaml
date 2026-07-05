@@ -99,6 +99,7 @@ hosts:
   - host.agent.ask
   - host.agent.decide
   - host.agent.task
+  - host.agent.codeact
   # Pulled in transitively via dev-story → cypilot import (cypilot
   # uses host.run for its prd/adr/decomposition rooms). The strict
   # `hosts: declared` import on `core` requires every transitively-

@@ -80,29 +80,71 @@ states:
       # 1. Produce the standardized triage verdict. Read-only agent; working_dir
       #    defaults to "." (the current checkout) — triage needs no worktree.
       #    `once: true` keyed off its own bind so a reload re-renders without
-      #    re-running the agent; refine clears the bind to re-arm.
-      - invoke: host.agent.task
+      #    re-running the agent; refine clears the bind to re-arm. Triage is a
+      #    bounded read-only code-act loop (inspect tree + git history, then
+      #    emit a schema-gated verdict) rather than the open-ended
+      #    host.agent.task acceptance loop — capabilities is deliberately
+      #    [world, vcs] (no http: triage never needs outbound network).
+      - invoke: host.agent.codeact
         once: true
         with:
           agent: triager
-          working_dir: "{{ world.workdir }}"
-          acceptance:
-            schema: schemas/triage_verdict.json
-          context:
-            prompt: prompts/triaging.md
-            args:
-              ticket_id:       "{{ world.ticket_id }}"
-              ticket_title:    "{{ world.ticket_title }}"
-              ticket_url:      "{{ world.ticket_url }}"
-              ticket_repo:     "{{ world.ticket_repo }}"
-              ticket_source_mode: "{{ world.ticket_repo != '' ? 'remote' : world.ticket_source_mode }}"
-              ticket_source_ref:  "{{ world.ticket_source_ref }}"
-              ticket_body:        "{{ world.ticket_body }}"
-              thread:          "{{ world.thread }}"
-              workdir:         "{{ world.workdir }}"
-              refine_feedback: "{{ world.refine_feedback }}"
+          budget: 6
+          capabilities: [world, vcs]
+          schema: schemas/triage_verdict.json
+          goal: >-
+            You are triaging bug {{ world.ticket_id }} — {{ world.ticket_title }}
+            against the current working tree at {{ world.workdir }}. Ticket
+            source mode: {{ world.ticket_repo != '' ? 'remote' : world.ticket_source_mode }}
+            {% if world.ticket_source_ref %}(source ref: {{ world.ticket_source_ref }}){% endif %}.
+            This is triage only — do NOT fix anything, do NOT write files, do NOT
+            create a branch. Your single job is to determine whether the reported
+            defect still exists in the code right now, and emit a standardized
+            verdict with concrete code evidence. Read the bug report: when
+            ticket_source_mode is "local", read the ticket file named by
+            ticket_source_ref, or thread when it looks like a local path, or
+            issues/bugs/{{ world.ticket_id }}.md; when "remote", use
+            ctx.world.get("ticket_body") (with ticket_title/ticket_url/ticket_repo)
+            and do not go hunting through issues/bugs or unrelated local notes —
+            return UNCLEAR if ticket_body is empty. Open the exact files/functions
+            the report cites in the CURRENT tree: has the buggy line/behavior
+            changed? Does a proposed fix already appear applied? Search for a
+            regression test asserting the fixed behavior — a green regression
+            test is strong evidence of ALREADY-FIXED. If the ticket claims
+            status: fixed/resolved, still verify in code rather than trusting the
+            flag. {% if world.refine_feedback %}The previous verdict was rejected;
+            this operator directive overrides defaults where they conflict and
+            must be addressed before you submit again: {{ world.refine_feedback }}{% endif %}
+            Pick exactly one verdict: ALREADY-FIXED (the cited defect no longer
+            exists; cite the function/test that proves it), STILL-LIVE (the buggy
+            code/behavior is still present; cite the line that still reads the
+            buggy way), PARTIAL (some sites fixed, others remain; cite both), or
+            UNCLEAR (you cannot determine from the code alone; say what you'd
+            need). Finish by calling done() with a payload matching
+            schemas/triage_verdict.json: verdict, confidence (0..1, honest given
+            what you actually examined), summary_title (one-line headline),
+            evidence (the load-bearing field — cite specific file:line / function
+            / regression test and what you found there; prose without a code
+            citation is a failed triage), summary_markdown (the reasoning trail a
+            human reviewer reads), suggested_action (e.g. "close as fixed",
+            "drive the full bugfix pipeline", "needs human repro", "fix remaining
+            site in <file>"), fixed_in_ref (when ALREADY-FIXED, the
+            commit/function/test that proves it, else null), and
+            involved_components (the files/modules you inspected with what you
+            found).
+          world:
+            ticket_id:          "{{ world.ticket_id }}"
+            ticket_title:       "{{ world.ticket_title }}"
+            ticket_url:         "{{ world.ticket_url }}"
+            ticket_repo:        "{{ world.ticket_repo }}"
+            ticket_source_mode: "{{ world.ticket_repo != '' ? 'remote' : world.ticket_source_mode }}"
+            ticket_source_ref:  "{{ world.ticket_source_ref }}"
+            ticket_body:        "{{ world.ticket_body }}"
+            thread:             "{{ world.thread }}"
+            workdir:            "{{ world.workdir }}"
+            refine_feedback:    "{{ world.refine_feedback }}"
         bind:
-          triage_verdict: submitted
+          triage_verdict: payload
         on_error: idle
 
       # 2. Autonomous terminal: the verdict needs no second opinion. In any

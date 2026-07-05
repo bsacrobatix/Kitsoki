@@ -263,6 +263,7 @@ func synthesizedRootHosts() []string {
 		"host.agent.ask",
 		"host.agent.decide",
 		"host.agent.task",
+		"host.agent.codeact",
 		"host.run",
 		"host.agent.search",
 		"host.artifacts_dir",

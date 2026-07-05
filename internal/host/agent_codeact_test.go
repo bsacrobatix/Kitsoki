@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -104,6 +105,80 @@ func TestAgentCodeactHandler_RealAgentDrivesRunToDone(t *testing.T) {
 	snippet, _ := step0["snippet"].(string)
 	if !strings.Contains(snippet, "seen") {
 		t.Fatalf("expected step 0 to journal the scripted snippet; got %#v", step0)
+	}
+}
+
+// TestAgentCodeactHandler_SchemaRejectsThenAccepts proves the "schema" arg
+// documented on AgentCodeactHandler is actually wired into codeact.Params.Schema:
+// a first done() turn whose payload fails the declared JSON schema is rejected
+// and fed back to the (fake) agent as an ErrorEnvelope, and a corrected second
+// done() turn — matching the schema — terminates the loop successfully. Before
+// this fix codeact.Run was always called with no Schema func, so the first,
+// schema-invalid turn would have been silently accepted as TerminatedDone.
+func TestAgentCodeactHandler_SchemaRejectsThenAccepts(t *testing.T) {
+	t.Parallel()
+
+	schemaPath := filepath.Join(t.TempDir(), "verdict.json")
+	if err := os.WriteFile(schemaPath, []byte(`{
+		"type": "object",
+		"required": ["verdict"],
+		"properties": {
+			"verdict": {"type": "string", "enum": ["STILL-LIVE", "ALREADY-FIXED"]}
+		}
+	}`), 0o600); err != nil {
+		t.Fatalf("write schema: %v", err)
+	}
+
+	turns := []map[string]any{
+		{
+			// Schema-invalid: verdict is missing entirely.
+			"action":  "done",
+			"payload": map[string]any{"summary": "looks broken"},
+		},
+		{
+			// Corrected: matches the schema.
+			"action":  "done",
+			"payload": map[string]any{"verdict": "STILL-LIVE"},
+		},
+	}
+	runner := fakeCodeactRunner(t, turns)
+
+	ctx := host.WithClaudeRunner(context.Background(), runner)
+	ctx = host.WithAgents(ctx, map[string]host.Agent{
+		"triager": {SystemPrompt: "You triage bugs."},
+	})
+
+	res, err := host.AgentCodeactHandler(ctx, map[string]any{
+		"agent":        "triager",
+		"goal":         "assess whether the bug still exists",
+		"budget":       5,
+		"capabilities": []any{"world"},
+		"schema":       schemaPath,
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected Result.Error: %s", res.Error)
+	}
+
+	terminated, _ := res.Data["terminated"].(string)
+	if terminated != "done" {
+		t.Fatalf("expected terminated=done, got %q (Data=%#v)", terminated, res.Data)
+	}
+	payload, _ := res.Data["payload"].(map[string]any)
+	if payload["verdict"] != "STILL-LIVE" {
+		t.Fatalf("expected the CORRECTED payload to win, got %#v", payload)
+	}
+
+	steps, _ := res.Data["steps"].([]any)
+	if len(steps) != 2 {
+		t.Fatalf("expected 2 journaled steps (reject + accept), got %d (%#v)", len(steps), steps)
+	}
+	step0, _ := steps[0].(map[string]any)
+	errMsg, _ := step0["error"].(string)
+	if !strings.Contains(errMsg, "rejected") {
+		t.Fatalf("expected step 0 to journal a schema-rejection error, got %#v", step0)
 	}
 }
 
