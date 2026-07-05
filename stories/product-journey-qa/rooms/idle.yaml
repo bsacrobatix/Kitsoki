@@ -325,6 +325,65 @@ states:
                 review_failed_count: 0
                 review_backlog_summary: "Run capture_preflight and keep it passing before live persona evidence capture."
                 status: "autonomous_marathon_invalid"
+        - when: "(slots.autonomous_driver_mode ?? 'pending') != 'replay' && (slots.live_budget_minutes ?? world.live_budget_minutes) > 0 && (slots.ticket_repo == nil || slots.ticket_repo == '')"
+          target: .
+          effects:
+            - set:
+                project: "{{ slots.project ?? world.project }}"
+                persona: "{{ slots.persona ?? world.persona }}"
+                seed: "{{ slots.seed ?? world.seed }}"
+                scenario_scope: "{{ slots.scenarios ?? world.scenario_scope }}"
+                live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
+                autonomous_marathon_status: "autonomous_marathon_invalid"
+                autonomous_marathon_summary: "Live-budgeted autonomous marathon requires ticket_repo before driver handoff."
+                autonomous_driver_mode: "{{ slots.autonomous_driver_mode ?? 'pending' }}"
+                autonomous_driver_status: "invalid"
+                autonomous_driver_summary: "ticket_repo is required before live-budgeted driver handoff"
+                autonomous_driver_evidence_count: 0
+                autonomous_driver_issue_count: 0
+                autonomous_fix_status: "not_run"
+                autonomous_gate_summary: "preflight=pass, filing=fail, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=fail"
+                independent_verify_status: "not_run"
+                independent_verify_summary: "ticket_repo must be configured before live persona evidence capture"
+                validation_status: "invalid"
+                validation_errors: 1
+                validation_warnings: 0
+                validation_issue_summary: "ticket-repo-required"
+                review_status: "not_run"
+                review_failed_count: 0
+                review_backlog_summary: "Set ticket_repo so credible findings can be filed and fixed after capture."
+                filing_summary: "ticket_repo is required before live-budgeted autonomous marathon"
+                status: "autonomous_marathon_invalid"
+        - when: "(slots.autonomous_driver_mode ?? 'pending') != 'replay' && (slots.live_budget_minutes ?? world.live_budget_minutes) > 0 && (slots.gh_agent_public_base_url == nil || slots.gh_agent_public_base_url == '')"
+          target: .
+          effects:
+            - set:
+                project: "{{ slots.project ?? world.project }}"
+                persona: "{{ slots.persona ?? world.persona }}"
+                seed: "{{ slots.seed ?? world.seed }}"
+                scenario_scope: "{{ slots.scenarios ?? world.scenario_scope }}"
+                live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
+                autonomous_marathon_status: "autonomous_marathon_invalid"
+                autonomous_marathon_summary: "Live-budgeted autonomous marathon requires gh_agent_public_base_url before driver handoff."
+                autonomous_driver_mode: "{{ slots.autonomous_driver_mode ?? 'pending' }}"
+                autonomous_driver_status: "invalid"
+                autonomous_driver_summary: "gh_agent_public_base_url is required before live-budgeted driver handoff"
+                autonomous_driver_evidence_count: 0
+                autonomous_driver_issue_count: 0
+                autonomous_fix_status: "not_run"
+                autonomous_gate_summary: "preflight=pass, filing=not_run, gh_agent=fail, independent_verify=not_run, review=not_run, validation=fail"
+                independent_verify_status: "not_run"
+                independent_verify_summary: "gh_agent_public_base_url must be configured before live persona evidence capture"
+                validation_status: "invalid"
+                validation_errors: 1
+                validation_warnings: 0
+                validation_issue_summary: "gh-agent-public-base-url"
+                review_status: "not_run"
+                review_failed_count: 0
+                review_backlog_summary: "Set gh_agent_public_base_url so fix evidence run links are reviewable after capture."
+                gh_agent_missing_evidence_summary: "gh_agent_public_base_url is required before live-budgeted autonomous marathon"
+                gh_agent_missing_verify_summary: "gh_agent_public_base_url is required before live-budgeted autonomous marathon"
+                status: "autonomous_marathon_invalid"
         - target: run_created
           effects:
             - set:
