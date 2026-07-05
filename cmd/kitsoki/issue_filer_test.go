@@ -1,61 +1,49 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
 
-// issue_filer_test.go — guards the label-error heuristic that decides whether
-// ghIssueFiler degrades to an unlabelled create. The degrade path is what keeps
-// the studio's issue.create self-improvement loop operable on a repo where the
-// caller lacks triage (a fork contributor on constructorfabric/Kitsoki). The
-// exec orchestration is tested at the studio seam (an injected fake IssueFiler);
-// here we pin the pure decision the orchestration branches on.
+	"kitsoki/internal/host"
+	studio "kitsoki/internal/mcp/studio"
+)
 
-func TestLooksLikeLabelErr(t *testing.T) {
-	cases := []struct {
-		name   string
-		stderr string
-		want   bool
-	}{
-		{
-			// The exact failure the dogfood driver hit (issue 092411's sibling):
-			// label-create 403'd, then create rejected the unknown label.
-			name:   "could not add label",
-			stderr: "could not add label: 'source-autonomous' not found",
-			want:   true,
-		},
-		{
-			name:   "fork contributor 403",
-			stderr: "GraphQL: Resource not accessible by integration (addLabelsToLabelable)",
-			want:   true,
-		},
-		{
-			name:   "no permission to label",
-			stderr: "you do not have permission to add labels to this issue",
-			want:   true,
-		},
-		{
-			// An auth failure is NOT a label error — must stay fatal so we don't
-			// retry-and-mask a genuine credential problem as a silent unlabelled file.
-			name:   "auth failure is fatal",
-			stderr: "gh: To get started with GitHub CLI, please run: gh auth login",
-			want:   false,
-		},
-		{
-			name:   "unknown repo is fatal",
-			stderr: "GraphQL: Could not resolve to a Repository with the name 'owner/nope'.",
-			want:   false,
-		},
-		{
-			name:   "empty stderr",
-			stderr: "",
-			want:   false,
-		},
+func TestIssueFilerUsesNativeGitHubAPI(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	var sawIssueCreate bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/repos/o/r/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		sawIssueCreate = true
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["title"] != "native issue" {
+			t.Fatalf("title = %v", payload["title"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number":123,"html_url":"https://github.com/o/r/issues/123"}`))
+	}))
+	defer srv.Close()
+	restore := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restore()
+
+	res, err := ghIssueFiler(context.Background(), studio.IssueRequest{
+		Repo: "o/r", Title: "native issue", Body: "body", Labels: []string{"source-autonomous"},
+	})
+	if err != nil {
+		t.Fatalf("ghIssueFiler: %v", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := looksLikeLabelErr(tc.stderr); got != tc.want {
-				t.Fatalf("looksLikeLabelErr(%q) = %v, want %v", tc.stderr, got, tc.want)
-			}
-		})
+	if !sawIssueCreate {
+		t.Fatal("expected native issue create request")
+	}
+	if res.URL != "https://github.com/o/r/issues/123" || res.Number != 123 {
+		t.Fatalf("result = %+v", res)
 	}
 }
 

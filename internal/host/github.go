@@ -1,14 +1,16 @@
 // Package host — host.gh.ticket — GitHub Issues-backed ticket provider.
 //
-// Implements the `ticket` host_interface (see docs/architecture/hosts.md) against the
-// GitHub `gh` CLI.  Mirrors the localfiles_ticket.go surface so a parent
+// Implements the `ticket` host_interface (see docs/architecture/hosts.md)
+// against GitHub Issues. Mirrors the localfiles_ticket.go surface so a parent
 // story (kitsoki-dev, cyber-repo's devstory flavour) can rebind
-// `iface.ticket → host.gh.ticket` without touching room YAML.
+// `iface.ticket -> host.gh.ticket` without touching room YAML.
 //
 // Why a separate handler?  GitHub Issues is the obvious "next provider after
-// local files" surface for the dogfood loop; we ship a
-// `gh`-CLI shell-out provider in kitsoki rather than reusing the file-backed
-// one when the operator wants live GitHub Issues.
+// local files" surface for the dogfood loop. Issue creation and bug evidence
+// filing use the native GitHub REST API with GH_TOKEN/GITHUB_TOKEN so headless
+// autonomous runs do not depend on a locally logged-in gh binary. Older
+// read/comment/list operations still use the gh CLI through cliExec until they
+// are migrated behind the same native transport.
 //
 // The companion `gh pr ...` family already lives in `internal/host/git_vcs.go`
 // — that file's `host.git` handler dispatches PR ops (open_pr / pr_status /
@@ -17,11 +19,11 @@
 // `host.gh.ticket` for tickets and keeps `host.git` (which already routes to
 // `gh pr` under the hood) for vcs.
 //
-// All exec calls go through the same `cliExec` seam declared in
+// CLI-backed operations go through the same `cliExec` seam declared in
 // `cli_exec.go` so tests can substitute a deterministic runner without
-// shelling out to the real `gh` binary.  When `gh` is not installed (or not
-// authenticated), every op returns a clean Result.Error rather than crashing,
-// so authors can route the YAML `on_error:` arc.
+// shelling out to the real `gh` binary. Native operations use an injectable HTTP
+// client. Auth and transport failures return clean Result.Error values rather
+// than crashing, so authors can route YAML `on_error:` arcs.
 package host
 
 import (
@@ -41,9 +43,14 @@ import (
 //   - op (string): one of create, search, get, comment, comment_edit,
 //     transition, list_mine.
 //
-// Optional args (all ops):
-//   - repo (string): the `owner/repo` slug for the `--repo` flag.  When
-//     omitted, `gh` falls back to the current directory's git remote.
+// Optional args (all ops except create):
+//   - repo (string): the `owner/repo` slug for the `--repo` flag.  For
+//     CLI-backed ops, omitted repo lets `gh` fall back to the current
+//     directory's git remote.
+//
+// Required args (create):
+//   - repo (string): the `owner/repo` slug. Native create does not infer a
+//     remote because headless autonomous runs need explicit routing.
 //
 // Per-op input/output follows the ticket iface contract.  See doc comments on each
 // dispatch helper below.
@@ -53,23 +60,38 @@ func GitHubTicketHandler(ctx context.Context, args map[string]any) (Result, erro
 	if op == "" {
 		return Result{Error: "host.gh.ticket: op argument is required"}, nil
 	}
-	if !ghAvailable(ctx) {
-		return Result{Error: "host.gh.ticket: gh CLI not available — install github.com/cli/cli and run `gh auth login`"}, nil
-	}
 	switch op {
 	case "create":
 		return ghTicketCreate(ctx, args)
 	case "search":
+		if !ghAvailable(ctx) {
+			return Result{Error: "host.gh.ticket: gh CLI not available — install github.com/cli/cli and run `gh auth login`"}, nil
+		}
 		return ghTicketSearch(ctx, args)
 	case "get":
+		if !ghAvailable(ctx) {
+			return Result{Error: "host.gh.ticket: gh CLI not available — install github.com/cli/cli and run `gh auth login`"}, nil
+		}
 		return ghTicketGet(ctx, args)
 	case "comment":
+		if !ghAvailable(ctx) {
+			return Result{Error: "host.gh.ticket: gh CLI not available — install github.com/cli/cli and run `gh auth login`"}, nil
+		}
 		return ghTicketComment(ctx, args)
 	case "comment_edit":
+		if !ghAvailable(ctx) {
+			return Result{Error: "host.gh.ticket: gh CLI not available — install github.com/cli/cli and run `gh auth login`"}, nil
+		}
 		return ghTicketCommentEdit(ctx, args)
 	case "transition":
+		if !ghAvailable(ctx) {
+			return Result{Error: "host.gh.ticket: gh CLI not available — install github.com/cli/cli and run `gh auth login`"}, nil
+		}
 		return ghTicketTransition(ctx, args)
 	case "list_mine":
+		if !ghAvailable(ctx) {
+			return Result{Error: "host.gh.ticket: gh CLI not available — install github.com/cli/cli and run `gh auth login`"}, nil
+		}
 		return ghTicketListMine(ctx, args)
 	default:
 		return Result{Error: fmt.Sprintf("host.gh.ticket: unknown op %q", op)}, nil

@@ -2,6 +2,9 @@ package host_test
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -19,11 +22,6 @@ func TestGitHubTicket_RegisteredCreate(t *testing.T) {
 }
 
 func TestGitHubTicket_Create_RequiresTitle(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
-
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
 		"op": "create",
 	})
@@ -36,12 +34,23 @@ func TestGitHubTicket_Create_RequiresTitle(t *testing.T) {
 }
 
 func TestGitHubTicket_Create_Happy(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	// gh issue create prints the new issue URL; the body+labels vary so let the
-	// default response carry the URL and assert on the recorded argv.
-	fr.defaultResp = fakeResp{stdout: "https://github.com/constructorfabric/Kitsoki/issues/77\n"}
-	restore := host.SetExecRunnerForTest(fr.run)
+	t.Setenv("GH_TOKEN", "test-token")
+	var payload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/repos/constructorfabric/Kitsoki/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number":77,"html_url":"https://github.com/constructorfabric/Kitsoki/issues/77"}`))
+	}))
+	defer srv.Close()
+	restore := host.SetGitHubAPIForTest(srv.URL, srv.Client())
 	defer restore()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
@@ -70,31 +79,18 @@ func TestGitHubTicket_Create_Happy(t *testing.T) {
 		t.Fatalf("url: %v", res.Data["url"])
 	}
 
-	// Find the create invocation and assert the conventions are on the wire.
-	var create string
-	for _, c := range fr.calls {
-		if strings.HasPrefix(c, "gh issue create") {
-			create = c
-		}
-	}
-	if create == "" {
-		t.Fatal("no `gh issue create` call recorded")
-	}
-	for _, want := range []string{
-		"--repo constructorfabric/Kitsoki",
-		"--label P1",
-		"--label comp:tui",
-		"--label target:kitsoki",
-		"--label in_progress",
-	} {
-		if !strings.Contains(create, want) {
-			t.Errorf("create argv missing %q\n  got: %s", want, create)
+	labels, _ := payload["labels"].([]any)
+	gotLabels := strings.Join(anyStrings(labels), ",")
+	for _, want := range []string{"P1", "comp:tui", "target:kitsoki", "in_progress"} {
+		if !strings.Contains(gotLabels, want) {
+			t.Errorf("create payload labels missing %q: %v", want, labels)
 		}
 	}
 	// The ```kitsoki body-metadata block carries the GitHub-homeless fields.
+	body, _ := payload["body"].(string)
 	for _, want := range []string{"```kitsoki", "trace_ref: trace://abc123", "kitsoki_rev: deadbeef", "filed_by: brad"} {
-		if !strings.Contains(create, want) {
-			t.Errorf("create body missing %q\n  got: %s", want, create)
+		if !strings.Contains(body, want) {
+			t.Errorf("create body missing %q\n  got: %s", want, body)
 		}
 	}
 }
@@ -103,25 +99,32 @@ func TestGitHubTicket_Create_Happy(t *testing.T) {
 // without triage still files the issue (unlabelled) with a warning, rather than
 // failing the create.
 func TestGitHubTicket_Create_LabelPermissionDegrades(t *testing.T) {
-	var labelled, unlabelled bool
-	runner := func(ctx context.Context, dir, name string, args ...string) (string, string, int, error) {
-		if len(args) > 0 && args[0] == "--version" {
-			return "gh version 2.x\n", "", 0, nil
+	t.Setenv("GH_TOKEN", "test-token")
+	var labelled, unlabelled, labelEnsure bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/labels") {
+			labelEnsure = true
+			http.Error(w, `{"message":"Resource not accessible by integration (label)"}`, http.StatusForbidden)
+			return
 		}
-		hasLabel := false
-		for _, a := range args {
-			if a == "--label" {
-				hasLabel = true
-			}
+		if r.Method != http.MethodPost || r.URL.Path != "/repos/constructorfabric/Kitsoki/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
-		if hasLabel {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if _, hasLabels := payload["labels"]; hasLabels {
 			labelled = true
-			return "", "could not add label: you must have triage permission (HTTP 403)", 1, nil
+			http.Error(w, `{"message":"could not add label: you must have triage permission (HTTP 403)"}`, http.StatusForbidden)
+			return
 		}
 		unlabelled = true
-		return "https://github.com/constructorfabric/Kitsoki/issues/88\n", "", 0, nil
-	}
-	restore := host.SetExecRunnerForTest(runner)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number":88,"html_url":"https://github.com/constructorfabric/Kitsoki/issues/88"}`))
+	}))
+	defer srv.Close()
+	restore := host.SetGitHubAPIForTest(srv.URL, srv.Client())
 	defer restore()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
@@ -136,8 +139,8 @@ func TestGitHubTicket_Create_LabelPermissionDegrades(t *testing.T) {
 	if res.Error != "" {
 		t.Fatalf("create should degrade, not fail: %s", res.Error)
 	}
-	if !labelled || !unlabelled {
-		t.Fatalf("expected a labelled attempt then an unlabelled retry (labelled=%v unlabelled=%v)", labelled, unlabelled)
+	if !labelled || !unlabelled || !labelEnsure {
+		t.Fatalf("expected labelled attempt, label ensure, and unlabelled retry (labelled=%v ensure=%v unlabelled=%v)", labelled, labelEnsure, unlabelled)
 	}
 	if res.Data["id"] != "88" {
 		t.Fatalf("issue number: %v", res.Data["id"])
@@ -145,6 +148,16 @@ func TestGitHubTicket_Create_LabelPermissionDegrades(t *testing.T) {
 	if w, _ := res.Data["warning"].(string); w == "" {
 		t.Fatal("expected a warning that labels were dropped")
 	}
+}
+
+func anyStrings(values []any) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // TestGitHubTicket_Get_ParsesMetadata proves get() recovers the create-written

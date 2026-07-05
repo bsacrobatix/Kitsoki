@@ -256,7 +256,7 @@ resolved target-root. Exit 1 on error.`,
 	cmd.Flags().StringVar(&severity, "severity", "", "free-form severity tag (agent prompts use low|med|high)")
 	cmd.Flags().StringVar(&traceRef, "trace-ref", "", "path to a trace file or a session id")
 	cmd.Flags().StringVar(&targetDir, "target-dir", "", "override the resolved target-root (escape hatch)")
-	cmd.Flags().StringVar(&githubRepo, "github", "", "file a GitHub issue on this owner/repo instead of a local markdown file (requires gh auth)")
+	cmd.Flags().StringVar(&githubRepo, "github", "", "file a GitHub issue on this owner/repo instead of a local markdown file (requires GH_TOKEN/GITHUB_TOKEN)")
 	cmd.Flags().Int64Var(&clockNowSec, "clock-now", 0,
 		"Unix-seconds override for the filed-at timestamp (tests only; 0 = use real clock)")
 	_ = cmd.Flags().MarkHidden("clock-now")

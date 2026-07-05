@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,25 +122,46 @@ func writeFindingsBundle(t *testing.T) string {
 	return dir
 }
 
-// ghFindingsRunner stubs the gh seam: releases succeed, each issue create
-// returns an incrementing issue URL, and every argv is recorded.
-func ghFindingsRunner(t *testing.T, calls *[]string) func(context.Context, string, string, ...string) (string, string, int, error) {
+// githubFindingsAPI stubs the native GitHub API: releases succeed, each issue
+// create returns an incrementing issue URL, and issue bodies/upload counts are
+// recorded for assertions.
+func githubFindingsAPI(t *testing.T, issueBodies *[]string, uploads *int, failFirstIssue bool) func() {
+	t.Helper()
+	t.Setenv("GH_TOKEN", "test-token")
 	issue := 100
-	return func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
-		j := strings.Join(args, " ")
-		*calls = append(*calls, j)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case len(args) > 0 && args[0] == "--version":
-			return "gh version 2.x\n", "", 0, nil
-		case strings.HasPrefix(j, "release view"):
-			return "", "", 0, nil
-		case strings.HasPrefix(j, "release upload"):
-			return "", "", 0, nil
-		case strings.HasPrefix(j, "issue create"):
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/releases/tags/kitsoki-artifacts":
+			writeJSON(w, map[string]any{"upload_url": "http://" + r.Host + "/uploads/assets{?name,label}"})
+		case r.Method == http.MethodPost && r.URL.Path == "/uploads/assets":
+			*uploads++
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/o/r/issues":
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			title, _ := payload["title"].(string)
+			body, _ := payload["body"].(string)
+			*issueBodies = append(*issueBodies, title+"\n"+body)
+			if failFirstIssue && len(*issueBodies) == 1 {
+				http.Error(w, `{"message":"boom: api down"}`, http.StatusInternalServerError)
+				return
+			}
 			issue++
-			return fmt.Sprintf("https://github.com/o/r/issues/%d\n", issue), "", 0, nil
+			writeJSON(w, map[string]any{
+				"number":   issue,
+				"html_url": fmt.Sprintf("https://github.com/o/r/issues/%d", issue),
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
-		return "", "unexpected: " + j, 1, nil
+	}))
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	return func() {
+		restoreAPI()
+		srv.Close()
 	}
 }
 
@@ -147,8 +170,9 @@ func ghFindingsRunner(t *testing.T, calls *[]string) func(context.Context, strin
 // recorded back into findings.json.
 func TestGitHubFileFindings_FilesCredibleIssues(t *testing.T) {
 	dir := writeFindingsBundle(t)
-	var calls []string
-	restore := host.SetExecRunnerForTest(ghFindingsRunner(t, &calls))
+	var issueBodies []string
+	uploads := 0
+	restore := githubFindingsAPI(t, &issueBodies, &uploads, false)
 	defer restore()
 
 	res, err := host.GitHubFileFindings(context.Background(), host.FindingsFilingInput{
@@ -164,18 +188,8 @@ func TestGitHubFileFindings_FilesCredibleIssues(t *testing.T) {
 		t.Fatalf("outcomes = %d, want 2 (seeded + strength + blocked findings excluded)", len(res.Outcomes))
 	}
 
-	var issueBodies []string
-	uploads := 0
-	for _, c := range calls {
-		if strings.HasPrefix(c, "issue create") {
-			issueBodies = append(issueBodies, c)
-		}
-		if strings.HasPrefix(c, "release upload") {
-			uploads++
-		}
-	}
 	if len(issueBodies) != 2 {
-		t.Fatalf("gh issue create calls = %d, want 2", len(issueBodies))
+		t.Fatalf("issue create calls = %d, want 2", len(issueBodies))
 	}
 	// finding-1 uploads its screenshot + the scenario's captured trace.
 	if uploads != 2 {
@@ -198,10 +212,9 @@ func TestGitHubFileFindings_FilesCredibleIssues(t *testing.T) {
 		"releases/download/kitsoki-artifacts/",
 		"```kitsoki",
 		"trace_ref: product-journey://run-777/finding-1",
-		"--label comp:product-journey",
 	} {
 		if !strings.Contains(first, want) {
-			t.Errorf("finding-1 issue argv missing %q", want)
+			t.Errorf("finding-1 issue body missing %q", want)
 		}
 	}
 	// finding-4: unresolvable evidence stays a body reference; fallback
@@ -214,7 +227,7 @@ func TestGitHubFileFindings_FilesCredibleIssues(t *testing.T) {
 		"cassette://product-journey/run-777/missing/none.json",
 	} {
 		if !strings.Contains(second, want) {
-			t.Errorf("finding-4 issue argv missing %q", want)
+			t.Errorf("finding-4 issue body missing %q", want)
 		}
 	}
 	// finding-5 is a blocked capture-gap finding: it must never be filed.
@@ -252,20 +265,16 @@ func TestGitHubFileFindings_FilesCredibleIssues(t *testing.T) {
 // findings instead of filing duplicates.
 func TestGitHubFileFindings_Idempotent(t *testing.T) {
 	dir := writeFindingsBundle(t)
-	var calls []string
-	restore := host.SetExecRunnerForTest(ghFindingsRunner(t, &calls))
+	var issueBodies []string
+	uploads := 0
+	restore := githubFindingsAPI(t, &issueBodies, &uploads, false)
 	defer restore()
 
 	in := host.FindingsFilingInput{RunDir: dir, RepoRoot: dir, Repo: "o/r"}
 	if _, err := host.GitHubFileFindings(context.Background(), in); err != nil {
 		t.Fatal(err)
 	}
-	firstIssueCreates := 0
-	for _, c := range calls {
-		if strings.HasPrefix(c, "issue create") {
-			firstIssueCreates++
-		}
-	}
+	firstIssueCreates := len(issueBodies)
 
 	res, err := host.GitHubFileFindings(context.Background(), in)
 	if err != nil {
@@ -274,12 +283,7 @@ func TestGitHubFileFindings_Idempotent(t *testing.T) {
 	if res.Filed != 0 || res.Skipped != 2 {
 		t.Fatalf("second run filed/skipped = %d/%d, want 0/2", res.Filed, res.Skipped)
 	}
-	secondIssueCreates := 0
-	for _, c := range calls {
-		if strings.HasPrefix(c, "issue create") {
-			secondIssueCreates++
-		}
-	}
+	secondIssueCreates := len(issueBodies)
 	if secondIssueCreates != firstIssueCreates {
 		t.Fatalf("re-run created %d extra issues", secondIssueCreates-firstIssueCreates)
 	}
@@ -335,23 +339,9 @@ func TestGitHubFileFindings_DryRun(t *testing.T) {
 // abort the walk and is reported (not exit-coded) in the result.
 func TestGitHubFileFindings_PerFindingFailure(t *testing.T) {
 	dir := writeFindingsBundle(t)
-	issue := 0
-	restore := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
-		j := strings.Join(args, " ")
-		switch {
-		case len(args) > 0 && args[0] == "--version":
-			return "gh version 2.x\n", "", 0, nil
-		case strings.HasPrefix(j, "release view"), strings.HasPrefix(j, "release upload"):
-			return "", "", 0, nil
-		case strings.HasPrefix(j, "issue create"):
-			issue++
-			if issue == 1 {
-				return "", "boom: api down", 1, nil
-			}
-			return "https://github.com/o/r/issues/200\n", "", 0, nil
-		}
-		return "", "unexpected: " + j, 1, nil
-	})
+	var issueBodies []string
+	uploads := 0
+	restore := githubFindingsAPI(t, &issueBodies, &uploads, true)
 	defer restore()
 
 	res, err := host.GitHubFileFindings(context.Background(), host.FindingsFilingInput{
