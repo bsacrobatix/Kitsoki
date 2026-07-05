@@ -191,6 +191,64 @@ func StarlarkRunHandler(ctx context.Context, args map[string]any) (Result, error
 	return Result{Data: data}, nil
 }
 
+// AllowedStarlarkHostVerbs is the fixed, narrow set of host verbs a
+// starlark-run script may call via ctx.host.call (S3d — narrow allow-listed
+// ctx.host in the sandbox, .context/kits-implementation-plan.md Decision 3).
+// Kept intentionally tiny and read/introspection-oriented: this is a
+// trust-boundary list, not a convenience one — a kit script runs sandboxed
+// but can already reach fs/http/probe, so ctx.host additionally reaching
+// arbitrary host verbs (shell exec, ticket mutation, ...) would widen that a
+// lot for little benefit. host.graph.* isn't registered until S5 (the
+// object-graph kit's engine verbs); listing those names now means a kit
+// script written against ctx.host.call for them keeps working unmodified
+// once S5 lands, without S3d depending on that slice.
+var AllowedStarlarkHostVerbs = []string{
+	"host.workspace_manager.get",
+	"host.graph.load",
+	"host.graph.lint",
+	"host.graph.diff",
+	"host.graph.project",
+}
+
+// NewStarlarkRunHandler returns a host.starlark.run Handler bound to reg,
+// enabling ctx.host.call inside the running script to invoke back into reg
+// itself, narrowed to AllowedStarlarkHostVerbs (S3d). RegisterBuiltins uses
+// this instead of the bare StarlarkRunHandler function value so ctx.host
+// works for any story/kit run driven through the production registry.
+//
+// The bare StarlarkRunHandler remains directly usable (existing callers —
+// cmd/kitsoki/runtime.go, internal/testrunner/flows.go — register it as-is
+// for their own registries/flow fixtures); it simply leaves ctx.host
+// unconfigured, which fails safe ("no host caller configured for this run")
+// rather than silently doing nothing, exactly like an un-injected
+// HTTPClient/Inspector.
+func NewStarlarkRunHandler(reg *Registry) Handler {
+	return func(ctx context.Context, args map[string]any) (Result, error) {
+		if !starlarkhost.HasHost(ctx) {
+			ctx = starlarkhost.WithHost(ctx, registryHostCaller{reg: reg}, AllowedStarlarkHostVerbs)
+		}
+		return StarlarkRunHandler(ctx, args)
+	}
+}
+
+// registryHostCaller adapts a *Registry to starlarkhost.HostCaller (S3d),
+// closing over the SAME registry the story/kit call is otherwise dispatched
+// through — so ctx.host.call("host.graph.load", ...) resolves exactly like
+// an ordinary invoke: target would, including any test/replay stub installed
+// on that registry.
+type registryHostCaller struct{ reg *Registry }
+
+func (c registryHostCaller) Invoke(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
+	result, err := c.reg.Invoke(ctx, name, args)
+	if err != nil {
+		return nil, err
+	}
+	if result.Error != "" {
+		return nil, fmt.Errorf("%s", result.Error)
+	}
+	return result.Data, nil
+}
+
 func inferRepoRootForScript(scriptPath string) string {
 	dir := filepath.Dir(scriptPath)
 	for {
