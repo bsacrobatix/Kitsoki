@@ -17,11 +17,10 @@ import (
 // gh_tools.go — a GitHub read/comment surface for Studio.
 //
 // issue.create files an issue and inbox.sync_github pulls assigned issues INTO a
-// handle's inbox, but the everyday GitHub reads an agent needs while developing
-// still need a first-class MCP path. Issue listing uses the native
-// host.gh.ticket provider; the PR view/comment helpers still wrap the GitHub CLI
-// through host.RunHandler until the PR read/comment surface is migrated too. No
-// LLM.
+// handle's inbox, but the everyday GitHub reads and comments an agent needs
+// while developing still need a first-class MCP path. Issue listing and
+// comments use native host providers; PR view still wraps the GitHub CLI through
+// host.RunHandler until that read surface is migrated too. No LLM.
 //
 // gh.issues / gh.pr_view are pure reads (available read-only); gh.comment posts,
 // so a read-only server omits it.
@@ -44,7 +43,7 @@ func (srv *Server) registerGHTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "gh.comment",
-		Description: "Comment on a GitHub issue or PR via `gh issue/pr comment`. {number (required), body (required), on? (issue|pr; default issue), dir?, repo?} → {ok, url}. Mutating (posts to GitHub).",
+		Description: "Comment on a GitHub issue or PR via native host.gh.ticket / host.git providers. {number (required), body (required), on? (issue|pr; default issue), dir?, repo?} → {ok, url}. Mutating (posts to GitHub).",
 	}, srv.handleGHComment)
 }
 
@@ -73,7 +72,7 @@ func (srv *Server) handleGHIssues(ctx context.Context, req *mcpsdk.CallToolReque
 		limit = 30
 	}
 
-	repo, rerr := resolveGitHubIssuesRepo(ctx, args)
+	repo, rerr := resolveGitHubRepoForStudio(ctx, "gh.issues", args.Dir, args.Repo)
 	if rerr != nil {
 		return rerr, nil, nil
 	}
@@ -112,18 +111,18 @@ func (srv *Server) handleGHIssues(ctx context.Context, req *mcpsdk.CallToolReque
 	return nil, GHIssuesOK{OK: true, Issues: res.Data["tickets"]}, nil
 }
 
-func resolveGitHubIssuesRepo(ctx context.Context, args GHIssuesArgs) (string, *mcpsdk.CallToolResult) {
-	if repo := strings.TrimSpace(args.Repo); repo != "" {
+func resolveGitHubRepoForStudio(ctx context.Context, tool, dir, repoArg string) (string, *mcpsdk.CallToolResult) {
+	if repo := strings.TrimSpace(repoArg); repo != "" {
 		return repo, nil
 	}
-	out, exit, err := gitRun(ctx, args.Dir, "remote", "get-url", "origin")
-	if rerr := gitErr("gh.issues", out, exit, err); rerr != nil {
+	out, exit, err := gitRun(ctx, dir, "remote", "get-url", "origin")
+	if rerr := gitErr(tool, out, exit, err); rerr != nil {
 		return "", rerr
 	}
 	if repo := githubRepoFromRemoteURL(out); repo != "" {
 		return repo, nil
 	}
-	return "", buildToolError(ErrBadRequest, "gh.issues: repo is required and origin is not a GitHub remote")
+	return "", buildToolError(ErrBadRequest, tool+": repo is required and origin is not a GitHub remote")
 }
 
 func githubRepoFromRemoteURL(remoteURL string) string {
@@ -203,8 +202,7 @@ type GHCommentArgs struct {
 	Repo   string `json:"repo,omitempty"`
 }
 
-// GHCommentOK is the gh.comment result; URL is the posted comment's URL (gh
-// echoes it on stdout).
+// GHCommentOK is the gh.comment result; URL is the posted comment's URL.
 type GHCommentOK struct {
 	OK  bool   `json:"ok"`
 	URL string `json:"url"`
@@ -224,15 +222,39 @@ func (srv *Server) handleGHComment(ctx context.Context, req *mcpsdk.CallToolRequ
 	if kind != "issue" && kind != "pr" {
 		return buildToolError(ErrBadRequest, "gh.comment: on must be \"issue\" or \"pr\""), nil, nil
 	}
-	ghArgs := []string{kind, "comment", strconv.Itoa(args.Number), "--body", args.Body}
-	if args.Repo != "" {
-		ghArgs = append(ghArgs, "--repo", args.Repo)
-	}
-	out, exit, err := ghRun(ctx, args.Dir, ghArgs...)
-	if rerr := ghErr("gh.comment", out, exit, err); rerr != nil {
+
+	repo, rerr := resolveGitHubRepoForStudio(ctx, "gh.comment", args.Dir, args.Repo)
+	if rerr != nil {
 		return rerr, nil, nil
 	}
-	return nil, GHCommentOK{OK: true, URL: strings.TrimSpace(out)}, nil
+	var res host.Result
+	var err error
+	if kind == "issue" {
+		res, err = host.GitHubTicketHandler(ctx, map[string]any{
+			"op":   "comment",
+			"repo": repo,
+			"id":   strconv.Itoa(args.Number),
+			"body": args.Body,
+		})
+	} else {
+		res, err = host.GitVCSHandler(ctx, map[string]any{
+			"op":    "pr_comment",
+			"repo":  repo,
+			"pr_id": strconv.Itoa(args.Number),
+			"body":  args.Body,
+		})
+	}
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("gh.comment: %v", err)), nil, nil
+	}
+	if res.Error != "" {
+		return buildToolError(ErrBadRequest, "gh.comment: "+res.Error), nil, nil
+	}
+	url, _ := res.Data["url"].(string)
+	if url == "" {
+		url, _ = res.Data["comment_id"].(string)
+	}
+	return nil, GHCommentOK{OK: true, URL: strings.TrimSpace(url)}, nil
 }
 
 // ── gh execution + helpers ────────────────────────────────────────────────────
