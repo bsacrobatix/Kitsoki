@@ -7,8 +7,9 @@ states:
 
   branch_ops:
     description: "Feature-branch hub. Rebase, commit, squash, and merge to integration."
+    default_intent: discuss
     relevant_world: [current_branch, integration_branch, rebase_done, commits_ahead,
-                     commits_behind, has_uncommitted, on_integration]
+                     commits_behind, has_uncommitted, on_integration, git_answer]
     view:
       - kv:
           pairs:
@@ -24,6 +25,10 @@ states:
         when: "world.no_common_ancestor == true"
       - prose: "Pre-rebase backup tag: {{ world.pre_rebase_tag }}"
         when: "world.pre_rebase_tag != ''"
+      - heading: "Assistant"
+        when: "world.git_answer != ''"
+      - prose: "{{ world.git_answer }}"
+        when: "world.git_answer != ''"
       - choice:
           mode: single
           prompt: "Actions"
@@ -116,6 +121,31 @@ states:
           no_common_ancestor: "stdout_json.no_common_ancestor"
         on_error: branch_ops
     on:
+      discuss:
+        - target: .
+          effects:
+            - set:
+                git_message: "{{ slots.message }}"
+                git_answer:  ""
+            - invoke: host.chat.resolve
+              with:
+                app:       "git-ops"
+                room:      "branch_ops"
+                scope_key: "{{ world.working_dir }}"
+                title:     "Git operations"
+              bind:
+                git_chat_id:    "chat_id"
+                git_chat_title: "title"
+            - invoke: host.agent.converse
+              with:
+                chat_id:         "{{ world.git_chat_id }}"
+                agent:           git_assistant
+                working_dir:     "{{ world.working_dir }}"
+                question:        "{{ slots.message }}"
+              bind:
+                git_answer:     "answer"
+                git_chat_id:    "chat_id"
+                git_session_id: "claude_session_id"
       rebase:
         - target: rebase
           effects:
