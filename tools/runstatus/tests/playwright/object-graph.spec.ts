@@ -120,6 +120,37 @@ test("selecting an object renders its relationships as an inline Cytoscape graph
   await page.close();
 });
 
+test("the inline relationship graph can pop out to a mostly full-screen modal", async () => {
+  const page: Page = await browser.newPage();
+  await page.goto(`${BASE}/#/graph?catalog=${encodeURIComponent(SEED_CATALOG)}`);
+  await page.waitForSelector('[data-testid="objectgraph-catalog"]', { timeout: 10000 });
+
+  const firstNodeButton = page.locator(".object-list button").first();
+  const label = (await firstNodeButton.locator("strong").innerText()).trim();
+  await firstNodeButton.click();
+  await expect(page.locator(".focus-card h2")).toHaveText(label);
+
+  await page.click('[data-testid="relationship-graph-expand"]');
+  const modal = page.locator('[data-testid="relationship-graph-modal"]');
+  await expect(modal).toBeVisible();
+  await expect(modal.locator('[data-testid="graph-view-host"] canvas').first()).toBeVisible();
+
+  // "Mostly" full-screen: a backdrop with margin, not edge-to-edge.
+  const box = await modal.locator(".relationship-graph-modal").boundingBox();
+  const viewport = page.viewportSize();
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  if (box && viewport) {
+    expect(box.width).toBeLessThan(viewport.width);
+    expect(box.height).toBeLessThan(viewport.height);
+  }
+
+  await page.keyboard.press("Escape");
+  await expect(modal).toHaveCount(0);
+
+  await page.close();
+});
+
 test("the full graph is available as a de-emphasized overlay, not a primary toggle", async () => {
   const page: Page = await browser.newPage();
   await page.goto(`${BASE}/#/graph?catalog=${encodeURIComponent(SEED_CATALOG)}`);
