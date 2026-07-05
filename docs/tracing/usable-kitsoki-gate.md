@@ -1,21 +1,38 @@
 # Tracing: usable-kitsoki release gate
 
-**Status:** Tasks 1 (parity-metric spec), 2 (plugin skeleton), 3.1 + 3.2
-(wire the real scenario corpus + S1 completion signal), 3.3's no-LLM half
-(bounded-concurrency flow-replay harness for the tui/mcp surfaces), 3.3's
-live half (`tools/usable-kitsoki-gate/run_live_gate.py`, a real agent
-driving `stories/dev-story`'s real `workbench:` room — double-gated behind
+**Status:** Shipped (S6 of the `usable-kitsoki.md` epic). Tasks 1 (parity-metric
+spec), 2 (plugin skeleton), 3.1 + 3.2 (wire the real scenario corpus + S1
+completion signal), 3.3's no-LLM half (bounded-concurrency flow-replay
+harness for the tui/mcp surfaces), 3.3's live half
+(`tools/usable-kitsoki-gate/run_live_gate.py`, a real agent driving
+`stories/dev-story`'s real `workbench:` room — double-gated behind
 `arena run --live` plus that script's own `--live-gate` argv flag, never
 executed automatically), 4.1 (golden regression fixtures), 4.2
-(calibration-set run), and 5.1 + 5.2
+(calibration-set run, checked in and diffed byte-for-byte in CI), 5.1 + 5.2
 (`.github/workflows/usable-kitsoki-gate.yml` — a cassette-only no-LLM CI job
 path-filtered on the S1/S2/S4/S5 code, plus a release-candidate live-gate
 job whose TRIGGER routing is real — `rc-*` tag / explicit
 `workflow_dispatch` confirmation only — but whose actual credential/image
-arming remains deliberate operator follow-up) are shipped and tested, zero
-LLM spend in CI. Task 3.3's remaining browser-driven web-surface harness
-remains gated. See `docs/proposals/usable-kitsoki-release-gate.md` for the
-proposal's remaining open questions and gated tasks.
+arming remains deliberate operator follow-up), and 5.3 (this doc) are all
+landed and tested, zero LLM spend in CI. The one deliberately gated
+remainder is Task 3.3's real browser-driven web-surface harness
+(`tests/playwright/usable-kitsoki-gate-web.spec.ts`), which does not exist
+yet — separately scoped, larger, browser-specific follow-up, tracked as an
+honest gap rather than blocking this slice.
+
+**Honesty note on what "shipped" means here:** every piece of this gate
+(schema, constants, plugin, both no-LLM harnesses, the live harness, CI
+wiring) is real, tested, and zero-LLM-spend in CI. It has never yet been run
+LIVE, green, over a real multi-story checkout — the checked-in calibration
+report measures `worst_surface_parity_percent = 0.0%` because
+`stories/scenario-foundry-harness` (the no-LLM path's drive target) is not a
+real `workbench:` room, so `candidate_completed` reads `False` for every
+cell today by construction, not because the workbench performed badly. A
+LIVE green run of this gate over `stories/dev-story` and at least one other
+real workbench-bearing story is the epic's own release-readiness bar — that
+run is epic-level finalization work (see the epic's own task list), not part
+of this slice's scope, and this doc will be updated with that result when it
+happens rather than implied here.
 
 This is the day-one contract `S1` (the free-form workbench) develops
 against, and the schema `S6` (`tools/arena/arena/plugins/usable_kitsoki_gate.py`)

@@ -308,11 +308,13 @@ job type scales.
   spend. A real docker-gated run (the actual swarm inside the browser image)
   is manual acceptance only, out of this test gate's scope.
 
-## Status — usable-kitsoki-gate job type registered (usable-kitsoki-release-gate, Tasks 2, 3, 4, 5.1/5.2)
+## Status — usable-kitsoki-gate job type shipped (S6 of usable-kitsoki.md, Tasks 1-5 landed)
 
 `usable-kitsoki-gate` is a fourth job type alongside `bugfix`/`persona-qa`/
-`swarm` (`arena plugins` lists all four). Per
-`docs/proposals/usable-kitsoki-release-gate.md`, one cell now drives one
+`swarm` (`arena plugins` lists all four). See
+`docs/tracing/usable-kitsoki-gate.md` for the narrative doc; the
+`usable-kitsoki-release-gate.md` proposal that specified it has been
+migrated and deleted per the repo's proposal lifecycle. One cell now drives one
 scenario x surface combination (Task 3.1 — enumeration is wired to S4's real
 scenario-foundry IR corpus, no bespoke logic in the plugin): a spec's
 `targets_from` points at a *directory* of scenario IR documents (default
@@ -478,3 +480,17 @@ override is given.
   loudly-failing placeholder until a real provider-credential secret and
   the arena browser-capable container images are wired in (deliberate
   operator follow-up, not fabricated here).
+- **Docs** (Task 5.3): `docs/tracing/usable-kitsoki-gate.md` is the
+  narrative home for the parity verdict schema, gate conditions, producer
+  contract, and no-LLM/live determinism split; `docs/proposals/
+  usable-kitsoki-release-gate.md`, the proposal that specified all of the
+  above, has been trimmed to its historical Why/design rationale and
+  deleted per this repo's proposal lifecycle (its remaining content moved
+  here and into the narrative doc). One remainder is deliberately still
+  gated and out of this slice's scope: Task 3.3's real browser-driven
+  web-surface harness (`tests/playwright/usable-kitsoki-gate-web.spec.ts`)
+  does not exist yet. Also out of scope here, and NOT claimed as done: a
+  LIVE, green run of this gate over `stories/dev-story` plus at least one
+  other real workbench-bearing story — that is the `usable-kitsoki.md`
+  epic's own definition of done, executed once at epic finalization, not a
+  claim this slice or this README makes.
