@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -16,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -225,20 +223,19 @@ func versionCmd() *cobra.Command {
 
 func runCmd() *cobra.Command {
 	var (
-		harnessType      string
-		claudeModel      string
-		agentBackend     string
-		recordingPath    string
-		recordPath       string
-		dbPath           string
-		continueFlag     bool
-		continueID       string
-		continueKey      string
-		noImplicitResume bool
-		warpBasisPath    string
-		execModeFlag     string
-		promptOverlay    string
-		ticketRepo       string
+		harnessType   string
+		claudeModel   string
+		agentBackend  string
+		recordingPath string
+		recordPath    string
+		dbPath        string
+		continueFlag  bool
+		continueID    string
+		continueKey   string
+		warpBasisPath string
+		execModeFlag  string
+		promptOverlay string
+		ticketRepo    string
 	)
 
 	cmd := &cobra.Command{
@@ -468,92 +465,6 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 					}
 				}
 				resumeMode = true
-			} else if !noImplicitResume {
-				// Implicit-resume path: prompt with the most recent active
-				// session as the default. ListSessions returns rows ordered
-				// by started_at DESC, so activeSessions[0] is the newest.
-				// The earlier "exactly one active" guard surprised users
-				// who accumulated a pile of sessions across restarts: the
-				// prompt silently disappeared the moment they had two,
-				// so each restart spun up a fresh session and the loop
-				// felt amnesiac. Now any number of active sessions
-				// surfaces the prompt; the picker is one keystroke away
-				// for users who want to resume an OLDER session.
-				summaries, lErr := s.ListSessions(ctx, def.App.ID, 0)
-				if lErr != nil {
-					return fmt.Errorf("list sessions: %w", lErr)
-				}
-				activeSessions := summaries[:0]
-				for _, sum := range summaries {
-					if sum.Status == "active" {
-						activeSessions = append(activeSessions, sum)
-					}
-				}
-				if len(activeSessions) >= 1 {
-					sum := activeSessions[0]
-					age := time.Since(sum.StartedAt).Truncate(time.Second)
-					stateLabel := "unknown"
-					if jPreview, jErr := orch.LoadJourney(sum.ID); jErr == nil {
-						stateLabel = string(jPreview.State)
-					}
-					var pickerHint string
-					if len(activeSessions) > 1 {
-						pickerHint = fmt.Sprintf(" · [p] pick from %d active",
-							len(activeSessions))
-					}
-					fmt.Fprintf(cmd.ErrOrStderr(),
-						"You have an active session for %s from %s ago, turn %d (in %s).\n"+
-							"[Enter] to continue · [n] start fresh%s · [q] quit\n",
-						def.App.ID,
-						humanizeAge(age),
-						sum.LastTurn,
-						stateLabel,
-						pickerHint,
-					)
-					scanner := bufio.NewScanner(cmd.InOrStdin())
-					if !scanner.Scan() {
-						// EOF / I/O error (e.g. piped or closed stdin): we
-						// cannot prompt for a choice, so don't silently fall
-						// into the default (resume) branch. Surface the
-						// condition and abort rather than guessing intent.
-						if err := scanner.Err(); err != nil {
-							fmt.Fprintf(cmd.ErrOrStderr(),
-								"Aborted: cannot read choice from stdin: %v\n", err)
-						} else {
-							fmt.Fprintln(cmd.ErrOrStderr(),
-								"Aborted: no input on stdin (EOF).")
-						}
-						return errTempFail
-					}
-					choice := strings.TrimSpace(scanner.Text())
-					switch strings.ToLower(choice) {
-					case "q":
-						return errTempFail
-					case "n", "no":
-						// Fall through: fresh session.
-					case "p", "pick":
-						// Open the numbered-list picker over all active
-						// sessions so the user can resume a specific one.
-						keys := make([][]store.ExternalKey, len(activeSessions))
-						for i, sum := range activeSessions {
-							keys[i], _ = s.ListExternalKeys(ctx, sum.ID)
-						}
-						chosen, pErr := pickSession(activeSessions, keys, cmd.ErrOrStderr(), cmd.InOrStdin())
-						if errors.Is(pErr, errPickerAborted) {
-							return errTempFail
-						}
-						if pErr != nil {
-							return pErr
-						}
-						sid = chosen
-						resumeMode = true
-					default:
-						// Empty line (Enter) or any other input → resume the
-						// most recent active session.
-						sid = sum.ID
-						resumeMode = true
-					}
-				}
 			}
 
 			// ── Acquire writer lock for resume ─────────────────────────────
@@ -907,8 +818,6 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 		"resume a specific session by ID (requires --continue)")
 	cmd.Flags().StringVar(&continueKey, "key", "",
 		"resume a specific session by external key transport:thread (requires --continue)")
-	cmd.Flags().BoolVar(&noImplicitResume, "no-implicit-resume", false,
-		"always start a fresh session even if exactly one active session exists for this app")
 
 	cmd.Flags().StringVar(&promptOverlay, "prompt-overlay", "",
 		"project prompt-overlay dir: its prompts shadow the story's and may {% extends \"@story/…\" %} to specialize without forking (see docs/stories/prompts.md)")
