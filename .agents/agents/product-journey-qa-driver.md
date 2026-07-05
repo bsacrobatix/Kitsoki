@@ -77,10 +77,14 @@ story `blocker` intent. Do not silently substitute a fake pass.
 For each scenario in the bundle:
 
 1. Read the scenario task, primary story, `driver_actions`, required MCP tools,
-   `resolved_mcp_tools`, evidence slots, and success criteria. Treat the
+   `resolved_mcp_tools`, evidence slots, `live_budget`, and success criteria. Treat the
    scenario `quality_gate` in `driver-plan.json` as the minimum proof contract: capture its
    `minimum_evidence`, satisfy `done_when`, or record a blocker matching one of
    the `block_if` conditions.
+   Treat `live_budget.max_live_minutes` as a hard per-scenario ceiling for
+   cost-bearing live work. When the budget is exhausted, stop live exploration,
+   record a blocker using the generated blocker command, journal the attempt,
+   and move to the next scenario instead of spending the whole run on one path.
    Also read `persona_lens`; it is the repeatable persona-specific bias for the
    run. Use its starting surface, first skepticism question, evidence emphasis,
    escalation trigger, and finding bias when choosing actions and deciding what

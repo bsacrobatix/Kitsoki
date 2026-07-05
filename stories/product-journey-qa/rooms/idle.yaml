@@ -339,6 +339,7 @@ states:
                 persona: "{{ slots.persona ?? world.persona }}"
                 seed: "{{ slots.seed ?? world.seed }}"
                 scenario_scope: "{{ slots.scenarios ?? world.scenario_scope }}"
+                live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
@@ -360,6 +361,8 @@ states:
                   - "{{ slots.seed ?? world.seed }}"
                   - --scenarios
                   - "{{ slots.scenarios ?? world.scenario_scope }}"
+                  - --live-budget-minutes
+                  - "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
                 cwd: "."
               bind:
                 last_result: stdout_json
@@ -378,6 +381,7 @@ states:
                 persona_evidence_emphasis: "stdout_json.persona_evidence_emphasis"
                 persona_escalation_trigger: "stdout_json.persona_escalation_trigger"
                 persona_finding_bias: "stdout_json.persona_finding_bias"
+                live_budget_minutes: "stdout_json.live_budget_minutes"
                 run_scenario_count: "stdout_json.scenario_count"
                 proof_evidence_count: "stdout_json.proof_evidence_count"
                 demo_evidence_count: "stdout_json.demo_evidence_count"
@@ -440,6 +444,7 @@ states:
                 persona_evidence_emphasis: "stdout_json.persona_evidence_emphasis"
                 persona_escalation_trigger: "stdout_json.persona_escalation_trigger"
                 persona_finding_bias: "stdout_json.persona_finding_bias"
+                live_budget_minutes: "stdout_json.live_budget_minutes"
                 proof_evidence_count: "stdout_json.proof_evidence_count"
                 demo_evidence_count: "stdout_json.demo_evidence_count"
                 finding_total_count: "stdout_json.finding_total_count"

@@ -13,6 +13,7 @@ world:
   persona:        { type: string, default: "core-maintainer" }
   seed:           { type: string, default: "default" }
   scenario_scope: { type: string, default: "" }
+  live_budget_minutes: { type: int, default: 20 }
   matrix_id:      { type: string, default: "" }
   matrix_dir:     { type: string, default: "" }
   matrix_personas: { type: string, default: "primary" }
@@ -175,13 +176,14 @@ world:
 intents:
   start:
     description: "Create a deterministic product-journey QA run bundle."
-    examples: ["start", "create a product journey run", "begin qa run", "start scenarios=bugfix,project-onboarding"]
+    examples: ["start", "create a product journey run", "begin qa run", "start scenarios=bugfix,project-onboarding live_budget_minutes=10"]
     priority: 90
     slots:
       project: { type: string, required: false }
       persona: { type: string, required: false }
       seed: { type: string, required: false }
       scenarios: { type: string, required: false }
+      live_budget_minutes: { type: int, required: false }
   matrix:
     description: "Create a deterministic 10-repo GitHub product-journey matrix."
     examples: ["create github matrix", "plan ten repo sweep", "emit matrix with target proof"]

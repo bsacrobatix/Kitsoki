@@ -77,7 +77,8 @@ Create one bundle from a matrix assignment or direct target:
 
 ```sh
 python3 tools/product-journey/run.py --emit-run \
-  --project <target-id> --persona <persona-id> --seed <seed>
+  --project <target-id> --persona <persona-id> --seed <seed> \
+  [--scenarios <scenario-id,...>] [--live-budget-minutes <n>]
 ```
 
 Then hand it to the reusable driver:
