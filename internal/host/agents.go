@@ -4,9 +4,14 @@
 // An Agent is a named system prompt (and optional model override) declared in
 // the app's top-level `agents:` block (internal/app/types.go AgentDef). Effects
 // reference an agent by name via the `agent: <name>` key in the effect's
-// `with:` map; this package then looks up the agent in the per-session context
-// and threads its system_prompt onto the claude CLI via
-// `--append-system-prompt` (and `--model` when Model is set).
+// `with:` map; this package then looks up the agent in the per-session context.
+// SystemPrompt becomes the Layer-3 (task) body composed by
+// composeAgentSystemPrompt (sysprompt.go): kitsoki → project → task, joined
+// stable-prefix-first and forwarded via `--system-prompt`, which REPLACES
+// Claude Code's default (and `--model` when Model is set). The older
+// `--append-system-prompt`-onto-Claude's-default posture survives only behind
+// the explicit per-agent `inherit_claude_default` escape hatch — see
+// appendComposedSystemPrompt for both paths.
 //
 // Defined here (not in internal/app) so the host package stays free of an app
 // import; the orchestrator builds a map[string]Agent from app.AppDef.Agents and
@@ -49,7 +54,9 @@ type BashProfile struct {
 }
 
 // Agent is the per-call configuration applied when a host.agent.* invocation
-// names an agent. SystemPrompt is forwarded to `claude --append-system-prompt`;
+// names an agent. SystemPrompt becomes the Layer-3 (task) body composed by
+// composeAgentSystemPrompt and forwarded via `claude --system-prompt` (default
+// path) or `--append-system-prompt` (inherit_claude_default escape hatch);
 // Model, when non-empty, is forwarded to `claude -p --model`. Description on
 // the app-side AgentDef is documentation-only and intentionally not threaded
 // through here.

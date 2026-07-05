@@ -68,6 +68,17 @@ const kitsokiOverlayRef = "sysprompt/kitsoki.md"
 // resolved Layer-3 persona, pulling Layer 2 (project) from ctx and Layer 1
 // (kitsoki) from the engine default (or a @shared overlay if the project ships
 // one). Pure assembly is delegated to sysprompt.Compose.
+//
+// Stable-prefix invariant (docs/proposals/dispatch-context-floor.md): every
+// layer here is static for a given (verb, agent) pair — kitsoki is a compiled
+// constant, project is the app's declared context, and persona is the
+// author's declared agent.SystemPrompt / call-site system_prompt: override.
+// None of the three may carry per-call volatile data (turn numbers,
+// timestamps, artifact IDs, story/journey snapshots) — that data belongs in
+// the verb's PROMPT (the user message built by each handler's own
+// prompt/context resolution, e.g. resolveDecidePrompt), never in the system
+// prompt, so the composed prefix stays byte-identical (and thus
+// cache-eligible) across every call to the same agent.
 func composeAgentSystemPrompt(ctx context.Context, verb sysprompt.Verb, persona string) sysprompt.Composed {
 	return sysprompt.Compose(sysprompt.Spec{
 		Verb:    verb,
