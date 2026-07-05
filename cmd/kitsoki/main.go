@@ -1200,7 +1200,8 @@ func testCmd() *cobra.Command {
 		Long: `Test sub-commands:
   kitsoki test flows         <app.yaml>   — Mode 2: deterministic flow tests (no LLM)
   kitsoki test flow-coverage <app.yaml>   — static flow fixture coverage ledger
-  kitsoki test intents       <app.yaml>   — Mode 1: intent pass-rate tests
+  kitsoki test intents       <app.yaml>   — Mode 1: intent pass-rate tests (harness/recording, may use an LLM)
+  kitsoki test routing       <app.yaml>   — Mode 0: no-LLM routing-tier fixture tests (semroute/deterministic only)
 
 Fixture layout (defaults):
   <app-dir>/flows/*.yaml      — flow fixtures (run under 'test flows')
@@ -1212,6 +1213,7 @@ See 'kitsoki docs llm-guide' §7 for fixture shape.`,
 	cmd.AddCommand(testFlowsCmd())
 	cmd.AddCommand(testFlowCoverageCmd())
 	cmd.AddCommand(testIntentsCmd())
+	cmd.AddCommand(testRoutingCmd())
 	return cmd
 }
 

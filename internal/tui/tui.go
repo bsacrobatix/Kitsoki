@@ -314,6 +314,18 @@ type RootModel struct {
 	// lastInput remembers the input that triggered the current turn.
 	lastInput string
 
+	// lastRoutedIntent / lastRoutedTier / lastRoutedState snapshot the most
+	// recently RESOLVED turn's routing outcome (see routing_pipeline.go),
+	// captured at the same point m.routing settles (handleTurnOutcome) —
+	// m.routing itself gets reset to a fresh pipeline at the START of the
+	// NEXT submitInput, so these are the durable copy the `/route` feedback
+	// command reads (WS-C C4 routing-dissatisfaction substrate; see
+	// docs/testing/routing-tuning.md). Empty lastRoutedIntent means no turn
+	// has resolved yet this session (or the last turn was a slash command).
+	lastRoutedIntent string
+	lastRoutedTier   string
+	lastRoutedState  app.StatePath
+
 	// inputHistory is an in-memory, per-session ring of past prompt
 	// submissions (oldest at index 0, newest at the end). Up/Down arrows
 	// in the main prompt walk this list. We deliberately do NOT persist
@@ -1246,6 +1258,7 @@ func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.routing.markHit(tm.Tier, tm.Intent, hitDetailFor(tm), tm.Confidence, tm.Tier == TierLLM)
 			if m.transcript.hasLive() {
 				m.transcript.FinalizeLive(m.routing.renderResolved())
+				m.snapshotRoutedTurn()
 			}
 		case RoutingAmbiguousMsg:
 			m.transcript.UpdateLive(ir.r.RoutingResolved(blocks.Resolved{
@@ -1767,6 +1780,22 @@ func (m *RootModel) appendHistory(input string) {
 	m.historyDraft = ""
 }
 
+// snapshotRoutedTurn copies the just-resolved m.routing pipeline's outcome
+// into the durable lastRouted* fields (WS-C C4 routing-dissatisfaction
+// substrate). Call this at the SAME point m.routing settles — m.routing
+// itself gets reset to a fresh pipeline at the start of the next
+// submitInput, so a `/route up|down` typed after that reset must read a
+// snapshot, not the live (possibly already-reset) pipeline. A no-op when
+// the pipeline never resolved (e.g. the turn was rejected/cancelled).
+func (m *RootModel) snapshotRoutedTurn() {
+	if !m.routing.resolved() {
+		return
+	}
+	m.lastRoutedIntent = m.routing.intent
+	m.lastRoutedTier = m.routing.winnerTier()
+	m.lastRoutedState = m.currentState
+}
+
 // historyNavigating reports whether the user is currently walking
 // inputHistory with arrow keys (i.e. historyIdx points at a stored entry
 // rather than the "draft" sentinel).
@@ -2073,6 +2102,13 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	case "/bug":
 		body, next, cmd := BugCommand{}.Run(m, parts[1:])
+		if body != "" {
+			next.transcript.AppendBlock(body)
+		}
+		return next, cmd
+
+	case "/route":
+		body, next, cmd := RouteCommand{}.Run(m, parts[1:])
 		if body != "" {
 			next.transcript.AppendBlock(body)
 		}
@@ -2599,6 +2635,7 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 				m.routing.resolveFromProvenance(routedBy, matchType, conf, intentFromEvents(out.Events))
 			}
 			m.transcript.FinalizeLive(m.routing.renderResolved())
+			m.snapshotRoutedTurn()
 		}
 		// If the new view declares an interactive choice widget,
 		// open it FIRST so we can strip the choice element from the
