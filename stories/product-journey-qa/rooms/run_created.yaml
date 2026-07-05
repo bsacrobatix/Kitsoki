@@ -1,7 +1,7 @@
 states:
   run_created:
     description: "A product-journey QA run bundle exists; waiting for captured evidence."
-    relevant_world: [project, persona, seed, scenario_scope, run_scenario_count, live_budget_minutes, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, driver_journal_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, persona_starting_surface, persona_first_question, persona_evidence_emphasis, persona_escalation_trigger, persona_finding_bias, proof_evidence_count, demo_evidence_count, finding_total_count, strength_count, weakness_count, issue_count, fix_count, blocked_count, missing_evidence_count, missing_proof_evidence_count, proof_minimum_evidence_count, minimum_evidence_count, missing_proof_summary, driver_contract_summary, next_driver_capture, next_driver_attach_command, next_driver_blocker_command, scenario, evidence_kind, evidence_path, evidence_source, finding_kind, finding_title, ticket_repo, filing_status, filing_dry_run, findings_filed_count, findings_skipped_count, findings_failed_count, findings_unfiled_count, filed_issue_summary, filing_summary, autonomous_fix_status, gh_agent_enqueue_status, gh_agent_enqueued_count, gh_agent_skipped_count, gh_agent_job_summary, gh_agent_drain_status, gh_agent_drained_count, gh_agent_done_count, gh_agent_failed_count, gh_agent_active_count, gh_agent_run_summary, stats_status, stats_root, stats_output, stats_summary, stats_runs_scanned, stats_found_count, stats_filed_count, stats_fixed_count, stats_reopened_count, stats_unknown_state_count, stats_similar_pair_count, driver_event_id, dispatch_mode, driver_status, driver_summary, review_status, review_summary, review_passed_count, review_failed_count, review_warning_count, review_total_count, review_backlog_summary, validation_status, validation_errors, validation_warnings, validation_issue_summary, status]
+    relevant_world: [project, persona, seed, scenario_scope, run_scenario_count, live_budget_minutes, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, driver_journal_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, persona_starting_surface, persona_first_question, persona_evidence_emphasis, persona_escalation_trigger, persona_finding_bias, proof_evidence_count, demo_evidence_count, finding_total_count, strength_count, weakness_count, issue_count, fix_count, blocked_count, missing_evidence_count, missing_proof_evidence_count, proof_minimum_evidence_count, minimum_evidence_count, missing_proof_summary, driver_contract_summary, next_driver_capture, next_driver_attach_command, next_driver_blocker_command, scenario, evidence_kind, evidence_path, evidence_source, finding_kind, finding_title, ticket_repo, filing_status, filing_dry_run, findings_filed_count, findings_skipped_count, findings_failed_count, findings_unfiled_count, filed_issue_summary, filing_summary, autonomous_fix_status, autonomous_gate_summary, gh_agent_enqueue_status, gh_agent_enqueued_count, gh_agent_skipped_count, gh_agent_job_summary, gh_agent_drain_status, gh_agent_drained_count, gh_agent_done_count, gh_agent_failed_count, gh_agent_active_count, gh_agent_run_summary, gh_agent_fix_evidence_count, gh_agent_missing_evidence_count, gh_agent_fix_evidence_summary, gh_agent_missing_evidence_summary, stats_status, stats_root, stats_output, stats_summary, stats_runs_scanned, stats_found_count, stats_filed_count, stats_fixed_count, stats_reopened_count, stats_unknown_state_count, stats_similar_pair_count, driver_event_id, dispatch_mode, driver_status, driver_summary, review_status, review_summary, review_passed_count, review_failed_count, review_warning_count, review_total_count, review_backlog_summary, validation_status, validation_errors, validation_warnings, validation_issue_summary, status]
     view:
       - banner:
           text: "RUN CREATED"
@@ -38,10 +38,12 @@ states:
             Last finding: '{{ world.finding_kind|default:"(none)" }} / {{ world.finding_title|default:"" }}'
             Ticket repo: '{{ world.ticket_repo|default:"(not set)" }}'
             Autonomous fix: '{{ world.autonomous_fix_status|default:"(not run)" }}'
+            Autonomous gates: '{{ world.autonomous_gate_summary|default:"(not run)" }}'
             Issue filing: '{{ world.filing_status|default:"(not filed)" }}: filed {{ world.findings_filed_count }}, skipped {{ world.findings_skipped_count }}, failed {{ world.findings_failed_count }}, unfiled {{ world.findings_unfiled_count }}'
             GH-agent fixes: '{{ world.gh_agent_enqueue_status|default:"(not queued)" }}: queued {{ world.gh_agent_enqueued_count }}, skipped {{ world.gh_agent_skipped_count }}'
             GH-agent jobs: '{{ world.gh_agent_job_summary|default:"(none)" }}'
             GH-agent drain: '{{ world.gh_agent_drain_status|default:"(not drained)" }}: drained {{ world.gh_agent_drained_count }}, done {{ world.gh_agent_done_count }}, failed {{ world.gh_agent_failed_count }}, active {{ world.gh_agent_active_count }}'
+            GH-agent evidence: "{{ world.gh_agent_fix_evidence_count }} attached; {{ world.gh_agent_missing_evidence_count }} missing"
             GH-agent runs: '{{ world.gh_agent_run_summary|default:"(none)" }}'
             Derived stats: '{{ world.stats_status|default:"(not derived)" }}: found {{ world.stats_found_count }}, filed {{ world.stats_filed_count }}, fixed {{ world.stats_fixed_count }}, reopened {{ world.stats_reopened_count }}, similar {{ world.stats_similar_pair_count }}'
             Stats runs: "{{ world.stats_runs_scanned }} scanned; unknown state {{ world.stats_unknown_state_count }}"
@@ -61,6 +63,8 @@ states:
       - prose: '{{ world.next_driver_blocker_command|default:"No next proof blocker command is queued." }}'
       - prose: '{{ world.filing_summary|default:"Use file_findings ticket_repo=owner/repo to file recorded issue findings as GitHub issues with uploaded evidence (mode=dry-run to preview)." }}'
       - prose: '{{ world.filed_issue_summary|default:"" }}'
+      - prose: '{{ world.gh_agent_fix_evidence_summary|default:"GH-agent fix evidence assets appear here after autonomous_fix." }}'
+      - prose: '{{ world.gh_agent_missing_evidence_summary|default:"" }}'
       - prose: '{{ world.stats_summary|default:"Use stats to derive filed/fixed/reopened/similar issue counts from run bundles and cached issue state." }}'
       - prose: '{{ world.review_backlog_summary|default:"Run review to see actionable review checks." }}'
       - choice:
@@ -329,6 +333,10 @@ states:
                 validation_errors: 0
                 validation_warnings: 0
                 validation_issue_summary: ""
+                gh_agent_fix_evidence_count: 0
+                gh_agent_missing_evidence_count: 0
+                gh_agent_fix_evidence_summary: ""
+                gh_agent_missing_evidence_summary: ""
                 status: "filing_findings"
             - invoke: host.run
               id: file_product_journey_findings
@@ -376,6 +384,10 @@ states:
                 gh_agent_failed_count: "stdout_json.gh_agent_failed_count"
                 gh_agent_active_count: "stdout_json.gh_agent_active_count"
                 gh_agent_run_summary: "stdout_json.gh_agent_run_summary"
+                gh_agent_fix_evidence_count: "stdout_json.gh_agent_fix_evidence_count"
+                gh_agent_missing_evidence_count: "stdout_json.gh_agent_missing_evidence_count"
+                gh_agent_fix_evidence_summary: "stdout_json.gh_agent_fix_evidence_summary"
+                gh_agent_missing_evidence_summary: "stdout_json.gh_agent_missing_evidence_summary"
                 deck_path: "stdout_json.deck_path"
                 execution_plan_path: "stdout_json.execution_plan_path"
                 driver_plan_path: "stdout_json.driver_plan_path"
@@ -411,10 +423,15 @@ states:
                 ticket_repo: "{{ slots.ticket_repo }}"
                 filing_dry_run: "file"
                 autonomous_fix_status: "running"
+                autonomous_gate_summary: ""
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
                 validation_issue_summary: ""
+                gh_agent_fix_evidence_count: 0
+                gh_agent_missing_evidence_count: 0
+                gh_agent_fix_evidence_summary: ""
+                gh_agent_missing_evidence_summary: ""
                 status: "running_autonomous_fix"
             - invoke: host.run
               id: autonomous_product_journey_fix
@@ -442,6 +459,7 @@ states:
               bind:
                 last_result: stdout_json
                 autonomous_fix_status: "stdout_json.autonomous_fix_status"
+                autonomous_gate_summary: "stdout_json.autonomous_gate_summary"
                 filing_status: "stdout_json.filing_status"
                 filing_dry_run: "stdout_json.dry_run"
                 findings_filed_count: "stdout_json.findings_filed_count"
@@ -460,6 +478,10 @@ states:
                 gh_agent_failed_count: "stdout_json.gh_agent_failed_count"
                 gh_agent_active_count: "stdout_json.gh_agent_active_count"
                 gh_agent_run_summary: "stdout_json.gh_agent_run_summary"
+                gh_agent_fix_evidence_count: "stdout_json.gh_agent_fix_evidence_count"
+                gh_agent_missing_evidence_count: "stdout_json.gh_agent_missing_evidence_count"
+                gh_agent_fix_evidence_summary: "stdout_json.gh_agent_fix_evidence_summary"
+                gh_agent_missing_evidence_summary: "stdout_json.gh_agent_missing_evidence_summary"
                 review_status: "stdout_json.review_status"
                 review_summary: "stdout_json.review_summary"
                 review_passed_count: "stdout_json.review_passed_count"

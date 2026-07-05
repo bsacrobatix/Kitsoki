@@ -2919,6 +2919,8 @@ def run_story_summary(run_dir: Path) -> dict:
         review_backlog.append(f"{check.get('status', 'unknown')}: {check.get('id', 'check')}{suffix}")
     if len(actionable_review) > 4:
         review_backlog.append(f"+{len(actionable_review) - 4} more review checks")
+    gh_agent_fix_evidence = gh_agent_fix_evidence_links(gh_agent)
+    gh_agent_missing_evidence = gh_agent_missing_fix_evidence(gh_agent)
     return {
         "persona_starting_surface": lens.get("starting_surface", ""),
         "persona_first_question": lens.get("first_question", ""),
@@ -2959,6 +2961,10 @@ def run_story_summary(run_dir: Path) -> dict:
         "gh_agent_failed_count": gh_agent.get("failed_count", 0),
         "gh_agent_active_count": gh_agent.get("active_count", 0),
         "gh_agent_run_summary": gh_agent.get("run_summary", ""),
+        "gh_agent_fix_evidence_count": len(gh_agent_fix_evidence),
+        "gh_agent_missing_evidence_count": len(gh_agent_missing_evidence),
+        "gh_agent_fix_evidence_summary": summarize_gh_agent_fix_evidence(gh_agent),
+        "gh_agent_missing_evidence_summary": "; ".join(gh_agent_missing_evidence[:4]) + (f"; +{len(gh_agent_missing_evidence) - 4} more" if len(gh_agent_missing_evidence) > 4 else ""),
     }
 
 
@@ -3268,6 +3274,29 @@ def gh_agent_missing_fix_evidence(gh_agent: dict) -> list[str]:
     return missing
 
 
+def gh_agent_fix_evidence_links(gh_agent: dict) -> list[str]:
+    links: list[str] = []
+    seen: set[str] = set()
+    for job in gh_agent.get("drained_jobs", []) or []:
+        if not isinstance(job, dict) or job.get("state") != "done":
+            continue
+        for link in gh_agent_job_evidence_links(job):
+            if link not in seen:
+                seen.add(link)
+                links.append(link)
+    return links
+
+
+def summarize_gh_agent_fix_evidence(gh_agent: dict) -> str:
+    links = gh_agent_fix_evidence_links(gh_agent)
+    if not links:
+        return ""
+    parts = links[:4]
+    if len(links) > 4:
+        parts.append(f"+{len(links) - 4} more")
+    return "; ".join(parts)
+
+
 def file_findings(
     run_dir: Path,
     ticket_repo: str,
@@ -3429,11 +3458,37 @@ def autonomous_fix_loop(
     )
     reviewed = review_run_bundle(run_dir, publish_deck)
     validation = validate_run_bundle(run_dir)
-    status = "autonomous_fix_valid" if validation.get("status") == "valid" else "autonomous_fix_invalid"
+    story_summary = run_story_summary(run_dir)
+    review_failed = int(reviewed.get("review_failed_count", reviewed.get("failed", 0)) or 0)
+    review_ok = reviewed.get("review_status", reviewed.get("status", "")) == "ready" and review_failed == 0
+    validation_ok = validation.get("status") == "valid" and int(validation.get("errors", 0) or 0) == 0
+    filing_ok = (
+        filed.get("status") == "findings_filed"
+        and int(filed.get("findings_failed_count", filed.get("failed", 0)) or 0) == 0
+        and int(filed.get("findings_unfiled_count", 0) or 0) == 0
+    )
+    gh_agent_requested = filed.get("gh_agent_enqueue_status", "") not in {"", "disabled", "dry-run"}
+    gh_agent_enqueued = int(filed.get("gh_agent_enqueued_count", 0) or 0)
+    gh_agent_done = int(filed.get("gh_agent_done_count", 0) or 0)
+    gh_agent_ok = (
+        gh_agent_requested
+        and filed.get("gh_agent_drain_status") == "drained"
+        and int(filed.get("gh_agent_failed_count", 0) or 0) == 0
+        and int(filed.get("gh_agent_active_count", 0) or 0) == 0
+        and gh_agent_done >= gh_agent_enqueued
+        and int(story_summary.get("gh_agent_missing_evidence_count", 0) or 0) == 0
+    )
+    status = "autonomous_fix_valid" if review_ok and validation_ok and filing_ok and gh_agent_ok else "autonomous_fix_invalid"
     result = {
         **filed,
         "status": status,
         "autonomous_fix_status": status,
+        "autonomous_gate_summary": (
+            f"filing={'pass' if filing_ok else 'fail'}, "
+            f"gh_agent={'pass' if gh_agent_ok else 'fail'}, "
+            f"review={'pass' if review_ok else 'fail'}, "
+            f"validation={'pass' if validation_ok else 'fail'}"
+        ),
         "filing_status": filed.get("status", ""),
         "review_status": reviewed.get("review_status", reviewed.get("status", "")),
         "review_summary": reviewed.get("summary", ""),
@@ -3448,7 +3503,7 @@ def autonomous_fix_loop(
         "validation_issue_summary": validation.get("validation_issue_summary", ""),
         "validation_issues": validation.get("issues", []),
     }
-    result.update(run_story_summary(run_dir))
+    result.update(story_summary)
     return result
 
 
