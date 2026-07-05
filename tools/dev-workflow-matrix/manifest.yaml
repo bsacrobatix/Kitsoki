@@ -1,0 +1,265 @@
+# dev-workflow-matrix manifest — the hand-maintained truth behind the
+# GENERATED matrix at docs/testing/dev-workflow-matrix.md (WS-F F1 of
+# .context/dev-workflows-surface-matrix-plan.md).
+#
+# Edit THIS file (statuses, reasons, verdict pointers), then regenerate:
+#   make dev-workflow-matrix
+#
+# Every {workflow, surface, repo} cell must appear exactly once. Statuses:
+#   works        (✅  works + no-LLM proven)
+#   proof-thin   (🟡  works but proof thin or reliability suspect)
+#   gap          (🔴  gap)
+#   out-of-scope (⬜  intentionally out of scope for the surface)
+#
+# Each cell may point at standing completion-state verdict files
+# (schemas/completion-state.schema.json), one per proof class:
+#   verdicts.mechanical  — check_type: replay (no-LLM, per-commit)
+#   verdicts.experience  — check_type: docs-fidelity | ux-heuristic |
+#                          journey-verdict (persona-judged, budgeted — WS-G)
+# A cell without a pointer (or whose pointed file is absent) renders as
+# "no standing verdict" — that is honest, not an error.
+
+schema_version: "1.0.0"
+plan: .context/dev-workflows-surface-matrix-plan.md
+
+workflows:
+  - id: onboard
+    title: Onboard
+  - id: prd-proposal
+    title: PRD / proposal
+  - id: decompose-implement
+    title: "Decompose → implement"
+  - id: file-bug
+    title: File a bug
+  - id: fix-bug
+    title: Fix a bug
+
+surfaces:
+  - id: tui
+    title: TUI
+  - id: web
+    title: Web
+  - id: vscode
+    title: VS Code
+  - id: gh-agent
+    title: gh-agent
+
+repos:
+  - id: kitsoki-dev
+    title: "kitsoki self-instance (.kitsoki/stories/kitsoki-dev/)"
+  - id: gears-rust
+    title: "gears-rust thin instance (imports @kitsoki/dev-story)"
+
+cells:
+  # ── kitsoki-dev — transcribed from plan §1 (today's mechanical truth) ──
+  - workflow: onboard
+    surface: tui
+    repo: kitsoki-dev
+    status: proof-thin
+    reason: "works (init rooms flow-tested) but two divergent paths"
+  - workflow: onboard
+    surface: web
+    repo: kitsoki-dev
+    status: gap
+    reason: "no web onboarding entry"
+  - workflow: onboard
+    surface: vscode
+    repo: kitsoki-dev
+    status: gap
+    reason: "extension assumes an already-onboarded repo"
+  - workflow: onboard
+    surface: gh-agent
+    repo: kitsoki-dev
+    status: out-of-scope
+    reason: "App install ≠ repo onboarding; needs a doc'd handoff"
+
+  - workflow: prd-proposal
+    surface: tui
+    repo: kitsoki-dev
+    status: works
+    reason: "prd story (33 flows) + design rooms (~20 flows)"
+  - workflow: prd-proposal
+    surface: web
+    repo: kitsoki-dev
+    status: proof-thin
+    reason: "drivable (PRD demo exists) but free-text composer routing unfinished"
+  - workflow: prd-proposal
+    surface: vscode
+    repo: kitsoki-dev
+    status: proof-thin
+    reason: "PRD demo spec exists (vscode-prd-demo.e2e.spec.ts); v0.1.0 extension"
+  - workflow: prd-proposal
+    surface: gh-agent
+    repo: kitsoki-dev
+    status: gap
+    reason: "no label→prd/design route"
+
+  - workflow: decompose-implement
+    surface: tui
+    repo: kitsoki-dev
+    status: gap
+    reason: "fragmented: skill vs deliver (5 flows, no README) vs decompose-update (1) vs fleet (1); impl story thin (9 flows)"
+  - workflow: decompose-implement
+    surface: web
+    repo: kitsoki-dev
+    status: gap
+    reason: "same fragmentation as TUI + no web proof"
+  - workflow: decompose-implement
+    surface: vscode
+    repo: kitsoki-dev
+    status: gap
+    reason: "same fragmentation as TUI + no VS Code proof"
+  - workflow: decompose-implement
+    surface: gh-agent
+    repo: kitsoki-dev
+    status: gap
+    reason: "no route"
+
+  - workflow: file-bug
+    surface: tui
+    repo: kitsoki-dev
+    status: works
+    reason: "/bug meta modes + CLI, host tests"
+  - workflow: file-bug
+    surface: web
+    repo: kitsoki-dev
+    status: works
+    reason: "Report Bug modal shipped (proposal doc stale)"
+  - workflow: file-bug
+    surface: vscode
+    repo: kitsoki-dev
+    status: proof-thin
+    reason: "rides web SPA in webview; no dedicated proof"
+  - workflow: file-bug
+    surface: gh-agent
+    repo: kitsoki-dev
+    status: works
+    reason: "bug-report deck auto-trigger shipped"
+
+  - workflow: fix-bug
+    surface: tui
+    repo: kitsoki-dev
+    status: proof-thin
+    reason: "bugfix mature (63 flows, triage mode) but silent-bounce reliability warranted its own debugging skill"
+  - workflow: fix-bug
+    surface: web
+    repo: kitsoki-dev
+    status: proof-thin
+    reason: "drivable; staged-gate & pace issues historically"
+  - workflow: fix-bug
+    surface: vscode
+    repo: kitsoki-dev
+    status: proof-thin
+    reason: "rides web SPA; untested for full pipeline"
+  - workflow: fix-bug
+    surface: gh-agent
+    repo: kitsoki-dev
+    status: gap
+    reason: "dispatch is stubbed beats — honesty Task 0 shipped, real dispatch (Tasks 1–4) unstarted; per-job KITSOKI_APP_DIR isolation blocks concurrency"
+
+  # ── gears-rust — the acid test; nothing exercised there yet (plan §1
+  #    table is kitsoki-dev truth; every WS exit requires a gears-rust run) ──
+  - workflow: onboard
+    surface: tui
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust (WS-A exit: stranger-shaped onboard replayable no-LLM)"
+  - workflow: onboard
+    surface: web
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust; also no web onboarding entry at all"
+  - workflow: onboard
+    surface: vscode
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust; extension assumes an already-onboarded repo"
+  - workflow: onboard
+    surface: gh-agent
+    repo: gears-rust
+    status: out-of-scope
+    reason: "App install ≠ repo onboarding; needs a doc'd handoff"
+
+  - workflow: prd-proposal
+    surface: tui
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust (thin @kitsoki/dev-story instance run pending)"
+  - workflow: prd-proposal
+    surface: web
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust"
+  - workflow: prd-proposal
+    surface: vscode
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust"
+  - workflow: prd-proposal
+    surface: gh-agent
+    repo: gears-rust
+    status: gap
+    reason: "no label→prd/design route; nothing exercised on gears-rust"
+
+  - workflow: decompose-implement
+    surface: tui
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust (WS-B exit: epic → briefs → branches with no-LLM replay)"
+  - workflow: decompose-implement
+    surface: web
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust"
+  - workflow: decompose-implement
+    surface: vscode
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust"
+  - workflow: decompose-implement
+    surface: gh-agent
+    repo: gears-rust
+    status: gap
+    reason: "no route; nothing exercised on gears-rust"
+
+  - workflow: file-bug
+    surface: tui
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust (needs WS-A A2 external ticket-repo passthrough)"
+  - workflow: file-bug
+    surface: web
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust"
+  - workflow: file-bug
+    surface: vscode
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust"
+  - workflow: file-bug
+    surface: gh-agent
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust (WS-E E3: labeled gears-rust issue → honest triage verdict)"
+
+  - workflow: fix-bug
+    surface: tui
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust (needs WS-A A2 external ticket-repo passthrough)"
+  - workflow: fix-bug
+    surface: web
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust"
+  - workflow: fix-bug
+    surface: vscode
+    repo: gears-rust
+    status: gap
+    reason: "not yet exercised on gears-rust"
+  - workflow: fix-bug
+    surface: gh-agent
+    repo: gears-rust
+    status: gap
+    reason: "stubbed beats + nothing exercised on gears-rust (WS-E exit: real triage/fix on a gears-rust issue)"

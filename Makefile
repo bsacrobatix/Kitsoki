@@ -636,6 +636,19 @@ usable-kitsoki-gate-check:
 	# plumbing (the schema every gate cell reports through).
 	python3 tools/arena/tests/test_check_types.py
 
+# dev-workflow-matrix regenerates the 5-workflow x 4-surface x 2-repo
+# support matrix (docs/testing/dev-workflow-matrix.md) from its hand-edited
+# manifest plus any standing completion-state verdict files (WS-F F1 of
+# .context/dev-workflows-surface-matrix-plan.md). The generated file carries
+# a DO-NOT-HAND-EDIT header; edit tools/dev-workflow-matrix/manifest.yaml
+# and rerun this target. Deterministic, no LLM, no network.
+.PHONY: dev-workflow-matrix dev-workflow-matrix-check
+dev-workflow-matrix:
+	python3 tools/dev-workflow-matrix/generate.py --out docs/testing/dev-workflow-matrix.md
+
+dev-workflow-matrix-check:
+	python3 tools/dev-workflow-matrix/generate_test.py
+
 features-index:
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:index
 
