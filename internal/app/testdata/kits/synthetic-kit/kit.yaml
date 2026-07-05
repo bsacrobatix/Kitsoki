@@ -8,9 +8,14 @@ version: 0.1.0
 title: Synthetic test kit (S1 loader fixture)
 summary: |
   Minimal kit.yaml exercising every S1 manifest field against a single
-  standalone-loadable story.
+  standalone-loadable story. composes: and provides.ui/schemas are declared
+  here purely for schema/round-trip coverage — synthetic-kit does not
+  actually depend on or ship the referenced kit/ui module.
 requires:
   kitsoki: ">=0.0.0"
+composes:
+  - kit: "@kitsoki-test/unused-example"
+    constraint: ">=0.0.0"
 parameters:
   greeting:
     type: string
@@ -18,7 +23,9 @@ parameters:
     description: "Greeting folded into the greeter story's world."
 provides:
   stories: [greeter]
+  schemas: [synthetic/v1]
   interfaces: [reporter]
+  ui: [greeter/panel]
   onboarding: greeter.start
 conformance:
   flows: []
