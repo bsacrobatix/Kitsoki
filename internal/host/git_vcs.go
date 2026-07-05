@@ -375,15 +375,18 @@ func ghPRStatus(ctx context.Context, workdir string, args map[string]any) (Resul
 	if pr.State == "closed" && pr.Merged && ciState == "pending" && len(checks) == 0 {
 		ciState = "success"
 	}
+	checksSummary, failedLog := githubPRChecksText(ciState, checks)
 	return Result{Data: map[string]any{
-		"state":        ciState,
-		"pr_state":     strings.ToLower(strings.TrimSpace(pr.State)),
-		"merged":       pr.Merged,
-		"url":          pr.HTMLURL,
-		"head_sha":     pr.Head.SHA,
-		"checks":       checks,
-		"comments":     githubIssueCommentsForWorld(comments),
-		"raw_comments": comments,
+		"state":          ciState,
+		"pr_state":       strings.ToLower(strings.TrimSpace(pr.State)),
+		"merged":         pr.Merged,
+		"url":            pr.HTMLURL,
+		"head_sha":       pr.Head.SHA,
+		"checks":         checks,
+		"checks_summary": checksSummary,
+		"failed_log":     failedLog,
+		"comments":       githubIssueCommentsForWorld(comments),
+		"raw_comments":   comments,
 	}}, nil
 }
 
@@ -646,6 +649,40 @@ func githubIssueCommentsForWorld(comments []githubIssueComment) []map[string]any
 		})
 	}
 	return out
+}
+
+func githubPRChecksText(state string, checks []map[string]any) (string, string) {
+	normalized := strings.TrimSpace(state)
+	if normalized == "" {
+		normalized = "unknown"
+	}
+	if len(checks) == 0 {
+		return "state: " + normalized + "\nNo failed checks reported by GitHub.", ""
+	}
+	var summary strings.Builder
+	fmt.Fprintf(&summary, "state: %s\nfailed checks: %d\n", normalized, len(checks))
+	var failed strings.Builder
+	for _, check := range checks {
+		name := strings.TrimSpace(fmt.Sprint(check["name"]))
+		if name == "" {
+			name = "(unnamed check)"
+		}
+		status := strings.TrimSpace(fmt.Sprint(check["state"]))
+		if status == "" {
+			status = strings.TrimSpace(fmt.Sprint(check["conclusion"]))
+		}
+		if status == "" {
+			status = "failure"
+		}
+		url := strings.TrimSpace(fmt.Sprint(check["url"]))
+		line := "- " + name + ": " + status
+		if url != "" {
+			line += " (" + url + ")"
+		}
+		summary.WriteString(line + "\n")
+		failed.WriteString(line + "\n")
+	}
+	return strings.TrimRight(summary.String(), "\n"), strings.TrimRight(failed.String(), "\n")
 }
 
 func optBool(args map[string]any, key string, def bool) bool {

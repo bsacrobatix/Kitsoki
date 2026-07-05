@@ -492,9 +492,10 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.inbox.add", InboxAddHandler)
 
 	// Wave 3 / Phase 5 — GitHub Issues + cypilot artifact providers.
-	// `host.gh.ticket` backs the `ticket` iface against the gh CLI; the
-	// existing `host.git` already routes PR ops through gh.  `host.cypilot_artifacts`
-	// shells out to cpt for the SDLC artifact iface.
+	// `host.gh.ticket` backs the `ticket` iface with native GitHub Issues API
+	// calls; `host.git` routes PR operations through local git plus native
+	// GitHub API calls. `host.cypilot_artifacts` shells out to cpt for the SDLC
+	// artifact iface.
 	r.Register("host.gh.ticket", GitHubTicketHandler)
 	r.Register("host.cypilot_artifacts", CypilotArtifactsHandler)
 
