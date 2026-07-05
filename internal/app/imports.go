@@ -30,6 +30,7 @@
 package app
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
@@ -39,6 +40,8 @@ import (
 	"strings"
 
 	starlarkhost "kitsoki/internal/host/starlark"
+	"kitsoki/internal/kitgit"
+	"kitsoki/internal/kitver"
 )
 
 // importAliasRE constrains an import alias to characters safe to use as a
@@ -186,6 +189,29 @@ func resolveImports(def *AppDef, file, baseDir string, parents []string, resolve
 		if len(childErrs) > 0 {
 			errs = append(errs, childErrs...)
 			continue
+		}
+
+		// Constraint matching (S2): imp.Version, previously parsed and
+		// inert (see ImportDef.Version's doc comment), is checked against
+		// the resolved child's own `app.version:`. A declared constraint
+		// that the resolved candidate fails to satisfy is a load-time
+		// error — the same "fail fast, never silently substitute" posture
+		// resolveImportSource's override tier uses. No constraint
+		// declared (imp.Version == "") skips the check entirely, matching
+		// pre-S2 behaviour for every import that doesn't opt in.
+		if imp.Version != "" {
+			ok, vErr := kitver.Satisfies(childDef.App.Version, imp.Version)
+			if vErr != nil {
+				errs = append(errs, &ValidationError{File: file, Message: fmt.Sprintf(
+					"imports.%s: version constraint %q: %v", alias, imp.Version, vErr)})
+				continue
+			}
+			if !ok {
+				errs = append(errs, &ValidationError{File: file, Message: fmt.Sprintf(
+					"imports.%s: resolved %s app.version %q does not satisfy version constraint %q",
+					alias, childPath, childDef.App.Version, imp.Version)})
+				continue
+			}
 		}
 
 		// Apply overrides BEFORE namespace flattening so override.states
@@ -361,9 +387,25 @@ func loadImportedChild(path string, parents []string, resolver ImportResolver) (
 	return def, nil
 }
 
+// ResolveSource is the exported form of resolveImportSource — the seam
+// `kitsoki kit add|verify` (cmd/kitsoki) use to resolve an arbitrary source
+// string to an absolute manifest path the same way the loader would, without
+// duplicating the tier logic (S2).
+func ResolveSource(src, importerDir string, resolver ImportResolver) (string, error) {
+	return resolveImportSource(src, importerDir, resolver)
+}
+
 // resolveImportSource maps a `source:` value to an absolute manifest path.
 //
-// For an `@kitsoki/<name>` source the resolution ORDER is:
+// Resolution is tiered by source SHAPE, checked in this order:
+//
+//  0. `git+<url>@<ref>` — the git source tier (S2). Fetched into a
+//     content-addressed cache generalizing the basestories/baseskills
+//     embed→cache→materialize pattern (see internal/kitgit). This is
+//     independent of the `@kitsoki/<name>` tiers below: a git source names
+//     its own remote, not a story inside the kitsoki repo/embedded library.
+//
+// For an `@kitsoki/<name>` source the resolution order is:
 //
 //  1. the injected resolver's `--kitsoki-repo` / KITSOKI_REPO override
 //     (override=true) — checked FIRST so an explicit operator checkout always
@@ -376,6 +418,17 @@ func loadImportedChild(path string, parents []string, resolver ImportResolver) (
 // The loader builds one closure serving both resolver calls; nil keeps the
 // legacy error-on-missing behaviour.
 func resolveImportSource(src, importerDir string, resolver ImportResolver) (string, error) {
+	if url, ref, ok := kitgit.ParseSource(src); ok {
+		res, err := kitgit.Materialize(context.Background(), kitgit.DefaultRunner, url, ref)
+		if err != nil {
+			return "", fmt.Errorf("source %q: %w", src, err)
+		}
+		candidate := filepath.Join(res.Root, "app.yaml")
+		if _, statErr := os.Stat(candidate); statErr != nil {
+			return "", fmt.Errorf("source %q: app.yaml not found at repo root (%s): %w", src, candidate, statErr)
+		}
+		return candidate, nil
+	}
 	if strings.HasPrefix(src, "@kitsoki/") {
 		name := strings.TrimPrefix(src, "@kitsoki/")
 		if name == "" || strings.ContainsAny(name, "/\\") {
