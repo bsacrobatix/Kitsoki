@@ -70,8 +70,9 @@ states:
                   cases_processed: "{{ world.cases_processed }}"
                   case_budget:     "{{ world.case_budget }}"
               bind:
-                current_case:    current_case
-                current_case_id: current_case_id
+                current_case:      current_case
+                current_case_id:   current_case_id
+                current_case_json: current_case_json
             - set:
                 triage_verdict: {}
                 drive_result:   {}
