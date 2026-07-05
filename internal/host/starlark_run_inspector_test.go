@@ -69,3 +69,59 @@ func TestStarlarkRunDefaultInspector_PrefersAppDir(t *testing.T) {
 		t.Fatalf("ctx.fs.exists(%q) = %v, want true (inspector should root at KITSOKI_APP_DIR=%s, not cwd=%s)", marker, got, dirA, dirB)
 	}
 }
+
+// TestStarlarkRunDefaultInspector_AppDirWidensToRepoRoot locks that when
+// KITSOKI_APP_DIR points at a subdirectory of a repo (kitsoki's own
+// stories/<name>/ layout), the default inspector roots at the ENCLOSING repo
+// root (.kitsoki-root / go.mod marker), not the bare app dir. ctx.fs paths are
+// repo-relative by contract, and host.run effects in the same room execute at
+// the repo root — rooting ctx.fs at the app dir makes the two host surfaces
+// disagree about the same relative path (scenario-qa's plan room hit exactly
+// this: run.py wrote .artifacts/... at the repo root, plan_legs.star read it
+// back under stories/scenario-qa/.artifacts/...).
+func TestStarlarkRunDefaultInspector_AppDirWidensToRepoRoot(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, ".kitsoki-root"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	appDir := filepath.Join(repo, "stories", "example")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// The marker lives at the REPO root, so a repo-relative read only succeeds
+	// if the inspector widened the app dir to the enclosing repo root.
+	const marker = ".artifacts/marker.txt"
+	if err := os.MkdirAll(filepath.Join(repo, ".artifacts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, filepath.FromSlash(marker)), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	script := filepath.Join(appDir, "check.star")
+	if err := os.WriteFile(script, []byte(
+		"def main(ctx):\n    return {\"found\": ctx.fs.exists(\""+marker+"\")}\n",
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script+".yaml", []byte(
+		"outputs:\n  found: { type: bool }\n",
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(AppDirEnv, appDir)
+
+	ctx := WithWorldSnapshot(context.Background(), map[string]any{})
+	res, err := StarlarkRunHandler(ctx, map[string]any{"script": script})
+	if err != nil {
+		t.Fatalf("StarlarkRunHandler: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected domain error: %s", res.Error)
+	}
+	if got := res.Data["found"]; got != true {
+		t.Fatalf("ctx.fs.exists(%q) = %v, want true (inspector should widen KITSOKI_APP_DIR=%s to repo root %s)", marker, got, appDir, repo)
+	}
+}

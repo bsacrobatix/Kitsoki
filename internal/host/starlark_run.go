@@ -123,16 +123,28 @@ func StarlarkRunHandler(ctx context.Context, args map[string]any) (Result, error
 	// caller already installed one (the testrunner installs a replay inspector
 	// for flow fixtures). Mirrors the HTTP default-injection block above; the
 	// safe deny-all default is applied by InspectorFromContext when nothing is
-	// injected. Root at world.workdir when present, else KITSOKI_APP_DIR (the
-	// target app's directory, published by loaders — see AppDirEnv in
-	// agent_ask.go), else the repo containing the resolved story script, else
-	// the process cwd. Without the AppDirEnv fallback, a driver whose own
-	// process cwd differs from the app being driven can resolve ctx.fs.* paths
-	// against the wrong directory.
+	// injected. Root at world.workdir when present, else the repo root
+	// enclosing KITSOKI_APP_DIR (the target app's directory, published by
+	// loaders — see AppDirEnv in agent_ask.go), else the repo containing the
+	// resolved story script, else the process cwd. Without the AppDirEnv
+	// fallback, a driver whose own process cwd differs from the app being
+	// driven can resolve ctx.fs.* paths against the wrong directory. The app
+	// dir is widened to its enclosing repo root because ctx.fs paths are
+	// repo-relative by contract while an app.yaml may live in a subdirectory
+	// of its repo (kitsoki's own stories/<name>/ chief among them): host.run
+	// effects in the same room execute at the repo root, so rooting ctx.fs at
+	// the bare app dir makes the two host surfaces disagree about the same
+	// relative path.
 	if !starlarkhost.HasInspector(runCtx) {
 		root, _ := worldSnapshot["workdir"].(string)
 		if root == "" {
-			root = os.Getenv(AppDirEnv)
+			if appDir := os.Getenv(AppDirEnv); appDir != "" {
+				if inferred := inferRepoRootForDir(appDir); inferred != "" {
+					root = inferred
+				} else {
+					root = appDir
+				}
+			}
 		}
 		if root == "" {
 			if inferred := inferRepoRootForScript(scriptPath); inferred != "" {
@@ -250,7 +262,13 @@ func (c registryHostCaller) Invoke(ctx context.Context, name string, args map[st
 }
 
 func inferRepoRootForScript(scriptPath string) string {
-	dir := filepath.Dir(scriptPath)
+	return inferRepoRootForDir(filepath.Dir(scriptPath))
+}
+
+// inferRepoRootForDir walks dir upward to the nearest enclosing repo root,
+// identified by a go.mod or .kitsoki-root marker. Returns "" when no marker is
+// found so callers keep their own fallback.
+func inferRepoRootForDir(dir string) string {
 	for {
 		if fileExists(filepath.Join(dir, "go.mod")) || fileExists(filepath.Join(dir, ".kitsoki-root")) {
 			return dir
