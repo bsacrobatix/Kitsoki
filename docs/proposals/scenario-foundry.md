@@ -1,6 +1,12 @@
 # Tracing: Scenario Foundry
 
-**Status:** Draft v1. Nothing implemented yet.
+**Status:** Shipped. Tasks 1-3 and 5 are done; 4.1 (paraphrase tier)
+shipped, 4.2 (a live local paraphraser) is deliberately not built — no
+evidence the pre-recorded pool is insufficient. The IR shape and
+compiler contracts now live in
+[`docs/tracing/scenario-foundry.md`](../tracing/scenario-foundry.md)
+(the authoritative reference); this file is kept short as the
+historical design record (Why / Tasks / Non-goals).
 **Kind:**   tracing
 **Epic:**   usable-kitsoki.md
 
@@ -94,68 +100,19 @@ else is built against.
   compiler contracts); a short note in `tools/session-mining/README.md`
   for the codex adapter.
 
-## Scenario IR
+## Scenario IR, determinism, producers & consumers
 
-```jsonc
-{
-  "kind": "conversation",
-  "id": "scn-git-ops-0007",
-  "source": "mined",
-  "provenance": { "corpus": "claude-code", "session_id": "sess-git", "span_idx": 0 },
-  "persona": "core-maintainer",
-  "goal": "rebase a feature branch onto main without losing local commits",
-  "turns": [
-    { "role": "user", "text": "rebase this onto main", "corrected": true,
-      "corrective_ops": ["git rebase --abort"], "followup_text_head": "no wait, stash first" },
-    { "role": "user", "text": "ok stash my changes then rebase" }
-  ],
-  "expected_effects": ["git.rebase completed", "no uncommitted changes lost"],
-  "abandoned": false
-}
-```
-
-| Field | When present | Carries |
-|---|---|---|
-| `provenance` | always (mined scenarios) | corpus + session id + span index — traces back to the source session for audit/redaction review |
-| `turns[].corrected` / `corrective_ops` / `followup_text_head` | when `emit.py --outcomes` detected a correction | the raw signal a hand-authored scenario structurally cannot express — a wrong turn, its fix, and the user's own follow-up words |
-| `abandoned` | when the mined span ends without a satisfying outcome | marks a scenario that should assert the workbench does NOT silently claim success |
-
-## Determinism
-
-Compilation is a pure function of the mined `analysis.json` +
-`--outcomes` output — same input corpus, same redaction pass, same
-scenario IR bytes. The IR itself carries no timestamps or live-call
-data; it is consumed by the no-LLM replay harnesses (flow fixtures,
-swarm tier 1/2 scripted paths) exactly like a hand-authored fixture.
-The paraphrase tier is the one place novelty enters: semantic-match
-recordings pin the paraphrase set at record time (reusing the existing
-replay harness's exact-match discipline over a *pre-recorded* paraphrase
-pool, not a live call), so a CI run never depends on a live model.
-
-## Producers & consumers
-
-- **Codex adapter** (new): parses `~/.codex/sessions/*.jsonl` rollout
-  files — `payload.type` task boundaries carry the same turn/tool-call
-  structure the Claude Code adapter already extracts — and normalizes
-  into the same intermediate shape `prep.py`/`intent_brief.py` consume,
-  so downstream mining code (outcome/satisfaction join, redaction) is
-  shared, not duplicated.
-- **Scenario compiler** (new): reads `emit.py --outcomes` per-session
-  output, groups turns into scenario spans (goal-bounded, corrections
-  folded in as `turns[].corrected`), emits one IR document per
-  calibration-worthy span.
-- **Flow-fixture compiler** (new): projects an IR document onto the
-  `trace to-flow` shape (`cmd/kitsoki/trace.go:943`,
-  `internal/testrunner/fromtrace.go` — one flow turn per mined user
-  turn, host cassette episodes stubbed to the mined tool recipe where
-  known, `host.agent.converse` elsewhere).
-- **Swarm tier-2 compiler** (new): emits a scripted-user recording
-  keyed to the axes the arena swarm plugin already threads through but
-  tier 2 never reads (`tools/arena/arena/plugins/swarm.py:129-132`) —
-  this is the wiring, not new axis design.
-- **Product-journey compiler** (new): clusters mined personas by intent
-  pattern into `personas.json` entries, projects scenario goals into
-  `scenarios.json` task definitions.
+Shipped as designed here, with two corrections learned during
+implementation (both from the codex adapter and flow-fixture compiler
+respectively): codex's real per-line shape splits `type` across both
+the outer record and `payload`, and `trace to-flow`'s shape could not
+be reused directly because it needs an already-resolved
+`intent`/`slots` per turn, which a mined scenario doesn't have (the
+flow-fixture compiler instead targets a purpose-built harness story).
+The IR schema, worked example, determinism contract, and every
+producer/compiler are documented in full — with source references —
+in [`docs/tracing/scenario-foundry.md`](../tracing/scenario-foundry.md);
+this section is intentionally not duplicated here.
 
 ## Backward compatibility
 
@@ -177,14 +134,25 @@ the compiler against the same (redacted) mining output and diffing.
 
 ```
 ## 1. Codex adapter
-- [ ] 1.1 Parse `~/.codex/sessions/*.jsonl` rollout format into the
+- [x] 1.1 Parse `~/.codex/sessions/*.jsonl` rollout format into the
       shared intermediate turn/tool-call shape `prep.py` already
-      produces for Claude Code sessions
-- [ ] 1.2 Route codex sessions through the existing outcome/satisfaction
+      produces for Claude Code sessions. Implemented as
+      `codex_adapter.py`/`codex_prep.py`; the real per-line shape splits
+      `type` across the outer record and `payload` (not a single flat
+      `payload.type` stream as first assumed) and codex's headless
+      dispatched-agent filter keys on `payload.originator`, not
+      `entrypoint`.
+- [x] 1.2 Route codex sessions through the existing outcome/satisfaction
       join (`emit.py --outcomes`) and redaction ladder (`redact.py`)
-      unchanged
-- [ ] 1.3 Calibration: parse a small sample of real codex rollouts,
-      hand-verify turn/outcome extraction against the raw JSONL
+      unchanged. `codex_outcomes.py` emits the same `outcomes.json`
+      shape, id-keyed on codex's real `call_id` (an easier, exact join
+      than Claude Code's positional one).
+- [x] 1.3 Calibration: parse a small sample of real codex rollouts,
+      hand-verify turn/outcome extraction against the raw JSONL. See
+      `tests/test_codex_adapter.py` and the codex portion of
+      `tools/session-mining/calibration/MANIFEST.md` (surfaced a real
+      filtering gap: codex approval-sidecar sessions share the human
+      `codex-tui` originator tag and must be excluded separately).
 
 ## 2. Scenario IR + first calibration set
 - [x] 2.1 Define the `kind: conversation` IR schema (persona, goal,
@@ -212,11 +180,20 @@ the compiler against the same (redacted) mining output and diffing.
       corrective-op false-positive).
 
 ## 3. Downstream compilers
-- [ ] 3.1 Flow-fixture + recording compiler (IR → `trace to-flow` shape)
-- [ ] 3.2 Swarm tier-2 compiler, wiring `SWARM_PERSONA_MIX`/
-      `SWARM_FIXTURE` (`tools/arena/arena/plugins/swarm.py:129-132`)
-- [ ] 3.3 Product-journey compiler (IR → `scenarios.json`/`personas.json`
-      entries, mined personas from intent clusters)
+- [x] 3.1 Flow-fixture + recording compiler. Shipped as
+      `flow_fixture_compiler.py`, targeting a purpose-built
+      `stories/scenario-foundry-harness/` rather than `trace to-flow`'s
+      shape directly — that converter needs an already-resolved
+      `intent`/`slots` per turn, which a mined scenario doesn't carry.
+- [x] 3.2 Swarm tier-2 compiler, wiring `SWARM_PERSONA_MIX`/
+      `SWARM_FIXTURE` (`tools/arena/arena/plugins/swarm.py:129-132`).
+      `tools/swarm/tiers/tier2.ts` now reads both env vars, falling
+      back to the prior hardcoded fixture when unset.
+- [x] 3.3 Product-journey compiler (IR → `scenarios.json`/`personas.json`
+      entries, mined personas from intent clusters). Shipped as
+      `product_journey_compiler.py`; mined entries are tagged
+      `"source": "mined"` with `stage: "mined_from_sessions"` so live
+      dispatch never auto-selects them.
 
 ## 4. Paraphrase tier 2.5
 - [x] 4.1 Semantic-match recording path: pre-recorded paraphrase pool,
@@ -237,11 +214,12 @@ the compiler against the same (redacted) mining output and diffing.
       is insufficient).
 
 ## 5. Document
-- [ ] 5.1 Write `docs/tracing/scenario-foundry.md`; update
+- [x] 5.1 Write `docs/tracing/scenario-foundry.md`; update
       `tools/session-mining/README.md` with the codex adapter note
-- [ ] 5.2 Update `conversation-driven-development.md`'s slice 1 row to
+- [x] 5.2 Update `conversation-driven-development.md`'s slice 1 row to
       point at this proposal (done as part of landing this file)
-- [ ] 5.3 Migrate shipped content to docs/ and trim/delete this proposal
+- [x] 5.3 Migrate shipped content to docs/ and trim this proposal (kept,
+      not deleted, as the historical design record — Why/Tasks/Non-goals)
 ```
 
 ## Open questions
