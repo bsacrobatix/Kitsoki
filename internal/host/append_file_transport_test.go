@@ -151,6 +151,44 @@ func TestAppendFileTransport_RelativeBugThreadUsesWorkdir(t *testing.T) {
 	}
 }
 
+func TestAppendFileTransport_RelativeBugThreadMirrorsWhenWorkdirNotWritable(t *testing.T) {
+	t.Chdir(t.TempDir())
+	workdir := t.TempDir()
+	thread := "issues/bugs/BUG-49.md"
+	target := filepath.Join(workdir, thread)
+	tmpPath := filepath.Join(os.TempDir(), "kitsoki-append-to-file", "issues-bugs-BUG-49.md.md")
+	_ = os.Remove(tmpPath)
+	t.Cleanup(func() {
+		_ = os.Chmod(workdir, 0o755)
+		_ = os.Remove(tmpPath)
+	})
+	if err := os.Chmod(workdir, 0o555); err != nil {
+		t.Fatalf("chmod workdir read-only: %v", err)
+	}
+
+	res, err := host.AppendFileTransportHandler(context.Background(), map[string]any{
+		"thread":  thread,
+		"body":    "Comment mirrored away from a protected checkout.",
+		"workdir": workdir,
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("protected workdir target should not be written, stat err=%v", err)
+	}
+	raw, err := os.ReadFile(tmpPath)
+	if err != nil {
+		t.Fatalf("temp mirror not written: %v", err)
+	}
+	if !strings.Contains(string(raw), "Comment mirrored away from a protected checkout.") {
+		t.Fatalf("temp mirror missing body: %s", raw)
+	}
+}
+
 func TestAppendFileTransport_RelativeBugThreadWithoutWorkdirUsesTempMirror(t *testing.T) {
 	t.Chdir(t.TempDir())
 	thread := "issues/bugs/BUG-48.md"

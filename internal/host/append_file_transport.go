@@ -70,13 +70,28 @@ func AppendFileTransportHandler(ctx context.Context, args map[string]any) (Resul
 
 	workdir, _ := args["workdir"].(string)
 	threadPath := appendFileThreadPath(thread, workdir)
+	mirrorOnWriteFailure := appendFileShouldMirrorOnWriteFailure(thread, workdir, threadPath)
 
+	res, fallbackable := appendFileTransportWrite(threadPath, thread, body, author, title, phaseID)
+	if res.Error == "" || !fallbackable || !mirrorOnWriteFailure {
+		return res, nil
+	}
+
+	mirrorPath := appendFileTempMirrorPath(thread)
+	mirrorRes, _ := appendFileTransportWrite(mirrorPath, thread, body, author, title, phaseID)
+	if mirrorRes.Error != "" {
+		return Result{Error: fmt.Sprintf("%s; mirror fallback failed: %s", res.Error, mirrorRes.Error)}, nil
+	}
+	return mirrorRes, nil
+}
+
+func appendFileTransportWrite(threadPath, thread, body, author, title, phaseID string) (Result, bool) {
 	// Make sure the directory exists.  Bug-file thread paths are
 	// always under issues/bugs/ which the bug-create CLI creates,
 	// but the transport itself shouldn't refuse a path that doesn't
 	// exist yet — the dogfood path needs to be self-bootstrapping.
 	if err := os.MkdirAll(filepath.Dir(threadPath), 0o755); err != nil {
-		return Result{Error: fmt.Sprintf("host.append_to_file: mkdir: %v", err)}, nil
+		return Result{Error: fmt.Sprintf("host.append_to_file: mkdir: %v", err)}, true
 	}
 
 	// Read existing content (if any) and re-parse it as a bug file so
@@ -89,7 +104,7 @@ func AppendFileTransportHandler(ctx context.Context, args map[string]any) (Resul
 		var err error
 		bf, err = readBugFile(threadPath)
 		if err != nil {
-			return Result{Error: fmt.Sprintf("host.append_to_file: read: %v", err)}, nil
+			return Result{Error: fmt.Sprintf("host.append_to_file: read: %v", err)}, os.IsPermission(err)
 		}
 	} else {
 		bf = &BugFile{
@@ -123,13 +138,13 @@ func AppendFileTransportHandler(ctx context.Context, args map[string]any) (Resul
 	})
 	bf.Path = threadPath
 	if err := writeBugFile(bf); err != nil {
-		return Result{Error: fmt.Sprintf("host.append_to_file: write: %v", err)}, nil
+		return Result{Error: fmt.Sprintf("host.append_to_file: write: %v", err)}, true
 	}
 	id := fmt.Sprintf("%s#%d", bf.ID, len(bf.Comments))
 	return Result{Data: map[string]any{
 		"ok":         true,
 		"message_id": id,
-	}}, nil
+	}}, false
 }
 
 func appendFileThreadPath(thread, workdir string) string {
@@ -146,6 +161,15 @@ func appendFileThreadPath(thread, workdir string) string {
 		return thread
 	}
 	return appendFileTempMirrorPath(thread)
+}
+
+func appendFileShouldMirrorOnWriteFailure(thread, workdir, threadPath string) bool {
+	thread = strings.TrimSpace(thread)
+	workdir = strings.TrimSpace(workdir)
+	if workdir == "" || thread == "" || filepath.IsAbs(thread) || !isAppendFileLocalPath(thread) {
+		return false
+	}
+	return threadPath != appendFileTempMirrorPath(thread)
 }
 
 func appendFileTempMirrorPath(thread string) string {
