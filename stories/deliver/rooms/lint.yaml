@@ -2,7 +2,10 @@
 #
 # Runs stories/deliver/scripts/lint_decomposition.star against decomposition_path.
 # Checks: at least one brief; ids unique & non-empty; each brief has non-empty
-# brief + gate_command; every dep references an existing id; no dep cycle.
+# brief + gate_command; every dep references an existing id; no dep cycle;
+# when present, 'acceptance' is non-empty and every 'scope' glob is bounded
+# inside the repo (its parent dir exists) — the skill validator's remaining
+# checks, folded in here (proposal: deliver-canonical-decomposition B2a).
 #
 # Output: { "route": "ok"|"fail", "error": "<specific failure>" }
 # last_error is bound from error (empty string when route=="ok").

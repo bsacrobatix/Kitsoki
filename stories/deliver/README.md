@@ -8,10 +8,11 @@ per brief behind a merge lock) over the result.
 Layering is acyclic: **deliver → fleet → ship-it**. deliver is the only entry
 above fleet; fleet never imports deliver.
 
-> **Target shape:** deliver is the decided canonical decomposition story —
-> it will absorb the work-decomposition skill's richer manifest schema, a
-> budgeted refine loop, and an adversarial feasibility/completeness review
-> gate, and become reachable from dev-story. See
+> **Target shape:** deliver is the decided canonical decomposition story. It
+> has absorbed the work-decomposition skill's richer manifest schema (B2a,
+> below); a budgeted refine loop, an adversarial feasibility/completeness
+> review gate, managed re-decompose, and dev-story reachability are still to
+> come. See
 > [`docs/proposals/deliver-canonical-decomposition.md`](../../docs/proposals/deliver-canonical-decomposition.md).
 > This README documents what ships **today**.
 
@@ -42,18 +43,29 @@ specific error rather than re-arming the decomposer. Every failure arc exits
 
 ## The manifest contract
 
+Top-level, optional: `coverage_note` — the completeness claim (how the briefs
+together fully cover the epic/proposal).
+
 `briefs:` — an ordered list; each brief:
 
-- `id` — unique, `^[a-z][a-z0-9-]*$`
-- `brief` — self-contained task for the maker agent (min 10 chars)
+- `id` — unique, `^[a-z][a-z0-9-]*$` (**required**)
+- `brief` — self-contained task for the maker agent, min 10 chars (**required**)
 - `gate_command` — deterministic shell command, exit 0 = success, and
   **RED at baseline** (see [`prompts/decompose.md`](prompts/decompose.md))
-- `deps` — ids that must ship first (acyclic)
+  (**required**)
+- `deps` — ids that must ship first, acyclic (optional, default `[]`)
+- `title`, `kind` (`story\|runtime\|tui\|tracing\|test\|docs`), `scope[]`
+  (write-boundary globs), `acceptance[]`, `risk` (`low\|medium\|high`) —
+  optional richer fields absorbed from the work-decomposition skill's schema
+  (proposal: deliver-canonical-decomposition B2a).
 
-The lint (no LLM) enforces: at least one brief; ids unique and non-empty;
-non-empty `brief` and `gate_command` per brief; every dep references a known
-id; no dependency cycle. It also accepts the work-decomposition skill's field
-aliases (`agent_brief`, `test_plan`, `depends_on`).
+The lint (no LLM, [`scripts/lint_decomposition.star`](scripts/lint_decomposition.star))
+enforces: at least one brief; ids unique and non-empty; non-empty `brief` and
+`gate_command` per brief; every dep references a known id; no dependency
+cycle; when present, `acceptance` is non-empty and every `scope` glob is
+bounded inside the repo (repo-relative, no `..` escape, parent dir exists). It
+also accepts the work-decomposition skill's field aliases (`agent_brief` →
+`brief`, `test_plan` → `gate_command`, `depends_on` → `deps`).
 
 ## World / agents / exits
 
@@ -80,6 +92,7 @@ go run ./cmd/kitsoki test flows stories/deliver/app.yaml
 | [`decompose_error`](flows/decompose_error.yaml) | Decomposer host error → `decompose_error` → `@exit:needs-human` with `last_error`. |
 | [`lint_rejects_cycle`](flows/lint_rejects_cycle.yaml) | Dependency cycle → specific lint error → `needs-human`. |
 | [`lint_rejects_missing_dep`](flows/lint_rejects_missing_dep.yaml) | Dangling dep id → specific lint error → `needs-human`. |
+| [`rich_schema_happy`](flows/rich_schema_happy.yaml) | A manifest carrying `coverage_note` + per-brief `title/kind/scope/acceptance/risk` lints clean and reaches `fleet.load` — proves the absorbed skill schema/lint fields, not just the bare `id/brief/gate_command/deps` contract. |
 | [`slidey_decomposition`](flows/slidey_decomposition.yaml) | Tour-shaped happy path (`epic_path` seeded in `initial_world` so `start` needs no slot) for the web/no-LLM demo. |
 
 The agent is mocked in every flow; lint and fleet-load run **real Starlark**
@@ -95,5 +108,6 @@ decomposer benchmark script.
 - [`stories/decompose-update/`](../decompose-update/) — the managed-delta
   transaction for *changing* an existing decomposition.
 - [`.agents/skills/work-decomposition/`](../../.agents/skills/work-decomposition/SKILL.md)
-  — the manual twin of this pipeline (richer schema; being reconciled per
-  the proposal above).
+  — the manual twin of this pipeline for by-hand runs; its schema is a copy of
+  this story's `schemas/decomposition.json`, kept identical rather than left
+  to drift.
