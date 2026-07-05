@@ -3090,7 +3090,80 @@ def unfiled_credible_findings(findings: dict) -> list[str]:
     ]
 
 
-def file_findings(run_dir: Path, ticket_repo: str, dry_run: bool, publish_deck: Optional[Path]) -> dict:
+def github_issue_ref(item: dict, fallback_repo: str) -> tuple[str, str, str, str]:
+    github_issue = item.get("github_issue", {}) or {}
+    url = str(github_issue.get("url", "")).strip()
+    repo = str(github_issue.get("repo", "") or fallback_repo).strip()
+    number = str(github_issue.get("number", "")).strip()
+    kind = "issue"
+    if (not repo or not number) and url:
+        parsed = urllib.parse.urlparse(url)
+        parts = [part for part in parsed.path.split("/") if part]
+        if parsed.netloc.lower() == "github.com" and len(parts) >= 4 and parts[2] in {"issues", "pull"}:
+            repo = repo or f"{parts[0]}/{parts[1]}"
+            number = number or parts[3]
+            if parts[2] == "pull":
+                kind = "pr"
+    return repo, number, kind, url
+
+
+def enqueue_gh_agent_fixes(run_dir: Path, ticket_repo: str, db_path: str, story: str) -> dict:
+    if not db_path:
+        return {
+            "gh_agent_enqueue_status": "disabled",
+            "gh_agent_enqueued_count": 0,
+            "gh_agent_skipped_count": 0,
+            "gh_agent_job_summary": "",
+            "gh_agent_jobs": [],
+        }
+    findings = read_json(run_dir / "findings.json")
+    jobs = []
+    skipped = 0
+    for item in credible_issue_findings(findings):
+        repo, number, kind, url = github_issue_ref(item, ticket_repo)
+        if not repo or not number:
+            skipped += 1
+            continue
+        cmd = kitsoki_cli_command() + [
+            "gh-agent", "enqueue",
+            "--db", db_path,
+            "--repo", repo,
+            "--issue", number,
+            "--kind", kind,
+            "--story", story or "stories/bugfix",
+            "--json",
+        ]
+        proc = shell(cmd, ROOT)
+        if proc.returncode != 0:
+            detail = proc.stderr.strip() or proc.stdout.strip()
+            raise SystemExit(f"kitsoki gh-agent enqueue failed (exit {proc.returncode}): {detail}")
+        try:
+            queued = json.loads(proc.stdout)
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"kitsoki gh-agent enqueue printed invalid JSON ({exc}): {proc.stdout[:400]}")
+        queued["finding_id"] = item.get("id", "")
+        queued["issue_url"] = url
+        jobs.append(queued)
+    summary = "; ".join(job.get("origin_ref", "") for job in jobs[:5])
+    if len(jobs) > 5:
+        summary += f"; +{len(jobs) - 5} more"
+    return {
+        "gh_agent_enqueue_status": "queued",
+        "gh_agent_enqueued_count": len(jobs),
+        "gh_agent_skipped_count": skipped,
+        "gh_agent_job_summary": summary,
+        "gh_agent_jobs": jobs,
+    }
+
+
+def file_findings(
+    run_dir: Path,
+    ticket_repo: str,
+    dry_run: bool,
+    publish_deck: Optional[Path],
+    gh_agent_db: str = "",
+    gh_agent_story: str = "stories/bugfix",
+) -> dict:
     """File the bundle's credible issue findings as GitHub issues.
 
     Body assembly, evidence upload (release assets + `## Artifacts` section),
@@ -3169,6 +3242,16 @@ def file_findings(run_dir: Path, ticket_repo: str, dry_run: bool, publish_deck: 
         "media_manifest_path": str(run_dir / "media-manifest.json"),
         "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
     }
+    if not dry_run and gh_agent_db:
+        result.update(enqueue_gh_agent_fixes(run_dir, ticket_repo, gh_agent_db, gh_agent_story))
+    else:
+        result.update({
+            "gh_agent_enqueue_status": "disabled" if not gh_agent_db else "dry-run",
+            "gh_agent_enqueued_count": 0,
+            "gh_agent_skipped_count": 0,
+            "gh_agent_job_summary": "",
+            "gh_agent_jobs": [],
+        })
     result.update(run_story_summary(run_dir))
     return result
 
@@ -7145,6 +7228,8 @@ def main() -> None:
     parser.add_argument("--similarity-threshold", type=float, default=0.82, help="Title similarity threshold for --stats duplicate/similar issue detection")
     parser.add_argument("--similar-pair-limit", type=int, default=25, help="Maximum similar issue pairs to include in --stats JSON; use -1 for all pairs")
     parser.add_argument("--ticket-repo", default="", help="owner/repo GitHub target for --file-findings")
+    parser.add_argument("--gh-agent-db", default="", help="With --file-findings, enqueue filed issues into this gh-agent SQLite job DB")
+    parser.add_argument("--gh-agent-story", default="stories/bugfix", help="Story path to queue for filed issue fixes when --gh-agent-db is set")
     parser.add_argument("--dry-run", action="store_true", help="With --file-findings, render what would be filed without calling GitHub")
     parser.add_argument(
         "--filing-mode",
@@ -7560,7 +7645,14 @@ def main() -> None:
         publish_deck = DEFAULT_DECK if args.publish_deck else None
         run_dir = run_dir_from_arg(args.run_dir)
         dry_run = args.dry_run or args.filing_mode == "dry-run"
-        result = file_findings(run_dir, args.ticket_repo, dry_run, publish_deck)
+        result = file_findings(
+            run_dir,
+            args.ticket_repo,
+            dry_run,
+            publish_deck,
+            args.gh_agent_db,
+            args.gh_agent_story,
+        )
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
             append_log(f"Filed findings for {run_dir.name}: {result['filing_summary']}")
@@ -7575,6 +7667,13 @@ def main() -> None:
                 line += f" ({outcome['error']})"
             print(line)
         print(f"Unfiled credible findings: {result['findings_unfiled_count']}")
+        if result.get("gh_agent_enqueue_status") != "disabled":
+            print(
+                "GH-agent fixes: "
+                f"{result['gh_agent_enqueue_status']} "
+                f"({result['gh_agent_enqueued_count']} queued, "
+                f"{result['gh_agent_skipped_count']} skipped)"
+            )
         append_log(f"Filed findings for {run_dir.name}: {result['filing_summary']}")
         return
 

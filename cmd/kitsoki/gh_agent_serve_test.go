@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -59,6 +60,48 @@ func TestWebhookMentionIssueComment(t *testing.T) {
 	}
 	if len(labels) != 1 || labels[0] != "bug" {
 		t.Fatalf("labels=%v", labels)
+	}
+}
+
+func TestGHAgentEnqueueCmdQueuesIssue(t *testing.T) {
+	dbPath := t.TempDir() + "/gh-jobs.sqlite"
+	cmd := newGHAgentCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{
+		"enqueue",
+		"--db", dbPath,
+		"--repo", "o/r",
+		"--issue", "105",
+		"--story", "stories/bugfix",
+		"--json",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("enqueue command: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("decode enqueue JSON %q: %v", out.String(), err)
+	}
+	if payload["origin_ref"] != "github:o/r/issue/105" || payload["story"] != "stories/bugfix" || payload["state"] != jobs.GHQueued {
+		t.Fatalf("unexpected enqueue payload: %#v", payload)
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	store, err := jobs.NewGHJobStore(db)
+	if err != nil {
+		t.Fatalf("NewGHJobStore: %v", err)
+	}
+	queued, err := store.ListQueued(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListQueued: %v", err)
+	}
+	if len(queued) != 1 || queued[0].OriginRef != "github:o/r/issue/105" {
+		t.Fatalf("queued=%+v", queued)
 	}
 }
 

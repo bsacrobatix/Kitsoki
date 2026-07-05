@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -36,6 +38,98 @@ func newGHAgentCmd() *cobra.Command {
 	cmd.AddCommand(newGHAgentReplayCmd())
 	cmd.AddCommand(newGHAgentCommentCmd())
 	cmd.AddCommand(newGHAgentSetupCmd())
+	cmd.AddCommand(newGHAgentEnqueueCmd())
+	return cmd
+}
+
+func newGHAgentEnqueueCmd() *cobra.Command {
+	var (
+		dbPath     string
+		repo       string
+		issue      int
+		story      string
+		objectKind string
+		jsonOut    bool
+	)
+	cmd := &cobra.Command{
+		Use:   "enqueue",
+		Short: "Queue a GitHub issue/PR for the gh-agent worker to drain",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
+			if strings.TrimSpace(dbPath) == "" {
+				return fmt.Errorf("gh-agent enqueue: --db is required")
+			}
+			if strings.TrimSpace(repo) == "" {
+				return fmt.Errorf("gh-agent enqueue: --repo is required")
+			}
+			if issue <= 0 {
+				return fmt.Errorf("gh-agent enqueue: --issue must be positive")
+			}
+			objectKind = strings.TrimSpace(objectKind)
+			if objectKind == "" {
+				objectKind = "issue"
+			}
+			if objectKind != "issue" && objectKind != "pr" {
+				return fmt.Errorf("gh-agent enqueue: --kind must be issue or pr")
+			}
+			if strings.TrimSpace(story) == "" {
+				story = "stories/bugfix"
+			}
+
+			db, err := sql.Open("sqlite", dbPath)
+			if err != nil {
+				return fmt.Errorf("gh-agent enqueue: open db %q: %w", dbPath, err)
+			}
+			defer db.Close()
+			store, err := jobs.NewGHJobStore(db)
+			if err != nil {
+				return err
+			}
+
+			number := strconv.Itoa(issue)
+			kindPath := objectKind
+			if objectKind == "issue" {
+				kindPath = "issue"
+			}
+			job, created, err := store.Enqueue(ctx, jobs.GHMention{
+				OriginRef:    "github:" + repo + "/" + kindPath + "/" + number,
+				Repo:         repo,
+				ObjectKind:   objectKind,
+				ObjectNumber: number,
+			}, story)
+			if err != nil {
+				return err
+			}
+			result := map[string]any{
+				"status":        "queued",
+				"created":       created,
+				"job_id":        job.JobID,
+				"origin_ref":    job.OriginRef,
+				"repo":          job.Repo,
+				"object_kind":   job.ObjectKind,
+				"object_number": job.ObjectNumber,
+				"story":         job.Story,
+				"state":         job.State,
+			}
+			if jsonOut {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetEscapeHTML(false)
+				return enc.Encode(result)
+			}
+			action := "attached"
+			if created {
+				action = "queued"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s %s -> %s (%s)\n", action, job.OriginRef, job.Story, job.JobID)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&dbPath, "db", "", "sqlite path for the gh_jobs store")
+	cmd.Flags().StringVar(&repo, "repo", "", "owner/repo")
+	cmd.Flags().IntVar(&issue, "issue", 0, "issue or PR number")
+	cmd.Flags().StringVar(&objectKind, "kind", "issue", "GitHub object kind: issue or pr")
+	cmd.Flags().StringVar(&story, "story", "stories/bugfix", "story path or gh-agent sentinel to run")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print a JSON result")
 	return cmd
 }
 

@@ -179,6 +179,54 @@ func (s *GHJobStore) Claim(ctx context.Context, m GHMention, workerID string) (j
 	return job, won, nil
 }
 
+// Enqueue inserts a queued GitHub-agent job without claiming it. It is the
+// native handoff for producers that have already filed or discovered a GitHub
+// issue and want the long-running gh-agent worker to drain it later. The
+// origin_ref natural key keeps enqueue idempotent: if the job already exists,
+// the existing row is returned unchanged.
+func (s *GHJobStore) Enqueue(ctx context.Context, m GHMention, story string) (job *GHJob, created bool, err error) {
+	if strings.TrimSpace(m.OriginRef) == "" {
+		return nil, false, fmt.Errorf("jobs.Enqueue: origin_ref is required")
+	}
+	if strings.TrimSpace(m.Repo) == "" {
+		return nil, false, fmt.Errorf("jobs.Enqueue: repo is required")
+	}
+	if strings.TrimSpace(m.ObjectKind) == "" {
+		return nil, false, fmt.Errorf("jobs.Enqueue: object_kind is required")
+	}
+	if strings.TrimSpace(m.ObjectNumber) == "" {
+		return nil, false, fmt.Errorf("jobs.Enqueue: object_number is required")
+	}
+	now := time.Now().UnixMilli()
+	jobID := ulid.New()
+	res, err := s.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO gh_jobs
+		   (job_id, origin_ref, repo, object_kind, object_number, story, state, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		jobID, m.OriginRef, m.Repo, m.ObjectKind, m.ObjectNumber, story, GHQueued, now, now,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("jobs.Enqueue: insert: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	created = affected == 1
+	job, err = s.GetByOriginRef(ctx, m.OriginRef)
+	if err != nil {
+		return nil, created, fmt.Errorf("jobs.Enqueue: read-back: %w", err)
+	}
+	if created {
+		if err := s.RecordEvent(ctx, job.JobID, GHQueued, "queued by producer"); err != nil {
+			return nil, created, err
+		}
+		if strings.TrimSpace(story) != "" {
+			if err := s.RecordEvent(ctx, job.JobID, "story", story); err != nil {
+				return nil, created, err
+			}
+		}
+	}
+	return job, created, nil
+}
+
 // GetByOriginRef returns the job for an origin_ref, or sql.ErrNoRows.
 func (s *GHJobStore) GetByOriginRef(ctx context.Context, originRef string) (*GHJob, error) {
 	return scanGHJob(ctx, s.db, "origin_ref", originRef)
