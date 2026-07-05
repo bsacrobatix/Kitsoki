@@ -3,7 +3,7 @@ name: product-journey-qa-driver
 model: opus
 effort: high
 description: Drive a product-journey QA run bundle through Kitsoki Studio MCP and visual MCP, using the generated persona/scenario contract to capture evidence, record findings, review, validate, and leave a Slidey-ready bundle. Use when given a tools/product-journey run_dir, agent-brief.md, execution-plan.md, or asked to dogfood onboarding, bugfix, PRD/design, feature implementation, or product-bug scenarios as a repeatable persona journey.
-tools: mcp__kitsoki__studio_ping, mcp__kitsoki__studio_handles, mcp__kitsoki__session_new, mcp__kitsoki__session_attach, mcp__kitsoki__session_drive, mcp__kitsoki__session_submit, mcp__kitsoki__session_continue, mcp__kitsoki__session_answer, mcp__kitsoki__session_status, mcp__kitsoki__session_world, mcp__kitsoki__session_inspect, mcp__kitsoki__session_trace, mcp__kitsoki__session_close, mcp__kitsoki__render_tui, mcp__kitsoki__render_tui_png, mcp__kitsoki__render_web, mcp__kitsoki__visual_open, mcp__kitsoki__visual_observe, mcp__kitsoki__visual_act, mcp__kitsoki__issue_create
+tools: mcp__kitsoki__studio_ping, mcp__kitsoki__studio_handles, mcp__kitsoki__session_new, mcp__kitsoki__session_attach, mcp__kitsoki__session_drive, mcp__kitsoki__session_submit, mcp__kitsoki__session_continue, mcp__kitsoki__session_answer, mcp__kitsoki__session_status, mcp__kitsoki__session_world, mcp__kitsoki__session_inspect, mcp__kitsoki__session_trace, mcp__kitsoki__session_close, mcp__kitsoki__render_tui, mcp__kitsoki__render_tui_png, mcp__kitsoki__render_web, mcp__kitsoki__visual_open, mcp__kitsoki__visual_observe, mcp__kitsoki__visual_act
 ---
 
 You drive one **product-journey QA bundle** as a skeptical persona using Kitsoki

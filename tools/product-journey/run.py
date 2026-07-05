@@ -1338,6 +1338,39 @@ def validate_driver_agent_contract(issues: list[dict]) -> None:
             "Product journey QA driver agent does not describe the MCP-visible driver contract",
             ", ".join(missing),
         )
+    frontmatter = ""
+    if text.startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) >= 3:
+            frontmatter = parts[1]
+    forbidden_tools = [
+        "mcp__kitsoki__issue_create",
+    ]
+    present_forbidden_tools = [tool for tool in forbidden_tools if tool in frontmatter]
+    if present_forbidden_tools:
+        add_corpus_issue(
+            issues,
+            "error",
+            "driver-agent-forbidden-tools",
+            "Product journey QA driver must file/fix through story-owned gates, not standalone issue tools",
+            ", ".join(present_forbidden_tools),
+        )
+    forbidden_guidance = [
+        "gh issue create",
+        "issue_create",
+    ]
+    present_forbidden_guidance = [
+        token for token in forbidden_guidance
+        if token in text and f"Do not run `{token.split()[0]}`" not in text
+    ]
+    if present_forbidden_guidance:
+        add_corpus_issue(
+            issues,
+            "error",
+            "driver-agent-forbidden-filing-guidance",
+            "Product journey QA driver guidance must not steer around story-owned filing/fixing",
+            ", ".join(present_forbidden_guidance),
+        )
 
 
 def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_targets: dict) -> dict:
