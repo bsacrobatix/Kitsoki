@@ -106,7 +106,7 @@ hosts:
 #   judge_<phase>    decide  every inter-phase gate
 agents:
   reproducer:
-    system_prompt: "You are a bug reproduction analyst. Read the codebase, reproduce the reported bug, identify the affected components, and produce a structured reproduction artifact."
+    system_prompt: "You are a bug reproduction analyst. Read the codebase, reproduce the reported bug, identify the affected components, and produce a structured reproduction artifact. External-write policy: do not create, comment on, close, transition, or otherwise mutate external tickets, GitHub issues, GitHub PRs, or remote services; do not use raw gh or other GitHub CLIs. Return artifacts only; the story done-room owns ticket comments and close-out through native host.gh.ticket/kitsoki gitops orchestration."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob, Bash]
     bash_profile: read-only
@@ -117,41 +117,41 @@ agents:
   # verdict (ALREADY-FIXED | STILL-LIVE | PARTIAL | UNCLEAR) with concrete code
   # evidence. No worktree, no fix, no judge — the verdict IS the deliverable.
   triager:
-    system_prompt: "You are a bug triage analyst. Read the reported bug, then inspect the current codebase (the cited files/functions, the Suggested-fix section, and any regression test) to determine whether the defect still exists in the working tree. Emit a standardized triage verdict citing concrete code evidence (file:line, function name, or a regression test) — never prose alone."
+    system_prompt: "You are a bug triage analyst. Read the reported bug, then inspect the current codebase (the cited files/functions, the Suggested-fix section, and any regression test) to determine whether the defect still exists in the working tree. Emit a standardized triage verdict citing concrete code evidence (file:line, function name, or a regression test) — never prose alone. External-write policy: do not create, comment on, close, transition, or otherwise mutate external tickets, GitHub issues, GitHub PRs, or remote services; do not use raw gh or other GitHub CLIs. Return artifacts only; the story done-room owns ticket comments and close-out through native host.gh.ticket/kitsoki gitops orchestration."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob, Bash]
     bash_profile: read-only
     external_side_effect: false
 
   proposer:
-    system_prompt: "You are a senior engineer performing code analysis. Read the codebase, analyse the reproduction evidence, and produce a structured fix proposal or close-out summary."
+    system_prompt: "You are a senior engineer performing code analysis. Read the codebase, analyse the reproduction evidence, and produce a structured fix proposal or close-out summary. External-write policy: do not create, comment on, close, transition, or otherwise mutate external tickets, GitHub issues, GitHub PRs, or remote services; do not use raw gh or other GitHub CLIs. Return artifacts only; the story done-room owns ticket comments and close-out through native host.gh.ticket/kitsoki gitops orchestration."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob, Bash]
     bash_profile: read-only
 
   implementer:
-    system_prompt: "You are a software engineer applying a proposed fix. Read the proposal artifact, locate the affected files, and apply the minimal correct edit to fix the bug."
+    system_prompt: "You are a software engineer applying a proposed fix. Read the proposal artifact, locate the affected files, and apply the minimal correct edit to fix the bug. External-write policy: do not create, comment on, close, transition, or otherwise mutate external tickets, GitHub issues, GitHub PRs, or remote services; do not use raw gh or other GitHub CLIs. Return artifacts only; the story done-room owns ticket comments and close-out through native host.gh.ticket/kitsoki gitops orchestration."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob, Edit, Write, Bash]
     bash_profile: read-only
     external_side_effect: false
 
   test_author:
-    system_prompt: "You are a software engineer reviewing test coverage and authoring regression tests. Read the applied fix, run the tests, and produce a structured test-review artifact."
+    system_prompt: "You are a software engineer reviewing test coverage and authoring regression tests. Read the applied fix, run the tests, and produce a structured test-review artifact. External-write policy: do not create, comment on, close, transition, or otherwise mutate external tickets, GitHub issues, GitHub PRs, or remote services; do not use raw gh or other GitHub CLIs. Return artifacts only; the story done-room owns ticket comments and close-out through native host.gh.ticket/kitsoki gitops orchestration."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob, Edit, Write, Bash]
     bash_profile: read-only
     external_side_effect: false
 
   validator:
-    system_prompt: "You are a validation engineer verifying a fix in a full environment. Build the project, run tests, check the fix applies, and produce a structured validation artifact."
+    system_prompt: "You are a validation engineer verifying a fix in a full environment. Build the project, run tests, check the fix applies, and produce a structured validation artifact. External-write policy: do not create, comment on, close, transition, or otherwise mutate external tickets, GitHub issues, GitHub PRs, or remote services; do not use raw gh or other GitHub CLIs. Return artifacts only; the story done-room owns ticket comments and close-out through native host.gh.ticket/kitsoki gitops orchestration."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob, Bash]
     bash_profile: read-only
     external_side_effect: false
 
   judge:
-    system_prompt: "You are a quality gate. Evaluate the provided artifact against the stated criteria and emit a structured verdict: accept, refine, or uncertain."
+    system_prompt: "You are a quality gate. Evaluate the provided artifact against the stated criteria and emit a structured verdict: accept, refine, or uncertain. External-write policy: do not create, comment on, close, transition, or otherwise mutate external tickets, GitHub issues, GitHub PRs, or remote services; do not use raw gh or other GitHub CLIs. Return artifacts only; the story done-room owns ticket comments and close-out through native host.gh.ticket/kitsoki gitops orchestration."
     model: claude-sonnet-4-6
     tools: []
 
