@@ -44,7 +44,36 @@ Start every run with:
 1. `studio.ping`
 2. `studio.handles`
 
-Then choose the cheapest surface that proves the next claim:
+### Transport pin (scenario-qa handoffs)
+
+When the handoff/context names a `transport:` for the current scenario leg (a
+single pinned transport — `tui`, `web`, or `vscode` — as `stories/scenario-qa`
+sends per leg), that pin OVERRIDES the cheapest-surface choice below for
+THIS leg: use only that transport's tools even when a different surface
+would be cheaper to prove the same claim. `tui` → `render.tui` /
+`render.tui_png`; `web` → `visual.open` then `visual.observe` (and
+`visual.act` for actions) against the web surface; `vscode` → `visual.open
+kind=vscode` (bridge-level, not a genuine editor — label evidence
+accordingly, never as editor-level coverage). This pin is what lets a
+transport-scoped check produce an honest per-transport verdict instead of
+always defaulting to whichever surface is easiest.
+
+**Preflight before capturing on a pinned transport.** Call the transport's
+primary tool once (`render.tui_png` for tui; `visual.open` + `visual.observe`
+for web; `visual.open kind=vscode` for vscode) and confirm it returns a
+genuine frame/screenshot — not a JSON-degraded stub (a bare data envelope
+with no image/frame payload, an error body, or a placeholder path in place of
+real pixels). If the visual surface comes back JSON-degraded, STOP capturing
+for this leg immediately and report `status: "degraded-evidence"` with the
+exact blocker (which tool, what it returned instead of a real frame). Do not
+fabricate a screenshot, do not substitute a different transport's evidence
+for the one that was requested, and do not silently report a pass. This
+preflight is mandatory for `web` and `vscode` legs — the two transports most
+likely to degrade to a JSON stub without a real browser/bridge attached —
+and a good habit for `tui` legs too when in doubt.
+
+Otherwise (no transport pin — the general product-journey-qa case), choose
+the cheapest surface that proves the next claim:
 
 - `session.status` for current room, allowed intents, and last error.
 - `session.world` for one field.

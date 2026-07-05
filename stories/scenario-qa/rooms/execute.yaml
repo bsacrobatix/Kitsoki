@@ -1,0 +1,69 @@
+# execute — dispatch the reusable product-journey-qa-driver for the CURRENT
+# transport leg (world.leg_index into world.legs). The handoff's `transport:`
+# field is a PIN that overrides the driver's usual cheapest-surface heuristic
+# (.agents/agents/product-journey-qa-driver.md) — this leg's evidence must
+# come from the named transport, not whichever surface looks cheapest.
+#
+# A dead/failed driver dispatch still routes forward to judge (on_error:
+# judge, mirroring stories/dogfood-marathon's driving→verifying split) —
+# judge independently grades whatever was actually captured; the driver's own
+# report is never the grade.
+
+states:
+
+  execute:
+    description: "Dispatching the reusable driver for the current transport leg."
+    relevant_world: [run_id, run_dir, leg_index, leg_count, current_leg, drive_result, status]
+    view:
+      - heading: "Scenario QA · execute"
+      - kv:
+          pairs:
+            Run: "{{ world.run_id }}"
+            Leg: "{{ world.leg_index }} / {{ world.leg_count }}"
+            Scenario: "{{ world.current_leg.scenario }}"
+            Transport: "{{ world.current_leg.transport }}"
+            Visual surface: "{{ world.current_leg.visual_surface }}"
+            Evidence dir: "{{ world.current_leg.evidence_dir }}"
+      - prose: "Dispatching product-journey-qa-driver for this leg, pinned to `{{ world.current_leg.transport }}` — this OVERRIDES the driver's usual cheapest-surface heuristic. A missing or JSON-degraded visual surface is reported as a blocker, never fabricated."
+    on_enter:
+      - invoke: host.starlark.run
+        id: pick_leg
+        with:
+          script: scripts/pick_leg.star
+          inputs:
+            legs: "{{ world.legs }}"
+            leg_index: "{{ world.leg_index }}"
+        bind:
+          current_leg: current_leg
+          current_leg_id: current_leg_id
+        on_error: idle
+      - set:
+          status: "judging"
+      - invoke: host.agent.task
+        id: drive_leg
+        with:
+          agent: driver
+          acceptance:
+            schema: schemas/drive_leg_result.json
+          context:
+            prompt: prompts/drive_leg.md
+            leg: "{{ world.current_leg }}"
+            run_id: "{{ world.run_id }}"
+            run_dir: "{{ world.run_dir }}"
+            transport: "{{ world.current_leg.transport }}"
+        bind:
+          drive_result: submitted
+        on_error: judge
+      # Guarded on an object-field read (drive_result defaults to `{}`) so
+      # this errors pre-bind and the engine defers it until drive_leg's bind
+      # actually lands, instead of firing immediately against a stale empty
+      # drive_result (see plan.yaml's header comment for the general gotcha).
+      - when: "world.drive_result.status != ''"
+        emit_intent: leg_driven
+    on:
+      leg_driven:
+        - target: judge
+      status:
+        - target: .
+      look:
+        - target: .

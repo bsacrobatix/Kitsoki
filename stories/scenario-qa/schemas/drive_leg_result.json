@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "drive_leg_result",
+  "description": "One transport leg's driver dispatch outcome -- REPORTED, not self-graded. The judge room independently grades the captured evidence.",
+  "type": "object",
+  "required": ["status"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "description": "attempted | captured | blocked | degraded-evidence"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths or retained ids for the captured evidence (frames/screenshots/traces)."
+    },
+    "frames_dir": {
+      "type": "string",
+      "description": "Directory of captured frames/screenshots for this leg, if any."
+    },
+    "blockers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Honest blockers if evidence could not be captured (e.g. a JSON-degraded visual surface)."
+    },
+    "summary": {
+      "type": "string",
+      "description": "What the driver actually attempted for this leg."
+    }
+  },
+  "additionalProperties": true
+}

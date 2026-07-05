@@ -1,0 +1,81 @@
+# recording — append the current leg's driver+judge outcome to
+# world.leg_results (scripts/record_leg_result.star), then either drain to
+# report (auto, when this was the last leg) or PAUSE here for an explicit
+# "next_leg" (mirrors stories/dogfood-marathon's processing checkpoint: one
+# leg per operator/flow turn keeps each turn's internal emit chain
+# (legs_ready → leg_driven → leg_judged → ...) safely under the engine's
+# EmitIntentMaxDepth no matter how many transports were requested — a whole
+# "transport=all" run cannot auto-run in a single turn).
+
+states:
+
+  recording:
+    description: "Recording the current leg's outcome, then advancing to the next leg or the report."
+    relevant_world: [leg_index, leg_count, current_leg, drive_result, judge_result, leg_results, pass_count, fail_count, degraded_count, status]
+    view:
+      - heading: "Scenario QA · recording"
+      - kv:
+          pairs:
+            Leg: "{{ world.leg_index }} / {{ world.leg_count }}"
+            Transport: "{{ world.current_leg.transport }}"
+            Driver status: '{{ world.drive_result.status|default:"—" }}'
+            Verdict: '{{ world.judge_result.verdict|default:"—" }}'
+            Recorded: "{{ world.leg_results.items|length }}"
+            Pass: "{{ world.pass_count }}"
+            Fail: "{{ world.fail_count }}"
+            Degraded: "{{ world.degraded_count }}"
+      - prose: "Recorded this leg's driver + judge outcome."
+      - prose: "More transport legs remain — `next_leg` to drive the next one."
+        when: "world.leg_index + 1 < world.leg_count"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "next_leg"
+              hint: "drive the next transport leg"
+              intent: next_leg
+              when: "world.leg_index + 1 < world.leg_count"
+            - label: "report"
+              hint: "fold every recorded leg into report.md"
+              intent: report
+            - label: "status"
+              intent: status
+    on_enter:
+      - invoke: host.starlark.run
+        id: record_leg_result
+        with:
+          script: scripts/record_leg_result.star
+          inputs:
+            leg: "{{ world.current_leg }}"
+            drive_result: "{{ world.drive_result }}"
+            judge_result: "{{ world.judge_result }}"
+        bind:
+          leg_results: leg_results
+          pass_count: pass_count
+          fail_count: fail_count
+          degraded_count: degraded_count
+        on_error: report
+      - when: "world.leg_index + 1 >= world.leg_count"
+        set:
+          status: "reporting"
+        emit_intent: legs_drained
+    on:
+      next_leg:
+        - target: execute
+          effects:
+            - set:
+                leg_index: "{{ world.leg_index + 1 }}"
+                drive_result: {}
+                judge_result: {}
+                status: "executing"
+      legs_drained:
+        - target: report
+      report:
+        - target: report
+          effects:
+            - set:
+                status: "reporting"
+      status:
+        - target: .
+      look:
+        - target: .

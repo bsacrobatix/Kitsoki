@@ -1,0 +1,120 @@
+# report — fold every recorded leg's driver+judge outcome (world.leg_results)
+# into report.md AND deck.slidey.json under the run dir: the ONE per-transport
+# verdict table (VS Code legs labeled "bridge-level", never editor-level).
+# report.md is folded in Starlark (scripts/build_report.star); deck.slidey.json
+# is folded by tools/product-journey/run.py's --scenario-qa-report subcommand,
+# which reuses this module's existing Slidey deck-shape validator. Re-runs on
+# every entry (including the operator-typable "report" intent), so both
+# artifacts always reflect the current session's leg_results, never stale.
+
+states:
+
+  report:
+    description: "Folded the per-transport verdict table into report.md."
+    relevant_world: [run_id, run_dir, scenario_ref, scenario_description, leg_results, pass_count, fail_count, degraded_count, report_path, report_summary, deck_path, status]
+    view:
+      - banner:
+          text: "SCENARIO QA REPORT"
+          subtitle: "{{ world.report_summary }}"
+          color: "#059669"
+      - kv:
+          pairs:
+            Run: "{{ world.run_id }}"
+            Legs recorded: "{{ world.leg_results.items|length }}"
+            Pass: "{{ world.pass_count }}"
+            Fail: "{{ world.fail_count }}"
+            Degraded: "{{ world.degraded_count }}"
+            Report: '{{ world.report_path|default:"(building…)" }}'
+            Deck: '{{ world.deck_path|default:"(building…)" }}'
+      - heading: "Per-transport verdicts"
+      - code: |
+          {% for leg in world.leg_results.items %}
+          - {{ leg.transport }} / {{ leg.scenario }}: driver={{ leg.driver_status }} verdict={{ leg.verdict }} — {{ leg.verdict_summary }} [{{ leg.evidence_level }}]
+          {% endfor %}
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "check scenario=... transport=..."
+              hint: "start a new scenario-qa check"
+              intent: check
+            - label: "report"
+              hint: "rebuild report.md"
+              intent: report
+            - label: "status"
+              intent: status
+            - label: "look"
+              intent: look
+    on_enter:
+      - invoke: host.starlark.run
+        id: build_report
+        with:
+          script: scripts/build_report.star
+          inputs:
+            run_id: "{{ world.run_id }}"
+            run_dir: "{{ world.run_dir_rel }}"
+            scenario_ref: "{{ world.scenario_ref }}"
+            scenario_description: "{{ world.scenario_description }}"
+            leg_results: "{{ world.leg_results }}"
+        bind:
+          report_path: report_path
+          report_summary: report_summary
+        on_error: idle
+      # report.md is folded in Starlark (above); deck.slidey.json is folded by
+      # tools/product-journey/run.py's --scenario-qa-report subcommand instead
+      # — it reuses this module's existing Slidey deck-shape validator rather
+      # than reimplementing scene-shape rules here. leg_results is templated
+      # in directly (map -> compact JSON splice, reference.md:255-256) so no
+      # intermediate file/`|json` filter is needed.
+      - invoke: host.run
+        id: build_scenario_qa_deck
+        with:
+          cmd: python3
+          args:
+            - tools/product-journey/run.py
+            - --scenario-qa-report
+            - --json-output
+            - --run-dir
+            - "{{ world.run_dir }}"
+            - --scenario
+            - "{{ world.scenario_ref }}"
+            - --scenario-description
+            - "{{ world.scenario_description }}"
+            - --leg-results-json
+            - "{{ world.leg_results }}"
+          cwd: "."
+        bind:
+          deck_path: "stdout_json.deck_path"
+        on_error: .
+    on:
+      check:
+        - when: "(slots.scenario ?? '') == '' && (slots.description ?? '') == ''"
+          target: .
+          effects:
+            - set:
+                last_error: "check needs scenario=<catalog-id> or description=\"<free text>\"."
+        - target: plan
+          effects:
+            - set:
+                scenario_ref: "{{ slots.scenario ?? '' }}"
+                scenario_description: "{{ slots.description ?? '' }}"
+                transport_arg: "{{ slots.transport ?? world.transport_arg }}"
+                persona: "{{ slots.persona ?? world.persona }}"
+                target: "{{ slots.target ?? world.target }}"
+                seed: "{{ slots.seed ?? world.seed }}"
+                mode: "{{ (slots.description ?? '') != '' ? 'adhoc' : 'catalog' }}"
+                last_error: ""
+                status: "planning"
+                leg_index: 0
+                leg_count: 0
+                legs: {}
+                leg_results: { items: [] }
+                pass_count: 0
+                fail_count: 0
+                degraded_count: 0
+      report:
+        - target: report
+      status:
+        - target: .
+      look:
+        - target: .
