@@ -203,6 +203,10 @@ world:
   stats_root:     { type: string, default: "" }
   stats_output:   { type: string, default: "" }
   stats_summary:  { type: string, default: "" }
+  issue_state_status: { type: string, default: "" }
+  issue_state_output: { type: string, default: "" }
+  issue_state_count: { type: int, default: 0 }
+  issue_state_summary: { type: string, default: "" }
   stats_gate_status: { type: string, default: "" }
   stats_gate_summary: { type: string, default: "" }
   stats_current_run_scanned: { type: string, default: "" }
@@ -408,12 +412,14 @@ intents:
       gh_agent_asset_dir: { type: string, required: false }
       gh_agent_comment_mode: { type: string, required: false }
   stats:
-    description: "Derive filed/fixed/reopened/similar issue stats from product-journey run bundles and cached GitHub issue state."
-    examples: ["stats", "derive issue stats", "stats issue_state_file=.artifacts/product-journey/issues.json"]
+    description: "Derive filed/fixed/reopened/similar issue stats from product-journey run bundles and native/cached GitHub issue state."
+    examples: ["stats", "derive issue stats", "stats refresh_issue_state=true ticket_repo=owner/repo"]
     priority: 78
     slots:
       stats_root: { type: string, required: false }
       issue_state_file: { type: string, required: false }
+      refresh_issue_state: { type: string, required: false }
+      ticket_repo: { type: string, required: false }
       stats_output: { type: string, required: false }
   driver_event:
     description: "Record what the reusable driver actually attempted for a scenario."

@@ -61,6 +61,10 @@ bound to `host.gh.ticket`; agents should not shell out to `gh issue ...`.
 The CLI mirrors that native surface for automation and debugging:
 `kitsoki gitops issue-status --repo owner/repo --id N --json` and
 `kitsoki gitops issue-create --repo owner/repo --title ... --body ... --json`.
+Product-journey stats refreshes use
+`kitsoki gitops issue-state-cache --findings-root .artifacts/product-journey --repo owner/repo --output .artifacts/product-journey/stats/issue-state.json --json`
+to scan filed findings and build the issue-state cache through the same native
+ticket provider.
 Both use the same GitHub REST-backed ticket provider as story flows, preserving
 metadata and testability.
 

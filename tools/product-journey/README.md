@@ -433,6 +433,12 @@ validation gates are green, the same native gitops facade posts a
 GitHub issue, and writes `findings.issue_closeout` plus closed issue state back
 into `findings.json`; follow-up stats can then be derived from the run bundle
 instead of hand-maintained notes.
+For older filed issues or cross-run summaries whose current state is not already
+in `findings.json`, run the story intent
+`stats refresh_issue_state=true ticket_repo=<owner/repo>` or the CLI
+`python3 tools/product-journey/run.py --stats --refresh-issue-state --ticket-repo <owner/repo>`.
+That refreshes the issue-state cache through
+`kitsoki gitops issue-state-cache` / `host.gh.ticket`, not raw `gh`.
 
 The lower-level `file_findings ticket_repo=<owner/repo> [mode=dry-run]` story
 intent and the CLI `--file-findings` command remain useful for previewing or

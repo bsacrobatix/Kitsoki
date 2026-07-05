@@ -51,6 +51,10 @@ host_handlers:
             issues_reopened_count: 1
             issues_unknown_state_count: 2
             similar_pair_count: 3
+            issue_state_status: issue_state_cached
+            issue_state_output: .artifacts/product-journey/issue-state.json
+            issue_state_count: 9
+            issue_state_summary: "Refreshed 9 issue state record(s) through kitsoki gitops issue-state-cache."
             manual_stats_replaced: "yes"
             stats_summary: "Derived product-journey stats: 11 found, 9 filed, 4 fixed, 1 reopened, 3 similar pair(s)."
 
@@ -74,6 +78,8 @@ turns:
       slots:
         stats_root: .artifacts/product-journey
         issue_state_file: .artifacts/product-journey/issue-state.json
+        refresh_issue_state: "true"
+        ticket_repo: owner/repo
         stats_output: .artifacts/product-journey/stats/latest.json
     expect_state: run_created
     expect_world:
@@ -87,8 +93,12 @@ turns:
       stats_reopened_count: 1
       stats_unknown_state_count: 2
       stats_similar_pair_count: 3
+      issue_state_status: issue_state_cached
+      issue_state_output: .artifacts/product-journey/issue-state.json
+      issue_state_count: 9
+      issue_state_summary: "Refreshed 9 issue state record(s) through kitsoki gitops issue-state-cache."
       stats_summary: "Derived product-journey stats: 11 found, 9 filed, 4 fixed, 1 reopened, 3 similar pair(s)."
-    expect_view_matches: "RUN CREATED[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 11, filed 9, fixed 4, reopened 1,[\\s\\S]*similar 3[\\s\\S]*Stats runs[\\s\\S]*8 scanned; unknown state 2[\\s\\S]*Derived product-journey stats: 11 found, 9 filed, 4 fixed, 1 reopened, 3 similar[\\s\\S]*pair\\(s\\)\\."
+    expect_view_matches: "RUN CREATED[\\s\\S]*Issue state[\\s\\S]*issue_state_cached: 9 refreshed[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 11, filed 9, fixed 4, reopened 1,[\\s\\S]*similar 3[\\s\\S]*Stats runs[\\s\\S]*8 scanned; unknown state 2[\\s\\S]*Issue state artifact[\\s\\S]*\\.artifacts/product-journey/issue-state\\.json[\\s\\S]*Refreshed 9 issue state record\\(s\\) through kitsoki gitops issue-state-cache\\.[\\s\\S]*Derived product-journey stats: 11 found, 9 filed, 4 fixed, 1 reopened, 3 similar[\\s\\S]*pair\\(s\\)\\."
     expect_host_calls:
       - handler: host.run
         args: { call: derive_product_journey_stats }

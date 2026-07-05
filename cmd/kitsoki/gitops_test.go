@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -135,6 +136,139 @@ func TestGitopsIssueCreateUsesNativeTicketProvider(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body missing %q:\n%s", want, body)
 		}
+	}
+}
+
+func TestGitopsIssueStateCacheUsesNativeTicketProvider(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	root := t.TempDir()
+	findings := map[string]any{
+		"items": []any{
+			map[string]any{
+				"id":     "finding-1",
+				"kind":   "issue",
+				"title":  "Replay miss must fail closed",
+				"origin": "observed",
+				"github_issue": map[string]any{
+					"url":    "https://github.com/o/r/issues/105",
+					"repo":   "o/r",
+					"number": "105",
+				},
+			},
+			map[string]any{
+				"id":     "finding-duplicate",
+				"kind":   "issue",
+				"title":  "Same issue from another scenario",
+				"origin": "observed",
+				"github_issue": map[string]any{
+					"url":    "https://github.com/o/r/issues/105",
+					"repo":   "o/r",
+					"number": "105",
+				},
+			},
+			map[string]any{
+				"id":     "finding-2",
+				"kind":   "issue",
+				"title":  "Done room does not close tickets",
+				"origin": "observed",
+				"github_issue": map[string]any{
+					"url": "https://github.com/o/r/issues/117",
+				},
+			},
+			map[string]any{
+				"id":     "unfiled",
+				"kind":   "issue",
+				"title":  "No GitHub issue yet",
+				"origin": "observed",
+			},
+		},
+	}
+	runDir := filepath.Join(root, "run-a")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("mkdir run dir: %v", err)
+	}
+	if err := gitopsWriteJSONFile(filepath.Join(runDir, "findings.json"), findings); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+
+	var gotPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/105":
+			writeJSON(w, map[string]any{
+				"number":   105,
+				"title":    "Replay miss must fail closed",
+				"body":     "body",
+				"state":    "closed",
+				"html_url": "https://github.com/o/r/issues/105",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/105/comments":
+			writeJSON(w, []map[string]any{{"body": "kitsoki-fixed-in: 23bbf28a"}})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/117":
+			writeJSON(w, map[string]any{
+				"number":   117,
+				"title":    "Done room does not close tickets",
+				"body":     "body",
+				"state":    "open",
+				"html_url": "https://github.com/o/r/issues/117",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/117/comments":
+			writeJSON(w, []map[string]any{{"body": "kitsoki-fixed-in: 4165e298"}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("gitops issue-state-cache must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
+
+	output := filepath.Join(root, "stats", "issue-state.json")
+	cmd := gitopsCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"issue-state-cache", "--findings-root", root, "--output", output, "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("issue-state-cache: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out.String())
+	}
+	if got["status"] != "issue_state_cached" || intValue(got, "issues_count") != 2 {
+		t.Fatalf("cache output = %+v", got)
+	}
+	if got["output"] != output {
+		t.Fatalf("output path = %+v", got)
+	}
+	wantPaths := []string{
+		"GET /repos/o/r/issues/105",
+		"GET /repos/o/r/issues/105/comments",
+		"GET /repos/o/r/issues/117",
+		"GET /repos/o/r/issues/117/comments",
+	}
+	if strings.Join(gotPaths, "\n") != strings.Join(wantPaths, "\n") {
+		t.Fatalf("native requests:\n%s", strings.Join(gotPaths, "\n"))
+	}
+	cache, err := gitopsReadJSONFile(output)
+	if err != nil {
+		t.Fatalf("read output cache: %v", err)
+	}
+	issues := mapSliceValue(cache, "issues")
+	if len(issues) != 2 {
+		t.Fatalf("issues = %+v", issues)
+	}
+	if stringValue(issues[0], "issue_state") != "closed" || len(mapSliceValue(issues[0], "comments")) != 1 {
+		t.Fatalf("first issue = %+v", issues[0])
+	}
+	if stringValue(issues[1], "issue_state") != "open" || stringValue(issues[1], "url") != "https://github.com/o/r/issues/117" {
+		t.Fatalf("second issue = %+v", issues[1])
 	}
 }
 

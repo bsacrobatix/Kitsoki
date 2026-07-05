@@ -90,6 +90,10 @@ TRANSPORT_EVIDENCE_CONTRACTS = {
 }
 
 
+def truthy(value) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def load_catalog(path: Path):
     return json.loads(path.read_text())
 
@@ -5351,6 +5355,31 @@ def derive_stats(root: Path, issue_state_file: str, similarity_threshold: float,
     return result
 
 
+def refresh_issue_state_cache(root: Path, issue_state_file: str, ticket_repo: str) -> dict:
+    output = run_dir_from_arg(issue_state_file) if issue_state_file else root / "stats" / "issue-state.json"
+    cmd = [
+        "go", "run", "./cmd/kitsoki",
+        "gitops", "issue-state-cache",
+        "--findings-root", str(root),
+        "--output", str(output),
+        "--json",
+    ]
+    if ticket_repo:
+        cmd.extend(["--repo", ticket_repo])
+    proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True)
+    if proc.returncode != 0:
+        raise SystemExit(
+            "kitsoki gitops issue-state-cache failed\n"
+            f"cmd: {' '.join(shlex.quote(part) for part in cmd)}\n"
+            f"stdout:\n{proc.stdout}\n"
+            f"stderr:\n{proc.stderr}"
+        )
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"kitsoki gitops issue-state-cache printed invalid JSON: {exc}\n{proc.stdout}") from exc
+
+
 def record_driver_event(
     run_dir: Path,
     scenario_id: str,
@@ -9860,6 +9889,7 @@ def main() -> None:
     parser.add_argument("--stats", action="store_true", help="Derive product-journey issue stats from run bundles and cached issue state")
     parser.add_argument("--stats-root", default="", help="Root containing product-journey run bundles for --stats; defaults to .artifacts/product-journey")
     parser.add_argument("--issue-state-file", default="", help="Optional JSON fixture/cache with GitHub issue state for --stats")
+    parser.add_argument("--refresh-issue-state", nargs="?", const="true", default="", help="Before --stats, refresh the issue-state cache through kitsoki gitops issue-state-cache (true/false)")
     parser.add_argument("--stats-output", default="", help="Optional path to write the derived --stats JSON")
     parser.add_argument("--similarity-threshold", type=float, default=0.82, help="Title similarity threshold for --stats duplicate/similar issue detection")
     parser.add_argument("--similar-pair-limit", type=int, default=25, help="Maximum similar issue pairs to include in --stats JSON; use -1 for all pairs")
@@ -10539,7 +10569,20 @@ def main() -> None:
 
     if args.stats:
         stats_root = run_dir_from_arg(args.stats_root) if args.stats_root else ARTIFACT_ROOT
-        result = derive_stats(stats_root, args.issue_state_file, args.similarity_threshold, args.similar_pair_limit, args.stats_output)
+        issue_state_file = args.issue_state_file
+        issue_state_refresh = None
+        if truthy(args.refresh_issue_state):
+            issue_state_refresh = refresh_issue_state_cache(stats_root, issue_state_file, args.ticket_repo)
+            issue_state_file = str(issue_state_refresh.get("output", issue_state_file))
+        result = derive_stats(stats_root, issue_state_file, args.similarity_threshold, args.similar_pair_limit, args.stats_output)
+        if issue_state_refresh:
+            result["issue_state_status"] = issue_state_refresh.get("status", "")
+            result["issue_state_output"] = issue_state_refresh.get("output", "")
+            result["issue_state_count"] = issue_state_refresh.get("issues_count", 0)
+            result["issue_state_summary"] = (
+                f"Refreshed {issue_state_refresh.get('issues_count', 0)} issue state record(s) "
+                "through kitsoki gitops issue-state-cache."
+            )
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
             append_log(f"Derived product journey stats: {result['stats_summary']}")
