@@ -4714,6 +4714,8 @@ def render_autonomous_marathon_report(run_dir: Path, result: dict) -> str:
         f"- Review: `{result.get('review_status', '')}` ({result.get('review_failed_count', 0)} failed)",
         f"- Validation: `{result.get('validation_status', '')}` ({result.get('validation_errors', 0)} errors)",
         f"- Weakness routes: {result.get('weakness_route_count', 0)}",
+        f"- Stats gate: `{result.get('stats_gate_status', '')}` - {result.get('stats_gate_summary', '')}",
+        f"- Stats current run scanned: `{result.get('stats_current_run_scanned', '')}`",
         f"- Stats: {result.get('stats_summary', '(not derived)')}",
         "",
         "## Next Driver Action",
@@ -5028,6 +5030,7 @@ def autonomous_marathon(
             f"fixed={stats.get('issues_fixed_count', 0)}/{credible_issue_count}"
         )
     )
+    stats_gate_status = "pass" if stats_ok else "fail"
     status = "autonomous_marathon_valid" if fix_valid and review_ok and validation_ok and stats_ok else "autonomous_marathon_invalid"
     result = {
         **base,
@@ -5053,6 +5056,9 @@ def autonomous_marathon(
         "stats_root": stats.get("stats_root", ""),
         "stats_output": stats.get("stats_output", ""),
         "stats_summary": stats.get("stats_summary", ""),
+        "stats_gate_status": stats_gate_status,
+        "stats_gate_summary": stats_gate,
+        "stats_current_run_scanned": "yes" if current_run_scanned else "no",
         "stats_runs_scanned": stats.get("runs_scanned", 0),
         "stats_found_count": stats.get("findings_found_count", 0),
         "stats_filed_count": stats.get("findings_filed_count", 0),

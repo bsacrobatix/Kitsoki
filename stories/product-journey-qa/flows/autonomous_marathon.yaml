@@ -56,7 +56,7 @@ host_handlers:
           stdout_json:
                 status: autonomous_marathon_valid
                 autonomous_marathon_status: autonomous_marathon_valid
-                autonomous_marathon_summary: "credible_issues=1, fix=autonomous_fix_valid, review=ready, validation=valid"
+                autonomous_marathon_summary: "credible_issues=1, fix=autonomous_fix_valid, review=ready, validation=valid, stats=pass"
                 autonomous_marathon_report_path: .artifacts/product-journey/run-999/autonomous-marathon-report.md
                 autonomous_fix_status: autonomous_fix_valid
                 autonomous_fix_report_path: .artifacts/product-journey/run-999/autonomous-fix-report.md
@@ -105,6 +105,9 @@ host_handlers:
                 stats_reopened_count: 0
                 stats_unknown_state_count: 0
                 stats_similar_pair_count: 0
+                stats_gate_status: pass
+                stats_gate_summary: pass
+                stats_current_run_scanned: "yes"
                 review_status: ready
                 review_summary: "ready: 28/28 checks passed, 0 warnings, 0 failures"
                 review_passed_count: 28
@@ -185,7 +188,7 @@ turns:
       stats_fixed_count: 1
       weakness_route_count: 1
       validation_status: valid
-    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, review=pass, validation=pass[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 1[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*GH-agent claims[\\s\\S]*claimed: claimed 1[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 1, filed 1, fixed 1"
+    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, review=pass, validation=pass[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 1[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*GH-agent claims[\\s\\S]*claimed: claimed 1[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 1, filed 1, fixed 1[\\s\\S]*Stats gate[\\s\\S]*pass: pass; current run scanned yes"
     expect_host_calls:
       - handler: host.run
         args: { call: autonomous_product_journey_marathon_finalize }
