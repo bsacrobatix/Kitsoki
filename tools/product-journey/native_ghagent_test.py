@@ -179,6 +179,8 @@ def main():
               and drained["gh_agent_failed_count"] == 0)
         check("native drain exposed fix artifacts",
               any(link.endswith("/fix-report.md") for link in links))
+        check("native drain exposed independent verification",
+              any(link.endswith("/independent-verify.md") for link in links))
         check("native review is ready", reviewed["review_status"] == "ready")
         check("native validation is valid", validated["status"] == "valid")
         report_text = report.read_text()
