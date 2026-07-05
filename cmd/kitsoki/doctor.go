@@ -79,16 +79,19 @@ func mcpReadiness() (bool, string) {
 	return false, ".mcp.json present but does not register the kitsoki server — run `kitsoki init`"
 }
 
-// initCmd — change 4.3: a top-level `init` alias for the project onboarding step
-// (project-tools install), so a stranger's first move is the obvious one.
-// Installs the embedded agent toolkit + registers the studio MCP into the
-// target project.
+// initCmd — the *toolkit substep* of project onboarding (an alias for
+// `project-tools install`): embedded skills/agents + the studio MCP
+// registration. The full onboarding front door is the dev-story pipeline
+// (`kitsoki run` → "onboard ."), which discovers a project profile and
+// materializes a thin dev-story instance before calling this same install.
+// When the target repo has no `.kitsoki.yaml` (i.e. it was never onboarded),
+// init points the user at `onboard .` instead of silently looking complete.
 func initCmd() *cobra.Command {
 	var target string
 	c := &cobra.Command{
 		Use:     "init",
-		Short:   "Onboard this project — install the agent toolkit + register the studio MCP",
-		Long:    "Alias for `kitsoki project-tools install`: copies the embedded skills/agents into the target project and registers the kitsoki studio MCP server so your coding agent can drive kitsoki.",
+		Short:   "Install the agent toolkit + register the studio MCP (onboarding's toolkit substep)",
+		Long:    "Alias for `kitsoki project-tools install`: copies the embedded skills/agents into the target project and registers the kitsoki studio MCP server so your coding agent can drive kitsoki.\n\nThis is the toolkit substep of full project onboarding. For the complete onboarding (project profile + dev-story instance + toolkit), run `kitsoki run` from the project root and type `onboard .` — see docs/project-onboarding.md.",
 		GroupID: "setup",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -101,7 +104,7 @@ func initCmd() *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "onboarded kitsoki toolkit into %s\n", rep.Target)
+			fmt.Fprintf(out, "installed kitsoki toolkit into %s\n", rep.Target)
 			fmt.Fprintf(out, "  skills: %d linked into .claude/skills\n", len(rep.Skills))
 			fmt.Fprintf(out, "  agents: %d linked into .claude/agents\n", len(rep.Agents))
 			if rep.MCPWritten {
@@ -109,11 +112,43 @@ func initCmd() *cobra.Command {
 			} else {
 				fmt.Fprintf(out, "  mcp:    kitsoki server already registered in %s\n", rep.MCPPath)
 			}
+			if hint := initOnboardPointer(hasProjectConfig(abs)); hint != "" {
+				fmt.Fprint(out, hint)
+			}
 			return nil
 		},
 	}
 	c.Flags().StringVar(&target, "target", ".", "target project root to onboard")
 	return c
+}
+
+// hasProjectConfig reports whether the target repo already carries a
+// `.kitsoki.yaml` — the marker that full onboarding (profile + instance)
+// has run there.
+func hasProjectConfig(root string) bool {
+	_, err := os.Stat(filepath.Join(root, ".kitsoki.yaml"))
+	return err == nil
+}
+
+// initOnboardPointer returns the pointer printed after `kitsoki init` when the
+// target repo was never fully onboarded (no `.kitsoki.yaml`). init only
+// installs the toolkit + MCP; the profile-driven onboarding is `onboard .`.
+// Empty when the repo is already onboarded (or init is being used deliberately
+// as the MCP-client-only mode on an onboarded repo).
+func initOnboardPointer(hasProjectConfig bool) string {
+	if hasProjectConfig {
+		return ""
+	}
+	return `
+note: no .kitsoki.yaml here — this repo is not fully onboarded yet.
+  ` + "`kitsoki init`" + ` only installs the agent toolkit + studio MCP (fine if you
+  just want an MCP client to drive kitsoki). For the full onboarding —
+  project profile + dev-story instance + toolkit — run:
+
+    kitsoki run        # then type: onboard .
+
+  See docs/project-onboarding.md.
+`
 }
 
 // tierHelp groups the ~48 top-level commands into readable tiers for the root

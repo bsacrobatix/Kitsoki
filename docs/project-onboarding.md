@@ -7,6 +7,13 @@ any language, any stack — from "kitsoki is on my PATH" to a
 dev-story instance, the studio MCP registered for your coding agent, and the
 kitsoki skill/agent toolkit installed.
 
+**`onboard .` is THE onboarding.** There is one front door: the dev-story
+onboarding pipeline, which discovers a project **profile**, materializes a
+**thin dev-story instance**, and installs the agent **toolkit + studio MCP**.
+`kitsoki init` is not a second onboarding — it is the *toolkit substep* of that
+pipeline, exposed standalone for the one case where it is the whole job
+([MCP-client-only setups](#the-toolkit-substep-kitsoki-init)).
+
 > **The 30-second version.** From your project root, with only the `kitsoki`
 > binary on PATH (no kitsoki checkout needed):
 > ```sh
@@ -14,7 +21,7 @@ kitsoki skill/agent toolkit installed.
 > ```
 > With no app path, Kitsoki starts the embedded dev-story root for the current
 > project. Walk the four onboarding rooms (review → apply) and you're done.
-> The rest of this page explains what that produces and the standalone command
+> The rest of this page explains what that produces and the toolkit substep
 > behind it.
 
 ---
@@ -50,9 +57,7 @@ dependency.
 
 ---
 
-## Two ways to run it
-
-### 1. The onboarding pipeline (recommended)
+## Running it: `onboard .`
 
 The [dev-story](../stories/dev-story/README.md) hub ships a four-room onboarding
 pipeline that **discovers** your project, lets you **review** the profile, then
@@ -93,24 +98,44 @@ kitsoki session continue --app "$APP" --key local:onboard --intent confirm_init
 kitsoki session continue --app "$APP" --key local:onboard --intent init_applied
 ```
 
-### 2. Just the toolkit + MCP — `kitsoki project-tools install`
+## The toolkit substep: `kitsoki init`
 
-If you only want the agent toolkit and the studio MCP (you already have an
-instance, or you onboarded an older repo before this step existed), run the
-standalone command the apply step calls:
+The apply step above ends by running one standalone command: the toolkit + MCP
+install. `kitsoki init` (an alias for `kitsoki project-tools install`) exposes
+that substep directly:
 
 ```sh
 cd ~/code/my-project
-kitsoki project-tools install --target .
+kitsoki init                        # or: kitsoki init --target <path>
 #   skills: 17 linked into .claude/skills
 #   agents: 2 linked into .claude/agents
 #   mcp:    registered kitsoki server in .../my-project/.mcp.json
 ```
 
-It is idempotent: source trees are refreshed from the binary, our own symlinks
-are re-pointed, an existing `.mcp.json` is **merged** (other servers preserved),
-and a real file a human placed at a link path is left untouched. Add `--json`
-for a machine-readable report.
+It installs the embedded skills/agents and registers the studio MCP — nothing
+else. It does **not** discover a profile, write `.kitsoki.yaml`, or materialize
+a dev-story instance; when it runs in a repo with no `.kitsoki.yaml`, it prints
+a pointer back to `onboard .` so a partial setup never masquerades as a full
+one.
+
+**When to use it standalone (MCP-client-only).** Run `kitsoki init` by itself
+only when the toolkit + MCP *is* the whole job:
+
+- you just want an MCP client (Claude Code, Cursor, Claude Desktop) in this
+  repo to drive kitsoki through the studio tools, with no project profile or
+  dev-story instance;
+- the repo is already onboarded and you're refreshing the toolkit (e.g. after
+  upgrading the binary), or repairing a missing `.mcp.json` flagged by
+  `kitsoki doctor`.
+
+For everything else, use `onboard .` — it calls this same install as its final
+step.
+
+The install is idempotent: source trees are refreshed from the binary, our own
+symlinks are re-pointed, an existing `.mcp.json` is **merged** (other servers
+preserved), and a real file a human placed at a link path is left untouched.
+`kitsoki project-tools install` remains the underlying command; add `--json`
+there for a machine-readable report.
 
 ---
 
@@ -186,6 +211,12 @@ Codex ships the mirrored `.codex/agents/kitsoki-mcp-driver.toml` subagent (no
 whole-session flag); see the
 [Studio MCP dogfood recipe](recipes/studio-mcp-dogfood.md#run-a-pure-kitsoki-driver)
 for the Codex specifics and headless runbook.
+
+**VS Code.** The kitsoki VS Code extension is expected to discover the
+onboarded `.kitsoki/stories/` instance automatically — an onboarded repo should
+need no manual `storiesDir` configuration, with the setting remaining an
+explicit override. (This is the documented contract for the extension;
+auto-discovery ships with its v0.2 work.)
 
 **Use the skills.** The installed skills (`.claude/skills/`) cover authoring,
 debugging, UI demos/QA, dogfooding, and more — your agent discovers them
