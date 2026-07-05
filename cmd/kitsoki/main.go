@@ -1225,6 +1225,7 @@ See 'kitsoki docs llm-guide' §7 for fixture shape.`,
 //	echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{...}}' | kitsoki serve cloak.yaml
 func serveCmd() *cobra.Command {
 	var dbPath string
+	var kitsDir string
 	cmd := &cobra.Command{
 		Use:   "serve <app.yaml>",
 		Short: "Start the MCP server on stdio for an app",
@@ -1276,8 +1277,13 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				return fmt.Errorf("build machine for %q: %w", def.App.ID, err)
 			}
 
-			// Construct the MCP server.
-			srv := kitsokimcp.NewServer(m, s, def)
+			// Construct the MCP server (kit_call is enabled when --kits-dir
+			// discovers one or more installed kits, S3b).
+			kits, err := buildKitDispatcher(kitsDir)
+			if err != nil {
+				return fmt.Errorf("load installed kits from %q: %w", kitsDir, err)
+			}
+			srv := kitsokimcp.NewServer(m, s, def, mcpKitOption(kits))
 
 			// Run until stdin closes or signal received.
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -1288,6 +1294,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 		},
 	}
 	cmd.Flags().StringVar(&dbPath, "db", "", "path to the SQLite session database (default: in-memory)")
+	cmd.Flags().StringVar(&kitsDir, "kits-dir", "", "directory of installed kit.yaml roots (enables the kit_call MCP tool, S3b)")
 	return cmd
 }
 

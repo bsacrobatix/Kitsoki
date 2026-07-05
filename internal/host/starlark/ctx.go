@@ -10,15 +10,16 @@ import (
 )
 
 // buildCtx assembles the `ctx` value passed to main(ctx). It is a Starlark
-// struct with exactly five attributes — inputs, world, http, fs, probe — and
-// nothing else, which is what keeps the sandbox honest: a script cannot reach
-// any capability that buildCtx does not put here. http is the network boundary;
-// fs and probe are the filesystem + allow-listed-process boundary
-// (see Inspector).
+// struct with exactly six attributes — inputs, world, http, fs, probe, host —
+// and nothing else, which is what keeps the sandbox honest: a script cannot
+// reach any capability that buildCtx does not put here. http is the network
+// boundary; fs and probe are the filesystem + allow-listed-process boundary
+// (see Inspector); host is the narrow allow-listed engine-verb boundary (S3d
+// — see HostCaller/WithHost in host_proxy.go).
 //
-// ictx is the Go context carrying the injected HTTPClient and Inspector
-// (resolved lazily per call). inputs are the (already type-validated) effect
-// inputs. worldSnapshot is the read-only world map.
+// ictx is the Go context carrying the injected HTTPClient, Inspector, and
+// HostCaller (resolved lazily per call). inputs are the (already
+// type-validated) effect inputs. worldSnapshot is the read-only world map.
 func buildCtx(ictx context.Context, inputs, worldSnapshot map[string]any) (starlark.Value, error) {
 	inputsVal, err := goToStarlark(inputs)
 	if err != nil {
@@ -28,6 +29,7 @@ func buildCtx(ictx context.Context, inputs, worldSnapshot map[string]any) (starl
 	worldVal := newWorldProxy(worldSnapshot)
 	httpVal := newHTTPProxy(ictx)
 	inspect := newInspectorProxy(ictx)
+	hostVal := newHostProxy(ictx)
 
 	return starlarkstruct.FromStringDict(starlarkstruct.Default, starlark.StringDict{
 		"inputs": inputsVal,
@@ -35,6 +37,7 @@ func buildCtx(ictx context.Context, inputs, worldSnapshot map[string]any) (starl
 		"http":   httpVal,
 		"fs":     &fsValue{p: inspect},
 		"probe":  starlark.NewBuiltin("ctx.probe", inspect.probe),
+		"host":   hostVal,
 	}), nil
 }
 
