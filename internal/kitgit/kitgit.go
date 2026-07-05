@@ -183,6 +183,27 @@ func Materialize(ctx context.Context, runner Runner, url, ref string) (Result, e
 	return Result{Root: root, Commit: commit, TreeHash: treeHash}, nil
 }
 
+// CachedResult looks up an already-materialized commit in the cache without
+// touching the network — the seam `kitsoki kit verify` uses to check a
+// locked git-sourced kit is still present and content-matches, without
+// re-fetching. ok is false when the commit has no materialized cache entry
+// (a fresh Materialize call is needed to populate it).
+func CachedResult(commit string) (res Result, ok bool, err error) {
+	base, err := cacheBaseDir()
+	if err != nil {
+		return Result{}, false, err
+	}
+	root := filepath.Join(base, commit)
+	if _, statErr := os.Stat(filepath.Join(root, ".materialized")); statErr != nil {
+		return Result{}, false, nil
+	}
+	treeHash, err := readSentinelTreeHash(root)
+	if err != nil {
+		return Result{}, false, err
+	}
+	return Result{Root: root, Commit: commit, TreeHash: treeHash}, true, nil
+}
+
 // readSentinelTreeHash reads the tree hash back out of a previously-written
 // `.materialized` sentinel (see Materialize).
 func readSentinelTreeHash(root string) (string, error) {
