@@ -110,7 +110,7 @@ host_handlers:
                 review_passed_count: 28
                 review_failed_count: 0
                 review_warning_count: 0
-                review_total_count: 28
+                review_total_count: 29
                 review_backlog_summary: ""
                 validation_status: valid
                 validation_errors: 0

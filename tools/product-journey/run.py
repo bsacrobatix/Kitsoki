@@ -4367,6 +4367,7 @@ def missing_autonomous_fix_report_tokens(run_dir: Path, findings: dict) -> list[
         return ["autonomous-fix-report.md"]
     text = path.read_text(encoding="utf-8")
     gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
+    issue_closeout = findings.get("issue_closeout", {}) if isinstance(findings.get("issue_closeout", {}), dict) else {}
     expected = [
         item.get("github_issue", {}).get("url", "")
         for item in findings.get("items", [])
@@ -4383,7 +4384,30 @@ def missing_autonomous_fix_report_tokens(run_dir: Path, findings: dict) -> list[
         if isinstance(job, dict)
         for link in gh_agent_job_evidence_links(job)
     )
+    expected.extend(
+        item.get("comment_url", "")
+        for item in issue_closeout.get("items", []) or []
+        if isinstance(item, dict) and item.get("comment_url")
+    )
+    if issue_closeout.get("status"):
+        expected.append(f"Issue close-out: `{issue_closeout.get('status')}`")
     return [token for token in expected if token and token not in text]
+
+
+def issue_closeout_gate(findings: dict, gh_agent_requested: bool, credible_findings: list[dict]) -> tuple[bool, str]:
+    if not credible_findings or not gh_agent_requested:
+        return True, "issue close-out not required"
+    issue_closeout = findings.get("issue_closeout", {}) if isinstance(findings.get("issue_closeout", {}), dict) else {}
+    status = str(issue_closeout.get("status", "")).strip()
+    count = int(issue_closeout.get("count", 0) or 0)
+    errors = issue_closeout.get("errors", []) if isinstance(issue_closeout.get("errors", []), list) else []
+    if status != "closed":
+        return False, f"status={status or '(missing)'}, count={count}"
+    if count < len(credible_findings):
+        return False, f"closed={count}/{len(credible_findings)}"
+    if errors:
+        return False, "; ".join(str(item) for item in errors[:3])
+    return True, f"closed={count}/{len(credible_findings)}"
 
 
 def file_findings(
@@ -5492,6 +5516,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     gh_agent_fix_evidence_complete = (not gh_agent_requested) or not gh_agent_missing_evidence
     gh_agent_independent_verify_complete = (not gh_agent_requested) or not gh_agent_missing_verify
     gh_agent_run_urls_complete = (not gh_agent_requested) or not gh_agent_missing_run_url
+    issue_closeout_ok, issue_closeout_detail = issue_closeout_gate(findings, gh_agent_requested, credible_findings)
 
     checks = [
         {
@@ -5698,6 +5723,12 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
                     else f"run_urls={len([job for job in gh_agent.get('drained_jobs', []) or [] if isinstance(job, dict) and str(job.get('run_url', '')).strip()])}"
                 )
             ),
+        },
+        {
+            "id": "issue-closeout",
+            "status": "pass" if issue_closeout_ok else "fail",
+            "summary": "After autonomous fixes pass, filed GitHub issues receive kitsoki-fixed-in close-out comments and are closed.",
+            "detail": issue_closeout_detail,
         },
         {
             "id": "autonomous-fix-report",
@@ -6825,6 +6856,15 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 "gh-agent-run-url",
                 "Completed gh-agent fix jobs are missing reviewable run URLs",
                 ", ".join(missing_run_urls[:5]),
+            )
+        issue_closeout_ok, issue_closeout_detail = issue_closeout_gate(findings_json, gh_agent_requested, credible_findings)
+        if not issue_closeout_ok:
+            add_validation_issue(
+                issues,
+                "error",
+                "issue-closeout",
+                "Autonomous fixes completed but filed GitHub issues were not closed with kitsoki-fixed-in close-out evidence",
+                issue_closeout_detail,
             )
         missing_report_tokens = missing_autonomous_fix_report_tokens(run_dir, findings_json)
         if missing_report_tokens:

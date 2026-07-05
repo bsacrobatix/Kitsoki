@@ -239,6 +239,51 @@ def attach_bugfix_proof(run_dir, scenario_id):
     )
 
 
+def attach_closeout(run_dir):
+    findings = run.read_json(run_dir / "findings.json")
+    jobs = {
+        job.get("origin_ref"): job
+        for job in findings.get("gh_agent", {}).get("drained_jobs", [])
+        if job.get("state") == "done"
+    }
+    items = []
+    for item in findings.get("items", []):
+        issue = item.get("github_issue", {})
+        if item.get("kind") != "issue" or item.get("origin") == "seeded" or not issue.get("url"):
+            continue
+        origin = f"github:{issue.get('repo')}/issue/{issue.get('number')}"
+        job = jobs.get(origin, {})
+        comment_url = f"{issue['url']}#issuecomment-kitsoki-fixed-in"
+        issue["state"] = "closed"
+        issue["status"] = "closed"
+        issue["closed_by"] = "kitsoki gitops autonomous-fix"
+        issue["closeout_comment_url"] = comment_url
+        issue.setdefault("comments", []).append({
+            "body": "kitsoki-fixed-in\nindependent-verify.md",
+            "url": comment_url,
+        })
+        item["status"] = "fixed"
+        items.append({
+            "finding_id": item.get("id", ""),
+            "issue_url": issue["url"],
+            "repo": issue.get("repo", ""),
+            "number": issue.get("number", ""),
+            "comment_url": comment_url,
+            "run_url": job.get("run_url", ""),
+            "job_id": job.get("job_id", ""),
+            "closed": True,
+        })
+    findings["issue_closeout"] = {
+        "status": "closed",
+        "count": len(items),
+        "summary": f"Closed {len(items)} fixed GitHub issue(s).",
+        "items": items,
+        "errors": [],
+    }
+    run.write_json(run_dir / "findings.json", findings)
+    run.update_derived_artifacts(run_dir, None)
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
@@ -366,14 +411,30 @@ def main():
         urls = sorted(i["github_issue"]["url"] for i in findings2["items"] if i.get("github_issue"))
         _check("urls stable across re-runs", len(urls) == 2 and len(set(urls)) == 2)
 
-        # 4. Gates: review counts the filing check; a new credible finding
+        # 4. Gates: review counts filing, gh-agent, and close-out checks; a
+        # direct file_findings run is not complete until native gitops closes
+        # the fixed issues.
+        reviewed = run.review_run_bundle(run_dir, None)
+        _check("review has 29 checks", reviewed["total"] == 29)
+        _check("direct filing requires issue close-out before final review",
+               review_check(reviewed, "issue-closeout")["status"] == "fail"
+               and "status=(missing)" in review_check(reviewed, "issue-closeout")["detail"])
+        validated = run.validate_run_bundle(run_dir)
+        _check("validate blocks missing issue close-out",
+               any(i["id"] == "issue-closeout" and i["severity"] == "error"
+                   for i in validated["issues"]))
+        attach_closeout(run_dir)
+
+        # 5. Gates: a new credible finding
         # after filing trips review + validate until re-filed.
         reviewed = run.review_run_bundle(run_dir, None)
-        _check("review has 28 checks", reviewed["total"] == 28)
+        _check("review has 29 checks after close-out", reviewed["total"] == 29)
         _check("weakness-routing passes when weakness has PRD route",
                review_check(reviewed, "weakness-routing")["status"] == "pass")
         _check("findings-filed passes when fully filed",
                review_check(reviewed, "findings-filed")["status"] == "pass")
+        _check("issue-closeout passes when fixed issues are closed",
+               review_check(reviewed, "issue-closeout")["status"] == "pass")
         _check("gh-agent-fixes passes when drained",
                review_check(reviewed, "gh-agent-fixes")["status"] == "pass")
         _check("gh-agent-fix-evidence passes when assets are present",
@@ -386,7 +447,7 @@ def main():
         _check("validate has no findings-filed error",
                not any(i["id"] == "findings-filed" for i in validated["issues"]))
         _check("validate has no gh-agent evidence error",
-               not any(i["id"] in {"gh-agent-fixes", "gh-agent-fix-evidence", "gh-agent-independent-verify", "gh-agent-run-url", "gh-agent-fix-deck"} for i in validated["issues"]))
+               not any(i["id"] in {"gh-agent-fixes", "gh-agent-fix-evidence", "gh-agent-independent-verify", "gh-agent-run-url", "issue-closeout", "gh-agent-fix-deck"} for i in validated["issues"]))
         saved_findings = run.read_json(run_dir / "findings.json")
         missing_asset_findings = json.loads(json.dumps(saved_findings))
         for job in missing_asset_findings["gh_agent"]["drained_jobs"]:
@@ -477,8 +538,8 @@ def main():
         _check("re-filing closes the gate",
                review_check(reviewed, "findings-filed")["status"] == "pass")
 
-        # 5. Composite autonomous fix loop: one runner call owns filing,
-        # gh-agent drain, review, and validation.
+        # 6. The legacy Python composite loop owns filing and gh-agent drain,
+        # but native gitops is required for final issue close-out.
         stable_scenarios = [scenario for scenario in scenarios if scenario.get("id") == "bugfix"]
         run_dir2, run_json2 = run.build_run_bundle(
             catalog, run.load_github_targets(run.GITHUB_TARGETS),
@@ -500,9 +561,11 @@ def main():
             "none",
             None,
         )
-        _check("autonomous loop validates bundle", result["autonomous_fix_status"] == "autonomous_fix_valid")
-        _check("autonomous loop reports all reliability gates",
-               result["autonomous_gate_summary"] == "filing=pass, gh_agent=pass, review=pass, validation=pass")
+        _check("legacy autonomous loop requires native close-out",
+               result["autonomous_fix_status"] == "autonomous_fix_invalid")
+        _check("legacy autonomous loop reports missing close-out gates",
+               result["autonomous_gate_summary"] == "filing=pass, gh_agent=pass, review=fail, validation=fail"
+               and any(i["id"] == "issue-closeout" for i in result["validation_issues"]))
         _check("autonomous loop preserves filing status", result["filing_status"] == "findings_filed")
         _check("autonomous loop drained gh-agent", result["gh_agent_drain_status"] == "drained" and result["gh_agent_done_count"] == 1)
         _check("autonomous loop exposes fix evidence assets",
@@ -517,7 +580,8 @@ def main():
                and "https://agent.example/run/job-1" in report_text
                and "https://agent.example/run/job-1/artifacts/fix-report.md" in report_text
                and "https://agent.example/run/job-1/artifacts/independent-verify.md" in report_text)
-        _check("autonomous loop reviewed and validated", result["review_total_count"] == 28 and result["validation_status"] == "valid")
+        _check("legacy autonomous loop reviewed close-out gate",
+               result["review_total_count"] == 29 and result["validation_status"] == "invalid")
 
         run_dir_facade, run_json_facade = run.build_run_bundle(
             catalog, run.load_github_targets(run.GITHUB_TARGETS),
@@ -550,6 +614,9 @@ def main():
                facade_result["autonomous_fix_status"] == "autonomous_fix_valid")
         _check("gitops autonomous-fix facade writes report",
                Path(facade_result["autonomous_fix_report_path"]).exists())
+        _check("gitops autonomous-fix facade closes filed issues",
+               facade_result["issue_closeout_status"] == "closed"
+               and facade_result["issue_closeout_count"] == 1)
         report.unlink()
         reviewed_missing_report = run.review_run_bundle(run_dir2, None)
         _check("review fails missing autonomous report",
