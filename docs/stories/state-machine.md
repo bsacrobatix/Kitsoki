@@ -1177,6 +1177,34 @@ the usual `OffPathQuestion` / `OffPathAnswer`; there is no
 (`stories/dev-story/rooms/main.yaml`). Full design narrative:
 [`architecture.md` §9](architecture.md#9-agent-rooms-meta-and-off-path).
 
+### Room workbenches — one block instead of four hand-rolled primitives
+
+A room that wants the full "governed free-form floor" — `write_mode:
+read_only` + `agent_off_ramp:` + an `on_enter host.agent.task` dispatch + a
+free-text capture intent, all four wired together — can declare a single
+`workbench:` block instead of hand-authoring each one:
+
+```yaml
+states:
+  bench:
+    workbench:
+      agent: builder                       # must resolve to WS effect write|external
+      prompt: prompts/bench.md
+      acceptance_schema: schemas/bench-note.json
+```
+
+The loader **desugars** this at load time into exactly those four
+primitives — already-shipped mechanisms, not new ones — before the
+write-mode / off-ramp / effect-taxonomy validation passes run, so those
+existing checks validate the desugared shape for free. A route-out to
+another authored pipeline stays a hand-authored `on:` arc's
+`set:`/`emit_intent:` effects; the workbench agent never constructs a
+transition or a target room's `initial_world` itself. dev-story's `landing`
+room is the reference consumer — see
+[dev-story's README](../../stories/dev-story/README.md#the-free-form-workbench-landing).
+Full model, desugaring contract, invariants, and the deterministic-seam
+rule: [`room-workbench.md`](../architecture/room-workbench.md).
+
 ### Contextual routing — a routing tier, not a transition
 
 A state can opt into a **contextual routing tier** (`contextual_routing: {enabled: true}`) that sits between the embedding tier and the LLM in the routing stack. It classifies the utterance into four classes (`intent`, `help`, `room_request`, `meta_edit`) and dispatches accordingly. Crucially, the three lane classes — `help`, `room_request`, `meta_edit` — route into a persistent room chat **without advancing the state machine**: state and world stay unchanged, and the FSM's next-turn menu is still the same room's intents. Only `class=intent` produces a real state-machine transition. Contextual routing is a routing decision inside the orchestrator's `translate` step, not a state node or edge in the app graph. See [`semantic-routing.md` §7](../architecture/semantic-routing.md#7-contextual-routing-tier).
