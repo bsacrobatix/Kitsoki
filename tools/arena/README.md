@@ -308,7 +308,7 @@ job type scales.
   spend. A real docker-gated run (the actual swarm inside the browser image)
   is manual acceptance only, out of this test gate's scope.
 
-## Status — usable-kitsoki-gate job type registered (usable-kitsoki-release-gate, Tasks 2 + 3.1/3.2)
+## Status — usable-kitsoki-gate job type registered (usable-kitsoki-release-gate, Tasks 2, 3, 4, 5.1/5.2)
 
 `usable-kitsoki-gate` is a fourth job type alongside `bugfix`/`persona-qa`/
 `swarm` (`arena plugins` lists all four). Per
@@ -339,15 +339,20 @@ override is given.
   `tui`/`mcp` shell into their own stub runner script under
   `tools/usable-kitsoki-gate/`. `GATE_SURFACE`/`GATE_SCENARIO_ID`/
   `GATE_PERSONA`/`GATE_SCENARIO_CORPUS`/`GATE_RUN_ID`/`GATE_RESULTS_PATH` env
-  vars carry the cell's coords through either path. **The three concrete
-  harness entry points still don't exist** (`tests/playwright/
-  usable-kitsoki-gate-web.spec.ts`, `tools/usable-kitsoki-gate/
-  run_tui_gate.py`, `tools/usable-kitsoki-gate/run_mcp_gate.py`) — that's
-  Task 3.3 (swarm tier 1/2 concurrency wiring), still gated. S1 (workbench
-  producer contract, `internal/orchestrator/workbench_gate_signal.go`) and
-  S4 (scenario foundry, `tools/session-mining/scenario_compiler.py` +
-  `calibration/`) have both landed. No separate `--live` path exists yet
-  either (mirrors `swarm.py`'s `live` no-op).
+  vars carry the cell's coords through either path. Two of the three
+  no-LLM harness entry points now exist (`tools/usable-kitsoki-gate/
+  run_tui_gate.py`, `tools/usable-kitsoki-gate/run_mcp_gate.py`); the real
+  browser-driven `tests/playwright/usable-kitsoki-gate-web.spec.ts` remains
+  separately gated, larger, browser-specific work. S1 (workbench producer
+  contract, `internal/orchestrator/workbench_gate_signal.go`) and S4
+  (scenario foundry, `tools/session-mining/scenario_compiler.py` +
+  `calibration/`) have both landed. A real `--live` path now exists too:
+  `drive_command(cell, live=True)` dispatches into
+  `tools/usable-kitsoki-gate/run_live_gate.py --live-gate`, which drives a
+  real agent against `stories/dev-story`'s real `workbench:` room —
+  double-gated (`arena run --live` plus that script's own `--live-gate`
+  argv flag, mirroring `tools/swarm/tiers/liveExplorerCli.ts`), never run
+  in any test or CI job (see `.github/workflows/usable-kitsoki-gate.yml`).
 - An empty scenario corpus (no targets/variants/axes) enumerates to **zero
   cells**, not an error — `JobSpec.cells()` already returns `[]` for empty
   `targets`/`variants`/any axis with an empty value list; no special-casing
@@ -447,3 +452,29 @@ override is given.
   number is an honest artifact of `stories/scenario-foundry-harness` not
   being a real `workbench:` room yet, not a workbench-quality finding, and
   why the threshold was NOT silently lowered in response.
+- **Live gate harness** (Task 3.3's live half):
+  `tools/usable-kitsoki-gate/run_live_gate.py` is the gated, cost-bearing
+  counterpart to `flow_gate_runner.py` — a real spawned agent drives
+  `stories/dev-story`'s real `workbench:` room turn by turn, and the
+  resulting on-disk session trace is joined via the SAME
+  `extract_turn_signals`/`build_parity_record` functions the no-LLM path
+  uses (never a second join implementation). Structurally gated exactly
+  like `tools/swarm/tiers/liveExplorerCli.ts`'s tier 3: a literal
+  `--live-gate` argv flag with no env fallback, checked BEFORE any env is
+  read or any agent spawned. `tools/arena/tests/
+  test_usable_kitsoki_gate_live_gate.py` proves the refusal — including
+  monkeypatching `subprocess.run` to raise if ever called — without
+  spawning a real agent, mirroring `swarm-cassette-users.spec.ts`'s
+  "stubbed live-explorer dispatch contract" test shape.
+- **CI workflow** (Task 5.1 + 5.2): `.github/workflows/
+  usable-kitsoki-gate.yml` has two jobs. `no-llm-gate` runs on every PR
+  whose diff touches the S1/S2/S4/S5 code paths (path-filtered), executing
+  `make usable-kitsoki-gate-check` (the schema/plugin/corpus/golden/
+  live-gate-refusal/calibration suite above) — cassette/flow-replay only,
+  zero LLM spend. `release-candidate-live-gate` only fires on an `rc-*` tag
+  push or an explicit `workflow_dispatch` with `confirm_live: yes` typed in
+  (never `pull_request`, never a plain `push: main`) — its trigger routing
+  is real and `actionlint`-clean, but the job itself is an honest,
+  loudly-failing placeholder until a real provider-credential secret and
+  the arena browser-capable container images are wired in (deliberate
+  operator follow-up, not fabricated here).

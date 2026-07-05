@@ -608,6 +608,23 @@ features-check:
 vitest-check:
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm test
 
+# usable-kitsoki-gate-check runs the no-LLM half of the usable-kitsoki
+# release gate (docs/proposals/usable-kitsoki-release-gate.md Task 5.1):
+# the arena plugin/schema/golden-fixture suite plus the 18-scenario
+# calibration sweep, regenerated and diffed against the checked-in report.
+# Every test here is cassette/flow-replay only (`go run ./cmd/kitsoki test
+# flows`, never a real LLM) — see AGENTS.md's "never use a real LLM or
+# incur costs" rule. Wired into .github/workflows/usable-kitsoki-gate.yml's
+# `no-llm-gate` job with path filters on the S1/S2/S4/S5 code it exercises.
+.PHONY: usable-kitsoki-gate-check
+usable-kitsoki-gate-check:
+	python3 tools/arena/tests/test_usable_kitsoki_gate_schema.py
+	python3 tools/arena/tests/test_usable_kitsoki_gate_plugin.py
+	python3 tools/arena/tests/test_usable_kitsoki_gate_corpus.py
+	python3 tools/arena/tests/test_usable_kitsoki_gate_golden_fixtures.py
+	python3 tools/arena/tests/test_usable_kitsoki_gate_live_gate.py
+	python3 tools/arena/tests/test_usable_kitsoki_gate_calibration.py
+
 features-index:
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:index
 

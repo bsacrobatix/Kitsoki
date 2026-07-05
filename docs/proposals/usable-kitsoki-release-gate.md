@@ -5,24 +5,35 @@
 into cell enumeration/`score()`), 3.3's no-LLM half (bounded-concurrency
 flow-replay harness for the tui/mcp surfaces,
 `tools/usable-kitsoki-gate/run_tui_gate.py` / `run_mcp_gate.py` /
-`run_calibration_gate.py`), 4.1 (golden regression fixtures, `e4f55ffb`), and
-4.2 (the 18-scenario calibration-set run, checked in at `tools/arena/tests/
-fixtures/usable-kitsoki-gate/calibration-report.json`) are shipped — the
-parity verdict schema, gate constants, the registered `usable-kitsoki-gate`
-arena plugin (now enumerating one cell per S4 scenario x surface off the
-committed calibration set, and joining S1's raw per-turn signal into
-`candidate_completed`/`source_completed` in `score()`), the two landed
-no-LLM harness entry points, and the offline golden-regression proof that
-the gate flips PASS→FAIL on each condition all exist and are tested, zero
-LLM spend. See `docs/tracing/usable-kitsoki-gate.md` for the narrative doc
-this content has moved to, and `usable_kitsoki_gate_constants.py`'s
+`run_calibration_gate.py`), 3.3's live half
+(`tools/usable-kitsoki-gate/run_live_gate.py`, a real agent driving
+`stories/dev-story`'s real `workbench:` room — double-gated behind
+`arena run --live` and the script's own `--live-gate` argv flag, never
+invoked by any test), 4.1 (golden regression fixtures, `e4f55ffb`), 4.2 (the
+18-scenario calibration-set run, checked in at `tools/arena/tests/
+fixtures/usable-kitsoki-gate/calibration-report.json`), and 5.1 + 5.2
+(`.github/workflows/usable-kitsoki-gate.yml` — a cassette-only no-LLM CI job
+path-filtered on S1/S2/S4/S5 code, plus a release-candidate live-gate job
+whose `rc-*`-tag/`workflow_dispatch`-only trigger routing is real and
+`actionlint`-clean, though its credential/image arming is deliberate
+operator follow-up) are shipped — the parity verdict schema, gate
+constants, the registered `usable-kitsoki-gate` arena plugin (now
+enumerating one cell per S4 scenario x surface off the committed
+calibration set, joining S1's raw per-turn signal into
+`candidate_completed`/`source_completed` in `score()`, and dispatching a
+real live cell into `run_live_gate.py` when `arena run --live` is passed),
+the three landed no-LLM harness entry points, the live harness, the CI
+workflow, and the offline golden-regression proof that the gate flips
+PASS→FAIL on each condition all exist and are tested, zero LLM spend in
+CI. See `docs/tracing/usable-kitsoki-gate.md` for the narrative doc this
+content has moved to, and `usable_kitsoki_gate_constants.py`'s
 calibration-contact note for the honest finding the calibration run
 surfaced (0% measured parity — an artifact of `stories/scenario-foundry-
 harness` not yet being a real `workbench:` room, not a workbench quality
 regression; the 90% placeholder threshold was deliberately NOT lowered in
 response). What remains gated: 3.3's real browser-driven web-surface
-harness, and Task 5 (stand it up as the CI release gate). This proposal
-stays open, trimmed to that remaining work.
+harness, and Task 5.3 (finalize docs, trim/delete this proposal). This
+proposal stays open, trimmed to that remaining work.
 **Kind:**   tracing (tooling spillover — the deliverable is an arena job type; see Impact)
 **Epic:**   usable-kitsoki.md
 
@@ -212,9 +223,23 @@ test.
       x surface set at a bounded thread pool (mirrors `tools/swarm/tiers/
       tier2.ts`'s bounded-pool shape — no docker needed for this substrate).
       Still open: the real browser-driven web-surface harness
-      (`tests/playwright/usable-kitsoki-gate-web.spec.ts`), and the gated
-      live path for the release-candidate cadence (mirrors swarm tier 3's
-      manual-only gating)
+      (`tests/playwright/usable-kitsoki-gate-web.spec.ts`)
+- [x] 3.3 (live half) Gated, cost-bearing live path:
+      `tools/usable-kitsoki-gate/run_live_gate.py` drives a REAL agent
+      against `stories/dev-story`'s real `workbench:` room (closing the
+      no-LLM path's "not yet a real workbench" honest gap, for the live
+      path specifically), joining the resulting session trace via the
+      SAME `extract_turn_signals`/`build_parity_record` the no-LLM path
+      uses. Double-gated exactly like `tools/swarm/tiers/
+      liveExplorerCli.ts`'s manual-only tier 3: `arena run --live`
+      (`usable_kitsoki_gate.py`'s `drive_command(cell, live=True)` now
+      dispatches into it, instead of the prior no-op) plus the script's own
+      literal `--live-gate` argv flag (no env fallback). Never invoked by
+      any test — `tools/arena/tests/test_usable_kitsoki_gate_live_gate.py`
+      proves the gate refuses (and that `subprocess.run` is never reached)
+      via `parse_args`/`assert_live_gate_allowed`/`main([])` directly,
+      mirroring the swarm spec's "stubbed live-explorer dispatch contract"
+      test shape
 
 ## 4. Prove the gate has teeth
 - [x] 4.1 Golden regression scenarios for each of the three gate conditions
@@ -234,9 +259,28 @@ test.
       threshold was deliberately NOT lowered in response.
 
 ## 5. Stand it up as the release gate
-- [ ] 5.1 CI workflow: no-LLM path on every PR touching S1/S2/S4/S5 code
-- [ ] 5.2 Release-candidate workflow: live path on a cadence, gating the
-      actual release decision
+- [x] 5.1 CI workflow: no-LLM path on every PR touching S1/S2/S4/S5 code —
+      `.github/workflows/usable-kitsoki-gate.yml`'s `no-llm-gate` job, path-
+      filtered on the producer/corpus/plugin/join code (`internal/
+      orchestrator/**`, `internal/app/workbench*.go`, `stories/dev-story/**`,
+      `tools/session-mining/**`, `tools/arena/arena/plugins/**`,
+      `tools/usable-kitsoki-gate/**`, this proposal's own tests/fixtures),
+      running `make usable-kitsoki-gate-check` (schema + plugin + corpus +
+      golden-fixture + live-gate-refusal + calibration suite) — cassette/
+      flow-replay only, zero LLM spend, ~20-30s
+- [x] 5.2 Release-candidate workflow: live path on a cadence, gating the
+      actual release decision — the SAME workflow file's
+      `release-candidate-live-gate` job. TRIGGER routing is real and
+      verified (`actionlint`-clean): an `rc-*` tag push, or an explicit
+      `workflow_dispatch` with `confirm_live: yes` typed in — never
+      `pull_request`, never a plain `push: main` (open question 3's
+      release-candidate-cadence lean, encoded structurally, not just
+      argued in prose). Actually arming the job (a real provider-credential
+      secret, the arena browser-capable container images per
+      `tools/arena/README.md`) is deliberate follow-up operator work with no
+      existing precedent to copy (confirmed in the S6 scouting pass) — the
+      job fails loudly with that explanation rather than fabricating a
+      working live invocation
 - [ ] 5.3 Document in `docs/tracing/usable-kitsoki-gate.md` and
       `tools/arena/README.md`; trim/delete this proposal
 ```

@@ -107,7 +107,15 @@ check("mcp: runs the mcp gate runner", "tools/usable-kitsoki-gate/run_mcp_gate.p
 check("mcp: GATE_SURFACE=mcp", "GATE_SURFACE=mcp" in mcp_script, True)
 
 live_argv = plugin.drive_command(web_cell, live=True)
-check("live and non-live compose the identical command today (no S1/S4 live path yet)", live_argv, web_argv)
+check("live composes via bash -lc same as non-live", live_argv[0:2], ["bash", "-lc"])
+live_script = live_argv[2]
+check("live: still cd's into the kitsoki mount root", f"cd {KITSOKI_MNT}" in live_script, True)
+check("live: dispatches into run_live_gate.py", "tools/usable-kitsoki-gate/run_live_gate.py" in live_script, True)
+check("live: passes --live-gate", "run_live_gate.py --live-gate" in live_script, True)
+check("live: still threads GATE_SURFACE=web", "GATE_SURFACE=web" in live_script, True)
+check("live: still threads GATE_PERSONA", "GATE_PERSONA=core-maintainer" in live_script, True)
+check("live: does NOT run playwright (surface-agnostic live runner)", "npx playwright" in live_script, False)
+check("live != non-live command (they now genuinely differ)", live_argv == web_argv, False)
 
 scenario_corpus_cell = make_cell("web", extra_axes={"scenario_corpus": ["docs/proposals/pinned-corpus.json"], "run_id": ["run-42"]})
 scenario_script = plugin.drive_command(scenario_corpus_cell, live=False)[2]

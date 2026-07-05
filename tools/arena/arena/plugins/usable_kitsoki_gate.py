@@ -50,7 +50,14 @@ is the standalone (non-arena, non-docker) sweep tool Task 4.2's checked-in
 calibration report (`tests/fixtures/usable-kitsoki-gate/calibration-
 report.json`) was produced from — it drives the same scenario x surface
 cells at bounded concurrency without going through a container executor,
-since the no-LLM contract needs no docker isolation.
+since the no-LLM contract needs no docker isolation. Task 3.3's LIVE half
+has also landed: `drive_command(cell, live=True)` dispatches into
+`tools/usable-kitsoki-gate/run_live_gate.py --live-gate`, which drives a
+REAL agent against `stories/dev-story`'s real `workbench:` room (see that
+script's module docstring for the double-gating -- `arena run --live` at
+the top level, plus that script's own `--live-gate` argv flag, mirroring
+`tools/swarm/tiers/liveExplorerCli.ts`) — real LLM spend, never run in CI,
+manual-only per `tools/arena/README.md`'s existing live-path convention.
 
 Scoring never regexes stdout for a verdict. It only reads the
 `[usable-kitsoki-gate] wrote <path>` pointer line the harness is expected to
@@ -123,6 +130,15 @@ RUNSTATUS_DIR = f"{KITSOKI_MNT}/tools/runstatus"
 WEB_SPEC = "tests/playwright/usable-kitsoki-gate-web.spec.ts"
 TUI_RUNNER = f"{KITSOKI_MNT}/tools/usable-kitsoki-gate/run_tui_gate.py"
 MCP_RUNNER = f"{KITSOKI_MNT}/tools/usable-kitsoki-gate/run_mcp_gate.py"
+
+# The live half of Task 3.3 (docs/proposals/usable-kitsoki-release-gate.md):
+# a real agent drives a real `workbench:` room via
+# `tools/usable-kitsoki-gate/run_live_gate.py` -- gated behind BOTH `arena
+# run --live` (the top-level spend gate, `arena.py`'s `--live` flag) AND that
+# script's own `--live-gate` argv flag (mirrors `liveExplorerCli.ts`'s
+# structural gating: no env var fallback, no implicit default). Never run in
+# CI -- see that script's module docstring.
+LIVE_RUNNER = f"{KITSOKI_MNT}/tools/usable-kitsoki-gate/run_live_gate.py"
 
 SURFACES = ("web", "tui", "mcp")
 DEFAULT_SURFACE = "web"
@@ -199,11 +215,6 @@ class UsableKitsokiGatePlugin:
         }
 
     def drive_command(self, cell: Cell, *, live: bool) -> list[str]:
-        # No separate paid path today: neither surface driver exists yet (see
-        # module docstring), so there is nothing live-specific to branch on.
-        # Accepted for interface parity with the other job-type plugins, same
-        # as swarm.py's `live` no-op.
-        del live
         coords = self._coords(cell)
         surface = coords["surface"]
         results_path = (
@@ -220,6 +231,22 @@ class UsableKitsokiGatePlugin:
             env.append(f"GATE_SCENARIO_ID={shlex.quote(coords['scenario_id'])}")
         if coords["persona"]:
             env.append(f"GATE_PERSONA={shlex.quote(coords['persona'])}")
+
+        if live:
+            # Task 3.3's live half: a real agent drives a real `workbench:`
+            # room (see run_live_gate.py's module docstring). Surface-
+            # agnostic today -- the live runner's target app has one
+            # workbench room, not a per-surface driver, mirroring the
+            # no-LLM path's own documented "all three surfaces drive the
+            # identical mechanism today" simplification. `--live-gate` is
+            # this composed command's OWN second gate (on top of the
+            # `arena run --live` gate that got drive_command() called with
+            # live=True at all); nothing here ever fires without both.
+            script = (
+                f"set -euo pipefail; cd {shlex.quote(KITSOKI_MNT)} && "
+                f"{' '.join(env)} python3 {shlex.quote(LIVE_RUNNER)} --live-gate"
+            )
+            return ["bash", "-lc", script]
 
         if surface == "web":
             script = (
