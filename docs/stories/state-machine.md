@@ -530,6 +530,22 @@ returning success idempotently over erroring, so the redirect never
 forms. See [`testing.md` §1.9](../tracing/testing.md#19-integration-tests-for-host-failure-paths)
 for how to test these paths.
 
+**Never-silent invariant.** Every `on_error:` redirect renders a message
+distinguishable from a normal state view before the turn ends — enforced
+once, in the shared redirect-application seam both of the orchestrator's
+host-dispatch entry points converge on (`applyErrorBannerSeam`,
+`internal/orchestrator/host_dispatch.go`), not re-implemented per call
+site (`Turn`, `submitDirect`, `ContinueTurn`, `OneShot`,
+`RunInitialOnEnter` all route through it). The seam appends
+`⚠ Action failed: <message>` to the redirect target's rendered view
+whenever `world.last_error` is a non-empty string the view doesn't
+already contain — so a room that renders `{{ world.last_error }}`
+itself is left alone. `kitsoki test flows` enforces this as the
+**G-FLOW gate**: any flow turn whose events show an `on_error:`-driven
+`TransitionApplied` must render either the banner or the raw
+`last_error` message, or the fixture fails automatically (no opt-in
+field required).
+
 ---
 
 ## 6. The world

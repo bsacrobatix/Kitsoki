@@ -182,6 +182,20 @@ Confidence bands:
   orchestrator runs `ComputeClarification` so the user can fill the
   missing slot directly.
 
+**Near-miss band.** A verdict strictly between 0 (a genuine miss,
+which never reaches this switch) and `semantic_mid_bar` (0.65 by
+default) is a `near_miss`: scored above the reject floor but below
+the accept floor. It is recorded on the trace (`turn.near_miss`, with
+`confidence` + `threshold`) but never auto-resolves to the nearest
+authored intent — that guess is exactly how prose misroutes to an
+adjacent command. Reusing the existing high/mid bars means there is
+no new tunable to drift. Today the band falls back to the next
+routing tier (`nearMissWorkbenchEnabled` is a stubbed-`false` feature
+check); once the S1 workbench exists, a near-miss escalates there as
+a governed free-form request instead. See
+[`never-silent-runtime.md`](../proposals/never-silent-runtime.md) for
+the rationale.
+
 > Case folding caveat: captured `string` slot values are NFKC-
 > normalised and lowercased by `lex.Tokenize` before the matcher
 > sees them, so the value handed to downstream views is always
