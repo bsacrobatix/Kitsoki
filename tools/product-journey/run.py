@@ -9471,6 +9471,7 @@ def main() -> None:
         help="With --autonomous-marathon creation, pending emits a driver handoff; replay attaches cassette-backed proof and runs the native final gates",
     )
     parser.add_argument("--report-invalid-autonomous-fix", action="store_true", help="With --autonomous-fix-loop, print invalid gate JSON and exit 0 so story callers can bind failure evidence")
+    parser.add_argument("--report-invalid-autonomous-marathon", action="store_true", help="With --autonomous-marathon, print invalid marathon JSON and exit 0 so story callers can bind failure evidence")
     parser.add_argument("--stats", action="store_true", help="Derive product-journey issue stats from run bundles and cached issue state")
     parser.add_argument("--stats-root", default="", help="Root containing product-journey run bundles for --stats; defaults to .artifacts/product-journey")
     parser.add_argument("--issue-state-file", default="", help="Optional JSON fixture/cache with GitHub issue state for --stats")
@@ -10043,7 +10044,7 @@ def main() -> None:
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
             append_log(f"Ran autonomous marathon for {Path(result['run_dir']).name}: {result['status']}")
-            if result["status"] == "autonomous_marathon_invalid":
+            if result["status"] == "autonomous_marathon_invalid" and not args.report_invalid_autonomous_marathon:
                 raise SystemExit(1)
             return
         print(f"Status: {result['status']}")
@@ -10055,7 +10056,7 @@ def main() -> None:
         if result.get("stats_output"):
             print(f"Stats: {result['stats_output']}")
         append_log(f"Ran autonomous marathon for {Path(result['run_dir']).name}: {result['status']}")
-        if result["status"] == "autonomous_marathon_invalid":
+        if result["status"] == "autonomous_marathon_invalid" and not args.report_invalid_autonomous_marathon:
             raise SystemExit(1)
         return
 
