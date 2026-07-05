@@ -67,6 +67,9 @@ way, see [`../architecture/concept.md`](../architecture/concept.md).)
 - **[`delivery-loop.md`](delivery-loop.md)** — the shipped `deliver` / `fleet` /
   `ship-it` stack for decomposing accepted work into deterministic, verified
   delivery runs.
+- **[`deliver.md`](deliver.md)** — `deliver` in depth: the canonical
+  decomposition story's graph, manifest contract, `dev-story` reachability,
+  and per-surface (engine/web/VS Code) no-LLM proofs.
 - **[`bugs.md`](bugs.md)** — filing story and kitsoki bug reports
   (`/meta story bug`, `kitsoki bug create`), the on-disk format, and
   target resolution.

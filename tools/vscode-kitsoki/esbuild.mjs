@@ -15,10 +15,25 @@ const watch = process.argv.includes('--watch');
 // build then replaces it before packaging or recording.
 function stageSpa() {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const built = path.resolve(here, '../runstatus/dist/index.html');
+  // Two candidate sources, in preference order:
+  //  1. internal/runstatus/web/assets/index.html — the go:embed asset `make
+  //     web` (part of `make build` / `make build-bin`) always leaves fresh;
+  //     this is the canonical staged location every other consumer (the
+  //     `kitsoki web` binary itself) reads from, so it can't silently drift.
+  //  2. .temp/runstatus/dist/index.html — vite's raw build output
+  //     (`pnpm -C tools/runstatus build` run standalone, without the go
+  //     embed step). NOTE: this was `tools/runstatus/dist/` before the
+  //     .temp/ build-output relocation (see Makefile's TEMP_DIR /
+  //     RUNSTATUS_DIST); that path no longer exists, so a bare `pnpm build`
+  //     here always fell through to the placeholder below until this fix.
+  const candidates = [
+    path.resolve(here, '../../internal/runstatus/web/assets/index.html'),
+    path.resolve(here, '../../.temp/runstatus/dist/index.html'),
+  ];
+  const built = candidates.find((p) => fs.existsSync(p));
   const dest = path.join(here, 'media/spa/index.html');
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  if (fs.existsSync(built)) {
+  if (built) {
     fs.copyFileSync(built, dest);
     console.log(`[stage-spa] copied ${path.relative(here, built)} -> media/spa/index.html (${fs.statSync(dest).size} bytes)`);
   } else if (!fs.existsSync(dest)) {

@@ -55,7 +55,7 @@ the PRD/design scout's `roadmap_fit` and overlap recommendations
 (`stories/prd/prompts/prd_existing_state.md`,
 `stories/dev-story/prompts/design_existing_state.md`), proposal epic/slice
 lifecycle (`docs/proposals/templates/`), the decomposition manifest and DAG lint
-(`docs/proposals/work-decomposition.md`), and the generalized-usage traceability
+(`docs/stories/deliver.md`), and the generalized-usage traceability
 spine in `.context/generalized-usage-decomposition-overview.md`
 (`goal -> wall -> change -> gate -> commit -> trace`).
 
