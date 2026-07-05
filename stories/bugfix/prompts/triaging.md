@@ -24,9 +24,9 @@ The caller must choose exactly one source mode. Do not silently switch modes.
 - **remote** — the bug report is a remote tracker issue. Use the supplied
   `ticket_body` below plus `ticket_title`, `ticket_url`, and `ticket_repo`.
   Do **not** search `issues/bugs/`, `.context`, traces, or unrelated local notes
-  to reconstruct the report. If `ticket_body` is empty or insufficient, return
-  `UNCLEAR` and say the remote issue body must be supplied by the caller or a
-  host/MCP GitHub issue-body seam.
+  to reconstruct the report. If `ticket_body` is empty, fall back to
+  `ticket_title` and `ticket_url` only; return `UNCLEAR` if those are
+  insufficient and say the remote issue body could not be fetched.
 - Any other mode is invalid. Return `UNCLEAR` and cite the invalid mode.
 
 {% if args.ticket_source_mode == "remote" %}

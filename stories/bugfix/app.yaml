@@ -64,6 +64,7 @@ hosts:
   # Standalone GitHub ticket close-out: when world.ticket_repo is set the done
   # room comments/closes the GitHub issue directly instead of falling back to
   # the local-files default ticket provider.
+  - host.gh.ticket.get
   - host.gh.ticket.comment
   - host.gh.ticket.transition
   # The ship-it tail import declares these; unioned at load so the imported
