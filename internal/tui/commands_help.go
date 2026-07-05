@@ -28,6 +28,7 @@ func (HelpCommand) Run(m RootModel, _ []string) (string, RootModel, tea.Cmd) {
 		{"chat blocks", []row{
 			{"/help", "this list"},
 			{"/bug [description]", "file a bug report with scrubbed TUI transcript evidence"},
+			{"/route up|down", "record a thumbs up/down verdict on the last routed turn"},
 			{"/ideas <text>", "jot an idea to ideas.md without interrupting the conversation"},
 			{"/chat show <id>", "show focused async chat context without attaching"},
 			{"/intents [<n>]", "print available intents; <n> dispatches by index"},

@@ -77,6 +77,13 @@ type IntentFixture struct {
 	MinPassRate       float64        `yaml:"min_pass_rate,omitempty"`
 	ExpectFailure     *ExpectFailure `yaml:"expect_failure,omitempty"`
 	ExpectFallthrough bool           `yaml:"expect_fallthrough,omitempty"`
+	// DefersToInterpreter, when true, asserts the OPPOSITE of a resolved
+	// intent for `test routing` (routing.go): the no-LLM tiers (deterministic
+	// + semantic + embedding) must NOT resolve this phrase — it is
+	// content-bearing free text that should fall through to the LLM
+	// interpreter. Ignored by `test intents` (Mode 1), which is
+	// harness/recording-driven, not semroute-driven.
+	DefersToInterpreter bool `yaml:"defers_to_interpreter,omitempty"`
 }
 
 // IntentExpect holds the expected intent name and slots.
