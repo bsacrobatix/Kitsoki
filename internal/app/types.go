@@ -1343,6 +1343,16 @@ type OffRampDef struct {
 	// Banner is an optional label shown when the off-ramp engages, equivalent
 	// to OffPathDef.Banner.
 	Banner string `yaml:"banner,omitempty"`
+	// CaptureFreeText, when true, makes this room's off-ramp the
+	// deterministic free-text sink: the loader (expandOffRampCaptures,
+	// offramp_capture.go) synthesizes a `<room>_discuss` intent, sets it as
+	// the room's default_intent, and the orchestrator diverts that intent to
+	// the off-ramp conversation lane BEFORE the state machine runs — no
+	// transition, no world mutation, no room re-render. Without it the
+	// off-ramp only catches post-LLM clarify no-matches; with it unmatched
+	// prose never reaches the main-turn LLM at all (the near-miss
+	// misclassification guard routeViaDefaultIntent exists for).
+	CaptureFreeText bool `yaml:"capture_free_text,omitempty"`
 
 	// enabled distinguishes an active off-ramp from an explicit
 	// `agent_off_ramp: false`. Because goccy allocates the pointer and calls
@@ -1475,15 +1485,16 @@ func (d *OffRampDef) UnmarshalYAML(data []byte) error {
 	// Fall through: the struct form. Probe with the exact field set so a
 	// stray key (e.g. trigger:, which is off-path-only) fails the load.
 	type offRampForm struct {
-		Agent   string `yaml:"agent,omitempty"`
-		Persona string `yaml:"persona,omitempty"`
-		Banner  string `yaml:"banner,omitempty"`
+		Agent           string `yaml:"agent,omitempty"`
+		Persona         string `yaml:"persona,omitempty"`
+		Banner          string `yaml:"banner,omitempty"`
+		CaptureFreeText bool   `yaml:"capture_free_text,omitempty"`
 	}
 	var f offRampForm
 	if err := goyaml.UnmarshalWithOptions(data, &f, goyaml.Strict()); err != nil {
-		return fmt.Errorf("agent_off_ramp: must be `true` or an {agent, persona, banner} mapping: %w", err)
+		return fmt.Errorf("agent_off_ramp: must be `true` or an {agent, persona, banner, capture_free_text} mapping: %w", err)
 	}
-	*d = OffRampDef{Agent: f.Agent, Persona: f.Persona, Banner: f.Banner, enabled: true}
+	*d = OffRampDef{Agent: f.Agent, Persona: f.Persona, Banner: f.Banner, CaptureFreeText: f.CaptureFreeText, enabled: true}
 	return nil
 }
 

@@ -7,7 +7,7 @@
 # - the failing live git-ops trace from 2026-06-30:
 #   "fix it - i just want to rebase main again"
 #
-# The `discuss` cases are load-bearing: they are the phrases that previously
+# The assistant cases are load-bearing: they are the phrases that previously
 # reached the main-turn LLM and could be misclassified into a room command,
 # causing another room re-render instead of a focused assistant reply.
 
@@ -83,8 +83,12 @@ fixtures:
       - "amend it without the generated mocks"
 
   - id: assistant-followups
+    # `main_ops_discuss` is the intent the engine synthesizes for the room's
+    # agent_off_ramp.capture_free_text conversational lane; live surfaces
+    # divert it to a persistent per-room converse turn before the machine
+    # runs (see docs/architecture/room-workbench.md §"The conversational lane").
     intent:
-      name: discuss
+      name: main_ops_discuss
     inputs:
       - "fix it - i just want to rebase main again"
       - "what happened with that rebase?"

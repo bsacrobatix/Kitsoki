@@ -19,8 +19,6 @@ hosts:
   - host.run
   - host.agent.decide
   - host.agent.task
-  - host.agent.converse
-  - host.chat.resolve
 
 host_interfaces:
   ticket:
@@ -164,14 +162,6 @@ world:
   issue_legacy_id:          { type: string, default: "" }
   issue_body:               { type: string, default: "" }
   issue_warning:            { type: string, default: "" }
-  # Persistent assistant lane for hub free text. Deterministic git commands
-  # still route to their named intents first; only unmatched/ambiguous prose
-  # falls through to `discuss`.
-  git_message:              { type: string, default: "" }
-  git_answer:               { type: string, default: "" }
-  git_chat_id:              { type: string, default: "" }
-  git_chat_title:           { type: string, default: "" }
-  git_session_id:           { type: string, default: "" }
 
 intents:
   # ── Routing (internal; emitted by on_enter) ─────────────────────────
@@ -247,13 +237,6 @@ intents:
     priority: 95
 
   # ── Hub operations ───────────────────────────────────────────────────
-  discuss:
-    description: "Ask a focused git-ops assistant without leaving the current hub."
-    examples: []
-    priority: 1
-    slots:
-      message: { type: string, required: true }
-
   issue_status:
     description: "Fetch an issue/ticket through the configured ticket provider."
     examples: ["issue status", "show issue", "issue 105", "show ticket 105", "what is issue 105"]

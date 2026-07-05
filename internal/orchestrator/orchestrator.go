@@ -1227,7 +1227,7 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 			// behavior below is byte-identical to before: maybeOffRamp is scoped
 			// to off-ramp rooms via the State.AgentOffRamp gate, so it returns
 			// (nil, false) in the common case (see offpath.go's isNoMatchCode).
-			if outcome, ok := o.maybeOffRamp(ctx, sid, journey.State, input,
+			if outcome, ok := o.maybeOffRamp(ctx, sid, journey.State, journey.World, input,
 				codeLLMClarification, 0, allowedNames, turnNum); ok {
 				return outcome, nil
 			}
@@ -1387,7 +1387,7 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 			// instead of persisting a rejection (Task 1.3/1.4). Inert for every
 			// other code flowing through here (GUARD_FAILED, INVALID_SLOT_VALUE,
 			// INTENT_NOT_ALLOWED_IN_STATE, …) and when the room has no off-ramp.
-			if outcome, ok := o.maybeOffRamp(ctx, sid, journey.State, input, ve.Code, harnessConfidence(params), allowedNames, turnNum); ok {
+			if outcome, ok := o.maybeOffRamp(ctx, sid, journey.State, journey.World, input, ve.Code, harnessConfidence(params), allowedNames, turnNum); ok {
 				return outcome, nil
 			}
 
@@ -1921,6 +1921,19 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 		slog.String("mode", "submit-direct"),
 	)
 	emitRoutingStream(ctx, turnNum, intentName, prov)
+
+	// Conversation lane (agent_off_ramp.capture_free_text): the room's
+	// synthesized <room>_discuss intent diverts to a persistent per-room
+	// converse turn BEFORE the machine runs — no transition, no world
+	// mutation, no room re-render. Every live entry path (routed free text,
+	// menu submit, MCP drive) converges here, so this is the single divert
+	// point. See offramp_conversation.go.
+	if outcome, ok, convErr := o.maybeConversationDivert(ctx, sid, journey.State, journey.World, intentName, slots, userInput, turnNum); ok || convErr != nil {
+		if convErr != nil {
+			return nil, fmt.Errorf("orchestrator: SubmitDirect: %w", convErr)
+		}
+		return outcome, nil
+	}
 
 	call := intent.IntentCall{
 		Intent: intentName,
@@ -2546,7 +2559,7 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 		// sites can't drift (Task 1.3). This is the slot-continuation path —
 		// it carries no fresh free-text utterance, so maybeOffRamp's empty-input
 		// guard makes it inert here; the call exists for parity, not effect.
-		if outcome, ok := o.maybeOffRamp(ctx, sid, journey.State, "", ve.Code, call.Confidence, allowedNames, turnNum); ok {
+		if outcome, ok := o.maybeOffRamp(ctx, sid, journey.State, journey.World, "", ve.Code, call.Confidence, allowedNames, turnNum); ok {
 			return outcome, nil
 		}
 		// Rejection path: TypedView/RenderEnv/Renderer intentionally

@@ -175,6 +175,14 @@ func runLoadPipeline(merged *AppDef, path, baseDir string, ifaceOverrides map[st
 		return nil, errors.Join(workbenchErrs...)
 	}
 
+	// Expand agent_off_ramp capture_free_text declarations into the
+	// synthesized <room>_discuss intent + default_intent — after
+	// expandWorkbenches so workbench-synthesized off-ramps (which never set
+	// capture) are already in place. See offramp_capture.go.
+	if captureErrs := expandOffRampCaptures(merged, path); len(captureErrs) > 0 {
+		return nil, errors.Join(captureErrs...)
+	}
+
 	// Inject builtin meta_modes (`self`, `bug`) that the app didn't
 	// declare itself. Done before validation so trigger collisions and
 	// missing-env-var diagnostics fire the same way as for app-declared
@@ -940,6 +948,9 @@ func loadAndValidate(b []byte, file string) (*AppDef, []error) {
 	}
 	if workbenchErrs := expandWorkbenches(&def, file); len(workbenchErrs) > 0 {
 		return nil, workbenchErrs
+	}
+	if captureErrs := expandOffRampCaptures(&def, file); len(captureErrs) > 0 {
+		return nil, captureErrs
 	}
 
 	// LoadBytes skips parseAndMerge/runLoadPipeline, so inject builtin

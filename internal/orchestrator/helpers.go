@@ -347,7 +347,7 @@ func (o *Orchestrator) RunIntentWithInput(ctx context.Context, sid app.SessionID
 		// synthetic "[intent] <name>" marker is not free text), so pass that;
 		// an empty displayInput makes maybeOffRamp inert. Inert for every
 		// non-no-match code flowing through here.
-		if outcome, ok := o.maybeOffRamp(ctx, sid, journey.State, displayInput, ve.Code, call.Confidence, allowedNames, turnNum); ok {
+		if outcome, ok := o.maybeOffRamp(ctx, sid, journey.State, journey.World, displayInput, ve.Code, call.Confidence, allowedNames, turnNum); ok {
 			return outcome, nil
 		}
 

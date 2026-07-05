@@ -237,6 +237,74 @@ honest gap.
   migrating an existing hand-rolled floor onto `workbench:` — run via
   `go run ./cmd/kitsoki test flows stories/dev-story/app.yaml`.
 
+## The conversational lane (`agent_off_ramp.capture_free_text`)
+
+The workbench above dispatches **write work**. Its sibling is the
+**conversational lane**: one persistent, engine-owned conversation per room
+for everything the room's deterministic commands don't cover — follow-ups,
+"what happened?", "what should I do next?". A room opts in with one line:
+
+```yaml
+states:
+  main_ops:
+    agent_off_ramp: { agent: git_assistant, capture_free_text: true }
+```
+
+`stories/git-ops/rooms/main_ops.yaml` (and its two sibling hubs) is the
+reference consumer — it replaced a hand-rolled per-room `discuss` intent +
+`host.chat.resolve` + `host.agent.converse` arc duplicated across three
+rooms, five world vars, and a view-injected answer.
+
+What the engine owns, so the story carries **zero** conversation plumbing:
+
+- **Deterministic entry.** The loader (`expandOffRampCaptures`,
+  `internal/app/offramp_capture.go`) synthesizes a `<room>_discuss` intent
+  (one required `message` slot) and sets it as the room's `default_intent`,
+  so the deterministic free-text tier (`routeViaDefaultIntent`,
+  [`semantic-routing.md` §1.6](semantic-routing.md)) sinks unmatched prose
+  into it with **no main-turn LLM classification** — commands the operator
+  actually names still win in the earlier tiers. Combining the flag with a
+  hand-authored `default_intent`, or colliding with a declared
+  `<room>_discuss` intent, is a load error.
+- **No transition, no re-render.** The orchestrator diverts the synthesized
+  intent BEFORE the state machine runs (`maybeConversationDivert`,
+  `internal/orchestrator/offramp_conversation.go`, hooked into
+  `submitDirect` so every live entry path — routed free text, menu submit,
+  MCP drive — is covered) and returns the answer as a `ModeOffPath` outcome:
+  resting state, menu, and world are untouched, and the room's `on_enter`
+  chain never re-fires mid-conversation. A synthesized no-op self-arc keeps
+  the intent legal for validation, menus, and bare-machine flow fixtures.
+- **One conversation per room.** The chat thread is resolved per
+  `(session, room)` (`offRampScope`, `internal/orchestrator/offpath.go`), so
+  follow-up turns `--resume` the same warm Claude session; the transcript
+  lives in the ChatStore, never in world. The typed `/freeform` door keeps
+  its separate session-wide `off_path` thread.
+- **Engine-composed context.** Every converse call carries a `room_context`
+  block (`composeRoomContext`) appended to the agent's system prompt: the
+  room's purpose (state description), the commands available this turn (with
+  their intent descriptions, framed as "recommend these, don't perform their
+  work yourself"), and the room's `relevant_world` values. Composed fresh
+  per call, so a resumed conversation always sees the CURRENT room state.
+- **Permissions unchanged.** The converse dispatch rides the same
+  `enforceToolbox` as every agent call — the named agent's declaration is
+  the whole permission surface, and the lane's advisory posture means a
+  read-only agent is the right shape here (contrast the `workbench:`
+  agent-capability invariant above, which *requires* write/external).
+
+The clarify-triggered off-ramp (a plain `agent_off_ramp:` without the flag)
+still exists and now shares the per-room thread and composed context; the
+flag only adds the deterministic capture entry. Trace-wise the lane records
+`OffPathEntered` with `reason: "conversation"` plus the ordinary
+`OffPathQuestion`/`OffPathAnswer` pair — additive fields, replay-safe.
+
+Testing without an LLM: loader desugaring + invariants in
+`internal/app/offramp_capture_test.go`; the divert, per-room scope, and
+context composition in
+`internal/orchestrator/offramp_conversation_test.go`; the machine-level
+no-op floor in `stories/git-ops/flows/workbench_discuss.yaml`; the
+command-vs-prose routing split in
+`stories/git-ops/intents/workbench_conversation.yaml`.
+
 ## What this is not
 
 - Not a new execution engine — every synthesized primitive already existed

@@ -185,26 +185,26 @@ entries:
     majority_of: 1
   - state: main_ops
     input: "fix it - i just want to rebase main again"
-    intent: { name: discuss, slots: { message: "fix it - i just want to rebase main again" } }
+    intent: { name: main_ops_discuss, slots: { message: "fix it - i just want to rebase main again" } }
     confidence: 1.00
     majority_of: 1
   - state: main_ops
     input: "what happened with that rebase?"
-    intent: { name: discuss, slots: { message: "what happened with that rebase?" } }
+    intent: { name: main_ops_discuss, slots: { message: "what happened with that rebase?" } }
     confidence: 1.00
     majority_of: 1
   - state: main_ops
     input: "why did it go to conflict?"
-    intent: { name: discuss, slots: { message: "why did it go to conflict?" } }
+    intent: { name: main_ops_discuss, slots: { message: "why did it go to conflict?" } }
     confidence: 1.00
     majority_of: 1
   - state: main_ops
     input: "is a rebase still in progress?"
-    intent: { name: discuss, slots: { message: "is a rebase still in progress?" } }
+    intent: { name: main_ops_discuss, slots: { message: "is a rebase still in progress?" } }
     confidence: 1.00
     majority_of: 1
   - state: main_ops
     input: "what should I do next?"
-    intent: { name: discuss, slots: { message: "what should I do next?" } }
+    intent: { name: main_ops_discuss, slots: { message: "what should I do next?" } }
     confidence: 1.00
     majority_of: 1

@@ -1177,6 +1177,18 @@ the usual `OffPathQuestion` / `OffPathAnswer`; there is no
 (`stories/dev-story/rooms/main.yaml`). Full design narrative:
 [`architecture.md` §9](architecture.md#9-agent-rooms-meta-and-off-path).
 
+Off-ramp conversations are **per-room and persistent**: each room resolves
+its own chat thread (resumed across turns within the session), and every
+converse call carries an engine-composed `room_context` block — the room's
+purpose, its available commands, its `relevant_world` values — so the agent
+is oriented without any story-side plumbing. Adding
+`capture_free_text: true` to the block upgrades the off-ramp into the
+room's deterministic free-text sink: the loader synthesizes a
+`<room>_discuss` default intent and the orchestrator diverts it to the
+conversation BEFORE the machine runs — no transition, no re-render.
+Authoritative narrative:
+[`room-workbench.md` §"The conversational lane"](../architecture/room-workbench.md#the-conversational-lane-agent_off_rampcapture_free_text).
+
 ### Room workbenches — one block instead of four hand-rolled primitives
 
 A room that wants the full "governed free-form floor" — `write_mode:

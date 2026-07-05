@@ -149,7 +149,7 @@ func AgentConverseHandler(ctx context.Context, args map[string]any) (Result, err
 	workingDir, _ := args["working_dir"].(string)
 	agent, _ := resolveAgent(ctx, args)
 	ctx, agent = applyProvider(ctx, args, agent)
-	systemPrompt := effectiveSystemPrompt(args, agent)
+	systemPrompt := converseSystemPrompt(args, agent)
 	workingDir = appendDefaultCwd(workingDir, agent)
 	policy := enforceToolbox(ctx, args, agent, permMode)
 	permMode = policy.CLIMode
@@ -318,13 +318,33 @@ func emitConverseJournal(ctx context.Context, callID string, callStart time.Time
 	}
 }
 
+// converseSystemPrompt resolves the effective system prompt for a converse
+// call and appends the engine-composed `room_context` arg when present —
+// the orchestrator's off-ramp / conversation lane passes the resting room's
+// purpose, available commands, and relevant world through it so the agent
+// starts every turn already oriented (see
+// internal/orchestrator/offramp_conversation.go). Appended per call (it
+// rides --append-system-prompt / the composed prompt, not the transcript),
+// so a resumed chat always sees the CURRENT room state, not a stale copy.
+func converseSystemPrompt(args map[string]any, agent Agent) string {
+	sp := effectiveSystemPrompt(args, agent)
+	rc, _ := args["room_context"].(string)
+	if strings.TrimSpace(rc) == "" {
+		return sp
+	}
+	if strings.TrimSpace(sp) == "" {
+		return rc
+	}
+	return sp + "\n\n" + rc
+}
+
 // runConverseWithChat executes a chat-aware converse turn: appends user/assistant
 // messages to the transcript and stores the claude session ID on the chat row.
 func runConverseWithChat(ctx context.Context, cs ChatStore, chatID, question, permMode string, args map[string]any) (Result, error) {
 	workingDir, _ := args["working_dir"].(string)
 	agent, _ := resolveAgent(ctx, args)
 	ctx, agent = applyProvider(ctx, args, agent)
-	systemPrompt := effectiveSystemPrompt(args, agent)
+	systemPrompt := converseSystemPrompt(args, agent)
 	model := agent.Model
 	effort := effectiveEffort(args, agent)
 	workingDir = appendDefaultCwd(workingDir, agent)
