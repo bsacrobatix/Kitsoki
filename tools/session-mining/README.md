@@ -92,6 +92,11 @@ this task's calibration notes for a real-corpus spot-check):
   `cost_extract.py`'s pricing model) — real per-session $ for codex jobs is a
   follow-up, not covered by this task.
 
+Codex-sourced jobs feed the **Scenario Foundry** exactly like Claude-Code-
+sourced ones (same `emit.py --outcomes` output, same `scenario_compiler.py`
+input) — see [`docs/tracing/scenario-foundry.md`](../../docs/tracing/scenario-foundry.md)
+for the mined `kind: conversation` IR and its downstream compilers.
+
 ---
 
 ## Quickstart (pattern mining)
@@ -546,6 +551,8 @@ schema/intents.schema.json    JSON Schema for REPORT 1 (the intents catalog)
 schema/analysis.schema.json   JSON Schema for REPORT 2 (the per-instance recipes)
 schema/scenario_ir.schema.json  JSON Schema for the SCENARIO FOUNDRY `kind: conversation` IR (docs/proposals/scenario-foundry.md); see examples/scenario-ir.example.json
 scenario_compiler.py    SCENARIO FOUNDRY — compiles emit.py --outcomes' intents.json+analysis.json into one kind:conversation IR document per goal-bounded, calibration-worthy span (corrections folded in as extra turns, unresolved endings marked abandoned); pure/deterministic, no LLM
+flow_fixture_compiler.py  SCENARIO FOUNDRY — projects a kind:conversation IR document onto a runnable `kitsoki test flows` flow fixture + host cassette (stories/scenario-foundry-harness/); pure/deterministic
+product_journey_compiler.py  SCENARIO FOUNDRY — projects mined kind:conversation IR documents into tools/product-journey/{personas,scenarios}.json entries tagged source:mined; pure/deterministic
 aggregate.py            merge + score + promotion gate (stdlib only; associative)
 intents.workflow.js     INTENT MINING step B — the one strictly-validated agent pass (schema-constrained)
 intent_common.py        shared helpers for the intent-mining spine (trace/vocab/io primitives)
