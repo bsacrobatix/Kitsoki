@@ -1482,23 +1482,16 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	// TransitionApplied event was appended for replay; here we update
 	// result.NewState so subsequent allowed-intent / terminal-state /
 	// turn-end logic targets the redirected state, not the original.
+	//
+	// The never-silent error banner itself is no longer applied here:
+	// dispatchHostCalls/dispatchHostCallsDetailed apply it once, in the
+	// shared applyErrorBannerSeam seam (host_dispatch.go), before result.View
+	// is even set above — so it is already present by the time we reach this
+	// point, for every caller that routes through that seam (Turn,
+	// submitDirect, ContinueTurn, OneShot, RunInitialOnEnter), not just this
+	// one call site.
 	if hostRedirect != "" {
 		result.NewState = hostRedirect
-
-		// Usability safety-net: an on_error: redirect routed this turn to a
-		// destination room. If that room's view does not itself surface the
-		// failure (most stories don't reference {{ world.last_error }}), the
-		// operator would see a silently re-rendered room with no clue why the
-		// turn bounced. Append a concise, consistently-formatted banner so the
-		// reason is ALWAYS visible. Gated on (redirect happened AND last_error
-		// is set), and skipped when the view already shows the error text, so
-		// it never fires on success and never double-shows for the good
-		// citizens that already render last_error.
-		if msg, ok := result.World.Vars["last_error"].(string); ok && msg != "" {
-			if !strings.Contains(result.View, msg) {
-				result.View = appendErrorBanner(result.View, msg)
-			}
-		}
 	}
 
 	// Post-bind emit_intent dispatch (see settlePostBindEmits doc).
