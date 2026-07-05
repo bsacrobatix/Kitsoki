@@ -13,6 +13,22 @@
 //
 // A state with no `workbench:` block is byte-for-byte untouched: this pass
 // is a pure no-op over it.
+//
+// # Load-time invariants (Tasks 1.2 / 2.1)
+//
+// Before desugaring, expandOneWorkbench fails the load with an actionable
+// message when:
+//
+//   - The named agent isn't declared in agents:, doesn't declare toolbox: +
+//     effect: (WS vocabulary — legacy tools:/bash_profile:/
+//     external_side_effect: is rejected for workbench use), or its resolved
+//     effect isn't write or external. A workbench dispatches work that
+//     makes changes; a read-only agent belongs behind a hand-authored
+//     agent_off_ramp instead, not workbench:.
+//   - The state also hand-authors write_mode, agent_off_ramp, or
+//     default_intent — workbench: sets all three itself, so a hand-authored
+//     value alongside it is an unresolvable ambiguity, not a silent
+//     override.
 package app
 
 import (
@@ -21,6 +37,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"kitsoki/internal/effect"
 )
 
 // expandWorkbenches walks def.States and desugars every non-nil
@@ -84,6 +102,47 @@ func expandOneWorkbench(def *AppDef, file, statePath, room string, s *State) []e
 	if len(errs) > 0 {
 		// Don't desugar off a decl missing its required fields — every
 		// synthesized primitive below depends on all three.
+		return errs
+	}
+
+	// Mutual exclusion (Task 2.1b): workbench: is a macro over write_mode /
+	// agent_off_ramp / default_intent — a state that also hand-authors any
+	// of those is ambiguous about which value should win, so it's a load
+	// error rather than a silent overwrite. Checked before any of this
+	// pass's own mutations below, against whatever the author wrote.
+	if s.WriteMode != "" {
+		addErr(fmt.Sprintf("cannot combine with hand-authored write_mode: %q (workbench: always sets write_mode: read_only itself)", s.WriteMode))
+	}
+	if s.AgentOffRamp != nil {
+		addErr("cannot combine with a hand-authored agent_off_ramp: (workbench: synthesizes its own off-ramp; use workbench.off_ramp_agent to point it at a different agent)")
+	}
+	if s.DefaultIntent != "" {
+		addErr(fmt.Sprintf("cannot combine with hand-authored default_intent: %q (workbench: sets its own default_intent to the synthesized capture intent)", s.DefaultIntent))
+	}
+
+	// Agent-capability invariant (Task 1.2a/2.1c): the named agent must
+	// exist, must declare the WS toolbox:+effect: vocabulary rather than
+	// hand-rolling the legacy tools:/bash_profile:/external_side_effect:
+	// triplet, and must resolve to effect write or external.
+	// resolveAgentDecls (called during parseAndMerge, before
+	// expandWorkbenches ever runs) has already populated AgentDecl.Effect
+	// for every agent in def.Agents (and mirrors ExternalSideEffect from it
+	// unconditionally — see resolveAgentEffect's doc comment — so that
+	// field can't be used post-resolution to detect whether the *author*
+	// wrote it; Toolbox is the reliable signal: it is only ever set when
+	// the author used the toolbox: form, and is never touched by mirroring).
+	agentDecl, ok := def.Agents[decl.Agent]
+	if !ok || agentDecl == nil {
+		addErr(fmt.Sprintf("agent %q is not declared in agents:", decl.Agent))
+	} else {
+		if agentDecl.Toolbox == "" {
+			addErr(fmt.Sprintf("agent %q must declare toolbox: + effect: (WS vocabulary) for workbench use, not the legacy tools:/bash_profile:/external_side_effect: triplet", decl.Agent))
+		}
+		if agentDecl.Effect != effect.Write && agentDecl.Effect != effect.External {
+			addErr(fmt.Sprintf("agent %q resolves to effect %q, but a workbench agent must declare effect: write or external — a workbench exists to dispatch work that makes changes. For a read-only advisor room, hand-author agent_off_ramp instead of workbench:", decl.Agent, agentDecl.Effect))
+		}
+	}
+	if len(errs) > 0 {
 		return errs
 	}
 

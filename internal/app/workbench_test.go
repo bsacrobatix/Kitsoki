@@ -165,6 +165,84 @@ func TestExpandWorkbenches_PlanContract(t *testing.T) {
 	}
 }
 
+// TestExpandWorkbenches_AgentInvariants is the table-driven check for Task
+// 1.2/2.1's load-time agent-capability invariant: the named agent must exist
+// in agents:, must declare toolbox:+effect: (WS vocabulary) rather than the
+// legacy tools:/bash_profile:/external_side_effect: triplet, and must resolve
+// to effect write or external — a read-only workbench agent is a load error
+// pointing the author at agent_off_ramp instead.
+func TestExpandWorkbenches_AgentInvariants(t *testing.T) {
+	cases := []struct {
+		name string
+		file string
+		want string
+	}{
+		{
+			name: "agent not declared in agents:",
+			file: "agent-not-declared.yaml",
+			want: `agent "ghost" is not declared in agents:`,
+		},
+		{
+			name: "agent uses legacy tools/bash_profile/external_side_effect vocabulary",
+			file: "agent-legacy-vocabulary.yaml",
+			want: `agent "builder" must declare toolbox: + effect: (WS vocabulary) for workbench use, not the legacy tools:/bash_profile:/external_side_effect:`,
+		},
+		{
+			name: "agent resolves to a read-only effect",
+			file: "agent-readonly.yaml",
+			want: `agent "reviewer" resolves to effect "read", but a workbench agent must declare effect: write or external`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := loadWorkbenchTestdata(t, tc.file)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.want)
+		})
+	}
+	// The read-only case's message must also point the author at the
+	// escape hatch (agent_off_ramp) rather than just naming the failure.
+	_, err := loadWorkbenchTestdata(t, "agent-readonly.yaml")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "hand-author agent_off_ramp instead of workbench:")
+}
+
+// TestExpandWorkbenches_MutualExclusion covers Task 1.2b: a state with
+// workbench: may not also hand-author write_mode, agent_off_ramp, or
+// default_intent — workbench: is a macro that sets all three itself, so a
+// hand-authored value alongside it is an unresolvable ambiguity, not a
+// silent override.
+func TestExpandWorkbenches_MutualExclusion(t *testing.T) {
+	cases := []struct {
+		name string
+		file string
+		want string
+	}{
+		{
+			name: "hand-authored write_mode",
+			file: "conflict-write-mode.yaml",
+			want: `cannot combine with hand-authored write_mode: "open"`,
+		},
+		{
+			name: "hand-authored agent_off_ramp",
+			file: "conflict-off-ramp.yaml",
+			want: `cannot combine with a hand-authored agent_off_ramp:`,
+		},
+		{
+			name: "hand-authored default_intent",
+			file: "conflict-default-intent.yaml",
+			want: `cannot combine with hand-authored default_intent: "go"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := loadWorkbenchTestdata(t, tc.file)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
 // TestExpandWorkbenches_NoOpWithoutWorkbenchBlock proves the desugaring pass
 // is byte-for-byte inert over a room with no `workbench:` block — the
 // proposal's backward-compat guarantee ("a room with no workbench: block is

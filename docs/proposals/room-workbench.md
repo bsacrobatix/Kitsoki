@@ -227,7 +227,7 @@ macro is wrong, not the fixtures.
 ## 1. Engine
 - [ ] 1.1 `Workbench` struct on `State`; loader desugaring pass (write_mode,
       agent_off_ramp, on_enter host.agent.task, default_intent/free_form_fallback)
-- [ ] 1.2 Load-time invariants: agent toolbox+effect required (effect ∈
+- [x] 1.2 Load-time invariants: agent toolbox+effect required (effect ∈
       {write, external}); mutual-exclusion with hand-authored write_mode/
       agent_off_ramp/default_intent; clear error messages
 - [ ] 1.3 Re-verify the claude-backend Studio MCP precondition with a live
@@ -236,7 +236,7 @@ macro is wrong, not the fixtures.
       TransitionApplied provenance is unchanged and legible for a desugared room
 
 ## 2. Verification
-- [ ] 2.1 Stateless unit: loader desugars a minimal `workbench:` block into
+- [x] 2.1 Stateless unit: loader desugars a minimal `workbench:` block into
       the expected State shape; invariant violations produce the expected
       load errors
 - [ ] 2.2 Flow fixture: a synthetic story with one `workbench:` room —

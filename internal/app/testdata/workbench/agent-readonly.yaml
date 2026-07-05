@@ -1,5 +1,5 @@
 app:
-  id: wb-basic
+  id: wb-agent-readonly
   version: 0.1.0
 hosts:
   - host.agent.task
@@ -8,16 +8,16 @@ intents:
     title: Go
 root: bench
 toolboxes:
-  builder_toolbox:
-    tools: [Read, Grep, Glob, Edit, Write, Bash]
-    effect: write
+  reviewer_toolbox:
+    tools: [Read, Grep, Glob]
+    effect: read
 states:
   bench:
     workbench:
-      agent: builder
+      agent: reviewer
       prompt: prompts/bench.md
       acceptance_schema: schemas/out.json
 agents:
-  builder:
-    system_prompt: "build things"
-    toolbox: builder_toolbox
+  reviewer:
+    system_prompt: "review things"
+    toolbox: reviewer_toolbox

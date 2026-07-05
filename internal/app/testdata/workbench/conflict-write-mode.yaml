@@ -1,5 +1,5 @@
 app:
-  id: wb-overrides
+  id: wb-conflict-write-mode
   version: 0.1.0
 hosts:
   - host.agent.task
@@ -13,16 +13,12 @@ toolboxes:
     effect: write
 states:
   bench:
+    write_mode: open
     workbench:
       agent: builder
       prompt: prompts/bench.md
       acceptance_schema: schemas/out.json
-      capture_slot: custom_field
-      off_ramp_agent: qa_agent
 agents:
   builder:
     system_prompt: "build things"
     toolbox: builder_toolbox
-  qa_agent:
-    system_prompt: "answer questions"
-    external_side_effect: false
