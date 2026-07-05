@@ -94,6 +94,7 @@ def run_apply_with(
     build: str,
     draft: dict | None = None,
     mining: dict | None = None,
+    tracker: str = "none",
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["KITSOKI_BIN"] = str(validator)
@@ -108,7 +109,7 @@ def run_apply_with(
         test,
         build,
         "local defaults",
-        "none",
+        tracker,
     ]
     if draft is not None:
         args.append(json.dumps(draft))
@@ -423,6 +424,49 @@ if profile_path.exists():
     check("draft bugfix test", "test_cmd: \"go test ./...\"" in profile_text)
     check("draft onboarding defaults injected", "base_story: \"dev-story\"" in profile_text)
     check("draft onboarding customizations injected", "story_customizations:" in profile_text)
+
+# 9. GitHub tracker ⇒ the external ticket-repo passthrough: the generated
+# instance binds iface.ticket → host.gh.ticket pinned on the slug derived from
+# the origin remote (never hardcoded), and the profile records the source.
+repo = mkgitrepo()
+proc = run_apply_with(repo, fake_kitsoki(True), "acme", "Acme", "go project", "", "go test ./...", "go build ./...", tracker="github")
+check("gh tracker exit", proc.returncode == 0, proc.stdout + proc.stderr)
+profile_path = repo / ".kitsoki" / "project-profile.yaml"
+if profile_path.exists():
+    profile_text = profile_path.read_text(encoding="utf-8")
+    check("gh tracker provider", "provider: \"github\"" in profile_text)
+    check("gh tracker repo slug", "repo: \"example/acme\"" in profile_text)
+    check("gh tracker binding", "ticket: host.gh.ticket" in profile_text)
+    check("gh tracker docs ticket_repo", "ticket_repo: \"example/acme\"" in profile_text)
+    check("gh tracker customization", "id: \"github-ticket-source\"" in profile_text)
+app_path = repo / ".kitsoki" / "stories" / "acme-dev" / "app.yaml"
+check("gh tracker instance write", app_path.exists())
+if app_path.exists():
+    app_text = app_path.read_text(encoding="utf-8")
+    check("gh tracker instance binding", "ticket:    host.gh.ticket" in app_text)
+    check("gh tracker instance world pin", 'ticket_repo:                { type: string, default: "example/acme" }' in app_text)
+    check("gh tracker instance hosts", "- host.gh.ticket.transition" in app_text)
+
+# 9b. GitHub tracker WITHOUT a parseable GitHub remote degrades honestly to
+# local-file tickets (no guessed slug, no gh binding).
+repo = mkrepo()
+proc = run_apply_with(repo, fake_kitsoki(True), "acme", "Acme", "go project", "", "go test ./...", "go build ./...", tracker="github")
+check("gh no-remote exit", proc.returncode == 0, proc.stdout + proc.stderr)
+app_path = repo / ".kitsoki" / "stories" / "acme-dev" / "app.yaml"
+if app_path.exists():
+    app_text = app_path.read_text(encoding="utf-8")
+    check("gh no-remote local binding", "ticket:    host.local_files.ticket" in app_text)
+    check("gh no-remote empty pin", 'ticket_repo:                { type: string, default: "" }' in app_text)
+
+# 9c. tracker=none keeps the local binding even when the remote IS GitHub
+# (the operator's explicit choice wins over remote evidence).
+repo = mkgitrepo()
+proc = run_apply(repo, fake_kitsoki(True))
+check("none tracker exit", proc.returncode == 0, proc.stdout + proc.stderr)
+app_path = repo / ".kitsoki" / "stories" / "acme-dev" / "app.yaml"
+if app_path.exists():
+    app_text = app_path.read_text(encoding="utf-8")
+    check("none tracker local binding", "ticket:    host.local_files.ticket" in app_text)
 
 if failures:
     print("FAIL: init_apply regression")

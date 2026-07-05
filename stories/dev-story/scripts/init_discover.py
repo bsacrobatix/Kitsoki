@@ -161,6 +161,26 @@ def git_output(path: Path, *args: str) -> str:
     return proc.stdout.strip()
 
 
+def github_repo_slug(remote: str) -> str:
+    """Parse an `owner/repo` slug from a github.com remote URL.
+
+    Handles the common transports (`https://github.com/owner/repo.git`,
+    `git@github.com:owner/repo.git`, `ssh://git@github.com/owner/repo`).
+    Non-GitHub remotes return "" — the ticket passthrough is GitHub-only
+    (the `host.gh.ticket` adapter); other forges keep local-file tickets.
+    """
+    remote = (remote or "").strip()
+    if not remote:
+        return ""
+    match = re.search(r"(?:^|[/@])github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$", remote)
+    if not match:
+        return ""
+    owner, repo = match.group(1), match.group(2)
+    if not owner or not repo:
+        return ""
+    return f"{owner}/{repo}"
+
+
 def git_info(path: Path) -> dict:
     inside = git_output(path, "rev-parse", "--is-inside-work-tree")
     if inside != "true":
@@ -195,6 +215,7 @@ def invalid_discovery(path: Path, error: str) -> dict:
         "repo_remote": "",
         "conventions": "local defaults",
         "tracker": "none",
+        "ticket_repo": "",
         "transcript_slug": transcripts["slug"],
         "transcript_count": transcripts["count"],
         "transcript_sources": transcripts["sources"],
@@ -304,6 +325,13 @@ def discover(path: Path) -> dict:
 
     transcripts = transcript_evidence(path)
     repo = git_info(path)
+    # External ticket-repo passthrough: a github.com origin is the repo's
+    # ticket source of record (GitHub Issues), so discovery classifies the
+    # tracker and carries the `owner/repo` slug. Apply binds
+    # `iface.ticket → host.gh.ticket` pinned to that slug; the operator (or
+    # the profile-draft step) can override tracker back to "none" to keep
+    # local-file tickets.
+    ticket_repo = github_repo_slug(repo["remote"])
     return {
         "target_path": str(path),
         "project_id": project_id,
@@ -317,7 +345,8 @@ def discover(path: Path) -> dict:
         "repo_default_branch": repo["default_branch"],
         "repo_remote": repo["remote"],
         "conventions": "hybrid" if project_id == "slidey" or (path / "AGENTS.md").exists() or (path / "CLAUDE.md").exists() else "local defaults",
-        "tracker": "none",
+        "tracker": "github" if ticket_repo else "none",
+        "ticket_repo": ticket_repo,
         "transcript_slug": transcripts["slug"],
         "transcript_count": transcripts["count"],
         "transcript_sources": transcripts["sources"],

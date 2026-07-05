@@ -2014,6 +2014,20 @@ to `constructorfabric/Kitsoki` via the `ticket_repo` world key
 `origin` (a personal fork). The slug is data, not a Go constant — a fork-of-a-
 fork or downstream project overrides the world key.
 
+**External repo binding (onboarding passthrough).** Project onboarding
+(`stories/dev-story/scripts/init_discover.py` + `init_apply.py`) closes the
+same loop for external repos: discovery classifies `tracker: github` when the
+target's `origin` remote parses to a `github.com` `owner/repo` slug, and apply
+generates an instance whose `host_bindings` pin `ticket: host.gh.ticket` with
+`world.ticket_repo` defaulting to that slug (plus a `tracker.repo` record in
+`.kitsoki/project-profile.yaml`). The dev-story rooms thread
+`repo: {{ world.ticket_repo }}` into every `iface.ticket.*` call, so an
+onboarded gears-rust checkout reads/comments its real GitHub issues with zero
+room changes; a non-GitHub remote (or `tracker: none`) keeps
+`host.local_files.ticket`, which instead honours the threaded
+`root: {{ world.repo_root }}` arg for tickets under an external checkout.
+No repo slug is ever hardcoded — the source of truth is the onboarded profile.
+
 **Label vocabulary.** `create` maps the bug-format axes onto a fixed GitHub label
 set, applied by `create` and understood by `transition`:
 
@@ -2075,7 +2089,7 @@ Three paths reach it:
 - **CLI** — `kitsoki bug create --github <owner/repo>` files a text-only issue
   (the CLI captures no evidence) and prints the URL.
 - **Design pipeline** — publishing a design mints a GitHub **feature** issue
-  (`target:kitsoki` + `comp:proposal`, body links the proposal) when the
+  (`target:<repo-name>` + `comp:proposal`, body links the proposal) when the
   instance sets `ticket_repo`, instead of `issues/features/<id>.md` (see the
   [dev-story README](../../stories/dev-story/README.md)).
 
