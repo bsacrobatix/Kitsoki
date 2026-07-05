@@ -1285,6 +1285,27 @@ func TestRunStorySession_RealDispatch_BugfixReplay(t *testing.T) {
 	}
 }
 
+func TestJobFlowWorldLeavesGitHubCloseoutToOrchestrator(t *testing.T) {
+	job := &jobs.GHJob{
+		JobID:        "job-real-claim",
+		OriginRef:    "github:o/r/issue/42",
+		Repo:         "o/r",
+		ObjectKind:   "issue",
+		ObjectNumber: "42",
+	}
+
+	world := jobFlowWorld(job)
+	if got := world["ticket_id"]; got != "42" {
+		t.Fatalf("ticket_id = %q, want issue number", got)
+	}
+	if got := world["ticket_url"]; got != "https://github.com/o/r/issues/42" {
+		t.Fatalf("ticket_url = %q, want GitHub issue URL", got)
+	}
+	if _, ok := world["ticket_repo"]; ok {
+		t.Fatalf("gh-agent bugfix world must not seed ticket_repo; gitops owns issue claim/closeout: %+v", world)
+	}
+}
+
 // TestDispatchRealDispatchOnlyDoneWithRealHostCalls is the task 2.4 invariant:
 // a real-dispatch route (Harness set) may only claim completion when it also
 // shows evidence of real host calls. A RunResult that claims Harness but
