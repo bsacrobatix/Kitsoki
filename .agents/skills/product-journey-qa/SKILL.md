@@ -118,7 +118,12 @@ Then hand it to the reusable driver:
    are idempotent. If the pre-file search fails, the gate fails closed rather
    than creating a possible duplicate. Completed gh-agent jobs must publish an
    `independent-verify.md` asset from the story run; a fix report or patch alone
-   does not satisfy the autonomous gate. Never file these findings with raw `gh
+   does not satisfy the autonomous gate. Once the filing, gh-agent, review, and
+   validation gates pass, `kitsoki gitops autonomous-fix` posts a
+   `kitsoki-fixed-in` close-out comment through `host.gh.ticket`, closes the
+   GitHub issue, and records `findings.issue_closeout` plus closed issue state
+   back into `findings.json` so stats can be derived mechanically. Never file
+   or close these findings with raw `gh
    issue create` or text-only `issue_create` — that drops the evidence.
    Open `weakness` findings are routed to the PRD/design path instead of the
    bugfix queue: review regenerates `weakness-routes.json`,

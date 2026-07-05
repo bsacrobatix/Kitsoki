@@ -61,6 +61,9 @@ host_handlers:
                 autonomous_fix_status: autonomous_fix_valid
                 autonomous_fix_report_path: .artifacts/product-journey/run-999/autonomous-fix-report.md
                 autonomous_gate_summary: "filing=pass, gh_agent=pass, review=pass, validation=pass"
+                issue_closeout_status: closed
+                issue_closeout_count: 1
+                issue_closeout_summary: "Closed 1 fixed GitHub issue(s)."
                 filing_status: findings_filed
                 dry_run: "no"
                 findings_filed_count: 1
@@ -171,11 +174,13 @@ turns:
       autonomous_marathon_status: autonomous_marathon_valid
       autonomous_fix_status: autonomous_fix_valid
       autonomous_gate_summary: "filing=pass, gh_agent=pass, review=pass, validation=pass"
+      issue_closeout_status: closed
+      issue_closeout_count: 1
       stats_status: stats_derived
       stats_fixed_count: 1
       weakness_route_count: 1
       validation_status: valid
-    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, review=pass, validation=pass[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 1, filed 1, fixed 1"
+    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, review=pass, validation=pass[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 1[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 1, filed 1, fixed 1"
     expect_host_calls:
       - handler: host.run
         args: { call: autonomous_product_journey_marathon_finalize }
