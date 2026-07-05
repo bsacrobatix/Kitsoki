@@ -313,6 +313,7 @@ states:
                   - tools/product-journey/run.py
                   - --autonomous-marathon
                   - --json-output
+                  - --report-invalid-autonomous-marathon
                   - --project
                   - "{{ slots.project ?? world.project }}"
                   - --persona
