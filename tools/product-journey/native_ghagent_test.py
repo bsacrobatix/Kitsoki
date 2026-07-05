@@ -97,6 +97,51 @@ def mark_filed_issue(run_dir, repo, number):
     return issue_url
 
 
+def attach_closeout(run_dir):
+    findings = run.read_json(run_dir / "findings.json")
+    jobs = {
+        job.get("origin_ref"): job
+        for job in findings.get("gh_agent", {}).get("drained_jobs", [])
+        if job.get("state") == "done"
+    }
+    items = []
+    for item in findings.get("items", []):
+        issue = item.get("github_issue", {})
+        if item.get("kind") != "issue" or item.get("origin") == "seeded" or not issue.get("url"):
+            continue
+        origin = f"github:{issue.get('repo')}/issue/{issue.get('number')}"
+        job = jobs.get(origin, {})
+        comment_url = f"{issue['url']}#issuecomment-kitsoki-fixed-in"
+        issue["state"] = "closed"
+        issue["status"] = "closed"
+        issue["closed_by"] = "kitsoki gitops autonomous-fix"
+        issue["closeout_comment_url"] = comment_url
+        issue.setdefault("comments", []).append({
+            "body": "kitsoki-fixed-in\nindependent-verify.md",
+            "url": comment_url,
+        })
+        item["status"] = "fixed"
+        items.append({
+            "finding_id": item.get("id", ""),
+            "issue_url": issue["url"],
+            "repo": issue.get("repo", ""),
+            "number": issue.get("number", ""),
+            "comment_url": comment_url,
+            "run_url": job.get("run_url", ""),
+            "job_id": job.get("job_id", ""),
+            "closed": True,
+        })
+    findings["issue_closeout"] = {
+        "status": "closed",
+        "count": len(items),
+        "summary": f"Closed {len(items)} fixed GitHub issue(s).",
+        "items": items,
+        "errors": [],
+    }
+    run.write_json(run_dir / "findings.json", findings)
+    run.update_derived_artifacts(run_dir, None)
+
+
 def deck_scene(deck, eyebrow):
     for scene in deck.get("scenes", []):
         if scene.get("eyebrow") == eyebrow:
@@ -165,6 +210,7 @@ def main():
             "autonomous_gate_summary": "filing=pass, gh_agent=pass, review=pending, validation=pending",
         })
         run.record_gh_agent_findings_status(run_dir, combined)
+        attach_closeout(run_dir)
         report = run.write_autonomous_fix_report(run_dir, combined)
         run.update_derived_artifacts(run_dir, None)
         reviewed = run.review_run_bundle(run_dir, None)
