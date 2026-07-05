@@ -179,6 +179,8 @@ def main() -> int:
         stats = run.derive_stats(run.ARTIFACT_ROOT, str(issue_state), 0.82, 25, str(stats_output))
         report_path = Path(result.get("autonomous_fix_report_path", ""))
         report_text = report_path.read_text(encoding="utf-8") if report_path.exists() else ""
+        weakness_routes = run.read_json(run_dir / "weakness-routes.json")
+        deck_text = (run_dir / "deck.slidey.json").read_text(encoding="utf-8")
 
         check("marathon scoped run has one scenario",
               len(run_json.get("scenarios", [])) == 1 and scenario_id == "bugfix",
@@ -201,6 +203,11 @@ def main() -> int:
               and "https://agent.example/run/job-" in report_text
               and "fix-report.md" in report_text
               and "independent-verify.md" in report_text,
+              failures)
+        check("weakness routed to PRD/design review artifact",
+              weakness_routes.get("summary", {}).get("routed") == 1
+              and weakness_routes.get("items", [{}])[0].get("target_story") == "stories/prd"
+              and "PRD/design routes" in deck_text,
               failures)
         check("mechanical stats count found/filed/fixed",
               stats.get("findings_found_count") == 1

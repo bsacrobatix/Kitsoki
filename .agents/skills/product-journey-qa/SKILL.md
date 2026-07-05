@@ -120,6 +120,11 @@ Then hand it to the reusable driver:
    `independent-verify.md` asset from the story run; a fix report or patch alone
    does not satisfy the autonomous gate. Never file these findings with raw `gh
    issue create` or text-only `issue_create` — that drops the evidence.
+   Open `weakness` findings are routed to the PRD/design path instead of the
+   bugfix queue: review regenerates `weakness-routes.json`,
+   `weakness-routes.md`, and a `PRD/design routes` deck scene pointing each
+   observed weakness at `stories/prd` with persona, scenario, and evidence
+   context attached.
 7. If there are no credible issue findings, or after `autonomous_fix` reports
    the bundle valid, submit `review` and `validate` through the story. Use
    `file_findings` or the CLI `--file-findings`/`--review-run`/`--validate-run`
@@ -127,7 +132,8 @@ Then hand it to the reusable driver:
    not as the canonical autonomous path.
 
 Review `deck.slidey.json` for the narrative, `Playback evidence` scenes,
-`Proof gates`, `Persona lens`, and `Driver contract` scenes.
+`Proof gates`, `Persona lens`, `Driver contract`, and `PRD/design routes`
+scenes.
 
 ## Story Surface
 

@@ -304,6 +304,10 @@ differently.
 Scenario outcomes summarize evidence coverage and finding counts per scenario
 so onboarding, bugfix, PRD/design, feature implementation, and product-bug gaps
 stay visible independently of the bundle-level review status.
+Open observed `weakness` findings also generate `weakness-routes.json`,
+`weakness-routes.md`, and a `PRD/design routes` deck scene. Those route rows
+preserve the persona, scenario, evidence path, and suggested PRD idea so
+usability/product-shape gaps go to `stories/prd` instead of the bugfix queue.
 Use `--evidence-source local`, `retained`, `external`, or `cassette` for proof
 evidence. `demo` is reserved for deterministic placeholder evidence, and
 captured `unknown` evidence does not count as proof evidence. Use a real local
@@ -437,8 +441,10 @@ autonomous-fix` gate and publishes the filed issue, gh-agent run URL, fix
 evidence, and independent verification. The `autonomous_marathon_smoke` story
 intent adds the standing-loop shell around that path: it creates a scoped
 persona-QA run, journals replayed driver evidence, files and fixes one
-credible issue through the native autonomous gate, and derives found/filed/fixed
-stats from issue state so manual stats are not part of the loop.
+credible issue through the native autonomous gate, routes observed weakness
+findings into `weakness-routes.json` / `weakness-routes.md` for `stories/prd`,
+and derives found/filed/fixed stats from issue state so manual stats are not
+part of the loop.
 
 Do not bypass this with raw `gh` commands. Product-journey issue filing and
 autonomous fixes are intentionally routed through Kitsoki's native
@@ -545,7 +551,7 @@ onboarding, and bugfix surfaces.
 
 ## Shared completion-state contract (arena)
 
-`review.json`'s 19-check review gate is native to product-journey, but arena
+`review.json`'s review gate is native to product-journey, but arena
 (`tools/arena`) needs one job-agnostic grade it can score without knowing that
 artifact's shape. `tools/persona_qa/completion.py` is the bridge:
 `from_product_journey_report(report)` / `load_product_journey_run(run_dir)` turn
