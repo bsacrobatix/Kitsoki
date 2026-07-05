@@ -160,6 +160,7 @@ func tierHelp(root *cobra.Command) {
 		cmds      []string
 	}{
 		{"setup", "Setup & onboarding", []string{"init", "doctor", "project-tools", "project-profile", "docs", "materialize", "version"}},
+		{"kits", "Kit dependencies", []string{"kit"}},
 		{"drive", "Run & drive", []string{"run", "turn", "drive", "chat", "serve", "web", "tour", "inbox", "session", "status"}},
 		{"author", "Author & test", []string{"validate", "test", "viz", "workflow", "prompts", "extract"}},
 		{"debug", "Debug & trace", []string{"trace", "replay", "replay-routing", "inspect", "render", "shot", "web-shot", "export-status"}},
