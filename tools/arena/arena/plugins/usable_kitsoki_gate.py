@@ -374,14 +374,21 @@ def build_parity_record(
       compile time; it is read here, never re-derived and never re-judged
       by an LLM (docs/proposals/usable-kitsoki-release-gate.md's Event/
       format model).
-    - `candidate_completed` reduces S1's per-turn dispatch-success proxy
-      (`candidate_completed == !dispatchFailed`, see
-      `workbench_gate_signal.go`) across every turn: true only if a signal
-      was captured for every turn AND none of them failed. This is
-      necessary-but-not-sufficient for "the scenario's expected_effects were
-      covered" (S1 does not yet key its signal to `expected_effects` --
-      documented gap) -- the record's `notes` say so explicitly rather than
-      silently overclaiming a stronger join than actually happened.
+    - `candidate_completed` reduces S1's per-turn signal across every turn:
+      true only if a signal was captured for every turn AND none of them
+      failed. Per turn, S1 (`workbench_gate_signal.go`) computes that signal
+      one of two ways: a REAL join against the scenario's own
+      `expected_effects` (true iff dispatch succeeded AND the workbench's own
+      bound close-out note actually covers every expected effect) when the
+      dispatching room's world carries a `<room>_expected_effects` var (S6's
+      `flow_fixture_compiler.py` real-workbench projection seeds this on a
+      compiled scenario's final turn); otherwise the narrower dispatch-only
+      proxy (`candidate_completed == !dispatchFailed`) unchanged from before
+      that join existed. This record cannot distinguish which of the two
+      produced a given turn's signal (the payload does not carry which path
+      fired) -- the record's `notes` say so explicitly rather than silently
+      overclaiming a stronger join than may have actually happened for any
+      one turn.
     - `silent_bounce` / `misroute_adjacent` are OR'd across turns.
       `misroute_adjacent` is hard-false from every S1 signal today (S1 does
       not compute it at all); this record inherits that honest absence
@@ -405,8 +412,10 @@ def build_parity_record(
         caveats.append("no usable_kitsoki_gate turn signal was captured for this scenario run")
     else:
         caveats.append(
-            "candidate_completed reduced from S1's per-turn dispatch-success proxy, "
-            "not yet joined against expected_effects (documented S1 gap)"
+            "candidate_completed reduced from S1's per-turn signal, which is a real "
+            "expected_effects join when the dispatching workbench room's world carries "
+            "a <room>_expected_effects var, else the dispatch-success proxy -- this "
+            "record cannot tell which fired for any one turn (see workbench_gate_signal.go)"
         )
     caveats.append(
         "misroute_adjacent is hard-false from S1 today (not computed, documented gap); "

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """run_calibration_gate.py — Task 3.3 (no-LLM half) + Task 4.2
-(docs/proposals/usable-kitsoki-release-gate.md): sweep every scenario in a
-corpus x every surface, driving each (scenario, surface) cell through
+(docs/proposals/usable-kitsoki-release-gate.md), extended by S6
+"no-llm-parity" to sweep the real workbench-target projection: sweep every
+scenario in a corpus x every surface x every real workbench: target
+(dev-story/pets-dev/slidey-dev by default -- see `DEFAULT_TARGETS`), driving
+each (scenario, surface, target) cell through
 `flow_gate_runner.build_record_for_cell` at bounded concurrency (mirroring
 `tools/swarm/tiers/tier2.ts`'s tier-2 "several cells in flight, bounded pool"
 shape -- see that file's `buildTier2RecordingAuto` for the TS-side sibling;
@@ -46,6 +49,14 @@ from arena.plugins import usable_kitsoki_gate_constants as gate_constants  # noq
 
 DEFAULT_CONCURRENCY = 4
 
+# The three real workbench: rooms this project ships (S6 "no-llm-parity"):
+# dev-story is the hand-authored primary, pets-dev/slidey-dev import it
+# unmodified (see flow_fixture_compiler.py's WORKBENCH_TARGETS registry /
+# module docstring for the full contract). `None` means the old harness-stub
+# projection (stories/scenario-foundry-harness, never a workbench: room --
+# kept purely as a back-compat / schema-proving path, no longer the default).
+DEFAULT_TARGETS: tuple[str, ...] = ("dev-story", "pets-dev", "slidey-dev")
+
 
 def sweep(
     corpus_dir: Path,
@@ -54,28 +65,43 @@ def sweep(
     run_id: str,
     evidence_dir: Path,
     concurrency: int = DEFAULT_CONCURRENCY,
+    targets: list[str | None] | None = None,
 ) -> list[dict[str, Any]]:
-    """Drive every (scenario, surface) cell in `corpus_dir x surfaces` and
-    return the parity records in deterministic (scenario_id, surface) order
-    -- regardless of which worker finished first, so the checked-in
-    calibration report diffs cleanly run to run.
-    """
-    scenario_ids = runner.list_scenario_ids(corpus_dir)
-    cells = [(sid, surface) for sid in scenario_ids for surface in surfaces]
+    """Drive every (scenario, surface, target) cell in
+    `corpus_dir x surfaces x targets` and return the parity records in
+    deterministic (scenario_id, surface, target) order -- regardless of which
+    worker finished first, so the checked-in calibration report diffs
+    cleanly run to run.
 
-    results: dict[tuple[str, str], dict[str, Any]] = {}
+    `targets` defaults to `DEFAULT_TARGETS` (all three real workbench: rooms
+    this project ships) -- pass `[None]` to reproduce the old harness-stub-
+    only sweep.
+    """
+    if targets is None:
+        targets = list(DEFAULT_TARGETS)
+    scenario_ids = runner.list_scenario_ids(corpus_dir)
+    cells = [
+        (sid, surface, target)
+        for sid in scenario_ids
+        for surface in surfaces
+        for target in targets
+    ]
+
+    results: dict[tuple[str, str, str | None], dict[str, Any]] = {}
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         futures = {
             pool.submit(
-                runner.build_record_for_cell, sid, corpus_dir, surface, evidence_dir=evidence_dir,
-            ): (sid, surface)
-            for sid, surface in cells
+                runner.build_record_for_cell,
+                sid, corpus_dir, surface,
+                evidence_dir=evidence_dir, target=target,
+            ): (sid, surface, target)
+            for sid, surface, target in cells
         }
         for future in as_completed(futures):
-            sid, surface = futures[future]
-            results[(sid, surface)] = future.result()
+            sid, surface, target = futures[future]
+            results[(sid, surface, target)] = future.result()
 
-    return [results[(sid, surface)] for sid, surface in cells]
+    return [results[(sid, surface, target)] for sid, surface, target in cells]
 
 
 def rollup(records: list[dict[str, Any]], *, results_path: str) -> dict[str, Any]:
@@ -124,6 +150,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus", default=str(runner.DEFAULT_CORPUS))
     parser.add_argument("--surfaces", default=",".join(gate_plugin.SURFACES))
+    parser.add_argument(
+        "--targets", default=",".join(DEFAULT_TARGETS),
+        help="comma-separated workbench targets to sweep (dev-story,pets-dev,slidey-dev by default). "
+             "Pass 'harness' for the old non-workbench stub projection (back-compat, never a "
+             "workbench: room -- see flow_gate_runner.py's module docstring).",
+    )
     parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
     parser.add_argument("--run-id", default="calibration")
     parser.add_argument("--out", required=True)
@@ -139,6 +171,10 @@ def main() -> int:
     if not corpus_dir.is_absolute():
         corpus_dir = runner.REPO_ROOT / corpus_dir
     surfaces = [s.strip() for s in args.surfaces.split(",") if s.strip()]
+    targets: list[str | None] = [
+        None if t.strip() == "harness" else t.strip()
+        for t in args.targets.split(",") if t.strip()
+    ]
 
     out_path = Path(args.out)
     if not out_path.is_absolute():
@@ -147,7 +183,7 @@ def main() -> int:
 
     records = sweep(
         corpus_dir, surfaces, run_id=args.run_id, evidence_dir=evidence_dir,
-        concurrency=args.concurrency,
+        concurrency=args.concurrency, targets=targets,
     )
     rolled = rollup(records, results_path=str(out_path))
 
@@ -156,6 +192,7 @@ def main() -> int:
         "run_id": args.run_id,
         "corpus": str(corpus_dir.relative_to(runner.REPO_ROOT)) if corpus_dir.is_relative_to(runner.REPO_ROOT) else str(corpus_dir),
         "surfaces": surfaces,
+        "targets": [t if t else "harness" for t in targets],
         "scenario_count": len(runner.list_scenario_ids(corpus_dir)),
         "record_count": len(records),
         "parity_threshold_percent": gate_constants.PARITY_THRESHOLD_PERCENT,

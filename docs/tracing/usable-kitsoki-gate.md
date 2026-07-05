@@ -22,17 +22,28 @@ honest gap rather than blocking this slice.
 
 **Honesty note on what "shipped" means here:** every piece of this gate
 (schema, constants, plugin, both no-LLM harnesses, the live harness, CI
-wiring) is real, tested, and zero-LLM-spend in CI. It has never yet been run
-LIVE, green, over a real multi-story checkout — the checked-in calibration
-report measures `worst_surface_parity_percent = 0.0%` because
-`stories/scenario-foundry-harness` (the no-LLM path's drive target) is not a
-real `workbench:` room, so `candidate_completed` reads `False` for every
-cell today by construction, not because the workbench performed badly. A
-LIVE green run of this gate over `stories/dev-story` and at least one other
-real workbench-bearing story is the epic's own release-readiness bar — that
-run is epic-level finalization work (see the epic's own task list), not part
-of this slice's scope, and this doc will be updated with that result when it
-happens rather than implied here.
+wiring) is real, tested, and zero-LLM-spend in CI. The no-LLM path now drives
+the real workbench-target projection (S6 "no-llm-parity", epic finalization):
+the checked-in calibration report sweeps the 18-scenario calibration set
+against all THREE real `workbench:` rooms this project ships
+(`stories/dev-story`, and its thin inheritors `stories/pets-dev` /
+`stories/slidey-dev` — see `tools/session-mining/flow_fixture_compiler.py`'s
+`WORKBENCH_TARGETS`), not the non-workbench harness stub round 1 measured
+against. Measured: `worst_surface_parity_percent = 100.0%` (162 records —
+18 scenarios x 3 surfaces x 3 targets), `silent_bounce_count = 0`,
+`misroute_adjacent_count = 0` (still hard-false — S1 does not compute this).
+Read this with its own caveat, not as a clean bill of health: the
+calibration corpus's 18 scenarios are all non-abandoned, and its stubbed
+`host.agent.task` answers are DERIVED FROM the same `expected_effects` the
+engine-side join then checks against — this proves the join/rollup/schema
+machinery and the real per-target app wiring (import-folding included) work
+end to end, not that a real LLM-driven workbench agent's own answers would
+satisfy those effects (see `usable_kitsoki_gate_constants.py`'s calibration-
+contact note for the full caveat). A LIVE green run of this gate over
+`stories/dev-story` with a real agent (not a canned cassette) is still the
+epic's own release-readiness bar for that stronger claim — that run is
+epic-level finalization work (see the epic's own task list), gated behind
+`run_live_gate.py --live-gate` and never run automatically.
 
 This is the day-one contract `S1` (the free-form workbench) develops
 against, and the schema `S6` (`tools/arena/arena/plugins/usable_kitsoki_gate.py`)
@@ -192,10 +203,13 @@ exist: `tools/usable-kitsoki-gate/run_tui_gate.py` and `run_mcp_gate.py`
 drive a real `kitsoki test flows` replay of each scenario's compiled flow
 fixture and join the resulting trace via this plugin's own
 `extract_turn_signals`/`build_parity_record` (see
-`tools/usable-kitsoki-gate/flow_gate_runner.py`'s module docstring for the
-honest gap this makes visible: `stories/scenario-foundry-harness` is not a
-`workbench:` room, so `candidate_completed` reads False for every scenario
-today). `tests/playwright/usable-kitsoki-gate-web.spec.ts` (the real
+`tools/usable-kitsoki-gate/flow_gate_runner.py`'s module docstring: by
+default this now replays the real workbench-target projection —
+`stories/dev-story`/`pets-dev`/`slidey-dev`'s real `workbench:` rooms — so
+`candidate_completed` is a real engine-side join, not a harness-stub gap;
+the older non-workbench `stories/scenario-foundry-harness` stub still
+exists as an explicit back-compat/schema-proving path, not the default).
+`tests/playwright/usable-kitsoki-gate-web.spec.ts` (the real
 browser-driven web surface) still doesn't exist — separately gated,
 larger, browser-specific work. The plugin, its two landed no-LLM harnesses,
 and the calibration sweep can all be exercised today through no-LLM tests

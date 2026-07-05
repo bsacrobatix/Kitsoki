@@ -1,25 +1,32 @@
 #!/usr/bin/env python3
-"""Task 4.2 (docs/proposals/usable-kitsoki-release-gate.md): the no-LLM
-calibration run over the 18-scenario calibration set
-(tools/session-mining/calibration/), checked in as a diffable parity report
-at tools/arena/tests/fixtures/usable-kitsoki-gate/calibration-report.json.
+"""Task 4.2 (docs/proposals/usable-kitsoki-release-gate.md) + S6
+"no-llm-parity": the no-LLM calibration run over the 18-scenario calibration
+set (tools/session-mining/calibration/), driven against the THREE real
+`workbench:` rooms this project ships (dev-story, the hand-authored primary,
+and its two thin inheritors pets-dev/slidey-dev -- see
+tools/session-mining/flow_fixture_compiler.py's WORKBENCH_TARGETS registry),
+checked in as a diffable parity report at
+tools/arena/tests/fixtures/usable-kitsoki-gate/calibration-report.json.
 
 This test REGENERATES that report from scratch (via
 tools/usable-kitsoki-gate/run_calibration_gate.py's `sweep()`/`rollup()`,
-the exact no-LLM harness Task 3.3 wired in) and diffs it byte-for-byte
-against the checked-in copy. A real diff here means either (a) the
-calibration set changed, (b) the harness/join logic changed, or (c) S1's
-producer contract changed -- any of which should surface as a reviewable
+the exact no-LLM harness Task 3.3 wired in, now defaulting to the
+workbench-target projection rather than the non-workbench harness stub) and
+diffs it byte-for-byte against the checked-in copy. A real diff here means
+either (a) the calibration set changed, (b) the harness/join logic changed,
+(c) S1's producer contract changed, or (d) one of the three target stories'
+workbench wiring changed -- any of which should surface as a reviewable
 fixture diff, not a silent behavior change.
 
 Spends zero dollars and touches no docker/browser/LLM: every scenario is
 driven through a real `kitsoki test flows` replay
-(tools/session-mining/calibration/flows/*.flow.yaml, `test_kind: flow`,
-pure state-machine + host_cassette replay) against
-stories/scenario-foundry-harness, per AGENTS.md's "Automated testing should
+(tools/session-mining/calibration/flows/*.<target>.flow.yaml, `test_kind:
+flow`, pure state-machine + host_cassette replay) against each target's own
+real app (stories/dev-story/app.yaml, stories/pets-dev/app.yaml,
+stories/slidey-dev/app.yaml), per AGENTS.md's "Automated testing should
 never use a real LLM" rule. It does invoke `go run ./cmd/kitsoki` as a
-subprocess 54 times (18 scenarios x 3 surfaces) -- this is the one test in
-this suite that is not instant; budget ~10-20s.
+subprocess 162 times (18 scenarios x 3 surfaces x 3 targets) -- this is the
+one test in this suite that is not instant; budget ~30-60s.
 """
 
 from __future__ import annotations
@@ -64,11 +71,12 @@ check("calibration set has 18 scenario documents", len(scenario_ids), 18)
 # spuriously diff every regeneration. .artifacts/ is gitignored, so this
 # write is ephemeral scratch, not a second copy of the checked-in report.
 evidence_dir = REPO_ROOT / ".artifacts" / "usable-kitsoki-gate" / "calibration-evidence"
+targets = list(calib.DEFAULT_TARGETS)
 records = calib.sweep(
     corpus_dir, list(("web", "tui", "mcp")), run_id="calibration",
-    evidence_dir=evidence_dir, concurrency=6,
+    evidence_dir=evidence_dir, concurrency=6, targets=targets,
 )
-check("54 records for 18 scenarios x 3 surfaces", len(records), 54)
+check("162 records for 18 scenarios x 3 surfaces x 3 workbench targets", len(records), 18 * 3 * len(targets))
 
 rolled = calib.rollup(records, results_path=str(REPO_ROOT / ".artifacts" / "usable-kitsoki-gate" / "calibration-report.json"))
 
@@ -77,6 +85,7 @@ report = {
     "run_id": "calibration",
     "corpus": "tools/session-mining/calibration",
     "surfaces": ["web", "tui", "mcp"],
+    "targets": targets,
     "scenario_count": len(scenario_ids),
     "record_count": len(records),
     "parity_threshold_percent": calib.gate_constants.PARITY_THRESHOLD_PERCENT,
@@ -109,11 +118,25 @@ else:
         # calibration-contact note, which this run's number must match.)
         worst = checked_in["rollup"]["metrics"]["worst_surface_parity_percent"]
         threshold = checked_in["parity_threshold_percent"]
+        silent_bounce_count = checked_in["rollup"]["metrics"]["silent_bounce_count"]
+        misroute_adjacent_count = checked_in["rollup"]["metrics"]["misroute_adjacent_count"]
         check_true(
             "calibration-contact finding is consistent: worst-surface parity vs threshold is honestly reported "
             "(not silently patched to pass)",
             True,  # this check always "passes" -- it exists to print the number below for a human reviewer
         )
+        # Report (not assume) the other two GATE_CONDITIONS from the actual
+        # measured run -- S2's own regression-test-at-scale framing
+        # (workbench_gate_signal.go's doc comment) says silent_bounce should
+        # always be false by construction across all 162 real cells, and
+        # misroute_adjacent is hard-false from every S1 signal today (a
+        # documented absence, not a measurement) -- print both explicitly
+        # rather than only ever reporting the parity number.
+        print(f"[calibration] silent_bounce_count={silent_bounce_count} "
+              f"(zero_silent_bounce {'PASSES' if silent_bounce_count == 0 else 'FAILS'})")
+        print(f"[calibration] misroute_adjacent_count={misroute_adjacent_count} "
+              f"(zero_misroute_adjacent {'PASSES' if misroute_adjacent_count == 0 else 'FAILS'}; "
+              "S1 hard-codes this false today -- documented absence, not a measurement)")
         print(f"[calibration] worst_surface_parity_percent={worst} vs PARITY_THRESHOLD_PERCENT={threshold} "
               f"-> gate {'PASSES' if checked_in['rollup']['verdict'] == 'solved' else 'FAILS'} on the calibration set "
               "(see usable_kitsoki_gate_constants.py's calibration-contact note for why)")
