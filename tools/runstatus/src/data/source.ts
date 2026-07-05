@@ -261,6 +261,25 @@ export interface DataSource {
     reason?: string
   ): Promise<TurnResult>;
 
+  /**
+   * Record an operator up/down verdict on a routed turn (the web chat's
+   * thumbs-up/down control, WS-C C4) — journals through the same event the
+   * TUI's `/route up|down` command writes
+   * (Orchestrator.RecordRoutingFeedback). Does not advance the turn: no
+   * TurnResult, no server-side state change. Live session only; sources
+   * without an orchestrator omit it (the control stays hidden).
+   */
+  routingFeedback?(
+    sessionId: string,
+    feedback: {
+      state: string;
+      intent: string;
+      phrase: string;
+      tier: string;
+      verdict: "up" | "down";
+    }
+  ): Promise<void>;
+
   // ── Harness profiles (optional; live session only) ───────────────────────
   // Sources without an orchestrator (artifact/snapshot) omit these, so the
   // header picker stays hidden. Mirrors the server's optional HarnessController.

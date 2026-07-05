@@ -626,6 +626,84 @@ func TestGitHubTicket_CommentEdit_Happy(t *testing.T) {
 	}
 }
 
+// comment_reactions (WS-C C4 gh-agent surface): reads the reactions on the
+// gh-agent's ack comment via the native GitHub reactions endpoint, and
+// precomputes the has_thumbsdown/has_thumbsup convenience flags.
+func TestGitHubTicket_CommentReactions_DetectsThumbsdown(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/repos/o/r/issues/comments/1/reactions" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		writeJSON(w, []map[string]any{
+			{"id": 1, "content": "+1", "user": map[string]any{"login": "alice"}},
+			{"id": 2, "content": "-1", "user": map[string]any{"login": "bob"}},
+		})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+
+	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
+		"op":         "comment_reactions",
+		"comment_id": "https://github.com/o/r/issues/42#issuecomment-1",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if res.Data["has_thumbsdown"] != true {
+		t.Fatalf("has_thumbsdown: %v", res.Data["has_thumbsdown"])
+	}
+	if res.Data["has_thumbsup"] != true {
+		t.Fatalf("has_thumbsup: %v", res.Data["has_thumbsup"])
+	}
+	reactions, _ := res.Data["reactions"].([]any)
+	if len(reactions) != 2 {
+		t.Fatalf("reactions: got %d, want 2", len(reactions))
+	}
+}
+
+func TestGitHubTicket_CommentReactions_NoDissatisfaction(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, []map[string]any{{"id": 1, "content": "+1"}})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+
+	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
+		"op":         "comment_reactions",
+		"comment_id": "1",
+		"repo":       "o/r",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if res.Data["has_thumbsdown"] != false {
+		t.Fatalf("has_thumbsdown: %v", res.Data["has_thumbsdown"])
+	}
+}
+
+func TestGitHubTicket_CommentReactions_CommentIDRequired(t *testing.T) {
+	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
+		"op":   "comment_reactions",
+		"repo": "o/r",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error == "" {
+		t.Fatal("expected domain error when comment_id missing")
+	}
+}
+
 func TestGitHubTicket_Transition_CloseHappy(t *testing.T) {
 	t.Setenv("GH_TOKEN", "test-token")
 	var state string

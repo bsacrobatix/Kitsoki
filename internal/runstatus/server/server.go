@@ -1402,6 +1402,36 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		}
 		return newTurnResult(out, entry.Driver), nil
 
+	case "runstatus.session.routing_feedback":
+		// Web chat's thumbs-up/down control on a routed turn (WS-C C4). The
+		// browser recovers state/intent/tier/phrase from the turn's own trace
+		// events (readTurnRouting in stores/run.ts) and posts them here; this
+		// is a pure pass-through to the SAME journaled routing-feedback event
+		// the TUI's `/route up|down` command writes (Orchestrator.
+		// RecordRoutingFeedback / journal.KindRoutingFeedback) — no second
+		// schema. Never mutates session/world state, so no writer lock and no
+		// TurnOutcome to return.
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		statePath, _ := params["state"].(string)
+		intent, _ := params["intent"].(string)
+		phrase, _ := params["phrase"].(string)
+		tier, _ := params["tier"].(string)
+		verdictStr, _ := params["verdict"].(string)
+		verdict := orchestrator.RoutingFeedbackVerdict(verdictStr)
+		if verdict != orchestrator.RoutingFeedbackUp && verdict != orchestrator.RoutingFeedbackDown {
+			return nil, &rpcError{Code: codeServerError, Message: "session.routing_feedback: 'verdict' must be 'up' or 'down'"}
+		}
+		if err := entry.Driver.RecordRoutingFeedback(ctx, statePath, intent, phrase, tier, verdict); err != nil {
+			return nil, serverErr(err)
+		}
+		return map[string]any{"ok": true}, nil
+
 	case "runstatus.notifications.subscribe":
 		// Cross-session feed: no session_id — the browser home chrome opens one
 		// of these for the global badge/toast. Returns a subscription_id the

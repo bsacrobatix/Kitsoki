@@ -528,6 +528,59 @@ describe("useRunStore — write-side actions", () => {
     );
   });
 
+  // ---- sendRoutingFeedback (WS-C C4 web control) ----
+  // The routing chip's thumbs-up/down control drives store.sendRoutingFeedback,
+  // which posts the entry's own recovered provenance (state/intent/tier) + its
+  // phrase to the source, then marks the master transcript entry so the chip
+  // hides in favour of a "recorded" indicator — without advancing the turn (no
+  // TurnResult is applied).
+  it("sendRoutingFeedback posts the entry's routing provenance and marks it given", async () => {
+    let captured: unknown = null;
+    const src = writeSource({
+      sendTurn: () => Promise.resolve(turnResult({ view: "Got it." })),
+    }) as DataSource & {
+      routingFeedback: (
+        sid: string,
+        feedback: { state: string; intent: string; phrase: string; tier: string; verdict: string }
+      ) => Promise<void>;
+    };
+    src.routingFeedback = (_sid, feedback) => {
+      captured = feedback;
+      return Promise.resolve();
+    };
+
+    const store = useRunStore();
+    await store.sendText(src, "sess-1", "fix the crash on login", "discuss");
+    // sendText doesn't stamp routing (no trace events wired in this fixture),
+    // so drive the entry directly the way chatEntries would enrich it.
+    const entry = store.transcript[0]!;
+    entry.turn = 1;
+    entry.routing = { routedBy: "semantic", intent: "go_bugfix", statePath: "hub" };
+
+    await store.sendRoutingFeedback(src, "sess-1", entry, "down");
+
+    expect(captured).toEqual({
+      state: "hub",
+      intent: "go_bugfix",
+      phrase: "fix the crash on login",
+      tier: "semantic",
+      verdict: "down",
+    });
+    expect(store.transcript[0]!.feedbackGiven).toBe("down");
+  });
+
+  it("sendRoutingFeedback is a no-op on a source without the optional method", async () => {
+    const src = writeSource({
+      sendTurn: () => Promise.resolve(turnResult({ view: "Got it." })),
+    }); // no routingFeedback
+    const store = useRunStore();
+    await store.sendText(src, "sess-1", "hi", "discuss");
+    const entry = store.transcript[0]!;
+    entry.turn = 1;
+    await store.sendRoutingFeedback(src, "sess-1", entry, "up");
+    expect(store.transcript[0]!.feedbackGiven).toBeUndefined();
+  });
+
   it("sendText pushes the raw text as the user entry and applies the result", async () => {
     let capturedInput = "";
     const src = writeSource({
@@ -805,6 +858,7 @@ describe("useRunStore — write-side actions", () => {
       matchType: "main-turn",
       confidence: 0.82,
       intent: "workbench.ad_hoc",
+      statePath: "root/idle",
     });
   });
 
@@ -885,6 +939,7 @@ describe("run store — chatEntries routing provenance", () => {
       matchType: "leading-verb:commit",
       confidence: 0.95,
       intent: "git.commit",
+      statePath: "root/idle",
     });
     // The raw transcript is never mutated — only chatEntries carries routing,
     // which is exactly why a surface binding the raw transcript loses the chip.

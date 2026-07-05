@@ -89,6 +89,9 @@ func (routingFrameDriver) Teleport(context.Context, string) (*orchestrator.TurnO
 func (routingFrameDriver) RewindRoute(context.Context, string, orchestrator.ContextRouteClass, string) (*orchestrator.TurnOutcome, error) {
 	return &orchestrator.TurnOutcome{}, nil
 }
+func (routingFrameDriver) RecordRoutingFeedback(context.Context, string, string, string, string, orchestrator.RoutingFeedbackVerdict) error {
+	return nil
+}
 
 func TestTurnStream_RoutingFramePrecedesDone(t *testing.T) {
 	ts := httptest.NewServer(NewWithSource(routingFrameSource{def: &app.AppDef{}}, WithDriver(routingFrameDriver{})).Handler())
