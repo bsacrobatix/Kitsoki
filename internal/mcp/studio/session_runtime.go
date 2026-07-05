@@ -169,7 +169,7 @@ func (rt *sessionRuntime) Close() {
 // backend (synthetic, codex, …) instead of the static default — the same
 // remap `kitsoki turn --profile` applies. An empty map leaves the session on the
 // legacy default-backend path (selectedProfile is then ignored).
-func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string, initialWorld map[string]any, hostCassette string, resolver app.ImportResolver, chatStore *chats.Store, configureHosts HostRegistryConfigurer) (*sessionRuntime, error) {
+func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string, initialWorld map[string]any, hostCassette string, failClosedAgentReplay bool, resolver app.ImportResolver, chatStore *chats.Store, configureHosts HostRegistryConfigurer) (*sessionRuntime, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -269,11 +269,17 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 			return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: configure host registry: %v", err)}
 		}
 	}
+	cassetteHandlers := map[string]bool{}
 	if hostCassette != "" {
-		if err := applyStudioHostCassette(hostReg, hostCassette, sink); err != nil {
+		seen, err := applyStudioHostCassette(hostReg, hostCassette, sink, failClosedAgentReplay)
+		if err != nil {
 			rt.Close()
 			return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: apply host cassette: %v", err)}
 		}
+		cassetteHandlers = seen
+	}
+	if failClosedAgentReplay {
+		installReplayAgentMissHandlers(hostReg, cassetteHandlers)
 	}
 	if err := hostReg.ValidateAllowList(def.Hosts); err != nil {
 		rt.Close()
@@ -377,10 +383,10 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 	return rt, nil
 }
 
-func applyStudioHostCassette(hostReg *host.Registry, cassettePath string, sink store.EventSink) error {
+func applyStudioHostCassette(hostReg *host.Registry, cassettePath string, sink store.EventSink, failClosedAgentReplay bool) (map[string]bool, error) {
 	cas, err := testrunner.LoadCassette(cassettePath)
 	if err != nil {
-		return fmt.Errorf("load host cassette: %w", err)
+		return nil, fmt.Errorf("load host cassette: %w", err)
 	}
 	stateOf := func() string { return "" }
 	seen := map[string]bool{}
@@ -391,9 +397,39 @@ func applyStudioHostCassette(hostReg *host.Registry, cassettePath string, sink s
 		}
 		seen[hn] = true
 		fallback, _ := hostReg.Get(hn)
+		if failClosedAgentReplay && strings.HasPrefix(hn, "host.agent.") {
+			fallback = replayAgentMissHandler(hn)
+		}
 		hostReg.Replace(hn, testrunner.BuildCassetteDispatcherWithSink(cas, hn, stateOf, fallback, nil, clock.Real(), sink, nil))
 	}
-	return nil
+	return seen, nil
+}
+
+var replayAgentHostHandlers = []string{
+	"host.agent.ask",
+	"host.agent.extract",
+	"host.agent.decide",
+	"host.agent.task",
+	"host.agent.converse",
+	"host.agent.search",
+}
+
+func installReplayAgentMissHandlers(hostReg *host.Registry, cassetteHandlers map[string]bool) {
+	for _, name := range replayAgentHostHandlers {
+		if cassetteHandlers[name] {
+			continue
+		}
+		hostReg.Replace(name, replayAgentMissHandler(name))
+	}
+}
+
+func replayAgentMissHandler(name string) host.Handler {
+	return func(context.Context, map[string]any) (host.Result, error) {
+		return host.Result{}, fmt.Errorf(
+			"studio: harness:replay cannot dispatch %s without a matching host_cassette episode; replay misses fail closed instead of falling through to a live agent",
+			name,
+		)
+	}
 }
 
 // newComposerModel seeds the headless TUI model used solely as the slice-1
