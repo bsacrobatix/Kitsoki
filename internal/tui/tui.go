@@ -1888,35 +1888,23 @@ func (m RootModel) dispatchInput(input string) (tea.Model, tea.Cmd) {
 	m.routing = newRoutingPipeline()
 	m.transcript.AppendLive(m.routing.renderProgress())
 
-	// Cheap, side-effect-free match against the current menu. This avoids the
-	// LLM round-trip when the user typed something we can route locally — but
-	// we still dispatch the resulting transition asynchronously so a slow
-	// on_enter host call (e.g. host.agent.ask, host.run on a long command)
-	// doesn't freeze the TUI.
+	// Route through the shared orchestrator entry point, exactly like every
+	// other surface (web, one-shot, flows). Turn runs its own deterministic
+	// → semantic → LLM tier stack internally and stamps a slog event per
+	// tier (turn.deterministic_hit/miss, turn.semantic_hit/miss, ...); the
+	// routingObserver installed on this context translates those events into
+	// RoutingTier{Hit,Miss}Msg deliveries that drive the live routing chip
+	// via UpdateLive/FinalizeLive (handleTurnOutcome finalizes on
+	// completion). There is deliberately no synchronous pre-pass here: an
+	// independent MatchDeterministic call used to shortcut the deterministic
+	// tier before dispatch, but it duplicated Turn's own deterministic
+	// matching logic and could in principle disagree with it. Turn's
+	// deterministic hit is fast (no LLM round-trip) and dispatches
+	// asynchronously either way, so folding this surface into the shared
+	// entry point costs nothing and removes a second place routing behavior
+	// could drift.
 	orch := m.orch
 	sid := m.sid
-	ctx := context.Background()
-	intent, slots, hit, err := orch.MatchDeterministic(ctx, sid, input)
-	if err != nil {
-		// Drop the placeholder before printing the error.
-		m.transcript.FinalizeLive("")
-		m.transcript.AppendError("", fmt.Sprintf("error: %s", userfacing.Error(err)))
-		return m, nil
-	}
-	if hit {
-		// Deterministic match at submit time — the pipeline resolves on the
-		// first layer and settles immediately (this path has no completion-time
-		// finalizer because handleTurnOutcome skips deterministic turns).
-		m.routing.markHit(TierDeterministic, intent, "", 0, false)
-		m.transcript.FinalizeLive(m.routing.renderResolved())
-		return startAsyncTurn(m, input, asyncSubmitDirectFromInput(orch, sid, intent, slots, input, orchestrator.RouteProvenance{Source: "deterministic"}), pendingDeterministic)
-	}
-
-	// No deterministic match — the deterministic layer is passed-through; the
-	// async router (semantic → LLM) drives the rest via RoutingTier*Msg, and
-	// handleTurnOutcome finalizes. Advance the live pipeline now.
-	m.routing.markMiss(TierDeterministic, "")
-	m.transcript.UpdateLive(m.routing.renderProgress())
 	return startAsyncTurn(m, input, asyncTurn(orch, sid, input), pendingLLM)
 }
 
