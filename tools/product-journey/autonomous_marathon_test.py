@@ -7,10 +7,12 @@ and later finalizes that run through the native issue filing and gh-agent gate.
 """
 
 import importlib.util
+import http.server
 import os
 import stat
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location(
@@ -32,6 +34,31 @@ def check(label: str, condition: bool, failures: list[str]) -> None:
     else:
         print(f"not ok: {label}")
         failures.append(label)
+
+
+class HealthHandler(http.server.BaseHTTPRequestHandler):
+    body = b"ok"
+    status = 200
+
+    def do_GET(self) -> None:
+        if self.path != "/healthz":
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.send_response(self.status)
+        self.end_headers()
+        self.wfile.write(self.body)
+
+    def log_message(self, _format: str, *_args: object) -> None:
+        return
+
+
+def start_health_server(body: bytes = b"ok", status: int = 200):
+    handler = type("TestHealthHandler", (HealthHandler,), {"body": body, "status": status})
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, f"http://127.0.0.1:{server.server_port}"
 
 
 def main() -> int:
@@ -56,6 +83,8 @@ def main() -> int:
             github_targets = run.load_github_targets(run.GITHUB_TARGETS)
             personas = run.load_personas(run.PERSONAS)
             scenarios = run.load_scenarios(run.SCENARIOS)
+            healthy_server, healthy_url = start_health_server()
+            unhealthy_server, unhealthy_url = start_health_server(b"not-ok")
 
             created = run.autonomous_marathon(
                 catalog,
@@ -68,10 +97,10 @@ def main() -> int:
                 "autonomous-marathon-test",
                 "bugfix",
                 7,
-                "",
+                "o/r",
                 "",
                 "stories/bugfix",
-                "",
+                healthy_url,
                 "",
                 "",
                 "",
@@ -134,6 +163,79 @@ def main() -> int:
                   and driver_handoff["finalize_commands"] == expected_final_gates
                   and loaded_summary["driver_final_gates"] == expected_final_gates
                   and "4 final gates" in loaded_summary["driver_contract_summary"],
+                  failures)
+
+            missing_ticket = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-missing-ticket",
+                "bugfix",
+                7,
+                "",
+                "",
+                "stories/bugfix",
+                healthy_url,
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                "pending",
+                24,
+                15,
+                45,
+                None,
+            )
+            check("live pending marathon refuses missing ticket repo before handoff",
+                  missing_ticket["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and missing_ticket["validation_issue_summary"] == "ticket-repo-required"
+                  and missing_ticket["autonomous_control_status"] == "not_run",
+                  failures)
+
+            unhealthy = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-unhealthy-gh-agent",
+                "bugfix",
+                7,
+                "o/r",
+                "",
+                "stories/bugfix",
+                unhealthy_url,
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                "pending",
+                24,
+                15,
+                45,
+                None,
+            )
+            check("live pending marathon refuses unhealthy gh-agent before handoff",
+                  unhealthy["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and unhealthy["validation_issue_summary"] == "gh-agent-health"
+                  and unhealthy["gh_agent_health_status"] == "fail"
+                  and unhealthy["autonomous_control_status"] == "not_run",
                   failures)
 
             filing_test.attach_bugfix_proof(run_dir, scenario_id)
@@ -236,10 +338,10 @@ def main() -> int:
                 "autonomous-marathon-stale-watchdog",
                 "bugfix",
                 7,
-                "",
+                "o/r",
                 "",
                 "stories/bugfix",
-                "",
+                healthy_url,
                 "",
                 "",
                 "",
@@ -472,6 +574,10 @@ def main() -> int:
                   and "Autonomous driver: `replay` / `captured`" in replay_report_text,
                   failures)
         finally:
+            if "healthy_server" in locals():
+                healthy_server.shutdown()
+            if "unhealthy_server" in locals():
+                unhealthy_server.shutdown()
             for key, value in old_env.items():
                 if value is None:
                     os.environ.pop(key, None)

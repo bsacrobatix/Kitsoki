@@ -458,6 +458,7 @@ states:
                 cwd: "."
               bind:
                 last_result: stdout_json
+                status: "stdout_json.status"
                 run_id: "stdout_json.run_id"
                 run_dir: "stdout_json.run_dir"
                 deck_path: "stdout_json.deck_path"
@@ -527,6 +528,8 @@ states:
                 gh_agent_missing_triage_summary: "stdout_json.gh_agent_missing_triage_summary"
                 gh_agent_independent_verify_summary: "stdout_json.gh_agent_independent_verify_summary"
                 gh_agent_missing_verify_summary: "stdout_json.gh_agent_missing_verify_summary"
+                gh_agent_health_status: "stdout_json.gh_agent_health_status"
+                gh_agent_health_summary: "stdout_json.gh_agent_health_summary"
                 stats_status: "stdout_json.stats_status"
                 stats_root: "stdout_json.stats_root"
                 stats_output: "stdout_json.stats_output"
@@ -582,8 +585,6 @@ states:
                 validation_warnings: "stdout_json.validation_warnings"
                 validation_issue_summary: "stdout_json.validation_issue_summary"
               on_error: idle
-            - set:
-                status: "autonomous_marathon_ready"
       refresh_targets:
         - target: .
           effects:

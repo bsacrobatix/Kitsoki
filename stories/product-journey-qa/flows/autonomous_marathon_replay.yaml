@@ -141,7 +141,7 @@ turns:
         gh_agent_public_base_url: https://agent.example
     expect_state: run_created
     expect_world:
-      status: autonomous_marathon_ready
+      status: autonomous_marathon_valid
       run_id: run-replay
       autonomous_marathon_status: autonomous_marathon_valid
       autonomous_driver_mode: replay

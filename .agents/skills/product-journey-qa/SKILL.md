@@ -63,7 +63,9 @@ this live-capture preflight.
 Live-budgeted pending marathons also require `ticket_repo` and
 `gh_agent_public_base_url` before driver handoff, so the story cannot spend
 capture budget on a run that cannot later file findings, drain gh-agent fixes,
-or expose reviewable run links.
+or expose reviewable run links. The runner checks
+`<gh_agent_public_base_url>/healthz` and refuses `ready_for_driver` unless it
+returns HTTP 200 with body `ok`.
 
 Use `--driver-replay-smoke --smoke-scenario <scenario-id>` when narrowing a
 single scenario. Use `--dogfood-smoke` when checking matrix-to-rollup artifact
@@ -176,7 +178,9 @@ Then hand it to the reusable driver:
    `autonomous_driver_mode=pending` when a live budgeted driver still needs to
    capture evidence first; live-budgeted pending mode must still provide
    `ticket_repo` and `gh_agent_public_base_url` up front because those values
-   are required for the autonomous file/fix/close-out gates after capture.
+   are required for the autonomous file/fix/close-out gates after capture. The
+   hosted gh-agent health check must pass before the story returns a driver
+   handoff for live capture.
 8. If there are no credible issue findings, or after `autonomous_fix` reports
    the bundle valid, submit `review` and `validate` through the story. Use
    `file_findings` or the CLI `--file-findings`/`--review-run`/`--validate-run`
