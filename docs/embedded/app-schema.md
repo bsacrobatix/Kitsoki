@@ -875,13 +875,15 @@ have no analogue here):
 ```yaml
 agent_off_ramp: true                                          # bare scalar — use the off-path voice
 agent_off_ramp: { agent: discovery-guide, banner: "(thinking)" }  # struct form
+agent_off_ramp: { agent: discovery-guide, capture_free_text: true } # preserve rejected text
 ```
 
-| Field     | Required | Notes                                                                                       |
-|-----------|----------|---------------------------------------------------------------------------------------------|
-| `agent`   | no       | Names an entry in top-level `agents:` whose system prompt + model style the converse call. Validated at load against the `agents:` map (mirrors `off_path.agent`). |
-| `persona` | no       | Inline system-prompt-style instruction for the off-ramp voice. When both `persona` and `agent` are set, `persona` wins. |
-| `banner`  | no       | One-line label shown when the off-ramp engages.                                             |
+| Field               | Required | Notes                                                                                       |
+|---------------------|----------|---------------------------------------------------------------------------------------------|
+| `agent`             | no       | Names an entry in top-level `agents:` whose system prompt + model style the converse call. Validated at load against the `agents:` map (mirrors `off_path.agent`). |
+| `persona`           | no       | Inline system-prompt-style instruction for the off-ramp voice. When both `persona` and `agent` are set, `persona` wins. |
+| `banner`            | no       | One-line label shown when the off-ramp engages.                                             |
+| `capture_free_text` | no       | Preserves the rejected free text on the off-ramp input.                                     |
 
 Load-time invariants (a violating `agent_off_ramp` fails the load):
 

@@ -13,7 +13,7 @@
 
 test_kind: flow
 app: ../app.yaml
-initial_state: bootstrap
+initial_state: start
 initial_world:
   goal_slug: goal-seeker-two-ready
   goal_dir:  stories/goal-seeker/testdata/two-ready
@@ -44,6 +44,8 @@ host_handlers:
 
 turns:
   - intent: { name: look, slots: {} }
+    expect_state: start
+  - intent: { name: advance, slots: {} }        # start → bootstrap (reset log)
     expect_state: bootstrap
   - intent: { name: advance, slots: {} }        # bootstrap → lint_check
     expect_state: lint_check

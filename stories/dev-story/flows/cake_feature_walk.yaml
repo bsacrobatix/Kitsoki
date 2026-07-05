@@ -148,17 +148,12 @@ host_handlers:
         reason:           "Stub artifact passes."
 
 turns:
-  # main → impl.idle.
+  # main → impl.review_task_executing. impl.idle auto-starts when a ticket is
+  # already projected, so the ticket fetch happens in the same turn.
   - intent: { name: go_implementation, slots: {} }
-    expect_state: impl.idle
+    expect_state: impl.review_task_executing
     expect_world:
       impl__ticket_id: "F-2026-05-18-export-csv"
-
-  # impl.idle → impl.review_task_executing. impl's `start` lifts via
-  # dev-story's imports.bf.intents.import: [start] — start is shared
-  # across imports as bare.
-  - intent: { name: impl__start, slots: {} }
-    expect_state: impl.review_task_executing
     expect_host_calls:
       - handler: host.local_files.ticket.get
         args: { id: "F-2026-05-18-export-csv" }

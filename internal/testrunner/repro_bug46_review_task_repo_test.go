@@ -1,8 +1,9 @@
 package testrunner_test
 
 import (
-	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,24 +19,21 @@ func TestBug46ReviewTaskFetchesGitHubIssueFromTicketRepo(t *testing.T) {
 		t.Skip("TestBug46ReviewTaskFetchesGitHubIssueFromTicketRepo: skipped under -short (full story run)")
 	}
 
-	restore := host.SetExecRunnerForTest(func(_ context.Context, _ string, name string, args ...string) (string, string, int, error) {
-		require.Equal(t, "gh", name)
-		repo := ""
-		for i := 0; i+1 < len(args); i++ {
-			if args[i] == "--repo" {
-				repo = args[i+1]
-				break
-			}
+	t.Setenv("GH_TOKEN", "test-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/repos/constructorfabric/Kitsoki/issues/46/comments" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[]`))
+			return
 		}
-
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, "/repos/constructorfabric/Kitsoki/issues/46", r.URL.Path)
 		title := "WRONG-REPO-ISSUE-46"
 		body := "Issue #46 from the cwd fallback repository."
 		url := "https://github.com/wrong/repo/issues/46"
-		if repo == "constructorfabric/Kitsoki" {
-			title = "Correct Kitsoki feature issue"
-			body = "Issue #46 from constructorfabric/Kitsoki."
-			url = "https://github.com/constructorfabric/Kitsoki/issues/46"
-		}
+		title = "Correct Kitsoki feature issue"
+		body = "Issue #46 from constructorfabric/Kitsoki."
+		url = "https://github.com/constructorfabric/Kitsoki/issues/46"
 
 		payload, err := json.Marshal(map[string]any{
 			"number":    float64(46),
@@ -48,8 +46,11 @@ func TestBug46ReviewTaskFetchesGitHubIssueFromTicketRepo(t *testing.T) {
 			"comments":  []any{},
 		})
 		require.NoError(t, err)
-		return string(payload), "", 0, nil
-	})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+	restore := host.SetGitHubAPIForTest(srv.URL, srv.Client())
 	defer restore()
 
 	dir := t.TempDir()
