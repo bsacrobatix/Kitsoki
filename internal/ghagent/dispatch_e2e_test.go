@@ -3,8 +3,11 @@ package ghagent
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1041,13 +1044,35 @@ func TestDispatch_FeatureDevStoryBeat(t *testing.T) {
 }
 
 // TestDispatch_PRBeat routes a pr-kind mention to the PR status beat: one real
-// host.git pr_status read through the gh CLI seam + one status comment.
+// host.git pr_status read through the native GitHub API + one status comment.
 func TestDispatch_PRBeat(t *testing.T) {
 	ctx := context.Background()
+	t.Setenv("GH_TOKEN", "test-token")
 
 	prsJSON := `[{"number":77,"title":"@kitsoki review this PR","author":{"login":"bob"},"url":"https://github.com/o/r/pull/77"}]`
 	restore := stubGHCli(t, `[]`, prsJSON)
 	defer restore()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/pulls/77":
+			writeJSONForDispatchTest(t, w, map[string]any{
+				"state":    "open",
+				"html_url": "https://github.com/o/r/pull/77",
+				"head":     map[string]any{"sha": "abc123"},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/77/comments":
+			writeJSONForDispatchTest(t, w, []map[string]any{})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/commits/abc123/status":
+			writeJSONForDispatchTest(t, w, map[string]any{"state": "success", "statuses": []map[string]any{}})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/commits/abc123/check-runs":
+			writeJSONForDispatchTest(t, w, map[string]any{"check_runs": []map[string]any{{"name": "ci", "status": "completed", "conclusion": "success"}}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
 
 	items, err := host.ListGitHubInboxItems(ctx, host.GitHubInboxOptions{
 		Repo: "o/r", IncludeIssues: true, IncludePRs: true,
@@ -1111,8 +1136,16 @@ func TestDispatch_PRBeat(t *testing.T) {
 	if meta["origin_ref"] != "github:o/r/pr/77" {
 		t.Fatalf("meta origin_ref = %v", meta["origin_ref"])
 	}
-	if !strings.Contains(last, "PR #77 status: `OPEN`") || !strings.Contains(last, "ci=SUCCESS") {
+	if !strings.Contains(last, "PR #77 status: `success`") {
 		t.Fatalf("PR final comment missing status reasoning:\n%s", last)
+	}
+}
+
+func writeJSONForDispatchTest(t *testing.T, w http.ResponseWriter, v any) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		t.Fatalf("write json: %v", err)
 	}
 }
 

@@ -1,10 +1,11 @@
-// Package host — host.git — git/gh-backed VCS provider.
+// Package host — host.git — git-backed VCS provider.
 //
 // Implements the `vcs` host_interface (see docs/architecture/hosts.md).  One
 // prefix-fallback handler dispatches the seven vcs ops via the `op`
-// arg.  Local git ops shell out to the `git` CLI; PR ops shell out to
-// `gh`, which is optional — if missing or unauthenticated the handler
-// returns a clean Result.Error rather than crashing.
+// arg.  Local git ops shell out to the `git` CLI; GitHub PR status/comment
+// ops use the native GitHub REST API with GH_TOKEN/GITHUB_TOKEN. PR creation
+// and deterministic rebase still use local git plumbing plus the remaining
+// compatibility shims noted below.
 //
 // All exec calls go through the shared `cliExec` seam declared in
 // cli_exec.go so tests don't shell out for real.
@@ -13,7 +14,6 @@ package host
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -267,31 +267,24 @@ func gitPush(ctx context.Context, workdir string, args map[string]any) (Result, 
 	}}, nil
 }
 
-// ─── gh ops (optional — clean error if `gh` absent) ────────────────────────
+// ─── GitHub PR ops ────────────────────────────────────────────────────────
 
-// ghAvailable reports whether the `gh` binary is on PATH.  A negative
-// answer turns the four PR ops into a clean domain error so the YAML
-// `on_error:` arc fires instead of crashing.  The `gh --version` probe is
-// workdir-agnostic, so no workdir argument is taken; this is the single
-// availability probe shared by both the git_vcs PR ops and the gh.ticket ops.
+// ghAvailable reports whether the `gh` binary is on PATH. It remains for
+// GitHub inbox helpers that still use gh list commands.
 func ghAvailable(ctx context.Context) bool {
 	_, _, code, err := cliExec(ctx, "", "gh", "--version")
 	return err == nil && code == 0
 }
 
 func ghOpenPR(ctx context.Context, workdir string, args map[string]any) (Result, error) {
-	if !ghAvailable(ctx) {
-		return Result{Error: "git.open_pr: gh CLI not available — install github.com/cli/cli"}, nil
-	}
 	title, _ := args["title"].(string)
 	body, _ := args["body"].(string)
 	base, _ := args["base"].(string)
 	if strings.TrimSpace(title) == "" {
 		return Result{Error: "git.open_pr: title argument is required"}, nil
 	}
-	// `gh pr create` refuses to open a PR unless the head branch has been
-	// published to the remote.  Publish the current HEAD first, mirroring the
-	// sibling gitPush handler (`git push -u origin HEAD`).
+	// GitHub cannot open a PR until the head branch is published. Publish the
+	// current HEAD first, mirroring the sibling gitPush handler.
 	remote, _ := args["remote"].(string)
 	if remote == "" {
 		remote = "origin"
@@ -301,85 +294,387 @@ func ghOpenPR(ctx context.Context, workdir string, args map[string]any) (Result,
 	} else if pushCode != 0 {
 		return Result{Error: fmt.Sprintf("git.open_pr: push: %s", strings.TrimSpace(pushStderr))}, nil
 	}
-	ghArgs := []string{"pr", "create", "--title", title, "--body", body}
-	if base != "" {
-		ghArgs = append(ghArgs, "--base", base)
+	repo, errMsg := resolveGitHubRepo(ctx, workdir, args)
+	if errMsg != "" {
+		return Result{Error: "git.open_pr: " + errMsg}, nil
 	}
-	stdout, stderr, code, err := cliExec(ctx, workdir, "gh", ghArgs...)
+	head, _ := args["head"].(string)
+	if strings.TrimSpace(head) == "" {
+		stdout, stderr, code, err := cliExec(ctx, workdir, "git", "rev-parse", "--abbrev-ref", "HEAD")
+		if err != nil {
+			return Result{Error: fmt.Sprintf("git.open_pr: head branch: %v", err)}, nil
+		}
+		if code != 0 {
+			return Result{Error: fmt.Sprintf("git.open_pr: head branch: %s", strings.TrimSpace(stderr))}, nil
+		}
+		head = strings.TrimSpace(stdout)
+	}
+	if head == "" || head == "HEAD" {
+		return Result{Error: "git.open_pr: head branch is required for native GitHub PR creation"}, nil
+	}
+	if strings.TrimSpace(base) == "" {
+		var repoMeta githubRepository
+		code, resp, err := githubAPIJSON(ctx, "GET", "repos/"+repo, nil, &repoMeta)
+		if err != nil {
+			return Result{Error: fmt.Sprintf("git.open_pr: default branch: %v", err)}, nil
+		}
+		if code >= 300 {
+			return Result{Error: fmt.Sprintf("git.open_pr: default branch: %s", githubAPIError(resp))}, nil
+		}
+		base = strings.TrimSpace(repoMeta.DefaultBranch)
+		if base == "" {
+			base = "main"
+		}
+	}
+	var pr githubPullRequestCreateResponse
+	code, resp, err := githubAPIJSON(ctx, "POST", "repos/"+repo+"/pulls", map[string]any{
+		"title": title,
+		"body":  body,
+		"head":  head,
+		"base":  base,
+	}, &pr)
 	if err != nil {
-		return Result{Error: fmt.Sprintf("git.open_pr: exec: %v", err)}, nil
+		return Result{Error: fmt.Sprintf("git.open_pr: %v", err)}, nil
 	}
-	if code != 0 {
-		return Result{Error: fmt.Sprintf("git.open_pr: %s", strings.TrimSpace(stderr))}, nil
+	if code >= 300 {
+		return Result{Error: fmt.Sprintf("git.open_pr: %s", githubAPIError(resp))}, nil
 	}
-	// `gh pr create` prints the PR URL on the last line of stdout.
-	url := lastNonEmptyLine(stdout)
-	prID := prIDFromURL(url)
+	prID := fmt.Sprintf("%d", pr.Number)
 	return Result{Data: map[string]any{
 		"ok":    true,
-		"url":   url,
+		"url":   pr.HTMLURL,
 		"pr_id": prID,
 	}}, nil
 }
 
 func ghPRStatus(ctx context.Context, workdir string, args map[string]any) (Result, error) {
-	if !ghAvailable(ctx) {
-		return Result{Error: "git.pr_status: gh CLI not available"}, nil
-	}
 	prID, _ := args["pr_id"].(string)
-	if strings.TrimSpace(prID) == "" {
+	repo, num, errMsg := resolveGitHubPRRef(ctx, workdir, args, prID)
+	if errMsg != "" {
+		return Result{Error: "git.pr_status: " + errMsg}, nil
+	}
+	if num == "" {
 		return Result{Error: "git.pr_status: pr_id argument is required"}, nil
 	}
-	ghArgs := []string{"pr", "view", prID}
-	ghArgs = append(ghArgs, repoFlag(args)...)
-	ghArgs = append(ghArgs, "--json", "state,statusCheckRollup")
-	stdout, stderr, code, err := cliExec(ctx, workdir, "gh", ghArgs...)
+
+	var pr githubPullRequest
+	code, resp, err := githubAPIJSON(ctx, "GET", fmt.Sprintf("repos/%s/pulls/%s", repo, num), nil, &pr)
 	if err != nil {
-		return Result{Error: fmt.Sprintf("git.pr_status: exec: %v", err)}, nil
+		return Result{Error: fmt.Sprintf("git.pr_status: %v", err)}, nil
 	}
-	if code != 0 {
-		return Result{Error: fmt.Sprintf("git.pr_status: %s", strings.TrimSpace(stderr))}, nil
+	if code >= 300 {
+		return Result{Error: fmt.Sprintf("git.pr_status: %s", githubAPIError(resp))}, nil
 	}
-	// Surface the raw JSON envelope on `state` + `checks`; callers may
-	// JSON-parse via host.run's stdout_json convention if they want
-	// structured access.  Wave 1 just hands the raw blob back.
+
+	var comments []githubIssueComment
+	code, resp, err = githubAPIJSON(ctx, "GET", fmt.Sprintf("repos/%s/issues/%s/comments?per_page=100", repo, num), nil, &comments)
+	if err != nil {
+		return Result{Error: fmt.Sprintf("git.pr_status comments: %v", err)}, nil
+	}
+	if code >= 300 {
+		return Result{Error: fmt.Sprintf("git.pr_status comments: %s", githubAPIError(resp))}, nil
+	}
+
+	checks, ciState, errMsg := githubPRChecks(ctx, repo, pr.Head.SHA)
+	if errMsg != "" {
+		return Result{Error: errMsg}, nil
+	}
+	if pr.State == "closed" && pr.Merged && ciState == "pending" && len(checks) == 0 {
+		ciState = "success"
+	}
 	return Result{Data: map[string]any{
-		"state":    stdout,
-		"checks":   []any{},
-		"comments": []any{},
+		"state":        ciState,
+		"pr_state":     strings.ToLower(strings.TrimSpace(pr.State)),
+		"merged":       pr.Merged,
+		"url":          pr.HTMLURL,
+		"head_sha":     pr.Head.SHA,
+		"checks":       checks,
+		"comments":     githubIssueCommentsForWorld(comments),
+		"raw_comments": comments,
 	}}, nil
 }
 
-func repoFlag(args map[string]any) []string {
-	if r, _ := args["repo"].(string); strings.TrimSpace(r) != "" {
-		return []string{"--repo", r}
-	}
-	return nil
-}
-
 func ghPRComment(ctx context.Context, workdir string, args map[string]any) (Result, error) {
-	if !ghAvailable(ctx) {
-		return Result{Error: "git.pr_comment: gh CLI not available"}, nil
-	}
 	prID, _ := args["pr_id"].(string)
 	body, _ := args["body"].(string)
 	if strings.TrimSpace(prID) == "" || strings.TrimSpace(body) == "" {
 		return Result{Error: "git.pr_comment: pr_id and body are required"}, nil
 	}
-	_, stderr, code, err := cliExec(ctx, workdir, "gh", "pr", "comment", prID, "--body", body)
+	repo, num, errMsg := resolveGitHubPRRef(ctx, workdir, args, prID)
+	if errMsg != "" {
+		return Result{Error: "git.pr_comment: " + errMsg}, nil
+	}
+	path := fmt.Sprintf("repos/%s/issues/%s/comments", repo, num)
+	payload := map[string]any{"body": body}
+	if optBool(args, "approve", false) || optBool(args, "request_changes", false) {
+		event := "COMMENT"
+		if optBool(args, "approve", false) {
+			event = "APPROVE"
+		}
+		if optBool(args, "request_changes", false) {
+			event = "REQUEST_CHANGES"
+		}
+		path = fmt.Sprintf("repos/%s/pulls/%s/reviews", repo, num)
+		payload = map[string]any{"body": body, "event": event}
+	}
+	var raw map[string]any
+	code, resp, err := githubAPIJSON(ctx, "POST", path, payload, &raw)
 	if err != nil {
-		return Result{Error: fmt.Sprintf("git.pr_comment: exec: %v", err)}, nil
+		return Result{Error: fmt.Sprintf("git.pr_comment: %v", err)}, nil
+	}
+	if code >= 300 {
+		return Result{Error: fmt.Sprintf("git.pr_comment: %s", githubAPIError(resp))}, nil
+	}
+	commentURL, _ := raw["html_url"].(string)
+	if commentURL == "" {
+		commentURL, _ = raw["url"].(string)
+	}
+	return Result{Data: map[string]any{"ok": true, "url": commentURL, "comment_id": commentURL}}, nil
+}
+
+type githubPullRequest struct {
+	State   string `json:"state"`
+	Merged  bool   `json:"merged"`
+	HTMLURL string `json:"html_url"`
+	Head    struct {
+		SHA string `json:"sha"`
+	} `json:"head"`
+}
+
+type githubPullRequestCreateResponse struct {
+	Number  int    `json:"number"`
+	HTMLURL string `json:"html_url"`
+}
+
+type githubRepository struct {
+	DefaultBranch string `json:"default_branch"`
+}
+
+type githubIssueComment struct {
+	ID      any    `json:"id"`
+	Body    string `json:"body"`
+	HTMLURL string `json:"html_url"`
+	URL     string `json:"url"`
+	User    struct {
+		Login string `json:"login"`
+	} `json:"user"`
+}
+
+type githubCombinedStatus struct {
+	State    string `json:"state"`
+	Statuses []struct {
+		Context   string `json:"context"`
+		State     string `json:"state"`
+		TargetURL string `json:"target_url"`
+	} `json:"statuses"`
+}
+
+type githubCheckRunsResponse struct {
+	CheckRuns []struct {
+		Name       string `json:"name"`
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+		HTMLURL    string `json:"html_url"`
+	} `json:"check_runs"`
+}
+
+func resolveGitHubPRRef(ctx context.Context, workdir string, args map[string]any, prID string) (string, string, string) {
+	repo, num := splitGitHubPRRef(prID)
+	if r, _ := args["repo"].(string); strings.TrimSpace(r) != "" {
+		repo = strings.TrimSpace(r)
+	}
+	if num == "" {
+		num = strings.TrimSpace(prID)
+	}
+	if strings.TrimSpace(num) == "" {
+		return repo, num, "pr_id argument is required"
+	}
+	if strings.TrimSpace(repo) != "" {
+		return repo, num, ""
+	}
+	repo, errMsg := resolveGitHubRepo(ctx, workdir, args)
+	return repo, num, errMsg
+}
+
+func resolveGitHubRepo(ctx context.Context, workdir string, args map[string]any) (string, string) {
+	if r, _ := args["repo"].(string); strings.TrimSpace(r) != "" {
+		return strings.TrimSpace(r), ""
+	}
+	remote, _ := args["remote"].(string)
+	if strings.TrimSpace(remote) == "" {
+		remote = "origin"
+	}
+	stdout, stderr, code, err := cliExec(ctx, workdir, "git", "remote", "get-url", remote)
+	if err != nil {
+		return "", fmt.Sprintf("repo argument is required and git remote lookup failed: %v", err)
 	}
 	if code != 0 {
-		return Result{Error: fmt.Sprintf("git.pr_comment: %s", strings.TrimSpace(stderr))}, nil
+		return "", fmt.Sprintf("repo argument is required and git remote lookup failed: %s", strings.TrimSpace(stderr))
 	}
-	return Result{Data: map[string]any{"ok": true}}, nil
+	repo := githubRepoFromRemote(stdout)
+	if repo == "" {
+		return "", fmt.Sprintf("repo argument is required and remote %q is not a GitHub repository", remote)
+	}
+	return repo, ""
+}
+
+func splitGitHubPRRef(ref string) (string, string) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", ""
+	}
+	if !strings.Contains(ref, "github.com/") {
+		return "", ref
+	}
+	after := ref[strings.Index(ref, "github.com/")+len("github.com/"):]
+	after = strings.Trim(after, "/")
+	parts := strings.Split(after, "/")
+	if len(parts) >= 4 && parts[2] == "pull" {
+		return parts[0] + "/" + strings.TrimSuffix(parts[1], ".git"), parts[3]
+	}
+	return "", ref
+}
+
+func githubRepoFromRemote(remoteURL string) string {
+	s := strings.TrimSpace(remoteURL)
+	s = strings.TrimSuffix(s, ".git")
+	switch {
+	case strings.HasPrefix(s, "git@github.com:"):
+		return strings.TrimPrefix(s, "git@github.com:")
+	case strings.Contains(s, "github.com/"):
+		after := s[strings.Index(s, "github.com/")+len("github.com/"):]
+		after = strings.Trim(after, "/")
+		parts := strings.Split(after, "/")
+		if len(parts) >= 2 {
+			return parts[0] + "/" + parts[1]
+		}
+	}
+	return ""
+}
+
+func githubPRChecks(ctx context.Context, repo, sha string) ([]map[string]any, string, string) {
+	if strings.TrimSpace(sha) == "" {
+		return nil, "pending", ""
+	}
+	var combined githubCombinedStatus
+	code, resp, err := githubAPIJSON(ctx, "GET", fmt.Sprintf("repos/%s/commits/%s/status", repo, sha), nil, &combined)
+	if err != nil {
+		return nil, "", fmt.Sprintf("git.pr_status checks: %v", err)
+	}
+	if code >= 300 {
+		return nil, "", fmt.Sprintf("git.pr_status checks: %s", githubAPIError(resp))
+	}
+	var runs githubCheckRunsResponse
+	code, resp, err = githubAPIJSON(ctx, "GET", fmt.Sprintf("repos/%s/commits/%s/check-runs?per_page=100", repo, sha), nil, &runs)
+	if err != nil {
+		return nil, "", fmt.Sprintf("git.pr_status check-runs: %v", err)
+	}
+	if code >= 300 {
+		return nil, "", fmt.Sprintf("git.pr_status check-runs: %s", githubAPIError(resp))
+	}
+
+	state := normalizeCIState(combined.State)
+	if state == "" {
+		state = "pending"
+	}
+	var failed []map[string]any
+	for _, st := range combined.Statuses {
+		stState := normalizeCIState(st.State)
+		if stState == "failure" {
+			state = "failure"
+			failed = append(failed, map[string]any{"name": st.Context, "state": st.State, "url": st.TargetURL})
+		} else if stState == "pending" && state != "failure" {
+			state = "pending"
+		}
+	}
+	sawRun := false
+	allRunsGreen := true
+	for _, run := range runs.CheckRuns {
+		sawRun = true
+		runState := normalizeCheckRunState(run.Status, run.Conclusion)
+		if runState == "failure" {
+			state = "failure"
+			allRunsGreen = false
+			failed = append(failed, map[string]any{"name": run.Name, "status": run.Status, "conclusion": run.Conclusion, "url": run.HTMLURL})
+		} else if runState == "pending" {
+			allRunsGreen = false
+			if state != "failure" {
+				state = "pending"
+			}
+		}
+	}
+	if sawRun && allRunsGreen && state != "failure" {
+		state = "success"
+	}
+	return failed, state, ""
+}
+
+func normalizeCIState(state string) string {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "success":
+		return "success"
+	case "failure", "error":
+		return "failure"
+	case "pending", "expected":
+		return "pending"
+	default:
+		return ""
+	}
+}
+
+func normalizeCheckRunState(status, conclusion string) string {
+	switch strings.ToLower(strings.TrimSpace(conclusion)) {
+	case "success", "neutral", "skipped":
+		return "success"
+	case "failure", "timed_out", "cancelled", "action_required", "startup_failure":
+		return "failure"
+	}
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "completed":
+		return "pending"
+	case "queued", "in_progress", "requested", "waiting", "pending":
+		return "pending"
+	}
+	return "pending"
+}
+
+func githubIssueCommentsForWorld(comments []githubIssueComment) []map[string]any {
+	out := make([]map[string]any, 0, len(comments))
+	for _, c := range comments {
+		url := c.HTMLURL
+		if url == "" {
+			url = c.URL
+		}
+		out = append(out, map[string]any{
+			"id":     c.ID,
+			"body":   c.Body,
+			"author": c.User.Login,
+			"url":    url,
+		})
+	}
+	return out
+}
+
+func optBool(args map[string]any, key string, def bool) bool {
+	v, ok := args[key]
+	if !ok {
+		return def
+	}
+	switch b := v.(type) {
+	case bool:
+		return b
+	case string:
+		switch strings.ToLower(strings.TrimSpace(b)) {
+		case "true", "1", "yes", "y":
+			return true
+		case "false", "0", "no", "n":
+			return false
+		}
+	}
+	return def
 }
 
 func ghPRRebase(ctx context.Context, args map[string]any) (Result, error) {
-	if !ghAvailable(ctx) {
-		return Result{Error: "git.pr_rebase: gh CLI not available"}, nil
-	}
 	repo, _ := args["repo"].(string)
 	prID, _ := args["pr_id"].(string)
 	if strings.TrimSpace(repo) == "" || strings.TrimSpace(prID) == "" {
@@ -483,17 +778,32 @@ type ghPRRebaseView struct {
 
 func ghPRRebaseMetadata(ctx context.Context, repo, prID string) (ghPRRebaseView, string) {
 	var meta ghPRRebaseView
-	stdout, stderr, code, err := cliExec(ctx, "", "gh", "pr", "view", prID, "--repo", repo, "--json", "headRefName,headRefOid,baseRefName,headRepository")
+	var raw githubPullRequestRebaseMetadata
+	code, resp, err := githubAPIJSON(ctx, "GET", fmt.Sprintf("repos/%s/pulls/%s", repo, prID), nil, &raw)
 	if err != nil {
-		return meta, fmt.Sprintf("git.pr_rebase: gh pr view: %v", err)
+		return meta, fmt.Sprintf("git.pr_rebase: PR metadata: %v", err)
 	}
-	if code != 0 {
-		return meta, fmt.Sprintf("git.pr_rebase: gh pr view: %s", strings.TrimSpace(stderr))
+	if code >= 300 {
+		return meta, fmt.Sprintf("git.pr_rebase: PR metadata: %s", githubAPIError(resp))
 	}
-	if err := json.Unmarshal([]byte(stdout), &meta); err != nil {
-		return meta, fmt.Sprintf("git.pr_rebase: parse gh pr view: %v", err)
-	}
+	meta.HeadRefName = raw.Head.Ref
+	meta.HeadRefOID = raw.Head.SHA
+	meta.BaseRefName = raw.Base.Ref
+	meta.HeadRepository.NameWithOwner = raw.Head.Repo.FullName
 	return meta, ""
+}
+
+type githubPullRequestRebaseMetadata struct {
+	Head struct {
+		Ref  string `json:"ref"`
+		SHA  string `json:"sha"`
+		Repo struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
+	} `json:"head"`
+	Base struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
 }
 
 func runRebaseWithDeterministicResolvers(ctx context.Context, workdir string, run func(string, ...string) (string, string, int, error), baseRef string) ([]string, string) {

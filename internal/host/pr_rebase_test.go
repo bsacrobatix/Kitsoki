@@ -2,6 +2,8 @@ package host
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -114,14 +116,21 @@ after
 
 func TestGitVCS_PRRebaseCleanPathPushesHead(t *testing.T) {
 	var calls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/repos/o/r/pulls/56" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"head":{"ref":"fix/pr-56","sha":"oldsha","repo":{"full_name":"o/r"}},"base":{"ref":"main"}}`))
+	}))
+	defer srv.Close()
+	restoreAPI := SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
 	restore := SetExecRunnerForTest(func(ctx context.Context, dir, name string, args ...string) (string, string, int, error) {
 		key := name + " " + strings.Join(args, " ")
 		calls = append(calls, key)
-		if name == "gh" && strings.Join(args, " ") == "--version" {
-			return "gh version 2.x", "", 0, nil
-		}
-		if name == "gh" && strings.HasPrefix(strings.Join(args, " "), "pr view 56") {
-			return `{"headRefName":"fix/pr-56","headRefOid":"oldsha","baseRefName":"main","headRepository":{"nameWithOwner":"o/r"}}`, "", 0, nil
+		if name == "gh" {
+			t.Fatalf("pr_rebase must not invoke gh: %s", key)
 		}
 		if name != "git" {
 			t.Fatalf("unexpected command: %s", key)
