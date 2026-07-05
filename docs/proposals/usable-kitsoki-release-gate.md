@@ -231,11 +231,13 @@ ships without breaking `arena plugins`.
       manual-only gating)
 
 ## 4. Prove the gate has teeth
-- [ ] 4.1 Golden regression scenarios for each of the three gate conditions
+- [x] 4.1 Golden regression scenarios for each of the three gate conditions
       (scripted bounce / scripted misroute / scripted parity miss) flip
-      the rollup to `FAIL`
+      the rollup to `FAIL` — `tools/arena/tests/fixtures/usable-kitsoki-gate/`
+      + `tools/arena/tests/test_usable_kitsoki_gate_golden_fixtures.py`
 - [ ] 4.2 Calibration-set run (S4's 20 hand-checked scenarios) produces a
-      checked-in, diffable parity report
+      checked-in, diffable parity report (needs S4's calibration set — skip
+      until S4 lands)
 
 ## 5. Stand it up as the release gate
 - [ ] 5.1 CI workflow: no-LLM path on every PR touching S1/S2/S4/S5 code

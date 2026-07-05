@@ -37,11 +37,15 @@ print (mirrors swarm.py's `[swarm] wrote <path>` convention), loads the
 parity-records bundle at that path, validates each record against
 `usable_kitsoki_gate_schema.json`, and reduces the records into the three
 GATE_CONDITIONS from `usable_kitsoki_gate_constants.py`. The reduction here
-is PER CELL, i.e. per (persona, surface) -- not yet the cross-surface
-worst-surface-gating reduction the proposal describes, which needs multiple
-cells' results compared against each other and belongs to the arena rollup
-layer (Task 3, gated on S1/S4 landing, explicitly out of scope for this
-plugin).
+is PER CELL, i.e. per (persona, surface) in production (one cell drives one
+surface, so grouping by surface is normally a no-op) -- but it groups
+records by their own `surface` field and gates on the MINIMUM per-surface
+parity (WORST_SURFACE_GATING), not a flat aggregate, so a hand-written
+bundle spanning more than one surface (golden regression fixtures, Task 4.1
+-- see tests/fixtures/usable-kitsoki-gate/) is still reduced correctly. True
+cross-CELL worst-surface gating (comparing separately-run cells against each
+other across a real S1/S4 sweep) is still a higher rollup layer (Task 3,
+gated on S1/S4 landing, explicitly out of scope for this plugin).
 """
 
 from __future__ import annotations
@@ -213,9 +217,20 @@ class UsableKitsokiGatePlugin:
 def _rollup_from_records(result: CellResult, records: list[Any], results_path: str) -> CellResult:
     """Reduce the cell's parity verdict records into the three
     GATE_CONDITIONS (usable_kitsoki_gate_constants.py) for THIS cell's
-    (persona, surface) combination. Cross-surface worst-surface-gating is a
-    higher-layer (arena rollup) reduction over multiple cells' results, not
-    something a single cell's score() can compute — see module docstring.
+    (persona, surface) combination.
+
+    In production a single cell's records all share one `surface` value (one
+    cell = one persona x surface run, per module docstring), so grouping by
+    surface here is a no-op superset of the plain aggregate. But nothing stops
+    a hand-written parity-records bundle (golden regression fixtures, Task 4.1)
+    or a future harness change from putting more than one surface's records in
+    one bundle, and `usable_kitsoki_gate_constants.WORST_SURFACE_GATING` is a
+    fixed design decision (never average across surfaces) -- so this reduction
+    groups by `surface` and gates on the MINIMUM per-surface parity, not the
+    flat aggregate, to be correct either way. True cross-CELL worst-surface
+    gating (comparing separately-run cells against each other) is still a
+    higher-layer (arena rollup) concern -- see module docstring -- this is
+    only the within-bundle reduction.
     """
     schema_errors: list[str] = []
     if jsonschema is not None and SCHEMA_PATH.exists():
@@ -242,10 +257,29 @@ def _rollup_from_records(result: CellResult, records: list[Any], results_path: s
         1 for r in records if r.get("source_completed") and r.get("candidate_completed")
     )
     parity_pct = gate_constants.parity_percent(both_completed_count, source_completed_count)
+
+    # Per-surface breakdown -- the gate always reduces with min(), never
+    # average, per WORST_SURFACE_GATING (usable_kitsoki_gate_constants.py).
+    per_surface_totals: dict[str, dict[str, int]] = {}
+    for r in records:
+        surface = str(r.get("surface", ""))
+        bucket = per_surface_totals.setdefault(surface, {"source": 0, "both": 0})
+        if r.get("source_completed"):
+            bucket["source"] += 1
+            if r.get("candidate_completed"):
+                bucket["both"] += 1
+    per_surface_parity_percent = {
+        surface: gate_constants.parity_percent(totals["both"], totals["source"])
+        for surface, totals in per_surface_totals.items()
+    }
+    worst_surface_parity_pct = (
+        min(per_surface_parity_percent.values()) if per_surface_parity_percent else 100.0
+    )
+
     passes = gate_constants.gate_passes(
         silent_bounce_count=silent_bounce_count,
         misroute_adjacent_count=misroute_adjacent_count,
-        worst_surface_parity_percent=parity_pct,
+        worst_surface_parity_percent=worst_surface_parity_pct,
     )
 
     evidence_refs = {results_path}
@@ -264,9 +298,12 @@ def _rollup_from_records(result: CellResult, records: list[Any], results_path: s
         "source_completed_count": source_completed_count,
         "both_completed_count": both_completed_count,
         "parity_percent": parity_pct,
+        "worst_surface_parity_percent": worst_surface_parity_pct,
+        "per_surface_parity_percent": per_surface_parity_percent,
     })
     result.notes = (
-        f"{result.verdict}: {len(records)} record(s), parity={parity_pct:.1f}% "
+        f"{result.verdict}: {len(records)} record(s), parity={parity_pct:.1f}% overall, "
+        f"worst_surface_parity={worst_surface_parity_pct:.1f}% "
         f"(threshold {gate_constants.PARITY_THRESHOLD_PERCENT:.1f}%), "
         f"silent_bounce={silent_bounce_count}, misroute_adjacent={misroute_adjacent_count}"
     )
