@@ -28,6 +28,8 @@ func gitopsCmd() *cobra.Command {
 	}
 	cmd.AddCommand(gitopsIssueStatusCmd())
 	cmd.AddCommand(gitopsIssueCreateCmd())
+	cmd.AddCommand(gitopsIssueCommentCmd())
+	cmd.AddCommand(gitopsIssueTransitionCmd())
 	cmd.AddCommand(gitopsIssueStateCacheCmd())
 	cmd.AddCommand(gitopsAutonomousFixCmd())
 	return cmd
@@ -228,6 +230,107 @@ func gitopsIssueCreateResult(data map[string]any, title string) map[string]any {
 		out["warning"] = warning
 	}
 	return out
+}
+
+func gitopsIssueCommentCmd() *cobra.Command {
+	var (
+		repo    string
+		issueID string
+		body    string
+		jsonOut bool
+	)
+	cmd := &cobra.Command{
+		Use:   "issue-comment --repo owner/repo --id N --body text",
+		Short: "Comment on a GitHub issue through the native ticket provider",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			result, err := host.GitHubTicketHandler(cmd.Context(), map[string]any{
+				"op":   "comment",
+				"repo": repo,
+				"id":   issueID,
+				"body": body,
+			})
+			if err != nil {
+				return err
+			}
+			if result.Error != "" {
+				return fmt.Errorf("gitops issue-comment: %s", result.Error)
+			}
+			data := gitopsIssueCommentResult(result.Data, issueID)
+			if jsonOut {
+				return writeGitopsJSON(cmd, data)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Comment: %s\n", stringValue(data, "comment_url"))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&repo, "repo", "", "owner/repo ticket target")
+	cmd.Flags().StringVar(&issueID, "id", "", "issue number or owner/repo#number")
+	cmd.Flags().StringVar(&body, "body", "", "comment body")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON output")
+	return cmd
+}
+
+func gitopsIssueTransitionCmd() *cobra.Command {
+	var (
+		repo    string
+		issueID string
+		to      string
+		jsonOut bool
+	)
+	cmd := &cobra.Command{
+		Use:   "issue-transition --repo owner/repo --id N --to resolved",
+		Short: "Transition a GitHub issue through the native ticket provider",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			result, err := host.GitHubTicketHandler(cmd.Context(), map[string]any{
+				"op":   "transition",
+				"repo": repo,
+				"id":   issueID,
+				"to":   to,
+			})
+			if err != nil {
+				return err
+			}
+			if result.Error != "" {
+				return fmt.Errorf("gitops issue-transition: %s", result.Error)
+			}
+			data := gitopsIssueTransitionResult(result.Data, issueID, to)
+			if jsonOut {
+				return writeGitopsJSON(cmd, data)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Issue: %s\n", stringValue(data, "id"))
+			fmt.Fprintf(cmd.OutOrStdout(), "State: %s\n", stringValue(data, "issue_state"))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&repo, "repo", "", "owner/repo ticket target")
+	cmd.Flags().StringVar(&issueID, "id", "", "issue number or owner/repo#number")
+	cmd.Flags().StringVar(&to, "to", "", "target state, e.g. resolved or open")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON output")
+	return cmd
+}
+
+func gitopsIssueCommentResult(data map[string]any, issueID string) map[string]any {
+	return map[string]any{
+		"status":      "issue_commented",
+		"issue_id":    strings.TrimSpace(issueID),
+		"id":          strings.TrimSpace(issueID),
+		"comment_id":  stringValue(data, "comment_id"),
+		"comment_url": firstNonBlank(stringValue(data, "url"), stringValue(data, "comment_id")),
+		"url":         firstNonBlank(stringValue(data, "url"), stringValue(data, "comment_id")),
+		"source":      "github",
+	}
+}
+
+func gitopsIssueTransitionResult(data map[string]any, issueID, to string) map[string]any {
+	state := firstNonBlank(stringValue(data, "status"), strings.TrimSpace(to))
+	return map[string]any{
+		"status":      "issue_transitioned",
+		"issue_id":    strings.TrimSpace(issueID),
+		"id":          strings.TrimSpace(issueID),
+		"issue_state": state,
+		"state":       state,
+		"source":      "github",
+	}
 }
 
 func gitopsAutonomousFixCmd() *cobra.Command {
