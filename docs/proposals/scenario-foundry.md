@@ -192,11 +192,24 @@ the compiler against the same (redacted) mining output and diffing.
       provenance)
 - [x] 2.2 Scenario compiler: mined intents + outcomes + satisfaction →
       IR documents, scoped to goal-bounded spans
-- [ ] 2.3 Redaction gate: every mined scenario passes `redact.py`'s
+- [x] 2.3 Redaction gate: every mined scenario passes `redact.py`'s
       ladder before it can be committed; unredacted IR stays local/
-      gitignored (shared decision 9)
-- [ ] 2.4 Ship 20 hand-checked Kitsoki scenarios as the calibration set
-      (first-week deliverable)
+      gitignored (shared decision 9). Implemented as `redact.py
+      --scenario` (genericizes goal/turns/corrective_ops/
+      followup_text_head/expected_effects, then re-runs the HIGH-RISK
+      `scan()` gate and fails closed — exit 1, empty stdout — if
+      anything secret-shaped survives). Unit-tested in
+      `tests/test_redact_scenario.py`.
+- [x] 2.4 Ship 20 hand-checked Kitsoki scenarios as the calibration set
+      (first-week deliverable). Ran the real pipeline over local
+      claude-code + codex corpora; 20 scenarios compiled and passed the
+      redaction gate, 18 survived hand-check (2 excluded for
+      insufficient standalone signal after required path redaction, not
+      padded back to 20). See `tools/session-mining/calibration/` +
+      `MANIFEST.md` for the set, provenance, and hand-check notes
+      (including two real pipeline findings surfaced along the way: a
+      codex approval-sidecar-session filtering gap, and an `emit.py`
+      corrective-op false-positive).
 
 ## 3. Downstream compilers
 - [ ] 3.1 Flow-fixture + recording compiler (IR → `trace to-flow` shape)
