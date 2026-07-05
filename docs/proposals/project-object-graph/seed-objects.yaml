@@ -117,9 +117,6 @@ catalog:
       - id: source-mockup-video-studio-proposal
         kind: proposal
         path: docs/proposals/mockup-video-studio.md
-      - id: source-work-decomposition-proposal
-        kind: proposal
-        path: docs/proposals/work-decomposition.md
       - id: source-hybrid-session-driving-proposal
         kind: proposal
         path: docs/proposals/hybrid-session-driving.md
@@ -7785,24 +7782,6 @@ nodes:
       creates_requirements: []
       creates_use_cases: []
       decomposes_to: []
-  - schema: graph/proposal/v0
-    id: proposal-work-decomposition
-    title: Work decomposition
-    status: draft
-    visibility: internal
-    proposal_kind: story
-    path: docs/proposals/work-decomposition.md
-    status_line: Partially superseded. The proposed `stories/decompose/` import has
-    index_blurb: 'A new `stories/decompose/` sub-story imported into dev-story: hand it an accepted proposal (or epic + children) and an interactive discovery conversation distils scope, an `agent.decide` emits a brief manifest the MCP submit validator structurally enforces, a deterministic `host.run` renders + lints it to `decomposition.yaml` (acyclic DAG, coverage), an adversarial `agent.decide` judges feasibility + completeness, and a coordination board dispatches each brief into the `impl` import one at a time with a human gate. Partially superseded: `stories/decompose/` has not shipped, but the work-decomposition skill and `stories/deliver/` cover a simpler validated-manifest path that hands briefs to `stories/fleet/`.'
-    sources:
-      - source-work-decomposition-proposal
-    edges:
-      owned_by: []
-      proposes: []
-      creates_requirements: []
-      creates_use_cases: []
-      decomposes_to: []
-
   - schema: graph/proposal/v0
     id: proposal-hybrid-session-driving
     title: Hybrid session driving
