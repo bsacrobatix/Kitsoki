@@ -214,6 +214,63 @@ func TestEnqueueCreatesQueuedJobIdempotently(t *testing.T) {
 	}
 }
 
+func TestMergeMetadataPersistsAndOverlaysKeys(t *testing.T) {
+	ctx := context.Background()
+	s := newTestGHStore(t)
+	job, _, err := s.Enqueue(ctx, GHMention{
+		OriginRef:    "github:o/r/issue/105",
+		Repo:         "o/r",
+		ObjectKind:   "issue",
+		ObjectNumber: "105",
+	}, "stories/bugfix")
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if err := s.MergeMetadata(ctx, job.JobID, map[string]string{
+		"ticket_title": "Still-live UI bug",
+		"ticket_body":  "Steps and evidence",
+		"blank":        " ",
+	}); err != nil {
+		t.Fatalf("MergeMetadata first: %v", err)
+	}
+	if err := s.MergeMetadata(ctx, job.JobID, map[string]string{
+		"ticket_body":        "Updated evidence",
+		"ticket_source_mode": "remote",
+	}); err != nil {
+		t.Fatalf("MergeMetadata second: %v", err)
+	}
+	got, err := s.GetJob(ctx, job.JobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if got.Metadata["ticket_title"] != "Still-live UI bug" {
+		t.Fatalf("ticket_title = %q", got.Metadata["ticket_title"])
+	}
+	if got.Metadata["ticket_body"] != "Updated evidence" {
+		t.Fatalf("ticket_body = %q", got.Metadata["ticket_body"])
+	}
+	if got.Metadata["ticket_source_mode"] != "remote" {
+		t.Fatalf("ticket_source_mode = %q", got.Metadata["ticket_source_mode"])
+	}
+	if _, ok := got.Metadata["blank"]; ok {
+		t.Fatalf("blank metadata key should have been discarded: %+v", got.Metadata)
+	}
+
+	events, err := s.Events(ctx, job.JobID)
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	var metadataEvents int
+	for _, ev := range events {
+		if ev.State == "metadata" {
+			metadataEvents++
+		}
+	}
+	if metadataEvents != 2 {
+		t.Fatalf("metadata events = %d, want 2", metadataEvents)
+	}
+}
+
 func TestAdvanceAndSetters(t *testing.T) {
 	ctx := context.Background()
 	s := newTestGHStore(t)
