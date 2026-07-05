@@ -45,6 +45,15 @@ type EdgeFieldDecl struct {
 	// leak. W3 (the site conversion) is what decides which edges are
 	// Renders when it wires the real generator.
 	Renders bool
+	// NestsUnder marks an edge field whose source node is a sub-item of its
+	// target, not a peer — e.g. persona.persona_of (a persona profiles an
+	// actor) or proposal.child_of (a proposal slice decomposes an epic). A
+	// generic UI list projection (unlike a graph canvas, where the edge
+	// itself already draws the relationship) can use this to nest a node
+	// under its target instead of listing it as a flat peer, without a
+	// hand-maintained kind->edge table that silently drifts from the type
+	// registry (see runstatus's CatalogPanel.vue, W6.2 follow-up).
+	NestsUnder bool
 }
 
 // TypeDef is one type-registry entry: a node type's schema pin, optional

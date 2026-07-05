@@ -51,12 +51,23 @@ func ObjectCatalogGraph(cat *objectgraph.Catalog, graphID string) KitsokiGraph {
 			continue
 		}
 		for _, decl := range eff.EdgeFields {
+			var edgeAttrs map[string]any
+			if decl.NestsUnder {
+				// Threads the type registry's nests_under marker (W6.2
+				// follow-up) onto the wire edge so a generic list/detail UI
+				// projection (unlike a graph canvas, where the edge itself
+				// already draws the relationship) can nest a source node
+				// under its target without a hand-maintained kind->edge
+				// table that silently drifts from the type registry.
+				edgeAttrs = map[string]any{"nests_under": true}
+			}
 			for _, target := range node.EdgeTargets(decl) {
 				g.Edges = append(g.Edges, GraphEdge{
 					ID:     string(node.ID) + ":" + string(decl.ID) + ":" + string(target),
 					Kind:   string(decl.ID),
 					Source: string(node.ID),
 					Target: string(target),
+					Attrs:  edgeAttrs,
 				})
 			}
 		}
