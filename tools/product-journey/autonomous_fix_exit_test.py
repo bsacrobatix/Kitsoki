@@ -37,44 +37,51 @@ def fake_autonomous_fix_loop(*_args, **_kwargs):
     }
 
 
+def run_case(extra_args, expected_exit):
+    out = io.StringIO()
+    sys.argv = [
+        "run.py",
+        "--autonomous-fix-loop",
+        "--json-output",
+        "--run-dir",
+        "/tmp/product-journey-run",
+        "--ticket-repo",
+        "o/r",
+        "--gh-agent-db",
+        "/tmp/gh-agent.sqlite",
+        *extra_args,
+    ]
+    with contextlib.redirect_stdout(out):
+        try:
+            run.main()
+        except SystemExit as exc:
+            if exc.code != expected_exit:
+                print(f"FAIL: expected exit {expected_exit}, got {exc.code}")
+                raise SystemExit(1)
+        else:
+            if expected_exit != 0:
+                print(f"FAIL: expected exit {expected_exit}, got success")
+                raise SystemExit(1)
+    payload = json.loads(out.getvalue())
+    if payload.get("status") != "autonomous_fix_invalid":
+        print(f"FAIL: expected invalid JSON status, got {payload.get('status')}")
+        raise SystemExit(1)
+
+
 def main():
     original_argv = sys.argv
     original_loop = run.autonomous_fix_loop
     original_run_dir_from_arg = run.run_dir_from_arg
-    out = io.StringIO()
     try:
         run.autonomous_fix_loop = fake_autonomous_fix_loop
         run.run_dir_from_arg = lambda value: Path(value)
-        sys.argv = [
-            "run.py",
-            "--autonomous-fix-loop",
-            "--json-output",
-            "--run-dir",
-            "/tmp/product-journey-run",
-            "--ticket-repo",
-            "o/r",
-            "--gh-agent-db",
-            "/tmp/gh-agent.sqlite",
-        ]
-        with contextlib.redirect_stdout(out):
-            try:
-                run.main()
-            except SystemExit as exc:
-                if exc.code != 1:
-                    print(f"FAIL: expected exit 1, got {exc.code}")
-                    raise SystemExit(1)
-            else:
-                print("FAIL: expected autonomous_fix_invalid to exit nonzero")
-                raise SystemExit(1)
+        run_case([], 1)
+        run_case(["--report-invalid-autonomous-fix"], 0)
     finally:
         sys.argv = original_argv
         run.autonomous_fix_loop = original_loop
         run.run_dir_from_arg = original_run_dir_from_arg
 
-    payload = json.loads(out.getvalue())
-    if payload.get("status") != "autonomous_fix_invalid":
-        print(f"FAIL: expected invalid JSON status, got {payload.get('status')}")
-        raise SystemExit(1)
     print("PASS")
 
 

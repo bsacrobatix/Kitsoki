@@ -445,6 +445,7 @@ states:
                   - tools/product-journey/run.py
                   - --autonomous-fix-loop
                   - --json-output
+                  - --report-invalid-autonomous-fix
                   - --run-dir
                   - "{{ world.run_dir }}"
                   - --ticket-repo

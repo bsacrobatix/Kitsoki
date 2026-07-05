@@ -7665,6 +7665,7 @@ def main() -> None:
     parser.add_argument("--seed-demo-evidence", action="store_true", help="Attach deterministic demo evidence and findings to an existing run bundle")
     parser.add_argument("--file-findings", action="store_true", help="File the bundle's credible issue findings as GitHub issues via the kitsoki bug orchestration")
     parser.add_argument("--autonomous-fix-loop", action="store_true", help="File findings, enqueue/drain gh-agent fixes, review, and validate as one no-operator reliability gate")
+    parser.add_argument("--report-invalid-autonomous-fix", action="store_true", help="With --autonomous-fix-loop, print invalid gate JSON and exit 0 so story callers can bind failure evidence")
     parser.add_argument("--stats", action="store_true", help="Derive product-journey issue stats from run bundles and cached issue state")
     parser.add_argument("--stats-root", default="", help="Root containing product-journey run bundles for --stats; defaults to .artifacts/product-journey")
     parser.add_argument("--issue-state-file", default="", help="Optional JSON fixture/cache with GitHub issue state for --stats")
@@ -8196,7 +8197,7 @@ def main() -> None:
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
             append_log(f"Ran autonomous fix loop for {run_dir.name}: {result['status']}")
-            if result["status"] != "autonomous_fix_valid":
+            if result["status"] != "autonomous_fix_valid" and not args.report_invalid_autonomous_fix:
                 raise SystemExit(1)
             return
         print(f"Status: {result['status']}")
@@ -8211,7 +8212,7 @@ def main() -> None:
         print(f"Review: {result['review_summary']}")
         print(f"Validation: {result['validation_status']} ({result['validation_errors']} errors, {result['validation_warnings']} warnings)")
         append_log(f"Ran autonomous fix loop for {run_dir.name}: {result['status']}")
-        if result["status"] != "autonomous_fix_valid":
+        if result["status"] != "autonomous_fix_valid" and not args.report_invalid_autonomous_fix:
             raise SystemExit(1)
         return
 
