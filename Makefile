@@ -38,6 +38,23 @@ KITSOKI_GOCACHE ?= $(shell if [ -d /private/tmp ]; then printf '%s' /private/tmp
 RUNSTATUS_LOCKFILE := $(RUNSTATUS_DIR)/pnpm-lock.yaml
 RUNSTATUS_MODULES  := $(RUNSTATUS_DIR)/node_modules/.modules.yaml
 RUNSTATUS_DIST     := $(TEMP_DIR)/runstatus/dist
+RUNSTATUS_ABS      := $(abspath $(RUNSTATUS_DIR))
+
+define runstatus_pnpm_install
+	@set -e; \
+	relock_root=0; relock_modules=0; \
+	if [ -d "$(RUNSTATUS_ABS)" ] && [ ! -w "$(RUNSTATUS_ABS)" ]; then chmod u+w "$(RUNSTATUS_ABS)"; relock_root=1; fi; \
+	if [ -d "$(RUNSTATUS_ABS)/node_modules" ] && [ ! -w "$(RUNSTATUS_ABS)/node_modules" ]; then chmod -R u+w "$(RUNSTATUS_ABS)/node_modules"; relock_modules=1; fi; \
+	restore_runstatus_guard() { \
+		if [ "$$relock_modules" = 1 ] || [ "$$relock_root" = 1 ]; then [ ! -e "$(RUNSTATUS_ABS)/node_modules" ] || chmod -R a-w "$(RUNSTATUS_ABS)/node_modules" 2>/dev/null || true; fi; \
+		if [ "$$relock_root" = 1 ]; then chmod a-w "$(RUNSTATUS_ABS)" 2>/dev/null || true; fi; \
+	}; \
+	trap restore_runstatus_guard EXIT INT TERM; \
+	cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) pnpm install --frozen-lockfile $(1); \
+	restore_runstatus_guard; \
+	trap - EXIT INT TERM
+endef
+
 # features/*.yaml is part of the SPA's sources: the tour manifests the bundle
 # ships are code-generated from the feature catalog (see `make features`).
 SPA_SOURCES   := $(shell find $(RUNSTATUS_DIR)/src $(RUNSTATUS_DIR)/index.html \
@@ -203,6 +220,10 @@ embed-skills:
 # only rebuilds when a source file is newer than the staged bundle.
 web: $(EMBED_INDEX)
 
+.PHONY: runstatus-deps
+runstatus-deps:
+	$(call runstatus_pnpm_install,)
+
 $(EMBED_INDEX): $(SPA_SOURCES)
 	@command -v pnpm >/dev/null 2>&1 || { \
 		echo "error: pnpm not found — needed to build the runstatus SPA." >&2; \
@@ -211,7 +232,7 @@ $(EMBED_INDEX): $(SPA_SOURCES)
 	@mkdir -p $(TEMP_DIR)
 	@chmod u+rwx $(TEMP_DIR)
 	@if [ ! -f "$(RUNSTATUS_MODULES)" ] || [ "$(RUNSTATUS_LOCKFILE)" -nt "$(RUNSTATUS_MODULES)" ]; then \
-		cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) pnpm install --frozen-lockfile; \
+		$(MAKE) --no-print-directory runstatus-deps; \
 	else \
 		echo "runstatus deps already installed for $(RUNSTATUS_LOCKFILE)"; \
 	fi
@@ -239,7 +260,7 @@ web-clean:
 # this once from inside a new worktree, before `go run ./cmd/kitsoki` or any
 # Playwright spec.
 bootstrap-worktree: embed-stories web
-	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
+	$(call runstatus_pnpm_install,--silent)
 	@echo "bootstrap-worktree: warming shared Go build cache at $(KITSOKI_GOCACHE) (first compile is slow)…"
 	@GOCACHE="$(KITSOKI_GOCACHE)" go run $(PKG) --help >/dev/null
 	@echo "worktree bootstrapped — go run/Playwright specs should work now"
@@ -263,11 +284,12 @@ web-dev:
 	@command -v pnpm >/dev/null 2>&1 || { echo "error: pnpm not found" >&2; exit 1; }
 	@mkdir -p $(WEB_LOG_DIR)
 	@find $(WEB_LOG_DIR) -maxdepth 1 -name "web-dev-*.log" | sort | head -n -$(WEB_LOG_KEEP) | xargs -r rm --
+	$(call runstatus_pnpm_install,--silent)
 	@LOG=$(WEB_LOG_DIR)/web-dev-$$(date +%Y%m%d-%H%M%S).log; \
 	  printf 'kitsoki: debug log → %s\n' "$$LOG" >&2; \
 	  trap 'kill 0' INT TERM EXIT; \
 	  { go run $(PKG) web $(WEB_ARGS) 2>&1; } | tee -a "$$LOG" & \
-	  { cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && FORCE_COLOR=1 pnpm dev 2>&1; } | tee -a "$$LOG"; \
+	  { cd $(RUNSTATUS_DIR) && FORCE_COLOR=1 pnpm dev 2>&1; } | tee -a "$$LOG"; \
 	  wait
 
 # web-dev-logs tails the most recent web-dev log file.
@@ -603,18 +625,21 @@ OBJECT_GRAPH_CATALOG := docs/proposals/project-object-graph/seed-objects.yaml
 .PHONY: features features-check features-index media-check media-check-promo demo-feature feature-qa
 features:
 	go run ./cmd/kitsoki graph render-features $(OBJECT_GRAPH_CATALOG) features
-	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:gen
+	$(call runstatus_pnpm_install,--silent)
+	cd $(RUNSTATUS_DIR) && pnpm features:gen
 
 features-check:
 	go run ./cmd/kitsoki graph render-features $(OBJECT_GRAPH_CATALOG) features --check
-	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:check
+	$(call runstatus_pnpm_install,--silent)
+	cd $(RUNSTATUS_DIR) && pnpm features:check
 
 # vitest-check runs the runstatus (web UI) component/unit test suite. Split out
 # from `make test` (which stays Go-only + no-LLM deterministic story/tool
 # suites) because it needs pnpm/node_modules; wired into CI's `site` job,
 # which already installs them for features-check/site.
 vitest-check:
-	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm test
+	$(call runstatus_pnpm_install,--silent)
+	cd $(RUNSTATUS_DIR) && pnpm test
 
 # usable-kitsoki-gate-check runs the no-LLM half of the usable-kitsoki
 # release gate (docs/proposals/usable-kitsoki-release-gate.md Task 5.1):
@@ -650,7 +675,8 @@ dev-workflow-matrix-check:
 	python3 tools/dev-workflow-matrix/generate_test.py
 
 features-index:
-	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:index
+	$(call runstatus_pnpm_install,--silent)
+	cd $(RUNSTATUS_DIR) && pnpm features:index
 
 media-check: features-index
 	node $(SITE_DIR)/scripts/check-media.mjs --index .artifacts/features/features-index.json
@@ -669,7 +695,7 @@ media-check-promo: features-index
 FEATURE ?=
 demo-feature: build-bin
 	@test -n "$(FEATURE)" || { echo "usage: make demo-feature FEATURE=<id>" >&2; exit 1; }
-	@cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
+	$(call runstatus_pnpm_install,--silent)
 	@set -e; \
 	demo=$$(cd $(RUNSTATUS_DIR) && pnpm exec tsx scripts/features/generate.ts --print-demo $(FEATURE)); \
 	spec=$$(printf '%s' "$$demo" | cut -f1); \
@@ -750,11 +776,11 @@ mcp-qa:
 # scripts/record-demos.sh for the stamp design.
 .PHONY: demos demos-force site-full
 demos: build-bin features-index
-	@cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
+	$(call runstatus_pnpm_install,--silent)
 	./scripts/record-demos.sh
 
 demos-force: build-bin features-index
-	@cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
+	$(call runstatus_pnpm_install,--silent)
 	./scripts/record-demos.sh --force
 
 # site-full is the everything path: record any stale demos, then build the
@@ -831,8 +857,8 @@ SITE_BASE ?= /Kitsoki/
 # site-data emits the feature-catalog contract (features-index.json + QA files)
 # into the site's gitignored gen/ dir.
 site-data:
-	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && \
-		pnpm exec tsx scripts/features/generate.ts --index --out $(CURDIR)/$(SITE_DIR)/.vitepress/gen
+	$(call runstatus_pnpm_install,--silent)
+	cd $(RUNSTATUS_DIR) && pnpm exec tsx scripts/features/generate.ts --index --out $(CURDIR)/$(SITE_DIR)/.vitepress/gen
 
 site: site-data
 	cd $(SITE_DIR) && pnpm install --frozen-lockfile --silent
@@ -996,14 +1022,14 @@ surface-panels: web
 # The spec emits the canonical MP4 directly (never .webm); render adds GIF +
 # contact sheet. Output: .artifacts/tour-video/ (mp4, gif, contact-sheet, PNGs).
 demo-tour: build
-	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
+	$(call runstatus_pnpm_install,--silent)
 	cd $(RUNSTATUS_DIR) && pnpm exec playwright test tour-video --project=chromium
 	.agents/skills/kitsoki-ui-demo/scripts/render.sh .artifacts/tour-video/tour-video-demo.mp4
 
 # demo-tour-fast validates the tour spec assertions only (no dwells, no render).
 # Use this in CI or to iterate on spec changes quickly.
 demo-tour-fast: build
-	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
+	$(call runstatus_pnpm_install,--silent)
 	cd $(RUNSTATUS_DIR) && WEB_CHAT_PACE=0 pnpm exec playwright test tour-video --project=chromium
 
 # demo-tour-qa records the tour video then runs the vision QA gate against it,
