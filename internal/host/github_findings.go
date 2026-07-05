@@ -247,7 +247,34 @@ type relatedFindingIssue struct {
 }
 
 func findRelatedFindingIssue(ctx context.Context, repo, title, traceRef string) (relatedFindingIssue, error) {
-	query := strings.TrimSpace("is:open in:title " + title)
+	titleTickets, err := searchRelatedFindingTickets(ctx, repo, strings.TrimSpace("is:open in:title "+title))
+	if err != nil {
+		return relatedFindingIssue{}, err
+	}
+	for _, ticket := range titleTickets {
+		if strongRelatedTitle(title, str(ticket["title"])) {
+			return relatedIssueFromTicket(ticket), nil
+		}
+	}
+	if strings.TrimSpace(traceRef) != "" {
+		traceTickets, err := searchRelatedFindingTickets(ctx, repo, strings.TrimSpace("is:open in:body "+traceRef))
+		if err != nil {
+			return relatedFindingIssue{}, err
+		}
+		for _, ticket := range traceTickets {
+			matches, err := ticketMatchesTraceRef(ctx, repo, ticket, traceRef)
+			if err != nil {
+				return relatedFindingIssue{}, err
+			}
+			if matches {
+				return relatedIssueFromTicket(ticket), nil
+			}
+		}
+	}
+	return relatedFindingIssue{}, nil
+}
+
+func searchRelatedFindingTickets(ctx context.Context, repo, query string) ([]map[string]any, error) {
 	res, err := GitHubTicketHandler(ctx, map[string]any{
 		"op":    "search",
 		"repo":  repo,
@@ -255,23 +282,70 @@ func findRelatedFindingIssue(ctx context.Context, repo, title, traceRef string) 
 		"limit": 10,
 	})
 	if err != nil {
-		return relatedFindingIssue{}, err
+		return nil, err
 	}
 	if res.Error != "" {
-		return relatedFindingIssue{}, fmt.Errorf("ticket.search: %s", res.Error)
+		return nil, fmt.Errorf("ticket.search: %s", res.Error)
 	}
-	for _, ticket := range ticketsFromResult(res) {
-		if !strongRelatedTitle(title, str(ticket["title"])) {
+	return ticketsFromResult(res), nil
+}
+
+func relatedIssueFromTicket(ticket map[string]any) relatedFindingIssue {
+	return relatedFindingIssue{
+		ID:    str(ticket["id"]),
+		URL:   str(ticket["url"]),
+		Title: str(ticket["title"]),
+	}
+}
+
+func ticketMatchesTraceRef(ctx context.Context, repo string, ticket map[string]any, traceRef string) (bool, error) {
+	if issueHasTraceRef(ticket, traceRef) {
+		return true, nil
+	}
+	id := str(ticket["id"])
+	if id == "" {
+		return false, nil
+	}
+	res, err := GitHubTicketHandler(ctx, map[string]any{
+		"op":   "get",
+		"repo": repo,
+		"id":   id,
+	})
+	if err != nil {
+		return false, err
+	}
+	if res.Error != "" {
+		return false, fmt.Errorf("ticket.get: %s", res.Error)
+	}
+	return issueHasTraceRef(res.Data, traceRef), nil
+}
+
+func issueHasTraceRef(issue map[string]any, traceRef string) bool {
+	traceRef = strings.TrimSpace(traceRef)
+	if traceRef == "" {
+		return false
+	}
+	if meta, ok := issue["kitsoki_meta"].(map[string]any); ok && strings.TrimSpace(str(meta["trace_ref"])) == traceRef {
+		return true
+	}
+	body := str(issue["body"])
+	if meta := GHParseMetadata(body); meta != nil && strings.TrimSpace(str(meta["trace_ref"])) == traceRef {
+		return true
+	}
+	for _, raw := range anySlice(issue["comments"]) {
+		comment, ok := raw.(map[string]any)
+		if !ok {
 			continue
 		}
-		return relatedFindingIssue{
-			ID:    str(ticket["id"]),
-			URL:   str(ticket["url"]),
-			Title: str(ticket["title"]),
-		}, nil
+		body := str(comment["body"])
+		if strings.Contains(body, traceRef) {
+			return true
+		}
+		if meta := GHParseMetadata(body); meta != nil && strings.TrimSpace(str(meta["trace_ref"])) == traceRef {
+			return true
+		}
 	}
-	_ = traceRef // Reserved for body-metadata/trace-fingerprint matching once search surfaces bodies.
-	return relatedFindingIssue{}, nil
+	return false
 }
 
 func commentRelatedFinding(ctx context.Context, repo, issueID, body string) (string, error) {
@@ -297,6 +371,7 @@ func relatedFindingComment(runJSON, item map[string]any, issueBody string, evide
 	sb.WriteString("A product-journey QA run found a similar issue, so Kitsoki attached the new evidence here instead of filing a duplicate.\n\n")
 	fmt.Fprintf(&sb, "- Run: `%s`\n", runID)
 	fmt.Fprintf(&sb, "- Finding: `%s`\n", str(item["id"]))
+	fmt.Fprintf(&sb, "- Trace ref: `product-journey://%s/%s`\n", runID, str(item["id"]))
 	if scenario := str(item["scenario"]); scenario != "" {
 		fmt.Fprintf(&sb, "- Scenario: `%s`\n", scenario)
 	}
@@ -323,6 +398,20 @@ func ticketsFromResult(res Result) []map[string]any {
 		}
 	}
 	return out
+}
+
+func anySlice(value any) []any {
+	if rows, ok := value.([]any); ok {
+		return rows
+	}
+	if rows, ok := value.([]map[string]any); ok {
+		out := make([]any, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, row)
+		}
+		return out
+	}
+	return nil
 }
 
 func strongRelatedTitle(left, right string) bool {
