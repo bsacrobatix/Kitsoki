@@ -36,6 +36,7 @@ states:
         bind:
           current_leg: current_leg
           current_leg_id: current_leg_id
+          current_leg_json: current_leg_json
         on_error: idle
       - set:
           status: "judging"
@@ -45,12 +46,17 @@ states:
           agent: driver
           acceptance:
             schema: schemas/drive_leg_result.json
+          # Prompt variables MUST live under context.args and be referenced as
+          # {{ args.<key> }} — the prompt renderer's env only exposes the args
+          # namespace; keys placed directly under context: silently render as
+          # empty (the first live drive shipped the driver a blank handoff).
           context:
             prompt: prompts/drive_leg.md
-            leg: "{{ world.current_leg }}"
-            run_id: "{{ world.run_id }}"
-            run_dir: "{{ world.run_dir }}"
-            transport: "{{ world.current_leg.transport }}"
+            args:
+              leg_json: "{{ world.current_leg_json }}"
+              run_id: "{{ world.run_id }}"
+              run_dir: "{{ world.run_dir }}"
+              transport: "{{ world.current_leg.transport }}"
         bind:
           drive_result: submitted
         on_error: judge
