@@ -90,7 +90,24 @@ Then hand it to the reusable driver:
    `--record-blocker` or `last_result.next_driver_blocker_command`.
 5. Record each attempt with `--record-driver-event` or the story `driver_event`
    intent.
-6. Run:
+6. File the credible `issue` findings as GitHub issues through the story
+   `file_findings ticket_repo=<owner/repo>` intent (preferred; add
+   `mode=dry-run` to preview) or the headless fallback:
+
+```sh
+python3 tools/product-journey/run.py --file-findings --run-dir <run-dir> \
+  --ticket-repo <owner/repo> [--dry-run]
+```
+
+   This drives `kitsoki bug file-findings` (host.GitHubFileFindings), the same
+   artifact-preserving orchestration as web Report-bug / TUI `/bug`: evidence
+   uploads as release assets, the issue gets an `## Artifacts` section +
+   kitsoki metadata block, and the issue URL is written back into
+   `findings.json` (`item.github_issue`) so re-runs are idempotent. Never file
+   these findings with raw `gh issue create` or text-only `issue_create` —
+   that drops the evidence. Once filing is requested, review/validate gate on
+   every credible issue finding carrying a filed URL (`findings-filed`).
+7. Run:
 
 ```sh
 python3 tools/product-journey/run.py --review-run --run-dir <run-dir>
@@ -115,6 +132,7 @@ Useful intents:
 - `attach`
 - `record`
 - `blocker`
+- `file_findings ticket_repo=owner/repo mode=file|dry-run`
 - `driver_event`
 - `validate_matrix_strict`
 - `review`

@@ -121,6 +121,15 @@ world:
   finding_title:  { type: string, default: "" }
   finding_summary: { type: string, default: "" }
   finding_severity: { type: string, default: "" }
+  ticket_repo:    { type: string, default: "" }
+  filing_status:  { type: string, default: "" }
+  filing_dry_run: { type: string, default: "" }
+  findings_filed_count: { type: int, default: 0 }
+  findings_skipped_count: { type: int, default: 0 }
+  findings_failed_count: { type: int, default: 0 }
+  findings_unfiled_count: { type: int, default: 0 }
+  filed_issue_summary: { type: string, default: "" }
+  filing_summary: { type: string, default: "" }
   dispatch_mode:  { type: string, default: "" }
   driver_status:  { type: string, default: "" }
   driver_summary: { type: string, default: "" }
@@ -240,6 +249,13 @@ intents:
       title: { type: string, required: true }
       summary: { type: string, required: true }
       evidence_path: { type: string, required: false }
+  file_findings:
+    description: "File every credible recorded issue finding as a GitHub issue with uploaded evidence, via the kitsoki bug orchestration."
+    examples: ["file findings", "file findings ticket_repo=bsacrobatix/Kitsoki", "file issues to github", "dry-run finding filing"]
+    priority: 79
+    slots:
+      ticket_repo: { type: string, required: true }
+      mode: { type: string, required: false }
   driver_event:
     description: "Record what the reusable driver actually attempted for a scenario."
     examples: ["record driver event", "driver attempted bugfix", "journal visual observe"]
@@ -282,7 +298,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
+  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
 
 root: idle
 

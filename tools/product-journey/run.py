@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import datetime
 import tempfile
@@ -2848,6 +2849,118 @@ def record_blocker(
     )
 
 
+def kitsoki_cli_command() -> list[str]:
+    """Resolve the kitsoki CLI invocation for headless orchestration.
+
+    Defaults to `go run ./cmd/kitsoki` from the repo root; tests and installed
+    environments override with KITSOKI_BIN (a shell-split command prefix).
+    """
+    override = os.environ.get("KITSOKI_BIN", "").strip()
+    if override:
+        return shlex.split(override)
+    return ["go", "run", "./cmd/kitsoki"]
+
+
+def credible_issue_findings(findings: dict) -> list[dict]:
+    """Findings that must be filed when GitHub filing is requested: observed
+    (non-seeded) `issue` findings, including blocked scenarios."""
+    return [
+        item for item in findings.get("items", [])
+        if item.get("kind") == "issue" and item.get("origin", "observed") != "seeded"
+    ]
+
+
+def unfiled_credible_findings(findings: dict) -> list[str]:
+    return [
+        item.get("id", "")
+        for item in credible_issue_findings(findings)
+        if not item.get("github_issue", {}).get("url")
+    ]
+
+
+def file_findings(run_dir: Path, ticket_repo: str, dry_run: bool, publish_deck: Optional[Path]) -> dict:
+    """File the bundle's credible issue findings as GitHub issues.
+
+    Body assembly, evidence upload (release assets + `## Artifacts` section),
+    dedupe, and the findings.json write-back all live in the Go orchestration
+    (`kitsoki bug file-findings` -> host.GitHubFileFindings -> host.GitHubFileBug,
+    the same path the web Report-bug and TUI /bug surfaces use). This runner
+    entrypoint drives that CLI and refreshes the derived bundle artifacts so
+    review/validate gates see the filing results.
+    """
+    if not ticket_repo:
+        raise SystemExit("--file-findings requires --ticket-repo (owner/repo)")
+    if not (run_dir / "findings.json").exists():
+        raise SystemExit(f"No findings.json in {run_dir}; record findings before filing")
+    cmd = kitsoki_cli_command() + [
+        "bug", "file-findings",
+        "--run-dir", str(run_dir),
+        "--repo", ticket_repo,
+    ]
+    if dry_run:
+        cmd.append("--dry-run")
+    proc = shell(cmd, ROOT)
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip()
+        raise SystemExit(f"kitsoki bug file-findings failed (exit {proc.returncode}): {detail}")
+    try:
+        filing = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"kitsoki bug file-findings printed invalid JSON ({exc}): {proc.stdout[:400]}")
+
+    if not dry_run:
+        # The Go side rewrote findings.json (issue URLs + the filing block);
+        # refresh every derived artifact so decks/metrics/handoff stay honest.
+        update_derived_artifacts(run_dir, publish_deck=publish_deck)
+
+    findings = read_json(run_dir / "findings.json")
+    credible = credible_issue_findings(findings)
+    filed_urls = [
+        item.get("github_issue", {}).get("url", "")
+        for item in credible
+        if item.get("github_issue", {}).get("url")
+    ]
+    unfiled = unfiled_credible_findings(findings)
+    outcomes = filing.get("outcomes") or []
+    filed = filing.get("filed", 0)
+    skipped = filing.get("skipped", 0)
+    failed = filing.get("failed", 0)
+    if dry_run:
+        summary = f"Dry-run rendered {len(outcomes)} candidate issue(s) for {ticket_repo}; nothing was filed."
+    else:
+        summary = (
+            f"Filed findings to {ticket_repo}: {filed} filed, {skipped} already filed, "
+            f"{failed} failed; {len(unfiled)} credible finding(s) remain unfiled."
+        )
+    issue_summary = "; ".join(filed_urls[:5])
+    if len(filed_urls) > 5:
+        issue_summary += f"; +{len(filed_urls) - 5} more"
+    result = {
+        "status": filing.get("status", "findings_dry_run" if dry_run else "findings_filed"),
+        "run_dir": str(run_dir),
+        "ticket_repo": ticket_repo,
+        "dry_run": "yes" if dry_run else "no",
+        "findings_filed_count": filed,
+        "findings_skipped_count": skipped,
+        "findings_failed_count": failed,
+        "findings_unfiled_count": len(unfiled),
+        "filed_issue_urls": filed_urls,
+        "filed_issue_summary": issue_summary,
+        "filing_summary": summary,
+        "outcomes": outcomes,
+        "deck_path": str(run_dir / "deck.slidey.json"),
+        "execution_plan_path": str(run_dir / "execution-plan.md"),
+        "driver_plan_path": str(run_dir / "driver-plan.md"),
+        "driver_journal_path": str(run_dir / "driver-journal.md"),
+        "agent_brief_path": str(run_dir / "agent-brief.md"),
+        "driver_handoff_path": str(run_dir / "driver-handoff.md"),
+        "media_manifest_path": str(run_dir / "media-manifest.json"),
+        "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
+    }
+    result.update(run_story_summary(run_dir))
+    return result
+
+
 def record_driver_event(
     run_dir: Path,
     scenario_id: str,
@@ -3116,6 +3229,9 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         for row in driver_action_contract["rows"]
         if not row["valid"]
     ]
+    filing_requested = bool(findings.get("filing", {}).get("requested"))
+    credible_findings = credible_issue_findings(findings)
+    unfiled_credible = unfiled_credible_findings(findings)
 
     checks = [
         {
@@ -3230,6 +3346,24 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             "status": "pass" if not rejected_items else "warn",
             "summary": "No attached evidence is marked rejected.",
             "detail": f"rejected={len(rejected_items)}",
+        },
+        {
+            # GitHub filing gate: once filing was requested (--file-findings /
+            # the story file_findings intent), every credible issue finding must
+            # carry a filed issue URL. Bundles that never requested filing pass
+            # untouched.
+            "id": "findings-filed",
+            "status": ("pass" if not unfiled_credible else "fail") if filing_requested else "pass",
+            "summary": "When GitHub filing was requested, every credible issue finding has a filed issue URL.",
+            "detail": (
+                f"unfiled: {', '.join(unfiled_credible)}"
+                if filing_requested and unfiled_credible
+                else (
+                    f"ticket_repo={findings.get('filing', {}).get('ticket_repo', '')}, filed={len(credible_findings) - len(unfiled_credible)}/{len(credible_findings)}"
+                    if filing_requested
+                    else "filing not requested"
+                )
+            ),
         },
         {
             "id": "deck-generated",
@@ -4114,6 +4248,30 @@ def validate_run_bundle(run_dir: Path) -> dict:
             ]:
                 if metrics.get(key) != expected:
                     add_validation_issue(issues, "error", "metrics-review-consistency", f"metrics.json {key} is stale or inconsistent with review.json", f"expected={expected}, actual={metrics.get(key)}")
+
+    # GitHub filing contract: once filing was requested, the bundle must show
+    # an issue URL for every credible issue finding, and filing failures are
+    # surfaced for re-runs.
+    findings_json = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {}
+    filing = findings_json.get("filing", {}) if findings_json else {}
+    if filing.get("requested"):
+        unfiled = unfiled_credible_findings(findings_json)
+        if unfiled:
+            add_validation_issue(
+                issues,
+                "error",
+                "findings-filed",
+                "GitHub filing was requested but credible issue findings remain unfiled",
+                ", ".join(unfiled),
+            )
+        if filing.get("failed"):
+            add_validation_issue(
+                issues,
+                "warn",
+                "findings-filing-failures",
+                "The last findings filing run reported failures; re-run --file-findings",
+                f"failed={filing.get('failed')}",
+            )
 
     validate_slidey_deck_shape(deck, media_manifest, issues)
     scene_eyebrows = deck_scene_eyebrows(deck)
@@ -6581,6 +6739,15 @@ def main() -> None:
     parser.add_argument("--record-blocker", action="store_true", help="Record an explicit blocked scenario as an issue finding")
     parser.add_argument("--record-driver-event", action="store_true", help="Append one driver execution event to driver-journal.json")
     parser.add_argument("--seed-demo-evidence", action="store_true", help="Attach deterministic demo evidence and findings to an existing run bundle")
+    parser.add_argument("--file-findings", action="store_true", help="File the bundle's credible issue findings as GitHub issues via the kitsoki bug orchestration")
+    parser.add_argument("--ticket-repo", default="", help="owner/repo GitHub target for --file-findings")
+    parser.add_argument("--dry-run", action="store_true", help="With --file-findings, render what would be filed without calling GitHub")
+    parser.add_argument(
+        "--filing-mode",
+        default="file",
+        choices=["file", "dry-run"],
+        help="Value-style alias for --dry-run so story slots can select the mode (--filing-mode dry-run)",
+    )
     parser.add_argument("--review-run", action="store_true", help="Review an existing run bundle for readiness")
     parser.add_argument("--driver-handoff", action="store_true", help="Refresh and print the product-journey QA driver handoff artifact")
     parser.add_argument("--summarize-run", action="store_true", help="Print the story-load summary for an existing run bundle")
@@ -6963,6 +7130,30 @@ def main() -> None:
         print(f"Targets: {matrix['target_count']}")
         print(f"Assignments: {matrix['assignment_count']}")
         append_log(f"Emitted GitHub matrix {matrix['matrix_id']}")
+        return
+
+    if args.file_findings:
+        if not args.run_dir:
+            raise SystemExit("--file-findings requires --run-dir")
+        publish_deck = DEFAULT_DECK if args.publish_deck else None
+        run_dir = run_dir_from_arg(args.run_dir)
+        dry_run = args.dry_run or args.filing_mode == "dry-run"
+        result = file_findings(run_dir, args.ticket_repo, dry_run, publish_deck)
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Filed findings for {run_dir.name}: {result['filing_summary']}")
+            return
+        print(f"Status: {result['status']}")
+        print(result["filing_summary"])
+        for outcome in result["outcomes"]:
+            line = f"- {outcome.get('finding_id', '?')} [{outcome.get('status', '?')}]"
+            if outcome.get("issue_url"):
+                line += f" {outcome['issue_url']}"
+            if outcome.get("error"):
+                line += f" ({outcome['error']})"
+            print(line)
+        print(f"Unfiled credible findings: {result['findings_unfiled_count']}")
+        append_log(f"Filed findings for {run_dir.name}: {result['filing_summary']}")
         return
 
     if args.review_run:
