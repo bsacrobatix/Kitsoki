@@ -1275,13 +1275,137 @@ func TestRunStorySession_RealDispatch_BugfixReplay(t *testing.T) {
 		t.Errorf("FinalState = %q, want done", result.FinalState)
 	}
 	if result.Turns < 8 {
-		t.Errorf("Turns = %d, want >= 8 (the recorded pipeline's full checkpoint walk)", result.Turns)
+		t.Errorf("Turns = %d, want >= 8 (triage preflight plus the recorded pipeline's full checkpoint walk)", result.Turns)
 	}
 	if strings.TrimSpace(result.Summary) == "" {
 		t.Fatal("Summary is empty — real dispatch should carry a real completion summary")
 	}
 	if !strings.Contains(result.Summary, "worktree `.worktrees/gh-job-job-real-1`") {
 		t.Errorf("Summary missing the worktree it ran in:\n%s", result.Summary)
+	}
+	var sawTriageVerdict, sawIndependentVerify bool
+	for _, asset := range result.Assets {
+		switch asset.Name {
+		case "triage-verdict.md":
+			sawTriageVerdict = true
+			if !strings.Contains(string(asset.Data), "STILL-LIVE") {
+				t.Fatalf("triage-verdict.md missing STILL-LIVE verdict:\n%s", string(asset.Data))
+			}
+		case "independent-verify.md":
+			sawIndependentVerify = true
+			if !strings.Contains(string(asset.Data), "Triage preflight: STILL-LIVE") {
+				t.Fatalf("independent-verify.md missing triage preflight evidence:\n%s", string(asset.Data))
+			}
+		}
+	}
+	if !sawTriageVerdict || !sawIndependentVerify {
+		t.Fatalf("missing expected assets: triage=%v independent_verify=%v assets=%+v", sawTriageVerdict, sawIndependentVerify, result.Assets)
+	}
+}
+
+func TestRunStorySession_RealDispatch_AlreadyFixedTriageSkipsMakerPipeline(t *testing.T) {
+	ctx := context.Background()
+	root, err := repoRoot()
+	if err != nil {
+		t.Fatalf("repoRoot: %v", err)
+	}
+	job := &jobs.GHJob{
+		JobID:        "job-already-fixed",
+		OriginRef:    "github:o/r/issue/44",
+		Repo:         "o/r",
+		ObjectKind:   "issue",
+		ObjectNumber: "44",
+		Metadata: map[string]string{
+			"ticket_title":       "Already fixed issue",
+			"ticket_body":        "The issue body cites a defect that no longer exists.",
+			"ticket_source_mode": "remote",
+			"ticket_source_ref":  "https://github.com/o/r/issues/44",
+		},
+	}
+	route := DefaultLabelStoryMap()["bug"]
+	plan := realDispatchPlans["stories/bugfix"]
+	plan.TriageReplayVerdict = map[string]any{
+		"verdict":             "ALREADY-FIXED",
+		"confidence":          0.91,
+		"summary_title":       "ALREADY-FIXED — regression already landed",
+		"evidence":            "internal/example.go:12 already contains the fixed branch.",
+		"summary_markdown":    "The current tree already contains the cited fix, so the maker pipeline should not run.",
+		"suggested_action":    "close as fixed",
+		"fixed_in_ref":        "internal/example.go:12",
+		"involved_components": []any{"internal/example.go"},
+	}
+
+	result, err := runRealDispatch(ctx, root, route, job, plan)
+	if err != nil {
+		t.Fatalf("runRealDispatch: %v", err)
+	}
+	if result.FinalState != "triaged" {
+		t.Fatalf("FinalState = %q, want triaged", result.FinalState)
+	}
+	if result.Turns != 1 {
+		t.Fatalf("Turns = %d, want only the triage preflight turn", result.Turns)
+	}
+	if result.Stubbed {
+		t.Fatal("already-fixed triage must still be a real story preflight, not a stubbed beat")
+	}
+	if result.RealHostCalls == 0 {
+		t.Fatal("already-fixed triage should carry host-call evidence")
+	}
+	if !strings.Contains(result.Summary, "ALREADY-FIXED") || strings.Contains(result.Summary, "end-to-end") {
+		t.Fatalf("summary should report triage skip, not full maker completion:\n%s", result.Summary)
+	}
+	var verify, triage string
+	for _, asset := range result.Assets {
+		switch asset.Name {
+		case "independent-verify.md":
+			verify = string(asset.Data)
+		case "triage-verdict.md":
+			triage = string(asset.Data)
+		}
+	}
+	if !strings.Contains(verify, "Full maker pipeline: skipped") {
+		t.Fatalf("independent verify should explain skipped maker pipeline:\n%s", verify)
+	}
+	if !strings.Contains(triage, "ALREADY-FIXED") || !strings.Contains(triage, "internal/example.go:12") {
+		t.Fatalf("triage artifact missing verdict/evidence:\n%s", triage)
+	}
+}
+
+func TestRunStorySession_RealDispatch_UnclearTriageFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	root, err := repoRoot()
+	if err != nil {
+		t.Fatalf("repoRoot: %v", err)
+	}
+	job := &jobs.GHJob{
+		JobID:        "job-unclear",
+		OriginRef:    "github:o/r/issue/45",
+		Repo:         "o/r",
+		ObjectKind:   "issue",
+		ObjectNumber: "45",
+	}
+	route := DefaultLabelStoryMap()["bug"]
+	plan := realDispatchPlans["stories/bugfix"]
+	plan.TriageReplayVerdict = map[string]any{
+		"verdict":             "UNCLEAR",
+		"confidence":          0.2,
+		"summary_title":       "UNCLEAR — issue lacks enough evidence",
+		"evidence":            "No cited code path was available.",
+		"summary_markdown":    "The triager could not determine whether the defect is still live.",
+		"suggested_action":    "needs human repro",
+		"fixed_in_ref":        nil,
+		"involved_components": []any{},
+	}
+
+	result, err := runRealDispatch(ctx, root, route, job, plan)
+	if err == nil {
+		t.Fatal("runRealDispatch succeeded; UNCLEAR triage should fail closed")
+	}
+	if !strings.Contains(err.Error(), "UNCLEAR") {
+		t.Fatalf("error should include unclear verdict, got: %v", err)
+	}
+	if result.Turns != 0 || result.Summary != "" {
+		t.Fatalf("UNCLEAR triage should not synthesize maker completion: %+v", result)
 	}
 }
 
