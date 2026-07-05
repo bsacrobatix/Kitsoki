@@ -36,12 +36,16 @@ states:
           agent: driver
           acceptance:
             schema: schemas/drive_result.json
+          # Prompt variables MUST live under context.args and be referenced
+          # as {{ args.<key> }} — the prompt renderer only exposes the args
+          # namespace; keys directly under context: silently render as empty.
           context:
             prompt: prompts/drive_case.md
-            case:           "{{ world.current_case }}"
-            inner_pipeline: "{{ world.inner_pipeline }}"
-            profile:        "{{ world.profile }}"
-            baseline_policy: "{{ world.baseline_policy }}"
+            args:
+              case_json:       "{{ world.current_case_json }}"
+              inner_pipeline:  "{{ world.inner_pipeline }}"
+              profile:         "{{ world.profile }}"
+              baseline_policy: "{{ world.baseline_policy }}"
         bind:
           drive_result: submitted
         on_error: verifying   # a dead/failed driver can still have landed edits — verify anyway

@@ -30,10 +30,12 @@ states:
           agent: triager
           acceptance:
             schema: schemas/triage_verdict.json
+          # See driving.yaml: prompt variables live under context.args.
           context:
             prompt: prompts/triage_case.md
-            case:           "{{ world.current_case }}"
-            inner_pipeline: "{{ world.inner_pipeline }}"
+            args:
+              case_json:      "{{ world.current_case_json }}"
+              inner_pipeline: "{{ world.inner_pipeline }}"
         bind:
           triage_verdict: submitted
         on_error: driving   # triage is advisory — a failed triage still drives

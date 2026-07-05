@@ -5,12 +5,12 @@ self-grade — an oracle decides solved/partial/failed afterward.
 Case:
 
 ```
-{{ context.case }}
+{{ args.case_json }}
 ```
 
-- Inner pipeline: `{{ context.inner_pipeline }}` (bugfix / delivery-tail / ship-it)
-- Maker profile (the model): `{{ context.profile }}`
-- Baseline policy: `{{ context.baseline_policy }}`
+- Inner pipeline: `{{ args.inner_pipeline }}` (bugfix / delivery-tail / ship-it)
+- Maker profile (the model): `{{ args.profile }}`
+- Baseline policy: `{{ args.baseline_policy }}`
 
 Drive the inner pipeline to its terminal exit following the dogfood-marathon
 method (see `.agents/skills/dogfood-marathon/SKILL.md`). The hard requirements:

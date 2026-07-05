@@ -118,6 +118,7 @@ world:
   # picks backlog.items[case_index]). Cleared on next_case.
   current_case:     { type: object, default: {} }                # {id,title,baseline,repro_command}
   current_case_id:  { type: string, default: "" }                # scalar mirror of current_case.id — the dispatcher's drain guard (empty = drained)
+  current_case_json: { type: string, default: "{}" }             # JSON form for agent prompt args (a raw object renders as a Go map string)
   triage_verdict:   { type: object, default: {} }                # this case's triage verdict (read-only)
   drive_result:     { type: object, default: {} }                # inner-pipeline drive output {exit,worktree,branch,trace,cost_usd,tokens,wall_s}
   verify_result:    { type: object, default: {} }                # INDEPENDENT oracle outcome {status:solved|partial|failed,how}
