@@ -41,6 +41,13 @@ type JourneyState struct {
 	World world.World
 	// Turn is the highest turn number seen in the history.
 	Turn app.TurnNumber
+	// History is the exact event slice BuildJourney replayed to produce this
+	// JourneyState. Callers that need a post-hoc pass over the same rows
+	// (e.g. deriving RecentTurns for the harness) should read this field
+	// instead of re-querying the store — it is already the identical data
+	// loadJourney read to build State/World/Turn, so a second store round
+	// trip would be redundant work over the same rows.
+	History History
 }
 
 // BuildJourney reconstructs the journey state by replaying events in order.
@@ -171,6 +178,7 @@ func BuildJourney(def *app.AppDef, initialState app.StatePath, initialWorld worl
 		}
 	}
 
+	js.History = history
 	return js, nil
 }
 

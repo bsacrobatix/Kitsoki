@@ -1128,22 +1128,14 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		slog.String("mode", "normal"),
 	)
 
-	// Build RecentTurns from the event history. The store call here is a
-	// second pass over the same rows loadJourney already read, but the slice
-	// isn't carried on JourneyState today and snapshotting through the
-	// journey type would be a bigger refactor. Bounded to RecentTurnsLimit
-	// so prompt size stays predictable.
-	//
-	// On error: log and pass nil. RecentTurns is purely advisory — a missing
-	// history must not abort the turn.
-	history, histErr := o.store.LoadHistory(sid)
-	if histErr != nil {
-		tl.Debug(ctx, trace.EvTurnStart,
-			slog.String("recent_turns_load_error", histErr.Error()),
-		)
-		history = nil
-	}
-	recent := extractRecentTurns(history)
+	// Build RecentTurns from the event history loadJourney already read.
+	// journey.History carries the exact rows BuildJourney replayed to
+	// produce State/World/Turn above (either o.store.LoadHistory's
+	// since-snapshot slice or the eventSink's in-memory slice, depending on
+	// which branch loadJourney took) — reusing it here avoids a second store
+	// round trip over the same rows. Bounded to RecentTurnsLimit so prompt
+	// size stays predictable.
+	recent := extractRecentTurns(journey.History)
 
 	in := harness.TurnInput{
 		SessionID:      app.SessionID(sid),
