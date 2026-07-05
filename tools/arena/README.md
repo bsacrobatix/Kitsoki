@@ -352,13 +352,19 @@ convention `swarm.py` established.
   the cell (`infra:results-malformed`) rather than silently scoring past it.
   Clean records are reduced into the three `GATE_CONDITIONS`
   (`usable_kitsoki_gate_constants.py`): zero `silent_bounce`, zero
-  `misroute_adjacent`, and `parity_percent(candidate_and_source_completed,
-  source_completed) >= PARITY_THRESHOLD_PERCENT` — all three passing is
-  `solved`, any one failing is `failed`. This reduction is **per cell**, i.e.
-  per `(persona, surface)`; the cross-surface **worst-surface-gating**
-  reduction the proposal describes needs multiple cells' results compared
-  against each other and belongs to a higher rollup layer (Task 3, gated on
-  S1/S4 landing — explicitly out of scope here).
+  `misroute_adjacent`, and a **worst-surface** `parity_percent(...) >=
+  PARITY_THRESHOLD_PERCENT` — all three passing is `solved`, any one failing
+  is `failed`. This reduction is **per cell**, i.e. per `(persona, surface)`
+  in production (one cell drives exactly one surface, so grouping by surface
+  is normally a no-op), but `score()` groups records by their own `surface`
+  field and gates on the MINIMUM per-surface parity rather than the flat
+  aggregate regardless — `usable_kitsoki_gate_constants.WORST_SURFACE_GATING`
+  is a fixed design decision (never average across surfaces), so a
+  hand-written bundle spanning more than one surface (e.g. a golden
+  regression fixture) is reduced correctly too. True cross-**cell**
+  worst-surface gating (comparing separately-run cells against each other,
+  e.g. across a real S1/S4 sweep) is still a higher rollup layer (Task 3,
+  gated on S1/S4 landing — explicitly out of scope here).
 - Tests: `tools/arena/tests/test_usable_kitsoki_gate_plugin.py` proves
   registration alongside the other three job types, image selection per
   surface (+ target/variant meta overrides), full argv/env composition for
@@ -370,3 +376,17 @@ convention `swarm.py` established.
   empty-records-solves / schema-violation-blocks / missing-pointer-infra /
   crash-infra), plus the container<->host results-path mapping — all with
   zero docker, zero LLM spend.
+- **Golden regression fixtures** (Task 4.1 — offline proof the gate has
+  teeth): `tools/arena/tests/fixtures/usable-kitsoki-gate/clean-pass.json`
+  is a hand-written 30-record bundle (web/tui/mcp × 10 scenarios) with zero
+  violations and 100% parity everywhere. `scripted-silent-bounce.json`,
+  `scripted-misroute-adjacent.json`, and `scripted-parity-miss.json` are
+  each that exact same bundle with **exactly one** scripted violation added,
+  so each isolates one `GATE_CONDITIONS` entry. `scripted-parity-miss.json`
+  is specifically shaped so the flat aggregate across all 30 records sits AT
+  the 90% threshold (27/30) while mcp alone is at 70% — proving the rollup
+  gates on the worst surface, not the average. `tools/arena/tests/
+  test_usable_kitsoki_gate_golden_fixtures.py` scores each fixture through
+  the plugin's real `score()` entry point and proves `clean-pass.json`
+  solves while each of the other three independently flips the rollup from
+  `solved` to `failed` — zero docker, zero LLM spend, no S1/S4 dependency.
