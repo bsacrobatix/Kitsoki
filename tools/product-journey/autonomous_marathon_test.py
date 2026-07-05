@@ -180,6 +180,40 @@ def main() -> int:
                   and "finding-1->stories/prd" in finalized["weakness_route_summary"],
                   failures)
 
+            missing_stats = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-missing-stats",
+                "bugfix",
+                7,
+                "o/r",
+                str(tmp / "gh-agent-missing-stats.json"),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                str(tmp / "empty-stats-root"),
+                "",
+                0.82,
+                25,
+                "replay",
+                None,
+            )
+            check("marathon fails closed when derived stats do not cover the run",
+                  missing_stats["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and missing_stats["autonomous_fix_status"] == "autonomous_fix_valid"
+                  and missing_stats["stats_found_count"] == 0
+                  and "stats=fail" in missing_stats["autonomous_marathon_summary"],
+                  failures)
+
             replay = run.autonomous_marathon(
                 catalog,
                 github_targets,
