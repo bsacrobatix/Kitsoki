@@ -71,6 +71,20 @@ fixtures:
     inputs:
       - "work on task"
 
+  # ── Decompose -> implement (deliver, the decompose-vs-direct alternative) ─
+  - id: deliver-explicit
+    intent: { name: go_deliver }
+    inputs:
+      - "decompose the epic"
+  - id: deliver-break-into-briefs
+    intent: { name: go_deliver }
+    inputs:
+      - "break this into briefs"
+  - id: deliver-noun
+    intent: { name: go_deliver }
+    inputs:
+      - "decompose"
+
   # ── Fix a bug ──────────────────────────────────────────────────────────
   - id: fixbug-explicit
     intent: { name: go_bugfix }

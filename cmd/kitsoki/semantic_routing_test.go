@@ -26,15 +26,19 @@ func resetSemanticRoutingGlobals(t *testing.T) {
 	})
 }
 
-func TestSemanticRoutingOverrideUnsetDisablesStack(t *testing.T) {
+func TestSemanticRoutingOverrideUnsetDefersToAppConfig(t *testing.T) {
 	resetSemanticRoutingGlobals(t)
 
 	_, ok := semanticRoutingOverride()
 	if ok {
 		t.Fatal("unset flag/env should not force an orchestrator override")
 	}
-	if got := semanticRoutingOptions(); len(got) != 1 {
-		t.Fatalf("unset flag/env should produce one default-off option, got %d", len(got))
+	// Unset must produce NO options at all — appending a default-off
+	// WithSemanticRouting(false) here would silently override every app's
+	// own routing.enabled (default true), which is the bug this pins
+	// against (see .context/dwf2-d1-findings.md).
+	if got := semanticRoutingOptions(); len(got) != 0 {
+		t.Fatalf("unset flag/env should defer to per-app routing.enabled (no override option), got %d option(s)", len(got))
 	}
 }
 
