@@ -63,6 +63,26 @@ def load_scenarios(path: Path):
     return json.loads(path.read_text())["scenarios"]
 
 
+def is_active_persona(persona: dict) -> bool:
+    if persona.get("status") == "draft":
+        return False
+    return isinstance(persona.get("risk_focus"), list) and bool(persona.get("risk_focus"))
+
+
+def active_personas(personas: list[dict]) -> list[dict]:
+    return [persona for persona in personas if is_active_persona(persona)]
+
+
+def is_active_scenario(scenario: dict) -> bool:
+    if scenario.get("status") == "draft":
+        return False
+    return scenario.get("stage") in STAGES
+
+
+def active_scenarios(scenarios: list[dict]) -> list[dict]:
+    return [scenario for scenario in scenarios if is_active_scenario(scenario)]
+
+
 def select_scenarios(scenarios: list[dict], scenario_filter: str) -> list[dict]:
     requested = [item.strip() for item in scenario_filter.split(",") if item.strip()]
     if not requested:
@@ -76,7 +96,7 @@ def select_scenarios(scenarios: list[dict], scenario_filter: str) -> list[dict]:
     unknown = [scenario_id for scenario_id in requested if scenario_id not in by_id]
     if unknown:
         known = ", ".join(sorted(by_id))
-        raise SystemExit(f"--scenarios contains unknown scenario id(s): {', '.join(unknown)}. Known scenarios: {known}")
+        raise SystemExit(f"--scenarios contains unknown active scenario id(s): {', '.join(unknown)}. Known active scenarios: {known}")
 
     return [by_id[scenario_id] for scenario_id in requested]
 
@@ -1218,6 +1238,10 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
     schema = read_json(SCHEMA)
     issues: list[dict] = []
     targets = github_targets.get("targets", [])
+    active_persona_list = active_personas(personas)
+    draft_persona_list = [persona for persona in personas if not is_active_persona(persona)]
+    active_scenario_list = active_scenarios(scenarios)
+    draft_scenario_list = [scenario for scenario in scenarios if not is_active_scenario(scenario)]
     persona_required = ["id", "label", "description", "surface_preference", "risk_focus"]
     scenario_required = ["id", "label", "stage", "task", "primary_story", "required_mcp", "evidence", "success_criteria"]
     target_required = ["id", "label", "repo", "stack", "license_spdx", "bug_query", "open_bug_floor", "status", "notes"]
@@ -1242,19 +1266,30 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
         if blanks:
             add_corpus_issue(issues, "error", f"blank-{label}-ids", f"Blank {label} ids", ", ".join(blanks))
 
-    if len(personas) < 4:
-        add_corpus_issue(issues, "warn", "persona-count", "Persona corpus is narrow for natural-use sweeps", f"personas={len(personas)}")
-    for persona in personas:
+    if draft_persona_list:
+        draft_ids = ", ".join(sorted(persona.get("id", "unknown") for persona in draft_persona_list))
+        add_corpus_issue(issues, "warn", "draft-personas", "Draft personas are skipped by active product-journey gates", draft_ids)
+    if draft_scenario_list:
+        draft_ids = sorted(scenario.get("id", "unknown") for scenario in draft_scenario_list)
+        detail = ", ".join(draft_ids[:8])
+        if len(draft_ids) > 8:
+            detail = f"{detail}, ... ({len(draft_ids)} total)"
+        add_corpus_issue(issues, "warn", "draft-scenarios", "Draft scenarios are skipped by active product-journey gates", detail)
+
+    if len(active_persona_list) < 4:
+        add_corpus_issue(issues, "warn", "persona-count", "Active persona corpus is narrow for natural-use sweeps", f"personas={len(active_persona_list)}")
+    for persona in active_persona_list:
         missing = [key for key in persona_required if key not in persona]
         if missing:
             add_corpus_issue(issues, "error", "persona-required-keys", "Persona is missing required keys", f"{persona.get('id', 'unknown')}: {', '.join(missing)}")
         if not isinstance(persona.get("risk_focus", []), list) or not persona.get("risk_focus"):
             add_corpus_issue(issues, "error", "persona-risk-focus", "Persona must name at least one risk focus", persona.get("id", "unknown"))
 
-    missing_required_scenarios = sorted(required_scenarios - set(scenario_ids))
+    active_scenario_ids = [scenario.get("id", "") for scenario in active_scenario_list]
+    missing_required_scenarios = sorted(required_scenarios - set(active_scenario_ids))
     if missing_required_scenarios:
         add_corpus_issue(issues, "error", "required-scenarios", "Required natural-use scenarios are missing", ", ".join(missing_required_scenarios))
-    for scenario in scenarios:
+    for scenario in active_scenario_list:
         scenario_id = scenario.get("id", "unknown")
         missing = [key for key in scenario_required if key not in scenario]
         if missing:
@@ -1318,8 +1353,12 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
     warnings = sum(1 for issue in issues if issue["severity"] == "warn")
     return {
         "status": "valid" if errors == 0 else "invalid",
-        "personas": len(personas),
-        "scenarios": len(scenarios),
+        "personas": len(active_persona_list),
+        "scenarios": len(active_scenario_list),
+        "all_personas": len(personas),
+        "all_scenarios": len(scenarios),
+        "draft_personas": len(draft_persona_list),
+        "draft_scenarios": len(draft_scenario_list),
         "targets": len(targets),
         "errors": errors,
         "warnings": warnings,
@@ -7180,8 +7219,10 @@ def main() -> None:
     args = parser.parse_args()
 
     catalog = load_catalog(CATALOG)
-    personas = load_personas(PERSONAS)
-    scenarios = load_scenarios(SCENARIOS)
+    all_personas = load_personas(PERSONAS)
+    all_scenarios = load_scenarios(SCENARIOS)
+    personas = active_personas(all_personas)
+    scenarios = active_scenarios(all_scenarios)
     github_targets = load_github_targets(GITHUB_TARGETS)
 
     if args.prune_runs:
@@ -7198,7 +7239,7 @@ def main() -> None:
         return
 
     if args.validate_corpus:
-        result = validate_journey_corpus(personas, scenarios, github_targets)
+        result = validate_journey_corpus(all_personas, all_scenarios, github_targets)
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
             append_log(f"Validated product journey corpus: {result['status']}")
