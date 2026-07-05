@@ -30,7 +30,10 @@ Hard requirements:
   `publish_durable_path` to `.context/prd`, `design_durable_path` to
   `.context/designs`, `design_template_dir` to `""`, and both
   `design_ticket_dir` and `ticket_repo` to `""` unless repo evidence shows a
-  project-owned docs or tracker convention.
+  project-owned docs or tracker convention. When discovery reports
+  `tracker: github` with a `ticket_repo` slug (a github.com origin), keep that
+  slug — it pins `iface.ticket → host.gh.ticket` to the project's real GitHub
+  issues; do not blank it or substitute a different repo.
 - Include `dev_story_profile.bugfix.build_cmd` and `dev_story_profile.bugfix.test_cmd` when build/test commands are known.
 - Include `onboarding.base_story`, `onboarding.base_story_title`, and
   `onboarding.base_story_reason`; default to `dev-story` as the starter story

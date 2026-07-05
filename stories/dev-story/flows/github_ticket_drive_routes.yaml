@@ -83,6 +83,13 @@ turns:
   # stub, binding ticket_results (the one classified bug row).
   - intent: { name: go_ticket_search, slots: {} }
     expect_state: ticket_search
+    # The external ticket-repo passthrough: the room threads
+    # world.ticket_repo into the search as the `repo` arg, so the gh
+    # provider reads the CONFIGURED repo (an onboarded external project's
+    # slug), never a silently-resolved local `origin`.
+    expect_host_calls:
+      - handler: host.gh.ticket.search
+        args: { repo: "acme/repo" }
 
   # Pick row 1 by number — pick_ticket reads ticket_type off the picked
   # ROW (the provider-classified `type: bug`), NOT from a type slot. This
@@ -90,6 +97,10 @@ turns:
   # binds the title; the legacy_id rides the row for the identity surface.
   - intent: { name: pick_ticket, slots: { n: 1 } }
     expect_state: ticket_search
+    # The pick's iface.ticket.get carries the same repo pin.
+    expect_host_calls:
+      - handler: host.gh.ticket.get
+        args: { repo: "acme/repo" }
     expect_world:
       ticket_id:    "19"
       ticket_type:  "bug"

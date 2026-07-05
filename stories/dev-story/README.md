@@ -113,14 +113,14 @@ repo-native docs paths such as `docs/prd` and `docs/proposals`.
 
 | World key | Default | Effect |
 |---|---|---|
-| `repo_root` | `""` | external checkout root (forward-compat; ticket passthrough is the deferred gh-adapter slice) |
+| `repo_root` | `""` | external checkout root; threaded into every `iface.ticket.*` call as the `root` arg, so `host.local_files.ticket` scans `<repo_root>/issues/...` (`""` ⇒ cwd). `host.gh.ticket` ignores it (its source is `ticket_repo`). |
 | `publish_durable_path` | `docs/prd` | PRD publish home (relative to `workdir`); projected into the `prd` import via `world_in`. |
 | `prd_doc_filename` | `""` | fixed PRD filename (e.g. `PRD` → `PRD.md`); `""` ⇒ slug-named (`<slug>.md`) |
 | `design_template_dir` | `docs/proposals/templates` | dir the design author reads its doc templates from |
 | `design_durable_path` | `docs/proposals` | DESIGN publish home (relative to `workdir`). |
 | `design_doc_filename` | `""` | fixed DESIGN filename (e.g. `DESIGN` → `DESIGN.md`); `""` ⇒ slug-named |
 | `design_ticket_dir` | `issues/features` | where the linking feature ticket is minted; `""` ⇒ **skip** minting (an external target tracks work elsewhere, e.g. GitHub issues) |
-| `ticket_repo` | `""` | `owner/repo` for GitHub-issue tickets; **non-empty ⇒ the feature publish mints a GitHub feature issue** (labels `target:kitsoki` + `comp:proposal`, body links the proposal) instead of a local file — takes precedence over `design_ticket_dir`. `kitsoki-dev` pins `constructorfabric/Kitsoki`. See [hosts.md → host.gh.ticket](../../docs/architecture/hosts.md#hostghticket--github-issues-backed-tracker). |
+| `ticket_repo` | `""` | `owner/repo` for GitHub-issue tickets; **non-empty ⇒ the feature publish mints a GitHub feature issue** (labels `target:<repo-name>` + `comp:proposal`, body links the proposal) instead of a local file — takes precedence over `design_ticket_dir`. `kitsoki-dev` pins `constructorfabric/Kitsoki`. See [hosts.md → host.gh.ticket](../../docs/architecture/hosts.md#hostghticket--github-issues-backed-tracker). |
 
 How the keys reach the glue: the `prd` import's `world_in` projects
 `publish_durable_path` + `prd_doc_filename` into the prd child;

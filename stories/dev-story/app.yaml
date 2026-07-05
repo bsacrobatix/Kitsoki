@@ -726,7 +726,7 @@ world:
   # publish into <workdir>/<durable>, choose fixed filenames, read the target's
   # own doc templates, and choose local ticket, GitHub ticket, or no-ticket
   # follow-up. See the "doc profile" section of the dev-story README.
-  repo_root:             { type: string, default: "" }                        # external checkout root (forward-compat; ticket passthrough is the deferred gh-adapter slice)
+  repo_root:             { type: string, default: "" }                        # external checkout root; threaded into iface.ticket.* as `root` (honoured by host.local_files.ticket; "" ⇒ cwd)
   publish_durable_path:  { type: string, default: "docs/prd" }                # prd publish home (projected into the prd import)
   prd_doc_filename:      { type: string, default: "" }                        # fixed PRD filename for an external target (e.g. "PRD"); "" ⇒ slug-named
   prd_mockup_path:       { type: string, default: "" }                        # optional feature-mockup HTML (relative to workdir); non-empty ⇒ prd_published emits + embeds it inline as the PRD's mockup. "" ⇒ no mockup (default for every instance).

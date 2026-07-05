@@ -175,15 +175,15 @@ imports:
 # defaults; the operator can override any of them at session start
 # via a `--warp` scenario file.
 #
-# `repo_root` and `ticket_globs` are documented here for forward
-# compatibility — the local-files provider currently honours
-# args.root → $KITSOKI_TICKETS_ROOT → cwd, and reads
-# `<root>/issues/bugs/*.md` literally. A future enhancement (Wave 3.5)
-# will accept ticket_globs as a multi-glob scan list and respect
-# repo_root via world.repo_root passthrough in `iface.ticket.*` args.
+# `repo_root` is wired: dev-story threads it into `iface.ticket.*` calls as
+# the `root` arg, which the local-files provider honours
+# (args.root → $KITSOKI_TICKETS_ROOT → cwd); host.gh.ticket ignores it.
+# `ticket_globs` remains forward-compat only — the provider reads
+# `<root>/issues/bugs/*.md` literally; a future enhancement would accept
+# it as a multi-glob scan list.
 world:
-  # Provider-pointing keys (forward-looking; not yet wired into
-  # iface.ticket.* args — see comment above).
+  # Provider-pointing keys. repo_root reaches iface.ticket.* via the
+  # dev-story rooms' `root:` passthrough; ticket_globs is still unwired.
   repo_root:    { type: string, default: "" }
   ticket_globs: { type: string, default: "issues/bugs/*.md,issues/features/*.md,stories/*/issues/bugs/*.md,stories/*/issues/features/*.md" }
 

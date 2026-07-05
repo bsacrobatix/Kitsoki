@@ -66,9 +66,6 @@ catalog:
       - id: source-story-qa-agent-proposal
         kind: proposal
         path: docs/proposals/story-qa-agent.md
-      - id: source-gh-ticket-adapter-proposal
-        kind: proposal
-        path: docs/proposals/gh-ticket-adapter.md
       - id: source-issues-migration-to-github-proposal
         kind: proposal
         path: docs/proposals/issues-migration-to-github.md
@@ -7513,24 +7510,6 @@ nodes:
     index_blurb: '(re-scoped). A Claude agent that QAs a story by *using* it: given a persona + scenario it walks the story turn-by-turn through the **MCP studio** tools, reading the exact human-fidelity screen (and a screenshot), and reports view/navigation/intuitiveness/objective findings. Its frame composer / drive / shot / web-screenshot substrate **shipped** as the [`mcp-studio` epic](../architecture/mcp-studio.md) (the `kitsoki mcp` studio server + `kitsoki drive`/`shot`/`web-shot`). A local skill scaffold and `tools/story-qa/run.py` wrapper now exist; the remaining slice is the live persona/scenario drive loop:'
     sources:
       - source-story-qa-agent-proposal
-    edges:
-      owned_by: []
-      proposes: []
-      creates_requirements: []
-      creates_use_cases: []
-      decomposes_to: []
-
-  - schema: graph/proposal/v0
-    id: proposal-gh-ticket-adapter
-    title: Gh ticket adapter
-    status: draft
-    visibility: internal
-    proposal_kind: runtime
-    path: docs/proposals/gh-ticket-adapter.md
-    status_line: Draft v1. Nothing implemented yet. Deferred pending real GitHub integration demand.
-    index_blurb: a `gh`-backed glue provider satisfying the `ticket` interface against GitHub issues. Part of the external-project-targeting epic (profile + instance now shipped and documented in [dev-story README](../../stories/dev-story/README.md#doc-profile--targeting-an-external-project)); this adapter is deferred pending real GitHub integration demand.
-    sources:
-      - source-gh-ticket-adapter-proposal
     edges:
       owned_by: []
       proposes: []

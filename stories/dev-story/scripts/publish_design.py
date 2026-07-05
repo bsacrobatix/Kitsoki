@@ -143,9 +143,13 @@ def file_feature_issue_github(slug: str, title: str, idea: str, design_rel: str,
     """Mint a GitHub feature issue on `repo` linking the published proposal,
     instead of an issues/features/<id>.md file.
 
-    Labels target:kitsoki + comp:proposal (the GitHub twin of the local
-    format's component: proposal). Returns (issue_number, issue_url). Routes
-    through Kitsoki's native GitHub filing path instead of shelling out to gh.
+    Labels target:<repo-name> + comp:proposal (the GitHub twin of the local
+    format's component: proposal). The target label derives from the repo
+    slug's name segment — never a hardcoded project — so an onboarded external
+    repo (e.g. acme/gears-rust → target:gears-rust) gets its own vocabulary
+    while kitsoki-dev (constructorfabric/Kitsoki) keeps target:kitsoki.
+    Returns (issue_number, issue_url). Routes through Kitsoki's native GitHub
+    filing path instead of shelling out to gh.
     """
     ticket_title = title.strip() or slug
     body_idea = idea.strip()
@@ -158,10 +162,11 @@ def file_feature_issue_github(slug: str, title: str, idea: str, design_rel: str,
         "before starting implementation.\n"
     )
     kitsoki = shlex.split(os.environ.get("KITSOKI_BIN", "go run ./cmd/kitsoki"))
+    repo_name = repo.rstrip("/").rsplit("/", 1)[-1].lower() or "project"
     args = kitsoki + [
         "bug", "create",
         "--github", repo,
-        "--target", "kitsoki",
+        "--target", repo_name,
         "--title", ticket_title,
         "--body", body,
         "--component", "proposal",

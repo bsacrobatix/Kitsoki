@@ -155,6 +155,16 @@ single profile. The materialized `.kitsoki/stories/<id>-dev/app.yaml` is still
 checked in so teams can extend it deliberately, but the profile is the reusable
 convention source.
 
+**Ticket source.** When discovery classifies the tracker as GitHub (the
+`origin` remote parses to a `github.com` `owner/repo` slug), the generated
+instance binds `iface.ticket → host.gh.ticket` pinned on that slug
+(`world.ticket_repo`; recorded as `tracker.provider: github` + `tracker.repo`
+in the profile), so `pick_ticket` / triage / bugfix read and comment the
+project's **real GitHub issues** — auth rides your existing `gh auth`. Any
+other remote (or `tracker: none`) keeps local-file tickets under `issues/`,
+scanned from `world.repo_root`. See
+[hosts.md → host.gh.ticket](architecture/hosts.md#hostghticket--github-issues-backed-tracker).
+
 The profile's `onboarding` block records why the starter story was selected
 (`base_story`), which repo patterns discovery used (`repo_patterns`), and which
 project-local story customizations were applied or queued

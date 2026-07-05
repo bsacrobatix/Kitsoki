@@ -29,9 +29,13 @@ states:
         with:
           query: "{{ world.ticket_query }}"
           limit: 25
-          # repo is honoured by host.gh.ticket (the kitsoki-dev GitHub binding)
-          # and ignored by host.local_files.ticket; "" ⇒ gh's local-remote default.
+          # repo is honoured by host.gh.ticket (the GitHub binding: kitsoki-dev
+          # + onboarded external repos); ignored by host.local_files.ticket.
+          # "" ⇒ gh's local-remote default.
           repo: "{{ world.ticket_repo }}"
+          # root is honoured by host.local_files.ticket (tickets under an
+          # external checkout root); ignored by host.gh.ticket. "" ⇒ cwd.
+          root: "{{ world.repo_root }}"
         bind:
           ticket_results: tickets
         on_error: ticket_search
@@ -223,6 +227,7 @@ states:
               with:
                 id: "{{ slots.id ?? world.ticket_results[int(slots.n) - 1].id }}"
                 repo: "{{ world.ticket_repo }}"
+                root: "{{ world.repo_root }}"
               bind:
                 ticket_title: title
                 ticket_url:   url
@@ -369,9 +374,13 @@ states:
         with:
           query: "{{ world.ticket_query }}"
           limit: 25
-          # repo is honoured by host.gh.ticket (the kitsoki-dev GitHub binding)
-          # and ignored by host.local_files.ticket; "" ⇒ gh's local-remote default.
+          # repo is honoured by host.gh.ticket (the GitHub binding: kitsoki-dev
+          # + onboarded external repos); ignored by host.local_files.ticket.
+          # "" ⇒ gh's local-remote default.
           repo: "{{ world.ticket_repo }}"
+          # root is honoured by host.local_files.ticket (tickets under an
+          # external checkout root); ignored by host.gh.ticket. "" ⇒ cwd.
+          root: "{{ world.repo_root }}"
         bind:
           ticket_results: tickets
         on_error: ticket_search

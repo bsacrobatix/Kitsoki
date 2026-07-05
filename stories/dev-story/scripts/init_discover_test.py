@@ -123,6 +123,31 @@ prof = mod.discover(git_repo)
 check("git vcs", prof["repo_vcs"], "git")
 check("git branch", prof["repo_default_branch"], "trunk")
 check("git remote", prof["repo_remote"], "git@github.com:example/branchy.git")
+# GitHub remote ⇒ the tracker classifies as github and the owner/repo slug
+# rides discovery so apply can pin host.gh.ticket (external ticket-repo
+# passthrough — WS-A A2).
+check("git tracker", prof["tracker"], "github")
+check("git ticket_repo", prof["ticket_repo"], "example/branchy")
+
+# 9b. github_repo_slug covers the common transports; non-GitHub remotes stay "".
+for remote, want in [
+    ("https://github.com/acme/gears-rust.git", "acme/gears-rust"),
+    ("https://github.com/acme/gears-rust", "acme/gears-rust"),
+    ("git@github.com:acme/gears-rust.git", "acme/gears-rust"),
+    ("ssh://git@github.com/acme/gears-rust", "acme/gears-rust"),
+    ("https://gitlab.com/acme/gears-rust.git", ""),
+    ("https://github.com.evil.example/acme/gears-rust.git", ""),
+    ("", ""),
+]:
+    check(f"slug {remote!r}", mod.github_repo_slug(remote), want)
+
+# 9c. A non-GitHub origin keeps tracker=none / ticket_repo="" (local tickets).
+gl_repo = _mkrepo({"go.mod": "module gl\ngo 1.22\n"})
+subprocess.run(["git", "-C", str(gl_repo), "init", "--quiet", "--initial-branch=main"], check=True)
+_git(gl_repo, "remote", "add", "origin", "https://gitlab.com/example/gl.git")
+prof = mod.discover(gl_repo)
+check("gitlab tracker", prof["tracker"], "none")
+check("gitlab ticket_repo", prof["ticket_repo"], "")
 
 # 10. Associated Claude/Codex transcript history is detected without running
 # the mining pipeline or touching the real home directory.

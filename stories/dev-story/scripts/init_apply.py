@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from init_discover import github_repo_slug  # noqa: E402
 from init_transcripts import mining_recommendation  # noqa: E402
 
 
@@ -207,7 +208,9 @@ def dev_story_docs_profile(data: dict) -> dict:
             "design_durable_path": ".context/designs",
             "design_doc_filename": "",
             "design_ticket_dir": "",
-            "ticket_repo": "",
+            # GitHub tracker ⇒ feature publish mints a GitHub issue on the
+            # detected slug (same convention as kitsoki-dev); otherwise "".
+            "ticket_repo": data.get("ticket_repo") or "",
         }
     override = data.get("dev_story_docs_profile")
     if isinstance(override, dict):
@@ -221,6 +224,13 @@ def app_yaml(data: dict) -> str:
     project_id = data["project_id"]
     title = data["project_title"]
     docs = dev_story_docs_profile(data)
+    # Ticket source passthrough: a GitHub-tracked project binds the ticket
+    # interface to the gh adapter pinned on the detected `owner/repo` slug
+    # (world.ticket_repo — dev-story rooms thread it into every
+    # iface.ticket.* call as the `repo` arg). Everything else keeps
+    # local-file tickets under the checkout.
+    ticket_repo = data.get("ticket_repo") or ""
+    ticket_binding = "host.gh.ticket" if ticket_repo else "host.local_files.ticket"
     return f"""app:
   id: {project_id}-dev
   version: 0.1.0
@@ -235,6 +245,9 @@ routing:
 hosts:
   - host.local_files.ticket
   - host.gh.ticket
+  - host.gh.ticket.get
+  - host.gh.ticket.comment
+  - host.gh.ticket.transition
   - host.git
   - host.local
   - host.git_worktree
@@ -259,7 +272,7 @@ imports:
     entry: landing
     hosts: declared
     host_bindings:
-      ticket:    host.local_files.ticket
+      ticket:    {ticket_binding}
       vcs:       host.git
       ci:        host.local
       workspace: host.git_worktree
@@ -284,7 +297,9 @@ imports:
 world:
   workdir:                    {{ type: string, default: "." }}
   repo_root:                  {{ type: string, default: "." }}
-  ticket_repo:                {{ type: string, default: "" }}
+  # Non-empty ⇒ tickets are GitHub issues on this repo (host.gh.ticket
+  # binding above); "" ⇒ local files under issues/ (host.local_files.ticket).
+  ticket_repo:                {{ type: string, default: {q(ticket_repo)} }}
   judge_mode:                 {{ type: string, default: "human" }}
   judge_confidence_threshold: {{ type: float, default: 0.8 }}
 
@@ -325,6 +340,11 @@ def enrich_project_shape(data: dict, root: Path) -> None:
     data["repo_vcs"] = repo["vcs"]
     data["repo_default_branch"] = repo["default_branch"]
     data["repo_remote"] = repo["remote"]
+    # External ticket-repo passthrough: when the tracker is GitHub, the
+    # generated instance pins `iface.ticket → host.gh.ticket` on this slug
+    # (derived from the origin remote, never hardcoded). Any other tracker —
+    # or an unparseable remote — degrades honestly to local-file tickets.
+    data["ticket_repo"] = github_repo_slug(repo["remote"]) if data.get("tracker") == "github" else ""
     data["has_makefile"] = (root / "Makefile").exists()
     cargo = root / "Cargo.toml"
     data["has_cargo"] = cargo.exists()
@@ -526,6 +546,13 @@ def onboarding_profile(data: dict) -> dict:
             "status": "applied",
             "summary": "Project build/test commands are projected into dev-story bugfix gates.",
             "evidence": f"build={data.get('build_command', '')}; test={data.get('test_command', '')}",
+        })
+    if data.get("ticket_repo"):
+        customizations.append({
+            "id": "github-ticket-source",
+            "status": "applied",
+            "summary": f"Tickets bind to GitHub issues on `{data['ticket_repo']}` (iface.ticket → host.gh.ticket, pinned via world.ticket_repo).",
+            "evidence": f"remote={data.get('repo_remote', '')}",
         })
     if mining_seed_enabled(data):
         customizations.append({
@@ -761,6 +788,7 @@ conventions:
 
 tracker:
   provider: {q(data.get("tracker", "none"))}
+  repo: {q(data.get("ticket_repo", ""))}
 
 kitsoki:
   story: dev-story
@@ -768,7 +796,7 @@ kitsoki:
     id: {data["project_id"]}-dev
     path: .kitsoki/stories/{data["project_id"]}-dev/app.yaml
     bindings:
-      ticket: host.local_files.ticket
+      ticket: {"host.gh.ticket" if data.get("ticket_repo") else "host.local_files.ticket"}
       vcs: host.git
       ci: host.local
       workspace: host.git_worktree
@@ -1695,6 +1723,18 @@ def main() -> int:
         "conventions": sys.argv[8],
         "tracker": sys.argv[9] if len(sys.argv) > 9 else "none",
     }
+    # Validate + enrich the target BEFORE draft-profile defaulting so the
+    # detected repo shape (remote → ticket_repo, toolchain files) seeds the
+    # draft's dev_story_profile defaults too.
+    root = Path(data["target_path"])
+    if not root.exists() or not root.is_dir():
+        print(json.dumps({
+            "status": "target-invalid",
+            "target_path": str(root),
+            "error": "target path does not exist" if not root.exists() else "target path is not a directory",
+        }, sort_keys=True))
+        return 1
+    enrich_project_shape(data, root)
     draft_profile = None
     if len(sys.argv) > 10 and sys.argv[10].strip():
         draft_profile = json.loads(sys.argv[10])
@@ -1715,15 +1755,6 @@ def main() -> int:
         if isinstance(docs_profile, dict):
             data["dev_story_docs_profile"] = docs_profile
         ensure_draft_profile_defaults(draft_profile, data)
-    root = Path(data["target_path"])
-    if not root.exists() or not root.is_dir():
-        print(json.dumps({
-            "status": "target-invalid",
-            "target_path": str(root),
-            "error": "target path does not exist" if not root.exists() else "target path is not a directory",
-        }, sort_keys=True))
-        return 1
-    enrich_project_shape(data, root)
     makefile = root / "Makefile"
     if makefile.exists() and not data.get("check_command"):
         try:
