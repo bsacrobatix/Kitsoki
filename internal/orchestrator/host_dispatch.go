@@ -89,6 +89,31 @@ func (o *Orchestrator) writeModePosture(state app.StatePath, w world.World) (wri
 	return wm, scope
 }
 
+// applyErrorBannerSeam is the single never-silent redirect-application seam
+// (docs/proposals/never-silent-runtime.md, Task 1.1): every code path that
+// applies an on_error: redirect converges on dispatchHostCalls or
+// dispatchHostCallsDetailed, and both call this helper on the resolved
+// redirect view before returning it. That makes the banner an invariant of
+// the seam itself rather than a convention each of the orchestrator's five
+// call sites (Turn, submitDirect, ContinueTurn, OneShot, RunInitialOnEnter)
+// has to remember to re-implement — OneShot silently lacked it before this
+// fix (see TestOrchestrator_OneShot_AppliesErrorBannerOnRedirect).
+//
+// Gated on (last_error being a non-empty string AND the view not already
+// containing it), so it never fires on success and never double-shows for
+// stories whose on_error: target already renders {{ world.last_error }}
+// itself.
+func applyErrorBannerSeam(view string, w world.World) string {
+	msg, ok := w.Vars["last_error"].(string)
+	if !ok || msg == "" {
+		return view
+	}
+	if strings.Contains(view, msg) {
+		return view
+	}
+	return appendErrorBanner(view, msg)
+}
+
 func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID, calls []machine.HostInvocation, w world.World, state app.StatePath) ([]store.Event, world.World, string, app.StatePath, error) {
 	if o.hosts == nil || len(calls) == 0 {
 		return nil, w, "", "", nil
@@ -580,6 +605,7 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			}
 			errView = v
 		}
+		errView = applyErrorBannerSeam(errView, w)
 		return events, w, errView, resolvedRedirect, nil
 	}
 
@@ -996,6 +1022,7 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 			}
 			errView = v
 		}
+		errView = applyErrorBannerSeam(errView, w)
 		return summaries, events, w, errView, resolvedRedirect, nil
 	}
 
