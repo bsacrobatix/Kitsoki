@@ -383,9 +383,12 @@ surfaces: `kitsoki bug file-findings`
 (host.GitHubFileFindings) walks `findings.json` and, for every credible finding
 (kind `issue`, origin not `seeded`) without a recorded issue, assembles an
 expected/actual/reproduction body from the finding, the driver-plan scenario
-contract, and the driver journal; uploads locally-resolvable evidence as GitHub
-release assets linked from an `## Artifacts` section; files the issue with the
-kitsoki metadata block; and writes `item.github_issue` plus
+contract, and the driver journal; searches open issues for a strong title match
+before creating anything; and either comments the related finding on the
+existing issue or uploads locally-resolvable evidence as GitHub release assets
+linked from a new issue's `## Artifacts` section. Search failures fail the
+filing gate closed instead of silently creating a duplicate. In both the related
+and newly-filed paths, the command writes `item.github_issue` plus
 `findings.filing` back into `findings.json`. Native gh-agent queue state
 defaults to `<run_dir>/gh-agent-jobs.sqlite`; pass `gh_agent_db=<sqlite>` only
 to override that run-local path.

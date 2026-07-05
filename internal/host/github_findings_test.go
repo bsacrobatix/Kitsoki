@@ -131,6 +131,8 @@ func githubFindingsAPI(t *testing.T, issueBodies *[]string, uploads *int, failFi
 	issue := 100
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/search/issues":
+			writeJSON(w, map[string]any{"items": []map[string]any{}})
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/releases/tags/kitsoki-artifacts":
 			writeJSON(w, map[string]any{"upload_url": "http://" + r.Host + "/uploads/assets{?name,label}"})
 		case r.Method == http.MethodPost && r.URL.Path == "/uploads/assets":
@@ -188,6 +190,9 @@ func TestGitHubFileFindings_FilesCredibleIssues(t *testing.T) {
 	}
 	if res.Filed != 2 || res.Skipped != 0 || res.Failed != 0 {
 		t.Fatalf("counts filed/skipped/failed = %d/%d/%d, want 2/0/0", res.Filed, res.Skipped, res.Failed)
+	}
+	if res.Related != 0 {
+		t.Fatalf("related = %d, want 0", res.Related)
 	}
 	if len(res.Outcomes) != 2 {
 		t.Fatalf("outcomes = %d, want 2 (seeded + strength + blocked findings excluded)", len(res.Outcomes))
@@ -263,6 +268,113 @@ func TestGitHubFileFindings_FilesCredibleIssues(t *testing.T) {
 	filing := f["filing"].(map[string]any)
 	if filing["requested"] != true || filing["ticket_repo"] != "o/r" || filing["filed"] != float64(2) {
 		t.Errorf("filing block = %v", filing)
+	}
+}
+
+func TestGitHubFileFindings_RelatesDuplicateOpenIssue(t *testing.T) {
+	dir := writeFindingsBundle(t)
+	t.Setenv("GH_TOKEN", "test-token")
+	var searchQueries []string
+	var issueCreates int
+	var comments []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/search/issues":
+			q := r.URL.Query().Get("q")
+			searchQueries = append(searchQueries, q)
+			if strings.Contains(q, "verify") {
+				writeJSON(w, map[string]any{
+					"items": []map[string]any{{
+						"number":   900,
+						"title":    "verify gate loops forever",
+						"state":    "open",
+						"html_url": "https://github.com/o/r/issues/900",
+					}},
+				})
+				return
+			}
+			writeJSON(w, map[string]any{"items": []map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/o/r/issues/900/comments":
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			comments = append(comments, payload["body"].(string))
+			writeJSON(w, map[string]any{"html_url": "https://github.com/o/r/issues/900#issuecomment-1"})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/releases/tags/kitsoki-artifacts":
+			writeJSON(w, map[string]any{"upload_url": "http://" + r.Host + "/uploads/assets{?name,label}"})
+		case r.Method == http.MethodPost && r.URL.Path == "/uploads/assets":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/o/r/issues":
+			issueCreates++
+			writeJSON(w, map[string]any{
+				"number":   901,
+				"html_url": "https://github.com/o/r/issues/901",
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("findings filing must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
+
+	res, err := host.GitHubFileFindings(context.Background(), host.FindingsFilingInput{
+		RunDir: dir, RepoRoot: dir, Repo: "o/r", FiledBy: "qa",
+	})
+	if err != nil {
+		t.Fatalf("GitHubFileFindings: %v", err)
+	}
+	if res.Related != 1 || res.Filed != 1 || res.Failed != 0 {
+		t.Fatalf("counts filed/related/failed = %d/%d/%d, want 1/1/0", res.Filed, res.Related, res.Failed)
+	}
+	if issueCreates != 1 {
+		t.Fatalf("issue creates = %d, want 1 (second finding only)", issueCreates)
+	}
+	if len(comments) != 1 {
+		t.Fatalf("comments = %d, want 1", len(comments))
+	}
+	for _, want := range []string{
+		"<!-- kitsoki-related-product-journey-finding -->",
+		"attached the new evidence here instead of filing a duplicate",
+		"finding-1",
+		"## Related observation",
+		"The verify gate re-entered itself after the fix landed.",
+		"evidence/shot.png",
+	} {
+		if !strings.Contains(comments[0], want) {
+			t.Errorf("related comment missing %q", want)
+		}
+	}
+	if len(searchQueries) == 0 || !strings.Contains(searchQueries[0], "is:open") || !strings.Contains(searchQueries[0], "in:title") {
+		t.Fatalf("search queries = %v, want open-title search", searchQueries)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "findings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var findings map[string]any
+	if err := json.Unmarshal(data, &findings); err != nil {
+		t.Fatal(err)
+	}
+	first := findings["items"].([]any)[0].(map[string]any)
+	gi := first["github_issue"].(map[string]any)
+	if gi["url"] != "https://github.com/o/r/issues/900" || gi["relation"] != "related" {
+		t.Fatalf("related github_issue = %v", gi)
+	}
+	if gi["comment_url"] != "https://github.com/o/r/issues/900#issuecomment-1" {
+		t.Fatalf("comment_url = %v", gi["comment_url"])
+	}
+	filing := findings["filing"].(map[string]any)
+	if filing["related"] != float64(1) {
+		t.Fatalf("filing related = %v", filing)
 	}
 }
 
