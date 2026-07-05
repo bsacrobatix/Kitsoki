@@ -924,10 +924,6 @@ func loadAndValidate(b []byte, file string) (*AppDef, []error) {
 		return nil, []error{ve}
 	}
 
-	// LoadBytes skips parseAndMerge, so inject builtin meta_modes here
-	// before validation. Same rationale as the Load() path.
-	injectBuiltinMetaModes(&def)
-
 	// Resolve agent declarations (tools normalisation, external_side_effect
 	// inference, bash_profile checks). baseDir is "" in the LoadBytes path —
 	// system_prompt_path resolution is intentionally not supported here;
@@ -935,6 +931,20 @@ func loadAndValidate(b []byte, file string) (*AppDef, []error) {
 	if agentErrs := resolveAgentDecls(&def, file, ""); len(agentErrs) > 0 {
 		return nil, agentErrs
 	}
+
+	// LoadBytes skips runLoadPipeline, so run the same local macro expansions
+	// here before validation. Import folding and file-backed path resolution
+	// remain Load-only concerns.
+	if expandErrs := expandPhases(&def, file); len(expandErrs) > 0 {
+		return nil, expandErrs
+	}
+	if workbenchErrs := expandWorkbenches(&def, file); len(workbenchErrs) > 0 {
+		return nil, workbenchErrs
+	}
+
+	// LoadBytes skips parseAndMerge/runLoadPipeline, so inject builtin
+	// meta_modes here before validation. Same rationale as the Load() path.
+	injectBuiltinMetaModes(&def)
 
 	// Resolve agent plugin declarations from agent_plugins: block.
 	if pluginErrs := resolveAgentPlugins(&def, file); len(pluginErrs) > 0 {
@@ -1060,6 +1070,12 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	// instead of exploding mid-turn the first time its transition fires. See
 	// validate_exprs.go.
 	validateExprs(file, def, &errs)
+
+	// Workbench owns its synthesized request/note world keys and capture intent,
+	// but author-provided context_args can still point at arbitrary world keys.
+	// Validate those references after import/workbench expansion so namespace
+	// drift is caught at load time.
+	validateWorkbenchContextArgs(file, def, worldKeys, &errs)
 
 	// ── 7a''. view ↔ on_enter bind-target fallback advisory ───────────────────
 	// Emit a NON-FATAL warning when a state's inline view reads a world key that

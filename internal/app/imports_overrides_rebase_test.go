@@ -140,8 +140,6 @@ app: {id: child, title: child}
 root: bench
 hosts: [host.agent.task]
 world:
-  custom_request: {type: string, default: ""}
-  defaultbench_request: {type: string, default: ""}
   prior_summary: {type: string, default: ""}
 toolboxes:
   builder_toolbox:
@@ -188,6 +186,18 @@ agents:
 	if got, want := task.When, "world.sub__custom_request != ''"; got != want {
 		t.Fatalf("workbench guard = %q, want %q", got, want)
 	}
+	if got, want := task.Bind["sub__bench_note"], "submitted"; got != want {
+		t.Fatalf("workbench bind = %q, want %q", got, want)
+	}
+	if _, ok := def.World["sub__custom_request"]; !ok {
+		t.Fatalf("workbench did not synthesize prefixed custom request world key")
+	}
+	if _, ok := def.World["sub__bench_note"]; !ok {
+		t.Fatalf("workbench did not synthesize prefixed note world key")
+	}
+	if got, want := bench.DefaultIntent, "sub__bench_capture"; got != want {
+		t.Fatalf("workbench default_intent = %q, want %q", got, want)
+	}
 	ctx := task.With["context"].(map[string]any)
 	if got, want := ctx["prompt"].(string), filepath.Join(childDir, "prompts", "bench.md"); got != want {
 		t.Fatalf("workbench prompt = %q, want child story path %q", got, want)
@@ -221,6 +231,9 @@ agents:
 	if got, want := defaultTask.When, "world.sub__defaultbench_request != ''"; got != want {
 		t.Fatalf("default-slot workbench guard = %q, want %q", got, want)
 	}
+	if got, want := defaultTask.Bind["sub__defaultbench_note"], "submitted"; got != want {
+		t.Fatalf("default-slot workbench bind = %q, want %q", got, want)
+	}
 }
 
 // TestImports_ProjectKitsokiDevWorkbenchUsesPrefixedCaptureSlot guards the
@@ -249,6 +262,15 @@ func TestImports_ProjectKitsokiDevWorkbenchUsesPrefixedCaptureSlot(t *testing.T)
 	}
 	if got, want := task.When, "world.core__landing_request != ''"; got != want {
 		t.Fatalf("core.landing workbench guard = %q, want %q", got, want)
+	}
+	if got, want := task.Bind["core__landing_note"], "submitted"; got != want {
+		t.Fatalf("core.landing workbench bind = %q, want %q", got, want)
+	}
+	if got, want := landing.DefaultIntent, "core__landing_capture"; got != want {
+		t.Fatalf("core.landing default_intent = %q, want %q", got, want)
+	}
+	if _, ok := landing.On["landing_capture"]; ok {
+		t.Fatalf("core.landing unexpectedly kept unprefixed landing_capture arc")
 	}
 	ctx := task.With["context"].(map[string]any)
 	args := ctx["args"].(map[string]any)

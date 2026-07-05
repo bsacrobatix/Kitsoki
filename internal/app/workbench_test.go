@@ -10,11 +10,8 @@ import (
 )
 
 // workbench_test.go — stateless unit coverage for the `workbench:` loader
-// desugaring pass (docs/proposals/room-workbench.md Tasks 1.1 + 2.1). Uses
-// Load(testdata/...) rather than LoadBytes, matching phases_test.go's
-// convention: LoadBytes's loadAndValidate path skips expandPhases (and, for
-// the same reason, expandWorkbenches) since it has no BaseDir-rooted import
-// fold to expand ahead of.
+// desugaring pass (docs/proposals/room-workbench.md Tasks 1.1 + 2.1). Most
+// cases use Load(testdata/...) so file-backed path resolution is covered too.
 
 func loadWorkbenchTestdata(t *testing.T, name string) (*AppDef, error) {
 	t.Helper()
@@ -44,6 +41,10 @@ func TestExpandWorkbenches_DesugarsExpectedShape(t *testing.T) {
 
 			// write_mode: read_only.
 			require.Equal(t, WriteModeReadOnly, s.WriteMode)
+			require.Contains(t, def.World, tc.wantCaptureSlot)
+			require.Equal(t, "string", def.World[tc.wantCaptureSlot].Type)
+			require.Contains(t, def.World, "bench_note")
+			require.Equal(t, "object", def.World["bench_note"].Type)
 
 			// agent_off_ramp.
 			require.NotNil(t, s.AgentOffRamp)
@@ -88,6 +89,35 @@ func TestExpandWorkbenches_DesugarsExpectedShape(t *testing.T) {
 	}
 }
 
+func TestExpandWorkbenches_LoadBytesRunsMacro(t *testing.T) {
+	def, err := LoadBytes([]byte(`
+app:
+  id: wb-load-bytes
+  version: 0.1.0
+hosts: [host.agent.task]
+root: bench
+toolboxes:
+  builder_toolbox:
+    tools: [Read, Grep, Glob, Edit, Write, Bash]
+    effect: write
+states:
+  bench:
+    workbench:
+      agent: builder
+      prompt: prompts/bench.md
+      acceptance_schema: schemas/out.json
+agents:
+  builder:
+    system_prompt: "build things"
+    toolbox: builder_toolbox
+`))
+	require.NoError(t, err)
+	require.Equal(t, WriteModeReadOnly, def.States["bench"].WriteMode)
+	require.Contains(t, def.World, "bench_request")
+	require.Contains(t, def.World, "bench_note")
+	require.Contains(t, def.Intents, "bench_capture")
+}
+
 // TestExpandWorkbenches_MissingRequiredField checks each of the three
 // required fields fails to load with a clear, field-naming error.
 func TestExpandWorkbenches_MissingRequiredField(t *testing.T) {
@@ -107,6 +137,36 @@ func TestExpandWorkbenches_MissingRequiredField(t *testing.T) {
 			require.Contains(t, err.Error(), tc.want)
 		})
 	}
+}
+
+func TestExpandWorkbenches_ContextArgsMustReferenceDeclaredWorld(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "app.yaml"), `
+app:
+  id: wb-context-args
+  version: 0.1.0
+hosts: [host.agent.task]
+root: bench
+toolboxes:
+  builder_toolbox:
+    tools: [Read, Grep, Glob, Edit, Write, Bash]
+    effect: write
+states:
+  bench:
+    workbench:
+      agent: builder
+      prompt: prompts/bench.md
+      acceptance_schema: schemas/out.json
+      context_args:
+        prior: "{{ world.missing_prior }}"
+agents:
+  builder:
+    system_prompt: "build things"
+    toolbox: builder_toolbox
+`)
+	_, err := Load(filepath.Join(dir, "app.yaml"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `workbench.context_args.prior references undeclared world key "missing_prior"`)
 }
 
 // TestExpandWorkbenches_PlanContract covers the `plan: true` load-time

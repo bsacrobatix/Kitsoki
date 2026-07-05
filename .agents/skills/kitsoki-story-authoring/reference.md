@@ -538,6 +538,31 @@ swaps in the concrete dispatcher. The host registry's prefix-fallback
 means one handler at `host.git` satisfies `iface.vcs.commit`,
 `iface.vcs.push`, etc., unless you register per-op handlers.
 
+### Workbench rooms under imports
+
+Prefer the `workbench:` primitive for free-form work floors instead of
+hand-authoring `write_mode`, `agent_off_ramp`, `on_enter host.agent.task`, and
+`default_intent` in parallel. The macro owns its generated wiring:
+
+- It auto-declares the request world key (`<room>_request`, or `capture_slot`)
+  and note world key (`<room>_note`) if the story did not declare them.
+- It auto-declares the capture intent (`<room>_capture`) and installs it as the
+  room's `default_intent` unless the room already hand-authored that arc.
+- When imported, those generated world keys and intents are alias-prefixed like
+  any other child-local surface (`core__landing_request`,
+  `core__landing_note`, `core__landing_capture`). Do not manually spell parent
+  prefixes in the child story.
+- `context_args:` is the only workbench field that may point at arbitrary extra
+  world keys. Declare those extra keys normally; `kitsoki validate` rejects a
+  `context_args` reference to an undeclared key after import expansion.
+
+For import-sensitive workbench changes, validate both surfaces:
+
+```sh
+kitsoki validate stories/<story>/app.yaml
+kitsoki validate .kitsoki/stories/<project-instance>/app.yaml
+```
+
 Every importable story needs a `README.md` documenting entry state,
 exits + `requires:`, `world_in:` contract, intent export/import surface,
 `host_interfaces:` contract, and host requirements. `stories/robbery/README.md`

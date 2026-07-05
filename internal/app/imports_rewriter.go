@@ -181,9 +181,7 @@ func (rw *childRewriter) rewriteState(name string, s *State) {
 		if captureSlot == "" {
 			captureSlot = name + "_request"
 		}
-		if _, isChild := rw.childWorldKey[captureSlot]; isChild {
-			s.Workbench.CaptureSlot = rw.alias + "__" + captureSlot
-		}
+		s.Workbench.CaptureSlot = rw.alias + "__" + captureSlot
 		for k, v := range s.Workbench.ContextArgs {
 			s.Workbench.ContextArgs[k] = rw.rewriteExpr(v)
 		}
