@@ -33,6 +33,105 @@ catalog:
       - id: source-dev-story-bugfix-feature
         kind: feature_catalog
         path: features/dev-story-bugfix.yaml
+      - id: source-human-action-workflows-proposal
+        kind: proposal
+        path: docs/proposals/human-action-workflows.md
+      - id: source-kitsoki-github-agent-proposal
+        kind: proposal
+        path: docs/proposals/kitsoki-github-agent.md
+      - id: source-generic-feedback-sdk-slidey-reports-proposal
+        kind: proposal
+        path: docs/proposals/generic-feedback-sdk-slidey-reports.md
+      - id: source-top10-gpt55-dogfood-ingestion-proposal
+        kind: proposal
+        path: docs/proposals/top10-gpt55-dogfood-ingestion.md
+      - id: source-session-mining-backend-generalization-proposal
+        kind: proposal
+        path: docs/proposals/session-mining-backend-generalization.md
+      - id: source-stories-as-trainable-models-proposal
+        kind: proposal
+        path: docs/proposals/stories-as-trainable-models.md
+      - id: source-repo-history-training-loop-proposal
+        kind: proposal
+        path: docs/proposals/repo-history-training-loop.md
+      - id: source-contextual-room-routing-proposal
+        kind: proposal
+        path: docs/proposals/contextual-room-routing.md
+      - id: source-multi-hop-contextual-routing-proposal
+        kind: proposal
+        path: docs/proposals/multi-hop-contextual-routing.md
+      - id: source-ai-collaboration-proposal-proposal
+        kind: proposal
+        path: docs/proposals/ai-collaboration-proposal.md
+      - id: source-story-qa-agent-proposal
+        kind: proposal
+        path: docs/proposals/story-qa-agent.md
+      - id: source-gh-ticket-adapter-proposal
+        kind: proposal
+        path: docs/proposals/gh-ticket-adapter.md
+      - id: source-issues-migration-to-github-proposal
+        kind: proposal
+        path: docs/proposals/issues-migration-to-github.md
+      - id: source-agent-capability-model-proposal
+        kind: proposal
+        path: docs/proposals/agent-capability-model.md
+      - id: source-artifact-format-proposal
+        kind: proposal
+        path: docs/proposals/artifact-format.md
+      - id: source-auto-advance-states-proposal-proposal
+        kind: proposal
+        path: docs/proposals/auto-advance-states-proposal.md
+      - id: source-claude-code-sessions-proposal-proposal
+        kind: proposal
+        path: docs/proposals/claude-code-sessions-proposal.md
+      - id: source-continue-mode-proposal-proposal
+        kind: proposal
+        path: docs/proposals/continue-mode-proposal.md
+      - id: source-execution-modes-and-gate-deciders-proposal
+        kind: proposal
+        path: docs/proposals/execution-modes-and-gate-deciders.md
+      - id: source-lifecycle-taxonomy-proposal
+        kind: proposal
+        path: docs/proposals/lifecycle-taxonomy.md
+      - id: source-local-model-agent-proposal
+        kind: proposal
+        path: docs/proposals/local-model-agent.md
+      - id: source-agent-contract-eval-proposal
+        kind: proposal
+        path: docs/proposals/agent-contract-eval.md
+      - id: source-runstatus-proposal-proposal
+        kind: proposal
+        path: docs/proposals/runstatus-proposal.md
+      - id: source-runstatus-trace-fidelity-proposal
+        kind: proposal
+        path: docs/proposals/runstatus-trace-fidelity.md
+      - id: source-trace-introspection-proposal
+        kind: proposal
+        path: docs/proposals/trace-introspection.md
+      - id: source-semantic-routing-proposal-proposal
+        kind: proposal
+        path: docs/proposals/semantic-routing-proposal.md
+      - id: source-embeddings-proposal
+        kind: proposal
+        path: docs/proposals/embeddings.md
+      - id: source-view-rendering-readability-proposal
+        kind: proposal
+        path: docs/proposals/view-rendering-readability.md
+      - id: source-mockup-video-studio-proposal
+        kind: proposal
+        path: docs/proposals/mockup-video-studio.md
+      - id: source-work-decomposition-proposal
+        kind: proposal
+        path: docs/proposals/work-decomposition.md
+      - id: source-hybrid-session-driving-proposal
+        kind: proposal
+        path: docs/proposals/hybrid-session-driving.md
+      - id: source-line-messenger-channel-proposal
+        kind: proposal
+        path: docs/proposals/line-messenger-channel.md
+      - id: source-review-externally-proposal
+        kind: proposal
+        path: docs/proposals/review-externally.md
       - id: source-product-site-docs
         kind: docs
         path: docs/site/README.md
@@ -6829,3 +6928,598 @@ nodes:
       governed_by:
         - req-dev-story-bugfix-end-to-end
       changed_by: []
+
+  - schema: graph/proposal/v0
+    id: proposal-human-action-workflows
+    title: Human action workflows
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/human-action-workflows.md
+    status_line: Draft v1. No slices implemented yet.
+    index_blurb: 'Make human-dependent work a first-class workflow executor beside agents: `host.human.*` verbs create/await/complete person-owned tasks through a pluggable backend, with GitHub Issues as v1, trace/replay/cassette support, a roadmap/portfolio taxonomy, and mixed human/agent work decomposition. Six slices: runtime contract ([`human-action-runtime.md`](human-action-runtime.md)), GitHub backend ([`github-human-action-backend.md`](github-human-action-backend.md)), tracing + replay ([`human-action-tracing.md`](human-action-tracing.md)), roadmap and portfolio work ([`roadmap-portfolio-work.md`](roadmap-portfolio-work.md)), task-scoped assistance rooms ([`human-task-assistance-rooms.md`](human-task-assistance-rooms.md)), and decomposition adoption ([`human-work-decomposition.md`](human-work-decomposition.md)). Nothing implemented yet.'
+    sources:
+      - source-human-action-workflows-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-kitsoki-github-agent
+    title: Kitsoki github agent
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/kitsoki-github-agent.md
+    status_line: Draft v1. No slices implemented yet.
+    index_blurb: '`@kitsoki` in a GitHub issue or PR dispatches a kitsoki run, observable + driveable through a public trace/artifact web service, with kitsoki reporting progress back to the thread. Six slices: GitHub ingress + comment substrate ([`gh-event-ingress.md`](gh-event-ingress.md), runtime), job dispatch ([`gh-job-dispatch.md`](gh-job-dispatch.md), runtime), the PR-autopilot story ([`pr-autopilot-story.md`](pr-autopilot-story.md), story), a persistent trace+artifact service ([`trace-artifact-service.md`](trace-artifact-service.md), tracing), the web viewer + operator-drive surface ([`gh-web-operator-viewer.md`](gh-web-operator-viewer.md), tui), and the tour-driven demo + slidey composite ([`kitsoki-github-demo.md`](kitsoki-github-demo.md)). Round-1 decisions: poll ingest, Postgres state + filesystem artifacts, Postgres job locking, owner-only driving, GitHub-native auth (App token + OAuth). Nothing implemented yet.'
+    sources:
+      - source-kitsoki-github-agent-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-generic-feedback-sdk-slidey-reports
+    title: Generic feedback sdk slidey reports
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/generic-feedback-sdk-slidey-reports.md
+    status_line: Draft v1. No slices implemented yet.
+    index_blurb: 'Turn Kitsoki''s built-in web bug reporting, rrweb capture, spatial oracle, and Slidey media substrate into a framework-neutral browser feedback SDK. The proposal centers privacy-by-design: data avoidance first, reviewed/redacted bundles as the remote boundary, a mandatory privacy manifest, chromeless UI, plugin-contributed context, a Slidey narrative report deck, and a generic sink contract for the parallel GitHub agent.'
+    sources:
+      - source-generic-feedback-sdk-slidey-reports-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-top10-gpt55-dogfood-ingestion
+    title: Top10 gpt55 dogfood ingestion
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/top10-gpt55-dogfood-ingestion.md
+    status_line: Draft v1. `stories/punch-list/` shipped; the top-10 manifest now lives at `stories/punch-list/testdata/top10_gpt55.yaml`; item runs remain.
+    index_blurb: 'Drive the current top-10 backlog through Kitsoki Studio MCP with the right story entrypoint per item, real human-like operator turns, trace-backed findings, and a strict implementation policy: live implementation sessions use `profile: codex-native` / `gpt-5.5`, not Claude. This now consumes the generic [`punch-list`](../stories/punch-list.md) story rather than a top-10-specific runner.'
+    sources:
+      - source-top10-gpt55-dogfood-ingestion-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-session-mining-backend-generalization
+    title: Session mining backend generalization
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/session-mining-backend-generalization.md
+    status_line: Draft v1, partially implemented. The initial canonical corpus
+    index_blurb: 'Generalize session mining from Claude Code-shaped ingestion into a backend-normal corpus for Claude Code, Codex, kitsoki traces, and imported JSONL. The shared substrate provides source adapters, canonical sessions, evidence indexes, reusable analysis drivers, route-feedback mining, and no-LLM fixture seams for examples, scenarios, story coverage, and progressive determinism. **Initial corpus + trace-pattern substrate is partially implemented** in `internal/mining`; pipeline/source-registry integration remains. One focused child proposal is split out:'
+    sources:
+      - source-session-mining-backend-generalization-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-stories-as-trainable-models
+    title: Stories as trainable models
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/stories-as-trainable-models.md
+    status_line: Draft v1. No slices implemented yet.
+    index_blurb: 'Reframe a kitsoki story as a quasi-deterministic, **trainable** model of a domain: forward pass = running a session, training set = the event log, but the "weights" being adjusted are the story''s scripts/prompts/workflow graph, not a tensor. Subsumes the **training half** of the [4-layer self-improvement model](../competitive-analysis/market-research.md): L1–L2 (validate+nudge, recycle-to-prior-step) stay as the *adaptive forward pass*, L3–L4 (self-patch, cross-run mining) become the trainable model — with the existing [`tools/session-mining/`](../../tools/session-mining/README.md) ladder as the L4 substrate. Three slices (0/3): the **loss** ([`reward-function.md`](reward-function.md), runtime), the **gradient** via failure→success credit assignment ([`credit-assignment.md`](credit-assignment.md), tracing), and the **optimizer step + validation gate** ([`training-loop.md`](training-loop.md), runtime+story).'
+    sources:
+      - source-stories-as-trainable-models-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-repo-history-training-loop
+    title: Repo history training loop
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/repo-history-training-loop.md
+    status_line: Draft v3. Feasibility-reviewed against the current mining,
+    index_blurb: 'Treat repository history as training material for Kitsoki''s own workflows: onboarding, bug fixing, feature spec and design, feature implementation, and dev lifecycle / SDLC. Feasibility-reviewed against the existing `internal/mining`, session-mining, bugfix-bakeoff, `internal/agenteval`, and model-harness/reporting substrates: the plan is to generalize those surfaces into a curated history corpus, lane-neutral task/oracle manifests, traceable precedent selection, and a gated autonomous runner. Nothing implemented yet; slices are sketched but not cut.'
+    sources:
+      - source-repo-history-training-loop-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-contextual-room-routing
+    title: Contextual room routing
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    path: docs/proposals/contextual-room-routing.md
+    status_line: Mostly shipped. Runtime slices 1–4 shipped (20bb2911, 9311197a,
+    index_blurb: 'make the final LLM routing tier classify unmatched room input as exactly one of: explicit intent with slots, read-only help, in-room free-form request, or room-scoped meta edit. Adds persistent room chat lanes, route receipts, and one-decision rewind so operators can correct a bad routing choice. Builds on the in-progress ad-hoc structured-plan workbench and existing meta modes. Runtime slices shipped; web receipt/rewind plumbing and intent-class rewind exist. Remaining work is switch-route ergonomics, TUI parity for receipt/rewind controls, and optional extra flow fixtures.'
+    sources:
+      - source-contextual-room-routing-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-multi-hop-contextual-routing
+    title: Multi hop contextual routing
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    path: docs/proposals/multi-hop-contextual-routing.md
+    status_line: Draft v1. Nothing implemented yet for multi-hop route plans.
+    index_blurb: 'extend the contextual routing tier with an opt-in `route_plan` verdict for bounded cross-room commands: leave the current room, execute a validated intent in another room, optionally return, and surface one plan receipt/rewind target so bad-route correction can restore the conversation to the pre-plan state and choose a different interpretation. Multi-hop `route_plan` itself is not implemented; base contextual-routing substrate has advanced since this draft.'
+    sources:
+      - source-multi-hop-contextual-routing-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-ai-collaboration-proposal
+    title: Ai collaboration proposal
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/ai-collaboration-proposal.md
+    status_line: v1 trimmed. The original draft proposed five surfaces;
+    index_blurb: one remaining AI-collaborator surface (per-state `loading_view`). Three v1 surfaces shipped (`docs/architecture/developer-guide.md` §6); the scripted `kitsoki drive` (§1) is superseded by the [`story-qa-agent`](story-qa-agent.md) epic, which makes it interactive.
+    sources:
+      - source-ai-collaboration-proposal-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-story-qa-agent
+    title: Story qa agent
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/story-qa-agent.md
+    status_line: 'Draft v1. Re-scoped: the frame composer, `kitsoki drive`, and'
+    index_blurb: '(re-scoped). A Claude agent that QAs a story by *using* it: given a persona + scenario it walks the story turn-by-turn through the **MCP studio** tools, reading the exact human-fidelity screen (and a screenshot), and reports view/navigation/intuitiveness/objective findings. Its frame composer / drive / shot / web-screenshot substrate **shipped** as the [`mcp-studio` epic](../architecture/mcp-studio.md) (the `kitsoki mcp` studio server + `kitsoki drive`/`shot`/`web-shot`). A local skill scaffold and `tools/story-qa/run.py` wrapper now exist; the remaining slice is the live persona/scenario drive loop:'
+    sources:
+      - source-story-qa-agent-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-gh-ticket-adapter
+    title: Gh ticket adapter
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    path: docs/proposals/gh-ticket-adapter.md
+    status_line: Draft v1. Nothing implemented yet. Deferred pending real GitHub integration demand.
+    index_blurb: a `gh`-backed glue provider satisfying the `ticket` interface against GitHub issues. Part of the external-project-targeting epic (profile + instance now shipped and documented in [dev-story README](../../stories/dev-story/README.md#doc-profile--targeting-an-external-project)); this adapter is deferred pending real GitHub integration demand.
+    sources:
+      - source-gh-ticket-adapter-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-issues-migration-to-github
+    title: Issues migration to github
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    path: docs/proposals/issues-migration-to-github.md
+    status_line: '**Shipped except the real bulk-migration run.** Done:'
+    index_blurb: the GitHub Issues tracker substrate is shipped and documented in [`hosts.md → host.gh.ticket`](../architecture/hosts.md#hostghticket--github-issues-backed-tracker); the only remaining step is the maintainer-triggered real bulk migration of the frozen `issues/` archive onto `constructorfabric/Kitsoki`.
+    sources:
+      - source-issues-migration-to-github-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-agent-capability-model
+    title: Agent capability model
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/agent-capability-model.md
+    status_line: Draft v1. Slices 1 and 2 have shipped into narrative docs and
+    index_blurb: 'One capability model governing **every** agent (decide / ask / converse / task), unifying three ad-hoc restrictions and an overloaded boolean. Four cooperating layers — **toolbox** (a named, reusable tool grant) → **effect class** (`pure | read | write | external` + `deterministic`) → **layered enforcement** (tool allowlist for pure/read; secure runtime boundary for write/external) → **conformance** (the trace proves the box held). The effect taxonomy and toolbox/tool-layer enforcement slices have shipped; secure runtime confinement and offline conformance remain proposed. Decomposed into three runtime slices + a conformance check:'
+    sources:
+      - source-agent-capability-model-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-artifact-format
+    title: Artifact format
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/artifact-format.md
+    status_line: Draft v1. Nothing implemented yet.
+    index_blurb: a schema-verified markdown-with-frontmatter artifact format with **lossless** round-trip via `yaml.Node`, consolidating three hand-rolled artifact writers (`localfiles_ticket.go`, `cypilot_artifacts.go`, `append_file_transport.go`) that today reorder frontmatter and skip validation. Supports markdown as block-scalar fields (data-primary docs). Nothing implemented yet; no new deps.
+    sources:
+      - source-artifact-format-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-auto-advance-states-proposal
+    title: Auto advance states proposal
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/auto-advance-states-proposal.md
+    status_line: Not implemented. Motivated by the cyber-repo bugfix
+    index_blurb: 'auto-fire `done` after `on_enter` chains complete, with `wait: true` to opt out. Nothing implemented yet.'
+    sources:
+      - source-auto-advance-states-proposal-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-claude-code-sessions-proposal
+    title: Claude code sessions proposal
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/claude-code-sessions-proposal.md
+    status_line: Phases 0/A/B/C shipped; D/E/F/G partial or deferred; H
+    index_blurb: chats PTY mode, input queue, and multi-transport drive. Phases 0/A/B/C shipped (see `docs/stories/meta-mode.md` §5 and `docs/architecture/hosts.md` for the user-facing surface); D/E/F/G partial or deferred; H not started. The status table at the top of the proposal is the source of truth for what's wired today.
+    sources:
+      - source-claude-code-sessions-proposal-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-continue-mode-proposal
+    title: Continue mode proposal
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/continue-mode-proposal.md
+    status_line: Draft v3. Spike (R1-R9) completed; call-site enumeration
+    index_blurb: durable sessions via a unified trace journal (`kitsoki run --continue`). Phase A + Wave 2 shipped (`internal/journal/`, `--continue`, session verbs); Wave 3 dual-write mostly landed, with the metamode proposal ledger entries and `recovery_state` still TODO.
+    sources:
+      - source-continue-mode-proposal-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-execution-modes-and-gate-deciders
+    title: Execution modes and gate deciders
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/execution-modes-and-gate-deciders.md
+    status_line: Partially implemented (2026-05-29). The engine core + the
+    index_blurb: one-shot / staged execution modes; intent gates resolved by a per-state decider. Engine core, CLI/flow surface, and docs-review migration shipped; pre-bind staging and the bugfix-story migration remain (§8).
+    sources:
+      - source-execution-modes-and-gate-deciders-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-lifecycle-taxonomy
+    title: Lifecycle taxonomy
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    path: docs/proposals/lifecycle-taxonomy.md
+    status_line: Draft v1. Initial design for review — nothing implemented yet.
+    index_blurb: '(slice 1 of [`project-object-graph.md`](project-object-graph.md)). A YAML domain model for the early project lifecycle: composable **Features** (media / help / tutorials / acceptance criteria at every level) → **Proposals** (the spine as data) → **Plans** (tasks with expected files + per-file change descriptions) → **TestSpecs** (scenarios tracing back to feature acceptance criteria, mapped to harness + fixture + evidence). Pure-YAML containers with pinned JSON Schemas, markdown embedded inline or via a generalized `!include`, and a deterministic two-layer validation (per-file schema + catalog lint: DAGs, refs, coverage). Initial design for review; nothing implemented yet.'
+    sources:
+      - source-lifecycle-taxonomy-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-local-model-agent
+    title: Local model agent
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/local-model-agent.md
+    status_line: Largely shipped — trimmed to the unfinished tail. The engine,
+    index_blurb: a `builtin.local_llm` agent plugin that drives a local llama.cpp `llama-server` sidecar over OpenAI-compatible HTTP, with grammar-forced schema-valid output, for routing and small `decide` verdicts. Nothing implemented yet; spike (§0) required before committing.
+    sources:
+      - source-local-model-agent-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-agent-contract-eval
+    title: Agent contract eval
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/agent-contract-eval.md
+    status_line: Partially shipped. The offline eval substrate, `kitsoki eval`
+    index_blurb: 'task-adherence benchmark for bounded agent call sites: offline contract/toolbox conformance, gated live model matrices across Claude, Codex, local, and synthetic profiles, evidence-based `profile/model/effort` pinning, and TUI/web surfaces that show why a task is using a given model. Produces the measurement `local-model-agent.md` consumes. Offline eval dataset/report loading, `kitsoki eval` list/show/run validation, `selection:` metadata, and the `pr-refinement` merge-judge pilot are implemented; live matrix execution, strict cassette conformance, runtime pin selection, and full TUI/web views remain.'
+    sources:
+      - source-agent-contract-eval-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-runstatus-proposal
+    title: Runstatus proposal
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/runstatus-proposal.md
+    status_line: Phases 1 and 3 shipped; only Phase 2 (frontend polish)
+    index_blurb: 'Vue 3 web UI for inspecting a run: clickable state diagram + trace timeline + detail drawer. Phase 1 (artifact mode) ~90% shipped; the single-file HTML export, timeline virtualization, and live JSON-RPC + SSE mode remain.'
+    sources:
+      - source-runstatus-proposal-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-runstatus-trace-fidelity
+    title: Runstatus trace fidelity
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/runstatus-trace-fidelity.md
+    status_line: Producer (§1) and consumer (§2) shipped; fixtures migrated
+    index_blurb: make the bugfix trace canonical (`agent.call.*`, a distinct `machine.say` kind, `turn.input`) and rewire runstatus so each meaningful aspect renders once per column. Producer half shipped and documented in `docs/tracing/trace-format.md`; the runstatus consumer rewrite and fixture migration remain.
+    sources:
+      - source-runstatus-trace-fidelity-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-trace-introspection
+    title: Trace introspection
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/trace-introspection.md
+    status_line: Draft v1. No slices implemented yet.
+    index_blurb: 'Enrich `runstatus` trace viewing (inspired by a Langfuse comparison) while leaning into the decision-provenance moat: co-equal view modes, decision-first detail, recorded decide alternatives, human annotation, and single-call operator replay. Observation kinds shipped; remaining slices:'
+    sources:
+      - source-trace-introspection-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-semantic-routing-proposal
+    title: Semantic routing proposal
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/semantic-routing-proposal.md
+    status_line: v1 shipped. All seven phases plus the TUI route badges
+    index_blurb: v1 shipped. The trimmed proposal keeps only open questions and the Oregon Trail calibration history. The user-facing reference for the shipped surface lives at [`../architecture/semantic-routing.md`](../architecture/semantic-routing.md).
+    sources:
+      - source-semantic-routing-proposal-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-embeddings
+    title: Embeddings
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/embeddings.md
+    status_line: v1 — all 3 slices shipped. See [docs/architecture/embeddings.md](../architecture/embeddings.md) (substrate + agent.search) and [docs/architecture/semantic-routing.md](../architecture/semantic-routing.md) (routing tier).
+    index_blurb: All 3 slices shipped. See [`docs/architecture/embeddings.md`](../architecture/embeddings.md) (substrate + `agent.search`) and [`docs/architecture/semantic-routing.md`](../architecture/semantic-routing.md) §6 (routing tier). Child slice files deleted.
+    sources:
+      - source-embeddings-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-view-rendering-readability
+    title: View rendering readability
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/view-rendering-readability.md
+    status_line: Partially implemented. Typed-view rendering is widely wired through
+    index_blurb: 'Make the typed element tree the single canonical view representation so prose reads cleanly across the TUI and the web, and give authors a `kitsoki view` proofing command + lint. Partially implemented: typed views are wired broadly through TUI/web, but some legacy/template paths still fall back to the preformatted string and there is no `kitsoki view` command yet. Decomposed into four slices:'
+    sources:
+      - source-view-rendering-readability-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-mockup-video-studio
+    title: Mockup video studio
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/mockup-video-studio.md
+    status_line: Implemented. All 3 slices shipped; narrative docs landed and the
+    index_blurb: 'Author UI design-proposal walkthrough videos as a recorded process **and** improve them in the web UI: flag a scene or time-range, grab the frame, instruct the LLM, watch the video re-render. Builds on the shipped media artifact seam. Nothing implemented yet; decomposed into three slices:'
+    sources:
+      - source-mockup-video-studio-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-work-decomposition
+    title: Work decomposition
+    status: draft
+    visibility: internal
+    proposal_kind: story
+    path: docs/proposals/work-decomposition.md
+    status_line: Partially superseded. The proposed `stories/decompose/` import has
+    index_blurb: 'A new `stories/decompose/` sub-story imported into dev-story: hand it an accepted proposal (or epic + children) and an interactive discovery conversation distils scope, an `agent.decide` emits a brief manifest the MCP submit validator structurally enforces, a deterministic `host.run` renders + lints it to `decomposition.yaml` (acyclic DAG, coverage), an adversarial `agent.decide` judges feasibility + completeness, and a coordination board dispatches each brief into the `impl` import one at a time with a human gate. Partially superseded: `stories/decompose/` has not shipped, but the work-decomposition skill and `stories/deliver/` cover a simpler validated-manifest path that hands briefs to `stories/fleet/`.'
+    sources:
+      - source-work-decomposition-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-hybrid-session-driving
+    title: Hybrid session driving
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    path: docs/proposals/hybrid-session-driving.md
+    status_line: Mostly implemented. The drive-vs-transport model, operator
+    index_blurb: 'Let `kitsoki web` drive a live session (e.g. `stories/bugfix`) from the browser while Jira/Bitbucket keep receiving artifacts write-only. Decouples *driving* (inbound intents) from *transport* (output-only): the runstatus server stamps an operator identity into `last_reply_author` (so ACL-guarded `continue` stops silently no-opping), attaches to the persisted session store loop.py uses (so one ticket can be co-driven), and gains an opt-in inbound poll→intent bridge for Jira/PR replies. All opt-in; loop.py''s existing path unchanged. Nothing implemented yet.'
+    sources:
+      - source-hybrid-session-driving-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-line-messenger-channel
+    title: Line messenger channel
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/line-messenger-channel.md
+    status_line: Draft v1. No slices implemented yet.
+    index_blurb: 'Make LINE a first-class **customer-interaction channel** with kitsoki as the engine and **web presence**: a merchant authors a story once, provisions a LINE Official Account from the web console, and every customer who messages it gets their own session — the first inbound event *creates* one keyed `line:<channel>:<src>` (the multi-customer model the engine lacks today), and customer free text routes through the existing `internal/semroute`. Builds on the inbound bridge + transport registry + external-key store + operator-ask; the turn loop is unchanged. Nothing implemented yet; decomposed into four slices:'
+    sources:
+      - source-line-messenger-channel-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-review-externally
+    title: Review externally
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/review-externally.md
+    status_line: 'In progress. **Slice #2 (tui-md-links) shipped** — OSC 8 `.md`'
+    index_blurb: 'Review kitsoki''s edits where you actually read them — the IDE or the system diff viewer, not a cramped terminal pane. **Slice #2 shipped** (OSC 8 `.md` links + `/open`, now in `docs/tui/README.md`); **slice #1 Phase A shipped** (`host.diff.open`: connected-IDE accept/reject verdict capture + view-only system-difftool fallback, in `docs/architecture/hosts.md`), with its Phase B turn-suspend gate and a story adoption still remaining.'
+    sources:
+      - source-review-externally-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
