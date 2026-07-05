@@ -83,6 +83,12 @@ It is intentionally no-LLM:
   each item includes the `stories/prd` `start` handoff, upstream evidence paths,
   and the persona lens so usability gaps can enter the PRD/design path instead
   of being mistaken for bugfix queue work.
+- `autonomous_watchdog` calls `tools/product-journey/run.py
+  --autonomous-marathon-watchdog --json-output` to compare the latest
+  `driver-journal.json` heartbeat with the marathon control policy. Stale runs
+  write `autonomous-marathon-watchdog.json/md` and bind
+  `autonomous_watchdog_blocked` into the story so the loop stops before spend
+  with a human-reviewable blocker artifact.
 - `seed_demo` calls `tools/product-journey/run.py --seed-demo-evidence
   --json-output` to populate a no-LLM review bundle.
 - `handoff` calls `tools/product-journey/run.py --driver-handoff --json-output`
