@@ -7,7 +7,7 @@
  * Reads the same ObjectGraph the canvas renders (runstatus.objectgraph.load)
  * so both projections share one fetch and one selection.
  */
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import type { ObjectGraph, ObjectGraphNode } from "../../data/objectgraph.js";
 import {
   edgeTargetsByKind,
@@ -36,6 +36,13 @@ const selectedTypeId = ref("all");
 const query = ref("");
 const draftFields = ref({ title: "", tagline: "", summary: "" });
 const requestStarted = ref(false);
+const relationshipGraphExpanded = ref(false);
+const relationshipGraphModalEl = ref<HTMLDivElement>();
+
+watch(relationshipGraphExpanded, (expanded) => {
+  if (!expanded) return;
+  nextTick(() => relationshipGraphModalEl.value?.focus());
+});
 
 function currentNode(): ObjectGraphNode {
   return props.graph.nodes.find((n) => n.id === props.selectedId) ?? props.graph.nodes[0];
@@ -442,7 +449,15 @@ function selectNode(id: string) {
         </section>
 
         <section class="relationship-graph" data-testid="relationship-graph">
-          <h3>Relationships, visualized</h3>
+          <div class="relationship-graph__head">
+            <h3>Relationships, visualized</h3>
+            <button
+              type="button"
+              class="relationship-graph__expand"
+              data-testid="relationship-graph-expand"
+              @click="relationshipGraphExpanded = true"
+            >Expand ⤢</button>
+          </div>
           <GraphView
             :graph="relationshipGraph"
             :focus-id="selectedNode.id"
@@ -488,6 +503,33 @@ function selectNode(id: string) {
         </section>
       </section>
     </section>
+
+    <div
+      v-if="relationshipGraphExpanded && selectedNode"
+      ref="relationshipGraphModalEl"
+      class="relationship-graph-modal__backdrop"
+      data-testid="relationship-graph-modal"
+      tabindex="-1"
+      @click.self="relationshipGraphExpanded = false"
+      @keydown.esc="relationshipGraphExpanded = false"
+    >
+      <div class="relationship-graph-modal">
+        <div class="relationship-graph-modal__bar">
+          <span>Relationships, visualized — {{ selectedNode.label }}</span>
+          <button
+            type="button"
+            data-testid="relationship-graph-modal-close"
+            @click="relationshipGraphExpanded = false"
+          >Close</button>
+        </div>
+        <GraphView
+          :graph="relationshipGraph"
+          :focus-id="selectedNode.id"
+          class="relationship-graph-modal__view"
+          @update:focus-id="selectNode"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
