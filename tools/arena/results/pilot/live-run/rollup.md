@@ -1,12 +1,12 @@
 # Arena rollup
 
-- cells: **12**  · win-rate: **0.5**  · infra failures: 0
+- cells: **12**  · win-rate: **0.5**  · infra failures: 1
 
 ## By variant
 
 | variant | n | win-rate | avg cost | verdicts |
 |---|---|---|---|---|
-| kitsoki-codex-native | 3 | 1.0 | $0.4131 | {'solved': 3} |
+| kitsoki-codex-native | 3 | 1.0 | $0.7954 | {'solved': 3} |
 | kitsoki-synthetic-claude | 3 | 0.0 | $0.0000 | {'failed': 3} |
 | single-briefed-codex-native | 3 | 1.0 | $0.4762 | {'solved': 3} |
 | single-briefed-synthetic-claude | 3 | 0.0 | $0.0000 | {'failed': 3} |

@@ -10,12 +10,12 @@
   "health": "model:result",
   "job_type": "paired-task",
   "metrics": {
-    "cost_usd": 0.477878,
+    "cost_usd": 0.443556,
     "host": "local",
-    "tokens": 84956,
-    "wall_s": 201.758
+    "tokens": 931778,
+    "wall_s": 366.657
   },
-  "notes": "codex exit=0: Implemented the issue 336 fix.; [bench] query-string/qs1 oracle=pass suite=True -> solved; cost_usd=0.477878 (blended estimate, not exact)",
+  "notes": "kitsoki bugfix pipeline via drive.sh+MCP; cost_usd=0.443556 (cache-aware estimate over REAL trace usage: 205237 fresh input + 716800 cache-read input + 9741 output tokens; subscription auth reports no metered cost); oracle solved",
   "target_id": "cost-bench-pilot",
   "trace_ref": "",
   "variant_id": "kitsoki-codex-native",
