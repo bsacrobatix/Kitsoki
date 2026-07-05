@@ -66,6 +66,9 @@ class DockerBackend:
             "ARENA_PAIRED_TASK_ENABLE_CODEX",
             "ARENA_CODEX_TIMEOUT_S",
             "ARENA_PAIRED_TASK_WORK_ROOT",
+            "ARENA_PAIRED_TASK_ORCHESTRATOR_MODEL",
+            "ARENA_PAIRED_TASK_ORCHESTRATOR_BACKEND",
+            "CLAUDE_CODE_OAUTH_TOKEN",
         ):
             value = os.environ.get(name)
             if value is not None:
