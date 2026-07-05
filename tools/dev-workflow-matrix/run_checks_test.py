@@ -164,6 +164,27 @@ def main():
     names = [rc.verdict_filename(c) for c in rc.CHECKS]
     _check("declared checks have unique verdict filenames", len(names) == len(set(names)))
 
+    # 12. the dev-story routing check (dwf3 routing triage follow-through) is
+    # declared, scoped to `kitsoki test routing` (not `test intents` — the
+    # Mode 0 no-LLM-tier runner, internal/testrunner/routing.go), and its
+    # verdict maps the same pass/fail-tail shape a flow suite does (`test
+    # routing`'s `PrintRoutingReport` ends the same way `test flows` does:
+    # exit 0 on every fixture passing, exit 1 with a summary line otherwise).
+    routing_checks = [c for c in rc.CHECKS if c.workflow == "routing"]
+    _check("a routing CheckDef is declared", len(routing_checks) == 1)
+    routing_check = routing_checks[0]
+    _check("routing check runs `test routing`, not `test intents`", "routing" in routing_check.command)
+    _check("routing check targets dev-story", "stories/dev-story/app.yaml" in routing_check.command)
+    _check("routing check is check_type replay", routing_check.check_type == "replay")
+
+    payload = rc.run_check(routing_check, Path("."), lambda cmd, cwd: fake_proc(0))
+    _check("passing routing suite -> solved", payload["verdict"] == "solved")
+    payload = rc.run_check(
+        routing_check, Path("."), lambda cmd, cwd: fake_proc(1, stdout="Summary: 38/39 fixtures pass\n")
+    )
+    _check("failing routing suite -> failed", payload["verdict"] == "failed")
+    _check("failure tail (fixture summary) surfaces in summary", "38/39 fixtures pass" in payload["summary"])
+
     print("PASS")
 
 

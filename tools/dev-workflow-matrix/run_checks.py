@@ -20,12 +20,14 @@ today"): the four story flow suites the plan names directly — `prd`,
 `bugfix`, `dev-story` (covers onboarding), and `deliver` (the
 decompose→implement chain per WS-B) — plus one product-journey
 `--driver-replay-smoke` pass as a first `journey-verdict`
-(experience-class) pilot. Flow counts move fast; run the suite for the
-current number rather than trusting any figure written here. `go run
-./cmd/kitsoki test routing` now exists (landed with WS-C C2), but its
-default glob also picks up legacy landing_freeform/landing_proposal
-fixtures in dev-story that fail pre-existing — add a routing check scoped
-to the C2 fixture files (--intents) once those legacy fixtures are triaged.
+(experience-class) pilot, plus a `routing` check running the dev-story
+no-LLM routing-tier suite (`kitsoki test routing`). The legacy
+landing_freeform/landing_proposal fixtures this check exercises were
+triaged in dwf3 (.context/dwf3-routing-triage.md) — every fixture in
+`stories/dev-story/intents/*.yaml` now passes `kitsoki test routing
+stories/dev-story/app.yaml` cleanly, so this check has no pending-triage
+caveat left. Flow counts move fast; run the suite for the current number
+rather than trusting any figure written here.
 
 Usage:
   python3 tools/dev-workflow-matrix/run_checks.py                      # run all, write verdicts
@@ -95,6 +97,14 @@ CHECKS: list[CheckDef] = [
         check_type="replay",
         command=["go", "run", "./cmd/kitsoki", "test", "flows", "stories/deliver/app.yaml"],
         summary="deliver flow suite (11 flows; WS-B B1 decomposition chain candidate)",
+    ),
+    CheckDef(
+        workflow="routing",
+        surface="tui",
+        repo="kitsoki-dev",
+        check_type="replay",
+        command=["go", "run", "./cmd/kitsoki", "test", "routing", "stories/dev-story/app.yaml"],
+        summary="dev-story no-LLM routing-tier suite (landing_freeform + landing_proposal_routing + workflow_core5_routing; triaged in dwf3)",
     ),
     CheckDef(
         workflow="fix-bug",

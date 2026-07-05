@@ -859,7 +859,21 @@ intents:
   go_idea:
     title: "New Idea"
     description: "Start or amend an ad hoc design/proposal — draft, review, clarify decisions, resolve proposal questions, or make a proposal ready for human review. No ticket required."
-    examples: ["idea", "new idea", "propose", "proposal", "ad hoc", "draft proposal", "i have an idea", "work on a proposal", "new proposal", "write a proposal", "design proposal", "start a design", "use the design workflow", "amend existing proposal", "proposal ready for review", "human review proposal", "resolve proposal questions", "tighten proposal narration", "audit this proposal", "fold decisions back into the design", "make this proposal terse and clear"]
+    # NOTE (dwf3 routing triage): bare "propose" / "proposal" were removed.
+    # Either single-word stem {propos} whole-utterance-matches ANY input
+    # that merely mentions "the proposal" in passing — including requests
+    # that are actually about something else (tests, docs, an investigation)
+    # and correctly belong elsewhere (landing_proposal_routing.yaml
+    # `work-test-not-proposal`: "add tests for the proposal publish script"
+    # was misrouted here at 0.90 confidence via the bare "proposal" hit,
+    # with no competing tier to disambiguate since it's a unique match, not
+    # a tie). The richer multi-word examples below cover every "start/amend/
+    # review a proposal" phrasing already exercised by fixtures; the one
+    # near-miss that legitimately needed the generic word ("what should I
+    # include in a proposal before I hand it to design",
+    # `proposal-boundary-questionnaire`) gets its own literal example
+    # instead of leaning on the over-broad bare form.
+    examples: ["idea", "new idea", "ad hoc", "draft proposal", "i have an idea", "work on a proposal", "new proposal", "write a proposal", "design proposal", "start a design", "use the design workflow", "amend existing proposal", "proposal ready for review", "human review proposal", "resolve proposal questions", "tighten proposal narration", "audit this proposal", "fold decisions back into the design", "make this proposal terse and clear", "what should i include in a proposal"]
     priority: 50
   go_code_review:
     title: "Code Review"
@@ -869,7 +883,20 @@ intents:
   go_ideas:
     title: "Ideas Backlog"
     description: "Open the ideas reviewer — reconcile the backlog and pick something to propose."
-    examples: ["ideas", "review ideas", "idea backlog", "reconcile ideas", "what should I work on", "writer's block"]
+    # NOTE (dwf3 routing triage): bare "ideas" was removed. Porter-stemming
+    # collapses "idea"/"ideas" to the same stem {idea}, so this bare example
+    # and go_idea's bare "idea" example are LITERALLY the same whole-
+    # utterance synonym — any input naming either word ties the two intents
+    # whenever nothing else disambiguates them (e.g. "break this idea into
+    # proposal slices", landing_proposal_routing.yaml `proposal-slices`,
+    # where the leading stem "break" belongs to neither candidate so the
+    # tie never resolves). The richer, multi-stem examples below ("review
+    # ideas", "idea backlog", "reconcile ideas") still route real
+    # ideas-backlog requests — they win outright (or via the leading-verb
+    # tie-break) without the generic single-word form. No fixture exercises
+    # bare "ideas" alone (grepped stories/dev-story/intents/), so this is
+    # not a regression.
+    examples: ["review ideas", "idea backlog", "reconcile ideas", "what should I work on", "writer's block"]
     priority: 31
   go_model_eval:
     title: "Model Harness Eval"
@@ -1146,7 +1173,19 @@ intents:
   go_docs:
     title: "Docs"
     description: "Open the docs room."
-    examples: [docs, "update docs"]
+    # NOTE (dwf3 routing triage): bare "docs" was removed — its lone stem
+    # {doc} matches (as a whole-utterance subset) any input that merely
+    # mentions docs in passing, e.g. "update the docs after the proposal
+    # shipped" (landing_proposal_routing.yaml `work-docs-not-proposal`).
+    # Worse, because it is declared FIRST, the bare-string matcher records it
+    # (not "update docs") as go_docs's matched entry — which defeats the
+    # leading-verb tie-break (the richer "update docs" entry's stem set
+    # {updat, doc} contains the phrase's leading stem "updat"; the bare
+    # "docs" entry's stem set {doc} does not). Removing the generic bare
+    # form lets "update docs" win the tie outright. No fixture exercises
+    # bare "docs" alone (grepped stories/dev-story/intents/), so this is
+    # not a regression.
+    examples: ["update docs"]
     priority: 25
 
   # Ticket search slots
@@ -1210,7 +1249,30 @@ intents:
     # landing's default_intent (landing_capture, the workbench agent). Explicit
     # drive verbs ("drive", "drive it", "run the pipeline") still route
     # here. See .context/landing-onpath-offpath-bail.md slice C.
-    examples: ["drive", "push", "start", "drive it", "run the pipeline", "take it through", "drive the ticket"]
+    #
+    # NOTE (dwf3 routing triage): bare "start" was ALSO removed for the same
+    # reason — its lone stem {start} is a subset of any "start a/the …"
+    # utterance, including go_idea's own "start a design (package)" phrasing.
+    # The bare-string tier's leading-verb tie-break needs the two candidates'
+    # MATCHED entries to differ on the leading stem to resolve a tie; with
+    # bare "start" in the mix both candidates' matched entries contained the
+    # stem {start} so the tie never broke and "start a design package for
+    # the new routing eval process" stalled at ok=true/Intent="" (see
+    # landing_proposal_routing.yaml `design-package`).
+    #
+    # NOTE (dwf3 routing triage): bare "drive" was ALSO removed — the word
+    # overloads as a colloquial verb ("drive this through the dev-story
+    # proposal process" = push it along) as well as the command; the
+    # leading-verb tie-break can't tell those apart (it only sees the stem
+    # "drive", not the sense), so it always picked the `drive` intent even
+    # when the request was about the proposal pipeline
+    # (landing_proposal_routing.yaml `proposal-dev-story`, expected
+    # `go_idea`). "drive it" / "run the pipeline" / "take it through" /
+    # "drive the ticket" remain unambiguous multi-word commands; no fixture
+    # exercises bare "drive" (grepped stories/dev-story/{intents,flows}/ —
+    # the one flow hit dispatches the intent by name directly, bypassing
+    # routing).
+    examples: ["push", "drive it", "run the pipeline", "take it through", "drive the ticket"]
     priority: 60
   go_bugfix:
     title: "Fix Bug"
