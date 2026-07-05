@@ -35,6 +35,10 @@ export function toElements(graph: ObjectGraph, opts: ToElementsOptions = {}): cy
       status: node.status ?? "",
       lifecycle: lifecycleBucket(node),
       typeLabel: typeLabel(node.kind),
+      // diff mode (runstatus.objectgraph.diff): "" when the graph wasn't
+      // loaded in diff mode, otherwise one of added/modified/removed/
+      // unchanged (internal/graph.GapKind) — styled below.
+      diffKind: (node.attrs?.diff_kind as string) ?? "",
       parent: opts.groupByLayer ? `layer:${opts.groupByLayer(node)}` : undefined,
     },
   }));
@@ -78,6 +82,16 @@ export const LIFECYCLE_COLORS: Record<string, string> = {
   candidate: "#7a8896",
 };
 
+// Diff mode's added/modified/removed border language — the same colors
+// WorldDiffViewer.vue uses for world-state keys (--k-success/--k-warning/
+// --k-error), reused here so "what changed" reads the same everywhere in
+// the viewer rather than inventing a second color vocabulary.
+export const DIFF_COLORS: Record<string, string> = {
+  added: "#22c55e",
+  modified: "#f59e0b",
+  removed: "#ef4444",
+};
+
 export const cytoscapeStyle: cytoscape.StylesheetJson = [
   {
     selector: "node",
@@ -110,6 +124,18 @@ export const cytoscapeStyle: cytoscape.StylesheetJson = [
       "font-size": 11,
       color: "#46534d",
     },
+  },
+  {
+    selector: 'node[diffKind = "added"]',
+    style: { "border-color": DIFF_COLORS.added, "border-width": 3 },
+  },
+  {
+    selector: 'node[diffKind = "modified"]',
+    style: { "border-color": DIFF_COLORS.modified, "border-width": 3 },
+  },
+  {
+    selector: 'node[diffKind = "removed"]',
+    style: { "border-color": DIFF_COLORS.removed, "border-width": 3, "border-style": "dashed", "background-opacity": 0.5 },
   },
   {
     selector: "node.focused",
