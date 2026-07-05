@@ -572,17 +572,23 @@ func (o *Orchestrator) semanticBars() (high, mid float64) {
 //     carrying the candidate list; the TUI surfaces the existing
 //     disambiguation card.
 //   - Otherwise (0 < Confidence < MidBar) → near_miss (see
-//     never-silent-runtime.md). A verdict this weak must never fall
-//     through to the LLM interpreter, which would pick the closest
-//     authored intent by alphabet-of-commands — that guess is the
-//     adjacent-command misroute this band exists to stop. The verdict
-//     is recorded on the trace as near_miss and, once S1's workbench
-//     exists, escalates there; until then it falls back to today's
-//     off-ramp / no-match handling (nearMissWorkbenchEnabled is a
-//     stub that always reports false — see its doc comment).
-//     Confidence == 0 (a genuine miss) never reaches this switch: every
-//     path above already returned (nil, false, nil) for that case, so
-//     "reject floor" and "0" coincide here without a new tunable.
+//     docs/architecture/semantic-routing.md "Near-miss band"). A verdict
+//     this weak must never fall through to the LLM interpreter, which
+//     would pick the closest authored intent by alphabet-of-commands —
+//     that guess is the adjacent-command misroute this band exists to
+//     stop. The verdict is recorded on the trace as near_miss with its
+//     resolved destination: when the current room (or the app's
+//     free_form_fallback floor) is a room-workbench (internal/app's
+//     `workbench:` block), the whole utterance is routed straight into
+//     that room's synthesized capture intent — the governed free-form
+//     work floor — instead of the interpreter. Otherwise (no workbench
+//     reachable) it records destination "interpreter_fallback" and
+//     returns a miss so the caller advances to the next routing tier
+//     exactly as before (nearMissWorkbenchDestination is the resolver;
+//     see its doc comment). Confidence == 0 (a genuine miss) never
+//     reaches this switch: every path above already returned
+//     (nil, false, nil) for that case, so "reject floor" and "0"
+//     coincide here without a new tunable.
 func (o *Orchestrator) TrySemantic(ctx context.Context, sid app.SessionID, input string) (*TurnOutcome, bool, error) {
 	if !o.routingEnabled() {
 		return nil, false, nil
@@ -837,40 +843,101 @@ func (o *Orchestrator) TrySemantic(ctx context.Context, sid app.SessionID, input
 		// (a genuine miss) never reaches here — every path above already
 		// returned (nil, false, nil) for that case — so this branch only
 		// fires for a verdict that scored above the reject floor but
-		// below the accept floor. Record the decision on the trace with
-		// the same confidence-vs-threshold shape the other tiers record,
-		// so a near-miss is visible as "routed to workbench because
-		// confidence was in the near-miss band," not silently absorbed
-		// into "no match" (never-silent-runtime.md).
+		// below the accept floor. Resolve a workbench destination (if
+		// any) BEFORE recording the trace event so the decision — routed
+		// to a named capture intent, or falling back to the interpreter
+		// — is visible on the same turn.near_miss record, never silently
+		// absorbed into "no match" (docs/architecture/semantic-routing.md
+		// "Near-miss band").
+		destIntent, destSlot, destOK := o.nearMissWorkbenchDestination(journey.State, allowedNames)
+		destination := "interpreter_fallback"
+		if destOK {
+			destination = destIntent
+		}
 		tl.Debug(ctx, trace.EvTurnNearMiss,
 			slog.String("input", input),
 			slog.Float64("confidence", verdict.Confidence),
 			slog.Float64("threshold", midBar),
+			slog.String("destination", destination),
 		)
-		if o.nearMissWorkbenchEnabled() {
-			// TODO(S1): once the workbench's governed free-form entry
-			// point exists, route there instead of falling through.
-			// Deliberately unreachable until nearMissWorkbenchEnabled
-			// stops being a stubbed-false feature check.
+		if destOK {
+			prov := RouteProvenance{Source: "near_miss_workbench", MatchType: "workbench_capture"}
+			outcome, err := o.SubmitDirectRouted(ctx, sid, destIntent, map[string]any{destSlot: input}, input, prov)
+			if err != nil {
+				return nil, false, err
+			}
+			return outcome, true, nil
 		}
-		// S1's workbench doesn't exist yet (see never-silent-runtime.md
-		// Open questions #2) — fall back to today's off-ramp / no-match
-		// handling: the caller advances to the next routing tier exactly
-		// as it did before this band was named. The near_miss verdict
-		// above is what makes that fallback visible in the trace instead
-		// of indistinguishable from a genuine miss.
+		// No workbench reachable from here — fall back to today's
+		// off-ramp / no-match handling: the caller advances to the next
+		// routing tier exactly as it did before this band was named.
 		return nil, false, nil
 	}
 }
 
-// nearMissWorkbenchEnabled reports whether a near_miss verdict should
-// escalate to S1's workbench entry point. It is a stub that always
-// returns false: S1 doesn't exist yet (never-silent-runtime.md, Open
-// questions #2), so this proposal only lands the confidence-band
-// plumbing and decision recording now. Flipping this on (and wiring an
-// actual destination in TrySemantic's default case above) is the whole
-// of what's left once S1 ships — no other change to the band logic is
-// needed.
-func (o *Orchestrator) nearMissWorkbenchEnabled() bool {
-	return false
+// nearMissWorkbenchDestination resolves the room-workbench capture intent
+// (internal/app's `workbench:` block — see internal/app/workbench.go) a
+// near_miss verdict should escalate into, if any exists. It checks, in
+// order:
+//
+//  1. The current room itself: a state with a `workbench:` block has its
+//     DefaultIntent set to the synthesized `<room>_capture` intent
+//     (expandOneWorkbench sets both together, and State.Workbench is left
+//     populated as the marker that this DefaultIntent is workbench-owned
+//     rather than a hand-authored conversational sink like `discuss`).
+//  2. The app's canonical free-form floor (routing.free_form_fallback),
+//     when it names a DIFFERENT room that is itself a workbench and that
+//     room's capture intent is currently allowed from here — the same
+//     cross-room reachability [routeViaFreeFormFallback] relies on (the
+//     loader's applyFreeFormFallback pass already clones that intent's
+//     arc onto every non-workbench, non-off-ramp room at load time).
+//
+// Returns ("", "", false) when neither applies (no workbench reachable,
+// or a hand-authored default_intent/off-ramp room with no workbench at
+// all) so the caller keeps today's fallthrough.
+func (o *Orchestrator) nearMissWorkbenchDestination(state app.StatePath, allowedNames []string) (intentName, slotName string, ok bool) {
+	if o.def == nil {
+		return "", "", false
+	}
+
+	cur := lookupStateByPath(o.def, state)
+
+	// 1. The current room is itself a workbench floor.
+	if cur != nil && cur.Workbench != nil {
+		name := resolveDefaultIntentName(o.def, state, cur, allowedNames)
+		if name != "" {
+			if intentDef, found := lookupIntentByPath(o.def, state, name); found {
+				if slot, single := singleRequiredStringSlot(intentDef); single {
+					return name, slot, true
+				}
+			}
+		}
+	}
+
+	// 2. The app's free-form fallback floor is a different workbench room.
+	cfg, hasFallback := o.effectiveFreeFormFallback()
+	if !hasFallback {
+		return "", "", false
+	}
+	fallbackState := strings.TrimSpace(cfg.State)
+	if fallbackState == "" || fallbackState == string(state) {
+		return "", "", false
+	}
+	target := lookupStateByPath(o.def, app.StatePath(fallbackState))
+	if target == nil || target.Workbench == nil {
+		return "", "", false
+	}
+	fallbackIntent := resolveIntentAlias(o.def, state, cur, strings.TrimSpace(cfg.Intent))
+	if fallbackIntent == "" || !containsString(allowedNames, fallbackIntent) {
+		return "", "", false
+	}
+	intentDef, found := lookupIntentByPath(o.def, state, fallbackIntent)
+	if !found {
+		return "", "", false
+	}
+	slot, single := singleRequiredStringSlot(intentDef)
+	if !single {
+		return "", "", false
+	}
+	return fallbackIntent, slot, true
 }
