@@ -59,6 +59,7 @@ type fileEdgeField struct {
 	Storage     string `yaml:"storage"`
 	Acyclic     bool   `yaml:"acyclic"`
 	Renders     bool   `yaml:"renders"`
+	NestsUnder  bool   `yaml:"nests_under"`
 }
 
 type fileTypeDef struct {
@@ -98,6 +99,7 @@ func (ft fileTypeDef) toTypeDef() (TypeDef, string, error) {
 			Storage:     EdgeStorage(fe.Storage),
 			Acyclic:     fe.Acyclic,
 			Renders:     fe.Renders,
+			NestsUnder:  fe.NestsUnder,
 		})
 	}
 	return def, warning, nil
