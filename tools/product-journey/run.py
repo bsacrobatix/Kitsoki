@@ -4310,6 +4310,7 @@ def render_autonomous_fix_report(run_dir: Path, status: dict, review: Optional[d
     findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"items": []}
     gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
     filing = findings.get("filing", {}) if isinstance(findings.get("filing", {}), dict) else {}
+    issue_closeout = findings.get("issue_closeout", {}) if isinstance(findings.get("issue_closeout", {}), dict) else {}
     issue_items = [
         item for item in findings.get("items", [])
         if isinstance(item, dict) and item.get("github_issue", {}).get("url")
@@ -4329,6 +4330,24 @@ def render_autonomous_fix_report(run_dir: Path, status: dict, review: Optional[d
         for item in issue_items:
             issue = item.get("github_issue", {})
             lines.append(f"- `{item.get('id', item.get('title', 'finding'))}`: {issue.get('url', '')}")
+    else:
+        lines.append("- (none)")
+    lines.extend([
+        "",
+        "## GH-agent Claims",
+        "",
+        f"- Claims: `{gh_agent.get('claim_status', status.get('gh_agent_claim_status', 'not requested'))}`",
+        f"- Claimed: {gh_agent.get('claim_count', status.get('gh_agent_claim_count', 0))}",
+    ])
+    claim_items = [item for item in gh_agent.get("claims", []) or [] if isinstance(item, dict)]
+    if claim_items:
+        for item in claim_items:
+            parts = [
+                item.get("issue_url", ""),
+                f"comment={item.get('comment_url', '')}" if item.get("comment_url") else "",
+                f"job={item.get('job_id', '')}" if item.get("job_id") else "",
+            ]
+            lines.append("- " + " · ".join(part for part in parts if part))
     else:
         lines.append("- (none)")
     lines.extend([
@@ -4367,6 +4386,26 @@ def render_autonomous_fix_report(run_dir: Path, status: dict, review: Optional[d
             else:
                 lines.append("  - (missing)")
             lines.append("")
+    else:
+        lines.append("- (none)")
+    lines.extend([
+        "",
+        "## Issue Close-out",
+        "",
+        f"- Issue close-out: `{issue_closeout.get('status', status.get('issue_closeout_status', 'not run'))}`",
+        f"- Closed: {issue_closeout.get('count', status.get('issue_closeout_count', 0))}",
+    ])
+    if issue_closeout.get("summary"):
+        lines.append(f"- Summary: {issue_closeout.get('summary')}")
+    closeout_items = [item for item in issue_closeout.get("items", []) or [] if isinstance(item, dict)]
+    if closeout_items:
+        for item in closeout_items:
+            parts = [
+                item.get("issue_url", ""),
+                f"comment={item.get('comment_url', '')}" if item.get("comment_url") else "",
+                f"run={item.get('run_url', '')}" if item.get("run_url") else "",
+            ]
+            lines.append("- " + " · ".join(part for part in parts if part))
     else:
         lines.append("- (none)")
     review_status = (review or {}).get("review_status", (review or {}).get("status", status.get("review_status", "")))
