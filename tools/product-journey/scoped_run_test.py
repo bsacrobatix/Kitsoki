@@ -84,7 +84,7 @@ def main():
         _check("metrics scenario count is scoped", metrics["scenario_count"] == 2)
         _check("story summary scenario count is scoped", summary["scenario_count"] == 2)
         _check("evidence only references scoped scenarios", evidence_scenarios == set(scenario_ids))
-        _check("evidence count shrinks with scope", metrics["required_evidence_count"] == len(evidence["items"]) == 10)
+        _check("evidence count shrinks with scope", metrics["required_evidence_count"] == len(evidence["items"]) == 12)
 
     print("PASS")
 

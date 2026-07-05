@@ -200,6 +200,7 @@ def attach_bugfix_proof(run_dir, scenario_id):
         "oracle_result",
         "full_suite_result",
         "key_interaction_video",
+        "trace-replay",
     ]
     refs = []
     for kind in evidence_kinds:
@@ -328,7 +329,7 @@ def main():
         # 4. Gates: review counts the filing check; a new credible finding
         # after filing trips review + validate until re-filed.
         reviewed = run.review_run_bundle(run_dir, None)
-        _check("review has 21 checks", reviewed["total"] == 21)
+        _check("review has 22 checks", reviewed["total"] == 22)
         _check("findings-filed passes when fully filed",
                review_check(reviewed, "findings-filed")["status"] == "pass")
         _check("gh-agent-fixes passes when drained",
@@ -423,7 +424,7 @@ def main():
         _check("autonomous loop exposes fix evidence assets",
                result["gh_agent_fix_evidence_count"] == 2
                and result["gh_agent_missing_evidence_count"] == 0)
-        _check("autonomous loop reviewed and validated", result["review_total_count"] == 21 and result["validation_status"] == "valid")
+        _check("autonomous loop reviewed and validated", result["review_total_count"] == 22 and result["validation_status"] == "valid")
 
         run_dir3, run_json3 = run.build_run_bundle(
             catalog, run.load_github_targets(run.GITHUB_TARGETS),

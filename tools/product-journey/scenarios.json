@@ -16,7 +16,8 @@
         "session_trace",
         "navigation_trace",
         "checkpoint_rating",
-        "key_interaction_video"
+        "key_interaction_video",
+        "png-sequence"
       ],
       "success_criteria": [
         "Persona can identify the product category without private repo context.",
@@ -41,7 +42,8 @@
         "rendered_tui_frame",
         "generated_config_diff",
         "onboarding_smoke_result",
-        "key_interaction_video"
+        "key_interaction_video",
+        "flow-fixture"
       ],
       "success_criteria": [
         "Generated project config names real commands and relevant project files.",
@@ -66,7 +68,8 @@
         "candidate_diff",
         "oracle_result",
         "full_suite_result",
-        "key_interaction_video"
+        "key_interaction_video",
+        "trace-replay"
       ],
       "success_criteria": [
         "Hidden oracle passes.",
@@ -91,7 +94,8 @@
         "prd_artifact",
         "design_artifact",
         "review_notes",
-        "key_interaction_video"
+        "key_interaction_video",
+        "flow-fixture"
       ],
       "success_criteria": [
         "Artifacts cite real repository files and commands.",
@@ -116,7 +120,8 @@
         "implementation_diff",
         "targeted_test_result",
         "review_summary",
-        "key_interaction_video"
+        "key_interaction_video",
+        "flow-fixture"
       ],
       "success_criteria": [
         "Implementation follows the design artifact.",
@@ -140,7 +145,8 @@
         "screenshot_or_tui_png",
         "trace_reference",
         "reproduction_steps",
-        "key_interaction_video"
+        "key_interaction_video",
+        "rrweb"
       ],
       "success_criteria": [
         "Report includes expected versus actual behavior.",

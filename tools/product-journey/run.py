@@ -42,6 +42,12 @@ NATIVE_GHAGENT_SMOKE = ROOT / "tools" / "product-journey" / "native_ghagent_test
 AUTONOMOUS_FIX_SMOKE = ROOT / "tools" / "product-journey" / "file_findings_test.py"
 EVIDENCE_SOURCES = {"demo", "retained", "external", "local", "cassette", "unknown"}
 PROOF_EVIDENCE_SOURCES = {"retained", "external", "local", "cassette"}
+# Playback-capable evidence: a typed slot every natural-use scenario declares
+# so it can actually be REPLAYED (an rrweb viewer, `kitsoki test flows`, a PNG
+# frame sequence) rather than merely referenced. Unlike general proof evidence
+# (which accepts a cassette:// URI once it resolves to a backing file), a
+# playback slot must be a real LOCAL file — see is_playback_evidence.
+PLAYBACK_EVIDENCE_KINDS = {"rrweb", "trace-replay", "flow-fixture", "png-sequence"}
 STAGES = [
     "discover_product",
     "follow_tutorial",
@@ -1055,6 +1061,10 @@ def evidence_capture_hint(kind: str) -> str:
         "screenshot_or_tui_png": "Save screenshot or TUI PNG evidence.",
         "trace_reference": "Save the trace reference for reproduction.",
         "reproduction_steps": "Save deterministic reproduction steps.",
+        "rrweb": "Save a local rrweb session capture JSON (real recorded browser session, not a cassette:// ref) so the scenario replays in an rrweb viewer.",
+        "trace-replay": "Save a local Kitsoki trace file replayable via `kitsoki trace to-flow` / `test flows` (a real path, not cassette://).",
+        "flow-fixture": "Save a local flow fixture (`kitsoki test flows <app.yaml> --flows ...`) that replays this scenario no-LLM.",
+        "png-sequence": "Save a local directory or manifest of PNG frames captured via render.tui/visual.observe for frame-by-frame playback.",
     }
     return hints.get(kind, "Save this evidence artifact and attach it to the run.")
 
@@ -1292,6 +1302,18 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
         "feature-implementation",
         "evidence-backed-product-bug",
     }
+    # The four workflow personas WS-F wires across every natural-use scenario
+    # (surface_preference names each persona's primary surface: TUI, web,
+    # docs, VS Code). Product-journey's generic run/agent-brief/driver-plan
+    # machinery already crosses every active persona with every active
+    # scenario, so this check just guards the corpus does not silently drop
+    # one.
+    required_personas = {
+        "core-maintainer",
+        "dependency-debugger",
+        "docs-minded-contributor",
+        "ide-first-engineer",
+    }
 
     persona_ids = [persona.get("id", "") for persona in personas]
     scenario_ids = [scenario.get("id", "") for scenario in scenarios]
@@ -1316,6 +1338,10 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
 
     if len(active_persona_list) < 4:
         add_corpus_issue(issues, "warn", "persona-count", "Active persona corpus is narrow for natural-use sweeps", f"personas={len(active_persona_list)}")
+    active_persona_ids = {persona.get("id", "") for persona in active_persona_list}
+    missing_required_personas = sorted(required_personas - active_persona_ids)
+    if missing_required_personas:
+        add_corpus_issue(issues, "error", "required-personas", "Required workflow personas are missing or inactive", ", ".join(missing_required_personas))
     for persona in active_persona_list:
         missing = [key for key in persona_required if key not in persona]
         if missing:
@@ -1347,6 +1373,15 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
         ]
         if unknown_evidence:
             add_corpus_issue(issues, "error", "scenario-evidence-kind", "Scenario uses evidence kinds without capture hints", f"{scenario_id}: {', '.join(unknown_evidence)}")
+        if not scenario_playback_kind(scenario):
+            declared_playback = sorted(PLAYBACK_EVIDENCE_KINDS & set(scenario.get("evidence", [])))
+            add_corpus_issue(
+                issues,
+                "error",
+                "scenario-playback-evidence",
+                "Scenario must declare exactly one playback-capable evidence kind (rrweb|trace-replay|flow-fixture|png-sequence)",
+                f"{scenario_id}: {', '.join(declared_playback) or 'none'}",
+            )
         gate = scenario_quality_gate(scenario_id)
         missing_gate_keys = [key for key in schema["driver_plan"]["quality_gate_required"] if key not in gate]
         if missing_gate_keys:
@@ -1660,6 +1695,71 @@ def is_proof_evidence(item: dict, run_dir: Optional[Path] = None) -> bool:
     if run_dir is not None and source in {"local", "cassette"}:
         return artifact_ref_exists(run_dir, item.get("path", ""))
     return True
+
+
+def is_playback_evidence(item: dict, run_dir: Optional[Path] = None) -> bool:
+    """True when `item` is one of the four playback-capable evidence kinds
+    (rrweb / trace-replay / flow-fixture / png-sequence) AND is backed by a
+    real LOCAL file. Unlike is_proof_evidence, a cassette://, http(s)://, or
+    other opaque/indirect URI is NEVER accepted here — this slot exists so the
+    scenario can actually be replayed, and an indirection defeats that purpose
+    even when it happens to resolve to a real file elsewhere."""
+    if item.get("kind") not in PLAYBACK_EVIDENCE_KINDS:
+        return False
+    if item.get("status") not in {"captured", "validated"}:
+        return False
+    path = (item.get("path") or "").strip()
+    if not path or "://" in path or path.startswith(("cassette:", "retained:", "image:", "trace:", "mcp:")):
+        return False
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return candidate.is_file()
+    if run_dir is None:
+        return False
+    return (run_dir / candidate).is_file() or (ROOT / candidate).is_file()
+
+
+def scenario_playback_kind(scenario: dict) -> Optional[str]:
+    """The single playback-capable evidence kind a scenario declares in its
+    `evidence` list, or None if it declares zero or more than one."""
+    declared = sorted(PLAYBACK_EVIDENCE_KINDS & set(scenario.get("evidence", [])))
+    return declared[0] if len(declared) == 1 else None
+
+
+def missing_playback_evidence(
+    run_json: dict,
+    evidence_items: list[dict],
+    run_dir: Path,
+    blocked_scenarios: Optional[set] = None,
+) -> list[str]:
+    """Non-mined, non-blocked scenarios whose declared playback-capable
+    evidence kind lacks a captured/validated item backed by a real local file.
+    A blocked scenario (recorded via record_blocker) is exempt, matching the
+    other per-scenario coverage checks."""
+    blocked_scenarios = blocked_scenarios or set()
+    by_scenario: dict[str, list[dict]] = {}
+    for item in evidence_items:
+        by_scenario.setdefault(item.get("scenario", ""), []).append(item)
+    missing = []
+    for scenario in run_json.get("scenarios", []):
+        if scenario.get("source") == "mined":
+            continue
+        scenario_id = scenario.get("id", "")
+        if scenario_id in blocked_scenarios:
+            continue
+        kind = scenario_playback_kind(scenario)
+        if not kind:
+            missing.append(f"{scenario_id}: no playback-capable evidence kind declared")
+            continue
+        items = [item for item in by_scenario.get(scenario_id, []) if item.get("kind") == kind]
+        if any(is_playback_evidence(item, run_dir) for item in items):
+            continue
+        attempted = [item.get("path", "") for item in items if item.get("status") in {"captured", "validated"}]
+        if attempted:
+            missing.append(f"{scenario_id}/{kind}: unbacked reference ({', '.join(attempted)})")
+        else:
+            missing.append(f"{scenario_id}/{kind}: not captured")
+    return missing
 
 
 def build_media_manifest(run_json: dict, evidence: dict) -> dict:
@@ -3987,6 +4087,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         and scenario.get("id", "") not in blocked_scenarios
     ]
     missing_driver_evidence_refs = unattached_driver_evidence_refs(evidence, driver_journal)
+    missing_playback_evidence_slots = missing_playback_evidence(run_json, evidence_items, run_dir, blocked_scenarios)
     scenario_outcomes = build_scenario_outcomes(run_json, evidence, findings)
     driver_plan = build_driver_plan(run_json, evidence, execution_plan)
     quality_gates = summarize_quality_gates(evidence, scenario_outcomes, driver_plan, run_dir)
@@ -4098,6 +4199,12 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             "status": "pass" if playback_items or blocked_scenarios else "fail",
             "summary": "The review deck has playback media or an explicit blocked-scenario reason for missing playback.",
             "detail": f"playback_items={len(playback_items)}, blocked_scenarios={len(blocked_scenarios)}",
+        },
+        {
+            "id": "playback-evidence-backed",
+            "status": "pass" if not missing_playback_evidence_slots else "fail",
+            "summary": "Each scenario's playback-capable evidence slot (rrweb|trace-replay|flow-fixture|png-sequence) is backed by a real local file, not a cassette:// or other unbacked reference.",
+            "detail": "; ".join(missing_playback_evidence_slots),
         },
         {
             "id": "findings-summary",
@@ -4948,6 +5055,42 @@ def validate_run_bundle(run_dir: Path) -> dict:
     if required_evidence - declared_evidence:
         extra = sorted(f"{scenario}/{kind}" for scenario, kind in required_evidence - declared_evidence)
         add_validation_issue(issues, "warn", "evidence-contract-extra", "evidence.json has slots not declared by run.json scenarios", ", ".join(extra))
+
+    if run_json:
+        missing_playback_kind = sorted(
+            scenario.get("id", "unknown")
+            for scenario in scenarios
+            if scenario.get("source") != "mined" and not scenario_playback_kind(scenario)
+        )
+        if missing_playback_kind:
+            add_validation_issue(
+                issues,
+                "error",
+                "scenario-playback-evidence-kind",
+                "run.json scenarios must declare exactly one playback-capable evidence kind (rrweb|trace-replay|flow-fixture|png-sequence)",
+                ", ".join(missing_playback_kind),
+            )
+        # Demo-seeded placeholder evidence (source == "demo") never claims to
+        # be real proof anywhere else in this validator (see
+        # non-demo-evidence / artifact-ref-exists), so it is exempt here too —
+        # this check targets a captured/validated item that DOES claim a real
+        # local backing (local/cassette/etc.) but is not actually backed.
+        unbacked_playback_evidence = sorted(
+            f"{item.get('scenario', '')}/{item.get('kind', '')}:{item.get('path', '')}"
+            for item in evidence_items
+            if item.get("kind", "") in PLAYBACK_EVIDENCE_KINDS
+            and item.get("status") in {"captured", "validated"}
+            and item.get("source", "") != "demo"
+            and not is_playback_evidence(item, run_dir)
+        )
+        if unbacked_playback_evidence:
+            add_validation_issue(
+                issues,
+                "error",
+                "playback-evidence-unbacked",
+                "Playback-capable evidence must be a real LOCAL file, not a cassette:// or other unbacked/opaque reference",
+                ", ".join(unbacked_playback_evidence),
+            )
 
     schema_evidence_sources = set(schema["evidence_sources"])
     invalid_evidence_sources = sorted({
@@ -6481,7 +6624,11 @@ def dogfood_review_is_expected_demo_only(reviewed: dict) -> bool:
         for check in reviewed.get("checks", [])
         if check.get("status") == "fail"
     }
-    return failed_checks <= {"quality-gates"}
+    # Demo-seeded evidence is placeholder-only (attach_evidence records a path
+    # without writing a backing file), so the playback-capable slot can never
+    # resolve to a real local file here — same category as the unattempted
+    # quality-gate coverage this smoke already tolerates.
+    return failed_checks <= {"quality-gates", "playback-evidence-backed"}
 
 
 def driver_replay_review_is_expected_one_scenario(reviewed: dict) -> bool:
@@ -6490,7 +6637,11 @@ def driver_replay_review_is_expected_one_scenario(reviewed: dict) -> bool:
         for check in reviewed.get("checks", [])
         if check.get("status") == "fail"
     }
-    return failed_checks <= {"scenario-attempts", "driver-journal-coverage", "quality-gates", "playback-or-blocker"}
+    # This smoke replays exactly one scenario's minimum-evidence contract via
+    # cassette-backed proof; it never attaches the playback-capable slot (a
+    # cassette:// ref is deliberately NOT accepted there), and every other
+    # scenario in the bundle stays untouched.
+    return failed_checks <= {"scenario-attempts", "driver-journal-coverage", "quality-gates", "playback-or-blocker", "playback-evidence-backed"}
 
 
 def cassette_replay_path(run_id: str, scenario_id: str, evidence_kind: str) -> str:

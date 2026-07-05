@@ -40,6 +40,7 @@ def attach_bugfix_proof(run_dir, scenario_id):
         "oracle_result",
         "full_suite_result",
         "key_interaction_video",
+        "trace-replay",
     ]:
         suffix = ".mp4" if kind == "key_interaction_video" else ".md"
         artifact = evidence_dir / f"{kind}{suffix}"
