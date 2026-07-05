@@ -171,6 +171,7 @@ world:
   # ── prior-art gate (search room — see rooms/search.yaml) ─────────────
   prd_existing_state:   { type: object, default: {} }   # scout result: { overlaps: [{ path, kind, summary, recommendation }], roadmap_fit } — empty overlaps ⇒ no prior art, confirm proceeds cleanly.
   prd_overlap_decision: { type: string, default: "" }   # "" | new | change_existing — what the operator chose at the gate (audit trail).
+  prd_overlap_feedback: { type: string, default: "" }   # Visible guidance when confirm is attempted while overlaps are still active.
   prd_change_target:    { type: string, default: "" }   # path of the existing PRD to amend when prd_overlap_decision == change_existing (captured for the downstream workspace work — Gap #4).
 
   # ── clarification (accumulates across rounds — see rooms/clarifying.yaml) ─
