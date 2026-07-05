@@ -237,6 +237,7 @@ func gitopsGHAgentGateOK(result map[string]any) bool {
 		intValue(result, "gh_agent_active_count") == 0 &&
 		intValue(result, "gh_agent_done_count") >= intValue(result, "gh_agent_enqueued_count") &&
 		intValue(result, "gh_agent_missing_evidence_count") == 0 &&
+		intValue(result, "gh_agent_missing_triage_count") == 0 &&
 		intValue(result, "gh_agent_missing_verify_count") == 0 &&
 		intValue(result, "gh_agent_missing_run_url_count") == 0
 }

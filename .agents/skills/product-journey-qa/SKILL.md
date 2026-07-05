@@ -120,9 +120,10 @@ Then hand it to the reusable driver:
    `kitsoki gitops autonomous-fix` posts a `kitsoki-autofix-claim` comment
    through `host.gh.ticket` and records the claim URL in `findings.json`; this
    makes in-flight autonomous work visible to parallel agents and reviewers.
-   Completed gh-agent jobs must publish an `independent-verify.md` asset from
-   the story run; a fix report or patch alone does not satisfy the autonomous
-   gate. Once the filing, gh-agent, review, and validation gates pass,
+   Completed gh-agent jobs must publish a `triage-verdict.md` preflight asset
+   plus an `independent-verify.md` asset from the story run; a fix report or
+   patch alone does not satisfy the autonomous gate. Once the filing, gh-agent,
+   review, and validation gates pass,
    `kitsoki gitops autonomous-fix` posts a `kitsoki-fixed-in` close-out comment
    through `host.gh.ticket`, closes the GitHub issue, and records
    `findings.issue_closeout` plus closed issue state back into `findings.json`

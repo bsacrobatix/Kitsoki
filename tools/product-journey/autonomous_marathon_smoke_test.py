@@ -194,7 +194,9 @@ def main() -> int:
               result.get("gh_agent_drain_status") == "drained"
               and result.get("gh_agent_done_count") == 1
               and result.get("gh_agent_missing_verify_count") == 0
-              and result.get("gh_agent_independent_verify_count") == 1,
+              and result.get("gh_agent_independent_verify_count") == 1
+              and result.get("gh_agent_missing_triage_count") == 0
+              and result.get("gh_agent_triage_evidence_count") == 1,
               failures)
         check("autonomous gates are all green",
               result.get("autonomous_fix_status") == "autonomous_fix_valid"
@@ -204,6 +206,7 @@ def main() -> int:
               issue_urls and issue_urls[0] in report_text
               and "https://agent.example/run/job-" in report_text
               and "fix-report.md" in report_text
+              and "triage-verdict.md" in report_text
               and "independent-verify.md" in report_text,
               failures)
         check("human review artifacts link gh-agent claim evidence",

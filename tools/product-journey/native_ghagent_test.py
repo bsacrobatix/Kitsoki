@@ -149,6 +149,13 @@ def deck_scene(deck, eyebrow):
     return {}
 
 
+def review_check(review, check_id):
+    for check in review.get("checks", []):
+        if check.get("id") == check_id:
+            return check
+    return {}
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
@@ -219,20 +226,28 @@ def main():
         findings = run.read_json(run_dir / "findings.json")
         gh_agent = findings.get("gh_agent", {})
         links = run.gh_agent_fix_evidence_links(gh_agent)
+        triage_links = run.gh_agent_triage_evidence_links(gh_agent)
         check("native drain completed",
               drained["gh_agent_drain_status"] == "drained"
               and drained["gh_agent_done_count"] == 1
               and drained["gh_agent_failed_count"] == 0)
         check("native drain exposed fix artifacts",
               any(link.endswith("/fix-report.md") for link in links))
+        check("native drain exposed triage verdict",
+              any(link.endswith("/triage-verdict.md") for link in triage_links))
         check("native drain exposed independent verification",
               any(link.endswith("/independent-verify.md") for link in links))
-        check("native review is ready", reviewed["review_status"] == "ready")
-        check("native validation is valid", validated["status"] == "valid")
+        check("native review passes gh-agent evidence checks",
+              review_check(reviewed, "gh-agent-fix-evidence").get("status") == "pass"
+              and review_check(reviewed, "gh-agent-triage-evidence").get("status") == "pass"
+              and review_check(reviewed, "gh-agent-independent-verify").get("status") == "pass")
+        check("native review carries close-out evidence",
+              review_check(reviewed, "issue-closeout").get("status") == "pass")
         report_text = report.read_text()
         check("native report contains filed issue and fix evidence",
               issue_url in report_text
               and "https://agent.example/run/" in report_text
+              and any(link in report_text for link in triage_links)
               and any(link in report_text for link in links))
         deck = run.read_json(run_dir / "deck.slidey.json")
         gh_scene = deck_scene(deck, "GH-agent fixes")
