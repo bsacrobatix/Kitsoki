@@ -26,8 +26,167 @@ func gitopsCmd() *cobra.Command {
 		Use:   "gitops",
 		Short: "Story-owned git and ticket operations",
 	}
+	cmd.AddCommand(gitopsIssueStatusCmd())
+	cmd.AddCommand(gitopsIssueCreateCmd())
 	cmd.AddCommand(gitopsAutonomousFixCmd())
 	return cmd
+}
+
+func gitopsIssueStatusCmd() *cobra.Command {
+	var (
+		repo    string
+		issueID string
+		jsonOut bool
+	)
+	cmd := &cobra.Command{
+		Use:   "issue-status --repo owner/repo --id N",
+		Short: "Fetch GitHub issue status through the native ticket provider",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			result, err := host.GitHubTicketHandler(cmd.Context(), map[string]any{
+				"op":   "get",
+				"repo": repo,
+				"id":   issueID,
+			})
+			if err != nil {
+				return err
+			}
+			if result.Error != "" {
+				return fmt.Errorf("gitops issue-status: %s", result.Error)
+			}
+			data := gitopsIssueStatusResult(result.Data)
+			if jsonOut {
+				return writeGitopsJSON(cmd, data)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Issue: %s\n", stringValue(data, "id"))
+			fmt.Fprintf(cmd.OutOrStdout(), "Title: %s\n", stringValue(data, "title"))
+			fmt.Fprintf(cmd.OutOrStdout(), "State: %s\n", stringValue(data, "issue_state"))
+			fmt.Fprintf(cmd.OutOrStdout(), "URL: %s\n", stringValue(data, "url"))
+			if legacy := stringValue(data, "legacy_id"); legacy != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "Legacy ID: %s\n", legacy)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&repo, "repo", "", "owner/repo ticket target")
+	cmd.Flags().StringVar(&issueID, "id", "", "issue number or owner/repo#number")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON output")
+	return cmd
+}
+
+func gitopsIssueCreateCmd() *cobra.Command {
+	var (
+		repo       string
+		title      string
+		body       string
+		labels     string
+		severity   string
+		component  string
+		target     string
+		status     string
+		traceRef   string
+		kitsokiRev string
+		filedBy    string
+		legacyID   string
+		jsonOut    bool
+	)
+	cmd := &cobra.Command{
+		Use:   "issue-create --repo owner/repo --title title [--body body]",
+		Short: "Create a GitHub issue through the native ticket provider",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			result, err := host.GitHubTicketHandler(cmd.Context(), map[string]any{
+				"op":          "create",
+				"repo":        repo,
+				"title":       title,
+				"body":        body,
+				"labels":      labels,
+				"severity":    severity,
+				"component":   component,
+				"target":      target,
+				"status":      status,
+				"trace_ref":   traceRef,
+				"kitsoki_rev": kitsokiRev,
+				"filed_by":    filedBy,
+				"legacy_id":   legacyID,
+			})
+			if err != nil {
+				return err
+			}
+			if result.Error != "" {
+				return fmt.Errorf("gitops issue-create: %s", result.Error)
+			}
+			data := gitopsIssueCreateResult(result.Data, title)
+			if jsonOut {
+				return writeGitopsJSON(cmd, data)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Created: %s\n", stringValue(data, "url"))
+			if warning := stringValue(data, "warning"); warning != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "Warning: %s\n", warning)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&repo, "repo", "", "owner/repo ticket target")
+	cmd.Flags().StringVar(&title, "title", "", "issue title")
+	cmd.Flags().StringVar(&body, "body", "", "issue body")
+	cmd.Flags().StringVar(&labels, "labels", "", "comma-separated labels")
+	cmd.Flags().StringVar(&severity, "severity", "", "issue severity label axis, e.g. P1")
+	cmd.Flags().StringVar(&component, "component", "", "component label axis")
+	cmd.Flags().StringVar(&target, "target", "", "target label axis")
+	cmd.Flags().StringVar(&status, "status", "", "status label axis")
+	cmd.Flags().StringVar(&traceRef, "trace-ref", "", "trace reference recorded in kitsoki metadata")
+	cmd.Flags().StringVar(&kitsokiRev, "kitsoki-rev", "", "kitsoki revision recorded in kitsoki metadata")
+	cmd.Flags().StringVar(&filedBy, "filed-by", "", "actor recorded in kitsoki metadata")
+	cmd.Flags().StringVar(&legacyID, "legacy-id", "", "legacy local issue id recorded in kitsoki metadata")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON output")
+	return cmd
+}
+
+func writeGitopsJSON(cmd *cobra.Command, data map[string]any) error {
+	enc := json.NewEncoder(cmd.OutOrStdout())
+	enc.SetEscapeHTML(false)
+	return enc.Encode(data)
+}
+
+func gitopsIssueStatusResult(data map[string]any) map[string]any {
+	out := map[string]any{
+		"status":      "issue_status",
+		"issue_id":    stringValue(data, "id"),
+		"id":          stringValue(data, "id"),
+		"title":       stringValue(data, "title"),
+		"issue_state": stringValue(data, "status"),
+		"state":       stringValue(data, "status"),
+		"issue_url":   stringValue(data, "url"),
+		"url":         stringValue(data, "url"),
+		"source":      firstNonBlank(stringValue(data, "source"), "github"),
+	}
+	if v := stringValue(data, "legacy_id"); v != "" {
+		out["legacy_id"] = v
+	}
+	if v := stringValue(data, "body"); v != "" {
+		out["body"] = v
+	}
+	if comments, ok := data["comments"]; ok {
+		out["comments"] = comments
+	}
+	return out
+}
+
+func gitopsIssueCreateResult(data map[string]any, title string) map[string]any {
+	out := map[string]any{
+		"status":      "issue_created",
+		"issue_id":    firstNonBlank(stringValue(data, "id"), stringValue(data, "number")),
+		"id":          firstNonBlank(stringValue(data, "id"), stringValue(data, "number")),
+		"title":       strings.TrimSpace(title),
+		"issue_state": "created",
+		"state":       "created",
+		"issue_url":   stringValue(data, "url"),
+		"url":         stringValue(data, "url"),
+		"source":      "github",
+	}
+	if warning := stringValue(data, "warning"); warning != "" {
+		out["warning"] = warning
+	}
+	return out
 }
 
 func gitopsAutonomousFixCmd() *cobra.Command {

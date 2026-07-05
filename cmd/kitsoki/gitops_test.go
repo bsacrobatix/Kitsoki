@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -13,6 +14,129 @@ import (
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 )
+
+func TestGitopsIssueStatusUsesNativeTicketProvider(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	body := "Replay sessions must never fall through to a live agent.\n\n```kitsoki\nlegacy_id: 2026-07-05T021109Z-replay-miss\n```\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/105":
+			writeJSON(w, map[string]any{
+				"number":   105,
+				"title":    "Replay miss must fail closed",
+				"body":     body,
+				"state":    "closed",
+				"html_url": "https://github.com/o/r/issues/105",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/105/comments":
+			writeJSON(w, []map[string]any{{
+				"html_url": "https://github.com/o/r/issues/105#issuecomment-1",
+				"body":     "kitsoki-fixed-in",
+			}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("gitops issue-status must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
+
+	cmd := gitopsCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"issue-status", "--repo", "o/r", "--id", "105", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("issue-status: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out.String())
+	}
+	if got["status"] != "issue_status" || got["issue_state"] != "closed" {
+		t.Fatalf("status output = %+v", got)
+	}
+	if got["issue_id"] != "105" || got["title"] != "Replay miss must fail closed" {
+		t.Fatalf("issue identity = %+v", got)
+	}
+	if got["legacy_id"] != "2026-07-05T021109Z-replay-miss" {
+		t.Fatalf("legacy id = %+v", got)
+	}
+}
+
+func TestGitopsIssueCreateUsesNativeTicketProvider(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	var payload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/repos/o/r/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		writeJSON(w, map[string]any{
+			"number":   106,
+			"html_url": "https://github.com/o/r/issues/106",
+		})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("gitops issue-create must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
+
+	cmd := gitopsCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{
+		"issue-create",
+		"--repo", "o/r",
+		"--title", "Replay miss must fail closed",
+		"--body", "Replay sessions must never fall through to a live agent.",
+		"--labels", "bug,source-autonomous",
+		"--severity", "P1",
+		"--trace-ref", "trace://105",
+		"--legacy-id", "2026-07-05T021109Z-replay-miss",
+		"--json",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("issue-create: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out.String())
+	}
+	if got["status"] != "issue_created" || got["issue_id"] != "106" || got["issue_state"] != "created" {
+		t.Fatalf("create output = %+v", got)
+	}
+	if got["issue_url"] != "https://github.com/o/r/issues/106" {
+		t.Fatalf("issue url = %+v", got)
+	}
+	labels := anyStringsFromInterface(payload["labels"])
+	for _, want := range []string{"bug", "source-autonomous", "P1"} {
+		if !containsString(labels, want) {
+			t.Fatalf("labels %v missing %q", labels, want)
+		}
+	}
+	body, _ := payload["body"].(string)
+	for _, want := range []string{"Replay sessions", "trace_ref: trace://105", "legacy_id: 2026-07-05T021109Z-replay-miss"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q:\n%s", want, body)
+		}
+	}
+}
 
 func TestGitopsGHAgentGateRequiresIndependentVerify(t *testing.T) {
 	result := map[string]any{
@@ -290,4 +414,24 @@ func TestGitopsCloseoutFixedIssuesCommentsClosesAndPersistsState(t *testing.T) {
 	if len(secondComments) != 1 {
 		t.Fatalf("second closeout duplicated comments: %+v", secondComments)
 	}
+}
+
+func anyStringsFromInterface(value any) []string {
+	values, _ := value.([]any)
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

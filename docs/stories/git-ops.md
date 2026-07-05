@@ -55,6 +55,15 @@ the merge is always fast-forwardable and can never itself conflict.
 `git push`, or `git checkout`. All git commands are driven by the story's
 deterministic effects.
 
+**Native ticket operations.** When kitsoki-dev needs GitHub issue state or
+issue creation from the git-ops hub, it routes through the `ticket` interface
+bound to `host.gh.ticket`; agents should not shell out to `gh issue ...`.
+The CLI mirrors that native surface for automation and debugging:
+`kitsoki gitops issue-status --repo owner/repo --id N --json` and
+`kitsoki gitops issue-create --repo owner/repo --title ... --body ... --json`.
+Both use the same GitHub REST-backed ticket provider as story flows, preserving
+metadata and testability.
+
 ## Rooms
 
 | Room | Purpose |
