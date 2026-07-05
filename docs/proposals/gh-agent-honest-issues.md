@@ -1,6 +1,6 @@
 # Runtime: Honest gh-agent issue dispatch
 
-**Status:** Draft v1. Task 0 (interim honesty fix) shipped — see
+**Status:** Draft v1. Task 0 (interim honesty fix) shipped at `13d0fa91` — see
 `internal/ghagent/dispatch.go` (`RunResult.Stubbed`/`StubReason`,
 `Dispatcher.dispatchRouted`'s honest prose branch) and
 `internal/ghagent/dispatch_e2e_test.go` (`TestDispatchStubbedRunNeverSaysDone`
