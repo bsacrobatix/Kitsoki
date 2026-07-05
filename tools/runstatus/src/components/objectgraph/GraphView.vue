@@ -6,8 +6,17 @@
 import cytoscape, { type Core } from "cytoscape";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { ObjectGraph } from "../../data/objectgraph.js";
-import { cytoscapeStyle, toElements } from "./graph-elements.js";
+import { lifecycleLabel } from "./catalog-model.js";
+import { cytoscapeStyle, LIFECYCLE_COLORS, toElements } from "./graph-elements.js";
 import { defaultLayoutId, findLayout, layouts } from "./layouts.js";
+
+// Same buckets as lifecycleBucket's possible outputs (catalog-model.ts) —
+// the legend documents exactly what each node color means, nothing more.
+const legend = (["available", "active", "proof", "roadmap", "candidate"] as const).map((bucket) => ({
+  bucket,
+  color: LIFECYCLE_COLORS[bucket],
+  label: lifecycleLabel(bucket),
+}));
 
 const props = withDefaults(
   defineProps<{
@@ -74,6 +83,12 @@ defineExpose({ layoutId, layouts });
           <option v-for="layout in layouts" :key="layout.id" :value="layout.id">{{ layout.label }}</option>
         </select>
       </label>
+      <ul class="graph-view__legend" data-testid="graph-view-legend">
+        <li v-for="entry in legend" :key="entry.bucket">
+          <span class="graph-view__swatch" :style="{ background: entry.color }"></span>
+          {{ entry.label }}
+        </li>
+      </ul>
       <span class="graph-view__count" data-testid="graph-view-count">
         {{ graph.nodes.length }} nodes / {{ graph.edges.length }} edges
       </span>
@@ -92,7 +107,8 @@ defineExpose({ layoutId, layouts });
 .graph-view__toolbar {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
   padding: 0.4rem 0.6rem;
   border-bottom: 1px solid #d8ddd6;
   font-size: 0.8rem;
@@ -101,6 +117,28 @@ defineExpose({ layoutId, layouts });
   display: flex;
   align-items: center;
   gap: 0.35rem;
+}
+.graph-view__legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.graph-view__legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: #46534d;
+}
+.graph-view__swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid rgb(0 0 0 / 15%);
 }
 .graph-view__count {
   color: #667;
