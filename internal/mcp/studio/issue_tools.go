@@ -70,9 +70,9 @@ type IssueResult struct {
 }
 
 // IssueFiler is the injectable issue-creation seam. Production (cmd/kitsoki)
-// shells to `gh issue create`; a test injects a fake that records the request
-// and returns a canned result — no network, no LLM. Nil → issue.create returns
-// ErrIssueUnavailable.
+// routes through Kitsoki's native GitHub issue filing; tests inject fakes that
+// record the request and return canned results with no network or LLM. Nil →
+// issue.create returns ErrIssueUnavailable.
 type IssueFiler func(ctx context.Context, req IssueRequest) (IssueResult, error)
 
 // WithIssueFiler injects the issue-creation seam. Without it, issue.create is

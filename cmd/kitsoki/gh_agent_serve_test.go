@@ -498,21 +498,23 @@ func TestGHAgentReconcileEscalatesStuckJobs(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE gh_jobs SET updated_at=?, attempt_count=1 WHERE job_id=?`, old, job.JobID); err != nil {
 		t.Fatalf("age job: %v", err)
 	}
-	restore := host.SetExecRunnerForTest(func(_ context.Context, _ string, name string, args ...string) (string, string, int, error) {
-		if name != "gh" {
-			t.Fatalf("unexpected command %q", name)
+	t.Setenv("GH_TOKEN", "test-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/repos/o/r/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
-		joined := strings.Join(args, " ")
-		switch {
-		case strings.HasPrefix(joined, "--version"):
-			return "gh version 2.0.0", "", 0, nil
-		case strings.HasPrefix(joined, "issue create"):
-			return "https://github.com/o/r/issues/501\n", "", 0, nil
-		default:
-			t.Fatalf("unexpected gh args: %s", joined)
-			return "", "", 1, nil
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
 		}
-	})
+		if !strings.Contains(payload["title"].(string), "gh-agent incident") {
+			t.Fatalf("title=%v", payload["title"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number":501,"html_url":"https://github.com/o/r/issues/501"}`))
+	}))
+	defer srv.Close()
+	restore := host.SetGitHubAPIForTest(srv.URL, srv.Client())
 	defer restore()
 	if err := runGHAgentReconcileOnce(ctx, store, ghAgentServeOptions{
 		Repo:          "o/r",

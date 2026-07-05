@@ -253,7 +253,7 @@ func TestIssueCreate_FallbackToArtifactsOnFilingError(t *testing.T) {
 	dir := t.TempDir()
 	sess := studio.NewStudioSession(replayBuilder())
 	failing := func(_ context.Context, _ studio.IssueRequest) (studio.IssueResult, error) {
-		return studio.IssueResult{}, errors.New("gh issue create: HTTP 403: Resource not accessible by integration")
+		return studio.IssueResult{}, errors.New("github issue create: HTTP 403: Resource not accessible by integration")
 	}
 	srv := studio.NewServer(sess,
 		studio.WithIssueFiler(failing),

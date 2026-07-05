@@ -52,6 +52,7 @@ lexical-sort prefix.
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -143,9 +144,8 @@ def file_feature_issue_github(slug: str, title: str, idea: str, design_rel: str,
     instead of an issues/features/<id>.md file.
 
     Labels target:kitsoki + comp:proposal (the GitHub twin of the local
-    format's component: proposal). Returns (issue_number, issue_url). Mirrors
-    the Go host.gh.ticket create op: ensure the labels exist (best-effort), and
-    degrade to an unlabelled file if the caller lacks triage.
+    format's component: proposal). Returns (issue_number, issue_url). Routes
+    through Kitsoki's native GitHub filing path instead of shelling out to gh.
     """
     ticket_title = title.strip() or slug
     body_idea = idea.strip()
@@ -157,25 +157,20 @@ def file_feature_issue_github(slug: str, title: str, idea: str, design_rel: str,
         "proposal carries the full Why / What changes / Impact spine — read it "
         "before starting implementation.\n"
     )
-    labels = ["target:kitsoki", "comp:proposal"]
-    for lab in labels:
-        color = "1d76db" if lab.startswith("target:") else "d4c5f9"
-        subprocess.run(
-            ["gh", "label", "create", lab, "--repo", repo, "--color", color, "--force"],
-            capture_output=True, text=True,
-        )
-    args = ["gh", "issue", "create", "--repo", repo, "--title", ticket_title, "--body", body]
-    for lab in labels:
-        args += ["--label", lab]
+    kitsoki = shlex.split(os.environ.get("KITSOKI_BIN", "go run ./cmd/kitsoki"))
+    args = kitsoki + [
+        "bug", "create",
+        "--github", repo,
+        "--target", "kitsoki",
+        "--title", ticket_title,
+        "--body", body,
+        "--component", "proposal",
+        "--severity", "P3",
+        "--trace-ref", design_rel,
+    ]
     res = subprocess.run(args, capture_output=True, text=True)
     if res.returncode != 0:
-        # Degrade to an unlabelled issue (a fork contributor without triage).
-        res = subprocess.run(
-            ["gh", "issue", "create", "--repo", repo, "--title", ticket_title, "--body", body],
-            capture_output=True, text=True,
-        )
-        if res.returncode != 0:
-            raise RuntimeError("gh issue create failed: " + res.stderr.strip())
+        raise RuntimeError("kitsoki bug create --github failed: " + res.stderr.strip())
     url = res.stdout.strip().splitlines()[-1].strip()
     number = url.rstrip("/").rsplit("/", 1)[-1]
     return number, url

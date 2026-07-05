@@ -102,9 +102,10 @@ python3 tools/product-journey/run.py --file-findings --run-dir <run-dir> \
 ```
 
    This drives `kitsoki bug file-findings` (host.GitHubFileFindings), the same
-   artifact-preserving orchestration as web Report-bug / TUI `/bug`: evidence
-   uploads as release assets, the issue gets an `## Artifacts` section +
-   kitsoki metadata block, and the issue URL is written back into
+   artifact-preserving orchestration as web Report-bug / TUI `/bug`: native
+   GitHub API filing uses `GH_TOKEN` / `GITHUB_TOKEN`, evidence uploads as
+   release assets, the issue gets an `## Artifacts` section + kitsoki metadata
+   block, and the issue URL is written back into
    `findings.json` (`item.github_issue`) so re-runs are idempotent. Never file
    these findings with raw `gh issue create` or text-only `issue_create` —
    that drops the evidence. Once filing is requested, review/validate gate on
