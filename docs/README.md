@@ -81,6 +81,10 @@ live in the sections above.
   working kitsoki environment (instance + studio MCP + skill/agent toolkit) in
   your own repo; backed by the dev-story
   [`init` pipeline](stories/dev-story-onboarding.md).
+- [`workflows/`](workflows/README.md) — canonical "how a user does this" doc
+  per core developer workflow (PRD/design, decompose→implement, file a bug,
+  fix a bug), one per surface (TUI/web/VS Code/gh-agent) where the steps
+  actually differ.
 - [`contributor-setup.md`](contributor-setup.md) — build Kitsoki from source and
   set up this checkout for development.
 - [`case-studies/`](case-studies/README.md) — worked examples of

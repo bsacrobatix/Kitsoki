@@ -77,85 +77,85 @@ cells:
     surface: tui
     repo: kitsoki-dev
     status: works
-    reason: "prd story (33 flows) + design rooms (~20 flows)"
+    reason: "prd story (33 flows) + design rooms (~20 flows). Canonical doc: docs/workflows/prd-and-design.md"
   - workflow: prd-proposal
     surface: web
     repo: kitsoki-dev
     status: proof-thin
-    reason: "drivable (PRD demo exists) but free-text composer routing unfinished"
+    reason: "drivable (PRD demo exists) but free-text composer routing unfinished. Canonical doc: docs/workflows/prd-and-design.md"
   - workflow: prd-proposal
     surface: vscode
     repo: kitsoki-dev
     status: proof-thin
-    reason: "PRD demo spec exists (vscode-prd-demo.e2e.spec.ts); v0.1.0 extension"
+    reason: "PRD demo spec exists (vscode-prd-demo.e2e.spec.ts); v0.1.0 extension. Canonical doc: docs/workflows/prd-and-design.md"
   - workflow: prd-proposal
     surface: gh-agent
     repo: kitsoki-dev
     status: gap
-    reason: "no label→prd/design route"
+    reason: "no label→prd/design route. Canonical doc: docs/workflows/prd-and-design.md"
 
   - workflow: decompose-implement
     surface: tui
     repo: kitsoki-dev
-    status: gap
-    reason: "fragmented: skill vs deliver (5 flows, no README) vs decompose-update (1) vs fleet (1); impl story thin (9 flows)"
+    status: works
+    reason: "deliver is the canonical chain (schema+lint absorption, budgeted refine loop, adversarial review, managed re-decompose; 11 flows) wired into dev-story (go_deliver on landing/design_done + design_to_decompose_to_impl e2e flow); fleet still thin (1 flow). Canonical doc: docs/workflows/decompose-and-implement.md"
   - workflow: decompose-implement
     surface: web
     repo: kitsoki-dev
-    status: gap
-    reason: "same fragmentation as TUI + no web proof"
+    status: proof-thin
+    reason: "Playwright walk of the dev-story decompose fixture via kitsoki web --flow (deliver-decompose-walk.spec.ts) — one happy-path proof; red paths unproven on web. Canonical doc: docs/workflows/decompose-and-implement.md"
   - workflow: decompose-implement
     surface: vscode
     repo: kitsoki-dev
-    status: gap
-    reason: "same fragmentation as TUI + no VS Code proof"
+    status: proof-thin
+    reason: "extension e2e spec of the same walk (vscode-deliver-decompose-walk.e2e.spec.ts, real VS Code via kitsoki.flow settings) — one happy-path proof. Canonical doc: docs/workflows/decompose-and-implement.md"
   - workflow: decompose-implement
     surface: gh-agent
     repo: kitsoki-dev
     status: gap
-    reason: "no route"
+    reason: "no route. Canonical doc: docs/workflows/decompose-and-implement.md"
 
   - workflow: file-bug
     surface: tui
     repo: kitsoki-dev
     status: works
-    reason: "/bug meta modes + CLI, host tests"
+    reason: "/bug meta modes + CLI, host tests. Canonical doc: docs/workflows/file-a-bug.md"
   - workflow: file-bug
     surface: web
     repo: kitsoki-dev
     status: works
-    reason: "Report Bug modal shipped (proposal doc stale)"
+    reason: "Report Bug modal shipped (proposal doc stale). Canonical doc: docs/workflows/file-a-bug.md"
   - workflow: file-bug
     surface: vscode
     repo: kitsoki-dev
     status: proof-thin
-    reason: "rides web SPA in webview; no dedicated proof"
+    reason: "rides web SPA in webview; no dedicated proof. Canonical doc: docs/workflows/file-a-bug.md"
   - workflow: file-bug
     surface: gh-agent
     repo: kitsoki-dev
     status: works
-    reason: "bug-report deck auto-trigger shipped"
+    reason: "bug-report deck auto-trigger shipped. Canonical doc: docs/workflows/file-a-bug.md"
 
   - workflow: fix-bug
     surface: tui
     repo: kitsoki-dev
     status: proof-thin
-    reason: "bugfix mature (63 flows, triage mode) but silent-bounce reliability warranted its own debugging skill"
+    reason: "bugfix mature (80+ flows, triage mode) but silent-bounce reliability warranted its own debugging skill. Canonical doc: docs/workflows/fix-a-bug.md"
   - workflow: fix-bug
     surface: web
     repo: kitsoki-dev
     status: proof-thin
-    reason: "drivable; staged-gate & pace issues historically"
+    reason: "drivable; staged-gate & pace issues historically. Canonical doc: docs/workflows/fix-a-bug.md"
   - workflow: fix-bug
     surface: vscode
     repo: kitsoki-dev
     status: proof-thin
-    reason: "rides web SPA; untested for full pipeline"
+    reason: "rides web SPA; untested for full pipeline. Canonical doc: docs/workflows/fix-a-bug.md"
   - workflow: fix-bug
     surface: gh-agent
     repo: kitsoki-dev
-    status: gap
-    reason: "dispatch is stubbed beats — honesty Task 0 shipped, real dispatch (Tasks 1–4) unstarted; per-job KITSOKI_APP_DIR isolation blocks concurrency"
+    status: proof-thin
+    reason: "real dispatch of stories/bugfix landed (realDispatchPlan, per-job worktree, APP_DIR races scoped to the load span); no triage-only label route yet and end-to-end proof is thin. Canonical doc: docs/workflows/fix-a-bug.md"
 
   # ── gears-rust — the acid test; nothing exercised there yet (plan §1
   #    table is kitsoki-dev truth; every WS exit requires a gears-rust run) ──
@@ -184,82 +184,82 @@ cells:
     surface: tui
     repo: gears-rust
     status: gap
-    reason: "not yet exercised on gears-rust (thin @kitsoki/dev-story instance run pending)"
+    reason: "not yet exercised on gears-rust (thin @kitsoki/dev-story instance run pending). Canonical doc: docs/workflows/prd-and-design.md"
   - workflow: prd-proposal
     surface: web
     repo: gears-rust
     status: gap
-    reason: "not yet exercised on gears-rust"
+    reason: "not yet exercised on gears-rust. Canonical doc: docs/workflows/prd-and-design.md"
   - workflow: prd-proposal
     surface: vscode
     repo: gears-rust
     status: gap
-    reason: "not yet exercised on gears-rust"
+    reason: "not yet exercised on gears-rust. Canonical doc: docs/workflows/prd-and-design.md"
   - workflow: prd-proposal
     surface: gh-agent
     repo: gears-rust
     status: gap
-    reason: "no label→prd/design route; nothing exercised on gears-rust"
+    reason: "no label→prd/design route; nothing exercised on gears-rust. Canonical doc: docs/workflows/prd-and-design.md"
 
   - workflow: decompose-implement
     surface: tui
     repo: gears-rust
     status: gap
-    reason: "not yet exercised on gears-rust (WS-B exit: epic → briefs → branches with no-LLM replay)"
+    reason: "not yet exercised on gears-rust (WS-B exit: epic → briefs → branches with no-LLM replay). Canonical doc: docs/workflows/decompose-and-implement.md"
   - workflow: decompose-implement
     surface: web
     repo: gears-rust
     status: gap
-    reason: "not yet exercised on gears-rust"
+    reason: "not yet exercised on gears-rust. Canonical doc: docs/workflows/decompose-and-implement.md"
   - workflow: decompose-implement
     surface: vscode
     repo: gears-rust
     status: gap
-    reason: "not yet exercised on gears-rust"
+    reason: "not yet exercised on gears-rust. Canonical doc: docs/workflows/decompose-and-implement.md"
   - workflow: decompose-implement
     surface: gh-agent
     repo: gears-rust
     status: gap
-    reason: "no route; nothing exercised on gears-rust"
+    reason: "no route; nothing exercised on gears-rust. Canonical doc: docs/workflows/decompose-and-implement.md"
 
   - workflow: file-bug
     surface: tui
     repo: gears-rust
     status: gap
-    reason: "not yet exercised on gears-rust (needs WS-A A2 external ticket-repo passthrough)"
+    reason: "not yet exercised on gears-rust (needs WS-A A2 external ticket-repo passthrough). Canonical doc: docs/workflows/file-a-bug.md"
   - workflow: file-bug
     surface: web
     repo: gears-rust
     status: gap
-    reason: "not yet exercised on gears-rust"
+    reason: "not yet exercised on gears-rust. Canonical doc: docs/workflows/file-a-bug.md"
   - workflow: file-bug
     surface: vscode
     repo: gears-rust
     status: gap
-    reason: "not yet exercised on gears-rust"
+    reason: "not yet exercised on gears-rust. Canonical doc: docs/workflows/file-a-bug.md"
   - workflow: file-bug
     surface: gh-agent
     repo: gears-rust
     status: gap
-    reason: "not yet exercised on gears-rust (WS-E E3: labeled gears-rust issue → honest triage verdict)"
+    reason: "not yet exercised on gears-rust (WS-E E3: labeled gears-rust issue → honest triage verdict). Canonical doc: docs/workflows/file-a-bug.md"
 
   - workflow: fix-bug
     surface: tui
     repo: gears-rust
     status: gap
-    reason: "not yet exercised on gears-rust (needs WS-A A2 external ticket-repo passthrough)"
+    reason: "not yet exercised on gears-rust (needs WS-A A2 external ticket-repo passthrough). Canonical doc: docs/workflows/fix-a-bug.md"
   - workflow: fix-bug
     surface: web
     repo: gears-rust
     status: gap
-    reason: "not yet exercised on gears-rust"
+    reason: "not yet exercised on gears-rust. Canonical doc: docs/workflows/fix-a-bug.md"
   - workflow: fix-bug
     surface: vscode
     repo: gears-rust
     status: gap
-    reason: "not yet exercised on gears-rust"
+    reason: "not yet exercised on gears-rust. Canonical doc: docs/workflows/fix-a-bug.md"
   - workflow: fix-bug
     surface: gh-agent
     repo: gears-rust
     status: gap
-    reason: "stubbed beats + nothing exercised on gears-rust (WS-E exit: real triage/fix on a gears-rust issue)"
+    reason: "real dispatch exists but nothing exercised on gears-rust (WS-E exit: real triage/fix on a gears-rust issue). Canonical doc: docs/workflows/fix-a-bug.md"

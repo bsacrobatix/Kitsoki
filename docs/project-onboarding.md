@@ -234,6 +234,14 @@ automatically.
 
 ---
 
+## Next steps — the workflows onboarding unlocks
+
+Once onboarded, [`workflows/README.md`](workflows/README.md) covers the five
+core developer workflows — writing a PRD/design, decomposing an epic into
+implemented briefs, filing a bug, and fixing one — with the steps for each
+of the TUI, web, VS Code, and gh-agent surfaces, and truthful current-state
+caveats per surface.
+
 ## See also
 
 - [getting-started.md](getting-started.md) — install the binary, choose an agent

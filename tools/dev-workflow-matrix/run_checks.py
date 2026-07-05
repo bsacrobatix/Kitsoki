@@ -16,14 +16,16 @@ also make sense if a future spec wired these same suites through arena
 deliberately the simplest thing that works.
 
 Scope (WS-F F1 exit: "start with the cells that have real runnable proofs
-today"): the four story flow suites the plan names directly — `prd` (33
-flows), `bugfix` (63 flows), `dev-story` (86 flows, covers onboarding), and
-`deliver` (11 flows, the decompose→implement chain candidate per WS-B B2) —
-plus one product-journey `--driver-replay-smoke` pass as a first
-`journey-verdict` (experience-class) pilot. `go run ./cmd/kitsoki test
-routing` does not exist yet (checked 2026-07-05; only `test intents`/`test
-flows`/`test flow-coverage` are wired) so the routing-fixture check named in
-the task is deliberately NOT included here — add it once that CLI lands.
+today"): the four story flow suites the plan names directly — `prd`,
+`bugfix`, `dev-story` (covers onboarding), and `deliver` (the
+decompose→implement chain per WS-B) — plus one product-journey
+`--driver-replay-smoke` pass as a first `journey-verdict`
+(experience-class) pilot. Flow counts move fast; run the suite for the
+current number rather than trusting any figure written here. `go run
+./cmd/kitsoki test routing` now exists (landed with WS-C C2), but its
+default glob also picks up legacy landing_freeform/landing_proposal
+fixtures in dev-story that fail pre-existing — add a routing check scoped
+to the C2 fixture files (--intents) once those legacy fixtures are triaged.
 
 Usage:
   python3 tools/dev-workflow-matrix/run_checks.py                      # run all, write verdicts
@@ -84,7 +86,7 @@ CHECKS: list[CheckDef] = [
         repo="kitsoki-dev",
         check_type="replay",
         command=["go", "run", "./cmd/kitsoki", "test", "flows", "stories/bugfix/app.yaml"],
-        summary="bugfix flow suite (63 flows, triage mode)",
+        summary="bugfix flow suite (full glob, triage mode included)",
     ),
     CheckDef(
         workflow="decompose-implement",
