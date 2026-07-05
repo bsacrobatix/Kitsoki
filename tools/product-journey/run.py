@@ -57,6 +57,32 @@ STAGES = [
     "file_product_issue",
     "score_and_report",
 ]
+TRANSPORT_IDS = ["tui", "web", "vscode"]
+# Evidence contract per transport leg: which MCP-visible tool primarily backs
+# the leg's evidence, the evidence kind that names it, and how strong the
+# proof is. vscode is always bridge-level -- the IDE bridge stub/recording
+# path, never a genuine editor -- so a driver/report never mistakes it for
+# editor-level coverage (see docs/proposals/e2e-persona-qa-review.md G7).
+TRANSPORT_EVIDENCE_CONTRACTS = {
+    "tui": {
+        "primary_tool": "render.tui_png",
+        "evidence_kind": "rendered_tui_frame",
+        "level": "frame-level",
+        "capture_hint": "Capture render.tui_png frames before and after the interaction under test.",
+    },
+    "web": {
+        "primary_tool": "visual.snapshot",
+        "evidence_kind": "browser_screenshot",
+        "level": "frame-level",
+        "capture_hint": "Capture a visual.snapshot or rrweb recording of the browser surface.",
+    },
+    "vscode": {
+        "primary_tool": "visual.open (kind=vscode)",
+        "evidence_kind": "screenshot_or_tui_png",
+        "level": "bridge-level",
+        "capture_hint": "Open the VS Code bridge surface with visual.open kind=vscode; label this evidence bridge-level, not editor-level.",
+    },
+}
 
 
 def load_catalog(path: Path):
@@ -107,6 +133,32 @@ def select_scenarios(scenarios: list[dict], scenario_filter: str) -> list[dict]:
         raise SystemExit(f"--scenarios contains unknown active scenario id(s): {', '.join(unknown)}. Known active scenarios: {known}")
 
     return [by_id[scenario_id] for scenario_id in requested]
+
+
+def select_transports(transport_filter: str) -> list[str]:
+    """Validate and normalize a --transport CLI value into an ordered id list.
+
+    Mirrors select_scenarios()'s dup/unknown-id validation shape. An empty
+    filter returns [] (today's byte-compatible, transport-unaware behavior);
+    "all" (or any request that includes it) expands to every known transport.
+    """
+    requested = [item.strip() for item in transport_filter.split(",") if item.strip()]
+    if not requested:
+        return []
+
+    if "all" in requested:
+        return list(TRANSPORT_IDS)
+
+    duplicates = sorted({item for item in requested if requested.count(item) > 1})
+    if duplicates:
+        raise SystemExit(f"--transport contains duplicate transport id(s): {', '.join(duplicates)}")
+
+    unknown = [item for item in requested if item not in TRANSPORT_IDS]
+    if unknown:
+        known = ", ".join(TRANSPORT_IDS + ["all"])
+        raise SystemExit(f"--transport contains unknown transport id(s): {', '.join(unknown)}. Known transports: {known}")
+
+    return requested
 
 
 def load_github_targets(path: Path):
@@ -574,7 +626,7 @@ def stage_plan(project: dict, scenarios: list[dict]) -> list[dict]:
 def scenario_plan(scenarios: list[dict]) -> list[dict]:
     planned = []
     for scenario in scenarios:
-        planned.append({
+        item = {
             "id": scenario["id"],
             "label": scenario["label"],
             "stage": scenario["stage"],
@@ -586,7 +638,10 @@ def scenario_plan(scenarios: list[dict]) -> list[dict]:
             "status": "planned",
             "evidence_status": "missing",
             "artifacts": {},
-        })
+        }
+        if scenario.get("transports"):
+            item["transports"] = scenario["transports"]
+        planned.append(item)
     return planned
 
 
@@ -678,6 +733,7 @@ def build_run_bundle(
     mode: str,
     publish_deck: Optional[Path],
     live_budget_minutes: int = 20,
+    transports: Optional[list[str]] = None,
 ) -> tuple[Path, dict]:
     if live_budget_minutes < 0:
         raise SystemExit("--live-budget-minutes must be >= 0")
@@ -746,10 +802,12 @@ def build_run_bundle(
         run_json["notes"].append(
             "This project came from the GitHub matrix; refresh open bug counts before a live scored sweep."
         )
+    if transports:
+        run_json["transports"] = list(transports)
     evidence = evidence_plan(run_json)
     media_manifest = build_media_manifest(run_json, evidence)
-    execution_plan = build_execution_plan(run_json, evidence)
-    driver_plan = build_driver_plan(run_json, evidence, execution_plan)
+    execution_plan = build_execution_plan(run_json, evidence, transports)
+    driver_plan = build_driver_plan(run_json, evidence, execution_plan, transports)
     agent_brief = build_agent_brief(run_json, evidence, execution_plan)
     findings = {"run_id": run_id, "items": [], "summary": {"strength": 0, "weakness": 0, "issue": 0, "fix": 0}}
     driver_journal = build_driver_journal(run_id, [])
@@ -1363,6 +1421,22 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
         unknown_mcp = sorted(set(scenario.get("required_mcp", [])) - allowed_mcp)
         if unknown_mcp:
             add_corpus_issue(issues, "error", "scenario-mcp", "Scenario requires unknown MCP tools", f"{scenario_id}: {', '.join(unknown_mcp)}")
+        declared_transports = scenario.get("transports")
+        if declared_transports:
+            unknown_transports = sorted(set(declared_transports.get("allowed", [])) - set(TRANSPORT_IDS))
+            if unknown_transports:
+                add_corpus_issue(issues, "error", "scenario-transports-allowed", "Scenario declares unknown transport id(s)", f"{scenario_id}: {', '.join(unknown_transports)}")
+            required_not_allowed = sorted(set(declared_transports.get("required", [])) - set(declared_transports.get("allowed", [])))
+            if required_not_allowed:
+                add_corpus_issue(issues, "error", "scenario-transports-required", "Scenario requires transport(s) it does not allow", f"{scenario_id}: {', '.join(required_not_allowed)}")
+            overrides = declared_transports.get("overrides", {}) or {}
+            unknown_override_transports = sorted(set(overrides.keys()) - set(declared_transports.get("allowed", [])))
+            if unknown_override_transports:
+                add_corpus_issue(issues, "error", "scenario-transports-overrides", "Scenario overrides a transport it does not allow", f"{scenario_id}: {', '.join(unknown_override_transports)}")
+            for transport, override in overrides.items():
+                unknown_override_mcp = sorted(set(override.get("required_mcp", [])) - allowed_mcp)
+                if unknown_override_mcp:
+                    add_corpus_issue(issues, "error", "scenario-transports-override-mcp", "Scenario transport override requires unknown MCP tools", f"{scenario_id}/{transport}: {', '.join(unknown_override_mcp)}")
         if not scenario.get("success_criteria"):
             add_corpus_issue(issues, "error", "scenario-success-criteria", "Scenario must have success criteria", scenario_id)
         if not scenario.get("evidence"):
@@ -1498,6 +1572,89 @@ def driver_visual_surface(primary_story: str, required_mcp: list[str]) -> str:
     if "visual.observe" in required_mcp:
         return "web-or-tui"
     return "artifact"
+
+
+def default_scenario_transports(scenario: dict) -> dict:
+    """Derive an implicit transports contract from a scenario's required_mcp.
+
+    Scenarios authored before the `transports` field existed, and every mined
+    scenario (generated from session transcripts rather than hand-authored),
+    don't declare it. This mirrors driver_visual_surface()'s existing
+    single-surface inference so a scenario missing the field keeps behaving
+    exactly as it did before --transport existed, and only gains additional
+    transports when it explicitly opts in via scenarios.json.
+    """
+    surface = driver_visual_surface(scenario.get("primary_story", ""), scenario.get("required_mcp", []))
+    if surface == "web":
+        allowed = ["web"]
+    elif surface == "tui":
+        allowed = ["tui"]
+    elif surface == "web-or-tui":
+        allowed = ["tui", "web"]
+    else:
+        allowed = []
+    return {"allowed": allowed, "required": list(allowed), "overrides": {}}
+
+
+def resolve_scenario_transports(scenario: dict) -> dict:
+    """Normalize a scenario's transports contract, declared or derived."""
+    declared = scenario.get("transports")
+    if not declared:
+        return default_scenario_transports(scenario)
+    allowed = list(declared.get("allowed", []))
+    required = list(declared.get("required", allowed))
+    overrides = declared.get("overrides", {}) or {}
+    return {"allowed": allowed, "required": required, "overrides": overrides}
+
+
+def scenario_transport_leg(scenario: dict, transport: str) -> dict:
+    """Build a scenario view scoped to one transport leg.
+
+    Applies the scenario's per-transport `overrides` (required_mcp/evidence),
+    falling back to the scenario's base lists, and attaches the transport's
+    evidence contract (capture tool, evidence kind, proof level).
+    """
+    contract = resolve_scenario_transports(scenario)
+    override = contract.get("overrides", {}).get(transport, {})
+    leg = dict(scenario)
+    leg["required_mcp"] = list(override.get("required_mcp", scenario.get("required_mcp", [])))
+    leg["evidence"] = list(override.get("evidence", scenario.get("evidence", [])))
+    leg["transport"] = transport
+    leg["transport_evidence_contract"] = TRANSPORT_EVIDENCE_CONTRACTS[transport]
+    leg["leg_id"] = f"{scenario['id']}::{transport}"
+    return leg
+
+
+def scenario_transport_legs(scenario: dict, transports: list[str]) -> list[dict]:
+    """Expand one scenario into its scenario x transport legs.
+
+    Requested transports outside the scenario's allowed set are skipped
+    rather than erroring -- `--transport all` runs everything applicable to
+    each scenario, it does not force every scenario onto every transport.
+    """
+    allowed = resolve_scenario_transports(scenario).get("allowed", [])
+    applicable = [transport for transport in transports if transport in allowed]
+    return [scenario_transport_leg(scenario, transport) for transport in applicable]
+
+
+def leg_evidence_view(kinds: list[str], tracked_items: list[dict]) -> list[dict]:
+    """Build the evidence-contract view (kind/status/path/hint) for one leg.
+
+    `tracked_items` is the scenario-level evidence.json bookkeeping (still
+    scenario-scoped, not per-transport); kinds not yet tracked show as
+    missing rather than being dropped, so a per-transport evidence override
+    that names a kind the base scenario doesn't track still renders.
+    """
+    tracked = {item["kind"]: item for item in tracked_items}
+    return [
+        {
+            "kind": kind,
+            "status": tracked.get(kind, {}).get("status", "missing"),
+            "path": tracked.get(kind, {}).get("path", ""),
+            "capture_hint": evidence_capture_hint(kind),
+        }
+        for kind in kinds
+    ]
 
 
 def driver_action_sequence(required_mcp: list[str]) -> list[str]:
@@ -1972,71 +2129,116 @@ def render_scenario_outcomes(outcomes: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def build_execution_plan(run_json: dict, evidence: dict) -> dict:
+def _execution_plan_step(
+    order: int,
+    scenario: dict,
+    run_json: dict,
+    run_dir_arg: str,
+    evidence_view: list[dict],
+    required_mcp: list[str],
+    leg: Optional[dict] = None,
+) -> dict:
+    attach_commands = [
+        "python3 tools/product-journey/run.py --attach-evidence "
+        f"--run-dir {run_dir_arg} "
+        f"--scenario {scenario['id']} "
+        f"--evidence-kind {item['kind']} "
+        f"--evidence-path <path-or-retained-id> "
+        "--evidence-source <retained|external|local|cassette> "
+        f"--notes \"{evidence_capture_hint(item['kind'])}\""
+        for item in evidence_view
+    ]
+    record_blocker_command = (
+        "python3 tools/product-journey/run.py --record-blocker "
+        f"--run-dir {run_dir_arg} "
+        f"--scenario {scenario['id']} "
+        "--title <blocker-title> --summary <why-this-scenario-could-not-be-captured> "
+        "--evidence-path <trace-or-frame-path>"
+    )
+    step = {
+        "order": order,
+        "scenario": scenario["id"],
+        "label": scenario["label"],
+        "stage": scenario["stage"],
+        "persona": run_json["persona"]["id"],
+        "project": run_json["project"]["id"],
+        "task": scenario["task"],
+        "task_prompt": scenario.get("task_prompt", scenario["task"]),
+        "primary_story": scenario["primary_story"],
+        "live_budget": scenario_live_budget(run_json, scenario["id"]),
+        "mcp_steps": [
+            {"tool": tool, "instruction": mcp_step(tool)}
+            for tool in required_mcp
+        ],
+        "evidence": evidence_view,
+        "success_criteria": scenario["success_criteria"],
+        "quality_gate": scenario_quality_gate(scenario["id"]),
+        "attach_commands": attach_commands,
+        "record_blocker_command": record_blocker_command,
+    }
+    if leg is not None:
+        step["transport"] = leg["transport"]
+        step["leg_id"] = leg["leg_id"]
+        step["transport_evidence_contract"] = leg["transport_evidence_contract"]
+    return step
+
+
+def build_execution_plan(run_json: dict, evidence: dict, transports: Optional[list[str]] = None) -> dict:
+    """Build the execution plan's ordered steps.
+
+    Omitting `transports` (the default) preserves today's byte-compatible
+    output: one step per scenario, no `transport`/`leg_id` keys. Passing a
+    transport list expands each scenario into its scenario x transport legs
+    (scenarios not allowed on a requested transport are skipped for it, not
+    errored), each leg carrying its own required_mcp/evidence contract and a
+    `transport_evidence_contract` describing how that transport's evidence is
+    captured.
+    """
     evidence_by_scenario: dict[str, list[dict]] = {}
     for item in evidence.get("items", []):
         evidence_by_scenario.setdefault(item["scenario"], []).append(item)
 
     run_dir_arg = f".artifacts/product-journey/{run_json['run_id']}"
     steps = []
-    for index, scenario in enumerate(run_json["scenarios"], start=1):
-        evidence_items = evidence_by_scenario.get(scenario["id"], [])
-        attach_commands = [
-            "python3 tools/product-journey/run.py --attach-evidence "
-            f"--run-dir {run_dir_arg} "
-            f"--scenario {scenario['id']} "
-            f"--evidence-kind {item['kind']} "
-            f"--evidence-path <path-or-retained-id> "
-            "--evidence-source <retained|external|local|cassette> "
-            f"--notes \"{evidence_capture_hint(item['kind'])}\""
-            for item in evidence_items
-        ]
-        record_blocker_command = (
-            "python3 tools/product-journey/run.py --record-blocker "
-            f"--run-dir {run_dir_arg} "
-            f"--scenario {scenario['id']} "
-            "--title <blocker-title> --summary <why-this-scenario-could-not-be-captured> "
-            "--evidence-path <trace-or-frame-path>"
-        )
-        steps.append({
-            "order": index,
-            "scenario": scenario["id"],
-            "label": scenario["label"],
-            "stage": scenario["stage"],
-            "persona": run_json["persona"]["id"],
-            "project": run_json["project"]["id"],
-            "task": scenario["task"],
-            "task_prompt": scenario.get("task_prompt", scenario["task"]),
-            "primary_story": scenario["primary_story"],
-            "live_budget": scenario_live_budget(run_json, scenario["id"]),
-            "mcp_steps": [
-                {"tool": tool, "instruction": mcp_step(tool)}
-                for tool in scenario["required_mcp"]
-            ],
-            "evidence": [
-                {
-                    "kind": item["kind"],
-                    "status": item.get("status", "missing"),
-                    "path": item.get("path", ""),
-                    "capture_hint": evidence_capture_hint(item["kind"]),
-                }
-                for item in evidence_items
-            ],
-            "success_criteria": scenario["success_criteria"],
-            "quality_gate": scenario_quality_gate(scenario["id"]),
-            "attach_commands": attach_commands,
-            "record_blocker_command": record_blocker_command,
-        })
+    order = 0
+    scenarios_with_legs = 0
+    for scenario in run_json["scenarios"]:
+        scenario_evidence_items = evidence_by_scenario.get(scenario["id"], [])
+        if not transports:
+            order += 1
+            steps.append(_execution_plan_step(
+                order, scenario, run_json, run_dir_arg,
+                leg_evidence_view(scenario["evidence"], scenario_evidence_items),
+                scenario["required_mcp"],
+            ))
+            continue
+        legs = scenario_transport_legs(scenario, transports)
+        if legs:
+            scenarios_with_legs += 1
+        for leg in legs:
+            order += 1
+            steps.append(_execution_plan_step(
+                order, scenario, run_json, run_dir_arg,
+                leg_evidence_view(leg["evidence"], scenario_evidence_items),
+                leg["required_mcp"],
+                leg=leg,
+            ))
+
+    summary = {
+        "scenario_count": len(steps),
+        "evidence_count": sum(len(step["evidence"]) for step in steps),
+    }
+    if transports:
+        summary["transports"] = list(transports)
+        summary["scenario_count"] = scenarios_with_legs
+        summary["leg_count"] = len(steps)
 
     return {
         "run_id": run_json["run_id"],
         "project": run_json["project"],
         "persona": run_json["persona"],
         "created_at": now_utc(),
-        "summary": {
-            "scenario_count": len(steps),
-            "evidence_count": sum(len(step["evidence"]) for step in steps),
-        },
+        "summary": summary,
         "steps": steps,
         "finalize_commands": [
             f"python3 tools/product-journey/run.py --record-finding --run-dir {run_dir_arg} --finding-kind <strength|weakness|issue|fix> --title <title> --summary <summary>",
@@ -2094,6 +2296,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
                 "evidence": [item["kind"] for item in step["evidence"]],
                 "quality_gate": step.get("quality_gate", scenario_quality_gate(step["scenario"])),
                 "live_budget": step.get("live_budget", scenario_live_budget(run_json, step["scenario"])),
+                **({"transport": step["transport"], "leg_id": step["leg_id"]} if "transport" in step else {}),
             }
             for step in execution_plan.get("steps", [])
         ],
@@ -2102,85 +2305,136 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
     }
 
 
-def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict) -> dict:
+def _driver_plan_evidence_view(kinds: list[str], tracked_items: list[dict]) -> list[dict]:
+    view = leg_evidence_view(kinds, tracked_items)
+    for item in view:
+        item["playback_candidate"] = (
+            media_kind(item["kind"], item["path"]) in {"video", "image"}
+            or item["kind"] in {"browser_screenshot", "key_interaction_video", "screenshot_or_tui_png"}
+        )
+    return view
+
+
+def _driver_plan_entry(
+    scenario: dict,
+    run_json: dict,
+    run_dir_arg: str,
+    lens: dict,
+    step: dict,
+    required_mcp: list[str],
+    evidence_view: list[dict],
+    driver_action_scenario: dict,
+    driver_action_evidence: list[dict],
+    visual_surface: str,
+    leg: Optional[dict] = None,
+) -> dict:
+    scenario_id = scenario["id"]
+    entry = {
+        "scenario": scenario_id,
+        "label": scenario["label"],
+        "stage": scenario["stage"],
+        "primary_story": scenario["primary_story"],
+        "task_prompt": scenario.get("task_prompt", scenario["task"]),
+        "evidence_dir": scenario.get("evidence_dir", f"evidence/{run_json['project']['id']}--{run_json['persona']['id']}/{scenario_id}"),
+        "harness": driver_harness(scenario["primary_story"]),
+        "visual_surface": visual_surface,
+        "live_budget": scenario_live_budget(run_json, scenario_id),
+        "required_mcp": required_mcp,
+        "resolved_mcp_tools": resolved_mcp_tools(required_mcp),
+        "action_sequence": driver_action_sequence(required_mcp),
+        "driver_actions": driver_actions(driver_action_scenario, run_json, driver_action_evidence),
+        "persona_prompts": [
+            f"Act as {run_json['persona']['label']}: {run_json['persona']['description']}",
+            f"Risk focus: {', '.join(run_json['persona'].get('risk_focus', []))}",
+            f"Start from: {lens['starting_surface']}",
+            f"First skepticism check: {lens['first_question']}",
+            f"Escalate when: {lens['escalation_trigger']}",
+            f"Evidence emphasis: {lens['evidence_emphasis']}",
+            "Use natural operator phrasing where route quality or prompt quality is under test.",
+        ],
+        "persona_lens": lens,
+        "evidence": evidence_view,
+        "success_criteria": scenario["success_criteria"],
+        "quality_gate": scenario_quality_gate(scenario_id),
+        "attach_commands": step.get("attach_commands", []),
+        "record_finding_command": (
+            "python3 tools/product-journey/run.py --record-finding "
+            f"--run-dir {run_dir_arg} "
+            "--finding-kind <strength|weakness|issue|fix> "
+            f"--scenario {scenario_id} "
+            "--title <title> --summary <summary> --evidence-path <path-or-retained-id>"
+        ),
+        "record_blocker_command": step.get("record_blocker_command", (
+            "python3 tools/product-journey/run.py --record-blocker "
+            f"--run-dir {run_dir_arg} "
+            f"--scenario {scenario_id} "
+            "--title <blocker-title> --summary <why-this-scenario-could-not-be-captured> "
+            "--evidence-path <trace-or-frame-path>"
+        )),
+        "journal_command": (
+            "python3 tools/product-journey/run.py --record-driver-event "
+            f"--run-dir {run_dir_arg} "
+            f"--scenario {scenario_id} "
+            "--dispatch-mode <replay|record|live> "
+            "--driver-status <attempted|captured|blocked|validated> "
+            "--mcp-tools <comma-separated-tools-used> "
+            "--evidence-refs <comma-separated-paths-or-retained-ids> "
+            "--blockers <comma-separated-blockers-if-any> "
+            "--summary <what-the-driver-actually-tried>"
+        ),
+    }
+    if leg is not None:
+        entry["transport"] = leg["transport"]
+        entry["leg_id"] = leg["leg_id"]
+        entry["transport_evidence_contract"] = leg["transport_evidence_contract"]
+    return entry
+
+
+def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict, transports: Optional[list[str]] = None) -> dict:
+    """Build the driver plan's per-scenario (or per-leg) dispatch contracts.
+
+    Omitting `transports` preserves today's byte-compatible output: one entry
+    per scenario, `visual_surface` inferred by driver_visual_surface(). Passing
+    a transport list expands each scenario into its scenario x transport legs,
+    with `visual_surface` pinned to the leg's transport instead of inferred,
+    and required_mcp/evidence taken from that leg's contract.
+    """
     lens = persona_lens(run_json["persona"])
     evidence_by_scenario: dict[str, list[dict]] = {}
     for item in evidence.get("items", []):
         evidence_by_scenario.setdefault(item["scenario"], []).append(item)
-    steps_by_scenario = {
-        step["scenario"]: step
+    steps_by_leg = {
+        (step["scenario"], step.get("transport")): step
         for step in execution_plan.get("steps", [])
     }
     run_dir_arg = f".artifacts/product-journey/{run_json['run_id']}"
     scenarios = []
     for scenario in run_json["scenarios"]:
         scenario_id = scenario["id"]
-        required_mcp = scenario.get("required_mcp", [])
-        evidence_items = evidence_by_scenario.get(scenario_id, [])
-        step = steps_by_scenario.get(scenario_id, {})
-        scenarios.append({
-            "scenario": scenario_id,
-            "label": scenario["label"],
-            "stage": scenario["stage"],
-            "primary_story": scenario["primary_story"],
-            "task_prompt": scenario.get("task_prompt", scenario["task"]),
-            "evidence_dir": scenario.get("evidence_dir", f"evidence/{run_json['project']['id']}--{run_json['persona']['id']}/{scenario_id}"),
-            "harness": driver_harness(scenario["primary_story"]),
-            "visual_surface": driver_visual_surface(scenario["primary_story"], required_mcp),
-            "live_budget": scenario_live_budget(run_json, scenario_id),
-            "required_mcp": required_mcp,
-            "resolved_mcp_tools": resolved_mcp_tools(required_mcp),
-            "action_sequence": driver_action_sequence(required_mcp),
-            "driver_actions": driver_actions(scenario, run_json, evidence_items),
-            "persona_prompts": [
-                f"Act as {run_json['persona']['label']}: {run_json['persona']['description']}",
-                f"Risk focus: {', '.join(run_json['persona'].get('risk_focus', []))}",
-                f"Start from: {lens['starting_surface']}",
-                f"First skepticism check: {lens['first_question']}",
-                f"Escalate when: {lens['escalation_trigger']}",
-                f"Evidence emphasis: {lens['evidence_emphasis']}",
-                "Use natural operator phrasing where route quality or prompt quality is under test.",
-            ],
-            "persona_lens": lens,
-            "evidence": [
-                {
-                    "kind": item["kind"],
-                    "status": item.get("status", "missing"),
-                    "path": item.get("path", ""),
-                    "capture_hint": evidence_capture_hint(item["kind"]),
-                    "playback_candidate": media_kind(item["kind"], item.get("path", "")) in {"video", "image"} or item["kind"] in {"browser_screenshot", "key_interaction_video", "screenshot_or_tui_png"},
-                }
-                for item in evidence_items
-            ],
-            "success_criteria": scenario["success_criteria"],
-            "quality_gate": scenario_quality_gate(scenario_id),
-            "attach_commands": step.get("attach_commands", []),
-            "record_finding_command": (
-                "python3 tools/product-journey/run.py --record-finding "
-                f"--run-dir {run_dir_arg} "
-                "--finding-kind <strength|weakness|issue|fix> "
-                f"--scenario {scenario_id} "
-                "--title <title> --summary <summary> --evidence-path <path-or-retained-id>"
-            ),
-            "record_blocker_command": step.get("record_blocker_command", (
-                "python3 tools/product-journey/run.py --record-blocker "
-                f"--run-dir {run_dir_arg} "
-                f"--scenario {scenario_id} "
-                "--title <blocker-title> --summary <why-this-scenario-could-not-be-captured> "
-                "--evidence-path <trace-or-frame-path>"
-            )),
-            "journal_command": (
-                "python3 tools/product-journey/run.py --record-driver-event "
-                f"--run-dir {run_dir_arg} "
-                f"--scenario {scenario_id} "
-                "--dispatch-mode <replay|record|live> "
-                "--driver-status <attempted|captured|blocked|validated> "
-                "--mcp-tools <comma-separated-tools-used> "
-                "--evidence-refs <comma-separated-paths-or-retained-ids> "
-                "--blockers <comma-separated-blockers-if-any> "
-                "--summary <what-the-driver-actually-tried>"
-            ),
-        })
+        scenario_evidence_items = evidence_by_scenario.get(scenario_id, [])
+        if not transports:
+            required_mcp = scenario.get("required_mcp", [])
+            step = steps_by_leg.get((scenario_id, None), {})
+            scenarios.append(_driver_plan_entry(
+                scenario, run_json, run_dir_arg, lens, step,
+                required_mcp,
+                _driver_plan_evidence_view(scenario.get("evidence", []), scenario_evidence_items),
+                driver_action_scenario=scenario,
+                driver_action_evidence=scenario_evidence_items,
+                visual_surface=driver_visual_surface(scenario["primary_story"], required_mcp),
+            ))
+            continue
+        for leg in scenario_transport_legs(scenario, transports):
+            step = steps_by_leg.get((scenario_id, leg["transport"]), {})
+            evidence_view = _driver_plan_evidence_view(leg["evidence"], scenario_evidence_items)
+            scenarios.append(_driver_plan_entry(
+                scenario, run_json, run_dir_arg, lens, step,
+                leg["required_mcp"], evidence_view,
+                driver_action_scenario=leg,
+                driver_action_evidence=evidence_view,
+                visual_surface=leg["transport"],
+                leg=leg,
+            ))
     return {
         "run_id": run_json["run_id"],
         "driver_agent": ".agents/agents/product-journey-qa-driver.md",
@@ -2195,51 +2449,26 @@ def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict) -> d
 
 
 def persona_lens(persona: dict) -> dict:
-    lenses = {
-        "core-maintainer": {
-            "starting_surface": "terminal-first; prefer TUI/session state before browser surfaces",
-            "first_question": "Will this produce a minimal, reviewable diff that follows the repository's style?",
-            "evidence_emphasis": "candidate diff, targeted tests, full-suite classification, and trace events for unexpected routing",
-            "escalation_trigger": "generated churn, hidden broad scope, missing deterministic test proof, or unclear ownership boundary",
-            "finding_bias": "Prefer reviewability, bisectability, and least-surprise findings over cosmetic notes.",
-        },
-        "dependency-debugger": {
-            "starting_surface": "web-first; begin from public issue/repro context and then enter the story surface",
-            "first_question": "How quickly can I reproduce the dependency bug and decide whether Kitsoki's fix is trustworthy?",
-            "evidence_emphasis": "reproduction steps, oracle output, key interaction video, and handoff artifacts",
-            "escalation_trigger": "unclear repro setup, missing oracle, ambiguous pass/fail state, or no handoff artifact for my app",
-            "finding_bias": "Favor time-to-repro, confidence, and downstream handoff clarity.",
-        },
-        "docs-minded-contributor": {
-            "starting_surface": "docs-first; follow the documented path before trying hidden commands",
-            "first_question": "Can I follow the docs without private repo context or tribal knowledge?",
-            "evidence_emphasis": "page URLs, screenshots, prerequisite commands, stale-link proof, and onboarding smoke results",
-            "escalation_trigger": "stale docs, missing prerequisites, broken media, or commands that require unexplained setup",
-            "finding_bias": "Prefer onboarding clarity, documented next actions, and confusing-copy findings.",
-        },
-        "ide-first-engineer": {
-            "starting_surface": "visual-first; use web, TUI PNG, or editor-like surfaces before terminal archaeology",
-            "first_question": "Can I understand current state and next action from the visible UI?",
-            "evidence_emphasis": "visual frames, retained image IDs, operator-question state, navigation traces, and key interaction video",
-            "escalation_trigger": "state that is only visible in logs, silent operator defaults, confusing navigation, or unreadable layout",
-            "finding_bias": "Favor visible-state, affordance, and navigation findings.",
-        },
-        "hobbyist-contributor": {
-            "starting_surface": "docs-and-web-first; avoid repo archaeology until the product gives a concrete next step",
-            "first_question": "Can I make meaningful progress in a short spare-time session without knowing the repository's internal conventions?",
-            "evidence_emphasis": "setup commands, first-success proof, small issue selection, key interaction video, and explicit stop points",
-            "escalation_trigger": "unclear prerequisites, long-running setup, ambiguous next action, or work that expands beyond a small contribution",
-            "finding_bias": "Favor time-budget, setup-friction, and beginner-safe next-step findings.",
-        },
-    }
-    default = {
+    """Return this persona's driver lens: starting surface, first skepticism
+    check, evidence emphasis, escalation trigger, and finding bias.
+
+    The lens is now a cataloged field (personas.json `persona_lens`) for the
+    curated personas rather than a value computed only at runtime, so arena
+    and other read-only consumers of the catalog can see it too. Personas
+    that don't carry the field (today, every mined persona) fall back to a
+    lens synthesized from surface_preference/risk_focus -- this is the same
+    fallback shape the hardcoded lookup used before the field existed.
+    """
+    declared = persona.get("persona_lens")
+    if isinstance(declared, dict) and declared:
+        return declared
+    return {
         "starting_surface": persona.get("surface_preference", "surface chosen by scenario"),
         "first_question": f"What would a {persona.get('label', 'reviewer')} naturally try first, and what evidence proves the result?",
         "evidence_emphasis": ", ".join(persona.get("risk_focus", [])) or "scenario minimum evidence",
         "escalation_trigger": "the scenario cannot produce proof evidence or a clear blocker",
         "finding_bias": "Tie findings to the persona risk focus and scenario success criteria.",
     }
-    return lenses.get(persona.get("id", ""), default)
 
 
 def render_driver_plan(plan: dict) -> str:
@@ -2253,8 +2482,11 @@ def render_driver_plan(plan: dict) -> str:
         "",
     ]
     for index, scenario in enumerate(plan["scenarios"], start=1):
+        heading = f"{index}. {scenario['label']}"
+        if scenario.get("transport"):
+            heading = f"{heading} ({scenario['transport']})"
         lines.extend([
-            f"## {index}. {scenario['label']}",
+            f"## {heading}",
             "",
             f"- Scenario: `{scenario['scenario']}`",
             f"- Story: `{scenario['primary_story']}`",
@@ -2264,6 +2496,14 @@ def render_driver_plan(plan: dict) -> str:
             f"- MCP: {', '.join(scenario['required_mcp'])}",
             f"- MCP tools: {', '.join(scenario.get('resolved_mcp_tools', [])) or '(none)'}",
             f"- Evidence dir: `{scenario['evidence_dir']}`",
+        ])
+        contract = scenario.get("transport_evidence_contract")
+        if contract:
+            lines.append(
+                f"- Transport evidence contract: `{scenario['transport']}` via {contract['primary_tool']} "
+                f"-> `{contract['evidence_kind']}` ({contract['level']})"
+            )
+        lines.extend([
             "",
             scenario["task_prompt"],
             "",
@@ -2618,15 +2858,29 @@ def render_execution_plan(plan: dict) -> str:
         f"- Persona: `{plan['persona']['label']}`",
         f"- Scenarios: {plan['summary']['scenario_count']}",
         f"- Evidence slots: {plan['summary']['evidence_count']}",
-        "",
     ]
+    if plan["summary"].get("transports"):
+        lines.append(f"- Transports: {', '.join(plan['summary']['transports'])}")
+        lines.append(f"- Legs: {plan['summary'].get('leg_count', len(plan['steps']))}")
+    lines.append("")
     for step in plan["steps"]:
+        heading = f"{step['order']}. {step['label']}"
+        if step.get("transport"):
+            heading = f"{heading} ({step['transport']})"
         lines.extend([
-            f"## {step['order']}. {step['label']}",
+            f"## {heading}",
             "",
             f"- Scenario: `{step['scenario']}`",
             f"- Story: `{step['primary_story']}`",
             f"- Stage: `{step['stage']}`",
+        ])
+        contract = step.get("transport_evidence_contract")
+        if contract:
+            lines.append(
+                f"- Transport evidence contract: `{step['transport']}` via {contract['primary_tool']} "
+                f"-> `{contract['evidence_kind']}` ({contract['level']})"
+            )
+        lines.extend([
             "",
             step["task"],
             "",
@@ -6926,6 +7180,129 @@ def build_driver_replay_sweep(
     return report
 
 
+# ---------------------------------------------------------------------------
+# scenario-qa fold: stories/scenario-qa owns report.md (folded in Starlark,
+# scripts/build_report.star) and dispatches the driver/judge agents per
+# transport leg; this run.py subcommand owns the ONE derived artifact that
+# most benefits from this module's existing Slidey-deck machinery --
+# deck.slidey.json -- rather than reimplementing scene-shape validation in
+# Starlark. `--scenario-qa-report` is additive: it does not touch the
+# scenario-keyed run.json/evidence.json/deck.slidey.json pipeline that
+# `--emit-run`/`update_derived_artifacts` own for the matrix/rollup path
+# (those are per-scenario, not per-transport-leg, and reworking them is out of
+# scope here) -- it just overwrites <run-dir>/deck.slidey.json with a
+# transport-leg-shaped deck once the scenario-qa story has recorded every
+# leg's driver+judge outcome.
+def scenario_qa_leg_items(leg_results: Optional[dict]) -> list[dict]:
+    if not isinstance(leg_results, dict):
+        return []
+    items = leg_results.get("items", [])
+    return [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+
+
+def scenario_qa_leg_level(item: dict) -> str:
+    """The evidence level for one recorded leg -- 'bridge-level' for vscode
+    (the IDE bridge stub/recording path, never a genuine editor -- see
+    TRANSPORT_EVIDENCE_CONTRACTS and docs/proposals/e2e-persona-qa-review.md
+    G7), 'frame-level' for tui/web. Prefers the leg's own recorded
+    `evidence_level`/`transport_evidence_contract` (present once
+    scripts/record_leg_result.star has run for real); falls back to the
+    transport-id lookup so a leg_results row that only carries a bare
+    transport id (e.g. an older recording, or a flow fixture's stubbed data)
+    still gets labeled correctly.
+    """
+    level = item.get("evidence_level", "")
+    if level:
+        return level
+    contract = item.get("transport_evidence_contract")
+    if isinstance(contract, dict) and contract.get("level"):
+        return contract["level"]
+    return TRANSPORT_EVIDENCE_CONTRACTS.get(item.get("transport", ""), {}).get("level", "")
+
+
+def scenario_qa_leg_counts(items: list[dict]) -> dict:
+    passed = sum(1 for item in items if item.get("verdict") == "pass")
+    degraded = sum(1 for item in items if item.get("verdict") == "degraded-evidence")
+    judged = sum(1 for item in items if item.get("verdict", "") not in ("", "unjudged"))
+    return {
+        "total": len(items),
+        "pass": passed,
+        "degraded": degraded,
+        "fail": max(judged - passed - degraded, 0),
+    }
+
+
+def scenario_qa_report_summary(name: str, counts: dict) -> str:
+    summary = f"{counts['pass']} / {counts['total']} transport legs passed"
+    if counts["fail"] > 0:
+        summary += f", {counts['fail']} failed"
+    if counts["degraded"] > 0:
+        summary += f", {counts['degraded']} degraded-evidence"
+    return summary + "."
+
+
+def parse_scenario_qa_leg_results(raw: str) -> dict:
+    """Accepts an inline JSON object (the common case -- a story's `host.run`
+    invoke templates world.leg_results, a map, directly into this flag and the
+    engine auto-serializes it to compact JSON) or `@<path>` to a JSON file, so
+    the subcommand is also easy to drive by hand while authoring/debugging.
+    """
+    if not raw:
+        return {"items": []}
+    text = raw
+    if raw.startswith("@"):
+        path = Path(raw[1:])
+        if not path.is_absolute():
+            path = ROOT / path
+        text = path.read_text(encoding="utf-8")
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"--leg-results-json is not valid JSON: {exc}")
+    if not isinstance(parsed, dict):
+        raise SystemExit("--leg-results-json must decode to a JSON object with an 'items' list")
+    return parsed
+
+
+def render_scenario_qa_deck(name: str, run_id: str, items: list[dict], counts: dict) -> dict:
+    rows = [
+        f"{item.get('transport', '')} ({scenario_qa_leg_level(item)}) / {item.get('scenario', '')}: "
+        f"driver={item.get('driver_status', '')} verdict={item.get('verdict', '')} "
+        f"- {item.get('verdict_summary', '')}"
+        for item in items
+    ]
+    return {
+        "meta": {
+            "mode": "report",
+            "title": "Scenario QA",
+            "phase": "scenario-qa-report",
+            "resolution": {"width": 1920, "height": 1080},
+        },
+        "scenes": [
+            {
+                "type": "title",
+                "title": "Scenario QA",
+                "subtitle": name,
+                "narration": "This deck folds every transport leg's independently-judged verdict into one per-scenario view.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Verdict",
+                "title": scenario_qa_report_summary(name, counts),
+                "body": "\n".join(f"- {row}" for row in rows) or "(no transport legs recorded yet)",
+                "narration": "Each row is one transport leg: an independently-driven and independently-judged capture, never the driver's own self-report.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Run",
+                "title": run_id,
+                "body": f"{counts['total']} transport leg(s); {counts['pass']} pass, {counts['fail']} fail, {counts['degraded']} degraded-evidence.",
+                "narration": "vscode legs are always bridge-level proof (the IDE bridge stub/recording path) -- never mistake them for editor-level coverage.",
+            },
+        ],
+    }
+
+
 def build_driver_replay_smoke(
     catalog: dict,
     github_targets: dict,
@@ -7837,6 +8214,15 @@ def main() -> None:
     parser.add_argument("--run-log", action="store_true", help="Force a timestamped run log entry")
     parser.add_argument("--emit-run", action="store_true", help="Write a no-LLM run artifact bundle and Slidey deck")
     parser.add_argument("--scenarios", default="", help="Comma-separated scenario ids to include with --emit-run")
+    parser.add_argument(
+        "--transport",
+        default="",
+        help=(
+            "Comma-separated transport ids (tui,web,vscode) or 'all' to expand --emit-run's "
+            "execution-plan/driver-plan into scenario x transport legs. Omit to keep today's "
+            "single-surface-per-scenario output."
+        ),
+    )
     parser.add_argument("--emit-matrix", action="store_true", help="Write a no-LLM 10-repo GitHub journey matrix")
     parser.add_argument("--dogfood-smoke", action="store_true", help="Run a deterministic no-LLM matrix-to-rollup smoke and write review artifacts")
     parser.add_argument("--driver-replay-smoke", action="store_true", help="Run a deterministic no-LLM one-scenario driver replay smoke with cassette evidence")
@@ -7891,6 +8277,9 @@ def main() -> None:
         choices=["file", "dry-run"],
         help="Value-style alias for --dry-run so story slots can select the mode (--filing-mode dry-run)",
     )
+    parser.add_argument("--scenario-qa-report", action="store_true", help="Fold stories/scenario-qa's recorded per-transport leg results into <run-dir>/deck.slidey.json")
+    parser.add_argument("--scenario-description", default="", help="Free-text ad-hoc scenario name for --scenario-qa-report when no --scenario id was used")
+    parser.add_argument("--leg-results-json", default="", help="JSON object (or @path to a JSON file) with {items:[...]} per-transport leg driver+judge outcomes, for --scenario-qa-report")
     parser.add_argument("--review-run", action="store_true", help="Review an existing run bundle for readiness")
     parser.add_argument("--driver-handoff", action="store_true", help="Refresh and print the product-journey QA driver handoff artifact")
     parser.add_argument("--summarize-run", action="store_true", help="Print the story-load summary for an existing run bundle")
@@ -8327,6 +8716,40 @@ def main() -> None:
         append_log(f"Emitted GitHub matrix {matrix['matrix_id']}")
         return
 
+    if args.scenario_qa_report:
+        if not args.run_dir:
+            raise SystemExit("--scenario-qa-report requires --run-dir")
+        run_dir = run_dir_from_arg(args.run_dir)
+        name = args.scenario or args.scenario_description or "(unnamed scenario)"
+        leg_results = parse_scenario_qa_leg_results(args.leg_results_json)
+        items = scenario_qa_leg_items(leg_results)
+        counts = scenario_qa_leg_counts(items)
+        deck = render_scenario_qa_deck(name, run_dir.name, items, counts)
+        deck_issues: list[dict] = []
+        validate_slidey_deck_shape(deck, {"items": []}, deck_issues)
+        if deck_issues:
+            raise SystemExit(f"scenario-qa deck validation failed: {validation_issue_summary(deck_issues)}")
+        deck_path = run_dir / "deck.slidey.json"
+        write_json(deck_path, deck)
+        summary = scenario_qa_report_summary(name, counts)
+        if args.json_output:
+            print(json.dumps({
+                "status": "scenario_qa_deck_built",
+                "run_dir": str(run_dir),
+                "deck_path": str(deck_path),
+                "leg_count": counts["total"],
+                "pass_count": counts["pass"],
+                "fail_count": counts["fail"],
+                "degraded_count": counts["degraded"],
+                "summary": summary,
+            }, sort_keys=True))
+            append_log(f"Built scenario-qa deck for {run_dir.name}: {summary}")
+            return
+        print(f"Deck: {deck_path}")
+        print(summary)
+        append_log(f"Built scenario-qa deck for {run_dir.name}: {summary}")
+        return
+
     if args.file_findings:
         if not args.run_dir:
             raise SystemExit("--file-findings requires --run-dir")
@@ -8719,6 +9142,7 @@ def main() -> None:
     if args.emit_run:
         publish_deck = DEFAULT_DECK if args.publish_deck else None
         run_scenarios = select_scenarios(scenarios, args.scenarios)
+        run_transports = select_transports(args.transport)
         run_dir, run_json = build_run_bundle(
             catalog,
             github_targets,
@@ -8730,6 +9154,7 @@ def main() -> None:
             "dry-run",
             publish_deck,
             args.live_budget_minutes,
+            run_transports,
         )
         if args.json_output:
             result = {

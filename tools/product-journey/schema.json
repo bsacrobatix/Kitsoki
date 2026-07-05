@@ -68,7 +68,28 @@
   },
   "stage_statuses": ["planned", "ready", "captured", "cached_validated", "validated", "blocked", "error"],
   "scenario": {
-    "required": ["id", "label", "stage", "task", "task_prompt", "primary_story", "required_mcp", "evidence", "success_criteria"]
+    "required": ["id", "label", "stage", "task", "task_prompt", "primary_story", "required_mcp", "evidence", "success_criteria"],
+    "optional": ["transports"]
+  },
+  "transports": {
+    "comment": "Transport is the surface a scenario is driven and judged on. The `transports` field on a scenario is optional -- scenarios that omit it (today, the mined scenarios) get an implicit contract derived from required_mcp by run.py's default_scenario_transports(), so existing scenarios keep behaving exactly as before this field existed.",
+    "allowed_values": ["tui", "web", "vscode"],
+    "field_shape": {
+      "allowed": "subset of allowed_values this scenario can be driven on",
+      "required": "subset of allowed that must pass for the scenario to count as covered; defaults to allowed when omitted",
+      "overrides": "optional map keyed by transport id, each with an optional required_mcp and/or evidence array that replaces the scenario's base list for that transport leg only"
+    },
+    "evidence_contract_by_transport": {
+      "tui": {"primary_tool": "render.tui_png", "evidence_kind": "rendered_tui_frame", "level": "frame-level"},
+      "web": {"primary_tool": "visual.snapshot", "evidence_kind": "browser_screenshot", "level": "frame-level"},
+      "vscode": {"primary_tool": "visual.open (kind=vscode)", "evidence_kind": "screenshot_or_tui_png", "level": "bridge-level"}
+    }
+  },
+  "persona": {
+    "required": ["id", "label", "description", "surface_preference", "risk_focus"],
+    "optional": ["persona_lens"],
+    "persona_lens_required": ["starting_surface", "first_question", "evidence_emphasis", "escalation_trigger", "finding_bias"],
+    "comment": "persona_lens is optional -- personas that omit it (today, the mined personas) fall back to run.py's persona_lens() default synthesis, built from surface_preference/risk_focus."
   },
   "evidence_statuses": ["missing", "captured", "validated", "rejected"],
   "evidence_sources": ["demo", "retained", "external", "local", "cassette", "unknown"],
