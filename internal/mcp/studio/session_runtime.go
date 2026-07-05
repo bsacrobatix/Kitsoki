@@ -90,6 +90,9 @@ type sessionRuntime struct {
 	def   *app.AppDef
 	orch  *orchestrator.Orchestrator
 	sink  *store.JSONLSink
+	// tap records the latest trace event so status/inspect can report live
+	// in-flight progress while an async drive runs (never-silent).
+	tap *activityTap
 	sid   app.SessionID
 	model tui.RootModel
 	mu    sync.Mutex
@@ -211,6 +214,7 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 		return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: open trace %q: %v", tracePath, err)}
 	}
 	rt.sink = sink
+	rt.tap = &activityTap{}
 	rt.closers = append(rt.closers, func() { _ = sink.Close() })
 
 	def, err := app.LoadWithResolver(storyPath, nil, resolver)
@@ -271,7 +275,7 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 	}
 	cassetteHandlers := map[string]bool{}
 	if hostCassette != "" {
-		seen, err := applyStudioHostCassette(hostReg, hostCassette, sink, failClosedAgentReplay)
+		seen, err := applyStudioHostCassette(hostReg, hostCassette, tapSink{EventSink: sink, tap: rt.tap}, failClosedAgentReplay)
 		if err != nil {
 			rt.Close()
 			return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: apply host cassette: %v", err)}
@@ -295,7 +299,7 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 
 	orchOpts := []orchestrator.Option{
 		orchestrator.WithHostRegistry(hostReg),
-		orchestrator.WithEventSink(sink),
+		orchestrator.WithEventSink(tapSink{EventSink: sink, tap: rt.tap}),
 		orchestrator.WithEventSinkAuthority(true),
 		orchestrator.WithAgentRegistry(agentReg),
 		orchestrator.WithScheduler(rt.scheduler),

@@ -103,7 +103,7 @@ func (srv *Server) registerSessionTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.status",
-		Description: "Compact, overflow-proof snapshot of a driving handle: {handle} → {state, allowed_intents, running?, status?, last_error?, exit?}. Never embeds world or rendered views. running repeats an in-flight bounded session.drive until it settles. status/last_error/exit are read from well-known world keys when present.",
+		Description: "Compact, overflow-proof snapshot of a driving handle: {handle} → {state, allowed_intents, running?, status?, last_error?, exit?}. Never embeds world or rendered views. While an async turn runs, running is present and state reports the LIVE in-flight state path (with running.last_event_at_unix_micro advancing as the turn works) — a stable state with running present is normal progress, NOT a stuck run; only treat it as stuck if last_event_at stops advancing for many minutes. status/last_error/exit are read from well-known world keys when present.",
 	}, srv.handleSessionStatus)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
@@ -317,6 +317,20 @@ type RunningDrive struct {
 	Input              string `json:"input,omitempty"`
 	StartedAtUnixMicro int64  `json:"started_at_unix_micro,omitempty"`
 	Poll               string `json:"poll"`
+	// InFlightState is the live state path the running turn is currently
+	// executing in (e.g. "bf.reproducing"), read from the most recent trace
+	// event — NOT the resting state the turn was submitted from. Present
+	// whenever the running turn has written at least one event (never-silent:
+	// a poller must be able to see that work is happening and where).
+	InFlightState string `json:"in_flight_state,omitempty"`
+	// LastEventKind / LastEventAtUnixMicro identify the most recent trace
+	// activity (e.g. "agent.stream"), so a poller can distinguish an actively
+	// working turn from a genuinely wedged one by watching the timestamp move.
+	LastEventKind        string `json:"last_event_kind,omitempty"`
+	LastEventAtUnixMicro int64  `json:"last_event_at_unix_micro,omitempty"`
+	// ActiveAgent is the agent currently dispatched inside the running turn
+	// (empty between dispatches).
+	ActiveAgent string `json:"active_agent,omitempty"`
 }
 
 // SessionAnswerArgs is the input to session.answer (the fallback resume).
@@ -1334,9 +1348,17 @@ func resolveTracePath(override string) (string, error) {
 // full world map — so the result stays small regardless of world size.
 func (rt *sessionRuntime) status(ctx context.Context, handle string) (SessionStatusResult, error) {
 	if running, snap := rt.runningDriveSnapshot(handle); running != nil {
+		state := snap.state
+		if running.InFlightState != "" {
+			// Never-silent: while the turn runs, report where it actually is
+			// (e.g. "bf.reproducing"), not the resting state it left. The
+			// resting-state report misled pollers into treating healthy live
+			// runs as stuck.
+			state = running.InFlightState
+		}
 		result := SessionStatusResult{
 			OK:             true,
-			State:          snap.state,
+			State:          state,
 			AllowedIntents: append([]string(nil), snap.allowedIntents...),
 			Running:        running,
 		}
@@ -1433,9 +1455,13 @@ func (rt *sessionRuntime) inspect(ctx context.Context, lastTurns int, handle str
 			return InspectResult{}, asyncErr
 		}
 		operatorQuestions := rt.pendingOperatorQuestions()
+		state := snap.state
+		if running.InFlightState != "" {
+			state = running.InFlightState // never-silent: live in-flight state, not the resting state
+		}
 		return InspectResult{
 			OK:                true,
-			State:             snap.state,
+			State:             state,
 			World:             snap.world,
 			AllowedIntents:    append([]string(nil), snap.allowedIntents...),
 			LastView:          snap.lastView,
@@ -1803,7 +1829,27 @@ func (rt *sessionRuntime) runningDriveSnapshot(handle string) (*RunningDrive, dr
 	if !ok {
 		return nil, driveSnapshot{}
 	}
+	rt.decorateRunning(running)
 	return running, snap
+}
+
+// decorateRunning fills the live in-flight fields on a RunningDrive from the
+// session's activity tap (never-silent: pollers must see what the running
+// turn is doing, not just the resting state it was submitted from).
+func (rt *sessionRuntime) decorateRunning(running *RunningDrive) {
+	if rt == nil || running == nil {
+		return
+	}
+	act, ok := rt.tap.snapshot()
+	if !ok {
+		return
+	}
+	running.InFlightState = act.statePath
+	running.LastEventKind = act.kind
+	if !act.ts.IsZero() {
+		running.LastEventAtUnixMicro = act.ts.UnixMicro()
+	}
+	running.ActiveAgent = act.agent
 }
 
 func inspectOperatorQuestions(handle string, questions []pendingQuestion) []OperatorQuestionItem {
