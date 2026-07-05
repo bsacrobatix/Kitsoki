@@ -491,26 +491,40 @@ override is given.
   byte-for-byte against the checked-in
   `tests/fixtures/usable-kitsoki-gate/calibration-report.json` — the one
   test in this suite that is not instant (~10-20s: 54 real `go run`
-  invocations), still zero docker/LLM spend. That checked-in run measured
-  `worst_surface_parity_percent = 0.0%` against the 90% placeholder — see
-  `usable_kitsoki_gate_constants.py`'s calibration-contact note for why that
-  number is an honest artifact of `stories/scenario-foundry-harness` not
-  being a real `workbench:` room yet, not a workbench-quality finding, and
-  why the threshold was NOT silently lowered in response.
+  invocations), still zero docker/LLM spend. `run_calibration_gate.py` now
+  sweeps all THREE real `workbench:` targets (`dev-story`/`pets-dev`/
+  `slidey-dev`, S6 "no-llm-parity") rather than the original non-workbench
+  harness stub; the checked-in run measures `worst_surface_parity_percent =
+  100.0%` against the 90% placeholder — see `usable_kitsoki_gate_constants
+  .py`'s calibration-contact note for the full caveat on what that 100.0%
+  does and does not prove (round 1's original `0.0%` measurement, against
+  the non-workbench stub, is preserved there as history, not silently
+  dropped).
 - **Live gate harness** (Task 3.3's live half):
   `tools/usable-kitsoki-gate/run_live_gate.py` is the gated, cost-bearing
-  counterpart to `flow_gate_runner.py` — a real spawned agent drives
-  `stories/dev-story`'s real `workbench:` room turn by turn, and the
-  resulting on-disk session trace is joined via the SAME
-  `extract_turn_signals`/`build_parity_record` functions the no-LLM path
-  uses (never a second join implementation). Structurally gated exactly
-  like `tools/swarm/tiers/liveExplorerCli.ts`'s tier 3: a literal
-  `--live-gate` argv flag with no env fallback, checked BEFORE any env is
-  read or any agent spawned. `tools/arena/tests/
-  test_usable_kitsoki_gate_live_gate.py` proves the refusal — including
-  monkeypatching `subprocess.run` to raise if ever called — without
-  spawning a real agent, mirroring `swarm-cassette-users.spec.ts`'s
-  "stubbed live-explorer dispatch contract" test shape.
+  counterpart to `flow_gate_runner.py` — a real spawned orchestrator agent
+  drives the kitsoki studio MCP's `session.new`/`session.drive` against any
+  of the three real `workbench:` rooms (`dev-story`/`pets-dev`/`slidey-dev`,
+  selected via the same `GATE_TARGET` env var the no-LLM path uses) turn by
+  turn, via `tools/mcp-drive/drive.sh` (this repo's headless kitsoki-MCP
+  delegation primitive), and the resulting on-disk session trace (at an
+  explicit path this script chose, not a directory-mtime guess) is joined
+  via the SAME `extract_turn_signals`/`build_parity_record` functions the
+  no-LLM path uses (never a second join implementation).
+  `run_live_calibration.py` sweeps a small, explicitly-bounded set of
+  (scenario, target) cells through that same gated entry point and rolls
+  them up the same way `run_calibration_gate.py` does for the no-LLM sweep.
+  Structurally gated exactly like `tools/swarm/tiers/liveExplorerCli.ts`'s
+  tier 3: a literal `--live-gate` argv flag with no env fallback, checked
+  BEFORE any env is read or any agent spawned. `tools/arena/tests/
+  test_usable_kitsoki_gate_live_gate.py` and
+  `test_usable_kitsoki_gate_live_calibration.py` prove the refusal —
+  including monkeypatching `subprocess.run` to raise if ever called —
+  without spawning a real agent, mirroring `swarm-cassette-users.spec.ts`'s
+  "stubbed live-explorer dispatch contract" test shape. A real live run
+  over dev-story + its two thin inheritors (epic-finalization,
+  docs/proposals/usable-kitsoki.md) is recorded in
+  `tools/arena/tests/fixtures/usable-kitsoki-gate/live-run-summary.md`.
 - **CI workflow** (Task 5.1 + 5.2): `.github/workflows/
   usable-kitsoki-gate.yml` has two jobs. `no-llm-gate` runs on every PR
   whose diff touches the S1/S2/S4/S5 code paths (path-filtered), executing

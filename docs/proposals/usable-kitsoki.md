@@ -140,7 +140,30 @@ prerequisites for *marketing* claims, not for this epic's slices.
 8. **S1 rolls out behind a per-story opt-in flag** until the S6 gate is
    green on dev-story plus two other stories, then the default flips
    repo-wide. Adopted from the draft's recommendation; overridable by
-   Brad before S1 is cut.
+   Brad before S1 is cut. **The `workbench:` block on a room IS the
+   opt-in** (not a separate flag) — a room carries it, or it doesn't.
+   Per-story status as of the live-gate epic-finalization run (one real
+   `run_live_gate.py --live-gate` pass, 2 calibration scenarios x all 3
+   real `workbench:` targets, `mcp` surface; full detail:
+   [`live-run-summary.md`](../../tools/arena/tests/fixtures/usable-kitsoki-gate/live-run-summary.md)):
+   - **`stories/dev-story`** — carries `workbench:` (the hand-authored
+     primary, `rooms/landing.yaml`). **Live-green**: 2/2 real cells, zero
+     silent bounce, zero misroute-adjacent, real `opus` dispatches that
+     correctly stayed read-only on a mutating ask. Per open question 1's
+     "a story that's green shouldn't wait on siblings" lean, `dev-story`'s
+     opt-in is confirmed live on its own.
+   - **`stories/pets-dev`** / **`stories/slidey-dev`** — both carry
+     `workbench:` too (inherited unmodified from `dev-story` via
+     `@kitsoki/dev-story` import-folding; confirmed present and wired by
+     `internal/orchestrator/conversational_default_intent_test.go`), so
+     the opt-in is structurally in place. **Not yet live-confirmed**: this
+     run captured zero turn signal for either (a reproducible "session
+     opens, no turn ever drives" anomaly — ruled out as a stale-binary or
+     app-load issue, not yet root-caused; see live-run-summary.md). Their
+     live sign-off stays open pending a re-run (the harness was hardened
+     this run to persist the orchestrator's own log for exactly this
+     case) — this is a live-gate-harness gap being investigated, not an
+     observed workbench defect on either story.
 9. **Every mined fixture passes session-mining's `redact.py` ladder**
    before it is committed; the unredacted scenario IR stays
    local/gitignored, consistent with the licensing quarantine

@@ -40,10 +40,23 @@ machinery and the real per-target app wiring (import-folding included) work
 end to end, not that a real LLM-driven workbench agent's own answers would
 satisfy those effects (see `usable_kitsoki_gate_constants.py`'s calibration-
 contact note for the full caveat). A LIVE green run of this gate over
-`stories/dev-story` with a real agent (not a canned cassette) is still the
-epic's own release-readiness bar for that stronger claim — that run is
-epic-level finalization work (see the epic's own task list), gated behind
-`run_live_gate.py --live-gate` and never run automatically.
+`stories/dev-story` with a real agent (not a canned cassette) was the
+epic's own release-readiness bar for that stronger claim — that run has now
+happened (epic finalization, one deliberate `run_live_gate.py --live-gate`
+pass over a bounded 6-cell manifest — 2 calibration scenarios x all 3 real
+`workbench:` targets, `mcp` surface). Result: **`dev-story` is 2/2 real
+green** (zero silent bounce, zero misroute, real `opus` dispatches that
+correctly stayed read-only on a mutating "commit it" ask and routed it to
+the gitops hub instead of fabricating completion) — the live claim this
+section used to only aspire to is now backed by a real run, for `dev-story`
+specifically. `pets-dev`/`slidey-dev` did NOT get a real signal in this run
+(a reproducible "session opens, no turn ever drives" anomaly, ruled out as
+a stale-binary or app-load problem but not yet root-caused — a live-gate
+harness gap, not an observed workbench defect) and their own live sign-off
+is still open. Full per-cell detail, cost, and the anomaly writeup:
+[`tools/arena/tests/fixtures/usable-kitsoki-gate/live-run-summary.md`](../../tools/arena/tests/fixtures/usable-kitsoki-gate/live-run-summary.md).
+This live path is still never run automatically, only ever behind
+`run_live_gate.py --live-gate` / `run_live_calibration.py --live-gate`.
 
 This is the day-one contract `S1` (the free-form workbench) develops
 against, and the schema `S6` (`tools/arena/arena/plugins/usable_kitsoki_gate.py`)
