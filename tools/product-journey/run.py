@@ -4123,6 +4123,12 @@ def record_driver_event(
         raise SystemExit("Driver dispatch mode must be replay, record, or live")
     if status not in schema["driver_journal"]["statuses"]:
         raise SystemExit("Driver event status must be attempted, captured, blocked, or validated")
+    live_budget_minutes = int(run_json.get("live_budget_minutes", 0))
+    if dispatch_mode == "live" and live_budget_minutes == 0 and status != "blocked":
+        raise SystemExit(
+            "Live driver dispatch is disabled for this run; record a blocked driver event "
+            "or create the run with a positive live_budget_minutes value"
+        )
     journal_path = run_dir / "driver-journal.json"
     journal = read_json(journal_path) if journal_path.exists() else build_driver_journal(run_json["run_id"], [])
     items = journal.setdefault("items", [])
@@ -4349,6 +4355,14 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         for item in driver_journal.get("items", [])
         if item.get("scenario")
     }
+    live_budget_minutes = int(run_json.get("live_budget_minutes", 0) or 0)
+    forbidden_live_events = [
+        item.get("id", f"driver-event-{index}")
+        for index, item in enumerate(driver_journal.get("items", []), start=1)
+        if item.get("dispatch_mode") == "live"
+        and item.get("status") != "blocked"
+        and live_budget_minutes == 0
+    ]
     missing_driver_journal = [
         scenario.get("id", "")
         for scenario in run_json.get("scenarios", [])
@@ -4426,6 +4440,12 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             "status": "pass" if not missing_driver_evidence_refs else "fail",
             "summary": "Captured driver journal evidence refs are attached as structured evidence.",
             "detail": ", ".join(missing_driver_evidence_refs),
+        },
+        {
+            "id": "driver-live-budget",
+            "status": "pass" if not forbidden_live_events else "fail",
+            "summary": "Live driver dispatch is used only when the run has live budget, otherwise it is recorded as blocked.",
+            "detail": ", ".join(forbidden_live_events),
         },
         {
             "id": "driver-action-contract",
@@ -5088,6 +5108,22 @@ def validate_run_bundle(run_dir: Path) -> dict:
         })
         if invalid_event_statuses:
             add_validation_issue(issues, "error", "driver-journal-status", "driver-journal.json events use unknown statuses", ", ".join(invalid_event_statuses))
+        live_budget_minutes = int((run_json or {}).get("live_budget_minutes", 0) or 0)
+        forbidden_live_events = sorted({
+            event.get("id", f"event-{index}")
+            for index, event in enumerate(driver_events, start=1)
+            if event.get("dispatch_mode") == "live"
+            and event.get("status") != "blocked"
+            and live_budget_minutes == 0
+        })
+        if forbidden_live_events:
+            add_validation_issue(
+                issues,
+                "error",
+                "driver-journal-live-budget",
+                "driver-journal.json records non-blocked live dispatch while live_budget_minutes is zero",
+                ", ".join(forbidden_live_events),
+            )
         unknown_driver_scenarios = sorted({
             event.get("scenario", "")
             for event in driver_events

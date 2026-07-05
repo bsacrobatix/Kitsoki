@@ -661,6 +661,20 @@ states:
             - set:
                 status: "stats_derived"
       driver_event:
+        - when: "(slots.dispatch_mode ?? 'replay') == 'live' && world.live_budget_minutes == 0 && (slots.driver_status ?? 'attempted') != 'blocked'"
+          target: run_created
+          effects:
+            - set:
+                scenario: "{{ slots.scenario }}"
+                dispatch_mode: "{{ slots.dispatch_mode ?? 'replay' }}"
+                driver_status: "{{ slots.driver_status ?? 'attempted' }}"
+                driver_summary: "{{ slots.summary }}"
+                validation_status: "invalid"
+                validation_errors: 1
+                validation_warnings: 0
+                validation_issue_summary: "live-dispatch-disabled"
+                status: "driver_event_invalid"
+                review_backlog_summary: "Live driver dispatch is disabled for this run; record a blocked driver event or create the run with a positive live_budget_minutes value."
         - target: run_created
           effects:
             - set:

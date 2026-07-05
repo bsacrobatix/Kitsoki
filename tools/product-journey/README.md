@@ -274,6 +274,11 @@ python3 tools/product-journey/run.py --record-driver-event \
   --summary "Replayed the bugfix story through the oracle gate."
 ```
 
+When a run is created with `--live-budget-minutes 0`, `dispatch_mode=live` is
+accepted only with `--driver-status blocked`. Captured or validated live events
+fail closed in the story and in `--validate-run`; use replay/cassette evidence
+or record the live path as blocked instead of silently falling through.
+
 Attachment updates `evidence.json`, `media-manifest.json`, `scenarios.json`,
 `scenario-outcomes.md`, `metrics.json`, `agent-brief.md`, `journey.md`, and
 `deck.slidey.json`.

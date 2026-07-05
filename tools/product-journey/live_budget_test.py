@@ -82,6 +82,61 @@ def main():
             any(issue["id"] == "driver-plan-scenario-required-keys" for issue in invalid["issues"]),
         )
 
+        zero_run_dir, _ = run.build_run_bundle(
+            catalog,
+            github_targets,
+            personas,
+            scenarios,
+            "gears-rust",
+            "core-maintainer",
+            "live-budget-zero",
+            "dry-run",
+            None,
+            0,
+        )
+        try:
+            run.record_driver_event(
+                zero_run_dir,
+                "bugfix",
+                "live",
+                "captured",
+                "Live dispatch should not be accepted when live budget is zero.",
+                "session.open",
+                "",
+                "",
+                None,
+            )
+        except SystemExit as exc:
+            _check("zero-budget live capture fails closed", "Live driver dispatch is disabled" in str(exc))
+        else:
+            _check("zero-budget live capture fails closed", False)
+
+        blocked_event = run.record_driver_event(
+            zero_run_dir,
+            "bugfix",
+            "live",
+            "blocked",
+            "Live dispatch was blocked because this run has no live budget.",
+            "session.open",
+            "",
+            "live budget disabled",
+            None,
+        )
+        _check("zero-budget live blocker is journaled", blocked_event["status"] == "blocked")
+
+        live_event = run.record_driver_event(
+            run_dir,
+            "bugfix",
+            "live",
+            "captured",
+            "Live dispatch is allowed only when the run has a positive budget.",
+            "session.open",
+            "",
+            "",
+            None,
+        )
+        _check("positive-budget live capture is allowed", live_event["dispatch_mode"] == "live")
+
     print("PASS")
 
 
