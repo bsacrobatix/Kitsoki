@@ -17,6 +17,7 @@ import type {
   MetaMessage,
 } from "./source.js";
 import type { TranscriptData, TranscriptEvent } from "./transcript.js";
+import type { ObjectGraph } from "./objectgraph.js";
 import type {
   RoomSummary as EditorRoomSummary,
   RoomDetail as EditorRoomDetail,
@@ -961,6 +962,27 @@ export class LiveSource implements DataSource {
   }
 
   // ── Story editor (per-story static reads; no session) ─────────────────────
+
+  // ── Project object graph catalogs (W5.0; no story/session) ────────────────
+
+  /** Load a project object graph catalog (runstatus.objectgraph.load). */
+  loadObjectGraph(catalogPath: string): Promise<ObjectGraph> {
+    return this.client.post<ObjectGraph>("runstatus.objectgraph.load", {
+      catalog_path: catalogPath,
+    });
+  }
+
+  /**
+   * Load a diff-mode graph (runstatus.objectgraph.diff): catalogPath is
+   * "current", catalogPath + overlayPath unioned is "desired" — every node
+   * carries an attrs.diff_kind of added/modified/removed/unchanged.
+   */
+  loadObjectGraphDiff(catalogPath: string, overlayPath: string): Promise<ObjectGraph> {
+    return this.client.post<ObjectGraph>("runstatus.objectgraph.diff", {
+      catalog_path: catalogPath,
+      overlay_path: overlayPath,
+    });
+  }
 
   /** BFS-ordered room list for a story (runstatus.editor.rooms). */
   editorRooms(storyPath: string): Promise<EditorRoomSummary[]> {

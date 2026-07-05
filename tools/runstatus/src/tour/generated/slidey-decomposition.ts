@@ -17,7 +17,6 @@ export const SLIDEY_DECOMPOSITION_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "home-view",
     dwellMs: 5500,
-    drive: [],
   },
   {
     id: "sdc-story-card",
@@ -30,7 +29,6 @@ export const SLIDEY_DECOMPOSITION_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "story-card",
     dwellMs: 5000,
-    drive: [],
   },
   {
     id: "sdc-new-session",
@@ -44,7 +42,6 @@ export const SLIDEY_DECOMPOSITION_TOUR_STEPS: readonly TourStep[] = [
     advanceRoute: "interactive",
     waitForTarget: "new-session-btn",
     dwellMs: 3500,
-    drive: [],
   },
   {
     id: "sdc-configure",
@@ -57,7 +54,6 @@ export const SLIDEY_DECOMPOSITION_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 5500,
-    drive: [{"type":"wait-state","state":"configure"},{"type":"reveal-turn"}],
   },
   {
     id: "sdc-decompose",
@@ -70,7 +66,6 @@ export const SLIDEY_DECOMPOSITION_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 7000,
-    drive: [{"type":"click-intent","intent":"start"},{"type":"wait-state","state":"fleet.load"},{"type":"reveal-turn"}],
   },
   {
     id: "sdc-fleet-load",
@@ -83,6 +78,5 @@ export const SLIDEY_DECOMPOSITION_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 6500,
-    drive: [{"type":"reveal-turn"}],
   },
 ];
