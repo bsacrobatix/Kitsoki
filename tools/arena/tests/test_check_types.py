@@ -193,8 +193,16 @@ try:
             r = per_type[ct]
             check(f"{cell_id}/{ct}: honest PENDING", r.verdict, "pending")
             check(f"{cell_id}/{ct}: health incomplete (never scored)", r.health, "incomplete")
-            check_true(f"{cell_id}/{ct}: notes say unimplemented",
-                       "not implemented" in r.notes, r.notes)
+        # docs-fidelity is declared-but-not-implemented at all (no runner exists
+        # yet); journey-verdict/ux-heuristic (WS-G G6) ARE implemented as a
+        # file-adapter check, but this bugfix-shaped spec never configures a
+        # `verdict_path`, so they honestly PENDING for a different reason — no
+        # verdict.json to grade, not "unimplemented".
+        check_true("docs-fidelity: notes say unimplemented",
+                   "not implemented" in per_type["docs-fidelity"].notes, per_type["docs-fidelity"].notes)
+        for ct in ("ux-heuristic", "journey-verdict"):
+            check_true(f"{ct}: notes say no verdict_path configured",
+                       "no verdict_path configured" in per_type[ct].notes, per_type[ct].notes)
     check("replay verdict graded (qs1 armed)",
           by_cell["query-string--kitsoki-gpt-5.5--bug:qs1"]["replay"].verdict, "armed")
     check("replay verdict graded (qs2 failed)",

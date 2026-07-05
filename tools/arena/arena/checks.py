@@ -5,23 +5,47 @@ shape. Every check emits one `CellResult` tagged with its `check_type`
 (schemas/completion-state.schema.json's discriminator; absent == "replay"), so
 the matrix rollup aggregates one verdict per cell per check_type.
 
-Only `replay` is executable today — it IS the existing plugin/container path
-(`CellExecutor.execute`). The other declared types (`docs-fidelity`,
-`ux-heuristic`, `journey-verdict`) are accepted at spec-validation time but
-report an honest `pending` verdict at execution time — never a fake green —
-until their runners land (per the spark-quota / honest-PENDING discipline).
+Three execution strategies exist today:
+
+- `replay` — the existing plugin/container path (`CellExecutor.execute`).
+- `journey-verdict` / `ux-heuristic` (WS-G G6, FILE_ADAPTER_CHECK_TYPES) — a
+  file-adapter check: it reads an already-written kitsoki-ui-qa /
+  kitsoki-ui-review `verdict.json` off disk (path from the check's
+  `options.verdict_path`) and adapts it via
+  `tools.persona_qa.ui_verdict` into a completion-state. No container spawn,
+  no LLM call of its own — the judging already happened; this only folds its
+  verdict back into the arena rollup. If no path is configured, or the
+  configured path doesn't exist yet, the result is an honest `pending` — never
+  a fake green — exactly like a declared-but-unimplemented check type.
+- everything else (`docs-fidelity`) — declared-but-not-implemented: accepted
+  at spec-validation time, reports an honest `pending` at execution time,
+  never touches disk or a container (per the spark-quota / honest-PENDING
+  discipline).
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from .executor import CellExecutor
 from .model import (
+    REPO_ROOT,
     Cell,
     CellResult,
     CheckSpec,
     DEFAULT_CHECK_TYPE,
-    IMPLEMENTED_CHECK_TYPES,
+    _resolve_repo_path,
 )
+
+# Check types whose grade comes from reading an already-written verdict.json
+# off disk (WS-G G6) rather than spawning a container. Keyed by check_type ->
+# the tools.persona_qa.ui_verdict loader that understands that verdict.json's
+# native shape.
+_UI_VERDICT_LOADERS = {
+    "journey-verdict": "load_ui_qa_verdict",
+    "ux-heuristic": "load_ui_review_verdict",
+}
+FILE_ADAPTER_CHECK_TYPES = tuple(_UI_VERDICT_LOADERS)
 
 
 def unimplemented_check_result(cell: Cell, check_type: str) -> CellResult:
@@ -48,6 +72,86 @@ def unimplemented_check_result(cell: Cell, check_type: str) -> CellResult:
     )
 
 
+def run_ui_verdict_check(cell: Cell, check: CheckSpec) -> CellResult:
+    """Grade a `journey-verdict`/`ux-heuristic` check from a verdict.json (WS-G G6).
+
+    Never spawns a container or an LLM — the judging skill already produced
+    `verdict.json`; this only reads it and folds it into the arena rollup via
+    `tools.persona_qa.ui_verdict`. The path is `check.options["verdict_path"]`
+    (repo-relative or absolute, same convention as `JobSpec`'s corpus paths).
+    Honest `pending` — never a fake green — when no path is configured, the
+    configured path doesn't exist yet, or the file can't be parsed as the
+    expected verdict.json shape; only a genuinely present, well-formed
+    artifact is graded.
+    """
+    result = CellResult(
+        cell_id=cell.id,
+        job_type=cell.job_type,
+        target_id=cell.target.id,
+        variant_id=cell.variant.id,
+        axis=dict(cell.axis),
+        check_type=check.check_type,
+    )
+    loader_name = _UI_VERDICT_LOADERS.get(check.check_type)
+    if loader_name is None:
+        raise ValueError(f"no ui-verdict loader registered for check_type {check.check_type!r}")
+
+    verdict_path = check.options.get("verdict_path") or check.options.get("verdict")
+    if not verdict_path:
+        result.verdict = "pending"
+        result.health = "incomplete"
+        result.notes = (
+            f"check_type '{check.check_type}' has no verdict_path configured; "
+            "honest PENDING (never fake green)"
+        )
+        return result
+
+    path = _resolve_repo_path(verdict_path)
+    if not path.exists():
+        result.verdict = "pending"
+        result.health = "incomplete"
+        result.notes = (
+            f"no verdict.json found at {path} for check_type '{check.check_type}'; "
+            "honest PENDING (never fake green)"
+        )
+        return result
+
+    # Imported lazily (not at module top) so a plain `import arena.checks` never
+    # requires tools.persona_qa on sys.path unless a journey-verdict/ux-heuristic
+    # check is actually declared — mirrors plugins/persona_qa.py's own lazy
+    # ROOT-on-sys.path pattern.
+    import sys
+
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from tools import persona_qa  # noqa: E402
+
+    loader = getattr(persona_qa, loader_name)
+    try:
+        completion = loader(path)
+    except (OSError, ValueError, KeyError) as exc:
+        result.verdict = "blocked"
+        result.health = "infra:completion-state-malformed"
+        result.notes = f"could not load verdict.json at {path}: {exc}"
+        return result
+
+    result.verdict = completion.verdict
+    result.health = completion.health
+    result.notes = completion.summary
+    result.evidence_refs = list(completion.evidence_refs)
+    if completion.run_dir:
+        result.trace_ref = completion.run_dir
+    result.metrics.update(
+        {
+            "checks_passed": completion.checks_passed,
+            "checks_warned": completion.checks_warned,
+            "checks_failed": completion.checks_failed,
+            "checks_total": completion.checks_total,
+        }
+    )
+    return result
+
+
 def run_cell_checks(
     cell: Cell,
     executor: CellExecutor,
@@ -59,18 +163,22 @@ def run_cell_checks(
     """Run one cell's declared check suite → one CellResult per check_type.
 
     The replay check delegates to the existing container path (no behavior
-    change when the suite is the default `[replay]`); every other type yields
-    `unimplemented_check_result`. Note: callers that need INFRA retry around
-    the replay check (the placement scheduler) drive `executor.execute`
-    themselves and use `unimplemented_check_result` for the rest — this helper
-    is the single-cell, no-retry composition.
+    change when the suite is the default `[replay]`); `journey-verdict`/
+    `ux-heuristic` delegate to `run_ui_verdict_check` (a disk read, never a
+    container); every other type yields `unimplemented_check_result`. Note:
+    callers that need INFRA retry around the replay check (the placement
+    scheduler) drive `executor.execute` themselves and dispatch the rest via
+    this same per-check_type logic — this helper is the single-cell, no-retry
+    composition.
     """
     results: list[CellResult] = []
     for check in checks:
-        if check.check_type in IMPLEMENTED_CHECK_TYPES:
+        if check.check_type == DEFAULT_CHECK_TYPE:
             result = executor.execute(cell, host=host, live=live)
             result.check_type = DEFAULT_CHECK_TYPE
             results.append(result)
+        elif check.check_type in FILE_ADAPTER_CHECK_TYPES:
+            results.append(run_ui_verdict_check(cell, check))
         else:
             results.append(unimplemented_check_result(cell, check.check_type))
     return results

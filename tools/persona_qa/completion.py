@@ -54,6 +54,14 @@ class CompletionState:
     minimum_evidence_count: int = 0
     evidence_refs: list[str] = field(default_factory=list)
     blockers: list[str] = field(default_factory=list)
+    # Which proof class this state grades (schemas/completion-state.schema.json
+    # `check_type`, WS-G G1). "" (the default) means "not applicable" — the
+    # product-journey report bridge below never sets it (a run bundle IS the
+    # journey, not a graded check over one). Adapters that grade an already-
+    # judged artifact (e.g. a kitsoki-ui-qa/ui-review verdict.json) set this
+    # explicitly to "journey-verdict"/"ux-heuristic" so an arena check-suite
+    # consumer knows which check produced the verdict.
+    check_type: str = ""
 
     def __post_init__(self) -> None:
         if self.state not in STATES:
@@ -61,6 +69,11 @@ class CompletionState:
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
+        if not self.check_type:
+            # Omit rather than emit "" — mirrors CellResult.to_dict()'s
+            # omit-the-default convention so a bare completion-state (no
+            # declared check_type) stays byte-identical to pre-G6 payloads.
+            data.pop("check_type", None)
         # The shared contract (schemas/completion-state.schema.json) requires a
         # `metrics` object on every completion-state, bugfix and persona-qa
         # alike. persona-qa's "metrics" are its check/scenario/proof counters —

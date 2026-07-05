@@ -60,10 +60,32 @@ Check types (`arena/model.py CHECK_TYPES` == the schema enum):
 
 | check_type | Proof class | Status |
 |---|---|---|
-| `replay` | mechanical no-LLM proof (flow/cassette/oracle replay, per-commit) — the plugin/container path below | **implemented** (the default, and the only executable type today) |
+| `replay` | mechanical no-LLM proof (flow/cassette/oracle replay, per-commit) — the plugin/container path below | **implemented** (the default) |
 | `docs-fidelity` | a persona attempts the workflow using ONLY the published docs; doc claims scored truthful/stale/missing | declared, not implemented |
-| `ux-heuristic` | heuristic-catalog UX critique over captured frames/transcripts (web, TUI `render_tui_png`, VS Code webview, gh-agent comment/deck quality) | declared, not implemented |
-| `journey-verdict` | the product-journey review gate (evidence completeness, observed-vs-seeded finding floor) | declared, not implemented |
+| `ux-heuristic` | heuristic-catalog UX critique over captured frames/transcripts (web, TUI `render_tui_png`, VS Code webview, gh-agent comment/deck quality) | **implemented** (WS-G G6, file adapter — see below) |
+| `journey-verdict` | the product-journey review gate (evidence completeness, observed-vs-seeded finding floor) | **implemented** (WS-G G6, file adapter — see below) |
+
+`journey-verdict`/`ux-heuristic` are graded by a **file adapter**
+(`arena/checks.py`'s `run_ui_verdict_check`), not a container: they read an
+already-written `kitsoki-ui-qa` (`journey-verdict`) or `kitsoki-ui-review`
+(`ux-heuristic`) `verdict.json` off disk — path from the check's
+`options.verdict_path` — and adapt it into a completion-state via
+`tools/persona_qa/ui_verdict.py` (`from_ui_qa_verdict`/`from_ui_review_verdict`).
+No container spawn, no LLM call of their own: the judging skill already ran;
+this only folds its verdict back into the arena rollup. Honest `pending` (never
+a fake green) when no `verdict_path` is configured, or the configured path
+doesn't exist yet:
+
+```yaml
+checks:
+  - replay
+  - check_type: journey-verdict
+    options:
+      verdict_path: .artifacts/ui-qa/onboarding-tour/verdict.json
+  - check_type: ux-heuristic
+    options:
+      verdict_path: .artifacts/ui-review/onboarding-tour/verdict.json
+```
 
 Contract rules:
 
@@ -83,9 +105,13 @@ Contract rules:
 
   Omitting `checks:` means `[replay]` — exactly the pre-suite behavior.
   Unknown or duplicated check types are rejected at spec load.
-- **Declared-but-unimplemented types report honest `pending`** (`health:
-  incomplete`, a "not implemented yet" note) at execution time — never a fake
-  green, never a container run, never an INFRA retry (`arena/checks.py`).
+- **Declared-but-unimplemented types (`docs-fidelity`) report honest
+  `pending`** (`health: incomplete`, a "not implemented yet" note) at
+  execution time — never a fake green, never a container run, never an INFRA
+  retry (`arena/checks.py`). `journey-verdict`/`ux-heuristic` are implemented
+  as a file adapter (above) and can *also* report honest `pending` — with a
+  different note ("no verdict.json found"/"no verdict_path configured") — when
+  their input artifact genuinely doesn't exist yet.
 - Per-cell result files under the rollup's `cells/` keep the historical
   `<cell_id>.json` name for `replay` and add a `--check-<type>` suffix for the
   others.
@@ -95,7 +121,7 @@ Contract rules:
 | File | Role |
 |---|---|
 | `arena/model.py` | `JobSpec`, `Cell`, `CellResult`, `CheckSpec`, enumeration |
-| `arena/checks.py` | check-suite runner (WS-G G1): replay delegates to the container path; unimplemented types → honest `pending` |
+| `arena/checks.py` | check-suite runner (WS-G G1): replay delegates to the container path; journey-verdict/ux-heuristic delegate to the verdict.json file adapter (WS-G G6); unimplemented types → honest `pending` |
 | `arena/plugins/base.py` | `JobTypePlugin` protocol + registry |
 | `arena/plugins/bugfix.py` | bugfix plugin — wraps `bench.py` oracle (verify / drive), scores from the completion-state file |
 | `arena/plugins/paired_task.py` | paired-task plugin — one task through multiple treatments with shared oracle JSON |
