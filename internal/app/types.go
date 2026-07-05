@@ -1316,6 +1316,17 @@ type WorkbenchDecl struct {
 	// Empty defaults to Agent itself — the workbench agent's own persona
 	// answers genuine Q&A that never reaches the capture intent.
 	OffRampAgent string `yaml:"off_ramp_agent,omitempty"`
+	// ContextArgs adds extra with.context.args entries to the synthesized
+	// on_enter host.agent.task dispatch, alongside the always-present
+	// `request` (the captured utterance). Each value is a template string
+	// resolved the same way any other Effect.With value is (world/expr
+	// interpolation via resolveEffectValue) — the general escape hatch for a
+	// workbench room that needs to feed the agent more than the bare
+	// utterance (e.g. dev-story's landing threading the prior turn's
+	// summary/details/plan into prompts/landing.md for continuity). Kept
+	// generic rather than landing-specific: any workbench consumer with its
+	// own continuity/context world keys can use it the same way.
+	ContextArgs map[string]string `yaml:"context_args,omitempty"`
 	// Plan, when true, requires AcceptanceSchema to declare a top-level
 	// "plan" property matching the shared plan.json contract
 	// (stories/dev-story/schemas/plan.json's goal/step/verify shape),

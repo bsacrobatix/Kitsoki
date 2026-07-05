@@ -264,8 +264,33 @@ macro is wrong, not the fixtures.
       (this task doesn't touch landing.yaml yet — proves additivity)
 
 ## 3. Adopt + document
-- [ ] 3.1 Migrate `stories/dev-story/rooms/landing.yaml` onto `workbench:`;
-      all 61 dev-story flow fixtures pass unmodified in behavior
+- [x] 3.1 Migrate `stories/dev-story/rooms/landing.yaml` onto `workbench:`;
+      all 61 dev-story flow fixtures pass unmodified in behavior.
+      Landed as a hand-reviewed migration (not scripted): `write_mode`,
+      `agent_off_ramp`, and the on_enter `host.agent.task` dispatch are now
+      synthesized by one `workbench:` block; `landing_agent` moved off
+      `tools:`/`bash_profile:`/`external_side_effect:` onto
+      `toolboxes:`/`effect: write` (`app.yaml`). The capture intent was
+      renamed `work` → `landing_capture` to match workbench:'s fixed
+      `<room>_capture` synthesis (Open question 1); its `on:` arc stayed
+      hand-authored (not the macro's plain synthesized arc) because it
+      carries the onboarding-command escape hatch and thread-continuity
+      preservation the macro does not auto-generate — a new
+      `workbench.context_args` field (generic, not landing-specific) feeds
+      `prior_summary`/`prior_details`/`prior_plan` into the synthesized
+      dispatch so that continuity survives the migration. Every flow/intents
+      fixture that dispatched `work` by name was renamed to `landing_capture`
+      alongside it (a pure rename: same guards/slots/effects) — the flow
+      suite passes at its pre-existing 79/82 (the 3 failures are a documented
+      unrelated `impl.idle` regression). Fallout fixed along the way:
+      `internal/app/imports_rewriter.go` didn't rewrite `Workbench.Agent` /
+      `OffRampAgent` on import-fold (broke `pets-dev` / `slidey-dev`,
+      `TestAllStoriesLoad`); and the loader's `free_form_fallback`
+      auto-detect hardcodes the bare name `work` (+ `__work` alias suffix),
+      so `stories/pets-dev/app.yaml`, `stories/slidey-dev/app.yaml`, and
+      `.kitsoki/stories/kitsoki-dev/app.yaml` now declare
+      `routing.free_form_fallback` explicitly instead of relying on
+      auto-detect.
 - [ ] 3.2 `docs/stories/state-machine.md` §"Room workbenches";
       `docs/architecture/room-workbench.md`; update dev-story README; trim/
       delete this proposal

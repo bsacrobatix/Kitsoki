@@ -3,7 +3,7 @@
 //
 // In an imported conversational discovery room (core.prd.idle: mode:
 // conversational + default_intent: discuss) the parent's GLOBAL, content-bearing
-// slot-bearing intent core__work (priority 45, required `request` slot) is in the
+// slot-bearing intent core__landing_capture (priority 45, required `request` slot) is in the
 // allowed set and competes with the room's default_intent. A product manager's
 // free-text idea must sink to default_intent (discuss) — NOT be stolen by the
 // global work intent, which would transition out of the discovery room and
@@ -43,20 +43,20 @@ func TestConversationalDefaultIntent_WinsOverGlobalWork(t *testing.T) {
 	m, err := machine.New(def)
 	require.NoError(t, err)
 
-	// core__work is genuinely in the allowed set for core.prd.idle — the
+	// core__landing_capture is genuinely in the allowed set for core.prd.idle — the
 	// competition this test guards against is real, not vacuous.
 	ais := m.AllowedIntents(app.StatePath("core.prd.idle"), machine.WorldFromSchema(def.World))
 	var hasWork bool
 	for _, ai := range ais {
-		if ai.Name == "core__work" {
+		if ai.Name == "core__landing_capture" {
 			hasWork = true
 		}
 	}
-	require.True(t, hasWork, "precondition: global core__work must be allowed in core.prd.idle")
+	require.True(t, hasWork, "precondition: global core__landing_capture must be allowed in core.prd.idle")
 
-	// Each utterance — including lines lexically identical to core__work's
+	// Each utterance — including lines lexically identical to core__landing_capture's
 	// examples — must sink to default_intent (stay in core.prd.idle), never
-	// steal to core__work (which would transition to core.landing).
+	// steal to core__landing_capture (which would transition to core.landing).
 	utterances := []string{
 		"I want a CLI tool that converts markdown to PDF",
 		"refactor the loader",
@@ -79,7 +79,7 @@ func TestConversationalDefaultIntent_WinsOverGlobalWork(t *testing.T) {
 			out, err := orch.Turn(context.Background(), sid, msg)
 			require.NoError(t, err)
 			require.Equal(t, app.StatePath("core.prd.idle"), out.NewState,
-				"free-text idea must sink to default_intent discuss (stay in room), not steal to global core__work")
+				"free-text idea must sink to default_intent discuss (stay in room), not steal to global core__landing_capture")
 		})
 	}
 }

@@ -167,7 +167,7 @@ dev rebinds to `host.local_files.ticket`. Same YAML, two providers.
 
 | Room | Status | Notes |
 |---|---|---|
-| `landing` | **root** | The **free-form workbench** — dev-story's root, replacing the former `main` catalog ([freeform-landing](#the-free-form-workbench-landing) below). A full-tool, Claude-Code-like agent (`landing_agent`) is the resting surface: the operator describes work in their own words (the `work` intent → on_enter `host.agent.task`), read-only by default and gated to a write-mode opt-in (`write_mode: read_only`). Carries `main`'s highest-value navigation forward as quick actions + intents. Declares the [agent off-ramp](../../docs/stories/state-machine.md#11-off-path-the-global-escape-hatch) (`agent_off_ramp.agent: agent_qa`) as its read-only Q&A floor. Every pipeline returns here (`go_main`/`go_back` self-loop). |
+| `landing` | **root** | The **free-form workbench** — dev-story's root, replacing the former `main` catalog ([freeform-landing](#the-free-form-workbench-landing) below). A full-tool, Claude-Code-like agent (`landing_agent`) is the resting surface: the operator describes work in their own words (the `landing_capture` intent → on_enter `host.agent.task`, via the [`workbench:`](../../docs/proposals/room-workbench.md) primitive), read-only by default and gated to a write-mode opt-in (`write_mode: read_only`). Carries `main`'s highest-value navigation forward as quick actions + intents. Declares the [agent off-ramp](../../docs/stories/state-machine.md#11-off-path-the-global-escape-hatch) (`workbench.off_ramp_agent: agent_qa`) as its read-only Q&A floor. Every pipeline returns here (`go_main`/`go_back` self-loop). |
 | `applying` | — | The deterministic executor for an accepted ad-hoc [plan](#ad-hoc-structured-plan-proposeacceptrefineapplyverify): re-prompts the `landing_agent` with the **accepted plan as instruction** (`prompts/apply.md`) and binds a **distinct `apply_note`** (binding `landing_note` would let `once:` skip the dispatch), then emits `run_verify`. |
 | `verifying` | — | Runs the accepted plan's **verify gate** (`host.starlark.run` script and/or `gate_reviewer` agent), binds tri-state `verify_ok`, and routes on the post-bind verdict: PASS → `plan_done`, FAIL → `landing` (`last_error` = the gate's reason). Pinned `decider: llm` so the deterministic verdict auto-fires in STAGED mode. |
 | `plan_done` | — | The plan completion read-out (`captured++`); `go_main`/`go_back` return to the workbench. |
@@ -358,26 +358,51 @@ design) are the **grown structure reached from** the floor, carried forward as
 quick-action buttons and intents so nothing `main` offered is lost; every
 pipeline's exit returns here, and `go_main` / `go_back` self-loop the workbench.
 
-**Read-only by default → opt into write.** The room carries
-`write_mode: read_only` and the persona declares `bash_profile: read-only` +
-`external_side_effect: false` (the static and runtime postures the loader
-requires to agree). The agent boots with its full toolbox but every *mutating*
-tool call (`Edit` / `Write` / side-effecting `Bash`) holds for an operator
+**Built on the `workbench:` primitive**
+([`docs/proposals/room-workbench.md`](../../docs/proposals/room-workbench.md);
+landing is its reference consumer). The room declares one `workbench:` block
+instead of hand-rolling `write_mode` + `agent_off_ramp` + an `on_enter
+host.agent.task` + a free-text capture arc; the loader desugars it at load time
+into exactly those four primitives, wired to `landing_agent`'s WS `toolbox:` +
+`effect:` declaration (`app.yaml agents.landing_agent`, `toolboxes.landing_toolbox`
+— `effect: write`, not the legacy `tools:`/`bash_profile:`/`external_side_effect:`
+triplet).
+
+**Read-only by default → opt into write.** `workbench:` sets `write_mode:
+read_only`; the agent boots with its full toolbox but every *mutating* tool
+call (`Edit` / `Write` / side-effecting `Bash`) holds for an operator
 write-mode grant before the effect lands, recorded as a
 `machine.write_mode_granted` event; headless (cassettes / flows / no operator)
 the gate denies and the agent stays read-only. The gate is
 [`internal/host/write_mode_gate.go`](../../internal/host/write_mode_gate.go);
 the landing is its first real client (the `agent-write-mode-opt-in` slice).
+`landing_agent`'s WS `effect: write` (not `external`) mirrors
+`ExternalSideEffect=false`, which is what keeps the static and runtime
+postures in agreement.
 
-The agent turn fires on the **`work`** intent (slot `request`), which captures
-the operator's utterance, clears the prior note to re-arm, and self-targets so
-`on_enter` dispatches `host.agent.task` (`agent: landing_agent`,
-`acceptance.schema: schemas/landing-note.json` — a minimal, permissive
-close-out note: the engine requires *a* schema on `task`, so "free output" is
-expressed as a one-field `summary` with `additionalProperties` open). Free text
-the router can't map to an action is answered in place by the read-only
-**agent off-ramp** (`agent_off_ramp.agent: agent_qa`) — the same floor `main`
-declared. The `world.captured` counter (rendered read-only here) is the
+The agent turn fires on the **`landing_capture`** intent (slot `request`) —
+named to match `workbench:`'s fixed `<room>_capture` synthesis, not the macro's
+plain synthesized arc: `landing_capture`'s `on:` transition is hand-authored so
+it can carry the onboarding-command escape hatch and thread continuity
+(preserving the prior note/plan across the re-dispatch) that the macro does not
+(and should not) auto-generate. It captures the operator's utterance, clears
+the prior note to re-arm, and self-targets so `on_enter` dispatches
+`host.agent.task` (`agent: landing_agent`, `acceptance.schema:
+schemas/landing-note.json` — a minimal, permissive close-out note: the engine
+requires *a* schema on `task`, so "free output" is expressed as a one-field
+`summary` with `additionalProperties` open, plus `workbench.context_args` to
+thread `prior_summary`/`prior_details`/`prior_plan` into the prompt). Because
+the app declares no explicit `routing:` block naming `landing`/`landing_capture`,
+every other non-conversational room falls back to it via
+`routing.free_form_fallback` auto-detection
+([`semantic-routing.md` §1.6](../../docs/architecture/semantic-routing.md)) — an
+instance importing dev-story under an alias (e.g. `core`) must declare that
+block explicitly instead, since the auto-detect's own heuristic only ever
+matches the un-aliased bare name (see `stories/pets-dev/app.yaml`,
+`stories/slidey-dev/app.yaml`, `.kitsoki/stories/kitsoki-dev/app.yaml`). Free
+text the router can't map to an action is answered in place by the read-only
+**agent off-ramp** (`workbench.off_ramp_agent: agent_qa`) — the same floor
+`main` declared. The `world.captured` counter (rendered read-only here) is the
 progressive-determinism read-out, incremented by the mining apply path.
 
 #### Ad-hoc structured plan (propose→accept/refine→apply→verify)
@@ -386,8 +411,8 @@ When the request is concrete, actionable work, the `landing_agent` proposes a
 **validated, executable `plan`** (one goal, one run-then-verify step, a Starlark
 verify gate) in its close-out note instead of prose. The workbench renders a
 reviewable **plan card**; the operator **Accepts** it (or types an adjustment to
-**refine** it — the `work` sink re-dispatches the planner with the prior plan as
-context), `apply` runs the step under the write-mode grant, then the verify gate
+**refine** it — the `landing_capture` sink re-dispatches the planner with the
+prior plan as context), `apply` runs the step under the write-mode grant, then the verify gate
 proves it landed and routes on a **real pass/fail verdict**. The full narrative —
 the rooms (`applying` / `verifying` / `plan_done`), the plan schema (a strict
 subset of cherny-loop's `gate_plan`), the Starlark read-only inspection
@@ -426,7 +451,7 @@ intents in Wave 2:
 | `pr` | `open`, `monitor`, `retry`, `resolve`, `merge_now` |
 
 The parent declares additional navigation / pipeline-launching
-intents at the bare name: `work` (the free-form workbench request —
+intents at the bare name: `landing_capture` (the free-form workbench request —
 slot `request`), `go_main` / `go_back` (now self-loop the `landing`
 floor), `go_inbox`, `go_agent`, `go_ticket_search`,
 `go_workspace_manager`, `go_standup`, `go_code_review`, `go_deploy`,
@@ -449,14 +474,14 @@ rooms; the post-bind guarded emit auto-routes on the agent's verdict).
 | `landing_smoke.yaml` | Boot, land in the free-form workbench (`root: landing`), render view, `go_main` self-loops the floor. Smallest possible smoke (replaces `main_smoke`). |
 | `landing_quick_action.yaml` | From `landing` a quick action (`go_ticket_search`) reaches ticket_search → search → pick → `drive` routes into the bugfix pipeline. Proves the re-homed navigation is intact (replaces `ticket_search_smoke`). |
 | `landing_off_ramp.yaml` | The read-only Q&A floor: an unmapped utterance never advances the workbench and never mutates world (the invariant the live off-ramp converse rests on; the converse answer itself is the LLM step, exercised by the web posture + `offramp_test.go`, never CI). |
-| `landing_write_mode_opt_in.yaml` | The `work` intent captures a (mutating) request and re-arms the on_enter `landing_agent` task (stubbed); the workbench stays put as the read-only floor. The gate's decision spine (mutating-step classify, grant scopes, headless deny, recorded event) is unit-tested end-to-end in `internal/host/write_mode_gate_test.go` (a flow stub bypasses the in-subprocess gate, per AGENTS.md). |
+| `landing_write_mode_opt_in.yaml` | The `landing_capture` intent captures a (mutating) request and re-arms the on_enter `landing_agent` task (stubbed); the workbench stays put as the read-only floor. The gate's decision spine (mutating-step classify, grant scopes, headless deny, recorded event) is unit-tested end-to-end in `internal/host/write_mode_gate_test.go` (a flow stub bypasses the in-subprocess gate, per AGENTS.md). |
 | `pickup_to_bugfix.yaml` | landing → ticket_search → pick → dispatch into the bf import (lands in bf.idle with world_in: projections firing). |
 | `github_ticket_drive_routes.yaml` | `iface.ticket` rebound to `host.gh.ticket`: a GitHub-Issue-sourced bug carries a provider-classified `ticket_type` (from its `bug` label), so a row pick (`n=`) lands `ticket_type=bug` and the headline `drive` routes into bf — no silent self-loop. The get also surfaces `source=github` + the lifted `legacy_id`, so the local↔issue identity shows in the ticket view. Regression for the two `host.gh.ticket` provider bugs. |
 | `bugfix_to_pr.yaml` | The full closed-loop walk: landing → bf.idle → walk every bf room to @exit:done → handoff into pr → walk pr to @exit:merged → land back in `landing` with status="merged" and last_pr_url populated. |
 | `design_to_implementation.yaml` | The publish → implement bridge: design_done → `go_implementation` → impl.idle (on_enter self-provisions the worktree — the fixture seeds NO workspace) → walk the impl pipeline to @exit:done → `landing` with status="merged". |
 | `prd_to_design.yaml` | The PRD → Design walk: landing → `go_prd` → walk the imported prd pipeline to @exit:done → land in `prd_published` (prd__prd_file lifted) → `continue` → the `design` intake, seeded with a pointer to the published PRD. |
 | `plan_propose_render.yaml` | A stubbed planner returns a note *with* a plan → the [ad-hoc plan](#ad-hoc-structured-plan-proposeacceptrefineapplyverify) card + Accept & apply quick action render; `look` re-renders without re-dispatching. |
-| `plan_refine.yaml` | A free-text adjustment re-uses the `work` sink: the prior plan is preserved into `landing_plan_prior` (fed into the re-dispatched prompt) and a revised plan binds — asserts the *dispatched prompt* carries the prior plan. |
+| `plan_refine.yaml` | A free-text adjustment re-uses the `landing_capture` sink: the prior plan is preserved into `landing_plan_prior` (fed into the re-dispatched prompt) and a revised plan binds — asserts the *dispatched prompt* carries the prior plan. |
 | `plan_apply_verify_green.yaml` | accept → apply → the **real** verify script runs against an inspect cassette (3 ≥ 3) → `{ok:true}` → `plan_done`, `captured++`. Exercises `ctx.probe` on the happy path. |
 | `plan_apply_verify_red.yaml` | Same path, cassette yields 1 (< 3) → real `{ok:false}` → back to `landing`, `last_error` = the script's reason, `captured` unchanged, plan kept for refine. The don't-false-pass case. |
 | `plan_mutation_gate.yaml` | Mutation test: breaking the `verify_ok: ok` bind in `verifying.yaml` makes it fail — proves the verify gate is load-bearing, not decorative. |
@@ -473,7 +498,7 @@ rooms; the post-bind guarded emit auto-routes on the agent's verdict).
 | `docs_publish.yaml` | The documentation happy path: target → draft (`host.agent.task`, write-mode opt-in) → review → publish (`iface.transport.post`) → published → landing. |
 | `docs_revise.yaml` | The revise edge: draft → `revise_doc` parks back at intake (`status=revising`, draft retained) → a fresh `draft_doc` re-arms the writer. |
 
-These are a sample; the full suite (61 / 61) passes under `kitsoki test flows stories/dev-story/app.yaml`.
+These are a sample; the full suite passes under `kitsoki test flows stories/dev-story/app.yaml`.
 
 ## Manual TUI walkthrough
 

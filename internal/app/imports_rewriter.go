@@ -163,6 +163,27 @@ func (rw *childRewriter) rewriteState(s *State) {
 		}
 	}
 
+	// Workbench.Agent / OffRampAgent: workbench: (room-workbench.md) names an
+	// agent exactly like AgentOffRamp.Agent above, but expandWorkbenches
+	// (workbench.go) runs AFTER import folding, so without this rewrite a
+	// workbench: block folded from a child story would carry a dangling
+	// reference to the child's pre-fold agent name (parent.Agents only holds
+	// the renamed <alias>__<agent> entry) and fail expandWorkbenches's
+	// agent-capability invariant at load time. CaptureSlot/Prompt/
+	// AcceptanceSchema/ContextArgs need no rewrite: they are world keys /
+	// paths / templates, not agent names, and expandWorkbenches synthesizes
+	// world keys from the (already-aliased) room name.
+	if s.Workbench != nil {
+		if _, isChild := rw.childAgent[s.Workbench.Agent]; isChild {
+			s.Workbench.Agent = rw.alias + "__" + s.Workbench.Agent
+		}
+		if s.Workbench.OffRampAgent != "" {
+			if _, isChild := rw.childAgent[s.Workbench.OffRampAgent]; isChild {
+				s.Workbench.OffRampAgent = rw.alias + "__" + s.Workbench.OffRampAgent
+			}
+		}
+	}
+
 	// Local intents.
 	if len(s.Intents) > 0 {
 		// State.Intents are addressable by bare name inside this state's

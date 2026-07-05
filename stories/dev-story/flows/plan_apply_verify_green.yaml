@@ -53,7 +53,7 @@ host_handlers:
 
 turns:
   # Propose the plan.
-  - intent: { name: work, slots: { request: "import the issues folder in the repo to github" } }
+  - intent: { name: landing_capture, slots: { request: "import the issues folder in the repo to github" } }
     expect_state: landing
 
   # Accept & apply — freezes accepted_plan, enters applying, applying runs the

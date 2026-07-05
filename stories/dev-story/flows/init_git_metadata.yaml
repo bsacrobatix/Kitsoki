@@ -41,7 +41,7 @@ host_handlers:
               note: "No associated Claude/Codex transcripts were found during deterministic discovery."
 
 turns:
-  - intent: { name: work, slots: { request: "onboard /tmp/kitsoki-init-fixtures/branchy" } }
+  - intent: { name: landing_capture, slots: { request: "onboard /tmp/kitsoki-init-fixtures/branchy" } }
     expect_state: init_discover
     expect_world:
       init_target_path: "/tmp/kitsoki-init-fixtures/branchy"

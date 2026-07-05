@@ -91,14 +91,14 @@ fixtures:
 
   - id: work-investigate-not-proposal
     intent:
-      name: work
+      name: landing_capture
       slots: { request: "investigate why the proposal publish step created two tickets" }
     inputs:
       - "investigate why the proposal publish step created two tickets"
 
   - id: work-test-not-proposal
     intent:
-      name: work
+      name: landing_capture
       slots: { request: "add tests for the proposal publish script" }
     inputs:
       - "add tests for the proposal publish script"

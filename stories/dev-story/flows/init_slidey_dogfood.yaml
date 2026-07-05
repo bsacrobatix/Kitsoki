@@ -81,7 +81,7 @@ turns:
   - intent: { name: quit, slots: {} }
     expect_state: landing
 
-  - intent: { name: work, slots: { request: "onboard ~/code/slidey" } }
+  - intent: { name: landing_capture, slots: { request: "onboard ~/code/slidey" } }
     expect_state: init_discover
     expect_world:
       init_request: "onboard ~/code/slidey"

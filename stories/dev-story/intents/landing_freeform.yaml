@@ -23,14 +23,14 @@ fixtures:
   # utterance fills the required `request` slot.
   - id: affirmation-ok-go-ahead
     intent:
-      name: work
+      name: landing_capture
       slots: { request: "ok go ahead" }
     inputs:
       - "ok go ahead"
 
   - id: affirmation-do-it
     intent:
-      name: work
+      name: landing_capture
       slots: { request: "do it" }
     inputs:
       - "do it"

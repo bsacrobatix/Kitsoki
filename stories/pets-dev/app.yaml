@@ -25,6 +25,16 @@ app:
 routing:
   embedding:
     model: "nomic-embed-text-v1.5"
+  # Explicit — the loader's own free-form-fallback auto-detect
+  # (effectiveFreeFormFallback, internal/app/loader.go) hardcodes the bare
+  # intent name "work" (and the "__work" import-alias suffix); dev-story's
+  # landing room now names its capture intent `landing_capture` (workbench:'s
+  # fixed `<room>_capture` naming, docs/proposals/room-workbench.md Task 3.1),
+  # so after folding under the `core` alias the auto-detect would find nothing
+  # and menu-shaped rooms in this instance would lose their free-text sink.
+  free_form_fallback:
+    state: core.landing
+    intent: core__landing_capture
 
 hosts:
   - host.local_files.ticket

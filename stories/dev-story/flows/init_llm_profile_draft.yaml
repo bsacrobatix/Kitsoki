@@ -91,7 +91,7 @@ host_handlers:
                   transport: host.append_to_file
 
 turns:
-  - intent: { name: work, slots: { request: "onboard ~/code/acme-rust" } }
+  - intent: { name: landing_capture, slots: { request: "onboard ~/code/acme-rust" } }
     expect_state: init_discover
 
   - intent: { name: init_discovered, slots: {} }
