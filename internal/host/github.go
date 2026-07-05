@@ -33,7 +33,7 @@ import (
 //
 // Required args:
 //   - op (string): one of create, search, get, comment, comment_edit,
-//     transition, list_mine.
+//     comment_reactions, transition, list_mine.
 //
 // Optional args (all ops except create):
 //   - repo (string): the `owner/repo` slug. Required for native operations
@@ -62,6 +62,8 @@ func GitHubTicketHandler(ctx context.Context, args map[string]any) (Result, erro
 		return ghTicketComment(ctx, args)
 	case "comment_edit":
 		return ghTicketCommentEdit(ctx, args)
+	case "comment_reactions":
+		return ghTicketCommentReactions(ctx, args)
 	case "transition":
 		return ghTicketTransition(ctx, args)
 	case "list_mine":
@@ -243,6 +245,63 @@ func ghTicketCommentEdit(ctx context.Context, args map[string]any) (Result, erro
 		"ok":         true,
 		"comment_id": commentURL,
 		"url":        commentURL,
+	}}, nil
+}
+
+// ghTicketCommentReactions implements ticket.comment_reactions via the native
+// GitHub REST reactions endpoint — reads the emoji reactions left on a comment
+// (e.g. the ghagent ack comment) so a caller can detect a 👎 (thumbsdown)
+// dissatisfaction signal (WS-C C4's gh-agent surface; see
+// docs/testing/routing-tuning.md).
+//
+// Input  args: comment_id (string — same accepted forms as comment_edit: a
+// raw id, an API URL, or a web URL with #issuecomment-N), repo (string,
+// required unless comment_id is an API URL containing /repos/owner/repo/).
+// Output Data: ok (bool), reactions ([]map[string]any — each carries at least
+// "content", the reaction shortcode: "+1" | "-1" | "laugh" | … per the GitHub
+// API), has_thumbsdown (bool), has_thumbsup (bool) — precomputed convenience
+// flags so callers don't need to know the GitHub content vocabulary.
+func ghTicketCommentReactions(ctx context.Context, args map[string]any) (Result, error) {
+	commentID, _ := args["comment_id"].(string)
+	repo, id := splitIssueCommentID(commentID)
+	if repo == "" {
+		if r, _ := args["repo"].(string); r != "" {
+			repo = r
+		}
+	}
+	if strings.TrimSpace(id) == "" {
+		return Result{Error: "ticket.comment_reactions: comment_id argument is required"}, nil
+	}
+	if strings.TrimSpace(repo) == "" {
+		return Result{Error: "ticket.comment_reactions: repo argument is required"}, nil
+	}
+	path := fmt.Sprintf("repos/%s/issues/comments/%s/reactions", repo, id)
+	var raw []map[string]any
+	code, resp, err := githubAPIJSON(ctx, "GET", path, nil, &raw)
+	if err != nil {
+		return Result{Error: fmt.Sprintf("ticket.comment_reactions: %v", err)}, nil
+	}
+	if code >= 300 {
+		return Result{Error: fmt.Sprintf("ticket.comment_reactions: %s", githubAPIError(resp))}, nil
+	}
+	hasThumbsdown, hasThumbsup := false, false
+	for _, r := range raw {
+		switch fmt.Sprint(r["content"]) {
+		case "-1":
+			hasThumbsdown = true
+		case "+1":
+			hasThumbsup = true
+		}
+	}
+	reactions := make([]any, len(raw))
+	for i, r := range raw {
+		reactions[i] = r
+	}
+	return Result{Data: map[string]any{
+		"ok":             true,
+		"reactions":      reactions,
+		"has_thumbsdown": hasThumbsdown,
+		"has_thumbsup":   hasThumbsup,
 	}}, nil
 }
 

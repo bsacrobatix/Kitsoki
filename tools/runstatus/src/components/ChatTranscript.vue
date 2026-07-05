@@ -168,6 +168,43 @@
           <span class="chat-routing__conf" v-if="entry.routing!.confidence"
             >{{ entry.routing!.confidence.toFixed(2) }}</span
           >
+          <!-- Routing-feedback control (WS-C C4): thumbs up/down on this turn's
+               route, journaled through the same event the TUI's `/route up|down`
+               command writes. Hidden once the operator has given a verdict this
+               session, or when the run store has no routingFeedback-capable
+               source (artifact/snapshot). -->
+          <span
+            v-if="!entry.feedbackGiven"
+            class="chat-routing__feedback"
+            data-testid="routing-feedback"
+          >
+            <button
+              type="button"
+              class="chat-routing__feedback-btn"
+              data-testid="routing-feedback-up"
+              title="this route was correct"
+              @click="onFeedback(entry, 'up')"
+            >
+              👍
+            </button>
+            <button
+              type="button"
+              class="chat-routing__feedback-btn"
+              data-testid="routing-feedback-down"
+              title="this route was wrong"
+              @click="onFeedback(entry, 'down')"
+            >
+              👎
+            </button>
+          </span>
+          <span
+            v-else
+            class="chat-routing__feedback-given"
+            data-testid="routing-feedback-given"
+            :title="`recorded: ${entry.feedbackGiven}`"
+          >
+            {{ entry.feedbackGiven === "up" ? "👍" : "👎" }} recorded
+          </span>
         </div>
       </div>
     </div>
@@ -215,6 +252,9 @@ export interface ChatEntry {
   isOffRamp?: boolean;
   /** Routing provenance for a free-text user turn (renders the routing chip). */
   routing?: RoutingInfo;
+  /** Set once the operator has given a routing-feedback verdict this session
+   *  (WS-C C4); hides the thumbs control in favour of a "recorded" chip. */
+  feedbackGiven?: "up" | "down";
   /** A media annotation the operator attached to this user turn (deck frame +
    *  picked anchor) — rendered as a marked-up thumbnail above the instruction. */
   annotation?: {
@@ -271,7 +311,10 @@ const props = withDefaults(
 // 'rewind' is emitted with the receipt's decision_id when the operator clicks
 // the rewind affordance on a (rewindable) route receipt; the owning surface
 // drives the run store's rewindRoute action with it.
-const emit = defineEmits<{ rewind: [decisionId: string] }>();
+const emit = defineEmits<{
+  rewind: [decisionId: string];
+  feedback: [entry: ChatEntry, verdict: "up" | "down"];
+}>();
 
 /**
  * A CRR receipt is rewindable only for the lane classes the engine can reverse
@@ -286,6 +329,11 @@ function canRewind(r: ContextRouteInfo): boolean {
 function onRewind(r: ContextRouteInfo): void {
   if (!canRewind(r)) return;
   emit("rewind", r.decision_id);
+}
+
+/** Emit a routing-feedback verdict for a user turn's routing chip. */
+function onFeedback(entry: ChatEntry, verdict: "up" | "down"): void {
+  emit("feedback", entry, verdict);
 }
 
 const scrollEl = ref<HTMLElement | null>(null);
@@ -699,6 +747,29 @@ watch(
 .chat-routing__conf {
   color: rgba(255, 255, 255, 0.6);
   margin-left: auto;
+}
+/* Routing-feedback control (WS-C C4): a compact thumbs up/down pair sitting
+   at the end of the routing chip, or (once given) a small "recorded" chip in
+   its place. */
+.chat-routing__feedback {
+  display: flex;
+  gap: 3px;
+}
+.chat-routing__feedback-btn {
+  border: none;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.chat-routing__feedback-btn:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+.chat-routing__feedback-given {
+  color: rgba(255, 255, 255, 0.55);
+  font-style: italic;
 }
 
 /* The agent room view: preserve the engine's layout verbatim. Monospace +

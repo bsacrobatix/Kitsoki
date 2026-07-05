@@ -18,9 +18,9 @@ import (
 	"kitsoki/internal/jobs"
 	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/orchestrator"
-	"kitsoki/internal/world"
 	"kitsoki/internal/render/elements"
 	"kitsoki/internal/store"
+	"kitsoki/internal/world"
 )
 
 // Driver is the write side of the runstatus surface: the server calls it to
@@ -90,6 +90,18 @@ type Driver interface {
 	// intent-class rewind is not yet recoverable from the journal and returns an
 	// explicit error the surface presents gracefully (a disabled control), not a 500.
 	RewindRoute(ctx context.Context, decisionID string, newClass orchestrator.ContextRouteClass, reason string) (*orchestrator.TurnOutcome, error)
+
+	// RecordRoutingFeedback journals an operator's up/down verdict on a
+	// previously-routed turn (WS-C C4: the routing-dissatisfaction substrate).
+	// It backs the runstatus.session.routing_feedback RPC the web chat's
+	// thumbs-up/down control calls — the browser-side twin of the TUI's
+	// `/route up|down` command. state/intent/phrase/tier are recovered by the
+	// browser from the turn's own trace events (see readTurnRouting in
+	// stores/run.ts), exactly like the TUI recovers them from its routing
+	// pipeline snapshot; this method does no lookup of its own. It never
+	// mutates session/world state (a standalone journal write), so it is safe
+	// to call without the session writer lock.
+	RecordRoutingFeedback(ctx context.Context, statePath, intent, phrase, tier string, verdict orchestrator.RoutingFeedbackVerdict) error
 }
 
 // WorkLister is an optional read-only extension for Drivers that can expose the
@@ -841,6 +853,12 @@ func (d OrchestratorDriver) Teleport(ctx context.Context, notificationID string)
 // error (the original intent isn't recoverable from TurnStarted alone).
 func (d OrchestratorDriver) RewindRoute(ctx context.Context, decisionID string, newClass orchestrator.ContextRouteClass, reason string) (*orchestrator.TurnOutcome, error) {
 	return d.Orch.RewindRoute(ctx, d.SID, decisionID, newClass, reason)
+}
+
+// RecordRoutingFeedback delegates to Orchestrator.RecordRoutingFeedback,
+// binding the session id. See the [Driver] doc for the surface contract.
+func (d OrchestratorDriver) RecordRoutingFeedback(ctx context.Context, statePath, intent, phrase, tier string, verdict orchestrator.RoutingFeedbackVerdict) error {
+	return d.Orch.RecordRoutingFeedback(ctx, d.SID, app.StatePath(statePath), intent, phrase, tier, verdict)
 }
 
 // IntentInfo resolves the intent's slot schema against `state` and derives the

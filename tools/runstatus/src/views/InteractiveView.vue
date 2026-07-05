@@ -296,6 +296,7 @@
             :suppressed-media-handles="suppressedMediaHandles"
             :suppressed-media-labels="suppressedMediaLabels"
             @rewind="onRewind"
+            @feedback="onFeedback"
           />
           <!-- Streaming thinking bubble: visible while a turn is in flight -->
           <div v-if="pending || store.busy" class="iv__thinking" data-testid="thinking-bubble">
@@ -581,7 +582,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { useRunStore } from "../stores/run.js";
+import { useRunStore, type TranscriptEntry } from "../stores/run.js";
 import { useInboxStore } from "../stores/inbox.js";
 import { createDataSource } from "../data/source.js";
 import type { DataSource } from "../data/source.js";
@@ -1447,6 +1448,13 @@ function onIntent(name: string, slots: Record<string, unknown>, displayLabel?: s
 function onRewind(decisionId: string): void {
   if (!source) return;
   void runTurn(() => store.rewindRoute(source!, props.sessionId, decisionId));
+}
+
+// Routing-feedback thumbs up/down (WS-C C4): fire-and-forget, no in-flight
+// guard needed since it never advances the turn.
+function onFeedback(entry: TranscriptEntry, verdict: "up" | "down"): void {
+  if (!source) return;
+  void store.sendRoutingFeedback(source, props.sessionId, entry, verdict);
 }
 
 // ---- trace interactions (mirror RunView observer behavior) ----

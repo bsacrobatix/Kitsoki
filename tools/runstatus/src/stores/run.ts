@@ -34,6 +34,13 @@ export interface RoutingInfo {
   confidence?: number;
   /** The intent the turn resolved to (turn's first transition). */
   intent?: string;
+  /**
+   * The state path the turn routed FROM (the turn.start event's own
+   * state_path). Carried so the WS-C C4 thumbs-up/down feedback control can
+   * journal a verdict without a second server round-trip — see
+   * runstatus.session.routing_feedback / Orchestrator.RecordRoutingFeedback.
+   */
+  statePath?: string;
 }
 
 /** One entry of the conversational transcript shown beside the trace. */
@@ -69,6 +76,13 @@ export interface TranscriptEntry {
   turn?: number;
   /** Routing provenance, resolved reactively from events (see chatEntries). */
   routing?: RoutingInfo;
+  /**
+   * Set once the operator has given a routing-feedback verdict on this turn
+   * (WS-C C4's thumbs-up/down control) — the chip disables further clicks and
+   * shows which way it went. Persists only for the session's lifetime (not
+   * replayed from the trace); a page reload re-enables the control.
+   */
+  feedbackGiven?: "up" | "down";
   /**
    * Set on a USER bubble dispatched from the media-annotation composer: the
    * artifact the operator pointed at + the picked anchor, so the bubble renders
@@ -193,6 +207,7 @@ export const useRunStore = defineStore("run", () => {
           routedBy: e.attrs.routed_by,
           matchType: typeof e.attrs.match_type === "string" ? e.attrs.match_type : undefined,
           confidence: typeof e.attrs.confidence === "number" ? e.attrs.confidence : undefined,
+          statePath: e.state_path || undefined,
         };
       }
       if (!intent && e.msg === "machine.transition" && typeof e.attrs.intent === "string") {
@@ -757,6 +772,37 @@ export const useRunStore = defineStore("run", () => {
     return result;
   }
 
+  /**
+   * Record an operator up/down verdict on a routed turn — the web chat's
+   * thumbs-up/down control (WS-C C4), the browser twin of the TUI's `/route
+   * up|down` command. entry carries the turn number + the routing provenance
+   * (state/intent/tier) readTurnRouting already recovered from the trace, and
+   * entry.text is the original phrase — nothing is looked up server-side.
+   * Journals through the SAME event the TUI writes
+   * (Orchestrator.RecordRoutingFeedback); does not advance the turn, so there
+   * is no TurnResult to apply. A source without routingFeedback (artifact/
+   * snapshot sources) makes this a no-op — the control hides there.
+   */
+  async function sendRoutingFeedback(
+    source: DataSource,
+    sessionId: string,
+    entry: TranscriptEntry,
+    verdict: "up" | "down"
+  ): Promise<void> {
+    if (!source.routingFeedback || entry.turn == null) return;
+    await source.routingFeedback(sessionId, {
+      state: entry.routing?.statePath ?? "",
+      intent: entry.routing?.intent ?? "",
+      phrase: entry.text,
+      tier: entry.routing?.routedBy ?? "",
+      verdict,
+    });
+    // Mutate the master transcript entry (not the derived chatEntries copy) so
+    // the disabled/given state survives the next reactive recompute.
+    const master = transcript.value.find((e) => e.turn === entry.turn && e.role === "user");
+    if (master) master.feedbackGiven = verdict;
+  }
+
   /** Set the selected event by index (drives inline row highlight). */
   function selectEvent(index: number): void {
     selectedEventIndex.value = index;
@@ -903,6 +949,7 @@ export const useRunStore = defineStore("run", () => {
     submitIntent,
     sendText,
     rewindRoute,
+    sendRoutingFeedback,
     applyTurnResult,
   };
 });

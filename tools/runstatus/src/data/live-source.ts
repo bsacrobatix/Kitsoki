@@ -658,6 +658,25 @@ export class LiveSource implements DataSource {
     });
   }
 
+  /**
+   * Record an operator up/down verdict on a routed turn (the web chat's
+   * thumbs-up/down control) via runstatus.session.routing_feedback — the same
+   * journaled event the TUI's `/route up|down` command writes.
+   */
+  async routingFeedback(
+    sessionId: string,
+    feedback: { state: string; intent: string; phrase: string; tier: string; verdict: "up" | "down" }
+  ): Promise<void> {
+    await this.client.post<{ ok: boolean }>("runstatus.session.routing_feedback", {
+      session_id: sessionId,
+      state: feedback.state,
+      intent: feedback.intent,
+      phrase: feedback.phrase,
+      tier: feedback.tier,
+      verdict: feedback.verdict,
+    });
+  }
+
   getHarness(sessionId: string): Promise<HarnessState> {
     return this.client.post<HarnessState>("runstatus.session.harness", {
       session_id: sessionId,
