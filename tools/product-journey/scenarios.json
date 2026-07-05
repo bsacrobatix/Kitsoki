@@ -23,7 +23,17 @@
         "Persona can identify the product category without private repo context.",
         "Persona can find a documented next action.",
         "Broken links, stale media, or confusing claims are filed as product findings."
-      ]
+      ],
+      "transports": {
+        "allowed": ["tui", "web"],
+        "required": ["tui"],
+        "overrides": {
+          "web": {
+            "required_mcp": ["session.open", "session.inspect", "visual.open", "visual.observe"],
+            "evidence": ["browser_screenshot", "session_trace", "navigation_trace", "checkpoint_rating", "key_interaction_video"]
+          }
+        }
+      }
     },
     {
       "id": "project-onboarding",
@@ -49,7 +59,11 @@
         "Generated project config names real commands and relevant project files.",
         "Persona can state the next Kitsoki command or room to use.",
         "No silent operator-question defaulting occurs."
-      ]
+      ],
+      "transports": {
+        "allowed": ["tui", "web", "vscode"],
+        "required": ["tui"]
+      }
     },
     {
       "id": "bugfix",
@@ -75,7 +89,11 @@
         "Hidden oracle passes.",
         "Full suite passes or failure is classified.",
         "Patch shape is reviewable for the persona's project."
-      ]
+      ],
+      "transports": {
+        "allowed": ["tui", "web", "vscode"],
+        "required": ["tui"]
+      }
     },
     {
       "id": "prd-design",
@@ -101,7 +119,11 @@
         "Artifacts cite real repository files and commands.",
         "Scope is small enough for review.",
         "Open questions are explicit instead of hidden in generated prose."
-      ]
+      ],
+      "transports": {
+        "allowed": ["tui", "web", "vscode"],
+        "required": ["tui"]
+      }
     },
     {
       "id": "feature-implementation",
@@ -127,7 +149,11 @@
         "Implementation follows the design artifact.",
         "Tests are targeted and deterministic.",
         "Remaining work is separated from completed work."
-      ]
+      ],
+      "transports": {
+        "allowed": ["tui", "web", "vscode"],
+        "required": ["tui"]
+      }
     },
     {
       "id": "evidence-backed-product-bug",
@@ -152,7 +178,11 @@
         "Report includes expected versus actual behavior.",
         "Report includes deterministic reproduction context.",
         "Sensitive local data is redacted or explicitly marked local-only."
-      ]
+      ],
+      "transports": {
+        "allowed": ["tui", "web", "vscode"],
+        "required": ["tui"]
+      }
     },
     {
       "id": "mined-scn-1b4ace86-f192-43b0-ab86-16142fec0079-0001",

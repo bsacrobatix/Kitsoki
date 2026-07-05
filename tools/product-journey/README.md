@@ -30,6 +30,23 @@ Emit a repeatable no-LLM dry-run bundle and Slidey deck:
 python3 tools/product-journey/run.py --emit-run --project gears-rust --persona core-maintainer --seed demo
 ```
 
+Emit the same bundle scoped to specific transports (`tui`, `web`, `vscode`, or
+`all`) so `execution-plan.md`/`driver-plan.json` enumerate scenario x
+transport legs instead of one entry per scenario:
+
+```sh
+python3 tools/product-journey/run.py --emit-run --project gears-rust --persona core-maintainer --seed demo --transport all
+python3 tools/product-journey/run.py --emit-run --project gears-rust --persona core-maintainer --seed demo --scenarios bugfix --transport tui,web
+```
+
+Each leg carries its own `required_mcp`/`evidence` (from the scenario's
+`transports.overrides`, when declared) and a `transport_evidence_contract`
+naming the capture tool, evidence kind, and proof level for that transport
+(`tui` -> `render.tui_png` frames, `web` -> `visual.snapshot`/rrweb, `vscode`
+-> `visual.open kind=vscode`, always labeled bridge-level). A scenario that
+doesn't allow a requested transport is skipped for it rather than erroring.
+Omitting `--transport` keeps today's one-entry-per-scenario output unchanged.
+
 Validate the reusable natural-use corpus before planning a sweep:
 
 ```sh
@@ -512,8 +529,16 @@ coverage of this mapping.
 - `github-targets.json` — 10 GitHub candidate targets for natural-usage
   journey sweeps.
 - `personas.json` — reusable personas for deterministic journey assignment.
+  Curated personas carry a `persona_lens` object (`starting_surface`,
+  `first_question`, `evidence_emphasis`, `escalation_trigger`, `finding_bias`)
+  read by `persona_lens()`; personas without it (today, every mined persona)
+  fall back to a lens synthesized from `surface_preference`/`risk_focus`.
 - `scenarios.json` — reusable scenario/task definitions with required MCP tools,
-  expected evidence, and success criteria.
+  expected evidence, and success criteria. Scenarios may declare an optional
+  `transports` object (`allowed`, `required`, and per-transport `overrides` of
+  `required_mcp`/`evidence`) consumed by `--emit-run --transport`; scenarios
+  without it (today, every mined scenario) get an implicit contract derived
+  from `required_mcp` by `default_scenario_transports()`.
 - `schema.json` — current artifact and stage contract.
 - `run.py` — entrypoint script used by the journey orchestrator.
 

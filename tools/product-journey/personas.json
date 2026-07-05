@@ -9,7 +9,14 @@
         "reviewability",
         "house-style",
         "minimal diffs"
-      ]
+      ],
+      "persona_lens": {
+        "starting_surface": "terminal-first; prefer TUI/session state before browser surfaces",
+        "first_question": "Will this produce a minimal, reviewable diff that follows the repository's style?",
+        "evidence_emphasis": "candidate diff, targeted tests, full-suite classification, and trace events for unexpected routing",
+        "escalation_trigger": "generated churn, hidden broad scope, missing deterministic test proof, or unclear ownership boundary",
+        "finding_bias": "Prefer reviewability, bisectability, and least-surprise findings over cosmetic notes."
+      }
     },
     {
       "id": "dependency-debugger",
@@ -20,7 +27,14 @@
         "time-to-repro",
         "test confidence",
         "handoff artifacts"
-      ]
+      ],
+      "persona_lens": {
+        "starting_surface": "web-first; begin from public issue/repro context and then enter the story surface",
+        "first_question": "How quickly can I reproduce the dependency bug and decide whether Kitsoki's fix is trustworthy?",
+        "evidence_emphasis": "reproduction steps, oracle output, key interaction video, and handoff artifacts",
+        "escalation_trigger": "unclear repro setup, missing oracle, ambiguous pass/fail state, or no handoff artifact for my app",
+        "finding_bias": "Favor time-to-repro, confidence, and downstream handoff clarity."
+      }
     },
     {
       "id": "docs-minded-contributor",
@@ -31,7 +45,14 @@
         "stale docs",
         "missing prerequisites",
         "broken demos"
-      ]
+      ],
+      "persona_lens": {
+        "starting_surface": "docs-first; follow the documented path before trying hidden commands",
+        "first_question": "Can I follow the docs without private repo context or tribal knowledge?",
+        "evidence_emphasis": "page URLs, screenshots, prerequisite commands, stale-link proof, and onboarding smoke results",
+        "escalation_trigger": "stale docs, missing prerequisites, broken media, or commands that require unexplained setup",
+        "finding_bias": "Prefer onboarding clarity, documented next actions, and confusing-copy findings."
+      }
     },
     {
       "id": "ide-first-engineer",
@@ -42,7 +63,14 @@
         "visual state",
         "operator questions",
         "navigation clarity"
-      ]
+      ],
+      "persona_lens": {
+        "starting_surface": "visual-first; use web, TUI PNG, or editor-like surfaces before terminal archaeology",
+        "first_question": "Can I understand current state and next action from the visible UI?",
+        "evidence_emphasis": "visual frames, retained image IDs, operator-question state, navigation traces, and key interaction video",
+        "escalation_trigger": "state that is only visible in logs, silent operator defaults, confusing navigation, or unreadable layout",
+        "finding_bias": "Favor visible-state, affordance, and navigation findings."
+      }
     },
     {
       "id": "hobbyist-contributor",
@@ -53,7 +81,14 @@
         "time budget",
         "setup friction",
         "clear next step"
-      ]
+      ],
+      "persona_lens": {
+        "starting_surface": "docs-and-web-first; avoid repo archaeology until the product gives a concrete next step",
+        "first_question": "Can I make meaningful progress in a short spare-time session without knowing the repository's internal conventions?",
+        "evidence_emphasis": "setup commands, first-success proof, small issue selection, key interaction video, and explicit stop points",
+        "escalation_trigger": "unclear prerequisites, long-running setup, ambiguous next action, or work that expands beyond a small contribution",
+        "finding_bias": "Favor time-budget, setup-friction, and beginner-safe next-step findings."
+      }
     },
     {
       "id": "bugfix-contributor",
