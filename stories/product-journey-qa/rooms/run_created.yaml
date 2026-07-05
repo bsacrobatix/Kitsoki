@@ -324,6 +324,25 @@ states:
             - set:
                 status: "blocker_recorded"
       file_findings:
+        - when: "slots.ticket_repo == nil || slots.ticket_repo == ''"
+          target: run_created
+          guard_hint: "Provide ticket_repo=owner/repo so product-journey issues are filed in the intended repository."
+          effects:
+            - set:
+                ticket_repo: ""
+                filing_dry_run: "{{ slots.mode ?? 'file' }}"
+                filing_status: "findings_filing_invalid"
+                filing_summary: "Product-journey finding filing requires ticket_repo=owner/repo."
+                validation_status: "invalid"
+                validation_errors: 1
+                validation_warnings: 0
+                validation_issue_summary: "ticket-repo-required"
+                gh_agent_fix_evidence_count: 0
+                gh_agent_missing_evidence_count: 0
+                gh_agent_missing_run_url_count: 0
+                gh_agent_fix_evidence_summary: ""
+                gh_agent_missing_evidence_summary: "ticket_repo is required"
+                status: "findings_filing_invalid"
         - when: "(slots.mode ?? 'file') != 'dry-run' && (slots.gh_agent_public_base_url == nil || slots.gh_agent_public_base_url == '')"
           target: run_created
           guard_hint: "Provide gh_agent_public_base_url=<public agent URL> for real filing/fixing."
@@ -442,6 +461,29 @@ states:
             - set:
                 status: "findings_filing_complete"
       autonomous_fix:
+        - when: "slots.ticket_repo == nil || slots.ticket_repo == ''"
+          target: run_created
+          guard_hint: "Provide ticket_repo=owner/repo so autonomous fixes are filed against the intended repository."
+          effects:
+            - set:
+                ticket_repo: ""
+                filing_dry_run: "file"
+                autonomous_fix_status: "autonomous_fix_invalid"
+                autonomous_gate_summary: "filing=not_run, gh_agent=fail, review=not_run, validation=fail"
+                filing_status: "not_run"
+                filing_summary: "Autonomous product-journey fixes require ticket_repo=owner/repo."
+                validation_status: "invalid"
+                validation_errors: 1
+                validation_warnings: 0
+                validation_issue_summary: "ticket-repo-required"
+                gh_agent_fix_evidence_count: 0
+                gh_agent_missing_evidence_count: 0
+                gh_agent_missing_run_url_count: 0
+                gh_agent_fix_evidence_summary: ""
+                gh_agent_missing_evidence_summary: "ticket_repo is required"
+                review_status: "not_run"
+                review_failed_count: 0
+                status: "autonomous_fix_invalid"
         - when: "slots.gh_agent_public_base_url == nil || slots.gh_agent_public_base_url == ''"
           target: run_created
           guard_hint: "Provide gh_agent_public_base_url=<public agent URL> for autonomous fixes."
