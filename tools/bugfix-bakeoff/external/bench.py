@@ -1604,7 +1604,10 @@ def verify(m, only_bug, repo_dir, completion_state=None):
         src = Path(repo_dir)
         tmp = Path(tempfile.mkdtemp(prefix="bench-repo-"))
         repo = tmp / f"{proj['id']}-mirror"
-        r = sh(["git", "clone", "--local", "--no-checkout", "-q", str(src), str(repo)], cwd=tmp)
+        # --no-hardlinks: repo_dir may be a read-only bind mount (e.g. inside the
+        # paired-task arena container) on a different device than tmp, so
+        # --local's default hardlinking fails with "Invalid cross-device link".
+        r = sh(["git", "clone", "--local", "--no-hardlinks", "--no-checkout", "-q", str(src), str(repo)], cwd=tmp)
         if r.returncode != 0:
             sys.stderr.write(r.stdout[-2000:] + r.stderr[-2000:])
             if completion_state:

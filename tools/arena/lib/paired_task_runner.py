@@ -194,7 +194,14 @@ def materialize_baseline(task: dict[str, Any], tree: Path) -> None:
         )
         repo = meta.get("repo") or "."
         if repo == ".":
-            run(["git", "clone", "--local", "--no-checkout", "-q", str(KITSOKI_ROOT), str(tree)], cwd=KITSOKI_ROOT)
+            # --no-hardlinks: inside the paired-task container, KITSOKI_ROOT is a
+            # read-only bind mount and `tree` lives on the container's own
+            # filesystem (e.g. /tmp) — a different device, so --local's default
+            # hardlinking fails with "Invalid cross-device link". Force copies.
+            run(
+                ["git", "clone", "--local", "--no-hardlinks", "--no-checkout", "-q", str(KITSOKI_ROOT), str(tree)],
+                cwd=KITSOKI_ROOT,
+            )
         else:
             run(["git", "clone", "-q", "--no-checkout", str(repo), str(tree)], cwd=KITSOKI_ROOT)
         run(["git", "checkout", "-q", str(meta["baseline_sha"])], cwd=tree)
