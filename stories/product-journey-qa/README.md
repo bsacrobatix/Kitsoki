@@ -33,6 +33,11 @@ It is intentionally no-LLM:
 - `driver_replay_sweep` calls `tools/product-journey/run.py
   --driver-replay-sweep --json-output` to run the same replay proof for every
   product-journey scenario and summarize playback/validation coverage.
+- `persona_autofix_smoke` calls `tools/product-journey/run.py
+  --persona-autofix-smoke --json-output` to prove that a persona replay bundle
+  with an observed issue finding enters the native `kitsoki gitops
+  autonomous-fix` gate and produces filed issue, gh-agent run, fix evidence,
+  and `independent-verify.md` artifacts without live GitHub or LLM work.
 - `rollup` calls `tools/product-journey/run.py --rollup-matrix --json-output`
   to create or refresh the matrix-level Slidey deck from reviewed run bundles.
 - `validate_matrix` calls `tools/product-journey/run.py --validate-matrix

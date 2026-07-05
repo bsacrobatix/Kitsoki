@@ -409,6 +409,7 @@ To prove the next hop without GitHub credentials or LLM cost:
 ```sh
 python3 tools/product-journey/run.py --native-ghagent-smoke --json-output
 python3 tools/product-journey/run.py --autonomous-fix-smoke --json-output
+python3 tools/product-journey/run.py --persona-autofix-smoke --json-output
 ```
 
 The native smoke creates a temporary product-journey bundle with a filed issue,
@@ -418,7 +419,10 @@ checks that fix artifacts and run URLs are persisted back into the bundle for
 review. The autonomous smoke runs the full no-LLM envelope with a fake `kitsoki`
 CLI behind the same story-owned contract: persona findings file as issues,
 gh-agent fixes queue and drain, review artifacts refresh, and validation must
-pass.
+pass. The persona-autofix smoke starts from a persona replay bundle with local
+proof artifacts and an observed issue finding, then proves that bundle enters
+the native `kitsoki gitops autonomous-fix` gate and publishes the filed issue,
+gh-agent run URL, fix report, and `independent-verify.md` artifact.
 
 Do not bypass this with raw `gh` commands. Product-journey issue filing and
 autonomous fixes are intentionally routed through Kitsoki's native

@@ -1,7 +1,7 @@
 states:
   idle:
     description: "Waiting to create a product-journey QA run bundle."
-    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, status]
+    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, status]
     view:
       - banner:
           text: "PRODUCT JOURNEY QA"
@@ -18,6 +18,7 @@ states:
             Corpus: '{{ world.corpus_validation_status|default:"(not checked)" }}'
             Native gh-agent: '{{ world.native_ghagent_status|default:"(not checked)" }}'
             Autonomous fix smoke: '{{ world.autonomous_fix_smoke_status|default:"(not checked)" }}'
+            Persona autofix smoke: '{{ world.persona_autofix_smoke_status|default:"(not checked)" }}'
             Status: "{{ world.status }}"
       - prose: "Create a no-LLM run bundle or a 10-repo GitHub matrix, then attach visual/MCP evidence as scenarios play out."
       - choice:
@@ -51,6 +52,9 @@ states:
             - label: "autonomous_fix_smoke"
               hint: "prove persona findings file, queue, drain, review, and validate in one no-LLM loop"
               intent: autonomous_fix_smoke
+            - label: "persona_autofix_smoke"
+              hint: "prove persona replay findings enter the autonomous gitops issue-to-fix gate"
+              intent: persona_autofix_smoke
             - label: "refresh_targets seed=..."
               hint: "write a GitHub target-proof artifact for bug-count and popularity floors"
               intent: refresh_targets
@@ -168,6 +172,33 @@ states:
               on_error: idle
             - set:
                 status: "autonomous_fix_smoke_checked"
+      persona_autofix_smoke:
+        - target: .
+          effects:
+            - set:
+                persona_autofix_smoke_status: ""
+                persona_autofix_smoke_summary: ""
+                persona_autofix_smoke_output: ""
+                persona_autofix_smoke_exit_code: 0
+                status: "persona_autofix_smoking"
+            - invoke: host.run
+              id: persona_product_journey_autofix_smoke
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --persona-autofix-smoke
+                  - --json-output
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                persona_autofix_smoke_status: "stdout_json.status"
+                persona_autofix_smoke_summary: "stdout_json.summary"
+                persona_autofix_smoke_exit_code: "stdout_json.exit_code"
+                persona_autofix_smoke_output: "stdout_json.output"
+              on_error: idle
+            - set:
+                status: "persona_autofix_smoke_checked"
       refresh_targets:
         - target: .
           effects:

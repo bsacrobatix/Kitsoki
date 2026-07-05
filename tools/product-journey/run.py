@@ -42,6 +42,7 @@ PREFLIGHT_ROOT = ARTIFACT_ROOT / "preflights"
 DEFAULT_DECK = ROOT / "docs" / "decks" / "product-journey-eval.slidey.json"
 NATIVE_GHAGENT_SMOKE = ROOT / "tools" / "product-journey" / "native_ghagent_test.py"
 AUTONOMOUS_FIX_SMOKE = ROOT / "tools" / "product-journey" / "file_findings_test.py"
+PERSONA_AUTOFIX_SMOKE = ROOT / "tools" / "product-journey" / "persona_autofix_smoke_test.py"
 EVIDENCE_SOURCES = {"demo", "retained", "external", "local", "cassette", "unknown"}
 PROOF_EVIDENCE_SOURCES = {"retained", "external", "local", "cassette"}
 # Playback-capable evidence: a typed slot every natural-use scenario declares
@@ -227,6 +228,24 @@ def autonomous_fix_smoke() -> dict:
     return {
         "status": "passed",
         "summary": "autonomous issue-to-fix smoke passed",
+        "exit_code": result.returncode,
+        "output": output,
+    }
+
+
+def persona_autofix_smoke() -> dict:
+    result = shell([sys.executable, str(PERSONA_AUTOFIX_SMOKE)], ROOT)
+    output = (result.stdout + result.stderr).strip()
+    if result.returncode != 0:
+        return {
+            "status": "failed",
+            "summary": "persona replay autonomous issue-to-fix smoke failed",
+            "exit_code": result.returncode,
+            "output": output,
+        }
+    return {
+        "status": "passed",
+        "summary": "persona replay autonomous issue-to-fix smoke passed",
         "exit_code": result.returncode,
         "output": output,
     }
@@ -1397,6 +1416,7 @@ def validate_autonomous_workflow_docs(issues: list[dict]) -> None:
             "kitsoki gitops autonomous-fix",
             "gh-agent",
             "independent-verify.md",
+            "--persona-autofix-smoke",
         ]
         missing = [token for token in required_tokens if token not in text]
         if missing:
@@ -8661,6 +8681,7 @@ def main() -> None:
     parser.add_argument("--capture-preflight", action="store_true", help="Run no-LLM capture-toolchain preflight checks")
     parser.add_argument("--native-ghagent-smoke", action="store_true", help="Run no-LLM native gh-agent enqueue/drain smoke through kitsoki commands")
     parser.add_argument("--autonomous-fix-smoke", action="store_true", help="Run no-LLM full autonomous issue filing and gh-agent fix smoke")
+    parser.add_argument("--persona-autofix-smoke", action="store_true", help="Run no-LLM persona replay issue-to-fix smoke through the gitops autonomous gate")
     parser.add_argument("--preflight-command", default="", help="Override the webshot smoke command for --capture-preflight tests")
     parser.add_argument("--preflight-timeout", type=int, default=90, help="Timeout in seconds for --capture-preflight webshot smoke")
     parser.add_argument("--validate-corpus", action="store_true", help="Validate personas, scenarios, and GitHub target catalog without writing artifacts")
@@ -8865,6 +8886,23 @@ def main() -> None:
         if result["output"]:
             print(result["output"])
         append_log(f"Ran autonomous fix smoke: {result['status']}")
+        if result["status"] != "passed":
+            raise SystemExit(1)
+        return
+
+    if args.persona_autofix_smoke:
+        result = persona_autofix_smoke()
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Ran persona autofix smoke: {result['status']}")
+            if result["status"] != "passed":
+                raise SystemExit(1)
+            return
+        print(f"Persona autofix smoke: {result['status']}")
+        print(result["summary"])
+        if result["output"]:
+            print(result["output"])
+        append_log(f"Ran persona autofix smoke: {result['status']}")
         if result["status"] != "passed":
             raise SystemExit(1)
         return
