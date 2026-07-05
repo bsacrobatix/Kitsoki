@@ -353,7 +353,10 @@ block back into `findings.json`. Re-runs are idempotent (already-filed findings
 are skipped), `--dry-run` renders the candidate issues without calling GitHub
 or touching the bundle, and non-local refs (retained/http/unbacked cassette
 URIs) are listed in the body instead of uploaded. The story equivalent is the
-`file_findings ticket_repo=<owner/repo> [mode=dry-run]` intent.
+`file_findings ticket_repo=<owner/repo> [mode=dry-run]` intent. When that story
+surface drains gh-agent fixes, queue state defaults to
+`<run_dir>/gh-agent-jobs.sqlite`; pass `gh_agent_db=<sqlite>` only to override
+that run-local path.
 
 Once filing has been requested, the `findings-filed` review check fails and
 `--validate-run` errors while any credible issue finding remains unfiled, so

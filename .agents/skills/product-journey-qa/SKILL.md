@@ -150,8 +150,9 @@ Use CLI fallback when the story session is unavailable.
 When the goal is the full issue-to-fix loop, prefer `autonomous_fix`: it files
 credible findings with evidence, enqueues and drains gh-agent fixes, refreshes
 review artifacts, and validates the bundle in one story-owned reliability gate.
-The story stores gh-agent queue state at `<run_dir>/gh-agent-jobs.sqlite` by
-default; pass `gh_agent_db=<sqlite>` only to override that run-local path.
+The story stores gh-agent queue state for `file_findings` and `autonomous_fix`
+at `<run_dir>/gh-agent-jobs.sqlite` by default; pass `gh_agent_db=<sqlite>` only
+to override that run-local path.
 The CLI exits nonzero for an invalid autonomous loop by default; the story uses
 `--report-invalid-autonomous-fix` so failed gate details bind into world state
 for review instead of disappearing behind a host error.

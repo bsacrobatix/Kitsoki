@@ -116,7 +116,6 @@ turns:
       name: file_findings
       slots:
         ticket_repo: bsacrobatix/Kitsoki
-        gh_agent_db: .artifacts/product-journey/gh-agent-jobs.sqlite
         gh_agent_story: stories/bugfix
         gh_agent_public_base_url: https://agent.example
     expect_state: run_created
@@ -144,6 +143,32 @@ turns:
     expect_view_matches: "RUN CREATED[\\s\\S]*Ticket repo[\\s\\S]*bsacrobatix/Kitsoki[\\s\\S]*Issue filing[\\s\\S]*findings_filed: filed 2, skipped 0, failed 0, unfiled 0[\\s\\S]*GH-agent fixes[\\s\\S]*queued: queued 2, skipped 0[\\s\\S]*GH-agent drain[\\s\\S]*drained: drained 2, done 2, failed 0, active 0[\\s\\S]*Filed findings to bsacrobatix/Kitsoki[\\s\\S]*issues/101[\\s\\S]*issues/102[\\s\\S]*file_findings ticket_repo=owner/repo"
     expect_host_calls:
       - handler: host.run
-        args: { call: file_product_journey_findings }
+        args:
+          call: file_product_journey_findings
+          args:
+            - tools/product-journey/run.py
+            - --file-findings
+            - --json-output
+            - --run-dir
+            - .artifacts/product-journey/run-777
+            - --ticket-repo
+            - bsacrobatix/Kitsoki
+            - --filing-mode
+            - file
+            - --gh-agent-db
+            - .artifacts/product-journey/run-777/gh-agent-jobs.sqlite
+            - --gh-agent-story
+            - stories/bugfix
+            - --gh-agent-drain
+            - --gh-agent-public-base-url
+            - https://agent.example
+            - --gh-agent-project-root
+            - ""
+            - --gh-agent-incident-repo
+            - ""
+            - --gh-agent-asset-dir
+            - ""
+            - --gh-agent-comment-mode
+            - none
 
 expect_no_errors: true
