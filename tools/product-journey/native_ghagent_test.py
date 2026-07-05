@@ -159,7 +159,13 @@ def main():
             "none",
         )
         combined = {**enqueued, **drained}
+        combined.update({
+            "status": "native_ghagent_smoke",
+            "ticket_repo": "o/r",
+            "autonomous_gate_summary": "filing=pass, gh_agent=pass, review=pending, validation=pending",
+        })
         run.record_gh_agent_findings_status(run_dir, combined)
+        report = run.write_autonomous_fix_report(run_dir, combined)
         run.update_derived_artifacts(run_dir, None)
         reviewed = run.review_run_bundle(run_dir, None)
         validated = run.validate_run_bundle(run_dir)
@@ -175,6 +181,11 @@ def main():
               any(link.endswith("/fix-report.md") for link in links))
         check("native review is ready", reviewed["review_status"] == "ready")
         check("native validation is valid", validated["status"] == "valid")
+        report_text = report.read_text()
+        check("native report contains filed issue and fix evidence",
+              issue_url in report_text
+              and "https://agent.example/run/" in report_text
+              and any(link in report_text for link in links))
         deck = run.read_json(run_dir / "deck.slidey.json")
         gh_scene = deck_scene(deck, "GH-agent fixes")
         check("deck contains filed issue and native artifact links",

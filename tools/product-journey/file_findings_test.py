@@ -329,7 +329,7 @@ def main():
         # 4. Gates: review counts the filing check; a new credible finding
         # after filing trips review + validate until re-filed.
         reviewed = run.review_run_bundle(run_dir, None)
-        _check("review has 25 checks", reviewed["total"] == 25)
+        _check("review has 26 checks", reviewed["total"] == 26)
         _check("findings-filed passes when fully filed",
                review_check(reviewed, "findings-filed")["status"] == "pass")
         _check("gh-agent-fixes passes when drained",
@@ -428,7 +428,21 @@ def main():
         _check("autonomous loop exposes fix evidence assets",
                result["gh_agent_fix_evidence_count"] == 2
                and result["gh_agent_missing_evidence_count"] == 0)
-        _check("autonomous loop reviewed and validated", result["review_total_count"] == 25 and result["validation_status"] == "valid")
+        report = Path(result["autonomous_fix_report_path"])
+        report_text = report.read_text()
+        _check("autonomous loop writes complete review report",
+               "https://github.com/o/r/issues/101" in report_text
+               and "https://agent.example/run/job-1" in report_text
+               and "https://agent.example/run/job-1/artifacts/fix-report.md" in report_text)
+        _check("autonomous loop reviewed and validated", result["review_total_count"] == 26 and result["validation_status"] == "valid")
+        report.unlink()
+        reviewed_missing_report = run.review_run_bundle(run_dir2, None)
+        _check("review fails missing autonomous report",
+               review_check(reviewed_missing_report, "autonomous-fix-report")["status"] == "fail")
+        validated_missing_report = run.validate_run_bundle(run_dir2)
+        _check("validate catches missing autonomous report",
+               any(i["id"] == "autonomous-fix-report" and i["severity"] == "error"
+                   for i in validated_missing_report["issues"]))
 
         run_dir3, run_json3 = run.build_run_bundle(
             catalog, run.load_github_targets(run.GITHUB_TARGETS),
