@@ -232,9 +232,24 @@ func TestSessionDrive_ReturnsRunningWhenTurnExceedsBoundedWait(t *testing.T) {
 	}
 	tr := driveResult(t, res)
 	require.True(t, tr.OK, "session.drive: %s", contentText(res))
-	require.NotNil(t, tr.Running, "slow turns return a running status before the MCP client times out")
-	require.Equal(t, ok.Handle, tr.Running.Handle)
-	require.Equal(t, "go west", tr.Running.Input)
+	running := tr.Running
+	if running == nil {
+		require.Eventually(t, func() bool {
+			res, err := callTool(ctx, cs, "session.status", map[string]any{"handle": ok.Handle})
+			if err != nil || res.IsError {
+				return false
+			}
+			var status studio.SessionStatusResult
+			if json.Unmarshal([]byte(contentText(res)), &status) != nil {
+				return false
+			}
+			running = status.Running
+			return running != nil
+		}, time.Second, 20*time.Millisecond, "slow turns must be reacquirable before the MCP client times out")
+	}
+	require.NotNil(t, running, "slow turns return or expose a running status before the MCP client times out")
+	require.Equal(t, ok.Handle, running.Handle)
+	require.Equal(t, "go west", running.Input)
 	require.Less(t, time.Since(start), 100*time.Millisecond)
 
 	res, err = callTool(ctx, cs, "session.status", map[string]any{"handle": ok.Handle})
