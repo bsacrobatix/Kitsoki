@@ -24,13 +24,16 @@
 //   - steps      ([]any): a journal of each step's snippet + observation, for
 //     tracing/debugging.
 //
-// v1 STATUS: the Agent implementation wired in here (codeactStubAgent) is a
-// placeholder that immediately emits done() with an empty payload — there is
-// no live LLM loop yet. Flow-fixture tests stub host.agent.codeact entirely
-// at the host_handlers: layer (see
-// internal/testrunner/testdata/codeact_demo/flows/happy_path.yaml), so they
-// never exercise this path. Wiring a real LLM-backed codeact.Agent is
-// follow-up work (see docs/goals/codeact/decomposition.yaml, later slices).
+// v1 STATUS: the Agent wired in here (RealCodeactAgent, see
+// agent_codeact_real.go) drives one ONE-SHOT `claude -p` call per step,
+// composing the Codeact verb contract (sysprompt.Codeact) plus a per-step
+// addendum (goal, remaining budget, granted capability names, and the last
+// observation or structured error), and reads back a discriminated-union
+// {"action":"snippet"|"done",...} verdict through the same mcp-validator
+// submit mechanism host.agent.decide uses. Runtime enforcement of the
+// with.capabilities allowlist against the actual ctx proxies exposed to a
+// snippet is follow-up work (see docs/goals/codeact/decomposition.yaml, later
+// slices) — v1 only tells the model the granted names.
 package host
 
 import (
@@ -76,12 +79,30 @@ func AgentCodeactHandler(ctx context.Context, args map[string]any) (Result, erro
 		}
 	}
 
+	var capabilities []string
+	switch v := args["capabilities"].(type) {
+	case []any:
+		for _, c := range v {
+			if s, ok := c.(string); ok && strings.TrimSpace(s) != "" {
+				capabilities = append(capabilities, s)
+			}
+		}
+	case []string:
+		capabilities = v
+	}
+
 	worldArg, _ := args["world"].(map[string]any)
+
+	agentImpl, cleanup, err := newRealCodeactAgent(ctx, args, goal, budget, capabilities)
+	if err != nil {
+		return Result{Error: fmt.Sprintf("host.agent.codeact: %v", err), FailureKind: FailureInfra}, nil
+	}
+	defer cleanup()
 
 	res, err := codeact.Run(ctx, codeact.Params{
 		Budget: budget,
 		World:  worldArg,
-		Agent:  codeactStubAgent{goal: goal},
+		Agent:  agentImpl,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("host.agent.codeact: %w", err)
@@ -106,16 +127,4 @@ func AgentCodeactHandler(ctx context.Context, args map[string]any) (Result, erro
 			"steps":      steps,
 		},
 	}, nil
-}
-
-// codeactStubAgent is the v1 placeholder Agent: it immediately terminates
-// with an empty done() payload on the first step, without calling any LLM.
-// TODO(codeact-s3+): replace with a real LLM-backed Agent that emits
-// Starlark snippets scoped to the declared with.capabilities allowlist.
-type codeactStubAgent struct {
-	goal string
-}
-
-func (a codeactStubAgent) Next(_ context.Context, _ int, _ map[string]any, _ *codeact.ErrorEnvelope) (codeact.Emission, error) {
-	return codeact.Emission{Done: true, Payload: map[string]any{}}, nil
 }
