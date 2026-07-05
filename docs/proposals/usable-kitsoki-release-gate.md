@@ -2,18 +2,27 @@
 
 **Status:** Tasks 1 (parity-metric spec, `4205c5af`), 2 (plugin skeleton,
 `606a5181`), 3.1 + 3.2 (wire the real scenario corpus + S1 completion signal
-into cell enumeration/`score()`), and 4.1 (golden regression fixtures,
-`e4f55ffb`) are shipped — the parity verdict schema, gate constants, the
-registered `usable-kitsoki-gate` arena plugin (now enumerating one cell per
-S4 scenario x surface off the committed calibration set, and joining S1's
-raw per-turn signal into `candidate_completed`/`source_completed` in
-`score()`), and the offline golden-regression proof that the gate flips
-PASS→FAIL on each condition all exist and are tested, zero LLM spend. See
-`docs/tracing/usable-kitsoki-gate.md` for the narrative doc this content has
-moved to. Task 3.3 (swarm tier 1/2 concurrency + the three concrete harness
-entry points), 4.2 (calibration-set run), and Task 5 (stand it up as the CI
-release gate) remain gated on 3.3 landing. This proposal stays open, trimmed
-to the remaining gated work, until 3.3 lands.
+into cell enumeration/`score()`), 3.3's no-LLM half (bounded-concurrency
+flow-replay harness for the tui/mcp surfaces,
+`tools/usable-kitsoki-gate/run_tui_gate.py` / `run_mcp_gate.py` /
+`run_calibration_gate.py`), 4.1 (golden regression fixtures, `e4f55ffb`), and
+4.2 (the 18-scenario calibration-set run, checked in at `tools/arena/tests/
+fixtures/usable-kitsoki-gate/calibration-report.json`) are shipped — the
+parity verdict schema, gate constants, the registered `usable-kitsoki-gate`
+arena plugin (now enumerating one cell per S4 scenario x surface off the
+committed calibration set, and joining S1's raw per-turn signal into
+`candidate_completed`/`source_completed` in `score()`), the two landed
+no-LLM harness entry points, and the offline golden-regression proof that
+the gate flips PASS→FAIL on each condition all exist and are tested, zero
+LLM spend. See `docs/tracing/usable-kitsoki-gate.md` for the narrative doc
+this content has moved to, and `usable_kitsoki_gate_constants.py`'s
+calibration-contact note for the honest finding the calibration run
+surfaced (0% measured parity — an artifact of `stories/scenario-foundry-
+harness` not yet being a real `workbench:` room, not a workbench quality
+regression; the 90% placeholder threshold was deliberately NOT lowered in
+response). What remains gated: 3.3's real browser-driven web-surface
+harness, and Task 5 (stand it up as the CI release gate). This proposal
+stays open, trimmed to that remaining work.
 **Kind:**   tracing (tooling spillover — the deliverable is an arena job type; see Impact)
 **Epic:**   usable-kitsoki.md
 
@@ -192,8 +201,19 @@ test.
       honestly-incomplete S1 field (full `expected_effects` coverage,
       `misroute_adjacent`) is called out in the record's `notes`, never
       fabricated
-- [ ] 3.3 Wire swarm tier 1/2 concurrency for the no-LLM path; a gated live
-      path for the release-candidate cadence (mirrors swarm tier 3's
+- [x] 3.3 (no-LLM half) Bounded-concurrency flow-replay harness for the
+      no-LLM path: `tools/usable-kitsoki-gate/flow_gate_runner.py` drives one
+      (scenario, surface) cell through a real `kitsoki test flows
+      --trace-out` replay of that scenario's S4-compiled flow fixture and
+      joins the trace via this plugin's own `extract_turn_signals`/
+      `build_parity_record`; `run_tui_gate.py`/`run_mcp_gate.py` land two of
+      the plugin's three referenced harness entry points against the real
+      `GATE_*` env contract; `run_calibration_gate.py` sweeps a whole corpus
+      x surface set at a bounded thread pool (mirrors `tools/swarm/tiers/
+      tier2.ts`'s bounded-pool shape — no docker needed for this substrate).
+      Still open: the real browser-driven web-surface harness
+      (`tests/playwright/usable-kitsoki-gate-web.spec.ts`), and the gated
+      live path for the release-candidate cadence (mirrors swarm tier 3's
       manual-only gating)
 
 ## 4. Prove the gate has teeth
@@ -201,9 +221,17 @@ test.
       (scripted bounce / scripted misroute / scripted parity miss) flip
       the rollup to `FAIL` — `tools/arena/tests/fixtures/usable-kitsoki-gate/`
       + `tools/arena/tests/test_usable_kitsoki_gate_golden_fixtures.py`
-- [ ] 4.2 Calibration-set run (S4's 20 hand-checked scenarios) produces a
-      checked-in, diffable parity report (needs S4's calibration set — skip
-      until S4 lands)
+- [x] 4.2 Calibration-set run (S4's 18 hand-checked scenarios) produces a
+      checked-in, diffable parity report —
+      `tools/arena/tests/fixtures/usable-kitsoki-gate/calibration-report.json`
+      (54 records: 18 scenarios x 3 surfaces), regenerated and diffed by
+      `tools/arena/tests/test_usable_kitsoki_gate_calibration.py`. Measured
+      `worst_surface_parity_percent = 0.0%` against the 90% placeholder —
+      see `usable_kitsoki_gate_constants.py`'s calibration-contact note:
+      this is an honest artifact of `stories/scenario-foundry-harness` not
+      yet being a real `workbench:` room (so `candidate_completed` reads
+      False for every cell today), not a workbench-quality finding, and the
+      threshold was deliberately NOT lowered in response.
 
 ## 5. Stand it up as the release gate
 - [ ] 5.1 CI workflow: no-LLM path on every PR touching S1/S2/S4/S5 code

@@ -1,12 +1,13 @@
 # Tracing: usable-kitsoki release gate
 
 **Status:** Tasks 1 (parity-metric spec), 2 (plugin skeleton), 3.1 + 3.2
-(wire the real scenario corpus + S1 completion signal), and 4.1 (golden
-regression fixtures) are shipped and tested, zero LLM spend. Task 3.3 (swarm
-tier 1/2 concurrency + the three concrete harness entry points), 4.2
-(calibration-set run), and 5 (stand it up as the CI release gate) remain
-gated on 3.3 landing. See `docs/proposals/usable-kitsoki-release-gate.md`
-for the proposal's remaining open questions and the gated tasks.
+(wire the real scenario corpus + S1 completion signal), 3.3's no-LLM half
+(bounded-concurrency flow-replay harness for the tui/mcp surfaces), 4.1
+(golden regression fixtures), and 4.2 (calibration-set run) are shipped and
+tested, zero LLM spend. Task 3.3's remaining browser-driven web-surface
+harness and Task 5 (stand it up as the CI release gate) remain gated. See
+`docs/proposals/usable-kitsoki-release-gate.md` for the proposal's
+remaining open questions and the gated tasks.
 
 This is the day-one contract `S1` (the free-form workbench) develops
 against, and the schema `S6` (`tools/arena/arena/plugins/usable_kitsoki_gate.py`)
@@ -155,13 +156,21 @@ tools/arena/specs/usable-kitsoki-gate-calibration.yaml` enumerates 18 x 3 =
 54 cells (`tools/arena/README.md`'s "Status — usable-kitsoki-gate job type
 registered" section has the full `image()`/`drive_command()`/`score()`
 walkthrough). With no scenario corpus configured, `arena plan` returns zero
-cells, not an error. The three concrete harness entry points
-(`tests/playwright/usable-kitsoki-gate-web.spec.ts`,
-`tools/usable-kitsoki-gate/run_tui_gate.py`,
-`tools/usable-kitsoki-gate/run_mcp_gate.py`) still don't exist (Task 3.3) —
-the plugin can be exercised today through its own no-LLM tests
+cells, not an error. Two of the three concrete harness entry points now
+exist: `tools/usable-kitsoki-gate/run_tui_gate.py` and `run_mcp_gate.py`
+drive a real `kitsoki test flows` replay of each scenario's compiled flow
+fixture and join the resulting trace via this plugin's own
+`extract_turn_signals`/`build_parity_record` (see
+`tools/usable-kitsoki-gate/flow_gate_runner.py`'s module docstring for the
+honest gap this makes visible: `stories/scenario-foundry-harness` is not a
+`workbench:` room, so `candidate_completed` reads False for every scenario
+today). `tests/playwright/usable-kitsoki-gate-web.spec.ts` (the real
+browser-driven web surface) still doesn't exist — separately gated,
+larger, browser-specific work. The plugin, its two landed no-LLM harnesses,
+and the calibration sweep can all be exercised today through no-LLM tests
 (`tools/arena/tests/test_usable_kitsoki_gate_plugin.py`,
 `tools/arena/tests/test_usable_kitsoki_gate_corpus.py`,
 `tools/arena/tests/test_usable_kitsoki_gate_schema.py`,
-`tools/arena/tests/test_usable_kitsoki_gate_golden_fixtures.py`), all of
+`tools/arena/tests/test_usable_kitsoki_gate_golden_fixtures.py`,
+`tools/arena/tests/test_usable_kitsoki_gate_calibration.py`), all of
 which run with zero docker and zero LLM spend.

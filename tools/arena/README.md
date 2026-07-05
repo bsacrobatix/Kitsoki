@@ -423,3 +423,27 @@ override is given.
   the plugin's real `score()` entry point and proves `clean-pass.json`
   solves while each of the other three independently flips the rollup from
   `solved` to `failed` — zero docker, zero LLM spend, no S1/S4 dependency.
+- **No-LLM gate harness + calibration run** (Task 3.3's no-LLM half + Task
+  4.2): `tools/usable-kitsoki-gate/flow_gate_runner.py` drives one
+  (scenario, surface) cell through a REAL `kitsoki test flows --trace-out`
+  replay of that scenario's S4-compiled flow fixture and joins the resulting
+  trace via this plugin's own `extract_turn_signals`/`build_parity_record`;
+  `run_tui_gate.py`/`run_mcp_gate.py` are the two (of three) harness entry
+  points this plugin's `drive_command()` already dispatches to, now landed
+  against the real `GATE_*` env contract (the web surface's real
+  Playwright-driven spec remains separately gated). `run_calibration_gate.py`
+  sweeps every scenario x surface at bounded concurrency (mirroring
+  `tools/swarm/tiers/tier2.ts`'s bounded-pool shape, no docker needed for
+  this substrate) and rolls the swept records up through the same
+  `_rollup_from_records` reduction a single cell's bundle goes through.
+  `tools/arena/tests/test_usable_kitsoki_gate_calibration.py` regenerates
+  the 18-scenario calibration set's 54-cell sweep from scratch and diffs it
+  byte-for-byte against the checked-in
+  `tests/fixtures/usable-kitsoki-gate/calibration-report.json` — the one
+  test in this suite that is not instant (~10-20s: 54 real `go run`
+  invocations), still zero docker/LLM spend. That checked-in run measured
+  `worst_surface_parity_percent = 0.0%` against the 90% placeholder — see
+  `usable_kitsoki_gate_constants.py`'s calibration-contact note for why that
+  number is an honest artifact of `stories/scenario-foundry-harness` not
+  being a real `workbench:` room yet, not a workbench-quality finding, and
+  why the threshold was NOT silently lowered in response.
