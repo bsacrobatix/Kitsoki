@@ -186,7 +186,9 @@ state whenever possible:
    recorded and the caller supplied `ticket_repo` plus
    `gh_agent_public_base_url`, then submit `autonomous_fix` so the story files
    the issues, drains gh-agent fixes, refreshes review artifacts, and validates
-   the bundle. If either parameter is missing, leave the exact
+   the bundle. The story rejects `autonomous_fix` unless the watchdog passed;
+   do not bypass that by calling lower-level gitops commands. If either
+   parameter is missing, leave the exact
    `autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<url>`
    command as the remaining gate instead of silently skipping it.
    Do not run `gh` or hand-file GitHub issues; the story-owned gitops/gh-agent

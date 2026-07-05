@@ -28,6 +28,19 @@ host_handlers:
             issue_count: 1
             proof_evidence_count: 3
             review_status: needs_evidence
+      autonomous_product_journey_marathon_watchdog:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            schema: kitsoki/product-journey-autonomous-marathon-watchdog/v1
+            status: autonomous_watchdog_ok
+            autonomous_watchdog_status: autonomous_watchdog_ok
+            autonomous_watchdog_summary: "heartbeat age 10m within watchdog=45m"
+            autonomous_watchdog_path: .artifacts/product-journey/run-999/autonomous-marathon-watchdog.json
+            autonomous_watchdog_markdown_path: .artifacts/product-journey/run-999/autonomous-marathon-watchdog.md
+            autonomous_watchdog_age_minutes: 10
+            driver_journal_path: .artifacts/product-journey/run-999/driver-journal.md
       autonomous_product_journey_fix:
         data:
           ok: true
@@ -116,6 +129,17 @@ turns:
     expect_host_calls:
       - handler: host.run
         args: { call: load_product_journey_run }
+
+  - intent:
+      name: autonomous_watchdog
+    expect_state: run_created
+    expect_world:
+      status: autonomous_watchdog_checked
+      autonomous_watchdog_status: autonomous_watchdog_ok
+      autonomous_watchdog_age_minutes: 10
+    expect_host_calls:
+      - handler: host.run
+        args: { call: autonomous_product_journey_marathon_watchdog }
 
   - intent:
       name: autonomous_fix

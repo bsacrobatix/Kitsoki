@@ -120,7 +120,8 @@ def main() -> int:
                   and control["budget"]["per_scenario_live_minutes"] == 7
                   and control["budget"]["manual_glue_steps_target"] == 0
                   and control["watchdog"]["heartbeat_minutes"] == 15
-                  and control["watchdog"]["watchdog_minutes"] == 45,
+                  and control["watchdog"]["watchdog_minutes"] == 45
+                  and control["final_gates"][:2] == ["autonomous_watchdog", "autonomous_fix"],
                   failures)
             check("creation writes a human-reviewable marathon report",
                   Path(created["autonomous_marathon_report_path"]).exists()
