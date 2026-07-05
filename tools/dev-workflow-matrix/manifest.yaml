@@ -82,7 +82,7 @@ cells:
     surface: web
     repo: kitsoki-dev
     status: proof-thin
-    reason: "drivable (PRD demo exists) but free-text composer routing unfinished. Canonical doc: docs/workflows/prd-and-design.md"
+    reason: "drivable (PRD demo exists); typed free-text routing fixed (semanticRoutingOptions no longer forces semantic routing off) but no standing web walk of the prd chain. Canonical doc: docs/workflows/prd-and-design.md"
   - workflow: prd-proposal
     surface: vscode
     repo: kitsoki-dev
