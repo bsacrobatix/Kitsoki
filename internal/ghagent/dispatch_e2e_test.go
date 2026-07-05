@@ -557,8 +557,18 @@ func TestConcurrentDispatch_NoAppDirCrossContamination(t *testing.T) {
 		if res.Turns < 1 {
 			t.Errorf("route %d (%s) ran %d turns, want >=1 (app dir may have resolved against the other job's story)", i, routes[i].Story, res.Turns)
 		}
-		if !res.Stubbed {
-			t.Errorf("route %d (%s) Stubbed = false, want true (beat-fixture spawn path)", i, routes[i].Story)
+		// stories/bugfix has a registered real-dispatch plan (task 2) and runs
+		// unstubbed by default (replay harness, no LLM); stories/dev-story has
+		// no plan yet and still runs the honest beat-fixture stub. Proving
+		// BOTH shapes stay concurrency-safe in one process is the point of
+		// this test — a real-dispatch job loading a real cassette must not
+		// cross-contaminate a concurrently-dispatched stub job's app dir.
+		wantStubbed := routes[i].Story != "stories/bugfix"
+		if res.Stubbed != wantStubbed {
+			t.Errorf("route %d (%s) Stubbed = %v, want %v", i, routes[i].Story, res.Stubbed, wantStubbed)
+		}
+		if routes[i].Story == "stories/bugfix" && res.Worktree == "" {
+			t.Errorf("route %d (%s) real dispatch recorded no worktree path", i, routes[i].Story)
 		}
 	}
 }
@@ -653,15 +663,18 @@ func TestDispatch_MentionToAckLoop(t *testing.T) {
 		t.Errorf("meta run_url = %v, want %s", meta["run_url"], got.RunURL)
 	}
 
-	// Assertion E (honesty, gh-agent-honest-issues.md task 0): the issue route
-	// still runs the beat-fixture stub (host.agent.* inline handlers, no LLM,
-	// no code changed) — the ack must never say "Done", only the honest
-	// "acknowledged — pipeline not yet enabled" prose.
-	if strings.Contains(last, "Done") {
-		t.Fatalf("stubbed run's ack must never contain \"Done\":\n%s", last)
+	// Assertion E (real dispatch, gh-agent-honest-issues.md task 2): bugfix now
+	// has a registered real-dispatch plan, so this route runs the REAL
+	// machine end-to-end via the replay harness (a recorded cassette, no
+	// LLM) instead of the beat-fixture stub — the ack carries a real summary,
+	// never the task-0/1 "acknowledged — pipeline not yet enabled" stub
+	// prose, and the job's state=done metadata reflects an actual completed
+	// run, not a synthesized "Done — ..." string over stub data.
+	if strings.Contains(last, "acknowledged — pipeline not yet enabled for this route") {
+		t.Fatalf("real-dispatch run's ack must not carry the stub-path honesty prose:\n%s", last)
 	}
-	if !strings.Contains(last, "acknowledged — pipeline not yet enabled for this route") {
-		t.Fatalf("stubbed run's ack missing honest prose:\n%s", last)
+	if !strings.Contains(last, "Ran `stories/bugfix` end-to-end via the replay harness") {
+		t.Fatalf("real-dispatch run's ack missing the real-dispatch summary:\n%s", last)
 	}
 
 	// Assertion D: idempotency. A second Dispatch of the same mention ATTACHES
@@ -1096,6 +1109,151 @@ func TestDispatchStubbedRunNeverSaysDone(t *testing.T) {
 	}
 	if !hasEvent(events, "stubbed") {
 		t.Fatalf("trace missing \"stubbed\" event: %+v", events)
+	}
+}
+
+// TestRunStorySession_RealDispatch_BugfixReplay drives RunStorySession's real
+// path directly (task 2 of gh-agent-honest-issues.md): stories/bugfix has a
+// registered real-dispatch plan, so a bug-labelled issue mention now runs the
+// REAL machine end-to-end (idle -> ... -> done) via the replay harness — a
+// recorded cassette captured once against the real Claude CLI
+// (stories/bugfix/cassettes/happy_human.cassette.yaml), not the beat
+// fixture's inline "always succeed" stub map. No LLM call, no network, fully
+// offline — but Stubbed is false and RealHostCalls > 0, because the events
+// this run produced came from a real (if replayed) host dispatch, not a
+// canned map indifferent to the call's actual args.
+func TestRunStorySession_RealDispatch_BugfixReplay(t *testing.T) {
+	ctx := context.Background()
+	job := &jobs.GHJob{
+		JobID:        "job-real-1",
+		OriginRef:    "github:o/r/issue/42",
+		Repo:         "o/r",
+		ObjectKind:   "issue",
+		ObjectNumber: "42",
+	}
+	route := DefaultLabelStoryMap()["bug"]
+
+	result, err := RunStorySession(ctx, route, job)
+	if err != nil {
+		t.Fatalf("RunStorySession: %v", err)
+	}
+	if result.Stubbed {
+		t.Fatalf("Stubbed = true, want false (stories/bugfix has a registered real-dispatch plan): reason=%q", result.StubReason)
+	}
+	if result.Harness != HarnessReplay {
+		t.Errorf("Harness = %q, want %q (default posture without an operator override)", result.Harness, HarnessReplay)
+	}
+	if result.RealHostCalls == 0 {
+		t.Errorf("RealHostCalls = 0, want > 0 — no evidence of real host dispatch")
+	}
+	if result.Worktree == "" {
+		t.Errorf("Worktree is empty, want the per-job worktree path this run seeded")
+	}
+	wantWorktreeSuffix := filepath.Join(".worktrees", "gh-job-job-real-1")
+	if !strings.HasSuffix(result.Worktree, wantWorktreeSuffix) {
+		t.Errorf("Worktree = %q, want suffix %q", result.Worktree, wantWorktreeSuffix)
+	}
+	if result.FinalState != "done" {
+		t.Errorf("FinalState = %q, want done", result.FinalState)
+	}
+	if result.Turns < 8 {
+		t.Errorf("Turns = %d, want >= 8 (the recorded pipeline's full checkpoint walk)", result.Turns)
+	}
+	if strings.TrimSpace(result.Summary) == "" {
+		t.Fatal("Summary is empty — real dispatch should carry a real completion summary")
+	}
+	if !strings.Contains(result.Summary, "worktree `.worktrees/gh-job-job-real-1`") {
+		t.Errorf("Summary missing the worktree it ran in:\n%s", result.Summary)
+	}
+}
+
+// TestDispatchRealDispatchOnlyDoneWithRealHostCalls is the task 2.4 invariant:
+// a real-dispatch route (Harness set) may only claim completion when it also
+// shows evidence of real host calls. A RunResult that claims Harness but
+// RealHostCalls == 0 (a hypothetical bug in a future real-dispatch plan) must
+// render as inconclusive, never "Done" or the plan's synthesized summary —
+// this is the same honesty invariant TestDispatchStubbedRunNeverSaysDone
+// enforces for the Stubbed case, extended to the real-dispatch case.
+func TestDispatchRealDispatchOnlyDoneWithRealHostCalls(t *testing.T) {
+	ctx := context.Background()
+	mention := Mention{
+		Item: host.GitHubInboxItem{Kind: "issue", Number: "11", Title: "@kitsoki fix the thing"},
+		Repo: "o/r", OriginRef: "github:o/r/issue/11", Trigger: DefaultMentionTrigger,
+	}
+	store := newGHJobStore(t)
+	rec := &recordingComments{commentID: "https://github.com/o/r/issues/11#issuecomment-1"}
+	d := &Dispatcher{
+		Jobs:     store,
+		Routes:   DefaultLabelStoryMap(),
+		Comments: &CommentStore{Exec: rec.handler, Repo: "o/r"},
+		WorkerID: "worker-real-honesty",
+		SpawnFn: func(context.Context, Route, *jobs.GHJob) (RunResult, error) {
+			return RunResult{
+				RunURL:     "kitsoki://run/no-evidence",
+				FinalState: "done",
+				Turns:      8,
+				Stubbed:    false,
+				Harness:    HarnessReplay,
+				Worktree:   "/tmp/.worktrees/gh-job-x",
+				// RealHostCalls deliberately left at zero — the bug this
+				// invariant catches.
+			}, nil
+		},
+	}
+
+	job, err := d.Dispatch(ctx, mention, []string{"bug"})
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if job.State != jobs.GHDone {
+		t.Fatalf("State = %q, want done (rendering honesty is not a routing decision)", job.State)
+	}
+
+	rec.mu.Lock()
+	bodies := append([]string(nil), rec.bodies...)
+	rec.mu.Unlock()
+	if len(bodies) < 2 {
+		t.Fatalf("want >=2 comments, got %d", len(bodies))
+	}
+	last := bodies[len(bodies)-1]
+	if strings.Contains(last, "Done —") {
+		t.Fatalf("a real-dispatch result with zero real host calls must never render the synthesized Done prose:\n%s", last)
+	}
+	if !strings.Contains(last, "no real host calls") {
+		t.Fatalf("missing the inconclusive-not-done prose:\n%s", last)
+	}
+}
+
+// TestRunStubBeatFixture_BugfixPlumbingStillValid proves the beat-fixture
+// dispatch plumbing (task 2.3) still works even though RunStorySession no
+// longer reaches internal/ghagent/testdata/bugfix.beat.yaml for the "bug"
+// route in production (that route now runs the real-dispatch plan). Calling
+// runStubBeatFixture directly is the flow-test-only coverage the fixture is
+// retained for.
+func TestRunStubBeatFixture_BugfixPlumbingStillValid(t *testing.T) {
+	ctx := context.Background()
+	root, err := repoRoot()
+	if err != nil {
+		t.Fatalf("repoRoot: %v", err)
+	}
+	job := &jobs.GHJob{
+		JobID:        "job-plumbing-1",
+		OriginRef:    "github:o/r/issue/7",
+		Repo:         "o/r",
+		ObjectKind:   "issue",
+		ObjectNumber: "7",
+	}
+	route := DefaultLabelStoryMap()["bug"]
+
+	result, err := runStubBeatFixture(ctx, root, route, job)
+	if err != nil {
+		t.Fatalf("runStubBeatFixture: %v", err)
+	}
+	if !result.Stubbed {
+		t.Fatalf("Stubbed = false, want true — this is the stub-fixture plumbing path")
+	}
+	if result.Turns < 1 {
+		t.Errorf("Turns = %d, want >= 1", result.Turns)
 	}
 }
 
