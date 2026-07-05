@@ -99,13 +99,15 @@ host_handlers:
       submitted: *impl_artifact
 
 turns:
-  # The done room's `implement` action → go_implementation → impl.idle.
+  # The done room's `implement` action → go_implementation →
+  # impl.review_task_executing. impl.idle auto-starts when a ticket is already
+  # projected, so workspace provisioning and ticket fetch happen in one turn.
   # world_in: projects the proposal's ticket keys into impl__<key>, then
   # impl.idle.on_enter derives the workspace identity from the ticket and
   # creates the worktree — so impl__workdir / impl__workspace_id /
   # impl__feature_branch are PROVISIONED here, not seeded.
   - intent: { name: go_implementation, slots: {} }
-    expect_state: impl.idle
+    expect_state: impl.review_task_executing
     expect_world:
       impl__ticket_id:      "F-2026-06-11T120000Z-per-session-working-folder"
       impl__ticket_url:     "docs/proposals/per-session-working-folder.md"
@@ -114,8 +116,6 @@ turns:
       impl__workdir:        ".worktrees/impl-F-2026-06-11T120000Z-per-session-working-folder-flowsess"
       impl__impl_provision_attempted: true
 
-  - intent: { name: impl__start, slots: {} }
-    expect_state: impl.review_task_executing
   - intent: { name: impl__proceed, slots: {} }
     expect_state: impl.review_task_awaiting_reply
   - intent: { name: impl__accept, slots: {} }

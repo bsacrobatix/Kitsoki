@@ -65,11 +65,12 @@ func TestTurn_RoutedInput(t *testing.T) {
 
 func TestTurn_ReplayWithoutRecordingFallsThroughWhenSemanticDefaultOff(t *testing.T) {
 	resetSemanticRoutingGlobals(t)
+	appPath := writeNoRouteTurnApp(t)
 
 	_, err := runKitsoki(t,
-		"turn", "../../stories/dev-story/app.yaml",
-		"--state", "prd.idle",
-		"--input", "what's the state of our local main vs origin",
+		"turn", appPath,
+		"--state", "start",
+		"--input", "unmatched free text",
 		"--harness", "replay",
 	)
 	require.Error(t, err)
@@ -133,6 +134,33 @@ intents:
     title: "Go west"
     examples: ["go west"]
     synonyms: ["wade"]
+root: start
+states:
+  start:
+    view: "start"
+    on:
+      go_west:
+        - target: ended
+  ended:
+    terminal: true
+    view: "done"
+`)
+	require.NoError(t, os.WriteFile(path, yml, 0o644))
+	return path
+}
+
+func writeNoRouteTurnApp(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "app.yaml")
+	yml := []byte(`
+app:
+  id: turn-no-route-test
+  version: 0.1.0
+world: {}
+intents:
+  go_west:
+    title: "Go west"
+    examples: ["go west"]
 root: start
 states:
   start:

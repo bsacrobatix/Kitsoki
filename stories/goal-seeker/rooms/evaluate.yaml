@@ -199,7 +199,6 @@ states:
           summary: "decide gate failed; degraded to the deterministic ready pick {{ world.ready_id }}"
           verdict: "not_done"
           decide_change_id: ""
-          last_error: ""
       - emit_intent: dispatch_next
     view:
       extends: "base"
@@ -208,6 +207,7 @@ states:
           - kv:
               pairs:
                 Ready: '{{ world.ready_id|default:"(none)" }}'
+          - prose: "⚠ Action failed: decide gate failed; degrading to the deterministic ready pick."
           - prose: "Decide gate failed — degrading to the deterministic ready pick (advisory gate; the ledger is authoritative)."
         choices:
           - list:

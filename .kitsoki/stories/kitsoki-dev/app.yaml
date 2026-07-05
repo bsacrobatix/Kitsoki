@@ -121,6 +121,8 @@ hosts:
   # PRD → Design walk. Required under `hosts: declared`.
   - host.agent.converse
   - host.chat.resolve
+  - host.chat.transcript
+  - host.ide.get_diagnostics
   # Code-review surface (dev-story's code_review room opens diffs in the best
   # surface). Required under `hosts: declared`.
   - host.diff.open

@@ -108,22 +108,17 @@ host_handlers:
         reason:     "Stub."
 
 turns:
-  # main → go_implementation → impl.idle (the impl compound's entry).
+  # main → go_implementation → impl.review_task_executing. impl.idle auto-starts
+  # when a ticket is already projected.
   # world_in: projects parent ticket_id / workdir / feature_branch /
   # judge_mode / judge_confidence_threshold / merge_strategy into
   # impl__<key>.
   - intent: { name: go_implementation, slots: {} }
-    expect_state: impl.idle
+    expect_state: impl.review_task_executing
     expect_world:
       impl__ticket_id:    "TKT-T-100"
       impl__workdir:      ".worktrees/tkt-t-100"
       impl__judge_mode:   "human"
-
-  # impl__start fires the bare `start` arc inside the impl child.
-  # The child's intents are prefixed (impl__start) because the
-  # parent's `start` was lifted by the bf import — no double lift.
-  - intent: { name: impl__start, slots: {} }
-    expect_state: impl.review_task_executing
 
   - intent: { name: impl__proceed, slots: {} }
     expect_state: impl.review_task_awaiting_reply

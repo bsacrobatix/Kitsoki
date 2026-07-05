@@ -159,6 +159,7 @@ func kitListCmd() *cobra.Command {
 // kitVerifyCmd implements `kitsoki kit verify <kit-dir>` (S4).
 func kitVerifyCmd() *cobra.Command {
 	var (
+		target        string
 		jsonOut       bool
 		recordingPath string
 		failFast      bool
@@ -166,7 +167,7 @@ func kitVerifyCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "verify <kit-dir>",
+		Use:   "verify [kit-dir]",
 		Short: "Run a kit's standalone contract checks and no-LLM conformance flow suite",
 		Long: `Loads the kit.yaml manifest at <kit-dir> and, for each story it
 provides:
@@ -192,8 +193,12 @@ Exit codes:
   0  every check and every flow passed
   1  a contract check failed or a flow failed
   2  fatal error (bad kit.yaml, bad glob, ...)`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return verifyKitLockfile(cmd, target)
+			}
+
 			kitDir := args[0]
 			opts := kitverify.Options{
 				ImportResolver: buildImportResolver(),
@@ -227,12 +232,56 @@ Exit codes:
 		},
 	}
 
+	cmd.Flags().StringVar(&target, "target", ".", "project root the lockfile is read from")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the report as JSON instead of plain text")
 	cmd.Flags().StringVar(&recordingPath, "recording", "", "override the recording path declared in conformance flow fixtures")
 	cmd.Flags().BoolVar(&failFast, "fail-fast", false, "stop each flow suite at its first failure")
 	cmd.Flags().BoolVar(&verbose, "v", false, "verbose per-turn flow output")
 
 	return cmd
+}
+
+func verifyKitLockfile(cmd *cobra.Command, target string) error {
+	targetAbs, err := filepath.Abs(target)
+	if err != nil {
+		return fmt.Errorf("resolve --target: %w", err)
+	}
+	lockPath := kitlock.Path(targetAbs)
+	if !kitlock.Exists(lockPath) {
+		return fmt.Errorf("no lockfile at %s", lockPath)
+	}
+	lf, err := kitlock.Load(lockPath)
+	if err != nil {
+		return err
+	}
+	out := cmd.OutOrStdout()
+	if len(lf.Kits) == 0 {
+		fmt.Fprintln(out, "no kits locked yet")
+		return nil
+	}
+
+	ok := true
+	for _, name := range lf.SortedNames() {
+		locked := lf.Kits[name]
+		resolved, err := resolveKitEntry(cmd.Context(), locked.Source, targetAbs, "")
+		if err != nil {
+			ok = false
+			fmt.Fprintf(out, "%s: ERROR %v\n", name, err)
+			continue
+		}
+		if locked.TreeHash != resolved.TreeHash || locked.Commit != resolved.Commit {
+			ok = false
+			fmt.Fprintf(out, "%s: MISMATCH\n", name)
+			fmt.Fprintf(out, "  locked:   commit=%s tree_hash=%s\n", locked.Commit, locked.TreeHash)
+			fmt.Fprintf(out, "  resolved: commit=%s tree_hash=%s\n", resolved.Commit, resolved.TreeHash)
+			continue
+		}
+		fmt.Fprintf(out, "%s: OK\n", name)
+	}
+	if !ok {
+		return fmt.Errorf("one or more locked kits changed")
+	}
+	return nil
 }
 
 // printVerifyReport renders a kitverify.Report as the plain-text default

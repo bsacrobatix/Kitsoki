@@ -54,7 +54,9 @@ hosts:
   - host.agent.search
   - host.agent.converse
   - host.chat.resolve
+  - host.chat.transcript
   - host.artifacts_dir
+  - host.ide.get_diagnostics
   - host.ide.open_file
   - host.ide.open_diff
   - host.diff.open

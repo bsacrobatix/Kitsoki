@@ -81,6 +81,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -581,7 +582,30 @@ func (s *Server) Handler() http.Handler {
 	// Installed-kit UI static assets (S3c vertical slice — see kit_ui.go).
 	mux.HandleFunc("/kit/", s.handleKitUI)
 	mux.HandleFunc("/", s.handleIndex)
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if kitPathHasTraversal(r) {
+			http.NotFound(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+func kitPathHasTraversal(r *http.Request) bool {
+	rawPath := r.URL.EscapedPath()
+	decoded, err := url.PathUnescape(rawPath)
+	if err != nil {
+		return strings.HasPrefix(rawPath, kitUIPathPrefix)
+	}
+	if !strings.HasPrefix(decoded, kitUIPathPrefix) {
+		return false
+	}
+	for _, part := range strings.Split(decoded, "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 // ── Static SPA ────────────────────────────────────────────────────────────
