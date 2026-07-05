@@ -59,17 +59,13 @@ type blockingLive struct {
 	release chan struct{}
 }
 
-func (b blockingLive) RunTurn(ctx context.Context, in harness.TurnInput) (mcpsdk.CallToolParams, error) {
+func (b blockingLive) RunTurn(_ context.Context, in harness.TurnInput) (mcpsdk.CallToolParams, error) {
 	select {
 	case <-b.started:
 	default:
 		close(b.started)
 	}
-	select {
-	case <-b.release:
-	case <-ctx.Done():
-		return mcpsdk.CallToolParams{}, ctx.Err()
-	}
+	<-b.release
 	args := map[string]any{"intent": "go", "confidence": 1.0, "slots": map[string]any{"direction": "west"}}
 	return mcpsdk.CallToolParams{Name: "transition", Arguments: args}, nil
 }
@@ -178,6 +174,13 @@ func TestSessionDrive_ReturnsRunningWhenTurnExceedsBoundedWait(t *testing.T) {
 	ctx := context.Background()
 	started := make(chan struct{})
 	release := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
 	sess := studio.NewStudioSession(func(mode studio.HarnessMode, _, _ string) (harness.Harness, error) {
 		require.Equal(t, studio.HarnessLive, mode)
 		return blockingLive{started: started, release: release}, nil
@@ -195,13 +198,38 @@ func TestSessionDrive_ReturnsRunningWhenTurnExceedsBoundedWait(t *testing.T) {
 	var ok studio.SessionOpenOK
 	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &ok))
 
+	type driveCall struct {
+		res *mcpsdk.CallToolResult
+		err error
+	}
+	driveDone := make(chan driveCall, 1)
 	start := time.Now()
-	res, err = callTool(ctx, cs, "session.drive", map[string]any{
-		"handle":         ok.Handle,
-		"input":          "go west",
-		"async_after_ms": 20,
-	})
-	require.NoError(t, err)
+	go func() {
+		res, err := callTool(ctx, cs, "session.drive", map[string]any{
+			"handle":         ok.Handle,
+			"input":          "go west",
+			"async_after_ms": 20,
+		})
+		driveDone <- driveCall{res: res, err: err}
+	}()
+	var got driveCall
+	select {
+	case <-started:
+		select {
+		case got = <-driveDone:
+		case <-time.After(time.Second):
+			require.Fail(t, "session.drive did not return a running response while the harness was blocked")
+		}
+	case got := <-driveDone:
+		require.NoError(t, got.err)
+		res = got.res
+	case <-time.After(time.Second):
+		require.Fail(t, "timed out waiting for live harness to start")
+	}
+	if res == nil {
+		require.NoError(t, got.err)
+		res = got.res
+	}
 	tr := driveResult(t, res)
 	require.True(t, tr.OK, "session.drive: %s", contentText(res))
 	require.NotNil(t, tr.Running, "slow turns return a running status before the MCP client times out")
