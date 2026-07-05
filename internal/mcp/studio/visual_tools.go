@@ -539,8 +539,12 @@ func (srv *Server) handleVisualObserve(
 		},
 	}
 	if args.IncludeSemantic && (vh.Kind == VisualWeb || vh.Kind == VisualVSCode) {
-		if semantic, errs := srv.visualWebSemantic(ctx, vh); semantic != nil || len(errs) > 0 {
+		if semantic, errs, imageOK := srv.visualWebSemantic(ctx, vh); semantic != nil || len(errs) > 0 {
 			applyVisualSemantic(&out, semantic, errs)
+			if !imageOK {
+				out.ImageAvailable = false
+				out.Next.Reasons = append(out.Next.Reasons, "web image snapshot capture failed; see errors")
+			}
 		}
 	}
 	if !out.ImageAvailable {
@@ -1206,29 +1210,29 @@ func (srv *Server) visualWebSnapshot(ctx context.Context, req *mcpsdk.CallToolRe
 	return imageResult(req, mustJSON(info), processed.PNG, "image/png"), nil, nil
 }
 
-func (srv *Server) visualWebSemantic(ctx context.Context, vh *VisualHandle) (map[string]any, []string) {
+func (srv *Server) visualWebSemantic(ctx context.Context, vh *VisualHandle) (map[string]any, []string, bool) {
 	shotResult := srv.webShotResult
 	if shotResult == nil {
-		return nil, nil
+		return nil, nil, true
 	}
 	spec, rerr := srv.webSpec(RenderArgs{Handle: vh.Handle})
 	if rerr != nil {
-		return nil, []string{"visual.observe: web semantic observation could not resolve the session"}
+		return nil, []string{"visual.observe: web semantic observation could not resolve the session"}, false
 	}
 	result, err := shotResult(ctx, spec)
 	if err != nil {
-		return nil, []string{err.Error()}
+		return nil, []string{err.Error()}, false
 	}
 	semantic := compactSemantic(result.SemanticJSON)
 	if len(semantic) == 0 {
-		return nil, nil
+		return nil, nil, true
 	}
 	if ok, _ := semantic["ok"].(bool); !ok {
 		if msg, _ := semantic["error"].(string); msg != "" {
-			return semantic, []string{msg}
+			return semantic, []string{msg}, true
 		}
 	}
-	return semantic, nil
+	return semantic, nil, true
 }
 
 func applyVisualSemantic(out *VisualObserveOK, semantic map[string]any, errs []string) {

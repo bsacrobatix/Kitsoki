@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -121,6 +122,32 @@ func TestVisualObserve_WebUsesCompactSemanticSidecar(t *testing.T) {
 	assert.Equal(t, "chat", got.Regions[0].ID)
 	assert.Equal(t, &studio.VisualBBox{X: 10, Y: 20, Width: 300, Height: 400}, got.Regions[0].BBox)
 	assert.NotContains(t, contentText(res), "nodes", "observe must not leak raw DOM sidecars")
+}
+
+func TestVisualObserve_WebCaptureErrorDisablesImageAvailability(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	srv.SetWebShotResult(func(ctx context.Context, spec studio.WebRenderSpec) (studio.WebShotResult, error) {
+		return studio.WebShotResult{}, errors.New("webshot: capture: exit status 1")
+	})
+	cs := connectInProcess(ctx, t, srv)
+	handle := openCloak(ctx, t, cs)
+	visual := openVisual(ctx, t, cs, handle, "vscode")
+
+	res, err := callTool(ctx, cs, "visual.observe", map[string]any{
+		"visual_handle":    visual,
+		"include_semantic": true,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "visual.observe semantic: %s", contentText(res))
+
+	var got studio.VisualObserveOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &got))
+	assert.False(t, got.ImageAvailable, "failed web/vscode capture must not advertise an available image")
+	require.NotEmpty(t, got.Errors)
+	assert.Contains(t, got.Errors[0], "webshot: capture: exit status 1")
+	assert.Contains(t, got.Next.Reasons, "web image snapshot capture failed; see errors")
+	assert.Contains(t, got.Next.Reasons, "web image snapshots need a browser-capable webShot seam")
 }
 
 func TestVisualObserve_TUIIncludesTerminalWrapper(t *testing.T) {
