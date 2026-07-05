@@ -1,7 +1,7 @@
 states:
   run_created:
     description: "A product-journey QA run bundle exists; waiting for captured evidence."
-    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, driver_journal_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, persona_starting_surface, persona_first_question, persona_evidence_emphasis, persona_escalation_trigger, persona_finding_bias, proof_evidence_count, demo_evidence_count, finding_total_count, strength_count, weakness_count, issue_count, fix_count, blocked_count, missing_evidence_count, missing_proof_evidence_count, proof_minimum_evidence_count, minimum_evidence_count, missing_proof_summary, driver_contract_summary, next_driver_capture, next_driver_attach_command, next_driver_blocker_command, scenario, evidence_kind, evidence_path, evidence_source, finding_kind, finding_title, ticket_repo, filing_status, filing_dry_run, findings_filed_count, findings_skipped_count, findings_failed_count, findings_unfiled_count, filed_issue_summary, filing_summary, driver_event_id, dispatch_mode, driver_status, driver_summary, review_status, review_summary, review_passed_count, review_failed_count, review_warning_count, review_total_count, review_backlog_summary, validation_status, validation_errors, validation_warnings, validation_issue_summary, status]
+    relevant_world: [project, persona, seed, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, driver_journal_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, persona_starting_surface, persona_first_question, persona_evidence_emphasis, persona_escalation_trigger, persona_finding_bias, proof_evidence_count, demo_evidence_count, finding_total_count, strength_count, weakness_count, issue_count, fix_count, blocked_count, missing_evidence_count, missing_proof_evidence_count, proof_minimum_evidence_count, minimum_evidence_count, missing_proof_summary, driver_contract_summary, next_driver_capture, next_driver_attach_command, next_driver_blocker_command, scenario, evidence_kind, evidence_path, evidence_source, finding_kind, finding_title, ticket_repo, filing_status, filing_dry_run, findings_filed_count, findings_skipped_count, findings_failed_count, findings_unfiled_count, filed_issue_summary, filing_summary, stats_status, stats_root, stats_output, stats_summary, stats_runs_scanned, stats_found_count, stats_filed_count, stats_fixed_count, stats_reopened_count, stats_unknown_state_count, stats_similar_pair_count, driver_event_id, dispatch_mode, driver_status, driver_summary, review_status, review_summary, review_passed_count, review_failed_count, review_warning_count, review_total_count, review_backlog_summary, validation_status, validation_errors, validation_warnings, validation_issue_summary, status]
     view:
       - banner:
           text: "RUN CREATED"
@@ -35,6 +35,9 @@ states:
             Last finding: '{{ world.finding_kind|default:"(none)" }} / {{ world.finding_title|default:"" }}'
             Ticket repo: '{{ world.ticket_repo|default:"(not set)" }}'
             Issue filing: '{{ world.filing_status|default:"(not filed)" }}: filed {{ world.findings_filed_count }}, skipped {{ world.findings_skipped_count }}, failed {{ world.findings_failed_count }}, unfiled {{ world.findings_unfiled_count }}'
+            Derived stats: '{{ world.stats_status|default:"(not derived)" }}: found {{ world.stats_found_count }}, filed {{ world.stats_filed_count }}, fixed {{ world.stats_fixed_count }}, reopened {{ world.stats_reopened_count }}, similar {{ world.stats_similar_pair_count }}'
+            Stats runs: "{{ world.stats_runs_scanned }} scanned; unknown state {{ world.stats_unknown_state_count }}"
+            Stats artifact: '{{ world.stats_output|default:"(not written)" }}'
             Last driver event: '{{ world.driver_event_id|default:"(none)" }} / {{ world.driver_status|default:"" }}'
             Review: '{{ world.review_status|default:"(not reviewed)" }}'
             Review checks: "{{ world.review_passed_count }} / {{ world.review_total_count }} passed; {{ world.review_failed_count }} failed; {{ world.review_warning_count }} warnings"
@@ -50,6 +53,7 @@ states:
       - prose: '{{ world.next_driver_blocker_command|default:"No next proof blocker command is queued." }}'
       - prose: '{{ world.filing_summary|default:"Use file_findings ticket_repo=owner/repo to file recorded issue findings as GitHub issues with uploaded evidence (mode=dry-run to preview)." }}'
       - prose: '{{ world.filed_issue_summary|default:"" }}'
+      - prose: '{{ world.stats_summary|default:"Use stats to derive filed/fixed/reopened/similar issue counts from run bundles and cached issue state." }}'
       - prose: '{{ world.review_backlog_summary|default:"Run review to see actionable review checks." }}'
       - choice:
           mode: single
@@ -70,6 +74,9 @@ states:
             - label: "file_findings ticket_repo=owner/repo"
               hint: "file every credible issue finding as a GitHub issue with uploaded evidence (mode=dry-run to preview)"
               intent: file_findings
+            - label: "stats"
+              hint: "derive filed/fixed/reopened/similar issue counts from run bundles"
+              intent: stats
             - label: "seed_demo"
               hint: "populate representative evidence and findings for deck review"
               intent: seed_demo
@@ -368,6 +375,48 @@ states:
               on_error: run_created
             - set:
                 status: "findings_filing_complete"
+      stats:
+        - target: run_created
+          effects:
+            - set:
+                stats_root: "{{ slots.stats_root ?? '.artifacts/product-journey' }}"
+                stats_output: "{{ slots.stats_output ?? '' }}"
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
+                validation_issue_summary: ""
+                status: "deriving_stats"
+            - invoke: host.run
+              id: derive_product_journey_stats
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --stats
+                  - --json-output
+                  - --stats-root
+                  - "{{ slots.stats_root ?? '.artifacts/product-journey' }}"
+                  - --issue-state-file
+                  - "{{ slots.issue_state_file ?? '' }}"
+                  - --stats-output
+                  - "{{ slots.stats_output ?? '' }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                stats_status: "stdout_json.status"
+                stats_root: "stdout_json.stats_root"
+                stats_output: "stdout_json.stats_output"
+                stats_summary: "stdout_json.stats_summary"
+                stats_runs_scanned: "stdout_json.runs_scanned"
+                stats_found_count: "stdout_json.findings_found_count"
+                stats_filed_count: "stdout_json.findings_filed_count"
+                stats_fixed_count: "stdout_json.issues_fixed_count"
+                stats_reopened_count: "stdout_json.issues_reopened_count"
+                stats_unknown_state_count: "stdout_json.issues_unknown_state_count"
+                stats_similar_pair_count: "stdout_json.similar_pair_count"
+              on_error: run_created
+            - set:
+                status: "stats_derived"
       driver_event:
         - target: run_created
           effects:
