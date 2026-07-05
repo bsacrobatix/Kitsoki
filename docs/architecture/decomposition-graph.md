@@ -204,4 +204,4 @@ document's scope.
 - [`tools/validate-decomposition-graph.py`](../../tools/validate-decomposition-graph.py)
 - [`docs/goals/generalized-usage/decomposition.yaml`](../goals/generalized-usage/decomposition.yaml)
 - [`stories/deliver/schemas/decomposition.json`](../../stories/deliver/schemas/decomposition.json)
-- [`docs/proposals/work-decomposition.md`](../proposals/work-decomposition.md)
+- [`docs/stories/deliver.md`](../stories/deliver.md)

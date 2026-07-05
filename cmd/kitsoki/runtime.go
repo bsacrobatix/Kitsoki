@@ -404,6 +404,40 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 				return real(starlarkhost.WithHTTP(ctx, httpClient), args)
 			})
 		}
+
+		// Starlark inspect cassette: the fs/probe sibling of the HTTP cassette
+		// above. Unlike a host.starlark.run HostCassette stub (which replaces
+		// the whole call with a canned Result), this lets the REAL handler run
+		// a story's script for real — only its ctx.fs.*/ctx.probe I/O is served
+		// from disk instead of touching the filesystem. Mirrors
+		// testrunner.buildOrchestratorRig's identical wiring
+		// (internal/testrunner/flows.go) so a flow fixture written for `test
+		// flows` (e.g. stories/deliver's decompose_happy / slidey_decomposition
+		// / dev-story's design_to_decompose_to_impl, which fake ctx.fs.read of a
+		// decomposition manifest the stubbed decomposer agent never actually
+		// wrote to disk) drives identically live under `kitsoki web --flow`.
+		if cfg.Flow.StarlarkInspectCassette != "" {
+			cassettePath := cfg.Flow.StarlarkInspectCassette
+			if !filepath.IsAbs(cassettePath) && cfg.FlowFilePath != "" {
+				cassettePath = filepath.Join(filepath.Dir(cfg.FlowFilePath), cassettePath)
+			}
+			raw, rerr := os.ReadFile(cassettePath)
+			if rerr != nil {
+				return nil, fmt.Errorf("read starlark inspect cassette: %w", rerr)
+			}
+			var cas starlarkhost.InspectCassette
+			if uerr := goyaml.Unmarshal(raw, &cas); uerr != nil {
+				return nil, fmt.Errorf("parse starlark inspect cassette %q: %w", cassettePath, uerr)
+			}
+			inspector := starlarkhost.NewReplayInspector(&cas)
+			if _, ok := hostReg.Get("host.starlark.run"); !ok {
+				hostReg.Register("host.starlark.run", host.StarlarkRunHandler)
+			}
+			real2, _ := hostReg.Get("host.starlark.run")
+			hostReg.Replace("host.starlark.run", func(ctx context.Context, args map[string]any) (host.Result, error) {
+				return real2(starlarkhost.WithInspector(ctx, inspector), args)
+			})
+		}
 		// Harness stays nil: flow intents are submitted explicitly via the
 		// write RPCs; the orchestrator's RunIntent path never calls the
 		// harness.

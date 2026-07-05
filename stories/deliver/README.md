@@ -9,15 +9,15 @@ result.
 Layering is acyclic: **deliver → fleet → ship-it**. deliver is the only entry
 above fleet; fleet never imports deliver.
 
-> **Target shape:** deliver is the decided canonical decomposition story. It
-> has absorbed the work-decomposition skill's richer manifest schema (B2a),
-> the budgeted refine loop + adversarial review gate (B2b), managed
-> re-decompose via the decompose-update transaction (B2c), and dev-story
-> reachability (B3, below). See
-> [`docs/proposals/deliver-canonical-decomposition.md`](../../docs/proposals/deliver-canonical-decomposition.md).
-> This README documents what ships **today**.
+`deliver` is the canonical decomposition story: it has absorbed the
+work-decomposition skill's richer manifest schema, the budgeted refine loop +
+adversarial review gate, managed re-decompose via the decompose-update
+transaction, and `dev-story` reachability (below) — all shipped. This README
+is the room-by-room reference; see
+[`docs/stories/deliver.md`](../../docs/stories/deliver.md) for the narrative
+overview (story graph, dev-story integration, per-surface no-LLM proofs).
 
-## Reachable from dev-story (B3)
+## Reachable from dev-story
 
 [`stories/dev-story/`](../dev-story/) imports `deliver` (alias `deliver`,
 entry `configure`; `world_in: epic_path` reads the child's `design_file`) and
@@ -112,8 +112,7 @@ together fully cover the epic/proposal) that `review` attacks.
 - `deps` — ids that must ship first, acyclic (optional, default `[]`)
 - `title`, `kind` (`story\|runtime\|tui\|tracing\|test\|docs`), `scope[]`
   (write-boundary globs), `acceptance[]`, `risk` (`low\|medium\|high`) —
-  optional richer fields absorbed from the work-decomposition skill's schema
-  (proposal: deliver-canonical-decomposition B2a).
+  optional richer fields absorbed from the work-decomposition skill's schema.
 
 The lint (no LLM, [`scripts/lint_decomposition.star`](scripts/lint_decomposition.star))
 enforces: at least one brief; ids unique and non-empty; non-empty `brief` and
@@ -131,7 +130,7 @@ Key world: `epic_path`, `decomposition_path`, `decomposition_briefs`,
 `coverage_note`, `lint_route`, `review_verdict`, `review_reason`,
 `review_questions`, `refine_feedback`, `refine_cycle`, `refine_budget`,
 `last_error`, `delivery_summary`, plus `base_branch` / `main_worktree_path`
-projected into fleet. Managed re-decompose (B2c): `decompose_route`
+projected into fleet. Managed re-decompose: `decompose_route`
 (`""`/`"fresh"`/`"redecompose"`), `redecompose_checked`,
 `redecompose_delta_path`, `redecompose_versions_dir`, `redecompose_event_log`,
 `redecompose_trigger`, `redecompose_added`, `redecompose_apply_ok`,
@@ -165,7 +164,7 @@ go run ./cmd/kitsoki test flows stories/deliver/app.yaml
 | [`refine_budget_exhausted`](flows/refine_budget_exhausted.yaml) | The reviewer keeps revising past the shared `refine_cycle`/`refine_budget` counter → honest `@exit:needs-human` with a specific `last_error` naming the last review reason, instead of looping forever. |
 | [`rich_schema_happy`](flows/rich_schema_happy.yaml) | A manifest carrying `coverage_note` + per-brief `title/kind/scope/acceptance/risk` lints clean and reaches `fleet.load` — proves the absorbed skill schema/lint fields, not just the bare `id/brief/gate_command/deps` contract. |
 | [`slidey_decomposition`](flows/slidey_decomposition.yaml) | Tour-shaped happy path (`epic_path` seeded in `initial_world` so `start` needs no slot) for the web/no-LLM demo. |
-| [`redecompose_managed_delta`](flows/redecompose_managed_delta.yaml) | A prior `decomposition.yaml` already exists (`exists: true` in the inspect cassette) → `decompose` routes to `redecompose` (additive delta authored) → `redecompose_apply` (`host.run`, STUBBED) applies it via the decompose-update transaction → `lint` re-validates the post-apply manifest → review accepts → `fleet.load`. Never a blind decomposer overwrite (proposal: deliver-canonical-decomposition B2c). |
+| [`redecompose_managed_delta`](flows/redecompose_managed_delta.yaml) | A prior `decomposition.yaml` already exists (`exists: true` in the inspect cassette) → `decompose` routes to `redecompose` (additive delta authored) → `redecompose_apply` (`host.run`, STUBBED) applies it via the decompose-update transaction → `lint` re-validates the post-apply manifest → review accepts → `fleet.load`. Never a blind decomposer overwrite. |
 
 Both agents are mocked in every flow (`host_handlers.host.agent.task` /
 `.host.agent.decide` `by_call`, or a `host_cassette:` when a flow needs

@@ -157,6 +157,12 @@
           "type": "string",
           "default": "",
           "description": "Stories directory to pass to 'kitsoki web --stories-dir'."
+        },
+        "kitsoki.mode": {
+          "type": "string",
+          "default": "",
+          "enum": ["", "staged", "one-shot"],
+          "description": "Execution mode to pass to 'kitsoki web --mode'. Leave empty for the backend default (staged); 'one-shot' auto-advances synthetic emit chains through decision gates (needed to drive a flow fixture whose decompose/lint/review chain has no operator-facing button at each hop)."
         }
       }
     }

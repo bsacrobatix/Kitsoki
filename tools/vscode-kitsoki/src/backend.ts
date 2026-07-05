@@ -17,6 +17,7 @@ export interface BackendConfig {
   flow: string;
   hostCassette: string;
   storiesDir: string;
+  mode: string; // "" => backend default (staged); "one-shot" auto-advances synthetic gates
 }
 
 /**
@@ -40,6 +41,7 @@ export function readConfig(): BackendConfig {
     flow: (cfg.get<string>('flow') ?? '').trim(),
     hostCassette: (cfg.get<string>('hostCassette') ?? '').trim(),
     storiesDir: (cfg.get<string>('storiesDir') ?? '').trim(),
+    mode: (cfg.get<string>('mode') ?? '').trim(),
   };
 }
 
@@ -184,6 +186,7 @@ export class Backend {
     if (cfg.flow) args.push('--flow', cfg.flow);
     if (cfg.hostCassette) args.push('--host-cassette', cfg.hostCassette);
     if (cfg.storiesDir) args.push('--stories-dir', cfg.storiesDir);
+    if (cfg.mode) args.push('--mode', cfg.mode);
 
     // When the extension's IDE-MCP server is up, seed CLAUDE_CODE_SSE_PORT so the
     // backend's IDE link discovers our lock and dials this window outright (the

@@ -8,7 +8,8 @@ description: Turn an accepted kitsoki proposal (or an epic + its children) into 
 This skill is the **Claude-driven manual twin** of
 [`stories/deliver`](../../../stories/deliver/README.md) — the canonical
 decomposition story (see
-[`docs/proposals/deliver-canonical-decomposition.md`](../../proposals/deliver-canonical-decomposition.md)).
+[`docs/stories/deliver.md`](../../../docs/stories/deliver.md) for the
+narrative overview).
 It takes an *accepted* proposal (or an epic + its linked children) and produces
 a `decomposition.yaml` of agent briefs — structurally validated and
 adversarially reviewed — for by-hand runs, or to check out the manifest shape
@@ -195,8 +196,8 @@ make setup
 
 `schemas/decomposition.json` here is a manual copy of
 [`stories/deliver/schemas/decomposition.json`](../../../stories/deliver/schemas/decomposition.json)
-— the canonical decomposition story owns the contract now (decision:
-`docs/proposals/deliver-canonical-decomposition.md`). Keep the two files
+— the canonical decomposition story owns the contract now (see
+[`docs/stories/deliver.md`](../../../docs/stories/deliver.md)). Keep the two files
 identical rather than letting them drift; when `deliver`'s schema gains a
 field, copy it here too. Likewise, when `deliver`'s `lint_decomposition.star`
 gains a check, port it to `validate_decomposition.py`/`.star` here so a
