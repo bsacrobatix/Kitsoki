@@ -107,6 +107,7 @@ turns:
       status: run_loaded
       run_id: run-888
       run_dir: .artifacts/product-journey/run-888
+    expect_view_matches: "RUN CREATED[\\s\\S]*file_findings ticket_repo=owner/repo[\\s\\S]*autonomous_fix ticket_repo=owner/repo gh_agent_public_base_url=<url>"
     expect_host_calls:
       - handler: host.run
         args: { call: load_product_journey_run }

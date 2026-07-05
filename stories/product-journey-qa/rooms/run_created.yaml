@@ -86,6 +86,9 @@ states:
             - label: "file_findings ticket_repo=owner/repo"
               hint: "file every credible issue finding as a GitHub issue with uploaded evidence (mode=dry-run to preview)"
               intent: file_findings
+            - label: "autonomous_fix ticket_repo=owner/repo gh_agent_public_base_url=<url>"
+              hint: "file credible issues, drain gh-agent fixes, refresh review artifacts, and validate in one gate"
+              intent: autonomous_fix
             - label: "stats"
               hint: "derive filed/fixed/reopened/similar issue counts from run bundles"
               intent: stats
