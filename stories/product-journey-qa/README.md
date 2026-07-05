@@ -63,7 +63,8 @@ It is intentionally no-LLM:
   `driver-journal.md/json`.
 - `autonomous_fix` calls the native `kitsoki gitops autonomous-fix` facade to
   file credible issue findings, drain gh-agent fixes, refresh review artifacts,
-  require each completed fix run to publish `independent-verify.md`, write
+  require each completed fix run to publish `independent-verify.md`, post a
+  `kitsoki-fixed-in` close-out comment, close the GitHub issue, write
   `autonomous-fix-report.md`, and validate the bundle without exposing raw
   `gh` or gh-agent plumbing as the operator contract.
 - `seed_demo` calls `tools/product-journey/run.py --seed-demo-evidence

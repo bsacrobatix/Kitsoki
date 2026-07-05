@@ -408,7 +408,12 @@ defaults to `<run_dir>/gh-agent-jobs.sqlite`; pass `gh_agent_db=<sqlite>` only
 to override that run-local path. Completed gh-agent fix jobs must expose both
 reviewable fix evidence and an `independent-verify.md` asset produced by the
 story dispatcher; the autonomous review and validation gates fail closed when a
-job only provides a fix report or patch.
+job only provides a fix report or patch. After filing, gh-agent, review, and
+validation gates are green, the same native gitops facade posts a
+`kitsoki-fixed-in` close-out comment through `host.gh.ticket`, closes the
+GitHub issue, and writes `findings.issue_closeout` plus closed issue state back
+into `findings.json`; follow-up stats can then be derived from the run bundle
+instead of hand-maintained notes.
 
 The lower-level `file_findings ticket_repo=<owner/repo> [mode=dry-run]` story
 intent and the CLI `--file-findings` command remain useful for previewing or

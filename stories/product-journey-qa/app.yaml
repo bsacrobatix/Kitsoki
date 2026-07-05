@@ -145,6 +145,9 @@ world:
   filing_summary: { type: string, default: "" }
   autonomous_fix_status: { type: string, default: "" }
   autonomous_fix_report_path: { type: string, default: "" }
+  issue_closeout_status: { type: string, default: "" }
+  issue_closeout_count: { type: int, default: 0 }
+  issue_closeout_summary: { type: string, default: "" }
   gh_agent_enqueue_status: { type: string, default: "" }
   gh_agent_enqueued_count: { type: int, default: 0 }
   gh_agent_skipped_count: { type: int, default: 0 }

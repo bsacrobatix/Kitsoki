@@ -3692,6 +3692,7 @@ def run_story_summary(run_dir: Path) -> dict:
     weakness_routes = read_json(run_dir / "weakness-routes.json") if (run_dir / "weakness-routes.json").exists() else {"summary": {}, "items": []}
     finding_summary = findings.get("summary", {})
     gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
+    issue_closeout = findings.get("issue_closeout", {}) if isinstance(findings.get("issue_closeout", {}), dict) else {}
     lens = agent_brief.get("persona_contract", {}).get("lens", {})
     missing_proof_rows = handoff.get("missing_proof_evidence", [])
     missing_proof_summary = []
@@ -3773,6 +3774,9 @@ def run_story_summary(run_dir: Path) -> dict:
         "gh_agent_independent_verify_summary": "; ".join(gh_agent_independent_verify[:4]) + (f"; +{len(gh_agent_independent_verify) - 4} more" if len(gh_agent_independent_verify) > 4 else ""),
         "gh_agent_missing_verify_summary": "; ".join(gh_agent_missing_verify[:4]) + (f"; +{len(gh_agent_missing_verify) - 4} more" if len(gh_agent_missing_verify) > 4 else ""),
         "gh_agent_missing_run_url_count": len(missing_run_urls),
+        "issue_closeout_status": issue_closeout.get("status", ""),
+        "issue_closeout_count": issue_closeout.get("count", 0),
+        "issue_closeout_summary": issue_closeout.get("summary", ""),
     }
 
 
@@ -4504,6 +4508,59 @@ def autonomous_fix_loop(
     return result
 
 
+def gitops_autonomous_fix(
+    run_dir: Path,
+    ticket_repo: str,
+    gh_agent_db: str,
+    gh_agent_story: str,
+    gh_agent_public_base_url: str,
+    gh_agent_project_root: str,
+    gh_agent_incident_repo: str,
+    gh_agent_asset_dir: str,
+    gh_agent_comment_mode: str,
+) -> dict:
+    if os.environ.get("KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE") == "1":
+        cmd = ["go", "run", "./cmd/kitsoki"]
+    else:
+        cmd = kitsoki_cli_command()
+    cmd.extend([
+        "gitops",
+        "autonomous-fix",
+        "--json",
+        "--report-invalid-autonomous-fix",
+        "--run-dir",
+        str(run_dir),
+        "--ticket-repo",
+        ticket_repo,
+        "--agent-db",
+        gh_agent_db,
+        "--agent-story",
+        gh_agent_story or "stories/bugfix",
+        "--public-base-url",
+        gh_agent_public_base_url,
+        "--project-root",
+        gh_agent_project_root,
+        "--incident-repo",
+        gh_agent_incident_repo,
+        "--asset-dir",
+        gh_agent_asset_dir,
+        "--comment-mode",
+        gh_agent_comment_mode or "none",
+    ])
+    proc = shell(cmd, ROOT)
+    if proc.returncode != 0:
+        raise SystemExit(
+            "kitsoki gitops autonomous-fix failed\n"
+            + proc.stdout.strip()
+            + ("\n" if proc.stdout.strip() and proc.stderr.strip() else "")
+            + proc.stderr.strip()
+        )
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"kitsoki gitops autonomous-fix printed invalid JSON: {exc}\n{proc.stdout}") from exc
+
+
 def autonomous_marathon_report_path(run_dir: Path) -> Path:
     return run_dir / "autonomous-marathon-report.md"
 
@@ -4631,7 +4688,7 @@ def autonomous_marathon(
             raise SystemExit("--autonomous-marathon requires --ticket-repo when credible issue findings exist")
         if not gh_agent_db:
             gh_agent_db = str(run_dir / "gh-agent-jobs.sqlite")
-        fix_result = autonomous_fix_loop(
+        fix_result = gitops_autonomous_fix(
             run_dir,
             ticket_repo,
             gh_agent_db,
@@ -4641,7 +4698,6 @@ def autonomous_marathon(
             gh_agent_incident_repo,
             gh_agent_asset_dir,
             gh_agent_comment_mode,
-            publish_deck,
         )
         base = dict(fix_result)
         fix_valid = fix_result.get("autonomous_fix_status") == "autonomous_fix_valid"
