@@ -1,0 +1,33 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+
+host_handlers:
+  host.run:
+    by_call:
+      autonomous_product_journey_marathon_smoke:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            status: passed
+            summary: autonomous product-QA marathon smoke passed
+            exit_code: 0
+            output: "ok: credible issue was filed\nok: gh-agent fix drained with independent verification\nok: mechanical stats count found/filed/fixed\nPASS"
+
+turns:
+  - intent:
+      name: autonomous_marathon_smoke
+      slots: {}
+    expect_state: idle
+    expect_world:
+      status: autonomous_marathon_smoke_checked
+      autonomous_marathon_smoke_status: passed
+      autonomous_marathon_smoke_summary: autonomous product-QA marathon smoke passed
+      autonomous_marathon_smoke_exit_code: 0
+    expect_host_calls:
+      - handler: host.run
+        args: { call: autonomous_product_journey_marathon_smoke }
+    expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Autonomous marathon smoke[\\s\\S]*passed[\\s\\S]*Status[\\s\\S]*autonomous_marathon_smoke_checked"
+
+expect_no_errors: true

@@ -1,7 +1,7 @@
 states:
   idle:
     description: "Waiting to create a product-journey QA run bundle."
-    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, status]
+    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, status]
     view:
       - banner:
           text: "PRODUCT JOURNEY QA"
@@ -19,6 +19,7 @@ states:
             Native gh-agent: '{{ world.native_ghagent_status|default:"(not checked)" }}'
             Autonomous fix smoke: '{{ world.autonomous_fix_smoke_status|default:"(not checked)" }}'
             Persona autofix smoke: '{{ world.persona_autofix_smoke_status|default:"(not checked)" }}'
+            Autonomous marathon smoke: '{{ world.autonomous_marathon_smoke_status|default:"(not checked)" }}'
             Status: "{{ world.status }}"
       - prose: "Create a no-LLM run bundle or a 10-repo GitHub matrix, then attach visual/MCP evidence as scenarios play out."
       - choice:
@@ -55,6 +56,9 @@ states:
             - label: "persona_autofix_smoke"
               hint: "prove persona replay findings enter the autonomous gitops issue-to-fix gate"
               intent: persona_autofix_smoke
+            - label: "autonomous_marathon_smoke"
+              hint: "prove the scoped persona-QA marathon chain reaches autonomous fix and derived stats"
+              intent: autonomous_marathon_smoke
             - label: "refresh_targets seed=..."
               hint: "write a GitHub target-proof artifact for bug-count and popularity floors"
               intent: refresh_targets
@@ -199,6 +203,33 @@ states:
               on_error: idle
             - set:
                 status: "persona_autofix_smoke_checked"
+      autonomous_marathon_smoke:
+        - target: .
+          effects:
+            - set:
+                autonomous_marathon_smoke_status: ""
+                autonomous_marathon_smoke_summary: ""
+                autonomous_marathon_smoke_output: ""
+                autonomous_marathon_smoke_exit_code: 0
+                status: "autonomous_marathon_smoking"
+            - invoke: host.run
+              id: autonomous_product_journey_marathon_smoke
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --autonomous-marathon-smoke
+                  - --json-output
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                autonomous_marathon_smoke_status: "stdout_json.status"
+                autonomous_marathon_smoke_summary: "stdout_json.summary"
+                autonomous_marathon_smoke_exit_code: "stdout_json.exit_code"
+                autonomous_marathon_smoke_output: "stdout_json.output"
+              on_error: idle
+            - set:
+                status: "autonomous_marathon_smoke_checked"
       refresh_targets:
         - target: .
           effects:

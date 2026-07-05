@@ -420,6 +420,7 @@ To prove the next hop without GitHub credentials or LLM cost:
 python3 tools/product-journey/run.py --native-ghagent-smoke --json-output
 python3 tools/product-journey/run.py --autonomous-fix-smoke --json-output
 python3 tools/product-journey/run.py --persona-autofix-smoke --json-output
+python3 tools/product-journey/run.py --autonomous-marathon-smoke --json-output
 ```
 
 The native smoke creates a temporary product-journey bundle with a filed issue,
@@ -433,7 +434,11 @@ pass. The `persona_autofix_smoke` story intent / persona-autofix runner smoke
 starts from a persona replay bundle with local proof artifacts and an observed
 issue finding, then proves that bundle enters the native `kitsoki gitops
 autonomous-fix` gate and publishes the filed issue, gh-agent run URL, fix
-report, and `independent-verify.md` artifact.
+evidence, and independent verification. The `autonomous_marathon_smoke` story
+intent adds the standing-loop shell around that path: it creates a scoped
+persona-QA run, journals replayed driver evidence, files and fixes one
+credible issue through the native autonomous gate, and derives found/filed/fixed
+stats from issue state so manual stats are not part of the loop.
 
 Do not bypass this with raw `gh` commands. Product-journey issue filing and
 autonomous fixes are intentionally routed through Kitsoki's native
