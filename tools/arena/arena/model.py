@@ -81,13 +81,21 @@ VERDICTS = ("solved", "partial", "failed", "armed", "blocked", "pending")
 # Check-type discriminator (WS-G G1): a cell declares a check SUITE, not one
 # verdict shape, and every check emits a completion-state verdict tagged with
 # its type (schemas/completion-state.schema.json `check_type`; absent == the
-# default "replay"). Only `replay` is executable today — the plugin/container
-# path below IS the replay check. The other three are declared-but-not-
-# implemented: specs may declare them (validation accepts them) and execution
-# reports an honest `pending` verdict, never a fake green.
+# default "replay"). `replay` is the container/plugin path below. `journey-
+# verdict`/`ux-heuristic` (WS-G G6) are FILE-ADAPTER checks: they read an
+# already-written kitsoki-ui-qa / kitsoki-ui-review `verdict.json` off disk via
+# tools.persona_qa.ui_verdict — no container spawn, no LLM call of their own
+# (see arena/checks.py's `run_ui_verdict_check`). `docs-fidelity` remains
+# declared-but-not-implemented: specs may declare it (validation accepts it)
+# and execution reports an honest `pending` verdict, never a fake green.
 CHECK_TYPES = ("replay", "docs-fidelity", "ux-heuristic", "journey-verdict")
 DEFAULT_CHECK_TYPE = "replay"
-IMPLEMENTED_CHECK_TYPES = ("replay",)
+# Check types execution never falls back to `unimplemented_check_result` for.
+# `replay` runs a container; `journey-verdict`/`ux-heuristic` run the file
+# adapter (arena/checks.py FILE_ADAPTER_CHECK_TYPES) — both can still yield an
+# honest `pending` verdict at the CellResult level (e.g. no verdict.json
+# configured/found yet), but the check_type itself is implemented.
+IMPLEMENTED_CHECK_TYPES = ("replay", "journey-verdict", "ux-heuristic")
 
 
 @dataclass(frozen=True)

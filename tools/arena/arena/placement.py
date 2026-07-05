@@ -10,9 +10,9 @@ from __future__ import annotations
 import concurrent.futures
 from typing import Callable
 
-from .checks import unimplemented_check_result
+from .checks import FILE_ADAPTER_CHECK_TYPES, run_ui_verdict_check, unimplemented_check_result
 from .executor import CellExecutor
-from .model import Cell, CellResult, JobSpec, IMPLEMENTED_CHECK_TYPES
+from .model import Cell, CellResult, DEFAULT_CHECK_TYPE, JobSpec
 
 
 def _is_infra(result: CellResult) -> bool:
@@ -33,37 +33,39 @@ def run_sweep(
     check_type (WS-G G1). The `replay` check is the container execution below;
     its INFRA failures are retried up to `placement.retry` times (the failure
     is the harness, not the model) while a MODEL result is final (the verdict
-    stands). Declared-but-unimplemented check types report an honest `pending`
-    without touching a container (see arena/checks.py) — no retries, no spend.
+    stands). `journey-verdict`/`ux-heuristic` checks (WS-G G6) read an
+    already-written verdict.json off disk (see arena/checks.py's
+    `run_ui_verdict_check`) — no container, no retry, since an INFRA retry
+    around a static file read would never change the outcome. Every other
+    declared check type reports an honest `pending` without touching disk or a
+    container (see arena/checks.py) — no retries, no spend.
     """
     cells = spec.cells()
     hosts = spec.placement.hosts or ["local"]
     retry = spec.placement.retry
-    check_types = [c.check_type for c in spec.checks] or ["replay"]
-    run_replay = any(ct in IMPLEMENTED_CHECK_TYPES for ct in check_types)
     results: list[CellResult] = []
 
     def run_one(idx_cell: tuple[int, Cell]) -> list[CellResult]:
         idx, cell = idx_cell
         host = hosts[idx % len(hosts)]
         out: list[CellResult] = []
-        if run_replay:
-            attempt = 0
-            while True:
-                result = executor.execute(cell, host=host, live=live)
-                if _is_infra(result) and attempt < retry:
-                    attempt += 1
-                    continue
-                if attempt:
-                    result.notes = (result.notes + f" (after {attempt} infra retr{'y' if attempt == 1 else 'ies'})").strip()
-                break
-            result.check_type = "replay"
-            out.append(result)
-        out.extend(
-            unimplemented_check_result(cell, ct)
-            for ct in check_types
-            if ct not in IMPLEMENTED_CHECK_TYPES
-        )
+        for check in spec.checks:
+            if check.check_type == DEFAULT_CHECK_TYPE:
+                attempt = 0
+                while True:
+                    result = executor.execute(cell, host=host, live=live)
+                    if _is_infra(result) and attempt < retry:
+                        attempt += 1
+                        continue
+                    if attempt:
+                        result.notes = (result.notes + f" (after {attempt} infra retr{'y' if attempt == 1 else 'ies'})").strip()
+                    break
+                result.check_type = DEFAULT_CHECK_TYPE
+                out.append(result)
+            elif check.check_type in FILE_ADAPTER_CHECK_TYPES:
+                out.append(run_ui_verdict_check(cell, check))
+            else:
+                out.append(unimplemented_check_result(cell, check.check_type))
         return out
 
     workers = max(1, spec.placement.concurrency)
