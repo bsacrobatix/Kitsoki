@@ -503,16 +503,17 @@ The read tools stay available on a `--read-only` server; the mutating ones
 
 The everyday GitHub reads a developing agent needs — list open issues, view a
 PR's body + changed files + diff (the bake-off needs a filed bug's own
-regression test), comment — stay behind Studio MCP tools. Issue listing uses the
-native `host.gh.ticket` provider; PR view/comment still wrap `gh` (argv mode,
-via `host.RunHandler`) until that convenience surface is migrated too.
+regression test), comment — stay behind Studio MCP tools. Issue listing and
+comments use the native `host.gh.ticket` / `host.git` providers; PR view still
+wraps `gh` (argv mode, via `host.RunHandler`) until that convenience surface is
+migrated too.
 ([`gh_tools.go`](../../internal/mcp/studio/gh_tools.go).)
 
 | Tool | Shape | Notes |
 |---|---|---|
 | `gh.issues` | `{repo?, state?, assignee?, search?, limit?, dir?} → {issues[]}` | Native `host.gh.ticket.search` result. Read-only |
 | `gh.pr_view` | `{number, repo?, include_diff?, dir?} → {pr, diff?}` | `gh pr view --json` (+ `gh pr diff`). Read-only |
-| `gh.comment` | `{number, body, on?:issue\|pr, repo?, dir?} → {url}` | `gh issue/pr comment`. Mutating (dropped `--read-only`) |
+| `gh.comment` | `{number, body, on?:issue\|pr, repo?, dir?} → {url}` | Native `host.gh.ticket.comment` / `host.git.pr_comment`. Mutating (dropped `--read-only`) |
 
 ## Operator-ask — the MCP client *is* the operator
 

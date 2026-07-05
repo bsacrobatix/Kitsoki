@@ -15,10 +15,10 @@ import (
 	studio "kitsoki/internal/mcp/studio"
 )
 
-// gh_tools_test.go — verification for the gh.* surface. gh.issues is native and
-// covered with a fake GitHub HTTP API; the remaining gh.pr_view/comment happy
-// paths call the real `gh` CLI, so these tests pin their offline-safe validation
-// guards instead.
+// gh_tools_test.go — verification for the gh.* surface. gh.issues and
+// gh.comment are native and covered with a fake GitHub HTTP API; the remaining
+// gh.pr_view happy path calls the real `gh` CLI, so these tests pin its
+// offline-safe validation guard instead.
 
 func TestGHIssuesUsesNativeTicketProvider(t *testing.T) {
 	ctx := context.Background()
@@ -77,6 +77,78 @@ func writeGHToolsJSON(t *testing.T, w http.ResponseWriter, v any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")
 	require.NoError(t, json.NewEncoder(w).Encode(v))
+}
+
+func TestGHCommentUsesNativeIssueProvider(t *testing.T) {
+	ctx := context.Background()
+	cs := newStudioNoWorkspace(ctx, t)
+
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("PATH", t.TempDir())
+
+	var postedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/repos/acme/repo/issues/7/comments", r.URL.Path)
+		require.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		var payload map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		postedBody, _ = payload["body"].(string)
+		writeGHToolsJSON(t, w, map[string]any{"html_url": "https://github.com/acme/repo/issues/7#issuecomment-1"})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+
+	res, err := callTool(ctx, cs, "gh.comment", map[string]any{
+		"repo":   "acme/repo",
+		"number": 7,
+		"body":   "Repro confirmed.",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "gh.comment: %s", contentText(res))
+	require.Equal(t, "Repro confirmed.", postedBody)
+
+	var out studio.GHCommentOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &out))
+	require.True(t, out.OK)
+	require.Equal(t, "https://github.com/acme/repo/issues/7#issuecomment-1", out.URL)
+}
+
+func TestGHCommentUsesNativePRProvider(t *testing.T) {
+	ctx := context.Background()
+	cs := newStudioNoWorkspace(ctx, t)
+
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("PATH", t.TempDir())
+
+	var postedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/repos/acme/repo/issues/42/comments", r.URL.Path)
+		var payload map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		postedBody, _ = payload["body"].(string)
+		writeGHToolsJSON(t, w, map[string]any{"html_url": "https://github.com/acme/repo/pull/42#issuecomment-2"})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+
+	res, err := callTool(ctx, cs, "gh.comment", map[string]any{
+		"repo":   "acme/repo",
+		"number": 42,
+		"on":     "pr",
+		"body":   "Review note.",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "gh.comment: %s", contentText(res))
+	require.Equal(t, "Review note.", postedBody)
+
+	var out studio.GHCommentOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &out))
+	require.True(t, out.OK)
+	require.Equal(t, "https://github.com/acme/repo/pull/42#issuecomment-2", out.URL)
 }
 
 func TestGH_ArgValidation(t *testing.T) {
