@@ -2,12 +2,12 @@
 #
 # Linear story: idle (detect + deterministically classify commits by path) →
 # planning (agent finalizes buckets + authors PR titles/bodies) → splitting
-# (deterministic branch/cherry-pick/push/gh-pr per bucket) → done.
+# (native deterministic branch/cherry-pick/push/open-PR per bucket) → done.
 #
-# Progressive determinism: the path→concern mapping and all git/gh plumbing are
-# deterministic host.run; the LLM appears once, only to resolve mixed-concern
-# commits and write human PR copy. The agent has NO Bash (write-fence) — the
-# story drives every git command.
+# Progressive determinism: the path→concern mapping and all git/GitHub plumbing
+# are deterministic host operations; the LLM appears once, only to resolve
+# mixed-concern commits and write human PR copy. The agent has NO Bash
+# (write-fence) — the story drives every git command.
 #
 # See .context/2026-06-29-pr-split-story-design.md.
 
@@ -20,6 +20,7 @@ app:
 
 hosts:
   - host.run
+  - host.git
   - host.agent.decide
   - host.starlark.run
 
@@ -43,6 +44,8 @@ agents:
 world:
   integration_branch: { type: string, default: "main" }
   working_dir:        { type: string, default: "." }
+  repo:               { type: string, default: "" }
+  remote:             { type: string, default: "origin" }
   source_branch:      { type: string, default: "" }
   commits:            { type: object, default: {} }
   commit_count:       { type: int,    default: 0 }

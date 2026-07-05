@@ -1,73 +1,32 @@
 # splitting — deterministic fan-out. For each bucket: branch off integration in a
 # throwaway worktree (never touches the caller's working tree), cherry-pick the
-# bucket's commits, push, and open a PR. Skipped writes under dry_run.
+# bucket's commits, push, and open a PR via native host.git. Skipped writes under
+# dry_run.
 
 states:
 
   splitting:
-    description: "Open one PR per bucket: branch, cherry-pick, push, gh pr create."
+    description: "Open one PR per bucket: branch, cherry-pick, push, native PR create."
     relevant_world: [buckets, opened_prs, dry_run, integration_branch, source_branch, last_op_ok, last_op_output]
     view:
       - prose: "{% if world.dry_run %}Dry run — planning PRs without pushing.{% else %}Opening one PR per concern bucket…{% endif %}"
       - prose: "Split failed: {{ world.last_op_output }}"
         when: "world.last_op_ok == false"
     on_enter:
-      - invoke: host.run
+      - invoke: host.git
         once: true
         id: open_prs
         with:
-          cmd: bash
-          args:
-            - "-c"
-            - |
-              set -euo pipefail
-              export NO_COLOR=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat
-              INT="{{ world.integration_branch }}"
-              DRY="{{ world.dry_run }}"
-              ROOT="$(git rev-parse --show-toplevel)"
-              # The plan JSON arrives as a POSITIONAL ARG, not an env var:
-              # host.run (RunHandler) has no env support — it runs the child with
-              # os.Environ() only — so an env: block is silently dropped. argv
-              # passes the multi-line JSON verbatim (exec, no shell re-parse).
-              BUCKETS_JSON="${1:-}"
-              if [ -z "$BUCKETS_JSON" ]; then
-                echo '{"opened_prs":{"items":[]}}'
-                exit 0
-              fi
-              n=$(printf '%s' "$BUCKETS_JSON" | jq '.buckets | length')
-              out='[]'
-              for i in $(seq 0 $((n - 1))); do
-                b=$(printf '%s' "$BUCKETS_JSON" | jq ".buckets[$i]")
-                concern=$(printf '%s' "$b" | jq -r '.concern')
-                title=$(printf '%s' "$b" | jq -r '.title')
-                body=$(printf '%s' "$b" | jq -r '.body')
-                slug=$(printf '%s' "$concern" | tr '[:upper:] ' '[:lower:]-' | tr -cd '[:alnum:]-')
-                br="{{ world.source_branch }}-split-${slug}"
-                mapfile -t shas < <(printf '%s' "$b" | jq -r '.shas[]')
-                ncommits=${#shas[@]}
-                url=""
-                if [ "$DRY" = "true" ]; then
-                  # Dry run: report the plan only — no worktree, cherry-pick,
-                  # push, or PR. This is the safe "show me what you'd open" mode.
-                  :
-                else
-                  wt="$(mktemp -d)/wt"
-                  git -C "$ROOT" worktree add -q --detach "$wt" "$INT"
-                  git -C "$wt" switch -q -c "$br"
-                  git -C "$wt" cherry-pick "${shas[@]}"
-                  git -C "$wt" push -q -u origin "$br"
-                  url=$(cd "$wt" && gh pr create --base "$INT" --head "$br" --title "$title" --body "$body" 2>/dev/null || echo "")
-                  git -C "$ROOT" worktree remove --force "$wt" || true
-                fi
-                out=$(printf '%s' "$out" | jq --arg c "$concern" --arg br "$br" --arg url "$url" --argjson n "$ncommits" \
-                  '. + [{"concern":$c,"branch":$br,"url":$url,"commits":$n}]')
-              done
-              jq -n --argjson items "$out" '{opened_prs:{items:$items}}'
-            - "pr-split"                      # $0
-            - "{{ world.buckets_json }}"       # $1 — the plan JSON (argv, not env)
-          cwd: "{{ world.working_dir }}"
+          op: split_prs
+          workdir: "{{ world.working_dir }}"
+          repo: "{{ world.repo }}"
+          remote: "{{ world.remote }}"
+          integration_branch: "{{ world.integration_branch }}"
+          source_branch: "{{ world.source_branch }}"
+          buckets_json: "{{ world.buckets_json }}"
+          dry_run: "{{ world.dry_run }}"
         bind:
-          opened_prs: "stdout_json.opened_prs"
+          opened_prs: "opened_prs"
           last_op_ok: ok
         on_error: splitting
       - emit_intent: proceed

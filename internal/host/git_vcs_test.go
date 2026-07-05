@@ -66,11 +66,91 @@ func TestGitVCS_RegisteredAsBuiltin(t *testing.T) {
 		"host.git.commit",
 		"host.git.push",
 		"host.git.open_pr",
+		"host.git.split_prs",
 		"host.git.pr_status",
 		"host.git.pr_comment",
 	} {
 		if _, ok := r.Get(name); !ok {
 			t.Fatalf("registry: %s missing", name)
+		}
+	}
+}
+
+func TestGitVCS_SplitPRs_DryRun(t *testing.T) {
+	res, err := host.GitVCSHandler(context.Background(), map[string]any{
+		"op":                 "split_prs",
+		"source_branch":      "feat/x",
+		"integration_branch": "main",
+		"dry_run":            true,
+		"buckets_json":       `{"buckets":[{"concern":"Core API","title":"core","body":"body","shas":["aaaaaaa1"]}]}`,
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	opened := res.Data["opened_prs"].(map[string]any)
+	items := opened["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items: %#v", items)
+	}
+	item := items[0].(map[string]any)
+	if item["branch"] != "feat/x-split-core-api" || item["url"] != "" || item["commits"] != 1 {
+		t.Fatalf("item: %#v", item)
+	}
+}
+
+func TestGitVCS_SplitPRs_NativeDoesNotRequireGh(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/repos/o/r/pulls" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		if payload["base"] != "main" || payload["head"] != "feat/x-split-core" {
+			t.Fatalf("payload: %#v", payload)
+		}
+		writeJSON(w, map[string]any{"number": 9, "html_url": "https://github.com/o/r/pull/9"})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	fr := newFakeRunner()
+	fr.responses["git worktree add"] = fakeResp{}
+	fr.responses["git switch -q -c feat/x-split-core"] = fakeResp{}
+	fr.responses["git cherry-pick aaaaaaa1"] = fakeResp{}
+	fr.responses["git push -u origin HEAD"] = fakeResp{}
+	fr.responses["git worktree remove"] = fakeResp{}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitVCSHandler(context.Background(), map[string]any{
+		"op":                 "split_prs",
+		"workdir":            ".",
+		"repo":               "o/r",
+		"source_branch":      "feat/x",
+		"integration_branch": "main",
+		"buckets_json":       `{"buckets":[{"concern":"core","title":"core: fix","body":"body","shas":["aaaaaaa1"]}]}`,
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s; calls=%v", res.Error, fr.calls)
+	}
+	opened := res.Data["opened_prs"].(map[string]any)
+	items := opened["items"].([]any)
+	item := items[0].(map[string]any)
+	if item["url"] != "https://github.com/o/r/pull/9" {
+		t.Fatalf("item: %#v", item)
+	}
+	for _, call := range fr.calls {
+		if strings.HasPrefix(call, "gh ") {
+			t.Fatalf("split_prs must not invoke gh; calls=%v", fr.calls)
 		}
 	}
 }
