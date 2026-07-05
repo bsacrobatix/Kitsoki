@@ -161,7 +161,7 @@ func tierHelp(root *cobra.Command) {
 	}{
 		{"setup", "Setup & onboarding", []string{"init", "doctor", "project-tools", "project-profile", "docs", "materialize", "version"}},
 		{"drive", "Run & drive", []string{"run", "turn", "drive", "chat", "serve", "web", "tour", "inbox", "session", "status"}},
-		{"author", "Author & test", []string{"validate", "test", "viz", "workflow", "prompts", "extract"}},
+		{"author", "Author & test", []string{"validate", "test", "viz", "workflow", "prompts", "extract", "kit"}},
 		{"debug", "Debug & trace", []string{"trace", "replay", "replay-routing", "inspect", "render", "shot", "web-shot", "export-status"}},
 		{"agents", "Agents & bench", []string{"agent", "agent-serve", "agent-bench", "eval", "bug", "issues", "gh-agent", "record", "cassette", "migrate-agent"}},
 		{"mcp", "MCP & integration", []string{"mcp", "mcp-test", "mcp-bash", "mcp-validator", "mcp-operator-ask", "hook", "intercept", "ui"}},
