@@ -78,48 +78,68 @@ bare system path, dropping `/usr/local/go/bin` entirely. Verified: `bash -lc
 `tools/arena/docker/Dockerfile.paired-task` via a `/etc/profile.d/` script
 (login shells source those; `ENV` does not reach them).
 
-**Implication:** the agent may have produced a materially correct fix for
-bug9/bug12 but skipped its own `go test` self-verification because the tool
-appeared unavailable, then reported success anyway without real evidence —
-a real, separate finding (a live worker should not report a fix as verified
-when its own verification step silently failed to run) worth carrying into
-the story/prompt layer once training patches start, but NOT yet actioned
-this round (see anti-overfit note below). Because this confound existed for
-both treatments equally (single-briefed also runs shell commands the same
-way), it does not by itself explain the *treatment* comparison, but it does
-mean **bug9/bug12's absolute solve-rate numbers should not be trusted as
-this task's true difficulty** until re-run under the fixed image. That
-re-run has NOT happened yet — flagging it as the immediate next step rather
-than re-running unprompted, given the live spend already used this session.
+**Correction after deeper tracing (do not overstate this confound):** the
+`failed` verdict itself is NOT explained by the PATH bug. Scoring runs
+through `bench.py`'s `sh()` helper (`subprocess.run(cmd, shell=True,
+env={**os.environ, ...})`) — a plain non-login subprocess that inherits the
+calling Python process's own environment directly, with no `/etc/profile`
+re-sourcing. `go` was on `PATH` there the whole time; verified by reading
+the actual scoring code path (`tools/bugfix-bakeoff/external/bench.py`
+`score()` → `sh(run_cmd, ...)`). Kitsoki's hidden hidden regression-test
+oracle for bug9/bug12 (a real, pinned test from this repo's own historical
+fix, injected only at scoring time) genuinely did not pass against either
+treatment's fix. Corroborating evidence: the **single-briefed** cells'
+own self-authored verification (via absolute `/usr/local/go/bin/go` paths,
+visible in their real trace output) ran and PASSED, yet those cells *still*
+failed the hidden oracle — so the failure is a real result about fix
+correctness against the specific pinned oracle, not a scoring-side infra
+artifact.
+
+The PATH bug's actual, narrower effect: only the **kitsoki-treatment**
+agent's own self-verification (via the `host.Bash` tool, which runs through
+`bash -lc`) was broken, so those two threads falsely reported "validation
+completed" without having actually run their own tests. That's a real,
+separate finding — a live worker should not report a fix as verified when
+its own verification tool call errored out — worth carrying into the
+story/prompt layer once training patches start (not yet actioned this
+round; see anti-overfit note below). It does NOT mean bug9/bug12's `failed`
+verdicts are untrustworthy; a re-run under the fixed image might still
+change the *kitsoki*-treatment outcome (a worker that can actually see its
+own test failures might iterate further before giving up), but there's no
+reason to expect it changes the *single-briefed* result, and no basis to
+expect the hidden oracle would suddenly pass either way. A clean re-run is
+still worth doing to get an honest read on the kitsoki treatment
+specifically, but it should not be read as "the current failed verdicts are
+probably wrong."
 
 ## Analysis gate (against docs/research/cost-efficiency-benchmark.md §2 criteria)
 
 **Still not evaluated against H1-H4.** The training split now has real data
-for 4/20 tasks (1 of 4 archetypes), and 2 of those 4 tasks have a confounded
-result that needs a clean re-run before it can be trusted. Declaring a
-verdict off this subset — especially with a known confound sitting in it —
-would violate the anti-overfit/fair-sample discipline the round protocol
-itself requires.
+for 4/20 tasks (1 of 4 archetypes). Declaring a verdict off a 4-task, 1-
+archetype subset would violate the anti-overfit/fair-sample discipline the
+round protocol itself requires, independent of the PATH-bug question above.
 
 ## Training pass
 
 **None landed.** Per §7's lifecycle, a training pass (failure mining →
 generic patches → ratchet → version bump) is warranted when the analysis
-gate says "not met" on *trustworthy* evidence. The bug9/bug12 failures are
-real cells but a confounded signal (see above) — patching the story/prompt
-layer against them now, before a clean re-run, risks fixing a Docker-image
-bug's symptom rather than a real process gap. The self-verification-silently-
-skipped finding is a legitimate candidate for the eventual training pass (a
-generic guard: a live worker should not report a fix verified when its
-verification tool call itself errored/was unavailable), but it's flagged
-here for later mining, not actioned this round.
+gate says "not met" on real evidence across a fair sample — a single
+archetype at 4/20 tasks isn't that yet, regardless of the PATH-bug question.
+The self-verification-silently-skipped finding IS a legitimate candidate for
+the eventual training pass (a generic guard: a live worker should not report
+a fix verified when its verification tool call itself errored/was
+unavailable) — flagged here for later mining, not actioned this round.
 
 ## Recommended next round
 
 1. Re-run `kitsoki-bug9`/`kitsoki-bug12`'s `kitsoki`-treatment cells under
-   the fixed Docker image (Go now reachable from `bash -lc`) to get a clean
-   read on whether they're genuinely hard or were purely blocked by the
-   PATH bug. Small, bounded (~$1.20-3.50/cell based on this round's costs).
+   the fixed Docker image (Go now reachable from `bash -lc`) for a cleaner
+   read on the kitsoki-treatment process specifically — not because the
+   current `failed` verdicts are expected to be wrong (see correction
+   above: the oracle itself was never affected by the PATH bug), but
+   because a worker that can actually see its own test results might
+   iterate further before giving up. Small, bounded (~$1.20-3.50/cell based
+   on this round's costs).
 2. Extend to the remaining 3 archetypes' training tasks (`docs_site_release`,
    `git_ops_landing`, `ui_visual_qa` — 12 more training tasks) before any
    analysis-gate verdict is drawn; even a clean 4-task sample is too narrow
