@@ -320,6 +320,21 @@ def run_live_cell(
     # (best-effort; a real operator run is not latency-sensitive here).
     time.sleep(0.5)
 
+    # ALWAYS persist the orchestrator's own stdout/stderr, regardless of exit
+    # code -- an earlier revision only did this on a non-zero exit, which left
+    # a "the orchestrator exited 0 but the trace shows no turns were ever
+    # driven" outcome completely undebuggable after the fact (the spawned
+    # `claude -p` process, and any explanation it gave for stopping short, is
+    # gone by the time this function inspects the result). A zero-exit,
+    # zero-turn cell is exactly the kind of gap the live gate exists to
+    # surface, so it must be at least as inspectable as a hard failure.
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    orchestrator_log_path = evidence_dir / f"{scenario_id}.{target}.{surface}.live.orchestrator.log"
+    orchestrator_log_path.write_text(
+        f"[exit code {proc.returncode}]\n--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}\n",
+        encoding="utf-8",
+    )
+
     trace_events: list[dict[str, Any]] = []
     notes_parts: list[str] = []
     if proc.returncode != 0:
@@ -336,11 +351,19 @@ def run_live_cell(
             line = line.strip()
             if line:
                 trace_events.append(json.loads(line))
+        if not trace_events or not any(e.get("kind") == "turn.end" for e in trace_events):
+            notes_parts.append(
+                f"orchestrator exited {proc.returncode} but the trace at {trace_path} shows "
+                "no turn.end event -- session_new likely succeeded (a trace file/header exists) "
+                "but no turn was ever driven to completion; see "
+                f"{orchestrator_log_path} for the orchestrator's own stdout/stderr"
+            )
 
     turn_signals = gate_plugin.extract_turn_signals(trace_events)
 
-    evidence_dir.mkdir(parents=True, exist_ok=True)
-    evidence_refs = [str(trace_path)] if trace_path.is_file() else []
+    evidence_refs = [str(orchestrator_log_path)]
+    if trace_path.is_file():
+        evidence_refs.append(str(trace_path))
 
     return gate_plugin.build_parity_record(
         scenario=scenario,
