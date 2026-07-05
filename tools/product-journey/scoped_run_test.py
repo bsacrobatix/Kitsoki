@@ -52,7 +52,7 @@ def main():
     _expect_system_exit(
         "rejects unknown scenario ids",
         lambda: run.select_scenarios(scenarios, "missing-scenario"),
-        "unknown scenario",
+        "unknown active scenario",
     )
 
     with tempfile.TemporaryDirectory() as tmp:
