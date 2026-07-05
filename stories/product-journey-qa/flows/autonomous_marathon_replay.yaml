@@ -112,6 +112,9 @@ host_handlers:
             weakness_count: 1
             weakness_route_count: 1
             weakness_route_summary: "finding-3->stories/prd"
+            prd_design_intake_path: .artifacts/product-journey/run-replay/prd-design-intake.md
+            prd_design_intake_count: 1
+            prd_design_intake_summary: "finding-3->stories/prd start"
             issue_count: 1
             fix_count: 0
             blocked_count: 0
@@ -156,8 +159,9 @@ turns:
       gh_agent_triage_evidence_count: 1
       gh_agent_missing_triage_count: 0
       stats_status: stats_derived
+      prd_design_intake_count: 1
       validation_status: valid
-    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, independent_verify=pass,[\\s\\S]*review=pass, validation=pass[\\s\\S]*Independent verify[\\s\\S]*pass: verified=1/1[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 1[\\s\\S]*Autonomous driver[\\s\\S]*replay / captured: evidence 5, issues 1[\\s\\S]*Marathon control[\\s\\S]*armed[\\s\\S]*Control artifact[\\s\\S]*autonomous-marathon-[\\s\\S]*control.json[\\s\\S]*GH-agent claims[\\s\\S]*claimed: claimed 1[\\s\\S]*GH-agent evidence[\\s\\S]*triage 1 attached / 0 missing[\\s\\S]*triage-[\\s\\S]*verdict.md[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 1, filed 1, fixed 1[\\s\\S]*Stats gate[\\s\\S]*pass: pass; current run scanned yes"
+    expect_view_matches: "RUN CREATED[\\s\\S]*PRD intake[\\s\\S]*1 routed[\\s\\S]*finding-3->stories/prd start[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, independent_verify=pass,[\\s\\S]*review=pass, validation=pass[\\s\\S]*Independent verify[\\s\\S]*pass: verified=1/1[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 1[\\s\\S]*Autonomous driver[\\s\\S]*replay / captured: evidence 5, issues 1[\\s\\S]*Marathon control[\\s\\S]*armed[\\s\\S]*Control artifact[\\s\\S]*autonomous-marathon-[\\s\\S]*control.json[\\s\\S]*GH-agent claims[\\s\\S]*claimed: claimed 1[\\s\\S]*GH-agent evidence[\\s\\S]*triage 1 attached / 0 missing[\\s\\S]*triage-[\\s\\S]*verdict.md[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 1, filed 1, fixed 1[\\s\\S]*Stats gate[\\s\\S]*pass: pass; current run scanned yes"
     expect_host_calls:
       - handler: host.run
         args: { call: autonomous_product_journey_marathon }

@@ -199,7 +199,10 @@ def main() -> int:
                   failures)
             check("weaknesses route to PRD/design during finalization",
                   finalized["weakness_route_count"] == 1
-                  and "finding-1->stories/prd" in finalized["weakness_route_summary"],
+                  and "finding-1->stories/prd" in finalized["weakness_route_summary"]
+                  and finalized["prd_design_intake_count"] == 1
+                  and "finding-1->stories/prd start" in finalized["prd_design_intake_summary"]
+                  and Path(finalized["prd_design_intake_path"]).exists(),
                   failures)
 
             missing_stats = run.autonomous_marathon(

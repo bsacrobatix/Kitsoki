@@ -113,6 +113,9 @@ world:
   weakness_count: { type: int, default: 0 }
   weakness_route_count: { type: int, default: 0 }
   weakness_route_summary: { type: string, default: "" }
+  prd_design_intake_path: { type: string, default: "" }
+  prd_design_intake_count: { type: int, default: 0 }
+  prd_design_intake_summary: { type: string, default: "" }
   issue_count: { type: int, default: 0 }
   fix_count: { type: int, default: 0 }
   blocked_count: { type: int, default: 0 }

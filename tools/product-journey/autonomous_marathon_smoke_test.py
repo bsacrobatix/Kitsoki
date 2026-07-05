@@ -182,6 +182,7 @@ def main() -> int:
         claim_comment_url = result.get("gh_agent_claims", [{}])[0].get("comment_url", "")
         closeout_comment_url = result.get("issue_closeouts", [{}])[0].get("comment_url", "")
         weakness_routes = run.read_json(run_dir / "weakness-routes.json")
+        prd_intake = run.read_json(run_dir / "prd-design-intake.json")
         deck_text = (run_dir / "deck.slidey.json").read_text(encoding="utf-8")
 
         check("marathon scoped run has one scenario",
@@ -225,6 +226,11 @@ def main() -> int:
         check("weakness routed to PRD/design review artifact",
               weakness_routes.get("summary", {}).get("routed") == 1
               and weakness_routes.get("items", [{}])[0].get("target_story") == "stories/prd"
+              and prd_intake.get("summary", {}).get("intake_count") == 1
+              and prd_intake.get("items", [{}])[0].get("story_intent") == "start"
+              and prd_intake.get("items", [{}])[0].get("persona_lens", {}).get("evidence_emphasis")
+              and "weakness-routes.md" in prd_intake.get("items", [{}])[0].get("story_slots", {}).get("upstream_paths", "")
+              and "prd-design-intake.md" in deck_text
               and "PRD/design routes" in deck_text,
               failures)
         check("mechanical stats count found/filed/fixed",

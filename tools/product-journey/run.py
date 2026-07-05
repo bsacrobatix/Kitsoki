@@ -837,6 +837,8 @@ def build_run_bundle(
             "driver_handoff_markdown": "driver-handoff.md",
             "weakness_routes": "weakness-routes.json",
             "weakness_routes_markdown": "weakness-routes.md",
+            "prd_design_intake": "prd-design-intake.json",
+            "prd_design_intake_markdown": "prd-design-intake.md",
             "review": "review.json",
             "deck": "deck.slidey.json",
         },
@@ -857,6 +859,8 @@ def build_run_bundle(
     driver_plan = build_driver_plan(run_json, evidence, execution_plan, transports)
     agent_brief = build_agent_brief(run_json, evidence, execution_plan)
     findings = {"run_id": run_id, "items": [], "summary": {"strength": 0, "weakness": 0, "issue": 0, "fix": 0}}
+    weakness_routes = build_weakness_routes(run_json, findings)
+    prd_design_intake = build_prd_design_intake(run_json, weakness_routes)
     driver_journal = build_driver_journal(run_id, [])
     scenario_outcomes = build_scenario_outcomes(run_json, evidence, findings)
     present_evidence = [
@@ -908,6 +912,10 @@ def build_run_bundle(
     write_json(run_dir / "metrics.json", metrics)
     write_json(run_dir / "bugs.json", bugs)
     write_json(run_dir / "findings.json", findings)
+    write_json(run_dir / "weakness-routes.json", weakness_routes)
+    (run_dir / "weakness-routes.md").write_text(render_weakness_routes(weakness_routes), encoding="utf-8")
+    write_json(run_dir / "prd-design-intake.json", prd_design_intake)
+    (run_dir / "prd-design-intake.md").write_text(render_prd_design_intake(prd_design_intake), encoding="utf-8")
     write_json(run_dir / "scenario-outcomes.json", scenario_outcomes)
     (run_dir / "scenario-outcomes.md").write_text(render_scenario_outcomes(scenario_outcomes), encoding="utf-8")
     write_json(run_dir / "evidence.json", evidence)
@@ -3535,6 +3543,108 @@ def render_weakness_routes(routes: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def build_prd_design_intake(run_json: dict, routes: dict) -> dict:
+    lens = persona_lens(run_json.get("persona", {}))
+    upstream_paths = [
+        "weakness-routes.md",
+        "scenario-outcomes.md",
+        "driver-journal.md",
+        "driver-plan.md",
+        "deck.slidey.json",
+    ]
+    items = []
+    for route in routes.get("items", []):
+        evidence_path = str(route.get("evidence_path", "")).strip()
+        item_upstream_paths = list(upstream_paths)
+        if evidence_path:
+            item_upstream_paths.append(evidence_path)
+        intake_id = f"prd-intake-{route.get('finding_id', len(items) + 1)}"
+        idea = str(route.get("suggested_idea", "")).strip()
+        items.append({
+            "intake_id": intake_id,
+            "finding_id": route.get("finding_id", ""),
+            "title": route.get("title", ""),
+            "summary": route.get("summary", ""),
+            "severity": route.get("severity", ""),
+            "project": route.get("project", run_json.get("project", {}).get("id", "")),
+            "scenario": route.get("scenario", ""),
+            "scenario_label": route.get("scenario_label", route.get("scenario", "")),
+            "persona": route.get("persona", run_json.get("persona", {}).get("id", "")),
+            "persona_lens": lens,
+            "target_pipeline": "prd-design",
+            "target_story": "stories/prd",
+            "story_intent": "start",
+            "story_slots": {
+                "idea": idea,
+                "upstream_paths": " ".join(item_upstream_paths),
+                "workdir": ".",
+            },
+            "handoff": (
+                "Open stories/prd and submit start with the provided idea and upstream_paths. "
+                "Keep the persona lens and evidence paths attached through the PRD brief."
+            ),
+            "evidence_path": evidence_path,
+            "upstream_paths": item_upstream_paths,
+        })
+    return {
+        "schema": "kitsoki/product-journey-prd-design-intake/v1",
+        "run_id": run_json.get("run_id", ""),
+        "created_at": now_utc(),
+        "target_pipeline": "prd-design",
+        "target_story": "stories/prd",
+        "summary": {
+            "intake_count": len(items),
+            "open_weaknesses": routes.get("summary", {}).get("open_weaknesses", len(items)),
+        },
+        "items": items,
+    }
+
+
+def render_prd_design_intake(intake: dict) -> str:
+    lines = [
+        "# Product Journey PRD/design intake",
+        "",
+        f"- Run: `{intake.get('run_id', '')}`",
+        f"- Target pipeline: `{intake.get('target_pipeline', 'prd-design')}`",
+        f"- Target story: `{intake.get('target_story', 'stories/prd')}`",
+        f"- Intake items: {intake.get('summary', {}).get('intake_count', 0)}",
+        "",
+    ]
+    items = intake.get("items", [])
+    if not items:
+        lines.append("No open observed weakness findings need PRD/design intake.")
+        return "\n".join(lines) + "\n"
+    lines.extend(["## Intake Items", ""])
+    for item in items:
+        lens = item.get("persona_lens", {})
+        slots = item.get("story_slots", {})
+        lines.extend([
+            f"### {item.get('intake_id', '')}: {item.get('title', '')}",
+            "",
+            f"- Finding: `{item.get('finding_id', '')}`",
+            f"- Scenario: `{item.get('scenario', '')}` ({item.get('scenario_label', '')})",
+            f"- Persona: `{item.get('persona', '')}`",
+            f"- Severity: `{item.get('severity', '')}`",
+            f"- Evidence: `{item.get('evidence_path', '')}`",
+            f"- Story: `{item.get('target_story', 'stories/prd')}` intent `{item.get('story_intent', 'start')}`",
+            f"- Upstream paths: `{slots.get('upstream_paths', '')}`",
+            "",
+            "Persona lens:",
+            "",
+            f"- Starting surface: {lens.get('starting_surface', '')}",
+            f"- First question: {lens.get('first_question', '')}",
+            f"- Evidence emphasis: {lens.get('evidence_emphasis', '')}",
+            f"- Escalation trigger: {lens.get('escalation_trigger', '')}",
+            f"- Finding bias: {lens.get('finding_bias', '')}",
+            "",
+            "PRD idea:",
+            "",
+            f"> {slots.get('idea', '')}",
+            "",
+        ])
+    return "\n".join(lines) + "\n"
+
+
 def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None) -> None:
     run_json = read_json(run_dir / "run.json")
     evidence = read_json(run_dir / "evidence.json")
@@ -3591,6 +3701,7 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
     }
     findings["summary"] = finding_summary
     weakness_routes = build_weakness_routes(run_json, findings)
+    prd_design_intake = build_prd_design_intake(run_json, weakness_routes)
     metrics = {
         "run_id": run_json["run_id"],
         "stage_count": len(run_json["stages"]),
@@ -3625,6 +3736,8 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
     write_json(run_dir / "findings.json", findings)
     write_json(run_dir / "weakness-routes.json", weakness_routes)
     (run_dir / "weakness-routes.md").write_text(render_weakness_routes(weakness_routes), encoding="utf-8")
+    write_json(run_dir / "prd-design-intake.json", prd_design_intake)
+    (run_dir / "prd-design-intake.md").write_text(render_prd_design_intake(prd_design_intake), encoding="utf-8")
     scenario_outcomes = build_scenario_outcomes(run_json, evidence, findings)
     write_json(run_dir / "scenario-outcomes.json", scenario_outcomes)
     (run_dir / "scenario-outcomes.md").write_text(render_scenario_outcomes(scenario_outcomes), encoding="utf-8")
@@ -3800,6 +3913,7 @@ def run_story_summary(run_dir: Path) -> dict:
     agent_brief = read_json(run_dir / "agent-brief.json") if (run_dir / "agent-brief.json").exists() else {}
     review = read_json(run_dir / "review.json") if (run_dir / "review.json").exists() else {}
     weakness_routes = read_json(run_dir / "weakness-routes.json") if (run_dir / "weakness-routes.json").exists() else {"summary": {}, "items": []}
+    prd_design_intake = read_json(run_dir / "prd-design-intake.json") if (run_dir / "prd-design-intake.json").exists() else {"summary": {}, "items": []}
     finding_summary = findings.get("summary", {})
     gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
     issue_closeout = findings.get("issue_closeout", {}) if isinstance(findings.get("issue_closeout", {}), dict) else {}
@@ -3851,6 +3965,13 @@ def run_story_summary(run_dir: Path) -> dict:
         "weakness_route_summary": "; ".join(
             f"{item.get('finding_id', '')}->{item.get('target_story', '')}"
             for item in weakness_routes.get("items", [])[:4]
+            if isinstance(item, dict)
+        ),
+        "prd_design_intake_path": str(run_dir / "prd-design-intake.md") if (run_dir / "prd-design-intake.md").exists() else "",
+        "prd_design_intake_count": prd_design_intake.get("summary", {}).get("intake_count", len(prd_design_intake.get("items", []))),
+        "prd_design_intake_summary": "; ".join(
+            f"{item.get('finding_id', '')}->{item.get('target_story', '')} {item.get('story_intent', '')}"
+            for item in prd_design_intake.get("items", [])[:4]
             if isinstance(item, dict)
         ),
         "missing_evidence_count": metrics.get("missing_evidence_count", handoff.get("status", {}).get("missing_evidence_count", 0)),
@@ -5758,6 +5879,8 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         "driver-handoff.md",
         "weakness-routes.json",
         "weakness-routes.md",
+        "prd-design-intake.json",
+        "prd-design-intake.md",
         "review.json",
         "deck.slidey.json",
     ]
@@ -5775,6 +5898,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     finding_items = findings.get("items", [])
     finding_kinds = {item.get("kind") for item in finding_items}
     weakness_routes = build_weakness_routes(run_json, findings)
+    prd_design_intake = build_prd_design_intake(run_json, weakness_routes)
     open_weakness_ids = {
         item.get("id") or f"weakness-{index}"
         for index, item in enumerate(open_weakness_findings(findings), start=1)
@@ -5785,6 +5909,18 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         if item.get("target_pipeline") == "prd-design" and item.get("target_story") == "stories/prd"
     }
     unrouted_weaknesses = sorted(open_weakness_ids - routed_weakness_ids)
+    intake_weakness_ids = {
+        item.get("finding_id", "")
+        for item in prd_design_intake.get("items", [])
+        if item.get("target_pipeline") == "prd-design"
+        and item.get("target_story") == "stories/prd"
+        and item.get("story_intent") == "start"
+        and item.get("story_slots", {}).get("idea")
+        and item.get("story_slots", {}).get("upstream_paths")
+        and item.get("persona_lens", {}).get("starting_surface")
+        and item.get("persona_lens", {}).get("evidence_emphasis")
+    }
+    missing_prd_intake = sorted(open_weakness_ids - intake_weakness_ids)
     # Legacy findings predate the origin field; treat them as observed so old
     # bundles do not retroactively fail. New runs stamp origin explicitly.
     observed_findings = [item for item in finding_items if item.get("origin", "observed") != "seeded"]
@@ -6007,6 +6143,16 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             ),
         },
         {
+            "id": "prd-design-intake",
+            "status": "pass" if not missing_prd_intake else "fail",
+            "summary": "Open observed weakness routes have PRD/design start-intent intake with persona lens and upstream evidence.",
+            "detail": (
+                f"missing: {', '.join(missing_prd_intake)}"
+                if missing_prd_intake
+                else f"intake={len(intake_weakness_ids)}/{len(open_weakness_ids)} target=stories/prd intent=start"
+            ),
+        },
+        {
             # GitHub filing gate: credible issue findings are not discussion
             # ready until the story-owned autonomous path has filed them.
             "id": "findings-filed",
@@ -6143,6 +6289,8 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     (run_dir / "scenario-outcomes.md").write_text(render_scenario_outcomes(scenario_outcomes), encoding="utf-8")
     write_json(run_dir / "weakness-routes.json", weakness_routes)
     (run_dir / "weakness-routes.md").write_text(render_weakness_routes(weakness_routes), encoding="utf-8")
+    write_json(run_dir / "prd-design-intake.json", prd_design_intake)
+    (run_dir / "prd-design-intake.md").write_text(render_prd_design_intake(prd_design_intake), encoding="utf-8")
     metrics["review_status"] = status
     metrics["review_passed_checks"] = passed
     metrics["review_total_checks"] = len(checks)
@@ -6362,6 +6510,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
     agent_brief = load_json_for_validation(run_dir / "agent-brief.json", issues)
     driver_handoff = load_json_for_validation(run_dir / "driver-handoff.json", issues)
     scenario_outcomes = load_json_for_validation(run_dir / "scenario-outcomes.json", issues)
+    prd_design_intake = load_json_for_validation(run_dir / "prd-design-intake.json", issues)
     review = load_json_for_validation(run_dir / "review.json", issues)
     deck = load_json_for_validation(run_dir / "deck.slidey.json", issues)
 
@@ -7095,6 +7244,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
     credible_findings = credible_issue_findings(findings_json)
     unfiled = unfiled_credible_findings(findings_json)
     weakness_routes = read_json(run_dir / "weakness-routes.json") if (run_dir / "weakness-routes.json").exists() else {}
+    prd_design_intake = prd_design_intake if isinstance(prd_design_intake, dict) else {}
     open_weakness_ids = {
         item.get("id") or f"weakness-{index}"
         for index, item in enumerate(open_weakness_findings(findings_json), start=1)
@@ -7107,6 +7257,19 @@ def validate_run_bundle(run_dir: Path) -> dict:
         and item.get("target_story") == "stories/prd"
     }
     missing_weakness_routes = sorted(open_weakness_ids - routed_weakness_ids)
+    intake_weakness_ids = {
+        item.get("finding_id", "")
+        for item in prd_design_intake.get("items", [])
+        if isinstance(item, dict)
+        and item.get("target_pipeline") == "prd-design"
+        and item.get("target_story") == "stories/prd"
+        and item.get("story_intent") == "start"
+        and item.get("story_slots", {}).get("idea")
+        and item.get("story_slots", {}).get("upstream_paths")
+        and item.get("persona_lens", {}).get("starting_surface")
+        and item.get("persona_lens", {}).get("evidence_emphasis")
+    }
+    missing_prd_intake = sorted(open_weakness_ids - intake_weakness_ids)
     if missing_weakness_routes:
         add_validation_issue(
             issues,
@@ -7122,6 +7285,22 @@ def validate_run_bundle(run_dir: Path) -> dict:
             "weakness-routing",
             "weakness-routes.json summary is stale or inconsistent",
             f"summary.routed={weakness_routes.get('summary', {}).get('routed')}, actual={len(routed_weakness_ids)}",
+        )
+    if missing_prd_intake:
+        add_validation_issue(
+            issues,
+            "error",
+            "prd-design-intake",
+            "Open observed weakness findings require PRD/design intake artifacts with persona lens and story start slots",
+            ", ".join(missing_prd_intake),
+        )
+    if prd_design_intake and prd_design_intake.get("summary", {}).get("intake_count") != len(intake_weakness_ids):
+        add_validation_issue(
+            issues,
+            "error",
+            "prd-design-intake",
+            "prd-design-intake.json summary is stale or inconsistent",
+            f"summary.intake_count={prd_design_intake.get('summary', {}).get('intake_count')}, actual={len(intake_weakness_ids)}",
         )
     if unfiled:
         add_validation_issue(
@@ -9360,15 +9539,20 @@ def render_deck(
         if item.get("github_issue", {}).get("url")
     ]
     weakness_routes = build_weakness_routes(run_json, findings or {"items": []})
+    prd_design_intake = build_prd_design_intake(run_json, weakness_routes)
     weakness_route_lines = [
         (
             f"{item.get('finding_id', '')}: {item.get('title', '')} -> "
-            f"{item.get('target_story', 'stories/prd')} ({item.get('scenario', '')}, {item.get('persona', '')})"
+            f"{item.get('target_story', 'stories/prd')} start ({item.get('scenario', '')}, {item.get('persona', '')})"
         )
         for item in weakness_routes.get("items", [])
     ]
     if weakness_route_lines:
-        weakness_routes_body = "\n".join(weakness_route_lines[:12])
+        weakness_routes_body = "\n".join([
+            "Intake artifact: prd-design-intake.md",
+            f"Intake items: {prd_design_intake.get('summary', {}).get('intake_count', 0)}",
+            *weakness_route_lines[:12],
+        ])
     else:
         weakness_routes_body = "No open observed weakness findings need PRD/design routing."
     gh_agent = findings.get("gh_agent", {}) if isinstance(findings, dict) and isinstance(findings.get("gh_agent", {}), dict) else {}

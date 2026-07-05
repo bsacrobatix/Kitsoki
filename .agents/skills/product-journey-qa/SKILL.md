@@ -141,8 +141,9 @@ Then hand it to the reusable driver:
    `kitsoki gitops issue-state-cache` / `host.gh.ticket`, not raw `gh`.
    Open `weakness` findings are routed to the PRD/design path instead of the
    bugfix queue: review regenerates `weakness-routes.json`,
-   `weakness-routes.md`, and a `PRD/design routes` deck scene pointing each
-   observed weakness at `stories/prd` with persona, scenario, and evidence
+   `weakness-routes.md`, `prd-design-intake.json`, `prd-design-intake.md`,
+   and a `PRD/design routes` deck scene pointing each observed weakness at
+   `stories/prd` with a `start` intent, persona lens, scenario, and evidence
    context attached.
    For a deterministic no-operator marathon, submit
    `autonomous_marathon scenarios=<ids> autonomous_driver_mode=replay
