@@ -9,7 +9,7 @@
 # {ok: false} for real. The verifying room's post-bind emit fires apply_failed,
 # we return to `landing`, last_error carries the script's own reason, captured is
 # NOT incremented, and the proposed plan stays bound so the operator can refine
-# and re-apply. No LLM, no real `gh` call.
+# and re-apply. No LLM, no live GitHub call.
 #
 # MUTATION TEST: break the `verify_ok: ok` bind in rooms/verifying.yaml (the
 # verify-script invoke's bind:) — e.g. bind a literal, or drop the bind — and

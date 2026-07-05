@@ -2,7 +2,10 @@ package starlark_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -208,6 +211,55 @@ def main(ctx):
 	// Exit is an int64 after conversion; just assert it is present and an integer.
 	if _, ok := out["exit"].(int64); !ok {
 		t.Errorf("probe exit: got %T %v", out["exit"], out["exit"])
+	}
+}
+
+func TestProbe_GHIssueListUsesNativeGitHubAPI(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("PATH", t.TempDir())
+
+	var sawRequest bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawRequest = true
+		if r.Method != http.MethodGet || r.URL.Path != "/search/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		q := r.URL.Query().Get("q")
+		if !strings.Contains(q, "repo:owner/repo") || !strings.Contains(q, "is:issue") {
+			t.Fatalf("query = %q", q)
+		}
+		if got := r.URL.Query().Get("per_page"); got != "200" {
+			t.Fatalf("per_page = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{{
+			"number": 7,
+			"title":  "Native issue",
+			"state":  "open",
+		}}}); err != nil {
+			t.Fatal(err)
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := starlarkhost.SetGitHubProbeAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+
+	in := starlarkhost.NewProductionInspector(t.TempDir())
+	res, err := in.Probe(context.Background(), "gh.issue.list", []string{"owner/repo"})
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if !sawRequest {
+		t.Fatal("expected native GitHub API request")
+	}
+	if res.Exit != 0 {
+		t.Fatalf("Exit = %d, out = %q", res.Exit, res.Out)
+	}
+	if !strings.Contains(res.Out, `"number":7`) || !strings.Contains(res.Out, `"title":"Native issue"`) {
+		t.Fatalf("Out = %q", res.Out)
 	}
 }
 

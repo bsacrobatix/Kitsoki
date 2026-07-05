@@ -215,7 +215,7 @@ ctx.probe(name, args=[])                    # -> {exit: int, out: string} (allow
 `ctx.fs` and `ctx.probe` are the **filesystem + allow-listed-process boundary**
 — the sibling of `ctx.http` for the working tree and a few curated probes. They
 exist so a glue script can assert against reality ("does this file exist", "does
-`gh issue list` show ≥ N issues") and write small deterministic artifacts while
+GitHub list ≥ N issues") and write small deterministic artifacts while
 keeping the record/replay contract intact. `ctx.env` is still absent — there is
 deliberately no environment surface.
 
@@ -228,13 +228,13 @@ deliberately no environment surface.
   returns the normalized path. There is no delete, chmod, rename, shell,
   environment, or clock surface.
 - `ctx.probe(name, args=[])` is an **allow-list, not a shell.** `name` must be on
-  a fixed global vocabulary of read-only probes; each maps to a static argv
-  template exec'd directly (no shell, no word-splitting), with `args` substituted
-  positionally. The current allow-list: `gh.issue.list`, `git.status`,
-  `git.ls_files` (see `probeAllowList` in `internal/host/starlark/inspect.go`). A
-  non-zero exit is **not** an error — it is returned in the result's `exit` so a
-  script can branch on a clean failure, exactly like a non-2xx HTTP status; an
-  unknown name is an error.
+  a fixed global vocabulary of read-only probes. GitHub probes such as
+  `gh.issue.list` use native GitHub API calls; local VCS probes such as
+  `git.status` and `git.ls_files` map to static argv templates exec'd directly
+  (no shell, no word-splitting), with `args` substituted positionally (see
+  `internal/host/starlark/inspect.go`). A non-zero exit is **not** an error — it
+  is returned in the result's `exit` so a script can branch on a clean failure,
+  exactly like a non-2xx HTTP status; an unknown name is an error.
 
 All filesystem/probe calls funnel through one `Inspector` interface (`internal/host/starlark/inspect.go`)
 — the inspection-side analogue of `HTTPClient`. It is injected via
