@@ -1056,6 +1056,15 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		} else if hit {
 			return outcome, nil
 		}
+		// Room-local conversational sinks are deterministic and authored
+		// explicitly on the active state. Keep them available even when the
+		// broader semantic stack is disabled so discovery/chat rooms do not
+		// fall through to the main-turn LLM for plain prose.
+		if outcome, hit, defErr := o.routeViaDefaultIntent(ctx, sid, input); defErr != nil {
+			return nil, defErr
+		} else if hit {
+			return outcome, nil
+		}
 	}
 
 	// Full deterministic semantic-routing stack: exact match (via the semroute
