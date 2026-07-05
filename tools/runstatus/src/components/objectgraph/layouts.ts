@@ -34,8 +34,11 @@ export const layouts: GraphLayout[] = [
       name: "fcose",
       animate: false,
       quality: "proof",
-      nodeSeparation: 90,
-      idealEdgeLength: 120,
+      // Node separation is generous because labels now wrap to multiple
+      // lines below each node (see cytoscapeStyle's text-wrap) rather than
+      // eliding to one line — wrapped labels need vertical room.
+      nodeSeparation: 120,
+      idealEdgeLength: 140,
     },
   },
   {
@@ -44,8 +47,8 @@ export const layouts: GraphLayout[] = [
     options: {
       name: "cola",
       animate: false,
-      nodeSpacing: 24,
-      edgeLength: 140,
+      nodeSpacing: 34,
+      edgeLength: 160,
       handleDisconnected: true,
     },
   },
@@ -56,8 +59,8 @@ export const layouts: GraphLayout[] = [
     options: {
       name: "cola",
       animate: false,
-      nodeSpacing: 28,
-      edgeLength: 160,
+      nodeSpacing: 38,
+      edgeLength: 180,
       handleDisconnected: true,
       alignment: undefined,
     },
@@ -69,7 +72,7 @@ export const layouts: GraphLayout[] = [
       name: "klay",
       klay: {
         direction: "RIGHT",
-        spacing: 40,
+        spacing: 55,
         thoroughness: 7,
       },
     },
@@ -80,7 +83,7 @@ export const layouts: GraphLayout[] = [
     options: {
       name: "breadthfirst",
       animate: false,
-      spacingFactor: 1.4,
+      spacingFactor: 1.7,
       circle: true,
     },
   },
