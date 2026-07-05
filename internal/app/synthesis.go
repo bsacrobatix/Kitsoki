@@ -249,6 +249,8 @@ func synthesizedRootHosts() []string {
 		// Iface-backed handlers (dev-story defaults; rebindable via bindings).
 		"host.local_files.ticket",
 		"host.gh.ticket",
+		"host.gh.ticket.comment",
+		"host.gh.ticket.transition",
 		"host.git",
 		"host.local",
 		"host.git_worktree",

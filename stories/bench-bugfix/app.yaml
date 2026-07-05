@@ -20,6 +20,8 @@ app:
 
 hosts:
   - host.local_files.ticket
+  - host.gh.ticket.comment
+  - host.gh.ticket.transition
   - host.git
   - host.local
   - host.git_worktree
@@ -47,6 +49,7 @@ imports:
       ticket_id:       "{{ world.ticket_id }}"
       ticket_title:    "{{ world.ticket_title }}"
       ticket_url:      "{{ world.ticket_url }}"
+      ticket_repo:     "{{ world.ticket_repo }}"
       thread:          "{{ world.thread }}"
       workspace_id:    "{{ world.workspace_id }}"
       workdir:         "{{ world.workdir }}"
@@ -81,6 +84,7 @@ world:
   ticket_id:       { type: string, default: "" }
   ticket_title:    { type: string, default: "" }
   ticket_url:      { type: string, default: "" }
+  ticket_repo:     { type: string, default: "" }
   thread:          { type: string, default: "" }
   workspace_id:    { type: string, default: "" }
   workdir:         { type: string, default: "" }

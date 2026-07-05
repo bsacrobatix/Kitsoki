@@ -210,6 +210,7 @@ states:
                 body:     "{{ world.done_artifact.summary_markdown }}"
                 phase_id: "done_{{ world.ticket_id }}"
             - invoke: iface.ticket.comment
+              when: "world.ticket_repo == ''"
               with:
                 id: "{{ world.ticket_id }}"
                 thread: "{{ world.thread }}"
@@ -230,9 +231,39 @@ states:
                   verified:
                     - {{ (world.validate_artifact.summary_title ?? '') != '' ? world.validate_artifact.summary_title : "Validation completed" }}
                   -->
+            - invoke: host.gh.ticket.comment
+              when: "world.ticket_repo != ''"
+              with:
+                repo: "{{ world.ticket_repo }}"
+                id: "{{ world.ticket_url != '' ? world.ticket_url : world.ticket_id }}"
+                thread: "{{ world.thread }}"
+                body: |
+                  Fixed in:
+
+                  - `{{ world.fixed_in_commit != '' ? world.fixed_in_commit : "unknown" }}` {{ (world.done_artifact.summary_title ?? '') != '' ? world.done_artifact.summary_title : "Bug-fix close-out" }}
+
+                  Verification:
+
+                  - {{ (world.validate_artifact.summary_title ?? '') != '' ? world.validate_artifact.summary_title : "Validation completed" }}
+
+                  <!-- kitsoki-fixed-in
+                  commits:
+                    - {{ world.fixed_in_commit != '' ? world.fixed_in_commit : "unknown" }}
+                  branch: {{ world.base_branch != '' ? world.base_branch : "main" }}
+                  workdir: {{ world.workdir }}
+                  verified:
+                    - {{ (world.validate_artifact.summary_title ?? '') != '' ? world.validate_artifact.summary_title : "Validation completed" }}
+                  -->
             - invoke: iface.ticket.transition
+              when: "world.ticket_repo == ''"
               with:
                 id: "{{ world.ticket_id }}"
+                to: "resolved"
+            - invoke: host.gh.ticket.transition
+              when: "world.ticket_repo != ''"
+              with:
+                repo: "{{ world.ticket_repo }}"
+                id: "{{ world.ticket_url != '' ? world.ticket_url : world.ticket_id }}"
                 to: "resolved"
             - set:
                 status:        "fixed"

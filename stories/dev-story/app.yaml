@@ -1515,6 +1515,7 @@ imports:
       ticket_id:       "{{ world.ticket_id }}"
       ticket_title:    "{{ world.ticket_title }}"
       ticket_url:      "{{ world.ticket_url }}"
+      ticket_repo:     "{{ world.ticket_repo }}"
       thread:          "{{ world.thread }}"
       workspace_id:    "{{ world.workspace_id }}"
       workdir:         "{{ world.workdir }}"

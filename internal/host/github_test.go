@@ -329,6 +329,38 @@ func TestGitHubTicket_Comment_Happy(t *testing.T) {
 	}
 }
 
+func TestGitHubTicket_Comment_AcceptsIssueURL(t *testing.T) {
+	fr := newFakeRunner()
+	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
+	fr.responses["gh issue comment 117 --repo bsacrobatix/Kitsoki"] = fakeResp{
+		stdout: "https://github.com/bsacrobatix/Kitsoki/issues/117#issuecomment-1\n",
+	}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
+		"op":   "comment",
+		"id":   "https://github.com/bsacrobatix/Kitsoki/issues/117",
+		"body": "Fixed in abc123.",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	found := false
+	for _, c := range fr.calls {
+		if strings.Contains(c, "issue comment 117 --repo bsacrobatix/Kitsoki") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected issue URL to provide repo + number, got: %v", fr.calls)
+	}
+}
+
 func TestGitHubTicket_CommentReceivesCLIExecEnv(t *testing.T) {
 	var seen []map[string]string
 	restore := host.SetExecRunnerForTest(func(ctx context.Context, _ string, name string, args ...string) (string, string, int, error) {
@@ -463,6 +495,36 @@ func TestGitHubTicket_Transition_CloseHappy(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected `gh issue close 42` call, got: %v", fr.calls)
+	}
+}
+
+func TestGitHubTicket_Transition_AcceptsIssueURL(t *testing.T) {
+	fr := newFakeRunner()
+	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
+	fr.responses["gh issue close 117 --repo bsacrobatix/Kitsoki"] = fakeResp{}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
+		"op": "transition",
+		"id": "https://github.com/bsacrobatix/Kitsoki/issues/117",
+		"to": "resolved",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	found := false
+	for _, c := range fr.calls {
+		if strings.Contains(c, "issue close 117 --repo bsacrobatix/Kitsoki") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected issue URL to provide repo + number, got: %v", fr.calls)
 	}
 }
 

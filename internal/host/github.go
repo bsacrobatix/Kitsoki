@@ -28,6 +28,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -470,14 +471,23 @@ func ghLabelNames(raw map[string]any) []string {
 	return out
 }
 
-// splitIssueID parses an issue ref.  Accepts "owner/repo#42" → ("owner/repo",
-// "42"); a bare "42" → ("", "42"); a #-prefixed "#42" → ("", "42").
+// splitIssueID parses an issue ref.  Accepts:
+//   - "owner/repo#42" → ("owner/repo", "42")
+//   - "https://github.com/owner/repo/issues/42" → ("owner/repo", "42")
+//   - bare "42" or "#42" → ("", "42")
+//
 // Anything that doesn't fit either pattern returns ("", id) so gh's own
 // resolution can take a swing at it.
 func splitIssueID(id string) (string, string) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", ""
+	}
+	if u, err := url.Parse(id); err == nil && strings.EqualFold(u.Host, "github.com") {
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) >= 4 && parts[2] == "issues" && parts[3] != "" {
+			return parts[0] + "/" + parts[1], parts[3]
+		}
 	}
 	if hash := strings.LastIndex(id, "#"); hash >= 0 {
 		return strings.TrimSuffix(id[:hash], "/"), strings.TrimPrefix(id[hash+1:], "#")
