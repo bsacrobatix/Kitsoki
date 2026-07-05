@@ -1,16 +1,14 @@
 // Command group `kitsoki kit` — S2 (.context/kits-implementation-plan.md):
-// resolve, lock, list, and (minimally) verify kit dependencies, plus the
-// `kit dev` local-checkout override for contributing to a kit.
-//
-// `kit verify` and `kit update` are deliberately minimal stubs here — S4
-// (conformance) and S7 (lifecycle) build them out for real. They exist as
-// real CLI verbs with honest, documented behaviour rather than TODO-only
-// placeholders: verify does a real (if narrow) hash-consistency check;
-// update prints that it isn't implemented yet.
+// resolve, lock, list, and dev-override kit dependencies. `kit verify` is
+// S4's full contract-check + no-LLM conformance-flow runner (it supersedes
+// the narrower lockfile-hash stub S2 originally shipped here — see PR #126
+// and #127's flagged decisions). `kit update` remains a documented stub;
+// S7 (lifecycle) builds it out for real.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	stdpath "path"
@@ -24,6 +22,8 @@ import (
 	"kitsoki/internal/kitgit"
 	"kitsoki/internal/kitlock"
 	"kitsoki/internal/kitver"
+	"kitsoki/internal/kitverify"
+	"kitsoki/internal/testrunner"
 )
 
 // kitCmd groups the kit-dependency lifecycle commands.
@@ -41,12 +41,12 @@ A kit source is one of:
 
 'kit add' resolves a source, checks any --version constraint against the
 resolved kit's own app.version:, and records (source, version, commit,
-tree-hash) in the lockfile. 'kit list' reads it back. 'kit verify' does a
-narrow real check (lockfile present, resolved content still hashes to what's
-locked) — full contract/conformance checking is S4. 'kit update' is a stub —
-semver-gated re-resolution is S7. 'kit dev' overrides one kit's resolution
-with a local checkout for development, generalizing the --kitsoki-repo /
-$KITSOKI_REPO override to a single named kit (internal/kitdev).`,
+tree-hash) in the lockfile. 'kit list' reads it back. 'kit verify' runs the
+full S4 contract-check + no-LLM conformance-flow suite against a kit
+directory. 'kit update' is a stub — semver-gated re-resolution is S7.
+'kit dev' overrides one kit's resolution with a local checkout for
+development, generalizing the --kitsoki-repo / $KITSOKI_REPO override to a
+single named kit (internal/kitdev).`,
 	}
 	cmd.AddCommand(kitAddCmd())
 	cmd.AddCommand(kitListCmd())
@@ -156,81 +156,138 @@ func kitListCmd() *cobra.Command {
 	return cmd
 }
 
+// kitVerifyCmd implements `kitsoki kit verify <kit-dir>` (S4).
 func kitVerifyCmd() *cobra.Command {
-	var target string
+	var (
+		jsonOut       bool
+		recordingPath string
+		failFast      bool
+		verbose       bool
+	)
+
 	cmd := &cobra.Command{
-		Use:   "verify",
-		Short: "Check the lockfile exists and resolved kits still hash-match (minimal stub — full contract checks are S4)",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			targetAbs, err := filepath.Abs(target)
+		Use:   "verify <kit-dir>",
+		Short: "Run a kit's standalone contract checks and no-LLM conformance flow suite",
+		Long: `Loads the kit.yaml manifest at <kit-dir> and, for each story it
+provides:
+
+  - checks that every exit-firing transition sets the world keys its
+    exits.<name>.requires: declares (standalone — no importer needed)
+  - checks that every name in exports.intents: is actually defined in
+    intents:
+  - checks that every host_interfaces.<name>.default's declared operation
+    input/output shapes match either its starlark sidecar (when
+    host_bindings bound it to a script) or a registered Go handler schema
+    (internal/host/opschema) — an unregistered handler is skipped, not
+    flagged
+
+It then runs every glob in conformance.flows: (kit-root-relative) as a
+no-LLM flow/cassette suite via the same runner as ` + "`kitsoki test flows`" + `,
+and — when the manifest declares extends: dependencies — notes that a base
+kit's own conformance suite would be re-run too, given a resolver (S2's
+kit-resolution/lockfile machinery is not wired into this command yet; see
+the PR description's flagged decisions).
+
+Exit codes:
+  0  every check and every flow passed
+  1  a contract check failed or a flow failed
+  2  fatal error (bad kit.yaml, bad glob, ...)`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			kitDir := args[0]
+			opts := kitverify.Options{
+				ImportResolver: buildImportResolver(),
+				Flow: testrunner.FlowOptions{
+					RecordingOverride: recordingPath,
+					FailFast:          failFast,
+					Verbose:           verbose,
+				},
+			}
+			report, err := kitverify.VerifyKit(kitDir, opts)
 			if err != nil {
-				return fmt.Errorf("resolve --target: %w", err)
-			}
-			lockPath := kitlock.Path(targetAbs)
-			out := cmd.OutOrStdout()
-			if !kitlock.Exists(lockPath) {
-				return fmt.Errorf("no lockfile at %s — run `kitsoki kit add` first", lockPath)
-			}
-			lf, err := kitlock.Load(lockPath)
-			if err != nil {
-				return err
-			}
-			if len(lf.Kits) == 0 {
-				fmt.Fprintln(out, "lockfile present, no kits locked — nothing to verify")
-				return nil
+				fmt.Fprintf(os.Stderr, "kitsoki kit verify: %v\n", err)
+				os.Exit(2)
 			}
 
-			var mismatches []string
-			for _, kn := range lf.SortedNames() {
-				e := lf.Kits[kn]
-				status, verifyErr := verifyEntry(kn, e, targetAbs)
-				if verifyErr != nil {
-					mismatches = append(mismatches, fmt.Sprintf("%s: %v", kn, verifyErr))
-					fmt.Fprintf(out, "%s: ERROR (%v)\n", kn, verifyErr)
-					continue
+			out := cmd.OutOrStdout()
+			if jsonOut {
+				enc := json.NewEncoder(out)
+				enc.SetIndent("", "  ")
+				if err := enc.Encode(report); err != nil {
+					return fmt.Errorf("encode report: %w", err)
 				}
-				if status {
-					fmt.Fprintf(out, "%s: OK\n", kn)
-				} else {
-					mismatches = append(mismatches, kn)
-					fmt.Fprintf(out, "%s: MISMATCH (resolved content no longer matches the lockfile)\n", kn)
-				}
+			} else {
+				printVerifyReport(out, report)
 			}
-			if len(mismatches) > 0 {
-				return fmt.Errorf("kit verify: %d kit(s) failed: %s", len(mismatches), strings.Join(mismatches, ", "))
+
+			if !report.OK() {
+				os.Exit(1)
 			}
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&target, "target", ".", "project root the lockfile is read from")
+
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the report as JSON instead of plain text")
+	cmd.Flags().StringVar(&recordingPath, "recording", "", "override the recording path declared in conformance flow fixtures")
+	cmd.Flags().BoolVar(&failFast, "fail-fast", false, "stop each flow suite at its first failure")
+	cmd.Flags().BoolVar(&verbose, "v", false, "verbose per-turn flow output")
+
 	return cmd
 }
 
-// verifyEntry re-derives the tree hash for a locked kit and compares it to
-// what's recorded. For a git-sourced kit it checks the (offline) content
-// cache only — it does not re-fetch, matching the "narrow real check, not
-// full conformance" scope this stub commits to.
-func verifyEntry(name string, e *kitlock.Entry, targetDir string) (ok bool, err error) {
-	if e.Commit != "" {
-		res, cached, cacheErr := kitgit.CachedResult(e.Commit)
-		if cacheErr != nil {
-			return false, cacheErr
+// printVerifyReport renders a kitverify.Report as the plain-text default
+// output, mirroring validateCmd's ✓/✗ convention.
+func printVerifyReport(out interface{ Write([]byte) (int, error) }, report *kitverify.Report) {
+	status := "✓"
+	if !report.OK() {
+		status = "✗"
+	}
+	fmt.Fprintf(out, "%s %s (%s)\n", status, report.Kit, report.Dir)
+
+	if len(report.ParamIssues) > 0 {
+		fmt.Fprintln(out, "  parameters:")
+		for _, issue := range report.ParamIssues {
+			fmt.Fprintf(out, "    - %s\n", issue)
 		}
-		if !cached {
-			return false, fmt.Errorf("commit %s not present in the local git cache (re-run `kitsoki kit add %s`)", e.Commit, e.Source)
+	}
+
+	for _, s := range report.Stories {
+		st := "✓"
+		if len(s.Issues) > 0 {
+			st = "✗"
 		}
-		return res.TreeHash == e.TreeHash, nil
+		fmt.Fprintf(out, "  %s story %s\n", st, s.Story)
+		for _, issue := range s.Issues {
+			fmt.Fprintf(out, "      - %s\n", issue)
+		}
 	}
-	appPath, resolveErr := app.ResolveSource(e.Source, targetDir, buildImportResolver())
-	if resolveErr != nil {
-		return false, resolveErr
+
+	for _, f := range report.Flows {
+		switch {
+		case f.Err != nil:
+			fmt.Fprintf(out, "  ✗ flows %s: %v\n", f.Pattern, f.Err)
+		case f.Report == nil:
+			fmt.Fprintf(out, "  · flows %s: no fixtures matched\n", f.Pattern)
+		default:
+			st := "✓"
+			if f.Report.Failed > 0 {
+				st = "✗"
+			}
+			fmt.Fprintf(out, "  %s flows %s: %d passed, %d failed (app %s)\n", st, f.Pattern, f.Report.Passed, f.Report.Failed, f.AppPath)
+		}
 	}
-	treeHash, hashErr := kitgit.DirTreeHash(filepath.Dir(appPath))
-	if hashErr != nil {
-		return false, hashErr
+
+	for _, e := range report.Extends {
+		if e.Err != nil {
+			fmt.Fprintf(out, "  · extends %s: skipped (%v)\n", e.Kit, e.Err)
+			continue
+		}
+		st := "✓"
+		if e.Report != nil && !e.Report.OK() {
+			st = "✗"
+		}
+		fmt.Fprintf(out, "  %s extends %s: re-ran base kit's own conformance suite\n", st, e.Kit)
 	}
-	return treeHash == e.TreeHash, nil
 }
 
 func kitUpdateCmd() *cobra.Command {
