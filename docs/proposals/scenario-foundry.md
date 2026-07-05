@@ -187,10 +187,10 @@ the compiler against the same (redacted) mining output and diffing.
       hand-verify turn/outcome extraction against the raw JSONL
 
 ## 2. Scenario IR + first calibration set
-- [ ] 2.1 Define the `kind: conversation` IR schema (persona, goal,
+- [x] 2.1 Define the `kind: conversation` IR schema (persona, goal,
       turns incl. correction/abandonment fields, expected_effects,
       provenance)
-- [ ] 2.2 Scenario compiler: mined intents + outcomes + satisfaction →
+- [x] 2.2 Scenario compiler: mined intents + outcomes + satisfaction →
       IR documents, scoped to goal-bounded spans
 - [ ] 2.3 Redaction gate: every mined scenario passes `redact.py`'s
       ladder before it can be committed; unredacted IR stays local/

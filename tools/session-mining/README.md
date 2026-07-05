@@ -544,6 +544,8 @@ schema/report.schema.json     JSON Schema for one contributor's report (aggregat
 schema/aggregate.schema.json  JSON Schema for a merged report (aggregate.py output; re-aggregatable)
 schema/intents.schema.json    JSON Schema for REPORT 1 (the intents catalog)
 schema/analysis.schema.json   JSON Schema for REPORT 2 (the per-instance recipes)
+schema/scenario_ir.schema.json  JSON Schema for the SCENARIO FOUNDRY `kind: conversation` IR (docs/proposals/scenario-foundry.md); see examples/scenario-ir.example.json
+scenario_compiler.py    SCENARIO FOUNDRY — compiles emit.py --outcomes' intents.json+analysis.json into one kind:conversation IR document per goal-bounded, calibration-worthy span (corrections folded in as extra turns, unresolved endings marked abandoned); pure/deterministic, no LLM
 aggregate.py            merge + score + promotion gate (stdlib only; associative)
 intents.workflow.js     INTENT MINING step B — the one strictly-validated agent pass (schema-constrained)
 intent_common.py        shared helpers for the intent-mining spine (trace/vocab/io primitives)
@@ -558,6 +560,7 @@ tests/                  fixture + no-LLM end-to-end tests (intent C->F pipeline;
 examples/report.example.json   a real redacted report (reference run)
 examples/merge/         two reports + their merged output (worked aggregation)
 examples/git-ops/       STORY COVERAGE MINING flagship — committed corpus + run.sh demo + worked coverage.worked.md (the worked answer to "how does coverage mining work?")
+examples/scenario-ir.example.json  documented example of the kind:conversation scenario IR (hand-written, matches docs/proposals/scenario-foundry.md#scenario-ir)
 ```
 
 ## Limitations
