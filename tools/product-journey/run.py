@@ -5093,6 +5093,7 @@ def write_autonomous_marathon_control(
         },
         "human_role": "review outcomes and set budget; no issue filing, fix dispatch, close-out, or stats glue",
         "final_gates": [
+            "autonomous_watchdog",
             "autonomous_fix",
             "review",
             "validate",

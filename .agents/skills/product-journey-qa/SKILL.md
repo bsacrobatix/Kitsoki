@@ -117,7 +117,8 @@ Then hand it to the reusable driver:
    intent.
 6. For the full issue-to-fix loop, submit the watchdog gate first:
    `autonomous_watchdog`. It fails stale standing-loop heartbeats closed before
-   filing or fixing can spend anything.
+   filing or fixing can spend anything. The story rejects `autonomous_fix`
+   unless this watchdog gate has passed.
 7. Then submit the story-owned issue-to-fix gate:
    `autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<url>`.
    This files credible `issue` findings with uploaded evidence, enqueues and
