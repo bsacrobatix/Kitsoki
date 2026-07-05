@@ -210,6 +210,7 @@ func AgentAskHandler(ctx context.Context, args map[string]any) (Result, error) {
 		tools = rewriteToolsForBashMCP(tools)
 	}
 
+	agent = applyNoToolsContract(agent, policy)
 	cliArgs := buildBaseCLIArgs(ctx, sysprompt.Ask, args, agent)
 	cliArgs = setPermissionMode(cliArgs, policy.CLIMode)
 	cliArgs = appendDisallowedToolsFlag(cliArgs, policy.DeniedTools)

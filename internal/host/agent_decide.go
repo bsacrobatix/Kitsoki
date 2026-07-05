@@ -161,6 +161,7 @@ func agentDecideHandlerOnce(ctx context.Context, args map[string]any) (Result, e
 		ReadOnlyDeniedTools: readOnlyAgentVerbDeniedTools,
 	})
 	tools := policy.AllowedTools
+	agent = applyNoToolsContract(agent, policy)
 	// Build base CLI args.
 	cliArgs := buildBaseCLIArgs(ctx, sysprompt.Decide, args, agent)
 	cliArgs = setPermissionMode(cliArgs, policy.CLIMode)

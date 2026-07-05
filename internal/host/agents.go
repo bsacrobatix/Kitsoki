@@ -775,6 +775,35 @@ func enforceToolbox(ctx context.Context, args map[string]any, agent Agent, fallb
 	}
 }
 
+// noToolsDispatchContract is appended to the persona of a dispatch whose
+// resolved toolset is EMPTY. On the claude backend the empty allowlist is
+// mechanically enforced; on backends whose intrinsic tools cannot be removed
+// (codex must run with the approvals/sandbox bypass so the validator submit
+// MCP tool can execute, and its shell survives that), this contract is the
+// enforcement. Live-proven cost: a tools:[] judge on codex re-ran the full
+// test suite its validator had just run, tripling the call's marginal tokens
+// (see .context/llm-usage-audit-bugfix-qs1.md).
+const noToolsDispatchContract = "TOOLING CONTRACT: this dispatch grants you NO workspace tools. " +
+	"Do not run shell commands, read or write files, or explore the repository — " +
+	"any workspace tool use violates your toolbox declaration and wastes the call. " +
+	"Everything you need is already in the prompt; act on the provided material " +
+	"alone and submit your structured answer directly (the submit/question tools " +
+	"provided to you are the only permitted tool calls)."
+
+// applyNoToolsContract returns the agent with the no-tools contract folded
+// into its persona when the enforced toolset is empty. Static text appended
+// to the persona (task) layer, so prompt-prefix stability is preserved.
+func applyNoToolsContract(agent Agent, policy ToolboxEnforcement) Agent {
+	if len(policy.AllowedTools) != 0 {
+		return agent
+	}
+	if agent.SystemPrompt != "" {
+		agent.SystemPrompt += "\n\n"
+	}
+	agent.SystemPrompt += noToolsDispatchContract
+	return agent
+}
+
 func (p ToolboxEnforcement) WithAllowed(tools []string) ToolboxEnforcement {
 	p.AllowedTools = dedupeStrings(tools)
 	return p
