@@ -60,86 +60,59 @@
   margin: 0 0 14px;
 }
 
+/* One compact line per layer (Actors/Site/Capabilities/Delta/Proof — a
+ * small fixed set, not open-ended) instead of the old per-layer card that
+ * repeated the type-count breakdown already shown just below in the object
+ * picker's type-filter row once a layer is selected. flex-wrap (not
+ * overflow-x scroll) since five short pills fit one row at desktop width;
+ * they only wrap at narrow viewports, which is still fully visible rather
+ * than hidden behind a scroll track. */
 .catalog-panel .layer-map {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-bottom: 12px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-  scrollbar-color: #8aa69d transparent;
-  scrollbar-width: thin;
 }
 
-.catalog-panel .layer-map article {
+.catalog-panel .layer-card {
+  align-items: center;
   background: #fff;
   border: 1px solid #d5ddd8;
-  border-radius: 8px;
+  border-radius: 999px;
   color: #253037;
-  display: grid;
-  flex: 1 0 210px;
-  gap: 7px;
-  min-height: 128px;
-  padding: 12px;
-  position: relative;
+  display: flex;
+  gap: 8px;
+  padding: 7px 12px;
   text-align: left;
 }
 
-.catalog-panel .layer-map article::after {
-  color: #b3bdb7;
-  content: "->";
-  font-weight: 900;
-  position: absolute;
-  right: -13px;
-  top: 58px;
-}
-
-.catalog-panel .layer-map article:last-child::after {
-  content: "";
-}
-
-.catalog-panel .layer-map article.active {
+.catalog-panel .layer-card.active {
   border-color: #1f5f55;
-  box-shadow: inset 0 -4px 0 #1f5f55, 0 8px 22px rgb(31 95 85 / 12%);
+  box-shadow: inset 0 0 0 1px #1f5f55;
 }
 
-.catalog-panel .layer-map article.contains:not(.active) {
+.catalog-panel .layer-card.contains:not(.active) {
   border-color: #8aa69d;
-}
-
-.catalog-panel .layer-main {
-  background: transparent;
-  border: 0;
-  color: inherit;
-  display: grid;
-  gap: 7px;
-  padding: 0;
-  text-align: left;
-  width: 100%;
 }
 
 .catalog-panel .layer-map .step {
   color: #1f5f55;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
   text-transform: uppercase;
 }
 
 .catalog-panel .layer-map strong {
-  font-size: 18px;
+  font-size: 14px;
 }
 
-.catalog-panel .layer-map small {
-  color: #596460;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  font-size: 13px;
-  /* Belt-and-suspenders: some engines size the -webkit-box item to its
-   * unclamped intrinsic height inside a CSS grid parent, letting a partial
-   * third line bleed past the clamp before overflow:hidden clips it. Capping
-   * max-height guarantees the clip even if the clamp itself under-constrains. */
-  max-height: 2.6em;
-  overflow: hidden;
+.catalog-panel .layer-count {
+  background: #eef3ef;
+  border-radius: 999px;
+  color: #31413b;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 7px;
 }
 
 .catalog-panel .layer-statuses {
@@ -160,14 +133,6 @@
   padding: 0 7px;
 }
 
-.catalog-panel .type-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.catalog-panel .type-summary button,
 .catalog-panel .type-filter button,
 .catalog-panel .type-chain button {
   background: #eef3ef;
@@ -177,12 +142,6 @@
   font-size: 12px;
   font-weight: 800;
   padding: 5px 8px;
-}
-
-.catalog-panel .type-summary button.active {
-  background: #1f5f55;
-  border-color: #1f5f55;
-  color: #fff;
 }
 
 .catalog-panel .status-badge,
