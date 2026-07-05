@@ -133,7 +133,7 @@ def main():
         })
 
         stats_out = root / "stats" / "latest.json"
-        result = run.derive_stats(root, str(issue_state), 0.72, str(stats_out))
+        result = run.derive_stats(root, str(issue_state), 0.72, 25, str(stats_out))
 
         _check("status", result["status"] == "stats_derived")
         _check("scans two runs", result["runs_scanned"] == 2)
