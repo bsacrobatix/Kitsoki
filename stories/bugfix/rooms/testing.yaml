@@ -139,22 +139,26 @@ states:
             - |
               set -e
               export NO_COLOR=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat
-              WT="{{ world.workdir }}"
+              # host.run already chdirs the child into cwd (world.workdir); do NOT
+              # re-apply world.workdir — it is a RELATIVE path in production and a
+              # second git -C would nest it under the already-chdir'd cwd. Derive
+              # the scratch worktree as an ABSOLUTE sibling of the current dir so
+              # `git worktree add` doesn't place it inside this worktree.
               GATE='{{ world.gate_command }}'
               # The pre-fix snapshot: the commit before the fix tip.
-              PREFIX_SHA=$(git -C "$WT" rev-parse 'HEAD~1' 2>/dev/null || echo "")
+              PREFIX_SHA=$(git rev-parse 'HEAD~1' 2>/dev/null || echo "")
               if [ -z "$PREFIX_SHA" ]; then
                 jq -n '{red:false,checked:false,log:"no pre-fix snapshot (HEAD~1 missing — fix not committed as a discrete tip?)"}'
                 exit 0
               fi
-              SCRATCH="$WT-prefix-gate"
-              git -C "$WT" worktree add --detach "$SCRATCH" "$PREFIX_SHA" >/dev/null 2>&1 || {
+              SCRATCH="$(pwd)-prefix-gate"
+              git worktree add --detach "$SCRATCH" "$PREFIX_SHA" >/dev/null 2>&1 || {
                 jq -n '{red:false,checked:false,log:"could not materialise pre-fix snapshot worktree"}'
                 exit 0
               }
               GATE_EXIT=0
               GATE_OUT=$( (cd "$SCRATCH" && bash -c "$GATE") 2>&1 ) || GATE_EXIT=$?
-              git -C "$WT" worktree remove --force "$SCRATCH" >/dev/null 2>&1 || true
+              git worktree remove --force "$SCRATCH" >/dev/null 2>&1 || true
               if [ "$GATE_EXIT" -ne 0 ]; then
                 jq -n --arg log "$GATE_OUT" '{red:true,checked:true,log:$log}'
               else

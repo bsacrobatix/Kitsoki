@@ -209,8 +209,10 @@ states:
             - |
               set +e
               export NO_COLOR=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat
-              WT="{{ world.workdir }}"
-              cd "$WT" || { jq -n '{ran:false,baseline_green:false,test_red:false,ok:false,summary:"gate skipped: workdir unavailable",log:""}'; exit 0; }
+              # host.run already chdirs the child into cwd (world.workdir); do NOT
+              # re-apply world.workdir here — it is a RELATIVE path in production
+              # and a second cd/git -C would resolve it against the already-chdir'd
+              # cwd (nested .worktrees/bf-<id>/.worktrees/bf-<id>) and self-skip.
               TESTCMD='{{ world.test_cmd }}'
               # RED leg: the suite on the DIRTY tree (reproducer's new failing test
               # present, no fix) must FAIL.
