@@ -350,6 +350,65 @@ A ready-to-edit feature/scenarios pair for a VS Code embed lives at
 `templates/vscode-feature.md` + `templates/vscode-scenarios.yaml` (the worked
 example behind the `vscode-tour` gate above).
 
+## TUI (terminal) evidence
+
+QA'ing a **TUI** scenario ("check this in the TUI") uses the exact same
+frame-based pipeline — there is no separate DOM/axe path for the terminal, and
+none is needed: the pipeline never inspected the DOM to begin with, it always
+judged pixels. The only TUI-specific work is *producing* the right frames and
+tuning the deterministic scans for a character grid instead of a browser
+viewport.
+
+- **Capture is single-frame, so build a labeled sequence yourself — same shape
+  as the recorder's `NN-<scene>.png`.** `render.tui_png` (studio MCP) rasterises
+  ANSI to one PNG per call — it re-renders a live `handle`'s CURRENT state
+  (read-only) or a headless `{story_path, state, world?}` spec, never a video.
+  Drive the scenario (`session.drive`/`session.submit` per turn, or a spec
+  render per state) and save one PNG per meaningful state/turn, named
+  `NN-<state-or-scene>.png` in one directory — then point `qa.sh`/`qa-review.sh`
+  straight at that directory with `--frames`, exactly the existing
+  "ground-truth frames" path (no `extract-frames.sh` scene-detection involved,
+  since there's no video to slice):
+  ```bash
+  .agents/skills/kitsoki-ui-qa/scripts/qa.sh .artifacts/tui-scenario/00-idle.png \
+    --frames    .artifacts/tui-scenario \
+    --feature   .context/qa-tui-feature.md \
+    --scenarios .context/qa-tui-scenarios.yaml --strict
+  ```
+  If a scenario instead needs deterministic dwell timing across a driven
+  sequence (rare — most TUI scenarios are state-transition claims, not motion),
+  emit a `frames.json`/chapters sidecar next to the PNGs yourself, mirroring
+  `extract-frames.sh`'s shape, so `pacing-scan.sh` can run over it; otherwise
+  treat TUI like the screenshot path (no chapters, no pacing gate).
+- **Write TUI scenarios as observable terminal claims**, not DOM assertions:
+  "the state banner reads `CLOAKROOM`", "the allowed-intent list shows `go` and
+  `hang_cloak`", "the prose paragraph mentions the velvet cloak" — things a
+  vision reviewer can literally read off the character grid. There is no
+  clickable-element/axe-tree concept in a terminal frame; do not phrase a
+  scenario in terms of ARIA roles, hover states, or DOM structure.
+- **Blank-scan needs no special tuning for the common case.** A TUI frame is
+  legitimately mostly one flat dark background colour (the theme bg behind
+  sparse monospace glyphs) — `blank-scan.sh`'s background-bucket detection
+  already treats the most-common colour as the page background (the same logic
+  that keeps a sparse dark web/VS Code pane quiet), so a normal terminal frame
+  does not self-flag. It only fires when a *foreign*, high-contrast block
+  covers a large area with little text detail inside it — e.g. a panel that
+  should show rendered content but rasterised as a single solid colour (a
+  theme/rasteriser bug), or a video-recorder letterbox bar if the frames came
+  from a screen-recorded terminal rather than direct `render.tui_png` PNGs. If
+  a story's theme legitimately fills a large uniform panel (e.g. a full-width
+  status bar), the default `--min-coverage 0.10` / `--detail-min 0.015` may
+  need the same kind of loosening the VS Code editor-chrome strip needed above
+  (`--blank-min-coverage 0.15`); tune per-theme, not globally.
+- **Pixel regression across a change: `visual.tui_git_diff`.** The TUI
+  counterpart of `visual.git_diff` — renders the same `{story_path, state}`
+  scene at two git revisions via the in-process ANSI rasteriser (no
+  browser/webShot seam to wire, so it never degrades for want of one) and
+  returns a compact `changed`/`changed_bbox` diff over the retained
+  screenshots. Useful as a cheap non-vision pre-check before spending an LLM
+  review pass: a `same: true` result across a revision pair means the terminal
+  rendering didn't move at all for that scene.
+
 ## rrweb-embedded slidey composite deck evidence
 
 A new reusable deliverable shape: a **slidey composite deck** — section/title
@@ -428,6 +487,10 @@ pass `--blank-strict` / `--pacing-strict`. The LLM `visual_issues` and
   — its `NN-<scene>.png` output is the ideal `--frames` input here, and its
   `contact-sheet.sh` is reused for the storyboard.
 - Oracle = local `claude` CLI: `internal/host/oracle_runner.go`.
+- TUI frame capture: `render.tui_png` (studio MCP, `internal/mcp/studio/session_tools.go`)
+  — one PNG per call, handle or headless spec. Pixel regression across a
+  revision pair: `visual.tui_git_diff` (`internal/mcp/studio/visual_tools.go`),
+  the TUI counterpart of `visual.git_diff`.
 
 ## Maintenance
 
