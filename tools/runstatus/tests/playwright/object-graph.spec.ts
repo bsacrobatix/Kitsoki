@@ -117,6 +117,11 @@ test("selecting an object renders its relationships as an inline Cytoscape graph
   await relationshipGraph.locator('[data-testid="graph-view-layout"]').selectOption("cola");
   await expect(relationshipGraph.locator('[data-testid="graph-view-host"] canvas').first()).toBeVisible();
 
+  // Node color is lifecycle-coded — a legend must spell out what each color
+  // means, or the coding is unreadable.
+  const legend = relationshipGraph.locator('[data-testid="graph-view-legend"] li');
+  await expect(legend).toContainText(["Available", "Active", "Proof", "Roadmap", "Candidate"]);
+
   await page.close();
 });
 

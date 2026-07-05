@@ -68,7 +68,9 @@ export function neighborhood(graph: ObjectGraph, nodeId: string): ObjectGraph {
   return { ...graph, nodes, edges };
 }
 
-const LIFECYCLE_COLORS: Record<string, string> = {
+// Exported so GraphView's legend can render the exact same swatches used by
+// the node style below — one source of truth for the color coding.
+export const LIFECYCLE_COLORS: Record<string, string> = {
   available: "#2f7a4f",
   active: "#1d6fb8",
   proof: "#7a4fd6",
