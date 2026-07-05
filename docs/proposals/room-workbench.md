@@ -5,13 +5,13 @@ are landed on `s1/room-workbench`; full design, model, desugaring contract,
 invariants, and the deterministic-seam rule now live in
 [`docs/architecture/room-workbench.md`](../architecture/room-workbench.md)
 (narrative home going forward — this file is a shipped-record summary only).
-**Follow-up not covered by this proposal:** S2's never-silent runtime
-(`docs/proposals/never-silent-runtime.md`) lands a `near_miss` routing
-verdict with a `nearMissWorkbenchEnabled` stub that still needs to be wired
-to this workbench's entry point (the synthesized `<room>_capture` intent /
-`free_form_fallback`) so a near-miss confidence band routes into the
-governed floor rather than the nearest authored intent — tracked as its own
-task, not part of S1.
+**Follow-up (shipped separately, not part of S1):** S2's near_miss routing
+verdict is now wired to this workbench's entry point — a near-miss
+confidence band routes into the current room's (or the app's
+`routing.free_form_fallback` floor's) synthesized `<room>_capture` intent
+rather than the nearest authored intent or the main-turn interpreter. See
+[`semantic-routing.md` "Near-miss band"](../architecture/semantic-routing.md#13-synonym-templates)
+(`nearMissWorkbenchDestination`, `internal/orchestrator/semantic.go`).
 **Kind:**   runtime (story spillover — see Impact)
 **Epic:**   usable-kitsoki.md
 

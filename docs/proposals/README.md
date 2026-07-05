@@ -67,8 +67,9 @@ thought.
   governed free-form agent, and prove it against scenarios compiled from real
   conversations, at swarm scale, before release. Six slices: the room
   workbench primitive ([`room-workbench.md`](room-workbench.md), runtime +
-  story), a never-silent runtime
-  ([`never-silent-runtime.md`](never-silent-runtime.md), runtime), a dispatch
+  story), a never-silent runtime (shipped; see
+  [`semantic-routing.md`](../architecture/semantic-routing.md#13-synonym-templates) —
+  `never-silent-runtime.md` deleted per lifecycle guidance), a dispatch
   context floor ([`dispatch-context-floor.md`](dispatch-context-floor.md),
   runtime), the Scenario Foundry
   ([`scenario-foundry.md`](scenario-foundry.md), tracing + tooling), honest
