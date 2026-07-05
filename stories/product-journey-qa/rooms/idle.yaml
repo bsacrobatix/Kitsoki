@@ -1,7 +1,7 @@
 states:
   idle:
     description: "Waiting to create a product-journey QA run bundle."
-    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_status, autonomous_marathon_report_path, autonomous_driver_mode, autonomous_driver_status, autonomous_driver_evidence_count, autonomous_gate_summary, independent_verify_status, independent_verify_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, validation_status, validation_errors, validation_issue_summary, status]
+    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_status, autonomous_marathon_report_path, autonomous_driver_mode, autonomous_driver_status, autonomous_driver_evidence_count, autonomous_control_status, autonomous_control_summary, autonomous_control_path, autonomous_gate_summary, independent_verify_status, independent_verify_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, validation_status, validation_errors, validation_issue_summary, status]
     view:
       - banner:
           text: "PRODUCT JOURNEY QA"
@@ -22,6 +22,8 @@ states:
             Autonomous marathon smoke: '{{ world.autonomous_marathon_smoke_status|default:"(not checked)" }}'
             Autonomous marathon: '{{ world.autonomous_marathon_status|default:"(not started)" }}'
             Autonomous driver: '{{ world.autonomous_driver_mode|default:"pending" }} / {{ world.autonomous_driver_status|default:"(not run)" }}'
+            Marathon control: '{{ world.autonomous_control_status|default:"(not armed)" }}: {{ world.autonomous_control_summary|default:"" }}'
+            Control artifact: '{{ world.autonomous_control_path|default:"(not generated)" }}'
             Autonomous gates: '{{ world.autonomous_gate_summary|default:"(not run)" }}'
             Independent verify: '{{ world.independent_verify_status|default:"(not checked)" }}: {{ world.independent_verify_summary|default:"" }}'
             Stats gate: '{{ world.stats_gate_status|default:"(not checked)" }}: {{ world.stats_gate_summary|default:"" }}; current run scanned {{ world.stats_current_run_scanned|default:"unknown" }}'
@@ -306,6 +308,10 @@ states:
                 autonomous_marathon_status: "running"
                 autonomous_marathon_summary: ""
                 autonomous_marathon_report_path: ""
+                autonomous_control_path: ""
+                autonomous_control_markdown_path: ""
+                autonomous_control_status: ""
+                autonomous_control_summary: ""
                 independent_verify_status: ""
                 independent_verify_summary: ""
                 validation_status: ""
@@ -334,6 +340,12 @@ states:
                   - "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
                   - --autonomous-driver-mode
                   - "{{ slots.autonomous_driver_mode ?? 'pending' }}"
+                  - --autonomous-cadence-hours
+                  - "{{ slots.autonomous_cadence_hours ?? 24 }}"
+                  - --autonomous-heartbeat-minutes
+                  - "{{ slots.autonomous_heartbeat_minutes ?? 15 }}"
+                  - --autonomous-watchdog-minutes
+                  - "{{ slots.autonomous_watchdog_minutes ?? 45 }}"
                   - --ticket-repo
                   - "{{ slots.ticket_repo ?? world.ticket_repo }}"
                   - --gh-agent-db
@@ -377,6 +389,10 @@ states:
                 autonomous_driver_summary: "stdout_json.autonomous_driver_summary"
                 autonomous_driver_evidence_count: "stdout_json.autonomous_driver_evidence_count"
                 autonomous_driver_issue_count: "stdout_json.autonomous_driver_issue_count"
+                autonomous_control_path: "stdout_json.autonomous_control_path"
+                autonomous_control_markdown_path: "stdout_json.autonomous_control_markdown_path"
+                autonomous_control_status: "stdout_json.autonomous_control_status"
+                autonomous_control_summary: "stdout_json.autonomous_control_summary"
                 autonomous_fix_status: "stdout_json.autonomous_fix_status"
                 autonomous_fix_report_path: "stdout_json.autonomous_fix_report_path"
                 autonomous_gate_summary: "stdout_json.autonomous_gate_summary"

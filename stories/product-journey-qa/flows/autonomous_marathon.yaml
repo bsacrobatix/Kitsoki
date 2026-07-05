@@ -14,6 +14,10 @@ host_handlers:
             autonomous_marathon_status: autonomous_marathon_ready_for_driver
             autonomous_marathon_summary: "Created 1 scenario(s); driver evidence capture is pending."
             autonomous_marathon_report_path: .artifacts/product-journey/run-999/autonomous-marathon-report.md
+            autonomous_control_path: .artifacts/product-journey/run-999/autonomous-marathon-control.json
+            autonomous_control_markdown_path: .artifacts/product-journey/run-999/autonomous-marathon-control.md
+            autonomous_control_status: ready_for_driver
+            autonomous_control_summary: "cadence=24h, next_due=2026-07-06T00:00:00+00:00, budget=6m/scenario, heartbeat=15m, watchdog=45m"
             autonomous_fix_status: not_run
             autonomous_gate_summary: "filing=not_run, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=not_run"
             independent_verify_status: not_run
@@ -60,6 +64,10 @@ host_handlers:
                 autonomous_marathon_status: autonomous_marathon_valid
                 autonomous_marathon_summary: "credible_issues=1, fix=autonomous_fix_valid, review=ready, validation=valid, stats=pass"
                 autonomous_marathon_report_path: .artifacts/product-journey/run-999/autonomous-marathon-report.md
+                autonomous_control_path: .artifacts/product-journey/run-999/autonomous-marathon-control.json
+                autonomous_control_markdown_path: .artifacts/product-journey/run-999/autonomous-marathon-control.md
+                autonomous_control_status: ready_for_driver
+                autonomous_control_summary: "cadence=24h, next_due=2026-07-06T00:00:00+00:00, budget=6m/scenario, heartbeat=15m, watchdog=45m"
                 autonomous_fix_status: autonomous_fix_valid
                 autonomous_fix_report_path: .artifacts/product-journey/run-999/autonomous-fix-report.md
                 autonomous_gate_summary: "filing=pass, gh_agent=pass, independent_verify=pass, review=pass, validation=pass"
@@ -170,8 +178,10 @@ turns:
       run_dir: .artifacts/product-journey/run-999
       autonomous_marathon_status: autonomous_marathon_ready_for_driver
       autonomous_marathon_report_path: .artifacts/product-journey/run-999/autonomous-marathon-report.md
+      autonomous_control_status: ready_for_driver
+      autonomous_control_path: .artifacts/product-journey/run-999/autonomous-marathon-control.json
       missing_proof_evidence_count: 3
-    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_ready_for_driver[\\s\\S]*Marathon report[\\s\\S]*autonomous-marathon[\\s\\S]*report.md"
+    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_ready_for_driver[\\s\\S]*Marathon report[\\s\\S]*autonomous-marathon[\\s\\S]*report.md[\\s\\S]*Marathon control[\\s\\S]*ready_for_driver[\\s\\S]*Control artifact[\\s\\S]*autonomous-marathon-[\\s\\S]*control.json"
     expect_host_calls:
       - handler: host.run
         args: { call: autonomous_product_journey_marathon }
@@ -192,6 +202,7 @@ turns:
       independent_verify_summary: "verified=1/1"
       issue_closeout_status: closed
       issue_closeout_count: 1
+      autonomous_control_status: ready_for_driver
       gh_agent_claim_status: claimed
       gh_agent_claim_count: 1
       gh_agent_triage_evidence_count: 1
@@ -200,7 +211,7 @@ turns:
       stats_fixed_count: 1
       weakness_route_count: 1
       validation_status: valid
-    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, independent_verify=pass,[\\s\\S]*review=pass, validation=pass[\\s\\S]*Independent verify[\\s\\S]*pass: verified=1/1[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 1[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*GH-agent claims[\\s\\S]*claimed: claimed 1[\\s\\S]*GH-agent evidence[\\s\\S]*triage 1 attached / 0 missing[\\s\\S]*triage-[\\s\\S]*verdict.md[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 1, filed 1, fixed 1[\\s\\S]*Stats gate[\\s\\S]*pass: pass; current run scanned yes"
+    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, independent_verify=pass,[\\s\\S]*review=pass, validation=pass[\\s\\S]*Independent verify[\\s\\S]*pass: verified=1/1[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 1[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*Marathon control[\\s\\S]*ready_for_driver[\\s\\S]*GH-agent claims[\\s\\S]*claimed: claimed 1[\\s\\S]*GH-agent evidence[\\s\\S]*triage 1 attached / 0 missing[\\s\\S]*triage-[\\s\\S]*verdict.md[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 1, filed 1, fixed 1[\\s\\S]*Stats gate[\\s\\S]*pass: pass; current run scanned yes"
     expect_host_calls:
       - handler: host.run
         args: { call: autonomous_product_journey_marathon_finalize }
