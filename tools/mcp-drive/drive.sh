@@ -46,6 +46,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 MCP_CONFIG="$HERE/kitsoki-mcp.json"
 
 MODEL="${MCP_DRIVE_MODEL:-sonnet}"
@@ -150,12 +151,32 @@ run_once() {
     if [[ "${MCP_DRIVE_CODEX_CONFIG_MCP:-0}" != "1" ]]; then
       codex_mcp_args+=(-c mcp_servers.kitsoki.command=kitsoki)
       codex_mcp_args+=(-c 'mcp_servers.kitsoki.args=["mcp","--stories-dir","stories"]')
+      # A machine's own ~/.codex/config.toml may already declare mcp_servers.kitsoki
+      # (pointing `cwd` at THAT machine's checkout, e.g. a developer's primary
+      # checkout path). If CODEX_HOME happens to carry that file (bind-mounted
+      # into a container, say), the pre-existing `cwd` silently wins over the -c
+      # command/args overrides above, the kitsoki subprocess fails to start in a
+      # directory that doesn't exist there, and codex reports zero MCP tools
+      # with NO error surfaced — it just looks like the server was never
+      # registered. Force `cwd` to THIS repo checkout so the override is total.
+      codex_mcp_args+=(-c "mcp_servers.kitsoki.cwd=$REPO_ROOT")
       local _fwd
       for _fwd in ${MCP_DRIVE_FORWARD_ENV//,/ }; do
         codex_mcp_args+=(-c "mcp_servers.kitsoki.env.${_fwd}=${!_fwd-}")
       done
     fi
-    codex exec "$PROMPT" \
+    # codex (>=0.142) DEFERS MCP server tools behind its `tool_search` tool —
+    # studio.ping/session.new/etc. are NOT in the eager tool list, so without
+    # this the orchestrator reports them "not available" and bounces instead of
+    # driving the pipeline (see MEMORY codex-defers-mcp-tools-toolsearch; the
+    # same fix already ships inside kitsoki's own codex agent backend at
+    # internal/host/agent_backend_codex.go's codexMCPToolSearchPreamble — this
+    # is the external orchestrator invocation, so it needs its own copy). Tool
+    # names here MUST be the server's raw dotted names (session.new, not
+    # session_new) — codex's tool_search indexes the MCP server's own name, not
+    # the mcp__kitsoki__session_new alias the CLAUDE backend's client presents.
+    local codex_tool_search_preamble="TOOL ACCESS (codex): Some tools provided to you — including the kitsoki studio tools (studio.ping, session.new, session.drive, session.status, etc. — note the DOTTED names) — are NOT listed in your default tool set. They are reachable only via the \`tool_search\` tool. BEFORE you conclude that a tool the task asks for is unavailable, you MUST call \`tool_search\` to locate it, then call it. Never emulate such a tool by printing its name or arguments as text — a printed call does nothing."
+    codex exec "${codex_tool_search_preamble}"$'\n\n---\n\n'"$PROMPT" \
       --model "$MODEL" \
       --dangerously-bypass-approvals-and-sandbox \
       --skip-git-repo-check \
