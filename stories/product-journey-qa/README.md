@@ -72,8 +72,10 @@ It is intentionally no-LLM:
   attaches cassette-backed local proof artifacts, records the driver journal
   and credible findings, then runs the same native gitops autonomous fix,
   review, validation, PRD weakness routing, close-out, and stats gates in one
-  story-owned call. Omit the mode, or use `pending`, when a live driver should
-  capture evidence before finalization.
+  story-owned call. Missing `ticket_repo` or `gh_agent_public_base_url` fails
+  closed in the story view as `autonomous_marathon_invalid` so the operator can
+  review the invalid gate state without reading host errors. Omit the mode, or
+  use `pending`, when a live driver should capture evidence before finalization.
 - `seed_demo` calls `tools/product-journey/run.py --seed-demo-evidence
   --json-output` to populate a no-LLM review bundle.
 - `handoff` calls `tools/product-journey/run.py --driver-handoff --json-output`

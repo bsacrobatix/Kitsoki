@@ -140,8 +140,11 @@ Then hand it to the reusable driver:
    still story-owned: it creates the run, attaches cassette-backed local proof
    artifacts, records the driver journal and findings, runs native gitops
    filing/fixing/close-out, refreshes review artifacts, validates, and derives
-   stats in one call. Use default `autonomous_driver_mode=pending` when a live
-   budgeted driver still needs to capture evidence first.
+   stats in one call. Missing `ticket_repo` or `gh_agent_public_base_url` must
+   fail closed in the story view with `autonomous_marathon_invalid` instead of
+   disappearing behind a host error. Use default
+   `autonomous_driver_mode=pending` when a live budgeted driver still needs to
+   capture evidence first.
 7. If there are no credible issue findings, or after `autonomous_fix` reports
    the bundle valid, submit `review` and `validate` through the story. Use
    `file_findings` or the CLI `--file-findings`/`--review-run`/`--validate-run`
