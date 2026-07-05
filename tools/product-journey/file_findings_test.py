@@ -456,6 +456,7 @@ def main():
                 "--public-base-url", "https://agent.example",
             ],
             cwd=run.ROOT,
+            env={**os.environ, "KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE": "1"},
             text=True,
             capture_output=True,
             check=False,
