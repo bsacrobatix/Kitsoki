@@ -3375,6 +3375,60 @@ def file_findings(
     return result
 
 
+def autonomous_fix_loop(
+    run_dir: Path,
+    ticket_repo: str,
+    gh_agent_db: str,
+    gh_agent_story: str,
+    gh_agent_public_base_url: str,
+    gh_agent_project_root: str,
+    gh_agent_incident_repo: str,
+    publish_deck: Optional[Path],
+) -> dict:
+    """Run the autonomous product-journey issue-to-fix gate.
+
+    This is the story-owned reliability envelope for the goal state: file
+    credible findings with artifact-preserving GitHub issue creation, enqueue
+    and drain gh-agent fixes, refresh the review artifact, then validate the
+    bundle contract.
+    """
+    filed = file_findings(
+        run_dir,
+        ticket_repo,
+        False,
+        publish_deck,
+        gh_agent_db,
+        gh_agent_story,
+        True,
+        gh_agent_public_base_url,
+        gh_agent_project_root,
+        gh_agent_incident_repo,
+    )
+    reviewed = review_run_bundle(run_dir, publish_deck)
+    validation = validate_run_bundle(run_dir)
+    status = "autonomous_fix_valid" if validation.get("status") == "valid" else "autonomous_fix_invalid"
+    result = {
+        **filed,
+        "status": status,
+        "autonomous_fix_status": status,
+        "filing_status": filed.get("status", ""),
+        "review_status": reviewed.get("review_status", reviewed.get("status", "")),
+        "review_summary": reviewed.get("summary", ""),
+        "review_passed_count": reviewed.get("review_passed_count", reviewed.get("passed", 0)),
+        "review_failed_count": reviewed.get("review_failed_count", reviewed.get("failed", 0)),
+        "review_warning_count": reviewed.get("review_warning_count", reviewed.get("warnings", 0)),
+        "review_total_count": reviewed.get("review_total_count", reviewed.get("total", 0)),
+        "review_backlog_summary": reviewed.get("review_backlog_summary", ""),
+        "validation_status": validation.get("status", ""),
+        "validation_errors": validation.get("errors", 0),
+        "validation_warnings": validation.get("warnings", 0),
+        "validation_issue_summary": validation.get("validation_issue_summary", ""),
+        "validation_issues": validation.get("issues", []),
+    }
+    result.update(run_story_summary(run_dir))
+    return result
+
+
 def normalize_issue_title(value: str) -> str:
     return " ".join(
         "".join(ch.lower() if ch.isalnum() else " " for ch in value).split()
@@ -7452,6 +7506,7 @@ def main() -> None:
     parser.add_argument("--record-driver-event", action="store_true", help="Append one driver execution event to driver-journal.json")
     parser.add_argument("--seed-demo-evidence", action="store_true", help="Attach deterministic demo evidence and findings to an existing run bundle")
     parser.add_argument("--file-findings", action="store_true", help="File the bundle's credible issue findings as GitHub issues via the kitsoki bug orchestration")
+    parser.add_argument("--autonomous-fix-loop", action="store_true", help="File findings, enqueue/drain gh-agent fixes, review, and validate as one no-operator reliability gate")
     parser.add_argument("--stats", action="store_true", help="Derive product-journey issue stats from run bundles and cached issue state")
     parser.add_argument("--stats-root", default="", help="Root containing product-journey run bundles for --stats; defaults to .artifacts/product-journey")
     parser.add_argument("--issue-state-file", default="", help="Optional JSON fixture/cache with GitHub issue state for --stats")
@@ -7921,6 +7976,41 @@ def main() -> None:
                 f"{result['gh_agent_active_count']} active)"
             )
         append_log(f"Filed findings for {run_dir.name}: {result['filing_summary']}")
+        return
+
+    if args.autonomous_fix_loop:
+        if not args.run_dir:
+            raise SystemExit("--autonomous-fix-loop requires --run-dir")
+        if not args.gh_agent_db:
+            raise SystemExit("--autonomous-fix-loop requires --gh-agent-db")
+        publish_deck = DEFAULT_DECK if args.publish_deck else None
+        run_dir = run_dir_from_arg(args.run_dir)
+        result = autonomous_fix_loop(
+            run_dir,
+            args.ticket_repo,
+            args.gh_agent_db,
+            args.gh_agent_story,
+            args.gh_agent_public_base_url,
+            args.gh_agent_project_root,
+            args.gh_agent_incident_repo,
+            publish_deck,
+        )
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Ran autonomous fix loop for {run_dir.name}: {result['status']}")
+            return
+        print(f"Status: {result['status']}")
+        print(result["filing_summary"])
+        print(
+            "GH-agent drain: "
+            f"{result['gh_agent_drain_status']} "
+            f"({result['gh_agent_done_count']} done, "
+            f"{result['gh_agent_failed_count']} failed, "
+            f"{result['gh_agent_active_count']} active)"
+        )
+        print(f"Review: {result['review_summary']}")
+        print(f"Validation: {result['validation_status']} ({result['validation_errors']} errors, {result['validation_warnings']} warnings)")
+        append_log(f"Ran autonomous fix loop for {run_dir.name}: {result['status']}")
         return
 
     if args.stats:

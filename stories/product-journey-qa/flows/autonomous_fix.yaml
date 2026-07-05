@@ -1,0 +1,137 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+
+host_handlers:
+  host.run:
+    by_call:
+      load_product_journey_run:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            status: run_loaded
+            run_id: run-888
+            run_dir: .artifacts/product-journey/run-888
+            project: vscode
+            persona: ide-first-engineer
+            seed: autonomous-demo
+            deck_path: .artifacts/product-journey/run-888/deck.slidey.json
+            execution_plan_path: .artifacts/product-journey/run-888/execution-plan.md
+            driver_plan_path: .artifacts/product-journey/run-888/driver-plan.md
+            driver_journal_path: .artifacts/product-journey/run-888/driver-journal.md
+            agent_brief_path: .artifacts/product-journey/run-888/agent-brief.md
+            driver_handoff_path: .artifacts/product-journey/run-888/driver-handoff.md
+            media_manifest_path: .artifacts/product-journey/run-888/media-manifest.json
+            scenario_outcomes_path: .artifacts/product-journey/run-888/scenario-outcomes.md
+            finding_total_count: 2
+            issue_count: 2
+            proof_evidence_count: 3
+            review_status: needs_evidence
+      autonomous_product_journey_fix:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            status: autonomous_fix_valid
+            autonomous_fix_status: autonomous_fix_valid
+            filing_status: findings_filed
+            run_dir: .artifacts/product-journey/run-888
+            ticket_repo: bsacrobatix/Kitsoki
+            dry_run: "no"
+            findings_filed_count: 2
+            findings_skipped_count: 0
+            findings_failed_count: 0
+            findings_unfiled_count: 0
+            filed_issue_summary: "https://github.com/bsacrobatix/Kitsoki/issues/201; https://github.com/bsacrobatix/Kitsoki/issues/202"
+            filing_summary: "Filed findings to bsacrobatix/Kitsoki: 2 filed, 0 already filed, 0 failed; 0 credible finding(s) remain unfiled."
+            gh_agent_enqueue_status: queued
+            gh_agent_enqueued_count: 2
+            gh_agent_skipped_count: 0
+            gh_agent_job_summary: "github:bsacrobatix/Kitsoki/issue/201; github:bsacrobatix/Kitsoki/issue/202"
+            gh_agent_drain_status: drained
+            gh_agent_drained_count: 2
+            gh_agent_done_count: 2
+            gh_agent_failed_count: 0
+            gh_agent_active_count: 0
+            gh_agent_run_summary: "github:bsacrobatix/Kitsoki/issue/201=done https://agent.example/run/job-201; github:bsacrobatix/Kitsoki/issue/202=done https://agent.example/run/job-202"
+            review_status: ready
+            review_summary: "ready: 21/21 checks passed, 0 warnings, 0 failures"
+            review_passed_count: 21
+            review_failed_count: 0
+            review_warning_count: 0
+            review_total_count: 21
+            review_backlog_summary: ""
+            validation_status: valid
+            validation_errors: 0
+            validation_warnings: 0
+            validation_issue_summary: ""
+            deck_path: .artifacts/product-journey/run-888/deck.slidey.json
+            execution_plan_path: .artifacts/product-journey/run-888/execution-plan.md
+            driver_plan_path: .artifacts/product-journey/run-888/driver-plan.md
+            driver_journal_path: .artifacts/product-journey/run-888/driver-journal.md
+            agent_brief_path: .artifacts/product-journey/run-888/agent-brief.md
+            driver_handoff_path: .artifacts/product-journey/run-888/driver-handoff.md
+            media_manifest_path: .artifacts/product-journey/run-888/media-manifest.json
+            scenario_outcomes_path: .artifacts/product-journey/run-888/scenario-outcomes.md
+            proof_evidence_count: 3
+            demo_evidence_count: 0
+            finding_total_count: 2
+            strength_count: 0
+            weakness_count: 0
+            issue_count: 2
+            fix_count: 0
+            blocked_count: 0
+            missing_evidence_count: 0
+            missing_proof_evidence_count: 0
+            proof_minimum_evidence_count: 3
+            minimum_evidence_count: 3
+            missing_proof_summary: ""
+            driver_contract_summary: "Driver contract: 1 scenarios (bugfix); 0 missing-proof rows; 2 final gates."
+            next_driver_capture: ""
+            next_driver_attach_command: ""
+            next_driver_blocker_command: ""
+
+turns:
+  - intent:
+      name: load
+      slots:
+        run_dir: .artifacts/product-journey/run-888
+    expect_state: run_created
+    expect_world:
+      status: run_loaded
+      run_id: run-888
+      run_dir: .artifacts/product-journey/run-888
+    expect_host_calls:
+      - handler: host.run
+        args: { call: load_product_journey_run }
+
+  - intent:
+      name: autonomous_fix
+      slots:
+        ticket_repo: bsacrobatix/Kitsoki
+        gh_agent_db: .artifacts/product-journey/gh-agent-jobs.sqlite
+        gh_agent_story: stories/bugfix
+        gh_agent_public_base_url: https://agent.example
+    expect_state: run_created
+    expect_world:
+      status: autonomous_fix_complete
+      autonomous_fix_status: autonomous_fix_valid
+      ticket_repo: bsacrobatix/Kitsoki
+      filing_status: findings_filed
+      findings_filed_count: 2
+      findings_unfiled_count: 0
+      gh_agent_enqueue_status: queued
+      gh_agent_drain_status: drained
+      gh_agent_done_count: 2
+      gh_agent_failed_count: 0
+      review_status: ready
+      review_failed_count: 0
+      validation_status: valid
+      validation_errors: 0
+    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous fix[\\s\\S]*autonomous_fix_valid[\\s\\S]*Issue filing[\\s\\S]*findings_filed: filed 2[\\s\\S]*GH-agent drain[\\s\\S]*drained: drained 2, done 2, failed 0, active 0[\\s\\S]*Review checks[\\s\\S]*21 / 21 passed[\\s\\S]*Validation[\\s\\S]*valid"
+    expect_host_calls:
+      - handler: host.run
+        args: { call: autonomous_product_journey_fix }
+
+expect_no_errors: true

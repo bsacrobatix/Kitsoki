@@ -299,6 +299,31 @@ def main():
         _check("re-filing closes the gate",
                review_check(reviewed, "findings-filed")["status"] == "pass")
 
+        # 5. Composite autonomous fix loop: one runner call owns filing,
+        # gh-agent drain, review, and validation.
+        stable_scenarios = [scenario for scenario in scenarios if scenario.get("id") == "bugfix"]
+        run_dir2, run_json2 = run.build_run_bundle(
+            catalog, run.load_github_targets(run.GITHUB_TARGETS),
+            personas, stable_scenarios, "vscode", "", "autonomous-fix-test", "dry-run", None,
+        )
+        scenario2 = run_json2["scenarios"][0]["id"]
+        run.record_finding(run_dir2, "issue", "autonomous credible", "observed problem",
+                           scenario2, "high", "", "open", None)
+        result = run.autonomous_fix_loop(
+            run_dir2,
+            "o/r",
+            str(tmp / "gh-agent-autonomous.json"),
+            "stories/bugfix",
+            "https://agent.example",
+            "",
+            "",
+            None,
+        )
+        _check("autonomous loop validates bundle", result["autonomous_fix_status"] == "autonomous_fix_valid")
+        _check("autonomous loop preserves filing status", result["filing_status"] == "findings_filed")
+        _check("autonomous loop drained gh-agent", result["gh_agent_drain_status"] == "drained" and result["gh_agent_done_count"] == 1)
+        _check("autonomous loop reviewed and validated", result["review_total_count"] == 21 and result["validation_status"] == "valid")
+
     print("PASS")
 
 
