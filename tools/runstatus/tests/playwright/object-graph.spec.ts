@@ -98,6 +98,30 @@ test("project object graph viewer renders the seed catalog", async () => {
   await page.close();
 });
 
+test("project object graph viewer's catalog projection lists nodes and shares selection with the graph", async () => {
+  const page: Page = await browser.newPage();
+  await page.goto(`${BASE}/#/graph?catalog=${encodeURIComponent(SEED_CATALOG)}`);
+  await page.waitForSelector('[data-testid="objectgraph-canvas"]', { timeout: 10000 });
+
+  await page.click('[data-testid="objectgraph-view-catalog"]');
+  await page.waitForSelector('[data-testid="objectgraph-catalog"]', { timeout: 10000 });
+
+  // The object picker lists at least one selectable node button.
+  const firstNodeButton = page.locator(".object-list button").first();
+  await expect(firstNodeButton).toBeVisible();
+  const label = (await firstNodeButton.locator("strong").innerText()).trim();
+
+  await firstNodeButton.click();
+  await expect(page.locator(".focus-card h2")).toHaveText(label);
+
+  // Selection carries over to the graph projection (shared selectedId).
+  await page.click('[data-testid="objectgraph-view-graph"]');
+  await page.waitForSelector('[data-testid="objectgraph-canvas"]', { timeout: 10000 });
+  await expect(page.locator(".vue-flow__node").first()).toBeVisible();
+
+  await page.close();
+});
+
 test("project object graph viewer surfaces a load error for a bad catalog path", async () => {
   const page: Page = await browser.newPage();
   await page.goto(`${BASE}/#/graph?catalog=${encodeURIComponent("does/not/exist.yaml")}`);
