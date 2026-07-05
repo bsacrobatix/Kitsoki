@@ -9,7 +9,7 @@
 // local files" surface for the dogfood loop. Issue creation and bug evidence
 // filing use the native GitHub REST API with GH_TOKEN/GITHUB_TOKEN so headless
 // autonomous runs do not depend on a locally logged-in gh binary. Older
-// read/comment/list operations still use the gh CLI through cliExec until they
+// search/comment/list operations still use the gh CLI through cliExec until they
 // are migrated behind the same native transport.
 //
 // The companion `gh pr ...` family already lives in `internal/host/git_vcs.go`
@@ -69,9 +69,6 @@ func GitHubTicketHandler(ctx context.Context, args map[string]any) (Result, erro
 		}
 		return ghTicketSearch(ctx, args)
 	case "get":
-		if !ghAvailable(ctx) {
-			return Result{Error: "host.gh.ticket: gh CLI not available — install github.com/cli/cli and run `gh auth login`"}, nil
-		}
 		return ghTicketGet(ctx, args)
 	case "comment":
 		if !ghAvailable(ctx) {
@@ -146,7 +143,7 @@ func ghTicketSearch(ctx context.Context, args map[string]any) (Result, error) {
 	return Result{Data: map[string]any{"tickets": tickets}}, nil
 }
 
-// ghTicketGet implements ticket.get via `gh issue view --json`.
+// ghTicketGet implements ticket.get via the native GitHub REST API.
 //
 // Input args:  id (string — accepts either "owner/repo#N" or a bare "N"),
 //
@@ -164,22 +161,22 @@ func ghTicketGet(ctx context.Context, args map[string]any) (Result, error) {
 			repo = r
 		}
 	}
-	ghArgs := []string{"issue", "view", num}
-	if repo != "" {
-		ghArgs = append(ghArgs, "--repo", repo)
+	if strings.TrimSpace(repo) == "" {
+		return Result{Error: "ticket.get: repo argument is required for native GitHub issue lookup"}, nil
 	}
-	ghArgs = append(ghArgs, "--json",
-		"number,title,body,state,labels,assignees,url,comments")
-	stdout, stderr, code, err := cliExec(ctx, "", "gh", ghArgs...)
-	if err != nil {
-		return Result{Error: fmt.Sprintf("ticket.get: exec: %v", err)}, nil
-	}
-	if code != 0 {
-		return Result{Error: fmt.Sprintf("ticket.get: %s", strings.TrimSpace(stderr))}, nil
-	}
+
 	var raw map[string]any
-	if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
-		return Result{Error: fmt.Sprintf("ticket.get: parse JSON: %v", err)}, nil
+	code, resp, err := githubAPIJSON(ctx, "GET", "repos/"+repo+"/issues/"+num, nil, &raw)
+	if err != nil {
+		return Result{Error: fmt.Sprintf("ticket.get: %v", err)}, nil
+	}
+	if code >= 300 {
+		return Result{Error: fmt.Sprintf("ticket.get: %s", githubAPIError(resp))}, nil
+	}
+	if _, ok := raw["url"]; !ok {
+		if html, _ := raw["html_url"].(string); strings.TrimSpace(html) != "" {
+			raw["url"] = html
+		}
 	}
 	data := ghIssueSummary(raw)
 	if body, ok := raw["body"].(string); ok {
@@ -200,11 +197,15 @@ func ghTicketGet(ctx context.Context, args map[string]any) (Result, error) {
 			}
 		}
 	}
-	if comments, ok := raw["comments"].([]any); ok {
-		data["comments"] = comments
-	} else {
-		data["comments"] = []any{}
+	var comments []any
+	code, resp, err = githubAPIJSON(ctx, "GET", "repos/"+repo+"/issues/"+num+"/comments?per_page=100", nil, &comments)
+	if err != nil {
+		return Result{Error: fmt.Sprintf("ticket.get comments: %v", err)}, nil
 	}
+	if code >= 300 {
+		return Result{Error: fmt.Sprintf("ticket.get comments: %s", githubAPIError(resp))}, nil
+	}
+	data["comments"] = comments
 	return Result{Data: data}, nil
 }
 

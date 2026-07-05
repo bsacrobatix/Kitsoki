@@ -3,6 +3,8 @@ package host_test
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -175,17 +177,39 @@ func TestGitHubTicket_Search_BadJSON(t *testing.T) {
 }
 
 func TestGitHubTicket_Get_Happy(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	fr.responses["gh issue view 42"] = fakeResp{
-		stdout: `{"number":42,"title":"Esc hangs","body":"Expected x","state":"OPEN","url":"https://github.com/o/r/issues/42","assignees":[{"login":"brad"}],"comments":[{"id":1,"body":"repro"}]}`,
-	}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
+	t.Setenv("GH_TOKEN", "test-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/42":
+			writeJSON(w, map[string]any{
+				"number":   42,
+				"title":    "Esc hangs",
+				"body":     "Expected x",
+				"state":    "OPEN",
+				"html_url": "https://github.com/o/r/issues/42",
+				"assignees": []map[string]any{
+					{"login": "brad"},
+				},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/42/comments":
+			writeJSON(w, []map[string]any{{"id": 1, "body": "repro"}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("ticket.get must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
-		"op": "get",
-		"id": "42",
+		"op":   "get",
+		"id":   "42",
+		"repo": "o/r",
 	})
 	if err != nil {
 		t.Fatalf("infra: %v", err)
@@ -198,6 +222,13 @@ func TestGitHubTicket_Get_Happy(t *testing.T) {
 	}
 	if res.Data["body"] != "Expected x" {
 		t.Fatalf("body: %v", res.Data["body"])
+	}
+	if res.Data["url"] != "https://github.com/o/r/issues/42" {
+		t.Fatalf("url: %v", res.Data["url"])
+	}
+	comments, _ := res.Data["comments"].([]any)
+	if len(comments) != 1 {
+		t.Fatalf("comments: %v", res.Data["comments"])
 	}
 }
 
@@ -250,18 +281,39 @@ func TestGitHubTicket_Search_ClassifiesType(t *testing.T) {
 // field, and marks source=github — making the local-file ↔ GitHub-issue mapping
 // visible to the ticket view (P5).
 func TestGitHubTicket_Get_SurfacesIdentity(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
+	t.Setenv("GH_TOKEN", "test-token")
 	body := "Esc hangs the TUI.\n\n```kitsoki\nlegacy_id: 2026-06-19T12-00-00Z-esc-hang\nfiled_by: brad\n```\n"
-	fr.responses["gh issue view 19"] = fakeResp{
-		stdout: `{"number":19,"title":"Esc hangs","body":` + jsonStringForTest(body) + `,"state":"OPEN","url":"https://github.com/o/r/issues/19","labels":[{"name":"bug"}],"assignees":[],"comments":[]}`,
-	}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/19":
+			writeJSON(w, map[string]any{
+				"number":    19,
+				"title":     "Esc hangs",
+				"body":      body,
+				"state":     "OPEN",
+				"html_url":  "https://github.com/o/r/issues/19",
+				"labels":    []map[string]any{{"name": "bug"}},
+				"assignees": []map[string]any{},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/19/comments":
+			writeJSON(w, []map[string]any{})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("ticket.get must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
-		"op": "get",
-		"id": "19",
+		"op":   "get",
+		"id":   "19",
+		"repo": "o/r",
 	})
 	if err != nil {
 		t.Fatalf("infra: %v", err)
@@ -285,11 +337,6 @@ func TestGitHubTicket_Get_SurfacesIdentity(t *testing.T) {
 }
 
 func TestGitHubTicket_Get_RequiresID(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
-
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
 		"op": "get",
 	})

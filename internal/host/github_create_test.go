@@ -163,18 +163,37 @@ func anyStrings(values []any) []string {
 // TestGitHubTicket_Get_ParsesMetadata proves get() recovers the create-written
 // ```kitsoki block (the round-trip slice #4's migration relies on).
 func TestGitHubTicket_Get_ParsesMetadata(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
+	t.Setenv("GH_TOKEN", "test-token")
 	body := "Pressing Esc hangs.\n\n```kitsoki\ntrace_ref: trace://abc123\nlegacy_id: 2026-05-14T103205Z-tui-hang\n```\n"
-	fr.responses["gh issue view 88"] = fakeResp{
-		stdout: `{"number":88,"title":"Esc hangs","body":` + jsonQuote(body) + `,"state":"OPEN","url":"https://github.com/o/r/issues/88","comments":[]}`,
-	}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/88":
+			writeJSON(w, map[string]any{
+				"number":   88,
+				"title":    "Esc hangs",
+				"body":     body,
+				"state":    "OPEN",
+				"html_url": "https://github.com/o/r/issues/88",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/88/comments":
+			writeJSON(w, []map[string]any{})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("ticket.get must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
-		"op": "get",
-		"id": "88",
+		"op":   "get",
+		"id":   "88",
+		"repo": "o/r",
 	})
 	if err != nil {
 		t.Fatalf("infra: %v", err)
@@ -192,10 +211,4 @@ func TestGitHubTicket_Get_ParsesMetadata(t *testing.T) {
 	if meta["legacy_id"] != "2026-05-14T103205Z-tui-hang" {
 		t.Errorf("legacy_id: %v", meta["legacy_id"])
 	}
-}
-
-// jsonQuote renders s as a JSON string literal (incl. surrounding quotes).
-func jsonQuote(s string) string {
-	r := strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "\n", "\\n", "\t", "\\t", "\r", "\\r")
-	return "\"" + r.Replace(s) + "\""
 }
