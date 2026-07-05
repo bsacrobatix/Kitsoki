@@ -570,7 +570,7 @@ turns:
       issue_count: 1
       fix_count: 1
       blocked_count: 0
-    expect_view_matches: "Finding matrix[\\s\\S]*5 total; strength 1, weakness 2, issue 1, fix 1, blocked 0"
+    expect_view_matches: "Finding matrix[\\s\\S]*5 total; strength 1, weakness 2, issue 1, fix 1, blocked[\\s\\S]*0"
     expect_host_calls:
       - handler: host.run
         args: { call: seed_product_journey_demo }

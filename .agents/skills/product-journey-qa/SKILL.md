@@ -130,6 +130,10 @@ Then hand it to the reusable driver:
    so stats can be derived mechanically. Never file, claim, or close these
    findings with raw `gh
    issue create` or text-only `issue_create` — that drops the evidence.
+   For cross-run stats that need fresh GitHub state, use the story intent
+   `stats refresh_issue_state=true ticket_repo=<owner/repo>` or the runner
+   `--stats --refresh-issue-state`; both refresh through native
+   `kitsoki gitops issue-state-cache` / `host.gh.ticket`, not raw `gh`.
    Open `weakness` findings are routed to the PRD/design path instead of the
    bugfix queue: review regenerates `weakness-routes.json`,
    `weakness-routes.md`, and a `PRD/design routes` deck scene pointing each

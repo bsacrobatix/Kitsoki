@@ -28,6 +28,7 @@ func gitopsCmd() *cobra.Command {
 	}
 	cmd.AddCommand(gitopsIssueStatusCmd())
 	cmd.AddCommand(gitopsIssueCreateCmd())
+	cmd.AddCommand(gitopsIssueStateCacheCmd())
 	cmd.AddCommand(gitopsAutonomousFixCmd())
 	return cmd
 }
@@ -137,6 +138,46 @@ func gitopsIssueCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&kitsokiRev, "kitsoki-rev", "", "kitsoki revision recorded in kitsoki metadata")
 	cmd.Flags().StringVar(&filedBy, "filed-by", "", "actor recorded in kitsoki metadata")
 	cmd.Flags().StringVar(&legacyID, "legacy-id", "", "legacy local issue id recorded in kitsoki metadata")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON output")
+	return cmd
+}
+
+func gitopsIssueStateCacheCmd() *cobra.Command {
+	var (
+		findingsRoot string
+		repo         string
+		output       string
+		jsonOut      bool
+	)
+	cmd := &cobra.Command{
+		Use:   "issue-state-cache --findings-root .artifacts/product-journey [--output issues.json]",
+		Short: "Refresh GitHub issue state for filed product-journey findings",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if strings.TrimSpace(findingsRoot) == "" {
+				return fmt.Errorf("gitops issue-state-cache: --findings-root is required")
+			}
+			result, err := runGitopsIssueStateCache(cmd.Context(), gitopsIssueStateCacheOptions{
+				FindingsRoot: findingsRoot,
+				Repo:         repo,
+				Output:       output,
+			})
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				return writeGitopsJSON(cmd, result)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Issues: %d\n", intValue(result, "issues_count"))
+			fmt.Fprintf(cmd.OutOrStdout(), "Findings root: %s\n", stringValue(result, "findings_root"))
+			if out := stringValue(result, "output"); out != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "Output: %s\n", out)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&findingsRoot, "findings-root", "", "root containing product-journey findings.json files")
+	cmd.Flags().StringVar(&repo, "repo", "", "fallback owner/repo for issue refs without a repo")
+	cmd.Flags().StringVar(&output, "output", "", "write issue-state cache JSON to this path")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON output")
 	return cmd
 }
@@ -1255,6 +1296,117 @@ func gitopsIssueRef(item map[string]any, fallbackRepo string) (string, string, s
 		}
 	}
 	return repo, number, kind, issueURL
+}
+
+type gitopsIssueStateCacheOptions struct {
+	FindingsRoot string
+	Repo         string
+	Output       string
+}
+
+func runGitopsIssueStateCache(ctx context.Context, opts gitopsIssueStateCacheOptions) (map[string]any, error) {
+	root := filepath.Clean(opts.FindingsRoot)
+	var findingsPaths []string
+	if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == "stats" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() == "findings.json" {
+			findingsPaths = append(findingsPaths, path)
+		}
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("gitops issue-state-cache: scan %q: %w", root, err)
+	}
+
+	type issueRef struct {
+		Repo      string
+		Number    string
+		URL       string
+		FindingID string
+		RunDir    string
+	}
+	seen := map[string]bool{}
+	var refs []issueRef
+	for _, path := range findingsPaths {
+		findings, err := gitopsReadJSONFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("gitops issue-state-cache: read %q: %w", path, err)
+		}
+		runDir := filepath.Dir(path)
+		for _, item := range gitopsFindingsItems(findings) {
+			repo, number, kind, issueURL := gitopsIssueRef(item, opts.Repo)
+			if repo == "" || number == "" || kind != "issue" {
+				continue
+			}
+			key := repo + "#" + number
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			refs = append(refs, issueRef{
+				Repo:      repo,
+				Number:    number,
+				URL:       firstNonBlank(issueURL, "https://github.com/"+repo+"/issues/"+number),
+				FindingID: stringValue(item, "id"),
+				RunDir:    runDir,
+			})
+		}
+	}
+
+	issues := make([]any, 0, len(refs))
+	for _, ref := range refs {
+		result, err := host.GitHubTicketHandler(ctx, map[string]any{
+			"op":   "get",
+			"repo": ref.Repo,
+			"id":   ref.Number,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if result.Error != "" {
+			return nil, fmt.Errorf("gitops issue-state-cache: fetch %s#%s: %s", ref.Repo, ref.Number, result.Error)
+		}
+		issue := gitopsIssueStatusResult(result.Data)
+		issue["repo"] = ref.Repo
+		issue["number"] = ref.Number
+		issue["url"] = firstNonBlank(stringValue(issue, "url"), ref.URL)
+		issue["issue_url"] = firstNonBlank(stringValue(issue, "issue_url"), ref.URL)
+		if ref.FindingID != "" {
+			issue["finding_id"] = ref.FindingID
+		}
+		if ref.RunDir != "" {
+			issue["run_dir"] = ref.RunDir
+		}
+		issues = append(issues, issue)
+	}
+
+	out := map[string]any{
+		"status":         "issue_state_cached",
+		"findings_root":  root,
+		"findings_files": len(findingsPaths),
+		"issues_count":   len(issues),
+		"issues":         issues,
+		"source":         "kitsoki gitops issue-state-cache",
+		"updated_at":     time.Now().UTC().Format(time.RFC3339),
+	}
+	if strings.TrimSpace(opts.Output) != "" {
+		outPath := filepath.Clean(opts.Output)
+		if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+			return nil, fmt.Errorf("gitops issue-state-cache: mkdir output: %w", err)
+		}
+		out["output"] = outPath
+		if err := gitopsWriteJSONFile(outPath, out); err != nil {
+			return nil, fmt.Errorf("gitops issue-state-cache: write %q: %w", outPath, err)
+		}
+	}
+	return out, nil
 }
 
 func gitopsReadJSONFile(path string) (map[string]any, error) {
