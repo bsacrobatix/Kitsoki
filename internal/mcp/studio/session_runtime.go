@@ -87,12 +87,12 @@ func (noRouteHarness) Close() error { return nil }
 // MCP server processes one tool call at a time per connection, and a handle is
 // single-writer by construction.
 type sessionRuntime struct {
-	def   *app.AppDef
-	orch  *orchestrator.Orchestrator
-	sink  *store.JSONLSink
+	def  *app.AppDef
+	orch *orchestrator.Orchestrator
+	sink *store.JSONLSink
 	// tap records the latest trace event so status/inspect can report live
 	// in-flight progress while an async drive runs (never-silent).
-	tap *activityTap
+	tap   *activityTap
 	sid   app.SessionID
 	model tui.RootModel
 	mu    sync.Mutex
@@ -586,7 +586,7 @@ func (rt *sessionRuntime) turnSuspendable(ctx context.Context, input string, col
 	r, q, werr := broker.waitNext(waitCtx)
 	if werr != nil {
 		if wait > 0 && werr == context.DeadlineExceeded {
-			return turnResult{}, nil, false, &runningDrive{startedAt: startedAt}, nil
+			return turnResult{}, nil, false, broker.snapshotRunning(), nil
 		}
 		cancelTurn()
 		rt.clearInFlightIf(broker)
