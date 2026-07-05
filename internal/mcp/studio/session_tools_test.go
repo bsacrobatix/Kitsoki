@@ -209,6 +209,13 @@ func TestSessionDrive_ReturnsRunningWhenTurnExceedsBoundedWait(t *testing.T) {
 	require.NotNil(t, runningStatus.Running, "session.status exposes the in-flight drive for polling")
 	assert.Equal(t, ok.Handle, runningStatus.Running.Handle)
 	assert.Equal(t, "go west", runningStatus.Running.Input)
+	// Never-silent: while the turn runs, the status must carry live activity so
+	// a poller can tell a working run from a wedged one.
+	assert.NotEmpty(t, runningStatus.Running.LastEventKind, "running status carries last trace event kind")
+	assert.Positive(t, runningStatus.Running.LastEventAtUnixMicro, "running status carries last activity timestamp")
+	assert.NotEmpty(t, runningStatus.Running.InFlightState, "running status carries the live in-flight state")
+	assert.Equal(t, runningStatus.Running.InFlightState, runningStatus.State,
+		"status state reports where the running turn actually is")
 
 	res, err = callTool(ctx, cs, "session.inspect", map[string]any{"handle": ok.Handle, "omit_world": true})
 	require.NoError(t, err)
