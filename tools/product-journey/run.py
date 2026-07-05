@@ -38,6 +38,7 @@ TARGET_PROOF_ROOT = ARTIFACT_ROOT / "target-proofs"
 DOGFOOD_ROOT = ARTIFACT_ROOT / "dogfood"
 PREFLIGHT_ROOT = ARTIFACT_ROOT / "preflights"
 DEFAULT_DECK = ROOT / "docs" / "decks" / "product-journey-eval.slidey.json"
+NATIVE_GHAGENT_SMOKE = ROOT / "tools" / "product-journey" / "native_ghagent_test.py"
 EVIDENCE_SOURCES = {"demo", "retained", "external", "local", "cassette", "unknown"}
 PROOF_EVIDENCE_SOURCES = {"retained", "external", "local", "cassette"}
 STAGES = [
@@ -132,6 +133,24 @@ def shell(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
         text=True,
         capture_output=True,
     )
+
+
+def native_ghagent_smoke() -> dict:
+    result = shell([sys.executable, str(NATIVE_GHAGENT_SMOKE)], ROOT)
+    output = (result.stdout + result.stderr).strip()
+    if result.returncode != 0:
+        return {
+            "status": "failed",
+            "summary": "native gh-agent queue/drain smoke failed",
+            "exit_code": result.returncode,
+            "output": output,
+        }
+    return {
+        "status": "passed",
+        "summary": "native gh-agent queue/drain smoke passed",
+        "exit_code": result.returncode,
+        "output": output,
+    }
 
 
 def clone_local_repo(src: str, prefix: str) -> Path:
@@ -7598,6 +7617,7 @@ def main() -> None:
     parser.add_argument("--driver-replay-smoke", action="store_true", help="Run a deterministic no-LLM one-scenario driver replay smoke with cassette evidence")
     parser.add_argument("--driver-replay-sweep", action="store_true", help="Run deterministic no-LLM driver replay smokes for every scenario")
     parser.add_argument("--capture-preflight", action="store_true", help="Run no-LLM capture-toolchain preflight checks")
+    parser.add_argument("--native-ghagent-smoke", action="store_true", help="Run no-LLM native gh-agent enqueue/drain smoke through kitsoki commands")
     parser.add_argument("--preflight-command", default="", help="Override the webshot smoke command for --capture-preflight tests")
     parser.add_argument("--preflight-timeout", type=int, default=90, help="Timeout in seconds for --capture-preflight webshot smoke")
     parser.add_argument("--validate-corpus", action="store_true", help="Validate personas, scenarios, and GitHub target catalog without writing artifacts")
@@ -7766,6 +7786,23 @@ def main() -> None:
         for check in result["checks"]:
             print(f"- {check['status']}: {check['id']} ({check['summary']})")
         append_log(f"Ran capture preflight {result['preflight_id']}: {result['status']}")
+        return
+
+    if args.native_ghagent_smoke:
+        result = native_ghagent_smoke()
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Ran native gh-agent smoke: {result['status']}")
+            if result["status"] != "passed":
+                raise SystemExit(1)
+            return
+        print(f"Native gh-agent smoke: {result['status']}")
+        print(result["summary"])
+        if result["output"]:
+            print(result["output"])
+        append_log(f"Ran native gh-agent smoke: {result['status']}")
+        if result["status"] != "passed":
+            raise SystemExit(1)
         return
 
     if args.dogfood_smoke:

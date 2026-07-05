@@ -45,6 +45,7 @@ Start with the cheap gates before live capture:
 python3 tools/product-journey/run.py --validate-corpus --json-output
 python3 tools/product-journey/run.py --capture-preflight --json-output
 python3 tools/product-journey/run.py --driver-replay-sweep --seed demo --json-output
+python3 tools/product-journey/run.py --native-ghagent-smoke --json-output
 GOCACHE=/private/tmp/kitsoki-gocache go run ./cmd/kitsoki test flows stories/product-journey-qa/app.yaml
 ```
 
@@ -158,7 +159,7 @@ When refining the pipeline:
 2. Patch the smallest durable surface: catalog, runner, story, driver agent, or
    this skill.
 3. Add or update a deterministic flow/cassette/replay check.
-4. Re-run `--validate-corpus`, `--driver-replay-sweep`, and product-journey
-   story flows.
+4. Re-run `--validate-corpus`, `--driver-replay-sweep`,
+   `--native-ghagent-smoke`, and product-journey story flows.
 5. Commit only the product-journey slice, leaving unrelated workspace dirt
    untouched.
