@@ -24,15 +24,22 @@ import (
 // (formatting is not semantically significant) — see BuildFeatureDoc's doc
 // comment and the adapter tests for how equivalence is actually checked.
 type FeatureDoc struct {
-	ID      string   `yaml:"id"`
-	Kind    string   `yaml:"kind"`
-	Title   string   `yaml:"title"`
-	Tagline string   `yaml:"tagline"`
-	Summary string   `yaml:"summary"`
-	Promo   *Promo   `yaml:"promo,omitempty"`
-	Docs    []string `yaml:"docs,omitempty"`
-	Demo    *Demo    `yaml:"demo,omitempty"`
-	Tour    *Tour    `yaml:"tour,omitempty"`
+	ID        string   `yaml:"id"`
+	Kind      string   `yaml:"kind"`
+	Title     string   `yaml:"title"`
+	Tagline   string   `yaml:"tagline"`
+	Summary   string   `yaml:"summary"`
+	Narrative string   `yaml:"narrative,omitempty"`
+	Promo     *Promo   `yaml:"promo,omitempty"`
+	Docs      []string `yaml:"docs,omitempty"`
+	Related   []string `yaml:"related,omitempty"`
+	Demo      *Demo    `yaml:"demo,omitempty"`
+	// Sections and QA are schema shapes this adapter does not need to
+	// interpret (stitched product-tour chapters; gated vision-QA scenarios)
+	// — carried verbatim so nothing is lost on a graph round-trip.
+	Sections []any `yaml:"sections,omitempty"`
+	QA       any   `yaml:"qa,omitempty"`
+	Tour     *Tour `yaml:"tour,omitempty"`
 }
 
 type Promo struct {
@@ -43,13 +50,22 @@ type Promo struct {
 // Demo is derived entirely from the site-page's has_media evidence node —
 // never stored on the site-page itself, so it can't drift from its source.
 type Demo struct {
-	Spec         string `yaml:"spec,omitempty"`
-	ArtifactDir  string `yaml:"artifactDir,omitempty"`
-	VideoBase    string `yaml:"videoBase,omitempty"`
-	PosterStep   string `yaml:"posterStep,omitempty"`
-	Story        string `yaml:"story,omitempty"`
-	Flow         string `yaml:"flow,omitempty"`
-	HostCassette string `yaml:"hostCassette,omitempty"`
+	Renderer     string   `yaml:"renderer,omitempty"`
+	Spec         string   `yaml:"spec,omitempty"`
+	ArtifactDir  string   `yaml:"artifactDir,omitempty"`
+	VideoBase    string   `yaml:"videoBase,omitempty"`
+	PosterStep   string   `yaml:"posterStep,omitempty"`
+	Story        string   `yaml:"story,omitempty"`
+	Flow         string   `yaml:"flow,omitempty"`
+	HostCassette string   `yaml:"hostCassette,omitempty"`
+	External     bool     `yaml:"external,omitempty"`
+	Profiles     []string `yaml:"profiles,omitempty"`
+	Embed        *DemoEmbed `yaml:"embed,omitempty"`
+}
+
+type DemoEmbed struct {
+	Deck  string `yaml:"deck"`
+	Rrweb string `yaml:"rrweb"`
 }
 
 type Tour struct {
@@ -98,11 +114,12 @@ func BuildFeatureDoc(cat *graph.Catalog, sitePage *graph.Node) (*FeatureDoc, err
 
 	content, _ := sitePage.Fields["content_fields"].(map[string]any)
 	doc := &FeatureDoc{
-		ID:      featureSlug(feature.ID),
-		Kind:    "feature",
-		Title:   stringField(content, "title", sitePage.Title),
-		Tagline: stringField(content, "tagline", sitePage.Title),
-		Summary: stringField(content, "summary", ""),
+		ID:        featureSlug(feature.ID),
+		Kind:      stringField(sitePage.Fields, "kind", "feature"),
+		Title:     stringField(content, "title", sitePage.Title),
+		Tagline:   stringField(content, "tagline", sitePage.Title),
+		Summary:   stringField(content, "summary", ""),
+		Narrative: stringField(content, "narrative", ""),
 	}
 
 	if promo, ok := sitePage.Fields["promo"].(map[string]any); ok {
@@ -116,13 +133,8 @@ func BuildFeatureDoc(cat *graph.Catalog, sitePage *graph.Node) (*FeatureDoc, err
 		doc.Promo = p
 	}
 
-	if rawDocs, ok := sitePage.Fields["docs"].([]any); ok {
-		for _, d := range rawDocs {
-			if s, ok := d.(string); ok {
-				doc.Docs = append(doc.Docs, s)
-			}
-		}
-	}
+	doc.Docs = stringSliceField(sitePage.Fields, "docs")
+	doc.Related = stringSliceField(sitePage.Fields, "related")
 
 	if evidence, err := joinOne(cat, sitePage, "has_media"); err == nil {
 		doc.Demo = demoFromEvidence(evidence)
@@ -132,7 +144,28 @@ func BuildFeatureDoc(cat *graph.Catalog, sitePage *graph.Node) (*FeatureDoc, err
 		doc.Tour = tourFromFields(rawTour)
 	}
 
+	if rawSections, ok := sitePage.Fields["sections"].([]any); ok {
+		doc.Sections = rawSections
+	}
+	if rawQA, ok := sitePage.Fields["qa"]; ok {
+		doc.QA = rawQA
+	}
+
 	return doc, nil
+}
+
+func stringSliceField(m map[string]any, key string) []string {
+	raw, ok := m[key].([]any)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, v := range raw {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // featureSlug derives the features/<id>.yaml site-facing id from a feature
@@ -164,7 +197,17 @@ func joinOne(cat *graph.Catalog, node *graph.Node, edgeField graph.EdgeField) (*
 // story-driven demo's fields split across a media-recording artifact and a
 // story/flow/hostCassette artifact) into one Demo.
 func demoFromEvidence(evidence *graph.Node) *Demo {
-	d := &Demo{}
+	d := &Demo{
+		Renderer: stringField(evidence.Fields, "renderer", ""),
+		External: boolField(evidence.Fields, "external"),
+		Profiles: stringSliceField(evidence.Fields, "profiles"),
+	}
+	if embed, ok := evidence.Fields["embed"].(map[string]any); ok {
+		d.Embed = &DemoEmbed{
+			Deck:  stringField(embed, "deck", ""),
+			Rrweb: stringField(embed, "rrweb", ""),
+		}
+	}
 	if producers, ok := evidence.Fields["producers"].([]any); ok && len(producers) > 0 {
 		if s, ok := producers[0].(string); ok {
 			d.Spec = s
@@ -196,6 +239,14 @@ func demoFromEvidence(evidence *graph.Node) *Demo {
 		}
 	}
 	return d
+}
+
+func boolField(m map[string]any, key string) bool {
+	if m == nil {
+		return false
+	}
+	b, _ := m[key].(bool)
+	return b
 }
 
 func tourFromFields(raw map[string]any) *Tour {
