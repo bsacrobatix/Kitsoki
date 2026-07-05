@@ -126,6 +126,21 @@ export const cytoscapeStyle: cytoscape.StylesheetJson = [
     },
   },
   {
+    selector: "node.focused",
+    style: {
+      "border-color": "#e0463c",
+      "border-width": 4,
+      width: 30,
+      height: 30,
+      "font-weight": 700,
+    },
+  },
+  {
+    // Listed after node.focused so a gapped node's added/modified/removed
+    // color always shows, even while focused (Cytoscape resolves the same
+    // property from the LAST matching rule in the stylesheet array) — focus
+    // still reads via the width/height/font-weight bump above, just not a
+    // second competing border color.
     selector: 'node[diffKind = "added"]',
     style: { "border-color": DIFF_COLORS.added, "border-width": 3 },
   },
@@ -136,16 +151,6 @@ export const cytoscapeStyle: cytoscape.StylesheetJson = [
   {
     selector: 'node[diffKind = "removed"]',
     style: { "border-color": DIFF_COLORS.removed, "border-width": 3, "border-style": "dashed", "background-opacity": 0.5 },
-  },
-  {
-    selector: "node.focused",
-    style: {
-      "border-color": "#e0463c",
-      "border-width": 4,
-      width: 30,
-      height: 30,
-      "font-weight": 700,
-    },
   },
   {
     selector: "edge",
