@@ -107,6 +107,7 @@ func TestGHAgentEnqueueCmdQueuesIssue(t *testing.T) {
 
 func TestGHAgentDrainCmdDrainsQueuedIssue(t *testing.T) {
 	dbPath := t.TempDir() + "/gh-jobs.sqlite"
+	assetDir := t.TempDir()
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -143,7 +144,6 @@ func TestGHAgentDrainCmdDrainsQueuedIssue(t *testing.T) {
 		if err := store.SetRunURL(ctx, job.JobID, job.JobID, "https://agent.example/run/"+job.JobID); err != nil {
 			return nil, err
 		}
-		store.DataDir = t.TempDir()
 		if err := store.PutAsset(ctx, job.JobID, "fix-report.md", "text/markdown", []byte("# Fix report\n")); err != nil {
 			return nil, err
 		}
@@ -161,6 +161,7 @@ func TestGHAgentDrainCmdDrainsQueuedIssue(t *testing.T) {
 		"--db", dbPath,
 		"--repo", "o/r",
 		"--public-base-url", "https://agent.example",
+		"--asset-dir", assetDir,
 		"--json",
 	})
 	if err := cmd.Execute(); err != nil {
