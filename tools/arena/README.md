@@ -307,3 +307,66 @@ job type scales.
   carried through to `CellResult`/rollup — all with zero docker, zero LLM
   spend. A real docker-gated run (the actual swarm inside the browser image)
   is manual acceptance only, out of this test gate's scope.
+
+## Status — usable-kitsoki-gate job type registered (usable-kitsoki-release-gate, Task 2)
+
+`usable-kitsoki-gate` is a fourth job type alongside `bugfix`/`persona-qa`/
+`swarm` (`arena plugins` lists all four). Per
+`docs/proposals/usable-kitsoki-release-gate.md`, one cell drives the whole
+mined scenario corpus for one `persona x surface` combination (the parity
+verdict record — `arena/plugins/usable_kitsoki_gate_schema.json`, Task 1 — is
+emitted once per scenario within that cell, not once per cell), the same
+"the cell is the unit of placement, not the individual run inside it"
+convention `swarm.py` established.
+
+- **image()** dispatches on `axis.surface`: `web`/`tui` request the
+  browser-capable image (`kitsoki-arena-repo-runtime-browser:latest`); `mcp`
+  is a headless stdio surface and gets the plain
+  `kitsoki-arena-repo-runtime:latest`. `target.meta.image`/`variant.meta.image`
+  override either default, same escape hatch as `swarm.py`/`persona_qa.py`.
+- **drive_command()** dispatches on `axis.surface` too: `web` reuses the
+  swarm-style convention (`cd tools/runstatus && npx playwright test ...`);
+  `tui`/`mcp` shell into their own stub runner script under
+  `tools/usable-kitsoki-gate/`. `GATE_SURFACE`/`GATE_PERSONA`/
+  `GATE_SCENARIO_CORPUS`/`GATE_RUN_ID`/`GATE_RESULTS_PATH` env vars carry the
+  cell's coords through either path. **None of the three concrete harness
+  entry points exist yet** (`tests/playwright/usable-kitsoki-gate-web.spec.ts`,
+  `tools/usable-kitsoki-gate/run_tui_gate.py`,
+  `tools/usable-kitsoki-gate/run_mcp_gate.py`) — S1 (workbench producer
+  contract) and S4 (scenario foundry / mined corpus) are separate proposals
+  that haven't landed. This plugin's job today is the argv/env composition
+  and scoring contract, proven by test, so S1/S4 land against an already-
+  stable seam. No separate `--live` path exists yet either, for the same
+  reason (mirrors `swarm.py`'s `live` no-op).
+- An empty scenario corpus (no targets/variants/axes) enumerates to **zero
+  cells**, not an error — `JobSpec.cells()` already returns `[]` for empty
+  `targets`/`variants`/any axis with an empty value list; no special-casing
+  needed in the plugin (`arena plan --spec <empty-corpus-spec>` prints
+  `cells=0` and exits 0).
+- **score()** never regexes stdout for a verdict. The ONE thing read from
+  stdout is the harness's own `[usable-kitsoki-gate] wrote <path> (...)`
+  line, mirroring `swarm.py`'s `[swarm] wrote <path>` convention. The bundle
+  at that path (`{"run_id", "records": [...]}`) is mapped from its container
+  path back to the host path and every record is validated against
+  `usable_kitsoki_gate_schema.json` — a record that fails validation blocks
+  the cell (`infra:results-malformed`) rather than silently scoring past it.
+  Clean records are reduced into the three `GATE_CONDITIONS`
+  (`usable_kitsoki_gate_constants.py`): zero `silent_bounce`, zero
+  `misroute_adjacent`, and `parity_percent(candidate_and_source_completed,
+  source_completed) >= PARITY_THRESHOLD_PERCENT` — all three passing is
+  `solved`, any one failing is `failed`. This reduction is **per cell**, i.e.
+  per `(persona, surface)`; the cross-surface **worst-surface-gating**
+  reduction the proposal describes needs multiple cells' results compared
+  against each other and belongs to a higher rollup layer (Task 3, gated on
+  S1/S4 landing — explicitly out of scope here).
+- Tests: `tools/arena/tests/test_usable_kitsoki_gate_plugin.py` proves
+  registration alongside the other three job types, image selection per
+  surface (+ target/variant meta overrides), full argv/env composition for
+  all three surfaces (web/tui/mcp, including the default-surface and
+  no-persona-axis fallbacks and the explicit `scenario_corpus`/`run_id`
+  threading), the empty-scenario-corpus zero-cells behavior, and scoring
+  against a real on-disk parity-records bundle (solved / silent-bounce-fails
+  / misroute-fails / below-threshold-fails / at-threshold-boundary-solves /
+  empty-records-solves / schema-violation-blocks / missing-pointer-infra /
+  crash-infra), plus the container<->host results-path mapping — all with
+  zero docker, zero LLM spend.
