@@ -155,6 +155,27 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 
 	storySummary, _ := productJourneyJSON(ctx, "--summarize-run", "--run-dir", runDir)
 	mergeMaps(result, storySummary)
+	filedIssueCount := len(stringSliceValue(result, "filed_issue_urls"))
+	filingOK := stringValue(result, "status") == "findings_filed" &&
+		filedIssueCount > 0 &&
+		intValue(result, "findings_failed_count") == 0 &&
+		intValue(result, "findings_unfiled_count") == 0
+	ghAgentOK := gitopsGHAgentGateOK(result)
+	closeoutOK := false
+	if filingOK && ghAgentOK {
+		closeout, err := gitopsCloseoutFixedIssues(ctx, runDir, opts.TicketRepo, result)
+		if err != nil {
+			return nil, err
+		}
+		mergeMaps(result, closeout)
+		closeoutOK = stringValue(closeout, "issue_closeout_status") == "closed"
+	} else {
+		result["issue_closeout_status"] = "skipped"
+		result["issue_closeout_summary"] = "Issue close-out skipped because one or more autonomous gates failed."
+		result["issue_closeout_count"] = 0
+	}
+	storySummary, _ = productJourneyJSON(ctx, "--summarize-run", "--run-dir", runDir)
+	mergeMaps(result, storySummary)
 	reportPath, err := writeGitopsAutonomousReport(runDir, result, nil, nil)
 	if err != nil {
 		return nil, err
@@ -175,25 +196,6 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 	reviewFailed := firstNonZero(intValue(review, "review_failed_count"), intValue(review, "failed"))
 	reviewOK := stringValue(review, "review_status") == "ready" && reviewFailed == 0
 	validationOK := stringValue(validation, "status") == "valid" && intValue(validation, "errors") == 0
-	filedIssueCount := len(stringSliceValue(result, "filed_issue_urls"))
-	filingOK := stringValue(result, "status") == "findings_filed" &&
-		filedIssueCount > 0 &&
-		intValue(result, "findings_failed_count") == 0 &&
-		intValue(result, "findings_unfiled_count") == 0
-	ghAgentOK := gitopsGHAgentGateOK(result)
-	closeoutOK := false
-	if reviewOK && validationOK && filingOK && ghAgentOK {
-		closeout, err := gitopsCloseoutFixedIssues(ctx, runDir, opts.TicketRepo, result)
-		if err != nil {
-			return nil, err
-		}
-		mergeMaps(result, closeout)
-		closeoutOK = stringValue(closeout, "issue_closeout_status") == "closed"
-	} else {
-		result["issue_closeout_status"] = "skipped"
-		result["issue_closeout_summary"] = "Issue close-out skipped because one or more autonomous gates failed."
-		result["issue_closeout_count"] = 0
-	}
 
 	status := "autonomous_fix_invalid"
 	if reviewOK && validationOK && filingOK && ghAgentOK && closeoutOK {
@@ -494,7 +496,153 @@ func runGitopsAutonomousFixViaRunner(ctx context.Context, opts gitopsAutonomousF
 	if err := json.Unmarshal(out, &result); err != nil {
 		return nil, fmt.Errorf("product-journey autonomous-fix test fallback printed invalid JSON: %w\n%s", err, strings.TrimSpace(string(out)))
 	}
+	if stringValue(result, "filing_status") == "findings_filed" && gitopsGHAgentGateOK(result) {
+		closeout, err := gitopsCloseoutFixedIssuesFake(opts.RunDir, opts.TicketRepo, result)
+		if err != nil {
+			return nil, err
+		}
+		mergeMaps(result, closeout)
+		storySummary, _ := productJourneyJSON(ctx, "--summarize-run", "--run-dir", opts.RunDir)
+		mergeMaps(result, storySummary)
+		reportPath, err := writeGitopsAutonomousReport(opts.RunDir, result, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		result["autonomous_fix_report_path"] = reportPath
+		review, err := productJourneyJSON(ctx, "--review-run", "--run-dir", opts.RunDir)
+		if err != nil {
+			return nil, err
+		}
+		validation, err := productJourneyJSON(ctx, "--validate-run", "--run-dir", opts.RunDir)
+		if err != nil {
+			return nil, err
+		}
+		storySummary, _ = productJourneyJSON(ctx, "--summarize-run", "--run-dir", opts.RunDir)
+		mergeMaps(result, storySummary)
+		reviewFailed := firstNonZero(intValue(review, "review_failed_count"), intValue(review, "failed"))
+		reviewOK := stringValue(review, "review_status") == "ready" && reviewFailed == 0
+		validationOK := stringValue(validation, "status") == "valid" && intValue(validation, "errors") == 0
+		closeoutOK := stringValue(closeout, "issue_closeout_status") == "closed"
+		status := "autonomous_fix_invalid"
+		if reviewOK && validationOK && closeoutOK {
+			status = "autonomous_fix_valid"
+		}
+		result["status"] = status
+		result["autonomous_fix_status"] = status
+		result["autonomous_gate_summary"] = fmt.Sprintf("filing=pass, gh_agent=pass, review=%s, validation=%s",
+			passFail(reviewOK), passFail(validationOK))
+		result["review_status"] = firstNonBlank(stringValue(review, "review_status"), stringValue(review, "status"))
+		result["review_summary"] = stringValue(review, "summary")
+		result["review_passed_count"] = firstNonZero(intValue(review, "review_passed_count"), intValue(review, "passed"))
+		result["review_failed_count"] = reviewFailed
+		result["review_warning_count"] = firstNonZero(intValue(review, "review_warning_count"), intValue(review, "warnings"))
+		result["review_total_count"] = firstNonZero(intValue(review, "review_total_count"), intValue(review, "total"))
+		result["review_backlog_summary"] = stringValue(review, "review_backlog_summary")
+		result["validation_status"] = stringValue(validation, "status")
+		result["validation_errors"] = intValue(validation, "errors")
+		result["validation_warnings"] = intValue(validation, "warnings")
+		result["validation_issue_summary"] = stringValue(validation, "validation_issue_summary")
+		result["validation_issues"] = validation["issues"]
+		reportPath, err = writeGitopsAutonomousReport(opts.RunDir, result, review, validation)
+		if err != nil {
+			return nil, err
+		}
+		result["autonomous_fix_report_path"] = reportPath
+	}
 	return result, nil
+}
+
+func gitopsCloseoutFixedIssuesFake(runDir, ticketRepo string, status map[string]any) (map[string]any, error) {
+	findingsPath := filepath.Join(runDir, "findings.json")
+	findings, err := gitopsReadJSONFile(findingsPath)
+	if err != nil {
+		return nil, err
+	}
+	jobsByOrigin := make(map[string]map[string]any)
+	for _, job := range mapSliceValue(status, "gh_agent_drained_jobs") {
+		if stringValue(job, "state") != "done" {
+			continue
+		}
+		if origin := stringValue(job, "origin_ref"); origin != "" {
+			jobsByOrigin[origin] = job
+		}
+	}
+	var closed []map[string]any
+	var failed []string
+	closeoutRev := gitShortRevCWD()
+	for _, item := range gitopsFindingsItems(findings) {
+		if stringValue(item, "kind") != "issue" || stringValue(item, "origin") == "seeded" {
+			continue
+		}
+		repo, number, kind, issueURL := gitopsIssueRef(item, ticketRepo)
+		if repo == "" || number == "" || kind != "issue" {
+			continue
+		}
+		origin := "github:" + repo + "/" + kind + "/" + number
+		job := jobsByOrigin[origin]
+		if job == nil {
+			failed = append(failed, fmt.Sprintf("%s missing done gh-agent job", issueURL))
+			continue
+		}
+		commentURL := firstNonBlank(issueURL, "https://github.com/"+repo+"/issues/"+number) + "#issuecomment-kitsoki-fixed-in"
+		closed = append(closed, map[string]any{
+			"finding_id":  stringValue(item, "id"),
+			"issue_url":   firstNonBlank(issueURL, "https://github.com/"+repo+"/issues/"+number),
+			"repo":        repo,
+			"number":      number,
+			"comment_url": commentURL,
+			"run_url":     stringValue(job, "run_url"),
+			"job_id":      stringValue(job, "job_id"),
+			"closed":      true,
+		})
+		issue := mapValue(item, "github_issue")
+		if issue == nil {
+			issue = map[string]any{}
+			item["github_issue"] = issue
+		}
+		issue["repo"] = repo
+		issue["number"] = number
+		issue["url"] = firstNonBlank(issueURL, "https://github.com/"+repo+"/issues/"+number)
+		issue["state"] = "closed"
+		issue["status"] = "closed"
+		issue["closed_by"] = "kitsoki gitops autonomous-fix"
+		issue["fixed_by"] = closeoutRev
+		issue["closeout_comment_url"] = commentURL
+		issue["comments"] = append(mapSliceValue(issue, "comments"), map[string]any{
+			"body": gitopsFixedInCommentBody(runDir, item, job, closeoutRev),
+			"url":  commentURL,
+		})
+		item["status"] = "fixed"
+		item["fixed_by"] = closeoutRev
+		item["fixed_at"] = time.Now().UTC().Format(time.RFC3339)
+	}
+	closeoutStatus := "closed"
+	if len(closed) == 0 || len(failed) > 0 {
+		closeoutStatus = "failed"
+	}
+	summary := fmt.Sprintf("Closed %d fixed GitHub issue(s).", len(closed))
+	if len(failed) > 0 {
+		summary = fmt.Sprintf("%s %d close-out failure(s): %s", summary, len(failed), strings.Join(firstStrings(failed, 3), "; "))
+	}
+	findings["issue_closeout"] = map[string]any{
+		"updated_at": time.Now().UTC().Format(time.RFC3339),
+		"status":     closeoutStatus,
+		"count":      len(closed),
+		"summary":    summary,
+		"items":      closed,
+		"errors":     failed,
+	}
+	if err := gitopsWriteJSONFile(findingsPath, findings); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"issue_closeout_status":  closeoutStatus,
+		"issue_closeout_count":   len(closed),
+		"issue_closeout_summary": summary,
+		"closed_issue_urls":      closeoutIssueURLs(closed),
+		"issue_closeouts":        closed,
+		"issue_closeout_errors":  failed,
+	}, nil
 }
 
 func gitopsFilingResult(runDir, ticketRepo string, filed host.FindingsFilingResult) map[string]any {
