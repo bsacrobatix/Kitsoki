@@ -12,7 +12,7 @@
   ],
   "run_result": {
     "required": ["run_id", "created_at", "mode", "project", "persona", "stages", "scenarios", "artifacts"],
-    "artifacts": ["run.json", "journey.md", "metrics.json", "bugs.json", "findings.json", "scenario-outcomes.json", "scenario-outcomes.md", "evidence.json", "media-manifest.json", "scenarios.json", "execution-plan.json", "execution-plan.md", "driver-plan.json", "driver-plan.md", "driver-journal.json", "driver-journal.md", "agent-brief.json", "agent-brief.md", "driver-handoff.json", "driver-handoff.md", "weakness-routes.json", "weakness-routes.md", "review.json", "deck.slidey.json"]
+    "artifacts": ["run.json", "journey.md", "metrics.json", "bugs.json", "findings.json", "scenario-outcomes.json", "scenario-outcomes.md", "evidence.json", "media-manifest.json", "scenarios.json", "execution-plan.json", "execution-plan.md", "driver-plan.json", "driver-plan.md", "driver-journal.json", "driver-journal.md", "agent-brief.json", "agent-brief.md", "driver-handoff.json", "driver-handoff.md", "weakness-routes.json", "weakness-routes.md", "prd-design-intake.json", "prd-design-intake.md", "review.json", "deck.slidey.json"]
   },
   "scenario_outcomes": {
     "required": ["run_id", "items", "summary"],
@@ -97,7 +97,7 @@
   "finding_kinds": ["strength", "weakness", "issue", "fix"],
   "review_statuses": ["not_reviewed", "needs_evidence", "ready"],
   "review_check_statuses": ["pass", "warn", "fail"],
-  "review_check_ids": ["required-files", "scenario-contract", "scenario-attempts", "driver-journal-coverage", "driver-evidence-linked", "driver-live-budget", "driver-action-contract", "captured-evidence", "non-demo-evidence", "key-video", "media-manifest", "playback-artifacts-resolve", "playback-or-blocker", "playback-evidence-backed", "findings-summary", "balanced-findings", "observed-findings", "scenario-outcomes", "quality-gates", "no-rejected-evidence", "weakness-routing", "findings-filed", "gh-agent-fixes", "gh-agent-fix-evidence", "gh-agent-triage-evidence", "gh-agent-independent-verify", "gh-agent-run-url", "issue-closeout", "autonomous-fix-report", "deck-generated"],
+  "review_check_ids": ["required-files", "scenario-contract", "scenario-attempts", "driver-journal-coverage", "driver-evidence-linked", "driver-live-budget", "driver-action-contract", "captured-evidence", "non-demo-evidence", "key-video", "media-manifest", "playback-artifacts-resolve", "playback-or-blocker", "playback-evidence-backed", "findings-summary", "balanced-findings", "observed-findings", "scenario-outcomes", "quality-gates", "no-rejected-evidence", "weakness-routing", "prd-design-intake", "findings-filed", "gh-agent-fixes", "gh-agent-fix-evidence", "gh-agent-triage-evidence", "gh-agent-independent-verify", "gh-agent-run-url", "issue-closeout", "autonomous-fix-report", "deck-generated"],
   "demo_seed": {
     "evidence_items": 25,
     "findings": 4

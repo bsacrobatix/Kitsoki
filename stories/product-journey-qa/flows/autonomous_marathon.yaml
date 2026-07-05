@@ -150,6 +150,9 @@ host_handlers:
                 weakness_count: 1
                 weakness_route_count: 1
                 weakness_route_summary: "finding-1->stories/prd"
+                prd_design_intake_path: .artifacts/product-journey/run-999/prd-design-intake.md
+                prd_design_intake_count: 1
+                prd_design_intake_summary: "finding-1->stories/prd start"
                 issue_count: 1
                 fix_count: 0
                 blocked_count: 0
@@ -210,8 +213,9 @@ turns:
       stats_status: stats_derived
       stats_fixed_count: 1
       weakness_route_count: 1
+      prd_design_intake_count: 1
       validation_status: valid
-    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, independent_verify=pass,[\\s\\S]*review=pass, validation=pass[\\s\\S]*Independent verify[\\s\\S]*pass: verified=1/1[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 1[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*Marathon control[\\s\\S]*ready_for_driver[\\s\\S]*GH-agent claims[\\s\\S]*claimed: claimed 1[\\s\\S]*GH-agent evidence[\\s\\S]*triage 1 attached / 0 missing[\\s\\S]*triage-[\\s\\S]*verdict.md[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 1, filed 1, fixed 1[\\s\\S]*Stats gate[\\s\\S]*pass: pass; current run scanned yes"
+    expect_view_matches: "RUN CREATED[\\s\\S]*PRD intake[\\s\\S]*1 routed[\\s\\S]*finding-1->stories/prd start[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, independent_verify=pass,[\\s\\S]*review=pass, validation=pass[\\s\\S]*Independent verify[\\s\\S]*pass: verified=1/1[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 1[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*Marathon control[\\s\\S]*ready_for_driver[\\s\\S]*GH-agent claims[\\s\\S]*claimed: claimed 1[\\s\\S]*GH-agent evidence[\\s\\S]*triage 1 attached / 0 missing[\\s\\S]*triage-[\\s\\S]*verdict.md[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 1, filed 1, fixed 1[\\s\\S]*Stats gate[\\s\\S]*pass: pass; current run scanned yes"
     expect_host_calls:
       - handler: host.run
         args: { call: autonomous_product_journey_marathon_finalize }

@@ -401,14 +401,24 @@ def main():
                "https://agent.example/run/job-1/artifacts/fix-report.md" in gh_scene.get("body", "")
                and "https://agent.example/run/job-1/artifacts/fix.patch" in gh_scene.get("body", ""))
         routes = run.read_json(run_dir / "weakness-routes.json")
+        intake = run.read_json(run_dir / "prd-design-intake.json")
         _check("weakness finding routes to PRD/design",
                routes["summary"]["routed"] == 1
                and routes["items"][0]["target_story"] == "stories/prd"
                and routes["items"][0]["target_pipeline"] == "prd-design")
+        _check("weakness route has PRD/design intake",
+               intake["summary"]["intake_count"] == 1
+               and intake["items"][0]["target_story"] == "stories/prd"
+               and intake["items"][0]["story_intent"] == "start"
+               and "confusing design prompt" in intake["items"][0]["story_slots"]["idea"]
+               and "weakness-routes.md" in intake["items"][0]["story_slots"]["upstream_paths"]
+               and intake["items"][0]["persona_lens"]["starting_surface"],
+               )
         route_scene = deck_scene(deck, "PRD/design routes")
         _check("deck includes PRD/design route scene",
                "confusing design prompt" in route_scene.get("body", "")
-               and "stories/prd" in route_scene.get("body", ""))
+               and "stories/prd" in route_scene.get("body", "")
+               and "prd-design-intake.md" in route_scene.get("body", ""))
         seeded = [i for i in findings["items"] if i.get("origin") == "seeded"]
         _check("seeded finding not filed", not seeded[0].get("github_issue"))
 
@@ -427,7 +437,7 @@ def main():
         # direct file_findings run is not complete until native gitops closes
         # the fixed issues.
         reviewed = run.review_run_bundle(run_dir, None)
-        _check("review has 30 checks", reviewed["total"] == 30)
+        _check("review has 31 checks", reviewed["total"] == 31)
         _check("direct filing requires issue close-out before final review",
                review_check(reviewed, "issue-closeout")["status"] == "fail"
                and "status=(missing)" in review_check(reviewed, "issue-closeout")["detail"])
@@ -440,9 +450,11 @@ def main():
         # 5. Gates: a new credible finding
         # after filing trips review + validate until re-filed.
         reviewed = run.review_run_bundle(run_dir, None)
-        _check("review has 30 checks after close-out", reviewed["total"] == 30)
+        _check("review has 31 checks after close-out", reviewed["total"] == 31)
         _check("weakness-routing passes when weakness has PRD route",
                review_check(reviewed, "weakness-routing")["status"] == "pass")
+        _check("prd-design-intake passes when weakness has PRD intake",
+               review_check(reviewed, "prd-design-intake")["status"] == "pass")
         _check("findings-filed passes when fully filed",
                review_check(reviewed, "findings-filed")["status"] == "pass")
         _check("issue-closeout passes when fixed issues are closed",
@@ -626,7 +638,7 @@ def main():
                and "https://agent.example/run/job-1/artifacts/triage-verdict.md" in report_text
                and "https://agent.example/run/job-1/artifacts/independent-verify.md" in report_text)
         _check("legacy autonomous loop reviewed close-out gate",
-               result["review_total_count"] == 30 and result["validation_status"] == "invalid")
+               result["review_total_count"] == 31 and result["validation_status"] == "invalid")
 
         run_dir_facade, run_json_facade = run.build_run_bundle(
             catalog, run.load_github_targets(run.GITHUB_TARGETS),

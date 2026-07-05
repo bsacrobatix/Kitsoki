@@ -79,6 +79,10 @@ It is intentionally no-LLM:
   Each marathon run also writes `autonomous-marathon-control.json/md` with the
   cadence, per-scenario live budget, human role, heartbeat/watchdog timing, and
   final gates, and the story view surfaces that control state for review.
+  Open weakness findings are also materialized as `prd-design-intake.json/md`:
+  each item includes the `stories/prd` `start` handoff, upstream evidence paths,
+  and the persona lens so usability gaps can enter the PRD/design path instead
+  of being mistaken for bugfix queue work.
 - `seed_demo` calls `tools/product-journey/run.py --seed-demo-evidence
   --json-output` to populate a no-LLM review bundle.
 - `handoff` calls `tools/product-journey/run.py --driver-handoff --json-output`
