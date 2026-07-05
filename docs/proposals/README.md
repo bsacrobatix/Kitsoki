@@ -82,59 +82,11 @@ thought.
   `ad-hoc-workbench.md` (via S1) and absorbs
   `conversation-driven-development.md` slice 1 (via S4).
 - [`project-object-graph.md`](project-object-graph.md) — **epic.** Build one typed project graph for durable product state and transient change - features, requirements, use cases, proposals, plans, tests, evidence, changesets, and roadmap deltas as schema-pinned YAML objects with typed edges. First review fixture `project-object-graph/seed-objects.yaml`. Six slices are sketched; substrate, changesets, one dogfooded feature, and the computed-roadmap mechanism are implemented and tested.
-- [`human-action-workflows.md`](human-action-workflows.md) — **epic.** Make
-  human-dependent work a first-class workflow executor beside agents:
-  `host.human.*` verbs create/await/complete person-owned tasks through a
-  pluggable backend, with GitHub Issues as v1, trace/replay/cassette support,
-  a roadmap/portfolio taxonomy, and mixed human/agent work decomposition. Six
-  slices: runtime contract
-  ([`human-action-runtime.md`](human-action-runtime.md)), GitHub backend
-  ([`github-human-action-backend.md`](github-human-action-backend.md)), tracing
-  + replay ([`human-action-tracing.md`](human-action-tracing.md)), roadmap and
-  portfolio work ([`roadmap-portfolio-work.md`](roadmap-portfolio-work.md)),
-  task-scoped assistance rooms
-  ([`human-task-assistance-rooms.md`](human-task-assistance-rooms.md)), and
-  decomposition adoption
-  ([`human-work-decomposition.md`](human-work-decomposition.md)). Nothing
-  implemented yet.
-- [`kitsoki-github-agent.md`](kitsoki-github-agent.md) — **epic.** `@kitsoki` in
-  a GitHub issue or PR dispatches a kitsoki run, observable + driveable through a
-  public trace/artifact web service, with kitsoki reporting progress back to the
-  thread. Six slices: GitHub ingress + comment substrate
-  ([`gh-event-ingress.md`](gh-event-ingress.md), runtime), job dispatch
-  ([`gh-job-dispatch.md`](gh-job-dispatch.md), runtime), the PR-autopilot story
-  ([`pr-autopilot-story.md`](pr-autopilot-story.md), story), a persistent
-  trace+artifact service ([`trace-artifact-service.md`](trace-artifact-service.md),
-  tracing), the web viewer + operator-drive surface
-  ([`gh-web-operator-viewer.md`](gh-web-operator-viewer.md), tui), and the
-  tour-driven demo + slidey composite
-  ([`kitsoki-github-demo.md`](kitsoki-github-demo.md)). Round-1 decisions: poll
-  ingest, Postgres state + filesystem artifacts, Postgres job locking,
-  owner-only driving, GitHub-native auth (App token + OAuth). Nothing
-  implemented yet.
-- [`generic-feedback-sdk-slidey-reports.md`](generic-feedback-sdk-slidey-reports.md)
-  — **epic.** Turn Kitsoki's built-in web bug reporting, rrweb capture,
-  spatial oracle, and Slidey media substrate into a framework-neutral browser
-  feedback SDK. The proposal centers privacy-by-design: data avoidance first,
-  reviewed/redacted bundles as the remote boundary, a mandatory privacy
-  manifest, chromeless UI, plugin-contributed context, a Slidey narrative report
-  deck, and a generic sink contract for the parallel GitHub agent.
-- [`top10-gpt55-dogfood-ingestion.md`](top10-gpt55-dogfood-ingestion.md)
-  — **epic.** Drive the current top-10 backlog through Kitsoki Studio MCP with
-  the right story entrypoint per item, real human-like operator turns,
-  trace-backed findings, and a strict implementation policy: live implementation
-  sessions use `profile: codex-native` / `gpt-5.5`, not Claude. This now
-  consumes the generic [`punch-list`](../stories/punch-list.md) story rather than a
-  top-10-specific runner.
-- [`session-mining-backend-generalization.md`](session-mining-backend-generalization.md)
-  — **epic.** Generalize session mining from Claude Code-shaped ingestion into a
-  backend-normal corpus for Claude Code, Codex, kitsoki traces, and imported
-  JSONL. The shared substrate provides source adapters, canonical sessions,
-  evidence indexes, reusable analysis drivers, route-feedback mining, and
-  no-LLM fixture seams for examples, scenarios, story coverage, and progressive
-  determinism. **Initial corpus + trace-pattern substrate is partially
-  implemented** in `internal/mining`; pipeline/source-registry integration
-  remains. One focused child proposal is split out:
+- [`human-action-workflows.md`](human-action-workflows.md) — **epic.** Make human-dependent work a first-class workflow executor beside agents: `host.human.*` verbs create/await/complete person-owned tasks through a pluggable backend, with GitHub Issues as v1, trace/replay/cassette support, a roadmap/portfolio taxonomy, and mixed human/agent work decomposition. Six slices: runtime contract ([`human-action-runtime.md`](human-action-runtime.md)), GitHub backend ([`github-human-action-backend.md`](github-human-action-backend.md)), tracing + replay ([`human-action-tracing.md`](human-action-tracing.md)), roadmap and portfolio work ([`roadmap-portfolio-work.md`](roadmap-portfolio-work.md)), task-scoped assistance rooms ([`human-task-assistance-rooms.md`](human-task-assistance-rooms.md)), and decomposition adoption ([`human-work-decomposition.md`](human-work-decomposition.md)). Nothing implemented yet.
+- [`kitsoki-github-agent.md`](kitsoki-github-agent.md) — **epic.** `@kitsoki` in a GitHub issue or PR dispatches a kitsoki run, observable + driveable through a public trace/artifact web service, with kitsoki reporting progress back to the thread. Six slices: GitHub ingress + comment substrate ([`gh-event-ingress.md`](gh-event-ingress.md), runtime), job dispatch ([`gh-job-dispatch.md`](gh-job-dispatch.md), runtime), the PR-autopilot story ([`pr-autopilot-story.md`](pr-autopilot-story.md), story), a persistent trace+artifact service ([`trace-artifact-service.md`](trace-artifact-service.md), tracing), the web viewer + operator-drive surface ([`gh-web-operator-viewer.md`](gh-web-operator-viewer.md), tui), and the tour-driven demo + slidey composite ([`kitsoki-github-demo.md`](kitsoki-github-demo.md)). Round-1 decisions: poll ingest, Postgres state + filesystem artifacts, Postgres job locking, owner-only driving, GitHub-native auth (App token + OAuth). Nothing implemented yet.
+- [`generic-feedback-sdk-slidey-reports.md`](generic-feedback-sdk-slidey-reports.md) — **epic.** Turn Kitsoki's built-in web bug reporting, rrweb capture, spatial oracle, and Slidey media substrate into a framework-neutral browser feedback SDK. The proposal centers privacy-by-design: data avoidance first, reviewed/redacted bundles as the remote boundary, a mandatory privacy manifest, chromeless UI, plugin-contributed context, a Slidey narrative report deck, and a generic sink contract for the parallel GitHub agent.
+- [`top10-gpt55-dogfood-ingestion.md`](top10-gpt55-dogfood-ingestion.md) — **epic.** Drive the current top-10 backlog through Kitsoki Studio MCP with the right story entrypoint per item, real human-like operator turns, trace-backed findings, and a strict implementation policy: live implementation sessions use `profile: codex-native` / `gpt-5.5`, not Claude. This now consumes the generic [`punch-list`](../stories/punch-list.md) story rather than a top-10-specific runner.
+- [`session-mining-backend-generalization.md`](session-mining-backend-generalization.md) — **epic.** Generalize session mining from Claude Code-shaped ingestion into a backend-normal corpus for Claude Code, Codex, kitsoki traces, and imported JSONL. The shared substrate provides source adapters, canonical sessions, evidence indexes, reusable analysis drivers, route-feedback mining, and no-LLM fixture seams for examples, scenarios, story coverage, and progressive determinism. **Initial corpus + trace-pattern substrate is partially implemented** in `internal/mining`; pipeline/source-registry integration remains. One focused child proposal is split out:
   - [`kitsoki-trace-pattern-matching.md`](kitsoki-trace-pattern-matching.md)
     (tracing, partially implemented) — deterministic pattern matching over
     kitsoki JSONL traces: typed event tokens, bounded path windows,
@@ -210,26 +162,9 @@ thought.
   - [`qa-agent-skill.md`](qa-agent-skill.md) (tooling) — the `story-qa`
     subagent: persona + scenario → studio drive loop → scored UX rubric +
     report + screenshots + bug list.
-- [`gh-ticket-adapter.md`](gh-ticket-adapter.md) (runtime, deferred) — a `gh`-backed
-  glue provider satisfying the `ticket` interface against GitHub issues. Part of
-  the external-project-targeting epic (profile + instance now shipped and
-  documented in [dev-story README](../../stories/dev-story/README.md#doc-profile--targeting-an-external-project));
-  this adapter is deferred pending real GitHub integration demand.
-- [`issues-migration-to-github.md`](issues-migration-to-github.md) (runtime) —
-  the GitHub Issues tracker substrate is shipped and documented in
-  [`hosts.md → host.gh.ticket`](../architecture/hosts.md#hostghticket--github-issues-backed-tracker);
-  the only remaining step is the maintainer-triggered real bulk migration of the
-  frozen `issues/` archive onto `constructorfabric/Kitsoki`.
-- [`agent-capability-model.md`](agent-capability-model.md) — **epic.**
-  One capability model governing **every** agent (decide / ask / converse /
-  task), unifying three ad-hoc restrictions and an overloaded boolean. Four
-  cooperating layers — **toolbox** (a named, reusable tool grant) → **effect
-  class** (`pure | read | write | external` + `deterministic`) → **layered
-  enforcement** (tool allowlist for pure/read; secure runtime boundary for
-  write/external) → **conformance** (the trace proves the box held). The
-  effect taxonomy and toolbox/tool-layer enforcement slices have shipped;
-  secure runtime confinement and offline conformance remain proposed.
-  Decomposed into three runtime slices + a conformance check:
+- [`gh-ticket-adapter.md`](gh-ticket-adapter.md) — **runtime.** a `gh`-backed glue provider satisfying the `ticket` interface against GitHub issues. Part of the external-project-targeting epic (profile + instance now shipped and documented in [dev-story README](../../stories/dev-story/README.md#doc-profile--targeting-an-external-project)); this adapter is deferred pending real GitHub integration demand.
+- [`issues-migration-to-github.md`](issues-migration-to-github.md) — **runtime.** the GitHub Issues tracker substrate is shipped and documented in [`hosts.md → host.gh.ticket`](../architecture/hosts.md#hostghticket--github-issues-backed-tracker); the only remaining step is the maintainer-triggered real bulk migration of the frozen `issues/` archive onto `constructorfabric/Kitsoki`.
+- [`agent-capability-model.md`](agent-capability-model.md) — **epic.** One capability model governing **every** agent (decide / ask / converse / task), unifying three ad-hoc restrictions and an overloaded boolean. Four cooperating layers — **toolbox** (a named, reusable tool grant) → **effect class** (`pure | read | write | external` + `deterministic`) → **layered enforcement** (tool allowlist for pure/read; secure runtime boundary for write/external) → **conformance** (the trace proves the box held). The effect taxonomy and toolbox/tool-layer enforcement slices have shipped; secure runtime confinement and offline conformance remain proposed. Decomposed into three runtime slices + a conformance check:
   - [`effect-taxonomy.md`](effect-taxonomy.md) (runtime) — the classification
     substrate: `effect`/`deterministic` on host calls **and** agents, replacing
     `external_side_effect`; a load-time hard-fail for a read-only call holding a
@@ -247,31 +182,11 @@ thought.
   - conformance check folded into
     [`agent-contract-eval.md`](agent-contract-eval.md) (§Layer 1b) — offline
     lint that recorded tool uses never exceeded the declared toolbox/effect.
-- [`artifact-format.md`](artifact-format.md) — a schema-verified
-  markdown-with-frontmatter artifact format with **lossless** round-trip via
-  `yaml.Node`, consolidating three hand-rolled artifact writers
-  (`localfiles_ticket.go`, `cypilot_artifacts.go`, `append_file_transport.go`)
-  that today reorder frontmatter and skip validation. Supports markdown as
-  block-scalar fields (data-primary docs). Nothing implemented yet; no new deps.
-- [`auto-advance-states-proposal.md`](auto-advance-states-proposal.md) —
-  auto-fire `done` after `on_enter` chains complete, with `wait: true`
-  to opt out. Nothing implemented yet.
-- [`claude-code-sessions-proposal.md`](claude-code-sessions-proposal.md) —
-  chats PTY mode, input queue, and multi-transport drive.
-  Phases 0/A/B/C shipped (see `docs/stories/meta-mode.md` §5 and
-  `docs/architecture/hosts.md` for the user-facing surface); D/E/F/G partial
-  or deferred; H not started. The status table at the top of the
-  proposal is the source of truth for what's wired today.
-- [`continue-mode-proposal.md`](continue-mode-proposal.md) — durable
-  sessions via a unified trace journal (`kitsoki run --continue`).
-  Phase A + Wave 2 shipped (`internal/journal/`, `--continue`, session
-  verbs); Wave 3 dual-write mostly landed, with the metamode proposal
-  ledger entries and `recovery_state` still TODO.
-- [`execution-modes-and-gate-deciders.md`](execution-modes-and-gate-deciders.md) —
-  one-shot / staged execution modes; intent gates resolved by a
-  per-state decider. Engine core, CLI/flow surface, and docs-review
-  migration shipped; pre-bind staging and the bugfix-story migration
-  remain (§8).
+- [`artifact-format.md`](artifact-format.md) — **epic.** a schema-verified markdown-with-frontmatter artifact format with **lossless** round-trip via `yaml.Node`, consolidating three hand-rolled artifact writers (`localfiles_ticket.go`, `cypilot_artifacts.go`, `append_file_transport.go`) that today reorder frontmatter and skip validation. Supports markdown as block-scalar fields (data-primary docs). Nothing implemented yet; no new deps.
+- [`auto-advance-states-proposal.md`](auto-advance-states-proposal.md) — **epic.** auto-fire `done` after `on_enter` chains complete, with `wait: true` to opt out. Nothing implemented yet.
+- [`claude-code-sessions-proposal.md`](claude-code-sessions-proposal.md) — **epic.** chats PTY mode, input queue, and multi-transport drive. Phases 0/A/B/C shipped (see `docs/stories/meta-mode.md` §5 and `docs/architecture/hosts.md` for the user-facing surface); D/E/F/G partial or deferred; H not started. The status table at the top of the proposal is the source of truth for what's wired today.
+- [`continue-mode-proposal.md`](continue-mode-proposal.md) — **epic.** durable sessions via a unified trace journal (`kitsoki run --continue`). Phase A + Wave 2 shipped (`internal/journal/`, `--continue`, session verbs); Wave 3 dual-write mostly landed, with the metamode proposal ledger entries and `recovery_state` still TODO.
+- [`execution-modes-and-gate-deciders.md`](execution-modes-and-gate-deciders.md) — **epic.** one-shot / staged execution modes; intent gates resolved by a per-state decider. Engine core, CLI/flow surface, and docs-review migration shipped; pre-bind staging and the bugfix-story migration remain (§8).
 - [`project-object-graph.md`](project-object-graph.md) — **epic.** Unify the
   loose ends of project representation (lifecycle taxonomy, the shipped
   change-node/two-graph substrate, the roadmap/portfolio taxonomy, the
@@ -286,32 +201,9 @@ thought.
   type packs. Six slices (0/6): slice 1 is
   [`lifecycle-taxonomy.md`](lifecycle-taxonomy.md) (re-parented); the rest
   are not yet cut.
-- [`lifecycle-taxonomy.md`](lifecycle-taxonomy.md) — **runtime** (slice 1 of
-  [`project-object-graph.md`](project-object-graph.md)). A YAML
-  domain model for the early project lifecycle: composable **Features**
-  (media / help / tutorials / acceptance criteria at every level) →
-  **Proposals** (the spine as data) → **Plans** (tasks with expected files +
-  per-file change descriptions) → **TestSpecs** (scenarios tracing back to
-  feature acceptance criteria, mapped to harness + fixture + evidence).
-  Pure-YAML containers with pinned JSON Schemas, markdown embedded inline or
-  via a generalized `!include`, and a deterministic two-layer validation
-  (per-file schema + catalog lint: DAGs, refs, coverage). Initial design for
-  review; nothing implemented yet.
-- [`local-model-agent.md`](local-model-agent.md) — a `builtin.local_llm`
-  agent plugin that drives a local llama.cpp `llama-server` sidecar over
-  OpenAI-compatible HTTP, with grammar-forced schema-valid output, for
-  routing and small `decide` verdicts. Nothing implemented yet; spike (§0)
-  required before committing.
-- [`agent-contract-eval.md`](agent-contract-eval.md) — task-adherence
-  benchmark for bounded agent call sites: offline contract/toolbox conformance,
-  gated live model matrices across Claude, Codex, local, and synthetic profiles,
-  evidence-based `profile/model/effort` pinning, and TUI/web surfaces that show
-  why a task is using a given model. Produces the measurement
-  `local-model-agent.md` consumes. Offline eval dataset/report loading,
-  `kitsoki eval` list/show/run validation, `selection:` metadata, and the
-  `pr-refinement` merge-judge pilot are implemented; live matrix execution,
-  strict cassette conformance, runtime pin selection, and full TUI/web views
-  remain.
+- [`lifecycle-taxonomy.md`](lifecycle-taxonomy.md) — **runtime.** (slice 1 of [`project-object-graph.md`](project-object-graph.md)). A YAML domain model for the early project lifecycle: composable **Features** (media / help / tutorials / acceptance criteria at every level) → **Proposals** (the spine as data) → **Plans** (tasks with expected files + per-file change descriptions) → **TestSpecs** (scenarios tracing back to feature acceptance criteria, mapped to harness + fixture + evidence). Pure-YAML containers with pinned JSON Schemas, markdown embedded inline or via a generalized `!include`, and a deterministic two-layer validation (per-file schema + catalog lint: DAGs, refs, coverage). Initial design for review; nothing implemented yet.
+- [`local-model-agent.md`](local-model-agent.md) — **epic.** a `builtin.local_llm` agent plugin that drives a local llama.cpp `llama-server` sidecar over OpenAI-compatible HTTP, with grammar-forced schema-valid output, for routing and small `decide` verdicts. Nothing implemented yet; spike (§0) required before committing.
+- [`agent-contract-eval.md`](agent-contract-eval.md) — **epic.** task-adherence benchmark for bounded agent call sites: offline contract/toolbox conformance, gated live model matrices across Claude, Codex, local, and synthetic profiles, evidence-based `profile/model/effort` pinning, and TUI/web surfaces that show why a task is using a given model. Produces the measurement `local-model-agent.md` consumes. Offline eval dataset/report loading, `kitsoki eval` list/show/run validation, `selection:` metadata, and the `pr-refinement` merge-judge pilot are implemented; live matrix execution, strict cassette conformance, runtime pin selection, and full TUI/web views remain.
 - `agent-off-ramp.md` — a per-room `agent_off_ramp:` opt-in: when free text
   maps to no declared intent, hand the turn to an agent `converse` answer
   instead of rejecting, with no state/world change. **Shipped**; the proposal
@@ -329,22 +221,9 @@ thought.
 - [`stories/prd/`](../../stories/prd/README.md) — a standalone
   PRD-authoring operator story. Shipped; the design proposal was never
   committed, so its reference is the story README.
-- [`runstatus-proposal.md`](runstatus-proposal.md) — Vue 3 web UI
-  for inspecting a run: clickable state diagram + trace timeline +
-  detail drawer. Phase 1 (artifact mode) ~90% shipped; the single-file
-  HTML export, timeline virtualization, and live JSON-RPC + SSE mode
-  remain.
-- [`runstatus-trace-fidelity.md`](runstatus-trace-fidelity.md) —
-  make the bugfix trace canonical (`agent.call.*`, a distinct
-  `machine.say` kind, `turn.input`) and rewire runstatus so each
-  meaningful aspect renders once per column. Producer half shipped
-  and documented in `docs/tracing/trace-format.md`; the runstatus
-  consumer rewrite and fixture migration remain.
-- [`trace-introspection.md`](trace-introspection.md) — **epic.** Enrich
-  `runstatus` trace viewing (inspired by a Langfuse comparison) while leaning
-  into the decision-provenance moat: co-equal view modes, decision-first
-  detail, recorded decide alternatives, human annotation, and single-call
-  operator replay. Observation kinds shipped; remaining slices:
+- [`runstatus-proposal.md`](runstatus-proposal.md) — **epic.** Vue 3 web UI for inspecting a run: clickable state diagram + trace timeline + detail drawer. Phase 1 (artifact mode) ~90% shipped; the single-file HTML export, timeline virtualization, and live JSON-RPC + SSE mode remain.
+- [`runstatus-trace-fidelity.md`](runstatus-trace-fidelity.md) — **epic.** make the bugfix trace canonical (`agent.call.*`, a distinct `machine.say` kind, `turn.input`) and rewire runstatus so each meaningful aspect renders once per column. Producer half shipped and documented in `docs/tracing/trace-format.md`; the runstatus consumer rewrite and fixture migration remain.
+- [`trace-introspection.md`](trace-introspection.md) — **epic.** Enrich `runstatus` trace viewing (inspired by a Langfuse comparison) while leaning into the decision-provenance moat: co-equal view modes, decision-first detail, recorded decide alternatives, human annotation, and single-call operator replay. Observation kinds shipped; remaining slices:
   - [`trace-decision-detail.md`](trace-decision-detail.md) (tui) — hero the
     gate/routing detail with the decision (available → chosen → confidence-vs-
     threshold → reason → bailed) and demote prompt/response to an evidence
@@ -446,13 +325,7 @@ thought.
   - [`line-channel-console.md`](line-channel-console.md) (tui) — the merchant's
     web home: provision a channel (creds + story binding + webhook URL) and
     watch/assist the live customer sessions it spawns (operator-ask inbox).
-- [`review-externally.md`](review-externally.md) — **epic.** Review kitsoki's
-  edits where you actually read them — the IDE or the system diff viewer, not a
-  cramped terminal pane. **Slice #2 shipped** (OSC 8 `.md` links + `/open`, now
-  in `docs/tui/README.md`); **slice #1 Phase A shipped** (`host.diff.open`:
-  connected-IDE accept/reject verdict capture + view-only system-difftool
-  fallback, in `docs/architecture/hosts.md`), with its Phase B turn-suspend gate
-  and a story adoption still remaining.
+- [`review-externally.md`](review-externally.md) — **epic.** Review kitsoki's edits where you actually read them — the IDE or the system diff viewer, not a cramped terminal pane. **Slice #2 shipped** (OSC 8 `.md` links + `/open`, now in `docs/tui/README.md`); **slice #1 Phase A shipped** (`host.diff.open`: connected-IDE accept/reject verdict capture + view-only system-difftool fallback, in `docs/architecture/hosts.md`), with its Phase B turn-suspend gate and a story adoption still remaining.
   - [`diff-open-fallback.md`](diff-open-fallback.md) — **runtime** (slice #1).
   - `tui-md-links.md` — **tui** (slice #2): shipped, proposal file retired —
     see [`docs/tui/README.md`](../tui/README.md#opening-markdown-artifacts-osc-8-links--open)
