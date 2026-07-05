@@ -134,6 +134,9 @@ Useful intents:
 - `matrix seed=... matrix_personas=primary|all`
 - `driver_replay_smoke scenario=... persona=... seed=...`
 - `driver_replay_sweep persona=... seed=...`
+- `native_ghagent_smoke`
+- `autonomous_fix_smoke`
+- `persona_autofix_smoke`
 - `start project=... persona=... seed=...`
 - `load run_dir=...`
 - `handoff`
