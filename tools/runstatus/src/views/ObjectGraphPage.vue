@@ -214,13 +214,20 @@ watch([catalogPath, overlayPath], load);
   font-weight: 600;
 }
 .objectgraph-page__count {
-  color: var(--muted-color, #667);
+  /* #667 (--muted-color's unset fallback) is 3.17:1 on the page's dark
+     background — an axe color-contrast error every object-graph-review
+     persona pass flagged (WCAG needs 4.5:1). #94a3b8 clears it. */
+  color: var(--muted-color, #94a3b8);
   font-size: 0.85rem;
 }
 .objectgraph-page__full-graph-link {
   background: none;
   border: none;
-  color: #46534d;
+  /* #46534d (here and on .objectgraph-page__mode-toggle button below) was a
+     light-background-only choice: 2.21:1 against this bar's dark shell —
+     the same axe color-contrast error as .objectgraph-page__count above.
+     #94a3b8 fixes both sites. */
+  color: #94a3b8;
   cursor: pointer;
   font-size: 0.8rem;
   margin-left: auto;
@@ -238,7 +245,7 @@ watch([catalogPath, overlayPath], load);
   background: none;
   border: none;
   border-radius: 4px;
-  color: #46534d;
+  color: #94a3b8;
   cursor: pointer;
   font-size: 0.75rem;
   padding: 0.2rem 0.6rem;
