@@ -51,6 +51,17 @@ type RunResult struct {
 	// real-work invariant test to prove the real path only ever reports
 	// completion when real work actually happened.
 	RealHostCalls int
+	// Assets are review artifacts produced by the run and persisted to the
+	// gh-agent job store for human review. Successful fix routes should include
+	// a report and, when available, a patch/diff.
+	Assets []RunAsset
+}
+
+// RunAsset is one reviewable artifact produced by a spawned story run.
+type RunAsset struct {
+	Name     string
+	MimeType string
+	Data     []byte
 }
 
 // Harness mode constants for real dispatch (task 2.2). Only two values are
@@ -303,6 +314,13 @@ func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *j
 		_ = d.Jobs.SetRunURL(persistCtx, job.JobID, job.JobID, result.RunURL)
 		job.RunURL = result.RunURL
 	}
+	if spawnErr == nil && len(result.Assets) > 0 {
+		if assetErr := d.persistRunAssets(persistCtx, job, result.Assets); assetErr != nil {
+			finalState = jobs.GHFailed
+			errMsg = assetErr.Error()
+			spawnErr = assetErr
+		}
+	}
 	if err := d.Jobs.Advance(persistCtx, job.JobID, finalState, errMsg); err != nil {
 		return nil, err
 	}
@@ -368,6 +386,28 @@ func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *j
 
 	job, _ = d.Jobs.GetJob(persistCtx, job.JobID)
 	return job, spawnErr
+}
+
+func (d *Dispatcher) persistRunAssets(ctx context.Context, job *jobs.GHJob, assets []RunAsset) error {
+	if d == nil || d.Jobs == nil || job == nil {
+		return nil
+	}
+	for _, asset := range assets {
+		name := strings.TrimSpace(asset.Name)
+		if name == "" || len(asset.Data) == 0 {
+			continue
+		}
+		mimeType := strings.TrimSpace(asset.MimeType)
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		if err := d.Jobs.PutAsset(ctx, job.JobID, name, mimeType, asset.Data); err != nil {
+			_ = d.Jobs.RecordEvent(ctx, job.JobID, "asset_persist_failed", err.Error())
+			return fmt.Errorf("ghagent: persist run asset %q: %w", name, err)
+		}
+		_ = d.Jobs.RecordEvent(ctx, job.JobID, "asset_persisted", name)
+	}
+	return nil
 }
 
 func (d *Dispatcher) failBeforeRun(ctx context.Context, job *jobs.GHJob, event string, cause error) (*jobs.GHJob, error) {
