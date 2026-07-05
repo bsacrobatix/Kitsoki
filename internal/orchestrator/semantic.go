@@ -571,7 +571,18 @@ func (o *Orchestrator) semanticBars() (high, mid float64) {
 //   - Confidence == ConfidenceTie (0.50) → AMBIGUOUS_INTENT outcome
 //     carrying the candidate list; the TUI surfaces the existing
 //     disambiguation card.
-//   - Otherwise → no match.
+//   - Otherwise (0 < Confidence < MidBar) → near_miss (see
+//     never-silent-runtime.md). A verdict this weak must never fall
+//     through to the LLM interpreter, which would pick the closest
+//     authored intent by alphabet-of-commands — that guess is the
+//     adjacent-command misroute this band exists to stop. The verdict
+//     is recorded on the trace as near_miss and, once S1's workbench
+//     exists, escalates there; until then it falls back to today's
+//     off-ramp / no-match handling (nearMissWorkbenchEnabled is a
+//     stub that always reports false — see its doc comment).
+//     Confidence == 0 (a genuine miss) never reaches this switch: every
+//     path above already returned (nil, false, nil) for that case, so
+//     "reject floor" and "0" coincide here without a new tunable.
 func (o *Orchestrator) TrySemantic(ctx context.Context, sid app.SessionID, input string) (*TurnOutcome, bool, error) {
 	if !o.routingEnabled() {
 		return nil, false, nil
@@ -822,15 +833,44 @@ func (o *Orchestrator) TrySemantic(ctx context.Context, sid app.SessionID, input
 		}, true, nil
 
 	default:
-		// Below mid-bar but non-zero. Today the matcher never emits
-		// these (only 0.90 / 0.50 / 0). Log and fall through so an
-		// over-eager future tier can't accidentally hijack a turn
-		// the LLM would handle better.
-		tl.Debug(ctx, trace.EvTurnSemanticMiss,
+		// near_miss band: strictly between 0 and midBar. Confidence == 0
+		// (a genuine miss) never reaches here — every path above already
+		// returned (nil, false, nil) for that case — so this branch only
+		// fires for a verdict that scored above the reject floor but
+		// below the accept floor. Record the decision on the trace with
+		// the same confidence-vs-threshold shape the other tiers record,
+		// so a near-miss is visible as "routed to workbench because
+		// confidence was in the near-miss band," not silently absorbed
+		// into "no match" (never-silent-runtime.md).
+		tl.Debug(ctx, trace.EvTurnNearMiss,
 			slog.String("input", input),
-			slog.String("note", "below mid-bar"),
 			slog.Float64("confidence", verdict.Confidence),
+			slog.Float64("threshold", midBar),
 		)
+		if o.nearMissWorkbenchEnabled() {
+			// TODO(S1): once the workbench's governed free-form entry
+			// point exists, route there instead of falling through.
+			// Deliberately unreachable until nearMissWorkbenchEnabled
+			// stops being a stubbed-false feature check.
+		}
+		// S1's workbench doesn't exist yet (see never-silent-runtime.md
+		// Open questions #2) — fall back to today's off-ramp / no-match
+		// handling: the caller advances to the next routing tier exactly
+		// as it did before this band was named. The near_miss verdict
+		// above is what makes that fallback visible in the trace instead
+		// of indistinguishable from a genuine miss.
 		return nil, false, nil
 	}
+}
+
+// nearMissWorkbenchEnabled reports whether a near_miss verdict should
+// escalate to S1's workbench entry point. It is a stub that always
+// returns false: S1 doesn't exist yet (never-silent-runtime.md, Open
+// questions #2), so this proposal only lands the confidence-band
+// plumbing and decision recording now. Flipping this on (and wiring an
+// actual destination in TrySemantic's default case above) is the whole
+// of what's left once S1 ships — no other change to the band logic is
+// needed.
+func (o *Orchestrator) nearMissWorkbenchEnabled() bool {
+	return false
 }
