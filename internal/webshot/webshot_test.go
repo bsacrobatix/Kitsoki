@@ -327,7 +327,8 @@ func TestShot_RequiresSeams(t *testing.T) {
 
 // TestNodeInvoker_BuildsWebShotArgv asserts the default invoker shells the
 // maintained web-shot.ts with the expected argv (no Node required: the runner
-// is stubbed). Guards the contract with the TS helper's CLI.
+// is stubbed). It intentionally bypasses pnpm exec: pnpm writes workspace temp
+// files even for exec, which breaks render.web from a protected checkout.
 func TestNodeInvoker_BuildsWebShotArgv(t *testing.T) {
 	rec := &recordingRunner{}
 	inv := &NodeInvoker{RepoRoot: "/repo", Runner: rec}
@@ -342,8 +343,9 @@ func TestNodeInvoker_BuildsWebShotArgv(t *testing.T) {
 	if rec.dir != filepath.Join("/repo", "tools", "runstatus") {
 		t.Errorf("cwd = %q, want /repo/tools/runstatus", rec.dir)
 	}
-	if rec.name != "pnpm" {
-		t.Errorf("command = %q, want pnpm", rec.name)
+	wantName := filepath.Join("/repo", "tools", "runstatus", "node_modules", ".bin", "tsx")
+	if rec.name != wantName {
+		t.Errorf("command = %q, want %q", rec.name, wantName)
 	}
 	joined := strings.Join(rec.args, " ")
 	for _, want := range []string{
