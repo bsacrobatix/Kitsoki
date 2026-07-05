@@ -330,6 +330,35 @@ python3 tools/product-journey/run.py --record-blocker \
 The review gate treats a scenario as attempted when it has captured evidence or
 an explicit blocker, so missing live paths stay visible in the deck and rollup.
 
+File the bundle's credible `issue` findings as GitHub issues (one per finding)
+through the same artifact-preserving orchestration the web Report-bug and TUI
+`/bug` surfaces use:
+
+```sh
+python3 tools/product-journey/run.py --file-findings \
+  --run-dir .artifacts/product-journey/<run-id> \
+  --ticket-repo <owner/repo> [--dry-run]
+```
+
+This shells to `kitsoki bug file-findings` (override the CLI with
+`KITSOKI_BIN`; default `go run ./cmd/kitsoki` from the repo root), which walks
+`findings.json` and, for every credible finding (kind `issue`, origin not
+`seeded`) without a recorded issue: assembles an expected/actual/reproduction
+body from the finding, the driver-plan scenario contract, and the driver
+journal; uploads locally-resolvable evidence (the finding's `evidence_path`
+plus the scenario's captured evidence) as GitHub release assets linked from an
+`## Artifacts` section; files the issue with the kitsoki metadata block; and
+writes `item.github_issue` (URL/number/repo/filed_at) plus a `findings.filing`
+block back into `findings.json`. Re-runs are idempotent (already-filed findings
+are skipped), `--dry-run` renders the candidate issues without calling GitHub
+or touching the bundle, and non-local refs (retained/http/unbacked cassette
+URIs) are listed in the body instead of uploaded. The story equivalent is the
+`file_findings ticket_repo=<owner/repo> [mode=dry-run]` intent.
+
+Once filing has been requested, the `findings-filed` review check fails and
+`--validate-run` errors while any credible issue finding remains unfiled, so
+"issues filed for all credible findings" becomes part of bundle readiness.
+
 For a no-LLM dogfood/demo bundle with representative evidence and findings:
 
 ```sh

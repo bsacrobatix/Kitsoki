@@ -31,10 +31,23 @@ Kitsoki story or command that applies the repo's bug-filing conventions.
 4. **Text-only issue with no evidence:** `kitsoki bug create --github
    <owner/repo>` is acceptable, but note that it captures no artifacts. Do not
    use it when the user asked for artifacts.
-5. **Dogfood or debugging finding:** file via the live story/studio path when
-   available. In dogfood-marathon, findings normally become issues through the
-   studio `issue_create` tool; keep using that path instead of shelling out to
-   `gh`.
+5. **Product-journey / dogfood run-bundle findings with attached evidence:**
+   do NOT hand-file these (no manual `issue_create`, no raw `gh`). The
+   product-journey story files them itself: `file_findings
+   ticket_repo=<owner/repo>` on `stories/product-journey-qa` (or the headless
+   fallback `python3 tools/product-journey/run.py --file-findings --run-dir
+   <run-dir> --ticket-repo <owner/repo>`). Both drive `kitsoki bug
+   file-findings` → `host.GitHubFileFindings` → `host.GitHubFileBug(...
+   UploadArtifacts: true)`: one issue per credible `issue` finding, evidence
+   uploaded as release assets, expected/actual/repro body assembled from the
+   finding + driver journal, and the issue URL recorded back into
+   `findings.json` so re-runs are idempotent. Use `mode=dry-run` / `--dry-run`
+   to preview.
+6. **Other dogfood or debugging findings (no run bundle):** file via the live
+   story/studio path when available. In dogfood-marathon, evidence-free
+   findings may still go through the studio `issue_create` tool; anything with
+   captured evidence should go through a Kitsoki filing path above instead of
+   shelling out to `gh`.
 
 ## Filing Workflows
 
@@ -107,6 +120,31 @@ agent is off-box, copy the deposited `<deck-id>/har.json` and/or
 repair. Do not use `kitsoki gh-agent deck --comment` as the normal filing path:
 that posts through the caller's local `gh` authentication, so the issue comment
 will be authored by the user instead of the GitHub App.
+
+### Product-Journey Findings (`kitsoki bug file-findings`)
+
+Use this when a tools/product-journey run bundle has recorded `issue` findings
+that must become GitHub issues without an outer agent hand-assembling bodies.
+
+```bash
+# Preferred: the story files its own findings.
+#   file_findings ticket_repo=<owner/repo>            (mode=dry-run to preview)
+# Headless fallback (drives the same Go orchestration):
+python3 tools/product-journey/run.py --file-findings \
+  --run-dir .artifacts/product-journey/<run-id> \
+  --ticket-repo <owner/repo> [--dry-run]
+# Direct CLI (what the runner shells to):
+go run ./cmd/kitsoki bug file-findings \
+  --run-dir .artifacts/product-journey/<run-id> --repo <owner/repo> [--dry-run]
+```
+
+Per credible finding (kind `issue`, origin not `seeded`, no recorded issue
+yet) this uploads locally-resolvable evidence as release assets, files the
+issue with `## Artifacts` + the kitsoki metadata block, and writes
+`item.github_issue` (URL/number/repo/filed_at) plus a `findings.filing` block
+back into `findings.json`. Re-runs skip already-filed findings, and the
+runner's `--review-run` / `--validate-run` gates (`findings-filed`) then
+require every credible finding to be filed.
 
 ### Text-Only Fallback
 
