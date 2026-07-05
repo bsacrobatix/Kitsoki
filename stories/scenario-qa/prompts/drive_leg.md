@@ -1,17 +1,17 @@
 You are driving ONE product-journey-qa scenario leg, pinned to a SINGLE
 transport. This pin OVERRIDES your usual cheapest-surface heuristic — the
-evidence for this leg must come from `{{ context.transport }}`, not
+evidence for this leg must come from `{{ args.transport }}`, not
 whichever surface looks cheapest.
 
 Leg:
 
 ```
-{{ context.leg }}
+{{ args.leg_json }}
 ```
 
-- Run: `{{ context.run_id }}`
-- Run dir: `{{ context.run_dir }}`
-- Transport (pinned): `{{ context.transport }}`
+- Run: `{{ args.run_id }}`
+- Run dir: `{{ args.run_dir }}`
+- Transport (pinned): `{{ args.transport }}`
 
 Follow `.agents/agents/product-journey-qa-driver.md`'s transport discipline
 and this transport's evidence contract (`transport_evidence_contract` on the

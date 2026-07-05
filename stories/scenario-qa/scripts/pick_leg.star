@@ -5,7 +5,9 @@
 #
 # Interface (authoritative in pick_leg.star.yaml):
 #   inputs:  legs (object {items:[...]}), leg_index (int)
-#   outputs: current_leg (object), current_leg_id (string)
+#   outputs: current_leg (object), current_leg_id (string),
+#            current_leg_json (string — for agent prompt context.args, where
+#            a raw object value renders as a Go map string, not JSON)
 
 def main(ctx):
     legs = ctx.inputs.get("legs", {})
@@ -13,8 +15,12 @@ def main(ctx):
     idx = int(ctx.inputs.get("leg_index", 0))
 
     if idx < 0 or idx >= len(items):
-        return {"current_leg": {}, "current_leg_id": ""}
+        return {"current_leg": {}, "current_leg_id": "", "current_leg_json": "{}"}
 
     leg = items[idx]
     leg_id = leg.get("leg_id", "") if type(leg) == "dict" else ""
-    return {"current_leg": leg, "current_leg_id": leg_id}
+    return {
+        "current_leg": leg,
+        "current_leg_id": leg_id,
+        "current_leg_json": json.encode(leg),
+    }

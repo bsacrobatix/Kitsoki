@@ -23,6 +23,18 @@ states:
             Verdict: '{{ world.judge_result.verdict|default:"(judging…)" }}'
       - prose: "Judging with the kitsoki-ui-qa posture against this transport's evidence contract and the scenario's success criteria — every pass must cite a concrete frame or trace path."
     on_enter:
+      - invoke: host.starlark.run
+        id: prepare_judge
+        with:
+          script: scripts/prepare_judge.star
+          inputs:
+            drive_result: "{{ world.drive_result }}"
+        bind:
+          drive_result_json: drive_result_json
+        on_error: recording
+      # Prompt variables MUST live under context.args and be referenced as
+      # {{ args.<key> }} — keys placed directly under context: silently render
+      # as empty (see execute.yaml's identical comment).
       - invoke: host.agent.task
         id: judge_leg
         with:
@@ -31,9 +43,10 @@ states:
             schema: schemas/judge_leg_result.json
           context:
             prompt: prompts/judge_leg.md
-            leg: "{{ world.current_leg }}"
-            drive_result: "{{ world.drive_result }}"
-            run_dir: "{{ world.run_dir }}"
+            args:
+              leg_json: "{{ world.current_leg_json }}"
+              drive_result_json: "{{ world.drive_result_json }}"
+              run_dir: "{{ world.run_dir }}"
         bind:
           judge_result: submitted
         on_error: recording

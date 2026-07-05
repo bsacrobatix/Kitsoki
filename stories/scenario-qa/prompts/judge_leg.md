@@ -6,16 +6,16 @@ no citable evidence is `unsupported`, never a silent pass.
 Leg being judged:
 
 ```
-{{ context.leg }}
+{{ args.leg_json }}
 ```
 
 Driver's own report (context only — you do NOT trust this as the grade):
 
 ```
-{{ context.drive_result }}
+{{ args.drive_result_json }}
 ```
 
-- Run dir: `{{ context.run_dir }}`
+- Run dir: `{{ args.run_dir }}`
 
 Judge whether the evidence the driver actually captured for THIS transport
 leg proves the scenario's success criteria (see the leg's

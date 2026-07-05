@@ -146,6 +146,8 @@ world:
   leg_count:            { type: int, default: 0 }
   current_leg:          { type: object, default: {} }
   current_leg_id:       { type: string, default: "" }
+  current_leg_json:     { type: string, default: "{}" }  # JSON form for agent prompt args
+  drive_result_json:    { type: string, default: "{}" }  # JSON form for the judge prompt
   drive_result:         { type: object, default: {} }
   judge_result:         { type: object, default: {} }
   leg_results:          { type: object, default: { items: [] } }  # accumulated per-leg outcomes
