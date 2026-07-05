@@ -90,8 +90,8 @@ export const cytoscapeStyle: cytoscape.StylesheetJson = [
       height: 22,
       "border-width": 2,
       "border-color": "#ffffff",
-      "text-wrap": "ellipsis",
-      "text-max-width": "120px",
+      "text-wrap": "wrap",
+      "text-max-width": "110px",
     },
   },
   {
