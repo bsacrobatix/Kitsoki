@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -2345,6 +2346,12 @@ func (m *machineImpl) coerceSetValue(k string, v any) any {
 	}
 	vd, ok := m.appDef.World[k]
 	if !ok {
+		return v
+	}
+	if f, isFloat := v.(float64); isFloat {
+		if vd.Type == "int" && !math.IsInf(f, 0) && !math.IsNaN(f) && f == math.Trunc(f) {
+			return int64(f)
+		}
 		return v
 	}
 	s, isStr := v.(string)
