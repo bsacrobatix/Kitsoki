@@ -38,7 +38,7 @@ Every cell carries two proof-class verdicts from `schemas/completion-state.schem
 - **PRD / proposal × TUI** — ✅ works: prd story (33 flows) + design rooms (~20 flows). Canonical doc: docs/workflows/prd-and-design.md
   - mechanical: no standing verdict
   - experience: no standing verdict
-- **PRD / proposal × Web** — 🟡 proof-thin: drivable (PRD demo exists) but free-text composer routing unfinished. Canonical doc: docs/workflows/prd-and-design.md
+- **PRD / proposal × Web** — 🟡 proof-thin: drivable (PRD demo exists); typed free-text routing fixed (semanticRoutingOptions no longer forces semantic routing off) but no standing web walk of the prd chain. Canonical doc: docs/workflows/prd-and-design.md
   - mechanical: no standing verdict
   - experience: no standing verdict
 - **PRD / proposal × VS Code** — 🟡 proof-thin: PRD demo spec exists (vscode-prd-demo.e2e.spec.ts); v0.1.0 extension. Canonical doc: docs/workflows/prd-and-design.md
