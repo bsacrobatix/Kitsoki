@@ -111,3 +111,49 @@ func TestMarshalRoadmap_RoundTrips(t *testing.T) {
 		}
 	}
 }
+
+// TestDiffNodes_MatchesDiffGap exercises the node-granularity classification
+// a UI diff mode needs against the same golden fixture pair TestDiff_GoldenRoadmap
+// uses, and checks it agrees with Diff's own gap set (added/modified/removed
+// ids) since gapClassify backs both.
+func TestDiffNodes_MatchesDiffGap(t *testing.T) {
+	current, err := LoadCatalog("testdata/diff/current")
+	if err != nil {
+		t.Fatalf("load current: %v", err)
+	}
+	desired, err := LoadCatalog("testdata/diff/desired")
+	if err != nil {
+		t.Fatalf("load desired: %v", err)
+	}
+
+	nodeDiffs := DiffNodes(current, desired)
+	got := map[NodeID]GapKind{}
+	for _, d := range nodeDiffs {
+		got[d.ID] = d.Kind
+	}
+	want := map[NodeID]GapKind{
+		"change-diff":          GapAdded,
+		"change-legacy-cli":    GapRemoved,
+		"change-modify-target": GapModified,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("DiffNodes gap kinds = %+v, want %+v", got, want)
+	}
+
+	for _, d := range nodeDiffs {
+		switch d.Kind {
+		case GapAdded:
+			if d.Current != nil || d.Desired == nil {
+				t.Errorf("added NodeDiff %q: want Current=nil, Desired!=nil, got Current=%v Desired=%v", d.ID, d.Current, d.Desired)
+			}
+		case GapRemoved:
+			if d.Desired != nil || d.Current == nil {
+				t.Errorf("removed NodeDiff %q: want Desired=nil, Current!=nil, got Current=%v Desired=%v", d.ID, d.Current, d.Desired)
+			}
+		case GapModified:
+			if d.Current == nil || d.Desired == nil {
+				t.Errorf("modified NodeDiff %q: want both Current and Desired non-nil, got Current=%v Desired=%v", d.ID, d.Current, d.Desired)
+			}
+		}
+	}
+}
