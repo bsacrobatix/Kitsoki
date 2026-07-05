@@ -31,6 +31,8 @@ SCENARIOS = ROOT / "tools" / "product-journey" / "scenarios.json"
 GITHUB_TARGETS = ROOT / "tools" / "product-journey" / "github-targets.json"
 SCHEMA = ROOT / "tools" / "product-journey" / "schema.json"
 DRIVER_AGENT = ROOT / ".agents" / "agents" / "product-journey-qa-driver.md"
+PRODUCT_JOURNEY_SKILL = ROOT / ".agents" / "skills" / "product-journey-qa" / "SKILL.md"
+PRODUCT_JOURNEY_README = ROOT / "tools" / "product-journey" / "README.md"
 LOG = ROOT / ".context" / "product-journey-runlog.md"
 ARTIFACT_ROOT = ROOT / ".artifacts" / "product-journey"
 MATRIX_ROOT = ARTIFACT_ROOT / "matrices"
@@ -1373,6 +1375,51 @@ def validate_driver_agent_contract(issues: list[dict]) -> None:
         )
 
 
+def validate_autonomous_workflow_docs(issues: list[dict]) -> None:
+    required_docs = [
+        (PRODUCT_JOURNEY_SKILL, "skill"),
+        (PRODUCT_JOURNEY_README, "README"),
+    ]
+    for path, label in required_docs:
+        if not path.exists():
+            add_corpus_issue(
+                issues,
+                "error",
+                "autonomous-workflow-docs",
+                f"Product journey {label} is missing",
+                str(path),
+            )
+            continue
+        text = path.read_text(encoding="utf-8")
+        required_tokens = [
+            "autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<url>",
+            "story-owned",
+            "gh-agent",
+        ]
+        missing = [token for token in required_tokens if token not in text]
+        if missing:
+            add_corpus_issue(
+                issues,
+                "error",
+                "autonomous-workflow-docs",
+                f"Product journey {label} does not present the story-owned autonomous fix path",
+                f"{path.relative_to(ROOT)}: {', '.join(missing)}",
+            )
+        stale_guidance = [
+            "file_findings ticket_repo=<owner/repo>` intent (preferred",
+            "File the credible `issue` findings as GitHub issues through the story\n   `file_findings",
+        ]
+        present_stale = [token for token in stale_guidance if token in text]
+        if present_stale:
+            add_corpus_issue(
+                issues,
+                "error",
+                "autonomous-workflow-docs",
+                f"Product journey {label} still presents split filing as the preferred full-loop path",
+                path.relative_to(ROOT).as_posix(),
+            )
+
+
 def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_targets: dict) -> dict:
     schema = read_json(SCHEMA)
     issues: list[dict] = []
@@ -1528,6 +1575,7 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
 
     validate_story_driver_contract_bindings(issues)
     validate_driver_agent_contract(issues)
+    validate_autonomous_workflow_docs(issues)
 
     errors = sum(1 for issue in issues if issue["severity"] == "error")
     warnings = sum(1 for issue in issues if issue["severity"] == "warn")
