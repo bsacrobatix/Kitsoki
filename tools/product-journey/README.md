@@ -359,6 +359,17 @@ Once filing has been requested, the `findings-filed` review check fails and
 `--validate-run` errors while any credible issue finding remains unfiled, so
 "issues filed for all credible findings" becomes part of bundle readiness.
 
+To prove the next hop without GitHub credentials or LLM cost:
+
+```sh
+python3 tools/product-journey/run.py --native-ghagent-smoke --json-output
+```
+
+This creates a temporary product-journey bundle with a filed issue, enqueues it
+through native `kitsoki gh-agent enqueue`, drains it through native
+`kitsoki gh-agent drain` in replay mode with GitHub comments disabled, and
+checks that fix artifacts are persisted back into the bundle for review.
+
 For a no-LLM dogfood/demo bundle with representative evidence and findings:
 
 ```sh
