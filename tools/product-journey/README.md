@@ -372,10 +372,10 @@ python3 tools/product-journey/run.py --autonomous-fix-smoke --json-output
 The native smoke creates a temporary product-journey bundle with a filed issue,
 enqueues it through native `kitsoki gh-agent enqueue`, drains it through native
 `kitsoki gh-agent drain` in replay mode with GitHub comments disabled, and
-checks that fix artifacts are persisted back into the bundle for review. The
-autonomous smoke runs the full no-LLM envelope with a fake `kitsoki` CLI:
-persona findings file as issues, gh-agent fixes queue and drain, review artifacts
-refresh, and `--validate-run` must pass.
+checks that fix artifacts and run URLs are persisted back into the bundle for
+review. The autonomous smoke runs the full no-LLM envelope with a fake `kitsoki`
+CLI: persona findings file as issues, gh-agent fixes queue and drain, review
+artifacts refresh, and `--validate-run` must pass.
 
 For a no-LLM dogfood/demo bundle with representative evidence and findings:
 
