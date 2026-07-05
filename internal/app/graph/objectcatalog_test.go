@@ -43,3 +43,51 @@ func TestObjectCatalogGraph_NestsUnderThreadsToWireEdge(t *testing.T) {
 		}
 	}
 }
+
+// TestObjectCatalogDiffGraph_BadgesTheOverlayAddition exercises diff mode
+// end to end against the real seed catalog + its ui-declutter overlay
+// (docs/proposals/project-object-graph/seed-objects.overlay-ui-declutter.yaml):
+// every node keeps desired's data, gets a diff_kind attr, and the one node
+// the overlay actually adds is badged "added" — everything else "unchanged".
+func TestObjectCatalogDiffGraph_BadgesTheOverlayAddition(t *testing.T) {
+	const base = "../../../docs/proposals/project-object-graph/seed-objects.yaml"
+	const overlay = "../../../docs/proposals/project-object-graph/seed-objects.overlay-ui-declutter.yaml"
+
+	current, err := objectgraph.LoadCatalog(base)
+	if err != nil {
+		t.Fatalf("LoadCatalog(base): %v", err)
+	}
+	desired, err := objectgraph.LoadCatalogWithOverlay(base, overlay)
+	if err != nil {
+		t.Fatalf("LoadCatalogWithOverlay: %v", err)
+	}
+
+	g := ObjectCatalogDiffGraph(current, desired, "test-diff")
+	if g.Kind != "object-graph-diff" {
+		t.Errorf("g.Kind = %q, want object-graph-diff", g.Kind)
+	}
+	if len(g.Nodes) != len(desired.Nodes) {
+		t.Fatalf("diff graph has %d nodes, want %d (no removed nodes in this fixture pair)", len(g.Nodes), len(desired.Nodes))
+	}
+
+	var added, unchanged int
+	for _, n := range g.Nodes {
+		switch n.Attrs["diff_kind"] {
+		case "added":
+			added++
+			if n.ID != "evidence-object-graph-ui-persona-review" {
+				t.Errorf("unexpected added node %q", n.ID)
+			}
+		case "unchanged":
+			unchanged++
+		default:
+			t.Errorf("node %q has unexpected diff_kind %v", n.ID, n.Attrs["diff_kind"])
+		}
+	}
+	if added != 1 {
+		t.Errorf("added = %d, want exactly 1", added)
+	}
+	if unchanged != len(current.Nodes) {
+		t.Errorf("unchanged = %d, want %d (every base node)", unchanged, len(current.Nodes))
+	}
+}

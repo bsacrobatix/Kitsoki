@@ -32,6 +32,30 @@ func (s *Server) dispatchObjectGraph(method string, params map[string]any) (any,
 		}
 		return appgraph.ObjectCatalogGraph(cat, "objectgraph:"+catalogPath), nil, true
 
+	// runstatus.objectgraph.diff {catalog_path, overlay_path} → kitsoki.graph/v1
+	// graph with a diff_kind attr per node (added/modified/removed/unchanged) —
+	// diff mode's data source. catalog_path is "current"; catalog_path loaded
+	// with overlay_path unioned in (objectgraph.LoadCatalogWithOverlay) is
+	// "desired".
+	case "runstatus.objectgraph.diff":
+		catalogPath, _ := params["catalog_path"].(string)
+		overlayPath, _ := params["overlay_path"].(string)
+		if catalogPath == "" {
+			return nil, &rpcError{Code: codeServerError, Message: "objectgraph.diff: missing 'catalog_path'"}, true
+		}
+		if overlayPath == "" {
+			return nil, &rpcError{Code: codeServerError, Message: "objectgraph.diff: missing 'overlay_path'"}, true
+		}
+		current, err := objectgraph.LoadCatalog(catalogPath)
+		if err != nil {
+			return nil, &rpcError{Code: codeServerError, Message: "objectgraph.diff: " + err.Error()}, true
+		}
+		desired, err := objectgraph.LoadCatalogWithOverlay(catalogPath, overlayPath)
+		if err != nil {
+			return nil, &rpcError{Code: codeServerError, Message: "objectgraph.diff: " + err.Error()}, true
+		}
+		return appgraph.ObjectCatalogDiffGraph(current, desired, "objectgraph-diff:"+catalogPath+"+"+overlayPath), nil, true
+
 	default:
 		return nil, nil, false
 	}
