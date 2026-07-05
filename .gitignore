@@ -78,6 +78,13 @@ docs/proposals/.workspace/
 
 # Run-status SPA — single-file HTML artifacts (built by `kitsoki
 # export-status … -o *.html` and by the Playwright artifact suite).
+#
+# This also covers session-mining's UNREDACTED scenario IR + intermediates
+# (.artifacts/session-mining/**: distilled traces, intents/analysis.json, and
+# raw compiled scenario docs before redact.py --scenario runs) — the
+# redaction gate's contract is that a mined scenario may only reach a
+# committable path (tools/session-mining/calibration/) AFTER it passes
+# `redact.py --scenario`; everything upstream of that gate stays local here.
 .artifacts/
 tools/runstatus/test-results/
 tools/runstatus/playwright-report/
