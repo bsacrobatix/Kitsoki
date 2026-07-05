@@ -54,13 +54,19 @@ func (f *failingLive) RunTurn(_ context.Context, _ harness.TurnInput) (mcpsdk.Ca
 }
 func (f *failingLive) Close() error { return nil }
 
-type sleepyLive struct {
-	delay time.Duration
+type blockingLive struct {
+	started chan struct{}
+	release chan struct{}
 }
 
-func (s sleepyLive) RunTurn(ctx context.Context, in harness.TurnInput) (mcpsdk.CallToolParams, error) {
+func (b blockingLive) RunTurn(ctx context.Context, in harness.TurnInput) (mcpsdk.CallToolParams, error) {
 	select {
-	case <-time.After(s.delay):
+	case <-b.started:
+	default:
+		close(b.started)
+	}
+	select {
+	case <-b.release:
 	case <-ctx.Done():
 		return mcpsdk.CallToolParams{}, ctx.Err()
 	}
@@ -68,7 +74,7 @@ func (s sleepyLive) RunTurn(ctx context.Context, in harness.TurnInput) (mcpsdk.C
 	return mcpsdk.CallToolParams{Name: "transition", Arguments: args}, nil
 }
 
-func (s sleepyLive) Close() error { return nil }
+func (b blockingLive) Close() error { return nil }
 
 // replayBuilder is the production-equivalent harness builder for these tests: it
 // builds a real no-LLM ReplayHarness for replay mode (so orch.Turn replays the
@@ -170,9 +176,11 @@ func TestSessionDrive_GoldenTranscript(t *testing.T) {
 
 func TestSessionDrive_ReturnsRunningWhenTurnExceedsBoundedWait(t *testing.T) {
 	ctx := context.Background()
+	started := make(chan struct{})
+	release := make(chan struct{})
 	sess := studio.NewStudioSession(func(mode studio.HarnessMode, _, _ string) (harness.Harness, error) {
 		require.Equal(t, studio.HarnessLive, mode)
-		return sleepyLive{delay: 120 * time.Millisecond}, nil
+		return blockingLive{started: started, release: release}, nil
 	})
 	srv := studio.NewServer(sess)
 	cs := connectInProcess(ctx, t, srv)
@@ -195,7 +203,7 @@ func TestSessionDrive_ReturnsRunningWhenTurnExceedsBoundedWait(t *testing.T) {
 	})
 	require.NoError(t, err)
 	tr := driveResult(t, res)
-	require.True(t, tr.OK)
+	require.True(t, tr.OK, "session.drive: %s", contentText(res))
 	require.NotNil(t, tr.Running, "slow turns return a running status before the MCP client times out")
 	require.Equal(t, ok.Handle, tr.Running.Handle)
 	require.Equal(t, "go west", tr.Running.Input)
@@ -226,6 +234,7 @@ func TestSessionDrive_ReturnsRunningWhenTurnExceedsBoundedWait(t *testing.T) {
 	require.NotNil(t, runningInspect.Async)
 	assert.Equal(t, 1, runningInspect.Async.RunningDrive)
 
+	close(release)
 	require.Eventually(t, func() bool {
 		res, err := callTool(ctx, cs, "session.status", map[string]any{"handle": ok.Handle})
 		if err != nil || res.IsError {
