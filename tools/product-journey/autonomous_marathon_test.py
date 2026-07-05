@@ -81,6 +81,7 @@ def main() -> int:
                 "",
                 0.82,
                 25,
+                "pending",
                 None,
             )
             run_dir = Path(created["run_dir"])
@@ -157,6 +158,7 @@ def main() -> int:
                 str(run_dir / "autonomous-marathon-stats.json"),
                 0.82,
                 25,
+                "pending",
                 None,
             )
             report = Path(finalized["autonomous_marathon_report_path"])
@@ -176,6 +178,50 @@ def main() -> int:
             check("weaknesses route to PRD/design during finalization",
                   finalized["weakness_route_count"] == 1
                   and "finding-1->stories/prd" in finalized["weakness_route_summary"],
+                  failures)
+
+            replay = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-replay",
+                "bugfix",
+                7,
+                "o/r",
+                str(tmp / "gh-agent-replay.json"),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                str(run.ARTIFACT_ROOT),
+                "",
+                0.82,
+                25,
+                "replay",
+                None,
+            )
+            replay_dir = Path(replay["run_dir"])
+            replay_report = Path(replay["autonomous_marathon_report_path"])
+            replay_report_text = replay_report.read_text(encoding="utf-8") if replay_report.exists() else ""
+            check("replay mode creates, captures, and finalizes without external attachment",
+                  replay["autonomous_marathon_status"] == "autonomous_marathon_valid"
+                  and replay["autonomous_driver_status"] == "captured"
+                  and replay["autonomous_driver_evidence_count"] >= 5
+                  and replay["autonomous_fix_status"] == "autonomous_fix_valid"
+                  and replay["stats_filed_count"] >= 1,
+                  failures)
+            check("replay mode leaves human-reviewable driver and fix artifacts",
+                  (replay_dir / "driver-journal.md").exists()
+                  and "autonomous-replay-evidence" in (replay_dir / "driver-journal.md").read_text(encoding="utf-8")
+                  and "autonomous-fix-report.md" in replay_report_text
+                  and "Autonomous driver: `replay` / `captured`" in replay_report_text,
                   failures)
         finally:
             for key, value in old_env.items():

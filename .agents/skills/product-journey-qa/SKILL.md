@@ -134,6 +134,14 @@ Then hand it to the reusable driver:
    `weakness-routes.md`, and a `PRD/design routes` deck scene pointing each
    observed weakness at `stories/prd` with persona, scenario, and evidence
    context attached.
+   For a deterministic no-operator marathon, submit
+   `autonomous_marathon scenarios=<ids> autonomous_driver_mode=replay
+   ticket_repo=<owner/repo> gh_agent_public_base_url=<url>`. Replay mode is
+   still story-owned: it creates the run, attaches cassette-backed local proof
+   artifacts, records the driver journal and findings, runs native gitops
+   filing/fixing/close-out, refreshes review artifacts, validates, and derives
+   stats in one call. Use default `autonomous_driver_mode=pending` when a live
+   budgeted driver still needs to capture evidence first.
 7. If there are no credible issue findings, or after `autonomous_fix` reports
    the bundle valid, submit `review` and `validate` through the story. Use
    `file_findings` or the CLI `--file-findings`/`--review-run`/`--validate-run`

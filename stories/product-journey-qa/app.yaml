@@ -189,6 +189,11 @@ world:
   autonomous_marathon_status: { type: string, default: "" }
   autonomous_marathon_summary: { type: string, default: "" }
   autonomous_marathon_report_path: { type: string, default: "" }
+  autonomous_driver_mode: { type: string, default: "" }
+  autonomous_driver_status: { type: string, default: "" }
+  autonomous_driver_summary: { type: string, default: "" }
+  autonomous_driver_evidence_count: { type: int, default: 0 }
+  autonomous_driver_issue_count: { type: int, default: 0 }
   autonomous_gate_summary: { type: string, default: "" }
   stats_status:   { type: string, default: "" }
   stats_root:     { type: string, default: "" }
@@ -298,6 +303,7 @@ intents:
       seed: { type: string, required: false }
       scenarios: { type: string, required: false }
       live_budget_minutes: { type: int, required: false }
+      autonomous_driver_mode: { type: string, required: false }
       run_dir: { type: string, required: false }
       ticket_repo: { type: string, required: false }
       gh_agent_db: { type: string, required: false }
