@@ -329,6 +329,56 @@ func TestGitHubTicket_Get_Happy(t *testing.T) {
 	}
 }
 
+func TestGitHubTicket_Get_PublicReadWithoutToken(t *testing.T) {
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization = %q, want none for public read", got)
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/105":
+			writeJSON(w, map[string]any{
+				"number":   105,
+				"title":    "Native public issue read",
+				"body":     "No token needed for public metadata.",
+				"state":    "open",
+				"html_url": "https://github.com/o/r/issues/105",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/105/comments":
+			writeJSON(w, []map[string]any{})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("ticket.get must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
+
+	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
+		"op":   "get",
+		"id":   "105",
+		"repo": "o/r",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if res.Data["title"] != "Native public issue read" {
+		t.Fatalf("title: %v", res.Data["title"])
+	}
+	if res.Data["url"] != "https://github.com/o/r/issues/105" {
+		t.Fatalf("url: %v", res.Data["url"])
+	}
+}
+
 // TestGitHubTicket_Search_ClassifiesType proves a GitHub-sourced ticket lands a
 // concrete `type` (P3): a `bug` label → "bug", a `feature`/`enhancement` label →
 // "feature", an `epic` label → "epic", and an unlabelled issue defaults to "bug"
