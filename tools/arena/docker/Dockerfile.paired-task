@@ -39,4 +39,17 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CARGO_TARGET_DIR="/workspace/.cache/cargo-target" \
     PNPM_STORE_DIR="/workspace/.cache/pnpm"
 
+# Docker `ENV PATH` only reaches non-login shells. The live worker's host.Bash
+# tool runs commands via `bash -lc`, which re-sources /etc/profile — Debian's
+# default there unconditionally OVERWRITES the inherited PATH with a bare
+# .../usr/bin:/bin, dropping go/cargo. Verified live: a real kitsoki-native
+# bugfix cell (kitsoki-bug9/bug12 training tasks) self-reported "done" after
+# reading "go not on PATH" and skipping its own `go test` verification, then
+# failed the arena's independent oracle — the agent never actually confirmed
+# its own fix. A profile.d script IS sourced by login shells, so re-declare
+# the toolchain PATH there too.
+RUN printf 'export PATH="/root/.cargo/bin:/go/bin:/usr/local/go/bin:$PATH"\n' \
+      > /etc/profile.d/00-kitsoki-toolchain-path.sh \
+ && chmod +x /etc/profile.d/00-kitsoki-toolchain-path.sh
+
 WORKDIR /workspace
