@@ -14,6 +14,7 @@ const props = withDefaults(
     graph: ObjectGraph;
     focusId?: string;
     groupByLayer?: (node: ObjectGraph["nodes"][number]) => string;
+    groupLabel?: (groupId: string) => string;
   }>(),
   { focusId: "" },
 );
@@ -28,7 +29,7 @@ function render() {
   cy?.destroy();
   cy = cytoscape({
     container: host.value,
-    elements: toElements(props.graph, { groupByLayer: props.groupByLayer }),
+    elements: toElements(props.graph, { groupByLayer: props.groupByLayer, groupLabel: props.groupLabel }),
     style: cytoscapeStyle,
     wheelSensitivity: 0.25,
   });
@@ -56,6 +57,8 @@ onMounted(render);
 onBeforeUnmount(() => cy?.destroy());
 
 watch(() => props.graph, render);
+watch(() => props.groupByLayer, render);
+watch(() => props.groupLabel, render);
 watch(layoutId, runLayout);
 watch(() => props.focusId, markFocus);
 

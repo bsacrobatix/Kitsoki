@@ -8,13 +8,23 @@ import { edgeLabel, lifecycleBucket, typeLabel } from "./catalog-model.js";
 export interface ToElementsOptions {
   // When set, nodes get a `parent` pointing at their layer id so compound
   // layouts (fcose, cola-compound) can draw a layer boundary around them.
+  // The grouping is presentation-only and pluggable — the hardcoded
+  // type-layer taxonomy (catalog-model's `nodeLayerId`) and the data-driven
+  // area grouping (`buildAreaGroupResolver`) are both just functions of this
+  // shape.
   groupByLayer?: (node: ObjectGraphNode) => string;
+  // Friendly label for a group id produced by groupByLayer above. Defaults
+  // to the raw id (fine for the short type-layer ids; area grouping passes
+  // `areaGroupLabel` to show the area's title instead of its node id).
+  groupLabel?: (groupId: string) => string;
 }
 
 export function toElements(graph: ObjectGraph, opts: ToElementsOptions = {}): cytoscape.ElementDefinition[] {
   const groups = opts.groupByLayer ? new Set(graph.nodes.map((n) => opts.groupByLayer!(n))) : null;
   const groupNodes: cytoscape.ElementDefinition[] = groups
-    ? [...groups].map((id) => ({ data: { id: `layer:${id}`, label: id, isLayer: true } }))
+    ? [...groups].map((id) => ({
+        data: { id: `layer:${id}`, label: opts.groupLabel ? opts.groupLabel(id) : id, isLayer: true },
+      }))
     : [];
 
   const nodes: cytoscape.ElementDefinition[] = graph.nodes.map((node) => ({

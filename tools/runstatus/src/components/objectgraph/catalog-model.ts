@@ -83,6 +83,99 @@ export function nodeLayerId(node: ObjectGraphNode): string {
   return layers.find((layer) => layer.types.includes(node.kind))?.id ?? "capabilities";
 }
 
+// --- Data-driven "group by area" mode (design doc §4.4) -------------------
+//
+// Unlike the hardcoded type layers above, this grouping is computed from
+// whatever `area` nodes and `in_area`/`part_of` edges the catalog actually
+// has — it does not hardcode area ids. A node's primary area is:
+//   - feature: the first `in_area` edge target (convention — see the
+//     `feature` type_registry summary in seed-objects.yaml: the first entry
+//     is primary for tree-shaped rollups; a feature listing more than one is
+//     spanning by convention, not schema).
+//   - area: its `part_of` parent (areas nest under their parent's bucket),
+//     or the root bucket if it has none.
+//   - everything else: one hop to a feature via the type's own obvious edge
+//     (e.g. requirement.required_by, evidence.demonstrates), then that
+//     feature's primary area — or the unassigned bucket if no such hop
+//     exists or resolves.
+export const UNASSIGNED_AREA_ID = "unassigned-area";
+export const AREA_ROOT_ID = "area-root";
+
+// The one-hop edge (by kind) each non-feature, non-area type uses to reach a
+// feature. Kept to the "obvious" hops named in the design doc — anything
+// without one falls into the unassigned bucket rather than guessing.
+const FEATURE_HOP_EDGE: Record<string, string> = {
+  requirement: "required_by",
+  "use-case": "exercises",
+  proposal: "proposes",
+  evidence: "demonstrates",
+  implementation: "implements",
+  change: "implements",
+  "site-page": "presents",
+  actor: "uses",
+  agent: "uses",
+};
+
+export function hasAreaNodes(graph: ObjectGraph): boolean {
+  return graph.nodes.some((node) => node.kind === "area");
+}
+
+// Builds a per-graph node -> primary-area-id resolver. Pass the returned
+// function as `groupByLayer` (graph-elements.ts's compound-parent mechanism
+// doesn't care whether the grouping key is a type layer or an area id).
+export function buildAreaGroupResolver(graph: ObjectGraph): (node: ObjectGraphNode) => string {
+  const targetsByEdgeKind = new Map<string, Map<string, string[]>>();
+  for (const edge of graph.edges) {
+    let bySource = targetsByEdgeKind.get(edge.kind);
+    if (!bySource) {
+      bySource = new Map();
+      targetsByEdgeKind.set(edge.kind, bySource);
+    }
+    const targets = bySource.get(edge.source);
+    if (targets) targets.push(edge.target);
+    else bySource.set(edge.source, [edge.target]);
+  }
+  const firstTarget = (kind: string, sourceId: string): string | undefined =>
+    targetsByEdgeKind.get(kind)?.get(sourceId)?.[0];
+
+  const cache = new Map<string, string>();
+
+  function resolve(node: ObjectGraphNode, visiting: Set<string>): string {
+    const cached = cache.get(node.id);
+    if (cached) return cached;
+    if (visiting.has(node.id)) return UNASSIGNED_AREA_ID; // defensive cycle guard
+    visiting.add(node.id);
+
+    let result: string;
+    if (node.kind === "area") {
+      result = firstTarget("part_of", node.id) ?? AREA_ROOT_ID;
+    } else if (node.kind === "feature") {
+      result = firstTarget("in_area", node.id) ?? UNASSIGNED_AREA_ID;
+    } else {
+      const hopEdge = FEATURE_HOP_EDGE[node.kind];
+      const featureId = hopEdge ? firstTarget(hopEdge, node.id) : undefined;
+      result = (featureId && firstTarget("in_area", featureId)) || UNASSIGNED_AREA_ID;
+    }
+
+    cache.set(node.id, result);
+    return result;
+  }
+
+  return (node: ObjectGraphNode) => resolve(node, new Set());
+}
+
+// Friendly label for a group id produced by buildAreaGroupResolver: the
+// area node's own title when the id is a real area, otherwise the fixed
+// bucket labels.
+export function areaGroupLabel(graph: ObjectGraph): (groupId: string) => string {
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  return (groupId: string): string => {
+    if (groupId === UNASSIGNED_AREA_ID) return "Unassigned";
+    if (groupId === AREA_ROOT_ID) return "Areas";
+    return nodeById.get(groupId)?.label ?? groupId;
+  };
+}
+
 export function typeLabel(type: string): string {
   const labels: Record<string, string> = {
     actor: "Actors",
@@ -130,6 +223,12 @@ export function edgeLabel(edge: string): string {
     persona_of: "persona of",
     qa_evidence: "QA evidence",
     from_persona: "from persona",
+    in_area: "in area",
+    part_of: "part of",
+    owns_area: "owns area",
+    targets: "targets",
+    includes: "includes",
+    proposals: "proposals",
   };
   return labels[edge] ?? edge.split("_").join(" ");
 }
