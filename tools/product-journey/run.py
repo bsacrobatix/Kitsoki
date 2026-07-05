@@ -1418,6 +1418,44 @@ def validate_autonomous_workflow_docs(issues: list[dict]) -> None:
                 f"Product journey {label} still presents split filing as the preferred full-loop path",
                 path.relative_to(ROOT).as_posix(),
             )
+    run_created_room = ROOT / "stories" / "product-journey-qa" / "rooms" / "run_created.yaml"
+    if not run_created_room.exists():
+        add_corpus_issue(
+            issues,
+            "error",
+            "autonomous-workflow-docs",
+            "Product journey run_created room is missing",
+            str(run_created_room),
+        )
+        return
+    room_text = run_created_room.read_text(encoding="utf-8")
+    autonomous_label = "autonomous_fix ticket_repo=owner/repo gh_agent_public_base_url=<url>"
+    file_label = "file_findings ticket_repo=owner/repo"
+    if autonomous_label not in room_text:
+        add_corpus_issue(
+            issues,
+            "error",
+            "autonomous-workflow-docs",
+            "Product journey run view does not expose autonomous_fix as the full-loop action",
+            run_created_room.relative_to(ROOT).as_posix(),
+        )
+    if file_label in room_text and autonomous_label in room_text and room_text.index(file_label) < room_text.index(autonomous_label):
+        add_corpus_issue(
+            issues,
+            "error",
+            "autonomous-workflow-docs",
+            "Product journey run view lists file_findings before the story-owned autonomous_fix gate",
+            run_created_room.relative_to(ROOT).as_posix(),
+        )
+    stale_room_guidance = "Use file_findings ticket_repo=owner/repo to file recorded issue findings"
+    if stale_room_guidance in room_text:
+        add_corpus_issue(
+            issues,
+            "error",
+            "autonomous-workflow-docs",
+            "Product journey run view still presents file_findings as the default issue-to-fix guidance",
+            run_created_room.relative_to(ROOT).as_posix(),
+        )
 
 
 def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_targets: dict) -> dict:
