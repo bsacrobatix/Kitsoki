@@ -183,7 +183,7 @@ then default; see epic §Shared decisions).
 - [ ] 1.2 Add the near_miss confidence band + verdict to the routing stack
       (orchestrator.go:1019-1060); wire near_miss to the S1 workbench entry
       point (stub until S1 lands; see Open questions)
-- [ ] 1.3 Delete the TUI's MatchDeterministic pre-pass (tui.go:1899); TUI
+- [x] 1.3 Delete the TUI's MatchDeterministic pre-pass (tui.go:1899); TUI
       calls Turn directly
 - [ ] 1.4 Decision recording: near_miss verdict lands in the existing
       routing decision event with confidence + threshold fields
@@ -195,7 +195,7 @@ then default; see epic §Shared decisions).
       banner fails; the same fixture with the banner assertion passes
 - [ ] 2.3 Routing near-miss fixture: an input scored in the near-miss band
       resolves to the workbench outcome, not the nearest authored intent
-- [ ] 2.4 TUI regression: MatchDeterministic removal doesn't change any
+- [x] 2.4 TUI regression: MatchDeterministic removal doesn't change any
       existing TUI routing flow fixture's outcome
 
 ## 3. Adopt + document

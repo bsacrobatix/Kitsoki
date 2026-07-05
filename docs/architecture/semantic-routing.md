@@ -69,12 +69,15 @@ which shows every tier that ran and what each said.
 
 > Note: when the semantic stack is **enabled**, the deterministic
 > tier's exact match is provided by the semroute synonym index inside
-> `TrySemantic` (the TUI additionally runs `MatchDeterministic` before
-> submission as a fast path). When the stack is **disabled** (by app config or
+> `TrySemantic`. When the stack is **disabled** (by app config or
 > explicit override), `Orchestrator.Turn` runs `TryDeterministic`
 > itself so an exact menu-display or example-string match still resolves
 > without an LLM hop on every surface — then falls straight through to
-> `harness.RunTurn`.
+> `harness.RunTurn`. Every surface, including the TUI, calls `Turn` directly
+> and shares this single decision point; the TUI used to run a separate
+> `MatchDeterministic` pre-pass before submission, but that duplicated
+> `Turn`'s own deterministic tier and could disagree with it, so it was
+> removed (never-silent-runtime proposal, Task 1.3).
 
 ### 1.1 Deterministic
 
