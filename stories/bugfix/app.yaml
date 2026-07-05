@@ -26,8 +26,11 @@
 # checkpoint — no fork in the state graph.
 #
 # # What is NOT here (Wave 2):
-#   - the pr-refinement tail import (the `@exit:done` hands off to a parent
-#     story that imports pr-refinement; standalone Wave 1 terminates here)
+#   - the pr-refinement tail import is now OPT-IN (bugfix_exit=open-PR-merge,
+#     WS-C C3 — see the `imports.pr` block below): `done`'s accept arc composes
+#     it in-process and can reach @exit:merged standalone. The default
+#     (open-PR) still hands off `@exit:done` to a parent that imports
+#     pr-refinement itself (dev-story's `pr` alias), unchanged.
 #   - cycle budgets, `restart_from_stage` plumbing, `quick_fix` / `skip_to_pr`
 #     shortcut intents
 #   - actual provider implementations for ticket / vcs / ci / workspace —
@@ -61,6 +64,13 @@ hosts:
   # host.run — the pre-fix regression gate (testing room) + the ship-it tail's
   # integrate/verify/cleanup host.run sites (imported as `tail`).
   - host.run
+  # Editor awareness (WS-C C3, docs/proposals/ide-integration.md follow-up 3):
+  # the validating room pulls REAL diagnostics from an attached `/ide` editor
+  # as extra evidence for the verify gate. "Not-connected is a value" — no
+  # live link (every flow/cassette/headless run) returns a typed
+  # {connected:false, diagnostics:[]}, never an error, so this degrades
+  # honestly rather than needing a fallback host. See rooms/validating.yaml.
+  - host.ide.get_diagnostics
   # Standalone GitHub ticket close-out: when world.ticket_repo is set the done
   # room comments/closes the GitHub issue directly instead of falling back to
   # the local-files default ticket provider.
@@ -301,11 +311,17 @@ world:
   #   open-PR     — today's behaviour: walk reviewing → validating → done and hand
   #                 the close-out artifact to pr-refinement (parent stories lift
   #                 @exit:done). For human-review flows.
+  #   open-PR-merge — opt-in tail (WS-C C3): same as open-PR through `done`, but
+  #                 done's accept arc composes the IMPORTED pr-refinement pipeline
+  #                 in-process (open → CI-watch → merge) instead of firing
+  #                 @exit:done — so a standalone "fix a bug" run can reach
+  #                 @exit:merged with NO parent story required. @exit:done stays
+  #                 the default for every existing caller that doesn't opt in.
   #
   # Default direct-ship for the self-hosting loop. Parent stories that want the
   # PR-handoff tail (dev-story, gears-bugfix) project bugfix_exit: open-PR via
   # world_in. See stories/bugfix/README.md (the exit slot + RED→GREEN gate).
-  bugfix_exit:      { type: string, default: "direct-ship" }     # direct-ship | open-PR
+  bugfix_exit:      { type: string, default: "direct-ship" }     # direct-ship | open-PR | open-PR-merge
 
   # ── RED→GREEN regression gate (slice 4) ────────────────────────────────
   # The bugfix-specific discipline ship-it does NOT cover: the regression test
@@ -485,6 +501,26 @@ world:
   pr_url:           { type: string, default: "" }
   ci_state:         { type: string, default: "" }
   ci_log:           { type: string, default: "" }  # last CI run log; scratch
+
+  # ── CI-watch/merge tail handoff (opt-in — bugfix_exit=open-PR-merge) ────
+  # done's accept arc (when bugfix_exit=open-PR-merge) sets pr_title/pr_body
+  # from the just-produced done_artifact, then enters the imported `pr`
+  # compound (../pr-refinement) at open_pr; its world_in: projects these +
+  # workdir/feature_branch/base_branch/judge_mode into the child. merge_sha
+  # is lifted back from the child's @exit:merged. See rooms/done.yaml.
+  pr_title:         { type: string, default: "" }
+  pr_body:          { type: string, default: "" }
+  merge_strategy:   { type: string, default: "squash" }  # squash | merge | rebase — forwarded to pr-refinement
+  merge_sha:        { type: string, default: "" }        # the merged commit sha, lifted from the pr child on @exit:merged
+
+  # ── Editor awareness (validating room, WS-C C3) ─────────────────────────
+  # host.ide.get_diagnostics's whole Result.Data envelope + a convenience
+  # flattened list, so the validator's prompt AND the room's view can weigh
+  # real editor diagnostics as evidence. connected:false (no `/ide` link —
+  # the default for every flow/cassette/headless run) is a HONEST value, not
+  # an error: the view renders it explicitly rather than hiding the gap.
+  ide_diagnostics_result: { type: object, default: {} }  # {connected, diagnostics}
+  ide_diagnostics:        { type: list,   default: [] }  # world.ide_diagnostics_result.diagnostics, flattened
 
   # ── Review-diff (host.diff.open) — populated by reviewing_external ────────
   review_verdict:       { type: string, default: "" }   # "accept" | "reject" | "" (no verdict)
@@ -678,6 +714,10 @@ exits:
   not-reproducible:
     description: "The ticket's repro_command passed (GREEN) on the unchanged worktree — the bug does not currently reproduce. Needs a human to confirm wontfix / cannot-reproduce or supply a sharper repro. Carries the gate's output as last_error."
     requires: [last_error]
+  # ── CI-watch/merge tail exit (opt-in — bugfix_exit=open-PR-merge) ────────
+  merged:
+    description: "open-PR-merge: the imported pr-refinement tail opened the PR, watched CI, and merged it. Carries pr_url + merge_sha."
+    requires: [pr_url]
 
 # ── The shared ship-it tail (slice 4 — compose, don't reinvent) ──────────
 #
@@ -725,6 +765,63 @@ imports:
         set:
           last_error: "{{ world.tail__last_error }}"
           status:     "needs-human"
+
+  # ── The opt-in CI-watch/merge tail (WS-C C3 — compose, don't reinvent) ──
+  #
+  # bugfix_exit=open-PR-merge (default stays open-PR / direct-ship for every
+  # existing caller). `done`'s accept arc, instead of firing @exit:done, sets
+  # pr_title/pr_body from the just-produced done_artifact and enters this
+  # import — the SAME pr-refinement sub-story dev-story imports as `pr`
+  # (stories/pr-refinement/), reused verbatim: open_pr → ci_monitoring →
+  # (diagnose/resolve_comments on red or pushback) → merge → @exit:merged.
+  # This lets a standalone `kitsoki run stories/bugfix/app.yaml` reach a real
+  # MERGED terminal with no parent hub required.
+  pr:
+    source: ../pr-refinement
+    entry: open_pr   # bypass pr-refinement's standalone-only idle state —
+                     # done's accept hands off straight to the open_pr room.
+    world_in:
+      ticket_id:       "{{ world.ticket_id }}"
+      ticket_title:    "{{ world.ticket_title }}"
+      thread:          "{{ world.thread }}"
+      workspace_id:    "{{ world.workspace_id }}"
+      workdir:         "{{ world.workdir }}"
+      base_branch:     "{{ world.base_branch }}"
+      feature_branch:  "{{ world.feature_branch }}"
+      pr_title:        "{{ world.pr_title }}"
+      pr_body:         "{{ world.pr_body }}"
+      judge_mode:      "{{ world.judge_mode }}"
+      judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
+      merge_strategy:  "{{ world.merge_strategy }}"
+
+    # Lift pr-unique intents into bugfix's bare intent table. Overlapping
+    # names (accept, refine, quit, look, proceed) stay prefixed — they
+    # collide with bugfix's own bare intents of the same name (same
+    # collision dev-story's `pr` import already documents).
+    intents:
+      import: [open, monitor, retry, resolve, merge_now]
+
+    exits:
+      merged:
+        to: "@exit:merged"
+        set:
+          pr_url:    "{{ world.pr__pr_url }}"
+          merge_sha: "{{ world.pr__merge_sha }}"
+          status:    "merged"
+      abandoned:
+        to: "@exit:needs-human"
+        set:
+          status:     "needs-human"
+          last_error: "{{ world.pr__refine_feedback }}"
+      # pr-refinement declares this for a future re-review loop (dev-story's
+      # comment: "Wave 3 may use it"); this opt-in tail has no room to resume
+      # monitoring from, so land honestly at needs-human rather than silently
+      # treating unresolved pushback as merged.
+      pushback_resolved:
+        to: "@exit:needs-human"
+        set:
+          status:     "needs-human"
+          last_error: "PR review pushback addressed but the opt-in CI-watch/merge tail has no room to resume monitoring — drive stories/pr-refinement directly (or dev-story's `pr` import) to finish the merge."
 
 # Root state — the operator-controlled entry point. Children fold this into
 # `bf` (or similar alias) and `entry: idle` enters here.

@@ -33,11 +33,12 @@ import via `entry: idle`.
 | `shipped` | direct-ship exit: the fix integrated to local main, the regression gate re-verified GREEN on the merged commit, worktree cleaned up. | `shipped_sha` | The self-hosting loop (no PR). |
 | `needs-human` | direct-ship exit: an integrate/verify/cleanup failure, or a regression gate that was never RED pre-fix / isn't GREEN on merged main. | `last_error` | Carries the real error; never a swallowed false success. |
 | `not-reproducible` | the ticket's `repro_command` passed (GREEN) on the unchanged worktree — the bug does not currently reproduce. | `last_error` | Carries the gate output; a human confirms wontfix / cannot-reproduce or supplies a sharper repro. |
+| `merged` | opt-in CI-watch/merge tail exit (`bugfix_exit: open-PR-merge`, WS-C C3): the imported pr-refinement compound opened the PR, watched CI, and merged it. | `pr_url` | Carries `pr_url` + `merge_sha`; a standalone `kitsoki run` reaches a real MERGED terminal with no parent hub. |
 
 Standalone (no parent) load synthesises `__exit__done`,
-`__exit__abandoned`, `__exit__shipped`, `__exit__needs-human`, and
-`__exit__not-reproducible` terminals so `kitsoki run` and `kitsoki test flows`
-both terminate cleanly.
+`__exit__abandoned`, `__exit__shipped`, `__exit__needs-human`,
+`__exit__not-reproducible`, and `__exit__merged` terminals so `kitsoki run`
+and `kitsoki test flows` both terminate cleanly.
 
 ## The exit slot — direct-ship vs open-PR (delivery-loop slice 4)
 
@@ -58,6 +59,33 @@ The pipeline ends one of two ways, chosen by the **`bugfix_exit`** world key:
 - **`open-PR`**: today's behaviour — walk `reviewing → validating → done` and
   hand the close-out artifact to pr-refinement. Parent stories that want the PR
   tail (`dev-story`, `gears-bugfix`) pin `bugfix_exit: open-PR` via `world_in`.
+- **`open-PR-merge`** (opt-in, WS-C C3): same as `open-PR` through `done`, but
+  `done`'s accept arc composes the imported [`pr-refinement`](../pr-refinement/)
+  pipeline **directly** — `open_pr → ci_monitoring → merge` (`imports.pr`,
+  `entry: open_pr`) — instead of firing `@exit:done`. `pr_title`/`pr_body` are
+  seeded from the just-produced `done_artifact`; `merge_strategy` forwards to
+  the child. Reaches `@exit:merged` (carrying `pr_url` + `merge_sha`) with **no
+  parent hub required** — a standalone `kitsoki run stories/bugfix/app.yaml`
+  can now go all the way to a merged PR. `@exit:done` stays the default for
+  every existing caller that doesn't opt in. See
+  [`flows/done_opens_pr_and_merges.yaml`](flows/done_opens_pr_and_merges.yaml).
+
+## Editor awareness (validating room, WS-C C3)
+
+The `validating` room pulls `host.ide.get_diagnostics` on entry, before the
+validator agent runs, and threads the result into both the room's view and
+the validator's prompt args (`ide_connected`, `ide_diagnostics_count`,
+`ide_diagnostics`) — real editor diagnostics as extra evidence alongside the
+build, per [`docs/proposals/ide-integration.md`](../../docs/proposals/ide-integration.md)
+follow-up 3. `host.ide.*` is "not-connected is a value"
+([`docs/architecture/hosts.md#hostide--editor-awareness`](../../docs/architecture/hosts.md#hostide--editor-awareness)):
+with no live `/ide` link attached — the default for every flow/cassette run
+and any headless dispatch — the real handler returns a typed
+`{connected:false, diagnostics:[]}`, never a Go error, so the room degrades
+**honestly** (rendered in the view as "no editor attached") rather than
+silently omitting the signal. A `refine` or the `infra_error` self-loop
+re-pulls fresh diagnostics on re-entry. See
+[`flows/validating_surfaces_ide_diagnostics.yaml`](flows/validating_surfaces_ide_diagnostics.yaml).
 
 ### RED→GREEN regression gate
 
@@ -450,6 +478,8 @@ stories/bugfix/
     mode_switch_full_to_quick.yaml        — full → quick mid-flow at reproducing checkpoint
     mixed_judge_swap.yaml                 — start llm_then_human, flip to human mid-run
     quit_at_{idle,proposing,validating}.yaml — quit from various states → @exit:abandoned
+    validating_surfaces_ide_diagnostics.yaml — WS-C C3: host.ide.get_diagnostics surfaced into the world + prompt args
+    done_opens_pr_and_merges.yaml          — WS-C C3: bugfix_exit=open-PR-merge walks the imported pr-refinement tail to @exit:merged
 ```
 
 ## See also

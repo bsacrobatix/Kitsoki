@@ -44,6 +44,10 @@ states:
             Ticket:  "{{ world.ticket_id }} — {{ world.ticket_title }}"
             Summary: '{{ world.validate_artifact.summary_title|default:"(pending)" }}'
             Outcome: '{{ world.validate_artifact.outcome|default:"(pending)" }}'
+            # Editor awareness (WS-C C3): honest either way — an attached
+            # `/ide` link's diagnostic count, or an explicit "no editor
+            # attached" rather than silently omitting the row.
+            "Editor diagnostics": '{{ world.ide_diagnostics_result.connected ? world.ide_diagnostics|length : "no editor attached" }}'
       - heading: "Artifact"
       - code: '{{ world.validate_artifact.summary_markdown|default:"(pending — agent has not returned yet)" }}'
       - choice:
@@ -87,8 +91,27 @@ states:
             - label:  "look"
               hint:   "re-render"
               intent: look
-    relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, validate_artifact, implement_review_artifact, ci_log, llm_verdict, refine_feedback, cycle]
+    relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, validate_artifact, implement_review_artifact, ci_log, ide_diagnostics_result, ide_diagnostics, llm_verdict, refine_feedback, cycle]
     on_enter:
+      # Editor awareness (WS-C C3 / docs/proposals/ide-integration.md follow-up
+      # 3): surface REAL diagnostics from an attached editor as extra evidence
+      # for the validator, alongside the build. host.ide.* is "not-connected is
+      # a value" (docs/architecture/hosts.md#hostide--editor-awareness) — no
+      # live `/ide` link (every flow/cassette run, and any headless dispatch)
+      # returns a typed {connected:false, diagnostics:[]}, never a Go error —
+      # so this always degrades HONESTLY (rendered above) rather than being a
+      # silent no-op. `once: true`: pulling diagnostics is a read, but the same
+      # reload-safety rule as the other `once:` binds here applies — a fresh
+      # pull re-arms only via the refine/restart-from clears below.
+      - invoke: host.ide.get_diagnostics
+        id: validating_ide_diagnostics
+        once: true
+        with:
+          path: "{{ world.workdir }}"
+        bind:
+          ide_diagnostics_result: "{{ result }}"
+          ide_diagnostics:        diagnostics
+
       # `target:` is intentionally absent — ciBuild treats target as a
       # literal go-package-path arg appended to `go build ./...`. Pre-fix,
       # passing `target: "default"` here produced
@@ -134,6 +157,9 @@ states:
               workdir:         "{{ world.workdir }}"
               build_log:       "{{ world.ci_log }}"
               review_body:     "{{ world.implement_review_artifact.summary_markdown }}"
+              ide_connected:       "{{ world.ide_diagnostics_result.connected }}"
+              ide_diagnostics_count: "{{ len(world.ide_diagnostics) }}"
+              ide_diagnostics:       "{{ world.ide_diagnostics }}"
               refine_feedback: "{{ world.refine_feedback }}"
               cycle:           "{{ world.cycle }}"
         bind:
@@ -225,8 +251,12 @@ states:
                 refine_feedback:   "{{ world.validate_artifact.next_action_hint ?? world.validate_artifact.summary_markdown }}"
                 validating_cycle:  "{{ world.validating_cycle + 1 }}"
                 cycle:             "{{ world.cycle + 1 }}"
-                # Self-loop for a fresh re-validate: clear the once: bind.
-                validate_artifact: {}
+                # Self-loop for a fresh re-validate: clear the once: binds so
+                # both the validator agent AND the editor-diagnostics pull
+                # re-run (a re-validate should see fresh diagnostics too).
+                validate_artifact:      {}
+                ide_diagnostics_result: {}
+                ide_diagnostics:        []
 
         # pass — the success close-out. Also the fall-through for legacy
         # artifacts that don't set `outcome`.
@@ -257,8 +287,11 @@ states:
                 refine_feedback:   "{{ slots.feedback ?? world.llm_verdict.reason }}"
                 validating_cycle:  "{{ world.validating_cycle + 1 }}"
                 cycle:             "{{ world.cycle + 1 }}"
-                # Clear the once: bind so on_enter re-runs the agent.
-                validate_artifact: {}
+                # Clear the once: binds so on_enter re-runs the agent AND
+                # re-pulls editor diagnostics.
+                validate_artifact:      {}
+                ide_diagnostics_result: {}
+                ide_diagnostics:        []
 
       restart_from:
         - when: "slots.stage == 'reproducing'"
