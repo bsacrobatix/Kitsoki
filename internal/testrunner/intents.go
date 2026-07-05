@@ -202,11 +202,11 @@ type Baseline struct {
 func RunIntents(ctx context.Context, appPath string, opts IntentOptions) (*IntentReport, error) {
 	// Publish KITSOKI_APP_DIR before Load so env-expanded fields in
 	// the app yaml validate against the live var (bug 2 ordering fix
-	// — see flows.go for the canonical comment).
-	publishAppDirForTestrunner(appPath)
-
-	// Load app.
-	def, err := app.LoadWithResolver(appPath, nil, opts.ImportResolver)
+	// — see flows.go for the canonical comment). loadAppForRun holds
+	// appDirLoadMu across the setenv+Load span so a concurrent
+	// RunFlows/RunIntents/RunFlowCoverage call in the same process can't
+	// clobber the var mid-Load.
+	def, err := loadAppForRun(appPath, opts.ImportResolver)
 	if err != nil {
 		return nil, fmt.Errorf("load app %q: %w", appPath, err)
 	}

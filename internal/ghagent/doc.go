@@ -30,8 +30,19 @@
 //
 // # Concurrency note
 //
-// testrunner.RunFlows publishes KITSOKI_APP_DIR as a process global, so
-// concurrent story Dispatch of multiple issue mentions in one process can
-// cross-contaminate. The serve loop dispatches synchronously today; per-job
-// KITSOKI_APP_DIR isolation is required before parallel story workers.
+// KITSOKI_APP_DIR is still a process-global env var (app.Load's env-var
+// validator reads it synchronously to resolve `${KITSOKI_APP_DIR}`
+// references such as meta_modes[*].cwd), but testrunner now serializes only
+// the narrow setenv-then-Load span behind a package mutex
+// (internal/testrunner/flows.go's appDirLoadMu / loadAppForRun), not whole
+// flow/turn runs. Two jobs' RunStorySession calls dispatched concurrently in
+// one process load their app.yaml one at a time — briefly serialized, never
+// cross-contaminated — and then run their turns fully concurrently, since
+// post-Load prompt/script resolution goes through the per-orchestrator
+// def.BaseDir-scoped render.AppRenderer
+// (internal/host/prompt_render.go), not the global env var. See
+// TestConcurrentDispatch_NoAppDirCrossContamination in dispatch_e2e_test.go.
+// The one residual gap: internal/host/starlark_run.go's Starlark-inspector
+// root still falls back to the global env var when world.workdir is unset,
+// so a per-job worktree (task 2.1) should always seed world.workdir.
 package ghagent

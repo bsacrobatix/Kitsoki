@@ -147,8 +147,10 @@ func RunFlowCoverage(ctx context.Context, appPath string, opts FlowCoverageOptio
 		opts.MaxCombinations = 64
 	}
 
-	publishAppDirForTestrunner(appPath)
-	def, err := app.LoadWithResolver(appPath, nil, opts.ImportResolver)
+	// loadAppForRun holds appDirLoadMu across the setenv+Load span so a
+	// concurrent RunFlows/RunIntents/RunFlowCoverage call in the same
+	// process can't clobber KITSOKI_APP_DIR mid-Load (see flows.go).
+	def, err := loadAppForRun(appPath, opts.ImportResolver)
 	if err != nil {
 		return nil, fmt.Errorf("load app %q: %w", appPath, err)
 	}

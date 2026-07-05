@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
@@ -50,6 +51,41 @@ func publishAppDirForTestrunner(appPath string) {
 	if abs, err := filepath.Abs(appPath); err == nil {
 		_ = os.Setenv(host.AppDirEnv, filepath.Dir(abs))
 	}
+}
+
+// appDirLoadMu serializes the publish-then-Load span for KITSOKI_APP_DIR.
+//
+// KITSOKI_APP_DIR is a process-global env var (see
+// internal/mcp/studio/app_dir.go's doc comment): app.Load's env-var validator
+// reads it synchronously during Load to resolve `${KITSOKI_APP_DIR}`
+// references (e.g. meta_modes[*].cwd). Two concurrent RunFlows/RunIntents/
+// RunFlowCoverage calls in one process — e.g. gh-agent dispatching two jobs
+// for different stories at once — would otherwise race: whichever
+// publishAppDirForTestrunner call lands last during the other's Load wins the
+// global, corrupting that other job's env-expanded paths.
+//
+// This mutex narrows the race window to exactly that span (setenv through
+// Load) rather than serializing whole flow/turn runs: once app.Load returns,
+// the built orchestrator resolves per-call prompt/script paths through its
+// own def.BaseDir-scoped render.AppRenderer (internal/host/prompt_render.go),
+// not the global env var, so turn execution after Load stays fully
+// concurrent. The one residual gap is internal/host/starlark_run.go's
+// inspector-root fallback to os.Getenv(AppDirEnv) when world.workdir is
+// unset — callers that drive multiple concurrent jobs through Starlark glue
+// should seed world.workdir (e.g. to a per-job worktree path) so that
+// fallback is never reached.
+var appDirLoadMu sync.Mutex
+
+// loadAppForRun publishes KITSOKI_APP_DIR and loads appPath while holding
+// appDirLoadMu, so the setenv the loader depends on can never be clobbered by
+// a concurrent RunFlows/RunIntents/RunFlowCoverage call in the same process.
+// See appDirLoadMu's doc comment for the scope of what this does and doesn't
+// cover.
+func loadAppForRun(appPath string, resolver app.ImportResolver) (*app.AppDef, error) {
+	appDirLoadMu.Lock()
+	defer appDirLoadMu.Unlock()
+	publishAppDirForTestrunner(appPath)
+	return app.LoadWithResolver(appPath, nil, resolver)
 }
 
 // ─── Flow fixture YAML format ────────────────────────────────────────────────
@@ -993,11 +1029,10 @@ func RunFlows(ctx context.Context, appPath, glob string, opts FlowOptions) (*Flo
 	// env-expanded field (e.g. meta_modes[*].cwd). Setting the env var
 	// after Load was the bug-2 ordering issue — `hally test flows`
 	// then rejected a perfectly valid yaml because the var wasn't set
-	// yet at validation time.
-	publishAppDirForTestrunner(appPath)
-
-	// Load app.
-	def, err := app.LoadWithResolver(appPath, nil, opts.ImportResolver)
+	// yet at validation time. loadAppForRun holds appDirLoadMu across the
+	// setenv+Load span so a concurrent RunFlows/RunIntents/RunFlowCoverage
+	// call in the same process can't clobber the var mid-Load.
+	def, err := loadAppForRun(appPath, opts.ImportResolver)
 	if err != nil {
 		return nil, fmt.Errorf("load app %q: %w", appPath, err)
 	}

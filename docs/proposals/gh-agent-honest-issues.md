@@ -168,12 +168,24 @@ replaced; each task below updates or replaces the fixtures it makes stale.
       substrate for a stubbed run; existing e2e fixtures updated to assert
       the new prose
 
-## 1. Per-job KITSOKI_APP_DIR
-- [ ] 1.1 Scope KITSOKI_APP_DIR per job (mirror the driver-session fix per
-      the parallel-live-drivers-schema-bleed pattern); remove the
-      process-global concurrency note from doc.go once fixed
-- [ ] 1.2 Concurrency flow/unit test: two jobs dispatched in the same process
-      do not cross-contaminate renderer/app-dir state
+## 1. Per-job KITSOKI_APP_DIR — SHIPPED
+- [x] 1.1 Scope KITSOKI_APP_DIR per job. Corrected from the proposal's
+      original framing (there is no general per-session app-dir fix to
+      mirror — the schema-bleed fix only solved `host.agent.*` prompt/schema
+      resolution via a per-orchestrator `render.AppRenderer`). The actually
+      racy window is the synchronous `publishAppDirForTestrunner` →
+      `app.Load` span inside `RunFlows`/`RunIntents`/`RunFlowCoverage`; that
+      span is now serialized behind a package mutex (`appDirLoadMu` /
+      `loadAppForRun` in internal/testrunner/flows.go), narrowing the fix to
+      exactly the unsafe window instead of serializing whole flow/turn runs.
+      doc.go's stale "fixing that generally is out of scope" /
+      process-global concurrency notes are corrected to describe the actual
+      (narrowed) scope and the one residual gap (starlark_run.go's
+      inspector-root env fallback when `world.workdir` is unset).
+- [x] 1.2 Concurrency test: `TestConcurrentDispatch_NoAppDirCrossContamination`
+      (internal/ghagent/dispatch_e2e_test.go) dispatches two different
+      stories' `RunStorySession` calls concurrently in one process (`go test
+      -race`) and asserts neither job's `RunURL`/turn count crossed streams.
 
 ## 2. Real pipeline dispatch
 - [ ] 2.1 Per-job worktree checkout (`.worktrees/gh-job-<id>`) before spawn;
