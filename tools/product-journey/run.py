@@ -3028,7 +3028,7 @@ def issue_has_fixed_marker(issue: dict) -> bool:
     return "kitsoki-fixed-in" in issue_marker_text(issue)
 
 
-def derive_stats(root: Path, issue_state_file: str, similarity_threshold: float, stats_output: str) -> dict:
+def derive_stats(root: Path, issue_state_file: str, similarity_threshold: float, similar_pair_limit: int, stats_output: str) -> dict:
     issue_state = load_issue_state(issue_state_file)
     run_findings: list[tuple[Path, dict]] = []
     if root.exists():
@@ -3090,6 +3090,7 @@ def derive_stats(root: Path, issue_state_file: str, similarity_threshold: float,
                     "right_run_dir": right.get("run_dir", ""),
                 })
     similar_pairs.sort(key=lambda item: (-item["score"], item["left_title"], item["right_title"]))
+    visible_pairs = similar_pairs if similar_pair_limit < 0 else similar_pairs[:similar_pair_limit]
     stats_summary = (
         f"Derived product-journey stats: {len(credible)} found, {len(filed)} filed, "
         f"{len(fixed)} fixed, {len(reopened)} reopened, {len(similar_pairs)} similar pair(s)."
@@ -3105,7 +3106,8 @@ def derive_stats(root: Path, issue_state_file: str, similarity_threshold: float,
         "issues_reopened_count": len(reopened),
         "issues_unknown_state_count": unknown_state,
         "similar_pair_count": len(similar_pairs),
-        "similar_pairs": similar_pairs,
+        "similar_pairs_shown": len(visible_pairs),
+        "similar_pairs": visible_pairs,
         "manual_stats_replaced": "yes",
         "stats_summary": stats_summary,
     }
@@ -6901,6 +6903,7 @@ def main() -> None:
     parser.add_argument("--issue-state-file", default="", help="Optional JSON fixture/cache with GitHub issue state for --stats")
     parser.add_argument("--stats-output", default="", help="Optional path to write the derived --stats JSON")
     parser.add_argument("--similarity-threshold", type=float, default=0.82, help="Title similarity threshold for --stats duplicate/similar issue detection")
+    parser.add_argument("--similar-pair-limit", type=int, default=25, help="Maximum similar issue pairs to include in --stats JSON; use -1 for all pairs")
     parser.add_argument("--ticket-repo", default="", help="owner/repo GitHub target for --file-findings")
     parser.add_argument("--dry-run", action="store_true", help="With --file-findings, render what would be filed without calling GitHub")
     parser.add_argument(
@@ -7319,7 +7322,7 @@ def main() -> None:
 
     if args.stats:
         stats_root = run_dir_from_arg(args.stats_root) if args.stats_root else ARTIFACT_ROOT
-        result = derive_stats(stats_root, args.issue_state_file, args.similarity_threshold, args.stats_output)
+        result = derive_stats(stats_root, args.issue_state_file, args.similarity_threshold, args.similar_pair_limit, args.stats_output)
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
             append_log(f"Derived product journey stats: {result['stats_summary']}")
