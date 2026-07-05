@@ -660,7 +660,8 @@ func agentAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, a
 	}
 	// Thread agent tools (or per-call override) via --allowedTools. Per-call
 	// wins over agent.Tools per D5; effectiveTools emits a warn-line on conflict.
-	if tools := effectiveTools(ctx, args, agent); len(tools) > 0 {
+	tools := effectiveTools(ctx, args, agent)
+	if len(tools) > 0 {
 		cliArgs = appendAllowedToolsFlag(cliArgs, tools)
 	}
 	// Hard-deny AskUserQuestion: headless `-p` auto-resolves it with empty
@@ -753,6 +754,8 @@ func agentAskWithMCPCore(ctx context.Context, rendered, resolvedPrompt string, a
 			mcpServers["validator"] = validatorEntry
 		}
 	}
+
+	mcpServers = attachStudioMCPServer(mcpServers, tools)
 
 	// Materialize mcp_servers (if any) into a temp config file.
 	if len(mcpServers) > 0 {

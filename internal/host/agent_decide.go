@@ -254,6 +254,8 @@ func agentDecideHandlerOnce(ctx context.Context, args map[string]any) (Result, e
 		}
 	}
 
+	mcpServers = attachStudioMCPServer(mcpServers, tools)
+
 	// Materialize mcp_servers into a temp config file.
 	if len(mcpServers) > 0 {
 		mcpConfigPath, cleanup, cfgErr := writeMCPConfigTempfile(mcpServers, "kitsoki-decide-mcp")

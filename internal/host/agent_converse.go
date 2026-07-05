@@ -216,7 +216,7 @@ func AgentConverseHandler(ctx context.Context, args map[string]any) (Result, err
 	cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
 	defer opAskCleanup()
 	policy = policy.WithAllowed(tools)
-	if contractServers := effectiveMCPServers(args, agent); len(contractServers) > 0 {
+	if contractServers := attachStudioMCPServer(effectiveMCPServers(args, agent), tools); len(contractServers) > 0 {
 		contractMCPPath, contractMCPCleanup, mErr := writeMCPConfigTempfile(contractServers, "kitsoki-converse-contract-mcp")
 		if mErr != nil {
 			return Result{Error: fmt.Sprintf("host.agent.converse: write contract MCP config: %v", mErr)}, nil
@@ -434,6 +434,19 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 	}
 	if e := strings.TrimSpace(effort); e != "" {
 		cliArgs = append(cliArgs, "--effort", e)
+	}
+	// This chat-aware path builds no other --mcp-config (unlike the
+	// stateless path above), so a chat agent whose tool surface names a
+	// studio tool needs its own attach here rather than riding along on
+	// attachOperatorAsk's config (which only exists when an operator is
+	// attached).
+	if studioServers := attachStudioMCPServer(nil, tools); len(studioServers) > 0 {
+		studioMCPPath, studioMCPCleanup, mErr := writeMCPConfigTempfile(studioServers, "kitsoki-converse-chat-studio-mcp")
+		if mErr != nil {
+			return Result{Error: fmt.Sprintf("host.agent.converse: write studio MCP config: %v", mErr)}, nil
+		}
+		defer studioMCPCleanup()
+		cliArgs = append(cliArgs, "--mcp-config", studioMCPPath)
 	}
 	// Forward operator questions into kitsoki when a live surface is attached.
 	var opAskCleanup func()

@@ -378,7 +378,8 @@ func attachOperatorAsk(ctx context.Context, cliArgs, tools []string) (outArgs, o
 		"command": bin,
 		"args":    []any{"mcp-operator-ask", "--socket", l.sockPath},
 	}
-	cfgPath, cfgCleanup, cfgErr := writeMCPConfigTempfile(map[string]any{operatorAskServerName: server}, "kitsoki-opask-mcp")
+	mcpServers := attachStudioMCPServer(map[string]any{operatorAskServerName: server}, tools)
+	cfgPath, cfgCleanup, cfgErr := writeMCPConfigTempfile(mcpServers, "kitsoki-opask-mcp")
 	if cfgErr != nil {
 		l.close()
 		slog.WarnContext(ctx, "operator-ask: cannot write MCP config; agent will run without the ask tool", "error", cfgErr)
