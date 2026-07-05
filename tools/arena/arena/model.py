@@ -78,6 +78,50 @@ class Cell:
 # onboarding assertions all land in this vocabulary.)
 VERDICTS = ("solved", "partial", "failed", "armed", "blocked", "pending")
 
+# Check-type discriminator (WS-G G1): a cell declares a check SUITE, not one
+# verdict shape, and every check emits a completion-state verdict tagged with
+# its type (schemas/completion-state.schema.json `check_type`; absent == the
+# default "replay"). Only `replay` is executable today — the plugin/container
+# path below IS the replay check. The other three are declared-but-not-
+# implemented: specs may declare them (validation accepts them) and execution
+# reports an honest `pending` verdict, never a fake green.
+CHECK_TYPES = ("replay", "docs-fidelity", "ux-heuristic", "journey-verdict")
+DEFAULT_CHECK_TYPE = "replay"
+IMPLEMENTED_CHECK_TYPES = ("replay",)
+
+
+@dataclass(frozen=True)
+class CheckSpec:
+    """One declared check in a cell's check suite: a type + how to run/collect.
+
+    `options` is the check-type-specific "how" (e.g. a future docs-fidelity
+    check's docs path or persona id); the replay check needs none — its "how"
+    is the job-type plugin itself.
+    """
+
+    check_type: str = DEFAULT_CHECK_TYPE
+    options: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.check_type not in CHECK_TYPES:
+            raise ValueError(
+                f"unknown check_type {self.check_type!r}; known: {list(CHECK_TYPES)}"
+            )
+
+
+def _check_spec_from(entry: Any) -> CheckSpec:
+    """Parse one spec-file `checks:` entry — a bare type string or a mapping."""
+    if isinstance(entry, str):
+        return CheckSpec(check_type=entry)
+    if isinstance(entry, dict):
+        data = dict(entry)
+        check_type = data.pop("check_type", data.pop("type", DEFAULT_CHECK_TYPE))
+        options = data.pop("options", None)
+        if options is None:
+            options = data  # remaining keys fold into options (least surprise)
+        return CheckSpec(check_type=check_type, options=dict(options))
+    raise ValueError(f"checks entry must be a string or mapping, got {entry!r}")
+
 
 @dataclass
 class CellResult:
@@ -94,9 +138,18 @@ class CellResult:
     evidence_refs: list[str] = field(default_factory=list)
     trace_ref: str = ""
     notes: str = ""
+    # Which proof class this verdict grades (WS-G G1). Default "replay" — the
+    # only value pre-check-suite consumers ever meant.
+    check_type: str = DEFAULT_CHECK_TYPE
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        # Schema semantics: absent check_type == "replay". Omitting the default
+        # keeps every pre-check-suite consumer (and the golden rollup bytes)
+        # unchanged; only non-replay checks carry the discriminator explicitly.
+        if self.check_type == DEFAULT_CHECK_TYPE:
+            d.pop("check_type")
+        return d
 
 
 @dataclass
@@ -187,6 +240,10 @@ class JobSpec:
     axes: dict[str, list[str]] = field(default_factory=dict)   # extra per-job axes
     placement: Placement = field(default_factory=Placement)
     options: dict[str, Any] = field(default_factory=dict)      # job-type-specific knobs
+    # The cell's check suite (WS-G G1). Every cell in the job runs every
+    # declared check; aggregation is one verdict per cell per check_type.
+    # Default: the single replay check — exactly the pre-check-suite behavior.
+    checks: list[CheckSpec] = field(default_factory=lambda: [CheckSpec()])
     # Corpus provenance (informational; the fields above are already resolved).
     targets_from: str = ""
     persona_axis_from: str = ""
@@ -239,6 +296,14 @@ class JobSpec:
             # fills in the axis when the spec didn't hand-copy persona ids.
             axes["persona"] = load_persona_axis_values(persona_axis_from)
 
+        checks_data = data.get("checks") or []
+        checks = [_check_spec_from(c) for c in checks_data] or [CheckSpec()]
+        # A duplicated check_type would double-report a verdict per type —
+        # reject it at load time rather than surprising the rollup.
+        seen_types = [c.check_type for c in checks]
+        if len(seen_types) != len(set(seen_types)):
+            raise ValueError(f"duplicate check_type in checks: {seen_types}")
+
         place = data.get("placement", {}) or {}
         return JobSpec(
             job_type=data["job_type"],
@@ -252,6 +317,7 @@ class JobSpec:
                 host_repo=dict(place.get("host_repo", {}) or {}),
             ),
             options=data.get("options", {}) or {},
+            checks=checks,
             targets_from=targets_from,
             persona_axis_from=persona_axis_from,
             target_proof_from=target_proof_from,

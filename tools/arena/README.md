@@ -48,11 +48,54 @@ shape a bugfix cell does. A missing or malformed file is reported as an explicit
 `infra:completion-state-malformed`) — stdout/stderr infra-signal regexing (e.g.
 `"connection refused"`) survives ONLY as a fallback for when the file is absent.
 
+## The check-type contract (WS-G G1)
+
+A matrix/arena cell declares a **check suite**, not one verdict shape. Every
+check emits one completion-state verdict tagged with the schema's optional
+`check_type` discriminator; the rollup aggregates **one verdict per cell per
+check_type**, so a cell can be mechanically green (`replay`) while its
+experience checks are still pending or red.
+
+Check types (`arena/model.py CHECK_TYPES` == the schema enum):
+
+| check_type | Proof class | Status |
+|---|---|---|
+| `replay` | mechanical no-LLM proof (flow/cassette/oracle replay, per-commit) — the plugin/container path below | **implemented** (the default, and the only executable type today) |
+| `docs-fidelity` | a persona attempts the workflow using ONLY the published docs; doc claims scored truthful/stale/missing | declared, not implemented |
+| `ux-heuristic` | heuristic-catalog UX critique over captured frames/transcripts (web, TUI `render_tui_png`, VS Code webview, gh-agent comment/deck quality) | declared, not implemented |
+| `journey-verdict` | the product-journey review gate (evidence completeness, observed-vs-seeded finding floor) | declared, not implemented |
+
+Contract rules:
+
+- **`check_type` is optional in the schema; absent means `replay`.** Every
+  pre-check-suite producer (bench.py, persona_qa/completion.py) and consumer
+  stays valid unchanged. `CellResult.to_dict()` likewise omits the default, so
+  existing rollup output is byte-identical for a `[replay]`-only suite.
+- **A spec declares its suite** with a top-level `checks:` list — bare type
+  strings or mappings with check-type-specific options:
+
+  ```yaml
+  checks:
+    - replay
+    - check_type: docs-fidelity
+      docs: docs/project-onboarding.md   # extra keys fold into CheckSpec.options
+  ```
+
+  Omitting `checks:` means `[replay]` — exactly the pre-suite behavior.
+  Unknown or duplicated check types are rejected at spec load.
+- **Declared-but-unimplemented types report honest `pending`** (`health:
+  incomplete`, a "not implemented yet" note) at execution time — never a fake
+  green, never a container run, never an INFRA retry (`arena/checks.py`).
+- Per-cell result files under the rollup's `cells/` keep the historical
+  `<cell_id>.json` name for `replay` and add a `--check-<type>` suffix for the
+  others.
+
 ## Layout
 
 | File | Role |
 |---|---|
-| `arena/model.py` | `JobSpec`, `Cell`, `CellResult`, enumeration |
+| `arena/model.py` | `JobSpec`, `Cell`, `CellResult`, `CheckSpec`, enumeration |
+| `arena/checks.py` | check-suite runner (WS-G G1): replay delegates to the container path; unimplemented types → honest `pending` |
 | `arena/plugins/base.py` | `JobTypePlugin` protocol + registry |
 | `arena/plugins/bugfix.py` | bugfix plugin — wraps `bench.py` oracle (verify / drive), scores from the completion-state file |
 | `arena/plugins/paired_task.py` | paired-task plugin — one task through multiple treatments with shared oracle JSON |

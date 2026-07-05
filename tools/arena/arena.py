@@ -92,7 +92,11 @@ def _primary_git_dir_for_worktree(checkout: Path) -> str | None:
 def cmd_plan(args: argparse.Namespace) -> int:
     spec = JobSpec.load(args.spec)
     cells = spec.cells()
-    print(f"job_type={spec.job_type}  cells={len(cells)}  hosts={spec.placement.hosts}")
+    check_types = [c.check_type for c in spec.checks]
+    print(
+        f"job_type={spec.job_type}  cells={len(cells)}  hosts={spec.placement.hosts}"
+        f"  checks={check_types}"
+    )
     if spec.targets_from:
         print(f"  targets_from={spec.targets_from} (product-journey corpus, read-only)")
     if spec.target_proof_from:
@@ -112,7 +116,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("LIVE run — this WILL spend on LLM calls.", file=sys.stderr)
     results = run_sweep(
         spec, executor, live=args.live,
-        on_result=lambda r: print(f"  {r.cell_id}: {r.verdict} [{r.health}]"),
+        on_result=lambda r: print(f"  {r.cell_id} ({r.check_type}): {r.verdict} [{r.health}]"),
     )
     paths = write_rollup(results, args.out)
     print(f"\nrollup → {paths['summary']}")

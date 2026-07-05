@@ -55,6 +55,9 @@ on:
       # The gate's own harness/join/schema/plugin layer (Task 2/3/4/5).
       - "tools/usable-kitsoki-gate/**"
       - "tools/arena/tests/test_usable_kitsoki_gate*.py"
+      # WS-G G1 — check-type discriminator schema + its arena contract test.
+      - "schemas/completion-state.schema.json"
+      - "tools/arena/tests/test_check_types.py"
       - "tools/arena/tests/fixtures/usable-kitsoki-gate/**"
       - "tools/arena/specs/usable-kitsoki-gate*.yaml"
       - "docs/tracing/usable-kitsoki-gate.md"

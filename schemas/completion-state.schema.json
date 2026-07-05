@@ -1,9 +1,9 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://kitsoki.dev/schemas/completion-state/v1.0.0",
+  "$id": "https://kitsoki.dev/schemas/completion-state/v1.1.0",
   "title": "Completion State — Unified arena/persona-QA scoring contract",
-  "description": "The structural contract for grading one unit of comparison work (a bugfix cell, a persona-QA scenario run, or any future arena job-type) on a single job-agnostic verdict/health/metrics/evidence vocabulary. tools/arena's plugins score from this shape instead of scraping stdout; tools/persona_qa/completion.py builds it from a product-journey review.json; tools/bugfix-bakeoff/external/bench.py writes it from the hidden-oracle grade. additionalProperties stays true so a job-type plugin can carry extra fields (e.g. bugfix's cell_id/axis, persona-qa's checks_* counters) without forking the schema.",
-  "version": "1.0.0",
+  "description": "The structural contract for grading one unit of comparison work (a bugfix cell, a persona-QA scenario run, or any future arena job-type) on a single job-agnostic verdict/health/metrics/evidence vocabulary. tools/arena's plugins score from this shape instead of scraping stdout; tools/persona_qa/completion.py builds it from a product-journey review.json; tools/bugfix-bakeoff/external/bench.py writes it from the hidden-oracle grade. additionalProperties stays true so a job-type plugin can carry extra fields (e.g. bugfix's cell_id/axis, persona-qa's checks_* counters) without forking the schema. v1.1.0 adds the optional `check_type` discriminator (WS-G G1): a matrix/arena cell declares a check SUITE, and every check emits one completion-state verdict tagged with its type; absent means `replay`, so every pre-1.1.0 producer/consumer stays valid.",
+  "version": "1.1.0",
   "type": "object",
   "required": ["schema_version", "verdict", "health", "metrics", "evidence_refs"],
   "additionalProperties": true,
@@ -16,6 +16,11 @@
       "type": "string",
       "enum": ["solved", "partial", "failed", "armed", "blocked", "pending"],
       "description": "Job-agnostic outcome grade. bugfix: oracle GREEN+suite -> solved, oracle GREEN+suite RED -> partial, oracle RED -> failed, verify-mode arming proof -> armed. persona-qa (19-check review gate): ready -> solved, needs_evidence (with some passing signal) -> partial, all-checks-failed / a blocking scenario -> failed or blocked. `pending` means the grade was never run (e.g. a provider/profile blocker) — it is NOT a failure and must be excluded from solve-rate denominators."
+    },
+    "check_type": {
+      "type": "string",
+      "enum": ["replay", "docs-fidelity", "ux-heuristic", "journey-verdict"],
+      "description": "Which proof class this verdict grades (WS-G G1 check-type discriminator). Optional; ABSENT MEANS `replay` — the default and the only value pre-1.1.0 producers ever meant — so existing payloads stay valid unchanged. `replay`: the mechanical no-LLM proof (flow/cassette/oracle replay, per-commit). `docs-fidelity`: a persona attempted the workflow using only the published docs; doc claims scored truthful/stale/missing. `ux-heuristic`: heuristic-catalog UX critique over captured frames/transcripts. `journey-verdict`: the product-journey review gate (evidence completeness, finding floors). A cell's matrix rollup aggregates one verdict PER check_type; consumers that predate check suites may treat every record as `replay`."
     },
     "health": {
       "type": "string",

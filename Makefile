@@ -632,6 +632,9 @@ usable-kitsoki-gate-check:
 	python3 tools/arena/tests/test_usable_kitsoki_gate_golden_fixtures.py
 	python3 tools/arena/tests/test_usable_kitsoki_gate_live_gate.py
 	python3 tools/arena/tests/test_usable_kitsoki_gate_calibration.py
+	# WS-G G1 — completion-state check_type discriminator + arena check-suite
+	# plumbing (the schema every gate cell reports through).
+	python3 tools/arena/tests/test_check_types.py
 
 features-index:
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:index
