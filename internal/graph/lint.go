@@ -5,17 +5,44 @@ import (
 	"sort"
 )
 
+// Severity says whether a LintIssue is a hard failure or advisory. The zero
+// value (SeverityError) is what every pre-existing check (dangling-ref,
+// type-mismatch, cycle, visibility-leak) emits, so old callers that only
+// checked len(issues) != 0 keep working unchanged.
+type Severity string
+
+const (
+	// SeverityError is a hard failure — the catalog is invalid.
+	SeverityError Severity = "error"
+	// SeverityWarning is advisory — the catalog is incomplete or drifting,
+	// but not invalid. Used for staged/migration-era checks (design doc
+	// §4.3) that are not mandatory across the whole catalog family yet.
+	SeverityWarning Severity = "warning"
+)
+
 // LintIssue is one catalog-level invariant violation. Lint returns every
 // issue found rather than failing on the first, so a caller (CLI, CI) can
 // report the whole picture at once.
 type LintIssue struct {
-	Node    NodeID
-	Kind    string // "dangling-ref" | "type-mismatch" | "cycle" | "visibility-leak"
-	Message string
+	Node     NodeID
+	Kind     string // "dangling-ref" | "type-mismatch" | "cycle" | "visibility-leak" | "orphan-feature" | "initiative-scope"
+	Severity Severity
+	Message  string
 }
 
 func (i LintIssue) Error() string {
 	return fmt.Sprintf("%s: %s: %s", i.Node, i.Kind, i.Message)
+}
+
+// LintOptions gates the advisory checks added by the
+// feature-grouping-taxonomy design (docs §4.3) that stay opt-in.
+type LintOptions struct {
+	// InitiativeScope enables the initiative-scope check (§4.3.4):
+	// initiative.targets must equal the areas derived by walking
+	// includes -> change.implements -> feature.in_area. Off by default.
+	// Always SeverityWarning — the design doc keeps this one advisory
+	// indefinitely, it just keeps the cached `targets` edge honest.
+	InitiativeScope bool
 }
 
 // Lint validates a fully-loaded catalog's cross-node invariants that a
@@ -24,11 +51,22 @@ func (i LintIssue) Error() string {
 // registry marks Acyclic, and an internal node reachable from a public
 // node's edges. LoadCatalog does not call this — callers (the `kitsoki
 // graph lint` CLI, tests) call it explicitly once a catalog is assembled.
-func Lint(cat *Catalog) []LintIssue {
+//
+// opts is variadic so existing call sites (Lint(cat)) are unaffected; pass
+// a LintOptions to opt into the staged checks it gates.
+func Lint(cat *Catalog, opts ...LintOptions) []LintIssue {
+	var opt LintOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
 	var issues []LintIssue
 	issues = append(issues, lintEdgeTargets(cat)...)
-	issues = append(issues, lintCycles(cat)...)
+	issues = append(issues, lintCycles(cat)...) // covers area-cycle: part_of is Acyclic in the registry
 	issues = append(issues, lintVisibilityLeaks(cat)...)
+	issues = append(issues, lintOrphanFeature(cat)...)
+	if opt.InitiativeScope {
+		issues = append(issues, lintInitiativeScope(cat)...)
+	}
 	sort.Slice(issues, func(i, j int) bool {
 		if issues[i].Node != issues[j].Node {
 			return issues[i].Node < issues[j].Node
@@ -51,14 +89,14 @@ func lintEdgeTargets(cat *Catalog) []LintIssue {
 				targetNode, exists := cat.Nodes[target]
 				if !exists {
 					issues = append(issues, LintIssue{
-						Node: id, Kind: "dangling-ref",
+						Node: id, Kind: "dangling-ref", Severity: SeverityError,
 						Message: fmt.Sprintf("edge %q points at %q, which does not exist", decl.ID, target),
 					})
 					continue
 				}
 				if decl.TargetType != "" && !cat.Registry.IsA(targetNode.TypeID, decl.TargetType) {
 					issues = append(issues, LintIssue{
-						Node: id, Kind: "type-mismatch",
+						Node: id, Kind: "type-mismatch", Severity: SeverityError,
 						Message: fmt.Sprintf("edge %q points at %q (type %q), which is not a %q", decl.ID, target, targetNode.TypeID, decl.TargetType),
 					})
 				}
@@ -82,7 +120,7 @@ func lintCycles(cat *Catalog) []LintIssue {
 				}
 				seenCycleNodes[n] = true
 				issues = append(issues, LintIssue{
-					Node: n, Kind: "cycle",
+					Node: n, Kind: "cycle", Severity: SeverityError,
 					Message: fmt.Sprintf("acyclic edge forms a cycle: %v", cyclePath),
 				})
 			}
@@ -194,9 +232,135 @@ func lintVisibilityLeaks(cat *Catalog) []LintIssue {
 		}
 		sort.Strings(roots)
 		issues = append(issues, LintIssue{
-			Node: id, Kind: "visibility-leak",
+			Node: id, Kind: "visibility-leak", Severity: SeverityError,
 			Message: fmt.Sprintf("internal node reachable from public node(s) %v", roots),
 		})
 	}
 	return issues
+}
+
+// edgeTargetsByFieldID looks up node's effective type, finds the edge field
+// declaration named fieldID (present on any type the design doc §4
+// registers it on: feature.in_area, change.implements, initiative.includes,
+// initiative.targets), and returns its targets plus whether the type
+// declares the field at all. A (nil, false) result means the catalog's
+// registry never opted into that part of the taxonomy — callers treat that
+// as "nothing to check" rather than an error, since dangling-ref /
+// type-mismatch already report malformed data elsewhere.
+func edgeTargetsByFieldID(cat *Catalog, node *Node, fieldID string) ([]NodeID, bool) {
+	eff, ok := cat.Registry.Effective(node.TypeID)
+	if !ok {
+		return nil, false
+	}
+	for _, decl := range eff.EdgeFields {
+		if string(decl.ID) == fieldID {
+			return node.EdgeTargets(decl), true
+		}
+	}
+	return nil, false
+}
+
+// lintOrphanFeature reports every public feature with zero in_area targets
+// (design doc §4.3.2). Internal features are never flagged — the design's
+// migration is incremental (§5), so only the public surface is enforced.
+// The check is a hard failure (§5 step 3: the seed catalog is fully
+// seeded with in_area, so orphaned public features are now invalid), but
+// it only applies to catalogs whose registry declares feature.in_area at
+// all — a registry without the area taxonomy has not opted in.
+func lintOrphanFeature(cat *Catalog) []LintIssue {
+	var issues []LintIssue
+	for _, id := range cat.SortedNodeIDs() {
+		node := cat.Nodes[id]
+		if !cat.Registry.IsA(node.TypeID, "feature") {
+			continue
+		}
+		if node.Visibility != VisibilityPublic {
+			continue
+		}
+		targets, declared := edgeTargetsByFieldID(cat, node, "in_area")
+		if !declared || len(targets) > 0 {
+			continue
+		}
+		issues = append(issues, LintIssue{
+			Node: id, Kind: "orphan-feature", Severity: SeverityError,
+			Message: "public feature has no in_area targets",
+		})
+	}
+	return issues
+}
+
+// lintInitiativeScope reports every initiative whose `targets` edge
+// disagrees with the derived set of areas reachable by walking:
+//
+//	initiative.includes -> change.implements -> feature.in_area
+//
+// (design doc §4.3.4 — the exact traversal implemented here; the design
+// doc's parenthetical "feature/implementation" alternative is not walked
+// because initiative.includes only targets `change`, and `change.implements`
+// already targets `feature` directly — there is no implementation hop on
+// this path in the current registry). Always SeverityWarning: the design
+// doc keeps this check advisory indefinitely, it exists to catch a cached
+// `targets` edge drifting from the changes actually included.
+func lintInitiativeScope(cat *Catalog) []LintIssue {
+	var issues []LintIssue
+	for _, id := range cat.SortedNodeIDs() {
+		node := cat.Nodes[id]
+		if !cat.Registry.IsA(node.TypeID, "initiative") {
+			continue
+		}
+		derived := map[NodeID]bool{}
+		includes, _ := edgeTargetsByFieldID(cat, node, "includes")
+		for _, changeID := range includes {
+			changeNode, ok := cat.Nodes[changeID]
+			if !ok {
+				continue // dangling-ref lint already reports this
+			}
+			implements, _ := edgeTargetsByFieldID(cat, changeNode, "implements")
+			for _, featureID := range implements {
+				featureNode, ok := cat.Nodes[featureID]
+				if !ok {
+					continue
+				}
+				inArea, _ := edgeTargetsByFieldID(cat, featureNode, "in_area")
+				for _, areaID := range inArea {
+					derived[areaID] = true
+				}
+			}
+		}
+		declared := map[NodeID]bool{}
+		targets, _ := edgeTargetsByFieldID(cat, node, "targets")
+		for _, areaID := range targets {
+			declared[areaID] = true
+		}
+		if setEqual(derived, declared) {
+			continue
+		}
+		issues = append(issues, LintIssue{
+			Node: id, Kind: "initiative-scope", Severity: SeverityWarning,
+			Message: fmt.Sprintf("targets %v does not match derived area set %v (includes -> change.implements -> feature.in_area)",
+				sortedNodeIDKeys(declared), sortedNodeIDKeys(derived)),
+		})
+	}
+	return issues
+}
+
+func setEqual(a, b map[NodeID]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if !b[k] {
+			return false
+		}
+	}
+	return true
+}
+
+func sortedNodeIDKeys(m map[NodeID]bool) []NodeID {
+	ids := make([]NodeID, 0, len(m))
+	for id := range m {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
 }
