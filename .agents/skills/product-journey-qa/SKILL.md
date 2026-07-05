@@ -100,9 +100,10 @@ Then hand it to the reusable driver:
    `autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<url>`.
    This files credible `issue` findings with uploaded evidence, enqueues and
    drains gh-agent fixes, refreshes the deck/review artifacts, and validates the
-   bundle without agent oversight. It drives `kitsoki bug file-findings`
-   (host.GitHubFileFindings) and native gh-agent queue/drain surfaces behind
-   the story boundary: native GitHub API filing uses `GH_TOKEN` /
+   bundle without agent oversight. The story calls the native
+   `kitsoki gitops autonomous-fix` facade, which drives `kitsoki bug
+   file-findings` (host.GitHubFileFindings) and native gh-agent queue/drain
+   surfaces behind the story boundary: native GitHub API filing uses `GH_TOKEN` /
    `GITHUB_TOKEN`, evidence uploads as release assets, the issue gets an
    `## Artifacts` section + kitsoki metadata block, and the issue URL is
    written back into `findings.json` (`item.github_issue`) so re-runs are
@@ -145,6 +146,9 @@ Use CLI fallback when the story session is unavailable.
 When the goal is the full issue-to-fix loop, prefer `autonomous_fix`: it files
 credible findings with evidence, enqueues and drains gh-agent fixes, refreshes
 review artifacts, and validates the bundle in one story-owned reliability gate.
+The underlying fallback command is `kitsoki gitops autonomous-fix`; do not ask
+operators or agents to run raw `gh` commands or direct gh-agent plumbing for the
+product-journey loop.
 The story stores gh-agent queue state for `file_findings` and `autonomous_fix`
 at `<run_dir>/gh-agent-jobs.sqlite` by default; pass `gh_agent_db=<sqlite>` only
 to override that run-local path.

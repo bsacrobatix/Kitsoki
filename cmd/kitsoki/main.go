@@ -177,6 +177,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(kitCmd())
 	root.AddCommand(validateCmd())
 	root.AddCommand(workflowCmd())
+	root.AddCommand(gitopsCmd())
 	root.AddCommand(doctorCmd())
 	root.AddCommand(graphCmd())
 	root.AddCommand(pogCmd())

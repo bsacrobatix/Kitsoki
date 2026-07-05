@@ -51,6 +51,10 @@ It is intentionally no-LLM:
 - `driver_event` calls `tools/product-journey/run.py --record-driver-event
   --json-output` to append what the reusable driver actually attempted to
   `driver-journal.md/json`.
+- `autonomous_fix` calls the native `kitsoki gitops autonomous-fix` facade to
+  file credible issue findings, drain gh-agent fixes, refresh review artifacts,
+  write `autonomous-fix-report.md`, and validate the bundle without exposing
+  raw `gh` or gh-agent plumbing as the operator contract.
 - `seed_demo` calls `tools/product-journey/run.py --seed-demo-evidence
   --json-output` to populate a no-LLM review bundle.
 - `handoff` calls `tools/product-journey/run.py --driver-handoff --json-output`
