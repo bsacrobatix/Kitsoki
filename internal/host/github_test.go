@@ -520,16 +520,33 @@ func TestGitHubTicket_CommentEdit_Happy(t *testing.T) {
 }
 
 func TestGitHubTicket_Transition_CloseHappy(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	fr.responses["gh issue close 42"] = fakeResp{}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
+	t.Setenv("GH_TOKEN", "test-token")
+	var state string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/repos/o/r/issues/42" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		state, _ = payload["state"].(string)
+		writeJSON(w, map[string]any{"state": state})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("ticket.transition must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
-		"op": "transition",
-		"id": "42",
-		"to": "resolved",
+		"op":   "transition",
+		"repo": "o/r",
+		"id":   "42",
+		"to":   "resolved",
 	})
 	if err != nil {
 		t.Fatalf("infra: %v", err)
@@ -540,25 +557,29 @@ func TestGitHubTicket_Transition_CloseHappy(t *testing.T) {
 	if res.Data["ok"] != true {
 		t.Fatalf("ok: %v", res.Data["ok"])
 	}
-	// Confirm we routed to `close` (not `reopen`) for the synonym "resolved".
-	found := false
-	for _, c := range fr.calls {
-		if strings.Contains(c, "issue close 42") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected `gh issue close 42` call, got: %v", fr.calls)
+	if state != "closed" || res.Data["status"] != "closed" {
+		t.Fatalf("state/status = %q/%v, want closed", state, res.Data["status"])
 	}
 }
 
 func TestGitHubTicket_Transition_AcceptsIssueURL(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	fr.responses["gh issue close 117 --repo bsacrobatix/Kitsoki"] = fakeResp{}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
+	t.Setenv("GH_TOKEN", "test-token")
+	transitioned := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/repos/bsacrobatix/Kitsoki/issues/117" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		transitioned = true
+		writeJSON(w, map[string]any{"state": "closed"})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("ticket.transition must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
 		"op": "transition",
@@ -571,29 +592,39 @@ func TestGitHubTicket_Transition_AcceptsIssueURL(t *testing.T) {
 	if res.Error != "" {
 		t.Fatalf("domain: %s", res.Error)
 	}
-	found := false
-	for _, c := range fr.calls {
-		if strings.Contains(c, "issue close 117 --repo bsacrobatix/Kitsoki") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected issue URL to provide repo + number, got: %v", fr.calls)
+	if !transitioned {
+		t.Fatal("expected issue URL to provide repo + number")
 	}
 }
 
 func TestGitHubTicket_Transition_ReopenHappy(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	fr.responses["gh issue reopen 42"] = fakeResp{}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
+	t.Setenv("GH_TOKEN", "test-token")
+	var state string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/repos/o/r/issues/42" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		state, _ = payload["state"].(string)
+		writeJSON(w, map[string]any{"state": state})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("ticket.transition must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
-		"op": "transition",
-		"id": "42",
-		"to": "open",
+		"op":   "transition",
+		"repo": "o/r",
+		"id":   "42",
+		"to":   "open",
 	})
 	if err != nil {
 		t.Fatalf("infra: %v", err)
@@ -601,14 +632,12 @@ func TestGitHubTicket_Transition_ReopenHappy(t *testing.T) {
 	if res.Error != "" {
 		t.Fatalf("domain: %s", res.Error)
 	}
+	if state != "open" || res.Data["status"] != "open" {
+		t.Fatalf("state/status = %q/%v, want open", state, res.Data["status"])
+	}
 }
 
 func TestGitHubTicket_Transition_RequiresTo(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
-
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
 		"op": "transition",
 		"id": "42",
