@@ -1,0 +1,94 @@
+# done_closes_github_issue — GitHub issue close-out traceability.
+#
+# A bugfix run whose ticket is a GitHub issue must post the same
+# kitsoki-fixed-in close-out comment and close the GitHub issue through
+# host.gh.ticket. It must not fall back to the local-files ticket provider,
+# which cannot resolve numeric GitHub issue ids in standalone/autonomous runs.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: validating
+initial_world:
+  ticket_id:     "117"
+  ticket_title:  "done room fails on GitHub issue ids"
+  ticket_url:    "https://github.com/bsacrobatix/Kitsoki/issues/117"
+  ticket_repo:   "bsacrobatix/Kitsoki"
+  thread:        "https://github.com/bsacrobatix/Kitsoki/issues/117"
+  workdir:       ".worktrees/bf-117"
+  base_branch:   "main"
+  judge_mode:    "human"
+  done_artifact:
+    summary_title:    "GitHub close-out fixed"
+    summary_markdown: "Close-out body."
+  validate_artifact:
+    summary_title:    "Done-room GitHub flow passed"
+    summary_markdown: "Validation body."
+    outcome:          "pass"
+
+host_handlers:
+  host.run:
+    by_call:
+      done_clean_tree_check:
+        data: { ok: true, exit_code: 0, stdout_json: { dirty: false, files: "" } }
+      done_fixed_in_commit:
+        data: { ok: true, exit_code: 0, stdout_json: { commit: "7c9dfcb51234" } }
+  host.gh.ticket.comment:
+    data: { ok: true, comment_id: "https://github.com/bsacrobatix/Kitsoki/issues/117#issuecomment-1" }
+  host.gh.ticket.transition:
+    data: { ok: true }
+  host.append_to_file:
+    data: { ok: true, message_id: "done-post" }
+  host.agent.decide:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "GitHub close-out fixed"
+        summary_markdown: "Close-out body."
+
+turns:
+  - intent: { name: accept, slots: {} }
+    expect_state: done
+    expect_world:
+      fixed_in_commit: "7c9dfcb51234"
+    expect_host_calls:
+      - handler: host.run
+        args: { call: done_fixed_in_commit }
+
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__done
+    expect_world:
+      status: "fixed"
+      fixed_in_commit: "7c9dfcb51234"
+    expect_host_calls:
+      - handler: host.gh.ticket.comment
+        args:
+          repo: "bsacrobatix/Kitsoki"
+          id: "https://github.com/bsacrobatix/Kitsoki/issues/117"
+          body: |
+            Fixed in:
+
+            - `7c9dfcb51234` GitHub close-out fixed
+
+            Verification:
+
+            - Done-room GitHub flow passed
+
+            <!-- kitsoki-fixed-in
+            commits:
+              - 7c9dfcb51234
+            branch: main
+            workdir: .worktrees/bf-117
+            verified:
+              - Done-room GitHub flow passed
+            -->
+      - handler: host.gh.ticket.transition
+        args:
+          repo: "bsacrobatix/Kitsoki"
+          id: "https://github.com/bsacrobatix/Kitsoki/issues/117"
+          to: "resolved"
+
+expect_no_host_calls:
+  - host.local_files.ticket.comment
+  - host.local_files.ticket.transition
+expect_terminal: true
+expect_no_errors: true

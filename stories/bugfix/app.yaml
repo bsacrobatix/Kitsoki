@@ -61,6 +61,11 @@ hosts:
   # host.run — the pre-fix regression gate (testing room) + the ship-it tail's
   # integrate/verify/cleanup host.run sites (imported as `tail`).
   - host.run
+  # Standalone GitHub ticket close-out: when world.ticket_repo is set the done
+  # room comments/closes the GitHub issue directly instead of falling back to
+  # the local-files default ticket provider.
+  - host.gh.ticket.comment
+  - host.gh.ticket.transition
   # The ship-it tail import declares these; unioned at load so the imported
   # integrate/verify/cleanup rooms resolve their host bindings.
   - host.git_worktree
@@ -256,6 +261,7 @@ world:
   ticket_title:     { type: string, default: "" }
   ticket_status:    { type: string, default: "" }
   ticket_url:       { type: string, default: "" }
+  ticket_repo:      { type: string, default: "" }   # owner/repo for GitHub issue close-out; empty keeps local ticket provider
   thread:           { type: string, default: "" }
   allowed_authors:  { type: string, default: "" }   # CSV — list not yet a first-class scalar type
 

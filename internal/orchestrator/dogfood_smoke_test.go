@@ -228,6 +228,15 @@ func newDogfoodRegistry(agentCalls *int) *host.Registry {
 			"comments": []any{},
 		}}, nil
 	})
+	reg.Replace("host.gh.ticket.comment", func(ctx context.Context, args map[string]any) (host.Result, error) {
+		return host.Result{Data: map[string]any{
+			"ok":         true,
+			"comment_id": "https://github.com/constructorfabric/Kitsoki/issues/1#issuecomment-smoke",
+		}}, nil
+	})
+	reg.Replace("host.gh.ticket.transition", func(ctx context.Context, args map[string]any) (host.Result, error) {
+		return host.Result{Data: map[string]any{"ok": true}}, nil
+	})
 	return reg
 }
 
@@ -886,7 +895,7 @@ func TestDogfoodSmoke_FullBugfixPipeline(t *testing.T) {
 // This closes the gap the flow fixtures can't: they stub the dirty result, so
 // they prove the guard ROUTES correctly but not that host.run DETECTS dirt in
 // the live folded-story path. If world.workdir were empty here (the guard's
-// on-enter check is guarded on workdir != ''), the file injection would have no
+// on-enter check is guarded on workdir != ”), the file injection would have no
 // effect and the test would land at core.pr.* — failing loudly. So this also
 // asserts the guard is actually wired in the dogfood path, not silently dead.
 func TestDogfoodSmoke_DoneRefusesUncommittedWork(t *testing.T) {
