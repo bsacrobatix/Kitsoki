@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -70,6 +71,68 @@ No external service, no schema beyond the markdown template.`,
 	cmd.AddCommand(bugCreateCmd())
 	cmd.AddCommand(bugListCmd())
 	cmd.AddCommand(bugShowCmd())
+	cmd.AddCommand(bugFileFindingsCmd())
+	return cmd
+}
+
+// bugFileFindingsCmd implements `kitsoki bug file-findings`: file every
+// credible `issue` finding recorded in a product-journey run bundle as a
+// GitHub issue via the same artifact-preserving orchestration
+// (host.GitHubFileFindings → host.GitHubFileBug with UploadArtifacts) the web
+// Report-bug and TUI /bug paths use.
+func bugFileFindingsCmd() *cobra.Command {
+	var (
+		runDir string
+		repo   string
+		dryRun bool
+	)
+	cmd := &cobra.Command{
+		Use:   "file-findings",
+		Short: "File a run bundle's issue findings as GitHub issues with uploaded evidence",
+		Long: `Walk <--run-dir>/findings.json (a tools/product-journey run bundle),
+and for every credible issue finding (kind=issue, origin!=seeded) that has no
+recorded GitHub issue yet:
+
+  - assemble an expected/actual/reproduction body from the finding, the
+    scenario contract (driver-plan.json), and the driver journal,
+  - upload the finding's locally-resolvable evidence as release assets,
+  - file one GitHub issue through the kitsoki bug orchestration
+    (## Artifacts section + kitsoki metadata block),
+  - record the issue URL back into findings.json (item.github_issue) so
+    re-runs are idempotent, and stamp findings.filing so the runner's
+    review/validate gates can require full filing coverage.
+
+--dry-run renders the issues that WOULD be filed (title/body/evidence) as JSON
+without calling gh or writing to the bundle.
+
+Output is a single JSON object on stdout. The command exits 0 whenever the
+walk completes; per-finding failures are reported in the JSON (failed count +
+outcome rows), not as an exit code.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
+			res, err := host.GitHubFileFindings(context.Background(), host.FindingsFilingInput{
+				RunDir:     runDir,
+				Repo:       repo,
+				DryRun:     dryRun,
+				KitsokiRev: gitShortRevCWD(),
+				FiledBy:    os.Getenv("USER"),
+			})
+			if err != nil {
+				return fmt.Errorf("file findings (%s): %w", repo, err)
+			}
+			data, err := json.MarshalIndent(res, "", "  ")
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), string(data))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&runDir, "run-dir", "", "product-journey run bundle directory (required)")
+	cmd.Flags().StringVar(&repo, "repo", "", "owner/repo to file issues on (required)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "render what would be filed without calling gh or writing the bundle")
+	_ = cmd.MarkFlagRequired("run-dir")
+	_ = cmd.MarkFlagRequired("repo")
 	return cmd
 }
 
