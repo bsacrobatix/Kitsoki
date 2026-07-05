@@ -4837,7 +4837,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     gh_agent_missing_run_url = gh_agent_missing_run_urls(gh_agent)
     autonomous_fix_report_missing = missing_autonomous_fix_report_tokens(run_dir, findings)
     gh_agent_jobs_terminal = (
-        not gh_agent_requested
+        (not credible_findings and not gh_agent_requested)
         or (
             gh_agent_enqueued > 0
             and gh_agent_drain_status == "drained"
@@ -4977,20 +4977,18 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             "detail": f"rejected={len(rejected_items)}",
         },
         {
-            # GitHub filing gate: once filing was requested (--file-findings /
-            # the story file_findings intent), every credible issue finding must
-            # carry a filed issue URL. Bundles that never requested filing pass
-            # untouched.
+            # GitHub filing gate: credible issue findings are not discussion
+            # ready until the story-owned autonomous path has filed them.
             "id": "findings-filed",
-            "status": ("pass" if not unfiled_credible else "fail") if filing_requested else "pass",
-            "summary": "When GitHub filing was requested, every credible issue finding has a filed issue URL.",
+            "status": "pass" if not unfiled_credible else "fail",
+            "summary": "Every credible issue finding has a filed issue URL before review.",
             "detail": (
                 f"unfiled: {', '.join(unfiled_credible)}"
-                if filing_requested and unfiled_credible
+                if unfiled_credible
                 else (
                     f"ticket_repo={findings.get('filing', {}).get('ticket_repo', '')}, filed={len(credible_findings) - len(unfiled_credible)}/{len(credible_findings)}"
                     if filing_requested
-                    else "filing not requested"
+                    else f"credible={len(credible_findings)}"
                 )
             ),
         },
@@ -4999,7 +4997,9 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             "status": "pass" if gh_agent_jobs_terminal else "fail",
             "summary": "When gh-agent fixing was requested, queued fix jobs drain to reviewable terminal runs.",
             "detail": (
-                "gh-agent fixing not requested"
+                f"credible issue findings require autonomous_fix; credible={len(credible_findings)}"
+                if credible_findings and not gh_agent_requested
+                else "gh-agent fixing not requested"
                 if not gh_agent_requested
                 else f"enqueue={gh_agent.get('enqueue_status', '')}, drain={gh_agent_drain_status}, enqueued={gh_agent_enqueued}, done={gh_agent_done}, failed={gh_agent_failed}, active={gh_agent_active}; {gh_agent.get('run_summary', '')}"
             ),
@@ -5048,10 +5048,12 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         },
         {
             "id": "autonomous-fix-report",
-            "status": "pass" if (not gh_agent_requested or not autonomous_fix_report_missing) else "fail",
+            "status": "pass" if (not credible_findings or (gh_agent_requested and not autonomous_fix_report_missing)) else "fail",
             "summary": "Autonomous fixes produce a complete human-review report with filed issue, run, and evidence links.",
             "detail": (
-                "gh-agent fixing not requested"
+                f"credible issue findings require autonomous_fix; credible={len(credible_findings)}"
+                if credible_findings and not gh_agent_requested
+                else "gh-agent fixing not requested"
                 if not gh_agent_requested
                 else (
                     f"missing: {', '.join(autonomous_fix_report_missing[:5])}"
@@ -6033,21 +6035,22 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 if metrics.get(key) != expected:
                     add_validation_issue(issues, "error", "metrics-review-consistency", f"metrics.json {key} is stale or inconsistent with review.json", f"expected={expected}, actual={metrics.get(key)}")
 
-    # GitHub filing contract: once filing was requested, the bundle must show
-    # an issue URL for every credible issue finding, and filing failures are
-    # surfaced for re-runs.
+    # GitHub/autonomous-fix contract: credible issue findings are not final
+    # review artifacts until the story-owned native path files them and drains
+    # fix jobs with human-review evidence.
     findings_json = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {}
     filing = findings_json.get("filing", {}) if findings_json else {}
+    credible_findings = credible_issue_findings(findings_json)
+    unfiled = unfiled_credible_findings(findings_json)
+    if unfiled:
+        add_validation_issue(
+            issues,
+            "error",
+            "findings-filed",
+            "Credible issue findings require story-owned autonomous GitHub filing before review",
+            ", ".join(unfiled),
+        )
     if filing.get("requested"):
-        unfiled = unfiled_credible_findings(findings_json)
-        if unfiled:
-            add_validation_issue(
-                issues,
-                "error",
-                "findings-filed",
-                "GitHub filing was requested but credible issue findings remain unfiled",
-                ", ".join(unfiled),
-            )
         if filing.get("failed"):
             add_validation_issue(
                 issues,
@@ -6064,6 +6067,21 @@ def validate_run_bundle(run_dir: Path) -> dict:
             add_validation_issue(issues, "error", "deck-scene", "deck.slidey.json is missing a required review scene", expected)
     gh_agent = findings_json.get("gh_agent", {}) if isinstance(findings_json.get("gh_agent", {}), dict) else {}
     gh_agent_requested = gh_agent.get("enqueue_status", "") not in {"", "disabled", "dry-run"}
+    if credible_findings and not gh_agent_requested:
+        add_validation_issue(
+            issues,
+            "error",
+            "gh-agent-fixes",
+            "Credible issue findings require the native autonomous_fix gate before final validation",
+            f"credible={len(credible_findings)}",
+        )
+        add_validation_issue(
+            issues,
+            "error",
+            "autonomous-fix-report",
+            "Credible issue findings require an autonomous-fix report with issue, run, and evidence links",
+            f"credible={len(credible_findings)}",
+        )
     if gh_agent_requested:
         enqueued = int(gh_agent.get("enqueued_count", 0) or 0)
         done = int(gh_agent.get("done_count", 0) or 0)
@@ -7969,6 +7987,7 @@ def build_driver_replay_smoke(
         str(run_dir / "review.json"),
         "open",
         publish_deck=None,
+        origin="seeded",
     )
 
     reviewed = review_run_bundle(run_dir, publish_deck=None)
