@@ -6025,12 +6025,15 @@ def validate_run_bundle(run_dir: Path) -> dict:
             for job in gh_agent.get("drained_jobs", [])
             if isinstance(job, dict) and job.get("run_url")
         ]
+        expected_tokens.append("autonomous-fix-report.md")
         expected_tokens.extend(
             link
             for job in gh_agent.get("drained_jobs", [])
             if isinstance(job, dict)
             for link in gh_agent_job_evidence_links(job)
         )
+        if gh_agent_independent_verify_links(gh_agent):
+            expected_tokens.append("independent_verify=")
         missing_tokens = [
             token for token in expected_tokens
             if token and not any(token in body for body in scene_bodies)
@@ -8123,7 +8126,13 @@ def render_deck(
             details.append("evidence=" + ", ".join(evidence_links[:3]))
         elif job.get("state") == "done":
             details.append("evidence=missing")
+        independent_verify_links = gh_agent_job_independent_verify_links(job)
+        if independent_verify_links:
+            details.append("independent_verify=" + ", ".join(independent_verify_links[:3]))
+        elif job.get("state") == "done":
+            details.append("independent_verify=missing")
         gh_agent_job_lines.append(" · ".join(part for part in details if part))
+    gh_agent_requested = gh_agent.get("enqueue_status", "") not in {"", "disabled", "dry-run"}
     gh_agent_lines = [
         f"Filing: {len(filed_issue_lines)} issue URL(s)",
         *filed_issue_lines[:8],
@@ -8139,6 +8148,8 @@ def render_deck(
             f"failed {gh_agent.get('failed_count', 0)}, active {gh_agent.get('active_count', 0)}"
         ),
     ]
+    if gh_agent_requested:
+        gh_agent_lines.append("Autonomous report: autonomous-fix-report.md")
     if gh_agent_job_lines:
         gh_agent_lines.extend(gh_agent_job_lines[:8])
     else:
