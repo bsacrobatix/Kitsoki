@@ -67,6 +67,10 @@ func Builtins() *Registry {
 		Input:  fields("workdir", "string", "title", "string", "body", "string", "base", "string", "remote", "string", "repo", "string", "head", "string", "draft", "bool"),
 		Output: fields("ok", "bool", "outcome", "string", "url", "string", "pr_id", "string", "repo", "string"),
 	})
+	r.Register("host.git", "split_prs", Op{
+		Input:  fields("workdir", "string", "buckets_json", "string", "integration_branch", "string", "source_branch", "string", "remote", "string", "repo", "string", "dry_run", "bool"),
+		Output: fields("ok", "bool", "opened_prs", "object"),
+	})
 	r.Register("host.git", "pr_status", Op{
 		Input:  fields("pr_id", "string"),
 		Output: fields("state", "string", "checks", "list", "checks_summary", "string", "failed_log", "string", "comments", "list"),

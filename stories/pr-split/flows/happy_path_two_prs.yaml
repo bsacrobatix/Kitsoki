@@ -15,6 +15,8 @@ initial_state: idle
 initial_world:
   integration_branch: main
   working_dir:        "."
+  repo:               o/r
+  remote:             origin
   dry_run:            false
   source_branch:      feat/x
   commit_count:       3
@@ -26,17 +28,15 @@ initial_world:
       - { sha: ccccccc3, subject: "tool test", files: "tools/bugfix-bakeoff/external/t_test.py", concern: harness, ambiguous: false }
 
 host_handlers:
-  host.run:
+  host.git:
     by_call:
       open_prs:
         data:
           ok:        true
-          exit_code: 0
-          stdout_json:
-            opened_prs:
-              items:
-                - { concern: core,    branch: "feat/x-split-core",    url: "https://github.com/o/r/pull/1", commits: 1 }
-                - { concern: harness, branch: "feat/x-split-harness", url: "https://github.com/o/r/pull/2", commits: 2 }
+          opened_prs:
+            items:
+              - { concern: core,    branch: "feat/x-split-core",    url: "https://github.com/o/r/pull/1", commits: 1 }
+              - { concern: harness, branch: "feat/x-split-harness", url: "https://github.com/o/r/pull/2", commits: 2 }
   host.agent.decide:
     data:
       ok: true

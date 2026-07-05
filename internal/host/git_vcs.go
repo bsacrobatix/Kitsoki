@@ -14,6 +14,7 @@ package host
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -47,7 +48,7 @@ func runRealCommand(ctx context.Context, dir, name string, args ...string) (stri
 // GitVCSHandler implements host.git (prefix-fallback for all 7 ops).
 //
 // Required args:
-//   - op (string): one of branch, diff, commit, push, open_pr, pr_status, pr_comment, pr_rebase.
+//   - op (string): one of branch, diff, commit, push, open_pr, split_prs, pr_status, pr_comment, pr_rebase.
 //
 // Common optional args:
 //   - workdir (string): working directory for the git command; defaults to cwd.
@@ -72,6 +73,8 @@ func GitVCSHandler(ctx context.Context, args map[string]any) (Result, error) {
 		return gitPush(ctx, workdir, args)
 	case "open_pr":
 		return ghOpenPR(ctx, workdir, args)
+	case "split_prs":
+		return gitSplitPRs(ctx, workdir, args)
 	case "pr_status":
 		return ghPRStatus(ctx, workdir, args)
 	case "pr_comment":
@@ -344,6 +347,135 @@ func ghOpenPR(ctx context.Context, workdir string, args map[string]any) (Result,
 		"pr_id":   prID,
 		"repo":    repo,
 	}}, nil
+}
+
+type gitSplitPRPlan struct {
+	Buckets []gitSplitPRBucket `json:"buckets"`
+}
+
+type gitSplitPRBucket struct {
+	Concern string   `json:"concern"`
+	Title   string   `json:"title"`
+	Body    string   `json:"body"`
+	SHAs    []string `json:"shas"`
+}
+
+func gitSplitPRs(ctx context.Context, workdir string, args map[string]any) (Result, error) {
+	bucketsJSON, _ := args["buckets_json"].(string)
+	if strings.TrimSpace(bucketsJSON) == "" {
+		return Result{Data: map[string]any{
+			"ok":         true,
+			"opened_prs": map[string]any{"items": []any{}},
+		}}, nil
+	}
+	var plan gitSplitPRPlan
+	if err := json.Unmarshal([]byte(bucketsJSON), &plan); err != nil {
+		return Result{Error: fmt.Sprintf("git.split_prs: buckets_json: %v", err)}, nil
+	}
+	integration, _ := args["integration_branch"].(string)
+	if strings.TrimSpace(integration) == "" {
+		integration = "main"
+	}
+	source, _ := args["source_branch"].(string)
+	if strings.TrimSpace(source) == "" {
+		return Result{Error: "git.split_prs: source_branch argument is required"}, nil
+	}
+	remote, _ := args["remote"].(string)
+	if strings.TrimSpace(remote) == "" {
+		remote = "origin"
+	}
+	repo, _ := args["repo"].(string)
+	dryRun := optBool(args, "dry_run", false)
+	root := workdir
+	if strings.TrimSpace(root) == "" {
+		root = "."
+	}
+	items := make([]any, 0, len(plan.Buckets))
+	for _, bucket := range plan.Buckets {
+		concern := strings.TrimSpace(bucket.Concern)
+		branch := source + "-split-" + slugForBranch(concern)
+		item := map[string]any{
+			"concern": concern,
+			"branch":  branch,
+			"url":     "",
+			"commits": len(bucket.SHAs),
+		}
+		if !dryRun {
+			if strings.TrimSpace(bucket.Title) == "" {
+				return Result{Error: fmt.Sprintf("git.split_prs: bucket %q title is required", concern)}, nil
+			}
+			if len(bucket.SHAs) == 0 {
+				return Result{Error: fmt.Sprintf("git.split_prs: bucket %q has no commits", concern)}, nil
+			}
+			tempDir, err := os.MkdirTemp("", "kitsoki-pr-split-*")
+			if err != nil {
+				return Result{Error: fmt.Sprintf("git.split_prs: tempdir: %v", err)}, nil
+			}
+			wt := filepath.Join(tempDir, "wt")
+			cleanup := func() {
+				_, _, _, _ = cliExec(ctx, root, "git", "worktree", "remove", "--force", wt)
+				_ = os.RemoveAll(tempDir)
+			}
+			if _, stderr, code, err := cliExec(ctx, root, "git", "worktree", "add", "-q", "--detach", wt, integration); err != nil {
+				cleanup()
+				return Result{Error: fmt.Sprintf("git.split_prs: worktree add: exec: %v", err)}, nil
+			} else if code != 0 {
+				cleanup()
+				return Result{Error: fmt.Sprintf("git.split_prs: worktree add: %s", strings.TrimSpace(stderr))}, nil
+			}
+			if _, stderr, code, err := cliExec(ctx, wt, "git", "switch", "-q", "-c", branch); err != nil {
+				cleanup()
+				return Result{Error: fmt.Sprintf("git.split_prs: switch: exec: %v", err)}, nil
+			} else if code != 0 {
+				cleanup()
+				return Result{Error: fmt.Sprintf("git.split_prs: switch: %s", strings.TrimSpace(stderr))}, nil
+			}
+			cherryPickArgs := append([]string{"cherry-pick"}, bucket.SHAs...)
+			if _, stderr, code, err := cliExec(ctx, wt, "git", cherryPickArgs...); err != nil {
+				cleanup()
+				return Result{Error: fmt.Sprintf("git.split_prs: cherry-pick: exec: %v", err)}, nil
+			} else if code != 0 {
+				cleanup()
+				return Result{Error: fmt.Sprintf("git.split_prs: cherry-pick: %s", strings.TrimSpace(stderr))}, nil
+			}
+			prRes, _ := ghOpenPR(ctx, wt, map[string]any{
+				"title":  bucket.Title,
+				"body":   bucket.Body,
+				"base":   integration,
+				"head":   branch,
+				"remote": remote,
+				"repo":   repo,
+			})
+			cleanup()
+			if prRes.Error != "" {
+				return Result{Error: "git.split_prs: " + prRes.Error}, nil
+			}
+			item["url"] = prRes.Data["url"]
+		}
+		items = append(items, item)
+	}
+	return Result{Data: map[string]any{
+		"ok":         true,
+		"opened_prs": map[string]any{"items": items},
+	}}, nil
+}
+
+func slugForBranch(s string) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastDash = false
+		case r == '-' || r == '_' || r == ' ' || r == '/':
+			if b.Len() > 0 && !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 func ghPRStatus(ctx context.Context, workdir string, args map[string]any) (Result, error) {

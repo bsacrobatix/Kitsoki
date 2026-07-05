@@ -11,8 +11,9 @@ it. The split honors progressive determinism:
 - **Deterministic (no LLM):** `idle` lists `integration..HEAD`, reads each
   commit's changed files, and maps paths → concern (`internal/**`→core,
   `tools/bugfix-bakeoff/**`→harness, `docs/**`→docs, `stories/**`→stories, …).
-  `splitting` does every git/gh operation (branch, cherry-pick, push, `gh pr
-  create`) in a throwaway worktree so the caller's tree is never disturbed.
+  `splitting` calls `host.git.split_prs`, which does every branch,
+  cherry-pick, push, and native PR-create operation in a throwaway worktree so
+  the caller's tree is never disturbed.
 - **LLM (one step):** `planning` runs a single fenced `bucketer` agent that
   finalizes mixed-concern commits and authors each PR's title/body. It has no
   Bash — the story drives every command. A `host.starlark.run` step then
@@ -53,10 +54,8 @@ to the documented sequential pattern; the runtime does not fully honor it:
    guard on a later on_enter step has the same race (it reads pre-bind world) —
    gate on a scalar known before the room, never on a freshly-bound value.
 
-2. **`host.run` has no `env:` support** — `RunHandler` runs the child with
-   `os.Environ()` only, so an `env:` block on the effect is silently dropped (the
-   first cut passed the plan as `env: { BUCKETS_JSON: … }` and the bash got
-   nothing). Fixed by passing the plan JSON as a POSITIONAL argv element
-   (`args: [-c, <script>, pr-split, "{{ world.buckets_json }}"]`, read as `$1`):
-   exec passes argv bytes verbatim, so the multi-line JSON survives. (Worth
-   adding real `env:` support to host.run, but argv is the robust bridge today.)
+2. **Keep GitHub plumbing in native hosts.** The first splitter used `host.run`
+   to bridge plan JSON into Bash and then shell out to the GitHub CLI. The
+   current story passes the serialized plan to `host.git.split_prs` instead, so
+   provider auth, PR creation, and failure reporting stay inside the gitops
+   host surface.
