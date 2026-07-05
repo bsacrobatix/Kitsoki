@@ -20,6 +20,17 @@ hosts:
   - host.agent.decide
   - host.agent.task
 
+host_interfaces:
+  ticket:
+    description: "Issue tracker abstraction (file / GitHub Issues / Jira)."
+    operations:
+      get:
+        input:  { id: string, repo: string }
+        output: { id: string, title: string, body: string, status: string,
+                  priority: string, assignee: string, url: string, comments: list,
+                  source: string, legacy_id: string }
+    default: host.local_files.ticket
+
 # conflict_resolver is declared with tools: [Read, Edit] and NO Bash —
 # the v1 write-fence. The agent physically cannot run git commit / push /
 # checkout; correctness is gated by the acceptance.post_cmd (git diff --check)
@@ -119,6 +130,17 @@ world:
   sync_continue_branch:     { type: string, default: "" }
   sync_auto_resolve:        { type: bool,   default: false }
   sync_result:              { type: object, default: {} }
+  # issue status arc. In kitsoki-dev this resolves through iface.ticket →
+  # host.gh.ticket, so operators can inspect GitHub issues from the story
+  # surface instead of shelling out to `gh issue view`.
+  ticket_repo:              { type: string, default: "" }
+  issue_id:                 { type: string, default: "" }
+  issue_title:              { type: string, default: "" }
+  issue_status:             { type: string, default: "" }
+  issue_url:                { type: string, default: "" }
+  issue_source:             { type: string, default: "" }
+  issue_legacy_id:          { type: string, default: "" }
+  issue_body:               { type: string, default: "" }
 
 intents:
   # ── Routing (internal; emitted by on_enter) ─────────────────────────
@@ -194,6 +216,13 @@ intents:
     priority: 95
 
   # ── Hub operations ───────────────────────────────────────────────────
+  issue_status:
+    description: "Fetch an issue/ticket through the configured ticket provider."
+    examples: ["issue status", "show issue", "issue 105", "show ticket 105", "what is issue 105"]
+    priority: 82
+    slots:
+      id: { type: string, required: false }
+
   commit:
     description: "Stage and commit changes with an agent-authored message."
     # "commit the staged fix"/"…work" are verbatim mined real-session phrasings.

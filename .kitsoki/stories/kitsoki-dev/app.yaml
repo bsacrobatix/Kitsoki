@@ -86,6 +86,7 @@ hosts:
   # here so `hosts: declared` is satisfied.
   - host.local_files.ticket
   - host.gh.ticket
+  - host.gh.ticket.get
   - host.gh.ticket.comment
   - host.gh.ticket.transition
   - host.git
