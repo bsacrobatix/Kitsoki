@@ -57,6 +57,9 @@ GOCACHE=/private/tmp/kitsoki-gocache go run ./cmd/kitsoki test flows stories/pro
 `--capture-preflight` must stay no-LLM and fail closed before live persona
 spend: it checks webshot capture, Studio MCP `studio.ping`, and provider-quota
 state for malformed JSON or active cooldown windows.
+The story rejects live-budgeted pending `autonomous_marathon` creation unless
+`capture_preflight` has passed; replay mode stays no-LLM and does not require
+this live-capture preflight.
 
 Use `--driver-replay-smoke --smoke-scenario <scenario-id>` when narrowing a
 single scenario. Use `--dogfood-smoke` when checking matrix-to-rollup artifact

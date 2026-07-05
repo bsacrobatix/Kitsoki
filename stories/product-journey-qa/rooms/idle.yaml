@@ -297,6 +297,34 @@ states:
                 gh_agent_missing_evidence_summary: "gh_agent_public_base_url is required"
                 gh_agent_missing_verify_summary: "gh_agent_public_base_url is required"
                 status: "autonomous_marathon_invalid"
+        - when: "(slots.autonomous_driver_mode ?? 'pending') != 'replay' && (slots.live_budget_minutes ?? world.live_budget_minutes) > 0 && world.capture_preflight_status != 'passed'"
+          target: .
+          effects:
+            - set:
+                project: "{{ slots.project ?? world.project }}"
+                persona: "{{ slots.persona ?? world.persona }}"
+                seed: "{{ slots.seed ?? world.seed }}"
+                scenario_scope: "{{ slots.scenarios ?? world.scenario_scope }}"
+                live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
+                autonomous_marathon_status: "autonomous_marathon_invalid"
+                autonomous_marathon_summary: "Run capture_preflight successfully before creating a live-budgeted autonomous marathon."
+                autonomous_driver_mode: "{{ slots.autonomous_driver_mode ?? 'pending' }}"
+                autonomous_driver_status: "invalid"
+                autonomous_driver_summary: "capture_preflight must pass before live-budgeted driver handoff"
+                autonomous_driver_evidence_count: 0
+                autonomous_driver_issue_count: 0
+                autonomous_fix_status: "not_run"
+                autonomous_gate_summary: "preflight=fail, filing=not_run, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=fail"
+                independent_verify_status: "not_run"
+                independent_verify_summary: "capture_preflight must pass before live-budgeted autonomous marathon"
+                validation_status: "invalid"
+                validation_errors: 1
+                validation_warnings: 0
+                validation_issue_summary: "capture-preflight-required"
+                review_status: "not_run"
+                review_failed_count: 0
+                review_backlog_summary: "Run capture_preflight and keep it passing before live persona evidence capture."
+                status: "autonomous_marathon_invalid"
         - target: run_created
           effects:
             - set:

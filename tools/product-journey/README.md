@@ -479,6 +479,10 @@ credible issue through the native autonomous gate, routes observed weakness
 findings into `weakness-routes.json` / `weakness-routes.md` for `stories/prd`,
 and derives found/filed/fixed stats from issue state so manual stats are not
 part of the loop.
+For live-budgeted pending marathons, run `capture_preflight` first; the story
+fails closed before creating the driver handoff if capture preflight has not
+passed. Replay marathons remain no-LLM and do not require this live-capture
+preflight.
 
 Do not bypass this with raw `gh` commands. Product-journey issue filing and
 autonomous fixes are intentionally routed through Kitsoki's native

@@ -5,6 +5,19 @@ initial_state: idle
 host_handlers:
   host.run:
     by_call:
+      capture_product_journey_preflight:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            status: passed
+            preflight_id: preflight-marathon
+            preflight_dir: .artifacts/product-journey/preflights/preflight-marathon
+            preflight_path: .artifacts/product-journey/preflights/preflight-marathon/preflight.json
+            markdown_path: .artifacts/product-journey/preflights/preflight-marathon/preflight.md
+            webshot_output: .artifacts/product-journey/preflights/preflight-marathon/webshot-smoke.png
+            passed: 6
+            failed: 0
       autonomous_product_journey_marathon:
         data:
           ok: true
@@ -166,6 +179,19 @@ host_handlers:
                 next_driver_blocker_command: ""
 
 turns:
+  - intent:
+      name: capture_preflight
+      slots:
+        seed: marathon-demo
+    expect_state: idle
+    expect_world:
+      status: capture_preflight_checked
+      capture_preflight_status: passed
+      capture_preflight_failed: 0
+    expect_host_calls:
+      - handler: host.run
+        args: { call: capture_product_journey_preflight }
+
   - intent:
       name: autonomous_marathon
       slots:
