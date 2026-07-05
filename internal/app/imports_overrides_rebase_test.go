@@ -139,12 +139,24 @@ imports:
 app: {id: child, title: child}
 root: bench
 hosts: [host.agent.task]
+world:
+  custom_request: {type: string, default: ""}
+  defaultbench_request: {type: string, default: ""}
+  prior_summary: {type: string, default: ""}
 toolboxes:
   builder_toolbox:
     tools: [Read, Grep, Glob, Edit, Write, Bash]
     effect: write
 states:
   bench:
+    workbench:
+      agent: builder
+      prompt: prompts/bench.md
+      acceptance_schema: schemas/out.json
+      capture_slot: custom_request
+      context_args:
+        prior_summary: "{{ world.prior_summary }}"
+  defaultbench:
     workbench:
       agent: builder
       prompt: prompts/bench.md
@@ -173,13 +185,78 @@ agents:
 	if task == nil {
 		t.Fatalf("imported workbench did not synthesize host.agent.task")
 	}
+	if got, want := task.When, "world.sub__custom_request != ''"; got != want {
+		t.Fatalf("workbench guard = %q, want %q", got, want)
+	}
 	ctx := task.With["context"].(map[string]any)
 	if got, want := ctx["prompt"].(string), filepath.Join(childDir, "prompts", "bench.md"); got != want {
 		t.Fatalf("workbench prompt = %q, want child story path %q", got, want)
 	}
+	args := ctx["args"].(map[string]any)
+	if got, want := args["request"].(string), "{{ world.sub__custom_request }}"; got != want {
+		t.Fatalf("workbench request arg = %q, want %q", got, want)
+	}
+	if got, want := args["prior_summary"].(string), "{{ world.sub__prior_summary }}"; got != want {
+		t.Fatalf("workbench context arg = %q, want %q", got, want)
+	}
 	acc := task.With["acceptance"].(map[string]any)
 	if got, want := acc["schema"].(string), filepath.Join(childDir, "schemas", "out.json"); got != want {
 		t.Fatalf("workbench acceptance schema = %q, want child story path %q", got, want)
+	}
+
+	defaultBench := def.States["sub"].States["defaultbench"]
+	if defaultBench == nil {
+		t.Fatalf("imported default-slot workbench state not found")
+	}
+	var defaultTask *Effect
+	for i := range defaultBench.OnEnter {
+		if defaultBench.OnEnter[i].Invoke == "host.agent.task" {
+			defaultTask = &defaultBench.OnEnter[i]
+			break
+		}
+	}
+	if defaultTask == nil {
+		t.Fatalf("imported default-slot workbench did not synthesize host.agent.task")
+	}
+	if got, want := defaultTask.When, "world.sub__defaultbench_request != ''"; got != want {
+		t.Fatalf("default-slot workbench guard = %q, want %q", got, want)
+	}
+}
+
+// TestImports_ProjectKitsokiDevWorkbenchUsesPrefixedCaptureSlot guards the
+// exact dogfood startup bug: imported dev-story's workbench capture_slot must be
+// rewritten before workbench: desugaring, or the generated boot-time guard reads
+// world.landing_request instead of world.core__landing_request and dispatches
+// the landing agent on a cold boot.
+func TestImports_ProjectKitsokiDevWorkbenchUsesPrefixedCaptureSlot(t *testing.T) {
+	def, err := Load(filepath.Join("..", "..", ".kitsoki", "stories", "kitsoki-dev", "app.yaml"))
+	if err != nil {
+		t.Fatalf("Load kitsoki-dev app: %v", err)
+	}
+	landing := def.States["core"].States["landing"]
+	if landing == nil {
+		t.Fatalf("core.landing not found")
+	}
+	var task *Effect
+	for i := range landing.OnEnter {
+		if landing.OnEnter[i].Invoke == "host.agent.task" {
+			task = &landing.OnEnter[i]
+			break
+		}
+	}
+	if task == nil {
+		t.Fatalf("core.landing did not synthesize host.agent.task")
+	}
+	if got, want := task.When, "world.core__landing_request != ''"; got != want {
+		t.Fatalf("core.landing workbench guard = %q, want %q", got, want)
+	}
+	ctx := task.With["context"].(map[string]any)
+	args := ctx["args"].(map[string]any)
+	if got, want := args["request"].(string), "{{ world.core__landing_request }}"; got != want {
+		t.Fatalf("core.landing request arg = %q, want %q", got, want)
+	}
+	if got, want := args["prior_summary"].(string), "{{ world.core__landing_prior_summary }}"; got != want {
+		t.Fatalf("core.landing prior_summary arg = %q, want %q", got, want)
 	}
 }
 

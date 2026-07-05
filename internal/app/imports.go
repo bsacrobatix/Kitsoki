@@ -556,11 +556,11 @@ func foldChild(parent *AppDef, alias string, imp *ImportDef, child *AppDef, file
 	// The rewriter also rewrites bare-name targets to slash form
 	// `<alias>/<name>` so a child transition `target: working` resolves
 	// to the nested child sibling inside the compound wrapper.
-	for _, s := range child.States {
+	for name, s := range child.States {
 		if s == nil {
 			continue
 		}
-		rw.rewriteState(s)
+		rw.rewriteState(name, s)
 		rewriteChildStateTransitions(s, alias, imp, &errs, file)
 	}
 
