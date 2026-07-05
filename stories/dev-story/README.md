@@ -167,7 +167,7 @@ dev rebinds to `host.local_files.ticket`. Same YAML, two providers.
 
 | Room | Status | Notes |
 |---|---|---|
-| `landing` | **root** | The **free-form workbench** — dev-story's root, replacing the former `main` catalog ([freeform-landing](#the-free-form-workbench-landing) below). A full-tool, Claude-Code-like agent (`landing_agent`) is the resting surface: the operator describes work in their own words (the `landing_capture` intent → on_enter `host.agent.task`, via the [`workbench:`](../../docs/proposals/room-workbench.md) primitive), read-only by default and gated to a write-mode opt-in (`write_mode: read_only`). Carries `main`'s highest-value navigation forward as quick actions + intents. Declares the [agent off-ramp](../../docs/stories/state-machine.md#11-off-path-the-global-escape-hatch) (`workbench.off_ramp_agent: agent_qa`) as its read-only Q&A floor. Every pipeline returns here (`go_main`/`go_back` self-loop). |
+| `landing` | **root** | The **free-form workbench** — dev-story's root, replacing the former `main` catalog ([freeform-landing](#the-free-form-workbench-landing) below). A full-tool, Claude-Code-like agent (`landing_agent`) is the resting surface: the operator describes work in their own words (the `landing_capture` intent → on_enter `host.agent.task`, via the [`workbench:`](../../docs/architecture/room-workbench.md) primitive), read-only by default and gated to a write-mode opt-in (`write_mode: read_only`). Carries `main`'s highest-value navigation forward as quick actions + intents. Declares the [agent off-ramp](../../docs/stories/state-machine.md#11-off-path-the-global-escape-hatch) (`workbench.off_ramp_agent: agent_qa`) as its read-only Q&A floor. Every pipeline returns here (`go_main`/`go_back` self-loop). |
 | `applying` | — | The deterministic executor for an accepted ad-hoc [plan](#ad-hoc-structured-plan-proposeacceptrefineapplyverify): re-prompts the `landing_agent` with the **accepted plan as instruction** (`prompts/apply.md`) and binds a **distinct `apply_note`** (binding `landing_note` would let `once:` skip the dispatch), then emits `run_verify`. |
 | `verifying` | — | Runs the accepted plan's **verify gate** (`host.starlark.run` script and/or `gate_reviewer` agent), binds tri-state `verify_ok`, and routes on the post-bind verdict: PASS → `plan_done`, FAIL → `landing` (`last_error` = the gate's reason). Pinned `decider: llm` so the deterministic verdict auto-fires in STAGED mode. |
 | `plan_done` | — | The plan completion read-out (`captured++`); `go_main`/`go_back` return to the workbench. |
@@ -359,7 +359,7 @@ quick-action buttons and intents so nothing `main` offered is lost; every
 pipeline's exit returns here, and `go_main` / `go_back` self-loop the workbench.
 
 **Built on the `workbench:` primitive**
-([`docs/proposals/room-workbench.md`](../../docs/proposals/room-workbench.md);
+([`docs/architecture/room-workbench.md`](../../docs/architecture/room-workbench.md);
 landing is its reference consumer). The room declares one `workbench:` block
 instead of hand-rolling `write_mode` + `agent_off_ramp` + an `on_enter
 host.agent.task` + a free-text capture arc; the loader desugars it at load time
