@@ -272,7 +272,7 @@ func TestGitopsIssueStateCacheUsesNativeTicketProvider(t *testing.T) {
 	}
 }
 
-func TestGitopsGHAgentGateRequiresIndependentVerify(t *testing.T) {
+func TestGitopsGHAgentGateLeavesIndependentVerifySeparate(t *testing.T) {
 	result := map[string]any{
 		"gh_agent_enqueue_status":         "queued",
 		"gh_agent_enqueued_count":         1,
@@ -289,13 +289,36 @@ func TestGitopsGHAgentGateRequiresIndependentVerify(t *testing.T) {
 		t.Fatalf("complete gh-agent result should pass")
 	}
 	result["gh_agent_missing_verify_count"] = 1
-	if gitopsGHAgentGateOK(result) {
-		t.Fatalf("missing independent verification must fail the gh-agent gate")
+	if !gitopsGHAgentGateOK(result) {
+		t.Fatalf("missing independent verification should not fail the gh-agent gate")
 	}
 	result["gh_agent_missing_verify_count"] = 0
 	result["gh_agent_missing_triage_count"] = 1
 	if gitopsGHAgentGateOK(result) {
 		t.Fatalf("missing triage preflight evidence must fail the gh-agent gate")
+	}
+}
+
+func TestGitopsIndependentVerifyGate(t *testing.T) {
+	result := map[string]any{
+		"gh_agent_enqueue_status":           "queued",
+		"gh_agent_enqueued_count":           2,
+		"gh_agent_independent_verify_count": 2,
+		"gh_agent_missing_verify_count":     0,
+	}
+	if !gitopsIndependentVerifyGateOK(result) {
+		t.Fatalf("complete independent verification should pass")
+	}
+	if got := gitopsIndependentVerifySummary(result); got != "verified=2/2" {
+		t.Fatalf("summary = %q", got)
+	}
+	result["gh_agent_missing_verify_count"] = 1
+	result["gh_agent_independent_verify_count"] = 1
+	if gitopsIndependentVerifyGateOK(result) {
+		t.Fatalf("missing independent verification should fail the independent gate")
+	}
+	if got := gitopsIndependentVerifySummary(result); got != "missing=1, verified=1/2" {
+		t.Fatalf("missing summary = %q", got)
 	}
 }
 

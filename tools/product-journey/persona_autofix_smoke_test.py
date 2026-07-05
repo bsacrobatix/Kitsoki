@@ -157,7 +157,7 @@ def main() -> int:
               failures)
         check("autonomous gate is valid",
               result.get("autonomous_fix_status") == "autonomous_fix_valid"
-              and result.get("autonomous_gate_summary") == "filing=pass, gh_agent=pass, review=pass, validation=pass",
+              and result.get("autonomous_gate_summary") == "filing=pass, gh_agent=pass, independent_verify=pass, review=pass, validation=pass",
               failures)
         check("review and validation are clean",
               result.get("review_status") == "ready"

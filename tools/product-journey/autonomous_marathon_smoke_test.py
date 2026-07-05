@@ -200,7 +200,7 @@ def main() -> int:
               failures)
         check("autonomous gates are all green",
               result.get("autonomous_fix_status") == "autonomous_fix_valid"
-              and result.get("autonomous_gate_summary") == "filing=pass, gh_agent=pass, review=pass, validation=pass",
+              and result.get("autonomous_gate_summary") == "filing=pass, gh_agent=pass, independent_verify=pass, review=pass, validation=pass",
               failures)
         check("human review artifacts link issue, run, fix, and verify",
               issue_urls and issue_urls[0] in report_text

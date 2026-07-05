@@ -167,7 +167,7 @@ def main() -> int:
             check("finalization runs native autonomous fix gate",
                   finalized["autonomous_marathon_status"] == "autonomous_marathon_valid"
                   and finalized["autonomous_fix_status"] == "autonomous_fix_valid"
-                  and finalized["autonomous_gate_summary"] == "filing=pass, gh_agent=pass, review=pass, validation=pass",
+                  and finalized["autonomous_gate_summary"] == "filing=pass, gh_agent=pass, independent_verify=pass, review=pass, validation=pass",
                   failures)
             check("marathon report links fix evidence and stats",
                   "autonomous-fix-report.md" in report_text

@@ -214,7 +214,7 @@ def main():
         combined.update({
             "status": "native_ghagent_smoke",
             "ticket_repo": "o/r",
-            "autonomous_gate_summary": "filing=pass, gh_agent=pass, review=pending, validation=pending",
+            "autonomous_gate_summary": "filing=pass, gh_agent=pass, independent_verify=pass, review=pending, validation=pending",
         })
         run.record_gh_agent_findings_status(run_dir, combined)
         attach_closeout(run_dir)

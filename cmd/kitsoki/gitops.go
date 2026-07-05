@@ -361,8 +361,9 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 		intValue(result, "findings_failed_count") == 0 &&
 		intValue(result, "findings_unfiled_count") == 0
 	ghAgentOK := gitopsGHAgentGateOK(result)
+	independentVerifyOK := gitopsIndependentVerifyGateOK(result)
 	closeoutOK := false
-	if filingOK && ghAgentOK {
+	if filingOK && ghAgentOK && independentVerifyOK {
 		closeout, err := gitopsCloseoutFixedIssues(ctx, runDir, opts.TicketRepo, result)
 		if err != nil {
 			return nil, err
@@ -398,13 +399,15 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 	validationOK := stringValue(validation, "status") == "valid" && intValue(validation, "errors") == 0
 
 	status := "autonomous_fix_invalid"
-	if reviewOK && validationOK && filingOK && ghAgentOK && closeoutOK {
+	if reviewOK && validationOK && filingOK && ghAgentOK && independentVerifyOK && closeoutOK {
 		status = "autonomous_fix_valid"
 	}
 	result["status"] = status
 	result["autonomous_fix_status"] = status
-	result["autonomous_gate_summary"] = fmt.Sprintf("filing=%s, gh_agent=%s, review=%s, validation=%s",
-		passFail(filingOK), passFail(ghAgentOK), passFail(reviewOK), passFail(validationOK))
+	result["independent_verify_status"] = passFail(independentVerifyOK)
+	result["independent_verify_summary"] = gitopsIndependentVerifySummary(result)
+	result["autonomous_gate_summary"] = fmt.Sprintf("filing=%s, gh_agent=%s, independent_verify=%s, review=%s, validation=%s",
+		passFail(filingOK), passFail(ghAgentOK), passFail(independentVerifyOK), passFail(reviewOK), passFail(validationOK))
 	result["filing_status"] = "findings_filed"
 	result["review_status"] = firstNonBlank(stringValue(review, "review_status"), stringValue(review, "status"))
 	result["review_summary"] = stringValue(review, "summary")
@@ -438,8 +441,28 @@ func gitopsGHAgentGateOK(result map[string]any) bool {
 		intValue(result, "gh_agent_done_count") >= intValue(result, "gh_agent_enqueued_count") &&
 		intValue(result, "gh_agent_missing_evidence_count") == 0 &&
 		intValue(result, "gh_agent_missing_triage_count") == 0 &&
-		intValue(result, "gh_agent_missing_verify_count") == 0 &&
 		intValue(result, "gh_agent_missing_run_url_count") == 0
+}
+
+func gitopsIndependentVerifyGateOK(result map[string]any) bool {
+	enqueued := intValue(result, "gh_agent_enqueued_count")
+	return stringValue(result, "gh_agent_enqueue_status") == "queued" &&
+		enqueued > 0 &&
+		intValue(result, "gh_agent_missing_verify_count") == 0 &&
+		intValue(result, "gh_agent_independent_verify_count") >= enqueued
+}
+
+func gitopsIndependentVerifySummary(result map[string]any) string {
+	enqueued := intValue(result, "gh_agent_enqueued_count")
+	verified := intValue(result, "gh_agent_independent_verify_count")
+	missing := intValue(result, "gh_agent_missing_verify_count")
+	if enqueued == 0 {
+		return "no queued fix jobs"
+	}
+	if missing > 0 {
+		return fmt.Sprintf("missing=%d, verified=%d/%d", missing, verified, enqueued)
+	}
+	return fmt.Sprintf("verified=%d/%d", verified, enqueued)
 }
 
 func gitopsCloseoutFixedIssues(ctx context.Context, runDir, ticketRepo string, status map[string]any) (map[string]any, error) {
@@ -697,7 +720,8 @@ func runGitopsAutonomousFixViaRunner(ctx context.Context, opts gitopsAutonomousF
 	if err := json.Unmarshal(out, &result); err != nil {
 		return nil, fmt.Errorf("product-journey autonomous-fix test fallback printed invalid JSON: %w\n%s", err, strings.TrimSpace(string(out)))
 	}
-	if stringValue(result, "filing_status") == "findings_filed" && gitopsGHAgentGateOK(result) {
+	independentVerifyOK := gitopsIndependentVerifyGateOK(result)
+	if stringValue(result, "filing_status") == "findings_filed" && gitopsGHAgentGateOK(result) && independentVerifyOK {
 		closeout, err := gitopsCloseoutFixedIssuesFake(opts.RunDir, opts.TicketRepo, result)
 		if err != nil {
 			return nil, err
@@ -725,13 +749,15 @@ func runGitopsAutonomousFixViaRunner(ctx context.Context, opts gitopsAutonomousF
 		validationOK := stringValue(validation, "status") == "valid" && intValue(validation, "errors") == 0
 		closeoutOK := stringValue(closeout, "issue_closeout_status") == "closed"
 		status := "autonomous_fix_invalid"
-		if reviewOK && validationOK && closeoutOK {
+		if reviewOK && validationOK && independentVerifyOK && closeoutOK {
 			status = "autonomous_fix_valid"
 		}
 		result["status"] = status
 		result["autonomous_fix_status"] = status
-		result["autonomous_gate_summary"] = fmt.Sprintf("filing=pass, gh_agent=pass, review=%s, validation=%s",
-			passFail(reviewOK), passFail(validationOK))
+		result["independent_verify_status"] = passFail(independentVerifyOK)
+		result["independent_verify_summary"] = gitopsIndependentVerifySummary(result)
+		result["autonomous_gate_summary"] = fmt.Sprintf("filing=pass, gh_agent=pass, independent_verify=%s, review=%s, validation=%s",
+			passFail(independentVerifyOK), passFail(reviewOK), passFail(validationOK))
 		result["review_status"] = firstNonBlank(stringValue(review, "review_status"), stringValue(review, "status"))
 		result["review_summary"] = stringValue(review, "summary")
 		result["review_passed_count"] = firstNonZero(intValue(review, "review_passed_count"), intValue(review, "passed"))
@@ -1092,6 +1118,7 @@ func writeGitopsAutonomousReport(runDir string, status, review, validation map[s
 		fmt.Sprintf("- Ticket repo: `%s`", stringValue(status, "ticket_repo")),
 		fmt.Sprintf("- Status: `%s`", firstNonBlank(stringValue(status, "autonomous_fix_status"), stringValue(status, "status"))),
 		fmt.Sprintf("- Gates: %s", firstNonBlank(stringValue(status, "autonomous_gate_summary"), "(not evaluated)")),
+		fmt.Sprintf("- Independent verification: `%s` - %s", stringValue(status, "independent_verify_status"), stringValue(status, "independent_verify_summary")),
 		fmt.Sprintf("- Issue close-out: `%s` (%d closed)", stringValue(status, "issue_closeout_status"), intValue(status, "issue_closeout_count")),
 		"",
 		"## Filed Issues",

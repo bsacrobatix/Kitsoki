@@ -57,9 +57,15 @@ host_handlers:
             gh_agent_run_summary: "github:bsacrobatix/Kitsoki/issue/301=done https://agent.example/run/job-301"
             gh_agent_fix_evidence_count: 0
             gh_agent_missing_evidence_count: 1
+            gh_agent_independent_verify_count: 0
+            gh_agent_missing_verify_count: 1
             gh_agent_fix_evidence_summary: ""
             gh_agent_missing_evidence_summary: "github:bsacrobatix/Kitsoki/issue/301"
-            autonomous_gate_summary: "filing=pass, gh_agent=fail, review=fail, validation=fail"
+            gh_agent_independent_verify_summary: ""
+            gh_agent_missing_verify_summary: "github:bsacrobatix/Kitsoki/issue/301"
+            autonomous_gate_summary: "filing=pass, gh_agent=fail, independent_verify=fail, review=fail, validation=fail"
+            independent_verify_status: fail
+            independent_verify_summary: "missing=1, verified=0/1"
             review_status: needs_evidence
             review_summary: "needs_evidence: 23/24 checks passed, 0 warnings, 1 failures"
             review_passed_count: 23
@@ -130,13 +136,17 @@ turns:
       gh_agent_failed_count: 0
       gh_agent_fix_evidence_count: 0
       gh_agent_missing_evidence_count: 1
-      autonomous_gate_summary: "filing=pass, gh_agent=fail, review=fail, validation=fail"
+      gh_agent_independent_verify_count: 0
+      gh_agent_missing_verify_count: 1
+      autonomous_gate_summary: "filing=pass, gh_agent=fail, independent_verify=fail, review=fail, validation=fail"
+      independent_verify_status: fail
+      independent_verify_summary: "missing=1, verified=0/1"
       review_status: needs_evidence
       review_failed_count: 1
       validation_status: invalid
       validation_errors: 1
       validation_issue_summary: gh-agent-fix-evidence
-    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous fix[\\s\\S]*autonomous_fix_invalid[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=fail, review=fail, validation=fail[\\s\\S]*GH-agent evidence[\\s\\S]*0 attached; 1 missing[\\s\\S]*Validation[\\s\\S]*invalid"
+    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous fix[\\s\\S]*autonomous_fix_invalid[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=fail, independent_verify=fail,[\\s\\S]*review=fail, validation=fail[\\s\\S]*Independent verify[\\s\\S]*fail: missing=1, verified=0/1[\\s\\S]*GH-agent evidence[\\s\\S]*0 attached; 1 missing[\\s\\S]*Validation[\\s\\S]*invalid"
     expect_host_calls:
       - handler: host.run
         args: { call: autonomous_product_journey_fix }

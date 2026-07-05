@@ -4370,6 +4370,7 @@ def render_autonomous_fix_report(run_dir: Path, status: dict, review: Optional[d
         f"- Ticket repo: `{status.get('ticket_repo', filing.get('ticket_repo', ''))}`",
         f"- Status: `{status.get('autonomous_fix_status', status.get('status', ''))}`",
         f"- Gates: {status.get('autonomous_gate_summary', '(not evaluated)')}",
+        f"- Independent verification: `{status.get('independent_verify_status', '')}` - {status.get('independent_verify_summary', '')}",
         "",
         "## Filed Issues",
         "",
@@ -4532,6 +4533,20 @@ def issue_closeout_gate(findings: dict, gh_agent_requested: bool, credible_findi
     if errors:
         return False, "; ".join(str(item) for item in errors[:3])
     return True, f"closed={count}/{len(credible_findings)}"
+
+
+def independent_verify_gate_from_summary(summary: dict, gh_agent_requested: bool, enqueued_count: int) -> tuple[bool, str]:
+    if not gh_agent_requested:
+        return True, "independent verification not required"
+    verified = int(summary.get("gh_agent_independent_verify_count", 0) or 0)
+    missing = int(summary.get("gh_agent_missing_verify_count", 0) or 0)
+    if enqueued_count <= 0:
+        return False, "no queued fix jobs"
+    if missing > 0:
+        return False, f"missing={missing}, verified={verified}/{enqueued_count}"
+    if verified < enqueued_count:
+        return False, f"verified={verified}/{enqueued_count}"
+    return True, f"verified={verified}/{enqueued_count}"
 
 
 def file_findings(
@@ -4729,17 +4744,24 @@ def autonomous_fix_loop(
         and gh_agent_done >= gh_agent_enqueued
         and int(story_summary.get("gh_agent_missing_evidence_count", 0) or 0) == 0
         and int(story_summary.get("gh_agent_missing_triage_count", 0) or 0) == 0
-        and int(story_summary.get("gh_agent_missing_verify_count", 0) or 0) == 0
         and int(story_summary.get("gh_agent_missing_run_url_count", 0) or 0) == 0
     )
-    status = "autonomous_fix_valid" if review_ok and validation_ok and filing_ok and gh_agent_ok else "autonomous_fix_invalid"
+    independent_verify_ok, independent_verify_summary = independent_verify_gate_from_summary(
+        story_summary,
+        gh_agent_requested,
+        gh_agent_enqueued,
+    )
+    status = "autonomous_fix_valid" if review_ok and validation_ok and filing_ok and gh_agent_ok and independent_verify_ok else "autonomous_fix_invalid"
     result = {
         **filed,
         "status": status,
         "autonomous_fix_status": status,
+        "independent_verify_status": "pass" if independent_verify_ok else "fail",
+        "independent_verify_summary": independent_verify_summary,
         "autonomous_gate_summary": (
             f"filing={'pass' if filing_ok else 'fail'}, "
             f"gh_agent={'pass' if gh_agent_ok else 'fail'}, "
+            f"independent_verify={'pass' if independent_verify_ok else 'fail'}, "
             f"review={'pass' if review_ok else 'fail'}, "
             f"validation={'pass' if validation_ok else 'fail'}"
         ),
@@ -5068,7 +5090,9 @@ def autonomous_marathon(
             "media_manifest_path": str(created_dir / "media-manifest.json"),
             "scenario_outcomes_path": str(created_dir / "scenario-outcomes.md"),
             "autonomous_fix_status": "not_run",
-            "autonomous_gate_summary": "filing=not_run, gh_agent=not_run, review=not_run, validation=not_run",
+            "independent_verify_status": "not_run",
+            "independent_verify_summary": "independent verification not run",
+            "autonomous_gate_summary": "filing=not_run, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=not_run",
         }
         result.update(run_story_summary(created_dir))
         result["autonomous_marathon_report_path"] = str(write_autonomous_marathon_report(created_dir, result))
@@ -5100,7 +5124,9 @@ def autonomous_marathon(
         validation = validate_run_bundle(run_dir)
         base = {
             "autonomous_fix_status": "not_required",
-            "autonomous_gate_summary": "filing=not_required, gh_agent=not_required, review=pending, validation=pending",
+            "independent_verify_status": "not_required",
+            "independent_verify_summary": "independent verification not required",
+            "autonomous_gate_summary": "filing=not_required, gh_agent=not_required, independent_verify=not_required, review=pending, validation=pending",
             "review_status": reviewed.get("review_status", reviewed.get("status", "")),
             "review_summary": reviewed.get("summary", ""),
             "review_passed_count": reviewed.get("review_passed_count", reviewed.get("passed", 0)),
