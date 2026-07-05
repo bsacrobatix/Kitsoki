@@ -202,23 +202,40 @@ changes:
     scope: ["internal/host/starlark/**", "stories/**"]
     depends_on: [s4-live-proof]
     acceptance:
-      - "an extraction command/tool (trace_to_flow-style) takes the s4 trace and emits a .star file + sidecar that starcheck passes"
-      - "the extracted .star reproduces the s4 done payload deterministically when run via host.starlark.run"
-      - "the target room's invoke is swapped from agent.codeact to host.starlark.run and a flow proves the room runs with zero agent dispatch"
+      - "an extraction command/tool (trace_to_flow-style) takes a codeact.Trace (or a recorded session trace) and emits a .star file + sidecar that starcheck passes"
+      - "the extracted .star reproduces a recorded done() payload deterministically when run via host.starlark.run"
+      - "an existing agent.codeact room is swapped to host.starlark.run and a flow proves it runs with zero agent dispatch"
+    deviation_note: >
+      s0 picked stories/bugfix/rooms/triaging.yaml as the promotion TARGET, but
+      s4's live run exposed why that choice is wrong for this slice: a triage
+      verdict is ticket-specific (it must vary per bug reported), so freezing
+      one trajectory's verdict into a permanent host.starlark.run swap would
+      silently give every FUTURE ticket the same stale answer — a real
+      regression, not a valid promotion. The ratchet only makes sense for a
+      codeact invoke whose output is a deterministic function of fixed inputs,
+      not one whose whole point is per-call variation. triaging.yaml stays on
+      live agent.codeact; the extraction tool is built generically and proven
+      against internal/testrunner/testdata/codeact_demo (s2's fixture room,
+      already deterministic-by-design) instead. Logged as a finding in
+      .context/codeact-dogfood-findings.md, not silently changed.
     gate:
       class: G-FLOW
-      red_now: "no extraction path exists from a codeact trace to a committed .star; the target room still dispatches an agent every run"
-      green_when: "the extraction unit test passes (emits a starcheck-clean, payload-reproducing .star) and a flow proves the promoted room has zero agent dispatch"
-      cmd: "go test ./internal/host/starlark/... -run Promot && kitsoki test flows stories/ --filter promoted-codeact 2>/dev/null || go test ./internal/host/starlark/... -run Promot"
+      red_now: "no extraction path exists from a codeact trace to a committed .star; codeact_demo's room still declares agent.codeact"
+      green_when: "the extraction unit test passes (emits a starcheck-clean, payload-reproducing .star) and a flow proves the promoted codeact_demo room has zero agent dispatch"
+      cmd: "go test ./internal/host/starlark/... -run Promot && go test ./internal/testrunner/... -run Codeact"
     agent_brief: >
       Build the promotion ratchet per .context/codeact-implementation-brief.md
-      Slice 5: given the s4 trace, extract the final Starlark into a committed
-      .star + sidecar (a trace_to_flow-style command or MCP tool is fine for
-      v1; fully-automatic promotion is out of scope). Swap the target room's
-      agent.codeact for host.starlark.run. RED gate: an extraction unit test
-      (given the slice-4 trace, emits a .star that starcheck passes and
-      reproduces the payload deterministically) + a flow proving the promoted
-      room runs with no agent dispatch.
+      Slice 5, generalized: given a codeact.Trace (see internal/host/codeact/trace.go's
+      TraceStep from s3), extract the final Starlark into a committed .star +
+      sidecar (a small extraction command/function is fine for v1;
+      fully-automatic promotion is out of scope). Prove it on
+      internal/testrunner/testdata/codeact_demo/ (NOT stories/bugfix/rooms/triaging.yaml
+      — see deviation_note above): swap that fixture room's invoke from
+      agent.codeact to host.starlark.run using the extracted .star, and prove
+      via a flow fixture it now runs with zero agent dispatch. RED gate: an
+      extraction unit test (given a recorded trace, emits a .star that
+      starcheck passes and reproduces the payload deterministically) + the
+      flow proving zero agent dispatch on the promoted room.
 
   - id: s6-findings-and-docs
     wall: S6
