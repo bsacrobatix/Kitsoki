@@ -179,6 +179,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(doctorCmd())
 	root.AddCommand(graphCmd())
 	root.AddCommand(initCmd())
+	root.AddCommand(kitCmd())
 	tierHelp(root)
 
 	return root
