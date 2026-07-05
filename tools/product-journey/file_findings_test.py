@@ -521,6 +521,18 @@ def main():
                any(i["id"] == "gh-agent-fix-deck" and i["severity"] == "error"
                    for i in stale_validated["issues"]))
         run.update_derived_artifacts(run_dir, None)
+        closeout_url = saved_findings["issue_closeout"]["items"][0]["comment_url"]
+        stale_deck = run.read_json(deck_path)
+        for scene in stale_deck["scenes"]:
+            if scene.get("eyebrow") == "GH-agent fixes":
+                scene["body"] = scene.get("body", "").replace(closeout_url, "")
+                break
+        run.write_json(deck_path, stale_deck)
+        stale_validated = run.validate_run_bundle(run_dir)
+        _check("validate catches missing issue close-out URL in deck",
+               any(i["id"] == "gh-agent-fix-deck" and i["severity"] == "error"
+                   for i in stale_validated["issues"]))
+        run.update_derived_artifacts(run_dir, None)
 
         run.record_finding(run_dir, "issue", "late credible", "found after filing",
                            scenario_id, "high", "", "open", None)

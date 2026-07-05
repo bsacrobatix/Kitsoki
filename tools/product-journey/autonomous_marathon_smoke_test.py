@@ -179,6 +179,7 @@ def main() -> int:
         stats = run.derive_stats(run.ARTIFACT_ROOT, str(issue_state), 0.82, 25, str(stats_output))
         report_path = Path(result.get("autonomous_fix_report_path", ""))
         report_text = report_path.read_text(encoding="utf-8") if report_path.exists() else ""
+        closeout_comment_url = result.get("issue_closeouts", [{}])[0].get("comment_url", "")
         weakness_routes = run.read_json(run_dir / "weakness-routes.json")
         deck_text = (run_dir / "deck.slidey.json").read_text(encoding="utf-8")
 
@@ -203,6 +204,12 @@ def main() -> int:
               and "https://agent.example/run/job-" in report_text
               and "fix-report.md" in report_text
               and "independent-verify.md" in report_text,
+              failures)
+        check("review deck links issue close-out evidence",
+              result.get("issue_closeout_status") == "closed"
+              and closeout_comment_url
+              and closeout_comment_url in deck_text
+              and "Issue close-out: closed" in deck_text,
               failures)
         check("weakness routed to PRD/design review artifact",
               weakness_routes.get("summary", {}).get("routed") == 1
@@ -231,6 +238,8 @@ def main() -> int:
             "filed_issue_count": result.get("findings_filed_count", 0),
             "gh_agent_done_count": result.get("gh_agent_done_count", 0),
             "gh_agent_independent_verify_count": result.get("gh_agent_independent_verify_count", 0),
+            "issue_closeout_status": result.get("issue_closeout_status", ""),
+            "issue_closeout_comment_url": closeout_comment_url,
             "autonomous_gate_summary": result.get("autonomous_gate_summary", ""),
             "failures": failures,
         }

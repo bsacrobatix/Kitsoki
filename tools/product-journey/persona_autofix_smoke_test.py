@@ -136,6 +136,7 @@ def main() -> int:
         ]
         report_path = Path(result.get("autonomous_fix_report_path", ""))
         report_text = report_path.read_text(encoding="utf-8") if report_path.exists() else ""
+        closeout_comment_url = result.get("issue_closeouts", [{}])[0].get("comment_url", "")
         deck = run.read_json(run_dir / "deck.slidey.json")
         gh_scene = next(
             (scene for scene in deck.get("scenes", []) if scene.get("eyebrow") == "GH-agent fixes"),
@@ -181,6 +182,12 @@ def main() -> int:
               and "independent_verify=" in gh_scene_body
               and "independent-verify.md" in gh_scene_body,
               failures)
+        check("review deck links issue close-out evidence",
+              result.get("issue_closeout_status") == "closed"
+              and closeout_comment_url
+              and closeout_comment_url in gh_scene_body
+              and "Issue close-out: closed" in gh_scene_body,
+              failures)
 
         output = {
             "status": "passed" if not failures else "failed",
@@ -192,6 +199,8 @@ def main() -> int:
             "filed_issue_count": result.get("findings_filed_count", 0),
             "gh_agent_done_count": result.get("gh_agent_done_count", 0),
             "gh_agent_independent_verify_count": result.get("gh_agent_independent_verify_count", 0),
+            "issue_closeout_status": result.get("issue_closeout_status", ""),
+            "issue_closeout_comment_url": closeout_comment_url,
             "review_status": result.get("review_status", ""),
             "validation_status": result.get("validation_status", ""),
             "autonomous_gate_summary": result.get("autonomous_gate_summary", ""),

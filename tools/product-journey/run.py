@@ -6894,6 +6894,14 @@ def validate_run_bundle(run_dir: Path) -> dict:
         )
         if gh_agent_independent_verify_links(gh_agent):
             expected_tokens.append("independent_verify=")
+        issue_closeout = findings_json.get("issue_closeout", {}) if isinstance(findings_json.get("issue_closeout", {}), dict) else {}
+        if issue_closeout:
+            expected_tokens.append(f"Issue close-out: {issue_closeout.get('status', '')}")
+            expected_tokens.extend(
+                item.get("comment_url", "")
+                for item in issue_closeout.get("items", []) or []
+                if isinstance(item, dict) and item.get("comment_url")
+            )
         missing_tokens = [
             token for token in expected_tokens
             if token and not any(token in body for body in scene_bodies)
@@ -6903,7 +6911,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 issues,
                 "error",
                 "gh-agent-fix-deck",
-                "GH-agent fix run and evidence links are missing from the review deck",
+                "GH-agent fix, evidence, or issue close-out links are missing from the review deck",
                 ", ".join(missing_tokens[:5]),
             )
     playback_count = media_manifest.get("summary", {}).get("playback_items", 0) if media_manifest else 0
@@ -8980,6 +8988,7 @@ def render_deck(
     else:
         weakness_routes_body = "No open observed weakness findings need PRD/design routing."
     gh_agent = findings.get("gh_agent", {}) if isinstance(findings, dict) and isinstance(findings.get("gh_agent", {}), dict) else {}
+    issue_closeout = findings.get("issue_closeout", {}) if isinstance(findings, dict) and isinstance(findings.get("issue_closeout", {}), dict) else {}
     gh_agent_job_lines = []
     for job in gh_agent.get("drained_jobs", []) or gh_agent.get("jobs", []):
         if not isinstance(job, dict):
@@ -9023,6 +9032,30 @@ def render_deck(
     ]
     if gh_agent_requested:
         gh_agent_lines.append("Autonomous report: autonomous-fix-report.md")
+    closeout_lines = []
+    if issue_closeout:
+        closeout_lines.append(
+            f"Issue close-out: {issue_closeout.get('status', '')} · closed {issue_closeout.get('count', 0)}"
+        )
+        if issue_closeout.get("summary"):
+            closeout_lines.append(str(issue_closeout.get("summary", "")))
+        for item in issue_closeout.get("items", []) or []:
+            if not isinstance(item, dict):
+                continue
+            closeout_lines.append(
+                "closeout="
+                + ", ".join(
+                    part
+                    for part in [
+                        str(item.get("issue_url", "")).strip(),
+                        str(item.get("comment_url", "")).strip(),
+                        str(item.get("run_url", "")).strip(),
+                    ]
+                    if part
+                )
+            )
+    if closeout_lines:
+        gh_agent_lines.extend(closeout_lines[:8])
     if gh_agent_job_lines:
         gh_agent_lines.extend(gh_agent_job_lines[:8])
     else:
