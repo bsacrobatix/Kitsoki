@@ -59,6 +59,7 @@ func webCmd() *cobra.Command {
 		ticketRepo       string
 		agentEvidenceDir string
 		maxSessions      int
+		kitsDir          string
 	)
 
 	cmd := &cobra.Command{
@@ -267,12 +268,20 @@ authentication.`,
 			// falling back to that dir, then $PWD. This mirrors `kitsoki bug
 			// --target story` (which writes under $PWD) while preferring the repo
 			// root so the issues/bugs/ pile is shared across story subdirs.
+			// --kits-dir enables the kit.<kit>.<iface>.<op> JSON-RPC fallback +
+			// runstatus.kits.list (S3b); empty (the default) leaves both
+			// reporting "no kits installed" — most instances have none yet.
+			kits, err := buildKitDispatcher(kitsDir)
+			if err != nil {
+				return fmt.Errorf("load installed kits from %q: %w", kitsDir, err)
+			}
 			srv := server.NewMulti(registry,
 				server.WithDefaultActor(actor),
 				server.WithBugRoot(resolveWebBugRoot(dirs)),
 				server.WithWorkflowRoot(resolveWebBugRoot(dirs)),
 				server.WithTicketRepo(ticketRepo),
 				server.WithAgentEvidenceDir(agentEvidenceDir),
+				server.WithKits(kits),
 			)
 			// Attach the cross-session notification relay sink so each new
 			// session's background-turn fan-out reaches the runstatus.notification
@@ -324,6 +333,7 @@ authentication.`,
 	cmd.Flags().StringVar(&ticketRepo, "ticket-repo", "constructorfabric/Kitsoki", "file Report-bug reports as GitHub issues on this owner/repo (evidence saved under .artifacts/bug-reports for developer review) instead of a local issues/bugs/*.md file; requires gh auth. Pass an empty string to write local issues/bugs/*.md files instead")
 	cmd.Flags().StringVar(&agentEvidenceDir, "agent-evidence-dir", "", "after a GitHub bug filing, also deposit the scrubbed rrweb+HAR here under <DeckID>/ so the kitsoki gh-agent can auto-build a hosted deck without re-downloading; point at the agent's --evidence-dir")
 	cmd.Flags().IntVar(&maxSessions, "max-sessions", 0, "cap on concurrently live in-memory sessions before idle eviction kicks in (default: $KITSOKI_WEB_MAX_SESSIONS or a generous built-in default; 0 means use that default)")
+	cmd.Flags().StringVar(&kitsDir, "kits-dir", "", "directory of installed kit.yaml roots (enables kit.<kit>.<iface>.<op> + runstatus.kits.list, S3b)")
 
 	return cmd
 }
