@@ -2,6 +2,7 @@ package host_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -349,17 +350,32 @@ func TestGitHubTicket_Get_RequiresID(t *testing.T) {
 }
 
 func TestGitHubTicket_Comment_Happy(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	fr.responses["gh issue comment 42"] = fakeResp{
-		stdout: "https://github.com/o/r/issues/42#issuecomment-1\n",
-	}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
+	t.Setenv("GH_TOKEN", "test-token")
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/repos/o/r/issues/42/comments" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		body, _ = payload["body"].(string)
+		writeJSON(w, map[string]any{"html_url": "https://github.com/o/r/issues/42#issuecomment-1"})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("ticket.comment must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
 		"op":   "comment",
 		"id":   "42",
+		"repo": "o/r",
 		"body": "Repro confirmed.",
 	})
 	if err != nil {
@@ -371,19 +387,32 @@ func TestGitHubTicket_Comment_Happy(t *testing.T) {
 	if res.Data["ok"] != true {
 		t.Fatalf("ok: %v", res.Data["ok"])
 	}
-	if !strings.Contains(res.Data["comment_id"].(string), "issuecomment") {
-		t.Fatalf("comment_id should be the URL gh prints: %v", res.Data["comment_id"])
+	if body != "Repro confirmed." {
+		t.Fatalf("posted body = %q", body)
+	}
+	if !strings.Contains(res.Data["comment_id"].(string), "issuecomment") || res.Data["url"] != res.Data["comment_id"] {
+		t.Fatalf("comment URL fields: %v", res.Data)
 	}
 }
 
 func TestGitHubTicket_Comment_AcceptsIssueURL(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	fr.responses["gh issue comment 117 --repo bsacrobatix/Kitsoki"] = fakeResp{
-		stdout: "https://github.com/bsacrobatix/Kitsoki/issues/117#issuecomment-1\n",
-	}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
+	t.Setenv("GH_TOKEN", "test-token")
+	posted := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/repos/bsacrobatix/Kitsoki/issues/117/comments" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		posted = true
+		writeJSON(w, map[string]any{"html_url": "https://github.com/bsacrobatix/Kitsoki/issues/117#issuecomment-1"})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("ticket.comment must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
 		"op":   "comment",
@@ -396,34 +425,20 @@ func TestGitHubTicket_Comment_AcceptsIssueURL(t *testing.T) {
 	if res.Error != "" {
 		t.Fatalf("domain: %s", res.Error)
 	}
-	found := false
-	for _, c := range fr.calls {
-		if strings.Contains(c, "issue comment 117 --repo bsacrobatix/Kitsoki") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected issue URL to provide repo + number, got: %v", fr.calls)
+	if !posted {
+		t.Fatal("expected issue URL to provide repo + number")
 	}
 }
 
-func TestGitHubTicket_CommentReceivesCLIExecEnv(t *testing.T) {
-	var seen []map[string]string
-	restore := host.SetExecRunnerForTest(func(ctx context.Context, _ string, name string, args ...string) (string, string, int, error) {
-		seen = append(seen, host.CLIExecEnvFromCtx(ctx))
-		key := name + " " + strings.Join(args, " ")
-		switch {
-		case key == "gh --version":
-			return "gh version 2.x\n", "", 0, nil
-		case strings.HasPrefix(key, "gh issue comment 42"):
-			return "https://github.com/o/r/issues/42#issuecomment-1\n", "", 0, nil
-		default:
-			t.Fatalf("unexpected command: %s", key)
-			return "", "", 1, nil
-		}
-	})
-	defer restore()
+func TestGitHubTicket_CommentUsesContextToken(t *testing.T) {
+	var auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		writeJSON(w, map[string]any{"html_url": "https://github.com/o/r/issues/42#issuecomment-1"})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
 
 	ctx := host.WithCLIExecEnv(context.Background(), map[string]string{
 		"GH_TOKEN":     "app-token",
@@ -432,6 +447,7 @@ func TestGitHubTicket_CommentReceivesCLIExecEnv(t *testing.T) {
 	res, err := host.GitHubTicketHandler(ctx, map[string]any{
 		"op":   "comment",
 		"id":   "42",
+		"repo": "o/r",
 		"body": "Repro confirmed.",
 	})
 	if err != nil {
@@ -440,25 +456,12 @@ func TestGitHubTicket_CommentReceivesCLIExecEnv(t *testing.T) {
 	if res.Error != "" {
 		t.Fatalf("domain: %s", res.Error)
 	}
-	if len(seen) != 2 {
-		t.Fatalf("saw %d commands, want 2", len(seen))
-	}
-	for i, env := range seen {
-		if env["GH_TOKEN"] != "app-token" {
-			t.Fatalf("command %d GH_TOKEN=%q, want app-token", i, env["GH_TOKEN"])
-		}
-		if env["GITHUB_TOKEN"] != "app-token" {
-			t.Fatalf("command %d GITHUB_TOKEN=%q, want app-token", i, env["GITHUB_TOKEN"])
-		}
+	if auth != "Bearer app-token" {
+		t.Fatalf("Authorization = %q, want bearer app-token", auth)
 	}
 }
 
 func TestGitHubTicket_Comment_BodyRequired(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
-
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
 		"op": "comment",
 		"id": "42",
@@ -472,17 +475,30 @@ func TestGitHubTicket_Comment_BodyRequired(t *testing.T) {
 }
 
 func TestGitHubTicket_CommentEdit_Happy(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	fr.responses["gh api repos/o/r/issues/comments/1"] = fakeResp{
-		stdout: `{"html_url":"https://github.com/o/r/issues/42#issuecomment-1"}`,
-	}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
+	t.Setenv("GH_TOKEN", "test-token")
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/repos/o/r/issues/comments/1" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		body, _ = payload["body"].(string)
+		writeJSON(w, map[string]any{"html_url": "https://github.com/o/r/issues/42#issuecomment-1"})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("ticket.comment_edit must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
 		"op":         "comment_edit",
-		"repo":       "o/r",
 		"comment_id": "https://github.com/o/r/issues/42#issuecomment-1",
 		"body":       "Updated status.",
 	})
@@ -498,16 +514,8 @@ func TestGitHubTicket_CommentEdit_Happy(t *testing.T) {
 	if got := res.Data["comment_id"]; got != "https://github.com/o/r/issues/42#issuecomment-1" {
 		t.Fatalf("comment_id: %v", got)
 	}
-	found := false
-	for _, c := range fr.calls {
-		if strings.Contains(c, "api repos/o/r/issues/comments/1 -X PATCH") &&
-			strings.Contains(c, "body=Updated status.") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected gh api PATCH call, got: %v", fr.calls)
+	if body != "Updated status." {
+		t.Fatalf("patched body = %q", body)
 	}
 }
 

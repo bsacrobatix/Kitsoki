@@ -9,7 +9,7 @@
 // local files" surface for the dogfood loop. Issue creation and bug evidence
 // filing use the native GitHub REST API with GH_TOKEN/GITHUB_TOKEN so headless
 // autonomous runs do not depend on a locally logged-in gh binary. Older
-// search/comment/list operations still use the gh CLI through cliExec until they
+// search/list/transition operations still use the gh CLI through cliExec until they
 // are migrated behind the same native transport.
 //
 // The companion `gh pr ...` family already lives in `internal/host/git_vcs.go`
@@ -71,14 +71,8 @@ func GitHubTicketHandler(ctx context.Context, args map[string]any) (Result, erro
 	case "get":
 		return ghTicketGet(ctx, args)
 	case "comment":
-		if !ghAvailable(ctx) {
-			return Result{Error: "host.gh.ticket: gh CLI not available — install github.com/cli/cli and run `gh auth login`"}, nil
-		}
 		return ghTicketComment(ctx, args)
 	case "comment_edit":
-		if !ghAvailable(ctx) {
-			return Result{Error: "host.gh.ticket: gh CLI not available — install github.com/cli/cli and run `gh auth login`"}, nil
-		}
 		return ghTicketCommentEdit(ctx, args)
 	case "transition":
 		if !ghAvailable(ctx) {
@@ -209,12 +203,10 @@ func ghTicketGet(ctx context.Context, args map[string]any) (Result, error) {
 	return Result{Data: data}, nil
 }
 
-// ghTicketComment implements ticket.comment via `gh issue comment --body`.
+// ghTicketComment implements ticket.comment via the native GitHub REST API.
 //
 // Input  args: id (string), body (string), repo (string, optional).
-// Output Data: ok (bool), comment_id (string — the comment URL from gh's
-//
-//	stdout when present, else the issue url).
+// Output Data: ok (bool), comment_id/url (string — the comment web URL).
 func ghTicketComment(ctx context.Context, args map[string]any) (Result, error) {
 	id, _ := args["id"].(string)
 	body, _ := args["body"].(string)
@@ -230,28 +222,27 @@ func ghTicketComment(ctx context.Context, args map[string]any) (Result, error) {
 			repo = r
 		}
 	}
-	ghArgs := []string{"issue", "comment", num}
-	if repo != "" {
-		ghArgs = append(ghArgs, "--repo", repo)
+	if strings.TrimSpace(repo) == "" {
+		return Result{Error: "ticket.comment: repo argument is required for native GitHub issue comments"}, nil
 	}
-	ghArgs = append(ghArgs, "--body", body)
-	stdout, stderr, code, err := cliExec(ctx, "", "gh", ghArgs...)
+	var raw map[string]any
+	code, resp, err := githubAPIJSON(ctx, "POST", "repos/"+repo+"/issues/"+num+"/comments", map[string]any{"body": body}, &raw)
 	if err != nil {
-		return Result{Error: fmt.Sprintf("ticket.comment: exec: %v", err)}, nil
+		return Result{Error: fmt.Sprintf("ticket.comment: %v", err)}, nil
 	}
-	if code != 0 {
-		return Result{Error: fmt.Sprintf("ticket.comment: %s", strings.TrimSpace(stderr))}, nil
+	if code >= 300 {
+		return Result{Error: fmt.Sprintf("ticket.comment: %s", githubAPIError(resp))}, nil
 	}
-	commentURL := lastNonEmptyLine(stdout)
+	commentURL, _ := raw["html_url"].(string)
 	return Result{Data: map[string]any{
 		"ok":         true,
 		"comment_id": commentURL,
+		"url":        commentURL,
 	}}, nil
 }
 
 // ghTicketCommentEdit implements ticket.comment_edit via the GitHub REST issue
-// comments endpoint. gh's issue-comment subcommand does not expose editing an
-// arbitrary comment id, so this uses `gh api` with the same gh auth context.
+// comments endpoint.
 //
 // Input args: comment_id (string — accepts a raw id, an API URL, or a web URL
 // with #issuecomment-N), body (string), repo (string, required unless
@@ -276,23 +267,22 @@ func ghTicketCommentEdit(ctx context.Context, args map[string]any) (Result, erro
 		return Result{Error: "ticket.comment_edit: body argument is required"}, nil
 	}
 	path := fmt.Sprintf("repos/%s/issues/comments/%s", repo, id)
-	stdout, stderr, code, err := cliExec(ctx, "", "gh", "api", path, "-X", "PATCH", "-f", "body="+body)
+	var raw map[string]any
+	code, resp, err := githubAPIJSON(ctx, "PATCH", path, map[string]any{"body": body}, &raw)
 	if err != nil {
-		return Result{Error: fmt.Sprintf("ticket.comment_edit: exec: %v", err)}, nil
+		return Result{Error: fmt.Sprintf("ticket.comment_edit: %v", err)}, nil
 	}
-	if code != 0 {
-		return Result{Error: fmt.Sprintf("ticket.comment_edit: %s", strings.TrimSpace(stderr))}, nil
+	if code >= 300 {
+		return Result{Error: fmt.Sprintf("ticket.comment_edit: %s", githubAPIError(resp))}, nil
 	}
 	commentURL := commentID
-	var raw map[string]any
-	if err := json.Unmarshal([]byte(stdout), &raw); err == nil {
-		if url, _ := raw["html_url"].(string); strings.TrimSpace(url) != "" {
-			commentURL = url
-		}
+	if url, _ := raw["html_url"].(string); strings.TrimSpace(url) != "" {
+		commentURL = url
 	}
 	return Result{Data: map[string]any{
 		"ok":         true,
 		"comment_id": commentURL,
+		"url":        commentURL,
 	}}, nil
 }
 
@@ -528,7 +518,14 @@ func splitIssueCommentID(commentID string) (repo, id string) {
 	}
 	if marker := "#issuecomment-"; strings.Contains(commentID, marker) {
 		parts := strings.Split(commentID, marker)
-		return "", strings.TrimSpace(parts[len(parts)-1])
+		id = strings.TrimSpace(parts[len(parts)-1])
+		if u, err := url.Parse(commentID); err == nil && strings.EqualFold(u.Host, "github.com") {
+			pathParts := strings.Split(strings.Trim(u.Path, "/"), "/")
+			if len(pathParts) >= 2 {
+				repo = pathParts[0] + "/" + pathParts[1]
+			}
+		}
+		return repo, id
 	}
 	const apiPrefix = "/repos/"
 	if i := strings.Index(commentID, apiPrefix); i >= 0 {
