@@ -43,6 +43,7 @@ Start with the cheap gates before live capture:
 
 ```sh
 python3 tools/product-journey/run.py --validate-corpus --json-output
+python3 tools/product-journey/run.py --capture-preflight --json-output
 python3 tools/product-journey/run.py --driver-replay-sweep --seed demo --json-output
 GOCACHE=/private/tmp/kitsoki-gocache go run ./cmd/kitsoki test flows stories/product-journey-qa/app.yaml
 ```
@@ -123,6 +124,7 @@ When driving through Kitsoki itself, open `stories/product-journey-qa/app.yaml`.
 Useful intents:
 
 - `validate_corpus`
+- `capture_preflight`
 - `matrix seed=... matrix_personas=primary|all`
 - `driver_replay_smoke scenario=... persona=... seed=...`
 - `driver_replay_sweep persona=... seed=...`

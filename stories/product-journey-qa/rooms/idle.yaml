@@ -1,7 +1,7 @@
 states:
   idle:
     description: "Waiting to create a product-journey QA run bundle."
-    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, status]
+    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, status]
     view:
       - banner:
           text: "PRODUCT JOURNEY QA"
@@ -14,6 +14,7 @@ states:
             Seed: "{{ world.seed }}"
             Matrix personas: "{{ world.matrix_personas }}"
             Target proof: '{{ world.target_proof_file|default:"(not refreshed)" }}'
+            Capture preflight: '{{ world.capture_preflight_status|default:"(not checked)" }}'
             Corpus: '{{ world.corpus_validation_status|default:"(not checked)" }}'
             Status: "{{ world.status }}"
       - prose: "Create a no-LLM run bundle or a 10-repo GitHub matrix, then attach visual/MCP evidence as scenarios play out."
@@ -39,6 +40,9 @@ states:
             - label: "validate_corpus"
               hint: "preflight personas, scenarios, quality gates, and the GitHub target catalog"
               intent: validate_corpus
+            - label: "capture_preflight seed=..."
+              hint: "prove webshot/browser capture works before spending a live run"
+              intent: capture_preflight
             - label: "refresh_targets seed=..."
               hint: "write a GitHub target-proof artifact for bug-count and popularity floors"
               intent: refresh_targets
@@ -70,6 +74,38 @@ states:
               on_error: idle
             - set:
                 status: "corpus_validated"
+      capture_preflight:
+        - target: .
+          effects:
+            - set:
+                seed: "{{ slots.seed ?? world.seed }}"
+                capture_preflight_status: ""
+                capture_preflight_failed: 0
+                status: "capture_preflighting"
+            - invoke: host.run
+              id: capture_product_journey_preflight
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --capture-preflight
+                  - --json-output
+                  - --seed
+                  - "{{ slots.seed ?? world.seed }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                capture_preflight_status: "stdout_json.status"
+                capture_preflight_id: "stdout_json.preflight_id"
+                capture_preflight_dir: "stdout_json.preflight_dir"
+                capture_preflight_path: "stdout_json.preflight_path"
+                capture_preflight_markdown_path: "stdout_json.markdown_path"
+                capture_preflight_webshot_output: "stdout_json.webshot_output"
+                capture_preflight_passed: "stdout_json.passed"
+                capture_preflight_failed: "stdout_json.failed"
+              on_error: idle
+            - set:
+                status: "capture_preflight_checked"
       refresh_targets:
         - target: .
           effects:
