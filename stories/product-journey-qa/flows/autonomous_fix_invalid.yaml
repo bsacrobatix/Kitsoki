@@ -115,7 +115,6 @@ turns:
       name: autonomous_fix
       slots:
         ticket_repo: bsacrobatix/Kitsoki
-        gh_agent_db: .artifacts/product-journey/gh-agent-jobs.sqlite
         gh_agent_story: stories/bugfix
         gh_agent_public_base_url: https://agent.example
     expect_state: run_created

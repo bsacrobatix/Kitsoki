@@ -45,6 +45,8 @@ states:
             URL:    '{{ world.issue_url|default:"(none)" }}'
             Source: '{{ world.issue_source|default:"ticket provider" }}{% if world.issue_legacy_id %} (legacy {{ world.issue_legacy_id }}){% endif %}'
         when: "world.issue_id != ''"
+      - prose: "Issue warning: {{ world.issue_warning }}"
+        when: "world.issue_warning != ''"
       - prose: "Last operation failed: {{ world.last_op_output|default:'(no output)' }}"
         when: "world.last_op_ok == false"
       - choice:
@@ -70,6 +72,14 @@ states:
                 slot:        id
                 type:        string
                 placeholder: "issue id (e.g. 105)"
+                required:    true
+            - label: "issue_create"
+              hint:  "create an issue/ticket through the configured ticket provider"
+              intent: issue_create
+              param:
+                slot:        title
+                type:        string
+                placeholder: "issue title"
                 required:    true
             - { label: "undo",            hint: "undo the last commit",                                        intent: undo }
             - { label: "worktree_create", hint: "create a linked worktree under .worktrees/",                 intent: worktree_create }
@@ -170,6 +180,7 @@ states:
                 issue_source:    ""
                 issue_legacy_id: ""
                 issue_body:      ""
+                issue_warning:   ""
                 last_op_ok:      true
                 last_op_output:  ""
             - invoke: iface.ticket.get
@@ -184,6 +195,37 @@ states:
                 issue_legacy_id: legacy_id
                 issue_body:      body
               on_error: intercept
+      issue_create:
+        - when: "slots.title == nil || slots.title == ''"
+          target: .
+          guard_hint: "Provide title=<issue-title>."
+        - target: .
+          effects:
+            - set:
+                issue_id:        ""
+                issue_title:     "{{ slots.title }}"
+                issue_status:    ""
+                issue_url:       ""
+                issue_source:    ""
+                issue_legacy_id: ""
+                issue_body:      "{{ slots.body ?? '' }}"
+                issue_warning:   ""
+                last_op_ok:      true
+                last_op_output:  ""
+            - invoke: iface.ticket.create
+              with:
+                repo:   "{{ world.ticket_repo }}"
+                title:  "{{ slots.title }}"
+                body:   "{{ slots.body ?? '' }}"
+                labels: "{{ slots.labels ?? '' }}"
+              bind:
+                issue_id:      id
+                issue_url:     url
+                issue_warning: warning
+              on_error: intercept
+            - set:
+                issue_status: "created"
+                issue_source: "ticket provider"
       undo:
         - target: undo
       worktree_create:

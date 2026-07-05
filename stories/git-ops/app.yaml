@@ -24,6 +24,9 @@ host_interfaces:
   ticket:
     description: "Issue tracker abstraction (file / GitHub Issues / Jira)."
     operations:
+      create:
+        input:  { title: string, body: string, repo: string, labels: list }
+        output: { id: string, number: string, url: string, warning: string }
       get:
         input:  { id: string, repo: string }
         output: { id: string, title: string, body: string, status: string,
@@ -141,6 +144,7 @@ world:
   issue_source:             { type: string, default: "" }
   issue_legacy_id:          { type: string, default: "" }
   issue_body:               { type: string, default: "" }
+  issue_warning:            { type: string, default: "" }
 
 intents:
   # ── Routing (internal; emitted by on_enter) ─────────────────────────
@@ -222,6 +226,14 @@ intents:
     priority: 82
     slots:
       id: { type: string, required: false }
+  issue_create:
+    description: "Create an issue/ticket through the configured ticket provider."
+    examples: ["create issue", "file an issue", "open a ticket", "report issue", "make issue"]
+    priority: 82
+    slots:
+      title: { type: string, required: false }
+      body: { type: string, required: false }
+      labels: { type: string, required: false }
 
   commit:
     description: "Stage and commit changes with an agent-authored message."
