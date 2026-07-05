@@ -110,6 +110,79 @@ states:
 	}
 }
 
+// TestImports_RebasesWorkbenchAssetPaths proves imported workbench prompt and
+// acceptance_schema paths are rooted at the child story before workbench:
+// desugars them into a host.agent.task call. Without this, project-local
+// dev-story instances validate prompts/landing.md against the thin parent app
+// directory instead of the imported dev-story directory.
+func TestImports_RebasesWorkbenchAssetPaths(t *testing.T) {
+	root := t.TempDir()
+	parentDir := filepath.Join(root, "parent")
+	childDir := filepath.Join(root, "child")
+	mustMkdirAll(t, parentDir)
+	mustMkdirAll(t, filepath.Join(childDir, "prompts"))
+	mustMkdirAll(t, filepath.Join(childDir, "schemas"))
+	mustWriteFile(t, filepath.Join(childDir, "prompts", "bench.md"), "child bench prompt")
+	mustWriteFile(t, filepath.Join(childDir, "schemas", "out.json"), `{"type":"object"}`)
+
+	mustWriteFile(t, filepath.Join(parentDir, "app.yaml"), `
+app: {id: parent, title: parent}
+root: sub
+hosts: [host.agent.task]
+imports:
+  sub:
+    source: ../child
+    entry: bench
+    hosts: declared
+`)
+	mustWriteFile(t, filepath.Join(childDir, "app.yaml"), `
+app: {id: child, title: child}
+root: bench
+hosts: [host.agent.task]
+toolboxes:
+  builder_toolbox:
+    tools: [Read, Grep, Glob, Edit, Write, Bash]
+    effect: write
+states:
+  bench:
+    workbench:
+      agent: builder
+      prompt: prompts/bench.md
+      acceptance_schema: schemas/out.json
+agents:
+  builder:
+    system_prompt: build things
+    toolbox: builder_toolbox
+`)
+
+	def, err := Load(filepath.Join(parentDir, "app.yaml"))
+	if err != nil {
+		t.Fatalf("Load imported workbench app: %v", err)
+	}
+	bench := def.States["sub"].States["bench"]
+	if bench == nil {
+		t.Fatalf("imported workbench state not found")
+	}
+	var task *Effect
+	for i := range bench.OnEnter {
+		if bench.OnEnter[i].Invoke == "host.agent.task" {
+			task = &bench.OnEnter[i]
+			break
+		}
+	}
+	if task == nil {
+		t.Fatalf("imported workbench did not synthesize host.agent.task")
+	}
+	ctx := task.With["context"].(map[string]any)
+	if got, want := ctx["prompt"].(string), filepath.Join(childDir, "prompts", "bench.md"); got != want {
+		t.Fatalf("workbench prompt = %q, want child story path %q", got, want)
+	}
+	acc := task.With["acceptance"].(map[string]any)
+	if got, want := acc["schema"].(string), filepath.Join(childDir, "schemas", "out.json"); got != want {
+		t.Fatalf("workbench acceptance schema = %q, want child story path %q", got, want)
+	}
+}
+
 // TestImports_RebasesStarlarkScriptPath proves an imported child's
 // host.starlark.run script is resolved from the child story directory. This is
 // the Starlark counterpart to prompt/schema rebasing: generated project-owned
