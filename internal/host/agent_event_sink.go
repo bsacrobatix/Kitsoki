@@ -184,7 +184,8 @@ func AgentUsageFrom(ctx context.Context) map[string]any {
 
 // agentUsageMeta builds the AgentReturned.Meta map from the usage box in ctx,
 // or returns nil when no usage was recorded (so Meta stays omitempty). The
-// shape is {"usage": {…claude usage object…}, "cost_usd": <float>}.
+// shape is {"usage": {…claude usage object…}, "cache": {…CacheUsage…},
+// "cost_usd": <float>}.
 func agentUsageMeta(ctx context.Context) map[string]any {
 	b := agentUsageBoxFrom(ctx)
 	if b == nil {
@@ -198,11 +199,66 @@ func agentUsageMeta(ctx context.Context) map[string]any {
 	meta := map[string]any{}
 	if b.usage != nil {
 		meta["usage"] = b.usage
+		if cache := cacheUsageFromMap(b.usage); cache != nil {
+			meta["cache"] = cache
+		}
 	}
 	if b.cost != 0 {
 		meta["cost_usd"] = b.cost
 	}
 	return meta
+}
+
+// ── Cache-usage surfacing (dispatch-context-floor task 1.2) ─────────────────
+//
+// The claude CLI's stream-json `result` event already reports
+// cache_read_input_tokens / cache_creation_input_tokens (parsed in
+// agent_runner.go and stashed into the usage box above), so the raw numbers
+// already reach agent.call.complete inside Meta.usage. What was missing —
+// per the dispatch-context-floor spike (.context/2026-07-05-s3-spike-cache-fields.md)
+// — was a named, typed surface mirroring internal/harness/live.go's
+// UsageInfo (CacheReadTokens / CacheCreateTokens / CacheHit), the same shape
+// LiveHarness already logs for routing calls, so a trace consumer doesn't
+// have to know the claude-CLI-specific snake_case key names to compute
+// cache-hit visibility for host.agent.* dispatch.
+
+// CacheUsage is the named cache-usage surface for a single agent host-call,
+// derived from the claude CLI's reported usage object. Hit is true only when
+// this call actually read from the cache; a call that merely wrote a new
+// cache-eligible prefix (CreationTokens > 0, ReadTokens == 0 — e.g. the very
+// first call after a prompt-shape change) is a cache miss, not a hit.
+type CacheUsage struct {
+	ReadTokens     int64 `json:"read_tokens"`
+	CreationTokens int64 `json:"creation_tokens"`
+	Hit            bool  `json:"hit"`
+}
+
+// cacheUsageFromMap derives a CacheUsage from the raw usage map the claude CLI
+// transport recorded (recordAgentUsage), or nil when the map carries neither
+// cache key — e.g. a transport that reports no cache accounting at all (the
+// copilot path, per mergeOutputTokens above) — so Meta.cache stays omitted
+// rather than falsely reporting an all-zero cache result for a transport that
+// never measured caching in the first place.
+func cacheUsageFromMap(usage map[string]any) *CacheUsage {
+	if usage == nil {
+		return nil
+	}
+	_, hasRead := usage["cache_read_input_tokens"]
+	_, hasCreate := usage["cache_creation_input_tokens"]
+	if !hasRead && !hasCreate {
+		return nil
+	}
+	// usageInt64 (quota_control.go) already extracts an integer usage field
+	// from a raw usage map, tolerating both the float64 shape json.Unmarshal
+	// produces and a plain int/int64 a test or in-process caller might
+	// construct directly — reused here rather than duplicated.
+	read := usageInt64(usage, "cache_read_input_tokens")
+	create := usageInt64(usage, "cache_creation_input_tokens")
+	return &CacheUsage{
+		ReadTokens:     read,
+		CreationTokens: create,
+		Hit:            read > 0,
+	}
 }
 
 // ── EventSink context plumbing ────────────────────────────────────────────────
