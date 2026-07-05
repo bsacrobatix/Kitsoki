@@ -2897,6 +2897,7 @@ def run_story_summary(run_dir: Path) -> dict:
     agent_brief = read_json(run_dir / "agent-brief.json") if (run_dir / "agent-brief.json").exists() else {}
     review = read_json(run_dir / "review.json") if (run_dir / "review.json").exists() else {}
     finding_summary = findings.get("summary", {})
+    gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
     lens = agent_brief.get("persona_contract", {}).get("lens", {})
     missing_proof_rows = handoff.get("missing_proof_evidence", [])
     missing_proof_summary = []
@@ -2948,6 +2949,16 @@ def run_story_summary(run_dir: Path) -> dict:
         "review_warning_count": review.get("summary_counts", {}).get("warned", 0),
         "review_total_count": review.get("summary_counts", {}).get("total", 0),
         "review_backlog_summary": "; ".join(review_backlog),
+        "gh_agent_enqueue_status": gh_agent.get("enqueue_status", ""),
+        "gh_agent_enqueued_count": gh_agent.get("enqueued_count", 0),
+        "gh_agent_skipped_count": gh_agent.get("skipped_count", 0),
+        "gh_agent_job_summary": gh_agent.get("job_summary", ""),
+        "gh_agent_drain_status": gh_agent.get("drain_status", ""),
+        "gh_agent_drained_count": gh_agent.get("drained_count", 0),
+        "gh_agent_done_count": gh_agent.get("done_count", 0),
+        "gh_agent_failed_count": gh_agent.get("failed_count", 0),
+        "gh_agent_active_count": gh_agent.get("active_count", 0),
+        "gh_agent_run_summary": gh_agent.get("run_summary", ""),
     }
 
 
@@ -3156,6 +3167,84 @@ def enqueue_gh_agent_fixes(run_dir: Path, ticket_repo: str, db_path: str, story:
     }
 
 
+def drain_gh_agent_fixes(
+    db_path: str,
+    repo: str,
+    public_base_url: str,
+    project_root: str,
+    incident_repo: str,
+) -> dict:
+    if not db_path:
+        return {
+            "gh_agent_drain_status": "disabled",
+            "gh_agent_drained_count": 0,
+            "gh_agent_done_count": 0,
+            "gh_agent_failed_count": 0,
+            "gh_agent_active_count": 0,
+            "gh_agent_run_summary": "",
+            "gh_agent_drained_jobs": [],
+        }
+    cmd = kitsoki_cli_command() + [
+        "gh-agent", "drain",
+        "--db", db_path,
+        "--repo", repo,
+        "--json",
+    ]
+    if public_base_url:
+        cmd += ["--public-base-url", public_base_url]
+    if project_root:
+        cmd += ["--project-root", project_root]
+    if incident_repo:
+        cmd += ["--incident-repo", incident_repo]
+    proc = shell(cmd, ROOT)
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip()
+        raise SystemExit(f"kitsoki gh-agent drain failed (exit {proc.returncode}): {detail}")
+    try:
+        drained = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"kitsoki gh-agent drain printed invalid JSON ({exc}): {proc.stdout[:400]}")
+    jobs = drained.get("jobs", [])
+    summary_parts = []
+    for job in jobs[:5]:
+        origin = job.get("origin_ref", "")
+        state = job.get("state", "")
+        run_url = job.get("run_url", "")
+        summary_parts.append(f"{origin}={state}{' ' + run_url if run_url else ''}".strip())
+    if len(jobs) > 5:
+        summary_parts.append(f"+{len(jobs) - 5} more")
+    return {
+        "gh_agent_drain_status": drained.get("status", "unknown"),
+        "gh_agent_drained_count": int(drained.get("drained_count", 0)),
+        "gh_agent_done_count": int(drained.get("done_count", 0)),
+        "gh_agent_failed_count": int(drained.get("failed_count", 0)),
+        "gh_agent_active_count": int(drained.get("active_count", 0)),
+        "gh_agent_run_summary": "; ".join(summary_parts),
+        "gh_agent_drained_jobs": jobs,
+    }
+
+
+def record_gh_agent_findings_status(run_dir: Path, status: dict) -> None:
+    findings_path = run_dir / "findings.json"
+    findings = read_json(findings_path)
+    findings["gh_agent"] = {
+        "updated_at": now_utc(),
+        "enqueue_status": status.get("gh_agent_enqueue_status", "disabled"),
+        "enqueued_count": status.get("gh_agent_enqueued_count", 0),
+        "skipped_count": status.get("gh_agent_skipped_count", 0),
+        "job_summary": status.get("gh_agent_job_summary", ""),
+        "jobs": status.get("gh_agent_jobs", []),
+        "drain_status": status.get("gh_agent_drain_status", "disabled"),
+        "drained_count": status.get("gh_agent_drained_count", 0),
+        "done_count": status.get("gh_agent_done_count", 0),
+        "failed_count": status.get("gh_agent_failed_count", 0),
+        "active_count": status.get("gh_agent_active_count", 0),
+        "run_summary": status.get("gh_agent_run_summary", ""),
+        "drained_jobs": status.get("gh_agent_drained_jobs", []),
+    }
+    write_json(findings_path, findings)
+
+
 def file_findings(
     run_dir: Path,
     ticket_repo: str,
@@ -3163,6 +3252,10 @@ def file_findings(
     publish_deck: Optional[Path],
     gh_agent_db: str = "",
     gh_agent_story: str = "stories/bugfix",
+    gh_agent_drain: bool = False,
+    gh_agent_public_base_url: str = "",
+    gh_agent_project_root: str = "",
+    gh_agent_incident_repo: str = "",
 ) -> dict:
     """File the bundle's credible issue findings as GitHub issues.
 
@@ -3244,6 +3337,25 @@ def file_findings(
     }
     if not dry_run and gh_agent_db:
         result.update(enqueue_gh_agent_fixes(run_dir, ticket_repo, gh_agent_db, gh_agent_story))
+        if gh_agent_drain:
+            result.update(drain_gh_agent_fixes(
+                gh_agent_db,
+                ticket_repo,
+                gh_agent_public_base_url,
+                gh_agent_project_root,
+                gh_agent_incident_repo,
+            ))
+        else:
+            result.update({
+                "gh_agent_drain_status": "not_requested",
+                "gh_agent_drained_count": 0,
+                "gh_agent_done_count": 0,
+                "gh_agent_failed_count": 0,
+                "gh_agent_active_count": 0,
+                "gh_agent_run_summary": "",
+                "gh_agent_drained_jobs": [],
+            })
+        record_gh_agent_findings_status(run_dir, result)
     else:
         result.update({
             "gh_agent_enqueue_status": "disabled" if not gh_agent_db else "dry-run",
@@ -3251,6 +3363,13 @@ def file_findings(
             "gh_agent_skipped_count": 0,
             "gh_agent_job_summary": "",
             "gh_agent_jobs": [],
+            "gh_agent_drain_status": "disabled" if not gh_agent_db else "dry-run",
+            "gh_agent_drained_count": 0,
+            "gh_agent_done_count": 0,
+            "gh_agent_failed_count": 0,
+            "gh_agent_active_count": 0,
+            "gh_agent_run_summary": "",
+            "gh_agent_drained_jobs": [],
         })
     result.update(run_story_summary(run_dir))
     return result
@@ -3684,6 +3803,23 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     filing_requested = bool(findings.get("filing", {}).get("requested"))
     credible_findings = credible_issue_findings(findings)
     unfiled_credible = unfiled_credible_findings(findings)
+    gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
+    gh_agent_requested = gh_agent.get("enqueue_status", "") not in {"", "disabled", "dry-run"}
+    gh_agent_enqueued = int(gh_agent.get("enqueued_count", 0) or 0)
+    gh_agent_done = int(gh_agent.get("done_count", 0) or 0)
+    gh_agent_failed = int(gh_agent.get("failed_count", 0) or 0)
+    gh_agent_active = int(gh_agent.get("active_count", 0) or 0)
+    gh_agent_drain_status = gh_agent.get("drain_status", "")
+    gh_agent_fix_complete = (
+        not gh_agent_requested
+        or gh_agent_enqueued == 0
+        or (
+            gh_agent_drain_status == "drained"
+            and gh_agent_failed == 0
+            and gh_agent_active == 0
+            and gh_agent_done >= gh_agent_enqueued
+        )
+    )
 
     checks = [
         {
@@ -3815,6 +3951,16 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
                     if filing_requested
                     else "filing not requested"
                 )
+            ),
+        },
+        {
+            "id": "gh-agent-fixes",
+            "status": "pass" if gh_agent_fix_complete else "fail",
+            "summary": "When gh-agent fixing was requested, queued fix jobs drain to reviewable terminal runs.",
+            "detail": (
+                "gh-agent fixing not requested"
+                if not gh_agent_requested
+                else f"enqueue={gh_agent.get('enqueue_status', '')}, drain={gh_agent_drain_status}, enqueued={gh_agent_enqueued}, done={gh_agent_done}, failed={gh_agent_failed}, active={gh_agent_active}; {gh_agent.get('run_summary', '')}"
             ),
         },
         {
@@ -7230,6 +7376,10 @@ def main() -> None:
     parser.add_argument("--ticket-repo", default="", help="owner/repo GitHub target for --file-findings")
     parser.add_argument("--gh-agent-db", default="", help="With --file-findings, enqueue filed issues into this gh-agent SQLite job DB")
     parser.add_argument("--gh-agent-story", default="stories/bugfix", help="Story path to queue for filed issue fixes when --gh-agent-db is set")
+    parser.add_argument("--gh-agent-drain", action="store_true", help="With --file-findings and --gh-agent-db, immediately drain queued gh-agent fixes")
+    parser.add_argument("--gh-agent-public-base-url", default="", help="Public gh-agent base URL used when draining queued fixes")
+    parser.add_argument("--gh-agent-project-root", default="", help="Local checkout root used by gh-agent drain for onboarded target repos")
+    parser.add_argument("--gh-agent-incident-repo", default="", help="Repo for gh-agent incident tickets during drain; defaults to --ticket-repo")
     parser.add_argument("--dry-run", action="store_true", help="With --file-findings, render what would be filed without calling GitHub")
     parser.add_argument(
         "--filing-mode",
@@ -7652,6 +7802,10 @@ def main() -> None:
             publish_deck,
             args.gh_agent_db,
             args.gh_agent_story,
+            args.gh_agent_drain,
+            args.gh_agent_public_base_url,
+            args.gh_agent_project_root,
+            args.gh_agent_incident_repo,
         )
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
@@ -7673,6 +7827,13 @@ def main() -> None:
                 f"{result['gh_agent_enqueue_status']} "
                 f"({result['gh_agent_enqueued_count']} queued, "
                 f"{result['gh_agent_skipped_count']} skipped)"
+            )
+            print(
+                "GH-agent drain: "
+                f"{result['gh_agent_drain_status']} "
+                f"({result['gh_agent_done_count']} done, "
+                f"{result['gh_agent_failed_count']} failed, "
+                f"{result['gh_agent_active_count']} active)"
             )
         append_log(f"Filed findings for {run_dir.name}: {result['filing_summary']}")
         return

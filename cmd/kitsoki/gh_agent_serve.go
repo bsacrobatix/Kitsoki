@@ -292,6 +292,9 @@ func runGHAgentPollLoop(ctx context.Context, store *jobs.GHJobStore, opts ghAgen
 
 func runGHAgentPollOnce(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) error {
 	return withGHAgentAuth(ctx, opts, func(authedCtx context.Context) error {
+		if _, err := drainQueuedGHAgentJobs(authedCtx, store, opts); err != nil {
+			return err
+		}
 		items, err := pollInboxItems(authedCtx, opts.Repo, "")
 		if err != nil {
 			return err
@@ -330,23 +333,32 @@ func runGHAgentDrainLoop(ctx context.Context, store *jobs.GHJobStore, opts ghAge
 
 func runGHAgentDrainOnce(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) error {
 	return withGHAgentAuth(ctx, opts, func(authedCtx context.Context) error {
-		return drainQueuedGHAgentJobs(authedCtx, store, opts)
+		_, err := drainQueuedGHAgentJobs(authedCtx, store, opts)
+		return err
 	})
 }
 
-func drainQueuedGHAgentJobs(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) error {
+func drainQueuedGHAgentJobs(ctx context.Context, store *jobs.GHJobStore, opts ghAgentServeOptions) ([]*jobs.GHJob, error) {
 	queued, err := store.ListQueued(ctx, 20)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	drained := make([]*jobs.GHJob, 0, len(queued))
 	for _, job := range queued {
 		mention := mentionFromQueuedJob(job, opts.Trigger)
 		labels := labelsFromQueuedJob(job)
-		if _, err := ghAgentDispatchMention(ctx, store, opts, mention, labels); err != nil {
+		drainedJob, err := ghAgentDispatchMention(ctx, store, opts, mention, labels)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "gh-agent: queued dispatch %s: %v\n", job.OriginRef, err)
 		}
+		if drainedJob == nil {
+			drainedJob, _ = store.GetJob(ctx, job.JobID)
+		}
+		if drainedJob != nil {
+			drained = append(drained, drainedJob)
+		}
 	}
-	return nil
+	return drained, nil
 }
 
 func mentionFromQueuedJob(job *jobs.GHJob, trigger string) ghagent.Mention {
