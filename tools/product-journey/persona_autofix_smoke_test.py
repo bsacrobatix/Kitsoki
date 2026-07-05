@@ -136,6 +136,7 @@ def main() -> int:
         ]
         report_path = Path(result.get("autonomous_fix_report_path", ""))
         report_text = report_path.read_text(encoding="utf-8") if report_path.exists() else ""
+        claim_comment_url = result.get("gh_agent_claims", [{}])[0].get("comment_url", "")
         closeout_comment_url = result.get("issue_closeouts", [{}])[0].get("comment_url", "")
         deck = run.read_json(run_dir / "deck.slidey.json")
         gh_scene = next(
@@ -174,6 +175,12 @@ def main() -> int:
               and "fix-report.md" in report_text
               and "independent-verify.md" in report_text,
               failures)
+        check("human report links gh-agent claim evidence",
+              result.get("gh_agent_claim_status") == "claimed"
+              and claim_comment_url
+              and claim_comment_url in report_text
+              and "Claims: `claimed`" in report_text,
+              failures)
         check("review deck links issue, run, report, fix evidence, and independent verification",
               "https://github.com/o/r/issues/" in gh_scene_body
               and "https://agent.example/run/job-" in gh_scene_body
@@ -181,6 +188,12 @@ def main() -> int:
               and "fix-report.md" in gh_scene_body
               and "independent_verify=" in gh_scene_body
               and "independent-verify.md" in gh_scene_body,
+              failures)
+        check("review deck links gh-agent claim evidence",
+              result.get("gh_agent_claim_status") == "claimed"
+              and claim_comment_url
+              and claim_comment_url in gh_scene_body
+              and "Claims: claimed" in gh_scene_body,
               failures)
         check("review deck links issue close-out evidence",
               result.get("issue_closeout_status") == "closed"
@@ -198,6 +211,7 @@ def main() -> int:
             "autonomous_fix_report_path": str(report_path),
             "filed_issue_count": result.get("findings_filed_count", 0),
             "gh_agent_done_count": result.get("gh_agent_done_count", 0),
+            "gh_agent_claim_comment_url": claim_comment_url,
             "gh_agent_independent_verify_count": result.get("gh_agent_independent_verify_count", 0),
             "issue_closeout_status": result.get("issue_closeout_status", ""),
             "issue_closeout_comment_url": closeout_comment_url,

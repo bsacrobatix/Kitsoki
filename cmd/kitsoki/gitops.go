@@ -904,6 +904,17 @@ func writeGitopsAutonomousReport(runDir string, status, review, validation map[s
 		fmt.Sprintf("- Drain: `%s` (drained %d, done %d, failed %d, active %d)", stringValue(status, "gh_agent_drain_status"), intValue(status, "gh_agent_drained_count"), intValue(status, "gh_agent_done_count"), intValue(status, "gh_agent_failed_count"), intValue(status, "gh_agent_active_count")),
 		"",
 	)
+	claimsOut := mapSliceValue(status, "gh_agent_claims")
+	if len(claimsOut) > 0 {
+		lines = append(lines,
+			"### Claims",
+			"",
+		)
+		for _, claim := range claimsOut {
+			lines = append(lines, fmt.Sprintf("- %s — %s", firstNonBlank(stringValue(claim, "issue_url"), stringValue(claim, "repo")+"#"+stringValue(claim, "number")), firstNonBlank(stringValue(claim, "comment_url"), "(missing)")))
+		}
+		lines = append(lines, "")
+	}
 	jobsOut := mapSliceValue(status, "gh_agent_drained_jobs")
 	if len(jobsOut) == 0 {
 		lines = append(lines, "- (none)")

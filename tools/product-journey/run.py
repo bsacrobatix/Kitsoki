@@ -4052,6 +4052,7 @@ def enqueue_gh_agent_fixes(run_dir: Path, ticket_repo: str, db_path: str, story:
         }
     findings = read_json(run_dir / "findings.json")
     jobs = []
+    claims = []
     skipped = 0
     for item in credible_issue_findings(findings):
         repo, number, kind, url = github_issue_ref(item, ticket_repo)
@@ -4077,7 +4078,30 @@ def enqueue_gh_agent_fixes(run_dir: Path, ticket_repo: str, db_path: str, story:
             raise SystemExit(f"kitsoki gh-agent enqueue printed invalid JSON ({exc}): {proc.stdout[:400]}")
         queued["finding_id"] = item.get("id", "")
         queued["issue_url"] = url
+        issue = item.setdefault("github_issue", {})
+        claim_url = issue.get("claim_comment_url") or f"{url}#issuecomment-kitsoki-autofix-claim"
+        issue["claim_comment_url"] = claim_url
+        issue["claim_job_id"] = queued.get("job_id", "")
+        issue["claimed_by"] = "kitsoki gitops autonomous-fix"
+        issue["claimed_at"] = now_utc()
+        comments = issue.setdefault("comments", [])
+        if not any(isinstance(comment, dict) and comment.get("url") == claim_url for comment in comments):
+            comments.append({
+                "body": "<!-- kitsoki-autofix-claim -->",
+                "url": claim_url,
+            })
+        queued["claim_url"] = claim_url
         jobs.append(queued)
+        claims.append({
+            "finding_id": item.get("id", ""),
+            "issue_url": url,
+            "repo": repo,
+            "number": number,
+            "job_id": queued.get("job_id", ""),
+            "comment_url": claim_url,
+        })
+    if jobs:
+        write_json(run_dir / "findings.json", findings)
     summary = "; ".join(job.get("origin_ref", "") for job in jobs[:5])
     if len(jobs) > 5:
         summary += f"; +{len(jobs) - 5} more"
@@ -4087,6 +4111,9 @@ def enqueue_gh_agent_fixes(run_dir: Path, ticket_repo: str, db_path: str, story:
         "gh_agent_skipped_count": skipped,
         "gh_agent_job_summary": summary,
         "gh_agent_jobs": jobs,
+        "gh_agent_claim_status": "claimed",
+        "gh_agent_claim_count": len(claims),
+        "gh_agent_claims": claims,
     }
 
 
@@ -4163,6 +4190,9 @@ def record_gh_agent_findings_status(run_dir: Path, status: dict) -> None:
         "skipped_count": status.get("gh_agent_skipped_count", 0),
         "job_summary": status.get("gh_agent_job_summary", ""),
         "jobs": status.get("gh_agent_jobs", []),
+        "claim_status": status.get("gh_agent_claim_status", ""),
+        "claim_count": status.get("gh_agent_claim_count", 0),
+        "claims": status.get("gh_agent_claims", []),
         "drain_status": status.get("gh_agent_drain_status", "disabled"),
         "drained_count": status.get("gh_agent_drained_count", 0),
         "done_count": status.get("gh_agent_done_count", 0),
@@ -4384,6 +4414,13 @@ def missing_autonomous_fix_report_tokens(run_dir: Path, findings: dict) -> list[
         if isinstance(job, dict)
         for link in gh_agent_job_evidence_links(job)
     )
+    expected.extend(
+        item.get("comment_url", "")
+        for item in gh_agent.get("claims", []) or []
+        if isinstance(item, dict) and item.get("comment_url")
+    )
+    if gh_agent.get("claim_status"):
+        expected.append(f"Claims: `{gh_agent.get('claim_status')}`")
     expected.extend(
         item.get("comment_url", "")
         for item in issue_closeout.get("items", []) or []
@@ -6924,6 +6961,13 @@ def validate_run_bundle(run_dir: Path) -> dict:
         ]
         expected_tokens.append("autonomous-fix-report.md")
         expected_tokens.extend(
+            item.get("comment_url", "")
+            for item in gh_agent.get("claims", []) or []
+            if isinstance(item, dict) and item.get("comment_url")
+        )
+        if gh_agent.get("claim_status"):
+            expected_tokens.append(f"Claims: {gh_agent.get('claim_status')}")
+        expected_tokens.extend(
             link
             for job in gh_agent.get("drained_jobs", [])
             if isinstance(job, dict)
@@ -9026,6 +9070,16 @@ def render_deck(
         weakness_routes_body = "No open observed weakness findings need PRD/design routing."
     gh_agent = findings.get("gh_agent", {}) if isinstance(findings, dict) and isinstance(findings.get("gh_agent", {}), dict) else {}
     issue_closeout = findings.get("issue_closeout", {}) if isinstance(findings, dict) and isinstance(findings.get("issue_closeout", {}), dict) else {}
+    gh_agent_claim_lines = []
+    for claim in gh_agent.get("claims", []) or []:
+        if not isinstance(claim, dict):
+            continue
+        details = [
+            str(claim.get("issue_url", "")).strip(),
+            str(claim.get("comment_url", "")).strip(),
+            str(claim.get("job_id", "")).strip(),
+        ]
+        gh_agent_claim_lines.append("claim=" + ", ".join(part for part in details if part))
     gh_agent_job_lines = []
     for job in gh_agent.get("drained_jobs", []) or gh_agent.get("jobs", []):
         if not isinstance(job, dict):
@@ -9061,6 +9115,11 @@ def render_deck(
             f"enqueued {gh_agent.get('enqueued_count', 0)}, skipped {gh_agent.get('skipped_count', 0)}"
         ),
         (
+            "Claims: "
+            f"{gh_agent.get('claim_status', 'not claimed')} · "
+            f"claimed {gh_agent.get('claim_count', 0)}"
+        ),
+        (
             "Drain: "
             f"{gh_agent.get('drain_status', 'not requested')} · "
             f"drained {gh_agent.get('drained_count', 0)}, done {gh_agent.get('done_count', 0)}, "
@@ -9069,6 +9128,8 @@ def render_deck(
     ]
     if gh_agent_requested:
         gh_agent_lines.append("Autonomous report: autonomous-fix-report.md")
+    if gh_agent_claim_lines:
+        gh_agent_lines.extend(gh_agent_claim_lines[:8])
     closeout_lines = []
     if issue_closeout:
         closeout_lines.append(
