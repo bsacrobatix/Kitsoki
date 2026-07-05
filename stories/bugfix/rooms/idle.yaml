@@ -198,6 +198,8 @@ states:
           bf_autostart_attempted: true
     on:
       start:
+        - when: "world.ticket_id == ''"
+          target: "@exit:pick_ticket"
         - target: reproducing
       # NL ticket-id handoff — see the work_ticket intent doc in ../app.yaml.
       # Re-targets idle EXPLICITLY (not `.`) so on_enter re-fires with
@@ -213,6 +215,8 @@ states:
       # also pins bugfix_mode=full so a previously-set quick flag is
       # cleared. Autonomous callers prefer this for unambiguity.
       full_pipeline:
+        - when: "world.ticket_id == ''"
+          target: "@exit:pick_ticket"
         - target: reproducing
           effects:
             - set:
@@ -222,6 +226,8 @@ states:
       # done_executing instead. Still walks reproducing → proposing →
       # implementing → testing so the artifact chain has a body.
       quick_fix:
+        - when: "world.ticket_id == ''"
+          target: "@exit:pick_ticket"
         - target: reproducing
           effects:
             - set:
@@ -230,6 +236,8 @@ states:
       # worktree, no fix. Pins bugfix_mode=triage (the idle autostart guard and
       # the triaging room read it) and enters the triaging room.
       triage:
+        - when: "world.ticket_id == ''"
+          target: "@exit:pick_ticket"
         - target: triaging
           effects:
             - set:
@@ -239,6 +247,8 @@ states:
       # the value "validate" for audit. Use when the operator already
       # has the fix in hand and just wants to re-validate / open the PR.
       skip_to_pr:
+        - when: "world.ticket_id == ''"
+          target: "@exit:pick_ticket"
         - target: validating
           effects:
             - set:
