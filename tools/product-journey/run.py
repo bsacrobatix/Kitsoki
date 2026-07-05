@@ -1394,6 +1394,7 @@ def validate_autonomous_workflow_docs(issues: list[dict]) -> None:
         required_tokens = [
             "autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<url>",
             "story-owned",
+            "kitsoki gitops autonomous-fix",
             "gh-agent",
         ]
         missing = [token for token in required_tokens if token not in text]
@@ -1430,6 +1431,9 @@ def validate_autonomous_workflow_docs(issues: list[dict]) -> None:
         return
     room_text = run_created_room.read_text(encoding="utf-8")
     autonomous_label = "autonomous_fix ticket_repo=owner/repo gh_agent_public_base_url=<url>"
+    gitops_facade = "gitops"
+    gitops_command = "autonomous-fix"
+    report_bind = 'autonomous_fix_report_path: "stdout_json.autonomous_fix_report_path"'
     file_label = "file_findings ticket_repo=owner/repo"
     if autonomous_label not in room_text:
         add_corpus_issue(
@@ -1437,6 +1441,22 @@ def validate_autonomous_workflow_docs(issues: list[dict]) -> None:
             "error",
             "autonomous-workflow-docs",
             "Product journey run view does not expose autonomous_fix as the full-loop action",
+            run_created_room.relative_to(ROOT).as_posix(),
+        )
+    if gitops_facade not in room_text or gitops_command not in room_text:
+        add_corpus_issue(
+            issues,
+            "error",
+            "autonomous-workflow-docs",
+            "Product journey autonomous fix must invoke the native gitops facade, not runner plumbing",
+            run_created_room.relative_to(ROOT).as_posix(),
+        )
+    if report_bind not in room_text or "Autonomous report" not in room_text:
+        add_corpus_issue(
+            issues,
+            "error",
+            "autonomous-workflow-docs",
+            "Product journey run view must bind and surface the autonomous-fix report artifact",
             run_created_room.relative_to(ROOT).as_posix(),
         )
     if file_label in room_text and autonomous_label in room_text and room_text.index(file_label) < room_text.index(autonomous_label):
@@ -2250,11 +2270,12 @@ def render_scenario_outcomes(outcomes: dict) -> str:
 
 def autonomous_fix_cli_command(run_dir_arg: str) -> str:
     return (
-        "python3 tools/product-journey/run.py --autonomous-fix-loop "
+        "go run ./cmd/kitsoki gitops autonomous-fix --json "
+        "--report-invalid-autonomous-fix "
         f"--run-dir {run_dir_arg} "
         "--ticket-repo <owner/repo> "
-        f"--gh-agent-db {run_dir_arg}/gh-agent-jobs.sqlite "
-        "--gh-agent-public-base-url <public-gh-agent-url>"
+        f"--agent-db {run_dir_arg}/gh-agent-jobs.sqlite "
+        "--public-base-url <public-gh-agent-url>"
     )
 
 

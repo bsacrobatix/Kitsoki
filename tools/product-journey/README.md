@@ -377,8 +377,9 @@ autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<url>
 That single intent files every credible `issue` finding as a GitHub issue with
 uploaded evidence, enqueues and drains native gh-agent repair jobs, refreshes
 the review/deck artifacts, and validates the bundle. Under the story boundary
-it uses the same artifact-preserving orchestration as the web Report-bug and
-TUI `/bug` surfaces: `kitsoki bug file-findings`
+it calls the native `kitsoki gitops autonomous-fix` facade, which uses the same
+artifact-preserving orchestration as the web Report-bug and TUI `/bug`
+surfaces: `kitsoki bug file-findings`
 (host.GitHubFileFindings) walks `findings.json` and, for every credible finding
 (kind `issue`, origin not `seeded`) without a recorded issue, assembles an
 expected/actual/reproduction body from the finding, the driver-plan scenario

@@ -6,7 +6,7 @@ Run directly:  python3 tools/product-journey/file_findings_test.py
 Body assembly and the real GitHub orchestration live in Go
 (host.GitHubFileFindings, unit-tested in internal/host/github_findings_test.go
 with a stubbed gh runner). This test covers the runner side with a fake
-KITSOKI_BIN so nothing calls go, gh, GitHub, or an LLM:
+KITSOKI_BIN so nothing calls gh, GitHub, or an LLM:
 
   1. dry-run leaves the bundle untouched and reports candidates,
   2. filing records issue URLs + the filing block and refreshes derived
@@ -21,6 +21,7 @@ import importlib.util
 import json
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -435,6 +436,37 @@ def main():
                and "https://agent.example/run/job-1" in report_text
                and "https://agent.example/run/job-1/artifacts/fix-report.md" in report_text)
         _check("autonomous loop reviewed and validated", result["review_total_count"] == 26 and result["validation_status"] == "valid")
+
+        run_dir_facade, run_json_facade = run.build_run_bundle(
+            catalog, run.load_github_targets(run.GITHUB_TARGETS),
+            personas, stable_scenarios, "vscode", "", "gitops-facade-test", "dry-run", None,
+        )
+        scenario_facade = run_json_facade["scenarios"][0]["id"]
+        attach_bugfix_proof(run_dir_facade, scenario_facade)
+        run.record_finding(run_dir_facade, "issue", "gitops facade credible", "observed problem",
+                           scenario_facade, "high", "", "open", None)
+        facade_proc = subprocess.run(
+            [
+                "go", "run", "./cmd/kitsoki", "gitops", "autonomous-fix",
+                "--json",
+                "--report-invalid-autonomous-fix",
+                "--run-dir", str(run_dir_facade),
+                "--ticket-repo", "o/r",
+                "--agent-db", str(tmp / "gh-agent-autonomous-facade.json"),
+                "--public-base-url", "https://agent.example",
+            ],
+            cwd=run.ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        _check("gitops autonomous-fix facade exits cleanly",
+               facade_proc.returncode == 0)
+        facade_result = json.loads(facade_proc.stdout)
+        _check("gitops autonomous-fix facade validates bundle",
+               facade_result["autonomous_fix_status"] == "autonomous_fix_valid")
+        _check("gitops autonomous-fix facade writes report",
+               Path(facade_result["autonomous_fix_report_path"]).exists())
         report.unlink()
         reviewed_missing_report = run.review_run_bundle(run_dir2, None)
         _check("review fails missing autonomous report",
