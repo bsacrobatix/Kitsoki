@@ -291,6 +291,9 @@ catalog:
       - id: source-graph-grouping-projections-proposal
         kind: proposal
         path: docs/proposals/graph-grouping-projections.md
+      - id: source-object-graph-ui-declutter-and-diff-mode-proposal
+        kind: proposal
+        path: docs/proposals/project-object-graph/ui-declutter-and-diff-mode.md
 
 type_registry:
   - id: core-node
@@ -8109,6 +8112,97 @@ nodes:
       proposes: []
       creates_requirements: []
       creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/requirement/v0
+    id: req-object-graph-layer-bar-no-scroll
+    title: The catalog layer bar must not require horizontal scrolling at desktop width
+    status: draft
+    visibility: internal
+    statement: The object-graph catalog's layer summary bar (Actors/Site/Capabilities/Delta/Proof) must lay out its fixed, small set of layers within the desktop viewport without overflow-x scrolling, even as per-layer type and lifecycle counts grow.
+    rationale: The layer bar duplicates type counts already shown in the object picker's type-filter row and grew an overflow-x:auto scroll track as layers/types accumulated, making the primary catalog surface feel busy and hiding chips off-screen.
+    sources:
+      - source-object-graph-ui-declutter-and-diff-mode-proposal
+    edges:
+      required_by:
+        - feature-graph-viewer
+      motivated_by:
+        - usecase-pm-scans-roadmap-delta
+      verified_by: []
+
+  - schema: graph/requirement/v0
+    id: req-object-graph-diff-mode-visual-affordances
+    title: Diff mode must visually distinguish added, modified, and removed nodes
+    status: draft
+    visibility: internal
+    statement: A current-vs-proposed view of the catalog must render every gapped node with a distinct added/modified/removed affordance (color, badge, and gutter glyph), both in the catalog list and the full-graph modal, reusing the existing WorldDiffViewer color language rather than inventing a second one.
+    rationale: The backend gap classification (internal/graph/diff.go, W4.0) has existed since the roadmap-as-delta slice shipped but has no UI; without visual affordances a reviewer has no way to see what a proposal changes short of reading two YAML files by hand.
+    sources:
+      - source-object-graph-ui-declutter-and-diff-mode-proposal
+    edges:
+      required_by:
+        - feature-graph-viewer
+      motivated_by:
+        - usecase-reviewer-scans-proposal-diff
+      verified_by: []
+
+  - schema: graph/requirement/v0
+    id: req-object-graph-persona-qa-stays-local
+    title: Persona-lensed usability findings on the object-graph UI stay local
+    status: draft
+    visibility: internal
+    statement: Persona-driven usability review of the object-graph catalog UI must write only to local .artifacts/.context paths — no GitHub issue filing, no deck upload, no network calls beyond what the reviewed kitsoki web server itself needs.
+    rationale: kitsoki-ui-review is already local-only by construction; this requirement pins that property for the object-graph surface specifically so a future change to the review pipeline can't silently add a filing/upload step for this dogfood loop.
+    sources:
+      - source-object-graph-ui-declutter-and-diff-mode-proposal
+    edges:
+      required_by:
+        - feature-graph-viewer
+      motivated_by:
+        - usecase-reviewer-scans-proposal-diff
+      verified_by: []
+
+  - schema: graph/use-case/v0
+    id: usecase-reviewer-scans-proposal-diff
+    title: Reviewer scans a proposal's diff before it lands
+    status: draft
+    visibility: internal
+    actor: product-manager
+    trigger: A proposal changeset is ready for review and the reviewer needs to see exactly what it adds, changes, or removes in the catalog before approving.
+    desired_outcome: The reviewer opens the object-graph viewer in diff mode, sees every gapped node badged added/modified/removed grouped by layer, and only reads full node detail for the ones that actually changed.
+    sources:
+      - source-object-graph-ui-declutter-and-diff-mode-proposal
+    edges:
+      actor:
+        - actor-product-manager
+      exercises:
+        - feature-graph-viewer
+      acceptance:
+        - req-object-graph-diff-mode-visual-affordances
+
+  - schema: graph/proposal/v0
+    id: proposal-object-graph-ui-declutter-and-diff-mode
+    title: 'Object-graph viewer: declutter the layer bar, add diff mode, local persona QA'
+    status: draft
+    visibility: internal
+    proposal_kind: tui
+    path: docs/proposals/project-object-graph/ui-declutter-and-diff-mode.md
+    index_blurb: 'Meta-dogfood of the object graph on itself: declutter the busy layer-map top bar, add a current-vs-proposed diff mode over the catalog (reusing the shipped internal/graph/diff.go gap classification and the WorldDiffViewer color language), and run a local-only, persona-lensed usability pass (kitsoki-ui-review, no filing/upload) against the result.'
+    sources:
+      - source-object-graph-ui-declutter-and-diff-mode-proposal
+    edges:
+      child_of:
+        - proposal-project-object-graph
+      owned_by:
+        - actor-product-manager
+      proposes:
+        - feature-graph-viewer
+      creates_requirements:
+        - req-object-graph-layer-bar-no-scroll
+        - req-object-graph-diff-mode-visual-affordances
+        - req-object-graph-persona-qa-stays-local
+      creates_use_cases:
+        - usecase-reviewer-scans-proposal-diff
       decomposes_to: []
 
   # --- Product/functional areas (design doc §5 seed cut) ------------------
