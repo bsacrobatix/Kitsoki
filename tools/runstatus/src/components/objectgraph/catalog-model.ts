@@ -71,6 +71,27 @@ export function nodeVisibility(node: ObjectGraphNode): string {
   return (node.attrs?.visibility as string) ?? "internal";
 }
 
+// Diff mode's per-node classification (runstatus.objectgraph.diff,
+// internal/graph.GapKind) — "" when the graph wasn't loaded in diff mode.
+export type DiffKind = "added" | "modified" | "removed" | "unchanged" | "";
+
+export function diffKind(node: ObjectGraphNode): DiffKind {
+  return (node.attrs?.diff_kind as DiffKind) ?? "";
+}
+
+export function diffKindLabel(kind: DiffKind): string {
+  switch (kind) {
+    case "added":
+      return "Added";
+    case "modified":
+      return "Modified";
+    case "removed":
+      return "Removed";
+    default:
+      return "";
+  }
+}
+
 export function nodeSources(node: ObjectGraphNode): string[] {
   return (node.attrs?.sources as string[]) ?? [];
 }

@@ -4,10 +4,10 @@
 // full-graph overlay (ObjectGraphPage). Layouts are pluggable — see
 // ./layouts.ts; picking a different one is just a dropdown, no code change.
 import cytoscape, { type Core } from "cytoscape";
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { ObjectGraph } from "../../data/objectgraph.js";
 import { lifecycleLabel } from "./catalog-model.js";
-import { cytoscapeStyle, LIFECYCLE_COLORS, toElements } from "./graph-elements.js";
+import { cytoscapeStyle, DIFF_COLORS, LIFECYCLE_COLORS, toElements } from "./graph-elements.js";
 import { defaultLayoutId, findLayout, layouts } from "./layouts.js";
 
 // Same buckets as lifecycleBucket's possible outputs (catalog-model.ts) —
@@ -28,6 +28,17 @@ const props = withDefaults(
   { focusId: "" },
 );
 const emit = defineEmits<{ "update:focusId": [id: string] }>();
+
+const diffLegendLabels: Record<string, string> = { added: "Added", modified: "Modified", removed: "Removed" };
+const diffLegend = (["added", "modified", "removed"] as const).map((kind) => ({
+  kind,
+  color: DIFF_COLORS[kind],
+  label: diffLegendLabels[kind],
+}));
+// Only shown when the graph actually carries diff_kind attrs (diff mode) —
+// a plain (non-diff) graph load has no such attr and the border colors above
+// never match, so the legend would be noise.
+const showDiffLegend = computed(() => props.graph.nodes.some((n) => typeof n.attrs?.diff_kind === "string"));
 
 const host = ref<HTMLDivElement>();
 const layoutId = ref(defaultLayoutId);
@@ -89,6 +100,12 @@ defineExpose({ layoutId, layouts });
           {{ entry.label }}
         </li>
       </ul>
+      <ul v-if="showDiffLegend" class="graph-view__legend graph-view__legend--diff" data-testid="graph-view-diff-legend">
+        <li v-for="entry in diffLegend" :key="entry.kind">
+          <span class="graph-view__swatch graph-view__swatch--ring" :style="{ borderColor: entry.color }"></span>
+          {{ entry.label }}
+        </li>
+      </ul>
       <span class="graph-view__count" data-testid="graph-view-count">
         {{ graph.nodes.length }} nodes / {{ graph.edges.length }} edges
       </span>
@@ -139,6 +156,15 @@ defineExpose({ layoutId, layouts });
   height: 10px;
   border-radius: 999px;
   border: 1px solid rgb(0 0 0 / 15%);
+}
+.graph-view__legend--diff {
+  padding-left: 0.6rem;
+  border-left: 1px solid #d8ddd6;
+}
+.graph-view__swatch--ring {
+  background: none;
+  border-width: 2px;
+  border-style: solid;
 }
 .graph-view__count {
   color: #667;

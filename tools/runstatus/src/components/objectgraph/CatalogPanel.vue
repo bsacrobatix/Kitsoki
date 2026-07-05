@@ -10,6 +10,8 @@
 import { computed, nextTick, ref, watch } from "vue";
 import type { ObjectGraph, ObjectGraphNode } from "../../data/objectgraph.js";
 import {
+  diffKind,
+  diffKindLabel,
   edgeTargetsByKind,
   incomingGroups,
   layers,
@@ -346,6 +348,7 @@ function selectNode(id: string) {
                 <strong>{{ entry.node.label }}</strong>
                 <small>{{ entry.node.id }}</small>
                 <span class="node-badges">
+                  <span v-if="diffKind(entry.node) && diffKind(entry.node) !== 'unchanged'" :class="['diff-badge', `diff-${diffKind(entry.node)}`]">{{ diffKindLabel(diffKind(entry.node)) }}</span>
                   <span :class="['status-badge', `life-${lifecycleBucket(entry.node)}`]">{{ lifecycleLabel(lifecycleBucket(entry.node)) }}</span>
                   <span :class="['visibility-badge', `visibility-${nodeVisibility(entry.node)}`]">{{ nodeVisibility(entry.node) }}</span>
                 </span>
@@ -361,6 +364,7 @@ function selectNode(id: string) {
                 <small>{{ child.id }}</small>
                 <span class="node-badges">
                   <span class="type-badge">{{ child.kind }}</span>
+                  <span v-if="diffKind(child) && diffKind(child) !== 'unchanged'" :class="['diff-badge', `diff-${diffKind(child)}`]">{{ diffKindLabel(diffKind(child)) }}</span>
                   <span :class="['status-badge', `life-${lifecycleBucket(child)}`]">{{ lifecycleLabel(lifecycleBucket(child)) }}</span>
                   <span :class="['visibility-badge', `visibility-${nodeVisibility(child)}`]">{{ nodeVisibility(child) }}</span>
                 </span>
@@ -378,6 +382,10 @@ function selectNode(id: string) {
               <h2>{{ selectedNode.label }}</h2>
             </div>
             <div class="chips">
+              <span
+                v-if="diffKind(selectedNode) && diffKind(selectedNode) !== 'unchanged'"
+                :class="['diff-badge', `diff-${diffKind(selectedNode)}`]"
+              >{{ diffKindLabel(diffKind(selectedNode)) }}</span>
               <span :class="['status-badge', `life-${lifecycleBucket(selectedNode)}`]">
                 {{ lifecycleLabel(lifecycleBucket(selectedNode)) }} / {{ selectedNode.status }}
               </span>

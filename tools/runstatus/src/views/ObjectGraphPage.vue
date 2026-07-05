@@ -3,10 +3,20 @@
     <header class="objectgraph-page__bar">
       <span class="objectgraph-page__title">Project object graph</span>
       <span
-        v-if="graph"
+        v-if="displayGraph"
         class="objectgraph-page__count"
         data-testid="objectgraph-count"
-      >{{ graph.nodes.length }} nodes / {{ graph.edges.length }} edges</span>
+      >{{ displayGraph.nodes.length }} nodes / {{ displayGraph.edges.length }} edges</span>
+      <div v-if="overlayPath" class="objectgraph-page__mode-toggle" data-testid="objectgraph-mode-toggle">
+        <button
+          v-for="m in (['asis', 'proposed', 'diff'] as const)"
+          :key="m"
+          type="button"
+          :class="{ active: mode === m }"
+          :data-testid="`objectgraph-mode-${m}`"
+          @click="mode = m"
+        >{{ modeLabel(m) }}</button>
+      </div>
       <button
         type="button"
         class="objectgraph-page__full-graph-link"
@@ -22,15 +32,15 @@
       {{ error }}
     </div>
     <CatalogPanel
-      v-else-if="graph"
-      :graph="graph"
+      v-else-if="displayGraph"
+      :graph="displayGraph"
       :selected-id="selectedId"
       data-testid="objectgraph-catalog"
       @update:selected-id="selectedId = $event"
     />
 
     <div
-      v-if="fullGraphOpen && graph"
+      v-if="fullGraphOpen && displayGraph"
       class="objectgraph-page__modal"
       data-testid="objectgraph-graph-modal"
       @keydown.esc="fullGraphOpen = false"
@@ -49,7 +59,7 @@
         </div>
       </div>
       <GraphView
-        :graph="graph"
+        :graph="displayGraph"
         :focus-id="selectedId"
         :group-by-layer="groupByLayerFn"
         :group-label="groupLabelFn"
@@ -92,10 +102,50 @@ const route = useRoute();
 const source = new LiveSource("/");
 
 const graph = ref<ObjectGraph | null>(null);
+const diffGraph = ref<ObjectGraph | null>(null);
 const loading = ref(false);
 const error = ref("");
 const selectedId = ref("");
 const fullGraphOpen = ref(false);
+
+// Diff mode (`?overlay=`): current-vs-proposed, the first real exercise of
+// internal/graph.LoadCatalogWithOverlay + runstatus.objectgraph.diff
+// (docs/proposals/project-object-graph/ui-declutter-and-diff-mode.md).
+// "As-is" renders the plain catalog load (100% correct, no overlay
+// involved); "Proposed" and "Diff" both render the diff RPC's graph
+// (every node carries a diff_kind), filtered client-side — Proposed drops
+// removed nodes, Diff keeps only the gapped ones.
+type Mode = "asis" | "proposed" | "diff";
+const mode = ref<Mode>("asis");
+function modeLabel(m: Mode): string {
+  return { asis: "As-is", proposed: "Proposed", diff: "Diff" }[m];
+}
+
+const overlayPath = computed<string>(() => {
+  const p = route.query.overlay;
+  return typeof p === "string" ? p : "";
+});
+
+// Filters diffGraph's nodes for a mode, then drops any edge that would
+// dangle (source/target no longer present) — Cytoscape (GraphView) errors
+// on an edge referencing a missing node id, so this must hold for every
+// mode, not just look right in the catalog list.
+function filterGraph(g: ObjectGraph, keepNode: (n: ObjectGraph["nodes"][number]) => boolean): ObjectGraph {
+  const nodes = g.nodes.filter(keepNode);
+  const ids = new Set(nodes.map((n) => n.id));
+  const edges = g.edges.filter((e) => ids.has(e.source) && ids.has(e.target));
+  return { ...g, nodes, edges };
+}
+
+const displayGraph = computed<ObjectGraph | null>(() => {
+  if (!overlayPath.value || mode.value === "asis") return graph.value;
+  if (!diffGraph.value) return null;
+  if (mode.value === "proposed") {
+    return filterGraph(diffGraph.value, (n) => n.attrs?.diff_kind !== "removed");
+  }
+  // mode === "diff": only the gapped nodes.
+  return filterGraph(diffGraph.value, (n) => n.attrs?.diff_kind !== "unchanged");
+});
 
 // Full-graph "group by" mode: the default 'type' mode is the existing
 // hardcoded presentation layers (nodeLayerId); 'area' is the data-driven
@@ -125,9 +175,15 @@ const catalogPath = computed<string>(() => {
 async function load(): Promise<void> {
   loading.value = true;
   error.value = "";
+  diffGraph.value = null;
   try {
     graph.value = await source.loadObjectGraph(catalogPath.value);
     selectedId.value = graph.value.nodes[0]?.id ?? "";
+    if (overlayPath.value) {
+      diffGraph.value = await source.loadObjectGraphDiff(catalogPath.value, overlayPath.value);
+    } else {
+      mode.value = "asis";
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
     graph.value = null;
@@ -137,7 +193,7 @@ async function load(): Promise<void> {
 }
 
 onMounted(load);
-watch(catalogPath, load);
+watch([catalogPath, overlayPath], load);
 </script>
 
 <style scoped>
@@ -169,6 +225,28 @@ watch(catalogPath, load);
   font-size: 0.8rem;
   margin-left: auto;
   text-decoration: underline;
+}
+.objectgraph-page__mode-toggle {
+  display: flex;
+  gap: 2px;
+  margin-left: 0.5rem;
+  border: 1px solid var(--border-color, #d6dde8);
+  border-radius: 6px;
+  padding: 2px;
+}
+.objectgraph-page__mode-toggle button {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: #46534d;
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+}
+.objectgraph-page__mode-toggle button.active {
+  background: #1d2a24;
+  color: #f4f7f3;
+  font-weight: 700;
 }
 :deep(.catalog-panel) {
   flex: 1;
