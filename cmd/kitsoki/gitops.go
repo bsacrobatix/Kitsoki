@@ -718,6 +718,17 @@ func gitopsEnqueueFixes(ctx context.Context, runDir, dbPath, fallbackRepo, story
 		if err != nil {
 			return nil, err
 		}
+		jobMetadata := gitopsFindingJobMetadata(runDir, item, issueURL)
+		if err := store.MergeMetadata(ctx, job.JobID, jobMetadata); err != nil {
+			return nil, err
+		}
+		if len(jobMetadata) > 0 {
+			if refreshed, err := store.GetJob(ctx, job.JobID); err == nil {
+				job = refreshed
+			} else {
+				return nil, err
+			}
+		}
 		issue := mapValue(item, "github_issue")
 		if issue == nil {
 			issue = map[string]any{}
@@ -749,18 +760,19 @@ func gitopsEnqueueFixes(ctx context.Context, runDir, dbPath, fallbackRepo, story
 			})
 		}
 		jobOut := map[string]any{
-			"status":        "queued",
-			"created":       created,
-			"job_id":        job.JobID,
-			"origin_ref":    job.OriginRef,
-			"repo":          job.Repo,
-			"object_kind":   job.ObjectKind,
-			"object_number": job.ObjectNumber,
-			"story":         job.Story,
-			"state":         job.State,
-			"issue_url":     issueURL,
-			"finding_id":    stringValue(item, "id"),
-			"claim_url":     claimURL,
+			"status":         "queued",
+			"created":        created,
+			"job_id":         job.JobID,
+			"origin_ref":     job.OriginRef,
+			"repo":           job.Repo,
+			"object_kind":    job.ObjectKind,
+			"object_number":  job.ObjectNumber,
+			"story":          job.Story,
+			"state":          job.State,
+			"issue_url":      issueURL,
+			"finding_id":     stringValue(item, "id"),
+			"claim_url":      claimURL,
+			"triage_context": len(job.Metadata) > 0,
 		}
 		jobsOut = append(jobsOut, jobOut)
 		claims = append(claims, map[string]any{
@@ -1015,6 +1027,42 @@ func gitopsClaimCommentBody(finding map[string]any, job *jobs.GHJob, issueURL st
 		"-->",
 	}
 	return strings.Join(lines, "\n")
+}
+
+func gitopsFindingJobMetadata(runDir string, finding map[string]any, issueURL string) map[string]string {
+	title := firstNonBlank(stringValue(finding, "title"), stringValue(finding, "id"), "product-journey finding")
+	bodyLines := []string{
+		"# Product-journey finding",
+		"",
+		fmt.Sprintf("- Finding: `%s`", firstNonBlank(stringValue(finding, "id"), "(unknown)")),
+		fmt.Sprintf("- Title: %s", title),
+	}
+	for _, key := range []string{"summary", "scenario", "persona", "severity", "evidence_path"} {
+		if value := stringValue(finding, key); value != "" {
+			bodyLines = append(bodyLines, fmt.Sprintf("- %s: %s", key, value))
+		}
+	}
+	if issueURL != "" {
+		bodyLines = append(bodyLines, fmt.Sprintf("- GitHub issue: %s", issueURL))
+	}
+	if runDir != "" {
+		bodyLines = append(bodyLines, fmt.Sprintf("- Product-journey run: %s", runDir))
+	}
+	if summary := stringValue(finding, "summary"); summary != "" {
+		bodyLines = append(bodyLines, "", "## Summary", "", summary)
+	}
+	if evidencePath := stringValue(finding, "evidence_path"); evidencePath != "" {
+		bodyLines = append(bodyLines, "", "## Evidence", "", evidencePath)
+	}
+	out := map[string]string{
+		"ticket_title":       title,
+		"ticket_body":        strings.Join(bodyLines, "\n"),
+		"ticket_source_mode": "remote",
+	}
+	if issueURL != "" {
+		out["ticket_source_ref"] = issueURL
+	}
+	return out
 }
 
 func gitopsFindingsItems(findings map[string]any) []map[string]any {

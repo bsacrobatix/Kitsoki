@@ -1292,6 +1292,14 @@ func TestJobFlowWorldLeavesGitHubCloseoutToOrchestrator(t *testing.T) {
 		Repo:         "o/r",
 		ObjectKind:   "issue",
 		ObjectNumber: "42",
+		Metadata: map[string]string{
+			"ticket_title":       "Claimed product-journey finding",
+			"ticket_body":        "Evidence path and summary for triage",
+			"ticket_source_mode": "remote",
+			"ticket_source_ref":  "https://github.com/o/r/issues/42",
+			"ticket_repo":        "o/r",
+			"unrelated":          "must not leak",
+		},
 	}
 
 	world := jobFlowWorld(job)
@@ -1303,6 +1311,19 @@ func TestJobFlowWorldLeavesGitHubCloseoutToOrchestrator(t *testing.T) {
 	}
 	if _, ok := world["ticket_repo"]; ok {
 		t.Fatalf("gh-agent bugfix world must not seed ticket_repo; gitops owns issue claim/closeout: %+v", world)
+	}
+	for key, want := range map[string]string{
+		"ticket_title":       "Claimed product-journey finding",
+		"ticket_body":        "Evidence path and summary for triage",
+		"ticket_source_mode": "remote",
+		"ticket_source_ref":  "https://github.com/o/r/issues/42",
+	} {
+		if got := world[key]; got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+	if _, ok := world["unrelated"]; ok {
+		t.Fatalf("job metadata must be allowlisted before entering the story world: %+v", world)
 	}
 }
 

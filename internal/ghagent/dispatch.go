@@ -706,6 +706,11 @@ func jobFlowWorld(job *jobs.GHJob) map[string]string {
 	case "issue":
 		out["ticket_id"] = job.ObjectNumber
 		out["ticket_url"] = githubObjectURL(job)
+		for _, key := range []string{"ticket_title", "ticket_body", "ticket_source_mode", "ticket_source_ref"} {
+			if value := strings.TrimSpace(job.Metadata[key]); value != "" {
+				out[key] = value
+			}
+		}
 	}
 	return out
 }

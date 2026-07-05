@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,6 +49,7 @@ type GHJob struct {
 	CommentID    string
 	AttemptCount int
 	IncidentURL  string
+	Metadata     map[string]string
 	ErrMsg       string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
@@ -108,6 +110,7 @@ func NewGHJobStore(db *sql.DB) (*GHJobStore, error) {
 	for _, stmt := range []string{
 		`ALTER TABLE gh_jobs ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE gh_jobs ADD COLUMN incident_url TEXT`,
+		`ALTER TABLE gh_jobs ADD COLUMN metadata_json TEXT`,
 	} {
 		if _, err := db.Exec(stmt); err != nil && !isSQLiteDuplicateColumn(err) {
 			return nil, fmt.Errorf("jobs.NewGHJobStore: compatibility migration: %w", err)
@@ -225,6 +228,39 @@ func (s *GHJobStore) Enqueue(ctx context.Context, m GHMention, story string) (jo
 		}
 	}
 	return job, created, nil
+}
+
+// MergeMetadata overlays producer-supplied context onto a job without
+// disturbing existing keys not mentioned by the caller.
+func (s *GHJobStore) MergeMetadata(ctx context.Context, jobID string, metadata map[string]string) error {
+	cleaned := cleanGHJobMetadata(metadata)
+	if len(cleaned) == 0 {
+		return nil
+	}
+	job, err := s.GetJob(ctx, jobID)
+	if err != nil {
+		return fmt.Errorf("jobs.MergeMetadata: read-back: %w", err)
+	}
+	merged := map[string]string{}
+	for k, v := range job.Metadata {
+		merged[k] = v
+	}
+	for k, v := range cleaned {
+		merged[k] = v
+	}
+	encoded, err := encodeGHJobMetadata(merged)
+	if err != nil {
+		return fmt.Errorf("jobs.MergeMetadata: encode: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE gh_jobs SET metadata_json=?, updated_at=? WHERE job_id=?`,
+		encoded, time.Now().UnixMilli(), jobID); err != nil {
+		return fmt.Errorf("jobs.MergeMetadata: update: %w", err)
+	}
+	if err := s.RecordEvent(ctx, jobID, "metadata", fmt.Sprintf("%d key(s)", len(cleaned))); err != nil {
+		return err
+	}
+	return nil
 }
 
 // GetByOriginRef returns the job for an origin_ref, or sql.ErrNoRows.
@@ -452,7 +488,7 @@ type ghRowScanner interface {
 const ghJobCols = `job_id, origin_ref, repo, object_kind, object_number,
 	COALESCE(story,''), state, COALESCE(worker_id,''), COALESCE(run_id,''),
 	COALESCE(run_url,''), COALESCE(comment_id,''), attempt_count,
-	COALESCE(incident_url,''), COALESCE(err_msg,''),
+	COALESCE(incident_url,''), COALESCE(metadata_json,''), COALESCE(err_msg,''),
 	created_at, updated_at`
 
 func scanGHJob(ctx context.Context, q ghRowScanner, col, val string) (*GHJob, error) {
@@ -478,16 +514,59 @@ type ghJobScanner interface {
 func scanGHJobScanner(row ghJobScanner) (*GHJob, error) {
 	var j GHJob
 	var createdMs, updatedMs int64
+	var metadataJSON string
 	if err := row.Scan(
 		&j.JobID, &j.OriginRef, &j.Repo, &j.ObjectKind, &j.ObjectNumber,
 		&j.Story, &j.State, &j.WorkerID, &j.RunID, &j.RunURL, &j.CommentID,
-		&j.AttemptCount, &j.IncidentURL, &j.ErrMsg, &createdMs, &updatedMs,
+		&j.AttemptCount, &j.IncidentURL, &metadataJSON, &j.ErrMsg, &createdMs, &updatedMs,
 	); err != nil {
 		return nil, err
 	}
+	metadata, err := decodeGHJobMetadata(metadataJSON)
+	if err != nil {
+		return nil, err
+	}
+	j.Metadata = metadata
 	j.CreatedAt = time.UnixMilli(createdMs)
 	j.UpdatedAt = time.UnixMilli(updatedMs)
 	return &j, nil
+}
+
+func cleanGHJobMetadata(metadata map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range metadata {
+		key := strings.TrimSpace(k)
+		value := strings.TrimSpace(v)
+		if key == "" || value == "" {
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func encodeGHJobMetadata(metadata map[string]string) (string, error) {
+	cleaned := cleanGHJobMetadata(metadata)
+	if len(cleaned) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(cleaned)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func decodeGHJobMetadata(raw string) (map[string]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return map[string]string{}, nil
+	}
+	var out map[string]string
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, err
+	}
+	return cleanGHJobMetadata(out), nil
 }
 
 func insertGHJobEventTx(ctx context.Context, tx *sql.Tx, jobID, state, message string) error {

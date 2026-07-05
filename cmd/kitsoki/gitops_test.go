@@ -42,12 +42,15 @@ func TestGitopsEnqueueFixesClaimsGitHubIssueAndPersistsState(t *testing.T) {
 		"run_id": "run-claim",
 		"items": []any{
 			map[string]any{
-				"id":       "finding-claim",
-				"kind":     "issue",
-				"title":    "Parallel agents should see in-flight work",
-				"status":   "open",
-				"origin":   "observed",
-				"severity": "high",
+				"id":            "finding-claim",
+				"kind":          "issue",
+				"title":         "Parallel agents should see in-flight work",
+				"summary":       "Claim comments and job context must be native gitops state.",
+				"scenario":      "bugfix",
+				"status":        "open",
+				"origin":        "observed",
+				"severity":      "high",
+				"evidence_path": "evidence/bugfix.md",
 				"github_issue": map[string]any{
 					"url":    "https://github.com/o/r/issues/77",
 					"repo":   "o/r",
@@ -127,6 +130,20 @@ func TestGitopsEnqueueFixesClaimsGitHubIssueAndPersistsState(t *testing.T) {
 	}
 	if job.OriginRef != "github:o/r/issue/77" || job.Story != "stories/bugfix" {
 		t.Fatalf("job = %+v", job)
+	}
+	if job.Metadata["ticket_title"] != "Parallel agents should see in-flight work" {
+		t.Fatalf("ticket title metadata = %q", job.Metadata["ticket_title"])
+	}
+	for _, want := range []string{"Claim comments and job context", "bugfix", "evidence/bugfix.md", "https://github.com/o/r/issues/77"} {
+		if !strings.Contains(job.Metadata["ticket_body"], want) {
+			t.Fatalf("ticket body metadata missing %q:\n%s", want, job.Metadata["ticket_body"])
+		}
+	}
+	if job.Metadata["ticket_source_mode"] != "remote" || job.Metadata["ticket_source_ref"] != "https://github.com/o/r/issues/77" {
+		t.Fatalf("ticket source metadata = %+v", job.Metadata)
+	}
+	if got := mapSliceValue(result, "gh_agent_jobs")[0]["triage_context"]; got != true {
+		t.Fatalf("triage_context = %v, want true", got)
 	}
 }
 
