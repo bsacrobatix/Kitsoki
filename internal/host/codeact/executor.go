@@ -84,6 +84,10 @@ type Result struct {
 	// Payload is the schema-valid done() payload, set only when Terminated
 	// == TerminatedDone.
 	Payload map[string]any
+	// Trace is the stable, serializable projection of Steps — one TraceStep
+	// per executed iteration, in order — that tracing/journaling and
+	// cassette-recording tooling is built against (see trace.go).
+	Trace []TraceStep
 }
 
 // Params configures a Run.
@@ -130,13 +134,17 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 					Message: fmt.Sprintf("done() payload rejected: %v", schemaErr),
 					Step:    step,
 				}
-				res.Steps = append(res.Steps, StepResult{Emission: emission, Err: envelope})
+				sr := StepResult{Emission: emission, Err: envelope}
+				res.Steps = append(res.Steps, sr)
+				res.Trace = append(res.Trace, traceStepFromResult(step, sr))
 				obs = nil
 				errEnv = envelope
 				continue
 			}
 
-			res.Steps = append(res.Steps, StepResult{Emission: emission})
+			sr := StepResult{Emission: emission}
+			res.Steps = append(res.Steps, sr)
+			res.Trace = append(res.Trace, traceStepFromResult(step, sr))
 			res.Terminated = TerminatedDone
 			res.Payload = emission.Payload
 			return res, nil
@@ -148,13 +156,17 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 				Message: runErr.Error(),
 				Step:    step,
 			}
-			res.Steps = append(res.Steps, StepResult{Emission: emission, Err: envelope})
+			sr := StepResult{Emission: emission, Err: envelope}
+			res.Steps = append(res.Steps, sr)
+			res.Trace = append(res.Trace, traceStepFromResult(step, sr))
 			obs = nil
 			errEnv = envelope
 			continue
 		}
 
-		res.Steps = append(res.Steps, StepResult{Emission: emission, Observation: out})
+		sr := StepResult{Emission: emission, Observation: out}
+		res.Steps = append(res.Steps, sr)
+		res.Trace = append(res.Trace, traceStepFromResult(step, sr))
 		obs = out
 		errEnv = nil
 	}
