@@ -157,6 +157,7 @@ export class IdeTools {
    */
   private async getDiagnostics(args: Record<string, unknown>): Promise<unknown> {
     const p = typeof args.path === 'string' ? args.path : '';
+    this.out.appendLine(`[ide] getDiagnostics args=${JSON.stringify(args)} (narrowed to path=${p || '(none — workspace-wide)'})`);
     const encode = (uri: vscode.Uri, diags: readonly vscode.Diagnostic[]) => ({
       uri: uri.toString(),
       diagnostics: diags.map((d) => ({

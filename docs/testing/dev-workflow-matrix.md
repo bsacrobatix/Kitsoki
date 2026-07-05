@@ -65,7 +65,7 @@ Every cell carries two proof-class verdicts from `schemas/completion-state.schem
 - **File a bug × Web** — ✅ works: Report Bug modal shipped (proposal doc stale). Canonical doc: docs/workflows/file-a-bug.md
   - mechanical: no standing verdict
   - experience: no standing verdict
-- **File a bug × VS Code** — 🟡 proof-thin: rides web SPA in webview; no dedicated proof. Canonical doc: docs/workflows/file-a-bug.md
+- **File a bug × VS Code** — 🟡 proof-thin: dedicated extension e2e spec (vscode-file-a-bug-walk.e2e.spec.ts, real VS Code): Meta → Report a bug → capture/review modal → describe → File bug → filed-path toast — one happy-path proof, local filing only. Canonical doc: docs/workflows/file-a-bug.md
   - mechanical: no standing verdict
   - experience: no standing verdict
 - **File a bug × gh-agent** — ✅ works: bug-report deck auto-trigger shipped. Canonical doc: docs/workflows/file-a-bug.md
@@ -77,7 +77,7 @@ Every cell carries two proof-class verdicts from `schemas/completion-state.schem
 - **Fix a bug × Web** — 🟡 proof-thin: drivable; staged-gate & pace issues historically. Canonical doc: docs/workflows/fix-a-bug.md
   - mechanical: no standing verdict
   - experience: no standing verdict
-- **Fix a bug × VS Code** — 🟡 proof-thin: rides web SPA; untested for full pipeline. Canonical doc: docs/workflows/fix-a-bug.md
+- **Fix a bug × VS Code** — 🟡 proof-thin: dedicated extension e2e spec (vscode-bugfix-walk.e2e.spec.ts, real VS Code via kitsoki.flow): full bugfix pipeline idle → @exit:done — one happy-path proof; also the real-socket capture that pinned host.ide.get_diagnostics' wire shape (ide-integration.md follow-up 1). Canonical doc: docs/workflows/fix-a-bug.md
   - mechanical: no standing verdict
   - experience: no standing verdict
 - **Fix a bug × gh-agent** — 🟡 proof-thin: real dispatch of stories/bugfix landed (realDispatchPlan, per-job worktree, APP_DIR races scoped to the load span); no triage-only label route yet and end-to-end proof is thin. Canonical doc: docs/workflows/fix-a-bug.md
