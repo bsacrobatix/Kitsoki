@@ -17,7 +17,10 @@
 //
 // # Endpoints
 //
-//	GET  /                                     → the bundled SPA (index.html)
+//	GET  /                                     → the bundled SPA (index.html;
+//	                                              installed-kit registry +
+//	                                              import map injected, S3c)
+//	GET  /kit/<namespace>/<kit>/ui/<rest...>   → an installed kit's UI assets (S3c)
 //	POST /rpc                                  → JSON-RPC 2.0 control
 //	GET  /rpc/events?subscription_id=<id>      → text/event-stream notifications
 //
@@ -25,6 +28,8 @@
 //
 //	runstatus.stories.list       {}                                  → []StoryHeader
 //	runstatus.stories.rescan     {}                                  → []StoryHeader
+//	runstatus.kits.list          {}                                  → []KitHeader (S3b/c)
+//	kit.<kit>.<iface>.<op>       {...}                                → kit endpoint result (S3b fallback)
 //	runstatus.session.new        {story_path}                        → {session_id}
 //	runstatus.session.reload     {session_id}                        → {ok, prev_state_exists}
 //	runstatus.session.staleness  {session_id}                        → {stale, diff}
@@ -87,6 +92,7 @@ import (
 	"kitsoki/internal/helpdocs"
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
+	"kitsoki/internal/kitendpoint"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/harrec"
@@ -243,6 +249,12 @@ type Server struct {
 	// Guarded by turnMu. See handleTurnStream / cancelActiveTurn.
 	turnMu      sync.Mutex
 	activeTurns map[string]*activeTurn
+
+	// kits is the installed-kit JSON-RPC/MCP dispatcher (S3b — see kits.go).
+	// Nil when the server was built without WithKits, in which case the
+	// `kit.<kit>.<iface>.<op>` fallback and `runstatus.kits.list` report
+	// codeMethodMissing / an empty list rather than panicking.
+	kits *kitendpoint.Dispatcher
 }
 
 // activeTurn is one in-flight streamed turn's cancel handle. Stored by pointer
@@ -281,6 +293,7 @@ type serverConfig struct {
 	ticketRepo       string
 	agentEvidenceDir string
 	workflowRoot     string
+	kits             *kitendpoint.Dispatcher
 }
 
 // WithBugRoot sets the repo root under which runstatus.bug.report writes
@@ -316,6 +329,16 @@ func WithAgentEvidenceDir(dir string) Option {
 // family on this server.
 func WithWorkflowRoot(dir string) Option {
 	return func(c *serverConfig) { c.workflowRoot = strings.TrimSpace(dir) }
+}
+
+// WithKits attaches the installed-kit endpoint dispatcher (S3b —
+// .context/kits-implementation-plan.md design decision D2.2/2.3), enabling
+// the `kit.<kit>.<iface>.<op>` JSON-RPC fallback and `runstatus.kits.list`.
+// A nil dispatcher (the default, when this option is not passed) leaves that
+// surface reporting "unknown method" / an empty kit list — most instances
+// have no kits installed.
+func WithKits(d *kitendpoint.Dispatcher) Option {
+	return func(c *serverConfig) { c.kits = d }
 }
 
 // WithPollInterval overrides the SSE trace-poll interval.
@@ -405,6 +428,7 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 		workflowRoot:     cfg.workflowRoot,
 		captureStore:     make(map[string]*capSnap),
 		activeTurns:      make(map[string]*activeTurn),
+		kits:             cfg.kits,
 	}
 }
 
@@ -554,6 +578,8 @@ func (s *Server) Handler() http.Handler {
 	// Embedded help-docs site (make site-embed). Serves an actionable
 	// placeholder when not staged — never an error (see internal/helpdocs).
 	mux.Handle("/help/", http.StripPrefix("/help/", helpdocs.Handler()))
+	// Installed-kit UI static assets (S3c vertical slice — see kit_ui.go).
+	mux.HandleFunc("/kit/", s.handleKitUI)
 	mux.HandleFunc("/", s.handleIndex)
 	return mux
 }
@@ -571,6 +597,10 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
+	// S3c: splice the installed-kit registry + a minimal import map into
+	// <head> when any kits are installed. See kit_ui.go's package doc for
+	// what this is (and is not) a vertical slice of.
+	index = s.injectKitRegistry(index)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(index)
 }
@@ -759,6 +789,9 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 			out.Context = &ChatShowContext{SessionID: sessionID}
 		}
 		return out, nil
+
+	case "runstatus.kits.list":
+		return s.listInstalledKits(), nil
 
 	case "runstatus.stories.list":
 		return s.provider.ListStories(), nil
@@ -1653,6 +1686,10 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		}
 		// ── Project object graph catalogs (W5.0, no story/session) ───────────
 		if result, rerr, handled := s.dispatchObjectGraph(method, params); handled {
+			return result, rerr
+		}
+		// ── Kit extension surface (S3b: kit.<kit>.<iface>.<op>) ──────────────
+		if result, rerr, handled := s.dispatchKit(ctx, method, params); handled {
 			return result, rerr
 		}
 		return nil, &rpcError{Code: codeMethodMissing, Message: "unknown method: " + method}

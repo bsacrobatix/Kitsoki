@@ -25,10 +25,10 @@
 //
 // # The ctx surface (deliberately narrow)
 //
-// The single argument to main is a struct with exactly five attributes. No
+// The single argument to main is a struct with exactly six attributes. No
 // environment, no clock, no randomness — and only a NARROW filesystem
-// + allow-listed-probe surface, never a shell — so a recorded run replays
-// byte-for-byte:
+// + allow-listed-probe + allow-listed-host surface, never a shell — so a
+// recorded run replays byte-for-byte:
 //
 //	ctx.inputs.<name>            typed inputs resolved from the effect's with.inputs
 //	ctx.world.get("key")         read-only snapshot of world; None when absent
@@ -39,6 +39,7 @@
 //	ctx.fs.glob(pattern)         -> [path] (sorted, repo-relative)
 //	ctx.fs.write(path, content)  write one repo-rooted, size-capped file -> path
 //	ctx.probe(name, args=[])     run an ALLOW-LISTED read-only probe -> {exit, out}
+//	ctx.host.call(name, args={}) invoke an ALLOW-LISTED engine host verb -> dict (S3d)
 //
 // An http response exposes .status (int), .headers (dict), .text() (string),
 // and .json() (parsed value). body on post may be a dict (JSON-encoded with an
@@ -56,6 +57,16 @@
 // Outputs flow ONLY through main()'s return dict. There is deliberately no
 // ctx.world.set — a Starlark effect cannot mutate world out-of-band; everything
 // it produces is named, typed, and visible to bind:.
+//
+// ctx.host.call is the narrow, allow-listed boundary onto the ENGINE's own
+// host.Registry (S3d — see HostCaller/WithHost in host_proxy.go): a kit
+// endpoint script that binds an interface op straight to a starlark script
+// (S3a) can compose engine host verbs — e.g. host.graph.load then project —
+// rather than reimplementing that logic itself via ctx.fs/ctx.http. The
+// allow-list (package host's AllowedStarlarkHostVerbs) is fixed and tiny by
+// design: a name not on it is rejected before the underlying Invoke is ever
+// called, and no caller injected at all (HasHost false) fails the same way
+// an un-injected HTTPClient/Inspector does — loudly, not silently.
 //
 // # I/O boundary and record/replay
 //
