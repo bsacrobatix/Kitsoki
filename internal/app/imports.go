@@ -577,9 +577,10 @@ func foldChild(parent *AppDef, alias string, imp *ImportDef, child *AppDef, file
 		return errs
 	}
 	wrapper := &State{
-		Type:    "compound",
-		Initial: entryName,
-		States:  make(map[string]*State, len(child.States)),
+		Type:        "compound",
+		Initial:     entryName,
+		States:      make(map[string]*State, len(child.States)),
+		ImportAlias: alias,
 	}
 	for _, name := range sortedKeys(child.States) {
 		wrapper.States[name] = child.States[name]

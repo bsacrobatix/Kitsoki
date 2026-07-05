@@ -1540,7 +1540,7 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 
 	successEvents := append(prefix, result.Events...)
 	endEvent := newOrchestratorEvent(store.TurnEnded,
-		transitionedTurnEndWithGateSignal(o.def, result.NewState, result.View, dispatchState, dispatchFailed), turnNum)
+		transitionedTurnEndWithGateSignal(o.def, result.NewState, result.View, dispatchState, dispatchFailed, result.World.Vars), turnNum)
 	successEvents = append(successEvents, endEvent)
 	if inputEvent.Kind != "" {
 		successEvents = append([]store.Event{inputEvent}, successEvents...)
@@ -2112,7 +2112,7 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 
 	successEvents := append([]store.Event{sdInputEvent, startEvent}, result.Events...)
 	endEvent := newOrchestratorEvent(store.TurnEnded,
-		transitionedTurnEndWithGateSignal(o.def, result.NewState, result.View, dispatchState, dispatchFailed), turnNum)
+		transitionedTurnEndWithGateSignal(o.def, result.NewState, result.View, dispatchState, dispatchFailed, result.World.Vars), turnNum)
 	successEvents = append(successEvents, endEvent)
 	for i := range successEvents {
 		successEvents[i].Turn = turnNum
@@ -2602,7 +2602,7 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 
 	successEvents := append([]store.Event{startEvent}, result.Events...)
 	endEvent := newOrchestratorEvent(store.TurnEnded,
-		transitionedTurnEndWithGateSignal(o.def, result.NewState, result.View, dispatchState, dispatchFailed), turnNum)
+		transitionedTurnEndWithGateSignal(o.def, result.NewState, result.View, dispatchState, dispatchFailed, result.World.Vars), turnNum)
 	successEvents = append(successEvents, endEvent)
 
 	for i := range successEvents {
@@ -3112,12 +3112,14 @@ func transitionedTurnEnd(to app.StatePath, view string) map[string]any {
 // documented S4 gap). dispatchingState is the state whose on_enter host
 // calls this turn dispatched (captured by the caller right after
 // machine.Turn, before any on_error redirect reassigns result.NewState);
-// dispatchFailed is whether that dispatch took its on_error redirect. When
+// dispatchFailed is whether that dispatch took its on_error redirect. world
+// is the post-dispatch world snapshot, used only to look up the optional S6
+// expected_effects join input (see workbench_gate_signal.go). When
 // dispatchingState is not a workbench: room (the common case), the payload
 // is byte-identical to plain transitionedTurnEnd.
-func transitionedTurnEndWithGateSignal(def *app.AppDef, to app.StatePath, view string, dispatchingState app.StatePath, dispatchFailed bool) map[string]any {
+func transitionedTurnEndWithGateSignal(def *app.AppDef, to app.StatePath, view string, dispatchingState app.StatePath, dispatchFailed bool, world map[string]any) map[string]any {
 	p := transitionedTurnEnd(to, view)
-	if sig := workbenchGateSignal(def, dispatchingState, dispatchFailed, view); sig != nil {
+	if sig := workbenchGateSignal(def, dispatchingState, dispatchFailed, view, world); sig != nil {
 		for k, v := range sig {
 			p[k] = v
 		}

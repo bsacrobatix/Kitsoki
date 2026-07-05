@@ -56,25 +56,36 @@ func expandWorkbenches(def *AppDef, file string) []error {
 		return nil
 	}
 	var errs []error
-	var walk func(prefix string, states map[string]*State)
-	walk = func(prefix string, states map[string]*State) {
+	// worldPrefix accumulates the `<alias>__` prefix(es) import folding
+	// (resolveImports, which runs before this pass) already applied to
+	// every world key / intent name beneath a compound import wrapper — see
+	// State.ImportAlias's doc comment. "" outside any import (the common
+	// case, and the ONLY case for a workbench: room's home story loaded
+	// standalone), so a state's own room-derived names (captureSlot/noteKey/
+	// captureIntent) are byte-identical to before this parameter existed.
+	var walk func(prefix, worldPrefix string, states map[string]*State)
+	walk = func(prefix, worldPrefix string, states map[string]*State) {
 		for _, name := range sortedKeys(states) {
 			s := states[name]
 			if s == nil {
 				continue
 			}
 			statePath := joinPath(prefix, name)
+			childWorldPrefix := worldPrefix
+			if s.ImportAlias != "" {
+				childWorldPrefix = worldPrefix + s.ImportAlias + "__"
+			}
 			if s.Workbench != nil {
-				if wErrs := expandOneWorkbench(def, file, statePath, name, s); len(wErrs) > 0 {
+				if wErrs := expandOneWorkbench(def, file, statePath, name, s, childWorldPrefix); len(wErrs) > 0 {
 					errs = append(errs, wErrs...)
 				}
 			}
 			if len(s.States) > 0 {
-				walk(statePath, s.States)
+				walk(statePath, childWorldPrefix, s.States)
 			}
 		}
 	}
-	walk("", def.States)
+	walk("", "", def.States)
 	return errs
 }
 
@@ -83,7 +94,7 @@ func expandWorkbenches(def *AppDef, file string) []error {
 // (`<room>_note`, `<room>_request`, `<room>_capture`), matching
 // landing.yaml's landing_* naming exactly. statePath is the full dotted path,
 // used only in error messages.
-func expandOneWorkbench(def *AppDef, file, statePath, room string, s *State) []error {
+func expandOneWorkbench(def *AppDef, file, statePath, room string, s *State, worldPrefix string) []error {
 	decl := s.Workbench
 	var errs []error
 	addErr := func(msg string) {
@@ -146,13 +157,29 @@ func expandOneWorkbench(def *AppDef, file, statePath, room string, s *State) []e
 		return errs
 	}
 
+	// worldPrefix is the `<alias>__` chain import folding already applied to
+	// everything beneath this room (see State.ImportAlias's doc comment) —
+	// "" for a workbench room's home story loaded standalone (the common
+	// case; every name below is then byte-identical to before worldPrefix
+	// existed). Applied consistently to every room-derived world key AND to
+	// the synthesized capture intent's name, so a hand-authored capture arc
+	// that survived folding under its OWN alias-prefixed name (e.g.
+	// stories/dev-story/rooms/landing.yaml's landing_capture, folded to
+	// core__landing_capture) is recognized as already-existing below,
+	// instead of this pass synthesizing a second, dangling, un-prefixed
+	// duplicate that writes to phantom world keys the room's own
+	// (correctly-aliased) view can never read.
 	captureSlot := decl.CaptureSlot
 	if strings.TrimSpace(captureSlot) == "" {
 		captureSlot = room + "_request"
 	}
-	namespacePrefix := workbenchNamespacePrefix(captureSlot)
-	noteKey := namespacePrefix + room + "_note"
-	captureIntent := namespacePrefix + room + "_capture"
+	// captureSlot arrives ALREADY alias-prefixed for imported workbenches —
+	// the imports rewriter prefixes it (together with the workbench agents and
+	// context args) at fold time. Only the names this expansion derives itself
+	// (note key, capture intent, working_dir) take worldPrefix here; re-prefixing
+	// captureSlot would double it (core__core__…).
+	noteKey := worldPrefix + room + "_note"
+	captureIntent := worldPrefix + room + "_capture"
 	ensureWorkbenchWorldKeys(def, captureSlot, noteKey)
 
 	offRampAgent := decl.OffRampAgent
@@ -191,7 +218,7 @@ func expandOneWorkbench(def *AppDef, file, statePath, room string, s *State) []e
 		Once:   true,
 		With: map[string]any{
 			"agent":       decl.Agent,
-			"working_dir": "{{ world.workdir }}",
+			"working_dir": fmt.Sprintf("{{ world.%sworkdir }}", worldPrefix),
 			"acceptance": map[string]any{
 				"schema": decl.AcceptanceSchema,
 			},
@@ -251,13 +278,6 @@ func expandOneWorkbench(def *AppDef, file, statePath, room string, s *State) []e
 	}
 
 	return errs
-}
-
-func workbenchNamespacePrefix(captureSlot string) string {
-	if idx := strings.LastIndex(captureSlot, "__"); idx >= 0 {
-		return captureSlot[:idx+2]
-	}
-	return ""
 }
 
 func ensureWorkbenchWorldKeys(def *AppDef, captureSlot, noteKey string) {
