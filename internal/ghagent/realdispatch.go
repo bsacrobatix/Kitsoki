@@ -59,6 +59,12 @@ type realDispatchPlan struct {
 	JudgeMode string
 	// BugfixMode ("full"/"quick") the plan's turns assume.
 	BugfixMode string
+	// TriagePreflight runs bugfix triage-only mode before the full maker
+	// pipeline and gates repair on a STILL-LIVE/PARTIAL verdict.
+	TriagePreflight bool
+	// TriageReplayVerdict is the deterministic no-LLM verdict used by the
+	// replay harness. Live mode ignores this and calls the real triager.
+	TriageReplayVerdict map[string]any
 	// Turns is the fixed intent sequence the cassette was recorded against.
 	Turns []testrunner.FlowTurn
 	// BaseWorld seeds fixture-shape defaults the plan's turns rely on
@@ -83,8 +89,19 @@ var realDispatchPlans = map[string]realDispatchPlan{
 		// dispatch forces this regardless of route.World's judge_mode
 		// default (llm_then_human) until a cassette recorded against that
 		// cadence exists.
-		JudgeMode:  "human",
-		BugfixMode: "full",
+		JudgeMode:       "human",
+		BugfixMode:      "full",
+		TriagePreflight: true,
+		TriageReplayVerdict: map[string]any{
+			"verdict":             "STILL-LIVE",
+			"confidence":          0.82,
+			"summary_title":       "STILL-LIVE — queued issue proceeds to bugfix",
+			"evidence":            "Replay harness preflight preserves the triage gate without live LLM spend; the queued issue context is present in ticket_body/ticket_title.",
+			"summary_markdown":    "The deterministic replay preflight treats the queued issue as still actionable so the recorded full bugfix pipeline can run without live LLM spend.",
+			"suggested_action":    "drive the full bugfix pipeline",
+			"fixed_in_ref":        nil,
+			"involved_components": []any{"gh-agent replay preflight"},
+		},
 		BaseWorld: map[string]any{
 			"bugfix_exit":                "open-PR",
 			"base_branch":                "main",
@@ -145,6 +162,23 @@ func runRealDispatch(ctx context.Context, root string, route Route, job *jobs.GH
 
 	worktreeRel := jobWorktreeRelDir(job.JobID)
 	worktreeAbs := filepath.Join(root, worktreeRel)
+
+	var triage triagePreflightResult
+	if plan.TriagePreflight && job.ObjectKind == "issue" {
+		var err error
+		triage, err = runBugfixTriagePreflight(ctx, appPath, route, job, plan, mode)
+		if err != nil {
+			return RunResult{Harness: mode, Worktree: worktreeAbs, RealHostCalls: triage.HostCalls}, err
+		}
+		switch triage.Verdict {
+		case "STILL-LIVE", "PARTIAL":
+			// Continue into the full bugfix pipeline.
+		case "ALREADY-FIXED":
+			return alreadyFixedTriageResult(route, job, mode, worktreeAbs, triage), nil
+		default:
+			return RunResult{Harness: mode, Worktree: worktreeAbs, RealHostCalls: triage.HostCalls}, fmt.Errorf("ghagent: triage preflight for %s returned %q; refusing to run or close autonomously", job.OriginRef, triage.Verdict)
+		}
+	}
 
 	initialWorld := map[string]any{}
 	for k, v := range plan.BaseWorld {
@@ -251,14 +285,15 @@ func runRealDispatch(ctx context.Context, root string, route Route, job *jobs.GH
 
 - Story: %q
 - Harness: %q
+- Triage preflight: %s
 - Final state: "done"
 - Flow turns: %d
 - Host returns observed: %d
 - Worktree: %q
 - Result: passed
 
-The gh-agent dispatcher ran the bugfix story from a fresh job context through its verification and done gates before marking this job done.
-`, route.Story, mode, turns, hostCalls, worktreeRel)
+The gh-agent dispatcher first ran the bugfix story's triage-only preflight, then ran the bugfix story from a fresh job context through its verification and done gates before marking this job done.
+`, route.Story, mode, triage.Verdict, turns, hostCalls+triage.HostCalls, worktreeRel)
 	assets := []RunAsset{{
 		Name:     "fix-report.md",
 		MimeType: "text/markdown",
@@ -267,6 +302,10 @@ The gh-agent dispatcher ran the bugfix story from a fresh job context through it
 		Name:     "independent-verify.md",
 		MimeType: "text/markdown",
 		Data:     []byte(verification),
+	}, {
+		Name:     "triage-verdict.md",
+		MimeType: "text/markdown",
+		Data:     []byte(renderTriageVerdictMarkdown(triage)),
 	}}
 	if strings.TrimSpace(lastDiff) != "" {
 		assets = append(assets, RunAsset{
@@ -284,9 +323,228 @@ The gh-agent dispatcher ran the bugfix story from a fresh job context through it
 		Stubbed:       false,
 		Harness:       mode,
 		Worktree:      worktreeAbs,
-		RealHostCalls: hostCalls,
+		RealHostCalls: hostCalls + triage.HostCalls,
 		Assets:        assets,
 	}, nil
+}
+
+type triagePreflightResult struct {
+	Verdict         string
+	Confidence      any
+	SummaryTitle    string
+	Evidence        string
+	SummaryMarkdown string
+	SuggestedAction string
+	FixedInRef      string
+	Payload         map[string]any
+	Turns           int
+	HostCalls       int
+}
+
+func runBugfixTriagePreflight(ctx context.Context, appPath string, route Route, job *jobs.GHJob, plan realDispatchPlan, mode string) (triagePreflightResult, error) {
+	initialWorld := map[string]any{
+		"bugfix_mode": "triage",
+		"judge_mode":  "llm_then_human",
+		"workdir":     ".",
+	}
+	for k, v := range jobFlowWorld(job) {
+		if strings.TrimSpace(v) != "" {
+			initialWorld[k] = v
+		}
+	}
+	for k, v := range route.World {
+		if k == "bugfix_mode" || k == "judge_mode" || k == "workdir" {
+			continue
+		}
+		initialWorld[k] = v
+	}
+	fixture := &testrunner.FlowFixture{
+		TestKind:       "flow",
+		App:            appPath,
+		InitialState:   "idle",
+		InitialWorld:   initialWorld,
+		Turns:          []testrunner.FlowTurn{{Intent: &testrunner.FlowIntent{Name: "triage"}, ExpectState: "__exit__triaged"}},
+		ExpectTerminal: boolPtr(true),
+		ExpectNoErrors: boolPtr(true),
+	}
+	if mode == HarnessReplay {
+		fixture.HostHandlers = map[string]testrunner.HostStub{
+			"host.append_to_file": {Data: map[string]any{"ok": true}},
+			"host.inbox.add":      {Data: map[string]any{"ok": true}},
+			"host.agent.codeact": {
+				Data: map[string]any{
+					"ok":         true,
+					"terminated": "done",
+					"payload":    firstNonNilMap(plan.TriageReplayVerdict, defaultStillLiveTriageVerdict(job)),
+				},
+			},
+		}
+	} else {
+		fixture.HostBindings = map[string]string{"transport": "host.append_to_file"}
+	}
+
+	fixturePath, cleanupFixture, err := writeFlowFixture(fixture)
+	if err != nil {
+		return triagePreflightResult{}, err
+	}
+	defer cleanupFixture()
+
+	report, runErr := testrunner.RunFlows(ctx, appPath, fixturePath, testrunner.FlowOptions{})
+	if runErr != nil {
+		return triagePreflightResult{}, fmt.Errorf("ghagent: triage preflight %q: %w", route.Story, runErr)
+	}
+	if report.Passed < 1 {
+		return triagePreflightResult{}, fmt.Errorf("ghagent: triage preflight %q ran no passing turn (passed=%d failed=%d): %s", route.Story, report.Passed, report.Failed, summarizeFlowFailures(report))
+	}
+
+	result := triagePreflightResult{}
+	for _, r := range report.Results {
+		result.Turns += len(r.Turns)
+		for _, t := range r.Turns {
+			verdict, calls := extractTriagePreflightVerdict(t.Events)
+			result.HostCalls += calls
+			if verdict != nil {
+				result.Payload = verdict
+			}
+		}
+	}
+	result.applyPayload()
+	if result.Verdict == "" {
+		return result, fmt.Errorf("ghagent: triage preflight %q produced no verdict", route.Story)
+	}
+	return result, nil
+}
+
+func extractTriagePreflightVerdict(events []store.Event) (map[string]any, int) {
+	hostCalls := 0
+	var verdict map[string]any
+	for _, ev := range events {
+		if ev.Kind != store.HostReturned {
+			continue
+		}
+		hostCalls++
+		var payload struct {
+			Namespace string         `json:"namespace"`
+			Data      map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			continue
+		}
+		if payload.Namespace != "host.agent.codeact" {
+			continue
+		}
+		for _, key := range []string{"payload", "submitted"} {
+			if m, ok := payload.Data[key].(map[string]any); ok {
+				verdict = m
+			}
+		}
+	}
+	return verdict, hostCalls
+}
+
+func (r *triagePreflightResult) applyPayload() {
+	if r.Payload == nil {
+		return
+	}
+	r.Verdict = strings.TrimSpace(stringFromAny(r.Payload["verdict"]))
+	r.Confidence = r.Payload["confidence"]
+	r.SummaryTitle = strings.TrimSpace(stringFromAny(r.Payload["summary_title"]))
+	r.Evidence = strings.TrimSpace(stringFromAny(r.Payload["evidence"]))
+	r.SummaryMarkdown = strings.TrimSpace(stringFromAny(r.Payload["summary_markdown"]))
+	r.SuggestedAction = strings.TrimSpace(stringFromAny(r.Payload["suggested_action"]))
+	r.FixedInRef = strings.TrimSpace(stringFromAny(r.Payload["fixed_in_ref"]))
+}
+
+func alreadyFixedTriageResult(route Route, job *jobs.GHJob, mode string, worktreeAbs string, triage triagePreflightResult) RunResult {
+	summary := fmt.Sprintf("Triage preflight for `%s` returned `ALREADY-FIXED`; skipped the full bugfix maker pipeline.\n\n%s", job.OriginRef, triage.SummaryMarkdown)
+	verification := fmt.Sprintf(`# Independent verification
+
+- Story: %q
+- Harness: %q
+- Triage preflight: ALREADY-FIXED
+- Full maker pipeline: skipped
+- Host returns observed: %d
+- Result: passed
+
+The gh-agent dispatcher ran the bugfix story's triage-only preflight and did not run the maker pipeline because the filed issue no longer described a live defect.
+
+## Evidence
+
+%s
+`, route.Story, mode, triage.HostCalls, triage.Evidence)
+	return RunResult{
+		RunURL:        "kitsoki://run/" + job.JobID,
+		FinalState:    "triaged",
+		Turns:         triage.Turns,
+		Summary:       summary,
+		Stubbed:       false,
+		Harness:       mode,
+		Worktree:      worktreeAbs,
+		RealHostCalls: triage.HostCalls,
+		Assets: []RunAsset{{
+			Name:     "fix-report.md",
+			MimeType: "text/markdown",
+			Data:     []byte(summary + "\n"),
+		}, {
+			Name:     "independent-verify.md",
+			MimeType: "text/markdown",
+			Data:     []byte(verification),
+		}, {
+			Name:     "triage-verdict.md",
+			MimeType: "text/markdown",
+			Data:     []byte(renderTriageVerdictMarkdown(triage)),
+		}},
+	}
+}
+
+func renderTriageVerdictMarkdown(triage triagePreflightResult) string {
+	lines := []string{
+		"# Triage verdict",
+		"",
+		"- Verdict: `" + triage.Verdict + "`",
+		"- Confidence: " + stringFromAny(triage.Confidence),
+		"- Suggested action: " + triage.SuggestedAction,
+	}
+	if triage.FixedInRef != "" {
+		lines = append(lines, "- Fixed in: "+triage.FixedInRef)
+	}
+	lines = append(lines, "", "## Evidence", "", triage.Evidence, "", "## Summary", "", triage.SummaryMarkdown)
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func defaultStillLiveTriageVerdict(job *jobs.GHJob) map[string]any {
+	return map[string]any{
+		"verdict":             "STILL-LIVE",
+		"confidence":          0.8,
+		"summary_title":       "STILL-LIVE — queued issue proceeds to bugfix",
+		"evidence":            "Replay harness preflight preserved the triage gate for " + job.OriginRef + ".",
+		"summary_markdown":    "The deterministic replay preflight treats the queued issue as still actionable so the recorded full bugfix pipeline can run without live LLM spend.",
+		"suggested_action":    "drive the full bugfix pipeline",
+		"fixed_in_ref":        nil,
+		"involved_components": []any{"gh-agent replay preflight"},
+	}
+}
+
+func firstNonNilMap(values ...map[string]any) map[string]any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return map[string]any{}
+}
+
+func stringFromAny(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case fmt.Stringer:
+		return v.String()
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 // extractRealDispatchEvidence scans one turn's events for HostReturned
