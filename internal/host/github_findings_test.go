@@ -174,6 +174,11 @@ func TestGitHubFileFindings_FilesCredibleIssues(t *testing.T) {
 	uploads := 0
 	restore := githubFindingsAPI(t, &issueBodies, &uploads, false)
 	defer restore()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("findings filing must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
 
 	res, err := host.GitHubFileFindings(context.Background(), host.FindingsFilingInput{
 		RunDir: dir, RepoRoot: dir, Repo: "o/r", FiledBy: "qa",
@@ -296,7 +301,7 @@ func TestGitHubFileFindings_Idempotent(t *testing.T) {
 }
 
 // TestGitHubFileFindings_DryRun proves dry-run renders bodies without touching
-// gh or the bundle.
+// the network or the bundle.
 func TestGitHubFileFindings_DryRun(t *testing.T) {
 	dir := writeFindingsBundle(t)
 	before, err := os.ReadFile(filepath.Join(dir, "findings.json"))
@@ -304,7 +309,7 @@ func TestGitHubFileFindings_DryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	restore := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
-		t.Errorf("dry-run must not exec gh, got: %s", strings.Join(args, " "))
+		t.Errorf("dry-run must not exec, got: %s %s", name, strings.Join(args, " "))
 		return "", "", 1, nil
 	})
 	defer restore()

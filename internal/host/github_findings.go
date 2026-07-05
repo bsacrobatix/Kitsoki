@@ -13,8 +13,9 @@
 // records that filing was requested so the runner's review/validate gates can
 // require "issues filed for all credible findings".
 //
-// Everything shells through the one cliExec seam, so tests stub the runner and
-// never touch real GitHub.
+// The GitHub write path uses the native ticket provider and GitHub REST helpers,
+// so headless autonomous runs only need GH_TOKEN/GITHUB_TOKEN. Tests inject a
+// fake HTTP API and never touch real GitHub.
 package host
 
 import (
@@ -58,7 +59,7 @@ type FindingFilingOutcome struct {
 
 // FindingsFilingResult is what GitHubFileFindings returns. Per-finding failures
 // are recorded in Outcomes/Failed (the run completes); only bundle-level
-// problems (unreadable bundle, gh missing for a non-dry run) return an error.
+// problems (unreadable bundle, missing target repo, etc.) return an error.
 type FindingsFilingResult struct {
 	Status   string                 `json:"status"` // findings_filed | findings_dry_run
 	Repo     string                 `json:"ticket_repo"`
@@ -107,10 +108,6 @@ func GitHubFileFindings(ctx context.Context, in FindingsFilingInput) (FindingsFi
 	driverPlan, _ := readJSONMap(filepath.Join(runDir, "driver-plan.json"))
 	journal, _ := readJSONMap(filepath.Join(runDir, "driver-journal.json"))
 	evidence, _ := readJSONMap(filepath.Join(runDir, "evidence.json"))
-
-	if !in.DryRun && !ghAvailable(ctx) {
-		return res, fmt.Errorf("gh CLI not available — install github.com/cli/cli and run `gh auth login`")
-	}
 
 	items, _ := findings["items"].([]any)
 	changed := false

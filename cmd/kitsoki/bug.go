@@ -103,7 +103,7 @@ recorded GitHub issue yet:
     review/validate gates can require full filing coverage.
 
 --dry-run renders the issues that WOULD be filed (title/body/evidence) as JSON
-without calling gh or writing to the bundle.
+without calling GitHub or writing to the bundle.
 
 Output is a single JSON object on stdout. The command exits 0 whenever the
 walk completes; per-finding failures are reported in the JSON (failed count +
@@ -130,7 +130,7 @@ outcome rows), not as an exit code.`,
 	}
 	cmd.Flags().StringVar(&runDir, "run-dir", "", "product-journey run bundle directory (required)")
 	cmd.Flags().StringVar(&repo, "repo", "", "owner/repo to file issues on (required)")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "render what would be filed without calling gh or writing the bundle")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "render what would be filed without calling GitHub or writing the bundle")
 	_ = cmd.MarkFlagRequired("run-dir")
 	_ = cmd.MarkFlagRequired("repo")
 	return cmd
