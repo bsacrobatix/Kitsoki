@@ -24,6 +24,7 @@ package host
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -46,7 +47,11 @@ func (copilotBackend) ResolveBin(ctx context.Context) (string, error) {
 	}
 	path, err := exec.LookPath("copilot")
 	if err != nil {
-		return "", ErrAgentUnavailable
+		// See codexBackend.ResolveBin: wraps the shared sentinel so
+		// errors.Is(_, ErrAgentUnavailable) still holds, but names the
+		// backend that actually failed instead of the sentinel's
+		// hardcoded "claude" text.
+		return "", fmt.Errorf("host.agent.converse: `copilot` binary not found on PATH; install the GitHub Copilot CLI: %w", ErrAgentUnavailable)
 	}
 	return path, nil
 }
