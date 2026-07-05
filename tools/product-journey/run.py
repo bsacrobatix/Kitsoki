@@ -5051,6 +5051,103 @@ def autonomous_marathon_control_summary(control: dict) -> str:
     )
 
 
+def gh_agent_health_url(public_base_url: str) -> str:
+    base = public_base_url.strip().rstrip("/")
+    if not base:
+        return ""
+    return f"{base}/healthz"
+
+
+def check_gh_agent_health(public_base_url: str, timeout: float = 5.0) -> dict:
+    url = gh_agent_health_url(public_base_url)
+    if not url:
+        return {
+            "status": "fail",
+            "summary": "gh_agent_public_base_url is required",
+            "url": "",
+        }
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            body = resp.read(256).decode("utf-8", errors="replace").strip()
+            code = getattr(resp, "status", resp.getcode())
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {
+            "status": "fail",
+            "summary": f"{url}: {exc}",
+            "url": url,
+        }
+    if code == 200 and body == "ok":
+        return {
+            "status": "pass",
+            "summary": f"{url}: ok",
+            "url": url,
+            "http_status": code,
+        }
+    return {
+        "status": "fail",
+        "summary": f"{url}: expected HTTP 200 body ok, got HTTP {code} body {body!r}",
+        "url": url,
+        "http_status": code,
+    }
+
+
+def invalid_autonomous_marathon_creation(
+    created_dir: Path,
+    run_json: dict,
+    summary: str,
+    validation_issue: str,
+    gate_summary: str,
+    ticket_repo: str,
+    gh_agent_public_base_url: str,
+    gh_agent_health: Optional[dict] = None,
+) -> dict:
+    result = run_story_summary(created_dir)
+    result.update({
+        "status": "autonomous_marathon_invalid",
+        "autonomous_marathon_status": "autonomous_marathon_invalid",
+        "autonomous_marathon_summary": summary,
+        "autonomous_driver_mode": "pending",
+        "autonomous_driver_status": "invalid",
+        "autonomous_driver_summary": summary,
+        "autonomous_driver_evidence_count": 0,
+        "autonomous_driver_issue_count": 0,
+        "run_id": run_json["run_id"],
+        "run_dir": str(created_dir),
+        "project": run_json["project"]["id"],
+        "persona": run_json["persona"]["id"],
+        "seed": run_json.get("seed", ""),
+        "deck_path": str(created_dir / "deck.slidey.json"),
+        "execution_plan_path": str(created_dir / "execution-plan.md"),
+        "driver_plan_path": str(created_dir / "driver-plan.md"),
+        "driver_journal_path": str(created_dir / "driver-journal.md"),
+        "agent_brief_path": str(created_dir / "agent-brief.md"),
+        "driver_handoff_path": str(created_dir / "driver-handoff.md"),
+        "media_manifest_path": str(created_dir / "media-manifest.json"),
+        "scenario_outcomes_path": str(created_dir / "scenario-outcomes.md"),
+        "ticket_repo": ticket_repo,
+        "gh_agent_public_base_url": gh_agent_public_base_url,
+        "gh_agent_health_status": (gh_agent_health or {}).get("status", ""),
+        "gh_agent_health_summary": (gh_agent_health or {}).get("summary", ""),
+        "autonomous_fix_status": "not_run",
+        "independent_verify_status": "not_run",
+        "independent_verify_summary": summary,
+        "autonomous_gate_summary": gate_summary,
+        "autonomous_control_path": "",
+        "autonomous_control_markdown_path": "",
+        "autonomous_control_status": "not_run",
+        "autonomous_control_summary": "",
+        "review_status": "not_run",
+        "review_summary": "",
+        "review_failed_count": 0,
+        "validation_status": "invalid",
+        "validation_errors": 1,
+        "validation_warnings": 0,
+        "validation_issue_summary": validation_issue,
+    })
+    result["autonomous_marathon_report_path"] = str(write_autonomous_marathon_report(created_dir, result))
+    return result
+
+
 def write_autonomous_marathon_control(
     run_dir: Path,
     run_json: dict,
@@ -5428,6 +5525,40 @@ def autonomous_marathon(
             live_budget_minutes,
             [],
         )
+        health: Optional[dict] = None
+        if autonomous_driver_mode != "replay" and live_budget_minutes > 0:
+            if not ticket_repo:
+                return invalid_autonomous_marathon_creation(
+                    created_dir,
+                    run_json,
+                    "Live-budgeted autonomous marathon requires ticket_repo before driver handoff.",
+                    "ticket-repo-required",
+                    "preflight=pass, filing=fail, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=fail",
+                    ticket_repo,
+                    gh_agent_public_base_url,
+                )
+            if not gh_agent_public_base_url:
+                return invalid_autonomous_marathon_creation(
+                    created_dir,
+                    run_json,
+                    "Live-budgeted autonomous marathon requires gh_agent_public_base_url before driver handoff.",
+                    "gh-agent-public-base-url",
+                    "preflight=pass, filing=not_run, gh_agent=fail, independent_verify=not_run, review=not_run, validation=fail",
+                    ticket_repo,
+                    gh_agent_public_base_url,
+                )
+            health = check_gh_agent_health(gh_agent_public_base_url)
+            if health.get("status") != "pass":
+                return invalid_autonomous_marathon_creation(
+                    created_dir,
+                    run_json,
+                    f"Hosted gh-agent health check failed before driver handoff: {health.get('summary', '')}",
+                    "gh-agent-health",
+                    "preflight=pass, filing=not_run, gh_agent=fail, independent_verify=not_run, review=not_run, validation=fail",
+                    ticket_repo,
+                    gh_agent_public_base_url,
+                    health,
+                )
         control = write_autonomous_marathon_control(
             created_dir,
             run_json,
@@ -5512,6 +5643,8 @@ def autonomous_marathon(
             "autonomous_control_markdown_path": str(autonomous_marathon_control_markdown_path(created_dir)),
             "autonomous_control_status": control.get("status", ""),
             "autonomous_control_summary": autonomous_marathon_control_summary(control),
+            "gh_agent_health_status": (health or {}).get("status", ""),
+            "gh_agent_health_summary": (health or {}).get("summary", ""),
         }
         result.update(run_story_summary(created_dir))
         result["autonomous_marathon_report_path"] = str(write_autonomous_marathon_report(created_dir, result))

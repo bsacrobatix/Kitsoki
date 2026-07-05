@@ -486,7 +486,9 @@ preflight.
 Live-budgeted pending marathons must also provide `ticket_repo` and
 `gh_agent_public_base_url` before handoff, so live capture cannot begin for a
 run whose downstream autonomous filing, gh-agent repair, close-out, and
-review-link gates cannot complete.
+review-link gates cannot complete. The runner also checks
+`<gh_agent_public_base_url>/healthz` and refuses `ready_for_driver` unless it
+returns HTTP 200 with body `ok`.
 
 Do not bypass this with raw `gh` commands. Product-journey issue filing and
 autonomous fixes are intentionally routed through Kitsoki's native

@@ -179,6 +179,8 @@ world:
   gh_agent_missing_triage_summary: { type: string, default: "" }
   gh_agent_independent_verify_summary: { type: string, default: "" }
   gh_agent_missing_verify_summary: { type: string, default: "" }
+  gh_agent_health_status: { type: string, default: "" }
+  gh_agent_health_summary: { type: string, default: "" }
   native_ghagent_status: { type: string, default: "" }
   native_ghagent_summary: { type: string, default: "" }
   native_ghagent_exit_code: { type: int, default: 0 }
