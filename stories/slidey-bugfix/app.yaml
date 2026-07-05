@@ -37,6 +37,11 @@ hosts:
   - host.diff.open
   - host.run
   - host.artifacts_dir
+  # bf's opt-in editor-awareness pull (WS-C C3, validating room). `hosts:
+  # declared` on the bf import is strict — every child host bind must be
+  # listed here even though bugfix_exit is pinned to open-PR below (the
+  # room still runs on_enter regardless of the exit slot).
+  - host.ide.get_diagnostics
 
 imports:
   bf:
@@ -75,6 +80,11 @@ imports:
       # bf triage-only mode terminal (unreachable here — full mode — but the
       # loader requires every child exit be mapped).
       triaged:          { to: shipped }
+      # bf's opt-in CI-watch/merge tail (WS-C C3, bugfix_exit=open-PR-merge).
+      # bugfix_exit is pinned to "open-PR" above so this is unreachable from
+      # this instance today — mapped so the loader's every-exit-covered
+      # check passes.
+      merged:           { to: shipped }
 
     # Surface a bare `start` intent for MCP and web composer users while
     # preserving namespaced bugfix intents for advanced flows.

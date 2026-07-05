@@ -1680,6 +1680,18 @@ imports:
         to: ticket_search
         set:
           prev_state: "landing"
+      # bf's own opt-in CI-watch/merge tail (WS-C C3, bugfix_exit=open-PR-merge
+      # — bugfix's imports.pr composing pr-refinement directly). dev-story's
+      # world_in above only ever projects direct-ship / open-PR, so this exit
+      # is unreachable from THIS hub in practice (same "declared but not
+      # exercised here" shape as `triaged` below) — mapped so the loader's
+      # every-exit-covered check passes, landing exactly where dev-story's
+      # OWN `pr` import's `merged` exit lands.
+      merged:
+        to: landing
+        set:
+          status:      "merged"
+          last_pr_url: "{{ world.bf__pr_url }}"
 
   pr:
     source: ../pr-refinement

@@ -55,12 +55,13 @@ Verified wire contract: `.context/claude-code-ide-interface.md`.
    are synchronous). Follow-up: add a post-effect suspend/resume gate and route
    the verdict through the decider machinery as a recorded decision.
 
-3. **Adopt in the production `bugfix` story.** The `ide_awareness` demo proves
-   the diagnostics-behind-an-availability-gate pattern end to end. Migrating
-   `bugfix` to pull `host.ide.get_diagnostics` (falling back to its real linter
-   when no editor is attached) was intentionally deferred — `bugfix` validates
-   via its agent rather than a discrete lint call, so the seam wants design
-   work, not a shoehorn (`stories/CLAUDE.md`).
+3. ~~**Adopt in the production `bugfix` story.**~~ Done (WS-C C3): the
+   `validating` room pulls `host.ide.get_diagnostics` on entry and threads the
+   result into the validator agent's prompt args (`ide_connected`,
+   `ide_diagnostics_count`, `ide_diagnostics`) alongside the build log — no
+   editor attached degrades honestly (`connected:false`), matching the
+   `ide_awareness` demo's pattern. See `stories/bugfix/README.md` ("Editor
+   awareness") and `stories/bugfix/flows/validating_surfaces_ide_diagnostics.yaml`.
 
 4. **JetBrains parity.** The lock-file/token/ws contract is shared; the client
    is transport- and tool-agnostic, so JetBrains is a capability-probe away.
