@@ -122,16 +122,57 @@ func TestGitHubTicket_Search_Happy(t *testing.T) {
 }
 
 func TestListGitHubInboxItems_Happy(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	fr.responses["gh issue list --repo acme/repo --state open --assignee @me --limit 25 --json number,title,assignees,url"] = fakeResp{
-		stdout: `[{"number":7,"title":"Assigned issue","url":"https://github.com/acme/repo/issues/7","assignees":[{"login":"brad"}]}]`,
-	}
-	fr.responses["gh pr list --repo acme/repo --state open --search review-requested:@me --limit 25 --json number,title,author,url"] = fakeResp{
-		stdout: `[{"number":42,"title":"Review this","url":"https://github.com/acme/repo/pull/42","author":{"login":"alice"}}]`,
-	}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
+	t.Setenv("GH_TOKEN", "test-token")
+	var seenIssues, seenPRs bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/search/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if got := r.URL.Query().Get("per_page"); got != "25" {
+			t.Fatalf("per_page = %q", got)
+		}
+		q := r.URL.Query().Get("q")
+		switch {
+		case strings.Contains(q, "is:issue"):
+			seenIssues = true
+			for _, want := range []string{"repo:acme/repo", "is:open", "assignee:@me"} {
+				if !strings.Contains(q, want) {
+					t.Fatalf("issue query %q missing %q", q, want)
+				}
+			}
+			writeJSON(w, map[string]any{"items": []map[string]any{{
+				"number":    7,
+				"title":     "Assigned issue",
+				"html_url":  "https://github.com/acme/repo/issues/7",
+				"assignees": []map[string]any{{"login": "brad"}},
+			}}})
+		case strings.Contains(q, "is:pr"):
+			seenPRs = true
+			for _, want := range []string{"repo:acme/repo", "is:open", "review-requested:@me"} {
+				if !strings.Contains(q, want) {
+					t.Fatalf("pr query %q missing %q", q, want)
+				}
+			}
+			writeJSON(w, map[string]any{"items": []map[string]any{{
+				"number":   42,
+				"title":    "Review this",
+				"html_url": "https://github.com/acme/repo/pull/42",
+				"user":     map[string]any{"login": "alice"},
+			}}})
+		default:
+			t.Fatalf("unexpected search query: %q", q)
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		if name == "gh" {
+			t.Fatalf("ListGitHubInboxItems must not invoke gh: %s %s", name, strings.Join(args, " "))
+		}
+		return "", "", 1, nil
+	})
+	defer restoreExec()
 
 	items, err := host.ListGitHubInboxItems(context.Background(), host.GitHubInboxOptions{
 		Repo:          "acme/repo",
@@ -141,6 +182,9 @@ func TestListGitHubInboxItems_Happy(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("ListGitHubInboxItems: %v", err)
+	}
+	if !seenIssues || !seenPRs {
+		t.Fatalf("expected issue and PR search calls, seenIssues=%v seenPRs=%v", seenIssues, seenPRs)
 	}
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d (%+v)", len(items), items)
@@ -155,12 +199,33 @@ func TestListGitHubInboxItems_Happy(t *testing.T) {
 
 func TestListGitHubInboxItems_CustomFilters(t *testing.T) {
 	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	fr.responses["gh issue list --state open --assignee octo --limit 5 --json number,title,assignees,url"] = fakeResp{
-		stdout: `[]`,
-	}
+	fr.responses["git remote get-url origin"] = fakeResp{stdout: "git@github.com:acme/repo.git\n"}
 	restore := host.SetExecRunnerForTest(fr.run)
 	defer restore()
+	t.Setenv("GH_TOKEN", "test-token")
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != http.MethodGet || r.URL.Path != "/search/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if got := r.URL.Query().Get("per_page"); got != "5" {
+			t.Fatalf("per_page = %q", got)
+		}
+		q := r.URL.Query().Get("q")
+		for _, want := range []string{"repo:acme/repo", "is:issue", "is:open", "assignee:octo"} {
+			if !strings.Contains(q, want) {
+				t.Fatalf("query %q missing %q", q, want)
+			}
+		}
+		if strings.Contains(q, "is:pr") {
+			t.Fatalf("did not expect PR query: %q", q)
+		}
+		writeJSON(w, map[string]any{"items": []map[string]any{}})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
 
 	items, err := host.ListGitHubInboxItems(context.Background(), host.GitHubInboxOptions{
 		IncludeIssues: true,
@@ -173,9 +238,12 @@ func TestListGitHubInboxItems_CustomFilters(t *testing.T) {
 	if len(items) != 0 {
 		t.Fatalf("expected no items, got %+v", items)
 	}
+	if calls != 1 {
+		t.Fatalf("expected one issue search, got %d", calls)
+	}
 	for _, cmd := range fr.calls {
-		if strings.Contains(cmd, "pr list") {
-			t.Fatalf("did not expect PR query when IncludePRs=false: %v", fr.calls)
+		if strings.HasPrefix(cmd, "gh ") {
+			t.Fatalf("did not expect gh query: %v", fr.calls)
 		}
 	}
 }

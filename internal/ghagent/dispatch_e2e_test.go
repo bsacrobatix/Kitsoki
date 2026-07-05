@@ -23,30 +23,30 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// stubGHCli installs a cliExec fake that answers the three gh calls the ingress
-// poll makes (gh --version for ghAvailable, gh issue list, gh pr list) entirely
-// offline. issuesJSON/prsJSON are the --json stdout payloads. Returns a restore.
-func stubGHCli(t *testing.T, issuesJSON, prsJSON string) func() {
+// stubGitHubInboxAPI installs a fake GitHub Search API for inbox polling.
+// issuesJSON/prsJSON are JSON arrays used as search/issues `items`.
+func stubGitHubInboxAPI(t *testing.T, issuesJSON, prsJSON string) func() {
 	t.Helper()
-	return host.SetExecRunnerForTest(func(_ context.Context, _ /*dir*/ string, name string, args ...string) (string, string, int, error) {
-		if name != "gh" {
-			t.Fatalf("unexpected exec %q %v", name, args)
+	t.Setenv("GH_TOKEN", "test-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/search/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
-		joined := strings.Join(args, " ")
+		q := r.URL.Query().Get("q")
 		switch {
-		case strings.HasPrefix(joined, "--version"):
-			return "gh version 2.0.0", "", 0, nil
-		case strings.HasPrefix(joined, "issue list"):
-			return issuesJSON, "", 0, nil
-		case strings.HasPrefix(joined, "pr list"):
-			return prsJSON, "", 0, nil
-		case strings.HasPrefix(joined, "pr view"):
-			return `{"state":"OPEN","statusCheckRollup":[{"name":"ci","conclusion":"SUCCESS"}]}`, "", 0, nil
+		case strings.Contains(q, "is:issue"):
+			writeRawSearchItemsForDispatchTest(t, w, issuesJSON)
+		case strings.Contains(q, "is:pr"):
+			writeRawSearchItemsForDispatchTest(t, w, prsJSON)
 		default:
-			t.Fatalf("unexpected gh args: %s", joined)
-			return "", "", 1, nil
+			t.Fatalf("unexpected search query: %q", q)
 		}
-	})
+	}))
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	return func() {
+		restoreAPI()
+		srv.Close()
+	}
 }
 
 func TestCommentUpdateRetriesWithoutPostingDuplicate(t *testing.T) {
@@ -635,10 +635,10 @@ func TestDispatch_MentionToAckLoop(t *testing.T) {
 	ctx := context.Background()
 
 	issuesJSON := `[{"number":42,"title":"@kitsoki please fix the crash","assignees":[{"login":"alice"}],"url":"https://github.com/o/r/issues/42"}]`
-	restore := stubGHCli(t, issuesJSON, `[]`)
+	restore := stubGitHubInboxAPI(t, issuesJSON, `[]`)
 	defer restore()
 
-	// Real ingress: ListGitHubInboxItems shells gh through the cliExec seam.
+	// Real ingress: ListGitHubInboxItems uses the native GitHub Search API.
 	items, err := host.ListGitHubInboxItems(ctx, host.GitHubInboxOptions{
 		Repo: "o/r", IncludeIssues: true, IncludePRs: true,
 	})
@@ -1049,11 +1049,19 @@ func TestDispatch_PRBeat(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("GH_TOKEN", "test-token")
 
-	prsJSON := `[{"number":77,"title":"@kitsoki review this PR","author":{"login":"bob"},"url":"https://github.com/o/r/pull/77"}]`
-	restore := stubGHCli(t, `[]`, prsJSON)
-	defer restore()
+	prsJSON := `[{"number":77,"title":"@kitsoki review this PR","user":{"login":"bob"},"html_url":"https://github.com/o/r/pull/77"}]`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/search/issues":
+			q := r.URL.Query().Get("q")
+			switch {
+			case strings.Contains(q, "is:issue"):
+				writeRawSearchItemsForDispatchTest(t, w, `[]`)
+			case strings.Contains(q, "is:pr"):
+				writeRawSearchItemsForDispatchTest(t, w, prsJSON)
+			default:
+				t.Fatalf("unexpected search query: %q", q)
+			}
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/pulls/77":
 			writeJSONForDispatchTest(t, w, map[string]any{
 				"state":    "open",
@@ -1147,6 +1155,15 @@ func writeJSONForDispatchTest(t *testing.T, w http.ResponseWriter, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		t.Fatalf("write json: %v", err)
 	}
+}
+
+func writeRawSearchItemsForDispatchTest(t *testing.T, w http.ResponseWriter, rawItems string) {
+	t.Helper()
+	var items json.RawMessage
+	if err := json.Unmarshal([]byte(rawItems), &items); err != nil {
+		t.Fatalf("decode search items: %v", err)
+	}
+	writeJSONForDispatchTest(t, w, map[string]any{"items": items})
 }
 
 // TestDispatchStubbedRunNeverSaysDone is the direct unit test for

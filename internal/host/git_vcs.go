@@ -269,13 +269,6 @@ func gitPush(ctx context.Context, workdir string, args map[string]any) (Result, 
 
 // ─── GitHub PR ops ────────────────────────────────────────────────────────
 
-// ghAvailable reports whether the `gh` binary is on PATH. It remains for
-// GitHub inbox helpers that still use gh list commands.
-func ghAvailable(ctx context.Context) bool {
-	_, _, code, err := cliExec(ctx, "", "gh", "--version")
-	return err == nil && code == 0
-}
-
 func ghOpenPR(ctx context.Context, workdir string, args map[string]any) (Result, error) {
 	title, _ := args["title"].(string)
 	body, _ := args["body"].(string)
