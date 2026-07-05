@@ -6,8 +6,10 @@
 Remaining: switch-route ergonomics, TUI parity for receipt/rewind controls, and
 optional extra no-LLM fixtures for help/meta_edit verdict classes. The
 single-decision-point direction (one shared routing stack instead of a
-TUI pre-pass plus `Turn`/`OneShot`) is being pursued in
-[`never-silent-runtime.md`](never-silent-runtime.md).
+TUI pre-pass plus `Turn`/`OneShot`) shipped as the never-silent runtime
+— see [`semantic-routing.md`](../architecture/semantic-routing.md#13-synonym-templates)
+(the proposal, `never-silent-runtime.md`, was deleted per lifecycle
+guidance once its only open item shipped).
 **Kind:**   runtime
 **Epic:**   — standalone
 **Relation:** builds on [`ad-hoc-structured-plan.md`](ad-hoc-structured-plan.md)

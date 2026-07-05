@@ -185,16 +185,36 @@ Confidence bands:
 **Near-miss band.** A verdict strictly between 0 (a genuine miss,
 which never reaches this switch) and `semantic_mid_bar` (0.65 by
 default) is a `near_miss`: scored above the reject floor but below
-the accept floor. It is recorded on the trace (`turn.near_miss`, with
-`confidence` + `threshold`) but never auto-resolves to the nearest
-authored intent — that guess is exactly how prose misroutes to an
-adjacent command. Reusing the existing high/mid bars means there is
-no new tunable to drift. Today the band falls back to the next
-routing tier (`nearMissWorkbenchEnabled` is a stubbed-`false` feature
-check); once the S1 workbench exists, a near-miss escalates there as
-a governed free-form request instead. See
-[`never-silent-runtime.md`](../proposals/never-silent-runtime.md) for
-the rationale.
+the accept floor. It never auto-resolves to the nearest authored
+intent — that guess is exactly how prose misroutes to an adjacent
+command. Reusing the existing high/mid bars means there is no new
+tunable to drift.
+
+`TrySemantic`'s `nearMissWorkbenchDestination` (`internal/orchestrator/semantic.go`)
+resolves where the near-miss escalates, in order:
+
+1. The current room is itself a [room-workbench](room-workbench.md)
+   (`workbench:` block): the verdict routes into that room's
+   synthesized `<room>_capture` intent — the governed free-form
+   request path — filling its single required string slot with the
+   whole utterance.
+2. Otherwise, the app's `routing.free_form_fallback` floor — if it
+   names a *different* room that is itself a workbench and that
+   room's capture intent is reachable from here (the same
+   load-time-cloned arc `routeViaFreeFormFallback` relies on) —
+   escalates there instead.
+3. Otherwise no workbench is reachable: the band falls back to
+   today's off-ramp / no-match handling (the caller advances to the
+   next routing tier — turn cache, `default_intent`, the app-level
+   free-form fallback, then the main-turn interpreter).
+
+Either way the decision is recorded on the trace (`turn.near_miss`,
+with `confidence`, `threshold`, and `destination` — the resolved
+capture intent's name, or `"interpreter_fallback"`) so a near-miss is
+always visible as a routing decision, never silently absorbed into
+"no match". See
+[`room-workbench.md`](room-workbench.md) for the workbench primitive
+this wiring targets.
 
 > Case folding caveat: captured `string` slot values are NFKC-
 > normalised and lowercased by `lex.Tokenize` before the matcher
