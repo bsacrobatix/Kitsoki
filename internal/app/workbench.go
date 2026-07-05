@@ -150,8 +150,10 @@ func expandOneWorkbench(def *AppDef, file, statePath, room string, s *State) []e
 	if strings.TrimSpace(captureSlot) == "" {
 		captureSlot = room + "_request"
 	}
-	noteKey := room + "_note"
-	captureIntent := room + "_capture"
+	namespacePrefix := workbenchNamespacePrefix(captureSlot)
+	noteKey := namespacePrefix + room + "_note"
+	captureIntent := namespacePrefix + room + "_capture"
+	ensureWorkbenchWorldKeys(def, captureSlot, noteKey)
 
 	offRampAgent := decl.OffRampAgent
 	if strings.TrimSpace(offRampAgent) == "" {
@@ -249,6 +251,66 @@ func expandOneWorkbench(def *AppDef, file, statePath, room string, s *State) []e
 	}
 
 	return errs
+}
+
+func workbenchNamespacePrefix(captureSlot string) string {
+	if idx := strings.LastIndex(captureSlot, "__"); idx >= 0 {
+		return captureSlot[:idx+2]
+	}
+	return ""
+}
+
+func ensureWorkbenchWorldKeys(def *AppDef, captureSlot, noteKey string) {
+	if def.World == nil {
+		def.World = map[string]VarDef{}
+	}
+	if _, exists := def.World[captureSlot]; !exists {
+		def.World[captureSlot] = VarDef{Type: "string", Default: ""}
+	}
+	if _, exists := def.World[noteKey]; !exists {
+		def.World[noteKey] = VarDef{Type: "object", Default: map[string]any{}}
+	}
+}
+
+func validateWorkbenchContextArgs(file string, def *AppDef, worldKeys map[string]struct{}, errs *[]error) {
+	var walk func(prefix string, states map[string]*State)
+	walk = func(prefix string, states map[string]*State) {
+		for _, name := range sortedKeys(states) {
+			s := states[name]
+			if s == nil {
+				continue
+			}
+			statePath := joinPath(prefix, name)
+			if s.Workbench != nil {
+				for _, argName := range sortedKeys(s.Workbench.ContextArgs) {
+					for _, ref := range worldRefsInString(s.Workbench.ContextArgs[argName]) {
+						if _, ok := worldKeys[ref]; !ok {
+							*errs = append(*errs, &ValidationError{
+								File:    file,
+								Message: fmt.Sprintf("state %q: workbench.context_args.%s references undeclared world key %q", statePath, argName, ref),
+							})
+						}
+					}
+				}
+			}
+			if len(s.States) > 0 {
+				walk(statePath, s.States)
+			}
+		}
+	}
+	walk("", def.States)
+}
+
+func worldRefsInString(s string) []string {
+	if s == "" {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for _, match := range worldIdentRE.FindAllString(s, -1) {
+		key := strings.TrimPrefix(match, "world.")
+		seen[key] = struct{}{}
+	}
+	return sortedKeys(seen)
 }
 
 // validateWorkbenchPlanContract loads decl's acceptance_schema JSON file
