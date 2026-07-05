@@ -30,11 +30,15 @@
 package app
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	starlarkhost "kitsoki/internal/host/starlark"
 )
 
 // importAliasRE constrains an import alias to characters safe to use as a
@@ -146,6 +150,16 @@ func resolveImports(def *AppDef, file, baseDir string, parents []string, resolve
 			continue
 		}
 
+		// Resolve any script-form host_bindings entries (S3a/D2.1) BEFORE
+		// folding: synthesizes a handler name for each, records it on
+		// def.StarlarkHostBindings, and rewrites the entry in place to a
+		// plain Handler spec so foldChild's binding-application logic
+		// (9/9a/9b below) never needs to know about scripts at all.
+		if hbErrs := resolveHostBindingScripts(def, imp, baseDir, file, alias); len(hbErrs) > 0 {
+			errs = append(errs, hbErrs...)
+			continue
+		}
+
 		childPath, resolveErr := resolveImportSource(imp.Source, baseDir, resolver)
 		if resolveErr != nil {
 			errs = append(errs, &ValidationError{File: file, Message: fmt.Sprintf("imports.%s: %v", alias, resolveErr)})
@@ -233,6 +247,83 @@ func resolveImports(def *AppDef, file, baseDir string, parents []string, resolve
 	// runtime treat the merged def as a single flat app.
 	def.Imports = nil
 	return errs
+}
+
+// starlarkBindingHandlerPrefix names every synthetic host handler
+// resolveHostBindingScripts introduces for a script-form host_bindings entry
+// (S3a/D2.1). Kept distinct from ordinary host.* names purely for
+// readability in traces/errors; dispatch treats it like any other handler
+// name.
+const starlarkBindingHandlerPrefix = "host.starlark_binding."
+
+// resolveHostBindingScripts resolves every script-form entry in imp.HostBindings
+// (a bare `.star`-suffixed string or a `{script: ...}` mapping — see
+// HostBindingSpec) against baseDir (the directory of the app.yaml declaring
+// this imports.<alias>.host_bindings block, NOT the child being imported),
+// verifies the script and its sidecar exist, synthesizes a deterministic
+// handler name, records the (handler name -> absolute script path) pair on
+// def.StarlarkHostBindings, and rewrites the entry in place to a plain
+// Handler spec. This runs BEFORE foldChild so every later consumer of
+// imp.HostBindings (foldChild's binding-application logic, synthesis.go) only
+// ever sees plain handler names — script resolution is fully contained here.
+//
+// The handler name is derived from a hash of the absolute script path so:
+//   - the same script bound twice (e.g. via both a base-name and a
+//     prefixed host_bindings key) yields the same handler name — no
+//     duplicate registration.
+//   - two different aliases/levels binding two different scripts never
+//     collide, without needing the full alias chain threaded through here.
+func resolveHostBindingScripts(def *AppDef, imp *ImportDef, baseDir, file, alias string) []error {
+	if imp == nil || len(imp.HostBindings) == 0 {
+		return nil
+	}
+	var errs []error
+	for _, name := range sortedKeys(imp.HostBindings) {
+		spec := imp.HostBindings[name]
+		if spec.Script == "" {
+			continue // plain handler-name form — nothing to resolve.
+		}
+
+		rawScript := strings.TrimSpace(spec.Script)
+		resolved := rawScript
+		if !filepath.IsAbs(resolved) {
+			resolved = filepath.Join(baseDir, resolved)
+		}
+		resolved = filepath.Clean(resolved)
+
+		if _, statErr := os.Stat(resolved); statErr != nil {
+			errs = append(errs, &ValidationError{File: file, Message: fmt.Sprintf(
+				"imports.%s: host_bindings.%s script %q not found (resolved to %q)", alias, name, rawScript, resolved)})
+			continue
+		}
+		sidecarPath := resolved + ".yaml"
+		raw, readErr := os.ReadFile(sidecarPath)
+		if readErr != nil {
+			errs = append(errs, &ValidationError{File: file, Message: fmt.Sprintf(
+				"imports.%s: host_bindings.%s script %q has no sidecar (expected %q): %v", alias, name, rawScript, sidecarPath, readErr)})
+			continue
+		}
+		if _, parseErr := starlarkhost.ParseSidecar(raw); parseErr != nil {
+			errs = append(errs, &ValidationError{File: file, Message: fmt.Sprintf(
+				"imports.%s: host_bindings.%s sidecar %q is malformed: %v", alias, name, sidecarPath, parseErr)})
+			continue
+		}
+
+		handlerName := starlarkBindingHandlerName(resolved)
+		if def.StarlarkHostBindings == nil {
+			def.StarlarkHostBindings = make(map[string]string)
+		}
+		def.StarlarkHostBindings[handlerName] = resolved
+		imp.HostBindings[name] = HostBindingSpec{Handler: handlerName}
+	}
+	return errs
+}
+
+// starlarkBindingHandlerName derives a deterministic, collision-safe handler
+// name from an absolute script path (see resolveHostBindingScripts).
+func starlarkBindingHandlerName(absScriptPath string) string {
+	sum := sha1.Sum([]byte(absScriptPath))
+	return starlarkBindingHandlerPrefix + hex.EncodeToString(sum[:])[:16]
 }
 
 // appendUnique adds v to list iff it's not already present. Order is
@@ -636,10 +727,13 @@ func foldChild(parent *AppDef, alias string, imp *ImportDef, child *AppDef, file
 		// Shallow copy is fine: Default is the only field we mutate; the
 		// rest are read-only metadata.
 		clone := *src
-		if handler, ok := imp.HostBindings[ifaceName]; ok {
+		if spec, ok := imp.HostBindings[ifaceName]; ok {
 			// Explicit prefixed override wins (e.g. host_bindings:
-			// { bf__ticket: host.X }).
-			clone.Default = handler
+			// { bf__ticket: host.X }). By fold time every HostBindingSpec's
+			// Script form has already been resolved to a synthetic Handler
+			// name by resolveHostBindingScripts, so Handler is always the
+			// concrete binding here regardless of the author's original form.
+			clone.Default = spec.Handler
 		} else if terminal := ifaceTerminalName(ifaceName); terminal != ifaceName {
 			// Base-name fallback: a binding keyed on the terminal
 			// capability name (e.g. `ticket: host.gh.ticket`) cascades
@@ -647,8 +741,8 @@ func foldChild(parent *AppDef, alias string, imp *ImportDef, child *AppDef, file
 			// explicit prefixed override. This is what lets an instance
 			// rebind a capability once and have it apply across
 			// all nested folds. See bug 44.
-			if handler, ok := imp.HostBindings[terminal]; ok {
-				clone.Default = handler
+			if spec, ok := imp.HostBindings[terminal]; ok {
+				clone.Default = spec.Handler
 			}
 		}
 		parent.HostInterfaces[newName] = &clone
@@ -658,17 +752,32 @@ func foldChild(parent *AppDef, alias string, imp *ImportDef, child *AppDef, file
 	// has folded a grandchild under alias `enc`). The lookup is uniform
 	// via `<alias>__<binding-name>` so the grandparent surface is just
 	// "spell the prefixed name."
-	for bindingName, handler := range imp.HostBindings {
+	for bindingName, spec := range imp.HostBindings {
 		// Skip ifaces directly owned by the child — already applied above.
 		if _, ownedByChild := child.HostInterfaces[bindingName]; ownedByChild {
 			continue
 		}
 		fullName := alias + "__" + bindingName
 		if iface, ok := parent.HostInterfaces[fullName]; ok && iface != nil {
-			iface.Default = handler
+			iface.Default = spec.Handler
 			continue
 		}
 		errs = append(errs, &ValidationError{File: file, Message: fmt.Sprintf("imports.%s: host_bindings.%s: no matching host_interface (looked for %q in lifted child interfaces)", alias, bindingName, fullName)})
+	}
+
+	// 9c. Propagate any starlark-script synthetic bindings this level (or
+	// any descendant already folded into `child`) introduced, so the
+	// top-level Load() sees the full handler-name → script-path map after
+	// all folds complete (resolveHostBindingScripts resolves script paths
+	// against each level's own baseDir; the mapping itself just needs to
+	// bubble up unchanged).
+	if len(child.StarlarkHostBindings) > 0 {
+		if parent.StarlarkHostBindings == nil {
+			parent.StarlarkHostBindings = make(map[string]string, len(child.StarlarkHostBindings))
+		}
+		for name, script := range child.StarlarkHostBindings {
+			parent.StarlarkHostBindings[name] = script
+		}
 	}
 
 	// 10. Intent re-exports.

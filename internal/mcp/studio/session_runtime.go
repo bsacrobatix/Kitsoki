@@ -260,6 +260,7 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 
 	hostReg := host.NewRegistry()
 	host.RegisterBuiltins(hostReg)
+	host.RegisterStarlarkBindings(hostReg, def.StarlarkHostBindings)
 	// Test-only injection seam: a flow/cassette test registers an extra host
 	// capability (e.g. one that forwards to the in-context OperatorPrompter) so a
 	// no-LLM drive can exercise the operator-ask branch end-to-end without

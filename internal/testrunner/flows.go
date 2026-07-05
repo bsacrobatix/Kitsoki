@@ -549,6 +549,11 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 	// precedence over any built-in with the same name (host.Register
 	// overwrites).
 	reg := host.NewRegistry()
+	// Starlark-script host_bindings (S3a/D2.1) are wired unconditionally —
+	// they're synthesized from def, not stub data, so any flow whose app
+	// declares one needs the real script-backed handler registered
+	// regardless of which branch below runs.
+	host.RegisterStarlarkBindings(reg, def.StarlarkHostBindings)
 	if len(fixture.HostBindings) > 0 {
 		// RegisterBuiltins covers host.jobs.answer_clarification too,
 		// so the bare-registration branch below is skipped.
