@@ -1417,6 +1417,7 @@ def validate_autonomous_workflow_docs(issues: list[dict]) -> None:
             "gh-agent",
             "independent-verify.md",
             "--persona-autofix-smoke",
+            "persona_autofix_smoke",
         ]
         missing = [token for token in required_tokens if token not in text]
         if missing:
