@@ -180,14 +180,7 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 		filedIssueCount > 0 &&
 		intValue(result, "findings_failed_count") == 0 &&
 		intValue(result, "findings_unfiled_count") == 0
-	ghAgentOK := stringValue(result, "gh_agent_enqueue_status") == "queued" &&
-		intValue(result, "gh_agent_enqueued_count") > 0 &&
-		stringValue(result, "gh_agent_drain_status") == "drained" &&
-		intValue(result, "gh_agent_failed_count") == 0 &&
-		intValue(result, "gh_agent_active_count") == 0 &&
-		intValue(result, "gh_agent_done_count") >= intValue(result, "gh_agent_enqueued_count") &&
-		intValue(result, "gh_agent_missing_evidence_count") == 0 &&
-		intValue(result, "gh_agent_missing_run_url_count") == 0
+	ghAgentOK := gitopsGHAgentGateOK(result)
 
 	status := "autonomous_fix_invalid"
 	if reviewOK && validationOK && filingOK && ghAgentOK {
@@ -217,6 +210,18 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 	}
 	result["autonomous_fix_report_path"] = reportPath
 	return result, nil
+}
+
+func gitopsGHAgentGateOK(result map[string]any) bool {
+	return stringValue(result, "gh_agent_enqueue_status") == "queued" &&
+		intValue(result, "gh_agent_enqueued_count") > 0 &&
+		stringValue(result, "gh_agent_drain_status") == "drained" &&
+		intValue(result, "gh_agent_failed_count") == 0 &&
+		intValue(result, "gh_agent_active_count") == 0 &&
+		intValue(result, "gh_agent_done_count") >= intValue(result, "gh_agent_enqueued_count") &&
+		intValue(result, "gh_agent_missing_evidence_count") == 0 &&
+		intValue(result, "gh_agent_missing_verify_count") == 0 &&
+		intValue(result, "gh_agent_missing_run_url_count") == 0
 }
 
 func runGitopsAutonomousFixViaRunner(ctx context.Context, opts gitopsAutonomousFixOptions) (map[string]any, error) {
