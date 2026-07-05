@@ -76,48 +76,65 @@ test.afterAll(async () => {
   if (tmpDbDir) fs.rmSync(tmpDbDir, { recursive: true, force: true });
 });
 
-test("project object graph viewer renders the seed catalog", async () => {
+test("project object graph viewer renders the seed catalog as the primary, integrated view", async () => {
   const page: Page = await browser.newPage();
   await page.goto(`${BASE}/#/graph?catalog=${encodeURIComponent(SEED_CATALOG)}`);
 
   await page.waitForSelector('[data-testid="objectgraph-page"]', { timeout: 10000 });
-  await page.waitForSelector('[data-testid="objectgraph-canvas"]', { timeout: 10000 });
+  await page.waitForSelector('[data-testid="objectgraph-catalog"]', { timeout: 10000 });
 
   // The count badge proves the RPC round-tripped real data, not an empty
-  // shell — the seed catalog has 68 nodes as of W6.0.
+  // shell — the seed catalog has 68+ nodes as of W6.0.
   const countText = await page.locator('[data-testid="objectgraph-count"]').innerText();
   expect(countText).toMatch(/^\d+ nodes \/ \d+ edges$/);
   const nodeCount = Number(countText.match(/^(\d+) nodes/)?.[1] ?? "0");
   expect(nodeCount).toBeGreaterThan(60);
 
-  // Vue Flow renders each graph node as a `.vue-flow__node` element.
-  await expect(page.locator(".vue-flow__node").first()).toBeVisible();
-  const renderedNodes = await page.locator(".vue-flow__node").count();
-  expect(renderedNodes).toBeGreaterThan(0);
+  // The catalog is the whole page — no mode switch to a separate graph view.
+  const firstNodeButton = page.locator(".object-list button").first();
+  await expect(firstNodeButton).toBeVisible();
 
   await page.close();
 });
 
-test("project object graph viewer's catalog projection lists nodes and shares selection with the graph", async () => {
+test("selecting an object renders its relationships as an inline Cytoscape graph", async () => {
   const page: Page = await browser.newPage();
   await page.goto(`${BASE}/#/graph?catalog=${encodeURIComponent(SEED_CATALOG)}`);
-  await page.waitForSelector('[data-testid="objectgraph-canvas"]', { timeout: 10000 });
-
-  await page.click('[data-testid="objectgraph-view-catalog"]');
   await page.waitForSelector('[data-testid="objectgraph-catalog"]', { timeout: 10000 });
 
-  // The object picker lists at least one selectable node button.
   const firstNodeButton = page.locator(".object-list button").first();
-  await expect(firstNodeButton).toBeVisible();
   const label = (await firstNodeButton.locator("strong").innerText()).trim();
-
   await firstNodeButton.click();
   await expect(page.locator(".focus-card h2")).toHaveText(label);
 
-  // Selection carries over to the graph projection (shared selectedId).
-  await page.click('[data-testid="objectgraph-view-graph"]');
-  await page.waitForSelector('[data-testid="objectgraph-canvas"]', { timeout: 10000 });
-  await expect(page.locator(".vue-flow__node").first()).toBeVisible();
+  // The relationship graph is embedded inline (not behind a mode toggle) and
+  // renders the selected node's neighborhood via Cytoscape.
+  const relationshipGraph = page.locator('[data-testid="relationship-graph"]');
+  await expect(relationshipGraph).toBeVisible();
+  await expect(relationshipGraph.locator('[data-testid="graph-view-host"] canvas').first()).toBeVisible();
+
+  // Layout is pluggable: switching it re-runs without erroring the page.
+  await relationshipGraph.locator('[data-testid="graph-view-layout"]').selectOption("cola");
+  await expect(relationshipGraph.locator('[data-testid="graph-view-host"] canvas').first()).toBeVisible();
+
+  await page.close();
+});
+
+test("the full graph is available as a de-emphasized overlay, not a primary toggle", async () => {
+  const page: Page = await browser.newPage();
+  await page.goto(`${BASE}/#/graph?catalog=${encodeURIComponent(SEED_CATALOG)}`);
+  await page.waitForSelector('[data-testid="objectgraph-catalog"]', { timeout: 10000 });
+
+  await expect(page.locator('[data-testid="objectgraph-view-catalog"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid="objectgraph-view-graph"]')).toHaveCount(0);
+
+  await page.click('[data-testid="objectgraph-open-full-graph"]');
+  const modal = page.locator('[data-testid="objectgraph-graph-modal"]');
+  await expect(modal).toBeVisible();
+  await expect(modal.locator('[data-testid="graph-view-host"] canvas').first()).toBeVisible();
+
+  await page.click('[data-testid="objectgraph-close-full-graph"]');
+  await expect(modal).toHaveCount(0);
 
   await page.close();
 });

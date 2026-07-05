@@ -7,20 +7,12 @@
         class="objectgraph-page__count"
         data-testid="objectgraph-count"
       >{{ graph.nodes.length }} nodes / {{ graph.edges.length }} edges</span>
-      <span class="objectgraph-page__view-toggle" role="group" aria-label="View mode">
-        <button
-          type="button"
-          :class="{ active: viewMode === 'catalog' }"
-          data-testid="objectgraph-view-catalog"
-          @click="viewMode = 'catalog'"
-        >Catalog</button>
-        <button
-          type="button"
-          :class="{ active: viewMode === 'graph' }"
-          data-testid="objectgraph-view-graph"
-          @click="viewMode = 'graph'"
-        >Graph</button>
-      </span>
+      <button
+        type="button"
+        class="objectgraph-page__full-graph-link"
+        data-testid="objectgraph-open-full-graph"
+        @click="fullGraphOpen = true"
+      >View full graph ⤢</button>
     </header>
 
     <div v-if="loading" class="objectgraph-page__loading" data-testid="objectgraph-loading">
@@ -30,53 +22,50 @@
       {{ error }}
     </div>
     <CatalogPanel
-      v-else-if="graph && viewMode === 'catalog'"
+      v-else-if="graph"
       :graph="graph"
       :selected-id="selectedId"
       data-testid="objectgraph-catalog"
       @update:selected-id="selectedId = $event"
     />
-    <GraphCanvas
-      v-else-if="graph"
-      :graph="graph"
-      :focus-id="selectedId"
-      data-testid="objectgraph-canvas"
-      @update:focus-id="selectedId = $event"
-    />
+
+    <div
+      v-if="fullGraphOpen && graph"
+      class="objectgraph-page__modal"
+      data-testid="objectgraph-graph-modal"
+      @keydown.esc="fullGraphOpen = false"
+    >
+      <div class="objectgraph-page__modal-bar">
+        <span>Full project object graph</span>
+        <button type="button" data-testid="objectgraph-close-full-graph" @click="fullGraphOpen = false">Close</button>
+      </div>
+      <GraphView :graph="graph" :focus-id="selectedId" :group-by-layer="nodeLayerId" class="objectgraph-page__modal-view" @update:focus-id="selectedId = $event" />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 /**
- * ObjectGraphPage — W5.0: one graph viewer in kitsoki web for the project
- * object graph catalog (internal/graph, W1.0/W1.1), consolidating the two
- * prior prototypes (the proposal-local Vue app and the Vue Flow + ELK
- * mockup in .artifacts/graph-viewer-library-research/) into runstatus.
+ * ObjectGraphPage — the project object graph catalog (internal/graph,
+ * W1.0/W1.1) as one integrated view in kitsoki web: CatalogPanel is the
+ * primary surface (layer map, object picker, focus detail), and every
+ * object's "points to" / "points here" relationships render inline as a
+ * Cytoscape neighborhood graph (see CatalogPanel's relationship-graph
+ * section) rather than behind a separate mode switch. A full-graph overlay
+ * (GraphView.vue over the whole catalog) is available but deliberately
+ * de-emphasized — a small link, not a primary toggle.
  *
  * Catalog selected via `?catalog=<path>` (default: the seed review
  * fixture), loaded through runstatus.objectgraph.load — the same
- * kitsoki.graph/v1 wire shape story room graphs use (../components/
- * objectgraph/GraphCanvas.vue is the same renderer as the two merged
- * prototypes, not a rebuild). CatalogPanel.vue restores the prototype's
- * other projection — the layered list/detail catalog — sharing this page's
- * one fetch and selection (picking an object in the catalog focuses it on
- * the canvas and vice versa, same as the prototype).
+ * kitsoki.graph/v1 wire shape story room graphs use.
  */
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { LiveSource } from "../data/live-source.js";
 import type { ObjectGraph } from "../data/objectgraph.js";
 import CatalogPanel from "../components/objectgraph/CatalogPanel.vue";
-// GraphCanvas.vue is a plain-JS SFC (copied unmodified from the merged W5.0
-// viewer prototypes — see components/objectgraph/shims.d.ts); vue-tsc's .vue
-// module resolution doesn't pick up ambient `declare module` overrides for
-// .vue specifiers the way it does for .js, so this one import is untyped.
-// @ts-expect-error — untyped plain-JS SFC, see comment above.
-import GraphCanvas from "../components/objectgraph/GraphCanvas.vue";
-import "@vue-flow/core/dist/style.css";
-import "@vue-flow/core/dist/theme-default.css";
-import "@vue-flow/controls/dist/style.css";
-import "../components/objectgraph/graph.css";
+import GraphView from "../components/objectgraph/GraphView.vue";
+import { nodeLayerId } from "../components/objectgraph/catalog-model.js";
 
 const route = useRoute();
 const source = new LiveSource("/");
@@ -84,11 +73,8 @@ const source = new LiveSource("/");
 const graph = ref<ObjectGraph | null>(null);
 const loading = ref(false);
 const error = ref("");
-// Default stays "graph" — the existing Playwright gate
-// (object-graph.spec.ts) asserts objectgraph-canvas renders on first load;
-// Catalog is one click away via the toggle.
-const viewMode = ref<"catalog" | "graph">("graph");
 const selectedId = ref("");
+const fullGraphOpen = ref(false);
 
 const catalogPath = computed<string>(() => {
   const p = route.query.catalog;
@@ -136,27 +122,16 @@ watch(catalogPath, load);
   color: var(--muted-color, #667);
   font-size: 0.85rem;
 }
-.objectgraph-page__view-toggle {
-  display: flex;
-  gap: 0.4rem;
-  margin-left: auto;
-}
-.objectgraph-page__view-toggle button {
-  background: #fff;
-  border: 1px solid #d8ddd6;
-  border-radius: 999px;
+.objectgraph-page__full-graph-link {
+  background: none;
+  border: none;
   color: #46534d;
   cursor: pointer;
   font-size: 0.8rem;
-  font-weight: 700;
-  padding: 0.35rem 0.9rem;
+  margin-left: auto;
+  text-decoration: underline;
 }
-.objectgraph-page__view-toggle button.active {
-  background: #1d2a24;
-  border-color: #1d2a24;
-  color: #f4f7f3;
-}
-.objectgraph-page > :last-child {
+:deep(.catalog-panel) {
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -168,7 +143,32 @@ watch(catalogPath, load);
 .objectgraph-page__error {
   color: var(--error-color, #b00020);
 }
-:deep(.graph-canvas-host) {
+.objectgraph-page__modal {
+  position: fixed;
+  inset: 0;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  z-index: 20;
+}
+.objectgraph-page__modal-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border-color, #d6dde8);
+  font-weight: 600;
+}
+.objectgraph-page__modal-bar button {
+  background: #1d2a24;
+  border: none;
+  border-radius: 6px;
+  color: #f4f7f3;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0.35rem 0.9rem;
+}
+.objectgraph-page__modal-view {
   flex: 1;
   min-height: 0;
 }

@@ -263,11 +263,30 @@
 .catalog-panel .object-picker,
 .catalog-panel .focus-card,
 .catalog-panel .site-workbench article,
+.catalog-panel .relationship-graph,
 .catalog-panel .relationship-board section,
 .catalog-panel .sources {
   background: #fff;
   border: 1px solid #d5ddd8;
   border-radius: 8px;
+}
+
+.catalog-panel .relationship-graph {
+  padding: 14px;
+}
+
+.catalog-panel .relationship-graph h3 {
+  color: #1f5f55;
+  font-size: 12px;
+  font-weight: 900;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.catalog-panel .relationship-graph__view {
+  border: 1px solid #e3e9e5;
+  border-radius: 7px;
+  height: 320px;
 }
 
 .catalog-panel .object-picker {
