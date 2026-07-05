@@ -829,11 +829,6 @@ func TestGitHubTicket_ListMine_ErrorPropagates(t *testing.T) {
 }
 
 func TestGitHubTicket_UnknownOpRejected(t *testing.T) {
-	fr := newFakeRunner()
-	fr.responses["gh --version"] = fakeResp{stdout: "gh version 2.x\n"}
-	restore := host.SetExecRunnerForTest(fr.run)
-	defer restore()
-
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
 		"op": "smoke",
 	})

@@ -28,7 +28,7 @@ var newGitHubAppTokenSource = func(cfg *githubapp.Config, client githubapp.Doer)
 
 // newGHAgentCmd builds `kitsoki gh-agent`, whose single `poll` subcommand runs
 // ONE poll cycle of the @kitsoki mention -> dispatch -> run -> ack loop:
-// ListGitHubInboxItems (through the cliExec seam) -> FilterMentions -> for each
+// ListGitHubInboxItems (native GitHub Search API) -> FilterMentions -> for each
 // mention, Dispatcher.Dispatch. Single-shot; the serve daemon is deferred.
 func newGHAgentCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -382,7 +382,7 @@ func newGHAgentPollCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&repo, "repo", "", "owner/repo slug to poll")
-	cmd.Flags().StringVar(&mentionFile, "mention", "", "JSON file with []host.GitHubInboxItem (bypasses the live gh list)")
+	cmd.Flags().StringVar(&mentionFile, "mention", "", "JSON file with []host.GitHubInboxItem (bypasses live GitHub inbox search)")
 	cmd.Flags().StringVar(&dbPath, "db", "", "sqlite path for the gh_jobs store (default in-memory)")
 	cmd.Flags().StringVar(&trigger, "trigger", ghagent.DefaultMentionTrigger, "mention trigger literal")
 	cmd.Flags().StringVar(&worker, "worker", "gh-agent-1", "worker id holding the claim")
@@ -457,7 +457,7 @@ func setupGitHubAppAuth(ctx context.Context, force bool, appID, installationID i
 }
 
 // pollInboxItems reads the inbox: from a JSON fixture when --mention is set,
-// otherwise via ListGitHubInboxItems (which shells gh through the cliExec seam).
+// otherwise via ListGitHubInboxItems through the native GitHub Search API.
 func pollInboxItems(ctx context.Context, repo, mentionFile string) ([]host.GitHubInboxItem, error) {
 	if mentionFile != "" {
 		raw, err := os.ReadFile(mentionFile)

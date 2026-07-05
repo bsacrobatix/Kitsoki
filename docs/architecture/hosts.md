@@ -1987,26 +1987,26 @@ tour recorder mirrors the JSON shape in
 
 ## host.gh.ticket — GitHub Issues-backed tracker
 
-The `ticket` host_interface backed by the GitHub `gh` CLI. It mirrors the
+The `ticket` host_interface backed by the native GitHub REST API. It mirrors the
 file-backed `host.local_files.ticket` surface so the dogfood app
-(`.kitsoki/stories/kitsoki-dev`) rebinds `iface.ticket → host.gh.ticket` without touching
-room YAML. Auth rides the operator's existing `gh auth` — kitsoki handles no
-tokens. Every op degrades cleanly (a `Result.Error`, not a crash) when `gh` is
-missing/unauthenticated, so rooms route the `on_error:` arc. All shell-outs go
-through the one `cliExec` seam so they're testable with a stubbed runner (no real
-GitHub in tests). Implementation:
+(`.kitsoki/stories/kitsoki-dev`) rebinds `iface.ticket → host.gh.ticket` without
+touching room YAML. Auth uses `GH_TOKEN` / `GITHUB_TOKEN`, including tokens
+minted by the GitHub App path for headless runs. Every op degrades cleanly (a
+`Result.Error`, not a crash) when auth or transport fails, so rooms route the
+`on_error:` arc. Tests inject a fake HTTP API; no real GitHub or local `gh`
+binary is required. Implementation:
 [`internal/host/github.go`](../../internal/host/github.go) +
 [`github_create.go`](../../internal/host/github_create.go) +
 [`github_bug.go`](../../internal/host/github_bug.go).
 
-| op | gh call | Returns |
+| op | GitHub API operation | Returns |
 |---|---|---|
-| `create` | `gh issue create --repo … --title … --body … --label …` | `{id, number, url, warning?}` |
-| `search` | `gh issue list --search …` | `{tickets: [{id,title,status,priority,assignee,url,type,source}]}` |
-| `get` | `gh issue view … --json …` | `{id,title,body,status,…,type,source,legacy_id?,comments, kitsoki_meta?}` |
-| `comment` | `gh issue comment … --body …` | `{ok, comment_id}` |
-| `transition` | `gh issue close` / `gh issue reopen` | `{ok}` |
-| `list_mine` | `gh issue list --assignee …` | `{tickets: […]}` |
+| `create` | `POST /repos/{owner}/{repo}/issues` | `{id, number, url, warning?}` |
+| `search` | `GET /search/issues` | `{tickets: [{id,title,status,priority,assignee,url,type,source}]}` |
+| `get` | `GET /repos/{owner}/{repo}/issues/{number}` + comments | `{id,title,body,status,…,type,source,legacy_id?,comments, kitsoki_meta?}` |
+| `comment` | `POST /repos/{owner}/{repo}/issues/{number}/comments` | `{ok, comment_id}` |
+| `transition` | `PATCH /repos/{owner}/{repo}/issues/{number}` | `{ok}` |
+| `list_mine` | `GET /search/issues` with `assignee:` | `{tickets: […]}` |
 
 **Repo pin.** Every call takes a `repo` arg (`owner/repo`); the dogfood pins it
 to `constructorfabric/Kitsoki` via the `ticket_repo` world key
