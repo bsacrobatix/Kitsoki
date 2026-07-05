@@ -113,6 +113,10 @@ func Run(ictx context.Context, p Params) (*Result, error) {
 	//    of which keep behaviour predictable and deterministic.
 	thread := &starlark.Thread{Name: "host.starlark.run"}
 	thread.SetMaxExecutionSteps(maxExecutionSteps)
+	coverage := coverageFromContext(ictx)
+	if coverage.flowFile != "" {
+		thread.SetLocal("kitsoki_flow_file", coverage.flowFile)
+	}
 
 	predeclared := starlark.StringDict{
 		"json": starlarkjson.Module,
@@ -123,6 +127,13 @@ func Run(ictx context.Context, p Params) (*Result, error) {
 	src := p.Source
 	if src == nil {
 		return nil, &DomainError{msg: "no script source provided"}
+	}
+	if coverage.recorder != nil {
+		var covBuiltins starlark.StringDict
+		src, covBuiltins = coverage.recorder.instrument(p.Script, src)
+		for k, v := range covBuiltins {
+			predeclared[k] = v
+		}
 	}
 
 	globals, err := starlark.ExecFileOptions(&syntax.FileOptions{}, thread, p.Script, src, predeclared)

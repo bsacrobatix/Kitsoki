@@ -15,6 +15,14 @@
         "KITSOKI_REPO": ".",
         "KITSOKI_AGENT_CMD": "kitsoki"
       }
+    },
+    "frontend-mockup": {
+      "command": "node",
+      "args": ["/Users/brad/code/Kitsoki/tools/frontend-mockup-mcp/server.mjs"],
+      "env": {
+        "KITSOKI_REPO": "/Users/brad/code/Kitsoki",
+        "KITSOKI_AGENT_CMD": "kitsoki"
+      }
     }
   }
 }

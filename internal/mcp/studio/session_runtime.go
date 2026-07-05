@@ -301,13 +301,9 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 			orchestrator.WithChatsConcrete(chatStore),
 		)
 	}
-	// Honor the global semantic-routing toggle when explicitly set via env. The
-	// `kitsoki mcp` command exports KITSOKI_SEMANTIC_ROUTING from
-	// --semantic-routing (default false → LLM-only routing). When the env var is
-	// absent — the posture of flow/cassette tests that drive the studio
-	// directly — routing defers to the per-app routing.enabled config so the
-	// existing deterministic test fixtures keep matching. See
-	// docs/architecture/semantic-routing.md.
+	// Honor the global semantic-routing toggle. When the env var is absent,
+	// studio sessions use the same simple default as the CLI: exact
+	// deterministic first, then the selected harness/model.
 	if opt, ok := semanticRoutingEnvOption(); ok {
 		orchOpts = append(orchOpts, opt)
 	}
@@ -490,6 +486,25 @@ func (rt *sessionRuntime) driveElicit(ctx context.Context, input string, cols, r
 // timeout (inside the bridge), so a never-answered park falls through to the
 // headless tool-error path on its own.
 func (rt *sessionRuntime) driveSuspendable(ctx context.Context, input string, cols, rows int, wait time.Duration) (res turnResult, pq *pendingQuestion, turnDone bool, running *runningDrive, err error) {
+	return rt.turnSuspendable(ctx, input, cols, rows, wait, func(turnCtx context.Context) (*orchestrator.TurnOutcome, tui.Frame) {
+		return rt.drive(turnCtx, input, cols, rows)
+	})
+}
+
+func (rt *sessionRuntime) submitSuspendable(ctx context.Context, intent string, slots map[string]any, cols, rows int, wait time.Duration) (res turnResult, pq *pendingQuestion, turnDone bool, running *runningDrive, err error) {
+	label := "intent:" + intent
+	return rt.turnSuspendable(ctx, label, cols, rows, wait, func(turnCtx context.Context) (*orchestrator.TurnOutcome, tui.Frame) {
+		return rt.submit(turnCtx, intent, slots, cols, rows)
+	})
+}
+
+func (rt *sessionRuntime) continueSuspendable(ctx context.Context, slots map[string]any, cols, rows int, wait time.Duration) (res turnResult, pq *pendingQuestion, turnDone bool, running *runningDrive, err error) {
+	return rt.turnSuspendable(ctx, "continue", cols, rows, wait, func(turnCtx context.Context) (*orchestrator.TurnOutcome, tui.Frame) {
+		return rt.cont(turnCtx, slots, cols, rows)
+	})
+}
+
+func (rt *sessionRuntime) turnSuspendable(ctx context.Context, input string, cols, rows int, wait time.Duration, run func(context.Context) (*orchestrator.TurnOutcome, tui.Frame)) (res turnResult, pq *pendingQuestion, turnDone bool, running *runningDrive, err error) {
 	rt.mu.Lock()
 	if rt.inFlight != nil {
 		rt.mu.Unlock()
@@ -516,7 +531,7 @@ func (rt *sessionRuntime) driveSuspendable(ctx context.Context, input string, co
 	turnCtx := host.WithOperatorPrompter(turnBase, prompter)
 	turnCtx = host.WithKitsokiSessionID(turnCtx, string(rt.sid))
 	go func() {
-		out, frame := rt.drive(turnCtx, input, cols, rows)
+		out, frame := run(turnCtx)
 		broker.finish(turnResult{outcome: out, frame: frame, err: rt.lastTurnErr})
 		rt.clearInFlightIf(broker)
 	}()
@@ -579,25 +594,34 @@ func (rt *sessionRuntime) driveSnapshot() (driveSnapshot, error) {
 // resumeSuspendable delivers the operator's answer to a parked question and
 // blocks until the turn completes or parks on the NEXT operator-ask. It is the
 // runtime half of session.answer: deliver → waitNext → {outcome | awaiting}.
-func (rt *sessionRuntime) resumeSuspendable(ctx context.Context, questionID string, answers map[string]any) (res turnResult, pq *pendingQuestion, turnDone bool, ok bool, err error) {
+func (rt *sessionRuntime) resumeSuspendable(ctx context.Context, questionID string, answers map[string]any, wait time.Duration) (res turnResult, pq *pendingQuestion, turnDone bool, running *runningDrive, ok bool, err error) {
 	rt.mu.Lock()
 	broker := rt.inFlight
 	rt.mu.Unlock()
 	if broker == nil {
-		return turnResult{}, nil, false, false, nil
+		return turnResult{}, nil, false, nil, false, nil
 	}
 	if !broker.answer(questionID, answers) {
-		return turnResult{}, nil, false, false, nil
+		return turnResult{}, nil, false, nil, false, nil
 	}
-	r, q, werr := broker.waitNext(ctx)
+	waitCtx := ctx
+	var cancelWait context.CancelFunc
+	if wait > 0 {
+		waitCtx, cancelWait = context.WithTimeout(ctx, wait)
+		defer cancelWait()
+	}
+	r, q, werr := broker.waitNext(waitCtx)
 	if werr != nil {
-		return turnResult{}, nil, false, true, werr
+		if wait > 0 && werr == context.DeadlineExceeded {
+			return turnResult{}, nil, false, broker.snapshotRunning(), true, nil
+		}
+		return turnResult{}, nil, false, nil, true, werr
 	}
 	if q != nil {
-		return turnResult{}, q, false, true, nil
+		return turnResult{}, q, false, nil, true, nil
 	}
 	rt.clearInFlightIf(broker)
-	return r, nil, true, true, nil
+	return r, nil, true, nil, true, nil
 }
 
 // submit applies a chosen intent + slots with no routing (SubmitDirect — the

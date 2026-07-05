@@ -26,6 +26,7 @@ import (
 	"kitsoki/internal/expr"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
+	"kitsoki/internal/inbox"
 	"kitsoki/internal/intent"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
@@ -138,10 +139,9 @@ type Orchestrator struct {
 	// semantic-routing stack (semroute + turn-cache + default_intent sink +
 	// free-form fallback). nil means "no override — defer to the per-app
 	// routing.enabled config"; a non-nil value overrides it. Set via
-	// WithSemanticRouting from the CLI (--semantic-routing / KITSOKI_SEMANTIC_ROUTING),
-	// which defaults it to false so production routing is an isolated main-model
-	// decision (harness.RunTurn). The zero-cost exact display/example match
-	// (TryDeterministic) runs regardless of this gate. See
+	// WithSemanticRouting from explicit CLI/env overrides
+	// (--semantic-routing / KITSOKI_SEMANTIC_ROUTING). The zero-cost exact
+	// display/example match (TryDeterministic) runs regardless of this gate. See
 	// semanticStackEnabled and docs/architecture/semantic-routing.md.
 	semanticOverride *bool
 
@@ -632,9 +632,8 @@ func WithAgentRegistry(reg *agent.Registry) Option {
 // the turn-cache, the default_intent sink, and the app free-form fallback; the
 // zero-cost exact display/example match still runs. Passing true forces the
 // full stack on regardless of per-app config. Not calling this option at all
-// leaves routing deferred to the per-app routing.enabled config (the posture
-// used by tests and the flow runner). The CLI wires this from
-// --semantic-routing / KITSOKI_SEMANTIC_ROUTING, defaulting to false.
+// leaves routing deferred to the per-app routing.enabled config. The CLI wires
+// this only when --semantic-routing or KITSOKI_SEMANTIC_ROUTING is explicit.
 func WithSemanticRouting(enabled bool) Option {
 	return func(o *Orchestrator) { o.semanticOverride = &enabled }
 }
@@ -2205,7 +2204,6 @@ func (o *Orchestrator) OneShot(ctx context.Context, in OneShotInput) (*OneShotRe
 
 	var (
 		call intent.IntentCall
-		err  error
 	)
 	switch {
 	case in.Intent != "":
@@ -2214,26 +2212,7 @@ func (o *Orchestrator) OneShot(ctx context.Context, in OneShotInput) (*OneShotRe
 			Slots:  world.Slots(in.Slots),
 		}
 	case in.Input != "":
-		allowed := o.machine.AllowedIntents(in.State, w)
-		allowedNames := make([]string, len(allowed))
-		for i, a := range allowed {
-			allowedNames[i] = a.Name
-		}
-		params, runErr := o.harness.RunTurn(ctx, harness.TurnInput{
-			SessionID:      app.SessionID("oneshot"),
-			TurnNumber:     1,
-			UserText:       in.Input,
-			StatePath:      in.State,
-			World:          w,
-			AllowedIntents: allowedNames,
-		})
-		if runErr != nil {
-			return nil, fmt.Errorf("orchestrator: OneShot: harness.RunTurn: %w", runErr)
-		}
-		call, err = parseIntentCall(params)
-		if err != nil {
-			return nil, fmt.Errorf("orchestrator: OneShot: parse intent call: %w", err)
-		}
+		return o.oneShotInput(ctx, in, worldBefore)
 	default:
 		return nil, fmt.Errorf("orchestrator: OneShot: exactly one of Intent or Input must be set")
 	}
@@ -2309,6 +2288,133 @@ func (o *Orchestrator) OneShot(ctx context.Context, in OneShotInput) (*OneShotRe
 	out.AllowedIntents = allowedNamesFromMachine(o.machine, result.NewState, result.World)
 
 	return out, nil
+}
+
+func (o *Orchestrator) oneShotInput(ctx context.Context, in OneShotInput, worldBefore map[string]any) (*OneShotResult, error) {
+	sid, err := o.NewSession(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("orchestrator: OneShot: new session: %w", err)
+	}
+	if _, err := o.Teleport(ctx, sid, inbox.TeleportTarget{State: in.State, Slots: in.World}); err != nil {
+		return nil, fmt.Errorf("orchestrator: OneShot: teleport: %w", err)
+	}
+	outcome, err := o.Turn(ctx, sid, in.Input)
+	if err != nil {
+		return nil, err
+	}
+	journey, err := o.loadJourney(sid)
+	if err != nil {
+		return nil, fmt.Errorf("orchestrator: OneShot: load result journey: %w", err)
+	}
+
+	intentName, slots := intentAcceptedFromEvents(outcome.Events)
+	result := &OneShotResult{
+		Mode:           outcome.Mode,
+		Intent:         intentName,
+		Slots:          slots,
+		PrevState:      in.State,
+		NextState:      outcome.NewState,
+		WorldBefore:    worldBefore,
+		WorldAfter:     copyWorldVars(journey.World),
+		Effects:        effectsFromEvents(outcome.Events),
+		HostCalls:      hostCallsFromEvents(outcome.Events),
+		View:           outcome.View,
+		AllowedIntents: outcome.AllowedIntents,
+		ErrorCode:      string(outcome.ErrorCode),
+		ErrorMessage:   outcome.ErrorMessage,
+		GuardHint:      outcome.GuardHint,
+		SlotsNeeded:    outcome.SlotsNeeded,
+	}
+	if result.WorldAfter == nil {
+		result.WorldAfter = worldBefore
+	}
+	return result, nil
+}
+
+func copyWorldVars(w world.World) map[string]any {
+	out := make(map[string]any, len(w.Vars))
+	for k, v := range w.Vars {
+		out[k] = v
+	}
+	return out
+}
+
+func intentAcceptedFromEvents(events []store.Event) (string, map[string]any) {
+	for _, ev := range events {
+		if ev.Kind != store.IntentAccepted {
+			continue
+		}
+		var payload struct {
+			Intent string         `json:"intent"`
+			Slots  map[string]any `json:"slots"`
+		}
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			return "", nil
+		}
+		return payload.Intent, payload.Slots
+	}
+	for _, ev := range events {
+		if ev.Kind != store.TransitionApplied {
+			continue
+		}
+		var payload struct {
+			Intent string         `json:"intent"`
+			Slots  map[string]any `json:"slots"`
+		}
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			return "", nil
+		}
+		if payload.Intent != "" {
+			return payload.Intent, payload.Slots
+		}
+	}
+	return "", nil
+}
+
+func hostCallsFromEvents(events []store.Event) []HostCallSummary {
+	var out []HostCallSummary
+	for _, ev := range events {
+		switch ev.Kind {
+		case store.HostDispatched:
+			var payload struct {
+				Namespace string         `json:"namespace"`
+				Args      map[string]any `json:"args"`
+			}
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+				continue
+			}
+			out = append(out, HostCallSummary{Namespace: payload.Namespace, Args: payload.Args})
+		case store.HostReturned:
+			var payload struct {
+				Namespace string         `json:"namespace"`
+				Data      map[string]any `json:"data"`
+				Error     string         `json:"error"`
+			}
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+				continue
+			}
+			found := false
+			for i := len(out) - 1; i >= 0; i-- {
+				if out[i].Namespace != payload.Namespace {
+					continue
+				}
+				if out[i].Data == nil && out[i].Error == "" {
+					out[i].Data = payload.Data
+					out[i].Error = payload.Error
+					found = true
+					break
+				}
+			}
+			if !found {
+				out = append(out, HostCallSummary{
+					Namespace: payload.Namespace,
+					Data:      payload.Data,
+					Error:     payload.Error,
+				})
+			}
+		}
+	}
+	return out
 }
 
 // effectsFromEvents flattens EffectApplied events into EffectSummary form.

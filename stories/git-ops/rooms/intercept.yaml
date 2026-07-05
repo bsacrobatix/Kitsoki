@@ -52,6 +52,10 @@ states:
               hint:  "merge this branch into {{ world.integration_branch }} (rebase first)"
               intent: merge_into_main
             - { label: "pull",            hint: "git pull --rebase from upstream",                            intent: pull }
+            - label: "sync_main remote=origin"
+              hint:  "reconcile protected {{ world.integration_branch }} with origin/main via .worktrees/"
+              intent: sync_main
+              slots: { remote: "origin", remote_branch: "main" }
             - { label: "undo",            hint: "undo the last commit",                                        intent: undo }
             - { label: "worktree_create", hint: "create a linked worktree under .worktrees/",                 intent: worktree_create }
             - { label: "worktree_list",   hint: "list and classify existing worktrees",                       intent: worktree_list }
@@ -127,6 +131,16 @@ states:
             - say: "Rebase first — rebase_done is false."
       pull:
         - target: pull
+      sync_main:
+        - target: sync_main
+          effects:
+            - set:
+                sync_remote:        "{{ slots.remote ?? 'origin' }}"
+                sync_remote_branch: "{{ slots.remote_branch ?? world.integration_branch }}"
+                sync_name:          "{{ slots.name ?? '' }}"
+                sync_continue_branch: "{{ slots.continue_branch ?? slots.branch ?? '' }}"
+                sync_auto_resolve:  "{{ slots.auto_resolve ?? false }}"
+                sync_result:        {}
       undo:
         - target: undo
       worktree_create:

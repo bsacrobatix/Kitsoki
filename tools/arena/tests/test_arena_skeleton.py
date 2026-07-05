@@ -9,6 +9,7 @@ real DockerBackend satisfies the same `ContainerBackend` interface.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -57,6 +58,26 @@ check("image per project", bugfix.image(cells[0]), "kitsoki-arena-repo/query-str
 live_argv = bugfix.drive_command(cells[0], live=True)
 check("live uses drive_cell", live_argv[0:2], ["bash", "/workspace/kitsoki/tools/bugfix-bakeoff/external/drive_cell.sh"])
 
+
+def write_completion_state(cell, *, verdict, health, notes=""):
+    """Simulate bench.py's --completion-state write from inside the container —
+    the plugin now scores from this file (schemas/completion-state.schema.json),
+    not from stdout. Host-side path == what the plugin reads after the run."""
+    path = Path(bugfix.completion_state_path(cell))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "verdict": verdict,
+        "health": health,
+        "metrics": {},
+        "evidence_refs": [],
+        "notes": notes,
+    }))
+    return path
+
+
+written_state_paths: list[Path] = []
+
 # 3. Fake container backend: qs2 fails the oracle once then nothing (no retry
 #    config here is exercised separately); everything else arms GREEN.
 seen_hosts: set[str] = set()
@@ -66,7 +87,13 @@ def responder(cell, host, argv):
     seen_hosts.add(host)
     bug = cell.axis["bug"]
     if bug == "qs2":
+        written_state_paths.append(write_completion_state(
+            cell, verdict="failed", health="model:result",
+            notes="RED stayed RED: oracle did not go GREEN"))
         return ContainerRun(exit_code=1, stdout="RED stayed RED: oracle did not go GREEN", stderr="", host=host)
+    written_state_paths.append(write_completion_state(
+        cell, verdict="armed", health="model:result",
+        notes="verify OK: baseline RED, fix GREEN (armed)"))
     return ContainerRun(exit_code=0, stdout="verify OK: baseline RED, fix GREEN (armed)", stderr="", host=host)
 
 
@@ -85,7 +112,15 @@ check("armed is model health", armed[0].health, "model:result")
 check("container calls == cells", len(backend.calls), 6)
 check("mounts threaded through", backend.calls[0]["mounts"], {"/repo": "/workspace/kitsoki"})
 
+# 3b. Done with block 3's cell results — clear the fixture files so block 4's
+#     reused cell id ("qs1" × the same variant) doesn't pick up a stale file.
+for p in written_state_paths:
+    p.unlink(missing_ok=True)
+
 # 4. Retry: an infra failure is retried up to placement.retry, a model verdict is final.
+#    The infra branch writes NO completion-state file (a real harness failure
+#    dies before bench.py can write one) so the plugin falls back to the
+#    stdout infra-signal detector; the eventual success branch writes the file.
 infra_calls = {"n": 0}
 
 
@@ -93,6 +128,7 @@ def flaky(cell, host, argv):
     if cell.axis["bug"] == "qs1" and infra_calls["n"] == 0:
         infra_calls["n"] += 1
         return ContainerRun(exit_code=1, stdout="connection refused", stderr="", host=host)
+    write_completion_state(cell, verdict="armed", health="model:result", notes="armed")
     return ContainerRun(exit_code=0, stdout="armed", stderr="", host=host)
 
 
@@ -102,6 +138,7 @@ executor2 = CellExecutor(backend2, mounts_for=lambda c, h: {})
 retry_results = run_sweep(spec_one, executor2, live=False)
 check("infra retried then armed", retry_results[0].verdict, "armed")
 check("retry note recorded", "infra" in retry_results[0].notes, True)
+Path(bugfix.completion_state_path(spec_one.cells()[0])).unlink(missing_ok=True)
 
 # 5. Rollup buckets by variant + target with a win-rate.
 rollup = build_rollup(results)

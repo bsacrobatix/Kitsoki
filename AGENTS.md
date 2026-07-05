@@ -1,5 +1,50 @@
 make your worktrees in the project root folder .worktrees
 
+The primary checkout is protected as read-mostly. Do implementation work in a
+branch worktree under `.worktrees`, commit it there, then land it onto local
+`main` from the primary checkout with:
+
+```
+scripts/merge-to-main.sh <branch>
+```
+
+That helper only accepts fast-forward merges. If it refuses because `main`
+advanced, rebase the branch in its worktree onto local `main`, rerun focused
+validation, and then run the helper again. Do not manually chmod the primary
+checkout except to repair the guard itself.
+
+Prefer GitHub PRs for review and landing, but do not burn CI on every
+work-in-progress agent branch. The CI workflow is configured so `pull_request`
+runs target `main`; GitHub branch filters on `pull_request` match the PR base
+branch, not the source branch. Open draft or staging PRs against a non-main
+base branch prefix such as `agent/*`, `integration/*`, or `staging/*` when the
+PR is not ready for CI. Retarget or promote the finished PR to `main` only when
+it is ready for the required CI gate and GitHub merge.
+
+When local `main` must be reconciled with `origin/main` or `upstream/main`, do
+not run `git pull` in the protected primary checkout. From the primary checkout,
+run:
+
+```
+scripts/sync-main-from-remote.sh --remote origin
+```
+
+or `--remote upstream`. The sync helper fetches, creates an integration worktree
+under `.worktrees`, and attempts the remote merge there. If conflicts occur,
+prefer:
+
+```
+scripts/sync-main-from-remote.sh --remote origin --auto-resolve
+```
+
+with `KITSOKI_SYNC_RESOLVE_CMD` set to the LLM/agent command that resolves and
+stages conflicts, and `KITSOKI_SYNC_REVIEW_CMD` set to a separate read/check
+agent command that verifies no local or remote work was dropped. For manual
+resolution, resolve conflicts inside that integration worktree, rerun the helper
+with `--continue <branch>` and `KITSOKI_SYNC_REVIEW_CMD` set, validate there,
+and only then land the integration branch with `scripts/merge-to-main.sh
+<branch>`.
+
 Project skills live in the Codex-standard `.agents/skills/<name>/SKILL.md` location. Claude Code does not auto-discover that directory, so `make setup` links every `.agents/skills/*/SKILL.md` into `.claude/skills/` (relative symlinks; `.claude/` is gitignored). After adding a new skill, re-run:
 
 ```
@@ -11,6 +56,12 @@ To link a single skill by hand (e.g. without a full setup run):
 ```
 ln -s "../../.agents/skills/<name>" .claude/skills/<name>
 ```
+
+After creating a new worktree with `git worktree add`, run `make bootstrap-worktree`
+from inside it before running `go run ./cmd/kitsoki` or any Playwright spec — it
+stages the embed-only stories/SPA dirs, installs `tools/runstatus` node_modules,
+and warms the Go build cache, all of which are otherwise empty/cold in a fresh
+worktree.
 
 When we do an implementation based on a proposal, the goal is to complete the proposal implementation and move the content to proper narrative docs and delete the proposal - don't leave unfinished work unless specifically instructed, and if so, update the proposal to summarize the completed aspect and focus on the remaining work.
 

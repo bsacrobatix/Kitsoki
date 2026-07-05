@@ -428,6 +428,24 @@ This stages the production bundle locally and then serves it from a reproducible
 local endpoint (`http://127.0.0.1:7777`) for every run against docs,
 onboarding, and bugfix surfaces.
 
+## Shared completion-state contract (arena)
+
+`review.json`'s 19-check review gate is native to product-journey, but arena
+(`tools/arena`) needs one job-agnostic grade it can score without knowing that
+artifact's shape. `tools/persona_qa/completion.py` is the bridge:
+`from_product_journey_report(report)` / `load_product_journey_run(run_dir)` turn
+a run's `review.json` + `scenario-outcomes.json` + `driver-handoff.json` into a
+`CompletionState` conforming to
+[`schemas/completion-state.schema.json`](../../schemas/completion-state.schema.json)
+— the same `verdict`/`health`/`metrics`/`evidence_refs` contract arena's bugfix
+plugin scores bugfix cells from. The mapping: `ready` (+ valid/unknown
+validation) → `solved`; `needs_evidence` with some passing/evidence signal →
+`partial`; all checks failed with no evidence or a blocking scenario →
+`failed`/`blocked`; a harness/validation error → `blocked` + `health:
+infra:harness`. See `tools/persona_qa/tests/test_completion.py` and
+`tools/arena/tests/test_completion_state.py` for the deterministic, no-LLM
+coverage of this mapping.
+
 ## Files
 
 - `catalog.json` — first-pass project + perspective registry.

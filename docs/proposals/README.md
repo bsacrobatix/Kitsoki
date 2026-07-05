@@ -8,6 +8,9 @@ New proposals start from a template in
 `tracing` for a focused change, or `epic` for one that spans several.
 The [`proposal-authoring`](../skills/proposal-authoring/SKILL.md) skill
 drives picking a template and decomposing a large change into slices.
+(`proposals.md`, the original design doc for this brief/gate/references
+pipeline, has shipped — its narrative home is now this README + the
+templates + the skill.)
 
 ## What lives here
 
@@ -141,6 +144,18 @@ thought.
   into a curated history corpus, lane-neutral task/oracle manifests,
   traceable precedent selection, and a gated autonomous runner. Nothing
   implemented yet; slices are sketched but not cut.
+- [`kits.md`](kits.md) — **epic.** Kits: named, semver-versioned, distributable
+  bundles of stories with a standardized shape (interface contracts, onboarding,
+  data-management schemas, conformance fixtures), declared by a `kit.yaml`
+  manifest compiled onto the shipped import/interface/profile machinery. Adds
+  the deliberately-deferred versioning enforcement (resolution tiers + lockfile),
+  deterministic conformance (contract checks + the base kit's no-LLM flow suite
+  run against extensions), and a rev-absorption lifecycle so upstream standards
+  (e.g. an ISO 9001 / ISO 14001 pack over a base management-system kit) evolve
+  through re-extension / re-composition / re-parameterization, never
+  copy-and-edit migration. Prior art: cypilot kits
+  (`constructorfabric/studio-kit-sdlc`). Nothing implemented yet; slices
+  sketched but not cut.
 - [`contextual-room-routing.md`](contextual-room-routing.md) — (runtime)
   make the final LLM routing tier classify unmatched room input as exactly one
   of: explicit intent with slots, read-only help, in-room free-form request, or
@@ -318,10 +333,6 @@ thought.
   the Oregon Trail calibration history. The user-facing reference
   for the shipped surface lives at
   [`../architecture/semantic-routing.md`](../architecture/semantic-routing.md).
-- [`embeddings.md`](embeddings.md) — **epic.** All 3 slices shipped. See
-  [`docs/architecture/embeddings.md`](../architecture/embeddings.md) (substrate
-  + `agent.search`) and [`docs/architecture/semantic-routing.md`](../architecture/semantic-routing.md)
-  §6 (routing tier). Child slice files deleted.
 - [`view-rendering-readability.md`](view-rendering-readability.md) —
   **epic.** Make the typed element tree the single canonical view
   representation so prose reads cleanly across the TUI and the web,
@@ -347,24 +358,17 @@ thought.
   meta chat, agent workbench with cassette browser + isolated replay, reusable
   `StoryViewer.vue`) now lives in narrative docs:
   [`docs/tui/story-editor.md`](../tui/story-editor.md). Proposals deleted.
-- [`mockup-video-studio.md`](mockup-video-studio.md) — **epic.** Author UI
-  design-proposal walkthrough videos as a recorded process **and** improve
-  them in the web UI: flag a scene or time-range, grab the frame, instruct
-  the LLM, watch the video re-render. Builds on the shipped media artifact
-  seam. Nothing implemented yet; decomposed
-  into three slices:
-  - [`video-frame-seam.md`](video-frame-seam.md) (runtime) — a
-    producer-agnostic **chapter sidecar** (scene↔timestamp + `source_ref`) +
-    a deterministic `host.video.frame` still-grab, backed by one
-    `internal/video` extractor shared by a host call and the slice-2 web RPC.
-  - [`video-feedback-mode.md`](video-feedback-mode.md) (tui) — a `/review`
-    web panel: player + chapter timeline + flag-scene/range + per-flag PNG +
-    chat → structured, source-targeted **feedback notes** (capture + dispatch;
-    the LLM edit is the story's recorded decision).
-  - [`mockup-video-authoring.md`](mockup-video-authoring.md) (story) — a new
-    `stories/mockup-video/`: brief → author HTML+tour *or* slidey deck
-    (`medium: tour | deck`) → render (chapter sidecar) → review → refine-loop
-    on each flag → gallery.
+- `mockup-video-studio.md` — author UI design-proposal walkthrough videos as a
+  recorded process and improve them in the web UI (chapter sidecar + still
+  grab, `/review` flag-and-refine panel, `stories/mockup-video/`). **Shipped**
+  (all 3 slices); the proposal and its three slice files were retired — see
+  `stories/mockup-video/`, [`docs/stories/mockup-video.md`](../stories/mockup-video.md),
+  [`docs/tui/video-review.md`](../tui/video-review.md), and
+  `host.video.frame` in [`hosts.md`](../architecture/hosts.md).
+- `kitsoki-as-dependency.md` — base stories + demos runnable inside a foreign
+  repo. **Shipped** (all 4 slices); the proposal was retired — see the
+  dev-story README, the `kitsoki-ui-demo` skill, and
+  [`docs/web/tour.md`](../web/tour.md).
 - [`work-decomposition.md`](work-decomposition.md) — **story.** A new
   `stories/decompose/` sub-story imported into dev-story: hand it an accepted
   proposal (or epic + children) and an interactive discovery conversation
@@ -416,4 +420,28 @@ thought.
   fallback, in `docs/architecture/hosts.md`), with its Phase B turn-suspend gate
   and a story adoption still remaining.
   - [`diff-open-fallback.md`](diff-open-fallback.md) — **runtime** (slice #1).
-  - tui-md-links — **tui** (slice #2): shipped, file deleted.
+  - `tui-md-links.md` — **tui** (slice #2): shipped, proposal file retired —
+    see [`docs/tui/README.md`](../tui/README.md#opening-markdown-artifacts-osc-8-links--open)
+    (OSC 8 `.md` links + `/open`).
+- `embeddings.md` — shared vector index substrate, `host.agent.search`, and a
+  paraphrase-recall routing tier. **Shipped** (all 3 slices, incl. the
+  `embed-substrate.md` / `embedding-routing-tier.md` / `agent-search.md`
+  children); the proposal and its children were retired — see
+  [`docs/architecture/embeddings.md`](../architecture/embeddings.md)
+  (substrate + `agent.search`) and
+  [`docs/architecture/semantic-routing.md`](../architecture/semantic-routing.md)
+  §6 (routing tier).
+- [`arena-comparison-runner.md`](arena-comparison-runner.md) — (runtime) one
+  tool to run any large comparison/sweep job in containers, placed on local
+  or remote-VM Docker hosts; unifies `tools/bugfix-bakeoff/` and the matrix
+  half of `tools/product-journey/`. P0 (walking skeleton) + VM placement
+  shipped as [`tools/arena/`](../../tools/arena/README.md); a VM host pool,
+  a persona-qa/onboarding plugin, and retiring `escalate.sh` remain.
+- [`per-story-cost-tracking.md`](per-story-cost-tracking.md) — (tracing) every
+  story publishes its cost savings vs. a raw agentic loop. The driver +
+  report (`tools/session-mining/{pricing,cost_extract,cost_report}.py`,
+  `make cost-report`) are shipped; recording a real, non-authored agent-cost
+  numerator is the remaining honesty gap.
+- [`session-launcher.md`](session-launcher.md) — (story) a story-driven CLI
+  session launcher that spins up a tailored Claude Code instance per task
+  from a natural-language description. Draft; nothing implemented yet.

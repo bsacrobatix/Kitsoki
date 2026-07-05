@@ -97,8 +97,8 @@ tickets, GitHub issues, or no follow-up ticket at all. External targets live in
 their **own** repo as a zero-config `stories/<name>/` instance, discovered by
 the default `./stories` walk, importing this base via `@kitsoki/dev-story` from
 the binary's embedded story library — see
-[`kitsoki-as-dependency.md`](../../docs/proposals/kitsoki-as-dependency.md)
-for the broader dependency story.
+[`docs/web/tour.md`](../../docs/web/tour.md) for the broader
+kitsoki-as-a-dependency story (shipped; the design proposal was retired).
 
 The profile is the "External-target profile" world block in
 [`app.yaml`](./app.yaml) (search `External-target profile`). Every key has
@@ -554,10 +554,9 @@ this one is kitsoki's self-targeting parallel — **"kitsoki on kitsoki"**.
   clarification rounds, PRD draft review and publish, design intake handoff,
   design brief refinement, design publish, feature-ticket auto-mint) — was
   **de-listed** from `features/`: the binary `kitsoki tour` renderer it needed
-  (slice 2 of the [kitsoki-as-dependency](../../docs/proposals/kitsoki-as-dependency.md)
-  epic) can advance the imported PRD state but doesn't remount the chat surface
-  reliably enough for Pages CI, so the page shipped as a permanent placeholder.
-  The stub spec
+  (shipped; see [`docs/web/tour.md`](../../docs/web/tour.md)) can advance the
+  imported PRD state but doesn't remount the chat surface reliably enough for
+  Pages CI, so the page shipped as a permanent placeholder. The stub spec
   [`dev-story-prd-design-video.spec.ts`](../../tools/runstatus/tests/playwright/dev-story-prd-design-video.spec.ts)
   is kept for reviving it once that renderer gap closes; the flow fixture's
   *content* is already verified no-LLM under

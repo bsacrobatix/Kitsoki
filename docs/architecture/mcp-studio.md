@@ -193,9 +193,9 @@ deterministic direct path or a read.
 | `session.new` | `{story_path, harness?, cassette?, trace?} → {handle, state}` | open a driving handle (default `harness:replay`) |
 | `session.attach` | `{story_path, key, …} → {handle, state}` | co-drive an existing keyed session via the external-attach bridge |
 | `session.drive` | `{handle, input, async_after_ms?} → {outcome, frame} \| {running} \| {awaiting_operator}` | **free text** → `orch.Turn` (interpretive route); returns `running` after a bounded wait instead of letting long live turns time out |
-| `session.submit` | `{handle, intent, slots?} → {outcome, frame}` | `SubmitDirect` — pick a menu intent |
-| `session.continue` | `{handle, slots} → {outcome, frame}` | `ContinueTurn` — supply missing slots |
-| `session.answer` | `{handle, question_id, answers} → {outcome, frame} \| {awaiting_operator}` | resume a parked operator-ask (see below) |
+| `session.submit` | `{handle, intent, slots?, async_after_ms?} → {outcome, frame} \| {running} \| {awaiting_operator}` | `SubmitDirect` — pick a menu intent; shares the bounded wait/poll path |
+| `session.continue` | `{handle, slots, async_after_ms?} → {outcome, frame} \| {running} \| {awaiting_operator}` | `ContinueTurn` — supply missing slots; shares the bounded wait/poll path |
+| `session.answer` | `{handle, question_id, answers, async_after_ms?} → {outcome, frame} \| {running} \| {awaiting_operator}` | resume a parked operator-ask (see below); shares the bounded wait/poll path after the answer is delivered |
 | `session.status` | `{handle} → {state, allowed_intents, running?, status?, last_error?, exit?}` | compact, overflow-proof snapshot — **never embeds world**; reads only the well-known keys `status`/`last_error`/`exit` from the world. Use instead of `session.inspect` when the world may hold multi-KB LLM artifacts. |
 | `session.teleport` | `{handle, notification_id} → {outcome, frame}` | jump to an inbox notification's saved target and mark it read |
 | `session.inspect` | `{handle, omit_world?, max_value_len?} → {state, world, allowed_intents, last_view, async, running?, jobs[], notifications[], pending_drives[], backgrounded_chats[], operator_questions[], mining_proposals[], last_turns[]}` | `buildInspectOutput` + session JobStore / ChatStore / trace side channel (read-only); `omit_world:true` drops world entirely; `max_value_len:N` truncates each value to N chars with `…` |
@@ -207,8 +207,9 @@ Every drive/submit/continue returns **both** the structured `TurnOutcome` (mode,
 new state, allowed intents, slots needed) **and** the rendered `Frame` — so the
 agent reasons on metadata and *sees* the screen in one call.
 
-Long live `session.drive` calls are bounded by default. If a turn is still
-executing after the wait window, the tool returns
+Long live turn calls (`session.drive`, `session.submit`, `session.continue`, and
+the post-answer wait in `session.answer`) are bounded by default. If a turn is
+still executing after the wait window, the tool returns
 `{ok:true, running:{handle,input,started_at_unix_micro,poll:"session.status"}}`
 while the same turn continues in the session runtime. Clients should poll
 `session.status` first; it repeats the same compact `running` object until the

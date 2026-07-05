@@ -15,8 +15,13 @@
 //     story it runs, its *sessionRuntime, the read Source and write Driver the
 //     server routes against, and enough state to drive a TUI-parity Reload.
 //
-// Sessions are in-memory only: they die with the process (no persistence across
-// restarts, no cap, no kill action — all decided leans for the PoC).
+// Sessions are in-memory only: they die with the process (no persistence
+// across restarts, no kill action — decided leans for the PoC). Live count IS
+// now bounded (swarm-session-cap): session.new / AttachExternal evict the
+// least-recently-active IDLE session once the configurable cap is reached
+// (server.SessionRegistry.ensureCapacityLocked), so dozens of churning swarm
+// UI-QA sessions can't leak an orchestrator per session for the life of the
+// process the way an uncapped registry would.
 package main
 
 import (
@@ -30,6 +35,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -81,6 +87,22 @@ type entry struct {
 	// stay stable across RPCs for this session.
 	frames   *server.JournalFrameRecorder
 	feedback *server.JSONLFeedbackSink
+
+	// turnsInFlight counts driver calls currently executing against this
+	// session (Turn/SubmitDirect/ContinueTurn/AskOffPath/Teleport/RewindRoute,
+	// via trackingDriver). >0 means "mid-turn" — ensureCapacityLocked never
+	// picks such a session as an eviction victim. Accessed with sync/atomic so
+	// trackingDriver's begin/end calls don't need the registry mutex held for
+	// the call's whole duration.
+	turnsInFlight int32
+
+	// lastActive is stamped by trackingDriver when a turn-advancing call
+	// completes (and seeded to session-creation time), so
+	// ensureCapacityLocked's "least-recently-active idle session" choice has a
+	// meaningful signal — a session mid-conversation ranks recent even between
+	// turns; one nobody has touched since it was opened ranks oldest. Guarded
+	// by the registry mutex (all entry field access is).
+	lastActive time.Time
 }
 
 type storyLoad struct {
@@ -138,6 +160,12 @@ type SessionRegistry struct {
 	stories  []webconfig.StoryMeta
 	sessions map[string]*entry
 
+	// maxSessions caps the live-session count (swarm-session-cap). Set from
+	// $KITSOKI_WEB_MAX_SESSIONS (or DefaultMaxLiveSessions) at construction;
+	// SetMaxSessions overrides it (e.g. from a future --max-sessions flag, or
+	// a test tightening it to exercise eviction cheaply). Guarded by mu.
+	maxSessions int
+
 	// currentSessionID is the id of the most recently created (NewSession) or
 	// attached (AttachExternal) session — the "current" session trace-only and
 	// graph-only surfaces follow (server.CurrentSessionProvider). Empty means no
@@ -161,11 +189,253 @@ type SessionRegistry struct {
 // initial catalogue is empty until the caller runs Rescan.
 func NewRegistry(cfg webconfig.WebConfig, dirs []string, base runtimeBase) *SessionRegistry {
 	return &SessionRegistry{
-		cfg:      cfg,
-		base:     base,
-		dirs:     dirs,
-		sessions: map[string]*entry{},
+		cfg:         cfg,
+		base:        base,
+		dirs:        dirs,
+		sessions:    map[string]*entry{},
+		maxSessions: maxSessionsFromEnv(),
 	}
+}
+
+// DefaultMaxLiveSessions is the fallback cap on concurrently live in-memory
+// sessions (swarm-session-cap) when neither $KITSOKI_WEB_MAX_SESSIONS nor
+// SetMaxSessions configures one explicitly. Picked generous enough that
+// ordinary single-operator usage — a handful of story tabs open in a
+// browser — never brushes against it, while still bounding the swarm-scale
+// churn scenario (dozens of short-lived persona/UI-QA sessions started back
+// to back) that would otherwise leak an orchestrator per session for the life
+// of the process, per the package doc's now-revisited "no cap" lean.
+const DefaultMaxLiveSessions = 128
+
+// maxSessionsFromEnv resolves the configured cap from $KITSOKI_WEB_MAX_SESSIONS,
+// falling back to DefaultMaxLiveSessions when unset or not a positive integer.
+func maxSessionsFromEnv() int {
+	v := os.Getenv("KITSOKI_WEB_MAX_SESSIONS")
+	if v == "" {
+		return DefaultMaxLiveSessions
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return DefaultMaxLiveSessions
+	}
+	return n
+}
+
+// SetMaxSessions overrides the live-session cap after construction — the
+// injection point a future `kitsoki web --max-sessions` flag would call, and
+// what tests use to exercise eviction without starting 128 real sessions. n<=0
+// restores DefaultMaxLiveSessions rather than disabling the cap (a cap of zero
+// or negative would either always-evict or panic the eviction search).
+func (r *SessionRegistry) SetMaxSessions(n int) {
+	if n <= 0 {
+		n = DefaultMaxLiveSessions
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.maxSessions = n
+}
+
+// ErrNoEvictableSession is returned by NewSession/AttachExternal when the live
+// -session cap is reached and every live session is mid-turn (turnsInFlight >
+// 0) — there is nothing safe to evict. Returning this beats the alternatives:
+// silently exceeding the cap (defeats the point of having one) or blocking
+// until something finishes (an operator-facing hang with no visible cause).
+var ErrNoEvictableSession = errors.New("kitsoki web: live-session cap reached and every session is mid-turn; no idle session is evictable")
+
+// ensureCapacityLocked makes room for one more live session when the cap is
+// already met: it picks the least-recently-active session with no turn in
+// flight and evicts it. Caller MUST hold r.mu for the whole
+// check-evict-then-insert sequence (both NewSession and AttachExternal do),
+// so two concurrent session.new calls can't both observe "under cap" and both
+// insert, exceeding it.
+//
+// The returned *entry (nil when no eviction was needed) is the victim; the
+// caller must release it via cleanupEvicted AFTER unlocking r.mu (Close/sink
+// I/O has no business running under the map lock).
+func (r *SessionRegistry) ensureCapacityLocked() (*entry, error) {
+	if len(r.sessions) < r.maxSessions {
+		return nil, nil
+	}
+	var victimID string
+	var victim *entry
+	for id, e := range r.sessions {
+		if atomic.LoadInt32(&e.turnsInFlight) > 0 {
+			continue // never evict a session mid-turn
+		}
+		if victim == nil || e.lastActive.Before(victim.lastActive) {
+			victimID, victim = id, e
+		}
+	}
+	if victim == nil {
+		return nil, ErrNoEvictableSession
+	}
+	delete(r.sessions, victimID)
+	if r.currentSessionID == victimID {
+		r.currentSessionID = ""
+	}
+	return victim, nil
+}
+
+// cleanupEvicted releases everything an evicted session held: its trace sink
+// and its sessionRuntime (which owns the orchestrator, its store handles, and
+// any agent/IDE connections — rt.Close's usual shutdown path). e is already
+// unreachable from r.sessions by the time this runs (ensureCapacityLocked
+// deleted it under the lock), so:
+//
+//   - a subsequent RPC against its id resolves via Get with ok=false, which
+//     the server surface turns into a clear "unknown session_id" error — not a
+//     hang or a panic (see server.resolve);
+//   - its notification relay (registered on e.rt.Orch via
+//     r.notifier.AttachSession at NewSession/AttachExternal time — the leak
+//     named in the package doc) needs no separate UnregisterObserver call: the
+//     relay is reachable only through that orchestrator's observer list, and
+//     once e.rt.Close() runs and e is dropped here, nothing in the process
+//     still references the orchestrator, so the relay (and the orchestrator
+//     itself) become eligible for garbage collection together. It will never
+//     fire again because nothing can drive e.sid to produce a background turn
+//     for it to relay.
+//
+// Called after r.mu is released (Close/sink I/O has no business running under
+// the map lock).
+func (r *SessionRegistry) cleanupEvicted(e *entry) {
+	if e == nil {
+		return
+	}
+	if e.sink != nil {
+		_ = e.sink.Close()
+	}
+	if e.rt != nil {
+		e.rt.Close()
+	}
+}
+
+// beginTurn marks id as mid-turn (turnsInFlight+1), protecting it from
+// idle eviction for the duration of the call. No-op if id is no longer live
+// (e.g. it raced an eviction — vanishingly unlikely since the caller can only
+// reach beginTurn through a Driver obtained from a still-registered entry, but
+// defensive rather than a nil-deref). Called by trackingDriver.
+func (r *SessionRegistry) beginTurn(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e, ok := r.sessions[id]; ok {
+		atomic.AddInt32(&e.turnsInFlight, 1)
+	}
+}
+
+// endTurn clears the mid-turn mark and stamps lastActive to now — the signal
+// ensureCapacityLocked ranks idle victims on. Called by trackingDriver via
+// defer, so it runs whether the call succeeded or errored.
+func (r *SessionRegistry) endTurn(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e, ok := r.sessions[id]; ok {
+		atomic.AddInt32(&e.turnsInFlight, -1)
+		e.lastActive = time.Now()
+	}
+}
+
+// trackingDriver wraps a live session's [server.Driver] so the registry can
+// enforce swarm-session-cap eviction safely: it marks the session mid-turn
+// (via beginTurn/endTurn) around every call that advances or could race the
+// session's teardown, so ensureCapacityLocked never picks a busy session as a
+// victim. Read-only / no-advance methods (View, IntentInfo, DefaultIntent,
+// PatchWorld, the inbox listing methods) are promoted unchanged from the
+// embedded Driver, matching lockingDriver's split between advancing and
+// read-only calls.
+//
+// The optional Driver extensions (HarnessController, WorkLister, ChatShower,
+// GitHubInboxSyncer) are forwarded explicitly, mirroring lockingDriver, so
+// wrapping a session's driver for tracking introduces no feature regression —
+// a Driver that doesn't implement one of these reports the same
+// not-configured shape a read-only surface would.
+type trackingDriver struct {
+	server.Driver
+	reg *SessionRegistry
+	id  string
+}
+
+// newTrackingDriver wraps inner so its turn-advancing calls bump the
+// registry's mid-turn / lastActive bookkeeping for session id.
+func newTrackingDriver(reg *SessionRegistry, id string, inner server.Driver) server.Driver {
+	return &trackingDriver{Driver: inner, reg: reg, id: id}
+}
+
+func (d *trackingDriver) Turn(ctx context.Context, input string) (*orchestrator.TurnOutcome, error) {
+	d.reg.beginTurn(d.id)
+	defer d.reg.endTurn(d.id)
+	return d.Driver.Turn(ctx, input)
+}
+
+func (d *trackingDriver) SubmitDirect(ctx context.Context, intent string, slots map[string]any) (*orchestrator.TurnOutcome, error) {
+	d.reg.beginTurn(d.id)
+	defer d.reg.endTurn(d.id)
+	return d.Driver.SubmitDirect(ctx, intent, slots)
+}
+
+func (d *trackingDriver) ContinueTurn(ctx context.Context, slots map[string]any) (*orchestrator.TurnOutcome, error) {
+	d.reg.beginTurn(d.id)
+	defer d.reg.endTurn(d.id)
+	return d.Driver.ContinueTurn(ctx, slots)
+}
+
+func (d *trackingDriver) AskOffPath(ctx context.Context, input string) (string, error) {
+	d.reg.beginTurn(d.id)
+	defer d.reg.endTurn(d.id)
+	return d.Driver.AskOffPath(ctx, input)
+}
+
+func (d *trackingDriver) Teleport(ctx context.Context, notificationID string) (*orchestrator.TurnOutcome, error) {
+	d.reg.beginTurn(d.id)
+	defer d.reg.endTurn(d.id)
+	return d.Driver.Teleport(ctx, notificationID)
+}
+
+func (d *trackingDriver) RewindRoute(ctx context.Context, decisionID string, newClass orchestrator.ContextRouteClass, reason string) (*orchestrator.TurnOutcome, error) {
+	d.reg.beginTurn(d.id)
+	defer d.reg.endTurn(d.id)
+	return d.Driver.RewindRoute(ctx, decisionID, newClass, reason)
+}
+
+func (d *trackingDriver) HarnessProfiles() []orchestrator.ProfileInfo {
+	if hc, ok := d.Driver.(server.HarnessController); ok {
+		return hc.HarnessProfiles()
+	}
+	return nil
+}
+
+func (d *trackingDriver) HarnessSelection() orchestrator.ProfileSelection {
+	if hc, ok := d.Driver.(server.HarnessController); ok {
+		return hc.HarnessSelection()
+	}
+	return orchestrator.ProfileSelection{}
+}
+
+func (d *trackingDriver) SetHarnessSelection(profile, model, effort string) error {
+	if hc, ok := d.Driver.(server.HarnessController); ok {
+		return hc.SetHarnessSelection(profile, model, effort)
+	}
+	return nil
+}
+
+func (d *trackingDriver) ListWork(ctx context.Context) (server.SessionWork, error) {
+	if wl, ok := d.Driver.(server.WorkLister); ok {
+		return wl.ListWork(ctx)
+	}
+	return server.SessionWork{}, nil
+}
+
+func (d *trackingDriver) ShowChat(ctx context.Context, chatID string, sinceSeq int) (server.ChatShowResult, error) {
+	if cs, ok := d.Driver.(server.ChatShower); ok {
+		return cs.ShowChat(ctx, chatID, sinceSeq)
+	}
+	return server.ChatShowResult{}, fmt.Errorf("chat.show: no chat store configured")
+}
+
+func (d *trackingDriver) SyncGitHubInbox(ctx context.Context, opts server.GitHubInboxSyncOptions) (server.GitHubInboxSyncResult, error) {
+	if sy, ok := d.Driver.(server.GitHubInboxSyncer); ok {
+		return sy.SyncGitHubInbox(ctx, opts)
+	}
+	return server.GitHubInboxSyncResult{}, fmt.Errorf("inbox.sync_github: not supported")
 }
 
 func (r *SessionRegistry) implicitRootPath() (string, error) {
@@ -363,26 +633,35 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 		source:        live,
 		driver:        server.OrchestratorDriver{Orch: orch, SID: sid, Jobs: rt.JobStore, Chats: rt.ChatStore, TraceHistory: live.History},
 		sink:          sink,
+		lastActive:    time.Now(),
 	}
+	e.driver = newTrackingDriver(r, id, e.driver)
 
 	// Register a per-session notification relay so the orchestrator's
-	// background-turn fan-out reaches the cross-session SSE feed. Sessions are
-	// in-memory and never explicitly removed in the PoC (Close releases the
-	// runtime on shutdown but does not delete entries), so there is no
-	// per-session UnregisterObserver here — the relay lives as long as the
-	// orchestrator. Epic open question 1 (cross-session aggregation cost): the
-	// relay holds only references to the server buffer and the JobStore, so the
-	// bound is the live-session count. The notifier is injected by web.go via
-	// SetNotifier after the server is constructed; it is nil in tests that build
-	// a registry without a server.
+	// background-turn fan-out reaches the cross-session SSE feed. The relay is
+	// never explicitly unregistered here — it lives as long as the
+	// orchestrator does. That used to mean "as long as the process" (the
+	// original PoC leak this package doc named), but sessions are now bounded
+	// (swarm-session-cap): once ensureCapacityLocked evicts this entry and
+	// cleanupEvicted closes rt, the orchestrator (and the relay registered on
+	// it) become unreachable and are collected together — see cleanupEvicted's
+	// doc. The notifier is injected by web.go via SetNotifier after the server
+	// is constructed; it is nil in tests that build a registry without a
+	// server.
 	if r.notifier != nil {
 		r.notifier.AttachSession(orch, sid, id, rt.JobStore)
 	}
 
 	r.mu.Lock()
+	victim, evictErr := r.ensureCapacityLocked()
+	if evictErr != nil {
+		r.mu.Unlock()
+		return "", evictErr
+	}
 	r.sessions[id] = e
 	r.currentSessionID = id
 	r.mu.Unlock()
+	r.cleanupEvicted(victim)
 
 	// The current session changed: notify subscribers (trace-only / graph-only
 	// surfaces follow this). Emitted outside the lock, after the value is
@@ -537,22 +816,28 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 		source:        live,
 		driver:        driver,
 		sink:          sink,
+		lastActive:    time.Now(),
 	}
+	e.driver = newTrackingDriver(r, id, e.driver)
 
 	r.mu.Lock()
+	victim, evictErr := r.ensureCapacityLocked()
+	if evictErr != nil {
+		r.mu.Unlock()
+		return "", evictErr
+	}
 	r.sessions[id] = e
 	r.currentSessionID = id
 	r.mu.Unlock()
+	r.cleanupEvicted(victim)
 
 	// The current session changed: notify subscribers (same as NewSession).
 	if r.notifier != nil {
 		r.notifier.EmitCurrentSession(id, true)
 	}
 
-	// Attach the cross-session notification relay, same as NewSession — a
-	// store-attached (hybrid) session's background-turn fan-out must also reach
-	// the runstatus.notification SSE feed. See the note at NewSession for why
-	// there is no matching UnregisterObserver.
+	// Attach the cross-session notification relay, same as NewSession — see
+	// the note there for why eviction needs no matching UnregisterObserver.
 	if r.notifier != nil {
 		r.notifier.AttachSession(orch, sid, id, rt.JobStore)
 	}

@@ -245,6 +245,7 @@ describe("ViewElement", () => {
     const video = wrapper.find("video.ve-media-video");
     expect(video.exists()).toBe(true);
     expect(video.attributes("src")).toBe("/fake-artifact/clip.mp4");
+    expect(video.attributes("poster")).toBe("/fake-artifact/clip.mp4/poster");
     expect(video.attributes("controls")).toBeDefined();
     w.unmount();
   });

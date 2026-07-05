@@ -347,6 +347,65 @@ func TestDispatchFailedPRRebaseRetriesRebaseRequest(t *testing.T) {
 	}
 }
 
+func TestDispatchPRRebaseRequestCancellationDoesNotStrandRunningJob(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	store := newGHJobStore(t)
+	rec := &recordingComments{commentID: "https://github.com/o/r/pull/56#issuecomment-1"}
+	d := &Dispatcher{
+		Jobs:          store,
+		Routes:        DefaultLabelStoryMap(),
+		Comments:      &CommentStore{Exec: rec.handler, Repo: "o/r"},
+		WorkerID:      "worker-cancelled",
+		PublicBaseURL: "https://agent.example",
+		SpawnFn: func(spawnCtx context.Context, route Route, _ *jobs.GHJob) (RunResult, error) {
+			if route.Story != StoryPRRebase {
+				t.Fatalf("route story=%q, want %q", route.Story, StoryPRRebase)
+			}
+			cancel()
+			<-spawnCtx.Done()
+			return RunResult{}, spawnCtx.Err()
+		},
+	}
+
+	job, err := d.Dispatch(ctx, Mention{
+		Item: host.GitHubInboxItem{Kind: "pr", Number: "56", Title: "@kitsoki resolve the merge conflicts"},
+		Repo: "o/r", OriginRef: "github:o/r/pr/56", Trigger: DefaultMentionTrigger,
+	}, nil)
+	if err == nil {
+		t.Fatal("Dispatch succeeded despite cancelled pr-rebase context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Dispatch error = %v, want context.Canceled", err)
+	}
+	if job == nil {
+		var getErr error
+		job, getErr = store.GetByOriginRef(context.Background(), "github:o/r/pr/56")
+		if getErr != nil {
+			t.Fatalf("GetByOriginRef: %v", getErr)
+		}
+	}
+	got, getErr := store.GetJob(context.Background(), job.JobID)
+	if getErr != nil {
+		t.Fatalf("GetJob: %v", getErr)
+	}
+	if got.Story != StoryPRRebase {
+		t.Fatalf("Story=%q, want %q", got.Story, StoryPRRebase)
+	}
+	if got.State != jobs.GHFailed {
+		t.Fatalf("State=%q, want failed so the run page/API do not strand an active job; job=%+v", got.State, got)
+	}
+	if !strings.Contains(got.ErrMsg, "context canceled") {
+		t.Fatalf("ErrMsg=%q, want context canceled", got.ErrMsg)
+	}
+	events, eventsErr := store.Events(context.Background(), got.JobID)
+	if eventsErr != nil {
+		t.Fatalf("Events: %v", eventsErr)
+	}
+	if !hasEvent(events, jobs.GHFailed) {
+		t.Fatalf("events missing failed terminal transition: %+v", events)
+	}
+}
+
 // recordingComments is a host.Handler bound as the CommentStore.Exec seam. It
 // captures every op=comment body (so the test can assert the fenced metadata
 // block) and returns a synthetic comment id. This is the DI seam in place of a

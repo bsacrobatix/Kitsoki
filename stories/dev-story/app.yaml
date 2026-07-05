@@ -799,8 +799,9 @@ intents:
     priority: 20
   go_gitops:
     title: "Git commands"
-    description: "Open the git command hub — rebase, commit, merge, worktrees."
-    examples: [git, "git ops", "git commands", "version control"]
+    description: "Open the git command hub — status, rebase, commit, merge, worktrees."
+    examples: [git, "git ops", "git commands", "version control", "git status", "repo status"]
+    synonyms: ["local main vs origin", "main vs origin", "what's the status of local main vs origin", "what's the state of our local main vs origin", "what is the state of our local main vs origin"]
     priority: 20
   go_agent:
     title: "Ask Agent"
@@ -1827,6 +1828,8 @@ imports:
       # works there.
       done:
         to: prd_published
+      gitops:
+        to: gitops
       abandoned:
         to: landing
         set:

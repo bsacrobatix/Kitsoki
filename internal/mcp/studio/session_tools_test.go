@@ -239,6 +239,64 @@ func TestSessionDrive_ReturnsRunningWhenTurnExceedsBoundedWait(t *testing.T) {
 	assert.Nil(t, settledStatus.Running, "running marker is removed after the turn settles")
 }
 
+func TestSessionSubmit_ReturnsRunningWhenTurnExceedsBoundedWait(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	cs := connectInProcess(ctx, t, srv)
+	appPath := writeSlowSubmitStory(t)
+
+	res, err := callTool(ctx, cs, "session.new", map[string]any{
+		"story_path": appPath,
+		"harness":    "replay",
+		"trace":      t.TempDir() + "/trace.jsonl",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.new: %s", contentText(res))
+	var ok studio.SessionOpenOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &ok))
+
+	start := time.Now()
+	res, err = callTool(ctx, cs, "session.submit", map[string]any{
+		"handle":         ok.Handle,
+		"intent":         "enter",
+		"async_after_ms": 20,
+	})
+	require.NoError(t, err)
+	tr := driveResult(t, res)
+	require.True(t, tr.OK)
+	require.NotNil(t, tr.Running, "slow direct submits return a running status before the MCP client times out")
+	require.Equal(t, ok.Handle, tr.Running.Handle)
+	require.Equal(t, "intent:enter", tr.Running.Input)
+	require.Less(t, time.Since(start), 100*time.Millisecond)
+
+	res, err = callTool(ctx, cs, "session.status", map[string]any{"handle": ok.Handle})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.status: %s", contentText(res))
+	var runningStatus studio.SessionStatusResult
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &runningStatus))
+	require.NotNil(t, runningStatus.Running, "session.status exposes the in-flight submit for polling")
+	assert.Equal(t, "intent:enter", runningStatus.Running.Input)
+
+	require.Eventually(t, func() bool {
+		res, err := callTool(ctx, cs, "session.status", map[string]any{"handle": ok.Handle})
+		if err != nil || res.IsError {
+			return false
+		}
+		var status studio.SessionStatusResult
+		if json.Unmarshal([]byte(contentText(res)), &status) != nil {
+			return false
+		}
+		return status.State == "done" && status.Running == nil
+	}, time.Second, 20*time.Millisecond)
+
+	res, err = callTool(ctx, cs, "session.world", map[string]any{"handle": ok.Handle, "key": "result"})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.world: %s", contentText(res))
+	var worldValue studio.SessionWorldValue
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &worldValue))
+	assert.Equal(t, "slow-submit-done", worldValue.Value)
+}
+
 // ─── 2.2 no-live-fallthrough ─────────────────────────────────────────────────
 
 // TestSessionDrive_NoLiveFallthrough is the teeth. A replay session driven with
@@ -311,7 +369,7 @@ func TestSessionNew_ReplayWithoutCassetteAllowsDirectSubmitOnly(t *testing.T) {
 
 	res, err = callTool(ctx, cs, "session.drive", map[string]any{
 		"handle": ok.Handle,
-		"input":  "go east",
+		"input":  "this should require the harness",
 	})
 	require.NoError(t, err)
 	driven := driveResult(t, res)
@@ -920,6 +978,49 @@ states:
           - set:
               result: "{{ world.last_job_result.stdout }}"
           - say: "Background complete: {{ world.result }}"
+`
+	require.NoError(t, os.WriteFile(appPath, []byte(body), 0o644))
+	return appPath
+}
+
+func writeSlowSubmitStory(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	appPath := dir + "/app.yaml"
+	const body = `app:
+  id: studio-slow-submit-test
+  version: 0.1.0
+  title: "Studio Slow Submit Test"
+
+hosts:
+  - host.run
+
+world:
+  result: { type: string, default: "" }
+
+intents:
+  enter:
+    title: "Enter"
+
+root: lobby
+
+states:
+  lobby:
+    view: "Lobby."
+    on:
+      enter:
+        - target: done
+
+  done:
+    view: |
+      Done.
+      Result: {{ world.result }}
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "sleep 0.12; printf slow-submit-done"
+        bind:
+          result: stdout
 `
 	require.NoError(t, os.WriteFile(appPath, []byte(body), 0o644))
 	return appPath

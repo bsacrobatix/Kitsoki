@@ -1,8 +1,8 @@
 # Project onboarding — getting started with kitsoki in your project
 
-You have the `kitsoki` binary installed (if not, do
-[getting-started.md](getting-started.md) first). This guide takes *your*
-repository — any language, any stack — from "kitsoki is on my PATH" to a
+You have the `kitsoki` binary installed (if not, start with
+[getting-started.md](getting-started.md)). This guide takes *your* repository —
+any language, any stack — from "kitsoki is on my PATH" to a
 **fully working kitsoki environment** committed into the repo: a runnable
 dev-story instance, the studio MCP registered for your coding agent, and the
 kitsoki skill/agent toolkit installed.
@@ -195,8 +195,8 @@ automatically.
 
 ## See also
 
-- [getting-started.md](getting-started.md) — install the toolchain + binary
-  first; §5 covers choosing the LLM provider/model.
+- [getting-started.md](getting-started.md) — install the binary, choose an agent
+  backend, and run your first project onboarding pass.
 - [stories/dev-story-onboarding.md](stories/dev-story-onboarding.md) — the
   onboarding pipeline in detail (the dev-story `init` rooms).
 - [../stories/dev-story/README.md](../stories/dev-story/README.md) — the

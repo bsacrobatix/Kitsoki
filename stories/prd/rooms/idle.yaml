@@ -165,5 +165,7 @@ states:
             - set:
                 abandon_reason: "abandoned_at_idle"
                 status:         "abandoned"
+      go_gitops:
+        - target: "@exit:gitops"
       look:
         - target: .

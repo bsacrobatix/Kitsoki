@@ -135,7 +135,7 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	// `with: { agent: <name> }` references to a host.Agent value. Built
 	// once per dispatch (cheap — translation is tag-equivalent).
 	ctx = host.WithAgents(ctx, agentsForContext(o.def))
-	ctx = host.WithProviders(ctx, providersForContext(o.def))
+	ctx = host.WithProviders(ctx, o.providersForDispatch())
 	// Resolve the live harness selection once for this dispatch: the active
 	// profile chooses the backend to fork and the env/model default (installed as
 	// the operator-selected provider via WithActiveProfile). No profile selected
@@ -831,7 +831,7 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 		}
 	}
 	ctx = host.WithAgents(ctx, agentsForContext(o.def))
-	ctx = host.WithProviders(ctx, providersForContext(o.def))
+	ctx = host.WithProviders(ctx, o.providersForDispatch())
 	// Resolve the live harness selection once for this dispatch: the active
 	// profile chooses the backend to fork and the env/model default (installed as
 	// the operator-selected provider via WithActiveProfile). No profile selected

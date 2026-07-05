@@ -19,6 +19,7 @@ and [`../tracing/`](../tracing/README.md).
 | [Host call & branch](host-call-and-branch.md) | Run a `host.*` call and handle success vs failure |
 | [Collect a form](choice-form.md) | Gather several typed fields in one submission |
 | [Flow test + cassette](flow-test-with-cassette.md) | Lock behaviour with a deterministic test |
+| [Story flow coverage](story-flow-coverage.md) | Gate whether fixtures cover authored branches and enum parameters |
 | [Background job](background-job.md) | Run long work off the turn and notify on completion |
 | [Studio MCP async smoke](studio-mcp-async-smoke.md) | Prove background completion, inbox teleport, and chat-work reacquisition over studio MCP |
 | [Studio MCP GitHub inbox smoke](studio-mcp-github-inbox-smoke.md) | Prove GitHub issue/PR intake and reacquisition over studio MCP |
