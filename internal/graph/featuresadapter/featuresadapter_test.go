@@ -3,6 +3,7 @@ package featuresadapter
 import (
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -68,6 +69,62 @@ func TestBuildFeatureDoc_MatchesCommittedOperatorAskFeature(t *testing.T) {
 
 	if !reflect.DeepEqual(got, &want) {
 		t.Errorf("adapter output does not match features/operator-ask.yaml.\ngot:  %+v\nwant: %+v", got, &want)
+	}
+}
+
+// TestBuildFeatureDoc_MatchesEveryCommittedFeature is W3.1's full-conversion
+// acceptance check: every features/<id>.yaml file has a graph-sourced
+// site-page, and the adapter reconstructs each one's content from the graph
+// alone — including narrative, related, sections, qa, and the demo's
+// renderer/external/profiles/embed fields, not just the pilot's subset.
+func TestBuildFeatureDoc_MatchesEveryCommittedFeature(t *testing.T) {
+	cat, err := graph.LoadCatalog(seedCatalogPath)
+	if err != nil {
+		t.Fatalf("LoadCatalog: %v", err)
+	}
+
+	entries, err := os.ReadDir("../../../features")
+	if err != nil {
+		t.Fatalf("read features dir: %v", err)
+	}
+	var slugs []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".yaml") {
+			slugs = append(slugs, strings.TrimSuffix(e.Name(), ".yaml"))
+		}
+	}
+	if len(slugs) == 0 {
+		t.Fatal("no features/*.yaml found — fixture assumption broken")
+	}
+
+	pages := PublicSitePages(cat)
+	bySlug := make(map[string]*graph.Node, len(pages))
+	for _, p := range pages {
+		bySlug[strings.TrimPrefix(string(p.ID), "sitepage-feature-")] = p
+	}
+
+	for _, slug := range slugs {
+		t.Run(slug, func(t *testing.T) {
+			sitePage, ok := bySlug[slug]
+			if !ok {
+				t.Fatalf("no sitepage-feature-%s node in the seed catalog", slug)
+			}
+			got, err := BuildFeatureDoc(cat, sitePage)
+			if err != nil {
+				t.Fatalf("BuildFeatureDoc: %v", err)
+			}
+			raw, err := os.ReadFile("../../../features/" + slug + ".yaml")
+			if err != nil {
+				t.Fatalf("read committed feature file: %v", err)
+			}
+			var want FeatureDoc
+			if err := yaml.Unmarshal(raw, &want); err != nil {
+				t.Fatalf("parse committed feature file: %v", err)
+			}
+			if !reflect.DeepEqual(got, &want) {
+				t.Errorf("adapter output does not match features/%s.yaml.\ngot:  %+v\nwant: %+v", slug, got, &want)
+			}
+		})
 	}
 }
 

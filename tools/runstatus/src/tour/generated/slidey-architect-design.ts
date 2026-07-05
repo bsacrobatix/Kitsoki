@@ -17,7 +17,6 @@ export const SLIDEY_ARCHITECT_DESIGN_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "home-view",
     dwellMs: 5500,
-    drive: [],
   },
   {
     id: "sad-story-card",
@@ -30,7 +29,6 @@ export const SLIDEY_ARCHITECT_DESIGN_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "story-card",
     dwellMs: 5000,
-    drive: [],
   },
   {
     id: "sad-new-session",
@@ -44,7 +42,6 @@ export const SLIDEY_ARCHITECT_DESIGN_TOUR_STEPS: readonly TourStep[] = [
     advanceRoute: "interactive",
     waitForTarget: "new-session-btn",
     dwellMs: 3500,
-    drive: [],
   },
   {
     id: "sad-prd-published",
@@ -57,7 +54,6 @@ export const SLIDEY_ARCHITECT_DESIGN_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 6000,
-    drive: [{"type":"wait-state","state":"core.prd_published"},{"type":"reveal-turn"}],
   },
   {
     id: "sad-design-intake",
@@ -70,7 +66,6 @@ export const SLIDEY_ARCHITECT_DESIGN_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 6000,
-    drive: [{"type":"type-and-send","text":"continue"},{"type":"wait-state","state":"core.design"},{"type":"reveal-turn"},{"type":"type-and-send","text":"realize the speaker-notes-export PRD as a slidey runtime design"},{"type":"wait-state","state":"core.design_search"},{"type":"reveal-turn"}],
   },
   {
     id: "sad-design-refine",
@@ -83,7 +78,6 @@ export const SLIDEY_ARCHITECT_DESIGN_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 6500,
-    drive: [{"type":"click-intent","intent":"core__confirm"},{"type":"wait-state","state":"core.design_refine"},{"type":"reveal-turn"},{"type":"type-and-send","text":"name the notes collector and the CLI seam, and the per-scene Markdown shape"},{"type":"wait-state","state":"core.design_refine"},{"type":"reveal-turn"}],
   },
   {
     id: "sad-design-draft",
@@ -96,7 +90,6 @@ export const SLIDEY_ARCHITECT_DESIGN_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 7000,
-    drive: [{"type":"click-intent","intent":"core__ready"},{"type":"wait-state","state":"core.design_draft"},{"type":"reveal-turn"}],
   },
   {
     id: "sad-design-published",
@@ -109,6 +102,5 @@ export const SLIDEY_ARCHITECT_DESIGN_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 7000,
-    drive: [{"type":"click-intent","intent":"core__accept"},{"type":"wait-state","state":"core.design_done"},{"type":"reveal-turn"}],
   },
 ];
