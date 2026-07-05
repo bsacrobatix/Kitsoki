@@ -160,6 +160,10 @@ world:
   native_ghagent_summary: { type: string, default: "" }
   native_ghagent_exit_code: { type: int, default: 0 }
   native_ghagent_output: { type: string, default: "" }
+  autonomous_fix_smoke_status: { type: string, default: "" }
+  autonomous_fix_smoke_summary: { type: string, default: "" }
+  autonomous_fix_smoke_exit_code: { type: int, default: 0 }
+  autonomous_fix_smoke_output: { type: string, default: "" }
   autonomous_gate_summary: { type: string, default: "" }
   stats_status:   { type: string, default: "" }
   stats_root:     { type: string, default: "" }
@@ -246,6 +250,10 @@ intents:
   native_ghagent_smoke:
     description: "Run a no-LLM native gh-agent queue/drain smoke through kitsoki commands."
     examples: ["native ghagent smoke", "native gh-agent smoke", "prove gh-agent queue drain"]
+    priority: 88
+  autonomous_fix_smoke:
+    description: "Run a no-LLM full autonomous issue filing and gh-agent fix smoke."
+    examples: ["autonomous fix smoke", "prove autonomous issue to fix", "full autonomous fix smoke"]
     priority: 88
   refresh_targets:
     description: "Refresh GitHub open-bug proof for the 10-repo target catalog."
@@ -381,7 +389,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, capture_preflight, native_ghagent_smoke, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, autonomous_fix, stats, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
+  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, capture_preflight, native_ghagent_smoke, autonomous_fix_smoke, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, autonomous_fix, stats, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
 
 root: idle
 
