@@ -926,7 +926,87 @@ def render_capture_preflight_markdown(result: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def capture_preflight(seed: str, command: str = "", timeout: int = 90) -> dict:
+def parse_preflight_time(value: str) -> Optional[datetime.datetime]:
+    value = str(value or "").strip()
+    if not value:
+        return None
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    try:
+        return datetime.datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def quota_preflight_check(path: Path, now: Optional[datetime.datetime] = None) -> tuple[bool, str]:
+    if now is None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=datetime.timezone.utc)
+    if not path.exists():
+        return True, f"{path} (not present; no quota cooldown recorded)"
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return False, f"{path}: read failed: {exc}"
+    if not raw.strip():
+        return True, f"{path} (empty; no quota cooldown recorded)"
+    try:
+        state = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return False, f"{path}: invalid JSON: {exc}"
+    if not isinstance(state, dict):
+        return False, f"{path}: expected object"
+    if state.get("schema") not in {"", None, "kitsoki/provider-quota/v1"}:
+        return False, f"{path}: unexpected schema {state.get('schema')}"
+    profiles = state.get("profiles", {})
+    if profiles is None:
+        profiles = {}
+    if not isinstance(profiles, dict):
+        return False, f"{path}: profiles must be an object"
+    blocked: list[str] = []
+    for profile, data in profiles.items():
+        if not isinstance(data, dict):
+            return False, f"{path}: profile {profile} must be an object"
+        for key in ("backoff_until", "last_throttle_until"):
+            ts = parse_preflight_time(str(data.get(key, "")))
+            if ts is not None and ts.tzinfo is None:
+                ts = ts.replace(tzinfo=datetime.timezone.utc)
+            if ts is not None and ts > now:
+                blocked.append(f"{profile} {key}={data.get(key)}")
+    if blocked:
+        return False, "provider quota cooldown active: " + "; ".join(blocked[:5])
+    return True, f"{path}: {len(profiles)} profile(s), no active cooldown"
+
+
+def run_preflight_command(check_id: str, command: str, timeout: int, env: dict[str, str]) -> tuple[bool, str, str, str]:
+    if not command:
+        return True, "skipped", "", ""
+    cmd = shlex.split(command)
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        summary = f"exit_code={proc.returncode}; command={shlex.join(cmd)}"
+        return proc.returncode == 0, summary, proc.stdout or "", proc.stderr or ""
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or ""
+        stderr = exc.stderr or ""
+        return False, f"{check_id} timed out after {timeout}s; command={shlex.join(cmd)}", stdout, stderr
+
+
+def capture_preflight(
+    seed: str,
+    command: str = "",
+    timeout: int = 90,
+    studio_command: str = "",
+    quota_state: str = "",
+) -> dict:
     preflight_id = f"{slug_timestamp()}-capture-{seed}"
     preflight_dir = PREFLIGHT_ROOT / preflight_id
     preflight_dir.mkdir(parents=True, exist_ok=False)
@@ -993,6 +1073,22 @@ def capture_preflight(seed: str, command: str = "", timeout: int = 90) -> dict:
 
     output_ok = output.exists() and output.stat().st_size > 0
     add_check("webshot-output", output_ok, str(output))
+    if not studio_command:
+        studio_command = "go test ./internal/mcp/studio -run TestStudioPing -count=1"
+    studio_ok, studio_summary, studio_stdout, studio_stderr = run_preflight_command(
+        "studio-ping",
+        studio_command,
+        timeout,
+        env,
+    )
+    add_check("studio-ping", studio_ok, studio_summary)
+    stdout = "\n".join(part for part in [stdout, studio_stdout] if part)
+    stderr = "\n".join(part for part in [stderr, studio_stderr] if part)
+    quota_path = Path(quota_state) if quota_state else ROOT / ".artifacts" / "quota" / "provider-state.json"
+    if not quota_path.is_absolute():
+        quota_path = ROOT / quota_path
+    quota_ok, quota_summary = quota_preflight_check(quota_path)
+    add_check("quota-window", quota_ok, quota_summary)
     status = "passed" if all(check["status"] == "passed" for check in checks) else "failed"
     stdout_tail = stdout[-4000:] if isinstance(stdout, str) else str(stdout)[-4000:]
     stderr_tail = stderr[-4000:] if isinstance(stderr, str) else str(stderr)[-4000:]
@@ -1005,6 +1101,8 @@ def capture_preflight(seed: str, command: str = "", timeout: int = 90) -> dict:
         "created_at": started_at,
         "webshot_output": str(output),
         "command": cmd,
+        "studio_command": shlex.split(studio_command) if studio_command else [],
+        "quota_state": str(quota_path),
         "exit_code": returncode,
         "stdout": stdout_tail,
         "stderr": stderr_tail,
@@ -8695,6 +8793,8 @@ def main() -> None:
     parser.add_argument("--autonomous-fix-smoke", action="store_true", help="Run no-LLM full autonomous issue filing and gh-agent fix smoke")
     parser.add_argument("--persona-autofix-smoke", action="store_true", help="Run no-LLM persona replay issue-to-fix smoke through the gitops autonomous gate")
     parser.add_argument("--preflight-command", default="", help="Override the webshot smoke command for --capture-preflight tests")
+    parser.add_argument("--preflight-studio-command", default="", help="Override the studio.ping smoke command for --capture-preflight tests")
+    parser.add_argument("--preflight-quota-state", default="", help="Override provider quota state file for --capture-preflight tests")
     parser.add_argument("--preflight-timeout", type=int, default=90, help="Timeout in seconds for --capture-preflight webshot smoke")
     parser.add_argument("--validate-corpus", action="store_true", help="Validate personas, scenarios, and GitHub target catalog without writing artifacts")
     parser.add_argument("--refresh-github-targets", action="store_true", help="Query GitHub for current open bug counts and write a target-proof artifact")
@@ -8853,10 +8953,18 @@ def main() -> None:
         return
 
     if args.capture_preflight:
-        result = capture_preflight(args.seed, args.preflight_command, args.preflight_timeout)
+        result = capture_preflight(
+            args.seed,
+            args.preflight_command,
+            args.preflight_timeout,
+            args.preflight_studio_command,
+            args.preflight_quota_state,
+        )
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
             append_log(f"Ran capture preflight {result['preflight_id']}: {result['status']}")
+            if result["status"] != "passed":
+                raise SystemExit(1)
             return
         print(f"Product journey capture preflight: {result['preflight_id']}")
         print(f"Status: {result['status']}")
@@ -8866,6 +8974,8 @@ def main() -> None:
         for check in result["checks"]:
             print(f"- {check['status']}: {check['id']} ({check['summary']})")
         append_log(f"Ran capture preflight {result['preflight_id']}: {result['status']}")
+        if result["status"] != "passed":
+            raise SystemExit(1)
         return
 
     if args.native_ghagent_smoke:
