@@ -58,6 +58,16 @@ This checks that personas, scenarios, quality gates, evidence hints, and the
 `stories/product-journey-qa/app.yaml`, submit `validate_corpus` for the same
 no-LLM preflight.
 
+Before spending a live persona run, run the capture preflight:
+
+```sh
+python3 tools/product-journey/run.py --capture-preflight --json-output
+```
+
+It fails closed when webshot capture is broken, Studio MCP `studio.ping` is not
+healthy, the provider-quota state file is malformed, or an active quota
+cooldown window would make unattended capture waste spend.
+
 Emit a repeatable 10-repo GitHub planning matrix:
 
 ```sh

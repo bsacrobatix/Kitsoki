@@ -16,13 +16,15 @@ host_handlers:
             preflight_path: .artifacts/product-journey/preflights/preflight-123/preflight.json
             markdown_path: .artifacts/product-journey/preflights/preflight-123/preflight.md
             webshot_output: .artifacts/product-journey/preflights/preflight-123/webshot-smoke.png
-            passed: 4
+            passed: 6
             failed: 0
             checks:
               - { id: webshot-helper, status: passed, summary: tools/runstatus/web-shot.ts }
               - { id: webshot-flow, status: passed, summary: testdata/apps/choice_smoke/flows/intro_begin.yaml }
               - { id: webshot-command, status: passed, summary: exit_code=0 }
               - { id: webshot-output, status: passed, summary: webshot-smoke.png }
+              - { id: studio-ping, status: passed, summary: exit_code=0 }
+              - { id: quota-window, status: passed, summary: no active cooldown }
 
 steps:
   - intent:
@@ -39,7 +41,7 @@ steps:
       capture_preflight_path: .artifacts/product-journey/preflights/preflight-123/preflight.json
       capture_preflight_markdown_path: .artifacts/product-journey/preflights/preflight-123/preflight.md
       capture_preflight_webshot_output: .artifacts/product-journey/preflights/preflight-123/webshot-smoke.png
-      capture_preflight_passed: 4
+      capture_preflight_passed: 6
       capture_preflight_failed: 0
     expect_view_matches: "Capture preflight[\\s\\S]*passed"
     expect_host_calls:

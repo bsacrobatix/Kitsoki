@@ -53,6 +53,10 @@ python3 tools/product-journey/run.py --persona-autofix-smoke --json-output
 GOCACHE=/private/tmp/kitsoki-gocache go run ./cmd/kitsoki test flows stories/product-journey-qa/app.yaml
 ```
 
+`--capture-preflight` must stay no-LLM and fail closed before live persona
+spend: it checks webshot capture, Studio MCP `studio.ping`, and provider-quota
+state for malformed JSON or active cooldown windows.
+
 Use `--driver-replay-smoke --smoke-scenario <scenario-id>` when narrowing a
 single scenario. Use `--dogfood-smoke` when checking matrix-to-rollup artifact
 composition.
