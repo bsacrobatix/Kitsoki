@@ -3264,6 +3264,12 @@ func agentsForContext(def *app.AppDef) map[string]host.Agent {
 			v := *a.ExternalSideEffect
 			agent.ExternalSideEffect = &v
 		}
+		if a.TokenBudget != nil {
+			agent.TokenBudget = &host.BudgetThresholds{
+				WarnTokens:   a.TokenBudget.WarnTokens,
+				RefuseTokens: a.TokenBudget.RefuseTokens,
+			}
+		}
 		agent.Effect = a.Effect
 		out[name] = agent
 	}

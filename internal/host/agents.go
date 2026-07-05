@@ -113,6 +113,15 @@ type Agent struct {
 	// Empty means the ambient environment (today's behavior).
 	Provider string
 	Harness  string
+
+	// TokenBudget overrides the per-verb default pre-dispatch budget-gate
+	// thresholds (see budget_gate.go) for this agent. Mirrors the
+	// Toolbox/BashProfile declaration pattern: nil means "use the built-in
+	// per-verb default"; a non-nil value that fails validation (WarnTokens
+	// <= 0, or RefuseTokens < WarnTokens) makes every dispatch through this
+	// agent refuse closed rather than silently falling back to the default —
+	// an author-declared budget is trusted at face value or not at all.
+	TokenBudget *BudgetThresholds
 }
 
 // AgentPermissions is the resolved permission posture for one agent contract.

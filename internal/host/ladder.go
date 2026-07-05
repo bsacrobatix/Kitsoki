@@ -492,6 +492,20 @@ func runAgentVerbWithLadder(ctx context.Context, args map[string]any, verb strin
 	} else if ok {
 		ctx = WithHarnessLadder(ctx, cfg)
 	}
+
+	// Pre-dispatch budget gate (dispatch-context-floor task 1.4): estimate
+	// this call's token footprint and decide proceed/escalate/refuse BEFORE
+	// any rung is dispatched. A refuse decision returns here — no claude
+	// subprocess is ever spawned for this call. An escalate decision skips
+	// the ladder's cheapest effort tier (see escalateLadderStart) so the
+	// walk's first attempt already starts one step up; with no ladder
+	// installed this is a no-op and the call proceeds exactly as before.
+	if decision := checkDispatchBudget(ctx, args, verb); decision.Outcome == budgetRefuse {
+		return decision.refuseResult(), nil
+	} else if decision.Outcome == budgetEscalate {
+		ctx = escalateLadderStart(ctx)
+	}
+
 	cfg, ok := HarnessLadderFromContext(ctx)
 	if !ok || !cfg.Enabled() {
 		return once(ctx, args)
