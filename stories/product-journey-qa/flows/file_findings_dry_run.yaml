@@ -45,7 +45,7 @@ host_handlers:
                 status: dry-run
                 body: "The verify gate re-entered itself.\n\n## Expected\n\n- The bugfix story reaches a verified fix.\n\n## Actual\n\n..."
               - finding_id: finding-4
-                title: onboarding blocked on missing config
+                title: onboarding config generator emits stale commands
                 scenario: project-onboarding
                 status: dry-run
                 body: "Onboarding could not proceed.\n\n## Expected\n\n..."

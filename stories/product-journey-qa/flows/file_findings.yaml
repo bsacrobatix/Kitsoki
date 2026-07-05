@@ -66,7 +66,7 @@ host_handlers:
                 issue_url: https://github.com/bsacrobatix/Kitsoki/issues/101
                 issue_number: "101"
               - finding_id: finding-4
-                title: onboarding blocked on missing config
+                title: onboarding config generator emits stale commands
                 scenario: project-onboarding
                 status: filed
                 issue_url: https://github.com/bsacrobatix/Kitsoki/issues/102
