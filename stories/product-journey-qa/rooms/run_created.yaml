@@ -61,7 +61,7 @@ states:
       - prose: '{{ world.next_driver_capture|default:"No next proof capture is queued; run review or open scenario-outcomes.md." }}'
       - prose: '{{ world.next_driver_attach_command|default:"No next proof attach command is queued." }}'
       - prose: '{{ world.next_driver_blocker_command|default:"No next proof blocker command is queued." }}'
-      - prose: '{{ world.filing_summary|default:"Use file_findings ticket_repo=owner/repo to file recorded issue findings as GitHub issues with uploaded evidence (mode=dry-run to preview)." }}'
+      - prose: '{{ world.filing_summary|default:"Use autonomous_fix ticket_repo=owner/repo gh_agent_public_base_url=<url> for the full issue-to-fix loop; file_findings is only for preview/debug filing." }}'
       - prose: '{{ world.filed_issue_summary|default:"" }}'
       - prose: '{{ world.gh_agent_fix_evidence_summary|default:"GH-agent fix evidence assets appear here after autonomous_fix." }}'
       - prose: '{{ world.gh_agent_missing_evidence_summary|default:"" }}'
@@ -83,12 +83,12 @@ states:
             - label: "driver_event scenario=... summary=..."
               hint: "append a reusable-driver attempt to driver-journal.md"
               intent: driver_event
-            - label: "file_findings ticket_repo=owner/repo"
-              hint: "file every credible issue finding as a GitHub issue with uploaded evidence (mode=dry-run to preview)"
-              intent: file_findings
             - label: "autonomous_fix ticket_repo=owner/repo gh_agent_public_base_url=<url>"
               hint: "file credible issues, drain gh-agent fixes, refresh review artifacts, and validate in one gate"
               intent: autonomous_fix
+            - label: "file_findings ticket_repo=owner/repo"
+              hint: "preview or debug issue filing without making it the full autonomous fix gate"
+              intent: file_findings
             - label: "stats"
               hint: "derive filed/fixed/reopened/similar issue counts from run bundles"
               intent: stats
