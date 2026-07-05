@@ -7,11 +7,12 @@
 // a driver journal of what was actually attempted. This orchestration walks the
 // credible `issue` findings (observed, not seeded demo data), assembles an
 // expected/actual/reproduction body from the finding + scenario contract +
-// journal, uploads locally-resolvable evidence as release assets, and files one
-// issue per finding. Filed issue URLs are written back into findings.json
-// (item.github_issue) so re-runs are idempotent, and a findings.filing block
-// records that filing was requested so the runner's review/validate gates can
-// require "issues filed for all credible findings".
+// journal, checks for strongly-similar open issues, and either files one issue
+// per new finding or comments on the related existing issue. Issue URLs are
+// written back into findings.json (item.github_issue) so re-runs are
+// idempotent, and a findings.filing block records that filing was requested so
+// the runner's review/validate gates can require "issues filed for all credible
+// findings".
 //
 // The GitHub write path uses the native ticket provider and GitHub REST helpers,
 // so headless autonomous runs only need GH_TOKEN/GITHUB_TOKEN. Tests inject a
@@ -52,6 +53,7 @@ type FindingFilingOutcome struct {
 	Status      string   `json:"status"` // filed | skipped | failed | dry-run
 	IssueURL    string   `json:"issue_url,omitempty"`
 	IssueNumber string   `json:"issue_number,omitempty"`
+	CommentURL  string   `json:"comment_url,omitempty"`
 	Error       string   `json:"error,omitempty"`
 	Evidence    []string `json:"evidence,omitempty"`
 	Body        string   `json:"body,omitempty"` // rendered body (dry-run only)
@@ -66,6 +68,7 @@ type FindingsFilingResult struct {
 	RunDir   string                 `json:"run_dir"`
 	DryRun   bool                   `json:"dry_run"`
 	Filed    int                    `json:"filed"`
+	Related  int                    `json:"related"`
 	Skipped  int                    `json:"skipped"`
 	Failed   int                    `json:"failed"`
 	Outcomes []FindingFilingOutcome `json:"outcomes"`
@@ -146,6 +149,43 @@ func GitHubFileFindings(ctx context.Context, in FindingsFilingInput) (FindingsFi
 			continue
 		}
 
+		traceRef := fmt.Sprintf("product-journey://%s/%s", str(runJSON["run_id"]), str(item["id"]))
+		related, err := findRelatedFindingIssue(ctx, in.Repo, title, traceRef)
+		if err != nil {
+			out.Status = "failed"
+			out.Error = err.Error()
+			res.Failed++
+			res.Outcomes = append(res.Outcomes, out)
+			continue
+		}
+		if related.URL != "" {
+			commentBody := relatedFindingComment(runJSON, item, body, out.Evidence)
+			comment, err := commentRelatedFinding(ctx, in.Repo, related.ID, commentBody)
+			if err != nil {
+				out.Status = "failed"
+				out.Error = err.Error()
+				res.Failed++
+				res.Outcomes = append(res.Outcomes, out)
+				continue
+			}
+			out.Status = "related"
+			out.IssueURL = related.URL
+			out.IssueNumber = related.ID
+			out.CommentURL = comment
+			item["github_issue"] = map[string]any{
+				"url":         related.URL,
+				"number":      related.ID,
+				"repo":        in.Repo,
+				"relation":    "related",
+				"related_at":  nowFn().UTC().Format(time.RFC3339),
+				"comment_url": comment,
+			}
+			changed = true
+			res.Related++
+			res.Outcomes = append(res.Outcomes, out)
+			continue
+		}
+
 		filed, err := GitHubFileBug(ctx, GitHubBugFiling{
 			Repo:            in.Repo,
 			Title:           title,
@@ -153,7 +193,7 @@ func GitHubFileFindings(ctx context.Context, in FindingsFilingInput) (FindingsFi
 			Severity:        str(item["severity"]),
 			Component:       "product-journey",
 			Target:          "kitsoki",
-			TraceRef:        fmt.Sprintf("product-journey://%s/%s", str(runJSON["run_id"]), str(item["id"])),
+			TraceRef:        traceRef,
 			KitsokiRev:      in.KitsokiRev,
 			FiledBy:         in.FiledBy,
 			Evidence:        files,
@@ -188,6 +228,7 @@ func GitHubFileFindings(ctx context.Context, in FindingsFilingInput) (FindingsFi
 			"ticket_repo": in.Repo,
 			"updated_at":  nowFn().UTC().Format(time.RFC3339),
 			"filed":       res.Filed,
+			"related":     res.Related,
 			"skipped":     res.Skipped,
 			"failed":      res.Failed,
 		}
@@ -197,6 +238,119 @@ func GitHubFileFindings(ctx context.Context, in FindingsFilingInput) (FindingsFi
 		_ = changed // findings.json is always rewritten to stamp the filing block
 	}
 	return res, nil
+}
+
+type relatedFindingIssue struct {
+	ID    string
+	URL   string
+	Title string
+}
+
+func findRelatedFindingIssue(ctx context.Context, repo, title, traceRef string) (relatedFindingIssue, error) {
+	query := strings.TrimSpace("is:open in:title " + title)
+	res, err := GitHubTicketHandler(ctx, map[string]any{
+		"op":    "search",
+		"repo":  repo,
+		"query": query,
+		"limit": 10,
+	})
+	if err != nil {
+		return relatedFindingIssue{}, err
+	}
+	if res.Error != "" {
+		return relatedFindingIssue{}, fmt.Errorf("ticket.search: %s", res.Error)
+	}
+	for _, ticket := range ticketsFromResult(res) {
+		if !strongRelatedTitle(title, str(ticket["title"])) {
+			continue
+		}
+		return relatedFindingIssue{
+			ID:    str(ticket["id"]),
+			URL:   str(ticket["url"]),
+			Title: str(ticket["title"]),
+		}, nil
+	}
+	_ = traceRef // Reserved for body-metadata/trace-fingerprint matching once search surfaces bodies.
+	return relatedFindingIssue{}, nil
+}
+
+func commentRelatedFinding(ctx context.Context, repo, issueID, body string) (string, error) {
+	res, err := GitHubTicketHandler(ctx, map[string]any{
+		"op":   "comment",
+		"repo": repo,
+		"id":   issueID,
+		"body": body,
+	})
+	if err != nil {
+		return "", err
+	}
+	if res.Error != "" {
+		return "", fmt.Errorf("ticket.comment: %s", res.Error)
+	}
+	return str(res.Data["url"]), nil
+}
+
+func relatedFindingComment(runJSON, item map[string]any, issueBody string, evidence []string) string {
+	runID := str(runJSON["run_id"])
+	var sb strings.Builder
+	sb.WriteString("<!-- kitsoki-related-product-journey-finding -->\n")
+	sb.WriteString("A product-journey QA run found a similar issue, so Kitsoki attached the new evidence here instead of filing a duplicate.\n\n")
+	fmt.Fprintf(&sb, "- Run: `%s`\n", runID)
+	fmt.Fprintf(&sb, "- Finding: `%s`\n", str(item["id"]))
+	if scenario := str(item["scenario"]); scenario != "" {
+		fmt.Fprintf(&sb, "- Scenario: `%s`\n", scenario)
+	}
+	if len(evidence) > 0 {
+		sb.WriteString("- Evidence refs:\n")
+		for _, ref := range evidence {
+			fmt.Fprintf(&sb, "  - `%s`\n", ref)
+		}
+	}
+	sb.WriteString("\n## Related observation\n\n")
+	sb.WriteString(issueBody)
+	return sb.String()
+}
+
+func ticketsFromResult(res Result) []map[string]any {
+	if rows, ok := res.Data["tickets"].([]map[string]any); ok {
+		return rows
+	}
+	rawRows, _ := res.Data["tickets"].([]any)
+	out := make([]map[string]any, 0, len(rawRows))
+	for _, raw := range rawRows {
+		if row, ok := raw.(map[string]any); ok {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+func strongRelatedTitle(left, right string) bool {
+	leftNorm := normalizeFindingTitle(left)
+	rightNorm := normalizeFindingTitle(right)
+	if leftNorm == "" || rightNorm == "" {
+		return false
+	}
+	return leftNorm == rightNorm ||
+		strings.HasSuffix(leftNorm, rightNorm) ||
+		strings.HasSuffix(rightNorm, leftNorm)
+}
+
+func normalizeFindingTitle(value string) string {
+	var b strings.Builder
+	lastSpace := true
+	for _, r := range strings.ToLower(value) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastSpace = false
+			continue
+		}
+		if !lastSpace {
+			b.WriteByte(' ')
+			lastSpace = true
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // credibleIssueFinding reports whether a finding should be filed: an observed

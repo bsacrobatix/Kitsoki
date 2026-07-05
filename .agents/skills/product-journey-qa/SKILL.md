@@ -104,11 +104,14 @@ Then hand it to the reusable driver:
    `kitsoki gitops autonomous-fix` facade, which drives `kitsoki bug
    file-findings` (host.GitHubFileFindings) and native gh-agent queue/drain
    surfaces behind the story boundary: native GitHub API filing uses `GH_TOKEN` /
-   `GITHUB_TOKEN`, evidence uploads as release assets, the issue gets an
-   `## Artifacts` section + kitsoki metadata block, and the issue URL is
-   written back into `findings.json` (`item.github_issue`) so re-runs are
-   idempotent. Never file these findings with raw `gh issue create` or
-   text-only `issue_create` — that drops the evidence.
+   `GITHUB_TOKEN`, open issues are searched for a strong title match before
+   creating anything, duplicates receive a related-finding comment instead of a
+   new issue, evidence uploads as release assets for newly-filed issues, the
+   issue gets an `## Artifacts` section + kitsoki metadata block, and the issue
+   URL is written back into `findings.json` (`item.github_issue`) so re-runs
+   are idempotent. If the pre-file search fails, the gate fails closed rather
+   than creating a possible duplicate. Never file these findings with raw `gh
+   issue create` or text-only `issue_create` — that drops the evidence.
 7. If there are no credible issue findings, or after `autonomous_fix` reports
    the bundle valid, submit `review` and `validate` through the story. Use
    `file_findings` or the CLI `--file-findings`/`--review-run`/`--validate-run`
