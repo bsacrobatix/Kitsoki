@@ -72,8 +72,10 @@ intents — you don't memorize commands):
    If it finds one it **strongly urges you to amend the existing doc** —
    select it to `change_existing` (the amend target is captured), or
    `override_new` to start fresh anyway. With no overlap, **`confirm`**
-   proceeds. Committing (any of those) mints the per-PRD slug + workspace
-   (`prd_slug.star`) that every later artifact writes into.
+   proceeds; while overlaps remain, `confirm` is not advertised and a typed
+   `confirm` renders explicit guidance. Committing (any of the valid paths)
+   mints the per-PRD slug + workspace (`prd_slug.star`) that every later
+   artifact writes into.
 3. **`clarifying` — answer the questions.** The `analyst` posts a numbered
    list of the gaps that most change the PRD. **Just type your answers in
    plain language** — in any order, with or without naming a number. The
@@ -432,8 +434,8 @@ kitsoki test flows stories/prd/app.yaml
 | `llm_judge.yaml` | Full path in `judge_mode: llm` with an *uncertain* verdict → HOLDS at `drafting`; also proves the three `host.agent.decide` call sites (`analyst_questions`, `references_research`, `judge_verdict`) are stubbed apart by invoke `id:` via `by_call:`. |
 | `judge_auto_accept.yaml` | The other judge half — a *confident, non-uncertain* verdict (`accept@0.92 ≥ threshold`) makes `drafting`'s `on_enter` `emit_intent: accept` the same turn, so a single `confirm` into `drafting` auto-advances to `@exit:done`. |
 | `prd_overlap_no_matches.yaml` | The prior-art gate, clean (greenfield) path: the scout finds no overlap, `confirm` mints the slug + workspace and advances to `clarifying`. |
-| `prd_overlap_proposes_change.yaml` | The scout surfaces an overlap; `change_existing` captures `prd_change_target` (the amend doc) and still mints a workspace for the check artifacts. |
-| `prd_search_override.yaml` | `override_new` starts a NEW PRD despite a detected overlap (the discouraged escape hatch), recording `prd_overlap_decision=new`. |
+| `prd_overlap_proposes_change.yaml` | The scout surfaces an overlap; typed `confirm` stays in `search` with visible guidance, and `change_existing` captures `prd_change_target` (the amend doc) while still minting a workspace for the check artifacts. |
+| `prd_search_override.yaml` | `override_new` starts a NEW PRD despite a detected overlap (the discouraged escape hatch), recording `prd_overlap_decision=new` and clearing any prior overlap feedback. |
 | `slug_collision.yaml` | The `search` gate's workspace mint is collision-suffixed: an existing `<slug>` workspace / published PRD pushes the new one to `<slug>-2` (`prd_slug.star` uniquify). |
 | `publish_to_durable.yaml` | `accept` runs `prd_publish.star` to publish `004-prd.md` out of the workspace to `docs/prd/<slug>.md`, binding `prd_file` to the durable path. |
 | `references_semantic_preseed.yaml` | The optional semantic pre-seed populates the researcher's `reference_hits` before it curates. |

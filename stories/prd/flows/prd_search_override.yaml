@@ -1,9 +1,9 @@
 # prd_search_override — the operator overrides the guard.
 #
-# With an overlap present, `confirm` bounces (the guard). The operator
-# insists on a NEW PRD anyway via `override_new`, which advances to
-# clarifying recording prd_overlap_decision: "new" and clearing any amend
-# target.
+# With an overlap present, `confirm` bounces with visible feedback (the
+# guard). The operator insists on a NEW PRD anyway via `override_new`, which
+# advances to clarifying recording prd_overlap_decision: "new" and clearing
+# any amend target.
 
 test_kind: flow
 app: ../app.yaml
@@ -33,17 +33,21 @@ host_handlers:
   # override_new mints the per-PRD workspace (it commits to a NEW PRD).
 
 turns:
-  # confirm bounces while the overlap remains (the guard).
+  # confirm bounces while the overlap remains (the guard) and renders explicit
+  # guidance instead of an indistinguishable self-loop.
   - intent: { name: confirm, slots: {} }
     expect_state: search
     expect_world:
-      prd_overlap_decision: ""
+      prd_overlap_decision: "blocked_confirm"
+      prd_overlap_feedback: "An overlapping PRD was found. Choose an existing document to amend, or use override_new if you intentionally want a separate PRD."
+    expect_view_matches: "Overlap gate still active"
 
   # override_new forces a new PRD despite the overlap.
   - intent: { name: override_new, slots: {} }
     expect_state: clarifying
     expect_world:
       prd_overlap_decision: "new"
+      prd_overlap_feedback: ""
       prd_change_target:    ""
       prd_workspace:        ".artifacts/prd/a-standalone-metrics-dashboard"
 
