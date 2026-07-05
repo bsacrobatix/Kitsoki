@@ -1,0 +1,19 @@
+app:
+  id: wb-basic
+  version: 0.1.0
+hosts:
+  - host.agent.task
+intents:
+  go:
+    title: Go
+root: bench
+states:
+  bench:
+    workbench:
+      agent: builder
+      prompt: prompts/bench.md
+      acceptance_schema: schemas/out.json
+agents:
+  builder:
+    system_prompt: "build things"
+    external_side_effect: false
