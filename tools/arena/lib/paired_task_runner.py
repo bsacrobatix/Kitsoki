@@ -447,23 +447,59 @@ def build_kitsoki_prompt(
 
 
 def real_trace_metrics(trace_ref: str, model: str) -> dict[str, Any]:
-    """Cost/tokens off the REAL kitsoki session trace via bench.py's shared
-    `read_trace_metrics` (payload.meta.cost_usd / usage on every agent call) —
-    the same reader bugfix-bakeoff uses for `bench.py cost`. codex-native runs
-    on ChatGPT-subscription auth (unmetered: cost_usd stays 0 even though
-    tokens are real), so when tokens are recorded but no metered cost is, fall
-    back to the same blended per-token estimate the single-briefed arm uses —
-    disclosed as an estimate, so both arms are held to the identical standard."""
-    proc = run(["python3", str(BENCH), "cost", "--trace", trace_ref], cwd=KITSOKI_ROOT, capture=True)
-    payload = json.loads(proc.stdout) if proc.stdout.strip() else {}
-    tokens = int((payload.get("input_tokens") or 0) + (payload.get("output_tokens") or 0))
-    cost_usd = payload.get("cost_usd")
-    if isinstance(cost_usd, (int, float)) and cost_usd > 0:
-        return {"cost_usd": round(cost_usd, 6), "tokens": tokens, "cost_note": "cost_usd from real recorded trace usage (metered)"}
-    if tokens > 0:
-        blended, _ = blended_cost_usd(model, tokens)
-        return {"cost_usd": blended, "tokens": tokens, "cost_note": f"cost_usd={blended} (blended estimate over REAL trace tokens; subscription auth reports no metered cost)"}
-    return {"cost_usd": 0.0, "tokens": 0, "cost_note": "no trace usage recorded"}
+    """Cost/tokens off the REAL kitsoki session trace, read directly (NOT via
+    bench.py's `cost` command / read_trace_metrics — that shared reader sums
+    input_tokens but DISCARDS cached_input_tokens, then callers price every
+    token at the full input rate).
+
+    Verified live on two real kitsoki-codex-native cells: a codex-native
+    worker's calls are 90-96% cache reads across a long multi-turn agent
+    session (bf__reproducer/bf__implementer each re-read a large, mostly
+    unchanged context every tool turn). Pricing that at the full input rate
+    instead of pricing.py's cache_read rate (0.1x input) overstated real cost
+    by >20x — a genuine cost-reporting bug, not a genuine kitsoki cost gap.
+    codex-native runs on ChatGPT-subscription auth (unmetered: recorded
+    cost_usd stays 0 even though token counts are real), so this always
+    falls back to a cache-aware estimate computed directly from the trace's
+    own per-call usage breakdown — the same pricing table method_cost() uses
+    on Claude usage blocks, applied here to codex's usage shape."""
+    if not os.path.exists(trace_ref):
+        return {"cost_usd": 0.0, "tokens": 0, "cost_note": "no trace usage recorded"}
+    total_in = total_cached = total_out = 0
+    metered_cost = 0.0
+    for line in Path(trace_ref).read_text(encoding="utf-8").splitlines():
+        try:
+            entry = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if entry.get("kind") != "agent.call.complete":
+            continue
+        meta = (entry.get("payload") or {}).get("meta") or {}
+        usage = meta.get("usage") or {}
+        total_in += usage.get("input_tokens", 0) or 0
+        total_cached += usage.get("cached_input_tokens", 0) or 0
+        total_out += usage.get("output_tokens", 0) or 0
+        c = meta.get("cost_usd")
+        if isinstance(c, (int, float)):
+            metered_cost += c
+    tokens = total_in + total_out
+    if metered_cost > 0:
+        return {"cost_usd": round(metered_cost, 6), "tokens": tokens, "cost_note": "cost_usd from real recorded trace usage (metered)"}
+    if tokens == 0:
+        return {"cost_usd": 0.0, "tokens": 0, "cost_note": "no trace usage recorded"}
+    price, _ = price_for(model)
+    fresh_input = max(total_in - total_cached, 0)
+    cost = (fresh_input * price.input + total_cached * price.cache_read + total_out * price.output) / 1e6
+    cost = round(cost, 6)
+    return {
+        "cost_usd": cost,
+        "tokens": tokens,
+        "cost_note": (
+            f"cost_usd={cost} (cache-aware estimate over REAL trace usage: "
+            f"{fresh_input} fresh input + {total_cached} cache-read input + {total_out} output tokens; "
+            "subscription auth reports no metered cost)"
+        ),
+    }
 
 
 def build_prompt(args: argparse.Namespace, task: dict[str, Any]) -> str:

@@ -160,6 +160,14 @@ run_once() {
       # with NO error surfaced — it just looks like the server was never
       # registered. Force `cwd` to THIS repo checkout so the override is total.
       codex_mcp_args+=(-c "mcp_servers.kitsoki.cwd=$REPO_ROOT")
+      # codex's default per-tool-call timeout is far shorter than a real
+      # session.drive full_pipeline turn (kitsoki dispatches its OWN live
+      # agent calls inside that one MCP tool call — verified live: an
+      # 11-minute drive got cut off mid-pipeline with the session left
+      # "stuck" at bf.idle, no fix produced, no error). Both keys are accepted
+      # by this codex version under --strict-config.
+      codex_mcp_args+=(-c "mcp_servers.kitsoki.startup_timeout_sec=${MCP_DRIVE_MCP_STARTUP_TIMEOUT_SEC:-120}")
+      codex_mcp_args+=(-c "mcp_servers.kitsoki.tool_timeout_sec=${MCP_DRIVE_MCP_TOOL_TIMEOUT_SEC:-1800}")
       local _fwd
       for _fwd in ${MCP_DRIVE_FORWARD_ENV//,/ }; do
         codex_mcp_args+=(-c "mcp_servers.kitsoki.env.${_fwd}=${!_fwd-}")
