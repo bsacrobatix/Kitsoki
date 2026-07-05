@@ -137,12 +137,17 @@ keyed to the scenario IR's `expected_effects` list
 (`docs/proposals/scenario-foundry.md`'s IR shape). This is the *consumer*
 shape the parity scorer needs.
 
-As landed, S1 emits a necessary-but-not-sufficient *proxy* for point 1 below
-(`candidate_completed := !dispatchFailed` — the workbench room's dispatch
-didn't take its `on_error` redirect this turn), not yet the full
-`expected_effects`-coverage join, and hard-codes `misroute_adjacent: false`
-(point 3) rather than computing it — both are documented, honest gaps in
-that file's own HONESTY NOTE, not silently-wrong values. `usable_kitsoki_gate
+As landed, S1 emits a real `expected_effects`-coverage join for point 1 below
+when the dispatching room's world carries the scenario's `expected_effects`
+list under the `<noteKey>_expected_effects` convention key (`candidate_completed`
+is then true iff dispatch didn't take its `on_error` redirect AND every
+expected effect is found, case-insensitively, as a substring of the
+workbench's own bound close-out note); on any turn without that world var
+(the overwhelming majority — ordinary workbench use, and every pre-S6
+fixture) it falls back to the narrower `candidate_completed := !dispatchFailed`
+proxy, unchanged. `misroute_adjacent` (point 3) is still hard-coded `false`
+rather than computed — a documented, honest gap in that file's own HONESTY
+NOTE, not a silently-wrong value. `usable_kitsoki_gate
 .py`'s `build_parity_record` (Task 3.2) performs the join `score()` can do
 today from that proxy (`source_completed` off the scenario IR's own
 `abandoned` field, `candidate_completed`/`silent_bounce` reduced across
@@ -174,11 +179,12 @@ The trace-event shape is pinned down: an existing `turn.end` trace event's
 `{"turn":N, "seq":N, "ts":..., "kind":"turn.end", "payload":{
 "usable_kitsoki_gate": {"candidate_completed":bool, "silent_bounce":bool,
 "misroute_adjacent":bool, "evidence_refs":[]}}}`, `internal/store/event.go`'s
-`TurnEnded` JSONL shape). This section stays partial on points 1 and 3 above
-until a workbench-driving harness (Task 3.3) can thread a scenario's
-`expected_effects` into the room's world/context so a future S1 pass (or the
-harness's own join) can compute them for real, rather than the current
-per-turn dispatch-success proxy.
+`TurnEnded` JSONL shape). Point 1 is now computed for real wherever a
+workbench-driving harness threads a scenario's `expected_effects` into the
+room's world/context (the workbench-target no-LLM harness, and
+`flow_fixture_compiler.py`'s real-workbench projection, both do this). Point
+3 (`misroute_adjacent`) remains a documented, honest gap — still hard-false,
+not computed.
 
 ## Determinism
 

@@ -23,7 +23,7 @@ import (
 // dispatch's AgentCalled event carries state_path == "bench" — a reviewer
 // scanning an unfamiliar trace can tell "this agent.call came from the
 // workbench floor" from the existing field alone, per
-// docs/proposals/room-workbench.md's Decision recording section ("carried
+// docs/architecture/room-workbench.md's Decision recording section ("carried
 // as an existing field ... rather than a new event").
 //
 // This must read the run's authoritative JSONL sink via OnRigClose rather

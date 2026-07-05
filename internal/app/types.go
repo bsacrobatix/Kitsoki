@@ -957,7 +957,7 @@ type State struct {
 	// precondition pass runs. Nil — the default — means no workbench; the
 	// state's WriteMode/AgentOffRamp/OnEnter/DefaultIntent are whatever the
 	// author wrote by hand (or nothing). See
-	// docs/proposals/room-workbench.md.
+	// docs/architecture/room-workbench.md.
 	Workbench *WorkbenchDecl `yaml:"workbench,omitempty"`
 
 	// ImportAlias is set ONLY on the synthesized compound wrapper state
@@ -1362,7 +1362,7 @@ type OffRampDef struct {
 // accessor exists for the loader's own normalization pass and for tests.
 func (d *OffRampDef) Enabled() bool { return d != nil && d.enabled }
 
-// WorkbenchDecl is the `workbench:` state block — see docs/proposals/room-workbench.md.
+// WorkbenchDecl is the `workbench:` state block — see docs/architecture/room-workbench.md.
 // The loader's expandWorkbenches pass (workbench.go) desugars a non-nil
 // WorkbenchDecl into write_mode: read_only, agent_off_ramp, a synthesized
 // on_enter host.agent.task, and a synthesized catch-all capture intent set as

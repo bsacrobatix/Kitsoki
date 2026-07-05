@@ -11,7 +11,7 @@ import (
 
 // TestRunFlows_WorkbenchSmoke drives testdata/apps/workbench_smoke — a
 // synthetic, no-LLM regression for the `workbench:` state-block desugaring
-// (docs/proposals/room-workbench.md, Task 2.2): free-text capture into the
+// (docs/architecture/room-workbench.md): free-text capture into the
 // synthesized default_intent, the synthesized on_enter host.agent.task
 // dispatch stubbed by a flow cassette, the read-only floor holding across a
 // repeated dispatch, the synthesized agent_off_ramp's residual rejection

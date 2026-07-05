@@ -163,7 +163,7 @@ func (rw *childRewriter) rewriteState(name string, s *State) {
 		}
 	}
 
-	// Workbench.Agent / OffRampAgent: workbench: (room-workbench.md) names an
+	// Workbench.Agent / OffRampAgent: workbench: (docs/architecture/room-workbench.md) names an
 	// agent exactly like AgentOffRamp.Agent above. CaptureSlot and ContextArgs
 	// are world references that expandWorkbenches later turns into an on_enter
 	// guard and host.agent.task context. They must be rewritten before that
