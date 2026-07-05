@@ -11,6 +11,7 @@ import difflib
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import datetime
@@ -1340,6 +1341,102 @@ def add_corpus_issue(issues: list[dict], severity: str, check_id: str, message: 
     })
 
 
+def line_number_for_offset(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+def normalized_context(text: str, start: int, end: int, radius: int = 120) -> str:
+    return " ".join(text[max(0, start - radius):min(len(text), end + radius)].split())
+
+
+def display_path(path: Path) -> str:
+    try:
+        return path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def raw_github_reference_is_prohibition(context: str) -> bool:
+    lower = context.lower()
+    return any(token in lower for token in [
+        "never file",
+        "never run",
+        "do not file",
+        "do not run",
+        "do not use",
+        "must not file",
+        "must not run",
+        "must not use",
+        "not standalone issue tools",
+        "without raw gh",
+    ])
+
+
+def validate_native_gitops_boundaries(issues: list[dict]) -> None:
+    """Keep product-journey issue filing/fixing behind story-owned native gitops."""
+    prose_paths = [
+        DRIVER_AGENT,
+        PRODUCT_JOURNEY_SKILL,
+        PRODUCT_JOURNEY_README,
+        ROOT / "stories" / "product-journey-qa" / "README.md",
+    ]
+    forbidden_prose_tokens = [
+        "gh issue create",
+        "issue_create",
+        "mcp__kitsoki__issue_create",
+    ]
+    for path in prose_paths:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        collapsed = " ".join(text.split())
+        for token in forbidden_prose_tokens:
+            start = 0
+            while True:
+                index = collapsed.find(token, start)
+                if index == -1:
+                    break
+                context = normalized_context(collapsed, index, index + len(token))
+                if not raw_github_reference_is_prohibition(context):
+                    add_corpus_issue(
+                        issues,
+                        "error",
+                        "native-gitops-boundary",
+                        "Product journey guidance must not steer around story-owned native gitops filing/fixing",
+                        f"{display_path(path)}: {context}",
+                    )
+                start = index + len(token)
+
+    execution_patterns = [
+        ("raw gh subprocess", re.compile(r"subprocess\.(?:run|check_call|check_output|Popen)\(\s*\[\s*['\"]gh['\"]")),
+        ("raw gh argv", re.compile(r"\[\s*['\"]gh['\"]\s*,")),
+        ("story host.run gh", re.compile(r"cmd:\s*gh\b")),
+    ]
+    scan_roots = [
+        ROOT / "tools" / "product-journey",
+        ROOT / "stories" / "product-journey-qa",
+    ]
+    for scan_root in scan_roots:
+        if not scan_root.exists():
+            continue
+        for path in sorted(scan_root.rglob("*")):
+            if path.is_dir() or path.suffix not in {".py", ".yaml", ".yml", ".md"}:
+                continue
+            text = path.read_text(encoding="utf-8")
+            for label, pattern in execution_patterns:
+                for match in pattern.finditer(text):
+                    context = normalized_context(text, match.start(), match.end())
+                    if "Do not run" in context or "Never file" in context:
+                        continue
+                    add_corpus_issue(
+                        issues,
+                        "error",
+                        "native-gitops-boundary",
+                        "Product journey automation must use kitsoki gitops/host.gh.ticket, not raw GitHub CLI commands",
+                        f"{display_path(path)}:{line_number_for_offset(text, match.start())}: {label}",
+                    )
+
+
 def duplicate_values(values: list[str]) -> list[str]:
     seen: set[str] = set()
     duplicates: set[str] = set()
@@ -1775,6 +1872,7 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
     validate_story_driver_contract_bindings(issues)
     validate_driver_agent_contract(issues)
     validate_autonomous_workflow_docs(issues)
+    validate_native_gitops_boundaries(issues)
 
     errors = sum(1 for issue in issues if issue["severity"] == "error")
     warnings = sum(1 for issue in issues if issue["severity"] == "warn")
