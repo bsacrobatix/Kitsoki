@@ -115,6 +115,17 @@ turns:
         times: 1
     expect_world:
       init_profile_json: '{"commands":{"build":"make build","dev":"make dev","test":"make test"},"id":"acme-rust","kitsoki":{"instance":{"bindings":{"ci":"host.local","ticket":"host.local_files.ticket","transport":"host.append_to_file","vcs":"host.git","workspace":"host.git_worktree"},"id":"acme-rust-dev","path":".kitsoki/stories/acme-rust-dev/app.yaml"},"story":"dev-story"},"repo":{"root":".","vcs":"git"},"schema":"project-profile/v1","stack":{"kind":"rust","languages":["rust"]},"title":"Acme Rust"}'
+    # Regression pin: init_profile_validate's "OK/Schema/Semantic/Warnings" kv
+    # block is gated by `when: "len(world.init_profile_validation) > 0"`. That
+    # guard used to read `!= {}`, a map-literal comparison the expr whitelist
+    # rejects UNCONDITIONALLY at compile time (internal/expr/expr.go
+    # MapNode case) — every live render of this state (kitsoki run / session
+    # continue / kitsoki turn) hard-errored, while `kitsoki test flows` never
+    # caught it because a turn with no `expect_view_matches` never asserts the
+    # rendered view actually rendered. Asserting real view content here is
+    # what makes that class of bug visible again if it regresses. See
+    # .context/dwf3-a3-recording-notes.md.
+    expect_view_matches: "OK:"
 
   - intent: { name: profile_validated, slots: {} }
     expect_state: init

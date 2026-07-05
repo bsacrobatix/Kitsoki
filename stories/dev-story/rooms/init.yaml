@@ -505,7 +505,7 @@ states:
             Schema:   "{{ world.init_profile_validation.schema|default:'[]' }}"
             Semantic: "{{ world.init_profile_validation.semantic|default:'[]' }}"
             Warnings: "{{ world.init_profile_validation.warnings|default:'[]' }}"
-        when: "world.init_profile_validation != {}"
+        when: "len(world.init_profile_validation) > 0"
       - choice:
           mode: single
           prompt: "Actions"
