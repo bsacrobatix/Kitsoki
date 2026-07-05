@@ -76,6 +76,9 @@ host_handlers:
                 gh_agent_enqueued_count: 1
                 gh_agent_skipped_count: 0
                 gh_agent_job_summary: "github:bsacrobatix/Kitsoki/issue/301"
+                gh_agent_claim_status: claimed
+                gh_agent_claim_count: 1
+                gh_agent_claim_summary: "https://github.com/bsacrobatix/Kitsoki/issues/301#issuecomment-claim"
                 gh_agent_drain_status: drained
                 gh_agent_drained_count: 1
                 gh_agent_done_count: 1
@@ -176,11 +179,13 @@ turns:
       autonomous_gate_summary: "filing=pass, gh_agent=pass, review=pass, validation=pass"
       issue_closeout_status: closed
       issue_closeout_count: 1
+      gh_agent_claim_status: claimed
+      gh_agent_claim_count: 1
       stats_status: stats_derived
       stats_fixed_count: 1
       weakness_route_count: 1
       validation_status: valid
-    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, review=pass, validation=pass[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 1[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 1, filed 1, fixed 1"
+    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, review=pass, validation=pass[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 1[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*GH-agent claims[\\s\\S]*claimed: claimed 1[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 1, filed 1, fixed 1"
     expect_host_calls:
       - handler: host.run
         args: { call: autonomous_product_journey_marathon_finalize }

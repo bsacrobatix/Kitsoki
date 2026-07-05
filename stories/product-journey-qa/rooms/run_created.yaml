@@ -1,7 +1,7 @@
 states:
   run_created:
     description: "A product-journey QA run bundle exists; waiting for captured evidence."
-    relevant_world: [project, persona, seed, scenario_scope, run_scenario_count, live_budget_minutes, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, driver_journal_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, persona_starting_surface, persona_first_question, persona_evidence_emphasis, persona_escalation_trigger, persona_finding_bias, proof_evidence_count, demo_evidence_count, finding_total_count, strength_count, weakness_count, weakness_route_count, weakness_route_summary, issue_count, fix_count, blocked_count, missing_evidence_count, missing_proof_evidence_count, proof_minimum_evidence_count, minimum_evidence_count, missing_proof_summary, driver_contract_summary, next_driver_capture, next_driver_attach_command, next_driver_blocker_command, scenario, evidence_kind, evidence_path, evidence_source, finding_kind, finding_title, ticket_repo, filing_status, filing_dry_run, findings_filed_count, findings_skipped_count, findings_failed_count, findings_unfiled_count, filed_issue_summary, filing_summary, autonomous_marathon_status, autonomous_marathon_summary, autonomous_marathon_report_path, autonomous_fix_status, autonomous_fix_report_path, autonomous_gate_summary, issue_closeout_status, issue_closeout_count, issue_closeout_summary, gh_agent_enqueue_status, gh_agent_enqueued_count, gh_agent_skipped_count, gh_agent_job_summary, gh_agent_drain_status, gh_agent_drained_count, gh_agent_done_count, gh_agent_failed_count, gh_agent_active_count, gh_agent_run_summary, gh_agent_fix_evidence_count, gh_agent_missing_evidence_count, gh_agent_independent_verify_count, gh_agent_missing_verify_count, gh_agent_missing_run_url_count, gh_agent_fix_evidence_summary, gh_agent_missing_evidence_summary, gh_agent_independent_verify_summary, gh_agent_missing_verify_summary, stats_status, stats_root, stats_output, stats_summary, stats_runs_scanned, stats_found_count, stats_filed_count, stats_fixed_count, stats_reopened_count, stats_unknown_state_count, stats_similar_pair_count, driver_event_id, dispatch_mode, driver_status, driver_summary, review_status, review_summary, review_passed_count, review_failed_count, review_warning_count, review_total_count, review_backlog_summary, validation_status, validation_errors, validation_warnings, validation_issue_summary, status]
+    relevant_world: [project, persona, seed, scenario_scope, run_scenario_count, live_budget_minutes, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, driver_journal_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, persona_starting_surface, persona_first_question, persona_evidence_emphasis, persona_escalation_trigger, persona_finding_bias, proof_evidence_count, demo_evidence_count, finding_total_count, strength_count, weakness_count, weakness_route_count, weakness_route_summary, issue_count, fix_count, blocked_count, missing_evidence_count, missing_proof_evidence_count, proof_minimum_evidence_count, minimum_evidence_count, missing_proof_summary, driver_contract_summary, next_driver_capture, next_driver_attach_command, next_driver_blocker_command, scenario, evidence_kind, evidence_path, evidence_source, finding_kind, finding_title, ticket_repo, filing_status, filing_dry_run, findings_filed_count, findings_skipped_count, findings_failed_count, findings_unfiled_count, filed_issue_summary, filing_summary, autonomous_marathon_status, autonomous_marathon_summary, autonomous_marathon_report_path, autonomous_fix_status, autonomous_fix_report_path, autonomous_gate_summary, issue_closeout_status, issue_closeout_count, issue_closeout_summary, gh_agent_enqueue_status, gh_agent_enqueued_count, gh_agent_skipped_count, gh_agent_job_summary, gh_agent_claim_status, gh_agent_claim_count, gh_agent_claim_summary, gh_agent_drain_status, gh_agent_drained_count, gh_agent_done_count, gh_agent_failed_count, gh_agent_active_count, gh_agent_run_summary, gh_agent_fix_evidence_count, gh_agent_missing_evidence_count, gh_agent_independent_verify_count, gh_agent_missing_verify_count, gh_agent_missing_run_url_count, gh_agent_fix_evidence_summary, gh_agent_missing_evidence_summary, gh_agent_independent_verify_summary, gh_agent_missing_verify_summary, stats_status, stats_root, stats_output, stats_summary, stats_runs_scanned, stats_found_count, stats_filed_count, stats_fixed_count, stats_reopened_count, stats_unknown_state_count, stats_similar_pair_count, driver_event_id, dispatch_mode, driver_status, driver_summary, review_status, review_summary, review_passed_count, review_failed_count, review_warning_count, review_total_count, review_backlog_summary, validation_status, validation_errors, validation_warnings, validation_issue_summary, status]
     view:
       - banner:
           text: "RUN CREATED"
@@ -45,6 +45,7 @@ states:
             Marathon report: '{{ world.autonomous_marathon_report_path|default:"(not generated)" }}'
             Issue filing: '{{ world.filing_status|default:"(not filed)" }}: filed {{ world.findings_filed_count }}, skipped {{ world.findings_skipped_count }}, failed {{ world.findings_failed_count }}, unfiled {{ world.findings_unfiled_count }}'
             GH-agent fixes: '{{ world.gh_agent_enqueue_status|default:"(not queued)" }}: queued {{ world.gh_agent_enqueued_count }}, skipped {{ world.gh_agent_skipped_count }}'
+            GH-agent claims: '{{ world.gh_agent_claim_status|default:"(not claimed)" }}: claimed {{ world.gh_agent_claim_count }}'
             GH-agent jobs: '{{ world.gh_agent_job_summary|default:"(none)" }}'
             GH-agent drain: '{{ world.gh_agent_drain_status|default:"(not drained)" }}: drained {{ world.gh_agent_drained_count }}, done {{ world.gh_agent_done_count }}, failed {{ world.gh_agent_failed_count }}, active {{ world.gh_agent_active_count }}'
             GH-agent evidence: "{{ world.gh_agent_fix_evidence_count }} attached; {{ world.gh_agent_missing_evidence_count }} missing; {{ world.gh_agent_independent_verify_count }} verified; {{ world.gh_agent_missing_verify_count }} missing verification; {{ world.gh_agent_missing_run_url_count }} missing run URLs"
@@ -451,6 +452,9 @@ states:
                 gh_agent_enqueued_count: "stdout_json.gh_agent_enqueued_count"
                 gh_agent_skipped_count: "stdout_json.gh_agent_skipped_count"
                 gh_agent_job_summary: "stdout_json.gh_agent_job_summary"
+                gh_agent_claim_status: "stdout_json.gh_agent_claim_status"
+                gh_agent_claim_count: "stdout_json.gh_agent_claim_count"
+                gh_agent_claim_summary: "stdout_json.gh_agent_claim_summary"
                 gh_agent_drain_status: "stdout_json.gh_agent_drain_status"
                 gh_agent_drained_count: "stdout_json.gh_agent_drained_count"
                 gh_agent_done_count: "stdout_json.gh_agent_done_count"
@@ -565,6 +569,9 @@ states:
                 gh_agent_enqueued_count: "stdout_json.gh_agent_enqueued_count"
                 gh_agent_skipped_count: "stdout_json.gh_agent_skipped_count"
                 gh_agent_job_summary: "stdout_json.gh_agent_job_summary"
+                gh_agent_claim_status: "stdout_json.gh_agent_claim_status"
+                gh_agent_claim_count: "stdout_json.gh_agent_claim_count"
+                gh_agent_claim_summary: "stdout_json.gh_agent_claim_summary"
                 gh_agent_drain_status: "stdout_json.gh_agent_drain_status"
                 gh_agent_drained_count: "stdout_json.gh_agent_drained_count"
                 gh_agent_done_count: "stdout_json.gh_agent_done_count"
@@ -761,6 +768,9 @@ states:
                 gh_agent_enqueued_count: "stdout_json.gh_agent_enqueued_count"
                 gh_agent_skipped_count: "stdout_json.gh_agent_skipped_count"
                 gh_agent_job_summary: "stdout_json.gh_agent_job_summary"
+                gh_agent_claim_status: "stdout_json.gh_agent_claim_status"
+                gh_agent_claim_count: "stdout_json.gh_agent_claim_count"
+                gh_agent_claim_summary: "stdout_json.gh_agent_claim_summary"
                 gh_agent_drain_status: "stdout_json.gh_agent_drain_status"
                 gh_agent_drained_count: "stdout_json.gh_agent_drained_count"
                 gh_agent_done_count: "stdout_json.gh_agent_done_count"

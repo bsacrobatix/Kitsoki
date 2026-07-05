@@ -510,9 +510,16 @@ func gitopsEnqueueFixes(ctx context.Context, runDir, dbPath, fallbackRepo, story
 	if err != nil {
 		return nil, err
 	}
+	findingsPath := filepath.Join(runDir, "findings.json")
+	findings, err := gitopsReadJSONFile(findingsPath)
+	if err != nil {
+		return nil, err
+	}
 	var jobsOut []map[string]any
+	var claims []map[string]any
 	skipped := 0
-	for _, item := range gitopsCredibleFindings(runDir) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, item := range gitopsCredibleFindingsFrom(findings) {
 		repo, number, kind, issueURL := gitopsIssueRef(item, fallbackRepo)
 		if repo == "" || number == "" {
 			skipped++
@@ -527,7 +534,37 @@ func gitopsEnqueueFixes(ctx context.Context, runDir, dbPath, fallbackRepo, story
 		if err != nil {
 			return nil, err
 		}
-		jobsOut = append(jobsOut, map[string]any{
+		issue := mapValue(item, "github_issue")
+		if issue == nil {
+			issue = map[string]any{}
+			item["github_issue"] = issue
+		}
+		claimURL := stringValue(issue, "claim_comment_url")
+		if claimURL == "" {
+			body := gitopsClaimCommentBody(item, job, issueURL)
+			claim, err := host.GitHubTicketHandler(ctx, map[string]any{
+				"op":   "comment",
+				"repo": repo,
+				"id":   number,
+				"body": body,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if claim.Error != "" {
+				return nil, fmt.Errorf("gitops autonomous-fix: claim %s: %s", firstNonBlank(issueURL, repo+"#"+number), claim.Error)
+			}
+			claimURL = stringValue(claim.Data, "url")
+			issue["claim_comment_url"] = claimURL
+			issue["claim_job_id"] = job.JobID
+			issue["claimed_by"] = "kitsoki gitops autonomous-fix"
+			issue["claimed_at"] = now
+			issue["comments"] = append(mapSliceValue(issue, "comments"), map[string]any{
+				"body": body,
+				"url":  claimURL,
+			})
+		}
+		jobOut := map[string]any{
 			"status":        "queued",
 			"created":       created,
 			"job_id":        job.JobID,
@@ -539,7 +576,22 @@ func gitopsEnqueueFixes(ctx context.Context, runDir, dbPath, fallbackRepo, story
 			"state":         job.State,
 			"issue_url":     issueURL,
 			"finding_id":    stringValue(item, "id"),
+			"claim_url":     claimURL,
+		}
+		jobsOut = append(jobsOut, jobOut)
+		claims = append(claims, map[string]any{
+			"finding_id":  stringValue(item, "id"),
+			"issue_url":   issueURL,
+			"repo":        repo,
+			"number":      number,
+			"job_id":      job.JobID,
+			"comment_url": claimURL,
 		})
+	}
+	if len(jobsOut) > 0 {
+		if err := gitopsWriteJSONFile(findingsPath, findings); err != nil {
+			return nil, err
+		}
 	}
 	return map[string]any{
 		"gh_agent_enqueue_status": "queued",
@@ -547,6 +599,9 @@ func gitopsEnqueueFixes(ctx context.Context, runDir, dbPath, fallbackRepo, story
 		"gh_agent_skipped_count":  skipped,
 		"gh_agent_job_summary":    originSummary(jobsOut),
 		"gh_agent_jobs":           jobsOut,
+		"gh_agent_claim_status":   "claimed",
+		"gh_agent_claim_count":    len(claims),
+		"gh_agent_claims":         claims,
 	}, nil
 }
 
@@ -616,6 +671,9 @@ func gitopsRecordGHAgent(runDir string, status map[string]any) error {
 		"skipped_count":  intValue(status, "gh_agent_skipped_count"),
 		"job_summary":    stringValue(status, "gh_agent_job_summary"),
 		"jobs":           status["gh_agent_jobs"],
+		"claim_status":   stringValue(status, "gh_agent_claim_status"),
+		"claim_count":    intValue(status, "gh_agent_claim_count"),
+		"claims":         status["gh_agent_claims"],
 		"drain_status":   stringValue(status, "gh_agent_drain_status"),
 		"drained_count":  intValue(status, "gh_agent_drained_count"),
 		"done_count":     intValue(status, "gh_agent_done_count"),
@@ -658,6 +716,7 @@ func writeGitopsAutonomousReport(runDir string, status, review, validation map[s
 		"## GH-agent Runs",
 		"",
 		fmt.Sprintf("- Queue: `%s` (enqueued %d, skipped %d)", stringValue(status, "gh_agent_enqueue_status"), intValue(status, "gh_agent_enqueued_count"), intValue(status, "gh_agent_skipped_count")),
+		fmt.Sprintf("- Claims: `%s` (%d claimed)", stringValue(status, "gh_agent_claim_status"), intValue(status, "gh_agent_claim_count")),
 		fmt.Sprintf("- Drain: `%s` (drained %d, done %d, failed %d, active %d)", stringValue(status, "gh_agent_drain_status"), intValue(status, "gh_agent_drained_count"), intValue(status, "gh_agent_done_count"), intValue(status, "gh_agent_failed_count"), intValue(status, "gh_agent_active_count")),
 		"",
 	)
@@ -731,6 +790,10 @@ func gitopsCredibleFindings(runDir string) []map[string]any {
 	if err != nil {
 		return nil
 	}
+	return gitopsCredibleFindingsFrom(findings)
+}
+
+func gitopsCredibleFindingsFrom(findings map[string]any) []map[string]any {
 	var out []map[string]any
 	for _, item := range gitopsFindingsItems(findings) {
 		if stringValue(item, "kind") != "issue" || stringValue(item, "status") == "blocked" || stringValue(item, "origin") == "seeded" {
@@ -739,6 +802,24 @@ func gitopsCredibleFindings(runDir string) []map[string]any {
 		out = append(out, item)
 	}
 	return out
+}
+
+func gitopsClaimCommentBody(finding map[string]any, job *jobs.GHJob, issueURL string) string {
+	lines := []string{
+		"Claimed by the Kitsoki autonomous bugfix pipeline.",
+		"",
+		fmt.Sprintf("- Finding: `%s` - %s", firstNonBlank(stringValue(finding, "id"), "finding"), stringValue(finding, "title")),
+		fmt.Sprintf("- Job: `%s`", job.JobID),
+		fmt.Sprintf("- Story: `%s`", job.Story),
+		"",
+		"<!-- kitsoki-autofix-claim",
+		"issue: " + issueURL,
+		"job: " + job.JobID,
+		"origin: " + job.OriginRef,
+		"finding: " + stringValue(finding, "id"),
+		"-->",
+	}
+	return strings.Join(lines, "\n")
 }
 
 func gitopsFindingsItems(findings map[string]any) []map[string]any {
