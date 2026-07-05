@@ -202,12 +202,17 @@ func GitHubFileFindings(ctx context.Context, in FindingsFilingInput) (FindingsFi
 	return res, nil
 }
 
-// credibleIssueFinding reports whether a finding should be filed: an `issue`
-// (including blocked scenarios, which are recorded as issue findings) that was
-// observed rather than seeded demo data. Legacy findings predate the origin
-// field and count as observed.
+// credibleIssueFinding reports whether a finding should be filed: an observed
+// `issue`, not seeded demo data, and not a blocker. Blocked scenarios are
+// recorded as issue findings in the bundle, but they describe capture gaps in
+// the QA run (missing cassette, unavailable surface), not product defects, so
+// they must never be filed upstream. Legacy findings predate the origin field
+// and count as observed.
 func credibleIssueFinding(item map[string]any) bool {
 	if str(item["kind"]) != "issue" {
+		return false
+	}
+	if str(item["status"]) == "blocked" {
 		return false
 	}
 	origin := str(item["origin"])

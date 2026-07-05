@@ -17,7 +17,8 @@ import (
 //     evidence artifact on disk
 //   - finding-2: seeded demo issue (never filed)
 //   - finding-3: strength (never filed)
-//   - finding-4: credible blocked issue whose evidence ref does not resolve
+//   - finding-4: credible issue whose evidence ref does not resolve
+//   - finding-5: blocked issue (capture gap, never filed)
 func writeFindingsBundle(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -98,8 +99,17 @@ func writeFindingsBundle(t *testing.T) string {
 			},
 			map[string]any{
 				"id": "finding-4", "kind": "issue",
-				"title":         "onboarding blocked on missing config",
-				"summary":       "Onboarding could not proceed.",
+				"title":         "onboarding config generator emits stale commands",
+				"summary":       "Generated onboarding config referenced commands that do not exist in the repo.",
+				"scenario":      "project-onboarding",
+				"severity":      "high",
+				"status":        "open",
+				"evidence_path": "cassette://product-journey/run-777/missing/none.json",
+			},
+			map[string]any{
+				"id": "finding-5", "kind": "issue",
+				"title":         "onboarding blocked on missing cassette",
+				"summary":       "Scenario could not be captured without a cassette.",
 				"scenario":      "project-onboarding",
 				"severity":      "high",
 				"status":        "blocked",
@@ -151,7 +161,7 @@ func TestGitHubFileFindings_FilesCredibleIssues(t *testing.T) {
 		t.Fatalf("counts filed/skipped/failed = %d/%d/%d, want 2/0/0", res.Filed, res.Skipped, res.Failed)
 	}
 	if len(res.Outcomes) != 2 {
-		t.Fatalf("outcomes = %d, want 2 (seeded + strength findings excluded)", len(res.Outcomes))
+		t.Fatalf("outcomes = %d, want 2 (seeded + strength + blocked findings excluded)", len(res.Outcomes))
 	}
 
 	var issueBodies []string
@@ -194,18 +204,23 @@ func TestGitHubFileFindings_FilesCredibleIssues(t *testing.T) {
 			t.Errorf("finding-1 issue argv missing %q", want)
 		}
 	}
-	// finding-4: unresolvable evidence stays a body reference; blocked note and
-	// fallback expected line render.
+	// finding-4: unresolvable evidence stays a body reference; fallback
+	// expected line renders.
 	second := issueBodies[1]
 	for _, want := range []string{
-		"product-journey project-onboarding: onboarding blocked on missing config",
+		"product-journey project-onboarding: onboarding config generator emits stale commands",
 		"The project-onboarding journey completes without the problem described below.",
-		"attempted but blocked",
 		"## Additional evidence references",
 		"cassette://product-journey/run-777/missing/none.json",
 	} {
 		if !strings.Contains(second, want) {
 			t.Errorf("finding-4 issue argv missing %q", want)
+		}
+	}
+	// finding-5 is a blocked capture-gap finding: it must never be filed.
+	for _, c := range issueBodies {
+		if strings.Contains(c, "onboarding blocked on missing cassette") {
+			t.Error("blocked finding must not be filed as a GitHub issue")
 		}
 	}
 
