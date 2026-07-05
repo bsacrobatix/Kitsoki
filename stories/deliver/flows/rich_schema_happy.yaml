@@ -6,8 +6,8 @@
 # gate_command/deps contract.
 #
 # Full path: configure → start → decompose (agent mocked) → lint (Starlark,
-# real scope/acceptance checks against the inspect cassette) → fleet.load
-# (Starlark).
+# real scope/acceptance checks against the inspect cassette) → review (agent
+# mocked, accept) → fleet.load (Starlark).
 
 test_kind: flow
 app: ../app.yaml
@@ -33,6 +33,14 @@ host_handlers:
                 brief: "Add GET /health handler serialising HealthStatus to JSON. Gate: go test ./internal/handler/..."
                 gate_command: "go test ./internal/handler/..."
                 deps: [health-model]
+  host.agent.decide:
+    by_call:
+      review:
+        data:
+          submitted:
+            verdict: accept
+            reason: "Rich-schema fields (scope, acceptance) are consistent with the two briefs and coverage_note."
+            questions: []
 
 turns:
   - intent:

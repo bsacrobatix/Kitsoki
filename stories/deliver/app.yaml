@@ -7,16 +7,22 @@
 # Pipeline:
 #   configure{epic_path}
 #     └─ start ─▶ decompose (LLM: read epic, emit brief manifest YAML)
-#                  └─ on success ─▶ lint (deterministic DAG/uniqueness/completeness)
-#                                    ├─ pass ─▶ fleet (fan ship-it over every brief)
-#                                    │           └─ @exit:done {delivery_summary}
-#                                    └─ fail ─▶ @exit:needs-human {last_error}
+#                  ├─ on success ─▶ lint (deterministic DAG/uniqueness/completeness)
+#                  │                 ├─ pass ─▶ review (adversarial feasibility/completeness)
+#                  │                 │           ├─ accept ─▶ fleet (fan ship-it over every brief)
+#                  │                 │           │             └─ @exit:done {delivery_summary}
+#                  │                 │           └─ revise ─▶ decompose (budgeted refine)
+#                  │                 └─ fail ─▶ decompose (budgeted refine)
 #                  └─ on error  ─▶ @exit:needs-human {last_error}
 #
 # Every failure arc exits @exit:needs-human with a SPECIFIC non-blank last_error.
 # The lint step is fully deterministic (no LLM): ids unique & non-empty, each
 # brief has non-empty brief + gate_command, every dep references an existing id,
-# no dependency cycle, at least one brief.
+# no dependency cycle, at least one brief. The review step (host.agent.decide,
+# schemas/review-decision.json) attacks what lint cannot: per-brief buildability
+# and whether coverage_note actually covers the epic. Both refine edges
+# (lint-fail and review-revise) share one refine_cycle/refine_budget counter;
+# budget exhaustion exits @exit:needs-human instead of looping forever.
 
 app:
   id: deliver
@@ -29,6 +35,7 @@ hosts:
   - host.run
   - host.starlark.run
   - host.agent.task
+  - host.agent.decide
   - host.artifacts_dir
 
 world:
@@ -40,6 +47,13 @@ world:
   last_error:           { type: string, default: "" }   # set by lint (bind) or engine (on_error)
   decomposition_briefs: { type: list,   default: [] }   # briefs returned by the decomposer agent
   lint_route:           { type: string, default: "" }   # "ok" | "fail" — lint script verdict
+  coverage_note:        { type: string, default: "" }   # decomposer's completeness claim, attacked by review
+  review_verdict:       { type: string, default: "" }   # "accept" | "revise" — adversarial reviewer's verdict
+  review_reason:        { type: string, default: "" }
+  review_questions:     { type: list,   default: [] }   # specific gaps to feed back on revise
+  refine_feedback:      { type: string, default: "" }   # fed into the decomposer's prompt on a re-entry
+  refine_cycle:         { type: int,    default: 0 }    # shared by the lint-fail and review-revise refine loops
+  refine_budget:        { type: int,    default: 3 }
 
 intents:
   start:
@@ -53,11 +67,23 @@ intents:
     examples: []
     priority: 1
   lint_passed:
-    description: "(internal) lint passed → enter fleet fan-out."
+    description: "(internal) lint passed → enter adversarial review."
     examples: []
     priority: 1
   lint_failed:
-    description: "(internal) lint failed → needs-human."
+    description: "(internal) lint failed → budgeted refine loop back to decompose."
+    examples: []
+    priority: 1
+  review_accepted:
+    description: "(internal) adversarial review accepted the manifest → enter fleet fan-out."
+    examples: []
+    priority: 1
+  review_revise:
+    description: "(internal) adversarial review requested changes → budgeted refine loop back to decompose."
+    examples: []
+    priority: 1
+  refine_budget_exhausted:
+    description: "(internal) refine cycle budget exhausted → needs-human."
     examples: []
     priority: 1
   bail:
@@ -74,6 +100,10 @@ agents:
     system_prompt: "You are a delivery decomposer. Read the epic or proposal at the given path, break it into independently-shippable briefs each with a deterministic gate command, write the decomposition YAML to the given output path, and submit the structured manifest."
     model: claude-opus-4-8
     tools: [Read, Edit, Write]
+  reviewer:
+    system_prompt: "You are a skeptical decomposition reviewer. Attack per-brief buildability (self-contained, deps right, gate plausible) and cross-brief completeness (does coverage_note overclaim, any epic requirement uncovered, any file double-owned). Accept only when both hold up."
+    model: claude-sonnet-4-6
+    tools: [Read]
 
 exits:
   done:        { requires: [delivery_summary] }

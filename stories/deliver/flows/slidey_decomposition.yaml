@@ -11,7 +11,8 @@
 #     with a validated work plan.
 #
 # Full path: configure (seeded epic_path) → start → decompose (agent mocked) →
-#            lint (Starlark) → fleet.load (Starlark).
+#            lint (Starlark) → review (agent mocked, accept) → fleet.load
+#            (Starlark).
 
 test_kind: flow
 app: ../app.yaml
@@ -42,6 +43,14 @@ host_handlers:
                 brief: "Register a --notes <path> flag on the slidey CLI that renders the handout over the parsed deck spec. Gate: go test ./cmd/slidey/..."
                 gate_command: "go test ./cmd/slidey/..."
                 deps: [notes-renderer]
+  host.agent.decide:
+    by_call:
+      review:
+        data:
+          submitted:
+            verdict: accept
+            reason: "Three briefs cover the notes model, renderer, and CLI wiring with clean deps."
+            questions: []
 
 turns:
   - intent:

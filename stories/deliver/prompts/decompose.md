@@ -3,6 +3,15 @@ break it into an ordered list of independently-shippable briefs. Each brief must
 have a deterministic, no-LLM gate command so the delivery loop can verify
 completion automatically.
 
+{% if args.refine_feedback %}
+## This is a refine attempt
+
+A previous manifest you wrote was rejected. Fix the SPECIFIC problem below —
+do not just resubmit the same manifest:
+
+> {{ args.refine_feedback }}
+{% endif %}
+
 ## Your task
 
 1. **Read** the epic at `{{ args.epic_path }}` exactly once before doing any
