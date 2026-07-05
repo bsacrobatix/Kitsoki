@@ -91,7 +91,7 @@ func newGHAgentDeckCmd() *cobra.Command {
 	cmd.Flags().StringVar(&slideyBin, "slidey-bin", "", "slidey binary/entrypoint (alternative to --slidey-dir)")
 	cmd.Flags().StringVar(&publicBaseURL, "public-base-url", "", "agent public base URL used in the deck link")
 	cmd.Flags().StringVar(&title, "title", "", "issue title for deck framing")
-	cmd.Flags().BoolVar(&comment, "comment", false, "post the deck-link comment on the issue (needs gh auth)")
+	cmd.Flags().BoolVar(&comment, "comment", false, "post the deck-link comment on the issue (needs GitHub API auth)")
 	return cmd
 }
 

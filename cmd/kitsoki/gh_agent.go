@@ -331,9 +331,9 @@ func newGHAgentPollCmd() *cobra.Command {
 
 			// Opt-in GitHub App auth: when --github-app is set (or the
 			// KITSOKI_GH_APP_* env is fully present), mint an installation
-			// token and attach it to the host CLI context so every `gh`
-			// subprocess spawned under dispatch authenticates as the App.
-			// When not configured, today's offline/mention-file path is unchanged.
+			// token and attach it to host GitHub operations so dispatch
+			// authenticates as the App. When not configured, today's
+			// offline/mention-file path is unchanged.
 			ctx, restoreGHToken, err := setupGitHubAppAuth(ctx, useGitHubApp, appID, installationID, appKeyFile)
 			if err != nil {
 				return err
@@ -396,8 +396,8 @@ func newGHAgentPollCmd() *cobra.Command {
 }
 
 // setupGitHubAppAuth optionally mints a GitHub App installation token and
-// exports it as GH_TOKEN for the gh subprocesses spawned during dispatch. It
-// returns a restore func (always non-nil) that resets GH_TOKEN.
+// exports it as GH_TOKEN / GITHUB_TOKEN for host GitHub API calls during
+// dispatch. It returns a restore func (always non-nil) that resets GH_TOKEN.
 //
 // Auth engages when --github-app is set, any --gh-app-* flag is provided, or
 // the KITSOKI_GH_APP_* env config is fully present. Flags override env. When

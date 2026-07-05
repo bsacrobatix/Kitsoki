@@ -113,9 +113,9 @@ func newGHAgentReplayCmd() *cobra.Command {
 	cmd.Flags().IntVar(&issue, "issue", 0, "issue (or PR) number")
 	cmd.Flags().StringVar(&action, "action", "opened", "webhook action: opened|reopened|labeled|edited|…")
 	cmd.Flags().StringVar(&event, "event", "issues", "X-GitHub-Event type")
-	cmd.Flags().StringVar(&title, "title", "", "override issue title (default: fetched via gh)")
-	cmd.Flags().StringVar(&body, "body", "", "override issue body (default: fetched via gh)")
-	cmd.Flags().StringSliceVar(&labels, "label", nil, "override issue labels (repeatable; default: fetched via gh)")
+	cmd.Flags().StringVar(&title, "title", "", "override issue title (default: fetched via host.gh.ticket)")
+	cmd.Flags().StringVar(&body, "body", "", "override issue body (default: fetched via host.gh.ticket)")
+	cmd.Flags().StringSliceVar(&labels, "label", nil, "override issue labels (repeatable; default: fetched via host.gh.ticket)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the signed payload instead of delivering")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "HTTP timeout")
 	return cmd
@@ -169,7 +169,7 @@ func postWebhook(ctx context.Context, url, event, sig string, body []byte, timeo
 	return resp.StatusCode, string(b), nil
 }
 
-// fetchIssueForReplay reads an issue's title/body/labels via the host gh seam so
+// fetchIssueForReplay reads an issue's title/body/labels via host.gh.ticket so
 // the replay matches the real issue.
 func fetchIssueForReplay(ctx context.Context, repo string, number int) (title, body string, labels []string, err error) {
 	res, err := host.GitHubTicketHandler(ctx, map[string]any{
