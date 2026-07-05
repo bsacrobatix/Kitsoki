@@ -1,11 +1,12 @@
 # Tracing: usable-kitsoki release gate
 
-**Status:** Tasks 1 (parity-metric spec), 2 (plugin skeleton), and 4.1
-(golden regression fixtures) are shipped and tested, zero LLM spend. Tasks 3
-(wire real S1/S4 inputs), 4.2 (calibration-set run), and 5 (stand it up as
-the CI release gate) are gated on S1 (workbench) and S4 (scenario foundry)
-landing. See `docs/proposals/usable-kitsoki-release-gate.md` for the
-proposal's remaining open questions and the gated tasks.
+**Status:** Tasks 1 (parity-metric spec), 2 (plugin skeleton), 3.1 + 3.2
+(wire the real scenario corpus + S1 completion signal), and 4.1 (golden
+regression fixtures) are shipped and tested, zero LLM spend. Task 3.3 (swarm
+tier 1/2 concurrency + the three concrete harness entry points), 4.2
+(calibration-set run), and 5 (stand it up as the CI release gate) remain
+gated on 3.3 landing. See `docs/proposals/usable-kitsoki-release-gate.md`
+for the proposal's remaining open questions and the gated tasks.
 
 This is the day-one contract `S1` (the free-form workbench) develops
 against, and the schema `S6` (`tools/arena/arena/plugins/usable_kitsoki_gate.py`)
@@ -80,11 +81,24 @@ Constants (not prose):
 
 ## Producer contract — what S1 must emit
 
-S1 (the free-form workbench, not yet built) must emit, **per scenario
-turn**, a machine-readable completion signal keyed to the scenario IR's
-`expected_effects` list (`docs/proposals/scenario-foundry.md`'s IR shape).
-This is the *consumer* shape the parity scorer needs; S1's own tracing
-proposal should link back here rather than re-deriving it.
+S1 (the free-form workbench, `internal/orchestrator/workbench_gate_signal.go`)
+emits, **per scenario turn**, a machine-readable completion signal — ideally
+keyed to the scenario IR's `expected_effects` list
+(`docs/proposals/scenario-foundry.md`'s IR shape). This is the *consumer*
+shape the parity scorer needs.
+
+As landed, S1 emits a necessary-but-not-sufficient *proxy* for point 1 below
+(`candidate_completed := !dispatchFailed` — the workbench room's dispatch
+didn't take its `on_error` redirect this turn), not yet the full
+`expected_effects`-coverage join, and hard-codes `misroute_adjacent: false`
+(point 3) rather than computing it — both are documented, honest gaps in
+that file's own HONESTY NOTE, not silently-wrong values. `usable_kitsoki_gate
+.py`'s `build_parity_record` (Task 3.2) performs the join `score()` can do
+today from that proxy (`source_completed` off the scenario IR's own
+`abandoned` field, `candidate_completed`/`silent_bounce` reduced across
+turns) and calls out — in the record's own `notes` — exactly which of the
+three points below the record does NOT yet cover, rather than
+overclaiming.
 
 Concretely, for each turn kitsoki drives against a mined scenario, S1's
 trace must let a downstream reader answer, without re-running an LLM judge:
@@ -105,12 +119,16 @@ trace must let a downstream reader answer, without re-running an LLM judge:
    (true when the workbench routed to a command *adjacent* to the ask, not
    the ask itself).
 
-This section stays partial until S1 lands and its concrete trace-event shape
-(field names, event type, where it's emitted from) can be pinned down here
-by reference rather than by this description alone. When S1 ships, replace
-this section with a link to S1's own doc plus the exact event/field it
-promises, and keep only the *why* (join key = scenario IR's `expected_effects`)
-here to avoid duplicating the contract in two places.
+The trace-event shape is pinned down: an existing `turn.end` trace event's
+`payload` gains an additional `usable_kitsoki_gate` key (no new event kind —
+`{"turn":N, "seq":N, "ts":..., "kind":"turn.end", "payload":{
+"usable_kitsoki_gate": {"candidate_completed":bool, "silent_bounce":bool,
+"misroute_adjacent":bool, "evidence_refs":[]}}}`, `internal/store/event.go`'s
+`TurnEnded` JSONL shape). This section stays partial on points 1 and 3 above
+until a workbench-driving harness (Task 3.3) can thread a scenario's
+`expected_effects` into the room's world/context so a future S1 pass (or the
+harness's own join) can compute them for real, rather than the current
+per-turn dispatch-success proxy.
 
 ## Determinism
 
@@ -127,15 +145,23 @@ schema or constants above changes between the two paths, only what produces
 
 `usable-kitsoki-gate` is a fourth `arena` job type, registered alongside
 `bugfix`/`persona-qa`/`swarm` (`arena plugins` lists it;
-`tools/arena/arena/plugins/usable_kitsoki_gate.py`). One cell drives the
-whole mined scenario corpus for one `persona x surface` combination; `arena
-plan`/`arena run` enumerate cells the same way as every other job type
-(`tools/arena/README.md`'s "Status — usable-kitsoki-gate job type
+`tools/arena/arena/plugins/usable_kitsoki_gate.py`). One cell drives one
+scenario x surface combination; a spec's `targets_from` points at S4's
+scenario IR corpus directory (default `tools/session-mining/calibration/`,
+the committed calibration set) and `arena.model
+.load_targets_from_corpus`'s directory branch turns each scenario IR
+document into a `Target`, crossed with `axes.surface` — `arena plan --spec
+tools/arena/specs/usable-kitsoki-gate-calibration.yaml` enumerates 18 x 3 =
+54 cells (`tools/arena/README.md`'s "Status — usable-kitsoki-gate job type
 registered" section has the full `image()`/`drive_command()`/`score()`
-walkthrough). With no scenario corpus yet (S4 not landed), `arena plan`
-returns zero cells, not an error — the plugin can be exercised today only
-through its own no-LLM tests
+walkthrough). With no scenario corpus configured, `arena plan` returns zero
+cells, not an error. The three concrete harness entry points
+(`tests/playwright/usable-kitsoki-gate-web.spec.ts`,
+`tools/usable-kitsoki-gate/run_tui_gate.py`,
+`tools/usable-kitsoki-gate/run_mcp_gate.py`) still don't exist (Task 3.3) —
+the plugin can be exercised today through its own no-LLM tests
 (`tools/arena/tests/test_usable_kitsoki_gate_plugin.py`,
+`tools/arena/tests/test_usable_kitsoki_gate_corpus.py`,
 `tools/arena/tests/test_usable_kitsoki_gate_schema.py`,
 `tools/arena/tests/test_usable_kitsoki_gate_golden_fixtures.py`), all of
 which run with zero docker and zero LLM spend.

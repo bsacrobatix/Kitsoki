@@ -1,13 +1,24 @@
-"""usable-kitsoki-gate job-type plugin — one arena cell = one (persona x
-surface) run of the mined scenario corpus, per
-docs/proposals/usable-kitsoki-release-gate.md Task 2.
+"""usable-kitsoki-gate job-type plugin — one arena cell = one (scenario x
+surface) run of a mined scenario, per
+docs/proposals/usable-kitsoki-release-gate.md Tasks 2 and 3.
 
-Cell shape: `scenario_id x persona x surface` per the proposal's own
-Event/format model, but — exactly like `swarm.py` — one CELL drives the
-WHOLE mined corpus for one persona x surface combination (N scenarios run
-inside the cell), not one cell per scenario; the parity verdict record
-(`usable_kitsoki_gate_schema.json`) is emitted once per scenario x persona x
-surface, i.e. many records per cell.
+Cell shape (Task 3.1, S4 landed): `scenario x surface`, one cell per
+combination, enumerated the same way every other job type enumerates cells
+(`arena.model.JobSpec.cells()`, target x variant x axes) — no bespoke
+enumeration logic lives here. A spec's `targets_from` points at S4's
+scenario-foundry IR corpus (a *directory* of `scn-*.json` documents, default
+`tools/session-mining/calibration/`, the committed 18-scenario calibration
+set — `arena.model.load_targets_from_corpus`'s directory branch turns each
+IR document into one `Target`, `id` = the scenario id, `meta` carrying
+`persona`/`goal`/`expected_effects`/`abandoned`/`provenance` verbatim); the
+spec's `axes.surface` supplies `["web", "tui", "mcp"]`. Cross-producing those
+gives one cell per scenario x surface — 18 scenarios x 3 surfaces = 54 cells
+against the calibration set (see `specs/usable-kitsoki-gate-calibration.yaml`
+and `tests/test_usable_kitsoki_gate_corpus.py`). `persona` is NOT a separate
+axis to cross-multiply — a mined scenario's persona is a fixed property of
+that scenario (baked into `target.meta["persona"]` from the IR document),
+not an independent dimension it should be re-run under; `_coords()` reads it
+from there when no explicit `persona` axis/meta override is present.
 
 `drive_command()` dispatches on `axis["surface"]`:
   - "web" reuses the existing swarm-style harness convention: cd into
@@ -16,17 +27,18 @@ surface, i.e. many records per cell.
   - "tui" / "mcp" dispatch into a workbench-driving runner script under
     `tools/usable-kitsoki-gate/` instead of a browser spec.
 
-S1 (workbench producer contract) and S4 (scenario foundry / mined corpus)
-have not landed yet as of this commit, so none of the three concrete
-harness entry points referenced below
-(`tests/playwright/usable-kitsoki-gate-web.spec.ts`,
+S1 (workbench producer contract) has landed (`internal/orchestrator/
+workbench_gate_signal.go`) and S4 (scenario foundry / mined corpus) has
+landed (`tools/session-mining/scenario_compiler.py` +
+`tools/session-mining/calibration/`), but the three concrete harness entry
+points referenced below (`tests/playwright/usable-kitsoki-gate-web.spec.ts`,
 `tools/usable-kitsoki-gate/run_tui_gate.py`,
-`tools/usable-kitsoki-gate/run_mcp_gate.py`) exist on disk yet — this
-plugin's job today is to get the argv/env composition and scoring contract
-right and PROVEN by test, so S1/S4 land against a stable, already-tested
-seam rather than the plugin being re-designed once those pieces show up.
-`arena plan`/`arena run` will simply fail to find those scripts until S1/S3
-wire them in (Task 3, out of scope here) — that failure mode is
+`tools/usable-kitsoki-gate/run_mcp_gate.py`) still do not exist on disk
+(Task 3.3, gated separately) — this plugin's cell enumeration and scoring
+contract are proven by test against the REAL corpus and a REAL (synthetic,
+no-LLM) S1-shaped trace so the eventual harness lands against an
+already-tested seam. `arena plan`/`arena run` will fail to find those
+scripts until Task 3.3 wires them in — that failure mode is
 indistinguishable from any other "harness script missing" infra failure and
 is handled the same way `score()` handles any other harness crash: an
 `infra:*` health, never a fabricated model verdict.
@@ -34,18 +46,38 @@ is handled the same way `score()` handles any other harness crash: an
 Scoring never regexes stdout for a verdict. It only reads the
 `[usable-kitsoki-gate] wrote <path>` pointer line the harness is expected to
 print (mirrors swarm.py's `[swarm] wrote <path>` convention), loads the
-parity-records bundle at that path, validates each record against
-`usable_kitsoki_gate_schema.json`, and reduces the records into the three
-GATE_CONDITIONS from `usable_kitsoki_gate_constants.py`. The reduction here
-is PER CELL, i.e. per (persona, surface) in production (one cell drives one
-surface, so grouping by surface is normally a no-op) -- but it groups
-records by their own `surface` field and gates on the MINIMUM per-surface
-parity (WORST_SURFACE_GATING), not a flat aggregate, so a hand-written
-bundle spanning more than one surface (golden regression fixtures, Task 4.1
--- see tests/fixtures/usable-kitsoki-gate/) is still reduced correctly. True
-cross-CELL worst-surface gating (comparing separately-run cells against each
-other across a real S1/S4 sweep) is still a higher rollup layer (Task 3,
-gated on S1/S4 landing, explicitly out of scope for this plugin).
+results bundle at that path, and reduces it into the three GATE_CONDITIONS
+from `usable_kitsoki_gate_constants.py`. Two bundle shapes are accepted
+(Task 3.2):
+
+  1. Already-built parity-verdict records (`{"records": [...]}`, or a bare
+     JSON list) — every field already schema-shaped. This is what Task 4.1's
+     hand-written golden-regression fixtures use, and what any future
+     harness MAY choose to write directly if it does its own join.
+  2. A raw S1 signal bundle (`{"turn_signals": [...]}` or
+     `{"trace_events": [...]}`) — the turn-level `usable_kitsoki_gate`
+     payload(s) captured off a REAL session trace (`extract_turn_signals`
+     pulls them out of raw `kind: "turn.end"` trace-event dicts), with no
+     pre-built parity record at all. `score()` performs the actual S1 x S4
+     join itself (`build_parity_record`): `source_completed` is read off
+     THIS cell's own scenario (`cell.target.meta["abandoned"]`, the IR
+     document `targets_from` already loaded it from — never re-derived,
+     never re-judged by an LLM), `candidate_completed`/`silent_bounce`/
+     `misroute_adjacent` are reduced across `turn_signals`, and every field
+     S1 is honestly unable to compute yet (see
+     `internal/orchestrator/workbench_gate_signal.go`'s HONESTY NOTE) is
+     marked in the record's own `notes`, not fabricated.
+
+Either way records are validated against `usable_kitsoki_gate_schema.json`
+and reduced PER CELL. A cell in production now carries exactly one record
+(one scenario x one surface), but the reduction groups by each record's own
+`surface` field and gates on the MINIMUM per-surface parity
+(WORST_SURFACE_GATING), not a flat aggregate, so a hand-written bundle
+spanning more than one scenario/surface (golden regression fixtures, Task
+4.1 -- see tests/fixtures/usable-kitsoki-gate/) is still reduced correctly.
+True cross-CELL worst-surface gating (comparing separately-run cells against
+each other across a real sweep) is still a higher rollup layer (Task 5,
+gated on Task 3 landing, explicitly out of scope for this plugin).
 """
 
 from __future__ import annotations
@@ -85,7 +117,15 @@ MCP_RUNNER = f"{KITSOKI_MNT}/tools/usable-kitsoki-gate/run_mcp_gate.py"
 
 SURFACES = ("web", "tui", "mcp")
 DEFAULT_SURFACE = "web"
-DEFAULT_SCENARIO_CORPUS = "docs/proposals/scenario-foundry-corpus.json"
+# S4's committed, hand-checked calibration set (tools/session-mining/
+# calibration/MANIFEST.md) — 18 scenario IR documents, one per file. This is
+# the default corpus BOTH for `targets_from`-style cell enumeration (a spec
+# points here, or overrides with any other directory of scenario IR docs)
+# and for the `GATE_SCENARIO_CORPUS` env var threaded to the not-yet-built
+# harness (Task 3.3), so a harness that needs to re-read a scenario's full
+# IR document (turns, goal, expected_effects) by id can find it at
+# `{GATE_SCENARIO_CORPUS}/{scenario_id}.json` without a second lookup path.
+DEFAULT_SCENARIO_CORPUS = "tools/session-mining/calibration"
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "usable_kitsoki_gate_schema.json"
 
@@ -126,9 +166,21 @@ class UsableKitsokiGatePlugin:
             or str(cell.variant.meta.get("surface", ""))
             or DEFAULT_SURFACE
         )
+        # persona is a fixed property of the scenario a cell was enumerated
+        # for (Task 3.1: `target.meta["persona"]` came straight off S4's IR
+        # document via `load_targets_from_corpus`'s directory branch), not an
+        # independent axis to cross-multiply — so it is the LAST fallback,
+        # behind an explicit axis or variant-meta override (kept for hand-
+        # authored specs / existing tests that set persona explicitly).
+        persona = (
+            cell.axis.get("persona")
+            or str(cell.variant.meta.get("persona", ""))
+            or str(cell.target.meta.get("persona", ""))
+        )
         return {
             "surface": surface,
-            "persona": cell.axis.get("persona") or str(cell.variant.meta.get("persona", "")),
+            "persona": persona,
+            "scenario_id": cell.target.id,
             "scenario_corpus": (
                 cell.axis.get("scenario_corpus")
                 or str(cell.variant.meta.get("scenario_corpus", ""))
@@ -155,6 +207,8 @@ class UsableKitsokiGatePlugin:
             f"GATE_RUN_ID={shlex.quote(coords['run_id'])}",
             f"GATE_RESULTS_PATH={shlex.quote(results_path)}",
         ]
+        if coords["scenario_id"]:
+            env.append(f"GATE_SCENARIO_ID={shlex.quote(coords['scenario_id'])}")
         if coords["persona"]:
             env.append(f"GATE_PERSONA={shlex.quote(coords['persona'])}")
 
@@ -205,13 +259,137 @@ class UsableKitsokiGatePlugin:
             return result
 
         records = data.get("records") if isinstance(data, dict) else data
+        if records is None and isinstance(data, dict) and ("turn_signals" in data or "trace_events" in data):
+            # Task 3.2's real join: the harness wrote S1's raw per-turn
+            # signal(s) instead of an already-built parity record. Perform
+            # the S1 (candidate) x S4 (source) join here, against THIS
+            # cell's own scenario -- the exact IR document `targets_from`
+            # enumerated this cell from (Task 3.1), never re-read from disk,
+            # never re-derived.
+            turn_signals = data.get("turn_signals")
+            if turn_signals is None:
+                turn_signals = extract_turn_signals(data.get("trace_events") or [])
+            evidence_refs = data.get("evidence_refs") or [str(host_path)]
+            record = build_parity_record(
+                scenario={**cell.target.meta, "id": cell.target.id},
+                surface=self._coords(cell)["surface"],
+                turn_signals=turn_signals,
+                evidence_refs=evidence_refs,
+                notes=str(data.get("notes", "")),
+            )
+            records = [record]
+
         if not isinstance(records, list):
             result.verdict = "blocked"
             result.health = "infra:results-malformed"
-            result.notes = f"usable-kitsoki-gate results at {host_path} did not contain a 'records' array"
+            result.notes = (
+                f"usable-kitsoki-gate results at {host_path} did not contain a 'records' array "
+                "(nor a 'turn_signals'/'trace_events' raw-signal bundle)"
+            )
             return result
 
         return _rollup_from_records(result, records, str(host_path))
+
+
+def extract_turn_signals(trace_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pull the `usable_kitsoki_gate` payload out of raw `kind: "turn.end"`
+    trace-event dicts (the JSONL shape `internal/store/event.go`'s
+    `TurnEnded` writes: `{"turn":N, "seq":N, "ts":..., "kind":"turn.end",
+    "payload":{...}}`).
+
+    Turns outside a `workbench:` room never carry this key at all
+    (`workbenchGateSignal` returns nil for those,
+    `internal/orchestrator/workbench_gate_signal.go`) -- such events are
+    silently skipped rather than treated as a missing/failed signal, exactly
+    matching that producer's own "byte-identical to before this change"
+    contract for ordinary turns.
+    """
+    signals: list[dict[str, Any]] = []
+    for event in trace_events:
+        if not isinstance(event, dict) or event.get("kind") != "turn.end":
+            continue
+        payload = event.get("payload") or {}
+        signal = payload.get("usable_kitsoki_gate") if isinstance(payload, dict) else None
+        if isinstance(signal, dict):
+            signals.append(signal)
+    return signals
+
+
+def build_parity_record(
+    scenario: dict[str, Any],
+    surface: str,
+    turn_signals: list[dict[str, Any]],
+    evidence_refs: list[str],
+    *,
+    notes: str = "",
+) -> dict[str, Any]:
+    """The real S1 (candidate) x S4 (source) join Task 3.2 was missing.
+
+    `scenario` is a full scenario IR document (S4,
+    `tools/session-mining/schema/scenario_ir.schema.json`) -- typically
+    `cell.target.meta` plus `cell.target.id` back-filled as `"id"`, since
+    Task 3.1's `load_targets_from_corpus` directory branch already loaded
+    the IR document verbatim into the Target that cell was enumerated from.
+    `turn_signals` is the list of per-turn `usable_kitsoki_gate` payload
+    dicts this scenario's run produced (see `extract_turn_signals`).
+
+    - `source_completed := not scenario["abandoned"]` -- the hidden oracle
+      is S4's own `outcomes.py` satisfaction signal folded into the IR at
+      compile time; it is read here, never re-derived and never re-judged
+      by an LLM (docs/proposals/usable-kitsoki-release-gate.md's Event/
+      format model).
+    - `candidate_completed` reduces S1's per-turn dispatch-success proxy
+      (`candidate_completed == !dispatchFailed`, see
+      `workbench_gate_signal.go`) across every turn: true only if a signal
+      was captured for every turn AND none of them failed. This is
+      necessary-but-not-sufficient for "the scenario's expected_effects were
+      covered" (S1 does not yet key its signal to `expected_effects` --
+      documented gap) -- the record's `notes` say so explicitly rather than
+      silently overclaiming a stronger join than actually happened.
+    - `silent_bounce` / `misroute_adjacent` are OR'd across turns.
+      `misroute_adjacent` is hard-false from every S1 signal today (S1 does
+      not compute it at all); this record inherits that honest absence
+      rather than fabricating a verdict, and says so in `notes`.
+    """
+    if not evidence_refs:
+        raise ValueError(
+            "build_parity_record: evidence_refs must be non-empty (schema minItems=1) "
+            "-- pass at least the run directory's own results/trace path; never fabricate one"
+        )
+
+    source_completed = not bool(scenario.get("abandoned", False))
+    silent_bounce = any(bool(s.get("silent_bounce")) for s in turn_signals)
+    misroute_adjacent = any(bool(s.get("misroute_adjacent")) for s in turn_signals)
+    candidate_completed = bool(turn_signals) and all(
+        bool(s.get("candidate_completed")) for s in turn_signals
+    )
+
+    caveats: list[str] = []
+    if not turn_signals:
+        caveats.append("no usable_kitsoki_gate turn signal was captured for this scenario run")
+    else:
+        caveats.append(
+            "candidate_completed reduced from S1's per-turn dispatch-success proxy, "
+            "not yet joined against expected_effects (documented S1 gap)"
+        )
+    caveats.append(
+        "misroute_adjacent is hard-false from S1 today (not computed, documented gap); "
+        "this record inherits that honest absence rather than a fabricated verdict"
+    )
+    note_text = "; ".join(part for part in [notes, *caveats] if part).strip()
+
+    return {
+        "schema_version": "1.0.0",
+        "scenario_id": scenario["id"],
+        "persona": str(scenario.get("persona", "")),
+        "surface": surface,
+        "source_completed": source_completed,
+        "candidate_completed": candidate_completed,
+        "silent_bounce": silent_bounce,
+        "misroute_adjacent": misroute_adjacent,
+        "evidence_refs": list(evidence_refs),
+        "notes": note_text,
+    }
 
 
 def _rollup_from_records(result: CellResult, records: list[Any], results_path: str) -> CellResult:
