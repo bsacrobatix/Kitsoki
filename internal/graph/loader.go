@@ -156,6 +156,59 @@ func loadSingleFile(path string) (*Catalog, error) {
 	return buildCatalog(path, SchemaPin(file.Schema), file.TypeRegistry, sources)
 }
 
+// LoadCatalogWithOverlay loads basePath (single-file or bundle, same as
+// LoadCatalog) as the current state, then unions in overlayPath's `nodes:`
+// list to produce the desired state a diff-mode caller wants — a small,
+// additive delta file instead of a hand-duplicated full catalog copy. This
+// is intentionally additive-only: overlayPath declaring an id that already
+// exists in basePath is a duplicate-id error (buildCatalog's existing
+// invariant), the same way two bundle files declaring the same id today
+// error. Representing a *modified* or *removed* node in the desired state
+// needs the real changeset apply/merge machinery (epic slice 2, not yet
+// built), not this loader.
+func LoadCatalogWithOverlay(basePath, overlayPath string) (*Catalog, error) {
+	base, err := LoadCatalog(basePath)
+	if err != nil {
+		return nil, err
+	}
+
+	raw, err := os.ReadFile(overlayPath)
+	if err != nil {
+		return nil, fmt.Errorf("graph: read overlay %s: %w", overlayPath, err)
+	}
+	var overlay struct {
+		Nodes []fileNode `yaml:"nodes"`
+	}
+	if err := yaml.Unmarshal(raw, &overlay); err != nil {
+		return nil, fmt.Errorf("graph: parse overlay %s: %w", overlayPath, err)
+	}
+
+	merged := &Catalog{
+		Schema:   base.Schema,
+		Registry: base.Registry,
+		Nodes:    make(map[NodeID]*Node, len(base.Nodes)+len(overlay.Nodes)),
+		NodeFile: make(map[NodeID]string, len(base.NodeFile)+len(overlay.Nodes)),
+		RootPath: basePath,
+		Warnings: base.Warnings,
+	}
+	for id, n := range base.Nodes {
+		merged.Nodes[id] = n
+		merged.NodeFile[id] = base.NodeFile[id]
+	}
+	for _, fn := range overlay.Nodes {
+		node, err := buildNode(fn, merged.Registry)
+		if err != nil {
+			return nil, fmt.Errorf("graph: overlay %s: %w", overlayPath, err)
+		}
+		if _, exists := merged.Nodes[node.ID]; exists {
+			return nil, fmt.Errorf("graph: overlay %s: duplicate node id %q already present in %s", overlayPath, node.ID, basePath)
+		}
+		merged.Nodes[node.ID] = node
+		merged.NodeFile[node.ID] = overlayPath
+	}
+	return merged, nil
+}
+
 func loadBundle(dir string) (*Catalog, error) {
 	var schema string
 	if raw, err := os.ReadFile(filepath.Join(dir, "catalog.yaml")); err == nil {
