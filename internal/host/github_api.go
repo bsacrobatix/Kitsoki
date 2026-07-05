@@ -61,7 +61,7 @@ func githubAPIRequest(ctx context.Context, method, path, contentType string, bod
 
 func githubAPIRequestAccept(ctx context.Context, method, path, accept, contentType string, body io.Reader, out any) (int, string, error) {
 	token := githubToken(ctx)
-	if token == "" {
+	if token == "" && githubMethodRequiresToken(method) {
 		return 0, "", fmt.Errorf("GH_TOKEN or GITHUB_TOKEN is required for native GitHub API calls")
 	}
 	base := strings.TrimRight(githubAPI.baseURL, "/")
@@ -84,7 +84,9 @@ func githubAPIRequestAccept(ctx context.Context, method, path, accept, contentTy
 		accept = "application/vnd.github+json"
 	}
 	req.Header.Set("Accept", accept)
-	req.Header.Set("Authorization", "Bearer "+token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
@@ -104,6 +106,10 @@ func githubAPIRequestAccept(ctx context.Context, method, path, accept, contentTy
 		}
 	}
 	return resp.StatusCode, string(data), nil
+}
+
+func githubMethodRequiresToken(method string) bool {
+	return strings.ToUpper(strings.TrimSpace(method)) != http.MethodGet
 }
 
 func githubIssueURL(repo string, number int) string {

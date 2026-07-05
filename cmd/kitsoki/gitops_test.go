@@ -70,6 +70,57 @@ func TestGitopsIssueStatusUsesNativeTicketProvider(t *testing.T) {
 	}
 }
 
+func TestGitopsIssueStatusSupportsPublicReadWithoutToken(t *testing.T) {
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization = %q, want none for public read", got)
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/105":
+			writeJSON(w, map[string]any{
+				"number":   105,
+				"title":    "Native public issue read",
+				"body":     "No gh CLI required.",
+				"state":    "open",
+				"html_url": "https://github.com/o/r/issues/105",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/105/comments":
+			writeJSON(w, []map[string]any{})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("gitops issue-status must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
+
+	cmd := gitopsCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"issue-status", "--repo", "o/r", "--id", "105", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("issue-status: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out.String())
+	}
+	if got["status"] != "issue_status" || got["issue_state"] != "open" {
+		t.Fatalf("status output = %+v", got)
+	}
+	if got["issue_id"] != "105" || got["title"] != "Native public issue read" {
+		t.Fatalf("issue identity = %+v", got)
+	}
+}
+
 func TestGitopsIssueCreateUsesNativeTicketProvider(t *testing.T) {
 	t.Setenv("GH_TOKEN", "test-token")
 	var payload map[string]any
