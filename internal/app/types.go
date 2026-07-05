@@ -960,6 +960,20 @@ type State struct {
 	// docs/proposals/room-workbench.md.
 	Workbench *WorkbenchDecl `yaml:"workbench,omitempty"`
 
+	// ImportAlias is set ONLY on the synthesized compound wrapper state
+	// resolveImports creates for one import (imports.go's `wrapper`), to the
+	// alias it was folded under (e.g. "core"). Never authored in YAML — an
+	// internal marker read by expandWorkbenches (workbench.go), which runs
+	// AFTER import folding and needs to know the cumulative world-key/intent
+	// prefix (`<alias>__`) already applied to everything folded beneath this
+	// wrapper, so a workbench: room imported from a child story synthesizes
+	// its on_enter Bind / capture-slot / capture-intent names against the
+	// SAME already-aliased keys the rest of the fold produced — not the
+	// child's bare pre-fold names, which would silently write to phantom,
+	// undeclared world keys the room's own (correctly-aliased) view can
+	// never see. See expandOneWorkbench's worldPrefix parameter.
+	ImportAlias string `yaml:"-"`
+
 	// ContextualRouting opts this room into the contextual-routing final tier:
 	// a router that fires AFTER deterministic and LLM tiers miss, classifying
 	// free-text input into one of four classes (intent, help, room_request,

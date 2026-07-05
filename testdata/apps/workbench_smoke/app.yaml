@@ -45,6 +45,13 @@ world:
   ticket_id:     { type: string, default: "" }
   ticket_type:   { type: string, default: "" }
   second_note:   { type: string, default: "" }
+  # Optional S6 usable-kitsoki-gate join input (room-workbench Task 1.4(b)'s
+  # real expected_effects join, internal/orchestrator/workbench_gate_signal.go)
+  # — a flow fixture may seed this via initial_world to prove
+  # candidate_completed is computed against bench_note's actual content,
+  # never hardcoded true. Empty by default: ordinary bench_smoke flows never
+  # set it, so the gate signal falls back to its dispatch-only proxy.
+  bench_expected_effects: { type: array, default: [] }
 
 root: bench
 

@@ -440,7 +440,7 @@ func (o *Orchestrator) RunIntentWithInput(ctx context.Context, sid app.SessionID
 
 	successEvents := append([]store.Event{inputEvent, startEvent, acceptedEvent}, result.Events...)
 	endEvent := newOrchestratorEvent(store.TurnEnded,
-		transitionedTurnEndWithGateSignal(o.def, result.NewState, result.View, dispatchState, dispatchFailed), turnNum)
+		transitionedTurnEndWithGateSignal(o.def, result.NewState, result.View, dispatchState, dispatchFailed, result.World.Vars), turnNum)
 	successEvents = append(successEvents, endEvent)
 	for i := range successEvents {
 		successEvents[i].Turn = turnNum

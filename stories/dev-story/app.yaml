@@ -378,10 +378,19 @@ world:
   #   captured by the `work` intent; fed to the on_enter landing_agent.
   # landing_note: the landing_agent's close-out note (schemas/landing-note.json).
   # landing_started: first-start banner sentinel (on_enter once: guard).
+  # landing_expected_effects: optional S6 usable-kitsoki-gate join input (see
+  #   internal/orchestrator/workbench_gate_signal.go's expectedEffectsFor) —
+  #   a list of deterministic, checkable outcome strings a no-LLM flow
+  #   fixture may seed via initial_world so the engine's own
+  #   candidate_completed join can check them against landing_note's actual
+  #   content, instead of a hardcoded true. Ordinary (non-calibration) use
+  #   never sets this, so it stays empty and the gate signal falls back to
+  #   its original dispatch-only proxy — byte-identical behavior.
   captured:            { type: int,    default: 0 }
   landing_request:     { type: string, default: "" }
   landing_note:        { type: object, default: {} }
   landing_started:     { type: bool,   default: false }
+  landing_expected_effects: { type: array, default: [] }
   # Thread continuity: the prior turn's note, preserved across the `work`
   # arc's landing_note clear so the next agent dispatch can build on what
   # it last reported (so "ok go ahead" continues the thread instead of a

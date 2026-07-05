@@ -3348,7 +3348,22 @@ func (a *appImpl) InitialState() StatePath {
 
 // LookupState resolves a dot-separated state path through the state tree.
 func (a *appImpl) LookupState(p StatePath) (*State, bool) {
-	return lookupStateInMap(string(p), a.def.States)
+	return a.def.LookupState(p)
+}
+
+// LookupState resolves a dot-separated state path (e.g. "core.landing", the
+// shape a compound import wrapper produces) through def's nested state tree.
+// Callers outside this package that hold a bare *AppDef (no appImpl) — e.g.
+// internal/orchestrator's workbench_gate_signal.go, which must resolve a
+// dispatching state that may sit under an imported alias's compound wrapper —
+// need this directly rather than reaching for the flat, single-level
+// def.States[...] index, which only ever resolves a TOP-LEVEL state name and
+// silently misses (nil, false) anything nested under a compound wrapper.
+func (def *AppDef) LookupState(p StatePath) (*State, bool) {
+	if def == nil {
+		return nil, false
+	}
+	return lookupStateInMap(string(p), def.States)
 }
 
 // lookupStateInMap walks a dot-separated path through a nested state map.
