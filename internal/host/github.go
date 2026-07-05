@@ -9,7 +9,7 @@
 // local files" surface for the dogfood loop. Issue creation and bug evidence
 // filing use the native GitHub REST API with GH_TOKEN/GITHUB_TOKEN so headless
 // autonomous runs do not depend on a locally logged-in gh binary. Older
-// search/list/transition operations still use the gh CLI through cliExec until they
+// search/list operations still use the gh CLI through cliExec until they
 // are migrated behind the same native transport.
 //
 // The companion `gh pr ...` family already lives in `internal/host/git_vcs.go`
@@ -75,9 +75,6 @@ func GitHubTicketHandler(ctx context.Context, args map[string]any) (Result, erro
 	case "comment_edit":
 		return ghTicketCommentEdit(ctx, args)
 	case "transition":
-		if !ghAvailable(ctx) {
-			return Result{Error: "host.gh.ticket: gh CLI not available — install github.com/cli/cli and run `gh auth login`"}, nil
-		}
 		return ghTicketTransition(ctx, args)
 	case "list_mine":
 		if !ghAvailable(ctx) {
@@ -286,8 +283,8 @@ func ghTicketCommentEdit(ctx context.Context, args map[string]any) (Result, erro
 	}}, nil
 }
 
-// ghTicketTransition implements ticket.transition via `gh issue close` /
-// `gh issue reopen`.  GitHub Issues has only two states (open / closed), so
+// ghTicketTransition implements ticket.transition via the native GitHub REST
+// API. GitHub Issues has only two states (open / closed), so
 // any `to:` value not in the closed-set re-opens.
 //
 // Input  args: id (string), to (string — "closed" | "resolved" | "open" | ...),
@@ -310,27 +307,30 @@ func ghTicketTransition(ctx context.Context, args map[string]any) (Result, error
 			repo = r
 		}
 	}
-	// Map a wide set of "closed" synonyms to gh's `close`.  Anything else
-	// triggers `reopen`.  This is intentionally permissive — the same
+	if strings.TrimSpace(repo) == "" {
+		return Result{Error: "ticket.transition: repo argument is required for native GitHub issue transitions"}, nil
+	}
+	// Map a wide set of "closed" synonyms to GitHub's `closed`. Anything else
+	// maps to `open`. This is intentionally permissive — the same
 	// vocabulary the file-backed provider accepts (`resolved`, `closed`,
 	// `done`, `wontfix`) maps cleanly.
-	sub := "reopen"
+	state := "open"
 	switch strings.ToLower(strings.TrimSpace(to)) {
 	case "closed", "close", "resolved", "done", "wontfix", "fixed":
-		sub = "close"
+		state = "closed"
 	}
-	ghArgs := []string{"issue", sub, num}
-	if repo != "" {
-		ghArgs = append(ghArgs, "--repo", repo)
-	}
-	_, stderr, code, err := cliExec(ctx, "", "gh", ghArgs...)
+	var raw map[string]any
+	code, resp, err := githubAPIJSON(ctx, "PATCH", "repos/"+repo+"/issues/"+num, map[string]any{"state": state}, &raw)
 	if err != nil {
-		return Result{Error: fmt.Sprintf("ticket.transition: exec: %v", err)}, nil
+		return Result{Error: fmt.Sprintf("ticket.transition: %v", err)}, nil
 	}
-	if code != 0 {
-		return Result{Error: fmt.Sprintf("ticket.transition: %s", strings.TrimSpace(stderr))}, nil
+	if code >= 300 {
+		return Result{Error: fmt.Sprintf("ticket.transition: %s", githubAPIError(resp))}, nil
 	}
-	return Result{Data: map[string]any{"ok": true}}, nil
+	return Result{Data: map[string]any{
+		"ok":     true,
+		"status": state,
+	}}, nil
 }
 
 // ghTicketListMine implements ticket.list_mine via `gh issue list --assignee`.
