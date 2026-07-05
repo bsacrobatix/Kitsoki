@@ -3852,6 +3852,120 @@ def summarize_gh_agent_fix_evidence(gh_agent: dict) -> str:
     return "; ".join(parts)
 
 
+def autonomous_fix_report_path(run_dir: Path) -> Path:
+    return run_dir / "autonomous-fix-report.md"
+
+
+def render_autonomous_fix_report(run_dir: Path, status: dict, review: Optional[dict] = None, validation: Optional[dict] = None) -> str:
+    findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"items": []}
+    gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
+    filing = findings.get("filing", {}) if isinstance(findings.get("filing", {}), dict) else {}
+    issue_items = [
+        item for item in findings.get("items", [])
+        if isinstance(item, dict) and item.get("github_issue", {}).get("url")
+    ]
+    lines = [
+        "# Autonomous Fix Report",
+        "",
+        f"- Run: `{run_dir.name}`",
+        f"- Ticket repo: `{status.get('ticket_repo', filing.get('ticket_repo', ''))}`",
+        f"- Status: `{status.get('autonomous_fix_status', status.get('status', ''))}`",
+        f"- Gates: {status.get('autonomous_gate_summary', '(not evaluated)')}",
+        "",
+        "## Filed Issues",
+        "",
+    ]
+    if issue_items:
+        for item in issue_items:
+            issue = item.get("github_issue", {})
+            lines.append(f"- `{item.get('id', item.get('title', 'finding'))}`: {issue.get('url', '')}")
+    else:
+        lines.append("- (none)")
+    lines.extend([
+        "",
+        "## GH-agent Runs",
+        "",
+        (
+            f"- Queue: `{gh_agent.get('enqueue_status', 'not requested')}` "
+            f"(enqueued {gh_agent.get('enqueued_count', 0)}, skipped {gh_agent.get('skipped_count', 0)})"
+        ),
+        (
+            f"- Drain: `{gh_agent.get('drain_status', 'not requested')}` "
+            f"(drained {gh_agent.get('drained_count', 0)}, done {gh_agent.get('done_count', 0)}, "
+            f"failed {gh_agent.get('failed_count', 0)}, active {gh_agent.get('active_count', 0)})"
+        ),
+        "",
+    ])
+    jobs = [job for job in gh_agent.get("drained_jobs", []) or gh_agent.get("jobs", []) if isinstance(job, dict)]
+    if jobs:
+        for job in jobs:
+            label = job.get("origin_ref") or job.get("job_id") or "unknown"
+            lines.extend([
+                f"### {label}",
+                "",
+                f"- State: `{job.get('state', '')}`",
+                f"- Run URL: {job.get('run_url', '') or '(missing)'}",
+            ])
+            if job.get("incident_url"):
+                lines.append(f"- Incident: {job.get('incident_url')}")
+            if job.get("err_msg"):
+                lines.append(f"- Error: {job.get('err_msg')}")
+            evidence_links = gh_agent_job_evidence_links(job)
+            lines.append("- Evidence:")
+            if evidence_links:
+                lines.extend([f"  - {link}" for link in evidence_links])
+            else:
+                lines.append("  - (missing)")
+            lines.append("")
+    else:
+        lines.append("- (none)")
+    review_status = (review or {}).get("review_status", (review or {}).get("status", status.get("review_status", "")))
+    lines.extend([
+        "## Review",
+        "",
+        f"- Status: `{review_status}`",
+        f"- Summary: {(review or {}).get('summary', status.get('review_summary', ''))}",
+        "",
+        "## Validation",
+        "",
+        f"- Status: `{(validation or {}).get('status', status.get('validation_status', ''))}`",
+        f"- Issues: {(validation or {}).get('validation_issue_summary', status.get('validation_issue_summary', '')) or '(none)'}",
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def write_autonomous_fix_report(run_dir: Path, status: dict, review: Optional[dict] = None, validation: Optional[dict] = None) -> Path:
+    path = autonomous_fix_report_path(run_dir)
+    path.write_text(render_autonomous_fix_report(run_dir, status, review, validation) + "\n", encoding="utf-8")
+    return path
+
+
+def missing_autonomous_fix_report_tokens(run_dir: Path, findings: dict) -> list[str]:
+    path = autonomous_fix_report_path(run_dir)
+    if not path.exists():
+        return ["autonomous-fix-report.md"]
+    text = path.read_text(encoding="utf-8")
+    gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
+    expected = [
+        item.get("github_issue", {}).get("url", "")
+        for item in findings.get("items", [])
+        if isinstance(item, dict) and item.get("github_issue", {}).get("url")
+    ]
+    expected.extend(
+        job.get("run_url", "")
+        for job in gh_agent.get("drained_jobs", [])
+        if isinstance(job, dict) and job.get("run_url")
+    )
+    expected.extend(
+        link
+        for job in gh_agent.get("drained_jobs", [])
+        if isinstance(job, dict)
+        for link in gh_agent_job_evidence_links(job)
+    )
+    return [token for token in expected if token and token not in text]
+
+
 def file_findings(
     run_dir: Path,
     ticket_repo: str,
@@ -3982,6 +4096,8 @@ def file_findings(
         # The Go side rewrote findings.json (issue URLs + the filing block), and
         # the gh-agent handoff may have added fix-run lifecycle evidence. Refresh
         # derived artifacts after both writes so decks/metrics/handoff stay honest.
+        if result.get("gh_agent_enqueue_status", "") not in {"", "disabled", "dry-run"}:
+            result["autonomous_fix_report_path"] = str(write_autonomous_fix_report(run_dir, result))
         update_derived_artifacts(run_dir, publish_deck=publish_deck)
     result.update(run_story_summary(run_dir))
     return result
@@ -4072,6 +4188,7 @@ def autonomous_fix_loop(
         "validation_issues": validation.get("issues", []),
     }
     result.update(story_summary)
+    result["autonomous_fix_report_path"] = str(write_autonomous_fix_report(run_dir, result, reviewed, validation))
     return result
 
 
@@ -4527,6 +4644,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     gh_agent_drain_status = gh_agent.get("drain_status", "")
     gh_agent_missing_evidence = gh_agent_missing_fix_evidence(gh_agent)
     gh_agent_missing_run_url = gh_agent_missing_run_urls(gh_agent)
+    autonomous_fix_report_missing = missing_autonomous_fix_report_tokens(run_dir, findings)
     gh_agent_jobs_terminal = (
         not gh_agent_requested
         or (
@@ -4719,6 +4837,20 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
                     f"missing: {', '.join(gh_agent_missing_run_url)}"
                     if gh_agent_missing_run_url
                     else f"run_urls={len([job for job in gh_agent.get('drained_jobs', []) or [] if isinstance(job, dict) and str(job.get('run_url', '')).strip()])}"
+                )
+            ),
+        },
+        {
+            "id": "autonomous-fix-report",
+            "status": "pass" if (not gh_agent_requested or not autonomous_fix_report_missing) else "fail",
+            "summary": "Autonomous fixes produce a complete human-review report with filed issue, run, and evidence links.",
+            "detail": (
+                "gh-agent fixing not requested"
+                if not gh_agent_requested
+                else (
+                    f"missing: {', '.join(autonomous_fix_report_missing[:5])}"
+                    if autonomous_fix_report_missing
+                    else "autonomous-fix-report.md"
                 )
             ),
         },
@@ -5756,6 +5888,15 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 "gh-agent-run-url",
                 "Completed gh-agent fix jobs are missing reviewable run URLs",
                 ", ".join(missing_run_urls[:5]),
+            )
+        missing_report_tokens = missing_autonomous_fix_report_tokens(run_dir, findings_json)
+        if missing_report_tokens:
+            add_validation_issue(
+                issues,
+                "error",
+                "autonomous-fix-report",
+                "Autonomous fix report is missing filed issue, run, or evidence links required for human review",
+                ", ".join(missing_report_tokens[:5]),
             )
         scene_bodies = [
             str(scene.get("body", ""))

@@ -97,7 +97,7 @@
   "finding_kinds": ["strength", "weakness", "issue", "fix"],
   "review_statuses": ["not_reviewed", "needs_evidence", "ready"],
   "review_check_statuses": ["pass", "warn", "fail"],
-  "review_check_ids": ["required-files", "scenario-contract", "scenario-attempts", "driver-journal-coverage", "driver-evidence-linked", "driver-live-budget", "driver-action-contract", "captured-evidence", "non-demo-evidence", "key-video", "media-manifest", "playback-artifacts-resolve", "playback-or-blocker", "playback-evidence-backed", "findings-summary", "balanced-findings", "observed-findings", "scenario-outcomes", "quality-gates", "no-rejected-evidence", "findings-filed", "gh-agent-fixes", "gh-agent-fix-evidence", "gh-agent-run-url", "deck-generated"],
+  "review_check_ids": ["required-files", "scenario-contract", "scenario-attempts", "driver-journal-coverage", "driver-evidence-linked", "driver-live-budget", "driver-action-contract", "captured-evidence", "non-demo-evidence", "key-video", "media-manifest", "playback-artifacts-resolve", "playback-or-blocker", "playback-evidence-backed", "findings-summary", "balanced-findings", "observed-findings", "scenario-outcomes", "quality-gates", "no-rejected-evidence", "findings-filed", "gh-agent-fixes", "gh-agent-fix-evidence", "gh-agent-run-url", "autonomous-fix-report", "deck-generated"],
   "demo_seed": {
     "evidence_items": 25,
     "findings": 4
