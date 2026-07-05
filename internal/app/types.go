@@ -33,6 +33,19 @@ type BashProfileDecl struct {
 	ScratchDir string           // set when Kind == bashprofile.SandboxWrite
 }
 
+// TokenBudgetDecl declares a per-agent override of the pre-dispatch
+// budget-gate thresholds (see AgentDecl.TokenBudget). Both fields are
+// required together — the loader rejects a declaration missing either or
+// with RefuseTokens < WarnTokens (see internal/app/loader.go).
+//
+//	agents:
+//	  reviewer:
+//	    token_budget: { warn_tokens: 50000, refuse_tokens: 120000 }
+type TokenBudgetDecl struct {
+	WarnTokens   int64 `yaml:"warn_tokens,omitempty"`
+	RefuseTokens int64 `yaml:"refuse_tokens,omitempty"`
+}
+
 // BashProfileKind is an alias for bashprofile.Kind kept for source compatibility.
 // New callers should prefer bashprofile.Kind directly.
 type BashProfileKind = bashprofile.Kind
@@ -1401,6 +1414,16 @@ type AgentDecl struct {
 	// Code's default behavior; default false. See
 	// docs/architecture/system-prompt.md (Replace vs append).
 	InheritClaudeDefault bool `yaml:"inherit_claude_default,omitempty"`
+
+	// TokenBudget overrides the built-in per-verb pre-dispatch budget-gate
+	// defaults (internal/host budget_gate.go, dispatch-context-floor task
+	// 1.4) for this agent. Both fields are required together: warn_tokens
+	// must be positive and refuse_tokens must be >= warn_tokens (checked at
+	// load time here, and again at runtime as a safety net) — an invalid
+	// override makes every dispatch through this agent refuse closed rather
+	// than silently falling back to the default. Omit entirely to use the
+	// shipped per-verb default (generous; effectively off until tuned).
+	TokenBudget *TokenBudgetDecl `yaml:"token_budget,omitempty"`
 
 	// BashProfile restricts Bash tool usage when the agent's tool surface
 	// includes "Bash". Required when Bash is in Tools and the agent is

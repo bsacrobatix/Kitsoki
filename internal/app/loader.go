@@ -615,6 +615,14 @@ func resolveAgentDecls(def *AppDef, file, baseDir string) []error {
 			}
 		}
 
+		if decl.TokenBudget != nil {
+			if decl.TokenBudget.WarnTokens <= 0 || decl.TokenBudget.RefuseTokens < decl.TokenBudget.WarnTokens {
+				addErr(fmt.Sprintf("agent %q: token_budget must set warn_tokens > 0 and refuse_tokens >= warn_tokens (got warn_tokens=%d refuse_tokens=%d)",
+					name, decl.TokenBudget.WarnTokens, decl.TokenBudget.RefuseTokens))
+				continue
+			}
+		}
+
 		if decl.Toolbox != "" && len(decl.Tools) > 0 {
 			addErr(fmt.Sprintf("agent %q: toolbox and tools are mutually exclusive; use toolbox with tools_add/tools_remove or inline tools, not both", name))
 			continue

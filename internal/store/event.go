@@ -177,6 +177,18 @@ const (
 	// Replay no-op.
 	AgentError EventKind = "agent.call.error"
 
+	// AgentDispatchBudgetChecked records the pre-dispatch budget-gate
+	// decision for one host.agent.* call (dispatch-context-floor proposal,
+	// task 1.4): {verb, estimated_tokens, budget_warn_tokens,
+	// budget_refuse_tokens, decision: proceed|escalate|refuse, reason,
+	// rung}. Appended BEFORE the underlying claude CLI subprocess is
+	// dispatched — a "refuse" decision means no subprocess ran at all for
+	// that call, and a "escalate" decision records which (if any) stronger
+	// ladder rung the walk was steered to start from. Replay no-op (falls
+	// through the replay switch's default case): it is a labeled
+	// pre-dispatch datapoint, not a world/state mutation.
+	AgentDispatchBudgetChecked EventKind = "agent.dispatch.budget_checked"
+
 	// IDEContextCaptured records one host.ide.get_* pull whose result feeds a
 	// decision. Payload carries {verb, request, response_digest, port,
 	// workspace}: the IDE provenance (which workspace/port served it) plus a
