@@ -144,6 +144,18 @@ thought.
   into a curated history corpus, lane-neutral task/oracle manifests,
   traceable precedent selection, and a gated autonomous runner. Nothing
   implemented yet; slices are sketched but not cut.
+- [`kits.md`](kits.md) — **epic.** Kits: named, semver-versioned, distributable
+  bundles of stories with a standardized shape (interface contracts, onboarding,
+  data-management schemas, conformance fixtures), declared by a `kit.yaml`
+  manifest compiled onto the shipped import/interface/profile machinery. Adds
+  the deliberately-deferred versioning enforcement (resolution tiers + lockfile),
+  deterministic conformance (contract checks + the base kit's no-LLM flow suite
+  run against extensions), and a rev-absorption lifecycle so upstream standards
+  (e.g. an ISO 9001 / ISO 14001 pack over a base management-system kit) evolve
+  through re-extension / re-composition / re-parameterization, never
+  copy-and-edit migration. Prior art: cypilot kits
+  (`constructorfabric/studio-kit-sdlc`). Nothing implemented yet; slices
+  sketched but not cut.
 - [`contextual-room-routing.md`](contextual-room-routing.md) — (runtime)
   make the final LLM routing tier classify unmatched room input as exactly one
   of: explicit intent with slots, read-only help, in-room free-form request, or
