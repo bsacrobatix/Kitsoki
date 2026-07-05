@@ -266,6 +266,8 @@ func AgentAskHandler(ctx context.Context, args map[string]any) (Result, error) {
 		mcpServers["validator"] = validatorEntry
 	}
 
+	mcpServers = attachStudioMCPServer(mcpServers, tools)
+
 	if len(mcpServers) > 0 {
 		mcpConfigPath, cleanup, cfgErr := writeMCPConfigTempfile(mcpServers, "kitsoki-ask-mcp")
 		if cfgErr != nil {

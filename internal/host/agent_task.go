@@ -301,7 +301,7 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 		defer bashMCPCleanup()
 		baseCLIArgs = append(baseCLIArgs, "--mcp-config", bashMCPPath)
 	}
-	if contractServers := effectiveMCPServers(args, agent); len(contractServers) > 0 {
+	if contractServers := attachStudioMCPServer(effectiveMCPServers(args, agent), tools); len(contractServers) > 0 {
 		contractMCPPath, contractMCPCleanup, mErr := writeMCPConfigTempfile(contractServers, "kitsoki-task-contract-mcp")
 		if mErr != nil {
 			return Result{Error: "host.agent.task: write contract MCP config: " + mErr.Error()}, nil
