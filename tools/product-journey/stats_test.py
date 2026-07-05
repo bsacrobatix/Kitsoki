@@ -145,6 +145,8 @@ def main():
         _check("writes stats artifact", stats_out.exists())
         written = run.read_json(stats_out)
         _check("written artifact includes path", written["stats_output"] == str(stats_out))
+        _check("written artifact includes scanned run dirs",
+               sorted(Path(path).name for path in written["run_dirs"]) == ["run-a", "run-b"])
         _check("manual stats replaced", written["manual_stats_replaced"] == "yes")
 
     print("PASS")
