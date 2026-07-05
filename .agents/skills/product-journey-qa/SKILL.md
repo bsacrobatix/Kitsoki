@@ -71,6 +71,9 @@ so the standing loop can be reviewed without relying on operator glue.
 heartbeats fail closed before spend. Story callers should include
 `--report-blocked-autonomous-watchdog` so the blocked report binds into the
 Kitsoki view instead of disappearing as a host error.
+`--autonomous-marathon --run-dir <run>` also enforces the same watchdog before
+native issue filing, gh-agent drain, close-out, or stats work; a stale heartbeat
+returns `autonomous_marathon_invalid` with the watchdog report attached.
 
 ## Matrix Workflow
 

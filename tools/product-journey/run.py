@@ -5393,6 +5393,7 @@ def autonomous_marathon(
     autonomous_heartbeat_minutes: int,
     autonomous_watchdog_minutes: int,
     publish_deck: Optional[Path],
+    watchdog_checked_at: str = "",
 ) -> dict:
     """Create or finalize a standing persona-QA marathon bundle.
 
@@ -5459,6 +5460,7 @@ def autonomous_marathon(
                 autonomous_heartbeat_minutes,
                 autonomous_watchdog_minutes,
                 publish_deck,
+                watchdog_checked_at,
             )
             finalized.update(driver_result)
             finalized["autonomous_control_path"] = str(autonomous_marathon_control_path(created_dir))
@@ -5505,6 +5507,60 @@ def autonomous_marathon(
         return result
 
     update_derived_artifacts(run_dir, publish_deck=None)
+    watchdog = autonomous_marathon_watchdog(run_dir, watchdog_checked_at)
+    if watchdog.get("status") != "autonomous_watchdog_ok":
+        base = {
+            "autonomous_fix_status": "not_run",
+            "independent_verify_status": "fail",
+            "independent_verify_summary": watchdog.get("autonomous_watchdog_summary", ""),
+            "autonomous_gate_summary": "watchdog=fail, filing=not_run, gh_agent=not_run, independent_verify=fail, review=not_run, validation=fail",
+            "review_status": "not_run",
+            "review_summary": "",
+            "review_passed_count": 0,
+            "review_failed_count": 0,
+            "review_warning_count": 0,
+            "review_total_count": 0,
+            "review_backlog_summary": watchdog.get("blocker_summary", ""),
+            "validation_status": "invalid",
+            "validation_errors": 1,
+            "validation_warnings": 0,
+            "validation_issue_summary": "autonomous-watchdog",
+        }
+        result = {
+            **base,
+            **run_story_summary(run_dir),
+            "status": "autonomous_marathon_invalid",
+            "autonomous_marathon_status": "autonomous_marathon_invalid",
+            "autonomous_marathon_summary": f"watchdog=fail: {watchdog.get('autonomous_watchdog_summary', '')}",
+            "run_dir": str(run_dir),
+            "deck_path": str(run_dir / "deck.slidey.json"),
+            "execution_plan_path": str(run_dir / "execution-plan.md"),
+            "driver_plan_path": str(run_dir / "driver-plan.md"),
+            "driver_journal_path": str(run_dir / "driver-journal.md"),
+            "agent_brief_path": str(run_dir / "agent-brief.md"),
+            "driver_handoff_path": str(run_dir / "driver-handoff.md"),
+            "media_manifest_path": str(run_dir / "media-manifest.json"),
+            "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
+            "autonomous_control_path": str(autonomous_marathon_control_path(run_dir)) if autonomous_marathon_control_path(run_dir).exists() else "",
+            "autonomous_control_markdown_path": str(autonomous_marathon_control_markdown_path(run_dir)) if autonomous_marathon_control_markdown_path(run_dir).exists() else "",
+            "stats_status": "not_run",
+            "stats_root": "",
+            "stats_output": "",
+            "stats_summary": "",
+            "stats_gate_status": "fail",
+            "stats_gate_summary": "watchdog failed before stats",
+            "stats_current_run_scanned": "no",
+            "stats_runs_scanned": 0,
+            "stats_found_count": 0,
+            "stats_filed_count": 0,
+            "stats_fixed_count": 0,
+            "stats_reopened_count": 0,
+            "stats_unknown_state_count": 0,
+            "stats_similar_pair_count": 0,
+        }
+        result.update(run_story_summary(run_dir))
+        result["autonomous_marathon_report_path"] = str(write_autonomous_marathon_report(run_dir, result))
+        return result
     findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"items": []}
     credible_issues = credible_issue_findings(findings)
     if credible_issues:

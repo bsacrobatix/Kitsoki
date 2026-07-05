@@ -205,6 +205,98 @@ def main() -> int:
                   and Path(finalized["prd_design_intake_path"]).exists(),
                   failures)
 
+            stale = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-stale-watchdog",
+                "bugfix",
+                7,
+                "",
+                "",
+                "stories/bugfix",
+                "",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                "pending",
+                24,
+                15,
+                45,
+                None,
+            )
+            stale_dir = Path(stale["run_dir"])
+            stale_run_json = run.read_json(stale_dir / "run.json")
+            stale_scenario = stale_run_json["scenarios"][0]["id"]
+            filing_test.attach_bugfix_proof(stale_dir, stale_scenario)
+            run.record_finding(
+                stale_dir,
+                "issue",
+                "Stale marathon must stop before autonomous fixing",
+                "The marathon has a credible issue but no driver heartbeat inside the watchdog window.",
+                stale_scenario,
+                "high",
+                str(stale_dir / "test-evidence" / "trace-replay.md"),
+                "open",
+                None,
+            )
+            stale_checked_at = (
+                run.parse_iso_datetime(stale_run_json["created_at"]) + run.datetime.timedelta(minutes=46)
+            ).isoformat(timespec="seconds")
+            stale_db = tmp / "gh-agent-stale-watchdog.json"
+            stale_finalized = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                stale_dir,
+                "vscode",
+                "core-maintainer",
+                "ignored",
+                "",
+                7,
+                "o/r",
+                str(stale_db),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                str(run.ARTIFACT_ROOT),
+                str(stale_dir / "autonomous-marathon-stats.json"),
+                0.82,
+                25,
+                "pending",
+                24,
+                15,
+                45,
+                None,
+                stale_checked_at,
+            )
+            stale_report_text = Path(stale_finalized["autonomous_marathon_report_path"]).read_text(encoding="utf-8")
+            check("marathon finalization enforces watchdog before autonomous fix spend",
+                  stale_finalized["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and stale_finalized["autonomous_fix_status"] == "not_run"
+                  and stale_finalized["autonomous_watchdog_status"] == "autonomous_watchdog_blocked"
+                  and stale_finalized["validation_issue_summary"] == "autonomous-watchdog"
+                  and stale_finalized["stats_status"] == "not_run"
+                  and "watchdog=fail" in stale_finalized["autonomous_marathon_summary"]
+                  and "autonomous-marathon-watchdog.md" in stale_report_text
+                  and not stale_db.exists(),
+                  failures)
+
             missing_stats = run.autonomous_marathon(
                 catalog,
                 github_targets,
