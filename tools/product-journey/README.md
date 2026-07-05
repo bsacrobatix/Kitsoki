@@ -450,7 +450,7 @@ For all journey runs, use a local production build of the product site so no rem
 
 ```sh
 make web
-GOCACHE=$(mktemp -d) go run ./cmd/kitsoki web --addr 127.0.0.1:7777
+GOCACHE="${KITSOKI_GOCACHE:-/private/tmp/kitsoki-gocache}" go run ./cmd/kitsoki web --addr 127.0.0.1:7777
 ```
 
 This stages the production bundle locally and then serves it from a reproducible

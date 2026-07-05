@@ -35,7 +35,7 @@ states:
         id: parity_provider_stream
         once: true
         with:
-          cmd: "GOCACHE=${GOCACHE:-$(pwd)/.cache/go-build} go test ./internal/host -run TestAgentStream_HarnessParityThinkingAndToolUse"
+          cmd: "GOCACHE=${KITSOKI_GOCACHE:-/private/tmp/kitsoki-gocache} go test ./internal/host -run TestAgentStream_HarnessParityThinkingAndToolUse"
           cwd: "{{ world.workdir }}"
           timeout: "120s"
         bind:
@@ -47,7 +47,7 @@ states:
         id: parity_tui_activity
         once: true
         with:
-          cmd: "GOCACHE=${GOCACHE:-$(pwd)/.cache/go-build} go test ./internal/tui -run TestMetaStream_FullThoughtReachesScrollback"
+          cmd: "GOCACHE=${KITSOKI_GOCACHE:-/private/tmp/kitsoki-gocache} go test ./internal/tui -run TestMetaStream_FullThoughtReachesScrollback"
           cwd: "{{ world.workdir }}"
           timeout: "120s"
         bind:
