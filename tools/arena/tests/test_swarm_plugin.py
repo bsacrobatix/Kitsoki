@@ -121,6 +121,74 @@ check("falls back to the DEFAULT_USERS default with no axis at all", "SWARM_USER
 check("does not emit SWARM_PERSONA_MIX with no persona_mix axis", "SWARM_PERSONA_MIX=" in no_axes_script, False)
 check("still threads the default fixture", "happy_path.yaml" in no_axes_script, True)
 
+# ---- 3b. tier-2 cell selection (task 3.2, docs/proposals/scenario-foundry.md) --
+# A variant with meta.tier == "tier2" drives swarm-cassette-users.spec.ts
+# instead, and SWARM_FIXTURE/SWARM_PERSONA_MIX are genuinely consumed there
+# (tools/swarm/tiers/tier2.ts's buildTier2RecordingAuto) rather than merely
+# recorded — the DEFAULT_FIXTURE flow-fixture default must NOT leak onto a
+# tier-2 cell, since tier2.ts's own fixture semantics are a scenario-IR
+# path/dir, not a flow-fixture path.
+
+TIER2_SPEC = {
+    "job_type": "swarm",
+    "targets": [{"id": "kitsoki", "label": "kitsoki web UI"}],
+    "variants": [{"id": "tier2", "backend": "replay", "tier": "tier2"}],
+    "axes": {
+        "persona_mix": ["core-maintainer"],
+        "fixture": ["tools/session-mining/calibration"],
+    },
+    "placement": {"hosts": ["local"], "concurrency": 1, "retry": 0},
+}
+tier2_cell = JobSpec.from_dict(TIER2_SPEC).cells()[0]
+tier2_argv = plugin.drive_command(tier2_cell, live=False)
+tier2_script = tier2_argv[2]
+check(
+    "tier2 variant drives swarm-cassette-users.spec.ts, not tier 1's spec",
+    "tests/playwright/swarm-cassette-users.spec.ts" in tier2_script,
+    True,
+)
+check(
+    "tier2 cell still runs via npx playwright test",
+    "npx playwright test" in tier2_script,
+    True,
+)
+check(
+    "tier2 SWARM_FIXTURE carries the scenario-IR axis value",
+    "SWARM_FIXTURE=" in tier2_script and "tools/session-mining/calibration" in tier2_script,
+    True,
+)
+check(
+    "tier2 SWARM_PERSONA_MIX carries the axis value",
+    "SWARM_PERSONA_MIX=" in tier2_script and "core-maintainer" in tier2_script,
+    True,
+)
+
+TIER2_NO_FIXTURE_AXIS = {
+    "job_type": "swarm",
+    "targets": [{"id": "kitsoki", "label": "kitsoki web UI"}],
+    "variants": [{"id": "tier2", "backend": "replay", "tier": "tier2"}],
+    "axes": {},
+    "placement": {"hosts": ["local"], "concurrency": 1, "retry": 0},
+}
+tier2_no_fixture_cell = JobSpec.from_dict(TIER2_NO_FIXTURE_AXIS).cells()[0]
+tier2_no_fixture_script = plugin.drive_command(tier2_no_fixture_cell, live=False)[2]
+check(
+    "tier2 with no fixture axis does NOT leak tier-1's DEFAULT_FIXTURE (happy_path.yaml)",
+    "happy_path.yaml" in tier2_no_fixture_script,
+    False,
+)
+check(
+    "tier2 with no fixture axis emits no SWARM_FIXTURE at all",
+    "SWARM_FIXTURE=" in tier2_no_fixture_script,
+    False,
+)
+
+# A default (unset tier) variant is untouched by the tier2 branch.
+check("default variant (no tier meta) is not tier2", plugin._is_tier2(cell), False)
+check("default variant drives the tier-1 spec", plugin._spec_for(cell), "tests/playwright/swarm-replay-users.spec.ts")
+check("tier2-meta variant IS tier2", plugin._is_tier2(tier2_cell), True)
+check("tier2-meta variant resolves to the tier-2 spec", plugin._spec_for(tier2_cell), "tests/playwright/swarm-cassette-users.spec.ts")
+
 # ---- 4. score() reads a REAL swarm results JSON via the stdout pointer -----
 
 with tempfile.TemporaryDirectory() as tmp:
