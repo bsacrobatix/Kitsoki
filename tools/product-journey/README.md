@@ -98,6 +98,22 @@ or cassette evidence is still required before making product claims. Because
 seeded demo artifacts are not proof evidence, the smoke command can pass while
 the seeded run review remains `needs_evidence` with an unsatisfied quality gate.
 
+Run the story-owned persona-QA marathon in deterministic replay mode:
+
+```sh
+python3 tools/product-journey/run.py --autonomous-marathon \
+  --project vscode --persona core-maintainer --seed demo --scenarios bugfix \
+  --autonomous-driver-mode replay \
+  --ticket-repo owner/repo --gh-agent-public-base-url https://agent.example
+```
+
+Replay mode creates the run, attaches cassette-backed local proof artifacts,
+records the driver journal and findings, runs native gitops filing/fixing/
+close-out, refreshes review artifacts, validates, routes weaknesses to PRD/
+design, and derives stats without operator glue. Leave
+`--autonomous-driver-mode` at `pending` when a live budgeted driver should
+capture evidence before finalization.
+
 Prove one reusable-driver scenario loop with cassette-backed proof evidence:
 
 ```sh

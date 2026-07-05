@@ -68,6 +68,12 @@ It is intentionally no-LLM:
   `kitsoki-fixed-in` close-out comment, close the GitHub issue, write
   `autonomous-fix-report.md`, and validate the bundle without exposing raw
   `gh` or gh-agent plumbing as the operator contract.
+- `autonomous_marathon autonomous_driver_mode=replay ...` creates a scoped run,
+  attaches cassette-backed local proof artifacts, records the driver journal
+  and credible findings, then runs the same native gitops autonomous fix,
+  review, validation, PRD weakness routing, close-out, and stats gates in one
+  story-owned call. Omit the mode, or use `pending`, when a live driver should
+  capture evidence before finalization.
 - `seed_demo` calls `tools/product-journey/run.py --seed-demo-evidence
   --json-output` to populate a no-LLM review bundle.
 - `handoff` calls `tools/product-journey/run.py --driver-handoff --json-output`

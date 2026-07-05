@@ -1,7 +1,7 @@
 states:
   idle:
     description: "Waiting to create a product-journey QA run bundle."
-    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_status, autonomous_marathon_report_path, status]
+    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_status, autonomous_marathon_report_path, autonomous_driver_mode, autonomous_driver_status, autonomous_driver_evidence_count, status]
     view:
       - banner:
           text: "PRODUCT JOURNEY QA"
@@ -21,6 +21,7 @@ states:
             Persona autofix smoke: '{{ world.persona_autofix_smoke_status|default:"(not checked)" }}'
             Autonomous marathon smoke: '{{ world.autonomous_marathon_smoke_status|default:"(not checked)" }}'
             Autonomous marathon: '{{ world.autonomous_marathon_status|default:"(not started)" }}'
+            Autonomous driver: '{{ world.autonomous_driver_mode|default:"pending" }} / {{ world.autonomous_driver_status|default:"(not run)" }}'
             Status: "{{ world.status }}"
       - prose: "Create a no-LLM run bundle or a 10-repo GitHub matrix, then attach visual/MCP evidence as scenarios play out."
       - choice:
@@ -269,6 +270,8 @@ states:
                   - "{{ slots.scenarios ?? world.scenario_scope }}"
                   - --live-budget-minutes
                   - "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
+                  - --autonomous-driver-mode
+                  - "{{ slots.autonomous_driver_mode ?? 'pending' }}"
                   - --ticket-repo
                   - "{{ slots.ticket_repo ?? world.ticket_repo }}"
                   - --gh-agent-db
@@ -307,9 +310,47 @@ states:
                 autonomous_marathon_status: "stdout_json.autonomous_marathon_status"
                 autonomous_marathon_summary: "stdout_json.autonomous_marathon_summary"
                 autonomous_marathon_report_path: "stdout_json.autonomous_marathon_report_path"
+                autonomous_driver_mode: "stdout_json.autonomous_driver_mode"
+                autonomous_driver_status: "stdout_json.autonomous_driver_status"
+                autonomous_driver_summary: "stdout_json.autonomous_driver_summary"
+                autonomous_driver_evidence_count: "stdout_json.autonomous_driver_evidence_count"
+                autonomous_driver_issue_count: "stdout_json.autonomous_driver_issue_count"
                 autonomous_fix_status: "stdout_json.autonomous_fix_status"
                 autonomous_fix_report_path: "stdout_json.autonomous_fix_report_path"
                 autonomous_gate_summary: "stdout_json.autonomous_gate_summary"
+                issue_closeout_status: "stdout_json.issue_closeout_status"
+                issue_closeout_count: "stdout_json.issue_closeout_count"
+                issue_closeout_summary: "stdout_json.issue_closeout_summary"
+                filing_status: "stdout_json.filing_status"
+                filing_dry_run: "stdout_json.dry_run"
+                findings_filed_count: "stdout_json.findings_filed_count"
+                findings_skipped_count: "stdout_json.findings_skipped_count"
+                findings_failed_count: "stdout_json.findings_failed_count"
+                findings_unfiled_count: "stdout_json.findings_unfiled_count"
+                filed_issue_summary: "stdout_json.filed_issue_summary"
+                filing_summary: "stdout_json.filing_summary"
+                gh_agent_enqueue_status: "stdout_json.gh_agent_enqueue_status"
+                gh_agent_enqueued_count: "stdout_json.gh_agent_enqueued_count"
+                gh_agent_skipped_count: "stdout_json.gh_agent_skipped_count"
+                gh_agent_job_summary: "stdout_json.gh_agent_job_summary"
+                gh_agent_claim_status: "stdout_json.gh_agent_claim_status"
+                gh_agent_claim_count: "stdout_json.gh_agent_claim_count"
+                gh_agent_claim_summary: "stdout_json.gh_agent_claim_summary"
+                gh_agent_drain_status: "stdout_json.gh_agent_drain_status"
+                gh_agent_drained_count: "stdout_json.gh_agent_drained_count"
+                gh_agent_done_count: "stdout_json.gh_agent_done_count"
+                gh_agent_failed_count: "stdout_json.gh_agent_failed_count"
+                gh_agent_active_count: "stdout_json.gh_agent_active_count"
+                gh_agent_run_summary: "stdout_json.gh_agent_run_summary"
+                gh_agent_fix_evidence_count: "stdout_json.gh_agent_fix_evidence_count"
+                gh_agent_missing_evidence_count: "stdout_json.gh_agent_missing_evidence_count"
+                gh_agent_independent_verify_count: "stdout_json.gh_agent_independent_verify_count"
+                gh_agent_missing_verify_count: "stdout_json.gh_agent_missing_verify_count"
+                gh_agent_missing_run_url_count: "stdout_json.gh_agent_missing_run_url_count"
+                gh_agent_fix_evidence_summary: "stdout_json.gh_agent_fix_evidence_summary"
+                gh_agent_missing_evidence_summary: "stdout_json.gh_agent_missing_evidence_summary"
+                gh_agent_independent_verify_summary: "stdout_json.gh_agent_independent_verify_summary"
+                gh_agent_missing_verify_summary: "stdout_json.gh_agent_missing_verify_summary"
                 stats_status: "stdout_json.stats_status"
                 stats_root: "stdout_json.stats_root"
                 stats_output: "stdout_json.stats_output"
@@ -347,6 +388,17 @@ states:
                 next_driver_capture: "stdout_json.next_driver_capture"
                 next_driver_attach_command: "stdout_json.next_driver_attach_command"
                 next_driver_blocker_command: "stdout_json.next_driver_blocker_command"
+                review_status: "stdout_json.review_status"
+                review_summary: "stdout_json.review_summary"
+                review_passed_count: "stdout_json.review_passed_count"
+                review_failed_count: "stdout_json.review_failed_count"
+                review_warning_count: "stdout_json.review_warning_count"
+                review_total_count: "stdout_json.review_total_count"
+                review_backlog_summary: "stdout_json.review_backlog_summary"
+                validation_status: "stdout_json.validation_status"
+                validation_errors: "stdout_json.validation_errors"
+                validation_warnings: "stdout_json.validation_warnings"
+                validation_issue_summary: "stdout_json.validation_issue_summary"
               on_error: idle
             - set:
                 status: "autonomous_marathon_ready"
