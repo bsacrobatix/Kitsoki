@@ -184,6 +184,45 @@ def deck_scene(deck, eyebrow):
     return {}
 
 
+def attach_bugfix_proof(run_dir, scenario_id):
+    evidence_dir = run_dir / "test-evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    evidence_kinds = [
+        "session_trace",
+        "candidate_diff",
+        "oracle_result",
+        "full_suite_result",
+        "key_interaction_video",
+    ]
+    refs = []
+    for kind in evidence_kinds:
+        suffix = ".mp4" if kind == "key_interaction_video" else ".md"
+        artifact = evidence_dir / f"{kind}{suffix}"
+        artifact.write_text(f"{kind} proof\n", encoding="utf-8")
+        run.attach_evidence(
+            run_dir,
+            scenario_id,
+            kind,
+            str(artifact),
+            "validated",
+            "cassette",
+            f"{kind} proof for autonomous fix test",
+            None,
+        )
+        refs.append(str(artifact))
+    run.record_driver_event(
+        run_dir,
+        scenario_id,
+        "replay",
+        "validated",
+        "Cassette replay produced the bugfix proof artifacts.",
+        "story.driver_event,visual.observe",
+        ",".join(refs),
+        "",
+        None,
+    )
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
@@ -245,6 +284,10 @@ def main():
                and result["gh_agent_failed_count"] == 0)
         _check("gh-agent run summary surfaces review links",
                "https://agent.example/run/job-1" in result["gh_agent_run_summary"])
+        _check("gh-agent fix evidence fields are reported",
+               result["gh_agent_fix_evidence_count"] == 4
+               and result["gh_agent_missing_evidence_count"] == 0
+               and "https://agent.example/run/job-1/artifacts/fix-report.md" in result["gh_agent_fix_evidence_summary"])
         queued_rows = json.loads(gh_agent_db.read_text())
         _check("gh-agent queue uses issue origin refs",
                sorted(row["origin_ref"] for row in queued_rows)
@@ -339,6 +382,7 @@ def main():
             personas, stable_scenarios, "vscode", "", "autonomous-fix-test", "dry-run", None,
         )
         scenario2 = run_json2["scenarios"][0]["id"]
+        attach_bugfix_proof(run_dir2, scenario2)
         run.record_finding(run_dir2, "issue", "autonomous credible", "observed problem",
                            scenario2, "high", "", "open", None)
         result = run.autonomous_fix_loop(
@@ -352,9 +396,43 @@ def main():
             None,
         )
         _check("autonomous loop validates bundle", result["autonomous_fix_status"] == "autonomous_fix_valid")
+        _check("autonomous loop reports all reliability gates",
+               result["autonomous_gate_summary"] == "filing=pass, gh_agent=pass, review=pass, validation=pass")
         _check("autonomous loop preserves filing status", result["filing_status"] == "findings_filed")
         _check("autonomous loop drained gh-agent", result["gh_agent_drain_status"] == "drained" and result["gh_agent_done_count"] == 1)
+        _check("autonomous loop exposes fix evidence assets",
+               result["gh_agent_fix_evidence_count"] == 2
+               and result["gh_agent_missing_evidence_count"] == 0)
         _check("autonomous loop reviewed and validated", result["review_total_count"] == 21 and result["validation_status"] == "valid")
+
+        run_dir3, run_json3 = run.build_run_bundle(
+            catalog, run.load_github_targets(run.GITHUB_TARGETS),
+            personas, stable_scenarios, "vscode", "", "autonomous-missing-evidence-test", "dry-run", None,
+        )
+        scenario3 = run_json3["scenarios"][0]["id"]
+        attach_bugfix_proof(run_dir3, scenario3)
+        run.record_finding(run_dir3, "issue", "autonomous missing evidence", "observed problem",
+                           scenario3, "high", "", "open", None)
+        os.environ["KITSOKI_FAKE_GH_AGENT_NO_ASSETS"] = "1"
+        try:
+            result = run.autonomous_fix_loop(
+                run_dir3,
+                "o/r",
+                str(tmp / "gh-agent-autonomous-no-assets.json"),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                None,
+            )
+        finally:
+            os.environ.pop("KITSOKI_FAKE_GH_AGENT_NO_ASSETS", None)
+        _check("autonomous loop rejects done fixes without evidence",
+               result["autonomous_fix_status"] == "autonomous_fix_invalid"
+               and result["gh_agent_missing_evidence_count"] == 1)
+        _check("autonomous loop reports failing gates for missing evidence",
+               result["autonomous_gate_summary"] == "filing=pass, gh_agent=fail, review=fail, validation=fail"
+               and any(i["id"] == "gh-agent-fix-evidence" for i in result["validation_issues"]))
 
     print("PASS")
 

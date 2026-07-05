@@ -152,6 +152,11 @@ world:
   gh_agent_failed_count: { type: int, default: 0 }
   gh_agent_active_count: { type: int, default: 0 }
   gh_agent_run_summary: { type: string, default: "" }
+  gh_agent_fix_evidence_count: { type: int, default: 0 }
+  gh_agent_missing_evidence_count: { type: int, default: 0 }
+  gh_agent_fix_evidence_summary: { type: string, default: "" }
+  gh_agent_missing_evidence_summary: { type: string, default: "" }
+  autonomous_gate_summary: { type: string, default: "" }
   stats_status:   { type: string, default: "" }
   stats_root:     { type: string, default: "" }
   stats_output:   { type: string, default: "" }
