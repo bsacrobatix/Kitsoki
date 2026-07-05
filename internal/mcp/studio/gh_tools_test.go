@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -15,10 +16,8 @@ import (
 	studio "kitsoki/internal/mcp/studio"
 )
 
-// gh_tools_test.go — verification for the gh.* surface. gh.issues and
-// gh.comment are native and covered with a fake GitHub HTTP API; the remaining
-// gh.pr_view happy path calls the real `gh` CLI, so these tests pin its
-// offline-safe validation guard instead.
+// gh_tools_test.go — verification for the gh.* surface. The GitHub-backed tools
+// are native and covered with fake GitHub HTTP APIs.
 
 func TestGHIssuesUsesNativeTicketProvider(t *testing.T) {
 	ctx := context.Background()
@@ -77,6 +76,73 @@ func writeGHToolsJSON(t *testing.T, w http.ResponseWriter, v any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")
 	require.NoError(t, json.NewEncoder(w).Encode(v))
+}
+
+func TestGHPRViewUsesNativeProvider(t *testing.T) {
+	ctx := context.Background()
+	cs := newStudioNoWorkspace(ctx, t)
+
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("PATH", t.TempDir())
+
+	var sawPR, sawFiles, sawDiff bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/repo/pulls/51" && strings.Contains(r.Header.Get("Accept"), "diff"):
+			sawDiff = true
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte("diff --git a/app.go b/app.go\n"))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/repo/pulls/51":
+			sawPR = true
+			writeGHToolsJSON(t, w, map[string]any{
+				"number":   51,
+				"title":    "Fix owner routing",
+				"state":    "open",
+				"html_url": "https://github.com/acme/repo/pull/51",
+				"body":     "Regression test included.",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/repo/pulls/51/files":
+			sawFiles = true
+			assert.Equal(t, "100", r.URL.Query().Get("per_page"))
+			writeGHToolsJSON(t, w, []map[string]any{{
+				"filename":  "app.go",
+				"additions": 5,
+				"deletions": 2,
+			}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+
+	res, err := callTool(ctx, cs, "gh.pr_view", map[string]any{
+		"repo":         "acme/repo",
+		"number":       51,
+		"include_diff": true,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "gh.pr_view: %s", contentText(res))
+	require.True(t, sawPR, "expected PR metadata request")
+	require.True(t, sawFiles, "expected PR files request")
+	require.True(t, sawDiff, "expected PR diff request")
+
+	var out studio.GHPRViewOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &out))
+	require.True(t, out.OK)
+	require.Contains(t, out.Diff, "diff --git")
+	pr, ok := out.PR.(map[string]any)
+	require.True(t, ok, "PR should decode as object: %#v", out.PR)
+	assert.Equal(t, float64(51), pr["number"])
+	assert.Equal(t, "Fix owner routing", pr["title"])
+	files, ok := pr["files"].([]any)
+	require.True(t, ok, "files should decode as array: %#v", pr["files"])
+	require.Len(t, files, 1)
+	file := files[0].(map[string]any)
+	assert.Equal(t, "app.go", file["path"])
+	assert.Equal(t, float64(5), file["additions"])
+	assert.Equal(t, float64(2), file["deletions"])
 }
 
 func TestGHCommentUsesNativeIssueProvider(t *testing.T) {
