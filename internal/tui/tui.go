@@ -233,6 +233,13 @@ type RootModel struct {
 	// turns if the `result` stream event is lost to backpressure.
 	metaStreamPending string
 
+	// flushStreamPendingDuringLive is set when a streaming agent event queued
+	// visible transcript activity while an in-flight live line is active. The
+	// normal pending-flush guard suppresses scrollback while routing live rows
+	// are changing; streaming tool/thinking lines are different because they are
+	// the operator's proof that long-running work is alive.
+	flushStreamPendingDuringLive bool
+
 	// initialTypedView carries the typed-view payload for the very
 	// first frame so NewRootModel can paint via AppendSystemTyped (the
 	// typed-element-aware path) instead of AppendSystem (which re-runs
@@ -1067,7 +1074,10 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // resolved routing row together.
 func (m *RootModel) flushPendingWhenStable() tea.Cmd {
 	if m.mode == ModeAwaitingLLM && m.transcript.hasLive() {
-		return nil
+		if !m.flushStreamPendingDuringLive {
+			return nil
+		}
+		m.flushStreamPendingDuringLive = false
 	}
 	return m.transcript.FlushPending()
 }
@@ -3440,6 +3450,7 @@ func (m RootModel) handleMetaStreamEvent(msg MetaStreamMsg) RootModel {
 	if !inFlight {
 		return m
 	}
+	pendingBefore := len(m.transcript.pending)
 	ev := msg.Event
 	switch ev.Type {
 	case "assistant":
@@ -3506,6 +3517,9 @@ func (m RootModel) handleMetaStreamEvent(msg MetaStreamMsg) RootModel {
 		// AppendSystem (meta) presents the final reply, so echoing it
 		// here as thinking would duplicate it.
 		m.metaStreamPending = ""
+	}
+	if len(m.transcript.pending) > pendingBefore {
+		m.flushStreamPendingDuringLive = true
 	}
 	return m
 }

@@ -170,3 +170,38 @@ func TestMetaStream_OnPathNoActivityIsSilent(t *testing.T) {
 	require.NotContains(t, visible, finalAnswer,
 		"the terminal answer is the room's to present, never an activity line")
 }
+
+func TestMetaStream_OnPathFlushesWhileLiveLineActive(t *testing.T) {
+	forceTrueColor(t)
+	orch, sid := setupCloak(t)
+	m := buildModel(t, orch, sid)
+	rm, ok := tuipkg.ExtractRootModel(m)
+	require.True(t, ok)
+	rm = resizeForTest(rm, 100, 24)
+	tuipkg.SetModeForTest(&rm, tuipkg.ModeAwaitingLLM)
+	tuipkg.AppendLiveForTest(&rm, "routing: resolving…")
+	tuipkg.ClearTranscriptPendingForTest(&rm)
+
+	feed := func(ev host.StreamEvent) {
+		next, _ := rm.Update(tuipkg.MetaStreamMsg{Event: ev})
+		rm, ok = tuipkg.ExtractRootModel(next)
+		require.True(t, ok)
+	}
+
+	feed(host.StreamEvent{Type: "assistant", Text: "I will inspect the current state before changing the TUI."})
+	require.Empty(t, tuipkg.PendingTranscriptForTest(rm),
+		"first pure narration is deferred until the next stream event proves it is not the final answer")
+
+	feed(host.StreamEvent{Type: "assistant", Text: "The trace shows stream events arriving while the live line stays active.", Tool: "Read", Preview: "trace.redacted.jsonl"})
+
+	require.Empty(t, tuipkg.PendingTranscriptForTest(rm),
+		"stream activity must flush immediately even while ModeAwaitingLLM has an active live line")
+	require.NotEmpty(t, tuipkg.LiveLineForTest(rm),
+		"the live routing line should remain active; stream flushing must not finalize it")
+
+	visible := stripStyles(tuipkg.GetTranscriptContent(rm))
+	require.Contains(t, visible, "I will inspect the current state",
+		"deferred narration should become visible once followed by more activity")
+	require.Contains(t, visible, "trace.redacted.jsonl",
+		"tool breadcrumb should be visible without waiting for Esc/cancel")
+}
