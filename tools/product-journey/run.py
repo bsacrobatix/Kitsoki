@@ -7,6 +7,7 @@ contracts so the runner itself stays cost-free by default.
 """
 
 import argparse
+import difflib
 import hashlib
 import json
 import os
@@ -2958,6 +2959,161 @@ def file_findings(run_dir: Path, ticket_repo: str, dry_run: bool, publish_deck: 
         "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
     }
     result.update(run_story_summary(run_dir))
+    return result
+
+
+def normalize_issue_title(value: str) -> str:
+    return " ".join(
+        "".join(ch.lower() if ch.isalnum() else " " for ch in value).split()
+    )
+
+
+def load_issue_state(path: str) -> dict[str, dict]:
+    if not path:
+        return {}
+    source = run_dir_from_arg(path)
+    if not source.exists():
+        raise SystemExit(f"--issue-state-file does not exist: {source}")
+    payload = read_json(source)
+    if isinstance(payload, dict) and isinstance(payload.get("issues"), list):
+        items = payload["issues"]
+    elif isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        items = []
+        for key, value in payload.items():
+            if isinstance(value, dict):
+                item = dict(value)
+                item.setdefault("url", key)
+                items.append(item)
+    else:
+        items = []
+    state: dict[str, dict] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url") or item.get("html_url") or item.get("issue_url")
+        if url:
+            state[str(url)] = item
+        repo = item.get("repo", "")
+        number = item.get("number", "")
+        if repo and number:
+            state[f"https://github.com/{repo}/issues/{number}"] = item
+    return state
+
+
+def issue_marker_text(issue: dict) -> str:
+    chunks = [
+        str(issue.get("body", "")),
+        str(issue.get("resolution", "")),
+        str(issue.get("fixed_by", "")),
+    ]
+    for comment in issue.get("comments", []) or []:
+        if isinstance(comment, dict):
+            chunks.append(str(comment.get("body", "")))
+        else:
+            chunks.append(str(comment))
+    return "\n".join(chunks).lower()
+
+
+def issue_is_closed(issue: dict) -> bool:
+    return str(issue.get("state", issue.get("status", ""))).lower() in {"closed", "fixed", "resolved"}
+
+
+def issue_is_open(issue: dict) -> bool:
+    return str(issue.get("state", issue.get("status", ""))).lower() in {"open", "reopened"}
+
+
+def issue_has_fixed_marker(issue: dict) -> bool:
+    return "kitsoki-fixed-in" in issue_marker_text(issue)
+
+
+def derive_stats(root: Path, issue_state_file: str, similarity_threshold: float, stats_output: str) -> dict:
+    issue_state = load_issue_state(issue_state_file)
+    run_findings: list[tuple[Path, dict]] = []
+    if root.exists():
+        for path in sorted(root.rglob("findings.json")):
+            if "stats" in path.parts:
+                continue
+            try:
+                findings = read_json(path)
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"Invalid findings JSON in {path}: {exc}")
+            run_findings.append((path.parent, findings))
+
+    credible: list[dict] = []
+    filed: list[dict] = []
+    fixed: list[dict] = []
+    reopened: list[dict] = []
+    unknown_state = 0
+    for run_dir, findings in run_findings:
+        for item in credible_issue_findings(findings):
+            entry = dict(item)
+            entry["run_dir"] = str(run_dir)
+            credible.append(entry)
+            github_issue = item.get("github_issue", {}) or {}
+            url = github_issue.get("url", "")
+            if not url:
+                continue
+            filed.append(entry)
+            merged_issue = dict(github_issue)
+            if url in issue_state:
+                merged_issue.update(issue_state[url])
+            if not merged_issue.get("state") and not merged_issue.get("status"):
+                unknown_state += 1
+            has_marker = issue_has_fixed_marker(merged_issue)
+            if has_marker and issue_is_closed(merged_issue):
+                fixed.append(entry)
+            if has_marker and issue_is_open(merged_issue):
+                reopened.append(entry)
+
+    similar_pairs = []
+    titled = [
+        item for item in credible
+        if normalize_issue_title(str(item.get("title", "")))
+    ]
+    for index, left in enumerate(titled):
+        left_title = str(left.get("title", ""))
+        left_norm = normalize_issue_title(left_title)
+        for right in titled[index + 1:]:
+            right_title = str(right.get("title", ""))
+            right_norm = normalize_issue_title(right_title)
+            score = difflib.SequenceMatcher(None, left_norm, right_norm).ratio()
+            if score >= similarity_threshold:
+                similar_pairs.append({
+                    "score": round(score, 3),
+                    "left_title": left_title,
+                    "right_title": right_title,
+                    "left_issue_url": left.get("github_issue", {}).get("url", ""),
+                    "right_issue_url": right.get("github_issue", {}).get("url", ""),
+                    "left_run_dir": left.get("run_dir", ""),
+                    "right_run_dir": right.get("run_dir", ""),
+                })
+    similar_pairs.sort(key=lambda item: (-item["score"], item["left_title"], item["right_title"]))
+    stats_summary = (
+        f"Derived product-journey stats: {len(credible)} found, {len(filed)} filed, "
+        f"{len(fixed)} fixed, {len(reopened)} reopened, {len(similar_pairs)} similar pair(s)."
+    )
+    result = {
+        "status": "stats_derived",
+        "stats_root": str(root),
+        "stats_output": "",
+        "runs_scanned": len(run_findings),
+        "findings_found_count": len(credible),
+        "findings_filed_count": len(filed),
+        "issues_fixed_count": len(fixed),
+        "issues_reopened_count": len(reopened),
+        "issues_unknown_state_count": unknown_state,
+        "similar_pair_count": len(similar_pairs),
+        "similar_pairs": similar_pairs,
+        "manual_stats_replaced": "yes",
+        "stats_summary": stats_summary,
+    }
+    if stats_output:
+        output_path = run_dir_from_arg(stats_output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        result["stats_output"] = str(output_path)
+        write_json(output_path, result)
     return result
 
 
@@ -6740,6 +6896,11 @@ def main() -> None:
     parser.add_argument("--record-driver-event", action="store_true", help="Append one driver execution event to driver-journal.json")
     parser.add_argument("--seed-demo-evidence", action="store_true", help="Attach deterministic demo evidence and findings to an existing run bundle")
     parser.add_argument("--file-findings", action="store_true", help="File the bundle's credible issue findings as GitHub issues via the kitsoki bug orchestration")
+    parser.add_argument("--stats", action="store_true", help="Derive product-journey issue stats from run bundles and cached issue state")
+    parser.add_argument("--stats-root", default="", help="Root containing product-journey run bundles for --stats; defaults to .artifacts/product-journey")
+    parser.add_argument("--issue-state-file", default="", help="Optional JSON fixture/cache with GitHub issue state for --stats")
+    parser.add_argument("--stats-output", default="", help="Optional path to write the derived --stats JSON")
+    parser.add_argument("--similarity-threshold", type=float, default=0.82, help="Title similarity threshold for --stats duplicate/similar issue detection")
     parser.add_argument("--ticket-repo", default="", help="owner/repo GitHub target for --file-findings")
     parser.add_argument("--dry-run", action="store_true", help="With --file-findings, render what would be filed without calling GitHub")
     parser.add_argument(
@@ -7154,6 +7315,21 @@ def main() -> None:
             print(line)
         print(f"Unfiled credible findings: {result['findings_unfiled_count']}")
         append_log(f"Filed findings for {run_dir.name}: {result['filing_summary']}")
+        return
+
+    if args.stats:
+        stats_root = run_dir_from_arg(args.stats_root) if args.stats_root else ARTIFACT_ROOT
+        result = derive_stats(stats_root, args.issue_state_file, args.similarity_threshold, args.stats_output)
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Derived product journey stats: {result['stats_summary']}")
+            return
+        print(result["stats_summary"])
+        print(f"Runs scanned: {result['runs_scanned']}")
+        print(f"Unknown issue states: {result['issues_unknown_state_count']}")
+        if result["stats_output"]:
+            print(f"Stats: {result['stats_output']}")
+        append_log(f"Derived product journey stats: {result['stats_summary']}")
         return
 
     if args.review_run:

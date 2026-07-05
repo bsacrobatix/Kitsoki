@@ -130,6 +130,17 @@ world:
   findings_unfiled_count: { type: int, default: 0 }
   filed_issue_summary: { type: string, default: "" }
   filing_summary: { type: string, default: "" }
+  stats_status:   { type: string, default: "" }
+  stats_root:     { type: string, default: "" }
+  stats_output:   { type: string, default: "" }
+  stats_summary:  { type: string, default: "" }
+  stats_runs_scanned: { type: int, default: 0 }
+  stats_found_count: { type: int, default: 0 }
+  stats_filed_count: { type: int, default: 0 }
+  stats_fixed_count: { type: int, default: 0 }
+  stats_reopened_count: { type: int, default: 0 }
+  stats_unknown_state_count: { type: int, default: 0 }
+  stats_similar_pair_count: { type: int, default: 0 }
   dispatch_mode:  { type: string, default: "" }
   driver_status:  { type: string, default: "" }
   driver_summary: { type: string, default: "" }
@@ -256,6 +267,14 @@ intents:
     slots:
       ticket_repo: { type: string, required: true }
       mode: { type: string, required: false }
+  stats:
+    description: "Derive filed/fixed/reopened/similar issue stats from product-journey run bundles and cached GitHub issue state."
+    examples: ["stats", "derive issue stats", "stats issue_state_file=.artifacts/product-journey/issues.json"]
+    priority: 78
+    slots:
+      stats_root: { type: string, required: false }
+      issue_state_file: { type: string, required: false }
+      stats_output: { type: string, required: false }
   driver_event:
     description: "Record what the reusable driver actually attempted for a scenario."
     examples: ["record driver event", "driver attempted bugfix", "journal visual observe"]
@@ -298,7 +317,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
+  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, stats, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
 
 root: idle
 
