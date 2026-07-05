@@ -319,13 +319,17 @@ func ghOpenPR(ctx context.Context, workdir string, args map[string]any) (Result,
 			base = "main"
 		}
 	}
-	var pr githubPullRequestCreateResponse
-	code, resp, err := githubAPIJSON(ctx, "POST", "repos/"+repo+"/pulls", map[string]any{
+	payload := map[string]any{
 		"title": title,
 		"body":  body,
 		"head":  head,
 		"base":  base,
-	}, &pr)
+	}
+	if optBool(args, "draft", false) {
+		payload["draft"] = true
+	}
+	var pr githubPullRequestCreateResponse
+	code, resp, err := githubAPIJSON(ctx, "POST", "repos/"+repo+"/pulls", payload, &pr)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("git.open_pr: %v", err)}, nil
 	}
@@ -334,9 +338,11 @@ func ghOpenPR(ctx context.Context, workdir string, args map[string]any) (Result,
 	}
 	prID := fmt.Sprintf("%d", pr.Number)
 	return Result{Data: map[string]any{
-		"ok":    true,
-		"url":   pr.HTMLURL,
-		"pr_id": prID,
+		"ok":      true,
+		"outcome": "opened",
+		"url":     pr.HTMLURL,
+		"pr_id":   prID,
+		"repo":    repo,
 	}}, nil
 }
 

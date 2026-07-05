@@ -1,8 +1,8 @@
-# opens_pr — happy path: `open` pushes + opens the PR → @exit:opened with pr_url.
+# opens_pr — happy path: `open` packages evidence and host.git opens the PR → @exit:opened with pr_url.
 #
-# MOCKS open_pr_exec (host.run), so it proves the ROUTING contract (the JSON
-# outcome → opened → @exit:opened, pr_url bound). The real git/gh shell is
-# exercised by the operator's environment when driven live.
+# MOCKS open_pr_exec (host.git), so it proves the ROUTING contract (native
+# outcome → opened → @exit:opened, pr_url bound). The real provider path is
+# covered by host.git unit tests.
 
 test_kind: flow
 app: ../app.yaml
@@ -33,15 +33,15 @@ host_handlers:
             package_path: ".context/open-pr/fix-template-object-interp-placeholder.md"
             demo_video_path: ".artifacts/trace-features/trace-features.mp4"
             last_error: ""
+  host.git:
+    by_call:
       open_pr_exec:
         data:
           ok: true
-          exit_code: 0
-          stdout_json:
-            outcome: opened
-            url:     "https://github.com/bsacrobatix/Kitsoki/pull/7"
-            number:  "7"
-            last_error: ""
+          outcome: opened
+          url:     "https://github.com/bsacrobatix/Kitsoki/pull/7"
+          pr_id:   "7"
+          repo:    bsacrobatix/Kitsoki
 
 turns:
   - intent: { name: open, slots: {} }
@@ -54,5 +54,6 @@ turns:
       open_outcome: opened
       pr_url:       "https://github.com/bsacrobatix/Kitsoki/pull/7"
       pr_number:    "7"
+      repo:         bsacrobatix/Kitsoki
 
 expect_terminal: true

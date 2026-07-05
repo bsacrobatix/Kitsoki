@@ -11,14 +11,15 @@ already produced a committed branch in a worktree.
 ```
 idle --open--> prepare --prepared--> publishing --opened--> @exit:opened
                     |                         |
-                    +---- prepare_failed -----+---- open_failed/open_aborted --> @exit:needs-human
+                    +---- prepare_failed -----+---- open_failed --> @exit:needs-human
 ```
 
 `prepare` is deterministic and no-LLM. It writes
 `.context/open-pr/<branch>.md` and uses that markdown as the PR body when
 `world.body` is empty.
 
-`publishing` is the external side effect: `git push` plus `gh pr create`.
+`publishing` is the external side effect: host.git pushes the branch and opens
+the PR through the native provider.
 
 ## Required World
 

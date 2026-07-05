@@ -276,6 +276,9 @@ func TestGitVCS_OpenPR_NativeDoesNotRequireGh(t *testing.T) {
 	if res.Data["pr_id"] != "42" {
 		t.Fatalf("pr_id: %v", res.Data["pr_id"])
 	}
+	if res.Data["outcome"] != "opened" || res.Data["repo"] != "o/r" {
+		t.Fatalf("open_pr result: %#v", res.Data)
+	}
 	for _, call := range fr.calls {
 		if strings.HasPrefix(call, "gh ") {
 			t.Fatalf("open_pr must not invoke gh; calls=%v", fr.calls)
@@ -296,6 +299,9 @@ func TestGitVCS_OpenPR_UsesExplicitBaseAndHead(t *testing.T) {
 		if payload["base"] != "release" || payload["head"] != "fork:topic" {
 			t.Fatalf("payload: %#v", payload)
 		}
+		if payload["draft"] != true {
+			t.Fatalf("draft payload: %#v", payload)
+		}
 		writeJSON(w, map[string]any{"number": 43, "html_url": "https://github.com/o/r/pull/43"})
 	}))
 	defer srv.Close()
@@ -313,6 +319,7 @@ func TestGitVCS_OpenPR_UsesExplicitBaseAndHead(t *testing.T) {
 		"body":  "body",
 		"base":  "release",
 		"head":  "fork:topic",
+		"draft": true,
 	})
 	if err != nil {
 		t.Fatalf("infra: %v", err)

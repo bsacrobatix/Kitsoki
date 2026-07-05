@@ -1,7 +1,8 @@
-# push_fails — the git push fails (no remote / unauthenticated) → @exit:needs-human
-# carrying the real git output. Proves a delivery failure never silently "succeeds".
+# push_fails — the native provider push fails (no remote / unauthenticated) →
+# @exit:needs-human carrying the host.git error. Proves a delivery failure
+# never silently "succeeds".
 #
-# MOCKS open_pr_exec (host.run) returning the push_failed outcome.
+# MOCKS open_pr_exec (host.git) returning a domain error.
 
 test_kind: flow
 app: ../app.yaml
@@ -32,15 +33,11 @@ host_handlers:
             package_path: ".context/open-pr/fix-template-object-interp-placeholder.md"
             demo_video_path: ".artifacts/trace-features/trace-features.mp4"
             last_error: ""
+  host.git:
+    by_call:
       open_pr_exec:
-        data:
-          ok: true
-          exit_code: 0
-          stdout_json:
-            outcome: push_failed
-            url:     ""
-            number:  ""
-            last_error: "git push to remote \"bsacrobatix\" failed:\nfatal: 'bsacrobatix' does not appear to be a git repository"
+        data: {}
+        error: "git.open_pr: push: fatal: 'bsacrobatix' does not appear to be a git repository"
 
 turns:
   - intent: { name: open, slots: {} }
@@ -48,8 +45,8 @@ turns:
     expect_world:
       status:       needs-human
       prepare_outcome: prepared
-      open_outcome: push_failed
+      open_outcome: ""
       pr_url:       ""
-      last_error:   "git push to remote \"bsacrobatix\" failed:\nfatal: 'bsacrobatix' does not appear to be a git repository"
+      last_error:   "git.open_pr: push: fatal: 'bsacrobatix' does not appear to be a git repository"
 
 expect_terminal: true

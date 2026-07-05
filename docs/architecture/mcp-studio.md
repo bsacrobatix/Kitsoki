@@ -440,12 +440,11 @@ Three things happen server-side so the agent never handles bytes:
 - **file** — the composed `{repo, title, body, labels}` goes to the injected
   [`IssueFiler`](../../internal/mcp/studio/issue_tools.go) seam. The
   `source-autonomous` label is always applied (first) so agent-filed issues are
-  filterable. Production (`cmd/kitsoki`) shells to `gh issue create` (and
-  best-effort `gh label create --force source-autonomous`); a test injects a fake
-  that records the request and returns a canned URL — no network, no LLM. With no
-  filer wired the tool returns a structured `ISSUE_UNAVAILABLE`. `issue.create`
-  is allowed in `--read-only` mode (it mutates `.artifacts` + GitHub, not the
-  story tree).
+  filterable. Production (`cmd/kitsoki`) files through the native GitHub issue
+  provider; a test injects a fake that records the request and returns a canned
+  URL — no network, no LLM. With no filer wired the tool returns a structured
+  `ISSUE_UNAVAILABLE`. `issue.create` is allowed in `--read-only` mode (it
+  mutates `.artifacts` + GitHub, not the story tree).
 
 ### `host.*` — the standalone gate-runner
 
