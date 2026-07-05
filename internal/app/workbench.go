@@ -175,7 +175,14 @@ func expandOneWorkbench(def *AppDef, file, statePath, room string, s *State) []e
 	// 3. Synthesized on_enter host.agent.task, appended after any
 	// hand-authored on_enter effects. Mirrors landing.yaml's on_enter
 	// dispatch shape exactly (guard, once, working_dir, acceptance.schema,
-	// context.prompt, bind, on_error).
+	// context.prompt, bind, on_error). context_args (optional) adds extra
+	// with.context.args entries alongside the always-present `request`.
+	args := map[string]any{
+		"request": fmt.Sprintf("{{ world.%s }}", captureSlot),
+	}
+	for _, k := range sortedKeys(decl.ContextArgs) {
+		args[k] = decl.ContextArgs[k]
+	}
 	s.OnEnter = append(s.OnEnter, Effect{
 		When:   fmt.Sprintf("world.%s != ''", captureSlot),
 		Invoke: "host.agent.task",
@@ -188,9 +195,7 @@ func expandOneWorkbench(def *AppDef, file, statePath, room string, s *State) []e
 			},
 			"context": map[string]any{
 				"prompt": decl.Prompt,
-				"args": map[string]any{
-					"request": fmt.Sprintf("{{ world.%s }}", captureSlot),
-				},
+				"args":   args,
 			},
 		},
 		Bind: map[string]string{

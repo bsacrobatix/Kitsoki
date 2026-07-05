@@ -119,6 +119,16 @@ hosts:
   # gate, reusing the gate_reviewer persona + gate_verdict schema.
   - host.starlark.run
 
+# Toolboxes (WS vocabulary — docs/proposals/effect-taxonomy.md). The
+# `landing_agent` below is `workbench:`'s reference consumer
+# (docs/proposals/room-workbench.md Task 3.1): workbench: requires the named
+# agent to declare toolbox: + effect: (not the legacy tools:/bash_profile:/
+# external_side_effect: triplet) with effect in {write, external}.
+toolboxes:
+  landing_toolbox:
+    tools: [Read, Grep, Glob, Edit, Write, Bash]
+    effect: write
+
 # Persona table (agent-split proposal §3.5).
 #
 # The dev-story hub's own agent room makes one-shot prose Q&A
@@ -134,21 +144,24 @@ agents:
 
   # ── Free-form workbench persona (rooms/landing.yaml) ──────────────
   # A general-purpose, Claude-Code-like engineering agent — the resting
-  # surface of dev-story's landing. It carries the FULL toolbox so it can
-  # do real work, but boots READ-ONLY: bash_profile: read-only +
-  # external_side_effect: false set the read-only floor, and the landing
-  # room's write_mode: read_only gates every mutating tool call (Edit /
-  # Write / side-effecting Bash) behind an operator opt-in
-  # (internal/host/write_mode_gate.go). The static (external_side_effect:
-  # false) and runtime (write_mode: read_only) postures must agree — the
-  # loader rejects a contradiction — so this persona generalizes the
-  # read-only posture dev-story's task personas already carry.
+  # surface of dev-story's landing, and the reference `workbench:` agent
+  # (docs/proposals/room-workbench.md Task 3.1). It carries the FULL
+  # toolbox (landing_toolbox above) so it can do real work, but boots
+  # READ-ONLY: the room's `workbench:` block sets write_mode: read_only,
+  # gating every mutating tool call (Edit / Write / side-effecting Bash)
+  # behind an operator opt-in (internal/host/write_mode_gate.go). The
+  # static posture — toolbox: landing_toolbox resolving to effect: write —
+  # and the runtime posture (write_mode: read_only) agree because Write is
+  # not External: resolveAgentEffect mirrors ExternalSideEffect=false onto
+  # this declaration, which is exactly what validateWriteMode requires to
+  # NOT contradict write_mode: read_only. Migrated off the legacy
+  # tools:/bash_profile:/external_side_effect: triplet onto the WS
+  # toolboxes:/effect: vocabulary workbench: requires (effect ∈
+  # {write, external}).
   landing_agent:
     system_prompt: "You are a general-purpose engineering agent working in this repository, like Claude Code. Explore freely with read-only tools (Read/Grep/Glob, read-only Bash); when the work needs a change — an edit, a write, a side-effecting command — attempt it and the runtime will surface the proposed change to the operator for a write-mode grant before it lands. If write mode is declined or you are headless, stay read-only and describe precisely what you would change instead."
     model: claude-sonnet-4-6
-    tools: [Read, Grep, Glob, Edit, Write, Bash]   # full toolbox; gated read-only by the room's write_mode: read_only
-    bash_profile: read-only                         # the read-only floor
-    external_side_effect: false                     # static posture must agree with write_mode: read_only
+    toolbox: landing_toolbox   # full toolbox; gated read-only by the room's workbench: write_mode: read_only
 
   # ── Ad-hoc plan verify gate (rooms/verifying.yaml) ────────────────
   # The agent / hybrid verify mode reuses cherny-loop's adversarial gate
@@ -1174,7 +1187,7 @@ intents:
     # affirmations ("ok go ahead", "let's go"), so the semantic tier
     # (stem-subset, runs before the default-intent sink) grabbed a
     # continuation as a pipeline-drive. Affirmations now fall through to
-    # landing's `default_intent: work` (the workbench agent). Explicit
+    # landing's default_intent (landing_capture, the workbench agent). Explicit
     # drive verbs ("drive", "drive it", "run the pipeline") still route
     # here. See .context/landing-onpath-offpath-bail.md slice C.
     examples: ["drive", "push", "start", "drive it", "run the pipeline", "take it through", "drive the ticket"]
@@ -1420,7 +1433,19 @@ intents:
   # it up (read-only by default; mutating steps hold for a write-mode
   # grant). `request` is required so the semantic router falls through
   # to the LLM router and captures the whole utterance whole.
-  work:
+  #
+  # Named `landing_capture` — not `work` — because `workbench:` (see
+  # rooms/landing.yaml) always synthesizes its catch-all capture intent as
+  # `<room>_capture` (room-workbench.md Open question 1) and sets it as the
+  # room's default_intent; landing hand-authors this intent's `on:` arc
+  # itself (see landing.yaml) instead of taking the macro's plain
+  # synthesized arc, since it carries extra behavior (the onboarding escape
+  # hatch, thread continuity / prior-plan preservation) the macro does not
+  # (and should not) auto-generate. Renamed from `work` in Task 3.1; every
+  # flow/intents fixture that dispatched `work` was updated to
+  # `landing_capture` in the same commit (a pure rename — identical guards,
+  # slots, and effects).
+  landing_capture:
     title: "Describe Work"
     description: "Describe implementation/debugging/investigation work for the free-form workbench agent to pick up — explore code, draft a code change, investigate a failure. Read-only until you approve a change. Do not use for proposal authoring, proposal review, design-workflow, or proposal-decision turns; those go to New Idea."
     examples: ["fix the login crash", "investigate why the build is slow", "look at how imports resolve and sketch a change", "refactor the loader", "add a test for the off-ramp"]
@@ -1443,9 +1468,10 @@ intents:
   # ── Ad-hoc structured plan (rooms/landing|applying|verifying.yaml) ─────
   # accept_plan / apply freeze the proposed plan and enter `applying`. Both are
   # BUTTON-ONLY (examples: [] ⇒ the semantic router never binds them from free
-  # text) — a free-text adjustment instead routes to the work sink, re-dispatching
-  # the planner with the prior plan (that is "refine", reusing default_intent: work,
-  # not a new intent). `apply` is a strict alias of accept_plan, only meaningful
+  # text) — a free-text adjustment instead routes to the landing_capture sink,
+  # re-dispatching the planner with the prior plan (that is "refine", reusing
+  # default_intent: landing_capture, not a new intent). `apply` is a strict
+  # alias of accept_plan, only meaningful
   # when a plan is present (the landing arc guards on the plan being non-empty).
   accept_plan:
     title: "Accept & apply this plan"
@@ -1488,6 +1514,21 @@ intents:
 # reachable "show me everything" hub (sibling rooms' go_main arcs still resolve
 # to it) but is no longer the root or any pipeline's return target.
 root: landing
+
+# Free-form fallback — explicit, not auto-detected. The loader's own
+# auto-detect (effectiveFreeFormFallback, internal/app/loader.go) hardcodes
+# the bare intent name "work" (and the "__work" import-alias suffix); landing's
+# capture intent is now `landing_capture` (workbench:'s fixed `<room>_capture`
+# naming, room-workbench.md Task 3.1), so the auto-detect would silently find
+# nothing and menu-shaped rooms (ticket_search, workspace_manager, …) would
+# lose their free-text-to-workbench sink. Declaring this block explicitly is
+# exactly what room-workbench.md's model anticipates ("routing.free_form_fallback
+# when the workbench room is the app's canonical floor") — otherwise
+# byte-for-byte the same behavior the auto-detect gave `work`.
+routing:
+  free_form_fallback:
+    state: landing
+    intent: landing_capture
 
 # Imports (proposal §5.1). bf and pr both project from / into the
 # day-level world. The bf → pr chain is one import-exit edge; the

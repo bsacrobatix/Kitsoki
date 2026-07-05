@@ -24,7 +24,7 @@ host_handlers:
 
 turns:
   - intent:
-      name: work
+      name: landing_capture
       slots:
         request: "we have a bunch of tickets saved in the repo itself we need to migrate to github"
     expect_state: landing

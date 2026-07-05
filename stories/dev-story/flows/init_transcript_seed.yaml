@@ -91,7 +91,7 @@ host_handlers:
             mcp_written: true
 
 turns:
-  - intent: { name: work, slots: { request: "onboard /tmp/kitsoki-init-fixtures/acme-go" } }
+  - intent: { name: landing_capture, slots: { request: "onboard /tmp/kitsoki-init-fixtures/acme-go" } }
     expect_state: init_discover
     expect_world:
       init_target_path: "/tmp/kitsoki-init-fixtures/acme-go"

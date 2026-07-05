@@ -47,7 +47,7 @@ host_handlers:
             reason: "Passes iff GitHub lists >= expected_min issues for the repo."
 
 turns:
-  - intent: { name: work, slots: { request: "import the issues folder in the repo to github" } }
+  - intent: { name: landing_capture, slots: { request: "import the issues folder in the repo to github" } }
     expect_state: landing
 
   # Accept & apply — the REAL gate fails (1 < 3), so we bounce back to landing

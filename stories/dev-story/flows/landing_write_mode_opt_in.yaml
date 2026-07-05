@@ -41,7 +41,7 @@ turns:
   # The operator describes a mutating piece of work. `work` captures the
   # request, clears the prior note to re-arm the on_enter agent task, and
   # self-targets so the landing_agent dispatches on the fresh request.
-  - intent: { name: work, slots: { request: "edit the off-ramp guard so an empty utterance never off-ramps, and add a test" } }
+  - intent: { name: landing_capture, slots: { request: "edit the off-ramp guard so an empty utterance never off-ramps, and add a test" } }
     expect_state: landing
     expect_world:
       landing_request: "edit the off-ramp guard so an empty utterance never off-ramps, and add a test"
