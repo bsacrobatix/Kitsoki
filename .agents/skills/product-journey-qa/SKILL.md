@@ -197,7 +197,7 @@ Useful intents:
 - `attach`
 - `record`
 - `blocker`
-- `file_findings ticket_repo=owner/repo mode=file|dry-run`
+- `file_findings ticket_repo=owner/repo mode=dry-run`
 - `autonomous_watchdog`
 - `autonomous_fix ticket_repo=owner/repo gh_agent_public_base_url=<url>`
 - `driver_event`
