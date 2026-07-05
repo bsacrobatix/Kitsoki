@@ -54,7 +54,7 @@ type childRewriter struct {
 // against the correctly-prefixed world keys, intent names, and agents.
 //
 // Returns silently on nil input.
-func (rw *childRewriter) rewriteState(s *State) {
+func (rw *childRewriter) rewriteState(name string, s *State) {
 	if rw == nil || s == nil {
 		return
 	}
@@ -164,15 +164,10 @@ func (rw *childRewriter) rewriteState(s *State) {
 	}
 
 	// Workbench.Agent / OffRampAgent: workbench: (room-workbench.md) names an
-	// agent exactly like AgentOffRamp.Agent above, but expandWorkbenches
-	// (workbench.go) runs AFTER import folding, so without this rewrite a
-	// workbench: block folded from a child story would carry a dangling
-	// reference to the child's pre-fold agent name (parent.Agents only holds
-	// the renamed <alias>__<agent> entry) and fail expandWorkbenches's
-	// agent-capability invariant at load time. CaptureSlot/Prompt/
-	// AcceptanceSchema/ContextArgs need no rewrite: they are world keys /
-	// paths / templates, not agent names, and expandWorkbenches synthesizes
-	// world keys from the (already-aliased) room name.
+	// agent exactly like AgentOffRamp.Agent above. CaptureSlot and ContextArgs
+	// are world references that expandWorkbenches later turns into an on_enter
+	// guard and host.agent.task context. They must be rewritten before that
+	// expansion so an imported workbench reads the alias-prefixed child world.
 	if s.Workbench != nil {
 		if _, isChild := rw.childAgent[s.Workbench.Agent]; isChild {
 			s.Workbench.Agent = rw.alias + "__" + s.Workbench.Agent
@@ -181,6 +176,16 @@ func (rw *childRewriter) rewriteState(s *State) {
 			if _, isChild := rw.childAgent[s.Workbench.OffRampAgent]; isChild {
 				s.Workbench.OffRampAgent = rw.alias + "__" + s.Workbench.OffRampAgent
 			}
+		}
+		captureSlot := s.Workbench.CaptureSlot
+		if captureSlot == "" {
+			captureSlot = name + "_request"
+		}
+		if _, isChild := rw.childWorldKey[captureSlot]; isChild {
+			s.Workbench.CaptureSlot = rw.alias + "__" + captureSlot
+		}
+		for k, v := range s.Workbench.ContextArgs {
+			s.Workbench.ContextArgs[k] = rw.rewriteExpr(v)
 		}
 	}
 
@@ -210,8 +215,8 @@ func (rw *childRewriter) rewriteState(s *State) {
 	// rewriteChildStateTransitions). No rewriting required here.
 
 	// Recurse into nested states (compound/parallel).
-	for _, c := range s.States {
-		rw.rewriteState(c)
+	for childName, c := range s.States {
+		rw.rewriteState(childName, c)
 	}
 }
 
