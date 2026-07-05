@@ -61,7 +61,6 @@ turns:
       name: file_findings
       slots:
         ticket_repo: bsacrobatix/Kitsoki
-        mode: dry-run
     expect_state: run_created
     expect_world:
       status: findings_filing_complete

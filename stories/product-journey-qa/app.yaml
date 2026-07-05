@@ -408,12 +408,13 @@ intents:
       summary: { type: string, required: true }
       evidence_path: { type: string, required: false }
   file_findings:
-    description: "File every credible recorded issue finding as a GitHub issue with uploaded evidence, via the kitsoki bug orchestration."
-    examples: ["file findings", "file findings ticket_repo=bsacrobatix/Kitsoki", "file issues to github", "dry-run finding filing"]
+    description: "Dry-run product-journey issue filing for diagnostics; real filing belongs to autonomous_fix unless debug_file=true is explicit."
+    examples: ["file findings", "file findings ticket_repo=bsacrobatix/Kitsoki", "dry-run finding filing", "file findings mode=file debug_file=true"]
     priority: 79
     slots:
       ticket_repo: { type: string, required: true }
       mode: { type: string, required: false }
+      debug_file: { type: string, required: false }
       gh_agent_db: { type: string, required: false }
       gh_agent_story: { type: string, required: false }
       gh_agent_drain: { type: string, required: false }

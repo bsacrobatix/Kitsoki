@@ -115,8 +115,8 @@ states:
             - label: "autonomous_watchdog"
               hint: "check marathon heartbeat and fail closed before spend when stale"
               intent: autonomous_watchdog
-            - label: "file_findings ticket_repo=owner/repo"
-              hint: "preview or debug issue filing without making it the full autonomous fix gate"
+            - label: "file_findings ticket_repo=owner/repo mode=dry-run"
+              hint: "preview issue filing; real filing/fixing goes through autonomous_fix"
               intent: file_findings
             - label: "stats"
               hint: "derive filed/fixed/reopened/similar issue counts from run bundles"
@@ -377,7 +377,7 @@ states:
           effects:
             - set:
                 ticket_repo: ""
-                filing_dry_run: "{{ slots.mode ?? 'file' }}"
+                filing_dry_run: "{{ slots.mode ?? 'dry-run' }}"
                 filing_status: "findings_filing_invalid"
                 filing_summary: "Product-journey finding filing requires ticket_repo=owner/repo."
                 validation_status: "invalid"
@@ -398,13 +398,48 @@ states:
                 gh_agent_independent_verify_summary: ""
                 gh_agent_missing_verify_summary: "ticket_repo is required"
                 status: "findings_filing_invalid"
-        - when: "(slots.mode ?? 'file') != 'dry-run' && (slots.gh_agent_public_base_url == nil || slots.gh_agent_public_base_url == '')"
+        - when: "(slots.mode ?? 'dry-run') != 'dry-run' && slots.debug_file != 'true'"
+          target: run_created
+          guard_hint: "Use autonomous_watchdog and autonomous_fix for real issue filing/fixing; file_findings mode=file is debug-only."
+          effects:
+            - set:
+                ticket_repo: "{{ slots.ticket_repo }}"
+                filing_dry_run: "{{ slots.mode ?? 'dry-run' }}"
+                filing_status: "findings_filing_invalid"
+                filing_summary: "Real product-journey filing is routed through autonomous_fix; file_findings mode=file requires debug_file=true for isolated diagnostics."
+                validation_status: "invalid"
+                validation_errors: 1
+                validation_warnings: 0
+                validation_issue_summary: "file-findings-debug-only"
+                gh_agent_enqueue_status: "not_run"
+                gh_agent_enqueued_count: 0
+                gh_agent_skipped_count: 0
+                gh_agent_drain_status: "not_run"
+                gh_agent_drained_count: 0
+                gh_agent_done_count: 0
+                gh_agent_failed_count: 0
+                gh_agent_active_count: 0
+                gh_agent_fix_evidence_count: 0
+                gh_agent_missing_evidence_count: 0
+                gh_agent_triage_evidence_count: 0
+                gh_agent_missing_triage_count: 0
+                gh_agent_independent_verify_count: 0
+                gh_agent_missing_verify_count: 0
+                gh_agent_missing_run_url_count: 0
+                gh_agent_fix_evidence_summary: ""
+                gh_agent_missing_evidence_summary: "file_findings mode=file is debug-only; use autonomous_fix for the full issue-to-fix loop"
+                gh_agent_triage_evidence_summary: ""
+                gh_agent_missing_triage_summary: "file_findings mode=file is debug-only; use autonomous_fix for the full issue-to-fix loop"
+                gh_agent_independent_verify_summary: ""
+                gh_agent_missing_verify_summary: "file_findings mode=file is debug-only; use autonomous_fix for the full issue-to-fix loop"
+                status: "findings_filing_invalid"
+        - when: "(slots.mode ?? 'dry-run') != 'dry-run' && (slots.gh_agent_public_base_url == nil || slots.gh_agent_public_base_url == '')"
           target: run_created
           guard_hint: "Provide gh_agent_public_base_url=<public agent URL> for real filing/fixing."
           effects:
             - set:
                 ticket_repo: "{{ slots.ticket_repo }}"
-                filing_dry_run: "{{ slots.mode ?? 'file' }}"
+                filing_dry_run: "{{ slots.mode ?? 'dry-run' }}"
                 filing_status: "findings_filing_invalid"
                 filing_summary: "Real product-journey filing/fixing requires gh_agent_public_base_url so gh-agent run evidence is reviewable."
                 validation_status: "invalid"
@@ -429,7 +464,7 @@ states:
           effects:
             - set:
                 ticket_repo: "{{ slots.ticket_repo }}"
-                filing_dry_run: "{{ slots.mode ?? 'file' }}"
+                filing_dry_run: "{{ slots.mode ?? 'dry-run' }}"
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
@@ -461,7 +496,7 @@ states:
                   - --ticket-repo
                   - "{{ slots.ticket_repo }}"
                   - --filing-mode
-                  - "{{ slots.mode ?? 'file' }}"
+                  - "{{ slots.mode ?? 'dry-run' }}"
                   - --gh-agent-db
                   - "{{ slots.gh_agent_db ?? (world.run_dir + '/gh-agent-jobs.sqlite') }}"
                   - --gh-agent-story

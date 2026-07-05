@@ -442,8 +442,11 @@ That refreshes the issue-state cache through
 `kitsoki gitops issue-state-cache` / `host.gh.ticket`, not raw `gh`.
 
 The lower-level `file_findings ticket_repo=<owner/repo> [mode=dry-run]` story
-intent and the CLI `--file-findings` command remain useful for previewing or
-debugging filing in isolation, but they are not the canonical full-loop gate.
+intent defaults to dry-run and remains useful for previewing filing in
+isolation, but it is not the canonical full-loop gate. Real filing through that
+story intent is debug-only and requires `mode=file debug_file=true`; normal
+issue filing and fixing should use `autonomous_watchdog` followed by
+`autonomous_fix`.
 Once filing or autonomous fixing has been requested, the `findings-filed`
 review check fails and `--validate-run` errors while any credible issue finding
 remains unfiled, so "issues filed for all credible findings" stays part of
