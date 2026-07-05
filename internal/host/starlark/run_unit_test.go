@@ -250,3 +250,34 @@ def main(ctx):
 		t.Fatalf("absent_is_none = %v, want true", res.Outputs["absent_is_none"])
 	}
 }
+
+// TestRun_NormalizesExoticNumericKinds locks that inputs and world values
+// arriving as non-canonical Go integer kinds (uint64/int32/... — effect
+// templating and expression evaluation both produce these, e.g. a world
+// counter incremented by an expr) are normalized to int64 before sidecar
+// validation and ctx conversion. Without the normalization, a uint64 input
+// declared `int` fails validateInputs ("expected int, got uint64" — hit live
+// by scenario-qa's judge room passing leg_index) and a uint64 world value
+// errors goToStarlark's strict type switch on ctx.world.get.
+func TestRun_NormalizesExoticNumericKinds(t *testing.T) {
+	script := `
+def main(ctx):
+    return {"total": ctx.inputs["leg_index"] + ctx.world.get("count")}
+`
+	res, err := starlarkhost.Run(context.Background(), starlarkhost.Params{
+		Script: "numeric.star",
+		Source: []byte(script),
+		Sidecar: &starlarkhost.Sidecar{
+			Inputs:  map[string]starlarkhost.FieldSpec{"leg_index": {Type: "int"}},
+			Outputs: map[string]starlarkhost.FieldSpec{"total": {Type: "int"}},
+		},
+		Inputs: map[string]any{"leg_index": uint64(2)},
+		World:  map[string]any{"count": int32(3)},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := res.Outputs["total"]; got != int64(5) {
+		t.Fatalf("total = %v (%T), want int64(5)", got, got)
+	}
+}
