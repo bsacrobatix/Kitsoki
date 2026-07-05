@@ -173,9 +173,9 @@ func BuildRootImporter(spec *RootSpec, repoRoot string) (def *AppDef, abs string
 // synonyms on the matching instance intents.
 func applyRootOverrides(def *AppDef, imp *ImportDef, spec *RootSpec) {
 	if len(spec.Bindings) > 0 {
-		imp.HostBindings = make(map[string]string, len(spec.Bindings))
+		imp.HostBindings = make(map[string]HostBindingSpec, len(spec.Bindings))
 		for k, v := range spec.Bindings {
-			imp.HostBindings[k] = v
+			imp.HostBindings[k] = HostBindingSpec{Handler: v}
 		}
 	}
 	if len(spec.World) > 0 {

@@ -116,6 +116,7 @@ func (srv *Server) handleStoryTurn(
 
 	hostReg := host.NewRegistry()
 	host.RegisterBuiltins(hostReg)
+	host.RegisterStarlarkBindings(hostReg, def.StarlarkHostBindings)
 	if err := hostReg.ValidateAllowList(def.Hosts); err != nil {
 		return buildToolError(ErrBadRequest, fmt.Sprintf("story.turn: validate hosts: %v", err)), nil, nil
 	}

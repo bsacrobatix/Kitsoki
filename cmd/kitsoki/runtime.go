@@ -365,6 +365,7 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 		// web surface never records, so no record-mode cassette wiring.
 		hostReg = host.NewRegistry()
 		host.RegisterBuiltins(hostReg)
+		host.RegisterStarlarkBindings(hostReg, def.StarlarkHostBindings)
 		testrunner.RegisterHostStubs(hostReg, cfg.Flow.HostHandlers)
 
 		if cfg.Flow.HostCassette != "" {
@@ -409,6 +410,7 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 	} else {
 		hostReg = host.NewRegistry()
 		host.RegisterBuiltins(hostReg)
+		host.RegisterStarlarkBindings(hostReg, def.StarlarkHostBindings)
 		// Layer a host cassette over the live-harness posture when requested
 		// (e.g. --harness replay for free-text routing + --host-cassette for the
 		// off-ramp's host.agent.converse). The cassette's episodes replace the
