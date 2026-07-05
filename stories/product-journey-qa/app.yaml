@@ -141,6 +141,7 @@ world:
   findings_unfiled_count: { type: int, default: 0 }
   filed_issue_summary: { type: string, default: "" }
   filing_summary: { type: string, default: "" }
+  autonomous_fix_status: { type: string, default: "" }
   gh_agent_enqueue_status: { type: string, default: "" }
   gh_agent_enqueued_count: { type: int, default: 0 }
   gh_agent_skipped_count: { type: int, default: 0 }
@@ -302,6 +303,17 @@ intents:
       gh_agent_public_base_url: { type: string, required: false }
       gh_agent_project_root: { type: string, required: false }
       gh_agent_incident_repo: { type: string, required: false }
+  autonomous_fix:
+    description: "File credible issue findings, drain gh-agent fixes, review, and validate as one no-operator reliability gate."
+    examples: ["autonomous fix", "run autonomous fix ticket_repo=bsacrobatix/Kitsoki", "file and fix findings", "auto fix findings"]
+    priority: 80
+    slots:
+      ticket_repo: { type: string, required: true }
+      gh_agent_db: { type: string, required: true }
+      gh_agent_story: { type: string, required: false }
+      gh_agent_public_base_url: { type: string, required: false }
+      gh_agent_project_root: { type: string, required: false }
+      gh_agent_incident_repo: { type: string, required: false }
   stats:
     description: "Derive filed/fixed/reopened/similar issue stats from product-journey run bundles and cached GitHub issue state."
     examples: ["stats", "derive issue stats", "stats issue_state_file=.artifacts/product-journey/issues.json"]
@@ -352,7 +364,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, stats, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
+  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, autonomous_fix, stats, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
 
 root: idle
 

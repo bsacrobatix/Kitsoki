@@ -136,6 +136,7 @@ Useful intents:
 - `record`
 - `blocker`
 - `file_findings ticket_repo=owner/repo mode=file|dry-run`
+- `autonomous_fix ticket_repo=owner/repo gh_agent_db=<sqlite> gh_agent_public_base_url=<url>`
 - `driver_event`
 - `validate_matrix_strict`
 - `review`
@@ -143,6 +144,9 @@ Useful intents:
 
 Prefer the story as the write surface when an operator session is attached.
 Use CLI fallback when the story session is unavailable.
+When the goal is the full issue-to-fix loop, prefer `autonomous_fix`: it files
+credible findings with evidence, enqueues and drains gh-agent fixes, refreshes
+review artifacts, and validates the bundle in one story-owned reliability gate.
 
 ## Improvement Loop
 
