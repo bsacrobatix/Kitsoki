@@ -1,7 +1,8 @@
 # git-ops — Interactive Git Workflow
 
 A guided, deterministic git workflow story: staging, commit (with agent-authored
-message), rebase, squash-merge, worktree lifecycle, and conflict resolution.
+message), rebase, squash-merge, worktree lifecycle, protected-main sync/publish,
+and conflict resolution.
 
 The agent appears in exactly two cases: authoring a commit message and resolving
 a rebase/merge conflict. All other git operations are deterministic `host.run` shell calls.
@@ -86,6 +87,7 @@ branch first when remote freshness is required.
 |---|---|
 | `pull` | `git pull --rebase`. On conflict, routes to `conflict`. |
 | `sync_main` | Reconcile protected local `main` with a remote `main` through an integration worktree. |
+| `push_main` | Fast-forward `origin/main` (or another remote main) from protected local `main`, never force-push. |
 | `merge_branch` | Merge a named branch with same guards as `merge_into_main`. |
 | `worktree_create` | Create a new linked worktree under `.worktrees/`. |
 | `worktree_list` | List and classify existing worktrees. |
@@ -117,6 +119,14 @@ surfaces the integration branch/worktree plus the validation and
 | `name` | auto-generated | Optional integration worktree name. |
 | `continue_branch` / `branch` | empty | Existing sync integration branch to continue after conflicts are resolved. |
 | `auto_resolve` | `false` | Enable the helper's configured resolver command after deterministic known resolutions. |
+
+### `push_main` - guarded protected-main publish
+
+Use `push_main remote=origin` from `main_ops` when protected local `main` is
+ahead of `origin/main` and the remote should be brought up to the same commit.
+The room fetches first, refuses to push if the remote has commits local main
+does not contain, and uses a normal non-force `git push <remote> main:main`.
+If it reports `remote_ahead`, run `sync_main remote=<remote>` first.
 
 ### `cleanup` — operand-as-slot, no swallowed failures
 
@@ -201,7 +211,7 @@ Three guards run in sequence before the merge:
 
 ## Non-goals (v1)
 
-- Push to remote / PR creation
+- General branch push / PR creation
 - Interactive conflict editor
 - Branch creation / checkout without worktree
 - Cherry-pick, bisect, rebase -i

@@ -2,7 +2,7 @@
 
 `stories/git-ops/` is a hub-and-spoke story that provides a guided,
 deterministic git workflow: staging, commit (agent-authored message), rebase,
-squash-merge, worktree lifecycle, and conflict resolution. The agent appears
+squash-merge, worktree lifecycle, protected-main sync/publish, and conflict resolution. The agent appears
 in exactly two places — authoring a commit message and resolving a conflict.
 All other operations are deterministic `host.run` shell calls.
 
@@ -11,7 +11,7 @@ All other operations are deterministic `host.run` shell calls.
 On entry, `idle` detects the current branch and worktrees with a single
 JSON-emitting bash script and routes to the appropriate hub:
 
-- **`main_ops`** — integration branch: pull, merge branch, worktree lifecycle
+- **`main_ops`** — integration branch: pull, protected-main sync/publish, merge branch, worktree lifecycle
 - **`branch_ops`** — feature branch: rebase, commit, squash, merge to main
 
 Each hub refreshes its status on every return. Operations leave the hub,
@@ -70,6 +70,8 @@ deterministic effects.
 | `merge_into_main` | Merge feature branch into integration (worktree-aware) |
 | `merge_branch` + `merge_exec` | Merge a named branch (from main_ops) |
 | `pull` | git pull --rebase from upstream |
+| `sync_main` | Reconcile protected local main with a remote main via an integration worktree |
+| `push_main` | Fast-forward a remote main ref from protected local main |
 | `stash_sandwich` | Reference room for stash-around-operation pattern |
 | `worktree_create` | Create linked worktree under `.worktrees/` |
 | `worktree_list` | Audit and classify existing worktrees |
@@ -162,6 +164,7 @@ Key invariants verified:
 - `stale_rebase_check`: stale `rebase_base_sha` blocks merge even when `rebase_done=true`
 - `conflict_build_reject`: build failure post-rebase-continue does not set `rebase_done=true`
 - `checkpoint_restore`: the checkpoint→back→restore arc routes and binds correctly
+- `push_main_pushed`: protected local main can publish to origin/main through the story
 - `staging_classify_suspicious`: suspicious files require explicit confirmation before `add_all`
 - Natural-language routing: bare imperatives ("commit", "doit", "sync with main") route correctly
 
@@ -174,7 +177,7 @@ the checkpoint/restore roundtrip against real refs.
 
 ## Non-goals (v1)
 
-- Push to remote / PR creation
+- General branch push / PR creation
 - Interactive conflict editor
 - `git rebase -i` (non-interactive forms only)
 - Force-push
