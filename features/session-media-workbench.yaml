@@ -3,7 +3,7 @@ id: session-media-workbench
 kind: feature
 title: Session Media Workbench
 tagline: Pin the artifact, keep the conversation, move the devtools.
-summary: "A browser session can now pin a produced markdown/html/slidey/video artifact into a stable resizable media pane while the chat remains beside it and trace/graph devtools can dock right, dock bottom, float, or pop out."
+summary: A browser session can now pin a produced markdown/html/slidey/video artifact into a stable resizable media pane while the chat remains beside it and trace/graph devtools can dock right, dock bottom, float, or pop out.
 promo:
   order: 27
 docs:
@@ -45,7 +45,7 @@ tour:
       route: interactive
       target: chat-section
       title: Conversation stays live
-      body: "The chat remains a full session participant: typed input, streaming agent activity, routing chips, annotations, and follow-up turns all use the same run store and trace."
+      body: 'The chat remains a full session participant: typed input, streaming agent activity, routing chips, annotations, and follow-up turns all use the same run store and trace.'
       placement: left
       kind: explain
       advance: next
