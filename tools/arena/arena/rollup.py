@@ -44,7 +44,14 @@ def write_rollup(results: list[CellResult], out_dir: str | Path) -> dict[str, st
     cells_dir = out / "cells"
     cells_dir.mkdir(parents=True, exist_ok=True)
     for result in results:
-        (cells_dir / f"{_safe_cell_id(result.cell_id)}.json").write_text(
+        # One file per cell PER check_type (WS-G G1): the replay check keeps
+        # the historical `<cell_id>.json` name; non-replay checks get a
+        # `--check-<type>` suffix so a multi-check cell never overwrites itself.
+        name = _safe_cell_id(result.cell_id)
+        check_type = getattr(result, "check_type", "replay")
+        if check_type != "replay":
+            name = f"{name}--check-{_safe_cell_id(check_type)}"
+        (cells_dir / f"{name}.json").write_text(
             json.dumps(result.to_dict(), indent=2, sort_keys=True),
             encoding="utf-8",
         )
