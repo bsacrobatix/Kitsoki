@@ -129,7 +129,7 @@ cells:
     surface: vscode
     repo: kitsoki-dev
     status: proof-thin
-    reason: "rides web SPA in webview; no dedicated proof. Canonical doc: docs/workflows/file-a-bug.md"
+    reason: "dedicated extension e2e spec (vscode-file-a-bug-walk.e2e.spec.ts, real VS Code): Meta → Report a bug → capture/review modal → describe → File bug → filed-path toast — one happy-path proof, local filing only. Canonical doc: docs/workflows/file-a-bug.md"
   - workflow: file-bug
     surface: gh-agent
     repo: kitsoki-dev
@@ -150,7 +150,7 @@ cells:
     surface: vscode
     repo: kitsoki-dev
     status: proof-thin
-    reason: "rides web SPA; untested for full pipeline. Canonical doc: docs/workflows/fix-a-bug.md"
+    reason: "dedicated extension e2e spec (vscode-bugfix-walk.e2e.spec.ts, real VS Code via kitsoki.flow): full bugfix pipeline idle → @exit:done — one happy-path proof; also the real-socket capture that pinned host.ide.get_diagnostics' wire shape (ide-integration.md follow-up 1). Canonical doc: docs/workflows/fix-a-bug.md"
   - workflow: fix-bug
     surface: gh-agent
     repo: kitsoki-dev
