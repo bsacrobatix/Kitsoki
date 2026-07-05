@@ -44,7 +44,7 @@ import { gatingErrors, advisoryA11yErrors, SharedAxeGate, type TaggedFinding } f
 import {
   OFF_RAMP_STORY_DIR,
   OFF_RAMP_HOST_CASSETTE,
-  buildTier2Recording,
+  buildTier2RecordingAuto,
   makeTier2ScratchDir,
   openCassetteUserSession,
   driveCassetteUserJourney,
@@ -119,7 +119,14 @@ test.describe("swarm tier 2 — cassette-agent users coexisting with tier-1-styl
     }
     scratchDir = makeTier2ScratchDir(RUN_ID);
     const markers = Array.from({ length: N_CASSETTE }, (_, i) => markerFor(RUN_ID, i, `cassette-${i}`));
-    const recordingPath = buildTier2Recording(markers, scratchDir);
+    // buildTier2RecordingAuto (task 3.2, docs/proposals/scenario-foundry.md):
+    // when SWARM_FIXTURE names a mined scenario-IR file/dir, the cassette
+    // users' off-menu question is sourced from that (SWARM_PERSONA_MIX
+    // selects/orders which scenarios), ordered/selected deterministically;
+    // unset (the default here) reproduces the original hardcoded
+    // OFF_MENU_QUESTION byte-for-byte, so this spec's existing assertions are
+    // unaffected unless a run explicitly opts in via the env vars.
+    const recordingPath = buildTier2RecordingAuto(markers, scratchDir);
 
     server = await startWebServer({
       addr: ADDR,
