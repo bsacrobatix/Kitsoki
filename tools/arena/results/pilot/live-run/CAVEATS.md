@@ -11,7 +11,7 @@ kitsoki-pipeline result). Do not read the blended `avg cost` for
 |---|---|---|---|
 | query-string-qs1-bugfix-test-repair | $0.44 | $0.48 | ~0.9x (kitsoki cheaper) |
 | nextjs-05-story-runtime | $1.57 | $0.68 | ~2.3x |
-| vscode-01-docs-site-release | **STALE — not re-run** | $0.27 | n/a |
+| vscode-01-docs-site-release | $1.18 (refreshed, see below) | $0.27 | ~4.4x |
 
 Both real cells: `verdict: solved`, real cost computed cache-aware from the
 kitsoki session trace's own per-call usage (`cached_input_tokens` billed at
@@ -26,9 +26,24 @@ pricing everything at the full input rate). See goal log
 trail: the dispatch-routing fix, the cost-accounting fix, and this correction,
 in that order.
 
-`vscode-01-docs-site-release`'s `kitsoki-codex-native` cell was left
-deliberately unpatched (re-running it live was in scope but the operator
-chose not to spend further this cycle) — its `health` field is stamped
-`infra:stale` and its notes explain why. A future cycle should re-run it with
-the fixed dispatch before treating this pilot as a complete 3-task
-comparison.
+`vscode-01-docs-site-release`'s `kitsoki-codex-native` cell was refreshed in
+a later session: real cost $1.177037 (cache-aware, 386,844 fresh input +
+3,629,696 cache-read input + 23,977 output tokens), `drive.sh exit=0`,
+wall_s=987.6. The pipeline drove to completion but `verdict: failed` — the
+`github_content` oracle scored `green=False` (the produced doc content
+didn't match the expected upstream commit's text). This is a real substance
+result, not an infra failure, so this pilot's 3-task comparison is now
+complete with all-real data.
+
+**Held-out-split note (important for WB.5):** `vscode-01-docs-site-release`
+is marked `split: heldout` in `tools/arena/corpus/cost-bench.manifest.yaml`,
+not a training task. It has now been executed live **twice** under this
+pilot's "dispatch-mechanism/infra validation" framing (the original pilot
+run, and this refresh) — neither of which is the official WB.5 confirmation
+run per `docs/research/cost-efficiency-benchmark.md` §7.3 ("the first and
+only time held-out tasks are executed"). When WB.5 runs, do not describe
+this task's confirmation-run execution as a fresh first look at held-out
+data — it isn't. Whether this prior exposure meaningfully taints the WB.5
+result for this specific task (no training patches were derived from either
+pilot run, so the *process* wasn't tuned against it) is a judgment call for
+whoever writes the WB.5 report; it should be disclosed there either way.
