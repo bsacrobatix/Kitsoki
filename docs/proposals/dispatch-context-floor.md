@@ -1,6 +1,14 @@
 # Runtime: Dispatch context floor
 
-**Status:** Draft v1. Nothing implemented yet.
+**Status:** Shipped except the live-gated cost proof. Engine + verification +
+docs tasks (1.1-1.4, 2.1, 2.2, 3.2) landed on `s3/dispatch-context-floor` at
+`8563b5df` (1.1 prefix audit), `cc55d902` (1.2 cache-usage surface),
+`8b23fc40`/`e911362a` (1.3 double-read fix), `7261c471` (1.4 budget gate),
+and this commit (3.2 docs). **2.3** (before/after qs1 cost table) and **3.1**
+(live qs1 pipeline re-run) remain open — both require one real metered LLM
+run of the bugfix pipeline, which is explicitly BLOCKED pending Brad's
+go-ahead per the no-live-LLM-in-automation rule; this proposal stays open
+(not deleted) until that run happens and closes them out.
 **Kind:**   runtime
 **Epic:**   usable-kitsoki.md
 
@@ -41,118 +49,36 @@ read" by the code's own comment (`internal/orchestrator/orchestrator.go:1131-113
 Every workbench turn (S1) inherits both taxes: the constructed room context plus
 this per-turn double read, on top of the per-dispatch floor above.
 
-## What changes
+## What shipped
 
-Four independent, additive levers, each measured with the
-[`llm-usage-optimization`](../../.agents/skills/llm-usage-optimization/SKILL.md)
-methodology (trace `agent.call.complete.meta.usage` before/after, no vibes):
+Three of the four levers landed as engine changes (task 1.1's audit found the
+fourth, prefix-ordering, already correct — see Tasks below for the honest
+per-task account and where each is documented):
 
-1. **Stable-prefix caching for `host.agent.*` dispatch.** Give the `claude`
-   CLI a cache-eligible, byte-stable prefix the same way `LiveHarness` already
-   does for routing: order the composed system prompt (`internal/sysprompt/sysprompt.go`,
-   already stable→volatile by layer — kitsoki → project → task) so nothing
-   volatile (turn number, timestamps, per-call artifact IDs) lands ahead of
-   the ~1024-token cache threshold, and thread `cache_read_input_tokens` /
-   `cache_creation_input_tokens` out of the `claude` CLI's own usage reporting
-   into `AgentCalledPayload`/`agent.call.complete` the same way `live.go` does,
-   so cache hit-rate on dispatch calls becomes as visible as it is on routing.
-2. **Stop re-serializing the whole story per dispatch.** Constructed context
-   (the worker-brief pattern, S1) should carry only what the persona's
-   toolbox/effect class needs for *this* call — not the full `session.story`
-   snapshot on every task/decide/ask. Judge/decide calls in particular need
-   the artifact under review, not the story graph (`.context/token-bloat-finding.md`
-   candidate lever list).
-3. **Kill the double journey read.** Fold `RecentTurns` extraction into the
-   same event-log pass `loadJourney`/`store.BuildJourney` already does, or
-   carry the slice on `JourneyState` so a single read serves both — removing
-   the acknowledged duplicate pass at `internal/orchestrator/orchestrator.go:1131-1139`.
-4. **Budget / early-escalation gate.** Before a dispatch is sent, check a
-   per-call/per-turn token budget against the harness ladder
-   (`internal/host/ladder.go`, GU worktree `docs/goals/generalized-usage/decomposition.yaml:164-176`)
-   and escalate (or refuse with a recorded reason) *before* paying for an
-   oversized call, rather than discovering the cost after the fact in the
-   trace. This is the "budget gate" W4 named and never cut.
+- **Cache-usage visibility** — `agent.call.complete.meta.cache` (`host.CacheUsage`).
+  Documented in [hosts.md](../architecture/hosts.md#cache-usage-visibility-and-the-pre-dispatch-budget-gate).
+- **Pre-dispatch budget gate** — `agent.dispatch.budget_checked`, the
+  per-agent `token_budget:` override. Documented in the same hosts.md section.
+- **Single event-log read for `RecentTurns`** — folded into `loadJourney`'s
+  existing replay. Documented in
+  [state-machine.md §8](../stories/state-machine.md#8-the-turn-loop-state-machine-of-the-orchestrator).
+- **Stable-prefix prompt ordering** — audited, not changed: already
+  stable→volatile (kitsoki → project → task) per
+  [system-prompt.md](../architecture/system-prompt.md); this proposal's
+  headline 68k/774KB evidence does not originate at this seam (see task 1.1).
 
-**Target:** <15k marginal input tokens per workbench turn (S1), measured on
-the same `qs1` single-file-fix scenario used in the token-bloat finding.
+**Target (not yet measured):** <15k marginal input tokens per workbench turn
+(S1) on the `qs1` single-file-fix scenario — blocked on the live re-run (2.3/3.1
+below); the engine levers are in place but the before/after number itself
+requires the gated live run.
 
-## Impact
-
-- **Code seams:** `internal/host/agents.go`, `internal/host/agent_runner.go`,
-  `internal/host/sysprompt.go`, `internal/sysprompt/sysprompt.go`,
-  `internal/orchestrator/orchestrator.go:1131-1139,2912`, `internal/host/ladder.go`.
-- **Vocabulary:** no new host calls or world keys; extends the existing
-  `agent.call.complete` payload with cache-usage fields (mirroring `live.go`)
-  and adds a budget-gate decision to the trace (below).
-- **Stories affected:** none change authored behavior; every story that
-  dispatches `host.agent.*` (i.e. all of them) gets cheaper calls for free.
-  The workbench (S1) is the first consumer built *against* the <15k target
-  rather than retrofitted onto it.
-- **Backward compat:** prompt content is restructured, not removed —
-  existing cassettes are byte-sensitive to prompt shape (per the
-  llm-usage-optimization skill's cache rule) so cassette episodes affected by
-  prefix reordering must be re-recorded deliberately; behavior (what the
-  agent is told) is unchanged, only ordering and trimming.
-- **Docs on ship:** `docs/architecture/hosts.md` (agent dispatch), a new
-  `docs/architecture/cost-and-context.md` or a section in
-  `docs/stories/state-machine.md` documenting the budget gate.
-
-## Vocabulary changes
-
-| Kind | Name | Shape | Notes |
-|---|---|---|---|
-| trace field | `agent.call.complete.meta.usage.cache_read_input_tokens` / `cache_creation_input_tokens` | `int64` | already exists for `LiveHarness` routing calls (`live.go:215-217`); extended to `host.agent.*` dispatch calls |
-| trace event | `agent.dispatch.budget_checked` (or a field on `agent.call.start`) | `{estimated_tokens, budget, decision: proceed\|escalate\|refuse, rung}` | records the budget-gate decision before dispatch, deterministically reconstructable |
-
-## The model
-
-```
-host.agent.{task,decide,ask,converse}
-   │
-   ├─ 1. compose prompt: stable prefix (persona/contract/toolbox) FIRST,
-   │      volatile per-call context (artifact under review, turn state) LAST
-   ├─ 2. budget gate: estimate tokens against harness-ladder rung ──▶ proceed | escalate rung | refuse (recorded)
-   └─ 3. dispatch via claude CLI subprocess ──▶ usage (incl. cache_read/cache_creation) recorded on agent.call.complete
-```
-
-The budget gate is a DETERMINISTIC check (token estimate vs. a configured
-threshold) that decides only *which rung/whether to proceed* — it never
-interprets content. The prompt-composition and trimming are also
-deterministic (host-side assembly, no LLM judgment about what to include).
-Nothing here becomes interpretive; it removes bytes an LLM never needed to
-see.
-
-## Decision recording
-
-Every budget-gate decision is recorded as a labeled trace datapoint —
-`estimated_tokens`, `budget`, the chosen `decision`, and (when escalation
-fires) which `rung` was selected — so a reviewer can reconstruct *why* a call
-was allowed, escalated, or refused without re-running it. Cache-usage fields
-piggyback on the existing `agent.call.complete` event, matching the shape
-`live.go` already emits for routing calls.
-
-## Engine seams & invariants
-
-- Prompt composition remains centralized in `composeAgentSystemPrompt`
-  (`internal/host/sysprompt.go:69-76`) — trimming and ordering changes land
-  there and in the per-verb context builders, not scattered across call
-  sites.
-- The budget gate is a new pre-dispatch check; a load-time invariant is not
-  applicable here (it's a runtime decision, not a story-shape check), but the
-  gate's threshold config must fail closed (missing/invalid budget config
-  refuses rather than silently disables the gate).
-- The double-read fix must not change `RecentTurnsLimit` truncation
-  semantics — same bounded window, one read instead of two.
-
-## Backward compatibility / migration
-
-Existing stories and cassettes keep working: no story YAML changes, no new
-required fields. Cassette episodes recorded against the old prompt byte
-layout will mismatch after prefix reordering/trimming (expected, per the
-cache-construction rule) and must be re-recorded — this is a mechanical
-`kitsoki test flows --record` pass per affected story, not a design change.
-The budget gate defaults to a generous threshold (effectively off) until
-tuned per-story, so no story silently starts refusing calls on rollout.
+No new host calls, world keys, or story-authoring surface: the budget gate's
+only story-facing addition is the optional `agents.<name>.token_budget:`
+declaration (backward compatible — omitting it uses the generous shipped
+default, "effectively off"). Cassette matching keys on `(handler, phase,
+schema, declared args)`, never composed-prompt bytes (verified in
+`internal/testrunner/cassette.go`), so no existing flow needed re-recording
+(see task 2.2).
 
 ## Tasks
 
@@ -165,37 +91,35 @@ tuned per-story, so no story silently starts refusing calls on rollout.
 
 ## 2. Verification
 - [x] 2.1 Stateless: `kitsoki turn` exercises the budget gate at proceed/escalate/refuse thresholds — covered via the stateless `AgentDecideHandler` probes in `internal/host/budget_gate_test.go` (the same idiom `ladder_agent_verbs_test.go` already used for ladder verification) rather than the `cmd/kitsoki turn` CLI directly, since the gate is a `host` package internal; see task 1.4 above for the four scenarios (proceed, refuse, escalate, fail-closed-invalid-config).
-- [ ] 2.2 Flow fixtures cover the reordered prompt shape (existing flows re-recorded where cassette-sensitive)
-- [ ] 2.3 Before/after cost table on the qs1 single-file-fix scenario (per llm-usage-optimization skill Step 1/3), confirming <15k marginal tokens/turn and cache_read dominating input on repeat calls
+- [x] 2.2 Flow fixtures cover the reordered prompt shape (existing flows re-recorded where cassette-sensitive) — **resolved as zero-cost, not re-recorded.** Verified `internal/testrunner/cassette.go`'s `MatchEpisode`/`episodeMatches` (lines ~450-500): episode matching keys on `(handler, phase, schema_name, declared arg fields)` — it never compares composed system-prompt bytes. `EpisodeAgent.SystemPrompt`/`Prompt` are informational sidecar fields for humans/re-record tooling, not consulted by the matcher, and no test under `internal/testrunner` asserts on them. Since 1.1 made no prompt-shape change anyway (the engine seam was already stable→volatile; see 1.1's note), there is nothing to re-record. All 71 `stories/bugfix` flows pass unchanged (confirmed under both 1.1 and 1.4).
+- [ ] 2.3 Before/after cost table on the qs1 single-file-fix scenario (per llm-usage-optimization skill Step 1/3), confirming <15k marginal tokens/turn and cache_read dominating input on repeat calls — **blocked**, needs the same live qs1 re-run as 3.1 (see below); not attempted.
 
 ## 3. Adopt + document
-- [ ] 3.1 Re-run the bugfix pipeline live once (gated, not CI) to confirm the token-bloat finding is resolved; close it out
-- [ ] 3.2 Update docs/architecture/hosts.md + state-machine.md with the budget gate and context-trimming contract; migrate shipped content out of this proposal and delete it
+- [ ] 3.1 Re-run the bugfix pipeline live once (gated, not CI) to confirm the token-bloat finding is resolved; close it out — **explicitly BLOCKED pending Brad.** Requires a real metered LLM run (`tools/bugfix-bakeoff/external/drive_cell.sh --project query-string --bug qs1 --candidate gpt-5.5 --score`), which is out of scope for automated/agent work per the hard no-live-LLM-in-automation rule. 2.3's before/after table is gated on the same run.
+- [x] 3.2 Update docs/architecture/hosts.md + state-machine.md with the budget gate and context-trimming contract; migrate shipped content out of this proposal and delete it — done. Sized per docs/AGENTS.md's "one authoritative location per concept, referenced elsewhere" rule rather than adding a new file: cache-usage visibility + the budget gate (verb table, decision outcomes, `token_budget:` field, fail-closed posture) now live in `docs/architecture/hosts.md`'s new "Cache-usage visibility and the pre-dispatch budget gate" section (plus a `token_budget` row on the Agent declaration fields table); the single-event-log-read fix (`RecentTurns` folded into `loadJourney`'s replay) is noted in `docs/stories/state-machine.md` §8 (the turn loop) next to the `acquire` state it changes. Prefix-ordering itself needed no new prose — it was already fully documented and accurate in `docs/architecture/system-prompt.md` (task 1.1 found the engine seam already compliant); this proposal's docs only had to cover what genuinely changed (1.2 cache surface, 1.3 double-read, 1.4 budget gate).
 ```
 
 ## Verification
 
-Prefer stateless probes: `kitsoki turn --state … --intent … --world @w.json`
-against a fixture that forces a large synthetic prior artifact, asserting the
-budget gate's `proceed`/`escalate`/`refuse` decision and that the composed
-prompt trims the expected sections. The cost-improvement claim (§Why) does
-need one live re-run of the qs1 scenario per the token-bloat finding's own
-repro path (`tools/bugfix-bakeoff/external/drive_cell.sh --project
-query-string --bug qs1 --candidate gpt-5.5 --score`) — gated, run once for
-the before/after table, not part of the default test suite.
+Stateless probes landed (task 2.1/2.2): `internal/host/budget_gate_test.go`
+exercises `proceed`/`escalate`/`refuse`/fail-closed via a stateless
+`AgentDecideHandler` probe, and all 71 `stories/bugfix` flows pass unchanged
+with no re-recording needed. What's left is the one *live* piece: the
+cost-improvement claim (§Why) needs a live re-run of the qs1 scenario per the
+token-bloat finding's own repro path
+(`tools/bugfix-bakeoff/external/drive_cell.sh --project query-string --bug
+qs1 --candidate gpt-5.5 --score`) — gated on Brad, not part of the default
+test suite, tracked as tasks 2.3/3.1.
 
-## Open questions
+## Open questions — resolved
 
-1. Cache-usage visibility depends on whether the `claude` CLI subprocess
-   surfaces Anthropic's `cache_read_input_tokens`/`cache_creation_input_tokens`
-   in its own JSON output today — needs a spike to confirm before task 1.2 is
-   scoped. *Lean: spike first; if the CLI doesn't expose it, the fallback is
-   estimating cache eligibility from prefix byte-stability alone (still lets
-   1/2/3 ship independently).*
-2. Budget-gate threshold: a single global default, or per-verb (task vs.
-   decide have very different natural sizes)? *Lean: per-verb defaults,
-   overridable per-agent — mirrors the existing effect/toolbox declaration
-   pattern rather than inventing a new config surface.*
+1. **Does the claude CLI surface cache tokens?** Yes — confirmed without a
+   live probe. `agent_runner.go` already parses `cache_read_input_tokens` /
+   `cache_creation_input_tokens` off the CLI's `stream-json` terminal
+   `result` event; no estimation fallback was needed.
+2. **Budget-gate threshold: global or per-verb?** Per-verb defaults,
+   overridable per-agent (`token_budget:`) — shipped as designed, mirroring
+   the existing toolbox/bash_profile declaration pattern.
 
 ## Non-goals
 
