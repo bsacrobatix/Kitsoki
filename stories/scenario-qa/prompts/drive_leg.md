@@ -32,6 +32,13 @@ replay and report the missing-cassette blocker honestly, as usual. Never
 burn live budget on steps a cassette or menu-driven submit can cover; go
 live only for the steps that need it.
 
+**Persist every frame you render.** A frame that only existed in your tool
+output is not evidence: write each transport frame you capture (preflight
+AND key states — `render.tui_png` output files, `visual.snapshot` images)
+into the leg's `evidence_dir` and attach it with the leg's attach command
+under the matching evidence kind. The judge can only cite files that exist
+in the run dir.
+
 When you finish, **report — do not grade**. Submit:
 
 ```json
