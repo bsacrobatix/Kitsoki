@@ -288,6 +288,9 @@ catalog:
       - id: source-diff-open-fallback-proposal
         kind: proposal
         path: docs/proposals/diff-open-fallback.md
+      - id: source-graph-grouping-projections-proposal
+        kind: proposal
+        path: docs/proposals/graph-grouping-projections.md
 
 type_registry:
   - id: core-node
@@ -8089,6 +8092,23 @@ nodes:
       creates_use_cases: []
       decomposes_to: []
 
+  - schema: graph/proposal/v0
+    id: proposal-graph-grouping-projections
+    title: Graph grouping projections
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    path: docs/proposals/graph-grouping-projections.md
+    index_blurb: 'the persona views left after the landed area/initiative taxonomy (`docs/architecture/graph-grouping-taxonomy.md`): initiative detail view, the area inbox reverse-index, site category navigation off `area` nodes (which activates the area-visibility lint), per-area roadmap-delta rollup, and CLI wiring for the advisory initiative-scope check.'
+    sources:
+      - source-graph-grouping-projections-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
   # --- Product/functional areas (design doc §5 seed cut) ------------------
 
   - schema: graph/area/v0
@@ -8204,6 +8224,7 @@ nodes:
         - change-changeset-delta-ops
         - change-producer-consumer-adoption
         - change-iso-management-packs
-      proposals: []
+      proposals:
+        - proposal-graph-grouping-projections
       owned_by:
         - actor-developer
