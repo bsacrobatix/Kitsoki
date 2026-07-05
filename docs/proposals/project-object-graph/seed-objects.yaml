@@ -213,6 +213,9 @@ catalog:
       - id: source-story-editor-feature
         kind: feature_catalog
         path: features/story-editor.yaml
+      - id: source-session-media-workbench-feature
+        kind: feature_catalog
+        path: features/session-media-workbench.yaml
       - id: source-stranger-install-feature
         kind: feature_catalog
         path: features/stranger-install.yaml
@@ -4065,6 +4068,202 @@ nodes:
       changed_by: []
 
   - schema: graph/requirement/v0
+    id: req-session-media-workbench-behavior
+    title: Session Media Workbench behaves as documented
+    status: satisfied
+    visibility: public
+    statement: Pin the artifact, keep the conversation, move the devtools.
+    sources:
+      - source-session-media-workbench-feature
+    edges:
+      required_by:
+        - feature-session-media-workbench
+      motivated_by: []
+      verified_by:
+        - evidence-session-media-workbench-tour
+
+  - schema: graph/evidence/v0
+    id: evidence-session-media-workbench-tour
+    title: The session media workbench deterministic video tour and flow fixture
+    status: current
+    visibility: public
+    evidence_kind: deterministic_demo
+    producers:
+      - tests/playwright/session-media-workbench-video.spec.ts
+    artifacts:
+      - artifactDir: session-media-workbench
+        videoBase: session-media-workbench-demo
+        posterStep: smw-open-pane
+      - story: stories/mockup-video
+        flow: stories/mockup-video/flows/demo_web.yaml
+    sources:
+      - source-session-media-workbench-feature
+    edges:
+      demonstrates:
+        - feature-session-media-workbench
+      verifies:
+        - req-session-media-workbench-behavior
+
+  - schema: graph/feature/v0
+    id: feature-session-media-workbench
+    title: Session Media Workbench
+    status: shipped
+    visibility: public
+    summary: 'A browser session can now pin a produced markdown/html/slidey/video artifact into a stable resizable media pane while the chat remains beside it and trace/graph devtools can dock right, dock bottom, float, or pop out.'
+    sources:
+      - source-session-media-workbench-feature
+    edges:
+      in_area:
+        - area-media-and-demos
+      requirements:
+        - req-session-media-workbench-behavior
+      use_cases: []
+      evidence:
+        - evidence-session-media-workbench-tour
+      proposed_by: []
+      implemented_by: []
+
+  - schema: graph/site-page/v0
+    id: sitepage-feature-session-media-workbench
+    title: Session Media Workbench
+    status: shipped
+    visibility: public
+    content_fields:
+      title: Session Media Workbench
+      tagline: Pin the artifact, keep the conversation, move the devtools.
+      summary: 'A browser session can now pin a produced markdown/html/slidey/video artifact into a stable resizable media pane while the chat remains beside it and trace/graph devtools can dock right, dock bottom, float, or pop out.'
+    promo:
+      order: 27
+    docs:
+      - docs/web/session-media-workbench.md
+    related:
+      - mockup-video
+      - trace-features
+    tour:
+        export: SESSION_MEDIA_WORKBENCH_TOUR_STEPS
+        steps:
+            - id: smw-open-pane
+              route: interactive
+              target: media-workbench-toggle
+              title: Pin the artifact beside chat
+              body: The produced media no longer has to live only as another embed inside the transcript. Pin it into the session workbench and it becomes the stable thing this conversation is about.
+              placement: top
+              kind: action
+              advance: click-target
+              waitForTarget: media-workbench-toggle
+              dwellMs: 5000
+            - id: smw-media-pane
+              route: interactive
+              target: media-workbench-pane
+              title: Stable media pane
+              body: The selected html, slidey, markdown, or video artifact stays mounted here while new turns continue in the chat. The original chat bubble collapses to a receipt so the transcript keeps context without duplicating the embed.
+              placement: right
+              kind: explain
+              advance: next
+              waitForTarget: media-workbench-pane
+              dwellMs: 5500
+            - id: smw-chat-pane
+              route: interactive
+              target: chat-section
+              title: Conversation stays live
+              body: "The chat remains a full session participant: typed input, streaming agent activity, routing chips, annotations, and follow-up turns all use the same run store and trace."
+              placement: left
+              kind: explain
+              advance: next
+              waitForTarget: chat-section
+              dwellMs: 5000
+            - id: smw-media-receipt
+              route: interactive
+              target: chat-pinned-context
+              title: Pinned media receipt
+              body: The chat pane keeps the artifact's place in the session with a compact working-on receipt instead of mounting a duplicate media player beside the pinned pane.
+              placement: bottom
+              kind: explain
+              advance: next
+              waitForTarget: chat-pinned-context
+              dwellMs: 4200
+            - id: smw-devtools-graph
+              route: interactive
+              target: media-devtools-pane
+              title: Devtools dock
+              body: Traceability works like browser devtools. The graph and trace share a dockable pane beside the artifact and chat, so the operator can watch state and events while editing the visible thing.
+              placement: left
+              kind: explain
+              advance: next
+              waitForTarget: media-devtools-pane
+              dwellMs: 5500
+            - id: smw-resize-media
+              route: interactive
+              target: media-workbench-resizer
+              title: Resize the workbench
+              body: Drag the splitter between media and chat when the artifact needs more room. The split is stored with the rest of the workbench layout so the session feels stable after reloads.
+              placement: right
+              kind: action
+              advance: click-target
+              waitForTarget: media-workbench-resizer
+              dwellMs: 4200
+            - id: smw-trace-tab
+              route: interactive
+              target: devtools-tab-trace
+              title: Switch to trace
+              body: Swap the devtools pane from graph to the event trace without changing the media or chat layout.
+              placement: left
+              kind: action
+              advance: click-target
+              waitForTarget: devtools-tab-trace
+              dwellMs: 3500
+            - id: smw-horizontal
+              route: interactive
+              target: workbench-orient-horizontal
+              title: Rearrange horizontally
+              body: The layout can switch from side-by-side columns to a horizontal workbench, with media and chat above and devtools docked below.
+              placement: bottom
+              kind: action
+              advance: click-target
+              waitForTarget: workbench-orient-horizontal
+              dwellMs: 4500
+            - id: smw-resize-bottom
+              route: interactive
+              target: devtools-workbench-row-resizer
+              title: Resize docked devtools
+              body: When devtools moves below the media and chat, the horizontal splitter controls how much height the trace gets without unpinning the artifact or interrupting the conversation.
+              placement: top
+              kind: action
+              advance: click-target
+              waitForTarget: devtools-workbench-row-resizer
+              dwellMs: 4200
+            - id: smw-float
+              route: interactive
+              target: devtools-dock-float
+              title: Float devtools
+              body: Float the observability pane when the media needs more room. The floating pane is resizable and can be docked again.
+              placement: bottom
+              kind: action
+              advance: click-target
+              waitForTarget: devtools-dock-float
+              dwellMs: 4500
+            - id: smw-popout
+              route: interactive
+              target: devtools-popout
+              title: Pop out trace or graph
+              body: Pop out opens the selected devtools surface in a separate browser window using the existing single-surface trace/graph entrypoint, so it can live on another display while the media and chat stay together.
+              placement: bottom
+              kind: explain
+              advance: next
+              waitForTarget: devtools-popout
+              dwellMs: 5000
+    sources:
+      - source-session-media-workbench-feature
+    edges:
+      presents:
+        - feature-session-media-workbench
+      has_media:
+        - evidence-session-media-workbench-tour
+      governed_by:
+        - req-session-media-workbench-behavior
+      changed_by: []
+
+  - schema: graph/requirement/v0
     id: req-multi-story-behavior
     title: The full product walk behaves as documented
     status: satisfied
@@ -7590,25 +7789,6 @@ nodes:
       creates_requirements: []
       creates_use_cases: []
       decomposes_to: []
-
-  - schema: graph/proposal/v0
-    id: proposal-embeddings
-    title: Embeddings
-    status: draft
-    visibility: internal
-    proposal_kind: epic
-    path: docs/proposals/embeddings.md
-    status_line: v1 — all 3 slices shipped. See [docs/architecture/embeddings.md](../architecture/embeddings.md) (substrate + agent.search) and [docs/architecture/semantic-routing.md](../architecture/semantic-routing.md) (routing tier).
-    index_blurb: All 3 slices shipped. See [`docs/architecture/embeddings.md`](../architecture/embeddings.md) (substrate + `agent.search`) and [`docs/architecture/semantic-routing.md`](../architecture/semantic-routing.md) §6 (routing tier). Child slice files deleted.
-    sources:
-      - source-embeddings-proposal
-    edges:
-      owned_by: []
-      proposes: []
-      creates_requirements: []
-      creates_use_cases: []
-      decomposes_to: []
-
   - schema: graph/proposal/v0
     id: proposal-view-rendering-readability
     title: View rendering readability
@@ -7626,25 +7806,6 @@ nodes:
       creates_requirements: []
       creates_use_cases: []
       decomposes_to: []
-
-  - schema: graph/proposal/v0
-    id: proposal-mockup-video-studio
-    title: Mockup video studio
-    status: draft
-    visibility: internal
-    proposal_kind: epic
-    path: docs/proposals/mockup-video-studio.md
-    status_line: Implemented. All 3 slices shipped; narrative docs landed and the
-    index_blurb: 'Author UI design-proposal walkthrough videos as a recorded process **and** improve them in the web UI: flag a scene or time-range, grab the frame, instruct the LLM, watch the video re-render. Builds on the shipped media artifact seam. Nothing implemented yet; decomposed into three slices:'
-    sources:
-      - source-mockup-video-studio-proposal
-    edges:
-      owned_by: []
-      proposes: []
-      creates_requirements: []
-      creates_use_cases: []
-      decomposes_to: []
-
   - schema: graph/proposal/v0
     id: proposal-work-decomposition
     title: Work decomposition
@@ -7951,61 +8112,6 @@ nodes:
       creates_requirements: []
       creates_use_cases: []
       decomposes_to: []
-
-  - schema: graph/proposal/v0
-    id: proposal-video-frame-seam
-    title: Video frame seam
-    status: draft
-    visibility: internal
-    proposal_kind: runtime
-    path: docs/proposals/video-frame-seam.md
-    index_blurb: 'a producer-agnostic **chapter sidecar** (scene↔timestamp + `source_ref`) + a deterministic `host.video.frame` still-grab, backed by one `internal/video` extractor shared by a host call and the slice-2 web RPC.'
-    sources:
-      - source-video-frame-seam-proposal
-    edges:
-      child_of: [proposal-mockup-video-studio]
-      owned_by: []
-      proposes: []
-      creates_requirements: []
-      creates_use_cases: []
-      decomposes_to: []
-
-  - schema: graph/proposal/v0
-    id: proposal-video-feedback-mode
-    title: Video feedback mode
-    status: draft
-    visibility: internal
-    proposal_kind: tui
-    path: docs/proposals/video-feedback-mode.md
-    index_blurb: 'a `/review` web panel: player + chapter timeline + flag-scene/range + per-flag PNG + chat → structured, source-targeted **feedback notes** (capture + dispatch; the LLM edit is the story''s recorded decision).'
-    sources:
-      - source-video-feedback-mode-proposal
-    edges:
-      child_of: [proposal-mockup-video-studio]
-      owned_by: []
-      proposes: []
-      creates_requirements: []
-      creates_use_cases: []
-      decomposes_to: []
-
-  - schema: graph/proposal/v0
-    id: proposal-mockup-video-authoring
-    title: Mockup video authoring
-    status: draft
-    visibility: internal
-    proposal_kind: story
-    path: docs/proposals/mockup-video-authoring.md
-    index_blurb: 'a new `stories/mockup-video/`: brief → author HTML+tour *or* slidey deck (`medium: tour | deck`) → render (chapter sidecar) → review → refine-loop on each flag → gallery.'
-    sources:
-      - source-mockup-video-authoring-proposal
-    edges:
-      child_of: [proposal-mockup-video-studio]
-      owned_by: []
-      proposes: []
-      creates_requirements: []
-      creates_use_cases: []
-      decomposes_to: []
-
   - schema: graph/proposal/v0
     id: proposal-line-webhook-ingress
     title: Line webhook ingress
