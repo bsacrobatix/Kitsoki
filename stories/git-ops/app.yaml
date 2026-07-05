@@ -133,6 +133,11 @@ world:
   sync_continue_branch:     { type: string, default: "" }
   sync_auto_resolve:        { type: bool,   default: false }
   sync_result:              { type: object, default: {} }
+  # guarded main publish arc. This only fast-forwards the remote ref from the
+  # current integration branch; it never force-pushes or rewrites remote work.
+  push_remote:              { type: string, default: "origin" }
+  push_remote_branch:       { type: string, default: "main" }
+  push_result:              { type: object, default: {} }
   # issue status arc. In kitsoki-dev this resolves through iface.ticket →
   # host.gh.ticket, so operators can inspect GitHub issues from the story
   # surface instead of shelling out to `gh issue view`.
@@ -316,6 +321,15 @@ intents:
       branch:        { type: string, required: false }
       continue_branch: { type: string, required: false }
       auto_resolve:  { type: bool,   required: false }
+
+  push_main:
+    description: "Fast-forward a remote main ref from the current protected local main."
+    examples: ["push main to origin", "publish local main", "sync origin from local main",
+               "make origin main match local main", "push origin main"]
+    priority: 74
+    slots:
+      remote:        { type: string, required: false }
+      remote_branch: { type: string, required: false }
 
   merge_branch:
     description: "Merge a named branch into the integration branch (from main_ops)."

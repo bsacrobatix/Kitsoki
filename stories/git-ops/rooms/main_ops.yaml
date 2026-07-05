@@ -35,6 +35,10 @@ states:
               hint:  "reconcile protected {{ world.integration_branch }} with origin/main via .worktrees/"
               intent: sync_main
               slots: { remote: "origin", remote_branch: "main" }
+            - label: "push_main remote=origin"
+              hint:  "fast-forward origin/main from local {{ world.integration_branch }}"
+              intent: push_main
+              slots: { remote: "origin", remote_branch: "main" }
             - label: "merge_branch"
               hint:  "merge a named feature branch into {{ world.integration_branch }}"
               intent: merge_branch
@@ -148,6 +152,13 @@ states:
                 sync_continue_branch: "{{ slots.continue_branch ?? slots.branch ?? '' }}"
                 sync_auto_resolve:  "{{ slots.auto_resolve ?? false }}"
                 sync_result:        {}
+      push_main:
+        - target: push_main
+          effects:
+            - set:
+                push_remote:        "{{ slots.remote ?? 'origin' }}"
+                push_remote_branch: "{{ slots.remote_branch ?? world.integration_branch }}"
+                push_result:        {}
       merge_branch:
         # Operand-as-slot: when branch= is given, skip the picker and go
         # straight to merge_exec (git-ops-smoothing task 1.2).
