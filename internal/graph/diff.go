@@ -35,19 +35,66 @@ const (
 	gapRemoved
 )
 
-// Diff computes the roadmap: every node id present in current XOR desired,
-// plus every id present in both whose STRUCTURAL fields differ (title,
-// visibility, sources, edges, and type-specific Fields — status is
-// deliberately excluded, since status is process/ledger state, not roadmap
-// work: a node that only changed status between the two catalogs has no
-// gap). Output is sorted by id for determinism.
-//
-// depends_on on an emitted change node is projected to only the OTHER gap
-// ids among desired's depends_on for that node — a dependency already
-// satisfied in current is dropped, since there's no roadmap work left for
-// it. This makes the emitted depends_on DAG a closed subgraph of desired's
-// own (already-acyclic) dependency graph, so acyclicity is free.
-func Diff(current, desired *Catalog) []ChangeNode {
+// GapKind is the exported, wire/UI-friendly form of a node's diff
+// classification (see NodeDiff).
+type GapKind string
+
+const (
+	GapAdded    GapKind = "added"
+	GapModified GapKind = "modified"
+	GapRemoved  GapKind = "removed"
+)
+
+func (k gapKind) exported() GapKind {
+	switch k {
+	case gapAdded:
+		return GapAdded
+	case gapRemoved:
+		return GapRemoved
+	default:
+		return GapModified
+	}
+}
+
+// NodeDiff is one gapped node id's classification plus both sides of the
+// comparison, for callers that render the diff itself (e.g. a UI diff mode)
+// rather than the derived roadmap ChangeNode list. Current is nil when Kind
+// is GapAdded; Desired is nil when Kind is GapRemoved.
+type NodeDiff struct {
+	ID      NodeID
+	Kind    GapKind
+	Current *Node
+	Desired *Node
+}
+
+// DiffNodes classifies every node id present in current XOR desired, plus
+// every id present in both whose STRUCTURAL fields differ (see
+// structurallyDiffers) — the same gap Diff renders as a roadmap ChangeNode
+// list, exposed at node granularity for callers that need the raw
+// before/after (a UI diff mode) rather than a derived change-node brief.
+// Output is sorted by id for determinism.
+func DiffNodes(current, desired *Catalog) []NodeDiff {
+	sorted, gapped := gapClassify(current, desired)
+	diffs := make([]NodeDiff, 0, len(gapped))
+	for _, id := range sorted {
+		kind, isGap := gapped[id]
+		if !isGap {
+			continue
+		}
+		diffs = append(diffs, NodeDiff{
+			ID:      id,
+			Kind:    kind.exported(),
+			Current: current.Nodes[id],
+			Desired: desired.Nodes[id],
+		})
+	}
+	return diffs
+}
+
+// gapClassify is the shared gap computation Diff and DiffNodes both build
+// on, so the roadmap and the node-level diff can never disagree about which
+// ids are gapped or why.
+func gapClassify(current, desired *Catalog) ([]NodeID, map[NodeID]gapKind) {
 	ids := map[NodeID]bool{}
 	for id := range current.Nodes {
 		ids[id] = true
@@ -74,6 +121,21 @@ func Diff(current, desired *Catalog) []ChangeNode {
 			gapped[id] = gapModified
 		}
 	}
+	return sorted, gapped
+}
+
+// Diff computes the roadmap: every gapClassify gap rendered as a
+// schemas/change-node.schema.json-conforming ChangeNode, so goal.py-style
+// ledgers, stories/deliver, and stories/fleet consume the computed roadmap
+// unchanged.
+//
+// depends_on on an emitted change node is projected to only the OTHER gap
+// ids among desired's depends_on for that node — a dependency already
+// satisfied in current is dropped, since there's no roadmap work left for
+// it. This makes the emitted depends_on DAG a closed subgraph of desired's
+// own (already-acyclic) dependency graph, so acyclicity is free.
+func Diff(current, desired *Catalog) []ChangeNode {
+	sorted, gapped := gapClassify(current, desired)
 
 	var changes []ChangeNode
 	for _, id := range sorted {
