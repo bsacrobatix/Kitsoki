@@ -191,7 +191,7 @@ then default; see epic §Shared decisions).
 ## 2. Verification
 - [ ] 2.1 Stateless unit: kitsoki turn against a fixture whose on_error:
       target has no last_error reference — assert banner text present
-- [ ] 2.2 G-FLOW gate: a flow fixture that drives on_error: without the
+- [x] 2.2 G-FLOW gate: a flow fixture that drives on_error: without the
       banner fails; the same fixture with the banner assertion passes
 - [ ] 2.3 Routing near-miss fixture: an input scored in the near-miss band
       resolves to the workbench outcome, not the nearest authored intent
