@@ -1,0 +1,64 @@
+# workbench_discuss — ambiguous/free-form prose stays in the hub and is answered
+# by the assistant lane instead of re-entering a command room.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: main_ops
+initial_world:
+  integration_branch: main
+  current_branch:     main
+  on_integration:     true
+  working_dir:        "."
+  commits_ahead:      0
+  commits_behind:     0
+
+host_handlers:
+  host.run:
+    by_call:
+      refresh_main:
+        data:
+          ok:        true
+          exit_code: 0
+          stdout_json:
+            branch:             main
+            main_worktree_path: "."
+            worktree_list:      { raw: "" }
+            commits_ahead:      0
+            commits_behind:     0
+            has_uncommitted:    false
+            merge_in_progress:  false
+            no_common_ancestor: false
+            upstream_tracking:  true
+  host.chat.resolve:
+    data:
+      chat_id: git-main-chat
+      title: Git operations
+      is_new: true
+  host.agent.converse:
+    data:
+      answer: "You are on main. Use pull for upstream sync; use rebase only from a feature branch."
+      chat_id: git-main-chat
+      claude_session_id: claude-git-main-chat
+
+turns:
+  - intent:
+      name: discuss
+      slots:
+        message: "fix it - i just want to rebase main again"
+    expect_state: main_ops
+    expect_world:
+      git_message: "fix it - i just want to rebase main again"
+      git_answer: "You are on main. Use pull for upstream sync; use rebase only from a feature branch."
+      git_chat_id: git-main-chat
+      git_session_id: claude-git-main-chat
+    expect_host_calls:
+      - handler: host.chat.resolve
+        args:
+          app: git-ops
+          room: main_ops
+      - handler: host.agent.converse
+        args:
+          chat_id: git-main-chat
+          agent: git_assistant
+
+expect_no_errors: true

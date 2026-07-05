@@ -19,6 +19,8 @@ hosts:
   - host.run
   - host.agent.decide
   - host.agent.task
+  - host.agent.converse
+  - host.chat.resolve
 
 host_interfaces:
   ticket:
@@ -51,6 +53,18 @@ agents:
       resolved=true.
     model: claude-sonnet-4-6
     tools: [Read, Edit]
+    external_side_effect: false
+  git_assistant:
+    system_prompt: |
+      You are a focused git operations assistant inside Kitsoki's git-ops workbench.
+      The deterministic story commands perform mutations; your job is to answer
+      operator follow-ups, explain the current git state, inspect read-only context,
+      and recommend the next safe story action. Be concise. If the operator asks
+      you to perform a mutating git operation, explain the exact git-ops command or
+      button they should use instead of running it yourself.
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Bash]
+    bash_profile: read-only
     external_side_effect: false
 
 world:
@@ -150,6 +164,14 @@ world:
   issue_legacy_id:          { type: string, default: "" }
   issue_body:               { type: string, default: "" }
   issue_warning:            { type: string, default: "" }
+  # Persistent assistant lane for hub free text. Deterministic git commands
+  # still route to their named intents first; only unmatched/ambiguous prose
+  # falls through to `discuss`.
+  git_message:              { type: string, default: "" }
+  git_answer:               { type: string, default: "" }
+  git_chat_id:              { type: string, default: "" }
+  git_chat_title:           { type: string, default: "" }
+  git_session_id:           { type: string, default: "" }
 
 intents:
   # ── Routing (internal; emitted by on_enter) ─────────────────────────
@@ -225,6 +247,13 @@ intents:
     priority: 95
 
   # ── Hub operations ───────────────────────────────────────────────────
+  discuss:
+    description: "Ask a focused git-ops assistant without leaving the current hub."
+    examples: []
+    priority: 1
+    slots:
+      message: { type: string, required: true }
+
   issue_status:
     description: "Fetch an issue/ticket through the configured ticket provider."
     examples: ["issue status", "show issue", "issue 105", "show ticket 105", "what is issue 105"]
