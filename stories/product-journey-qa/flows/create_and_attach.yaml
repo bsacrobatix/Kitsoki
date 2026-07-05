@@ -51,7 +51,7 @@ host_handlers:
             proof_minimum_evidence_count: 0
             minimum_evidence_count: 30
             missing_proof_summary: "project-onboarding: generated_config_diff, onboarding_smoke_result"
-            driver_contract_summary: "Driver contract: 6 scenarios (product-discovery, project-onboarding, bugfix, prd-design, feature-implementation, +1 more); 6 missing-proof rows; 2 final gates. Inspect last_result.driver_scenarios, last_result.missing_proof_evidence, and last_result.driver_final_gates."
+            driver_contract_summary: "Driver contract: 6 scenarios (product-discovery, project-onboarding, bugfix, prd-design, feature-implementation, +1 more); 6 missing-proof rows; 3 final gates. Inspect last_result.driver_scenarios, last_result.missing_proof_evidence, and last_result.driver_final_gates."
             next_driver_capture: "Next capture: product-discovery/browser_screenshot. Save a retained visual MCP screenshot or PNG reference."
             next_driver_attach_command: 'python3 tools/product-journey/run.py --attach-evidence --run-dir .artifacts/product-journey/run-123 --scenario product-discovery --evidence-kind browser_screenshot --evidence-path <path-or-retained-id> --evidence-source <retained|external|local|cassette> --notes "Save a retained visual MCP screenshot or PNG reference."'
             next_driver_blocker_command: "python3 tools/product-journey/run.py --record-blocker --run-dir .artifacts/product-journey/run-123 --scenario product-discovery --title <blocker-title> --summary <why-this-scenario-could-not-be-captured> --evidence-path <trace-or-frame-path>"
@@ -437,7 +437,7 @@ turns:
       proof_minimum_evidence_count: 0
       minimum_evidence_count: 30
       missing_proof_summary: "project-onboarding: generated_config_diff, onboarding_smoke_result"
-      driver_contract_summary: "Driver contract: 6 scenarios (product-discovery, project-onboarding, bugfix, prd-design, feature-implementation, +1 more); 6 missing-proof rows; 2 final gates. Inspect last_result.driver_scenarios, last_result.missing_proof_evidence, and last_result.driver_final_gates."
+      driver_contract_summary: "Driver contract: 6 scenarios (product-discovery, project-onboarding, bugfix, prd-design, feature-implementation, +1 more); 6 missing-proof rows; 3 final gates. Inspect last_result.driver_scenarios, last_result.missing_proof_evidence, and last_result.driver_final_gates."
       next_driver_capture: "Next capture: product-discovery/browser_screenshot. Save a retained visual MCP screenshot or PNG reference."
       next_driver_attach_command: 'python3 tools/product-journey/run.py --attach-evidence --run-dir .artifacts/product-journey/run-123 --scenario product-discovery --evidence-kind browser_screenshot --evidence-path <path-or-retained-id> --evidence-source <retained|external|local|cassette> --notes "Save a retained visual MCP screenshot or PNG reference."'
       next_driver_blocker_command: "python3 tools/product-journey/run.py --record-blocker --run-dir .artifacts/product-journey/run-123 --scenario product-discovery --title <blocker-title> --summary <why-this-scenario-could-not-be-captured> --evidence-path <trace-or-frame-path>"

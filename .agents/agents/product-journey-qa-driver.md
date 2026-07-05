@@ -181,8 +181,17 @@ state whenever possible:
    `--record-driver-event` after each scenario attempt. Every `evidence_refs`
    value on a captured or validated driver event must also be attached with
    `attach`; journal-only evidence refs fail validation.
-7. Submit `review`.
-8. Submit `validate`.
+7. When credible `issue` findings were recorded and the caller supplied
+   `ticket_repo` plus `gh_agent_public_base_url`, submit `autonomous_fix` so the
+   story files the issues, drains gh-agent fixes, refreshes review artifacts,
+   and validates the bundle. If either parameter is missing, leave the exact
+   `autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<url>`
+   command as the remaining gate instead of silently skipping it.
+   Do not run `gh` or hand-file GitHub issues; the story-owned gitops/gh-agent
+   surface is the reliability boundary for preserving artifacts and replayable
+   fix evidence.
+8. Submit `review`.
+9. Submit `validate`.
 
 If you cannot access the story session that owns the run, report the exact
 `tools/product-journey/run.py --attach-evidence` / `--record-finding` commands
@@ -199,6 +208,9 @@ A run is ready only when all of these are true:
 - at least one visual or TUI artifact proves the operator-visible behavior;
 - bugfix/feature claims have deterministic oracle or test output;
 - strengths, weaknesses/issues, and fixes are represented when observed;
+- credible issue findings have either passed the story-owned `autonomous_fix`
+  gate or the missing `ticket_repo` / `gh_agent_public_base_url` input is
+  explicitly recorded as the remaining gate;
 - `review` reports no hard failures;
 - `validate` reports `status: valid`;
 - the resulting `deck.slidey.json` has playback media or an explicit blocker for
