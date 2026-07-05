@@ -76,7 +76,6 @@ const layerSummaries = computed(() =>
       ...layer,
       count: nodes.length,
       selected,
-      typeCounts: layer.types.map((type) => ({ type, count: typeCounts.value.get(type) ?? 0 })),
       lifecycleCounts: ["available", "active", "proof", "roadmap", "candidate"]
         .map((bucket) => ({
           bucket,
@@ -262,11 +261,6 @@ function selectLayer(layerId: string) {
   selectedTypeId.value = "all";
 }
 
-function selectLayerType(layerId: string, typeId: string) {
-  selectedLayerId.value = layerId;
-  selectedTypeId.value = typeId;
-}
-
 function selectNode(id: string) {
   emit("update:selectedId", id);
   const node = nodeById.value.get(id);
@@ -284,16 +278,18 @@ function selectNode(id: string) {
     </section>
 
     <section class="layer-map" aria-label="Project object graph layers">
-      <article
+      <button
         v-for="layer in layerSummaries"
         :key="layer.id"
+        type="button"
+        class="layer-card"
         :class="{ active: selectedLayerId === layer.id, contains: layer.selected }"
+        :title="layer.description"
+        @click="selectLayer(layer.id)"
       >
-        <button class="layer-main" type="button" @click="selectLayer(layer.id)">
-          <span class="step">{{ layer.short }}</span>
-          <strong>{{ layer.title }}</strong>
-          <small>{{ layer.description }}</small>
-        </button>
+        <span class="step">{{ layer.short }}</span>
+        <strong>{{ layer.title }}</strong>
+        <span class="layer-count">{{ layer.count }}</span>
         <span class="layer-statuses">
           <span
             v-for="entry in layer.lifecycleCounts"
@@ -302,16 +298,7 @@ function selectNode(id: string) {
             :title="`${entry.label}: ${entry.count}`"
           >{{ entry.count }}</span>
         </span>
-        <span class="type-summary">
-          <button
-            v-for="entry in layer.typeCounts"
-            :key="entry.type"
-            type="button"
-            :class="{ active: selectedLayerId === layer.id && selectedTypeId === entry.type }"
-            @click.stop="selectLayerType(layer.id, entry.type)"
-          >{{ typeLabel(entry.type) }} {{ entry.count }}</button>
-        </span>
-      </article>
+      </button>
     </section>
 
     <section class="workspace">
