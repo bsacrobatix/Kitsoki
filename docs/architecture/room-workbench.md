@@ -206,10 +206,14 @@ new event: `usable_kitsoki_gate` (`internal/orchestrator/workbench_gate_signal.g
 the S6 usable-kitsoki-gate producer contract
 ([`docs/tracing/usable-kitsoki-gate.md`](../tracing/usable-kitsoki-gate.md)).
 It carries `candidate_completed` / `silent_bounce` / `misroute_adjacent` /
-`evidence_refs`, derived from the dispatching state's on-error outcome. As
-of this writing it is not yet joined against a scenario's `expected_effects`
-list (S4's scenario IR) — see that file's own doc comment for the documented
-gap.
+`evidence_refs`, derived from the dispatching state's on-error outcome. When
+the dispatching room's world carries a scenario's `expected_effects` list
+(S4's scenario IR) under the `<noteKey>_expected_effects` convention key,
+`candidate_completed` is a real join against those effects (substring match
+over the workbench's own bound close-out note); otherwise it falls back to
+the narrower dispatch-success proxy. `misroute_adjacent` remains hard-false —
+see that file's own doc comment for the full contract and its one remaining
+honest gap.
 
 ## Testing without an LLM
 

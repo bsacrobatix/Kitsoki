@@ -1,7 +1,7 @@
 // Package host — auto-attachment of the kitsoki studio MCP server onto
 // claude-backend dispatches whose declared tool surface names it.
 //
-// Context (Task 1.3 precondition fix, docs/proposals/room-workbench.md): a
+// Context (Task 1.3 precondition fix, docs/architecture/room-workbench.md): a
 // live precheck proved that a claude-backend `-p` subprocess NEVER sees the
 // kitsoki studio MCP server (the one the project's own .mcp.json calls
 // "kitsoki", exposing mcp__kitsoki__studio_ping / studio_handles / studio_work

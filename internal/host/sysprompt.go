@@ -69,7 +69,9 @@ const kitsokiOverlayRef = "sysprompt/kitsoki.md"
 // (kitsoki) from the engine default (or a @shared overlay if the project ships
 // one). Pure assembly is delegated to sysprompt.Compose.
 //
-// Stable-prefix invariant (docs/proposals/dispatch-context-floor.md): every
+// Stable-prefix invariant (docs/architecture/system-prompt.md;
+// docs/architecture/hosts.md#cache-usage-visibility-and-the-pre-dispatch-budget-gate):
+// every
 // layer here is static for a given (verb, agent) pair — kitsoki is a compiled
 // constant, project is the app's declared context, and persona is the
 // author's declared agent.SystemPrompt / call-site system_prompt: override.

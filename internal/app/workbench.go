@@ -1,6 +1,6 @@
 // Package app — room workbench (`workbench:`) desugaring.
 //
-// See docs/proposals/room-workbench.md for the design rationale. A
+// See docs/architecture/room-workbench.md for the design rationale. A
 // `workbench:` block on a State is a macro over four already-shipped
 // primitives (write_mode, agent_off_ramp, on_enter host.agent.task,
 // default_intent) that stories/dev-story/rooms/landing.yaml hand-rolls

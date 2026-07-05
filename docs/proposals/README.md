@@ -65,14 +65,20 @@ thought.
 
 - [`usable-kitsoki.md`](usable-kitsoki.md) — **epic.** Make every room also a
   governed free-form agent, and prove it against scenarios compiled from real
-  conversations, at swarm scale, before release. Six slices: the room
-  workbench primitive ([`room-workbench.md`](room-workbench.md), runtime +
-  story), a never-silent runtime (shipped; see
+  conversations, at swarm scale, before release. All six slices shipped: the
+  room workbench primitive (**shipped**, see
+  [`../architecture/room-workbench.md`](../architecture/room-workbench.md);
+  `room-workbench.md` deleted per lifecycle guidance), a never-silent runtime
+  (shipped; see
   [`semantic-routing.md`](../architecture/semantic-routing.md#13-synonym-templates) —
   `never-silent-runtime.md` deleted per lifecycle guidance), a dispatch
-  context floor ([`dispatch-context-floor.md`](dispatch-context-floor.md),
-  runtime), the Scenario Foundry
-  ([`scenario-foundry.md`](scenario-foundry.md), tracing + tooling), honest
+  context floor (**shipped**, see
+  [`../architecture/hosts.md`](../architecture/hosts.md#cache-usage-visibility-and-the-pre-dispatch-budget-gate)
+  and [`../stories/state-machine.md`](../stories/state-machine.md#8-the-turn-loop-state-machine-of-the-orchestrator);
+  `dispatch-context-floor.md` deleted per lifecycle guidance), the Scenario
+  Foundry ([`scenario-foundry.md`](scenario-foundry.md), tracing + tooling —
+  kept as the historical design record; shipped detail lives in
+  [`../tracing/scenario-foundry.md`](../tracing/scenario-foundry.md)), honest
   gh-agent issue dispatch (runtime — **shipped**, see
   [`../architecture/github-agent.md`](../architecture/github-agent.md);
   child proposal deleted per lifecycle), and a
@@ -80,7 +86,9 @@ thought.
   [`docs/tracing/usable-kitsoki-gate.md`](../tracing/usable-kitsoki-gate.md) —
   `usable-kitsoki-release-gate.md` deleted per lifecycle guidance). Supersedes
   `ad-hoc-workbench.md` (via S1) and absorbs
-  `conversation-driven-development.md` slice 1 (via S4).
+  `conversation-driven-development.md` slice 1 (via S4). The epic file itself
+  stays open, trimmed to its one remaining item: a live-gate re-run on
+  `pets-dev`/`slidey-dev` (see the epic's own Status line).
 - [`project-object-graph.md`](project-object-graph.md) — **epic.** Build one typed project graph for durable product state and transient change - features, requirements, use cases, proposals, plans, tests, evidence, changesets, and roadmap deltas as schema-pinned YAML objects with typed edges. First review fixture `project-object-graph/seed-objects.yaml`. Six slices are sketched; substrate, changesets, one dogfooded feature, and the computed-roadmap mechanism are implemented and tested.
   - [`project-object-graph/ui-declutter-and-diff-mode.md`](project-object-graph/ui-declutter-and-diff-mode.md) (tui) — Meta-dogfood of the object graph on itself: declutter the busy layer-map top bar, add a current-vs-proposed diff mode over the catalog (reusing the shipped internal/graph/diff.go gap classification and the WorldDiffViewer color language), and run a local-only, persona-lensed usability pass (kitsoki-ui-review, no filing/upload) against the result.
 - [`graph-grouping-projections.md`](graph-grouping-projections.md) — **runtime.** the persona views left after the landed area/initiative taxonomy (`docs/architecture/graph-grouping-taxonomy.md`): initiative detail view, the area inbox reverse-index, site category navigation off `area` nodes (which activates the area-visibility lint), per-area roadmap-delta rollup, and CLI wiring for the advisory initiative-scope check.
