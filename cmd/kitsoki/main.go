@@ -174,6 +174,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(newGHAgentCmd())
 	root.AddCommand(projectProfileCmd())
 	root.AddCommand(projectToolsCmd())
+	root.AddCommand(kitCmd())
 	root.AddCommand(validateCmd())
 	root.AddCommand(workflowCmd())
 	root.AddCommand(doctorCmd())
