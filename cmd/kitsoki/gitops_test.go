@@ -160,9 +160,12 @@ func TestGitopsCloseoutFixedIssuesCommentsClosesAndPersistsState(t *testing.T) {
 
 	var commentBody string
 	var closedState string
+	commentCalls := 0
+	closeCalls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/o/r/issues/42/comments":
+			commentCalls++
 			var payload map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				t.Fatalf("decode comment: %v", err)
@@ -170,6 +173,7 @@ func TestGitopsCloseoutFixedIssuesCommentsClosesAndPersistsState(t *testing.T) {
 			commentBody, _ = payload["body"].(string)
 			writeJSON(w, map[string]any{"html_url": "https://github.com/o/r/issues/42#issuecomment-9"})
 		case r.Method == http.MethodPatch && r.URL.Path == "/repos/o/r/issues/42":
+			closeCalls++
 			var payload map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				t.Fatalf("decode transition: %v", err)
@@ -213,6 +217,9 @@ func TestGitopsCloseoutFixedIssuesCommentsClosesAndPersistsState(t *testing.T) {
 	if closedState != "closed" {
 		t.Fatalf("closed state = %q, want closed", closedState)
 	}
+	if commentCalls != 1 || closeCalls != 1 {
+		t.Fatalf("first closeout calls: comments=%d closes=%d, want 1/1", commentCalls, closeCalls)
+	}
 	for _, want := range []string{"kitsoki-fixed-in", "job-42", "independent-verify.md", "https://agent.example/run/job-42"} {
 		if !strings.Contains(commentBody, want) {
 			t.Fatalf("comment body missing %q:\n%s", want, commentBody)
@@ -237,5 +244,27 @@ func TestGitopsCloseoutFixedIssuesCommentsClosesAndPersistsState(t *testing.T) {
 	comments := mapSliceValue(issue, "comments")
 	if len(comments) != 1 || !strings.Contains(stringValue(comments[0], "body"), "kitsoki-fixed-in") {
 		t.Fatalf("fixed marker comment not persisted: %+v", comments)
+	}
+
+	second, err := gitopsCloseoutFixedIssues(context.Background(), runDir, "o/r", status)
+	if err != nil {
+		t.Fatalf("second closeout: %v", err)
+	}
+	if stringValue(second, "issue_closeout_status") != "closed" || intValue(second, "issue_closeout_count") != 1 {
+		t.Fatalf("second closeout result = %+v", second)
+	}
+	if intValue(second, "issue_already_closed_count") != 1 {
+		t.Fatalf("second closeout did not report already closed issue: %+v", second)
+	}
+	if commentCalls != 1 || closeCalls != 1 {
+		t.Fatalf("second closeout must not repeat GitHub mutations: comments=%d closes=%d", commentCalls, closeCalls)
+	}
+	updatedAgain, err := gitopsReadJSONFile(filepath.Join(runDir, "findings.json"))
+	if err != nil {
+		t.Fatalf("read second findings: %v", err)
+	}
+	secondComments := mapSliceValue(mapValue(gitopsFindingsItems(updatedAgain)[0], "github_issue"), "comments")
+	if len(secondComments) != 1 {
+		t.Fatalf("second closeout duplicated comments: %+v", secondComments)
 	}
 }
