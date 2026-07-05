@@ -232,8 +232,25 @@ macro is wrong, not the fixtures.
       agent_off_ramp/default_intent; clear error messages
 - [ ] 1.3 Re-verify the claude-backend Studio MCP precondition with a live
       dispatch; file/fix if still broken before proceeding
-- [ ] 1.4 Decision recording: confirm agent.call / write_mode_granted /
-      TransitionApplied provenance is unchanged and legible for a desugared room
+- [x] 1.4 Decision recording: confirm agent.call / write_mode_granted /
+      TransitionApplied provenance is unchanged and legible for a desugared room.
+      Confirmed via a flow-fixture test on workbench_smoke
+      (`internal/testrunner/flows_workbench_smoke_trace_test.go`): the
+      synthesized on_enter dispatch's AgentCalled event carries
+      `state_path == "bench"`, using host_cassette: (not host_handlers:,
+      which replaces the handler wholesale and never writes AgentCalled).
+      Also lands the S6 usable-kitsoki-gate producer contract's minimal
+      honest version (`docs/tracing/usable-kitsoki-gate.md`): a
+      `usable_kitsoki_gate` object on the existing `turn.end` payload
+      (`internal/orchestrator/workbench_gate_signal.go`, no new event kind)
+      carrying `candidate_completed`/`silent_bounce`/`misroute_adjacent`/
+      `evidence_refs`, computed from the dispatching state's on_error
+      outcome — not yet joined against a scenario's `expected_effects` list,
+      since S4's scenario IR was not present in this worktree at the time
+      (documented gap in the file's own doc comment). Field names are
+      cross-checked against
+      `tools/arena/arena/plugins/usable_kitsoki_gate_schema.json` by a
+      deterministic test.
 
 ## 2. Verification
 - [x] 2.1 Stateless unit: loader desugars a minimal `workbench:` block into

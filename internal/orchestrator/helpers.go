@@ -395,6 +395,12 @@ func (o *Orchestrator) RunIntentWithInput(ctx context.Context, sid app.SessionID
 		Turn:      turnNum,
 		StatePath: result.NewState,
 	})
+	// dispatchState is the room whose on_enter host calls are about to fire —
+	// captured before hostRedirect can reassign result.NewState, so
+	// transitionedTurnEndWithGateSignal's usable-kitsoki-gate signal
+	// (room-workbench Task 1.4(b)) attributes this turn's dispatch to the
+	// room that actually owned it, not wherever an on_error redirect lands.
+	dispatchState := result.NewState
 	hostEvents, hostWorld, hostView, hostRedirect, hostErr := o.dispatchHostCalls(ctx, sid, result.HostCalls, result.World, result.NewState)
 	if hostErr != nil {
 		tl.Debug(ctx, trace.EvHarnessError, slog.String("host_dispatch_error", hostErr.Error()))
@@ -406,6 +412,7 @@ func (o *Orchestrator) RunIntentWithInput(ctx context.Context, sid app.SessionID
 			result.View = hostView
 		}
 	}
+	dispatchFailed := hostRedirect != ""
 	if hostRedirect != "" {
 		result.NewState = hostRedirect
 		// The never-silent banner is applied once, upstream, by
@@ -433,7 +440,7 @@ func (o *Orchestrator) RunIntentWithInput(ctx context.Context, sid app.SessionID
 
 	successEvents := append([]store.Event{inputEvent, startEvent, acceptedEvent}, result.Events...)
 	endEvent := newOrchestratorEvent(store.TurnEnded,
-		transitionedTurnEnd(result.NewState, result.View), turnNum)
+		transitionedTurnEndWithGateSignal(o.def, result.NewState, result.View, dispatchState, dispatchFailed), turnNum)
 	successEvents = append(successEvents, endEvent)
 	for i := range successEvents {
 		successEvents[i].Turn = turnNum

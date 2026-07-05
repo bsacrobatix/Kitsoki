@@ -1469,6 +1469,12 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		Turn:      turnNum,
 		StatePath: result.NewState,
 	})
+	// dispatchState is the room whose on_enter host calls are about to fire —
+	// captured before hostRedirect can reassign result.NewState, so
+	// transitionedTurnEndWithGateSignal's usable-kitsoki-gate signal
+	// (room-workbench Task 1.4(b)) attributes this turn's dispatch to the
+	// room that actually owned it, not wherever an on_error redirect lands.
+	dispatchState := result.NewState
 	hostEvents, hostWorld, hostView, hostRedirect, hostErr := o.dispatchHostCalls(ctx, sid, result.HostCalls, result.World, result.NewState)
 	if hostErr != nil {
 		// A cancelled execution context (operator hit Stop — see
@@ -1488,6 +1494,7 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 			result.View = hostView
 		}
 	}
+	dispatchFailed := hostRedirect != ""
 	// Honour an on_error: redirect from the host dispatch.  The redirect
 	// state's on_enter has already run via dispatchHostCalls, and a
 	// TransitionApplied event was appended for replay; here we update
@@ -1533,7 +1540,7 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 
 	successEvents := append(prefix, result.Events...)
 	endEvent := newOrchestratorEvent(store.TurnEnded,
-		transitionedTurnEnd(result.NewState, result.View), turnNum)
+		transitionedTurnEndWithGateSignal(o.def, result.NewState, result.View, dispatchState, dispatchFailed), turnNum)
 	successEvents = append(successEvents, endEvent)
 	if inputEvent.Kind != "" {
 		successEvents = append([]store.Event{inputEvent}, successEvents...)
@@ -2069,6 +2076,7 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 		Turn:      turnNum,
 		StatePath: result.NewState,
 	})
+	dispatchState := result.NewState
 	hostEvents, hostWorld, hostView, hostRedirect, hostErr := o.dispatchHostCalls(ctx, sid, result.HostCalls, result.World, result.NewState)
 	if hostErr != nil {
 		// A cancelled execution context (operator hit Stop — see
@@ -2088,6 +2096,7 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 			result.View = hostView
 		}
 	}
+	dispatchFailed := hostRedirect != ""
 	if hostRedirect != "" {
 		result.NewState = hostRedirect
 	}
@@ -2103,7 +2112,7 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 
 	successEvents := append([]store.Event{sdInputEvent, startEvent}, result.Events...)
 	endEvent := newOrchestratorEvent(store.TurnEnded,
-		transitionedTurnEnd(result.NewState, result.View), turnNum)
+		transitionedTurnEndWithGateSignal(o.def, result.NewState, result.View, dispatchState, dispatchFailed), turnNum)
 	successEvents = append(successEvents, endEvent)
 	for i := range successEvents {
 		successEvents[i].Turn = turnNum
@@ -2558,6 +2567,7 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 	}
 
 	// Success: dispatch host calls then persist events.
+	dispatchState := result.NewState
 	hostEvents, hostWorld, hostView, hostRedirect, hostErr := o.dispatchHostCalls(ctx, sid, result.HostCalls, result.World, result.NewState)
 	if hostErr != nil {
 		// A cancelled execution context (operator hit Stop — see
@@ -2577,6 +2587,7 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 			result.View = hostView
 		}
 	}
+	dispatchFailed := hostRedirect != ""
 	if hostRedirect != "" {
 		result.NewState = hostRedirect
 	}
@@ -2591,7 +2602,7 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 
 	successEvents := append([]store.Event{startEvent}, result.Events...)
 	endEvent := newOrchestratorEvent(store.TurnEnded,
-		transitionedTurnEnd(result.NewState, result.View), turnNum)
+		transitionedTurnEndWithGateSignal(o.def, result.NewState, result.View, dispatchState, dispatchFailed), turnNum)
 	successEvents = append(successEvents, endEvent)
 
 	for i := range successEvents {
@@ -3091,6 +3102,25 @@ func transitionedTurnEnd(to app.StatePath, view string) map[string]any {
 	}
 	if v := recordedView(view); v != "" {
 		p["view"] = v
+	}
+	return p
+}
+
+// transitionedTurnEndWithGateSignal is transitionedTurnEnd plus the
+// room-workbench Task 1.4(b) usable-kitsoki-gate signal (see
+// workbench_gate_signal.go's doc comment for the full contract and its
+// documented S4 gap). dispatchingState is the state whose on_enter host
+// calls this turn dispatched (captured by the caller right after
+// machine.Turn, before any on_error redirect reassigns result.NewState);
+// dispatchFailed is whether that dispatch took its on_error redirect. When
+// dispatchingState is not a workbench: room (the common case), the payload
+// is byte-identical to plain transitionedTurnEnd.
+func transitionedTurnEndWithGateSignal(def *app.AppDef, to app.StatePath, view string, dispatchingState app.StatePath, dispatchFailed bool) map[string]any {
+	p := transitionedTurnEnd(to, view)
+	if sig := workbenchGateSignal(def, dispatchingState, dispatchFailed, view); sig != nil {
+		for k, v := range sig {
+			p[k] = v
+		}
 	}
 	return p
 }
