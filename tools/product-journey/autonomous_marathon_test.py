@@ -214,6 +214,65 @@ def main() -> int:
                   and "stats=fail" in missing_stats["autonomous_marathon_summary"],
                   failures)
 
+            unrelated_stats_root = tmp / "unrelated-stats-root"
+            unrelated_run = unrelated_stats_root / "run-unrelated"
+            unrelated_run.mkdir(parents=True)
+            run.write_json(unrelated_run / "findings.json", {
+                "items": [
+                    {
+                        "id": "finding-unrelated",
+                        "kind": "issue",
+                        "title": "Unrelated fixed persona QA issue",
+                        "summary": "This fixed issue belongs to a different run and must not satisfy the current marathon stats gate.",
+                        "scenario": "bugfix",
+                        "severity": "high",
+                        "origin": "observed",
+                        "status": "fixed",
+                        "github_issue": {
+                            "url": "https://github.com/o/r/issues/999",
+                            "repo": "o/r",
+                            "number": "999",
+                            "state": "closed",
+                            "comments": [{"body": "kitsoki-fixed-in: unrelated"}],
+                        },
+                    }
+                ]
+            })
+            unrelated_stats = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-unrelated-stats",
+                "bugfix",
+                7,
+                "o/r",
+                str(tmp / "gh-agent-unrelated-stats.json"),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                str(unrelated_stats_root),
+                "",
+                0.82,
+                25,
+                "replay",
+                None,
+            )
+            check("marathon fails closed when aggregate stats omit the current run",
+                  unrelated_stats["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and unrelated_stats["autonomous_fix_status"] == "autonomous_fix_valid"
+                  and unrelated_stats["stats_found_count"] == 1
+                  and unrelated_stats["stats_fixed_count"] == 1
+                  and "current_run_scanned=no" in unrelated_stats["autonomous_marathon_summary"],
+                  failures)
+
             replay = run.autonomous_marathon(
                 catalog,
                 github_targets,

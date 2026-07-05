@@ -5002,9 +5002,16 @@ def autonomous_marathon(
     stats_output_path = str(stats.get("stats_output", "")).strip()
     stats_output_exists = bool(stats_output_path) and run_dir_from_arg(stats_output_path).exists()
     credible_issue_count = len(credible_issues)
+    scanned_run_dirs = {
+        run_dir_from_arg(path).resolve()
+        for path in stats.get("run_dirs", []) or []
+        if str(path).strip()
+    }
+    current_run_scanned = run_dir.resolve() in scanned_run_dirs
     stats_ok = (
         stats.get("status") == "stats_derived"
         and stats_output_exists
+        and current_run_scanned
         and int(stats.get("findings_found_count", 0) or 0) >= credible_issue_count
         and int(stats.get("findings_filed_count", 0) or 0) >= credible_issue_count
         and int(stats.get("issues_fixed_count", 0) or 0) >= credible_issue_count
@@ -5015,6 +5022,7 @@ def autonomous_marathon(
         else (
             "fail: "
             f"status={stats.get('status', '')}, output={stats_output_path or '(missing)'}, "
+            f"current_run_scanned={'yes' if current_run_scanned else 'no'}, "
             f"found={stats.get('findings_found_count', 0)}/{credible_issue_count}, "
             f"filed={stats.get('findings_filed_count', 0)}/{credible_issue_count}, "
             f"fixed={stats.get('issues_fixed_count', 0)}/{credible_issue_count}"
@@ -5196,6 +5204,7 @@ def derive_stats(root: Path, issue_state_file: str, similarity_threshold: float,
         "stats_root": str(root),
         "stats_output": "",
         "runs_scanned": len(run_findings),
+        "run_dirs": [str(run_dir) for run_dir, _findings in run_findings],
         "findings_found_count": len(credible),
         "findings_filed_count": len(filed),
         "issues_fixed_count": len(fixed),
