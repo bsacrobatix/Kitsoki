@@ -131,7 +131,7 @@ export function edgeLabel(edge: string): string {
     qa_evidence: "QA evidence",
     from_persona: "from persona",
   };
-  return labels[edge] ?? edge.replaceAll("_", " ");
+  return labels[edge] ?? edge.split("_").join(" ");
 }
 
 export function typeOrder(type: string): number {
