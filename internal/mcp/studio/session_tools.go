@@ -30,9 +30,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
+	"github.com/google/uuid"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/app"
@@ -364,7 +366,7 @@ func (srv *Server) handleSessionNew(
 	if args.StoryPath == "" {
 		return buildToolError(ErrBadRequest, "session.new: story_path is required"), nil, nil
 	}
-	tracePath, err := resolveTracePath(args.Trace)
+	tracePath, err := resolveTracePath(args.Trace, args.StoryPath, args.Key)
 	if err != nil {
 		return buildToolError(ErrBadRequest, err.Error()), nil, nil
 	}
@@ -413,7 +415,7 @@ func (srv *Server) handleSessionAttach(
 	if args.Key == "" {
 		return buildToolError(ErrBadRequest, "session.attach: key is required"), nil, nil
 	}
-	tracePath, err := resolveTracePath(args.Trace)
+	tracePath, err := resolveTracePath(args.Trace, args.StoryPath, args.Key)
 	if err != nil {
 		return buildToolError(ErrBadRequest, err.Error()), nil, nil
 	}
@@ -1192,7 +1194,7 @@ func (srv *Server) composeRenderFrame(ctx context.Context, args RenderArgs, cols
 // before returning, so a spec render leaves nothing behind and touches no open
 // handle.
 func (srv *Server) specFrame(ctx context.Context, storyPath, state string, world map[string]any, cols, rows int) (tui.Frame, error) {
-	tracePath, err := resolveTracePath("")
+	tracePath, err := ephemeralTracePath()
 	if err != nil {
 		return tui.Frame{}, err
 	}
@@ -1327,10 +1329,39 @@ func frameResult(f tui.Frame) FrameResult {
 // resolveTracePath returns the trace path for a driving handle: the caller's
 // override when set, else a fresh temp .jsonl file. Each session gets its own
 // durable trace (the same JSONL `kitsoki turn --trace` writes).
-func resolveTracePath(override string) (string, error) {
+// resolveTracePath picks the JSONL trace path for a driving session. An
+// explicit override always wins. Otherwise the trace lands under the same
+// discoverable ~/.kitsoki/sessions/<app>/<sha8>-<slug>.jsonl location the web
+// transport uses (store.DefaultTracePath), tagged with the "mcp" transport
+// label so `kitsoki trace --app <app> --latest` and cost-mining tools can find
+// and distinguish it — see
+// issues/bugs/2026-06-24T090000Z-mcp-live-sessions-no-discoverable-trace.md.
+// Before this fix the default was an anonymous $TMPDIR/kitsoki-studio-*.jsonl
+// file: real durable events, but unreachable by app/id and eventually
+// temp-reaped, silently losing cost/token/replay evidence for every MCP-driven
+// live session that didn't pass an explicit trace: arg.
+func resolveTracePath(override, storyPath, key string) (string, error) {
 	if override != "" {
 		return override, nil
 	}
+	thread := key
+	if thread == "" {
+		thread = uuid.NewString()
+	}
+	path := store.DefaultTracePath(appSlugFromStoryPath(storyPath), "mcp", thread)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("create trace dir: %v", err)}
+	}
+	return path, nil
+}
+
+// ephemeralTracePath returns a throwaway temp-file trace path for callers that
+// explicitly don't want a discoverable, durable trace — e.g. specFrame's
+// torn-down-before-returning ephemeral runtime. This is the pre-fix behavior
+// of resolveTracePath's default branch, kept for the cases where it was
+// actually correct (not a driving session an operator might want to inspect
+// or replay later).
+func ephemeralTracePath() (string, error) {
 	f, err := os.CreateTemp("", "kitsoki-studio-*.jsonl")
 	if err != nil {
 		return "", &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("create trace file: %v", err)}
@@ -1338,6 +1369,22 @@ func resolveTracePath(override string) (string, error) {
 	name := f.Name()
 	_ = f.Close()
 	return name, nil
+}
+
+// appSlugFromStoryPath derives an app identifier from a story's app.yaml path
+// for trace-path purposes, without requiring the app to be loaded first (trace
+// path is resolved before OpenDrivingSession loads the story). By convention a
+// story's directory name IS its app id (stories/bugfix/app.yaml -> "bugfix"),
+// matching store.DefaultTracePath's appSlug for the web transport
+// (cmd/kitsoki/registry.go, which uses the loaded def.App.ID — same value for
+// every story in this repo). Falls back to "app" for an unparseable path
+// rather than failing the whole session.new call over a cosmetic detail.
+func appSlugFromStoryPath(storyPath string) string {
+	dir := filepath.Base(filepath.Dir(storyPath))
+	if dir == "" || dir == "." || dir == string(filepath.Separator) {
+		return "app"
+	}
+	return dir
 }
 
 // ── inspect on the runtime ────────────────────────────────────────────────────
