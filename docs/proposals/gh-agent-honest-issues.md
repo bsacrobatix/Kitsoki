@@ -4,9 +4,13 @@
 `internal/ghagent/dispatch.go` (`RunResult.Stubbed`/`StubReason`,
 `Dispatcher.dispatchRouted`'s honest prose branch) and
 `internal/ghagent/dispatch_e2e_test.go` (`TestDispatchStubbedRunNeverSaysDone`
-+ updated fixtures). Tasks 1-4 (real dispatch, per-job app-dir, drain-outside-
-poll-loop, adopt+document) are unstarted and remain gated on S1 (room
-workbench) / S3 (context floor) per Impact below.
++ updated fixtures). Task 1 (per-job `KITSOKI_APP_DIR`) shipped at `257b5c3c`
+— see `internal/testrunner/flows.go`'s `appDirLoadMu`/`loadAppForRun`. Task 2
+(real pipeline dispatch) has now landed for **stories/bugfix only** — see
+`internal/ghagent/realdispatch.go`'s doc comment for the honest scope
+correction (stories/dev-story has no recorded cassette yet and still runs the
+task-0/1 stub path). Tasks 3-4 (drain-outside-poll-loop, adopt+document)
+remain unstarted.
 **Kind:**   runtime (ghagent)
 **Epic:**   usable-kitsoki.md
 
@@ -101,8 +105,13 @@ existing [`kitsoki-github-agent.md`](kitsoki-github-agent.md) epic.
 
 | Kind | Name | Shape | Notes |
 |---|---|---|---|
-| world key | `gh_job_worktree` | `string` | Per-job worktree path the dispatcher checks out before spawning the real pipeline; read by `RunStorySession`, written by the dispatcher at claim time. |
 | host call | *(none new)* | — | Real dispatch reuses `host.git_worktree`, `host.agent.*`, `host.local` exactly as `stories/bugfix` already declares them — no new vocabulary, just a real harness behind it. |
+
+**Correction (task 2 landed):** the `gh_job_worktree` world key originally
+proposed here was never added — see task 2's vocabulary-correction note
+below. The per-job worktree identity is threaded through the sanctioned
+`workdir`/`workspace_id`/`feature_branch`/`workspace_prepared` keys
+`stories/bugfix/rooms/idle.yaml` already declares, not a bespoke one.
 
 ## The model
 
@@ -187,16 +196,53 @@ replaced; each task below updates or replaces the fixtures it makes stale.
       stories' `RunStorySession` calls concurrently in one process (`go test
       -race`) and asserts neither job's `RunURL`/turn count crossed streams.
 
-## 2. Real pipeline dispatch
-- [ ] 2.1 Per-job worktree checkout (`.worktrees/gh-job-<id>`) before spawn;
-      teardown/cleanup policy on completion or failure
-- [ ] 2.2 Live-or-replay harness selection wired into `RunStorySession`
-      (same seam `kitsoki turn`/`web` use), gated on S1 (workbench loop) and
-      S3 (context floor) having landed
-- [ ] 2.3 Stub beat fixtures retained as flow-test-only fixtures (dispatch
-      plumbing coverage), no longer reachable from the production spawn path
-- [ ] 2.4 `Stubbed` field flips to false end-to-end; comment prose carries a
-      real summary + diff/PR link
+## 2. Real pipeline dispatch — SHIPPED for stories/bugfix; stories/dev-story deferred
+- [x] 2.1 Per-job worktree identity (`.worktrees/gh-job-<id>`) seeded at
+      claim time via `internal/ghagent/realdispatch.go`'s `runRealDispatch` —
+      corrected from the proposal's `gh_job_worktree` vocabulary entry
+      (deleted; see below): the worktree is CREATED by the story's own
+      sanctioned `iface.workspace.create` (rooms/idle.yaml Step 2) once
+      `world.workdir`/`feature_branch`/`workspace_id`/`workspace_prepared` are
+      seeded, not by a bespoke checkout here. `cleanupJobWorktree` deletes on
+      success and keeps (bounded 7-day retention, `PruneStaleFailedWorktrees`)
+      on failure, per open-question 2's lean.
+- [x] 2.2 Live-or-replay harness selection (`resolveHarnessMode`,
+      `Dispatcher.HarnessMode` / `KITSOKI_GHAGENT_HARNESS`) wired into
+      `RunStorySession` via context, defaulting to `replay` always — NOT
+      `cmd/kitsoki`'s `autoSelectHarness` (which sniffs ambient
+      credentials/PATH and would silently go live in CI); `live` requires an
+      explicit operator override, never auto-detected.
+- [x] 2.3 `internal/ghagent/testdata/bugfix.beat.yaml` is now flow-test-only
+      (dispatch-plumbing coverage via `runStubBeatFixture`, exercised
+      directly by `TestRunStubBeatFixture_BugfixPlumbingStillValid`) —
+      unreachable from `RunStorySession`'s production spawn path for the
+      "bug" route, which now resolves through `realDispatchPlans["stories/
+      bugfix"]` instead.
+- [x] 2.4 `Stubbed` flips to `false` end-to-end for `stories/bugfix`
+      (`TestRunStorySession_RealDispatch_BugfixReplay`); comment prose carries
+      a real summary extracted from the run's `HostReturned` events (agent
+      submit `summary_markdown` + `host.git` diff). The no-"Done"-without-
+      real-work invariant (task 0's `TestDispatchStubbedRunNeverSaysDone`) is
+      extended by `TestDispatchRealDispatchOnlyDoneWithRealHostCalls`: a
+      real-dispatch result may only render as complete when `Stubbed ==
+      false` AND `RealHostCalls > 0`.
+- **Scope correction:** stories/dev-story has no recorded, arg-matched host
+  cassette walking its full pipeline yet (only `inspect_cassette` fixtures for
+  Starlark calls exist under `stories/dev-story/cassettes`), so its route
+  still runs the task-0/1 stub path (`runStubBeatFixture`) — honestly
+  reported via `Stubbed == true`, never "Done". Extending `realDispatchPlans`
+  to dev-story needs its own recorded cassette, authored the same way
+  `stories/bugfix/cassettes/happy_human.cassette.yaml` was (a real Claude CLI
+  run captured via `KITSOKI_CASSETTE_RECORD`), which is follow-up work, not
+  bundled into this slice.
+- **Vocabulary correction:** the `gh_job_worktree` world key this proposal's
+  Vocabulary changes table originally specified was never added. Seeding an
+  un-declared world key would have bypassed `rooms/idle.yaml`'s Step-0w guard
+  (which only recognizes `world.workspace_prepared` and a `.worktrees/`-
+  prefixed `world.workdir` as legitimate caller-supplied identity); the
+  per-job worktree path is instead threaded directly into the sanctioned
+  `workdir`/`workspace_id`/`feature_branch`/`workspace_prepared` keys that
+  path already declares. No new vocabulary was needed.
 
 ## 3. Drain outside the poll loop
 - [ ] 3.1 Run `drainQueuedGHAgentJobs` on its own ticker independent of
