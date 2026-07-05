@@ -2,8 +2,6 @@ package studio
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -19,8 +17,7 @@ import (
 // issue.create files an issue and inbox.sync_github pulls assigned issues INTO a
 // handle's inbox, but the everyday GitHub reads and comments an agent needs
 // while developing still need a first-class MCP path. Issue listing and
-// comments use native host providers; PR view still wraps the GitHub CLI through
-// host.RunHandler until that read surface is migrated too. No LLM.
+// comments and PR view use native host providers. No LLM.
 //
 // gh.issues / gh.pr_view are pure reads (available read-only); gh.comment posts,
 // so a read-only server omits it.
@@ -34,7 +31,7 @@ func (srv *Server) registerGHTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "gh.pr_view",
-		Description: "View a pull request via `gh pr view --json` (+ optional `gh pr diff`). {number (required), dir?, repo?, include_diff? (also fetch the unified diff)} → {ok, pr:{number, title, state, url, body, files[{path, additions, deletions}]}, diff?}. Use it to read a PR's body and the exact files/diff it changed (e.g. a filed bug's own regression test). Read-only.",
+		Description: "View a pull request via native GitHub API. {number (required), dir?, repo?, include_diff? (also fetch the unified diff)} → {ok, pr:{number, title, state, url, body, files[{path, additions, deletions}]}, diff?}. Use it to read a PR's body and the exact files/diff it changed (e.g. a filed bug's own regression test). Read-only.",
 	}, srv.handleGHPRView)
 
 	if srv.readOnly {
@@ -163,32 +160,19 @@ func (srv *Server) handleGHPRView(ctx context.Context, req *mcpsdk.CallToolReque
 	if args.Number <= 0 {
 		return buildToolError(ErrBadRequest, "gh.pr_view: number is required"), nil, nil
 	}
-	num := strconv.Itoa(args.Number)
-	ghArgs := []string{"pr", "view", num, "--json", "number,title,state,url,body,files"}
-	if args.Repo != "" {
-		ghArgs = append(ghArgs, "--repo", args.Repo)
-	}
-	out, exit, err := ghRun(ctx, args.Dir, ghArgs...)
-	if rerr := ghErr("gh.pr_view", out, exit, err); rerr != nil {
+	repo, rerr := resolveGitHubRepoForStudio(ctx, "gh.pr_view", args.Dir, args.Repo)
+	if rerr != nil {
 		return rerr, nil, nil
 	}
-	parsed, perr := parseJSONAny(out)
-	if perr != nil {
-		return buildToolError(ErrBadRequest, fmt.Sprintf("gh.pr_view: parse gh output: %v", perr)), nil, nil
+	view, err := host.GitHubPRView(ctx, host.GitHubPRViewOptions{
+		Repo:        repo,
+		Number:      args.Number,
+		IncludeDiff: args.IncludeDiff,
+	})
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("gh.pr_view: %v", err)), nil, nil
 	}
-	res := GHPRViewOK{OK: true, PR: parsed}
-	if args.IncludeDiff {
-		diffArgs := []string{"pr", "diff", num}
-		if args.Repo != "" {
-			diffArgs = append(diffArgs, "--repo", args.Repo)
-		}
-		dout, dexit, derr := ghRun(ctx, args.Dir, diffArgs...)
-		if rerr := ghErr("gh.pr_view (diff)", dout, dexit, derr); rerr != nil {
-			return rerr, nil, nil
-		}
-		res.Diff = dout
-	}
-	return nil, res, nil
+	return nil, GHPRViewOK{OK: true, PR: view.PR, Diff: view.Diff}, nil
 }
 
 // ── gh.comment ────────────────────────────────────────────────────────────────
@@ -255,57 +239,4 @@ func (srv *Server) handleGHComment(ctx context.Context, req *mcpsdk.CallToolRequ
 		url, _ = res.Data["comment_id"].(string)
 	}
 	return nil, GHCommentOK{OK: true, URL: strings.TrimSpace(url)}, nil
-}
-
-// ── gh execution + helpers ────────────────────────────────────────────────────
-
-// ghRun runs the gh CLI in argv mode via the shared host.RunHandler. dir is the
-// working directory (a repo checkout, so gh can infer the repo); empty runs in
-// the server cwd. Returns combined stdout, exit code, and an infra error.
-func ghRun(ctx context.Context, dir string, args ...string) (stdout string, exit int, err error) {
-	anyArgs := make([]any, len(args))
-	for i, a := range args {
-		anyArgs[i] = a
-	}
-	hargs := map[string]any{"cmd": "gh", "args": anyArgs}
-	if dir != "" {
-		hargs["cwd"] = dir
-	}
-	res, err := host.RunHandler(ctx, hargs)
-	if err != nil {
-		return "", -1, err
-	}
-	if res.Error != "" && res.Data == nil {
-		return "", -1, errors.New(res.Error)
-	}
-	exit, _ = res.Data["exit_code"].(int)
-	stdout, _ = res.Data["stdout"].(string)
-	return stdout, exit, nil
-}
-
-// ghErr maps a gh invocation to a tool error when it could not start or exited
-// non-zero (gh prints actionable messages — not authenticated, no such PR — on
-// stderr, which RunHandler folds into stdout).
-func ghErr(tool, out string, exit int, err error) *mcpsdk.CallToolResult {
-	if err != nil {
-		return buildToolError(ErrBadRequest, fmt.Sprintf("%s: %v", tool, err))
-	}
-	if exit != 0 {
-		return buildToolError(ErrBadRequest, fmt.Sprintf("%s: gh exited %d: %s", tool, exit, strings.TrimSpace(out)))
-	}
-	return nil
-}
-
-// parseJSONAny unmarshals gh's --json output into a generic value so the result
-// passes the field set through verbatim.
-func parseJSONAny(s string) (any, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil, nil
-	}
-	var v any
-	if err := json.Unmarshal([]byte(s), &v); err != nil {
-		return nil, err
-	}
-	return v, nil
 }
