@@ -152,7 +152,18 @@ func appendFileThreadPath(thread, workdir string) string {
 	if isAppendFileLocalPath(thread) {
 		if !filepath.IsAbs(thread) {
 			if workdir = strings.TrimSpace(workdir); workdir != "" {
-				return filepath.Join(workdir, thread)
+				// Only root the thread in the workdir when the workdir actually
+				// exists. Appending must never RESURRECT a removed worktree as a
+				// plain directory — the handler mkdirs the thread's parents, and
+				// a phantom dir at the worktree path makes the idempotent
+				// `git worktree add` re-create fail with "already exists"
+				// (continue-after-worktree-loss, dogfood smoke).
+				if st, err := os.Stat(workdir); err == nil && st.IsDir() {
+					return filepath.Join(workdir, thread)
+				}
+				if isAppendFileBugThread(thread) {
+					return appendFileTempMirrorPath(thread)
+				}
 			}
 			if isAppendFileBugThread(thread) {
 				return appendFileTempMirrorPath(thread)

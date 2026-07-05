@@ -116,11 +116,21 @@ states:
             - |
               export NO_COLOR=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat
               WT="{{ world.workdir }}"
+              THREAD="{{ world.thread }}"
               # `git -C` targets the worktree; NO cwd: is set so a missing/odd
               # worktree dir can't make exec fail to start (which would bounce
               # via on_error). A worktree that doesn't exist → git errors →
               # 2>/dev/null → DIRTY="" → reported clean (nothing to lose).
+              # The pipeline's OWN thread file is excluded: checkpoint posts
+              # are deliberately routed into the worktree (append_file
+              # transport workdir arg) so they stay out of the primary
+              # checkout — that is transport bookkeeping the pipeline wrote,
+              # not maker lost work, and without the exclusion every real run
+              # would refuse handoff here.
               DIRTY=$(git -C "$WT" status --porcelain 2>/dev/null || echo "")
+              if [ -n "$THREAD" ]; then
+                DIRTY=$(printf '%s\n' "$DIRTY" | grep -vF " $THREAD" || true)
+              fi
               if [ -n "$DIRTY" ]; then
                 jq -n --arg files "$DIRTY" '{dirty:true,files:$files}'
               else
