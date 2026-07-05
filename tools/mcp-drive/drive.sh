@@ -168,8 +168,8 @@ run_once() {
       # by this codex version under --strict-config.
       codex_mcp_args+=(-c "mcp_servers.kitsoki.startup_timeout_sec=${MCP_DRIVE_MCP_STARTUP_TIMEOUT_SEC:-120}")
       codex_mcp_args+=(-c "mcp_servers.kitsoki.tool_timeout_sec=${MCP_DRIVE_MCP_TOOL_TIMEOUT_SEC:-1800}")
-      local _fwd
-      for _fwd in ${MCP_DRIVE_FORWARD_ENV//,/ }; do
+      local _fwd _fwd_list="${MCP_DRIVE_FORWARD_ENV:-}"
+      for _fwd in ${_fwd_list//,/ }; do
         codex_mcp_args+=(-c "mcp_servers.kitsoki.env.${_fwd}=${!_fwd-}")
       done
     fi
