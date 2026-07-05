@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+
+	"kitsoki/internal/kit"
 )
 
 // RootStoryName is the only base story `root.import` may name in v1. The whole
@@ -286,6 +288,210 @@ func syntheticRootPath(repoRoot string) string {
 func ifaceList() string {
 	names := make([]string, 0, len(DevStoryIfaces))
 	for k := range DevStoryIfaces {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	out := ""
+	for i, n := range names {
+		if i > 0 {
+			out += ", "
+		}
+		out += n
+	}
+	return out
+}
+
+// KitImportSpec configures how BuildKitImporter/SynthesizeKit binds one of a
+// kit's provided stories into a synthesized importer. It is the kit-manifest
+// analogue of RootSpec: the same "spec != nil folds overrides in" shape,
+// generalized from the single hardcoded dev-story base to an arbitrary
+// kit.yaml-declared story.
+type KitImportSpec struct {
+	// Entry is the child story's initial state (mirrors ImportDef.Entry).
+	// Empty is only valid when the child's own root state name is an
+	// acceptable entry (import-fold's own validation catches a bad value).
+	Entry string
+	// Bindings rebinds the story's host_interfaces onto concrete handler
+	// names, keyed by iface name. Unlike RootSpec.Bindings — checked here
+	// against dev-story's hardcoded DevStoryIfaces set — a kit story's
+	// iface names aren't known statically at this call site; an unknown
+	// iface name is still rejected fail-fast, but by resolveAllInterfaces
+	// during the fold that BuildKitImporter's caller (SynthesizeKit) runs,
+	// not by a pre-check here.
+	Bindings map[string]string
+	// Parameters binds values for the kit manifest's declared `parameters:`
+	// block. Every key MUST be declared in manifest.Parameters — checked
+	// here fail-fast, mirroring BuildRootImporter's DevStoryIfaces check —
+	// and is folded into the import's world_in: on the same-named child
+	// world key (the child story must declare a matching world: key;
+	// caught downstream like any other dead world_in: projection).
+	Parameters map[string]any
+}
+
+// BuildKitImporter constructs the UN-folded importer AppDef for one story a
+// kit provides — the kit-manifest analogue of BuildRootImporter. manifest
+// must already be schema-validated and story-checked (kit.Load/kit.LoadDir
+// does both). storyName must be one of manifest.Provides.Stories; this is
+// checked here as the fail-fast allow-list BuildRootImporter's DevStoryIfaces
+// check mirrors. alias is the import alias the synthesized root folds the
+// story under (becomes the AppDef.States[alias] compound wrapper key);
+// callers typically pass storyName itself.
+//
+// SynthesizeKit runs the result through the identical runLoadPipeline
+// SynthesizeRoot uses (resolveImports → expandPhases → resolveAllInterfaces →
+// validateDef) — same verified Synthesize ≡ Load(emit) round-trip discipline:
+// a def built here folds identically to hand-writing a thin importer of the
+// kit's story on disk.
+func BuildKitImporter(manifest *kit.Def, storyName, alias string, spec *KitImportSpec) (def *AppDef, abs string, err error) {
+	return buildKitImporter(manifest, storyName, alias, spec, nil)
+}
+
+// buildKitImporter is BuildKitImporter plus an injected ImportResolver used
+// for the exit-discovery load of the child story below, so that a kit story's
+// own imports resolve through the same resolver SynthesizeKitWithResolver's
+// caller supplied — matching that function's documented contract.
+func buildKitImporter(manifest *kit.Def, storyName, alias string, spec *KitImportSpec, resolver ImportResolver) (def *AppDef, abs string, err error) {
+	if manifest == nil {
+		return nil, "", fmt.Errorf("kit importer: nil manifest")
+	}
+	if !manifest.HasStory(storyName) {
+		return nil, "", fmt.Errorf("kit importer: %q does not provide story %q (provides.stories: %v)", manifest.Identity(), storyName, manifest.Provides.Stories)
+	}
+	if alias == "" {
+		alias = storyName
+	}
+	if spec != nil {
+		for _, name := range sortedKeys(spec.Parameters) {
+			if _, ok := manifest.Parameters[name]; !ok {
+				return nil, "", fmt.Errorf("kit importer: %q: parameter %q is not declared in %s parameters: (declared: %s)", manifest.Identity(), name, manifest.Identity(), kitParamList(manifest))
+			}
+		}
+	}
+
+	abs = manifest.Dir()
+
+	imp := &ImportDef{
+		// Absolute story dir — the documented ImportDef.Source escape hatch
+		// ("/absolute/path" — test escape hatch), used here for the general
+		// case since a kit story is not a `@kitsoki/<name>` base story and
+		// may not live inside the loading repo at all.
+		Source: manifest.StoryDir(storyName),
+		Entry:  "",
+		// "inherit" (default) unions the story's hosts silently. Unlike
+		// BuildRootImporter's strict "declared" mode (a fixed, hand-audited
+		// dev-story host surface), a kit importer has no such fixed surface
+		// to hardcode per-kit, so plain union is the correct default here.
+		Hosts: "inherit",
+	}
+	if spec != nil {
+		imp.Entry = spec.Entry
+	}
+
+	def = &AppDef{
+		App: AppMeta{
+			ID:      fmt.Sprintf("%s-%s", manifest.Kit, storyName),
+			Version: "0.0.0",
+			Title:   fmt.Sprintf("%s — kit importer (%s)", manifest.Identity(), storyName),
+		},
+		Routing: synthesizedRouting(),
+		Imports: map[string]*ImportDef{alias: imp},
+		Root:    alias,
+	}
+
+	// A kit story declares its own `exits:` contract (docs/stories/imports.md);
+	// unlike dev-story (whose fixed exit set BuildRootImporter hand-maps to
+	// pr_landed/main), an arbitrary kit story's exits aren't known statically
+	// here. Discover them by loading the story standalone (it must be
+	// standalone-loadable per the "provides.stories" contract) and generically
+	// map every declared exit to a synthesized terminal state, so the fold
+	// never fails with "child uses @exit:X but parent does not map it"
+	// regardless of which story/kit is imported.
+	childPath := filepath.Join(imp.Source, "app.yaml")
+	var childDef *AppDef
+	var loadErr error
+	if resolver != nil {
+		childDef, loadErr = LoadWithResolver(childPath, nil, resolver)
+	} else {
+		childDef, loadErr = Load(childPath)
+	}
+	if loadErr != nil {
+		return nil, "", fmt.Errorf("kit importer: %q story %q must be standalone-loadable: %w", manifest.Identity(), storyName, loadErr)
+	}
+	if len(childDef.Exits) > 0 {
+		imp.Exits = make(map[string]*ImportExit, len(childDef.Exits))
+		def.States = make(map[string]*State, len(childDef.Exits))
+		for _, name := range sortedKeys(childDef.Exits) {
+			stateName := fmt.Sprintf("__kit_exit__%s__%s", alias, name)
+			imp.Exits[name] = &ImportExit{To: stateName}
+			def.States[stateName] = &State{
+				Description: fmt.Sprintf("kit exit: %s.%s", storyName, name),
+				Terminal:    true,
+			}
+		}
+	}
+
+	if spec != nil {
+		applyKitOverrides(def, imp, spec)
+	}
+	return def, abs, nil
+}
+
+// SynthesizeKit builds the importer for one of a kit's provided stories
+// (BuildKitImporter) and runs it through the identical fold pipeline a
+// file-backed Load runs, exactly mirroring SynthesizeRoot/SynthesizeRootWithResolver.
+func SynthesizeKit(manifest *kit.Def, storyName, alias string, spec *KitImportSpec) (*AppDef, error) {
+	return SynthesizeKitWithResolver(manifest, storyName, alias, spec, nil)
+}
+
+// SynthesizeKitWithResolver is SynthesizeKit plus an injected ImportResolver,
+// mirroring SynthesizeRootWithResolver. A kit story's own imports (if any)
+// resolve through this resolver exactly as a file-backed load's would.
+func SynthesizeKitWithResolver(manifest *kit.Def, storyName, alias string, spec *KitImportSpec, resolver ImportResolver) (*AppDef, error) {
+	def, abs, err := buildKitImporter(manifest, storyName, alias, spec, resolver)
+	if err != nil {
+		return nil, err
+	}
+	return runLoadPipeline(def, syntheticKitPath(abs, manifest, storyName), abs, nil, resolver)
+}
+
+// applyKitOverrides folds a KitImportSpec's overrides into the synthesized
+// importer + instance app: bindings → imports.<alias>.host_bindings,
+// parameters → world_in: projections + instance world: defaults. Mirrors
+// applyRootOverrides's Bindings/World handling (kit parameters have no
+// synonyms analogue in v1).
+func applyKitOverrides(def *AppDef, imp *ImportDef, spec *KitImportSpec) {
+	if len(spec.Bindings) > 0 {
+		imp.HostBindings = make(map[string]string, len(spec.Bindings))
+		for k, v := range spec.Bindings {
+			imp.HostBindings[k] = v
+		}
+	}
+	if len(spec.Parameters) > 0 {
+		if def.World == nil {
+			def.World = make(map[string]VarDef, len(spec.Parameters))
+		}
+		if imp.WorldIn == nil {
+			imp.WorldIn = make(map[string]string, len(spec.Parameters))
+		}
+		for _, k := range sortedKeys(spec.Parameters) {
+			v := spec.Parameters[k]
+			def.World[k] = VarDef{Type: inferVarType(v), Default: v}
+			imp.WorldIn[k] = fmt.Sprintf("{{ world.%s }}", k)
+		}
+	}
+}
+
+// syntheticKitPath is the sentinel manifest path a synthesized kit importer
+// carries, mirroring syntheticRootPath.
+func syntheticKitPath(repoRoot string, manifest *kit.Def, storyName string) string {
+	return filepath.Join(repoRoot, fmt.Sprintf("<synthesized-kit-%s-%s>", manifest.Kit, storyName), "app.yaml")
+}
+
+// kitParamList renders a kit manifest's declared parameter names as a sorted
+// comma-list for error messages, mirroring ifaceList.
+func kitParamList(manifest *kit.Def) string {
+	names := make([]string, 0, len(manifest.Parameters))
+	for k := range manifest.Parameters {
 		names = append(names, k)
 	}
 	sort.Strings(names)
