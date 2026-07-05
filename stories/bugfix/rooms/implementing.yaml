@@ -146,15 +146,16 @@ states:
             - |
               set +e
               export GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat
-              WT="{{ world.workdir }}"
-              cd "$WT" || { printf '{"sha":"","committed":false}\n'; exit 0; }
+              # host.run already chdirs the child into cwd (world.workdir); do NOT
+              # re-apply world.workdir here — it is a RELATIVE path in production
+              # and a second cd/git -C would nest it under the already-chdir'd cwd.
               git add -A
               git reset -q -- .kitsoki-owner 2>/dev/null
               if git diff --cached --quiet; then
                 printf '{"sha":"","committed":false}\n'
               else
                 git commit -q -m "test(repro): RED reproducer for {{ world.ticket_id }}" >/dev/null 2>&1
-                printf '{"sha":"%s","committed":true}\n' "$(git -C "$WT" rev-parse HEAD)"
+                printf '{"sha":"%s","committed":true}\n' "$(git rev-parse HEAD)"
               fi
           cwd: "{{ world.workdir }}"
         on_error: idle
