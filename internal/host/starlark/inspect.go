@@ -146,10 +146,11 @@ func (deniedInspector) Probe(_ context.Context, name string, _ []string) (ProbeR
 
 // ─── production inspector ────────────────────────────────────────────────────
 
-// probeSpec is one entry in the global probe allow-list: a fixed argv template
-// whose {0},{1}… placeholders are filled positionally from the script-supplied
-// args. The program is exec'd directly (no shell), so there is no word-splitting,
-// globbing, or injection surface — an arg can only ever land in one argv slot.
+// probeSpec is one entry in the global process probe allow-list: a fixed argv
+// template whose {0},{1}… placeholders are filled positionally from the
+// script-supplied args. The program is exec'd directly (no shell), so there is
+// no word-splitting, globbing, or injection surface — an arg can only ever land
+// in one argv slot.
 type probeSpec struct {
 	// argv is the command and its template arguments. argv[0] is the program;
 	// "{n}" tokens in later slots are replaced by args[n].
@@ -157,18 +158,17 @@ type probeSpec struct {
 }
 
 // probeAllowList is the GLOBAL read-only probe vocabulary. It is intentionally
-// tiny and audited: each entry is a read-only inspection of repo/issue state, no
-// program that can mutate the working tree or reach arbitrary hosts. Per-story
-// extension of this list is a documented v1 follow-up; this global base is the
-// security boundary now.
+// tiny and audited: each entry is a read-only inspection of repo state, no
+// program that can mutate the working tree or reach arbitrary hosts. Native
+// network probes such as gh.issue.list are handled explicitly in Probe, not by
+// this process allow-list. Per-story extension of this list is a documented v1
+// follow-up; this global base is the security boundary now.
 //
-//	gh.issue.list -> gh issue list --repo {0} --json number,title,state --limit 200
-//	git.status    -> git status --porcelain
-//	git.ls_files  -> git ls-files {0}
+//	git.status   -> git status --porcelain
+//	git.ls_files -> git ls-files {0}
 var probeAllowList = map[string]probeSpec{
-	"gh.issue.list": {argv: []string{"gh", "issue", "list", "--repo", "{0}", "--json", "number,title,state", "--limit", "200"}},
-	"git.status":    {argv: []string{"git", "status", "--porcelain"}},
-	"git.ls_files":  {argv: []string{"git", "ls-files", "{0}"}},
+	"git.status":   {argv: []string{"git", "status", "--porcelain"}},
+	"git.ls_files": {argv: []string{"git", "ls-files", "{0}"}},
 }
 
 // productionInspector is the real Inspector: filesystem reads rooted at a working
@@ -339,6 +339,14 @@ func (p *productionInspector) Write(_ context.Context, path string, content []by
 // argv template and exec'd directly (no shell). An unknown name is an error; a
 // non-zero exit is returned in ProbeResult.Exit, not as an error.
 func (p *productionInspector) Probe(ctx context.Context, name string, args []string) (ProbeResult, error) {
+	if name == "gh.issue.list" {
+		res, err := probeGitHubIssueList(ctx, args)
+		if err != nil {
+			return ProbeResult{}, err
+		}
+		p.record("probe", name, fmt.Sprintf("exit:%d", res.Exit))
+		return res, nil
+	}
 	spec, ok := probeAllowList[name]
 	if !ok {
 		return ProbeResult{}, fmt.Errorf("starlark probe %q: not on the allow-list", name)
