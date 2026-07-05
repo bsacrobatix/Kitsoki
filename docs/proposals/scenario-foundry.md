@@ -219,10 +219,22 @@ the compiler against the same (redacted) mining output and diffing.
       entries, mined personas from intent clusters)
 
 ## 4. Paraphrase tier 2.5
-- [ ] 4.1 Semantic-match recording path: pre-recorded paraphrase pool,
-      no live spend in CI, reuses the replay harness's match discipline
+- [x] 4.1 Semantic-match recording path: pre-recorded paraphrase pool,
+      no live spend in CI, reuses the replay harness's match discipline.
+      Implemented as an optional `paraphrases:` list on a recording entry
+      (`internal/harness/replay.go`) — every pool member is indexed under
+      the same exact/case-insensitive lookup as `input:`, so replay stays
+      a pure pre-recorded lookup (no embedding/live-model call at replay
+      time or in CI); an utterance outside the pool still misses with
+      `ErrRecordingMiss`. Documented in
+      `docs/tracing/testing.md#paraphrase-tier-25`. Tested in
+      `internal/harness/harness_test.go`
+      (`TestReplayHarness_ParaphrasePool`,
+      `TestReplayHarness_ParaphraseEmptyRejected`).
 - [ ] 4.2 (only if 4.1 proves insufficient) small local paraphraser,
       gated behind explicit invocation per the repo's no-LLM-in-CI rule
+      — deferred; not built (no evidence yet that the pre-recorded pool
+      is insufficient).
 
 ## 5. Document
 - [ ] 5.1 Write `docs/tracing/scenario-foundry.md`; update
