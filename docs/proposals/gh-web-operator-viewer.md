@@ -1,6 +1,11 @@
 # TUI: Web viewer — artifacts + operator drive
 
-**Status:** Draft v1. Nothing implemented yet.
+**Status:** Draft v1. Nothing implemented yet — confirmed on a re-audit
+alongside the shipped `docs/architecture/github-agent.md` dispatch write-up: no artifact gallery and no
+GitHub-OAuth-gated operator-drive surface exist. The gh-agent job list
+(`/runs`, `/run/<job-id>`) is a plain HTML table with no auth, no media
+rendering, and no drive affordance — it is the run-link target this slice
+would build *on top of*, not an implementation of it.
 **Kind:**   tui
 **Epic:**   kitsoki-github-agent.md
 

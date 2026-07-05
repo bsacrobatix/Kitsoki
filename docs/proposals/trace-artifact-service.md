@@ -1,6 +1,13 @@
 # Tracing: Trace + artifact service
 
-**Status:** Draft v1. Nothing implemented yet.
+**Status:** Draft v1. Nothing implemented yet — confirmed on a re-audit
+alongside the shipped `docs/architecture/github-agent.md` dispatch write-up: `internal/runstatus/server`
+still serves a single in-process session (`sessions.list` returns 0-1
+entries, `server.go:55`), and no Postgres-backed run/artifact index exists.
+The gh-agent dispatcher does mint a linkable-per-job URL today
+(`cmd/kitsoki/gh_agent_serve.go`'s `/run/<job-id>` handler), but it is a
+hand-rolled, single-job HTML/JSON page reading `jobs.GHJobStore` directly —
+not the persistent, queryable, artifact-indexed service this slice scopes.
 **Kind:**   tracing
 **Epic:**   kitsoki-github-agent.md
 

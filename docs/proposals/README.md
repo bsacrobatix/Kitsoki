@@ -73,9 +73,10 @@ thought.
   context floor ([`dispatch-context-floor.md`](dispatch-context-floor.md),
   runtime), the Scenario Foundry
   ([`scenario-foundry.md`](scenario-foundry.md), tracing + tooling), honest
-  gh-agent issue dispatch
-  ([`gh-agent-honest-issues.md`](gh-agent-honest-issues.md), runtime), and a
-  release gate (shipped; see
+  gh-agent issue dispatch (runtime — **shipped**, see
+  [`../architecture/github-agent.md`](../architecture/github-agent.md);
+  child proposal deleted per lifecycle), and a
+  release gate (**shipped**; see
   [`docs/tracing/usable-kitsoki-gate.md`](../tracing/usable-kitsoki-gate.md) —
   `usable-kitsoki-release-gate.md` deleted per lifecycle guidance). Supersedes
   `ad-hoc-workbench.md` (via S1) and absorbs

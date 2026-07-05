@@ -1,6 +1,17 @@
 # Runtime: Job dispatch & orchestration
 
-**Status:** Draft v1. Nothing implemented yet.
+**Status:** Draft v1 design; **shipped for issue routes to `stories/bugfix`**.
+`internal/ghagent/dispatch.go` claims a mention as a job, classifies its
+label against a route table (`internal/ghagent/router.go`), spawns a
+per-job `.worktrees/gh-job-<id>` worktree, and — for routes with a
+registered `internal/ghagent/realdispatch.go` plan (bugfix only today) —
+drives the real story end to end through a live-or-replay harness
+(replay by default; `live` is an explicit operator opt-in, never
+ambient-credential-sniffed). Routes without a plan (`stories/dev-story`,
+all PR routes) still run the honest stub path and never claim "Done." See
+`docs/architecture/github-agent.md` for the full dispatch write-up; the
+`host.git`/`host.gh` gaps for PR autopilot (wait-for-checks, `rebase`,
+force-push, thread `resolve`) listed below remain unaddressed.
 **Kind:**   runtime
 **Epic:**   kitsoki-github-agent.md
 

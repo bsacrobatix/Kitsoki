@@ -1,8 +1,22 @@
 # Epic: @kitsoki — a GitHub-native agent with a trace & artifact web service
 
-**Status:** Draft v1. No slices implemented yet.
+**Status:** Draft v1. Slices #1 (ingress) and #2 (dispatch) are real and
+under test — see `internal/ghagent/`, `cmd/kitsoki/gh_agent_serve.go`, and
+`docs/architecture/github-agent.md` for the shipped shape: GitHub-App
+webhook ingress with HMAC verification and a poll fallback
+(`internal/ghagent/githubapp/`), idempotent job claim + a Postgres-backed
+queue (`internal/jobs`), the rolling-status comment substrate, per-job
+`.worktrees/gh-job-<id>` isolation, and real end-to-end dispatch of
+`stories/bugfix` through a live-or-replay harness that defaults to replay
+(`internal/ghagent/realdispatch.go`) — a real Claude CLI never runs
+unattended. `stories/dev-story` issue routes and every PR route still run
+the honest stub path (`Stubbed: true`, never "Done"). Slices #3-#6 (PR
+autopilot, the persistent multi-run trace/artifact service, the web
+viewer's artifact gallery + operator drive, and the tour/demo composite)
+remain Draft — not implemented, though slice #6's demo tour/capture
+scaffolding already exists (`tools/runstatus/tests/playwright/github-demo-*.spec.ts`).
 **Kind:**   epic
-**Slices:** 6 (0/6 shipped)
+**Slices:** 6 (2/6 shipped: substrate real for issues, not PRs; 4 remain Draft)
 
 ## Why
 
@@ -74,8 +88,8 @@ Once every slice ships:
 
 | # | Slice | Kind | Scope (one line) | Depends on | Status | File |
 |---|---|---|---|---|---|---|
-| 1 | GitHub ingress & comment substrate | runtime | `@kitsoki` webhook/poll listener, GitHub-App auth, ack/status/guidance comment posting, parent-comment resolution semantics | — | Draft | [`gh-event-ingress.md`](gh-event-ingress.md) |
-| 2 | Job dispatch & orchestration | runtime | Map a mention → a job: issue label → bugfix/feature story, PR → autopilot; spawn session, mint the run, generate the web-UI link | 1 | Draft | [`gh-job-dispatch.md`](gh-job-dispatch.md) |
+| 1 | GitHub ingress & comment substrate | runtime | `@kitsoki` webhook/poll listener, GitHub-App auth, ack/status/guidance comment posting, parent-comment resolution semantics | — | **Shipped** (real; PR-review-thread resolve still a stub) | [`gh-event-ingress.md`](gh-event-ingress.md) |
+| 2 | Job dispatch & orchestration | runtime | Map a mention → a job: issue label → bugfix/feature story, PR → autopilot; spawn session, mint the run, generate the web-UI link | 1 | **Shipped for issues** (`stories/bugfix` real dispatch; `dev-story` + PRs still stub) | [`gh-job-dispatch.md`](gh-job-dispatch.md) |
 | 3 | PR autopilot story | story | CI-watch + auto-fix, rebase-on-conflict, comment-driven implement, resolve-parent-comment, ask-when-unsure | 1, 2 | Draft | [`pr-autopilot-story.md`](pr-autopilot-story.md) |
 | 4 | Trace + artifact service | tracing | Persistent, publicly-linkable serving of traces + artifacts by handle, with a queryable run/artifact index | — | Draft | [`trace-artifact-service.md`](trace-artifact-service.md) |
 | 5 | Web viewer: artifacts + operator drive | tui | Artifact gallery / media rendering + "drive the conversation directly" surface that posts acks back to GitHub | 4, 1 | Draft | [`gh-web-operator-viewer.md`](gh-web-operator-viewer.md) |
