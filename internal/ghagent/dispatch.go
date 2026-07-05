@@ -32,6 +32,84 @@ type RunResult struct {
 	// StubReason explains why the run was stubbed, for the trace record and
 	// (eventually) operator-facing diagnostics. Empty when Stubbed is false.
 	StubReason string
+	// Harness is which harness served the run's host.agent.* calls: "replay"
+	// (a recorded host cassette — no LLM, no cost) or "live" (the real
+	// agent subprocess; operator-invoked only). Empty for the PR sentinel
+	// beats and the pre-real-dispatch stub path, which don't select a
+	// harness. See docs/proposals/gh-agent-honest-issues.md task 2.2.
+	Harness string
+	// Worktree is the absolute path of the per-job worktree the run used
+	// (task 2.1), when one applies. Empty when the route has no real
+	// dispatch plan yet (stub path) or the harness never materialized a
+	// worktree on disk (replay mode — the cassette serves the workspace
+	// host calls, so nothing is actually checked out).
+	Worktree string
+	// RealHostCalls counts host.* invocations this run made that were
+	// NOT served by an unconditional "always succeed" stub map — i.e. a
+	// real subprocess (live) or a recorded, arg-matched cassette episode
+	// (replay). Zero for a Stubbed run. Used by the no-"Done"-without-
+	// real-work invariant test to prove the real path only ever reports
+	// completion when real work actually happened.
+	RealHostCalls int
+}
+
+// Harness mode constants for real dispatch (task 2.2). Only two values are
+// ever valid; "live" spawns the real agent subprocess (real cost — operator-
+// invoked only) while "replay" serves host.agent.*/host.git/host.local calls
+// from a recorded cassette (no LLM, no network, CI-safe). This mirrors the
+// same live-or-replay seam `kitsoki turn`/`web` expose via --harness, but
+// deliberately does NOT reuse cmd/kitsoki's autoSelectHarness: that helper
+// sniffs ambient credentials/PATH and silently goes live, which is unsafe for
+// an unattended dispatcher (see the HARD RULE in AGENTS.md: tests/CI must
+// default to cassettes/replay; live is operator-invoked only).
+const (
+	HarnessReplay = "replay"
+	HarnessLive   = "live"
+)
+
+// EnvGHAgentHarness is the operator-facing override for the dispatcher's
+// harness mode. Unset (or any value other than "live") means replay. Only an
+// operator standing up `gh-agent serve` in a deliberate live posture should
+// ever set this to "live"; it must never be sniffed from ambient credentials.
+const EnvGHAgentHarness = "KITSOKI_GHAGENT_HARNESS"
+
+// resolveHarnessMode picks the real-dispatch harness mode. explicit (e.g.
+// Dispatcher.HarnessMode, wired by an operator's CLI flag) wins over the
+// EnvGHAgentHarness env var, which wins over the default ("replay"). Any
+// value other than "replay"/"live" is a configuration error — fail loudly
+// rather than silently falling back, since a mistyped mode should never
+// quietly downgrade (or upgrade) the safety posture.
+func resolveHarnessMode(explicit string) (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(explicit))
+	if mode == "" {
+		mode = strings.ToLower(strings.TrimSpace(os.Getenv(EnvGHAgentHarness)))
+	}
+	if mode == "" {
+		mode = HarnessReplay
+	}
+	if mode != HarnessReplay && mode != HarnessLive {
+		return "", fmt.Errorf("ghagent: unknown harness mode %q (want %q or %q)", mode, HarnessReplay, HarnessLive)
+	}
+	return mode, nil
+}
+
+// harnessModeKey is the context key RunStorySession reads the resolved
+// harness mode from. Threaded via context (rather than widening the SpawnFn
+// signature) so injected test SpawnFns and the PR-beat paths stay untouched.
+type harnessModeKey struct{}
+
+func withHarnessMode(ctx context.Context, mode string) context.Context {
+	return context.WithValue(ctx, harnessModeKey{}, mode)
+}
+
+// harnessModeFromContext reads the mode dispatchRouted set, defaulting to the
+// safe replay posture when called out of that path (e.g. tests calling
+// RunStorySession directly without going through Dispatch).
+func harnessModeFromContext(ctx context.Context) string {
+	if v, _ := ctx.Value(harnessModeKey{}).(string); v == HarnessLive {
+		return HarnessLive
+	}
+	return HarnessReplay
 }
 
 // Dispatcher claims a job for a mention and spawns the mapped story no-LLM.
@@ -53,6 +131,12 @@ type Dispatcher struct {
 	// IncidentFn files an operator-facing incident for non-recoverable failures.
 	// It is injected so tests stay offline and production can use host.gh.ticket.
 	IncidentFn func(ctx context.Context, job *jobs.GHJob, errMsg string) (string, error)
+	// HarnessMode explicitly selects the real-dispatch harness ("live" or
+	// "replay"), overriding EnvGHAgentHarness. Empty defers to the env var,
+	// which defers to "replay". Only an operator wiring `gh-agent serve`
+	// deliberately live should ever set this to "live" — see
+	// resolveHarnessMode's doc for why this is never auto-detected.
+	HarnessMode string
 }
 
 // Dispatch runs ONE mention end-to-end. On a fresh claim (won): Post the initial
@@ -192,6 +276,12 @@ func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *j
 	}
 	job.State = jobs.GHRunning
 
+	mode, modeErr := resolveHarnessMode(d.HarnessMode)
+	if modeErr != nil {
+		return d.failBeforeRun(ctx, job, "harness_mode_invalid", modeErr)
+	}
+	ctx = withHarnessMode(ctx, mode)
+
 	spawn := d.SpawnFn
 	if spawn == nil {
 		spawn = RunStorySession
@@ -220,6 +310,13 @@ func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *j
 	if result.Stubbed {
 		_ = d.Jobs.RecordEvent(persistCtx, job.JobID, "stubbed", result.StubReason)
 	}
+	if result.Harness != "" {
+		detail := result.Harness
+		if result.Worktree != "" {
+			detail = fmt.Sprintf("%s worktree=%s", result.Harness, result.Worktree)
+		}
+		_ = d.Jobs.RecordEvent(persistCtx, job.JobID, "harness", detail)
+	}
 	if spawnErr != nil && d.IncidentFn != nil {
 		if incidentURL, incidentErr := d.IncidentFn(persistCtx, job, errMsg); incidentErr == nil && strings.TrimSpace(incidentURL) != "" {
 			_ = d.Jobs.SetIncidentURL(persistCtx, job.JobID, incidentURL)
@@ -232,12 +329,22 @@ func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *j
 	if d.Comments != nil && job.CommentID != "" {
 		meta := Meta{JobID: job.JobID, OriginRef: job.OriginRef, Story: route.Story, State: finalState, RunURL: job.RunURL}
 		// Honest predicate (rendering-time only, not a routing decision — see
-		// docs/proposals/gh-agent-honest-issues.md task 0): a stubbed run never
-		// gets to say "Done", no matter what FinalState/Turns/Summary it carries.
+		// docs/proposals/gh-agent-honest-issues.md tasks 0 and 2): a stubbed
+		// run never gets to say "Done". Extended for real dispatch (task 2.4):
+		// a route that went through the real-dispatch harness (result.Harness
+		// set) must ALSO show at least one real host call before it may claim
+		// completion — a real-dispatch plan that somehow produced zero host
+		// calls is a bug, not a completed run, and must not be allowed to
+		// render "Done" over nothing. Routes that never select a harness (the
+		// PR-status/rebase beats, or a test double that doesn't populate
+		// RealHostCalls) are unaffected — Harness == "" skips this check.
+		realWorkProven := !result.Stubbed && (result.Harness == "" || result.RealHostCalls > 0)
 		var prose string
 		switch {
 		case result.Stubbed:
 			prose = "acknowledged — pipeline not yet enabled for this route"
+		case !realWorkProven:
+			prose = fmt.Sprintf("acknowledged — `%s` real-dispatch harness reported no real host calls; treating as inconclusive, not done", route.Story)
 		case strings.TrimSpace(result.Summary) != "":
 			prose = result.Summary
 		default:
@@ -309,11 +416,14 @@ func publicRunURL(baseURL, jobID string) string {
 	return baseURL + "/run/" + jobID
 }
 
-// RunStorySession is the default SpawnFn. Issue routes point
-// testrunner.RunFlows at the route's story app.yaml + the per-job beat fixture
-// (authored under internal/ghagent/testdata/<story>.beat.yaml) and assert the
-// story ran >=1 turn. The PR-status route reads the live PR through host.git's
-// pr_status seam so the GitHub comment reports the actual PR state.
+// RunStorySession is the default SpawnFn. Routes with a registered real-
+// dispatch plan (realDispatchPlans — currently stories/bugfix only) drive the
+// REAL story end-to-end in a per-job worktree through a live-or-replay
+// harness (task 2 of gh-agent-honest-issues.md). Routes without one still run
+// the honest beat-fixture stub path from task 0/1 — Stubbed stays true and
+// the comment substrate never says "Done" for them (dispatch.go's rendering
+// predicate). The PR-status/rebase routes read the live PR through host.git's
+// pr_status/pr_rebase seams so the GitHub comment reports the actual state.
 func RunStorySession(ctx context.Context, route Route, job *jobs.GHJob) (RunResult, error) {
 	if route.Story == StoryPRBeat {
 		return RunPRStatusBeat(ctx, job)
@@ -327,6 +437,20 @@ func RunStorySession(ctx context.Context, route Route, job *jobs.GHJob) (RunResu
 		return RunResult{}, err
 	}
 
+	if plan, ok := realDispatchPlans[route.Story]; ok && strings.TrimSpace(route.BeatFixture) == "" {
+		return runRealDispatch(ctx, root, route, job, plan)
+	}
+	return runStubBeatFixture(ctx, root, route, job)
+}
+
+// runStubBeatFixture is the pre-real-dispatch path (task 0/1): it points
+// testrunner.RunFlows at the route's story app.yaml + the per-job beat
+// fixture (internal/ghagent/testdata/<story>.beat.yaml), whose host.agent.*
+// handlers are inline "always succeed" stubs — no LLM ran, no code changed,
+// no matter how many turns "passed". Retained as the flow-test-only fallback
+// for routes real dispatch hasn't reached yet (task 2.3), and still the path
+// a caller-supplied route.BeatFixture (project routes) opts into explicitly.
+func runStubBeatFixture(ctx context.Context, root string, route Route, job *jobs.GHJob) (RunResult, error) {
 	var appPath, beatFixture string
 	if strings.TrimSpace(route.AppPath) != "" {
 		appPath = route.AppPath
@@ -366,9 +490,10 @@ func RunStorySession(ctx context.Context, route Route, job *jobs.GHJob) (RunResu
 		// host.agent.task/ask/decide handlers are inline stubs (see
 		// internal/ghagent/testdata/*.beat.yaml) — no LLM ran and no code
 		// changed, regardless of how many turns "passed". Real dispatch
-		// (task 2 of gh-agent-honest-issues.md) replaces this path.
+		// (task 2 of gh-agent-honest-issues.md) replaces this path for
+		// routes with a registered realDispatchPlans entry.
 		Stubbed:    true,
-		StubReason: "issue route ran the beat-fixture stub (no real pipeline dispatch yet)",
+		StubReason: "issue route ran the beat-fixture stub (no real dispatch plan registered for this story yet)",
 	}, nil
 }
 

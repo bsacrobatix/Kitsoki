@@ -45,4 +45,20 @@
 // The one residual gap: internal/host/starlark_run.go's Starlark-inspector
 // root still falls back to the global env var when world.workdir is unset,
 // so a per-job worktree (task 2.1) should always seed world.workdir.
+//
+// # Real dispatch (task 2)
+//
+// Routes with a registered realdispatch.go plan (stories/bugfix only today —
+// see that file's doc comment) run the REAL machine end-to-end instead of the
+// beat-fixture stub: a per-job worktree identity is seeded through
+// stories/bugfix's own sanctioned workspace_prepared/.worktrees-prefix
+// exemption (rooms/idle.yaml Step-0w), which always sets world.workdir,
+// closing the starlark_run.go gap above for every real-dispatch job. The
+// harness that serves host.agent.*/host.git/host.local calls is selected by
+// resolveHarnessMode (dispatch.go): "replay" (a recorded, arg-matched
+// cassette — no LLM, CI-safe, the default) or "live" (the real agent
+// subprocess — real cost, operator-invoked only via Dispatcher.HarnessMode or
+// the KITSOKI_GHAGENT_HARNESS env var, never auto-detected from ambient
+// credentials). Routes without a plan yet (stories/dev-story) still run the
+// honest beat-fixture stub from tasks 0/1.
 package ghagent
