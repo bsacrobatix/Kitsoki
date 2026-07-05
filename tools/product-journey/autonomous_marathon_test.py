@@ -172,6 +172,8 @@ def main() -> int:
             check("marathon report links fix evidence and stats",
                   "autonomous-fix-report.md" in report_text
                   and "autonomous-marathon-stats.json" in report_text
+                  and "Stats gate: `pass` - pass" in report_text
+                  and "Stats current run scanned: `yes`" in report_text
                   and finalized["stats_found_count"] == 1
                   and finalized["stats_filed_count"] == 1,
                   failures)
@@ -211,6 +213,8 @@ def main() -> int:
                   missing_stats["autonomous_marathon_status"] == "autonomous_marathon_invalid"
                   and missing_stats["autonomous_fix_status"] == "autonomous_fix_valid"
                   and missing_stats["stats_found_count"] == 0
+                  and missing_stats["stats_gate_status"] == "fail"
+                  and missing_stats["stats_current_run_scanned"] == "no"
                   and "stats=fail" in missing_stats["autonomous_marathon_summary"],
                   failures)
 
@@ -270,6 +274,8 @@ def main() -> int:
                   and unrelated_stats["autonomous_fix_status"] == "autonomous_fix_valid"
                   and unrelated_stats["stats_found_count"] == 1
                   and unrelated_stats["stats_fixed_count"] == 1
+                  and unrelated_stats["stats_gate_status"] == "fail"
+                  and unrelated_stats["stats_current_run_scanned"] == "no"
                   and "current_run_scanned=no" in unrelated_stats["autonomous_marathon_summary"],
                   failures)
 

@@ -199,6 +199,9 @@ world:
   stats_root:     { type: string, default: "" }
   stats_output:   { type: string, default: "" }
   stats_summary:  { type: string, default: "" }
+  stats_gate_status: { type: string, default: "" }
+  stats_gate_summary: { type: string, default: "" }
+  stats_current_run_scanned: { type: string, default: "" }
   stats_runs_scanned: { type: int, default: 0 }
   stats_found_count: { type: int, default: 0 }
   stats_filed_count: { type: int, default: 0 }
