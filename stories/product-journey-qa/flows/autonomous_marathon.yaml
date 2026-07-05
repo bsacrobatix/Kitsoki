@@ -87,11 +87,15 @@ host_handlers:
                 gh_agent_run_summary: "github:bsacrobatix/Kitsoki/issue/301=done https://agent.example/run/job-301"
                 gh_agent_fix_evidence_count: 2
                 gh_agent_missing_evidence_count: 0
+                gh_agent_triage_evidence_count: 1
+                gh_agent_missing_triage_count: 0
                 gh_agent_independent_verify_count: 1
                 gh_agent_missing_verify_count: 0
                 gh_agent_missing_run_url_count: 0
                 gh_agent_fix_evidence_summary: "https://agent.example/api/run/job-301/assets/fix-report.md; https://agent.example/api/run/job-301/assets/independent-verify.md"
                 gh_agent_missing_evidence_summary: ""
+                gh_agent_triage_evidence_summary: "https://agent.example/api/run/job-301/assets/triage-verdict.md"
+                gh_agent_missing_triage_summary: ""
                 gh_agent_independent_verify_summary: "https://agent.example/api/run/job-301/assets/independent-verify.md"
                 gh_agent_missing_verify_summary: ""
                 stats_status: stats_derived
@@ -184,11 +188,13 @@ turns:
       issue_closeout_count: 1
       gh_agent_claim_status: claimed
       gh_agent_claim_count: 1
+      gh_agent_triage_evidence_count: 1
+      gh_agent_missing_triage_count: 0
       stats_status: stats_derived
       stats_fixed_count: 1
       weakness_route_count: 1
       validation_status: valid
-    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, review=pass, validation=pass[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 1[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*GH-agent claims[\\s\\S]*claimed: claimed 1[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 1, filed 1, fixed 1[\\s\\S]*Stats gate[\\s\\S]*pass: pass; current run scanned yes"
+    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, review=pass, validation=pass[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 1[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*GH-agent claims[\\s\\S]*claimed: claimed 1[\\s\\S]*GH-agent evidence[\\s\\S]*triage 1 attached / 0 missing[\\s\\S]*triage-[\\s\\S]*verdict.md[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 1, filed 1, fixed 1[\\s\\S]*Stats gate[\\s\\S]*pass: pass; current run scanned yes"
     expect_host_calls:
       - handler: host.run
         args: { call: autonomous_product_journey_marathon_finalize }

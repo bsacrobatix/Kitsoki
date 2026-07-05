@@ -163,11 +163,15 @@ world:
   gh_agent_run_summary: { type: string, default: "" }
   gh_agent_fix_evidence_count: { type: int, default: 0 }
   gh_agent_missing_evidence_count: { type: int, default: 0 }
+  gh_agent_triage_evidence_count: { type: int, default: 0 }
+  gh_agent_missing_triage_count: { type: int, default: 0 }
   gh_agent_independent_verify_count: { type: int, default: 0 }
   gh_agent_missing_verify_count: { type: int, default: 0 }
   gh_agent_missing_run_url_count: { type: int, default: 0 }
   gh_agent_fix_evidence_summary: { type: string, default: "" }
   gh_agent_missing_evidence_summary: { type: string, default: "" }
+  gh_agent_triage_evidence_summary: { type: string, default: "" }
+  gh_agent_missing_triage_summary: { type: string, default: "" }
   gh_agent_independent_verify_summary: { type: string, default: "" }
   gh_agent_missing_verify_summary: { type: string, default: "" }
   native_ghagent_status: { type: string, default: "" }
