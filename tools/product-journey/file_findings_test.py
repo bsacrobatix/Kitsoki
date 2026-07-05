@@ -442,6 +442,34 @@ def main():
                result["autonomous_gate_summary"] == "filing=pass, gh_agent=fail, review=fail, validation=fail"
                and any(i["id"] == "gh-agent-fix-evidence" for i in result["validation_issues"]))
 
+        run_dir4, run_json4 = run.build_run_bundle(
+            catalog, run.load_github_targets(run.GITHUB_TARGETS),
+            personas, stable_scenarios, "vscode", "", "autonomous-no-issue-test", "dry-run", None,
+        )
+        scenario4 = run_json4["scenarios"][0]["id"]
+        attach_bugfix_proof(run_dir4, scenario4)
+        run.record_finding(run_dir4, "strength", "autonomous strength only", "proof exists but no issue was found",
+                           scenario4, "low", "", "observed", None)
+        result = run.autonomous_fix_loop(
+            run_dir4,
+            "o/r",
+            str(tmp / "gh-agent-autonomous-no-issue.json"),
+            "stories/bugfix",
+            "https://agent.example",
+            "",
+            "",
+            "",
+            "none",
+            None,
+        )
+        _check("autonomous loop rejects zero issue findings",
+               result["autonomous_fix_status"] == "autonomous_fix_invalid"
+               and result["findings_filed_count"] == 0
+               and result["gh_agent_enqueued_count"] == 0)
+        _check("autonomous loop requires at least one drained fix job",
+               result["autonomous_gate_summary"] == "filing=fail, gh_agent=fail, review=fail, validation=fail"
+               and any(i["id"] == "gh-agent-fixes" for i in result["validation_issues"]))
+
     print("PASS")
 
 
