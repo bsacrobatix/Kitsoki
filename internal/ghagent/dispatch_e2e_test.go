@@ -597,6 +597,17 @@ func TestDispatch_MentionToAckLoop(t *testing.T) {
 		t.Errorf("meta run_url = %v, want %s", meta["run_url"], got.RunURL)
 	}
 
+	// Assertion E (honesty, gh-agent-honest-issues.md task 0): the issue route
+	// still runs the beat-fixture stub (host.agent.* inline handlers, no LLM,
+	// no code changed) — the ack must never say "Done", only the honest
+	// "acknowledged — pipeline not yet enabled" prose.
+	if strings.Contains(last, "Done") {
+		t.Fatalf("stubbed run's ack must never contain \"Done\":\n%s", last)
+	}
+	if !strings.Contains(last, "acknowledged — pipeline not yet enabled for this route") {
+		t.Fatalf("stubbed run's ack missing honest prose:\n%s", last)
+	}
+
 	// Assertion D: idempotency. A second Dispatch of the same mention ATTACHES
 	// (won=false) and does NOT respawn the story.
 	spawnCalls := 0
@@ -881,6 +892,15 @@ func TestDispatch_FeatureDevStoryBeat(t *testing.T) {
 	if job.ObjectNumber != "123" {
 		t.Fatalf("ObjectNumber = %q, want dynamic issue number", job.ObjectNumber)
 	}
+
+	// Honesty (gh-agent-honest-issues.md task 0): dev-story also spawns
+	// through the beat-fixture stub today — same "never say Done" rule.
+	if strings.Contains(last, "Done") {
+		t.Fatalf("stubbed feature run's ack must never contain \"Done\":\n%s", last)
+	}
+	if !strings.Contains(last, "acknowledged — pipeline not yet enabled for this route") {
+		t.Fatalf("stubbed feature run's ack missing honest prose:\n%s", last)
+	}
 }
 
 // TestDispatch_PRBeat routes a pr-kind mention to the PR status beat: one real
@@ -956,6 +976,70 @@ func TestDispatch_PRBeat(t *testing.T) {
 	}
 	if !strings.Contains(last, "PR #77 status: `OPEN`") || !strings.Contains(last, "ci=SUCCESS") {
 		t.Fatalf("PR final comment missing status reasoning:\n%s", last)
+	}
+}
+
+// TestDispatchStubbedRunNeverSaysDone is the direct unit test for
+// gh-agent-honest-issues.md's runtime invariant: no gh-agent comment may
+// contain "Done" unless the spawned run reports Stubbed == false. It injects
+// a SpawnFn that returns a RunResult shaped exactly like a "successful" stub
+// run (FinalState/Turns/Summary all populated as a real completion would be)
+// but with Stubbed: true, and asserts the rendered prose is the honest
+// "acknowledged" line — never the synthesized "Done — ..." string — and that
+// the stub is recorded on the job's trace.
+func TestDispatchStubbedRunNeverSaysDone(t *testing.T) {
+	ctx := context.Background()
+	mention := Mention{
+		Item: host.GitHubInboxItem{Kind: "issue", Number: "9", Title: "@kitsoki fix the thing"},
+		Repo: "o/r", OriginRef: "github:o/r/issue/9", Trigger: DefaultMentionTrigger,
+	}
+	store := newGHJobStore(t)
+	rec := &recordingComments{commentID: "https://github.com/o/r/issues/9#issuecomment-1"}
+	d := &Dispatcher{
+		Jobs:     store,
+		Routes:   DefaultLabelStoryMap(),
+		Comments: &CommentStore{Exec: rec.handler, Repo: "o/r"},
+		WorkerID: "worker-honesty",
+		SpawnFn: func(context.Context, Route, *jobs.GHJob) (RunResult, error) {
+			return RunResult{
+				RunURL:     "kitsoki://run/stub",
+				FinalState: "reproducing",
+				Turns:      1,
+				Summary:    "", // a real completion would often carry no summary either
+				Stubbed:    true,
+				StubReason: "issue route ran the beat-fixture stub",
+			}, nil
+		},
+	}
+
+	job, err := d.Dispatch(ctx, mention, []string{"bug"})
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if job.State != jobs.GHDone {
+		t.Fatalf("State=%q, want done (stubbing is a rendering decision, not a routing one)", job.State)
+	}
+
+	rec.mu.Lock()
+	bodies := append([]string(nil), rec.bodies...)
+	rec.mu.Unlock()
+	if len(bodies) < 2 {
+		t.Fatalf("want >=2 comments (initial ack + final), got %d", len(bodies))
+	}
+	last := bodies[len(bodies)-1]
+	if strings.Contains(last, "Done") {
+		t.Fatalf("stubbed run's comment must never contain \"Done\":\n%s", last)
+	}
+	if !strings.Contains(last, "acknowledged — pipeline not yet enabled for this route") {
+		t.Fatalf("stubbed run's comment missing honest prose:\n%s", last)
+	}
+
+	events, err := store.Events(ctx, job.JobID)
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	if !hasEvent(events, "stubbed") {
+		t.Fatalf("trace missing \"stubbed\" event: %+v", events)
 	}
 }
 

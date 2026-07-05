@@ -1,6 +1,12 @@
 # Runtime: Honest gh-agent issue dispatch
 
-**Status:** Draft v1. Nothing implemented yet.
+**Status:** Draft v1. Task 0 (interim honesty fix) shipped — see
+`internal/ghagent/dispatch.go` (`RunResult.Stubbed`/`StubReason`,
+`Dispatcher.dispatchRouted`'s honest prose branch) and
+`internal/ghagent/dispatch_e2e_test.go` (`TestDispatchStubbedRunNeverSaysDone`
++ updated fixtures). Tasks 1-4 (real dispatch, per-job app-dir, drain-outside-
+poll-loop, adopt+document) are unstarted and remain gated on S1 (room
+workbench) / S3 (context floor) per Impact below.
 **Kind:**   runtime (ghagent)
 **Epic:**   usable-kitsoki.md
 
@@ -151,14 +157,14 @@ replaced; each task below updates or replaces the fixtures it makes stale.
 ## Tasks
 
 ```
-## 0. Interim honesty fix (ships first, standalone)
-- [ ] 0.1 Add `Stubbed bool` / `StubReason string` to `RunResult`; set it true
+## 0. Interim honesty fix (ships first, standalone) — SHIPPED
+- [x] 0.1 Add `Stubbed bool` / `StubReason string` to `RunResult`; set it true
       wherever a beat fixture with `host.agent.*` stub handlers is the spawn
       path (internal/ghagent/testdata/*.beat.yaml)
-- [ ] 0.2 `Dispatcher.runJob`'s prose branch (dispatch.go:220-226) renders
+- [x] 0.2 `Dispatcher.runJob`'s prose branch (dispatch.go:220-226) renders
       "acknowledged — pipeline not yet enabled for this route" whenever
       `Stubbed == true`, never the synthesized "Done — …" string
-- [ ] 0.3 Unit test asserting no "Done" substring reaches the comment
+- [x] 0.3 Unit test asserting no "Done" substring reaches the comment
       substrate for a stubbed run; existing e2e fixtures updated to assert
       the new prose
 
