@@ -3515,8 +3515,10 @@ def autonomous_fix_loop(
     review_failed = int(reviewed.get("review_failed_count", reviewed.get("failed", 0)) or 0)
     review_ok = reviewed.get("review_status", reviewed.get("status", "")) == "ready" and review_failed == 0
     validation_ok = validation.get("status") == "valid" and int(validation.get("errors", 0) or 0) == 0
+    filed_issue_count = len(filed.get("filed_issue_urls", []) or [])
     filing_ok = (
         filed.get("status") == "findings_filed"
+        and filed_issue_count > 0
         and int(filed.get("findings_failed_count", filed.get("failed", 0)) or 0) == 0
         and int(filed.get("findings_unfiled_count", 0) or 0) == 0
     )
@@ -3525,6 +3527,7 @@ def autonomous_fix_loop(
     gh_agent_done = int(filed.get("gh_agent_done_count", 0) or 0)
     gh_agent_ok = (
         gh_agent_requested
+        and gh_agent_enqueued > 0
         and filed.get("gh_agent_drain_status") == "drained"
         and int(filed.get("gh_agent_failed_count", 0) or 0) == 0
         and int(filed.get("gh_agent_active_count", 0) or 0) == 0
@@ -3998,9 +4001,9 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     gh_agent_missing_evidence = gh_agent_missing_fix_evidence(gh_agent)
     gh_agent_fix_complete = (
         not gh_agent_requested
-        or gh_agent_enqueued == 0
         or (
-            gh_agent_drain_status == "drained"
+            gh_agent_enqueued > 0
+            and gh_agent_drain_status == "drained"
             and gh_agent_failed == 0
             and gh_agent_active == 0
             and gh_agent_done >= gh_agent_enqueued
@@ -5094,7 +5097,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
         done = int(gh_agent.get("done_count", 0) or 0)
         failed = int(gh_agent.get("failed_count", 0) or 0)
         active = int(gh_agent.get("active_count", 0) or 0)
-        if gh_agent.get("drain_status") != "drained" or failed or active or done < enqueued:
+        if enqueued == 0 or gh_agent.get("drain_status") != "drained" or failed or active or done < enqueued:
             add_validation_issue(
                 issues,
                 "error",
