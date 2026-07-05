@@ -101,6 +101,19 @@ func AsDomainError(err error) (string, bool) {
 // The HTTPClient is resolved from ictx (WithHTTP). When none is injected, any
 // ctx.http call fails — the sandbox never reaches the network by default.
 func Run(ictx context.Context, p Params) (*Result, error) {
+	// 0. Normalize exotic numeric kinds to the canonical JSON-ish shapes
+	//    (int64/float64) before validation and conversion. Effect templating
+	//    and expression evaluation can hand over uint64/int32/... values (e.g.
+	//    a world counter incremented by an expr), which would otherwise fail
+	//    the sidecar's int check here and error goToStarlark's strict type
+	//    switch when read via ctx.world.get.
+	if p.Inputs != nil {
+		p.Inputs = normalizeYAML(p.Inputs).(map[string]any)
+	}
+	if p.World != nil {
+		p.World = normalizeYAML(p.World).(map[string]any)
+	}
+
 	// 1. Input validation at the boundary, before any evaluation.
 	if p.Sidecar != nil {
 		if err := p.Sidecar.validateInputs(p.Inputs); err != nil {
