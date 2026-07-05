@@ -1396,6 +1396,7 @@ def validate_autonomous_workflow_docs(issues: list[dict]) -> None:
             "story-owned",
             "kitsoki gitops autonomous-fix",
             "gh-agent",
+            "independent-verify.md",
         ]
         missing = [token for token in required_tokens if token not in text]
         if missing:

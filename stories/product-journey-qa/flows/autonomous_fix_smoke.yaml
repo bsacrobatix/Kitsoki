@@ -13,7 +13,7 @@ host_handlers:
             status: passed
             summary: autonomous issue-to-fix smoke passed
             exit_code: 0
-            output: "ok: autonomous loop validates bundle\nok: autonomous loop reports all reliability gates\nok: autonomous loop preserves filing status\nok: autonomous loop drained gh-agent\nok: autonomous loop exposes fix evidence assets\nok: autonomous loop reviewed and validated\nPASS"
+            output: "ok: autonomous loop validates bundle\nok: autonomous loop reports all reliability gates\nok: autonomous loop preserves filing status\nok: autonomous loop drained gh-agent\nok: autonomous loop exposes fix evidence assets\nok: autonomous loop rejects done fixes without independent verification\nok: autonomous loop reviewed and validated\nPASS"
 
 turns:
   - intent:
