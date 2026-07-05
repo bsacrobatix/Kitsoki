@@ -199,8 +199,25 @@ then default; see epic §Shared decisions).
       existing TUI routing flow fixture's outcome
 
 ## 3. Adopt + document
-- [ ] 3.1 Run G-FLOW across dev-story + two other stories per the epic's S6
-      rollout gate; fix any fixture whose on_error: view was silent
+- [x] 3.1 Run G-FLOW across dev-story + two other stories per the epic's S6
+      rollout gate; fix any fixture whose on_error: view was silent.
+      Adopted across `stories/dev-story` (82 flows), `stories/bugfix` (71
+      flows), `stories/delivery-tail` (12 flows). Zero G-FLOW failures: the
+      shared redirect-application seam from Task 1.1 already makes every
+      exercised `on_error:` arc surface the banner, so no fixture needed a
+      banner-assertion edit. dev-story's `on_error:` arcs actually fire in 4
+      turns across its orchestrator-backed fixtures (verified via temporary
+      instrumentation, reverted) and all 4 pass the gate as-is. bugfix and
+      delivery-tail's `on_error:` YAML blocks aren't reached by any current
+      fixture (both suites run mostly through the legacy machine-only
+      runner, which per the gate's own doc comment can't emit the
+      `intent="on_error"` `TransitionApplied` event) — nothing for the gate
+      to check there yet, not a gap in this task. dev-story has 3
+      pre-existing `expect_state` failures (`cake_feature_walk.yaml`,
+      `design_to_implementation.yaml`, `pickup_to_implementation.yaml`, all
+      `impl.review_task_executing` vs `impl.idle`) reproduced identically on
+      `main` (unrelated to `on_error:`/banners, no `G-FLOW:` marker) — left
+      alone as out of scope for this proposal.
 - [ ] 3.2 Update docs/stories/state-machine.md (on_error: section) and
       docs/architecture/semantic-routing.md (single decision point,
       near-miss tier); add one-line pointers from
