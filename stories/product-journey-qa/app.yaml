@@ -332,7 +332,7 @@ intents:
     priority: 80
     slots:
       ticket_repo: { type: string, required: true }
-      gh_agent_db: { type: string, required: true }
+      gh_agent_db: { type: string, required: false }
       gh_agent_story: { type: string, required: false }
       gh_agent_public_base_url: { type: string, required: false }
       gh_agent_project_root: { type: string, required: false }

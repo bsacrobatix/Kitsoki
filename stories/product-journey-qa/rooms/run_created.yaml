@@ -451,7 +451,7 @@ states:
                   - --ticket-repo
                   - "{{ slots.ticket_repo }}"
                   - --gh-agent-db
-                  - "{{ slots.gh_agent_db }}"
+                  - "{{ slots.gh_agent_db ?? (world.run_dir + '/gh-agent-jobs.sqlite') }}"
                   - --gh-agent-story
                   - "{{ slots.gh_agent_story ?? 'stories/bugfix' }}"
                   - --gh-agent-public-base-url
