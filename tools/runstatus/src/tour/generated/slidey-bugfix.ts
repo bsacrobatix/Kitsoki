@@ -17,7 +17,6 @@ export const SLIDEY_BUGFIX_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "home-view",
     dwellMs: 6000,
-    drive: [],
   },
   {
     id: "sb-intro-story",
@@ -30,7 +29,6 @@ export const SLIDEY_BUGFIX_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "story-card",
     dwellMs: 5500,
-    drive: [],
   },
   {
     id: "sb-intro-start",
@@ -44,7 +42,6 @@ export const SLIDEY_BUGFIX_TOUR_STEPS: readonly TourStep[] = [
     advanceRoute: "interactive",
     waitForTarget: "new-session-btn",
     dwellMs: 3500,
-    drive: [],
   },
   {
     id: "sb-intro-observe",
@@ -57,7 +54,6 @@ export const SLIDEY_BUGFIX_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "observe-link",
     dwellMs: 5500,
-    drive: [],
   },
   {
     id: "sb-reproduce",
@@ -70,7 +66,6 @@ export const SLIDEY_BUGFIX_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 8000,
-    drive: [{"type":"wait-state","state":"bf.idle"},{"type":"click-intent","intent":"bf__start"},{"type":"wait-state","state":"bf.reproducing"},{"type":"reveal-turn"}],
   },
   {
     id: "sb-propose",
@@ -83,7 +78,6 @@ export const SLIDEY_BUGFIX_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 7000,
-    drive: [{"type":"click-intent","intent":"bf__accept"},{"type":"wait-state","state":"bf.proposing"},{"type":"reveal-turn"}],
   },
   {
     id: "sb-implement",
@@ -96,7 +90,6 @@ export const SLIDEY_BUGFIX_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 7000,
-    drive: [{"type":"click-intent","intent":"bf__accept"},{"type":"wait-state","state":"bf.implementing"},{"type":"reveal-turn"}],
   },
   {
     id: "sb-test",
@@ -109,7 +102,6 @@ export const SLIDEY_BUGFIX_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 7500,
-    drive: [{"type":"click-intent","intent":"bf__accept"},{"type":"wait-state","state":"bf.testing"},{"type":"reveal-turn"}],
   },
   {
     id: "sb-review",
@@ -122,7 +114,6 @@ export const SLIDEY_BUGFIX_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 7000,
-    drive: [{"type":"click-intent","intent":"bf__accept"},{"type":"wait-state","state":"bf.reviewing"},{"type":"reveal-turn"}],
   },
   {
     id: "sb-validate",
@@ -135,7 +126,6 @@ export const SLIDEY_BUGFIX_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 7500,
-    drive: [{"type":"click-intent","intent":"bf__accept"},{"type":"wait-state","state":"bf.validating"},{"type":"reveal-turn"}],
   },
   {
     id: "sb-done",
@@ -148,7 +138,6 @@ export const SLIDEY_BUGFIX_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 7500,
-    drive: [{"type":"click-intent","intent":"bf__accept"},{"type":"wait-state","state":"bf.done"},{"type":"reveal-turn"}],
   },
   {
     id: "sb-resolved",
@@ -161,7 +150,6 @@ export const SLIDEY_BUGFIX_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "state-badge",
     dwellMs: 6500,
-    drive: [{"type":"click-intent","intent":"bf__accept"},{"type":"wait-state","state":"shipped"},{"type":"dwell-ms","ms":1500}],
   },
   {
     id: "sb-outro",

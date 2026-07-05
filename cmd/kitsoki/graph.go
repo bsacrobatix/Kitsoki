@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"kitsoki/internal/graph"
+	"kitsoki/internal/graph/featuresadapter"
 	"kitsoki/internal/graph/proposalsadapter"
 )
 
@@ -23,6 +26,7 @@ func graphCmd() *cobra.Command {
 	}
 	cmd.AddCommand(graphLintCmd())
 	cmd.AddCommand(graphApplyCmd())
+	cmd.AddCommand(graphRenderFeaturesCmd())
 	return cmd
 }
 
@@ -151,5 +155,70 @@ Exit code 0 on a successful apply (or a clean dry-run); non-zero on rejection.`,
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview the changeset without requiring authorization or committing")
+	return cmd
+}
+
+// graphRenderFeaturesCmd — W3.1: regenerate features/*.yaml from the graph's
+// public site-page nodes via featuresadapter, so the graph catalog is the
+// only producer of the legacy feature-catalog shape. `make features` runs
+// this before the existing pnpm features:gen step; with --check it fails
+// (without writing) if any regenerated file would differ from what's on
+// disk, catching hand-edits to features/*.yaml that bypassed the graph.
+func graphRenderFeaturesCmd() *cobra.Command {
+	var check bool
+	cmd := &cobra.Command{
+		Use:   "render-features <catalog-path> <output-dir>",
+		Short: "Regenerate features/*.yaml from the graph's public site-page nodes",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			catalogPath, outDir := args[0], args[1]
+			cat, err := graph.LoadCatalog(catalogPath)
+			if err != nil {
+				return fmt.Errorf("graph render-features: %w", err)
+			}
+
+			var stale []string
+			for _, sitePage := range featuresadapter.PublicSitePages(cat) {
+				doc, err := featuresadapter.BuildFeatureDoc(cat, sitePage)
+				if err != nil {
+					return fmt.Errorf("graph render-features: %s: %w", sitePage.ID, err)
+				}
+				var buf bytes.Buffer
+				enc := yaml.NewEncoder(&buf)
+				enc.SetIndent(2)
+				if err := enc.Encode(doc); err != nil {
+					return fmt.Errorf("graph render-features: %s: marshal: %w", sitePage.ID, err)
+				}
+				enc.Close()
+				out := append([]byte("# yaml-language-server: $schema=feature.schema.json\n"), buf.Bytes()...)
+
+				outPath := filepath.Join(outDir, doc.ID+".yaml")
+				if check {
+					existing, err := os.ReadFile(outPath)
+					if err != nil || !bytes.Equal(existing, out) {
+						stale = append(stale, outPath)
+					}
+					continue
+				}
+				if err := os.WriteFile(outPath, out, 0o644); err != nil {
+					return fmt.Errorf("graph render-features: write %s: %w", outPath, err)
+				}
+			}
+
+			if check {
+				if len(stale) > 0 {
+					for _, p := range stale {
+						fmt.Fprintln(cmd.ErrOrStderr(), "stale:", p)
+					}
+					return fmt.Errorf("graph render-features --check: %d file(s) out of date with the graph catalog; run `kitsoki graph render-features` to regenerate", len(stale))
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "graph render-features --check: up to date")
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "graph render-features: wrote %d file(s) to %s\n", len(featuresadapter.PublicSitePages(cat)), outDir)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&check, "check", false, "fail if any regenerated file would differ from what's on disk, without writing")
 	return cmd
 }

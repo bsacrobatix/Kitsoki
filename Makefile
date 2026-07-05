@@ -585,20 +585,28 @@ fetch-models:
 fetch-llama-server:
 	go run ./tools/agent-fetch -binary
 
-# Feature catalog: features/*.yaml at the repo root is the single source of
-# truth for feature content — tour steps, demo bindings, promo/docs metadata,
-# and ui-qa scenarios. The committed tour manifests under
-# tools/runstatus/src/tour/generated/ are CODE-GENERATED from it.
-#   features        regenerate the manifests + features/feature.schema.json
-#   features-check  validate the catalog and fail on stale generated files
-#                   (runs inside `make build` and `make test` — a stale manifest
-#                   can never be embedded into the binary)
+# Feature catalog: the project object graph's public site-page nodes
+# (docs/proposals/project-object-graph/seed-objects.yaml) are the single
+# source of truth for feature content — tour steps, demo bindings,
+# promo/docs metadata, and ui-qa scenarios. `kitsoki graph render-features`
+# regenerates features/*.yaml from the graph (W3.1); the committed tour
+# manifests under tools/runstatus/src/tour/generated/ are CODE-GENERATED
+# from THAT in turn. Edit graph nodes, not features/*.yaml by hand.
+#   features        render features/*.yaml from the graph, then regenerate
+#                   the manifests + features/feature.schema.json
+#   features-check  fail if features/*.yaml has drifted from the graph, or
+#                   any generated file is stale (runs inside `make build`
+#                   and `make test` — a stale manifest can never be
+#                   embedded into the binary)
 #   features-index  emit the site/QA contract to .artifacts/features/
+OBJECT_GRAPH_CATALOG := docs/proposals/project-object-graph/seed-objects.yaml
 .PHONY: features features-check features-index media-check media-check-promo demo-feature feature-qa
 features:
+	go run ./cmd/kitsoki graph render-features $(OBJECT_GRAPH_CATALOG) features
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:gen
 
 features-check:
+	go run ./cmd/kitsoki graph render-features $(OBJECT_GRAPH_CATALOG) features --check
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:check
 
 # vitest-check runs the runstatus (web UI) component/unit test suite. Split out
