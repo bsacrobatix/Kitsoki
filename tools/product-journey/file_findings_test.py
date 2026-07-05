@@ -329,11 +329,15 @@ def main():
         # 4. Gates: review counts the filing check; a new credible finding
         # after filing trips review + validate until re-filed.
         reviewed = run.review_run_bundle(run_dir, None)
-        _check("review has 22 checks", reviewed["total"] == 22)
+        _check("review has 24 checks", reviewed["total"] == 24)
         _check("findings-filed passes when fully filed",
                review_check(reviewed, "findings-filed")["status"] == "pass")
         _check("gh-agent-fixes passes when drained",
                review_check(reviewed, "gh-agent-fixes")["status"] == "pass")
+        _check("gh-agent-fix-evidence passes when assets are present",
+               review_check(reviewed, "gh-agent-fix-evidence")["status"] == "pass")
+        _check("gh-agent-run-url passes when run URLs are present",
+               review_check(reviewed, "gh-agent-run-url")["status"] == "pass")
         validated = run.validate_run_bundle(run_dir)
         _check("validate has no findings-filed error",
                not any(i["id"] == "findings-filed" for i in validated["issues"]))
@@ -346,7 +350,7 @@ def main():
         run.write_json(run_dir / "findings.json", missing_asset_findings)
         reviewed_missing_assets = run.review_run_bundle(run_dir, None)
         _check("review fails done gh-agent jobs without evidence assets",
-               review_check(reviewed_missing_assets, "gh-agent-fixes")["status"] == "fail")
+               review_check(reviewed_missing_assets, "gh-agent-fix-evidence")["status"] == "fail")
         missing_asset_validated = run.validate_run_bundle(run_dir)
         _check("validate catches done gh-agent jobs without evidence assets",
                any(i["id"] == "gh-agent-fix-evidence" and i["severity"] == "error"
@@ -357,7 +361,7 @@ def main():
         run.write_json(run_dir / "findings.json", missing_run_url_findings)
         reviewed_missing_run_url = run.review_run_bundle(run_dir, None)
         _check("review fails done gh-agent jobs without run URLs",
-               review_check(reviewed_missing_run_url, "gh-agent-fixes")["status"] == "fail")
+               review_check(reviewed_missing_run_url, "gh-agent-run-url")["status"] == "fail")
         missing_run_url_validated = run.validate_run_bundle(run_dir)
         _check("validate catches done gh-agent jobs without run URLs",
                any(i["id"] == "gh-agent-run-url" and i["severity"] == "error"
@@ -424,7 +428,7 @@ def main():
         _check("autonomous loop exposes fix evidence assets",
                result["gh_agent_fix_evidence_count"] == 2
                and result["gh_agent_missing_evidence_count"] == 0)
-        _check("autonomous loop reviewed and validated", result["review_total_count"] == 22 and result["validation_status"] == "valid")
+        _check("autonomous loop reviewed and validated", result["review_total_count"] == 24 and result["validation_status"] == "valid")
 
         run_dir3, run_json3 = run.build_run_bundle(
             catalog, run.load_github_targets(run.GITHUB_TARGETS),
