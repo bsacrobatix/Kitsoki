@@ -74,11 +74,12 @@ thought.
   runtime), the Scenario Foundry
   ([`scenario-foundry.md`](scenario-foundry.md), tracing + tooling), honest
   gh-agent issue dispatch
-  ([`gh-agent-honest-issues.md`](gh-agent-honest-issues.md), runtime), and the
-  release gate ([`usable-kitsoki-release-gate.md`](usable-kitsoki-release-gate.md),
-  tooling). Supersedes `ad-hoc-workbench.md` (via S1) and absorbs
-  `conversation-driven-development.md` slice 1 (via S4). Nothing implemented
-  yet; children not yet cut.
+  ([`gh-agent-honest-issues.md`](gh-agent-honest-issues.md), runtime), and a
+  release gate (shipped; see
+  [`docs/tracing/usable-kitsoki-gate.md`](../tracing/usable-kitsoki-gate.md) —
+  `usable-kitsoki-release-gate.md` deleted per lifecycle guidance). Supersedes
+  `ad-hoc-workbench.md` (via S1) and absorbs
+  `conversation-driven-development.md` slice 1 (via S4).
 - [`human-action-workflows.md`](human-action-workflows.md) — **epic.** Make
   human-dependent work a first-class workflow executor beside agents:
   `host.human.*` verbs create/await/complete person-owned tasks through a
