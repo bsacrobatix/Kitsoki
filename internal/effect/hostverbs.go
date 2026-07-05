@@ -56,6 +56,7 @@ var builtinVerbTable = map[string]verbEffect{
 	"host.agent.decide":              {class: Read, deterministic: false},
 	"host.agent.task":                {class: Write, deterministic: false},
 	"host.agent.converse":            {class: Write, deterministic: false},
+	"host.agent.codeact":             {class: Write, deterministic: false},
 	"host.agent.search":              {class: Read, deterministic: true},
 	"host.transport.post":            {class: External, deterministic: false},
 	"host.jobs.answer_clarification": {class: Write, deterministic: true},
