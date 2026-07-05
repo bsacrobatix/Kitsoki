@@ -4999,7 +4999,28 @@ def autonomous_marathon(
     )
     review_ok = base.get("review_status") == "ready" and int(base.get("review_failed_count", 0) or 0) == 0
     validation_ok = base.get("validation_status") == "valid" and int(base.get("validation_errors", 0) or 0) == 0
-    status = "autonomous_marathon_valid" if fix_valid and review_ok and validation_ok else "autonomous_marathon_invalid"
+    stats_output_path = str(stats.get("stats_output", "")).strip()
+    stats_output_exists = bool(stats_output_path) and run_dir_from_arg(stats_output_path).exists()
+    credible_issue_count = len(credible_issues)
+    stats_ok = (
+        stats.get("status") == "stats_derived"
+        and stats_output_exists
+        and int(stats.get("findings_found_count", 0) or 0) >= credible_issue_count
+        and int(stats.get("findings_filed_count", 0) or 0) >= credible_issue_count
+        and int(stats.get("issues_fixed_count", 0) or 0) >= credible_issue_count
+    )
+    stats_gate = (
+        "pass"
+        if stats_ok
+        else (
+            "fail: "
+            f"status={stats.get('status', '')}, output={stats_output_path or '(missing)'}, "
+            f"found={stats.get('findings_found_count', 0)}/{credible_issue_count}, "
+            f"filed={stats.get('findings_filed_count', 0)}/{credible_issue_count}, "
+            f"fixed={stats.get('issues_fixed_count', 0)}/{credible_issue_count}"
+        )
+    )
+    status = "autonomous_marathon_valid" if fix_valid and review_ok and validation_ok and stats_ok else "autonomous_marathon_invalid"
     result = {
         **base,
         "status": status,
@@ -5008,7 +5029,8 @@ def autonomous_marathon(
             f"credible_issues={len(credible_issues)}, "
             f"fix={base.get('autonomous_fix_status', 'not_run')}, "
             f"review={base.get('review_status', '')}, "
-            f"validation={base.get('validation_status', '')}"
+            f"validation={base.get('validation_status', '')}, "
+            f"stats={stats_gate}"
         ),
         "run_dir": str(run_dir),
         "deck_path": str(run_dir / "deck.slidey.json"),
