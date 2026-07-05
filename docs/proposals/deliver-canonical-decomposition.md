@@ -7,11 +7,15 @@ below): `stories/deliver/schemas/decomposition.json` and
 `scripts/lint_decomposition.star` now carry the work-decomposition skill's
 richer optional fields (`coverage_note`, per-brief `title/kind/scope/
 acceptance/risk`) and scope-bound/acceptance checks, and the skill's schema is
-retargeted to be a manual copy of deliver's. **B2b/B2c/B3/B4 are not yet
-implemented** — today's `stories/deliver` is still the thin configure →
-decompose → lint → fleet pipeline documented in
-[`stories/deliver/README.md`](../../stories/deliver/README.md) (no refine
-loop, no adversarial review, no dev-story entry). Supersedes
+retargeted to be a manual copy of deliver's. **B2b shipped** (refine loop +
+adversarial review — see Task 2 below): a lint failure or a `review` verdict
+of `revise` now routes back to `decompose` with `refine_feedback` and a
+shared `refine_cycle`/`refine_budget` counter instead of hard-exiting, and a
+new `review` room (`host.agent.decide`, skeptic prompt, `{verdict, reason,
+questions[]}`) gates `lint` → `fleet` on feasibility/completeness, not just
+structure. See [`stories/deliver/README.md`](../../stories/deliver/README.md)
+for the current graph. **B2c/B3/B4 are not yet implemented** — no managed
+re-decompose and no dev-story entry yet. Supersedes
 [`work-decomposition.md`](work-decomposition.md).
 **Kind:**   story
 **Epic:**   — standalone (slice B1 of the dev-workflows surface-matrix plan)
@@ -226,10 +230,10 @@ Sequenced as implementable slices (B2 → B3 → B4 of the plan's WS-B):
 - [x] 1.4 rich_schema_happy flow; existing 5 flows stay green
 
 ## 2. B2b — refine loop + adversarial review
-- [ ] 2.1 lint fail → decompose refine edge with refine_feedback + budget; budget exhausted → @exit:needs-human
-- [ ] 2.2 review room (host.agent.decide, review_adversary prompt, review-decision schema) between lint and fleet
-- [ ] 2.3 Flows: lint_fail_refine_loop, review_revise_loop, refine_budget_exhausted; reshape lint_rejects_cycle
-- [ ] 2.4 stories/deliver/README.md updated to the new graph
+- [x] 2.1 lint fail → decompose refine edge with refine_feedback + budget; budget exhausted → @exit:needs-human
+- [x] 2.2 review room (host.agent.decide, review_adversary prompt, review-decision schema) between lint and fleet
+- [x] 2.3 Flows: lint_fail_refine_loop, review_revise_loop, refine_budget_exhausted; reshape lint_rejects_cycle
+- [x] 2.4 stories/deliver/README.md updated to the new graph
 
 ## 3. B2c — managed re-decompose
 - [ ] 3.1 Prior-decomposition detection in configure/decompose; route deltas through the decompose-update transaction

@@ -1,11 +1,13 @@
-# decompose_happy — 3-brief manifest → lint passes → routes into fleet.load.
+# decompose_happy — 3-brief manifest → lint passes → adversarial review
+# accepts → routes into fleet.load.
 #
-# The decomposer agent is mocked (no LLM), while deliver lint and fleet load run
-# REAL Starlark against the inspect cassette below. We assert the story reaches
-# fleet.load (the fleet import entry) and stop — fleet's own flows test fan-out.
+# The decomposer and reviewer agents are mocked (no LLM), while deliver lint
+# and fleet load run REAL Starlark against the inspect cassette below. We
+# assert the story reaches fleet.load (the fleet import entry) and stop —
+# fleet's own flows test fan-out.
 #
 # Full path: configure → start → decompose (agent mocked) → lint (Starlark)
-#            → fleet.load (Starlark)
+#            → review (agent mocked, accept) → fleet.load (Starlark)
 
 test_kind: flow
 app: ../app.yaml
@@ -35,6 +37,14 @@ host_handlers:
                 brief: "Register the health handler in the router and smoke-test /health. Gate: go test ./internal/router/..."
                 gate_command: "go test ./internal/router/..."
                 deps: [health-handler]
+  host.agent.decide:
+    by_call:
+      review:
+        data:
+          submitted:
+            verdict: accept
+            reason: "Every brief is self-contained, deps are ordered, and coverage_note holds up."
+            questions: []
 
 turns:
   - intent:
