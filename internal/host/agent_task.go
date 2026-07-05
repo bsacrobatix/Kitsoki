@@ -364,19 +364,25 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 			// Re-build with state file path.
 			mcpCfg2, _, vcErr2 := buildTaskValidatorMCPConfigWithState(ctx, acceptance, outputFile, stateFilePath)
 			if vcErr2 == nil && mcpCfg2 != "" {
-				// Replace the config.
-				os.Remove(mcpConfigPath)
+				// Replace the VALIDATOR config only. baseCLIArgs may carry
+				// other --mcp-config flags appended earlier (the studio
+				// contract server, the read-only bash wrapper, the
+				// operator-ask bridge) — stripping every --mcp-config here
+				// silently detached the kitsoki studio server from agents
+				// that declare mcp__kitsoki__* tools (scenario-qa's driver
+				// preflight found no kitsoki tools live because of this).
+				oldConfigPath := mcpConfigPath
+				os.Remove(oldConfigPath)
 				mcpConfigPath = mcpCfg2
 				defer os.Remove(mcpConfigPath)
-				// Rebuild baseCLIArgs without the old --mcp-config.
 				var filtered []string
 				skipNext := false
-				for _, a := range baseCLIArgs {
+				for i, a := range baseCLIArgs {
 					if skipNext {
 						skipNext = false
 						continue
 					}
-					if a == "--mcp-config" {
+					if a == "--mcp-config" && i+1 < len(baseCLIArgs) && baseCLIArgs[i+1] == oldConfigPath {
 						skipNext = true
 						continue
 					}
