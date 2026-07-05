@@ -89,6 +89,8 @@ It is intentionally no-LLM:
   write `autonomous-marathon-watchdog.json/md` and bind
   `autonomous_watchdog_blocked` into the story so the loop stops before spend
   with a human-reviewable blocker artifact.
+  `autonomous_marathon` finalization enforces that same check before filing
+  issues, draining gh-agent fixes, closing tickets, or deriving stats.
 - `seed_demo` calls `tools/product-journey/run.py --seed-demo-evidence
   --json-output` to populate a no-LLM review bundle.
 - `handoff` calls `tools/product-journey/run.py --driver-handoff --json-output`
