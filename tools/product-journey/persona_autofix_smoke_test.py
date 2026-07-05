@@ -136,6 +136,12 @@ def main() -> int:
         ]
         report_path = Path(result.get("autonomous_fix_report_path", ""))
         report_text = report_path.read_text(encoding="utf-8") if report_path.exists() else ""
+        deck = run.read_json(run_dir / "deck.slidey.json")
+        gh_scene = next(
+            (scene for scene in deck.get("scenes", []) if scene.get("eyebrow") == "GH-agent fixes"),
+            {},
+        )
+        gh_scene_body = gh_scene.get("body", "")
 
         check("persona replay filed exactly one observed issue",
               result.get("findings_filed_count") == 1
@@ -166,6 +172,14 @@ def main() -> int:
               and "https://agent.example/run/job-" in report_text
               and "fix-report.md" in report_text
               and "independent-verify.md" in report_text,
+              failures)
+        check("review deck links issue, run, report, fix evidence, and independent verification",
+              "https://github.com/o/r/issues/" in gh_scene_body
+              and "https://agent.example/run/job-" in gh_scene_body
+              and "autonomous-fix-report.md" in gh_scene_body
+              and "fix-report.md" in gh_scene_body
+              and "independent_verify=" in gh_scene_body
+              and "independent-verify.md" in gh_scene_body,
               failures)
 
         output = {

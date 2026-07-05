@@ -319,6 +319,10 @@ def main():
         _check("deck includes filed issues and fix run URLs",
                "https://github.com/o/r/issues/101" in gh_scene.get("body", "")
                and "https://agent.example/run/job-1" in gh_scene.get("body", ""))
+        _check("deck includes autonomous report and independent verification links",
+               "autonomous-fix-report.md" in gh_scene.get("body", "")
+               and "independent_verify=" in gh_scene.get("body", "")
+               and "https://agent.example/run/job-1/artifacts/independent-verify.md" in gh_scene.get("body", ""))
         _check("deck includes gh-agent fix evidence links",
                "https://agent.example/run/job-1/artifacts/fix-report.md" in gh_scene.get("body", "")
                and "https://agent.example/run/job-1/artifacts/fix.patch" in gh_scene.get("body", ""))
@@ -403,6 +407,28 @@ def main():
         run.write_json(deck_path, stale_deck)
         stale_validated = run.validate_run_bundle(run_dir)
         _check("validate catches missing gh-agent evidence URL in deck",
+               any(i["id"] == "gh-agent-fix-deck" and i["severity"] == "error"
+                   for i in stale_validated["issues"]))
+        run.update_derived_artifacts(run_dir, None)
+        stale_deck = run.read_json(deck_path)
+        for scene in stale_deck["scenes"]:
+            if scene.get("eyebrow") == "GH-agent fixes":
+                scene["body"] = scene.get("body", "").replace("autonomous-fix-report.md", "")
+                break
+        run.write_json(deck_path, stale_deck)
+        stale_validated = run.validate_run_bundle(run_dir)
+        _check("validate catches missing autonomous report link in deck",
+               any(i["id"] == "gh-agent-fix-deck" and i["severity"] == "error"
+                   for i in stale_validated["issues"]))
+        run.update_derived_artifacts(run_dir, None)
+        stale_deck = run.read_json(deck_path)
+        for scene in stale_deck["scenes"]:
+            if scene.get("eyebrow") == "GH-agent fixes":
+                scene["body"] = scene.get("body", "").replace("independent_verify=", "")
+                break
+        run.write_json(deck_path, stale_deck)
+        stale_validated = run.validate_run_bundle(run_dir)
+        _check("validate catches missing independent verification label in deck",
                any(i["id"] == "gh-agent-fix-deck" and i["severity"] == "error"
                    for i in stale_validated["issues"]))
         run.update_derived_artifacts(run_dir, None)
