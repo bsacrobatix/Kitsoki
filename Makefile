@@ -674,6 +674,23 @@ dev-workflow-matrix:
 
 dev-workflow-matrix-check:
 	python3 tools/dev-workflow-matrix/generate_test.py
+	python3 tools/dev-workflow-matrix/run_checks_test.py
+
+# dev-workflow-gate is the WS-F F1 exit criterion: "make target / CI job that
+# prints the live matrix; a red cell blocks declaring the workflow
+# supported." Runs the check suite (real no-LLM story-flow-suite + a
+# product-journey smoke replay) into a scratch verdicts dir, prints the LIVE
+# matrix report (verdict-aware, NOT the checked-in doc — that stays
+# manifest-only and deterministic), and exits non-zero if any cell the
+# manifest marks `works` has regressed against a real verdict. Deterministic
+# story replays, no LLM, no network, no docker.
+.PHONY: dev-workflow-gate
+DEV_WORKFLOW_GATE_VERDICTS_DIR ?= .artifacts/dev-workflow-matrix/verdicts
+dev-workflow-gate:
+	python3 tools/dev-workflow-matrix/run_checks.py --verdicts-dir $(DEV_WORKFLOW_GATE_VERDICTS_DIR)
+	python3 tools/dev-workflow-matrix/generate.py --out .artifacts/dev-workflow-matrix/dev-workflow-matrix.live.md \
+		--verdicts-dir $(DEV_WORKFLOW_GATE_VERDICTS_DIR) --gate
+	python3 tools/dev-workflow-matrix/generate.py --out docs/testing/dev-workflow-matrix.md
 
 features-index:
 	$(call runstatus_pnpm_install,--silent)
