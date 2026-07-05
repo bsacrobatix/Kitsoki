@@ -45,7 +45,10 @@ const tools = [
   },
   {
     name: "mockup_visual_qa",
-    description: "Capture a screenshot plus compact visual/design context for LLM visual QA.",
+    description:
+      "Capture a screenshot plus compact visual/design context for LLM visual QA. " +
+      "Defaults to a small max_nodes (20) to keep responses small; pass a larger max_nodes for more detail. " +
+      "Pass include_context:false for screenshot-only QA (skips building the DOM/heading dump entirely, not just omitting it from the response).",
     inputSchema: {
       type: "object",
       properties: {
@@ -55,7 +58,18 @@ const tools = [
         selector: { type: "string", description: "Optional selector to focus the capture and DOM summary." },
         full_page: { type: "boolean", description: "Capture the full page instead of the viewport." },
         include_image: { type: "boolean", description: "Include PNG image content. Defaults to true." },
-        max_nodes: { type: "integer", minimum: 5, maximum: 200, description: "Maximum DOM/layout nodes to summarize." },
+        include_context: {
+          type: "boolean",
+          description:
+            "Whether to build and include the DOM/layout node dump and headings. Defaults to true for backwards compat. " +
+            "Set to false for screenshot-only QA to avoid inflating the response with a large JSON dump."
+        },
+        max_nodes: {
+          type: "integer",
+          minimum: 5,
+          maximum: 200,
+          description: "Maximum DOM/layout nodes to summarize. Defaults to 20 (was 200); raise explicitly if you need more detail."
+        },
         wait_ms: { type: "integer", minimum: 0, maximum: 10000, description: "Optional settle delay before capture." }
       },
       additionalProperties: false
@@ -70,9 +84,41 @@ const tools = [
         url: { type: "string", description: "Optional URL to navigate before reading." },
         viewport: viewportSchema,
         selector: { type: "string", description: "Optional selector to summarize." },
-        max_nodes: { type: "integer", minimum: 5, maximum: 300 },
+        max_nodes: {
+          type: "integer",
+          minimum: 5,
+          maximum: 300,
+          description: "Maximum DOM/layout nodes to summarize. Defaults to 40 (was 80); raise explicitly if you need more detail."
+        },
         wait_ms: { type: "integer", minimum: 0, maximum: 10000 }
       },
+      additionalProperties: false
+    }
+  },
+  {
+    name: "mockup_click",
+    description: "Deterministically click a selector on the current mockup page. Does not require an active tour.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        selector: { type: "string", description: "CSS selector to click." },
+        wait_ms: { type: "integer", minimum: 0, maximum: 30000, description: "Optional delay after clicking." }
+      },
+      required: ["selector"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "mockup_fill",
+    description: "Deterministically fill a selector's value on the current mockup page. Does not require an active tour.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        selector: { type: "string", description: "CSS selector to fill." },
+        value: { type: "string", description: "Text to fill in." },
+        wait_ms: { type: "integer", minimum: 0, maximum: 30000, description: "Optional delay after filling." }
+      },
+      required: ["selector"],
       additionalProperties: false
     }
   },
@@ -335,7 +381,11 @@ async function makeLLMClient(modelName = "openai/gpt-5.5") {
   })();
 }
 
-async function ensureStagehand(viewport) {
+async function ensureStagehand(viewport, forceNew = false) {
+  if (stagehand && forceNew) {
+    await stagehand.close().catch(() => {});
+    stagehand = undefined;
+  }
   if (stagehand) {
     if (viewport) await setViewport(viewport);
     return stagehand;
@@ -363,11 +413,77 @@ function normalizeViewport(viewport) {
   };
 }
 
-async function page() {
-  const sh = await ensureStagehand();
+async function page(forceNew = false) {
+  const sh = await ensureStagehand(undefined, forceNew);
   let [current] = sh.context.pages();
   if (!current) current = await sh.context.newPage();
   return current;
+}
+
+// Detects a low-level transport/CDP error surfacing from deep inside Stagehand's
+// browser connection, as opposed to a normal Playwright locator/timeout error
+// (e.g. "element not found", "Timeout exceeded"). A failed sh.act() call can
+// leave the shared page/session in a bad state such that the NEXT plain
+// Playwright command on that page throws an opaque CDP error instead of its
+// own clean error.
+function isTransportError(err) {
+  const text = `${err?.message || ""}\n${err?.stack || ""}`;
+  if (/-32602/.test(text) && /invalid parameters/i.test(text)) return true;
+  if (/@browserbasehq\/stagehand/.test(text)) return true;
+  if (/protocol error|cdp session/i.test(text) && !/playwright-core/.test(text)) return true;
+  return false;
+}
+
+// Runs a Playwright action against the shared session, with one-shot recovery
+// from a poisoned session: if the action throws, check whether the page/context
+// still looks usable; if it doesn't (or the error itself looks like a transport
+// error rather than a normal Playwright failure), force a fresh Stagehand
+// session, re-navigate to the same URL, and retry the action exactly once.
+// Genuine "element not found"/timeout failures on a healthy session are
+// rethrown unchanged, never masked as a session problem.
+async function withResilientPage(action) {
+  const current = await page();
+  let previousUrl;
+  try {
+    previousUrl = current.url();
+  } catch {
+    previousUrl = undefined;
+  }
+  try {
+    return await action(current);
+  } catch (err) {
+    let healthy = true;
+    try {
+      if (typeof current.isClosed === "function" && current.isClosed()) {
+        healthy = false;
+      } else {
+        await current.title();
+      }
+    } catch {
+      healthy = false;
+    }
+    if (healthy && !isTransportError(err)) {
+      throw err;
+    }
+    process.stderr.write(
+      `[mockup] session looked unhealthy after an action failure; attempting one reconnect+retry. Original error: ${err?.message || err}\n`
+    );
+    try {
+      const fresh = await page(true);
+      if (previousUrl && previousUrl !== "about:blank") {
+        await fresh.goto(previousUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
+      }
+      return await action(fresh);
+    } catch (retryErr) {
+      const wrapped = new Error(
+        `mockup browser session appeared to be left in a bad state (often by a prior failed stagehand act() call); ` +
+          `attempted a session reconnect and retry, but the retry also failed: ${retryErr?.message || retryErr}. ` +
+          `Original error: ${err?.message || err}`
+      );
+      wrapped.cause = err;
+      throw wrapped;
+    }
+  }
 }
 
 async function setViewport(viewport) {
@@ -470,7 +586,6 @@ function ensureTour() {
 }
 
 async function performTourStep(step) {
-  const current = await page();
   switch (step.kind) {
     case "caption":
       await showCaption(step.title || "", step.body || "");
@@ -486,12 +601,12 @@ async function performTourStep(step) {
     case "click":
       if (!step.selector) throw new Error("click step requires selector");
       await showSpotlight(step.selector);
-      await current.click(step.selector);
+      await withResilientPage((p) => p.click(step.selector));
       break;
     case "type":
       if (!step.selector) throw new Error("type step requires selector");
       await showSpotlight(step.selector);
-      await current.fill(step.selector, step.value || "");
+      await withResilientPage((p) => p.fill(step.selector, step.value || ""));
       break;
     case "wait":
       break;
@@ -505,7 +620,20 @@ async function performTourStep(step) {
     case "stagehand_act": {
       if (!step.instruction) throw new Error("stagehand_act step requires instruction");
       const sh = await ensureStagehand();
-      await sh.act(step.instruction);
+      const value = await sh.act(step.instruction);
+      if (value && value.success === false) {
+        let observed;
+        try {
+          observed = await sh.observe();
+        } catch (obsErr) {
+          observed = { error: `observe() also failed: ${obsErr?.message || obsErr}` };
+        }
+        process.stderr.write(
+          `[mockup_tour_step stagehand_act] soft failure for instruction ${JSON.stringify(step.instruction)}: ${JSON.stringify(value)}\n` +
+            `Consider falling back to mockup_tour_step({kind:"click", selector}) or mockup_click({selector}) with a deterministic selector. ` +
+            `Observed page affordances: ${JSON.stringify(observed)}\n`
+        );
+      }
       break;
     }
     default:
@@ -620,7 +748,7 @@ document.getElementById("steps").innerHTML=tour.steps.map((s,i)=>'<section class
 </script>`;
 }
 
-async function collectDesignContext(args = {}) {
+async function collectDesignContext(args = {}, defaultMaxNodes = 80) {
   const current = await page();
   return current.evaluate(
     ({ selector, maxNodes }) => {
@@ -718,7 +846,7 @@ async function collectDesignContext(args = {}) {
         nodes
       };
     },
-    { selector: args.selector || "", maxNodes: args.max_nodes || 80 }
+    { selector: args.selector || "", maxNodes: args.max_nodes || defaultMaxNodes }
   );
 }
 
@@ -751,13 +879,13 @@ async function callTool(name, args = {}) {
     }
     case "mockup_dom": {
       const nav = await maybeNavigate(args);
-      const context = await collectDesignContext(args);
+      const context = await collectDesignContext(args, 40);
       return textResult({ ok: true, ...nav, context });
     }
     case "mockup_visual_qa": {
       const nav = await maybeNavigate(args);
       const current = await page();
-      const context = await collectDesignContext(args);
+      const includeContext = args.include_context !== false;
       const includeImage = args.include_image !== false;
       let clip;
       if (args.selector) {
@@ -778,6 +906,22 @@ async function callTool(name, args = {}) {
         ...(clip ? { clip } : { fullPage: Boolean(args.full_page) })
       };
       const png = includeImage ? await current.screenshot(screenshotOptions) : undefined;
+      if (!includeContext) {
+        const minimal = await current.evaluate(
+          (selector) => {
+            const root = selector ? document.querySelector(selector) : document.body;
+            return {
+              url: window.location.href,
+              title: document.title,
+              viewport: { width: window.innerWidth, height: window.innerHeight },
+              targetFound: Boolean(root || !selector)
+            };
+          },
+          args.selector || ""
+        );
+        return imageResult({ ok: true, ...nav, ...minimal }, png);
+      }
+      const context = await collectDesignContext(args, 20);
       return imageResult(
         {
           ok: true,
@@ -801,7 +945,38 @@ async function callTool(name, args = {}) {
       const sh = await ensureStagehand();
       const value = await sh.act(args.instruction);
       await maybeWait(args.wait_ms);
+      if (value && value.success === false) {
+        let observed;
+        try {
+          observed = await sh.observe();
+        } catch (obsErr) {
+          observed = { error: `observe() also failed: ${obsErr?.message || obsErr}` };
+        }
+        process.stderr.write(
+          `[mockup_stagehand_act] soft failure for instruction ${JSON.stringify(args.instruction)}: ${JSON.stringify(value)}\n`
+        );
+        return textResult({
+          ...value,
+          hint:
+            "stagehand act() could not ground this instruction to an action (a soft failure, not a thrown error). " +
+            "Consider falling back to the deterministic mockup_click({selector}) or mockup_fill({selector,value}) tools, " +
+            "or mockup_tour_step({kind:'click'|'type', selector}), using one of the observed selectors below.",
+          observed
+        });
+      }
       return textResult(value);
+    }
+    case "mockup_click": {
+      if (!args.selector) throw new Error("selector is required");
+      await withResilientPage((p) => p.click(args.selector));
+      await maybeWait(args.wait_ms);
+      return textResult({ ok: true, clicked: args.selector });
+    }
+    case "mockup_fill": {
+      if (!args.selector) throw new Error("selector is required");
+      await withResilientPage((p) => p.fill(args.selector, args.value || ""));
+      await maybeWait(args.wait_ms);
+      return textResult({ ok: true, filled: args.selector });
     }
     case "mockup_tour_start": {
       const viewport = normalizeViewport(args.viewport);
