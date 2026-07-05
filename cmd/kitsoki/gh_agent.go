@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -187,7 +189,7 @@ func newGHAgentDrainCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result := ghAgentDrainResult(drained)
+			result := ghAgentDrainResult(ctx, store, drained, publicBaseURL)
 			if jsonOut {
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetEscapeHTML(false)
@@ -213,7 +215,7 @@ func newGHAgentDrainCmd() *cobra.Command {
 	return cmd
 }
 
-func ghAgentDrainResult(drained []*jobs.GHJob) map[string]any {
+func ghAgentDrainResult(ctx context.Context, store *jobs.GHJobStore, drained []*jobs.GHJob, publicBaseURL string) map[string]any {
 	jobsOut := make([]map[string]any, 0, len(drained))
 	done, failed, active := 0, 0, 0
 	for _, job := range drained {
@@ -228,7 +230,7 @@ func ghAgentDrainResult(drained []*jobs.GHJob) map[string]any {
 		default:
 			active++
 		}
-		jobsOut = append(jobsOut, map[string]any{
+		jobOut := map[string]any{
 			"job_id":        job.JobID,
 			"origin_ref":    job.OriginRef,
 			"repo":          job.Repo,
@@ -239,7 +241,14 @@ func ghAgentDrainResult(drained []*jobs.GHJob) map[string]any {
 			"run_url":       job.RunURL,
 			"incident_url":  job.IncidentURL,
 			"err_msg":       job.ErrMsg,
-		})
+		}
+		assets, err := ghAgentDrainAssets(ctx, store, job.JobID, publicBaseURL)
+		if err != nil {
+			jobOut["asset_error"] = err.Error()
+		} else {
+			jobOut["assets"] = assets
+		}
+		jobsOut = append(jobsOut, jobOut)
 	}
 	status := "drained"
 	if failed > 0 {
@@ -255,6 +264,32 @@ func ghAgentDrainResult(drained []*jobs.GHJob) map[string]any {
 		"active_count":  active,
 		"jobs":          jobsOut,
 	}
+}
+
+func ghAgentDrainAssets(ctx context.Context, store *jobs.GHJobStore, jobID, publicBaseURL string) ([]map[string]any, error) {
+	if store == nil || strings.TrimSpace(jobID) == "" {
+		return nil, nil
+	}
+	assets, err := store.ListAssets(ctx, jobID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, 0, len(assets))
+	for _, asset := range assets {
+		row := map[string]any{
+			"name":       asset.Name,
+			"mime_type":  asset.MimeType,
+			"size_bytes": asset.SizeBytes,
+			"created_at": asset.CreatedAt.Format(time.RFC3339),
+		}
+		assetPath := "/api/run/" + url.PathEscape(jobID) + "/assets/" + url.PathEscape(asset.Name)
+		row["path"] = assetPath
+		if base := strings.TrimRight(strings.TrimSpace(publicBaseURL), "/"); base != "" {
+			row["url"] = base + assetPath
+		}
+		out = append(out, row)
+	}
+	return out, nil
 }
 
 func newGHAgentPollCmd() *cobra.Command {

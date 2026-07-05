@@ -143,6 +143,10 @@ func TestGHAgentDrainCmdDrainsQueuedIssue(t *testing.T) {
 		if err := store.SetRunURL(ctx, job.JobID, job.JobID, "https://agent.example/run/"+job.JobID); err != nil {
 			return nil, err
 		}
+		store.DataDir = t.TempDir()
+		if err := store.PutAsset(ctx, job.JobID, "fix-report.md", "text/markdown", []byte("# Fix report\n")); err != nil {
+			return nil, err
+		}
 		if err := store.Advance(ctx, job.JobID, jobs.GHDone, ""); err != nil {
 			return nil, err
 		}
@@ -168,6 +172,15 @@ func TestGHAgentDrainCmdDrainsQueuedIssue(t *testing.T) {
 	}
 	if payload["status"] != "drained" || payload["drained_count"].(float64) != 1 || payload["done_count"].(float64) != 1 {
 		t.Fatalf("unexpected drain payload: %#v", payload)
+	}
+	jobsPayload := payload["jobs"].([]any)
+	assets := jobsPayload[0].(map[string]any)["assets"].([]any)
+	if len(assets) != 1 {
+		t.Fatalf("assets len=%d, want 1", len(assets))
+	}
+	asset := assets[0].(map[string]any)
+	if asset["name"] != "fix-report.md" || asset["url"] != "https://agent.example/api/run/"+job.JobID+"/assets/fix-report.md" {
+		t.Fatalf("unexpected asset payload: %#v", asset)
 	}
 }
 
