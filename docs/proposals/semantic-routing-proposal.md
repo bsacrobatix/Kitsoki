@@ -7,7 +7,10 @@ moved to **[`../semantic-routing.md`](../architecture/semantic-routing.md)**;
 tiers sit in the broader turn pipeline; [`../authoring.md`](../stories/authoring.md)
 §6.1 is the authoring cheat-sheet for `synonyms:`. This document
 keeps only the **open questions** the design raised and the
-**calibration history** for Oregon Trail.
+**calibration history** for Oregon Trail. The single-decision-point
+direction (collapsing the TUI's routing pre-pass and `Turn`/`OneShot`
+into one shared stack) is being pursued in
+[`never-silent-runtime.md`](never-silent-runtime.md).
 
 The original design (rationale, alternatives, library survey) lives
 in git history at commit

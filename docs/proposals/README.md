@@ -63,6 +63,21 @@ thought.
 
 ## Current proposals
 
+- [`usable-kitsoki.md`](usable-kitsoki.md) — **epic.** Make every room also a
+  governed free-form agent, and prove it against scenarios compiled from real
+  conversations, at swarm scale, before release. Six slices: the room
+  workbench primitive ([`room-workbench.md`](room-workbench.md), runtime +
+  story), a never-silent runtime
+  ([`never-silent-runtime.md`](never-silent-runtime.md), runtime), a dispatch
+  context floor ([`dispatch-context-floor.md`](dispatch-context-floor.md),
+  runtime), the Scenario Foundry
+  ([`scenario-foundry.md`](scenario-foundry.md), tracing + tooling), honest
+  gh-agent issue dispatch
+  ([`gh-agent-honest-issues.md`](gh-agent-honest-issues.md), runtime), and the
+  release gate ([`usable-kitsoki-release-gate.md`](usable-kitsoki-release-gate.md),
+  tooling). Supersedes `ad-hoc-workbench.md` (via S1) and absorbs
+  `conversation-driven-development.md` slice 1 (via S4). Nothing implemented
+  yet; children not yet cut.
 - [`human-action-workflows.md`](human-action-workflows.md) — **epic.** Make
   human-dependent work a first-class workflow executor beside agents:
   `host.human.*` verbs create/await/complete person-owned tasks through a
