@@ -7,7 +7,7 @@
     "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/tools/arena/corpus/cost-bench.manifest.yaml#vscode-01-docs-site-release",
     "/Users/brad/code/Kitsoki/.worktrees/generalized-usage-rebase/.artifacts/arena/paired-task-work/vscode-01-docs-site-release--kitsoki--codex--gpt-5.5/src/vs/sessions/LAYOUT_CONTROLLER.md"
   ],
-  "health": "model:result",
+  "health": "infra:stale",
   "job_type": "paired-task",
   "metrics": {
     "cost_usd": 0.373883,
@@ -15,7 +15,7 @@
     "tokens": 66468,
     "wall_s": 90.732
   },
-  "notes": "codex exit=0: Applied the documentation-only slice from microsoft/vscode commit `7317e60` ([upstream patch](https://github.com/microsoft/vscode/commit/7317e60fe47bea256caf45ef830427365e4e6b3d.patch)).; github_content oracle green=True; cost_usd=0.373883 (blended estimate, not exact)",
+  "notes": "STALE: this cell predates the WB.4 dispatch_kitsoki fix (commit 6690d0d9) and was produced by the OLD broken dispatch \u2014 an identical raw `codex exec` call to the single-briefed arm, NOT the real kitsoki pipeline (see goal log seq 64/67). Left unpatched deliberately: re-running it live was in scope but the operator chose not to spend further this cycle. Do not read this cell's cost/verdict as a real kitsoki-pipeline result \u2014 see the query-string-qs1 and nextjs-05 cells for the two real, live-validated kitsoki cells produced after the fix.",
   "target_id": "cost-bench-pilot",
   "trace_ref": "",
   "variant_id": "kitsoki-codex-native",

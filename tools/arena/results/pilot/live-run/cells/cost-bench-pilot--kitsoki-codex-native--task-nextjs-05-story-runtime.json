@@ -10,12 +10,12 @@
   "health": "model:result",
   "job_type": "paired-task",
   "metrics": {
-    "cost_usd": 0.387591,
+    "cost_usd": 1.568615,
     "host": "local",
-    "tokens": 68905,
-    "wall_s": 162.717
+    "tokens": 6227163,
+    "wall_s": 1370.004
   },
-  "notes": "codex exit=0: Implemented the repo-history change from vercel/next.js commit [`422c93e`](https://github.com/vercel/next.js/commit/422c93e): added and plumbed `experimental.serverComponentsHmrCancellation` through config schema/defaults/runtime config, define-env, app render options, edge SSR template, CI env setu; github_content oracle green=True; cost_usd=0.387591 (blended estimate, not exact)",
+  "notes": "kitsoki bugfix pipeline via drive.sh+MCP; cost_usd=1.568615 (cache-aware estimate over REAL trace usage: 448906 fresh input + 5749376 cache-read input + 28881 output tokens; subscription auth reports no metered cost); oracle solved",
   "target_id": "cost-bench-pilot",
   "trace_ref": "",
   "variant_id": "kitsoki-codex-native",
