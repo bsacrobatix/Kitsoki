@@ -296,6 +296,14 @@ read-only structured analysis (no mutations; `proposer` carries
 evaluate a provided artifact and emit `{ verdict, intent, reason,
 confidence }` — no file access, no schema output beyond the verdict.
 
+All bugfix personas carry the same external-write policy in their
+`system_prompt`: dispatched agents return artifacts only. They must not
+create, comment on, close, transition, or otherwise mutate external
+tickets, GitHub issues, GitHub PRs, or remote services, and must not use
+raw `gh` or other GitHub CLIs. Ticket comments and close-out are owned by
+the story done-room through native `host.gh.ticket` / `kitsoki gitops`
+orchestration.
+
 ## Judge polymorphism
 
 The defining property of this story: every `_awaiting_reply` state
