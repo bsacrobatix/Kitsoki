@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -145,6 +146,7 @@ func newGHAgentDrainCmd() *cobra.Command {
 		publicBaseURL  string
 		projectRoot    string
 		incidentRepo   string
+		assetDir       string
 		useGitHubApp   bool
 		appID          int64
 		installationID int64
@@ -168,6 +170,7 @@ func newGHAgentDrainCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			store.DataDir = ghAgentDrainAssetDir(dbPath, assetDir)
 			opts := ghAgentServeOptions{
 				Repo:           repo,
 				PublicBaseURL:  publicBaseURL,
@@ -207,12 +210,23 @@ func newGHAgentDrainCmd() *cobra.Command {
 	cmd.Flags().StringVar(&publicBaseURL, "public-base-url", "", "public URL base used in ack run links")
 	cmd.Flags().StringVar(&projectRoot, "project-root", os.Getenv("KITSOKI_GH_AGENT_PROJECT_ROOT"), "local checkout root for --repo; when onboarded, issue routes use its .kitsoki app")
 	cmd.Flags().StringVar(&incidentRepo, "incident-repo", "", "owner/repo for gh-agent incidents; defaults to --repo")
+	cmd.Flags().StringVar(&assetDir, "asset-dir", "", "root directory for on-disk asset blobs; defaults to <db-dir>/assets")
 	cmd.Flags().BoolVar(&useGitHubApp, "github-app", false, "authenticate as a GitHub App installation (mints GH_TOKEN)")
 	cmd.Flags().Int64Var(&appID, "gh-app-id", 0, "GitHub App id (overrides KITSOKI_GH_APP_ID)")
 	cmd.Flags().Int64Var(&installationID, "gh-app-installation-id", 0, "installation id (overrides KITSOKI_GH_APP_INSTALLATION_ID)")
 	cmd.Flags().StringVar(&appKeyFile, "gh-app-key-file", "", "path to the App's RSA private key .pem (overrides KITSOKI_GH_APP_PRIVATE_KEY_FILE)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print a JSON result")
 	return cmd
+}
+
+func ghAgentDrainAssetDir(dbPath, assetDir string) string {
+	if dir := strings.TrimSpace(assetDir); dir != "" {
+		return dir
+	}
+	if dir := filepath.Dir(strings.TrimSpace(dbPath)); dir != "" && dir != "." {
+		return filepath.Join(dir, "assets")
+	}
+	return "assets"
 }
 
 func ghAgentDrainResult(ctx context.Context, store *jobs.GHJobStore, drained []*jobs.GHJob, publicBaseURL string) map[string]any {

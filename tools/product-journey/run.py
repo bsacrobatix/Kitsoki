@@ -3179,6 +3179,7 @@ def drain_gh_agent_fixes(
     public_base_url: str,
     project_root: str,
     incident_repo: str,
+    asset_dir: str = "",
 ) -> dict:
     if not db_path:
         return {
@@ -3202,6 +3203,8 @@ def drain_gh_agent_fixes(
         cmd += ["--project-root", project_root]
     if incident_repo:
         cmd += ["--incident-repo", incident_repo]
+    if asset_dir:
+        cmd += ["--asset-dir", asset_dir]
     proc = shell(cmd, ROOT)
     if proc.returncode != 0:
         detail = proc.stderr.strip() or proc.stdout.strip()
@@ -3308,6 +3311,7 @@ def file_findings(
     gh_agent_public_base_url: str = "",
     gh_agent_project_root: str = "",
     gh_agent_incident_repo: str = "",
+    gh_agent_asset_dir: str = "",
 ) -> dict:
     """File the bundle's credible issue findings as GitHub issues.
 
@@ -3385,12 +3389,14 @@ def file_findings(
     if not dry_run and gh_agent_db:
         result.update(enqueue_gh_agent_fixes(run_dir, ticket_repo, gh_agent_db, gh_agent_story))
         if gh_agent_drain:
+            asset_dir = gh_agent_asset_dir or str(run_dir / "gh-agent-assets")
             result.update(drain_gh_agent_fixes(
                 gh_agent_db,
                 ticket_repo,
                 gh_agent_public_base_url,
                 gh_agent_project_root,
                 gh_agent_incident_repo,
+                asset_dir,
             ))
         else:
             result.update({
@@ -3435,6 +3441,7 @@ def autonomous_fix_loop(
     gh_agent_public_base_url: str,
     gh_agent_project_root: str,
     gh_agent_incident_repo: str,
+    gh_agent_asset_dir: str,
     publish_deck: Optional[Path],
 ) -> dict:
     """Run the autonomous product-journey issue-to-fix gate.
@@ -3455,6 +3462,7 @@ def autonomous_fix_loop(
         gh_agent_public_base_url,
         gh_agent_project_root,
         gh_agent_incident_repo,
+        gh_agent_asset_dir,
     )
     reviewed = review_run_bundle(run_dir, publish_deck)
     validation = validate_run_bundle(run_dir)
@@ -7620,6 +7628,7 @@ def main() -> None:
     parser.add_argument("--gh-agent-public-base-url", default="", help="Public gh-agent base URL used when draining queued fixes")
     parser.add_argument("--gh-agent-project-root", default="", help="Local checkout root used by gh-agent drain for onboarded target repos")
     parser.add_argument("--gh-agent-incident-repo", default="", help="Repo for gh-agent incident tickets during drain; defaults to --ticket-repo")
+    parser.add_argument("--gh-agent-asset-dir", default="", help="Root directory for gh-agent drain artifacts; defaults to <run-dir>/gh-agent-assets")
     parser.add_argument("--dry-run", action="store_true", help="With --file-findings, render what would be filed without calling GitHub")
     parser.add_argument(
         "--filing-mode",
@@ -8046,6 +8055,7 @@ def main() -> None:
             args.gh_agent_public_base_url,
             args.gh_agent_project_root,
             args.gh_agent_incident_repo,
+            args.gh_agent_asset_dir,
         )
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
@@ -8093,6 +8103,7 @@ def main() -> None:
             args.gh_agent_public_base_url,
             args.gh_agent_project_root,
             args.gh_agent_incident_repo,
+            args.gh_agent_asset_dir,
             publish_deck,
         )
         if args.json_output:
