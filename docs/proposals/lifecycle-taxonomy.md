@@ -186,8 +186,9 @@ The two classic SDLC artifacts deliberately do **not** become objects here:
 
    `produced_by` points at the deterministic producer (Playwright spec, tour
    manifest, `kitsoki-ui-demo` run) so media is *regenerable*, not just
-   stored — the same source-pointer discipline as the chapter sidecar in
-   [`video-frame-seam.md`](video-frame-seam.md).
+   stored — the same source-pointer discipline as the chapter sidecar
+   shipped for mockup-video (`host.video.frame`, see
+   [`docs/architecture/hosts.md`](../architecture/hosts.md)).
 
 ## The objects
 

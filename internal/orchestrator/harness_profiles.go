@@ -97,6 +97,34 @@ func WithHarnessProfiles(profiles map[string]HarnessProfile, defaultProfile stri
 	}
 }
 
+// providersForDispatch merges story-declared providers with harness profiles
+// so a harness-ladder rung can name the same profile key the operator sees in
+// /provider. Story providers win on name collisions because explicit story
+// config is the older, narrower contract for `with: { provider: ... }`.
+func (o *Orchestrator) providersForDispatch() map[string]host.Provider {
+	out := providersForContext(o.def)
+	if len(o.harnessProfiles) == 0 {
+		return out
+	}
+	if out == nil {
+		out = make(map[string]host.Provider, len(o.harnessProfiles))
+	}
+	for name, p := range o.harnessProfiles {
+		if _, exists := out[name]; exists {
+			continue
+		}
+		prov := host.Provider{Model: p.Model, Effort: p.Effort}
+		if len(p.Env) > 0 {
+			prov.Env = make(map[string]string, len(p.Env))
+			for k, v := range p.Env {
+				prov.Env[k] = v
+			}
+		}
+		out[name] = prov
+	}
+	return out
+}
+
 // Profiles returns the declared profiles as a stable, name-sorted, secret-free
 // list with the active one flagged. Empty when no profiles are declared.
 func (o *Orchestrator) Profiles() []ProfileInfo {

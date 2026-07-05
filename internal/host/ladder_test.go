@@ -10,12 +10,16 @@ package host_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/host"
+	"kitsoki/internal/store"
 )
 
 // twoModelConfig returns a small ladder: two models, three efforts, backed by
@@ -396,27 +400,89 @@ func TestExpandLadder_ModelOuterEffortInner(t *testing.T) {
 	}
 }
 
-// TestDefaultLadderConfig_IsCheapFirst verifies the shipped default ladder's
-// model ordering matches the documented cheap-first design (GLM → gpt-5.5 →
-// gpt-5.3-codex-spark → sonnet → opus) and sweeps the full effort catalog.
-func TestDefaultLadderConfig_IsCheapFirst(t *testing.T) {
+// TestDefaultLadderConfig_IsAvailabilityFirst verifies the shipped default
+// ladder's model ordering matches the operator-priority fallback design
+// (claude → codex → synthetic-claude → synthetic-codex) and sweeps the full
+// effort catalog.
+func TestDefaultLadderConfig_IsAvailabilityFirst(t *testing.T) {
 	t.Parallel()
 	cfg := host.DefaultLadderConfig()
 	if !cfg.Enabled() {
 		t.Fatal("expected the default ladder to be enabled")
 	}
-	wantModels := []string{"hf:zai-org/GLM-5.2", "gpt-5.5", "gpt-5.3-codex-spark", "sonnet", "opus"}
+	wantModels := []struct {
+		backend  string
+		provider string
+		model    string
+	}{
+		{"claude", "claude-native", "opus"},
+		{"codex", "codex-native", "gpt-5.5"},
+		{"claude", "synthetic-claude", "hf:zai-org/GLM-5.2"},
+		{"codex", "synthetic-codex", "hf:zai-org/GLM-5.2"},
+	}
 	if len(cfg.Models) != len(wantModels) {
 		t.Fatalf("expected %d models, got %d", len(wantModels), len(cfg.Models))
 	}
 	for i, want := range wantModels {
-		if cfg.Models[i].Model != want {
-			t.Errorf("model %d = %q, want %q", i, cfg.Models[i].Model, want)
+		got := cfg.Models[i]
+		if got.Backend != want.backend || got.Provider != want.provider || got.Model != want.model {
+			t.Errorf("model %d = {%q %q %q}, want {%q %q %q}",
+				i, got.Backend, got.Provider, got.Model, want.backend, want.provider, want.model)
 		}
 	}
 	wantEfforts := []string{"low", "medium", "high", "xhigh", "max"}
 	if fmt.Sprint(cfg.Efforts) != fmt.Sprint(wantEfforts) {
 		t.Fatalf("efforts = %v, want %v", cfg.Efforts, wantEfforts)
+	}
+}
+
+func TestRunLadder_InfraFailureEmitsFallbackNotice(t *testing.T) {
+	t.Parallel()
+	cfg := twoModelConfig(t)
+	sink := &captureSink{}
+	ctx := host.WithAgentEventSink(context.Background(), sink)
+	ctx = host.WithAgentCallCtx(ctx, host.AgentCallCtx{
+		SessionID: app.SessionID("sess-ladder"),
+		Turn:      app.TurnNumber(7),
+		StatePath: app.StatePath("work.running"),
+	})
+
+	once := func(ctx context.Context, _ map[string]any) (host.Result, error) {
+		rung, _ := host.LadderRungFromContext(ctx)
+		if rung.Model == "modelA" {
+			return infraResult("429 rate limited"), nil
+		}
+		return host.Result{}, nil
+	}
+	res, err, summary := host.RunLadder(ctx, cfg, nil, once)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.Error != "" || summary.Winner == nil {
+		t.Fatalf("expected fallback success, res=%+v summary=%+v", res, summary)
+	}
+
+	var notice map[string]any
+	for _, ev := range sink.events {
+		if ev.Kind != store.AgentStreamEvent {
+			continue
+		}
+		if err := json.Unmarshal(ev.Payload, &notice); err != nil {
+			t.Fatalf("unmarshal notice: %v", err)
+		}
+		if notice["type"] == "ladder_fallback" {
+			break
+		}
+		notice = nil
+	}
+	if notice == nil {
+		t.Fatalf("expected a persisted ladder_fallback agent.stream event, got %+v", sink.events)
+	}
+	if notice["subtype"] != string(host.FailureInfra) || notice["model"] != "modelA" {
+		t.Fatalf("unexpected fallback notice payload: %+v", notice)
+	}
+	if text, _ := notice["text"].(string); text == "" || !strings.Contains(text, "429 rate limited") {
+		t.Fatalf("notice text should include the visible 429 reason, got %q", text)
 	}
 }
 

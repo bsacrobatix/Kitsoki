@@ -31,6 +31,13 @@
 #       ticket_repo: bsacrobatix/Kitsoki
 
 harness_profiles:
+  # codex with its own config/auth (no retarget). codex has a model selector;
+  # reasoning effort for codex is not wired (it ignores --effort), so no efforts.
+  codex-native:
+    backend: codex
+    model: gpt-5.5
+    models: [gpt-5-codex, gpt-5, gpt-5.5]
+
   # claude-code pointed at synthetic.new (Anthropic-compatible endpoint).
   # claude-code appends /v1/messages, so the base URL omits /v1.
   # models_endpoint pulls the FULL always-on model list at selection time, so you
@@ -78,13 +85,6 @@ harness_profiles:
     env:
       OPENAI_BASE_URL: https://api.synthetic.new/openai/v1
       OPENAI_API_KEY: "${SYNTHETIC_API_KEY}"
-
-  # codex with its own config/auth (no retarget). codex has a model selector;
-  # reasoning effort for codex is not wired (it ignores --effort), so no efforts.
-  codex-native:
-    backend: codex
-    model: gpt-5.5
-    models: [gpt-5-codex, gpt-5, gpt-5.5]
 
   # A local llama.cpp model via the builtin plugin (no backend CLI forked).
   llama-local:

@@ -70,11 +70,22 @@ importing git-ops. See
 | `worktree_list` | List and classify existing worktrees. |
 | `cleanup` | Remove worktree and branch. |
 
+### `rebase` - feature branch sync
+
+Use `rebase` from `branch_ops` or the `intercept` command hub to replace direct
+rebasing-helper recipes. It delegates to `scripts/rebase-current-branch.sh`,
+rebases the current branch onto the local `integration_branch`, creates a
+pre-rebase backup tag when the branch is more than one commit ahead, and tries
+`git rerere` before routing unresolved conflicts to the conflict room. It does
+not fetch or pull; use `sync_main remote=origin` or `pull` on the integration
+branch first when remote freshness is required.
+
 ### Integration branch (`main_ops`)
 
 | Intent | Description |
 |---|---|
 | `pull` | `git pull --rebase`. On conflict, routes to `conflict`. |
+| `sync_main` | Reconcile protected local `main` with a remote `main` through an integration worktree. |
 | `merge_branch` | Merge a named branch with same guards as `merge_into_main`. |
 | `worktree_create` | Create a new linked worktree under `.worktrees/`. |
 | `worktree_list` | List and classify existing worktrees. |
@@ -86,6 +97,26 @@ importing git-ops. See
 
 `merge_branch branch=<name>` also accepts the branch as a slot and skips the
 picker when given.
+
+### `sync_main` - protected-main remote sync
+
+Use `sync_main remote=origin` from `main_ops` or the `intercept` command hub to
+replace the direct helper-script recipe for reconciling guarded local main with
+a remote main. If the first pass stops for conflicts, resolve them in the
+integration worktree and then use `sync_main continue_branch=<branch>` to run
+the helper's continue/review/commit path through git-ops as well. It delegates
+to `scripts/sync-main-from-remote.sh`, creates an integration worktree under
+`.worktrees/`, applies the helper's deterministic known resolutions, and
+surfaces the integration branch/worktree plus the validation and
+`merge-to-main` command. Slots:
+
+| Slot | Default | Description |
+|---|---|---|
+| `remote` | `origin` | Remote to fetch from. |
+| `remote_branch` | `main` | Remote branch to reconcile. |
+| `name` | auto-generated | Optional integration worktree name. |
+| `continue_branch` / `branch` | empty | Existing sync integration branch to continue after conflicts are resolved. |
+| `auto_resolve` | `false` | Enable the helper's configured resolver command after deterministic known resolutions. |
 
 ### `cleanup` — operand-as-slot, no swallowed failures
 

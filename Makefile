@@ -32,6 +32,11 @@ endef
 RUNSTATUS_DIR := tools/runstatus
 VSCODE_DIR    := tools/vscode-kitsoki
 EMBED_INDEX   := internal/runstatus/web/assets/index.html
+TEMP_DIR      := .temp
+RUNSTATUS_TEMP_ENV := TMPDIR="$(abspath $(TEMP_DIR))" KITSOKI_TEMP_ROOT="$(abspath $(TEMP_DIR))"
+RUNSTATUS_LOCKFILE := $(RUNSTATUS_DIR)/pnpm-lock.yaml
+RUNSTATUS_MODULES  := $(RUNSTATUS_DIR)/node_modules/.modules.yaml
+RUNSTATUS_DIST     := $(TEMP_DIR)/runstatus/dist
 # features/*.yaml is part of the SPA's sources: the tour manifests the bundle
 # ships are code-generated from the feature catalog (see `make features`).
 SPA_SOURCES   := $(shell find $(RUNSTATUS_DIR)/src $(RUNSTATUS_DIR)/index.html \
@@ -47,7 +52,7 @@ STORY_APPS := $(wildcard stories/*/app.yaml)
 # gitignored; a committed stories/.gitkeep keeps the //go:embed pattern
 # matching on a fresh checkout. internal/basestories.Materialize extracts it
 # to a content-addressed cache at runtime so `@kitsoki/<name>` resolves with
-# only the binary present. See docs/proposals/kitsoki-as-dependency.md (slice 1).
+# only the binary present. See docs/web/tour.md and stories/dev-story/README.md.
 BASESTORIES_DIR   := internal/basestories/stories
 BASESTORIES_STAMP := internal/basestories/.embed-stamp
 
@@ -58,7 +63,7 @@ BASESTORIES_STAMP := internal/basestories/.embed-stamp
 BASESKILLS_DIR    := internal/baseskills/assets
 BASESKILLS_STAMP  := internal/baseskills/.embed-stamp
 
-.PHONY: all setup build build-lean install uninstall test test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff history-smoke history-pending-smoke gears-history-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
+.PHONY: all setup bootstrap-worktree build build-lean install uninstall test test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff history-smoke history-pending-smoke gears-history-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
 	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local
 
@@ -138,19 +143,28 @@ uninstall:
 # internal/basestories/stories/, disjoint trees) so there is no embed-of-cwd /
 # recursive-embed footgun.
 embed-stories:
-	@tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/kitsoki-basestories.XXXXXX"); \
-	trap 'rm -rf "$$tmp"' EXIT; \
+	@mkdir -p $(TEMP_DIR); chmod u+rwx $(TEMP_DIR); \
+	tmp=$$(mktemp -d "$(abspath $(TEMP_DIR))/kitsoki-basestories.XXXXXX"); \
+	trap 'chmod -R u+w "$$tmp" 2>/dev/null || true; rm -rf "$$tmp"' EXIT; \
 	mkdir -p "$$tmp/stories"; \
 	cp -R stories/. "$$tmp/stories"/; \
+	chmod -R u+w "$$tmp"; \
 	touch "$$tmp/stories/.gitkeep"; \
 	if [ -d "$(BASESTORIES_DIR)" ] && diff -qr "$$tmp/stories" "$(BASESTORIES_DIR)" >/dev/null; then \
-		touch "$(BASESTORIES_STAMP)"; \
+		relock_stamp=0; \
+		if ! touch "$(BASESTORIES_STAMP)" 2>/dev/null; then chmod u+w "$(dir $(BASESTORIES_STAMP))" "$(BASESTORIES_STAMP)" 2>/dev/null || true; relock_stamp=1; touch "$(BASESTORIES_STAMP)"; fi; \
+		if [ "$$relock_stamp" = 1 ]; then chmod u-w "$(BASESTORIES_STAMP)" "$(dir $(BASESTORIES_STAMP))" 2>/dev/null || true; fi; \
 		echo "stories/ already staged in $(BASESTORIES_DIR)"; \
 	else \
+		relock=0; \
+		probe="$(BASESTORIES_DIR)/.kitsoki-write-probe"; \
+		if [ -e "$(BASESTORIES_DIR)" ] && ! ( touch "$$probe" && rm -f "$$probe" ) 2>/dev/null; then chmod -R u+w "$(BASESTORIES_DIR)" && chmod u+w "$(dir $(BASESTORIES_DIR))" && relock=1; fi; \
+		if [ ! -e "$(BASESTORIES_DIR)" ] && ! ( touch "$(dir $(BASESTORIES_DIR))/.kitsoki-write-probe" && rm -f "$(dir $(BASESTORIES_DIR))/.kitsoki-write-probe" ) 2>/dev/null; then chmod u+w "$(dir $(BASESTORIES_DIR))" && relock=1; fi; \
 		rm -rf "$(BASESTORIES_DIR)"; \
 		mkdir -p "$(BASESTORIES_DIR)"; \
 		cp -R "$$tmp/stories"/. "$(BASESTORIES_DIR)"/; \
 		touch "$(BASESTORIES_STAMP)"; \
+		if [ "$$relock" = 1 ]; then chmod -R u-w "$(BASESTORIES_DIR)"; fi; \
 		echo "staged stories/ -> $(BASESTORIES_DIR)"; \
 	fi
 
@@ -158,20 +172,29 @@ embed-stories:
 # dir (as assets/skills + assets/agents) so //go:embed ships the agent toolkit.
 # Same content-compare/one-directional-copy discipline as embed-stories.
 embed-skills:
-	@tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/kitsoki-baseskills.XXXXXX"); \
-	trap 'rm -rf "$$tmp"' EXIT; \
+	@mkdir -p $(TEMP_DIR); chmod u+rwx $(TEMP_DIR); \
+	tmp=$$(mktemp -d "$(abspath $(TEMP_DIR))/kitsoki-baseskills.XXXXXX"); \
+	trap 'chmod -R u+w "$$tmp" 2>/dev/null || true; rm -rf "$$tmp"' EXIT; \
 	mkdir -p "$$tmp/assets/skills" "$$tmp/assets/agents"; \
 	cp -R .agents/skills/. "$$tmp/assets/skills"/; \
 	cp -R .agents/agents/. "$$tmp/assets/agents"/; \
+	chmod -R u+w "$$tmp"; \
 	touch "$$tmp/assets/.gitkeep"; \
 	if [ -d "$(BASESKILLS_DIR)" ] && diff -qr "$$tmp/assets" "$(BASESKILLS_DIR)" >/dev/null; then \
-		touch "$(BASESKILLS_STAMP)"; \
+		relock_stamp=0; \
+		if ! touch "$(BASESKILLS_STAMP)" 2>/dev/null; then chmod u+w "$(dir $(BASESKILLS_STAMP))" "$(BASESKILLS_STAMP)" 2>/dev/null || true; relock_stamp=1; touch "$(BASESKILLS_STAMP)"; fi; \
+		if [ "$$relock_stamp" = 1 ]; then chmod u-w "$(BASESKILLS_STAMP)" "$(dir $(BASESKILLS_STAMP))" 2>/dev/null || true; fi; \
 		echo "agent toolkit already staged in $(BASESKILLS_DIR)"; \
 	else \
+		relock=0; \
+		probe="$(BASESKILLS_DIR)/.kitsoki-write-probe"; \
+		if [ -e "$(BASESKILLS_DIR)" ] && ! ( touch "$$probe" && rm -f "$$probe" ) 2>/dev/null; then chmod -R u+w "$(BASESKILLS_DIR)" && chmod u+w "$(dir $(BASESKILLS_DIR))" && relock=1; fi; \
+		if [ ! -e "$(BASESKILLS_DIR)" ] && ! ( touch "$(dir $(BASESKILLS_DIR))/.kitsoki-write-probe" && rm -f "$(dir $(BASESKILLS_DIR))/.kitsoki-write-probe" ) 2>/dev/null; then chmod u+w "$(dir $(BASESKILLS_DIR))" && relock=1; fi; \
 		rm -rf "$(BASESKILLS_DIR)"; \
 		mkdir -p "$(BASESKILLS_DIR)"; \
 		cp -R "$$tmp/assets"/. "$(BASESKILLS_DIR)"/; \
 		touch "$(BASESKILLS_STAMP)"; \
+		if [ "$$relock" = 1 ]; then chmod -R u-w "$(BASESKILLS_DIR)"; fi; \
 		echo "staged .agents/{skills,agents} -> $(BASESKILLS_DIR)"; \
 	fi
 
@@ -184,15 +207,41 @@ $(EMBED_INDEX): $(SPA_SOURCES)
 		echo "error: pnpm not found — needed to build the runstatus SPA." >&2; \
 		echo "       run 'make setup' to install Node + pnpm, or 'make web-clean' if a bundle is already staged." >&2; \
 		exit 1; }
-	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile && pnpm features:check && pnpm build
+	@mkdir -p $(TEMP_DIR)
+	@chmod u+rwx $(TEMP_DIR)
+	@if [ ! -f "$(RUNSTATUS_MODULES)" ] || [ "$(RUNSTATUS_LOCKFILE)" -nt "$(RUNSTATUS_MODULES)" ]; then \
+		cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) pnpm install --frozen-lockfile; \
+	else \
+		echo "runstatus deps already installed for $(RUNSTATUS_LOCKFILE)"; \
+	fi
+	cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) ./node_modules/.bin/tsx scripts/features/generate.ts --check && $(RUNSTATUS_TEMP_ENV) ./node_modules/.bin/tsx scripts/features/lint-demos.ts
+	cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) ./node_modules/.bin/vite --configLoader runner build
 	@mkdir -p $(dir $(EMBED_INDEX))
-	cp $(RUNSTATUS_DIR)/dist/index.html $(EMBED_INDEX)
+	@embed_dir="$(dir $(EMBED_INDEX))"; relock_dir=0; relock_file=0; \
+	if [ -e "$(EMBED_INDEX)" ] && [ ! -w "$(EMBED_INDEX)" ]; then chmod u+w "$(EMBED_INDEX)" && relock_file=1; fi; \
+	if [ ! -e "$(EMBED_INDEX)" ] && [ ! -w "$$embed_dir" ]; then chmod u+w "$$embed_dir" && relock_dir=1; fi; \
+	cp $(RUNSTATUS_DIST)/index.html $(EMBED_INDEX); \
+	if [ "$$relock_file" = 1 ]; then chmod u-w "$(EMBED_INDEX)"; fi; \
+	if [ "$$relock_dir" = 1 ]; then chmod u-w "$$embed_dir"; fi
 	@echo "staged runstatus SPA -> $(EMBED_INDEX)"
 
 # web-clean removes the staged bundle (the binary then reports the SPA as
 # unbuilt until the next `make web`).
 web-clean:
 	rm -f $(EMBED_INDEX)
+
+# bootstrap-worktree is the one-shot setup for a FRESH `git worktree add`
+# checkout: stories/ and the runstatus SPA start as empty .gitkeep placeholders
+# (embed-only dirs, staged by embed-stories/web but gitignored once staged),
+# tools/runstatus/node_modules is gitignored, and the first `go run` in a new
+# worktree compiles cold (slow enough to blow past short test timeouts). Run
+# this once from inside a new worktree, before `go run ./cmd/kitsoki` or any
+# Playwright spec.
+bootstrap-worktree: embed-stories web
+	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
+	@echo "bootstrap-worktree: warming the Go build cache (first compile is slow)…"
+	@go run $(PKG) --help >/dev/null
+	@echo "worktree bootstrapped — go run/Playwright specs should work now"
 
 # web-dev starts the kitsoki Go backend and the Vite HMR dev server in
 # parallel so edits to tools/runstatus/src/** are reflected instantly without
@@ -550,6 +599,13 @@ features:
 
 features-check:
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:check
+
+# vitest-check runs the runstatus (web UI) component/unit test suite. Split out
+# from `make test` (which stays Go-only + no-LLM deterministic story/tool
+# suites) because it needs pnpm/node_modules; wired into CI's `site` job,
+# which already installs them for features-check/site.
+vitest-check:
+	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm test
 
 features-index:
 	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent && pnpm features:index

@@ -133,6 +133,43 @@ func TestGHJobEventsAndStuckListing(t *testing.T) {
 	}
 }
 
+func TestListQueuedReturnsOnlyQueuedJobs(t *testing.T) {
+	ctx := context.Background()
+	s := newTestGHStore(t)
+	queuedJob, _, err := s.Claim(ctx, GHMention{
+		OriginRef:    "github:o/r/issue/1",
+		Repo:         "o/r",
+		ObjectKind:   "issue",
+		ObjectNumber: "1",
+	}, "w1")
+	if err != nil {
+		t.Fatalf("Claim queued: %v", err)
+	}
+	if err := s.Advance(ctx, queuedJob.JobID, GHQueued, "retry"); err != nil {
+		t.Fatalf("requeue: %v", err)
+	}
+	runningJob, _, err := s.Claim(ctx, GHMention{
+		OriginRef:    "github:o/r/pr/2",
+		Repo:         "o/r",
+		ObjectKind:   "pr",
+		ObjectNumber: "2",
+	}, "w1")
+	if err != nil {
+		t.Fatalf("Claim running: %v", err)
+	}
+	if err := s.Advance(ctx, runningJob.JobID, GHRunning, ""); err != nil {
+		t.Fatalf("mark running: %v", err)
+	}
+
+	queued, err := s.ListQueued(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListQueued: %v", err)
+	}
+	if len(queued) != 1 || queued[0].JobID != queuedJob.JobID {
+		t.Fatalf("queued=%+v, want only queued job %s", queued, queuedJob.JobID)
+	}
+}
+
 func TestAdvanceAndSetters(t *testing.T) {
 	ctx := context.Background()
 	s := newTestGHStore(t)

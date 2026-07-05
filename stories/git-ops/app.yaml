@@ -110,6 +110,15 @@ world:
   checkpoint_list:          { type: object, default: {} }
   restore_label:            { type: string, default: "" }
   restore_outcome:          { type: string, default: "" }
+  # protected-main remote sync arc. This delegates to
+  # scripts/sync-main-from-remote.sh so local main is reconciled through an
+  # integration worktree instead of a pull in the guarded checkout.
+  sync_remote:              { type: string, default: "origin" }
+  sync_remote_branch:       { type: string, default: "main" }
+  sync_name:                { type: string, default: "" }
+  sync_continue_branch:     { type: string, default: "" }
+  sync_auto_resolve:        { type: bool,   default: false }
+  sync_result:              { type: object, default: {} }
 
 intents:
   # ── Routing (internal; emitted by on_enter) ─────────────────────────
@@ -251,6 +260,21 @@ intents:
     description: "Pull from upstream with --rebase."
     examples: ["pull", "pull from upstream", "git pull", "sync upstream"]
     priority: 70
+
+  sync_main:
+    description: "Reconcile protected local main with a remote main through an integration worktree."
+    examples: ["sync main from origin", "reconcile main with origin",
+               "update local main from origin", "sync protected main",
+               "sync origin main", "sync upstream main",
+               "continue main sync", "finish main sync"]
+    priority: 75
+    slots:
+      remote:        { type: string, required: false }
+      remote_branch: { type: string, required: false }
+      name:          { type: string, required: false }
+      branch:        { type: string, required: false }
+      continue_branch: { type: string, required: false }
+      auto_resolve:  { type: bool,   required: false }
 
   merge_branch:
     description: "Merge a named branch into the integration branch (from main_ops)."

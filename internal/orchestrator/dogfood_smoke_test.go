@@ -1037,8 +1037,11 @@ func TestDogfoodSmoke_FullImplementationPipeline(t *testing.T) {
 		cancel()
 	}
 
-	step("kickoff", "core__go_implementation", "core.impl.idle")
-	step("idle → review_task", "core__impl__start", "core.impl.review_task_executing")
+	// idle.on_enter now auto-starts once ticket_id is set (goal-seeker/
+	// punch-list headless drivers only reliably get one prompt turn), so
+	// kickoff lands straight at review_task_executing instead of parking
+	// at idle for a separate explicit `start`.
+	step("kickoff", "core__go_implementation", "core.impl.review_task_executing")
 	step("review_task → wait", "core__impl__proceed", "core.impl.review_task_awaiting_reply")
 	step("review_task → write", "core__impl__accept", "core.impl.write_code_executing")
 	step("write → wait", "core__impl__proceed", "core.impl.write_code_awaiting_reply")
@@ -1108,9 +1111,10 @@ func TestDogfoodSmoke_ImplHandoffRefusesUncommittedWork(t *testing.T) {
 	}
 
 	// Drive to handoff (worktree is clean here — the stage_all commits in
-	// write_code + test swept the stubbed maker work).
-	step("kickoff", "core__go_implementation", "core.impl.idle")
-	step("idle → review_task", "core__impl__start", "core.impl.review_task_executing")
+	// write_code + test swept the stubbed maker work). idle.on_enter now
+	// auto-starts once ticket_id is set, so kickoff lands straight at
+	// review_task_executing instead of parking at idle.
+	step("kickoff", "core__go_implementation", "core.impl.review_task_executing")
 	step("review_task → wait", "core__impl__proceed", "core.impl.review_task_awaiting_reply")
 	step("review_task → write", "core__impl__accept", "core.impl.write_code_executing")
 	step("write → wait", "core__impl__proceed", "core.impl.write_code_awaiting_reply")
@@ -1224,14 +1228,17 @@ func TestDogfoodSmoke_ImplIdleProvisionsWorktree(t *testing.T) {
 		cancel()
 	}
 
-	// drive a feature → impl.idle, whose on_enter must provision.
+	// drive a feature → impl.idle, whose on_enter must provision. idle now
+	// auto-starts once ticket_id is set (see stories/implementation/rooms/
+	// idle.yaml's Step 3), so the provisioning side effects land but the
+	// final state is review_task_executing, not idle itself.
 	c, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	out, err := orch.SubmitDirect(c, sid, "core__drive", nil)
 	require.NoError(t, err, "core__drive(feature) from main")
 	require.NotNil(t, out)
-	require.Equal(t, app.StatePath("core.impl.idle"), out.NewState,
-		"drive on a feature ticket must route to impl.idle; got %q", out.NewState)
+	require.Equal(t, app.StatePath("core.impl.review_task_executing"), out.NewState,
+		"drive on a feature ticket must auto-start into review_task_executing; got %q", out.NewState)
 
 	journey, err := orch.LoadJourney(sid)
 	require.NoError(t, err)

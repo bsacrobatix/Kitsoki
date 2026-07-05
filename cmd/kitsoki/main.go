@@ -72,9 +72,9 @@ func newRootCmd() *cobra.Command {
 			}
 		}
 		// Record whether the operator explicitly passed --semantic-routing so
-		// semanticRoutingOption can let it override KITSOKI_SEMANTIC_ROUTING
-		// and the default. Persistent flags are inherited, so cmd.Flags()
-		// resolves it for every subcommand.
+		// semanticRoutingOptions can let it override KITSOKI_SEMANTIC_ROUTING.
+		// Persistent flags are inherited, so cmd.Flags() resolves it for every
+		// subcommand.
 		semanticRoutingFlagSet = cmd.Flags().Changed("semantic-routing")
 		return nil
 	}
@@ -123,12 +123,12 @@ See docs/ in the repo for the narrative documentation.`,
 	root.PersistentFlags().StringVar(&kitsokiRepoFlag, "kitsoki-repo", "",
 		"path to a kitsoki source checkout; resolves @kitsoki/NAME imports against <path>/stories/NAME (overrides $KITSOKI_REPO and the embedded story library)")
 
-	// Global toggle for the deterministic semantic-routing stack. Off by default:
-	// free-text routing is an isolated main-model decision (see
-	// docs/architecture/semantic-routing.md). Overrides per-app routing.enabled
-	// and $KITSOKI_SEMANTIC_ROUTING when passed explicitly.
+	// Global toggle for the deterministic semantic-routing stack. When unset,
+	// the CLI keeps the stack off: exact deterministic commands still route, and
+	// misses go to the selected harness/model. Passing true opts back into
+	// semroute, turn-cache, default_intent, and free-form fallback.
 	root.PersistentFlags().BoolVar(&semanticRoutingFlag, "semantic-routing", false,
-		"enable the deterministic semantic-routing stack (semroute, turn-cache, default_intent sink, free-form fallback); default off routes free text via the main model (env: KITSOKI_SEMANTIC_ROUTING)")
+		"enable the deterministic semantic-routing stack (semroute, turn-cache, default_intent sink, free-form fallback); default off (env: KITSOKI_SEMANTIC_ROUTING)")
 	root.Flags().AddFlagSet(defaultRunCmd.Flags())
 
 	root.AddCommand(versionCmd())
@@ -1286,8 +1286,9 @@ func testCmd() *cobra.Command {
 		Use:   "test",
 		Short: "Run Mode 1 and Mode 2 tests for an app",
 		Long: `Test sub-commands:
-  kitsoki test flows   <app.yaml>   — Mode 2: deterministic flow tests (no LLM)
-  kitsoki test intents <app.yaml>   — Mode 1: intent pass-rate tests
+  kitsoki test flows         <app.yaml>   — Mode 2: deterministic flow tests (no LLM)
+  kitsoki test flow-coverage <app.yaml>   — static flow fixture coverage ledger
+  kitsoki test intents       <app.yaml>   — Mode 1: intent pass-rate tests
 
 Fixture layout (defaults):
   <app-dir>/flows/*.yaml      — flow fixtures (run under 'test flows')
@@ -1297,6 +1298,7 @@ Fixture layout (defaults):
 See 'kitsoki docs llm-guide' §7 for fixture shape.`,
 	}
 	cmd.AddCommand(testFlowsCmd())
+	cmd.AddCommand(testFlowCoverageCmd())
 	cmd.AddCommand(testIntentsCmd())
 	return cmd
 }

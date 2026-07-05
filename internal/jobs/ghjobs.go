@@ -291,6 +291,34 @@ func (s *GHJobStore) BumpAttempt(ctx context.Context, jobID string) (int, error)
 	return job.AttemptCount, nil
 }
 
+// ListQueued returns durable jobs waiting to be claimed by the gh-agent worker.
+func (s *GHJobStore) ListQueued(ctx context.Context, limit int) ([]*GHJob, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+ghJobCols+` FROM gh_jobs
+		  WHERE state=?
+		  ORDER BY updated_at ASC LIMIT ?`,
+		GHQueued, limit)
+	if err != nil {
+		return nil, fmt.Errorf("jobs.ListQueued: %w", err)
+	}
+	defer rows.Close()
+	var out []*GHJob
+	for rows.Next() {
+		job, err := scanGHJobScanner(rows)
+		if err != nil {
+			return nil, fmt.Errorf("jobs.ListQueued: scan: %w", err)
+		}
+		out = append(out, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("jobs.ListQueued: rows: %w", err)
+	}
+	return out, nil
+}
+
 // SetIncidentURL records the operator incident created for a non-recoverable job.
 func (s *GHJobStore) SetIncidentURL(ctx context.Context, jobID, incidentURL string) error {
 	_, err := s.db.ExecContext(ctx,

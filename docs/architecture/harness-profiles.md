@@ -125,6 +125,19 @@ harness_profiles:
 against the process environment. With no `harness_profiles:` block the static
 flag/env path is preserved byte-for-byte.
 
+Live TUI and web sessions also install an automatic fallback ladder when no
+explicit `harness_ladder:` is declared. The default priority is:
+
+1. `claude-native` (`claude` backend, `opus`)
+2. `codex-native` (`codex` backend, `gpt-5.5`)
+3. `synthetic-claude` (`claude` backend, `hf:zai-org/GLM-5.2`)
+4. `synthetic-codex` (`codex` backend, `hf:zai-org/GLM-5.2`)
+
+`synthetic-codex` stays in the profile catalog for manual selection and
+diagnostics, but it is intentionally last in automatic fallback. A 429, quota,
+rate-limit, timeout, 5xx, or provider transport failure is logged, recorded in
+the trace, backed off, and then the next configured profile is tried.
+
 ## Provider quota control
 
 `quota:` is an optional, provider-neutral control loop for profiles that have

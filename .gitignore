@@ -8,6 +8,10 @@
 # Ephemeral render artifacts (viewable over VS Code remote tunnel)
 /.artifacts/
 
+# Top-level scratch/temp root for build tools that need a writable temp dir even
+# when the primary checkout is otherwise read-only.
+/.temp/
+
 # Test binaries and coverage
 *.test
 coverage.out

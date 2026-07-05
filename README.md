@@ -36,8 +36,9 @@ For a reader-specific path through the docs, start at
 **Free-text in, deterministic transitions out.**
 
 ```sh
-go build -o kitsoki ./cmd/kitsoki
-./kitsoki
+cd ~/code/my-project
+kitsoki run
+# > onboard .
 ```
 
 ## What kitsoki is good for
@@ -72,124 +73,89 @@ Prebuilt downloads are published on
 macOS, Linux, and Windows. The product site has the platform list at
 [Download Kitsoki](https://bsacrobatix.github.io/Kitsoki/download.html).
 
-### 1. Build
+### 1. Install
+
+Put the `kitsoki` binary somewhere on your `PATH`, then check it:
 
 ```sh
-go build -o kitsoki ./cmd/kitsoki
+kitsoki version
 ```
 
-Requires Go 1.25+. Single static binary; no CGO, no system libraries.
+Kitsoki is a single binary. It embeds the base stories, the web UI, and the
+skill/agent toolkit used during onboarding.
 
-### 2. Pick a harness
+### 2. Choose an agent backend
 
-`kitsoki` auto-selects:
+Kitsoki auto-selects:
 
 | Available | Harness | What |
 |---|---|---|
-| `claude` CLI on `PATH` | `claude` | Shells out to `claude -p` using your existing Claude Code login. **Default.** |
+| `claude` CLI on `PATH` | `claude` | Uses your existing Claude Code login. |
 | `ANTHROPIC_API_KEY` set | `live` | Direct Anthropic SDK calls. |
-| Neither | `replay` | Deterministic; needs a recording (passed via `--recording`). |
+| Neither | `replay` | Deterministic replay; useful for fixtures, not fresh work. |
 
 Force one:
 
 ```sh
-./kitsoki --harness claude
-./kitsoki --harness live
-./kitsoki run testdata/apps/cloak/app.yaml \
-    --harness replay --recording testdata/apps/cloak/recording.yaml
+kitsoki run --harness claude
+kitsoki run --harness live
 ```
 
-### 3. Play
+### 3. Onboard your project
+
+Run Kitsoki from the repository you want to use it in:
 
 ```sh
-./kitsoki
+cd ~/code/my-project
+kitsoki run
 ```
 
-With no app path, the TUI synthesizes the project's implicit dev-story root
-from `.kitsoki.yaml` and opens the project workbench. Type free text or pick an
-action. Sessions persist in `$XDG_DATA_HOME/kitsoki/sessions.db`.
+Then type:
 
-To run a specific story or example instead, pass its app path:
+```text
+onboard .
+```
+
+Kitsoki discovers your project, shows the inferred profile for review, and only
+writes after you confirm. The normal path is:
+
+```text
+onboard .          # discover this repo
+continue           # review the discovered profile
+continue           # confirm apply
+```
+
+Onboarding writes a small checked-in setup: `.kitsoki.yaml`, a project profile,
+an editable dev-story instance, readiness checks, `.mcp.json`, and the
+skill/agent toolkit for your coding agent. The full walkthrough is
+[`docs/getting-started.md`](docs/getting-started.md); the detailed onboarding
+contract is [`docs/project-onboarding.md`](docs/project-onboarding.md).
+
+### 4. Verify readiness
 
 ```sh
-./kitsoki run testdata/apps/cloak/app.yaml
+python3 .kitsoki/check-readiness.py --list
+python3 .kitsoki/check-readiness.py --json
 ```
 
-### 4. Test
+The report lands at `.artifacts/kitsoki-readiness.json`. To persist a summary
+back into `.kitsoki/project-profile.yaml`, run:
 
 ```sh
-make test                                                  # full suite — what CI runs
-
-./kitsoki test flows testdata/apps/cloak/app.yaml          # deterministic, no LLM
-./kitsoki test intents testdata/apps/cloak/app.yaml \      # intent pass-rate (free w/ Claude Code)
-    --harness static
+python3 .kitsoki/check-readiness.py --json --update-profile
 ```
 
-`make test` runs `go test ./...` plus every story's deterministic flow fixtures —
-it's the suite CI runs and the [pre-PR gate](CONTRIBUTING.md) runs. Open PRs with
-`make pr` (local gate) or `make pr-ci` (gate on real CI).
+### 5. Use it from your coding agent
 
-### 5. Visualise
+Onboarding registers the Kitsoki studio MCP server in your repo's `.mcp.json`.
+Claude Code can adopt the installed driver agent:
 
 ```sh
-./kitsoki viz testdata/apps/cloak/app.yaml | dot -Tpng -o /tmp/cloak.png
-./kitsoki viz testdata/apps/cloak/app.yaml --mermaid > /tmp/cloak.mmd
+claude --agent kitsoki-mcp-driver
 ```
-
-### 6. Drive it from your coding agent (Studio MCP)
-
-The repo ships a [`.mcp.json`](.mcp.json) that attaches the kitsoki **studio MCP**
-— one control plane to author, validate, test, drive, and render stories from
-Claude Code, Codex, or any MCP client.
-
-The recommended way in is the checked-in driver agent, which constrains a session
-to that surface (its persona, model, and `mcp__kitsoki__*` tools):
-
-- **Claude Code** — adopt it for the *whole* session natively:
-  ```sh
-  claude --agent kitsoki-mcp-driver   # or per-repo default: { "agent": "kitsoki-mcp-driver" } in .claude/settings.json
-  ```
-- **Codex** — spawn the mirrored
-  [`.codex/agents/kitsoki-mcp-driver.toml`](.codex/agents/kitsoki-mcp-driver.toml)
-  subagent (Codex has no whole-session `--agent` flag), or use
-  `tools/mcp-drive/drive.sh`, which wraps both backends for headless runs.
 
 Full runbook, caveats, and the manual fallback:
 [`docs/recipes/studio-mcp-dogfood.md`](docs/recipes/studio-mcp-dogfood.md).
-
-## Dogfood mode — fixing kitsoki with kitsoki
-
-`.kitsoki/stories/kitsoki-dev/` is the dogfood instance: kitsoki working on
-kitsoki itself (and on each of its stories) through its own UI, with
-the bug file as both ticket and conversation log.
-
-```sh
-./kitsoki
-```
-
-Lands at the engineer's-day landing room via the implicit root in `.kitsoki.yaml`.
-From there: `tickets` to search `issues/bugs/`, `pick <id>` to pick a bug,
-`bugfix` to walk the supervised 8-room pipeline (idle → reproducing → proposing
-→ implementing → testing → reviewing → validating → done). PR refinement is a
-separate story under `stories/pr-refinement/`. Every checkpoint appends a
-`## Comment <iso> by <author>` block to the bug file, so the file itself is the
-conversation log + audit trail.
-
-Autonomous variant (LLM-judge auto-fires confident verdicts, bails
-to human only on uncertainty):
-
-```sh
-./kitsoki --warp scenarios/autonomous_ready.yaml
-```
-
-See **[`.kitsoki/stories/kitsoki-dev/README.md`](.kitsoki/stories/kitsoki-dev/README.md)**
-for the full operator walkthrough, the
-**[`docs/case-studies/bug-fix.md`](docs/case-studies/bug-fix.md)**
-case study for the architecture, and
-**[`issues/README.md`](issues/README.md)** for the on-disk bug
-schema. The dogfood multi-glob covers both kitsoki-self bugs
-(`issues/bugs/*.md`) and per-story bugs
-(`stories/*/issues/bugs/*.md`) in one pipeline.
 
 ## Where to go next
 
@@ -200,13 +166,13 @@ promo landing + help docs with recorded feature demos, generated from the
 
 | You want to… | Start here |
 |---|---|
-| Pick the right docs path | [`docs/start-here.md`](docs/start-here.md) |
+| Use Kitsoki in your project | [`docs/getting-started.md`](docs/getting-started.md), then [`docs/project-onboarding.md`](docs/project-onboarding.md) |
 | Understand the architecture | [`docs/architecture/concept.md`](docs/architecture/concept.md), then [`docs/architecture/overview.md`](docs/architecture/overview.md) |
 | Write a story | [`docs/stories/architecture.md`](docs/stories/architecture.md), then [`docs/recipes/`](docs/recipes/README.md) |
 | Look up story fields | `kitsoki docs app-schema` or [`docs/embedded/app-schema.md`](docs/embedded/app-schema.md) |
 | Debug or test a story | [`docs/tracing/README.md`](docs/tracing/README.md) and [`docs/tracing/testing.md`](docs/tracing/testing.md) |
 | Look up host handlers | [`docs/architecture/hosts/`](docs/architecture/hosts/README.md) and [`docs/architecture/hosts.md`](docs/architecture/hosts.md) |
-| Contribute code | [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/architecture/developer-guide.md`](docs/architecture/developer-guide.md) |
+| Build or contribute to Kitsoki | [`docs/contributor-setup.md`](docs/contributor-setup.md), then [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 
 ## Project layout
 

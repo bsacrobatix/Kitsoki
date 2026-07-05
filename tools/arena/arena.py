@@ -61,6 +61,12 @@ def cmd_plan(args: argparse.Namespace) -> int:
     spec = JobSpec.load(args.spec)
     cells = spec.cells()
     print(f"job_type={spec.job_type}  cells={len(cells)}  hosts={spec.placement.hosts}")
+    if spec.targets_from:
+        print(f"  targets_from={spec.targets_from} (product-journey corpus, read-only)")
+    if spec.target_proof_from:
+        print(f"  target_proof_from={spec.target_proof_from}")
+    if spec.persona_axis_from:
+        print(f"  persona_axis_from={spec.persona_axis_from} (product-journey corpus, read-only)")
     for c in cells:
         print(f"  {c.id}")
     return 0

@@ -4686,7 +4686,7 @@
           "status": "validated",
           "detail": "video frame seam, review panel, and mockup-video story shipped into narrative docs",
           "refType": "doc",
-          "ref": "mockup-video-studio.md"
+          "ref": "docs/stories/mockup-video.md"
         },
         {
           "label": "Runstatus foundation",

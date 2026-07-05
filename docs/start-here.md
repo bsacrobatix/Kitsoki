@@ -8,10 +8,9 @@ different paths. Use this page to pick the shortest useful route.
 | You are | Read in order |
 |---|---|
 | Skeptical and deciding whether Kitsoki is worth it | [`evaluate-kitsoki.md`](evaluate-kitsoki.md) -> [`architecture/concept.md`](architecture/concept.md) -> [`case-studies/bug-fix.md`](case-studies/bug-fix.md) -> [`case-studies/bugfix-bakeoff.md`](case-studies/bugfix-bakeoff.md) |
-| Running kitsoki locally | [`../README.md`](../README.md#quickstart) -> [`getting-started.md`](getting-started.md) -> [`tracing/testing.md`](tracing/testing.md) |
-| Setting up kitsoki in your own project | [`getting-started.md`](getting-started.md) -> [`project-onboarding.md`](project-onboarding.md) -> [`stories/dev-story-onboarding.md`](stories/dev-story-onboarding.md) |
+| Using Kitsoki in your own project | [`../README.md`](../README.md#quickstart) -> [`getting-started.md`](getting-started.md) -> [`project-onboarding.md`](project-onboarding.md) |
 | Writing a story | [`stories/architecture.md`](stories/architecture.md) -> [`recipes/`](recipes/README.md) -> [`stories/authoring.md`](stories/authoring.md) -> [`embedded/app-schema.md`](embedded/app-schema.md) |
-| Contributing to kitsoki | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) -> [`architecture/overview.md`](architecture/overview.md) -> [`architecture/developer-guide.md`](architecture/developer-guide.md) |
+| Contributing to Kitsoki | [`contributor-setup.md`](contributor-setup.md) -> [`../CONTRIBUTING.md`](../CONTRIBUTING.md) -> [`architecture/developer-guide.md`](architecture/developer-guide.md) |
 | Debugging a session | [`tracing/README.md`](tracing/README.md) -> [`tracing/testing.md`](tracing/testing.md) -> [`tracing/trace-format.md`](tracing/trace-format.md) |
 | Working on UI | [`web/README.md`](web/README.md) or [`tui/README.md`](tui/README.md) -> [`tui/rendering-tests.md`](tui/rendering-tests.md) |
 

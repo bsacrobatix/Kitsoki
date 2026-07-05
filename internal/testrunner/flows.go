@@ -451,6 +451,11 @@ type FlowOptions struct {
 	// `kitsoki test flows` run a vendored instance in a foreign repo with no
 	// on-disk kitsoki checkout. nil keeps the legacy error-on-missing behaviour.
 	ImportResolver app.ImportResolver
+
+	// StarlarkCoverage, when non-nil, instruments real host.starlark.run scripts
+	// during flow execution and records statement/branch hits by fixture file.
+	// It is ignored by host_cassette stubs that replace host.starlark.run.
+	StarlarkCoverage *starlarkhost.CoverageRecorder
 }
 
 // ─── orchRig holds all resources for an orchestrator-backed flow run ─────────
@@ -512,7 +517,7 @@ type orchRig struct {
 //
 // filePath is the fixture file's absolute path; it is used to resolve
 // host_cassette: relative paths.
-func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machine, fixture *FlowFixture, filePath string, tracePath string) (*orchRig, error) {
+func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machine, fixture *FlowFixture, filePath string, tracePath string, starlarkCoverage *starlarkhost.CoverageRecorder) (*orchRig, error) {
 	// Deterministic epoch.
 	clk := clock.NewFake(time.Unix(0, 0))
 
@@ -790,6 +795,15 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 		real, _ := reg.Get("host.starlark.run")
 		reg.Replace("host.starlark.run", func(ctx context.Context, args map[string]any) (host.Result, error) {
 			return real(starlarkhost.WithInspector(ctx, inspector), args)
+		})
+	}
+	if starlarkCoverage != nil {
+		if _, ok := reg.Get("host.starlark.run"); !ok {
+			reg.Register("host.starlark.run", host.StarlarkRunHandler)
+		}
+		real, _ := reg.Get("host.starlark.run")
+		reg.Replace("host.starlark.run", func(ctx context.Context, args map[string]any) (host.Result, error) {
+			return real(starlarkhost.WithCoverage(ctx, starlarkCoverage, filePath), args)
 		})
 	}
 
@@ -1481,7 +1495,7 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 	result := &FlowResult{File: filePath}
 
 	// Build the rig (store + scheduler + orchestrator).
-	rig, err := buildOrchestratorRig(ctx, def, m, fixture, filePath, opts.TracePath)
+	rig, err := buildOrchestratorRig(ctx, def, m, fixture, filePath, opts.TracePath, opts.StarlarkCoverage)
 	if err != nil {
 		return nil, fmt.Errorf("runOneFlowOrchestrator: %w", err)
 	}

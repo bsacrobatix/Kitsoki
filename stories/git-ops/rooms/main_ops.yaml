@@ -31,6 +31,10 @@ states:
             - label: "pull"
               hint:  "git pull --rebase from upstream"
               intent: pull
+            - label: "sync_main remote=origin"
+              hint:  "reconcile protected {{ world.integration_branch }} with origin/main via .worktrees/"
+              intent: sync_main
+              slots: { remote: "origin", remote_branch: "main" }
             - label: "merge_branch"
               hint:  "merge a named feature branch into {{ world.integration_branch }}"
               intent: merge_branch
@@ -134,6 +138,16 @@ states:
     on:
       pull:
         - target: pull
+      sync_main:
+        - target: sync_main
+          effects:
+            - set:
+                sync_remote:        "{{ slots.remote ?? 'origin' }}"
+                sync_remote_branch: "{{ slots.remote_branch ?? world.integration_branch }}"
+                sync_name:          "{{ slots.name ?? '' }}"
+                sync_continue_branch: "{{ slots.continue_branch ?? slots.branch ?? '' }}"
+                sync_auto_resolve:  "{{ slots.auto_resolve ?? false }}"
+                sync_result:        {}
       merge_branch:
         # Operand-as-slot: when branch= is given, skip the picker and go
         # straight to merge_exec (git-ops-smoothing task 1.2).

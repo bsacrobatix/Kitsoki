@@ -10,7 +10,7 @@
 # Usage: qa.sh <video> --feature <file> --scenarios <file>
 #          [--frames <dir>] [--out <dir>] [--model M]
 #          [--max-frames N] [--scene TH] [--blank-min-coverage F]
-#          [--no-adversary] [--strict] [--blank-strict]
+#          [--no-adversary] [--strict] [--blank-strict] [--edge-strict]
 #
 #   --frames <dir>  use existing labeled frames (e.g. the kitsoki-ui-demo skill's
 #                   NN-<scene>.png) as ground truth instead of extracting. Highest
@@ -29,6 +29,7 @@
 #                   auto-detect <video>.chapters.json next to the MP4)
 #   --pacing-min N  minimum readable on-screen window per chapter, ms (default 1500)
 #   --pacing-strict promote pacing flags from advisory to a blocking gate
+#   --edge-strict   promote edge-clipping flags from advisory to a blocking gate
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,7 +40,7 @@ shift || true
 
 feature="" scenarios="" frames="" outdir="" model="" max=48 chapters="" pacing_min="" scene="" blank_min_cov=""
 rrweb="" rrweb_min_dwell=""
-adv_flag="" strict_flag="" blank_strict_flag="" pacing_strict_flag="" rrweb_strict_flag="" scroll_strict_flag=""
+adv_flag="" strict_flag="" blank_strict_flag="" edge_strict_flag="" pacing_strict_flag="" rrweb_strict_flag="" scroll_strict_flag=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --feature)     feature="$2"; shift 2 ;;
@@ -55,6 +56,7 @@ while [ $# -gt 0 ]; do
     --no-adversary) adv_flag="--no-adversary"; shift ;;
     --strict)      strict_flag="--strict"; shift ;;
     --blank-strict) blank_strict_flag="--blank-strict"; shift ;;
+    --edge-strict) edge_strict_flag="--edge-strict"; shift ;;
     --pacing-strict) pacing_strict_flag="--pacing-strict"; shift ;;
     --rrweb)         rrweb="$2"; shift 2 ;;
     --rrweb-min-dwell) rrweb_min_dwell="$2"; shift 2 ;;
@@ -162,7 +164,7 @@ review_args=( --frames "$frames_dir" --feature "$feature" \
 # 4. Gated report — exit code propagates as the QA gate.
 echo
 report_args=( "$verdict" --out "$outdir/qa-report.md" $strict_flag \
-  --blank-scan "$blank_scan" $blank_strict_flag --edge-scan "$edge_scan" )
+  --blank-scan "$blank_scan" $blank_strict_flag --edge-scan "$edge_scan" $edge_strict_flag )
 [ -n "$pacing_scan" ] && report_args+=( --pacing-scan "$pacing_scan" $pacing_strict_flag )
 [ -n "$rrweb_scan" ] && report_args+=( --rrweb-scan "$rrweb_scan" $rrweb_strict_flag )
 [ -n "$scroll_scan" ] && report_args+=( --scroll-scan "$scroll_scan" $scroll_strict_flag )

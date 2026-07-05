@@ -2,11 +2,10 @@
 
 Welcome. This is the navigation hub for the documentation tree.
 
-For the elevator pitch and quickstart, see the top-level
-[`../README.md`](../README.md). If you are new to the project, start
-with [`start-here.md`](start-here.md); it routes evaluators, local users,
-story authors, contributors, debuggers, and UI contributors to the shortest
-useful path.
+For the elevator pitch and user quickstart, see the top-level
+[`../README.md`](../README.md). If you are new, start with
+[`getting-started.md`](getting-started.md) to use Kitsoki in your own project, or
+[`start-here.md`](start-here.md) to pick a more specific path.
 
 The tree is organised into four reference sections plus a recipes area. Each
 section has its own `README.md` index. The proposal tree is design history and
@@ -82,6 +81,8 @@ live in the sections above.
   working kitsoki environment (instance + studio MCP + skill/agent toolkit) in
   your own repo; backed by the dev-story
   [`init` pipeline](stories/dev-story-onboarding.md).
+- [`contributor-setup.md`](contributor-setup.md) — build Kitsoki from source and
+  set up this checkout for development.
 - [`case-studies/`](case-studies/README.md) — worked examples of
   progressive determinism applied to real workflows. Start with
   [`case-studies/bug-fix.md`](case-studies/bug-fix.md): how a

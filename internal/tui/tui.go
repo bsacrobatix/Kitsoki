@@ -169,6 +169,11 @@ type RootModel struct {
 	// composing.
 	pendingDraft string
 
+	// pendingHarnessPick remembers that the last slash command rendered a
+	// numbered harness picker. A bare follow-up like `3` should select from that
+	// picker, not fall through to semantic/LLM routing.
+	pendingHarnessPick string
+
 	// routing tracks the live routing-pipeline state for the in-flight turn:
 	// which tiers were tried/missed and which one won. Reset at submit time,
 	// updated by RoutingTier{Miss,Hit}Msg, and finalized at turn completion.
@@ -1042,7 +1047,7 @@ func (m RootModel) pollInbox(syncGitHub bool) tea.Msg {
 func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	nm, cmd := m.updateInner(msg)
 	if rm, ok := nm.(RootModel); ok {
-		if flush := rm.transcript.FlushPending(); flush != nil {
+		if flush := rm.flushPendingWhenStable(); flush != nil {
 			if cmd == nil {
 				cmd = flush
 			} else {
@@ -1052,6 +1057,19 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return rm, cmd
 	}
 	return nm, cmd
+}
+
+// flushPendingWhenStable emits queued scrollback unless the bottom live region
+// is actively redrawing an awaiting-turn routing line. tea.Println scrolls above
+// Bubble Tea's live region; doing that while the routing line is still changing
+// can leave prior frames stamped into scrollback. Once the live line settles or
+// cancels, the normal flush path resumes and emits the queued input echo plus the
+// resolved routing row together.
+func (m *RootModel) flushPendingWhenStable() tea.Cmd {
+	if m.mode == ModeAwaitingLLM && m.transcript.hasLive() {
+		return nil
+	}
+	return m.transcript.FlushPending()
 }
 
 func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1824,6 +1842,16 @@ func (m RootModel) dispatchInput(input string) (tea.Model, tea.Cmd) {
 	m.transcript.AppendUserInputEcho(input)
 	ir := m.newInlineRouter()
 
+	if m.pendingHarnessPick != "" && !strings.HasPrefix(input, "/") {
+		pick := m.pendingHarnessPick
+		m.pendingHarnessPick = ""
+		if isHarnessPickInput(input) {
+			settled := ir.settledLine("system", "/"+pick, blocks.SourceDeterministic, 0, "")
+			m.transcript.AppendBlock(settled)
+			return m.handleSlashCommand("/" + pick + " " + input)
+		}
+	}
+
 	// Handle slash commands. Settled-line classification is "system"
 	// — slash commands bypass routing.
 	if strings.HasPrefix(input, "/") {
@@ -1890,6 +1918,11 @@ func (m RootModel) dispatchInput(input string) (tea.Model, tea.Cmd) {
 	m.routing.markMiss(TierDeterministic, "")
 	m.transcript.UpdateLive(m.routing.renderProgress())
 	return startAsyncTurn(m, input, asyncTurn(orch, sid, input), pendingLLM)
+}
+
+func isHarnessPickInput(input string) bool {
+	n, err := strconv.Atoi(strings.TrimSpace(input))
+	return err == nil && n > 0
 }
 
 // pendingKind classifies why the TUI is currently in ModeAwaitingLLM, so the
@@ -2073,6 +2106,11 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		if body != "" {
 			next.transcript.AppendBlock(body)
 		}
+		if len(parts) == 1 && len(next.orch.Profiles()) > 0 {
+			next.pendingHarnessPick = "provider"
+		} else {
+			next.pendingHarnessPick = ""
+		}
 		return next, cmd
 
 	case "/model":
@@ -2080,12 +2118,22 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		if body != "" {
 			next.transcript.AppendBlock(body)
 		}
+		if active := activeProfile(next.orch.Profiles()); len(parts) == 1 && len(active.Models) > 0 {
+			next.pendingHarnessPick = "model"
+		} else {
+			next.pendingHarnessPick = ""
+		}
 		return next, cmd
 
 	case "/effort":
 		body, next, cmd := EffortCommand{}.Run(m, parts[1:])
 		if body != "" {
 			next.transcript.AppendBlock(body)
+		}
+		if active := activeProfile(next.orch.Profiles()); len(parts) == 1 && len(active.Efforts) > 0 {
+			next.pendingHarnessPick = "effort"
+		} else {
+			next.pendingHarnessPick = ""
 		}
 		return next, cmd
 

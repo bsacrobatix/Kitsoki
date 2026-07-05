@@ -262,6 +262,7 @@ type subscription struct {
 	sessionID string
 	mu        sync.Mutex
 	sent      int
+	seen      bool
 }
 
 // Option configures a Server. A few options (WithDriver) only apply when the
@@ -1991,7 +1992,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	for {
-		s.streamNew(w, flusher, sub)
+		if done := s.streamNew(w, flusher, sub); done {
+			return
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -2003,19 +2006,40 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 // streamNew emits a runstatus.event notification for every event appended to
 // the subscription's session since its last delivery, then advances the
 // watermark. The session's live [Source] is resolved per tick through the
-// provider, so a session created or reloaded after subscribe is still followed;
-// if the session has gone (unknown id) the tick is a no-op.
-func (s *Server) streamNew(w http.ResponseWriter, flusher http.Flusher, sub *subscription) {
+// provider, so a session created or reloaded after subscribe is still followed.
+// If a session that was previously resolving successfully has since vanished
+// (evicted — swarm-session-cap), streamNew emits one terminal
+// runstatus.session_gone frame and returns true so the caller closes the
+// stream instead of polling a dead session forever. A session that has never
+// resolved (subscribe raced session creation) is treated as a quiet no-op tick,
+// not a terminal condition.
+func (s *Server) streamNew(w http.ResponseWriter, flusher http.Flusher, sub *subscription) bool {
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
 
 	entry, ok := s.provider.Get(sub.sessionID)
 	if !ok {
-		return
+		if sub.seen {
+			frame := map[string]any{
+				"jsonrpc": "2.0",
+				"method":  "runstatus.session_gone",
+				"params": map[string]any{
+					"subscription_id": sub.id,
+					"session_id":      sub.sessionID,
+				},
+			}
+			if b, err := json.Marshal(frame); err == nil {
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+				flusher.Flush()
+			}
+			return true
+		}
+		return false
 	}
+	sub.seen = true
 	events, err := entry.Source.Events()
 	if err != nil || len(events) <= sub.sent {
-		return
+		return false
 	}
 	for _, ev := range events[sub.sent:] {
 		frame := map[string]any{
@@ -2034,6 +2058,7 @@ func (s *Server) streamNew(w http.ResponseWriter, flusher http.Flusher, sub *sub
 	}
 	sub.sent = len(events)
 	flusher.Flush()
+	return false
 }
 
 // handleNotifications streams the cross-session notification feed as SSE. It

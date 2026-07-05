@@ -10,44 +10,46 @@ import (
 
 // semanticRoutingFlag backs the global --semantic-routing persistent flag and
 // semanticRoutingFlagSet records whether the operator passed it (set in the
-// root PersistentPreRunE). Together with KITSOKI_SEMANTIC_ROUTING they drive the
-// orchestrator-level toggle for the deterministic semantic-routing stack.
+// root PersistentPreRunE). Together with KITSOKI_SEMANTIC_ROUTING they drive an
+// optional orchestrator-level override for the deterministic semantic-routing
+// stack.
 var (
 	semanticRoutingFlag    bool
 	semanticRoutingFlagSet bool
 )
 
-// semanticRoutingOption resolves the semantic-routing toggle and returns the
-// orchestrator option that wires it. Precedence (highest first):
+// semanticRoutingOptions resolves the semantic-routing toggle and returns the
+// orchestrator option that wires the process-level default.
+// Precedence (highest first):
 //
 //  1. --semantic-routing (when the operator passed it explicitly)
 //  2. KITSOKI_SEMANTIC_ROUTING (1/true/on / 0/false/off, case-insensitive)
-//  3. default: false — free-text routing is an isolated main-model decision
-//     (harness.RunTurn) and the deterministic stack (semroute + turn-cache +
-//     default_intent sink + free-form fallback) is skipped. The zero-cost exact
-//     display/example match still runs.
+//  3. default: disabled; keep only exact deterministic routing, then LLM
 //
-// Every CLI surface that builds a free-text-routing orchestrator appends this
-// option so the LLM-only default holds in production; the per-app routing.enabled
-// config only takes effect for orchestrators built without it (tests, the flow
-// runner). See docs/architecture/semantic-routing.md.
-func semanticRoutingOption() orchestrator.Option {
-	return orchestrator.WithSemanticRouting(semanticRoutingEnabled())
+// The per-app routing.enabled config is still available to lower-level
+// orchestrator callers that do not pass this option. The CLI defaults to the
+// simpler deterministic-then-LLM route until the semantic/default-intent stack
+// is stable enough to opt back in by default.
+func semanticRoutingOptions() []orchestrator.Option {
+	enabled, ok := semanticRoutingOverride()
+	if !ok {
+		enabled = false
+	}
+	return []orchestrator.Option{orchestrator.WithSemanticRouting(enabled)}
 }
 
-// semanticRoutingEnabled resolves the toggle to a concrete bool using the
-// precedence documented on semanticRoutingOption.
-func semanticRoutingEnabled() bool {
-	enabled := false
+// semanticRoutingOverride resolves the command/env override. ok=false means
+// "unset; defer to per-app routing.enabled".
+func semanticRoutingOverride() (enabled bool, ok bool) {
+	if semanticRoutingFlagSet {
+		return semanticRoutingFlag, true
+	}
 	if v, ok := os.LookupEnv("KITSOKI_SEMANTIC_ROUTING"); ok {
 		if b, err := parseEnvBool(v); err == nil {
-			enabled = b
+			return b, true
 		}
 	}
-	if semanticRoutingFlagSet {
-		enabled = semanticRoutingFlag
-	}
-	return enabled
+	return false, false
 }
 
 // parseEnvBool accepts the usual truthy/falsey spellings plus on/off.

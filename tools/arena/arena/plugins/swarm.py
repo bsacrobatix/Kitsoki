@@ -1,0 +1,276 @@
+"""swarm job-type plugin — one arena cell = one whole tier-1 swarm run.
+
+`tools/swarm/` + `tools/runstatus/tests/playwright/swarm-replay-users.spec.ts`
+(swarm-tier1) already put N>=24 concurrent scripted Playwright browser
+contexts on ONE `kitsoki web --flow ...` server, on a single machine. This
+plugin does not reinvent that harness — it places the WHOLE run (server + N
+drivers) as one cell in the browser-capable image `arena-browser-image`
+landed, so the swarm scales out through arena's existing local|VM placement
+exactly like a bugfix/persona-qa cell does. The swarm itself is the unit of
+placement; the N scripted users inside it are internal to the cell, not
+separate cells (unlike persona-qa, which fans personas out to one cell each).
+
+Cost/live: the tier-1 harness never calls an LLM (every user is a scripted
+replay driven by `tools/product-journey/personas.json` lenses over a flow
+fixture), so unlike bugfix/persona-qa there is no separate paid `--live`
+path here — `drive_command` runs the identical no-LLM Playwright spec either
+way. `live` is still accepted (for interface parity with the other plugins
+and so a future live-driven variant of the harness has somewhere to hook in)
+but is otherwise a no-op today.
+
+Axis-driven knobs: `axis["users"]` maps straight onto the harness's own
+`SWARM_USERS` env var (tools/swarm/README.md, swarm-replay-users.spec.ts:46)
+and `axis["interactive_concurrency"]` onto `SWARM_INTERACTIVE_CONCURRENCY`
+(swarm-replay-users.spec.ts:152) — both already read by the standing spec.
+`axis["persona_mix"]` and `axis["fixture"]` are threaded onto the command
+line as `SWARM_PERSONA_MIX`/`SWARM_FIXTURE` env vars for forward-compat (this
+ticket's scope is `tools/arena/arena/plugins/swarm.py` +
+`tools/arena/tests/test_swarm_plugin.py` only — it does not touch
+`tools/swarm/**` or the spec file) but are **not yet consumed** by the
+harness today: `swarm-replay-users.spec.ts` always rotates every persona in
+`personas.json` (`personaForIndex`) and always drives the hardcoded
+`stories/prd/flows/happy_path.yaml` fixture. Wiring the harness to honor
+these two env vars is a follow-up to swarm-tier1, not this change; a spec
+that sets them today gets them recorded on the cell/result but the run
+itself is unaffected until that wiring lands.
+
+Scoring reads the harness's own per-run results JSON
+(`.artifacts/swarm/results-<run_id>.json`, tools/swarm/results.ts's
+`SwarmResults` shape) instead of regexing stdout for a verdict. The only
+thing pulled from stdout is the `[swarm] wrote <path> (...)` line the spec
+logs right after `writeResults` returns (swarm-replay-users.spec.ts's final
+`console.log`) — a path, not a verdict, mirroring persona_qa.py's
+`_extract_run_dir` convention. `_completion_from_swarm_results` below is the
+"thin adapter" onto the shared completion-state contract
+(schemas/completion-state.schema.json) that unify-contract established:
+aggregate rule is all-journeys-complete AND isolation clean AND audit clean
+=> solved; some-but-not-all clean/complete => partial; nothing completed (or
+the negative control itself failed to fire) => failed; a harness crash
+before any results file was ever written is `infra:*`, never a model verdict.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import shlex
+import sys
+from pathlib import Path
+from typing import Any
+
+# tools/arena/arena/plugins/swarm.py -> parents[4] == REPO_ROOT (mirrors
+# bugfix.py's / persona_qa.py's REPO_ROOT derivation).
+REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from ..model import Cell, CellResult  # noqa: E402
+from . import base  # noqa: E402
+
+# Path *inside the container* where the kitsoki checkout is mounted (mirrors
+# bugfix.py's / persona_qa.py's KITSOKI_MNT convention).
+KITSOKI_MNT = "/workspace/kitsoki"
+RUNSTATUS_DIR = f"{KITSOKI_MNT}/tools/runstatus"
+SPEC = "tests/playwright/swarm-replay-users.spec.ts"
+
+DEFAULT_USERS = "24"
+DEFAULT_FIXTURE = "stories/prd/flows/happy_path.yaml"
+
+# `[swarm] wrote /abs/path/results-172....json (24 users)` — the ONE line of
+# stdout this plugin reads; everything else in score() comes off disk.
+_RESULTS_LINE_RE = re.compile(r"\[swarm\]\s+wrote\s+(\S+\.json)")
+
+# Infra signals — a harness crash before any results file was ever written is
+# not a model verdict. Kept ONLY as the fallback for when no results-path
+# pointer is found in stdout at all.
+_INFRA_RE = re.compile(
+    r"traceback|no such file|permission denied|connection refused|"
+    r"command not found|econnrefused|provider 5\d\d",
+    re.I,
+)
+
+
+class SwarmPlugin:
+    name = "swarm"
+
+    def image(self, cell: Cell) -> str:
+        # The swarm always needs a real browser (N Playwright contexts against
+        # a live kitsoki web server) — arena-browser-image's tag, unless a spec
+        # opts a target/variant into an override.
+        return (
+            cell.target.meta.get("image")
+            or cell.variant.meta.get("image")
+            or "kitsoki-arena-repo-runtime-browser:latest"
+        )
+
+    def _coords(self, cell: Cell) -> dict[str, str]:
+        return {
+            "users": cell.axis.get("users") or str(cell.variant.meta.get("users", "")) or DEFAULT_USERS,
+            "interactive_concurrency": cell.axis.get("interactive_concurrency", ""),
+            "persona_mix": cell.axis.get("persona_mix", ""),
+            "fixture": cell.axis.get("fixture") or DEFAULT_FIXTURE,
+        }
+
+    def drive_command(self, cell: Cell, *, live: bool) -> list[str]:
+        # No separate paid path: the tier-1 harness never calls an LLM (every
+        # user is a scripted replay), so `live` doesn't change what runs here
+        # (see module docstring). Accepted only for interface parity with the
+        # other job-type plugins.
+        del live
+        coords = self._coords(cell)
+
+        env: list[str] = [f"SWARM_USERS={shlex.quote(coords['users'])}"]
+        if coords["interactive_concurrency"]:
+            env.append(f"SWARM_INTERACTIVE_CONCURRENCY={shlex.quote(coords['interactive_concurrency'])}")
+        if coords["persona_mix"]:
+            # Not yet consumed by swarm-replay-users.spec.ts — see module
+            # docstring. Threaded through so the axis value is observable on
+            # the cell's own command line ahead of that wiring.
+            env.append(f"SWARM_PERSONA_MIX={shlex.quote(coords['persona_mix'])}")
+        if coords["fixture"]:
+            # Ditto — the spec hardcodes FLOW today; this is forward-compat.
+            env.append(f"SWARM_FIXTURE={shlex.quote(coords['fixture'])}")
+
+        script = (
+            f"set -euo pipefail; cd {shlex.quote(RUNSTATUS_DIR)} && "
+            f"{' '.join(env)} npx playwright test {shlex.quote(SPEC)}"
+        )
+        return ["bash", "-lc", script]
+
+    def score(self, cell: Cell, *, exit_code: int, stdout: str, stderr: str) -> CellResult:
+        result = CellResult(
+            cell_id=cell.id,
+            job_type=self.name,
+            target_id=cell.target.id,
+            variant_id=cell.variant.id,
+            axis=dict(cell.axis),
+        )
+        blob = f"{stdout}\n{stderr}"
+        results_path = _extract_results_path(stdout)
+        if results_path is None:
+            if _INFRA_RE.search(blob):
+                result.verdict = "blocked"
+                result.health = "infra:harness"
+                result.notes = _first_line(blob)
+            else:
+                result.verdict = "blocked"
+                result.health = "infra:missing-results-path"
+                result.notes = (
+                    f"no swarm results path found in stdout (exit_code={exit_code}); "
+                    "the harness did not honor the '[swarm] wrote <path>' contract"
+                )
+            return result
+
+        host_path = _host_results_path(results_path)
+        try:
+            data = json.loads(host_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            result.verdict = "blocked"
+            result.health = "infra:results-malformed"
+            result.notes = f"could not load swarm results at {host_path}: {exc}"
+            return result
+
+        return _completion_from_swarm_results(result, data, str(host_path))
+
+
+def _completion_from_swarm_results(result: CellResult, data: dict[str, Any], results_path: str) -> CellResult:
+    """The 'thin adapter' onto the shared completion-state contract
+    (schemas/completion-state.schema.json), built directly from a
+    `SwarmResults` payload (tools/swarm/results.ts) rather than a
+    completion-state file already on disk — the tier-1 harness has no reason
+    to know about arena's contract itself.
+    """
+
+    user_count = int(data.get("user_count", 0) or 0)
+    users = data.get("users") or []
+    all_completed = bool(data.get("all_completed"))
+    all_isolated = bool(data.get("all_isolated"))
+    all_console_clean = bool(data.get("all_console_clean"))
+    all_audit_clean = bool(data.get("all_audit_clean"))
+
+    negative_control = data.get("negative_control") or {}
+    # A negative control that was never populated (no description/no
+    # shared_session_id) means that test simply hasn't run yet in this
+    # results file — don't fail the cell over a control that wasn't
+    # exercised. One that WAS exercised but failed to detect the seeded fault
+    # means the isolation gate itself is broken, which is a real failure.
+    negative_control_ran = bool(negative_control.get("shared_session_id"))
+    negative_control_ok = (not negative_control_ran) or bool(negative_control.get("detected"))
+
+    completed_count = sum(1 for u in users if u.get("completed"))
+    isolated_count = sum(1 for u in users if u.get("isolation_ok"))
+    console_clean_count = sum(1 for u in users if u.get("console_errors", 0) == 0)
+    audit_clean_count = sum(1 for u in users if u.get("audit_error_count", 0) == 0)
+
+    if all_completed and all_isolated and all_console_clean and all_audit_clean and negative_control_ok:
+        verdict = "solved"
+    elif not negative_control_ok:
+        verdict = "failed"
+    elif completed_count == 0:
+        verdict = "failed"
+    else:
+        verdict = "partial"
+
+    result.verdict = verdict
+    result.health = "model:result"
+    result.evidence_refs = [results_path]
+    result.trace_ref = results_path
+    result.metrics.update({
+        "user_count": user_count,
+        "completed_count": completed_count,
+        "isolated_count": isolated_count,
+        "console_clean_count": console_clean_count,
+        "audit_clean_count": audit_clean_count,
+        "all_completed": all_completed,
+        "all_isolated": all_isolated,
+        "all_console_clean": all_console_clean,
+        "all_audit_clean": all_audit_clean,
+        "negative_control_ran": negative_control_ran,
+        "negative_control_detected": bool(negative_control.get("detected")),
+    })
+    result.notes = (
+        f"{verdict}: {completed_count}/{user_count} completed, "
+        f"{isolated_count}/{user_count} isolated, "
+        f"{console_clean_count}/{user_count} console-clean, "
+        f"{audit_clean_count}/{user_count} audit-clean"
+        + ("" if negative_control_ok else "; negative control FAILED to detect the seeded cross-talk fault")
+    )
+    return result
+
+
+def _extract_results_path(stdout: str) -> str | None:
+    """Pull the results-file path out of the harness's own
+    `[swarm] wrote <path> (...)` stdout line — a path, not a verdict (see
+    module docstring).
+    """
+    match = None
+    for line in stdout.splitlines():
+        m = _RESULTS_LINE_RE.search(line)
+        if m:
+            match = m.group(1)
+    return match
+
+
+def _host_results_path(container_path: str) -> Path:
+    """Map a results path as printed INSIDE the container back to the host
+    path this process can read (mirrors bugfix.py's completion_state_path
+    convention: for `local` placement the executor mounts REPO_ROOT at
+    KITSOKI_MNT, so a file written under KITSOKI_MNT/... is readable here at
+    the equivalent REPO_ROOT/... path). Paths that don't carry the
+    KITSOKI_MNT prefix (e.g. a test calling score() directly against a temp
+    dir) are returned unchanged.
+    """
+    if container_path.startswith(KITSOKI_MNT + "/"):
+        return REPO_ROOT / container_path[len(KITSOKI_MNT) + 1:]
+    return Path(container_path)
+
+
+def _first_line(blob: str) -> str:
+    for line in blob.splitlines():
+        line = line.strip()
+        if line:
+            return line[:200]
+    return ""
+
+
+base.register(SwarmPlugin())
