@@ -42,7 +42,7 @@ host_handlers:
             proof_minimum_evidence_count: 1
             minimum_evidence_count: 30
             missing_proof_summary: "product-discovery: checkpoint_rating, navigation_trace, page_url; project-onboarding: generated_config_diff, onboarding_smoke_result, rendered_tui_frame, session_trace"
-            driver_contract_summary: "Driver contract: 7 scenarios (product-discovery, project-onboarding, dependency-bugfix, prd-design, feature-implementation, +2 more); 7 missing-proof rows; 2 final gates. Inspect last_result.driver_scenarios, last_result.missing_proof_evidence, and last_result.driver_final_gates."
+            driver_contract_summary: "Driver contract: 7 scenarios (product-discovery, project-onboarding, dependency-bugfix, prd-design, feature-implementation, +2 more); 7 missing-proof rows; 3 final gates. Inspect last_result.driver_scenarios, last_result.missing_proof_evidence, and last_result.driver_final_gates."
             next_driver_capture: "Next capture: product-discovery/checkpoint_rating. Rate whether the persona could proceed without private context."
             next_driver_attach_command: 'python3 tools/product-journey/run.py --attach-evidence --run-dir .artifacts/product-journey/run-123 --scenario product-discovery --evidence-kind checkpoint_rating --evidence-path <path-or-retained-id> --evidence-source <retained|external|local|cassette> --notes "Rate whether the persona could proceed without private context."'
             next_driver_blocker_command: "python3 tools/product-journey/run.py --record-blocker --run-dir .artifacts/product-journey/run-123 --scenario product-discovery --title <blocker-title> --summary <why-this-scenario-could-not-be-captured> --evidence-path <trace-or-frame-path>"
@@ -79,7 +79,7 @@ turns:
       review_status: needs_evidence
       review_passed_count: 18
       review_total_count: 20
-      driver_contract_summary: "Driver contract: 7 scenarios (product-discovery, project-onboarding, dependency-bugfix, prd-design, feature-implementation, +2 more); 7 missing-proof rows; 2 final gates. Inspect last_result.driver_scenarios, last_result.missing_proof_evidence, and last_result.driver_final_gates."
+      driver_contract_summary: "Driver contract: 7 scenarios (product-discovery, project-onboarding, dependency-bugfix, prd-design, feature-implementation, +2 more); 7 missing-proof rows; 3 final gates. Inspect last_result.driver_scenarios, last_result.missing_proof_evidence, and last_result.driver_final_gates."
       next_driver_capture: "Next capture: product-discovery/checkpoint_rating. Rate whether the persona could proceed without private context."
       next_driver_attach_command: 'python3 tools/product-journey/run.py --attach-evidence --run-dir .artifacts/product-journey/run-123 --scenario product-discovery --evidence-kind checkpoint_rating --evidence-path <path-or-retained-id> --evidence-source <retained|external|local|cassette> --notes "Rate whether the persona could proceed without private context."'
       next_driver_blocker_command: "python3 tools/product-journey/run.py --record-blocker --run-dir .artifacts/product-journey/run-123 --scenario product-discovery --title <blocker-title> --summary <why-this-scenario-could-not-be-captured> --evidence-path <trace-or-frame-path>"

@@ -234,7 +234,8 @@ path instead of only static traces or written artifacts.
 `--validate-run` checks that `execution-plan.json` and `driver-plan.json`
 include one actionable `--attach-evidence` command for every declared evidence
 slot, and that the execution plan, agent brief, driver plan, and handoff retain
-the final `--review-run` and `--validate-run` commands. It also enforces the
+the final autonomous issue-to-fix, `--review-run`, and `--validate-run`
+commands. It also enforces the
 driver action contract: every scenario must keep the ordered
 `open_surface -> read_current_frame -> act_as_persona -> capture_required_evidence -> journal_attempt`
 sequence with the required fields and an auditable `journal_attempt` recording
@@ -406,6 +407,11 @@ checks that fix artifacts and run URLs are persisted back into the bundle for
 review. The autonomous smoke runs the full no-LLM envelope with a fake `kitsoki`
 CLI: persona findings file as issues, gh-agent fixes queue and drain, review
 artifacts refresh, and `--validate-run` must pass.
+
+Do not bypass this with raw `gh` commands. Product-journey issue filing and
+autonomous fixes are intentionally routed through Kitsoki's native
+gitops/gh-agent surfaces so artifact upload, issue metadata, queued repair
+state, fix-run evidence, and review gates stay coupled.
 
 For a no-LLM dogfood/demo bundle with representative evidence and findings:
 

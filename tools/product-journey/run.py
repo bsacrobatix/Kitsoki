@@ -2129,6 +2129,16 @@ def render_scenario_outcomes(outcomes: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def autonomous_fix_command(run_dir_arg: str) -> str:
+    return (
+        "python3 tools/product-journey/run.py --autonomous-fix-loop "
+        f"--run-dir {run_dir_arg} "
+        "--ticket-repo <owner/repo> "
+        f"--gh-agent-db {run_dir_arg}/gh-agent-jobs.sqlite "
+        "--gh-agent-public-base-url <public-gh-agent-url>"
+    )
+
+
 def _execution_plan_step(
     order: int,
     scenario: dict,
@@ -2243,6 +2253,7 @@ def build_execution_plan(run_json: dict, evidence: dict, transports: Optional[li
         "finalize_commands": [
             f"python3 tools/product-journey/run.py --record-finding --run-dir {run_dir_arg} --finding-kind <strength|weakness|issue|fix> --title <title> --summary <summary>",
             f"python3 tools/product-journey/run.py --record-blocker --run-dir {run_dir_arg} --scenario <scenario> --title <title> --summary <summary>",
+            autonomous_fix_command(run_dir_arg),
             f"python3 tools/product-journey/run.py --review-run --run-dir {run_dir_arg}",
             f"python3 tools/product-journey/run.py --validate-run --run-dir {run_dir_arg}",
         ],
@@ -2282,7 +2293,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
             "Prefer MCP evidence over prose claims: screenshots, session traces, TUI frames, diffs, oracle output, and videos.",
             "Record strengths as well as weaknesses, issues, and fixes.",
             "If a live LLM or paid service would be required, stop and record the blocker instead of calling it from an automated test.",
-            "Attach every useful artifact with tools/product-journey/run.py --attach-evidence, then run --review-run and --validate-run.",
+            "Attach every useful artifact with tools/product-journey/run.py --attach-evidence, then run --autonomous-fix-loop when credible issue findings exist, --review-run, and --validate-run.",
         ],
         "scenario_order": [
             {
@@ -2442,6 +2453,7 @@ def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict, tran
         "persona": run_json["persona"],
         "scenarios": scenarios,
         "final_gates": [
+            autonomous_fix_command(run_dir_arg),
             f"python3 tools/product-journey/run.py --review-run --run-dir {run_dir_arg}",
             f"python3 tools/product-journey/run.py --validate-run --run-dir {run_dir_arg}",
         ],
@@ -2783,9 +2795,12 @@ def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: 
             "Use `last_result.next_driver_attach_command` for the first proof attach when present, "
             "or `last_result.next_driver_blocker_command` when the slot is attempted but blocked, "
             "then use Kitsoki Studio MCP and visual MCP to capture proof-source evidence or blockers, "
-            "record findings, then run review and validation."
+            "record findings, then run the autonomous issue-to-fix gate when credible issue findings exist. "
+            "If the autonomous gate is not armed with ticket_repo and gh_agent_public_base_url, leave those "
+            "parameters explicit for the operator instead of silently skipping the gate. Finish with review and validation."
         ),
         "finalize_commands": [
+            autonomous_fix_command(run_dir_arg),
             f"python3 tools/product-journey/run.py --review-run --run-dir {run_dir_arg}",
             f"python3 tools/product-journey/run.py --validate-run --run-dir {run_dir_arg}",
         ],
@@ -4683,15 +4698,15 @@ def load_json_for_validation(path: Path, issues: list[dict]) -> dict:
 
 def validate_final_commands(commands: list[str], issues: list[dict], check_id: str, label: str) -> None:
     if not commands:
-        add_validation_issue(issues, "error", check_id, f"{label} has no final review/validation commands")
+        add_validation_issue(issues, "error", check_id, f"{label} has no final autonomous-fix/review/validation commands")
         return
-    required = ["--review-run", "--validate-run"]
+    required = ["--autonomous-fix-loop", "--review-run", "--validate-run"]
     missing = [
         token for token in required
         if not any(token in command for command in commands)
     ]
     if missing:
-        add_validation_issue(issues, "error", check_id, f"{label} is missing final review/validation commands", ", ".join(missing))
+        add_validation_issue(issues, "error", check_id, f"{label} is missing final autonomous-fix/review/validation commands", ", ".join(missing))
 
 
 def deck_scene_eyebrows(deck: dict) -> set[str]:
