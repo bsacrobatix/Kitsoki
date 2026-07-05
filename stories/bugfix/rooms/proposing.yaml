@@ -155,6 +155,7 @@ states:
             - invoke: iface.transport.post
               with:
                 thread:   "{{ world.thread }}"
+                workdir:  "{{ world.workdir }}"
                 title:    "Fix proposal: {{ world.ticket_id }}"
                 body:     "{{ world.propose_fix_artifact.summary_markdown }}"
                 phase_id: "proposing_{{ world.ticket_id }}_{{ world.cycle }}"

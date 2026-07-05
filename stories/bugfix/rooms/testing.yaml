@@ -316,6 +316,7 @@ states:
             - invoke: iface.transport.post
               with:
                 thread:   "{{ world.thread }}"
+                workdir:  "{{ world.workdir }}"
                 title:    "Test review: {{ world.ticket_id }}"
                 body:     "{{ world.implement_review_artifact.summary_markdown }}"
                 phase_id: "testing_{{ world.ticket_id }}_{{ world.cycle }}"
@@ -340,6 +341,7 @@ states:
             - invoke: iface.transport.post
               with:
                 thread:   "{{ world.thread }}"
+                workdir:  "{{ world.workdir }}"
                 title:    "Test review: {{ world.ticket_id }}"
                 body:     "{{ world.implement_review_artifact.summary_markdown }}"
                 phase_id: "testing_{{ world.ticket_id }}_{{ world.cycle }}"
@@ -352,6 +354,7 @@ states:
             - invoke: iface.transport.post
               with:
                 thread:   "{{ world.thread }}"
+                workdir:  "{{ world.workdir }}"
                 title:    "Test review: {{ world.ticket_id }}"
                 body:     "{{ world.implement_review_artifact.summary_markdown }}"
                 phase_id: "testing_{{ world.ticket_id }}_{{ world.cycle }}"

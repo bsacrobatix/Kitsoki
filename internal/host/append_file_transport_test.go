@@ -122,6 +122,64 @@ func TestAppendFileTransport_BareThreadUsesTempMirror(t *testing.T) {
 	}
 }
 
+func TestAppendFileTransport_RelativeBugThreadUsesWorkdir(t *testing.T) {
+	t.Chdir(t.TempDir())
+	workdir := t.TempDir()
+	thread := "issues/bugs/BUG-47.md"
+	target := filepath.Join(workdir, thread)
+
+	res, err := host.AppendFileTransportHandler(context.Background(), map[string]any{
+		"thread":  thread,
+		"body":    "Comment for the run worktree.",
+		"workdir": workdir,
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if _, err := os.Stat(filepath.Join("issues", "bugs", "BUG-47.md")); !os.IsNotExist(err) {
+		t.Fatalf("relative bug thread should not create a process-cwd file, stat err=%v", err)
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("workdir thread not written: %v", err)
+	}
+	if !strings.Contains(string(raw), "Comment for the run worktree.") {
+		t.Fatalf("workdir thread missing body: %s", raw)
+	}
+}
+
+func TestAppendFileTransport_RelativeBugThreadWithoutWorkdirUsesTempMirror(t *testing.T) {
+	t.Chdir(t.TempDir())
+	thread := "issues/bugs/BUG-48.md"
+	tmpPath := filepath.Join(os.TempDir(), "kitsoki-append-to-file", "issues-bugs-BUG-48.md.md")
+	_ = os.Remove(tmpPath)
+	t.Cleanup(func() { _ = os.Remove(tmpPath) })
+
+	res, err := host.AppendFileTransportHandler(context.Background(), map[string]any{
+		"thread": thread,
+		"body":   "Comment for a read-only checkout run.",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if _, err := os.Stat(filepath.Join("issues", "bugs", "BUG-48.md")); !os.IsNotExist(err) {
+		t.Fatalf("relative bug thread without workdir should not create a process-cwd file, stat err=%v", err)
+	}
+	raw, err := os.ReadFile(tmpPath)
+	if err != nil {
+		t.Fatalf("temp mirror not written: %v", err)
+	}
+	if !strings.Contains(string(raw), "Comment for a read-only checkout run.") {
+		t.Fatalf("temp mirror missing body: %s", raw)
+	}
+}
+
 func TestAppendFileTransport_RequiresThread(t *testing.T) {
 	res, err := host.AppendFileTransportHandler(context.Background(), map[string]any{
 		"body": "x",

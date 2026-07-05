@@ -41,6 +41,9 @@ import (
 //     of the comment body.
 //   - phase_id  (string): forwarded to the heading for traceability
 //     (`## Comment <ts> by <author> (phase=<id>)`).
+//   - workdir   (string): root for relative local thread paths. Bugfix runs pass
+//     their per-run worktree here so checkpoint comments do not write into the
+//     driving process's checkout.
 //
 // Returns Result.Data with:
 //   - ok         (bool):   true on successful append.
@@ -65,7 +68,8 @@ func AppendFileTransportHandler(ctx context.Context, args map[string]any) (Resul
 	title, _ := args["title"].(string)
 	phaseID, _ := args["phase_id"].(string)
 
-	threadPath := appendFileThreadPath(thread)
+	workdir, _ := args["workdir"].(string)
+	threadPath := appendFileThreadPath(thread, workdir)
 
 	// Make sure the directory exists.  Bug-file thread paths are
 	// always under issues/bugs/ which the bug-create CLI creates,
@@ -128,11 +132,23 @@ func AppendFileTransportHandler(ctx context.Context, args map[string]any) (Resul
 	}}, nil
 }
 
-func appendFileThreadPath(thread string) string {
+func appendFileThreadPath(thread, workdir string) string {
 	thread = strings.TrimSpace(thread)
 	if isAppendFileLocalPath(thread) {
+		if !filepath.IsAbs(thread) {
+			if workdir = strings.TrimSpace(workdir); workdir != "" {
+				return filepath.Join(workdir, thread)
+			}
+			if isAppendFileBugThread(thread) {
+				return appendFileTempMirrorPath(thread)
+			}
+		}
 		return thread
 	}
+	return appendFileTempMirrorPath(thread)
+}
+
+func appendFileTempMirrorPath(thread string) string {
 	return filepath.Join(os.TempDir(), "kitsoki-append-to-file", sanitizeAppendThreadName(thread)+".md")
 }
 
@@ -144,6 +160,11 @@ func isAppendFileLocalPath(thread string) bool {
 		return true
 	}
 	return strings.ContainsAny(thread, `/\`)
+}
+
+func isAppendFileBugThread(thread string) bool {
+	clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(thread)))
+	return strings.HasPrefix(clean, "issues/bugs/")
 }
 
 func sanitizeAppendThreadName(thread string) string {
