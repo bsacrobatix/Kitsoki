@@ -3,12 +3,12 @@
 `deliver` is the epic front door of the [delivery loop](delivery-loop.md): hand
 it a path to an accepted epic or proposal and it decomposes it into
 independently-shippable briefs, lints the manifest deterministically, runs it
-past an adversarial reviewer, and fans [`stories/fleet/`](../../stories/fleet/README.md)
-(which runs [`stories/ship-it/`](../../stories/ship-it/README.md) per brief
+past an adversarial reviewer, and fans [`stories/fleet/`](https://github.com/bsacrobatix/Kitsoki/tree/main/stories/fleet)
+(which runs [`stories/ship-it/`](https://github.com/bsacrobatix/Kitsoki/tree/main/stories/ship-it) per brief
 behind a merge lock) over the result. It absorbed the
 `.agents/skills/work-decomposition/` skill's richer manifest schema, refine
 loop, and adversarial review discipline, and is reachable directly from
-[`stories/dev-story/`](../../stories/dev-story/README.md) as the
+[`stories/dev-story/`](https://github.com/bsacrobatix/Kitsoki/tree/main/stories/dev-story) as the
 decompose-vs-direct sibling of the plain `impl` pipeline. *Audience: story
 authors extending the decomposition chain, and operators deciding whether to
 decompose or implement directly.*
@@ -110,14 +110,14 @@ cd tools/vscode-kitsoki && KITSOKI_VSCODE_PACE=0 pnpm exec playwright test vscod
 
 ## See also
 
-- [`stories/deliver/README.md`](../../stories/deliver/README.md) — the full
+- [`stories/deliver/README.md`](https://github.com/bsacrobatix/Kitsoki/tree/main/stories/deliver) — the full
   room-by-room reference: every room's contract, the complete world schema,
   the manifest field list, and the flow-fixture table.
 - [`delivery-loop.md`](delivery-loop.md) — how `deliver` fits with `fleet` and
   `ship-it` in the shipped delivery stack.
-- [`stories/decompose-update/README.md`](../../stories/decompose-update/README.md) —
+- [`stories/decompose-update/README.md`](https://github.com/bsacrobatix/Kitsoki/tree/main/stories/decompose-update) —
   the standalone review-then-apply demo of the transaction `deliver`'s
   `redecompose_apply` room wraps directly.
-- [`.agents/skills/work-decomposition/SKILL.md`](../../.agents/skills/work-decomposition/SKILL.md) —
+- [`.agents/skills/work-decomposition/SKILL.md`](https://github.com/bsacrobatix/Kitsoki/tree/main/.agents/skills/work-decomposition) —
   the manual twin of this pipeline for by-hand runs; its schema is kept
   identical to `deliver`'s rather than left to drift.
