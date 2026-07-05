@@ -1,11 +1,19 @@
-# tools/swarm — swarm tier 1 (scripted replay users)
+# tools/swarm — the swarm mix model (tiers 1-3)
 
-Puts **N>=24 concurrent, scripted, no-LLM Playwright browser contexts** on
-**ONE shared `kitsoki web --flow ...` server**, to soak the multi-session
-registry (`cmd/kitsoki/registry.go`) the way real concurrent users would —
-something nothing in the repo did before this change (see
-`docs/goals/ui-qa-scale/plan.md` and `decomposition.yaml`'s `swarm-tier1`
-entry for the full design rationale).
+Puts concurrent Playwright browser contexts on **ONE shared `kitsoki web`
+server**, to soak the multi-session registry (`cmd/kitsoki/registry.go`) the
+way real concurrent users would — something nothing in the repo did before
+tier 1 (see `docs/goals/ui-qa-scale/plan.md` and `decomposition.yaml`'s
+`swarm-tier1`/`swarm-tiers23` entries for the full design rationale). Three
+tiers, increasing realism and cost:
+
+| Tier | Realism | LLM spend | Gate |
+| --- | --- | --- | --- |
+| 1 — scripted replay users | explicit intents only, no free text | zero | `swarm-replay-users.spec.ts` (standing CI) |
+| 2 — cassette-agent users | real free text, routed by a recorded `--harness replay --recording ...` session | zero | `swarm-cassette-users.spec.ts` (standing CI) |
+| 3 — live persona explorers | autonomous LLM-driven browsing | REAL, every run | manual only, gated behind `--live-explorers` (contract stub-tested in CI) |
+
+## Tier 1 — scripted replay users
 
 ## What's here
 
@@ -154,3 +162,149 @@ Override the user count with `SWARM_USERS` (defaults to 24; the gate requires
 >= 24) and the interactive-turn throttle with `SWARM_INTERACTIVE_CONCURRENCY`
 (defaults to 3 — see "Known findings" #3 for why this isn't higher by
 default).
+
+## Tier 2 — cassette-agent users
+
+Adds FREE-TEXT REALISM while staying zero-LLM: instead of clicking a
+pre-selected intent, a tier-2 user types a real sentence, and a
+`--harness replay --recording ...` session (an interpreter harness backed by
+a hand-authorable recording — NOT tier 1's nil-harness `--flow` fixture)
+routes it deterministically, with a `--host-cassette` answering whatever
+`host.*` call the routed path fires.
+
+**Fixture reuse, not a new story.** Rather than hand-authoring a new
+story/recording/cassette trio, tier 2 reuses `stories/off-ramp-demo` verbatim
+— it already exercises exactly this posture end-to-end
+(`off-ramp-video.spec.ts` proved it live first) via its "agent off-ramp"
+feature: an off-menu question is answered IN PLACE (no state change) through
+`host.agent.converse`, stubbed by `assets/converse-cassette.yaml`
+(`match_on: [handler]`, so the SAME canned answer backs every user's question
+regardless of its exact text). The one derived artifact tier 2 generates at
+test time is a SMALL per-run recording (`tools/swarm/tiers/tier2.ts`'s
+`buildTier2Recording`) — one entry per swarm user, mapping that user's own
+marker-bearing question to the shipped fixture's exact clarify response.
+This is necessary, not decorative: `internal/harness/replay.go`'s
+`ReplayHarness` matches recording entries by EXACT (case-insensitive,
+trimmed) input text, so tier 1's "prepend a unique isolation marker" trick
+would silently break the shipped recording's one hardcoded entry. Deriving N
+near-identical entries from the real fixture keeps every user's utterance
+resolving deterministically AND keeps a real per-user isolation marker in
+play, without hand-authoring a giant new recording file.
+
+**Coexisting with tier 1 on ONE server** (the acceptance criterion): tier 1's
+own driver (`journey.ts`) is PRD-story-specific and can't run against
+off-ramp-demo, and `kitsoki web`'s harness posture (nil vs. live) is
+session-INVARIANT — one `runtimeBase` per server process, not one per
+session (see `cmd/kitsoki/web.go`'s doc comments on `recordingPath` /
+`flowPath` for the flow+live-harness coexistence path that DOES exist,
+seeding-only). So `swarm-cassette-users.spec.ts` proves coexistence with a
+tier-1-STYLE user expressed against the SAME off-ramp-demo story instead:
+`tools/swarm/tiers/scriptedMixUser.ts` drives the explicit `browse` menu
+intent — no free text, no interpreter routing, no recording entry needed at
+all (see `stories/off-ramp-demo/assets/recording.yaml`'s own doc comment) —
+which is tier 1's defining property (scripted, zero LLM), just against a
+story that can share one live-harness server process with tier 2's
+cassette-agent users.
+
+What's here (`tools/swarm/tiers/`):
+- `tier2.ts` — `buildTier2Recording` / `makeTier2ScratchDir` (the derived
+  per-run recording), `openCassetteUserSession` / `driveCassetteUserJourney`
+  (mint + free-text drive, mirroring `journey.ts`'s two-phase split),
+  `assertCassetteIsolated` (thin re-export of `isolation.ts`'s trace-based
+  check — story-agnostic, so tier 2 doesn't need tier 1's PRD-specific code).
+- `scriptedMixUser.ts` — the tier-1-style scripted coexistence user
+  described above.
+
+Run:
+
+```
+cd tools/runstatus
+npx playwright test tests/playwright/swarm-cassette-users.spec.ts
+```
+
+Same prerequisites as tier 1 (`make web && make embed-stories`, a Playwright
+chromium install). No LLM, no docker, no network egress.
+
+## Tier 3 — live persona explorers (gated, real LLM spend)
+
+A small number (**hard-capped at 3**) of headless, LIVE persona agents, each
+holding its own browser context against the shared swarm server, exploring
+autonomously and journaling findings — genuine LLM spend on every run. This
+tier is **OFF by default and structurally cannot start by accident**:
+
+1. `tools/swarm/tiers/explorer.ts`'s `dispatchExplorers` is the ONLY way to
+   run explorers, and it calls `assertLiveExplorersAllowed` FIRST — before
+   touching personas, the runner, or the budget. That function requires
+   `liveExplorers === true` with no default anywhere in the module.
+2. The only place that boolean is ever constructed from something external
+   is `tools/swarm/tiers/liveExplorerCli.ts`, and it is threaded from a
+   literal `--live-explorers` flag in `process.argv` — never an env var,
+   never a config default, never inherited from anything.
+3. `resolveExplorerBudget` hard-clamps the explorer count to
+   `MAX_LIVE_EXPLORERS` (3) regardless of what is requested — there is no
+   code path that can ask for more than 3 concurrent live agents.
+4. The standing CI gate (`swarm-cassette-users.spec.ts`'s "tier 3 — stubbed
+   live-explorer dispatch contract" describe block) exercises
+   `dispatchExplorers` with an injected STUB `runExplorer` — no browser, no
+   subprocess, no LLM call — proving the refusal, the clamp, and the
+   findings/blockers/cost aggregation contract stay correct without ever
+   constructing a real explorer. `liveExplorerCli.ts` (the real wiring) is
+   NEVER imported by any test.
+
+**What a real explorer does** (`liveExplorerCli.ts`'s `runLiveExplorer`,
+wired as `dispatchExplorers`'s `runExplorer`):
+1. Mints its own session on the shared server and opens a headless
+   Playwright browser context on it.
+2. Spawns a real agent process (default `claude -p`, override with
+   `--agent-cmd`) briefed with the persona's description and a lens mirroring
+   `tools/product-journey/run.py`'s `persona_lens()` (starting surface, first
+   question, evidence emphasis, escalation trigger, finding bias — see
+   `docs/architecture/operator-ask.md` for why the agent proceeds solo
+   instead of asking: `AskUserQuestion` is hard-denied headless). The agent
+   uses kitsoki's MCP tool surface to explore and calls
+   `python3 tools/product-journey/run.py --record-finding` /
+   `--record-blocker` directly against `--run-dir` whenever it finds
+   something.
+3. After the agent exits, the Node/Playwright side (which owns the live
+   `Page`) calls `tools/swarm/capture`'s `recordFinding` once, so every
+   explorer leaves an rrweb+console+HAR evidence bundle under
+   `.artifacts/swarm/findings/` regardless of what the agent chose to
+   journal narratively — the same capture loop tier 1/2's per-user gate
+   failures already use.
+
+`liveExplorerCli.ts` resolves `@playwright/test`'s `chromium` lazily via
+`createRequire` rooted at `tools/runstatus/package.json`, so it can launch a
+real browser without `tools/swarm/` needing its own `node_modules` (see "Why
+no dependencies" above) — that resolution only ever runs on the
+`--live-explorers` code path; the CI stub test never reaches it.
+
+### Manual live-acceptance procedure (real LLM spend — never run this in CI)
+
+1. Create a product-journey run bundle to journal into:
+   ```
+   python3 tools/product-journey/run.py --project <id> --persona <persona-id> --emit-run
+   ```
+   Note the printed `.artifacts/product-journey/<run-id>` directory.
+2. Start a shared `kitsoki web` server (tier 1/2's posture, or your own):
+   ```
+   go run ./cmd/kitsoki web --stories-dir stories --addr 127.0.0.1:7799 \
+     --harness replay --recording stories/off-ramp-demo/assets/recording.yaml \
+     --host-cassette stories/off-ramp-demo/assets/converse-cassette.yaml
+   ```
+3. Dispatch the explorers:
+   ```
+   node --loader tsx tools/swarm/tiers/liveExplorerCli.ts \
+     --live-explorers \
+     --server http://127.0.0.1:7799 \
+     --story-path stories/off-ramp-demo/app.yaml \
+     --run-dir .artifacts/product-journey/<run-id> \
+     --max-explorers 3
+   ```
+4. Review `.artifacts/product-journey/<run-id>/findings.json` (narrative
+   findings the agents journaled) and `.artifacts/swarm/findings/` (the
+   rrweb/console/HAR evidence bundles the runner captured per explorer).
+
+Budget a real dollar amount before running this — every invocation spawns up
+to 3 live agent processes. There is no automatic spend cap beyond the
+explorer-count clamp; treat `--max-explorers` and your own agent-backend
+quota/rate limits as the actual budget control.
