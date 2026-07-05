@@ -1,7 +1,7 @@
 states:
   idle:
     description: "Waiting to create a product-journey QA run bundle."
-    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, status]
+    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_status, autonomous_marathon_report_path, status]
     view:
       - banner:
           text: "PRODUCT JOURNEY QA"
@@ -20,6 +20,7 @@ states:
             Autonomous fix smoke: '{{ world.autonomous_fix_smoke_status|default:"(not checked)" }}'
             Persona autofix smoke: '{{ world.persona_autofix_smoke_status|default:"(not checked)" }}'
             Autonomous marathon smoke: '{{ world.autonomous_marathon_smoke_status|default:"(not checked)" }}'
+            Autonomous marathon: '{{ world.autonomous_marathon_status|default:"(not started)" }}'
             Status: "{{ world.status }}"
       - prose: "Create a no-LLM run bundle or a 10-repo GitHub matrix, then attach visual/MCP evidence as scenarios play out."
       - choice:
@@ -59,6 +60,9 @@ states:
             - label: "autonomous_marathon_smoke"
               hint: "prove the scoped persona-QA marathon chain reaches autonomous fix and derived stats"
               intent: autonomous_marathon_smoke
+            - label: "autonomous_marathon scenarios=bugfix"
+              hint: "create a standing persona-QA run envelope; rerun from the run page to finalize"
+              intent: autonomous_marathon
             - label: "refresh_targets seed=..."
               hint: "write a GitHub target-proof artifact for bug-count and popularity floors"
               intent: refresh_targets
@@ -230,6 +234,122 @@ states:
               on_error: idle
             - set:
                 status: "autonomous_marathon_smoke_checked"
+      autonomous_marathon:
+        - target: run_created
+          effects:
+            - set:
+                project: "{{ slots.project ?? world.project }}"
+                persona: "{{ slots.persona ?? world.persona }}"
+                seed: "{{ slots.seed ?? world.seed }}"
+                scenario_scope: "{{ slots.scenarios ?? world.scenario_scope }}"
+                live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
+                autonomous_marathon_status: "running"
+                autonomous_marathon_summary: ""
+                autonomous_marathon_report_path: ""
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
+                validation_issue_summary: ""
+                status: "creating_autonomous_marathon"
+            - invoke: host.run
+              id: autonomous_product_journey_marathon
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --autonomous-marathon
+                  - --json-output
+                  - --project
+                  - "{{ slots.project ?? world.project }}"
+                  - --persona
+                  - "{{ slots.persona ?? world.persona }}"
+                  - --seed
+                  - "{{ slots.seed ?? world.seed }}"
+                  - --scenarios
+                  - "{{ slots.scenarios ?? world.scenario_scope }}"
+                  - --live-budget-minutes
+                  - "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
+                  - --ticket-repo
+                  - "{{ slots.ticket_repo ?? world.ticket_repo }}"
+                  - --gh-agent-db
+                  - "{{ slots.gh_agent_db ?? '' }}"
+                  - --gh-agent-story
+                  - "{{ slots.gh_agent_story ?? 'stories/bugfix' }}"
+                  - --gh-agent-public-base-url
+                  - "{{ slots.gh_agent_public_base_url ?? '' }}"
+                  - --gh-agent-project-root
+                  - "{{ slots.gh_agent_project_root ?? '' }}"
+                  - --gh-agent-incident-repo
+                  - "{{ slots.gh_agent_incident_repo ?? '' }}"
+                  - --gh-agent-asset-dir
+                  - "{{ slots.gh_agent_asset_dir ?? '' }}"
+                  - --gh-agent-comment-mode
+                  - "{{ slots.gh_agent_comment_mode ?? 'none' }}"
+                  - --issue-state-file
+                  - "{{ slots.issue_state_file ?? '' }}"
+                  - --stats-root
+                  - "{{ slots.stats_root ?? '' }}"
+                  - --stats-output
+                  - "{{ slots.stats_output ?? '' }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                run_id: "stdout_json.run_id"
+                run_dir: "stdout_json.run_dir"
+                deck_path: "stdout_json.deck_path"
+                execution_plan_path: "stdout_json.execution_plan_path"
+                driver_plan_path: "stdout_json.driver_plan_path"
+                driver_journal_path: "stdout_json.driver_journal_path"
+                agent_brief_path: "stdout_json.agent_brief_path"
+                driver_handoff_path: "stdout_json.driver_handoff_path"
+                media_manifest_path: "stdout_json.media_manifest_path"
+                scenario_outcomes_path: "stdout_json.scenario_outcomes_path"
+                autonomous_marathon_status: "stdout_json.autonomous_marathon_status"
+                autonomous_marathon_summary: "stdout_json.autonomous_marathon_summary"
+                autonomous_marathon_report_path: "stdout_json.autonomous_marathon_report_path"
+                autonomous_fix_status: "stdout_json.autonomous_fix_status"
+                autonomous_fix_report_path: "stdout_json.autonomous_fix_report_path"
+                autonomous_gate_summary: "stdout_json.autonomous_gate_summary"
+                stats_status: "stdout_json.stats_status"
+                stats_root: "stdout_json.stats_root"
+                stats_output: "stdout_json.stats_output"
+                stats_summary: "stdout_json.stats_summary"
+                stats_runs_scanned: "stdout_json.stats_runs_scanned"
+                stats_found_count: "stdout_json.stats_found_count"
+                stats_filed_count: "stdout_json.stats_filed_count"
+                stats_fixed_count: "stdout_json.stats_fixed_count"
+                stats_reopened_count: "stdout_json.stats_reopened_count"
+                stats_unknown_state_count: "stdout_json.stats_unknown_state_count"
+                stats_similar_pair_count: "stdout_json.stats_similar_pair_count"
+                persona_starting_surface: "stdout_json.persona_starting_surface"
+                persona_first_question: "stdout_json.persona_first_question"
+                persona_evidence_emphasis: "stdout_json.persona_evidence_emphasis"
+                persona_escalation_trigger: "stdout_json.persona_escalation_trigger"
+                persona_finding_bias: "stdout_json.persona_finding_bias"
+                live_budget_minutes: "stdout_json.live_budget_minutes"
+                run_scenario_count: "stdout_json.scenario_count"
+                proof_evidence_count: "stdout_json.proof_evidence_count"
+                demo_evidence_count: "stdout_json.demo_evidence_count"
+                finding_total_count: "stdout_json.finding_total_count"
+                strength_count: "stdout_json.strength_count"
+                weakness_count: "stdout_json.weakness_count"
+                weakness_route_count: "stdout_json.weakness_route_count"
+                weakness_route_summary: "stdout_json.weakness_route_summary"
+                issue_count: "stdout_json.issue_count"
+                fix_count: "stdout_json.fix_count"
+                blocked_count: "stdout_json.blocked_count"
+                missing_evidence_count: "stdout_json.missing_evidence_count"
+                missing_proof_evidence_count: "stdout_json.missing_proof_evidence_count"
+                proof_minimum_evidence_count: "stdout_json.proof_minimum_evidence_count"
+                minimum_evidence_count: "stdout_json.minimum_evidence_count"
+                missing_proof_summary: "stdout_json.missing_proof_summary"
+                driver_contract_summary: "stdout_json.driver_contract_summary"
+                next_driver_capture: "stdout_json.next_driver_capture"
+                next_driver_attach_command: "stdout_json.next_driver_attach_command"
+                next_driver_blocker_command: "stdout_json.next_driver_blocker_command"
+              on_error: idle
+            - set:
+                status: "autonomous_marathon_ready"
       refresh_targets:
         - target: .
           effects:

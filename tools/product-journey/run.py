@@ -4504,6 +4504,215 @@ def autonomous_fix_loop(
     return result
 
 
+def autonomous_marathon_report_path(run_dir: Path) -> Path:
+    return run_dir / "autonomous-marathon-report.md"
+
+
+def render_autonomous_marathon_report(run_dir: Path, result: dict) -> str:
+    lines = [
+        "# Autonomous Marathon Report",
+        "",
+        f"- Run: `{run_dir.name}`",
+        f"- Status: `{result.get('autonomous_marathon_status', result.get('status', ''))}`",
+        f"- Summary: {result.get('autonomous_marathon_summary', '')}",
+        f"- Driver handoff: `{result.get('driver_handoff_path', run_dir / 'driver-handoff.md')}`",
+        f"- Autonomous fix report: `{result.get('autonomous_fix_report_path', '') or '(not generated)'}`",
+        f"- Stats output: `{result.get('stats_output', '') or '(not generated)'}`",
+        "",
+        "## Gates",
+        "",
+        f"- Autonomous fix: `{result.get('autonomous_fix_status', 'not_run')}`",
+        f"- Autonomous gates: {result.get('autonomous_gate_summary', '(not run)')}",
+        f"- Review: `{result.get('review_status', '')}` ({result.get('review_failed_count', 0)} failed)",
+        f"- Validation: `{result.get('validation_status', '')}` ({result.get('validation_errors', 0)} errors)",
+        f"- Weakness routes: {result.get('weakness_route_count', 0)}",
+        f"- Stats: {result.get('stats_summary', '(not derived)')}",
+        "",
+        "## Next Driver Action",
+        "",
+    ]
+    next_attach = result.get("next_driver_attach_command", "")
+    next_blocker = result.get("next_driver_blocker_command", "")
+    if next_attach or next_blocker:
+        if next_attach:
+            lines.append(f"- Attach proof: `{next_attach}`")
+        if next_blocker:
+            lines.append(f"- Record blocker: `{next_blocker}`")
+    else:
+        lines.append("- No pending driver action is advertised by the handoff artifact.")
+    return "\n".join(lines)
+
+
+def write_autonomous_marathon_report(run_dir: Path, result: dict) -> Path:
+    path = autonomous_marathon_report_path(run_dir)
+    path.write_text(render_autonomous_marathon_report(run_dir, result) + "\n", encoding="utf-8")
+    return path
+
+
+def autonomous_marathon(
+    catalog: dict,
+    github_targets: dict,
+    personas: list[dict],
+    scenarios: list[dict],
+    run_dir: Optional[Path],
+    project_id: str,
+    persona_id: str,
+    seed: str,
+    scenario_filter: str,
+    live_budget_minutes: int,
+    ticket_repo: str,
+    gh_agent_db: str,
+    gh_agent_story: str,
+    gh_agent_public_base_url: str,
+    gh_agent_project_root: str,
+    gh_agent_incident_repo: str,
+    gh_agent_asset_dir: str,
+    gh_agent_comment_mode: str,
+    issue_state_file: str,
+    stats_root: str,
+    stats_output: str,
+    similarity_threshold: float,
+    similar_pair_limit: int,
+    publish_deck: Optional[Path],
+) -> dict:
+    """Create or finalize a standing persona-QA marathon bundle.
+
+    Creation is deterministic and does not dispatch a live driver. Finalization
+    is story-owned: credible issue findings go through the native autonomous
+    fix gate, review/validate are refreshed, weaknesses route to PRD/design,
+    and stats derive from cached issue state.
+    """
+    if run_dir is None:
+        run_scenarios = select_scenarios(scenarios, scenario_filter)
+        created_dir, run_json = build_run_bundle(
+            catalog,
+            github_targets,
+            personas,
+            run_scenarios,
+            project_id,
+            persona_id,
+            seed,
+            "autonomous-marathon",
+            publish_deck,
+            live_budget_minutes,
+            [],
+        )
+        result = {
+            "status": "autonomous_marathon_ready_for_driver",
+            "autonomous_marathon_status": "autonomous_marathon_ready_for_driver",
+            "autonomous_marathon_summary": (
+                f"Created {len(run_json.get('scenarios', []))} scenario(s); driver evidence capture is pending."
+            ),
+            "run_id": run_json["run_id"],
+            "run_dir": str(created_dir),
+            "project": run_json["project"]["id"],
+            "persona": run_json["persona"]["id"],
+            "seed": run_json.get("seed", ""),
+            "deck_path": str(created_dir / "deck.slidey.json"),
+            "execution_plan_path": str(created_dir / "execution-plan.md"),
+            "driver_plan_path": str(created_dir / "driver-plan.md"),
+            "driver_journal_path": str(created_dir / "driver-journal.md"),
+            "agent_brief_path": str(created_dir / "agent-brief.md"),
+            "driver_handoff_path": str(created_dir / "driver-handoff.md"),
+            "media_manifest_path": str(created_dir / "media-manifest.json"),
+            "scenario_outcomes_path": str(created_dir / "scenario-outcomes.md"),
+            "autonomous_fix_status": "not_run",
+            "autonomous_gate_summary": "filing=not_run, gh_agent=not_run, review=not_run, validation=not_run",
+        }
+        result.update(run_story_summary(created_dir))
+        result["autonomous_marathon_report_path"] = str(write_autonomous_marathon_report(created_dir, result))
+        return result
+
+    update_derived_artifacts(run_dir, publish_deck=None)
+    findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"items": []}
+    credible_issues = credible_issue_findings(findings)
+    if credible_issues:
+        if not ticket_repo:
+            raise SystemExit("--autonomous-marathon requires --ticket-repo when credible issue findings exist")
+        if not gh_agent_db:
+            gh_agent_db = str(run_dir / "gh-agent-jobs.sqlite")
+        fix_result = autonomous_fix_loop(
+            run_dir,
+            ticket_repo,
+            gh_agent_db,
+            gh_agent_story,
+            gh_agent_public_base_url,
+            gh_agent_project_root,
+            gh_agent_incident_repo,
+            gh_agent_asset_dir,
+            gh_agent_comment_mode,
+            publish_deck,
+        )
+        base = dict(fix_result)
+        fix_valid = fix_result.get("autonomous_fix_status") == "autonomous_fix_valid"
+    else:
+        reviewed = review_run_bundle(run_dir, publish_deck)
+        validation = validate_run_bundle(run_dir)
+        base = {
+            "autonomous_fix_status": "not_required",
+            "autonomous_gate_summary": "filing=not_required, gh_agent=not_required, review=pending, validation=pending",
+            "review_status": reviewed.get("review_status", reviewed.get("status", "")),
+            "review_summary": reviewed.get("summary", ""),
+            "review_passed_count": reviewed.get("review_passed_count", reviewed.get("passed", 0)),
+            "review_failed_count": reviewed.get("review_failed_count", reviewed.get("failed", 0)),
+            "review_warning_count": reviewed.get("review_warning_count", reviewed.get("warnings", 0)),
+            "review_total_count": reviewed.get("review_total_count", reviewed.get("total", 0)),
+            "review_backlog_summary": reviewed.get("review_backlog_summary", ""),
+            "validation_status": validation.get("status", ""),
+            "validation_errors": validation.get("errors", 0),
+            "validation_warnings": validation.get("warnings", 0),
+            "validation_issue_summary": validation.get("validation_issue_summary", ""),
+        }
+        base.update(run_story_summary(run_dir))
+        fix_valid = True
+
+    stats_path = stats_output or str(run_dir / "autonomous-marathon-stats.json")
+    stats = derive_stats(
+        run_dir_from_arg(stats_root) if stats_root else ARTIFACT_ROOT,
+        issue_state_file,
+        similarity_threshold,
+        similar_pair_limit,
+        stats_path,
+    )
+    review_ok = base.get("review_status") == "ready" and int(base.get("review_failed_count", 0) or 0) == 0
+    validation_ok = base.get("validation_status") == "valid" and int(base.get("validation_errors", 0) or 0) == 0
+    status = "autonomous_marathon_valid" if fix_valid and review_ok and validation_ok else "autonomous_marathon_invalid"
+    result = {
+        **base,
+        "status": status,
+        "autonomous_marathon_status": status,
+        "autonomous_marathon_summary": (
+            f"credible_issues={len(credible_issues)}, "
+            f"fix={base.get('autonomous_fix_status', 'not_run')}, "
+            f"review={base.get('review_status', '')}, "
+            f"validation={base.get('validation_status', '')}"
+        ),
+        "run_dir": str(run_dir),
+        "deck_path": str(run_dir / "deck.slidey.json"),
+        "execution_plan_path": str(run_dir / "execution-plan.md"),
+        "driver_plan_path": str(run_dir / "driver-plan.md"),
+        "driver_journal_path": str(run_dir / "driver-journal.md"),
+        "agent_brief_path": str(run_dir / "agent-brief.md"),
+        "driver_handoff_path": str(run_dir / "driver-handoff.md"),
+        "media_manifest_path": str(run_dir / "media-manifest.json"),
+        "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
+        "stats_status": stats.get("status", ""),
+        "stats_root": stats.get("stats_root", ""),
+        "stats_output": stats.get("stats_output", ""),
+        "stats_summary": stats.get("stats_summary", ""),
+        "stats_runs_scanned": stats.get("runs_scanned", 0),
+        "stats_found_count": stats.get("findings_found_count", 0),
+        "stats_filed_count": stats.get("findings_filed_count", 0),
+        "stats_fixed_count": stats.get("issues_fixed_count", 0),
+        "stats_reopened_count": stats.get("issues_reopened_count", 0),
+        "stats_unknown_state_count": stats.get("issues_unknown_state_count", 0),
+        "stats_similar_pair_count": stats.get("similar_pair_count", 0),
+    }
+    result.update(run_story_summary(run_dir))
+    result["autonomous_marathon_report_path"] = str(write_autonomous_marathon_report(run_dir, result))
+    return result
+
+
 def normalize_issue_title(value: str) -> str:
     return " ".join(
         "".join(ch.lower() if ch.isalnum() else " " for ch in value).split()
@@ -9053,6 +9262,7 @@ def main() -> None:
     parser.add_argument("--seed-demo-evidence", action="store_true", help="Attach deterministic demo evidence and findings to an existing run bundle")
     parser.add_argument("--file-findings", action="store_true", help="File the bundle's credible issue findings as GitHub issues via the kitsoki bug orchestration")
     parser.add_argument("--autonomous-fix-loop", action="store_true", help="File findings, enqueue/drain gh-agent fixes, review, and validate as one no-operator reliability gate")
+    parser.add_argument("--autonomous-marathon", action="store_true", help="Create or finalize a standing persona-QA marathon through native autonomous fix, review, validation, and stats")
     parser.add_argument("--report-invalid-autonomous-fix", action="store_true", help="With --autonomous-fix-loop, print invalid gate JSON and exit 0 so story callers can bind failure evidence")
     parser.add_argument("--stats", action="store_true", help="Derive product-journey issue stats from run bundles and cached issue state")
     parser.add_argument("--stats-root", default="", help="Root containing product-journey run bundles for --stats; defaults to .artifacts/product-journey")
@@ -9591,6 +9801,54 @@ def main() -> None:
         print(f"Deck: {deck_path}")
         print(summary)
         append_log(f"Built scenario-qa deck for {run_dir.name}: {summary}")
+        return
+
+    if args.autonomous_marathon:
+        publish_deck = DEFAULT_DECK if args.publish_deck else None
+        run_dir = run_dir_from_arg(args.run_dir) if args.run_dir else None
+        result = autonomous_marathon(
+            catalog,
+            github_targets,
+            personas,
+            scenarios,
+            run_dir,
+            args.project,
+            args.persona,
+            args.seed,
+            args.scenarios,
+            args.live_budget_minutes,
+            args.ticket_repo,
+            args.gh_agent_db,
+            args.gh_agent_story,
+            args.gh_agent_public_base_url,
+            args.gh_agent_project_root,
+            args.gh_agent_incident_repo,
+            args.gh_agent_asset_dir,
+            args.gh_agent_comment_mode,
+            args.issue_state_file,
+            args.stats_root,
+            args.stats_output,
+            args.similarity_threshold,
+            args.similar_pair_limit,
+            publish_deck,
+        )
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Ran autonomous marathon for {Path(result['run_dir']).name}: {result['status']}")
+            if result["status"] == "autonomous_marathon_invalid":
+                raise SystemExit(1)
+            return
+        print(f"Status: {result['status']}")
+        print(result["autonomous_marathon_summary"])
+        print(f"Artifacts: {result['run_dir']}")
+        print(f"Report: {result['autonomous_marathon_report_path']}")
+        if result.get("autonomous_fix_report_path"):
+            print(f"Autonomous fix: {result['autonomous_fix_report_path']}")
+        if result.get("stats_output"):
+            print(f"Stats: {result['stats_output']}")
+        append_log(f"Ran autonomous marathon for {Path(result['run_dir']).name}: {result['status']}")
+        if result["status"] == "autonomous_marathon_invalid":
+            raise SystemExit(1)
         return
 
     if args.file_findings:

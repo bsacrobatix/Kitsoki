@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""Runner-level test for --autonomous-marathon.
+
+The fake KITSOKI_BIN comes from file_findings_test.py, so this test does not
+call GitHub or a real LLM. It proves the marathon wrapper creates a bounded run
+and later finalizes that run through the native issue filing and gh-agent gate.
+"""
+
+import importlib.util
+import os
+import stat
+import sys
+import tempfile
+from pathlib import Path
+
+_spec = importlib.util.spec_from_file_location(
+    "pj_run", str(Path(__file__).with_name("run.py"))
+)
+run = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(run)
+
+_filing_spec = importlib.util.spec_from_file_location(
+    "file_findings_test", str(Path(__file__).with_name("file_findings_test.py"))
+)
+filing_test = importlib.util.module_from_spec(_filing_spec)
+_filing_spec.loader.exec_module(filing_test)
+
+
+def check(label: str, condition: bool, failures: list[str]) -> None:
+    if condition:
+        print(f"ok: {label}")
+    else:
+        print(f"not ok: {label}")
+        failures.append(label)
+
+
+def main() -> int:
+    failures: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp_name:
+        tmp = Path(tmp_name)
+        run.ARTIFACT_ROOT = tmp / "product-journey"
+        run.ARTIFACT_ROOT.mkdir(parents=True)
+
+        fake = tmp / "fake_kitsoki.py"
+        fake.write_text(filing_test.FAKE_KITSOKI, encoding="utf-8")
+        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+
+        old_env = {
+            "KITSOKI_BIN": os.environ.get("KITSOKI_BIN"),
+            "KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE": os.environ.get("KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE"),
+        }
+        os.environ["KITSOKI_BIN"] = f"{sys.executable} {fake}"
+        os.environ["KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE"] = "1"
+        try:
+            catalog = run.load_catalog(run.CATALOG)
+            github_targets = run.load_github_targets(run.GITHUB_TARGETS)
+            personas = run.load_personas(run.PERSONAS)
+            scenarios = run.load_scenarios(run.SCENARIOS)
+
+            created = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-test",
+                "bugfix",
+                7,
+                "",
+                "",
+                "stories/bugfix",
+                "",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                None,
+            )
+            run_dir = Path(created["run_dir"])
+            run_json = run.read_json(run_dir / "run.json")
+            scenario_id = run_json["scenarios"][0]["id"]
+
+            check("autonomous marathon creates a bounded run",
+                  created["autonomous_marathon_status"] == "autonomous_marathon_ready_for_driver"
+                  and run_json["mode"] == "autonomous-marathon"
+                  and len(run_json["scenarios"]) == 1
+                  and created["live_budget_minutes"] == 7,
+                  failures)
+            check("creation writes a human-reviewable marathon report",
+                  Path(created["autonomous_marathon_report_path"]).exists()
+                  and "Autonomous Marathon Report" in Path(created["autonomous_marathon_report_path"]).read_text(encoding="utf-8"),
+                  failures)
+
+            filing_test.attach_bugfix_proof(run_dir, scenario_id)
+            run.record_driver_event(
+                run_dir,
+                scenario_id,
+                "replay",
+                "captured",
+                "Autonomous marathon test replay captured proof for the bugfix journey.",
+                "session.open,session.trace,render.tui,visual.observe",
+                str(run_dir / "test-evidence" / "trace-replay.md"),
+                "",
+                None,
+            )
+            run.record_finding(
+                run_dir,
+                "weakness",
+                "Scoped marathon still needs wider cadence",
+                "A single bounded scenario proves the gate while broader cadence expands coverage.",
+                scenario_id,
+                "medium",
+                str(run_dir / "driver-plan.md"),
+                "open",
+                None,
+            )
+            run.record_finding(
+                run_dir,
+                "issue",
+                "Autonomous marathon should file and fix issues",
+                "Credible persona QA issues should be filed, queued for gh-agent, verified, and included in stats.",
+                scenario_id,
+                "high",
+                str(run_dir / "test-evidence" / "trace-replay.md"),
+                "open",
+                None,
+            )
+
+            finalized = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                run_dir,
+                "vscode",
+                "core-maintainer",
+                "ignored",
+                "",
+                7,
+                "o/r",
+                str(tmp / "gh-agent.json"),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                str(run.ARTIFACT_ROOT),
+                str(run_dir / "autonomous-marathon-stats.json"),
+                0.82,
+                25,
+                None,
+            )
+            report = Path(finalized["autonomous_marathon_report_path"])
+            report_text = report.read_text(encoding="utf-8") if report.exists() else ""
+
+            check("finalization runs native autonomous fix gate",
+                  finalized["autonomous_marathon_status"] == "autonomous_marathon_valid"
+                  and finalized["autonomous_fix_status"] == "autonomous_fix_valid"
+                  and finalized["autonomous_gate_summary"] == "filing=pass, gh_agent=pass, review=pass, validation=pass",
+                  failures)
+            check("marathon report links fix evidence and stats",
+                  "autonomous-fix-report.md" in report_text
+                  and "autonomous-marathon-stats.json" in report_text
+                  and finalized["stats_found_count"] == 1
+                  and finalized["stats_filed_count"] == 1,
+                  failures)
+            check("weaknesses route to PRD/design during finalization",
+                  finalized["weakness_route_count"] == 1
+                  and "finding-1->stories/prd" in finalized["weakness_route_summary"],
+                  failures)
+        finally:
+            for key, value in old_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    if failures:
+        print("FAIL")
+        for failure in failures:
+            print(f"- {failure}")
+        return 1
+    print("PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
