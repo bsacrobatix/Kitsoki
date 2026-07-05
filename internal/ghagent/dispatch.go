@@ -24,6 +24,14 @@ type RunResult struct {
 	FinalState string // story terminal state, for the ack
 	Turns      int
 	Summary    string
+	// Stubbed is true when the spawn path ran the beat fixture's inline
+	// host.agent.* stub handlers instead of a real agent turn — no LLM ran,
+	// no code changed. The comment-render step must never say "Done" for a
+	// stubbed run; see docs/proposals/gh-agent-honest-issues.md task 0.
+	Stubbed bool
+	// StubReason explains why the run was stubbed, for the trace record and
+	// (eventually) operator-facing diagnostics. Empty when Stubbed is false.
+	StubReason string
 }
 
 // Dispatcher claims a job for a mention and spawns the mapped story no-LLM.
@@ -209,6 +217,9 @@ func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *j
 		return nil, err
 	}
 	job.State = finalState
+	if result.Stubbed {
+		_ = d.Jobs.RecordEvent(persistCtx, job.JobID, "stubbed", result.StubReason)
+	}
 	if spawnErr != nil && d.IncidentFn != nil {
 		if incidentURL, incidentErr := d.IncidentFn(persistCtx, job, errMsg); incidentErr == nil && strings.TrimSpace(incidentURL) != "" {
 			_ = d.Jobs.SetIncidentURL(persistCtx, job.JobID, incidentURL)
@@ -220,9 +231,17 @@ func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *j
 
 	if d.Comments != nil && job.CommentID != "" {
 		meta := Meta{JobID: job.JobID, OriginRef: job.OriginRef, Story: route.Story, State: finalState, RunURL: job.RunURL}
-		prose := fmt.Sprintf("Done — `%s` finished in state `%s` (%d turn(s)).", route.Story, result.FinalState, result.Turns)
-		if strings.TrimSpace(result.Summary) != "" {
+		// Honest predicate (rendering-time only, not a routing decision — see
+		// docs/proposals/gh-agent-honest-issues.md task 0): a stubbed run never
+		// gets to say "Done", no matter what FinalState/Turns/Summary it carries.
+		var prose string
+		switch {
+		case result.Stubbed:
+			prose = "acknowledged — pipeline not yet enabled for this route"
+		case strings.TrimSpace(result.Summary) != "":
 			prose = result.Summary
+		default:
+			prose = fmt.Sprintf("Done — `%s` finished in state `%s` (%d turn(s)).", route.Story, result.FinalState, result.Turns)
 		}
 		if spawnErr != nil {
 			prose = fmt.Sprintf("Run failed: %s", spawnErr.Error())
@@ -343,6 +362,13 @@ func RunStorySession(ctx context.Context, route Route, job *jobs.GHJob) (RunResu
 		RunURL:     "kitsoki://run/" + job.JobID,
 		FinalState: "passed",
 		Turns:      turns,
+		// This spawn path always points RunFlows at a beat fixture whose
+		// host.agent.task/ask/decide handlers are inline stubs (see
+		// internal/ghagent/testdata/*.beat.yaml) — no LLM ran and no code
+		// changed, regardless of how many turns "passed". Real dispatch
+		// (task 2 of gh-agent-honest-issues.md) replaces this path.
+		Stubbed:    true,
+		StubReason: "issue route ran the beat-fixture stub (no real pipeline dispatch yet)",
 	}, nil
 }
 
