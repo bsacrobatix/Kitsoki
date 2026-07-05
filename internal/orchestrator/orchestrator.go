@@ -3321,6 +3321,14 @@ func projectContextFor(def *app.AppDef) host.ProjectContext {
 // failure itself. Kept as one format so every story bounce looks identical.
 const errorBannerFormat = "⚠ Action failed: %s"
 
+// ErrorBannerMarker is the fixed, message-independent prefix of
+// errorBannerFormat. Callers outside this package (the G-FLOW flow-fixture
+// gate in internal/testrunner) use it to detect "did this turn's view carry
+// the never-silent banner" without depending on the exact failure message,
+// which varies per redirect. Kept in sync with errorBannerFormat by
+// derivation rather than a second literal.
+var ErrorBannerMarker = strings.TrimSuffix(errorBannerFormat, "%s")
+
 func appendErrorBanner(view, msg string) string {
 	banner := fmt.Sprintf(errorBannerFormat, msg)
 	if view == "" {

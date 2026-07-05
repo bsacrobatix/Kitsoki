@@ -1388,6 +1388,15 @@ func runOneFlowLegacy(ctx context.Context, def *app.AppDef, m machine.Machine, f
 			}
 		}
 
+		// G-FLOW near-silent-bounce gate. The legacy (machine-only) runner
+		// bypasses host dispatch, so it cannot itself apply an on_error:
+		// redirect or emit the intent="on_error" TransitionApplied the gate
+		// looks for — this call is a no-op today, kept here so the two
+		// per-turn assertion blocks stay symmetric if that ever changes.
+		if errs := assertNoSilentOnErrorBounce(filePath, i, tr.Events, tr.View, lastErrorString(currentWorld)); len(errs) > 0 {
+			tr.Failures = append(tr.Failures, errs...)
+		}
+
 		// expect_slots — assert on accepted slots (we don't have a clean path here
 		// unless we compare the call slots; do that).
 		if len(turn.ExpectSlots) > 0 {
@@ -1767,6 +1776,14 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 		// expect_no_view.
 		if turn.ExpectNoView != nil && *turn.ExpectNoView && tr.View != "" {
 			tr.Failures = append(tr.Failures, fmt.Sprintf("expect_no_view: view is not empty: %q", tr.View))
+		}
+		// G-FLOW near-silent-bounce gate (never-silent-runtime): a turn that
+		// drove an on_error: redirect must render the error banner (or the
+		// raw failure message it stands in for). This is an automatic
+		// check, not opt-in — a fixture cannot silently pass an on_error:
+		// arc the way it can skip expect_view_matches.
+		if errs := assertNoSilentOnErrorBounce(filePath, i, tr.Events, tr.View, lastErrorString(currentWorld)); len(errs) > 0 {
+			tr.Failures = append(tr.Failures, errs...)
 		}
 		// expect_slots.
 		if len(turn.ExpectSlots) > 0 {
@@ -2583,6 +2600,70 @@ func assertEventsExact(actual []store.Event, expected []FlowEvent) []string {
 	for i, exp := range expected {
 		if !matchEvent(actual[i], exp) {
 			failures = append(failures, fmt.Sprintf("expect_events_exact[%d]: event mismatch. got kind=%q, want kind=%q", i, actual[i].Kind, exp.Kind))
+		}
+	}
+	return failures
+}
+
+// lastErrorString reads world.last_error as a string for the G-FLOW gate,
+// tolerating the schema-default zero value (absent key, wrong type, or a
+// world with a nil Vars map) by returning "".
+func lastErrorString(w world.World) string {
+	if w.Vars == nil {
+		return ""
+	}
+	s, _ := w.Vars["last_error"].(string)
+	return s
+}
+
+// assertNoSilentOnErrorBounce is the G-FLOW near-silent-bounce gate
+// (never-silent-runtime proposal, Task 2.2). It scans a turn's events for a
+// TransitionApplied whose payload names "on_error" as the driving intent
+// (emitted by enterRedirectState in internal/orchestrator/host_dispatch.go
+// whenever an on_error: arc fires) and, when found, requires the turn's
+// rendered view to surface the failure — either via the never-silent error
+// banner (orchestrator.ErrorBannerMarker) or, for stories that render
+// {{ world.last_error }} themselves, via the raw error message. That mirrors
+// the shared seam's own idempotency guard
+// (applyErrorBannerSeam in host_dispatch.go: "if strings.Contains(view, msg)
+// { return view }") — a room that already shows the error verbatim is not a
+// silent bounce even though it never gained the banner text, and the gate
+// must not fail well-behaved fixtures like testdata/apps/starlark_min's
+// `failed` room ("Fetch failed: {{ world.last_error }}.").
+//
+// lastError is the post-turn world's last_error value (empty when the arc's
+// target on_enter cleared it before render, e.g. testdata/apps/error_banner's
+// bounced_silent room) — the same value applyErrorBannerSeam gates on.
+//
+// A story whose on_error: target renders a view with no trace of what failed
+// (no banner AND no verbatim error message) fails this check
+// unconditionally — it is not an opt-in assertion like expect_view_matches,
+// because the whole point of the gate is to catch fixtures that never
+// thought to check.
+func assertNoSilentOnErrorBounce(filePath string, turnIdx int, events []store.Event, view string, lastError string) []string {
+	var failures []string
+	for _, ev := range events {
+		if string(ev.Kind) != string(store.TransitionApplied) {
+			continue
+		}
+		if ev.Payload == nil {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			continue
+		}
+		intentName, _ := payload["intent"].(string)
+		if intentName != "on_error" {
+			continue
+		}
+		surfaced := strings.Contains(view, orchestrator.ErrorBannerMarker) ||
+			(lastError != "" && strings.Contains(view, lastError))
+		if !surfaced {
+			to, _ := payload["to"].(string)
+			failures = append(failures, fmt.Sprintf(
+				"G-FLOW: %s turn %d drove an on_error: arc to %q but the rendered view does not contain the never-silent error banner marker %q (nor the raw failure message) — the on_error: target must surface the failure (e.g. render {{ world.last_error }}) or rely on the runtime's appendErrorBanner seam, not bounce silently",
+				filePath, turnIdx+1, to, orchestrator.ErrorBannerMarker))
 		}
 	}
 	return failures
