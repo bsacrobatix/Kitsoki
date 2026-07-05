@@ -503,13 +503,14 @@ The read tools stay available on a `--read-only` server; the mutating ones
 
 The everyday GitHub reads a developing agent needs — list open issues, view a
 PR's body + changed files + diff (the bake-off needs a filed bug's own
-regression test), comment — wrap `gh` (argv mode, via `host.RunHandler`). `gh`
-must be authenticated on the host (the same precondition `issue.create` /
-`inbox.sync_github` rely on). ([`gh_tools.go`](../../internal/mcp/studio/gh_tools.go).)
+regression test), comment — stay behind Studio MCP tools. Issue listing uses the
+native `host.gh.ticket` provider; PR view/comment still wrap `gh` (argv mode,
+via `host.RunHandler`) until that convenience surface is migrated too.
+([`gh_tools.go`](../../internal/mcp/studio/gh_tools.go).)
 
 | Tool | Shape | Notes |
 |---|---|---|
-| `gh.issues` | `{repo?, state?, assignee?, search?, limit?, dir?} → {issues[]}` | `gh issue list --json`, passed through. Read-only |
+| `gh.issues` | `{repo?, state?, assignee?, search?, limit?, dir?} → {issues[]}` | Native `host.gh.ticket.search` result. Read-only |
 | `gh.pr_view` | `{number, repo?, include_diff?, dir?} → {pr, diff?}` | `gh pr view --json` (+ `gh pr diff`). Read-only |
 | `gh.comment` | `{number, body, on?:issue\|pr, repo?, dir?} → {url}` | `gh issue/pr comment`. Mutating (dropped `--read-only`) |
 

@@ -10,12 +10,9 @@
 // filing use the native GitHub REST API with GH_TOKEN/GITHUB_TOKEN so headless
 // autonomous runs do not depend on a locally logged-in gh binary.
 //
-// The companion `gh pr ...` family already lives in `internal/host/git_vcs.go`
-// — that file's `host.git` handler dispatches PR ops (open_pr / pr_status /
-// pr_comment) through `gh pr` when the gh CLI is available.  We deliberately
-// do NOT duplicate the vcs surface here: a story binding GitHub picks
-// `host.gh.ticket` for tickets and keeps `host.git` (which already routes to
-// `gh pr` under the hood) for vcs.
+// The companion PR family lives in `internal/host/git_vcs.go`: stories bind
+// `host.gh.ticket` for tickets and keep `host.git` for branch/PR operations
+// backed by local git plus the native GitHub REST API.
 //
 // Native operations use an injectable HTTP client. Auth and transport failures
 // return clean Result.Error values rather than crashing, so authors can route

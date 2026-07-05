@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -13,16 +14,14 @@ import (
 	"kitsoki/internal/host"
 )
 
-// gh_tools.go — a read (and comment) surface over the GitHub CLI.
+// gh_tools.go — a GitHub read/comment surface for Studio.
 //
 // issue.create files an issue and inbox.sync_github pulls assigned issues INTO a
-// handle's inbox, but the everyday GitHub reads an agent needs while developing —
-// "list the open issues", "show me this PR's body + changed files + diff" (the
-// bake-off needs the PR's own regression oracle), "leave a comment" — had no MCP
-// path and forced a `gh` shell-out. These wrap `gh` (argv mode, via the shared
-// host.RunHandler) so they stay inside the studio. gh must be authenticated on
-// the host (the same precondition issue.create / inbox.sync_github already rely
-// on). No LLM.
+// handle's inbox, but the everyday GitHub reads an agent needs while developing
+// still need a first-class MCP path. Issue listing uses the native
+// host.gh.ticket provider; the PR view/comment helpers still wrap the GitHub CLI
+// through host.RunHandler until the PR read/comment surface is migrated too. No
+// LLM.
 //
 // gh.issues / gh.pr_view are pure reads (available read-only); gh.comment posts,
 // so a read-only server omits it.
@@ -31,7 +30,7 @@ import (
 func (srv *Server) registerGHTools() {
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "gh.issues",
-		Description: "List GitHub issues via `gh issue list --json`. {dir? (a repo checkout to infer the repo from; default the server cwd), repo? (owner/name override), state? (open|closed|all; default open), assignee? (e.g. @me), search? (a gh search query), limit? (default 30)} → {ok, issues[{number, title, state, url, labels[], assignees[]}]}. Read-only.",
+		Description: "List GitHub issues via the native host.gh.ticket provider. {dir? (a repo checkout to infer the repo from via git remote; default the server cwd), repo? (owner/name override), state? (open|closed|all; default open), assignee? (e.g. @me), search? (GitHub search terms), limit? (default 30)} → {ok, issues[{id,title,status,priority,assignee,url,type,source}]}. Read-only.",
 	}, srv.handleGHIssues)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
@@ -61,8 +60,8 @@ type GHIssuesArgs struct {
 	Limit    int    `json:"limit,omitempty"`
 }
 
-// GHIssuesOK is the gh.issues result. Issues is the parsed `gh --json` array,
-// passed through as generic JSON so the field set tracks gh without a rebuild.
+// GHIssuesOK is the gh.issues result. Issues uses the provider-neutral ticket
+// summary shape returned by host.gh.ticket.search.
 type GHIssuesOK struct {
 	OK     bool `json:"ok"`
 	Issues any  `json:"issues"`
@@ -73,28 +72,75 @@ func (srv *Server) handleGHIssues(ctx context.Context, req *mcpsdk.CallToolReque
 	if limit <= 0 {
 		limit = 30
 	}
-	ghArgs := []string{"issue", "list", "--json", "number,title,state,url,labels,assignees", "--limit", strconv.Itoa(limit)}
-	if args.State != "" {
-		ghArgs = append(ghArgs, "--state", args.State)
-	}
-	if args.Assignee != "" {
-		ghArgs = append(ghArgs, "--assignee", args.Assignee)
-	}
-	if args.Search != "" {
-		ghArgs = append(ghArgs, "--search", args.Search)
-	}
-	if args.Repo != "" {
-		ghArgs = append(ghArgs, "--repo", args.Repo)
-	}
-	out, exit, err := ghRun(ctx, args.Dir, ghArgs...)
-	if rerr := ghErr("gh.issues", out, exit, err); rerr != nil {
+
+	repo, rerr := resolveGitHubIssuesRepo(ctx, args)
+	if rerr != nil {
 		return rerr, nil, nil
 	}
-	parsed, perr := parseJSONAny(out)
-	if perr != nil {
-		return buildToolError(ErrBadRequest, fmt.Sprintf("gh.issues: parse gh output: %v", perr)), nil, nil
+
+	state := strings.TrimSpace(args.State)
+	if state == "" {
+		state = "open"
 	}
-	return nil, GHIssuesOK{OK: true, Issues: parsed}, nil
+	var queryParts []string
+	switch state {
+	case "open", "closed":
+		queryParts = append(queryParts, "is:"+state)
+	case "all":
+	default:
+		return buildToolError(ErrBadRequest, "gh.issues: state must be \"open\", \"closed\", or \"all\""), nil, nil
+	}
+	if assignee := strings.TrimSpace(args.Assignee); assignee != "" {
+		queryParts = append(queryParts, "assignee:"+assignee)
+	}
+	if search := strings.TrimSpace(args.Search); search != "" {
+		queryParts = append(queryParts, search)
+	}
+
+	res, err := host.GitHubTicketHandler(ctx, map[string]any{
+		"op":    "search",
+		"repo":  repo,
+		"query": strings.Join(queryParts, " "),
+		"limit": limit,
+	})
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("gh.issues: %v", err)), nil, nil
+	}
+	if res.Error != "" {
+		return buildToolError(ErrBadRequest, "gh.issues: "+res.Error), nil, nil
+	}
+	return nil, GHIssuesOK{OK: true, Issues: res.Data["tickets"]}, nil
+}
+
+func resolveGitHubIssuesRepo(ctx context.Context, args GHIssuesArgs) (string, *mcpsdk.CallToolResult) {
+	if repo := strings.TrimSpace(args.Repo); repo != "" {
+		return repo, nil
+	}
+	out, exit, err := gitRun(ctx, args.Dir, "remote", "get-url", "origin")
+	if rerr := gitErr("gh.issues", out, exit, err); rerr != nil {
+		return "", rerr
+	}
+	if repo := githubRepoFromRemoteURL(out); repo != "" {
+		return repo, nil
+	}
+	return "", buildToolError(ErrBadRequest, "gh.issues: repo is required and origin is not a GitHub remote")
+}
+
+func githubRepoFromRemoteURL(remoteURL string) string {
+	s := strings.TrimSpace(remoteURL)
+	s = strings.TrimSuffix(s, ".git")
+	switch {
+	case strings.HasPrefix(s, "git@github.com:"):
+		return strings.Trim(strings.TrimPrefix(s, "git@github.com:"), "/")
+	case strings.Contains(s, "github.com/"):
+		after := s[strings.Index(s, "github.com/")+len("github.com/"):]
+		if u, err := url.Parse(s); err == nil && u.Host == "github.com" {
+			after = strings.TrimPrefix(u.Path, "/")
+		}
+		return strings.Trim(after, "/")
+	default:
+		return ""
+	}
 }
 
 // ── gh.pr_view ────────────────────────────────────────────────────────────────
