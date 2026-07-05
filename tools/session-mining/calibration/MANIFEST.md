@@ -11,7 +11,7 @@ exclusions honestly rather than padding to 20.**
 
 ## Provenance — how this set was produced
 
-- **claude-code corpus**: `~/.claude/projects/-Users-brad-code-Kitsoki/` (this
+- **claude-code corpus**: `~/.claude/projects/<this-repo-slug>/` (this
   project's own real Claude Code sessions). 10 small (~150-420KB) real
   `entrypoint==cli` session files were staged into a local, gitignored
   selection dir; `prep.py` dropped 7 more that were dispatched
@@ -67,8 +67,8 @@ exclusions honestly rather than padding to 20.**
 
 | id | reason |
 |---|---|
-| `scn-1b4ace86-f192-43b0-ab86-16142fec0079-0000` | The real user turn was a bare context-file reference (`@/Users/.../HANDOFF-bugfix-pipeline-dogfood.md`) with no other prose. Once the required home+repo path redaction runs, `goal`/`turns[0].text` collapse to `"@<path>"` — technically correct (that IS all the user said) but useless as a calibration example: there is no recoverable signal about what the goal even was without the (redacted) file content. Excluded for insufficient standalone signal, not for a privacy failure. |
-| `scn-567c65c2-2f1d-4fee-b0a4-e125ffb160ef-0000` | Same shape: real turn was `@/Users/.../gh42-fix-brief.md do it` → redacts to `"<path> do it"`. Marginally more signal than the one above (the imperative survives) but still not independently interpretable. Excluded for the same reason. |
+| `scn-1b4ace86-f192-43b0-ab86-16142fec0079-0000` | The real user turn was a bare context-file reference (a lone `@<path>` mention) with no other prose. Once the required home+repo path redaction runs, `goal`/`turns[0].text` collapse to `"@<path>"` — technically correct (that IS all the user said) but useless as a calibration example: there is no recoverable signal about what the goal even was without the (redacted) file content. Excluded for insufficient standalone signal, not for a privacy failure. |
+| `scn-567c65c2-2f1d-4fee-b0a4-e125ffb160ef-0000` | Same shape: real turn was a `@<path>` mention plus a two-word imperative → redacts to `"<path> <imperative>"`. Marginally more signal than the one above (the imperative survives) but still not independently interpretable. Excluded for the same reason. |
 
 **Note for future work (not fixed here, out of scope for 2.3/2.4):** both
 exclusions share a root cause worth designing for later — `@file` context
