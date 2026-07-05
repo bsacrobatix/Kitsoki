@@ -4,6 +4,9 @@
 # lint's second pass after the decompose re-entry, and fleet.load's read.
 kind: inspect_cassette
 interactions:
+  - op: exists
+    target: .artifacts/deliver/decomposition.yaml
+    out: "false"
   - op: read
     target: .artifacts/deliver/decomposition.yaml
     out: |

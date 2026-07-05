@@ -13,10 +13,19 @@ of `revise` now routes back to `decompose` with `refine_feedback` and a
 shared `refine_cycle`/`refine_budget` counter instead of hard-exiting, and a
 new `review` room (`host.agent.decide`, skeptic prompt, `{verdict, reason,
 questions[]}`) gates `lint` → `fleet` on feasibility/completeness, not just
-structure. See [`stories/deliver/README.md`](../../stories/deliver/README.md)
-for the current graph. **B2c/B3/B4 are not yet implemented** — no managed
-re-decompose and no dev-story entry yet. Supersedes
-[`work-decomposition.md`](work-decomposition.md).
+structure. **B2c shipped** (managed re-decompose — see Task 3 below):
+`decompose` is now a router; `scripts/detect_prior_decomposition.star`
+detects a prior `decomposition.yaml` and, when one exists, routes to a new
+`redecompose` room (decomposer authors an additive delta) →
+`redecompose_apply` (`host.run tools/decomposition-update/apply_delta.py
+--list-key briefs --skip-validate` — the SAME decompose-update transaction,
+invoked directly rather than importing that story) → `lint`, instead of
+letting the decomposer overwrite the prior manifest. See
+[`stories/deliver/README.md`](../../stories/deliver/README.md) for the
+current graph and
+[`tools/decomposition-update/README.md`](../../tools/decomposition-update/README.md)
+for the transaction's CLI. **B3/B4 are not yet implemented** — no dev-story
+entry yet. Supersedes [`work-decomposition.md`](work-decomposition.md).
 **Kind:**   story
 **Epic:**   — standalone (slice B1 of the dev-workflows surface-matrix plan)
 
@@ -236,8 +245,8 @@ Sequenced as implementable slices (B2 → B3 → B4 of the plan's WS-B):
 - [x] 2.4 stories/deliver/README.md updated to the new graph
 
 ## 3. B2c — managed re-decompose
-- [ ] 3.1 Prior-decomposition detection in configure/decompose; route deltas through the decompose-update transaction
-- [ ] 3.2 redecompose_managed_delta flow; decompose-update README cross-link
+- [x] 3.1 Prior-decomposition detection in configure/decompose; route deltas through the decompose-update transaction
+- [x] 3.2 redecompose_managed_delta flow; decompose-update README cross-link
 
 ## 4. B3 — dev-story integration
 - [ ] 4.1 deliver import in stories/dev-story/app.yaml (world_in: epic_path from the published proposal; exits → main)

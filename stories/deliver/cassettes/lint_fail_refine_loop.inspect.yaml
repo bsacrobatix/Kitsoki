@@ -1,5 +1,8 @@
 kind: inspect_cassette
 interactions:
+  - op: exists
+    target: .artifacts/deliver/decomposition.yaml
+    out: "false"
   # 1. First lint invoke: slice-1 references a dangling dep — lint fails.
   - op: read
     target: .artifacts/deliver/decomposition.yaml

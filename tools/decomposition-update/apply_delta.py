@@ -36,6 +36,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--event-log", required=True, help="append-only plan evolution JSONL")
     parser.add_argument("--ledger", help="optional folded ledger.json for no-orphan checks")
     parser.add_argument("--version-id", help="deterministic version suffix for tests")
+    parser.add_argument(
+        "--list-key",
+        default="changes",
+        help="top-level list key the base/delta documents use (default 'changes'; "
+        "e.g. 'briefs' for a deliver-shaped decomposition manifest)",
+    )
+    parser.add_argument(
+        "--skip-validate",
+        action="store_true",
+        help="skip the tools/validate-decomposition-graph.py candidate check — that "
+        "validator is shaped for the dev-workflow 'changes' graph; callers with a "
+        "different list-key (e.g. deliver's brief manifest) run their own "
+        "deterministic validation downstream (deliver's lint room) instead",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -47,11 +61,20 @@ def main(argv: list[str] | None = None) -> int:
             event_log=Path(args.event_log),
             ledger=Path(args.ledger) if args.ledger else None,
             version_id=args.version_id,
+            list_key=args.list_key,
+            skip_validate=args.skip_validate,
         )
     except TransactionError as exc:
         print(f"FAIL: {exc}")
+        # A single-line JSON envelope with an explicit "route" field as the
+        # LAST stdout line — host.run's stdout_json binder parses the last
+        # non-empty line, and a story room branching on a bool alone (host.run
+        # has no native tri-state) needs a string that is absent-by-default,
+        # never a bool whose zero-value coincides with "failed" (see
+        # stories/deliver/rooms/redecompose.yaml's comment on this).
+        print(json.dumps({"route": "fail", "ok": False, "error": str(exc)}, sort_keys=True))
         return 1
-    print(json.dumps({"ok": True, **result}, indent=2, sort_keys=True))
+    print(json.dumps({"route": "ok", "ok": True, **result}, sort_keys=True))
     return 0
 
 
@@ -68,13 +91,16 @@ def apply_delta(
     event_log: Path,
     ledger: Path | None,
     version_id: str | None,
+    list_key: str = "changes",
+    skip_validate: bool = False,
 ) -> dict[str, Any]:
     base_doc = _load_yaml(base)
     delta_doc = _load_yaml(delta)
     _validate_delta_header(delta_doc)
     locked = _locked_change_ids(ledger)
-    next_doc = _apply_operations(base_doc, delta_doc, locked)
-    _validate_candidate(next_doc, out)
+    next_doc = _apply_operations(base_doc, delta_doc, locked, list_key=list_key)
+    if not skip_validate:
+        _validate_candidate(next_doc, out)
 
     version_id = version_id or _next_version_id(versions_dir)
     version_path = versions_dir / f"decomposition.{version_id}.yaml"
@@ -142,11 +168,13 @@ def _locked_change_ids(ledger: Path | None) -> set[str]:
     return out
 
 
-def _apply_operations(base: dict[str, Any], delta: dict[str, Any], locked: set[str]) -> dict[str, Any]:
+def _apply_operations(
+    base: dict[str, Any], delta: dict[str, Any], locked: set[str], *, list_key: str = "changes"
+) -> dict[str, Any]:
     doc = copy.deepcopy(base)
-    changes = doc.get("changes")
+    changes = doc.get(list_key)
     if not isinstance(changes, list):
-        raise TransactionError("base document must contain changes list")
+        raise TransactionError(f"base document must contain {list_key!r} list")
     by_id = {str(c.get("id")): c for c in changes if isinstance(c, dict)}
     for op in delta.get("operations", []):
         if not isinstance(op, dict):
