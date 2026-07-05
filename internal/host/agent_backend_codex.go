@@ -40,6 +40,7 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,7 +65,14 @@ func (codexBackend) ResolveBin(ctx context.Context) (string, error) {
 	}
 	path, err := exec.LookPath("codex")
 	if err != nil {
-		return "", ErrAgentUnavailable
+		// Wraps the shared sentinel (errors.Is(_, ErrAgentUnavailable) still
+		// holds for existing callers) but names the ACTUAL missing binary —
+		// the bare sentinel's text hardcodes "claude", which is wrong and
+		// misleading whenever a codex-backend session is what failed to
+		// resolve (verified live: a codex-native profile session reported
+		// "claude binary not found" while codex itself was on PATH the whole
+		// time — the real failure was PATH not reaching this subprocess).
+		return "", fmt.Errorf("host.agent.converse: `codex` binary not found on PATH; install the OpenAI Codex CLI (npm install -g @openai/codex): %w", ErrAgentUnavailable)
 	}
 	return path, nil
 }
