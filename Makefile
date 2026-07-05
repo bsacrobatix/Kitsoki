@@ -63,7 +63,7 @@ BASESTORIES_STAMP := internal/basestories/.embed-stamp
 BASESKILLS_DIR    := internal/baseskills/assets
 BASESKILLS_STAMP  := internal/baseskills/.embed-stamp
 
-.PHONY: all setup build install uninstall test test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff history-smoke history-pending-smoke gears-history-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
+.PHONY: all setup bootstrap-worktree build install uninstall test test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff history-smoke history-pending-smoke gears-history-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
 	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local
 
@@ -220,6 +220,19 @@ $(EMBED_INDEX): $(SPA_SOURCES)
 # unbuilt until the next `make web`).
 web-clean:
 	rm -f $(EMBED_INDEX)
+
+# bootstrap-worktree is the one-shot setup for a FRESH `git worktree add`
+# checkout: stories/ and the runstatus SPA start as empty .gitkeep placeholders
+# (embed-only dirs, staged by embed-stories/web but gitignored once staged),
+# tools/runstatus/node_modules is gitignored, and the first `go run` in a new
+# worktree compiles cold (slow enough to blow past short test timeouts). Run
+# this once from inside a new worktree, before `go run ./cmd/kitsoki` or any
+# Playwright spec.
+bootstrap-worktree: embed-stories web
+	cd $(RUNSTATUS_DIR) && pnpm install --frozen-lockfile --silent
+	@echo "bootstrap-worktree: warming the Go build cache (first compile is slow)…"
+	@go run $(PKG) --help >/dev/null
+	@echo "worktree bootstrapped — go run/Playwright specs should work now"
 
 # web-dev starts the kitsoki Go backend and the Vite HMR dev server in
 # parallel so edits to tools/runstatus/src/** are reflected instantly without

@@ -57,6 +57,12 @@ To link a single skill by hand (e.g. without a full setup run):
 ln -s "../../.agents/skills/<name>" .claude/skills/<name>
 ```
 
+After creating a new worktree with `git worktree add`, run `make bootstrap-worktree`
+from inside it before running `go run ./cmd/kitsoki` or any Playwright spec — it
+stages the embed-only stories/SPA dirs, installs `tools/runstatus` node_modules,
+and warms the Go build cache, all of which are otherwise empty/cold in a fresh
+worktree.
+
 When we do an implementation based on a proposal, the goal is to complete the proposal implementation and move the content to proper narrative docs and delete the proposal - don't leave unfinished work unless specifically instructed, and if so, update the proposal to summarize the completed aspect and focus on the remaining work.
 
 use the `.context` folder for transient markdown files like proposals, summaries, etc... and use the `.artifacts` folder (with subfolders as necessary) for any generated artifact for review that shouldn't be committed.  following these guidelines will help to avoid bot pollution and cruft in the repo.
