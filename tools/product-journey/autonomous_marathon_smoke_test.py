@@ -179,6 +179,7 @@ def main() -> int:
         stats = run.derive_stats(run.ARTIFACT_ROOT, str(issue_state), 0.82, 25, str(stats_output))
         report_path = Path(result.get("autonomous_fix_report_path", ""))
         report_text = report_path.read_text(encoding="utf-8") if report_path.exists() else ""
+        claim_comment_url = result.get("gh_agent_claims", [{}])[0].get("comment_url", "")
         closeout_comment_url = result.get("issue_closeouts", [{}])[0].get("comment_url", "")
         weakness_routes = run.read_json(run_dir / "weakness-routes.json")
         deck_text = (run_dir / "deck.slidey.json").read_text(encoding="utf-8")
@@ -204,6 +205,13 @@ def main() -> int:
               and "https://agent.example/run/job-" in report_text
               and "fix-report.md" in report_text
               and "independent-verify.md" in report_text,
+              failures)
+        check("human review artifacts link gh-agent claim evidence",
+              result.get("gh_agent_claim_status") == "claimed"
+              and claim_comment_url
+              and claim_comment_url in report_text
+              and claim_comment_url in deck_text
+              and "Claims: claimed" in deck_text,
               failures)
         check("review deck links issue close-out evidence",
               result.get("issue_closeout_status") == "closed"
@@ -237,6 +245,7 @@ def main() -> int:
             "stats_summary": stats.get("stats_summary", ""),
             "filed_issue_count": result.get("findings_filed_count", 0),
             "gh_agent_done_count": result.get("gh_agent_done_count", 0),
+            "gh_agent_claim_comment_url": claim_comment_url,
             "gh_agent_independent_verify_count": result.get("gh_agent_independent_verify_count", 0),
             "issue_closeout_status": result.get("issue_closeout_status", ""),
             "issue_closeout_comment_url": closeout_comment_url,
