@@ -225,6 +225,69 @@ catalog:
       - id: source-web-inbox-feature
         kind: feature_catalog
         path: features/web-inbox.yaml
+      - id: source-kitsoki-trace-pattern-matching-proposal
+        kind: proposal
+        path: docs/proposals/kitsoki-trace-pattern-matching.md
+      - id: source-qa-agent-skill-proposal
+        kind: proposal
+        path: docs/proposals/qa-agent-skill.md
+      - id: source-effect-taxonomy-proposal
+        kind: proposal
+        path: docs/proposals/effect-taxonomy.md
+      - id: source-task-fs-sandbox-proposal
+        kind: proposal
+        path: docs/proposals/task-fs-sandbox.md
+      - id: source-trace-decision-detail-proposal
+        kind: proposal
+        path: docs/proposals/trace-decision-detail.md
+      - id: source-trace-view-modes-proposal
+        kind: proposal
+        path: docs/proposals/trace-view-modes.md
+      - id: source-decision-alternatives-proposal
+        kind: proposal
+        path: docs/proposals/decision-alternatives.md
+      - id: source-trace-annotation-proposal
+        kind: proposal
+        path: docs/proposals/trace-annotation.md
+      - id: source-replay-decision-proposal
+        kind: proposal
+        path: docs/proposals/replay-decision.md
+      - id: source-view-canonical-typed-proposal
+        kind: proposal
+        path: docs/proposals/view-canonical-typed.md
+      - id: source-view-tui-rendering-proposal
+        kind: proposal
+        path: docs/proposals/view-tui-rendering.md
+      - id: source-view-trace-and-web-typed-proposal
+        kind: proposal
+        path: docs/proposals/view-trace-and-web-typed.md
+      - id: source-view-proofing-tooling-proposal
+        kind: proposal
+        path: docs/proposals/view-proofing-tooling.md
+      - id: source-video-frame-seam-proposal
+        kind: proposal
+        path: docs/proposals/video-frame-seam.md
+      - id: source-video-feedback-mode-proposal
+        kind: proposal
+        path: docs/proposals/video-feedback-mode.md
+      - id: source-mockup-video-authoring-proposal
+        kind: proposal
+        path: docs/proposals/mockup-video-authoring.md
+      - id: source-line-webhook-ingress-proposal
+        kind: proposal
+        path: docs/proposals/line-webhook-ingress.md
+      - id: source-line-transport-proposal
+        kind: proposal
+        path: docs/proposals/line-transport.md
+      - id: source-line-commerce-stories-proposal
+        kind: proposal
+        path: docs/proposals/line-commerce-stories.md
+      - id: source-line-channel-console-proposal
+        kind: proposal
+        path: docs/proposals/line-channel-console.md
+      - id: source-diff-open-fallback-proposal
+        kind: proposal
+        path: docs/proposals/diff-open-fallback.md
 
 type_registry:
   - id: core-node
@@ -246,7 +309,10 @@ type_registry:
   - id: feature
     schema: graph-type/v0
     derives_from: core-node
-    summary: Durable product capability or capability group.
+    summary: Durable product capability or capability group. in_area's first
+      entry is the primary area for tree-shaped rollups (site nav, portfolio
+      rollup); a feature listing more than one is spanning by convention, not
+      by schema.
     edge_fields:
       - id: requirements
         target_type: requirement
@@ -262,6 +328,9 @@ type_registry:
         cardinality: many
       - id: proposed_by
         target_type: proposal
+        cardinality: many
+      - id: in_area
+        target_type: area
         cardinality: many
   - id: site-page
     schema: graph-type/v0
@@ -285,13 +354,16 @@ type_registry:
   - id: actor
     schema: graph-type/v0
     derives_from: core-node
-    summary: A human role, agent role, or automated executor that owns, uses, reviews, or implements graph objects.
+    summary: A human role, agent role, or automated executor that owns, uses, reviews, or implements graph objects. owns stays targeted at feature (per-feature ownership, migrating out); owns_area is the new group-level ownership edge (design doc lean 4.2 — the existing ~4 actor nodes' owns data all point at feature, so retargeting owns itself would break them).
     edge_fields:
       - id: uses
         target_type: feature
         cardinality: many
       - id: owns
         target_type: feature
+        cardinality: many
+      - id: owns_area
+        target_type: area
         cardinality: many
       - id: participates_in
         target_type: use-case
@@ -372,6 +444,9 @@ type_registry:
       - id: creates_use_cases
         target_type: use-case
         cardinality: many
+      - id: child_of
+        target_type: proposal
+        cardinality: one
       - id: decomposes_to
         target_type: change
         cardinality: many
@@ -414,6 +489,40 @@ type_registry:
       - id: satisfies
         target_type: requirement
         cardinality: many
+  - id: area
+    schema: graph-type/v0
+    derives_from: core-node
+    summary: Stable product or functional area — the ownable, near-hierarchical
+      home of features. Areas form a DAG via part_of (single primary parent
+      recommended by lint, not by schema); part_of is acyclic the same way
+      change.depends_on is.
+    edge_fields:
+      - id: part_of
+        target_type: area
+        cardinality: one
+        acyclic: true
+      - id: owned_by
+        target_type: actor
+        cardinality: many
+  - id: initiative
+    schema: graph-type/v0
+    derives_from: core-node
+    summary: Time-bounded cross-cutting project bundling proposals/changes
+      across areas. Absorbs roadmap-portfolio-work's initiative level; its
+      horizon and priority scalars live in per-type fields, not edges.
+    edge_fields:
+      - id: targets
+        target_type: area
+        cardinality: many
+      - id: includes
+        target_type: change
+        cardinality: many
+      - id: proposals
+        target_type: proposal
+        cardinality: many
+      - id: owned_by
+        target_type: actor
+        cardinality: one
 
 nodes:
   - schema: graph/actor/v0
@@ -7523,3 +7632,382 @@ nodes:
       creates_use_cases: []
       decomposes_to: []
 
+  - schema: graph/proposal/v0
+    id: proposal-kitsoki-trace-pattern-matching
+    title: Kitsoki trace pattern matching
+    status: draft
+    visibility: internal
+    proposal_kind: tracing
+    child_note: partially implemented
+    path: docs/proposals/kitsoki-trace-pattern-matching.md
+    index_blurb: 'deterministic pattern matching over kitsoki JSONL traces: typed event tokens, bounded path windows, directly-follows graphs, cycle-aware path signatures, route-feedback aggregation, and exact structural verification for promoted candidates.'
+    sources:
+      - source-kitsoki-trace-pattern-matching-proposal
+    edges:
+      child_of: [proposal-session-mining-backend-generalization]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-qa-agent-skill
+    title: Qa agent skill
+    status: draft
+    visibility: internal
+    proposal_kind: tooling
+    path: docs/proposals/qa-agent-skill.md
+    index_blurb: 'the `story-qa` subagent: persona + scenario → studio drive loop → scored UX rubric + report + screenshots + bug list.'
+    sources:
+      - source-qa-agent-skill-proposal
+    edges:
+      child_of: [proposal-story-qa-agent]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-effect-taxonomy
+    title: Effect taxonomy
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    path: docs/proposals/effect-taxonomy.md
+    index_blurb: 'the classification substrate: `effect`/`deterministic` on host calls **and** agents, replacing `external_side_effect`; a load-time hard-fail for a read-only call holding a mutator. (Modelled on Acronis DTS''s `deterministic_behavior` enum.)'
+    sources:
+      - source-effect-taxonomy-proposal
+    edges:
+      child_of: [proposal-agent-capability-model]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-task-fs-sandbox
+    title: Task fs sandbox
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    path: docs/proposals/task-fs-sandbox.md
+    index_blurb: 'the process boundary beneath the tools: `sandbox:` routes write/external agents through a pluggable runtime ladder (`supervised` → filesystem confinement → namespace/jail → VM). Landlock is the first no-daemon Linux backend, macOS gets honest best-effort local confinement, and hosted/proprietary runtimes can provide Firecracker/Kubernetes/nsjail backends.'
+    sources:
+      - source-task-fs-sandbox-proposal
+    edges:
+      child_of: [proposal-agent-capability-model]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-trace-decision-detail
+    title: Trace decision detail
+    status: draft
+    visibility: internal
+    proposal_kind: tui
+    path: docs/proposals/trace-decision-detail.md
+    index_blurb: 'hero the gate/routing detail with the decision (available → chosen → confidence-vs-threshold → reason → bailed) and demote prompt/response to an evidence drawer.'
+    sources:
+      - source-trace-decision-detail-proposal
+    edges:
+      child_of: [proposal-trace-introspection]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-trace-view-modes
+    title: Trace view modes
+    status: draft
+    visibility: internal
+    proposal_kind: tui
+    path: docs/proposals/trace-view-modes.md
+    index_blurb: 'co-equal Tree / Timeline-waterfall / Graph view modes over the one event stream + a sortable/filterable Home triage table (cost / duration / bailed).'
+    sources:
+      - source-trace-view-modes-proposal
+    edges:
+      child_of: [proposal-trace-introspection]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-decision-alternatives
+    title: Decision alternatives
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    path: docs/proposals/decision-alternatives.md
+    index_blurb: 'the decide verdict gains a ranked `alternatives` list, recorded in `gate_decided`; selection stays deterministic (record-only).'
+    sources:
+      - source-decision-alternatives-proposal
+    edges:
+      child_of: [proposal-trace-introspection]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-trace-annotation
+    title: Trace annotation
+    status: draft
+    visibility: internal
+    proposal_kind: tracing
+    path: docs/proposals/trace-annotation.md
+    index_blurb: 'a read-only `trace.annotation` event in a trace-adjacent sidecar; operators score / label / comment a gate or turn, making traces a labeled dataset.'
+    sources:
+      - source-trace-annotation-proposal
+    edges:
+      child_of: [proposal-trace-introspection]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-replay-decision
+    title: Replay decision
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    path: docs/proposals/replay-decision.md
+    index_blurb: '`kitsoki replay-call`: reconstruct one recorded agent call from the embedded story and re-dispatch it against a different operator / edited prompt, then diff the verdict — the pluggable-operator moat made visible.'
+    sources:
+      - source-replay-decision-proposal
+    edges:
+      child_of: [proposal-trace-introspection]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-view-canonical-typed
+    title: View canonical typed
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    path: docs/proposals/view-canonical-typed.md
+    index_blurb: 'normalize every view shape to typed elements at load; always populate `TypedView`; `say:`→leading prose; demote `View string`.'
+    sources:
+      - source-view-canonical-typed-proposal
+    edges:
+      child_of: [proposal-view-rendering-readability]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-view-tui-rendering
+    title: View tui rendering
+    status: draft
+    visibility: internal
+    proposal_kind: tui
+    path: docs/proposals/view-tui-rendering.md
+    index_blurb: 'collapse the four-stage width chain; render typed elements direct-to-styled; shrink Glamour to the code/raw escape hatch.'
+    sources:
+      - source-view-tui-rendering-proposal
+    edges:
+      child_of: [proposal-view-rendering-readability]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-view-trace-and-web-typed
+    title: View trace and web typed
+    status: draft
+    visibility: internal
+    proposal_kind: tracing
+    path: docs/proposals/view-trace-and-web-typed.md
+    index_blurb: 'record the typed tree in the trace; web renders every turn through `ViewElement`; delete the 80-col fossil fallback.'
+    sources:
+      - source-view-trace-and-web-typed-proposal
+    edges:
+      child_of: [proposal-view-rendering-readability]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-view-proofing-tooling
+    title: View proofing tooling
+    status: draft
+    visibility: internal
+    proposal_kind: tui
+    path: docs/proposals/view-proofing-tooling.md
+    index_blurb: '`kitsoki view` + lint catalog + cross-env golden/property tests + authoring-skill wiring.'
+    sources:
+      - source-view-proofing-tooling-proposal
+    edges:
+      child_of: [proposal-view-rendering-readability]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-video-frame-seam
+    title: Video frame seam
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    path: docs/proposals/video-frame-seam.md
+    index_blurb: 'a producer-agnostic **chapter sidecar** (scene↔timestamp + `source_ref`) + a deterministic `host.video.frame` still-grab, backed by one `internal/video` extractor shared by a host call and the slice-2 web RPC.'
+    sources:
+      - source-video-frame-seam-proposal
+    edges:
+      child_of: [proposal-mockup-video-studio]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-video-feedback-mode
+    title: Video feedback mode
+    status: draft
+    visibility: internal
+    proposal_kind: tui
+    path: docs/proposals/video-feedback-mode.md
+    index_blurb: 'a `/review` web panel: player + chapter timeline + flag-scene/range + per-flag PNG + chat → structured, source-targeted **feedback notes** (capture + dispatch; the LLM edit is the story''s recorded decision).'
+    sources:
+      - source-video-feedback-mode-proposal
+    edges:
+      child_of: [proposal-mockup-video-studio]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-mockup-video-authoring
+    title: Mockup video authoring
+    status: draft
+    visibility: internal
+    proposal_kind: story
+    path: docs/proposals/mockup-video-authoring.md
+    index_blurb: 'a new `stories/mockup-video/`: brief → author HTML+tour *or* slidey deck (`medium: tour | deck`) → render (chapter sidecar) → review → refine-loop on each flag → gallery.'
+    sources:
+      - source-mockup-video-authoring-proposal
+    edges:
+      child_of: [proposal-mockup-video-studio]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-line-webhook-ingress
+    title: Line webhook ingress
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    path: docs/proposals/line-webhook-ingress.md
+    index_blurb: 'a LINE-signed webhook handler + a **get-or-create session factory** (the one novel engine concept: an external event with no prior session creates one) that drives raw customer text under the writer lock.'
+    sources:
+      - source-line-webhook-ingress-proposal
+    edges:
+      child_of: [proposal-line-messenger-channel]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-line-transport
+    title: Line transport
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    path: docs/proposals/line-transport.md
+    index_blurb: 'a `transport.Transport` for the LINE Messaging API (reply-token fast path + push fallback); typed view → text + **room-intents-as-quick-reply-buttons**.'
+    sources:
+      - source-line-transport-proposal
+    edges:
+      child_of: [proposal-line-messenger-channel]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-line-commerce-stories
+    title: Line commerce stories
+    status: draft
+    visibility: internal
+    proposal_kind: story
+    path: docs/proposals/line-commerce-stories.md
+    index_blurb: 'two copy-me examples, `stories/line-store/` (browse → cart → checkout) and `stories/line-booking/` (availability → reserve → confirm), composing existing hosts only; channel-agnostic YAML.'
+    sources:
+      - source-line-commerce-stories-proposal
+    edges:
+      child_of: [proposal-line-messenger-channel]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-line-channel-console
+    title: Line channel console
+    status: draft
+    visibility: internal
+    proposal_kind: tui
+    path: docs/proposals/line-channel-console.md
+    index_blurb: 'the merchant''s web home: provision a channel (creds + story binding + webhook URL) and watch/assist the live customer sessions it spawns (operator-ask inbox).'
+    sources:
+      - source-line-channel-console-proposal
+    edges:
+      child_of: [proposal-line-messenger-channel]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-diff-open-fallback
+    title: Diff open fallback
+    status: draft
+    visibility: internal
+    proposal_kind: runtime
+    child_note: 'slice #1'
+    path: docs/proposals/diff-open-fallback.md
+    index_blurb: '`host.diff.open` — Phase A shipped + adopted (IDE/difftool surface resolver, verdict capture, gate-decision recording); Phase B''s turn-suspend gate and the editor''s live accept/reject wire shape remain.'
+    sources:
+      - source-diff-open-fallback-proposal
+    edges:
+      child_of: [proposal-review-externally]
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
