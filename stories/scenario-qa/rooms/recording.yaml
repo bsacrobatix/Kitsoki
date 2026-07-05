@@ -11,7 +11,7 @@ states:
 
   recording:
     description: "Recording the current leg's outcome, then advancing to the next leg or the report."
-    relevant_world: [leg_index, leg_count, current_leg, drive_result, judge_result, leg_results, pass_count, fail_count, degraded_count, status]
+    relevant_world: [leg_index, leg_count, current_leg, drive_result, judge_result, leg_results, pass_count, fail_count, degraded_count, last_error, status]
     view:
       - heading: "Scenario QA · recording"
       - kv:
@@ -25,6 +25,8 @@ states:
             Fail: "{{ world.fail_count }}"
             Degraded: "{{ world.degraded_count }}"
       - prose: "Recorded this leg's driver + judge outcome."
+      - prose: "A dispatch along the way failed and was recorded honestly rather than silently retried: {{ world.last_error }}"
+        when: "world.last_error != ''"
       - prose: "More transport legs remain — `next_leg` to drive the next one."
         when: "world.leg_index + 1 < world.leg_count"
       - choice:

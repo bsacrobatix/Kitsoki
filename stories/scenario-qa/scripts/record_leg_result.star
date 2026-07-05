@@ -15,6 +15,27 @@ def _d(v):
     return v if type(v) == "dict" else {}
 
 
+def _lacks_evidence(drive):
+    # Mirrors judge_leg.md's own instruction verbatim (docs/proposals/
+    # e2e-persona-qa-review.md G7: never let a leg's evidence be
+    # "false-complete"): the judge is TOLD its verdict must be
+    # "degraded-evidence" whenever the driver reported "blocked" /
+    # "degraded-evidence", or produced no evidence_refs. That is only a
+    # prompt instruction -- a model that slips (or a dead driver dispatch
+    # that leaves drive_result at its stale/empty {} default via
+    # execute.yaml's on_error: judge route) must not be able to turn a
+    # missing capture into a recorded "pass". This is the deterministic
+    # backstop for that same rule, evaluated in code rather than trusted to
+    # the judge's compliance.
+    status = drive.get("status", "")
+    if status == "blocked" or status == "degraded-evidence":
+        return True
+    evidence_refs = drive.get("evidence_refs", [])
+    if type(evidence_refs) != "list":
+        return True
+    return len(evidence_refs) == 0
+
+
 def _evidence_level(leg):
     # Every leg carries its own transport_evidence_contract (plan_legs.star
     # read it straight off driver-plan.json / carried it through the ad-hoc
@@ -47,6 +68,14 @@ def main(ctx):
     items = list(leg_results.get("items", []))
 
     verdict = judge.get("verdict", "unjudged")
+    # Verdicts the judge itself never rendered ("unjudged", e.g. a dead judge
+    # dispatch via judge.yaml's on_error: recording route) are left alone --
+    # that is a different, already-honest failure mode, not a fabricated
+    # pass. Anything the judge DID render (pass/fail/unsupported/
+    # degraded-evidence) is downgraded to "degraded-evidence" when the
+    # driver's own report proves there was nothing real to judge.
+    if verdict != "unjudged" and _lacks_evidence(drive):
+        verdict = "degraded-evidence"
 
     record = {
         "leg_id":          leg.get("leg_id", ""),
