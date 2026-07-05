@@ -62,6 +62,24 @@ def load_scenarios(path: Path):
     return json.loads(path.read_text())["scenarios"]
 
 
+def select_scenarios(scenarios: list[dict], scenario_filter: str) -> list[dict]:
+    requested = [item.strip() for item in scenario_filter.split(",") if item.strip()]
+    if not requested:
+        return scenarios
+
+    by_id = {scenario["id"]: scenario for scenario in scenarios}
+    duplicates = sorted({scenario_id for scenario_id in requested if requested.count(scenario_id) > 1})
+    if duplicates:
+        raise SystemExit(f"--scenarios contains duplicate scenario id(s): {', '.join(duplicates)}")
+
+    unknown = [scenario_id for scenario_id in requested if scenario_id not in by_id]
+    if unknown:
+        known = ", ".join(sorted(by_id))
+        raise SystemExit(f"--scenarios contains unknown scenario id(s): {', '.join(unknown)}. Known scenarios: {known}")
+
+    return [by_id[scenario_id] for scenario_id in requested]
+
+
 def load_github_targets(path: Path):
     return json.loads(path.read_text())
 
@@ -2715,6 +2733,7 @@ def run_story_summary(run_dir: Path) -> dict:
         "persona_evidence_emphasis": lens.get("evidence_emphasis", ""),
         "persona_escalation_trigger": lens.get("escalation_trigger", ""),
         "persona_finding_bias": lens.get("finding_bias", ""),
+        "scenario_count": metrics.get("scenario_count", 0),
         "proof_evidence_count": metrics.get("proof_evidence_count", 0),
         "demo_evidence_count": metrics.get("demo_evidence_count", 0),
         "finding_total_count": sum(finding_summary.get(kind, 0) for kind in ["strength", "weakness", "issue", "fix"]),
@@ -6873,6 +6892,7 @@ def main() -> None:
     parser.add_argument("--smoke-persona", default="core-maintainer", help="Persona id for driver replay smoke/sweep")
     parser.add_argument("--run-log", action="store_true", help="Force a timestamped run log entry")
     parser.add_argument("--emit-run", action="store_true", help="Write a no-LLM run artifact bundle and Slidey deck")
+    parser.add_argument("--scenarios", default="", help="Comma-separated scenario ids to include with --emit-run")
     parser.add_argument("--emit-matrix", action="store_true", help="Write a no-LLM 10-repo GitHub journey matrix")
     parser.add_argument("--dogfood-smoke", action="store_true", help="Run a deterministic no-LLM matrix-to-rollup smoke and write review artifacts")
     parser.add_argument("--driver-replay-smoke", action="store_true", help="Run a deterministic no-LLM one-scenario driver replay smoke with cassette evidence")
@@ -7619,11 +7639,12 @@ def main() -> None:
 
     if args.emit_run:
         publish_deck = DEFAULT_DECK if args.publish_deck else None
+        run_scenarios = select_scenarios(scenarios, args.scenarios)
         run_dir, run_json = build_run_bundle(
             catalog,
             github_targets,
             personas,
-            scenarios,
+            run_scenarios,
             args.project,
             args.persona,
             args.seed,

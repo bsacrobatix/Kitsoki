@@ -12,6 +12,7 @@ world:
   project:        { type: string, default: "gears-rust" }
   persona:        { type: string, default: "core-maintainer" }
   seed:           { type: string, default: "default" }
+  scenario_scope: { type: string, default: "" }
   matrix_id:      { type: string, default: "" }
   matrix_dir:     { type: string, default: "" }
   matrix_personas: { type: string, default: "primary" }
@@ -90,6 +91,7 @@ world:
   driver_handoff_path: { type: string, default: "" }
   media_manifest_path: { type: string, default: "" }
   scenario_outcomes_path: { type: string, default: "" }
+  run_scenario_count: { type: int, default: 0 }
   persona_starting_surface: { type: string, default: "" }
   persona_first_question: { type: string, default: "" }
   persona_evidence_emphasis: { type: string, default: "" }
@@ -165,12 +167,13 @@ world:
 intents:
   start:
     description: "Create a deterministic product-journey QA run bundle."
-    examples: ["start", "create a product journey run", "begin qa run"]
+    examples: ["start", "create a product journey run", "begin qa run", "start scenarios=bugfix,project-onboarding"]
     priority: 90
     slots:
       project: { type: string, required: false }
       persona: { type: string, required: false }
       seed: { type: string, required: false }
+      scenarios: { type: string, required: false }
   matrix:
     description: "Create a deterministic 10-repo GitHub product-journey matrix."
     examples: ["create github matrix", "plan ten repo sweep", "emit matrix with target proof"]
