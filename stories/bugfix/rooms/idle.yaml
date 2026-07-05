@@ -111,6 +111,17 @@ states:
         set:
           thread: "issues/bugs/{{ world.ticket_id }}.md"
 
+      # Step 0w: autostart owns maker workspace identity. A headless caller can
+      # safely seed ticket metadata, but it must not be able to steer maker rooms
+      # onto "." or another non-isolated checkout by also seeding workspace_id /
+      # feature_branch / workdir. Triage is the explicit read-only exception
+      # below; every mutating bugfix run re-derives a .worktrees/bf-* checkout.
+      - when: "world.ticket_id != '' && world.bugfix_mode != 'triage' && !world.bf_autostart_attempted && (world.workspace_id != '' || world.feature_branch != '' || world.workdir != '')"
+        set:
+          workspace_id: ""
+          feature_branch: ""
+          workdir: ""
+
       # Step 1: derive workspace identity from ticket_id. Skipped in triage
       # mode — triage is read-only against the current tree, so it needs no
       # worktree (and creating one would be wasted side-effect).
