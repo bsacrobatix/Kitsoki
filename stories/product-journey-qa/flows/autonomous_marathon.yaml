@@ -200,6 +200,8 @@ turns:
         seed: marathon-demo
         scenarios: bugfix
         live_budget_minutes: 6
+        ticket_repo: bsacrobatix/Kitsoki
+        gh_agent_public_base_url: https://agent.example
     expect_state: run_created
     expect_world:
       status: autonomous_marathon_ready
