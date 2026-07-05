@@ -34,8 +34,10 @@ The durable surfaces are:
   evidence differently.
 - Every scenario attempt needs a driver journal event, even when it ends in a
   blocker.
-- A bundle is not discussion-ready until `--review-run` and `--validate-run`
-  have run and the deck has playback media or an explicit playback blocker.
+- A bundle is not discussion-ready until the story-owned final gates have run:
+  `autonomous_fix` when credible issue findings exist, then `review` and
+  `validate`. The deck must have playback media or an explicit playback
+  blocker.
 
 ## No-LLM Gates
 
@@ -94,30 +96,23 @@ Then hand it to the reusable driver:
    `--record-blocker` or `last_result.next_driver_blocker_command`.
 5. Record each attempt with `--record-driver-event` or the story `driver_event`
    intent.
-6. File the credible `issue` findings as GitHub issues through the story
-   `file_findings ticket_repo=<owner/repo>` intent (preferred; add
-   `mode=dry-run` to preview) or the headless fallback:
-
-```sh
-python3 tools/product-journey/run.py --file-findings --run-dir <run-dir> \
-  --ticket-repo <owner/repo> [--dry-run]
-```
-
-   This drives `kitsoki bug file-findings` (host.GitHubFileFindings), the same
-   artifact-preserving orchestration as web Report-bug / TUI `/bug`: native
-   GitHub API filing uses `GH_TOKEN` / `GITHUB_TOKEN`, evidence uploads as
-   release assets, the issue gets an `## Artifacts` section + kitsoki metadata
-   block, and the issue URL is written back into
-   `findings.json` (`item.github_issue`) so re-runs are idempotent. Never file
-   these findings with raw `gh issue create` or text-only `issue_create` —
-   that drops the evidence. Once filing is requested, review/validate gate on
-   every credible issue finding carrying a filed URL (`findings-filed`).
-7. Run:
-
-```sh
-python3 tools/product-journey/run.py --review-run --run-dir <run-dir>
-python3 tools/product-journey/run.py --validate-run --run-dir <run-dir>
-```
+6. For the full issue-to-fix loop, submit the story-owned final gate:
+   `autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<url>`.
+   This files credible `issue` findings with uploaded evidence, enqueues and
+   drains gh-agent fixes, refreshes the deck/review artifacts, and validates the
+   bundle without agent oversight. It drives `kitsoki bug file-findings`
+   (host.GitHubFileFindings) and native gh-agent queue/drain surfaces behind
+   the story boundary: native GitHub API filing uses `GH_TOKEN` /
+   `GITHUB_TOKEN`, evidence uploads as release assets, the issue gets an
+   `## Artifacts` section + kitsoki metadata block, and the issue URL is
+   written back into `findings.json` (`item.github_issue`) so re-runs are
+   idempotent. Never file these findings with raw `gh issue create` or
+   text-only `issue_create` — that drops the evidence.
+7. If there are no credible issue findings, or after `autonomous_fix` reports
+   the bundle valid, submit `review` and `validate` through the story. Use
+   `file_findings` or the CLI `--file-findings`/`--review-run`/`--validate-run`
+   commands only as fallback/debug surfaces when a story session is unavailable,
+   not as the canonical autonomous path.
 
 Review `deck.slidey.json` for the narrative, `Playback evidence` scenes,
 `Proof gates`, `Persona lens`, and `Driver contract` scenes.

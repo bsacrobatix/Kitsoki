@@ -234,8 +234,8 @@ path instead of only static traces or written artifacts.
 `--validate-run` checks that `execution-plan.json` and `driver-plan.json`
 include one actionable `--attach-evidence` command for every declared evidence
 slot, and that the execution plan, agent brief, driver plan, and handoff retain
-the final autonomous issue-to-fix, `--review-run`, and `--validate-run`
-commands. It also enforces the
+the story-owned final gates: `autonomous_fix`, `review`, and `validate`.
+It also enforces the
 driver action contract: every scenario must keep the ordered
 `open_surface -> read_current_frame -> act_as_persona -> capture_required_evidence -> journal_attempt`
 sequence with the required fields and an auditable `journal_attempt` recording
@@ -366,37 +366,36 @@ python3 tools/product-journey/run.py --record-blocker \
 The review gate treats a scenario as attempted when it has captured evidence or
 an explicit blocker, so missing live paths stay visible in the deck and rollup.
 
-File the bundle's credible `issue` findings as GitHub issues (one per finding)
-through the same artifact-preserving orchestration the web Report-bug and TUI
-`/bug` surfaces use:
+For the full issue-to-fix loop, drive the loaded
+`stories/product-journey-qa/app.yaml` run through the story-owned autonomous
+gate:
 
-```sh
-python3 tools/product-journey/run.py --file-findings \
-  --run-dir .artifacts/product-journey/<run-id> \
-  --ticket-repo <owner/repo> [--dry-run]
+```text
+autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<url>
 ```
 
-This shells to `kitsoki bug file-findings` (override the CLI with
-`KITSOKI_BIN`; default `go run ./cmd/kitsoki` from the repo root), which walks
-`findings.json` and, for every credible finding (kind `issue`, origin not
-`seeded`) without a recorded issue: assembles an expected/actual/reproduction
-body from the finding, the driver-plan scenario contract, and the driver
-journal; uploads locally-resolvable evidence (the finding's `evidence_path`
-plus the scenario's captured evidence) as GitHub release assets linked from an
-`## Artifacts` section; files the issue with the kitsoki metadata block; and
-writes `item.github_issue` (URL/number/repo/filed_at) plus a `findings.filing`
-block back into `findings.json`. Re-runs are idempotent (already-filed findings
-are skipped), `--dry-run` renders the candidate issues without calling GitHub
-or touching the bundle, and non-local refs (retained/http/unbacked cassette
-URIs) are listed in the body instead of uploaded. The story equivalent is the
-`file_findings ticket_repo=<owner/repo> [mode=dry-run]` intent. When that story
-surface drains gh-agent fixes, queue state defaults to
-`<run_dir>/gh-agent-jobs.sqlite`; pass `gh_agent_db=<sqlite>` only to override
-that run-local path.
+That single intent files every credible `issue` finding as a GitHub issue with
+uploaded evidence, enqueues and drains native gh-agent repair jobs, refreshes
+the review/deck artifacts, and validates the bundle. Under the story boundary
+it uses the same artifact-preserving orchestration as the web Report-bug and
+TUI `/bug` surfaces: `kitsoki bug file-findings`
+(host.GitHubFileFindings) walks `findings.json` and, for every credible finding
+(kind `issue`, origin not `seeded`) without a recorded issue, assembles an
+expected/actual/reproduction body from the finding, the driver-plan scenario
+contract, and the driver journal; uploads locally-resolvable evidence as GitHub
+release assets linked from an `## Artifacts` section; files the issue with the
+kitsoki metadata block; and writes `item.github_issue` plus
+`findings.filing` back into `findings.json`. Native gh-agent queue state
+defaults to `<run_dir>/gh-agent-jobs.sqlite`; pass `gh_agent_db=<sqlite>` only
+to override that run-local path.
 
-Once filing has been requested, the `findings-filed` review check fails and
-`--validate-run` errors while any credible issue finding remains unfiled, so
-"issues filed for all credible findings" becomes part of bundle readiness.
+The lower-level `file_findings ticket_repo=<owner/repo> [mode=dry-run]` story
+intent and the CLI `--file-findings` command remain useful for previewing or
+debugging filing in isolation, but they are not the canonical full-loop gate.
+Once filing or autonomous fixing has been requested, the `findings-filed`
+review check fails and `--validate-run` errors while any credible issue finding
+remains unfiled, so "issues filed for all credible findings" stays part of
+bundle readiness.
 
 To prove the next hop without GitHub credentials or LLM cost:
 
@@ -410,8 +409,9 @@ enqueues it through native `kitsoki gh-agent enqueue`, drains it through native
 `kitsoki gh-agent drain` in replay mode with GitHub comments disabled, and
 checks that fix artifacts and run URLs are persisted back into the bundle for
 review. The autonomous smoke runs the full no-LLM envelope with a fake `kitsoki`
-CLI: persona findings file as issues, gh-agent fixes queue and drain, review
-artifacts refresh, and `--validate-run` must pass.
+CLI behind the same story-owned contract: persona findings file as issues,
+gh-agent fixes queue and drain, review artifacts refresh, and validation must
+pass.
 
 Do not bypass this with raw `gh` commands. Product-journey issue filing and
 autonomous fixes are intentionally routed through Kitsoki's native
