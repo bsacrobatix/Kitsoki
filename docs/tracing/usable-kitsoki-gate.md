@@ -2,12 +2,20 @@
 
 **Status:** Tasks 1 (parity-metric spec), 2 (plugin skeleton), 3.1 + 3.2
 (wire the real scenario corpus + S1 completion signal), 3.3's no-LLM half
-(bounded-concurrency flow-replay harness for the tui/mcp surfaces), 4.1
-(golden regression fixtures), and 4.2 (calibration-set run) are shipped and
-tested, zero LLM spend. Task 3.3's remaining browser-driven web-surface
-harness and Task 5 (stand it up as the CI release gate) remain gated. See
-`docs/proposals/usable-kitsoki-release-gate.md` for the proposal's
-remaining open questions and the gated tasks.
+(bounded-concurrency flow-replay harness for the tui/mcp surfaces), 3.3's
+live half (`tools/usable-kitsoki-gate/run_live_gate.py`, a real agent
+driving `stories/dev-story`'s real `workbench:` room — double-gated behind
+`arena run --live` plus that script's own `--live-gate` argv flag, never
+executed automatically), 4.1 (golden regression fixtures), 4.2
+(calibration-set run), and 5.1 + 5.2
+(`.github/workflows/usable-kitsoki-gate.yml` — a cassette-only no-LLM CI job
+path-filtered on the S1/S2/S4/S5 code, plus a release-candidate live-gate
+job whose TRIGGER routing is real — `rc-*` tag / explicit
+`workflow_dispatch` confirmation only — but whose actual credential/image
+arming remains deliberate operator follow-up) are shipped and tested, zero
+LLM spend in CI. Task 3.3's remaining browser-driven web-surface harness
+remains gated. See `docs/proposals/usable-kitsoki-release-gate.md` for the
+proposal's remaining open questions and gated tasks.
 
 This is the day-one contract `S1` (the free-form workbench) develops
 against, and the schema `S6` (`tools/arena/arena/plugins/usable_kitsoki_gate.py`)
@@ -137,9 +145,15 @@ No-LLM path replays every mined scenario through existing zero-spend
 harnesses (flow fixtures / cassettes, swarm tier 1/2); this is what
 Task 2.3's plugin tests and Task 4.1's golden regression scenarios prove
 without touching a real workbench or an LLM. The live path (real workbench
-turns) is a separate, gated, release-candidate-cadence run — see the
-proposal's own "Determinism" section for the full split; nothing about the
-schema or constants above changes between the two paths, only what produces
+turns, `tools/usable-kitsoki-gate/run_live_gate.py`) is a separate, gated,
+release-candidate-cadence run: double-gated (`arena run --live` at the top
+level, that script's own `--live-gate` argv flag with no env fallback,
+mirroring `tools/swarm/tiers/liveExplorerCli.ts`), never invoked by any
+test in this repo, and never triggered by CI except an explicit `rc-*` tag
+push or a `workflow_dispatch` with `confirm_live: yes`
+(`.github/workflows/usable-kitsoki-gate.yml`) — see the proposal's own
+"Determinism" section for the full split; nothing about the schema or
+constants above changes between the two paths, only what produces
 `candidate_completed`.
 
 ## Plugin usage
