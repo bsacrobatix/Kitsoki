@@ -1,6 +1,16 @@
 # Tracing: usable-kitsoki release gate — the realism bar
 
-**Status:** Draft v1. Nothing implemented yet.
+**Status:** Tasks 1 (parity-metric spec, `4205c5af`), 2 (plugin skeleton,
+`606a5181`), and 4.1 (golden regression fixtures, `e4f55ffb`) are shipped —
+the parity verdict schema, gate constants, the registered
+`usable-kitsoki-gate` arena plugin, and the offline golden-regression proof
+that the gate flips PASS→FAIL on each condition all exist and are tested,
+zero LLM spend. See `docs/tracing/usable-kitsoki-gate.md` for the narrative
+doc this content has moved to. Tasks 3 (wire real S1/S4 inputs) and 4.2
+(calibration-set run) are gated on S1 (workbench) and S4 (scenario foundry)
+landing; Task 5 (stand it up as the CI release gate) is gated on Task 3.
+This proposal stays open, trimmed to the remaining gated work, until S1/S4
+land.
 **Kind:**   tracing (tooling spillover — the deliverable is an arena job type; see Impact)
 **Epic:**   usable-kitsoki.md
 
@@ -71,71 +81,17 @@ whenever they disagree.
   gains a "Status — usable-kitsoki-gate job type landed" section in the
   style of the swarm entry it's modeled on.
 
-## Event / format model
+## Event / format model, gate conditions, determinism
 
-The gate does not invent new trace event *types* — it reads the workbench's
-existing turn-completion trace (S1's contract) and the mined scenario's
-recorded outcome (S4's IR), and emits one **parity verdict record** per
-scenario per surface as the job type's `CellResult.metrics` + a sibling
-JSON evidence file:
-
-```jsonc
-{
-  "scenario_id": "sess-3f2a1c-turn-12",
-  "persona": "impatient-debugger",
-  "surface": "web",
-  "source_completed": true,        // did the ORIGINAL session complete this ask
-  "candidate_completed": false,    // did the workbench complete it, this run
-  "silent_bounce": false,          // on_error arc fired with no rendered explanation
-  "misroute_adjacent": true,       // routed to a command adjacent to the ask, not the ask
-  "evidence_refs": [
-    ".artifacts/usable-kitsoki-gate/<run_id>/<scenario_id>/trace.jsonl",
-    ".artifacts/usable-kitsoki-gate/<run_id>/<scenario_id>/rrweb.json"
-  ],
-  "notes": "workbench asked a clarifying question the source session never needed"
-}
-```
-
-| Field | When emitted | Key fields |
-|---|---|---|
-| parity verdict record | once per scenario × persona × surface, at the end of a `usable-kitsoki-gate` cell | `source_completed`, `candidate_completed`, `silent_bounce`, `misroute_adjacent`, `evidence_refs` |
-| rollup gate verdict | once per cell after all scenarios in the cell finish | aggregate `PASS`/`FAIL`, the three gate conditions below, parity percentage |
-
-**The three gate conditions** (all three must hold for the rollup to pass;
-each maps directly to an epic release-blocker):
-
-1. **Zero `silent_bounce: true` records** (kills R2 regressions).
-2. **Zero `misroute_adjacent: true` records** (kills R3 regressions).
-3. **Parity ≥ X%**: `count(candidate_completed AND source_completed) /
-   count(source_completed)` across the cell's scenarios — binary
-   completion, not a scored rubric, per the epic's shared decision 6. `X`
-   is the open threshold below.
-
-## Determinism
-
-- **No-LLM path (standing CI):** every mined scenario replays through the
-  existing zero-spend harnesses — flow fixtures / cassettes (S4's
-  fixture-and-recording compiler output) and swarm tier 1/2's scripted or
-  cassette-agent users (`tools/swarm/README.md`'s tier table) — so the gate
-  runs on every PR without LLM cost, the same way `swarm-replay-users.spec.ts`
-  and `swarm-cassette-users.spec.ts` are zero-spend today.
-- **Live path (release-candidate cadence):** a real workbench (S1) drives
-  the same mined scenarios; this is the only place the gate spends, and it
-  runs on a cadence, not per-PR, mirroring how the swarm job type reserves
-  its tier-3 live explorers for manual/gated runs
-  (`tools/swarm/README.md`, tier 3 row: "manual only, gated behind
-  `--live-explorers`").
-- **Scenario identity is stable:** each scenario's `scenario_id` is derived
-  deterministically from its source session + turn offset (S4's IR
-  contract), so a rerun's parity record is diffable turn-for-turn against a
-  prior run — a parity regression on scenario `sess-3f2a1c-turn-12` means
-  the same real ask regressed, not a different draw from a random sample.
-- **The oracle is the source session, not a judge model.** `source_completed`
-  is read off the mined session's own `outcomes.py` satisfaction signal
-  (epic §4), never re-adjudicated by an LLM at gate time — the same
-  "hidden oracle, not judge drift" discipline the bugfix arena plugin uses
-  (`tools/arena/arena/plugins/base.py`'s `score()` contract: grade from
-  what actually ran, not from asking a model whether it liked the result).
+Shipped and moved to the narrative doc — see
+`docs/tracing/usable-kitsoki-gate.md` for the parity verdict record schema,
+the three gate conditions (`GATE_CONDITIONS`), the parity threshold constant,
+worst-surface gating, and the no-LLM/live determinism split. Kept here only
+where it bears on the still-gated tasks below: the parity record's oracle is
+the mined session's own `outcomes.py` satisfaction signal, never re-judged by
+an LLM at gate time (Task 3.2 must preserve this — `candidate_completed`
+comes from S1's trace facts, not a judge call), and `scenario_id := IR.id`
+verbatim (Task 3.1's join key once S4 lands).
 
 ## Producers & consumers
 
@@ -177,22 +133,15 @@ ships without breaking `arena plugins`.
 
 ## Fixtures / golden traces
 
-- A small, hand-checked **calibration set** — the "20 mined Kitsoki
-  scenarios in the IR, hand-checked" the epic names as S4's first
-  deliverable (epic §5, "First concrete steps") — is this gate's first
-  fixture: enough to prove the plugin's `image()`/`drive_command()`/
-  `score()` wiring and the parity-record shape end to end, before the
-  corpus is large.
-- One **golden regression scenario per gate condition** (a scripted silent
-  bounce, a scripted misroute, a scripted parity miss) proves the rollup
-  correctly flips `PASS` → `FAIL` on each condition independently — this is
-  the offline, no-LLM proof that the gate has teeth, the same role the RED
-  fixture plays for the WS conformance lint (epic §1.1,
-  `internal/agenteval/conformance/`).
-- A reviewer regenerates the calibration set by rerunning S4's compiler
-  against the same 20 source sessions; the parity verdict records for those
-  20 are checked into `tools/arena/tests/fixtures/usable-kitsoki-gate/` as
-  the no-LLM contract test.
+The golden-regression-per-gate-condition fixture (Task 4.1) is shipped —
+`tools/arena/tests/fixtures/usable-kitsoki-gate/` + `tools/arena/README.md`'s
+status section. Still open: the **calibration set** — the "20 mined Kitsoki
+scenarios in the IR, hand-checked" the epic names as S4's first deliverable
+(epic §5) — is Task 4.2 and needs S4's compiler output to exist first. A
+reviewer will regenerate it by rerunning S4's compiler against the same 20
+source sessions and checking the resulting parity verdict records into
+`tools/arena/tests/fixtures/usable-kitsoki-gate/` as the no-LLM contract
+test.
 
 ## Tasks
 
@@ -215,11 +164,11 @@ ships without breaking `arena plugins`.
       marked partial until S1's concrete trace-event shape lands)
 
 ## 2. Plugin skeleton (no scenarios required yet)
-- [ ] 2.1 Register `usable-kitsoki-gate` in `tools/arena/arena/plugins/`
+- [x] 2.1 Register `usable-kitsoki-gate` in `tools/arena/arena/plugins/`
       implementing `image()`/`drive_command()`/`score()`
-- [ ] 2.2 `arena plan`/`arena plugins` list it; empty-corpus case returns
+- [x] 2.2 `arena plan`/`arena plugins` list it; empty-corpus case returns
       zero cells, not an error
-- [ ] 2.3 No-LLM tests (`tools/arena/tests/test_usable_kitsoki_gate_plugin.py`)
+- [x] 2.3 No-LLM tests (`tools/arena/tests/test_usable_kitsoki_gate_plugin.py`)
       proving registration + argv/env composition, mirroring
       `test_swarm_plugin.py`
 

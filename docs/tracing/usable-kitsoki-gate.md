@@ -1,11 +1,11 @@
 # Tracing: usable-kitsoki release gate
 
-**Status:** Partial. Task block 1 (parity-metric spec) landed — the schema,
-gate constants, and this producer-contract section. Tasks 2 (plugin
-skeleton) and 4.1 (golden regression scenarios) are being worked in
-parallel; Tasks 3/4.2/5 are gated on S1 and S4 landing. See
-`docs/proposals/usable-kitsoki-release-gate.md` for the full proposal this
-doc will absorb once every task ships.
+**Status:** Tasks 1 (parity-metric spec), 2 (plugin skeleton), and 4.1
+(golden regression fixtures) are shipped and tested, zero LLM spend. Tasks 3
+(wire real S1/S4 inputs), 4.2 (calibration-set run), and 5 (stand it up as
+the CI release gate) are gated on S1 (workbench) and S4 (scenario foundry)
+landing. See `docs/proposals/usable-kitsoki-release-gate.md` for the
+proposal's remaining open questions and the gated tasks.
 
 This is the day-one contract `S1` (the free-form workbench) develops
 against, and the schema `S6` (`tools/arena/arena/plugins/usable_kitsoki_gate.py`)
@@ -122,3 +122,20 @@ turns) is a separate, gated, release-candidate-cadence run — see the
 proposal's own "Determinism" section for the full split; nothing about the
 schema or constants above changes between the two paths, only what produces
 `candidate_completed`.
+
+## Plugin usage
+
+`usable-kitsoki-gate` is a fourth `arena` job type, registered alongside
+`bugfix`/`persona-qa`/`swarm` (`arena plugins` lists it;
+`tools/arena/arena/plugins/usable_kitsoki_gate.py`). One cell drives the
+whole mined scenario corpus for one `persona x surface` combination; `arena
+plan`/`arena run` enumerate cells the same way as every other job type
+(`tools/arena/README.md`'s "Status — usable-kitsoki-gate job type
+registered" section has the full `image()`/`drive_command()`/`score()`
+walkthrough). With no scenario corpus yet (S4 not landed), `arena plan`
+returns zero cells, not an error — the plugin can be exercised today only
+through its own no-LLM tests
+(`tools/arena/tests/test_usable_kitsoki_gate_plugin.py`,
+`tools/arena/tests/test_usable_kitsoki_gate_schema.py`,
+`tools/arena/tests/test_usable_kitsoki_gate_golden_fixtures.py`), all of
+which run with zero docker and zero LLM spend.
