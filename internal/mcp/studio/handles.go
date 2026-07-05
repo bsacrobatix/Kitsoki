@@ -449,7 +449,8 @@ func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSe
 
 	// newSessionRuntime takes ownership of h: on a returned error h is already
 	// closed; on success rt.Close tears it down.
-	rt, err := newSessionRuntime(ctx, p.StoryPath, p.TracePath, h, harnessProfiles, selectedProfile, p.InitialWorld, p.HostCassette, p.ImportResolver, chatStore, configureHosts)
+	failClosedAgentReplay := mode == HarnessReplay
+	rt, err := newSessionRuntime(ctx, p.StoryPath, p.TracePath, h, harnessProfiles, selectedProfile, p.InitialWorld, p.HostCassette, failClosedAgentReplay, p.ImportResolver, chatStore, configureHosts)
 	if err != nil {
 		// h was already closed inside newSessionRuntime on error.
 		ss.removeOpeningSession(key, sh)

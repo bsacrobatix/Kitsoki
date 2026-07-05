@@ -378,6 +378,33 @@ func TestSessionNew_ReplayWithoutCassetteAllowsDirectSubmitOnly(t *testing.T) {
 	assert.Contains(t, driven.Outcome.Error, "noRouteHarness")
 }
 
+func TestSessionNew_ReplayWithoutHostCassetteFailsClosedOnAgentCall(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	cs := connectInProcess(ctx, t, srv)
+	appPath := writeAgentCallStory(t)
+
+	res, err := callTool(ctx, cs, "session.new", map[string]any{
+		"story_path": appPath,
+		"harness":    "replay",
+		"trace":      t.TempDir() + "/trace.jsonl",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.new should surface on_enter host errors through session status: %s", contentText(res))
+	var ok studio.SessionOpenOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &ok))
+
+	res, err = callTool(ctx, cs, "session.status", map[string]any{"handle": ok.Handle})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.status: %s", contentText(res))
+	var status studio.SessionStatusResult
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &status))
+	assert.Contains(t, status.LastError, "harness:replay")
+	assert.Contains(t, status.LastError, "host.agent.decide")
+	assert.Contains(t, status.LastError, "host_cassette")
+	assert.Contains(t, status.LastError, "fail closed")
+}
+
 func TestSessionNew_HostCassetteBacksDirectSubmitRun(t *testing.T) {
 	ctx := context.Background()
 	srv, _ := newReplayServer(t)
@@ -1021,6 +1048,47 @@ states:
           cmd: "sleep 0.12; printf slow-submit-done"
         bind:
           result: stdout
+`
+	require.NoError(t, os.WriteFile(appPath, []byte(body), 0o644))
+	return appPath
+}
+
+func writeAgentCallStory(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	appPath := dir + "/app.yaml"
+	const body = `app:
+  id: studio-replay-agent-guard-test
+  version: 0.1.0
+  title: "Studio Replay Agent Guard Test"
+
+hosts:
+  - host.agent.decide
+
+world:
+  result: { type: string, default: "" }
+
+root: agent_room
+
+states:
+  agent_room:
+    view: |
+      Agent room.
+      Result: {{ world.result }}
+    on_enter:
+      - invoke: host.agent.decide
+        with:
+          prompt: "write a deterministic answer"
+          acceptance:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [answer]
+              properties:
+                answer:
+                  type: string
+        bind:
+          result: answer
 `
 	require.NoError(t, os.WriteFile(appPath, []byte(body), 0o644))
 	return appPath
