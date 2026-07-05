@@ -107,29 +107,38 @@ const filteredNodes = computed(() => {
     .sort((a, b) => typeOrder(a.kind) - typeOrder(b.kind) || a.label.localeCompare(b.label));
 });
 
-// Personas nest under the actor they profile (persona derives_from actor);
-// they only fall back to a flat peer group when their parent actor is
-// filtered out of the current list (e.g. the Personas type chip).
+// Some node kinds nest under a same-or-different-kind parent rather than
+// standing as their own peer entry: a persona nests under the actor it
+// profiles (persona_of), and a proposal slice nests under the epic it
+// decomposes (child_of, W6.2). Nesting only applies when the parent is
+// present in the current filtered list (e.g. the type chip narrows to just
+// "Personas" or just the children's own kind) — otherwise the node falls
+// back to a flat peer entry so it's never silently hidden.
+const NEST_EDGE: Record<string, string> = {
+  persona: "persona_of",
+  proposal: "child_of",
+};
+
 const groupedNodes = computed(() => {
   const nodes = filteredNodes.value;
   const listedIds = new Set(nodes.map((node) => node.id));
-  const personasByActor = new Map<string, ObjectGraphNode[]>();
-  const orphanPersonas = new Set<string>();
+  const childrenByParent = new Map<string, ObjectGraphNode[]>();
+  const nestedIds = new Set<string>();
   for (const node of nodes) {
-    if (node.kind !== "persona") continue;
-    const parent = edgeTargetsByKind(props.graph, node.id, "persona_of")[0];
+    const edgeKind = NEST_EDGE[node.kind];
+    if (!edgeKind) continue;
+    const parent = edgeTargetsByKind(props.graph, node.id, edgeKind)[0];
     if (parent && listedIds.has(parent.id)) {
-      if (!personasByActor.has(parent.id)) personasByActor.set(parent.id, []);
-      personasByActor.get(parent.id)?.push(node);
-    } else {
-      orphanPersonas.add(node.id);
+      if (!childrenByParent.has(parent.id)) childrenByParent.set(parent.id, []);
+      childrenByParent.get(parent.id)?.push(node);
+      nestedIds.add(node.id);
     }
   }
   const grouped = new Map<string, Array<{ node: ObjectGraphNode; children: ObjectGraphNode[] }>>();
   for (const node of nodes) {
-    if (node.kind === "persona" && !orphanPersonas.has(node.id)) continue;
+    if (nestedIds.has(node.id)) continue;
     if (!grouped.has(node.kind)) grouped.set(node.kind, []);
-    grouped.get(node.kind)?.push({ node, children: personasByActor.get(node.id) ?? [] });
+    grouped.get(node.kind)?.push({ node, children: childrenByParent.get(node.id) ?? [] });
   }
   return [...grouped.entries()].map(([type, entries]) => ({ type, label: typeLabel(type), entries }));
 });
@@ -349,7 +358,7 @@ function selectNode(id: string) {
                 <strong>{{ child.label }}</strong>
                 <small>{{ child.id }}</small>
                 <span class="node-badges">
-                  <span class="type-badge">persona</span>
+                  <span class="type-badge">{{ child.kind }}</span>
                   <span :class="['status-badge', `life-${lifecycleBucket(child)}`]">{{ lifecycleLabel(lifecycleBucket(child)) }}</span>
                   <span :class="['visibility-badge', `visibility-${nodeVisibility(child)}`]">{{ nodeVisibility(child) }}</span>
                 </span>
