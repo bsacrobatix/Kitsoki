@@ -62,10 +62,12 @@
 
 .catalog-panel .layer-map {
   display: flex;
-  gap: 14px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 12px;
   overflow-x: auto;
   padding-bottom: 4px;
+  scrollbar-color: #8aa69d transparent;
+  scrollbar-width: thin;
 }
 
 .catalog-panel .layer-map article {
@@ -74,10 +76,10 @@
   border-radius: 8px;
   color: #253037;
   display: grid;
-  flex: 1 0 260px;
+  flex: 1 0 210px;
   gap: 7px;
-  min-height: 150px;
-  padding: 14px;
+  min-height: 128px;
+  padding: 12px;
   position: relative;
   text-align: left;
 }
@@ -123,12 +125,21 @@
 }
 
 .catalog-panel .layer-map strong {
-  font-size: 20px;
+  font-size: 18px;
 }
 
 .catalog-panel .layer-map small {
   color: #596460;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   font-size: 13px;
+  /* Belt-and-suspenders: some engines size the -webkit-box item to its
+   * unclamped intrinsic height inside a CSS grid parent, letting a partial
+   * third line bleed past the clamp before overflow:hidden clips it. Capping
+   * max-height guarantees the clip even if the clamp itself under-constrains. */
+  max-height: 2.6em;
+  overflow: hidden;
 }
 
 .catalog-panel .layer-statuses {
@@ -280,6 +291,11 @@
   display: flex;
   justify-content: space-between;
   margin: 0 0 8px;
+  /* The global inbox/meta launcher chrome floats fixed in the bottom-right
+   * corner of the viewport; this card's header can land at that same
+   * screen position depending on scroll/viewport height. Reserve enough
+   * right clearance that Expand never renders under it. */
+  padding-right: 56px;
 }
 
 .catalog-panel .relationship-graph h3 {
