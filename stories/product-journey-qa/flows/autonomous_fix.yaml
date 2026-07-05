@@ -61,11 +61,11 @@ host_handlers:
             gh_agent_missing_evidence_summary: ""
             autonomous_gate_summary: "filing=pass, gh_agent=pass, review=pass, validation=pass"
             review_status: ready
-            review_summary: "ready: 21/21 checks passed, 0 warnings, 0 failures"
-            review_passed_count: 21
+            review_summary: "ready: 24/24 checks passed, 0 warnings, 0 failures"
+            review_passed_count: 24
             review_failed_count: 0
             review_warning_count: 0
-            review_total_count: 21
+            review_total_count: 24
             review_backlog_summary: ""
             validation_status: valid
             validation_errors: 0
@@ -136,7 +136,7 @@ turns:
       review_failed_count: 0
       validation_status: valid
       validation_errors: 0
-    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous fix[\\s\\S]*autonomous_fix_valid[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, review=pass, validation=pass[\\s\\S]*Issue filing[\\s\\S]*findings_filed: filed 2[\\s\\S]*GH-agent drain[\\s\\S]*drained: drained 2, done 2, failed 0, active 0[\\s\\S]*GH-agent evidence[\\s\\S]*2 attached; 0 missing[\\s\\S]*Review checks[\\s\\S]*21 / 21 passed[\\s\\S]*Validation[\\s\\S]*valid"
+    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous fix[\\s\\S]*autonomous_fix_valid[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, review=pass, validation=pass[\\s\\S]*Issue filing[\\s\\S]*findings_filed: filed 2[\\s\\S]*GH-agent drain[\\s\\S]*drained: drained 2, done 2, failed 0, active 0[\\s\\S]*GH-agent evidence[\\s\\S]*2 attached; 0 missing[\\s\\S]*Review checks[\\s\\S]*24 / 24 passed[\\s\\S]*Validation[\\s\\S]*valid"
     expect_host_calls:
       - handler: host.run
         args: { call: autonomous_product_journey_fix }

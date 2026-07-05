@@ -61,12 +61,12 @@ host_handlers:
             gh_agent_missing_evidence_summary: "github:bsacrobatix/Kitsoki/issue/301"
             autonomous_gate_summary: "filing=pass, gh_agent=fail, review=fail, validation=fail"
             review_status: needs_evidence
-            review_summary: "needs_evidence: 20/21 checks passed, 0 warnings, 1 failures"
-            review_passed_count: 20
+            review_summary: "needs_evidence: 23/24 checks passed, 0 warnings, 1 failures"
+            review_passed_count: 23
             review_failed_count: 1
             review_warning_count: 0
-            review_total_count: 21
-            review_backlog_summary: "gh-agent-fixes"
+            review_total_count: 24
+            review_backlog_summary: "gh-agent-fix-evidence"
             validation_status: invalid
             validation_errors: 1
             validation_warnings: 0

@@ -4114,7 +4114,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     gh_agent_drain_status = gh_agent.get("drain_status", "")
     gh_agent_missing_evidence = gh_agent_missing_fix_evidence(gh_agent)
     gh_agent_missing_run_url = gh_agent_missing_run_urls(gh_agent)
-    gh_agent_fix_complete = (
+    gh_agent_jobs_terminal = (
         not gh_agent_requested
         or (
             gh_agent_enqueued > 0
@@ -4122,10 +4122,10 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             and gh_agent_failed == 0
             and gh_agent_active == 0
             and gh_agent_done >= gh_agent_enqueued
-            and not gh_agent_missing_evidence
-            and not gh_agent_missing_run_url
         )
     )
+    gh_agent_fix_evidence_complete = (not gh_agent_requested) or not gh_agent_missing_evidence
+    gh_agent_run_urls_complete = (not gh_agent_requested) or not gh_agent_missing_run_url
 
     checks = [
         {
@@ -4267,12 +4267,40 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         },
         {
             "id": "gh-agent-fixes",
-            "status": "pass" if gh_agent_fix_complete else "fail",
+            "status": "pass" if gh_agent_jobs_terminal else "fail",
             "summary": "When gh-agent fixing was requested, queued fix jobs drain to reviewable terminal runs.",
             "detail": (
                 "gh-agent fixing not requested"
                 if not gh_agent_requested
-                else f"enqueue={gh_agent.get('enqueue_status', '')}, drain={gh_agent_drain_status}, enqueued={gh_agent_enqueued}, done={gh_agent_done}, failed={gh_agent_failed}, active={gh_agent_active}, missing_evidence={len(gh_agent_missing_evidence)}, missing_run_urls={len(gh_agent_missing_run_url)}; {gh_agent.get('run_summary', '')}"
+                else f"enqueue={gh_agent.get('enqueue_status', '')}, drain={gh_agent_drain_status}, enqueued={gh_agent_enqueued}, done={gh_agent_done}, failed={gh_agent_failed}, active={gh_agent_active}; {gh_agent.get('run_summary', '')}"
+            ),
+        },
+        {
+            "id": "gh-agent-fix-evidence",
+            "status": "pass" if gh_agent_fix_evidence_complete else "fail",
+            "summary": "Completed gh-agent fix jobs expose reviewable evidence assets.",
+            "detail": (
+                "gh-agent fixing not requested"
+                if not gh_agent_requested
+                else (
+                    f"missing: {', '.join(gh_agent_missing_evidence)}"
+                    if gh_agent_missing_evidence
+                    else f"evidence_links={len(gh_agent_fix_evidence_links(gh_agent))}"
+                )
+            ),
+        },
+        {
+            "id": "gh-agent-run-url",
+            "status": "pass" if gh_agent_run_urls_complete else "fail",
+            "summary": "Completed gh-agent fix jobs expose public run URLs for human review.",
+            "detail": (
+                "gh-agent fixing not requested"
+                if not gh_agent_requested
+                else (
+                    f"missing: {', '.join(gh_agent_missing_run_url)}"
+                    if gh_agent_missing_run_url
+                    else f"run_urls={len([job for job in gh_agent.get('drained_jobs', []) or [] if isinstance(job, dict) and str(job.get('run_url', '')).strip()])}"
+                )
             ),
         },
         {
