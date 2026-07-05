@@ -41,7 +41,7 @@ host_handlers:
             proof_minimum_evidence_count: 0
             minimum_evidence_count: 10
             missing_proof_summary: "bugfix: candidate_diff, regression_test_result; project-onboarding: generated_config_diff"
-            driver_contract_summary: "Driver contract: 2 scenarios (bugfix, project-onboarding); 2 missing-proof rows; 3 final gates."
+            driver_contract_summary: "Driver contract: 2 scenarios (bugfix, project-onboarding); 2 missing-proof rows; 4 final gates."
             next_driver_capture: "Next capture: bugfix/candidate_diff. Save a retained patch or diff reference."
             next_driver_attach_command: 'python3 tools/product-journey/run.py --attach-evidence --run-dir .artifacts/product-journey/run-scoped --scenario bugfix --evidence-kind candidate_diff --evidence-path <path-or-retained-id> --evidence-source <retained|external|local|cassette> --notes "Save a retained patch or diff reference."'
             next_driver_blocker_command: "python3 tools/product-journey/run.py --record-blocker --run-dir .artifacts/product-journey/run-scoped --scenario bugfix --title <blocker-title> --summary <why-this-scenario-could-not-be-captured> --evidence-path <trace-or-frame-path>"

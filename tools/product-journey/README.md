@@ -260,7 +260,8 @@ path instead of only static traces or written artifacts.
 `--validate-run` checks that `execution-plan.json` and `driver-plan.json`
 include one actionable `--attach-evidence` command for every declared evidence
 slot, and that the execution plan, agent brief, driver plan, and handoff retain
-the story-owned final gates: `autonomous_fix`, `review`, and `validate`.
+the story-owned final gates: `autonomous_watchdog`, `autonomous_fix`, `review`,
+and `validate`.
 It also enforces the
 driver action contract: every scenario must keep the ordered
 `open_surface -> read_current_frame -> act_as_persona -> capture_required_evidence -> journal_attempt`

@@ -93,6 +93,17 @@ def main() -> int:
             control_path = Path(created["autonomous_control_path"])
             control_markdown_path = Path(created["autonomous_control_markdown_path"])
             control = run.read_json(control_path)
+            expected_final_gates = [
+                "autonomous_watchdog",
+                "autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<public-gh-agent-url>",
+                "review",
+                "validate",
+            ]
+            execution_plan = run.read_json(run_dir / "execution-plan.json")
+            driver_plan = run.read_json(run_dir / "driver-plan.json")
+            agent_brief = run.read_json(run_dir / "agent-brief.json")
+            driver_handoff = run.read_json(run_dir / "driver-handoff.json")
+            loaded_summary = run.summarize_run_bundle(run_dir)
 
             check("autonomous marathon creates a bounded run",
                   created["autonomous_marathon_status"] == "autonomous_marathon_ready_for_driver"
@@ -114,6 +125,14 @@ def main() -> int:
             check("creation writes a human-reviewable marathon report",
                   Path(created["autonomous_marathon_report_path"]).exists()
                   and "Autonomous Marathon Report" in Path(created["autonomous_marathon_report_path"]).read_text(encoding="utf-8"),
+                  failures)
+            check("generated driver contract advertises watchdog before autonomous fix",
+                  execution_plan["finalize_commands"][-4:] == expected_final_gates
+                  and driver_plan["final_gates"] == expected_final_gates
+                  and agent_brief["finalize_commands"][-4:] == expected_final_gates
+                  and driver_handoff["finalize_commands"] == expected_final_gates
+                  and loaded_summary["driver_final_gates"] == expected_final_gates
+                  and "4 final gates" in loaded_summary["driver_contract_summary"],
                   failures)
 
             filing_test.attach_bugfix_proof(run_dir, scenario_id)
