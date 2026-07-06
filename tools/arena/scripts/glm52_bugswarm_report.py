@@ -111,6 +111,7 @@ def build_report(
         },
         "evidence_gaps": evidence_gaps(matrix_rows, bugswarm_tasks, verification),
         "interpretation": interpretation(matrix_rows, bugswarm_tasks, verification),
+        "evidence_closure": evidence_closure(matrix_rows, bugswarm_tasks, verification),
     }
 
 
@@ -359,6 +360,73 @@ def evidence_gaps(rows: list[dict[str, Any]], bugswarm_tasks: list[dict[str, Any
     return gaps
 
 
+def evidence_closure(rows: list[dict[str, Any]], bugswarm_tasks: list[dict[str, Any]], verification: dict[str, Any]) -> dict[str, Any]:
+    pending = [row for row in rows if row["quality"] == "pending"]
+    by_corpus: dict[str, list[dict[str, Any]]] = {}
+    for row in pending:
+        by_corpus.setdefault(str(row["corpus"]), []).append(row)
+    actions = [
+        closure_action_oss(by_corpus.get("oss-oracle", [])),
+        closure_action_bugswarm(by_corpus.get("bugswarm", []), bugswarm_tasks, verification),
+    ]
+    return {
+        "pending_cell_count": len(pending),
+        "pending_by_corpus": {corpus: len(items) for corpus, items in sorted(by_corpus.items())},
+        "actions": actions,
+    }
+
+
+def closure_action_oss(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {
+            "corpus": "oss-oracle",
+            "status": "complete",
+            "pending_count": 0,
+            "next": "No pending OSS oracle GLM-5.2 cells.",
+        }
+    return {
+        "corpus": "oss-oracle",
+        "status": "needs-spec",
+        "pending_count": len(rows),
+        "tasks": sorted({str(row["task"]) for row in rows}),
+        "treatments": sorted({str(row["treatment"]) for row in rows}),
+        "next": "Provide --oss-spec pointing at a paired-task spec with GLM-5.2 Kitsoki/raw-prompt variants.",
+    }
+
+
+def closure_action_bugswarm(rows: list[dict[str, Any]], bugswarm_tasks: list[dict[str, Any]], verification: dict[str, Any]) -> dict[str, Any]:
+    if not rows:
+        return {
+            "corpus": "bugswarm",
+            "status": "complete",
+            "pending_count": 0,
+            "next": "No pending BugSwarm GLM-5.2 cells.",
+        }
+    if not bugswarm_tasks:
+        return {
+            "corpus": "bugswarm",
+            "status": "needs-import",
+            "pending_count": len(rows),
+            "next": "Import BugSwarm artifact metadata, execute RED/GREEN verification, then pass --bugswarm-source to glm52_gap_plan.py.",
+        }
+    if str(verification.get("mode") or "") != "execute" or int(verification.get("verified_count") or 0) == 0:
+        return {
+            "corpus": "bugswarm",
+            "status": "needs-execute-verification",
+            "pending_count": len(rows),
+            "tasks": sorted({str(row["task"]) for row in rows}),
+            "next": "Run bugswarm_verify_source.py --execute and apply the verification report before scheduling live GLM-5.2 cells.",
+        }
+    return {
+        "corpus": "bugswarm",
+        "status": "ready",
+        "pending_count": len(rows),
+        "tasks": sorted({str(row["task"]) for row in rows}),
+        "treatments": sorted({str(row["treatment"]) for row in rows}),
+        "next": "Run glm52_gap_plan.py with --bugswarm-source; it will generate split-backend BugSwarm live commands.",
+    }
+
+
 def interpretation(rows: list[dict[str, Any]], bugswarm_tasks: list[dict[str, Any]], verification: dict[str, Any]) -> list[str]:
     glm_kitsoki_attempts = [r for r in rows if r["corpus"] == "oss-oracle" and r["treatment"] == "kitsoki" and r["quality"] != "pending"]
     raw_prompt_attempts = [r for r in rows if r["treatment"] == "raw-prompt" and r["quality"] not in {"pending", "blocked"}]
@@ -594,6 +662,7 @@ def render_evidence_closure_packet(report: dict[str, Any]) -> list[str]:
             "",
             "No pending GLM-5.2 headline cells remain in this report.",
         ]
+    closure = report["evidence_closure"]
     commands = [
         "python3 tools/arena/scripts/glm52_gap_plan.py \\",
         f"  --report-json {inputs['report_json']} \\",
@@ -620,6 +689,13 @@ def render_evidence_closure_packet(report: dict[str, Any]) -> list[str]:
         "The packet emits no-spend `arena.py plan` / arming commands and, only",
         "after a spec passes audit, explicit `ARENA_PAIRED_TASK_ENABLE_CODEX=1",
         "... --live` commands for operator execution.",
+        "",
+        "| corpus | status | pending | next |",
+        "|---|---|---:|---|",
+        *[
+            f"| {action['corpus']} | `{action['status']}` | {action['pending_count']} | {action['next']} |"
+            for action in closure["actions"]
+        ],
     ]
 
 

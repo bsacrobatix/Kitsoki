@@ -119,6 +119,11 @@ The packet emits no-spend `arena.py plan` / arming commands and, only
 after a spec passes audit, explicit `ARENA_PAIRED_TASK_ENABLE_CODEX=1
 ... --live` commands for operator execution.
 
+| corpus | status | pending | next |
+|---|---|---:|---|
+| oss-oracle | `needs-spec` | 1 | Provide --oss-spec pointing at a paired-task spec with GLM-5.2 Kitsoki/raw-prompt variants. |
+| bugswarm | `needs-import` | 2 | Import BugSwarm artifact metadata, execute RED/GREEN verification, then pass --bugswarm-source to glm52_gap_plan.py. |
+
 ## Interpretation
 
 - Committed GLM-5.2 Kitsoki evidence contains 1 attempted OSS oracle cell(s), 2890980 total tokens, and no solved cell yet.

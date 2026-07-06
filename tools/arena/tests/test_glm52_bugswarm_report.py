@@ -51,6 +51,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("oss corpus task count", report["corpora"]["oss_oracle"]["task_count"], 26)
     check("bugswarm source status", report["corpora"]["bugswarm"]["source_status"], "adapter-ready")
     check("bugswarm imported count", report["corpora"]["bugswarm"]["imported_task_count"], 0)
+    closure = {action["corpus"]: action for action in report["evidence_closure"]["actions"]}
+    check("closure oss needs spec", closure["oss-oracle"]["status"], "needs-spec")
+    check("closure bugswarm needs import", closure["bugswarm"]["status"], "needs-import")
 
     glm_cells = report["glm52_bugfix_cells"]
     check("one committed glm cell", len(glm_cells), 1)
@@ -70,6 +73,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("markdown includes closure packet", "## Evidence Closure Packet" in md, True)
     check("markdown includes gap planner", "glm52_gap_plan.py" in md, True)
     check("markdown tells bugswarm source handoff", "--bugswarm-source <execute-verified BugSwarm YAML>" in md, True)
+    check("markdown closure table includes import", "| bugswarm | `needs-import`" in md, True)
 
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)
@@ -117,6 +121,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("bugswarm verification mode", report["corpora"]["bugswarm"]["verification_mode"], "dry-run")
     check("bugswarm verification count", report["corpora"]["bugswarm"]["verification_report_count"], 1)
     check("bugswarm dry-run verified count", report["corpora"]["bugswarm"]["verification_verified_count"], 0)
+    closure = {action["corpus"]: action for action in report["evidence_closure"]["actions"]}
+    check("closure bugswarm needs execute verification", closure["bugswarm"]["status"], "needs-execute-verification")
     md = md_out.read_text(encoding="utf-8")
     check("bugswarm source closure command", f"--bugswarm-source {source}" in md, True)
 

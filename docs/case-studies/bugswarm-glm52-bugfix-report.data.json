@@ -30,6 +30,33 @@
       "task_count": 26
     }
   },
+  "evidence_closure": {
+    "actions": [
+      {
+        "corpus": "oss-oracle",
+        "next": "Provide --oss-spec pointing at a paired-task spec with GLM-5.2 Kitsoki/raw-prompt variants.",
+        "pending_count": 1,
+        "status": "needs-spec",
+        "tasks": [
+          "current-committed-glm52"
+        ],
+        "treatments": [
+          "raw-prompt"
+        ]
+      },
+      {
+        "corpus": "bugswarm",
+        "next": "Import BugSwarm artifact metadata, execute RED/GREEN verification, then pass --bugswarm-source to glm52_gap_plan.py.",
+        "pending_count": 2,
+        "status": "needs-import"
+      }
+    ],
+    "pending_by_corpus": {
+      "bugswarm": 2,
+      "oss-oracle": 1
+    },
+    "pending_cell_count": 3
+  },
   "evidence_gaps": [
     "No committed raw-prompt GLM-5.2 result exists for the OSS oracle corpus.",
     "No BugSwarm artifact source has been imported and RED/GREEN verified yet.",
