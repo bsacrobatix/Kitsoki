@@ -56,7 +56,7 @@ from local runs when GitHub auth is available. The preferred setup is a
 least-privilege GitHub App installation token, not a broad personal token:
 
 ```sh
-kitsoki gh-agent setup app --name <app-name> --public-base-url https://agent.example.com
+kitsoki gh-agent setup app --name <app-name> --local-only
 kitsoki gh-agent setup attach --repo owner/name
 kitsoki gh-agent token
 source ~/.config/kitsoki/github.env
@@ -66,6 +66,15 @@ What you do: create/install the App, choose the repositories it can access, and
 approve GitHub's consent page. What Kitsoki does autonomously: mint a
 short-lived installation token, write it to a local 0600 env file, and use it as
 `GH_TOKEN`/`GITHUB_TOKEN` only for the GitHub actions your flow requests.
+
+No public URL is required for this local bug/PR path. OAuth uses a localhost
+callback, and `--local-only` creates the App without a webhook URL or event
+subscriptions. If you later run a hosted `@kitsoki` agent that receives GitHub
+webhooks, recreate or update the App with a public webhook URL:
+
+```sh
+kitsoki gh-agent setup app --name <app-name> --public-base-url https://agent.example.com
+```
 
 The App permission floor is repository metadata read; issues, pull requests,
 and contents write; checks read. Repository access is still limited to the repos

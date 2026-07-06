@@ -92,14 +92,15 @@ func (s *SetupClient) out() io.Writer {
 
 // --- App-Manifest one-click ------------------------------------------------
 
-// Manifest describes the GitHub App to create. Permissions and events are
-// fixed to the @kitsoki agent's floor (kitsoki-github-agent proposal, shared
-// decision #1) — issues/PRs/contents write, checks read — so every
-// wizard-created App is born least-privilege.
+// Manifest describes the GitHub App to create. Permissions are fixed to the
+// @kitsoki agent's floor (kitsoki-github-agent proposal, shared decision #1) —
+// issues/PRs/contents write, checks read — so every wizard-created App is born
+// least-privilege. WebhookURL is optional for local-only OAuth/token setup; when
+// empty, no webhook or event subscription is requested.
 type Manifest struct {
 	Name        string
 	URL         string // the App's homepage
-	WebhookURL  string
+	WebhookURL  string // optional; empty creates a local-only OAuth/App-token profile
 	RedirectURL string // local callback that receives the manifest code
 	Description string
 	// Public false = only installable on the owning account, the right
@@ -111,9 +112,6 @@ type Manifest struct {
 func (m Manifest) JSON() ([]byte, error) {
 	if m.Name == "" {
 		return nil, fmt.Errorf("githubapp: manifest needs a name")
-	}
-	if m.WebhookURL == "" {
-		return nil, fmt.Errorf("githubapp: manifest needs a webhook url")
 	}
 	if m.RedirectURL == "" {
 		return nil, fmt.Errorf("githubapp: manifest needs a redirect url")
@@ -128,10 +126,6 @@ func (m Manifest) JSON() ([]byte, error) {
 		"callback_urls": []string{"http://127.0.0.1/callback"},
 		"description":   m.Description,
 		"public":        m.Public,
-		"hook_attributes": map[string]any{
-			"url":    m.WebhookURL,
-			"active": true,
-		},
 		"default_permissions": map[string]string{
 			"issues":        "write",
 			"pull_requests": "write",
@@ -139,14 +133,20 @@ func (m Manifest) JSON() ([]byte, error) {
 			"checks":        "read",
 			"metadata":      "read",
 		},
-		"default_events": []string{
+	}
+	if m.WebhookURL != "" {
+		doc["hook_attributes"] = map[string]any{
+			"url":    m.WebhookURL,
+			"active": true,
+		}
+		doc["default_events"] = []string{
 			"issues",
 			"issue_comment",
 			"pull_request",
 			"pull_request_review",
 			"pull_request_review_comment",
 			"check_suite",
-		},
+		}
 	}
 	return json.Marshal(doc)
 }

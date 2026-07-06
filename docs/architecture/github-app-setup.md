@@ -31,7 +31,19 @@ The hosted webhook service is parameterized by environment:
 
 The manifest wizard collapses sections **a–d** into two GitHub consent clicks
 with no settings-page copy/paste (packaging plan §2A — the Probot
-manifest-wizard pattern, in Go):
+manifest-wizard pattern, in Go). For local issue/PR/bug-filing auth, no public
+URL is required:
+
+```
+kitsoki gh-agent setup app --name <app-name> --local-only
+```
+
+`--local-only` keeps the OAuth callback on localhost, omits webhook
+configuration and event subscriptions, and still writes the same App
+credentials for installation-token minting.
+
+For a hosted `@kitsoki` agent that receives GitHub webhook events, provide a
+public base URL:
 
 ```
 kitsoki gh-agent setup app --name <app-name> --public-base-url https://agent.example.com
@@ -40,8 +52,8 @@ kitsoki gh-agent setup app --name <app-name> --public-base-url https://agent.exa
 serves a local page that auto-POSTs the App manifest (permission floor from
 shared decision #1 baked in), catches GitHub's redirect, exchanges the code at
 `/app-manifests/{code}/conversions`, and writes `kitsoki.env` + `gh-app.pem`
-(0600) with the App id, client id/secret, and webhook secret — then opens the
-install page and records the installation id once you approve it.
+(0600) with the App id, client id/secret, and webhook secret when present —
+then opens the install page and records the installation id once you approve it.
 
 Attaching further repositories later never touches the settings page again:
 

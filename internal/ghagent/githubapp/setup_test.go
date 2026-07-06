@@ -52,9 +52,39 @@ func TestManifestJSONCarriesPermissionFloor(t *testing.T) {
 	}
 }
 
+func TestManifestJSONAllowsLocalOnlyOAuthSetup(t *testing.T) {
+	m := Manifest{
+		Name:        "kitsoki-local",
+		URL:         "https://github.com/kitsoki",
+		RedirectURL: "http://127.0.0.1:1234/callback",
+	}
+	raw, err := m.JSON()
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	if _, ok := doc["hook_attributes"]; ok {
+		t.Fatalf("local-only manifest should not request hook_attributes: %s", raw)
+	}
+	if _, ok := doc["default_events"]; ok {
+		t.Fatalf("local-only manifest should not subscribe to events: %s", raw)
+	}
+	callbacks, ok := doc["callback_urls"].([]any)
+	if !ok || len(callbacks) != 1 || callbacks[0] != "http://127.0.0.1/callback" {
+		t.Fatalf("local-only manifest should keep loopback callback: %v", doc["callback_urls"])
+	}
+	perms, ok := doc["default_permissions"].(map[string]any)
+	if !ok || perms["issues"] != "write" || perms["metadata"] != "read" {
+		t.Fatalf("local-only manifest permissions wrong: %v", doc["default_permissions"])
+	}
+}
+
 func TestManifestJSONRejectsIncomplete(t *testing.T) {
-	if _, err := (Manifest{Name: "x", RedirectURL: "y"}).JSON(); err == nil {
-		t.Fatal("expected error for missing webhook url")
+	if _, err := (Manifest{Name: "x"}).JSON(); err == nil {
+		t.Fatal("expected error for missing redirect url")
 	}
 }
 
