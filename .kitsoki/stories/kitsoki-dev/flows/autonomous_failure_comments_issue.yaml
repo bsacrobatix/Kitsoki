@@ -31,7 +31,13 @@ initial_world:
   core__bf__implement_review_artifact:
     summary_title: "Tests need another pass"
     summary_markdown: "The generated regression test is still incomplete."
-    status: "blocked"
+    # status=passed (NOT blocked/failed) so the testing refine arc reaches the
+    # `testing_cycle >= testing_budget` abandon arm — "implementation is fine,
+    # the test review needs another pass" — instead of the status-aware
+    # `blocked → implementing` arm (added by bc41f5c7) which would route back
+    # into implementing and fire the workspace-provisioning git ops this
+    # offline flow does not stub.
+    status: "passed"
 
 host_handlers:
   host.agent.decide:
