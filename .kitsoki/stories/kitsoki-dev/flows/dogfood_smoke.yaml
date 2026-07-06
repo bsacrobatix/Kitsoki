@@ -52,7 +52,10 @@ turns:
     expect_state: core.ticket_searching
     expect_view_matches: "TUI view templates render BEFORE on_enter binds"
     expect_world:
-      ticket_repo: "constructorfabric/Kitsoki"
+      # The kitsoki-dev instance defaults ticket_repo to the symbolic `origin`
+      # (host.gh.ticket resolves it against `git remote get-url origin`). The
+      # flow stubs the host, so `origin` stays the literal default here.
+      ticket_repo: "origin"
 
   # Land back at main.
   - intent: { name: core__go_main, slots: {} }

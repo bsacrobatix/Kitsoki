@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -90,13 +91,14 @@ func ghTicketSearch(ctx context.Context, args map[string]any) (Result, error) {
 	}
 	q := githubIssueSearchQuery(repo, "is:issue", strings.TrimSpace(query))
 	var raw githubIssueSearchResponse
-	code, resp, err := githubAPIJSON(ctx, "GET", "search/issues?q="+url.QueryEscape(q)+"&per_page="+fmt.Sprintf("%d", limit), nil, &raw)
+	code, resp, err := githubAPIJSON(ctx, "GET", githubSearchIssuesURL(q, limit), nil, &raw)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("ticket.search: %v", err)}, nil
 	}
 	if code >= 300 {
 		return Result{Error: fmt.Sprintf("ticket.search: %s", githubAPIError(resp))}, nil
 	}
+	ghSortItemsNewestFirst(raw.Items)
 	tickets := make([]map[string]any, 0, len(raw.Items))
 	for _, r := range raw.Items {
 		ghNormalizeIssueURL(r)
@@ -382,13 +384,14 @@ func ghTicketListMine(ctx context.Context, args map[string]any) (Result, error) 
 	}
 	q := githubIssueSearchQuery(repo, "is:issue", "is:open", "assignee:"+filter)
 	var raw githubIssueSearchResponse
-	code, resp, err := githubAPIJSON(ctx, "GET", "search/issues?q="+url.QueryEscape(q)+"&per_page=100", nil, &raw)
+	code, resp, err := githubAPIJSON(ctx, "GET", githubSearchIssuesURL(q, 100), nil, &raw)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("ticket.list_mine: %v", err)}, nil
 	}
 	if code >= 300 {
 		return Result{Error: fmt.Sprintf("ticket.list_mine: %s", githubAPIError(resp))}, nil
 	}
+	ghSortItemsNewestFirst(raw.Items)
 	tickets := make([]map[string]any, 0, len(raw.Items))
 	for _, r := range raw.Items {
 		ghNormalizeIssueURL(r)
@@ -411,6 +414,47 @@ func githubIssueSearchQuery(repo string, parts ...string) string {
 		}
 	}
 	return strings.Join(out, " ")
+}
+
+// githubSearchIssuesURL builds the GitHub Search API path for an issue query,
+// asking GitHub for newest-first (sort=created, order=desc) as a page-level
+// recency hint. GitHub's Search `sort=created` orders by the issue's
+// `created_at`, which diverges from the issue NUMBER when issues are
+// transferred/imported with a backdated timestamp — so the page comes back
+// ~recent but not strictly highest-number-first. ghSortItemsNewestFirst is the
+// real guarantee: it re-sorts the fetched page by issue number (the source of
+// truth for "newest bug" in a repo) so the queue is strict id-DESC, matching the
+// local-files provider's "id DESC (newest first)" ordering.
+func githubSearchIssuesURL(q string, limit int) string {
+	return "search/issues?q=" + url.QueryEscape(q) +
+		"&sort=created&order=desc&per_page=" + fmt.Sprintf("%d", limit)
+}
+
+// ghSortItemsNewestFirst sorts GitHub issue rows by issue number, highest
+// (newest) first. It is the load-bearing newest-first guarantee for
+// host.gh.ticket listings; see githubSearchIssuesURL for why the server-side
+// sort alone is insufficient.
+func ghSortItemsNewestFirst(items []map[string]any) {
+	sort.SliceStable(items, func(i, j int) bool {
+		return ghRawNumber(items[i]) > ghRawNumber(items[j])
+	})
+}
+
+// ghRawNumber reads a GitHub issue row's `number` as an int, tolerating the
+// float64 / int / string shapes the API and fixtures emit. Returns 0 when the
+// field is absent or unparseable, so a row without a number sorts last.
+func ghRawNumber(m map[string]any) int {
+	switch v := m["number"].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case string:
+		var n int
+		_, _ = fmt.Sscanf(v, "%d", &n)
+		return n
+	}
+	return 0
 }
 
 func ghNormalizeIssueURL(raw map[string]any) {

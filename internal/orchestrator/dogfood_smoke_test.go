@@ -445,7 +445,9 @@ func TestDogfoodSmoke_TicketSearchFreeTextRoutesToWorkbench(t *testing.T) {
 	// Boot the session the way every real surface does (see
 	// DriveToRest → RunInitialOnEnter). This fires the `core` compound's
 	// on_enter chain, including the kitsoki-dev world_in projection that
-	// sets core__ticket_repo from the instance-level ticket_repo default.
+	// sets core__ticket_repo from the instance-level ticket_repo default
+	// (the symbolic `origin` — host.gh.ticket resolves it against
+	// `git remote get-url origin` at dispatch time).
 	// Without it the child keeps its own "" default and every
 	// host.gh.ticket.* call resolves repo via ambient gh (the bug).
 	require.NoError(t, orch.RunInitialOnEnter(c, sid))
@@ -462,7 +464,7 @@ func TestDogfoodSmoke_TicketSearchFreeTextRoutesToWorkbench(t *testing.T) {
 
 	history, err := s.LoadHistory(sid)
 	require.NoError(t, err)
-	requireDogfoodHostArg(t, history, "host.gh.ticket.search", "repo", "constructorfabric/Kitsoki")
+	requireDogfoodHostArg(t, history, "host.gh.ticket.search", "repo", "origin")
 
 	// 2. In the strict ticket-search menu the operator does NOT pick a row —
 	//    they describe a piece of ad-hoc work in their own words (the exact

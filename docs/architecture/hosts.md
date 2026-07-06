@@ -2039,17 +2039,19 @@ binary is required. Implementation:
 | op | GitHub API operation | Returns |
 |---|---|---|
 | `create` | `POST /repos/{owner}/{repo}/issues` | `{id, number, url, warning?}` |
-| `search` | `GET /search/issues` | `{tickets: [{id,title,status,priority,assignee,url,type,source}]}` |
+| `search` | `GET /search/issues` (`sort=created&order=desc`, newest-first) | `{tickets: [{id,title,status,priority,assignee,url,type,source}]}` |
 | `get` | `GET /repos/{owner}/{repo}/issues/{number}` + comments | `{id,title,body,status,…,type,source,legacy_id?,comments, kitsoki_meta?}` |
 | `comment` | `POST /repos/{owner}/{repo}/issues/{number}/comments` | `{ok, comment_id}` |
 | `transition` | `PATCH /repos/{owner}/{repo}/issues/{number}` | `{ok}` |
-| `list_mine` | `GET /search/issues` with `assignee:` | `{tickets: […]}` |
+| `list_mine` | `GET /search/issues` with `assignee:` (newest-first) | `{tickets: […]}` |
 
-**Repo pin.** Every call takes a `repo` arg (`owner/repo`); the dogfood pins it
-to `constructorfabric/Kitsoki` via the `ticket_repo` world key
-(`.kitsoki/stories/kitsoki-dev/app.yaml`) so it never silently resolves the operator's
-`origin` (a personal fork). The slug is data, not a Go constant — a fork-of-a-
-fork or downstream project overrides the world key.
+**Repo pin.** Every call takes a `repo` arg (`owner/repo`). The dogfood instance
+(`.kitsoki/stories/kitsoki-dev/app.yaml`) defaults `ticket_repo` to the symbolic
+`origin`, which `host.gh.ticket` resolves against `git remote get-url origin` —
+so the queue targets the repo you cloned (a fork like `bsacrobatix/Kitsoki`, or
+the canonical `constructorfabric/Kitsoki`) rather than a hardcoded slug. The
+slug is data, not a Go constant: pin an explicit `owner/repo`, or override the
+world key per-session, to retarget a fork-of-a-fork or downstream project.
 
 **External repo binding (onboarding passthrough).** Project onboarding
 (`stories/dev-story/scripts/init_discover.py` + `init_apply.py`) closes the
