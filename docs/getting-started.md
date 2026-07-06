@@ -61,8 +61,21 @@ covered in [harness profiles](architecture/harness-profiles.md).
 ## 3. Set up GitHub auth for local issue/PR work
 
 Kitsoki can open GitHub issues, open PRs, push branches/artifacts, and comment
-from local runs when GitHub auth is available. The preferred setup is a
-least-privilege GitHub App installation token, not a broad personal token:
+from local runs when GitHub auth is available. The fastest local setup requires
+GitHub CLI (`gh`) and reuses its browser/PIN login:
+
+```sh
+kitsoki gh-agent login
+source ~/.config/kitsoki/github.env
+```
+
+What you do: approve GitHub CLI auth in the browser, or enter the one-time code
+GitHub CLI prints. What Kitsoki does autonomously: run `gh auth login --web`
+when needed, read `gh auth token`, write it to a local 0600 env file, and use
+it as `GH_TOKEN`/`GITHUB_TOKEN` only for the GitHub actions your flow requests.
+Use `gh auth status` to inspect the GitHub CLI account and OAuth scopes.
+
+For tighter repo-limited permissions, use a GitHub App installation token:
 
 ```sh
 kitsoki gh-agent setup app --name <app-name> --local-only
@@ -71,7 +84,7 @@ kitsoki gh-agent token
 source ~/.config/kitsoki/github.env
 ```
 
-What you do: create/install the App, choose the repositories it can access, and
+For the App path, what you do: create/install the App, choose the repositories it can access, and
 approve GitHub's consent page. What Kitsoki does autonomously: mint a
 short-lived installation token, write it to a local 0600 env file, and use it as
 `GH_TOKEN`/`GITHUB_TOKEN` only for the GitHub actions your flow requests.

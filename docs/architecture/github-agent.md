@@ -153,11 +153,13 @@ App JWT (`internal/ghagent/githubapp.AppTokenSource`) — see
 Every dispatched job gets exactly one rolling status comment, edited in
 place (never a flood of new comments) as the run progresses.
 
-Local bug/PR filing does not require this hosted webhook surface. A developer
-without a public URL can run `kitsoki gh-agent setup app --name <app-name>
---local-only`, attach the target repo, then run `kitsoki gh-agent token` and
-source `~/.config/kitsoki/github.env`. That configures the same
-least-privilege GitHub App installation token for local `kitsoki bug
+Local bug/PR filing does not require this hosted webhook surface. The easy
+developer-local path is `kitsoki gh-agent login`, which wraps GitHub CLI's
+browser/PIN OAuth flow and writes `~/.config/kitsoki/github.env`. For
+repo-limited App auth, a developer without a public URL can run `kitsoki
+gh-agent setup app --name <app-name> --local-only`, attach the target repo,
+then run `kitsoki gh-agent token` and source
+`~/.config/kitsoki/github.env`. That token env powers local `kitsoki bug
 create --github`, TUI `/bug`, web Report bug, and MCP issue-filing paths.
 
 A minimal run list/detail surface is served at `/runs` and `/run/<job-id>`

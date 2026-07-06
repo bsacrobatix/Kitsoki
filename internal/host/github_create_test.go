@@ -157,6 +157,7 @@ func TestGitHubTicket_CreateMissingAuthExplainsSetup(t *testing.T) {
 	}
 	for _, want := range []string{
 		"GitHub auth is not configured",
+		"kitsoki gh-agent login",
 		"kitsoki gh-agent setup app --name <app-name> --local-only",
 		"kitsoki gh-agent token",
 		"GH_TOKEN/GITHUB_TOKEN",

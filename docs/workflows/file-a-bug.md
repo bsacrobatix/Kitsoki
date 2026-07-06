@@ -27,8 +27,20 @@ see [`../stories/bugs.md` §2–3](../stories/bugs.md) for the full layout and
 frontmatter contract.
 
 GitHub filing is optional and uses the same local auth setup across every
-surface. Before using `--github`, `--ticket-repo`, TUI `/bug` GitHub filing,
-or MCP issue filing, run:
+surface. The easiest local setup requires GitHub CLI (`gh`) and uses its
+browser/PIN login:
+
+```sh
+kitsoki gh-agent login
+source ~/.config/kitsoki/github.env
+```
+
+What you do: approve GitHub CLI auth in the browser, or enter the one-time
+code GitHub CLI prints. What Kitsoki does: copy `gh auth token` into the local
+env file used by `--github`, `--ticket-repo`, TUI `/bug` GitHub filing, web
+Report bug, and MCP issue filing.
+
+For repo-limited GitHub App auth instead, run:
 
 ```sh
 kitsoki gh-agent setup app --name <app-name> --local-only

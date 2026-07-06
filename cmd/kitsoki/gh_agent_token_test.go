@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,6 +107,141 @@ func TestGHAgentTokenFromEnvWritesOperatorProvidedToken(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "export GH_TOKEN='pat-from-operator'") {
 		t.Fatalf("manual token not written:\n%s", raw)
+	}
+}
+
+func TestGHAgentLoginUsesExistingGitHubCLIToken(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(githubapp.EnvCredentialsDir, dir)
+
+	prevRead := readGitHubCLIToken
+	prevRun := runGitHubCLIAuthLogin
+	readGitHubCLIToken = func(ctx context.Context, hostname string) (string, error) {
+		if hostname != "github.com" {
+			t.Fatalf("hostname = %q, want github.com", hostname)
+		}
+		return "gh-cli-token", nil
+	}
+	runGitHubCLIAuthLogin = func(context.Context, string, io.Reader, io.Writer, io.Writer) error {
+		t.Fatal("login should not run when gh auth token is already available")
+		return nil
+	}
+	t.Cleanup(func() {
+		readGitHubCLIToken = prevRead
+		runGitHubCLIAuthLogin = prevRun
+	})
+
+	outPath := filepath.Join(dir, "github.env")
+	out, err := execRoot(t, "gh-agent", "login", "--out", outPath)
+	if err != nil {
+		t.Fatalf("gh-agent login: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "gh-cli-token") {
+		t.Fatalf("command output leaked token:\n%s", out)
+	}
+	for _, want := range []string{"wrote GitHub auth env", "GitHub CLI OAuth token", "next: source"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	raw, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read env file: %v", err)
+	}
+	if !strings.Contains(string(raw), "export GH_TOKEN='gh-cli-token'") {
+		t.Fatalf("GitHub CLI token not written:\n%s", raw)
+	}
+}
+
+func TestGHAgentLoginStartsGitHubCLIAuthWhenTokenMissing(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(githubapp.EnvCredentialsDir, dir)
+
+	prevRead := readGitHubCLIToken
+	prevRun := runGitHubCLIAuthLogin
+	reads := 0
+	readGitHubCLIToken = func(ctx context.Context, hostname string) (string, error) {
+		if hostname != "github.example" {
+			t.Fatalf("hostname = %q, want github.example", hostname)
+		}
+		reads++
+		if reads == 1 {
+			return "", fmt.Errorf("not logged in")
+		}
+		return "post-login-token", nil
+	}
+	loginRan := false
+	runGitHubCLIAuthLogin = func(ctx context.Context, hostname string, stdin io.Reader, stdout, stderr io.Writer) error {
+		if hostname != "github.example" {
+			t.Fatalf("login hostname = %q, want github.example", hostname)
+		}
+		loginRan = true
+		fmt.Fprintln(stdout, "First copy your one-time code: ABCD-1234")
+		return nil
+	}
+	t.Cleanup(func() {
+		readGitHubCLIToken = prevRead
+		runGitHubCLIAuthLogin = prevRun
+	})
+
+	outPath := filepath.Join(dir, "github.env")
+	out, err := execRoot(t, "gh-agent", "login", "--hostname", "github.example", "--out", outPath)
+	if err != nil {
+		t.Fatalf("gh-agent login: %v\n%s", err, out)
+	}
+	if !loginRan {
+		t.Fatal("expected GitHub CLI login to run")
+	}
+	for _, want := range []string{
+		"No usable GitHub CLI token found",
+		"one-time code",
+		"user does:",
+		"kitsoki does:",
+		"GitHub CLI OAuth token (`gh auth token`) for github.example",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	raw, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read env file: %v", err)
+	}
+	if !strings.Contains(string(raw), "export GH_TOKEN='post-login-token'") {
+		t.Fatalf("post-login token not written:\n%s", raw)
+	}
+}
+
+func TestGHAgentLoginMissingGitHubCLIExplainsAlternatives(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(githubapp.EnvCredentialsDir, dir)
+
+	prevRead := readGitHubCLIToken
+	prevRun := runGitHubCLIAuthLogin
+	readGitHubCLIToken = func(context.Context, string) (string, error) {
+		return "", errGitHubCLINotFound
+	}
+	runGitHubCLIAuthLogin = func(context.Context, string, io.Reader, io.Writer, io.Writer) error {
+		t.Fatal("login should not run when gh is missing")
+		return nil
+	}
+	t.Cleanup(func() {
+		readGitHubCLIToken = prevRead
+		runGitHubCLIAuthLogin = prevRun
+	})
+
+	out, err := execRoot(t, "gh-agent", "login")
+	if err == nil {
+		t.Fatalf("expected error, got output:\n%s", out)
+	}
+	for _, want := range []string{
+		"GitHub CLI `gh` is not installed",
+		"kitsoki gh-agent setup app --name <app-name> --local-only",
+		"GH_TOKEN/GITHUB_TOKEN",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error missing %q:\n%v", want, err)
+		}
 	}
 }
 
