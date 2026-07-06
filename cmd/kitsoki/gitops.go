@@ -1119,6 +1119,22 @@ func runGitopsAutonomousFixViaRunner(ctx context.Context, opts gitopsAutonomousF
 			return nil, err
 		}
 		mergeMaps(result, closeout)
+		watchdog, watchdogOK, _ := gitopsAutonomousFixWatchdog(ctx, opts.RunDir)
+		if watchdogOK {
+			gitopsMergeAutonomousWatchdogProof(result, watchdog)
+		}
+		if opts.PublicBaseURL != "" {
+			gitopsMergeGHAgentReadinessProof(result,
+				map[string]any{
+					"status":  "pass",
+					"summary": fmt.Sprintf("%s: ok", gitopsGHAgentEndpoint(opts.PublicBaseURL, "/healthz")),
+				},
+				map[string]any{
+					"status":  "pass",
+					"summary": fmt.Sprintf("%s: ready for %s as fake-worker", gitopsGHAgentEndpoint(opts.PublicBaseURL, "/api/ready"), opts.TicketRepo),
+				},
+			)
+		}
 		storySummary, _ := productJourneyJSON(ctx, "--summarize-run", "--run-dir", opts.RunDir)
 		mergeMaps(result, storySummary)
 		reportPath, err := writeGitopsAutonomousReport(opts.RunDir, result, nil, nil)

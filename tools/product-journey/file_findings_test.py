@@ -646,6 +646,7 @@ def main():
         )
         scenario_facade = run_json_facade["scenarios"][0]["id"]
         attach_bugfix_proof(run_dir_facade, scenario_facade)
+        run.write_autonomous_marathon_control(run_dir_facade, run_json_facade, "pending", 24, 15, 45)
         run.record_finding(run_dir_facade, "issue", "gitops facade credible", "observed problem",
                            scenario_facade, "high", "", "open", None)
         facade_proc = subprocess.run(
@@ -674,6 +675,31 @@ def main():
         _check("gitops autonomous-fix facade closes filed issues",
                facade_result["issue_closeout_status"] == "closed"
                and facade_result["issue_closeout_count"] == 1)
+        facade_report = Path(facade_result["autonomous_fix_report_path"])
+        facade_report_text = facade_report.read_text()
+        _check("gitops autonomous-fix facade report includes watchdog and hosted-agent proof",
+               "## Autonomous Watchdog" in facade_report_text
+               and "autonomous_watchdog_ok" in facade_report_text
+               and "## Hosted GH-agent" in facade_report_text
+               and "Health: `pass`" in facade_report_text
+               and "Readiness: `pass`" in facade_report_text
+               and "/healthz" in facade_report_text
+               and "/api/ready" in facade_report_text)
+        facade_report.write_text(facade_report_text.replace("## Autonomous Watchdog", "## Watchdog", 1))
+        validated_missing_watchdog_proof = run.validate_run_bundle(run_dir_facade)
+        _check("validate catches missing autonomous watchdog proof in report",
+               any(i["id"] == "autonomous-fix-report" and i["severity"] == "error"
+                   for i in validated_missing_watchdog_proof["issues"]))
+        facade_report.write_text(
+            facade_report_text
+            .replace("/healthz", "/health-check")
+            .replace("/api/ready", "/api/status")
+        )
+        validated_missing_readiness_proof = run.validate_run_bundle(run_dir_facade)
+        _check("validate catches missing hosted gh-agent proof in report",
+               any(i["id"] == "autonomous-fix-report" and i["severity"] == "error"
+                   for i in validated_missing_readiness_proof["issues"]))
+        facade_report.write_text(facade_report_text)
         report.unlink()
         reviewed_missing_report = run.review_run_bundle(run_dir2, None)
         _check("review fails missing autonomous report",

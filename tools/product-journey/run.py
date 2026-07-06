@@ -4531,6 +4531,18 @@ def render_autonomous_fix_report(run_dir: Path, status: dict, review: Optional[d
         f"- Status: `{status.get('autonomous_fix_status', status.get('status', ''))}`",
         f"- Gates: {status.get('autonomous_gate_summary', '(not evaluated)')}",
         f"- Independent verification: `{status.get('independent_verify_status', '')}` - {status.get('independent_verify_summary', '')}",
+        f"- Issue close-out: `{status.get('issue_closeout_status', '')}` ({int(status.get('issue_closeout_count', 0) or 0)} closed)",
+        "",
+        "## Autonomous Watchdog",
+        "",
+        f"- Status: `{status.get('autonomous_watchdog_status', '') or '(not checked)'}` - {status.get('autonomous_watchdog_summary', '')}",
+        f"- Age: {int(status.get('autonomous_watchdog_age_minutes', 0) or 0)} minute(s)",
+        f"- Report: {status.get('autonomous_watchdog_markdown_path', '') or '(not generated)'}",
+        "",
+        "## Hosted GH-agent",
+        "",
+        f"- Health: `{status.get('gh_agent_health_status', '') or '(not checked)'}` - {status.get('gh_agent_health_summary', '')}",
+        f"- Readiness: `{status.get('gh_agent_readiness_status', '') or '(not checked)'}` - {status.get('gh_agent_readiness_summary', '')}",
         "",
         "## Filed Issues",
         "",
@@ -4676,7 +4688,37 @@ def missing_autonomous_fix_report_tokens(run_dir: Path, findings: dict) -> list[
     )
     if issue_closeout.get("status"):
         expected.append(f"Issue close-out: `{issue_closeout.get('status')}`")
-    return [token for token in expected if token and token not in text]
+    expected.extend([
+        "## Autonomous Watchdog",
+        "## Hosted GH-agent",
+        "Health: `",
+        "Readiness: `",
+        "/healthz",
+        "/api/ready",
+    ])
+    watchdog_path = autonomous_marathon_watchdog_path(run_dir)
+    if watchdog_path.exists():
+        watchdog = read_json(watchdog_path)
+        if watchdog.get("autonomous_watchdog_status") or watchdog.get("status"):
+            expected.append(f"Status: `{watchdog.get('autonomous_watchdog_status', watchdog.get('status'))}`")
+        if watchdog.get("autonomous_watchdog_summary"):
+            expected.append(str(watchdog.get("autonomous_watchdog_summary")))
+        if watchdog.get("autonomous_watchdog_markdown_path"):
+            expected.append(str(watchdog.get("autonomous_watchdog_markdown_path")))
+    missing = [token for token in expected if token and token not in text]
+    if "Status: `(not checked)`" in text:
+        missing.append("autonomous_watchdog_status")
+    if "Report: (not generated)" in text:
+        missing.append("autonomous_watchdog_markdown_path")
+    if "Health: `(not checked)`" in text:
+        missing.append("gh_agent_health_status")
+    if "Readiness: `(not checked)`" in text:
+        missing.append("gh_agent_readiness_status")
+    if "Health: `pass`" not in text:
+        missing.append("gh_agent_health_status=pass")
+    if "Readiness: `pass`" not in text:
+        missing.append("gh_agent_readiness_status=pass")
+    return list(dict.fromkeys(missing))
 
 
 def issue_closeout_gate(findings: dict, gh_agent_requested: bool, credible_findings: list[dict]) -> tuple[bool, str]:
@@ -6708,7 +6750,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         {
             "id": "autonomous-fix-report",
             "status": "pass" if (not credible_findings or (gh_agent_requested and not autonomous_fix_report_missing)) else "fail",
-            "summary": "Autonomous fixes produce a complete human-review report with filed issue, run, and evidence links.",
+            "summary": "Autonomous fixes produce a complete human-review report with watchdog proof, hosted-agent readiness proof, filed issue links, run links, and evidence links.",
             "detail": (
                 f"credible issue findings require autonomous_fix; credible={len(credible_findings)}"
                 if credible_findings and not gh_agent_requested
@@ -7889,7 +7931,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 issues,
                 "error",
                 "autonomous-fix-report",
-                "Autonomous fix report is missing filed issue, run, or evidence links required for human review",
+                "Autonomous fix report is missing watchdog proof, hosted-agent readiness proof, filed issue links, run links, or evidence links required for human review",
                 ", ".join(missing_report_tokens[:5]),
             )
         scene_bodies = [
