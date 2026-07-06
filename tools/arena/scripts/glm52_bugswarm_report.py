@@ -25,6 +25,7 @@ DEFAULT_BAKEOFF_CELLS = REPO_ROOT / "tools/bugfix-bakeoff/results/cells"
 DEFAULT_ARENA_ROUND1 = REPO_ROOT / "tools/arena/results/round-1/rollup.json"
 DEFAULT_CORPUS = REPO_ROOT / "tools/arena/corpus/cost-bench.manifest.yaml"
 DEFAULT_SOURCES = REPO_ROOT / "tools/arena/corpus/sources.yaml"
+DEFAULT_BUGSWARM_SOURCE = REPO_ROOT / "tools/arena/corpus/bugswarm.seed.yaml"
 
 QUALITY_VALUES = ("solved", "partial", "failed", "pending", "blocked")
 
@@ -34,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--generated-at", required=True, help="stable report timestamp")
     parser.add_argument("--json-out", required=True)
     parser.add_argument("--markdown-out", required=True)
-    parser.add_argument("--bugswarm-source", default="", help="optional converted BugSwarm YAML source")
+    parser.add_argument("--bugswarm-source", default=str(DEFAULT_BUGSWARM_SOURCE), help="optional converted BugSwarm YAML source")
     parser.add_argument("--bugswarm-verification", default="", help="optional bugswarm_verify_source.py JSON report")
     parser.add_argument("--bugswarm-arena-rollup", default="", help="optional arena rollup with BugSwarm GLM-5.2 cells")
     parser.add_argument("--oss-arena-rollup", default="", help="optional arena rollup with OSS oracle GLM-5.2 cells")

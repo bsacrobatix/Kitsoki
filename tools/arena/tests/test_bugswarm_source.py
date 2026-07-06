@@ -15,6 +15,8 @@ HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parent.parent.parent
 SCRIPT = REPO_ROOT / "tools/arena/scripts/bugswarm_to_arena.py"
 SOURCES = REPO_ROOT / "tools/arena/corpus/sources.yaml"
+SEED_ARTIFACTS = REPO_ROOT / "tools/arena/corpus/bugswarm.seed-artifacts.json"
+SEED_SOURCE = REPO_ROOT / "tools/arena/corpus/bugswarm.seed.yaml"
 
 failures: list[str] = []
 
@@ -32,6 +34,16 @@ check("bugswarm verification applier path recorded", bugswarm.get("verification_
 check("bugswarm spec generator path recorded", bugswarm.get("spec_generator") if bugswarm else "", "tools/arena/scripts/bugswarm_to_arena_spec.py")
 check("bugswarm oracle kind recorded", bugswarm.get("oracle_contract", {}).get("kind") if bugswarm else "", "bugswarm_fail_pass_pair")
 
+seed_payload = yaml.safe_load(SEED_SOURCE.read_text(encoding="utf-8"))
+check("seed source kind", seed_payload.get("kind"), "arena_bugswarm_source")
+check("seed generated from artifacts", seed_payload.get("generated_from"), "tools/arena/corpus/bugswarm.seed-artifacts.json")
+check("seed task count", seed_payload.get("task_count"), 1)
+seed_task = seed_payload["tasks"][0]
+check("seed task id", seed_task["id"], "bugswarm-square-okio-140452393")
+check("seed source url preserved", seed_task["meta"]["source_url"], "https://www.bugswarm.org/docs/tutorials/setting-up-an-experiment/")
+check("seed starts unverified red", seed_task["verified_red"], False)
+check("seed starts unverified green", seed_task["verified_green"], False)
+
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
     src = tmpdir / "artifacts.json"
@@ -46,6 +58,7 @@ with tempfile.TemporaryDirectory() as tmp:
                 "language": "Java",
                 "build_system": "Gradle",
                 "classification": "code",
+                "source_url": "https://www.bugswarm.org/docs/tutorials/setting-up-an-experiment/",
             }
         ]
     }), encoding="utf-8")
@@ -69,6 +82,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("oracle kind", task["oracle"]["kind"], "bugswarm_fail_pass_pair")
     check("oracle image tag", task["oracle"]["image_tag"], "square-okio-140452393")
     check("metadata preserved", task["meta"]["build_system"], "Gradle")
+    check("source url preserved", task["meta"]["source_url"], "https://www.bugswarm.org/docs/tutorials/setting-up-an-experiment/")
 
 if failures:
     print("FAIL: bugswarm source")

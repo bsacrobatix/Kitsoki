@@ -119,6 +119,8 @@ def task_from_artifact(artifact: dict[str, Any], *, split: str) -> dict[str, Any
         "build_system": build_system,
         "classification": classification,
         "reproducibility": reproducibility,
+        "source_url": str(normalized.get("source_url") or ""),
+        "selection_note": str(normalized.get("selection_note") or ""),
     }
     task["meta"] = {k: v for k, v in meta.items() if v}
     return task

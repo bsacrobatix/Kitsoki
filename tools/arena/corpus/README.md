@@ -34,6 +34,16 @@ python3 tools/arena/scripts/bugswarm_to_arena.py \
   --out .artifacts/bugswarm/arena-source.yaml
 ```
 
+The committed `bugswarm.seed-artifacts.json` / `bugswarm.seed.yaml` pair is a
+metadata-only seed that keeps the GLM-5.2 report wired to a real BugSwarm
+artifact before any Docker pulls are approved. Regenerate it with:
+
+```bash
+python3 tools/arena/scripts/bugswarm_to_arena.py \
+  --in tools/arena/corpus/bugswarm.seed-artifacts.json \
+  --out tools/arena/corpus/bugswarm.seed.yaml
+```
+
 The converter is offline and does not pull Docker images. The generated
 BugSwarm tasks start with `verified_red: false` and `verified_green: false`;
 those flags become true only after an explicit Docker verification proves the
@@ -114,10 +124,12 @@ cells. The planner audits supplied specs before emitting paid commands: the
 Kitsoki GLM-5.2 arm is live-ready through paired-task's Kitsoki profile mapping,
 and the raw-prompt GLM-5.2 arm is live-ready only when its variant uses
 `backend: claude` so the runner can use the `synthetic-claude` profile. When
-given `--bugswarm-source`, the packet generates the BugSwarm spec with
-`--kitsoki-backend codex --raw-backend claude`; the standalone spec generator
-still defaults to `backend: synthetic` so ad hoc generated specs stay no-spend
-until an operator explicitly opts in.
+given an execute-verified `--bugswarm-source`, the packet generates the
+BugSwarm spec with `--kitsoki-backend codex --raw-backend claude`. If the
+source is only the committed metadata seed, the packet emits the Docker
+verification and verification-application commands instead of live model
+commands. The standalone spec generator still defaults to `backend: synthetic`
+so ad hoc generated specs stay no-spend until an operator explicitly opts in.
 At live run time, paired-task copies the failing checkout from the BugSwarm
 artifact image and scores the modified candidate in a fresh artifact container
 with `./run_failed.sh`, so Docker image pulls and long CI jobs remain an
