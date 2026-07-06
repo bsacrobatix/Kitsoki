@@ -64,6 +64,7 @@ states:
                 target: "{{ slots.target ?? world.target }}"
                 seed: "{{ slots.seed ?? world.seed }}"
                 live_profile: "{{ slots.profile ?? world.live_profile }}"
+                live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
                 mode: "{{ (slots.description ?? '') != '' ? 'adhoc' : 'catalog' }}"
                 last_error: ""
                 status: "planning"
