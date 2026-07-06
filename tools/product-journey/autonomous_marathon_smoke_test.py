@@ -141,6 +141,29 @@ def run_persona(
     expected_lens = run.persona_lens(run_json["persona"])
     driver_lenses = [item.get("persona_lens", {}) for item in driver_plan.get("scenarios", [])]
     brief_lens = agent_brief.get("persona_contract", {}).get("lens", {})
+    expected_utterances = {
+        scenario["id"]: scenario.get("natural_utterances", [])
+        for scenario in run_json.get("scenarios", [])
+    }
+    driver_utterances = {
+        item.get("scenario"): item.get("natural_utterances", [])
+        for item in driver_plan.get("scenarios", [])
+    }
+    driver_action_utterances = {
+        item.get("scenario"): next(
+            (
+                action.get("natural_utterances", [])
+                for action in item.get("driver_actions", [])
+                if action.get("id") == "act_as_persona"
+            ),
+            [],
+        )
+        for item in driver_plan.get("scenarios", [])
+    }
+    brief_utterances = {
+        item.get("id"): item.get("natural_utterances", [])
+        for item in agent_brief.get("scenario_order", [])
+    }
 
     scenario_ids = [scenario.get("id") for scenario in run_json.get("scenarios", [])]
     check(prefix + "run targets gears-rust with requested persona",
@@ -158,6 +181,17 @@ def run_persona(
           failures)
     check(prefix + "marathon scoped run covers core use cases",
           scenario_ids == ["project-onboarding", "prd-design", "bugfix"],
+          failures)
+    check(prefix + "core use cases carry transcript-derived natural utterances",
+          expected_utterances
+          and all(
+              utterances
+              and driver_utterances.get(scenario_id) == utterances
+              and driver_action_utterances.get(scenario_id) == utterances
+              and brief_utterances.get(scenario_id) == utterances
+              and all(item.get("source") == "session-transcript" and item.get("source_ref") for item in utterances)
+              for scenario_id, utterances in expected_utterances.items()
+          ),
           failures)
     check(prefix + "autonomous replay captured every core use case",
           driver_result.get("autonomous_driver_status") == "captured"
