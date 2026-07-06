@@ -71,6 +71,7 @@ states:
                 leg_index: 0
                 leg_count: 0
                 legs: {}
+                plan_status: {}
                 current_leg: {}
                 current_leg_id: ""
                 drive_result: {}
