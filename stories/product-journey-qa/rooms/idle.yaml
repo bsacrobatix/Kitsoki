@@ -392,6 +392,8 @@ states:
                 seed: "{{ slots.seed ?? world.seed }}"
                 scenario_scope: "{{ slots.scenarios ?? world.scenario_scope }}"
                 live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
+                ticket_repo: "{{ slots.ticket_repo ?? world.ticket_repo }}"
+                gh_agent_public_base_url: "{{ slots.gh_agent_public_base_url ?? world.gh_agent_public_base_url }}"
                 autonomous_marathon_status: "running"
                 autonomous_marathon_summary: ""
                 autonomous_marathon_report_path: ""
@@ -407,7 +409,7 @@ states:
                 validation_issue_summary: ""
                 status: "creating_autonomous_marathon"
             - invoke: host.run
-              id: autonomous_product_journey_marathon
+              id: autonomous_product_journey_marathon_create
               with:
                 cmd: python3
                 args:

@@ -7,6 +7,23 @@ app:
 
 hosts:
   - host.run
+  - host.agent.task
+
+agents:
+  autonomous_driver:
+    system_prompt: >-
+      You are the reusable product-journey QA driver
+      (.agents/agents/product-journey-qa-driver.md). Drive the generated
+      product-journey run bundle through Kitsoki Studio MCP and visual MCP,
+      capture evidence, record findings and driver-journal events through the
+      product-journey story, then run the story-owned autonomous watchdog,
+      autonomous_fix, review, validate, and stats gates when the run has
+      credible issue findings. Do not call gh directly; the native
+      product-journey story/gitops/gh-agent gates own all GitHub filing,
+      fixing, evidence, close-out, and stats.
+    model: claude-sonnet-4-6
+    tools: [Read, Grep, Glob, Bash, mcp__kitsoki__studio_ping, mcp__kitsoki__studio_handles, mcp__kitsoki__session_new, mcp__kitsoki__session_attach, mcp__kitsoki__session_drive, mcp__kitsoki__session_submit, mcp__kitsoki__session_continue, mcp__kitsoki__session_answer, mcp__kitsoki__session_status, mcp__kitsoki__session_world, mcp__kitsoki__session_inspect, mcp__kitsoki__session_trace, mcp__kitsoki__session_close, mcp__kitsoki__render_tui, mcp__kitsoki__render_tui_png, mcp__kitsoki__render_web, mcp__kitsoki__visual_open, mcp__kitsoki__visual_observe, mcp__kitsoki__visual_act]
+    effect: external
 
 world:
   project:        { type: string, default: "gears-rust" }
@@ -138,6 +155,7 @@ world:
   finding_summary: { type: string, default: "" }
   finding_severity: { type: string, default: "" }
   ticket_repo:    { type: string, default: "" }
+  gh_agent_public_base_url: { type: string, default: "" }
   filing_status:  { type: string, default: "" }
   filing_dry_run: { type: string, default: "" }
   findings_filed_count: { type: int, default: 0 }
@@ -207,6 +225,8 @@ world:
   autonomous_driver_summary: { type: string, default: "" }
   autonomous_driver_evidence_count: { type: int, default: 0 }
   autonomous_driver_issue_count: { type: int, default: 0 }
+  autonomous_driver_dispatch_result: { type: object, default: {} }
+  autonomous_driver_dispatch_trace: { type: string, default: "" }
   autonomous_control_path: { type: string, default: "" }
   autonomous_control_markdown_path: { type: string, default: "" }
   autonomous_control_status: { type: string, default: "" }
@@ -348,6 +368,10 @@ intents:
       autonomous_cadence_hours: { type: int, required: false }
       autonomous_heartbeat_minutes: { type: int, required: false }
       autonomous_watchdog_minutes: { type: int, required: false }
+  dispatch_driver:
+    description: "Dispatch the story-owned record/live product-journey QA driver for a ready autonomous marathon run."
+    examples: ["dispatch driver", "run autonomous driver", "capture live persona evidence"]
+    priority: 88
   autonomous_watchdog:
     description: "Check a standing persona-QA marathon heartbeat against its watchdog control artifact."
     examples: ["autonomous watchdog", "check marathon watchdog", "watchdog run_dir=.artifacts/product-journey/run-123"]
@@ -492,7 +516,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, capture_preflight, native_ghagent_smoke, autonomous_fix_smoke, persona_autofix_smoke, autonomous_marathon_smoke, autonomous_marathon, autonomous_watchdog, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, autonomous_fix, stats, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
+  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, capture_preflight, native_ghagent_smoke, autonomous_fix_smoke, persona_autofix_smoke, autonomous_marathon_smoke, autonomous_marathon, dispatch_driver, autonomous_watchdog, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, autonomous_fix, stats, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
 
 root: idle
 

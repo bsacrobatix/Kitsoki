@@ -108,6 +108,9 @@ states:
             - label: "driver_event scenario=... summary=..."
               hint: "append a reusable-driver attempt to driver-journal.md"
               intent: driver_event
+            - label: "dispatch_driver"
+              hint: "launch the story-owned record/live product-journey driver, then finalize through native gates"
+              intent: dispatch_driver
             - label: "autonomous_fix ticket_repo=owner/repo gh_agent_public_base_url=<url>"
               hint: "file credible issues, drain gh-agent fixes, refresh review artifacts, and validate in one gate"
               intent: autonomous_fix
@@ -143,6 +146,45 @@ states:
             - label: "look"
               intent: look
     on:
+      dispatch_driver:
+        - when: "!(world.autonomous_driver_mode == 'record' || world.autonomous_driver_mode == 'live') || world.autonomous_driver_status != 'ready_for_dispatch'"
+          target: run_created
+          effects:
+            - set:
+                autonomous_driver_summary: "No live or record driver is ready for dispatch."
+                status: "driver_dispatch_not_ready"
+        - target: run_created
+          effects:
+            - set:
+                status: "dispatching_autonomous_driver"
+            - invoke: host.agent.task
+              id: autonomous_product_journey_driver
+              with:
+                agent: autonomous_driver
+                acceptance:
+                  schema: schemas/autonomous_driver_result.json
+                context:
+                  prompt: prompts/autonomous_driver.md
+                  args:
+                    run_dir: "{{ world.run_dir }}"
+                    project: "{{ world.project }}"
+                    persona: "{{ world.persona }}"
+                    scenario_scope: "{{ world.scenario_scope }}"
+                    autonomous_driver_mode: "{{ world.autonomous_driver_mode }}"
+                    live_budget_minutes: "{{ world.live_budget_minutes }}"
+                    ticket_repo: "{{ world.ticket_repo }}"
+                    gh_agent_public_base_url: "{{ world.gh_agent_public_base_url }}"
+                    autonomous_control_path: "{{ world.autonomous_control_path }}"
+                    autonomous_marathon_report_path: "{{ world.autonomous_marathon_report_path }}"
+              bind:
+                autonomous_driver_dispatch_result: submitted
+                autonomous_driver_status: submitted.status
+                autonomous_driver_summary: submitted.summary
+                autonomous_driver_evidence_count: submitted.evidence_count
+                autonomous_driver_issue_count: submitted.issue_count
+                autonomous_driver_dispatch_trace: submitted.trace
+              on_error: run_created
+            - emit_intent: autonomous_marathon
       attach:
         - target: run_created
           guard_hint: "create a run before attaching evidence"
@@ -607,7 +649,7 @@ states:
                 gh_agent_missing_evidence_summary: "ticket_repo is required"
                 gh_agent_missing_verify_summary: "ticket_repo is required"
                 status: "autonomous_marathon_invalid"
-        - when: "world.issue_count > 0 && (slots.gh_agent_public_base_url == nil || slots.gh_agent_public_base_url == '')"
+        - when: "world.issue_count > 0 && (slots.gh_agent_public_base_url == nil || slots.gh_agent_public_base_url == '') && (world.gh_agent_public_base_url == nil || world.gh_agent_public_base_url == '')"
           target: run_created
           effects:
             - set:
@@ -629,6 +671,7 @@ states:
           effects:
             - set:
                 ticket_repo: "{{ slots.ticket_repo ?? world.ticket_repo }}"
+                gh_agent_public_base_url: "{{ slots.gh_agent_public_base_url ?? world.gh_agent_public_base_url }}"
                 autonomous_marathon_status: "running"
                 autonomous_marathon_summary: ""
                 autonomous_marathon_report_path: ""
@@ -667,7 +710,7 @@ states:
                   - --gh-agent-story
                   - "{{ slots.gh_agent_story ?? 'stories/bugfix' }}"
                   - --gh-agent-public-base-url
-                  - "{{ slots.gh_agent_public_base_url ?? '' }}"
+                  - "{{ slots.gh_agent_public_base_url ?? world.gh_agent_public_base_url }}"
                   - --gh-agent-project-root
                   - "{{ slots.gh_agent_project_root ?? '' }}"
                   - --gh-agent-incident-repo

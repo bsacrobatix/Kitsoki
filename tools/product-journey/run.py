@@ -5679,10 +5679,12 @@ def autonomous_marathon(
 ) -> dict:
     """Create or finalize a standing persona-QA marathon bundle.
 
-    Creation is deterministic and does not dispatch a live driver. Finalization
-    is story-owned: credible issue findings go through the native autonomous
-    fix gate, review/validate are refreshed, weaknesses route to PRD/design,
-    and stats derive from cached issue state.
+    Creation is deterministic. Replay attaches cassette proof immediately;
+    live/record return a ready bundle for the product-journey story to dispatch
+    through host.agent.task before re-entering this finalizer. Finalization is
+    story-owned: credible issue findings go through the native autonomous fix
+    gate, review/validate are refreshed, weaknesses route to PRD/design, and
+    stats derive from cached issue state.
     """
     if run_dir is None:
         run_scenarios = select_scenarios(scenarios, scenario_filter)
@@ -5699,15 +5701,12 @@ def autonomous_marathon(
             live_budget_minutes,
             [],
         )
-        if autonomous_driver_mode not in {"pending", "replay"}:
+        if autonomous_driver_mode not in {"pending", "replay", "record", "live"}:
             return invalid_autonomous_marathon_creation(
                 created_dir,
                 run_json,
-                (
-                    f"autonomous_driver_mode={autonomous_driver_mode} is not story-dispatchable yet; "
-                    "use pending for a reviewable handoff or replay for a no-LLM autonomous proof."
-                ),
-                "driver-dispatch-not-implemented",
+                f"unsupported autonomous_driver_mode={autonomous_driver_mode}",
+                "unsupported-driver-mode",
                 "driver=fail, filing=not_run, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=fail",
                 ticket_repo,
                 gh_agent_public_base_url,
@@ -5817,11 +5816,16 @@ def autonomous_marathon(
             "status": "autonomous_marathon_ready_for_driver",
             "autonomous_marathon_status": "autonomous_marathon_ready_for_driver",
             "autonomous_marathon_summary": (
-                f"Created {len(run_json.get('scenarios', []))} scenario(s); driver evidence capture is pending."
+                f"Created {len(run_json.get('scenarios', []))} scenario(s); driver evidence capture is "
+                + ("ready for story-owned dispatch." if autonomous_driver_mode in {"record", "live"} else "pending.")
             ),
-            "autonomous_driver_mode": "pending",
-            "autonomous_driver_status": "pending",
-            "autonomous_driver_summary": "Driver evidence capture is pending.",
+            "autonomous_driver_mode": autonomous_driver_mode,
+            "autonomous_driver_status": "ready_for_dispatch" if autonomous_driver_mode in {"record", "live"} else "pending",
+            "autonomous_driver_summary": (
+                f"Story-owned {autonomous_driver_mode} driver dispatch is ready."
+                if autonomous_driver_mode in {"record", "live"}
+                else "Driver evidence capture is pending."
+            ),
             "autonomous_driver_evidence_count": 0,
             "autonomous_driver_issue_count": 0,
             "run_id": run_json["run_id"],
@@ -5840,7 +5844,11 @@ def autonomous_marathon(
             "autonomous_fix_status": "not_run",
             "independent_verify_status": "not_run",
             "independent_verify_summary": "independent verification not run",
-            "autonomous_gate_summary": "filing=not_run, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=not_run",
+            "autonomous_gate_summary": (
+                "driver=ready, filing=not_run, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=not_run"
+                if autonomous_driver_mode in {"record", "live"}
+                else "filing=not_run, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=not_run"
+            ),
             "autonomous_control_path": str(autonomous_marathon_control_path(created_dir)),
             "autonomous_control_markdown_path": str(autonomous_marathon_control_markdown_path(created_dir)),
             "autonomous_control_status": control.get("status", ""),
