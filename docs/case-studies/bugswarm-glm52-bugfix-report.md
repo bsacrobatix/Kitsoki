@@ -103,6 +103,22 @@ BugSwarm source contract:
 - No BugSwarm artifact source has been imported and RED/GREEN verified yet.
 - No committed GLM-5.2 Kitsoki or raw-prompt result exists for BugSwarm.
 
+## Evidence Closure Packet
+
+Generate the offline execution packet for the pending headline cells with:
+
+```bash
+python3 tools/arena/scripts/glm52_gap_plan.py \
+  --report-json docs/case-studies/bugswarm-glm52-bugfix-report.data.json \
+  --json-out .artifacts/arena/glm52-gap-plan.json \
+  --markdown-out .artifacts/arena/glm52-gap-plan.md
+  # pass --bugswarm-source <execute-verified BugSwarm YAML> after importing artifacts
+```
+
+The packet emits no-spend `arena.py plan` / arming commands and, only
+after a spec passes audit, explicit `ARENA_PAIRED_TASK_ENABLE_CODEX=1
+... --live` commands for operator execution.
+
 ## Interpretation
 
 - Committed GLM-5.2 Kitsoki evidence contains 1 attempted OSS oracle cell(s), 2890980 total tokens, and no solved cell yet.
