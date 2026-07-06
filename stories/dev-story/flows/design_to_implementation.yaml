@@ -70,7 +70,11 @@ host_handlers:
       title: "Per-session working folder"
       body:  "Implement the accepted proposal."
       url:   "docs/proposals/per-session-working-folder.md"
-      tickets: "F-2026-06-11T120000Z-per-session-working-folder: Per-session working folder"
+      tickets:
+        - id:    "F-2026-06-11T120000Z-per-session-working-folder"
+          title: "Per-session working folder"
+          type:  "feature"
+          status: "open"
   host.agent.decide:
     data:
       ok: true

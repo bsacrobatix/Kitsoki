@@ -1325,6 +1325,7 @@ func runOneFlowLegacy(ctx context.Context, def *app.AppDef, m machine.Machine, f
 			tr.View = v
 		} else {
 			tr.View = machResult.View
+			tr.Failures = append(tr.Failures, fmt.Sprintf("G-VIEW: post-turn render failed for state %q: %s", currentState, rErr.Error()))
 		}
 		tr.Events = machResult.Events
 
@@ -1726,16 +1727,24 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 		}
 
 		tr.NewState = currentState
-		// Use the outcome view when available — it reflects runtime-injected
-		// content (e.g. the on_error redirect error banner) that a bare
-		// template re-render cannot reproduce. Fall back to re-rendering
-		// against the post-completion state/world when the outcome has no
-		// view (e.g. clock-only turns or turns where the view was not yet
-		// captured at return time).
+		// Re-render against the post-completion state/world unconditionally
+		// (the G-VIEW gate): a non-nil error here fails the turn even if the
+		// fixture declares no expect_view_matches, so a broken template can't
+		// hide behind runtime-injected content from a prior step. The
+		// rendered text is only used as tr.View when outcome.View is empty
+		// (e.g. clock-only turns, or turns where the view was not yet
+		// captured at return time) — when outcome.View IS set it reflects
+		// runtime-injected content (e.g. the on_error redirect error banner)
+		// that a bare template re-render cannot reproduce, so it still wins.
+		if v, rErr := rig.orch.RenderState(currentState, currentWorld); rErr == nil {
+			if outcome.View == "" {
+				tr.View = v
+			}
+		} else {
+			tr.Failures = append(tr.Failures, fmt.Sprintf("G-VIEW: post-turn render failed for state %q: %s", currentState, rErr.Error()))
+		}
 		if outcome.View != "" {
 			tr.View = outcome.View
-		} else if v, rErr := rig.orch.RenderState(currentState, currentWorld); rErr == nil {
-			tr.View = v
 		}
 		tr.Events = outcome.Events
 

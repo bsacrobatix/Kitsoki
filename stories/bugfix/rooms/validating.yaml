@@ -47,7 +47,7 @@ states:
             # Editor awareness (WS-C C3): honest either way — an attached
             # `/ide` link's diagnostic count, or an explicit "no editor
             # attached" rather than silently omitting the row.
-            "Editor diagnostics": '{{ world.ide_diagnostics_result.connected ? world.ide_diagnostics|length : "no editor attached" }}'
+            "Editor diagnostics": '{% if world.ide_diagnostics_result.connected %}{{ world.ide_diagnostics|length }}{% else %}no editor attached{% endif %}'
       - heading: "Artifact"
       - code: '{{ world.validate_artifact.summary_markdown|default:"(pending — agent has not returned yet)" }}'
       - choice:

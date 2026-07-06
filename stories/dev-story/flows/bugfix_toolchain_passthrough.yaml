@@ -25,7 +25,12 @@ host_handlers:
   host.local_files.ticket:
     data:
       ok: true
-      tickets: "TKT-200: bar"
+      tickets:
+        - id:       "TKT-200"
+          title:    "bar"
+          type:     "bug"
+          status:   "open"
+          priority: "P2"
   host.append_to_file:
     data: { ok: true, message_id: "msg-1" }
   host.inbox.add:
