@@ -252,6 +252,36 @@ func TestBugCreateCmd_TargetRequired(t *testing.T) {
 	})
 }
 
+func TestBugCreateCmd_GitHubMissingAuthExplainsSetup(t *testing.T) {
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("HOME", t.TempDir())
+
+	root := newRootCmd()
+	root.SetArgs([]string{
+		"bug", "create",
+		"--target", "kitsoki",
+		"--title", "Report bug cannot file",
+		"--body", "Expected a clean auth prompt.",
+		"--github", "owner/repo",
+	})
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+
+	err := root.Execute()
+	require.Error(t, err)
+	for _, want := range []string{
+		"GitHub auth is not configured",
+		"kitsoki gh-agent setup app --name <app-name> --local-only",
+		"kitsoki gh-agent setup attach --repo <owner/repo>",
+		"kitsoki gh-agent token",
+		"GH_TOKEN/GITHUB_TOKEN",
+	} {
+		require.Contains(t, err.Error(), want)
+	}
+}
+
 // TestBugCreateCmd_KitsokiTarget asserts --target kitsoki with an
 // explicit --target-dir writes under <tmp>/issues/bugs/ and emits a
 // `target: "kitsoki"` field. The directory itself is not a real git

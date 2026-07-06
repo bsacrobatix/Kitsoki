@@ -5,7 +5,7 @@ becomes a real, honestly-reported kitsoki run. It covers the `ghagent`
 package end to end: ingress, the honesty contract, per-job worktree
 isolation, live-or-replay harness selection, and the drain loop that keeps
 queued jobs moving. For standing up the GitHub App itself (manifest,
-webhook URL, systemd service, live proof flow), see
+local-only OAuth/token setup, webhook URL, systemd service, live proof flow), see
 [`github-app-setup.md`](github-app-setup.md).
 
 Package: [`internal/ghagent`](../../internal/ghagent/doc.go). Serve command:
@@ -152,6 +152,13 @@ App JWT (`internal/ghagent/githubapp.AppTokenSource`) — see
 [`github-app-setup.md`](github-app-setup.md) for the manifest/setup flow.
 Every dispatched job gets exactly one rolling status comment, edited in
 place (never a flood of new comments) as the run progresses.
+
+Local bug/PR filing does not require this hosted webhook surface. A developer
+without a public URL can run `kitsoki gh-agent setup app --name <app-name>
+--local-only`, attach the target repo, then run `kitsoki gh-agent token` and
+source `~/.config/kitsoki/github.env`. That configures the same
+least-privilege GitHub App installation token for local `kitsoki bug
+create --github`, TUI `/bug`, web Report bug, and MCP issue-filing paths.
 
 A minimal run list/detail surface is served at `/runs` and `/run/<job-id>`
 (plain HTML + `/api/runs` JSON) reading `jobs.GHJobStore` directly — enough
