@@ -109,6 +109,42 @@ Status: `incomplete` (4/8 requirements proven).
 | bugswarm-kitsoki-glm52 | `missing` | No attempted cell is committed. Pending task(s): bugswarm-square-okio-140452393 | Run the generated gap-plan commands, land the rollup, and regenerate this report |
 | bugswarm-raw-glm52 | `missing` | No attempted cell is committed. Pending task(s): bugswarm-square-okio-140452393 | Run the generated gap-plan commands, land the rollup, and regenerate this report |
 
+## Study Protocol
+
+Status: `pending-evidence`. Candidate: `glm-5.2`. Primary cost metric: `total_tokens`.
+
+Success metric: `solved / (solved + partial + failed)`.
+
+| corpus | task | treatment | gate |
+|---|---|---|---|
+| oss-oracle | kitsoki-bug9-bugfix-test-repair | raw-prompt | `ready-to-plan` |
+| bugswarm | bugswarm-square-okio-140452393 | kitsoki | `execute-verify-bugswarm` |
+| bugswarm | bugswarm-square-okio-140452393 | raw-prompt | `execute-verify-bugswarm` |
+
+Execution steps:
+
+- `oss-raw-glm52`: `ready`; Schedule missing OSS oracle raw-prompt GLM-5.2 cells with the frozen corpus manifest.
+  Report regeneration argument: `--oss-arena-rollup .artifacts/arena/glm52-oss/rollup.json`.
+  Commands:
+  - `python3 tools/arena/scripts/oss_to_arena_spec.py --report-json docs/case-studies/bugswarm-glm52-bugfix-report.data.json --corpus tools/arena/corpus/cost-bench.manifest.yaml --out .artifacts/arena/oss-glm52.yaml`
+  - `python3 tools/arena/arena.py plan --spec .artifacts/arena/oss-glm52.yaml`
+  - `python3 tools/arena/arena.py run --spec .artifacts/arena/oss-glm52.yaml --out .artifacts/arena/glm52-oss`
+  - `ARENA_PAIRED_TASK_ENABLE_CODEX=1 python3 tools/arena/arena.py run --spec .artifacts/arena/oss-glm52.yaml --out .artifacts/arena/glm52-oss --live`
+- `bugswarm-execute-verification`: `required-before-live`; Prove BugSwarm failed/passed scripts still reproduce in fresh containers.
+  Report regeneration argument: `--bugswarm-verification .artifacts/bugswarm/verification.json`.
+  Commands:
+  - `python3 tools/arena/scripts/bugswarm_verify_source.py --source tools/arena/corpus/bugswarm.seed.yaml --out .artifacts/bugswarm/verification.json --execute`
+  - `python3 tools/arena/scripts/bugswarm_apply_verification.py --source tools/arena/corpus/bugswarm.seed.yaml --verification .artifacts/bugswarm/verification.json --out .artifacts/bugswarm/arena-source.verified.yaml`
+  - `python3 tools/arena/scripts/glm52_gap_plan.py --report-json docs/case-studies/bugswarm-glm52-bugfix-report.data.json --json-out .artifacts/arena/glm52-gap-plan.json --markdown-out .artifacts/arena/glm52-gap-plan.md --bugswarm-source .artifacts/bugswarm/arena-source.verified.yaml`
+
+Live controls:
+
+- The report generator, gap planner, and tests are offline and must not run Docker or LLMs.
+- The operator must run no-LLM arena.py plan and non-live arena.py run before any --live command.
+- Live commands must be explicit and include ARENA_PAIRED_TASK_ENABLE_CODEX=1.
+- GLM-5.2 raw-prompt variants must use backend=claude so paired_task_runner dispatches through the synthetic-claude profile.
+- BugSwarm live cells require execute-mode RED/GREEN verification before model scheduling.
+
 ## Committed GLM-5.2 Cells
 
 | task | treatment | quality | tokens | cost | evidence |

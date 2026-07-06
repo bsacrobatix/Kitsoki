@@ -83,6 +83,29 @@ with tempfile.TemporaryDirectory() as tmp:
 
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)
+    bad = out / "bad-study-protocol-count.json"
+    report = json.loads(REPORT.read_text(encoding="utf-8"))
+    report["study_protocol"]["pending_cell_count"] = 0
+    bad.write_text(json.dumps(report), encoding="utf-8")
+    proc = run_gate(bad)
+    check("bad study protocol count exits nonzero", proc.returncode, 1)
+    check("bad study protocol count names matrix", "study protocol pending_cell_count does not match matrix" in proc.stdout, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
+    bad = out / "bad-study-protocol-bugswarm.json"
+    report = json.loads(REPORT.read_text(encoding="utf-8"))
+    report["study_protocol"]["execution_steps"] = [
+        step for step in report["study_protocol"]["execution_steps"]
+        if step["id"] != "bugswarm-execute-verification"
+    ]
+    bad.write_text(json.dumps(report), encoding="utf-8")
+    proc = run_gate(bad)
+    check("bad study protocol bugswarm exits nonzero", proc.returncode, 1)
+    check("bad study protocol bugswarm names execute", "must require BugSwarm execute verification" in proc.stdout, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
     bad = out / "bad-pending-tokens.json"
     report = json.loads(REPORT.read_text(encoding="utf-8"))
     row = next(row for row in report["required_glm52_matrix"] if row["quality"] == "pending")

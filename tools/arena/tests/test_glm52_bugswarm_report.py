@@ -92,6 +92,18 @@ with tempfile.TemporaryDirectory() as tmp:
     check("audit oss raw missing", audit_requirements["oss-raw-glm52"]["status"], "missing")
     check("audit bugswarm kitsoki missing", audit_requirements["bugswarm-kitsoki-glm52"]["status"], "missing")
     check("audit bugswarm raw missing", audit_requirements["bugswarm-raw-glm52"]["status"], "missing")
+    protocol = report["study_protocol"]
+    check("study protocol pending", protocol["status"], "pending-evidence")
+    check("study protocol candidate", protocol["candidate"], "glm-5.2")
+    check("study protocol pending count", protocol["pending_cell_count"], 3)
+    protocol_cells = {(cell["corpus"], cell["treatment"], cell["gate"]) for cell in protocol["pending_cells"]}
+    check("study protocol oss raw gate", ("oss-oracle", "raw-prompt", "ready-to-plan") in protocol_cells, True)
+    check("study protocol bugswarm kitsoki gate", ("bugswarm", "kitsoki", "execute-verify-bugswarm") in protocol_cells, True)
+    protocol_steps = {step["id"]: step for step in protocol["execution_steps"]}
+    check("study protocol oss step ready", protocol_steps["oss-raw-glm52"]["status"], "ready")
+    check("study protocol bugswarm verification required", protocol_steps["bugswarm-execute-verification"]["status"], "required-before-live")
+    check("study protocol no premature bugswarm live step", "bugswarm-glm52-cells" in protocol_steps, False)
+    check("study protocol mentions claude backend", any("backend=claude" in item for item in protocol["live_controls"]), True)
     refs = report["references"]
     check("references include local evidence", refs["local_evidence"][0]["path"], "tools/bugfix-bakeoff/results/cells")
     check("references include bugswarm website", refs["upstream"][0]["url"], "https://www.bugswarm.org/")
@@ -105,6 +117,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("markdown includes completion audit", "## Completion Audit" in md, True)
     check("markdown audit includes execute verification", "bugswarm-execute-verification" in md, True)
     check("markdown audit includes oss raw", "oss-raw-glm52" in md, True)
+    check("markdown includes study protocol", "## Study Protocol" in md, True)
+    check("markdown protocol includes ready gate", "| oss-oracle | kitsoki-bug9-bugfix-test-repair | raw-prompt | `ready-to-plan` |" in md, True)
+    check("markdown protocol includes execute gate", "| bugswarm | bugswarm-square-okio-140452393 | kitsoki | `execute-verify-bugswarm` |" in md, True)
     check("markdown marks overall comparison pending", "| overall | pending | 1 | 0 | n/a | n/a | Raw-prompt GLM-5.2 arm has no attempted cells. |" in md, True)
     check("markdown warns no token ratio", "must not compute a token ratio" in md, True)
     check("markdown includes closure packet", "## Evidence Closure Packet" in md, True)
@@ -291,6 +306,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("bugswarm kitsoki audit proven", audit_requirements["bugswarm-kitsoki-glm52"]["status"], "proven")
     check("bugswarm raw audit proven", audit_requirements["bugswarm-raw-glm52"]["status"], "proven")
     check("bugswarm fixture still incomplete without oss raw", audit["status"], "incomplete")
+    protocol = report["study_protocol"]
+    check("bugswarm complete protocol omits execute gate", any(cell["gate"] == "execute-verify-bugswarm" for cell in protocol["pending_cells"]), False)
     gaps = "\n".join(report["evidence_gaps"])
     check("bugswarm result gap absent", "Some imported BugSwarm tasks are missing" in gaps, False)
     md = md_out.read_text(encoding="utf-8")

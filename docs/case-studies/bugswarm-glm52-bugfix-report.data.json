@@ -519,5 +519,66 @@
       }
     }
   },
+  "study_protocol": {
+    "candidate": "glm-5.2",
+    "execution_steps": [
+      {
+        "commands": [
+          "python3 tools/arena/scripts/oss_to_arena_spec.py --report-json docs/case-studies/bugswarm-glm52-bugfix-report.data.json --corpus tools/arena/corpus/cost-bench.manifest.yaml --out .artifacts/arena/oss-glm52.yaml",
+          "python3 tools/arena/arena.py plan --spec .artifacts/arena/oss-glm52.yaml",
+          "python3 tools/arena/arena.py run --spec .artifacts/arena/oss-glm52.yaml --out .artifacts/arena/glm52-oss",
+          "ARENA_PAIRED_TASK_ENABLE_CODEX=1 python3 tools/arena/arena.py run --spec .artifacts/arena/oss-glm52.yaml --out .artifacts/arena/glm52-oss --live"
+        ],
+        "id": "oss-raw-glm52",
+        "pending_cells": 1,
+        "purpose": "Schedule missing OSS oracle raw-prompt GLM-5.2 cells with the frozen corpus manifest.",
+        "report_arg": "--oss-arena-rollup .artifacts/arena/glm52-oss/rollup.json",
+        "status": "ready"
+      },
+      {
+        "commands": [
+          "python3 tools/arena/scripts/bugswarm_verify_source.py --source tools/arena/corpus/bugswarm.seed.yaml --out .artifacts/bugswarm/verification.json --execute",
+          "python3 tools/arena/scripts/bugswarm_apply_verification.py --source tools/arena/corpus/bugswarm.seed.yaml --verification .artifacts/bugswarm/verification.json --out .artifacts/bugswarm/arena-source.verified.yaml",
+          "python3 tools/arena/scripts/glm52_gap_plan.py --report-json docs/case-studies/bugswarm-glm52-bugfix-report.data.json --json-out .artifacts/arena/glm52-gap-plan.json --markdown-out .artifacts/arena/glm52-gap-plan.md --bugswarm-source .artifacts/bugswarm/arena-source.verified.yaml"
+        ],
+        "id": "bugswarm-execute-verification",
+        "pending_cells": 2,
+        "purpose": "Prove BugSwarm failed/passed scripts still reproduce in fresh containers.",
+        "report_arg": "--bugswarm-verification .artifacts/bugswarm/verification.json",
+        "status": "required-before-live"
+      }
+    ],
+    "live_controls": [
+      "The report generator, gap planner, and tests are offline and must not run Docker or LLMs.",
+      "The operator must run no-LLM arena.py plan and non-live arena.py run before any --live command.",
+      "Live commands must be explicit and include ARENA_PAIRED_TASK_ENABLE_CODEX=1.",
+      "GLM-5.2 raw-prompt variants must use backend=claude so paired_task_runner dispatches through the synthetic-claude profile.",
+      "BugSwarm live cells require execute-mode RED/GREEN verification before model scheduling."
+    ],
+    "pending_cell_count": 3,
+    "pending_cells": [
+      {
+        "corpus": "oss-oracle",
+        "gate": "ready-to-plan",
+        "task": "kitsoki-bug9-bugfix-test-repair",
+        "treatment": "raw-prompt"
+      },
+      {
+        "corpus": "bugswarm",
+        "gate": "execute-verify-bugswarm",
+        "task": "bugswarm-square-okio-140452393",
+        "treatment": "kitsoki"
+      },
+      {
+        "corpus": "bugswarm",
+        "gate": "execute-verify-bugswarm",
+        "task": "bugswarm-square-okio-140452393",
+        "treatment": "raw-prompt"
+      }
+    ],
+    "primary_cost_metric": "total_tokens",
+    "status": "pending-evidence",
+    "success_metric": "solved / (solved + partial + failed)"
+  },
   "version": 1
 }
