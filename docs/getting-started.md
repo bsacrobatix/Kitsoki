@@ -49,7 +49,42 @@ kitsoki run --harness live
 Provider/model switching for an onboarded project is covered in
 [harness profiles](architecture/harness-profiles.md).
 
-## 3. Onboard your project
+## 3. Set up GitHub auth for local issue/PR work
+
+Kitsoki can open GitHub issues, open PRs, push branches/artifacts, and comment
+from local runs when GitHub auth is available. The preferred setup is a
+least-privilege GitHub App installation token, not a broad personal token:
+
+```sh
+kitsoki gh-agent setup app --name <app-name> --public-base-url https://agent.example.com
+kitsoki gh-agent setup attach --repo owner/name
+kitsoki gh-agent token
+source ~/.config/kitsoki/github.env
+```
+
+What you do: create/install the App, choose the repositories it can access, and
+approve GitHub's consent page. What Kitsoki does autonomously: mint a
+short-lived installation token, write it to a local 0600 env file, and use it as
+`GH_TOKEN`/`GITHUB_TOKEN` only for the GitHub actions your flow requests.
+
+The App permission floor is repository metadata read; issues, pull requests,
+and contents write; checks read. Repository access is still limited to the repos
+you selected during installation.
+
+If you cannot use a GitHub App yet, create a fine-grained PAT scoped only to the
+target repositories with the same repository permissions, put it in
+`GH_TOKEN` or `GITHUB_TOKEN`, and record it for local Kitsoki commands:
+
+```sh
+export GH_TOKEN=<fine-grained-pat>
+kitsoki gh-agent token --from-env
+source ~/.config/kitsoki/github.env
+```
+
+For a hosted `@kitsoki` agent or deeper setup details, see
+[GitHub App setup](architecture/github-app-setup.md).
+
+## 4. Onboard your project
 
 Run Kitsoki from the repository you want to use it in:
 
@@ -78,7 +113,7 @@ continue           # confirm apply
 For the detailed contract behind this flow, see
 [project-onboarding.md](project-onboarding.md).
 
-## 4. Review what onboarding writes
+## 5. Review what onboarding writes
 
 Onboarding writes an auditable, checked-in Kitsoki setup into your repo:
 
@@ -94,7 +129,7 @@ Onboarding writes an auditable, checked-in Kitsoki setup into your repo:
 Nothing is hidden in a global cache. The setup is meant to be reviewed, edited,
 and committed with the rest of your project.
 
-## 5. Verify readiness
+## 6. Verify readiness
 
 Onboarding records likely project checks, but it does not run arbitrary project
 commands automatically. Run the readiness verifier when you are ready:
@@ -111,7 +146,7 @@ summary into `.kitsoki/project-profile.yaml`, run:
 python3 .kitsoki/check-readiness.py --json --update-profile
 ```
 
-## 6. Use Kitsoki after onboarding
+## 7. Use Kitsoki after onboarding
 
 From then on, run Kitsoki from the project root:
 
@@ -126,7 +161,7 @@ If you want to run the materialized story directly:
 kitsoki run .kitsoki/stories/<id>-dev/app.yaml
 ```
 
-## 7. Drive it from your coding agent
+## 8. Drive it from your coding agent
 
 Onboarding registers the Kitsoki studio MCP server in `.mcp.json`. Attach your
 coding agent to this project and it can use Kitsoki as a control plane for
@@ -142,7 +177,7 @@ Codex can use its MCP config or the mirrored driver agent installed by the
 toolkit. The full runbook is in
 [Studio MCP dogfood recipe](recipes/studio-mcp-dogfood.md#run-a-pure-kitsoki-driver).
 
-## 8. Learn the model
+## 9. Learn the model
 
 Once your project is onboarded, these are the next useful reads:
 

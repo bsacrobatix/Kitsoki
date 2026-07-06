@@ -41,6 +41,7 @@ func newGHAgentCmd() *cobra.Command {
 	cmd.AddCommand(newGHAgentReplayCmd())
 	cmd.AddCommand(newGHAgentCommentCmd())
 	cmd.AddCommand(newGHAgentSetupCmd())
+	cmd.AddCommand(newGHAgentTokenCmd())
 	cmd.AddCommand(newGHAgentEnqueueCmd())
 	cmd.AddCommand(newGHAgentDrainCmd())
 	return cmd

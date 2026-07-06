@@ -178,3 +178,119 @@ func ResolveAppClient(flagClientID, flagClientSecret string, flagInstallationID 
 	}
 	return out, nil
 }
+
+// AppConfigResolution is a GitHub App installation-token config plus a
+// secret-free description of the source(s) that supplied it.
+type AppConfigResolution struct {
+	Config *Config
+	Source string
+}
+
+// ResolveAppConfig applies the same credential-store precedence chain used by
+// setup flows, but resolves the App installation identity needed to mint
+// GH_TOKEN/GITHUB_TOKEN: explicit flags, process env, explicit env file, then
+// the default profile. It returns Config nil when no App fields are present at
+// all, and a clear half-configured error when only some fields can be found.
+func ResolveAppConfig(flagAppID, flagInstallationID int64, flagKeyFile, envFileFlag string) (*AppConfigResolution, error) {
+	var (
+		appID          = flagAppID
+		installationID = flagInstallationID
+		keyFile        = flagKeyFile
+		webhookSecret  string
+		sources        []string
+	)
+	if appID != 0 || installationID != 0 || keyFile != "" {
+		sources = append(sources, "flags")
+	}
+	fill := func(vals map[string]string, source string) {
+		filled := false
+		if appID == 0 && vals[EnvAppID] != "" {
+			if id, err := strconv.ParseInt(vals[EnvAppID], 10, 64); err == nil {
+				appID = id
+				filled = true
+			}
+		}
+		if installationID == 0 && vals[EnvInstallationID] != "" {
+			if id, err := strconv.ParseInt(vals[EnvInstallationID], 10, 64); err == nil {
+				installationID = id
+				filled = true
+			}
+		}
+		if keyFile == "" && vals[EnvPrivateKeyFile] != "" {
+			keyFile = vals[EnvPrivateKeyFile]
+			filled = true
+		}
+		if webhookSecret == "" && vals[EnvWebhookSecret] != "" {
+			webhookSecret = vals[EnvWebhookSecret]
+		}
+		if filled {
+			sources = append(sources, source)
+		}
+	}
+
+	fill(map[string]string{
+		EnvAppID:          os.Getenv(EnvAppID),
+		EnvInstallationID: os.Getenv(EnvInstallationID),
+		EnvPrivateKeyFile: os.Getenv(EnvPrivateKeyFile),
+		EnvWebhookSecret:  os.Getenv(EnvWebhookSecret),
+	}, "env")
+
+	explicit := envFileFlag
+	if explicit == "" {
+		explicit = os.Getenv(EnvAppEnvFile)
+	}
+	if explicit != "" && (appID == 0 || installationID == 0 || keyFile == "") {
+		vals, err := ParseEnvFile(explicit)
+		if err != nil {
+			return nil, err
+		}
+		fill(vals, "env-file "+explicit)
+	}
+
+	if appID == 0 || installationID == 0 || keyFile == "" {
+		def := filepath.Join(DefaultProfileLink(), "kitsoki.env")
+		if vals, err := ParseEnvFile(def); err == nil {
+			fill(vals, "default profile "+def)
+		}
+	}
+
+	if appID == 0 && installationID == 0 && keyFile == "" {
+		return &AppConfigResolution{Source: "unconfigured"}, nil
+	}
+	var missing []string
+	if appID == 0 {
+		missing = append(missing, EnvAppID)
+	}
+	if installationID == 0 {
+		missing = append(missing, EnvInstallationID)
+	}
+	if keyFile == "" {
+		missing = append(missing, EnvPrivateKeyFile)
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("githubapp: GitHub App auth is half-configured; missing %s", strings.Join(missing, ", "))
+	}
+	if len(sources) == 0 {
+		sources = append(sources, "resolved")
+	}
+	cfg := &Config{
+		AppID:          appID,
+		InstallationID: installationID,
+		PrivateKeyPath: keyFile,
+		WebhookSecret:  webhookSecret,
+	}
+	return &AppConfigResolution{Config: cfg, Source: strings.Join(uniqueStrings(sources), " + ")}, cfg.Validate()
+}
+
+func uniqueStrings(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}

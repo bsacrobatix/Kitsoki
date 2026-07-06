@@ -56,6 +56,35 @@ flow with `--device`) and `PUT`s the repo into the installation;
 Client ID (and generate a client secret or enable Device Flow) once, then
 `attach` works the same.
 
+For local Kitsoki commands that need GitHub API auth, mint a short-lived
+installation token from the same App profile:
+
+```
+kitsoki gh-agent token
+source ~/.config/kitsoki/github.env
+```
+
+The command writes a 0600 shell env file with `GH_TOKEN` and `GITHUB_TOKEN`.
+It does not print the token unless `--print` is passed. The operator's part is
+to create/install the App, select repositories, and approve GitHub consent.
+Kitsoki's autonomous part is to mint the installation token and use it only for
+requested issue, PR, comment, branch-push, and artifact-push operations. The
+token inherits the App's permission floor and selected repository set:
+metadata read; issues, pull requests, and contents write; checks read.
+
+If an App is not available, an operator can provide a fine-grained PAT manually:
+
+```
+export GH_TOKEN=<fine-grained-pat>
+kitsoki gh-agent token --from-env
+source ~/.config/kitsoki/github.env
+```
+
+Scope that PAT only to the target repositories with the same repository
+permissions. Treat this as a compatibility path; the App token remains the
+least-surprise default because it is short-lived, install-scoped, and
+bot-authored.
+
 Sections a–g remain the manual path and the reference for what the wizard does.
 
 ## a. Create the App
