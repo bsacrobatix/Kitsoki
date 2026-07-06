@@ -452,6 +452,7 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 		return nil, err
 	}
 	result := gitopsFilingResult(runDir, opts.TicketRepo, filed)
+	gitopsMergeAutonomousWatchdogProof(result, watchdog)
 	gitopsMergeGHAgentReadinessProof(result, health, readiness)
 	enqueue, err := gitopsEnqueueFixes(ctx, runDir, opts.AgentDB, opts.TicketRepo, opts.AgentStory)
 	if err != nil {
@@ -544,6 +545,14 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 	}
 	result["autonomous_fix_report_path"] = reportPath
 	return result, nil
+}
+
+func gitopsMergeAutonomousWatchdogProof(result, watchdog map[string]any) {
+	result["autonomous_watchdog_status"] = firstNonBlank(stringValue(watchdog, "autonomous_watchdog_status"), stringValue(watchdog, "status"))
+	result["autonomous_watchdog_summary"] = stringValue(watchdog, "autonomous_watchdog_summary")
+	result["autonomous_watchdog_path"] = stringValue(watchdog, "autonomous_watchdog_path")
+	result["autonomous_watchdog_markdown_path"] = stringValue(watchdog, "autonomous_watchdog_markdown_path")
+	result["autonomous_watchdog_age_minutes"] = intValue(watchdog, "heartbeat_age_minutes")
 }
 
 func gitopsAutonomousFixWatchdog(ctx context.Context, runDir string) (map[string]any, bool, string) {
@@ -1516,6 +1525,12 @@ func writeGitopsAutonomousReport(runDir string, status, review, validation map[s
 		fmt.Sprintf("- Gates: %s", firstNonBlank(stringValue(status, "autonomous_gate_summary"), "(not evaluated)")),
 		fmt.Sprintf("- Independent verification: `%s` - %s", stringValue(status, "independent_verify_status"), stringValue(status, "independent_verify_summary")),
 		fmt.Sprintf("- Issue close-out: `%s` (%d closed)", stringValue(status, "issue_closeout_status"), intValue(status, "issue_closeout_count")),
+		"",
+		"## Autonomous Watchdog",
+		"",
+		fmt.Sprintf("- Status: `%s` - %s", firstNonBlank(stringValue(status, "autonomous_watchdog_status"), "(not checked)"), stringValue(status, "autonomous_watchdog_summary")),
+		fmt.Sprintf("- Age: %d minute(s)", intValue(status, "autonomous_watchdog_age_minutes")),
+		fmt.Sprintf("- Report: %s", firstNonBlank(stringValue(status, "autonomous_watchdog_markdown_path"), "(not generated)")),
 		"",
 		"## Hosted GH-agent",
 		"",

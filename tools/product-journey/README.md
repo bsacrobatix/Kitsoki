@@ -501,9 +501,10 @@ watchdog before filing issues, then checks the hosted gh-agent `/healthz` and
 `/api/ready` endpoints; readiness must match the ticket repo and report an
 enabled drain loop, or the gate returns `autonomous_fix_invalid` with filing
 still `not_run`.
-Passing health/readiness summaries are also written into the story result and
-`autonomous-fix-report.md` so a reviewer can see which hosted worker was trusted
-before issue filing and repair started.
+Passing watchdog and health/readiness summaries are also written into the story
+result and `autonomous-fix-report.md` so a reviewer can see both the standing
+loop state and which hosted worker was trusted before issue filing and repair
+started.
 
 For a no-LLM dogfood/demo bundle with representative evidence and findings:
 
