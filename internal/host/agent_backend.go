@@ -187,6 +187,8 @@ func ResolveAgentBackendName(name string) (b agentBackend, ok bool) {
 		return copilotBackend{}, true
 	case "codex":
 		return codexBackend{}, true
+	case "agy":
+		return agyBackend{}, true
 	case "claude", "":
 		return claudeBackend{}, name == "claude"
 	default:

@@ -961,6 +961,24 @@ func buildHarnessWithActiveProfile(harnessType, claudeModel, agentBackend, recor
 				ValidatorTool: host.CodexValidatorToolName("kitsoki-validator"),
 			})
 		}
+		if agentBackend == "agy" {
+			agyBin, err := exec.LookPath("agy")
+			if env := os.Getenv(host.AgyBinEnv); env != "" {
+				agyBin, err = env, nil
+			}
+			if err != nil {
+				return nil, fmt.Errorf("--agent agy: %w", host.ErrAgentUnavailable)
+			}
+			agyExec := func(ctx context.Context, bin string, args []string, stdin, workingDir string) (string, error) {
+				return host.RunClaudeOneShotForHarness(host.WithAgentBackendNamed(withProfile(ctx), "agy"), bin, args, stdin, workingDir)
+			}
+			return harness.NewClaudeCLI(def, harness.ClaudeCLIConfig{
+				Model:         claudeModel,
+				ClaudeBin:     agyBin,
+				Exec:          agyExec,
+				ValidatorTool: "mcp__kitsoki-validator__submit",
+			})
+		}
 		claudeExec := func(ctx context.Context, bin string, args []string, stdin, workingDir string) (string, error) {
 			return host.RunClaudeOneShotForHarness(withProfile(ctx), bin, args, stdin, workingDir)
 		}
