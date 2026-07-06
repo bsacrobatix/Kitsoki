@@ -523,30 +523,74 @@ func TestGitopsIssueStateCacheUsesNativeTicketProvider(t *testing.T) {
 	}
 }
 
-func TestGitopsGHAgentGateLeavesIndependentVerifySeparate(t *testing.T) {
+func TestGitopsGHAgentGateRequiresIndependentVerifyEvidence(t *testing.T) {
 	result := map[string]any{
-		"gh_agent_enqueue_status":         "queued",
-		"gh_agent_enqueued_count":         1,
-		"gh_agent_drain_status":           "drained",
-		"gh_agent_failed_count":           0,
-		"gh_agent_active_count":           0,
-		"gh_agent_done_count":             1,
-		"gh_agent_missing_evidence_count": 0,
-		"gh_agent_missing_triage_count":   0,
-		"gh_agent_missing_verify_count":   0,
-		"gh_agent_missing_run_url_count":  0,
+		"gh_agent_enqueue_status":           "queued",
+		"gh_agent_enqueued_count":           1,
+		"gh_agent_drain_status":             "drained",
+		"gh_agent_failed_count":             0,
+		"gh_agent_active_count":             0,
+		"gh_agent_done_count":               1,
+		"gh_agent_fix_evidence_count":       1,
+		"gh_agent_triage_evidence_count":    1,
+		"gh_agent_independent_verify_count": 1,
+		"gh_agent_missing_evidence_count":   0,
+		"gh_agent_missing_triage_count":     0,
+		"gh_agent_missing_verify_count":     0,
+		"gh_agent_missing_run_url_count":    0,
 	}
 	if !gitopsGHAgentGateOK(result) {
 		t.Fatalf("complete gh-agent result should pass")
 	}
 	result["gh_agent_missing_verify_count"] = 1
-	if !gitopsGHAgentGateOK(result) {
-		t.Fatalf("missing independent verification should not fail the gh-agent gate")
+	if gitopsGHAgentGateOK(result) {
+		t.Fatalf("missing independent verification must fail the gh-agent evidence gate")
 	}
 	result["gh_agent_missing_verify_count"] = 0
 	result["gh_agent_missing_triage_count"] = 1
 	if gitopsGHAgentGateOK(result) {
 		t.Fatalf("missing triage preflight evidence must fail the gh-agent gate")
+	}
+}
+
+func TestGitopsGHAgentGateRequiresReviewArtifactsForEveryJob(t *testing.T) {
+	base := map[string]any{
+		"gh_agent_enqueue_status":           "queued",
+		"gh_agent_enqueued_count":           2,
+		"gh_agent_drain_status":             "drained",
+		"gh_agent_failed_count":             0,
+		"gh_agent_active_count":             0,
+		"gh_agent_done_count":               2,
+		"gh_agent_fix_evidence_count":       2,
+		"gh_agent_triage_evidence_count":    2,
+		"gh_agent_independent_verify_count": 2,
+		"gh_agent_missing_evidence_count":   0,
+		"gh_agent_missing_triage_count":     0,
+		"gh_agent_missing_verify_count":     0,
+		"gh_agent_missing_run_url_count":    0,
+	}
+	if !gitopsGHAgentGateOK(base) {
+		t.Fatalf("complete gh-agent artifact set should pass")
+	}
+	for _, tc := range []struct {
+		name  string
+		field string
+		value any
+	}{
+		{"missing fix evidence count", "gh_agent_fix_evidence_count", 1},
+		{"missing triage evidence count", "gh_agent_triage_evidence_count", 1},
+		{"missing independent verify count", "gh_agent_independent_verify_count", 1},
+		{"missing run url count", "gh_agent_missing_run_url_count", 1},
+		{"implicit zero evidence count", "gh_agent_fix_evidence_count", 0},
+	} {
+		result := make(map[string]any, len(base))
+		for k, v := range base {
+			result[k] = v
+		}
+		result[tc.field] = tc.value
+		if gitopsGHAgentGateOK(result) {
+			t.Fatalf("%s should fail gate: %+v", tc.name, result)
+		}
 	}
 }
 
