@@ -434,6 +434,10 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 	}
 	runDir := strings.TrimSpace(opts.RunDir)
 	assetDir := firstNonBlank(opts.AssetDir, filepath.Join(runDir, "gh-agent-assets"))
+	watchdog, watchdogOK, watchdogSummary := gitopsAutonomousFixWatchdog(ctx, runDir)
+	if !watchdogOK {
+		return gitopsAutonomousFixWatchdogInvalid(ctx, opts, runDir, watchdog, watchdogSummary)
+	}
 	health, readiness, readyOK, readinessIssue, readinessSummary := gitopsAutonomousFixAgentReady(ctx, opts.PublicBaseURL, opts.TicketRepo)
 	if !readyOK {
 		return gitopsAutonomousFixReadinessInvalid(ctx, opts, runDir, health, readiness, readinessIssue, readinessSummary)
@@ -535,6 +539,48 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 	storySummary, _ = productJourneyJSON(ctx, "--summarize-run", "--run-dir", runDir)
 	mergeMaps(result, storySummary)
 	reportPath, err = writeGitopsAutonomousReport(runDir, result, review, validation)
+	if err != nil {
+		return nil, err
+	}
+	result["autonomous_fix_report_path"] = reportPath
+	return result, nil
+}
+
+func gitopsAutonomousFixWatchdog(ctx context.Context, runDir string) (map[string]any, bool, string) {
+	watchdog, err := productJourneyJSON(ctx,
+		"--autonomous-marathon-watchdog",
+		"--run-dir", runDir,
+		"--report-blocked-autonomous-watchdog",
+	)
+	if err != nil {
+		return map[string]any{
+			"autonomous_watchdog_status":  "autonomous_watchdog_blocked",
+			"autonomous_watchdog_summary": err.Error(),
+		}, false, err.Error()
+	}
+	ok := stringValue(watchdog, "autonomous_watchdog_status") == "autonomous_watchdog_ok" || stringValue(watchdog, "status") == "autonomous_watchdog_ok"
+	return watchdog, ok, stringValue(watchdog, "autonomous_watchdog_summary")
+}
+
+func gitopsAutonomousFixWatchdogInvalid(ctx context.Context, opts gitopsAutonomousFixOptions, runDir string, watchdog map[string]any, summary string) (map[string]any, error) {
+	result := gitopsAutonomousFixPreflightInvalidBase(opts, runDir, firstNonBlank(summary, "autonomous watchdog failed before autonomous fix"))
+	result["autonomous_gate_summary"] = "watchdog=fail, filing=not_run, gh_agent=not_run, independent_verify=fail, review=not_run, validation=fail"
+	result["validation_issue_summary"] = "autonomous-watchdog"
+	result["autonomous_watchdog_status"] = firstNonBlank(stringValue(watchdog, "autonomous_watchdog_status"), stringValue(watchdog, "status"))
+	result["autonomous_watchdog_summary"] = stringValue(watchdog, "autonomous_watchdog_summary")
+	result["autonomous_watchdog_path"] = stringValue(watchdog, "autonomous_watchdog_path")
+	result["autonomous_watchdog_markdown_path"] = stringValue(watchdog, "autonomous_watchdog_markdown_path")
+	result["autonomous_watchdog_age_minutes"] = intValue(watchdog, "heartbeat_age_minutes")
+	result["filing_summary"] = "Autonomous watchdog failed before issue filing or gh-agent repair: " + firstNonBlank(summary, stringValue(watchdog, "autonomous_watchdog_summary"))
+	result["independent_verify_summary"] = result["filing_summary"]
+	result["issue_closeout_summary"] = "Issue close-out skipped because autonomous watchdog failed before filing."
+	result["review_summary"] = result["filing_summary"]
+	result["gh_agent_missing_evidence_summary"] = result["filing_summary"]
+	result["gh_agent_missing_triage_summary"] = result["filing_summary"]
+	result["gh_agent_missing_verify_summary"] = result["filing_summary"]
+	storySummary, _ := productJourneyJSON(ctx, "--summarize-run", "--run-dir", runDir)
+	mergeMaps(result, storySummary)
+	reportPath, err := writeGitopsAutonomousReport(runDir, result, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -701,15 +747,29 @@ func gitopsGHAgentEndpoint(publicBaseURL, path string) string {
 }
 
 func gitopsAutonomousFixReadinessInvalid(ctx context.Context, opts gitopsAutonomousFixOptions, runDir string, health, readiness map[string]any, validationIssue, summary string) (map[string]any, error) {
-	result := map[string]any{
+	result := gitopsAutonomousFixPreflightInvalidBase(opts, runDir, summary)
+	result["gh_agent_health_status"] = stringValue(health, "status")
+	result["gh_agent_health_summary"] = stringValue(health, "summary")
+	result["gh_agent_readiness_status"] = stringValue(readiness, "status")
+	result["gh_agent_readiness_summary"] = stringValue(readiness, "summary")
+	result["validation_issue_summary"] = validationIssue
+	result["issue_closeout_summary"] = "Issue close-out skipped because hosted gh-agent readiness failed before filing."
+	storySummary, _ := productJourneyJSON(ctx, "--summarize-run", "--run-dir", runDir)
+	mergeMaps(result, storySummary)
+	reportPath, err := writeGitopsAutonomousReport(runDir, result, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	result["autonomous_fix_report_path"] = reportPath
+	return result, nil
+}
+
+func gitopsAutonomousFixPreflightInvalidBase(opts gitopsAutonomousFixOptions, runDir, summary string) map[string]any {
+	return map[string]any{
 		"status":                            "autonomous_fix_invalid",
 		"autonomous_fix_status":             "autonomous_fix_invalid",
 		"ticket_repo":                       opts.TicketRepo,
 		"gh_agent_public_base_url":          opts.PublicBaseURL,
-		"gh_agent_health_status":            stringValue(health, "status"),
-		"gh_agent_health_summary":           stringValue(health, "summary"),
-		"gh_agent_readiness_status":         stringValue(readiness, "status"),
-		"gh_agent_readiness_summary":        stringValue(readiness, "summary"),
 		"filing_status":                     "not_run",
 		"filing_summary":                    summary,
 		"findings_filed_count":              0,
@@ -741,7 +801,7 @@ func gitopsAutonomousFixReadinessInvalid(ctx context.Context, opts gitopsAutonom
 		"independent_verify_summary":        summary,
 		"issue_closeout_status":             "skipped",
 		"issue_closeout_count":              0,
-		"issue_closeout_summary":            "Issue close-out skipped because hosted gh-agent readiness failed before filing.",
+		"issue_closeout_summary":            "Issue close-out skipped because a pre-filing autonomous gate failed.",
 		"autonomous_gate_summary":           "filing=not_run, gh_agent=fail, independent_verify=fail, review=not_run, validation=fail",
 		"review_status":                     "not_run",
 		"review_summary":                    summary,
@@ -752,16 +812,7 @@ func gitopsAutonomousFixReadinessInvalid(ctx context.Context, opts gitopsAutonom
 		"validation_status":                 "invalid",
 		"validation_errors":                 1,
 		"validation_warnings":               0,
-		"validation_issue_summary":          validationIssue,
 	}
-	storySummary, _ := productJourneyJSON(ctx, "--summarize-run", "--run-dir", runDir)
-	mergeMaps(result, storySummary)
-	reportPath, err := writeGitopsAutonomousReport(runDir, result, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	result["autonomous_fix_report_path"] = reportPath
-	return result, nil
 }
 
 func gitopsGHAgentGateOK(result map[string]any) bool {
@@ -1400,7 +1451,7 @@ func productJourneyJSON(ctx context.Context, args ...string) (map[string]any, er
 	all := append([]string{"tools/product-journey/run.py"}, args...)
 	all = append(all, "--json-output")
 	py := exec.CommandContext(ctx, "python3", all...)
-	py.Dir = "."
+	py.Dir = gitopsRepoRoot()
 	py.Env = os.Environ()
 	out, err := py.CombinedOutput()
 	var result map[string]any
@@ -1411,6 +1462,19 @@ func productJourneyJSON(ctx context.Context, args ...string) (map[string]any, er
 		return nil, fmt.Errorf("product-journey %s printed invalid JSON: %w\n%s", strings.Join(args, " "), jsonErr, strings.TrimSpace(string(out)))
 	}
 	return result, nil
+}
+
+func gitopsRepoRoot() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	for dir := wd; dir != "" && dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+		if _, err := os.Stat(filepath.Join(dir, "tools", "product-journey", "run.py")); err == nil {
+			return dir
+		}
+	}
+	return "."
 }
 
 func gitopsRecordGHAgent(runDir string, status map[string]any) error {

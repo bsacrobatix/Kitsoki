@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
@@ -483,6 +484,7 @@ func TestGitopsAutonomousFixChecksHostedAgentReadinessBeforeFiling(t *testing.T)
 	defer restoreAPI()
 
 	runDir := t.TempDir()
+	writeValidAutonomousControl(t, runDir)
 	result, err := runGitopsAutonomousFix(context.Background(), gitopsAutonomousFixOptions{
 		RunDir:        runDir,
 		TicketRepo:    "o/r",
@@ -506,6 +508,44 @@ func TestGitopsAutonomousFixChecksHostedAgentReadinessBeforeFiling(t *testing.T)
 	}
 	if _, err := os.Stat(filepath.Join(runDir, "autonomous-fix-report.md")); err != nil {
 		t.Fatalf("autonomous fix report not written: %v", err)
+	}
+}
+
+func TestGitopsAutonomousFixChecksWatchdogBeforeAgentOrGitHub(t *testing.T) {
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("autonomous-fix must not check hosted agent before watchdog passes: %s %s", r.Method, r.URL.String())
+	}))
+	defer agent.Close()
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("autonomous-fix must not touch GitHub before watchdog passes: %s %s", r.Method, r.URL.String())
+	}))
+	defer github.Close()
+	restoreAPI := host.SetGitHubAPIForTest(github.URL, github.Client())
+	defer restoreAPI()
+
+	runDir := t.TempDir()
+	result, err := runGitopsAutonomousFix(context.Background(), gitopsAutonomousFixOptions{
+		RunDir:        runDir,
+		TicketRepo:    "o/r",
+		AgentDB:       filepath.Join(runDir, "gh-agent.sqlite"),
+		AgentStory:    "stories/bugfix",
+		PublicBaseURL: agent.URL,
+		CommentMode:   "none",
+	})
+	if err != nil {
+		t.Fatalf("autonomous-fix watchdog invalid result: %v", err)
+	}
+	if stringValue(result, "autonomous_fix_status") != "autonomous_fix_invalid" ||
+		stringValue(result, "validation_issue_summary") != "autonomous-watchdog" ||
+		stringValue(result, "filing_status") != "not_run" ||
+		stringValue(result, "gh_agent_enqueue_status") != "not_run" {
+		t.Fatalf("result = %+v", result)
+	}
+	if !strings.Contains(stringValue(result, "autonomous_watchdog_summary"), "missing autonomous-marathon-control.json") {
+		t.Fatalf("watchdog summary = %q", stringValue(result, "autonomous_watchdog_summary"))
+	}
+	if _, err := os.Stat(filepath.Join(runDir, "autonomous-marathon-watchdog.md")); err != nil {
+		t.Fatalf("watchdog report not written: %v", err)
 	}
 }
 
@@ -584,6 +624,23 @@ func TestGitopsAutonomousReportIncludesHostedAgentReadinessProof(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("report missing %q:\n%s", want, string(body))
 		}
+	}
+}
+
+func writeValidAutonomousControl(t *testing.T, runDir string) {
+	t.Helper()
+	control := map[string]any{
+		"cadence": map[string]any{
+			"created_at": time.Now().UTC().Format("2006-01-02T15:04:05+00:00"),
+		},
+		"watchdog": map[string]any{
+			"heartbeat_minutes":   15,
+			"watchdog_minutes":    45,
+			"on_missed_heartbeat": "record_blocker_and_stop_before_spend",
+		},
+	}
+	if err := gitopsWriteJSONFile(filepath.Join(runDir, "autonomous-marathon-control.json"), control); err != nil {
+		t.Fatalf("write control: %v", err)
 	}
 }
 

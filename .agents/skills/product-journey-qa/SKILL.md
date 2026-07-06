@@ -126,18 +126,16 @@ Then hand it to the reusable driver:
    `--record-blocker` or `last_result.next_driver_blocker_command`.
 5. Record each attempt with `--record-driver-event` or the story `driver_event`
    intent.
-6. For the full issue-to-fix loop, submit the watchdog gate first:
-   `autonomous_watchdog`. It fails stale standing-loop heartbeats closed before
-   filing or fixing can spend anything. The story rejects `autonomous_fix`
-   unless this watchdog gate has passed.
-7. Then submit the story-owned issue-to-fix gate:
+6. For the full issue-to-fix loop, submit the story-owned issue-to-fix gate:
    `autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<url>`.
    This files credible `issue` findings with uploaded evidence, enqueues and
    drains gh-agent fixes, refreshes the deck/review artifacts, and validates the
    bundle without agent oversight. The story calls the native
    `kitsoki gitops autonomous-fix` facade. Before filing anything, that facade
-   checks `<gh_agent_public_base_url>/healthz` and `/api/ready`; readiness must
-   report `status=ready`, the same `ticket_repo`, and an enabled drain loop.
+   runs the autonomous watchdog check and fails closed on stale or missing
+   standing-loop control, then checks `<gh_agent_public_base_url>/healthz` and
+   `/api/ready`; readiness must report `status=ready`, the same `ticket_repo`,
+   and an enabled drain loop.
    A mismatch returns `autonomous_fix_invalid` with filing still `not_run`;
    successful runs carry the health/readiness summaries into the story view and
    `autonomous-fix-report.md`.

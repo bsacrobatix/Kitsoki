@@ -2721,7 +2721,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
             "Prefer MCP evidence over prose claims: screenshots, session traces, TUI frames, diffs, oracle output, and videos.",
             "Record strengths as well as weaknesses, issues, and fixes.",
             "If a live LLM or paid service would be required, stop and record the blocker instead of calling it from an automated test.",
-            "Attach every useful artifact, then submit autonomous_watchdog before autonomous_fix when credible issue findings exist, review, and validate through the story session. Use the CLI fallback commands only when the story session is unavailable.",
+            "Attach every useful artifact, then submit autonomous_fix when credible issue findings exist; the native gate runs the autonomous watchdog before filing or fixing. Review and validate through the story session. Use the CLI fallback commands only when the story session is unavailable.",
         ],
         "scenario_order": [
             {
