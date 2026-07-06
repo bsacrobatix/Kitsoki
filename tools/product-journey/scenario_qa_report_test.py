@@ -56,7 +56,20 @@ def _expect_system_exit(name, fn, expected_text):
 
 _LEG_RESULTS = {
     "items": [
-        {"leg_id": "bugfix::tui", "scenario": "bugfix", "transport": "tui", "driver_status": "captured", "verdict": "pass", "verdict_summary": "TUI frame confirms the fix."},
+        {
+            "leg_id": "bugfix::tui",
+            "scenario": "bugfix",
+            "transport": "tui",
+            "driver_status": "captured",
+            "verdict": "pass",
+            "verdict_summary": "TUI frame confirms the fix.",
+            "natural_utterance_count": 2,
+            "natural_utterance_example": "resolve the red gate test that's already written but not committed",
+            "natural_utterance_sources": [
+                "mined-scn-1b4ace86-f192-43b0-ab86-16142fec0079-0001",
+                "mined-scn-c4d281a2-30e4-4002-9152-59d28d824abc-0001",
+            ],
+        },
         {"leg_id": "bugfix::web", "scenario": "bugfix", "transport": "web", "driver_status": "captured", "verdict": "pass", "verdict_summary": "Browser screenshot confirms the fix."},
         {"leg_id": "bugfix::vscode", "scenario": "bugfix", "transport": "vscode", "driver_status": "degraded-evidence", "verdict": "degraded-evidence", "verdict_summary": "IDE bridge came back JSON-degraded."},
     ]
@@ -121,6 +134,17 @@ def _test_leg_level():
     )
 
 
+def _test_natural_prompt_lines():
+    items = run.scenario_qa_leg_items(_LEG_RESULTS)
+    lines = run.scenario_qa_natural_prompt_lines(items)
+    _check("natural prompt lines include only legs with transcript wording", len(lines) == 1)
+    line = lines[0]
+    _check("natural prompt line names the scenario leg", "tui / bugfix" in line)
+    _check("natural prompt line names the prompt count", "2 transcript-derived prompt(s)" in line)
+    _check("natural prompt line carries the mined example", "resolve the red gate test" in line)
+    _check("natural prompt line carries source refs", "mined-scn-1b4ace86-f192-43b0-ab86-16142fec0079-0001" in line)
+
+
 def _test_parse_leg_results(tmp: Path):
     _check("empty raw returns an empty items list", run.parse_scenario_qa_leg_results("") == {"items": []})
     inline = json.dumps({"items": [{"transport": "tui"}]})
@@ -157,6 +181,11 @@ def _test_render_deck():
     _check("the deck labels the tui leg frame-level", "frame-level" in body_text)
     _check("the deck carries the run id", "scenario-qa-run-all" in body_text)
     _check("the deck's summary scene names the pass/total ratio", "2 / 3 transport legs passed" in body_text)
+    _check("the deck includes a natural prompt scene", "Natural prompts" in body_text)
+    _check("the deck labels transcript-derived wording", "Transcript-derived scenario wording" in body_text)
+    _check("the deck carries the natural prompt count", "2 transcript-derived prompt" in body_text)
+    _check("the deck carries the natural prompt example", "resolve the red gate test" in body_text)
+    _check("the deck carries natural prompt source refs", "mined-scn-1b4ace86-f192-43b0-ab86-16142fec0079-0001" in body_text)
 
     empty_deck = run.render_scenario_qa_deck("adhoc-thing", "run-empty", [], run.scenario_qa_leg_counts([]))
     empty_issues: list[dict] = []
@@ -205,6 +234,9 @@ def _test_cli(tmp: Path):
     _check("CLI actually wrote the deck file", deck_path.exists())
     written = json.loads(deck_path.read_text(encoding="utf-8"))
     _check("the written deck names the scenario", written["scenes"][0]["subtitle"] == "bugfix")
+    written_text = json.dumps(written)
+    _check("the written deck includes natural prompt coverage", "Transcript-derived scenario wording" in written_text)
+    _check("the written deck preserves the mined example", "resolve the red gate test" in written_text)
 
     adhoc_dir = tmp / "run-cli-adhoc"
     adhoc_dir.mkdir()
@@ -236,6 +268,7 @@ def _test_cli(tmp: Path):
 def main():
     _test_leg_counts()
     _test_leg_level()
+    _test_natural_prompt_lines()
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         _test_parse_leg_results(tmp)
