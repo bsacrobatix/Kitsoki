@@ -37,6 +37,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 
+	"kitsoki/internal/capsuletest"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
 	studio "kitsoki/internal/mcp/studio"
@@ -82,26 +83,7 @@ states:
 // A committed file is required so git will accept worktree add operations.
 func initWorktreeReproRepo(t *testing.T) string {
 	t.Helper()
-	repo := t.TempDir()
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = repo
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v in %s: %v\n%s", args, repo, err, out)
-		}
-	}
-	run("init", "--quiet", "--initial-branch=main")
-	run("config", "user.email", "repro@test.invalid")
-	run("config", "user.name", "Repro")
-	seed := filepath.Join(repo, "seed.txt")
-	if err := os.WriteFile(seed, []byte("seed\n"), 0o644); err != nil {
-		t.Fatalf("write seed file: %v", err)
-	}
-	run("add", "-A")
-	run("commit", "--quiet", "-m", "init")
-	return repo
+	return capsuletest.Open(t, "worktree-repro-repo")
 }
 
 // worktreeReproHarness is a no-LLM harness for the worktree repro test.

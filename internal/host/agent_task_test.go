@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"kitsoki/internal/capsuletest"
 	"kitsoki/internal/host"
 )
 
@@ -218,20 +219,7 @@ func TestCapReadToolOutput_OverCap(t *testing.T) {
 // "git:<sha>" prefix.
 func TestCaptureInitialStateHash_GitTree(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	if err := taskTestGitInit(dir); err != nil {
-		t.Skip("git not available:", err)
-	}
-	// Write and commit a file so the repo has a valid HEAD.
-	if err := os.WriteFile(filepath.Join(dir, "init.txt"), []byte("init"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := taskTestGitAdd(dir, "init.txt"); err != nil {
-		t.Skip("git add failed:", err)
-	}
-	if err := taskTestGitCommit(dir, "init"); err != nil {
-		t.Skip("git commit failed:", err)
-	}
+	dir := capsuletest.Open(t, "clean-repo")
 	hash := host.CaptureInitialStateHashExport(context.Background(), dir)
 	if !strings.HasPrefix(hash, "git:") {
 		t.Fatalf("expected git: prefix, got %q", hash)
@@ -291,23 +279,9 @@ func TestHashDirectory_ChangesWithContent(t *testing.T) {
 // given the initial hash + diff, the final state can be reconstructed.
 func TestAgentTask_ModeA_ReplayFromDiff(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	if err := taskTestGitInit(dir); err != nil {
-		t.Skip("git not available:", err)
-	}
-
-	// Write initial file and commit.
+	dir := capsuletest.Open(t, "agent-task-replay-base")
 	initialContent := "initial content\n"
 	filePath := filepath.Join(dir, "work.txt")
-	if err := os.WriteFile(filePath, []byte(initialContent), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := taskTestGitAdd(dir, "work.txt"); err != nil {
-		t.Fatalf("git add: %v", err)
-	}
-	if err := taskTestGitCommit(dir, "initial"); err != nil {
-		t.Fatalf("git commit: %v", err)
-	}
 
 	initialHash := host.CaptureInitialStateHashExport(context.Background(), dir)
 	if !strings.HasPrefix(initialHash, "git:") {
@@ -442,30 +416,6 @@ func TestTarballDirectory_WithFiles(t *testing.T) {
 }
 
 // ── git helper functions ──────────────────────────────────────────────────
-
-func taskTestGitInit(dir string) error {
-	c := exec.Command("git", "init", "--initial-branch=main")
-	c.Dir = dir
-	return c.Run()
-}
-
-func taskTestGitAdd(dir, file string) error {
-	c := exec.Command("git", "add", file)
-	c.Dir = dir
-	return c.Run()
-}
-
-func taskTestGitCommit(dir, msg string) error {
-	c := exec.Command("git", "config", "user.email", "test@test.com")
-	c.Dir = dir
-	_ = c.Run()
-	c2 := exec.Command("git", "config", "user.name", "Test")
-	c2.Dir = dir
-	_ = c2.Run()
-	c3 := exec.Command("git", "commit", "-m", msg)
-	c3.Dir = dir
-	return c3.Run()
-}
 
 func taskTestGitCheckout(dir, ref string) error {
 	c := exec.Command("git", "checkout", "--detach", ref)
@@ -661,20 +611,7 @@ func (s *testStreamSink) OnStreamEvent(_ context.Context, ev host.StreamEvent) {
 // The diff also applies cleanly via `git apply` in a fresh checkout.
 func TestCaptureFinalDiff_UntrackedFile(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	if err := taskTestGitInit(dir); err != nil {
-		t.Skip("git not available:", err)
-	}
-	// Commit an initial file.
-	if err := os.WriteFile(filepath.Join(dir, "existing.txt"), []byte("existing\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := taskTestGitAdd(dir, "existing.txt"); err != nil {
-		t.Fatalf("git add: %v", err)
-	}
-	if err := taskTestGitCommit(dir, "initial"); err != nil {
-		t.Fatalf("git commit: %v", err)
-	}
+	dir := capsuletest.Open(t, "agent-task-replay-base")
 
 	// Create a brand-new untracked file (agent side-effect).
 	if err := os.WriteFile(filepath.Join(dir, "newfile.go"), []byte("package p\n"), 0o644); err != nil {
