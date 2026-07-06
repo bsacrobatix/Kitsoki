@@ -465,6 +465,51 @@ func TestDispatchFailedPRRebaseRetriesRebaseRequest(t *testing.T) {
 	}
 }
 
+// TestDispatchRepeatedTerminalPRFailureFilesOnlyOneIncident guards against a
+// runaway-incident regression: shouldRerunTerminalPR deliberately re-dispatches
+// the same job on every re-mention of a persistently-failing PR (e.g. a rebase
+// that can never succeed). Each re-dispatch must NOT file a fresh operator
+// incident once one is already on record for the job — otherwise a single
+// stuck PR spams the incident tracker with one duplicate issue per poll cycle.
+func TestDispatchRepeatedTerminalPRFailureFilesOnlyOneIncident(t *testing.T) {
+	ctx := context.Background()
+	store := newGHJobStore(t)
+	mention := Mention{
+		Item: host.GitHubInboxItem{Kind: "pr", Number: "56", Title: "@kitsoki resolve the merge conflicts"},
+		Repo: "o/r", OriginRef: "github:o/r/pr/56", Trigger: DefaultMentionTrigger,
+	}
+	incidentCalls := 0
+	d := &Dispatcher{
+		Jobs:          store,
+		Routes:        DefaultLabelStoryMap(),
+		Comments:      &CommentStore{Exec: (&recordingComments{commentID: "https://github.com/o/r/pull/56#issuecomment-1"}).handler, Repo: "o/r"},
+		WorkerID:      "worker-repeat",
+		PublicBaseURL: "https://agent.example",
+		SpawnFn: func(context.Context, Route, *jobs.GHJob) (RunResult, error) {
+			return RunResult{}, errors.New("rebase always fails: pr already merged")
+		},
+		IncidentFn: func(_ context.Context, job *jobs.GHJob, _ string) (string, error) {
+			incidentCalls++
+			return "https://github.com/o/r/issues/900", nil
+		},
+	}
+	for i := 0; i < 5; i++ {
+		job, err := d.Dispatch(ctx, mention, nil)
+		if err == nil {
+			t.Fatalf("iteration %d: Dispatch succeeded unexpectedly", i)
+		}
+		if job.State != jobs.GHFailed {
+			t.Fatalf("iteration %d: state=%q, want failed", i, job.State)
+		}
+		if job.IncidentURL != "https://github.com/o/r/issues/900" {
+			t.Fatalf("iteration %d: IncidentURL=%q", i, job.IncidentURL)
+		}
+	}
+	if incidentCalls != 1 {
+		t.Fatalf("incidentCalls=%d, want 1 — repeated re-dispatch of the same failing PR must not refile", incidentCalls)
+	}
+}
+
 func TestDispatchPRRebaseRequestCancellationDoesNotStrandRunningJob(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	store := newGHJobStore(t)
