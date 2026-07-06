@@ -32,6 +32,7 @@ turns:
       marathon_smoke_ledger_validation_summary: ledger path missing
       marathon_smoke_ledger_validation_errors: 1
       marathon_smoke_ledger_validation_warnings: 0
+      marathon_smoke_ledger_validation_cycle_count: 0
       marathon_smoke_ledger_validation_path: ""
       marathon_smoke_ledger_validation_markdown_path: ""
     expect_host_calls:

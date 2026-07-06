@@ -51,6 +51,8 @@ python3 tools/product-journey/run.py --native-ghagent-smoke --json-output
 python3 tools/product-journey/run.py --autonomous-fix-smoke --json-output
 python3 tools/product-journey/run.py --persona-autofix-smoke --json-output
 python3 tools/product-journey/run.py --autonomous-marathon-smoke --json-output
+python3 tools/product-journey/run.py --autonomous-marathon-smoke \
+  --autonomous-marathon-smoke-repeats 2 --json-output
 GOCACHE=/private/tmp/kitsoki-gocache go run ./cmd/kitsoki test flows stories/product-journey-qa/app.yaml
 ```
 
@@ -227,6 +229,7 @@ Useful intents:
 - `persona_autofix_smoke`
 - `autonomous_marathon_due`
 - `autonomous_marathon_advance_due`
+- `autonomous_marathon_smoke repeats=<n>`
 - `start project=... persona=... seed=...`
 - `load run_dir=...`
 - `handoff`

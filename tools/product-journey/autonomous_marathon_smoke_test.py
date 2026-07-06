@@ -81,6 +81,7 @@ def render_smoke_markdown(output: dict) -> str:
         "",
         f"- Status: `{output.get('status', '')}`",
         f"- Project: `{output.get('project', '')}`",
+        f"- Cycles: {output.get('cycle_count', 1)}",
         f"- Personas: {output.get('persona_count', 0)}",
         f"- Scenarios: {output.get('scenario_count', 0)}",
         f"- Runs: {output.get('run_count', 0)}",
@@ -98,9 +99,11 @@ def render_smoke_markdown(output: dict) -> str:
         "",
     ]
     for item in output.get("runs", []):
+        cycle = int(item.get("cycle", 1) or 1)
         lines.extend([
-            f"### {item.get('persona', '')}",
+            f"### Cycle {cycle}: {item.get('persona', '')}",
             "",
+            f"- Cycle: {cycle}",
             f"- Status: `{item.get('status', '')}`",
             f"- Run id: `{item.get('run_id', '')}`",
             f"- Scenarios: {', '.join(item.get('scenario_ids', []))}",
@@ -137,6 +140,7 @@ def run_persona(
     personas: list[dict],
     scenarios: list[dict],
     persona_id: str,
+    cycle: int,
     failures: list[str],
 ) -> dict:
     run_dir, run_json = run.build_run_bundle(
@@ -146,7 +150,7 @@ def run_persona(
         scenarios,
         "gears-rust",
         persona_id,
-        f"autonomous-marathon-smoke-{persona_id}",
+        f"autonomous-marathon-smoke-cycle-{cycle}-{persona_id}",
         "dry-run",
         None,
     )
@@ -160,7 +164,7 @@ def run_persona(
             "--allow-test-backend",
             "--run-dir", str(run_dir),
             "--ticket-repo", "o/r",
-            "--agent-db", str(tmp / f"autonomous-marathon-{persona_id}-gh-agent.json"),
+            "--agent-db", str(tmp / f"autonomous-marathon-cycle-{cycle}-{persona_id}-gh-agent.json"),
             "--public-base-url", "https://agent.example",
         ],
         cwd=run.ROOT,
@@ -174,7 +178,7 @@ def run_persona(
         capture_output=True,
         check=False,
     )
-    prefix = f"{persona_id}: "
+    prefix = f"cycle {cycle} {persona_id}: "
     check(prefix + "native gitops autonomous-fix facade exits cleanly", proc.returncode == 0, failures)
     if proc.returncode != 0:
         print(proc.stdout)
@@ -189,10 +193,10 @@ def run_persona(
         if item.get("kind") == "issue" and item.get("origin", "observed") != "seeded"
     ]
     issue_urls = [url for url in issue_urls if url]
-    issue_state = tmp / f"{persona_id}-issue-state.json"
+    issue_state = tmp / f"cycle-{cycle}-{persona_id}-issue-state.json"
     if issue_urls:
         write_issue_state(issue_state, issue_urls)
-    stats_output = tmp / f"{persona_id}-stats.json"
+    stats_output = tmp / f"cycle-{cycle}-{persona_id}-stats.json"
     stats = run.derive_stats(run_dir, str(issue_state), 0.82, 25, str(stats_output))
     report_path = Path(result.get("autonomous_fix_report_path", ""))
     report_text = report_path.read_text(encoding="utf-8") if report_path.exists() else ""
@@ -338,6 +342,7 @@ def run_persona(
           failures)
 
     return {
+        "cycle": cycle,
         "persona": persona_id,
         "status": "passed",
         "run_id": run_json["run_id"],
@@ -364,7 +369,10 @@ def run_persona(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report-dir", default="", help="Directory for retained JSON/Markdown smoke ledger")
+    parser.add_argument("--repeats", type=int, default=1, help="Number of full active-persona cycles to run")
     args = parser.parse_args()
+    if args.repeats < 1:
+        raise SystemExit("--repeats must be >= 1")
     failures: list[str] = []
     with tempfile.TemporaryDirectory() as tmp_name:
         tmp = Path(tmp_name)
@@ -386,14 +394,14 @@ def main() -> int:
             run.active_scenarios(run.load_scenarios(run.SCENARIOS)),
             "core-use-cases",
         )
-        runs = [
-            run_persona(scratch, fake, catalog, github_targets, personas, scenarios, persona_id, failures)
-            for persona_id in active_persona_ids
-        ]
+        runs = []
+        for cycle in range(1, args.repeats + 1):
+            for persona_id in active_persona_ids:
+                runs.append(run_persona(scratch, fake, catalog, github_targets, personas, scenarios, persona_id, cycle, failures))
         total_filed = sum(int(item.get("filed_issue_count", 0) or 0) for item in runs)
         total_done = sum(int(item.get("gh_agent_done_count", 0) or 0) for item in runs)
         total_landing = sum(int(item.get("gh_agent_integration_landing_count", 0) or 0) for item in runs)
-        expected_issue_count = len(active_persona_ids) * len(scenarios)
+        expected_issue_count = args.repeats * len(active_persona_ids) * len(scenarios)
         flawless_runs = [
             item for item in runs
             if item.get("status") == "passed"
@@ -410,6 +418,7 @@ def main() -> int:
                 else "core use-case autonomous product-QA marathon persona sweep failed"
             ),
             "project": "gears-rust",
+            "cycle_count": args.repeats,
             "persona_ids": active_persona_ids,
             "persona_count": len(active_persona_ids),
             "scenario_ids": [scenario.get("id") for scenario in scenarios],
@@ -432,7 +441,10 @@ def main() -> int:
             report_json, report_markdown = write_smoke_reports(output, tmp)
             output["report_path"] = str(report_json)
             output["report_markdown_path"] = str(report_markdown)
-        check("sweep covered multiple persona runs", len(active_persona_ids) >= 5 and len(runs) == len(active_persona_ids), failures)
+        check("sweep covered multiple persona runs", len(active_persona_ids) >= 5 and len(runs) >= len(active_persona_ids), failures)
+        check("sweep completed every requested repeat cycle",
+              args.repeats >= 1 and len(runs) == args.repeats * len(active_persona_ids),
+              failures)
         check("sweep filed and fixed every core scenario issue",
               total_filed == expected_issue_count
               and total_done == expected_issue_count,
@@ -440,8 +452,8 @@ def main() -> int:
         check("sweep recorded integration landing proof for every fix",
               total_landing == expected_issue_count,
               failures)
-        check("sweep has a flawless ledger entry for every persona",
-              len(flawless_runs) == len(active_persona_ids),
+        check("sweep has a flawless ledger entry for every persona in every cycle",
+              len(flawless_runs) == args.repeats * len(active_persona_ids),
               failures)
         output["status"] = "passed" if not failures else "failed"
         output["failures"] = failures
@@ -452,6 +464,7 @@ def main() -> int:
             return 1
         print("SUMMARY_JSON: " + json.dumps({
             "project": output["project"],
+            "cycle_count": output["cycle_count"],
             "persona_count": output["persona_count"],
             "scenario_count": output["scenario_count"],
             "run_count": output["run_count"],

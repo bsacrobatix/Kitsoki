@@ -45,7 +45,9 @@ It is intentionally no-LLM:
   driver proof, target/persona/lens preservation in the driver and brief
   contracts, credible issue filing, gh-agent fixes, independent verification,
   integration landing proof, retained JSON/Markdown ledger artifacts,
-  human-review artifacts, and mechanically derived found/filed/fixed stats.
+  human-review artifacts, and mechanically derived found/filed/fixed stats. Use
+  `autonomous_marathon_smoke repeats=<n>` when the no-LLM gate should prove
+  multiple full active-persona cycles instead of a single sweep.
   Re-check a retained ledger through the story with
   `validate_marathon_smoke_ledger`, which defaults to the last smoke ledger, or
   pass `marathon_smoke_ledger=<path>`. The underlying CLI validator is
