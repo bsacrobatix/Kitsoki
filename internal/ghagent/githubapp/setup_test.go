@@ -370,3 +370,46 @@ func TestAddRepoToInstallationErrorSurfacesBody(t *testing.T) {
 		t.Fatalf("want 403 with body, got %v", err)
 	}
 }
+
+func TestAddRepoToInstallationAlreadyAttachedIsIdempotent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/user/installations/142507898/repositories/98765":
+			http.Error(w, `{"message":"Resource not accessible by integration"}`, http.StatusForbidden)
+		case r.Method == http.MethodGet && r.URL.Path == "/repositories/98765":
+			fmt.Fprint(w, `{"id":98765,"full_name":"bsacrobatix/studio-sassfully"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/user/installations/142507898/repositories":
+			fmt.Fprint(w, `{"total_count":1,"repositories":[{"full_name":"bsacrobatix/studio-sassfully"}]}`)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	s := &SetupClient{HTTPClient: srv.Client(), APIBase: srv.URL}
+	if err := s.AddRepoToInstallation(context.Background(), "ghu_tok", 142507898, 98765); err != nil {
+		t.Fatalf("AddRepoToInstallation: want idempotent success, got %v", err)
+	}
+}
+
+func TestAddRepoToInstallationForbiddenNotYetAttachedStillErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/user/installations/142507898/repositories/98765":
+			http.Error(w, `{"message":"Resource not accessible by integration"}`, http.StatusForbidden)
+		case r.Method == http.MethodGet && r.URL.Path == "/repositories/98765":
+			fmt.Fprint(w, `{"id":98765,"full_name":"bsacrobatix/studio-sassfully"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/user/installations/142507898/repositories":
+			fmt.Fprint(w, `{"total_count":0,"repositories":[]}`)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	s := &SetupClient{HTTPClient: srv.Client(), APIBase: srv.URL}
+	err := s.AddRepoToInstallation(context.Background(), "ghu_tok", 142507898, 98765)
+	if err == nil || !strings.Contains(err.Error(), "403") {
+		t.Fatalf("want 403 error when repo isn't actually attached, got %v", err)
+	}
+}

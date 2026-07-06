@@ -614,17 +614,55 @@ func (s *SetupClient) RepoID(ctx context.Context, token, slug string) (int64, er
 
 // AddRepoToInstallation attaches a repository to the installation — the
 // programmatic equivalent of the settings-page "Repository access" walk.
-// GitHub answers 204 whether the repo was newly added or already selected.
+// GitHub answers 204 whether the repo was newly added or already selected,
+// but some installations instead answer 403 "Resource not accessible by
+// integration" when the repo is already attached. Treat that specific 403 as
+// idempotent success once we confirm the repo is already in the
+// installation's repository list, rather than surfacing it as a hard failure.
 func (s *SetupClient) AddRepoToInstallation(ctx context.Context, token string, installationID, repoID int64) error {
 	path := fmt.Sprintf("/user/installations/%d/repositories/%d", installationID, repoID)
 	body, status, err := s.userAPI(ctx, http.MethodPut, path, token)
 	if err != nil {
 		return err
 	}
-	if status != http.StatusNoContent {
-		return fmt.Errorf("githubapp: add repo to installation returned %d: %s", status, strings.TrimSpace(string(body)))
+	if status == http.StatusNoContent {
+		return nil
 	}
-	return nil
+	if status == http.StatusForbidden && strings.Contains(string(body), "Resource not accessible by integration") {
+		if already, checkErr := s.repoAlreadyInInstallation(ctx, token, installationID, repoID); checkErr == nil && already {
+			return nil
+		}
+	}
+	return fmt.Errorf("githubapp: add repo to installation returned %d: %s", status, strings.TrimSpace(string(body)))
+}
+
+// repoAlreadyInInstallation reports whether repoID is already visible to
+// installationID, by resolving repoID to its full name and checking it
+// against the installation's repository list.
+func (s *SetupClient) repoAlreadyInInstallation(ctx context.Context, token string, installationID, repoID int64) (bool, error) {
+	body, status, err := s.userAPI(ctx, http.MethodGet, fmt.Sprintf("/repositories/%d", repoID), token)
+	if err != nil {
+		return false, err
+	}
+	if status != http.StatusOK {
+		return false, fmt.Errorf("githubapp: repo id %d lookup returned %d: %s", repoID, status, strings.TrimSpace(string(body)))
+	}
+	var repo struct {
+		FullName string `json:"full_name"`
+	}
+	if err := json.Unmarshal(body, &repo); err != nil || repo.FullName == "" {
+		return false, fmt.Errorf("githubapp: parse repo id %d: %w", repoID, err)
+	}
+	names, err := s.InstallationRepos(ctx, token, installationID)
+	if err != nil {
+		return false, err
+	}
+	for _, name := range names {
+		if name == repo.FullName {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // InstallationRepos lists the full names the installation can currently see.
