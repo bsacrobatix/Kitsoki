@@ -67,8 +67,10 @@ It is intentionally no-LLM:
   require each completed fix run to publish `independent-verify.md`, post a
   `kitsoki-fixed-in` close-out comment, close the GitHub issue, write
   `autonomous-fix-report.md`, and validate the bundle without exposing raw
-  `gh` or gh-agent plumbing as the operator contract. The story rejects this
-  gate unless `autonomous_watchdog` has already passed for the run.
+  `gh` or gh-agent plumbing as the operator contract. The native gate runs
+  `autonomous_watchdog` before filing anything and returns a reviewable
+  `autonomous_fix_invalid` result when the standing-loop control is missing or
+  stale.
 - `autonomous_marathon autonomous_driver_mode=replay ...` creates a scoped run,
   attaches cassette-backed local proof artifacts, records the driver journal
   and credible findings, then runs the same native gitops autonomous fix,

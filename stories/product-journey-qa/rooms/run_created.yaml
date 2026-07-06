@@ -932,50 +932,6 @@ states:
                 review_status: "not_run"
                 review_failed_count: 0
                 status: "autonomous_fix_invalid"
-        - when: "world.autonomous_watchdog_status != 'autonomous_watchdog_ok'"
-          target: run_created
-          guard_hint: "Run autonomous_watchdog successfully before autonomous_fix so stale standing-loop runs cannot spend."
-          effects:
-            - set:
-                ticket_repo: "{{ slots.ticket_repo }}"
-                filing_dry_run: "file"
-                autonomous_fix_status: "autonomous_fix_invalid"
-                autonomous_fix_report_path: ""
-                autonomous_gate_summary: "watchdog=fail, filing=not_run, gh_agent=not_run, independent_verify=fail, review=not_run, validation=fail"
-                independent_verify_status: "fail"
-                independent_verify_summary: "autonomous_watchdog must pass before autonomous_fix"
-                filing_status: "not_run"
-                filing_summary: "Run autonomous_watchdog before autonomous_fix so stale standing-loop runs fail closed before issue filing or gh-agent repair."
-                validation_status: "invalid"
-                validation_errors: 1
-                validation_warnings: 0
-                validation_issue_summary: "autonomous-watchdog"
-                gh_agent_enqueue_status: "not_run"
-                gh_agent_enqueued_count: 0
-                gh_agent_skipped_count: 0
-                gh_agent_claim_status: "not_run"
-                gh_agent_claim_count: 0
-                gh_agent_drain_status: "not_run"
-                gh_agent_drained_count: 0
-                gh_agent_done_count: 0
-                gh_agent_failed_count: 0
-                gh_agent_active_count: 0
-                gh_agent_fix_evidence_count: 0
-                gh_agent_missing_evidence_count: 0
-                gh_agent_triage_evidence_count: 0
-                gh_agent_missing_triage_count: 0
-                gh_agent_independent_verify_count: 0
-                gh_agent_missing_verify_count: 0
-                gh_agent_missing_run_url_count: 0
-                gh_agent_fix_evidence_summary: ""
-                gh_agent_missing_evidence_summary: "autonomous_watchdog must pass before autonomous_fix"
-                gh_agent_triage_evidence_summary: ""
-                gh_agent_missing_triage_summary: "autonomous_watchdog must pass before autonomous_fix"
-                gh_agent_independent_verify_summary: ""
-                gh_agent_missing_verify_summary: "autonomous_watchdog must pass before autonomous_fix"
-                review_status: "not_run"
-                review_failed_count: 0
-                status: "autonomous_fix_invalid"
         - target: run_created
           effects:
             - set:
@@ -1039,6 +995,11 @@ states:
                 autonomous_fix_status: "stdout_json.autonomous_fix_status"
                 autonomous_fix_report_path: "stdout_json.autonomous_fix_report_path"
                 autonomous_gate_summary: "stdout_json.autonomous_gate_summary"
+                autonomous_watchdog_status: "stdout_json.autonomous_watchdog_status"
+                autonomous_watchdog_summary: "stdout_json.autonomous_watchdog_summary"
+                autonomous_watchdog_path: "stdout_json.autonomous_watchdog_path"
+                autonomous_watchdog_markdown_path: "stdout_json.autonomous_watchdog_markdown_path"
+                autonomous_watchdog_age_minutes: "stdout_json.autonomous_watchdog_age_minutes"
                 independent_verify_status: "stdout_json.independent_verify_status"
                 independent_verify_summary: "stdout_json.independent_verify_summary"
                 issue_closeout_status: "stdout_json.issue_closeout_status"
