@@ -207,5 +207,10 @@ func renderWorkflowReceipt(cmd *cobra.Command, receipt *dynamicworkflow.Receipt,
 	if receipt.ExportReportPath != "" {
 		fmt.Fprintf(cmd.OutOrStdout(), "export report: %s\n", receipt.ExportReportPath)
 	}
+	if receipt.ExportReport != nil {
+		if summary := dynamicworkflow.FormatStarterFlowReplay(receipt.ExportReport.StarterFlowReplay); summary != "" {
+			fmt.Fprintf(cmd.OutOrStdout(), "starter flow replay: %s\n", summary)
+		}
+	}
 	return nil
 }

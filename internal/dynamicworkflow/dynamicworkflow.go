@@ -93,6 +93,23 @@ type StarterFlowReplayCheck struct {
 	Error  string `json:"error,omitempty"`
 }
 
+// FormatStarterFlowReplay returns the compact human-facing verdict for a
+// starter-flow replay check. Empty means no replay check was available.
+func FormatStarterFlowReplay(check *StarterFlowReplayCheck) string {
+	if check == nil {
+		return ""
+	}
+	status := "failed"
+	if check.OK {
+		status = "ok"
+	}
+	out := fmt.Sprintf("%s (%d passed, %d failed)", status, check.Passed, check.Failed)
+	if check.Error != "" {
+		out += ": " + check.Error
+	}
+	return out
+}
+
 // Receipt is the common artifact/trackable shape returned by create/validate/
 // launch/export. It is written to receipt.json in the draft directory.
 type Receipt struct {
