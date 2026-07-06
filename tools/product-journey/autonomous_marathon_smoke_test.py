@@ -10,6 +10,7 @@ calls a real LLM or GitHub.
 """
 
 import importlib.util
+import argparse
 import json
 import os
 import stat
@@ -62,6 +63,70 @@ def write_issue_state(path: Path, issue_urls: list[str]) -> None:
         for issue_url in issue_urls
     ]
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def display_path(value: str) -> str:
+    if not value:
+        return ""
+    path = Path(value)
+    try:
+        return str(path.relative_to(Path.cwd()))
+    except ValueError:
+        return value
+
+
+def render_smoke_markdown(output: dict) -> str:
+    lines = [
+        "# Autonomous Marathon Smoke Ledger",
+        "",
+        f"- Status: `{output.get('status', '')}`",
+        f"- Project: `{output.get('project', '')}`",
+        f"- Personas: {output.get('persona_count', 0)}",
+        f"- Scenarios: {output.get('scenario_count', 0)}",
+        f"- Runs: {output.get('run_count', 0)}",
+        f"- Filed issues: {output.get('filed_issue_count', 0)} / {output.get('expected_issue_count', 0)}",
+        f"- Fixed issues: {output.get('gh_agent_done_count', 0)} / {output.get('expected_issue_count', 0)}",
+        f"- Flawless runs: {output.get('flawless_run_count', 0)} / {output.get('run_count', 0)}",
+        f"- Success rate: {output.get('success_rate', '')}",
+        "",
+        "## Coverage",
+        "",
+        "- Persona ids: " + ", ".join(output.get("persona_ids", [])),
+        "- Scenario ids: " + ", ".join(output.get("scenario_ids", [])),
+        "",
+        "## Runs",
+        "",
+    ]
+    for item in output.get("runs", []):
+        lines.extend([
+            f"### {item.get('persona', '')}",
+            "",
+            f"- Status: `{item.get('status', '')}`",
+            f"- Run id: `{item.get('run_id', '')}`",
+            f"- Scenarios: {', '.join(item.get('scenario_ids', []))}",
+            f"- Filed issues: {item.get('filed_issue_count', 0)}",
+            f"- Fixed issues: {item.get('gh_agent_done_count', 0)}",
+            f"- Independent verification artifacts: {item.get('gh_agent_independent_verify_count', 0)}",
+            f"- Integration landing proofs: {item.get('gh_agent_integration_landing_count', 0)}",
+            f"- Gate: `{item.get('autonomous_gate_summary', '')}`",
+            f"- Report: `{display_path(item.get('autonomous_fix_report_path', ''))}`",
+            f"- Deck: `{display_path(item.get('deck_path', ''))}`",
+            "",
+        ])
+    if output.get("failures"):
+        lines.extend(["## Failures", ""])
+        lines.extend(f"- {failure}" for failure in output.get("failures", []))
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_smoke_reports(output: dict, report_dir: Path) -> tuple[Path, Path]:
+    report_dir.mkdir(parents=True, exist_ok=True)
+    json_path = report_dir / "autonomous-marathon-smoke.json"
+    markdown_path = report_dir / "autonomous-marathon-smoke.md"
+    json_path.write_text(json.dumps(output, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    markdown_path.write_text(render_smoke_markdown(output), encoding="utf-8")
+    return json_path, markdown_path
 
 
 def run_persona(
@@ -164,6 +229,16 @@ def run_persona(
         item.get("id"): item.get("natural_utterances", [])
         for item in agent_brief.get("scenario_order", [])
     }
+    drained_jobs = [
+        job for job in findings.get("gh_agent", {}).get("drained_jobs", [])
+        if isinstance(job, dict) and job.get("state") == "done"
+    ]
+    integration_landing_count = sum(
+        1
+        for job in drained_jobs
+        if str(job.get("integration_branch", "")).startswith("integration/")
+        and str(job.get("commit_sha", "")).strip()
+    )
 
     scenario_ids = [scenario.get("id") for scenario in run_json.get("scenarios", [])]
     check(prefix + "run targets gears-rust with requested persona",
@@ -208,6 +283,16 @@ def run_persona(
           and result.get("gh_agent_independent_verify_count") == 3
           and result.get("gh_agent_missing_triage_count") == 0
           and result.get("gh_agent_triage_evidence_count") == 3,
+          failures)
+    check(prefix + "gh-agent fixes carry integration landing proof",
+          integration_landing_count == 3
+          and all(
+              job.get("integration_branch", "") in report_text
+              and job.get("commit_sha", "") in report_text
+              and job.get("integration_branch", "") in deck_text
+              and job.get("commit_sha", "") in deck_text
+              for job in drained_jobs
+          ),
           failures)
     check(prefix + "autonomous gates are all green",
           result.get("autonomous_fix_status") == "autonomous_fix_valid"
@@ -269,6 +354,7 @@ def run_persona(
         "gh_agent_done_count": result.get("gh_agent_done_count", 0),
         "gh_agent_claim_comment_url": claim_comment_url,
         "gh_agent_independent_verify_count": result.get("gh_agent_independent_verify_count", 0),
+        "gh_agent_integration_landing_count": integration_landing_count,
         "issue_closeout_status": result.get("issue_closeout_status", ""),
         "issue_closeout_comment_url": closeout_comment_url,
         "autonomous_gate_summary": result.get("autonomous_gate_summary", ""),
@@ -276,13 +362,19 @@ def run_persona(
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--report-dir", default="", help="Directory for retained JSON/Markdown smoke ledger")
+    args = parser.parse_args()
     failures: list[str] = []
     with tempfile.TemporaryDirectory() as tmp_name:
         tmp = Path(tmp_name)
-        run.ARTIFACT_ROOT = tmp / "product-journey"
-        run.ARTIFACT_ROOT.mkdir(parents=True)
+        retained_root = Path(args.report_dir) if args.report_dir else None
+        scratch = retained_root / "support" if retained_root else tmp
+        scratch.mkdir(parents=True, exist_ok=True)
+        run.ARTIFACT_ROOT = retained_root / "runs" if retained_root else tmp / "product-journey"
+        run.ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
 
-        fake = tmp / "fake_kitsoki.py"
+        fake = scratch / "fake_kitsoki.py"
         fake.write_text(filing_test.FAKE_KITSOKI, encoding="utf-8")
         fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
 
@@ -295,11 +387,21 @@ def main() -> int:
             "core-use-cases",
         )
         runs = [
-            run_persona(tmp, fake, catalog, github_targets, personas, scenarios, persona_id, failures)
+            run_persona(scratch, fake, catalog, github_targets, personas, scenarios, persona_id, failures)
             for persona_id in active_persona_ids
         ]
         total_filed = sum(int(item.get("filed_issue_count", 0) or 0) for item in runs)
         total_done = sum(int(item.get("gh_agent_done_count", 0) or 0) for item in runs)
+        total_landing = sum(int(item.get("gh_agent_integration_landing_count", 0) or 0) for item in runs)
+        expected_issue_count = len(active_persona_ids) * len(scenarios)
+        flawless_runs = [
+            item for item in runs
+            if item.get("status") == "passed"
+            and int(item.get("filed_issue_count", 0) or 0) == len(scenarios)
+            and int(item.get("gh_agent_done_count", 0) or 0) == len(scenarios)
+            and int(item.get("gh_agent_integration_landing_count", 0) or 0) == len(scenarios)
+            and item.get("autonomous_gate_summary") == "filing=pass, gh_agent=pass, independent_verify=pass, review=pass, validation=pass"
+        ]
         output = {
             "status": "passed" if not failures else "failed",
             "summary": (
@@ -313,19 +415,37 @@ def main() -> int:
             "scenario_ids": [scenario.get("id") for scenario in scenarios],
             "scenario_count": len(scenarios),
             "run_count": len(runs),
+            "expected_issue_count": expected_issue_count,
             "filed_issue_count": total_filed,
             "gh_agent_done_count": total_done,
+            "gh_agent_integration_landing_count": total_landing,
+            "flawless_run_count": len(flawless_runs),
+            "success_rate": f"{len(flawless_runs)}/{len(runs)}",
             "runs": runs,
             "failures": failures,
         }
-        (tmp / "autonomous-marathon-smoke.json").write_text(json.dumps(output, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        if args.report_dir:
+            report_json, report_markdown = write_smoke_reports(output, Path(args.report_dir))
+            output["report_path"] = str(report_json)
+            output["report_markdown_path"] = str(report_markdown)
+        else:
+            report_json, report_markdown = write_smoke_reports(output, tmp)
+            output["report_path"] = str(report_json)
+            output["report_markdown_path"] = str(report_markdown)
         check("sweep covered multiple persona runs", len(active_persona_ids) >= 5 and len(runs) == len(active_persona_ids), failures)
         check("sweep filed and fixed every core scenario issue",
-              total_filed == len(active_persona_ids) * len(scenarios)
-              and total_done == len(active_persona_ids) * len(scenarios),
+              total_filed == expected_issue_count
+              and total_done == expected_issue_count,
+              failures)
+        check("sweep recorded integration landing proof for every fix",
+              total_landing == expected_issue_count,
+              failures)
+        check("sweep has a flawless ledger entry for every persona",
+              len(flawless_runs) == len(active_persona_ids),
               failures)
         output["status"] = "passed" if not failures else "failed"
         output["failures"] = failures
+        write_smoke_reports(output, Path(args.report_dir) if args.report_dir else tmp)
         if failures:
             output["summary"] = "core use-case autonomous product-QA marathon persona sweep failed"
             print(json.dumps(output, sort_keys=True))
@@ -337,6 +457,12 @@ def main() -> int:
             "run_count": output["run_count"],
             "filed_issue_count": output["filed_issue_count"],
             "gh_agent_done_count": output["gh_agent_done_count"],
+            "gh_agent_integration_landing_count": output["gh_agent_integration_landing_count"],
+            "flawless_run_count": output["flawless_run_count"],
+            "expected_issue_count": output["expected_issue_count"],
+            "success_rate": output["success_rate"],
+            "report_path": output["report_path"],
+            "report_markdown_path": output["report_markdown_path"],
         }, sort_keys=True))
         print("PASS")
         return 0
