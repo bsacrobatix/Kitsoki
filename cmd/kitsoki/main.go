@@ -910,6 +910,9 @@ func buildHarness(harnessType, claudeModel, agentBackend, recordingPath, recordP
 }
 
 func buildHarnessWithActiveProfile(harnessType, claudeModel, agentBackend, recordingPath, recordPath string, def *app.AppDef, activeProfile host.ActiveProfile) (harness.Harness, error) {
+	if activeProfile.Provider.Model != "" {
+		claudeModel = activeProfile.Provider.Model
+	}
 	if harnessType == "" {
 		harnessType = autoSelectHarness()
 	}
