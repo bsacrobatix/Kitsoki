@@ -46,6 +46,7 @@ func TestServiceCreateValidateExport(t *testing.T) {
 	require.FileExists(t, receipt.ManifestPath)
 	require.FileExists(t, receipt.EventsPath)
 	require.FileExists(t, filepath.Join(receipt.AppPath, "app.yaml"))
+	require.NotEmpty(t, receipt.StatePath)
 	require.Contains(t, receipt.LaunchCommand, "kitsoki run")
 	events, err := os.ReadFile(receipt.EventsPath)
 	require.NoError(t, err)
@@ -84,6 +85,7 @@ func TestServiceCreateValidateExport(t *testing.T) {
 	require.NoError(t, goyaml.Unmarshal(b, &launch))
 	world := launch["world"].(map[string]any)
 	require.Equal(t, filepath.ToSlash(runtimePath(repoRoot, filepath.Join(exportDir, "manifest.yaml"))), world["manifest_path"])
+	require.Equal(t, filepath.ToSlash(runtimePath(repoRoot, filepath.Join(exportDir, "punch-list.state.json"))), world["state_path"])
 }
 
 func TestServiceCreateAvoidsSameSecondSlugCollisions(t *testing.T) {
@@ -150,6 +152,69 @@ func TestValidateDraftRejectsRuntimeManifestFailure(t *testing.T) {
 	require.Contains(t, strings.Join(report.Errors, "\n"), "gate_command appears to invoke an LLM or live run")
 }
 
+func TestValidateDraftRejectsBrokenLaunchBasis(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	require.NoError(t, err)
+	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
+	require.NoError(t, err)
+
+	outDir := dynamicWorkflowTestDir(t, repoRoot)
+	svc := NewService(repoRoot)
+	svc.OutputDir = outDir
+	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)
+	svc.Now = func() time.Time { return time.Date(2026, 7, 6, 7, 0, 0, 0, time.UTC) }
+
+	receipt, err := svc.Create(context.Background(), CreateRequest{
+		Goal: "fan out agents to increase coverage",
+		Slug: "broken-launch-basis",
+	})
+	require.NoError(t, err)
+	require.True(t, receipt.Validation.OK, "receipt should validate: %v", receipt.Validation.Errors)
+
+	require.NoError(t, writeYAML(receipt.LaunchBasisPath, map[string]any{
+		"state": "idle",
+		"world": map[string]any{
+			"manifest_path": runtimePath(repoRoot, receipt.ManifestPath),
+		},
+	}))
+
+	report := svc.ValidateDraft(receipt.AppPath, receipt.ManifestPath)
+	require.False(t, report.OK)
+	require.Contains(t, strings.Join(report.Errors, "\n"), "launch basis invalid")
+	require.Contains(t, strings.Join(report.Errors, "\n"), "world.state_path is required")
+}
+
+func TestValidateDraftPreservesRuntimeStateFile(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	require.NoError(t, err)
+	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
+	require.NoError(t, err)
+
+	outDir := dynamicWorkflowTestDir(t, repoRoot)
+	svc := NewService(repoRoot)
+	svc.OutputDir = outDir
+	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)
+	svc.Now = func() time.Time { return time.Date(2026, 7, 6, 7, 15, 0, 0, time.UTC) }
+
+	receipt, err := svc.Create(context.Background(), CreateRequest{
+		Goal: "fan out agents to increase coverage",
+		Slug: "preserve-runtime-state",
+	})
+	require.NoError(t, err)
+	require.True(t, receipt.Validation.OK, "receipt should validate: %v", receipt.Validation.Errors)
+	require.NoFileExists(t, receipt.StatePath, "create-time validation should clean up its readiness state")
+
+	original := []byte(`{"sentinel":"keep"}
+`)
+	require.NoError(t, os.WriteFile(receipt.StatePath, original, 0o644))
+
+	report := svc.ValidateDraft(receipt.AppPath, receipt.ManifestPath)
+	require.True(t, report.OK, "revalidation should pass: %v", report.Errors)
+	after, err := os.ReadFile(receipt.StatePath)
+	require.NoError(t, err)
+	require.Equal(t, original, after, "validation must not overwrite runtime progress state")
+}
+
 func TestServiceCreatePreservesSyntheticGLMCoverageFanout(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	require.NoError(t, err)
@@ -209,6 +274,7 @@ func TestServiceCreatePreservesSyntheticGLMCoverageFanout(t *testing.T) {
 	require.NoError(t, goyaml.Unmarshal(b, &launch))
 	world := launch["world"].(map[string]any)
 	require.Equal(t, ".artifacts/dynamic-workflows-test/TestServiceCreatePreservesSyntheticGLMCoverageFanout/dwf_20260706T053000Z_glm-coverage/manifest.yaml", world["manifest_path"])
+	require.Equal(t, ".artifacts/dynamic-workflows-test/TestServiceCreatePreservesSyntheticGLMCoverageFanout/dwf_20260706T053000Z_glm-coverage/punch-list.state.json", world["state_path"])
 }
 
 func TestServiceCreateResearchTestingApproachesFanout(t *testing.T) {

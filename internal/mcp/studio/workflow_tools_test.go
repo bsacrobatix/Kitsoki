@@ -51,6 +51,7 @@ func TestWorkflowCreateValidateExport(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(contentText(launch)), &launched))
 	require.Equal(t, receipt.WorkflowID, launched.WorkflowID)
 	require.NotEmpty(t, launched.TracePath, "launch should persist a trace path")
+	require.NotEmpty(t, launched.StatePath, "launch should persist the runtime state path")
 	require.NotEmpty(t, launched.SessionID, "launch should open a studio session")
 	require.NotEmpty(t, launched.SessionHandle, "launch should return a studio handle")
 	require.FileExists(t, launched.EventsPath)
@@ -65,6 +66,7 @@ func TestWorkflowCreateValidateExport(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, start.IsError, "session.submit start errored: %s", contentText(start))
 	require.NotContains(t, contentText(start), "must be repo-relative or under /tmp")
+	require.FileExists(t, launched.StatePath)
 	require.NotContains(t, contentText(start), `"state":"needs_human"`)
 
 	exportDir := filepath.Join(t.TempDir(), "exported", "mcp-dwf-test")
@@ -185,6 +187,7 @@ func TestWorkflowLaunchStartsGeneratedCoverageAndResearchWorkflows(t *testing.T)
 			var launched dynamicworkflow.Receipt
 			require.NoError(t, json.Unmarshal([]byte(contentText(launch)), &launched))
 			require.NotEmpty(t, launched.SessionHandle)
+			require.NotEmpty(t, launched.StatePath)
 
 			start, err := callTool(ctx, cs, "session.submit", map[string]any{
 				"handle": launched.SessionHandle,

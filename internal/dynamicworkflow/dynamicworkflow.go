@@ -122,6 +122,7 @@ type Receipt struct {
 	AppPath          string           `json:"app_path"`
 	ManifestPath     string           `json:"manifest_path"`
 	LaunchBasisPath  string           `json:"launch_basis_path"`
+	StatePath        string           `json:"state_path,omitempty"`
 	TracePath        string           `json:"trace_path,omitempty"`
 	EventsPath       string           `json:"events_path,omitempty"`
 	LaunchCommand    string           `json:"launch_command,omitempty"`
@@ -263,6 +264,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Receipt, erro
 	appPath := filepath.Join(draftDir, "app")
 	manifestPath := filepath.Join(draftDir, "manifest.yaml")
 	launchBasisPath := filepath.Join(draftDir, "launch.yaml")
+	statePath := filepath.Join(draftDir, "punch-list.state.json")
 	validationPath := filepath.Join(draftDir, "validation.json")
 	eventsPath := filepath.Join(draftDir, "events.jsonl")
 	receiptPath := filepath.Join(draftDir, "receipt.json")
@@ -276,7 +278,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Receipt, erro
 	if err := writeYAML(manifestPath, manifest); err != nil {
 		return nil, err
 	}
-	if err := writeLaunchBasis(launchBasisPath, runtimePath(s.RootDir, manifestPath)); err != nil {
+	if err := writeLaunchBasis(launchBasisPath, runtimePath(s.RootDir, manifestPath), runtimePath(s.RootDir, statePath)); err != nil {
 		return nil, err
 	}
 
@@ -294,6 +296,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Receipt, erro
 		AppPath:          appPath,
 		ManifestPath:     manifestPath,
 		LaunchBasisPath:  launchBasisPath,
+		StatePath:        statePath,
 		TracePath:        filepath.Join(draftDir, "trace.jsonl"),
 		EventsPath:       eventsPath,
 		Validation:       report,
@@ -374,6 +377,15 @@ func (s *Service) Launch(ctx context.Context, workflowID string) (*Receipt, erro
 	if err != nil {
 		return nil, err
 	}
+	if receipt.StatePath == "" {
+		receipt.StatePath = filepath.Join(s.OutputDir, receipt.WorkflowID, "punch-list.state.json")
+	}
+	if receipt.LaunchBasisPath == "" {
+		receipt.LaunchBasisPath = filepath.Join(s.OutputDir, receipt.WorkflowID, "launch.yaml")
+	}
+	if err := writeLaunchBasis(receipt.LaunchBasisPath, runtimePath(s.RootDir, receipt.ManifestPath), runtimePath(s.RootDir, receipt.StatePath)); err != nil {
+		return nil, err
+	}
 	if !receipt.Validation.OK {
 		receipt.Validation = s.ValidateDraft(receipt.AppPath, receipt.ManifestPath)
 		if err := writeJSON(filepath.Join(s.OutputDir, receipt.WorkflowID, "receipt.json"), receipt); err != nil {
@@ -422,12 +434,28 @@ func (s *Service) ValidateDraft(appPath, manifestPath string) ValidationReport {
 		return report
 	}
 	report.Errors = append(report.Errors, validateManifest(s.RootDir, manifest, appPath)...)
-	report.Errors = append(report.Errors, s.validateLaunchReadiness(appPath, manifestPath)...)
+	launchWorld, launchErrs := s.validateLaunchBasis(filepath.Join(filepath.Dir(manifestPath), "launch.yaml"), manifestPath)
+	report.Errors = append(report.Errors, launchErrs...)
+	if len(launchErrs) == 0 {
+		report.Errors = append(report.Errors, s.validateLaunchReadiness(appPath, launchWorld)...)
+	}
 	report.OK = len(report.Errors) == 0
 	return report
 }
 
-func (s *Service) validateLaunchReadiness(appPath, manifestPath string) []string {
+func (s *Service) validateLaunchBasis(launchBasisPath, manifestPath string) (map[string]any, []string) {
+	world, err := LaunchInitialWorld(s.RootDir, launchBasisPath)
+	if err != nil {
+		return nil, []string{fmt.Sprintf("launch basis invalid: %v", err)}
+	}
+	expectedManifest := filepath.ToSlash(runtimePath(s.RootDir, manifestPath))
+	if got := strings.TrimSpace(stringFromAny(world["manifest_path"])); got != expectedManifest {
+		return nil, []string{fmt.Sprintf("launch basis manifest_path mismatch: got %q, want %q", got, expectedManifest)}
+	}
+	return world, nil
+}
+
+func (s *Service) validateLaunchReadiness(appPath string, launchWorld map[string]any) []string {
 	tmpDir, err := os.MkdirTemp("", "kitsoki-dynamicworkflow-validate-*")
 	if err != nil {
 		return []string{fmt.Sprintf("runtime launch-readiness setup failed: %v", err)}
@@ -435,33 +463,33 @@ func (s *Service) validateLaunchReadiness(appPath, manifestPath string) []string
 	defer os.RemoveAll(tmpDir)
 
 	appYAML := filepath.Join(appPath, "app.yaml")
-	statePath := filepath.Join(tmpDir, "punch-list.state.json")
 	flowPath := filepath.Join(tmpDir, "launch-readiness.yaml")
-	flow := fmt.Sprintf(`test_kind: flow
-app: %s
-use_orchestrator: true
-initial_state: idle
-initial_world:
-  manifest_path: %s
-  state_path: %s
-turns:
-  - intent: { name: start, slots: {} }
-    expect_state: load
-    expect_world:
-      load_error: ""
-  - intent: { name: next_item, slots: {} }
-    expect_state: board
-expect_no_errors: true
-`,
-		quoteYAMLString(filepath.ToSlash(runtimePath(s.RootDir, appYAML))),
-		quoteYAMLString(filepath.ToSlash(runtimePath(s.RootDir, manifestPath))),
-		quoteYAMLString(filepath.ToSlash(statePath)),
-	)
-	if err := os.WriteFile(flowPath, []byte(flow), 0o644); err != nil {
+	flow := map[string]any{
+		"test_kind":        "flow",
+		"app":              filepath.ToSlash(runtimePath(s.RootDir, appYAML)),
+		"use_orchestrator": true,
+		"initial_state":    "idle",
+		"initial_world":    launchWorld,
+		"turns": []map[string]any{
+			{
+				"intent":       map[string]any{"name": "start", "slots": map[string]any{}},
+				"expect_state": "load",
+				"expect_world": map[string]any{"load_error": ""},
+			},
+			{
+				"intent":       map[string]any{"name": "next_item", "slots": map[string]any{}},
+				"expect_state": "board",
+			},
+		},
+		"expect_no_errors": true,
+	}
+	if err := writeYAML(flowPath, flow); err != nil {
 		return []string{fmt.Sprintf("runtime launch-readiness setup failed: %v", err)}
 	}
 
-	report, err := testrunner.RunFlows(context.Background(), appYAML, flowPath, testrunner.FlowOptions{FailFast: true})
+	report, err := runPreservingStateFile(s.RootDir, launchWorld, func() (*testrunner.FlowReport, error) {
+		return testrunner.RunFlows(context.Background(), appYAML, flowPath, testrunner.FlowOptions{FailFast: true})
+	})
 	if err != nil {
 		return []string{fmt.Sprintf("runtime launch-readiness failed: %v", err)}
 	}
@@ -529,7 +557,8 @@ func (s *Service) Export(ctx context.Context, workflowID string, req ExportReque
 	if err := writeYAML(filepath.Join(targetDir, "manifest.yaml"), manifest); err != nil {
 		return nil, err
 	}
-	if err := writeLaunchBasis(filepath.Join(targetDir, "launch.yaml"), runtimePath(s.RootDir, filepath.Join(targetDir, "manifest.yaml"))); err != nil {
+	exportStatePath := filepath.Join(targetDir, "punch-list.state.json")
+	if err := writeLaunchBasis(filepath.Join(targetDir, "launch.yaml"), runtimePath(s.RootDir, filepath.Join(targetDir, "manifest.yaml")), runtimePath(s.RootDir, exportStatePath)); err != nil {
 		return nil, err
 	}
 	readme := strings.TrimSpace(fmt.Sprintf(`# %s
@@ -647,6 +676,7 @@ Validation: %t
 	receipt.LaunchBasisPath = filepath.Join(targetDir, "launch.yaml")
 	receipt.AppPath = exportAppDir
 	receipt.ManifestPath = filepath.Join(targetDir, "manifest.yaml")
+	receipt.StatePath = exportStatePath
 	receipt.LaunchCommand = fmt.Sprintf("kitsoki run %s --warp %s", quoteArg(filepath.Join(exportAppDir, "app.yaml")), quoteArg(receipt.LaunchBasisPath))
 	if err := writeJSON(filepath.Join(draftDir, "receipt.json"), receipt); err != nil {
 		return nil, err
@@ -1058,14 +1088,117 @@ func readManifest(path string) (Manifest, error) {
 	return m, nil
 }
 
-func writeLaunchBasis(path, manifestPath string) error {
+func writeLaunchBasis(path, manifestPath, statePath string) error {
 	body := map[string]any{
 		"state": "idle",
 		"world": map[string]any{
 			"manifest_path": filepath.ToSlash(manifestPath),
+			"state_path":    filepath.ToSlash(statePath),
 		},
 	}
 	return writeYAML(path, body)
+}
+
+// LaunchInitialWorld reads the persisted launch basis and returns the exact
+// world values that a runtime launch should use.
+func LaunchInitialWorld(root, launchBasisPath string) (map[string]any, error) {
+	var basis struct {
+		State string         `yaml:"state"`
+		World map[string]any `yaml:"world"`
+	}
+	b, err := os.ReadFile(launchBasisPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := goyaml.Unmarshal(b, &basis); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(basis.State) != "idle" {
+		return nil, fmt.Errorf("state must be idle")
+	}
+	if basis.World == nil {
+		return nil, fmt.Errorf("world is required")
+	}
+	manifestPath := strings.TrimSpace(stringFromAny(basis.World["manifest_path"]))
+	if manifestPath == "" {
+		return nil, fmt.Errorf("world.manifest_path is required")
+	}
+	statePath := strings.TrimSpace(stringFromAny(basis.World["state_path"]))
+	if statePath == "" {
+		return nil, fmt.Errorf("world.state_path is required")
+	}
+	if !pathExists(root, manifestPath) {
+		return nil, fmt.Errorf("world.manifest_path does not exist: %s", manifestPath)
+	}
+	world := map[string]any{}
+	for k, v := range basis.World {
+		world[k] = v
+	}
+	world["manifest_path"] = filepath.ToSlash(manifestPath)
+	world["state_path"] = filepath.ToSlash(statePath)
+	return world, nil
+}
+
+func runPreservingStateFile(root string, launchWorld map[string]any, run func() (*testrunner.FlowReport, error)) (*testrunner.FlowReport, error) {
+	statePath := strings.TrimSpace(stringFromAny(launchWorld["state_path"]))
+	if statePath == "" {
+		return nil, fmt.Errorf("world.state_path is required")
+	}
+	resolved := resolveRuntimePath(root, statePath)
+	var original []byte
+	var originalMode fs.FileMode
+	existed := false
+	if info, err := os.Stat(resolved); err == nil {
+		existed = true
+		originalMode = info.Mode().Perm()
+		b, readErr := os.ReadFile(resolved)
+		if readErr != nil {
+			return nil, readErr
+		}
+		original = b
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	report, runErr := run()
+	if existed {
+		restoreErr := os.WriteFile(resolved, original, originalMode)
+		if runErr != nil {
+			return report, runErr
+		}
+		return report, restoreErr
+	}
+	removeErr := os.Remove(resolved)
+	if removeErr != nil && !os.IsNotExist(removeErr) {
+		if runErr != nil {
+			return report, runErr
+		}
+		return report, removeErr
+	}
+	return report, runErr
+}
+
+func resolveRuntimePath(root, path string) string {
+	if filepath.IsAbs(path) {
+		return filepath.Clean(filepath.FromSlash(path))
+	}
+	if root == "" {
+		return filepath.Clean(filepath.FromSlash(path))
+	}
+	return filepath.Join(root, filepath.FromSlash(path))
+}
+
+func stringFromAny(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case fmt.Stringer:
+		return t.String()
+	default:
+		if t == nil {
+			return ""
+		}
+		return fmt.Sprint(t)
+	}
 }
 
 func writeYAML(path string, v any) error {
@@ -1241,14 +1374,6 @@ func quoteArg(s string) string {
 		return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 	}
 	return s
-}
-
-func quoteYAMLString(s string) string {
-	b, err := json.Marshal(s)
-	if err != nil {
-		return `""`
-	}
-	return string(b)
 }
 
 func isLLMSpendingCommand(cmd string) bool {
