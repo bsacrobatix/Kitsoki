@@ -34,11 +34,12 @@ import via `entry: idle`.
 | `needs-human` | direct-ship exit: an integrate/verify/cleanup failure, or a regression gate that was never RED pre-fix / isn't GREEN on merged main. | `last_error` | Carries the real error; never a swallowed false success. |
 | `not-reproducible` | the ticket's `repro_command` passed (GREEN) on the unchanged worktree — the bug does not currently reproduce. | `last_error` | Carries the gate output; a human confirms wontfix / cannot-reproduce or supplies a sharper repro. |
 | `merged` | opt-in CI-watch/merge tail exit (`bugfix_exit: open-PR-merge`, WS-C C3): the imported pr-refinement compound opened the PR, watched CI, and merged it. | `pr_url` | Carries `pr_url` + `merge_sha`; a standalone `kitsoki run` reaches a real MERGED terminal with no parent hub. |
+| `triaged` | a standardized read-only verdict was produced without attempting a fix — triage-only mode, or a full/quick autostart whose auto-triage pre-flight verdicted `ALREADY-FIXED` (see [Mode shortcuts](#mode-shortcuts)). | `triage_verdict` | Parent decides: close as fixed (`suggested_action` / `fixed_in_ref`), or re-drive with `auto_triage: false`. |
 
 Standalone (no parent) load synthesises `__exit__done`,
 `__exit__abandoned`, `__exit__shipped`, `__exit__needs-human`,
-`__exit__not-reproducible`, and `__exit__merged` terminals so `kitsoki run`
-and `kitsoki test flows` both terminate cleanly.
+`__exit__not-reproducible`, `__exit__merged`, and `__exit__triaged`
+terminals so `kitsoki run` and `kitsoki test flows` both terminate cleanly.
 
 ## The exit slot — direct-ship vs open-PR (delivery-loop slice 4)
 
@@ -409,6 +410,7 @@ The `bugfix_mode` world key gates collapse paths:
 |---|---|
 | `full` (default) | Walks every room in order. |
 | `quick` | At `testing_awaiting_reply.accept`, jump to `done_executing` (skipping reviewing + validating). Set via the `quick_fix` intent at idle or the first checkpoint. |
+| `triage` | Triage-only: the read-only `triaging` room emits a standardized verdict (`ALREADY-FIXED` \| `STILL-LIVE` \| `PARTIAL` \| `UNCLEAR`, `schemas/triage_verdict.json`) on whether the bug still exists — no worktree, no fix. Terminal: `@exit:triaged` carrying `world.triage_verdict`. Set via the `triage` intent at idle. |
 
 Entry intents:
 
@@ -416,7 +418,33 @@ Entry intents:
 |---|---|---|
 | `start` / `full_pipeline` | `bugfix_mode=full` | `reproducing_executing` |
 | `quick_fix` | `bugfix_mode=quick` | `reproducing_executing` |
+| `triage` | `bugfix_mode=triage` | `triaging` |
 | `skip_to_pr` | `bugfix_mode=full`, `restart_from_stage=validate`, `unsafe_jumps_made++` | `validating_executing` |
+
+### Auto-triage pre-flight (`world.auto_triage`, default `true`)
+
+A fresh full/quick **autostart** (idle entered with a ticket seeded — the
+headless / marathon / parent-hub path) does not go straight to `reproducing`:
+after the worktree is cut, idle's autostart chain emits the internal
+`preflight_triage` intent, and the same read-only `triaging` room produces a
+verdict against the exact tree the fix would be applied to — **before** any
+reproducer/judge/maker budget is spent. Routing on accept (auto-fired in any
+non-human judge mode):
+
+- **ALREADY-FIXED** → short-circuit to `@exit:triaged` (nothing to fix; the
+  verdict carries `fixed_in_ref` + `suggested_action`).
+- **STILL-LIVE / PARTIAL / UNCLEAR** → continue into `reproducing`, the
+  verdict posted as a checkpoint. UNCLEAR deliberately proceeds — the repro
+  RED-gate is the authoritative, deterministic arbiter of "does it reproduce".
+
+The pre-flight is skipped when: `auto_triage` is `false` (seed this for
+known-live bugs, e.g. bench cells pinned to a pre-fix baseline; under a parent
+hub set the PARENT-level key — the import wrapper re-seeds `bf__auto_triage`
+on every entry); a `triage_verdict` is already bound; or the idle re-entry is
+mid-pipeline (refine / `restart_from` / an `on_error` bounce). An operator
+explicitly typing `start` / `full_pipeline` / `quick_fix` also skips it —
+they've already chosen to run the pipeline. Fixtures:
+`flows/preflight_triage_*.yaml`.
 
 The shortcuts are also reachable from `reproducing_awaiting_reply` for
 operators who decide mid-flow (after seeing the reproducer) that the

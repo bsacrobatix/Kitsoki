@@ -1,13 +1,24 @@
-# triaging — triage-only mode (no fix pipeline).
+# triaging — read-only triage verdict. Two entry modes:
 #
-# Entered from idle when world.bugfix_mode == 'triage' (idle autostarts into
-# here instead of reproducing, and creates NO worktree). One read-only agent
-# (triager) inspects the current working tree and answers ONE question: does
-# the reported bug still exist? It emits a STANDARDIZED verdict
+#   triage-only (world.bugfix_mode == 'triage') — idle autostarts into here
+#   instead of reproducing and creates NO worktree (workdir pinned to ".").
+#   The verdict IS the deliverable. Terminal: @exit:triaged.
+#
+#   pipeline pre-flight (any other mode, via the internal `preflight_triage`
+#   emit from idle's autostart when world.auto_triage is on) — runs AFTER the
+#   worktree is cut but BEFORE any reproducer/judge/maker budget is spent, so
+#   the verdict assesses the exact tree the fix would be applied to.
+#   `accept` routes on the verdict: ALREADY-FIXED short-circuits to
+#   @exit:triaged (nothing to fix); STILL-LIVE / PARTIAL / UNCLEAR continue
+#   into reproducing with the verdict posted as a checkpoint — UNCLEAR
+#   deliberately proceeds because the repro RED-gate is the authoritative,
+#   deterministic arbiter of "does it reproduce".
+#
+# One read-only agent (triager) inspects the working tree and answers ONE
+# question: does the reported bug still exist? It emits a STANDARDIZED verdict
 # (schemas/triage_verdict.json) — ALREADY-FIXED | STILL-LIVE | PARTIAL |
 # UNCLEAR — with concrete code evidence (file:line / function / regression
-# test). The verdict IS the deliverable; there is no judge, no proposing, no
-# implementing. Terminal: @exit:triaged carrying world.triage_verdict.
+# test). There is no judge, no proposing, no implementing in this room.
 #
 # Autonomy: in any non-human judge_mode the room auto-fires `accept` once the
 # verdict binds (the verdict needs no second opinion). In human mode the
@@ -16,13 +27,13 @@
 states:
 
   triaging:
-    description: "Triage-only: assess whether the bug still exists; emit a standardized verdict. No fix."
+    description: "Read-only triage: assess whether the bug still exists; emit a standardized verdict. Triage-only mode terminates here; pipeline pre-flight continues into reproducing unless ALREADY-FIXED."
     view:
       - banner:
           text:     "TRIAGE"
           subtitle: "read-only verdict — does this bug still exist in the current tree?"
           color:    "#8B5CF6"   # violet — distinct from the cyan pipeline
-      - prose: "{{ world.ticket_id|default:'(no ticket)' }} · triage-only · judge {{ world.judge_mode }}"
+      - prose: "{{ world.ticket_id|default:'(no ticket)' }} · {% if world.bugfix_mode == 'triage' %}triage-only{% else %}pre-flight ({{ world.bugfix_mode }} pipeline){% endif %} · judge {{ world.judge_mode }}"
       - kv:
           pairs:
             Ticket:     "{{ world.ticket_id }} — {{ world.ticket_title }}"
@@ -39,7 +50,7 @@ states:
           prompt: "Actions"
           items:
             - label:  "accept"
-              hint:   "record the verdict and finish (→ @exit:triaged)"
+              hint:   "record the verdict{% if world.bugfix_mode == 'triage' %} and finish (→ @exit:triaged){% else %} (ALREADY-FIXED → @exit:triaged; otherwise continue → reproducing){% endif %}"
               intent: accept
             - label:  "refine"
               hint:   "re-run triage with feedback"
@@ -55,7 +66,7 @@ states:
             - label:  "look"
               hint:   "re-render"
               intent: look
-    relevant_world: [judge_mode, ticket_id, ticket_title, ticket_url, ticket_repo, ticket_source_mode, ticket_source_ref, ticket_body, thread, workdir, triage_verdict, refine_feedback, cycle]
+    relevant_world: [judge_mode, bugfix_mode, ticket_id, ticket_title, ticket_url, ticket_repo, ticket_source_mode, ticket_source_ref, ticket_body, thread, workdir, triage_verdict, refine_feedback, cycle]
     on_enter:
       # 0. GitHub-backed tickets are remote issue bodies, not local
       # issues/bugs/<id>.md files. Standalone/autonomous bugfix runs often seed
@@ -153,9 +164,20 @@ states:
       - when: "world.judge_mode != 'human' && world.triage_verdict.verdict != nil && world.triage_verdict.verdict != ''"
         emit_intent: accept
     on:
-      # accept — record the verdict to the transport and finish.
+      # accept — record the verdict to the transport, then route by entry
+      # mode + verdict:
+      #   triage-only mode        → @exit:triaged (always; the verdict IS the
+      #                             deliverable).
+      #   pre-flight ALREADY-FIXED → @exit:triaged (short-circuit: the bug no
+      #                             longer exists; never spend reproducer /
+      #                             judge / maker budget on it).
+      #   pre-flight otherwise    → reproducing (STILL-LIVE / PARTIAL /
+      #                             UNCLEAR; the verdict stays in
+      #                             world.triage_verdict as context and the
+      #                             repro RED-gate arbitrates UNCLEAR).
       accept:
-        - target: "@exit:triaged"
+        - when: "world.bugfix_mode == 'triage' || world.triage_verdict.verdict == 'ALREADY-FIXED'"
+          target: "@exit:triaged"
           effects:
             - invoke: iface.transport.post
               with:
@@ -170,6 +192,17 @@ states:
                 # transition (no-op at runtime — the value is already bound).
                 triage_verdict:  "{{ world.triage_verdict }}"
                 status:          "triaged"
+                refine_feedback: ""
+        - target: reproducing
+          effects:
+            - invoke: iface.transport.post
+              with:
+                thread:   "{{ world.thread }}"
+                workdir:  "{{ world.workdir }}"
+                title:    "Pre-flight triage [{{ world.triage_verdict.verdict }}]: {{ world.ticket_id }} — continuing into the fix pipeline"
+                body:     "{{ world.triage_verdict.summary_markdown }}"
+                phase_id: "triaging_{{ world.ticket_id }}"
+            - set:
                 refine_feedback: ""
 
       # refine — re-run triage with feedback. Human-only (no judge auto-fires

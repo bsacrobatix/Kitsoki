@@ -187,7 +187,27 @@ states:
       # dispatched after the effect chain completes, so the next
       # effect (the flag set below) still runs first.
       # Triage mode autostarts into the triaging room instead of reproducing.
-      - when: "world.ticket_id != '' && !world.bf_autostart_attempted && world.bugfix_mode != 'triage' && (world.reproduction_artifact.summary_title == nil || world.reproduction_artifact.summary_title == '')"
+      #
+      # Pipeline modes run a PRE-FLIGHT triage first (world.auto_triage,
+      # default on): one read-only triager call against the worktree just cut
+      # above answers "does this bug still exist?" BEFORE the reproducer /
+      # judge / maker budget is spent. ALREADY-FIXED short-circuits to
+      # @exit:triaged; any other verdict continues into reproducing (the
+      # triaging room's accept arc owns that routing — see triaging.yaml).
+      # The guard skips the pre-flight when a triage_verdict is already
+      # seeded (the caller triaged separately), auto_triage is off (e.g.
+      # bench cells pinned to a known-live pre-fix baseline), or this is a
+      # MID-PIPELINE or RECOVERY re-entry rather than a fresh ticket:
+      # reproducing's refine arm bounces through idle with
+      # bf_autostart_attempted reset (cycle / reproducing_cycle > 0),
+      # restart_from does the same with restart_from_stage set, and an
+      # on_error bounce re-enters carrying last_error — re-triaging in any
+      # of those would burn verdict budget on a bug the pipeline is already
+      # actively working (and, for the error bounce, would MASK the surviving
+      # last_error diagnostic with the triager's outcome).
+      - when: "world.ticket_id != '' && !world.bf_autostart_attempted && world.bugfix_mode != 'triage' && world.auto_triage && (world.triage_verdict.verdict == nil || world.triage_verdict.verdict == '') && world.cycle == 0 && world.reproducing_cycle == 0 && world.restart_from_stage == '' && world.last_error == '' && (world.reproduction_artifact.summary_title == nil || world.reproduction_artifact.summary_title == '')"
+        emit_intent: preflight_triage
+      - when: "world.ticket_id != '' && !world.bf_autostart_attempted && world.bugfix_mode != 'triage' && (!world.auto_triage || (world.triage_verdict.verdict != nil && world.triage_verdict.verdict != '') || world.cycle > 0 || world.reproducing_cycle > 0 || world.restart_from_stage != '' || world.last_error != '') && (world.reproduction_artifact.summary_title == nil || world.reproduction_artifact.summary_title == '')"
         emit_intent: start
       - when: "world.ticket_id != '' && !world.bf_autostart_attempted && world.bugfix_mode == 'triage' && (world.triage_verdict.verdict == nil || world.triage_verdict.verdict == '')"
         emit_intent: triage
@@ -244,6 +264,14 @@ states:
           effects:
             - set:
                 bugfix_mode: "triage"
+      # Autostart pre-flight triage (internal — see Step 3 above). Enters the
+      # triaging room WITHOUT touching bugfix_mode: triaging's accept arc reads
+      # the preserved full/quick mode to route back into reproducing (or exit
+      # at @exit:triaged when the verdict is ALREADY-FIXED).
+      preflight_triage:
+        - when: "world.ticket_id == ''"
+          target: "@exit:pick_ticket"
+        - target: triaging
       # Skip directly into validating; reproducing/proposing/
       # implementing/testing/reviewing don't run. restart_from_stage gets
       # the value "validate" for audit. Use when the operator already

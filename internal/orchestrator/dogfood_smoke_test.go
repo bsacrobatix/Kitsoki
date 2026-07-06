@@ -308,6 +308,15 @@ func seedDogfoodWorld(ticketID string) map[string]any {
 		"core__bf__base_branch":            "main",
 		"core__bf__bf_autostart_attempted": false,
 		"core__bf__bugfix_mode":            "full",
+
+		// Opt out of bf's auto_triage pre-flight: these smokes pin the
+		// pipeline mechanics (autostart → reproducing → …) with a hand-picked
+		// host subset that has no host.agent.codeact handler, and a human
+		// judge would dwell at triaging anyway. Parent-level key — the bf
+		// import wrapper re-seeds bf__auto_triage from dev-story's world_in
+		// projection on every entry. Pre-flight coverage lives in
+		// stories/bugfix/flows/preflight_triage_*.yaml.
+		"core__auto_triage": false,
 	}
 }
 

@@ -75,6 +75,12 @@ imports:
       # exhaustion rather than grinding a low-value fix (see #47). Overridable per
       # session via initial_world.escalate_low_value.
       escalate_low_value: "{{ world.escalate_low_value }}"
+      # Bench cells pin a KNOWN-LIVE pre-fix baseline (base_commit), so bf's
+      # auto_triage pre-flight would be pure redundant spend (and a mistaken
+      # ALREADY-FIXED would silently drop the cell at @exit:triaged).
+      # Overridable per session via initial_world.auto_triage for benches that
+      # want to measure the triage stage itself.
+      auto_triage: "{{ world.auto_triage }}"
     exits:
       done:             { to: finished }
       abandoned:        { to: finished }
@@ -118,6 +124,11 @@ world:
   # low-confidence proposal / budget exhaustion instead of grinding. Default true
   # for autonomous runs; override per session via initial_world.
   escalate_low_value: { type: bool, default: true }
+  # bf's auto_triage pre-flight is OFF by default here: bench cells pin a
+  # known-live pre-fix baseline, so a triage verdict is redundant spend and a
+  # mistaken ALREADY-FIXED would drop the cell at @exit:triaged. Override per
+  # session via initial_world for benches measuring the triage stage itself.
+  auto_triage: { type: bool, default: false }
 
 states:
   finished:

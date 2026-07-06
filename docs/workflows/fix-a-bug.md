@@ -17,9 +17,21 @@ it per surface.
   verdict on whether the bug still reproduces in the current tree —
   **ALREADY-FIXED** / **STILL-LIVE** / **PARTIAL** / **UNCLEAR**, with
   concrete code evidence (file:line / function / regression test), and no
-  worktree, no fix attempt. Cheap pre-flight before committing to a full
-  run. See
+  worktree, no fix attempt. See
   [`stories/bugfix/rooms/triaging.yaml`](../../stories/bugfix/rooms/triaging.yaml).
+
+Full and quick autostarts also run that triage as a built-in **pre-flight**
+(`world.auto_triage`, default `true`): before any reproducer/judge/maker
+budget is spent, the triager assesses the freshly-cut worktree, and an
+**ALREADY-FIXED** verdict short-circuits to `@exit:triaged` — no fix run on
+a bug that no longer exists. Any other verdict continues into `reproducing`
+with the verdict posted as a checkpoint. Callers driving a known-live bug
+(e.g. bench cells pinned to a pre-fix baseline) seed `auto_triage: false`
+to skip it; when composed under dev-story, set the PARENT-level
+`auto_triage` key (the import wrapper re-seeds `bf__auto_triage` on entry).
+The pre-flight applies only to the idle **autostart** path — an operator
+explicitly typing `start` / `full_pipeline` / `quick_fix` has already
+chosen to run the pipeline and goes straight in.
 - **Quick fix** (`quick_fix` intent): skips the reviewing + validating
   checkpoints for a trivial fix. See
   [`stories/bugfix/README.md#mode-shortcuts`](../../stories/bugfix/README.md#mode-shortcuts).

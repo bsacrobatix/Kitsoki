@@ -38,12 +38,16 @@ the only write surface; you never touch the filesystem to drive the story.
    PARENT commit (`<fix>^`); for a live ticket it is current main (or the SHA the
    ticket was filed against). Confirm the bug is actually present at the baseline.
 
-2. **(Optional) triage-only pre-flight.** Cheap read-only verdict before spending
-   maker budget. Drive bugfix with `bugfix_mode=triage` → the triaging room emits a
-   standardized verdict: `ALREADY-FIXED | STILL-LIVE | PARTIAL | UNCLEAR` (read-only,
-   no worktree). Drop `ALREADY-FIXED` cases (a test/lint layered on an already-merged
-   behavioural fix → baseline is GREEN → degenerate); only run the full pipeline on
-   `STILL-LIVE` / `PARTIAL`. See MEMORY `bugfix-triage-mode`.
+2. **Triage pre-flight — now BUILT IN.** A fresh full/quick autostart runs bf's
+   `auto_triage` pre-flight by default (`world.auto_triage: true`): the read-only
+   triaging room verdicts `ALREADY-FIXED | STILL-LIVE | PARTIAL | UNCLEAR` before
+   any maker budget is spent, and `ALREADY-FIXED` short-circuits to `@exit:triaged`
+   (record it as a marathon outcome, not a failure). `STILL-LIVE`/`PARTIAL`/`UNCLEAR`
+   continue into reproducing automatically. Only seed `auto_triage: false` when the
+   baseline is already confirmed live in step 1 and the extra verdict is redundant
+   spend. A standalone triage-only pass (`bugfix_mode=triage`) remains available for
+   backlog scrubbing without driving the pipeline. See
+   `stories/bugfix/README.md#auto-triage-pre-flight-worldauto_triage-default-true`.
 
 3. **Drive the full pipeline live** via `session_new` (through kitsoki-mcp-driver):
    - `harness: live`, an explicit `profile:` (the profile, not the story agent-def,
@@ -198,7 +202,7 @@ one-off marathons.
 ## Runbook (crisp)
 
 1. Assemble the backlog + pin each case's baseline; confirm the bug is present at baseline.
-2. (Optional) triage-only pass (`bugfix_mode=triage`); drop `ALREADY-FIXED`.
+2. Triage is built in (`auto_triage`, default on): `ALREADY-FIXED` exits at `triaged` — record and drop; seed `auto_triage: false` only for confirmed-live baselines.
 3. Per case, via **kitsoki-mcp-driver**: `session_new` (`harness:live`, `profile:`,
    explicit `trace:`, `base`=baseline, scoped `test_cmd`, fresh worktree) → drive rooms.
 4. **Independently verify** the deliverable yourself (oracle + deliverable-existence).

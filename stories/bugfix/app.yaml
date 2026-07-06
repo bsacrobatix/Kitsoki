@@ -298,6 +298,19 @@ world:
 
   # ── Pipeline control ──────────────────────────────────────────────────
   bugfix_mode:      { type: string, default: "full" }            # full | quick
+  # Autostart pre-flight triage (default ON). Before spending the maker
+  # pipeline on an autostarted ticket, run the read-only triager once against
+  # the freshly-cut worktree: ALREADY-FIXED short-circuits to @exit:triaged
+  # (no reproducer/judge/maker budget spent on a bug that no longer exists);
+  # any other verdict (STILL-LIVE | PARTIAL | UNCLEAR) proceeds into
+  # reproducing with the verdict posted as a checkpoint — the deterministic
+  # repro RED-gate remains the authoritative arbiter for UNCLEAR. Applies
+  # only to the idle AUTOSTART path (headless / marathon / parent-story
+  # handoffs); an operator explicitly typing start / full_pipeline /
+  # quick_fix has already chosen to run the pipeline and skips it. Callers
+  # with a known-live bug (e.g. bench cells pinned to a pre-fix baseline)
+  # seed auto_triage: false to skip the redundant spend.
+  auto_triage:      { type: bool, default: true }
 
   # ── Exit slot (slice 4 — bugfix convergence) ───────────────────────────
   # The bug-fix pipeline ends one of two ways:
@@ -626,6 +639,15 @@ intents:
     description: "Triage-only: assess whether the bug still exists in the current tree and emit a standardized verdict (ALREADY-FIXED | STILL-LIVE | PARTIAL | UNCLEAR). No fix pipeline."
     examples: [triage, "assess", "is it still a bug", "verdict only", "just triage"]
     priority: 75
+  # ── Autostart pre-flight triage (world.auto_triage). Internal guarded emit
+  # from idle's autostart chain: enters the triaging room WITHOUT pinning
+  # bugfix_mode=triage, so triaging's accept knows to continue into
+  # reproducing (or short-circuit to @exit:triaged on ALREADY-FIXED) instead
+  # of always terminating. Never typed. ──────────────────────────────────────
+  preflight_triage:
+    description: "(internal) autostart pre-flight: run read-only triage before spending the maker pipeline; keeps bugfix_mode so accept routes back into the pipeline."
+    examples: []
+    priority: 1
   change_ticket:
     description: "From idle: hand control back to the parent's ticket picker so the operator can choose a (different) ticket before starting."
     examples: [change_ticket, "pick ticket", "find ticket", "tickets"]
