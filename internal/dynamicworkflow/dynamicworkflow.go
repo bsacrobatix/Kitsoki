@@ -413,7 +413,9 @@ func (s *Service) Export(ctx context.Context, workflowID string, req ExportReque
 	manifest.Defaults.TraceRoot = filepath.ToSlash(filepath.Join(targetDir, "traces"))
 	for i := range manifest.Items {
 		manifest.Items[i].Story = filepath.ToSlash(exportAppPath)
-		manifest.Items[i].ImplementationStory = filepath.ToSlash(exportAppPath)
+		if strings.TrimSpace(manifest.Items[i].ImplementationStory) != "" {
+			manifest.Items[i].ImplementationStory = filepath.ToSlash(exportAppPath)
+		}
 		for j := range manifest.Items[i].Verify {
 			switch manifest.Items[i].Verify[j].Kind {
 			case "story_validate", "story_test":

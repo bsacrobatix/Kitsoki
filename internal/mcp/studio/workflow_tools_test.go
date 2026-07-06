@@ -120,6 +120,31 @@ func TestWorkflowCreateResearchGoalWritesResearchManifest(t *testing.T) {
 	require.True(t, strings.Contains(manifest, ".context/"), "research prompts should name .context outputs")
 }
 
+func TestWorkflowExportPreservesResearchDriveOnlyManifest(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	cs := connectInProcess(ctx, t, srv)
+
+	created := createWorkflowForTest(t, ctx, cs,
+		"research the different testing approaches in the repo with a dynamic workflow; inspect Go tests, TypeScript/JavaScript tests, story flow fixtures, Playwright/e2e tests, coverage gates, cassettes, and no-LLM policies",
+		"mcp-research-export-test",
+	)
+	exportDir := filepath.Join(t.TempDir(), "exported", "mcp-research-export-test")
+	export, err := callTool(ctx, cs, "workflow.export", map[string]any{
+		"workflow_id": created.WorkflowID,
+		"target":      exportDir,
+	})
+	require.NoError(t, err)
+	require.False(t, export.IsError, "workflow.export errored: %s", contentText(export))
+
+	manifestBytes, err := os.ReadFile(filepath.Join(exportDir, "manifest.yaml"))
+	require.NoError(t, err)
+	manifest := string(manifestBytes)
+	require.Contains(t, manifest, "id: research-scope")
+	require.NotContains(t, manifest, "implementation_story:")
+	require.NotContains(t, manifest, "implementation_prompt:")
+}
+
 func TestWorkflowLaunchStartsGeneratedCoverageAndResearchWorkflows(t *testing.T) {
 	ctx := context.Background()
 	srv, _ := newReplayServer(t)
