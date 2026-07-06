@@ -162,6 +162,7 @@ func runGHAgentServe(ctx context.Context, store *jobs.GHJobStore, opts ghAgentSe
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, "ok\n")
 	})
+	mux.HandleFunc("/api/ready", ghAgentReadyAPIHandler(store, opts))
 	mux.HandleFunc("/api/runs", ghAgentRunsAPIHandler(store))
 	mux.HandleFunc("/runs", ghAgentRunsHandler(store))
 	mux.HandleFunc("/api/run/", ghAgentRunAPIHandler(store))
@@ -607,6 +608,39 @@ func publicRunURLForServe(base, jobID string) string {
 		return ""
 	}
 	return base + "/run/" + jobID
+}
+
+func ghAgentReadyAPIHandler(store *jobs.GHJobStore, opts ghAgentServeOptions) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/ready" {
+			http.NotFound(w, r)
+			return
+		}
+		recent, err := store.ListRecent(r.Context(), 200)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		stateCounts := map[string]int{}
+		for _, job := range recent {
+			stateCounts[job.State]++
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":              "ready",
+			"repo":                strings.TrimSpace(opts.Repo),
+			"public_base_url":     strings.TrimRight(strings.TrimSpace(opts.PublicBaseURL), "/"),
+			"worker":              strings.TrimSpace(opts.Worker),
+			"trigger":             strings.TrimSpace(opts.Trigger),
+			"drain_enabled":       opts.DrainInterval > 0,
+			"poll_enabled":        opts.PollInterval > 0,
+			"reconcile_enabled":   opts.ReconcileInterval > 0 && opts.StuckAfter > 0,
+			"project_root":        strings.TrimSpace(opts.ProjectRoot),
+			"incident_repo":       strings.TrimSpace(firstNonBlank(opts.IncidentRepo, opts.Repo)),
+			"recent_job_count":    len(recent),
+			"recent_state_counts": stateCounts,
+		})
+	}
 }
 
 func ghAgentRunsHandler(store *jobs.GHJobStore) http.HandlerFunc {

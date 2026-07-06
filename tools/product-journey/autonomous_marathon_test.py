@@ -39,8 +39,15 @@ def check(label: str, condition: bool, failures: list[str]) -> None:
 class HealthHandler(http.server.BaseHTTPRequestHandler):
     body = b"ok"
     status = 200
+    ready_body = b'{"status":"ready","repo":"o/r","public_base_url":"","worker":"test-worker","drain_enabled":true}'
+    ready_status = 200
 
     def do_GET(self) -> None:
+        if self.path == "/api/ready":
+            self.send_response(self.ready_status)
+            self.end_headers()
+            self.wfile.write(self.ready_body)
+            return
         if self.path != "/healthz":
             self.send_response(404)
             self.end_headers()
@@ -53,8 +60,11 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
         return
 
 
-def start_health_server(body: bytes = b"ok", status: int = 200):
-    handler = type("TestHealthHandler", (HealthHandler,), {"body": body, "status": status})
+def start_health_server(body: bytes = b"ok", status: int = 200, ready_body=None, ready_status: int = 200):
+    attrs = {"body": body, "status": status, "ready_status": ready_status}
+    if ready_body is not None:
+        attrs["ready_body"] = ready_body
+    handler = type("TestHealthHandler", (HealthHandler,), attrs)
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -85,6 +95,9 @@ def main() -> int:
             scenarios = run.load_scenarios(run.SCENARIOS)
             healthy_server, healthy_url = start_health_server()
             unhealthy_server, unhealthy_url = start_health_server(b"not-ok")
+            wrong_repo_server, wrong_repo_url = start_health_server(
+                ready_body=b'{"status":"ready","repo":"other/repo","public_base_url":"","worker":"test-worker","drain_enabled":true}'
+            )
 
             created = run.autonomous_marathon(
                 catalog,
@@ -236,6 +249,43 @@ def main() -> int:
                   and unhealthy["validation_issue_summary"] == "gh-agent-health"
                   and unhealthy["gh_agent_health_status"] == "fail"
                   and unhealthy["autonomous_control_status"] == "not_run",
+                  failures)
+
+            wrong_repo = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-wrong-gh-agent",
+                "bugfix",
+                7,
+                "o/r",
+                "",
+                "stories/bugfix",
+                wrong_repo_url,
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                "pending",
+                24,
+                15,
+                45,
+                None,
+            )
+            check("live pending marathon refuses gh-agent for another repo before handoff",
+                  wrong_repo["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and wrong_repo["validation_issue_summary"] == "gh-agent-readiness"
+                  and wrong_repo["gh_agent_health_status"] == "fail"
+                  and wrong_repo["autonomous_control_status"] == "not_run",
                   failures)
 
             filing_test.attach_bugfix_proof(run_dir, scenario_id)
@@ -578,6 +628,8 @@ def main() -> int:
                 healthy_server.shutdown()
             if "unhealthy_server" in locals():
                 unhealthy_server.shutdown()
+            if "wrong_repo_server" in locals():
+                wrong_repo_server.shutdown()
             for key, value in old_env.items():
                 if value is None:
                     os.environ.pop(key, None)
