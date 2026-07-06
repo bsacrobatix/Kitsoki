@@ -213,8 +213,12 @@ still executing after the wait window, the tool returns
 `{ok:true, running:{handle,input,started_at_unix_micro,poll:"session.status"}}`
 while the same turn continues in the session runtime. Clients should poll
 `session.status` first; it repeats the same compact `running` object until the
-turn settles, then exposes the folded state and allowed intents. Use
-`session.inspect` when the driver needs a reacquire snapshot: it also exposes
+turn settles, then exposes the folded state and allowed intents. If a poll shows
+no change, wait outside the session before polling again instead of emitting a
+burst of identical status reads; for example, `host.run {cmd:"sleep 10"}` then
+`session.status`, followed by a bounded `session.trace {since:<previous_last_turn>,
+limit:20, kinds:[...]}` read to confirm trace freshness. Use `session.inspect`
+when the driver needs a reacquire snapshot: it also exposes
 `running` and increments `async.running_drive` while the turn is active. The
 default wait is 25 seconds; pass `async_after_ms` to lower or raise it for one
 call, or a negative value to disable early return and wait synchronously.

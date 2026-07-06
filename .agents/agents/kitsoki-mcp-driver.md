@@ -116,10 +116,29 @@ Dry-run one transition:     story.turn {dir, state, intent, slots?, world?}  →
 Find a thing in a story:    story.list {dir, glob?}  /  story.search {dir, pattern}   (NOT host Grep)
 Read a kitsoki web trace:   trace.read {session_id|app|path}        (off disk; NOT a handle)
 Confirm a tip is GREEN:     host.run {dir: <worktree>, cmd: "go test ./..."}
+Find one worktree:          host.run {dir: repo, cmd: "git worktree list --porcelain | grep -A2 '<needle>'"}
 Land a fix safely:          vcs.commit → vcs.integrate {dir, branch, onto:"main", message}   (NEVER reset --soft)
 Author edit:                story.read → story.write (read its .validation) → story.test
 Abandon a session:          session.close BEFORE reopening on the same trace
 ```
+
+### Token-budget guardrails
+
+Use the bounded/read-specific tool first. Two recurring waste patterns are
+expensive enough to call out explicitly:
+
+- Do not call `worktree.list` just to find one bugfix worktree or owner marker.
+  It returns the full structured worktree inventory and can overflow on a busy
+  repo. Use `story.search` for story files, or a targeted `host.run` query such
+  as `git worktree list --porcelain | grep -A2 'bf-TKT-123'` when the question is
+  about Git state.
+- Do not spin on bare `session.status` polls when a live turn is still running
+  and the previous status showed no progress. Sleep outside the session first,
+  then poll once and compare freshness: `host.run {cmd:"sleep 10"}` →
+  `session.status` → `session.trace {since:<previous_last_turn>, limit:20,
+  kinds:["turn.done","harness.returned","agent.call.start","agent.call.complete","machine.error"]}`.
+  Increase the sleep interval instead of emitting multiple identical status
+  reads.
 
 ## Authoring loop (story.*)
 
@@ -225,6 +244,9 @@ stopping at the first that answers the question:
 Do NOT `inspect` then re-read the same fact via `world`/`trace` — pick the
 targeted read up front. For "why did this room bounce?", `session.status`
 (`last_error`) + `session.trace {kinds:[...]}` is the path, not `inspect`.
+For "did the reproducer verify RED?", read `session.status`, then
+`session.world {key:"bug_verified"}` and only the specific companion keys you
+need (`reproduction_artifact`, `regression_red_pre_fix`, `last_error`).
 
 - `session.trace {handle, since?, until?, limit?} → {events[], last_turn}` —
   the JSONL trace, read-only. This is the ground truth for routing decisions,
@@ -254,10 +276,13 @@ bake-off cell):
   `workdir`/`base_sha`/`base` binds anything — only `base_commit` (then
   `base_branch`) is read. If you skip it, the tree is cut from `main` (already
   fixed) and the reproducer honestly reports `not-reproducible`.
-- After `start`, **`session.inspect` and confirm the reproduce phase verified
-  RED** (`bug_verified: yes`, status not `not-reproducible`) before walking on.
-  If it's not-reproducible, check the trace's `workspace.create` event for the
-  base it actually cut from — don't burn the rest of the pipeline.
+- After `start`, confirm the reproduce phase verified RED with targeted reads:
+  `session.status`, then `session.world {key:"bug_verified"}`. If status is
+  `not-reproducible` or `bug_verified` is not true, use
+  `session.trace {kinds:["host.call"], limit:20}` to check the
+  `workspace.create` event for the base it actually cut from — don't burn the
+  rest of the pipeline. Use `session.inspect` only if those focused reads cannot
+  answer the question.
 - **Seed the whole world on the FIRST `session.new`** (ticket fields, model,
   `base_commit`, `test_cmd`, …). `initial_world` is consumed only at creation;
   there is no reseed path. An exploratory unseeded `session.new` on a mandated
