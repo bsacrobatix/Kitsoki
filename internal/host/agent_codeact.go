@@ -111,16 +111,42 @@ func AgentCodeactHandler(ctx context.Context, args map[string]any) (Result, erro
 		schemaFn = fn
 	}
 
+	// Direct-API path: when the effect's resolved plugin is a builtin.local_llm
+	// transport (an OpenAI-compatible HTTP endpoint, e.g. GLM-5.2), drive the
+	// loop over HTTP via ApiCodeactAgent instead of forking claude -p per step.
+	// Opt-in: only when a plugin is named AND it resolves to a local_llm
+	// backend. The default (no plugin named, or a claude_cli plugin) stays on
+	// the CLI path below — IsLocalLLM("") and IsLocalLLM("agent.claude") are
+	// both false, so existing stories are byte-identical. See
+	// agent_codeact_api.go and .context/diy-harness-sandboxing-brief.md item 1.
+	if reg := AgentRegistryFromCtx(ctx); reg != nil {
+		if pluginName := AgentPluginNameFromCtx(ctx); reg.IsLocalLLM(pluginName) {
+			plug, perr := reg.Resolve(pluginName)
+			if perr != nil {
+				return Result{Error: fmt.Sprintf("host.agent.codeact: resolve api plugin %q: %v", pluginName, perr), FailureKind: FailureInfra}, nil
+			}
+			return runCodeactLoop(ctx, worldArg, schemaFn, newApiCodeactAgent(ctx, plug, args, goal, budget, capabilities), budget)
+		}
+	}
+
 	agentImpl, cleanup, err := newRealCodeactAgent(ctx, args, goal, budget, capabilities)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("host.agent.codeact: %v", err), FailureKind: FailureInfra}, nil
 	}
 	defer cleanup()
+	return runCodeactLoop(ctx, worldArg, schemaFn, agentImpl, budget)
+}
 
+// runCodeactLoop runs codeact.Run over impl and shapes the Result identically
+// for both the CLI (RealCodeactAgent) and direct-API (ApiCodeactAgent) paths:
+// terminated (done|budget_exhausted), the schema-valid done() payload, and a
+// per-step journal of snippet + observation (+ error). Keeping the shaping in
+// one place guarantees the two backends produce the same Result.Data shape.
+func runCodeactLoop(ctx context.Context, worldArg map[string]any, schemaFn func(map[string]any) error, impl codeact.Agent, budget int) (Result, error) {
 	res, err := codeact.Run(ctx, codeact.Params{
 		Budget: budget,
 		World:  worldArg,
-		Agent:  agentImpl,
+		Agent:  impl,
 		Schema: schemaFn,
 	})
 	if err != nil {
