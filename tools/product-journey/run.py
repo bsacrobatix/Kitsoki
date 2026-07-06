@@ -3538,6 +3538,11 @@ def render_agent_brief(brief: dict) -> str:
             lines.append(f"- `{name}`: `{selector}`")
     else:
         lines.append("- (none declared)")
+    notes = driver.get("notes", [])
+    if notes:
+        lines.extend(["", "### Driver Notes", ""])
+        for note in notes:
+            lines.append(f"- {note}")
     lines.extend(["", "## Scenario Order", ""])
     for index, scenario in enumerate(brief["scenario_order"], start=1):
         lines.extend([
@@ -3914,6 +3919,7 @@ def driver_summary(manifest: dict) -> dict:
         "capabilities": manifest.get("_resolved_capabilities", {}),
         "affordances": manifest.get("affordances", {}),
         "evidence_contract": manifest.get("evidence_contract", {}),
+        "notes": manifest.get("notes", []),
         "oracles": manifest.get("oracles", []),
     }
 
@@ -3931,6 +3937,11 @@ def validate_driver_manifest(manifest: dict) -> dict:
     unknown = sorted(set(capabilities) - set(CANONICAL_DRIVER_CAPABILITIES))
     if unknown:
         issues.append({"severity": "error", "id": "driver-capability-keys", "detail": ", ".join(unknown)})
+    notes = manifest.get("notes")
+    if notes is not None and (
+        not isinstance(notes, list) or any(not isinstance(note, str) or not note.strip() for note in notes)
+    ):
+        issues.append({"severity": "error", "id": "driver-notes-shape", "detail": "notes must be an array of non-empty strings"})
     launch = manifest.get("launch")
     if launch is not None:
         if not isinstance(launch, dict):

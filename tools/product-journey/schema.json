@@ -12,10 +12,11 @@
   ],
   "driver_manifest": {
     "required": ["id", "label", "app_kind", "capabilities"],
-    "optional": ["launch", "affordances", "evidence_contract", "oracles"],
+    "optional": ["launch", "affordances", "evidence_contract", "oracles", "notes"],
     "app_kinds": ["kitsoki-mcp", "web", "cli"],
     "capability_keys": ["visual.open", "visual.observe", "visual.act", "session.open", "session.status", "session.submit", "session.drive", "session.inspect", "session.trace", "render.tui"],
     "capability_value": "string tool name or ordered array of string tool names",
+    "notes": "array of non-empty strings; surface-specific operating guidance interpolated into the generated agent brief",
     "launch": {
       "optional": ["command", "cwd", "ready", "teardown"],
       "ready_optional": ["http", "timeout_s"]

@@ -303,6 +303,37 @@ place where a downstream web app maps those names to selectors or action handles
 and `drivers/web-generic.example.json` shows how a consumer can add launch,
 ready, affordance, and oracle details in its own repo.
 
+`drivers/claude-in-chrome.json` is the first *bound* real-browser surface: it
+maps every canonical capability to the `mcp__claude-in-chrome__*` tools that a
+Claude session with the Claude-in-Chrome extension actually exposes, so a
+driver agent can explore the real UI (the kitsoki web UI, the product site, or
+a downstream web app) instead of a placeholder tool list. Two constraints of
+that surface are encoded in the manifest rather than left as tribal knowledge:
+
+- **Evidence must be file-addressable.** Raw `computer` screenshots return an
+  opaque id with no filesystem path, so they can never satisfy an evidence
+  contract that records artifact paths. The manifest's `evidence_contract.web`
+  names `gif_creator` as the primary proof tool: record around the interaction,
+  export with `download: true`, then copy the `.gif` from `~/Downloads` into
+  the run evidence dir before `--attach-evidence` (`.gif` classifies as a
+  video media kind). Console and network reads return text only; the driver
+  agent persists them to files itself.
+- **Operating guidance rides in `notes`.** A driver manifest may declare an
+  optional `notes` array (non-empty strings, schema- and smoke-validated);
+  `--emit-run` interpolates it into `agent-brief.md` as a `### Driver Notes`
+  section. The claude-in-chrome notes carry the empirically-derived rules —
+  tabs-context first, screenshot-space coordinates, ref staleness across
+  re-renders, small `browser_batch` sequences ending in a screenshot, and the
+  no-dialogs rule — so every generated bundle briefs its driver on the
+  surface's real failure modes.
+
+Validate it like any other manifest:
+
+```sh
+python3 tools/product-journey/run.py --driver-smoke claude-in-chrome
+python3 tools/product-journey/claude_in_chrome_driver_test.py
+```
+
 Attach evidence captured by a live or cassette-backed MCP run:
 
 ```sh
