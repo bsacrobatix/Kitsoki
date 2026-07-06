@@ -193,6 +193,12 @@ Then hand it to the reusable driver:
    hosted gh-agent health/readiness checks must pass before the story returns a
    driver handoff for live capture; readiness must identify the same ticket repo
    and a draining worker.
+   For a standing cadence tick, submit `autonomous_marathon_advance_due`. The
+   story scans local marathon control artifacts, picks the next due active
+   control, and advances it through the same native `autonomous_marathon` path
+   as a fresh cycle. If nothing is due, or due controls are blocked, the story
+   returns an explicit no-op/blocked status instead of asking an operator or
+   agent to copy a command.
 8. If there are no credible issue findings, or after `autonomous_fix` reports
    the bundle valid, submit `review` and `validate` through the story. Use
    `file_findings` or the CLI `--file-findings`/`--review-run`/`--validate-run`
@@ -216,6 +222,8 @@ Useful intents:
 - `native_ghagent_smoke`
 - `autonomous_fix_smoke`
 - `persona_autofix_smoke`
+- `autonomous_marathon_due`
+- `autonomous_marathon_advance_due`
 - `start project=... persona=... seed=...`
 - `load run_dir=...`
 - `handoff`

@@ -242,6 +242,14 @@ def shell(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
     )
 
 
+def command_output_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
 def native_ghagent_smoke() -> dict:
     result = shell([sys.executable, str(NATIVE_GHAGENT_SMOKE)], ROOT)
     output = (result.stdout + result.stderr).strip()
@@ -1210,8 +1218,8 @@ def run_preflight_command(check_id: str, command: str, timeout: int, env: dict[s
         summary = f"exit_code={proc.returncode}; command={shlex.join(cmd)}"
         return proc.returncode == 0, summary, proc.stdout or "", proc.stderr or ""
     except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout or ""
-        stderr = exc.stderr or ""
+        stdout = command_output_text(exc.stdout)
+        stderr = command_output_text(exc.stderr)
         return False, f"{check_id} timed out after {timeout}s; command={shlex.join(cmd)}", stdout, stderr
 
 
@@ -1281,8 +1289,8 @@ def capture_preflight(
         returncode = proc.returncode
         add_check("webshot-command", returncode == 0, f"exit_code={returncode}; command={shlex.join(cmd)}")
     except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout or ""
-        stderr = exc.stderr or ""
+        stdout = command_output_text(exc.stdout)
+        stderr = command_output_text(exc.stderr)
         returncode = 124
         add_check("webshot-command", False, f"timed out after {timeout}s; command={shlex.join(cmd)}")
 
@@ -5967,7 +5975,7 @@ def autonomous_marathon_cycle_seed(seed: str, checked: datetime.datetime) -> str
     return f"{base}-cycle-{suffix}"
 
 
-def autonomous_marathon_due_command(run_json: dict, control: dict, checked: datetime.datetime) -> list[str]:
+def autonomous_marathon_due_params(run_json: dict, control: dict, checked: datetime.datetime) -> dict:
     cadence = control.get("cadence", {}) if isinstance(control.get("cadence", {}), dict) else {}
     budget = control.get("budget", {}) if isinstance(control.get("budget", {}), dict) else {}
     watchdog = control.get("watchdog", {}) if isinstance(control.get("watchdog", {}), dict) else {}
@@ -5980,6 +5988,23 @@ def autonomous_marathon_due_command(run_json: dict, control: dict, checked: date
     ]
     project = run_json.get("project", {}).get("id", "") if isinstance(run_json.get("project"), dict) else ""
     persona = run_json.get("persona", {}).get("id", "") if isinstance(run_json.get("persona"), dict) else ""
+    return {
+        "project": project,
+        "persona": persona,
+        "seed": autonomous_marathon_cycle_seed(str(run_json.get("seed", "")), checked),
+        "scenarios": ",".join(str(item) for item in scenarios if str(item).strip()),
+        "live_budget_minutes": int(budget.get("per_scenario_live_minutes", run_json.get("live_budget_minutes", 0)) or 0),
+        "autonomous_driver_mode": str(control.get("driver_mode", "") or "pending"),
+        "autonomous_cadence_hours": int(cadence.get("hours", 24) or 24),
+        "autonomous_heartbeat_minutes": int(watchdog.get("heartbeat_minutes", 15) or 15),
+        "autonomous_watchdog_minutes": int(watchdog.get("watchdog_minutes", 45) or 45),
+        "ticket_repo": str(gitops.get("ticket_repo", "")),
+        "gh_agent_public_base_url": str(gh_agent.get("public_base_url", "")),
+    }
+
+
+def autonomous_marathon_due_command(run_json: dict, control: dict, checked: datetime.datetime) -> list[str]:
+    params = autonomous_marathon_due_params(run_json, control, checked)
     parts = [
         "python3",
         "tools/product-journey/run.py",
@@ -5987,27 +6012,27 @@ def autonomous_marathon_due_command(run_json: dict, control: dict, checked: date
         "--json-output",
         "--report-invalid-autonomous-marathon",
         "--project",
-        project,
+        params["project"],
         "--persona",
-        persona,
+        params["persona"],
         "--seed",
-        autonomous_marathon_cycle_seed(str(run_json.get("seed", "")), checked),
+        params["seed"],
         "--scenarios",
-        ",".join(str(item) for item in scenarios if str(item).strip()),
+        params["scenarios"],
         "--live-budget-minutes",
-        int(budget.get("per_scenario_live_minutes", run_json.get("live_budget_minutes", 0)) or 0),
+        params["live_budget_minutes"],
         "--autonomous-driver-mode",
-        str(control.get("driver_mode", "") or "pending"),
+        params["autonomous_driver_mode"],
         "--autonomous-cadence-hours",
-        int(cadence.get("hours", 24) or 24),
+        params["autonomous_cadence_hours"],
         "--autonomous-heartbeat-minutes",
-        int(watchdog.get("heartbeat_minutes", 15) or 15),
+        params["autonomous_heartbeat_minutes"],
         "--autonomous-watchdog-minutes",
-        int(watchdog.get("watchdog_minutes", 45) or 45),
+        params["autonomous_watchdog_minutes"],
         "--ticket-repo",
-        str(gitops.get("ticket_repo", "")),
+        params["ticket_repo"],
         "--gh-agent-public-base-url",
-        str(gh_agent.get("public_base_url", "")),
+        params["gh_agent_public_base_url"],
     ]
     return [str(part) for part in parts]
 
@@ -6171,6 +6196,106 @@ def autonomous_marathon_due(root: Path, checked_at: str = "", limit: int = 10) -
         "next_due_story_intent": next_due.get("next_story_intent", ""),
         "next_due_minutes_overdue": next_due.get("minutes_overdue", 0),
     }
+
+
+def autonomous_marathon_advance_due(
+    catalog: dict,
+    github_targets: dict,
+    personas: list[dict],
+    scenarios: list[dict],
+    root: Path,
+    checked_at: str,
+    limit: int,
+    gh_agent_db: str,
+    gh_agent_story: str,
+    gh_agent_project_root: str,
+    gh_agent_incident_repo: str,
+    gh_agent_asset_dir: str,
+    gh_agent_comment_mode: str,
+    issue_state_file: str,
+    stats_root: str,
+    stats_output: str,
+    similarity_threshold: float,
+    similar_pair_limit: int,
+    publish_deck: Optional[Path],
+) -> dict:
+    checked = parse_iso_datetime(checked_at) if checked_at else parse_iso_datetime(now_utc())
+    due_scan = autonomous_marathon_due(root, checked.isoformat(timespec="seconds"), limit)
+    base = {
+        "autonomous_due_status": due_scan["status"],
+        "autonomous_due_summary": due_scan["summary"],
+        "autonomous_due_root": due_scan["root"],
+        "autonomous_due_count": due_scan["due_count"],
+        "autonomous_due_upcoming_count": due_scan["upcoming_count"],
+        "autonomous_due_blocked_count": due_scan["blocked_count"],
+        "autonomous_due_ignored_count": due_scan["ignored_count"],
+        "autonomous_due_total_count": due_scan["total_count"],
+        "autonomous_due_next_run_id": due_scan["next_due_run_id"],
+        "autonomous_due_next_run_dir": due_scan["next_due_run_dir"],
+        "autonomous_due_next_command": due_scan["next_due_command"],
+        "autonomous_due_next_story_intent": due_scan["next_due_story_intent"],
+        "autonomous_due_next_minutes_overdue": due_scan["next_due_minutes_overdue"],
+    }
+    if not due_scan.get("due_runs"):
+        blocked = int(due_scan.get("blocked_count", 0) or 0)
+        status = "autonomous_marathon_advance_blocked" if blocked else "autonomous_marathon_not_due"
+        summary = (
+            f"No due marathon advanced; blocked controls present: {due_scan['summary']}"
+            if blocked
+            else f"No due marathon advanced: {due_scan['summary']}"
+        )
+        return {
+            **base,
+            "status": status,
+            "autonomous_due_advance_status": status,
+            "autonomous_due_advance_summary": summary,
+            "autonomous_marathon_status": status,
+            "autonomous_marathon_summary": summary,
+        }
+
+    source_run_dir = run_dir_from_arg(due_scan["next_due_run_dir"])
+    control = read_json(autonomous_marathon_control_path(source_run_dir))
+    run_json = read_json(source_run_dir / "run.json")
+    params = autonomous_marathon_due_params(run_json, control, checked)
+    result = autonomous_marathon(
+        catalog,
+        github_targets,
+        personas,
+        scenarios,
+        None,
+        params["project"],
+        params["persona"],
+        params["seed"],
+        params["scenarios"],
+        params["live_budget_minutes"],
+        params["ticket_repo"],
+        gh_agent_db,
+        gh_agent_story,
+        params["gh_agent_public_base_url"],
+        gh_agent_project_root,
+        gh_agent_incident_repo,
+        gh_agent_asset_dir,
+        gh_agent_comment_mode,
+        issue_state_file,
+        stats_root,
+        stats_output,
+        similarity_threshold,
+        similar_pair_limit,
+        params["autonomous_driver_mode"],
+        params["autonomous_cadence_hours"],
+        params["autonomous_heartbeat_minutes"],
+        params["autonomous_watchdog_minutes"],
+        publish_deck,
+    )
+    result.update(base)
+    result["source_run_id"] = due_scan["next_due_run_id"]
+    result["source_run_dir"] = due_scan["next_due_run_dir"]
+    result["autonomous_due_advance_status"] = "autonomous_marathon_advanced"
+    result["autonomous_due_advance_summary"] = (
+        f"Advanced due marathon {due_scan['next_due_run_id']} into {result.get('run_id', '')}: "
+        f"{result.get('autonomous_marathon_status', result.get('status', ''))}"
+    )
+    return result
 
 
 def latest_driver_heartbeat(run_dir: Path) -> dict:
@@ -12080,6 +12205,7 @@ def main() -> None:
     parser.add_argument("--autonomous-fix-loop", action="store_true", help="Internal legacy test backend for kitsoki gitops autonomous-fix")
     parser.add_argument("--autonomous-marathon", action="store_true", help="Create or finalize a standing persona-QA marathon through native autonomous fix, review, validation, and stats")
     parser.add_argument("--autonomous-marathon-due", action="store_true", help="Scan standing persona-QA marathon control artifacts and report due cadence cycles")
+    parser.add_argument("--autonomous-marathon-advance-due", action="store_true", help="Advance the next due standing persona-QA marathon cycle through the native autonomous marathon path")
     parser.add_argument("--autonomous-marathon-watchdog", action="store_true", help="Check a standing persona-QA marathon heartbeat against its watchdog control artifact")
     parser.add_argument(
         "--autonomous-driver-mode",
@@ -12091,8 +12217,8 @@ def main() -> None:
     parser.add_argument("--autonomous-heartbeat-minutes", type=int, default=15, help="Heartbeat interval recorded in autonomous marathon control artifacts")
     parser.add_argument("--autonomous-watchdog-minutes", type=int, default=45, help="Watchdog escalation interval recorded in autonomous marathon control artifacts")
     parser.add_argument("--watchdog-now", default="", help="Deterministic ISO timestamp for --autonomous-marathon-watchdog tests")
-    parser.add_argument("--due-now", default="", help="Deterministic ISO timestamp for --autonomous-marathon-due tests")
-    parser.add_argument("--due-limit", type=int, default=10, help="Maximum due/upcoming/blocked marathon rows returned by --autonomous-marathon-due")
+    parser.add_argument("--due-now", default="", help="Deterministic ISO timestamp for autonomous marathon due/advance tests")
+    parser.add_argument("--due-limit", type=int, default=10, help="Maximum due/upcoming/blocked marathon rows returned by autonomous marathon due/advance")
     parser.add_argument("--report-invalid-autonomous-fix", action="store_true", help="With internal autonomous-fix backends, print invalid gate JSON and exit 0 so story callers can bind failure evidence")
     parser.add_argument("--report-invalid-autonomous-marathon", action="store_true", help="With --autonomous-marathon, print invalid marathon JSON and exit 0 so story callers can bind failure evidence")
     parser.add_argument("--report-blocked-autonomous-watchdog", action="store_true", help="With --autonomous-marathon-watchdog, print blocked watchdog JSON and exit 0 so story callers can bind failure evidence")
@@ -12738,6 +12864,47 @@ def main() -> None:
         for item in result["blocked_runs"]:
             print(f"- blocked {item.get('run_id', '')}: {item.get('blocked_reason', '')}")
         append_log(f"Checked autonomous marathon due runs under {root}: {result['summary']}")
+        return
+
+    if args.autonomous_marathon_advance_due:
+        root = run_dir_from_arg(args.stats_root) if args.stats_root else ARTIFACT_ROOT
+        publish_deck = DEFAULT_DECK if args.publish_deck else None
+        result = autonomous_marathon_advance_due(
+            catalog,
+            github_targets,
+            personas,
+            scenarios,
+            root,
+            args.due_now,
+            args.due_limit,
+            args.gh_agent_db,
+            args.gh_agent_story,
+            args.gh_agent_project_root,
+            args.gh_agent_incident_repo,
+            args.gh_agent_asset_dir,
+            args.gh_agent_comment_mode,
+            args.issue_state_file,
+            args.stats_root,
+            args.stats_output,
+            args.similarity_threshold,
+            args.similar_pair_limit,
+            publish_deck,
+        )
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Advanced autonomous marathon due cycle under {root}: {result.get('autonomous_due_advance_status', result['status'])}")
+            if result["status"] in {"autonomous_marathon_invalid", "autonomous_marathon_advance_blocked"} and not args.report_invalid_autonomous_marathon:
+                raise SystemExit(1)
+            return
+        print(f"Status: {result['status']}")
+        print(result.get("autonomous_due_advance_summary", result.get("autonomous_marathon_summary", "")))
+        if result.get("run_dir"):
+            print(f"Artifacts: {result['run_dir']}")
+        if result.get("autonomous_marathon_report_path"):
+            print(f"Report: {result['autonomous_marathon_report_path']}")
+        append_log(f"Advanced autonomous marathon due cycle under {root}: {result.get('autonomous_due_advance_status', result['status'])}")
+        if result["status"] in {"autonomous_marathon_invalid", "autonomous_marathon_advance_blocked"} and not args.report_invalid_autonomous_marathon:
+            raise SystemExit(1)
         return
 
     if args.autonomous_marathon:
