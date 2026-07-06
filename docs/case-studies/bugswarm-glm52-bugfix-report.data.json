@@ -34,11 +34,11 @@
     "actions": [
       {
         "corpus": "oss-oracle",
-        "next": "Provide --oss-spec pointing at a paired-task spec with GLM-5.2 Kitsoki/raw-prompt variants.",
+        "next": "Run glm52_gap_plan.py; it can generate an OSS paired-task spec from the frozen corpus manifest.",
         "pending_count": 1,
-        "status": "needs-spec",
+        "status": "ready-to-plan",
         "tasks": [
-          "current-committed-glm52"
+          "kitsoki-bug9-bugfix-test-repair"
         ],
         "treatments": [
           "raw-prompt"
@@ -106,13 +106,14 @@
       "corpus": "oss-oracle",
       "cost_usd": 15.57545,
       "evidence": "tools/bugfix-bakeoff/results/cells/bug9-glm-5.2-kitsoki.json",
+      "legacy_task": "bug9",
       "model": "hf:zai-org/GLM-5.2",
       "notes": "oracle TestRepro_ConcurrentSessionsShareCheckout_DestroysWIP: rc=1; cost from native meta.cost_usd",
       "oracle_status": "fail",
       "provider": "synthetic.new",
       "quality": "partial",
       "source": "bugfix-bakeoff",
-      "task": "bug9",
+      "task": "kitsoki-bug9-bugfix-test-repair",
       "total_tokens": 2890980,
       "treatment": "kitsoki"
     },
@@ -128,7 +129,7 @@
       "provider": "synthetic.new",
       "quality": "pending",
       "source": "pending",
-      "task": "current-committed-glm52",
+      "task": "kitsoki-bug9-bugfix-test-repair",
       "total_tokens": null,
       "treatment": "raw-prompt"
     },

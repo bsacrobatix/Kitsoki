@@ -151,8 +151,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("planner without specs exits zero", proc.returncode, 0)
     packet = json.loads(packet_json.read_text(encoding="utf-8"))
     actions = {action["corpus"]: action for action in packet["actions"]}
-    check("oss needs spec", actions["oss-oracle"]["status"], "needs-spec")
-    check("oss has prerequisite", bool(actions["oss-oracle"]["prerequisites"]), True)
+    check("oss generated spec ready", actions["oss-oracle"]["status"], "ready")
+    check("oss generated spec command present", "oss_to_arena_spec.py" in actions["oss-oracle"]["commands"][0], True)
+    check("oss generated spec uses report", str(report) in actions["oss-oracle"]["commands"][0], True)
+    check("oss generated spec uses corpus", "cost-bench.manifest.yaml" in actions["oss-oracle"]["commands"][0], True)
+    check("oss generated live command gated", "ARENA_PAIRED_TASK_ENABLE_CODEX=1" in actions["oss-oracle"]["commands"][-1], True)
     check("bugswarm complete when no pending rows", actions["bugswarm"]["status"], "complete")
 
 with tempfile.TemporaryDirectory() as tmp:

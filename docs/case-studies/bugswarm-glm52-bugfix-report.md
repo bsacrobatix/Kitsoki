@@ -121,7 +121,7 @@ after a spec passes audit, explicit `ARENA_PAIRED_TASK_ENABLE_CODEX=1
 
 | corpus | status | pending | next |
 |---|---|---:|---|
-| oss-oracle | `needs-spec` | 1 | Provide --oss-spec pointing at a paired-task spec with GLM-5.2 Kitsoki/raw-prompt variants. |
+| oss-oracle | `ready-to-plan` | 1 | Run glm52_gap_plan.py; it can generate an OSS paired-task spec from the frozen corpus manifest. |
 | bugswarm | `needs-import` | 2 | Import BugSwarm artifact metadata, execute RED/GREEN verification, then pass --bugswarm-source to glm52_gap_plan.py. |
 
 ## Interpretation
