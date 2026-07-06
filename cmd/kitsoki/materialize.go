@@ -209,7 +209,7 @@ func emitRootYAML(spec *app.RootSpec, slug string) ([]byte, error) {
 		Hosts:   imp.Hosts,
 		Imports: map[string]rootYAMLImport{
 			app.RootAlias: {
-				Source:       "@kitsoki/" + app.RootStoryName,
+				Source:       importDef.Source,
 				Entry:        importDef.Entry,
 				Hosts:        importDef.Hosts,
 				HostBindings: hostBindings,

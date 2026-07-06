@@ -85,6 +85,32 @@
         "onboarding": {
           "type": "string",
           "description": "Entry intent for install/setup, e.g. qms.onboard."
+        },
+        "story_dirs": {
+          "type": "object",
+          "description": "Overrides the default `stories/<name>` resolution for one or more provides.stories entries, keyed by story name, value a kit-root-relative directory (e.g. \".\" for a kit.yaml that sits directly beside its story's own app.yaml). S6 root-generalization escape hatch (docs/proposals/kits.md).",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+
+    "root": {
+      "type": "object",
+      "description": "Declares one of this kit's provides.stories as a valid 'blessed root' a synthesized instance may import (D6, S6) -- manifest-driven replacement for the old hardcoded RootStoryName const + duplicated five-interface allow-list.",
+      "additionalProperties": false,
+      "required": ["story", "entry", "host_interfaces"],
+      "properties": {
+        "story": { "type": "string", "description": "Which provides.stories entry is enterable as root." },
+        "entry": { "type": "string", "description": "The root story's initial state when synthesized as the implicit root." },
+        "host_interfaces": {
+          "type": "array",
+          "description": "Allow-list of host_interfaces names an `overrides.bindings.<iface>` may rebind.",
+          "items": { "type": "string" }
+        },
+        "hosts": {
+          "type": "array",
+          "description": "Fixed host allow-list the synthesized root declares (hosts: declared) for this root story's subtree.",
+          "items": { "type": "string" }
         }
       }
     },

@@ -62,6 +62,43 @@ type Provides struct {
 	Interfaces []string `yaml:"interfaces,omitempty"`
 	UI         []string `yaml:"ui,omitempty"`
 	Onboarding string   `yaml:"onboarding,omitempty"`
+
+	// StoryDirs overrides the default `stories/<name>` resolution for one or
+	// more provides.stories entries, keyed by story name, value a kit-root-
+	// relative directory (e.g. "." when the kit.yaml lives directly beside
+	// the story's own app.yaml instead of the usual nested stories/<name>/
+	// layout). Introduced by S6 (root generalization) for a "self-contained"
+	// root kit whose kit.yaml sits at the story's existing on-disk location
+	// (stories/dev-story/kit.yaml) rather than requiring a directory
+	// restructure — the repo-split-worthy move is deferred to Phase B. A
+	// story name absent from this map falls back to the original
+	// convention (see StoryDir).
+	StoryDirs map[string]string `yaml:"story_dirs,omitempty"`
+}
+
+// RootDecl declares that one of this kit's provided stories may serve as the
+// "blessed root" a synthesized instance imports (D6, S6). It replaces the
+// formerly hardcoded RootStoryName const + the duplicated five-interface
+// allow-list (internal/app/synthesis.go, internal/webconfig/webconfig.go,
+// internal/projectprofile) with manifest-driven data: "any installed kit
+// with a declared root: block can be the blessed root," fed by these fields
+// instead of a Go-side constant.
+type RootDecl struct {
+	// Story names which of this kit's provides.stories is enterable as root.
+	// Must be one of Provides.Stories.
+	Story string `yaml:"story"`
+	// Entry is the root story's initial state when synthesized as the
+	// implicit root (mirrors the old hardcoded "landing").
+	Entry string `yaml:"entry"`
+	// HostInterfaces is the allow-list of host_interfaces names an
+	// `overrides.bindings.<iface>` may rebind — replaces the hardcoded
+	// DevStoryIfaces map.
+	HostInterfaces []string `yaml:"host_interfaces"`
+	// Hosts is the fixed host allow-list the synthesized root declares
+	// (`hosts: declared`) so the root story's subtree has the same
+	// fail-fast host surface a hand-written instance does — replaces the
+	// hardcoded synthesizedRootHosts list.
+	Hosts []string `yaml:"hosts,omitempty"`
 }
 
 // Conformance declares the kit's no-LLM contract suite.
@@ -98,6 +135,7 @@ type Def struct {
 	Parameters map[string]Parameter `yaml:"parameters,omitempty"`
 
 	Provides    Provides    `yaml:"provides"`
+	Root        *RootDecl   `yaml:"root,omitempty"`
 	Conformance Conformance `yaml:"conformance,omitempty"`
 	Compat      Compat      `yaml:"compat,omitempty"`
 
@@ -136,13 +174,41 @@ func (d *Def) HasStory(name string) bool {
 }
 
 // StoryDir returns the absolute directory a provided story resolves to:
-// <kit-root>/stories/<name>. Callers should check HasStory first; StoryDir
-// does not itself validate that name is declared.
+// <kit-root>/stories/<name> by default, or <kit-root>/<Provides.StoryDirs[name]>
+// when that story has a StoryDirs override (see Provides.StoryDirs). Callers
+// should check HasStory first; StoryDir does not itself validate that name
+// is declared.
 func (d *Def) StoryDir(name string) string {
 	if d == nil {
 		return ""
 	}
+	if rel, ok := d.Provides.StoryDirs[name]; ok {
+		return filepath.Join(d.dir, rel)
+	}
 	return filepath.Join(d.dir, "stories", name)
+}
+
+// HasRoot reports whether this manifest declares a root: block naming story
+// as its blessed-root story (D6). Used by internal/app.ResolveRootKit to
+// validate a resolved manifest actually opts in as a root kit.
+func (d *Def) HasRoot(story string) bool {
+	if d == nil || d.Root == nil {
+		return false
+	}
+	return d.Root.Story == story
+}
+
+// RootHostInterfaces returns Def.Root.HostInterfaces as a set, or nil when
+// this manifest declares no root: block.
+func (d *Def) RootHostInterfaces() map[string]struct{} {
+	if d == nil || d.Root == nil {
+		return nil
+	}
+	out := make(map[string]struct{}, len(d.Root.HostInterfaces))
+	for _, iface := range d.Root.HostInterfaces {
+		out[iface] = struct{}{}
+	}
+	return out
 }
 
 // ValidateFile validates a kit.yaml file on disk against the kit/v1 schema

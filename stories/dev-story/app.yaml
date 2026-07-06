@@ -1613,6 +1613,76 @@ routing:
     state: landing
     intent: landing_capture
 
+# ── Kit boundary contract (S6 Phase A, kits-implementation-plan.md) ─────
+# dev-story has never before declared a top-level exports:/exits: block —
+# only its own sub-imports (bf/pr/impl/deliver/cyp/…) declare exits, folded
+# INTO dev-story. This is the first time dev-story itself is on the OTHER
+# side of that contract: the boundary an importer would see if something
+# (today: only the synthesized implicit root, see internal/app/synthesis.go
+# ResolveRootKit) imports dev-story as a whole. It has no runtime effect
+# standalone (ExportsBlock/ExitDef doc comments, internal/app/types.go) —
+# it exists for stories/dev-story/kit.yaml's `root:` declaration and for
+# `kitsoki kit verify`'s standalone contract checks (S4) to have something
+# real to check.
+#
+# exports.intents: the "public menu" dev-story's landing hub surfaces to
+# whatever enters it — the free-form capture sink, the on-path bail, and
+# every pipeline launcher (go_*) reachable from landing/main. Chosen by
+# reading which intents are reachable from the root state rather than
+# invented: every name below is declared in intents: above.
+exports:
+  intents:
+    - landing_capture
+    - take_route
+    - go_main
+    - go_inbox
+    - go_gitops
+    - go_agent
+    - go_ticket_search
+    - go_workspace_manager
+    - go_standup
+    - go_idea
+    - go_ideas
+    - go_model_eval
+    - go_init
+    - go_deploy
+    - go_observability
+    - go_incident
+    - go_docs
+    - go_bugfix
+    - go_pr_refinement
+    - go_implementation
+    - go_deliver
+    - go_code_review_story
+
+# exits: dev-story is a perpetual workbench by design (every sub-import's
+# own exits fold back into `landing`/`human_review_report`, never leaving
+# the loop) — so unlike bf/pr/impl (which exit toward a parent), there is no
+# existing "leave dev-story" transition to name. The two exits below are
+# the honest, faithful projection of the two outcomes its OWN sub-imports
+# already converge on and already set matching world keys for (see the bf/
+# pr/impl `exits:` blocks below): every success path sets world.status to
+# one of merged/local-merged/delivered and lands at `landing`; every
+# human-in-the-loop path sets world.status + world.human_review_reason and
+# lands at `human_review_report`. Declaring them here documents that
+# existing, already-enforced contract at the top level — it does not change
+# dev-story's own runtime (see the ExitDef doc comment above), and nothing
+# maps @exit:work_merged / @exit:needs_human today since dev-story has no
+# parent in Phase A.
+exits:
+  work_merged:
+    description: >-
+      A ticket/PR reached its base branch via the bugfix, PR-refinement,
+      implementation, or deliver pipelines. world.status is one of
+      merged|local-merged|delivered; world.last_pr_url may be set.
+    requires: [status]
+  needs_human:
+    description: >-
+      Work paused pending a human decision (bugfix/PR-refinement abandoned,
+      a non-reproducible repro, or a triage-only verdict) — parked at
+      human_review_report.
+    requires: [status, human_review_reason]
+
 # Imports (proposal §5.1). bf and pr both project from / into the
 # day-level world. The bf → pr chain is one import-exit edge; the
 # operator never sees a separate "handoff" room — when bf fires

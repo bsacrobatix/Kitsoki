@@ -263,7 +263,7 @@
       "additionalProperties": false,
       "required": ["story", "instance"],
       "properties": {
-        "story": { "type": "string", "default": "dev-story", "description": "The hub story the instance imports (dev-story today)." },
+        "story": { "type": "string", "default": "dev-story", "description": "The root kit story the instance imports (dev-story by default; any installed kit that declares a kit.yaml root: block naming it also qualifies -- see D6 root generalization, .context/kits-implementation-plan.md)." },
         "instance": {
           "type": "object",
           "additionalProperties": false,
@@ -273,16 +273,8 @@
             "path": { "type": "string", "description": "Where the generated instance app.yaml is written, e.g. .kitsoki/stories/<id>-dev/app.yaml." },
             "bindings": {
               "type": "object",
-              "description": "Concrete host bindings for dev-story's five host_interfaces (ticket/vcs/ci/workspace/transport). Each value is a host id, e.g. host.git, host.local_files.ticket.",
-              "additionalProperties": false,
-              "required": ["ticket", "vcs", "ci", "workspace", "transport"],
-              "properties": {
-                "ticket": { "type": "string" },
-                "vcs": { "type": "string" },
-                "ci": { "type": "string" },
-                "workspace": { "type": "string" },
-                "transport": { "type": "string" }
-              }
+              "description": "Concrete host bindings for the root story's declared host_interfaces (dev-story's default set: ticket/vcs/ci/workspace/transport -- see kitsoki.story). Each value is a host id, e.g. host.git, host.local_files.ticket. Which keys are actually required is root-kit-dependent and checked semantically (internal/projectprofile.validateSemantic), not fixed here, since a non-default root kit may declare different interface names.",
+              "additionalProperties": { "type": "string" }
             }
           }
         },
