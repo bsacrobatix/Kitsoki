@@ -26,26 +26,27 @@ requires:
   kitsoki: ">=0.0.0"
 provides:
   stories: [object-graph]
+  # The type pack this kit ships concretely (example/catalog.yaml's own
+  # type_registry: — core-node/actor/feature/requirement). This is
+  # intentionally a small demonstration pack, not kitsoki's own broader
+  # taxonomy (actor/agent/persona/site-page/feature/requirement/use-case/
+  # proposal/change/evidence/implementation/area) — that full vocabulary
+  # lives in kitsoki's own seed-objects.yaml type_registry, which is
+  # instance data (D4), not part of this kit. A project adopting this kit
+  # authors its own type_registry the same way kitsoki does; the "graph"
+  # interface and viewer work over ANY registry the loaded catalog declares,
+  # not just this pack.
   schemas:
     - graph/core-node/v0
     - graph/actor/v0
-    - graph/agent/v0
-    - graph/persona/v0
-    - graph/site-page/v0
     - graph/feature/v0
     - graph/requirement/v0
-    - graph/use-case/v0
-    - graph/proposal/v0
-    - graph/change/v0
-    - graph/evidence/v0
-    - graph/implementation/v0
-    - graph/area/v0
   interfaces: [graph]
   ui:
     - id: graph
       title: Object graph
       entry: graph
       nav: true
-  onboarding: object-graph.start
+  onboarding: start
 conformance:
   flows: ["stories/object-graph/flows/*.yaml"]
