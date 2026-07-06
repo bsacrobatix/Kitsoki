@@ -394,6 +394,7 @@ states:
                 live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
                 ticket_repo: "{{ slots.ticket_repo ?? world.ticket_repo }}"
                 gh_agent_public_base_url: "{{ slots.gh_agent_public_base_url ?? world.gh_agent_public_base_url }}"
+                last_result: {}
                 autonomous_marathon_status: "running"
                 autonomous_marathon_summary: ""
                 autonomous_marathon_report_path: ""

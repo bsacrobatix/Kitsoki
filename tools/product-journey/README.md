@@ -485,11 +485,11 @@ passed. Replay marathons remain no-LLM and do not require this live-capture
 preflight.
 `--autonomous-driver-mode replay` is the no-LLM fully story-owned autonomous
 mode. Explicit `--autonomous-driver-mode record` or `live` returns
-`autonomous_marathon_ready_for_driver`; the product-journey story's
-`dispatch_driver` intent then dispatches the reusable driver through
-`host.agent.task` and re-enters the native finalizer. Automated flow tests stub
-that task by id; they must not call a real model or silently become fake proof
-passes.
+`autonomous_marathon_ready_for_driver`; the product-journey story auto-queues
+its `dispatch_driver` intent, dispatches the reusable driver through
+`host.agent.task`, and re-enters the native finalizer. Automated flow tests
+stub that task by id; they must not call a real model or silently become fake
+proof passes.
 Live-budgeted pending marathons must also provide `ticket_repo` and
 `gh_agent_public_base_url` before handoff, so live capture cannot begin for a
 run whose downstream autonomous filing, gh-agent repair, close-out, and
