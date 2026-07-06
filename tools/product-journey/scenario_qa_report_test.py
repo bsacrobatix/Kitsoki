@@ -193,6 +193,25 @@ def _test_render_deck():
     _check("a deck with zero recorded legs still passes deck-shape validation", empty_issues == [])
 
 
+def _test_render_review():
+    items = run.scenario_qa_leg_items(_LEG_RESULTS)
+    counts = run.scenario_qa_leg_counts(items)
+    review = run.render_scenario_qa_review("bugfix", "scenario-qa-run-all", items, counts)
+    _check("scenario-qa review marks degraded runs as needing evidence", review["status"] == "needs_evidence")
+    _check("scenario-qa review carries leg counts", review["summary_counts"]["total"] == 3)
+    _check("scenario-qa review carries natural prompt counts", review["summary_counts"]["natural_prompts"] == 2)
+    review_text = json.dumps(review)
+    _check("scenario-qa review records degraded evidence checks", "degraded evidence" in review_text)
+    _check("scenario-qa review records natural prompt checks", "transcript-derived prompt" in review_text)
+
+    passing_items = [item for item in items if item.get("transport") != "vscode"]
+    passing_review = run.render_scenario_qa_review("bugfix", "run-pass", passing_items, run.scenario_qa_leg_counts(passing_items))
+    _check("scenario-qa review marks all-pass recorded runs ready", passing_review["status"] == "ready")
+
+    empty_review = run.render_scenario_qa_review("adhoc-thing", "run-empty", [], run.scenario_qa_leg_counts([]))
+    _check("scenario-qa review leaves empty runs not reviewed", empty_review["status"] == "not_reviewed")
+
+
 def _run_cli(tmp: Path, extra_args, expected_exit=None):
     out = io.StringIO()
     sys.argv = [
@@ -229,6 +248,7 @@ def _test_cli(tmp: Path):
     _check("CLI reports the built status", payload["status"] == "scenario_qa_deck_built")
     _check("CLI reports the run dir", payload["run_dir"] == str(run_dir))
     _check("CLI reports leg/pass/fail/degraded counts", (payload["leg_count"], payload["pass_count"], payload["fail_count"], payload["degraded_count"]) == (3, 2, 0, 1))
+    _check("CLI reports the scenario-qa review status", payload["review_status"] == "needs_evidence")
     deck_path = Path(payload["deck_path"])
     _check("CLI writes deck.slidey.json into the run dir", deck_path == run_dir / "deck.slidey.json")
     _check("CLI actually wrote the deck file", deck_path.exists())
@@ -237,6 +257,12 @@ def _test_cli(tmp: Path):
     written_text = json.dumps(written)
     _check("the written deck includes natural prompt coverage", "Transcript-derived scenario wording" in written_text)
     _check("the written deck preserves the mined example", "resolve the red gate test" in written_text)
+    review_path = Path(payload["review_path"])
+    _check("CLI writes review.json into the run dir", review_path == run_dir / "review.json")
+    _check("CLI actually wrote the review file", review_path.exists())
+    written_review = json.loads(review_path.read_text(encoding="utf-8"))
+    _check("the written review marks degraded evidence", written_review["status"] == "needs_evidence")
+    _check("the written review carries natural prompt counts", written_review["summary_counts"]["natural_prompts"] == 2)
 
     adhoc_dir = tmp / "run-cli-adhoc"
     adhoc_dir.mkdir()
@@ -247,6 +273,8 @@ def _test_cli(tmp: Path):
     _check("CLI falls back to --scenario-description when there is no catalog scenario", adhoc_payload["leg_count"] == 0)
     adhoc_deck = json.loads((adhoc_dir / "deck.slidey.json").read_text(encoding="utf-8"))
     _check("an ad-hoc run names the description in the deck", adhoc_deck["scenes"][0]["subtitle"] == "open the onboarding tour")
+    adhoc_review = json.loads((adhoc_dir / "review.json").read_text(encoding="utf-8"))
+    _check("an ad-hoc run with no legs stays not reviewed", adhoc_review["status"] == "not_reviewed")
 
     missing_run_dir_argv = [
         "run.py",
@@ -274,6 +302,7 @@ def main():
         _test_parse_leg_results(tmp)
         _test_cli(tmp)
     _test_render_deck()
+    _test_render_review()
     print("PASS")
 
 
