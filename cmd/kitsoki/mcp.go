@@ -41,8 +41,11 @@ func studioImportResolver(storiesDir string) app.ImportResolver {
 		if override {
 			candidate := filepath.Join(storiesDir, name, "app.yaml")
 			if _, err := os.Stat(candidate); err != nil {
-				return "", fmt.Errorf("--stories-dir=%s: story %q not found (looked for %s): %w",
-					storiesDir, name, candidate, err)
+				// storiesDir is a project-story root, not a repo-wide override.
+				// Absence from it is not an error — delegate to base so that
+				// kitdev overrides, $KITSOKI_REPO, and the embedded library can
+				// satisfy @kitsoki/* imports that storiesDir does not cover.
+				return base(name, importerDir, override)
 			}
 			return candidate, nil
 		}
