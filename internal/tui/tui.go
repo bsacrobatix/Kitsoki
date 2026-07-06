@@ -486,6 +486,10 @@ type RootModel struct {
 	// run without launching a real opener. Nil means "use the default OS
 	// opener" (set in NewRootModel) — the production behavior.
 	openArtifact func(path string) error
+
+	// slashSuggester ranks and filters slash-command completions for the
+	// prompt affordance. Nil falls back to the ordered built-in catalogue.
+	slashSuggester SlashSuggester
 }
 
 const recentBackgroundCap = 8
@@ -542,6 +546,14 @@ func WithBugRoot(root string) RootModelOption {
 // TUI evidence as GitHub release assets. Empty keeps the local-file path.
 func WithBugTicketRepo(repo string) RootModelOption {
 	return func(m *RootModel) { m.bugTicketRepo = strings.TrimSpace(repo) }
+}
+
+// WithSlashSuggester injects the ranking/filtering implementation used by the
+// prompt slash-command affordance. The default suggester preserves catalogue
+// order; tests and future product tuning can swap in recency/frequency ranking
+// without changing input handling.
+func WithSlashSuggester(s SlashSuggester) RootModelOption {
+	return func(m *RootModel) { m.slashSuggester = s }
 }
 
 // WithIDEDenyList seeds the kitsoki-side deny list that gates ambient editor
@@ -761,6 +773,7 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 		prompt:           ti,
 		spinner:          sp,
 		openArtifact:     osOpenArtifact,
+		slashSuggester:   defaultSlashSuggester{},
 	}
 
 	// Set initial state.
@@ -1587,6 +1600,14 @@ func (m RootModel) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.mode == ModeAwaitingLLM {
 		if msg.Type == tea.KeyEnter && !msg.Alt {
 			return m.submitInput()
+		}
+	}
+
+	if msg.Type == tea.KeyTab && m.slashCompletionActive() {
+		if completion, ok := m.primarySlashCompletion(); ok {
+			m.prompt.SetValue(completion)
+			m.prompt.CursorEnd()
+			return m, nil
 		}
 	}
 
