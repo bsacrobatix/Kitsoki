@@ -112,14 +112,18 @@ def verify_task(
 
     failed = run_with_fallback(failed_cmd, fallback_failed_cmd, timeout_s=timeout_s)
     passed = run_with_fallback(passed_cmd, fallback_passed_cmd, timeout_s=timeout_s)
-    verified_red = failed["exit_code"] != 0
-    verified_green = passed["exit_code"] == 0
+    failed_infra = is_infrastructure_exit(failed["exit_code"])
+    passed_infra = is_infrastructure_exit(passed["exit_code"])
+    verified_red = failed["exit_code"] != 0 and not failed_infra
+    verified_green = passed["exit_code"] == 0 and not passed_infra
+    infrastructure_error = failed_infra or passed_infra
     return {
         "task_id": str(task.get("id") or ""),
         "image_tag": image_tag,
         "mode": "execute",
         "verified_red": verified_red,
         "verified_green": verified_green,
+        "infrastructure_error": infrastructure_error,
         "failed_exit_code": failed["exit_code"],
         "passed_exit_code": passed["exit_code"],
         "commands": {
@@ -134,6 +138,7 @@ def verify_task(
             "failed": failed["stderr_tail"],
             "passed": passed["stderr_tail"],
         },
+        "notes": verification_notes(failed, passed),
     }
 
 
@@ -175,6 +180,21 @@ def run_cmd(cmd: list[str], *, timeout_s: int) -> dict[str, Any]:
             "stdout_tail": (exc.stdout or "")[-4000:] if isinstance(exc.stdout, str) else "",
             "stderr_tail": f"timed out after {exc.timeout}s",
         }
+
+
+def is_infrastructure_exit(exit_code: int) -> bool:
+    # Docker uses 125 when the daemon/client/container setup fails before the
+    # artifact command can run. The verifier uses 124 for its own timeout.
+    return exit_code in {124, 125}
+
+
+def verification_notes(failed: dict[str, Any], passed: dict[str, Any]) -> str:
+    notes = []
+    if is_infrastructure_exit(failed["exit_code"]):
+        notes.append(f"failed-side infrastructure exit {failed['exit_code']}")
+    if is_infrastructure_exit(passed["exit_code"]):
+        notes.append(f"passed-side infrastructure exit {passed['exit_code']}")
+    return "; ".join(notes)
 
 
 def shell_join(cmd: list[str]) -> str:
