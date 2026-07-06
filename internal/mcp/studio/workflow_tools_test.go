@@ -13,6 +13,7 @@ import (
 
 	"kitsoki/internal/dynamicworkflow"
 	studio "kitsoki/internal/mcp/studio"
+	"kitsoki/internal/testrunner"
 )
 
 func TestWorkflowCreateValidateExport(t *testing.T) {
@@ -236,6 +237,27 @@ func TestWorkflowLaunchStartsGeneratedCoverageAndResearchWorkflows(t *testing.T)
 			require.Contains(t, contentText(trace), "harness_ladder")
 			require.Contains(t, contentText(trace), "synthetic-claude")
 			require.Contains(t, contentText(trace), "hf:zai-org/GLM-5.2")
+
+			exportDir := filepath.Join(t.TempDir(), "exported", tc.slug)
+			export, err := callTool(ctx, cs, "workflow.export", map[string]any{
+				"workflow_id": created.WorkflowID,
+				"target":      exportDir,
+			})
+			require.NoError(t, err)
+			require.False(t, export.IsError, "workflow.export errored: %s", contentText(export))
+			flowPath := filepath.Join(exportDir, "flows", "generated.yaml")
+			flowBytes, err := os.ReadFile(flowPath)
+			require.NoError(t, err)
+			flowYAML := string(flowBytes)
+			require.Contains(t, flowYAML, "host_cassette: generated.cassette.yaml")
+			require.Contains(t, flowYAML, "manifest_path: "+filepath.ToSlash(filepath.Join(exportDir, "manifest.yaml")))
+			require.NotContains(t, flowYAML, "policy_ok")
+			require.NotContains(t, flowYAML, "__on_complete_target__")
+
+			report, err := testrunner.RunFlows(t.Context(), filepath.Join(exportDir, "app", "app.yaml"), flowPath, testrunner.FlowOptions{FailFast: true})
+			require.NoError(t, err)
+			require.Zero(t, report.Failed)
+			require.Equal(t, 1, report.Passed)
 		})
 	}
 }
