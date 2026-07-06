@@ -18,7 +18,7 @@ host_handlers:
             webshot_output: .artifacts/product-journey/preflights/preflight-health/webshot-smoke.png
             passed: 6
             failed: 0
-      autonomous_product_journey_marathon:
+      autonomous_product_journey_marathon_create:
         data:
           ok: true
           exit_code: 0
@@ -106,6 +106,6 @@ turns:
     expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_invalid[\\s\\S]*GH-agent health[\\s\\S]*fail: https://agent.example/healthz[\\s\\S]*Validation issues[\\s\\S]*gh-agent-health"
     expect_host_calls:
       - handler: host.run
-        args: { call: autonomous_product_journey_marathon }
+        args: { call: autonomous_product_journey_marathon_create }
 
 expect_no_errors: true

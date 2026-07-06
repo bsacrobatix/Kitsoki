@@ -181,7 +181,7 @@ def main() -> int:
                   and "4 final gates" in loaded_summary["driver_contract_summary"],
                   failures)
 
-            unsupported_live = run.autonomous_marathon(
+            live_ready = run.autonomous_marathon(
                 catalog,
                 github_targets,
                 personas,
@@ -211,12 +211,13 @@ def main() -> int:
                 45,
                 None,
             )
-            check("live driver mode fails closed until story-owned dispatch exists",
-                  unsupported_live["autonomous_marathon_status"] == "autonomous_marathon_invalid"
-                  and unsupported_live["validation_issue_summary"] == "driver-dispatch-not-implemented"
-                  and unsupported_live["autonomous_driver_mode"] == "live"
-                  and unsupported_live["autonomous_driver_status"] == "invalid"
-                  and Path(unsupported_live["autonomous_marathon_report_path"]).exists(),
+            check("live driver mode creates a story-dispatchable bundle",
+                  live_ready["autonomous_marathon_status"] == "autonomous_marathon_ready_for_driver"
+                  and live_ready["autonomous_driver_mode"] == "live"
+                  and live_ready["autonomous_driver_status"] == "ready_for_dispatch"
+                  and live_ready["autonomous_control_status"] == "ready_for_driver"
+                  and "driver=ready" in live_ready["autonomous_gate_summary"]
+                  and Path(live_ready["autonomous_marathon_report_path"]).exists(),
                   failures)
 
             missing_ticket = run.autonomous_marathon(
