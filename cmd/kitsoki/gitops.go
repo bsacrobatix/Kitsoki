@@ -1650,6 +1650,9 @@ func writeGitopsAutonomousReport(runDir string, status, review, validation map[s
 		issue := mapValue(item, "github_issue")
 		if issueURL := stringValue(issue, "url"); issueURL != "" {
 			lines = append(lines, fmt.Sprintf("- `%s`: %s", firstNonBlank(stringValue(item, "id"), stringValue(item, "title"), "finding"), issueURL))
+			for _, asset := range gitopsIssueEvidenceAssets(issue) {
+				lines = append(lines, fmt.Sprintf("  - evidence `%s`: %s", firstNonBlank(stringValue(asset, "name"), "evidence"), stringValue(asset, "url")))
+			}
 			issueLines++
 		}
 	}
@@ -1739,6 +1742,20 @@ func writeGitopsAutonomousReport(runDir string, status, review, validation map[s
 	)
 	path := filepath.Join(runDir, "autonomous-fix-report.md")
 	return path, os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+}
+
+func gitopsIssueEvidenceAssets(issue map[string]any) []map[string]any {
+	var out []map[string]any
+	seen := map[string]bool{}
+	for _, asset := range mapSliceValue(issue, "evidence_assets") {
+		url := stringValue(asset, "url")
+		if url == "" || seen[url] {
+			continue
+		}
+		seen[url] = true
+		out = append(out, asset)
+	}
+	return out
 }
 
 func gitopsCredibleFindings(runDir string) []map[string]any {

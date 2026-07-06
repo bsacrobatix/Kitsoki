@@ -563,6 +563,7 @@ def main():
         run.write_json(run_dir / "findings.json", saved_findings)
         run.update_derived_artifacts(run_dir, None)
         deck_path = run_dir / "deck.slidey.json"
+        original_issue_evidence_url = saved_findings["items"][0]["github_issue"]["evidence_assets"][0]["url"]
         stale_deck = run.read_json(deck_path)
         for scene in stale_deck["scenes"]:
             if scene.get("eyebrow") == "GH-agent fixes":
@@ -571,6 +572,17 @@ def main():
         run.write_json(deck_path, stale_deck)
         stale_validated = run.validate_run_bundle(run_dir)
         _check("validate catches missing gh-agent evidence URL in deck",
+               any(i["id"] == "gh-agent-fix-deck" and i["severity"] == "error"
+                   for i in stale_validated["issues"]))
+        run.update_derived_artifacts(run_dir, None)
+        stale_deck = run.read_json(deck_path)
+        for scene in stale_deck["scenes"]:
+            if scene.get("eyebrow") == "GH-agent fixes":
+                scene["body"] = scene.get("body", "").replace(original_issue_evidence_url, "")
+                break
+        run.write_json(deck_path, stale_deck)
+        stale_validated = run.validate_run_bundle(run_dir)
+        _check("validate catches missing filed issue evidence URL in deck",
                any(i["id"] == "gh-agent-fix-deck" and i["severity"] == "error"
                    for i in stale_validated["issues"]))
         run.update_derived_artifacts(run_dir, None)
@@ -764,6 +776,14 @@ def main():
                and "Readiness: `pass`" in facade_report_text
                and "/healthz" in facade_report_text
                and "/api/ready" in facade_report_text)
+        facade_findings = run.read_json(run_dir_facade / "findings.json")
+        facade_issue_evidence_url = facade_findings["items"][0]["github_issue"]["evidence_assets"][0]["url"]
+        facade_report.write_text(facade_report_text.replace(facade_issue_evidence_url, "", 1))
+        validated_missing_issue_evidence = run.validate_run_bundle(run_dir_facade)
+        _check("validate catches missing filed issue evidence in autonomous report",
+               any(i["id"] == "autonomous-fix-report" and i["severity"] == "error"
+                   for i in validated_missing_issue_evidence["issues"]))
+        facade_report.write_text(facade_report_text)
         facade_report.write_text(facade_report_text.replace("## Autonomous Watchdog", "## Watchdog", 1))
         validated_missing_watchdog_proof = run.validate_run_bundle(run_dir_facade)
         _check("validate catches missing autonomous watchdog proof in report",
