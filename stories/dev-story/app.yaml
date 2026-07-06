@@ -1639,6 +1639,9 @@ imports:
     entry: intercept
     world_in:
       ticket_repo: "{{ world.ticket_repo }}"
+    exits:
+      main:
+        to: landing
 
   bf:
     source: ../bugfix
