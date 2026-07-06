@@ -11,6 +11,8 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"kitsoki/internal/capsuletest"
 )
 
 // vcs_tools_test.go — verification for the vcs.* / worktree.* surface. These run
@@ -27,21 +29,10 @@ func gitExec(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-// initRepo creates a temp git repo on `main` with one committed file.
+// initRepo opens the shared clean synthetic capsule used by VCS tests.
 func initRepo(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	gitExec(t, dir, "init", "-b", "main")
-	gitExec(t, dir, "config", "user.email", "test@kitsoki.dev")
-	gitExec(t, dir, "config", "user.name", "Kitsoki Test")
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a\n"), 0o644))
-	// Mirror the repo convention (AGENTS.md): worktrees live under .worktrees/,
-	// which is gitignored — so a worktree created inside the repo never makes the
-	// main checkout's tree dirty (the precondition vcs.integrate guards on).
-	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".worktrees/\n"), 0o644))
-	gitExec(t, dir, "add", "-A")
-	gitExec(t, dir, "commit", "-q", "-m", "init")
-	return dir
+	return capsuletest.Open(t, "clean-repo")
 }
 
 func decodeOK(t *testing.T, res *mcpsdk.CallToolResult, out any) {

@@ -124,6 +124,7 @@ guard_paths="$(
     while [ "$d" != "." ] && [ "$d" != "/" ]; do
       [ -e "$d" ] && printf '%s\n' "$d"
       parent="$(dirname "$d")"
+      [ "$parent" = "." ] && printf '%s\n' "."
       [ "$parent" = "$d" ] && break
       d="$parent"
     done
