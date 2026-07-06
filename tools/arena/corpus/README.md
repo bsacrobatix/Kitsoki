@@ -61,6 +61,20 @@ The verifier follows BugSwarm's own artifact contract: `run_failed.sh` must
 exit non-zero and `run_passed.sh` must exit zero, each in a fresh container so
 the failed script cannot pollute the passed run.
 
+After an `--execute` verification pass, write a benchmark-ready source without
+hand-editing YAML:
+
+```bash
+python3 tools/arena/scripts/bugswarm_apply_verification.py \
+  --source .artifacts/bugswarm/arena-source.yaml \
+  --verification .artifacts/bugswarm/verification.json \
+  --out .artifacts/bugswarm/arena-source.verified.yaml
+```
+
+Dry-run reports are rejected by default because they do not prove RED/GREEN.
+Pass `--allow-dry-run` only when you want to carry command-plan metadata forward
+without setting `verified_red` or `verified_green`.
+
 ## GLM-5.2 + BugSwarm Report
 
 The interim research report is generated, not hand-maintained:
@@ -72,8 +86,9 @@ python3 tools/arena/scripts/glm52_bugswarm_report.py \
   --markdown-out docs/case-studies/bugswarm-glm52-bugfix-report.md
 ```
 
-Pass `--bugswarm-source <converted-source.yaml>` after importing artifacts with
-`bugswarm_to_arena.py`, and `--bugswarm-verification <verification.json>` after
-planning or executing verification with `bugswarm_verify_source.py`. The
-generator keeps unavailable GLM-5.2 cells as `pending`, so missing raw-prompt or
-BugSwarm results cannot accidentally become zero-cost failures.
+Pass `--bugswarm-source .artifacts/bugswarm/arena-source.verified.yaml` after
+applying an execute-mode verification report, and
+`--bugswarm-verification .artifacts/bugswarm/verification.json` so the report
+records the verification evidence. The generator keeps unavailable GLM-5.2
+cells as `pending`, so missing raw-prompt or BugSwarm results cannot
+accidentally become zero-cost failures.

@@ -28,6 +28,7 @@ sources:
     owner: external
     adapter: tools/arena/scripts/bugswarm_to_arena.py
     verifier: tools/arena/scripts/bugswarm_verify_source.py
+    verification_applier: tools/arena/scripts/bugswarm_apply_verification.py
     upstream:
       website: https://www.bugswarm.org/
       client: https://github.com/BugSwarm/client
@@ -61,4 +62,5 @@ sources:
     notes:
       - "Adapter generation is offline and no-LLM; live artifact verification requires Docker and must be explicitly invoked."
       - "Verification runs failed and passed scripts in separate fresh containers: run_failed.sh must exit non-zero, run_passed.sh must exit zero."
+      - "bugswarm_apply_verification.py turns an execute-mode verification report into a verified source YAML for report generation and benchmark scheduling."
       - "BugSwarm fail/pass pairs measure CI failure repair; some artifacts are not suitable APR bugs and must be filtered or reported separately."
