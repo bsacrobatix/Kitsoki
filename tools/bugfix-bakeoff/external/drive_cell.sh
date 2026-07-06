@@ -214,6 +214,19 @@ git -C "$cell" checkout -q -B "$branch"
 # Link a prebuilt node_modules only for cloned JS repos; local_only repos have
 # their toolchain in place (and a root node_modules symlink would be wrong here).
 [[ -z "$local_only" && -d "$src/node_modules" ]] && ln -sfn "$src/node_modules" "$cell/node_modules"
+if [[ "${BAKEOFF_CLAUDE_ALLOW_VALIDATOR:-0}" == "1" ]]; then
+  mkdir -p "$cell/.claude"
+  cat >"$cell/.claude/settings.local.json" <<'JSON'
+{
+  "permissions": {
+    "allow": [
+      "mcp__validator__submit",
+      "mcp__operator__ask"
+    ]
+  }
+}
+JSON
+fi
 
 trace="$CACHE/traces/$cellkey.jsonl"; rm -f "$trace"
 thread_file="$CACHE/threads/$cellkey.md"
