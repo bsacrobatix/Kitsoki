@@ -61,6 +61,10 @@ states:
               hint:  "run the remote sync helper again"
               intent: retry
               when:  "world.sync_result.outcome == 'error'"
+            - label: "push_main remote={{ world.sync_remote|default:'origin' }}"
+              hint:  "fast-forward {{ world.sync_remote|default:'origin' }}/{{ world.sync_remote_branch|default:'main' }} from local {{ world.integration_branch }}"
+              intent: push_main
+              when:  "world.sync_result.outcome == 'local_ahead'"
             - label: "back"
               hint:  "return to hub"
               intent: back
@@ -155,6 +159,13 @@ states:
           effects:
             - set:
                 sync_result:   {}
+      push_main:
+        - target: push_main
+          effects:
+            - set:
+                push_remote:        "{{ world.sync_remote != '' ? world.sync_remote : 'origin' }}"
+                push_remote_branch: "{{ world.sync_remote_branch != '' ? world.sync_remote_branch : 'main' }}"
+                push_result:        {}
       back:
         - when: "world.on_integration == true"
           target: main_ops

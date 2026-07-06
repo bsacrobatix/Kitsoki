@@ -110,7 +110,10 @@ the helper's continue/review/commit path through git-ops as well. It delegates
 to `scripts/sync-main-from-remote.sh`, creates an integration worktree under
 `.worktrees/`, applies the helper's deterministic known resolutions, and
 surfaces the integration branch/worktree plus the validation and
-`merge-to-main` command. Slots:
+`merge-to-main` command. When local main already contains the remote but has
+local-only commits, `sync_main` surfaces that as `local_ahead` and offers the
+guarded `push_main` action instead of leaving the operator at a dead-end
+message. Slots:
 
 | Slot | Default | Description |
 |---|---|---|
