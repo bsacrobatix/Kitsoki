@@ -37,6 +37,8 @@ initial_world:
   core__design_ticket_dir:     "issues/features"
 
 host_handlers:
+  host.fs.writable_dir:
+    data: { path: "docs/proposals", used_fallback: false }
   host.ide.open_file:
     data: { ok: true, connected: false }
   host.chat.resolve:

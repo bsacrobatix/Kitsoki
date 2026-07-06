@@ -9,6 +9,8 @@ states:
 
   sync_main:
     description: "Reconcile protected local main with a remote main via an integration worktree."
+    operation:
+      scope: gitops.sync_main
     relevant_world: [sync_remote, sync_remote_branch, sync_name, sync_continue_branch,
                      sync_auto_resolve, sync_result]
     view:
@@ -68,6 +70,14 @@ states:
               hint:  "fast-forward {{ world.sync_remote|default:'origin' }}/{{ world.sync_remote_branch|default:'main' }} from local {{ world.integration_branch }}"
               intent: push_main
               when:  "world.sync_result.outcome == 'local_ahead'"
+            - label: "accept"
+              hint:  "commit this sync result to durable session world"
+              intent: accept
+              when:  "world.sync_result.outcome == 'prepared' || world.sync_result.outcome == 'conflicts' || world.sync_result.outcome == 'up_to_date' || world.sync_result.outcome == 'local_ahead'"
+            - label: "save_draft"
+              hint:  "preserve this sync attempt as an explicit draft"
+              intent: save_draft
+              when:  "world.sync_result.outcome != ''"
             - label: "back"
               hint:  "return to hub"
               intent: back
@@ -165,10 +175,34 @@ states:
       push_main:
         - target: push_main
           effects:
+            - commit_operation:
+                world:
+                  sync_remote: "{{ world.sync_remote }}"
+                  sync_remote_branch: "{{ world.sync_remote_branch }}"
+                  sync_result: "{{ world.sync_result }}"
             - set:
                 push_remote:        "{{ world.sync_remote != '' ? world.sync_remote : 'origin' }}"
                 push_remote_branch: "{{ world.sync_remote_branch != '' ? world.sync_remote_branch : 'main' }}"
                 push_result:        {}
+      accept:
+        - when: "world.sync_result.outcome == 'prepared' || world.sync_result.outcome == 'conflicts' || world.sync_result.outcome == 'up_to_date' || world.sync_result.outcome == 'local_ahead'"
+          target: main_ops
+          effects:
+            - commit_operation:
+                world:
+                  sync_remote: "{{ world.sync_remote }}"
+                  sync_remote_branch: "{{ world.sync_remote_branch }}"
+                  sync_name: "{{ world.sync_name }}"
+                  sync_continue_branch: "{{ world.sync_continue_branch }}"
+                  sync_auto_resolve: "{{ world.sync_auto_resolve }}"
+                  sync_result: "{{ world.sync_result }}"
+      save_draft:
+        - target: main_ops
+          effects:
+            - persist_draft:
+                id: "sync_main:{{ world.sync_result.branch ?? world.sync_remote }}"
+                title: "sync_main {{ world.sync_remote }}/{{ world.sync_remote_branch }}"
+                world: [sync_remote, sync_remote_branch, sync_name, sync_continue_branch, sync_auto_resolve, sync_result]
       back:
         - when: "world.on_integration == true"
           target: main_ops

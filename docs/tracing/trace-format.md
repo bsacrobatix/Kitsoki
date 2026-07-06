@@ -212,6 +212,10 @@ All kinds use the dotted form the SPA subsystem chip logic already consumes.
 | `harness.returned`           | Host invocation completed.                                  |
 | `harness.error`              | Orchestrator dispatch loop failed loudly.                   |
 | `world.update`               | One effect applied during a transition.                     |
+| `operation.started`          | An operation-scoped world overlay opened.                   |
+| `operation.committed`        | An operation overlay published selected values to durable world. |
+| `operation.abandoned`        | An operation overlay was discarded without becoming durable. |
+| `operation.draft_persisted`  | An operation overlay was saved as an explicit resumable draft. |
 | `scheduler.submitted`        | Background job dispatched.                                  |
 | `scheduler.completed`        | Background job reached a terminal state.                    |
 | `artifact.emitted`           | A host call produced a named media artifact (see §Artifact event). |
@@ -238,6 +242,49 @@ An off-ramp turn emits `agent.off_path.question` / `agent.off_path.answer`
 (the converse exchange) but **never** a `turn.end` with a rejected outcome — the
 whole point is that a no-match is answered instead of bounced. See
 [`docs/stories/state-machine.md`](../stories/state-machine.md) §11.
+
+### Operation events
+
+Operation-scoped world keeps abandonable task scratch out of durable session
+world. The trace records both the local overlay and the deterministic close-out
+so replay can reconstruct the same final world while still showing what was
+discarded.
+
+**`operation.started`** opens an overlay.
+
+| Payload key         | Type   | Meaning                                             |
+|---------------------|--------|-----------------------------------------------------|
+| `operation_id`      | string | Stable operation scope, usually the state's `operation.scope`. |
+| `state`             | string | State path whose operation overlay opened.          |
+| `parent_world_hash` | string | sha256 over the durable world snapshot at open time. |
+
+**`world.update` inside an operation** still uses the normal effect payload, but
+adds `operation_id` and `operation_local: true`. Replay applies that update to
+the active overlay instead of durable world.
+
+**`operation.committed`** closes an overlay by applying a durable patch.
+
+| Payload key    | Type   | Meaning                                      |
+|----------------|--------|----------------------------------------------|
+| `operation_id` | string | Operation being closed.                       |
+| `world_patch`  | object | Key/value patch copied into durable world.    |
+
+**`operation.draft_persisted`** saves a resumable draft under the reserved
+`world.operation_drafts` map and closes the overlay.
+
+| Payload key    | Type   | Meaning                                      |
+|----------------|--------|----------------------------------------------|
+| `operation_id` | string | Operation being saved.                        |
+| `draft_id`     | string | Draft handle written under `operation_drafts`. |
+| `world`        | object | Selected overlaid values captured in the draft. |
+
+**`operation.abandoned`** closes an overlay without applying its patch.
+
+| Payload key        | Type   | Meaning                                      |
+|--------------------|--------|----------------------------------------------|
+| `operation_id`     | string | Operation being abandoned.                    |
+| `reason`           | string | `exit`, `reenter`, `explicit`, or a story-provided reason. |
+| `discarded_patch`  | object | Overlay values that did not enter durable world. |
 
 ### Mining proposal events
 

@@ -313,6 +313,26 @@ func (rw *childRewriter) rewriteEffect(eff *Effect) {
 		}
 		eff.Increment = newInc
 	}
+	if eff.CommitOperation != nil && len(eff.CommitOperation.World) > 0 {
+		newCommit := make(map[string]any, len(eff.CommitOperation.World))
+		for k, v := range eff.CommitOperation.World {
+			newKey := k
+			if _, ok := rw.childWorldKey[k]; ok {
+				newKey = rw.alias + "__" + k
+			}
+			newCommit[newKey] = rw.rewriteAny(v)
+		}
+		eff.CommitOperation.World = newCommit
+	}
+	if eff.PersistDraft != nil {
+		eff.PersistDraft.ID = rw.rewriteExpr(eff.PersistDraft.ID)
+		eff.PersistDraft.Title = rw.rewriteExpr(eff.PersistDraft.Title)
+		for i, k := range eff.PersistDraft.World {
+			if _, ok := rw.childWorldKey[k]; ok {
+				eff.PersistDraft.World[i] = rw.alias + "__" + k
+			}
+		}
+	}
 
 	// With: arg values may be expressions; the `agent` arg is rewritten
 	// when it names a child agent.
@@ -358,6 +378,9 @@ func (rw *childRewriter) rewriteEffect(eff *Effect) {
 	// Nested on_complete effects.
 	for i := range eff.OnComplete {
 		rw.rewriteEffect(&eff.OnComplete[i])
+	}
+	for i := range eff.Effects {
+		rw.rewriteEffect(&eff.Effects[i])
 	}
 }
 

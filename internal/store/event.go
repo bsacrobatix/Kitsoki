@@ -42,6 +42,14 @@ const (
 	// dedicated MachineSay kind below so `world.update` unambiguously means a
 	// world mutation.
 	EffectApplied EventKind = "world.update"
+	// OperationStarted records entry into an operation-local world overlay.
+	OperationStarted EventKind = "operation.started"
+	// OperationCommitted records the durable patch copied out of an overlay.
+	OperationCommitted EventKind = "operation.committed"
+	// OperationAbandoned records an overlay discarded without entering durable world.
+	OperationAbandoned EventKind = "operation.abandoned"
+	// OperationDraftPersisted records an explicit draft handle produced from an overlay.
+	OperationDraftPersisted EventKind = "operation.draft_persisted"
 	// MachineSay is appended once per `say:` effect that resolves. Payload
 	// carries {"text": "<narration>"}. Split out of EffectApplied
 	// so a runstatus timeline can render

@@ -1069,6 +1069,7 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	// scope (it needs AgentDef.ExternalSideEffect, which validateStates does not
 	// carry).
 	validateWriteMode(file, def, &errs)
+	validateOperations(file, def, &errs)
 
 	// intercept_drive: multi-turn drive flag (conflict-capable intercept). The
 	// only valid value is "rest"; only meaningful on a top-level room.
@@ -1918,6 +1919,64 @@ func validateBackgroundEffectAware(file, location, originStatePath string, eff E
 		// Recursively reject nested on_complete with background and validate target rules.
 		validateBackgroundEffectAware(file, loc, originStatePath, child, true /* this child IS inside on_complete */, allowedHosts, declaredAgents, allStatePaths, stateOnKeys, errs)
 	}
+}
+
+func validateOperations(file string, def *AppDef, errs *[]error) {
+	var walkEffects func(location, statePath string, inOperation bool, effects []Effect)
+	walkEffects = func(location, statePath string, inOperation bool, effects []Effect) {
+		for i, eff := range effects {
+			loc := fmt.Sprintf("%s[%d]", location, i)
+			if inOperation && eff.Background {
+				*errs = append(*errs, &ValidationError{File: file, Message: fmt.Sprintf("%s: background jobs inside operation states need an explicit policy", loc)})
+			}
+			if eff.CommitOperation != nil && !inOperation {
+				*errs = append(*errs, &ValidationError{File: file, Message: fmt.Sprintf("%s: commit_operation is only valid inside a state with operation:", loc)})
+			}
+			if eff.PersistDraft != nil {
+				if !inOperation {
+					*errs = append(*errs, &ValidationError{File: file, Message: fmt.Sprintf("%s: persist_draft is only valid inside a state with operation:", loc)})
+				}
+				if strings.TrimSpace(eff.PersistDraft.ID) == "" {
+					*errs = append(*errs, &ValidationError{File: file, Message: fmt.Sprintf("%s: persist_draft requires id:", loc)})
+				}
+			}
+			if eff.DiscardOperation != nil && !inOperation {
+				*errs = append(*errs, &ValidationError{File: file, Message: fmt.Sprintf("%s: discard_operation is only valid inside a state with operation:", loc)})
+			}
+			if len(eff.OnComplete) > 0 {
+				walkEffects(loc+" on_complete", statePath, inOperation, eff.OnComplete)
+			}
+			if len(eff.Effects) > 0 {
+				walkEffects(loc+" effects", statePath, inOperation, eff.Effects)
+			}
+		}
+	}
+	var walkStates func(prefix string, states map[string]*State, inheritedOperation bool)
+	walkStates = func(prefix string, states map[string]*State, inheritedOperation bool) {
+		for name, s := range states {
+			if s == nil {
+				continue
+			}
+			statePath := joinPath(prefix, name)
+			inOperation := inheritedOperation || s.Operation != nil
+			if s.Operation != nil {
+				scope := strings.TrimSpace(s.Operation.Scope)
+				if strings.Contains(scope, "{{") || strings.Contains(scope, "{%") {
+					*errs = append(*errs, &ValidationError{File: file, Message: fmt.Sprintf("state %q: operation.scope must be a stable literal, got %q", statePath, scope)})
+				}
+			}
+			walkEffects(fmt.Sprintf("state %q on_enter", statePath), statePath, inOperation, s.OnEnter)
+			for intentName, transitions := range s.On {
+				for ti, tr := range transitions {
+					walkEffects(fmt.Sprintf("state %q intent %q transitions[%d] effects", statePath, intentName, ti), statePath, inOperation, tr.Effects)
+				}
+			}
+			if len(s.States) > 0 {
+				walkStates(statePath, s.States, inOperation)
+			}
+		}
+	}
+	walkStates("", def.States, false)
 }
 
 // validateWriteMode enforces the write_mode: room-posture invariants

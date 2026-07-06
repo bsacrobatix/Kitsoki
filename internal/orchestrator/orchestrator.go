@@ -2957,7 +2957,7 @@ func (o *Orchestrator) loadJourney(sid app.SessionID) (*store.JourneyState, erro
 	startWorld := initialWorld
 	if hasSnap {
 		startState = snap.StatePath
-		if err := json.Unmarshal(snap.WorldJSON, &startWorld.Vars); err != nil {
+		if err := json.Unmarshal(snap.WorldJSON, &startWorld); err != nil {
 			return nil, fmt.Errorf("unmarshal snapshot world: %w", err)
 		}
 	}

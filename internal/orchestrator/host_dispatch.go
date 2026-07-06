@@ -282,10 +282,8 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 					slog.String("phase", "dispatch_background"),
 					slog.String("err", bgErr.Error()),
 				)
-				w.Vars["last_error"] = bgErr.Error()
-				events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
-					"set": map[string]any{"last_error": bgErr.Error()},
-				}, 0))
+				w.Set("last_error", bgErr.Error())
+				events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{"last_error": bgErr.Error()}), 0))
 			} else {
 				w = bgWorld
 			}
@@ -391,20 +389,16 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 		}
 		if err != nil {
 			// Infrastructure failure (e.g. handler not registered): record and move on.
-			w.Vars["last_error"] = err.Error()
-			events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
-				"set": map[string]any{"last_error": err.Error()},
-			}, 0))
+			w.Set("last_error", err.Error())
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{"last_error": err.Error()}), 0))
 			// Structured global host_error so the redirect target room can render
 			// a rich error (namespace + message). Reserved global, never folded.
 			herr := map[string]any{
 				"namespace": hc.Namespace,
 				"message":   err.Error(),
 			}
-			w.Vars["host_error"] = herr
-			events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
-				"set": map[string]any{"host_error": herr},
-			}, 0))
+			w.Set("host_error", herr)
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{"host_error": herr}), 0))
 			events = append(events, newOrchestratorEvent(store.HostReturned, map[string]any{
 				"namespace":     hc.Namespace,
 				"error":         err.Error(),
@@ -438,10 +432,8 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			continue
 		}
 		if res.Error != "" {
-			w.Vars["last_error"] = res.Error
-			events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
-				"set": map[string]any{"last_error": res.Error},
-			}, 0))
+			w.Set("last_error", res.Error)
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{"last_error": res.Error}), 0))
 			// Structured global host_error mirrors last_error but carries the
 			// namespace and (when the host result returned a Data payload) the
 			// raw data plus the conventional stderr/exit_code host.run carries.
@@ -459,10 +451,8 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 					herr["exit_code"] = v
 				}
 			}
-			w.Vars["host_error"] = herr
-			events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
-				"set": map[string]any{"host_error": herr},
-			}, 0))
+			w.Set("host_error", herr)
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{"host_error": herr}), 0))
 		}
 
 		// Emit one EffectApplied event per binding so replay reconstructs
@@ -517,11 +507,9 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 					continue
 				}
 			}
-			w.Vars[wkey] = val
+			w.Set(wkey, val)
 			dispatchBinds[wkey] = val
-			events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
-				"set": map[string]any{wkey: val},
-			}, 0))
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{wkey: val}), 0))
 			applied = true
 		}
 
@@ -923,10 +911,8 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 		if err != nil {
 			summary.Error = err.Error()
 			summaries = append(summaries, summary)
-			w.Vars["last_error"] = err.Error()
-			events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
-				"set": map[string]any{"last_error": err.Error()},
-			}, 0))
+			w.Set("last_error", err.Error())
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{"last_error": err.Error()}), 0))
 			events = append(events, newOrchestratorEvent(store.HostReturned, map[string]any{
 				"namespace":     hc.Namespace,
 				"error":         err.Error(),
@@ -948,11 +934,9 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 			continue
 		}
 		if res.Error != "" {
-			w.Vars["last_error"] = res.Error
+			w.Set("last_error", res.Error)
 			summary.Error = res.Error
-			events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
-				"set": map[string]any{"last_error": res.Error},
-			}, 0))
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{"last_error": res.Error}), 0))
 		}
 		if res.Data != nil {
 			summary.Data = res.Data
@@ -970,11 +954,9 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 			if !ok {
 				continue
 			}
-			w.Vars[wkey] = val
+			w.Set(wkey, val)
 			dispatchBinds[wkey] = val
-			events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
-				"set": map[string]any{wkey: val},
-			}, 0))
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{wkey: val}), 0))
 			applied = true
 		}
 
@@ -1052,19 +1034,24 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 func foldAgentCost(w *world.World, batchCost float64) []store.Event {
 	var events []store.Event
 	if batchCost != worldFloat(w.Vars["turn_cost_usd"]) {
-		w.Vars["turn_cost_usd"] = batchCost
-		events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
-			"set": map[string]any{"turn_cost_usd": batchCost},
-		}, 0))
+		w.Set("turn_cost_usd", batchCost)
+		events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(*w, "set", map[string]any{"turn_cost_usd": batchCost}), 0))
 	}
 	if batchCost > 0 {
 		session := worldFloat(w.Vars["session_cost_usd"]) + batchCost
-		w.Vars["session_cost_usd"] = session
-		events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
-			"set": map[string]any{"session_cost_usd": session},
-		}, 0))
+		w.Set("session_cost_usd", session)
+		events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(*w, "set", map[string]any{"session_cost_usd": session}), 0))
 	}
 	return events
+}
+
+func operationWorldUpdatePayload(w world.World, kind string, value map[string]any) map[string]any {
+	payload := map[string]any{kind: value}
+	if w.Operation != nil {
+		payload["operation_id"] = w.Operation.ID
+		payload["operation_local"] = true
+	}
+	return payload
 }
 
 // worldFloat coerces a world value to float64 — float64 when set by foldAgentCost

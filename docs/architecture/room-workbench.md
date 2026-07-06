@@ -181,6 +181,14 @@ Note also that the effect used for a route-out is the singular
 `emit_intents:` array; see `stories/dev-story/rooms/landing.yaml`'s
 `take_route` transition for the worked shape.
 
+When a workbench models an abandonable task, put the dispatching room in
+`operation:` scope and make the route-out transition commit only the values the
+downstream authored room should treat as facts. Intermediate notes, host
+results, and retry state should stay in the operation overlay, be persisted with
+`persist_draft`, or be abandoned automatically on exit. That keeps this
+deterministic route-out rule intact without leaking scratch state into durable
+world.
+
 ## Dispatch and permissions
 
 The synthesized `on_enter` call is an ordinary `host.agent.task` invocation.

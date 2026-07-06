@@ -123,11 +123,11 @@ func (o *Orchestrator) dispatchBackground(
 			break
 		}
 	}
-	w.Vars[bindKey] = jobID
+	w.Set(bindKey, jobID)
 
 	// Always keep last_job_id up to date even if a custom key was used.
 	if bindKey != "last_job_id" {
-		w.Vars["last_job_id"] = jobID
+		w.Set("last_job_id", jobID)
 	}
 
 	// dispatchBackground always binds the job ID under bindKey AND under
@@ -135,13 +135,9 @@ func (o *Orchestrator) dispatchBackground(
 	// separate EffectApplied for each key so that on replay both are
 	// restored.  When bindKey == "last_job_id" a single event covers both.
 	var events []store.Event
-	events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
-		"set": map[string]any{bindKey: jobID},
-	}, 0))
+	events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{bindKey: jobID}), 0))
 	if bindKey != "last_job_id" {
-		events = append(events, newOrchestratorEvent(store.EffectApplied, map[string]any{
-			"set": map[string]any{"last_job_id": jobID},
-		}, 0))
+		events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{"last_job_id": jobID}), 0))
 	}
 	events = append(events, newOrchestratorEvent(store.JobSubmitted, map[string]any{
 		"namespace": hc.Namespace,

@@ -98,6 +98,19 @@ func validateEffectExprs(eff Effect, statePath, loc string, addErr func(string, 
 	for _, key := range sortedKeys(eff.EmitSlots) {
 		validateEffectValue(eff.EmitSlots[key], statePath, loc, fmt.Sprintf("emit_intent slot %q", key), addErr)
 	}
+	if eff.CommitOperation != nil {
+		for _, key := range sortedKeys(eff.CommitOperation.World) {
+			validateEffectValue(eff.CommitOperation.World[key], statePath, loc, fmt.Sprintf("commit_operation world %q", key), addErr)
+		}
+	}
+	if eff.PersistDraft != nil {
+		if eff.PersistDraft.ID != "" {
+			validateEffectValue(eff.PersistDraft.ID, statePath, loc, "persist_draft id", addErr)
+		}
+		if eff.PersistDraft.Title != "" {
+			validateEffectValue(eff.PersistDraft.Title, statePath, loc, "persist_draft title", addErr)
+		}
+	}
 	// emit_intent itself may be a template value resolved at fire time.
 	if eff.EmitIntent != "" {
 		validateEffectValue(eff.EmitIntent, statePath, loc, "emit_intent", addErr)
