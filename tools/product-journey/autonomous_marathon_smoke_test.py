@@ -294,6 +294,14 @@ def main() -> int:
             output["summary"] = "core use-case autonomous product-QA marathon persona sweep failed"
             print(json.dumps(output, sort_keys=True))
             return 1
+        print("SUMMARY_JSON: " + json.dumps({
+            "project": output["project"],
+            "persona_count": output["persona_count"],
+            "scenario_count": output["scenario_count"],
+            "run_count": output["run_count"],
+            "filed_issue_count": output["filed_issue_count"],
+            "gh_agent_done_count": output["gh_agent_done_count"],
+        }, sort_keys=True))
         print("PASS")
         return 0
 

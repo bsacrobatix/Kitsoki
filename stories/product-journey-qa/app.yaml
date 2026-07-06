@@ -217,6 +217,12 @@ world:
   autonomous_marathon_smoke_summary: { type: string, default: "" }
   autonomous_marathon_smoke_exit_code: { type: int, default: 0 }
   autonomous_marathon_smoke_output: { type: string, default: "" }
+  autonomous_marathon_smoke_project: { type: string, default: "" }
+  autonomous_marathon_smoke_persona_count: { type: int, default: 0 }
+  autonomous_marathon_smoke_scenario_count: { type: int, default: 0 }
+  autonomous_marathon_smoke_run_count: { type: int, default: 0 }
+  autonomous_marathon_smoke_filed_issue_count: { type: int, default: 0 }
+  autonomous_marathon_smoke_done_count: { type: int, default: 0 }
   autonomous_marathon_status: { type: string, default: "" }
   autonomous_marathon_summary: { type: string, default: "" }
   autonomous_marathon_report_path: { type: string, default: "" }
