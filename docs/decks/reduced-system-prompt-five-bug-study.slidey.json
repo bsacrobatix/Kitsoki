@@ -1,0 +1,164 @@
+{
+  "_comment": "Deck source for docs/research/reduced-system-prompt-five-bug-study.md. Source only; no bundled HTML requested.",
+  "meta": {
+    "title": "Reduced System Prompt Five-Bug Study",
+    "resolution": { "width": 1920, "height": 1080 },
+    "theme": {
+      "name": "rose-pine-moon",
+      "background": "#101820",
+      "fontFamily": "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica Neue, Arial, sans-serif",
+      "colors": {
+        "base": "#101820",
+        "surface": "#17212b",
+        "overlay": "#203141",
+        "muted": "#6c7d8e",
+        "subtle": "#9fb0c2",
+        "text": "#f4f7fb",
+        "love": "#f7a6b8",
+        "gold": "#f4d35e",
+        "rose": "#f08a5d",
+        "pine": "#7bd389",
+        "foam": "#80ced7",
+        "iris": "#9aa7ff",
+        "highlightLow": "#1a2936",
+        "highlightMuted": "#33495f",
+        "highlightHigh": "#5a7591"
+      }
+    },
+    "narration": { "voice": "en-AU-NatashaNeural", "rate": "+0%" }
+  },
+  "scenes": [
+    {
+      "type": "title",
+      "eyebrow": "Prompt-cost research plan",
+      "title": "Reduced System Prompt Five-Bug Study",
+      "subtitle": "Pilot evidence, honest limits, and the A/B run that would prove savings",
+      "narration": "This deck turns the reduced system prompt research note into a short decision artifact: what we know from existing traces, what we do not know yet, and exactly how to run the five-bug A/B study without overclaiming."
+    },
+    {
+      "type": "narrative",
+      "eyebrow": "Question",
+      "lede": "Does a focused replacement prompt reduce cost without lowering bug-fix quality?",
+      "body": "The change under test is f97e340a: Claude gets Kitsoki's composed prompt through --system-prompt, Codex gets the same bytes through model_instructions_file, and the editable base lives at .kitsoki/system-prompt.md. The important comparison is same bug, same model, same oracle, only the prompt path changed.",
+      "narration": "The research question is narrow. Does replacing the inherited harness prompt with Kitsoki's focused prompt reduce cost without lowering bug-fix quality? Same bugs, same model, same oracle. Only the system-prompt path changes."
+    },
+    {
+      "type": "cards",
+      "variant": "grid",
+      "title": "What changed",
+      "cards": [
+        { "label": "Claude", "sub": "--system-prompt replaces default", "style": "primary" },
+        { "label": "Codex", "sub": "model_instructions_file carries the same bytes", "style": "primary" },
+        { "label": "Project-owned", "sub": ".kitsoki/system-prompt.md is editable", "style": "default" },
+        { "label": "Template-aware", "sub": "renders through the same prompt mechanism", "style": "default" }
+      ],
+      "narration": "The implementation aligns the harnesses. Claude receives a replacement system prompt. Codex receives a model instructions file. The prompt is project-owned and template-rendered, so stories can control it transparently."
+    },
+    {
+      "type": "table",
+      "title": "Pilot corpus: five unique bugs already traced",
+      "columns": ["Bug", "Project", "Candidate", "Outcome", "Calls"],
+      "rows": [
+        { "cells": ["qs1", "query-string", "gpt-5.5", "solved, oracle pass", "10"] },
+        { "cells": ["qs2", "query-string", "gpt-5.5", "solved, oracle pass", "11"] },
+        { "cells": ["qs3", "query-string", "gpt-5.5", "solved, oracle pass", "11"] },
+        { "cells": ["bug9", "kitsoki", "opus-4.8", "solved by adjudication", "7"] },
+        { "cells": ["bug14", "kitsoki", "GLM-5.2", "failed / incomplete", "2 complete, 3 errored"] }
+      ],
+      "variant": "data",
+      "hold": 360,
+      "caption": "No new live LLM calls were made. These are existing traces and cell reports."
+    },
+    {
+      "type": "table",
+      "title": "Measured pilot usage",
+      "columns": ["Bug", "Visible tokens", "Cache-read tokens", "Prompt bytes", "Wall time"],
+      "rows": [
+        { "cells": ["qs1", "1,878,621", "1,344,512", "38,458", "507s"] },
+        { "cells": ["qs2", "1,355,081", "1,063,296", "38,722", "416s"] },
+        { "cells": ["qs3", "1,148,123", "841,472", "39,015", "350s"] },
+        { "cells": ["bug9", "61,288", "3,504,121", "92,209", "841s"] },
+        { "cells": ["bug14", "718,734", "0", "21,342", "420s"] }
+      ],
+      "variant": "data",
+      "hold": 420,
+      "caption": "Visible tokens are input + output + reasoning. Cache-read normalizes Codex cached_input_tokens and Claude cache_read_input_tokens."
+    },
+    {
+      "type": "narrative",
+      "eyebrow": "Important limit",
+      "lede": "This is not a causal A/B result yet.",
+      "body": "The existing traces were not run on both prompt variants. They prove the corpus is useful and that repeated context dominates cost, but they do not prove f97e340a saved money. A research-grade claim needs old-append-default versus focused-replace on the same five bugs.",
+      "narration": "The limit matters. The existing traces were not run on both prompt variants. They justify the experiment, but they do not prove the new prompt saved money. For that, we need an A/B matrix."
+    },
+    {
+      "type": "cards",
+      "variant": "grid",
+      "title": "Why the prompt lever is still worth testing",
+      "cards": [
+        { "label": "41 completed calls", "sub": "across the five-bug pilot", "style": "primary" },
+        { "label": "System prefix repeats", "sub": "one removed token can save many token-opportunities", "style": "primary" },
+        { "label": "Less instruction conflict", "sub": "focused operator contract, fewer inherited defaults", "style": "default" },
+        { "label": "Cost and behavior", "sub": "measure both; cheaper regressions fail", "style": "default" }
+      ],
+      "narration": "The lever is repetition. Across the five pilot bugs, there were forty-one completed calls. Removing tokens from the stable system prefix creates repeated token-saving opportunities, and may reduce instruction conflict."
+    },
+    {
+      "type": "table",
+      "title": "Lower-bound savings model",
+      "columns": ["Removed system tokens", "Five-bug input-token opportunities", "Input cost range"],
+      "rows": [
+        { "cells": ["1,000", "41,000", "$0.12 - $0.21"] },
+        { "cells": ["5,000", "205,000", "$0.62 - $1.03"] },
+        { "cells": ["10,000", "410,000", "$1.23 - $2.05"] }
+      ],
+      "variant": "data",
+      "hold": 360,
+      "caption": "Uses 41 completed calls and $3-$5 per million normal input tokens. Actual savings must come from A/B traces."
+    },
+    {
+      "type": "table",
+      "title": "The decisive A/B matrix",
+      "columns": ["Axis", "Values"],
+      "rows": [
+        { "cells": ["Prompt variant", "old-append-default at 822f3584 vs focused-replace at current main"] },
+        { "cells": ["Bugs", "qs1, qs2, qs3, bug9, bug14"] },
+        { "cells": ["Candidate", "one fixed metered profile first; Codex second pass after cleanup"] },
+        { "cells": ["Treatment", "Kitsoki pipeline only until prompt-variant result is known"] },
+        { "cells": ["Cells", "10 total: 5 bugs x 2 prompt variants"] }
+      ],
+      "variant": "data",
+      "hold": 420,
+      "caption": "Same bug, same model, same hidden oracle, same guidance policy."
+    },
+    {
+      "type": "table",
+      "title": "Research-grade success criteria",
+      "columns": ["Metric", "Pass bar"],
+      "rows": [
+        { "cells": ["Solve rate", "focused-replace >= old-append-default"] },
+        { "cells": ["Cost per solve", "focused-replace <= 80% of old-append-default"] },
+        { "cells": ["Token per solve", "report visible and processed tokens"] },
+        { "cells": ["Failure classes", "no new systematic regression"] },
+        { "cells": ["Disclosure", "all failures, adjudications, traces, and price assumptions included"] }
+      ],
+      "variant": "data",
+      "hold": 420,
+      "caption": "A cheaper prompt that causes quality regression should fail the study."
+    },
+    {
+      "type": "narrative",
+      "eyebrow": "Preflight",
+      "lede": "Spend only after the fixtures are armed.",
+      "body": "First verify query-string and kitsoki RED-at-baseline / GREEN-at-real-fix with bench.py. Then use drive_cell.sh --no-drive to print prompts for review. Only drive the 10 live cells after operator approval, because drive_cell.sh is the cost-bearing step.",
+      "narration": "Before spending, verify the fixtures. Then print prompts with no-drive. Only after that should the operator approve the ten live cells, because drive-cell is the cost-bearing step."
+    },
+    {
+      "type": "narrative",
+      "eyebrow": "Takeaway",
+      "lede": "The honest story is stronger than the premature headline.",
+      "body": "Existing traces justify the A/B: prompt overhead repeats across 41 completed calls, current costs are dominated by repeated context, and bug9 / bug14 show room for prompt-focus gains. The deck should claim readiness to test, not proven savings, until the 10 cells exist.",
+      "narration": "The honest story is stronger than a premature headline. Existing traces justify the A/B. They do not yet prove savings. The next artifact should be the ten-cell matrix."
+    }
+  ]
+}
