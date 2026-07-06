@@ -38,15 +38,15 @@ jobs:
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
-      # `make test` runs `go test ./...` plus the deterministic story flow
-      # suites (no LLM, no cost). KITSOKI_CASSETTE_STRICT hard-errors any flow
+      # `make test-full` runs exhaustive `go test ./...` plus the deterministic
+      # story flow suites (no LLM, no cost). KITSOKI_CASSETTE_STRICT hard-errors any flow
       # that tries to record/re-record a cassette instead of replaying one, so
       # a missing fixture fails CI loudly instead of silently recording (and
       # potentially calling a live LLM) in an environment with no credentials.
       - name: Run tests
         env:
           KITSOKI_CASSETTE_STRICT: "1"
-        run: make test
+        run: make test-full
 
   site:
     name: Site

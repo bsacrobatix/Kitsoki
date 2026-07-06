@@ -81,7 +81,7 @@ BASESTORIES_STAMP := internal/basestories/.embed-stamp
 BASESKILLS_DIR    := internal/baseskills/assets
 BASESKILLS_STAMP  := internal/baseskills/.embed-stamp
 
-.PHONY: all setup bootstrap-worktree build build-lean install uninstall test test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff history-smoke history-pending-smoke gears-history-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
+.PHONY: all setup bootstrap-worktree build build-lean install uninstall test test-full test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff history-smoke history-pending-smoke gears-history-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
 	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local
 
@@ -307,7 +307,7 @@ web-dev-logs:
 	  echo "tailing $$latest" >&2; \
 	  tail -f "$$latest"
 
-# test runs the Go unit tests, the Mode-2 deterministic story flow suites, the
+# test runs the short Go unit tests, the Mode-2 deterministic story flow suites, the
 # feature catalog, AND the session-mining no-LLM invariants (== mining-test) —
 # all without an LLM or cost. The flow suites guard the shipped stories under
 # stories/ and the mining suites guard tools/session-mining/, neither of which
@@ -316,6 +316,11 @@ web-dev-logs:
 # detail on failure, and always writes a rotated full report to
 # .artifacts/test-reports/.
 test:
+	@KITSOKI_GO_TEST_FLAGS="$${KITSOKI_GO_TEST_FLAGS:--short}" ./scripts/run-tests.sh
+
+# test-full preserves the exhaustive Go lane for CI/release gates and local
+# validation of integration/property tests skipped by -short.
+test-full:
 	@./scripts/run-tests.sh
 
 # pr / pr-ci gate PR creation on a green test run, then open the PR with `gh`.

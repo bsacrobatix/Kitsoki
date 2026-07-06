@@ -233,20 +233,24 @@ func TestStoryGraphStructuredGraphMode(t *testing.T) {
 	assert.True(t, hasForwardEdge, "entry room has at least one labelled outgoing edge")
 }
 
-// ─── 2.4 test: RunFlows over bugfix flows reproduces `kitsoki test flows` ──────
+// ─── 2.4 test: RunFlows over a fixture reproduces `kitsoki test flows` ──────
 
-// TestStoryTestReproducesFlows runs story.test over stories/bugfix/flows and
-// asserts every fixture passes with no LLM — the same result `kitsoki test
-// flows stories/bugfix/app.yaml` produces (48/48 at time of writing).
+// TestStoryTestReproducesFlows runs story.test over one concrete flow fixture
+// and asserts it passes with no LLM. The full all-story replay remains owned by
+// scripts/run-tests.sh; this unit test only proves the MCP tool is wired through
+// to the flow runner and returns structured per-fixture results.
 func TestStoryTestReproducesFlows(t *testing.T) {
 	ctx := context.Background()
-	cs := newStudioWithWorkspace(ctx, t, bugfixDir(t))
+	dir := filepath.Join(repoRoot(t), "stories", "inbox-demo")
+	cs := newStudioWithWorkspace(ctx, t, dir)
 
 	var got studio.StoryTestOK
-	callStory(ctx, t, cs, "story.test", nil, &got)
-	assert.True(t, got.OK, "all bugfix flows should pass; failed=%d", got.Failed)
+	callStory(ctx, t, cs, "story.test", map[string]any{
+		"flows": filepath.Join(dir, "flows", "background_notifies.yaml"),
+	}, &got)
+	assert.True(t, got.OK, "inbox demo flow should pass; failed=%d", got.Failed)
+	assert.Equal(t, 1, got.Passed)
 	assert.Equal(t, 0, got.Failed, "no flow failures")
-	assert.Greater(t, got.Passed, 0, "fixtures ran")
 	require.NotEmpty(t, got.Results, "per-fixture results present")
 	for _, r := range got.Results {
 		assert.True(t, r.Passed || r.Skipped, "fixture %s passed or skipped; failure_count=%d failures=%v", r.File, r.FailureCount, r.Failures)
