@@ -1,12 +1,12 @@
 // Shared model helpers for the catalog (list/detail) projection of the
-// project object graph. Ported from the deleted W5.0-prototype
-// docs/proposals/project-object-graph/viewer/src/catalog-model.ts and
-// adapted to read the kitsoki.graph/v1 wire shape (ObjectGraph, served by
-// runstatus.objectgraph.load) instead of the raw seed-objects.yaml — the
-// per-type scalars that were top-level GraphNode fields there now live in
-// `node.attrs.fields` (internal/app/graph's ObjectCatalogGraph puts the
-// substrate's Node.Fields there verbatim).
-import type { ObjectGraph, ObjectGraphNode } from "../../data/objectgraph.js";
+// project object graph. Ported from the deleted engine SPA's
+// tools/runstatus/src/components/objectgraph/catalog-model.ts (S5 — see
+// .context/kits-implementation-plan.md D3/D4) and adapted to read the
+// kitsoki.graph/v1 wire shape (ObjectGraph, served by
+// kit.object-graph.graph.project) instead of runstatus.objectgraph.load —
+// the per-type scalars live in `node.attrs.fields` (internal/host's
+// objectCatalogGraph puts the substrate's Node.Fields there verbatim).
+import type { ObjectGraph, ObjectGraphNode } from "../../objectgraph-types.js";
 
 export interface Layer {
   id: string;
@@ -16,12 +16,18 @@ export interface Layer {
   types: string[];
 }
 
-// This layer taxonomy is presentation curation over the seed catalog's
-// current type set, not something the type registry's `extends` chains
-// encode (every seed type extends `core-node` directly — see
-// docs/proposals/project-object-graph/seed-objects.yaml). It intentionally
-// mirrors the deleted prototype's grouping.
-export const layers: Layer[] = [
+// `layers` is `let`, not `const`: it starts as this file's bundled default
+// (identical to what the deleted engine SPA hardcoded) so the viewer works
+// even before the first RPC round-trip, but ObjectGraphPage.vue overwrites
+// it via setLayers() on mount from kit.object-graph.graph.presentation — the
+// starlark-served endpoint (scripts/presentation.star, D2.1) that is now the
+// real source of truth for this taxonomy. A kit consumer that never calls
+// setLayers (e.g. this file's own unit tests) still gets a sane default.
+export function setLayers(next: Layer[]): void {
+  if (next.length > 0) layers = next;
+}
+
+export let layers: Layer[] = [
   {
     id: "actors",
     title: "Actors, agents, and responsibilities",

@@ -57,11 +57,11 @@ type Parameter struct {
 
 // Provides declares what a kit contributes.
 type Provides struct {
-	Stories    []string `yaml:"stories"`
-	Schemas    []string `yaml:"schemas,omitempty"`
-	Interfaces []string `yaml:"interfaces,omitempty"`
-	UI         []string `yaml:"ui,omitempty"`
-	Onboarding string   `yaml:"onboarding,omitempty"`
+	Stories    []string  `yaml:"stories"`
+	Schemas    []string  `yaml:"schemas,omitempty"`
+	Interfaces []string  `yaml:"interfaces,omitempty"`
+	UI         []UIEntry `yaml:"ui,omitempty"`
+	Onboarding string    `yaml:"onboarding,omitempty"`
 
 	// StoryDirs overrides the default `stories/<name>` resolution for one or
 	// more provides.stories entries, keyed by story name, value a kit-root-
@@ -99,6 +99,56 @@ type RootDecl struct {
 	// fail-fast host surface a hand-written instance does — replaces the
 	// hardcoded synthesizedRootHosts list.
 	Hosts []string `yaml:"hosts,omitempty"`
+}
+
+// UIEntry is one `provides.ui` module entry point (S3c's minimal vertical
+// slice shipped this as a bare entry-path string; S5 widens it to D3's full
+// `provides.ui: [{id, title, entry, nav}]` shape while keeping the bare-
+// string form valid — every S1/S3c fixture and any kit.yaml already
+// authored against the narrower shape keeps parsing unchanged).
+type UIEntry struct {
+	// ID identifies this UI module within the kit (used to build the
+	// "@<namespace>/<kit>/ui/<id>" import-map module id). Defaults to Entry
+	// when authored as a bare string.
+	ID string `yaml:"-"`
+	// Title is a human-readable label for a nav link. Empty for a bare
+	// string entry (no nav metadata was available in that form).
+	Title string `yaml:"-"`
+	// Entry is the module's file basename (without extension) under the
+	// kit's ui/ directory, e.g. "graph" for ui/graph.mjs.
+	Entry string `yaml:"-"`
+	// Nav, when true, tells the SPA's runtime loader to add a nav link for
+	// this page (D3's "provides.ui: [{..., nav}]"). Always false for a bare
+	// string entry.
+	Nav bool `yaml:"-"`
+}
+
+// UnmarshalYAML accepts either a bare string (id=entry=that string, no
+// title, nav=false — the S3c-era shape) or a `{id, title, entry, nav}`
+// mapping (D3's full shape).
+func (u *UIEntry) UnmarshalYAML(data []byte) error {
+	var s string
+	if err := goyaml.Unmarshal(data, &s); err == nil {
+		*u = UIEntry{ID: s, Entry: s}
+		return nil
+	}
+	var raw struct {
+		ID    string `yaml:"id"`
+		Title string `yaml:"title"`
+		Entry string `yaml:"entry"`
+		Nav   bool   `yaml:"nav"`
+	}
+	if err := goyaml.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("provides.ui entry: must be a string or {id, title, entry, nav}: %w", err)
+	}
+	if raw.Entry == "" {
+		return fmt.Errorf("provides.ui entry: {entry: ...} is required in object form")
+	}
+	if raw.ID == "" {
+		raw.ID = raw.Entry
+	}
+	*u = UIEntry{ID: raw.ID, Title: raw.Title, Entry: raw.Entry, Nav: raw.Nav}
+	return nil
 }
 
 // Conformance declares the kit's no-LLM contract suite.

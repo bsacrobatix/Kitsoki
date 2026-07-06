@@ -13,20 +13,30 @@ package server
 import (
 	"context"
 
+	"kitsoki/internal/kit"
 	"kitsoki/internal/kitendpoint"
 )
 
 // KitHeader is the wire shape `runstatus.kits.list` returns per installed
 // kit — just enough for a story browser / kit-UI loader to know what's
-// available (S3c consumes Namespace+Kit+UI to build the import map; the rest
-// is display metadata).
+// available (the SPA's runtime kit-module loader, S5, consumes
+// Namespace+Kit+UI to build the import map and mount routes; the rest is
+// display metadata).
 type KitHeader struct {
-	Kit       string   `json:"kit"`
-	Namespace string   `json:"namespace"`
-	Version   string   `json:"version"`
-	Title     string   `json:"title,omitempty"`
-	Provides  []string `json:"provides_stories,omitempty"`
-	UI        []string `json:"ui,omitempty"`
+	Kit       string        `json:"kit"`
+	Namespace string        `json:"namespace"`
+	Version   string        `json:"version"`
+	Title     string        `json:"title,omitempty"`
+	Provides  []string      `json:"provides_stories,omitempty"`
+	UI        []KitUIHeader `json:"ui,omitempty"`
+}
+
+// KitUIHeader is the wire projection of one kit.UIEntry.
+type KitUIHeader struct {
+	ID    string `json:"id"`
+	Title string `json:"title,omitempty"`
+	Entry string `json:"entry"`
+	Nav   bool   `json:"nav,omitempty"`
 }
 
 // listInstalledKits renders every kit the server's dispatcher knows about as
@@ -46,8 +56,16 @@ func (s *Server) listInstalledKits() []KitHeader {
 			Version:   def.Version,
 			Title:     def.Title,
 			Provides:  def.Provides.Stories,
-			UI:        def.Provides.UI,
+			UI:        kitUIHeaders(def.Provides.UI),
 		})
+	}
+	return out
+}
+
+func kitUIHeaders(entries []kit.UIEntry) []KitUIHeader {
+	out := make([]KitUIHeader, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, KitUIHeader{ID: e.ID, Title: e.Title, Entry: e.Entry, Nav: e.Nav})
 	}
 	return out
 }

@@ -13,7 +13,7 @@ import {
   buildAreaGroupResolver,
   hasAreaNodes,
 } from "../../src/components/objectgraph/catalog-model.js";
-import type { ObjectGraph, ObjectGraphEdge, ObjectGraphNode } from "../../src/data/objectgraph.js";
+import type { ObjectGraph, ObjectGraphEdge, ObjectGraphNode } from "../../src/objectgraph-types.js";
 
 function node(id: string, kind: string, label = id): ObjectGraphNode {
   return { id, kind, label, ref: { kind, ref: id } };

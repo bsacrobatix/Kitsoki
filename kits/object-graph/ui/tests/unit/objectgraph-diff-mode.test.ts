@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { diffKind, diffKindLabel } from "../../src/components/objectgraph/catalog-model.js";
-import type { ObjectGraphNode } from "../../src/data/objectgraph.js";
+import type { ObjectGraphNode } from "../../src/objectgraph-types.js";
 
 function node(id: string, diff_kind?: string): ObjectGraphNode {
   return { id, kind: "requirement", label: id, ref: { kind: "requirement", ref: id }, attrs: diff_kind ? { diff_kind } : {} };

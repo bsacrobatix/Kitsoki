@@ -72,34 +72,41 @@
 
 <script setup lang="ts">
 /**
- * ObjectGraphPage — the project object graph catalog (internal/graph,
- * W1.0/W1.1) as one integrated view in kitsoki web: CatalogPanel is the
- * primary surface (layer map, object picker, focus detail), and every
- * object's "points to" / "points here" relationships render inline as a
- * Cytoscape neighborhood graph (see CatalogPanel's relationship-graph
- * section) rather than behind a separate mode switch. A full-graph overlay
- * (GraphView.vue over the whole catalog) is available but deliberately
- * de-emphasized — a small link, not a primary toggle.
+ * ObjectGraphPage — @kitsoki/object-graph's Vue viewer (S5 — moved out of
+ * the engine SPA nearly as-is; see .context/kits-implementation-plan.md D3/
+ * D4). CatalogPanel is the primary surface (layer map, object picker, focus
+ * detail), and every object's "points to" / "points here" relationships
+ * render inline as a Cytoscape neighborhood graph (see CatalogPanel's
+ * relationship-graph section) rather than behind a separate mode switch. A
+ * full-graph overlay (GraphView.vue over the whole catalog) is available but
+ * deliberately de-emphasized — a small link, not a primary toggle.
  *
- * Catalog selected via `?catalog=<path>` (default: the seed review
- * fixture), loaded through runstatus.objectgraph.load — the same
- * kitsoki.graph/v1 wire shape story room graphs use.
+ * Catalog/overlay path are passed in as props (rather than read via
+ * vue-router's useRoute()) because this module runs its own bundled Vue
+ * instance, not the host SPA's — see kit-rpc.ts's doc comment for why.
+ * KitPage.vue (the engine's generic kit-mount wrapper) reads
+ * `?catalog=`/`?overlay=` off window.location and passes them down.
+ * Data loads through kit.object-graph.graph.project (JSON-RPC), the S5
+ * replacement for the deleted runstatus.objectgraph.load/diff.
  */
 import { computed, onMounted, ref, watch } from "vue";
-import { useRoute } from "vue-router";
-import { LiveSource } from "../data/live-source.js";
-import type { ObjectGraph } from "../data/objectgraph.js";
-import CatalogPanel from "../components/objectgraph/CatalogPanel.vue";
-import GraphView from "../components/objectgraph/GraphView.vue";
+import { graphOp } from "./kit-rpc.js";
+import type { ObjectGraph } from "./objectgraph-types.js";
+import CatalogPanel from "./components/objectgraph/CatalogPanel.vue";
+import GraphView from "./components/objectgraph/GraphView.vue";
 import {
   areaGroupLabel,
   buildAreaGroupResolver,
   hasAreaNodes,
   nodeLayerId,
-} from "../components/objectgraph/catalog-model.js";
+  setLayers,
+  type Layer,
+} from "./components/objectgraph/catalog-model.js";
 
-const route = useRoute();
-const source = new LiveSource("/");
+const props = defineProps<{
+  catalogPath?: string;
+  overlayPath?: string;
+}>();
 
 const graph = ref<ObjectGraph | null>(null);
 const diffGraph = ref<ObjectGraph | null>(null);
@@ -121,10 +128,7 @@ function modeLabel(m: Mode): string {
   return { asis: "As-is", proposed: "Proposed", diff: "Diff" }[m];
 }
 
-const overlayPath = computed<string>(() => {
-  const p = route.query.overlay;
-  return typeof p === "string" ? p : "";
-});
+const overlayPath = computed<string>(() => props.overlayPath ?? "");
 
 // Filters diffGraph's nodes for a mode, then drops any edge that would
 // dangle (source/target no longer present) — Cytoscape (GraphView) errors
@@ -165,22 +169,32 @@ watch(catalogHasAreas, (hasAreas) => {
   if (!hasAreas) groupMode.value = "type";
 });
 
-const catalogPath = computed<string>(() => {
-  const p = route.query.catalog;
-  return typeof p === "string" && p
-    ? p
-    : "docs/proposals/project-object-graph/seed-objects.yaml";
-});
+const catalogPath = computed<string>(
+  () => props.catalogPath || "docs/proposals/project-object-graph/seed-objects.yaml",
+);
+
+interface ProjectResult {
+  graph: ObjectGraph;
+}
 
 async function load(): Promise<void> {
   loading.value = true;
   error.value = "";
   diffGraph.value = null;
   try {
-    graph.value = await source.loadObjectGraph(catalogPath.value);
+    const loaded = await graphOp<ProjectResult>("project", {
+      catalog_path: catalogPath.value,
+      graph_id: "objectgraph:" + catalogPath.value,
+    });
+    graph.value = loaded.graph;
     selectedId.value = graph.value.nodes[0]?.id ?? "";
     if (overlayPath.value) {
-      diffGraph.value = await source.loadObjectGraphDiff(catalogPath.value, overlayPath.value);
+      const diffed = await graphOp<ProjectResult>("project", {
+        catalog_path: catalogPath.value,
+        overlay_path: overlayPath.value,
+        graph_id: "objectgraph-diff:" + catalogPath.value + "+" + overlayPath.value,
+      });
+      diffGraph.value = diffed.graph;
     } else {
       mode.value = "asis";
     }
@@ -192,7 +206,21 @@ async function load(): Promise<void> {
   }
 }
 
-onMounted(load);
+async function loadPresentation(): Promise<void> {
+  try {
+    const pres = await graphOp<{ layers: Layer[] }>("presentation", {});
+    setLayers(pres.layers);
+  } catch {
+    // Non-fatal: the bundled default taxonomy (catalog-model.ts's initial
+    // `layers` value) stays in effect — a presentation-endpoint hiccup
+    // shouldn't block the viewer from rendering the graph itself.
+  }
+}
+
+onMounted(() => {
+  void loadPresentation();
+  void load();
+});
 watch([catalogPath, overlayPath], load);
 </script>
 

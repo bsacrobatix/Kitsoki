@@ -41,7 +41,11 @@ provides:
     - graph/implementation/v0
     - graph/area/v0
   interfaces: [graph]
-  ui: [graph]
+  ui:
+    - id: graph
+      title: Object graph
+      entry: graph
+      nav: true
   onboarding: object-graph.start
 conformance:
   flows: ["stories/object-graph/flows/*.yaml"]

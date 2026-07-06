@@ -88,11 +88,10 @@ func (s *Server) handleKitUI(w http.ResponseWriter, r *http.Request) {
 }
 
 // installedKitUIEntry is one row of the import map / registry blob injected
-// into index.html — the minimal shape a future SPA loader needs to
-// dynamic-import a kit's entry module and register its nav, per D3's
-// `provides.ui: [{id, title, entry, nav}]` shape (nav omitted here: the S1
-// manifest schema's provides.ui is still just a list of entry-path strings,
-// not objects — widening it is left to whoever builds the real loader).
+// into index.html — the minimal shape the SPA's runtime kit-module loader
+// (S5) needs to dynamic-import a kit's entry module and register its nav,
+// per D3's `provides.ui: [{id, title, entry, nav}]` shape (kit.UIEntry, S5 —
+// widened from S3c's bare entry-path-string form).
 type installedKitUIEntry struct {
 	ModuleID string `json:"module_id"`
 	URL      string `json:"url"`
@@ -110,8 +109,8 @@ func kitImportMapEntries(reg *kit.Registry) []installedKitUIEntry {
 	var out []installedKitUIEntry
 	for _, def := range reg.List() {
 		for _, entry := range def.Provides.UI {
-			moduleID := fmt.Sprintf("@%s/%s/ui/%s", def.Namespace, def.Kit, entry)
-			url := fmt.Sprintf("%s%s/%s/ui/%s.mjs", kitUIPathPrefix, def.Namespace, def.Kit, entry)
+			moduleID := fmt.Sprintf("@%s/%s/ui/%s", def.Namespace, def.Kit, entry.Entry)
+			url := fmt.Sprintf("%s%s/%s/ui/%s.mjs", kitUIPathPrefix, def.Namespace, def.Kit, entry.Entry)
 			out = append(out, installedKitUIEntry{ModuleID: moduleID, URL: url})
 		}
 	}
