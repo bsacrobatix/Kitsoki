@@ -9,7 +9,8 @@ app: ../app.yaml
 initial_world:
   goal_slug: reviewer-test
   goal_dir:  stories/goal-seeker/testdata/reviewer
-  work_dir:  stories/goal-seeker/testdata/reviewer
+  work_dir:  .artifacts/goal/flow-reviewer
+  reset_log: true
 initial_state: start
 host_handlers:
   host.run: { by_call: {} }
@@ -27,7 +28,7 @@ turns:
     expect_world: { remaining: 2 }
 
 expect_files:
-  - path: ../testdata/reviewer/ledger.json
+  - path: ../../../.artifacts/goal/flow-reviewer/ledger.json
     content_matches: '"change_id":"C1".*?"gate_status":"red".*"change_id":"C2".*?"gate_status":"green"'
 
 expect_no_errors: true
