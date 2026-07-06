@@ -36,7 +36,7 @@ with tempfile.TemporaryDirectory() as tmp:
             "  - id: raw-prompt-glm-5.2",
             "    treatment: single-briefed",
             "    candidate: glm-5.2",
-            "    backend: codex",
+            "    backend: claude",
             "    model: glm-5.2",
             "axes:",
             "  task:",
@@ -102,14 +102,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check("oss pending count", packet["pending_by_corpus"]["oss-oracle"], 1)
     check("bugswarm pending count", packet["pending_by_corpus"]["bugswarm"], 2)
     actions = {action["corpus"]: action for action in packet["actions"]}
-    check("oss raw prompt needs adapter", actions["oss-oracle"]["status"], "needs-spec-fix")
+    check("oss raw prompt ready", actions["oss-oracle"]["status"], "ready")
     check("oss command uses supplied spec", str(oss_spec) in "\n".join(actions["oss-oracle"]["commands"]), True)
-    check("oss raw prompt no live command", "--live" in "\n".join(actions["oss-oracle"]["commands"]), False)
-    check("oss raw prompt names adapter gap", "GLM-capable raw-prompt dispatch adapter" in "\n".join(actions["oss-oracle"]["prerequisites"]), True)
+    check("oss raw prompt live command present", "--live" in "\n".join(actions["oss-oracle"]["commands"]), True)
     check("bugswarm needs live spec via generated no-LLM spec", actions["bugswarm"]["status"], "needs-live-spec")
     check("bugswarm spec generation command present", "bugswarm_to_arena_spec.py" in actions["bugswarm"]["commands"][0], True)
     check("generated bugswarm commands stay no-live", "--live" in "\n".join(actions["bugswarm"]["commands"]), False)
-    check("bugswarm warns live backend", "GLM-capable backend" in "\n".join(actions["bugswarm"]["prerequisites"]), True)
+    check("bugswarm warns live backend", "backend=claude" in "\n".join(actions["bugswarm"]["prerequisites"]), True)
     md = packet_md.read_text(encoding="utf-8")
     check("markdown names report arg", "--bugswarm-arena-rollup" in md, True)
     check("markdown includes no-llm plan command", "arena.py run --spec" in md, True)
@@ -210,10 +209,72 @@ with tempfile.TemporaryDirectory() as tmp:
     check("planner with supplied bugswarm spec exits zero", proc.returncode, 0)
     packet = json.loads(packet_json.read_text(encoding="utf-8"))
     actions = {action["corpus"]: action for action in packet["actions"]}
-    check("supplied bugswarm raw spec needs adapter", actions["bugswarm"]["status"], "needs-spec-fix")
+    check("supplied bugswarm raw spec needs claude backend", actions["bugswarm"]["status"], "needs-spec-fix")
     check("supplied bugswarm raw spec audit fails", actions["bugswarm"]["spec_audit"]["ok"], False)
     check("supplied bugswarm raw spec no live command", "--live" in "\n".join(actions["bugswarm"]["commands"]), False)
-    check("supplied bugswarm raw spec names adapter gap", "GLM-capable raw-prompt dispatch adapter" in "\n".join(actions["bugswarm"]["prerequisites"]), True)
+    check("supplied bugswarm raw spec names claude backend", "requires backend 'claude'" in "\n".join(actions["bugswarm"]["prerequisites"]), True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
+    report = out / "report.json"
+    packet_json = out / "packet.json"
+    packet_md = out / "packet.md"
+    bugswarm_spec = out / "bugswarm-raw-glm52-live.yaml"
+    bugswarm_spec.write_text(
+        "\n".join([
+            "job_type: paired-task",
+            "targets:",
+            "  - id: bugswarm-verified",
+            "    corpus: .artifacts/bugswarm/arena-source.verified.yaml",
+            "variants:",
+            "  - id: raw-prompt-glm-5.2",
+            "    treatment: single-briefed",
+            "    candidate: glm-5.2",
+            "    backend: claude",
+            "    model: glm-5.2",
+            "axes:",
+            "  task:",
+            "    - bugswarm-square-okio-140452393",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    report.write_text(json.dumps({
+        "required_glm52_matrix": [
+            {
+                "corpus": "bugswarm",
+                "task": "bugswarm-square-okio-140452393",
+                "treatment": "raw-prompt",
+                "quality": "pending",
+            }
+        ]
+    }), encoding="utf-8")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--report-json",
+            str(report),
+            "--json-out",
+            str(packet_json),
+            "--markdown-out",
+            str(packet_md),
+            "--bugswarm-spec",
+            str(bugswarm_spec),
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    check("planner with supplied raw claude bugswarm spec exits zero", proc.returncode, 0)
+    packet = json.loads(packet_json.read_text(encoding="utf-8"))
+    actions = {action["corpus"]: action for action in packet["actions"]}
+    check("supplied bugswarm raw claude spec needs runner adapter", actions["bugswarm"]["status"], "needs-runner-adapter")
+    check("supplied bugswarm raw claude spec audit ok", actions["bugswarm"]["spec_audit"]["ok"], True)
+    check("supplied bugswarm raw claude no live command", "--live" in "\n".join(actions["bugswarm"]["commands"]), False)
+    check("supplied bugswarm raw claude names materializer gap", "BugSwarm --live materialization" in "\n".join(actions["bugswarm"]["prerequisites"]), True)
 
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)
@@ -272,10 +333,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check("planner with kitsoki-only bugswarm spec exits zero", proc.returncode, 0)
     packet = json.loads(packet_json.read_text(encoding="utf-8"))
     actions = {action["corpus"]: action for action in packet["actions"]}
-    check("supplied bugswarm kitsoki spec ready", actions["bugswarm"]["status"], "ready")
+    check("supplied bugswarm kitsoki spec needs runner adapter", actions["bugswarm"]["status"], "needs-runner-adapter")
     check("supplied bugswarm kitsoki spec audit ok", actions["bugswarm"]["spec_audit"]["ok"], True)
-    check("supplied bugswarm kitsoki live command explicit", "--live" in actions["bugswarm"]["commands"][-1], True)
-    check("supplied bugswarm kitsoki live command gated", "ARENA_PAIRED_TASK_ENABLE_CODEX=1" in actions["bugswarm"]["commands"][-1], True)
+    check("supplied bugswarm kitsoki no live command", "--live" in "\n".join(actions["bugswarm"]["commands"]), False)
+    check("supplied bugswarm kitsoki names materializer gap", "BugSwarm --live materialization" in "\n".join(actions["bugswarm"]["prerequisites"]), True)
 
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)

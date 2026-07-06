@@ -9,6 +9,7 @@ import runpy
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 
 import yaml  # type: ignore
@@ -120,7 +121,31 @@ with tempfile.TemporaryDirectory() as tmp:
     check("target corpus threaded", spec_payload["targets"][0]["corpus"], str(verified_source))
     check("verified-only task axis", spec_payload["axes"]["task"], ["bugswarm-square-okio-140452393"])
     check("variant treatments", [v["treatment"] for v in spec_payload["variants"]], ["kitsoki", "single-briefed"])
+    check("default variant backends", [v["backend"] for v in spec_payload["variants"]], ["synthetic", "synthetic"])
     check("candidate model", spec_payload["variants"][0]["model"], "glm-5.2")
+    live_spec_path = tmpdir / "bugswarm-paired-task-live.yaml"
+    live_generate = subprocess.run(
+        [
+            sys.executable,
+            str(GEN_SPEC),
+            "--source",
+            str(verified_source),
+            "--out",
+            str(live_spec_path),
+            "--kitsoki-backend",
+            "codex",
+            "--raw-backend",
+            "claude",
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    check("live spec generator exits zero", live_generate.returncode, 0)
+    live_spec_payload = yaml.safe_load(live_spec_path.read_text(encoding="utf-8"))
+    check("live variant backends", [v["backend"] for v in live_spec_payload["variants"]], ["codex", "claude"])
     old_kitsoki_root = os.environ.get("KITSOKI_ROOT")
     os.environ["KITSOKI_ROOT"] = str(REPO_ROOT)
     try:
@@ -131,6 +156,7 @@ with tempfile.TemporaryDirectory() as tmp:
         else:
             os.environ["KITSOKI_ROOT"] = old_kitsoki_root
     check("glm profile mapping", runner_globals["MODEL_TO_PROFILE"].get("glm-5.2"), "synthetic-claude")
+    check("glm raw claude mapping", runner_globals["MODEL_TO_RAW_CLAUDE_PROFILE"].get("glm-5.2"), "synthetic-claude")
 
     spec = JobSpec.load(spec_path)
     cells = spec.cells()
@@ -205,6 +231,55 @@ with tempfile.TemporaryDirectory() as tmp:
     unverified_payload = json.loads(unverified.stdout.splitlines()[-1])
     check("unverified runner verdict", unverified_payload["verdict"], "failed")
     require("unverified notes include green=false", "green=False" in unverified_payload["notes"])
+
+    old_key = os.environ.get("SYNTHETIC_API_KEY")
+    os.environ["SYNTHETIC_API_KEY"] = "test-synthetic-key"
+    calls: list[dict[str, object]] = []
+    original_run = runner_globals["subprocess"].run
+
+    def fake_claude_run(cmd, *, cwd, text, capture_output, timeout, env):  # noqa: ANN001 - mirrors subprocess.run shape.
+        calls.append({"cmd": cmd, "cwd": cwd, "env": env, "timeout": timeout})
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=json.dumps({
+                "result": "patched",
+                "total_cost_usd": 0.0123,
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }),
+            stderr="",
+        )
+
+    try:
+        runner_globals["subprocess"].run = fake_claude_run
+        trace = tmpdir / "raw-claude-trace.json"
+        raw_result = runner_globals["dispatch_single_prompt"](
+            SimpleNamespace(backend="claude", model="glm-5.2", treatment="single-briefed"),
+            {"id": "fixture-task", "archetype": "unit", "ticket": "Fix the fixture."},
+            tmpdir,
+            str(trace),
+        )
+    finally:
+        runner_globals["subprocess"].run = original_run
+        if old_key is None:
+            os.environ.pop("SYNTHETIC_API_KEY", None)
+        else:
+            os.environ["SYNTHETIC_API_KEY"] = old_key
+
+    check("raw claude call count", len(calls), 1)
+    call = calls[0]
+    cmd = call["cmd"]
+    env = call["env"]
+    check("raw claude executable", cmd[0], "claude")
+    check("raw claude model", cmd[cmd.index("--model") + 1], "hf:zai-org/GLM-5.2")
+    check("raw claude base url", env["ANTHROPIC_BASE_URL"], "https://api.synthetic.new/anthropic")
+    check("raw claude token expanded", env["ANTHROPIC_AUTH_TOKEN"], "test-synthetic-key")
+    check("raw claude blocked", raw_result.get("blocked"), False)
+    check("raw claude tokens", raw_result["metrics"]["tokens"], 15)
+    check("raw claude cost", raw_result["metrics"]["cost_usd"], 0.0123)
+    trace_payload = json.loads(trace.read_text(encoding="utf-8"))
+    check("raw claude trace env keys", trace_payload["env_keys"], ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"])
+    check("raw claude trace redacts secret", "test-synthetic-key" in trace.read_text(encoding="utf-8"), False)
 
 if failures:
     print("FAIL: BugSwarm paired-task source")

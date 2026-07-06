@@ -222,6 +222,7 @@ python3 tools/arena/scripts/bugswarm_apply_verification.py \
     --out .artifacts/bugswarm/verified-source.yaml
 
 # Generate a schedulable kitsoki-vs-raw-prompt paired-task spec.
+# The default backend is synthetic, keeping the generated spec no-spend.
 python3 tools/arena/scripts/bugswarm_to_arena_spec.py \
     --source .artifacts/bugswarm/verified-source.yaml \
     --out .artifacts/bugswarm/bugswarm-glm52.yaml
@@ -233,9 +234,12 @@ python3 tools/arena/arena.py run \
 ```
 
 The generated spec includes only tasks with `verified_red: true` and
-`verified_green: true` by default. `--live` BugSwarm paired-task cells currently
-report `blocked`; the live adapter still needs artifact materialization and a
-hidden scoring bridge before spending on GLM cells.
+`verified_green: true` by default. To prepare a future live GLM spec, use
+`--kitsoki-backend codex --raw-backend claude` so the raw-prompt arm runs through
+the Claude-compatible `synthetic-claude` profile instead of `codex exec`.
+`--live` BugSwarm paired-task cells still report `blocked`; the live adapter
+still needs artifact materialization and a hidden scoring bridge before spending
+on BugSwarm GLM cells.
 
 ## Cost discipline
 

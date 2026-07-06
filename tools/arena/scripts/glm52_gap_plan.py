@@ -130,7 +130,7 @@ def corpus_action(
                 "Generate and inspect the BugSwarm paired-task spec from the verified source."
             )
             action["prerequisites"].append(
-                "Do not run --live until the spec uses a verified GLM-capable backend for both Kitsoki and raw-prompt arms."
+                "Do not run --live until the spec uses backend=codex for Kitsoki and backend=claude for the raw-prompt GLM-5.2 arm."
             )
             action["commands"].append(
                 f"python3 tools/arena/scripts/bugswarm_to_arena_spec.py --source {source} --out {spec}"
@@ -153,6 +153,17 @@ def corpus_action(
         action["spec"] = spec
         action["prerequisites"].extend(audit["problems"])
         action["commands"].append(f"python3 tools/arena/arena.py plan --spec {spec}")
+        return action
+    if corpus == "bugswarm":
+        action["status"] = "needs-runner-adapter"
+        action["spec"] = spec
+        action["prerequisites"].append(
+            "paired_task_runner still blocks BugSwarm --live materialization; add the artifact materialization/scoring adapter before spending."
+        )
+        action["commands"].extend([
+            f"python3 tools/arena/arena.py plan --spec {spec}",
+            f"python3 tools/arena/arena.py run --spec {spec} --out {out_dir}",
+        ])
         return action
     action["status"] = "ready"
     action["spec"] = spec
@@ -236,8 +247,9 @@ def live_backend_problems(treatment: str, variants: list[dict[str, Any]]) -> lis
     """Mirror paired_task_runner's current live dispatch support.
 
     The Kitsoki arm maps model=glm-5.2 to a Kitsoki profile before driving the
-    story. The raw-prompt arm still shells out to `codex exec --model ...`;
-    labeling that variant GLM-5.2 is not enough to make it a valid GLM control.
+    story. The raw-prompt arm uses a Claude-compatible synthetic.new profile;
+    labeling a `codex` variant GLM-5.2 is not enough to make it a valid GLM
+    control.
     """
     blockers: list[str] = []
     for variant in variants:
@@ -253,6 +265,19 @@ def live_backend_problems(treatment: str, variants: list[dict[str, Any]]) -> lis
 def live_backend_blocker(treatment: str, variant: dict[str, Any]) -> str | None:
     backend = str(variant.get("backend") or "").strip().lower()
     variant_id = str(variant.get("id") or "<unnamed>")
+    if treatment == "raw-prompt":
+        if backend == "claude":
+            return None
+        if backend == "codex":
+            return (
+                "Spec treatment 'raw-prompt' is GLM-5.2 labeled, but paired_task_runner "
+                "requires backend 'claude' for GLM-5.2 raw-prompt cells; backend 'codex' "
+                "would run through `codex exec` instead of the synthetic-claude profile."
+            )
+        return (
+            f"Spec treatment 'raw-prompt' variant {variant_id!r} needs backend 'claude' "
+            f"for GLM-5.2 raw-prompt live dispatch, got {backend or '<empty>'!r}."
+        )
     if backend != "codex":
         return (
             f"Spec treatment {treatment!r} variant {variant_id!r} needs backend 'codex' "
@@ -260,12 +285,6 @@ def live_backend_blocker(treatment: str, variant: dict[str, Any]) -> str | None:
         )
     if treatment == "kitsoki":
         return None
-    if treatment == "raw-prompt":
-        return (
-            "Spec treatment 'raw-prompt' is GLM-5.2 labeled, but paired_task_runner "
-            "currently dispatches raw prompts through `codex exec` only; add a "
-            "GLM-capable raw-prompt dispatch adapter before running this cell live."
-        )
     return f"Spec treatment {treatment!r} has no audited live backend support."
 
 

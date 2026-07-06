@@ -112,5 +112,10 @@ include the exact `arena.py plan`, no-LLM `arena.py run`, and explicit
 `ARENA_PAIRED_TASK_ENABLE_CODEX=1 ... --live` commands for live-ready missing
 cells. The planner audits supplied specs before emitting paid commands: the
 Kitsoki GLM-5.2 arm is live-ready through paired-task's Kitsoki profile mapping,
-but raw-prompt GLM-5.2 remains blocked until a GLM-capable raw-prompt dispatch
-adapter exists.
+and the raw-prompt GLM-5.2 arm is live-ready only when its variant uses
+`backend: claude` so the runner can use the `synthetic-claude` profile. BugSwarm
+still has an additional runner gap: live artifact materialization/scoring is not
+implemented, so the planner withholds BugSwarm `--live` commands even when the
+variant backends audit cleanly. For future BugSwarm live packets, generate the spec with
+`--kitsoki-backend codex --raw-backend claude`; the default generated spec still
+uses `backend: synthetic` to stay no-spend until an operator explicitly opts in.
