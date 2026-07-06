@@ -284,7 +284,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("docker scorer verdict", docker_score["verdict"], "solved")
     score_cmd = next(cmd for cmd in docker_commands if cmd[:2] == ["docker", "run"])
     check("docker scorer mounts candidate tree", score_cmd[score_cmd.index("-v") + 1], f"{docker_tree}:/workspace/src")
-    check("docker scorer command", score_cmd[-2:], ["-lc", "./run_failed.sh"])
+    check("docker scorer command", score_cmd[-2:], ["-lc", "run_failed.sh"])
 
     host_root = tmpdir / "host-kitsoki"
     container_tree = REPO_ROOT / ".artifacts/arena/paired-task-work/container-path"

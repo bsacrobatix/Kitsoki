@@ -76,6 +76,9 @@ class DockerBackend:
             "ARENA_PAIRED_TASK_ORCHESTRATOR_MODEL",
             "ARENA_PAIRED_TASK_ORCHESTRATOR_BACKEND",
             "CLAUDE_CODE_OAUTH_TOKEN",
+            "SYNTHETIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
         ):
             value = os.environ.get(name)
             if value is not None:

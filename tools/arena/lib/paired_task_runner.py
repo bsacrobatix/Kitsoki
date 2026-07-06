@@ -585,7 +585,7 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
     # subprocess even though codex is on PATH for THIS process — internal/host's
     # ResolveBin then reported "codex binary not found", proving the pipeline's
     # own harness-profile routing was correct; only env propagation was missing).
-    env["MCP_DRIVE_FORWARD_ENV"] = "CODEX_HOME,HOME,PATH"
+    env["MCP_DRIVE_FORWARD_ENV"] = "CODEX_HOME,HOME,PATH,SYNTHETIC_API_KEY,ANTHROPIC_AUTH_TOKEN,ANTHROPIC_BASE_URL"
 
     cmd = [str(DRIVE_SH), "--prompt-file", str(prompt_file)]
     try:
@@ -863,7 +863,7 @@ def score_bugswarm_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:
         image,
         "bash",
         "-lc",
-        "./run_failed.sh",
+            "run_failed.sh",
     ]
     try:
         proc = subprocess.run(

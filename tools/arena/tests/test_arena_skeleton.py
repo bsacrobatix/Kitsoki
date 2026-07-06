@@ -128,11 +128,14 @@ def fake_docker_runner(cmd, *, capture_output, text):  # noqa: ANN001 - mirrors 
 
 
 old_sock = os.environ.get("ARENA_DOCKER_SOCK_SRC")
+old_synthetic = os.environ.get("SYNTHETIC_API_KEY")
 try:
     os.environ.pop("ARENA_DOCKER_SOCK_SRC", None)
+    os.environ["SYNTHETIC_API_KEY"] = "test-synthetic-key"
     docker_backend = DockerBackend(runner=fake_docker_runner)
     docker_backend.run(cell=cells[0], host="local", image="image:test", argv=["echo", "ok"], mounts={"/repo": "/workspace/kitsoki"})
     check("docker socket not mounted by default", any("docker.sock" in part for part in docker_commands[-1]), False)
+    check("synthetic key forwarded", "SYNTHETIC_API_KEY=test-synthetic-key" in docker_commands[-1], True)
 
     os.environ["ARENA_DOCKER_SOCK_SRC"] = "/var/run/docker.sock"
     docker_backend.run(cell=cells[0], host="local", image="image:test", argv=["echo", "ok"], mounts={"/repo": "/workspace/kitsoki"})
@@ -144,6 +147,10 @@ finally:
         os.environ.pop("ARENA_DOCKER_SOCK_SRC", None)
     else:
         os.environ["ARENA_DOCKER_SOCK_SRC"] = old_sock
+    if old_synthetic is None:
+        os.environ.pop("SYNTHETIC_API_KEY", None)
+    else:
+        os.environ["SYNTHETIC_API_KEY"] = old_synthetic
 
 # 3b. Done with block 3's cell results — clear the fixture files so block 4's
 #     reused cell id ("qs1" × the same variant) doesn't pick up a stale file.
