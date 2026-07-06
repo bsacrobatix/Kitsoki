@@ -414,6 +414,9 @@ history-smoke:
 	@test -n "$(HISTORY_BUGS)" || (echo "HISTORY_BUGS is required"; exit 1)
 	@test -n "$(HISTORY_CANDIDATES)" || (echo "HISTORY_CANDIDATES is required"; exit 1)
 	python3 tools/bugfix-bakeoff/external/bench_grade_test.py
+	@mkdir -p .artifacts/history-training/readiness
+	GOCACHE="$(KITSOKI_GOCACHE)" go run ./cmd/kitsoki history task-cases adapt-bugfix "tools/bugfix-bakeoff/external/projects/$(HISTORY_PROJECT)/manifest.yaml" --bug "$(HISTORY_BUGS)" --validate > ".artifacts/history-training/readiness/$(HISTORY_PROJECT)-task-cases.json"
+	GOCACHE="$(KITSOKI_GOCACHE)" go run ./cmd/kitsoki history task-cases validate tools/history-training/examples
 	@if [ -n "$(HISTORY_REPO_DIR)" ]; then repo_arg="--repo-dir $(HISTORY_REPO_DIR)"; else repo_arg=""; fi; \
 		python3 tools/bugfix-bakeoff/external/bench.py preflight --project "$(HISTORY_PROJECT)" --bug "$(HISTORY_BUGS)" $$repo_arg --candidate "$(HISTORY_CANDIDATES)"
 	@if [ -n "$(HISTORY_REPO_DIR)" ]; then repo_arg="--repo-dir $(HISTORY_REPO_DIR)"; else repo_arg=""; fi; \
