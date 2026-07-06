@@ -539,6 +539,54 @@ func TestGitopsAutonomousFixAgentReadinessPassesForMatchingRepo(t *testing.T) {
 	}
 }
 
+func TestGitopsAutonomousReportIncludesHostedAgentReadinessProof(t *testing.T) {
+	runDir := t.TempDir()
+	findings := map[string]any{
+		"items": []any{
+			map[string]any{
+				"id":    "finding-1",
+				"title": "reviewable autonomous issue",
+				"github_issue": map[string]any{
+					"url": "https://github.com/o/r/issues/42",
+				},
+			},
+		},
+	}
+	if err := gitopsWriteJSONFile(filepath.Join(runDir, "findings.json"), findings); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+	status := map[string]any{
+		"ticket_repo":                "o/r",
+		"autonomous_fix_status":      "autonomous_fix_valid",
+		"autonomous_gate_summary":    "filing=pass, gh_agent=pass, independent_verify=pass, review=pass, validation=pass",
+		"independent_verify_status":  "pass",
+		"independent_verify_summary": "verified=1/1",
+		"issue_closeout_status":      "closed",
+		"issue_closeout_count":       1,
+	}
+	gitopsMergeGHAgentReadinessProof(status,
+		map[string]any{"status": "pass", "summary": "https://agent.example/healthz: ok"},
+		map[string]any{"status": "pass", "summary": "https://agent.example/api/ready: ready for o/r as worker-1"},
+	)
+	path, err := writeGitopsAutonomousReport(runDir, status, nil, nil)
+	if err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	for _, want := range []string{
+		"## Hosted GH-agent",
+		"Health: `pass` - https://agent.example/healthz: ok",
+		"Readiness: `pass` - https://agent.example/api/ready: ready for o/r as worker-1",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("report missing %q:\n%s", want, string(body))
+		}
+	}
+}
+
 func agentURL(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil {

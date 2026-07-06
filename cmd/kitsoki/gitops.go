@@ -448,6 +448,7 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 		return nil, err
 	}
 	result := gitopsFilingResult(runDir, opts.TicketRepo, filed)
+	gitopsMergeGHAgentReadinessProof(result, health, readiness)
 	enqueue, err := gitopsEnqueueFixes(ctx, runDir, opts.AgentDB, opts.TicketRepo, opts.AgentStory)
 	if err != nil {
 		return nil, err
@@ -539,6 +540,13 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 	}
 	result["autonomous_fix_report_path"] = reportPath
 	return result, nil
+}
+
+func gitopsMergeGHAgentReadinessProof(result, health, readiness map[string]any) {
+	result["gh_agent_health_status"] = stringValue(health, "status")
+	result["gh_agent_health_summary"] = stringValue(health, "summary")
+	result["gh_agent_readiness_status"] = stringValue(readiness, "status")
+	result["gh_agent_readiness_summary"] = stringValue(readiness, "summary")
 }
 
 func gitopsAutonomousFixAgentReady(ctx context.Context, publicBaseURL, ticketRepo string) (map[string]any, map[string]any, bool, string, string) {
@@ -1444,6 +1452,11 @@ func writeGitopsAutonomousReport(runDir string, status, review, validation map[s
 		fmt.Sprintf("- Gates: %s", firstNonBlank(stringValue(status, "autonomous_gate_summary"), "(not evaluated)")),
 		fmt.Sprintf("- Independent verification: `%s` - %s", stringValue(status, "independent_verify_status"), stringValue(status, "independent_verify_summary")),
 		fmt.Sprintf("- Issue close-out: `%s` (%d closed)", stringValue(status, "issue_closeout_status"), intValue(status, "issue_closeout_count")),
+		"",
+		"## Hosted GH-agent",
+		"",
+		fmt.Sprintf("- Health: `%s` - %s", firstNonBlank(stringValue(status, "gh_agent_health_status"), "(not checked)"), stringValue(status, "gh_agent_health_summary")),
+		fmt.Sprintf("- Readiness: `%s` - %s", firstNonBlank(stringValue(status, "gh_agent_readiness_status"), "(not checked)"), stringValue(status, "gh_agent_readiness_summary")),
 		"",
 		"## Filed Issues",
 		"",
