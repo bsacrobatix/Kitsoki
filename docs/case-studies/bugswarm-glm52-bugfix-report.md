@@ -26,6 +26,8 @@ cell evidence that records real usage.
 
 Inputs:
 
+- Report JSON: `docs/case-studies/bugswarm-glm52-bugfix-report.data.json`.
+- Report Markdown: `docs/case-studies/bugswarm-glm52-bugfix-report.md`.
 - GLM-5.2 bakeoff cells: `tools/bugfix-bakeoff/results/cells`.
 - Arena supporting rollup: `tools/arena/results/round-1/rollup.json`.
 - OSS oracle corpus: `tools/arena/corpus/cost-bench.manifest.yaml`.
@@ -89,6 +91,38 @@ Blend policy:
 - Report overall GLM-5.2 treatment totals only after both Kitsoki and raw-prompt arms have attempted cells.
 - Use total tokens as the primary cross-source cost axis; USD remains secondary and evidence-dependent.
 - Do not count dry-run BugSwarm verification as RED/GREEN proof.
+
+## Reproducibility Ledger
+
+Status: `reproducible`. Generator: `tools/arena/scripts/glm52_bugswarm_report.py` sha256 `08d7ac0776bf1edcca5c1860061be66745ed3b483f58fc37fb004bae9d494e43`.
+
+Regenerate with:
+
+```bash
+python3 tools/arena/scripts/glm52_bugswarm_report.py --generated-at 2026-07-06T00:00:00Z --json-out docs/case-studies/bugswarm-glm52-bugfix-report.data.json --markdown-out docs/case-studies/bugswarm-glm52-bugfix-report.md
+```
+
+| artifact | kind | status | bytes | sha256 |
+|---|---|---|---:|---|
+| `tools/arena/corpus/cost-bench.manifest.yaml` | file | present | 20,768 | `e9ac3482ba56eae8e837b32e5f106565fbc8a03915d9c2535e563f87f69ffb49` |
+| `tools/arena/corpus/sources.yaml` | file | present | 3,008 | `93125ed682ff0b829b75642fcefd6a4a8f2a2993f99122629dea51b70590e566` |
+| `tools/arena/corpus/bugswarm.seed.yaml` | file | present | 1,185 | `f174df93ace8ad08aa7a5f90033301c09719a7b7230617b6b2c6379c13821a2e` |
+| `tools/arena/results/round-1/rollup.json` | file | present | 10,978 | `49f8d3cb25601a32a51d44a44cc940bd24f0261af887cc31fdcbc95443745724` |
+| `tools/bugfix-bakeoff/results/cells/*glm-5.2*.json` | directory-glob | 1 match(es) | n/a | n/a |
+| `tools/bugfix-bakeoff/results/cells/bug9-glm-5.2-kitsoki.json` | file | present | 1,554 | `ae6b0d8529e1b3fc183a999e93788ffa852b9881dbc8e6a3248aa1fe89839046` |
+| `optional-oss-arena-rollup` | missing-optional | missing | n/a | `n/a` |
+| `optional-bugswarm-verification` | missing-optional | missing | n/a | `n/a` |
+| `optional-bugswarm-arena-rollup` | missing-optional | missing | n/a | `n/a` |
+
+Validation commands:
+
+- `python3 tools/arena/scripts/glm52_report_gate.py --report-json docs/case-studies/bugswarm-glm52-bugfix-report.data.json`
+- `python3 tools/arena/scripts/glm52_report_gate.py --report-json docs/case-studies/bugswarm-glm52-bugfix-report.data.json --require-publishable`
+- `python3 tools/arena/tests/test_glm52_bugswarm_report.py`
+- `python3 tools/arena/tests/test_glm52_report_gate.py`
+- `python3 -m py_compile tools/arena/scripts/glm52_bugswarm_report.py tools/arena/scripts/glm52_report_gate.py`
+- `python3 tools/arena/tests/validate_corpus.py tools/arena/corpus/cost-bench.manifest.yaml`
+- `python3 tools/arena/tests/run_no_llm.py`
 
 ## GLM-5.2 Headline Matrix
 

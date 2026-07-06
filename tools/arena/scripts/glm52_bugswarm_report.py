@@ -9,6 +9,7 @@ Docker, or calls an LLM. Missing cells remain explicit `pending` records.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from collections import Counter
@@ -48,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     report = build_report(
         generated_at=args.generated_at,
         report_json=Path(args.json_out),
+        report_markdown=Path(args.markdown_out),
         bakeoff_cells=Path(args.bakeoff_cells),
         arena_rollup=Path(args.arena_rollup),
         corpus_path=Path(args.corpus),
@@ -67,6 +69,7 @@ def build_report(
     *,
     generated_at: str,
     report_json: Path,
+    report_markdown: Path,
     bakeoff_cells: Path,
     arena_rollup: Path,
     corpus_path: Path,
@@ -89,21 +92,35 @@ def build_report(
     matrix_rows = build_required_matrix(glm_headline_cells, bugswarm_tasks, bugswarm_cells)
     source_mix_data = source_mix(corpus, sources, bugswarm_tasks)
     comparisons = build_comparisons(matrix_rows)
+    inputs = {
+        "report_json": rel(report_json),
+        "report_markdown": rel(report_markdown),
+        "bakeoff_cells": rel(bakeoff_cells),
+        "arena_rollup": rel(arena_rollup),
+        "corpus": rel(corpus_path),
+        "sources": rel(sources_path),
+        "bugswarm_source": rel(bugswarm_source) if bugswarm_source else "",
+        "bugswarm_verification": rel(bugswarm_verification) if bugswarm_verification else "",
+        "bugswarm_arena_rollup": rel(bugswarm_arena_rollup) if bugswarm_arena_rollup else "",
+        "oss_arena_rollup": rel(oss_arena_rollup) if oss_arena_rollup else "",
+    }
     return {
         "kind": "glm52_bugswarm_bugfix_report",
         "version": 1,
         "generated_at": generated_at,
-        "inputs": {
-            "report_json": rel(report_json),
-            "bakeoff_cells": rel(bakeoff_cells),
-            "arena_rollup": rel(arena_rollup),
-            "corpus": rel(corpus_path),
-            "sources": rel(sources_path),
-            "bugswarm_source": rel(bugswarm_source) if bugswarm_source else "",
-            "bugswarm_verification": rel(bugswarm_verification) if bugswarm_verification else "",
-            "bugswarm_arena_rollup": rel(bugswarm_arena_rollup) if bugswarm_arena_rollup else "",
-            "oss_arena_rollup": rel(oss_arena_rollup) if oss_arena_rollup else "",
-        },
+        "inputs": inputs,
+        "reproducibility": reproducibility_ledger(
+            generated_at=generated_at,
+            inputs=inputs,
+            bakeoff_cells=bakeoff_cells,
+            arena_rollup=arena_rollup,
+            corpus_path=corpus_path,
+            sources_path=sources_path,
+            bugswarm_source=bugswarm_source,
+            bugswarm_verification=bugswarm_verification,
+            bugswarm_arena_rollup=bugswarm_arena_rollup,
+            oss_arena_rollup=oss_arena_rollup,
+        ),
         "corpora": corpus_summary(corpus, sources, bugswarm_tasks, verification),
         "source_mix": source_mix_data,
         "glm52_bugfix_cells": glm_cells,
@@ -401,6 +418,92 @@ def source_mix(corpus: dict[str, Any], sources: dict[str, Any], bugswarm_tasks: 
             "Use total tokens as the primary cross-source cost axis; USD remains secondary and evidence-dependent.",
             "Do not count dry-run BugSwarm verification as RED/GREEN proof.",
         ],
+    }
+
+
+def reproducibility_ledger(
+    *,
+    generated_at: str,
+    inputs: dict[str, str],
+    bakeoff_cells: Path,
+    arena_rollup: Path,
+    corpus_path: Path,
+    sources_path: Path,
+    bugswarm_source: Path | None,
+    bugswarm_verification: Path | None,
+    bugswarm_arena_rollup: Path | None,
+    oss_arena_rollup: Path | None,
+) -> dict[str, Any]:
+    generator = file_artifact(Path(__file__), "generator")
+    bakeoff_glm_cells = glob_artifact(bakeoff_cells, "*glm-5.2*.json", "directory-glob")
+    status = "reproducible" if bakeoff_glm_cells["files"] else "partial"
+    return {
+        "status": status,
+        "generated_at": generated_at,
+        "generator": generator,
+        "regenerate_command": [
+            "python3",
+            "tools/arena/scripts/glm52_bugswarm_report.py",
+            "--generated-at",
+            generated_at,
+            "--json-out",
+            inputs["report_json"],
+            "--markdown-out",
+            inputs["report_markdown"],
+        ],
+        "validation_commands": [
+            "python3 tools/arena/scripts/glm52_report_gate.py --report-json docs/case-studies/bugswarm-glm52-bugfix-report.data.json",
+            "python3 tools/arena/scripts/glm52_report_gate.py --report-json docs/case-studies/bugswarm-glm52-bugfix-report.data.json --require-publishable",
+            "python3 tools/arena/tests/test_glm52_bugswarm_report.py",
+            "python3 tools/arena/tests/test_glm52_report_gate.py",
+            "python3 -m py_compile tools/arena/scripts/glm52_bugswarm_report.py tools/arena/scripts/glm52_report_gate.py",
+            "python3 tools/arena/tests/validate_corpus.py tools/arena/corpus/cost-bench.manifest.yaml",
+            "python3 tools/arena/tests/run_no_llm.py",
+        ],
+        "artifacts": [
+            file_artifact(corpus_path, "corpus"),
+            file_artifact(sources_path, "source-catalog"),
+            file_artifact(bugswarm_source, "bugswarm-source"),
+            file_artifact(arena_rollup, "supporting-rollup"),
+            bakeoff_glm_cells,
+            file_artifact(oss_arena_rollup, "optional-oss-arena-rollup"),
+            file_artifact(bugswarm_verification, "optional-bugswarm-verification"),
+            file_artifact(bugswarm_arena_rollup, "optional-bugswarm-arena-rollup"),
+        ],
+    }
+
+
+def file_artifact(path: Path | None, role: str) -> dict[str, Any]:
+    if path is None:
+        return {
+            "role": role,
+            "kind": "missing-optional",
+            "path": "",
+            "exists": False,
+        }
+    artifact: dict[str, Any] = {
+        "role": role,
+        "kind": "file",
+        "path": rel(path),
+        "exists": path.exists(),
+    }
+    if path.exists():
+        data = path.read_bytes()
+        artifact["bytes"] = len(data)
+        artifact["sha256"] = hashlib.sha256(data).hexdigest()
+    return artifact
+
+
+def glob_artifact(directory: Path, pattern: str, role: str) -> dict[str, Any]:
+    files = [file_artifact(path, "matched-file") for path in sorted(directory.glob(pattern))]
+    return {
+        "role": role,
+        "kind": "directory-glob",
+        "path": rel(directory),
+        "pattern": pattern,
+        "exists": directory.exists(),
+        "match_count": len(files),
+        "files": files,
     }
 
 
@@ -1197,6 +1300,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         "Inputs:",
         "",
+        f"- Report JSON: `{inputs['report_json']}`.",
+        f"- Report Markdown: `{inputs['report_markdown']}`.",
         f"- GLM-5.2 bakeoff cells: `{inputs['bakeoff_cells']}`.",
         f"- Arena supporting rollup: `{inputs['arena_rollup']}`.",
         f"- OSS oracle corpus: `{inputs['corpus']}`.",
@@ -1243,6 +1348,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
     ])
     lines.extend(render_source_mix(report))
+    lines.extend(render_reproducibility(report))
     lines.extend([
         "",
         "## GLM-5.2 Headline Matrix",
@@ -1422,6 +1528,49 @@ def render_source_mix(report: dict[str, Any]) -> list[str]:
         "",
     ])
     lines.extend(f"- {policy}" for policy in mix["blend_policy"])
+    return lines
+
+
+def render_reproducibility(report: dict[str, Any]) -> list[str]:
+    ledger = report["reproducibility"]
+    generator = ledger["generator"]
+    lines = [
+        "",
+        "## Reproducibility Ledger",
+        "",
+        f"Status: `{ledger['status']}`. Generator: `{generator['path']}` "
+        f"sha256 `{generator.get('sha256', 'missing')}`.",
+        "",
+        "Regenerate with:",
+        "",
+        "```bash",
+        " ".join(ledger["regenerate_command"]),
+        "```",
+        "",
+        "| artifact | kind | status | bytes | sha256 |",
+        "|---|---|---|---:|---|",
+    ]
+    for artifact in ledger.get("artifacts") or []:
+        if artifact.get("kind") == "directory-glob":
+            status = f"{artifact.get('match_count', 0)} match(es)"
+            lines.append(f"| `{artifact['path']}/{artifact['pattern']}` | directory-glob | {status} | n/a | n/a |")
+            for matched in artifact.get("files") or []:
+                lines.append(
+                    f"| `{matched['path']}` | file | present | {format_int(matched.get('bytes'))} | `{matched.get('sha256', 'missing')}` |"
+                )
+            continue
+        status = "present" if artifact.get("exists") else "missing"
+        sha = artifact.get("sha256") or "n/a"
+        lines.append(
+            f"| `{artifact.get('path') or artifact.get('role')}` | {artifact.get('kind')} | "
+            f"{status} | {format_int(artifact.get('bytes'))} | `{sha}` |"
+        )
+    lines.extend([
+        "",
+        "Validation commands:",
+        "",
+    ])
+    lines.extend(f"- `{command}`" for command in ledger.get("validation_commands") or [])
     return lines
 
 
