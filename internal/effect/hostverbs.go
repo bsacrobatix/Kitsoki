@@ -167,6 +167,25 @@ var builtinVerbTable = map[string]verbEffect{
 			"decompose": {class: Write, deterministic: true},
 		},
 	},
+
+	// host.graph — S5 (.context/kits-implementation-plan.md D1/D4): the
+	// project object graph engine substrate (internal/graph) exposed as a
+	// generic host verb. load/lint/diff/project read a catalog off disk;
+	// apply writes a changeset's operations back to it; presentation
+	// delegates to a kit-shipped starlark script (the D2.1 mechanism) that
+	// serves presentation-layer data — deterministic (cassette-replayable)
+	// but not itself a further host call.
+	"host.graph": {
+		class: Read, deterministic: true, // fallback for an unrecognised op
+		ops: map[string]opEffect{
+			"load":         {class: Read, deterministic: true},
+			"lint":         {class: Read, deterministic: true},
+			"diff":         {class: Read, deterministic: true},
+			"project":      {class: Read, deterministic: true},
+			"apply":        {class: Write, deterministic: true},
+			"presentation": {class: Read, deterministic: true},
+		},
+	},
 }
 
 // ClassifyVerb returns the default (effect, deterministic) pair for a

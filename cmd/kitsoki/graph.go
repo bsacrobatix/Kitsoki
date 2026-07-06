@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,7 +14,28 @@ import (
 	"kitsoki/internal/graph"
 	"kitsoki/internal/graph/featuresadapter"
 	"kitsoki/internal/graph/proposalsadapter"
+	"kitsoki/internal/host"
 )
+
+// graphHostRegistry lazily builds the *host.Registry `kitsoki graph`
+// subcommands dispatch through. S5 (.context/kits-implementation-plan.md
+// decision 4, "keep kitsoki graph as generic engine verbs — the Makefile
+// pipeline uses them"): these subcommands are thin wrappers over
+// host.graph.* rather than calling internal/graph directly, so the CLI and
+// the kit.<kit>.graph.<op> JSON-RPC/MCP surface share one implementation.
+var graphHostRegistry = func() *host.Registry {
+	reg := host.NewRegistry()
+	host.RegisterBuiltins(reg)
+	return reg
+}()
+
+func invokeGraphOp(op string, args map[string]any) (host.Result, error) {
+	if args == nil {
+		args = map[string]any{}
+	}
+	args["op"] = op
+	return graphHostRegistry.Invoke(context.Background(), "host.graph."+op, args)
+}
 
 // graphCmd — W1.1: `kitsoki graph lint <dir>` loads a project object graph
 // catalog (bundle dir or the single-file seed-objects.yaml shape) and runs
@@ -52,21 +74,36 @@ drift, if checked); non-zero otherwise.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := args[0]
-			cat, err := graph.LoadCatalog(path)
+			loadRes, err := invokeGraphOp("load", map[string]any{"catalog_path": path})
 			if err != nil {
 				return fmt.Errorf("graph lint: %w", err)
 			}
-			for _, w := range cat.Warnings {
+			for _, w := range loadRes.Data["warnings"].([]any) {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
 			}
-			issues := graph.Lint(cat)
+			nodeCount := loadRes.Data["node_count"].(int)
+
+			lintRes, err := invokeGraphOp("lint", map[string]any{"catalog_path": path})
+			if err != nil {
+				return fmt.Errorf("graph lint: %w", err)
+			}
+			issues := lintRes.Data["issues"].([]any)
 			out := cmd.OutOrStdout()
-			for _, iss := range issues {
-				fmt.Fprintln(out, iss.Error())
+			for _, raw := range issues {
+				iss := raw.(map[string]any)
+				fmt.Fprintf(out, "%s: %s: %s\n", iss["node"], iss["kind"], iss["message"])
 			}
 
 			var indexErrs []string
 			if checkIndex {
+				// checkProposalsIndex needs the full *graph.Catalog for
+				// proposalsadapter (kitsoki-instance tooling that stays as-is
+				// per D4, not part of the kit extraction) — load it directly
+				// here rather than through host.graph.load's summary shape.
+				cat, err := graph.LoadCatalog(path)
+				if err != nil {
+					return fmt.Errorf("graph lint --check-index: %w", err)
+				}
 				indexErrs = checkProposalsIndex(cat, proposalsDir)
 				for _, e := range indexErrs {
 					fmt.Fprintln(out, "index-drift:", e)
@@ -74,7 +111,7 @@ drift, if checked); non-zero otherwise.`,
 			}
 
 			if len(issues) == 0 && len(indexErrs) == 0 {
-				fmt.Fprintf(out, "graph lint: %d nodes, clean\n", len(cat.Nodes))
+				fmt.Fprintf(out, "graph lint: %d nodes, clean\n", nodeCount)
 				return nil
 			}
 			return fmt.Errorf("graph lint: %d issue(s), %d index-drift error(s) found", len(issues), len(indexErrs))
@@ -141,26 +178,31 @@ committing anything.
 Exit code 0 on a successful apply (or a clean dry-run); non-zero on rejection.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			changesetID, path := graph.NodeID(args[0]), args[1]
-			res, err := graph.Apply(path, changesetID, dryRun)
+			changesetID, path := args[0], args[1]
+			res, err := invokeGraphOp("apply", map[string]any{
+				"catalog_path": path,
+				"changeset_id": changesetID,
+				"dry_run":      dryRun,
+			})
 			if err != nil {
 				return fmt.Errorf("graph apply: %w", err)
 			}
 			out := cmd.OutOrStdout()
-			for _, r := range res.RejectReasons {
+			for _, r := range res.Data["reject_reasons"].([]any) {
 				fmt.Fprintln(out, "reject:", r)
 			}
-			for _, iss := range res.LintIssues {
-				fmt.Fprintln(out, "reject (post-apply lint):", iss.Error())
+			for _, iss := range res.Data["lint_issues"].([]any) {
+				fmt.Fprintln(out, "reject (post-apply lint):", iss)
 			}
-			if res.Rejected() {
+			rejected, _ := res.Data["rejected"].(bool)
+			if rejected {
 				return fmt.Errorf("graph apply: changeset %q rejected, catalog untouched", changesetID)
 			}
 			verb := "applied"
 			if dryRun {
 				verb = "dry-run clean"
 			}
-			fmt.Fprintf(out, "graph apply: %s, %d file(s) changed: %v\n", verb, len(res.ChangedFiles), res.ChangedFiles)
+			fmt.Fprintf(out, "graph apply: %s, %d file(s) changed: %v\n", verb, len(res.Data["changed_files"].([]any)), res.Data["changed_files"])
 			return nil
 		},
 	}

@@ -109,7 +109,26 @@ func (d *Dispatcher) Call(ctx context.Context, kitName, iface, op string, args m
 	}
 
 	handlerName := entry.Default + "." + op
-	return d.reg.Invoke(ctx, handlerName, args)
+	return d.reg.Invoke(ctx, handlerName, withKitContext(args, manifest))
+}
+
+// withKitContext returns a shallow copy of args with "_kit_dir" and
+// "_kit_name" set to the resolved kit's on-disk root and short name — a
+// small, deliberately generic convention (not special-cased to any one
+// handler) so a handler bound through the kit dispatch surface can resolve
+// kit-relative paths (e.g. S5's host.graph.presentation locating the calling
+// kit's scripts/presentation.star) without the engine hardcoding which kit
+// it's talking to. Handlers that don't need kit context simply ignore the
+// extra keys. Any caller-supplied "_kit_dir"/"_kit_name" in args is
+// overwritten — these are dispatcher-owned, not client-settable.
+func withKitContext(args map[string]any, manifest *kit.Def) map[string]any {
+	out := make(map[string]any, len(args)+2)
+	for k, v := range args {
+		out[k] = v
+	}
+	out["_kit_dir"] = manifest.Dir()
+	out["_kit_name"] = manifest.Kit
+	return out
 }
 
 // resolveInterface finds the manifest story that declares iface as a

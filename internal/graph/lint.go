@@ -260,75 +260,85 @@ func edgeTargetsByFieldID(cat *Catalog, node *Node, fieldID string) ([]NodeID, b
 	return nil, false
 }
 
-// lintOrphanFeature reports every public feature with zero in_area targets
-// (design doc §4.3.2). Internal features are never flagged — the design's
-// migration is incremental (§5), so only the public surface is enforced.
-// The check is a hard failure (§5 step 3: the seed catalog is fully
-// seeded with in_area, so orphaned public features are now invalid), but
-// it only applies to catalogs whose registry declares feature.in_area at
-// all — a registry without the area taxonomy has not opted in.
+// lintOrphanFeature reports every public node of the configured membership
+// type (default: "feature") with zero targets on the configured membership
+// edge (default: "in_area") — design doc §4.3.2. Internal nodes are never
+// flagged — the design's migration is incremental (§5), so only the public
+// surface is enforced. The check is a hard failure (§5 step 3), but it only
+// applies to catalogs whose registry declares the membership edge at all —
+// a registry without the area taxonomy has not opted in.
+//
+// S5 de-domaining (.context/kits-implementation-plan.md D4): the type/edge
+// names are read from cat.Hints().OrphanMembership rather than hardcoded, so
+// a catalog with a different type/field vocabulary (e.g. a kit that isn't
+// kitsoki's own seed catalog) can configure this check via `lint_hints:`
+// instead of requiring a Go change. Every existing catalog (no `lint_hints:`
+// block) gets DefaultLintHints()'s feature/in_area pair, so behavior is
+// unchanged.
 func lintOrphanFeature(cat *Catalog) []LintIssue {
+	hint := cat.Hints().OrphanMembership
 	var issues []LintIssue
 	for _, id := range cat.SortedNodeIDs() {
 		node := cat.Nodes[id]
-		if !cat.Registry.IsA(node.TypeID, "feature") {
+		if !cat.Registry.IsA(node.TypeID, hint.Type) {
 			continue
 		}
 		if node.Visibility != VisibilityPublic {
 			continue
 		}
-		targets, declared := edgeTargetsByFieldID(cat, node, "in_area")
+		targets, declared := edgeTargetsByFieldID(cat, node, hint.Edge)
 		if !declared || len(targets) > 0 {
 			continue
 		}
 		issues = append(issues, LintIssue{
 			Node: id, Kind: "orphan-feature", Severity: SeverityError,
-			Message: "public feature has no in_area targets",
+			Message: fmt.Sprintf("public %s has no %s targets", hint.Type, hint.Edge),
 		})
 	}
 	return issues
 }
 
-// lintInitiativeScope reports every initiative whose `targets` edge
-// disagrees with the derived set of areas reachable by walking:
+// lintInitiativeScope reports every scope-type node (default: "initiative")
+// whose targets edge (default: "targets") disagrees with the derived set
+// reachable by walking include-edge -> hop-edge -> membership-edge (default:
+// includes -> implements -> in_area) — design doc §4.3.4. Always
+// SeverityWarning: the design doc keeps this check advisory indefinitely, it
+// exists to catch a cached `targets` edge drifting from the changes actually
+// included.
 //
-//	initiative.includes -> change.implements -> feature.in_area
-//
-// (design doc §4.3.4 — the exact traversal implemented here; the design
-// doc's parenthetical "feature/implementation" alternative is not walked
-// because initiative.includes only targets `change`, and `change.implements`
-// already targets `feature` directly — there is no implementation hop on
-// this path in the current registry). Always SeverityWarning: the design
-// doc keeps this check advisory indefinitely, it exists to catch a cached
-// `targets` edge drifting from the changes actually included.
+// S5 de-domaining: the five type/edge names come from
+// cat.Hints().ScopeDerivation rather than hardcoded literals — see
+// lintOrphanFeature's doc comment for the same rationale and the
+// backward-compatible default.
 func lintInitiativeScope(cat *Catalog) []LintIssue {
+	hint := cat.Hints().ScopeDerivation
 	var issues []LintIssue
 	for _, id := range cat.SortedNodeIDs() {
 		node := cat.Nodes[id]
-		if !cat.Registry.IsA(node.TypeID, "initiative") {
+		if !cat.Registry.IsA(node.TypeID, hint.ScopeType) {
 			continue
 		}
 		derived := map[NodeID]bool{}
-		includes, _ := edgeTargetsByFieldID(cat, node, "includes")
+		includes, _ := edgeTargetsByFieldID(cat, node, hint.IncludeEdge)
 		for _, changeID := range includes {
 			changeNode, ok := cat.Nodes[changeID]
 			if !ok {
 				continue // dangling-ref lint already reports this
 			}
-			implements, _ := edgeTargetsByFieldID(cat, changeNode, "implements")
-			for _, featureID := range implements {
+			hopTargets, _ := edgeTargetsByFieldID(cat, changeNode, hint.HopEdge)
+			for _, featureID := range hopTargets {
 				featureNode, ok := cat.Nodes[featureID]
 				if !ok {
 					continue
 				}
-				inArea, _ := edgeTargetsByFieldID(cat, featureNode, "in_area")
-				for _, areaID := range inArea {
+				members, _ := edgeTargetsByFieldID(cat, featureNode, hint.MembershipEdge)
+				for _, areaID := range members {
 					derived[areaID] = true
 				}
 			}
 		}
 		declared := map[NodeID]bool{}
-		targets, _ := edgeTargetsByFieldID(cat, node, "targets")
+		targets, _ := edgeTargetsByFieldID(cat, node, hint.TargetsEdge)
 		for _, areaID := range targets {
 			declared[areaID] = true
 		}
@@ -337,8 +347,9 @@ func lintInitiativeScope(cat *Catalog) []LintIssue {
 		}
 		issues = append(issues, LintIssue{
 			Node: id, Kind: "initiative-scope", Severity: SeverityWarning,
-			Message: fmt.Sprintf("targets %v does not match derived area set %v (includes -> change.implements -> feature.in_area)",
-				sortedNodeIDKeys(declared), sortedNodeIDKeys(derived)),
+			Message: fmt.Sprintf("%s %v does not match derived area set %v (%s -> %s -> %s)",
+				hint.TargetsEdge, sortedNodeIDKeys(declared), sortedNodeIDKeys(derived),
+				hint.IncludeEdge, hint.HopEdge, hint.MembershipEdge),
 		})
 	}
 	return issues

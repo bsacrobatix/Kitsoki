@@ -1738,10 +1738,11 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if result, rerr, handled := s.dispatchEditor(method, params); handled {
 			return result, rerr
 		}
-		// ── Project object graph catalogs (W5.0, no story/session) ───────────
-		if result, rerr, handled := s.dispatchObjectGraph(method, params); handled {
-			return result, rerr
-		}
+		// runstatus.objectgraph.* (W5.0) is retired as of S5: the project
+		// object graph catalog moved behind host.graph.* + the
+		// @kitsoki/object-graph kit's "graph" interface, reached through the
+		// kit.<kit>.<iface>.<op> fallback below (e.g.
+		// kit.object-graph.graph.project) — see .context/kits-implementation-plan.md.
 		// ── Kit extension surface (S3b: kit.<kit>.<iface>.<op>) ──────────────
 		if result, rerr, handled := s.dispatchKit(ctx, method, params); handled {
 			return result, rerr
