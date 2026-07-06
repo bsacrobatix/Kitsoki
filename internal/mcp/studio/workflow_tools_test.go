@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -83,3 +84,35 @@ func TestWorkflowCreateValidateExport(t *testing.T) {
 }
 
 var _ = studio.Version
+
+func TestWorkflowCreateResearchGoalWritesResearchManifest(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	cs := connectInProcess(ctx, t, srv)
+
+	res, err := callTool(ctx, cs, "workflow.create", map[string]any{
+		"goal": "research the different testing approaches in the repo with a dynamic workflow; inspect Go tests, TypeScript/JavaScript tests, story flow fixtures, Playwright/e2e tests, coverage gates, cassettes, and no-LLM policies",
+		"slug": "mcp-research-test",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "workflow.create errored: %s", contentText(res))
+	var receipt dynamicworkflow.Receipt
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &receipt))
+	require.True(t, receipt.Validation.OK)
+
+	manifestBytes, err := os.ReadFile(receipt.ManifestPath)
+	require.NoError(t, err)
+	manifest := string(manifestBytes)
+	for _, want := range []string{
+		"id: research-scope",
+		"id: go-testing-research",
+		"id: js-e2e-testing-research",
+		"id: story-flow-research",
+		"id: research-synthesis",
+	} {
+		require.Contains(t, manifest, want)
+	}
+	require.NotContains(t, manifest, "id: go-coverage")
+	require.NotContains(t, manifest, "Add focused deterministic Go tests")
+	require.True(t, strings.Contains(manifest, ".context/"), "research prompts should name .context outputs")
+}
