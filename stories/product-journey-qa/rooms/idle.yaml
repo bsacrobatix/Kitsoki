@@ -338,7 +338,7 @@ states:
                 review_failed_count: 0
                 review_backlog_summary: "Run capture_preflight and keep it passing before live persona evidence capture."
                 status: "autonomous_marathon_invalid"
-        - when: "(slots.autonomous_driver_mode ?? 'pending') != 'replay' && (slots.live_budget_minutes ?? world.live_budget_minutes) > 0 && (slots.ticket_repo == nil || slots.ticket_repo == '')"
+        - when: "(slots.autonomous_driver_mode ?? 'pending') != 'replay' && (slots.live_budget_minutes ?? world.live_budget_minutes) > 0 && (slots.ticket_repo == nil || slots.ticket_repo == '') && (world.ticket_repo == nil || world.ticket_repo == '')"
           target: .
           effects:
             - set:
@@ -367,7 +367,7 @@ states:
                 review_backlog_summary: "Set ticket_repo so credible findings can be filed and fixed after capture."
                 filing_summary: "ticket_repo is required before live-budgeted autonomous marathon"
                 status: "autonomous_marathon_invalid"
-        - when: "(slots.autonomous_driver_mode ?? 'pending') != 'replay' && (slots.live_budget_minutes ?? world.live_budget_minutes) > 0 && (slots.gh_agent_public_base_url == nil || slots.gh_agent_public_base_url == '')"
+        - when: "(slots.autonomous_driver_mode ?? 'pending') != 'replay' && (slots.live_budget_minutes ?? world.live_budget_minutes) > 0 && (slots.gh_agent_public_base_url == nil || slots.gh_agent_public_base_url == '') && (world.gh_agent_public_base_url == nil || world.gh_agent_public_base_url == '')"
           target: .
           effects:
             - set:
@@ -456,7 +456,7 @@ states:
                   - --gh-agent-story
                   - "{{ slots.gh_agent_story ?? 'stories/bugfix' }}"
                   - --gh-agent-public-base-url
-                  - "{{ slots.gh_agent_public_base_url ?? '' }}"
+                  - "{{ slots.gh_agent_public_base_url ?? world.gh_agent_public_base_url }}"
                   - --gh-agent-project-root
                   - "{{ slots.gh_agent_project_root ?? '' }}"
                   - --gh-agent-incident-repo
