@@ -756,5 +756,52 @@
     "status": "pending-evidence",
     "success_metric": "solved / (solved + partial + failed)"
   },
+  "threats_to_validity": {
+    "active_count": 5,
+    "high_count": 2,
+    "status": "blocked",
+    "threats": [
+      {
+        "category": "internal",
+        "description": "The raw-prompt GLM-5.2 arm has no committed attempted cells, so outcome deltas and token ratios are not publishable.",
+        "id": "missing-raw-glm52-arm",
+        "mitigation": "Commit raw-prompt GLM-5.2 cells for every headline task and regenerate the report.",
+        "severity": "high",
+        "status": "active"
+      },
+      {
+        "category": "construct",
+        "description": "The committed BugSwarm seed is metadata-only until execute-mode RED/GREEN verification proves failed and passed scripts still reproduce.",
+        "id": "bugswarm-unverified-artifact",
+        "mitigation": "Run bugswarm_verify_source.py --execute, apply the verification report, and regenerate with --bugswarm-verification.",
+        "severity": "high",
+        "status": "active"
+      },
+      {
+        "category": "external",
+        "description": "The current observed GLM-5.2 evidence is one OSS Kitsoki fixture cell, so the report is a ledger rather than a generalizable performance estimate.",
+        "id": "single-observed-glm52-cell",
+        "mitigation": "Schedule the remaining GLM-5.2 cells and report denominators by source family.",
+        "severity": "medium",
+        "status": "active"
+      },
+      {
+        "category": "construct",
+        "description": "The observed Kitsoki GLM-5.2 cell is partial, not solved, and success-rate claims count only solved cells.",
+        "id": "partial-is-not-solved",
+        "mitigation": "Keep partial rate separate from success rate and adjudicate oracle-coupled failures before publication.",
+        "severity": "medium",
+        "status": "active"
+      },
+      {
+        "category": "external",
+        "description": "The supporting Codex-native round checks harness behavior and token accounting but is not GLM-5.2 evidence.",
+        "id": "supporting-round-not-glm52",
+        "mitigation": "Keep supporting round results out of headline GLM-5.2 denominators.",
+        "severity": "low",
+        "status": "active"
+      }
+    ]
+  },
   "version": 1
 }

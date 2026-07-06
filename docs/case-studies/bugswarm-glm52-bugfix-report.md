@@ -135,6 +135,18 @@ python3 tools/arena/scripts/glm52_report_gate.py \
 | oss-source-mix | `supported` | 20 tasks over 10 public targets; 6 armed bugfix fixture tasks | GLM-5.2 headline cells currently cover only the committed bugfix fixture row |
 | observed-oss-kitsoki-glm52-cell | `supported` | 1 attempted cell(s), 2890980 total tokens | This is not a Kitsoki-vs-raw comparison until the matching raw-prompt arm is attempted |
 
+## Threats To Validity
+
+Status: `blocked` (5 active, 2 high severity).
+
+| threat | category | severity | status | mitigation |
+|---|---|---|---|---|
+| missing-raw-glm52-arm | internal | `high` | `active` | Commit raw-prompt GLM-5.2 cells for every headline task and regenerate the report |
+| bugswarm-unverified-artifact | construct | `high` | `active` | Run bugswarm_verify_source.py --execute, apply the verification report, and regenerate with --bugswarm-verification |
+| single-observed-glm52-cell | external | `medium` | `active` | Schedule the remaining GLM-5.2 cells and report denominators by source family |
+| partial-is-not-solved | construct | `medium` | `active` | Keep partial rate separate from success rate and adjudicate oracle-coupled failures before publication |
+| supporting-round-not-glm52 | external | `low` | `active` | Keep supporting round results out of headline GLM-5.2 denominators |
+
 ## Completion Audit
 
 Status: `incomplete` (4/8 requirements proven).

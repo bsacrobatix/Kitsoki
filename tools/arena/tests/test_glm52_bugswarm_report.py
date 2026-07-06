@@ -99,6 +99,14 @@ with tempfile.TemporaryDirectory() as tmp:
     check("claim bugswarm source supported", claims["bugswarm-reusable-source"]["status"], "supported")
     check("claim oss source mix supported", claims["oss-source-mix"]["status"], "supported")
     check("claim observed cell supported", claims["observed-oss-kitsoki-glm52-cell"]["status"], "supported")
+    threats = report["threats_to_validity"]
+    check("threats blocked", threats["status"], "blocked")
+    check("threats active count", threats["active_count"], 5)
+    check("threats high count", threats["high_count"], 2)
+    threats_by_id = {threat["id"]: threat for threat in threats["threats"]}
+    check("threat missing raw active", threats_by_id["missing-raw-glm52-arm"]["status"], "active")
+    check("threat missing raw high", threats_by_id["missing-raw-glm52-arm"]["severity"], "high")
+    check("threat bugswarm unverified high", threats_by_id["bugswarm-unverified-artifact"]["severity"], "high")
     audit = report["completion_audit"]
     check("completion audit incomplete", audit["status"], "incomplete")
     check("completion audit requirement count", audit["requirement_count"], 8)
@@ -142,6 +150,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("markdown includes publishable gate", "--require-publishable" in md, True)
     check("markdown claim ledger pending token", "| overall-token-usage | `pending`" in md, True)
     check("markdown claim ledger supported source", "| bugswarm-reusable-source | `supported`" in md, True)
+    check("markdown includes threats", "## Threats To Validity" in md, True)
+    check("markdown threats missing raw", "| missing-raw-glm52-arm | internal | `high` | `active`" in md, True)
     check("markdown includes completion audit", "## Completion Audit" in md, True)
     check("markdown audit includes execute verification", "bugswarm-execute-verification" in md, True)
     check("markdown audit includes oss raw", "oss-raw-glm52" in md, True)

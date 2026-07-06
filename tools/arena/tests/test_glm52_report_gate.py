@@ -103,6 +103,18 @@ with tempfile.TemporaryDirectory() as tmp:
 
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)
+    bad = out / "bad-threats.json"
+    report = json.loads(REPORT.read_text(encoding="utf-8"))
+    threat = next(threat for threat in report["threats_to_validity"]["threats"] if threat["id"] == "missing-raw-glm52-arm")
+    threat["severity"] = "low"
+    report["threats_to_validity"]["high_count"] -= 1
+    bad.write_text(json.dumps(report), encoding="utf-8")
+    proc = run_gate(bad)
+    check("bad threats exits nonzero", proc.returncode, 1)
+    check("bad threats names missing raw", "missing raw GLM-5.2 arm" in proc.stdout, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
     bad = out / "bad-completion-audit.json"
     report = json.loads(REPORT.read_text(encoding="utf-8"))
     report["completion_audit"]["status"] = "complete"

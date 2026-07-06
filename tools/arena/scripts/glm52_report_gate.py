@@ -67,6 +67,7 @@ def validate_report(report: dict[str, Any]) -> list[str]:
     problems.extend(require_source_mix(report))
     problems.extend(require_comparisons(report))
     problems.extend(require_claim_ledger(report))
+    problems.extend(require_threats_to_validity(report))
     problems.extend(require_closure(report, rows))
     problems.extend(require_completion_audit(report, rows))
     problems.extend(require_study_protocol(report, rows))
@@ -110,7 +111,7 @@ def require_top_level(report: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     if report.get("kind") != "glm52_bugswarm_bugfix_report":
         problems.append(f"unexpected report kind: {report.get('kind')!r}")
-    for key in ("corpora", "source_mix", "rollups", "comparisons", "claim_ledger", "completion_audit", "study_protocol", "evidence_closure", "references"):
+    for key in ("corpora", "source_mix", "rollups", "comparisons", "claim_ledger", "threats_to_validity", "completion_audit", "study_protocol", "evidence_closure", "references"):
         if not isinstance(report.get(key), dict):
             problems.append(f"missing mapping: {key}")
     return problems
@@ -256,6 +257,48 @@ def require_claim_ledger(report: dict[str, Any]) -> list[str]:
             problems.append(f"claim ledger {claim_id} should be supported by current committed evidence")
         if not claim.get("evidence"):
             problems.append(f"claim ledger {claim_id} lacks evidence")
+    return problems
+
+
+def require_threats_to_validity(report: dict[str, Any]) -> list[str]:
+    ledger = report.get("threats_to_validity") if isinstance(report.get("threats_to_validity"), dict) else {}
+    problems: list[str] = []
+    if not ledger:
+        return ["missing threats_to_validity"]
+    threats = ledger.get("threats") if isinstance(ledger.get("threats"), list) else []
+    by_id = {threat.get("id"): threat for threat in threats if isinstance(threat, dict)}
+    required = {
+        "missing-raw-glm52-arm",
+        "bugswarm-unverified-artifact",
+        "single-observed-glm52-cell",
+        "partial-is-not-solved",
+        "supporting-round-not-glm52",
+    }
+    missing = sorted(required - set(by_id))
+    if missing:
+        problems.append("threats_to_validity missing threat(s): " + ", ".join(missing))
+    active = [threat for threat in threats if isinstance(threat, dict) and threat.get("status") == "active"]
+    high = [threat for threat in active if threat.get("severity") == "high"]
+    if ledger.get("active_count") != len(active):
+        problems.append("threats_to_validity active_count does not match threats")
+    if ledger.get("high_count") != len(high):
+        problems.append("threats_to_validity high_count does not match threats")
+    comparisons = report.get("comparisons") if isinstance(report.get("comparisons"), dict) else {}
+    if (comparisons.get("overall") or {}).get("status") == "pending":
+        threat = by_id.get("missing-raw-glm52-arm", {})
+        if threat.get("status") != "active" or threat.get("severity") != "high":
+            problems.append("missing raw GLM-5.2 arm must be disclosed as an active high-severity threat")
+    bugswarm = report.get("corpora", {}).get("bugswarm", {}) if isinstance(report.get("corpora"), dict) else {}
+    if bugswarm.get("imported_task_count", 0) > 0 and bugswarm.get("verified_task_count", 0) == 0:
+        threat = by_id.get("bugswarm-unverified-artifact", {})
+        if threat.get("status") != "active" or threat.get("severity") != "high":
+            problems.append("unverified BugSwarm artifact must be disclosed as an active high-severity threat")
+    for threat in threats:
+        if not isinstance(threat, dict):
+            problems.append("threats_to_validity contains a non-mapping threat")
+            continue
+        if not str(threat.get("mitigation") or "").strip():
+            problems.append(f"threat {threat.get('id')} lacks mitigation")
     return problems
 
 

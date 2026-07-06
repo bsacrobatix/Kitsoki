@@ -117,6 +117,7 @@ def build_report(
         },
         "comparisons": comparisons,
         "claim_ledger": claim_ledger(matrix_rows, comparisons, source_mix_data, bugswarm_tasks, verification),
+        "threats_to_validity": threats_to_validity(matrix_rows, comparisons, bugswarm_tasks, verification),
         "completion_audit": completion_audit(matrix_rows, verification, bugswarm_tasks),
         "study_protocol": study_protocol(matrix_rows, bugswarm_tasks, verification, report_json, corpus_path, bugswarm_source),
         "evidence_gaps": evidence_gaps(matrix_rows, bugswarm_tasks, verification),
@@ -613,6 +614,82 @@ def observed_cell_claim(rows: list[dict[str, Any]]) -> dict[str, Any]:
         finding=f"{len(attempted)} attempted cell(s), {tokens} total tokens.",
         caveat="This is not a Kitsoki-vs-raw comparison until the matching raw-prompt arm is attempted.",
     )
+
+
+def threats_to_validity(
+    rows: list[dict[str, Any]],
+    comparisons: dict[str, dict[str, Any]],
+    bugswarm_tasks: list[dict[str, Any]],
+    verification: dict[str, Any],
+) -> dict[str, Any]:
+    threats = [
+        validity_threat(
+            "missing-raw-glm52-arm",
+            "internal",
+            "high" if comparisons["overall"]["status"] == "pending" else "resolved",
+            "The raw-prompt GLM-5.2 arm has no committed attempted cells, so outcome deltas and token ratios are not publishable.",
+            "Commit raw-prompt GLM-5.2 cells for every headline task and regenerate the report.",
+            active=comparisons["overall"]["status"] == "pending",
+        ),
+        validity_threat(
+            "bugswarm-unverified-artifact",
+            "construct",
+            "high" if not is_bugswarm_execute_verified(verification) else "resolved",
+            "The committed BugSwarm seed is metadata-only until execute-mode RED/GREEN verification proves failed and passed scripts still reproduce.",
+            "Run bugswarm_verify_source.py --execute, apply the verification report, and regenerate with --bugswarm-verification.",
+            active=bool(bugswarm_tasks) and not is_bugswarm_execute_verified(verification),
+        ),
+        validity_threat(
+            "single-observed-glm52-cell",
+            "external",
+            "medium",
+            "The current observed GLM-5.2 evidence is one OSS Kitsoki fixture cell, so the report is a ledger rather than a generalizable performance estimate.",
+            "Schedule the remaining GLM-5.2 cells and report denominators by source family.",
+            active=sum(1 for row in rows if row.get("quality") in {"solved", "partial", "failed"}) < 4,
+        ),
+        validity_threat(
+            "partial-is-not-solved",
+            "construct",
+            "medium",
+            "The observed Kitsoki GLM-5.2 cell is partial, not solved, and success-rate claims count only solved cells.",
+            "Keep partial rate separate from success rate and adjudicate oracle-coupled failures before publication.",
+            active=any(row.get("quality") == "partial" for row in rows),
+        ),
+        validity_threat(
+            "supporting-round-not-glm52",
+            "external",
+            "low",
+            "The supporting Codex-native round checks harness behavior and token accounting but is not GLM-5.2 evidence.",
+            "Keep supporting round results out of headline GLM-5.2 denominators.",
+            active=True,
+        ),
+    ]
+    active_threats = [threat for threat in threats if threat["status"] == "active"]
+    return {
+        "status": "blocked" if any(threat["severity"] == "high" for threat in active_threats) else "disclosed",
+        "active_count": len(active_threats),
+        "high_count": sum(1 for threat in active_threats if threat["severity"] == "high"),
+        "threats": threats,
+    }
+
+
+def validity_threat(
+    threat_id: str,
+    category: str,
+    severity: str,
+    description: str,
+    mitigation: str,
+    *,
+    active: bool,
+) -> dict[str, Any]:
+    return {
+        "id": threat_id,
+        "category": category,
+        "severity": severity,
+        "status": "active" if active else "resolved",
+        "description": description,
+        "mitigation": mitigation,
+    }
 
 
 def completion_audit(
@@ -1212,6 +1289,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         )
     lines.extend(render_comparisons(report))
     lines.extend(render_claim_ledger(report))
+    lines.extend(render_threats_to_validity(report))
     lines.extend(render_completion_audit(report))
     lines.extend(render_study_protocol(report))
     lines.extend([
@@ -1374,6 +1452,25 @@ def render_claim_ledger(report: dict[str, Any]) -> list[str]:
             f"| {claim['id']} | `{claim['status']}` | "
             f"{clean_sentence(str(claim.get('finding') or ''))} | "
             f"{clean_sentence(detail)} |"
+        )
+    return lines
+
+
+def render_threats_to_validity(report: dict[str, Any]) -> list[str]:
+    ledger = report["threats_to_validity"]
+    lines = [
+        "",
+        "## Threats To Validity",
+        "",
+        f"Status: `{ledger['status']}` ({ledger['active_count']} active, {ledger['high_count']} high severity).",
+        "",
+        "| threat | category | severity | status | mitigation |",
+        "|---|---|---|---|---|",
+    ]
+    for threat in ledger["threats"]:
+        lines.append(
+            f"| {threat['id']} | {threat['category']} | `{threat['severity']}` | "
+            f"`{threat['status']}` | {clean_sentence(str(threat.get('mitigation') or ''))} |"
         )
     return lines
 
