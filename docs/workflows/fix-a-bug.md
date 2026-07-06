@@ -33,16 +33,29 @@ An opt-in **`open-PR-merge`** exit walks `open-PR` all the way through
 `pr-refinement`'s CI-watch and merge, reaching a real `@exit:merged` with no
 parent hub required — see
 [`stories/bugfix/README.md#the-exit-slot--direct-ship-vs-open-pr-delivery-loop-slice-4`](../../stories/bugfix/README.md#the-exit-slot--direct-ship-vs-open-pr-delivery-loop-slice-4).
+`bugfix_exit` is a plain world var (default `direct-ship`) — a standalone
+run selects it via `initial_world: {bugfix_exit: open-PR}` (or
+`open-PR-merge`); dev-story instead derives it from its own
+`bugfix_destination` choice.
 
 ## Prerequisite
 
 Your repo must be onboarded (see [`../project-onboarding.md`](../project-onboarding.md))
 so a ticket source (local `issues/bugs/` or a bound `host.gh.ticket`
-GitHub repo) and a `gate_command`/`repro_command` convention exist.
+GitHub repo) exists. The `repro_command`/`gate_command` convention itself
+(a ticket's frontmatter `repro_command` seeds `world.gate_command`) is
+documented in
+[`stories/bugfix/README.md`](../../stories/bugfix/README.md).
 
 ## TUI
 
-The primary surface. From dev-story:
+The primary surface. From dev-story, with `judge_mode=human` (the standalone
+default) so each room's proposal pauses for an explicit `bf__accept` instead
+of auto-cascading under `judge_mode=llm`, and a live agent backend
+configured (or a recorded cassette/flow — see
+[`../project-onboarding.md`](../project-onboarding.md) for the agent-backend
+prerequisite; the "Verify" commands below run the same walk mocked, no
+backend needed):
 
 ```
 kitsoki run
@@ -52,14 +65,17 @@ kitsoki run
 > go_bugfix                # forces bf regardless of ticket_type; `drive` also
                             # routes here when ticket_type is "bug"
 > bf__start                # → reproducing_executing
-> bf__proceed               # → reproducing_awaiting_reply
+> bf__proceed                # → reproducing_awaiting_reply
 > bf__accept                # → proposing_executing
 > bf__proceed                # → proposing_awaiting_reply
 > bf__accept                # → implementing_executing
-> bf__proceed                # → testing_executing → testing_awaiting_reply
+> bf__proceed                # → testing_executing
+> bf__proceed                # → testing_awaiting_reply
 > bf__accept                # → reviewing_executing
-> bf__proceed                # → validating_executing → validating_awaiting_reply
-> bf__accept                # → done_executing → done_awaiting_reply
+> bf__proceed                # → validating_executing
+> bf__proceed                # → validating_awaiting_reply
+> bf__accept                # → done_executing
+> bf__proceed                # → done_awaiting_reply
 > bf__accept                # bf @exit:done → pr.open_pr (if bugfix_exit=open-PR)
 ```
 
@@ -101,8 +117,13 @@ up here; treat a full web-driven bugfix run as reliability-suspect
 ## VS Code
 
 Drivable via the same webview embed as [`file-a-bug.md`](file-a-bug.md).
-**Current caveat:** rides the web SPA's session; the full pipeline has not
-been proven end-to-end from inside the editor.
+A dedicated extension e2e spec
+(`tools/vscode-kitsoki/tests/vscode-bugfix-walk.e2e.spec.ts`, real VS Code
+via `kitsoki.flow`) drives the full pipeline `idle → … → done → @exit:done`
+end-to-end from inside the editor — one happy-path proof, the same real
+socket capture that pinned `host.ide.get_diagnostics`' wire shape (a
+still-open follow-up item; no standalone IDE-integration architecture doc
+exists yet).
 
 ## gh-agent
 

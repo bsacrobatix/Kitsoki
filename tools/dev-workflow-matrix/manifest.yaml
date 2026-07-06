@@ -141,6 +141,10 @@ cells:
     repo: kitsoki-dev
     status: proof-thin
     reason: "bugfix mature (80+ flows, triage mode) but silent-bounce reliability warranted its own debugging skill. Canonical doc: docs/workflows/fix-a-bug.md"
+    verdicts:
+      experience:
+        check_type: docs-fidelity
+        path: tools/dev-workflow-matrix/verdicts/fix-bug__tui__kitsoki-dev__docs-fidelity.json
   - workflow: fix-bug
     surface: web
     repo: kitsoki-dev
