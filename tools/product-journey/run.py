@@ -5646,11 +5646,24 @@ def blocked_autonomous_driver_dispatch(run_dir: Path) -> dict:
                     count_gaps.append(f"evidence={actual_evidence}/{claimed_evidence}")
                 if claimed_issues > actual_issues:
                     count_gaps.append(f"issues={actual_issues}/{claimed_issues}")
-                if not count_gaps:
-                    return {}
-                summary = "autonomous driver dispatch receipt claims artifacts that are not persisted: " + ", ".join(count_gaps)
                 trace = receipt.get("trace", "")
                 receipt_markdown = str(autonomous_driver_dispatch_markdown_path(run_dir))
+                if not count_gaps:
+                    if trace and artifact_ref_exists(run_dir, trace):
+                        return {}
+                    status = "missing-trace"
+                    summary = "autonomous driver dispatch captured no reviewable driver trace; stop before final gates"
+                    return {
+                        "autonomous_driver_mode": mode,
+                        "autonomous_driver_status": status,
+                        "autonomous_driver_summary": summary,
+                        "autonomous_driver_dispatch_status": receipt.get("status", status),
+                        "autonomous_driver_dispatch_summary": receipt.get("summary", summary),
+                        "autonomous_driver_dispatch_trace": trace,
+                        "autonomous_driver_dispatch_path": str(receipt_path),
+                        "autonomous_driver_dispatch_markdown_path": receipt_markdown,
+                    }
+                summary = "autonomous driver dispatch receipt claims artifacts that are not persisted: " + ", ".join(count_gaps)
                 status = "inconsistent-counts"
                 return {
                     "autonomous_driver_mode": mode,
