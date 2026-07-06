@@ -486,8 +486,10 @@ def main() -> int:
                 "open",
                 None,
             )
+            stale_control = run.read_json(run.autonomous_marathon_control_path(stale_dir))
+            stale_baseline = stale_control.get("cadence", {}).get("created_at") or stale_run_json["created_at"]
             stale_checked_at = (
-                run.parse_iso_datetime(stale_run_json["created_at"]) + run.datetime.timedelta(minutes=46)
+                run.parse_iso_datetime(stale_baseline) + run.datetime.timedelta(minutes=46)
             ).isoformat(timespec="seconds")
             stale_db = tmp / "gh-agent-stale-watchdog.json"
             stale_finalized = run.autonomous_marathon(

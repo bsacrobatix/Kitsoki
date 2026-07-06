@@ -21,15 +21,14 @@ Capture each scenario's proof evidence or record an honest blocker. Record every
 attempt through `driver_event`, attach all evidence refs through `attach`, and
 record concrete findings through `record` or `blocker`.
 
-Before issue-to-fix spend, submit `autonomous_watchdog`. If credible issue
-findings exist and both `ticket_repo` and `gh_agent_public_base_url` are
-configured, submit `autonomous_fix ticket_repo={{ args.ticket_repo }}
-gh_agent_public_base_url={{ args.gh_agent_public_base_url }}` so the native
-product-journey gitops/gh-agent path files issues, drains fixes, captures
-reviewable artifacts, independently verifies, and updates issue state. Do not
-run `gh` or file/fix issues outside that native story path.
+Do not submit the final gates from this dispatched driver task. The outer
+product-journey story has already queued the autonomous finalizer after this
+task returns; that finalizer owns `autonomous_watchdog`, `autonomous_fix`,
+review, validation, stats, issue close-out, and gh-agent draining. This keeps
+the reliability measures in deterministic story logic instead of agent
+judgment.
 
-Finish by submitting `review`, `validate`, and `stats` when the run has enough
-state for stats. Return a concise JSON object matching the schema with the
-driver status, captured evidence count, issue count, summary, and any trace or
-blocker references.
+Do not run `gh` or file/fix issues outside the native product-journey story
+path. Return a concise JSON object matching the schema with the driver status,
+captured evidence count, issue count, summary, and any trace or blocker
+references.
