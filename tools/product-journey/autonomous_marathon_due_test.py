@@ -182,6 +182,121 @@ def main() -> int:
             failures,
         )
 
+        calls = []
+        original_autonomous_marathon = run.autonomous_marathon
+
+        def fake_autonomous_marathon(
+            _catalog,
+            _github_targets,
+            _personas,
+            _scenarios,
+            run_dir,
+            project,
+            persona,
+            seed,
+            scenario_filter,
+            live_budget_minutes,
+            ticket_repo,
+            gh_agent_db,
+            gh_agent_story,
+            gh_agent_public_base_url,
+            *_args,
+            **_kwargs,
+        ):
+            calls.append({
+                "run_dir": run_dir,
+                "project": project,
+                "persona": persona,
+                "seed": seed,
+                "scenario_filter": scenario_filter,
+                "live_budget_minutes": live_budget_minutes,
+                "ticket_repo": ticket_repo,
+                "gh_agent_db": gh_agent_db,
+                "gh_agent_story": gh_agent_story,
+                "gh_agent_public_base_url": gh_agent_public_base_url,
+            })
+            return {
+                "status": "autonomous_marathon_valid",
+                "autonomous_marathon_status": "autonomous_marathon_valid",
+                "autonomous_marathon_summary": "credible_issues=1, fix=autonomous_fix_valid, review=ready, validation=valid, stats=pass",
+                "run_id": "advanced-run",
+                "run_dir": str(run.ARTIFACT_ROOT / "advanced-run"),
+                "autonomous_marathon_report_path": str(run.ARTIFACT_ROOT / "advanced-run" / "autonomous-marathon-report.md"),
+            }
+
+        run.autonomous_marathon = fake_autonomous_marathon
+        try:
+            advanced = run.autonomous_marathon_advance_due(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                run.ARTIFACT_ROOT,
+                checked_at,
+                10,
+                "jobs.sqlite",
+                "stories/bugfix",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                str(run.ARTIFACT_ROOT),
+                "",
+                0.82,
+                25,
+                None,
+            )
+        finally:
+            run.autonomous_marathon = original_autonomous_marathon
+        check(
+            "advance_due invokes the native autonomous marathon path for the next due cycle",
+            advanced["status"] == "autonomous_marathon_valid"
+            and advanced["autonomous_due_advance_status"] == "autonomous_marathon_advanced"
+            and advanced["source_run_dir"] == str(due_dir)
+            and calls
+            and calls[0]["run_dir"] is None
+            and calls[0]["project"] == "vscode"
+            and calls[0]["persona"] == "core-maintainer"
+            and calls[0]["seed"] == "due-seed-cycle-20260702T010000Z"
+            and calls[0]["scenario_filter"] == "bugfix"
+            and calls[0]["ticket_repo"] == "owner/repo"
+            and calls[0]["gh_agent_db"] == "jobs.sqlite"
+            and calls[0]["gh_agent_public_base_url"] == "https://agent.example",
+            failures,
+        )
+
+        empty_root = tmp / "empty-product-journey"
+        empty_root.mkdir()
+        not_due = run.autonomous_marathon_advance_due(
+            catalog,
+            github_targets,
+            personas,
+            scenarios,
+            empty_root,
+            checked_at,
+            10,
+            "",
+            "stories/bugfix",
+            "",
+            "",
+            "",
+            "none",
+            "",
+            str(empty_root),
+            "",
+            0.82,
+            25,
+            None,
+        )
+        check(
+            "advance_due reports no-op when no standing marathon is due",
+            not_due["status"] == "autonomous_marathon_not_due"
+            and not_due["autonomous_due_advance_status"] == "autonomous_marathon_not_due"
+            and not_due["autonomous_due_count"] == 0,
+            failures,
+        )
+
     if failures:
         print("\nFailures:")
         for failure in failures:

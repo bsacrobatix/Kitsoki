@@ -1,7 +1,7 @@
 states:
   idle:
     description: "Waiting to create a product-journey QA run bundle."
-    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_smoke_project, autonomous_marathon_smoke_persona_count, autonomous_marathon_smoke_scenario_count, autonomous_marathon_smoke_run_count, autonomous_marathon_smoke_filed_issue_count, autonomous_marathon_smoke_done_count, autonomous_marathon_smoke_landing_count, autonomous_marathon_smoke_flawless_count, autonomous_marathon_smoke_success_rate, autonomous_marathon_smoke_report_path, autonomous_marathon_smoke_report_markdown_path, autonomous_marathon_status, autonomous_marathon_report_path, autonomous_due_status, autonomous_due_summary, autonomous_due_count, autonomous_due_blocked_count, autonomous_due_next_run_dir, autonomous_due_next_story_intent, autonomous_driver_mode, autonomous_driver_status, autonomous_driver_evidence_count, autonomous_control_status, autonomous_control_summary, autonomous_control_path, autonomous_gate_summary, independent_verify_status, independent_verify_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, validation_status, validation_errors, validation_issue_summary, status]
+    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_smoke_project, autonomous_marathon_smoke_persona_count, autonomous_marathon_smoke_scenario_count, autonomous_marathon_smoke_run_count, autonomous_marathon_smoke_filed_issue_count, autonomous_marathon_smoke_done_count, autonomous_marathon_smoke_landing_count, autonomous_marathon_smoke_flawless_count, autonomous_marathon_smoke_success_rate, autonomous_marathon_smoke_report_path, autonomous_marathon_smoke_report_markdown_path, autonomous_marathon_status, autonomous_marathon_report_path, autonomous_due_status, autonomous_due_summary, autonomous_due_count, autonomous_due_blocked_count, autonomous_due_next_run_dir, autonomous_due_next_story_intent, autonomous_due_advance_status, autonomous_due_advance_summary, autonomous_due_source_run_id, autonomous_due_source_run_dir, autonomous_driver_mode, autonomous_driver_status, autonomous_driver_evidence_count, autonomous_control_status, autonomous_control_summary, autonomous_control_path, autonomous_gate_summary, independent_verify_status, independent_verify_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, validation_status, validation_errors, validation_issue_summary, status]
     view:
       - banner:
           text: "PRODUCT JOURNEY QA"
@@ -25,6 +25,8 @@ states:
             Autonomous marathon: '{{ world.autonomous_marathon_status|default:"(not started)" }}'
             Marathon due: '{{ world.autonomous_due_status|default:"(not checked)" }}: {{ world.autonomous_due_summary|default:"" }}'
             Next due intent: '{{ world.autonomous_due_next_story_intent|default:"(none)" }}'
+            Due advance: '{{ world.autonomous_due_advance_status|default:"(not run)" }}: {{ world.autonomous_due_advance_summary|default:"" }}'
+            Due source: '{{ world.autonomous_due_source_run_dir|default:"(none)" }}'
             Autonomous driver: '{{ world.autonomous_driver_mode|default:"pending" }} / {{ world.autonomous_driver_status|default:"(not run)" }}'
             Marathon control: '{{ world.autonomous_control_status|default:"(not armed)" }}: {{ world.autonomous_control_summary|default:"" }}'
             Control artifact: '{{ world.autonomous_control_path|default:"(not generated)" }}'
@@ -78,6 +80,9 @@ states:
             - label: "autonomous_marathon_due"
               hint: "scan standing marathon control artifacts for due fresh-cycle runs"
               intent: autonomous_marathon_due
+            - label: "autonomous_marathon_advance_due"
+              hint: "advance the next due standing marathon cycle without operator glue"
+              intent: autonomous_marathon_advance_due
             - label: "refresh_targets seed=..."
               hint: "write a GitHub target-proof artifact for bug-count and popularity floors"
               intent: refresh_targets
@@ -323,6 +328,131 @@ states:
               on_error: idle
             - set:
                 status: "autonomous_marathon_due_checked"
+      autonomous_marathon_advance_due:
+        - target: .
+          effects:
+            - set:
+                autonomous_due_status: "checking"
+                autonomous_due_advance_status: "running"
+                autonomous_due_advance_summary: ""
+                autonomous_due_source_run_id: ""
+                autonomous_due_source_run_dir: ""
+                autonomous_due_root: "{{ slots.stats_root ?? world.stats_root }}"
+                autonomous_due_count: 0
+                autonomous_due_upcoming_count: 0
+                autonomous_due_blocked_count: 0
+                autonomous_due_ignored_count: 0
+                autonomous_due_total_count: 0
+                autonomous_due_next_run_id: ""
+                autonomous_due_next_run_dir: ""
+                autonomous_due_next_command: ""
+                autonomous_due_next_story_intent: ""
+                autonomous_due_next_minutes_overdue: 0
+                status: "advancing_autonomous_marathon_due"
+            - invoke: host.run
+              id: autonomous_product_journey_marathon_advance_due
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --autonomous-marathon-advance-due
+                  - --json-output
+                  - --report-invalid-autonomous-marathon
+                  - --stats-root
+                  - "{{ slots.stats_root ?? world.stats_root }}"
+                  - --stats-output
+                  - "{{ slots.stats_output ?? '' }}"
+                  - --issue-state-file
+                  - "{{ slots.issue_state_file ?? '' }}"
+                  - --due-now
+                  - "{{ slots.due_now ?? '' }}"
+                  - --due-limit
+                  - "{{ slots.due_limit ?? 10 }}"
+                  - --gh-agent-db
+                  - "{{ slots.gh_agent_db ?? '' }}"
+                  - --gh-agent-story
+                  - "{{ slots.gh_agent_story ?? 'stories/bugfix' }}"
+                  - --gh-agent-project-root
+                  - "{{ slots.gh_agent_project_root ?? '' }}"
+                  - --gh-agent-incident-repo
+                  - "{{ slots.gh_agent_incident_repo ?? '' }}"
+                  - --gh-agent-asset-dir
+                  - "{{ slots.gh_agent_asset_dir ?? '' }}"
+                  - --gh-agent-comment-mode
+                  - "{{ slots.gh_agent_comment_mode ?? 'none' }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                status: "stdout_json.status"
+                run_id: "stdout_json.run_id"
+                run_dir: "stdout_json.run_dir"
+                deck_path: "stdout_json.deck_path"
+                autonomous_marathon_status: "stdout_json.autonomous_marathon_status"
+                autonomous_marathon_summary: "stdout_json.autonomous_marathon_summary"
+                autonomous_marathon_report_path: "stdout_json.autonomous_marathon_report_path"
+                autonomous_due_status: "stdout_json.autonomous_due_status"
+                autonomous_due_summary: "stdout_json.autonomous_due_summary"
+                autonomous_due_root: "stdout_json.autonomous_due_root"
+                autonomous_due_count: "stdout_json.autonomous_due_count"
+                autonomous_due_upcoming_count: "stdout_json.autonomous_due_upcoming_count"
+                autonomous_due_blocked_count: "stdout_json.autonomous_due_blocked_count"
+                autonomous_due_ignored_count: "stdout_json.autonomous_due_ignored_count"
+                autonomous_due_total_count: "stdout_json.autonomous_due_total_count"
+                autonomous_due_next_run_id: "stdout_json.autonomous_due_next_run_id"
+                autonomous_due_next_run_dir: "stdout_json.autonomous_due_next_run_dir"
+                autonomous_due_next_command: "stdout_json.autonomous_due_next_command"
+                autonomous_due_next_story_intent: "stdout_json.autonomous_due_next_story_intent"
+                autonomous_due_next_minutes_overdue: "stdout_json.autonomous_due_next_minutes_overdue"
+                autonomous_due_advance_status: "stdout_json.autonomous_due_advance_status"
+                autonomous_due_advance_summary: "stdout_json.autonomous_due_advance_summary"
+                autonomous_due_source_run_id: "stdout_json.source_run_id"
+                autonomous_due_source_run_dir: "stdout_json.source_run_dir"
+                autonomous_driver_mode: "stdout_json.autonomous_driver_mode"
+                autonomous_driver_status: "stdout_json.autonomous_driver_status"
+                autonomous_driver_summary: "stdout_json.autonomous_driver_summary"
+                autonomous_driver_evidence_count: "stdout_json.autonomous_driver_evidence_count"
+                autonomous_driver_issue_count: "stdout_json.autonomous_driver_issue_count"
+                autonomous_control_path: "stdout_json.autonomous_control_path"
+                autonomous_control_markdown_path: "stdout_json.autonomous_control_markdown_path"
+                autonomous_control_status: "stdout_json.autonomous_control_status"
+                autonomous_control_summary: "stdout_json.autonomous_control_summary"
+                autonomous_watchdog_status: "stdout_json.autonomous_watchdog_status"
+                autonomous_watchdog_summary: "stdout_json.autonomous_watchdog_summary"
+                autonomous_watchdog_path: "stdout_json.autonomous_watchdog_path"
+                autonomous_watchdog_markdown_path: "stdout_json.autonomous_watchdog_markdown_path"
+                autonomous_watchdog_age_minutes: "stdout_json.autonomous_watchdog_age_minutes"
+                autonomous_fix_status: "stdout_json.autonomous_fix_status"
+                autonomous_fix_report_path: "stdout_json.autonomous_fix_report_path"
+                autonomous_gate_summary: "stdout_json.autonomous_gate_summary"
+                independent_verify_status: "stdout_json.independent_verify_status"
+                independent_verify_summary: "stdout_json.independent_verify_summary"
+                issue_closeout_status: "stdout_json.issue_closeout_status"
+                issue_closeout_count: "stdout_json.issue_closeout_count"
+                issue_closeout_summary: "stdout_json.issue_closeout_summary"
+                filing_status: "stdout_json.filing_status"
+                filing_summary: "stdout_json.filing_summary"
+                findings_filed_count: "stdout_json.findings_filed_count"
+                gh_agent_drain_status: "stdout_json.gh_agent_drain_status"
+                gh_agent_done_count: "stdout_json.gh_agent_done_count"
+                gh_agent_failed_count: "stdout_json.gh_agent_failed_count"
+                review_status: "stdout_json.review_status"
+                review_summary: "stdout_json.review_summary"
+                review_failed_count: "stdout_json.review_failed_count"
+                validation_status: "stdout_json.validation_status"
+                validation_errors: "stdout_json.validation_errors"
+                validation_issue_summary: "stdout_json.validation_issue_summary"
+                stats_status: "stdout_json.stats_status"
+                stats_root: "stdout_json.stats_root"
+                stats_output: "stdout_json.stats_output"
+                stats_summary: "stdout_json.stats_summary"
+                stats_gate_status: "stdout_json.stats_gate_status"
+                stats_gate_summary: "stdout_json.stats_gate_summary"
+                stats_current_run_scanned: "stdout_json.stats_current_run_scanned"
+                stats_runs_scanned: "stdout_json.stats_runs_scanned"
+                stats_found_count: "stdout_json.stats_found_count"
+                stats_filed_count: "stdout_json.stats_filed_count"
+                stats_fixed_count: "stdout_json.stats_fixed_count"
+              on_error: idle
       autonomous_marathon:
         - when: "(slots.autonomous_driver_mode ?? 'pending') == 'replay' && (slots.ticket_repo == nil || slots.ticket_repo == '')"
           target: .

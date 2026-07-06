@@ -247,6 +247,10 @@ world:
   autonomous_due_next_command: { type: string, default: "" }
   autonomous_due_next_story_intent: { type: string, default: "" }
   autonomous_due_next_minutes_overdue: { type: int, default: 0 }
+  autonomous_due_advance_status: { type: string, default: "" }
+  autonomous_due_advance_summary: { type: string, default: "" }
+  autonomous_due_source_run_id: { type: string, default: "" }
+  autonomous_due_source_run_dir: { type: string, default: "" }
   autonomous_driver_mode: { type: string, default: "" }
   autonomous_driver_status: { type: string, default: "" }
   autonomous_driver_summary: { type: string, default: "" }
@@ -408,6 +412,22 @@ intents:
       stats_root: { type: string, required: false }
       due_now: { type: string, required: false }
       due_limit: { type: int, required: false }
+  autonomous_marathon_advance_due:
+    description: "Advance the next due standing persona-QA marathon cycle without operator glue."
+    examples: ["advance due marathon", "run due marathon", "autonomous marathon advance due"]
+    priority: 90
+    slots:
+      stats_root: { type: string, required: false }
+      stats_output: { type: string, required: false }
+      issue_state_file: { type: string, required: false }
+      due_now: { type: string, required: false }
+      due_limit: { type: int, required: false }
+      gh_agent_db: { type: string, required: false }
+      gh_agent_story: { type: string, required: false }
+      gh_agent_project_root: { type: string, required: false }
+      gh_agent_incident_repo: { type: string, required: false }
+      gh_agent_asset_dir: { type: string, required: false }
+      gh_agent_comment_mode: { type: string, required: false }
   dispatch_driver:
     description: "Dispatch the story-owned record/live product-journey QA driver for a ready autonomous marathon run."
     examples: ["dispatch driver", "run autonomous driver", "capture live persona evidence"]
@@ -556,7 +576,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, capture_preflight, native_ghagent_smoke, autonomous_fix_smoke, persona_autofix_smoke, autonomous_marathon_smoke, autonomous_marathon, autonomous_marathon_due, dispatch_driver, autonomous_watchdog, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, autonomous_fix, stats, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
+  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, capture_preflight, native_ghagent_smoke, autonomous_fix_smoke, persona_autofix_smoke, autonomous_marathon_smoke, autonomous_marathon, autonomous_marathon_due, autonomous_marathon_advance_due, dispatch_driver, autonomous_watchdog, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, autonomous_fix, stats, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
 
 root: idle
 
