@@ -20,13 +20,15 @@ states:
             "Name":        '{{ world.sync_name|default:"(auto)" }}'
             "Continue":    '{{ world.sync_continue_branch|default:"(prepare new sync)" }}'
             "Auto resolve": '{% if world.sync_auto_resolve %}yes{% else %}no{% endif %}'
+            Ahead:         '{% if world.sync_result.ahead > 0 and world.sync_result.behind > 0 %}⚔️ {% elif world.sync_result.ahead > 0 %}⚠️ {% else %}✅ {% endif %}{{ world.sync_result.ahead|default:0|integer }} commits ahead'
+            Behind:        '{% if world.sync_result.ahead > 0 and world.sync_result.behind > 0 %}⚔️ {% elif world.sync_result.behind > 0 %}⚠️ {% else %}✅ {% endif %}{{ world.sync_result.behind|default:0|integer }} commits behind'
       - heading: "✅ Already current"
         when: "world.sync_result.outcome == 'up_to_date'"
       - prose: "{{ world.integration_branch }} already contains {{ world.sync_remote }}/{{ world.sync_remote_branch }}."
         when: "world.sync_result.outcome == 'up_to_date'"
       - heading: "⚠️ Local main is ahead"
         when: "world.sync_result.outcome == 'local_ahead'"
-      - prose: "{{ world.integration_branch }} contains {{ world.sync_remote }}/{{ world.sync_remote_branch }}, but local main has {{ world.sync_result.ahead|stringformat:'%v' }} commits that are not on the remote. Run push_main remote={{ world.sync_remote }} or open/merge a PR before treating the remote as synchronized."
+      - prose: "{{ world.integration_branch }} contains {{ world.sync_remote }}/{{ world.sync_remote_branch }}, but local main has {{ world.sync_result.ahead|default:0|integer }} commits that are not on the remote. Run push_main remote={{ world.sync_remote }} or open/merge a PR before treating the remote as synchronized."
         when: "world.sync_result.outcome == 'local_ahead'"
       - heading: "✅ Integration branch ready"
         when: "world.sync_result.outcome == 'prepared'"

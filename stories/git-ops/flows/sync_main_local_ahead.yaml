@@ -54,7 +54,7 @@ host_handlers:
 turns:
   - intent: { name: sync_main, slots: { remote: origin } }
     expect_state: sync_main
-    expect_view_matches: "⚠️ Local main is ahead[\\s\\S]*local main has 10 commits[\\s\\S]*push_main remote=origin"
+    expect_view_matches: "Ahead:\\s+⚠️ 10 commits ahead[\\s\\S]*Behind:\\s+✅ 0 commits behind[\\s\\S]*⚠️ Local main is ahead[\\s\\S]*local main has 10 commits[\\s\\S]*push_main remote=origin"
     expect_world:
       sync_remote: origin
       sync_result:

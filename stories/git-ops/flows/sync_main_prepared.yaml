@@ -37,11 +37,14 @@ host_handlers:
             branch:   sync/main-origin-main-20260704T010203Z
             worktree: /repo/.worktrees/sync-main-origin-main-20260704T010203Z
             output:   "Integration branch: sync/main-origin-main-20260704T010203Z\nIntegration worktree: /repo/.worktrees/sync-main-origin-main-20260704T010203Z"
+            ahead:    3
+            behind:   2
             ok:       true
 
 turns:
   - intent: { name: sync_main, slots: { remote: origin } }
     expect_state: sync_main
+    expect_view_matches: "Ahead:\\s+⚔️ 3 commits ahead[\\s\\S]*Behind:\\s+⚔️ 2 commits behind[\\s\\S]*✅ Integration branch ready"
     expect_world:
       sync_remote:   origin
       sync_result:
@@ -49,6 +52,8 @@ turns:
         branch:   sync/main-origin-main-20260704T010203Z
         worktree: /repo/.worktrees/sync-main-origin-main-20260704T010203Z
         output:   "Integration branch: sync/main-origin-main-20260704T010203Z\nIntegration worktree: /repo/.worktrees/sync-main-origin-main-20260704T010203Z"
+        ahead:    3
+        behind:   2
         ok:       true
 
 expect_no_errors: true
