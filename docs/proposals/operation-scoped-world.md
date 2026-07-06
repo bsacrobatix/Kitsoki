@@ -47,12 +47,10 @@ The core invariant becomes:
 > committed intentionally, abandoned automatically, or persisted explicitly as a
 > draft.
 
-The first implementation can be opt-in so it is shippable and testable, but the
-accepted end state is not "some stories use the better model." Directly writing
-task scratch state into durable world is the legacy behavior to retire. Once the
-runtime substrate is proven, every story room that models an abandonable task
-must migrate to operation scope, an explicit draft, or a deliberately committed
-world write.
+This is the runtime model, not an opt-in feature flag. Directly writing task
+scratch state into durable world is the legacy behavior to retire. Implementation
+is complete only when every story room that models an abandonable task uses
+operation scope, an explicit draft, or a deliberately committed world write.
 
 ## Impact
 
@@ -61,15 +59,14 @@ world write.
   begin/commit/abandon, loader validation in `internal/app`.
 - **Vocabulary:** new operation-scope declaration on states or effects, plus
   commit/discard/draft mechanics described below.
-- **Stories affected:** opt-in at first, then repo-wide migration. `stories/git-ops`
-  should be the first migration because it has visible multi-step operation
-  rooms: `sync_main`, `pull`, `conflict`, `staging`, `commit`, `cleanup`, and
-  checkpoint/restore. The final phase audits and migrates every story with
-  abandonable task state.
-- **Backward compat:** existing stories keep direct world writes until they opt
-  in during the substrate phase. After the migration phase, loader/lint warnings
-  should become hard failures for new or touched operation-like rooms that keep
-  task scratch state in durable world.
+- **Stories affected:** repo-wide migration. `stories/git-ops` should be the
+  first migration because it has visible multi-step operation rooms:
+  `sync_main`, `pull`, `conflict`, `staging`, `commit`, `cleanup`, and
+  checkpoint/restore. The proposal is not complete until every story with
+  abandonable task state has migrated.
+- **Compatibility:** no compatibility mode for the old scratch-world pattern.
+  The implementation must update stories, fixtures, and docs together so local
+  `main` never carries both models as supported authoring paths.
 - **Docs on ship:** `docs/stories/state-machine.md`,
   `docs/architecture/room-workbench.md`, and tracing docs for operation events.
 
@@ -77,7 +74,7 @@ world write.
 
 | Kind | Name | Shape | Notes |
 |---|---|---|---|
-| state field | `operation:` | `{scope, commit?, draft?}` | Opts a state into operation-local world overlay. |
+| state field | `operation:` | `{scope, commit?, draft?}` | Declares an operation-local world overlay for an abandonable task room. |
 | effect | `commit_operation` | `{world: {key: expr}, clear?: bool}` | Copies selected overlay values into durable world and closes the operation. |
 | effect | `persist_draft` | `{id, title?, world?: [keys]}` | Saves the overlay under an explicit draft handle. |
 | effect | `discard_operation` | `{reason?}` | Explicit discard; implicit on uncommitted exit. |
@@ -149,21 +146,13 @@ Loader validation should catch only structural mistakes at first:
 - operation state with background jobs whose completion would write into a
   discarded overlay unless the story declares an explicit policy.
 
-## Backward compatibility / migration
-
-The substrate should start opt-in. Existing world semantics, flow cassettes, and
-story YAML continue to work unchanged while the mechanism is introduced and
-validated.
-
-That is a compatibility bridge, not the target architecture. The migration is
-complete only when the legacy pattern is retired:
+## Migration
 
 - abandonable task rooms use operation scope;
 - resumable abandoned work is represented by explicit draft records;
 - durable world writes from task rooms are reserved for committed facts,
   telemetry, and intentionally global state;
-- loader/lint policy prevents new direct scratch-world writes from entering the
-  repo.
+- loader validation prevents direct scratch-world writes from entering the repo.
 
 Migration should be mechanical for one class of rooms:
 
@@ -205,6 +194,8 @@ GitOps operation rooms, then audit the rest of `stories/` for the same pattern.
 - [ ] 3.2 Add a GitOps flow proving `sync_main -> back` leaves no `sync_*`
       residue in durable world.
 - [ ] 3.3 Add a draft-preservation example for a genuinely resumable task.
+- [ ] 3.4 Migrate the remaining GitOps operation rooms before calling the
+      runtime substrate shipped.
 
 ### 4. Document and retire
 
@@ -214,16 +205,16 @@ GitOps operation rooms, then audit the rest of `stories/` for the same pattern.
 - [ ] 4.3 Add authoring guidance that durable world is for committed facts, not
       abandonable task scratch state.
 
-### 5. Repo-wide migration and legacy retirement
+### 5. Repo-wide migration and old-model retirement
 
 - [ ] 5.1 Audit `stories/` for abandonable task rooms that write scratch inputs,
       host results, partial artifacts, or retry state directly to durable world.
 - [ ] 5.2 Migrate every matching room to operation scope, explicit drafts, or
       intentionally committed durable writes.
-- [ ] 5.3 Add a linter/load warning for operation-like direct scratch writes
-      while migration is in progress.
-- [ ] 5.4 Promote that warning to a hard failure for new or touched rooms after
-      the repo migration is complete.
+- [ ] 5.3 Add load-time validation that rejects new direct scratch-world writes
+      in abandonable task rooms.
+- [ ] 5.4 Remove docs and authoring examples that describe scratch-world cleanup
+      as an acceptable pattern.
 - [ ] 5.5 Move shipped guidance into narrative docs and delete this proposal.
 
 ## Verification
@@ -254,8 +245,7 @@ operation drafts with an LLM accept/reject gate should use host cassettes.
 ## Non-goals
 
 - Replacing off-path or room conversation lanes.
-- Making every story transactional by default in the first slice. The final
-  phase does retire the legacy scratch-world pattern across the repo.
+- Leaving the legacy scratch-world pattern as a supported authoring option.
 - Rolling back filesystem side effects made by host calls. The proposal scopes
   world integrity; filesystem transactions need a separate sandbox/checkpoint
   design.
