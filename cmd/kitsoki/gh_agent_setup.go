@@ -64,6 +64,7 @@ func newGHAgentSetupAppCmd() *cobra.Command {
 		outDir        string
 		listenAddr    string
 		noOpen        bool
+		localOnly     bool
 		timeout       time.Duration
 	)
 	cmd := &cobra.Command{
@@ -73,9 +74,9 @@ func newGHAgentSetupAppCmd() *cobra.Command {
 			if name == "" {
 				return fmt.Errorf("gh-agent setup app: --name is required")
 			}
-			if webhookURL == "" {
+			if webhookURL == "" && !localOnly {
 				if publicBaseURL == "" {
-					return fmt.Errorf("gh-agent setup app: --public-base-url (or --webhook-url) is required")
+					return fmt.Errorf("gh-agent setup app: --public-base-url (or --webhook-url) is required for webhook setup; use --local-only for OAuth/token setup without a public URL")
 				}
 				webhookURL = strings.TrimSuffix(publicBaseURL, "/") + "/gh-agent/webhook"
 			}
@@ -172,6 +173,9 @@ func newGHAgentSetupAppCmd() *cobra.Command {
 
 			installURL := fmt.Sprintf("https://github.com/apps/%s/installations/new", creds.Slug)
 			fmt.Fprintf(cmd.OutOrStdout(), "Now approve the install page (choose the repos): %s\n", installURL)
+			if localOnly {
+				fmt.Fprintln(cmd.OutOrStdout(), "local-only setup: no webhook URL or event subscriptions were configured; use this profile for local issue/PR/auth commands.")
+			}
 			if !noOpen {
 				openBrowser(installURL)
 			}
@@ -205,6 +209,7 @@ func newGHAgentSetupAppCmd() *cobra.Command {
 	cmd.Flags().StringVar(&outDir, "out", "", "directory for kitsoki.env + gh-app.pem (default ~/.config/kitsoki/gh-app/<name>)")
 	cmd.Flags().StringVar(&listenAddr, "listen", "127.0.0.1:0", "local address for the wizard page and redirect")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "print URLs instead of opening the browser")
+	cmd.Flags().BoolVar(&localOnly, "local-only", false, "create an OAuth/App-token profile without a public webhook URL or event subscriptions")
 	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Minute, "how long to wait for the GitHub redirect / install")
 	return cmd
 }
