@@ -72,6 +72,8 @@ class DockerBackend:
         for name in (
             "ARENA_PAIRED_TASK_ENABLE_CODEX",
             "ARENA_CODEX_TIMEOUT_S",
+            "ARENA_CLAUDE_TIMEOUT_S",
+            "ARENA_CLAUDE_MAX_BUDGET_USD",
             "ARENA_PAIRED_TASK_WORK_ROOT",
             "ARENA_PAIRED_TASK_ORCHESTRATOR_MODEL",
             "ARENA_PAIRED_TASK_ORCHESTRATOR_BACKEND",
