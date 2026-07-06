@@ -1,10 +1,13 @@
 # Reduced System Prompt Five-Bug Study
 
-**Status:** live run attempted; not a completed causal A/B.
+**Status:** live run attempted twice; not a completed causal A/B.
 **Prepared:** 2026-07-06.
 **Live LLM calls:** yes. One clean GLM-5.2 cell reached a terminal model result
-and was hidden-oracle scored. Nine planned cells failed before trace creation and
-are recorded as infrastructure-pending, not model failures.
+and was hidden-oracle scored. A second attempt at the remaining nine cells
+produced traces for all five `old-append-default` cells, but each stalled and
+was scored `oracle_pass: false` / `cost_usd: 0.0` — a runner permission bug,
+not a model failure (see "Second Attempt" below). The bug is now fixed; a
+third pass is needed to produce trace-backed results for the remaining cells.
 
 ## Question
 
@@ -106,6 +109,35 @@ Two live-run issues had to be made explicit before any result could be trusted:
 These are harness quality findings, not evidence for or against the reduced
 system prompt.
 
+## Second Attempt: `session_status` Permission Deadlock
+
+A follow-up live pass fixed the no-trace failure above (drivers now surface the
+underlying error) and produced full ~1.1 MB / 180+-line traces for all five
+`old-append-default` cells (`qs1`, `qs2`, `qs3`, `bug9`, `bug14`). Every cell
+still scored `oracle_pass: false`, `suite_pass: false`, `cost_usd: 0.0`,
+`agent_calls: 0` despite the substantial trace — a second infrastructure bug,
+not a model miss.
+
+The `qs1` transcript shows the proposer explicitly blocked:
+
+> I'm blocked — the `session_status` tool call keeps getting denied/unapproved.
+> Could you approve permission for `mcp__kitsoki__session_status` (and likely
+> the other kitsoki MCP tools I'll need: `session_world`, `session_trace`,
+> `session_close`)...
+
+Root cause: `drive_cell.sh` writes a per-cell `.claude/settings.local.json`
+(guarded by `BAKEOFF_CLAUDE_ALLOW_VALIDATOR=1`) that only allowlisted
+`mcp__validator__submit` and `mcp__operator__ask`. The proposer needs to poll
+`session_status`/`session_world`/`session_inspect`/`session_trace` to drive the
+pipeline to completion headlessly, and those calls were silently denied (no
+operator surface is attached in this harness, so there is nothing to approve
+them). The agent burned real tokens (`$0.44` on this one call alone) stuck
+retrying a denied tool instead of producing a scoring-eligible result.
+
+**Fixed** at `b94da0e2`: `drive_cell.sh`'s generated settings and
+`mcp-drive/drive.sh`'s default `TOOLS` now both allowlist
+`session_status`/`session_world`/`session_inspect`/`session_trace`.
+
 ## Conclusion
 
 The study still does **not** prove that `focused-replace` is cheaper or equally
@@ -115,12 +147,15 @@ result:
 > GLM-5.2 under the old prompt path solved `query-string/qs1` for $1.3704 across
 > 10 agent calls.
 
-That is not an A/B. A research-grade prompt result requires the remaining nine
-cells to produce trace-backed model results under the same runner isolation. The
-next blocker to fix is the no-trace driver failure: `drive_cell.sh`/`drive.sh`
-must preserve the orchestrator startup error when no session trace is created.
+That is not an A/B. A research-grade prompt result requires the remaining cells
+to produce trace-backed model results under the same runner isolation, now that
+both the no-trace failure and the `session_status` permission deadlock are
+fixed. The next live pass is the one that should finally produce a scoreable
+10-cell matrix.
 
 Until those cells exist, the only defensible claim is:
 
-> The corpus is armed, one clean live cell is solved, and the current live-drive
-> runner is not yet reliable enough to publish the five-bug prompt A/B.
+> The corpus is armed, one clean live cell is solved, two distinct runner bugs
+> (silent no-trace failures, then a silently-denied polling-tool deadlock) have
+> been found and fixed from live evidence, and the five-bug prompt A/B still
+> needs one more live-drive pass to publish.
