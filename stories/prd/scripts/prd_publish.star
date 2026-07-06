@@ -113,7 +113,7 @@ def main(ctx):
     doc_filename = str(ctx.inputs.get("doc_filename", "") or "").strip()
 
     if change_target:
-        return {"prd_file": _resolve(workdir, change_target)}
+        return {"prd_file": _resolve(workdir, change_target), "publish_status": "done"}
 
     if not draft_path and workspace:
         draft_path = _join(workspace, "004-prd.md")
@@ -131,4 +131,4 @@ def main(ctx):
         dest = _find_path(ctx, base_dir, slug)
 
     written = ctx.fs.write(dest, draft)
-    return {"prd_file": written}
+    return {"prd_file": written, "publish_status": "done"}

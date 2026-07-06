@@ -49,7 +49,7 @@ host_handlers:
   host.starlark.run:
     by_call:
       publish:
-        data: { ok: true, prd_file: ".artifacts/prd.md" }
+        data: { ok: true, prd_file: ".artifacts/prd.md", publish_status: "done" }
   host.agent.task:
     data:
       ok: true
