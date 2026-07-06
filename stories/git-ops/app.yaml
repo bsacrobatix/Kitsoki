@@ -534,6 +534,11 @@ intents:
     examples: ["quit", "exit", "done", "bye"]
     priority: 50
 
+  main_room:
+    description: "Return from git-ops to the parent story's main room."
+    examples: ["main room", "home", "go home", "back to main", "return to main"]
+    priority: 55
+
   look:
     # Status-query phrasings. Avoid examples that reduce to a bare command verb
     # stem — "is this committed"→{commit} and "what files are staged"→{stage}
@@ -544,6 +549,11 @@ intents:
                "what's uncommitted", "am I on main", "show the working tree state",
                "refresh", "status"]
     priority: 10
+
+# Named return points for importers. Standalone runs synthesize terminal rooms.
+exits:
+  main:
+    description: "Operator leaves git-ops for the parent story's main room."
 
 root: idle
 
