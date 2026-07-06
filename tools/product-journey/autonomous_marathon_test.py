@@ -718,6 +718,87 @@ def main() -> int:
                   and not run.autonomous_marathon_watchdog_path(missing_receipt_dir).exists(),
                   failures)
 
+            empty_journal = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-empty-driver-journal",
+                "bugfix",
+                7,
+                "o/r",
+                "",
+                "stories/bugfix",
+                healthy_url,
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                "live",
+                24,
+                15,
+                45,
+                None,
+            )
+            empty_journal_dir = Path(empty_journal["run_dir"])
+            run.record_autonomous_driver_dispatch(
+                empty_journal_dir,
+                "live",
+                "captured",
+                "Dispatch receipt claims captured proof, but no driver-journal event was persisted.",
+                1,
+                1,
+                str(empty_journal_dir / "driver-trace.jsonl"),
+                "",
+            )
+            empty_journal_finalized = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                empty_journal_dir,
+                "vscode",
+                "core-maintainer",
+                "ignored",
+                "",
+                7,
+                "o/r",
+                str(tmp / "gh-agent-empty-driver-journal.json"),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                str(run.ARTIFACT_ROOT),
+                str(empty_journal_dir / "autonomous-marathon-stats.json"),
+                0.82,
+                25,
+                "pending",
+                24,
+                15,
+                45,
+                None,
+            )
+            check("captured live driver receipt without driver journal stops before autonomous final gates",
+                  empty_journal_finalized["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and empty_journal_finalized["autonomous_driver_status"] == "missing-heartbeat"
+                  and empty_journal_finalized["autonomous_driver_dispatch_status"] == "captured"
+                  and empty_journal_finalized["autonomous_fix_status"] == "not_run"
+                  and empty_journal_finalized["validation_issue_summary"] == "autonomous-driver-dispatch"
+                  and empty_journal_finalized["stats_status"] == "not_run"
+                  and not run.autonomous_marathon_watchdog_path(empty_journal_dir).exists(),
+                  failures)
+
             stale = run.autonomous_marathon(
                 catalog,
                 github_targets,
