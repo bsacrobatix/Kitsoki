@@ -280,13 +280,13 @@ def autonomous_marathon_smoke() -> dict:
     if result.returncode != 0:
         return {
             "status": "failed",
-            "summary": "core use-case autonomous product-QA marathon smoke failed",
+            "summary": "core use-case autonomous product-QA marathon persona sweep failed",
             "exit_code": result.returncode,
             "output": output,
         }
     return {
         "status": "passed",
-        "summary": "core use-case autonomous product-QA marathon smoke passed",
+        "summary": "core use-case autonomous product-QA marathon persona sweep passed",
         "exit_code": result.returncode,
         "output": output,
     }
