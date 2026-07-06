@@ -882,6 +882,8 @@ def scenario_plan(scenarios: list[dict]) -> list[dict]:
         }
         if scenario.get("natural_utterances"):
             item["natural_utterances"] = scenario["natural_utterances"]
+        if scenario.get("case_variants"):
+            item["case_variants"] = scenario["case_variants"]
         if scenario.get("transports"):
             item["transports"] = scenario["transports"]
         planned.append(item)
@@ -1560,6 +1562,18 @@ def scenario_quality_gate(scenario_id: str) -> dict:
     })
 
 
+def format_case_variants(case_variants: list[dict]) -> str:
+    if not case_variants:
+        return ""
+    lines = ["Case variants to rotate through across persona/target runs:"]
+    for variant in case_variants:
+        lines.append(
+            f"- {variant.get('id', 'case')}: \"{variant.get('utterance', '')}\"; "
+            f"setup: {variant.get('setup', '')}; success focus: {variant.get('success_focus', '')}"
+        )
+    return "\n".join(lines)
+
+
 def add_corpus_issue(issues: list[dict], severity: str, check_id: str, message: str, detail: str = "") -> None:
     issues.append({
         "severity": severity,
@@ -2019,6 +2033,10 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
         "natural_utterance_required",
         ["text", "source", "source_ref"],
     )
+    case_variant_required = schema.get("scenario", {}).get(
+        "case_variant_required",
+        ["id", "utterance", "setup", "success_focus"],
+    )
     # The four workflow personas WS-F wires across every natural-use scenario
     # (surface_preference names each persona's primary surface: TUI, web,
     # docs, VS Code). Product-journey's generic run/agent-brief/driver-plan
@@ -2132,6 +2150,41 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
                         "Core scenario natural utterances must name transcript source metadata",
                         "; ".join(missing_items),
                     )
+        case_variants = scenario.get("case_variants", [])
+        if case_variants:
+            if not isinstance(case_variants, list):
+                add_corpus_issue(
+                    issues,
+                    "error",
+                    "scenario-case-variants",
+                    "Scenario case_variants must be a list",
+                    scenario_id,
+                )
+            else:
+                variant_issues = []
+                variant_ids = []
+                for index, variant in enumerate(case_variants, start=1):
+                    if not isinstance(variant, dict):
+                        variant_issues.append(f"{scenario_id}[{index}]: not an object")
+                        continue
+                    variant_ids.append(variant.get("id", ""))
+                    missing_variant_keys = [
+                        key for key in case_variant_required
+                        if not str(variant.get(key, "")).strip()
+                    ]
+                    if missing_variant_keys:
+                        variant_issues.append(f"{scenario_id}[{index}]: {', '.join(missing_variant_keys)}")
+                duplicate_variant_ids = duplicate_values([value for value in variant_ids if value])
+                if duplicate_variant_ids:
+                    variant_issues.append(f"{scenario_id}: duplicate ids {', '.join(duplicate_variant_ids)}")
+                if variant_issues:
+                    add_corpus_issue(
+                        issues,
+                        "error",
+                        "scenario-case-variants",
+                        "Scenario case variants must be complete and uniquely identified",
+                        "; ".join(variant_issues),
+                    )
         unknown_evidence = [
             kind for kind in scenario.get("evidence", [])
             if evidence_capture_hint(kind) == "Save this evidence artifact and attach it to the run."
@@ -2221,6 +2274,7 @@ def build_assignment_scenario_task(target: dict, persona: dict, scenario: dict) 
         "required_mcp": scenario["required_mcp"],
         "evidence": scenario["evidence"],
         "success_criteria": scenario["success_criteria"],
+        "case_variants": scenario.get("case_variants", []),
     }
     prompts = {
         "product-discovery": (
@@ -2247,7 +2301,11 @@ def build_assignment_scenario_task(target: dict, persona: dict, scenario: dict) 
             f"File a Kitsoki product bug discovered while working on {repo}. Include expected vs actual behavior, reproduction context, visual/TUI evidence, and a trace reference."
         ),
     }
-    base["task_prompt"] = prompts.get(scenario["id"], scenario["task"])
+    prompt_parts = [prompts.get(scenario["id"], scenario["task"])]
+    variants = format_case_variants(scenario.get("case_variants", []))
+    if variants:
+        prompt_parts.append(variants)
+    base["task_prompt"] = "\n\n".join(prompt_parts)
     base["evidence_dir"] = f"evidence/{target['id']}--{persona['id']}/{scenario['id']}"
     base["bug_query"] = bug_query if scenario["id"] == "bugfix" else ""
     return base
@@ -2894,6 +2952,7 @@ def _execution_plan_step(
         "task": scenario["task"],
         "task_prompt": scenario.get("task_prompt", scenario["task"]),
         "natural_utterances": scenario.get("natural_utterances", []),
+        "case_variants": scenario.get("case_variants", []),
         "primary_story": scenario["primary_story"],
         "live_budget": scenario_live_budget(run_json, scenario["id"]),
         "mcp_steps": [
@@ -3030,6 +3089,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict, driv
                 "success_criteria": step["success_criteria"],
                 "evidence": [item["kind"] for item in step["evidence"]],
                 "natural_utterances": step.get("natural_utterances", []),
+                "case_variants": step.get("case_variants", []),
                 "quality_gate": step.get("quality_gate", scenario_quality_gate(step["scenario"])),
                 "live_budget": step.get("live_budget", scenario_live_budget(run_json, step["scenario"])),
                 **({"transport": step["transport"], "leg_id": step["leg_id"]} if "transport" in step else {}),
@@ -3090,6 +3150,7 @@ def _driver_plan_entry(
             "Use natural operator phrasing where route quality or prompt quality is under test.",
         ],
         "natural_utterances": scenario.get("natural_utterances", []),
+        "case_variants": scenario.get("case_variants", []),
         "persona_lens": lens,
         "evidence": evidence_view,
         "success_criteria": scenario["success_criteria"],
@@ -3265,6 +3326,17 @@ def render_driver_plan(plan: dict) -> str:
                     f"({utterance.get('source', '')}: {utterance.get('source_ref', '')})"
                 )
             lines.append("")
+        variants = scenario.get("case_variants", [])
+        if variants:
+            if format_case_variants(variants) not in scenario.get("task_prompt", ""):
+                lines.extend(["### Case Variants", ""])
+                for variant in variants:
+                    lines.extend([
+                        f"- `{variant.get('id', 'case')}`: \"{variant.get('utterance', '')}\"",
+                        f"  - Setup: {variant.get('setup', '')}",
+                        f"  - Success focus: {variant.get('success_focus', '')}",
+                    ])
+                lines.append("")
         lines.extend([
             "### Action Sequence",
             "",
@@ -3412,6 +3484,14 @@ def render_agent_brief(brief: dict) -> str:
         ])
         for criterion in scenario["success_criteria"]:
             lines.append(f"- {criterion}")
+        variants = scenario.get("case_variants", [])
+        if variants:
+            if format_case_variants(variants) not in scenario.get("task_prompt", ""):
+                lines.extend(["", "Case variants:"])
+                for variant in variants:
+                    lines.append(f"- `{variant.get('id', 'case')}`: \"{variant.get('utterance', '')}\"")
+                    lines.append(f"  - Setup: {variant.get('setup', '')}")
+                    lines.append(f"  - Success focus: {variant.get('success_focus', '')}")
         gate = scenario.get("quality_gate", {})
         if gate:
             lines.extend(["", "Minimum proof:"])

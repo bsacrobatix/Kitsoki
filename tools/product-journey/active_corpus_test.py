@@ -47,6 +47,13 @@ def main():
     _check("active scenario corpus is runnable", len(active_scenarios) == 7)
     _check("active scenarios are the natural-use contract", {item["id"] for item in active_scenarios} == expected_active_scenarios)
     _check("mined scenarios are draft only", not any(item["id"].startswith("mined-scn-") for item in active_scenarios))
+    _check("active scenarios carry natural-language prompts", all(len(item["task"].split()) >= 12 for item in active_scenarios))
+    _check("active scenarios carry multiple realistic case variants", all(len(item.get("case_variants", [])) >= 3 for item in active_scenarios))
+    _check("case variants include user utterance, setup, and success focus", all(
+        {"id", "utterance", "setup", "success_focus"} <= set(variant)
+        for item in active_scenarios
+        for variant in item.get("case_variants", [])
+    ))
 
     result = run.validate_journey_corpus(personas, scenarios, github_targets)
     _check("full corpus validation passes with draft warnings", result["status"] == "valid")

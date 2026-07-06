@@ -4,7 +4,24 @@
       "id": "product-discovery",
       "label": "Product discovery walkthrough",
       "stage": "discover_product",
-      "task": "Walk the Kitsoki product overview story end to end and explain what Kitsoki does, who it is for, and what the first credible action should be.",
+      "task": "Start as a skeptical new visitor who has heard Kitsoki can drive agentic software work. Figure out what Kitsoki actually does, whether it fits the assigned repository, and what concrete action you would try first.",
+      "natural_utterances": [
+        {
+          "text": "i keep hearing kitsoki can run these workflows, but what would i actually use first on this repo?",
+          "source": "curated-corpus",
+          "source_ref": "product-discovery-visitor"
+        },
+        {
+          "text": "show me the shortest path from landing page to a real bugfix or design run",
+          "source": "curated-corpus",
+          "source_ref": "product-discovery-first-action"
+        },
+        {
+          "text": "i am not sure if this is a product, a framework, or just internal tooling - make that clear",
+          "source": "curated-corpus",
+          "source_ref": "product-discovery-category"
+        }
+      ],
       "primary_story": "stories/product-site/app.yaml",
       "required_mcp": [
         "session.open",
@@ -20,9 +37,30 @@
         "png-sequence"
       ],
       "success_criteria": [
-        "Persona can identify the product category without private repo context.",
-        "Persona can find a documented next action.",
-        "Broken links, stale media, or confusing claims are filed as product findings."
+        "Persona can state the product category and target user without relying on private repo context.",
+        "Persona can point to a first action that is concrete enough to try in the assigned repository.",
+        "Persona can identify at least one trust signal or missing proof that affects whether they would continue.",
+        "Broken links, stale media, ambiguous claims, or unclear setup paths are recorded as product findings."
+      ],
+      "case_variants": [
+        {
+          "id": "cold-visitor",
+          "utterance": "i have never seen kitsoki before - tell me whether this is worth trying today",
+          "setup": "Start from the product overview with no prior context and avoid repo archaeology until the page gives a concrete next step.",
+          "success_focus": "The product category, target user, and first credible action are visible from the walkthrough."
+        },
+        {
+          "id": "returning-skeptic",
+          "utterance": "i saw a demo last week, but i need to know what proof exists now before i spend time on it",
+          "setup": "Look for current demo evidence, proof artifacts, and wording that distinguishes planned capability from shipped behavior.",
+          "success_focus": "Claims are backed by accessible proof or filed as confusing product gaps."
+        },
+        {
+          "id": "repo-fit-check",
+          "utterance": "would this help with my assigned repo, or is it only tuned for kitsoki itself?",
+          "setup": "Interpret the product story through the assigned repository's stack and contribution model.",
+          "success_focus": "The user can decide whether onboarding, bugfix, design, or product-bug filing is the right next journey."
+        }
       ],
       "transports": {
         "allowed": ["tui", "web"],
@@ -39,7 +77,24 @@
       "id": "tui-slash-commands",
       "label": "TUI slash command discovery",
       "stage": "follow_tutorial",
-      "task": "After reading external Codex and Claude Code slash-command docs, use the Kitsoki TUI the same way: type / at the beginning of the prompt, filter the visible command menu, press Tab to accept the primary suggestion, and execute a command successfully.",
+      "task": "Use the Kitsoki TUI the way a Codex or Claude Code user would naturally try it: type / at the prompt, filter the command list, accept the visible primary suggestion, and verify the completed command actually executes.",
+      "natural_utterances": [
+        {
+          "text": "does slash work here like it does in codex or claude code?",
+          "source": "curated-corpus",
+          "source_ref": "slash-command-transfer"
+        },
+        {
+          "text": "i typed / but i cannot tell what tab is going to accept",
+          "source": "curated-corpus",
+          "source_ref": "slash-command-tab-target"
+        },
+        {
+          "text": "filter this down to the command i want and prove enter ran the completed thing",
+          "source": "curated-corpus",
+          "source_ref": "slash-command-execution"
+        }
+      ],
       "primary_story": "testdata/apps/cloak/app.yaml",
       "required_mcp": [
         "session.open",
@@ -58,7 +113,28 @@
         "Typing / at the beginning of the TUI prompt shows available slash commands without requiring Kitsoki-specific docs.",
         "Typing letters after / filters the visible command list to likely matches.",
         "The primary suggestion is visually marked as the Tab completion target.",
-        "Pressing Tab accepts the primary suggestion and Enter executes the completed command."
+        "Pressing Tab accepts the primary suggestion and Enter executes the completed command.",
+        "The failure mode is understandable when no command matches or the prompt cursor is not at a slash-command position."
+      ],
+      "case_variants": [
+        {
+          "id": "first-slash",
+          "utterance": "i typed slash at the beginning of the prompt; what commands can i run?",
+          "setup": "Begin from an idle TUI prompt with no command text entered.",
+          "success_focus": "The menu appears, is readable, and exposes the primary completion target."
+        },
+        {
+          "id": "filter-and-tab",
+          "utterance": "i know the command starts with val - filter the menu and tab-complete it",
+          "setup": "Type a partial command after / and capture the filtered list before pressing Tab.",
+          "success_focus": "Filtering narrows the list and Tab inserts the exact highlighted command."
+        },
+        {
+          "id": "noisy-transfer",
+          "utterance": "i am trying the slash commands i use elsewhere, so make the error state obvious if this one is not supported",
+          "setup": "Try a plausible external slash command that Kitsoki may not support.",
+          "success_focus": "Unsupported or mismatched commands fail with visible, non-destructive guidance."
+        }
       ],
       "transports": {
         "allowed": ["tui"],
@@ -69,7 +145,7 @@
       "id": "project-onboarding",
       "label": "Project onboarding",
       "stage": "onboard_project",
-      "task": "Use the documented Kitsoki onboarding path to configure the assigned repository and explain how bugfix/design work should be launched.",
+      "task": "Onboard a repository that is fresh on this machine, where setup may be incomplete and the user does not yet know which Kitsoki workflow to start. Produce a concrete project profile, smoke result, and next-story recommendation.",
       "natural_utterances": [
         {
           "text": "this repo is fresh on this machine - i want make install to run cleanly",
@@ -80,6 +156,11 @@
           "text": "so make install will work now?",
           "source": "session-transcript",
           "source_ref": "mined-scn-74252840-25f6-4449-85a0-8ad99f7c97d5-0001"
+        },
+        {
+          "text": "if make install fails, give a message that maybe make setup is needed",
+          "source": "session-transcript",
+          "source_ref": "mined-scn-74252840-25f6-4449-85a0-8ad99f7c97d5-0002"
         }
       ],
       "primary_story": "stories/dev-story/app.yaml",
@@ -98,9 +179,30 @@
         "flow-fixture"
       ],
       "success_criteria": [
-        "Generated project config names real commands and relevant project files.",
-        "Persona can state the next Kitsoki command or room to use.",
-        "No silent operator-question defaulting occurs."
+        "Generated project config names real commands, package managers, and project files from the assigned repository.",
+        "Setup or smoke output distinguishes missing prerequisites from product bugs.",
+        "Persona can state the next Kitsoki command, story, or stop point to use for bugfix/design work.",
+        "No silent operator-question defaulting occurs; missing human decisions become visible blockers."
+      ],
+      "case_variants": [
+        {
+          "id": "fresh-machine",
+          "utterance": "this repo is fresh here; make the first install path obvious",
+          "setup": "Assume dependencies may be missing and the user has not run setup before.",
+          "success_focus": "The profile identifies setup commands, install commands, and a deterministic smoke check."
+        },
+        {
+          "id": "failed-install-hint",
+          "utterance": "make install failed; tell me whether i should run setup or file a product bug",
+          "setup": "Start after a failed install or dependency check.",
+          "success_focus": "The outcome classifies prerequisite failure versus Kitsoki failure without hand-waving."
+        },
+        {
+          "id": "next-workflow",
+          "utterance": "now that the repo is onboarded, should i use bugfix, prd, or something else?",
+          "setup": "Assume onboarding produced enough repository facts to choose a next journey.",
+          "success_focus": "The next story recommendation is grounded in repository state and persona risk focus."
+        }
       ],
       "transports": {
         "allowed": ["tui", "web", "vscode"],
@@ -111,7 +213,7 @@
       "id": "bugfix",
       "label": "Bug fix with hidden oracle",
       "stage": "fix_bug",
-      "task": "Start from public issue/repro material, drive Kitsoki's bugfix workflow, and score the resulting worktree with the project's deterministic oracle.",
+      "task": "Start from messy public issue or local repro material, select one fixable bug, drive Kitsoki's bugfix workflow, and score the resulting worktree with deterministic oracle evidence instead of prose confidence.",
       "natural_utterances": [
         {
           "text": "resolve the red gate test that's already written but not committed",
@@ -122,6 +224,11 @@
           "text": "file the bug, then land the fixes",
           "source": "session-transcript",
           "source_ref": "mined-scn-c4d281a2-30e4-4002-9152-59d28d824abc-0001"
+        },
+        {
+          "text": "we have some .kitsoki-owner problem that's preventing us from merging some bug fixes",
+          "source": "session-transcript",
+          "source_ref": "mined-scn-c4d281a2-30e4-4002-9152-59d28d824abc-0000"
         }
       ],
       "primary_story": "stories/bugfix/app.yaml",
@@ -140,9 +247,30 @@
         "trace-replay"
       ],
       "success_criteria": [
-        "Hidden oracle passes.",
-        "Full suite passes or failure is classified.",
-        "Patch shape is reviewable for the persona's project."
+        "The selected bug has a concrete repro, failing test, issue reference, or explicitly recorded blocker.",
+        "Hidden oracle or targeted test passes for the candidate fix.",
+        "Full suite passes or failure is classified with a believable ownership boundary.",
+        "Patch shape is reviewable for the persona's project and does not include unrelated cleanup."
+      ],
+      "case_variants": [
+        {
+          "id": "red-test",
+          "utterance": "there is already a red gate test; make it pass without broad cleanup",
+          "setup": "Begin from a local failing test or oracle fixture.",
+          "success_focus": "The patch is minimal and the targeted oracle flips from failing to passing."
+        },
+        {
+          "id": "public-issue",
+          "utterance": "pick one public bug from this repo and prove the fix against its repro",
+          "setup": "Start from the target repository's bug queue and choose one issue with enough reproduction detail.",
+          "success_focus": "Issue selection, repro, patch, and verification are linked in the evidence."
+        },
+        {
+          "id": "blocked-landing",
+          "utterance": "the fix may be done, but owner/worktree state is preventing it from landing",
+          "setup": "Start after a candidate fix exists but merge ownership, branch, or worktree state is suspect.",
+          "success_focus": "The run classifies code correctness separately from landing or repository hygiene blockers."
+        }
       ],
       "transports": {
         "allowed": ["tui", "web", "vscode"],
@@ -153,7 +281,7 @@
       "id": "prd-design",
       "label": "PRD and design workflow",
       "stage": "plan_project_work",
-      "task": "Use Kitsoki to turn a project improvement idea into a PRD/design artifact grounded in repository files, conventions, and tests.",
+      "task": "Turn an under-specified improvement idea into a scoped PRD/design artifact that is grounded in repository files, names real risks, and is small enough to hand to an implementation agent.",
       "natural_utterances": [
         {
           "text": "i want to dogfood kitsoki to build a critical new feature",
@@ -164,6 +292,11 @@
           "text": "what does it take to get an extension uploaded to vs code marketplace?",
           "source": "session-transcript",
           "source_ref": "mined-scn-rollout-2026-06-22t17-54-26-019eeef7-9fdf-7060-86d0-1b1c25348cd5-0000"
+        },
+        {
+          "text": "is there an rrweb viewer extension for vs code?",
+          "source": "session-transcript",
+          "source_ref": "mined-scn-rollout-2026-06-26t15-21-48-019f0305-531e-7510-a890-14cc41e8491f-0000"
         }
       ],
       "primary_story": "stories/dev-story/app.yaml",
@@ -182,9 +315,30 @@
         "flow-fixture"
       ],
       "success_criteria": [
-        "Artifacts cite real repository files and commands.",
-        "Scope is small enough for review.",
-        "Open questions are explicit instead of hidden in generated prose."
+        "Artifacts cite real repository files, commands, or product surfaces rather than generic architecture advice.",
+        "Scope is small enough for review and explicitly excludes tempting adjacent work.",
+        "Open questions, assumptions, and operator decisions are explicit instead of hidden in generated prose.",
+        "The design names a validation path that does not require live LLM spend in automated tests."
+      ],
+      "case_variants": [
+        {
+          "id": "critical-feature",
+          "utterance": "i want to dogfood kitsoki to build a critical new feature, but keep the first slice reviewable",
+          "setup": "Start with a broad product idea and force it into a first deliverable.",
+          "success_focus": "The PRD/design separates first slice, non-goals, risks, and deterministic validation."
+        },
+        {
+          "id": "external-requirements",
+          "utterance": "what would it take to ship this as a VS Code extension?",
+          "setup": "Start from a product goal that depends on external platform requirements.",
+          "success_focus": "The artifact identifies researched constraints, repo touchpoints, and unresolved publication decisions."
+        },
+        {
+          "id": "evidence-viewer",
+          "utterance": "we need a way to inspect rrweb or playback evidence from inside the workflow",
+          "setup": "Start from an evidence-review pain point rather than a fully formed implementation request.",
+          "success_focus": "The design grounds UX, artifact format, and validation in existing media/replay contracts."
+        }
       ],
       "transports": {
         "allowed": ["tui", "web", "vscode"],
@@ -195,7 +349,24 @@
       "id": "feature-implementation",
       "label": "Feature implementation",
       "stage": "plan_project_work",
-      "task": "Use Kitsoki to implement a small accepted design slice and validate it with project tests.",
+      "task": "Implement or dry-run one accepted design slice while preserving reviewability: make the smallest coherent change, validate it with deterministic tests, and leave unfinished follow-up work explicit.",
+      "natural_utterances": [
+        {
+          "text": "implement the smallest slice from that design and do not drag in the whole roadmap",
+          "source": "curated-corpus",
+          "source_ref": "feature-slice-small"
+        },
+        {
+          "text": "if the accepted design is missing something, stop with a blocker instead of inventing requirements",
+          "source": "curated-corpus",
+          "source_ref": "feature-slice-blocker"
+        },
+        {
+          "text": "make sure the tests prove the behavior and not just that the code compiles",
+          "source": "curated-corpus",
+          "source_ref": "feature-slice-tests"
+        }
+      ],
       "primary_story": "stories/dev-story/app.yaml",
       "required_mcp": [
         "session.open",
@@ -212,9 +383,30 @@
         "flow-fixture"
       ],
       "success_criteria": [
-        "Implementation follows the design artifact.",
-        "Tests are targeted and deterministic.",
-        "Remaining work is separated from completed work."
+        "Implementation follows a named accepted design artifact or records that no accepted slice exists.",
+        "The diff is limited to the promised slice and follows local conventions.",
+        "Tests are targeted, deterministic, and tied to user-visible or contract behavior.",
+        "Remaining work is separated from completed work in the review summary."
+      ],
+      "case_variants": [
+        {
+          "id": "happy-slice",
+          "utterance": "the design is accepted; implement only the first user-visible path",
+          "setup": "Start with a complete enough design artifact and one obvious first slice.",
+          "success_focus": "The diff maps directly back to design requirements and passes targeted tests."
+        },
+        {
+          "id": "missing-decision",
+          "utterance": "i think this is ready, but stop if a product decision is still missing",
+          "setup": "Start with a design that may contain unresolved choices.",
+          "success_focus": "The run records a blocker rather than fabricating requirements or widening scope."
+        },
+        {
+          "id": "follow-up-cleanup",
+          "utterance": "finish the implementation, but keep cleanup and unrelated refactors out of the patch",
+          "setup": "Start with nearby tempting cleanup in the same code area.",
+          "success_focus": "The review summary explains what changed, what was deliberately left alone, and why."
+        }
       ],
       "transports": {
         "allowed": ["tui", "web", "vscode"],
@@ -225,7 +417,24 @@
       "id": "evidence-backed-product-bug",
       "label": "Evidence-backed product bug",
       "stage": "file_product_issue",
-      "task": "Convert any confusing or broken Kitsoki behavior observed during the journey into a useful product bug report with visual and trace evidence.",
+      "task": "Convert confusing, broken, or misleading Kitsoki behavior observed during the journey into a useful product bug report with expected/actual behavior, reproduction steps, trace context, and visual evidence.",
+      "natural_utterances": [
+        {
+          "text": "this bounced back to idle and i cannot tell what failed - file that as a real bug",
+          "source": "curated-corpus",
+          "source_ref": "product-bug-silent-bounce"
+        },
+        {
+          "text": "the UI made it look ready but the evidence was only demo data",
+          "source": "curated-corpus",
+          "source_ref": "product-bug-proof-confusion"
+        },
+        {
+          "text": "turn this confusing behavior into a ticket someone else can reproduce without reading this chat",
+          "source": "curated-corpus",
+          "source_ref": "product-bug-repro-ticket"
+        }
+      ],
       "primary_story": "stories/dev-story/app.yaml",
       "required_mcp": [
         "visual.observe",
@@ -241,9 +450,31 @@
         "rrweb"
       ],
       "success_criteria": [
-        "Report includes expected versus actual behavior.",
-        "Report includes deterministic reproduction context.",
-        "Sensitive local data is redacted or explicitly marked local-only."
+        "Report includes expected versus actual behavior in user-facing terms.",
+        "Report includes deterministic reproduction context, including story, intent, transport, and seed when available.",
+        "Report links trace and visual/TUI evidence that a reviewer can inspect.",
+        "Sensitive local data is redacted or explicitly marked local-only.",
+        "Weaknesses that are product-design gaps are routed to PRD/design instead of being mislabeled as implementation bugs."
+      ],
+      "case_variants": [
+        {
+          "id": "silent-bounce",
+          "utterance": "it went back to idle with no useful error, and i need a repro ticket",
+          "setup": "Start from an observed story transition or host-call failure that was not clearly surfaced.",
+          "success_focus": "The report preserves the state, intent, trace reference, and user-visible missing error."
+        },
+        {
+          "id": "visual-confusion",
+          "utterance": "the screen implied the run was ready, but the proof evidence did not back that up",
+          "setup": "Start from a mismatch between UI readiness language and evidence/review state.",
+          "success_focus": "The ticket links the visual frame to the underlying review or evidence artifact."
+        },
+        {
+          "id": "design-weakness",
+          "utterance": "this is not exactly broken, but the workflow led me to the wrong next step",
+          "setup": "Start from confusing guidance or unclear next action.",
+          "success_focus": "The finding is classified as weakness versus issue and routed to the right follow-up path."
+        }
       ],
       "transports": {
         "allowed": ["tui", "web", "vscode"],
