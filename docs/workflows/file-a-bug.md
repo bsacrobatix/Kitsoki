@@ -26,6 +26,21 @@ Both land the same on-disk shape:
 see [`../stories/bugs.md` §2–3](../stories/bugs.md) for the full layout and
 frontmatter contract.
 
+GitHub filing is optional and uses the same local auth setup across every
+surface. Before using `--github`, `--ticket-repo`, TUI `/bug` GitHub filing,
+or MCP issue filing, run:
+
+```sh
+kitsoki gh-agent setup app --name <app-name> --local-only
+kitsoki gh-agent setup attach --repo owner/name
+kitsoki gh-agent token
+source ~/.config/kitsoki/github.env
+```
+
+If a token is missing, the filing surface returns the same setup hint instead
+of silently dropping the report. For PAT fallback, set `GH_TOKEN` or
+`GITHUB_TOKEN` to a fine-grained PAT and run `kitsoki gh-agent token --from-env`.
+
 ## TUI
 
 While playing any app, drop into a bug meta mode:

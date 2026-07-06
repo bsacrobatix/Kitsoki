@@ -139,6 +139,34 @@ func TestGitHubTicket_CreateUsesSecretsFileWithoutProcessEnv(t *testing.T) {
 	}
 }
 
+func TestGitHubTicket_CreateMissingAuthExplainsSetup(t *testing.T) {
+	unsetEnvForTest(t, "GH_TOKEN")
+	unsetEnvForTest(t, "GITHUB_TOKEN")
+	t.Setenv("HOME", t.TempDir())
+
+	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
+		"op":    "create",
+		"repo":  "constructorfabric/Kitsoki",
+		"title": "Report bug cannot file",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error == "" {
+		t.Fatal("expected missing-auth domain error")
+	}
+	for _, want := range []string{
+		"GitHub auth is not configured",
+		"kitsoki gh-agent setup app --name <app-name> --local-only",
+		"kitsoki gh-agent token",
+		"GH_TOKEN/GITHUB_TOKEN",
+	} {
+		if !strings.Contains(res.Error, want) {
+			t.Fatalf("missing auth hint %q in:\n%s", want, res.Error)
+		}
+	}
+}
+
 // TestGitHubTicket_Create_LabelPermissionDegrades proves a fork contributor
 // without triage still files the issue (unlabelled) with a warning, rather than
 // failing the create.

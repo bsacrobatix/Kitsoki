@@ -131,7 +131,23 @@ skill/agent toolkit for your coding agent. The full walkthrough is
 [`docs/getting-started.md`](docs/getting-started.md); the detailed onboarding
 contract is [`docs/project-onboarding.md`](docs/project-onboarding.md).
 
-### 4. Verify readiness
+### 4. Optional: GitHub auth for bug and PR workflows
+
+To file bugs or PRs directly to GitHub from local Kitsoki runs, set up a
+least-privilege GitHub App token. No public URL is required for local use:
+
+```sh
+kitsoki gh-agent setup app --name <app-name> --local-only
+kitsoki gh-agent setup attach --repo owner/name
+kitsoki gh-agent token
+source ~/.config/kitsoki/github.env
+```
+
+Manual fine-grained PAT fallback is also supported with
+`kitsoki gh-agent token --from-env`. See
+[`docs/getting-started.md`](docs/getting-started.md#set-up-github-auth-for-local-issuepr-work).
+
+### 5. Verify readiness
 
 ```sh
 python3 .kitsoki/check-readiness.py --list

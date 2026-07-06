@@ -17,6 +17,14 @@ var githubAPI = githubAPIClient{
 	client:  http.DefaultClient,
 }
 
+// GitHubAuthSetupHint is the shared user-facing recovery path for every native
+// GitHub write surface (CLI, TUI/web Report bug, MCP tools, and story hosts).
+const GitHubAuthSetupHint = "GitHub auth is not configured (missing GH_TOKEN/GITHUB_TOKEN). " +
+	"Run `kitsoki gh-agent setup app --name <app-name> --local-only`, " +
+	"`kitsoki gh-agent setup attach --repo <owner/repo>`, `kitsoki gh-agent token`, " +
+	"then `source ~/.config/kitsoki/github.env`; or set a fine-grained PAT in " +
+	"GH_TOKEN/GITHUB_TOKEN and run `kitsoki gh-agent token --from-env`."
+
 type githubAPIClient struct {
 	baseURL string
 	client  *http.Client
@@ -81,7 +89,7 @@ func githubAPIRequest(ctx context.Context, method, path, contentType string, bod
 func githubAPIRequestAccept(ctx context.Context, method, path, accept, contentType string, body io.Reader, out any) (int, string, error) {
 	token := githubToken(ctx)
 	if token == "" && githubMethodRequiresToken(method) {
-		return 0, "", fmt.Errorf("GH_TOKEN or GITHUB_TOKEN is required for native GitHub API calls")
+		return 0, "", fmt.Errorf("%s", GitHubAuthSetupHint)
 	}
 	base := strings.TrimRight(githubAPI.baseURL, "/")
 	if base == "" {
