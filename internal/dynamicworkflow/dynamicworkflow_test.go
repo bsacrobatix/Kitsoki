@@ -334,6 +334,9 @@ func TestServiceExportGeneratedFlowReplaysSiblingCassette(t *testing.T) {
 
 	receipt, err = svc.Export(context.Background(), receipt.WorkflowID, ExportRequest{TargetDir: exportDir})
 	require.NoError(t, err)
+	require.NotNil(t, receipt.ExportReport)
+	require.NotNil(t, receipt.ExportReport.StarterFlowReplay)
+	require.True(t, receipt.ExportReport.StarterFlowReplay.OK)
 
 	flowPath := filepath.Join(exportDir, "flows", "generated.yaml")
 	cassettePath := filepath.Join(exportDir, "flows", "generated.cassette.yaml")
@@ -410,6 +413,9 @@ func TestServiceExportGeneratedFlowSkipsInternalDispatchTransitions(t *testing.T
 
 	receipt, err = svc.Export(context.Background(), receipt.WorkflowID, ExportRequest{TargetDir: exportDir})
 	require.NoError(t, err)
+	require.NotNil(t, receipt.ExportReport)
+	require.NotNil(t, receipt.ExportReport.StarterFlowReplay)
+	require.True(t, receipt.ExportReport.StarterFlowReplay.OK)
 
 	flowPath := filepath.Join(exportDir, "flows", "generated.yaml")
 	flowBytes, err := os.ReadFile(flowPath)
