@@ -37,10 +37,29 @@ func githubToken(ctx context.Context) string {
 			return tok
 		}
 	}
+	if secrets := SecretsFromContext(ctx); len(secrets) > 0 {
+		if tok := strings.TrimSpace(secrets["GH_TOKEN"]); tok != "" {
+			return tok
+		}
+		if tok := strings.TrimSpace(secrets["GITHUB_TOKEN"]); tok != "" {
+			return tok
+		}
+	}
 	if tok := strings.TrimSpace(os.Getenv("GH_TOKEN")); tok != "" {
 		return tok
 	}
-	return strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+	if tok := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); tok != "" {
+		return tok
+	}
+	if secrets := LoadSecrets(); len(secrets) > 0 {
+		if tok := strings.TrimSpace(secrets["GH_TOKEN"]); tok != "" {
+			return tok
+		}
+		if tok := strings.TrimSpace(secrets["GITHUB_TOKEN"]); tok != "" {
+			return tok
+		}
+	}
+	return ""
 }
 
 func githubAPIJSON(ctx context.Context, method, path string, body any, out any) (int, string, error) {
