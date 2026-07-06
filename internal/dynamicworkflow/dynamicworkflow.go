@@ -120,7 +120,7 @@ type ManifestDefaults struct {
 	Model             string         `yaml:"model"`
 	TraceRoot         string         `yaml:"trace_root"`
 	RequireGPT55      *bool          `yaml:"require_gpt55,omitempty"`
-	RequireTraceModel bool           `yaml:"require_trace_model,omitempty"`
+	RequireTraceModel bool           `yaml:"require_trace_model"`
 	HarnessLadder     *HarnessLadder `yaml:"harness_ladder,omitempty"`
 }
 
@@ -681,6 +681,7 @@ func inferManifestDefaults(goal, traceRoot string) ManifestDefaults {
 			defaults.Profile = "synthetic-claude"
 		}
 		defaults.Harness = "ladder"
+		defaults.RequireGPT55 = boolPointer(false)
 		defaults.RequireTraceModel = false
 		defaults.HarnessLadder = &HarnessLadder{
 			Models: []HarnessLadderModel{
@@ -700,6 +701,7 @@ func syntheticGLMLadderDefaults(defaults ManifestDefaults) ManifestDefaults {
 	defaults.Harness = "ladder"
 	defaults.Profile = "synthetic-claude"
 	defaults.Model = "hf:zai-org/GLM-5.2"
+	defaults.RequireGPT55 = boolPointer(false)
 	defaults.RequireTraceModel = false
 	defaults.HarnessLadder = &HarnessLadder{
 		Models: []HarnessLadderModel{
@@ -709,6 +711,10 @@ func syntheticGLMLadderDefaults(defaults ManifestDefaults) ManifestDefaults {
 		Efforts: []string{"low", "medium", "high", "xhigh", "max"},
 	}
 	return defaults
+}
+
+func boolPointer(v bool) *bool {
+	return &v
 }
 
 func ladderBackend(profile string) string {
