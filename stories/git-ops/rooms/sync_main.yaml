@@ -14,20 +14,21 @@ states:
     view:
       - kv:
           pairs:
+            Status:        '{% if world.sync_result.outcome == "up_to_date" %}✅ already current{% elif world.sync_result.outcome == "local_ahead" %}⚠️ local main ahead{% elif world.sync_result.outcome == "prepared" %}✅ integration branch ready{% elif world.sync_result.outcome == "conflicts" %}⚠️ conflicts need resolution{% elif world.sync_result.outcome == "error" %}❌ sync failed{% else %}⏳ checking{% endif %}'
             Remote:        '{{ world.sync_remote|default:"origin" }}'
             "Remote ref":  '{{ world.sync_remote_branch|default:"main" }}'
             "Name":        '{{ world.sync_name|default:"(auto)" }}'
             "Continue":    '{{ world.sync_continue_branch|default:"(prepare new sync)" }}'
             "Auto resolve": '{% if world.sync_auto_resolve %}yes{% else %}no{% endif %}'
-      - heading: "Already current"
+      - heading: "✅ Already current"
         when: "world.sync_result.outcome == 'up_to_date'"
       - prose: "{{ world.integration_branch }} already contains {{ world.sync_remote }}/{{ world.sync_remote_branch }}."
         when: "world.sync_result.outcome == 'up_to_date'"
-      - heading: "Local main is ahead"
+      - heading: "⚠️ Local main is ahead"
         when: "world.sync_result.outcome == 'local_ahead'"
-      - prose: "{{ world.integration_branch }} contains {{ world.sync_remote }}/{{ world.sync_remote_branch }}, but local main has {{ world.sync_result.ahead }} commits that are not on the remote. Run push_main remote={{ world.sync_remote }} or open/merge a PR before treating the remote as synchronized."
+      - prose: "{{ world.integration_branch }} contains {{ world.sync_remote }}/{{ world.sync_remote_branch }}, but local main has {{ world.sync_result.ahead|stringformat:'%v' }} commits that are not on the remote. Run push_main remote={{ world.sync_remote }} or open/merge a PR before treating the remote as synchronized."
         when: "world.sync_result.outcome == 'local_ahead'"
-      - heading: "Integration branch ready"
+      - heading: "✅ Integration branch ready"
         when: "world.sync_result.outcome == 'prepared'"
       - when: "world.sync_result.outcome == 'prepared'"
         kv:
@@ -36,7 +37,7 @@ states:
             Worktree: '{{ world.sync_result.worktree }}'
       - prose: "Validate in the integration worktree, then land from the protected checkout with merge-to-main."
         when: "world.sync_result.outcome == 'prepared'"
-      - heading: "Manual conflict resolution needed"
+      - heading: "⚠️ Manual conflict resolution needed"
         when: "world.sync_result.outcome == 'conflicts'"
       - when: "world.sync_result.outcome == 'conflicts'"
         kv:
@@ -45,7 +46,7 @@ states:
             Worktree: '{{ world.sync_result.worktree|default:"(see output)" }}'
       - prose: "Resolve conflicts in the integration worktree, then run sync_main continue_branch={{ world.sync_result.branch|default:'<branch>' }}."
         when: "world.sync_result.outcome == 'conflicts'"
-      - heading: "Sync failed"
+      - heading: "❌ Sync failed"
         when: "world.sync_result.outcome == 'error'"
       - prose: "{{ world.sync_result.output|default:'(no output)' }}"
         when: "world.sync_result.outcome == 'error'"

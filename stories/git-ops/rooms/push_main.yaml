@@ -12,23 +12,24 @@ states:
     view:
       - kv:
           pairs:
+            Status:       '{% if world.push_result.outcome == "up_to_date" %}✅ already current{% elif world.push_result.outcome == "pushed" %}✅ pushed{% elif world.push_result.outcome == "remote_ahead" %}⚠️ remote has new work{% elif world.push_result.outcome == "error" %}❌ push failed{% else %}⏳ checking{% endif %}'
             Remote:       '{{ world.push_remote|default:"origin" }}'
             "Remote ref": '{{ world.push_remote_branch|default:"main" }}'
-      - heading: "Already current"
+      - heading: "✅ Already current"
         when: "world.push_result.outcome == 'up_to_date'"
       - prose: "{{ world.push_remote }}/{{ world.push_remote_branch }} already matches {{ world.integration_branch }}."
         when: "world.push_result.outcome == 'up_to_date'"
-      - heading: "Pushed"
+      - heading: "✅ Pushed"
         when: "world.push_result.outcome == 'pushed'"
       - when: "world.push_result.outcome == 'pushed'"
         kv:
           pairs:
-            Ahead: '{{ world.push_result.ahead }} commits published'
-      - heading: "Remote has new work"
+            Ahead: '{{ world.push_result.ahead|stringformat:"%v" }} commits published'
+      - heading: "⚠️ Remote has new work"
         when: "world.push_result.outcome == 'remote_ahead'"
-      - prose: "{{ world.push_remote }}/{{ world.push_remote_branch }} has {{ world.push_result.behind }} commits not present locally. Run sync_main remote={{ world.push_remote }} first."
+      - prose: "{{ world.push_remote }}/{{ world.push_remote_branch }} has {{ world.push_result.behind|stringformat:'%v' }} commits not present locally. Run sync_main remote={{ world.push_remote }} first."
         when: "world.push_result.outcome == 'remote_ahead'"
-      - heading: "Push failed"
+      - heading: "❌ Push failed"
         when: "world.push_result.outcome == 'error'"
       - prose: "{{ world.push_result.output|default:'(no output)' }}"
         when: "world.push_result.outcome == 'error'"

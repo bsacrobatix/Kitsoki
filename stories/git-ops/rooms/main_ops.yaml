@@ -17,17 +17,18 @@ states:
     view:
       - kv:
           pairs:
+            Status:      '{% if world.last_op_ok == false %}❌ last operation failed{% elif world.merge_in_progress %}⚠️ merge/rebase in progress{% elif world.no_common_ancestor %}⚠️ no common ancestor{% elif world.has_uncommitted %}⚠️ uncommitted changes{% elif world.commits_behind > 0 %}⚠️ behind upstream{% else %}✅ ready{% endif %}'
             Branch:      '{{ world.current_branch|default:"(detecting…)" }}'
-            Uncommitted: '{% if world.has_uncommitted %}yes{% else %}clean{% endif %}'
-            Behind:      '{{ world.commits_behind }} commits behind upstream'
+            Uncommitted: '{% if world.has_uncommitted %}⚠️ yes{% else %}✅ clean{% endif %}'
+            Behind:      '{% if world.commits_behind > 0 %}⚠️ {% else %}✅ {% endif %}{{ world.commits_behind }} commits behind upstream'
             Worktrees:   '{{ world.worktree_list.raw|default:"(none)" }}'
-      - prose: "Last operation failed: {{ world.last_op_output|default:'(no output)' }}"
+      - prose: "❌ Last operation failed: {{ world.last_op_output|default:'(no output)' }}"
         when: "world.last_op_ok == false"
-      - prose: "Post-merge build failed. The merge path resets the target worktree to its pre-merge commit before returning here. Fix the branch and retry, or clear the failure with rollback."
+      - prose: "❌ Post-merge build failed. The merge path resets the target worktree to its pre-merge commit before returning here. Fix the branch and retry, or clear the failure with rollback."
         when: "world.last_op_outcome == 'post_merge_test_fail'"
-      - prose: "WARNING: this branch has no common ancestor with {{ world.integration_branch }}. Merge and rebase are unavailable."
+      - prose: "⚠️ This branch has no common ancestor with {{ world.integration_branch }}. Merge and rebase are unavailable."
         when: "world.no_common_ancestor == true"
-      - prose: "A merge or rebase is already in progress in this worktree."
+      - prose: "⚠️ A merge or rebase is already in progress in this worktree."
         when: "world.merge_in_progress == true"
       - choice:
           mode: single
