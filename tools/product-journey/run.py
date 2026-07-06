@@ -5233,13 +5233,14 @@ def invalid_autonomous_marathon_creation(
     gh_agent_public_base_url: str,
     gh_agent_health: Optional[dict] = None,
     gh_agent_readiness: Optional[dict] = None,
+    autonomous_driver_mode: str = "pending",
 ) -> dict:
     result = run_story_summary(created_dir)
     result.update({
         "status": "autonomous_marathon_invalid",
         "autonomous_marathon_status": "autonomous_marathon_invalid",
         "autonomous_marathon_summary": summary,
-        "autonomous_driver_mode": "pending",
+        "autonomous_driver_mode": autonomous_driver_mode or "pending",
         "autonomous_driver_status": "invalid",
         "autonomous_driver_summary": summary,
         "autonomous_driver_evidence_count": 0,
@@ -5660,6 +5661,20 @@ def autonomous_marathon(
             live_budget_minutes,
             [],
         )
+        if autonomous_driver_mode not in {"pending", "replay"}:
+            return invalid_autonomous_marathon_creation(
+                created_dir,
+                run_json,
+                (
+                    f"autonomous_driver_mode={autonomous_driver_mode} is not story-dispatchable yet; "
+                    "use pending for a reviewable handoff or replay for a no-LLM autonomous proof."
+                ),
+                "driver-dispatch-not-implemented",
+                "driver=fail, filing=not_run, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=fail",
+                ticket_repo,
+                gh_agent_public_base_url,
+                autonomous_driver_mode=autonomous_driver_mode,
+            )
         health: Optional[dict] = None
         ready: Optional[dict] = None
         if autonomous_driver_mode != "replay" and live_budget_minutes > 0:
@@ -10734,8 +10749,8 @@ def main() -> None:
     parser.add_argument(
         "--autonomous-driver-mode",
         default="pending",
-        choices=["pending", "replay"],
-        help="With --autonomous-marathon creation, pending emits a driver handoff; replay attaches cassette-backed proof and runs the native final gates",
+        choices=["pending", "replay", "record", "live"],
+        help="With --autonomous-marathon creation, pending emits a driver handoff; replay attaches cassette-backed proof and runs the native final gates; record/live fail closed until story-owned dispatch exists",
     )
     parser.add_argument("--autonomous-cadence-hours", type=int, default=24, help="Cadence recorded in autonomous marathon control artifacts")
     parser.add_argument("--autonomous-heartbeat-minutes", type=int, default=15, help="Heartbeat interval recorded in autonomous marathon control artifacts")

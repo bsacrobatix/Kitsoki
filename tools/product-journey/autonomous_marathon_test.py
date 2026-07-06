@@ -181,6 +181,44 @@ def main() -> int:
                   and "4 final gates" in loaded_summary["driver_contract_summary"],
                   failures)
 
+            unsupported_live = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-live-driver",
+                "bugfix",
+                7,
+                "o/r",
+                "",
+                "stories/bugfix",
+                healthy_url,
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                "live",
+                24,
+                15,
+                45,
+                None,
+            )
+            check("live driver mode fails closed until story-owned dispatch exists",
+                  unsupported_live["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and unsupported_live["validation_issue_summary"] == "driver-dispatch-not-implemented"
+                  and unsupported_live["autonomous_driver_mode"] == "live"
+                  and unsupported_live["autonomous_driver_status"] == "invalid"
+                  and Path(unsupported_live["autonomous_marathon_report_path"]).exists(),
+                  failures)
+
             missing_ticket = run.autonomous_marathon(
                 catalog,
                 github_targets,

@@ -483,6 +483,11 @@ For live-budgeted pending marathons, run `capture_preflight` first; the story
 fails closed before creating the driver handoff if capture preflight has not
 passed. Replay marathons remain no-LLM and do not require this live-capture
 preflight.
+`--autonomous-driver-mode replay` is the current fully story-owned autonomous
+mode. Explicit `--autonomous-driver-mode record` or `live` is accepted only to
+return a structured `autonomous_marathon_invalid` result with
+`driver-dispatch-not-implemented`; it must not silently become a handoff or a
+live model launch until the story owns that dispatcher.
 Live-budgeted pending marathons must also provide `ticket_repo` and
 `gh_agent_public_base_url` before handoff, so live capture cannot begin for a
 run whose downstream autonomous filing, gh-agent repair, close-out, and

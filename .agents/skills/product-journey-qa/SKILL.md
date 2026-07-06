@@ -182,7 +182,11 @@ Then hand it to the reusable driver:
    fail closed in the story view with `autonomous_marathon_invalid` instead of
    disappearing behind a host error. Use default
    `autonomous_driver_mode=pending` when a live budgeted driver still needs to
-   capture evidence first; live-budgeted pending mode must still provide
+   capture evidence first; use `autonomous_driver_mode=replay` for the current
+   no-LLM fully autonomous proof. Explicit `record` or `live` marathon driver
+   modes fail closed with `driver-dispatch-not-implemented` until the story owns
+   that dispatcher instead of relying on operator glue. Live-budgeted pending
+   mode must still provide
    `ticket_repo` and `gh_agent_public_base_url` up front because those values
    are required for the autonomous file/fix/close-out gates after capture. The
    hosted gh-agent health/readiness checks must pass before the story returns a
