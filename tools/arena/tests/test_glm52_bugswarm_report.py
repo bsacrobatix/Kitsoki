@@ -52,7 +52,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("bugswarm source status", report["corpora"]["bugswarm"]["source_status"], "adapter-ready")
     check("bugswarm imported count", report["corpora"]["bugswarm"]["imported_task_count"], 0)
     closure = {action["corpus"]: action for action in report["evidence_closure"]["actions"]}
-    check("closure oss needs spec", closure["oss-oracle"]["status"], "needs-spec")
+    check("closure oss ready to plan", closure["oss-oracle"]["status"], "ready-to-plan")
     check("closure bugswarm needs import", closure["bugswarm"]["status"], "needs-import")
 
     glm_cells = report["glm52_bugfix_cells"]
@@ -60,6 +60,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("glm cell treatment", glm_cells[0]["treatment"], "kitsoki")
     check("glm cell quality", glm_cells[0]["quality"], "partial")
     check("glm cell tokens", glm_cells[0]["total_tokens"], 2890980)
+    matrix = report["required_glm52_matrix"]
+    oss_tasks = sorted({row["task"] for row in matrix if row["corpus"] == "oss-oracle"})
+    check("oss matrix uses reusable task id", oss_tasks, ["kitsoki-bug9-bugfix-test-repair"])
+    oss_kitsoki = next(row for row in matrix if row["corpus"] == "oss-oracle" and row["treatment"] == "kitsoki")
+    check("oss legacy task preserved", oss_kitsoki["legacy_task"], "bug9")
 
     headline = report["rollups"]["glm52_by_corpus_treatment"]
     check("oss kitsoki attempted", headline["oss-oracle|kitsoki"]["attempted"], 1)
@@ -73,6 +78,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("markdown includes closure packet", "## Evidence Closure Packet" in md, True)
     check("markdown includes gap planner", "glm52_gap_plan.py" in md, True)
     check("markdown tells bugswarm source handoff", "--bugswarm-source <execute-verified BugSwarm YAML>" in md, True)
+    check("markdown closure table includes oss ready", "| oss-oracle | `ready-to-plan`" in md, True)
     check("markdown closure table includes import", "| bugswarm | `needs-import`" in md, True)
 
 with tempfile.TemporaryDirectory() as tmp:

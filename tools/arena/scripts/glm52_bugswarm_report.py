@@ -84,7 +84,8 @@ def build_report(
     bugswarm_cells = load_headline_arena_cells(bugswarm_arena_rollup, corpus_name="bugswarm")
     oss_arena_cells = load_headline_arena_cells(oss_arena_rollup, corpus_name="oss-oracle")
 
-    matrix_rows = build_required_matrix(glm_cells + oss_arena_cells, bugswarm_tasks, bugswarm_cells)
+    glm_headline_cells = map_legacy_oss_tasks(corpus, glm_cells) + oss_arena_cells
+    matrix_rows = build_required_matrix(glm_headline_cells, bugswarm_tasks, bugswarm_cells)
     return {
         "kind": "glm52_bugswarm_bugfix_report",
         "version": 1,
@@ -221,18 +222,58 @@ def load_verification(path: Path | None) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def map_legacy_oss_tasks(corpus: dict[str, Any], cells: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Map legacy bugfix-bakeoff task ids onto the reusable arena corpus ids."""
+    mapping: dict[tuple[str, str], str] = {}
+    for task in corpus.get("tasks", []):
+        if not isinstance(task, dict):
+            continue
+        oracle = task.get("oracle") or {}
+        if not isinstance(oracle, dict) or oracle.get("kind") != "external_bakeoff":
+            continue
+        project = str(oracle.get("project") or "")
+        bug = str(oracle.get("bug") or "")
+        task_id = str(task.get("id") or "")
+        if project and bug and task_id:
+            mapping[(project, bug)] = task_id
+
+    mapped: list[dict[str, Any]] = []
+    for cell in cells:
+        if cell.get("source") != "bugfix-bakeoff" or cell.get("corpus") != "oss-oracle":
+            mapped.append(cell)
+            continue
+        legacy_task = str(cell.get("task") or "")
+        arena_task = mapping.get(("kitsoki", legacy_task))
+        if not arena_task:
+            mapped.append(cell)
+            continue
+        copied = dict(cell)
+        copied["legacy_task"] = legacy_task
+        copied["task"] = arena_task
+        mapped.append(copied)
+    return mapped
+
+
 def build_required_matrix(
     glm_cells: list[dict[str, Any]],
     bugswarm_tasks: list[dict[str, Any]],
     bugswarm_cells: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    oss_tasks = sorted({c["task"] for c in glm_cells if c["corpus"] == "oss-oracle" and c.get("task")})
+    if not oss_tasks:
+        oss_tasks = ["current-committed-glm52"]
     for treatment in ("kitsoki", "raw-prompt"):
-        matching = [c for c in glm_cells if c["corpus"] == "oss-oracle" and c["treatment"] == treatment]
-        if matching:
-            rows.extend(matching)
-        else:
-            rows.append(pending_row("oss-oracle", "current-committed-glm52", treatment, "no committed GLM-5.2 cell"))
+        by_task = {
+            c["task"]: c
+            for c in glm_cells
+            if c["corpus"] == "oss-oracle" and c["treatment"] == treatment
+        }
+        for task_id in oss_tasks:
+            if task_id in by_task:
+                rows.append(by_task[task_id])
+            else:
+                rows.append(pending_row("oss-oracle", task_id, treatment, "no committed GLM-5.2 cell"))
 
     bugswarm_by_key = {
         (cell["task"], cell["treatment"]): cell
@@ -386,11 +427,11 @@ def closure_action_oss(rows: list[dict[str, Any]]) -> dict[str, Any]:
         }
     return {
         "corpus": "oss-oracle",
-        "status": "needs-spec",
+        "status": "ready-to-plan",
         "pending_count": len(rows),
         "tasks": sorted({str(row["task"]) for row in rows}),
         "treatments": sorted({str(row["treatment"]) for row in rows}),
-        "next": "Provide --oss-spec pointing at a paired-task spec with GLM-5.2 Kitsoki/raw-prompt variants.",
+        "next": "Run glm52_gap_plan.py; it can generate an OSS paired-task spec from the frozen corpus manifest.",
     }
 
 

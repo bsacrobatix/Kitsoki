@@ -20,6 +20,8 @@ try:
 except ModuleNotFoundError:
     yaml = None
 
+DEFAULT_OSS_CORPUS = "tools/arena/corpus/cost-bench.manifest.yaml"
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -27,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json-out", required=True)
     parser.add_argument("--markdown-out", required=True)
     parser.add_argument("--oss-spec", default="", help="paired-task arena spec for OSS GLM-5.2 cells")
+    parser.add_argument("--oss-corpus", default=DEFAULT_OSS_CORPUS, help="frozen OSS corpus used when --oss-spec must be generated")
     parser.add_argument("--bugswarm-spec", default="", help="paired-task arena spec for BugSwarm GLM-5.2 cells")
     parser.add_argument("--bugswarm-source", default="", help="verified BugSwarm source; used when --bugswarm-spec must be generated")
     parser.add_argument("--oss-out", default=".artifacts/arena/glm52-oss")
@@ -38,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
         report,
         report_json=args.report_json,
         oss_spec=args.oss_spec,
+        oss_corpus=args.oss_corpus,
         bugswarm_spec=args.bugswarm_spec,
         bugswarm_source=args.bugswarm_source,
         oss_out=args.oss_out,
@@ -54,6 +58,7 @@ def build_packet(
     *,
     report_json: str,
     oss_spec: str,
+    oss_corpus: str,
     bugswarm_spec: str,
     bugswarm_source: str,
     oss_out: str,
@@ -74,7 +79,8 @@ def build_packet(
         spec=oss_spec,
         out_dir=oss_out,
         report_arg="--oss-arena-rollup",
-        source="",
+        source=oss_corpus,
+        report_json=report_json,
     ))
     actions.append(corpus_action(
         corpus="bugswarm",
@@ -83,6 +89,7 @@ def build_packet(
         out_dir=bugswarm_out,
         report_arg="--bugswarm-arena-rollup",
         source=bugswarm_source,
+        report_json=report_json,
     ))
     return {
         "kind": "glm52_gap_execution_packet",
@@ -107,6 +114,7 @@ def corpus_action(
     out_dir: str,
     report_arg: str,
     source: str,
+    report_json: str,
 ) -> dict[str, Any]:
     treatments = sorted({str(row.get("treatment") or "") for row in rows if row.get("treatment")})
     tasks = sorted({str(row.get("task") or "") for row in rows if row.get("task")})
@@ -124,6 +132,23 @@ def corpus_action(
     if not rows:
         return action
     if not spec:
+        if corpus == "oss-oracle" and source:
+            spec = ".artifacts/arena/oss-glm52.yaml"
+            action["prerequisites"].append(
+                "Generate and inspect the OSS paired-task spec from the frozen corpus manifest before running --live."
+            )
+            action["commands"].append(
+                "python3 tools/arena/scripts/oss_to_arena_spec.py "
+                f"--report-json {report_json} --corpus {source} --out {spec}"
+            )
+            action["commands"].extend([
+                f"python3 tools/arena/arena.py plan --spec {spec}",
+                f"python3 tools/arena/arena.py run --spec {spec} --out {out_dir}",
+                f"ARENA_PAIRED_TASK_ENABLE_CODEX=1 python3 tools/arena/arena.py run --spec {spec} --out {out_dir} --live",
+            ])
+            action["status"] = "ready"
+            action["spec"] = spec
+            return action
         if corpus == "bugswarm" and source:
             spec = ".artifacts/bugswarm/bugswarm-glm52.yaml"
             action["prerequisites"].append(
