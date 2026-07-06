@@ -799,6 +799,113 @@ def main() -> int:
                   and not run.autonomous_marathon_watchdog_path(empty_journal_dir).exists(),
                   failures)
 
+            missing_issue = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-missing-issue-finding",
+                "bugfix",
+                7,
+                "o/r",
+                "",
+                "stories/bugfix",
+                healthy_url,
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                "live",
+                24,
+                15,
+                45,
+                None,
+            )
+            missing_issue_dir = Path(missing_issue["run_dir"])
+            missing_issue_run_json = run.read_json(missing_issue_dir / "run.json")
+            missing_issue_scenario = missing_issue_run_json["scenarios"][0]["id"]
+            filing_test.attach_bugfix_proof(missing_issue_dir, missing_issue_scenario)
+            run.record_driver_event(
+                missing_issue_dir,
+                missing_issue_scenario,
+                "live",
+                "captured",
+                "Live driver captured proof but failed to persist the claimed issue finding.",
+                "session.open,session.trace,visual.observe",
+                str(missing_issue_dir / "test-evidence" / "trace-replay.md"),
+                "",
+                None,
+            )
+            run.record_finding(
+                missing_issue_dir,
+                "strength",
+                "Live driver preserved proof before issue recording",
+                "This run intentionally omits the claimed issue finding to prove finalization fails closed.",
+                missing_issue_scenario,
+                "low",
+                str(missing_issue_dir / "test-evidence" / "oracle_result.md"),
+                "observed",
+                None,
+            )
+            run.record_autonomous_driver_dispatch(
+                missing_issue_dir,
+                "live",
+                "captured",
+                "Dispatch receipt claims one issue but no credible issue finding was persisted.",
+                1,
+                1,
+                str(missing_issue_dir / "driver-trace.jsonl"),
+                "",
+            )
+            missing_issue_finalized = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                missing_issue_dir,
+                "vscode",
+                "core-maintainer",
+                "ignored",
+                "",
+                7,
+                "o/r",
+                str(tmp / "gh-agent-missing-issue-finding.json"),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                str(run.ARTIFACT_ROOT),
+                str(missing_issue_dir / "autonomous-marathon-stats.json"),
+                0.82,
+                25,
+                "pending",
+                24,
+                15,
+                45,
+                None,
+            )
+            check("captured live driver receipt claiming missing issue stops before no-issue finalization",
+                  missing_issue_finalized["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and missing_issue_finalized["autonomous_driver_status"] == "inconsistent-counts"
+                  and missing_issue_finalized["autonomous_driver_dispatch_status"] == "captured"
+                  and missing_issue_finalized["autonomous_fix_status"] == "not_run"
+                  and missing_issue_finalized["validation_issue_summary"] == "autonomous-driver-dispatch"
+                  and missing_issue_finalized["stats_status"] == "not_run"
+                  and "issues=0/1" in missing_issue_finalized["autonomous_driver_summary"]
+                  and not run.autonomous_marathon_watchdog_path(missing_issue_dir).exists(),
+                  failures)
+
             stale = run.autonomous_marathon(
                 catalog,
                 github_targets,
