@@ -31,6 +31,8 @@ PERSONAS = ROOT / "tools" / "product-journey" / "personas.json"
 SCENARIOS = ROOT / "tools" / "product-journey" / "scenarios.json"
 GITHUB_TARGETS = ROOT / "tools" / "product-journey" / "github-targets.json"
 SCHEMA = ROOT / "tools" / "product-journey" / "schema.json"
+DRIVERS_DIR = ROOT / "tools" / "product-journey" / "drivers"
+DEFAULT_DRIVER_ID = "kitsoki-mcp"
 DRIVER_AGENT = ROOT / ".agents" / "agents" / "product-journey-qa-driver.md"
 AUTONOMOUS_DRIVER_PROMPT = ROOT / "stories" / "product-journey-qa" / "prompts" / "autonomous_driver.md"
 PRODUCT_JOURNEY_SKILL = ROOT / ".agents" / "skills" / "product-journey-qa" / "SKILL.md"
@@ -68,6 +70,18 @@ STAGES = [
     "score_and_report",
 ]
 TRANSPORT_IDS = ["tui", "web", "vscode"]
+CANONICAL_DRIVER_CAPABILITIES = [
+    "visual.open",
+    "visual.observe",
+    "visual.act",
+    "session.open",
+    "session.status",
+    "session.submit",
+    "session.drive",
+    "session.inspect",
+    "session.trace",
+    "render.tui",
+]
 # Evidence contract per transport leg: which MCP-visible tool primarily backs
 # the leg's evidence, the evidence kind that names it, and how strong the
 # proof is. vscode is always bridge-level -- the IDE bridge stub/recording
@@ -807,11 +821,13 @@ def build_run_bundle(
     publish_deck: Optional[Path],
     live_budget_minutes: int = 20,
     transports: Optional[list[str]] = None,
+    driver_manifest: Optional[dict] = None,
 ) -> tuple[Path, dict]:
     if live_budget_minutes < 0:
         raise SystemExit("--live-budget-minutes must be >= 0")
     target = resolve_project(catalog, github_targets, project_id)
     persona = select_persona(personas, persona_id, f"{project_id}:{seed}")
+    driver_manifest = driver_manifest or load_driver_manifest()
     created_at = now_utc()
     run_id = f"{slug_timestamp()}-{project_id}-{persona['id']}-{seed}"
     run_dir = ARTIFACT_ROOT / run_id
@@ -840,6 +856,7 @@ def build_run_bundle(
         "live_budget_minutes": live_budget_minutes,
         "project": _meta_value(target),
         "persona": persona,
+        "driver": driver_summary(driver_manifest),
         "stages": stages,
         "scenarios": scenario_items,
         "artifacts": {
@@ -883,9 +900,9 @@ def build_run_bundle(
         run_json["transports"] = list(transports)
     evidence = evidence_plan(run_json)
     media_manifest = build_media_manifest(run_json, evidence)
-    execution_plan = build_execution_plan(run_json, evidence, transports)
-    driver_plan = build_driver_plan(run_json, evidence, execution_plan, transports)
-    agent_brief = build_agent_brief(run_json, evidence, execution_plan)
+    execution_plan = build_execution_plan(run_json, evidence, transports, driver_manifest)
+    driver_plan = build_driver_plan(run_json, evidence, execution_plan, transports, driver_manifest)
+    agent_brief = build_agent_brief(run_json, evidence, execution_plan, driver_manifest)
     findings = {"run_id": run_id, "items": [], "summary": {"strength": 0, "weakness": 0, "issue": 0, "fix": 0}}
     weakness_routes = build_weakness_routes(run_json, findings)
     prd_design_intake = build_prd_design_intake(run_json, weakness_routes)
@@ -1183,8 +1200,10 @@ def build_matrix_bundle(
     scenarios: list[dict],
     seed: str,
     persona_mode: str,
+    driver_manifest: Optional[dict] = None,
 ) -> tuple[Path, dict]:
     created_at = now_utc()
+    driver_manifest = driver_manifest or load_driver_manifest()
     matrix_id = f"{slug_timestamp()}-github-10-{seed}"
     matrix_dir = MATRIX_ROOT / matrix_id
     matrix_dir.mkdir(parents=True, exist_ok=False)
@@ -1206,6 +1225,7 @@ def build_matrix_bundle(
                 build_assignment_scenario_task(target, persona, scenario)
                 for scenario in scenarios
             ]
+            driver_arg = "" if driver_manifest.get("id") == DEFAULT_DRIVER_ID else f" --driver {driver_manifest.get('id', DEFAULT_DRIVER_ID)}"
             assignments.append({
                 "id": assignment_id,
                 "target": target,
@@ -1220,6 +1240,7 @@ def build_matrix_bundle(
                     f"--project {target['id']} "
                     f"--persona {persona['id']} "
                     f"--seed {assignment_seed}"
+                    f"{driver_arg}"
                 ),
                 "run_hint": (
                     "Create a product-journey run with this target/persona, drive the listed scenarios "
@@ -1232,6 +1253,7 @@ def build_matrix_bundle(
         "created_at": created_at,
         "seed": seed,
         "persona_mode": persona_mode,
+        "driver": driver_summary(driver_manifest),
         "selection_contract": github_targets["selection_contract"],
         "target_proof": github_targets.get("target_proof", {}),
         "target_count": len(targets),
@@ -2208,32 +2230,21 @@ def scenario_live_budget(run_json: dict, scenario_id: str) -> dict:
     }
 
 
-def resolve_mcp_tools(capability: str) -> list[str]:
-    mapping = {
-        "visual.open": ["mcp__kitsoki__visual_open"],
-        "visual.observe": ["mcp__kitsoki__visual_observe"],
-        "visual.act": ["mcp__kitsoki__visual_act"],
-        "session.open": ["mcp__kitsoki__session_new", "mcp__kitsoki__session_attach"],
-        "session.status": ["mcp__kitsoki__session_status"],
-        "session.submit": ["mcp__kitsoki__session_submit", "mcp__kitsoki__session_drive"],
-        "session.drive": ["mcp__kitsoki__session_drive"],
-        "session.inspect": ["mcp__kitsoki__session_inspect", "mcp__kitsoki__session_world", "mcp__kitsoki__session_trace"],
-        "session.trace": ["mcp__kitsoki__session_trace"],
-        "render.tui": ["mcp__kitsoki__render_tui", "mcp__kitsoki__render_tui_png"],
-    }
-    return mapping.get(capability, [])
+def resolve_mcp_tools(capability: str, driver_manifest: Optional[dict] = None) -> list[str]:
+    manifest = driver_manifest or load_driver_manifest()
+    return list(manifest.get("_resolved_capabilities", {}).get(capability, []))
 
 
-def resolved_mcp_tools(capabilities: list[str]) -> list[str]:
+def resolved_mcp_tools(capabilities: list[str], driver_manifest: Optional[dict] = None) -> list[str]:
     tools: list[str] = []
     for capability in capabilities:
-        for tool in resolve_mcp_tools(capability):
+        for tool in resolve_mcp_tools(capability, driver_manifest):
             if tool not in tools:
                 tools.append(tool)
     return tools
 
 
-def driver_actions(scenario: dict, run_json: dict, evidence_items: list[dict]) -> list[dict]:
+def driver_actions(scenario: dict, run_json: dict, evidence_items: list[dict], driver_manifest: Optional[dict] = None) -> list[dict]:
     scenario_id = scenario["id"]
     evidence_dir = scenario.get(
         "evidence_dir",
@@ -2258,7 +2269,7 @@ def driver_actions(scenario: dict, run_json: dict, evidence_items: list[dict]) -
             "id": "open_surface",
             "goal": "Open or attach the Kitsoki/product surface named by the scenario.",
             "tools": open_tools,
-            "resolved_tools": resolved_mcp_tools(open_tools),
+            "resolved_tools": resolved_mcp_tools(open_tools, driver_manifest),
             "evidence": [],
             "record": "Record the handle, URL, or reason this surface could not be opened.",
         },
@@ -2266,7 +2277,7 @@ def driver_actions(scenario: dict, run_json: dict, evidence_items: list[dict]) -
             "id": "read_current_frame",
             "goal": "Observe the exact operator-visible state before acting.",
             "tools": read_tools,
-            "resolved_tools": resolved_mcp_tools(read_tools),
+            "resolved_tools": resolved_mcp_tools(read_tools, driver_manifest),
             "evidence": [
                 item["kind"]
                 for item in evidence_items
@@ -2278,7 +2289,7 @@ def driver_actions(scenario: dict, run_json: dict, evidence_items: list[dict]) -
             "id": "act_as_persona",
             "goal": "Take the next natural persona action and preserve route/interaction evidence.",
             "tools": act_tools,
-            "resolved_tools": resolved_mcp_tools(act_tools),
+            "resolved_tools": resolved_mcp_tools(act_tools, driver_manifest),
             "evidence": [
                 item["kind"]
                 for item in evidence_items
@@ -2290,7 +2301,7 @@ def driver_actions(scenario: dict, run_json: dict, evidence_items: list[dict]) -
             "id": "capture_required_evidence",
             "goal": "Attach every minimum-evidence slot or record the matching quality-gate blocker.",
             "tools": capture_tools,
-            "resolved_tools": resolved_mcp_tools(capture_tools),
+            "resolved_tools": resolved_mcp_tools(capture_tools, driver_manifest),
             "evidence": [item["kind"] for item in evidence_items],
             "record": "Use attach commands for captured evidence; use blocker command for honest gaps.",
         },
@@ -2732,7 +2743,7 @@ def _execution_plan_step(
     return step
 
 
-def build_execution_plan(run_json: dict, evidence: dict, transports: Optional[list[str]] = None) -> dict:
+def build_execution_plan(run_json: dict, evidence: dict, transports: Optional[list[str]] = None, driver_manifest: Optional[dict] = None) -> dict:
     """Build the execution plan's ordered steps.
 
     Omitting `transports` (the default) preserves today's byte-compatible
@@ -2782,8 +2793,10 @@ def build_execution_plan(run_json: dict, evidence: dict, transports: Optional[li
         summary["scenario_count"] = scenarios_with_legs
         summary["leg_count"] = len(steps)
 
+    driver_manifest = driver_manifest or load_driver_manifest()
     return {
         "run_id": run_json["run_id"],
+        "driver": driver_summary(driver_manifest),
         "project": run_json["project"],
         "persona": run_json["persona"],
         "created_at": now_utc(),
@@ -2797,9 +2810,10 @@ def build_execution_plan(run_json: dict, evidence: dict, transports: Optional[li
     }
 
 
-def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> dict:
+def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict, driver_manifest: Optional[dict] = None) -> dict:
     persona = run_json["persona"]
     lens = persona_lens(persona)
+    driver_manifest = driver_manifest or load_driver_manifest()
     missing_evidence = [
         {"scenario": item["scenario"], "kind": item["kind"], "hint": evidence_capture_hint(item["kind"])}
         for item in evidence.get("items", [])
@@ -2807,10 +2821,11 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
     ]
     return {
         "run_id": run_json["run_id"],
+        "driver": driver_summary(driver_manifest),
         "project": run_json["project"],
         "persona": persona,
         "mission": (
-            "Drive the product journey as this persona using Kitsoki MCP and visual MCP. "
+            "Drive the product journey as this persona using the concrete tools named by the driver manifest. "
             "Capture evidence, record concrete findings, and avoid treating planned steps as validated."
         ),
         "recommended_agent": ".agents/agents/product-journey-qa-driver.md",
@@ -2831,6 +2846,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
             "Record strengths as well as weaknesses, issues, and fixes.",
             "If a live LLM or paid service would be required, stop and record the blocker instead of calling it from an automated test.",
             "Attach every useful artifact, then submit autonomous_fix when credible issue findings exist; the native gate runs the autonomous watchdog before filing or fixing. Review and validate through the story session. Use the CLI fallback commands only when the story session is unavailable.",
+            "Use scenario affordance names from the driver manifest; scenarios and findings should not depend on raw selectors.",
         ],
         "scenario_order": [
             {
@@ -2840,6 +2856,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
                 "task_prompt": step.get("task_prompt", step["task"]),
                 "primary_story": step["primary_story"],
                 "mcp_tools": [mcp["tool"] for mcp in step["mcp_steps"]],
+                "resolved_mcp_tools": resolved_mcp_tools([mcp["tool"] for mcp in step["mcp_steps"]], driver_manifest),
                 "success_criteria": step["success_criteria"],
                 "evidence": [item["kind"] for item in step["evidence"]],
                 "natural_utterances": step.get("natural_utterances", []),
@@ -2875,6 +2892,7 @@ def _driver_plan_entry(
     driver_action_scenario: dict,
     driver_action_evidence: list[dict],
     visual_surface: str,
+    driver_manifest: Optional[dict] = None,
     leg: Optional[dict] = None,
 ) -> dict:
     scenario_id = scenario["id"]
@@ -2889,9 +2907,9 @@ def _driver_plan_entry(
         "visual_surface": visual_surface,
         "live_budget": scenario_live_budget(run_json, scenario_id),
         "required_mcp": required_mcp,
-        "resolved_mcp_tools": resolved_mcp_tools(required_mcp),
+        "resolved_mcp_tools": resolved_mcp_tools(required_mcp, driver_manifest),
         "action_sequence": driver_action_sequence(required_mcp),
-        "driver_actions": driver_actions(driver_action_scenario, run_json, driver_action_evidence),
+        "driver_actions": driver_actions(driver_action_scenario, run_json, driver_action_evidence, driver_manifest),
         "persona_prompts": [
             f"Act as {run_json['persona']['label']}: {run_json['persona']['description']}",
             f"Risk focus: {', '.join(run_json['persona'].get('risk_focus', []))}",
@@ -2940,7 +2958,7 @@ def _driver_plan_entry(
     return entry
 
 
-def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict, transports: Optional[list[str]] = None) -> dict:
+def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict, transports: Optional[list[str]] = None, driver_manifest: Optional[dict] = None) -> dict:
     """Build the driver plan's per-scenario (or per-leg) dispatch contracts.
 
     Omitting `transports` preserves today's byte-compatible output: one entry
@@ -2950,6 +2968,7 @@ def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict, tran
     and required_mcp/evidence taken from that leg's contract.
     """
     lens = persona_lens(run_json["persona"])
+    driver_manifest = driver_manifest or load_driver_manifest()
     evidence_by_scenario: dict[str, list[dict]] = {}
     for item in evidence.get("items", []):
         evidence_by_scenario.setdefault(item["scenario"], []).append(item)
@@ -2972,6 +2991,7 @@ def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict, tran
                 driver_action_scenario=scenario,
                 driver_action_evidence=scenario_evidence_items,
                 visual_surface=driver_visual_surface(scenario["primary_story"], required_mcp),
+                driver_manifest=driver_manifest,
             ))
             continue
         for leg in scenario_transport_legs(scenario, transports):
@@ -2983,11 +3003,13 @@ def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict, tran
                 driver_action_scenario=leg,
                 driver_action_evidence=evidence_view,
                 visual_surface=leg["transport"],
+                driver_manifest=driver_manifest,
                 leg=leg,
             ))
     return {
         "run_id": run_json["run_id"],
         "driver_agent": ".agents/agents/product-journey-qa-driver.md",
+        "driver": driver_summary(driver_manifest),
         "project": run_json["project"],
         "persona": run_json["persona"],
         "scenarios": scenarios,
@@ -3021,15 +3043,22 @@ def persona_lens(persona: dict) -> dict:
 
 
 def render_driver_plan(plan: dict) -> str:
+    driver = plan.get("driver", {})
     lines = [
         "# Product journey driver plan",
         "",
         f"- Run: `{plan['run_id']}`",
         f"- Driver: `{plan['driver_agent']}`",
+        f"- Driving surface: `{driver.get('id', DEFAULT_DRIVER_ID)}` ({driver.get('label', '')})",
         f"- Project: `{plan['project']['label']}`",
         f"- Persona: `{plan['persona']['label']}`",
         "",
     ]
+    if driver.get("affordances"):
+        lines.extend(["## Driver Affordances", ""])
+        for name, selector in sorted(driver.get("affordances", {}).items()):
+            lines.append(f"- `{name}`: `{selector}`")
+        lines.append("")
     for index, scenario in enumerate(plan["scenarios"], start=1):
         heading = f"{index}. {scenario['label']}"
         if scenario.get("transport"):
@@ -3143,10 +3172,12 @@ def render_driver_plan(plan: dict) -> str:
 
 
 def render_agent_brief(brief: dict) -> str:
+    driver = brief.get("driver", {})
     lines = [
         "# Product journey QA agent brief",
         "",
         f"- Run: `{brief['run_id']}`",
+        f"- Driving surface: `{driver.get('id', DEFAULT_DRIVER_ID)}` ({driver.get('label', '')})",
         f"- Project: `{brief['project']['label']}`",
         f"- Persona: `{brief['persona_contract']['label']}`",
         f"- Surface preference: `{brief['persona_contract']['surface_preference']}`",
@@ -3178,6 +3209,21 @@ def render_agent_brief(brief: dict) -> str:
     ])
     for rule in brief["operating_rules"]:
         lines.append(f"- {rule}")
+    lines.extend(["", "## Driver Manifest", ""])
+    lines.append(f"- App kind: `{driver.get('app_kind', '')}`")
+    lines.append(f"- Manifest: `{driver.get('manifest_path', '')}`")
+    lines.append("")
+    lines.append("### Capability Tools")
+    lines.append("")
+    for capability, tools in sorted(driver.get("capabilities", {}).items()):
+        lines.append(f"- `{capability}`: {', '.join(f'`{tool}`' for tool in tools)}")
+    affordances = driver.get("affordances", {})
+    lines.extend(["", "### Affordances", ""])
+    if affordances:
+        for name, selector in sorted(affordances.items()):
+            lines.append(f"- `{name}`: `{selector}`")
+    else:
+        lines.append("- (none declared)")
     lines.extend(["", "## Scenario Order", ""])
     for index, scenario in enumerate(brief["scenario_order"], start=1):
         lines.extend([
@@ -3186,6 +3232,7 @@ def render_agent_brief(brief: dict) -> str:
             f"- Scenario: `{scenario['id']}`",
             f"- Story: `{scenario['primary_story']}`",
             f"- MCP tools: {', '.join(scenario['mcp_tools'])}",
+            f"- Resolved tools: {', '.join(scenario.get('resolved_mcp_tools', [])) or '(none)'}",
             f"- Evidence: {', '.join(scenario['evidence'])}",
             f"- Live budget: {scenario.get('live_budget', {}).get('summary', '')}",
             "",
@@ -3495,6 +3542,115 @@ def write_json(path: Path, data: dict) -> None:
 
 def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def driver_manifest_path(path_or_id: str) -> Path:
+    value = (path_or_id or DEFAULT_DRIVER_ID).strip()
+    candidate = Path(value)
+    if candidate.is_absolute() or candidate.parent != Path("."):
+        return candidate if candidate.is_absolute() else ROOT / candidate
+    if candidate.suffix:
+        return DRIVERS_DIR / candidate
+    return DRIVERS_DIR / f"{candidate.name}.json"
+
+
+def normalize_capability_tools(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, list):
+        tools = []
+        for item in value:
+            if not isinstance(item, str) or not item:
+                raise SystemExit("Driver manifest capability values must be non-empty strings or string arrays")
+            tools.append(item)
+        return tools
+    raise SystemExit("Driver manifest capability values must be non-empty strings or string arrays")
+
+
+def load_driver_manifest(path_or_id: str = DEFAULT_DRIVER_ID) -> dict:
+    path = driver_manifest_path(path_or_id)
+    if not path.is_file():
+        raise SystemExit(f"Driver manifest not found: {path}")
+    manifest = read_json(path)
+    manifest["_path"] = str(path)
+    capabilities = manifest.get("capabilities", {})
+    if not isinstance(capabilities, dict):
+        raise SystemExit(f"Driver manifest {path} must contain a capabilities object")
+    manifest["_resolved_capabilities"] = {
+        capability: normalize_capability_tools(value)
+        for capability, value in capabilities.items()
+    }
+    return manifest
+
+
+def driver_summary(manifest: dict) -> dict:
+    return {
+        "id": manifest.get("id", ""),
+        "label": manifest.get("label", ""),
+        "app_kind": manifest.get("app_kind", ""),
+        "manifest_path": manifest.get("_path", ""),
+        "capabilities": manifest.get("_resolved_capabilities", {}),
+        "affordances": manifest.get("affordances", {}),
+        "evidence_contract": manifest.get("evidence_contract", {}),
+        "oracles": manifest.get("oracles", []),
+    }
+
+
+def validate_driver_manifest(manifest: dict) -> dict:
+    issues: list[dict] = []
+    path = manifest.get("_path", "")
+    for key in ["id", "label", "app_kind", "capabilities"]:
+        if not manifest.get(key):
+            issues.append({"severity": "error", "id": "driver-required-key", "detail": f"{path}: missing {key}"})
+    capabilities = manifest.get("_resolved_capabilities", {})
+    missing = [capability for capability in CANONICAL_DRIVER_CAPABILITIES if not capabilities.get(capability)]
+    if missing:
+        issues.append({"severity": "error", "id": "driver-capabilities", "detail": ", ".join(missing)})
+    unknown = sorted(set(capabilities) - set(CANONICAL_DRIVER_CAPABILITIES))
+    if unknown:
+        issues.append({"severity": "error", "id": "driver-capability-keys", "detail": ", ".join(unknown)})
+    launch = manifest.get("launch")
+    if launch is not None:
+        if not isinstance(launch, dict):
+            issues.append({"severity": "error", "id": "driver-launch-shape", "detail": "launch must be an object"})
+        else:
+            if "command" in launch and not isinstance(launch.get("command"), str):
+                issues.append({"severity": "error", "id": "driver-launch-command", "detail": "launch.command must be a string"})
+            if "cwd" in launch and not isinstance(launch.get("cwd"), str):
+                issues.append({"severity": "error", "id": "driver-launch-cwd", "detail": "launch.cwd must be a string"})
+            ready = launch.get("ready")
+            if ready is not None:
+                if not isinstance(ready, dict):
+                    issues.append({"severity": "error", "id": "driver-launch-ready", "detail": "launch.ready must be an object"})
+                elif ready.get("http") and not isinstance(ready.get("http"), str):
+                    issues.append({"severity": "error", "id": "driver-launch-ready-http", "detail": "launch.ready.http must be a string"})
+                elif "timeout_s" in ready and not isinstance(ready.get("timeout_s"), int):
+                    issues.append({"severity": "error", "id": "driver-launch-ready-timeout", "detail": "launch.ready.timeout_s must be an integer"})
+    for oracle in manifest.get("oracles", []):
+        if not isinstance(oracle, dict):
+            issues.append({"severity": "error", "id": "driver-oracle-shape", "detail": "oracle entries must be objects"})
+            continue
+        command = str(oracle.get("command", "")).strip()
+        if not oracle.get("id") or not command:
+            issues.append({"severity": "error", "id": "driver-oracle-required", "detail": "oracle entries require id and command"})
+            continue
+        parts = shlex.split(command)
+        if not parts:
+            issues.append({"severity": "error", "id": "driver-oracle-command", "detail": f"{oracle.get('id')}: empty command"})
+            continue
+        executable = Path(parts[0])
+        if executable.parent != Path("."):
+            candidate = executable if executable.is_absolute() else ROOT / executable
+            if not candidate.exists():
+                issues.append({"severity": "error", "id": "driver-oracle-exists", "detail": f"{oracle.get('id')}: {parts[0]} not found"})
+            elif not os.access(candidate, os.X_OK):
+                issues.append({"severity": "error", "id": "driver-oracle-executable", "detail": f"{oracle.get('id')}: {parts[0]} is not executable"})
+    return {
+        "status": "ok" if not any(issue["severity"] == "error" for issue in issues) else "error",
+        "driver": driver_summary(manifest),
+        "canonical_capabilities": CANONICAL_DRIVER_CAPABILITIES,
+        "issues": issues,
+    }
 
 
 def run_dir_from_arg(value: str) -> Path:
@@ -7513,6 +7669,29 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 "run.json artifacts map does not reference every required artifact",
                 ", ".join(missing_artifact_refs),
             )
+        run_driver = run_json.get("driver", {})
+        driver_ids = {
+            "run.json": run_driver.get("id", ""),
+            "execution-plan.json": execution_plan.get("driver", {}).get("id", "") if execution_plan else "",
+            "driver-plan.json": driver_plan.get("driver", {}).get("id", "") if driver_plan else "",
+            "agent-brief.json": agent_brief.get("driver", {}).get("id", "") if agent_brief else "",
+        }
+        if run_driver and any(value and value != run_driver.get("id", "") for value in driver_ids.values()):
+            add_validation_issue(
+                issues,
+                "error",
+                "driver-id-mismatch",
+                "Run artifacts disagree on the driver manifest id",
+                ", ".join(f"{name}={value or '(missing)'}" for name, value in driver_ids.items()),
+            )
+        if run_driver and not all(driver_ids.values()):
+            add_validation_issue(
+                issues,
+                "error",
+                "driver-id-missing",
+                "Run artifacts must record the driver manifest id",
+                ", ".join(name for name, value in driver_ids.items() if not value),
+            )
 
     for payload, schema_key, label in [
         (media_manifest, "media_manifest", "media-manifest.json"),
@@ -11180,6 +11359,8 @@ def main() -> None:
     parser.add_argument("--live-budget-minutes", type=int, default=20, help="Per-scenario live/model budget written into emitted run contracts")
     parser.add_argument("--run-log", action="store_true", help="Force a timestamped run log entry")
     parser.add_argument("--emit-run", action="store_true", help="Write a no-LLM run artifact bundle and Slidey deck")
+    parser.add_argument("--driver", default=DEFAULT_DRIVER_ID, help="Driver manifest id or path for --emit-run/--emit-matrix")
+    parser.add_argument("--driver-smoke", default="", help="Validate a driver manifest id/path without launching the target")
     parser.add_argument("--scenarios", default="", help="Comma-separated scenario ids to include with --emit-run")
     parser.add_argument(
         "--transport",
@@ -11348,6 +11529,21 @@ def main() -> None:
     personas = active_personas(all_personas)
     scenarios = active_scenarios(all_scenarios)
     github_targets = load_github_targets(GITHUB_TARGETS)
+
+    if args.driver_smoke:
+        result = validate_driver_manifest(load_driver_manifest(args.driver_smoke))
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+        else:
+            print(f"Driver smoke: {result['status']}")
+            print(f"Driver: {result['driver']['id']} ({result['driver']['label']})")
+            print(f"Manifest: {result['driver']['manifest_path']}")
+            for issue in result["issues"]:
+                print(f"- {issue['severity']}: {issue['id']}: {issue['detail']}")
+        if result["status"] != "ok":
+            raise SystemExit(1)
+        append_log(f"Validated driver manifest {result['driver']['id']}")
+        return
 
     if args.prune_runs:
         result = prune_runs(keep=args.keep, dry_run=not args.apply)
@@ -11724,7 +11920,8 @@ def main() -> None:
 
     if args.emit_matrix:
         github_targets_for_matrix = merge_target_proofs(github_targets, load_target_proof(args.target_proof_file))
-        matrix_dir, matrix = build_matrix_bundle(github_targets_for_matrix, personas, scenarios, args.seed, args.matrix_personas)
+        driver_manifest = load_driver_manifest(args.driver)
+        matrix_dir, matrix = build_matrix_bundle(github_targets_for_matrix, personas, scenarios, args.seed, args.matrix_personas, driver_manifest)
         target_proof = matrix.get("target_proof", {})
         target_proof_summary = target_proof.get("summary", {})
         target_proof_ready = bool(target_proof) and target_proof_summary.get("failed", 0) == 0 and target_proof_summary.get("errors", 0) == 0
@@ -12313,6 +12510,7 @@ def main() -> None:
         publish_deck = DEFAULT_DECK if args.publish_deck else None
         run_scenarios = select_scenarios(scenarios, args.scenarios)
         run_transports = select_transports(args.transport)
+        driver_manifest = load_driver_manifest(args.driver)
         run_dir, run_json = build_run_bundle(
             catalog,
             github_targets,
@@ -12325,6 +12523,7 @@ def main() -> None:
             publish_deck,
             args.live_budget_minutes,
             run_transports,
+            driver_manifest,
         )
         if args.json_output:
             result = {

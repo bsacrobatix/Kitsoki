@@ -224,16 +224,17 @@ Add `--publish-deck` when the generated deck should replace
 `docs/decks/product-journey-eval.slidey.json` for review.
 
 Use `agent-brief.md` as the live-driver handoff: it states the persona,
-operating rules, persona lens, scenario order, MCP tools, success criteria, and
-missing evidence without implying planned steps are validated. The lens makes
+operating rules, persona lens, driver manifest, scenario order, MCP tools,
+success criteria, and missing evidence without implying planned steps are
+validated. The lens makes
 the same scenario run differently for core maintainers, dependency debuggers,
 docs-minded contributors, and IDE-first engineers while keeping behavior
 repeatable. The brief names
 `.agents/agents/product-journey-qa-driver.md` as the reusable live/cassette
-driver for Kitsoki Studio MCP and visual MCP runs. Use `driver-plan.md` for the
+driver. Use `driver-plan.md` for the
 machine-readable harness, visual-surface, action-sequence, and gate contract,
 including `resolved_mcp_tools` and per-action `resolved_tools` entries that map
-scenario-level aliases like `session.open` to concrete Kitsoki MCP tool names,
+scenario-level aliases like `session.open` to concrete driver tool names,
 `driver-journal.md` for the auditable record of what the driver actually tried,
 `execution-plan.md` for the detailed evidence slots and ready-to-fill
 `--attach-evidence` commands, and `driver-handoff.md` as the operator handoff
@@ -274,6 +275,31 @@ Use `--driver-replay-smoke --smoke-scenario <scenario-id>` before a live pass
 when you want a cheap proof that the attach commands, driver journal refs, media
 manifest, review checks, and validation gates still compose around one
 cassette-backed scenario.
+
+### Driving Surfaces
+
+Product-journey resolves abstract capabilities through a driver manifest in
+`tools/product-journey/drivers/`. `kitsoki-mcp` is the default and preserves the
+existing Kitsoki Studio MCP / visual MCP tool mapping. Pass `--driver <id-or-path>`
+to `--emit-run` or `--emit-matrix` to generate bundles for another surface, and
+use `--driver-smoke <id-or-path>` to validate a manifest without launching the
+target app.
+
+A manifest must provide `id`, `label`, `app_kind`, and a `capabilities` map for
+the canonical keys in `schema.json` (`visual.open`, `visual.observe`,
+`visual.act`, `session.open`, `session.status`, `session.submit`,
+`session.drive`, `session.inspect`, `session.trace`, `render.tui`). Values may
+be one concrete tool name or an ordered list. Optional `launch`, `ready`,
+`affordances`, `evidence_contract`, and `oracles` describe how an external app is
+brought up and proved, but smoke validation only shape-checks launch data and
+never starts the app.
+
+Scenarios should refer to manifest affordance names such as
+`affordance:open-dashboard`, never raw selectors. The driver manifest is the
+place where a downstream web app maps those names to selectors or action handles.
+`drivers/web-generic.json` is a placeholder browser/Playwright-style surface,
+and `drivers/web-generic.example.json` shows how a consumer can add launch,
+ready, affordance, and oracle details in its own repo.
 
 Attach evidence captured by a live or cassette-backed MCP run:
 
