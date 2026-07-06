@@ -27,6 +27,7 @@ def main():
         good = root / "good.md"
         readme = root / "readme.md"
         story_readme = root / "story-readme.md"
+        prompt = root / "autonomous-driver.md"
         good.write_text(
             "Never file findings with raw `gh issue create`; use kitsoki gitops autonomous-fix.\n"
             "Do not run `gh issue comment` or `gh issue close`; use kitsoki gitops issue-comment "
@@ -47,12 +48,25 @@ def main():
             encoding="utf-8",
         )
         story_readme.write_text("Use the product-journey story autonomous_fix gate.\n", encoding="utf-8")
+        prompt.write_text(
+            "Capture proof, record findings, and return JSON. The outer product-journey story has already "
+            "queued the autonomous finalizer; that finalizer owns `autonomous_watchdog`, `autonomous_fix`, "
+            "review, validation, stats, issue close-out, and gh-agent draining.\n",
+            encoding="utf-8",
+        )
+        bad_prompt = root / "bad-autonomous-driver.md"
+        bad_prompt.write_text(
+            "After capture, submit `autonomous_fix ticket_repo=<owner/repo>` and submit `review`.\n",
+            encoding="utf-8",
+        )
 
         original_driver = run.DRIVER_AGENT
+        original_prompt = run.AUTONOMOUS_DRIVER_PROMPT
         original_skill = run.PRODUCT_JOURNEY_SKILL
         original_readme = run.PRODUCT_JOURNEY_README
         try:
             run.DRIVER_AGENT = good
+            run.AUTONOMOUS_DRIVER_PROMPT = prompt
             run.PRODUCT_JOURNEY_SKILL = readme
             run.PRODUCT_JOURNEY_README = story_readme
             issues = []
@@ -74,8 +88,18 @@ def main():
                     any(issue.get("id") == "native-gitops-boundary" for issue in issues),
                     failures,
                 )
+            run.DRIVER_AGENT = good
+            run.AUTONOMOUS_DRIVER_PROMPT = bad_prompt
+            issues = []
+            run.validate_native_gitops_boundaries(issues)
+            check(
+                "autonomous driver final gates must stay story-owned",
+                any(issue.get("id") == "autonomous-driver-finalizer-boundary" for issue in issues),
+                failures,
+            )
         finally:
             run.DRIVER_AGENT = original_driver
+            run.AUTONOMOUS_DRIVER_PROMPT = original_prompt
             run.PRODUCT_JOURNEY_SKILL = original_skill
             run.PRODUCT_JOURNEY_README = original_readme
 

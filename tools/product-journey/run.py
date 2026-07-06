@@ -32,6 +32,7 @@ SCENARIOS = ROOT / "tools" / "product-journey" / "scenarios.json"
 GITHUB_TARGETS = ROOT / "tools" / "product-journey" / "github-targets.json"
 SCHEMA = ROOT / "tools" / "product-journey" / "schema.json"
 DRIVER_AGENT = ROOT / ".agents" / "agents" / "product-journey-qa-driver.md"
+AUTONOMOUS_DRIVER_PROMPT = ROOT / "stories" / "product-journey-qa" / "prompts" / "autonomous_driver.md"
 PRODUCT_JOURNEY_SKILL = ROOT / ".agents" / "skills" / "product-journey-qa" / "SKILL.md"
 PRODUCT_JOURNEY_README = ROOT / "tools" / "product-journey" / "README.md"
 LOG = ROOT / ".context" / "product-journey-runlog.md"
@@ -1465,6 +1466,44 @@ def validate_native_gitops_boundaries(issues: list[dict]) -> None:
                         "Product journey automation must use kitsoki gitops/host.gh.ticket, not raw GitHub CLI commands",
                         f"{display_path(path)}:{line_number_for_offset(text, match.start())}: {label}",
                     )
+
+    if AUTONOMOUS_DRIVER_PROMPT.exists():
+        text = AUTONOMOUS_DRIVER_PROMPT.read_text(encoding="utf-8")
+        collapsed = " ".join(text.split())
+        lowered = collapsed.lower()
+        finalizer_markers = [
+            "outer product-journey story has already queued the autonomous finalizer",
+            "finalizer owns `autonomous_watchdog`, `autonomous_fix`, review, validation, stats",
+        ]
+        if not all(marker in lowered for marker in finalizer_markers):
+            add_corpus_issue(
+                issues,
+                "error",
+                "autonomous-driver-finalizer-boundary",
+                "Autonomous driver prompt must keep final gates owned by the story finalizer",
+                display_path(AUTONOMOUS_DRIVER_PROMPT),
+            )
+        forbidden_driver_gate_patterns = [
+            r"submit `autonomous_watchdog`",
+            r"submit `autonomous_fix",
+            r"submitting `review`",
+            r"submit `review`",
+            r"submitting `validate`",
+            r"submit `validate`",
+            r"submitting `stats`",
+            r"submit `stats`",
+        ]
+        for pattern in forbidden_driver_gate_patterns:
+            match = re.search(pattern, lowered)
+            if match:
+                context = normalized_context(collapsed, match.start(), match.end())
+                add_corpus_issue(
+                    issues,
+                    "error",
+                    "autonomous-driver-finalizer-boundary",
+                    "Autonomous dispatched driver must not instruct the agent to run final gates",
+                    f"{display_path(AUTONOMOUS_DRIVER_PROMPT)}: {context}",
+                )
 
 
 def duplicate_values(values: list[str]) -> list[str]:
