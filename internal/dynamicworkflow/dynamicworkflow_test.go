@@ -12,13 +12,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func dynamicWorkflowTestDir(t *testing.T, repoRoot string) string {
+	t.Helper()
+	dir := filepath.Join(repoRoot, ".artifacts", "dynamic-workflows-test", strings.ReplaceAll(t.Name(), "/", "-"))
+	require.NoError(t, os.RemoveAll(dir))
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 func TestServiceCreateValidateExport(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	require.NoError(t, err)
 	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
 	require.NoError(t, err)
 
-	outDir := t.TempDir()
+	outDir := dynamicWorkflowTestDir(t, repoRoot)
 	svc := NewService(repoRoot)
 	svc.OutputDir = outDir
 	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)
@@ -30,7 +38,7 @@ func TestServiceCreateValidateExport(t *testing.T) {
 		Slug: "dynamic-workflows",
 	})
 	require.NoError(t, err)
-	require.True(t, receipt.Validation.OK, "receipt should validate")
+	require.True(t, receipt.Validation.OK, "receipt should validate: %v", receipt.Validation.Errors)
 	require.True(t, strings.Contains(receipt.WorkflowID, "dynamic-workflows"))
 	require.FileExists(t, receipt.ManifestPath)
 	require.FileExists(t, receipt.EventsPath)
@@ -46,7 +54,7 @@ func TestServiceCreateValidateExport(t *testing.T) {
 	require.Equal(t, receipt.WorkflowID, loaded.WorkflowID)
 	require.True(t, loaded.Validation.OK)
 
-	exportDir := filepath.Join(t.TempDir(), "exported", "dynamic-workflows")
+	exportDir := filepath.Join(outDir, "exported", "dynamic-workflows")
 	receipt, err = svc.Export(context.Background(), receipt.WorkflowID, ExportRequest{TargetDir: exportDir})
 	require.NoError(t, err)
 	require.Equal(t, exportDir, receipt.ExportPath)
@@ -72,7 +80,7 @@ func TestServiceCreateValidateExport(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, goyaml.Unmarshal(b, &launch))
 	world := launch["world"].(map[string]any)
-	require.Equal(t, filepath.ToSlash(filepath.Join(exportDir, "manifest.yaml")), world["manifest_path"])
+	require.Equal(t, filepath.ToSlash(runtimePath(repoRoot, filepath.Join(exportDir, "manifest.yaml"))), world["manifest_path"])
 }
 
 func TestServiceCreateAvoidsSameSecondSlugCollisions(t *testing.T) {
@@ -81,7 +89,7 @@ func TestServiceCreateAvoidsSameSecondSlugCollisions(t *testing.T) {
 	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
 	require.NoError(t, err)
 
-	outDir := t.TempDir()
+	outDir := dynamicWorkflowTestDir(t, repoRoot)
 	svc := NewService(repoRoot)
 	svc.OutputDir = outDir
 	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)
@@ -108,14 +116,44 @@ func TestServiceCreateAvoidsSameSecondSlugCollisions(t *testing.T) {
 	require.FileExists(t, filepath.Join(second.DraftDir, "receipt.json"))
 }
 
+func TestValidateDraftRejectsRuntimeManifestFailure(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	require.NoError(t, err)
+	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
+	require.NoError(t, err)
+
+	outDir := dynamicWorkflowTestDir(t, repoRoot)
+	svc := NewService(repoRoot)
+	svc.OutputDir = outDir
+	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)
+	svc.Now = func() time.Time { return time.Date(2026, 7, 6, 6, 30, 0, 0, time.UTC) }
+
+	receipt, err := svc.Create(context.Background(), CreateRequest{
+		Goal: "fan out agents to increase coverage",
+		Slug: "runtime-manifest-failure",
+	})
+	require.NoError(t, err)
+	require.True(t, receipt.Validation.OK, "receipt should validate: %v", receipt.Validation.Errors)
+
+	manifest, err := readManifest(receipt.ManifestPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, manifest.Items)
+	manifest.Items[0].GateCommand = "claude -p 'spend tokens'"
+	require.NoError(t, writeYAML(receipt.ManifestPath, manifest))
+
+	report := svc.ValidateDraft(receipt.AppPath, receipt.ManifestPath)
+	require.False(t, report.OK)
+	require.Contains(t, strings.Join(report.Errors, "\n"), "runtime launch-readiness failed")
+	require.Contains(t, strings.Join(report.Errors, "\n"), "gate_command appears to invoke an LLM or live run")
+}
+
 func TestServiceCreatePreservesSyntheticGLMCoverageFanout(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	require.NoError(t, err)
 	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
 	require.NoError(t, err)
 
-	outDir := filepath.Join(repoRoot, ".artifacts", "dynamic-workflows-test", strings.ReplaceAll(t.Name(), "/", "-"))
-	t.Cleanup(func() { _ = os.RemoveAll(outDir) })
+	outDir := dynamicWorkflowTestDir(t, repoRoot)
 	svc := NewService(repoRoot)
 	svc.OutputDir = outDir
 	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)
@@ -126,7 +164,7 @@ func TestServiceCreatePreservesSyntheticGLMCoverageFanout(t *testing.T) {
 		Slug: "glm-coverage",
 	})
 	require.NoError(t, err)
-	require.True(t, receipt.Validation.OK)
+	require.True(t, receipt.Validation.OK, "receipt should validate: %v", receipt.Validation.Errors)
 
 	manifest, err := readManifest(receipt.ManifestPath)
 	require.NoError(t, err)
@@ -176,8 +214,7 @@ func TestServiceCreateResearchTestingApproachesFanout(t *testing.T) {
 	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
 	require.NoError(t, err)
 
-	outDir := filepath.Join(repoRoot, ".artifacts", "dynamic-workflows-test", strings.ReplaceAll(t.Name(), "/", "-"))
-	t.Cleanup(func() { _ = os.RemoveAll(outDir) })
+	outDir := dynamicWorkflowTestDir(t, repoRoot)
 	svc := NewService(repoRoot)
 	svc.OutputDir = outDir
 	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)
@@ -188,7 +225,7 @@ func TestServiceCreateResearchTestingApproachesFanout(t *testing.T) {
 		Slug: "testing-approaches-research",
 	})
 	require.NoError(t, err)
-	require.True(t, receipt.Validation.OK)
+	require.True(t, receipt.Validation.OK, "receipt should validate: %v", receipt.Validation.Errors)
 
 	manifest, err := readManifest(receipt.ManifestPath)
 	require.NoError(t, err)
@@ -234,7 +271,7 @@ func TestServiceExportPreservesResearchDriveOnlyItems(t *testing.T) {
 	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
 	require.NoError(t, err)
 
-	outDir := t.TempDir()
+	outDir := dynamicWorkflowTestDir(t, repoRoot)
 	svc := NewService(repoRoot)
 	svc.OutputDir = outDir
 	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)
@@ -245,9 +282,9 @@ func TestServiceExportPreservesResearchDriveOnlyItems(t *testing.T) {
 		Slug: "testing-approaches-research",
 	})
 	require.NoError(t, err)
-	require.True(t, receipt.Validation.OK)
+	require.True(t, receipt.Validation.OK, "receipt should validate: %v", receipt.Validation.Errors)
 
-	exportDir := filepath.Join(t.TempDir(), "exported", "testing-approaches-research")
+	exportDir := filepath.Join(outDir, "exported", "testing-approaches-research")
 	receipt, err = svc.Export(context.Background(), receipt.WorkflowID, ExportRequest{TargetDir: exportDir})
 	require.NoError(t, err)
 	require.Equal(t, exportDir, receipt.ExportPath)
@@ -299,7 +336,7 @@ func TestServiceExportBlocksBaseStoryWithoutApproval(t *testing.T) {
 	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
 	require.NoError(t, err)
 
-	outDir := t.TempDir()
+	outDir := dynamicWorkflowTestDir(t, repoRoot)
 	svc := NewService(repoRoot)
 	svc.OutputDir = outDir
 	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)

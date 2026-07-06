@@ -393,8 +393,61 @@ func (s *Service) ValidateDraft(appPath, manifestPath string) ValidationReport {
 		return report
 	}
 	report.Errors = append(report.Errors, validateManifest(s.RootDir, manifest, appPath)...)
+	report.Errors = append(report.Errors, s.validateLaunchReadiness(appPath, manifestPath)...)
 	report.OK = len(report.Errors) == 0
 	return report
+}
+
+func (s *Service) validateLaunchReadiness(appPath, manifestPath string) []string {
+	tmpDir, err := os.MkdirTemp("", "kitsoki-dynamicworkflow-validate-*")
+	if err != nil {
+		return []string{fmt.Sprintf("runtime launch-readiness setup failed: %v", err)}
+	}
+	defer os.RemoveAll(tmpDir)
+
+	appYAML := filepath.Join(appPath, "app.yaml")
+	statePath := filepath.Join(tmpDir, "punch-list.state.json")
+	flowPath := filepath.Join(tmpDir, "launch-readiness.yaml")
+	flow := fmt.Sprintf(`test_kind: flow
+app: %s
+use_orchestrator: true
+initial_state: idle
+initial_world:
+  manifest_path: %s
+  state_path: %s
+turns:
+  - intent: { name: start, slots: {} }
+    expect_state: load
+    expect_world:
+      load_error: ""
+  - intent: { name: next_item, slots: {} }
+    expect_state: board
+expect_no_errors: true
+`,
+		quoteYAMLString(filepath.ToSlash(runtimePath(s.RootDir, appYAML))),
+		quoteYAMLString(filepath.ToSlash(runtimePath(s.RootDir, manifestPath))),
+		quoteYAMLString(filepath.ToSlash(statePath)),
+	)
+	if err := os.WriteFile(flowPath, []byte(flow), 0o644); err != nil {
+		return []string{fmt.Sprintf("runtime launch-readiness setup failed: %v", err)}
+	}
+
+	report, err := testrunner.RunFlows(context.Background(), appYAML, flowPath, testrunner.FlowOptions{FailFast: true})
+	if err != nil {
+		return []string{fmt.Sprintf("runtime launch-readiness failed: %v", err)}
+	}
+	if report.Failed == 0 {
+		return nil
+	}
+	errs := []string{"runtime launch-readiness failed"}
+	for _, result := range report.Results {
+		for _, turn := range result.Turns {
+			for _, failure := range turn.Failures {
+				errs = append(errs, fmt.Sprintf("runtime launch-readiness turn %d: %s", turn.TurnIndex, failure))
+			}
+		}
+	}
+	return errs
 }
 
 // Export copies a generated workflow package to targetDir and writes starter
@@ -855,6 +908,9 @@ func validateManifest(root string, manifest Manifest, appPath string) []string {
 				errs = append(errs, fmt.Sprintf("%s.kind is unsupported: %s", checkPrefix, check.Kind))
 			}
 		}
+		if item.GateCommand != "" && isLLMSpendingCommand(item.GateCommand) {
+			errs = append(errs, fmt.Sprintf("%s.gate_command appears to invoke an LLM or live run", prefix))
+		}
 	}
 	_ = appPath
 	return errs
@@ -1127,6 +1183,14 @@ func quoteArg(s string) string {
 		return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 	}
 	return s
+}
+
+func quoteYAMLString(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return `""`
+	}
+	return string(b)
 }
 
 func isLLMSpendingCommand(cmd string) bool {
