@@ -45,6 +45,7 @@ var allBackends = []struct {
 	{"claude", claudeBackend{}},
 	{"copilot", copilotBackend{}},
 	{"codex", codexBackend{}},
+	{"agy", agyBackend{}},
 }
 
 // TestConformance_DefaultBackendIsClaude pins the load-bearing default: a
@@ -98,6 +99,14 @@ func TestConformance_StreamParse(t *testing.T) {
 			fixture:       "codex/ask_simple.jsonl",
 			wantReply:     `{"answer":"hello"}`,
 			wantSessionID: "00000000-0000-0000-0000-000000000000",
+			wantUsageKey:  "output_tokens",
+		},
+		{
+			name:          "agy/simple",
+			backend:       agyBackend{},
+			fixture:       "agy/ask_simple.jsonl",
+			wantReply:     "pong",
+			wantSessionID: "42e07c25-6fef-4771-aa40-1f263352723b",
 			wantUsageKey:  "output_tokens",
 		},
 		{
@@ -445,6 +454,47 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 			t.Errorf("codex -C must be absolute for a relative workingDir; want -C %s; args=%v", absWD, relArgs)
 		}
 	})
+
+	t.Run("agy/rewrite", func(t *testing.T) {
+		inv := agyBackend{}.TranslateInvocation(claudeArgs, stdin, wd)
+		got := strings.Join(inv.Args, " ")
+
+		if inv.Stdin != "" {
+			t.Errorf("agy stdin = %q, want empty (prompt is an arg)", inv.Stdin)
+		}
+		if !hasFlagValue(inv.Args, "--print", "SYS-PROMPT\n\n---\n\nUSER PROMPT") {
+			t.Errorf("agy --print arg missing prepended system prompt; args=%v", inv.Args)
+		}
+		mustContain(t, got, "--dangerously-skip-permissions")
+		mustContain(t, got, "--output-format json")
+		if !hasFlagValue(inv.Args, "--model", "some-model") {
+			t.Errorf("agy missing --model some-model; args=%v", inv.Args)
+		}
+		// A claude model id must be dropped.
+		cb := agyBackend{}
+		mi := cb.TranslateInvocation([]string{"-p", "--model", "claude-haiku-4-5-20251001"}, "p", "")
+		if strings.Contains(strings.Join(mi.Args, " "), "--model") {
+			t.Errorf("agy forwarded a claude model id; args=%v", mi.Args)
+		}
+		// A genuine model id IS forwarded.
+		ci := cb.TranslateInvocation([]string{"-p", "--model", "gemini-3.5-flash"}, "p", "")
+		if !hasFlagValue(ci.Args, "--model", "gemini-3.5-flash") {
+			t.Errorf("agy dropped a non-claude model; args=%v", ci.Args)
+		}
+
+		// Claude-only flags must be gone.
+		for _, dropped := range []string{"--permission-mode", "--setting-sources", "--disable-slash-commands", "--effort", "--verbose", "--append-system-prompt", "--mcp-config", "stream-json"} {
+			if strings.Contains(got, dropped) {
+				t.Errorf("agy args still contain dropped flag %q: %v", dropped, inv.Args)
+			}
+		}
+
+		// Resume maps to --conversation.
+		resume := cb.TranslateInvocation([]string{"-p", "--resume", "uuid-123"}, "p", "")
+		if !hasFlagValue(resume.Args, "--conversation", "uuid-123") {
+			t.Errorf("agy --resume not translated to --conversation; args=%v", resume.Args)
+		}
+	})
 }
 
 // TestConformance_CopilotUsageOutputTokens asserts copilot's per-message
@@ -485,6 +535,7 @@ func TestConformance_ValidatorToolName(t *testing.T) {
 		"claude":  "mcp__kitsoki-validator__submit",
 		"copilot": "kitsoki-validator-submit",
 		"codex":   "submit",
+		"agy":     "mcp__kitsoki-validator__submit",
 	}
 	for _, b := range allBackends {
 		got := b.backend.ValidatorToolName("kitsoki-validator")
@@ -507,6 +558,7 @@ func TestConformance_StubRoundTrip(t *testing.T) {
 		{"claude", claudeBackend{}, WithClaudeRunner, "claude/ask_simple.jsonl", "pong"},
 		{"copilot", copilotBackend{}, WithCopilotRunner, "copilot/ask_simple.jsonl", "pong"},
 		{"codex", codexBackend{}, WithCodexRunner, "codex/ask_simple.jsonl", `{"answer":"hello"}`},
+		{"agy", agyBackend{}, WithAgyRunner, "agy/ask_simple.jsonl", "pong"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
