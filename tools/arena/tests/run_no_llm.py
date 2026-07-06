@@ -118,6 +118,17 @@ def run_default() -> int:
     checks.check("glm52 bugswarm report gate", report_test.returncode, 0)
     if report_test.returncode:
         checks.failures.append((report_test.stdout + report_test.stderr).strip())
+    report_gate_test = subprocess.run(
+        [sys.executable, str(HERE / "test_glm52_report_gate.py")],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    checks.check("glm52 report claim gate", report_gate_test.returncode, 0)
+    if report_gate_test.returncode:
+        checks.failures.append((report_gate_test.stdout + report_gate_test.stderr).strip())
     gap_plan_test = subprocess.run(
         [sys.executable, str(HERE / "test_glm52_gap_plan.py")],
         cwd=REPO_ROOT,
