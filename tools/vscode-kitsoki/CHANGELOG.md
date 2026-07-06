@@ -2,6 +2,33 @@
 
 All notable changes to the Kitsoki VS Code extension.
 
+## 0.3.0
+
+- **`openDiff` Mode A ({paths, base}).** `DiffController` now implements the
+  already-applied-edits review shape `stories/bugfix`'s `reviewing_external`
+  sends (`{paths: [...], base: "..."}`), not just Mode B's proposed-content
+  shape (`{path, new_text}`). Each changed file opens as its own diff tab —
+  left = the file's content at `base` (via `git show`), right = the real
+  on-disk working-tree file — and every file in the set shares ONE collective
+  accept/reject verdict (deciding any one tab decides the whole batch), the
+  shape `reviewing_external` expects. Nothing is written back either way —
+  Mode A reviews edits that are already on disk. See `src/diff-mode-a.ts`
+  (the pure, unit-tested git-show + arg-normalisation seam) and
+  `src/ide-diff.ts`.
+- **Fixed the no-`DiffController` "unconditional accept" landmine.**
+  `IdeTools.openDiff` used to return `{ok:true, verdict:'accepted'}` when no
+  `DiffController` was registered — fabricating a verdict the operator never
+  gave (never actually reachable from the real extension, which always
+  constructs one, but a real trap for any other host/test that builds
+  `IdeTools` directly). It now throws instead, which `ide-server.ts` reports
+  as `{isError:true}`; the Go host's `diffOpenIDE` turns that into a
+  `Result.Error`, and `reviewing_external`'s `on_error: reviewing` routes back
+  to the room's own choice screen — an honest "couldn't review" outcome
+  instead of a silent, fabricated accept.
+- **`openDiff` args are now logged** (same style as `getDiagnostics`), so a
+  real-socket capture can pin the wire shape the way
+  `vscode-bugfix-walk.e2e.spec.ts` already does for `getDiagnostics`.
+
 ## 0.2.0
 
 - **Auto-discover an onboarded instance.** When `kitsoki.storiesDir` is left

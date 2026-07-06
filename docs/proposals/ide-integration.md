@@ -50,11 +50,21 @@ Verified wire contract: `.context/claude-code-ide-interface.md`.
    `{path, new_text, new_text_path, title}` argument shape and `{ok, verdict}`
    return shape were already exercised by
    `tools/vscode-kitsoki/tests/ide-bridge.e2e.test.ts`; both handlers' doc
-   comments now say CONFIRMED instead of carrying a stale `TODO(schema)`. One
-   real gap the same capture surfaced: `reviewing_external`'s Mode A
+   comments now say CONFIRMED instead of carrying a stale `TODO(schema)`.
+   ~~One real gap the same capture surfaced: `reviewing_external`'s Mode A
    (`{paths, base}`, reviewing already-applied working-tree edits) is sent by
    `diff_open.go` but the real `DiffController.open()` only implements Mode B
-   (`{path, new_text}`) — untracked here, a candidate for its own follow-up.
+   (`{path, new_text}`).~~ Closed (dwf4-ide-mode-a): `DiffController` now
+   implements Mode A too — one diff tab per changed file (left = the file's
+   content at `base` via `git show`, right = the on-disk working-tree file),
+   sharing one collective accept/reject verdict across the whole set. See
+   `tools/vscode-kitsoki/src/diff-mode-a.ts` (the unit-tested git-show +
+   arg-normalisation seam), `tools/vscode-kitsoki/src/ide-diff.ts`, and the
+   Mode A round-trip case in `ide-bridge.e2e.test.ts`. The extension's
+   `IdeTools.openDiff` also stopped fabricating `{verdict:'accepted'}` when no
+   `DiffController` is registered — it now throws, which routes
+   `reviewing_external` back to its own choice screen via `on_error`
+   (`Result.Error`) instead of a silent false accept.
 
 2. **`open_diff` verdict capture.** v1 opens the diff tab and returns `{ok}`
    without capturing the operator's accept/reject — that needs a *turn-suspend*

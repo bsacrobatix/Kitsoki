@@ -90,12 +90,13 @@ func DiffOpenHandler(ctx context.Context, args map[string]any) (Result, error) {
 // open_diff. On success it records the verdict as a gate decision.
 func diffOpenIDE(ctx context.Context, link IDELink, args map[string]any) (Result, error) {
 	// CONFIRMED arg keys (ide-integration.md #1): {path,new_text,title} for a
-	// single proposed-content diff (real DiffController support — see
-	// ide-diff.ts's open()); {paths,base} is the already-applied-edits Mode A
-	// shape reviewing_external sends, but the real extension does not yet
-	// implement it (DiffController only reads path/new_text/new_text_path) —
-	// tracked as a follow-up in docs/proposals/ide-integration.md, NOT a wire
-	// ambiguity. Mirrors IDEOpenDiffHandler.
+	// single proposed-content diff (Mode B — real DiffController support, see
+	// ide-diff.ts's openModeB()); {paths,base} is the already-applied-edits
+	// Mode A shape reviewing_external sends, now ALSO implemented by the real
+	// extension (DiffController.openModeA(), dwf4-ide-mode-a) — one diff tab
+	// per changed file (left = content at `base` via `git show`, right = the
+	// on-disk file), all sharing ONE collective accept/reject verdict.
+	// Mirrors IDEOpenDiffHandler.
 	toolArgs := map[string]any{}
 	if p, ok := args["path"].(string); ok && p != "" {
 		toolArgs["path"] = p
