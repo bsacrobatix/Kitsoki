@@ -123,6 +123,48 @@ func TestServiceCreatePreservesSyntheticGLMCoverageFanout(t *testing.T) {
 	require.Equal(t, ".artifacts/dynamic-workflows-test/TestServiceCreatePreservesSyntheticGLMCoverageFanout/dwf_20260706T053000Z_glm-coverage/manifest.yaml", world["manifest_path"])
 }
 
+func TestServiceCreateResearchTestingApproachesFanout(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	require.NoError(t, err)
+	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
+	require.NoError(t, err)
+
+	outDir := filepath.Join(repoRoot, ".artifacts", "dynamic-workflows-test", strings.ReplaceAll(t.Name(), "/", "-"))
+	t.Cleanup(func() { _ = os.RemoveAll(outDir) })
+	svc := NewService(repoRoot)
+	svc.OutputDir = outDir
+	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)
+	svc.Now = func() time.Time { return time.Date(2026, 7, 6, 5, 45, 0, 0, time.UTC) }
+
+	receipt, err := svc.Create(context.Background(), CreateRequest{
+		Goal: "research the different testing approaches in the repo with a dynamic workflow; inspect Go tests, TypeScript/JavaScript tests, story flow fixtures, Playwright/e2e tests, coverage gates, cassettes, and no-LLM policies; write a concise research report under .context and propose follow-up validation gates",
+		Slug: "testing-approaches-research",
+	})
+	require.NoError(t, err)
+	require.True(t, receipt.Validation.OK)
+
+	manifest, err := readManifest(receipt.ManifestPath)
+	require.NoError(t, err)
+	require.Equal(t, "codex-native", manifest.Defaults.Profile)
+	require.Equal(t, "gpt-5.5", manifest.Defaults.Model)
+
+	ids := make([]string, 0, len(manifest.Items))
+	for _, item := range manifest.Items {
+		ids = append(ids, item.ID)
+		require.Contains(t, item.Prompt, ".context")
+		require.Contains(t, item.Prompt, "Goal: research")
+		require.NotContains(t, item.Title, "Add Go coverage")
+		require.NotContains(t, item.Prompt, "Add focused deterministic Go tests")
+	}
+	require.Equal(t, []string{
+		"research-scope",
+		"go-testing-research",
+		"js-e2e-testing-research",
+		"story-flow-research",
+		"research-synthesis",
+	}, ids)
+}
+
 func TestServiceExportBlocksBaseStoryWithoutApproval(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	require.NoError(t, err)

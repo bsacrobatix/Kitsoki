@@ -548,7 +548,9 @@ func (s *Service) buildManifest(req GenerateRequest, workflowID, appPath, manife
 	fullGoal := truncateWords(goal, 80)
 	defaults := inferManifestDefaults(goal, filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(filepath.Dir(manifestPath), "traces"))))
 	var steps []manifestStep
-	if isCoverageFanoutGoal(goal) {
+	if isResearchGoal(goal) {
+		steps = researchFanoutSteps(fullGoal, filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml"))))
+	} else if isCoverageFanoutGoal(goal) {
 		steps = coverageFanoutSteps(fullGoal, filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml"))))
 	} else {
 		steps = []manifestStep{
@@ -630,6 +632,47 @@ func inferManifestDefaults(goal, traceRoot string) ManifestDefaults {
 func isCoverageFanoutGoal(goal string) bool {
 	lowered := strings.ToLower(goal)
 	return strings.Contains(lowered, "coverage") && (strings.Contains(lowered, "fan out") || strings.Contains(lowered, "fanning out") || strings.Contains(lowered, "typescript") || strings.Contains(lowered, "stories"))
+}
+
+func isResearchGoal(goal string) bool {
+	lowered := strings.ToLower(goal)
+	return strings.Contains(lowered, "research") || strings.Contains(lowered, "survey") || strings.Contains(lowered, "investigate") || strings.Contains(lowered, "map the")
+}
+
+func researchFanoutSteps(goal, appYAML string) []manifestStep {
+	storyCheck := ManifestVerify{Kind: "story_validate", Story: appYAML}
+	return []manifestStep{
+		{
+			id:     "research-scope",
+			title:  "Frame the research map",
+			prompt: fmt.Sprintf("Frame the research question, list the repo areas to inspect, and define the evidence files to write under .context/. Do not edit product code or run live LLM calls. Goal: %s", goal),
+			verify: []ManifestVerify{storyCheck},
+		},
+		{
+			id:     "go-testing-research",
+			title:  "Research Go testing",
+			prompt: fmt.Sprintf("Survey Go test packages, coverage commands, fixtures, and no-LLM seams. Write findings and recommended gates under .context/. Do not add or modify tests in this research item. Goal: %s", goal),
+			verify: []ManifestVerify{storyCheck},
+		},
+		{
+			id:     "js-e2e-testing-research",
+			title:  "Research JS and e2e testing",
+			prompt: fmt.Sprintf("Survey TypeScript/JavaScript, Playwright, runstatus, VS Code, and web UI test approaches. Write evidence-backed findings under .context/. Do not add or modify tests in this research item. Goal: %s", goal),
+			verify: []ManifestVerify{storyCheck},
+		},
+		{
+			id:     "story-flow-research",
+			title:  "Research stories and flows",
+			prompt: fmt.Sprintf("Survey story flow fixtures, cassettes, flow coverage, Starlark coverage, and replay patterns. Write evidence-backed findings under .context/. Do not run live agents. Goal: %s", goal),
+			verify: []ManifestVerify{storyCheck},
+		},
+		{
+			id:     "research-synthesis",
+			title:  "Synthesize testing approaches",
+			prompt: fmt.Sprintf("Merge worker findings into one concise .context research report with a taxonomy of testing approaches, recommended validation gates, gaps, and follow-up work. Inspect traces, diffs, and untracked files before reporting. Goal: %s", goal),
+			verify: []ManifestVerify{storyCheck},
+		},
+	}
 }
 
 func coverageFanoutSteps(goal, appYAML string) []manifestStep {
