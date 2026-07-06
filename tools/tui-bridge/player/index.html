@@ -135,12 +135,16 @@
     window.addEventListener("resize", () => { fitAddon.fit(); sendResize(); });
 
     // Drive/inspect surface for Playwright and claude-in-chrome: no OCR or
-    // vision needed to read back the exact current screen contents.
+    // vision needed to read back the exact current screen contents. Reads
+    // only the visible viewport (buf.viewportY .. +term.rows) — buf.length
+    // covers the full scrollback, which would silently include history that
+    // has already scrolled off-screen and doesn't match what a screenshot
+    // shows.
     window.__dump = () => {
       const buf = term.buffer.active;
       const lines = [];
-      for (let i = 0; i < buf.length; i++) {
-        const line = buf.getLine(i);
+      for (let i = 0; i < term.rows; i++) {
+        const line = buf.getLine(buf.viewportY + i);
         lines.push(line ? line.translateToString(true) : "");
       }
       return lines.join("\n");

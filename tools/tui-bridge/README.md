@@ -57,6 +57,31 @@ go run ./cmd/kitsoki tui-serve --addr 127.0.0.1:4700 -- run myapp.yaml --harness
 passed through as-is) — this is what the test suite uses to drive `/bin/cat`
 deterministically, with no kitsoki or LLM involved.
 
+## Driving it from claude-in-chrome
+
+No special wiring needed — it's a plain page, so the standard
+`mcp__claude-in-chrome__*` tools work directly (verified end-to-end: real
+keystrokes typed via `computer` landed in a live `kitsoki run` session and
+`Escape` correctly opened its menu):
+
+1. `tabs_context_mcp` (once, per conversation) → `navigate` to
+   `http://localhost:4320/player/?ws=ws://127.0.0.1:4700/pty`.
+2. `computer` with `action: "left_click"` on the terminal body to focus it —
+   xterm only captures keystrokes once its hidden textarea has focus, same as
+   Playwright.
+3. `computer` with `action: "type"` for text, or `action: "key"` for control
+   keys (`Escape`, `Enter`, `Tab`, arrows, `ctrl+c` via `modifiers`) — both
+   reach the real pty.
+4. `computer` with `action: "screenshot"` for vision evidence (feed straight
+   into [[kitsoki-ui-qa]]'s `--frames` pipeline), or `javascript_tool` with
+   `window.__dump()` for exact-text readback of the visible screen with no
+   vision pass needed.
+
+One gotcha worth knowing: take the first screenshot only *after* the initial
+frame has painted (a screenshot fired immediately on page load, before the
+first pty output arrives over the socket, can be blank) — poll `window.__status()
+=== "connected"` first, or just screenshot again if the first one looks empty.
+
 ## Tests
 
 - `internal/tuibridge/server_test.go` — Go-level bridge tests (`go test

@@ -424,13 +424,26 @@ viewport.
   # open http://localhost:4320/player/?ws=ws://127.0.0.1:4700/pty
   ```
   Capture evidence the same two ways the rest of this skill already uses: a
-  Playwright `page.screenshot()` of the rendered player page is a normal PNG —
-  feed it into `qa.sh`/`qa-review.sh --frames` exactly like any other frame;
-  `window.__dump()` gives exact-text readback (buffer-API based, no vision
-  needed) when a structural check is all a step requires. Keep the spawned
-  command deterministic and no-LLM (`--harness replay --recording ...`, or
-  `--exec` pointed at a fixture binary) — never a live model, the same
-  discipline `tools/mcp-demo` follows for the cassette-replay path above.
+  screenshot of the rendered player page is a normal PNG — feed it into
+  `qa.sh`/`qa-review.sh --frames` exactly like any other frame;
+  `window.__dump()` gives exact-text readback of the *visible viewport* (not
+  the full scrollback — buffer-API based, no vision needed) when a structural
+  check is all a step requires. Keep the spawned command deterministic and
+  no-LLM (`--harness replay --recording ...`, or `--exec` pointed at a fixture
+  binary) — never a live model, the same discipline `tools/mcp-demo` follows
+  for the cassette-replay path above.
+  - **claude-in-chrome needs no special wiring** — it's a plain page, so
+    `navigate` → `computer` (`left_click` on the terminal to focus it, then
+    `type`/`key` for input, `screenshot` for evidence) → `javascript_tool`
+    (`window.__dump()`) all work directly; verified end-to-end against a live
+    `kitsoki run` session (real keystrokes landed, `Escape` opened its menu).
+    See `tools/tui-bridge/README.md`'s "Driving it from claude-in-chrome"
+    section for the exact tool sequence and one timing gotcha (screenshot
+    before the socket's first frame paints comes back blank — wait for
+    `window.__status() === "connected"`).
+  - Playwright uses the same page (`page.click`, `page.keyboard.type/press`,
+    `page.screenshot()`) — see `tools/tui-bridge/tests/live-bridge.e2e.spec.ts`
+    for a worked example.
 - **This is pixel/vision QA, not [[rendering-tests]].** `rendering-tests`
   asserts `View()`'s ANSI-text *structure* (line separation, no horizontal
   concat) inside a `go test` — fast, no judge, catches layout regressions at
