@@ -168,6 +168,9 @@ cells:
       mechanical:
         check_type: replay
         path: tools/dev-workflow-matrix/verdicts/onboard-tui-gears-rust.replay.json
+      experience:
+        check_type: docs-fidelity
+        path: tools/dev-workflow-matrix/verdicts/onboard__tui__gears-rust__docs-fidelity.json
   - workflow: onboard
     surface: web
     repo: gears-rust

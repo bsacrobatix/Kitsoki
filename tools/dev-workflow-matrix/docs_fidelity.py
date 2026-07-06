@@ -59,6 +59,13 @@ if str(_THIS_DIR) not in sys.path:
 
 from agent_dispatch import AgentDispatchError, DispatchFn, claude_cli_dispatch, extract_json_object  # noqa: E402
 
+# read-only inspection (Read/Grep/Glob): enough to check the doc's claims
+# against what exists, without the unbounded execute-the-doc behavior that
+# hung the first live run for the full 900s (and no project MCP startup)
+def _production_dispatch(prompt: str, cwd: Path) -> str:
+    return claude_cli_dispatch(prompt, cwd, tools=("Read", "Grep", "Glob"))
+
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_VERDICTS_DIR = REPO_ROOT / ".artifacts" / "dev-workflow-matrix" / "verdicts"
 SCHEMA_VERSION = "1.1.0"
@@ -102,17 +109,21 @@ CHECKS: list[DocsFidelityCheck] = [
 
 def build_prompt(check: DocsFidelityCheck, doc_text: str) -> str:
     return f"""You are the persona "{check.persona}" attempting the "{check.workflow}" \
-workflow on the "{check.surface}" surface of the "{check.repo}" repo. Your ONLY \
-map is the document quoted below — do not read any other file, do not use any \
-tribal knowledge of this codebase, do not guess. Read it end to end and list \
+workflow on the "{check.surface}" surface of the "{check.repo}" repo. The \
+document quoted below is your ONLY map for HOW to do the workflow — no tribal \
+knowledge, no guessing at intent. You may inspect the repository READ-ONLY \
+(Read/Grep/Glob) to check whether the doc's claims match what actually exists \
+(files, commands, flags, story/room names), but you must NOT execute any \
+command, build anything, or modify any file. Read the doc end to end and list \
 EVERY factual or actionable claim it makes about how to accomplish this \
 workflow (a command to run, a UI element to click, a file to create, a \
 sequence of steps). Score each claim exactly one of:
-  - "truthful": you could follow it as written and it held up.
-  - "stale": it describes something that no longer works or matches reality.
+  - "truthful": what it references exists and matches the doc as written.
+  - "stale": it describes something that no longer exists or contradicts reality.
   - "missing": a step you needed was not covered by the doc at all.
 
-Respond with ONLY a JSON object, no prose before or after, of this exact shape:
+Your ENTIRE final response must be a single JSON object — no preamble, no \
+prose before or after — of this exact shape:
 {{"claims": [{{"claim": "<quoted or paraphrased claim>", "score": "truthful|stale|missing", "note": "<why>"}}, ...], "overall_pass": true|false, "summary": "<one line>"}}
 
 DOCUMENT ({check.doc_path}):
@@ -150,7 +161,7 @@ def _verdict_payload(
     return payload
 
 
-def run_check(check: DocsFidelityCheck, repo_root: Path, dispatch: DispatchFn = claude_cli_dispatch) -> dict:
+def run_check(check: DocsFidelityCheck, repo_root: Path, dispatch: DispatchFn = _production_dispatch) -> dict:
     """Run one docs-fidelity check, returning a completion-state verdict dict.
 
     Never raises: a missing doc, a dispatch failure, or an unparsable agent
@@ -207,7 +218,7 @@ def run_all(
     checks: list[DocsFidelityCheck],
     repo_root: Path,
     verdicts_dir: Path,
-    dispatch: DispatchFn = claude_cli_dispatch,
+    dispatch: DispatchFn = _production_dispatch,
     dry_run: bool = False,
 ) -> list[dict]:
     verdicts_dir.mkdir(parents=True, exist_ok=True)

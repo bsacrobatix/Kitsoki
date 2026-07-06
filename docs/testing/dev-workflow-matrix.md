@@ -98,7 +98,7 @@ Every cell carries two proof-class verdicts from `schemas/completion-state.schem
 
 - **Onboard × TUI** — ✅ works: WS-A A3: a real onboard of a fresh gears-rust clone recorded through the dev-story onboard path (kitsoki session create/continue, live harness) and converted to a committed no-LLM flow+cassette (stories/dev-story/flows/onboard_gears_rust.yaml); replays green via `kitsoki test flows`. A2 external-ticket passthrough proven: discovery auto-binds tracker=github/ticket_repo=bsacrobatix/gears-rust from the real remote. See .context/dwf3-a3-recording-notes.md.
   - mechanical: **solved** (replay, as of 2026-07-06)
-  - experience: no standing verdict
+  - experience: **solved** (docs-fidelity, as of 2026-07-06)
 - **Onboard × Web** — 🔴 gap: not yet exercised on gears-rust; also no web onboarding entry at all
   - mechanical: no standing verdict
   - experience: no standing verdict

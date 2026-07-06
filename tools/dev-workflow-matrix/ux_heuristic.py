@@ -52,6 +52,11 @@ if str(_THIS_DIR) not in sys.path:
 
 from agent_dispatch import AgentDispatchError, DispatchFn, claude_cli_dispatch, extract_json_object  # noqa: E402
 
+# Read only: the vision critique must open the frame files, nothing else
+def _production_dispatch(prompt: str, cwd: Path) -> str:
+    return claude_cli_dispatch(prompt, cwd, tools=("Read",))
+
+
 try:
     import yaml
 except ImportError:  # pragma: no cover - yaml is a repo-wide dependency already
@@ -166,7 +171,7 @@ def _verdict_payload(
 def run_check(
     check: UxHeuristicCheck,
     repo_root: Path,
-    dispatch: DispatchFn = claude_cli_dispatch,
+    dispatch: DispatchFn = _production_dispatch,
     catalog_path: Path = DEFAULT_CATALOG_PATH,
 ) -> dict:
     """Run one ux-heuristic check, returning a completion-state verdict dict.
@@ -237,7 +242,7 @@ def run_all(
     checks: list[UxHeuristicCheck],
     repo_root: Path,
     verdicts_dir: Path,
-    dispatch: DispatchFn = claude_cli_dispatch,
+    dispatch: DispatchFn = _production_dispatch,
     catalog_path: Path = DEFAULT_CATALOG_PATH,
     dry_run: bool = False,
 ) -> list[dict]:
