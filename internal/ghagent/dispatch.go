@@ -352,7 +352,7 @@ func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *j
 		}
 		_ = d.Jobs.RecordEvent(persistCtx, job.JobID, "harness", detail)
 	}
-	if spawnErr != nil && d.IncidentFn != nil {
+	if spawnErr != nil && d.IncidentFn != nil && strings.TrimSpace(job.IncidentURL) == "" {
 		if incidentURL, incidentErr := d.IncidentFn(persistCtx, job, errMsg); incidentErr == nil && strings.TrimSpace(incidentURL) != "" {
 			_ = d.Jobs.SetIncidentURL(persistCtx, job.JobID, incidentURL)
 			job.IncidentURL = incidentURL
@@ -438,7 +438,7 @@ func (d *Dispatcher) failBeforeRun(ctx context.Context, job *jobs.GHJob, event s
 	}
 	job.State = jobs.GHFailed
 	job.ErrMsg = errMsg
-	if d.IncidentFn != nil {
+	if d.IncidentFn != nil && strings.TrimSpace(job.IncidentURL) == "" {
 		if incidentURL, incidentErr := d.IncidentFn(ctx, job, errMsg); incidentErr == nil && strings.TrimSpace(incidentURL) != "" {
 			_ = d.Jobs.SetIncidentURL(ctx, job.JobID, incidentURL)
 			job.IncidentURL = incidentURL
