@@ -375,7 +375,7 @@ func (h *HarnessLadder) ToHostLadderConfig() host.LadderConfig {
 	}
 }
 
-var validBackends = map[string]bool{"": true, "claude": true, "copilot": true, "codex": true}
+var validBackends = map[string]bool{"": true, "claude": true, "copilot": true, "codex": true, "agy": true}
 
 // validEfforts mirrors the engine's --effort levels (internal/app loader).
 var validEfforts = map[string]bool{"low": true, "medium": true, "high": true, "xhigh": true, "max": true}
@@ -895,7 +895,7 @@ func (cfg *WebConfig) resolveHarnessProfiles() error {
 	var dropped []string
 	for name, p := range cfg.HarnessProfiles {
 		if !validBackends[p.Backend] {
-			return fmt.Errorf("harness_profiles.%s: backend %q is invalid (want claude|copilot|codex)", name, p.Backend)
+			return fmt.Errorf("harness_profiles.%s: backend %q is invalid (want claude|copilot|codex|agy)", name, p.Backend)
 		}
 		missingEnv := ""
 		for k, v := range p.Env {
@@ -989,7 +989,7 @@ func (cfg *WebConfig) resolveHarnessLadder() error {
 	}
 	for i, m := range l.Models {
 		if !validBackends[m.Backend] {
-			return fmt.Errorf("harness_ladder.models[%d]: backend %q is invalid (want claude|copilot|codex)", i, m.Backend)
+			return fmt.Errorf("harness_ladder.models[%d]: backend %q is invalid (want claude|copilot|codex|agy)", i, m.Backend)
 		}
 		if strings.TrimSpace(m.Model) == "" {
 			return fmt.Errorf("harness_ladder.models[%d]: model is required", i)
