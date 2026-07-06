@@ -334,7 +334,7 @@ def bugswarm_source_dir(task: dict[str, Any]) -> str:
     repo = str(task.get("repo_label") or task.get("repo") or "").strip("/")
     if "/" not in repo:
         raise SystemExit(f"BugSwarm task {task.get('id')!r} needs repo_label owner/name or meta.bugswarm_source_dir")
-    return f"/home/travis/build/{repo}"
+    return f"/home/travis/build/failed/{repo}"
 
 
 def dispatch_worker(args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> dict[str, Any]:
