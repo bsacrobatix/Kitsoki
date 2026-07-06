@@ -123,27 +123,44 @@ func StarlarkRunHandler(ctx context.Context, args map[string]any) (Result, error
 	// caller already installed one (the testrunner installs a replay inspector
 	// for flow fixtures). Mirrors the HTTP default-injection block above; the
 	// safe deny-all default is applied by InspectorFromContext when nothing is
-	// injected. Root at world.workdir when present, else the repo root
-	// enclosing KITSOKI_APP_DIR (the target app's directory, published by
-	// loaders — see AppDirEnv in agent_ask.go), else the repo containing the
-	// resolved story script, else the process cwd. Without the AppDirEnv
-	// fallback, a driver whose own process cwd differs from the app being
-	// driven can resolve ctx.fs.* paths against the wrong directory. The app
-	// dir is widened to its enclosing repo root because ctx.fs paths are
-	// repo-relative by contract while an app.yaml may live in a subdirectory
-	// of its repo (kitsoki's own stories/<name>/ chief among them): host.run
-	// effects in the same room execute at the repo root, so rooting ctx.fs at
-	// the bare app dir makes the two host surfaces disagree about the same
-	// relative path.
+	// injected. Root at world.workdir when present, else the per-session
+	// prompt renderer's story root (WithPromptRenderer, orchestrator-injected
+	// per dispatch — see below), else the repo root enclosing KITSOKI_APP_DIR
+	// (the target app's directory, published by loaders — see AppDirEnv in
+	// agent_ask.go), else the repo containing the resolved story script, else
+	// the process cwd. Without the AppDirEnv fallback, a driver whose own
+	// process cwd differs from the app being driven can resolve ctx.fs.*
+	// paths against the wrong directory. The app dir is widened to its
+	// enclosing repo root because ctx.fs paths are repo-relative by contract
+	// while an app.yaml may live in a subdirectory of its repo (kitsoki's own
+	// stories/<name>/ chief among them): host.run effects in the same room
+	// execute at the repo root, so rooting ctx.fs at the bare app dir makes
+	// the two host surfaces disagree about the same relative path.
+	//
+	// The prompt-renderer step takes priority over KITSOKI_APP_DIR because the
+	// latter is a single process-global env var (session_runtime.go's
+	// publishAppDir docstring calls this out explicitly): two concurrent
+	// studio sessions on different stories race to set it, and whichever
+	// session.new call ran last wins for BOTH sessions' subsequent dispatches,
+	// with no revert on session close. A studio-driven dispatch always has a
+	// prompt renderer injected per session (orchestrator.go's o.promptRenderer,
+	// built once from def.BaseDir and threaded through host_dispatch.go's
+	// WithPromptRenderer per turn), so preferring its RootDir() here makes the
+	// inspector root session-scoped instead of shared mutable global state.
+	// CLI one-shots, direct unit-test callers, and any other caller with no
+	// renderer in ctx keep exactly the previous AppDirEnv-based behavior.
 	if !starlarkhost.HasInspector(runCtx) {
 		root, _ := worldSnapshot["workdir"].(string)
 		if root == "" {
-			if appDir := os.Getenv(AppDirEnv); appDir != "" {
-				if inferred := inferRepoRootForDir(appDir); inferred != "" {
-					root = inferred
-				} else {
-					root = appDir
+			if pr := PromptRendererFromCtx(ctx); pr != nil {
+				if appDir := pr.RootDir(); appDir != "" {
+					root = widenToRepoRoot(appDir)
 				}
+			}
+		}
+		if root == "" {
+			if appDir := os.Getenv(AppDirEnv); appDir != "" {
+				root = widenToRepoRoot(appDir)
 			}
 		}
 		if root == "" {
@@ -263,6 +280,18 @@ func (c registryHostCaller) Invoke(ctx context.Context, name string, args map[st
 
 func inferRepoRootForScript(scriptPath string) string {
 	return inferRepoRootForDir(filepath.Dir(scriptPath))
+}
+
+// widenToRepoRoot resolves an app directory to its enclosing repo root
+// (go.mod / .kitsoki-root marker), falling back to appDir itself when no
+// marker is found walking upward. Shared by every appDir-shaped inspector-root
+// candidate (the per-session prompt renderer's RootDir() and the KITSOKI_APP_DIR
+// env var) so both apply the identical widening policy.
+func widenToRepoRoot(appDir string) string {
+	if inferred := inferRepoRootForDir(appDir); inferred != "" {
+		return inferred
+	}
+	return appDir
 }
 
 // inferRepoRootForDir walks dir upward to the nearest enclosing repo root,

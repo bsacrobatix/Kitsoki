@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"kitsoki/internal/render"
 )
 
 // TestStarlarkRunDefaultInspector_PrefersAppDir locks the resolution order for
@@ -123,5 +125,65 @@ func TestStarlarkRunDefaultInspector_AppDirWidensToRepoRoot(t *testing.T) {
 	}
 	if got := res.Data["found"]; got != true {
 		t.Fatalf("ctx.fs.exists(%q) = %v, want true (inspector should widen KITSOKI_APP_DIR=%s to repo root %s)", marker, got, appDir, repo)
+	}
+}
+
+// TestStarlarkRunDefaultInspector_PromptRendererBeatsContaminatedAppDir locks
+// the fix for the scenario-qa live bug: KITSOKI_APP_DIR is a single
+// process-global env var (session_runtime.go's publishAppDir), so a SECOND
+// concurrent studio session opened for a different story overwrites it for
+// EVERY session in the process, with no revert on close (see that file's
+// docstring). A live studio dispatch always carries a per-session prompt
+// renderer in ctx (orchestrator.go's o.promptRenderer, built once from
+// def.BaseDir and threaded per-turn via host.WithPromptRenderer), so the
+// default inspector must prefer that renderer's RootDir() over the
+// (possibly-contaminated) global env var.
+//
+// dirA is THIS session's true story root (what the renderer carries); dirB
+// stands in for another session's story dir that clobbered the global
+// KITSOKI_APP_DIR after this session started. Only dirA holds the marker, so
+// falling through to the env var (as the pre-fix code did) would report false
+// and fail the test.
+func TestStarlarkRunDefaultInspector_PromptRendererBeatsContaminatedAppDir(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	const marker = "marker.txt"
+	if err := os.WriteFile(filepath.Join(dirA, marker), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	script := filepath.Join(dirA, "check.star")
+	if err := os.WriteFile(script, []byte(
+		"def main(ctx):\n    return {\"found\": ctx.fs.exists(\""+marker+"\")}\n",
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script+".yaml", []byte(
+		"outputs:\n  found: { type: bool }\n",
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the race: some OTHER session's session.new call already
+	// overwrote the global to dirB by the time this dispatch runs.
+	t.Setenv(AppDirEnv, dirB)
+
+	pr, err := render.NewPromptRenderer(render.PromptPath{Story: dirA}, true)
+	if err != nil {
+		t.Fatalf("NewPromptRenderer: %v", err)
+	}
+	ctx := WithWorldSnapshot(context.Background(), map[string]any{})
+	ctx = WithPromptRenderer(ctx, pr)
+
+	res, err := StarlarkRunHandler(ctx, map[string]any{"script": script})
+	if err != nil {
+		t.Fatalf("StarlarkRunHandler: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected domain error: %s", res.Error)
+	}
+	if got := res.Data["found"]; got != true {
+		t.Fatalf("ctx.fs.exists(%q) = %v, want true (inspector should root at the per-session prompt renderer's dir %s, not the contaminated KITSOKI_APP_DIR=%s)", marker, got, dirA, dirB)
 	}
 }
