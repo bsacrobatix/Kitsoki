@@ -185,8 +185,15 @@ func TestServiceCreateResearchTestingApproachesFanout(t *testing.T) {
 
 	manifest, err := readManifest(receipt.ManifestPath)
 	require.NoError(t, err)
-	require.Equal(t, "codex-native", manifest.Defaults.Profile)
-	require.Equal(t, "gpt-5.5", manifest.Defaults.Model)
+	require.Equal(t, "synthetic-claude", manifest.Defaults.Profile)
+	require.Equal(t, "hf:zai-org/GLM-5.2", manifest.Defaults.Model)
+	require.Equal(t, "ladder", manifest.Defaults.Harness)
+	require.False(t, manifest.Defaults.RequireTraceModel)
+	require.NotNil(t, manifest.Defaults.HarnessLadder)
+	require.Equal(t, []HarnessLadderModel{
+		{Backend: "claude", Provider: "synthetic-claude", Model: "hf:zai-org/GLM-5.2"},
+		{Backend: "codex", Provider: "codex-native", Model: "gpt-5.5"},
+	}, manifest.Defaults.HarnessLadder.Models)
 
 	ids := make([]string, 0, len(manifest.Items))
 	for _, item := range manifest.Items {

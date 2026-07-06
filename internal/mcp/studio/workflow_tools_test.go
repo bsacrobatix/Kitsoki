@@ -218,6 +218,24 @@ func TestWorkflowLaunchStartsGeneratedCoverageAndResearchWorkflows(t *testing.T)
 			require.False(t, next.IsError, "session.submit next_item errored: %s", contentText(next))
 			require.Contains(t, contentText(next), tc.wantFrame)
 			require.NotContains(t, contentText(next), `"state":"needs_human"`)
+
+			drive, err := callTool(ctx, cs, "session.submit", map[string]any{
+				"handle": launched.SessionHandle,
+				"intent": "next_item",
+				"cols":   100,
+				"rows":   30,
+			})
+			require.NoError(t, err)
+			require.False(t, drive.IsError, "session.submit drive errored: %s", contentText(drive))
+
+			trace, err := callTool(ctx, cs, "session.trace", map[string]any{
+				"handle": launched.SessionHandle,
+			})
+			require.NoError(t, err)
+			require.False(t, trace.IsError, "session.trace errored: %s", contentText(trace))
+			require.Contains(t, contentText(trace), "harness_ladder")
+			require.Contains(t, contentText(trace), "synthetic-claude")
+			require.Contains(t, contentText(trace), "hf:zai-org/GLM-5.2")
 		})
 	}
 }
