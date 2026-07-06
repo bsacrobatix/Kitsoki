@@ -153,6 +153,12 @@ type Dispatcher struct {
 	// deliberately live should ever set this to "live" — see
 	// resolveHarnessMode's doc for why this is never auto-detected.
 	HarnessMode string
+	// IntegrationBranch, when set, is the shared branch every real-dispatch
+	// job in this drain cycle lands its verified fix onto (one branch per
+	// marathon cycle, per docs/proposals' batch-review model). Threaded into
+	// route.World["integration_branch"] before spawn; empty falls back to
+	// runRealDispatch's per-job branch naming.
+	IntegrationBranch string
 }
 
 // Dispatch runs ONE mention end-to-end. On a fresh claim (won): Post the initial
@@ -258,6 +264,14 @@ func (d *Dispatcher) classifyRoute(mention Mention, labels []string) (Route, boo
 }
 
 func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *jobs.GHJob, route Route) (*jobs.GHJob, error) {
+	if strings.TrimSpace(d.IntegrationBranch) != "" {
+		world := make(map[string]any, len(route.World)+1)
+		for k, v := range route.World {
+			world[k] = v
+		}
+		world["integration_branch"] = d.IntegrationBranch
+		route.World = world
+	}
 	if job.Story != route.Story {
 		if err := d.Jobs.SetStory(ctx, job.JobID, route.Story); err != nil {
 			return nil, err

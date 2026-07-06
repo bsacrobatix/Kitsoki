@@ -27,6 +27,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,6 +41,7 @@ import (
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/store"
 	"kitsoki/internal/testrunner"
+	"kitsoki/internal/vcsops"
 )
 
 // realDispatchPlan describes how to drive one story's REAL pipeline for gh
@@ -249,13 +251,31 @@ func runRealDispatch(ctx context.Context, root string, route Route, job *jobs.GH
 	defer cleanupFixture()
 
 	report, runErr := testrunner.RunFlows(ctx, appPath, fixturePath, testrunner.FlowOptions{})
+	succeeded := runErr == nil && report != nil && report.Passed >= 1 && report.Failed == 0
+
+	// Land the job's real commits onto a shared integration branch BEFORE
+	// cleanup, while jobFeatureBranch(job.JobID) still exists — cleanup below
+	// deletes it. A worktree only ever materializes on disk in live mode (see
+	// cleanupJobWorktree's doc); replay mode leaves worktreeAbs absent (the
+	// cassette served every workspace host call), so there is nothing real to
+	// land and the job keeps its synthetic-but-labeled identity below.
+	integrationBranch := jobIntegrationBranch(job.JobID)
+	if v, ok := route.World["integration_branch"].(string); ok && strings.TrimSpace(v) != "" {
+		integrationBranch = strings.TrimSpace(v)
+	}
+	commitSHA := jobReplayCommitSHA(job.JobID)
+	var landErr error
+	if succeeded {
+		if _, statErr := os.Stat(worktreeAbs); statErr == nil {
+			commitSHA, landErr = landFeatureBranch(ctx, root, route, job, integrationBranch)
+		}
+	}
 
 	// Cleanup policy (proposal open-question 2 lean): delete the worktree on
 	// success, keep it (bounded retention window) on failure for post-mortem.
 	// A no-op in replay mode, where nothing was ever checked out on disk —
 	// the cassette served every workspace host call.
-	succeeded := runErr == nil && report != nil && report.Passed >= 1 && report.Failed == 0
-	if cleanupErr := cleanupJobWorktree(ctx, root, worktreeAbs, job.JobID, succeeded); cleanupErr != nil {
+	if cleanupErr := cleanupJobWorktree(ctx, root, worktreeAbs, job.JobID, succeeded && landErr == nil); cleanupErr != nil {
 		// Best-effort: a cleanup failure must not mask the real run outcome.
 		_ = cleanupErr
 	}
@@ -265,6 +285,9 @@ func runRealDispatch(ctx context.Context, root string, route Route, job *jobs.GH
 	}
 	if report.Passed < 1 {
 		return RunResult{Harness: mode, Worktree: worktreeAbs}, fmt.Errorf("ghagent: real dispatch %q ran no passing turn (passed=%d failed=%d): %s", route.Story, report.Passed, report.Failed, summarizeFlowFailures(report))
+	}
+	if landErr != nil {
+		return RunResult{Harness: mode, Worktree: worktreeAbs}, fmt.Errorf("ghagent: real dispatch %q: landing onto %q: %w", route.Story, integrationBranch, landErr)
 	}
 
 	turns := 0
@@ -330,8 +353,8 @@ The gh-agent dispatcher first ran the bugfix story's triage-only preflight, then
 		FinalState:        "done",
 		Turns:             turns,
 		Summary:           summary,
-		IntegrationBranch: jobIntegrationBranch(job.JobID),
-		CommitSHA:         jobReplayCommitSHA(job.JobID),
+		IntegrationBranch: integrationBranch,
+		CommitSHA:         commitSHA,
 		Stubbed:           false,
 		Harness:           mode,
 		Worktree:          worktreeAbs,
@@ -623,6 +646,59 @@ func boolPtr(b bool) *bool { return &b }
 // cassette intercepts that call (no real git side effect); in live mode the
 // real handler runs `git worktree add`. This file only owns the CLEANUP side
 // of the lifecycle: delete on success, keep (bounded retention) on failure.
+
+// landFeatureBranch squash-merges the job's feature branch onto a shared
+// integration branch via vcsops.Integrate, so a live fix's real commits
+// survive as a real git object on a reviewable branch instead of only the
+// fix.patch asset. It runs the merge from a dedicated integration worktree
+// (never the caller's checkout) so root — typically the protected primary
+// checkout — is never mutated directly; see AGENTS.md's read-mostly rule.
+// Returns the real squash-commit SHA on success. A refused/conflicted
+// integrate is returned as an error: a fix with no real landing must not be
+// reported as done (fail closed, no fabricated success).
+func landFeatureBranch(ctx context.Context, root string, route Route, job *jobs.GHJob, integrationBranch string) (string, error) {
+	base := "main"
+	if v, ok := route.World["base_branch"].(string); ok && strings.TrimSpace(v) != "" {
+		base = strings.TrimSpace(v)
+	}
+	integrationDir, err := ensureIntegrationWorktree(ctx, root, integrationBranch, base)
+	if err != nil {
+		return "", err
+	}
+	message := fmt.Sprintf("Land %s fix for %s (job %s)", route.Story, job.OriginRef, job.JobID)
+	result, err := vcsops.Integrate(ctx, integrationDir, jobFeatureBranch(job.JobID), integrationBranch, message, vcsops.IntegrateOptions{})
+	if err != nil {
+		return "", err
+	}
+	if !result.Integrated {
+		if len(result.Conflicts) > 0 {
+			return "", fmt.Errorf("integration conflicts in %s", strings.Join(result.Conflicts, ", "))
+		}
+		return "", errors.New(result.Refused)
+	}
+	return result.Commit, nil
+}
+
+// ensureIntegrationWorktree returns the path of a worktree checked out on
+// branch, one per integration branch (reused across every job in a marathon
+// cycle that shares the branch name), creating the branch from base the
+// first time it's needed.
+func ensureIntegrationWorktree(ctx context.Context, root, branch, base string) (string, error) {
+	abs := filepath.Join(root, ".worktrees", "integration-"+jobWorktreeSlug(branch))
+	if _, err := os.Stat(abs); err == nil {
+		return abs, nil // already checked out by an earlier job in this cycle
+	}
+	if _, exit, _ := vcsops.RunGit(ctx, root, "rev-parse", "--verify", "--quiet", branch); exit == 0 {
+		if out, exit, err := vcsops.RunGit(ctx, root, "worktree", "add", abs, branch); err != nil || exit != 0 {
+			return "", fmt.Errorf("ghagent: worktree add %s %s: %w: %s", abs, branch, err, strings.TrimSpace(out))
+		}
+		return abs, nil
+	}
+	if out, exit, err := vcsops.RunGit(ctx, root, "worktree", "add", "-b", branch, abs, base); err != nil || exit != 0 {
+		return "", fmt.Errorf("ghagent: worktree add -b %s %s %s: %w: %s", branch, abs, base, err, strings.TrimSpace(out))
+	}
+	return abs, nil
+}
 
 // jobWorktreeRetention is the bounded retention window (proposal
 // open-question 2) for kept failed-job worktrees, mirroring dogfood-marathon
