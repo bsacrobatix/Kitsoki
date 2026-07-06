@@ -219,6 +219,26 @@ def main() -> int:
                   and "driver=ready" in live_ready["autonomous_gate_summary"]
                   and Path(live_ready["autonomous_marathon_report_path"]).exists(),
                   failures)
+            live_dispatch = run.record_autonomous_driver_dispatch(
+                Path(live_ready["run_dir"]),
+                "live",
+                "captured",
+                "Story-owned live driver captured proof and recorded a credible issue.",
+                5,
+                1,
+                str(Path(live_ready["run_dir"]) / "driver-trace.jsonl"),
+                "",
+            )
+            live_summary = run.run_story_summary(Path(live_ready["run_dir"]))
+            live_receipt_text = Path(live_summary["autonomous_driver_dispatch_markdown_path"]).read_text(encoding="utf-8")
+            check("live driver dispatch writes durable review receipt",
+                  live_dispatch["schema"] == "kitsoki/product-journey-autonomous-driver-dispatch/v1"
+                  and Path(live_summary["autonomous_driver_dispatch_path"]).exists()
+                  and Path(live_summary["autonomous_driver_dispatch_markdown_path"]).exists()
+                  and live_summary["autonomous_driver_dispatch_status"] == "captured"
+                  and live_summary["autonomous_driver_dispatch_trace"].endswith("driver-trace.jsonl")
+                  and "Autonomous Driver Dispatch" in live_receipt_text,
+                  failures)
 
             missing_ticket = run.autonomous_marathon(
                 catalog,

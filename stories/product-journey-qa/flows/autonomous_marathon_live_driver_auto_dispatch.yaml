@@ -160,6 +160,27 @@ host_handlers:
             validation_errors: 0
             validation_warnings: 0
             validation_issue_summary: ""
+      record_autonomous_product_journey_driver_dispatch:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            status: autonomous_driver_dispatch_recorded
+            run_id: run-live-driver
+            run_dir: .artifacts/product-journey/run-live-driver
+            autonomous_driver_dispatch_path: .artifacts/product-journey/run-live-driver/autonomous-driver-dispatch.json
+            autonomous_driver_dispatch_markdown_path: .artifacts/product-journey/run-live-driver/autonomous-driver-dispatch.md
+            autonomous_driver_dispatch_status: captured
+            autonomous_driver_dispatch_summary: "Captured live persona proof, recorded one credible issue, and ran story-owned gates."
+            autonomous_driver_dispatch_trace: .artifacts/product-journey/run-live-driver/driver-trace.jsonl
+            autonomous_marathon_status: autonomous_marathon_ready_for_driver
+            autonomous_marathon_summary: "Created 1 scenario(s); driver evidence capture is ready for story-owned dispatch."
+            autonomous_marathon_report_path: .artifacts/product-journey/run-live-driver/autonomous-marathon-report.md
+            autonomous_driver_mode: live
+            autonomous_driver_status: captured
+            autonomous_driver_summary: "Captured live persona proof, recorded one credible issue, and ran story-owned gates."
+            autonomous_driver_evidence_count: 5
+            autonomous_driver_issue_count: 1
 
   host.agent.task:
     by_call:
@@ -206,18 +227,21 @@ turns:
       autonomous_driver_status: captured
       autonomous_driver_evidence_count: 5
       autonomous_driver_issue_count: 1
+      autonomous_driver_dispatch_markdown_path: .artifacts/product-journey/run-live-driver/autonomous-driver-dispatch.md
       autonomous_gate_summary: "watchdog=pass, filing=pass, gh_agent=pass, independent_verify=pass, review=pass, validation=pass"
       autonomous_driver_dispatch_trace: .artifacts/product-journey/run-live-driver/driver-trace.jsonl
       validation_status: valid
       validation_errors: 0
       review_status: pass
       stats_current_run_scanned: yes
-    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous gates[\\s\\S]*watchdog=pass, filing=pass, gh_agent=pass,[\\s\\S]*independent_verify=pass, review=pass, validation=pass[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*Autonomous driver[\\s\\S]*live / captured"
+    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous gates[\\s\\S]*watchdog=pass, filing=pass, gh_agent=pass,[\\s\\S]*independent_verify=pass, review=pass, validation=pass[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*Autonomous driver[\\s\\S]*live / captured[\\s\\S]*Driver receipt[\\s\\S]*autonomous-driver-[\\s\\S]*dispatch.md"
     expect_host_calls:
       - handler: host.run
         args: { call: autonomous_product_journey_marathon_create }
       - handler: host.agent.task
         args: { call: autonomous_product_journey_driver }
+      - handler: host.run
+        args: { call: record_autonomous_product_journey_driver_dispatch }
       - handler: host.run
         args: { call: autonomous_product_journey_marathon_finalize }
 
