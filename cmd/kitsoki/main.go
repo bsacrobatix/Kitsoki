@@ -184,6 +184,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(pogCmd())
 	root.AddCommand(historyCmd())
 	root.AddCommand(initCmd())
+	root.AddCommand(tuiServeCmd())
 	tierHelp(root)
 
 	return root

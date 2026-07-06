@@ -1,0 +1,87 @@
+# tui-bridge — live pty-over-websocket bridge for the kitsoki TUI
+
+Lets Playwright and claude-in-chrome drive the **real, running** `kitsoki` TUI
+with full fidelity: real keystrokes in, real ANSI render out. This is the live
+counterpart to `tools/mcp-demo`, which replays a committed cassette (no pty, no
+websocket, no-LLM by construction) — good for demo videos and fixed-scenario
+QA, but not for driving a live session. Use this bridge when you need genuine
+interactive/live-model or agent-in-the-loop terminal testing.
+
+## Pieces
+
+- **Server** — `kitsoki tui-serve` (`cmd/kitsoki/tui_bridge.go`,
+  `internal/tuibridge`). Spawns a command in a real pty
+  (`github.com/creack/pty`) and bridges its bytes over a websocket
+  (`github.com/coder/websocket`, already vendored for the VS Code IDE bridge)
+  at `/pty`. One connection == one spawned process == one pty; a new
+  connection always gets a fresh process.
+- **Browser page** — `player/index.html`, forked from `tools/mcp-demo`'s
+  xterm.js scaffolding. Instead of replaying a cassette via `window.__feed`,
+  it opens a real `WebSocket` to the bridge: incoming bytes go straight to
+  `term.write()`, and `term.onData` sends real keystroke bytes back over the
+  socket. `window.__dump()` returns the exact current screen text via xterm's
+  buffer API — no OCR or vision needed for test assertions.
+- **Static server** — `player/serve.mjs`, same dependency-free `node:http`
+  static server pattern as `tools/mcp-demo/player/serve.mjs`.
+
+## Wire protocol
+
+- Binary frames carry raw pty bytes in both directions (keystrokes client→
+  server, rendered output server→client).
+- A single text frame shape is understood, for resizing the pty:
+  `{"type":"resize","cols":<n>,"rows":<n>}`.
+
+## Run it live
+
+```bash
+# terminal 1 — spawn the real TUI in a pty, bridge it on :4700
+go run ./cmd/kitsoki tui-serve --addr 127.0.0.1:4700
+
+# terminal 2 — serve the browser page
+cd tools/tui-bridge && pnpm install && pnpm run serve
+```
+
+Open `http://localhost:4320/player/?ws=ws://127.0.0.1:4700/pty` — you're now
+looking at (and can type into) the real onboarding TUI. Click into the
+terminal first; xterm only captures keystrokes once its hidden input has
+focus.
+
+To drive a specific app/harness instead of the bare onboarding TUI, pass the
+command after `--` (it's spawned as `<current kitsoki binary> <args...>`):
+
+```bash
+go run ./cmd/kitsoki tui-serve --addr 127.0.0.1:4700 -- run myapp.yaml --harness replay --recording rec.yaml
+```
+
+`--exec <path>` spawns an arbitrary binary instead (the trailing args are
+passed through as-is) — this is what the test suite uses to drive `/bin/cat`
+deterministically, with no kitsoki or LLM involved.
+
+## Tests
+
+- `internal/tuibridge/server_test.go` — Go-level bridge tests (`go test
+  ./internal/tuibridge/...`): byte round-trip and resize-before-input
+  ordering, both against `/bin/cat` and `/bin/sh` — no LLM, no browser.
+- `tools/tui-bridge/tests/live-bridge.e2e.spec.ts` — Playwright end-to-end:
+  boots the real Go bridge server (spawning `/bin/cat`) and the static player,
+  then drives the page with real keyboard input and asserts the round-tripped
+  screen contents via `window.__dump()`. Run with `pnpm install && pnpm test`
+  (first run also needs `npx playwright install chromium`).
+
+Neither test path spawns a real kitsoki session or an LLM — per repo policy,
+that only happens when explicitly requested (point `-- run ...` or `--exec`
+at whatever you actually want to drive live).
+
+## Recording
+
+Traffic through this bridge can be captured to seed new termcast cassettes for
+`tools/mcp-demo`, subsuming that surface's replay path rather than replacing
+it — record once here, replay for free there.
+
+## Security note
+
+`websocket.Accept` is configured with `OriginPatterns: []string{"*"}` because
+the player page and the bridge are served from different origins by design,
+and non-browser drivers (Playwright, claude-in-chrome) may send no `Origin`
+header at all. This is a local dev/test tool — `--addr` defaults to loopback;
+don't bind it to a non-loopback address on a shared or untrusted network.
