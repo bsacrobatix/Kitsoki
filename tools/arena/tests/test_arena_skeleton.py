@@ -10,6 +10,8 @@ real DockerBackend satisfies the same `ContainerBackend` interface.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -17,7 +19,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from arena.executor import CellExecutor, ContainerRun, FakeBackend  # noqa: E402
+from arena.executor import CellExecutor, ContainerRun, DockerBackend, FakeBackend  # noqa: E402
 from arena.model import JobSpec  # noqa: E402
 from arena.placement import run_sweep  # noqa: E402
 from arena.rollup import build_rollup  # noqa: E402
@@ -113,6 +115,34 @@ check("armed is model health", armed[0].health, "model:result")
 # FakeBackend recorded one container call per cell.
 check("container calls == cells", len(backend.calls), 6)
 check("mounts threaded through", backend.calls[0]["mounts"], {"/repo": "/workspace/kitsoki"})
+
+# 3a. DockerBackend command construction remains no-docker-testable via an
+# injected runner. Docker socket mounting is opt-in for nested Docker workloads
+# such as BugSwarm materialization/scoring.
+docker_commands: list[list[str]] = []
+
+
+def fake_docker_runner(cmd, *, capture_output, text):  # noqa: ANN001 - mirrors subprocess.run.
+    docker_commands.append(cmd)
+    return subprocess.CompletedProcess(cmd, 0, stdout="{}", stderr="")
+
+
+old_sock = os.environ.get("ARENA_DOCKER_SOCK_SRC")
+try:
+    os.environ.pop("ARENA_DOCKER_SOCK_SRC", None)
+    docker_backend = DockerBackend(runner=fake_docker_runner)
+    docker_backend.run(cell=cells[0], host="local", image="image:test", argv=["echo", "ok"], mounts={"/repo": "/workspace/kitsoki"})
+    check("docker socket not mounted by default", any("docker.sock" in part for part in docker_commands[-1]), False)
+
+    os.environ["ARENA_DOCKER_SOCK_SRC"] = "/var/run/docker.sock"
+    docker_backend.run(cell=cells[0], host="local", image="image:test", argv=["echo", "ok"], mounts={"/repo": "/workspace/kitsoki"})
+    check("docker socket mounted when requested", "-v" in docker_commands[-1] and "/var/run/docker.sock:/var/run/docker.sock" in docker_commands[-1], True)
+    check("docker host env forwarded", "DOCKER_HOST=unix:///var/run/docker.sock" in docker_commands[-1], True)
+finally:
+    if old_sock is None:
+        os.environ.pop("ARENA_DOCKER_SOCK_SRC", None)
+    else:
+        os.environ["ARENA_DOCKER_SOCK_SRC"] = old_sock
 
 # 3b. Done with block 3's cell results — clear the fixture files so block 4's
 #     reused cell id ("qs1" × the same variant) doesn't pick up a stale file.
