@@ -20,16 +20,24 @@ KITSOKI_MNT for `local` placement), so the file bench.py wrote inside the
 container is readable here at the equivalent host path once the run completes.
 Stdout/stderr infra-signal detection remains ONLY as a fallback for when that
 file is absent — e.g. a live cell driven through `drive_cell.sh`, which does not
-yet forward --completion-state to its embedded `bench.py score` call.
+emit a completion-state because the driver failed before scoring.
 """
 
 from __future__ import annotations
 
-import json
 import re
+import sys
 from pathlib import Path
 
-from ..model import Cell, CellResult, VERDICTS
+REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tools.completion_state import CompletionStateError
+
+from ..artifact_adapters import adapt_artifact
+from ..completion_state import apply_completion_state
+from ..model import Cell, CellResult
 from . import base
 
 # Path *inside the container* where the kitsoki checkout (incl. the bakeoff
@@ -41,10 +49,7 @@ BENCH = f"{KITSOKI_MNT}/tools/bugfix-bakeoff/external/bench.py"
 # For `local` placement this is the same tree the container mounts at KITSOKI_MNT,
 # so a file bench.py wrote under KITSOKI_MNT/.artifacts/... is readable here at
 # REPO_ROOT/.artifacts/....
-REPO_ROOT = Path(__file__).resolve().parents[4]
 COMPLETION_STATE_DIR = ".artifacts/arena/completion-state"
-
-_HEALTH_RE = re.compile(r"^(infra:[a-z0-9_-]+|model:result|incomplete)$")
 
 # Infra signals — a harness failure is not a model verdict. Kept ONLY as the
 # fallback for a missing completion-state file (see module docstring).
@@ -81,15 +86,13 @@ class BugfixPlugin:
             return ["python3", BENCH, "verify", "--project", project, "--bug", bug,
                     "--completion-state", state_path]
         # Paid path: drive a candidate then score it (drive_cell.sh handles both).
-        # NOTE: drive_cell.sh does not yet forward --completion-state to its
-        # embedded `bench.py score` call, so a live cell currently falls back to
-        # the infra-signal detection below until that wiring lands.
         drive = f"{KITSOKI_MNT}/tools/bugfix-bakeoff/external/drive_cell.sh"
         return [
             "bash", drive,
             "--project", project,
             "--bug", bug,
             "--candidate", cell.variant.id,
+            "--completion-state", state_path,
             "--score",
         ]
 
@@ -109,43 +112,13 @@ class BugfixPlugin:
 
     def _score_from_completion_state(self, result: CellResult, state_path: Path) -> CellResult:
         try:
-            data = json.loads(state_path.read_text())
-        except (OSError, json.JSONDecodeError) as exc:
+            payload = adapt_artifact("completion-state", state_path)
+        except CompletionStateError as exc:
             result.verdict = "blocked"
             result.health = "infra:completion-state-malformed"
-            result.notes = f"completion-state at {state_path} is not valid JSON: {exc}"
+            result.notes = f"completion-state at {state_path} is malformed: {exc}"
             return result
-
-        required = ("schema_version", "verdict", "health", "metrics", "evidence_refs")
-        missing = [k for k in required if k not in data]
-        if missing:
-            result.verdict = "blocked"
-            result.health = "infra:completion-state-malformed"
-            result.notes = f"completion-state at {state_path} missing field(s): {', '.join(missing)}"
-            return result
-        if data["verdict"] not in VERDICTS:
-            result.verdict = "blocked"
-            result.health = "infra:completion-state-malformed"
-            result.notes = f"completion-state at {state_path} has unknown verdict {data['verdict']!r}"
-            return result
-        if not _HEALTH_RE.match(str(data["health"])):
-            result.verdict = "blocked"
-            result.health = "infra:completion-state-malformed"
-            result.notes = f"completion-state at {state_path} has unrecognized health {data['health']!r}"
-            return result
-        if not isinstance(data.get("metrics"), dict) or not isinstance(data.get("evidence_refs"), list):
-            result.verdict = "blocked"
-            result.health = "infra:completion-state-malformed"
-            result.notes = f"completion-state at {state_path} has malformed metrics/evidence_refs"
-            return result
-
-        result.verdict = data["verdict"]
-        result.health = data["health"]
-        result.metrics = dict(data.get("metrics") or {})
-        result.evidence_refs = list(data.get("evidence_refs") or [])
-        result.trace_ref = data.get("trace_ref", "") or ""
-        result.notes = data.get("notes") or data.get("summary") or ""
-        return result
+        return apply_completion_state(result, payload)
 
     def _score_from_infra_fallback(self, result: CellResult, *, exit_code: int,
                                     stdout: str, stderr: str) -> CellResult:

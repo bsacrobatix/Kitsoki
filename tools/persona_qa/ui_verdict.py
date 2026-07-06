@@ -24,9 +24,10 @@ plus a thin `load_*` wrapper that reads the JSON off disk — mirroring
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
+
+from tools.completion_state import load_json_object
 
 from .completion import CompletionState
 
@@ -176,14 +177,14 @@ def from_ui_review_verdict(
 def load_ui_qa_verdict(path: str | Path) -> CompletionState:
     """Read a kitsoki-ui-qa `verdict.json` off disk and adapt it."""
     p = Path(path)
-    data = json.loads(p.read_text(encoding="utf-8"))
+    data = load_json_object(p)
     return from_ui_qa_verdict(data, source_path=str(p), run_dir=str(p.parent))
 
 
 def load_ui_review_verdict(path: str | Path) -> CompletionState:
     """Read a kitsoki-ui-review `verdict.json` off disk and adapt it."""
     p = Path(path)
-    data = json.loads(p.read_text(encoding="utf-8"))
+    data = load_json_object(p)
     return from_ui_review_verdict(data, source_path=str(p), run_dir=str(p.parent))
 
 

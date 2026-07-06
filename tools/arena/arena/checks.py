@@ -25,11 +25,19 @@ Three execution strategies exist today:
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
+_REPO_ROOT_FOR_IMPORTS = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT_FOR_IMPORTS) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_FOR_IMPORTS))
+
+from tools.completion_state import CompletionStateError
+
+from .artifact_adapters import adapt_artifact
+from .completion_state import apply_completion_state
 from .executor import CellExecutor
 from .model import (
-    REPO_ROOT,
     Cell,
     CellResult,
     CheckSpec,
@@ -39,13 +47,12 @@ from .model import (
 
 # Check types whose grade comes from reading an already-written verdict.json
 # off disk (WS-G G6) rather than spawning a container. Keyed by check_type ->
-# the tools.persona_qa.ui_verdict loader that understands that verdict.json's
-# native shape.
-_UI_VERDICT_LOADERS = {
-    "journey-verdict": "load_ui_qa_verdict",
-    "ux-heuristic": "load_ui_review_verdict",
+# the artifact adapter that understands that verdict.json's native shape.
+_FILE_ADAPTER_KINDS = {
+    "journey-verdict": "ui-qa-verdict",
+    "ux-heuristic": "ui-review-verdict",
 }
-FILE_ADAPTER_CHECK_TYPES = tuple(_UI_VERDICT_LOADERS)
+FILE_ADAPTER_CHECK_TYPES = tuple(_FILE_ADAPTER_KINDS)
 
 
 def unimplemented_check_result(cell: Cell, check_type: str) -> CellResult:
@@ -92,9 +99,9 @@ def run_ui_verdict_check(cell: Cell, check: CheckSpec) -> CellResult:
         axis=dict(cell.axis),
         check_type=check.check_type,
     )
-    loader_name = _UI_VERDICT_LOADERS.get(check.check_type)
-    if loader_name is None:
-        raise ValueError(f"no ui-verdict loader registered for check_type {check.check_type!r}")
+    adapter_kind = _FILE_ADAPTER_KINDS.get(check.check_type)
+    if adapter_kind is None:
+        raise ValueError(f"no artifact adapter registered for check_type {check.check_type!r}")
 
     verdict_path = check.options.get("verdict_path") or check.options.get("verdict")
     if not verdict_path:
@@ -116,40 +123,15 @@ def run_ui_verdict_check(cell: Cell, check: CheckSpec) -> CellResult:
         )
         return result
 
-    # Imported lazily (not at module top) so a plain `import arena.checks` never
-    # requires tools.persona_qa on sys.path unless a journey-verdict/ux-heuristic
-    # check is actually declared — mirrors plugins/persona_qa.py's own lazy
-    # ROOT-on-sys.path pattern.
-    import sys
-
-    if str(REPO_ROOT) not in sys.path:
-        sys.path.insert(0, str(REPO_ROOT))
-    from tools import persona_qa  # noqa: E402
-
-    loader = getattr(persona_qa, loader_name)
     try:
-        completion = loader(path)
-    except (OSError, ValueError, KeyError) as exc:
+        payload = adapt_artifact(adapter_kind, path)
+    except (OSError, ValueError, KeyError, CompletionStateError) as exc:
         result.verdict = "blocked"
         result.health = "infra:completion-state-malformed"
         result.notes = f"could not load verdict.json at {path}: {exc}"
         return result
 
-    result.verdict = completion.verdict
-    result.health = completion.health
-    result.notes = completion.summary
-    result.evidence_refs = list(completion.evidence_refs)
-    if completion.run_dir:
-        result.trace_ref = completion.run_dir
-    result.metrics.update(
-        {
-            "checks_passed": completion.checks_passed,
-            "checks_warned": completion.checks_warned,
-            "checks_failed": completion.checks_failed,
-            "checks_total": completion.checks_total,
-        }
-    )
-    return result
+    return apply_completion_state(result, payload)
 
 
 def run_cell_checks(

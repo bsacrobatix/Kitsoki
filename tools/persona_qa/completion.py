@@ -14,13 +14,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from tools.completion_state import SCHEMA_VERSION, dumps_completion_state
 
 STATES = ("completed", "incomplete", "blocked", "error")
-
-# The versioned contract this module emits — schemas/completion-state.schema.json.
-# Bump the major segment only on a breaking field change; arena's plugins and
-# bench.py's writer share the same version string.
-SCHEMA_VERSION = "1.0.0"
 
 
 @dataclass(frozen=True)
@@ -94,7 +90,7 @@ class CompletionState:
         return data
 
     def to_json(self) -> str:
-        return json.dumps(self.to_dict(), sort_keys=True)
+        return dumps_completion_state(self.to_dict())
 
 
 def from_product_journey_report(report: dict[str, Any]) -> CompletionState:

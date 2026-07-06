@@ -1,11 +1,13 @@
-# External-project bug-fix benchmark — "should I use kitsoki for MY project?"
+# Manifest-driven bug-fix harness — "should I use kitsoki for MY project?"
 
-The parent [`tools/bugfix-bakeoff`](../README.md) compares kitsoki's `bugfix`
-pipeline against a naive single-prompt agent on **kitsoki's own** bugs. This
-`external/` subtree generalises that into a **repo-agnostic benchmarking tool**:
-point it at any open-source repo, onboard it, let a model fix real filed-issue
-bugs through the kitsoki pipeline, and grade each fix **deterministically**
-against the regression test the real PR shipped.
+[`tools/bugfix-bakeoff`](../README.md) is the package: live cell driving,
+deterministic grading, aggregation, deck/report generation, durable results, and
+compatibility entry points. This `external/` subtree is the package's
+manifest-driven harness implementation. It handles kitsoki's own bugs and
+third-party repos through the same project manifest contract: point it at a repo,
+onboard it, let a model fix real filed-issue bugs through the kitsoki pipeline,
+and grade each fix **deterministically** against the regression test the real PR
+shipped.
 
 Use it to evaluate kitsoki's prompts/patterns on real-world code, and to answer
 the prospective-user question: *if I onboard my repo and let kitsoki fix a bug,
@@ -143,7 +145,9 @@ GEARS_RUST_REPO=/path/to/gears-rust ./provision_repos.sh --project gears-rust
 `run_repo_docker.sh` always mounts the checkout at `/workspace/repo`; for
 local-only projects, pass `--repo-dir /workspace/repo` inside the containered
 `bench.py` command. `drive_cell.sh` already handles this via its host-side
-`--repo-dir` wiring.
+`--repo-dir` wiring. When arena calls `drive_cell.sh`, it passes
+`--completion-state <path>` through to the final `bench.py score` call so live
+and no-LLM verification cells use the same result contract.
 
 The image is built from:
 `tools/bugfix-bakeoff/external/docker/Dockerfile.repo-runtime` and includes

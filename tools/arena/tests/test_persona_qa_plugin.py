@@ -130,16 +130,26 @@ sweep_cells = sweep_spec.cells()
 check("sweep enumerates one cell per persona", len(sweep_cells), 3)
 
 lock = threading.Lock()
+release_first = threading.Event()
 in_flight = 0
 max_in_flight = 0
+paused_once = False
 
 
 def responder(sweep_cell, host, sweep_argv):
-    global in_flight, max_in_flight
+    global in_flight, max_in_flight, paused_once
+    should_pause = False
     with lock:
         in_flight += 1
         max_in_flight = max(max_in_flight, in_flight)
+        if not paused_once:
+            paused_once = True
+            should_pause = True
+        elif not release_first.is_set():
+            release_first.set()
     try:
+        if should_pause:
+            release_first.wait(timeout=5)
         persona = sweep_cell.axis["persona"]
         bundle_dir = Path(tmp2) / persona
         bundle_dir.mkdir(parents=True, exist_ok=True)

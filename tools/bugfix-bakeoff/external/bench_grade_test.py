@@ -565,6 +565,78 @@ def test_drive_cell_preflight_scopes_to_requested_bug():
             shutil.rmtree(manifest_dir, ignore_errors=True)
 
 
+def test_drive_cell_score_writes_completion_state_without_live_drive():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        repo = root / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        (repo / "lib.txt").write_text("baseline\n")
+        subprocess.run(["git", "add", "lib.txt"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "baseline"],
+            cwd=repo,
+            check=True,
+        )
+        baseline = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+
+        project = "drive-completion-demo"
+        manifest_dir = Path(HERE) / "projects" / project
+        cache = root / "cache"
+        completion_state = root / "completion-state.json"
+        try:
+            (manifest_dir / "oracles").mkdir(parents=True)
+            (manifest_dir / "oracles" / "bug1.txt").write_text("pass\n")
+            (manifest_dir / "manifest.yaml").write_text(
+                "project:\n"
+                f"  id: {project}\n"
+                "  repo: local\n"
+                "  local_only: true\n"
+                "  suite: false\n"
+                "  oracle:\n"
+                "    target: oracle.txt\n"
+                "    inject: write\n"
+                "    run: \"test \\\"$(cat {target})\\\" = pass\"\n"
+                "bugs:\n"
+                "  - id: bug1\n"
+                f"    baseline_sha: {baseline}\n"
+                f"    fix_sha: {baseline}\n"
+                "    oracle_test: oracles/bug1.txt\n"
+            )
+            env = {
+                **os.environ,
+                "EXTERNAL_BAKEOFF_CACHE": str(cache),
+                "EXTERNAL_BAKEOFF_FAKE_DRIVE_SUCCESS": "1",
+            }
+            r = subprocess.run(
+                [
+                    str(Path(HERE) / "drive_cell.sh"),
+                    "--project", project,
+                    "--bug", "bug1",
+                    "--candidate", "opus-4.8",
+                    "--repo-dir", str(repo),
+                    "--score",
+                    "--no-docker-score",
+                    "--completion-state", str(completion_state),
+                ],
+                cwd=Path(HERE).parents[2],
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            assert r.returncode == 0, r.stdout + r.stderr
+            payload = json_load(completion_state.read_text())
+            assert payload["schema_version"] == bench.COMPLETION_STATE_SCHEMA_VERSION
+            assert payload["verdict"] == "solved"
+            assert payload["health"] == "model:result"
+            assert payload["target_id"] == project
+            assert payload["variant_id"] == "opus-4.8"
+            assert payload["axis"] == {"bug": "bug1"}
+        finally:
+            shutil.rmtree(manifest_dir, ignore_errors=True)
+
+
 def test_prepare_handoffs_wraps_no_drive_and_audit():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)

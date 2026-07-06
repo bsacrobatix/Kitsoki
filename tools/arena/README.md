@@ -34,16 +34,20 @@ JobSpec ──enumerate──▶ Cell[] ──execute(container)──▶ CellRe
 ## The shared completion-state contract
 
 `bugfix.py`'s `score()` no longer regexes the container's stdout/stderr. Whatever
-runs inside the container (`bench.py verify`/`score`, and eventually
-`drive_cell.sh`) writes one **versioned completion-state JSON** —
+runs inside the container (`bench.py verify`/`score`, including live
+`drive_cell.sh --score`) writes one **versioned completion-state JSON** —
 [`schemas/completion-state.schema.json`](../../schemas/completion-state.schema.json)
 (`verdict` / `health` / `metrics` / `evidence_refs`) — that this plugin reads back
 from the shared repo mount (`KITSOKI_MNT` inside the container == `REPO_ROOT`
 outside it, for `local` placement) instead of parsing text. The same contract
 backs the product-journey side: `tools/persona_qa/completion.py` builds a
 schema-conformant completion-state from a `review.json`/`scenario-outcomes.json`
-run bundle, so any future persona-qa arena plugin scores from the identical
-shape a bugfix cell does. A missing or malformed file is reported as an explicit
+run bundle, so persona-qa arena cells score from the identical shape a bugfix
+cell does. Shared helpers in `tools/completion_state.py` own deterministic JSON
+writing and validation; `arena/artifact_adapters.py` normalizes producer
+artifacts (`completion-state`, `swarm-results`, `ui-qa-verdict`,
+`ui-review-verdict`, `product-journey-review`) into that contract before rollup.
+A missing or malformed file is reported as an explicit
 `infra:*` health (`infra:missing-completion-state`,
 `infra:completion-state-malformed`) — stdout/stderr infra-signal regexing (e.g.
 `"connection refused"`) survives ONLY as a fallback for when the file is absent.
@@ -121,6 +125,8 @@ Contract rules:
 | File | Role |
 |---|---|
 | `arena/model.py` | `JobSpec`, `Cell`, `CellResult`, `CheckSpec`, enumeration |
+| `arena/artifact_adapters.py` | artifact adapter registry: completion-state/swarm/UI/product-journey artifacts → completion-state payloads |
+| `arena/completion_state.py` | arena-specific copy from validated completion-state payloads into `CellResult` |
 | `arena/checks.py` | check-suite runner (WS-G G1): replay delegates to the container path; journey-verdict/ux-heuristic delegate to the verdict.json file adapter (WS-G G6); unimplemented types → honest `pending` |
 | `arena/plugins/base.py` | `JobTypePlugin` protocol + registry |
 | `arena/plugins/bugfix.py` | bugfix plugin — wraps `bench.py` oracle (verify / drive), scores from the completion-state file |

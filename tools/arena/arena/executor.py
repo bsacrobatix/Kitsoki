@@ -31,7 +31,7 @@ class ContainerRun:
 class ContainerBackend(Protocol):
     """The execution seam: place+run a container on a host, return its output."""
 
-    def run(self, *, host: str, image: str, argv: list[str], mounts: dict[str, str]) -> ContainerRun:
+    def run(self, *, cell: Cell, host: str, image: str, argv: list[str], mounts: dict[str, str]) -> ContainerRun:
         ...
 
 
@@ -50,7 +50,8 @@ class DockerBackend:
         self._context_for = context_for or (lambda host: None if host == "local" else host)
         self._runner = runner
 
-    def run(self, *, host: str, image: str, argv: list[str], mounts: dict[str, str]) -> ContainerRun:
+    def run(self, *, cell: Cell, host: str, image: str, argv: list[str], mounts: dict[str, str]) -> ContainerRun:
+        del cell
         context = self._context_for(host)
         cmd = ["docker"]
         if context:
@@ -90,19 +91,9 @@ class FakeBackend:
         self._responder = responder
         self.calls: list[dict] = []
 
-    def run(self, *, host: str, image: str, argv: list[str], mounts: dict[str, str]) -> ContainerRun:
+    def run(self, *, cell: Cell, host: str, image: str, argv: list[str], mounts: dict[str, str]) -> ContainerRun:
         self.calls.append({"host": host, "image": image, "argv": argv, "mounts": mounts})
-        # The responder is keyed by the cell embedded in argv-free context, so we
-        # pass image+argv through; tests close over the cell list.
-        return self._responder_run(host, image, argv)
-
-    # Indirection so the responder can be (cell, host, argv) — the executor sets
-    # _current_cell right before each run.
-    _current_cell: Cell | None = None
-
-    def _responder_run(self, host: str, image: str, argv: list[str]) -> ContainerRun:
-        assert self._current_cell is not None, "FakeBackend used outside executor"
-        return self._responder(self._current_cell, host, argv)
+        return self._responder(cell, host, argv)
 
 
 class CellExecutor:
@@ -118,10 +109,13 @@ class CellExecutor:
         plugin = plugins.get(cell.job_type)
         image = plugin.image(cell)
         argv = plugin.drive_command(cell, live=live)
-        # Let FakeBackend route its responder by the current cell.
-        if isinstance(self._backend, FakeBackend):
-            self._backend._current_cell = cell
-        run = self._backend.run(host=host, image=image, argv=argv, mounts=self._mounts_for(cell, host))
+        run = self._backend.run(
+            cell=cell,
+            host=host,
+            image=image,
+            argv=argv,
+            mounts=self._mounts_for(cell, host),
+        )
         result = plugin.score(cell, exit_code=run.exit_code, stdout=run.stdout, stderr=run.stderr)
         result.metrics.setdefault("host", run.host)
         return result

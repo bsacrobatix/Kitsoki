@@ -6,7 +6,7 @@
 # hand-assembled prompt. COST-BEARING (real LLM) — operator-run, never in CI.
 #
 #   drive_cell.sh --project <name> --bug <id> --candidate <key> [--score] [--no-drive] [--no-docker-score]
-#                 [--repo-dir <local-checkout>]
+#                 [--repo-dir <local-checkout>] [--completion-state <path>]
 #
 #   --score      after the drive, grade the worktree with bench.py + extract cost
 #   --no-drive   only prepare the worktree + print the prompt (free; for inspection)
@@ -26,13 +26,14 @@ MAX_ATTEMPTS="${MCP_DRIVE_MAX_ATTEMPTS:-12}"
 BACKOFF_BASE="${MCP_DRIVE_BACKOFF_BASE:-10}"
 BACKOFF_MAX="${MCP_DRIVE_BACKOFF_MAX:-600}"
 
-project=""; bug=""; cand=""; repo_dir=""; do_score=0; no_drive=0; orch="${MCP_DRIVE_MODEL:-gpt-5.5}"; use_docker_score="${EXTERNAL_BAKEOFF_USE_DOCKER_SCORE:-1}"
+project=""; bug=""; cand=""; repo_dir=""; completion_state=""; do_score=0; no_drive=0; orch="${MCP_DRIVE_MODEL:-gpt-5.5}"; use_docker_score="${EXTERNAL_BAKEOFF_USE_DOCKER_SCORE:-1}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project) project="$2"; shift 2;;
     --bug) bug="$2"; shift 2;;
     --candidate) cand="$2"; shift 2;;
     --repo-dir) repo_dir="$2"; shift 2;;
+    --completion-state) completion_state="$2"; shift 2;;
     --orchestrator) orch="$2"; shift 2;;
     --no-docker-score) use_docker_score=0; shift;;
     --score) do_score=1; shift;;
@@ -41,7 +42,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$project" && -n "$bug" && -n "$cand" ]] || {
-  echo "usage: drive_cell.sh --project <name> --bug <id> --candidate <key> [--repo-dir <local-checkout>] [--score] [--no-drive] [--no-docker-score]" >&2; exit 2; }
+  echo "usage: drive_cell.sh --project <name> --bug <id> --candidate <key> [--repo-dir <local-checkout>] [--score] [--no-drive] [--no-docker-score] [--completion-state <path>]" >&2; exit 2; }
 
 is_retryable_error() {
   local payload="$1"
@@ -285,13 +286,20 @@ if [[ "$no_drive" == 1 ]]; then echo "[cell] --no-drive: prompt at $pf"; echo "[
 # --- drive (COST) -------------------------------------------------------------
 log="$CACHE/drive-logs/$cellkey.json"
 err="${log%.json}.err"
-echo "[cell] driving (orchestrator=$orch, worker=$cand)…" >&2
-if drive_with_retry "$log" "$err"; then
-  echo "[cell] drive done -> $log" >&2
+if [[ "${EXTERNAL_BAKEOFF_FAKE_DRIVE_SUCCESS:-0}" == 1 ]]; then
+  echo "[cell] fake drive enabled by EXTERNAL_BAKEOFF_FAKE_DRIVE_SUCCESS=1" >&2
+  printf '{"status":"fake-drive-success"}\n' >"$log"
+  : >"$err"
   drive_exit=0
 else
-  drive_exit=$?
-  echo "[cell] drive failed with exit $drive_exit -> $err" >&2
+  echo "[cell] driving (orchestrator=$orch, worker=$cand)…" >&2
+  if drive_with_retry "$log" "$err"; then
+    echo "[cell] drive done -> $log" >&2
+    drive_exit=0
+  else
+    drive_exit=$?
+    echo "[cell] drive failed with exit $drive_exit -> $err" >&2
+  fi
 fi
 
 # Cell-health classification from the trace: separate an INFRA failure (worker
@@ -350,6 +358,9 @@ if [[ "$do_score" == 1 ]]; then
     --trace "$trace"
     --candidates "$HERE/candidates.yaml"
   )
+  if [[ -n "$completion_state" ]]; then
+    bench_host+=(--completion-state "$completion_state")
+  fi
   host_score_log="$CACHE/score-logs/$cellkey-host.log"
   host_score_err="$CACHE/score-logs/$cellkey-host.err"
   if [[ "$use_docker_score" == 1 ]] && command -v docker >/dev/null 2>&1; then
@@ -359,15 +370,32 @@ if [[ "$do_score" == 1 ]]; then
       docker_bench_tree="$(to_docker_path "$cell")"
       docker_bench_out="$(to_docker_path "$out")"
       docker_bench_trace="$(to_docker_path "$trace")"
+      docker_completion_state=""
+      docker_bench_completion_state=""
+      if [[ -n "$completion_state" ]]; then
+        docker_completion_state="$CACHE/completion-state/$cellkey.json"
+        mkdir -p "$(dirname "$docker_completion_state")"
+        rm -f "$docker_completion_state"
+        docker_bench_completion_state="$(to_docker_path "$docker_completion_state")"
+      fi
       docker_score_log="$CACHE/score-logs/$cellkey-docker.log"
       docker_score_err="$CACHE/score-logs/$cellkey-docker.err"
+      docker_bench_args=(
+        python3 /workspace/kitsoki/tools/bugfix-bakeoff/external/bench.py score
+        --project "$project" --bug "$bug" --tree "$docker_bench_tree"
+        --candidate "$cand" --treatment kitsoki --out "$docker_bench_out"
+        --trace "$docker_bench_trace" --candidates /workspace/kitsoki/tools/bugfix-bakeoff/external/candidates.yaml
+      )
+      if [[ -n "$docker_bench_completion_state" ]]; then
+        docker_bench_args+=(--completion-state "$docker_bench_completion_state")
+      fi
       if run_with_retry "docker score --project $project --bug $bug --candidate $cand" "$docker_score_log" "$docker_score_err" \
         "$HERE/run_repo_docker.sh" --project "$project" --repo-dir "$src" -- \
-        python3 /workspace/kitsoki/tools/bugfix-bakeoff/external/bench.py score \
-          --project "$project" --bug "$bug" --tree "$docker_bench_tree" \
-          --candidate "$cand" --treatment kitsoki --out "$docker_bench_out" \
-          --trace "$docker_bench_trace" --candidates /workspace/kitsoki/tools/bugfix-bakeoff/external/candidates.yaml; then
-        :
+        "${docker_bench_args[@]}"; then
+        if [[ -n "$completion_state" && -f "$docker_completion_state" ]]; then
+          mkdir -p "$(dirname "$completion_state")"
+          cp "$docker_completion_state" "$completion_state"
+        fi
       else
         echo "[cell] docker score failed; falling back to host scoring" >&2
         run_with_retry "host score --project $project --bug $bug --candidate $cand" "$host_score_log" "$host_score_err" "${bench_host[@]}" || true
