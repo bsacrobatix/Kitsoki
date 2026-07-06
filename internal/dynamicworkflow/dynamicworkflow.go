@@ -112,6 +112,7 @@ type Receipt struct {
 	ValidationPath   string           `json:"validation_path,omitempty"`
 	ExportPath       string           `json:"export_path,omitempty"`
 	ExportReportPath string           `json:"export_report_path,omitempty"`
+	ExportReport     *ExportReport    `json:"export_report,omitempty"`
 	SessionID        string           `json:"session_id,omitempty"`
 	SessionHandle    string           `json:"session_handle,omitempty"`
 	URL              string           `json:"url,omitempty"`
@@ -625,6 +626,7 @@ Validation: %t
 	}
 	receipt.ExportPath = targetDir
 	receipt.ExportReportPath = reportPath
+	receipt.ExportReport = &report
 	receipt.LaunchBasisPath = filepath.Join(targetDir, "launch.yaml")
 	receipt.AppPath = exportAppDir
 	receipt.ManifestPath = filepath.Join(targetDir, "manifest.yaml")
