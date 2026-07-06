@@ -80,6 +80,9 @@ It is intentionally no-LLM:
   live pending mode also requires the hosted gh-agent `/healthz` and
   `/api/ready` checks to pass for the same ticket repo before returning a driver
   handoff.
+  The direct `autonomous_fix` gate repeats those hosted gh-agent checks before
+  filing anything, so loaded or separately finalized runs fail closed with
+  `filing_status=not_run` when the agent is unhealthy or points at another repo.
   Each marathon run also writes `autonomous-marathon-control.json/md` with the
   cadence, per-scenario live budget, human role, heartbeat/watchdog timing, and
   final gates, and the story view surfaces that control state for review.

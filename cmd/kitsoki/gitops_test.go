@@ -456,6 +456,97 @@ func TestGitopsIndependentVerifyGate(t *testing.T) {
 	}
 }
 
+func TestGitopsAutonomousFixChecksHostedAgentReadinessBeforeFiling(t *testing.T) {
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/healthz":
+			_, _ = w.Write([]byte("ok"))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/ready":
+			writeJSON(w, map[string]any{
+				"status":          "ready",
+				"repo":            "other/repo",
+				"public_base_url": agentURL(r),
+				"worker":          "test-worker",
+				"drain_enabled":   true,
+			})
+		default:
+			t.Fatalf("unexpected agent request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer agent.Close()
+
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("autonomous-fix must not touch GitHub after readiness fails: %s %s", r.Method, r.URL.String())
+	}))
+	defer github.Close()
+	restoreAPI := host.SetGitHubAPIForTest(github.URL, github.Client())
+	defer restoreAPI()
+
+	runDir := t.TempDir()
+	result, err := runGitopsAutonomousFix(context.Background(), gitopsAutonomousFixOptions{
+		RunDir:        runDir,
+		TicketRepo:    "o/r",
+		AgentDB:       filepath.Join(runDir, "gh-agent.sqlite"),
+		AgentStory:    "stories/bugfix",
+		PublicBaseURL: agent.URL,
+		CommentMode:   "none",
+	})
+	if err != nil {
+		t.Fatalf("autonomous-fix readiness invalid result: %v", err)
+	}
+	if stringValue(result, "autonomous_fix_status") != "autonomous_fix_invalid" ||
+		stringValue(result, "filing_status") != "not_run" ||
+		stringValue(result, "validation_issue_summary") != "gh-agent-readiness" {
+		t.Fatalf("result = %+v", result)
+	}
+	if stringValue(result, "gh_agent_health_status") != "pass" ||
+		stringValue(result, "gh_agent_readiness_status") != "fail" ||
+		!strings.Contains(stringValue(result, "gh_agent_readiness_summary"), "/api/ready") {
+		t.Fatalf("readiness fields = %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(runDir, "autonomous-fix-report.md")); err != nil {
+		t.Fatalf("autonomous fix report not written: %v", err)
+	}
+}
+
+func TestGitopsAutonomousFixAgentReadinessPassesForMatchingRepo(t *testing.T) {
+	var base string
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/healthz":
+			_, _ = w.Write([]byte("ok"))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/ready":
+			writeJSON(w, map[string]any{
+				"status":          "ready",
+				"repo":            "o/r",
+				"public_base_url": base,
+				"worker":          "test-worker",
+				"drain_enabled":   true,
+			})
+		default:
+			t.Fatalf("unexpected agent request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer agent.Close()
+	base = agent.URL
+
+	health, readiness, ok, issue, summary := gitopsAutonomousFixAgentReady(context.Background(), agent.URL, "o/r")
+	if !ok || issue != "" || summary != "" {
+		t.Fatalf("readiness = ok %v issue %q summary %q", ok, issue, summary)
+	}
+	if stringValue(health, "status") != "pass" || stringValue(readiness, "status") != "pass" {
+		t.Fatalf("health/readiness = %+v %+v", health, readiness)
+	}
+}
+
+func agentURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
 func TestGitopsEnqueueFixesClaimsGitHubIssueAndPersistsState(t *testing.T) {
 	t.Setenv("GH_TOKEN", "test-token")
 	runDir := t.TempDir()

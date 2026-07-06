@@ -135,7 +135,11 @@ Then hand it to the reusable driver:
    This files credible `issue` findings with uploaded evidence, enqueues and
    drains gh-agent fixes, refreshes the deck/review artifacts, and validates the
    bundle without agent oversight. The story calls the native
-   `kitsoki gitops autonomous-fix` facade, which drives `kitsoki bug
+   `kitsoki gitops autonomous-fix` facade. Before filing anything, that facade
+   checks `<gh_agent_public_base_url>/healthz` and `/api/ready`; readiness must
+   report `status=ready`, the same `ticket_repo`, and an enabled drain loop.
+   A mismatch returns `autonomous_fix_invalid` with filing still `not_run`.
+   The facade then drives `kitsoki bug
    file-findings` (host.GitHubFileFindings) and native gh-agent queue/drain
    surfaces behind the story boundary: native GitHub API filing uses `GH_TOKEN` /
    `GITHUB_TOKEN`, open issues are searched for a strong title match before

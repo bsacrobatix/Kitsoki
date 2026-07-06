@@ -496,6 +496,10 @@ Do not bypass this with raw `gh` commands. Product-journey issue filing and
 autonomous fixes are intentionally routed through Kitsoki's native
 gitops/gh-agent surfaces so artifact upload, issue metadata, queued repair
 state, fix-run evidence, and review gates stay coupled.
+The native `kitsoki gitops autonomous-fix` gate also checks the hosted
+gh-agent `/healthz` and `/api/ready` endpoints before filing issues; readiness
+must match the ticket repo and report an enabled drain loop, or the gate returns
+`autonomous_fix_invalid` with filing still `not_run`.
 
 For a no-LLM dogfood/demo bundle with representative evidence and findings:
 
