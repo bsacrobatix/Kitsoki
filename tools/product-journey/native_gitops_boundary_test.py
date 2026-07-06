@@ -59,11 +59,55 @@ def main():
             "After capture, submit `autonomous_fix ticket_repo=<owner/repo>` and submit `review`.\n",
             encoding="utf-8",
         )
+        story_root = root / "story-root"
+        room_path = story_root / "stories" / "product-journey-qa" / "rooms" / "run_created.yaml"
+        app_path = story_root / "stories" / "product-journey-qa" / "app.yaml"
+        room_path.parent.mkdir(parents=True)
+        docs_body = (
+            "Use `autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<url>` "
+            "as the story-owned full loop through `kitsoki gitops autonomous-fix`; gh-agent "
+            "runs include independent-verify.md proof. Run --persona-autofix-smoke and "
+            "persona_autofix_smoke gates.\n"
+        )
+        good_room = (
+            "label: autonomous_fix ticket_repo=owner/repo gh_agent_public_base_url=<url>\n"
+            "cmd: kitsoki\n"
+            "args: [gitops, autonomous-fix]\n"
+            'autonomous_fix_report_path: "stdout_json.autonomous_fix_report_path"\n'
+            "Autonomous report\n"
+            "id: file_product_journey_findings\n"
+            "args:\n"
+            "  - tools/product-journey/run.py\n"
+            "  - --file-findings\n"
+            "              bind:\n"
+            "label: file_findings ticket_repo=owner/repo\n"
+        )
+        bad_room = good_room.replace(
+            "  - --file-findings\n",
+            "  - --file-findings\n"
+            "  - --gh-agent-drain\n",
+        )
+        good_app = (
+            "  file_findings:\n"
+            "    slots:\n"
+            "      ticket_repo: { type: string, required: true }\n"
+            "  autonomous_fix:\n"
+            "    slots:\n"
+            "      gh_agent_db: { type: string, required: false }\n"
+        )
+        bad_app = good_app.replace(
+            "      ticket_repo: { type: string, required: true }\n",
+            "      ticket_repo: { type: string, required: true }\n"
+            "      gh_agent_db: { type: string, required: false }\n",
+        )
+        readme.write_text(docs_body, encoding="utf-8")
+        story_readme.write_text(docs_body, encoding="utf-8")
 
         original_driver = run.DRIVER_AGENT
         original_prompt = run.AUTONOMOUS_DRIVER_PROMPT
         original_skill = run.PRODUCT_JOURNEY_SKILL
         original_readme = run.PRODUCT_JOURNEY_README
+        original_root = run.ROOT
         try:
             run.DRIVER_AGENT = good
             run.AUTONOMOUS_DRIVER_PROMPT = prompt
@@ -110,11 +154,38 @@ def main():
                 any(issue.get("id") == "native-gitops-boundary" for issue in issues),
                 failures,
             )
+            run.ROOT = story_root
+            room_path.write_text(good_room, encoding="utf-8")
+            app_path.write_text(good_app, encoding="utf-8")
+            issues = []
+            run.validate_autonomous_workflow_docs(issues)
+            check("file_findings filing-only boundary accepts clean story", not issues, failures)
+
+            room_path.write_text(bad_room, encoding="utf-8")
+            app_path.write_text(good_app, encoding="utf-8")
+            issues = []
+            run.validate_autonomous_workflow_docs(issues)
+            check(
+                "file_findings gh-agent drain fails the corpus boundary",
+                any(issue.get("id") == "file-findings-gh-agent-boundary" for issue in issues),
+                failures,
+            )
+
+            room_path.write_text(good_room, encoding="utf-8")
+            app_path.write_text(bad_app, encoding="utf-8")
+            issues = []
+            run.validate_autonomous_workflow_docs(issues)
+            check(
+                "file_findings gh-agent slots fail the corpus boundary",
+                any(issue.get("id") == "file-findings-gh-agent-boundary" for issue in issues),
+                failures,
+            )
         finally:
             run.DRIVER_AGENT = original_driver
             run.AUTONOMOUS_DRIVER_PROMPT = original_prompt
             run.PRODUCT_JOURNEY_SKILL = original_skill
             run.PRODUCT_JOURNEY_README = original_readme
+            run.ROOT = original_root
 
     if failures:
         raise SystemExit(1)

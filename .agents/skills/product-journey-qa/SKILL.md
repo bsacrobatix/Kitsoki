@@ -257,9 +257,10 @@ review artifacts, and validates the bundle in one story-owned reliability gate.
 The underlying fallback command is `kitsoki gitops autonomous-fix`; do not ask
 operators or agents to run raw `gh` commands or direct gh-agent plumbing for the
 product-journey loop.
-The story stores gh-agent queue state for `file_findings` and `autonomous_fix`
-at `<run_dir>/gh-agent-jobs.sqlite` by default; pass `gh_agent_db=<sqlite>` only
-to override that run-local path.
+The story stores gh-agent queue state for `autonomous_fix` at
+`<run_dir>/gh-agent-jobs.sqlite` by default; pass `gh_agent_db=<sqlite>` only to
+override that run-local path. `file_findings` is filing-only and must not queue
+or drain gh-agent fixes.
 The CLI exits nonzero for an invalid autonomous loop by default; the story uses
 `--report-invalid-autonomous-fix` so failed gate details bind into world state
 for review instead of disappearing behind a host error.
