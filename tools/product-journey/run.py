@@ -349,8 +349,20 @@ def marathon_smoke_ledger_path(value: str) -> Path:
 
 
 def validate_marathon_smoke_ledger(ledger_arg: str) -> dict:
+    if not str(ledger_arg).strip():
+        issues: list[dict] = []
+        add_validation_issue(issues, "error", "ledger-path", "Autonomous marathon smoke ledger path was not provided")
+        return {
+            "status": "invalid",
+            "ledger_path": "",
+            "ledger_markdown_path": "",
+            "errors": 1,
+            "warnings": 0,
+            "issues": issues,
+            "summary": "ledger path missing",
+        }
     ledger_path = marathon_smoke_ledger_path(ledger_arg)
-    issues: list[dict] = []
+    issues = []
     if not ledger_path.exists():
         add_validation_issue(issues, "error", "ledger-exists", "Autonomous marathon smoke ledger JSON does not exist", str(ledger_path))
         return {
@@ -12176,6 +12188,7 @@ def main() -> None:
     parser.add_argument("--autonomous-marathon-smoke", action="store_true", help="Run no-LLM scoped persona-QA marathon smoke through native autonomous fix and stats")
     parser.add_argument("--validate-marathon-smoke-ledger", action="store_true", help="Validate a retained autonomous marathon smoke JSON ledger")
     parser.add_argument("--marathon-smoke-ledger", default="", help="Path to autonomous-marathon-smoke.json for --validate-marathon-smoke-ledger")
+    parser.add_argument("--report-invalid-marathon-smoke-ledger", action="store_true", help="Print invalid retained-ledger validation JSON instead of exiting early")
     parser.add_argument("--preflight-command", default="", help="Override the webshot smoke command for --capture-preflight tests")
     parser.add_argument("--preflight-studio-command", default="", help="Override the studio.ping smoke command for --capture-preflight tests")
     parser.add_argument("--preflight-quota-state", default="", help="Override provider quota state file for --capture-preflight tests")
@@ -12480,13 +12493,13 @@ def main() -> None:
         return
 
     if args.validate_marathon_smoke_ledger:
-        if not args.marathon_smoke_ledger:
+        if not args.marathon_smoke_ledger and not args.report_invalid_marathon_smoke_ledger:
             raise SystemExit("--validate-marathon-smoke-ledger requires --marathon-smoke-ledger")
         result = validate_marathon_smoke_ledger(args.marathon_smoke_ledger)
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
             append_log(f"Validated autonomous marathon smoke ledger {Path(args.marathon_smoke_ledger).name}: {result['status']}")
-            if result["status"] != "valid":
+            if result["status"] != "valid" and not args.report_invalid_marathon_smoke_ledger:
                 raise SystemExit(1)
             return
         print(f"Autonomous marathon smoke ledger: {result['status']}")
@@ -12498,7 +12511,7 @@ def main() -> None:
                 detail = f" ({issue['detail']})" if issue.get("detail") else ""
                 print(f"- {issue['severity']}: {issue['id']}: {issue['message']}{detail}")
         append_log(f"Validated autonomous marathon smoke ledger {Path(args.marathon_smoke_ledger).name}: {result['status']}")
-        if result["status"] != "valid":
+        if result["status"] != "valid" and not args.report_invalid_marathon_smoke_ledger:
             raise SystemExit(1)
         return
 

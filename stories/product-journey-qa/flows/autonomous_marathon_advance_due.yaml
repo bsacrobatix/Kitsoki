@@ -108,7 +108,7 @@ turns:
       stats_current_run_scanned: "yes"
       validation_status: valid
       validation_errors: 0
-    expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*Due advance[\\s\\S]*autonomous_marathon_advanced: Advanced due marathon[\\s\\S]*run-due into run-advanced: autonomous_marathon_valid[\\s\\S]*Due source[\\s\\S]*\\.artifacts/product-journey/run-due[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, independent_verify=pass,[\\s\\S]*review=pass, validation=pass[\\s\\S]*Stats gate[\\s\\S]*pass: pass; current run scanned yes"
+    expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*Due advance[\\s\\S]*autonomous_marathon_advanced: Advanced due marathon[\\s\\S]*run-due into run-advanced: autonomous_marathon_valid[\\s\\S]*Due source[\\s\\S]*\\.artifacts/product-journey/run-due[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass[\\s\\S]*gh_agent=pass[\\s\\S]*independent_verify=pass[\\s\\S]*review=pass[\\s\\S]*validation=pass[\\s\\S]*Stats gate[\\s\\S]*pass: pass; current run scanned yes"
     expect_host_calls:
       - handler: host.run
         args:
