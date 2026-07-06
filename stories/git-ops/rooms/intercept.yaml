@@ -38,11 +38,12 @@ states:
       - prose: "Say a git command in your own words — it's matched and run without a model."
       - kv:
           pairs:
+            Status:      '{% if world.last_op_ok == false %}❌ last operation failed{% elif world.has_uncommitted %}⚠️ uncommitted changes{% elif world.commits_behind > 0 %}⚠️ behind integration{% elif world.commits_ahead > 0 %}⚠️ ahead of integration{% else %}✅ clean{% endif %}'
             Branch:      '{{ world.current_branch|default:"(detecting…)" }}'
             Integration: '{{ world.integration_branch }}'
-            Uncommitted: '{% if world.has_uncommitted %}yes{% else %}clean{% endif %}'
-            Ahead:       '{{ world.commits_ahead }} ahead'
-            Behind:      '{{ world.commits_behind }} behind'
+            Uncommitted: '{% if world.has_uncommitted %}⚠️ yes{% else %}✅ clean{% endif %}'
+            Ahead:       '{% if world.commits_ahead > 0 %}⚠️ {% else %}✅ {% endif %}{{ world.commits_ahead }} ahead'
+            Behind:      '{% if world.commits_behind > 0 %}⚠️ {% else %}✅ {% endif %}{{ world.commits_behind }} behind'
       - kv:
           pairs:
             Issue:  '#{{ world.issue_id }} — {{ world.issue_title|default:"(untitled)" }}'
@@ -51,9 +52,9 @@ states:
             Source: '{{ world.issue_source|default:"ticket provider" }}{% if world.issue_legacy_id %} (legacy {{ world.issue_legacy_id }}){% endif %}'
             Comment: '{{ world.issue_comment_url|default:"(none)" }}'
         when: "world.issue_id != ''"
-      - prose: "Issue warning: {{ world.issue_warning }}"
+      - prose: "⚠️ Issue warning: {{ world.issue_warning }}"
         when: "world.issue_warning != ''"
-      - prose: "Last operation failed: {{ world.last_op_output|default:'(no output)' }}"
+      - prose: "❌ Last operation failed: {{ world.last_op_output|default:'(no output)' }}"
         when: "world.last_op_ok == false"
       - choice:
           mode: single

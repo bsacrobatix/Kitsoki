@@ -42,6 +42,7 @@ host_handlers:
 turns:
   - intent: { name: push_main, slots: { remote: origin } }
     expect_state: push_main
+    expect_view_matches: "✅ Pushed[\\s\\S]*3 commits published"
     expect_world:
       push_remote: origin
       push_result:
