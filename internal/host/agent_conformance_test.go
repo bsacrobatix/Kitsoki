@@ -489,10 +489,25 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 			}
 		}
 
-		// Resume maps to --conversation.
-		resume := cb.TranslateInvocation([]string{"-p", "--resume", "uuid-123"}, "p", "")
+		// Resume maps to --conversation and suppresses the system prompt on warm runs.
+		resume := cb.TranslateInvocation([]string{"-p", "--resume", "uuid-123", "--system-prompt", "SYS-PROMPT"}, "USER-PROMPT", "")
 		if !hasFlagValue(resume.Args, "--conversation", "uuid-123") {
 			t.Errorf("agy --resume not translated to --conversation; args=%v", resume.Args)
+		}
+		if hasFlagValue(resume.Args, "--print", "SYS-PROMPT\n\n---\n\nUSER-PROMPT") {
+			t.Errorf("agy warm run must not prepend system prompt; args=%v", resume.Args)
+		}
+		if !hasFlagValue(resume.Args, "--print", "USER-PROMPT") {
+			t.Errorf("agy warm run missing user prompt; args=%v", resume.Args)
+		}
+
+		// Session-id maps to --conversation and prepends system prompt on cold runs.
+		session := cb.TranslateInvocation([]string{"-p", "--session-id", "uuid-456", "--system-prompt", "SYS-PROMPT"}, "USER-PROMPT", "")
+		if !hasFlagValue(session.Args, "--conversation", "uuid-456") {
+			t.Errorf("agy --session-id not translated to --conversation; args=%v", session.Args)
+		}
+		if !hasFlagValue(session.Args, "--print", "SYS-PROMPT\n\n---\n\nUSER-PROMPT") {
+			t.Errorf("agy cold run must prepend system prompt; args=%v", session.Args)
 		}
 	})
 }
