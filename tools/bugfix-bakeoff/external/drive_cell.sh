@@ -159,10 +159,10 @@ if [[ -n "$local_only" ]]; then
     echo "[cell] project '$project' is local_only; pass --repo-dir <checkout> or set $env_name." >&2
     exit 2
   }
-  [[ -d "$src/.git" ]] || {
+  if ! git -C "$src" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "[cell] local repo '$src' is not a git checkout." >&2
     exit 2
-  }
+  fi
   # Drive against a worktree of the target checkout; the baseline must be a real
   # commit there. No clone, no install — language toolchains are cached locally;
   # a nested package install can still run at score time via oracle.setup.
@@ -220,6 +220,10 @@ if [[ "${BAKEOFF_CLAUDE_ALLOW_VALIDATOR:-0}" == "1" ]]; then
 {
   "permissions": {
     "allow": [
+      "mcp__kitsoki__session_status",
+      "mcp__kitsoki__session_world",
+      "mcp__kitsoki__session_inspect",
+      "mcp__kitsoki__session_trace",
       "mcp__validator__submit",
       "mcp__operator__ask"
     ]

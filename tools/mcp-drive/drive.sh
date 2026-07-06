@@ -95,7 +95,7 @@ esac
 # The full kitsoki studio surface. The orchestrator needs session.* driving
 # tools + story.*/render.* introspection; Bash/Read let it stage tickets + verify
 # the worktree between turns.
-TOOLS="${MCP_DRIVE_TOOLS:-mcp__kitsoki__studio_ping,mcp__kitsoki__story_read,mcp__kitsoki__story_graph,mcp__kitsoki__story_validate,mcp__kitsoki__session_new,mcp__kitsoki__session_attach,mcp__kitsoki__session_drive,mcp__kitsoki__session_submit,mcp__kitsoki__session_continue,mcp__kitsoki__session_answer,mcp__kitsoki__session_inspect,mcp__kitsoki__session_trace,mcp__kitsoki__session_close,mcp__kitsoki__render_tui,Bash,Read,Glob,Grep}"
+TOOLS="${MCP_DRIVE_TOOLS:-mcp__kitsoki__studio_ping,mcp__kitsoki__story_read,mcp__kitsoki__story_graph,mcp__kitsoki__story_validate,mcp__kitsoki__session_new,mcp__kitsoki__session_attach,mcp__kitsoki__session_drive,mcp__kitsoki__session_submit,mcp__kitsoki__session_continue,mcp__kitsoki__session_answer,mcp__kitsoki__session_status,mcp__kitsoki__session_world,mcp__kitsoki__session_inspect,mcp__kitsoki__session_trace,mcp__kitsoki__session_close,mcp__kitsoki__render_tui,Bash,Read,Glob,Grep}"
 
 is_retryable_error() {
   local payload="$1"
@@ -202,6 +202,10 @@ run_once() {
       --output-format json \
       >"$out_file" 2>"$err_file"
     rc=$?
+  fi
+
+  if [[ $rc -ne 0 && ! -s "$out_file" && ! -s "$err_file" ]]; then
+    printf 'drive.sh: backend=%s model=%s cmd failed with empty output (exit=%s)\n' "$BACKEND" "$MODEL" "$rc" >>"$err_file"
   fi
   set -e
   return "$rc"
