@@ -90,3 +90,9 @@ harness_profiles:
   llama-local:
     plugin: builtin.local_llm
     model: h200/gpt-oss-120b
+
+  # agy with its own config/auth (no retarget). agy has a model selector.
+  agy-native:
+    backend: agy
+    model: gemini-3.5-flash
+    models: [gemini-3.5-flash, gemini-3.5-pro, gemini-next]

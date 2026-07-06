@@ -36,3 +36,9 @@ harness_profiles:
     models: [opus, sonnet, haiku]
     effort: medium
     efforts: [low, medium, high, xhigh, max]
+
+  # Your native Google Antigravity (agy CLI) subscription (ambient auth — nothing to set).
+  agy-native:
+    backend: agy
+    model: gemini-3.5-flash
+    models: [gemini-3.5-flash, gemini-3.5-pro, gemini-next]
