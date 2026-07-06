@@ -30,6 +30,7 @@ Inputs:
 - Arena supporting rollup: `tools/arena/results/round-1/rollup.json`.
 - OSS oracle corpus: `tools/arena/corpus/cost-bench.manifest.yaml`.
 - Source catalog: `tools/arena/corpus/sources.yaml`.
+- OSS arena GLM rollup: `not supplied`.
 - BugSwarm source: `not supplied`.
 - BugSwarm verification report: `not supplied`.
 - BugSwarm arena rollup: `not supplied`.
@@ -83,6 +84,12 @@ BugSwarm source contract:
 | task | treatment | quality | tokens | cost | evidence |
 |---|---|---|---:|---:|---|
 | bug9 | kitsoki | partial | 2,890,980 | $15.575450 | `tools/bugfix-bakeoff/results/cells/bug9-glm-5.2-kitsoki.json` |
+
+## Committed OSS GLM-5.2 Arena Cells
+
+| task | treatment | quality | tokens | cost | evidence |
+|---|---|---|---:|---:|---|
+| none | none | pending | n/a | n/a | n/a |
 
 ## Committed BugSwarm GLM-5.2 Arena Cells
 

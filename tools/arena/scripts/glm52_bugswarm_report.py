@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bugswarm-source", default="", help="optional converted BugSwarm YAML source")
     parser.add_argument("--bugswarm-verification", default="", help="optional bugswarm_verify_source.py JSON report")
     parser.add_argument("--bugswarm-arena-rollup", default="", help="optional arena rollup with BugSwarm GLM-5.2 cells")
+    parser.add_argument("--oss-arena-rollup", default="", help="optional arena rollup with OSS oracle GLM-5.2 cells")
     parser.add_argument("--bakeoff-cells", default=str(DEFAULT_BAKEOFF_CELLS))
     parser.add_argument("--arena-rollup", default=str(DEFAULT_ARENA_ROUND1))
     parser.add_argument("--corpus", default=str(DEFAULT_CORPUS))
@@ -52,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         bugswarm_source=Path(args.bugswarm_source) if args.bugswarm_source else None,
         bugswarm_verification=Path(args.bugswarm_verification) if args.bugswarm_verification else None,
         bugswarm_arena_rollup=Path(args.bugswarm_arena_rollup) if args.bugswarm_arena_rollup else None,
+        oss_arena_rollup=Path(args.oss_arena_rollup) if args.oss_arena_rollup else None,
     )
     write_json(Path(args.json_out), report)
     write_text(Path(args.markdown_out), render_markdown(report))
@@ -69,6 +71,7 @@ def build_report(
     bugswarm_source: Path | None = None,
     bugswarm_verification: Path | None = None,
     bugswarm_arena_rollup: Path | None = None,
+    oss_arena_rollup: Path | None = None,
 ) -> dict[str, Any]:
     corpus = load_yaml(corpus_path)
     sources = load_yaml(sources_path)
@@ -76,9 +79,10 @@ def build_report(
     arena_cells = load_arena_cells(arena_rollup)
     bugswarm_tasks = load_bugswarm_tasks(bugswarm_source)
     verification = load_verification(bugswarm_verification)
-    bugswarm_cells = load_bugswarm_arena_cells(bugswarm_arena_rollup)
+    bugswarm_cells = load_headline_arena_cells(bugswarm_arena_rollup, corpus_name="bugswarm")
+    oss_arena_cells = load_headline_arena_cells(oss_arena_rollup, corpus_name="oss-oracle")
 
-    matrix_rows = build_required_matrix(glm_cells, bugswarm_tasks, bugswarm_cells)
+    matrix_rows = build_required_matrix(glm_cells + oss_arena_cells, bugswarm_tasks, bugswarm_cells)
     return {
         "kind": "glm52_bugswarm_bugfix_report",
         "version": 1,
@@ -91,9 +95,11 @@ def build_report(
             "bugswarm_source": rel(bugswarm_source) if bugswarm_source else "",
             "bugswarm_verification": rel(bugswarm_verification) if bugswarm_verification else "",
             "bugswarm_arena_rollup": rel(bugswarm_arena_rollup) if bugswarm_arena_rollup else "",
+            "oss_arena_rollup": rel(oss_arena_rollup) if oss_arena_rollup else "",
         },
         "corpora": corpus_summary(corpus, sources, bugswarm_tasks, verification),
         "glm52_bugfix_cells": glm_cells,
+        "oss_glm52_arena_cells": oss_arena_cells,
         "bugswarm_glm52_arena_cells": bugswarm_cells,
         "required_glm52_matrix": matrix_rows,
         "rollups": {
@@ -149,7 +155,7 @@ def load_arena_cells(rollup_path: Path) -> list[dict[str, Any]]:
     return out
 
 
-def load_bugswarm_arena_cells(rollup_path: Path | None) -> list[dict[str, Any]]:
+def load_headline_arena_cells(rollup_path: Path | None, *, corpus_name: str) -> list[dict[str, Any]]:
     if rollup_path is None or not rollup_path.exists():
         return []
     data = json.loads(rollup_path.read_text(encoding="utf-8"))
@@ -161,9 +167,11 @@ def load_bugswarm_arena_cells(rollup_path: Path | None) -> list[dict[str, Any]]:
         task = str((cell.get("axis") or {}).get("task") or "")
         variant = str(cell.get("variant_id") or "")
         treatment = treatment_from_variant(variant)
+        if "glm-5.2" not in variant.lower():
+            continue
         out.append({
             "source": "arena-rollup",
-            "corpus": "bugswarm",
+            "corpus": corpus_name,
             "task": task,
             "candidate": "glm-5.2",
             "treatment": treatment,
@@ -384,6 +392,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     corpora = report["corpora"]
     rollups = report["rollups"]["glm52_by_corpus_treatment"]
     cells = report["glm52_bugfix_cells"]
+    oss_arena_cells = report["oss_glm52_arena_cells"]
     bugswarm_cells = report["bugswarm_glm52_arena_cells"]
     inputs = report["inputs"]
     lines.extend([
@@ -419,6 +428,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- Arena supporting rollup: `{inputs['arena_rollup']}`.",
         f"- OSS oracle corpus: `{inputs['corpus']}`.",
         f"- Source catalog: `{inputs['sources']}`.",
+        f"- OSS arena GLM rollup: `{inputs['oss_arena_rollup'] or 'not supplied'}`.",
         f"- BugSwarm source: `{inputs['bugswarm_source'] or 'not supplied'}`.",
         f"- BugSwarm verification report: `{inputs['bugswarm_verification'] or 'not supplied'}`.",
         f"- BugSwarm arena rollup: `{inputs['bugswarm_arena_rollup'] or 'not supplied'}`.",
@@ -488,6 +498,21 @@ def render_markdown(report: dict[str, Any]) -> str:
     ])
     if cells:
         for cell in cells:
+            lines.append(
+                f"| {cell['task']} | {cell['treatment']} | {cell['quality']} | "
+                f"{format_int(cell['total_tokens'])} | {format_cost(cell['cost_usd'])} | `{cell['evidence']}` |"
+            )
+    else:
+        lines.append("| none | none | pending | n/a | n/a | n/a |")
+    lines.extend([
+        "",
+        "## Committed OSS GLM-5.2 Arena Cells",
+        "",
+        "| task | treatment | quality | tokens | cost | evidence |",
+        "|---|---|---|---:|---:|---|",
+    ])
+    if oss_arena_cells:
+        for cell in oss_arena_cells:
             lines.append(
                 f"| {cell['task']} | {cell['treatment']} | {cell['quality']} | "
                 f"{format_int(cell['total_tokens'])} | {format_cost(cell['cost_usd'])} | `{cell['evidence']}` |"

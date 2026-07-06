@@ -235,6 +235,82 @@ with tempfile.TemporaryDirectory() as tmp:
     check("markdown includes bugswarm arena section", "Committed BugSwarm GLM-5.2 Arena Cells" in md, True)
     check("markdown includes bugswarm rollup input", "BugSwarm arena rollup" in md, True)
 
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
+    rollup = out / "oss-glm-rollup.json"
+    json_out = out / "with-oss-rollup.json"
+    md_out = out / "with-oss-rollup.md"
+    rollup.write_text(json.dumps({
+        "cells": [
+            {
+                "axis": {"task": "query-string-qs1-bugfix-test-repair"},
+                "cell_id": "cost-bench-round2--kitsoki-glm-5.2--task:query-string-qs1-bugfix-test-repair",
+                "evidence_refs": ["tools/arena/corpus/cost-bench.manifest.yaml#query-string-qs1-bugfix-test-repair"],
+                "health": "model:result",
+                "job_type": "paired-task",
+                "metrics": {"cost_usd": 0.5, "tokens": 3000, "wall_s": 300.0},
+                "notes": "synthetic fixture: oracle solved",
+                "target_id": "cost-bench-round2",
+                "trace_ref": "traces/oss-kitsoki.jsonl",
+                "variant_id": "kitsoki-glm-5.2",
+                "verdict": "solved",
+            },
+            {
+                "axis": {"task": "query-string-qs1-bugfix-test-repair"},
+                "cell_id": "cost-bench-round2--raw-prompt-glm-5.2--task:query-string-qs1-bugfix-test-repair",
+                "evidence_refs": ["tools/arena/corpus/cost-bench.manifest.yaml#query-string-qs1-bugfix-test-repair"],
+                "health": "model:result",
+                "job_type": "paired-task",
+                "metrics": {"cost_usd": 0.08, "tokens": 700, "wall_s": 80.0},
+                "notes": "synthetic fixture: oracle failed",
+                "target_id": "cost-bench-round2",
+                "trace_ref": "traces/oss-raw.jsonl",
+                "variant_id": "raw-prompt-glm-5.2",
+                "verdict": "failed",
+            },
+            {
+                "axis": {"task": "query-string-qs2-bugfix-test-repair"},
+                "cell_id": "cost-bench-round2--kitsoki-codex-native--task:query-string-qs2-bugfix-test-repair",
+                "health": "model:result",
+                "job_type": "paired-task",
+                "metrics": {"cost_usd": 0.1, "tokens": 999, "wall_s": 20.0},
+                "target_id": "cost-bench-round2",
+                "variant_id": "kitsoki-codex-native",
+                "verdict": "solved",
+            },
+        ]
+    }), encoding="utf-8")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--generated-at",
+            "2026-07-06T00:00:00Z",
+            "--json-out",
+            str(json_out),
+            "--markdown-out",
+            str(md_out),
+            "--oss-arena-rollup",
+            str(rollup),
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    check("generator with oss rollup exits zero", proc.returncode, 0)
+    report = json.loads(json_out.read_text(encoding="utf-8"))
+    check("oss arena glm cell count", len(report["oss_glm52_arena_cells"]), 2)
+    headline = report["rollups"]["glm52_by_corpus_treatment"]
+    check("oss kitsoki includes bakeoff plus arena", headline["oss-oracle|kitsoki"]["attempted"], 2)
+    check("oss kitsoki token total includes both", headline["oss-oracle|kitsoki"]["total_tokens"], 2893980)
+    check("oss raw attempted from arena", headline["oss-oracle|raw-prompt"]["attempted"], 1)
+    check("oss raw tokens from arena", headline["oss-oracle|raw-prompt"]["total_tokens"], 700)
+    md = md_out.read_text(encoding="utf-8")
+    check("markdown includes oss arena section", "Committed OSS GLM-5.2 Arena Cells" in md, True)
+    check("markdown includes oss rollup input", "OSS arena GLM rollup" in md, True)
+
 if failures:
     print("FAIL: glm52 bugswarm report")
     for failure in failures:
