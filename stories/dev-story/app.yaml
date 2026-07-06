@@ -498,6 +498,13 @@ world:
   #   leave-worktree — stop after the validated bugfix, preserving the worktree
   #   local-merge    — use bugfix's direct-ship tail to merge into base_branch
   bugfix_destination:          { type: string, default: "open-pr" }
+  # Pass-through for bf's auto_triage pre-flight (see the bf world_in below):
+  # true ⇒ a fresh bf autostart runs one read-only triage verdict before the
+  # maker pipeline and short-circuits at @exit:triaged when ALREADY-FIXED.
+  # Fixtures/callers driving a known-live bug straight into the walk set this
+  # false at the PARENT level (the import wrapper re-seeds bf__auto_triage on
+  # every entry, so seeding the child key directly does not stick).
+  auto_triage:                 { type: bool, default: true }
   merge_strategy:              { type: string, default: "squash" }
   # build_cmd / test_cmd — the project's REAL build + test commands, projected
   # into the bf import so the bugfix testing/validating gates run them instead of
@@ -1736,6 +1743,13 @@ imports:
       bugfix_exit:     "{% if world.bugfix_destination == 'local-merge' %}direct-ship{% else %}open-PR{% endif %}"
       judge_mode:      "{{ world.judge_mode }}"
       judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
+      # Pass through bf's auto_triage pre-flight switch (default true — a
+      # fresh autostart runs a read-only triage verdict before spending the
+      # maker pipeline; ALREADY-FIXED exits at triaged). The import wrapper's
+      # re-entry reset re-seeds unprojected child keys to their defaults on
+      # every entry, so callers/fixtures MUST set the parent-level
+      # world.auto_triage (not bf__auto_triage) to opt out.
+      auto_triage:     "{{ world.auto_triage }}"
 
     # Lift bf-unique intents into the parent's bare intent table.
     # Overlapping names (accept, refine, restart_from, quit, look,
@@ -1795,11 +1809,12 @@ imports:
           status:     "not-reproducible"
           last_error: "{{ world.bf__last_error }}"
           human_review_reason: "{{ world.bf__last_error }}"
-      # bf's triage-only mode (bugfix_mode: triage) ends here: a standardized
-      # verdict was produced without attempting a fix. This hub runs bf in
-      # full/open-PR mode so triaged never fires in practice, but the loader
-      # requires every child exit be mapped. Land back at landing carrying the
-      # verdict; a human picks the next move (fix it for real, or close).
+      # bf ends here WITHOUT attempting a fix in two cases: triage-only mode
+      # (bugfix_mode: triage), and a full/quick autostart whose auto_triage
+      # PRE-FLIGHT (default on — see bf rooms/triaging.yaml) verdicts
+      # ALREADY-FIXED and short-circuits before any maker budget is spent.
+      # Land back at landing carrying world.bf__triage_verdict; a human picks
+      # the next move (close as fixed, or re-drive with bf__auto_triage off).
       triaged:
         to: landing
         set:
