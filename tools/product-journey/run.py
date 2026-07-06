@@ -5629,7 +5629,23 @@ def blocked_autonomous_driver_dispatch(run_dir: Path) -> dict:
         receipt = read_json(receipt_path)
         status = receipt.get("status", "")
         if status == "captured":
-            return {}
+            heartbeat = latest_driver_heartbeat(run_dir)
+            if heartbeat:
+                return {}
+            summary = "autonomous driver dispatch captured no driver-journal heartbeat; stop before final gates"
+            trace = receipt.get("trace", "")
+            receipt_markdown = str(autonomous_driver_dispatch_markdown_path(run_dir))
+            status = "missing-heartbeat"
+            return {
+                "autonomous_driver_mode": mode,
+                "autonomous_driver_status": status,
+                "autonomous_driver_summary": summary,
+                "autonomous_driver_dispatch_status": receipt.get("status", status),
+                "autonomous_driver_dispatch_summary": receipt.get("summary", summary),
+                "autonomous_driver_dispatch_trace": trace,
+                "autonomous_driver_dispatch_path": str(receipt_path),
+                "autonomous_driver_dispatch_markdown_path": receipt_markdown,
+            }
         summary = receipt.get("summary", "") or f"autonomous driver dispatch ended with status={status or 'unknown'}"
         trace = receipt.get("trace", "")
         receipt_markdown = str(autonomous_driver_dispatch_markdown_path(run_dir))
