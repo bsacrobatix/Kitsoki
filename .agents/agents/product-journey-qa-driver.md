@@ -125,6 +125,24 @@ Automated tests must stay no-LLM. For exploratory dogfood:
 - Use `live` only when the task explicitly requires real interpretive behavior
   such as routing, prompt quality, or agent decision quality.
 
+**An explicit harness/profile argument in your handoff IS that authorization —
+use it, do not re-derive your own judgment call.** When the prompt that
+dispatched you names a concrete harness profile for the surface you are about
+to open (e.g. `stories/scenario-qa`'s per-leg prompt supplies
+`args.live_profile` for its nested `session.new` — see
+`stories/scenario-qa/prompts/drive_leg.md`), that value is the caller's
+explicit live authorization for THIS run: open the primary_story session (step
+2 below) with `harness: "live"` and `profile: "<that value>"` from the very
+first `session.new` call, not `replay` with a hope to upgrade mid-session —
+`session.new` fixes the harness for the life of that session, so a scenario
+whose flow needs `host.agent.converse`/`host.agent.task`/routing decisions
+(PRD/design discovery, free-text routing, agent decisions) must be opened live
+up front whenever that argument is non-empty. Only fall back to `replay` (and
+report the resulting missing-cassette blocker honestly) when the supplied
+harness/profile argument is empty or absent — never silently downgrade an
+explicitly-authorized live leg to replay and call the resulting replay-miss a
+generic "not authorized" blocker.
+
 When live/model work is not explicitly authorized, stop at the blocker and
 record the missing evidence or scenario gap with `--record-blocker` or the
 story `blocker` intent. Do not silently substitute a fake pass.
@@ -152,6 +170,11 @@ For each scenario in the bundle:
    - product discovery: visual web surface for the local product site;
    - onboarding / PRD / design / feature: `stories/dev-story/app.yaml`;
    - bugfix: `stories/bugfix/app.yaml`;
+
+   Before calling `session.new` for this primary_story session, check whether
+   your handoff named an explicit harness/profile argument (see "Harness
+   Choice" above). If it did, that session must be opened `harness: "live"`
+   with that `profile` from this very call — do not open it `replay` first.
    - product bug filing: the smallest story or surface that reproduces the
      confusing behavior.
 3. Act as the assigned persona. Use natural operator text where route quality is
