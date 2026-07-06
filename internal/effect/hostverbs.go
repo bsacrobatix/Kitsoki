@@ -77,6 +77,12 @@ var builtinVerbTable = map[string]verbEffect{
 	"host.artifacts_dir":  {class: Write, deterministic: true},
 	"host.inbox.add":      {class: Write, deterministic: true},
 
+	// host.fs.writable_dir probes a directory's writability (a create+remove
+	// of a hidden marker file — net-zero on-disk effect) and returns which of
+	// path/fallback to use; it durably persists nothing, so it classifies as
+	// Read, same as host.workspace_manager.get.
+	"host.fs.writable_dir": {class: Read, deterministic: true},
+
 	// host.ide.* — a connected-editor query is Read; the two open_* verbs
 	// are a benign, reversible mutation of the OPERATOR'S IDE, resolved
 	// as Write per effect-taxonomy.md's open question 2.

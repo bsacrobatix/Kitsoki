@@ -265,6 +265,7 @@ hosts:
   - host.diff.open
   - host.run
   - host.starlark.run
+  - host.fs.writable_dir
 
 imports:
   core:

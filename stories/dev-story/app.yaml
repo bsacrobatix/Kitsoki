@@ -103,6 +103,10 @@ hosts:
   - host.artifacts_dir
   - host.ide.open_file
   - host.ide.open_diff
+  # design_search.on_enter resolves design_durable_path to a writable location
+  # (falling back to .context/designs) before any workspace folder is minted
+  # or artifact is written — see resolve_durable_path in rooms/design_search.yaml.
+  - host.fs.writable_dir
   # ── PRD discovery (imported `prd`, stories/prd/) ──────────────────
   # The PRD pipeline is a conversational discovery (host.agent.converse +
   # a persistent chat via host.chat.resolve) that decide/task-gates into a
@@ -747,7 +751,8 @@ world:
   prd_mockup_path:       { type: string, default: "" }                        # optional feature-mockup HTML (relative to workdir); non-empty ⇒ prd_published emits + embeds it inline as the PRD's mockup. "" ⇒ no mockup (default for every instance).
   mockup_handle:         { type: string, default: "" }                        # runtime bind: the content-addressed handle of the emitted PRD mockup (prd_published on_enter); "" ⇒ no mockup embedded.
   design_template_dir:   { type: string, default: "docs/proposals/templates" } # where the design author reads its doc templates
-  design_durable_path:   { type: string, default: "docs/proposals" }          # design publish home
+  design_durable_path:   { type: string, default: "docs/proposals" }          # design publish home; rebound to a writable fallback (.context/designs) by design_search.on_enter's resolve_durable_path step if this default is not writable (see design_search.yaml)
+  design_workspace_root_resolved: { type: string, default: "" }               # runtime bind: non-empty once resolve_durable_path has run (once: gate; see design_search.yaml)
   design_doc_filename:   { type: string, default: "" }                        # fixed DESIGN filename for an external target (e.g. "DESIGN"); "" ⇒ slug-named
   design_ticket_dir:     { type: string, default: "issues/features" }         # where the linking feature ticket is minted; "" ⇒ skip (external target)
   ticket_repo:           { type: string, default: "" }                        # owner/repo for GitHub-issue tickets; non-empty ⇒ feature publish mints a GitHub issue instead of a local file (slice #3). kitsoki-dev pins constructorfabric/Kitsoki.

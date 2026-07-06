@@ -35,6 +35,8 @@ initial_world:
 starlark_inspect_cassette: ../cassettes/design_reload_safe.inspect.yaml
 
 host_handlers:
+  host.fs.writable_dir:
+    data: { path: "docs/proposals", used_fallback: false }
   host.agent.decide:
     by_call:
       # If the once: guard failed, this would fire and overwrite the preset.

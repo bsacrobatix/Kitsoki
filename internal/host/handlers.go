@@ -490,6 +490,7 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.append_to_file", AppendFileTransportHandler)
 	r.Register("host.artifacts_dir", ArtifactsDirTransportHandler)
 	r.Register("host.inbox.add", InboxAddHandler)
+	r.Register("host.fs.writable_dir", FSWritableDirHandler)
 
 	// Wave 3 / Phase 5 — GitHub Issues + cypilot artifact providers.
 	// `host.gh.ticket` backs the `ticket` iface with native GitHub Issues API

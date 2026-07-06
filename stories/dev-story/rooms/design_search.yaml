@@ -137,6 +137,29 @@ states:
               intent: look
     relevant_world: [design_idea, design_existing_state, design_existing_path, design_overlap_decision, design_change_target]
     on_enter:
+      # 0. Resolve the design workspace's durable root to a writable location
+      #    BEFORE any scan, folder mint, or publish. dev-story's default
+      #    (docs/proposals) is Kitsoki's own dogfood convention, but Kitsoki's
+      #    primary checkout keeps docs/proposals/ intentionally read-only (see
+      #    AGENTS.md), and any other checkout can have its configured durable
+      #    path locked down too. Rebinding design_durable_path here means every
+      #    downstream step — workspace minting (design_workspace.star /
+      #    design_amend_workspace.star), the scratch artifact writes, and the
+      #    final publish (design_draft.yaml) — sees the SAME resolved,
+      #    guaranteed-writable root without each re-deriving it. once: keyed
+      #    off design_workspace_root_resolved (blank until this runs; kept
+      #    separate from design_durable_path itself, which already carries a
+      #    non-empty default and so can't gate a once: on its own).
+      - invoke: host.fs.writable_dir
+        once: true
+        id: resolve_durable_path
+        with:
+          path:     "{{ world.design_durable_path }}"
+          fallback: ".context/designs"
+        bind:
+          design_durable_path:            "path"
+          design_workspace_root_resolved: "path"
+        on_error: design
       # Scout: check for overlapping proposals + roadmap fit. THE EARLY GATE —
       # runs before any folder is created. once: keyed off design_existing_state.
       - invoke: host.agent.decide
@@ -187,8 +210,9 @@ states:
               with:
                 script: scripts/design_amend_workspace.star
                 inputs:
-                  target: "{{ slots.target }}"
+                  target:        "{{ slots.target }}"
                   proposed_slug: "{{ world.design_slug }}"
+                  durable_path:  "{{ world.design_durable_path }}"
               bind:
                 design_slug:      "slug"
                 design_workspace: "workspace"

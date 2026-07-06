@@ -260,6 +260,7 @@ func synthesizedRootHosts() []string {
 		"host.append_to_file",
 		// Bare hosts the chain calls directly.
 		"host.inbox.add",
+		"host.fs.writable_dir",
 		"host.agent.ask",
 		"host.agent.decide",
 		"host.agent.task",

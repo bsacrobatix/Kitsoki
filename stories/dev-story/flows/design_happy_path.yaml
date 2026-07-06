@@ -31,6 +31,8 @@ initial_world:
 starlark_inspect_cassette: ../cassettes/design_happy_path.inspect.yaml
 
 host_handlers:
+  host.fs.writable_dir:
+    data: { path: "docs/proposals", used_fallback: false }
   host.ide.open_file:
     data: { ok: true, connected: true }
   host.agent.decide:

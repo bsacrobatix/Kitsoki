@@ -112,6 +112,10 @@ hosts:
   - host.agent.search
   - host.artifacts_dir
   - host.ide.open_file
+  # design_search resolves design_durable_path to a writable location
+  # (falling back to .context/designs) before minting any workspace folder
+  # or writing any artifact. Required under `hosts: declared`.
+  - host.fs.writable_dir
   # Design draft (dev-story design_draft) + PRD drafting (prd/drafting) mirror
   # the editable artifact into the IDE and present the verdict-gated refine as a
   # diff. Required under `hosts: declared`.

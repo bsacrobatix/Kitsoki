@@ -29,6 +29,8 @@ initial_world:
 starlark_inspect_cassette: ../cassettes/design_overlap_early_bail.inspect.yaml
 
 host_handlers:
+  host.fs.writable_dir:
+    data: { path: "docs/proposals", used_fallback: false }
   host.agent.decide:
     by_call:
       existing_scan:
