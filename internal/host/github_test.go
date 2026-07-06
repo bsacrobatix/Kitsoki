@@ -332,6 +332,9 @@ func TestGitHubTicket_Get_Happy(t *testing.T) {
 func TestGitHubTicket_Get_PublicReadWithoutToken(t *testing.T) {
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("HOME", t.TempDir())
+	restoreGHCLI := host.SetGHCLITokenForTest(func(context.Context) string { return "" })
+	defer restoreGHCLI()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "" {
 			t.Fatalf("Authorization = %q, want none for public read", got)

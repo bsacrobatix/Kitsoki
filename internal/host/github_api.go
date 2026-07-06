@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
+	"time"
 )
 
 var githubAPI = githubAPIClient{
@@ -19,8 +21,9 @@ var githubAPI = githubAPIClient{
 
 // GitHubAuthSetupHint is the shared user-facing recovery path for every native
 // GitHub write surface (CLI, TUI/web Report bug, MCP tools, and story hosts).
-const GitHubAuthSetupHint = "GitHub auth is not configured (missing GH_TOKEN/GITHUB_TOKEN). " +
-	"Run `kitsoki gh-agent login` for the easy GitHub CLI browser/PIN flow; " +
+const GitHubAuthSetupHint = "GitHub auth is not configured (missing GH_TOKEN/GITHUB_TOKEN, and no `gh` CLI login was found). " +
+	"Run `gh auth login` — kitsoki reuses the standard GitHub CLI token automatically — or " +
+	"`kitsoki gh-agent login` for the easy GitHub CLI browser/PIN flow; " +
 	"or for repo-limited GitHub App auth run `kitsoki gh-agent setup app --name <app-name> --local-only`, " +
 	"`kitsoki gh-agent setup attach --repo <owner/repo>`, `kitsoki gh-agent token`, " +
 	"then `source ~/.config/kitsoki/github.env`; or set a fine-grained PAT in " +
@@ -68,7 +71,33 @@ func githubToken(ctx context.Context) string {
 			return tok
 		}
 	}
-	return ""
+	return ghCLIToken(ctx)
+}
+
+// ghCLIToken asks the standard GitHub CLI for its stored token (`gh auth
+// token`), so any surface that already works via `gh` (issues, PRs, gists)
+// also authorizes kitsoki's native GitHub writes without a separate
+// GH_TOKEN/GITHUB_TOKEN setup step. Env and secrets sources always win —
+// this is the fallback of last resort. A missing binary, a redirected HOME
+// with no gh config, or a logged-out CLI all resolve to "" so the existing
+// missing-auth guidance still fires. Swappable for tests.
+var ghCLIToken = func(ctx context.Context) string {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "gh", "auth", "token").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// SetGHCLITokenForTest replaces the gh CLI token fallback and returns a
+// restore func, letting tests pin the fallback on or off regardless of the
+// host machine's gh login state.
+func SetGHCLITokenForTest(fn func(context.Context) string) func() {
+	prev := ghCLIToken
+	ghCLIToken = fn
+	return func() { ghCLIToken = prev }
 }
 
 func githubAPIJSON(ctx context.Context, method, path string, body any, out any) (int, string, error) {
