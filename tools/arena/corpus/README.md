@@ -38,3 +38,19 @@ The converter is offline and does not pull Docker images. The generated
 BugSwarm tasks start with `verified_red: false` and `verified_green: false`;
 those flags become true only after an explicit Docker verification proves the
 failed job still fails and the passed job still passes inside the artifact.
+
+## GLM-5.2 + BugSwarm Report
+
+The interim research report is generated, not hand-maintained:
+
+```bash
+python3 tools/arena/scripts/glm52_bugswarm_report.py \
+  --generated-at 2026-07-06T00:00:00Z \
+  --json-out docs/case-studies/bugswarm-glm52-bugfix-report.data.json \
+  --markdown-out docs/case-studies/bugswarm-glm52-bugfix-report.md
+```
+
+Pass `--bugswarm-source <converted-source.yaml>` after importing artifacts with
+`bugswarm_to_arena.py`. The generator keeps unavailable GLM-5.2 cells as
+`pending`, so missing raw-prompt or BugSwarm results cannot accidentally become
+zero-cost failures.
