@@ -38,10 +38,17 @@ REQUIRED_COMPLETION_REQUIREMENTS = {
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report-json", required=True)
+    parser.add_argument(
+        "--require-publishable",
+        action="store_true",
+        help="fail unless the report has all evidence required for publishable headline claims",
+    )
     args = parser.parse_args(argv)
 
     report = json.loads(Path(args.report_json).read_text(encoding="utf-8"))
     problems = validate_report(report)
+    if args.require_publishable:
+        problems.extend(require_publishable(report))
     if problems:
         print("FAIL: GLM-5.2 report gate")
         for problem in problems:
@@ -64,6 +71,38 @@ def validate_report(report: dict[str, Any]) -> list[str]:
     problems.extend(require_completion_audit(report, rows))
     problems.extend(require_study_protocol(report, rows))
     problems.extend(require_references(report))
+    return problems
+
+
+def require_publishable(report: dict[str, Any]) -> list[str]:
+    """Validate that the report is complete enough for headline publication.
+
+    The normal gate checks that partial reports are honest. This stricter mode
+    is the completion gate: it must stay red until the missing GLM-5.2 raw and
+    BugSwarm cells are committed and folded into the report.
+    """
+    problems: list[str] = []
+    ledger = report.get("claim_ledger") if isinstance(report.get("claim_ledger"), dict) else {}
+    audit = report.get("completion_audit") if isinstance(report.get("completion_audit"), dict) else {}
+    protocol = report.get("study_protocol") if isinstance(report.get("study_protocol"), dict) else {}
+    closure = report.get("evidence_closure") if isinstance(report.get("evidence_closure"), dict) else {}
+    comparisons = report.get("comparisons") if isinstance(report.get("comparisons"), dict) else {}
+    if ledger.get("status") != "publishable":
+        problems.append("publishable gate requires claim_ledger.status == 'publishable'")
+    if audit.get("status") != "complete":
+        problems.append("publishable gate requires completion_audit.status == 'complete'")
+    if protocol.get("status") != "complete":
+        problems.append("publishable gate requires study_protocol.status == 'complete'")
+    if int(closure.get("pending_cell_count") or 0) != 0:
+        problems.append("publishable gate requires zero pending GLM-5.2 headline cells")
+    for scope in REQUIRED_COMPARISON_SCOPES:
+        comparison = comparisons.get(scope) if isinstance(comparisons.get(scope), dict) else {}
+        if comparison.get("status") != "complete":
+            problems.append(f"publishable gate requires comparison {scope} to be complete")
+        if comparison.get("success_rate_delta") is None:
+            problems.append(f"publishable gate requires comparison {scope} success_rate_delta")
+        if comparison.get("token_ratio_kitsoki_to_raw") is None:
+            problems.append(f"publishable gate requires comparison {scope} token_ratio_kitsoki_to_raw")
     return problems
 
 

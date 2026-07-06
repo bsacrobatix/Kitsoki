@@ -139,6 +139,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("markdown source mix bugswarm row", "BugSwarm containerized_fail_pass_ci_artifacts" in md, True)
     check("markdown includes comparisons", "## Kitsoki vs Raw-Prompt Comparisons" in md, True)
     check("markdown includes claim ledger", "## Research Claim Ledger" in md, True)
+    check("markdown includes publishable gate", "--require-publishable" in md, True)
     check("markdown claim ledger pending token", "| overall-token-usage | `pending`" in md, True)
     check("markdown claim ledger supported source", "| bugswarm-reusable-source | `supported`" in md, True)
     check("markdown includes completion audit", "## Completion Audit" in md, True)
