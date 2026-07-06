@@ -49,6 +49,7 @@ func ghTicketCreate(ctx context.Context, args map[string]any) (Result, error) {
 	body := ghAppendMetadata(ghStr(args["body"]), args)
 	labels := ghTicketLabels(args)
 	repo := strings.TrimSpace(ghStr(args["repo"]))
+	repo = resolveTicketRepo(ctx, repo, args)
 	if repo == "" {
 		return Result{Error: "ticket.create: repo argument is required for native GitHub issue filing"}, nil
 	}

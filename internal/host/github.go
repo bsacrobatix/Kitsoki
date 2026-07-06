@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -83,6 +84,7 @@ func ghTicketSearch(ctx context.Context, args map[string]any) (Result, error) {
 	query, _ := args["query"].(string)
 	limit := optInt(args, "limit", 30)
 	repo := strings.TrimSpace(ghStr(args["repo"]))
+	repo = resolveTicketRepo(ctx, repo, args)
 	if repo == "" {
 		return Result{Error: "ticket.search: repo argument is required for native GitHub issue search"}, nil
 	}
@@ -121,6 +123,7 @@ func ghTicketGet(ctx context.Context, args map[string]any) (Result, error) {
 			repo = r
 		}
 	}
+	repo = resolveTicketRepo(ctx, repo, args)
 	if strings.TrimSpace(repo) == "" {
 		return Result{Error: "ticket.get: repo argument is required for native GitHub issue lookup"}, nil
 	}
@@ -184,6 +187,7 @@ func ghTicketComment(ctx context.Context, args map[string]any) (Result, error) {
 			repo = r
 		}
 	}
+	repo = resolveTicketRepo(ctx, repo, args)
 	if strings.TrimSpace(repo) == "" {
 		return Result{Error: "ticket.comment: repo argument is required for native GitHub issue comments"}, nil
 	}
@@ -219,6 +223,7 @@ func ghTicketCommentEdit(ctx context.Context, args map[string]any) (Result, erro
 			repo = r
 		}
 	}
+	repo = resolveTicketRepo(ctx, repo, args)
 	if strings.TrimSpace(id) == "" {
 		return Result{Error: "ticket.comment_edit: comment_id argument is required"}, nil
 	}
@@ -269,6 +274,7 @@ func ghTicketCommentReactions(ctx context.Context, args map[string]any) (Result,
 			repo = r
 		}
 	}
+	repo = resolveTicketRepo(ctx, repo, args)
 	if strings.TrimSpace(id) == "" {
 		return Result{Error: "ticket.comment_reactions: comment_id argument is required"}, nil
 	}
@@ -329,6 +335,7 @@ func ghTicketTransition(ctx context.Context, args map[string]any) (Result, error
 			repo = r
 		}
 	}
+	repo = resolveTicketRepo(ctx, repo, args)
 	if strings.TrimSpace(repo) == "" {
 		return Result{Error: "ticket.transition: repo argument is required for native GitHub issue transitions"}, nil
 	}
@@ -369,6 +376,7 @@ func ghTicketListMine(ctx context.Context, args map[string]any) (Result, error) 
 		filter = "@me"
 	}
 	repo := strings.TrimSpace(ghStr(args["repo"]))
+	repo = resolveTicketRepo(ctx, repo, args)
 	if repo == "" {
 		return Result{Error: "ticket.list_mine: repo argument is required for native GitHub issue listing"}, nil
 	}
@@ -583,3 +591,35 @@ func splitIssueCommentID(commentID string) (repo, id string) {
 	}
 	return "", commentID
 }
+
+func resolveTicketRepo(ctx context.Context, repo string, args map[string]any) string {
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		return ""
+	}
+	if strings.Contains(repo, "/") {
+		return repo
+	}
+	var dir string
+	if v, _ := args["root"].(string); v != "" {
+		dir = v
+	} else if v, _ := args["workdir"].(string); v != "" {
+		dir = v
+	} else if v := os.Getenv("KITSOKI_TICKETS_ROOT"); v != "" {
+		dir = v
+	} else {
+		var err error
+		dir, err = os.Getwd()
+		if err != nil {
+			dir = ""
+		}
+	}
+	stdout, _, code, err := cliExec(ctx, dir, "git", "remote", "get-url", repo)
+	if err == nil && code == 0 {
+		if resolved := githubRepoFromRemote(stdout); resolved != "" {
+			return resolved
+		}
+	}
+	return repo
+}
+
