@@ -124,6 +124,10 @@ mapfile -t STORY_APPS < <(git ls-files | grep -E '^stories/[^/]+/app\.yaml$' | s
 
 declare -a FLOW_FAILED_APPS
 flow_apps_total=0
+FLOW_JOBS=${KITSOKI_FLOW_JOBS:-4}
+if ! [[ "$FLOW_JOBS" =~ ^[1-9][0-9]*$ ]]; then
+	FLOW_JOBS=4
+fi
 
 if [ "$flow_built" -ne 1 ]; then
 	{ echo "FAILED to build flow runner:"; cat "$TMP/build.log"; } >>"$REPORT"
@@ -139,17 +143,43 @@ fi
 FLOW_QUARANTINE=" stories/repo-bakeoff/app.yaml stories/bench-bugfix/app.yaml "
 
 if [ "$flow_built" -eq 1 ]; then
+	FLOW_APPS_LIST="$TMP/flow-apps.list"
+	: >"$FLOW_APPS_LIST"
 	for app in "${STORY_APPS[@]}"; do
 		if [[ "$FLOW_QUARANTINE" == *" $app "* ]]; then
 			printf -- '-- %s (QUARANTINED — flows skipped; see run-tests.sh FLOW_QUARANTINE)\n' "$app" >>"$REPORT"
 			continue
 		fi
 		flow_apps_total=$((flow_apps_total + 1))
-		slug="$(echo "$app" | tr '/' '-')"
-		fj="$TMP/flow-$slug.json"
+		printf '%s\n' "$app" >>"$FLOW_APPS_LIST"
+	done
+
+	if [ "$flow_apps_total" -gt 0 ]; then
+		xargs -n 1 -P "$FLOW_JOBS" bash -c '
+			set -uo pipefail
+			tmp="$1"
+			bin="$2"
+			app="$3"
+			slug="$(printf "%s" "$app" | tr "/" "-")"
+			fj="$tmp/flow-$slug.json"
+			fout="$tmp/flow-$slug.out"
+			frc="$tmp/flow-$slug.rc"
+			"$bin" test flows "$app" --json "$fj" >"$fout" 2>&1
+			printf "%d\n" "$?" >"$frc"
+		' _ "$TMP" "$FLOW_BINARY" <"$FLOW_APPS_LIST"
+	fi
+
+	while IFS= read -r app; do
+		[ -n "$app" ] || continue
+		slug="$(printf "%s" "$app" | tr "/" "-")"
 		fout="$TMP/flow-$slug.out"
-		"$FLOW_BINARY" test flows "$app" --json "$fj" >"$fout" 2>&1
-		rc=$?
+		frc="$TMP/flow-$slug.rc"
+		if [ -f "$frc" ]; then
+			rc="$(cat "$frc")"
+		else
+			rc=1
+			printf 'flow runner did not write a status file\n' >"$fout"
+		fi
 		{
 			printf -- '-- %s (exit %d)\n' "$app" "$rc"
 			# Strip the orchestrator WARN noise from the report body; keep the rest.
@@ -159,7 +189,7 @@ if [ "$flow_built" -eq 1 ]; then
 			FLOW_FAILED_APPS+=("$app")
 			flow_failures=$((flow_failures + 1))
 		fi
-	done
+	done <"$FLOW_APPS_LIST"
 fi
 
 # ---------------------------------------------------------------------------
