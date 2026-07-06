@@ -2,6 +2,7 @@ package dynamicworkflow
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,8 @@ import (
 
 	goyaml "github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/require"
+
+	"kitsoki/internal/testrunner"
 )
 
 func dynamicWorkflowTestDir(t *testing.T, repoRoot string) string {
@@ -298,6 +301,56 @@ func TestServiceExportPreservesResearchDriveOnlyItems(t *testing.T) {
 		require.Empty(t, item.ImplementationStory, "exported research item %s must stay drive-only", item.ID)
 		require.Empty(t, item.ImplementationPrompt, "exported research item %s must stay drive-only", item.ID)
 	}
+}
+
+func TestServiceExportGeneratedFlowReplaysSiblingCassette(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	require.NoError(t, err)
+	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
+	require.NoError(t, err)
+
+	outDir := dynamicWorkflowTestDir(t, repoRoot)
+	svc := NewService(repoRoot)
+	svc.OutputDir = outDir
+	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)
+	svc.Now = func() time.Time { return time.Date(2026, 7, 6, 8, 0, 0, 0, time.UTC) }
+
+	receipt, err := svc.Create(context.Background(), CreateRequest{
+		Goal: "research testing approaches with a dynamic workflow",
+		Slug: "export-replay",
+	})
+	require.NoError(t, err)
+	require.True(t, receipt.Validation.OK, "receipt should validate: %v", receipt.Validation.Errors)
+
+	exportDir := filepath.Join(outDir, "exported", "export-replay")
+	exportManifestPath := filepath.ToSlash(filepath.Join(exportDir, "manifest.yaml"))
+	exportStatePath := filepath.ToSlash(filepath.Join(exportDir, "flows", "generated.state.json"))
+	trace := fmt.Sprintf(`{"kind":"session.header","schema_version":1,"written_at":"2026-07-06T08:00:00Z"}
+{"turn":1,"seq":0,"ts":"2026-07-06T08:00:00.001Z","kind":"turn.input","state_path":"idle","payload":{"input":"start","intent":""}}
+{"turn":1,"seq":1,"ts":"2026-07-06T08:00:00.002Z","kind":"harness.returned","state_path":"load","payload":{"namespace":"host.starlark.run","data":{"manifest_path":%q,"state_path":%q,"items":[],"item_count":"0","error":""}}}
+{"turn":1,"seq":2,"ts":"2026-07-06T08:00:00.003Z","kind":"machine.transition","state_path":"idle","payload":{"from":"idle","to":"load","intent":"start","slots":{}}}
+`, exportManifestPath, exportStatePath)
+	require.NoError(t, os.WriteFile(receipt.TracePath, []byte(trace), 0o644))
+
+	receipt, err = svc.Export(context.Background(), receipt.WorkflowID, ExportRequest{TargetDir: exportDir})
+	require.NoError(t, err)
+
+	flowPath := filepath.Join(exportDir, "flows", "generated.yaml")
+	cassettePath := filepath.Join(exportDir, "flows", "generated.cassette.yaml")
+	require.FileExists(t, flowPath)
+	require.FileExists(t, cassettePath)
+
+	flowBytes, err := os.ReadFile(flowPath)
+	require.NoError(t, err)
+	flowYAML := string(flowBytes)
+	require.Contains(t, flowYAML, "host_cassette: generated.cassette.yaml")
+	require.NotContains(t, flowYAML, "flows/generated.cassette.yaml")
+	require.Contains(t, flowYAML, "manifest_path: "+exportManifestPath)
+
+	report, err := testrunner.RunFlows(t.Context(), filepath.Join(exportDir, "app", "app.yaml"), flowPath, testrunner.FlowOptions{FailFast: true})
+	require.NoError(t, err)
+	require.Zero(t, report.Failed)
+	require.Equal(t, 1, report.Passed)
 }
 
 func TestValidateManifestRejectsRuntimeLiveModelPolicyMismatch(t *testing.T) {
