@@ -32,8 +32,10 @@ ROOT = Path(__file__).resolve().parents[4]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.persona_qa import load_product_journey_run  # noqa: E402
+from tools.completion_state import CompletionStateError  # noqa: E402
 
+from ..artifact_adapters import adapt_artifact  # noqa: E402
+from ..completion_state import apply_completion_state  # noqa: E402
 from ..model import Cell, CellResult  # noqa: E402
 from . import base  # noqa: E402
 
@@ -128,32 +130,17 @@ class PersonaQAPlugin:
             return result
 
         try:
-            completion = load_product_journey_run(run_dir)
-        except (OSError, json.JSONDecodeError) as exc:
+            payload = adapt_artifact("product-journey-review", run_dir)
+        except (OSError, json.JSONDecodeError, CompletionStateError) as exc:
             result.verdict = "blocked"
             result.health = "infra:completion-state-malformed"
             result.notes = f"could not load run bundle at {run_dir}: {exc}"
             return result
 
-        result.verdict = completion.verdict
-        result.health = completion.health
-        result.notes = completion.summary
-        result.evidence_refs = list(completion.evidence_refs)
-        if completion.run_dir:
-            result.trace_ref = completion.run_dir
-        if completion.deck_path:
-            result.evidence_refs.append(completion.deck_path)
-        result.metrics.update({
-            "checks_passed": completion.checks_passed,
-            "checks_warned": completion.checks_warned,
-            "checks_failed": completion.checks_failed,
-            "checks_total": completion.checks_total,
-            "scenarios_total": completion.scenarios_total,
-            "scenarios_started": completion.scenarios_started,
-            "scenarios_blocked": completion.scenarios_blocked,
-            "proof_minimum_evidence_count": completion.proof_minimum_evidence_count,
-            "minimum_evidence_count": completion.minimum_evidence_count,
-        })
+        result = apply_completion_state(result, payload)
+        deck_path = payload.get("deck_path")
+        if deck_path:
+            result.evidence_refs.append(str(deck_path))
         return result
 
 

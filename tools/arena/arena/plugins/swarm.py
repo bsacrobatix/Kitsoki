@@ -44,9 +44,9 @@ Scoring reads the harness's own per-run results JSON
 thing pulled from stdout is the `[swarm] wrote <path> (...)` line the spec
 logs right after `writeResults` returns (swarm-replay-users.spec.ts's final
 `console.log`) — a path, not a verdict, mirroring persona_qa.py's
-`_extract_run_dir` convention. `_completion_from_swarm_results` below is the
-"thin adapter" onto the shared completion-state contract
-(schemas/completion-state.schema.json) that unify-contract established:
+`_extract_run_dir` convention. The `swarm-results` artifact adapter normalizes
+that file onto the shared completion-state contract
+(schemas/completion-state.schema.json):
 aggregate rule is all-journeys-complete AND isolation clean AND audit clean
 => solved; some-but-not-all clean/complete => partial; nothing completed (or
 the negative control itself failed to fire) => failed; a harness crash
@@ -55,12 +55,10 @@ before any results file was ever written is `infra:*`, never a model verdict.
 
 from __future__ import annotations
 
-import json
 import re
 import shlex
 import sys
 from pathlib import Path
-from typing import Any
 
 # tools/arena/arena/plugins/swarm.py -> parents[4] == REPO_ROOT (mirrors
 # bugfix.py's / persona_qa.py's REPO_ROOT derivation).
@@ -68,6 +66,10 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.completion_state import CompletionStateError  # noqa: E402
+
+from ..artifact_adapters import adapt_artifact  # noqa: E402
+from ..completion_state import apply_completion_state  # noqa: E402
 from ..model import Cell, CellResult  # noqa: E402
 from . import base  # noqa: E402
 
@@ -195,79 +197,14 @@ class SwarmPlugin:
 
         host_path = _host_results_path(results_path)
         try:
-            data = json.loads(host_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+            payload = adapt_artifact("swarm-results", host_path)
+        except CompletionStateError as exc:
             result.verdict = "blocked"
             result.health = "infra:results-malformed"
             result.notes = f"could not load swarm results at {host_path}: {exc}"
             return result
 
-        return _completion_from_swarm_results(result, data, str(host_path))
-
-
-def _completion_from_swarm_results(result: CellResult, data: dict[str, Any], results_path: str) -> CellResult:
-    """The 'thin adapter' onto the shared completion-state contract
-    (schemas/completion-state.schema.json), built directly from a
-    `SwarmResults` payload (tools/swarm/results.ts) rather than a
-    completion-state file already on disk — the tier-1 harness has no reason
-    to know about arena's contract itself.
-    """
-
-    user_count = int(data.get("user_count", 0) or 0)
-    users = data.get("users") or []
-    all_completed = bool(data.get("all_completed"))
-    all_isolated = bool(data.get("all_isolated"))
-    all_console_clean = bool(data.get("all_console_clean"))
-    all_audit_clean = bool(data.get("all_audit_clean"))
-
-    negative_control = data.get("negative_control") or {}
-    # A negative control that was never populated (no description/no
-    # shared_session_id) means that test simply hasn't run yet in this
-    # results file — don't fail the cell over a control that wasn't
-    # exercised. One that WAS exercised but failed to detect the seeded fault
-    # means the isolation gate itself is broken, which is a real failure.
-    negative_control_ran = bool(negative_control.get("shared_session_id"))
-    negative_control_ok = (not negative_control_ran) or bool(negative_control.get("detected"))
-
-    completed_count = sum(1 for u in users if u.get("completed"))
-    isolated_count = sum(1 for u in users if u.get("isolation_ok"))
-    console_clean_count = sum(1 for u in users if u.get("console_errors", 0) == 0)
-    audit_clean_count = sum(1 for u in users if u.get("audit_error_count", 0) == 0)
-
-    if all_completed and all_isolated and all_console_clean and all_audit_clean and negative_control_ok:
-        verdict = "solved"
-    elif not negative_control_ok:
-        verdict = "failed"
-    elif completed_count == 0:
-        verdict = "failed"
-    else:
-        verdict = "partial"
-
-    result.verdict = verdict
-    result.health = "model:result"
-    result.evidence_refs = [results_path]
-    result.trace_ref = results_path
-    result.metrics.update({
-        "user_count": user_count,
-        "completed_count": completed_count,
-        "isolated_count": isolated_count,
-        "console_clean_count": console_clean_count,
-        "audit_clean_count": audit_clean_count,
-        "all_completed": all_completed,
-        "all_isolated": all_isolated,
-        "all_console_clean": all_console_clean,
-        "all_audit_clean": all_audit_clean,
-        "negative_control_ran": negative_control_ran,
-        "negative_control_detected": bool(negative_control.get("detected")),
-    })
-    result.notes = (
-        f"{verdict}: {completed_count}/{user_count} completed, "
-        f"{isolated_count}/{user_count} isolated, "
-        f"{console_clean_count}/{user_count} console-clean, "
-        f"{audit_clean_count}/{user_count} audit-clean"
-        + ("" if negative_control_ok else "; negative control FAILED to detect the seeded cross-talk fault")
-    )
-    return result
+        return apply_completion_state(result, payload)
 
 
 def _extract_results_path(stdout: str) -> str | None:

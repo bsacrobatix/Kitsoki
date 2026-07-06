@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -25,6 +26,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools" / "arena"))
 
 from tools.persona_qa import from_product_journey_report  # noqa: E402
+from arena.artifact_adapters import adapt_artifact  # noqa: E402
 from arena.model import Cell, Target, Variant  # noqa: E402
 from arena.plugins.bugfix import BugfixPlugin  # noqa: E402
 
@@ -106,6 +108,84 @@ finally:
 if jsonschema is None:
     print("NOTE: jsonschema not installed — schema-conformance checks were skipped, "
           "not failed (pip install jsonschema to enforce them).")
+
+
+# 1c. Artifact adapter registry: every supported kind normalizes to the same
+# completion-state schema shape.
+with tempfile.TemporaryDirectory(prefix="arena-completion-adapters-") as td:
+    adapter_root = Path(td)
+    completion_path = adapter_root / "completion.json"
+    bench.write_completion_state(
+        completion_path,
+        verdict="solved",
+        health="model:result",
+        metrics={"cost_usd": 0.0},
+        evidence_refs=["trace.jsonl"],
+    )
+    assert_conforms(
+        "adapter completion-state conforms",
+        adapt_artifact("completion-state", completion_path),
+    )
+
+    swarm_path = adapter_root / "swarm-results.json"
+    swarm_path.write_text(json.dumps({
+        "run_id": "swarm-1",
+        "started_at": "",
+        "ended_at": "",
+        "server": {"addr": "", "flow": ""},
+        "user_count": 1,
+        "users": [{
+            "index": 0,
+            "persona_id": "p",
+            "session_id": "s",
+            "marker": "m",
+            "completed": True,
+            "states_visited": [],
+            "console_errors": 0,
+            "console_error_samples": [],
+            "audit_error_count": 0,
+            "audit_error_samples": [],
+            "audit_a11y_advisory_count": 0,
+            "audit_a11y_advisory_samples": [],
+            "isolation_ok": True,
+            "isolation_leaked": [],
+            "duration_ms": 1,
+        }],
+        "all_completed": True,
+        "all_isolated": True,
+        "all_console_clean": True,
+        "all_audit_clean": True,
+        "rss": {},
+        "negative_control": {
+            "description": "",
+            "shared_session_id": "",
+            "injected_marker": "",
+            "detected": False,
+            "leaked": [],
+        },
+    }))
+    swarm_payload = adapt_artifact("swarm-results", swarm_path)
+    check("adapter swarm-results verdict", swarm_payload["verdict"], "solved")
+    assert_conforms("adapter swarm-results conforms", swarm_payload)
+
+    ui_data = ROOT / "tools" / "persona_qa" / "tests" / "testdata"
+    ui_qa_payload = adapt_artifact("ui-qa-verdict", ui_data / "ui_qa_verdict_pass.json")
+    check("adapter ui-qa check_type", ui_qa_payload["check_type"], "journey-verdict")
+    assert_conforms("adapter ui-qa conforms", ui_qa_payload)
+
+    ui_review_payload = adapt_artifact("ui-review-verdict", ui_data / "ui_review_verdict_pass.json")
+    check("adapter ui-review check_type", ui_review_payload["check_type"], "ux-heuristic")
+    assert_conforms("adapter ui-review conforms", ui_review_payload)
+
+    run_dir = adapter_root / "product-journey-run"
+    run_dir.mkdir()
+    (run_dir / "review.json").write_text(json.dumps({
+        "status": "ready",
+        "summary_counts": {"passed": 19, "warned": 0, "failed": 0, "total": 19},
+    }))
+    product_payload = adapt_artifact("product-journey-review", run_dir)
+    check("adapter product-journey verdict", product_payload["verdict"], "solved")
+    assert_conforms("adapter product-journey conforms", product_payload)
 
 
 # ---------------------------------------------------------------------------

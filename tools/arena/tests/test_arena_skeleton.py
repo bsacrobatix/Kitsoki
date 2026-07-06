@@ -57,6 +57,8 @@ check("non-live uses bench verify", argv[1:4], ["/workspace/kitsoki/tools/bugfix
 check("image per project", bugfix.image(cells[0]), "kitsoki-arena-repo/query-string:latest")
 live_argv = bugfix.drive_command(cells[0], live=True)
 check("live uses drive_cell", live_argv[0:2], ["bash", "/workspace/kitsoki/tools/bugfix-bakeoff/external/drive_cell.sh"])
+check("live threads completion-state path", "--completion-state" in live_argv, True)
+check("live completion-state points inside mounted repo", live_argv[live_argv.index("--completion-state") + 1].startswith("/workspace/kitsoki/.artifacts/arena/completion-state/"), True)
 
 
 def write_completion_state(cell, *, verdict, health, notes=""):

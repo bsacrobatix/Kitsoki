@@ -49,6 +49,11 @@ except ImportError:
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tools.completion_state import SCHEMA_VERSION as COMPLETION_STATE_SCHEMA_VERSION
+from tools.completion_state import write_completion_state
 
 
 def load(project):
@@ -147,39 +152,6 @@ def materialize(tree, dest, node_modules=None):
     if nm.exists():
         (dest / "node_modules").unlink(missing_ok=True)
         os.symlink(nm, dest / "node_modules")
-
-
-# The shared arena/persona-QA scoring contract — schemas/completion-state.schema.json.
-# Keep this literal in sync with tools/persona_qa/completion.py's SCHEMA_VERSION;
-# both write against the same versioned contract so arena's bugfix plugin can
-# read either workload's output with one parser.
-COMPLETION_STATE_SCHEMA_VERSION = "1.0.0"
-
-
-def write_completion_state(path, *, verdict, health, metrics=None, evidence_refs=None,
-                            **extra):
-    """Write a schema-conformant completion-state file (the unified arena contract).
-
-    `path` may be None, in which case this is a no-op — callers pass the CLI's
-    optional --completion-state through unconditionally. Extra job-specific
-    fields (cell_id, job_type, notes, summary, …) are merged in verbatim; the
-    schema keeps additionalProperties so this stays forward-compatible with new
-    job-type plugins without a schema fork.
-    """
-    if not path:
-        return None
-    payload = {
-        "schema_version": COMPLETION_STATE_SCHEMA_VERSION,
-        "verdict": verdict,
-        "health": health,
-        "metrics": metrics or {},
-        "evidence_refs": evidence_refs or [],
-    }
-    payload.update({k: v for k, v in extra.items() if v is not None})
-    out_path = Path(path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-    return payload
 
 
 def decide_quality(oracle_pass, suite_pass, suite_enabled):
