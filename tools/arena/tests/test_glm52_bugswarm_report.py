@@ -12,6 +12,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parent.parent.parent
 SCRIPT = REPO_ROOT / "tools/arena/scripts/glm52_bugswarm_report.py"
+CONVERT = REPO_ROOT / "tools/arena/scripts/bugswarm_to_arena.py"
+VERIFY = REPO_ROOT / "tools/arena/scripts/bugswarm_verify_source.py"
 
 failures: list[str] = []
 
@@ -64,6 +66,53 @@ with tempfile.TemporaryDirectory() as tmp:
     md = md_out.read_text(encoding="utf-8")
     check("markdown names pending raw arm", "oss-oracle | raw-prompt" in md, True)
     check("markdown warns no token ratio", "must not compute a token ratio" in md, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
+    artifacts = out / "artifacts.json"
+    source = out / "bugswarm-source.yaml"
+    verification = out / "bugswarm-verification.json"
+    json_out = out / "with-bugswarm.json"
+    md_out = out / "with-bugswarm.md"
+    artifacts.write_text(json.dumps({
+        "artifacts": [
+            {
+                "image_tag": "square-okio-140452393",
+                "repo": "square/okio",
+                "failed_job_id": "140452393",
+                "passed_job_id": "140452394",
+            }
+        ]
+    }), encoding="utf-8")
+    subprocess.run([sys.executable, str(CONVERT), "--in", str(artifacts), "--out", str(source)], cwd=REPO_ROOT, check=True)
+    subprocess.run([sys.executable, str(VERIFY), "--source", str(source), "--out", str(verification), "--dry-run"], cwd=REPO_ROOT, check=True)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--generated-at",
+            "2026-07-06T00:00:00Z",
+            "--json-out",
+            str(json_out),
+            "--markdown-out",
+            str(md_out),
+            "--bugswarm-source",
+            str(source),
+            "--bugswarm-verification",
+            str(verification),
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    check("generator with bugswarm exits zero", proc.returncode, 0)
+    report = json.loads(json_out.read_text(encoding="utf-8"))
+    check("bugswarm imported with source", report["corpora"]["bugswarm"]["imported_task_count"], 1)
+    check("bugswarm verification mode", report["corpora"]["bugswarm"]["verification_mode"], "dry-run")
+    check("bugswarm verification count", report["corpora"]["bugswarm"]["verification_report_count"], 1)
+    check("bugswarm dry-run verified count", report["corpora"]["bugswarm"]["verification_verified_count"], 0)
 
 if failures:
     print("FAIL: glm52 bugswarm report")

@@ -4,6 +4,9 @@
       "imported_task_count": 0,
       "source_catalog": "tools/arena/corpus/sources.yaml",
       "source_status": "adapter-ready",
+      "verification_mode": "",
+      "verification_report_count": 0,
+      "verification_verified_count": 0,
       "verified_task_count": 0
     },
     "oss_oracle": {
@@ -54,6 +57,7 @@
     "arena_rollup": "tools/arena/results/round-1/rollup.json",
     "bakeoff_cells": "tools/bugfix-bakeoff/results/cells",
     "bugswarm_source": "",
+    "bugswarm_verification": "",
     "corpus": "tools/arena/corpus/cost-bench.manifest.yaml",
     "sources": "tools/arena/corpus/sources.yaml"
   },

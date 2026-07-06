@@ -30,6 +30,8 @@ Inputs:
 - Arena supporting rollup: `tools/arena/results/round-1/rollup.json`.
 - OSS oracle corpus: `tools/arena/corpus/cost-bench.manifest.yaml`.
 - Source catalog: `tools/arena/corpus/sources.yaml`.
+- BugSwarm source: `not supplied`.
+- BugSwarm verification report: `not supplied`.
 
 Primary metrics:
 
@@ -45,7 +47,7 @@ Primary metrics:
 | corpus | tasks | repositories | verified/imported status |
 |---|---:|---:|---|
 | OSS oracle corpus | 26 | 12 | frozen and locally validated |
-| BugSwarm | 0 | n/a | adapter-ready; verified tasks: 0 |
+| BugSwarm | 0 | n/a | adapter-ready; converted verified tasks: 0; verification report: 0/0 (none) |
 
 The OSS oracle corpus remains the active internal benchmark source. It
 covers the pre-registered public OSS targets plus existing hidden-oracle
@@ -62,6 +64,9 @@ BugSwarm source contract:
   artifact image.
 - keep imported tasks unattempted until Docker verification proves both
   sides still reproduce.
+- verify with `tools/arena/scripts/bugswarm_verify_source.py`; dry-run
+  mode records the Docker commands, while `--execute` runs each side in
+  separate fresh containers.
 
 ## GLM-5.2 Headline Matrix
 
