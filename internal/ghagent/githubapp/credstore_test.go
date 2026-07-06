@@ -143,3 +143,86 @@ func TestResolveAppClientExplicitFileErrors(t *testing.T) {
 		t.Errorf("expected unresolved client id, got %+v", cc)
 	}
 }
+
+func TestResolveAppConfigPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(EnvCredentialsDir, dir)
+
+	profile := AppProfileDir("prof")
+	if err := os.MkdirAll(profile, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	envBody := EnvAppID + "=101\n" + EnvInstallationID + "=202\n" + EnvPrivateKeyFile + "=/profile.pem\n"
+	if err := os.WriteFile(filepath.Join(profile, "kitsoki.env"), []byte(envBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetDefaultProfile("prof"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvAppID, "")
+	t.Setenv(EnvInstallationID, "")
+	t.Setenv(EnvPrivateKeyFile, "")
+	t.Setenv(EnvAppEnvFile, "")
+
+	resolved, err := ResolveAppConfig(0, 0, "", "")
+	if err != nil {
+		t.Fatalf("ResolveAppConfig default: %v", err)
+	}
+	if resolved.Config.AppID != 101 || resolved.Config.InstallationID != 202 || resolved.Config.PrivateKeyPath != "/profile.pem" {
+		t.Fatalf("default profile resolution wrong: %+v", resolved)
+	}
+	if !strings.Contains(resolved.Source, "default profile") {
+		t.Fatalf("source should mention default profile: %s", resolved.Source)
+	}
+
+	alt := filepath.Join(dir, "alt.env")
+	if err := os.WriteFile(alt, []byte(EnvAppID+"=303\n"+EnvInstallationID+"=404\n"+EnvPrivateKeyFile+"=/alt.pem\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err = ResolveAppConfig(0, 0, "", alt)
+	if err != nil {
+		t.Fatalf("ResolveAppConfig env-file: %v", err)
+	}
+	if resolved.Config.AppID != 303 || !strings.Contains(resolved.Source, "env-file ") {
+		t.Fatalf("env-file resolution wrong: %+v", resolved)
+	}
+
+	t.Setenv(EnvAppID, "505")
+	t.Setenv(EnvInstallationID, "606")
+	t.Setenv(EnvPrivateKeyFile, "/env.pem")
+	resolved, err = ResolveAppConfig(0, 0, "", alt)
+	if err != nil {
+		t.Fatalf("ResolveAppConfig env: %v", err)
+	}
+	if resolved.Config.AppID != 505 || resolved.Source != "env" {
+		t.Fatalf("env resolution wrong: %+v", resolved)
+	}
+
+	resolved, err = ResolveAppConfig(707, 808, "/flag.pem", alt)
+	if err != nil {
+		t.Fatalf("ResolveAppConfig flags: %v", err)
+	}
+	if resolved.Config.AppID != 707 || resolved.Source != "flags" {
+		t.Fatalf("flag resolution wrong: %+v", resolved)
+	}
+}
+
+func TestResolveAppConfigHalfConfiguredErrors(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(EnvCredentialsDir, dir)
+	t.Setenv(EnvAppID, "")
+	t.Setenv(EnvInstallationID, "")
+	t.Setenv(EnvPrivateKeyFile, "")
+	t.Setenv(EnvAppEnvFile, "")
+
+	if _, err := ResolveAppConfig(1, 0, "", ""); err == nil || !strings.Contains(err.Error(), EnvInstallationID) {
+		t.Fatalf("want missing installation id, got %v", err)
+	}
+	resolved, err := ResolveAppConfig(0, 0, "", "")
+	if err != nil {
+		t.Fatalf("unconfigured should not error: %v", err)
+	}
+	if resolved.Config != nil {
+		t.Fatalf("unconfigured should return nil config: %+v", resolved)
+	}
+}

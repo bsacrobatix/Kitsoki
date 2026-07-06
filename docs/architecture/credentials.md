@@ -13,17 +13,30 @@ One root, fixed layout, private permissions (0700 dirs, 0600 files):
 
 ```
 $KITSOKI_CREDENTIALS_DIR                 default: ~/.config/kitsoki
-└── gh-app/
+├── gh-app/
     ├── <app-slug>/                      one profile per GitHub App
     │   ├── kitsoki.env                  ids + secrets (KITSOKI_GH_APP_*)
     │   └── gh-app.pem                   the App's RSA private key
     ├── default -> <app-slug>            the active profile (symlink)
     └── tokens/<client-id>.json          cached user-to-server tokens
+└── github.env                           short-lived GH_TOKEN/GITHUB_TOKEN for local shells
 ```
 
 `kitsoki gh-agent setup app` populates a profile and points `default` at it.
 Hand-made Apps get a profile by writing the same two files (copy the env
 names below).
+
+`kitsoki gh-agent token` mints a GitHub App installation token from the active
+profile and writes `github.env` (0600). Source that file before local commands
+that open issues, open PRs, push branches/artifacts, or comment on GitHub:
+
+```
+source ~/.config/kitsoki/github.env
+```
+
+The env file is intentionally refreshable because GitHub App installation
+tokens are short-lived. Manual PAT fallback is explicit:
+`GH_TOKEN=<fine-grained-pat> kitsoki gh-agent token --from-env`.
 
 ## Env names
 
@@ -39,6 +52,7 @@ Fixed; scripts and CI use exactly these:
 | `KITSOKI_GH_APP_CLIENT_ID` | App OAuth client id |
 | `KITSOKI_GH_APP_CLIENT_SECRET` | App OAuth client secret |
 | `KITSOKI_GH_APP_ENV_FILE` | explicit profile env file (bypasses the default profile) |
+| `GH_TOKEN` / `GITHUB_TOKEN` | GitHub API token consumed by local GitHub host surfaces; usually written by `kitsoki gh-agent token` |
 
 ## Precedence
 
