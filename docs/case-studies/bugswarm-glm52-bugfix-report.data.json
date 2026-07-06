@@ -368,6 +368,7 @@
     "corpus": "tools/arena/corpus/cost-bench.manifest.yaml",
     "oss_arena_rollup": "",
     "report_json": "docs/case-studies/bugswarm-glm52-bugfix-report.data.json",
+    "report_markdown": "docs/case-studies/bugswarm-glm52-bugfix-report.md",
     "sources": "tools/arena/corpus/sources.yaml"
   },
   "interpretation": [
@@ -423,6 +424,107 @@
         "purpose": "published dataset/infrastructure description",
         "url": "https://arxiv.org/abs/1903.06725"
       }
+    ]
+  },
+  "reproducibility": {
+    "artifacts": [
+      {
+        "bytes": 20768,
+        "exists": true,
+        "kind": "file",
+        "path": "tools/arena/corpus/cost-bench.manifest.yaml",
+        "role": "corpus",
+        "sha256": "e9ac3482ba56eae8e837b32e5f106565fbc8a03915d9c2535e563f87f69ffb49"
+      },
+      {
+        "bytes": 3008,
+        "exists": true,
+        "kind": "file",
+        "path": "tools/arena/corpus/sources.yaml",
+        "role": "source-catalog",
+        "sha256": "93125ed682ff0b829b75642fcefd6a4a8f2a2993f99122629dea51b70590e566"
+      },
+      {
+        "bytes": 1185,
+        "exists": true,
+        "kind": "file",
+        "path": "tools/arena/corpus/bugswarm.seed.yaml",
+        "role": "bugswarm-source",
+        "sha256": "f174df93ace8ad08aa7a5f90033301c09719a7b7230617b6b2c6379c13821a2e"
+      },
+      {
+        "bytes": 10978,
+        "exists": true,
+        "kind": "file",
+        "path": "tools/arena/results/round-1/rollup.json",
+        "role": "supporting-rollup",
+        "sha256": "49f8d3cb25601a32a51d44a44cc940bd24f0261af887cc31fdcbc95443745724"
+      },
+      {
+        "exists": true,
+        "files": [
+          {
+            "bytes": 1554,
+            "exists": true,
+            "kind": "file",
+            "path": "tools/bugfix-bakeoff/results/cells/bug9-glm-5.2-kitsoki.json",
+            "role": "matched-file",
+            "sha256": "ae6b0d8529e1b3fc183a999e93788ffa852b9881dbc8e6a3248aa1fe89839046"
+          }
+        ],
+        "kind": "directory-glob",
+        "match_count": 1,
+        "path": "tools/bugfix-bakeoff/results/cells",
+        "pattern": "*glm-5.2*.json",
+        "role": "directory-glob"
+      },
+      {
+        "exists": false,
+        "kind": "missing-optional",
+        "path": "",
+        "role": "optional-oss-arena-rollup"
+      },
+      {
+        "exists": false,
+        "kind": "missing-optional",
+        "path": "",
+        "role": "optional-bugswarm-verification"
+      },
+      {
+        "exists": false,
+        "kind": "missing-optional",
+        "path": "",
+        "role": "optional-bugswarm-arena-rollup"
+      }
+    ],
+    "generated_at": "2026-07-06T00:00:00Z",
+    "generator": {
+      "bytes": 79753,
+      "exists": true,
+      "kind": "file",
+      "path": "tools/arena/scripts/glm52_bugswarm_report.py",
+      "role": "generator",
+      "sha256": "08d7ac0776bf1edcca5c1860061be66745ed3b483f58fc37fb004bae9d494e43"
+    },
+    "regenerate_command": [
+      "python3",
+      "tools/arena/scripts/glm52_bugswarm_report.py",
+      "--generated-at",
+      "2026-07-06T00:00:00Z",
+      "--json-out",
+      "docs/case-studies/bugswarm-glm52-bugfix-report.data.json",
+      "--markdown-out",
+      "docs/case-studies/bugswarm-glm52-bugfix-report.md"
+    ],
+    "status": "reproducible",
+    "validation_commands": [
+      "python3 tools/arena/scripts/glm52_report_gate.py --report-json docs/case-studies/bugswarm-glm52-bugfix-report.data.json",
+      "python3 tools/arena/scripts/glm52_report_gate.py --report-json docs/case-studies/bugswarm-glm52-bugfix-report.data.json --require-publishable",
+      "python3 tools/arena/tests/test_glm52_bugswarm_report.py",
+      "python3 tools/arena/tests/test_glm52_report_gate.py",
+      "python3 -m py_compile tools/arena/scripts/glm52_bugswarm_report.py tools/arena/scripts/glm52_report_gate.py",
+      "python3 tools/arena/tests/validate_corpus.py tools/arena/corpus/cost-bench.manifest.yaml",
+      "python3 tools/arena/tests/run_no_llm.py"
     ]
   },
   "required_glm52_matrix": [

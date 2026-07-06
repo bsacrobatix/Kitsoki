@@ -10,6 +10,7 @@ claim-level invariants that make the Markdown safe to cite.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -33,6 +34,7 @@ REQUIRED_COMPLETION_REQUIREMENTS = {
     "bugswarm-kitsoki-glm52",
     "bugswarm-raw-glm52",
 }
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -71,6 +73,7 @@ def validate_report(report: dict[str, Any]) -> list[str]:
     problems.extend(require_closure(report, rows))
     problems.extend(require_completion_audit(report, rows))
     problems.extend(require_study_protocol(report, rows))
+    problems.extend(require_reproducibility(report))
     problems.extend(require_references(report))
     return problems
 
@@ -111,7 +114,7 @@ def require_top_level(report: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     if report.get("kind") != "glm52_bugswarm_bugfix_report":
         problems.append(f"unexpected report kind: {report.get('kind')!r}")
-    for key in ("corpora", "source_mix", "rollups", "comparisons", "claim_ledger", "threats_to_validity", "completion_audit", "study_protocol", "evidence_closure", "references"):
+    for key in ("corpora", "source_mix", "rollups", "comparisons", "claim_ledger", "threats_to_validity", "completion_audit", "study_protocol", "evidence_closure", "reproducibility", "references"):
         if not isinstance(report.get(key), dict):
             problems.append(f"missing mapping: {key}")
     return problems
@@ -430,6 +433,101 @@ def require_study_protocol(report: dict[str, Any], rows: list[dict[str, Any]]) -
 def command_contains(step: dict[str, Any], needle: str) -> bool:
     commands = step.get("commands") if isinstance(step.get("commands"), list) else []
     return any(needle in str(command) for command in commands)
+
+
+def require_reproducibility(report: dict[str, Any]) -> list[str]:
+    ledger = report.get("reproducibility") if isinstance(report.get("reproducibility"), dict) else {}
+    problems: list[str] = []
+    if not ledger:
+        return ["missing reproducibility ledger"]
+    generator = ledger.get("generator") if isinstance(ledger.get("generator"), dict) else {}
+    if generator.get("path") != "tools/arena/scripts/glm52_bugswarm_report.py":
+        problems.append("reproducibility generator path must be tools/arena/scripts/glm52_bugswarm_report.py")
+    problems.extend(require_hashed_file(generator, "reproducibility generator"))
+
+    regenerate = ledger.get("regenerate_command") if isinstance(ledger.get("regenerate_command"), list) else []
+    regenerate_text = " ".join(str(part) for part in regenerate)
+    for required in ("--generated-at", "--json-out", "--markdown-out"):
+        if required not in regenerate_text:
+            problems.append(f"reproducibility regenerate command missing {required}")
+
+    validation_commands = [str(command) for command in ledger.get("validation_commands", []) if isinstance(command, str)]
+    joined_validation = "\n".join(validation_commands)
+    if "glm52_report_gate.py" not in joined_validation:
+        problems.append("reproducibility validation commands missing normal report gate")
+    if "--require-publishable" not in joined_validation:
+        problems.append("reproducibility validation commands missing publishable gate command")
+
+    artifacts = ledger.get("artifacts") if isinstance(ledger.get("artifacts"), list) else []
+    paths = {
+        artifact.get("path")
+        for artifact in artifacts
+        if isinstance(artifact, dict) and artifact.get("kind") == "file"
+    }
+    for required in (
+        "tools/arena/corpus/cost-bench.manifest.yaml",
+        "tools/arena/corpus/sources.yaml",
+        "tools/arena/corpus/bugswarm.seed.yaml",
+        "tools/arena/results/round-1/rollup.json",
+    ):
+        if required not in paths:
+            problems.append(f"reproducibility artifacts missing required input {required}")
+
+    has_glm52_cell = False
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            problems.append("reproducibility artifacts contains a non-mapping item")
+            continue
+        kind = artifact.get("kind")
+        if kind == "file":
+            if artifact.get("exists"):
+                problems.extend(require_hashed_file(artifact, f"reproducibility artifact {artifact.get('path')}"))
+        elif kind == "directory-glob":
+            if artifact.get("path") != "tools/bugfix-bakeoff/results/cells" or artifact.get("pattern") != "*glm-5.2*.json":
+                problems.append("reproducibility directory-glob must cover GLM-5.2 bakeoff cells")
+            files = artifact.get("files") if isinstance(artifact.get("files"), list) else []
+            if artifact.get("match_count") != len(files):
+                problems.append("reproducibility directory-glob match_count does not match files")
+            for item in files:
+                if not isinstance(item, dict):
+                    problems.append("reproducibility directory-glob contains a non-mapping file")
+                    continue
+                if str(item.get("path") or "").endswith("glm-5.2-kitsoki.json") or "*glm-5.2*" in str(artifact.get("pattern") or ""):
+                    has_glm52_cell = True
+                problems.extend(require_hashed_file(item, f"reproducibility artifact {item.get('path')}"))
+        elif kind != "missing-optional":
+            problems.append(f"reproducibility artifact has unexpected kind {kind!r}")
+    if not has_glm52_cell:
+        problems.append("reproducibility ledger must include at least one GLM-5.2 bakeoff cell hash")
+    return problems
+
+
+def require_hashed_file(artifact: dict[str, Any], label: str) -> list[str]:
+    problems: list[str] = []
+    path = str(artifact.get("path") or "")
+    sha = str(artifact.get("sha256") or "")
+    size = artifact.get("bytes")
+    if len(sha) != 64 or any(char not in "0123456789abcdef" for char in sha):
+        problems.append(f"{label} lacks a 64-character sha256")
+    if not isinstance(size, int):
+        problems.append(f"{label} lacks byte size")
+    if path:
+        disk_path = (REPO_ROOT / path).resolve()
+        try:
+            disk_path.relative_to(REPO_ROOT)
+        except ValueError:
+            problems.append(f"{label} path escapes repository root")
+            return problems
+        if not disk_path.exists():
+            problems.append(f"{label} path does not exist on disk: {path}")
+            return problems
+        data = disk_path.read_bytes()
+        actual_sha = hashlib.sha256(data).hexdigest()
+        if sha and sha != actual_sha:
+            problems.append(f"reproducibility hash mismatch for {path}")
+        if isinstance(size, int) and size != len(data):
+            problems.append(f"reproducibility byte size mismatch for {path}")
+    return problems
 
 
 def require_references(report: dict[str, Any]) -> list[str]:

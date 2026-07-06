@@ -137,6 +137,22 @@ with tempfile.TemporaryDirectory() as tmp:
     check("references include bugswarm website", refs["upstream"][0]["url"], "https://www.bugswarm.org/")
     check("references include bugswarm rest api", refs["upstream"][2]["url"], "https://www.bugswarm.org/docs/toolset/bugswarm-rest-api/")
     check("references include seed provenance", refs["bugswarm_seed"][0]["url"], "https://www.bugswarm.org/docs/tutorials/setting-up-an-experiment/")
+    reproducibility = report["reproducibility"]
+    check("reproducibility status", reproducibility["status"], "reproducible")
+    check("reproducibility generator path", reproducibility["generator"]["path"], "tools/arena/scripts/glm52_bugswarm_report.py")
+    check("reproducibility generator sha", len(reproducibility["generator"]["sha256"]), 64)
+    artifact_paths = {
+        artifact["path"]
+        for artifact in reproducibility["artifacts"]
+        if artifact.get("kind") == "file"
+    }
+    check("reproducibility includes corpus", "tools/arena/corpus/cost-bench.manifest.yaml" in artifact_paths, True)
+    check("reproducibility includes sources", "tools/arena/corpus/sources.yaml" in artifact_paths, True)
+    check("reproducibility includes bugswarm seed", "tools/arena/corpus/bugswarm.seed.yaml" in artifact_paths, True)
+    bakeoff_glob = next(artifact for artifact in reproducibility["artifacts"] if artifact.get("kind") == "directory-glob")
+    check("reproducibility bakeoff glob", bakeoff_glob["pattern"], "*glm-5.2*.json")
+    check("reproducibility bakeoff cell", bakeoff_glob["files"][0]["path"], "tools/bugfix-bakeoff/results/cells/bug9-glm-5.2-kitsoki.json")
+    check("reproducibility publishable validation", any("--require-publishable" in command for command in reproducibility["validation_commands"]), True)
 
     md = md_out.read_text(encoding="utf-8")
     check("markdown names pending raw arm", "oss-oracle | raw-prompt" in md, True)
@@ -145,6 +161,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("markdown source mix public target row", "| pre_registered_oss_targets | 20 | 10 | github_content" in md, True)
     check("markdown source mix fixture row", "| armed_bugfix_fixtures | 6 | 2 | external_bakeoff" in md, True)
     check("markdown source mix bugswarm row", "BugSwarm containerized_fail_pass_ci_artifacts" in md, True)
+    check("markdown includes reproducibility ledger", "## Reproducibility Ledger" in md, True)
+    check("markdown includes generator hash", "tools/arena/scripts/glm52_bugswarm_report.py` sha256" in md, True)
+    check("markdown includes normal report gate", "glm52_report_gate.py --report-json" in md, True)
     check("markdown includes comparisons", "## Kitsoki vs Raw-Prompt Comparisons" in md, True)
     check("markdown includes claim ledger", "## Research Claim Ledger" in md, True)
     check("markdown includes publishable gate", "--require-publishable" in md, True)

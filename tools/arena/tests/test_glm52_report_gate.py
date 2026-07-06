@@ -178,6 +178,30 @@ with tempfile.TemporaryDirectory() as tmp:
     check("bad references exits nonzero", proc.returncode, 1)
     check("bad references names seed", "references missing BugSwarm seed provenance" in proc.stdout, True)
 
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
+    bad = out / "bad-repro-hash.json"
+    report = json.loads(REPORT.read_text(encoding="utf-8"))
+    report["reproducibility"]["generator"]["sha256"] = "0" * 64
+    bad.write_text(json.dumps(report), encoding="utf-8")
+    proc = run_gate(bad)
+    check("bad reproducibility hash exits nonzero", proc.returncode, 1)
+    check("bad reproducibility hash names mismatch", "reproducibility hash mismatch" in proc.stdout, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
+    bad = out / "bad-repro-publishable-command.json"
+    report = json.loads(REPORT.read_text(encoding="utf-8"))
+    report["reproducibility"]["validation_commands"] = [
+        command
+        for command in report["reproducibility"]["validation_commands"]
+        if "--require-publishable" not in command
+    ]
+    bad.write_text(json.dumps(report), encoding="utf-8")
+    proc = run_gate(bad)
+    check("bad reproducibility command exits nonzero", proc.returncode, 1)
+    check("bad reproducibility command names publishable gate", "publishable gate command" in proc.stdout, True)
+
 if failures:
     print("FAIL: glm52 report gate")
     for failure in failures:
