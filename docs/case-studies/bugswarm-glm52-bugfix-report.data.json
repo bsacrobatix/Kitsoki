@@ -1,4 +1,5 @@
 {
+  "bugswarm_glm52_arena_cells": [],
   "corpora": {
     "bugswarm": {
       "imported_task_count": 0,
@@ -56,6 +57,7 @@
   "inputs": {
     "arena_rollup": "tools/arena/results/round-1/rollup.json",
     "bakeoff_cells": "tools/bugfix-bakeoff/results/cells",
+    "bugswarm_arena_rollup": "",
     "bugswarm_source": "",
     "bugswarm_verification": "",
     "corpus": "tools/arena/corpus/cost-bench.manifest.yaml",
