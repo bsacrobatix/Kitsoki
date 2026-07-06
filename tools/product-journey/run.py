@@ -4194,6 +4194,44 @@ def unfiled_credible_findings(findings: dict) -> list[str]:
     ]
 
 
+def credible_issue_driver_receipt_gaps(
+    findings: dict,
+    driver_journal: dict,
+    evidence: dict,
+    run_dir: Path,
+) -> list[str]:
+    proof_refs = {
+        item.get("path", "")
+        for item in evidence.get("items", [])
+        if item.get("status") in {"captured", "validated"}
+        and item.get("path", "")
+        and is_proof_evidence(item, run_dir)
+    }
+    valid_events_by_scenario: dict[str, list[dict]] = {}
+    for event in driver_journal.get("items", []):
+        scenario_id = event.get("scenario", "")
+        if event.get("status") not in {"captured", "validated"}:
+            continue
+        if not scenario_id:
+            continue
+        valid_events_by_scenario.setdefault(scenario_id, []).append(event)
+
+    gaps = []
+    for item in credible_issue_findings(findings):
+        finding_id = item.get("id", "finding")
+        scenario_id = item.get("scenario", "")
+        if not scenario_id:
+            gaps.append(f"{finding_id}: missing scenario")
+            continue
+        events = valid_events_by_scenario.get(scenario_id, [])
+        if not events:
+            gaps.append(f"{finding_id}/{scenario_id}: missing captured-or-validated driver event")
+            continue
+        if not any(set(event.get("evidence_refs", [])) & proof_refs for event in events):
+            gaps.append(f"{finding_id}/{scenario_id}: missing proof evidence refs")
+    return gaps
+
+
 def github_issue_ref(item: dict, fallback_repo: str) -> tuple[str, str, str, str]:
     github_issue = item.get("github_issue", {}) or {}
     url = str(github_issue.get("url", "")).strip()
@@ -6498,6 +6536,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     filing_requested = bool(findings.get("filing", {}).get("requested"))
     credible_findings = credible_issue_findings(findings)
     unfiled_credible = unfiled_credible_findings(findings)
+    driver_receipt_gaps = credible_issue_driver_receipt_gaps(findings, driver_journal, evidence, run_dir)
     gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
     gh_agent_requested = gh_agent.get("enqueue_status", "") not in {"", "disabled", "dry-run"}
     gh_agent_enqueued = int(gh_agent.get("enqueued_count", 0) or 0)
@@ -6686,6 +6725,16 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
                     if filing_requested
                     else f"credible={len(credible_findings)}"
                 )
+            ),
+        },
+        {
+            "id": "credible-issue-driver-receipts",
+            "status": "pass" if not driver_receipt_gaps else "fail",
+            "summary": "Every credible issue finding is backed by a captured or validated driver receipt with proof evidence.",
+            "detail": (
+                ", ".join(driver_receipt_gaps)
+                if driver_receipt_gaps
+                else f"credible={len(credible_findings)}"
             ),
         },
         {
@@ -7763,6 +7812,12 @@ def validate_run_bundle(run_dir: Path) -> dict:
     filing = findings_json.get("filing", {}) if findings_json else {}
     credible_findings = credible_issue_findings(findings_json)
     unfiled = unfiled_credible_findings(findings_json)
+    driver_receipt_gaps = credible_issue_driver_receipt_gaps(
+        findings_json,
+        driver_journal or {"items": []},
+        evidence or {"items": []},
+        run_dir,
+    )
     weakness_routes = read_json(run_dir / "weakness-routes.json") if (run_dir / "weakness-routes.json").exists() else {}
     prd_design_intake = prd_design_intake if isinstance(prd_design_intake, dict) else {}
     open_weakness_ids = {
@@ -7829,6 +7884,14 @@ def validate_run_bundle(run_dir: Path) -> dict:
             "findings-filed",
             "Credible issue findings require story-owned autonomous GitHub filing before review",
             ", ".join(unfiled),
+        )
+    if driver_receipt_gaps:
+        add_validation_issue(
+            issues,
+            "error",
+            "credible-issue-driver-receipts",
+            "Credible issue findings require captured or validated driver receipts with proof evidence before autonomous fixing",
+            ", ".join(driver_receipt_gaps),
         )
     if filing.get("requested"):
         if filing.get("failed"):
