@@ -118,6 +118,17 @@ def run_default() -> int:
     checks.check("glm52 bugswarm report gate", report_test.returncode, 0)
     if report_test.returncode:
         checks.failures.append((report_test.stdout + report_test.stderr).strip())
+    gap_plan_test = subprocess.run(
+        [sys.executable, str(HERE / "test_glm52_gap_plan.py")],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    checks.check("glm52 gap execution packet gate", gap_plan_test.returncode, 0)
+    if gap_plan_test.returncode:
+        checks.failures.append((gap_plan_test.stdout + gap_plan_test.stderr).strip())
     spec_path = ARENA_ROOT / "specs" / "paired-task-fixture.yaml"
     spec = JobSpec.load(spec_path)
     cells = spec.cells()

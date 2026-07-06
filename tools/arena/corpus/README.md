@@ -96,3 +96,17 @@ matrix while leaving the default Codex-native round-1 rollup as supporting
 evidence only. The generator keeps unavailable GLM-5.2 cells as `pending`, so
 missing raw-prompt or BugSwarm results cannot accidentally become zero-cost
 failures.
+
+To turn the report's pending headline cells into an operator run packet without
+spending, run:
+
+```bash
+python3 tools/arena/scripts/glm52_gap_plan.py \
+  --report-json docs/case-studies/bugswarm-glm52-bugfix-report.data.json \
+  --json-out .artifacts/arena/glm52-gap-plan.json \
+  --markdown-out .artifacts/arena/glm52-gap-plan.md
+```
+
+Add `--oss-spec`, `--bugswarm-spec`, or `--bugswarm-source` to have the packet
+include the exact `arena.py plan`, no-LLM `arena.py run`, and explicit
+`ARENA_PAIRED_TASK_ENABLE_CODEX=1 ... --live` commands for the missing cells.
