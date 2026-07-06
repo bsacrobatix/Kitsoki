@@ -597,6 +597,7 @@ func (s *Service) buildManifest(req GenerateRequest, workflowID, appPath, manife
 	researchOnly := false
 	if isResearchGoal(goal) {
 		researchOnly = true
+		defaults = syntheticGLMLadderDefaults(defaults)
 		steps = researchFanoutSteps(fullGoal, filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml"))))
 	} else if isCoverageFanoutGoal(goal) {
 		steps = coverageFanoutSteps(fullGoal, filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml"))))
@@ -688,6 +689,24 @@ func inferManifestDefaults(goal, traceRoot string) ManifestDefaults {
 			},
 			Efforts: []string{"low", "medium", "high", "xhigh", "max"},
 		}
+	}
+	return defaults
+}
+
+func syntheticGLMLadderDefaults(defaults ManifestDefaults) ManifestDefaults {
+	if defaults.Harness == "ladder" && defaults.HarnessLadder != nil {
+		return defaults
+	}
+	defaults.Harness = "ladder"
+	defaults.Profile = "synthetic-claude"
+	defaults.Model = "hf:zai-org/GLM-5.2"
+	defaults.RequireTraceModel = false
+	defaults.HarnessLadder = &HarnessLadder{
+		Models: []HarnessLadderModel{
+			{Backend: "claude", Provider: "synthetic-claude", Model: "hf:zai-org/GLM-5.2"},
+			{Backend: "codex", Provider: "codex-native", Model: "gpt-5.5"},
+		},
+		Efforts: []string{"low", "medium", "high", "xhigh", "max"},
 	}
 	return defaults
 }
