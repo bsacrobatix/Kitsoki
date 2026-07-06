@@ -157,6 +157,7 @@ turns:
             - bsacrobatix/Kitsoki
             - --filing-mode
             - file
+            - --debug-file
             - --gh-agent-db
             - .artifacts/product-journey/run-777/gh-agent-jobs.sqlite
             - --gh-agent-story
