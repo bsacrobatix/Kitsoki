@@ -18,8 +18,10 @@
 //   - MCP config is not a file flag: the --mcp-config JSON is read and each
 //     server is converted to codex `-c mcp_servers.<name>.{command,args,env}`
 //     TOML config overrides;
-//   - there is no system-prompt flag, so the composed kitsoki system prompt is
-//     prepended into the stdin prompt;
+//   - codex has no CLI system-prompt flag, so the composed kitsoki system prompt
+//     is materialized to a tempfile and installed with
+//     `-c model_instructions_file="..."`, replacing Codex's built-in base
+//     instructions instead of riding as user text;
 //   - output is `--json` — JSONL, one event per line — with a distinct,
 //     two-layer event vocabulary (thread.started / turn.* / item.* with nested
 //     item types agent_message / command_execution / mcp_tool_call) parsed by
@@ -79,18 +81,22 @@ func (codexBackend) ResolveBin(ctx context.Context) (string, error) {
 
 // TranslateInvocation rewrites a claude-shaped invocation into a `codex exec`
 // invocation. The prompt is kept on stdin (codex reads instructions from stdin
-// when no positional prompt is supplied); any system prompt extracted from the
-// claude argv is prepended to it. The working dir is carried both on the
-// Invocation (cmd.Dir) and as `-C` so it survives either way. MCP servers from
-// the --mcp-config file become `-c mcp_servers.<name>.*` TOML overrides.
+// when no positional prompt is supplied); any replacing system prompt extracted
+// from the claude argv is written to a model_instructions_file override. The
+// working dir is carried both on the Invocation (cmd.Dir) and as `-C` so it
+// survives either way. MCP servers from the --mcp-config file become `-c
+// mcp_servers.<name>.*` TOML overrides.
 func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir string) Invocation {
 	var (
-		out          []string // passthrough flags (e.g. --add-dir, unknown)
-		systemPrompt string
-		model        string
-		mcpConfig    string
-		sessionID    string // --session-id (first call) — codex has no equivalent
-		resumeID     string // --resume <id> → `exec resume <id>`
+		out             []string // passthrough flags (e.g. --add-dir, unknown)
+		systemPrompt    string
+		appendPrompt    string
+		model           string
+		mcpConfig       string
+		sessionID       string // --session-id (first call) — codex has no equivalent
+		resumeID        string // --resume <id> → `exec resume <id>`
+		cleanup         func()
+		promptForBudget string
 	)
 
 	// Split a "--flag=value" element into ("--flag","value"); leave others.
@@ -146,8 +152,10 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 			if strings.TrimSpace(val) != "" {
 				out = append(out, "--add-dir", val)
 			}
-		case "--system-prompt", "--append-system-prompt":
+		case "--system-prompt":
 			systemPrompt = val
+		case "--append-system-prompt":
+			appendPrompt = val
 		case "--model":
 			model = val
 		case "--mcp-config":
@@ -222,16 +230,28 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 		}
 		// Convert each MCP server in the --mcp-config file into codex `-c` overrides.
 		args = append(args, codexMCPConfigArgs(mcpConfig)...)
+		if sp := strings.TrimSpace(systemPrompt); sp != "" {
+			if path, fileCleanup, err := WritePromptTempFile(sp); err == nil {
+				cleanup = fileCleanup
+				args = append(args, "-c", "model_instructions_file="+tomlString(path))
+			} else {
+				// TranslateInvocation cannot return an error. Keep the call usable
+				// by falling back to the old prompt-prefix behavior if temp-file
+				// materialization fails.
+				appendPrompt = joinCodexPrompt(sp, appendPrompt)
+			}
+		}
 		// Forwarded/passthrough flags (--add-dir and any unknown flag).
 		args = append(args, out...)
 	} // end !isResume — resume rejects all of the above flags.
 
-	// Compose the stdin prompt: system prompt (if any) prepended to the user
-	// prompt claude would have piped on stdin. Unlike copilot, codex keeps the
-	// prompt on stdin.
+	// Compose the stdin prompt. Replacing system prompts ride
+	// model_instructions_file above; append-only prompts have no Codex CLI
+	// equivalent, so they remain a user-prompt prefix for the legacy escape
+	// hatch path.
 	prompt := stdin
-	if sp := strings.TrimSpace(systemPrompt); sp != "" {
-		prompt = sp + "\n\n---\n\n" + stdin
+	if ap := strings.TrimSpace(appendPrompt); ap != "" {
+		prompt = ap + "\n\n---\n\n" + prompt
 	}
 	// codex (≥0.142) DEFERS MCP server tools behind its `tool_search` tool — a
 	// registered server's tools (e.g. the acceptance-loop validator `submit`) are
@@ -246,8 +266,25 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 	if !isResume && strings.TrimSpace(mcpConfig) != "" {
 		prompt = codexMCPToolSearchPreamble + "\n\n---\n\n" + prompt
 	}
+	promptForBudget = prompt
+	if sp := strings.TrimSpace(systemPrompt); sp != "" && !isResume {
+		promptForBudget = joinCodexPrompt(sp, prompt)
+	}
 
-	return Invocation{Args: args, Stdin: prompt, WorkingDir: workingDir}
+	return Invocation{Args: args, Stdin: prompt, WorkingDir: workingDir, PromptForBudget: promptForBudget, Cleanup: cleanup}
+}
+
+func joinCodexPrompt(a, b string) string {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	default:
+		return a + "\n\n---\n\n" + b
+	}
 }
 
 // codexMCPToolSearchPreamble instructs a codex agent to surface deferred MCP

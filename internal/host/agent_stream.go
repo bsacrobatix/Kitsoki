@@ -123,6 +123,9 @@ func (s AgentStreamer) Run(ctx context.Context) (ClaudeRun, string, error) {
 func (s AgentStreamer) runWithRuntime(ctx context.Context, args []string) (ClaudeRun, string, error) {
 	backend := AgentBackendFromContext(ctx)
 	inv := backend.TranslateInvocation(args, s.Stdin, s.WorkingDir)
+	if inv.Cleanup != nil {
+		defer inv.Cleanup()
+	}
 	spec := s.Sandbox.launchSpec(ctx, s.Bin, inv.Args, inv.Stdin, inv.WorkingDir, s.SessionID)
 	running, policy, err := agentRuntimeRegistryFrom(ctx).Launch(ctx, spec)
 	if err != nil {

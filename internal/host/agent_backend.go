@@ -40,6 +40,13 @@ type Invocation struct {
 	// copilot also folds it into a `-C` flag (so it survives even if a caller
 	// ignores cmd.Dir) — both are honoured.
 	WorkingDir string
+	// PromptForBudget is the prompt text used for pre-dispatch quota estimates
+	// when it differs from Stdin. Codex carries base instructions through a
+	// model_instructions_file config override, so Stdin alone would undercount.
+	PromptForBudget string
+	// Cleanup removes any temporary files created during translation. Callers
+	// that execute an Invocation must defer it after translation.
+	Cleanup func()
 }
 
 // classifiedEvent is the backend-neutral distillation of one streamed JSONL

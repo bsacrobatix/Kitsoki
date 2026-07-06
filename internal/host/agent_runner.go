@@ -307,9 +307,16 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 
 	backend := AgentBackendFromContext(ctx)
 	inv := backend.TranslateInvocation(cliArgs, stdin, workingDir)
+	if inv.Cleanup != nil {
+		defer inv.Cleanup()
+	}
+	quotaPrompt := inv.Stdin
+	if inv.PromptForBudget != "" {
+		quotaPrompt = inv.PromptForBudget
+	}
 
 	if r := backend.runnerFromContext(ctx); r != nil {
-		reservation, qErr := reserveProviderQuota(ctx, backend, inv.Stdin)
+		reservation, qErr := reserveProviderQuota(ctx, backend, quotaPrompt)
 		if qErr != nil {
 			return ClaudeRun{}, "", qErr
 		}
@@ -340,7 +347,7 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 		return cr, parsedSID, nil
 	}
 
-	reservation, qErr := reserveProviderQuota(ctx, backend, inv.Stdin)
+	reservation, qErr := reserveProviderQuota(ctx, backend, quotaPrompt)
 	if qErr != nil {
 		return ClaudeRun{}, "", qErr
 	}

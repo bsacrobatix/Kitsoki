@@ -206,6 +206,9 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 		planCtx = host.WithAgentProviderEnv(planCtx, providerEnv)
 	}
 	inv := host.TranslateAgentInvocationForBackend(planCtx, backend, cliArgs, task, workingDir)
+	if inv.Cleanup != nil {
+		cleanups = append(cleanups, inv.Cleanup)
+	}
 	command := append([]string{bin}, inv.Args...)
 	return agentLaunchPlan{
 		App:         opts.AppPath,
@@ -329,6 +332,9 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		}, nil
 	}
 	inv := host.TranslateAgentInvocationForBackend(planCtx, backend, cliArgs, task, workingDir)
+	if inv.Cleanup != nil {
+		cleanups = append(cleanups, inv.Cleanup)
+	}
 	command := append([]string{bin}, inv.Args...)
 	return agentLaunchPlan{
 		AgentFile:   agentPath,

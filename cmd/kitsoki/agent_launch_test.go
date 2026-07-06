@@ -51,13 +51,17 @@ harness_profiles:
 		Task:       "implement it",
 	})
 	require.NoError(t, err)
+	for _, cleanup := range plan.cleanups {
+		t.Cleanup(cleanup)
+	}
 	require.Equal(t, "synthetic-codex", plan.Profile)
 	require.Equal(t, "codex", plan.Backend)
 	require.Equal(t, "/bin/codex-test", plan.Binary)
 	require.Equal(t, "hf:test/model", plan.Model, "profile model supersedes story-local Claude model")
 	require.Equal(t, filepath.Join(dir, "work"), plan.WorkingDir)
-	require.Contains(t, plan.Stdin, "You are the maker.")
+	require.NotContains(t, plan.Stdin, "You are the maker.")
 	require.Contains(t, plan.Stdin, "implement it")
+	require.Contains(t, readCodexModelInstructionsFile(t, plan.Command), "You are the maker.")
 	require.Equal(t, "<redacted>", plan.Env["OPENAI_API_KEY"])
 	require.Equal(t, "https://api.synthetic.new/openai/v1", plan.Env["OPENAI_BASE_URL"])
 	require.Contains(t, plan.Command, "exec")
@@ -151,8 +155,8 @@ args = ["mcp", "--stories-dir", "stories"]
 	require.NoError(t, err)
 	require.Equal(t, wantWorkingDir, plan.WorkingDir)
 	require.Contains(t, plan.Stdin, "tool_search")
-	require.Contains(t, plan.Stdin, "Use ONLY the kitsoki studio MCP.")
 	require.Contains(t, plan.Stdin, "Call studio.ping")
+	require.Contains(t, readCodexModelInstructionsFile(t, plan.Command), "Use ONLY the kitsoki studio MCP.")
 	joined := strings.Join(plan.Command, " ")
 	require.Contains(t, joined, "mcp_servers.kitsoki.command=\"kitsoki\"")
 	require.Contains(t, joined, "mcp_servers.kitsoki.args=[\"mcp\",\"--stories-dir\",\"stories\"]")
@@ -204,4 +208,22 @@ func flagValue(t *testing.T, args []string, flag string) string {
 	}
 	t.Fatalf("flag %s not found in %v", flag, args)
 	return ""
+}
+
+func readCodexModelInstructionsFile(t *testing.T, args []string) string {
+	t.Helper()
+	path := ""
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] != "-c" {
+			continue
+		}
+		if v, ok := strings.CutPrefix(args[i+1], "model_instructions_file="); ok {
+			path = strings.Trim(v, `"`)
+			break
+		}
+	}
+	require.NotEmpty(t, path, "codex command missing model_instructions_file override: %v", args)
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return string(raw)
 }

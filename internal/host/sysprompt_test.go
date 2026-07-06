@@ -2,12 +2,15 @@ package host
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"kitsoki/internal/render"
 	"kitsoki/internal/sysprompt"
 )
 
@@ -100,6 +103,29 @@ func TestComposeAgentSystemPrompt_GroundedWithoutPersona(t *testing.T) {
 	composed := composeAgentSystemPrompt(context.Background(), sysprompt.Ask, "")
 	assert.Contains(t, composed.SystemPrompt, "operating inside **kitsoki**")
 	assert.Contains(t, sysprompt.LayerNames(composed.Layers), "kitsoki")
+}
+
+func TestComposeAgentSystemPrompt_ProjectSystemPromptFile(t *testing.T) {
+	project := t.TempDir()
+	story := filepath.Join(project, "stories", "demo")
+	require.NoError(t, os.MkdirAll(filepath.Join(project, ".kitsoki"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(story, "prompts", "_shared"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(project, ".kitsoki", "system-prompt.md"), []byte(`PROJECT-KITSOKI
+{% include "@shared/system-frag.md" %}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(story, "prompts", "_shared", "system-frag.md"), []byte(`SHARED-FRAG`), 0o644))
+
+	pr, err := render.NewPromptRenderer(render.PromptPath{
+		Story:  story,
+		Shared: []string{filepath.Join(story, "prompts", "_shared")},
+	}, true)
+	require.NoError(t, err)
+
+	ctx := WithPromptRenderer(context.Background(), pr)
+	composed := composeAgentSystemPrompt(ctx, sysprompt.Ask, "PERSONA")
+	assert.Contains(t, composed.SystemPrompt, "PROJECT-KITSOKI")
+	assert.Contains(t, composed.SystemPrompt, "SHARED-FRAG")
+	assert.NotContains(t, composed.SystemPrompt, "operating inside **kitsoki**")
+	assert.Equal(t, []string{"kitsoki", "task"}, sysprompt.LayerNames(composed.Layers))
 }
 
 // TestComposeAgentSystemPrompt_StablePrefixAcrossCalls locks the
