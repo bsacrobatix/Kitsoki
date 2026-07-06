@@ -46,7 +46,7 @@ def main() -> int:
             "core-maintainer",
             "autonomous-watchdog-test",
             "bugfix",
-            7,
+            0,
             "",
             "",
             "stories/bugfix",
