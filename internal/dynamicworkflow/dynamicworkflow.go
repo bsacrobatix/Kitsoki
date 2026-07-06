@@ -570,7 +570,9 @@ func (s *Service) buildManifest(req GenerateRequest, workflowID, appPath, manife
 	fullGoal := truncateWords(goal, 80)
 	defaults := inferManifestDefaults(goal, filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(filepath.Dir(manifestPath), "traces"))))
 	var steps []manifestStep
+	researchOnly := false
 	if isResearchGoal(goal) {
+		researchOnly = true
 		steps = researchFanoutSteps(fullGoal, filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml"))))
 	} else if isCoverageFanoutGoal(goal) {
 		steps = coverageFanoutSteps(fullGoal, filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml"))))
@@ -607,6 +609,12 @@ func (s *Service) buildManifest(req GenerateRequest, workflowID, appPath, manife
 	}
 	items := make([]ManifestItem, 0, len(steps))
 	for i, step := range steps {
+		implementationStory := filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml")))
+		implementationPrompt := step.prompt
+		if researchOnly {
+			implementationStory = ""
+			implementationPrompt = ""
+		}
 		items = append(items, ManifestItem{
 			ID:                   step.id,
 			Title:                step.title,
@@ -614,8 +622,8 @@ func (s *Service) buildManifest(req GenerateRequest, workflowID, appPath, manife
 			Story:                filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml"))),
 			Mode:                 "drive",
 			Prompt:               step.prompt,
-			ImplementationStory:  filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml"))),
-			ImplementationPrompt: step.prompt,
+			ImplementationStory:  implementationStory,
+			ImplementationPrompt: implementationPrompt,
 			GateCommand:          "",
 			Verify:               step.verify,
 		})

@@ -115,6 +115,8 @@ func TestWorkflowCreateResearchGoalWritesResearchManifest(t *testing.T) {
 	}
 	require.NotContains(t, manifest, "id: go-coverage")
 	require.NotContains(t, manifest, "Add focused deterministic Go tests")
+	require.NotContains(t, manifest, "implementation_story:")
+	require.NotContains(t, manifest, "implementation_prompt:")
 	require.True(t, strings.Contains(manifest, ".context/"), "research prompts should name .context outputs")
 }
 
