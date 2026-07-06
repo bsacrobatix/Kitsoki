@@ -10496,6 +10496,73 @@ def render_scenario_qa_deck(name: str, run_id: str, items: list[dict], counts: d
     }
 
 
+def render_scenario_qa_review(name: str, run_id: str, items: list[dict], counts: dict) -> dict:
+    checks = []
+    if counts["total"] <= 0:
+        checks.append({
+            "id": "scenario-qa-legs",
+            "status": "warn",
+            "summary": "No transport legs have been recorded for this scenario-qa report.",
+        })
+        status = "not_reviewed"
+        summary = "Run has no recorded transport legs yet."
+    else:
+        checks.append({
+            "id": "scenario-qa-legs",
+            "status": "pass",
+            "summary": f"{counts['total']} transport leg(s) recorded.",
+        })
+        if counts["fail"] > 0:
+            checks.append({
+                "id": "scenario-qa-verdicts",
+                "status": "fail",
+                "summary": f"{counts['fail']} transport leg(s) failed.",
+            })
+        elif counts["degraded"] > 0:
+            checks.append({
+                "id": "scenario-qa-verdicts",
+                "status": "warn",
+                "summary": f"{counts['degraded']} transport leg(s) reported degraded evidence.",
+            })
+        else:
+            checks.append({
+                "id": "scenario-qa-verdicts",
+                "status": "pass",
+                "summary": "Every recorded transport leg passed.",
+            })
+        status = "ready" if counts["fail"] == 0 and counts["degraded"] == 0 else "needs_evidence"
+        summary = scenario_qa_report_summary(name, counts)
+
+    natural_prompt_count = sum(int(item.get("natural_utterance_count", 0) or 0) for item in items)
+    if natural_prompt_count > 0:
+        checks.append({
+            "id": "scenario-qa-natural-prompts",
+            "status": "pass",
+            "summary": f"{natural_prompt_count} transcript-derived prompt(s) preserved across recorded legs.",
+        })
+    elif counts["total"] > 0:
+        checks.append({
+            "id": "scenario-qa-natural-prompts",
+            "status": "warn",
+            "summary": "Recorded legs did not carry transcript-derived natural prompt metadata.",
+        })
+
+    return {
+        "run_id": run_id,
+        "scenario": name,
+        "status": status,
+        "summary": summary,
+        "summary_counts": {
+            "total": counts["total"],
+            "pass": counts["pass"],
+            "fail": counts["fail"],
+            "degraded": counts["degraded"],
+            "natural_prompts": natural_prompt_count,
+        },
+        "checks": checks,
+    }
+
+
 def build_driver_replay_smoke(
     catalog: dict,
     github_targets: dict,
@@ -12098,12 +12165,17 @@ def main() -> None:
             raise SystemExit(f"scenario-qa deck validation failed: {validation_issue_summary(deck_issues)}")
         deck_path = run_dir / "deck.slidey.json"
         write_json(deck_path, deck)
+        review = render_scenario_qa_review(name, run_dir.name, items, counts)
+        review_path = run_dir / "review.json"
+        write_json(review_path, review)
         summary = scenario_qa_report_summary(name, counts)
         if args.json_output:
             print(json.dumps({
                 "status": "scenario_qa_deck_built",
                 "run_dir": str(run_dir),
                 "deck_path": str(deck_path),
+                "review_path": str(review_path),
+                "review_status": review["status"],
                 "leg_count": counts["total"],
                 "pass_count": counts["pass"],
                 "fail_count": counts["fail"],
