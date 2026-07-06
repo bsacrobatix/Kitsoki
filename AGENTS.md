@@ -79,6 +79,8 @@ use the `.context` folder for transient markdown files like proposals, summaries
 
 Automated testing should never use a real LLM or incur costs - mock agents via cassettes should be used in all cases.  Tests which require real LLM must be gated and only done when specifically requested and required - never automatically or without checking first.
 
+Use hermetic capsules for reusable repository/workspace fixtures. Prefer `capsules/<name>/capsule.yaml` plus `internal/capsuletest.Open(t, "<name>")` over ad hoc `git init` setup in tests, story fixtures, and agent validation. Only keep bespoke temp repos when the behavior under test is the repository creation/bootstrap process itself or the exact git command sequence. When adding or migrating these fixtures, use the `.agents/skills/capsules/SKILL.md` project skill.
+
 use dependency injection patterns wherever relevant.
 
 principle of least surprise.

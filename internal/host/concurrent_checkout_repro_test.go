@@ -38,6 +38,7 @@ import (
 	"strings"
 	"testing"
 
+	"kitsoki/internal/capsuletest"
 	"kitsoki/internal/host"
 )
 
@@ -58,18 +59,7 @@ func reproGit(t *testing.T, dir string, args ...string) string {
 // session's live tree), so the first session's uncommitted WIP is never at
 // risk — while legitimate same-session re-entry still short-circuits to ok.
 func TestRepro_ConcurrentSessionsShareCheckout_DestroysWIP(t *testing.T) {
-	repo := t.TempDir()
-
-	// A real main checkout with one committed, tracked file.
-	reproGit(t, repo, "init", "--quiet", "--initial-branch=main")
-	reproGit(t, repo, "config", "user.email", "repro@test.invalid")
-	reproGit(t, repo, "config", "user.name", "Repro")
-	appYAML := filepath.Join(repo, "app.yaml")
-	if err := os.WriteFile(appYAML, []byte("version: v1\n"), 0o644); err != nil {
-		t.Fatalf("seed app.yaml: %v", err)
-	}
-	reproGit(t, repo, "add", "-A")
-	reproGit(t, repo, "commit", "--quiet", "-m", "init")
+	repo := capsuletest.Open(t, "worktree-repro-repo")
 
 	ctx := context.Background()
 	ticket := "2026-06-03T121409Z-demo"

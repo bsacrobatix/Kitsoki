@@ -98,7 +98,9 @@ repo := capsuletest.Open(t, "clean-repo")
 
 The helper returns a real git checkout and removes it during test cleanup. Use it
 instead of bespoke `git init` fixtures when the desired state belongs in the
-shared capsule library.
+shared capsule library. New reusable git/workspace test fixtures should be
+capsules by default; keep bespoke temp repos only when the test is specifically
+asserting repository creation/bootstrap behavior or exact git command ordering.
 
 ## Manifest
 

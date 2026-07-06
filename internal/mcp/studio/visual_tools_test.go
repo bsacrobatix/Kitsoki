@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"kitsoki/internal/capsuletest"
 	studio "kitsoki/internal/mcp/studio"
 )
 
@@ -417,19 +418,10 @@ func TestVisualDiff_ComparesRetainedSnapshots(t *testing.T) {
 
 func TestVisualGitDiff_CapturesTwoRevisionsAndDiffsScreenshots(t *testing.T) {
 	ctx := context.Background()
-	repo := t.TempDir()
+	repo := capsuletest.Open(t, "visual-story-two-revisions")
 	storyRel := filepath.Join("stories", "demo", "app.yaml")
 	storyPath := filepath.Join(repo, storyRel)
-	require.NoError(t, os.MkdirAll(filepath.Dir(storyPath), 0o755))
-	gitRun(t, repo, "init")
-	gitRun(t, repo, "config", "user.email", "test@example.com")
-	gitRun(t, repo, "config", "user.name", "Test User")
-	require.NoError(t, os.WriteFile(storyPath, []byte("scene: one\n"), 0o644))
-	gitRun(t, repo, "add", ".")
-	gitRun(t, repo, "commit", "-m", "one")
-	from := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
-	require.NoError(t, os.WriteFile(storyPath, []byte("scene: two\n"), 0o644))
-	gitRun(t, repo, "commit", "-am", "two")
+	from := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD~1"))
 	to := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
 
 	srv, _ := newReplayServer(t)
