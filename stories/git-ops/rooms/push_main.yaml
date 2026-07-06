@@ -24,10 +24,10 @@ states:
       - when: "world.push_result.outcome == 'pushed'"
         kv:
           pairs:
-            Ahead: '{{ world.push_result.ahead|stringformat:"%v" }} commits published'
+            Ahead: '{{ world.push_result.ahead|default:0|integer }} commits published'
       - heading: "⚠️ Remote has new work"
         when: "world.push_result.outcome == 'remote_ahead'"
-      - prose: "{{ world.push_remote }}/{{ world.push_remote_branch }} has {{ world.push_result.behind|stringformat:'%v' }} commits not present locally. Run sync_main remote={{ world.push_remote }} first."
+      - prose: "{{ world.push_remote }}/{{ world.push_remote_branch }} has {{ world.push_result.behind|default:0|integer }} commits not present locally. Run sync_main remote={{ world.push_remote }} first."
         when: "world.push_result.outcome == 'remote_ahead'"
       - heading: "❌ Push failed"
         when: "world.push_result.outcome == 'error'"

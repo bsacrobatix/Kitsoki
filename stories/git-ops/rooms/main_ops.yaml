@@ -12,15 +12,16 @@ states:
     # the prompt, no re-render). See docs/architecture/room-workbench.md
     # §"The conversational lane".
     agent_off_ramp: { agent: git_assistant, capture_free_text: true }
-    relevant_world: [current_branch, integration_branch, has_uncommitted, commits_behind,
+    relevant_world: [current_branch, integration_branch, has_uncommitted, commits_ahead, commits_behind,
                      worktree_list, on_integration, no_common_ancestor, merge_in_progress]
     view:
       - kv:
           pairs:
-            Status:      '{% if world.last_op_ok == false %}❌ last operation failed{% elif world.merge_in_progress %}⚠️ merge/rebase in progress{% elif world.no_common_ancestor %}⚠️ no common ancestor{% elif world.has_uncommitted %}⚠️ uncommitted changes{% elif world.commits_behind > 0 %}⚠️ behind upstream{% else %}✅ ready{% endif %}'
+            Status:      '{% if world.last_op_ok == false %}❌ last operation failed{% elif world.merge_in_progress %}⚠️ merge/rebase in progress{% elif world.no_common_ancestor %}⚠️ no common ancestor{% elif world.has_uncommitted %}⚠️ uncommitted changes{% elif world.commits_ahead > 0 and world.commits_behind > 0 %}⚔️ diverged from upstream{% elif world.commits_behind > 0 %}⚠️ behind upstream{% elif world.commits_ahead > 0 %}⚠️ ahead of upstream{% else %}✅ ready{% endif %}'
             Branch:      '{{ world.current_branch|default:"(detecting…)" }}'
             Uncommitted: '{% if world.has_uncommitted %}⚠️ yes{% else %}✅ clean{% endif %}'
-            Behind:      '{% if world.commits_behind > 0 %}⚠️ {% else %}✅ {% endif %}{{ world.commits_behind }} commits behind upstream'
+            Ahead:       '{% if world.commits_ahead > 0 and world.commits_behind > 0 %}⚔️ {% elif world.commits_ahead > 0 %}⚠️ {% else %}✅ {% endif %}{{ world.commits_ahead|integer }} commits ahead upstream'
+            Behind:      '{% if world.commits_ahead > 0 and world.commits_behind > 0 %}⚔️ {% elif world.commits_behind > 0 %}⚠️ {% else %}✅ {% endif %}{{ world.commits_behind|integer }} commits behind upstream'
             Worktrees:   '{{ world.worktree_list.raw|default:"(none)" }}'
       - prose: "❌ Last operation failed: {{ world.last_op_output|default:'(no output)' }}"
         when: "world.last_op_ok == false"
@@ -98,8 +99,16 @@ states:
               git update-index -q --refresh 2>/dev/null || true
               BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
               INTEGRATION="{{ world.integration_branch }}"
-              AHEAD=$(git rev-list --count "${INTEGRATION}..HEAD" 2>/dev/null || echo 0)
-              BEHIND=$(git rev-list --count "HEAD..${INTEGRATION}" 2>/dev/null || echo 0)
+              UPSTREAM=$(git rev-parse --abbrev-ref "${INTEGRATION}@{u}" 2>/dev/null || git rev-parse --abbrev-ref "@{u}" 2>/dev/null || echo "")
+              if [ -n "$UPSTREAM" ] && git rev-parse --verify --quiet "$UPSTREAM" >/dev/null; then
+                AHEAD=$(git rev-list --count "${UPSTREAM}..${INTEGRATION}" 2>/dev/null || echo 0)
+                BEHIND=$(git rev-list --count "${INTEGRATION}..${UPSTREAM}" 2>/dev/null || echo 0)
+                HAS_TRACKING=true
+              else
+                AHEAD=$(git rev-list --count "${INTEGRATION}..HEAD" 2>/dev/null || echo 0)
+                BEHIND=$(git rev-list --count "HEAD..${INTEGRATION}" 2>/dev/null || echo 0)
+                HAS_TRACKING=false
+              fi
               UNCOMMITTED=$(git status --porcelain 2>/dev/null | grep -c . || true)
               if [ "$UNCOMMITTED" -gt 0 ]; then HAS_UNCOMMITTED=true; else HAS_UNCOMMITTED=false; fi
               MAIN_WT=$(git worktree list --porcelain 2>/dev/null \
@@ -115,8 +124,6 @@ states:
               fi
               NO_COMMON=false
               if ! git merge-base HEAD "$INTEGRATION" >/dev/null 2>&1; then NO_COMMON=true; fi
-              UPSTREAM=$(git rev-parse --abbrev-ref "@{u}" 2>/dev/null || echo "")
-              if [ -n "$UPSTREAM" ]; then HAS_TRACKING=true; else HAS_TRACKING=false; fi
               jq -n \
                 --arg branch "$BRANCH" \
                 --arg main_wt "$MAIN_WT" \
