@@ -188,14 +188,14 @@ func TestGitHubFileFindings_FilesCredibleIssues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GitHubFileFindings: %v", err)
 	}
-	if res.Filed != 2 || res.Skipped != 0 || res.Failed != 0 {
-		t.Fatalf("counts filed/skipped/failed = %d/%d/%d, want 2/0/0", res.Filed, res.Skipped, res.Failed)
+	if res.Filed != 2 || res.Skipped != 0 || res.Failed != 0 || res.Excluded != 3 {
+		t.Fatalf("counts filed/skipped/failed/excluded = %d/%d/%d/%d, want 2/0/0/3", res.Filed, res.Skipped, res.Failed, res.Excluded)
 	}
 	if res.Related != 0 {
 		t.Fatalf("related = %d, want 0", res.Related)
 	}
-	if len(res.Outcomes) != 2 {
-		t.Fatalf("outcomes = %d, want 2 (seeded + strength + blocked findings excluded)", len(res.Outcomes))
+	if len(res.Outcomes) != 5 {
+		t.Fatalf("outcomes = %d, want 5", len(res.Outcomes))
 	}
 
 	if len(issueBodies) != 2 {
@@ -240,7 +240,24 @@ func TestGitHubFileFindings_FilesCredibleIssues(t *testing.T) {
 			t.Errorf("finding-4 issue body missing %q", want)
 		}
 	}
-	// finding-5 is a blocked capture-gap finding: it must never be filed.
+	excluded := map[string]string{}
+	for _, out := range res.Outcomes {
+		if out.Status != "excluded" {
+			continue
+		}
+		excluded[out.FindingID] = out.Reason
+	}
+	if got := excluded["finding-2"]; got != "seeded" {
+		t.Errorf("finding-2 excluded reason = %q, want seeded", got)
+	}
+	if got := excluded["finding-3"]; got != "non_issue" {
+		t.Errorf("finding-3 excluded reason = %q, want non_issue", got)
+	}
+	if got := excluded["finding-5"]; got != "blocked" {
+		t.Errorf("finding-5 excluded reason = %q, want blocked", got)
+	}
+
+	// Finding-5 is a blocked capture-gap finding: it must never be filed.
 	for _, c := range issueBodies {
 		if strings.Contains(c, "onboarding blocked on missing cassette") {
 			t.Error("blocked finding must not be filed as a GitHub issue")
@@ -279,7 +296,7 @@ func TestGitHubFileFindings_FilesCredibleIssues(t *testing.T) {
 		t.Error("seeded finding must not be filed")
 	}
 	filing := f["filing"].(map[string]any)
-	if filing["requested"] != true || filing["ticket_repo"] != "o/r" || filing["filed"] != float64(2) {
+	if filing["requested"] != true || filing["ticket_repo"] != "o/r" || filing["filed"] != float64(2) || filing["excluded"] != float64(3) {
 		t.Errorf("filing block = %v", filing)
 	}
 }
@@ -604,8 +621,8 @@ func TestGitHubFileFindings_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Filed != 0 || res.Skipped != 2 {
-		t.Fatalf("second run filed/skipped = %d/%d, want 0/2", res.Filed, res.Skipped)
+	if res.Filed != 0 || res.Skipped != 2 || res.Excluded != 3 {
+		t.Fatalf("second run filed/skipped/excluded = %d/%d/%d, want 0/2/3", res.Filed, res.Skipped, res.Excluded)
 	}
 	secondIssueCreates := len(issueBodies)
 	if secondIssueCreates != firstIssueCreates {
@@ -613,7 +630,7 @@ func TestGitHubFileFindings_Idempotent(t *testing.T) {
 	}
 	// Skipped outcomes still carry the existing URL so callers can report it.
 	for _, out := range res.Outcomes {
-		if out.IssueURL == "" {
+		if out.Status == "skipped" && out.IssueURL == "" {
 			t.Errorf("skipped outcome %s missing issue url", out.FindingID)
 		}
 	}
@@ -639,10 +656,13 @@ func TestGitHubFileFindings_DryRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GitHubFileFindings dry-run: %v", err)
 	}
-	if res.Status != "findings_dry_run" || len(res.Outcomes) != 2 {
+	if res.Status != "findings_dry_run" || len(res.Outcomes) != 5 {
 		t.Fatalf("dry-run result: status=%q outcomes=%d", res.Status, len(res.Outcomes))
 	}
 	for _, out := range res.Outcomes {
+		if out.Status == "excluded" {
+			continue
+		}
 		if out.Status != "dry-run" || out.Body == "" {
 			t.Errorf("outcome %s: status=%q body-empty=%v", out.FindingID, out.Status, out.Body == "")
 		}
@@ -674,8 +694,8 @@ func TestGitHubFileFindings_PerFindingFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walk must complete despite one failure: %v", err)
 	}
-	if res.Filed != 1 || res.Failed != 1 {
-		t.Fatalf("filed/failed = %d/%d, want 1/1", res.Filed, res.Failed)
+	if res.Filed != 1 || res.Failed != 1 || res.Excluded != 3 {
+		t.Fatalf("filed/failed/excluded = %d/%d/%d, want 1/1/3", res.Filed, res.Failed, res.Excluded)
 	}
 	var f map[string]any
 	data, _ := os.ReadFile(filepath.Join(dir, "findings.json"))

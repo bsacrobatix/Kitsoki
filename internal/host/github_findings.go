@@ -51,11 +51,12 @@ type FindingFilingOutcome struct {
 	FindingID   string   `json:"finding_id"`
 	Title       string   `json:"title"`
 	Scenario    string   `json:"scenario,omitempty"`
-	Status      string   `json:"status"` // filed | skipped | failed | dry-run
+	Status      string   `json:"status"` // filed | skipped | failed | dry-run | excluded
 	IssueURL    string   `json:"issue_url,omitempty"`
 	IssueNumber string   `json:"issue_number,omitempty"`
 	CommentURL  string   `json:"comment_url,omitempty"`
 	Error       string   `json:"error,omitempty"`
+	Reason      string   `json:"reason,omitempty"`
 	Evidence    []string `json:"evidence,omitempty"`
 	Body        string   `json:"body,omitempty"` // rendered body (dry-run only)
 }
@@ -72,6 +73,7 @@ type FindingsFilingResult struct {
 	Related  int                    `json:"related"`
 	Skipped  int                    `json:"skipped"`
 	Failed   int                    `json:"failed"`
+	Excluded int                    `json:"excluded"`
 	Outcomes []FindingFilingOutcome `json:"outcomes"`
 }
 
@@ -121,6 +123,14 @@ func GitHubFileFindings(ctx context.Context, in FindingsFilingInput) (FindingsFi
 			continue
 		}
 		if !credibleIssueFinding(item) {
+			res.Excluded++
+			res.Outcomes = append(res.Outcomes, FindingFilingOutcome{
+				FindingID: str(item["id"]),
+				Title:     str(item["title"]),
+				Scenario:  str(item["scenario"]),
+				Status:    "excluded",
+				Reason:    findingExclusionReason(item),
+			})
 			continue
 		}
 		out := FindingFilingOutcome{
@@ -236,6 +246,7 @@ func GitHubFileFindings(ctx context.Context, in FindingsFilingInput) (FindingsFi
 			"related":     res.Related,
 			"skipped":     res.Skipped,
 			"failed":      res.Failed,
+			"excluded":    res.Excluded,
 		}
 		if err := writeJSONMap(findingsPath, findings); err != nil {
 			return res, fmt.Errorf("file findings: record results: %w", err)
@@ -552,6 +563,19 @@ func credibleIssueFinding(item map[string]any) bool {
 	}
 	origin := str(item["origin"])
 	return origin == "" || origin != "seeded"
+}
+
+func findingExclusionReason(item map[string]any) string {
+	if str(item["kind"]) != "issue" {
+		return "non_issue"
+	}
+	if str(item["status"]) == "blocked" {
+		return "blocked"
+	}
+	if strings.TrimSpace(str(item["origin"])) == "seeded" {
+		return "seeded"
+	}
+	return "ineligible"
 }
 
 // filedIssueURL returns the already-filed issue URL recorded on the finding
