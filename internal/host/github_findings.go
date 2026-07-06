@@ -415,14 +415,81 @@ func anySlice(value any) []any {
 }
 
 func strongRelatedTitle(left, right string) bool {
-	leftNorm := normalizeFindingTitle(left)
-	rightNorm := normalizeFindingTitle(right)
-	if leftNorm == "" || rightNorm == "" {
-		return false
+	for _, leftNorm := range normalizedFindingTitleCandidates(left) {
+		for _, rightNorm := range normalizedFindingTitleCandidates(right) {
+			if leftNorm == "" || rightNorm == "" {
+				continue
+			}
+			if leftNorm == rightNorm ||
+				strings.HasSuffix(leftNorm, rightNorm) ||
+				strings.HasSuffix(rightNorm, leftNorm) ||
+				findingTitleSimilarity(leftNorm, rightNorm) >= 0.82 {
+				return true
+			}
+		}
 	}
-	return leftNorm == rightNorm ||
-		strings.HasSuffix(leftNorm, rightNorm) ||
-		strings.HasSuffix(rightNorm, leftNorm)
+	return false
+}
+
+func normalizedFindingTitleCandidates(value string) []string {
+	candidates := []string{normalizeFindingTitle(value)}
+	if _, after, found := strings.Cut(value, ":"); found {
+		candidates = append(candidates, normalizeFindingTitle(after))
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func findingTitleSimilarity(left, right string) float64 {
+	if len([]rune(left)) < 12 || len([]rune(right)) < 12 {
+		return 0
+	}
+	leftGrams := findingTitleBigrams(left)
+	rightGrams := findingTitleBigrams(right)
+	if len(leftGrams) == 0 || len(rightGrams) == 0 {
+		return 0
+	}
+	overlap := 0
+	for gram, leftCount := range leftGrams {
+		if rightCount := rightGrams[gram]; rightCount > 0 {
+			if leftCount < rightCount {
+				overlap += leftCount
+			} else {
+				overlap += rightCount
+			}
+		}
+	}
+	total := 0
+	for _, count := range leftGrams {
+		total += count
+	}
+	for _, count := range rightGrams {
+		total += count
+	}
+	if total == 0 {
+		return 0
+	}
+	return float64(2*overlap) / float64(total)
+}
+
+func findingTitleBigrams(value string) map[string]int {
+	runes := []rune(value)
+	if len(runes) < 2 {
+		return nil
+	}
+	grams := make(map[string]int, len(runes)-1)
+	for i := 0; i < len(runes)-1; i++ {
+		grams[string(runes[i:i+2])]++
+	}
+	return grams
 }
 
 func normalizeFindingTitle(value string) string {
