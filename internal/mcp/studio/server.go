@@ -83,8 +83,8 @@ type Server struct {
 	readOnly bool
 	// issueFiler is the injectable issue.create seam: it files a composed
 	// {repo, title, body, labels} GitHub issue. Nil → issue.create returns
-	// ErrIssueUnavailable. Production (cmd/kitsoki) shells to gh; a test injects
-	// a fake. See WithIssueFiler.
+	// ErrIssueUnavailable. Production (cmd/kitsoki) routes through Kitsoki's
+	// native GitHub issue filing; tests inject fakes. See WithIssueFiler.
 	issueFiler IssueFiler
 	// artifactsDir is where issue.create writes rendered assets. Empty →
 	// defaultIssueArtifactsDir. See WithArtifactsDir.

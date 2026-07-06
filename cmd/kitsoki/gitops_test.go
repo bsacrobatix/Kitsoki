@@ -274,6 +274,122 @@ func TestGitopsIssueTransitionUsesNativeTicketProvider(t *testing.T) {
 	}
 }
 
+func TestGitopsIssueCloseCommentsAndClosesThroughNativeTicketProvider(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	var requests []string
+	var commentBody string
+	var state string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/o/r/issues/105/comments":
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode comment payload: %v", err)
+			}
+			commentBody, _ = payload["body"].(string)
+			writeJSON(w, map[string]any{
+				"id":       9001,
+				"html_url": "https://github.com/o/r/issues/105#issuecomment-9001",
+			})
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/o/r/issues/105":
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode close payload: %v", err)
+			}
+			state, _ = payload["state"].(string)
+			writeJSON(w, map[string]any{"state": state})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("gitops issue-close must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
+
+	cmd := gitopsCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{
+		"issue-close",
+		"--repo", "o/r",
+		"--id", "105",
+		"--comment-body", "kitsoki-fixed-in: b19e3242\n\nVerification: autonomous marathon gates passed.",
+		"--json",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("issue-close: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out.String())
+	}
+	if got["status"] != "issue_closed" || got["issue_state"] != "closed" || state != "closed" {
+		t.Fatalf("close output = %+v, state=%q", got, state)
+	}
+	if got["comment_url"] != "https://github.com/o/r/issues/105#issuecomment-9001" {
+		t.Fatalf("comment url = %+v", got)
+	}
+	if !strings.Contains(commentBody, "kitsoki-fixed-in: b19e3242") {
+		t.Fatalf("comment body = %q", commentBody)
+	}
+	wantRequests := []string{
+		"POST /repos/o/r/issues/105/comments",
+		"PATCH /repos/o/r/issues/105",
+	}
+	if strings.Join(requests, "\n") != strings.Join(wantRequests, "\n") {
+		t.Fatalf("requests:\n%s", strings.Join(requests, "\n"))
+	}
+}
+
+func TestGitopsIssueCloseWithoutCommentUsesNativeTicketProvider(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method != http.MethodPatch || r.URL.Path != "/repos/o/r/issues/105" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		writeJSON(w, map[string]any{"state": "closed"})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("gitops issue-close must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
+
+	cmd := gitopsCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"issue-close", "--repo", "o/r", "--id", "105", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("issue-close: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out.String())
+	}
+	if got["status"] != "issue_closed" || got["issue_state"] != "closed" {
+		t.Fatalf("close output = %+v", got)
+	}
+	if _, ok := got["comment_url"]; ok {
+		t.Fatalf("comment_url should be absent without --comment-body: %+v", got)
+	}
+	if strings.Join(requests, "\n") != "PATCH /repos/o/r/issues/105" {
+		t.Fatalf("requests:\n%s", strings.Join(requests, "\n"))
+	}
+}
+
 func TestGitopsIssueStateCacheUsesNativeTicketProvider(t *testing.T) {
 	t.Setenv("GH_TOKEN", "test-token")
 	root := t.TempDir()

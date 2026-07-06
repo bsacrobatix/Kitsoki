@@ -30,8 +30,8 @@ def main():
         prompt = root / "autonomous-driver.md"
         good.write_text(
             "Never file findings with raw `gh issue create`; use kitsoki gitops autonomous-fix.\n"
-            "Do not run `gh issue comment` or `gh issue close`; use kitsoki gitops issue-comment "
-            "and kitsoki gitops issue-transition.\n",
+            "Do not run `gh issue comment` or `gh issue close`; use kitsoki gitops issue-close "
+            "for close-out comments plus closure.\n",
             encoding="utf-8",
         )
         bad_create = root / "bad-create.md"
@@ -44,7 +44,7 @@ def main():
         bad_intent.write_text("Use issue_comment and issue_transition directly from the driver.\n", encoding="utf-8")
         readme.write_text(
             "Use kitsoki gitops autonomous-fix for issue-to-fix gates, or kitsoki gitops "
-            "issue-comment / issue-transition for explicit native ticket mutations.\n",
+            "issue-comment / issue-close / issue-transition for explicit native ticket mutations.\n",
             encoding="utf-8",
         )
         story_readme.write_text("Use the product-journey story autonomous_fix gate.\n", encoding="utf-8")

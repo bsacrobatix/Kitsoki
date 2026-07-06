@@ -63,7 +63,10 @@ The CLI mirrors that native surface for automation and debugging:
 `kitsoki gitops issue-status --repo owner/repo --id N --json` and
 `kitsoki gitops issue-create --repo owner/repo --title ... --body ... --json`,
 plus `kitsoki gitops issue-comment --repo owner/repo --id N --body ... --json`
-and `kitsoki gitops issue-transition --repo owner/repo --id N --to resolved --json`.
+and `kitsoki gitops issue-close --repo owner/repo --id N --comment-body ... --json`
+for close-out comments plus closure. `kitsoki gitops issue-transition --repo
+owner/repo --id N --to resolved --json` remains available for lower-level state
+transitions when a story needs only the state change.
 Product-journey stats refreshes use
 `kitsoki gitops issue-state-cache --findings-root .artifacts/product-journey --repo owner/repo --output .artifacts/product-journey/stats/issue-state.json --json`
 to scan filed findings and build the issue-state cache through the same native
