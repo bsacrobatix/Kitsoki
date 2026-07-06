@@ -127,11 +127,15 @@ func (srv *Server) handleWorkflowLaunch(
 		return buildToolError(ErrBadRequest, err.Error()), nil, nil
 	}
 	if srv.sess != nil {
+		initialWorld, werr := dynamicworkflow.LaunchInitialWorld(svc.RootDir, receipt.LaunchBasisPath)
+		if werr != nil {
+			return buildToolError(ErrBadRequest, "workflow.launch: "+werr.Error()), nil, nil
+		}
 		handle, herr := srv.sess.OpenDrivingSession(ctx, OpenDrivingSessionParams{
 			Mode:           HarnessReplay,
 			StoryPath:      filepath.Join(receipt.AppPath, "app.yaml"),
 			TracePath:      receipt.TracePath,
-			InitialWorld:   map[string]any{"manifest_path": dynamicworkflow.RuntimePath(svc.RootDir, receipt.ManifestPath)},
+			InitialWorld:   initialWorld,
 			ImportResolver: srv.importResolver,
 		})
 		if herr != nil {
