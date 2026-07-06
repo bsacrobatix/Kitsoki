@@ -352,6 +352,25 @@ def main():
                any(i["id"] == "gh-agent-fixes" and i["severity"] == "error"
                    for i in validated["issues"]))
 
+        no_debug_proc = subprocess.run(
+            [
+                sys.executable, "tools/product-journey/run.py",
+                "--file-findings",
+                "--json-output",
+                "--run-dir", str(run_dir),
+                "--ticket-repo", "o/r",
+                "--filing-mode", "file",
+            ],
+            cwd=run.ROOT,
+            env=os.environ.copy(),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        _check("direct real file_findings requires debug opt-in",
+               no_debug_proc.returncode != 0
+               and "--debug-file" in (no_debug_proc.stderr + no_debug_proc.stdout))
+
         # 2. Filing: URLs + filing block recorded, derived artifacts refreshed.
         gh_agent_db = tmp / "gh-agent-jobs.json"
         result = run.file_findings(run_dir, "o/r", False, None, str(gh_agent_db), "stories/bugfix", True, "https://agent.example", "", "")

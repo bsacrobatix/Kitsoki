@@ -11439,6 +11439,7 @@ def main() -> None:
     parser.add_argument("--gh-agent-asset-dir", default="", help="Root directory for gh-agent drain artifacts; defaults to <run-dir>/gh-agent-assets")
     parser.add_argument("--gh-agent-comment-mode", default="none", choices=["none", "github"], help="Comment mode for gh-agent drain; none keeps deterministic gates offline")
     parser.add_argument("--dry-run", action="store_true", help="With --file-findings, render what would be filed without calling GitHub")
+    parser.add_argument("--debug-file", action="store_true", help="Allow real --file-findings filing as an isolated diagnostic; the full issue-to-fix path is autonomous-fix")
     parser.add_argument(
         "--filing-mode",
         default="file",
@@ -12065,6 +12066,11 @@ def main() -> None:
         publish_deck = DEFAULT_DECK if args.publish_deck else None
         run_dir = run_dir_from_arg(args.run_dir)
         dry_run = args.dry_run or args.filing_mode == "dry-run"
+        if not dry_run and not args.debug_file:
+            raise SystemExit(
+                "Real product-journey filing is routed through autonomous-fix; "
+                "--file-findings --filing-mode file requires --debug-file for isolated diagnostics"
+            )
         result = file_findings(
             run_dir,
             args.ticket_repo,

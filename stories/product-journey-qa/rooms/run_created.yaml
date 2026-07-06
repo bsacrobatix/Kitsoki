@@ -579,6 +579,7 @@ states:
                   - "{{ slots.ticket_repo }}"
                   - --filing-mode
                   - "{{ slots.mode ?? 'dry-run' }}"
+                  - --debug-file
                   - --gh-agent-db
                   - "{{ slots.gh_agent_db ?? (world.run_dir + '/gh-agent-jobs.sqlite') }}"
                   - --gh-agent-story
