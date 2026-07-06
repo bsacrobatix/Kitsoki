@@ -15,6 +15,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+try:
+    import yaml  # type: ignore
+except ModuleNotFoundError:
+    yaml = None
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -141,6 +146,14 @@ def corpus_action(
             f"Provide a paired-task arena spec for {corpus} with kitsoki-glm-5.2 and raw-prompt-glm-5.2 variants."
         )
         return action
+    audit = audit_spec(spec, tasks=tasks, treatments=treatments)
+    action["spec_audit"] = audit
+    if not audit["ok"]:
+        action["status"] = "needs-spec-fix"
+        action["spec"] = spec
+        action["prerequisites"].extend(audit["problems"])
+        action["commands"].append(f"python3 tools/arena/arena.py plan --spec {spec}")
+        return action
     action["status"] = "ready"
     action["spec"] = spec
     action["commands"].extend([
@@ -149,6 +162,72 @@ def corpus_action(
         f"ARENA_PAIRED_TASK_ENABLE_CODEX=1 python3 tools/arena/arena.py run --spec {spec} --out {out_dir} --live",
     ])
     return action
+
+
+def audit_spec(spec: str, *, tasks: list[str], treatments: list[str]) -> dict[str, Any]:
+    problems: list[str] = []
+    if yaml is None:
+        return {
+            "ok": False,
+            "problems": ["Cannot inspect supplied spec because PyYAML is not installed."],
+        }
+    path = Path(spec)
+    if not path.exists():
+        return {
+            "ok": False,
+            "problems": [f"Supplied spec does not exist: {spec}"],
+        }
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001 - report parse failure in the packet.
+        return {
+            "ok": False,
+            "problems": [f"Cannot parse supplied spec {spec}: {exc}"],
+        }
+    if not isinstance(data, dict):
+        return {"ok": False, "problems": [f"Supplied spec is not a mapping: {spec}"]}
+    if data.get("job_type") != "paired-task":
+        problems.append(f"Spec job_type must be paired-task, got {data.get('job_type')!r}.")
+    spec_tasks = {str(task) for task in (data.get("axes") or {}).get("task", [])}
+    missing_tasks = sorted(set(tasks) - spec_tasks)
+    if missing_tasks:
+        problems.append(f"Spec is missing pending task(s): {', '.join(missing_tasks)}.")
+    variants = [variant for variant in data.get("variants", []) if isinstance(variant, dict)]
+    variants_by_treatment: dict[str, list[dict[str, Any]]] = {}
+    for variant in variants:
+        treatment = normalize_treatment(str(variant.get("treatment") or variant.get("id") or ""))
+        variants_by_treatment.setdefault(treatment, []).append(variant)
+    for treatment in treatments:
+        matching = variants_by_treatment.get(treatment, [])
+        if not matching:
+            problems.append(f"Spec has no variant for treatment {treatment!r}.")
+            continue
+        if not any(is_glm_variant(variant) for variant in matching):
+            ids = ", ".join(str(variant.get("id") or "<unnamed>") for variant in matching)
+            problems.append(f"Spec treatment {treatment!r} is not GLM-5.2 labeled (variant(s): {ids}).")
+    return {
+        "ok": not problems,
+        "problems": problems,
+        "tasks": sorted(spec_tasks),
+        "variants": [str(variant.get("id") or "") for variant in variants],
+    }
+
+
+def normalize_treatment(value: str) -> str:
+    lowered = value.strip().lower()
+    if lowered.startswith("kitsoki"):
+        return "kitsoki"
+    if lowered.startswith("single") or lowered.startswith("raw-prompt") or lowered in {"raw", "raw-prompt"}:
+        return "raw-prompt"
+    return lowered
+
+
+def is_glm_variant(variant: dict[str, Any]) -> bool:
+    haystack = " ".join(
+        str(variant.get(key) or "")
+        for key in ("id", "candidate", "model", "profile")
+    ).lower()
+    return "glm-5.2" in haystack or "glm52" in haystack
 
 
 def render_markdown(packet: dict[str, Any]) -> str:
