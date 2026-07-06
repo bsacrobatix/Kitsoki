@@ -414,17 +414,18 @@ func gitopsIssueCloseResult(data, commentData map[string]any, issueID string) ma
 
 func gitopsAutonomousFixCmd() *cobra.Command {
 	var (
-		runDir        string
-		ticketRepo    string
-		agentDB       string
-		agentStory    string
-		publicBaseURL string
-		projectRoot   string
-		incidentRepo  string
-		assetDir      string
-		commentMode   string
-		reportInvalid bool
-		jsonOut       bool
+		runDir           string
+		ticketRepo       string
+		agentDB          string
+		agentStory       string
+		publicBaseURL    string
+		projectRoot      string
+		incidentRepo     string
+		assetDir         string
+		commentMode      string
+		reportInvalid    bool
+		allowTestBackend bool
+		jsonOut          bool
 	)
 	cmd := &cobra.Command{
 		Use:   "autonomous-fix",
@@ -440,15 +441,16 @@ func gitopsAutonomousFixCmd() *cobra.Command {
 				return fmt.Errorf("gitops autonomous-fix: --agent-db is required")
 			}
 			result, err := runGitopsAutonomousFix(cmd.Context(), gitopsAutonomousFixOptions{
-				RunDir:        runDir,
-				TicketRepo:    ticketRepo,
-				AgentDB:       agentDB,
-				AgentStory:    firstNonBlank(agentStory, "stories/bugfix"),
-				PublicBaseURL: publicBaseURL,
-				ProjectRoot:   projectRoot,
-				IncidentRepo:  incidentRepo,
-				AssetDir:      assetDir,
-				CommentMode:   firstNonBlank(commentMode, "none"),
+				RunDir:           runDir,
+				TicketRepo:       ticketRepo,
+				AgentDB:          agentDB,
+				AgentStory:       firstNonBlank(agentStory, "stories/bugfix"),
+				PublicBaseURL:    publicBaseURL,
+				ProjectRoot:      projectRoot,
+				IncidentRepo:     incidentRepo,
+				AssetDir:         assetDir,
+				CommentMode:      firstNonBlank(commentMode, "none"),
+				AllowTestBackend: allowTestBackend,
 			})
 			if err != nil {
 				return err
@@ -489,24 +491,29 @@ func gitopsAutonomousFixCmd() *cobra.Command {
 	cmd.Flags().StringVar(&assetDir, "asset-dir", "", "root directory for agent fix evidence assets")
 	cmd.Flags().StringVar(&commentMode, "comment-mode", "none", "comment mode for drained jobs: none or github")
 	cmd.Flags().BoolVar(&reportInvalid, "report-invalid-autonomous-fix", false, "print invalid autonomous-fix results instead of exiting early")
+	cmd.Flags().BoolVar(&allowTestBackend, "allow-test-backend", false, "allow the internal no-LLM autonomous-fix test backend when its env gate is set")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON output")
 	return cmd
 }
 
 type gitopsAutonomousFixOptions struct {
-	RunDir        string
-	TicketRepo    string
-	AgentDB       string
-	AgentStory    string
-	PublicBaseURL string
-	ProjectRoot   string
-	IncidentRepo  string
-	AssetDir      string
-	CommentMode   string
+	RunDir           string
+	TicketRepo       string
+	AgentDB          string
+	AgentStory       string
+	PublicBaseURL    string
+	ProjectRoot      string
+	IncidentRepo     string
+	AssetDir         string
+	CommentMode      string
+	AllowTestBackend bool
 }
 
 func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions) (map[string]any, error) {
 	if os.Getenv("KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE") == "1" {
+		if !opts.AllowTestBackend {
+			return nil, fmt.Errorf("gitops autonomous-fix: test backend env is set but --allow-test-backend was not provided")
+		}
 		return runGitopsAutonomousFixViaRunner(ctx, opts)
 	}
 	runDir := strings.TrimSpace(opts.RunDir)
