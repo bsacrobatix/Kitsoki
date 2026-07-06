@@ -47,6 +47,7 @@ def claude_cli_dispatch(
     agent: str | None = None,
     model: str | None = None,
     timeout_s: int = DEFAULT_TIMEOUT_S,
+    tools: tuple[str, ...] | None = None,
 ) -> str:
     """Production dispatch: one headless `claude -p` turn, no session state.
 
@@ -61,6 +62,14 @@ def claude_cli_dispatch(
     the simplest thing that answers a bounded judging prompt.
     """
     command = ["claude", "-p", prompt, "--output-format", "json"]
+    if tools is not None:
+        # A bounded judging prompt must not wander: pin the tool list (empty
+        # tuple = tool-less single-shot answer) and skip project MCP startup
+        # entirely — the first live docs-fidelity run hung for the full 900s
+        # because the agent tried to *execute* the doc under judgment instead
+        # of scoring the embedded text.
+        command += ["--tools", *tools] if tools else ["--tools", ""]
+        command += ["--strict-mcp-config"]
     if agent:
         command += ["--agent", agent]
     if model:

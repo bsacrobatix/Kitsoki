@@ -75,6 +75,13 @@ kitsoki run
 `kitsoki run @kitsoki/dev-story` remains equivalent if you want to name the
 embedded base story explicitly.
 
+The interactive run needs an agent backend for the discovery conversation:
+`kitsoki run` auto-selects a harness, and with no `claude` binary or Anthropic
+credential available it falls back to replay mode and errors without a
+`--recording`. Set up a backend first (see
+[getting-started.md](getting-started.md)) or use the headless sequence below
+with a recorded flow.
+
 If the toolkit + MCP install fails (e.g. the binary was built without `make
 embed-skills`), onboarding routes to a loud `init_tools_failed` read-out — it
 will **not** silently report success — from which you can retry or finish later
@@ -92,7 +99,7 @@ Headless equivalent (no TUI), useful for scripting or CI:
 APP=@kitsoki/dev-story
 kitsoki session create   --app "$APP" --key local:onboard
 kitsoki session continue --app "$APP" --key local:onboard \
-    --intent work --slots '{"request":"onboard /abs/path/to/my-project"}'
+    --intent landing_capture --slots '{"request":"onboard /abs/path/to/my-project"}'
 kitsoki session continue --app "$APP" --key local:onboard --intent init_discovered
 kitsoki session continue --app "$APP" --key local:onboard --intent confirm_init
 kitsoki session continue --app "$APP" --key local:onboard --intent init_applied
@@ -107,8 +114,8 @@ that substep directly:
 ```sh
 cd ~/code/my-project
 kitsoki init                        # or: kitsoki init --target <path>
-#   skills: 17 linked into .claude/skills
-#   agents: 2 linked into .claude/agents
+#   skills: <N> linked into .claude/skills
+#   agents: <N> linked into .claude/agents
 #   mcp:    registered kitsoki server in .../my-project/.mcp.json
 ```
 
@@ -217,8 +224,8 @@ the TUI/web — all through one facade. See
 to orchestrate kitsoki entirely through that surface — adopt it for a whole
 Claude Code session with `claude --agent kitsoki-mcp-driver` (or default it
 per-repo via `{ "agent": "kitsoki-mcp-driver" }` in `.claude/settings.json`).
-Codex ships the mirrored `.codex/agents/kitsoki-mcp-driver.toml` subagent (no
-whole-session flag); see the
+The kitsoki repo itself mirrors it as a `.codex/agents/kitsoki-mcp-driver.toml`
+subagent for Codex users (not installed into onboarded targets); see the
 [Studio MCP dogfood recipe](recipes/studio-mcp-dogfood.md#run-a-pure-kitsoki-driver)
 for the Codex specifics and headless runbook.
 
