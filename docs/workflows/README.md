@@ -7,7 +7,7 @@ doesn't support it yet.
 
 | Workflow | Doc |
 |---|---|
-| Onboard a project | [`../project-onboarding.md`](../project-onboarding.md) |
+| Onboard a project | [`../getting-started.md`](../getting-started.md) |
 | Write a PRD, then a design/proposal | [`prd-and-design.md`](prd-and-design.md) |
 | Decompose an epic → implement the briefs | [`decompose-and-implement.md`](decompose-and-implement.md) |
 | File a bug | [`file-a-bug.md`](file-a-bug.md) |
@@ -34,7 +34,7 @@ cell lives in the generated
 (source: [`../../tools/dev-workflow-matrix/manifest.yaml`](../../tools/dev-workflow-matrix/manifest.yaml)) —
 consult it for the standing verdict, not this index.
 
-See also [`../project-onboarding.md`](../project-onboarding.md) for the
+See also [`../getting-started.md`](../getting-started.md) for the
 prerequisite (a repo must be onboarded before any of the above apply) and
-its own ["after onboarding"](../project-onboarding.md#after-onboarding--using-it)
+its own ["after onboarding"](../getting-started.md#7-use-kitsoki-after-onboarding)
 section, which points here.

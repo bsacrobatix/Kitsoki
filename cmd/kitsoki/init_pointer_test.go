@@ -14,7 +14,7 @@ func TestInitOnboardPointer(t *testing.T) {
 	if got == "" {
 		t.Fatal("expected an onboarding pointer when no .kitsoki.yaml exists, got empty")
 	}
-	for _, want := range []string{"no .kitsoki.yaml", "onboard .", "kitsoki run", "docs/project-onboarding.md", "MCP"} {
+	for _, want := range []string{"no .kitsoki.yaml", "onboard .", "kitsoki run", "docs/getting-started.md", "MCP"} {
 		if !contains(got, want) {
 			t.Errorf("pointer missing %q; pointer was:\n%s", want, got)
 		}

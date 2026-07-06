@@ -5,7 +5,7 @@ deterministic **project onboarding** pipeline that takes a target checkout from
 nothing to a fully working kitsoki environment. This is the dev-story-specific
 mechanics; for the user-facing "how do I onboard my repo" walkthrough and the
 standalone `kitsoki project-tools install` command, read
-[project-onboarding.md](../project-onboarding.md) first.
+[getting-started.md](../getting-started.md) first.
 
 The pipeline is **boring and auditable on purpose**: discovery and apply are
 plain Python scripts that emit JSON, the operator reviews the profile before any
@@ -81,7 +81,7 @@ Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
    preserved so the operator can continue with `applied-no-tools` if needed.
    The command is backed by
    `internal/baseskills` (embedded toolkit; see
-   [project-onboarding.md](../project-onboarding.md)).
+   [getting-started.md](../getting-started.md)).
 
 The generated `.kitsoki/stories/<id>-dev/app.yaml` imports
 `@kitsoki/dev-story` from the binary's embedded story library and rebinds the
@@ -158,7 +158,7 @@ kitsoki test flows stories/dev-story/app.yaml
 
 ## See also
 
-- [project-onboarding.md](../project-onboarding.md) — the user-facing guide +
+- [getting-started.md](../getting-started.md) — the user-facing guide +
   the standalone `kitsoki project-tools install` command.
 - [../../stories/dev-story/README.md](../../stories/dev-story/README.md) — the
   dev-story hub the onboarded instance imports.

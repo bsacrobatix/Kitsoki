@@ -3,9 +3,18 @@
 Welcome. This is the navigation hub for the documentation tree.
 
 For the elevator pitch and user quickstart, see the top-level
-[`../README.md`](../README.md). If you are new, start with
-[`getting-started.md`](getting-started.md) to use Kitsoki in your own project, or
-[`start-here.md`](start-here.md) to pick a more specific path.
+[`../README.md`](../README.md).
+
+## Pick your path
+
+| You are | Read in order |
+|---|---|
+| Deciding whether Kitsoki is worth it | [`evaluate-kitsoki.md`](evaluate-kitsoki.md) -> [`architecture/concept.md`](architecture/concept.md) -> [`case-studies/bug-fix.md`](case-studies/bug-fix.md) -> [`case-studies/bugfix-bakeoff.md`](case-studies/bugfix-bakeoff.md) |
+| Using Kitsoki in your own project | [`getting-started.md`](getting-started.md) -> [`workflows/`](workflows/README.md) |
+| Writing a story | [`stories/architecture.md`](stories/architecture.md) -> [`recipes/`](recipes/README.md) -> [`stories/authoring.md`](stories/authoring.md) -> [`embedded/app-schema.md`](embedded/app-schema.md) |
+| Contributing to Kitsoki | [`contributor-setup.md`](contributor-setup.md) -> [`../CONTRIBUTING.md`](../CONTRIBUTING.md) -> [`architecture/developer-guide.md`](architecture/developer-guide.md) |
+| Debugging a session | [`tracing/README.md`](tracing/README.md) -> [`tracing/testing.md`](tracing/testing.md) -> [`tracing/trace-format.md`](tracing/trace-format.md) |
+| Working on UI | [`web/README.md`](web/README.md) or [`tui/README.md`](tui/README.md) -> [`tui/rendering-tests.md`](tui/rendering-tests.md) |
 
 The tree is organised into four reference sections plus a recipes area. Each
 section has its own `README.md` index. The proposal tree is design history and
@@ -77,9 +86,9 @@ live in the sections above.
 
 ## Worked examples and per-story references
 
-- [`project-onboarding.md`](project-onboarding.md) — set up a committed,
-  working kitsoki environment (instance + studio MCP + skill/agent toolkit) in
-  your own repo; backed by the dev-story
+- [`getting-started.md`](getting-started.md) — install the binary and onboard
+  your own repo: a committed, working kitsoki environment (instance + studio
+  MCP + skill/agent toolkit), backed by the dev-story
   [`init` pipeline](stories/dev-story-onboarding.md).
 - [`workflows/`](workflows/README.md) — canonical "how a user does this" doc
   per core developer workflow (PRD/design, decompose→implement, file a bug,

@@ -22,7 +22,7 @@ happen first for larger asks.
 
 ## Prerequisite
 
-Your repo must be onboarded (see [`../project-onboarding.md`](../project-onboarding.md))
+Your repo must be onboarded (see [`../getting-started.md`](../getting-started.md))
 so `docs/prd/` and `docs/proposals/` (or your project's configured
 equivalents — see dev-story's
 ["doc profile" section](../../stories/dev-story/README.md#doc-profile--targeting-an-external-project))

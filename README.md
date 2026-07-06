@@ -31,7 +31,7 @@ For the full thesis — control inversion, narrow LLM domains,
 progressive determinism, the spectrum from CLI wizards to free agent
 workflows — see [`docs/architecture/concept.md`](docs/architecture/concept.md).
 For a reader-specific path through the docs, start at
-[`docs/start-here.md`](docs/start-here.md).
+[`docs/README.md`](docs/README.md).
 
 **Free-text in, deterministic transitions out.**
 
@@ -127,9 +127,9 @@ continue           # confirm apply
 
 Onboarding writes a small checked-in setup: `.kitsoki.yaml`, a project profile,
 an editable dev-story instance, readiness checks, `.mcp.json`, and the
-skill/agent toolkit for your coding agent. The full walkthrough is
-[`docs/getting-started.md`](docs/getting-started.md); the detailed onboarding
-contract is [`docs/project-onboarding.md`](docs/project-onboarding.md).
+skill/agent toolkit for your coding agent. The full walkthrough and the
+detailed onboarding contract are both in
+[`docs/getting-started.md`](docs/getting-started.md).
 
 ### 4. Optional: GitHub auth for bug and PR workflows
 
@@ -145,7 +145,7 @@ source ~/.config/kitsoki/github.env
 
 Manual fine-grained PAT fallback is also supported with
 `kitsoki gh-agent token --from-env`. See
-[`docs/getting-started.md`](docs/getting-started.md#set-up-github-auth-for-local-issuepr-work).
+[`docs/getting-started.md`](docs/getting-started.md#3-set-up-github-auth-for-local-issuepr-work).
 
 ### 5. Verify readiness
 
@@ -182,7 +182,7 @@ promo landing + help docs with recorded feature demos, generated from the
 
 | You want to… | Start here |
 |---|---|
-| Use Kitsoki in your project | [`docs/getting-started.md`](docs/getting-started.md), then [`docs/project-onboarding.md`](docs/project-onboarding.md) |
+| Use Kitsoki in your project | [`docs/getting-started.md`](docs/getting-started.md), then [`docs/workflows/`](docs/workflows/README.md) |
 | Understand the architecture | [`docs/architecture/concept.md`](docs/architecture/concept.md), then [`docs/architecture/overview.md`](docs/architecture/overview.md) |
 | Write a story | [`docs/stories/architecture.md`](docs/stories/architecture.md), then [`docs/recipes/`](docs/recipes/README.md) |
 | Look up story fields | `kitsoki docs app-schema` or [`docs/embedded/app-schema.md`](docs/embedded/app-schema.md) |
