@@ -28,7 +28,7 @@ except ModuleNotFoundError:
     sys.exit("paired_task_runner.py needs pyyaml")
 
 KITSOKI_ROOT = Path(os.environ.get("KITSOKI_ROOT", "/workspace/kitsoki")).resolve()
-CORPUS = KITSOKI_ROOT / "tools/arena/corpus/cost-bench.manifest.yaml"
+DEFAULT_CORPUS = KITSOKI_ROOT / "tools/arena/corpus/cost-bench.manifest.yaml"
 BENCH = KITSOKI_ROOT / "tools/bugfix-bakeoff/external/bench.py"
 DRIVE_SH = KITSOKI_ROOT / "tools/mcp-drive/drive.sh"
 BENCH_BUGFIX_STORY = KITSOKI_ROOT / "stories/bench-bugfix/app.yaml"
@@ -65,6 +65,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--task", required=True)
     parser.add_argument("--treatment", required=True)
     parser.add_argument("--target", required=True)
+    parser.add_argument(
+        "--corpus",
+        default=os.environ.get("ARENA_PAIRED_TASK_CORPUS", str(DEFAULT_CORPUS)),
+        help="arena task corpus/source YAML; defaults to the built-in cost bench manifest",
+    )
     parser.add_argument("--backend", default="")
     parser.add_argument("--model", default="")
     parser.add_argument("--effort", default="")
@@ -86,18 +91,23 @@ def main(argv: list[str] | None = None) -> int:
             exit_code=2,
         )
 
-    task = load_task(args.task)
+    corpus_path = Path(args.corpus)
+    task = load_task(args.task, corpus_path)
     if args.arm_only:
         return arm_task(task)
     return run_live(args, task)
 
 
-def load_task(task_id: str) -> dict[str, Any]:
-    corpus = yaml.safe_load(CORPUS.read_text(encoding="utf-8"))
+def load_task(task_id: str, corpus_path: Path) -> dict[str, Any]:
+    corpus = yaml.safe_load(corpus_path.read_text(encoding="utf-8"))
+    if not isinstance(corpus, dict):
+        sys.exit(f"corpus must be a mapping: {corpus_path}")
     for task in corpus.get("tasks", []):
         if task.get("id") == task_id:
-            return task
-    sys.exit(f"unknown corpus task: {task_id}")
+            out = dict(task)
+            out["_corpus_path"] = str(corpus_path)
+            return out
+    sys.exit(f"unknown corpus task {task_id!r} in {corpus_path}")
 
 
 def arm_task(task: dict[str, Any]) -> int:
@@ -114,7 +124,7 @@ def arm_task(task: dict[str, Any]) -> int:
             cost_usd=0.0,
             tokens=0,
             wall_s=elapsed(started),
-            evidence_refs=[str(CORPUS) + "#" + str(task["id"])],
+            evidence_refs=[task_ref(task)],
             trace_ref="",
             notes=f"arm github_content red={red} green={green}",
         )
@@ -136,10 +146,24 @@ def arm_task(task: dict[str, Any]) -> int:
             cost_usd=0.0,
             tokens=0,
             wall_s=elapsed(started),
-            evidence_refs=[str(CORPUS) + "#" + str(task["id"])],
+            evidence_refs=[task_ref(task)],
             trace_ref="",
             notes=first_line(proc.stdout + "\n" + proc.stderr),
             exit_code=0 if proc.returncode == 0 else 1,
+        )
+    if kind == "bugswarm_fail_pass_pair":
+        red = task.get("verified_red") is True
+        green = task.get("verified_green") is True
+        image_tag = str(oracle.get("image_tag") or task.get("image_tag") or "")
+        return emit(
+            verdict="armed" if red and green else "failed",
+            cost_usd=0.0,
+            tokens=0,
+            wall_s=elapsed(started),
+            evidence_refs=[task_ref(task)],
+            trace_ref="",
+            notes=f"arm bugswarm_fail_pass_pair red={red} green={green} image_tag={image_tag}",
+            exit_code=0 if red and green else 1,
         )
     return emit(verdict="blocked", notes=f"unknown oracle kind {kind!r}", exit_code=2)
 
@@ -154,7 +178,19 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
     if tree.exists():
         shutil.rmtree(tree)
 
-    materialize_baseline(task, tree)
+    try:
+        materialize_baseline(task, tree)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 - report unsupported sources as cell results.
+        return emit(
+            verdict="blocked",
+            cost_usd=0.0,
+            tokens=0,
+            wall_s=elapsed(started),
+            evidence_refs=[task_ref(task)],
+            trace_ref=container_path(trace_ref),
+            notes=f"baseline materialization failed: {exc}",
+            exit_code=0,
+        )
     dispatch = dispatch_worker(args, task, tree, trace_ref)
     score = score_tree(task, tree)
     metrics = dispatch.get("metrics", {})
@@ -176,7 +212,7 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
         cost_usd=cost_usd,
         tokens=tokens,
         wall_s=elapsed(started),
-        evidence_refs=[str(CORPUS) + "#" + str(task["id"]), score.get("evidence", "")],
+        evidence_refs=[task_ref(task), score.get("evidence", "")],
         trace_ref=container_path(trace_ref),
         notes=notes,
         exit_code=0,
@@ -211,6 +247,11 @@ def remove_readonly(func: Any, path: str, _exc_info: Any) -> None:
 
 def materialize_baseline(task: dict[str, Any], tree: Path) -> None:
     oracle = task.get("oracle") or {}
+    if oracle.get("kind") == "bugswarm_fail_pass_pair":
+        raise SystemExit(
+            "BugSwarm live materialization is not implemented in paired_task_runner; "
+            "run the source through bugswarm_verify_source.py and use --arm-only"
+        )
     if oracle.get("kind") == "github_content":
         repo = str(oracle["repo"])
         run(["git", "init", "-q", str(tree)], cwd=KITSOKI_ROOT)
@@ -613,7 +654,17 @@ def score_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:
             verdict = str(((cell.get("outcome") or {}).get("quality")) or verdict)
             notes = notes or json.dumps(cell.get("outcome", {}), sort_keys=True)
         return {"verdict": verdict, "evidence": container_path(out), "notes": notes}
+    if oracle.get("kind") == "bugswarm_fail_pass_pair":
+        return {
+            "verdict": "blocked",
+            "evidence": task_ref(task),
+            "notes": "BugSwarm live scoring requires an artifact-materialization adapter",
+        }
     return {"verdict": "blocked", "evidence": "", "notes": f"unknown oracle kind {oracle.get('kind')!r}"}
+
+
+def task_ref(task: dict[str, Any]) -> str:
+    return str(task.get("_corpus_path") or DEFAULT_CORPUS) + "#" + str(task.get("id") or "")
 
 
 def fetch_raw(repo: str, sha: str, file_path: str) -> str | None:

@@ -38,6 +38,8 @@ class PairedTaskPlugin:
             "--target",
             cell.target.id,
         ]
+        corpus = _container_repo_path(str(cell.target.meta.get("corpus") or cell.target.meta.get("source") or ""))
+        _append_if(argv, "--corpus", corpus)
         if live:
             argv.append("--live")
             _append_if(argv, "--backend", cell.variant.backend)
@@ -85,6 +87,12 @@ class PairedTaskPlugin:
 def _append_if(argv: list[str], flag: str, value: str) -> None:
     if value:
         argv.extend([flag, value])
+
+
+def _container_repo_path(value: str) -> str:
+    if not value or value.startswith("/"):
+        return value
+    return f"{KITSOKI_MNT}/{value}"
 
 
 def _load_json(stdout: str) -> dict[str, Any]:
