@@ -232,6 +232,59 @@ with tempfile.TemporaryDirectory() as tmp:
     check("unverified runner verdict", unverified_payload["verdict"], "failed")
     require("unverified notes include green=false", "green=False" in unverified_payload["notes"])
 
+    bugswarm_task = yaml.safe_load(verified_source.read_text(encoding="utf-8"))["tasks"][0]
+    exported_checkout = tmpdir / "exported-checkout"
+    exported_checkout.mkdir()
+    (exported_checkout / "README.md").write_text("buggy checkout\n", encoding="utf-8")
+    exported_task = dict(bugswarm_task)
+    exported_task["meta"] = dict(exported_task.get("meta") or {}, bugswarm_checkout_path=str(exported_checkout))
+    exported_tree = tmpdir / "exported-tree"
+    runner_globals["materialize_baseline"](exported_task, exported_tree)
+    check("exported checkout copied", (exported_tree / "README.md").read_text(encoding="utf-8"), "buggy checkout\n")
+
+    docker_task = dict(bugswarm_task)
+    docker_task["meta"] = dict(docker_task.get("meta") or {}, bugswarm_source_dir="/workspace/src")
+    docker_tree = tmpdir / "docker-tree"
+    docker_commands: list[list[str]] = []
+    runner_module_globals = runner_globals["materialize_baseline"].__globals__
+    original_runner_run = runner_module_globals["run"]
+    original_subprocess_run = runner_module_globals["subprocess"].run
+
+    def fake_runner_run(cmd, *, cwd, capture=False):  # noqa: ANN001 - mirrors runner.run shape.
+        docker_commands.append(cmd)
+        if cmd[:2] == ["docker", "create"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="container-123\n", stderr="")
+        if cmd[:2] == ["docker", "cp"]:
+            docker_tree.mkdir()
+            (docker_tree / "build.gradle").write_text("copied from artifact\n", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    def fake_docker_subprocess(cmd, **kwargs):  # noqa: ANN001 - mirrors subprocess.run shape.
+        docker_commands.append(cmd)
+        if cmd[:3] == ["docker", "rm", "-f"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:2] == ["docker", "run"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="tests pass\n", stderr="")
+        raise AssertionError(f"unexpected subprocess command: {cmd}")
+
+    try:
+        runner_module_globals["run"] = fake_runner_run
+        runner_module_globals["subprocess"].run = fake_docker_subprocess
+        runner_globals["materialize_baseline"](docker_task, docker_tree)
+        docker_score = runner_globals["score_tree"](docker_task, docker_tree)
+    finally:
+        runner_module_globals["run"] = original_runner_run
+        runner_module_globals["subprocess"].run = original_subprocess_run
+
+    check("docker checkout copied", (docker_tree / "build.gradle").read_text(encoding="utf-8"), "copied from artifact\n")
+    check("docker materializer create image", docker_commands[0][2], "bugswarm/cached-images:square-okio-140452393")
+    check("docker materializer source dir", docker_commands[1][2], "container-123:/workspace/src/.")
+    check("docker scorer verdict", docker_score["verdict"], "solved")
+    score_cmd = next(cmd for cmd in docker_commands if cmd[:2] == ["docker", "run"])
+    check("docker scorer mounts candidate tree", score_cmd[score_cmd.index("-v") + 1], f"{docker_tree}:/workspace/src")
+    check("docker scorer command", score_cmd[-2:], ["-lc", "./run_failed.sh"])
+
     old_key = os.environ.get("SYNTHETIC_API_KEY")
     os.environ["SYNTHETIC_API_KEY"] = "test-synthetic-key"
     calls: list[dict[str, object]] = []

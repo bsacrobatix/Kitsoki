@@ -234,12 +234,14 @@ python3 tools/arena/arena.py run \
 ```
 
 The generated spec includes only tasks with `verified_red: true` and
-`verified_green: true` by default. To prepare a future live GLM spec, use
+`verified_green: true` by default. To prepare a live GLM spec, use
 `--kitsoki-backend codex --raw-backend claude` so the raw-prompt arm runs through
 the Claude-compatible `synthetic-claude` profile instead of `codex exec`.
-`--live` BugSwarm paired-task cells still report `blocked`; the live adapter
-still needs artifact materialization and a hidden scoring bridge before spending
-on BugSwarm GLM cells.
+Live BugSwarm paired-task cells materialize the failing checkout by copying
+`/home/travis/build/<owner>/<repo>` from the artifact image, then score the
+candidate by mounting the modified tree back into a fresh artifact container and
+running `./run_failed.sh`. Override the checkout path with
+`meta.bugswarm_source_dir` when an artifact uses a different layout.
 
 ## Cost discipline
 
