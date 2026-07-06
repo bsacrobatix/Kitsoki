@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -140,7 +141,7 @@ docs land):
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			defer func() {
-				if err != nil {
+				if shouldWriteMCPStartupError(err) {
 					writeMCPStartupError(err, dbPath, storiesDir, workspace, flowPath)
 				}
 			}()
@@ -254,6 +255,10 @@ docs land):
 	cmd.Flags().BoolVar(&readOnly, "read-only", false,
 		"omit the story-mutating tool (story.write); read + replay-driving tools stay available (the meta-mode Q&A surface)")
 	return cmd
+}
+
+func shouldWriteMCPStartupError(err error) bool {
+	return err != nil && !errors.Is(err, context.Canceled)
 }
 
 func writeMCPStartupError(err error, dbPath, storiesDir, workspace, flowPath string) {

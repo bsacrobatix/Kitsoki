@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -47,6 +49,14 @@ func TestMCPAttachEntry_OmitsEmptyStoriesDir(t *testing.T) {
 	servers := entry["mcpServers"].(map[string]any)
 	kit := servers["kitsoki"].(map[string]any)
 	assert.Equal(t, []any{"mcp"}, kit["args"], "no --stories-dir when dir is empty")
+}
+
+func TestShouldWriteMCPStartupError(t *testing.T) {
+	assert.False(t, shouldWriteMCPStartupError(nil))
+	assert.False(t, shouldWriteMCPStartupError(context.Canceled))
+	assert.False(t, shouldWriteMCPStartupError(fmt.Errorf("stdio peer closed: %w", context.Canceled)))
+	assert.True(t, shouldWriteMCPStartupError(errors.New("listen failed")))
+	assert.True(t, shouldWriteMCPStartupError(context.DeadlineExceeded))
 }
 
 // TestMCPCmd_Registered confirms `mcp` is wired into the root command tree and
