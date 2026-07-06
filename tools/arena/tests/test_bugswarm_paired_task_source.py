@@ -285,6 +285,22 @@ with tempfile.TemporaryDirectory() as tmp:
     check("docker scorer mounts candidate tree", score_cmd[score_cmd.index("-v") + 1], f"{docker_tree}:/workspace/src")
     check("docker scorer command", score_cmd[-2:], ["-lc", "./run_failed.sh"])
 
+    host_root = tmpdir / "host-kitsoki"
+    container_tree = REPO_ROOT / ".artifacts/arena/paired-task-work/container-path"
+    old_host_root = os.environ.get("ARENA_HOST_REPO_ROOT")
+    try:
+        os.environ["ARENA_HOST_REPO_ROOT"] = str(host_root)
+        check(
+            "container path translates for nested docker",
+            runner_globals["container_path"](container_tree),
+            str(host_root / ".artifacts/arena/paired-task-work/container-path"),
+        )
+    finally:
+        if old_host_root is None:
+            os.environ.pop("ARENA_HOST_REPO_ROOT", None)
+        else:
+            os.environ["ARENA_HOST_REPO_ROOT"] = old_host_root
+
     def fake_docker_infrastructure_failure(cmd, **kwargs):  # noqa: ANN001 - mirrors subprocess.run shape.
         if cmd[:2] == ["docker", "run"]:
             return subprocess.CompletedProcess(cmd, 125, stdout="", stderr="docker daemon metadata I/O error\n")

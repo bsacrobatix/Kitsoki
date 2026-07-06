@@ -311,7 +311,7 @@ def materialize_bugswarm_baseline(task: dict[str, Any], tree: Path) -> None:
     if not container:
         raise SystemExit(f"docker create returned no container id for {image}")
     try:
-        run(["docker", "cp", f"{container}:{source_dir}/.", str(tree)], cwd=KITSOKI_ROOT)
+        run(["docker", "cp", f"{container}:{source_dir}/.", container_path(tree)], cwd=KITSOKI_ROOT)
     finally:
         subprocess.run(["docker", "rm", "-f", container], cwd=KITSOKI_ROOT, text=True, capture_output=True)
 
@@ -859,7 +859,7 @@ def score_bugswarm_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:
         "run",
         "--rm",
         "-v",
-        f"{tree}:{source_dir}",
+            f"{container_path(tree)}:{source_dir}",
         image,
         "bash",
         "-lc",
