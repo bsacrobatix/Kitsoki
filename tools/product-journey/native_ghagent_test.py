@@ -237,10 +237,18 @@ def main():
               any(link.endswith("/triage-verdict.md") for link in triage_links))
         check("native drain exposed independent verification",
               any(link.endswith("/independent-verify.md") for link in links))
+        check("native drain exposed integration landing proof",
+              all(
+                  str(job.get("integration_branch", "")).startswith("integration/")
+                  and str(job.get("commit_sha", "")).strip()
+                  for job in gh_agent.get("drained_jobs", [])
+                  if isinstance(job, dict) and job.get("state") == "done"
+              ))
         check("native review passes gh-agent evidence checks",
               review_check(reviewed, "gh-agent-fix-evidence").get("status") == "pass"
               and review_check(reviewed, "gh-agent-triage-evidence").get("status") == "pass"
-              and review_check(reviewed, "gh-agent-independent-verify").get("status") == "pass")
+              and review_check(reviewed, "gh-agent-independent-verify").get("status") == "pass"
+              and review_check(reviewed, "gh-agent-integration-landing").get("status") == "pass")
         check("native review carries close-out evidence",
               review_check(reviewed, "issue-closeout").get("status") == "pass")
         report_text = report.read_text()

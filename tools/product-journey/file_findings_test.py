@@ -74,6 +74,8 @@ if (args.verb1, args.verb2) == ("gh-agent", "drain"):
         else:
             row["run_url"] = f"https://agent.example/run/job-{i}"
         row.setdefault("job_id", f"job-{i}")
+        integration_branch = f"integration/kitsoki-autofix-job-{i}"
+        commit_sha = f"abc123{i}"
         jobs.append({
             "job_id": row["job_id"],
             "origin_ref": row["origin_ref"],
@@ -83,6 +85,9 @@ if (args.verb1, args.verb2) == ("gh-agent", "drain"):
             "story": row["story"],
             "state": row["state"],
             "run_url": row["run_url"],
+            "integration_branch": integration_branch,
+            "commit_sha": commit_sha,
+            "commit_url": f"https://github.com/{row['origin_ref'].split('/issue/')[0].removeprefix('github:')}/commit/{commit_sha}",
             "incident_url": "",
             "err_msg": "",
             "assets": [] if os.environ.get("KITSOKI_FAKE_GH_AGENT_NO_ASSETS") else [
@@ -472,7 +477,7 @@ def main():
         # direct file_findings run is not complete until native gitops closes
         # the fixed issues.
         reviewed = run.review_run_bundle(run_dir, None)
-        _check("review has 32 checks", reviewed["total"] == 32)
+        _check("review has 33 checks", reviewed["total"] == 33)
         _check("direct filing requires issue close-out before final review",
                review_check(reviewed, "issue-closeout")["status"] == "fail"
                and "status=(missing)" in review_check(reviewed, "issue-closeout")["detail"])
@@ -485,7 +490,7 @@ def main():
         # 5. Gates: a new credible finding
         # after filing trips review + validate until re-filed.
         reviewed = run.review_run_bundle(run_dir, None)
-        _check("review has 32 checks after close-out", reviewed["total"] == 32)
+        _check("review has 33 checks after close-out", reviewed["total"] == 33)
         _check("weakness-routing passes when weakness has PRD route",
                review_check(reviewed, "weakness-routing")["status"] == "pass")
         _check("prd-design-intake passes when weakness has PRD intake",
@@ -504,11 +509,13 @@ def main():
                review_check(reviewed, "gh-agent-independent-verify")["status"] == "pass")
         _check("gh-agent-run-url passes when run URLs are present",
                review_check(reviewed, "gh-agent-run-url")["status"] == "pass")
+        _check("gh-agent-integration-landing passes when branch and commit are present",
+               review_check(reviewed, "gh-agent-integration-landing")["status"] == "pass")
         validated = run.validate_run_bundle(run_dir)
         _check("validate has no findings-filed error",
                not any(i["id"] == "findings-filed" for i in validated["issues"]))
         _check("validate has no gh-agent evidence error",
-               not any(i["id"] in {"gh-agent-fixes", "gh-agent-fix-evidence", "gh-agent-triage-evidence", "gh-agent-independent-verify", "gh-agent-run-url", "issue-closeout", "gh-agent-fix-deck"} for i in validated["issues"]))
+               not any(i["id"] in {"gh-agent-fixes", "gh-agent-fix-evidence", "gh-agent-triage-evidence", "gh-agent-independent-verify", "gh-agent-run-url", "gh-agent-integration-landing", "issue-closeout", "gh-agent-fix-deck"} for i in validated["issues"]))
         saved_findings = run.read_json(run_dir / "findings.json")
         missing_asset_findings = json.loads(json.dumps(saved_findings))
         for job in missing_asset_findings["gh_agent"]["drained_jobs"]:
@@ -560,6 +567,19 @@ def main():
         _check("validate catches done gh-agent jobs without run URLs",
                any(i["id"] == "gh-agent-run-url" and i["severity"] == "error"
                    for i in missing_run_url_validated["issues"]))
+        missing_landing_findings = json.loads(json.dumps(saved_findings))
+        for job in missing_landing_findings["gh_agent"]["drained_jobs"]:
+            job.pop("integration_branch", None)
+            job.pop("commit_sha", None)
+            job.pop("commit_url", None)
+        run.write_json(run_dir / "findings.json", missing_landing_findings)
+        reviewed_missing_landing = run.review_run_bundle(run_dir, None)
+        _check("review fails done gh-agent jobs without integration landing proof",
+               review_check(reviewed_missing_landing, "gh-agent-integration-landing")["status"] == "fail")
+        missing_landing_validated = run.validate_run_bundle(run_dir)
+        _check("validate catches done gh-agent jobs without integration landing proof",
+               any(i["id"] == "gh-agent-integration-landing" and i["severity"] == "error"
+                   for i in missing_landing_validated["issues"]))
         run.write_json(run_dir / "findings.json", saved_findings)
         run.update_derived_artifacts(run_dir, None)
         deck_path = run_dir / "deck.slidey.json"
@@ -720,11 +740,13 @@ def main():
                and "evidence `trace-replay.md`" in report_text
                and "https://github.com/o/r/releases/download/kitsoki-artifacts/" in report_text
                and "https://agent.example/run/job-1" in report_text
+               and "integration/kitsoki-autofix-job-1" in report_text
+               and "abc1231" in report_text
                and "https://agent.example/run/job-1/artifacts/fix-report.md" in report_text
                and "https://agent.example/run/job-1/artifacts/triage-verdict.md" in report_text
                and "https://agent.example/run/job-1/artifacts/independent-verify.md" in report_text)
         _check("legacy autonomous loop reviewed close-out gate",
-               result["review_total_count"] == 32 and result["validation_status"] == "invalid")
+               result["review_total_count"] == 33 and result["validation_status"] == "invalid")
 
         run_dir_facade, run_json_facade = run.build_run_bundle(
             catalog, run.load_github_targets(run.GITHUB_TARGETS),
