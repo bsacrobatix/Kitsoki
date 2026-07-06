@@ -59,6 +59,7 @@ def validate_report(report: dict[str, Any]) -> list[str]:
     problems.extend(require_rollups(report, rows))
     problems.extend(require_source_mix(report))
     problems.extend(require_comparisons(report))
+    problems.extend(require_claim_ledger(report))
     problems.extend(require_closure(report, rows))
     problems.extend(require_completion_audit(report, rows))
     problems.extend(require_study_protocol(report, rows))
@@ -70,7 +71,7 @@ def require_top_level(report: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     if report.get("kind") != "glm52_bugswarm_bugfix_report":
         problems.append(f"unexpected report kind: {report.get('kind')!r}")
-    for key in ("corpora", "source_mix", "rollups", "comparisons", "completion_audit", "study_protocol", "evidence_closure", "references"):
+    for key in ("corpora", "source_mix", "rollups", "comparisons", "claim_ledger", "completion_audit", "study_protocol", "evidence_closure", "references"):
         if not isinstance(report.get(key), dict):
             problems.append(f"missing mapping: {key}")
     return problems
@@ -173,6 +174,49 @@ def require_source_mix(report: dict[str, Any]) -> list[str]:
     for required in ("separate source families", "total tokens", "dry-run BugSwarm"):
         if required not in policies:
             problems.append(f"source mix blend_policy missing {required!r}")
+    return problems
+
+
+def require_claim_ledger(report: dict[str, Any]) -> list[str]:
+    ledger = report.get("claim_ledger") if isinstance(report.get("claim_ledger"), dict) else {}
+    problems: list[str] = []
+    if not ledger:
+        return ["missing claim_ledger"]
+    claims = ledger.get("claims") if isinstance(ledger.get("claims"), list) else []
+    by_id = {claim.get("id"): claim for claim in claims if isinstance(claim, dict)}
+    required = {
+        "overall-token-usage",
+        "overall-success-rate",
+        "bugswarm-success-rate",
+        "bugswarm-reusable-source",
+        "oss-source-mix",
+        "observed-oss-kitsoki-glm52-cell",
+    }
+    missing = sorted(required - set(by_id))
+    if missing:
+        problems.append("claim ledger missing claim(s): " + ", ".join(missing))
+    if ledger.get("supported_count") != sum(1 for claim in claims if isinstance(claim, dict) and claim.get("status") == "supported"):
+        problems.append("claim ledger supported_count does not match claims")
+    if ledger.get("pending_count") != sum(1 for claim in claims if isinstance(claim, dict) and claim.get("status") == "pending"):
+        problems.append("claim ledger pending_count does not match claims")
+    comparisons = report.get("comparisons") if isinstance(report.get("comparisons"), dict) else {}
+    if (comparisons.get("overall") or {}).get("status") == "pending":
+        for claim_id in ("overall-token-usage", "overall-success-rate"):
+            claim = by_id.get(claim_id, {})
+            if claim.get("status") != "pending":
+                problems.append(f"claim ledger {claim_id} must remain pending while overall comparison is pending")
+            if not claim.get("missing_evidence"):
+                problems.append(f"claim ledger {claim_id} must name missing evidence")
+    if (comparisons.get("bugswarm") or {}).get("status") == "pending":
+        claim = by_id.get("bugswarm-success-rate", {})
+        if claim.get("status") != "pending":
+            problems.append("claim ledger bugswarm-success-rate must remain pending while BugSwarm comparison is pending")
+    for claim_id in ("bugswarm-reusable-source", "oss-source-mix", "observed-oss-kitsoki-glm52-cell"):
+        claim = by_id.get(claim_id, {})
+        if claim.get("status") != "supported":
+            problems.append(f"claim ledger {claim_id} should be supported by current committed evidence")
+        if not claim.get("evidence"):
+            problems.append(f"claim ledger {claim_id} lacks evidence")
     return problems
 
 

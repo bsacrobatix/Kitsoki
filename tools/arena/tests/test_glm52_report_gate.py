@@ -73,6 +73,20 @@ with tempfile.TemporaryDirectory() as tmp:
 
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)
+    bad = out / "bad-claim-ledger.json"
+    report = json.loads(REPORT.read_text(encoding="utf-8"))
+    claim = next(claim for claim in report["claim_ledger"]["claims"] if claim["id"] == "overall-token-usage")
+    claim["status"] = "supported"
+    claim["missing_evidence"] = []
+    report["claim_ledger"]["supported_count"] += 1
+    report["claim_ledger"]["pending_count"] -= 1
+    bad.write_text(json.dumps(report), encoding="utf-8")
+    proc = run_gate(bad)
+    check("bad claim ledger exits nonzero", proc.returncode, 1)
+    check("bad claim ledger names pending overall", "overall-token-usage must remain pending" in proc.stdout, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
     bad = out / "bad-completion-audit.json"
     report = json.loads(REPORT.read_text(encoding="utf-8"))
     report["completion_audit"]["status"] = "complete"

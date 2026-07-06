@@ -87,6 +87,8 @@ def build_report(
 
     glm_headline_cells = map_legacy_oss_tasks(corpus, glm_cells) + oss_arena_cells
     matrix_rows = build_required_matrix(glm_headline_cells, bugswarm_tasks, bugswarm_cells)
+    source_mix_data = source_mix(corpus, sources, bugswarm_tasks)
+    comparisons = build_comparisons(matrix_rows)
     return {
         "kind": "glm52_bugswarm_bugfix_report",
         "version": 1,
@@ -103,7 +105,7 @@ def build_report(
             "oss_arena_rollup": rel(oss_arena_rollup) if oss_arena_rollup else "",
         },
         "corpora": corpus_summary(corpus, sources, bugswarm_tasks, verification),
-        "source_mix": source_mix(corpus, sources, bugswarm_tasks),
+        "source_mix": source_mix_data,
         "glm52_bugfix_cells": glm_cells,
         "oss_glm52_arena_cells": oss_arena_cells,
         "bugswarm_glm52_arena_cells": bugswarm_cells,
@@ -113,7 +115,8 @@ def build_report(
             "glm52_by_treatment_overall": rollup_by_treatment(matrix_rows),
             "supporting_oss_codex_round1": rollup_arena_cells(arena_cells),
         },
-        "comparisons": build_comparisons(matrix_rows),
+        "comparisons": comparisons,
+        "claim_ledger": claim_ledger(matrix_rows, comparisons, source_mix_data, bugswarm_tasks, verification),
         "completion_audit": completion_audit(matrix_rows, verification, bugswarm_tasks),
         "study_protocol": study_protocol(matrix_rows, bugswarm_tasks, verification, report_json, corpus_path, bugswarm_source),
         "evidence_gaps": evidence_gaps(matrix_rows, bugswarm_tasks, verification),
@@ -484,6 +487,132 @@ def comparison_missing_notes(kitsoki: dict[str, Any], raw: dict[str, Any]) -> li
     if raw["attempted"] == 0:
         notes.append("Raw-prompt GLM-5.2 arm has no attempted cells.")
     return notes
+
+
+def claim_ledger(
+    rows: list[dict[str, Any]],
+    comparisons: dict[str, dict[str, Any]],
+    mix: dict[str, Any],
+    bugswarm_tasks: list[dict[str, Any]],
+    verification: dict[str, Any],
+) -> dict[str, Any]:
+    claims = [
+        comparison_claim(
+            "overall-token-usage",
+            "Overall GLM-5.2 token usage comparison between Kitsoki bugfix and raw prompts.",
+            comparisons["overall"],
+            metric="token_ratio_kitsoki_to_raw",
+        ),
+        comparison_claim(
+            "overall-success-rate",
+            "Overall GLM-5.2 success-rate comparison between Kitsoki bugfix and raw prompts.",
+            comparisons["overall"],
+            metric="success_rate_delta",
+        ),
+        comparison_claim(
+            "bugswarm-success-rate",
+            "BugSwarm GLM-5.2 success-rate comparison between Kitsoki bugfix and raw prompts.",
+            comparisons["bugswarm"],
+            metric="success_rate_delta",
+        ),
+        supported_claim(
+            "bugswarm-reusable-source",
+            "BugSwarm is represented as a reusable source family alongside the OSS oracle corpus.",
+            evidence=["tools/arena/corpus/sources.yaml", "tools/arena/corpus/bugswarm.seed.yaml"],
+            finding=f"Imported BugSwarm task count: {len(bugswarm_tasks)}.",
+            caveat=(
+                "Execute-mode RED/GREEN verification is still required before live GLM-5.2 cells."
+                if not is_bugswarm_execute_verified(verification)
+                else ""
+            ),
+        ),
+        supported_claim(
+            "oss-source-mix",
+            "The OSS oracle corpus preserves the 10 public target source family separately from hidden bugfix fixtures.",
+            evidence=["tools/arena/corpus/cost-bench.manifest.yaml", "tools/arena/corpus/sources.yaml"],
+            finding=source_mix_finding(mix),
+            caveat="GLM-5.2 headline cells currently cover only the committed bugfix fixture row.",
+        ),
+        observed_cell_claim(rows),
+    ]
+    return {
+        "status": "publishable" if all(claim["status"] == "supported" for claim in claims) else "partial",
+        "supported_count": sum(1 for claim in claims if claim["status"] == "supported"),
+        "pending_count": sum(1 for claim in claims if claim["status"] == "pending"),
+        "claims": claims,
+    }
+
+
+def comparison_claim(claim_id: str, statement: str, comparison: dict[str, Any], *, metric: str) -> dict[str, Any]:
+    if comparison.get("status") == "complete" and comparison.get(metric) is not None:
+        return {
+            "id": claim_id,
+            "status": "supported",
+            "statement": statement,
+            "finding": f"{metric}={comparison[metric]}.",
+            "evidence": ["required_glm52_matrix", "comparisons"],
+            "missing_evidence": [],
+            "caveat": "",
+        }
+    return {
+        "id": claim_id,
+        "status": "pending",
+        "statement": statement,
+        "finding": "The claim is not yet answerable from committed evidence.",
+        "evidence": ["required_glm52_matrix", "comparisons"],
+        "missing_evidence": list(comparison.get("notes") or ["Both arms need attempted GLM-5.2 cells."]),
+        "caveat": "No delta or token ratio is published while the comparison is pending.",
+    }
+
+
+def supported_claim(
+    claim_id: str,
+    statement: str,
+    *,
+    evidence: list[str],
+    finding: str,
+    caveat: str,
+) -> dict[str, Any]:
+    return {
+        "id": claim_id,
+        "status": "supported",
+        "statement": statement,
+        "finding": finding,
+        "evidence": evidence,
+        "missing_evidence": [],
+        "caveat": caveat,
+    }
+
+
+def source_mix_finding(mix: dict[str, Any]) -> str:
+    components = {
+        component["id"]: component
+        for component in mix["oss_oracle"]["components"]
+        if isinstance(component, dict)
+    }
+    public = components.get("pre_registered_oss_targets", {})
+    fixtures = components.get("armed_bugfix_fixtures", {})
+    return (
+        f"{public.get('task_count', 0)} tasks over {public.get('repo_count', 0)} public targets; "
+        f"{fixtures.get('task_count', 0)} armed bugfix fixture tasks."
+    )
+
+
+def observed_cell_claim(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    attempted = [
+        row for row in rows
+        if row.get("corpus") == "oss-oracle"
+        and row.get("treatment") == "kitsoki"
+        and row.get("quality") in {"solved", "partial", "failed"}
+    ]
+    tokens = sum(row.get("total_tokens") or 0 for row in attempted)
+    return supported_claim(
+        "observed-oss-kitsoki-glm52-cell",
+        "Committed GLM-5.2 Kitsoki bugfix evidence exists for the OSS oracle headline matrix.",
+        evidence=[str(row.get("evidence") or "") for row in attempted if row.get("evidence")],
+        finding=f"{len(attempted)} attempted cell(s), {tokens} total tokens.",
+        caveat="This is not a Kitsoki-vs-raw comparison until the matching raw-prompt arm is attempted.",
+    )
 
 
 def completion_audit(
@@ -1082,6 +1211,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             )
         )
     lines.extend(render_comparisons(report))
+    lines.extend(render_claim_ledger(report))
     lines.extend(render_completion_audit(report))
     lines.extend(render_study_protocol(report))
     lines.extend([
@@ -1214,6 +1344,29 @@ def render_source_mix(report: dict[str, Any]) -> list[str]:
         "",
     ])
     lines.extend(f"- {policy}" for policy in mix["blend_policy"])
+    return lines
+
+
+def render_claim_ledger(report: dict[str, Any]) -> list[str]:
+    ledger = report["claim_ledger"]
+    lines = [
+        "",
+        "## Research Claim Ledger",
+        "",
+        f"Status: `{ledger['status']}` ({ledger['supported_count']} supported, {ledger['pending_count']} pending).",
+        "",
+        "| claim | status | finding | missing evidence / caveat |",
+        "|---|---|---|---|",
+    ]
+    for claim in ledger["claims"]:
+        missing = "; ".join(claim.get("missing_evidence") or [])
+        caveat = str(claim.get("caveat") or "")
+        detail = "; ".join(item for item in (missing, caveat) if item) or "none"
+        lines.append(
+            f"| {claim['id']} | `{claim['status']}` | "
+            f"{clean_sentence(str(claim.get('finding') or ''))} | "
+            f"{clean_sentence(detail)} |"
+        )
     return lines
 
 

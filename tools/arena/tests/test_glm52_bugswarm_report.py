@@ -88,6 +88,17 @@ with tempfile.TemporaryDirectory() as tmp:
     check("overall comparison pending", comparisons["overall"]["status"], "pending")
     check("bugswarm comparison pending", comparisons["bugswarm"]["status"], "pending")
     check("overall comparison no token ratio", comparisons["overall"]["token_ratio_kitsoki_to_raw"], None)
+    ledger = report["claim_ledger"]
+    check("claim ledger partial", ledger["status"], "partial")
+    check("claim ledger supported count", ledger["supported_count"], 3)
+    check("claim ledger pending count", ledger["pending_count"], 3)
+    claims = {claim["id"]: claim for claim in ledger["claims"]}
+    check("claim overall token pending", claims["overall-token-usage"]["status"], "pending")
+    check("claim overall success pending", claims["overall-success-rate"]["status"], "pending")
+    check("claim bugswarm success pending", claims["bugswarm-success-rate"]["status"], "pending")
+    check("claim bugswarm source supported", claims["bugswarm-reusable-source"]["status"], "supported")
+    check("claim oss source mix supported", claims["oss-source-mix"]["status"], "supported")
+    check("claim observed cell supported", claims["observed-oss-kitsoki-glm52-cell"]["status"], "supported")
     audit = report["completion_audit"]
     check("completion audit incomplete", audit["status"], "incomplete")
     check("completion audit requirement count", audit["requirement_count"], 8)
@@ -127,6 +138,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("markdown source mix fixture row", "| armed_bugfix_fixtures | 6 | 2 | external_bakeoff" in md, True)
     check("markdown source mix bugswarm row", "BugSwarm containerized_fail_pass_ci_artifacts" in md, True)
     check("markdown includes comparisons", "## Kitsoki vs Raw-Prompt Comparisons" in md, True)
+    check("markdown includes claim ledger", "## Research Claim Ledger" in md, True)
+    check("markdown claim ledger pending token", "| overall-token-usage | `pending`" in md, True)
+    check("markdown claim ledger supported source", "| bugswarm-reusable-source | `supported`" in md, True)
     check("markdown includes completion audit", "## Completion Audit" in md, True)
     check("markdown audit includes execute verification", "bugswarm-execute-verification" in md, True)
     check("markdown audit includes oss raw", "oss-raw-glm52" in md, True)
@@ -313,6 +327,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("bugswarm comparison complete", comparisons["bugswarm"]["status"], "complete")
     check("bugswarm comparison success delta", comparisons["bugswarm"]["success_rate_delta"], 1.0)
     check("bugswarm comparison token ratio", comparisons["bugswarm"]["token_ratio_kitsoki_to_raw"], 5.0)
+    claims = {claim["id"]: claim for claim in report["claim_ledger"]["claims"]}
+    check("bugswarm success claim supported", claims["bugswarm-success-rate"]["status"], "supported")
     audit = report["completion_audit"]
     audit_requirements = {item["id"]: item for item in audit["requirements"]}
     check("bugswarm execute audit proven", audit_requirements["bugswarm-execute-verification"]["status"], "proven")

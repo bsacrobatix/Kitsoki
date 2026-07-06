@@ -114,6 +114,19 @@ Blend policy:
 | oss-oracle | pending | 1 | 0 | n/a | n/a | Raw-prompt GLM-5.2 arm has no attempted cells. |
 | overall | pending | 1 | 0 | n/a | n/a | Raw-prompt GLM-5.2 arm has no attempted cells. |
 
+## Research Claim Ledger
+
+Status: `partial` (3 supported, 3 pending).
+
+| claim | status | finding | missing evidence / caveat |
+|---|---|---|---|
+| overall-token-usage | `pending` | The claim is not yet answerable from committed evidence | Raw-prompt GLM-5.2 arm has no attempted cells.; No delta or token ratio is published while the comparison is pending |
+| overall-success-rate | `pending` | The claim is not yet answerable from committed evidence | Raw-prompt GLM-5.2 arm has no attempted cells.; No delta or token ratio is published while the comparison is pending |
+| bugswarm-success-rate | `pending` | The claim is not yet answerable from committed evidence | Kitsoki GLM-5.2 arm has no attempted cells.; Raw-prompt GLM-5.2 arm has no attempted cells.; No delta or token ratio is published while the comparison is pending |
+| bugswarm-reusable-source | `supported` | Imported BugSwarm task count: 1 | Execute-mode RED/GREEN verification is still required before live GLM-5.2 cells |
+| oss-source-mix | `supported` | 20 tasks over 10 public targets; 6 armed bugfix fixture tasks | GLM-5.2 headline cells currently cover only the committed bugfix fixture row |
+| observed-oss-kitsoki-glm52-cell | `supported` | 1 attempted cell(s), 2890980 total tokens | This is not a Kitsoki-vs-raw comparison until the matching raw-prompt arm is attempted |
+
 ## Completion Audit
 
 Status: `incomplete` (4/8 requirements proven).
