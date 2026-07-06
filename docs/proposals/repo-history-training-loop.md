@@ -140,6 +140,53 @@ the process discipline this epic wants to generalize, but it does not replace
 the remaining corpus, generic task-case, precedent-selection, and workflow
 integration slices below.
 
+## External prior art (researched 2026-07-06)
+
+The "convert repo history into graded task cases at scale" idea now has a
+mature external ecosystem. Findings that bear on this epic (the full survey,
+including the substrate-level tools, lives in the hermetic-capsules proposal —
+currently `.context/2026-07-06-hermetic-capsules-proposal.md`, to be promoted
+to `docs/proposals/hermetic-capsules.md`):
+
+- **[SWE-smith](https://swesmith.com/blog.html)** — the scaling reference:
+  50k tasks from 250+ arbitrary repos in ~295 GB of images, using
+  LLM-synthesized bugs when history is thin. Its own conclusion is this
+  epic's constraint: **automated environment setup is the bottleneck**, not
+  case mining. (Python-centric pipeline; the strategy transfers.)
+- **R2E-Gym's SYNGEN pipeline** — back-translates commit history into issue
+  specs and test suites: the external twin of slice 2's "history item
+  graduates into a task manifest."
+  [SWE-rebench](https://arxiv.org/pdf/2602.23866) does the same
+  language-agnostically at scale — worth reading before finalizing the
+  lane-neutral manifest.
+- **[SWE-bench's harness](https://www.swebench.com/SWE-bench/reference/harness/)**
+  — validation discipline to copy: every case must resolve with its
+  ground-truth solution before it counts (99.78% of tasks pass this gate).
+  That is the bakeoff GREEN@fix rule; keep it standing for every lane.
+- **[BugSwarm](https://github.com/BugSwarm/bugswarm)** — the cautionary
+  tale: 3,600+ mined reproducible fail/fix Docker pairs, yet a
+  [critical review](https://arxiv.org/pdf/1905.09375) found ~96% unusable
+  for repair research (duplicates, no failing test, non-source changes).
+  **Curation gates beat mining volume** — this epic's "armed before live
+  drive" decision is the right one; don't relax it to grow case counts.
+- **[GitBug-Actions](https://arxiv.org/pdf/2310.15642)** — reproduces
+  historical bugs using the repo's **own CI workflow** as the environment
+  definition; the cheapest honest env spec for well-CI'd repos when arming
+  mined cases.
+- **[Harbor](https://github.com/harbor-framework/harbor)** (Terminal-Bench's
+  task format + harness) — the emerging lingua franca for agent task
+  environments, with existing drivers for Claude Code/Codex/OpenHands.
+  Keeping the task-case manifest exportable to Harbor's shape (instruction +
+  hidden tests + oracle solution, graded on environment end-state) makes
+  mined corpora externally consumable and comparable.
+
+Net: this epic's shape (mine → arm → gate → grade deterministically) is
+independently converged-on externally; the differentiators to protect are
+lane-neutrality (design/onboarding/docs, not just bugfix), precedent
+selection, and promotion-as-weight-update. The pinned-environment substrate
+itself is the hermetic-capsules proposal's job — this epic should consume
+capsules, not rebuild reproduction machinery per lane.
+
 ## Reuse and extension targets
 
 This epic must build on these current surfaces:
