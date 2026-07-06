@@ -29,7 +29,6 @@ package studio_test
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"

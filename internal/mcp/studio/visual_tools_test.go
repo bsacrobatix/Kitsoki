@@ -420,7 +420,6 @@ func TestVisualGitDiff_CapturesTwoRevisionsAndDiffsScreenshots(t *testing.T) {
 	ctx := context.Background()
 	repo := capsuletest.Open(t, "visual-story-two-revisions")
 	storyRel := filepath.Join("stories", "demo", "app.yaml")
-	storyPath := filepath.Join(repo, storyRel)
 	from := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD~1"))
 	to := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
 
