@@ -70,6 +70,26 @@ BugSwarm source contract:
   mode records the Docker commands, while `--execute` runs each side in
   separate fresh containers.
 
+## Source Mix
+
+The OSS oracle source and BugSwarm are kept as separate source families
+so the report can show blended overall treatment totals without hiding
+which evidence came from deterministic GitHub-content oracles, hidden
+bugfix fixtures, or containerized fail/pass CI artifacts.
+
+| source component | tasks | repos | oracle kinds | split | repositories |
+|---|---:|---:|---|---|---|
+| pre_registered_oss_targets | 20 | 10 | github_content | heldout:4, training:16 | ansible/ansible, grafana/grafana, kubernetes/kubernetes, microsoft/TypeScript, microsoft/vscode, python/cpython, pytorch/pytorch, rust-lang/rust, tensorflow/tensorflow, vercel/next.js |
+| armed_bugfix_fixtures | 6 | 2 | external_bakeoff | heldout:2, training:4 | kitsoki, query-string |
+| BugSwarm containerized_fail_pass_ci_artifacts | 1 | 1 | fail/pass artifact scripts | verification-gated | square/okio |
+
+Blend policy:
+
+- Keep OSS oracle tasks and BugSwarm artifacts as separate source families in denominators.
+- Report overall GLM-5.2 treatment totals only after both Kitsoki and raw-prompt arms have attempted cells.
+- Use total tokens as the primary cross-source cost axis; USD remains secondary and evidence-dependent.
+- Do not count dry-run BugSwarm verification as RED/GREEN proof.
+
 ## GLM-5.2 Headline Matrix
 
 | corpus | treatment | n | attempted | solved | partial | failed | pending | success rate | tokens |

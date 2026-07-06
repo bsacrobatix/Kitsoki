@@ -519,6 +519,97 @@
       }
     }
   },
+  "source_mix": {
+    "blend_policy": [
+      "Keep OSS oracle tasks and BugSwarm artifacts as separate source families in denominators.",
+      "Report overall GLM-5.2 treatment totals only after both Kitsoki and raw-prompt arms have attempted cells.",
+      "Use total tokens as the primary cross-source cost axis; USD remains secondary and evidence-dependent.",
+      "Do not count dry-run BugSwarm verification as RED/GREEN proof."
+    ],
+    "bugswarm": {
+      "component": "containerized_fail_pass_ci_artifacts",
+      "repo_count": 1,
+      "repositories": [
+        "square/okio"
+      ],
+      "status": "adapter-ready",
+      "task_count": 1,
+      "verification_gate": "execute RED/GREEN before live GLM-5.2 cells"
+    },
+    "oss_oracle": {
+      "components": [
+        {
+          "archetypes": {
+            "docs_site_release": 6,
+            "git_ops_landing": 5,
+            "story_runtime": 5,
+            "ui_visual_qa": 4
+          },
+          "description": "Pre-registered public OSS target libraries with GitHub-content RED/GREEN oracles.",
+          "id": "pre_registered_oss_targets",
+          "oracle_kinds": [
+            "github_content"
+          ],
+          "repo_count": 10,
+          "repositories": [
+            "ansible/ansible",
+            "grafana/grafana",
+            "kubernetes/kubernetes",
+            "microsoft/TypeScript",
+            "microsoft/vscode",
+            "python/cpython",
+            "pytorch/pytorch",
+            "rust-lang/rust",
+            "tensorflow/tensorflow",
+            "vercel/next.js"
+          ],
+          "splits": {
+            "heldout": 4,
+            "training": 16
+          },
+          "task_count": 20
+        },
+        {
+          "archetypes": {
+            "bugfix_test_repair": 6
+          },
+          "description": "Existing hidden-oracle bugfix/failing-test fixtures from the bakeoff harness.",
+          "id": "armed_bugfix_fixtures",
+          "oracle_kinds": [
+            "external_bakeoff"
+          ],
+          "repo_count": 2,
+          "repositories": [
+            "kitsoki",
+            "query-string"
+          ],
+          "splits": {
+            "heldout": 2,
+            "training": 4
+          },
+          "task_count": 6
+        },
+        {
+          "archetypes": {},
+          "description": "Other OSS-oracle tasks in the frozen manifest.",
+          "id": "other_oss_oracle_tasks",
+          "oracle_kinds": [],
+          "repo_count": 0,
+          "repositories": [],
+          "splits": {},
+          "task_count": 0
+        }
+      ],
+      "repo_count": 12,
+      "selection_notes": [
+        "20 repo-history tasks cover the pre-registered 10 public OSS targets, two per repo.",
+        "6 existing armed bugfix fixtures add bugfix/failing-test coverage from query-string and kitsoki.",
+        "All tasks record deterministic RED/GREEN proof before freeze; heldout tasks are marked in the manifest and must not be executed during training rounds."
+      ],
+      "status": "frozen",
+      "task_count": 26
+    }
+  },
   "study_protocol": {
     "candidate": "glm-5.2",
     "execution_steps": [
