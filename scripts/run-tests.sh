@@ -58,6 +58,16 @@ mining_skipped=0
 mining_total=0
 declare -a MINING_FAILED
 
+# Build the plain kitsoki binary once for all suites that need a command-line
+# executable. The flow suite uses it directly, and Go tests can opt into the same
+# binary via KITSOKI_TEST_KITSOKI_BINARY instead of linking their own copies.
+FLOW_BINARY="$ROOT/.kitsoki-flows"
+flow_built=1
+if ! go build -o "$FLOW_BINARY" ./cmd/kitsoki >"$TMP/build.log" 2>&1; then
+	flow_built=0
+	flow_failures=1
+fi
+
 # ---------------------------------------------------------------------------
 # Suite 1: go test $KITSOKI_GO_TEST_FLAGS ./...   (-json so we can separate signal from per-test noise)
 # ---------------------------------------------------------------------------
@@ -72,7 +82,11 @@ section "$GO_TEST_LABEL"
 # Intentionally split KITSOKI_GO_TEST_FLAGS on shell words so callers can pass
 # ordinary go-test flags like "-short -run TestName".
 # shellcheck disable=SC2086
-go test -json $GO_TEST_FLAGS ./... >"$GO_JSON" 2>"$TMP/go.stderr"
+if [ "$flow_built" -eq 1 ]; then
+	KITSOKI_TEST_KITSOKI_BINARY="$FLOW_BINARY" go test -json $GO_TEST_FLAGS ./... >"$GO_JSON" 2>"$TMP/go.stderr"
+else
+	go test -json $GO_TEST_FLAGS ./... >"$GO_JSON" 2>"$TMP/go.stderr"
+fi
 go_rc=$?
 
 # Reconstruct the conventional `go test` text into the full report.
@@ -110,12 +124,8 @@ mapfile -t STORY_APPS < <(git ls-files | grep -E '^stories/[^/]+/app\.yaml$' | s
 
 declare -a FLOW_FAILED_APPS
 flow_apps_total=0
-flow_built=1
 
-# Plain `go build` — flow replay needs no embedded SPA.
-if ! go build -o ./.kitsoki-flows ./cmd/kitsoki >"$TMP/build.log" 2>&1; then
-	flow_built=0
-	flow_failures=1
+if [ "$flow_built" -ne 1 ]; then
 	{ echo "FAILED to build flow runner:"; cat "$TMP/build.log"; } >>"$REPORT"
 fi
 
@@ -138,7 +148,7 @@ if [ "$flow_built" -eq 1 ]; then
 		slug="$(echo "$app" | tr '/' '-')"
 		fj="$TMP/flow-$slug.json"
 		fout="$TMP/flow-$slug.out"
-		./.kitsoki-flows test flows "$app" --json "$fj" >"$fout" 2>&1
+		"$FLOW_BINARY" test flows "$app" --json "$fj" >"$fout" 2>&1
 		rc=$?
 		{
 			printf -- '-- %s (exit %d)\n' "$app" "$rc"
