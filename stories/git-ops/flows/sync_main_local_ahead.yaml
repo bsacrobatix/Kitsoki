@@ -40,6 +40,16 @@ host_handlers:
             ahead:    10
             behind:   0
             ok:       true
+      push_main_exec:
+        data:
+          ok:        true
+          exit_code: 0
+          stdout_json:
+            outcome:  pushed
+            output:   "To github.com:example/repo.git\n \trefs/heads/main:refs/heads/main\t0000000..1111111"
+            ahead:    10
+            behind:   0
+            ok:       true
 
 turns:
   - intent: { name: sync_main, slots: { remote: origin } }
@@ -51,6 +61,17 @@ turns:
         branch:   ""
         worktree: ""
         output:   "main already contains origin/main, but local main is ahead by 10 commits.\nRun push_main remote=origin or open/merge a PR before treating the remote as synchronized."
+        ahead:    10
+        behind:   0
+        ok:       true
+  - intent: { name: push_main, slots: {} }
+    expect_state: push_main
+    expect_world:
+      push_remote:        origin
+      push_remote_branch: main
+      push_result:
+        outcome:  pushed
+        output:   "To github.com:example/repo.git\n \trefs/heads/main:refs/heads/main\t0000000..1111111"
         ahead:    10
         behind:   0
         ok:       true
