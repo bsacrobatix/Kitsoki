@@ -25,6 +25,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -210,6 +213,32 @@ authentication.`,
 			}
 
 			// ── Story discovery config (flags > .kitsoki.yaml > ./stories) ──
+			// Loading the config (root-story world-key resolution) and the
+			// story catalogue below both run per-story loader lint (deprecated
+			// agent fields, missing on_enter bind fallbacks, etc.) via
+			// slog.Warn. Across dozens of transitively-imported stories that's
+			// hundreds of startup lines with no bearing on `web` actually
+			// starting — real failures still surface as returned errors, not
+			// through this logger. Suppress the default logger for the whole
+			// load+scan phase, matching the same precedent `run` uses to keep
+			// TUI/output rendering clean (main.go's oldLogger/io.Discard
+			// swaps). slog.SetDefault also redirects the stdlib "log"
+			// package's writer/flags as a side effect when swapping to a
+			// non-default handler (see log/slog's SetDefault doc) and does
+			// NOT undo that on restore (the original default is specially
+			// exempted) — so log.Writer()/log.Flags() are saved and restored
+			// explicitly too, or the stdlib log package would stay silenced
+			// for the rest of the process.
+			restoreDefaultLogging := suppressDefaultLogging()
+			loggingRestored := false
+			restoreLogging := func() {
+				if loggingRestored {
+					return
+				}
+				restoreDefaultLogging()
+				loggingRestored = true
+			}
+			defer restoreLogging()
 			cfg, err := webconfig.Load(configPath)
 			if err != nil {
 				return err
@@ -258,6 +287,7 @@ authentication.`,
 			}
 			defer registry.Close()
 			stories, err := registry.Rescan()
+			restoreLogging()
 			if err != nil {
 				return fmt.Errorf("discover stories: %w", err)
 			}
@@ -336,6 +366,18 @@ authentication.`,
 	cmd.Flags().StringVar(&kitsDir, "kits-dir", "", "directory of installed kit.yaml roots (enables kit.<kit>.<iface>.<op> + runstatus.kits.list, S3b)")
 
 	return cmd
+}
+
+func suppressDefaultLogging() func() {
+	oldLogger := slog.Default()
+	oldLogOutput := log.Writer()
+	oldLogFlags := log.Flags()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return func() {
+		slog.SetDefault(oldLogger)
+		log.SetOutput(oldLogOutput)
+		log.SetFlags(oldLogFlags)
+	}
 }
 
 // resolveWebBugRoot picks the repo root under which web-filed bug reports
