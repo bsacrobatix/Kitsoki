@@ -710,6 +710,8 @@ def scenario_plan(scenarios: list[dict]) -> list[dict]:
             "evidence_status": "missing",
             "artifacts": {},
         }
+        if scenario.get("natural_utterances"):
+            item["natural_utterances"] = scenario["natural_utterances"]
         if scenario.get("transports"):
             item["transports"] = scenario["transports"]
         planned.append(item)
@@ -1821,6 +1823,14 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
         "feature-implementation",
         "evidence-backed-product-bug",
     }
+    core_natural_utterance_scenarios = set(schema.get("scenario", {}).get(
+        "core_scenarios_require_natural_utterances",
+        ["project-onboarding", "prd-design", "bugfix"],
+    ))
+    natural_utterance_required = schema.get("scenario", {}).get(
+        "natural_utterance_required",
+        ["text", "source", "source_ref"],
+    )
     # The four workflow personas WS-F wires across every natural-use scenario
     # (surface_preference names each persona's primary surface: TUI, web,
     # docs, VS Code). Product-journey's generic run/agent-brief/driver-plan
@@ -1902,6 +1912,38 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
             add_corpus_issue(issues, "error", "scenario-success-criteria", "Scenario must have success criteria", scenario_id)
         if not scenario.get("evidence"):
             add_corpus_issue(issues, "error", "scenario-evidence", "Scenario must declare evidence slots", scenario_id)
+        if scenario_id in core_natural_utterance_scenarios:
+            utterances = scenario.get("natural_utterances", [])
+            if not isinstance(utterances, list) or not utterances:
+                add_corpus_issue(
+                    issues,
+                    "error",
+                    "scenario-natural-utterances",
+                    "Core scenario must carry transcript-derived natural utterances",
+                    scenario_id,
+                )
+            else:
+                missing_items = []
+                for index, utterance in enumerate(utterances, start=1):
+                    if not isinstance(utterance, dict):
+                        missing_items.append(f"{scenario_id}[{index}]: not an object")
+                        continue
+                    missing_utterance_keys = [
+                        key for key in natural_utterance_required
+                        if not str(utterance.get(key, "")).strip()
+                    ]
+                    if missing_utterance_keys:
+                        missing_items.append(f"{scenario_id}[{index}]: {', '.join(missing_utterance_keys)}")
+                    if utterance.get("source") != "session-transcript":
+                        missing_items.append(f"{scenario_id}[{index}]: source={utterance.get('source', '')}")
+                if missing_items:
+                    add_corpus_issue(
+                        issues,
+                        "error",
+                        "scenario-natural-utterances",
+                        "Core scenario natural utterances must name transcript source metadata",
+                        "; ".join(missing_items),
+                    )
         unknown_evidence = [
             kind for kind in scenario.get("evidence", [])
             if evidence_capture_hint(kind) == "Save this evidence artifact and attach it to the run."
@@ -2211,7 +2253,7 @@ def driver_actions(scenario: dict, run_json: dict, evidence_items: list[dict]) -
         if tool in {"session.submit", "session.trace"} or tool in required_mcp
     ]
     capture_tools = ["visual.observe", "render.tui", "session.trace"]
-    return [
+    actions = [
         {
             "id": "open_surface",
             "goal": "Open or attach the Kitsoki/product surface named by the scenario.",
@@ -2261,6 +2303,17 @@ def driver_actions(scenario: dict, run_json: dict, evidence_items: list[dict]) -
             "record": "Journal the attempt even when the scenario only produced a blocker.",
         },
     ]
+    natural_utterances = scenario.get("natural_utterances", [])
+    if natural_utterances:
+        for action in actions:
+            if action["id"] == "act_as_persona":
+                action["natural_utterances"] = natural_utterances
+                action["record"] = (
+                    "Prefer the transcript-derived utterances when route quality is under test; "
+                    "otherwise use deterministic action handles."
+                )
+                break
+    return actions
 
 
 def media_kind(evidence_kind: str, artifact_path: str) -> str:
@@ -2659,6 +2712,7 @@ def _execution_plan_step(
         "project": run_json["project"]["id"],
         "task": scenario["task"],
         "task_prompt": scenario.get("task_prompt", scenario["task"]),
+        "natural_utterances": scenario.get("natural_utterances", []),
         "primary_story": scenario["primary_story"],
         "live_budget": scenario_live_budget(run_json, scenario["id"]),
         "mcp_steps": [
@@ -2788,6 +2842,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict) -> d
                 "mcp_tools": [mcp["tool"] for mcp in step["mcp_steps"]],
                 "success_criteria": step["success_criteria"],
                 "evidence": [item["kind"] for item in step["evidence"]],
+                "natural_utterances": step.get("natural_utterances", []),
                 "quality_gate": step.get("quality_gate", scenario_quality_gate(step["scenario"])),
                 "live_budget": step.get("live_budget", scenario_live_budget(run_json, step["scenario"])),
                 **({"transport": step["transport"], "leg_id": step["leg_id"]} if "transport" in step else {}),
@@ -2846,6 +2901,7 @@ def _driver_plan_entry(
             f"Evidence emphasis: {lens['evidence_emphasis']}",
             "Use natural operator phrasing where route quality or prompt quality is under test.",
         ],
+        "natural_utterances": scenario.get("natural_utterances", []),
         "persona_lens": lens,
         "evidence": evidence_view,
         "success_criteria": scenario["success_criteria"],
@@ -3000,6 +3056,17 @@ def render_driver_plan(plan: dict) -> str:
             "",
             scenario["task_prompt"],
             "",
+        ])
+        utterances = scenario.get("natural_utterances", [])
+        if utterances:
+            lines.extend(["### Transcript-Derived Utterances", ""])
+            for utterance in utterances:
+                lines.append(
+                    f"- \"{utterance.get('text', '')}\" "
+                    f"({utterance.get('source', '')}: {utterance.get('source_ref', '')})"
+                )
+            lines.append("")
+        lines.extend([
             "### Action Sequence",
             "",
         ])
@@ -3020,6 +3087,15 @@ def render_driver_plan(plan: dict) -> str:
                 f"- Record: {action['record']}",
                 "",
             ])
+            action_utterances = action.get("natural_utterances", [])
+            if action_utterances:
+                lines.extend(["Transcript-derived utterances:", ""])
+                for utterance in action_utterances:
+                    lines.append(
+                        f"- \"{utterance.get('text', '')}\" "
+                        f"({utterance.get('source', '')}: {utterance.get('source_ref', '')})"
+                    )
+                lines.append("")
         lines.extend(["", "### Persona Prompts", ""])
         for prompt in scenario["persona_prompts"]:
             lines.append(f"- {prompt}")

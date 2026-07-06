@@ -69,7 +69,9 @@
   "stage_statuses": ["planned", "ready", "captured", "cached_validated", "validated", "blocked", "error"],
   "scenario": {
     "required": ["id", "label", "stage", "task", "task_prompt", "primary_story", "required_mcp", "evidence", "success_criteria"],
-    "optional": ["transports"]
+    "optional": ["natural_utterances", "transports"],
+    "natural_utterance_required": ["text", "source", "source_ref"],
+    "core_scenarios_require_natural_utterances": ["project-onboarding", "prd-design", "bugfix"]
   },
   "transports": {
     "comment": "Transport is the surface a scenario is driven and judged on. The `transports` field on a scenario is optional -- scenarios that omit it (today, the mined scenarios) get an implicit contract derived from required_mcp by run.py's default_scenario_transports(), so existing scenarios keep behaving exactly as before this field existed.",

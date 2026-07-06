@@ -40,6 +40,18 @@
       "label": "Project onboarding",
       "stage": "onboard_project",
       "task": "Use the documented Kitsoki onboarding path to configure the assigned repository and explain how bugfix/design work should be launched.",
+      "natural_utterances": [
+        {
+          "text": "this repo is fresh on this machine - i want make install to run cleanly",
+          "source": "session-transcript",
+          "source_ref": "mined-scn-74252840-25f6-4449-85a0-8ad99f7c97d5-0000"
+        },
+        {
+          "text": "so make install will work now?",
+          "source": "session-transcript",
+          "source_ref": "mined-scn-74252840-25f6-4449-85a0-8ad99f7c97d5-0001"
+        }
+      ],
       "primary_story": "stories/dev-story/app.yaml",
       "required_mcp": [
         "session.open",
@@ -70,6 +82,18 @@
       "label": "Bug fix with hidden oracle",
       "stage": "fix_bug",
       "task": "Start from public issue/repro material, drive Kitsoki's bugfix workflow, and score the resulting worktree with the project's deterministic oracle.",
+      "natural_utterances": [
+        {
+          "text": "resolve the red gate test that's already written but not committed",
+          "source": "session-transcript",
+          "source_ref": "mined-scn-1b4ace86-f192-43b0-ab86-16142fec0079-0001"
+        },
+        {
+          "text": "file the bug, then land the fixes",
+          "source": "session-transcript",
+          "source_ref": "mined-scn-c4d281a2-30e4-4002-9152-59d28d824abc-0001"
+        }
+      ],
       "primary_story": "stories/bugfix/app.yaml",
       "required_mcp": [
         "session.open",
@@ -100,6 +124,18 @@
       "label": "PRD and design workflow",
       "stage": "plan_project_work",
       "task": "Use Kitsoki to turn a project improvement idea into a PRD/design artifact grounded in repository files, conventions, and tests.",
+      "natural_utterances": [
+        {
+          "text": "i want to dogfood kitsoki to build a critical new feature",
+          "source": "session-transcript",
+          "source_ref": "mined-scn-2e107a60-10e3-4d70-afe5-ea995adc4d6f-0000"
+        },
+        {
+          "text": "what does it take to get an extension uploaded to vs code marketplace?",
+          "source": "session-transcript",
+          "source_ref": "mined-scn-rollout-2026-06-22t17-54-26-019eeef7-9fdf-7060-86d0-1b1c25348cd5-0000"
+        }
+      ],
       "primary_story": "stories/dev-story/app.yaml",
       "required_mcp": [
         "session.open",
