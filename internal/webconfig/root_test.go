@@ -28,6 +28,19 @@ func repoRootFromCWD(t *testing.T) string {
 	}
 }
 
+func writableRepoRoot(t *testing.T) string {
+	t.Helper()
+	realRoot := repoRootFromCWD(t)
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module kitsoki\n"), 0o644); err != nil {
+		t.Fatalf("write temp go.mod: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(realRoot, "stories"), filepath.Join(root, "stories")); err != nil {
+		t.Fatalf("symlink stories into temp repo: %v", err)
+	}
+	return root
+}
+
 func TestLoadRoot_Rung0_NoRootBlock(t *testing.T) {
 	// A config with only harness-profile concerns (or none) ⇒ rung 0: Root is
 	// nil and RootSpec() returns nil so SynthesizeRoot uses its default.
@@ -51,7 +64,7 @@ func TestLoadRoot_Rung0_NoRootBlock(t *testing.T) {
 func TestLoadRoot_Rung1_Overrides(t *testing.T) {
 	// World-key validation loads dev-story, so write the config under the repo
 	// worktree where @kitsoki/dev-story resolves.
-	root := repoRootFromCWD(t)
+	root := writableRepoRoot(t)
 	dir, err := os.MkdirTemp(root, "wc-rung1-")
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +99,7 @@ func TestLoadRoot_Rung1_Overrides(t *testing.T) {
 }
 
 func TestLoadRoot_ProjectProfile(t *testing.T) {
-	root := repoRootFromCWD(t)
+	root := writableRepoRoot(t)
 	dir, err := os.MkdirTemp(root, "wc-profile-")
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +165,7 @@ dev_story_profile:
 }
 
 func TestLoadRoot_ProjectProfileExplicitRootWins(t *testing.T) {
-	root := repoRootFromCWD(t)
+	root := writableRepoRoot(t)
 	dir, err := os.MkdirTemp(root, "wc-profile-override-")
 	if err != nil {
 		t.Fatal(err)
@@ -196,7 +209,7 @@ dev_story_profile:
 }
 
 func TestLoadRoot_FailFast(t *testing.T) {
-	root := repoRootFromCWD(t)
+	root := writableRepoRoot(t)
 
 	cases := []struct {
 		name   string

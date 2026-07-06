@@ -61,7 +61,7 @@ declare -a MINING_FAILED
 # Build the plain kitsoki binary once for all suites that need a command-line
 # executable. The flow suite uses it directly, and Go tests can opt into the same
 # binary via KITSOKI_TEST_KITSOKI_BINARY instead of linking their own copies.
-FLOW_BINARY="$ROOT/.kitsoki-flows"
+FLOW_BINARY="$TMP/kitsoki-flows"
 flow_built=1
 if ! go build -o "$FLOW_BINARY" ./cmd/kitsoki >"$TMP/build.log" 2>&1; then
 	flow_built=0
