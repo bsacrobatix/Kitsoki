@@ -193,6 +193,50 @@ WB.2 paired-task gate:
 python3 tools/arena/tests/run_no_llm.py
 ```
 
+## BugSwarm source pipeline
+
+BugSwarm is a reusable external source alongside the built-in OSS oracle corpus.
+The arena adapter stays offline until verification is explicitly requested:
+
+```bash
+# Convert an exported BugSwarm artifact list into arena source YAML.
+python3 tools/arena/scripts/bugswarm_to_arena.py \
+    --in .artifacts/bugswarm/artifacts.json \
+    --out .artifacts/bugswarm/source.yaml
+
+# Optional dry-run plan (no Docker execution).
+python3 tools/arena/scripts/bugswarm_verify_source.py \
+    --source .artifacts/bugswarm/source.yaml \
+    --out .artifacts/bugswarm/verify-plan.json
+
+# Explicit Docker verification: fresh container for failed and passed scripts.
+python3 tools/arena/scripts/bugswarm_verify_source.py \
+    --source .artifacts/bugswarm/source.yaml \
+    --out .artifacts/bugswarm/verify.json \
+    --execute
+
+# Apply execute-mode RED/GREEN evidence to the source.
+python3 tools/arena/scripts/bugswarm_apply_verification.py \
+    --source .artifacts/bugswarm/source.yaml \
+    --verification .artifacts/bugswarm/verify.json \
+    --out .artifacts/bugswarm/verified-source.yaml
+
+# Generate a schedulable kitsoki-vs-raw-prompt paired-task spec.
+python3 tools/arena/scripts/bugswarm_to_arena_spec.py \
+    --source .artifacts/bugswarm/verified-source.yaml \
+    --out .artifacts/bugswarm/bugswarm-glm52.yaml
+
+# No-spend arming path through arena.
+python3 tools/arena/arena.py run \
+    --spec .artifacts/bugswarm/bugswarm-glm52.yaml \
+    --out .artifacts/arena/bugswarm-glm52
+```
+
+The generated spec includes only tasks with `verified_red: true` and
+`verified_green: true` by default. `--live` BugSwarm paired-task cells currently
+report `blocked`; the live adapter still needs artifact materialization and a
+hidden scoring bridge before spending on GLM cells.
+
 ## Cost discipline
 
 `run` defaults to the **no-LLM** path: for bugfix that is `bench.py verify`

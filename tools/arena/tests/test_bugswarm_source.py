@@ -29,6 +29,7 @@ bugswarm = next((s for s in sources.get("sources", []) if s.get("id") == "bugswa
 check("bugswarm source exists", bugswarm is not None, True)
 check("bugswarm adapter path recorded", bugswarm.get("adapter") if bugswarm else "", "tools/arena/scripts/bugswarm_to_arena.py")
 check("bugswarm verification applier path recorded", bugswarm.get("verification_applier") if bugswarm else "", "tools/arena/scripts/bugswarm_apply_verification.py")
+check("bugswarm spec generator path recorded", bugswarm.get("spec_generator") if bugswarm else "", "tools/arena/scripts/bugswarm_to_arena_spec.py")
 check("bugswarm oracle kind recorded", bugswarm.get("oracle_contract", {}).get("kind") if bugswarm else "", "bugswarm_fail_pass_pair")
 
 with tempfile.TemporaryDirectory() as tmp:
