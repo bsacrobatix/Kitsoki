@@ -675,6 +675,18 @@ dev-workflow-matrix:
 dev-workflow-matrix-check:
 	python3 tools/dev-workflow-matrix/generate_test.py
 	python3 tools/dev-workflow-matrix/run_checks_test.py
+	# WS-G G1 experience-check runners (docs-fidelity + ux-heuristic) — fully
+	# mocked, DI'd agent dispatch, no LLM/network/subprocess.
+	python3 tools/dev-workflow-matrix/docs_fidelity_test.py
+	python3 tools/dev-workflow-matrix/ux_heuristic_test.py
+
+# dev-workflow-experience-list enumerates the declared docs-fidelity /
+# ux-heuristic experience checks (WS-G G1) without dispatching any agent —
+# the --list entry point both runners expose alongside --dry-run.
+.PHONY: dev-workflow-experience-list
+dev-workflow-experience-list:
+	python3 tools/dev-workflow-matrix/docs_fidelity.py --list
+	python3 tools/dev-workflow-matrix/ux_heuristic.py --list
 
 # dev-workflow-gate is the WS-F F1 exit criterion: "make target / CI job that
 # prints the live matrix; a red cell blocks declaring the workflow

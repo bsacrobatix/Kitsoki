@@ -72,3 +72,94 @@ a fake subprocess runner rather than really invoking `go run`/`python3`).
 `go run ./cmd/kitsoki test routing` does not exist yet (checked 2026-07-05) so
 the routing-fixture check the WS-F plan names is not wired here — add a
 `CheckDef` for it once that CLI lands.
+
+## Experience-check runners (WS-G G1: docs-fidelity + ux-heuristic)
+
+`run_checks.py` only writes the **mechanical** proof class
+(`check_type: replay`, plus the one `journey-verdict` pilot). The other two
+experience check types the schema's `check_type` discriminator names —
+`docs-fidelity` and `ux-heuristic` — have their own runners, siblings of
+`run_checks.py` in this directory:
+
+- `docs_fidelity.py` — dispatches a persona agent whose ONLY map is one
+  canonical `docs/` narrative (plan G3), collects a per-claim
+  truthful/stale/missing score plus an overall pass, and writes a
+  `check_type: "docs-fidelity"` verdict. A doc that doesn't exist, or an
+  agent that reports any stale/missing claim, is an honest `failed` — never a
+  hygiene footnote.
+- `ux_heuristic.py` — takes already-captured evidence for a cell (web
+  screenshots, `render_tui_png` output, or a VS Code webview capture),
+  reuses the **same catalog** as the `kitsoki-ui-review` skill
+  (`.agents/skills/kitsoki-ui-review/heuristics.yaml` — no second catalog
+  invented), dispatches a vision-critique agent against it, and writes a
+  `check_type: "ux-heuristic"` verdict. Like that skill's own gate, this
+  runner recomputes pass/fail from finding severities itself rather than
+  trusting the agent's self-reported `overall_pass` — an `error`-severity
+  finding always fails the check.
+
+**Home + shape (why these are NOT arena plugins):** `tools/arena/arena/checks.py`
+already has `docs-fidelity` / `ux-heuristic` / `journey-verdict` check types,
+but its `docs-fidelity` is a declared-but-unimplemented placeholder
+(`unimplemented_check_result`), and its `ux-heuristic`/`journey-verdict` are
+pure **file adapters** — they read an already-produced `verdict.json` off
+disk and fold it into an arena `CellResult`; they never dispatch an agent
+themselves. `docs_fidelity.py`/`ux_heuristic.py` here ARE that missing
+producer for the dev-workflow matrix's own cells, matching how
+`run_checks.py` already writes `replay`/`journey-verdict` verdicts directly
+for this matrix without going through arena's container executor at all —
+same simplicity bias, same writer contract (a completion-state JSON file
+`generate.py --verdicts-dir` ingests by `(workflow, surface, repo,
+check_type)`).
+
+**Dependency injection:** both runners take an `agent_dispatch.DispatchFn`
+(`agent_dispatch.py`, shared): production defaults to
+`agent_dispatch.claude_cli_dispatch` (one headless `claude -p ...
+--output-format json` turn); their own test suites
+(`docs_fidelity_test.py`, `ux_heuristic_test.py`) inject a scripted fake that
+returns canned JSON — zero LLM, zero network, zero real subprocess, per
+AGENTS.md.
+
+**Enumerate without dispatching an agent:**
+
+```
+make dev-workflow-experience-list
+```
+
+or directly:
+
+```
+python3 tools/dev-workflow-matrix/docs_fidelity.py --list
+python3 tools/dev-workflow-matrix/ux_heuristic.py --list
+```
+
+Both scripts also support `--dry-run` (prints what would be dispatched —
+the doc path or the frame paths — without calling the dispatch function at
+all) and `--only <workflow-ids>` to scope a run, matching `run_checks.py`'s
+CLI shape.
+
+**Running a REAL (live) check.** Neither script is run live in this slice —
+that is a deliberate scope boundary, not an oversight. When a real run is
+warranted:
+
+```
+python3 tools/dev-workflow-matrix/docs_fidelity.py --only onboard
+python3 tools/dev-workflow-matrix/ux_heuristic.py --only fix-bug
+```
+
+dispatches a real agent turn per declared check and writes real verdict
+files into `.artifacts/dev-workflow-matrix/verdicts/` (never committed). Per
+plan G5, every judged run like this is meant to be **cassette-recorded**, the
+same way the repo's other live-gated tools work (`kitsoki record` + `kitsoki
+test flows` for story replay, `tools/usable-kitsoki-gate/run_live_gate.py`'s
+`--live-gate` flag for its live path): capture the real dispatch once, then
+replay it no-LLM for dispute/regression-diffing without re-spend. Recording
+discipline for these two runners' own dispatch calls (a cassette format for
+`agent_dispatch.DispatchFn`, wired the way `--host-cassette` wires host calls
+elsewhere) is intentionally NOT built in this slice — it is deferred to
+whichever WS-G slice actually schedules continuous/nightly persona runs (plan
+G5), so it can be designed once against real recorded traffic instead of
+speculatively here. Until then, treat any live invocation as a manual,
+budget-aware run (per the "maximize autonomous work, quota pacing is the only
+constraint" decision) rather than something CI or `make dev-workflow-gate`
+calls automatically — neither Makefile target above touches these two
+scripts.
