@@ -44,7 +44,11 @@ It is intentionally no-LLM:
   and `bugfix`) for every active curated persona: scoped persona runs, replayed
   driver proof, target/persona/lens preservation in the driver and brief
   contracts, credible issue filing, gh-agent fixes, independent verification,
+  integration landing proof, retained JSON/Markdown ledger artifacts,
   human-review artifacts, and mechanically derived found/filed/fixed stats.
+  Re-check a retained ledger with `tools/product-journey/run.py
+  --validate-marathon-smoke-ledger --marathon-smoke-ledger <path>
+  --json-output`.
 - `rollup` calls `tools/product-journey/run.py --rollup-matrix --json-output`
   to create or refresh the matrix-level Slidey deck from reviewed run bundles.
 - `validate_matrix` calls `tools/product-journey/run.py --validate-matrix
