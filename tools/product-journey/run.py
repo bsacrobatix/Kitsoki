@@ -4600,6 +4600,24 @@ def filed_issue_evidence_lines(findings: dict) -> list[str]:
     return lines
 
 
+def filed_issue_evidence_links(findings: dict) -> list[str]:
+    links: list[str] = []
+    seen: set[str] = set()
+    items = findings.get("items", []) if isinstance(findings, dict) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        issue = item.get("github_issue", {}) if isinstance(item.get("github_issue", {}), dict) else {}
+        if not str(issue.get("url", "")).strip():
+            continue
+        for asset in github_issue_evidence_assets(issue):
+            url = asset["url"]
+            if url not in seen:
+                seen.add(url)
+                links.append(url)
+    return links
+
+
 def enqueue_gh_agent_fixes(run_dir: Path, ticket_repo: str, db_path: str, story: str) -> dict:
     if not db_path:
         return {
@@ -5054,6 +5072,7 @@ def missing_autonomous_fix_report_tokens(run_dir: Path, findings: dict) -> list[
         for item in findings.get("items", [])
         if isinstance(item, dict) and item.get("github_issue", {}).get("url")
     ]
+    expected.extend(filed_issue_evidence_links(findings))
     expected.extend(
         job.get("run_url", "")
         for job in gh_agent.get("drained_jobs", [])
@@ -8679,6 +8698,10 @@ def validate_run_bundle(run_dir: Path) -> dict:
             for job in gh_agent.get("drained_jobs", [])
             if isinstance(job, dict) and job.get("run_url")
         ]
+        original_issue_evidence = filed_issue_evidence_links(findings_json)
+        if original_issue_evidence:
+            expected_tokens.append("issue_evidence=")
+            expected_tokens.extend(original_issue_evidence)
         expected_tokens.append("autonomous-fix-report.md")
         expected_tokens.extend(
             item.get("comment_url", "")
