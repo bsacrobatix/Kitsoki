@@ -122,6 +122,7 @@ world:
   target:               { type: string, default: "" }   # --project, or primary_story override for an ad-hoc scenario
   seed:                 { type: string, default: "scenario-qa" }
   live_profile:         { type: string, default: "" }   # harness profile the driver passes to nested live session.new calls
+  live_budget_minutes:  { type: int, default: 0 }   # caller override for run.py --live-budget-minutes; 0 = run.py's own default (20)
   mode:                 { type: string, default: "catalog" } # catalog | adhoc
 
   # ── run bundle ─────────────────────────────────────────────────────────
@@ -182,6 +183,7 @@ intents:
       target:       { type: string, required: false }
       seed:         { type: string, required: false }
       profile:      { type: string, required: false }  # harness profile for the driver's nested LIVE sessions (e.g. claude-native)
+      live_budget_minutes: { type: int, required: false }  # override run.py's default per-scenario live budget (20 min)
   # ── internal loop drivers (emitted by on_enter, not typed by an operator) ──
   run_emitted:
     description: "(internal) the run bundle's project/persona resolution committed; re-enter plan to resolve transport legs."

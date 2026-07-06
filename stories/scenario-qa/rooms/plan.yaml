@@ -81,6 +81,8 @@ states:
             - "{{ world.mode == 'adhoc' ? 'bugfix' : world.scenario_ref }}"
             - --transport
             - "{{ world.transport_arg }}"
+            - --live-budget-minutes
+            - "{{ world.live_budget_minutes > 0 ? world.live_budget_minutes : 20 }}"
             - --json-output
           cwd: "."
         bind:
