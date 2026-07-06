@@ -27,7 +27,11 @@ by proving the server is current:
 
 1. Call `studio.ping`.
 2. Call `studio.handles`.
-3. If the workflow depends on recently added fields, make a harmless
+3. Compare `studio.ping.revision` with `git rev-parse HEAD` for the checkout you
+   are about to use. If `revision` is missing, differs from `HEAD`, or
+   `working_dir` / `executable` point at an unexpected checkout, treat the MCP
+   process as stale and reconnect/reload before trusting `workflow.*` output.
+4. If the workflow depends on recently added fields, make a harmless
    `workflow.status`, `story.validate`, or similar call before spending a live
    run.
 

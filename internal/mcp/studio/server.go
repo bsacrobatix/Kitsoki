@@ -34,6 +34,10 @@ package studio
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"runtime/debug"
+	"strings"
 	"sync"
 
 	"kitsoki/internal/app"
@@ -130,7 +134,7 @@ func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 	// studio.ping — liveness; proves transport + attach.
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "studio.ping",
-		Description: "Liveness probe for the kitsoki studio server. Returns {ok, version}; proves the stdio transport and attach config resolved to this binary.",
+		Description: "Liveness and identity probe for the kitsoki studio server. Returns {ok, version, revision?, modified?, go_version?, executable?, working_dir?}; compare revision/working_dir with the checkout before trusting workflow generation.",
 	}, srv.handlePing)
 
 	// studio.handles — lists the open handles and their modes.
@@ -243,8 +247,13 @@ type PingArgs struct{}
 // PingOK is the success response of studio.ping. JSON tags are load-bearing
 // (read by the client).
 type PingOK struct {
-	OK      bool   `json:"ok"`      // always true on this branch
-	Version string `json:"version"` // the studio server version (== Version)
+	OK         bool   `json:"ok"`                    // always true on this branch
+	Version    string `json:"version"`               // the studio server version (== Version)
+	Revision   string `json:"revision,omitempty"`    // vcs.revision from Go build info, when available
+	Modified   string `json:"modified,omitempty"`    // vcs.modified from Go build info, when available
+	GoVersion  string `json:"go_version,omitempty"`  // Go toolchain version from build info
+	Executable string `json:"executable,omitempty"`  // resolved process path, useful when an MCP client is stale
+	WorkingDir string `json:"working_dir,omitempty"` // process cwd, useful when an MCP client is pointed at another checkout
 }
 
 // HandlesArgs is the (empty) input to studio.handles.
@@ -252,14 +261,57 @@ type HandlesArgs struct{}
 
 // ── handlers ──────────────────────────────────────────────────────────────────
 
-// handlePing returns {ok:true, version}. It never errors — its only job is to
-// prove the transport and attach config resolved to this server.
+// handlePing returns server identity. It never errors — its job is to prove the
+// transport and attach config resolved to this server, and to make stale MCP
+// attachments obvious before workflow generation spends time on the wrong code.
 func (srv *Server) handlePing(
 	ctx context.Context,
 	req *mcpsdk.CallToolRequest,
 	args PingArgs,
 ) (*mcpsdk.CallToolResult, any, error) {
-	return nil, PingOK{OK: true, Version: Version}, nil
+	return nil, buildPingOK(), nil
+}
+
+func buildPingOK() PingOK {
+	ok := PingOK{OK: true, Version: Version}
+	if info, available := debug.ReadBuildInfo(); available {
+		ok.GoVersion = info.GoVersion
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				ok.Revision = setting.Value
+			case "vcs.modified":
+				ok.Modified = setting.Value
+			}
+		}
+	}
+	if exe, err := os.Executable(); err == nil {
+		ok.Executable = exe
+	}
+	if wd, err := os.Getwd(); err == nil {
+		ok.WorkingDir = wd
+		if ok.Revision == "" {
+			ok.Revision = pingGitOutput(wd, "rev-parse", "HEAD")
+		}
+		if ok.Modified == "" {
+			if status := pingGitOutput(wd, "status", "--porcelain"); status != "" {
+				ok.Modified = "true"
+			} else if ok.Revision != "" {
+				ok.Modified = "false"
+			}
+		}
+	}
+	return ok
+}
+
+func pingGitOutput(dir string, args ...string) string {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // handleHandles snapshots the open handles. It never errors — an empty studio

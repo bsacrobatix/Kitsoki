@@ -94,6 +94,11 @@ func TestStudioPing(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &ok))
 	assert.True(t, ok.OK, "ping ok")
 	assert.Equal(t, studio.Version, ok.Version, "ping version")
+	assert.NotEmpty(t, ok.GoVersion, "ping should report Go build identity")
+	assert.NotEmpty(t, ok.Executable, "ping should identify the attached executable")
+	assert.NotEmpty(t, ok.WorkingDir, "ping should identify the attached working directory")
+	assert.NotEmpty(t, ok.Revision, "ping should identify the attached git revision")
+	assert.NotEmpty(t, ok.Modified, "ping should report whether the attached checkout is modified")
 }
 
 // TestStudioToolsListed confirms both server-core tools register under their
