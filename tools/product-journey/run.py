@@ -4874,6 +4874,55 @@ def gh_agent_missing_run_urls(gh_agent: dict) -> list[str]:
     return missing
 
 
+def gh_agent_job_integration_branch(job: dict) -> str:
+    return str(job.get("integration_branch") or job.get("branch") or "").strip()
+
+
+def gh_agent_job_commit_sha(job: dict) -> str:
+    return str(job.get("commit_sha") or job.get("commit") or job.get("fixed_commit") or "").strip()
+
+
+def gh_agent_job_commit_url(job: dict) -> str:
+    return str(job.get("commit_url") or "").strip()
+
+
+def gh_agent_missing_integration_landing(gh_agent: dict) -> list[str]:
+    missing: list[str] = []
+    for job in gh_agent.get("drained_jobs", []) or []:
+        if not isinstance(job, dict) or job.get("state") != "done":
+            continue
+        label = str(job.get("origin_ref") or job.get("job_id") or "unknown")
+        branch = gh_agent_job_integration_branch(job)
+        commit = gh_agent_job_commit_sha(job)
+        gaps = []
+        if not branch:
+            gaps.append("branch")
+        elif not branch.startswith("integration/"):
+            gaps.append(f"branch={branch}")
+        if not commit:
+            gaps.append("commit")
+        if gaps:
+            missing.append(f"{label} ({', '.join(gaps)})")
+    return missing
+
+
+def gh_agent_integration_landing_lines(gh_agent: dict) -> list[str]:
+    lines: list[str] = []
+    for job in gh_agent.get("drained_jobs", []) or []:
+        if not isinstance(job, dict) or job.get("state") != "done":
+            continue
+        branch = gh_agent_job_integration_branch(job)
+        commit = gh_agent_job_commit_sha(job)
+        if not branch or not commit:
+            continue
+        line = f"{branch}@{commit}"
+        commit_url = gh_agent_job_commit_url(job)
+        if commit_url:
+            line += f" ({commit_url})"
+        lines.append(line)
+    return lines
+
+
 def gh_agent_fix_evidence_links(gh_agent: dict) -> list[str]:
     links: list[str] = []
     seen: set[str] = set()
@@ -5007,7 +5056,11 @@ def render_autonomous_fix_report(run_dir: Path, status: dict, review: Optional[d
                 "",
                 f"- State: `{job.get('state', '')}`",
                 f"- Run URL: {job.get('run_url', '') or '(missing)'}",
+                f"- Integration branch: `{gh_agent_job_integration_branch(job) or '(missing)'}`",
+                f"- Commit: `{gh_agent_job_commit_sha(job) or '(missing)'}`",
             ])
+            if gh_agent_job_commit_url(job):
+                lines.append(f"- Commit URL: {gh_agent_job_commit_url(job)}")
             if job.get("incident_url"):
                 lines.append(f"- Incident: {job.get('incident_url')}")
             if job.get("err_msg"):
@@ -5081,6 +5134,14 @@ def missing_autonomous_fix_report_tokens(run_dir: Path, findings: dict) -> list[
         for job in gh_agent.get("drained_jobs", [])
         if isinstance(job, dict) and job.get("run_url")
     )
+    for job in gh_agent.get("drained_jobs", []):
+        if not isinstance(job, dict):
+            continue
+        expected.extend([
+            gh_agent_job_integration_branch(job),
+            gh_agent_job_commit_sha(job),
+            gh_agent_job_commit_url(job),
+        ])
     expected.extend(
         link
         for job in gh_agent.get("drained_jobs", [])
@@ -7437,6 +7498,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     gh_agent_missing_triage = gh_agent_missing_triage_evidence(gh_agent)
     gh_agent_missing_verify = gh_agent_missing_independent_verify(gh_agent)
     gh_agent_missing_run_url = gh_agent_missing_run_urls(gh_agent)
+    gh_agent_missing_landing = gh_agent_missing_integration_landing(gh_agent)
     autonomous_fix_report_missing = missing_autonomous_fix_report_tokens(run_dir, findings)
     gh_agent_jobs_terminal = (
         (not credible_findings and not gh_agent_requested)
@@ -7452,6 +7514,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     gh_agent_triage_evidence_complete = (not gh_agent_requested) or not gh_agent_missing_triage
     gh_agent_independent_verify_complete = (not gh_agent_requested) or not gh_agent_missing_verify
     gh_agent_run_urls_complete = (not gh_agent_requested) or not gh_agent_missing_run_url
+    gh_agent_integration_landing_complete = (not gh_agent_requested) or not gh_agent_missing_landing
     issue_closeout_ok, issue_closeout_detail = issue_closeout_gate(findings, gh_agent_requested, credible_findings)
 
     checks = [
@@ -7691,6 +7754,20 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
                     f"missing: {', '.join(gh_agent_missing_run_url)}"
                     if gh_agent_missing_run_url
                     else f"run_urls={len([job for job in gh_agent.get('drained_jobs', []) or [] if isinstance(job, dict) and str(job.get('run_url', '')).strip()])}"
+                )
+            ),
+        },
+        {
+            "id": "gh-agent-integration-landing",
+            "status": "pass" if gh_agent_integration_landing_complete else "fail",
+            "summary": "Completed gh-agent fix jobs record the integration branch and commit that landed the change.",
+            "detail": (
+                "gh-agent fixing not requested"
+                if not gh_agent_requested
+                else (
+                    f"missing: {', '.join(gh_agent_missing_landing)}"
+                    if gh_agent_missing_landing
+                    else "; ".join(gh_agent_integration_landing_lines(gh_agent))
                 )
             ),
         },
@@ -8906,6 +8983,15 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 "Completed gh-agent fix jobs are missing reviewable run URLs",
                 ", ".join(missing_run_urls[:5]),
             )
+        missing_landing = gh_agent_missing_integration_landing(gh_agent)
+        if missing_landing:
+            add_validation_issue(
+                issues,
+                "error",
+                "gh-agent-integration-landing",
+                "Completed gh-agent fix jobs are missing integration branch or commit landing proof",
+                ", ".join(missing_landing[:5]),
+            )
         issue_closeout_ok, issue_closeout_detail = issue_closeout_gate(findings_json, gh_agent_requested, credible_findings)
         if not issue_closeout_ok:
             add_validation_issue(
@@ -8934,6 +9020,14 @@ def validate_run_bundle(run_dir: Path) -> dict:
             for job in gh_agent.get("drained_jobs", [])
             if isinstance(job, dict) and job.get("run_url")
         ]
+        for job in gh_agent.get("drained_jobs", []):
+            if not isinstance(job, dict):
+                continue
+            expected_tokens.extend([
+                gh_agent_job_integration_branch(job),
+                gh_agent_job_commit_sha(job),
+                gh_agent_job_commit_url(job),
+            ])
         original_issue_evidence = filed_issue_evidence_links(findings_json)
         if original_issue_evidence:
             expected_tokens.append("issue_evidence=")
@@ -11193,6 +11287,16 @@ def render_deck(
         ]
         if job.get("run_url"):
             details.append(f"run={job.get('run_url')}")
+        branch = gh_agent_job_integration_branch(job)
+        commit = gh_agent_job_commit_sha(job)
+        commit_url = gh_agent_job_commit_url(job)
+        if branch and commit:
+            landing = f"{branch}@{commit}"
+            if commit_url:
+                landing += f" ({commit_url})"
+            details.append(f"integration={landing}")
+        elif job.get("state") == "done":
+            details.append("integration=missing")
         if job.get("incident_url"):
             details.append(f"incident={job.get('incident_url')}")
         if job.get("err_msg"):

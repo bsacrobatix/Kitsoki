@@ -24,6 +24,11 @@ type RunResult struct {
 	FinalState string // story terminal state, for the ack
 	Turns      int
 	Summary    string
+	// IntegrationBranch is the branch that received the autonomous fix after
+	// the story completed. CommitSHA/CommitURL identify the landed change.
+	IntegrationBranch string
+	CommitSHA         string
+	CommitURL         string
 	// Stubbed is true when the spawn path ran the beat fixture's inline
 	// host.agent.* stub handlers instead of a real agent turn — no LLM ran,
 	// no code changed. The comment-render step must never say "Done" for a
@@ -313,6 +318,18 @@ func (d *Dispatcher) dispatchRouted(ctx context.Context, mention Mention, job *j
 	if result.RunURL != "" {
 		_ = d.Jobs.SetRunURL(persistCtx, job.JobID, job.JobID, result.RunURL)
 		job.RunURL = result.RunURL
+	}
+	if spawnErr == nil {
+		landing := map[string]string{
+			"integration_branch": result.IntegrationBranch,
+			"commit_sha":         result.CommitSHA,
+			"commit_url":         result.CommitURL,
+		}
+		if err := d.Jobs.MergeMetadata(persistCtx, job.JobID, landing); err != nil {
+			finalState = jobs.GHFailed
+			errMsg = err.Error()
+			spawnErr = err
+		}
 	}
 	if spawnErr == nil && len(result.Assets) > 0 {
 		if assetErr := d.persistRunAssets(persistCtx, job, result.Assets); assetErr != nil {

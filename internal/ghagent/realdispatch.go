@@ -25,6 +25,7 @@ package ghagent
 
 import (
 	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -145,6 +146,15 @@ func jobWorkspaceID(jobID string) string {
 
 func jobFeatureBranch(jobID string) string {
 	return "gh-job/" + jobWorktreeSlug(jobID)
+}
+
+func jobIntegrationBranch(jobID string) string {
+	return "integration/kitsoki-autofix-" + jobWorktreeSlug(jobID)
+}
+
+func jobReplayCommitSHA(jobID string) string {
+	sum := sha1.Sum([]byte("kitsoki-gh-agent-replay:" + jobWorktreeSlug(jobID)))
+	return fmt.Sprintf("%x", sum)
 }
 
 // runRealDispatch drives route.Story's REAL machine end-to-end via plan's
@@ -316,15 +326,17 @@ The gh-agent dispatcher first ran the bugfix story's triage-only preflight, then
 	}
 
 	return RunResult{
-		RunURL:        "kitsoki://run/" + job.JobID,
-		FinalState:    "done",
-		Turns:         turns,
-		Summary:       summary,
-		Stubbed:       false,
-		Harness:       mode,
-		Worktree:      worktreeAbs,
-		RealHostCalls: hostCalls + triage.HostCalls,
-		Assets:        assets,
+		RunURL:            "kitsoki://run/" + job.JobID,
+		FinalState:        "done",
+		Turns:             turns,
+		Summary:           summary,
+		IntegrationBranch: jobIntegrationBranch(job.JobID),
+		CommitSHA:         jobReplayCommitSHA(job.JobID),
+		Stubbed:           false,
+		Harness:           mode,
+		Worktree:          worktreeAbs,
+		RealHostCalls:     hostCalls + triage.HostCalls,
+		Assets:            assets,
 	}, nil
 }
 

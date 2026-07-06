@@ -260,6 +260,15 @@ func ghAgentDrainResult(ctx context.Context, store *jobs.GHJobStore, drained []*
 			"incident_url":  job.IncidentURL,
 			"err_msg":       job.ErrMsg,
 		}
+		if branch := strings.TrimSpace(job.Metadata["integration_branch"]); branch != "" {
+			jobOut["integration_branch"] = branch
+		}
+		if commit := strings.TrimSpace(job.Metadata["commit_sha"]); commit != "" {
+			jobOut["commit_sha"] = commit
+		}
+		if commitURL := strings.TrimSpace(job.Metadata["commit_url"]); commitURL != "" {
+			jobOut["commit_url"] = commitURL
+		}
 		assets, err := ghAgentDrainAssets(ctx, store, job.JobID, publicBaseURL)
 		if err != nil {
 			jobOut["asset_error"] = err.Error()

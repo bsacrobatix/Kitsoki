@@ -1689,7 +1689,12 @@ func writeGitopsAutonomousReport(runDir string, status, review, validation map[s
 				"",
 				fmt.Sprintf("- State: `%s`", stringValue(job, "state")),
 				fmt.Sprintf("- Run URL: %s", firstNonBlank(stringValue(job, "run_url"), "(missing)")),
+				fmt.Sprintf("- Integration branch: `%s`", firstNonBlank(stringValue(job, "integration_branch"), "(missing)")),
+				fmt.Sprintf("- Commit: `%s`", firstNonBlank(stringValue(job, "commit_sha"), "(missing)")),
 			)
+			if commitURL := stringValue(job, "commit_url"); commitURL != "" {
+				lines = append(lines, "- Commit URL: "+commitURL)
+			}
 			if incident := stringValue(job, "incident_url"); incident != "" {
 				lines = append(lines, "- Incident: "+incident)
 			}
