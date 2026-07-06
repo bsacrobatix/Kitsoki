@@ -45,7 +45,7 @@ The verb handlers always build a **claude-shaped** invocation; the backend's
 | prompt delivery | piped on stdin | `-p <text>` argument | piped on stdin (`codex exec` reads instructions from stdin) |
 | permission | `--permission-mode bypassPermissions` | `--allow-all-tools` | `--dangerously-bypass-approvals-and-sandbox` (required — see note below) |
 | MCP config | `--mcp-config <file>` | `--additional-mcp-config @<file>` | `-c mcp_servers.<name>.{command,args,env}` TOML overrides (file read + converted) |
-| system prompt | `--system-prompt <s>` flag | prepended into the `-p` text (no flag) | prepended into the stdin prompt (no flag) |
+| system prompt | `--system-prompt <s>` flag | prepended into the `-p` text (no flag) | temp file + `-c model_instructions_file="<path>"` |
 | output | `--output-format stream-json --verbose` | `--output-format json` (JSONL) | `--json` (JSONL) |
 | working dir | `cmd.Dir` | `cmd.Dir` + `-C <dir>` | `cmd.Dir` + `-C <dir>` |
 | MCP tool name | `mcp__<server>__submit` | `<server>-submit` | bare `submit` (server is a separate JSONL field; live-pinned) |

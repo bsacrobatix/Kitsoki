@@ -18,6 +18,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"kitsoki/internal/render/sourcecolor"
@@ -63,6 +64,11 @@ const projectConventionRef = "prompts/_project.md"
 // with its own copy on the prompt search path (an experiment), without
 // recompiling. Empty result → the embedded default is used.
 const kitsokiOverlayRef = "sysprompt/kitsoki.md"
+
+// projectSystemPromptRel is the transparent, project-owned Layer-1 source.
+// A story rooted below the project searches upward for this file before falling
+// back to the story prompt search path and finally the embedded default.
+const projectSystemPromptRel = ".kitsoki/system-prompt.md"
 
 // composeAgentSystemPrompt builds the layered system prompt for a verb and the
 // resolved Layer-3 persona, pulling Layer 2 (project) from ctx and Layer 1
@@ -174,10 +180,19 @@ func renderProjectSource(ctx context.Context, src, ref string, warnOnError bool)
 	return strings.TrimSpace(sourcecolor.Strip(out))
 }
 
-// resolveKitsokiOverride returns a project's @shared override of the Layer-1
-// kitsoki fragment when one is on the search path, else "" (use the embedded
-// default). Cheap best-effort: any miss or error falls back to the default.
+// resolveKitsokiOverride returns a project-visible Layer-1 kitsoki fragment
+// when one is available, else "" (use the embedded default). Resolution order:
+// a nearest-upward .kitsoki/system-prompt.md from the story/project root, then
+// the legacy prompt-search-path sysprompt/kitsoki.md override. Both render
+// through the prompt TemplateSet, so {% include %} / {% extends %} keep the same
+// extension semantics as story prompts.
 func resolveKitsokiOverride(ctx context.Context) string {
+	if abs := findProjectSystemPrompt(ctx); abs != "" {
+		if rendered := renderProjectFile(ctx, abs, false); strings.TrimSpace(rendered) != "" {
+			return rendered
+		}
+	}
+
 	pr := PromptRendererFromCtx(ctx)
 	if pr == nil {
 		return ""
@@ -191,4 +206,53 @@ func resolveKitsokiOverride(ctx context.Context) string {
 		return ""
 	}
 	return renderProjectSource(ctx, string(body), kitsokiOverlayRef, false)
+}
+
+func findProjectSystemPrompt(ctx context.Context) string {
+	if pr := PromptRendererFromCtx(ctx); pr != nil && strings.TrimSpace(pr.RootDir()) != "" {
+		if abs, err := filepath.Abs(pr.RootDir()); err == nil {
+			return findUpward(abs, projectSystemPromptRel)
+		}
+		return ""
+	}
+	var starts []string
+	if cwd, err := os.Getwd(); err == nil {
+		starts = append(starts, cwd)
+	}
+	seen := map[string]bool{}
+	for _, start := range starts {
+		if start == "" {
+			continue
+		}
+		abs, err := filepath.Abs(start)
+		if err != nil {
+			continue
+		}
+		if seen[abs] {
+			continue
+		}
+		seen[abs] = true
+		if found := findUpward(abs, projectSystemPromptRel); found != "" {
+			return found
+		}
+	}
+	return ""
+}
+
+func findUpward(start, rel string) string {
+	dir := start
+	if info, err := os.Stat(dir); err == nil && !info.IsDir() {
+		dir = filepath.Dir(dir)
+	}
+	for {
+		candidate := filepath.Join(dir, rel)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }

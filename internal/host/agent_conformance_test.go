@@ -214,7 +214,7 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 		"--permission-mode", "bypassPermissions",
 		"--setting-sources", "project,local",
 		"--disable-slash-commands",
-		"--append-system-prompt", "SYS-PROMPT",
+		"--system-prompt", "SYS-PROMPT",
 		"--model", "some-model",
 		"--effort", "low",
 		"--mcp-config", "/tmp/cfg.json",
@@ -300,26 +300,54 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 			"--setting-sources", "project,local",
 			"--disable-slash-commands",
 			"--strict-mcp-config",
-			"--append-system-prompt", "SYS-PROMPT",
+			"--system-prompt", "SYS-PROMPT",
 			"--model", "some-model",
 			"--effort", "low",
 			"--mcp-config", cfgPath,
 			"--output-format", "stream-json", "--verbose",
 		}
 		inv := codexBackend{}.TranslateInvocation(args, stdin, wd)
+		defer inv.Cleanup()
 		got := strings.Join(inv.Args, " ")
 
-		// Prompt stays on stdin with the system prompt prepended.
-		if inv.Stdin != codexMCPToolSearchPreamble+"\n\n---\n\nSYS-PROMPT\n\n---\n\n"+stdin {
-			t.Errorf("codex stdin = %q, want tool-search preamble + system prompt prepended", inv.Stdin)
+		// User prompt stays on stdin; the system prompt becomes Codex base
+		// instructions via model_instructions_file.
+		if inv.Stdin != codexMCPToolSearchPreamble+"\n\n---\n\n"+stdin {
+			t.Errorf("codex stdin = %q, want tool-search preamble + user prompt only", inv.Stdin)
 		}
 		if !strings.Contains(inv.Stdin, "tool_search") {
 			t.Errorf("codex stdin missing the MCP tool-search discovery preamble; got %q", inv.Stdin)
 		}
+		if strings.Contains(inv.Stdin, "SYS-PROMPT") {
+			t.Errorf("codex stdin must not contain replacing system prompt; got %q", inv.Stdin)
+		}
+		sysFile := codexModelInstructionsFile(t, inv.Args)
+		rawSys, err := os.ReadFile(sysFile)
+		if err != nil {
+			t.Fatalf("read codex model_instructions_file %q: %v", sysFile, err)
+		}
+		if string(rawSys) != "SYS-PROMPT" {
+			t.Fatalf("model_instructions_file content = %q, want SYS-PROMPT", string(rawSys))
+		}
+		if inv.PromptForBudget != "SYS-PROMPT\n\n---\n\n"+inv.Stdin {
+			t.Errorf("PromptForBudget = %q, want system prompt + stdin", inv.PromptForBudget)
+		}
 		// No MCP config registered ⇒ no preamble (nothing deferred to discover).
-		noMCP := codexBackend{}.TranslateInvocation([]string{"-p", "--append-system-prompt", "S"}, "body", wd)
+		noMCP := codexBackend{}.TranslateInvocation([]string{"-p", "--system-prompt", "S"}, "body", wd)
+		defer noMCP.Cleanup()
 		if strings.Contains(noMCP.Stdin, "tool_search") {
 			t.Errorf("codex injected the tool-search preamble with no MCP config; stdin=%q", noMCP.Stdin)
+		}
+		if noMCP.Stdin != "body" {
+			t.Errorf("codex no-MCP stdin = %q, want bare body", noMCP.Stdin)
+		}
+		noMCPFile := codexModelInstructionsFile(t, noMCP.Args)
+		rawNoMCP, err := os.ReadFile(noMCPFile)
+		if err != nil {
+			t.Fatalf("read codex no-MCP model_instructions_file %q: %v", noMCPFile, err)
+		}
+		if string(rawNoMCP) != "S" {
+			t.Fatalf("no-MCP model_instructions_file content = %q, want S", string(rawNoMCP))
 		}
 		// Base exec flags.
 		if len(inv.Args) == 0 || inv.Args[0] != "exec" {
@@ -359,7 +387,7 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 		}
 
 		// Claude-only flags must be gone.
-		for _, dropped := range []string{"--permission-mode", "--setting-sources", "--disable-slash-commands", "--effort", "--verbose", "--append-system-prompt", "--mcp-config", "stream-json", "--output-format", "--strict-mcp-config"} {
+		for _, dropped := range []string{"--permission-mode", "--setting-sources", "--disable-slash-commands", "--effort", "--verbose", "--system-prompt", "--mcp-config", "stream-json", "--output-format", "--strict-mcp-config"} {
 			if strings.Contains(got, dropped) {
 				t.Errorf("codex args still contain dropped flag %q: %v", dropped, inv.Args)
 			}
@@ -535,4 +563,19 @@ func mustContain(t *testing.T, haystack, needle string) {
 	if !strings.Contains(haystack, needle) {
 		t.Errorf("expected %q to contain %q", haystack, needle)
 	}
+}
+
+func codexModelInstructionsFile(t *testing.T, args []string) string {
+	t.Helper()
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] != "-c" {
+			continue
+		}
+		const prefix = "model_instructions_file="
+		if v, ok := strings.CutPrefix(args[i+1], prefix); ok {
+			return strings.Trim(v, `"`)
+		}
+	}
+	t.Fatalf("codex args missing model_instructions_file override: %v", args)
+	return ""
 }
