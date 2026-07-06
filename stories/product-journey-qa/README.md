@@ -80,11 +80,11 @@ It is intentionally no-LLM:
   review the invalid gate state without reading host errors. Omit the mode, or
   use `pending`, when a live driver should capture evidence before finalization;
   use `replay` for the no-LLM autonomous proof. Explicit `record` or `live`
-  driver modes create the same control/report bundle and return
-  `ready_for_dispatch`; the story-owned `dispatch_driver` intent launches the
-  reusable product-journey QA driver through `host.agent.task` and then queues
-  the native autonomous finalizer. GitHub filing/fixing stays inside the
-  story-owned gitops/gh-agent gates; the driver must not call `gh` directly.
+  driver modes create the same control/report bundle, auto-queue the
+  story-owned `dispatch_driver` intent, launch the reusable product-journey QA
+  driver through `host.agent.task`, and then queue the native autonomous
+  finalizer. GitHub filing/fixing stays inside the story-owned gitops/gh-agent
+  gates; the driver must not call `gh` directly.
   Live pending mode also requires the hosted gh-agent `/healthz` and
   `/api/ready` checks to pass for the same ticket repo before returning a driver
   handoff.
