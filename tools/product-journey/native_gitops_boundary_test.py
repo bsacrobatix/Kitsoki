@@ -97,6 +97,19 @@ def main():
                 any(issue.get("id") == "autonomous-driver-finalizer-boundary" for issue in issues),
                 failures,
             )
+            bad_prompt.write_text(
+                "Capture proof, then file the issue with `gh issue create` before returning.\n"
+                "The outer product-journey story has already queued the autonomous finalizer; "
+                "that finalizer owns `autonomous_watchdog`, `autonomous_fix`, review, validation, stats.\n",
+                encoding="utf-8",
+            )
+            issues = []
+            run.validate_native_gitops_boundaries(issues)
+            check(
+                "autonomous driver prompt raw gh guidance fails the corpus boundary",
+                any(issue.get("id") == "native-gitops-boundary" for issue in issues),
+                failures,
+            )
         finally:
             run.DRIVER_AGENT = original_driver
             run.AUTONOMOUS_DRIVER_PROMPT = original_prompt
