@@ -8,29 +8,57 @@ import (
 	"kitsoki/internal/kit"
 )
 
-// RootStoryName is the only base story `root.import` may name in v1. The whole
-// implicit-root framing is "specialize dev-story", so dev-story is the single
-// blessed base; any other value is rejected before synthesis. Widening this to
-// an arbitrary in-story_dirs base is an open question (see
-// docs/stories/imports.md "The blank root that grows").
-const RootStoryName = "dev-story"
+// DefaultRootKitName is the root kit `root.import` (or kitsoki.story) defaults
+// to when unset — dev-story, the hub every kitsoki-dev/gears-rust-style
+// instance has always imported as its root. Per D6 (root generalization,
+// .context/kits-implementation-plan.md "S6"), dev-story is no longer the ONLY
+// value root.import may name — it is merely the DEFAULT one. Any installed
+// kit whose kit.yaml declares a `root:` block (kit.RootDecl) naming one of its
+// own provides.stories qualifies as a blessed root; see ResolveRootKit. This
+// replaces the former hardcoded `RootStoryName` const, which rejected every
+// import name except this one.
+const DefaultRootKitName = "dev-story"
 
-// RootAlias is the import alias the synthesized root folds dev-story under. It
-// mirrors kitsoki-dev's `core` alias role but is named `root` so a materialized
-// tree reads as "this is the project root, importing dev-story".
+// RootAlias is the import alias the synthesized root folds the root kit's
+// story under. It mirrors kitsoki-dev's `core` alias role but is named `root`
+// so a materialized tree reads as "this is the project root, importing
+// dev-story" (or whichever kit is installed as root).
 const RootAlias = "root"
 
-// DevStoryIfaces is the set of host_interfaces dev-story declares (and thus the
-// only ifaces an `overrides.bindings.<iface>` may rebind). Kept here as the
-// fail-fast allow-list so a typo'd binding iface is a clear load error rather
-// than a silently-ignored binding. Mirrors stories/dev-story/app.yaml's
-// host_interfaces: block; if dev-story grows a sixth iface, add it here.
-var DevStoryIfaces = map[string]struct{}{
-	"ticket":    {},
-	"vcs":       {},
-	"ci":        {},
-	"workspace": {},
-	"transport": {},
+// ResolveRootKit resolves importName (DefaultRootKitName when empty) to its
+// kit manifest and validates it declares a `root:` block naming importName as
+// its own blessed-root story (D6). This is the manifest-driven replacement
+// for the old hardcoded RootStoryName equality check + DevStoryIfaces
+// allow-list: BuildRootImporter now reads the story's entry state, the
+// rebindable host_interfaces allow-list, and the fixed `hosts: declared`
+// allow-list from the resolved manifest's kit.RootDecl instead of Go-side
+// constants.
+//
+// Resolution reuses the exact @kitsoki/<name> resolution tiers every other
+// import already goes through (resolveImportSource: injected override /
+// on-disk repo / embedded fallback) — dev-story is resolved as "just another
+// kit" (D5 Phase A: "engine resolves dev-story through the kit resolver even
+// though it's local"), not a special-cased file lookup. The kit.yaml is
+// expected to sit beside the resolved story's app.yaml (see
+// stories/dev-story/kit.yaml + Provides.StoryDirs for why that is a valid
+// in-repo layout in Phase A).
+func ResolveRootKit(importName, repoRoot string, resolver ImportResolver) (*kit.Def, error) {
+	if importName == "" {
+		importName = DefaultRootKitName
+	}
+	appPath, err := resolveImportSource("@kitsoki/"+importName, repoRoot, resolver)
+	if err != nil {
+		return nil, fmt.Errorf("root.import %q is not a known base story (could not resolve @kitsoki/%s: %v)", importName, importName, err)
+	}
+	manifestPath := filepath.Join(filepath.Dir(appPath), kit.ManifestFileName)
+	manifest, err := kit.Load(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("root.import %q is not a known base story (no valid kit.yaml root: declaration at %s: %v)", importName, manifestPath, err)
+	}
+	if !manifest.HasRoot(importName) {
+		return nil, fmt.Errorf("root.import %q is not a known base story (its kit.yaml declares no root: block for it)", importName)
+	}
+	return manifest, nil
 }
 
 // RootSpec is the neutral, package-local projection of the `.kitsoki.yaml`
@@ -88,7 +116,7 @@ func SynthesizeRoot(spec *RootSpec, repoRoot string) (*AppDef, error) {
 // the embedded-story resolver here so a binary-only user can run an implicit
 // dev-story root from a foreign repo that has no Kitsoki checkout on disk.
 func SynthesizeRootWithResolver(spec *RootSpec, repoRoot string, resolver ImportResolver) (*AppDef, error) {
-	def, abs, err := BuildRootImporter(spec, repoRoot)
+	def, abs, err := buildRootImporter(spec, repoRoot, resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -107,17 +135,29 @@ func SynthesizeRootWithResolver(spec *RootSpec, repoRoot string, resolver Import
 // deep-equal to SynthesizeRoot's. abs is the resolved repo root (the importer's
 // BaseDir / the @kitsoki resolution root).
 func BuildRootImporter(spec *RootSpec, repoRoot string) (def *AppDef, abs string, err error) {
-	importName := RootStoryName
+	return buildRootImporter(spec, repoRoot, nil)
+}
+
+// buildRootImporter is BuildRootImporter plus an injected ImportResolver,
+// mirroring buildKitImporter/BuildKitImporter. SynthesizeRootWithResolver
+// passes its resolver through here so root-kit resolution (ResolveRootKit)
+// uses the same resolver the later fold pipeline uses — a binary-only
+// downstream caller's embedded-fallback resolver is not asked to do
+// anything it doesn't already do at fold time.
+func buildRootImporter(spec *RootSpec, repoRoot string, resolver ImportResolver) (def *AppDef, abs string, err error) {
+	importName := DefaultRootKitName
 	if spec != nil && spec.Import != "" {
 		importName = spec.Import
 	}
-	if importName != RootStoryName {
-		return nil, "", fmt.Errorf("root.import %q is not a known base story (v1 supports: %s)", importName, RootStoryName)
+	manifest, err := ResolveRootKit(importName, repoRoot, resolver)
+	if err != nil {
+		return nil, "", err
 	}
+	rootIfaces := manifest.RootHostInterfaces()
 	if spec != nil {
 		for _, iface := range sortedKeys(spec.Bindings) {
-			if _, ok := DevStoryIfaces[iface]; !ok {
-				return nil, "", fmt.Errorf("root.overrides.bindings: %q is not a host_interface declared by %s (declared: %s)", iface, RootStoryName, ifaceList())
+			if _, ok := rootIfaces[iface]; !ok {
+				return nil, "", fmt.Errorf("root.overrides.bindings: %q is not a host_interface declared by %s (declared: %s)", iface, importName, ifaceList(rootIfaces))
 			}
 		}
 	}
@@ -129,13 +169,15 @@ func BuildRootImporter(spec *RootSpec, repoRoot string) (def *AppDef, abs string
 
 	imp := &ImportDef{
 		Source: "@kitsoki/" + importName,
-		// dev-story's root is the free-form workbench `landing` (freeform-landing.md);
-		// the implicit root lands there, mirroring kitsoki-dev's imports.core.entry.
-		Entry: "landing",
-		// Strict host composition mirrors kitsoki-dev: every host the dev-story
-		// subtree may invoke must appear in the synthesized hosts: allow-list
-		// below, so a synthesized root has the same fail-fast host surface a
-		// hand-written instance does.
+		// The root kit's manifest-declared entry state (kit.RootDecl.Entry) —
+		// dev-story's is "landing", the free-form workbench
+		// (freeform-landing.md); the implicit root lands there, mirroring
+		// kitsoki-dev's imports.core.entry.
+		Entry: manifest.Root.Entry,
+		// Strict host composition mirrors kitsoki-dev: every host the root
+		// story's subtree may invoke must appear in the synthesized hosts:
+		// allow-list below, so a synthesized root has the same fail-fast
+		// host surface a hand-written instance does.
 		Hosts: "declared",
 	}
 
@@ -143,7 +185,7 @@ func BuildRootImporter(spec *RootSpec, repoRoot string) (def *AppDef, abs string
 		App: AppMeta{
 			ID:      filepath.Base(abs),
 			Version: "0.0.0",
-			Title:   fmt.Sprintf("%s — implicit root (dev-story)", filepath.Base(abs)),
+			Title:   fmt.Sprintf("%s — implicit root (%s)", filepath.Base(abs), importName),
 		},
 		// Instance-level agent plugins + embedding model. These are NOT
 		// inherited from the imported child (agent_plugins live at the
@@ -158,7 +200,7 @@ func BuildRootImporter(spec *RootSpec, repoRoot string) (def *AppDef, abs string
 			},
 		},
 		Routing: synthesizedRouting(),
-		Hosts:   synthesizedRootHosts(),
+		Hosts:   append([]string(nil), manifest.Root.Hosts...),
 		Imports: map[string]*ImportDef{RootAlias: imp},
 		Root:    RootAlias,
 	}
@@ -241,46 +283,6 @@ func synthesizedRouting() *RoutingConfig {
 	return &r
 }
 
-// synthesizedRootHosts is the host allow-list the synthesized root declares so
-// `hosts: declared` on the dev-story import is satisfied. It mirrors
-// kitsoki-dev's hosts: block — every host the dev-story subtree may invoke,
-// including the iface-backed handlers (rebound via host_bindings) and the bare
-// hosts the chain calls directly. Kept in sync with .kitsoki/stories/kitsoki-dev/app.yaml.
-func synthesizedRootHosts() []string {
-	return []string{
-		// Iface-backed handlers (dev-story defaults; rebindable via bindings).
-		"host.local_files.ticket",
-		"host.gh.ticket",
-		"host.gh.ticket.comment",
-		"host.gh.ticket.get",
-		"host.gh.ticket.transition",
-		"host.git",
-		"host.local",
-		"host.git_worktree",
-		"host.append_to_file",
-		// Bare hosts the chain calls directly.
-		"host.inbox.add",
-		"host.fs.writable_dir",
-		"host.agent.ask",
-		"host.agent.decide",
-		"host.agent.task",
-		"host.agent.codeact",
-		"host.run",
-		"host.agent.search",
-		"host.artifacts_dir",
-		"host.ide.get_diagnostics",
-		"host.ide.open_file",
-		"host.ide.open_diff",
-		"host.agent.converse",
-		"host.chat.resolve",
-		"host.chat.transcript",
-		"host.diff.open",
-		// Ad-hoc structured plan verify gate (dev-story rooms/verifying.yaml):
-		// a sandboxed, recordable Starlark script with read-only inspection.
-		"host.starlark.run",
-	}
-}
-
 // syntheticRootPath is the sentinel manifest path a synthesized root carries.
 // It is rooted at the repo so canonicalPath / LoadedManifests produce a stable
 // key, but no file is read from it (runLoadPipeline never re-reads the root
@@ -289,10 +291,12 @@ func syntheticRootPath(repoRoot string) string {
 	return filepath.Join(repoRoot, "<synthesized-root>", "app.yaml")
 }
 
-// ifaceList renders DevStoryIfaces as a sorted comma-list for error messages.
-func ifaceList() string {
-	names := make([]string, 0, len(DevStoryIfaces))
-	for k := range DevStoryIfaces {
+// ifaceList renders a root kit's RootHostInterfaces() set as a sorted
+// comma-list for error messages (formerly rendered the hardcoded
+// DevStoryIfaces map).
+func ifaceList(ifaces map[string]struct{}) string {
+	names := make([]string, 0, len(ifaces))
+	for k := range ifaces {
 		names = append(names, k)
 	}
 	sort.Strings(names)
@@ -516,7 +520,32 @@ func kitParamList(manifest *kit.Def) string {
 // key — surfacing the typo at load rather than projecting a dead world_in:
 // setter. Returns an error when dev-story itself cannot be resolved/loaded.
 func DevStoryWorldKeys(repoRoot string) (map[string]struct{}, error) {
-	src, err := resolveImportSource("@kitsoki/"+RootStoryName, repoRoot, nil)
+	src, err := resolveImportSource("@kitsoki/"+DefaultRootKitName, repoRoot, nil)
+	if err != nil {
+		return nil, err
+	}
+	def, err := Load(src)
+	if err != nil {
+		return nil, err
+	}
+	keys := make(map[string]struct{}, len(def.World))
+	for k := range def.World {
+		keys[k] = struct{}{}
+	}
+	return keys, nil
+}
+
+// DevStoryWorldKeysFor is DevStoryWorldKeys generalized to an arbitrary
+// resolved root kit manifest (D6) — it loads manifest.Root.Story standalone
+// (resolving @kitsoki/<story> from repoRoot) and returns the set of world
+// keys it declares. webconfig.resolveRoot uses it, after ResolveRootKit has
+// already resolved the manifest, to fail-fast on an `overrides.world.<key>`
+// that names no root-story world key.
+func DevStoryWorldKeysFor(manifest *kit.Def, repoRoot string) (map[string]struct{}, error) {
+	if manifest == nil || manifest.Root == nil {
+		return nil, fmt.Errorf("kit manifest declares no root: block")
+	}
+	src, err := resolveImportSource("@kitsoki/"+manifest.Root.Story, repoRoot, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -720,7 +720,7 @@ func profileRootConfig(profile projectProfile) *RootConfig {
 	if len(overrides.Bindings) == 0 && len(overrides.World) == 0 {
 		return nil
 	}
-	return &RootConfig{Import: app.RootStoryName, Overrides: overrides}
+	return &RootConfig{Import: app.DefaultRootKitName, Overrides: overrides}
 }
 
 func mergeRootConfig(base, override *RootConfig) *RootConfig {
@@ -766,7 +766,7 @@ func mergeRootConfig(base, override *RootConfig) *RootConfig {
 		}
 	}
 	if out.Import == "" {
-		out.Import = app.RootStoryName
+		out.Import = app.DefaultRootKitName
 	}
 	return out
 }
@@ -813,15 +813,19 @@ func copyStringSliceMap(in map[string][]string) map[string][]string {
 // resolveRoot validates the `root:` block fail-fast at load (never at first
 // turn), mirroring resolveHarnessProfiles. Three checks:
 //
-//   - root.import must be the blessed base story (v1: dev-story);
-//   - every overrides.bindings.<iface> must name a dev-story host_interface
-//     (ticket/vcs/ci/workspace/transport);
-//   - every overrides.world.<key> must name a dev-story world key — resolved by
-//     loading dev-story standalone from the repo root (the directory the config
-//     file lives in is the resolution start). When dev-story cannot be resolved
-//     (a downstream checkout without the in-repo story — the deferred
-//     kitsoki-as-dependency case), world-key validation is skipped rather than
-//     failing the whole load; the import + binding checks still apply.
+//   - root.import must be a blessed root kit — one whose kit.yaml declares a
+//     root: block naming it (D6: any installed kit can qualify, not just the
+//     hardcoded dev-story; see app.ResolveRootKit);
+//   - every overrides.bindings.<iface> must name one of that kit's declared
+//     root.host_interfaces (dev-story's default set is
+//     ticket/vcs/ci/workspace/transport);
+//   - every overrides.world.<key> must name a root-story world key — resolved
+//     by loading the root story standalone from the repo root (the directory
+//     the config file lives in is the resolution start). When the root kit
+//     cannot be resolved at all (a downstream checkout without the in-repo
+//     story — the deferred kitsoki-as-dependency case), the import/binding
+//     checks are skipped too (root.import cannot be validated without
+//     resolving it) rather than failing the whole load.
 //
 // A nil Root (rung 0) is a no-op.
 func (cfg *WebConfig) resolveRoot(configPath string) error {
@@ -831,34 +835,44 @@ func (cfg *WebConfig) resolveRoot(configPath string) error {
 	}
 	importName := rc.Import
 	if importName == "" {
-		importName = app.RootStoryName
+		importName = app.DefaultRootKitName
 	}
-	if importName != app.RootStoryName {
-		return fmt.Errorf("root.import %q is not a known base story (v1 supports: %s)", importName, app.RootStoryName)
+	repoRoot := filepath.Dir(configPath)
+	if abs, err := filepath.Abs(repoRoot); err == nil {
+		repoRoot = abs
+	}
+	manifest, err := app.ResolveRootKit(importName, repoRoot, nil)
+	if err != nil {
+		if importName != app.DefaultRootKitName {
+			// An explicit, non-default root.import that fails to resolve is
+			// always a config error — surface it.
+			return err
+		}
+		// The default root kit is not resolvable here (downstream dependency
+		// case without an in-repo checkout); skip validation entirely rather
+		// than failing — the deferred kitsoki-as-dependency slice owns
+		// installed-story resolution.
+		return nil
 	}
 	if rc.Overrides == nil {
 		return nil
 	}
+	rootIfaces := manifest.RootHostInterfaces()
 	for iface := range rc.Overrides.Bindings {
-		if _, ok := app.DevStoryIfaces[iface]; !ok {
-			return fmt.Errorf("root.overrides.bindings: %q is not a host_interface declared by %s", iface, app.RootStoryName)
+		if _, ok := rootIfaces[iface]; !ok {
+			return fmt.Errorf("root.overrides.bindings: %q is not a host_interface declared by %s", iface, importName)
 		}
 	}
 	if len(rc.Overrides.World) > 0 {
-		repoRoot := filepath.Dir(configPath)
-		if abs, err := filepath.Abs(repoRoot); err == nil {
-			repoRoot = abs
-		}
-		keys, err := app.DevStoryWorldKeys(repoRoot)
+		keys, err := app.DevStoryWorldKeysFor(manifest, repoRoot)
 		if err != nil {
-			// dev-story is not resolvable here (downstream dependency case);
-			// skip the world-key check rather than failing — the deferred
-			// kitsoki-as-dependency slice owns installed-story resolution.
+			// The root story itself is not resolvable here; skip the
+			// world-key check rather than failing — same reasoning as above.
 			return nil
 		}
 		for key := range rc.Overrides.World {
 			if _, ok := keys[key]; !ok {
-				return fmt.Errorf("root.overrides.world: unknown key %q for base %s", key, app.RootStoryName)
+				return fmt.Errorf("root.overrides.world: unknown key %q for base %s", key, importName)
 			}
 		}
 	}
