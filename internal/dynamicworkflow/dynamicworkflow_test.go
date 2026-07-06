@@ -75,6 +75,39 @@ func TestServiceCreateValidateExport(t *testing.T) {
 	require.Equal(t, filepath.ToSlash(filepath.Join(exportDir, "manifest.yaml")), world["manifest_path"])
 }
 
+func TestServiceCreateAvoidsSameSecondSlugCollisions(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	require.NoError(t, err)
+	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
+	require.NoError(t, err)
+
+	outDir := t.TempDir()
+	svc := NewService(repoRoot)
+	svc.OutputDir = outDir
+	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)
+	fixedNow := time.Date(2026, 7, 6, 6, 0, 0, 0, time.UTC)
+	svc.Now = func() time.Time { return fixedNow }
+
+	first, err := svc.Create(context.Background(), CreateRequest{
+		Goal: "fan out agents to increase coverage",
+		Slug: "duplicate",
+	})
+	require.NoError(t, err)
+	second, err := svc.Create(context.Background(), CreateRequest{
+		Goal: "fan out agents to increase coverage",
+		Slug: "duplicate",
+	})
+	require.NoError(t, err)
+
+	require.NotEqual(t, first.WorkflowID, second.WorkflowID)
+	require.NotEqual(t, first.DraftDir, second.DraftDir)
+	require.NotEqual(t, first.TracePath, second.TracePath)
+	require.DirExists(t, first.DraftDir)
+	require.DirExists(t, second.DraftDir)
+	require.FileExists(t, filepath.Join(first.DraftDir, "receipt.json"))
+	require.FileExists(t, filepath.Join(second.DraftDir, "receipt.json"))
+}
+
 func TestServiceCreatePreservesSyntheticGLMCoverageFanout(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	require.NoError(t, err)
