@@ -15,8 +15,8 @@
 //   - context — given a driving handle, bundle the session trace (the same tail
 //     session.trace returns) and the inspect snapshot into the body.
 //   - file — hand {repo, title, body, labels} to the injected IssueFiler seam
-//     (production: gh; tests: a fake). source-autonomous is always added so an
-//     agent-filed issue is identifiable.
+//     (production: Kitsoki's native GitHub filer; tests: a fake).
+//     source-autonomous is always added so an agent-filed issue is identifiable.
 //
 // The filing seam is injected (WithIssueFiler) so tests never touch the network
 // or an LLM, mirroring the webShot / HarnessBuilder seams. issue.create is

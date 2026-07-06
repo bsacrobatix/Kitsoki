@@ -32,6 +32,7 @@ func gitopsCmd() *cobra.Command {
 	cmd.AddCommand(gitopsIssueCreateCmd())
 	cmd.AddCommand(gitopsIssueCommentCmd())
 	cmd.AddCommand(gitopsIssueTransitionCmd())
+	cmd.AddCommand(gitopsIssueCloseCmd())
 	cmd.AddCommand(gitopsIssueStateCacheCmd())
 	cmd.AddCommand(gitopsAutonomousFixCmd())
 	return cmd
@@ -311,6 +312,64 @@ func gitopsIssueTransitionCmd() *cobra.Command {
 	return cmd
 }
 
+func gitopsIssueCloseCmd() *cobra.Command {
+	var (
+		repo        string
+		issueID     string
+		commentBody string
+		jsonOut     bool
+	)
+	cmd := &cobra.Command{
+		Use:   "issue-close --repo owner/repo --id N [--comment-body text]",
+		Short: "Close a GitHub issue through the native ticket provider",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			var commentData map[string]any
+			if strings.TrimSpace(commentBody) != "" {
+				comment, err := host.GitHubTicketHandler(cmd.Context(), map[string]any{
+					"op":   "comment",
+					"repo": repo,
+					"id":   issueID,
+					"body": commentBody,
+				})
+				if err != nil {
+					return err
+				}
+				if comment.Error != "" {
+					return fmt.Errorf("gitops issue-close comment: %s", comment.Error)
+				}
+				commentData = comment.Data
+			}
+			transition, err := host.GitHubTicketHandler(cmd.Context(), map[string]any{
+				"op":   "transition",
+				"repo": repo,
+				"id":   issueID,
+				"to":   "closed",
+			})
+			if err != nil {
+				return err
+			}
+			if transition.Error != "" {
+				return fmt.Errorf("gitops issue-close: %s", transition.Error)
+			}
+			data := gitopsIssueCloseResult(transition.Data, commentData, issueID)
+			if jsonOut {
+				return writeGitopsJSON(cmd, data)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Issue: %s\n", stringValue(data, "id"))
+			fmt.Fprintf(cmd.OutOrStdout(), "State: %s\n", stringValue(data, "issue_state"))
+			if commentURL := stringValue(data, "comment_url"); commentURL != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "Comment: %s\n", commentURL)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&repo, "repo", "", "owner/repo ticket target")
+	cmd.Flags().StringVar(&issueID, "id", "", "issue number or owner/repo#number")
+	cmd.Flags().StringVar(&commentBody, "comment-body", "", "optional close-out comment body posted before closing")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON output")
+	return cmd
+}
+
 func gitopsIssueCommentResult(data map[string]any, issueID string) map[string]any {
 	return map[string]any{
 		"status":      "issue_commented",
@@ -333,6 +392,24 @@ func gitopsIssueTransitionResult(data map[string]any, issueID, to string) map[st
 		"state":       state,
 		"source":      "github",
 	}
+}
+
+func gitopsIssueCloseResult(data, commentData map[string]any, issueID string) map[string]any {
+	state := firstNonBlank(stringValue(data, "status"), "closed")
+	out := map[string]any{
+		"status":      "issue_closed",
+		"issue_id":    strings.TrimSpace(issueID),
+		"id":          strings.TrimSpace(issueID),
+		"issue_state": state,
+		"state":       state,
+		"source":      "github",
+	}
+	if commentData != nil {
+		out["comment_id"] = stringValue(commentData, "comment_id")
+		out["comment_url"] = firstNonBlank(stringValue(commentData, "url"), stringValue(commentData, "comment_id"))
+		out["url"] = firstNonBlank(stringValue(commentData, "url"), stringValue(commentData, "comment_id"))
+	}
+	return out
 }
 
 func gitopsAutonomousFixCmd() *cobra.Command {
