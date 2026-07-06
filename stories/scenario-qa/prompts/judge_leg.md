@@ -25,6 +25,15 @@ leg proves the scenario's success criteria (see the leg's
 your verdict is `"degraded-evidence"` — do not paper over a missing
 capture with a hopeful pass.
 
+For `vscode` legs specifically: a preflight-only capture is NOT proof of the
+scenario's outcome (it only proves the bridge was reachable before the
+scenario was driven). Check the driver's `post_drive_evidence_ref` — if it is
+empty, or the driver's report otherwise shows only one vscode frame taken
+before the session was driven forward, your verdict is
+`"degraded-evidence"` even if the rest of the leg's report reads as a clean
+pass. (The story's recording gate enforces this same rule deterministically
+as a backstop — your verdict should already agree with it, not rely on it.)
+
 Submit:
 
 ```json

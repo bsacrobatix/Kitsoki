@@ -80,6 +80,26 @@ preflight is mandatory for `web` and `vscode` legs — the two transports most
 likely to degrade to a JSON stub without a real browser/bridge attached —
 and a good habit for `tui` legs too when in doubt.
 
+**Post-drive re-capture is mandatory for `vscode` legs.** The preflight above
+only proves the bridge was reachable *before* you drove the scenario; it is
+NOT proof of the scenario's outcome, since the rest of a `vscode` leg is
+normally driven through a different surface (`session.submit`/a live text
+turn) that advances the same session to a new state (e.g. a session opened
+at `landing` gets driven forward to `s2`). After driving the live session to
+its target state, call `visual.open kind=vscode` (then `visual.observe`)
+**again**, against that same session handle, and persist the result as a
+distinct, clearly-labeled post-drive capture (never overwrite or reuse the
+preflight's filename/evidence slot). Report its path/id and the session
+handle it was taken against so the caller can bind it to the drive. A
+`vscode` leg with only a preflight capture — no matter how well the rest of
+the scenario went — must be reported honestly as incomplete for this
+transport; do not report a clean pass while carrying forward only the
+pre-drive frame. (`stories/scenario-qa`'s per-leg driver additionally reports
+this as `post_drive_evidence_ref`/`post_drive_session_handle` in its
+structured result — see `stories/scenario-qa/prompts/drive_leg.md` — and its
+recording gate scores a `vscode` leg missing that field as
+`degraded-evidence` even when the rest of the report looks clean.)
+
 Otherwise (no transport pin — the general product-journey-qa case), choose
 the cheapest manifest capability that proves the next claim:
 

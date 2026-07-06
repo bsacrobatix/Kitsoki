@@ -104,7 +104,15 @@ TRANSPORT_EVIDENCE_CONTRACTS = {
         "primary_tool": "visual.open (kind=vscode)",
         "evidence_kind": "screenshot_or_tui_png",
         "level": "bridge-level",
-        "capture_hint": "Open the VS Code bridge surface with visual.open kind=vscode; label this evidence bridge-level, not editor-level.",
+        "capture_hint": (
+            "Open the VS Code bridge surface with visual.open kind=vscode; label "
+            "this evidence bridge-level, not editor-level. A preflight capture "
+            "alone is NOT sufficient: after driving the live session forward to "
+            "its target state, capture visual.open kind=vscode again against the "
+            "SAME session handle (a distinct post-drive capture, never reusing "
+            "the preflight file/slot) before the leg can be scored anything "
+            "other than degraded-evidence."
+        ),
     },
 }
 

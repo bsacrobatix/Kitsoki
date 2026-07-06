@@ -23,6 +23,14 @@
       "items": { "type": "string" },
       "description": "Honest blockers if evidence could not be captured (e.g. a JSON-degraded visual surface)."
     },
+    "post_drive_evidence_ref": {
+      "type": "string",
+      "description": "vscode legs only: path or retained id for a SECOND vscode bridge capture (visual.open kind=vscode + visual.observe/snapshot) taken AFTER driving the live session to its target state -- not the preflight capture. Required before a vscode leg can be scored anything other than degraded-evidence; leave empty and report the blocker honestly if the post-drive capture could not be taken."
+    },
+    "post_drive_session_handle": {
+      "type": "string",
+      "description": "vscode legs only: the live session_handle the post-drive capture was taken against (e.g. \"s2\"). Should match the session handle the scenario was actually driven to, proving the capture reflects the driven-forward state rather than the original preflight session."
+    },
     "summary": {
       "type": "string",
       "description": "What the driver actually attempted for this leg."
