@@ -210,6 +210,9 @@ func composeChromeParts(m RootModel, width int, promptLine, bannerLine string) [
 	}
 	parts = append(parts, r.Divider())
 	parts = append(parts, promptLine)
+	if completion := m.slashCompletionView(width); completion != "" {
+		parts = append(parts, completion)
+	}
 	if line2 := footerStoryLine(m); line2 != "" {
 		parts = append(parts,
 			lipgloss.NewStyle().
