@@ -118,6 +118,14 @@ Blend policy:
 
 Status: `partial` (3 supported, 3 pending).
 
+Publication gate:
+
+```bash
+python3 tools/arena/scripts/glm52_report_gate.py \
+  --report-json docs/case-studies/bugswarm-glm52-bugfix-report.data.json \
+  --require-publishable
+```
+
 | claim | status | finding | missing evidence / caveat |
 |---|---|---|---|
 | overall-token-usage | `pending` | The claim is not yet answerable from committed evidence | Raw-prompt GLM-5.2 arm has no attempted cells.; No delta or token ratio is published while the comparison is pending |

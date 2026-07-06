@@ -33,9 +33,25 @@ def run_gate(path: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def run_publish_gate(path: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), "--report-json", str(path), "--require-publishable"],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
 proc = run_gate(REPORT)
 check("current report passes gate", proc.returncode, 0)
 check("current report pass message", "PASS: GLM-5.2 report gate" in proc.stdout, True)
+
+proc = run_publish_gate(REPORT)
+check("current report fails publishable gate", proc.returncode, 1)
+check("publishable gate names claim ledger", "claim_ledger.status == 'publishable'" in proc.stdout, True)
+check("publishable gate names pending cells", "zero pending GLM-5.2 headline cells" in proc.stdout, True)
 
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)
