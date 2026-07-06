@@ -146,6 +146,25 @@ after a spec passes audit, explicit `ARENA_PAIRED_TASK_ENABLE_CODEX=1
 - The GLM-5.2 raw-prompt arm remains pending; the report must not compute a token ratio from missing data.
 - BugSwarm is reusable as an imported source with 1 task(s) in the supplied source file.
 
+## Provenance and References
+
+Local evidence:
+
+- `tools/bugfix-bakeoff/results/cells` — committed Kitsoki/raw-prompt bugfix cells and usage evidence.
+- `tools/arena/corpus/cost-bench.manifest.yaml` — frozen reusable OSS task source and deterministic oracle metadata.
+- `tools/arena/corpus/sources.yaml` — adapter contract, required metadata fields, and verification contract.
+
+Upstream references:
+
+- BugSwarm website: https://www.bugswarm.org/ — dataset and project entry point.
+- BugSwarm client: https://github.com/BugSwarm/client — artifact client and image execution interface.
+- BugSwarm REST API: https://www.bugswarm.org/docs/toolset/bugswarm-rest-api/ — artifact metadata filtering and retrieval interface.
+- BugSwarm paper: https://arxiv.org/abs/1903.06725 — published dataset/infrastructure description.
+
+BugSwarm seed provenance:
+
+- BugSwarm seed artifact square-okio-140452393: https://www.bugswarm.org/docs/tutorials/setting-up-an-experiment/ — Official BugSwarm tutorial artifact; the tutorial documents run_failed.sh and run_passed.sh execution in fresh containers.
+
 Bottom line: the committed GLM-5.2 evidence is not yet sufficient to
 claim Kitsoki beats or loses to raw prompts. The report is useful now as
 a reproducible evidence ledger and corpus scaffold; the headline

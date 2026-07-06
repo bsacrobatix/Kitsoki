@@ -208,6 +208,54 @@
   ],
   "kind": "glm52_bugswarm_bugfix_report",
   "oss_glm52_arena_cells": [],
+  "references": {
+    "bugswarm_seed": [
+      {
+        "label": "BugSwarm seed artifact square-okio-140452393",
+        "purpose": "Official BugSwarm tutorial artifact; the tutorial documents run_failed.sh and run_passed.sh execution in fresh containers.",
+        "url": "https://www.bugswarm.org/docs/tutorials/setting-up-an-experiment/"
+      }
+    ],
+    "local_evidence": [
+      {
+        "label": "GLM-5.2 bugfix bakeoff cells",
+        "path": "tools/bugfix-bakeoff/results/cells",
+        "purpose": "committed Kitsoki/raw-prompt bugfix cells and usage evidence"
+      },
+      {
+        "label": "OSS oracle corpus",
+        "path": "tools/arena/corpus/cost-bench.manifest.yaml",
+        "purpose": "frozen reusable OSS task source and deterministic oracle metadata"
+      },
+      {
+        "label": "BugSwarm source catalog",
+        "path": "tools/arena/corpus/sources.yaml",
+        "purpose": "adapter contract, required metadata fields, and verification contract"
+      }
+    ],
+    "upstream": [
+      {
+        "label": "BugSwarm website",
+        "purpose": "dataset and project entry point",
+        "url": "https://www.bugswarm.org/"
+      },
+      {
+        "label": "BugSwarm client",
+        "purpose": "artifact client and image execution interface",
+        "url": "https://github.com/BugSwarm/client"
+      },
+      {
+        "label": "BugSwarm REST API",
+        "purpose": "artifact metadata filtering and retrieval interface",
+        "url": "https://www.bugswarm.org/docs/toolset/bugswarm-rest-api/"
+      },
+      {
+        "label": "BugSwarm paper",
+        "purpose": "published dataset/infrastructure description",
+        "url": "https://arxiv.org/abs/1903.06725"
+      }
+    ]
+  },
   "required_glm52_matrix": [
     {
       "adjudicated": true,

@@ -116,6 +116,7 @@ def build_report(
         "evidence_gaps": evidence_gaps(matrix_rows, bugswarm_tasks, verification),
         "interpretation": interpretation(matrix_rows, bugswarm_tasks, verification),
         "evidence_closure": evidence_closure(matrix_rows, bugswarm_tasks, verification),
+        "references": build_references(sources, bugswarm_source),
     }
 
 
@@ -549,6 +550,75 @@ def interpretation(rows: list[dict[str, Any]], bugswarm_tasks: list[dict[str, An
     return out
 
 
+def build_references(sources: dict[str, Any], bugswarm_source: Path | None) -> dict[str, Any]:
+    source_rows = sources.get("sources") if isinstance(sources.get("sources"), list) else []
+    bugswarm = next((s for s in source_rows if isinstance(s, dict) and s.get("id") == "bugswarm"), {})
+    upstream = bugswarm.get("upstream") if isinstance(bugswarm.get("upstream"), dict) else {}
+    refs = {
+        "local_evidence": [
+            {
+                "label": "GLM-5.2 bugfix bakeoff cells",
+                "path": "tools/bugfix-bakeoff/results/cells",
+                "purpose": "committed Kitsoki/raw-prompt bugfix cells and usage evidence",
+            },
+            {
+                "label": "OSS oracle corpus",
+                "path": "tools/arena/corpus/cost-bench.manifest.yaml",
+                "purpose": "frozen reusable OSS task source and deterministic oracle metadata",
+            },
+            {
+                "label": "BugSwarm source catalog",
+                "path": "tools/arena/corpus/sources.yaml",
+                "purpose": "adapter contract, required metadata fields, and verification contract",
+            },
+        ],
+        "upstream": [
+            {
+                "label": "BugSwarm website",
+                "url": str(upstream.get("website") or "https://www.bugswarm.org/"),
+                "purpose": "dataset and project entry point",
+            },
+            {
+                "label": "BugSwarm client",
+                "url": str(upstream.get("client") or "https://github.com/BugSwarm/client"),
+                "purpose": "artifact client and image execution interface",
+            },
+            {
+                "label": "BugSwarm REST API",
+                "url": str(upstream.get("rest_api") or "https://www.bugswarm.org/docs/toolset/bugswarm-rest-api/"),
+                "purpose": "artifact metadata filtering and retrieval interface",
+            },
+            {
+                "label": "BugSwarm paper",
+                "url": str(upstream.get("paper") or "https://arxiv.org/abs/1903.06725"),
+                "purpose": "published dataset/infrastructure description",
+            },
+        ],
+        "bugswarm_seed": seed_references(bugswarm_source),
+    }
+    return refs
+
+
+def seed_references(path: Path | None) -> list[dict[str, str]]:
+    if path is None or not path.exists():
+        return []
+    data = load_yaml(path)
+    refs: list[dict[str, str]] = []
+    for task in data.get("tasks", []):
+        if not isinstance(task, dict):
+            continue
+        meta = task.get("meta") if isinstance(task.get("meta"), dict) else {}
+        source_url = str(meta.get("source_url") or "")
+        if not source_url:
+            continue
+        refs.append({
+            "label": f"BugSwarm seed artifact {task.get('image_tag') or task.get('id')}",
+            "url": source_url,
+            "purpose": str(meta.get("selection_note") or "seed artifact provenance"),
+        })
+    return refs
+
+
 def render_markdown(report: dict[str, Any]) -> str:
     lines: list[str] = []
     corpora = report["corpora"]
@@ -732,6 +802,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
     ])
     lines.extend(f"- {item}" for item in report["interpretation"])
+    lines.extend(render_references(report))
     lines.extend([
         "",
         "Bottom line: the committed GLM-5.2 evidence is not yet sufficient to",
@@ -835,6 +906,40 @@ def render_comparisons(report: dict[str, Any]) -> list[str]:
             )
         )
     return lines
+
+
+def render_references(report: dict[str, Any]) -> list[str]:
+    refs = report["references"]
+    lines = [
+        "",
+        "## Provenance and References",
+        "",
+        "Local evidence:",
+        "",
+    ]
+    for ref in refs.get("local_evidence", []):
+        lines.append(f"- `{ref['path']}` — {clean_sentence(ref['purpose'])}.")
+    lines.extend([
+        "",
+        "Upstream references:",
+        "",
+    ])
+    for ref in refs.get("upstream", []):
+        lines.append(f"- {ref['label']}: {ref['url']} — {clean_sentence(ref['purpose'])}.")
+    seed_refs = refs.get("bugswarm_seed", [])
+    if seed_refs:
+        lines.extend([
+            "",
+            "BugSwarm seed provenance:",
+            "",
+        ])
+        for ref in seed_refs:
+            lines.append(f"- {ref['label']}: {ref['url']} — {clean_sentence(ref['purpose'])}.")
+    return lines
+
+
+def clean_sentence(value: str) -> str:
+    return value.strip().rstrip(".")
 
 
 def load_yaml(path: Path) -> dict[str, Any]:

@@ -79,6 +79,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("overall comparison pending", comparisons["overall"]["status"], "pending")
     check("bugswarm comparison pending", comparisons["bugswarm"]["status"], "pending")
     check("overall comparison no token ratio", comparisons["overall"]["token_ratio_kitsoki_to_raw"], None)
+    refs = report["references"]
+    check("references include local evidence", refs["local_evidence"][0]["path"], "tools/bugfix-bakeoff/results/cells")
+    check("references include bugswarm website", refs["upstream"][0]["url"], "https://www.bugswarm.org/")
+    check("references include bugswarm rest api", refs["upstream"][2]["url"], "https://www.bugswarm.org/docs/toolset/bugswarm-rest-api/")
+    check("references include seed provenance", refs["bugswarm_seed"][0]["url"], "https://www.bugswarm.org/docs/tutorials/setting-up-an-experiment/")
 
     md = md_out.read_text(encoding="utf-8")
     check("markdown names pending raw arm", "oss-oracle | raw-prompt" in md, True)
@@ -89,6 +94,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("markdown includes closure packet", "## Evidence Closure Packet" in md, True)
     check("markdown includes gap planner", "glm52_gap_plan.py" in md, True)
     check("markdown uses default bugswarm source", "BugSwarm source: `tools/arena/corpus/bugswarm.seed.yaml`" in md, True)
+    check("markdown includes provenance section", "## Provenance and References" in md, True)
+    check("markdown includes bugswarm rest api reference", "https://www.bugswarm.org/docs/toolset/bugswarm-rest-api/" in md, True)
+    check("markdown includes bugswarm tutorial reference", "https://www.bugswarm.org/docs/tutorials/setting-up-an-experiment/" in md, True)
     check("markdown closure table includes oss ready", "| oss-oracle | `ready-to-plan`" in md, True)
     check("markdown closure table includes execute verification", "| bugswarm | `needs-execute-verification`" in md, True)
 

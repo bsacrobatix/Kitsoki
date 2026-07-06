@@ -33,6 +33,7 @@ sources:
     upstream:
       website: https://www.bugswarm.org/
       client: https://github.com/BugSwarm/client
+      rest_api: https://www.bugswarm.org/docs/toolset/bugswarm-rest-api/
       paper: https://arxiv.org/abs/1903.06725
     selection: >
       Import an explicit exported list of BugSwarm artifacts instead of
