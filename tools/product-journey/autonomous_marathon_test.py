@@ -168,6 +168,7 @@ def main() -> int:
                   and control["budget"]["manual_glue_steps_target"] == 0
                   and control["watchdog"]["heartbeat_minutes"] == 15
                   and control["watchdog"]["watchdog_minutes"] == 45
+                  and control["gh_agent"]["public_base_url"] == healthy_url
                   and control["final_gates"][:2] == ["autonomous_watchdog", "autonomous_fix"],
                   failures)
             check("creation writes a human-reviewable marathon report",
@@ -180,6 +181,7 @@ def main() -> int:
                   and agent_brief["finalize_commands"][-4:] == expected_final_gates
                   and driver_handoff["finalize_commands"] == expected_final_gates
                   and loaded_summary["driver_final_gates"] == expected_final_gates
+                  and loaded_summary["gh_agent_public_base_url"] == healthy_url
                   and "4 final gates" in loaded_summary["driver_contract_summary"],
                   failures)
 
