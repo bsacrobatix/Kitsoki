@@ -8,7 +8,7 @@
  * so both projections share one fetch and one selection.
  */
 import { computed, nextTick, ref, watch } from "vue";
-import type { ObjectGraph, ObjectGraphNode } from "../../data/objectgraph.js";
+import type { ObjectGraph, ObjectGraphNode } from "../../objectgraph-types.js";
 import {
   diffKind,
   diffKindLabel,

@@ -79,8 +79,23 @@
         },
         "ui": {
           "type": "array",
-          "description": "Kit-contributed UI module entry points (S3c).",
-          "items": { "type": "string" }
+          "description": "Kit-contributed UI module entry points. Either a bare entry-path string (S3c's original shape) or {id, title, entry, nav} (S5/D3's full shape, needed for a nav link).",
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["entry"],
+                "properties": {
+                  "id": { "type": "string" },
+                  "title": { "type": "string" },
+                  "entry": { "type": "string" },
+                  "nav": { "type": "boolean" }
+                }
+              }
+            ]
+          }
         },
         "onboarding": {
           "type": "string",

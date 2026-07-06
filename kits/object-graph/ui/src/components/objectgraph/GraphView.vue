@@ -5,7 +5,7 @@
 // ./layouts.ts; picking a different one is just a dropdown, no code change.
 import cytoscape, { type Core } from "cytoscape";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import type { ObjectGraph } from "../../data/objectgraph.js";
+import type { ObjectGraph } from "../../objectgraph-types.js";
 import { lifecycleLabel } from "./catalog-model.js";
 import { cytoscapeStyle, DIFF_COLORS, LIFECYCLE_COLORS, toElements } from "./graph-elements.js";
 import { defaultLayoutId, findLayout, layouts } from "./layouts.js";

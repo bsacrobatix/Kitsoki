@@ -2,7 +2,7 @@
 // GraphView.vue instance (the full-graph view and each object's inline
 // relationship graph).
 import type cytoscape from "cytoscape";
-import type { ObjectGraph, ObjectGraphNode } from "../../data/objectgraph.js";
+import type { ObjectGraph, ObjectGraphNode } from "../../objectgraph-types.js";
 import { edgeLabel, lifecycleBucket, typeLabel } from "./catalog-model.js";
 
 export interface ToElementsOptions {
