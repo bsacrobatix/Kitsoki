@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -95,6 +97,48 @@ func TestGitHubTicket_Create_Happy(t *testing.T) {
 	}
 }
 
+func TestGitHubTicket_CreateUsesSecretsFileWithoutProcessEnv(t *testing.T) {
+	unsetEnvForTest(t, "GH_TOKEN")
+	unsetEnvForTest(t, "GITHUB_TOKEN")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".kitsoki"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".kitsoki", "secrets.yaml"), []byte("GH_TOKEN: file-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/repos/constructorfabric/Kitsoki/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer file-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number":77,"html_url":"https://github.com/constructorfabric/Kitsoki/issues/77"}`))
+	}))
+	defer srv.Close()
+	restore := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restore()
+
+	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
+		"op":    "create",
+		"repo":  "constructorfabric/Kitsoki",
+		"title": "Report bug cannot file",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	if res.Data["url"] != "https://github.com/constructorfabric/Kitsoki/issues/77" {
+		t.Fatalf("url: %v", res.Data["url"])
+	}
+}
+
 // TestGitHubTicket_Create_LabelPermissionDegrades proves a fork contributor
 // without triage still files the issue (unlabelled) with a warning, rather than
 // failing the create.
@@ -158,6 +202,21 @@ func anyStrings(values []any) []string {
 		}
 	}
 	return out
+}
+
+func unsetEnvForTest(t *testing.T, key string) {
+	t.Helper()
+	prev, had := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unset %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		if had {
+			_ = os.Setenv(key, prev)
+			return
+		}
+		_ = os.Unsetenv(key)
+	})
 }
 
 // TestGitHubTicket_Get_ParsesMetadata proves get() recovers the create-written

@@ -64,12 +64,14 @@ type Result struct {
 type Registry struct {
 	mu       sync.RWMutex
 	handlers map[string]Handler
+	secrets  map[string]string
 }
 
 // NewRegistry creates a new empty Registry.
 func NewRegistry() *Registry {
 	return &Registry{
 		handlers: make(map[string]Handler),
+		secrets:  LoadSecrets(),
 	}
 }
 
@@ -198,6 +200,12 @@ func (r *Registry) Invoke(ctx context.Context, name string, args map[string]any)
 	h, registeredName, ok := r.getWithName(name)
 	if !ok {
 		return Result{}, fmt.Errorf("host: no handler registered for %q", name)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if len(r.secrets) > 0 && len(SecretsFromContext(ctx)) == 0 {
+		ctx = WithSecrets(ctx, r.secrets)
 	}
 	if registeredName != name {
 		// Prefix-fallback hit: inject the trailing suffix as args["op"]
