@@ -23,6 +23,10 @@ states:
         when: "world.sync_result.outcome == 'up_to_date'"
       - prose: "{{ world.integration_branch }} already contains {{ world.sync_remote }}/{{ world.sync_remote_branch }}."
         when: "world.sync_result.outcome == 'up_to_date'"
+      - heading: "Local main is ahead"
+        when: "world.sync_result.outcome == 'local_ahead'"
+      - prose: "{{ world.integration_branch }} contains {{ world.sync_remote }}/{{ world.sync_remote_branch }}, but local main has {{ world.sync_result.ahead }} commits that are not on the remote. Run push_main remote={{ world.sync_remote }} or open/merge a PR before treating the remote as synchronized."
+        when: "world.sync_result.outcome == 'local_ahead'"
       - heading: "Integration branch ready"
         when: "world.sync_result.outcome == 'prepared'"
       - when: "world.sync_result.outcome == 'prepared'"
@@ -101,11 +105,23 @@ states:
               if [ -z "$WORKTREE" ]; then
                 WORKTREE=$(printf '%s\n' "$OUTPUT" | awk '/Merge conflicts are isolated in:/{getline; sub(/^  /,""); print; exit}')
               fi
+              REMOTE_REF="refs/remotes/$REMOTE/$REMOTE_BRANCH"
+              LOCAL_REF=$(git -C "$REPO_ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || echo main)
+              AHEAD=0
+              BEHIND=0
+              if [ -z "$CONTINUE_BRANCH" ] && git -C "$REPO_ROOT" rev-parse --verify --quiet "$REMOTE_REF" >/dev/null; then
+                AHEAD=$(git -C "$REPO_ROOT" rev-list --count "$REMOTE_REF..$LOCAL_REF" 2>/dev/null || echo 0)
+                BEHIND=$(git -C "$REPO_ROOT" rev-list --count "$LOCAL_REF..$REMOTE_REF" 2>/dev/null || echo 0)
+              fi
 
               OUTCOME=error
               OK=false
               if [ "$EXIT" -eq 0 ] && printf '%s\n' "$OUTPUT" | grep -q "already contains"; then
-                OUTCOME=up_to_date
+                if [ "$AHEAD" -gt 0 ]; then
+                  OUTCOME=local_ahead
+                else
+                  OUTCOME=up_to_date
+                fi
                 OK=true
               elif [ "$EXIT" -eq 0 ] && [ -n "$BRANCH" ]; then
                 OUTCOME=prepared
@@ -119,8 +135,10 @@ states:
                 --arg branch "$BRANCH" \
                 --arg worktree "$WORKTREE" \
                 --arg output "$OUTPUT" \
+                --argjson ahead "$AHEAD" \
+                --argjson behind "$BEHIND" \
                 --argjson ok "$OK" \
-                '{outcome:$outcome, branch:$branch, worktree:$worktree, output:$output, ok:$ok}'
+                '{outcome:$outcome, branch:$branch, worktree:$worktree, output:$output, ahead:$ahead, behind:$behind, ok:$ok}'
             - "kitsoki-sync-main"
             - "{{ world.sync_remote }}"
             - "{{ world.sync_remote_branch }}"

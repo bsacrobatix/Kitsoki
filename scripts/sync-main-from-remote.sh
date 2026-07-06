@@ -325,7 +325,20 @@ git rev-parse --verify --quiet "$remote_ref" >/dev/null ||
   die "remote ref not found: $remote_ref"
 
 if git merge-base --is-ancestor "$remote_ref" "$base"; then
-  echo "$base already contains $remote/$remote_branch"
+  ahead="$(git rev-list --count "$remote_ref..$base")"
+  if [ "$ahead" -gt 0 ]; then
+    if [ "$ahead" -eq 1 ]; then
+      commit_word=commit
+    else
+      commit_word=commits
+    fi
+    cat <<EOF
+$base already contains $remote/$remote_branch, but local $base is ahead by $ahead $commit_word.
+Run push_main remote=$remote or open/merge a PR before treating the remote as synchronized.
+EOF
+  else
+    echo "$base already contains $remote/$remote_branch"
+  fi
   exit 0
 fi
 
