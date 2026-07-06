@@ -529,7 +529,11 @@ Validation: %t
 	if tracePath := receipt.TracePath; tracePath != "" {
 		flowRes, convErr := testrunner.ConvertTraceToFlow(tracePath, testrunner.ConvertOptions{
 			AppPath:      filepath.ToSlash(filepath.Join(targetDir, "app", "app.yaml")),
-			CassettePath: filepath.ToSlash(filepath.Join(targetDir, "flows", "generated.cassette.yaml")),
+			CassettePath: "generated.cassette.yaml",
+			InitialWorld: map[string]any{
+				"manifest_path": filepath.ToSlash(filepath.Join(targetDir, "manifest.yaml")),
+				"state_path":    filepath.ToSlash(filepath.Join(targetDir, "flows", "generated.state.json")),
+			},
 		})
 		if convErr != nil {
 			report.Status = "copied-with-todos"
