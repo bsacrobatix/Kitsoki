@@ -214,6 +214,17 @@ func AgentAskHandler(ctx context.Context, args map[string]any) (Result, error) {
 	cliArgs := buildBaseCLIArgs(ctx, sysprompt.Ask, args, agent)
 	cliArgs = setPermissionMode(cliArgs, policy.CLIMode)
 	cliArgs = appendDisallowedToolsFlag(cliArgs, policy.DeniedTools)
+	// When a schema is set the validator MCP server is attached below as
+	// "validator", exposing mcp__validator__submit. Add it to the allowed
+	// tools so the agent can call submit() even when the CLI permission mode
+	// is "default" (the read-only ceiling this handler always enforces) —
+	// without this the tool is outside --allowedTools, so the CLI treats it
+	// as ungranted and blocks on an interactive permission prompt that a
+	// headless `-p` run can never answer (matches the mcp__validator__submit
+	// wiring in agent_task.go's acceptance-schema path).
+	if strings.TrimSpace(schemaArg) != "" {
+		tools = append(tools, "mcp__validator__submit")
+	}
 	// Forward operator questions into kitsoki when a live surface is attached.
 	var opAskCleanup func()
 	cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
