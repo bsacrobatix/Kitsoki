@@ -52,6 +52,13 @@ host_handlers:
                 evidence_dir: "evidence/gears-rust--core-maintainer/bugfix"
                 primary_story: "stories/bugfix/app.yaml"
                 success_criteria: ["Hidden oracle passes."]
+                natural_utterances:
+                  - text: "resolve the red gate test that's already written but not committed"
+                    source: "session-transcript"
+                    source_ref: "mined-scn-1b4ace86-f192-43b0-ab86-16142fec0079-0001"
+                  - text: "file the bug, then land the fixes"
+                    source: "session-transcript"
+                    source_ref: "mined-scn-c4d281a2-30e4-4002-9152-59d28d824abc-0001"
                 transport_evidence_contract:
                   primary_tool: "render.tui_png"
                   evidence_kind: "rendered_tui_frame"
@@ -68,6 +75,13 @@ host_handlers:
             transport: "tui"
             visual_surface: "tui"
             evidence_dir: "evidence/gears-rust--core-maintainer/bugfix"
+            natural_utterances:
+              - text: "resolve the red gate test that's already written but not committed"
+                source: "session-transcript"
+                source_ref: "mined-scn-1b4ace86-f192-43b0-ab86-16142fec0079-0001"
+              - text: "file the bug, then land the fixes"
+                source: "session-transcript"
+                source_ref: "mined-scn-c4d281a2-30e4-4002-9152-59d28d824abc-0001"
           current_leg_id: "bugfix::tui"
       record_leg_result:
         data:
@@ -77,7 +91,13 @@ host_handlers:
                 scenario: "bugfix"
                 transport: "tui"
                 visual_surface: "tui"
+                evidence_level: "frame-level"
                 driver_status: "captured"
+                natural_utterance_count: 2
+                natural_utterance_example: "resolve the red gate test that's already written but not committed"
+                natural_utterance_sources:
+                  - "mined-scn-1b4ace86-f192-43b0-ab86-16142fec0079-0001"
+                  - "mined-scn-c4d281a2-30e4-4002-9152-59d28d824abc-0001"
                 evidence_refs: ["render_tui_png:frame-1"]
                 verdict: "pass"
                 verdict_summary: "TUI frame confirms the fix state."
@@ -131,6 +151,23 @@ turns:
       report_path: ".artifacts/product-journey/scenario-qa-run-1/report.md"
       report_summary: "1 / 1 transport legs passed."
       deck_path: "/repo/.artifacts/product-journey/scenario-qa-run-1/deck.slidey.json"
+      leg_results:
+        items:
+          - leg_id: "bugfix::tui"
+            scenario: "bugfix"
+            transport: "tui"
+            visual_surface: "tui"
+            evidence_level: "frame-level"
+            driver_status: "captured"
+            natural_utterance_count: 2
+            natural_utterance_example: "resolve the red gate test that's already written but not committed"
+            natural_utterance_sources:
+              - "mined-scn-1b4ace86-f192-43b0-ab86-16142fec0079-0001"
+              - "mined-scn-c4d281a2-30e4-4002-9152-59d28d824abc-0001"
+            evidence_refs: ["render_tui_png:frame-1"]
+            verdict: "pass"
+            verdict_summary: "TUI frame confirms the fix state."
+            frames_dir: "evidence/gears-rust--core-maintainer/bugfix"
     expect_host_calls:
       - handler: host.run
         args: { call: emit_scenario_qa_run }
@@ -148,7 +185,7 @@ turns:
         args: { call: build_report }
       - handler: host.run
         args: { call: build_scenario_qa_deck }
-    expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*1 / 1 transport legs passed[\\s\\S]*tui / bugfix[\\s\\S]*driver=captured verdict=pass"
+    expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*1 / 1 transport legs passed[\\s\\S]*tui / bugfix[\\s\\S]*driver=captured verdict=pass[\\s\\S]*natural_prompts=2"
 
   - intent: { name: status, slots: {} }
     expect_state: report

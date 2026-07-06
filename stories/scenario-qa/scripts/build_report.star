@@ -45,6 +45,7 @@ def _row(item):
         "| " + _escape_cell(item.get("transport", "")) +
         " | " + _escape_cell(item.get("scenario", "")) +
         " | " + _escape_cell(item.get("evidence_level", "")) +
+        " | " + _escape_cell(item.get("natural_utterance_count", 0)) +
         " | " + _escape_cell(item.get("driver_status", "")) +
         " | " + _escape_cell(item.get("verdict", "")) +
         " | " + _escape_cell(item.get("verdict_summary", "")) +
@@ -78,10 +79,24 @@ def main(ctx):
     lines.append("# Scenario QA report\n\n")
     lines.append("- Scenario: `" + name + "`\n")
     lines.append("- Run: `" + run_id + "`\n\n")
-    lines.append("| Transport | Scenario | Level | Driver | Verdict | Notes |\n")
-    lines.append("|---|---|---|---|---|---|\n")
+    lines.append("| Transport | Scenario | Level | Natural prompts | Driver | Verdict | Notes |\n")
+    lines.append("|---|---|---|---:|---|---|---|\n")
     for item in items:
         lines.append(_row(item))
+    natural_lines = []
+    for item in items:
+        count = int(item.get("natural_utterance_count", 0))
+        if count > 0:
+            natural_lines.append(
+                "- `" + _escape_cell(item.get("scenario", "")) + "` / `" +
+                _escape_cell(item.get("transport", "")) + "`: " +
+                _str(count) + " transcript-derived prompt(s); example: \"" +
+                _escape_cell(item.get("natural_utterance_example", "")) + "\""
+            )
+    if natural_lines:
+        lines.append("\n## Natural Prompt Coverage\n\n")
+        for line in natural_lines:
+            lines.append(line + "\n")
 
     summary = _str(passes) + " / " + _str(len(items)) + " transport legs passed"
     if fails > 0:

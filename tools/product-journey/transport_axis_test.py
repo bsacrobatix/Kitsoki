@@ -190,6 +190,31 @@ def _test_emit_run_transport_axis():
         all_driver_md = run.render_driver_plan(all_driver)
         _check("driver-plan.md marks the vscode leg's evidence contract as bridge-level", "bridge-level" in all_driver_md)
 
+        # Scenario QA consumes driver-plan.json's transport-expanded scenarios
+        # as leg payloads. Core scenarios must keep transcript-derived natural
+        # utterances in that payload so the live driver receives human-shaped
+        # wording, not just a catalog id.
+        bugfix_scenarios = run.select_scenarios(run.load_scenarios(run.SCENARIOS), "bugfix")
+        bugfix_dir, _ = run.build_run_bundle(
+            catalog, github_targets, personas, bugfix_scenarios,
+            "gears-rust", "core-maintainer", "bugfix-natural-prompts", "dry-run", None,
+            20, ["tui"],
+        )
+        bugfix_driver = run.read_json(bugfix_dir / "driver-plan.json")
+        bugfix_leg = bugfix_driver["scenarios"][0]
+        bugfix_utterances = bugfix_leg.get("natural_utterances", [])
+        action_utterances = next(
+            action.get("natural_utterances", [])
+            for action in bugfix_leg["driver_actions"]
+            if action["id"] == "act_as_persona"
+        )
+        _check("bugfix tui leg carries transcript-derived natural utterances", len(bugfix_utterances) == 2)
+        _check("bugfix tui act_as_persona action carries the same utterances", action_utterances == bugfix_utterances)
+        _check(
+            "bugfix tui natural utterances cite mined transcript sources",
+            all(item.get("source") == "session-transcript" and item.get("source_ref", "").startswith("mined-scn-") for item in bugfix_utterances),
+        )
+
 
 def _test_persona_lens_promotion():
     personas = run.load_personas(run.PERSONAS)

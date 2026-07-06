@@ -76,6 +76,28 @@ def _evidence_level(leg):
     return ""
 
 
+def _natural_utterance_summary(leg):
+    utterances = leg.get("natural_utterances", [])
+    if type(utterances) != "list" or len(utterances) == 0:
+        return {"count": 0, "example": "", "sources": []}
+
+    sources = []
+    example = ""
+    for item in utterances:
+        if type(item) != "dict":
+            continue
+        if example == "":
+            example = item.get("text", "")
+        source = item.get("source_ref", "")
+        if source != "" and source not in sources:
+            sources.append(source)
+    return {
+        "count": len(utterances),
+        "example": example,
+        "sources": sources,
+    }
+
+
 def main(ctx):
     leg = _d(ctx.inputs.get("leg"))
     drive = _d(ctx.inputs.get("drive_result"))
@@ -98,12 +120,16 @@ def main(ctx):
     if verdict != "unjudged" and _vscode_missing_post_drive(leg, drive):
         verdict = "degraded-evidence"
 
+    natural = _natural_utterance_summary(leg)
     record = {
         "leg_id":                  leg.get("leg_id", ""),
         "scenario":                leg.get("scenario", ""),
         "transport":               leg.get("transport", ""),
         "visual_surface":          leg.get("visual_surface", ""),
         "evidence_level":          _evidence_level(leg),
+        "natural_utterance_count": natural["count"],
+        "natural_utterance_example": natural["example"],
+        "natural_utterance_sources": natural["sources"],
         "driver_status":           drive.get("status", "unattempted"),
         "evidence_refs":           drive.get("evidence_refs", []),
         "post_drive_evidence_ref": drive.get("post_drive_evidence_ref", ""),
