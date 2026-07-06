@@ -24,7 +24,12 @@ host_handlers:
       search:
         data:
           ok: true
-          tickets: "TKT-001: Esc hangs the TUI [bug]"
+          tickets:
+            - id:       "TKT-001"
+              title:    "Esc hangs the TUI"
+              type:     "bug"
+              status:   "open"
+              priority: "P2"
       get:
         data:
           ok: true

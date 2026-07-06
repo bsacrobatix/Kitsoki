@@ -20,7 +20,12 @@ host_handlers:
   host.local_files.ticket:
     data:
       ok: true
-      tickets: "TKT-100: foo"
+      tickets:
+        - id:       "TKT-100"
+          title:    "foo"
+          type:     "bug"
+          status:   "open"
+          priority: "P2"
   # bugfix's executing rooms call host.agent.task / decide / ask + iface
   # handlers; we provide bare stubs even though pickup_to_bugfix only
   # walks INTO bf and stops at idle.

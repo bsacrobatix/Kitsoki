@@ -121,9 +121,15 @@ turns:
     # rejects UNCONDITIONALLY at compile time (internal/expr/expr.go
     # MapNode case) — every live render of this state (kitsoki run / session
     # continue / kitsoki turn) hard-errored, while `kitsoki test flows` never
-    # caught it because a turn with no `expect_view_matches` never asserts the
-    # rendered view actually rendered. Asserting real view content here is
-    # what makes that class of bug visible again if it regresses. See
+    # caught it because a turn with no `expect_view_matches` never asserted the
+    # rendered view actually rendered. The class-level gate now exists — the
+    # G-VIEW gate (runOneFlowLegacy / runOneFlowOrchestrator in
+    # internal/testrunner/flows.go) fails ANY turn whose post-turn RenderState
+    # errors, unconditionally, whether or not the fixture declares
+    # expect_view_matches (see internal/testrunner/gview_gate_test.go +
+    # testdata/apps/view_render_gap). This turn's explicit
+    # expect_view_matches is kept as a content pin (the gate alone would only
+    # prove the view rendered, not that it renders the RIGHT thing). See
     # .context/dwf3-a3-recording-notes.md.
     expect_view_matches: "OK:"
 
