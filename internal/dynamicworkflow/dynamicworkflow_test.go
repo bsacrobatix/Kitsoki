@@ -75,6 +75,54 @@ func TestServiceCreateValidateExport(t *testing.T) {
 	require.Equal(t, filepath.ToSlash(filepath.Join(exportDir, "manifest.yaml")), world["manifest_path"])
 }
 
+func TestServiceCreatePreservesSyntheticGLMCoverageFanout(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	require.NoError(t, err)
+	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
+	require.NoError(t, err)
+
+	outDir := filepath.Join(repoRoot, ".artifacts", "dynamic-workflows-test", strings.ReplaceAll(t.Name(), "/", "-"))
+	t.Cleanup(func() { _ = os.RemoveAll(outDir) })
+	svc := NewService(repoRoot)
+	svc.OutputDir = outDir
+	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)
+	svc.Now = func() time.Time { return time.Date(2026, 7, 6, 5, 30, 0, 0, time.UTC) }
+
+	receipt, err := svc.Create(context.Background(), CreateRequest{
+		Goal: "fan out glm-5.2 agents with the claude-synthetic harness to get Go, TypeScript/JavaScript, stories, and e2e coverage toward 80%",
+		Slug: "glm-coverage",
+	})
+	require.NoError(t, err)
+	require.True(t, receipt.Validation.OK)
+
+	manifest, err := readManifest(receipt.ManifestPath)
+	require.NoError(t, err)
+	require.Equal(t, "synthetic-claude", manifest.Defaults.Profile)
+	require.Equal(t, "hf:zai-org/GLM-5.2", manifest.Defaults.Model)
+	require.Equal(t, ".artifacts/dynamic-workflows-test/TestServiceCreatePreservesSyntheticGLMCoverageFanout/dwf_20260706T053000Z_glm-coverage/traces", manifest.Defaults.TraceRoot)
+
+	ids := make([]string, 0, len(manifest.Items))
+	for _, item := range manifest.Items {
+		ids = append(ids, item.ID)
+		require.Contains(t, item.Prompt, "coverage")
+	}
+	require.Equal(t, []string{
+		"measure-coverage",
+		"go-coverage",
+		"story-workflow-coverage",
+		"js-ts-coverage",
+		"e2e-flow-coverage",
+		"supervisor-verify",
+	}, ids)
+
+	var launch map[string]any
+	b, err := os.ReadFile(receipt.LaunchBasisPath)
+	require.NoError(t, err)
+	require.NoError(t, goyaml.Unmarshal(b, &launch))
+	world := launch["world"].(map[string]any)
+	require.Equal(t, ".artifacts/dynamic-workflows-test/TestServiceCreatePreservesSyntheticGLMCoverageFanout/dwf_20260706T053000Z_glm-coverage/manifest.yaml", world["manifest_path"])
+}
+
 func TestServiceExportBlocksBaseStoryWithoutApproval(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	require.NoError(t, err)

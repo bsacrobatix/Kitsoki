@@ -144,6 +144,13 @@ type ManifestVerify struct {
 	Flows string `yaml:"flows,omitempty"`
 }
 
+type manifestStep struct {
+	id     string
+	title  string
+	prompt string
+	verify []ManifestVerify
+}
+
 var unsafeSlug = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
 // NewService returns a service rooted at repoRoot. The outputDir defaults to
@@ -218,7 +225,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Receipt, erro
 	if err := writeYAML(manifestPath, manifest); err != nil {
 		return nil, err
 	}
-	if err := writeLaunchBasis(launchBasisPath, manifestPath); err != nil {
+	if err := writeLaunchBasis(launchBasisPath, runtimePath(s.RootDir, manifestPath)); err != nil {
 		return nil, err
 	}
 
@@ -395,7 +402,7 @@ func (s *Service) Export(ctx context.Context, workflowID string, req ExportReque
 	if err := writeYAML(filepath.Join(targetDir, "manifest.yaml"), manifest); err != nil {
 		return nil, err
 	}
-	if err := writeLaunchBasis(filepath.Join(targetDir, "launch.yaml"), filepath.Join(targetDir, "manifest.yaml")); err != nil {
+	if err := writeLaunchBasis(filepath.Join(targetDir, "launch.yaml"), runtimePath(s.RootDir, filepath.Join(targetDir, "manifest.yaml"))); err != nil {
 		return nil, err
 	}
 	readme := strings.TrimSpace(fmt.Sprintf(`# %s
@@ -538,39 +545,41 @@ func (s *Service) buildManifest(req GenerateRequest, workflowID, appPath, manife
 		goal = workflowID
 	}
 	goalSentence := truncateWords(goal, 12)
-	steps := []struct {
-		id     string
-		title  string
-		prompt string
-		verify []ManifestVerify
-	}{
-		{
-			id:     "scope",
-			title:  "Scope the task",
-			prompt: fmt.Sprintf("Read the goal carefully and identify the parts that need implementation for %s.", goalSentence),
-			verify: []ManifestVerify{{Kind: "story_validate", Story: filepath.ToSlash(filepath.Join(appPath, "app.yaml"))}},
-		},
-		{
-			id:     "implement",
-			title:  "Implement the core slice",
-			prompt: fmt.Sprintf("Make the smallest coherent implementation for %s and keep the result reviewable.", goalSentence),
-			verify: []ManifestVerify{{Kind: "story_validate", Story: filepath.ToSlash(filepath.Join(appPath, "app.yaml"))}},
-		},
-		{
-			id:     "wire",
-			title:  "Wire the surfaces",
-			prompt: fmt.Sprintf("Thread the result through the MCP, CLI, and runstatus-facing surfaces for %s.", goalSentence),
-			verify: []ManifestVerify{{Kind: "story_validate", Story: filepath.ToSlash(filepath.Join(appPath, "app.yaml"))}},
-		},
-		{
-			id:     "test",
-			title:  "Test and document it",
-			prompt: fmt.Sprintf("Add deterministic checks, docs, and dogfood evidence for %s.", goalSentence),
-			verify: []ManifestVerify{
-				{Kind: "story_validate", Story: filepath.ToSlash(filepath.Join(appPath, "app.yaml"))},
-				{Kind: "command", Cmd: "go test ./..."},
+	fullGoal := truncateWords(goal, 80)
+	defaults := inferManifestDefaults(goal, filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(filepath.Dir(manifestPath), "traces"))))
+	var steps []manifestStep
+	if isCoverageFanoutGoal(goal) {
+		steps = coverageFanoutSteps(fullGoal, filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml"))))
+	} else {
+		steps = []manifestStep{
+			{
+				id:     "scope",
+				title:  "Scope the task",
+				prompt: fmt.Sprintf("Read the goal carefully and identify the parts that need implementation for %s.", goalSentence),
+				verify: []ManifestVerify{{Kind: "story_validate", Story: filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml")))}},
 			},
-		},
+			{
+				id:     "implement",
+				title:  "Implement the core slice",
+				prompt: fmt.Sprintf("Make the smallest coherent implementation for %s and keep the result reviewable.", goalSentence),
+				verify: []ManifestVerify{{Kind: "story_validate", Story: filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml")))}},
+			},
+			{
+				id:     "wire",
+				title:  "Wire the surfaces",
+				prompt: fmt.Sprintf("Thread the result through the MCP, CLI, and runstatus-facing surfaces for %s.", goalSentence),
+				verify: []ManifestVerify{{Kind: "story_validate", Story: filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml")))}},
+			},
+			{
+				id:     "test",
+				title:  "Test and document it",
+				prompt: fmt.Sprintf("Add deterministic checks, docs, and dogfood evidence for %s.", goalSentence),
+				verify: []ManifestVerify{
+					{Kind: "story_validate", Story: filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml")))},
+					{Kind: "command", Cmd: "go test ./..."},
+				},
+			},
+		}
 	}
 	items := make([]ManifestItem, 0, len(steps))
 	for i, step := range steps {
@@ -578,25 +587,90 @@ func (s *Service) buildManifest(req GenerateRequest, workflowID, appPath, manife
 			ID:                   step.id,
 			Title:                step.title,
 			Priority:             i + 1,
-			Story:                filepath.ToSlash(filepath.Join(appPath, "app.yaml")),
+			Story:                filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml"))),
 			Mode:                 "drive",
 			Prompt:               step.prompt,
-			ImplementationStory:  filepath.ToSlash(filepath.Join(appPath, "app.yaml")),
+			ImplementationStory:  filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml"))),
 			ImplementationPrompt: step.prompt,
 			GateCommand:          "",
 			Verify:               step.verify,
 		})
 	}
 	return Manifest{
-		Version: ManifestVersion,
-		Defaults: ManifestDefaults{
-			Harness:           "live",
-			Profile:           "codex-native",
-			Model:             "gpt-5.5",
-			TraceRoot:         filepath.ToSlash(filepath.Join(filepath.Dir(manifestPath), "traces")),
-			RequireTraceModel: true,
+		Version:  ManifestVersion,
+		Defaults: defaults,
+		Items:    items,
+	}
+}
+
+func inferManifestDefaults(goal, traceRoot string) ManifestDefaults {
+	defaults := ManifestDefaults{
+		Harness:           "live",
+		Profile:           "codex-native",
+		Model:             "gpt-5.5",
+		TraceRoot:         traceRoot,
+		RequireTraceModel: true,
+	}
+	lowered := strings.ToLower(goal)
+	switch {
+	case strings.Contains(lowered, "synthetic-claude") || strings.Contains(lowered, "claude-synthetic"):
+		defaults.Profile = "synthetic-claude"
+	case strings.Contains(lowered, "synthetic-codex") || strings.Contains(lowered, "codex-synthetic"):
+		defaults.Profile = "synthetic-codex"
+	}
+	if strings.Contains(lowered, "glm-5.2") || strings.Contains(lowered, "glm 5.2") || strings.Contains(lowered, "hf:zai-org/glm-5.2") {
+		defaults.Model = "hf:zai-org/GLM-5.2"
+		if defaults.Profile == "codex-native" {
+			defaults.Profile = "synthetic-claude"
+		}
+	}
+	return defaults
+}
+
+func isCoverageFanoutGoal(goal string) bool {
+	lowered := strings.ToLower(goal)
+	return strings.Contains(lowered, "coverage") && (strings.Contains(lowered, "fan out") || strings.Contains(lowered, "fanning out") || strings.Contains(lowered, "typescript") || strings.Contains(lowered, "stories"))
+}
+
+func coverageFanoutSteps(goal, appYAML string) []manifestStep {
+	storyCheck := ManifestVerify{Kind: "story_validate", Story: appYAML}
+	return []manifestStep{
+		{
+			id:     "measure-coverage",
+			title:  "Measure current coverage",
+			prompt: fmt.Sprintf("Measure current Go, TypeScript/JavaScript, story, and e2e coverage for this goal. Save the baseline and high-value gaps under .context/. Goal: %s", goal),
+			verify: []ManifestVerify{storyCheck},
 		},
-		Items: items,
+		{
+			id:     "go-coverage",
+			title:  "Add Go coverage",
+			prompt: fmt.Sprintf("Add focused deterministic Go tests for low-risk uncovered internals. Avoid live LLM calls and commit only verified changes. Goal: %s", goal),
+			verify: []ManifestVerify{storyCheck, {Kind: "command", Cmd: "go test ./internal/dynamicworkflow ./internal/mcp/studio"}},
+		},
+		{
+			id:     "story-workflow-coverage",
+			title:  "Add story workflow coverage",
+			prompt: fmt.Sprintf("Cover dynamic workflow and punch-list story behavior with deterministic story validation or flow fixtures. Treat skill/tool failures as bugs. Goal: %s", goal),
+			verify: []ManifestVerify{storyCheck},
+		},
+		{
+			id:     "js-ts-coverage",
+			title:  "Add JS and TS coverage",
+			prompt: fmt.Sprintf("Add focused deterministic TypeScript/JavaScript tests for tooling or UI gaps. Do not require network or live models. Goal: %s", goal),
+			verify: []ManifestVerify{storyCheck},
+		},
+		{
+			id:     "e2e-flow-coverage",
+			title:  "Add e2e and flow coverage",
+			prompt: fmt.Sprintf("Add no-LLM e2e, Playwright, or flow coverage for important user paths that can run deterministically. Goal: %s", goal),
+			verify: []ManifestVerify{storyCheck},
+		},
+		{
+			id:     "supervisor-verify",
+			title:  "Verify and report",
+			prompt: fmt.Sprintf("Inspect traces, diffs, untracked files, coverage deltas, and validation gates. Produce a concise .context report. Goal: %s", goal),
+			verify: []ManifestVerify{storyCheck, {Kind: "command", Cmd: "go test ./internal/dynamicworkflow ./internal/mcp/studio"}},
+		},
 	}
 }
 
@@ -755,6 +829,27 @@ func pathExists(root, rel string) bool {
 	_, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
 	return err == nil
 }
+
+func runtimePath(root, path string) string {
+	if path == "" {
+		return ""
+	}
+	cleanPath := filepath.Clean(path)
+	if root != "" {
+		if absRoot, err := filepath.Abs(root); err == nil {
+			if absPath, err := filepath.Abs(cleanPath); err == nil {
+				if rel, err := filepath.Rel(absRoot, absPath); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
+					return filepath.ToSlash(rel)
+				}
+			}
+		}
+	}
+	return filepath.ToSlash(cleanPath)
+}
+
+// RuntimePath returns the path form that stories can read at runtime: repo
+// relative when the file is under root, otherwise the cleaned slash path.
+func RuntimePath(root, path string) string { return runtimePath(root, path) }
 
 func copyDir(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {

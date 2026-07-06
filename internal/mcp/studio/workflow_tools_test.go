@@ -55,6 +55,15 @@ func TestWorkflowCreateValidateExport(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(events), "dynamic.workflow.launched")
 
+	start, err := callTool(ctx, cs, "session.submit", map[string]any{
+		"handle": launched.SessionHandle,
+		"intent": "start",
+	})
+	require.NoError(t, err)
+	require.False(t, start.IsError, "session.submit start errored: %s", contentText(start))
+	require.NotContains(t, contentText(start), "must be repo-relative or under /tmp")
+	require.NotContains(t, contentText(start), `"state":"needs_human"`)
+
 	exportDir := filepath.Join(t.TempDir(), "exported", "mcp-dwf-test")
 	export, err := callTool(ctx, cs, "workflow.export", map[string]any{
 		"workflow_id": receipt.WorkflowID,

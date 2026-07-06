@@ -131,7 +131,7 @@ func (srv *Server) handleWorkflowLaunch(
 			Mode:           HarnessReplay,
 			StoryPath:      filepath.Join(receipt.AppPath, "app.yaml"),
 			TracePath:      receipt.TracePath,
-			InitialWorld:   map[string]any{"manifest_path": receipt.ManifestPath},
+			InitialWorld:   map[string]any{"manifest_path": dynamicworkflow.RuntimePath(svc.RootDir, receipt.ManifestPath)},
 			ImportResolver: srv.importResolver,
 		})
 		if herr != nil {
