@@ -333,6 +333,124 @@ def autonomous_marathon_smoke() -> dict:
     }
 
 
+def marathon_smoke_ledger_path(value: str) -> Path:
+    path = Path(value)
+    if not path.is_absolute():
+        path = ROOT / path
+    return path
+
+
+def validate_marathon_smoke_ledger(ledger_arg: str) -> dict:
+    ledger_path = marathon_smoke_ledger_path(ledger_arg)
+    issues: list[dict] = []
+    if not ledger_path.exists():
+        add_validation_issue(issues, "error", "ledger-exists", "Autonomous marathon smoke ledger JSON does not exist", str(ledger_path))
+        return {
+            "status": "invalid",
+            "ledger_path": str(ledger_path),
+            "ledger_markdown_path": "",
+            "errors": 1,
+            "warnings": 0,
+            "issues": issues,
+            "summary": "ledger missing",
+        }
+    try:
+        ledger = read_json(ledger_path)
+    except Exception as exc:
+        add_validation_issue(issues, "error", "ledger-json", "Autonomous marathon smoke ledger JSON could not be parsed", str(exc))
+        return {
+            "status": "invalid",
+            "ledger_path": str(ledger_path),
+            "ledger_markdown_path": "",
+            "errors": 1,
+            "warnings": 0,
+            "issues": issues,
+            "summary": "ledger JSON invalid",
+        }
+
+    markdown_path = marathon_smoke_ledger_path(str(ledger.get("report_markdown_path") or ledger_path.with_suffix(".md")))
+    if not markdown_path.exists():
+        add_validation_issue(issues, "error", "ledger-markdown", "Autonomous marathon smoke Markdown ledger does not exist", str(markdown_path))
+
+    runs = [item for item in ledger.get("runs", []) if isinstance(item, dict)]
+    persona_count = int(ledger.get("persona_count", 0) or 0)
+    scenario_count = int(ledger.get("scenario_count", 0) or 0)
+    run_count = int(ledger.get("run_count", 0) or 0)
+    expected_issue_count = int(ledger.get("expected_issue_count", 0) or 0)
+    filed_issue_count = int(ledger.get("filed_issue_count", 0) or 0)
+    done_count = int(ledger.get("gh_agent_done_count", 0) or 0)
+    landing_count = int(ledger.get("gh_agent_integration_landing_count", 0) or 0)
+    flawless_count = int(ledger.get("flawless_run_count", 0) or 0)
+    expected_scenarios = ["project-onboarding", "prd-design", "bugfix"]
+
+    if ledger.get("status") != "passed":
+        add_validation_issue(issues, "error", "ledger-status", "Autonomous marathon smoke ledger did not pass", str(ledger.get("status", "")))
+    if ledger.get("project") != "gears-rust":
+        add_validation_issue(issues, "error", "ledger-project", "Autonomous marathon smoke ledger is not for gears-rust", str(ledger.get("project", "")))
+    if ledger.get("scenario_ids") != expected_scenarios:
+        add_validation_issue(issues, "error", "ledger-scenarios", "Autonomous marathon smoke ledger does not cover the core gears-rust scenarios", ",".join(str(item) for item in ledger.get("scenario_ids", [])))
+    if persona_count < 5 or run_count != persona_count or len(runs) != run_count:
+        add_validation_issue(issues, "error", "ledger-personas", "Autonomous marathon smoke ledger does not contain one run for each active persona", f"personas={persona_count}, runs={run_count}, entries={len(runs)}")
+    if scenario_count != len(expected_scenarios):
+        add_validation_issue(issues, "error", "ledger-scenario-count", "Autonomous marathon smoke ledger scenario count is not the core-use-case count", str(scenario_count))
+    if expected_issue_count != persona_count * scenario_count:
+        add_validation_issue(issues, "error", "ledger-expected-issues", "Autonomous marathon smoke ledger expected issue count does not match personas x scenarios", str(expected_issue_count))
+    if filed_issue_count != expected_issue_count or done_count != expected_issue_count or landing_count != expected_issue_count:
+        add_validation_issue(issues, "error", "ledger-fix-counts", "Autonomous marathon smoke ledger did not file, fix, and land every expected issue", f"expected={expected_issue_count}, filed={filed_issue_count}, fixed={done_count}, landed={landing_count}")
+    if flawless_count != run_count or ledger.get("success_rate") != f"{run_count}/{run_count}":
+        add_validation_issue(issues, "error", "ledger-flawless", "Autonomous marathon smoke ledger does not show every persona run as flawless", f"flawless={flawless_count}, runs={run_count}, success_rate={ledger.get('success_rate', '')}")
+
+    for item in runs:
+        persona = str(item.get("persona") or "(unknown)")
+        run_dir_value = str(item.get("run_dir") or "")
+        run_dir = marathon_smoke_ledger_path(run_dir_value) if run_dir_value else Path("")
+        if item.get("status") != "passed":
+            add_validation_issue(issues, "error", "run-status", "Persona run did not pass", persona)
+        if item.get("scenario_ids") != expected_scenarios:
+            add_validation_issue(issues, "error", "run-scenarios", "Persona run does not cover core gears-rust scenarios", persona)
+        if int(item.get("filed_issue_count", 0) or 0) != scenario_count or int(item.get("gh_agent_done_count", 0) or 0) != scenario_count or int(item.get("gh_agent_integration_landing_count", 0) or 0) != scenario_count:
+            add_validation_issue(issues, "error", "run-counts", "Persona run did not file, fix, and land one issue per scenario", persona)
+        if item.get("autonomous_gate_summary") != "filing=pass, gh_agent=pass, independent_verify=pass, review=pass, validation=pass":
+            add_validation_issue(issues, "error", "run-gates", "Persona run did not pass every autonomous gate", f"{persona}: {item.get('autonomous_gate_summary', '')}")
+        if not run_dir_value or not run_dir.exists():
+            add_validation_issue(issues, "error", "run-dir", "Persona run directory is missing from retained ledger", f"{persona}: {run_dir_value}")
+            continue
+        for field, check_id in (("autonomous_fix_report_path", "run-report"), ("deck_path", "run-deck")):
+            artifact = str(item.get(field) or "")
+            artifact_path = marathon_smoke_ledger_path(artifact) if artifact else Path("")
+            if not artifact or not artifact_path.exists():
+                add_validation_issue(issues, "error", check_id, f"Persona run retained artifact is missing: {field}", f"{persona}: {artifact}")
+        validation = validate_run_bundle(run_dir)
+        if validation.get("status") != "valid":
+            add_validation_issue(issues, "error", "run-validation", "Persona run bundle no longer validates", f"{persona}: {validation.get('validation_issue_summary', '')}")
+        review = review_run_bundle(run_dir, None)
+        if review.get("review_status") != "ready" or int(review.get("failed", 0) or 0) != 0:
+            add_validation_issue(issues, "error", "run-review", "Persona run bundle review is not ready", f"{persona}: {review.get('summary', '')}")
+
+    errors = sum(1 for issue in issues if issue.get("severity") == "error")
+    warnings = sum(1 for issue in issues if issue.get("severity") == "warning")
+    status = "valid" if errors == 0 else "invalid"
+    return {
+        "status": status,
+        "ledger_path": str(ledger_path),
+        "ledger_markdown_path": str(markdown_path),
+        "project": ledger.get("project", ""),
+        "persona_count": persona_count,
+        "scenario_count": scenario_count,
+        "run_count": run_count,
+        "expected_issue_count": expected_issue_count,
+        "filed_issue_count": filed_issue_count,
+        "gh_agent_done_count": done_count,
+        "gh_agent_integration_landing_count": landing_count,
+        "flawless_run_count": flawless_count,
+        "success_rate": ledger.get("success_rate", ""),
+        "errors": errors,
+        "warnings": warnings,
+        "issues": issues,
+        "summary": f"{status}: {flawless_count}/{run_count} flawless, filed={filed_issue_count}, fixed={done_count}, landed={landing_count}",
+    }
+
+
 def clone_local_repo(src: str, prefix: str) -> Path:
     clone_root = Path(tempfile.mkdtemp(prefix=prefix))
     clone = clone_root / Path(src).name
@@ -11931,6 +12049,8 @@ def main() -> None:
     parser.add_argument("--autonomous-fix-smoke", action="store_true", help="Run no-LLM full autonomous issue filing and gh-agent fix smoke")
     parser.add_argument("--persona-autofix-smoke", action="store_true", help="Run no-LLM persona replay issue-to-fix smoke through the gitops autonomous gate")
     parser.add_argument("--autonomous-marathon-smoke", action="store_true", help="Run no-LLM scoped persona-QA marathon smoke through native autonomous fix and stats")
+    parser.add_argument("--validate-marathon-smoke-ledger", action="store_true", help="Validate a retained autonomous marathon smoke JSON ledger")
+    parser.add_argument("--marathon-smoke-ledger", default="", help="Path to autonomous-marathon-smoke.json for --validate-marathon-smoke-ledger")
     parser.add_argument("--preflight-command", default="", help="Override the webshot smoke command for --capture-preflight tests")
     parser.add_argument("--preflight-studio-command", default="", help="Override the studio.ping smoke command for --capture-preflight tests")
     parser.add_argument("--preflight-quota-state", default="", help="Override provider quota state file for --capture-preflight tests")
@@ -12230,6 +12350,29 @@ def main() -> None:
             print(result["output"])
         append_log(f"Ran autonomous marathon smoke: {result['status']}")
         if result["status"] != "passed":
+            raise SystemExit(1)
+        return
+
+    if args.validate_marathon_smoke_ledger:
+        if not args.marathon_smoke_ledger:
+            raise SystemExit("--validate-marathon-smoke-ledger requires --marathon-smoke-ledger")
+        result = validate_marathon_smoke_ledger(args.marathon_smoke_ledger)
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Validated autonomous marathon smoke ledger {Path(args.marathon_smoke_ledger).name}: {result['status']}")
+            if result["status"] != "valid":
+                raise SystemExit(1)
+            return
+        print(f"Autonomous marathon smoke ledger: {result['status']}")
+        print(result["summary"])
+        print(f"Ledger JSON: {result['ledger_path']}")
+        print(f"Ledger Markdown: {result['ledger_markdown_path']}")
+        if result["issues"]:
+            for issue in result["issues"]:
+                detail = f" ({issue['detail']})" if issue.get("detail") else ""
+                print(f"- {issue['severity']}: {issue['id']}: {issue['message']}{detail}")
+        append_log(f"Validated autonomous marathon smoke ledger {Path(args.marathon_smoke_ledger).name}: {result['status']}")
+        if result["status"] != "valid":
             raise SystemExit(1)
         return
 

@@ -487,6 +487,9 @@ python3 tools/product-journey/run.py --native-ghagent-smoke --json-output
 python3 tools/product-journey/run.py --autonomous-fix-smoke --json-output
 python3 tools/product-journey/run.py --persona-autofix-smoke --json-output
 python3 tools/product-journey/run.py --autonomous-marathon-smoke --json-output
+python3 tools/product-journey/run.py --validate-marathon-smoke-ledger \
+  --marathon-smoke-ledger .artifacts/product-journey/marathon-smokes/<id>/autonomous-marathon-smoke.json \
+  --json-output
 ```
 
 The native smoke creates a temporary product-journey bundle with a filed issue,
@@ -503,10 +506,15 @@ autonomous-fix` gate and publishes the filed issue, gh-agent run URL, fix
 evidence, and independent verification. The `autonomous_marathon_smoke` story
 intent adds the standing-loop shell around that path: it creates a scoped
 persona-QA run, journals replayed driver evidence, files and fixes one
-credible issue through the native autonomous gate, routes observed weakness
-findings into `weakness-routes.json` / `weakness-routes.md` for `stories/prd`,
-and derives found/filed/fixed stats from issue state so manual stats are not
-part of the loop.
+credible issue per core scenario for every active persona, records integration
+landing proof for every gh-agent fix, and writes a retained JSON/Markdown
+ledger under `.artifacts/product-journey/marathon-smokes/<id>/`. It also routes
+observed weakness findings into `weakness-routes.json` / `weakness-routes.md`
+for `stories/prd` and derives found/filed/fixed stats from issue state so
+manual stats are not part of the loop. Use
+`--validate-marathon-smoke-ledger` to re-check that retained ledger later; it
+fails closed if the JSON/Markdown ledger, per-persona run bundle, report, deck,
+review, validation, filed/fixed counts, or landing proof no longer line up.
 For live-budgeted pending marathons, run `capture_preflight` first; the story
 fails closed before creating the driver handoff if capture preflight has not
 passed. Replay marathons remain no-LLM and do not require this live-capture
