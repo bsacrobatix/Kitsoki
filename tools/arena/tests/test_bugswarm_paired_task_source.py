@@ -317,7 +317,9 @@ with tempfile.TemporaryDirectory() as tmp:
     require("docker infrastructure scorer notes", "exit=125" in blocked_score["notes"])
 
     old_key = os.environ.get("SYNTHETIC_API_KEY")
+    old_budget = os.environ.get("ARENA_CLAUDE_MAX_BUDGET_USD")
     os.environ["SYNTHETIC_API_KEY"] = "test-synthetic-key"
+    os.environ["ARENA_CLAUDE_MAX_BUDGET_USD"] = "0.50"
     calls: list[dict[str, object]] = []
     original_run = runner_globals["subprocess"].run
 
@@ -349,6 +351,10 @@ with tempfile.TemporaryDirectory() as tmp:
             os.environ.pop("SYNTHETIC_API_KEY", None)
         else:
             os.environ["SYNTHETIC_API_KEY"] = old_key
+        if old_budget is None:
+            os.environ.pop("ARENA_CLAUDE_MAX_BUDGET_USD", None)
+        else:
+            os.environ["ARENA_CLAUDE_MAX_BUDGET_USD"] = old_budget
 
     check("raw claude call count", len(calls), 1)
     call = calls[0]
@@ -359,13 +365,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check("raw claude base url", env["ANTHROPIC_BASE_URL"], "https://api.synthetic.new/anthropic")
     check("raw claude token expanded", env["ANTHROPIC_AUTH_TOKEN"], "test-synthetic-key")
     check("raw claude blocked", raw_result.get("blocked"), False)
-    check("raw claude budget", cmd[cmd.index("--max-budget-usd") + 1], runner_globals["DEFAULT_RAW_CLAUDE_MAX_BUDGET_USD"])
+    check("raw claude omits subscription budget", "--max-budget-usd" in cmd, False)
     check("raw claude tokens", raw_result["metrics"]["tokens"], 15)
     check("raw claude cost", raw_result["metrics"]["cost_usd"], 0.0123)
     trace_payload = json.loads(trace.read_text(encoding="utf-8"))
     check("raw claude trace env keys", trace_payload["env_keys"], ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"])
     check("raw claude trace redacts secret", "test-synthetic-key" in trace.read_text(encoding="utf-8"), False)
-    check("raw claude trace budget field", trace_payload["max_budget_usd"], runner_globals["DEFAULT_RAW_CLAUDE_MAX_BUDGET_USD"])
+    check("raw claude trace budget field", trace_payload["max_budget_usd"], "")
 
     timeout_call_trace = tmpdir / "raw-claude-timeout.json"
     timeout_calls: list[dict[str, object]] = []
