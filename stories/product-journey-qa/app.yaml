@@ -284,7 +284,7 @@ world:
 intents:
   start:
     description: "Create a deterministic product-journey QA run bundle."
-    examples: ["start", "create a product journey run", "begin qa run", "start scenarios=bugfix,project-onboarding live_budget_minutes=10"]
+    examples: ["start", "create a product journey run", "begin qa run", "start scenarios=core-use-cases live_budget_minutes=10"]
     priority: 90
     slots:
       project: { type: string, required: false }
@@ -344,12 +344,12 @@ intents:
     examples: ["persona autofix smoke", "prove persona qa autofix", "persona issue to fix smoke"]
     priority: 89
   autonomous_marathon_smoke:
-    description: "Run a no-LLM scoped persona-QA marathon smoke through autonomous fix and derived stats."
+    description: "Run a no-LLM core-use-case persona-QA marathon smoke through autonomous fix and derived stats."
     examples: ["autonomous marathon smoke", "prove persona qa marathon", "standing product qa smoke"]
     priority: 89
   autonomous_marathon:
     description: "Create or finalize a standing persona-QA marathon through autonomous fix, review, validation, weakness routing, and stats."
-    examples: ["autonomous marathon", "start autonomous marathon scenarios=bugfix", "finalize autonomous marathon ticket_repo=bsacrobatix/Kitsoki"]
+    examples: ["autonomous marathon", "start autonomous marathon scenarios=core-use-cases", "finalize autonomous marathon ticket_repo=bsacrobatix/Kitsoki"]
     priority: 90
     slots:
       project: { type: string, required: false }

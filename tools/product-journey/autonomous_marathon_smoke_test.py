@@ -38,7 +38,7 @@ def check(name: str, cond: bool, failures: list[str]) -> None:
     failures.append(name)
 
 
-def write_issue_state(path: Path, issue_url: str) -> None:
+def write_issue_state(path: Path, issue_urls: list[str]) -> None:
     payload = [
         {
             "url": issue_url,
@@ -58,6 +58,7 @@ def write_issue_state(path: Path, issue_url: str) -> None:
                 }
             ],
         }
+        for issue_url in issue_urls
     ]
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -75,11 +76,10 @@ def main() -> int:
 
         catalog = run.load_catalog(run.CATALOG)
         personas = run.load_personas(run.PERSONAS)
-        scenarios = [
-            scenario
-            for scenario in run.load_scenarios(run.SCENARIOS)
-            if scenario.get("id") == "bugfix"
-        ]
+        scenarios = run.select_scenarios(
+            run.active_scenarios(run.load_scenarios(run.SCENARIOS)),
+            "core-use-cases",
+        )
         run_dir, run_json = run.build_run_bundle(
             catalog,
             run.load_github_targets(run.GITHUB_TARGETS),
@@ -91,52 +91,7 @@ def main() -> int:
             "dry-run",
             None,
         )
-        scenario_id = run_json["scenarios"][0]["id"]
-        filing_test.attach_bugfix_proof(run_dir, scenario_id)
-        run.record_driver_event(
-            run_dir,
-            scenario_id,
-            "replay",
-            "captured",
-            "Autonomous marathon smoke replay captured the scoped bugfix journey proof.",
-            "session.open,session.trace,render.tui,visual.observe",
-            str(run_dir / "test-evidence" / "trace-replay.md"),
-            "",
-            None,
-        )
-        run.record_finding(
-            run_dir,
-            "strength",
-            "Scoped persona journey produced reviewable proof",
-            "The marathon smoke attached local proof artifacts for the selected scenario only.",
-            scenario_id,
-            "low",
-            str(run_dir / "test-evidence" / "oracle_result.md"),
-            "observed",
-            None,
-        )
-        run.record_finding(
-            run_dir,
-            "weakness",
-            "Single-scenario marathon slice leaves broader coverage for cadence",
-            "The smoke proves the autonomous loop for one scoped issue; full cadence expands the matrix.",
-            scenario_id,
-            "medium",
-            str(run_dir / "driver-plan.md"),
-            "open",
-            None,
-        )
-        run.record_finding(
-            run_dir,
-            "issue",
-            "Autonomous marathon should file and fix persona QA issues",
-            "A credible persona QA issue should be filed with evidence, fixed by gh-agent, independently verified, and counted mechanically.",
-            scenario_id,
-            "high",
-            str(run_dir / "test-evidence" / "trace-replay.md"),
-            "open",
-            None,
-        )
+        driver_result = run.attach_autonomous_marathon_replay_driver(run_dir, run_json, None)
 
         proc = subprocess.run(
             [
@@ -174,7 +129,7 @@ def main() -> int:
         issue_urls = [url for url in issue_urls if url]
         issue_state = tmp / "issue-state.json"
         if issue_urls:
-            write_issue_state(issue_state, issue_urls[0])
+            write_issue_state(issue_state, issue_urls)
         stats_output = tmp / "stats.json"
         stats = run.derive_stats(run.ARTIFACT_ROOT, str(issue_state), 0.82, 25, str(stats_output))
         report_path = Path(result.get("autonomous_fix_report_path", ""))
@@ -185,19 +140,25 @@ def main() -> int:
         prd_intake = run.read_json(run_dir / "prd-design-intake.json")
         deck_text = (run_dir / "deck.slidey.json").read_text(encoding="utf-8")
 
-        check("marathon scoped run has one scenario",
-              len(run_json.get("scenarios", [])) == 1 and scenario_id == "bugfix",
+        scenario_ids = [scenario.get("id") for scenario in run_json.get("scenarios", [])]
+        check("marathon scoped run covers core use cases",
+              scenario_ids == ["project-onboarding", "prd-design", "bugfix"],
+              failures)
+        check("autonomous replay captured every core use case",
+              driver_result.get("autonomous_driver_status") == "captured"
+              and driver_result.get("autonomous_driver_issue_count") == 3
+              and driver_result.get("autonomous_driver_evidence_count", 0) >= 9,
               failures)
         check("credible issue was filed",
-              result.get("findings_filed_count") == 1 and len(issue_urls) == 1,
+              result.get("findings_filed_count") == 3 and len(issue_urls) == 3,
               failures)
         check("gh-agent fix drained with independent verification",
               result.get("gh_agent_drain_status") == "drained"
-              and result.get("gh_agent_done_count") == 1
+              and result.get("gh_agent_done_count") == 3
               and result.get("gh_agent_missing_verify_count") == 0
-              and result.get("gh_agent_independent_verify_count") == 1
+              and result.get("gh_agent_independent_verify_count") == 3
               and result.get("gh_agent_missing_triage_count") == 0
-              and result.get("gh_agent_triage_evidence_count") == 1,
+              and result.get("gh_agent_triage_evidence_count") == 3,
               failures)
         check("autonomous gates are all green",
               result.get("autonomous_fix_status") == "autonomous_fix_valid"
@@ -234,19 +195,20 @@ def main() -> int:
               and "PRD/design routes" in deck_text,
               failures)
         check("mechanical stats count found/filed/fixed",
-              stats.get("findings_found_count") == 1
-              and stats.get("findings_filed_count") == 1
-              and stats.get("issues_fixed_count") == 1
+              stats.get("findings_found_count") == 3
+              and stats.get("findings_filed_count") == 3
+              and stats.get("issues_fixed_count") == 3
               and stats.get("issues_reopened_count") == 0
               and stats.get("manual_stats_replaced") == "yes",
               failures)
 
         output = {
             "status": "passed" if not failures else "failed",
-            "summary": "autonomous product-QA marathon smoke passed" if not failures else "autonomous product-QA marathon smoke failed",
+            "summary": "core use-case autonomous product-QA marathon smoke passed" if not failures else "core use-case autonomous product-QA marathon smoke failed",
             "run_id": run_json["run_id"],
             "run_dir": str(run_dir),
             "deck_path": str(run_dir / "deck.slidey.json"),
+            "scenario_ids": scenario_ids,
             "driver_journal_path": str(run_dir / "driver-journal.md"),
             "autonomous_fix_report_path": str(report_path),
             "issue_state_file": str(issue_state),

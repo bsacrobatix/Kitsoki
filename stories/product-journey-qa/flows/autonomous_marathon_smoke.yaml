@@ -11,9 +11,9 @@ host_handlers:
           exit_code: 0
           stdout_json:
             status: passed
-            summary: autonomous product-QA marathon smoke passed
+            summary: core use-case autonomous product-QA marathon smoke passed
             exit_code: 0
-            output: "ok: credible issue was filed\nok: gh-agent fix drained with independent verification\nok: mechanical stats count found/filed/fixed\nPASS"
+            output: "ok: marathon scoped run covers core use cases\nok: autonomous replay captured every core use case\nok: credible issue was filed\nok: gh-agent fix drained with independent verification\nok: mechanical stats count found/filed/fixed\nPASS"
 
 turns:
   - intent:
@@ -23,7 +23,7 @@ turns:
     expect_world:
       status: autonomous_marathon_smoke_checked
       autonomous_marathon_smoke_status: passed
-      autonomous_marathon_smoke_summary: autonomous product-QA marathon smoke passed
+      autonomous_marathon_smoke_summary: core use-case autonomous product-QA marathon smoke passed
       autonomous_marathon_smoke_exit_code: 0
     expect_host_calls:
       - handler: host.run

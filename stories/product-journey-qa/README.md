@@ -39,10 +39,11 @@ It is intentionally no-LLM:
   autonomous-fix` gate and produces filed issue, gh-agent run, fix evidence,
   and `independent-verify.md` artifacts without live GitHub or LLM work.
 - `autonomous_marathon_smoke` calls `tools/product-journey/run.py
-  --autonomous-marathon-smoke --json-output` to prove the standing-loop shell:
-  scoped persona run, replayed driver proof, credible issue filing, gh-agent
-  fix, independent verification, human-review artifacts, and mechanically
-  derived found/filed/fixed stats.
+  --autonomous-marathon-smoke --json-output` to prove the standing-loop shell
+  across the core `core-use-cases` scope (`project-onboarding`, `prd-design`,
+  and `bugfix`): scoped persona run, replayed driver proof, credible issue
+  filing, gh-agent fix, independent verification, human-review artifacts, and
+  mechanically derived found/filed/fixed stats.
 - `rollup` calls `tools/product-journey/run.py --rollup-matrix --json-output`
   to create or refresh the matrix-level Slidey deck from reviewed run bundles.
 - `validate_matrix` calls `tools/product-journey/run.py --validate-matrix
@@ -71,10 +72,11 @@ It is intentionally no-LLM:
   `autonomous_watchdog` before filing anything and returns a reviewable
   `autonomous_fix_invalid` result when the standing-loop control is missing or
   stale.
-- `autonomous_marathon autonomous_driver_mode=replay ...` creates a scoped run,
-  attaches cassette-backed local proof artifacts, records the driver journal
-  and credible findings, then runs the same native gitops autonomous fix,
-  review, validation, PRD weakness routing, close-out, and stats gates in one
+- `autonomous_marathon scenarios=core-use-cases autonomous_driver_mode=replay
+  ...` creates a scoped run for onboarding, PRD/design, and bugfix, attaches
+  cassette-backed local proof artifacts, records the driver journal and
+  credible findings, then runs the same native gitops autonomous fix, review,
+  validation, PRD weakness routing, close-out, and stats gates in one
   story-owned call. Missing `ticket_repo` or `gh_agent_public_base_url` fails
   closed in the story view as `autonomous_marathon_invalid` so the operator can
   review the invalid gate state without reading host errors. Omit the mode, or

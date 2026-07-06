@@ -66,9 +66,9 @@ states:
               hint: "prove persona replay findings enter the autonomous gitops issue-to-fix gate"
               intent: persona_autofix_smoke
             - label: "autonomous_marathon_smoke"
-              hint: "prove the scoped persona-QA marathon chain reaches autonomous fix and derived stats"
+              hint: "prove onboarding, PRD/design, and bugfix reach autonomous fix and derived stats"
               intent: autonomous_marathon_smoke
-            - label: "autonomous_marathon scenarios=bugfix"
+            - label: "autonomous_marathon scenarios=core-use-cases"
               hint: "create a standing persona-QA run envelope; rerun from the run page to finalize"
               intent: autonomous_marathon
             - label: "refresh_targets seed=..."

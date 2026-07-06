@@ -54,6 +54,10 @@ PROOF_EVIDENCE_SOURCES = {"retained", "external", "local", "cassette"}
 # (which accepts a cassette:// URI once it resolves to a backing file), a
 # playback slot must be a real LOCAL file — see is_playback_evidence.
 PLAYBACK_EVIDENCE_KINDS = {"rrweb", "trace-replay", "flow-fixture", "png-sequence"}
+SCENARIO_ALIASES = {
+    "core-use-cases": ["project-onboarding", "prd-design", "bugfix"],
+    "core": ["project-onboarding", "prd-design", "bugfix"],
+}
 STAGES = [
     "discover_product",
     "follow_tutorial",
@@ -128,7 +132,9 @@ def active_scenarios(scenarios: list[dict]) -> list[dict]:
 
 
 def select_scenarios(scenarios: list[dict], scenario_filter: str) -> list[dict]:
-    requested = [item.strip() for item in scenario_filter.split(",") if item.strip()]
+    requested = []
+    for item in [item.strip() for item in scenario_filter.split(",") if item.strip()]:
+        requested.extend(SCENARIO_ALIASES.get(item, [item]))
     if not requested:
         return scenarios
 
@@ -274,13 +280,13 @@ def autonomous_marathon_smoke() -> dict:
     if result.returncode != 0:
         return {
             "status": "failed",
-            "summary": "autonomous product-QA marathon smoke failed",
+            "summary": "core use-case autonomous product-QA marathon smoke failed",
             "exit_code": result.returncode,
             "output": output,
         }
     return {
         "status": "passed",
-        "summary": "autonomous product-QA marathon smoke passed",
+        "summary": "core use-case autonomous product-QA marathon smoke passed",
         "exit_code": result.returncode,
         "output": output,
     }
