@@ -84,8 +84,8 @@ ready_state = from_product_journey_report({
 assert_conforms("persona-qa 'ready' CompletionState conforms", ready_state.to_dict())
 
 # 1b. bugfix direction — the exact shape bench.py's write_completion_state emits.
-bugfix_tmp = Path(__file__).resolve().parent / ".tmp-completion-state-schema-check.json"
-try:
+with tempfile.TemporaryDirectory(prefix="arena-completion-state-") as td:
+    bugfix_tmp = Path(td) / "completion-state-schema-check.json"
     payload = bench.write_completion_state(
         bugfix_tmp,
         verdict="armed",
@@ -102,8 +102,6 @@ try:
     assert_conforms("bugfix completion-state (write_completion_state output) conforms", payload)
     assert_conforms("bugfix completion-state (file round-trip) conforms",
                     json.loads(bugfix_tmp.read_text()))
-finally:
-    bugfix_tmp.unlink(missing_ok=True)
 
 if jsonschema is None:
     print("NOTE: jsonschema not installed — schema-conformance checks were skipped, "

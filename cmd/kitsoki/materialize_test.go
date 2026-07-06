@@ -31,6 +31,19 @@ func testRepoRoot(t *testing.T) string {
 	}
 }
 
+func writableRepoRoot(t *testing.T) string {
+	t.Helper()
+	realRoot := testRepoRoot(t)
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module kitsoki\n"), 0o644); err != nil {
+		t.Fatalf("write temp go.mod: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(realRoot, "stories"), filepath.Join(root, "stories")); err != nil {
+		t.Fatalf("symlink stories into temp repo: %v", err)
+	}
+	return root
+}
+
 // normalize strips the load-provenance fields that legitimately differ between a
 // synthesized def and a file-loaded one (path-rooted) plus the app metadata
 // (title/id are cosmetic), so the structural fold result can be deep-compared.
@@ -46,7 +59,7 @@ func normalize(def *app.AppDef) {
 }
 
 func TestMaterializeRoundTrip(t *testing.T) {
-	root := testRepoRoot(t)
+	root := writableRepoRoot(t)
 	spec := &app.RootSpec{
 		Bindings: map[string]string{"transport": "host.append_to_file"},
 		World:    map[string]any{"judge_mode": "llm_then_human"},
@@ -107,7 +120,7 @@ func TestMaterializeEmitHasProvenanceHeaderAndDevStorySource(t *testing.T) {
 // (runMaterialize): a rung-0 .kitsoki.yaml (no root: block) materializes a
 // loadable file, and a second run against the same slug refuses to overwrite.
 func TestMaterializeCmd_RoundTripAndRefuseOverwrite(t *testing.T) {
-	root := testRepoRoot(t)
+	root := writableRepoRoot(t)
 	// Materialize's write root is a temp dir UNDER the repo root (not real
 	// stories/): @kitsoki/dev-story still resolves via findRepoRoot, while the
 	// transient .kitsoki/stories/<slug> it writes can't race parallel stories/
@@ -144,7 +157,7 @@ func TestMaterializeCmd_RoundTripAndRefuseOverwrite(t *testing.T) {
 }
 
 func TestMaterializeCmd_UsesProjectProfile(t *testing.T) {
-	root := testRepoRoot(t)
+	root := writableRepoRoot(t)
 	matRoot, err := os.MkdirTemp(root, "mat-profile-")
 	if err != nil {
 		t.Fatalf("mkdtemp: %v", err)
@@ -212,7 +225,7 @@ dev_story_profile:
 // TestMaterializeCmd_AbortOnInvalidRoot proves materialize never writes a file
 // when synthesis fails (a bad root: block): no partial is left behind.
 func TestMaterializeCmd_AbortOnInvalidRoot(t *testing.T) {
-	root := testRepoRoot(t)
+	root := writableRepoRoot(t)
 	matRoot, err := os.MkdirTemp(root, "mat-abort-")
 	if err != nil {
 		t.Fatalf("mkdtemp: %v", err)
