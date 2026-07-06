@@ -32,7 +32,7 @@ states:
     relevant_world: [epic_path, decomposition_path, redecompose_delta_path, refine_feedback, redecompose_trigger, redecompose_added]
     view:
       - prose: "A decomposition already exists at {{ world.decomposition_path }} — authoring an additive delta instead of overwriting it."
-      - prose: "Delta: {{ world.redecompose_trigger|default:'(pending)' }} (adds {{ world.redecompose_added|length }} brief(s))"
+      - prose: "Delta: {{ world.redecompose_trigger|default:'(pending)' }} (adds {{ world.redecompose_added|default:''|length }} brief(s))"
         when: "world.redecompose_trigger != ''"
       - choice:
           mode: single

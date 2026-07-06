@@ -10,9 +10,9 @@ states:
     description: "Parse the decomposition manifest into the fleet brief list."
     relevant_world: [decomposition_path, fleet_briefs, load_error]
     view:
-      - prose: "Loaded {{ len(world.fleet_briefs) }} brief(s) from {{ world.decomposition_path }}."
-      - prose: "Load error: {{ world.load_error }}"
-        when: "world.load_error != ''"
+      - prose: "Loaded {{ world.fleet_briefs|default:''|length }} brief(s) from {{ world.decomposition_path }}."
+      - prose: "Load error: {{ world.load_error ?? '(pending)' }}"
+        when: "(world.load_error ?? '') != ''"
       - choice:
           mode: single
           prompt: "Actions"

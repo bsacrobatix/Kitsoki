@@ -98,8 +98,8 @@ states:
       - prose: "Decomposing {{ world.epic_path }} into independently-shippable briefs…"
       - prose: "Refine cycle {{ world.refine_cycle }} / {{ world.refine_budget }} — feedback: {{ world.refine_feedback }}"
         when: "world.refine_feedback != ''"
-      - prose: "{{ world.decomposition_briefs|length }} brief(s) returned."
-        when: "world.decomposition_briefs"
+      - prose: "{{ world.decomposition_briefs|default:''|length }} brief(s) returned."
+        when: "(world.decomposition_briefs ?? [])"
       - choice:
           mode: single
           prompt: "Actions"

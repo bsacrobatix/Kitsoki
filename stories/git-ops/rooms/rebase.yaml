@@ -21,13 +21,13 @@ states:
           pairs:
             Branch:       '{{ world.current_branch|default:"(unknown)" }}'
             Integration:  '{{ world.integration_branch }}'
-            Ahead:        '{{ world.commits_ahead }} commits'
+            Ahead:        '{{ world.commits_ahead ?? 0 }} commits'
             "Backup tag": '{{ world.pre_rebase_tag|default:"(none)" }}'
-      - prose: "Rebase output: {{ world.last_op_output }}"
+      - prose: "Rebase output: {{ world.last_op_output ?? '(pending)' }}"
         when: "world.last_op_ok == false"
       - prose: "Conflicts detected — routing to conflict resolver."
         when: "world.last_op_outcome == 'conflict'"
-      - prose: "Rebase complete. Backup tag: {{ world.pre_rebase_tag }}."
+      - prose: "Rebase complete. Backup tag: {{ world.pre_rebase_tag ?? '(none)' }}."
         when: "world.last_op_ok == true && world.last_op_outcome == 'ok'"
       - choice:
           mode: single

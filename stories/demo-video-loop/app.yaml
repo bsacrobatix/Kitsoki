@@ -61,7 +61,6 @@ agents:
       the qa feature/scenarios paths you wrote.
     model: claude-opus-4-8
     tools: [Read, Write, Edit, Glob, Grep, Bash]
-    external_side_effect: false
 
 world:
   # --- Input contract (the world_in: an importer supplies) ---
