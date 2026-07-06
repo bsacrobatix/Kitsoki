@@ -5638,7 +5638,7 @@ def blocked_autonomous_driver_dispatch(run_dir: Path) -> dict:
                 claimed_issues = max(0, int(receipt.get("issue_count", 0) or 0))
                 actual_evidence = sum(
                     1 for item in evidence.get("items", [])
-                    if item.get("status") in {"captured", "validated"} and item.get("path")
+                    if is_proof_evidence(item, run_dir)
                 )
                 actual_issues = len(credible_issue_findings(findings))
                 count_gaps = []

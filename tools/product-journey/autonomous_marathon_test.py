@@ -906,6 +906,125 @@ def main() -> int:
                   and not run.autonomous_marathon_watchdog_path(missing_issue_dir).exists(),
                   failures)
 
+            demo_proof = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-demo-proof",
+                "bugfix",
+                7,
+                "o/r",
+                "",
+                "stories/bugfix",
+                healthy_url,
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                "live",
+                24,
+                15,
+                45,
+                None,
+            )
+            demo_proof_dir = Path(demo_proof["run_dir"])
+            demo_proof_run_json = run.read_json(demo_proof_dir / "run.json")
+            demo_proof_scenario = demo_proof_run_json["scenarios"][0]["id"]
+            demo_artifact = demo_proof_dir / "test-evidence" / "demo-placeholder.md"
+            demo_artifact.parent.mkdir(parents=True, exist_ok=True)
+            demo_artifact.write_text("deterministic placeholder; not product proof\n", encoding="utf-8")
+            run.attach_evidence(
+                demo_proof_dir,
+                demo_proof_scenario,
+                "trace-replay",
+                str(demo_artifact),
+                "captured",
+                "demo",
+                "demo placeholder evidence for receipt consistency",
+                None,
+            )
+            run.record_driver_event(
+                demo_proof_dir,
+                demo_proof_scenario,
+                "live",
+                "captured",
+                "Live driver attached only demo evidence, which cannot satisfy autonomous proof.",
+                "session.open,session.trace,visual.observe",
+                str(demo_artifact),
+                "",
+                None,
+            )
+            run.record_finding(
+                demo_proof_dir,
+                "strength",
+                "Demo evidence is visible but not product proof",
+                "This run intentionally uses demo evidence to prove finalization fails closed.",
+                demo_proof_scenario,
+                "low",
+                str(demo_artifact),
+                "observed",
+                None,
+            )
+            run.record_autonomous_driver_dispatch(
+                demo_proof_dir,
+                "live",
+                "captured",
+                "Dispatch receipt claims one captured evidence artifact, but only demo evidence was persisted.",
+                1,
+                0,
+                str(demo_proof_dir / "driver-trace.jsonl"),
+                "",
+            )
+            demo_proof_finalized = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                demo_proof_dir,
+                "vscode",
+                "core-maintainer",
+                "ignored",
+                "",
+                7,
+                "o/r",
+                str(tmp / "gh-agent-demo-proof.json"),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                str(run.ARTIFACT_ROOT),
+                str(demo_proof_dir / "autonomous-marathon-stats.json"),
+                0.82,
+                25,
+                "pending",
+                24,
+                15,
+                45,
+                None,
+            )
+            check("captured live driver receipt backed only by demo evidence stops before final gates",
+                  demo_proof_finalized["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and demo_proof_finalized["autonomous_driver_status"] == "inconsistent-counts"
+                  and demo_proof_finalized["autonomous_driver_dispatch_status"] == "captured"
+                  and demo_proof_finalized["autonomous_fix_status"] == "not_run"
+                  and demo_proof_finalized["validation_issue_summary"] == "autonomous-driver-dispatch"
+                  and demo_proof_finalized["stats_status"] == "not_run"
+                  and "evidence=0/1" in demo_proof_finalized["autonomous_driver_summary"]
+                  and not run.autonomous_marathon_watchdog_path(demo_proof_dir).exists(),
+                  failures)
+
             stale = run.autonomous_marathon(
                 catalog,
                 github_targets,
@@ -954,7 +1073,7 @@ def main() -> int:
             stale_control = run.read_json(run.autonomous_marathon_control_path(stale_dir))
             stale_baseline = stale_control.get("cadence", {}).get("created_at") or stale_run_json["created_at"]
             stale_checked_at = (
-                run.parse_iso_datetime(stale_baseline) + run.datetime.timedelta(minutes=46)
+                run.parse_iso_datetime(stale_baseline) + run.datetime.timedelta(minutes=47)
             ).isoformat(timespec="seconds")
             stale_db = tmp / "gh-agent-stale-watchdog.json"
             stale_finalized = run.autonomous_marathon(
