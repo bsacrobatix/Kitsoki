@@ -32,6 +32,29 @@ replay and report the missing-cassette blocker honestly, as usual. Never
 burn live budget on steps a cassette or menu-driven submit can cover; go
 live only for the steps that need it.
 
+**Drive to the scenario's declared completion — not just the first
+transition.** The leg above carries the scenario's own contract:
+`task_prompt` (what the persona is actually trying to accomplish),
+`success_criteria`, and `quality_gate` (`minimum_evidence` — the concrete
+artifact/evidence kinds this scenario requires, e.g. `prd_artifact`,
+`design_artifact`, `review_notes` — and `done_when`, the plain-language
+completion condition). Reaching the nested `primary_story`'s first landing
+or discovery room (e.g. a PRD story's `idle`/discovery room right after
+`landing` routes into it) is the START of the drive, not the target state —
+it proves routing worked, nothing about the scenario itself. After the
+session opens live, keep acting as the scenario's persona and keep
+submitting/answering/advancing the nested session's own intents (use
+`session.status` for the current room and allowed intents, `session.world`
+for progress fields such as a generated draft/doc path) until
+`quality_gate.done_when` is satisfied and every artifact named in
+`quality_gate.minimum_evidence` either exists (attach its path as an
+`evidence_refs` entry) or is impossible to reach, in which case stop and
+report the exact blocker instead of a false `"captured"`. Do not report
+`status: "captured"` while stopped at an early routing/landing room with the
+scenario's declared artifacts still unproduced — that is `"blocked"` or
+`"attempted"` with an honest blocker naming which `minimum_evidence` item is
+missing and why.
+
 **Persist every frame you render.** A frame that only existed in your tool
 output is not evidence: write each transport frame you capture (preflight
 AND key states — `render.tui_png` output files, `visual.snapshot` images)
@@ -48,10 +71,23 @@ text turn, etc.) that advances the SAME session to a new state (e.g.
 everything else about the scenario worked. So, for `vscode` legs:
 
 1. Preflight (`visual.open kind=vscode` + `visual.observe`) as usual, and
-   note which session handle it opened against (e.g. `s1`).
-2. Drive the scenario to its target state exactly as you would for any other
+   note which session handle it opened against (e.g. `s1`). This preflight
+   proves the BRIDGE is reachable; it is bridge-level evidence, not a
+   substitute for the underlying story session's own harness/profile
+   authorization below.
+2. Drive the scenario to its declared completion (see "Drive to the
+   scenario's declared completion" above) exactly as you would for any other
    transport — this is normally NOT through vscode tools (e.g. it is driven
-   through `session.submit`/`session.drive` on the underlying story session).
+   through `session.submit`/`session.drive` on the underlying story
+   session). This is the SAME session the "Live drive authorization"
+   instruction above governs: it must be opened (or already have been
+   opened) with `harness: "live"` and `profile: "{{ args.live_profile }}"`
+   when that value is non-empty — a vscode leg's bridge preflight does not
+   itself authorize or open that session, so do not let the preflight step
+   substitute for, precede, or silently downgrade this authorization. If
+   `args.live_profile` is empty, fall back to replay here exactly as any
+   other transport would, and report the resulting missing-cassette blocker
+   honestly.
 3. Once the live session has reached its target state, call `visual.open
    kind=vscode` / `visual.observe` **again**, against the SAME session
    handle you just drove forward, and persist that frame into `evidence_dir`

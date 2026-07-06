@@ -25,6 +25,15 @@ leg proves the scenario's success criteria (see the leg's
 your verdict is `"degraded-evidence"` — do not paper over a missing
 capture with a hopeful pass.
 
+The leg's `quality_gate.minimum_evidence` names the concrete artifact/
+evidence kinds this scenario requires (e.g. a PRD/design scenario requires
+`prd_artifact`, `design_artifact`, `review_notes`, not just a screenshot of
+the story's landing room). A driver report that only reached an early
+routing/discovery room — no matter how clean the frame looks — has not
+satisfied `quality_gate.done_when` if those artifacts are still missing;
+verdict `"unsupported"` in that case (reaching the room is not the claim
+under test, producing the scenario's own artifacts is).
+
 For `vscode` legs specifically: a preflight-only capture is NOT proof of the
 scenario's outcome (it only proves the bridge was reachable before the
 scenario was driven). Check the driver's `post_drive_evidence_ref` — if it is
