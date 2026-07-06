@@ -4564,6 +4564,42 @@ def github_issue_ref(item: dict, fallback_repo: str) -> tuple[str, str, str, str
     return repo, number, kind, url
 
 
+def github_issue_evidence_assets(issue: dict) -> list[dict]:
+    raw = issue.get("evidence_assets", []) if isinstance(issue, dict) else []
+    if isinstance(raw, dict):
+        raw = [{"name": name, "url": url} for name, url in sorted(raw.items())]
+    out = []
+    for asset in raw or []:
+        if not isinstance(asset, dict):
+            continue
+        url = str(asset.get("url", "")).strip()
+        if not url:
+            continue
+        out.append({
+            "name": str(asset.get("name", "") or "evidence").strip(),
+            "url": url,
+        })
+    return out
+
+
+def filed_issue_evidence_lines(findings: dict) -> list[str]:
+    lines = []
+    items = findings.get("items", []) if isinstance(findings, dict) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        issue = item.get("github_issue", {}) if isinstance(item.get("github_issue", {}), dict) else {}
+        issue_url = str(issue.get("url", "")).strip()
+        if not issue_url:
+            continue
+        for asset in github_issue_evidence_assets(issue):
+            lines.append(
+                f"issue_evidence={item.get('id', item.get('title', 'finding'))}, "
+                f"{asset['name']}={asset['url']}"
+            )
+    return lines
+
+
 def enqueue_gh_agent_fixes(run_dir: Path, ticket_repo: str, db_path: str, story: str) -> dict:
     if not db_path:
         return {
@@ -4904,6 +4940,8 @@ def render_autonomous_fix_report(run_dir: Path, status: dict, review: Optional[d
         for item in issue_items:
             issue = item.get("github_issue", {})
             lines.append(f"- `{item.get('id', item.get('title', 'finding'))}`: {issue.get('url', '')}")
+            for asset in github_issue_evidence_assets(issue)[:4]:
+                lines.append(f"  - evidence `{asset['name']}`: {asset['url']}")
     else:
         lines.append("- (none)")
     lines.extend([
@@ -10773,6 +10811,7 @@ def render_deck(
         for item in finding_items
         if item.get("github_issue", {}).get("url")
     ]
+    issue_evidence_lines = filed_issue_evidence_lines(findings or {})
     weakness_routes = build_weakness_routes(run_json, findings or {"items": []})
     prd_design_intake = build_prd_design_intake(run_json, weakness_routes)
     weakness_route_lines = [
@@ -10836,6 +10875,7 @@ def render_deck(
     gh_agent_lines = [
         f"Filing: {len(filed_issue_lines)} issue URL(s)",
         *filed_issue_lines[:8],
+        *issue_evidence_lines[:8],
         (
             "Queue: "
             f"{gh_agent.get('enqueue_status', 'not requested')} · "

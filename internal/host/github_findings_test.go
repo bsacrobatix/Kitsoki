@@ -262,6 +262,19 @@ func TestGitHubFileFindings_FilesCredibleIssues(t *testing.T) {
 	if gi["url"] != "https://github.com/o/r/issues/101" || gi["repo"] != "o/r" {
 		t.Errorf("finding-1 github_issue = %v", gi)
 	}
+	assets, _ := gi["evidence_assets"].([]any)
+	if len(assets) != 2 {
+		t.Fatalf("finding-1 evidence_assets len = %d, want 2: %v", len(assets), gi["evidence_assets"])
+	}
+	assetURLs := map[string]string{}
+	for _, raw := range assets {
+		asset := raw.(map[string]any)
+		assetURLs[asset["name"].(string)] = asset["url"].(string)
+	}
+	if !strings.Contains(assetURLs["shot.png"], "https://github.com/o/r/releases/download/kitsoki-artifacts/") ||
+		!strings.Contains(assetURLs["trace.json"], "https://github.com/o/r/releases/download/kitsoki-artifacts/") {
+		t.Fatalf("finding-1 evidence asset URLs = %v", assetURLs)
+	}
 	if _, has := items[1].(map[string]any)["github_issue"]; has {
 		t.Error("seeded finding must not be filed")
 	}
