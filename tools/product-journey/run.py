@@ -2032,6 +2032,49 @@ def validate_autonomous_workflow_docs(issues: list[dict]) -> None:
             "Product journey run view still presents file_findings as the default issue-to-fix guidance",
             run_created_room.relative_to(ROOT).as_posix(),
         )
+    file_findings_call = "id: file_product_journey_findings"
+    if file_findings_call in room_text:
+        call_start = room_text.index(file_findings_call)
+        bind_start = room_text.find("\n              bind:", call_start)
+        call_block = room_text[call_start:bind_start if bind_start != -1 else len(room_text)]
+        forbidden_file_findings_tokens = [
+            "--gh-agent-db",
+            "--gh-agent-story",
+            "--gh-agent-drain",
+            "--gh-agent-public-base-url",
+            "--gh-agent-project-root",
+            "--gh-agent-incident-repo",
+            "--gh-agent-asset-dir",
+            "--gh-agent-comment-mode",
+        ]
+        present_forbidden_file_findings = [
+            token for token in forbidden_file_findings_tokens if token in call_block
+        ]
+        if present_forbidden_file_findings:
+            add_corpus_issue(
+                issues,
+                "error",
+                "file-findings-gh-agent-boundary",
+                "Product journey file_findings must stay filing-only; gh-agent queue/drain/fix belongs to autonomous_fix",
+                ", ".join(present_forbidden_file_findings),
+            )
+    app_path = ROOT / "stories" / "product-journey-qa" / "app.yaml"
+    if app_path.exists():
+        app_text = app_path.read_text(encoding="utf-8")
+        file_intent = "  file_findings:"
+        autonomous_intent = "  autonomous_fix:"
+        if file_intent in app_text and autonomous_intent in app_text:
+            intent_start = app_text.index(file_intent)
+            intent_end = app_text.index(autonomous_intent, intent_start)
+            intent_block = app_text[intent_start:intent_end]
+            if "gh_agent_" in intent_block:
+                add_corpus_issue(
+                    issues,
+                    "error",
+                    "file-findings-gh-agent-boundary",
+                    "Product journey file_findings must not expose gh-agent slots; use autonomous_fix for the full issue-to-fix loop",
+                    app_path.relative_to(ROOT).as_posix(),
+                )
 
 
 def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_targets: dict) -> dict:

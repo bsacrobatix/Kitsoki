@@ -517,33 +517,6 @@ states:
                 gh_agent_independent_verify_summary: ""
                 gh_agent_missing_verify_summary: "file_findings mode=file is debug-only; use autonomous_fix for the full issue-to-fix loop"
                 status: "findings_filing_invalid"
-        - when: "(slots.mode ?? 'dry-run') != 'dry-run' && (slots.gh_agent_public_base_url == nil || slots.gh_agent_public_base_url == '')"
-          target: run_created
-          guard_hint: "Provide gh_agent_public_base_url=<public agent URL> for real filing/fixing."
-          effects:
-            - set:
-                ticket_repo: "{{ slots.ticket_repo }}"
-                filing_dry_run: "{{ slots.mode ?? 'dry-run' }}"
-                filing_status: "findings_filing_invalid"
-                filing_summary: "Real product-journey filing/fixing requires gh_agent_public_base_url so gh-agent run evidence is reviewable."
-                validation_status: "invalid"
-                validation_errors: 1
-                validation_warnings: 0
-                validation_issue_summary: "gh-agent-public-base-url"
-                gh_agent_fix_evidence_count: 0
-                gh_agent_missing_evidence_count: 0
-                gh_agent_triage_evidence_count: 0
-                gh_agent_missing_triage_count: 0
-                gh_agent_independent_verify_count: 0
-                gh_agent_missing_verify_count: 0
-                gh_agent_missing_run_url_count: 1
-                gh_agent_fix_evidence_summary: ""
-                gh_agent_missing_evidence_summary: "gh_agent_public_base_url is required"
-                gh_agent_triage_evidence_summary: ""
-                gh_agent_missing_triage_summary: "gh_agent_public_base_url is required"
-                gh_agent_independent_verify_summary: ""
-                gh_agent_missing_verify_summary: "gh_agent_public_base_url is required"
-                status: "findings_filing_invalid"
         - target: run_created
           effects:
             - set:
@@ -582,21 +555,6 @@ states:
                   - --filing-mode
                   - "{{ slots.mode ?? 'dry-run' }}"
                   - --debug-file
-                  - --gh-agent-db
-                  - "{{ slots.gh_agent_db ?? (world.run_dir + '/gh-agent-jobs.sqlite') }}"
-                  - --gh-agent-story
-                  - "{{ slots.gh_agent_story ?? 'stories/bugfix' }}"
-                  - --gh-agent-drain
-                  - --gh-agent-public-base-url
-                  - "{{ slots.gh_agent_public_base_url ?? '' }}"
-                  - --gh-agent-project-root
-                  - "{{ slots.gh_agent_project_root ?? '' }}"
-                  - --gh-agent-incident-repo
-                  - "{{ slots.gh_agent_incident_repo ?? '' }}"
-                  - --gh-agent-asset-dir
-                  - "{{ slots.gh_agent_asset_dir ?? '' }}"
-                  - --gh-agent-comment-mode
-                  - "{{ slots.gh_agent_comment_mode ?? 'none' }}"
                 cwd: "."
               bind:
                 last_result: stdout_json

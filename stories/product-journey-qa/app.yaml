@@ -523,14 +523,6 @@ intents:
       ticket_repo: { type: string, required: true }
       mode: { type: string, required: false }
       debug_file: { type: string, required: false }
-      gh_agent_db: { type: string, required: false }
-      gh_agent_story: { type: string, required: false }
-      gh_agent_drain: { type: string, required: false }
-      gh_agent_public_base_url: { type: string, required: false }
-      gh_agent_project_root: { type: string, required: false }
-      gh_agent_incident_repo: { type: string, required: false }
-      gh_agent_asset_dir: { type: string, required: false }
-      gh_agent_comment_mode: { type: string, required: false }
   autonomous_fix:
     description: "File credible issue findings, drain gh-agent fixes, review, and validate as one no-operator reliability gate."
     examples: ["autonomous fix", "run autonomous fix ticket_repo=bsacrobatix/Kitsoki", "file and fix findings", "auto fix findings"]
