@@ -14,6 +14,7 @@ host_handlers:
             summary: ledger path missing
             ledger_path: ""
             ledger_markdown_path: ""
+            min_cycle_count: 1
             errors: 1
             warnings: 0
             issues:
@@ -33,11 +34,12 @@ turns:
       marathon_smoke_ledger_validation_errors: 1
       marathon_smoke_ledger_validation_warnings: 0
       marathon_smoke_ledger_validation_cycle_count: 0
+      marathon_smoke_ledger_validation_min_cycle_count: 1
       marathon_smoke_ledger_validation_path: ""
       marathon_smoke_ledger_validation_markdown_path: ""
     expect_host_calls:
       - handler: host.run
         args: { call: validate_autonomous_marathon_smoke_ledger }
-    expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Marathon ledger validation[\\s\\S]*invalid: ledger path missing[\\s\\S]*Status[\\s\\S]*marathon_smoke_ledger_validated"
+    expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Marathon ledger validation[\\s\\S]*invalid: ledger path missing[\\s\\S]*cycles=0, min=1[\\s\\S]*Status[\\s\\S]*marathon_smoke_ledger_validated"
 
 expect_no_errors: true
