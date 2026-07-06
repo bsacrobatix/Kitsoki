@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -209,12 +210,16 @@ func GitHubFileFindings(ctx context.Context, in FindingsFilingInput) (FindingsFi
 		out.Status = "filed"
 		out.IssueURL = filed.URL
 		out.IssueNumber = filed.Number
-		item["github_issue"] = map[string]any{
+		issue := map[string]any{
 			"url":      filed.URL,
 			"number":   filed.Number,
 			"repo":     in.Repo,
 			"filed_at": nowFn().UTC().Format(time.RFC3339),
 		}
+		if assets := findingEvidenceAssetRecords(filed.Assets); len(assets) > 0 {
+			issue["evidence_assets"] = assets
+		}
+		item["github_issue"] = issue
 		changed = true
 		res.Filed++
 		res.Outcomes = append(res.Outcomes, out)
@@ -238,6 +243,29 @@ func GitHubFileFindings(ctx context.Context, in FindingsFilingInput) (FindingsFi
 		_ = changed // findings.json is always rewritten to stamp the filing block
 	}
 	return res, nil
+}
+
+func findingEvidenceAssetRecords(assets map[string]string) []map[string]any {
+	if len(assets) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(assets))
+	for name := range assets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]map[string]any, 0, len(names))
+	for _, name := range names {
+		url := strings.TrimSpace(assets[name])
+		if url == "" {
+			continue
+		}
+		out = append(out, map[string]any{
+			"name": name,
+			"url":  url,
+		})
+	}
+	return out
 }
 
 type relatedFindingIssue struct {

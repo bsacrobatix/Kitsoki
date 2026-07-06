@@ -167,7 +167,13 @@ for i, item in enumerate(findings.get("items", []), start=1):
     filed += 1
     url = f"https://github.com/{args.repo}/issues/{100 + i}"
     item["github_issue"] = {"url": url, "number": str(100 + i), "repo": args.repo,
-                            "filed_at": "2026-07-05T00:00:00+00:00"}
+                            "filed_at": "2026-07-05T00:00:00+00:00",
+                            "evidence_assets": [
+                                {
+                                    "name": "trace-replay.md",
+                                    "url": f"https://github.com/{args.repo}/releases/download/kitsoki-artifacts/finding-{i}-trace-replay.md",
+                                }
+                            ]}
     outcomes.append({"finding_id": item.get("id", ""), "status": "filed", "issue_url": url})
 if not args.dry_run:
     findings["filing"] = {"requested": True, "ticket_repo": args.repo,
@@ -405,12 +411,20 @@ def main():
         findings = run.read_json(run_dir / "findings.json")
         _check("filing block recorded", findings["filing"]["requested"] is True
                and findings["filing"]["ticket_repo"] == "o/r")
+        first_issue_assets = findings["items"][0]["github_issue"].get("evidence_assets", [])
+        _check("filed issue evidence assets are retained for review",
+               first_issue_assets
+               and first_issue_assets[0]["name"] == "trace-replay.md"
+               and first_issue_assets[0]["url"].startswith("https://github.com/o/r/releases/download/kitsoki-artifacts/"))
         deck = run.read_json(run_dir / "deck.slidey.json")
         gh_scene = deck_scene(deck, "GH-agent fixes")
         _check("deck has gh-agent fix review scene", bool(gh_scene))
         _check("deck includes filed issues and fix run URLs",
                "https://github.com/o/r/issues/101" in gh_scene.get("body", "")
                and "https://agent.example/run/job-1" in gh_scene.get("body", ""))
+        _check("deck includes filed issue evidence assets",
+               "issue_evidence=" in gh_scene.get("body", "")
+               and "https://github.com/o/r/releases/download/kitsoki-artifacts/finding-1-trace-replay.md" in gh_scene.get("body", ""))
         _check("deck includes autonomous report and independent verification links",
                "autonomous-fix-report.md" in gh_scene.get("body", "")
                and "independent_verify=" in gh_scene.get("body", "")
@@ -691,6 +705,8 @@ def main():
         report_text = report.read_text()
         _check("autonomous loop writes complete review report",
                "https://github.com/o/r/issues/101" in report_text
+               and "evidence `trace-replay.md`" in report_text
+               and "https://github.com/o/r/releases/download/kitsoki-artifacts/" in report_text
                and "https://agent.example/run/job-1" in report_text
                and "https://agent.example/run/job-1/artifacts/fix-report.md" in report_text
                and "https://agent.example/run/job-1/artifacts/triage-verdict.md" in report_text
