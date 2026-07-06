@@ -137,8 +137,8 @@ Then hand it to the reusable driver:
    `/api/ready`; readiness must report `status=ready`, the same `ticket_repo`,
    and an enabled drain loop.
    A mismatch returns `autonomous_fix_invalid` with filing still `not_run`;
-   successful runs carry the health/readiness summaries into the story view and
-   `autonomous-fix-report.md`.
+   successful runs carry watchdog and health/readiness summaries into the story
+   view and `autonomous-fix-report.md`.
    The facade then drives `kitsoki bug
    file-findings` (host.GitHubFileFindings) and native gh-agent queue/drain
    surfaces behind the story boundary: native GitHub API filing uses `GH_TOKEN` /

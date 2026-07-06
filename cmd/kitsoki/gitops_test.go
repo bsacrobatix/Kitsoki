@@ -604,6 +604,12 @@ func TestGitopsAutonomousReportIncludesHostedAgentReadinessProof(t *testing.T) {
 		"issue_closeout_status":      "closed",
 		"issue_closeout_count":       1,
 	}
+	gitopsMergeAutonomousWatchdogProof(status, map[string]any{
+		"autonomous_watchdog_status":        "autonomous_watchdog_ok",
+		"autonomous_watchdog_summary":       "heartbeat age 10m within watchdog=45m",
+		"autonomous_watchdog_markdown_path": filepath.Join(runDir, "autonomous-marathon-watchdog.md"),
+		"heartbeat_age_minutes":             10,
+	})
 	gitopsMergeGHAgentReadinessProof(status,
 		map[string]any{"status": "pass", "summary": "https://agent.example/healthz: ok"},
 		map[string]any{"status": "pass", "summary": "https://agent.example/api/ready: ready for o/r as worker-1"},
@@ -617,6 +623,9 @@ func TestGitopsAutonomousReportIncludesHostedAgentReadinessProof(t *testing.T) {
 		t.Fatalf("read report: %v", err)
 	}
 	for _, want := range []string{
+		"## Autonomous Watchdog",
+		"Status: `autonomous_watchdog_ok` - heartbeat age 10m within watchdog=45m",
+		"Age: 10 minute(s)",
 		"## Hosted GH-agent",
 		"Health: `pass` - https://agent.example/healthz: ok",
 		"Readiness: `pass` - https://agent.example/api/ready: ready for o/r as worker-1",
