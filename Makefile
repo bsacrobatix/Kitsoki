@@ -143,6 +143,14 @@ install: check-deps web embed-stories embed-skills
 	@mkdir -p $(INSTALLDIR)
 	GOBIN=$(INSTALLDIR) go install $(PKG)
 	@echo "installed $(BINARY) -> $(INSTALLDIR)/$(BINARY)"
+	@echo "smoke-checking installed $(BINARY) can load git-ops stories"
+	@log="$$(mktemp)"; \
+	if ! "$(INSTALLDIR)/$(BINARY)" validate stories/git-ops/app.yaml >"$$log" 2>&1; then \
+		cat "$$log" >&2; \
+		rm -f "$$log"; \
+		exit 1; \
+	fi; \
+	rm -f "$$log"
 	@case ":$$PATH:" in \
 		*":$(INSTALLDIR):"*) ;; \
 		*) echo "warning: $(INSTALLDIR) is not on your PATH — '$(BINARY)' won't be found." >&2; \
