@@ -200,6 +200,19 @@ func (r *Registry) Effective(id string) (EffectiveType, bool) {
 	return eff, ok
 }
 
+// HasTypeDef reports whether a type ID exists in the registry.
+func (r *Registry) HasTypeDef(id string) bool {
+	_, exists := r.defs[id]
+	return exists
+}
+
+// TypeDef returns the TypeDef for id, or false if not registered.
+func (r *Registry) TypeDef(id string) (TypeDef, bool) {
+	def, ok := r.defs[id]
+	return def, ok
+}
+
+
 // IsA reports whether typeID equals ancestorID or extends it (directly or
 // transitively) — the assignability check an edge target uses (an edge
 // declared with target_type "requirement" accepts any type extending

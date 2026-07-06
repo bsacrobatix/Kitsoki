@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,6 +49,7 @@ func graphCmd() *cobra.Command {
 	}
 	cmd.AddCommand(graphLintCmd())
 	cmd.AddCommand(graphApplyCmd())
+	cmd.AddCommand(graphQueryCmd())
 	cmd.AddCommand(graphRenderFeaturesCmd())
 	return cmd
 }
@@ -274,3 +276,51 @@ func graphRenderFeaturesCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&check, "check", false, "fail if any regenerated file would differ from what's on disk, without writing")
 	return cmd
 }
+
+func graphQueryCmd() *cobra.Command {
+	var modeRefsTo string
+	var modeExplainType string
+	var modeImpact string
+	var toType string
+	cmd := &cobra.Command{
+		Use:   "query <catalog-path>",
+		Short: "Query relationships, types, or impact of changes in the catalog",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := args[0]
+			var mode, target string
+			if modeRefsTo != "" {
+				mode = "refs-to"
+				target = modeRefsTo
+			} else if modeExplainType != "" {
+				mode = "explain-type"
+				target = modeExplainType
+			} else if modeImpact != "" {
+				mode = "impact"
+				target = modeImpact
+			} else {
+				return fmt.Errorf("must specify one of --refs-to, --explain-type, or --impact")
+			}
+
+			res, err := invokeGraphOp("query", map[string]any{
+				"catalog_path": path,
+				"mode":         mode,
+				"target":       target,
+				"to_type":      toType,
+			})
+			if err != nil {
+				return fmt.Errorf("graph query: %w", err)
+			}
+			out := cmd.OutOrStdout()
+			enc := json.NewEncoder(out)
+			enc.SetIndent("", "  ")
+			return enc.Encode(res.Data)
+		},
+	}
+	cmd.Flags().StringVar(&modeRefsTo, "refs-to", "", "find all references to node ID")
+	cmd.Flags().StringVar(&modeExplainType, "explain-type", "", "explain effective type structure")
+	cmd.Flags().StringVar(&modeImpact, "impact", "", "preview impact of node ID")
+	cmd.Flags().StringVar(&toType, "to-type", "", "target type for --impact retype check")
+	return cmd
+}
+

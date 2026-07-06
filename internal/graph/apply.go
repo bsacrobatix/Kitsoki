@@ -325,6 +325,87 @@ func applyOperations(cat *Catalog, ops []Operation, scratchRoot string) ([]strin
 					touched[sf] = true
 				}
 			}
+
+		case OpRetyped:
+			realFile := cat.NodeFile[op.Node]
+			scratchFile, err := scratchFileFor(realFile)
+			if err != nil {
+				return nil, err
+			}
+			doc, err := loadDoc(scratchFile)
+			if err != nil {
+				return nil, err
+			}
+			seq, err := topLevelSequence(doc)
+			if err != nil {
+				return nil, err
+			}
+			mapping, _, found := findNodeMapping(seq, string(op.Node))
+			if !found {
+				return nil, fmt.Errorf("retyped op: node %q not found in %s", op.Node, scratchFile)
+			}
+			node := cat.Nodes[op.Node]
+			pack, _, version, err := ParseSchemaPin(node.Schema)
+			if err != nil {
+				return nil, err
+			}
+			newSchema := fmt.Sprintf("%s/%s/%s", pack, op.ToType, version)
+			if err := setMappingKey(mapping, "schema", newSchema); err != nil {
+				return nil, err
+			}
+			touched[scratchFile] = true
+
+		case OpRegistryTypeAdded:
+			regFile, err := registryFile(cat)
+			if err != nil {
+				return nil, err
+			}
+			scratchFile, err := scratchFileFor(regFile)
+			if err != nil {
+				return nil, err
+			}
+			doc, err := loadDoc(scratchFile)
+			if err != nil {
+				return nil, err
+			}
+			seq, err := typeRegistrySequence(doc)
+			if err != nil {
+				return nil, err
+			}
+			mapping, err := valueToNode(op.After)
+			if err != nil {
+				return nil, err
+			}
+			seq.Content = append(seq.Content, mapping)
+			touched[scratchFile] = true
+
+		case OpRegistryTypeModified:
+			regFile, err := registryFile(cat)
+			if err != nil {
+				return nil, err
+			}
+			scratchFile, err := scratchFileFor(regFile)
+			if err != nil {
+				return nil, err
+			}
+			doc, err := loadDoc(scratchFile)
+			if err != nil {
+				return nil, err
+			}
+			seq, err := typeRegistrySequence(doc)
+			if err != nil {
+				return nil, err
+			}
+			mapping, _, found := findTypeMapping(seq, string(op.Node))
+			if !found {
+				return nil, fmt.Errorf("registry_type_modified op: type %q not found in %s", op.Node, scratchFile)
+			}
+			for _, ch := range op.Changes {
+				if err := setNodeField(mapping, ch.Path, ch.After); err != nil {
+					return nil, fmt.Errorf("registry_type_modified op for %q: %w", op.Node, err)
+				}
+			}
+			touched[scratchFile] = true
 		}
 	}
 
@@ -522,3 +603,51 @@ func renameScalarRefs(node *yaml.Node, from, to string) bool {
 	}
 	return changed
 }
+
+func registryFile(cat *Catalog) (string, error) {
+	info, err := os.Stat(cat.RootPath)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return cat.RootPath, nil
+	}
+	return filepath.Join(cat.RootPath, "type_registry.yaml"), nil
+}
+
+func typeRegistrySequence(doc *yaml.Node) (*yaml.Node, error) {
+	root := doc
+	if root.Kind == yaml.DocumentNode {
+		if len(root.Content) == 0 {
+			return nil, fmt.Errorf("empty document")
+		}
+		root = root.Content[0]
+	}
+	if root.Kind == yaml.SequenceNode {
+		return root, nil
+	}
+	if root.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(root.Content); i += 2 {
+			if root.Content[i].Value == "type_registry" {
+				return root.Content[i+1], nil
+			}
+		}
+		return nil, fmt.Errorf("no top-level \"type_registry\" sequence")
+	}
+	return nil, fmt.Errorf("unexpected document shape %v", root.Kind)
+}
+
+func findTypeMapping(seq *yaml.Node, id string) (*yaml.Node, int, bool) {
+	for i, item := range seq.Content {
+		if item.Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j+1 < len(item.Content); j += 2 {
+			if item.Content[j].Value == "id" && item.Content[j+1].Value == id {
+				return item, i, true
+			}
+		}
+	}
+	return nil, -1, false
+}
+

@@ -237,6 +237,7 @@ var AllowedStarlarkHostVerbs = []string{
 	"host.graph.lint",
 	"host.graph.diff",
 	"host.graph.project",
+	"host.graph.query",
 }
 
 // NewStarlarkRunHandler returns a host.starlark.run Handler bound to reg,

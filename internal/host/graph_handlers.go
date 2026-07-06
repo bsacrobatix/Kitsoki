@@ -60,12 +60,14 @@ func GraphHandler(ctx context.Context, args map[string]any) (Result, error) {
 		return graphDiffOp(args)
 	case "apply":
 		return graphApplyOp(args)
+	case "query":
+		return graphQueryOp(args)
 	case "project":
 		return graphProjectOp(args)
 	case "presentation":
 		return graphPresentationOp(ctx, args)
 	default:
-		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, project, presentation)", op)
+		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, query, project, presentation)", op)
 	}
 }
 
@@ -367,3 +369,145 @@ func graphPresentationOp(ctx context.Context, args map[string]any) (Result, erro
 	scriptPath := filepath.Join(kitDir, "scripts", "presentation.star")
 	return StarlarkBindingHandler(scriptPath)(ctx, args)
 }
+
+
+func graphQueryOp(args map[string]any) (Result, error) {
+	cat, err := loadCatalogArg(args)
+	if err != nil {
+		return Result{}, err
+	}
+	mode := graphStringArg(args, "mode")
+	target := graphStringArg(args, "target")
+	if mode == "" || target == "" {
+		return Result{}, fmt.Errorf("host.graph.query: requires both mode and target")
+	}
+
+	switch mode {
+	case "refs-to":
+		return graphQueryRefsTo(cat, target)
+	case "explain-type":
+		return graphQueryExplainType(cat, target)
+	case "impact":
+		toType := graphStringArg(args, "to_type")
+		return graphQueryImpact(cat, target, toType)
+	default:
+		return Result{}, fmt.Errorf("host.graph.query: unknown mode %q", mode)
+	}
+}
+
+func graphQueryRefsTo(cat *objectgraph.Catalog, targetID string) (Result, error) {
+	var refs []any
+	targetNodeID := objectgraph.NodeID(targetID)
+	for _, id := range cat.SortedNodeIDs() {
+		node := cat.Nodes[id]
+		eff, ok := cat.Registry.Effective(node.TypeID)
+		if !ok {
+			continue
+		}
+		for _, decl := range eff.EdgeFields {
+			for _, t := range node.EdgeTargets(decl) {
+				if t == targetNodeID {
+					refs = append(refs, map[string]any{
+						"node":       string(id),
+						"edge_field": string(decl.ID),
+					})
+				}
+			}
+		}
+	}
+	return Result{Data: map[string]any{"references": refs}}, nil
+}
+
+func graphQueryExplainType(cat *objectgraph.Catalog, typeID string) (Result, error) {
+	eff, ok := cat.Registry.Effective(typeID)
+	if !ok {
+		return Result{}, fmt.Errorf("unknown type %q", typeID)
+	}
+
+	type Edge struct {
+		ID          string `json:"id"`
+		TargetType  string `json:"target_type"`
+		Cardinality string `json:"cardinality"`
+		Storage     string `json:"storage"`
+		Acyclic     bool   `json:"acyclic"`
+		Renders     bool   `json:"renders"`
+		NestsUnder  bool   `json:"nests_under"`
+	}
+	edges := make([]Edge, len(eff.EdgeFields))
+	for i, decl := range eff.EdgeFields {
+		edges[i] = Edge{
+			ID:          string(decl.ID),
+			TargetType:  decl.TargetType,
+			Cardinality: string(decl.Cardinality),
+			Storage:     string(decl.Storage),
+			Acyclic:     decl.Acyclic,
+			Renders:     decl.Renders,
+			NestsUnder:  decl.NestsUnder,
+		}
+	}
+
+	return Result{Data: map[string]any{
+		"type_id":         eff.ID,
+		"schema":          string(eff.Schema),
+		"extends":         eff.Extends,
+		"summary":         eff.Summary,
+		"required_fields": eff.RequiredFields,
+		"edge_fields":     edges,
+		"ancestry":        eff.Ancestry,
+	}}, nil
+}
+
+func graphQueryImpact(cat *objectgraph.Catalog, targetID string, toType string) (Result, error) {
+	node, exists := cat.Nodes[objectgraph.NodeID(targetID)]
+	if !exists {
+		return Result{}, fmt.Errorf("node %q not found", targetID)
+	}
+
+	typeRes, err := graphQueryExplainType(cat, node.TypeID)
+	var typeData any
+	if err == nil {
+		typeData = typeRes.Data
+	}
+
+	refsRes, err := graphQueryRefsTo(cat, targetID)
+	var refs any
+	if err == nil {
+		refs = refsRes.Data["references"]
+	}
+
+	var incompatibleRefs []any
+	if toType != "" {
+		if !cat.Registry.HasTypeDef(toType) {
+			return Result{}, fmt.Errorf("target type %q not found in registry", toType)
+		}
+		for _, id := range cat.SortedNodeIDs() {
+			otherNode := cat.Nodes[id]
+			eff, ok := cat.Registry.Effective(otherNode.TypeID)
+			if !ok {
+				continue
+			}
+			for _, decl := range eff.EdgeFields {
+				for _, t := range otherNode.EdgeTargets(decl) {
+					if t == objectgraph.NodeID(targetID) {
+						if decl.TargetType != "" && !cat.Registry.IsA(toType, decl.TargetType) {
+							incompatibleRefs = append(incompatibleRefs, map[string]any{
+								"node":        string(id),
+								"edge_field":  string(decl.ID),
+								"target_type": decl.TargetType,
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return Result{Data: map[string]any{
+		"node_id":           targetID,
+		"current_type":      node.TypeID,
+		"explain_type":      typeData,
+		"references":        refs,
+		"incompatible_refs": incompatibleRefs,
+	}}, nil
+}
+
