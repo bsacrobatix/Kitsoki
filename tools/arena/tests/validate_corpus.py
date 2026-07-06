@@ -72,6 +72,9 @@ def validate(path: Path, *, allow_small: bool = False) -> list[str]:
         failures.append("selection_rule_committed_at is required")
     if not data.get("archetypes"):
         failures.append("archetypes path is required")
+    source_catalog = data.get("source_catalog")
+    if source_catalog and not _resolve_declared_path(path, str(source_catalog)).exists():
+        failures.append(f"source_catalog does not exist: {source_catalog}")
 
     tasks = data.get("tasks")
     if not isinstance(tasks, list):
@@ -138,6 +141,16 @@ def _load_yaml(path: Path, failures: list[str]) -> Any:
     except Exception as exc:  # noqa: BLE001 - report parser failure as gate text.
         failures.append(f"cannot parse YAML: {exc}")
         return None
+
+
+def _resolve_declared_path(manifest_path: Path, declared: str) -> Path:
+    p = Path(declared)
+    if p.is_absolute():
+        return p
+    cwd_relative = Path.cwd() / p
+    if cwd_relative.exists():
+        return cwd_relative
+    return manifest_path.parent / p
 
 
 if __name__ == "__main__":
