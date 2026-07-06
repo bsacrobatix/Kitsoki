@@ -79,6 +79,19 @@ with tempfile.TemporaryDirectory() as tmp:
     check("overall comparison pending", comparisons["overall"]["status"], "pending")
     check("bugswarm comparison pending", comparisons["bugswarm"]["status"], "pending")
     check("overall comparison no token ratio", comparisons["overall"]["token_ratio_kitsoki_to_raw"], None)
+    audit = report["completion_audit"]
+    check("completion audit incomplete", audit["status"], "incomplete")
+    check("completion audit requirement count", audit["requirement_count"], 8)
+    check("completion audit proven count", audit["proven_count"], 4)
+    audit_requirements = {item["id"]: item for item in audit["requirements"]}
+    check("audit report artifact proven", audit_requirements["report-artifact"]["status"], "proven")
+    check("audit oss source proven", audit_requirements["oss-source"]["status"], "proven")
+    check("audit bugswarm source proven", audit_requirements["bugswarm-source"]["status"], "proven")
+    check("audit oss kitsoki proven", audit_requirements["oss-kitsoki-glm52"]["status"], "proven")
+    check("audit bugswarm execute missing", audit_requirements["bugswarm-execute-verification"]["status"], "missing")
+    check("audit oss raw missing", audit_requirements["oss-raw-glm52"]["status"], "missing")
+    check("audit bugswarm kitsoki missing", audit_requirements["bugswarm-kitsoki-glm52"]["status"], "missing")
+    check("audit bugswarm raw missing", audit_requirements["bugswarm-raw-glm52"]["status"], "missing")
     refs = report["references"]
     check("references include local evidence", refs["local_evidence"][0]["path"], "tools/bugfix-bakeoff/results/cells")
     check("references include bugswarm website", refs["upstream"][0]["url"], "https://www.bugswarm.org/")
@@ -89,6 +102,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("markdown names pending raw arm", "oss-oracle | raw-prompt" in md, True)
     check("markdown includes overall rollup", "## Overall GLM-5.2 Treatment Rollup" in md, True)
     check("markdown includes comparisons", "## Kitsoki vs Raw-Prompt Comparisons" in md, True)
+    check("markdown includes completion audit", "## Completion Audit" in md, True)
+    check("markdown audit includes execute verification", "bugswarm-execute-verification" in md, True)
+    check("markdown audit includes oss raw", "oss-raw-glm52" in md, True)
     check("markdown marks overall comparison pending", "| overall | pending | 1 | 0 | n/a | n/a | Raw-prompt GLM-5.2 arm has no attempted cells. |" in md, True)
     check("markdown warns no token ratio", "must not compute a token ratio" in md, True)
     check("markdown includes closure packet", "## Evidence Closure Packet" in md, True)
@@ -269,6 +285,12 @@ with tempfile.TemporaryDirectory() as tmp:
     check("bugswarm comparison complete", comparisons["bugswarm"]["status"], "complete")
     check("bugswarm comparison success delta", comparisons["bugswarm"]["success_rate_delta"], 1.0)
     check("bugswarm comparison token ratio", comparisons["bugswarm"]["token_ratio_kitsoki_to_raw"], 5.0)
+    audit = report["completion_audit"]
+    audit_requirements = {item["id"]: item for item in audit["requirements"]}
+    check("bugswarm execute audit proven", audit_requirements["bugswarm-execute-verification"]["status"], "proven")
+    check("bugswarm kitsoki audit proven", audit_requirements["bugswarm-kitsoki-glm52"]["status"], "proven")
+    check("bugswarm raw audit proven", audit_requirements["bugswarm-raw-glm52"]["status"], "proven")
+    check("bugswarm fixture still incomplete without oss raw", audit["status"], "incomplete")
     gaps = "\n".join(report["evidence_gaps"])
     check("bugswarm result gap absent", "Some imported BugSwarm tasks are missing" in gaps, False)
     md = md_out.read_text(encoding="utf-8")

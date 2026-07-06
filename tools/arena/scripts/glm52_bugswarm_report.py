@@ -113,6 +113,7 @@ def build_report(
             "supporting_oss_codex_round1": rollup_arena_cells(arena_cells),
         },
         "comparisons": build_comparisons(matrix_rows),
+        "completion_audit": completion_audit(matrix_rows, verification, bugswarm_tasks),
         "evidence_gaps": evidence_gaps(matrix_rows, bugswarm_tasks, verification),
         "interpretation": interpretation(matrix_rows, bugswarm_tasks, verification),
         "evidence_closure": evidence_closure(matrix_rows, bugswarm_tasks, verification),
@@ -402,6 +403,139 @@ def comparison_missing_notes(kitsoki: dict[str, Any], raw: dict[str, Any]) -> li
     if raw["attempted"] == 0:
         notes.append("Raw-prompt GLM-5.2 arm has no attempted cells.")
     return notes
+
+
+def completion_audit(
+    rows: list[dict[str, Any]],
+    verification: dict[str, Any],
+    bugswarm_tasks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    requirements = [
+        audit_requirement(
+            "report-artifact",
+            "Produce a generated research report with JSON data and Markdown narrative.",
+            "proven",
+            ["docs/case-studies/bugswarm-glm52-bugfix-report.md", "docs/case-studies/bugswarm-glm52-bugfix-report.data.json"],
+            "The report is generated offline from committed inputs.",
+            "",
+        ),
+        audit_requirement(
+            "oss-source",
+            "Keep the reusable OSS oracle corpus as a separate source.",
+            "proven",
+            ["tools/arena/corpus/cost-bench.manifest.yaml", "tools/arena/corpus/sources.yaml"],
+            "The report references the frozen OSS oracle corpus and keeps it separate from BugSwarm.",
+            "",
+        ),
+        audit_requirement(
+            "bugswarm-source",
+            "Make BugSwarm a reusable source alongside the OSS oracle corpus.",
+            "proven" if bugswarm_tasks else "missing",
+            ["tools/arena/corpus/sources.yaml", "tools/arena/corpus/bugswarm.seed.yaml"],
+            f"Imported BugSwarm task count: {len(bugswarm_tasks)}.",
+            "" if bugswarm_tasks else "Import BugSwarm artifact metadata with bugswarm_to_arena.py.",
+        ),
+        audit_requirement(
+            "bugswarm-execute-verification",
+            "Prove BugSwarm failed/passed artifact behavior before scheduling live cells.",
+            "proven" if is_bugswarm_execute_verified(verification) else "missing",
+            [str(verification.get("source") or "tools/arena/scripts/bugswarm_verify_source.py")],
+            (
+                f"Verification mode={verification.get('mode') or 'none'}; "
+                f"verified={verification.get('verified_count', 0)}/{verification.get('task_count', 0)}."
+            ),
+            "" if is_bugswarm_execute_verified(verification) else "Run bugswarm_verify_source.py --execute and apply the verification report.",
+        ),
+        audit_requirement_for_rows(
+            "oss-kitsoki-glm52",
+            "Commit Kitsoki bugfix GLM-5.2 evidence for the OSS oracle corpus.",
+            rows,
+            corpus="oss-oracle",
+            treatment="kitsoki",
+        ),
+        audit_requirement_for_rows(
+            "oss-raw-glm52",
+            "Commit raw-prompt GLM-5.2 evidence for the OSS oracle corpus.",
+            rows,
+            corpus="oss-oracle",
+            treatment="raw-prompt",
+        ),
+        audit_requirement_for_rows(
+            "bugswarm-kitsoki-glm52",
+            "Commit Kitsoki bugfix GLM-5.2 evidence for the BugSwarm corpus.",
+            rows,
+            corpus="bugswarm",
+            treatment="kitsoki",
+        ),
+        audit_requirement_for_rows(
+            "bugswarm-raw-glm52",
+            "Commit raw-prompt GLM-5.2 evidence for the BugSwarm corpus.",
+            rows,
+            corpus="bugswarm",
+            treatment="raw-prompt",
+        ),
+    ]
+    status = "complete" if all(item["status"] == "proven" for item in requirements) else "incomplete"
+    return {
+        "status": status,
+        "proven_count": sum(1 for item in requirements if item["status"] == "proven"),
+        "requirement_count": len(requirements),
+        "requirements": requirements,
+    }
+
+
+def audit_requirement(
+    requirement_id: str,
+    requirement: str,
+    status: str,
+    evidence: list[str],
+    finding: str,
+    next_step: str,
+) -> dict[str, Any]:
+    return {
+        "id": requirement_id,
+        "requirement": requirement,
+        "status": status,
+        "evidence": evidence,
+        "finding": finding,
+        "next": next_step,
+    }
+
+
+def audit_requirement_for_rows(
+    requirement_id: str,
+    requirement: str,
+    rows: list[dict[str, Any]],
+    *,
+    corpus: str,
+    treatment: str,
+) -> dict[str, Any]:
+    matching = [row for row in rows if row.get("corpus") == corpus and row.get("treatment") == treatment]
+    attempted = [row for row in matching if row.get("quality") in {"solved", "partial", "failed"}]
+    evidence = [str(row.get("evidence") or "") for row in attempted if row.get("evidence")]
+    if attempted:
+        tokens = sum(row.get("total_tokens") or 0 for row in attempted)
+        return audit_requirement(
+            requirement_id,
+            requirement,
+            "proven",
+            evidence,
+            f"{len(attempted)} attempted cell(s), {tokens} total tokens.",
+            "",
+        )
+    pending_tasks = sorted({str(row.get("task") or "") for row in matching if row.get("quality") == "pending"})
+    return audit_requirement(
+        requirement_id,
+        requirement,
+        "missing",
+        [],
+        f"No attempted cell is committed. Pending task(s): {', '.join(pending_tasks) if pending_tasks else 'none'}.",
+        "Run the generated gap-plan commands, land the rollup, and regenerate this report.",
+    )
+
+
+def is_bugswarm_execute_verified(verification: dict[str, Any]) -> bool:
+    return str(verification.get("mode") or "") == "execute" and int(verification.get("verified_count") or 0) > 0
 
 
 def rollup_arena_cells(cells: list[dict[str, Any]]) -> dict[str, Any]:
@@ -744,6 +878,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             )
         )
     lines.extend(render_comparisons(report))
+    lines.extend(render_completion_audit(report))
     lines.extend([
         "",
         "## Committed GLM-5.2 Cells",
@@ -832,6 +967,27 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"{bucket['failed']} | {format_rate(bucket['success_rate'])} | {format_int(bucket['total_tokens'])} |"
             )
     return "\n".join(lines) + "\n"
+
+
+def render_completion_audit(report: dict[str, Any]) -> list[str]:
+    audit = report["completion_audit"]
+    lines = [
+        "",
+        "## Completion Audit",
+        "",
+        f"Status: `{audit['status']}` ({audit['proven_count']}/{audit['requirement_count']} requirements proven).",
+        "",
+        "| requirement | status | finding | next |",
+        "|---|---|---|---|",
+    ]
+    for item in audit["requirements"]:
+        next_step = item.get("next") or "done"
+        lines.append(
+            f"| {item['id']} | `{item['status']}` | "
+            f"{clean_sentence(str(item.get('finding') or ''))} | "
+            f"{clean_sentence(str(next_step))} |"
+        )
+    return lines
 
 
 def render_evidence_closure_packet(report: dict[str, Any]) -> list[str]:

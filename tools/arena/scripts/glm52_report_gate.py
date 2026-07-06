@@ -23,6 +23,16 @@ REQUIRED_CORPUS_TREATMENTS = {
     "bugswarm|kitsoki",
     "bugswarm|raw-prompt",
 }
+REQUIRED_COMPLETION_REQUIREMENTS = {
+    "report-artifact",
+    "oss-source",
+    "bugswarm-source",
+    "bugswarm-execute-verification",
+    "oss-kitsoki-glm52",
+    "oss-raw-glm52",
+    "bugswarm-kitsoki-glm52",
+    "bugswarm-raw-glm52",
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,6 +59,7 @@ def validate_report(report: dict[str, Any]) -> list[str]:
     problems.extend(require_rollups(report, rows))
     problems.extend(require_comparisons(report))
     problems.extend(require_closure(report, rows))
+    problems.extend(require_completion_audit(report, rows))
     problems.extend(require_references(report))
     return problems
 
@@ -57,7 +68,7 @@ def require_top_level(report: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     if report.get("kind") != "glm52_bugswarm_bugfix_report":
         problems.append(f"unexpected report kind: {report.get('kind')!r}")
-    for key in ("corpora", "rollups", "comparisons", "evidence_closure", "references"):
+    for key in ("corpora", "rollups", "comparisons", "completion_audit", "evidence_closure", "references"):
         if not isinstance(report.get(key), dict):
             problems.append(f"missing mapping: {key}")
     return problems
@@ -150,6 +161,58 @@ def require_closure(report: dict[str, Any], rows: list[dict[str, Any]]) -> list[
         if bugswarm_action.get("status") != "needs-execute-verification":
             problems.append("BugSwarm imported-but-unverified source must be gated as needs-execute-verification")
     return problems
+
+
+def require_completion_audit(report: dict[str, Any], rows: list[dict[str, Any]]) -> list[str]:
+    audit = report.get("completion_audit") if isinstance(report.get("completion_audit"), dict) else {}
+    problems: list[str] = []
+    if not audit:
+        return ["missing completion_audit"]
+    status = audit.get("status")
+    if status not in {"complete", "incomplete"}:
+        problems.append(f"completion audit has invalid status {status!r}")
+    requirements = audit.get("requirements") if isinstance(audit.get("requirements"), list) else []
+    by_id = {item.get("id"): item for item in requirements if isinstance(item, dict)}
+    missing_ids = sorted(REQUIRED_COMPLETION_REQUIREMENTS - set(by_id))
+    extra_ids = sorted(set(by_id) - REQUIRED_COMPLETION_REQUIREMENTS)
+    if missing_ids:
+        problems.append("completion audit missing requirement(s): " + ", ".join(missing_ids))
+    if extra_ids:
+        problems.append("completion audit has unexpected requirement(s): " + ", ".join(extra_ids))
+    if audit.get("requirement_count") != len(requirements):
+        problems.append("completion audit requirement_count does not match requirements")
+    proven_count = sum(1 for item in requirements if isinstance(item, dict) and item.get("status") == "proven")
+    if audit.get("proven_count") != proven_count:
+        problems.append("completion audit proven_count does not match requirements")
+    pending_rows = [row for row in rows if row.get("quality") == "pending"]
+    pending_comparisons = pending_comparison_scopes(report)
+    if (pending_rows or pending_comparisons) and status == "complete":
+        problems.append("completion audit must remain incomplete while matrix/comparisons have pending evidence")
+    if status == "complete":
+        for item in requirements:
+            if isinstance(item, dict) and item.get("status") != "proven":
+                problems.append(f"completion audit complete but requirement {item.get('id')} is {item.get('status')}")
+    for item in requirements:
+        if not isinstance(item, dict):
+            problems.append("completion audit contains a non-mapping requirement")
+            continue
+        req_status = item.get("status")
+        if req_status not in {"proven", "missing"}:
+            problems.append(f"completion audit requirement {item.get('id')} has invalid status {req_status!r}")
+        if req_status == "missing" and not str(item.get("next") or "").strip():
+            problems.append(f"completion audit missing requirement {item.get('id')} lacks next step")
+        if req_status == "proven" and not item.get("evidence"):
+            problems.append(f"completion audit proven requirement {item.get('id')} lacks evidence")
+    return problems
+
+
+def pending_comparison_scopes(report: dict[str, Any]) -> list[str]:
+    comparisons = report.get("comparisons") if isinstance(report.get("comparisons"), dict) else {}
+    return [
+        str(scope)
+        for scope, comparison in comparisons.items()
+        if isinstance(comparison, dict) and comparison.get("status") == "pending"
+    ]
 
 
 def require_references(report: dict[str, Any]) -> list[str]:

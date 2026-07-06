@@ -62,6 +62,27 @@ with tempfile.TemporaryDirectory() as tmp:
 
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)
+    bad = out / "bad-completion-audit.json"
+    report = json.loads(REPORT.read_text(encoding="utf-8"))
+    report["completion_audit"]["status"] = "complete"
+    bad.write_text(json.dumps(report), encoding="utf-8")
+    proc = run_gate(bad)
+    check("bad completion audit exits nonzero", proc.returncode, 1)
+    check("bad completion audit names pending evidence", "completion audit must remain incomplete" in proc.stdout, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
+    bad = out / "bad-completion-next.json"
+    report = json.loads(REPORT.read_text(encoding="utf-8"))
+    missing = next(item for item in report["completion_audit"]["requirements"] if item["status"] == "missing")
+    missing["next"] = ""
+    bad.write_text(json.dumps(report), encoding="utf-8")
+    proc = run_gate(bad)
+    check("bad completion next exits nonzero", proc.returncode, 1)
+    check("bad completion next names next step", "lacks next step" in proc.stdout, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
     bad = out / "bad-pending-tokens.json"
     report = json.loads(REPORT.read_text(encoding="utf-8"))
     row = next(row for row in report["required_glm52_matrix"] if row["quality"] == "pending")
