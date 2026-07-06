@@ -274,7 +274,58 @@ states:
                 refine_feedback:   ""
                 cycle:             0
 
+      # refine mirrors accept's outcome-awareness (see file header): a
+      # fail_short/fail outcome means the IMPLEMENTATION or PROPOSAL is
+      # broken, not the validation run itself, so it must route back to
+      # implementing/proposing like accept does — a bare self-loop here
+      # only re-ran the validator, burning validating_budget
+      # re-validating the same unfixed code while implement_artifact's
+      # (or propose_fix_artifact's) once: bind stayed set and the maker
+      # never ran again.
       refine:
+        # fail_short — implementation needs a minor patch.
+        - when: |
+            world.validate_artifact.outcome == 'fail_short' &&
+            world.implementing_cycle >= world.implementing_budget
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "implementing_cycle_budget_exhausted_after_validation_refine"
+                status:         "abandoned"
+        - when: "world.validate_artifact.outcome == 'fail_short'"
+          target: implementing
+          effects:
+            - set:
+                refine_feedback:    "{{ slots.feedback ?? world.validate_artifact.next_action_hint ?? world.validate_artifact.summary_markdown }}"
+                implementing_cycle: "{{ world.implementing_cycle + 1 }}"
+                cycle:              "{{ world.cycle + 1 }}"
+                # Re-enter implementing for a fresh re-apply: clear its
+                # once: bind so the implementer agent runs again.
+                implement_artifact: {}
+
+        # fail — proposal needs a re-draft.
+        - when: |
+            world.validate_artifact.outcome == 'fail' &&
+            world.proposing_cycle >= world.proposing_budget
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "proposing_cycle_budget_exhausted_after_validation_refine"
+                status:         "abandoned"
+        - when: "world.validate_artifact.outcome == 'fail'"
+          target: proposing
+          effects:
+            - set:
+                refine_feedback:      "{{ slots.feedback ?? world.validate_artifact.next_action_hint ?? world.validate_artifact.summary_markdown }}"
+                proposing_cycle:      "{{ world.proposing_cycle + 1 }}"
+                cycle:                "{{ world.cycle + 1 }}"
+                # Re-enter proposing for a fresh re-draft: clear its
+                # once: bind so the proposer agent runs again.
+                propose_fix_artifact: {}
+
+        # infra_error / pass (or legacy/missing outcome) — the fix is
+        # fine; the validation run itself needs another pass, so
+        # self-loop and re-run only the validator.
         - when: "world.validating_cycle >= world.validating_budget"
           target: "@exit:abandoned"
           effects:
