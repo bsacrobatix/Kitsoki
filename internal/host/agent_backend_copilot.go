@@ -66,6 +66,7 @@ var claudeValueFlags = map[string]bool{
 	"--append-system-prompt": true,
 	"--mcp-config":           true,
 	"--setting-sources":      true,
+	"--settings":             true,
 	"--effort":               true,
 	"--output-format":        true,
 	"--session-id":           true,
@@ -113,7 +114,7 @@ func (copilotBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir
 		case "-p", "--verbose", "--exclude-dynamic-system-prompt-sections", "--no-session-persistence",
 			"--disable-slash-commands":
 			// Dropped: no copilot equivalent (or supplied differently).
-		case "--permission-mode", "--setting-sources", "--effort",
+		case "--permission-mode", "--setting-sources", "--settings", "--effort",
 			"--allowedTools", "--disallowedTools":
 			// Dropped along with their value. (Tool-scoping is a parity gap;
 			// copilot uses --allow-all-tools.)

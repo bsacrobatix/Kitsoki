@@ -130,7 +130,7 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 			// acceptance attempt in ~60ms and made codex-profile sessions
 			// "impossible" (validator submit never ran). codex registers the
 			// validator MCP via the `-c mcp_servers.*` overrides below instead.
-		case "--permission-mode", "--setting-sources", "--effort",
+		case "--permission-mode", "--setting-sources", "--settings", "--effort",
 			"--allowedTools":
 			// Dropped along with their value. (Tool-scoping is a parity gap;
 			// codex runs with the bypass flag set below.)

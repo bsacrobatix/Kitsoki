@@ -75,7 +75,7 @@ func (agyBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir str
 		case "-p", "--verbose", "--exclude-dynamic-system-prompt-sections", "--no-session-persistence",
 			"--disable-slash-commands":
 			// Dropped.
-		case "--permission-mode", "--setting-sources", "--effort",
+		case "--permission-mode", "--setting-sources", "--settings", "--effort",
 			"--allowedTools", "--disallowedTools":
 			// Dropped.
 		case "--session-id":
