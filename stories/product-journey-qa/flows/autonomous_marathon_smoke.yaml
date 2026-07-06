@@ -13,7 +13,7 @@ host_handlers:
             status: passed
             summary: core use-case autonomous product-QA marathon persona sweep passed
             exit_code: 0
-            output: "ok: core-maintainer: marathon scoped run covers core use cases\nok: dependency-debugger: autonomous replay captured every core use case\nok: docs-minded-contributor: credible issues were filed\nok: ide-first-engineer: gh-agent fixes drained with independent verification\nok: hobbyist-contributor: mechanical stats count found/filed/fixed\nok: sweep filed and fixed every core scenario issue\nPASS"
+            output: "ok: core-maintainer: run targets gears-rust with requested persona\nok: dependency-debugger: persona lens is preserved in driver and brief contracts\nok: docs-minded-contributor: credible issues were filed\nok: ide-first-engineer: gh-agent fixes drained with independent verification\nok: hobbyist-contributor: mechanical stats count found/filed/fixed\nok: sweep filed and fixed every core scenario issue\nPASS"
 
 turns:
   - intent:

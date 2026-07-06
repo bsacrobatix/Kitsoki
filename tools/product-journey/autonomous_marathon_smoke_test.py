@@ -134,8 +134,26 @@ def run_persona(
     weakness_routes = run.read_json(run_dir / "weakness-routes.json")
     prd_intake = run.read_json(run_dir / "prd-design-intake.json")
     deck_text = (run_dir / "deck.slidey.json").read_text(encoding="utf-8")
+    driver_plan = run.read_json(run_dir / "driver-plan.json")
+    agent_brief = run.read_json(run_dir / "agent-brief.json")
+    expected_lens = run.persona_lens(run_json["persona"])
+    driver_lenses = [item.get("persona_lens", {}) for item in driver_plan.get("scenarios", [])]
+    brief_lens = agent_brief.get("persona_contract", {}).get("lens", {})
 
     scenario_ids = [scenario.get("id") for scenario in run_json.get("scenarios", [])]
+    check(prefix + "run targets gears-rust with requested persona",
+          run_json.get("project", {}).get("id") == "gears-rust"
+          and run_json.get("persona", {}).get("id") == persona_id
+          and driver_plan.get("project", {}).get("id") == "gears-rust"
+          and driver_plan.get("persona", {}).get("id") == persona_id
+          and agent_brief.get("project", {}).get("id") == "gears-rust"
+          and agent_brief.get("persona", {}).get("id") == persona_id,
+          failures)
+    check(prefix + "persona lens is preserved in driver and brief contracts",
+          driver_lenses
+          and all(lens == expected_lens for lens in driver_lenses)
+          and brief_lens == expected_lens,
+          failures)
     check(prefix + "marathon scoped run covers core use cases",
           scenario_ids == ["project-onboarding", "prd-design", "bugfix"],
           failures)
@@ -185,7 +203,7 @@ def run_persona(
           and weakness_routes.get("items", [{}])[0].get("target_story") == "stories/prd"
           and prd_intake.get("summary", {}).get("intake_count") == 1
           and prd_intake.get("items", [{}])[0].get("story_intent") == "start"
-          and prd_intake.get("items", [{}])[0].get("persona_lens", {}).get("evidence_emphasis")
+          and prd_intake.get("items", [{}])[0].get("persona_lens", {}) == expected_lens
           and "weakness-routes.md" in prd_intake.get("items", [{}])[0].get("story_slots", {}).get("upstream_paths", "")
           and "prd-design-intake.md" in deck_text
           and "PRD/design routes" in deck_text,
@@ -205,6 +223,7 @@ def run_persona(
         "run_dir": str(run_dir),
         "deck_path": str(run_dir / "deck.slidey.json"),
         "scenario_ids": scenario_ids,
+        "persona_lens": expected_lens,
         "driver_journal_path": str(run_dir / "driver-journal.md"),
         "autonomous_fix_report_path": str(report_path),
         "issue_state_file": str(issue_state),

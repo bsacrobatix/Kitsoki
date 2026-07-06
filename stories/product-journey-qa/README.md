@@ -42,9 +42,9 @@ It is intentionally no-LLM:
   --autonomous-marathon-smoke --json-output` to prove the standing-loop shell
   across the core `core-use-cases` scope (`project-onboarding`, `prd-design`,
   and `bugfix`) for every active curated persona: scoped persona runs, replayed
-  driver proof, credible issue filing, gh-agent fixes, independent
-  verification, human-review artifacts, and mechanically derived
-  found/filed/fixed stats.
+  driver proof, target/persona/lens preservation in the driver and brief
+  contracts, credible issue filing, gh-agent fixes, independent verification,
+  human-review artifacts, and mechanically derived found/filed/fixed stats.
 - `rollup` calls `tools/product-journey/run.py --rollup-matrix --json-output`
   to create or refresh the matrix-level Slidey deck from reviewed run bundles.
 - `validate_matrix` calls `tools/product-journey/run.py --validate-matrix
