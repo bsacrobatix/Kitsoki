@@ -36,6 +36,25 @@ def _lacks_evidence(drive):
     return len(evidence_refs) == 0
 
 
+def _vscode_missing_post_drive(leg, drive):
+    # vscode legs are bridge-level proof (see _evidence_level below) and the
+    # driver's transport-pin preflight (product-journey-qa-driver.md) only
+    # proves the bridge is REACHABLE before the scenario is driven -- it does
+    # NOT prove the scenario's operator-visible outcome, because the rest of
+    # the leg is usually driven through a different surface (session.submit /
+    # a live text turn) that advances the SAME session to a new state (e.g.
+    # landing -> s2). Without a second vscode capture taken AFTER that drive,
+    # bound to the post-drive session_handle, the only vscode evidence on file
+    # is the pre-drive snapshot -- proof the bridge existed, not proof of the
+    # scenario outcome. Require drive_result.post_drive_evidence_ref (see
+    # drive_leg.md / drive_leg_result.json) before a vscode leg can be scored
+    # anything other than degraded-evidence. This is the deterministic
+    # backstop for the same rule the driver/judge prompts are told in prose.
+    if leg.get("transport", "") != "vscode":
+        return False
+    return drive.get("post_drive_evidence_ref", "") == ""
+
+
 def _evidence_level(leg):
     # Every leg carries its own transport_evidence_contract (plan_legs.star
     # read it straight off driver-plan.json / carried it through the ad-hoc
@@ -76,18 +95,21 @@ def main(ctx):
     # driver's own report proves there was nothing real to judge.
     if verdict != "unjudged" and _lacks_evidence(drive):
         verdict = "degraded-evidence"
+    if verdict != "unjudged" and _vscode_missing_post_drive(leg, drive):
+        verdict = "degraded-evidence"
 
     record = {
-        "leg_id":          leg.get("leg_id", ""),
-        "scenario":        leg.get("scenario", ""),
-        "transport":       leg.get("transport", ""),
-        "visual_surface":  leg.get("visual_surface", ""),
-        "evidence_level":  _evidence_level(leg),
-        "driver_status":   drive.get("status", "unattempted"),
-        "evidence_refs":   drive.get("evidence_refs", []),
-        "verdict":         verdict,
-        "verdict_summary": judge.get("summary", ""),
-        "frames_dir":      judge.get("frames_dir", drive.get("frames_dir", "")),
+        "leg_id":                  leg.get("leg_id", ""),
+        "scenario":                leg.get("scenario", ""),
+        "transport":               leg.get("transport", ""),
+        "visual_surface":          leg.get("visual_surface", ""),
+        "evidence_level":          _evidence_level(leg),
+        "driver_status":           drive.get("status", "unattempted"),
+        "evidence_refs":           drive.get("evidence_refs", []),
+        "post_drive_evidence_ref": drive.get("post_drive_evidence_ref", ""),
+        "verdict":                 verdict,
+        "verdict_summary":         judge.get("summary", ""),
+        "frames_dir":              judge.get("frames_dir", drive.get("frames_dir", "")),
     }
     items.append(record)
 

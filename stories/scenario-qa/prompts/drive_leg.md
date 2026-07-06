@@ -39,6 +39,36 @@ into the leg's `evidence_dir` and attach it with the leg's attach command
 under the matching evidence kind. The judge can only cite files that exist
 in the run dir.
 
+**vscode legs: capture the bridge TWICE, not once.** The preflight
+`visual.open kind=vscode` proves the bridge is *reachable* before you drive
+anything — it does not prove the scenario's outcome, because the rest of the
+leg is usually driven through a different surface (`session.submit`, a live
+text turn, etc.) that advances the SAME session to a new state (e.g.
+`landing` → `s2`). A preflight-only vscode leg is degraded evidence even if
+everything else about the scenario worked. So, for `vscode` legs:
+
+1. Preflight (`visual.open kind=vscode` + `visual.observe`) as usual, and
+   note which session handle it opened against (e.g. `s1`).
+2. Drive the scenario to its target state exactly as you would for any other
+   transport — this is normally NOT through vscode tools (e.g. it is driven
+   through `session.submit`/`session.drive` on the underlying story session).
+3. Once the live session has reached its target state, call `visual.open
+   kind=vscode` / `visual.observe` **again**, against the SAME session
+   handle you just drove forward, and persist that frame into `evidence_dir`
+   tagged as a post-drive capture (e.g. `NN-postdrive-vscode-observe.json`,
+   never reusing the preflight's filename). This is the only evidence that
+   proves the bridge reflects the driven-forward state, not just the
+   starting one.
+4. Report the post-drive capture's path/retained id as
+   `post_drive_evidence_ref`, and the session handle it was taken against as
+   `post_drive_session_handle`. If the post-drive capture could not be taken
+   (e.g. the bridge dropped, or you ran out of live budget before returning
+   to it), leave `post_drive_evidence_ref` empty and report the honest
+   blocker — do not report `"captured"`/`"pass"`-shaped status while
+   substituting the preflight frame for it. The record-keeping gate scores
+   any vscode leg missing `post_drive_evidence_ref` as `degraded-evidence`
+   regardless of what else was captured.
+
 When you finish, **report — do not grade**. Submit:
 
 ```json
@@ -46,6 +76,8 @@ When you finish, **report — do not grade**. Submit:
   "status": "attempted | captured | blocked | degraded-evidence",
   "evidence_refs": ["<path-or-retained-id>", "..."],
   "frames_dir": "<directory of captured frames, if any>",
+  "post_drive_evidence_ref": "<path-or-retained-id of the POST-drive vscode capture; vscode legs only, empty if not captured>",
+  "post_drive_session_handle": "<live session_handle the post-drive capture was taken against; vscode legs only>",
   "blockers": ["<honest blocker, if any>"],
   "summary": "<what you actually attempted for this leg>"
 }
