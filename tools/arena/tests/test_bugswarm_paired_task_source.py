@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -120,6 +121,16 @@ with tempfile.TemporaryDirectory() as tmp:
     check("verified-only task axis", spec_payload["axes"]["task"], ["bugswarm-square-okio-140452393"])
     check("variant treatments", [v["treatment"] for v in spec_payload["variants"]], ["kitsoki", "single-briefed"])
     check("candidate model", spec_payload["variants"][0]["model"], "glm-5.2")
+    old_kitsoki_root = os.environ.get("KITSOKI_ROOT")
+    os.environ["KITSOKI_ROOT"] = str(REPO_ROOT)
+    try:
+        runner_globals = runpy.run_path(str(RUNNER), run_name="paired_task_runner_test")
+    finally:
+        if old_kitsoki_root is None:
+            os.environ.pop("KITSOKI_ROOT", None)
+        else:
+            os.environ["KITSOKI_ROOT"] = old_kitsoki_root
+    check("glm profile mapping", runner_globals["MODEL_TO_PROFILE"].get("glm-5.2"), "synthetic-claude")
 
     spec = JobSpec.load(spec_path)
     cells = spec.cells()
