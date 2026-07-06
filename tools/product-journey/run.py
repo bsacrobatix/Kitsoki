@@ -5692,6 +5692,12 @@ def blocked_autonomous_driver_dispatch(run_dir: Path) -> dict:
         summary = receipt.get("summary", "") or f"autonomous driver dispatch ended with status={status or 'unknown'}"
         trace = receipt.get("trace", "")
         receipt_markdown = str(autonomous_driver_dispatch_markdown_path(run_dir))
+        if status in {"blocked", "degraded-evidence", "failed"} and not receipt.get("blockers", []):
+            summary = (
+                f"autonomous driver dispatch ended with status={status} "
+                "without a structured blocker; stop before final gates"
+            )
+            status = "missing-blocker"
     else:
         status = "missing"
         summary = "autonomous driver dispatch receipt is missing; stop before final gates"
