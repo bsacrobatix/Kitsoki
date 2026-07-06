@@ -285,6 +285,20 @@ with tempfile.TemporaryDirectory() as tmp:
     check("docker scorer mounts candidate tree", score_cmd[score_cmd.index("-v") + 1], f"{docker_tree}:/workspace/src")
     check("docker scorer command", score_cmd[-2:], ["-lc", "./run_failed.sh"])
 
+    def fake_docker_infrastructure_failure(cmd, **kwargs):  # noqa: ANN001 - mirrors subprocess.run shape.
+        if cmd[:2] == ["docker", "run"]:
+            return subprocess.CompletedProcess(cmd, 125, stdout="", stderr="docker daemon metadata I/O error\n")
+        raise AssertionError(f"unexpected subprocess command: {cmd}")
+
+    try:
+        runner_module_globals["subprocess"].run = fake_docker_infrastructure_failure
+        blocked_score = runner_globals["score_tree"](docker_task, docker_tree)
+    finally:
+        runner_module_globals["subprocess"].run = original_subprocess_run
+
+    check("docker infrastructure scorer verdict", blocked_score["verdict"], "blocked")
+    require("docker infrastructure scorer notes", "exit=125" in blocked_score["notes"])
+
     old_key = os.environ.get("SYNTHETIC_API_KEY")
     os.environ["SYNTHETIC_API_KEY"] = "test-synthetic-key"
     calls: list[dict[str, object]] = []

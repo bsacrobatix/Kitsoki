@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -74,6 +75,59 @@ with tempfile.TemporaryDirectory() as tmp:
     check("passed command uses run_passed", "run_passed.sh" in result["commands"]["passed"], True)
     check("commands use cached image first", "bugswarm/cached-images:square-okio-140452393" in result["commands"]["failed"], True)
     check("fallback command recorded", "bugswarm/images:square-okio-140452393" in result["commands"]["passed_fallback"], True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    bin_dir = tmpdir / "bin"
+    bin_dir.mkdir()
+    fake_docker = bin_dir / "docker"
+    fake_docker.write_text(
+        "#!/bin/sh\n"
+        "echo 'docker daemon metadata I/O error' >&2\n"
+        "exit 125\n",
+        encoding="utf-8",
+    )
+    fake_docker.chmod(0o755)
+    source = tmpdir / "source.yaml"
+    report = tmpdir / "verification.json"
+    source.write_text(
+        "\n".join(
+            [
+                "kind: arena_bugswarm_source",
+                "version: 1",
+                "source: bugswarm",
+                "tasks:",
+                "- id: bugswarm-square-okio-140452393",
+                "  repo: okio",
+                "  repo_label: square/okio",
+                "  image_tag: square-okio-140452393",
+                "  failed_job_id: '140452393'",
+                "  passed_job_id: '140452394'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    env = dict(os.environ)
+    env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
+    verify = subprocess.run(
+        [sys.executable, str(VERIFY), "--source", str(source), "--out", str(report), "--execute"],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    check("infrastructure verifier exits nonzero", verify.returncode, 1)
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    result = payload["results"][0]
+    check("infrastructure red false", result["verified_red"], False)
+    check("infrastructure green false", result["verified_green"], False)
+    check("infrastructure flag set", result["infrastructure_error"], True)
+    check("failed exit carried for infra", result["failed_exit_code"], 125)
+    check("passed exit carried for infra", result["passed_exit_code"], 125)
+    check("infrastructure notes mention failed side", "failed-side infrastructure exit 125" in result["notes"], True)
 
 if failures:
     print("FAIL: bugswarm verify source")

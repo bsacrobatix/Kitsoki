@@ -854,24 +854,34 @@ def score_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:
 def score_bugswarm_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:
     image = bugswarm_image(task)
     source_dir = bugswarm_source_dir(task)
-    proc = subprocess.run(
-        [
-            "docker",
-            "run",
-            "--rm",
-            "-v",
-            f"{tree}:{source_dir}",
-            image,
-            "bash",
-            "-lc",
-            "./run_failed.sh",
-        ],
-        cwd=KITSOKI_ROOT,
-        text=True,
-        capture_output=True,
-        timeout=int(os.environ.get("ARENA_BUGSWARM_SCORE_TIMEOUT_S", "7200")),
-    )
+    cmd = [
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        f"{tree}:{source_dir}",
+        image,
+        "bash",
+        "-lc",
+        "./run_failed.sh",
+    ]
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=KITSOKI_ROOT,
+            text=True,
+            capture_output=True,
+            timeout=int(os.environ.get("ARENA_BUGSWARM_SCORE_TIMEOUT_S", "7200")),
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "verdict": "blocked",
+            "evidence": task_ref(task),
+            "notes": f"bugswarm run_failed.sh timed out after {exc.timeout}s",
+        }
     notes = f"bugswarm run_failed.sh exit={proc.returncode}: {first_line(proc.stdout + chr(10) + proc.stderr)}"
+    if proc.returncode == 125:
+        return {"verdict": "blocked", "evidence": task_ref(task), "notes": notes}
     return {
         "verdict": "solved" if proc.returncode == 0 else "failed",
         "evidence": task_ref(task),
