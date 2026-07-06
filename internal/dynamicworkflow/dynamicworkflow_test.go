@@ -353,6 +353,76 @@ func TestServiceExportGeneratedFlowReplaysSiblingCassette(t *testing.T) {
 	require.Equal(t, 1, report.Passed)
 }
 
+func TestServiceExportGeneratedFlowSkipsInternalDispatchTransitions(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	require.NoError(t, err)
+	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
+	require.NoError(t, err)
+
+	outDir := dynamicWorkflowTestDir(t, repoRoot)
+	svc := NewService(repoRoot)
+	svc.OutputDir = outDir
+	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)
+	svc.Now = func() time.Time { return time.Date(2026, 7, 6, 8, 30, 0, 0, time.UTC) }
+
+	receipt, err := svc.Create(context.Background(), CreateRequest{
+		Goal: "fan out glm-5.2 agents with the claude-synthetic harness to get coverage toward 80%",
+		Slug: "export-dispatch-replay",
+	})
+	require.NoError(t, err)
+	require.True(t, receipt.Validation.OK, "receipt should validate: %v", receipt.Validation.Errors)
+
+	exportDir := filepath.Join(outDir, "exported", "export-dispatch-replay")
+	exportManifestPath := filepath.ToSlash(filepath.Join(exportDir, "manifest.yaml"))
+	exportStatePath := filepath.ToSlash(filepath.Join(exportDir, "flows", "generated.state.json"))
+	exportAppPath := filepath.ToSlash(filepath.Join(exportDir, "app", "app.yaml"))
+	itemJSON := fmt.Sprintf(`{"id":"measure-coverage","title":"Measure current coverage","status":"pending","mode":"drive","story":%q,"prompt":"Measure coverage","profile":"synthetic-claude","model":"hf:zai-org/GLM-5.2","trace_path":"%s/traces/deterministic/measure-coverage.jsonl","trace_root":"%s/traces","trace_run_id":"deterministic","require_trace_model":false,"require_gpt55":false,"implementation_story":%q,"implementation_prompt":"Measure coverage","implementation_trace_path":"%s/traces/deterministic/measure-coverage-implementation.jsonl","verify":[{"kind":"story_validate","story":%q}]}`,
+		exportAppPath,
+		filepath.ToSlash(exportDir),
+		filepath.ToSlash(exportDir),
+		exportAppPath,
+		filepath.ToSlash(exportDir),
+		exportAppPath,
+	)
+	trace := fmt.Sprintf(`{"kind":"session.header","schema_version":1,"written_at":"2026-07-06T08:30:00Z"}
+{"turn":1,"seq":0,"ts":"2026-07-06T08:30:00.001Z","kind":"turn.input","state_path":"idle","payload":{"input":"","intent":"start"}}
+{"turn":1,"seq":1,"ts":"2026-07-06T08:30:00.002Z","kind":"harness.returned","state_path":"load","payload":{"namespace":"host.starlark.run","data":{"manifest_path":%q,"state_path":%q,"items":[%s],"item_count":"1","error":""}}}
+{"turn":1,"seq":2,"ts":"2026-07-06T08:30:00.003Z","kind":"machine.transition","state_path":"idle","payload":{"from":"idle","to":"load","intent":"start","slots":{}}}
+{"turn":2,"seq":0,"ts":"2026-07-06T08:30:00.004Z","kind":"turn.input","state_path":"load","payload":{"input":"","intent":"next_item"}}
+{"turn":2,"seq":1,"ts":"2026-07-06T08:30:00.005Z","kind":"harness.returned","state_path":"board","payload":{"namespace":"host.starlark.run","data":{"items":[%s],"next_item":%s,"next_item_id":"measure-coverage","results":{"items":[]},"route":"dispatch","has_pending":true,"processed_count":0,"count_summary":"Processed 0 | Passed 0 | Partial 0 | Failed 0 | Skipped 0 | Pending 1","passed_count":0,"partial_count":0,"failed_count":0,"skipped_count":0,"pending_count":1}}}
+{"turn":2,"seq":2,"ts":"2026-07-06T08:30:00.006Z","kind":"machine.transition","state_path":"load","payload":{"from":"load","to":"board","intent":"next_item","slots":{}}}
+{"turn":3,"seq":0,"ts":"2026-07-06T08:30:00.007Z","kind":"turn.input","state_path":"board","payload":{"input":"","intent":"next_item"}}
+{"turn":3,"seq":1,"ts":"2026-07-06T08:30:00.008Z","kind":"harness.returned","state_path":"policy_check","payload":{"namespace":"host.starlark.run","data":{"policy_result":{"status":"ok","message":"profile/model/verifier policy passed"},"error":""}}}
+{"turn":3,"seq":2,"ts":"2026-07-06T08:30:00.009Z","kind":"machine.transition","state_path":"board","payload":{"from":"board","to":"policy_check","intent":"next_item","slots":{}}}
+{"turn":3,"seq":3,"ts":"2026-07-06T08:30:00.010Z","kind":"machine.transition","state_path":"board","payload":{"from":"policy_check","to":"drive","intent":"policy_ok","slots":{},"synthetic":true}}
+{"turn":3,"seq":4,"ts":"2026-07-06T08:30:00.011Z","kind":"harness.returned","state_path":"drive","payload":{"namespace":"host.agent.task","data":{"job_id":"job-export-dispatch"}}}
+{"turn":4,"seq":0,"ts":"2026-07-06T08:30:00.012Z","kind":"machine.transition","state_path":"drive","payload":{"from":"drive","to":"needs_human","intent":"__on_complete_target__","slots":{}}}
+`, exportManifestPath, exportStatePath, itemJSON, itemJSON, itemJSON)
+	require.NoError(t, os.WriteFile(receipt.TracePath, []byte(trace), 0o644))
+
+	receipt, err = svc.Export(context.Background(), receipt.WorkflowID, ExportRequest{TargetDir: exportDir})
+	require.NoError(t, err)
+
+	flowPath := filepath.Join(exportDir, "flows", "generated.yaml")
+	flowBytes, err := os.ReadFile(flowPath)
+	require.NoError(t, err)
+	flowYAML := string(flowBytes)
+	require.Contains(t, flowYAML, "host_cassette: generated.cassette.yaml")
+	require.Contains(t, flowYAML, "manifest_path: "+exportManifestPath)
+	require.Contains(t, flowYAML, "name: start")
+	require.Contains(t, flowYAML, "name: next_item")
+	require.NotContains(t, flowYAML, "policy_ok")
+	require.NotContains(t, flowYAML, "__on_complete_target__")
+
+	report, err := testrunner.RunFlows(t.Context(), filepath.Join(exportDir, "app", "app.yaml"), flowPath, testrunner.FlowOptions{FailFast: true})
+	require.NoError(t, err)
+	require.Zero(t, report.Failed)
+	require.Equal(t, 1, report.Passed)
+	require.Len(t, report.Results, 1)
+	require.Len(t, report.Results[0].Turns, 3)
+	require.Equal(t, "drive", string(report.Results[0].Turns[2].NewState))
+}
+
 func TestValidateManifestRejectsRuntimeLiveModelPolicyMismatch(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	require.NoError(t, err)
