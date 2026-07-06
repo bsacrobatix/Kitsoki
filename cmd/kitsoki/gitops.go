@@ -33,6 +33,7 @@ func gitopsCmd() *cobra.Command {
 	cmd.AddCommand(gitopsIssueCommentCmd())
 	cmd.AddCommand(gitopsIssueTransitionCmd())
 	cmd.AddCommand(gitopsIssueCloseCmd())
+	cmd.AddCommand(gitopsIssueCloseoutCmd())
 	cmd.AddCommand(gitopsIssueStateCacheCmd())
 	cmd.AddCommand(gitopsAutonomousFixCmd())
 	return cmd
@@ -368,6 +369,76 @@ func gitopsIssueCloseCmd() *cobra.Command {
 	cmd.Flags().StringVar(&commentBody, "comment-body", "", "optional close-out comment body posted before closing")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON output")
 	return cmd
+}
+
+func gitopsIssueCloseoutCmd() *cobra.Command {
+	var (
+		runDir     string
+		ticketRepo string
+		statusJSON string
+		jsonOut    bool
+	)
+	cmd := &cobra.Command{
+		Use:   "issue-closeout --run-dir RUN --ticket-repo owner/repo [--status-json status.json]",
+		Short: "Close fixed product-journey issues through native gitops",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if strings.TrimSpace(runDir) == "" {
+				return fmt.Errorf("gitops issue-closeout: --run-dir is required")
+			}
+			if strings.TrimSpace(ticketRepo) == "" {
+				return fmt.Errorf("gitops issue-closeout: --ticket-repo is required")
+			}
+			status, err := gitopsCloseoutStatus(runDir, statusJSON)
+			if err != nil {
+				return err
+			}
+			result, err := gitopsCloseoutFixedIssues(cmd.Context(), runDir, ticketRepo, status)
+			if err != nil {
+				return err
+			}
+			closeoutStatus := stringValue(result, "issue_closeout_status")
+			if jsonOut {
+				if err := writeGitopsJSON(cmd, result); err != nil {
+					return err
+				}
+				if closeoutStatus != "closed" {
+					return fmt.Errorf("gitops issue-closeout: %s", stringValue(result, "issue_closeout_summary"))
+				}
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Status: %s\n", closeoutStatus)
+			fmt.Fprintf(cmd.OutOrStdout(), "Closed: %d\n", intValue(result, "issue_closeout_count"))
+			if summary := stringValue(result, "issue_closeout_summary"); summary != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\n", summary)
+			}
+			if closeoutStatus != "closed" {
+				return fmt.Errorf("gitops issue-closeout: %s", stringValue(result, "issue_closeout_summary"))
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&runDir, "run-dir", "", "product-journey run directory containing findings.json")
+	cmd.Flags().StringVar(&ticketRepo, "ticket-repo", "", "owner/repo ticket target")
+	cmd.Flags().StringVar(&statusJSON, "status-json", "", "optional JSON status file with gh_agent_drained_jobs")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON output")
+	return cmd
+}
+
+func gitopsCloseoutStatus(runDir, statusJSON string) (map[string]any, error) {
+	if strings.TrimSpace(statusJSON) != "" {
+		return gitopsReadJSONFile(statusJSON)
+	}
+	findings, err := gitopsReadJSONFile(filepath.Join(runDir, "findings.json"))
+	if err != nil {
+		return nil, err
+	}
+	ghAgent := mapValue(findings, "gh_agent")
+	if ghAgent == nil {
+		return map[string]any{"gh_agent_drained_jobs": []any{}}, nil
+	}
+	return map[string]any{
+		"gh_agent_drained_jobs": ghAgent["drained_jobs"],
+	}, nil
 }
 
 func gitopsIssueCommentResult(data map[string]any, issueID string) map[string]any {
