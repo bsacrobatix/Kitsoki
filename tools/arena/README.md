@@ -100,7 +100,7 @@ Contract rules:
   checks:
     - replay
     - check_type: docs-fidelity
-      docs: docs/project-onboarding.md   # extra keys fold into CheckSpec.options
+      docs: docs/getting-started.md   # extra keys fold into CheckSpec.options
   ```
 
   Omitting `checks:` means `[replay]` — exactly the pre-suite behavior.

@@ -40,7 +40,7 @@ run selects it via `initial_world: {bugfix_exit: open-PR}` (or
 
 ## Prerequisite
 
-Your repo must be onboarded (see [`../project-onboarding.md`](../project-onboarding.md))
+Your repo must be onboarded (see [`../getting-started.md`](../getting-started.md))
 so a ticket source (local `issues/bugs/` or a bound `host.gh.ticket`
 GitHub repo) exists. The `repro_command`/`gate_command` convention itself
 (a ticket's frontmatter `repro_command` seeds `world.gate_command`) is
@@ -53,7 +53,7 @@ The primary surface. From dev-story, with `judge_mode=human` (the standalone
 default) so each room's proposal pauses for an explicit `bf__accept` instead
 of auto-cascading under `judge_mode=llm`, and a live agent backend
 configured (or a recorded cassette/flow — see
-[`../project-onboarding.md`](../project-onboarding.md) for the agent-backend
+[`../getting-started.md`](../getting-started.md) for the agent-backend
 prerequisite; the "Verify" commands below run the same walk mocked, no
 backend needed):
 

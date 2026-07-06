@@ -32,7 +32,7 @@ this doc and the workflow matrix track.
 
 ## Prerequisite
 
-Your repo must be onboarded (see [`../project-onboarding.md`](../project-onboarding.md)).
+Your repo must be onboarded (see [`../getting-started.md`](../getting-started.md)).
 Decompose needs an epic/proposal markdown file to read (e.g. one published
 by the [PRD → Design walk](prd-and-design.md)).
 

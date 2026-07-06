@@ -164,4 +164,4 @@ pre-flight, hidden-oracle adjudication, one-basis cost).
 
 - [bugfix-bakeoff.md](bugfix-bakeoff.md) — the parent study (kitsoki's own bugs)
 - [tools/bugfix-bakeoff/external/](../../tools/bugfix-bakeoff/external) — the harness
-- [project-onboarding.md](../project-onboarding.md) — onboarding any repo
+- [getting-started.md](../getting-started.md) — onboarding any repo

@@ -91,7 +91,7 @@ func initCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:     "init",
 		Short:   "Install the agent toolkit + register the studio MCP (onboarding's toolkit substep)",
-		Long:    "Alias for `kitsoki project-tools install`: copies the embedded skills/agents into the target project and registers the kitsoki studio MCP server so your coding agent can drive kitsoki.\n\nThis is the toolkit substep of full project onboarding. For the complete onboarding (project profile + dev-story instance + toolkit), run `kitsoki run` from the project root and type `onboard .` — see docs/project-onboarding.md.",
+		Long:    "Alias for `kitsoki project-tools install`: copies the embedded skills/agents into the target project and registers the kitsoki studio MCP server so your coding agent can drive kitsoki.\n\nThis is the toolkit substep of full project onboarding. For the complete onboarding (project profile + dev-story instance + toolkit), run `kitsoki run` from the project root and type `onboard .` — see docs/getting-started.md.",
 		GroupID: "setup",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -147,7 +147,7 @@ note: no .kitsoki.yaml here — this repo is not fully onboarded yet.
 
     kitsoki run        # then type: onboard .
 
-  See docs/project-onboarding.md.
+  See docs/getting-started.md.
 `
 }
 

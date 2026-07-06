@@ -663,7 +663,7 @@ Flow fixtures that exercise those imports carry `host.agent.decide:` and
 
 ## See also
 
-- [`docs/project-onboarding.md`](../../docs/project-onboarding.md) /
+- [`docs/getting-started.md`](../../docs/getting-started.md) /
   [`docs/stories/dev-story-onboarding.md`](../../docs/stories/dev-story-onboarding.md)
   — the project onboarding pipeline (the `init` rooms) that installs a runnable
   instance + studio MCP + skill/agent toolkit into a target repo.
