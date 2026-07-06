@@ -174,6 +174,41 @@ func TestServiceCreateResearchTestingApproachesFanout(t *testing.T) {
 	}, ids)
 }
 
+func TestServiceExportPreservesResearchDriveOnlyItems(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	require.NoError(t, err)
+	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
+	require.NoError(t, err)
+
+	outDir := t.TempDir()
+	svc := NewService(repoRoot)
+	svc.OutputDir = outDir
+	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)
+	svc.Now = func() time.Time { return time.Date(2026, 7, 6, 5, 55, 0, 0, time.UTC) }
+
+	receipt, err := svc.Create(context.Background(), CreateRequest{
+		Goal: "research the different testing approaches in the repo with a dynamic workflow; inspect Go tests, TypeScript/JavaScript tests, story flow fixtures, Playwright/e2e tests, coverage gates, cassettes, and no-LLM policies",
+		Slug: "testing-approaches-research",
+	})
+	require.NoError(t, err)
+	require.True(t, receipt.Validation.OK)
+
+	exportDir := filepath.Join(t.TempDir(), "exported", "testing-approaches-research")
+	receipt, err = svc.Export(context.Background(), receipt.WorkflowID, ExportRequest{TargetDir: exportDir})
+	require.NoError(t, err)
+	require.Equal(t, exportDir, receipt.ExportPath)
+
+	manifest, err := readManifest(filepath.Join(exportDir, "manifest.yaml"))
+	require.NoError(t, err)
+	require.NotEmpty(t, manifest.Items)
+	for _, item := range manifest.Items {
+		require.Equal(t, "drive", item.Mode)
+		require.True(t, strings.HasPrefix(item.Story, filepath.ToSlash(filepath.Join(exportDir, "app"))))
+		require.Empty(t, item.ImplementationStory, "exported research item %s must stay drive-only", item.ID)
+		require.Empty(t, item.ImplementationPrompt, "exported research item %s must stay drive-only", item.ID)
+	}
+}
+
 func TestValidateManifestRejectsRuntimeLiveModelPolicyMismatch(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	require.NoError(t, err)
