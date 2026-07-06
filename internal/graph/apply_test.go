@@ -301,6 +301,94 @@ func TestApply_RejectsAddingExistingNode(t *testing.T) {
 	}
 }
 
+
+func TestApply_Retyped(t *testing.T) {
+	root := copyBundleFixture(t)
+	// Retype req-one from requirement to feature. This should fail because req-one has
+	// required_by edge which feature does not declare.
+	writeChangeset(t, root, "change-retype-fail", ChangesetStatusAuthorized, `    - kind: retyped
+      node: req-one
+      from_type: requirement
+      to_type: feature
+`)
+	res, err := Apply(root, "change-retype-fail", false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if !res.Rejected() {
+		t.Fatal("expected retype to fail due to undeclared edge field")
+	}
+
+	// Add a new type program that has core-node fields and requirements edges, then retype req-one to program.
+	// Wait, req-one carries required_by. So first we add type program with required_by edge too.
+	writeChangeset(t, root, "change-retype-success", ChangesetStatusAuthorized, `    - kind: registry_type_added
+      after:
+        id: program
+        schema: graph-type/v1
+        extends: requirement
+        edge_fields:
+          - id: required_by
+            target_type: feature
+            cardinality: many
+    - kind: retyped
+      node: req-one
+      from_type: requirement
+      to_type: program
+`)
+	res, err = Apply(root, "change-retype-success", false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if res.Rejected() {
+		t.Fatalf("expected apply to succeed, got rejected: %+v", res)
+	}
+
+	cat, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	node, ok := cat.Nodes["req-one"]
+	if !ok {
+		t.Fatal("req-one not found")
+	}
+	if node.TypeID != "program" {
+		t.Errorf("expected node type program, got %q", node.TypeID)
+	}
+	if node.Schema != "graph/program/v0" {
+		t.Errorf("expected schema graph/program/v0, got %q", node.Schema)
+	}
+}
+
+func TestApply_RegistryTypeModified(t *testing.T) {
+	root := copyBundleFixture(t)
+	writeChangeset(t, root, "change-reg-mod", ChangesetStatusAuthorized, `    - kind: registry_type_modified
+      node: requirement
+      changes:
+        - path: [summary]
+          before: null
+          after: "Updated summary"
+`)
+	res, err := Apply(root, "change-reg-mod", false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if res.Rejected() {
+		t.Fatalf("expected apply to succeed, got rejected: %+v", res)
+	}
+
+	cat, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	def, exists := cat.Registry.TypeDef("requirement")
+	if !exists {
+		t.Fatal("requirement type not found")
+	}
+	if def.Summary != "Updated summary" {
+		t.Errorf("expected summary 'Updated summary', got %q", def.Summary)
+	}
+}
+
 func contains(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && (func() bool {
 		for i := 0; i+len(needle) <= len(haystack); i++ {

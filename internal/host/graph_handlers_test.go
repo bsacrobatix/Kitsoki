@@ -140,3 +140,51 @@ func TestObjectCatalogGraph_NestsUnderThreadsToWireEdge(t *testing.T) {
 		}
 	}
 }
+func TestGraphHandler_Query(t *testing.T) {
+	// refs-to mode
+	res, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "query",
+		"catalog_path": seedCatalogPath,
+		"mode":         "refs-to",
+		"target":       "usecase-developer-traces-requirement-to-proof",
+	})
+	if err != nil {
+		t.Fatalf("GraphHandler(query refs-to): %v", err)
+	}
+	refs, ok := res.Data["references"].([]any)
+	if !ok {
+		t.Fatal("expected references list")
+	}
+	if len(refs) == 0 {
+		t.Fatal("expected references to not be empty")
+	}
+
+	// explain-type mode
+	res, err = GraphHandler(context.Background(), map[string]any{
+		"op":           "query",
+		"catalog_path": seedCatalogPath,
+		"mode":         "explain-type",
+		"target":       "feature",
+	})
+	if err != nil {
+		t.Fatalf("GraphHandler(query explain-type): %v", err)
+	}
+	if res.Data["type_id"] != "feature" {
+		t.Errorf("expected type_id feature, got %v", res.Data["type_id"])
+	}
+
+	// impact mode
+	res, err = GraphHandler(context.Background(), map[string]any{
+		"op":           "query",
+		"catalog_path": seedCatalogPath,
+		"mode":         "impact",
+		"target":       "usecase-developer-traces-requirement-to-proof",
+		"to_type":      "feature",
+	})
+	if err != nil {
+		t.Fatalf("GraphHandler(query impact): %v", err)
+	}
+	if res.Data["node_id"] != "usecase-developer-traces-requirement-to-proof" {
+		t.Errorf("expected node_id usecase-developer-traces-requirement-to-proof, got %v", res.Data["node_id"])
+	}
+}

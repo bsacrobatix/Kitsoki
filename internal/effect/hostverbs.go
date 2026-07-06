@@ -181,6 +181,7 @@ var builtinVerbTable = map[string]verbEffect{
 			"load":         {class: Read, deterministic: true},
 			"lint":         {class: Read, deterministic: true},
 			"diff":         {class: Read, deterministic: true},
+			"query":        {class: Write, deterministic: true},
 			"project":      {class: Read, deterministic: true},
 			"apply":        {class: Write, deterministic: true},
 			"presentation": {class: Read, deterministic: true},
