@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -46,6 +47,35 @@ func TestBugfixAgentsCarryExternalWritePolicy(t *testing.T) {
 			if !strings.Contains(agent.SystemPrompt, phrase) {
 				t.Errorf("agent %q system prompt missing policy phrase %q", name, phrase)
 			}
+		}
+	}
+}
+
+func TestMCPDriverGuardsAgainstMechanicalBugfixWaste(t *testing.T) {
+	_, here, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(here), "..", ".."))
+	body, err := os.ReadFile(filepath.Join(repoRoot, ".agents", "agents", "kitsoki-mcp-driver.md"))
+	if err != nil {
+		t.Fatalf("read kitsoki-mcp-driver.md: %v", err)
+	}
+	text := string(body)
+
+	wantPhrases := []string{
+		"Token-budget guardrails",
+		"Do not call `worktree.list` just to find one bugfix worktree or owner marker.",
+		"git worktree list --porcelain | grep -A2",
+		"Do not spin on bare `session.status` polls",
+		"host.run {cmd:\"sleep 10\"}",
+		"session.trace {since:<previous_last_turn>",
+		"After `start`, confirm the reproduce phase verified RED with targeted reads",
+		"session.world {key:\"bug_verified\"}",
+	}
+	for _, phrase := range wantPhrases {
+		if !strings.Contains(text, phrase) {
+			t.Errorf("driver brief missing mechanical-waste guardrail %q", phrase)
 		}
 	}
 }
