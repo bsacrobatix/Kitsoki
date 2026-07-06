@@ -143,6 +143,8 @@ func TestGitHubTicket_CreateMissingAuthExplainsSetup(t *testing.T) {
 	unsetEnvForTest(t, "GH_TOKEN")
 	unsetEnvForTest(t, "GITHUB_TOKEN")
 	t.Setenv("HOME", t.TempDir())
+	restoreGHCLI := host.SetGHCLITokenForTest(func(context.Context) string { return "" })
+	defer restoreGHCLI()
 
 	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
 		"op":    "create",

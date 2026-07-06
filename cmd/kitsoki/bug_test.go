@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"kitsoki/internal/host"
 )
 
 // TestBugSlug covers the freeform-title → filesystem-slug mapping.
@@ -256,6 +259,8 @@ func TestBugCreateCmd_GitHubMissingAuthExplainsSetup(t *testing.T) {
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("HOME", t.TempDir())
+	restoreGHCLI := host.SetGHCLITokenForTest(func(context.Context) string { return "" })
+	defer restoreGHCLI()
 
 	root := newRootCmd()
 	root.SetArgs([]string{
