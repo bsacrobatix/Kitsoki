@@ -48,6 +48,7 @@ func (agyBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir str
 		systemPrompt string
 		model        string
 		mcpConfig    string
+		sessionID    string
 		resumeID     string
 	)
 
@@ -79,7 +80,7 @@ func (agyBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir str
 			"--allowedTools", "--disallowedTools":
 			// Dropped.
 		case "--session-id":
-			// Drop.
+			sessionID = val
 		case "--resume":
 			resumeID = val
 		case "--add-dir":
@@ -107,9 +108,17 @@ func (agyBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir str
 		}
 	}
 
+	var convID string
 	prompt := stdin
-	if sp := strings.TrimSpace(systemPrompt); sp != "" {
-		prompt = sp + "\n\n---\n\n" + stdin
+	if resumeID != "" {
+		convID = resumeID
+		// Warm run: omit system prompt since it is already in the conversation.
+	} else {
+		convID = sessionID
+		// Cold run: prepend system prompt.
+		if sp := strings.TrimSpace(systemPrompt); sp != "" {
+			prompt = sp + "\n\n---\n\n" + stdin
+		}
 	}
 
 	args := []string{
@@ -122,8 +131,8 @@ func (agyBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir str
 		args = append(args, "--model", m)
 	}
 
-	if strings.TrimSpace(resumeID) != "" {
-		args = append(args, "--conversation", strings.TrimSpace(resumeID))
+	if strings.TrimSpace(convID) != "" {
+		args = append(args, "--conversation", strings.TrimSpace(convID))
 	}
 
 	var cleanup func()

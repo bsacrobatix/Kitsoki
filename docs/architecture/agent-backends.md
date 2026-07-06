@@ -34,24 +34,25 @@ Binary resolution per backend:
 | `claude` (default) | `claude` on `PATH` | `KITSOKI_AGENT_CLAUDE_BIN` |
 | `copilot` | `copilot` on `PATH` | `KITSOKI_AGENT_COPILOT_BIN` |
 | `codex` | `codex` on `PATH` | `KITSOKI_AGENT_CODEX_BIN` |
+| `agy` | `agy` on `PATH` | `KITSOKI_AGENT_AGY_BIN` |
 
 ## What differs per backend
 
 The verb handlers always build a **claude-shaped** invocation; the backend's
 `TranslateInvocation` rewrites it onto the target CLI. The mappings:
 
-| Concern | claude | copilot | codex |
-|---|---|---|---|
-| prompt delivery | piped on stdin | `-p <text>` argument | piped on stdin (`codex exec` reads instructions from stdin) |
-| permission | `--permission-mode bypassPermissions` | `--allow-all-tools` | `--dangerously-bypass-approvals-and-sandbox` (required — see note below) |
-| MCP config | `--mcp-config <file>` | `--additional-mcp-config @<file>` | `-c mcp_servers.<name>.{command,args,env}` TOML overrides (file read + converted) |
-| system prompt | `--system-prompt <s>` flag | prepended into the `-p` text (no flag) | temp file + `-c model_instructions_file="<path>"` |
-| output | `--output-format stream-json --verbose` | `--output-format json` (JSONL) | `--json` (JSONL) |
-| working dir | `cmd.Dir` | `cmd.Dir` + `-C <dir>` | `cmd.Dir` + `-C <dir>` |
-| MCP tool name | `mcp__<server>__submit` | `<server>-submit` | bare `submit` (server is a separate JSONL field; live-pinned) |
-| session resume | `--session-id <id>` / `--resume <id>` | `--session-id <id>` / `--resume=<id>` | first call creates the session (id captured from `thread.started`); resume via the `exec resume <id>` subcommand |
-| transcript format | `claude-jsonl` | `copilot-jsonl` | `codex-jsonl` |
-| terminal usage | tokens + `total_cost_usd` | `premium_requests` + durations (no cost) | tokens (`input/cached_input/output/reasoning_output`), no cost |
+| Concern | claude | copilot | codex | agy |
+|---|---|---|---|---|
+| prompt delivery | piped on stdin | `-p <text>` argument | piped on stdin (`codex exec` reads instructions from stdin) | `--print <text>` argument |
+| permission | `--permission-mode bypassPermissions` | `--allow-all-tools` | `--dangerously-bypass-approvals-and-sandbox` (required — see note below) | `--dangerously-skip-permissions` |
+| MCP config | `--mcp-config <file>` | `--additional-mcp-config @<file>` | `-c mcp_servers.<name>.{command,args,env}` TOML overrides (file read + converted) | `--mcp-config <file>` (under temporary app data dir) |
+| system prompt | `--system-prompt <s>` flag | prepended into the `-p` text (no flag) | temp file + `-c model_instructions_file="<path>"` | prepended to `--print` on cold runs (no flag); omitted on warm runs |
+| output | `--output-format stream-json --verbose` | `--output-format json` (JSONL) | `--json` (JSONL) | `--output-format json` (JSONL) |
+| working dir | `cmd.Dir` | `cmd.Dir` + `-C <dir>` | `cmd.Dir` + `-C <dir>` | `cmd.Dir` |
+| MCP tool name | `mcp__<server>__submit` | `<server>-submit` | bare `submit` (server is a separate JSONL field; live-pinned) | `mcp__<server>__submit` |
+| session resume | `--session-id <id>` / `--resume <id>` | `--session-id <id>` / `--resume=<id>` | first call creates the session (id captured from `thread.started`); resume via the `exec resume <id>` subcommand | `--conversation <id>` for cold/warm sessions; system prompt omitted on warm runs |
+| transcript format | `claude-jsonl` | `copilot-jsonl` | `codex-jsonl` | `agy-jsonl` |
+| terminal usage | tokens + `total_cost_usd` | `premium_requests` + durations (no cost) | tokens (`input/cached_input/output/reasoning_output`), no cost | tokens (`input/cached_input/output`), no cost |
 
 Codex's `--json` wire protocol is two-layer: top-level event types
 (`thread.started`, `turn.started`, `item.started`, `item.completed`,
