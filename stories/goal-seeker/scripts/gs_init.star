@@ -43,13 +43,30 @@ def _reset_derived(ctx, work_dir):
         ctx.fs.write(path, "{}\n")
 
 
+def _seed_if_present(ctx, src, dst, overwrite=False):
+    if src == "" or dst == "":
+        return
+    if ctx.fs.exists(dst) and not overwrite:
+        return
+    if ctx.fs.exists(src):
+        ctx.fs.write(dst, ctx.fs.read(src))
+
+
 def main(ctx):
     work_dir = ctx.inputs["work_dir"].rstrip("/")
+    goal_dir = str(ctx.inputs.get("goal_dir") or "").rstrip("/")
     path = work_dir + "/log.jsonl"
     reset = ctx.inputs.get("reset")
     if _is_reset(reset):
         ctx.fs.write(path, "")
         _reset_derived(ctx, work_dir)
+        if goal_dir != "":
+            _seed_if_present(ctx, goal_dir + "/log.jsonl", path, True)
+            _seed_if_present(ctx, goal_dir + "/plan-evolution.jsonl", work_dir + "/plan-evolution.jsonl", True)
     elif not ctx.fs.exists(path):
-        ctx.fs.write(path, "")
+        if goal_dir != "":
+            _seed_if_present(ctx, goal_dir + "/log.jsonl", path)
+            _seed_if_present(ctx, goal_dir + "/plan-evolution.jsonl", work_dir + "/plan-evolution.jsonl")
+        if not ctx.fs.exists(path):
+            ctx.fs.write(path, "")
     return {"log_path": path}

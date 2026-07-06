@@ -35,6 +35,7 @@ states:
           script: scripts/gs_init.star
           inputs:
             work_dir: "{{ world.work_dir }}"
+            goal_dir: "{{ world.goal_dir }}"
             reset: "{{ world.reset_log }}"
         bind:
           init_log_path: log_path
