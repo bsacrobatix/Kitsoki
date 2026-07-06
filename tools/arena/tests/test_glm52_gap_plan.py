@@ -102,8 +102,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check("oss pending count", packet["pending_by_corpus"]["oss-oracle"], 1)
     check("bugswarm pending count", packet["pending_by_corpus"]["bugswarm"], 2)
     actions = {action["corpus"]: action for action in packet["actions"]}
-    check("oss ready", actions["oss-oracle"]["status"], "ready")
+    check("oss raw prompt needs adapter", actions["oss-oracle"]["status"], "needs-spec-fix")
     check("oss command uses supplied spec", str(oss_spec) in "\n".join(actions["oss-oracle"]["commands"]), True)
+    check("oss raw prompt no live command", "--live" in "\n".join(actions["oss-oracle"]["commands"]), False)
+    check("oss raw prompt names adapter gap", "GLM-capable raw-prompt dispatch adapter" in "\n".join(actions["oss-oracle"]["prerequisites"]), True)
     check("bugswarm needs live spec via generated no-LLM spec", actions["bugswarm"]["status"], "needs-live-spec")
     check("bugswarm spec generation command present", "bugswarm_to_arena_spec.py" in actions["bugswarm"]["commands"][0], True)
     check("generated bugswarm commands stay no-live", "--live" in "\n".join(actions["bugswarm"]["commands"]), False)
@@ -208,10 +210,72 @@ with tempfile.TemporaryDirectory() as tmp:
     check("planner with supplied bugswarm spec exits zero", proc.returncode, 0)
     packet = json.loads(packet_json.read_text(encoding="utf-8"))
     actions = {action["corpus"]: action for action in packet["actions"]}
-    check("supplied bugswarm spec ready", actions["bugswarm"]["status"], "ready")
-    check("supplied bugswarm spec audit ok", actions["bugswarm"]["spec_audit"]["ok"], True)
-    check("supplied bugswarm live command explicit", "--live" in actions["bugswarm"]["commands"][-1], True)
-    check("supplied bugswarm live command gated", "ARENA_PAIRED_TASK_ENABLE_CODEX=1" in actions["bugswarm"]["commands"][-1], True)
+    check("supplied bugswarm raw spec needs adapter", actions["bugswarm"]["status"], "needs-spec-fix")
+    check("supplied bugswarm raw spec audit fails", actions["bugswarm"]["spec_audit"]["ok"], False)
+    check("supplied bugswarm raw spec no live command", "--live" in "\n".join(actions["bugswarm"]["commands"]), False)
+    check("supplied bugswarm raw spec names adapter gap", "GLM-capable raw-prompt dispatch adapter" in "\n".join(actions["bugswarm"]["prerequisites"]), True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
+    report = out / "report.json"
+    packet_json = out / "packet.json"
+    packet_md = out / "packet.md"
+    bugswarm_spec = out / "bugswarm-kitsoki-glm52-live.yaml"
+    bugswarm_spec.write_text(
+        "\n".join([
+            "job_type: paired-task",
+            "targets:",
+            "  - id: bugswarm-verified",
+            "    corpus: .artifacts/bugswarm/arena-source.verified.yaml",
+            "variants:",
+            "  - id: kitsoki-glm-5.2",
+            "    treatment: kitsoki",
+            "    candidate: glm-5.2",
+            "    backend: codex",
+            "    model: glm-5.2",
+            "axes:",
+            "  task:",
+            "    - bugswarm-square-okio-140452393",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    report.write_text(json.dumps({
+        "required_glm52_matrix": [
+            {
+                "corpus": "bugswarm",
+                "task": "bugswarm-square-okio-140452393",
+                "treatment": "kitsoki",
+                "quality": "pending",
+            }
+        ]
+    }), encoding="utf-8")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--report-json",
+            str(report),
+            "--json-out",
+            str(packet_json),
+            "--markdown-out",
+            str(packet_md),
+            "--bugswarm-spec",
+            str(bugswarm_spec),
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    check("planner with kitsoki-only bugswarm spec exits zero", proc.returncode, 0)
+    packet = json.loads(packet_json.read_text(encoding="utf-8"))
+    actions = {action["corpus"]: action for action in packet["actions"]}
+    check("supplied bugswarm kitsoki spec ready", actions["bugswarm"]["status"], "ready")
+    check("supplied bugswarm kitsoki spec audit ok", actions["bugswarm"]["spec_audit"]["ok"], True)
+    check("supplied bugswarm kitsoki live command explicit", "--live" in actions["bugswarm"]["commands"][-1], True)
+    check("supplied bugswarm kitsoki live command gated", "ARENA_PAIRED_TASK_ENABLE_CODEX=1" in actions["bugswarm"]["commands"][-1], True)
 
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)

@@ -109,4 +109,8 @@ python3 tools/arena/scripts/glm52_gap_plan.py \
 
 Add `--oss-spec`, `--bugswarm-spec`, or `--bugswarm-source` to have the packet
 include the exact `arena.py plan`, no-LLM `arena.py run`, and explicit
-`ARENA_PAIRED_TASK_ENABLE_CODEX=1 ... --live` commands for the missing cells.
+`ARENA_PAIRED_TASK_ENABLE_CODEX=1 ... --live` commands for live-ready missing
+cells. The planner audits supplied specs before emitting paid commands: the
+Kitsoki GLM-5.2 arm is live-ready through paired-task's Kitsoki profile mapping,
+but raw-prompt GLM-5.2 remains blocked until a GLM-capable raw-prompt dispatch
+adapter exists.

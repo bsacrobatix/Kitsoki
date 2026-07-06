@@ -205,6 +205,8 @@ def audit_spec(spec: str, *, tasks: list[str], treatments: list[str]) -> dict[st
         if not any(is_glm_variant(variant) for variant in matching):
             ids = ", ".join(str(variant.get("id") or "<unnamed>") for variant in matching)
             problems.append(f"Spec treatment {treatment!r} is not GLM-5.2 labeled (variant(s): {ids}).")
+            continue
+        problems.extend(live_backend_problems(treatment, matching))
     return {
         "ok": not problems,
         "problems": problems,
@@ -228,6 +230,43 @@ def is_glm_variant(variant: dict[str, Any]) -> bool:
         for key in ("id", "candidate", "model", "profile")
     ).lower()
     return "glm-5.2" in haystack or "glm52" in haystack
+
+
+def live_backend_problems(treatment: str, variants: list[dict[str, Any]]) -> list[str]:
+    """Mirror paired_task_runner's current live dispatch support.
+
+    The Kitsoki arm maps model=glm-5.2 to a Kitsoki profile before driving the
+    story. The raw-prompt arm still shells out to `codex exec --model ...`;
+    labeling that variant GLM-5.2 is not enough to make it a valid GLM control.
+    """
+    blockers: list[str] = []
+    for variant in variants:
+        if not is_glm_variant(variant):
+            continue
+        blocker = live_backend_blocker(treatment, variant)
+        if blocker is None:
+            return []
+        blockers.append(blocker)
+    return sorted(set(blockers))
+
+
+def live_backend_blocker(treatment: str, variant: dict[str, Any]) -> str | None:
+    backend = str(variant.get("backend") or "").strip().lower()
+    variant_id = str(variant.get("id") or "<unnamed>")
+    if backend != "codex":
+        return (
+            f"Spec treatment {treatment!r} variant {variant_id!r} needs backend 'codex' "
+            f"for paired_task_runner live dispatch, got {backend or '<empty>'!r}."
+        )
+    if treatment == "kitsoki":
+        return None
+    if treatment == "raw-prompt":
+        return (
+            "Spec treatment 'raw-prompt' is GLM-5.2 labeled, but paired_task_runner "
+            "currently dispatches raw prompts through `codex exec` only; add a "
+            "GLM-capable raw-prompt dispatch adapter before running this cell live."
+        )
+    return f"Spec treatment {treatment!r} has no audited live backend support."
 
 
 def render_markdown(packet: dict[str, Any]) -> str:
