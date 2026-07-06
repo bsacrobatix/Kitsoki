@@ -377,7 +377,39 @@ states:
                 refine_feedback:   ""
                 cycle:             0
 
+      # refine mirrors accept's status-awareness (see file header): a
+      # failed/blocked review means the IMPLEMENTATION is broken, not the
+      # review, so it must route back to implementing like accept does —
+      # a bare self-loop here only re-ran test_author, burning
+      # testing_budget re-reviewing the same unfixed code while
+      # implement_artifact's once: bind stayed set and the implementer
+      # never ran again.
       refine:
+        - when: |
+            (world.implement_review_artifact.status == 'failed' ||
+             world.implement_review_artifact.status == 'blocked') &&
+            world.implementing_cycle >= world.implementing_budget
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "implementing_cycle_budget_exhausted_after_testing_refine"
+                status:         "abandoned"
+        - when: |
+            world.implement_review_artifact.status == 'failed' ||
+            world.implement_review_artifact.status == 'blocked'
+          target: implementing
+          effects:
+            - set:
+                refine_feedback:    "{{ slots.feedback ?? world.llm_verdict.reason ?? world.implement_review_artifact.summary_markdown }}"
+                implementing_cycle: "{{ world.implementing_cycle + 1 }}"
+                cycle:              "{{ world.cycle + 1 }}"
+                # Re-enter implementing for a fresh re-apply: clear its
+                # once: bind so the implementer agent runs again.
+                implement_artifact: {}
+
+        # passed (or legacy/missing status) — the implementation itself
+        # is fine; the review/tests need another pass (e.g. more
+        # coverage), so self-loop and re-run only the reviewer.
         - when: "world.testing_cycle >= world.testing_budget"
           target: "@exit:abandoned"
           effects:
