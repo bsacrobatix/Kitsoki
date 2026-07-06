@@ -53,6 +53,9 @@ python3 tools/product-journey/run.py --persona-autofix-smoke --json-output
 python3 tools/product-journey/run.py --autonomous-marathon-smoke --json-output
 python3 tools/product-journey/run.py --autonomous-marathon-smoke \
   --autonomous-marathon-smoke-repeats 2 --json-output
+python3 tools/product-journey/run.py --validate-marathon-smoke-ledger \
+  --marathon-smoke-ledger .artifacts/product-journey/marathon-smokes/<id>/autonomous-marathon-smoke.json \
+  --min-marathon-smoke-cycles 2 --json-output
 GOCACHE=/private/tmp/kitsoki-gocache go run ./cmd/kitsoki test flows stories/product-journey-qa/app.yaml
 ```
 
@@ -230,6 +233,7 @@ Useful intents:
 - `autonomous_marathon_due`
 - `autonomous_marathon_advance_due`
 - `autonomous_marathon_smoke repeats=<n>`
+- `validate_marathon_smoke_ledger min_cycles=<n>`
 - `start project=... persona=... seed=...`
 - `load run_dir=...`
 - `handoff`

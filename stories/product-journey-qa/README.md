@@ -50,9 +50,13 @@ It is intentionally no-LLM:
   multiple full active-persona cycles instead of a single sweep.
   Re-check a retained ledger through the story with
   `validate_marathon_smoke_ledger`, which defaults to the last smoke ledger, or
-  pass `marathon_smoke_ledger=<path>`. The underlying CLI validator is
+  pass `marathon_smoke_ledger=<path>`. Use
+  `validate_marathon_smoke_ledger min_cycles=<n>` when a proof must show many
+  completed cycles, not just a single retained sweep. The underlying CLI
+  validator is
   `tools/product-journey/run.py --validate-marathon-smoke-ledger
-  --marathon-smoke-ledger <path> --json-output`.
+  --marathon-smoke-ledger <path> --min-marathon-smoke-cycles <n>
+  --json-output`.
 - `rollup` calls `tools/product-journey/run.py --rollup-matrix --json-output`
   to create or refresh the matrix-level Slidey deck from reviewed run bundles.
 - `validate_matrix` calls `tools/product-journey/run.py --validate-matrix

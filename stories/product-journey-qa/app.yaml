@@ -237,6 +237,7 @@ world:
   marathon_smoke_ledger_validation_errors: { type: int, default: 0 }
   marathon_smoke_ledger_validation_warnings: { type: int, default: 0 }
   marathon_smoke_ledger_validation_cycle_count: { type: int, default: 0 }
+  marathon_smoke_ledger_validation_min_cycle_count: { type: int, default: 0 }
   marathon_smoke_ledger_validation_path: { type: string, default: "" }
   marathon_smoke_ledger_validation_markdown_path: { type: string, default: "" }
   autonomous_marathon_status: { type: string, default: "" }
@@ -391,10 +392,11 @@ intents:
       repeats: { type: int, required: false }
   validate_marathon_smoke_ledger:
     description: "Validate a retained autonomous marathon smoke ledger through the story surface."
-    examples: ["validate marathon smoke ledger", "check retained marathon ledger", "validate last marathon smoke"]
+    examples: ["validate marathon smoke ledger", "check retained marathon ledger", "validate last marathon smoke", "validate marathon smoke ledger min_cycles=2"]
     priority: 88
     slots:
       marathon_smoke_ledger: { type: string, required: false }
+      min_cycles: { type: int, required: false }
   autonomous_marathon:
     description: "Create or finalize a standing persona-QA marathon through autonomous fix, review, validation, weakness routing, and stats."
     examples: ["autonomous marathon", "start autonomous marathon scenarios=core-use-cases", "finalize autonomous marathon ticket_repo=bsacrobatix/Kitsoki"]

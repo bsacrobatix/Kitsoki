@@ -496,6 +496,7 @@ python3 tools/product-journey/run.py --autonomous-marathon-smoke \
   --autonomous-marathon-smoke-repeats 2 --json-output
 python3 tools/product-journey/run.py --validate-marathon-smoke-ledger \
   --marathon-smoke-ledger .artifacts/product-journey/marathon-smokes/<id>/autonomous-marathon-smoke.json \
+  --min-marathon-smoke-cycles 2 \
   --json-output
 ```
 
@@ -519,7 +520,9 @@ ledger under `.artifacts/product-journey/marathon-smokes/<id>/`. Pass
 `--autonomous-marathon-smoke-repeats <n>` to require multiple complete
 active-persona cycles; the retained ledger records `cycle_count`, one run entry
 per persona per cycle, and issue/fix/landing totals for
-`cycles x personas x scenarios`. It also routes
+`cycles x personas x scenarios`. The retained-ledger validator accepts
+`--min-marathon-smoke-cycles <n>` so an operator or story gate can reject a
+single-cycle ledger when the proof requires many complete cycles. It also routes
 observed weakness findings into `weakness-routes.json` / `weakness-routes.md`
 for `stories/prd` and derives found/filed/fixed stats from issue state so
 manual stats are not part of the loop. Use

@@ -353,7 +353,8 @@ def marathon_smoke_ledger_path(value: str) -> Path:
     return path
 
 
-def validate_marathon_smoke_ledger(ledger_arg: str) -> dict:
+def validate_marathon_smoke_ledger(ledger_arg: str, min_cycles: int = 1) -> dict:
+    min_cycles = max(1, int(min_cycles or 1))
     if not str(ledger_arg).strip():
         issues: list[dict] = []
         add_validation_issue(issues, "error", "ledger-path", "Autonomous marathon smoke ledger path was not provided")
@@ -361,6 +362,7 @@ def validate_marathon_smoke_ledger(ledger_arg: str) -> dict:
             "status": "invalid",
             "ledger_path": "",
             "ledger_markdown_path": "",
+            "min_cycle_count": min_cycles,
             "errors": 1,
             "warnings": 0,
             "issues": issues,
@@ -374,6 +376,7 @@ def validate_marathon_smoke_ledger(ledger_arg: str) -> dict:
             "status": "invalid",
             "ledger_path": str(ledger_path),
             "ledger_markdown_path": "",
+            "min_cycle_count": min_cycles,
             "errors": 1,
             "warnings": 0,
             "issues": issues,
@@ -387,6 +390,7 @@ def validate_marathon_smoke_ledger(ledger_arg: str) -> dict:
             "status": "invalid",
             "ledger_path": str(ledger_path),
             "ledger_markdown_path": "",
+            "min_cycle_count": min_cycles,
             "errors": 1,
             "warnings": 0,
             "issues": issues,
@@ -417,6 +421,8 @@ def validate_marathon_smoke_ledger(ledger_arg: str) -> dict:
         add_validation_issue(issues, "error", "ledger-scenarios", "Autonomous marathon smoke ledger does not cover the core gears-rust scenarios", ",".join(str(item) for item in ledger.get("scenario_ids", [])))
     if cycle_count < 1:
         add_validation_issue(issues, "error", "ledger-cycle-count", "Autonomous marathon smoke ledger cycle count must be at least one", str(cycle_count))
+    if cycle_count < min_cycles:
+        add_validation_issue(issues, "error", "ledger-min-cycles", "Autonomous marathon smoke ledger does not meet the requested minimum cycle count", f"cycles={cycle_count}, min={min_cycles}")
     expected_run_count = cycle_count * persona_count
     if persona_count < 5 or run_count != expected_run_count or len(runs) != run_count:
         add_validation_issue(issues, "error", "ledger-personas", "Autonomous marathon smoke ledger does not contain one run for each active persona", f"personas={persona_count}, runs={run_count}, entries={len(runs)}")
@@ -475,6 +481,7 @@ def validate_marathon_smoke_ledger(ledger_arg: str) -> dict:
         "ledger_markdown_path": str(markdown_path),
         "project": ledger.get("project", ""),
         "cycle_count": cycle_count,
+        "min_cycle_count": min_cycles,
         "persona_count": persona_count,
         "scenario_count": scenario_count,
         "run_count": run_count,
@@ -12357,6 +12364,7 @@ def main() -> None:
     parser.add_argument("--autonomous-marathon-smoke-repeats", type=int, default=1, help="Number of full active-persona cycles for --autonomous-marathon-smoke")
     parser.add_argument("--validate-marathon-smoke-ledger", action="store_true", help="Validate a retained autonomous marathon smoke JSON ledger")
     parser.add_argument("--marathon-smoke-ledger", default="", help="Path to autonomous-marathon-smoke.json for --validate-marathon-smoke-ledger")
+    parser.add_argument("--min-marathon-smoke-cycles", type=int, default=1, help="Minimum cycle_count required when validating a retained autonomous marathon smoke ledger")
     parser.add_argument("--report-invalid-marathon-smoke-ledger", action="store_true", help="Print invalid retained-ledger validation JSON instead of exiting early")
     parser.add_argument("--preflight-command", default="", help="Override the webshot smoke command for --capture-preflight tests")
     parser.add_argument("--preflight-studio-command", default="", help="Override the studio.ping smoke command for --capture-preflight tests")
@@ -12665,7 +12673,7 @@ def main() -> None:
     if args.validate_marathon_smoke_ledger:
         if not args.marathon_smoke_ledger and not args.report_invalid_marathon_smoke_ledger:
             raise SystemExit("--validate-marathon-smoke-ledger requires --marathon-smoke-ledger")
-        result = validate_marathon_smoke_ledger(args.marathon_smoke_ledger)
+        result = validate_marathon_smoke_ledger(args.marathon_smoke_ledger, args.min_marathon_smoke_cycles)
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
             append_log(f"Validated autonomous marathon smoke ledger {Path(args.marathon_smoke_ledger).name}: {result['status']}")
