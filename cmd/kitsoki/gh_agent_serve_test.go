@@ -185,6 +185,57 @@ func TestGHAgentDrainCmdDrainsQueuedIssue(t *testing.T) {
 	}
 }
 
+func TestGHAgentReadyAPIReportsConfiguredAgent(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store, err := jobs.NewGHJobStore(db)
+	if err != nil {
+		t.Fatalf("NewGHJobStore: %v", err)
+	}
+	if _, _, err := store.Enqueue(context.Background(), jobs.GHMention{
+		OriginRef:    "github:o/r/issue/105",
+		Repo:         "o/r",
+		ObjectKind:   "issue",
+		ObjectNumber: "105",
+	}, "stories/bugfix"); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	handler := ghAgentReadyAPIHandler(store, ghAgentServeOptions{
+		Repo:              "o/r",
+		PublicBaseURL:     "https://agent.example/",
+		Worker:            "worker-1",
+		Trigger:           "@kitsoki",
+		DrainInterval:     time.Second,
+		PollInterval:      0,
+		ReconcileInterval: time.Minute,
+		StuckAfter:        time.Minute,
+		IncidentRepo:      "o/incidents",
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode ready JSON %q: %v", rec.Body.String(), err)
+	}
+	if payload["status"] != "ready" || payload["repo"] != "o/r" || payload["public_base_url"] != "https://agent.example" {
+		t.Fatalf("unexpected ready payload: %#v", payload)
+	}
+	if payload["drain_enabled"] != true || payload["poll_enabled"] != false || payload["worker"] != "worker-1" {
+		t.Fatalf("unexpected readiness flags: %#v", payload)
+	}
+	counts := payload["recent_state_counts"].(map[string]any)
+	if counts[jobs.GHQueued].(float64) != 1 {
+		t.Fatalf("queued count=%#v", counts)
+	}
+}
+
 func TestWithGHAgentAuthInstallsCLIExecEnv(t *testing.T) {
 	prevTokenSource := newGitHubAppTokenSource
 	newGitHubAppTokenSource = func(*githubapp.Config, githubapp.Doer) (githubapp.TokenSource, error) {

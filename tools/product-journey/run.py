@@ -5065,6 +5065,13 @@ def gh_agent_health_url(public_base_url: str) -> str:
     return f"{base}/healthz"
 
 
+def gh_agent_ready_url(public_base_url: str) -> str:
+    base = public_base_url.strip().rstrip("/")
+    if not base:
+        return ""
+    return f"{base}/api/ready"
+
+
 def check_gh_agent_health(public_base_url: str, timeout: float = 5.0) -> dict:
     url = gh_agent_health_url(public_base_url)
     if not url:
@@ -5095,6 +5102,82 @@ def check_gh_agent_health(public_base_url: str, timeout: float = 5.0) -> dict:
         "summary": f"{url}: expected HTTP 200 body ok, got HTTP {code} body {body!r}",
         "url": url,
         "http_status": code,
+    }
+
+
+def check_gh_agent_readiness(public_base_url: str, ticket_repo: str, timeout: float = 5.0) -> dict:
+    url = gh_agent_ready_url(public_base_url)
+    if not url:
+        return {
+            "status": "fail",
+            "summary": "gh_agent_public_base_url is required",
+            "url": "",
+        }
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            body = resp.read(4096).decode("utf-8", errors="replace")
+            code = getattr(resp, "status", resp.getcode())
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {
+            "status": "fail",
+            "summary": f"{url}: {exc}",
+            "url": url,
+        }
+    if code != 200:
+        return {
+            "status": "fail",
+            "summary": f"{url}: expected HTTP 200, got HTTP {code}",
+            "url": url,
+            "http_status": code,
+        }
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as exc:
+        return {
+            "status": "fail",
+            "summary": f"{url}: invalid JSON readiness payload ({exc})",
+            "url": url,
+            "http_status": code,
+        }
+    expected_repo = ticket_repo.strip()
+    actual_repo = str(payload.get("repo", "")).strip()
+    if payload.get("status") != "ready":
+        return {
+            "status": "fail",
+            "summary": f"{url}: status={payload.get('status', '')!r}",
+            "url": url,
+            "http_status": code,
+        }
+    if expected_repo and actual_repo != expected_repo:
+        return {
+            "status": "fail",
+            "summary": f"{url}: repo mismatch, expected {expected_repo}, got {actual_repo or '(empty)'}",
+            "url": url,
+            "http_status": code,
+        }
+    if payload.get("drain_enabled") is not True:
+        return {
+            "status": "fail",
+            "summary": f"{url}: drain loop is not enabled",
+            "url": url,
+            "http_status": code,
+        }
+    public_base = str(payload.get("public_base_url", "")).strip().rstrip("/")
+    expected_base = public_base_url.strip().rstrip("/")
+    if public_base and expected_base and public_base != expected_base:
+        return {
+            "status": "fail",
+            "summary": f"{url}: public_base_url mismatch, expected {expected_base}, got {public_base}",
+            "url": url,
+            "http_status": code,
+        }
+    worker = str(payload.get("worker", "")).strip()
+    return {
+        "status": "pass",
+        "summary": f"{url}: ready for {actual_repo or expected_repo} as {worker or '(unknown worker)'}",
+        "url": url,
+        "http_status": code,
+        "payload": payload,
     }
 
 
@@ -5565,6 +5648,18 @@ def autonomous_marathon(
                     ticket_repo,
                     gh_agent_public_base_url,
                     health,
+                )
+            ready = check_gh_agent_readiness(gh_agent_public_base_url, ticket_repo)
+            if ready.get("status") != "pass":
+                return invalid_autonomous_marathon_creation(
+                    created_dir,
+                    run_json,
+                    f"Hosted gh-agent readiness check failed before driver handoff: {ready.get('summary', '')}",
+                    "gh-agent-readiness",
+                    "preflight=pass, filing=not_run, gh_agent=fail, independent_verify=not_run, review=not_run, validation=fail",
+                    ticket_repo,
+                    gh_agent_public_base_url,
+                    ready,
                 )
         control = write_autonomous_marathon_control(
             created_dir,

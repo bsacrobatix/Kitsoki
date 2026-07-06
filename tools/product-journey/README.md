@@ -488,7 +488,9 @@ Live-budgeted pending marathons must also provide `ticket_repo` and
 run whose downstream autonomous filing, gh-agent repair, close-out, and
 review-link gates cannot complete. The runner also checks
 `<gh_agent_public_base_url>/healthz` and refuses `ready_for_driver` unless it
-returns HTTP 200 with body `ok`.
+returns HTTP 200 with body `ok`; it then checks
+`<gh_agent_public_base_url>/api/ready` and refuses handoff unless the hosted
+agent reports `status=ready`, the same ticket repo, and an enabled drain loop.
 
 Do not bypass this with raw `gh` commands. Product-journey issue filing and
 autonomous fixes are intentionally routed through Kitsoki's native

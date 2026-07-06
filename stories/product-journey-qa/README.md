@@ -76,7 +76,10 @@ It is intentionally no-LLM:
   story-owned call. Missing `ticket_repo` or `gh_agent_public_base_url` fails
   closed in the story view as `autonomous_marathon_invalid` so the operator can
   review the invalid gate state without reading host errors. Omit the mode, or
-  use `pending`, when a live driver should capture evidence before finalization.
+  use `pending`, when a live driver should capture evidence before finalization;
+  live pending mode also requires the hosted gh-agent `/healthz` and
+  `/api/ready` checks to pass for the same ticket repo before returning a driver
+  handoff.
   Each marathon run also writes `autonomous-marathon-control.json/md` with the
   cadence, per-scenario live budget, human role, heartbeat/watchdog timing, and
   final gates, and the story view surfaces that control state for review.
