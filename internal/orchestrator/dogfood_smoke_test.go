@@ -54,6 +54,9 @@ import (
 // the pipeline.
 func setupDogfoodRepo(t *testing.T) (repoRoot string, ticketID string) {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("dogfood smoke tests use real git repos/worktrees; skipped under -short")
+	}
 
 	repoRoot = t.TempDir()
 

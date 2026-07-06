@@ -4,7 +4,7 @@
 #
 # Runs six suites and NEVER bails early — every failure across all is
 # collected before we exit:
-#   1. go test ./...                  (Go unit tests)
+#   1. go test $KITSOKI_GO_TEST_FLAGS ./...
 #   2. Starlark static validation     (host.starlark.run parse + resolve)
 #   3. story flow fixtures            (deterministic, no-LLM `kitsoki test flows`
 #                                      for each tracked stories/*/app.yaml)
@@ -59,11 +59,20 @@ mining_total=0
 declare -a MINING_FAILED
 
 # ---------------------------------------------------------------------------
-# Suite 1: go test ./...   (-json so we can separate signal from per-test noise)
+# Suite 1: go test $KITSOKI_GO_TEST_FLAGS ./...   (-json so we can separate signal from per-test noise)
 # ---------------------------------------------------------------------------
 GO_JSON="$TMP/go.json"
-section "go test ./..."
-go test -json ./... >"$GO_JSON" 2>"$TMP/go.stderr"
+GO_TEST_FLAGS=${KITSOKI_GO_TEST_FLAGS:-}
+GO_TEST_LABEL="go test"
+if [ -n "$GO_TEST_FLAGS" ]; then
+	GO_TEST_LABEL="$GO_TEST_LABEL $GO_TEST_FLAGS"
+fi
+GO_TEST_LABEL="$GO_TEST_LABEL ./..."
+section "$GO_TEST_LABEL"
+# Intentionally split KITSOKI_GO_TEST_FLAGS on shell words so callers can pass
+# ordinary go-test flags like "-short -run TestName".
+# shellcheck disable=SC2086
+go test -json $GO_TEST_FLAGS ./... >"$GO_JSON" 2>"$TMP/go.stderr"
 go_rc=$?
 
 # Reconstruct the conventional `go test` text into the full report.
@@ -218,7 +227,7 @@ ls -1t "$REPORT_DIR"/test-*.log 2>/dev/null | tail -n +$((KEEP + 1)) | while rea
 total_failures=$((go_failures + starlark_failures + flow_failures + features_failures + media_failures + mining_failures))
 
 if [ "$total_failures" -eq 0 ]; then
-	printf '%s✓%s go test ./...   %s%d packages%s\n' "$GREEN" "$RST" "$DIM" "$go_pkgs_total" "$RST"
+	printf '%s✓%s %s   %s%d packages%s\n' "$GREEN" "$RST" "$GO_TEST_LABEL" "$DIM" "$go_pkgs_total" "$RST"
 	printf '%s✓%s starlark check\n' "$GREEN" "$RST"
 	printf '%s✓%s story flows     %s%d stories%s\n' "$GREEN" "$RST" "$DIM" "$flow_apps_total" "$RST"
 	if [ "$features_skipped" -eq 1 ]; then
@@ -242,7 +251,7 @@ fi
 
 # --- Go test failures -------------------------------------------------------
 if [ "$go_failures" -gt 0 ]; then
-	printf '\n%s✗ go test ./...%s — %d package(s) failed\n' "$BOLD$RED" "$RST" "$go_failures"
+	printf '\n%s✗ %s%s — %d package(s) failed\n' "$BOLD$RED" "$GO_TEST_LABEL" "$RST" "$go_failures"
 	for pkg in "${GO_FAILED_PKGS[@]}"; do
 		printf '\n%s%s%s\n' "$YELLOW" "$pkg" "$RST"
 		# `go test -json` is implicitly verbose, so the package emits RUN/PASS for
