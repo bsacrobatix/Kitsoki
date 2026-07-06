@@ -1,5 +1,110 @@
 {
   "bugswarm_glm52_arena_cells": [],
+  "comparisons": {
+    "bugswarm": {
+      "kitsoki": {
+        "attempted": 0,
+        "avg_tokens": null,
+        "blocked": 0,
+        "failed": 0,
+        "n": 1,
+        "partial": 0,
+        "partial_rate": null,
+        "pending": 1,
+        "solved": 0,
+        "success_rate": null,
+        "total_tokens": null
+      },
+      "notes": [
+        "Kitsoki GLM-5.2 arm has no attempted cells.",
+        "Raw-prompt GLM-5.2 arm has no attempted cells."
+      ],
+      "raw_prompt": {
+        "attempted": 0,
+        "avg_tokens": null,
+        "blocked": 0,
+        "failed": 0,
+        "n": 1,
+        "partial": 0,
+        "partial_rate": null,
+        "pending": 1,
+        "solved": 0,
+        "success_rate": null,
+        "total_tokens": null
+      },
+      "status": "pending",
+      "success_rate_delta": null,
+      "token_ratio_kitsoki_to_raw": null
+    },
+    "oss-oracle": {
+      "kitsoki": {
+        "attempted": 1,
+        "avg_tokens": 2890980.0,
+        "blocked": 0,
+        "failed": 0,
+        "n": 1,
+        "partial": 1,
+        "partial_rate": 1.0,
+        "pending": 0,
+        "solved": 0,
+        "success_rate": 0.0,
+        "total_tokens": 2890980
+      },
+      "notes": [
+        "Raw-prompt GLM-5.2 arm has no attempted cells."
+      ],
+      "raw_prompt": {
+        "attempted": 0,
+        "avg_tokens": null,
+        "blocked": 0,
+        "failed": 0,
+        "n": 1,
+        "partial": 0,
+        "partial_rate": null,
+        "pending": 1,
+        "solved": 0,
+        "success_rate": null,
+        "total_tokens": null
+      },
+      "status": "pending",
+      "success_rate_delta": null,
+      "token_ratio_kitsoki_to_raw": null
+    },
+    "overall": {
+      "kitsoki": {
+        "attempted": 1,
+        "avg_tokens": 2890980.0,
+        "blocked": 0,
+        "failed": 0,
+        "n": 2,
+        "partial": 1,
+        "partial_rate": 1.0,
+        "pending": 1,
+        "solved": 0,
+        "success_rate": 0.0,
+        "total_tokens": 2890980
+      },
+      "notes": [
+        "Raw-prompt GLM-5.2 arm has no attempted cells."
+      ],
+      "raw_prompt": {
+        "attempted": 0,
+        "avg_tokens": null,
+        "blocked": 0,
+        "failed": 0,
+        "n": 2,
+        "partial": 0,
+        "partial_rate": null,
+        "pending": 2,
+        "solved": 0,
+        "success_rate": null,
+        "total_tokens": null
+      },
+      "status": "pending",
+      "success_rate_delta": null,
+      "token_ratio_kitsoki_to_raw": null
+    }
+  },
   "corpora": {
     "bugswarm": {
       "imported_task_count": 1,
@@ -220,6 +325,34 @@
         "partial": 0,
         "partial_rate": null,
         "pending": 1,
+        "solved": 0,
+        "success_rate": null,
+        "total_tokens": null
+      }
+    },
+    "glm52_by_treatment_overall": {
+      "kitsoki": {
+        "attempted": 1,
+        "avg_tokens": 2890980.0,
+        "blocked": 0,
+        "failed": 0,
+        "n": 2,
+        "partial": 1,
+        "partial_rate": 1.0,
+        "pending": 1,
+        "solved": 0,
+        "success_rate": 0.0,
+        "total_tokens": 2890980
+      },
+      "raw-prompt": {
+        "attempted": 0,
+        "avg_tokens": null,
+        "blocked": 0,
+        "failed": 0,
+        "n": 2,
+        "partial": 0,
+        "partial_rate": null,
+        "pending": 2,
         "solved": 0,
         "success_rate": null,
         "total_tokens": null

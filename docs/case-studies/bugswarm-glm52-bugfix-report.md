@@ -79,6 +79,21 @@ BugSwarm source contract:
 | oss-oracle | kitsoki | 1 | 1 | 0 | 1 | 0 | 0 | 0.000 | 2,890,980 |
 | oss-oracle | raw-prompt | 1 | 0 | 0 | 0 | 0 | 1 | n/a | n/a |
 
+## Overall GLM-5.2 Treatment Rollup
+
+| treatment | n | attempted | solved | partial | failed | pending | success rate | tokens |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| kitsoki | 2 | 1 | 0 | 1 | 0 | 1 | 0.000 | 2,890,980 |
+| raw-prompt | 2 | 0 | 0 | 0 | 0 | 2 | n/a | n/a |
+
+## Kitsoki vs Raw-Prompt Comparisons
+
+| scope | status | Kitsoki attempted | raw attempted | success delta | token ratio | notes |
+|---|---|---:|---:|---:|---:|---|
+| bugswarm | pending | 0 | 0 | n/a | n/a | Kitsoki GLM-5.2 arm has no attempted cells.; Raw-prompt GLM-5.2 arm has no attempted cells. |
+| oss-oracle | pending | 1 | 0 | n/a | n/a | Raw-prompt GLM-5.2 arm has no attempted cells. |
+| overall | pending | 1 | 0 | n/a | n/a | Raw-prompt GLM-5.2 arm has no attempted cells. |
+
 ## Committed GLM-5.2 Cells
 
 | task | treatment | quality | tokens | cost | evidence |
