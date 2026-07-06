@@ -73,7 +73,7 @@ Every cell carries two proof-class verdicts from `schemas/completion-state.schem
   - experience: no standing verdict
 - **Fix a bug × TUI** — 🟡 proof-thin: bugfix mature (80+ flows, triage mode) but silent-bounce reliability warranted its own debugging skill. Canonical doc: docs/workflows/fix-a-bug.md
   - mechanical: no standing verdict
-  - experience: no standing verdict
+  - experience: **solved** (docs-fidelity, as of 2026-07-06)
 - **Fix a bug × Web** — 🟡 proof-thin: drivable; staged-gate & pace issues historically. Canonical doc: docs/workflows/fix-a-bug.md
   - mechanical: no standing verdict
   - experience: no standing verdict

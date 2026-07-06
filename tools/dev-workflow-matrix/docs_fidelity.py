@@ -87,6 +87,19 @@ class DocsFidelityCheck:
 # WS-G G3: canonical docs per workflow. Scoped to the cells the plan names as
 # the natural first docs-fidelity targets (onboarding + fix-a-bug on
 # gears-rust, per plan §3 Phase 2/G2) — grows as more `docs/` narratives land.
+#
+# G2 grid growth: a canonical doc now exists for all 5 workflows
+# (docs/workflows/*.md + docs/project-onboarding.md), so every workflow gets
+# at least one declared docs-fidelity cell on its persona-assigned surface
+# (plan §WS-G G2: core-maintainer -> gh-agent+tui, dependency-debugger ->
+# tui+web, docs-minded-contributor -> web (docs-fidelity itself applies to
+# every cell, not just this persona's home surface), IDE-first -> vscode+web).
+# A doc's claims are read-only text/repo-structure checks that don't depend
+# on which repo instance is driving it, so the gears-rust acid-test repo gets
+# the same doc wherever gears-rust is already exercising that workflow
+# (manifest.yaml) rather than every workflow at once — declaring is free
+# (dispatch only happens under --only), so these are safe to grow ahead of a
+# live run.
 CHECKS: list[DocsFidelityCheck] = [
     DocsFidelityCheck(
         workflow="onboard",
@@ -103,6 +116,38 @@ CHECKS: list[DocsFidelityCheck] = [
         doc_path="docs/workflows/fix-a-bug.md",
         persona="dependency-debugger",
         summary="canonical fix-a-bug workflow doc, followed with no repo spelunking",
+    ),
+    DocsFidelityCheck(
+        workflow="fix-bug",
+        surface="tui",
+        repo="gears-rust",
+        doc_path="docs/workflows/fix-a-bug.md",
+        persona="dependency-debugger",
+        summary="same fix-a-bug doc, judged against the gears-rust acid-test repo (already onboard-proven on tui)",
+    ),
+    DocsFidelityCheck(
+        workflow="prd-proposal",
+        surface="web",
+        repo="kitsoki-dev",
+        doc_path="docs/workflows/prd-and-design.md",
+        persona="docs-minded-contributor",
+        summary="canonical prd-and-design workflow doc, followed with no repo spelunking",
+    ),
+    DocsFidelityCheck(
+        workflow="decompose-implement",
+        surface="tui",
+        repo="kitsoki-dev",
+        doc_path="docs/workflows/decompose-and-implement.md",
+        persona="core-maintainer",
+        summary="canonical decompose-and-implement workflow doc, followed with no repo spelunking",
+    ),
+    DocsFidelityCheck(
+        workflow="file-bug",
+        surface="web",
+        repo="kitsoki-dev",
+        doc_path="docs/workflows/file-a-bug.md",
+        persona="docs-minded-contributor",
+        summary="canonical file-a-bug workflow doc, followed with no repo spelunking",
     ),
 ]
 
