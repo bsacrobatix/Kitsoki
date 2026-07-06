@@ -114,6 +114,7 @@ def build_report(
         },
         "comparisons": build_comparisons(matrix_rows),
         "completion_audit": completion_audit(matrix_rows, verification, bugswarm_tasks),
+        "study_protocol": study_protocol(matrix_rows, bugswarm_tasks, verification, report_json, corpus_path, bugswarm_source),
         "evidence_gaps": evidence_gaps(matrix_rows, bugswarm_tasks, verification),
         "interpretation": interpretation(matrix_rows, bugswarm_tasks, verification),
         "evidence_closure": evidence_closure(matrix_rows, bugswarm_tasks, verification),
@@ -538,6 +539,125 @@ def is_bugswarm_execute_verified(verification: dict[str, Any]) -> bool:
     return str(verification.get("mode") or "") == "execute" and int(verification.get("verified_count") or 0) > 0
 
 
+def study_protocol(
+    rows: list[dict[str, Any]],
+    bugswarm_tasks: list[dict[str, Any]],
+    verification: dict[str, Any],
+    report_json: Path,
+    corpus_path: Path,
+    bugswarm_source: Path | None,
+) -> dict[str, Any]:
+    pending = [row for row in rows if row.get("quality") == "pending"]
+    return {
+        "status": "complete" if not pending else "pending-evidence",
+        "candidate": "glm-5.2",
+        "primary_cost_metric": "total_tokens",
+        "success_metric": "solved / (solved + partial + failed)",
+        "pending_cell_count": len(pending),
+        "pending_cells": [
+            {
+                "corpus": row["corpus"],
+                "task": row["task"],
+                "treatment": row["treatment"],
+                "gate": protocol_gate(row, bugswarm_tasks, verification),
+            }
+            for row in pending
+        ],
+        "execution_steps": protocol_execution_steps(pending, bugswarm_tasks, verification, report_json, corpus_path, bugswarm_source),
+        "live_controls": [
+            "The report generator, gap planner, and tests are offline and must not run Docker or LLMs.",
+            "The operator must run no-LLM arena.py plan and non-live arena.py run before any --live command.",
+            "Live commands must be explicit and include ARENA_PAIRED_TASK_ENABLE_CODEX=1.",
+            "GLM-5.2 raw-prompt variants must use backend=claude so paired_task_runner dispatches through the synthetic-claude profile.",
+            "BugSwarm live cells require execute-mode RED/GREEN verification before model scheduling.",
+        ],
+    }
+
+
+def protocol_gate(row: dict[str, Any], bugswarm_tasks: list[dict[str, Any]], verification: dict[str, Any]) -> str:
+    if row.get("corpus") == "bugswarm":
+        if not bugswarm_tasks:
+            return "import-bugswarm-source"
+        if not is_bugswarm_execute_verified(verification):
+            return "execute-verify-bugswarm"
+    return "ready-to-plan"
+
+
+def protocol_execution_steps(
+    pending: list[dict[str, Any]],
+    bugswarm_tasks: list[dict[str, Any]],
+    verification: dict[str, Any],
+    report_json: Path,
+    corpus_path: Path,
+    bugswarm_source: Path | None,
+) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    oss_pending = [row for row in pending if row.get("corpus") == "oss-oracle"]
+    bugswarm_pending = [row for row in pending if row.get("corpus") == "bugswarm"]
+    report_json_arg = rel(report_json)
+    corpus_arg = rel(corpus_path)
+    bugswarm_source_arg = rel(bugswarm_source) if bugswarm_source else ".artifacts/bugswarm/arena-source.yaml"
+    if oss_pending:
+        steps.append({
+            "id": "oss-raw-glm52",
+            "status": "ready",
+            "purpose": "Schedule missing OSS oracle raw-prompt GLM-5.2 cells with the frozen corpus manifest.",
+            "pending_cells": len(oss_pending),
+            "commands": [
+                f"python3 tools/arena/scripts/oss_to_arena_spec.py --report-json {report_json_arg} --corpus {corpus_arg} --out .artifacts/arena/oss-glm52.yaml",
+                "python3 tools/arena/arena.py plan --spec .artifacts/arena/oss-glm52.yaml",
+                "python3 tools/arena/arena.py run --spec .artifacts/arena/oss-glm52.yaml --out .artifacts/arena/glm52-oss",
+                "ARENA_PAIRED_TASK_ENABLE_CODEX=1 python3 tools/arena/arena.py run --spec .artifacts/arena/oss-glm52.yaml --out .artifacts/arena/glm52-oss --live",
+            ],
+            "report_arg": "--oss-arena-rollup .artifacts/arena/glm52-oss/rollup.json",
+        })
+    if bugswarm_pending:
+        if not bugswarm_tasks:
+            steps.append({
+                "id": "bugswarm-import",
+                "status": "required-before-live",
+                "purpose": "Import explicit BugSwarm artifact metadata before verification or live cells.",
+                "pending_cells": len(bugswarm_pending),
+                "commands": [
+                    "python3 tools/arena/scripts/bugswarm_to_arena.py --in .artifacts/bugswarm/artifacts.json --out .artifacts/bugswarm/arena-source.yaml",
+                ],
+                "report_arg": "",
+            })
+        if not is_bugswarm_execute_verified(verification):
+            steps.append({
+                "id": "bugswarm-execute-verification",
+                "status": "required-before-live",
+                "purpose": "Prove BugSwarm failed/passed scripts still reproduce in fresh containers.",
+                "pending_cells": len(bugswarm_pending),
+                "commands": [
+                    f"python3 tools/arena/scripts/bugswarm_verify_source.py --source {bugswarm_source_arg} --out .artifacts/bugswarm/verification.json --execute",
+                    f"python3 tools/arena/scripts/bugswarm_apply_verification.py --source {bugswarm_source_arg} --verification .artifacts/bugswarm/verification.json --out .artifacts/bugswarm/arena-source.verified.yaml",
+                    (
+                        f"python3 tools/arena/scripts/glm52_gap_plan.py --report-json {report_json_arg} "
+                        "--json-out .artifacts/arena/glm52-gap-plan.json "
+                        "--markdown-out .artifacts/arena/glm52-gap-plan.md "
+                        "--bugswarm-source .artifacts/bugswarm/arena-source.verified.yaml"
+                    ),
+                ],
+                "report_arg": "--bugswarm-verification .artifacts/bugswarm/verification.json",
+            })
+        else:
+            steps.append({
+                "id": "bugswarm-glm52-cells",
+                "status": "ready",
+                "purpose": "Schedule missing BugSwarm Kitsoki and raw-prompt GLM-5.2 cells from the execute-verified source.",
+                "pending_cells": len(bugswarm_pending),
+                "commands": [
+                    f"python3 tools/arena/scripts/bugswarm_to_arena_spec.py --source {bugswarm_source_arg} --out .artifacts/bugswarm/bugswarm-glm52.yaml --kitsoki-backend codex --raw-backend claude",
+                    "python3 tools/arena/arena.py plan --spec .artifacts/bugswarm/bugswarm-glm52.yaml",
+                    "python3 tools/arena/arena.py run --spec .artifacts/bugswarm/bugswarm-glm52.yaml --out .artifacts/arena/bugswarm-glm52",
+                    "ARENA_PAIRED_TASK_ENABLE_CODEX=1 python3 tools/arena/arena.py run --spec .artifacts/bugswarm/bugswarm-glm52.yaml --out .artifacts/arena/bugswarm-glm52 --live",
+                ],
+                "report_arg": "--bugswarm-arena-rollup .artifacts/arena/bugswarm-glm52/rollup.json",
+            })
+    return steps
+
+
 def rollup_arena_cells(cells: list[dict[str, Any]]) -> dict[str, Any]:
     buckets: dict[str, list[dict[str, Any]]] = {}
     for cell in cells:
@@ -879,6 +999,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         )
     lines.extend(render_comparisons(report))
     lines.extend(render_completion_audit(report))
+    lines.extend(render_study_protocol(report))
     lines.extend([
         "",
         "## Committed GLM-5.2 Cells",
@@ -987,6 +1108,50 @@ def render_completion_audit(report: dict[str, Any]) -> list[str]:
             f"{clean_sentence(str(item.get('finding') or ''))} | "
             f"{clean_sentence(str(next_step))} |"
         )
+    return lines
+
+
+def render_study_protocol(report: dict[str, Any]) -> list[str]:
+    protocol = report["study_protocol"]
+    lines = [
+        "",
+        "## Study Protocol",
+        "",
+        f"Status: `{protocol['status']}`. Candidate: `{protocol['candidate']}`. "
+        f"Primary cost metric: `{protocol['primary_cost_metric']}`.",
+        "",
+        f"Success metric: `{protocol['success_metric']}`.",
+        "",
+        "| corpus | task | treatment | gate |",
+        "|---|---|---|---|",
+    ]
+    pending_cells = protocol.get("pending_cells") or []
+    if pending_cells:
+        for cell in pending_cells:
+            lines.append(f"| {cell['corpus']} | {cell['task']} | {cell['treatment']} | `{cell['gate']}` |")
+    else:
+        lines.append("| none | none | none | complete |")
+    lines.extend([
+        "",
+        "Execution steps:",
+        "",
+    ])
+    for step in protocol.get("execution_steps") or []:
+        lines.extend([
+            f"- `{step['id']}`: `{step['status']}`; {clean_sentence(str(step.get('purpose') or ''))}.",
+        ])
+        if step.get("report_arg"):
+            lines.append(f"  Report regeneration argument: `{step['report_arg']}`.")
+        if step.get("commands"):
+            lines.append("  Commands:")
+            for command in step["commands"]:
+                lines.append(f"  - `{command}`")
+    lines.extend([
+        "",
+        "Live controls:",
+        "",
+    ])
+    lines.extend(f"- {control}" for control in protocol.get("live_controls") or [])
     return lines
 
 

@@ -60,6 +60,7 @@ def validate_report(report: dict[str, Any]) -> list[str]:
     problems.extend(require_comparisons(report))
     problems.extend(require_closure(report, rows))
     problems.extend(require_completion_audit(report, rows))
+    problems.extend(require_study_protocol(report, rows))
     problems.extend(require_references(report))
     return problems
 
@@ -68,7 +69,7 @@ def require_top_level(report: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     if report.get("kind") != "glm52_bugswarm_bugfix_report":
         problems.append(f"unexpected report kind: {report.get('kind')!r}")
-    for key in ("corpora", "rollups", "comparisons", "completion_audit", "evidence_closure", "references"):
+    for key in ("corpora", "rollups", "comparisons", "completion_audit", "study_protocol", "evidence_closure", "references"):
         if not isinstance(report.get(key), dict):
             problems.append(f"missing mapping: {key}")
     return problems
@@ -213,6 +214,65 @@ def pending_comparison_scopes(report: dict[str, Any]) -> list[str]:
         for scope, comparison in comparisons.items()
         if isinstance(comparison, dict) and comparison.get("status") == "pending"
     ]
+
+
+def require_study_protocol(report: dict[str, Any], rows: list[dict[str, Any]]) -> list[str]:
+    protocol = report.get("study_protocol") if isinstance(report.get("study_protocol"), dict) else {}
+    problems: list[str] = []
+    if not protocol:
+        return ["missing study_protocol"]
+    pending_rows = [row for row in rows if row.get("quality") == "pending"]
+    if protocol.get("candidate") != "glm-5.2":
+        problems.append("study protocol candidate must be glm-5.2")
+    if protocol.get("primary_cost_metric") != "total_tokens":
+        problems.append("study protocol primary_cost_metric must be total_tokens")
+    if protocol.get("pending_cell_count") != len(pending_rows):
+        problems.append("study protocol pending_cell_count does not match matrix")
+    cells = protocol.get("pending_cells") if isinstance(protocol.get("pending_cells"), list) else []
+    expected_cells = {
+        (str(row.get("corpus")), str(row.get("task")), str(row.get("treatment")))
+        for row in pending_rows
+    }
+    actual_cells = {
+        (str(cell.get("corpus")), str(cell.get("task")), str(cell.get("treatment")))
+        for cell in cells
+        if isinstance(cell, dict)
+    }
+    if actual_cells != expected_cells:
+        problems.append("study protocol pending_cells do not match matrix pending rows")
+    steps = protocol.get("execution_steps") if isinstance(protocol.get("execution_steps"), list) else []
+    step_by_id = {step.get("id"): step for step in steps if isinstance(step, dict)}
+    if any(row.get("corpus") == "oss-oracle" and row.get("treatment") == "raw-prompt" for row in pending_rows):
+        oss_step = step_by_id.get("oss-raw-glm52", {})
+        if oss_step.get("status") != "ready":
+            problems.append("study protocol must mark missing OSS raw GLM-5.2 cells ready to plan")
+        if not command_contains(oss_step, "oss_to_arena_spec.py"):
+            problems.append("study protocol OSS raw step must include oss_to_arena_spec.py")
+        if not command_contains(oss_step, "--live"):
+            problems.append("study protocol OSS raw step must include explicit live command")
+    bugswarm = report.get("corpora", {}).get("bugswarm", {}) if isinstance(report.get("corpora"), dict) else {}
+    bugswarm_pending = any(row.get("corpus") == "bugswarm" for row in pending_rows)
+    if bugswarm_pending and bugswarm.get("imported_task_count", 0) > 0 and bugswarm.get("verified_task_count", 0) == 0:
+        verify_step = step_by_id.get("bugswarm-execute-verification", {})
+        if verify_step.get("status") != "required-before-live":
+            problems.append("study protocol must require BugSwarm execute verification before live cells")
+        if not command_contains(verify_step, "bugswarm_verify_source.py") or not command_contains(verify_step, "--execute"):
+            problems.append("study protocol BugSwarm verification step must include --execute verifier command")
+        if command_contains(verify_step, "arena.py run") and command_contains(verify_step, "--live"):
+            problems.append("study protocol must not put live model command in BugSwarm verification step")
+        if "bugswarm-glm52-cells" in step_by_id:
+            problems.append("study protocol must not schedule BugSwarm live cells before execute verification")
+    controls = protocol.get("live_controls") if isinstance(protocol.get("live_controls"), list) else []
+    joined_controls = "\n".join(str(item) for item in controls)
+    for required in ("ARENA_PAIRED_TASK_ENABLE_CODEX=1", "backend=claude", "execute-mode RED/GREEN"):
+        if required not in joined_controls:
+            problems.append(f"study protocol live controls missing {required}")
+    return problems
+
+
+def command_contains(step: dict[str, Any], needle: str) -> bool:
+    commands = step.get("commands") if isinstance(step.get("commands"), list) else []
+    return any(needle in str(command) for command in commands)
 
 
 def require_references(report: dict[str, Any]) -> list[str]:
