@@ -6167,20 +6167,29 @@ def autonomous_marathon(
     else:
         reviewed = review_run_bundle(run_dir, publish_deck)
         validation = validate_run_bundle(run_dir)
+        review_status = reviewed.get("review_status", reviewed.get("status", ""))
+        review_failed = int(reviewed.get("review_failed_count", reviewed.get("failed", 0)) or 0)
+        validation_status = validation.get("status", "")
+        validation_errors = int(validation.get("errors", 0) or 0)
+        review_gate = "pass" if review_status == "ready" and review_failed == 0 else "fail"
+        validation_gate = "pass" if validation_status == "valid" and validation_errors == 0 else "fail"
         base = {
             "autonomous_fix_status": "not_required",
             "independent_verify_status": "not_required",
             "independent_verify_summary": "independent verification not required",
-            "autonomous_gate_summary": "filing=not_required, gh_agent=not_required, independent_verify=not_required, review=pending, validation=pending",
-            "review_status": reviewed.get("review_status", reviewed.get("status", "")),
+            "autonomous_gate_summary": (
+                "filing=not_required, gh_agent=not_required, independent_verify=not_required, "
+                f"review={review_gate}, validation={validation_gate}"
+            ),
+            "review_status": review_status,
             "review_summary": reviewed.get("summary", ""),
             "review_passed_count": reviewed.get("review_passed_count", reviewed.get("passed", 0)),
-            "review_failed_count": reviewed.get("review_failed_count", reviewed.get("failed", 0)),
+            "review_failed_count": review_failed,
             "review_warning_count": reviewed.get("review_warning_count", reviewed.get("warnings", 0)),
             "review_total_count": reviewed.get("review_total_count", reviewed.get("total", 0)),
             "review_backlog_summary": reviewed.get("review_backlog_summary", ""),
-            "validation_status": validation.get("status", ""),
-            "validation_errors": validation.get("errors", 0),
+            "validation_status": validation_status,
+            "validation_errors": validation_errors,
             "validation_warnings": validation.get("warnings", 0),
             "validation_issue_summary": validation.get("validation_issue_summary", ""),
         }
