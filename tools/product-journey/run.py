@@ -3936,6 +3936,7 @@ def run_story_summary(run_dir: Path) -> dict:
     prd_design_intake = read_json(run_dir / "prd-design-intake.json") if (run_dir / "prd-design-intake.json").exists() else {"summary": {}, "items": []}
     control = read_json(autonomous_marathon_control_path(run_dir)) if autonomous_marathon_control_path(run_dir).exists() else {}
     watchdog = read_json(autonomous_marathon_watchdog_path(run_dir)) if autonomous_marathon_watchdog_path(run_dir).exists() else {}
+    driver_dispatch = read_json(autonomous_driver_dispatch_path(run_dir)) if autonomous_driver_dispatch_path(run_dir).exists() else {}
     finding_summary = findings.get("summary", {})
     gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
     issue_closeout = findings.get("issue_closeout", {}) if isinstance(findings.get("issue_closeout", {}), dict) else {}
@@ -4052,6 +4053,11 @@ def run_story_summary(run_dir: Path) -> dict:
         "autonomous_watchdog_path": watchdog.get("autonomous_watchdog_path", str(autonomous_marathon_watchdog_path(run_dir)) if watchdog else ""),
         "autonomous_watchdog_markdown_path": watchdog.get("autonomous_watchdog_markdown_path", str(autonomous_marathon_watchdog_markdown_path(run_dir)) if watchdog else ""),
         "autonomous_watchdog_age_minutes": watchdog.get("heartbeat_age_minutes", 0),
+        "autonomous_driver_dispatch_path": str(autonomous_driver_dispatch_path(run_dir)) if driver_dispatch else "",
+        "autonomous_driver_dispatch_markdown_path": str(autonomous_driver_dispatch_markdown_path(run_dir)) if driver_dispatch else "",
+        "autonomous_driver_dispatch_status": driver_dispatch.get("status", ""),
+        "autonomous_driver_dispatch_summary": driver_dispatch.get("summary", ""),
+        "autonomous_driver_dispatch_trace": driver_dispatch.get("trace", ""),
     }
 
 
@@ -5503,6 +5509,74 @@ def autonomous_marathon_report_path(run_dir: Path) -> Path:
     return run_dir / "autonomous-marathon-report.md"
 
 
+def autonomous_driver_dispatch_path(run_dir: Path) -> Path:
+    return run_dir / "autonomous-driver-dispatch.json"
+
+
+def autonomous_driver_dispatch_markdown_path(run_dir: Path) -> Path:
+    return run_dir / "autonomous-driver-dispatch.md"
+
+
+def render_autonomous_driver_dispatch_receipt(receipt: dict) -> str:
+    blockers = receipt.get("blockers", [])
+    lines = [
+        "# Autonomous Driver Dispatch",
+        "",
+        f"- Run: `{receipt.get('run_id', '')}`",
+        f"- Mode: `{receipt.get('mode', '')}`",
+        f"- Status: `{receipt.get('status', '')}`",
+        f"- Summary: {receipt.get('summary', '')}",
+        f"- Evidence count: {receipt.get('evidence_count', 0)}",
+        f"- Issue count: {receipt.get('issue_count', 0)}",
+        f"- Trace: `{receipt.get('trace', '') or '(not reported)'}`",
+        f"- Recorded at: `{receipt.get('recorded_at', '')}`",
+        "",
+        "## Blockers",
+        "",
+    ]
+    if blockers:
+        lines.extend(f"- {blocker}" for blocker in blockers)
+    else:
+        lines.append("No blockers were reported by the autonomous driver task.")
+    return "\n".join(lines) + "\n"
+
+
+def record_autonomous_driver_dispatch(
+    run_dir: Path,
+    mode: str,
+    status: str,
+    summary: str,
+    evidence_count: int,
+    issue_count: int,
+    trace: str,
+    blockers: str,
+) -> dict:
+    run_json = read_json(run_dir / "run.json")
+    if mode not in {"record", "live"}:
+        raise SystemExit("--record-autonomous-driver-dispatch requires --dispatch-mode record or live")
+    if status not in {"captured", "blocked", "degraded-evidence", "failed"}:
+        raise SystemExit("--record-autonomous-driver-dispatch requires --dispatch-status captured, blocked, degraded-evidence, or failed")
+    receipt = {
+        "schema": "kitsoki/product-journey-autonomous-driver-dispatch/v1",
+        "run_id": run_json.get("run_id", run_dir.name),
+        "run_dir": str(run_dir),
+        "mode": mode,
+        "status": status,
+        "summary": summary,
+        "evidence_count": max(0, int(evidence_count or 0)),
+        "issue_count": max(0, int(issue_count or 0)),
+        "trace": trace,
+        "blockers": split_csv(blockers),
+        "recorded_at": now_utc(),
+    }
+    write_json(autonomous_driver_dispatch_path(run_dir), receipt)
+    autonomous_driver_dispatch_markdown_path(run_dir).write_text(
+        render_autonomous_driver_dispatch_receipt(receipt),
+        encoding="utf-8",
+    )
+    return receipt
+
+
 def render_autonomous_marathon_report(run_dir: Path, result: dict) -> str:
     lines = [
         "# Autonomous Marathon Report",
@@ -5512,6 +5586,8 @@ def render_autonomous_marathon_report(run_dir: Path, result: dict) -> str:
         f"- Summary: {result.get('autonomous_marathon_summary', '')}",
         f"- Autonomous driver: `{result.get('autonomous_driver_mode', 'pending')}` / `{result.get('autonomous_driver_status', 'pending')}`",
         f"- Driver proof: {result.get('autonomous_driver_summary', '')}",
+        f"- Driver dispatch receipt: `{result.get('autonomous_driver_dispatch_markdown_path', '') or '(not generated)'}`",
+        f"- Driver dispatch trace: `{result.get('autonomous_driver_dispatch_trace', '') or '(not reported)'}`",
         f"- Control: `{result.get('autonomous_control_path', '') or '(not generated)'}`",
         f"- Control status: `{result.get('autonomous_control_status', '') or '(unknown)'}` - {result.get('autonomous_control_summary', '')}",
         f"- Watchdog: `{result.get('autonomous_watchdog_status', '') or '(not checked)'}` - {result.get('autonomous_watchdog_summary', '')}",
@@ -10812,6 +10888,7 @@ def main() -> None:
     parser.add_argument("--record-finding", action="store_true", help="Record one strength, weakness, issue, or fix in an existing run bundle")
     parser.add_argument("--record-blocker", action="store_true", help="Record an explicit blocked scenario as an issue finding")
     parser.add_argument("--record-driver-event", action="store_true", help="Append one driver execution event to driver-journal.json")
+    parser.add_argument("--record-autonomous-driver-dispatch", action="store_true", help="Write the story-owned autonomous driver dispatch receipt into a run bundle")
     parser.add_argument("--seed-demo-evidence", action="store_true", help="Attach deterministic demo evidence and findings to an existing run bundle")
     parser.add_argument("--file-findings", action="store_true", help="File the bundle's credible issue findings as GitHub issues via the kitsoki bug orchestration")
     parser.add_argument("--autonomous-fix-loop", action="store_true", help="Internal legacy test backend for kitsoki gitops autonomous-fix")
@@ -10821,7 +10898,7 @@ def main() -> None:
         "--autonomous-driver-mode",
         default="pending",
         choices=["pending", "replay", "record", "live"],
-        help="With --autonomous-marathon creation, pending emits a driver handoff; replay attaches cassette-backed proof and runs the native final gates; record/live fail closed until story-owned dispatch exists",
+        help="With --autonomous-marathon creation, pending emits a driver handoff; replay attaches cassette-backed proof and runs the native final gates; record/live are story-dispatched through host.agent.task",
     )
     parser.add_argument("--autonomous-cadence-hours", type=int, default=24, help="Cadence recorded in autonomous marathon control artifacts")
     parser.add_argument("--autonomous-heartbeat-minutes", type=int, default=15, help="Heartbeat interval recorded in autonomous marathon control artifacts")
@@ -10880,7 +10957,7 @@ def main() -> None:
         "--dispatch-mode",
         default="replay",
         choices=["replay", "record", "live"],
-        help="Driver dispatch mode for --record-driver-event",
+        help="Driver dispatch mode for --record-driver-event or --record-autonomous-driver-dispatch",
     )
     parser.add_argument(
         "--driver-status",
@@ -10890,7 +10967,16 @@ def main() -> None:
     )
     parser.add_argument("--mcp-tools", default="", help="Comma-separated MCP tools used for --record-driver-event")
     parser.add_argument("--evidence-refs", default="", help="Comma-separated evidence refs produced for --record-driver-event")
-    parser.add_argument("--blockers", default="", help="Comma-separated blockers observed for --record-driver-event")
+    parser.add_argument("--blockers", default="", help="Comma-separated blockers observed for --record-driver-event or --record-autonomous-driver-dispatch")
+    parser.add_argument(
+        "--dispatch-status",
+        default="captured",
+        choices=["captured", "blocked", "degraded-evidence", "failed"],
+        help="Autonomous driver task status for --record-autonomous-driver-dispatch",
+    )
+    parser.add_argument("--driver-trace", default="", help="Trace or journal path for --record-autonomous-driver-dispatch")
+    parser.add_argument("--autonomous-driver-evidence-count", type=int, default=0, help="Evidence count reported by the autonomous driver task")
+    parser.add_argument("--autonomous-driver-issue-count", type=int, default=0, help="Issue count reported by the autonomous driver task")
     parser.add_argument(
         "--finding-kind",
         default="issue",
@@ -11684,6 +11770,46 @@ def main() -> None:
         if publish_deck is not None:
             print(f"Published deck: {publish_deck}")
         append_log(f"Recorded driver event for {run_dir.name}: {event['scenario']} / {event['status']}")
+        return
+
+    if args.record_autonomous_driver_dispatch:
+        missing = []
+        for flag, value in {
+            "--run-dir": args.run_dir,
+            "--summary": args.summary,
+        }.items():
+            if not value:
+                missing.append(flag)
+        if missing:
+            raise SystemExit(f"--record-autonomous-driver-dispatch requires {', '.join(missing)}")
+        run_dir = run_dir_from_arg(args.run_dir)
+        receipt = record_autonomous_driver_dispatch(
+            run_dir,
+            args.dispatch_mode,
+            args.dispatch_status,
+            args.summary,
+            args.autonomous_driver_evidence_count,
+            args.autonomous_driver_issue_count,
+            args.driver_trace,
+            args.blockers,
+        )
+        result = {
+            "status": "autonomous_driver_dispatch_recorded",
+            "run_dir": str(run_dir),
+            "autonomous_driver_dispatch_path": str(autonomous_driver_dispatch_path(run_dir)),
+            "autonomous_driver_dispatch_markdown_path": str(autonomous_driver_dispatch_markdown_path(run_dir)),
+            "autonomous_driver_dispatch_status": receipt["status"],
+            "autonomous_driver_dispatch_summary": receipt["summary"],
+            "autonomous_driver_dispatch_trace": receipt["trace"],
+        }
+        result.update(run_story_summary(run_dir))
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Recorded autonomous driver dispatch for {run_dir.name}: {receipt['status']}")
+            return
+        print(f"Autonomous driver dispatch: {receipt['status']}")
+        print(f"Receipt: {result['autonomous_driver_dispatch_markdown_path']}")
+        append_log(f"Recorded autonomous driver dispatch for {run_dir.name}: {receipt['status']}")
         return
 
     if args.record_blocker:

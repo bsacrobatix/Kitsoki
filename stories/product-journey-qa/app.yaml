@@ -227,6 +227,10 @@ world:
   autonomous_driver_issue_count: { type: int, default: 0 }
   autonomous_driver_dispatch_result: { type: object, default: {} }
   autonomous_driver_dispatch_trace: { type: string, default: "" }
+  autonomous_driver_dispatch_path: { type: string, default: "" }
+  autonomous_driver_dispatch_markdown_path: { type: string, default: "" }
+  autonomous_driver_dispatch_status: { type: string, default: "" }
+  autonomous_driver_dispatch_summary: { type: string, default: "" }
   autonomous_control_path: { type: string, default: "" }
   autonomous_control_markdown_path: { type: string, default: "" }
   autonomous_control_status: { type: string, default: "" }
