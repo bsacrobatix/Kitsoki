@@ -67,6 +67,9 @@ with tempfile.TemporaryDirectory() as tmp:
     md = md_out.read_text(encoding="utf-8")
     check("markdown names pending raw arm", "oss-oracle | raw-prompt" in md, True)
     check("markdown warns no token ratio", "must not compute a token ratio" in md, True)
+    check("markdown includes closure packet", "## Evidence Closure Packet" in md, True)
+    check("markdown includes gap planner", "glm52_gap_plan.py" in md, True)
+    check("markdown tells bugswarm source handoff", "--bugswarm-source <execute-verified BugSwarm YAML>" in md, True)
 
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)
@@ -114,6 +117,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("bugswarm verification mode", report["corpora"]["bugswarm"]["verification_mode"], "dry-run")
     check("bugswarm verification count", report["corpora"]["bugswarm"]["verification_report_count"], 1)
     check("bugswarm dry-run verified count", report["corpora"]["bugswarm"]["verification_verified_count"], 0)
+    md = md_out.read_text(encoding="utf-8")
+    check("bugswarm source closure command", f"--bugswarm-source {source}" in md, True)
 
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)

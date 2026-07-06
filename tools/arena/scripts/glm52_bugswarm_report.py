@@ -46,6 +46,7 @@ def main(argv: list[str] | None = None) -> int:
 
     report = build_report(
         generated_at=args.generated_at,
+        report_json=Path(args.json_out),
         bakeoff_cells=Path(args.bakeoff_cells),
         arena_rollup=Path(args.arena_rollup),
         corpus_path=Path(args.corpus),
@@ -64,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
 def build_report(
     *,
     generated_at: str,
+    report_json: Path,
     bakeoff_cells: Path,
     arena_rollup: Path,
     corpus_path: Path,
@@ -88,6 +90,7 @@ def build_report(
         "version": 1,
         "generated_at": generated_at,
         "inputs": {
+            "report_json": rel(report_json),
             "bakeoff_cells": rel(bakeoff_cells),
             "arena_rollup": rel(arena_rollup),
             "corpus": rel(corpus_path),
@@ -540,6 +543,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
     ])
     lines.extend(f"- {gap}" for gap in report["evidence_gaps"])
+    lines.extend(render_evidence_closure_packet(report))
     lines.extend([
         "",
         "## Interpretation",
@@ -575,6 +579,48 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"{bucket['failed']} | {format_rate(bucket['success_rate'])} | {format_int(bucket['total_tokens'])} |"
             )
     return "\n".join(lines) + "\n"
+
+
+def render_evidence_closure_packet(report: dict[str, Any]) -> list[str]:
+    inputs = report["inputs"]
+    rows = [
+        row for row in report["required_glm52_matrix"]
+        if row["quality"] == "pending"
+    ]
+    if not rows:
+        return [
+            "",
+            "## Evidence Closure Packet",
+            "",
+            "No pending GLM-5.2 headline cells remain in this report.",
+        ]
+    commands = [
+        "python3 tools/arena/scripts/glm52_gap_plan.py \\",
+        f"  --report-json {inputs['report_json']} \\",
+        "  --json-out .artifacts/arena/glm52-gap-plan.json \\",
+        "  --markdown-out .artifacts/arena/glm52-gap-plan.md",
+    ]
+    if inputs.get("oss_arena_rollup"):
+        commands.append("  # pass --oss-spec <paired-task spec> when scheduling missing OSS cells")
+    if inputs.get("bugswarm_source"):
+        commands[-1] += " \\"
+        commands.append(f"  --bugswarm-source {inputs['bugswarm_source']}")
+    else:
+        commands.append("  # pass --bugswarm-source <execute-verified BugSwarm YAML> after importing artifacts")
+    return [
+        "",
+        "## Evidence Closure Packet",
+        "",
+        "Generate the offline execution packet for the pending headline cells with:",
+        "",
+        "```bash",
+        *commands,
+        "```",
+        "",
+        "The packet emits no-spend `arena.py plan` / arming commands and, only",
+        "after a spec passes audit, explicit `ARENA_PAIRED_TASK_ENABLE_CODEX=1",
+        "... --live` commands for operator execution.",
+    ]
 
 
 def load_yaml(path: Path) -> dict[str, Any]:

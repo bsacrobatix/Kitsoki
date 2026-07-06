@@ -62,6 +62,7 @@
     "bugswarm_verification": "",
     "corpus": "tools/arena/corpus/cost-bench.manifest.yaml",
     "oss_arena_rollup": "",
+    "report_json": "docs/case-studies/bugswarm-glm52-bugfix-report.data.json",
     "sources": "tools/arena/corpus/sources.yaml"
   },
   "interpretation": [
