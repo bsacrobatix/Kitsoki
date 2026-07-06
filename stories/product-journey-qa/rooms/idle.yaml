@@ -947,6 +947,7 @@ states:
                 persona_escalation_trigger: "stdout_json.persona_escalation_trigger"
                 persona_finding_bias: "stdout_json.persona_finding_bias"
                 live_budget_minutes: "stdout_json.live_budget_minutes"
+                gh_agent_public_base_url: "stdout_json.gh_agent_public_base_url"
                 proof_evidence_count: "stdout_json.proof_evidence_count"
                 demo_evidence_count: "stdout_json.demo_evidence_count"
                 finding_total_count: "stdout_json.finding_total_count"

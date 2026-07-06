@@ -4277,7 +4277,9 @@ def run_story_summary(run_dir: Path) -> dict:
     gh_agent_independent_verify = gh_agent_independent_verify_links(gh_agent)
     gh_agent_missing_verify = gh_agent_missing_independent_verify(gh_agent)
     missing_run_urls = gh_agent_missing_run_urls(gh_agent)
+    control_gh_agent = control.get("gh_agent", {}) if isinstance(control.get("gh_agent", {}), dict) else {}
     return {
+        "gh_agent_public_base_url": control_gh_agent.get("public_base_url", gh_agent.get("public_base_url", "")),
         "persona_starting_surface": lens.get("starting_surface", ""),
         "persona_first_question": lens.get("first_question", ""),
         "persona_evidence_emphasis": lens.get("evidence_emphasis", ""),
@@ -4762,6 +4764,7 @@ def record_gh_agent_findings_status(run_dir: Path, status: dict) -> None:
     findings = read_json(findings_path)
     findings["gh_agent"] = {
         "updated_at": now_utc(),
+        "public_base_url": status.get("gh_agent_public_base_url", ""),
         "enqueue_status": status.get("gh_agent_enqueue_status", "disabled"),
         "enqueued_count": status.get("gh_agent_enqueued_count", 0),
         "skipped_count": status.get("gh_agent_skipped_count", 0),
@@ -5230,6 +5233,7 @@ def file_findings(
         "status": filing.get("status", "findings_dry_run" if dry_run else "findings_filed"),
         "run_dir": str(run_dir),
         "ticket_repo": ticket_repo,
+        "gh_agent_public_base_url": gh_agent_public_base_url,
         "dry_run": "yes" if dry_run else "no",
         "findings_filed_count": filed,
         "findings_skipped_count": skipped,
@@ -5475,9 +5479,10 @@ def autonomous_marathon_watchdog_markdown_path(run_dir: Path) -> Path:
 
 
 def render_autonomous_marathon_control(control: dict) -> str:
-    budget = control.get("budget", {})
     cadence = control.get("cadence", {})
     watchdog = control.get("watchdog", {})
+    budget = control.get("budget", {})
+    gh_agent = control.get("gh_agent", {})
     lines = [
         "# Autonomous Marathon Control",
         "",
@@ -5490,6 +5495,7 @@ def render_autonomous_marathon_control(control: dict) -> str:
         f"- Human role: {control.get('human_role', '')}",
         f"- Heartbeat: every {watchdog.get('heartbeat_minutes', 0)} minute(s)",
         f"- Watchdog: escalate after {watchdog.get('watchdog_minutes', 0)} minute(s)",
+        f"- Hosted gh-agent: `{gh_agent.get('public_base_url', '') or '(not set)'}`",
         "",
         "## Final Gates",
         "",
@@ -5703,6 +5709,7 @@ def write_autonomous_marathon_control(
     cadence_hours: int,
     heartbeat_minutes: int,
     watchdog_minutes: int,
+    gh_agent_public_base_url: str = "",
 ) -> dict:
     if cadence_hours <= 0:
         raise SystemExit("--autonomous-cadence-hours must be > 0")
@@ -5735,6 +5742,9 @@ def write_autonomous_marathon_control(
             "heartbeat_minutes": heartbeat_minutes,
             "watchdog_minutes": watchdog_minutes,
             "on_missed_heartbeat": "record_blocker_and_stop_before_spend",
+        },
+        "gh_agent": {
+            "public_base_url": gh_agent_public_base_url.strip().rstrip("/"),
         },
         "human_role": "review outcomes and set budget; no issue filing, fix dispatch, close-out, or stats glue",
         "final_gates": [
@@ -6325,6 +6335,7 @@ def autonomous_marathon(
             autonomous_cadence_hours,
             autonomous_heartbeat_minutes,
             autonomous_watchdog_minutes,
+            gh_agent_public_base_url,
         )
         if autonomous_driver_mode == "replay":
             if not ticket_repo:

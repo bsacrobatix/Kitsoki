@@ -16,6 +16,7 @@ host_handlers:
             project: vscode
             persona: ide-first-engineer
             seed: autonomous-demo
+            gh_agent_public_base_url: https://agent.example
             deck_path: .artifacts/product-journey/run-888/deck.slidey.json
             execution_plan_path: .artifacts/product-journey/run-888/execution-plan.md
             driver_plan_path: .artifacts/product-journey/run-888/driver-plan.md
@@ -146,6 +147,7 @@ turns:
       status: run_loaded
       run_id: run-888
       run_dir: .artifacts/product-journey/run-888
+      gh_agent_public_base_url: https://agent.example
     expect_view_matches: "RUN CREATED[\\s\\S]*autonomous_fix ticket_repo=owner/repo gh_agent_public_base_url=<url>[\\s\\S]*file_findings ticket_repo=owner/repo"
     expect_host_calls:
       - handler: host.run
@@ -168,7 +170,6 @@ turns:
       slots:
         ticket_repo: bsacrobatix/Kitsoki
         gh_agent_story: stories/bugfix
-        gh_agent_public_base_url: https://agent.example
     expect_state: run_created
     expect_world:
       status: autonomous_fix_complete
@@ -177,6 +178,7 @@ turns:
       autonomous_watchdog_status: autonomous_watchdog_ok
       autonomous_watchdog_age_minutes: 10
       ticket_repo: bsacrobatix/Kitsoki
+      gh_agent_public_base_url: https://agent.example
       filing_status: findings_filed
       findings_filed_count: 2
       findings_unfiled_count: 0
@@ -209,5 +211,30 @@ turns:
         args:
           call: autonomous_product_journey_fix
           cmd: go
+          args:
+            - run
+            - ./cmd/kitsoki
+            - gitops
+            - autonomous-fix
+            - --json
+            - --report-invalid-autonomous-fix
+            - --run-dir
+            - .artifacts/product-journey/run-888
+            - --ticket-repo
+            - bsacrobatix/Kitsoki
+            - --agent-db
+            - .artifacts/product-journey/run-888/gh-agent-jobs.sqlite
+            - --agent-story
+            - stories/bugfix
+            - --public-base-url
+            - https://agent.example
+            - --project-root
+            - ""
+            - --incident-repo
+            - ""
+            - --asset-dir
+            - ""
+            - --comment-mode
+            - none
 
 expect_no_errors: true
