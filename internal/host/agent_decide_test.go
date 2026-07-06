@@ -484,7 +484,12 @@ func TestAgentDecide_ReadOnlyTools_Allowed(t *testing.T) {
 		t.Fatalf("unexpected error for read-only tools: %q", res.Error)
 	}
 	rat, _ := res.Data["rationale"].(string)
-	if !strings.Contains(rat, "tools=[Read,Grep,Glob]") {
+	// mcp__validator__submit is always appended for decide (schema: is
+	// mandatory) so the auto-attached validator's submit tool is reachable
+	// under the "default" permission mode decide's read-only ceiling forces
+	// — otherwise the CLI treats it as ungranted and the agent can never
+	// call submit (see agent_decide.go).
+	if !strings.Contains(rat, "tools=[Read,Grep,Glob,mcp__validator__submit]") {
 		t.Fatalf("expected tools in rationale meta; got %q", rat)
 	}
 }
@@ -563,7 +568,9 @@ func TestAgentDecide_PerCallTools_WinsOverAgentTools(t *testing.T) {
 		t.Fatalf("unexpected Go error: %v", err)
 	}
 	rat, _ := res.Data["rationale"].(string)
-	if !strings.Contains(rat, "tools=[Read,Grep]") {
+	// mcp__validator__submit is always appended for decide regardless of the
+	// D5 per-call/agent tools resolution (see agent_decide.go).
+	if !strings.Contains(rat, "tools=[Read,Grep,mcp__validator__submit]") {
 		t.Fatalf("per-call tools did not win; got %q", rat)
 	}
 	if strings.Contains(rat, "Glob") {

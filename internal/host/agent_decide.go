@@ -173,6 +173,16 @@ func agentDecideHandlerOnce(ctx context.Context, args map[string]any) (Result, e
 		tools = rewriteToolsForBashMCP(tools)
 	}
 	cliArgs = appendDisallowedToolsFlag(cliArgs, policy.DeniedTools)
+	// schema: is mandatory for decide (checked above), so the validator MCP
+	// server is always auto-attached below as "validator", exposing
+	// mcp__validator__submit. Add it to the allowed tools so the agent can
+	// call submit() even though the CLI permission mode is always "default"
+	// here (decide's EffectCeiling forces the read-only ceiling) — without
+	// this the tool is outside --allowedTools, so the CLI treats it as
+	// ungranted and blocks on an interactive permission prompt that a
+	// headless `-p` run can never answer. This mirrors the
+	// mcp__validator__submit wiring in agent_task.go's acceptance-schema path.
+	tools = append(tools, "mcp__validator__submit")
 	// Forward operator questions into kitsoki when a live surface is attached.
 	var opAskCleanup func()
 	cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
