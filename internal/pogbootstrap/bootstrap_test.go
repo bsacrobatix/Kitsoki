@@ -7,12 +7,28 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/graph"
 	"kitsoki/internal/kit"
 )
+
+const kitsokiTestBinaryEnv = "KITSOKI_TEST_KITSOKI_BINARY"
+
+var buildKitsokiBinaryOnce sync.Once
+var builtKitsokiBinary string
+var builtKitsokiBinaryDir string
+var buildKitsokiBinaryErr error
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if builtKitsokiBinaryDir != "" {
+		_ = os.RemoveAll(builtKitsokiBinaryDir)
+	}
+	os.Exit(code)
+}
 
 func writeBrief(t *testing.T, dir string) string {
 	t.Helper()
@@ -86,12 +102,7 @@ func TestRunInitializesLintCleanRepo(t *testing.T) {
 	tmp := t.TempDir()
 	brief := writeBrief(t, tmp)
 	repo := filepath.Join(tmp, "repo")
-	kitsokiCommand := filepath.Join(tmp, "kitsoki")
-	build := exec.Command("go", "build", "-o", kitsokiCommand, "./cmd/kitsoki")
-	build.Dir = repoRoot(t)
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build kitsoki fixture binary: %v\n%s", err, output)
-	}
+	kitsokiCommand := kitsokiCommandForTest(t)
 
 	var out bytes.Buffer
 	res, err := Run(Options{
@@ -175,12 +186,7 @@ func TestRunCanCreateInitialCommit(t *testing.T) {
 	tmp := t.TempDir()
 	brief := writeBrief(t, tmp)
 	repo := filepath.Join(tmp, "repo")
-	kitsokiCommand := filepath.Join(tmp, "kitsoki")
-	build := exec.Command("go", "build", "-o", kitsokiCommand, "./cmd/kitsoki")
-	build.Dir = repoRoot(t)
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build kitsoki fixture binary: %v\n%s", err, output)
-	}
+	kitsokiCommand := kitsokiCommandForTest(t)
 
 	var out bytes.Buffer
 	res, err := Run(Options{
@@ -256,6 +262,46 @@ func repoRoot(t *testing.T) string {
 		}
 		wd = parent
 	}
+}
+
+func kitsokiCommandForTest(t *testing.T) string {
+	t.Helper()
+	if path := os.Getenv(kitsokiTestBinaryEnv); path != "" {
+		if info, err := os.Stat(path); err != nil {
+			t.Fatalf("%s=%q is not usable: %v", kitsokiTestBinaryEnv, path, err)
+		} else if info.IsDir() || info.Mode()&0o111 == 0 {
+			t.Fatalf("%s=%q is not an executable file", kitsokiTestBinaryEnv, path)
+		}
+		return path
+	}
+
+	buildKitsokiBinaryOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "kitsoki-pogbootstrap-*")
+		if err != nil {
+			buildKitsokiBinaryErr = err
+			return
+		}
+		builtKitsokiBinaryDir = dir
+		builtKitsokiBinary = filepath.Join(dir, "kitsoki")
+		build := exec.Command("go", "build", "-o", builtKitsokiBinary, "./cmd/kitsoki")
+		build.Dir = repoRoot(t)
+		if output, err := build.CombinedOutput(); err != nil {
+			buildKitsokiBinaryErr = &buildError{err: err, output: output}
+		}
+	})
+	if buildKitsokiBinaryErr != nil {
+		t.Fatalf("build kitsoki fixture binary: %v", buildKitsokiBinaryErr)
+	}
+	return builtKitsokiBinary
+}
+
+type buildError struct {
+	err    error
+	output []byte
+}
+
+func (e *buildError) Error() string {
+	return e.err.Error() + "\n" + string(e.output)
 }
 
 func readTraceEvents(t *testing.T, path string) []traceEvent {
