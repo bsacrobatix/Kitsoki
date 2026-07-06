@@ -85,6 +85,7 @@ states:
             - "{{ world.live_budget_minutes > 0 ? world.live_budget_minutes : 20 }}"
             - --json-output
           cwd: "."
+          fail_on_error: true
         bind:
           last_result: stdout_json
           run_id: "stdout_json.run_id"
