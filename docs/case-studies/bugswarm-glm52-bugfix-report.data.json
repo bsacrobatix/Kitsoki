@@ -61,6 +61,7 @@
     "bugswarm_source": "",
     "bugswarm_verification": "",
     "corpus": "tools/arena/corpus/cost-bench.manifest.yaml",
+    "oss_arena_rollup": "",
     "sources": "tools/arena/corpus/sources.yaml"
   },
   "interpretation": [
@@ -69,6 +70,7 @@
     "BugSwarm is adapter-ready in the source catalog, but the committed report has no imported artifact subset yet."
   ],
   "kind": "glm52_bugswarm_bugfix_report",
+  "oss_glm52_arena_cells": [],
   "required_glm52_matrix": [
     {
       "adjudicated": true,

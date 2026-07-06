@@ -89,6 +89,10 @@ python3 tools/arena/scripts/glm52_bugswarm_report.py \
 Pass `--bugswarm-source .artifacts/bugswarm/arena-source.verified.yaml` after
 applying an execute-mode verification report, and
 `--bugswarm-verification .artifacts/bugswarm/verification.json` so the report
-records the verification evidence. The generator keeps unavailable GLM-5.2
-cells as `pending`, so missing raw-prompt or BugSwarm results cannot
-accidentally become zero-cost failures.
+records the verification evidence. Pass `--oss-arena-rollup <rollup.json>` and
+`--bugswarm-arena-rollup <rollup.json>` when GLM-5.2 paired-task arena runs have
+landed for those corpora; the generator folds those cells into the headline
+matrix while leaving the default Codex-native round-1 rollup as supporting
+evidence only. The generator keeps unavailable GLM-5.2 cells as `pending`, so
+missing raw-prompt or BugSwarm results cannot accidentally become zero-cost
+failures.
