@@ -36,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
         default="synthetic",
         help="variant backend to record in the spec; synthetic keeps generated specs no-spend by default",
     )
+    parser.add_argument("--kitsoki-backend", default="", help="override the Kitsoki variant backend")
+    parser.add_argument("--raw-backend", default="", help="override the raw-prompt variant backend")
     args = parser.parse_args(argv)
 
     source_path = Path(args.source)
@@ -48,7 +50,8 @@ def main(argv: list[str] | None = None) -> int:
         target_label=args.target_label,
         image=args.image,
         candidate=args.candidate,
-        backend=args.backend,
+        kitsoki_backend=args.kitsoki_backend or args.backend,
+        raw_backend=args.raw_backend or args.backend,
     )
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -81,7 +84,8 @@ def build_spec(
     target_label: str,
     image: str,
     candidate: str,
-    backend: str,
+    kitsoki_backend: str,
+    raw_backend: str,
 ) -> dict[str, Any]:
     return {
         "job_type": "paired-task",
@@ -98,7 +102,7 @@ def build_spec(
                 "id": f"kitsoki-{candidate}",
                 "treatment": "kitsoki",
                 "candidate": candidate,
-                "backend": backend,
+                "backend": kitsoki_backend,
                 "model": candidate,
                 "effort": "medium",
             },
@@ -106,7 +110,7 @@ def build_spec(
                 "id": f"raw-prompt-{candidate}",
                 "treatment": "single-briefed",
                 "candidate": candidate,
-                "backend": backend,
+                "backend": raw_backend,
                 "model": candidate,
                 "effort": "medium",
             },

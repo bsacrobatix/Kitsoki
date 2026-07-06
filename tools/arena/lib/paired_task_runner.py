@@ -4,7 +4,7 @@
 The runner is intentionally small: it materializes the pinned task baseline,
 optionally dispatches a live worker, then scores the candidate tree with the
 task's frozen deterministic oracle. `--arm-only` never calls a model; `--live`
-only calls Codex when ARENA_PAIRED_TASK_ENABLE_CODEX=1 is set.
+only calls a live CLI when ARENA_PAIRED_TASK_ENABLE_CODEX=1 is set.
 """
 
 from __future__ import annotations
@@ -45,6 +45,12 @@ MODEL_TO_PROFILE = {
     "glm-5.2": "synthetic-claude",
     "gpt-5.5": "codex-native",
 }
+
+MODEL_TO_RAW_CLAUDE_PROFILE = {
+    "glm-5.2": "synthetic-claude",
+}
+
+RAW_ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep MultiEdit"
 
 
 def blended_cost_usd(model: str, tokens: int) -> tuple[float, bool]:
@@ -290,20 +296,32 @@ def materialize_baseline(task: dict[str, Any], tree: Path) -> None:
 def dispatch_worker(args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> dict[str, Any]:
     if args.backend == "synthetic":
         return {"notes": "synthetic backend: no live model call; baseline scored directly", "metrics": {"cost_usd": 0.0, "tokens": 0}}
-    if args.backend != "codex":
+    if args.backend not in {"codex", "claude"}:
         return {"blocked": True, "notes": f"unsupported live backend {args.backend!r}", "metrics": {"cost_usd": 0.0, "tokens": 0}}
     if os.environ.get("ARENA_PAIRED_TASK_ENABLE_CODEX") != "1":
         return {
             "blocked": True,
-            "notes": "codex live dispatch disabled; set ARENA_PAIRED_TASK_ENABLE_CODEX=1 to spend",
+            "notes": "live dispatch disabled; set ARENA_PAIRED_TASK_ENABLE_CODEX=1 to spend",
             "metrics": {"cost_usd": 0.0, "tokens": 0},
         }
     if args.treatment == "kitsoki":
+        if args.backend != "codex":
+            return {
+                "blocked": True,
+                "notes": f"kitsoki live dispatch currently expects backend 'codex', got {args.backend!r}",
+                "metrics": {"cost_usd": 0.0, "tokens": 0},
+            }
         return dispatch_kitsoki(args, task, tree, trace_ref)
     return dispatch_single_prompt(args, task, tree, trace_ref)
 
 
 def dispatch_single_prompt(args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> dict[str, Any]:
+    if args.backend == "claude":
+        return dispatch_single_prompt_claude(args, task, tree, trace_ref)
+    return dispatch_single_prompt_codex(args, task, tree, trace_ref)
+
+
+def dispatch_single_prompt_codex(args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> dict[str, Any]:
     """The naive baseline: one raw `codex exec` call, no kitsoki pipeline at all."""
     prompt = build_prompt(args, task)
     cmd = [
@@ -334,6 +352,112 @@ def dispatch_single_prompt(args: argparse.Namespace, task: dict[str, Any], tree:
         + (f"; cost_usd={cost_usd} (blended estimate, not exact)" if not cost_exact else ""),
         "metrics": {"cost_usd": cost_usd, "tokens": tokens},
     }
+
+
+def dispatch_single_prompt_claude(args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> dict[str, Any]:
+    """Raw Claude-compatible one-shot baseline, used for synthetic.new GLM cells."""
+    invocation = raw_claude_invocation_for_model(args.model)
+    if "blocked" in invocation:
+        return {
+            "blocked": True,
+            "notes": str(invocation["blocked"]),
+            "metrics": {"cost_usd": 0.0, "tokens": 0},
+        }
+    prompt = build_prompt(args, task)
+    cmd = [
+        "claude",
+        "-p",
+        prompt,
+        "--model",
+        str(invocation["model"]),
+        "--permission-mode",
+        "acceptEdits",
+        "--allowedTools",
+        RAW_ALLOWED_TOOLS,
+        "--output-format",
+        "json",
+    ]
+    proc = subprocess.run(
+        cmd,
+        cwd=tree,
+        text=True,
+        capture_output=True,
+        timeout=int(os.environ.get("ARENA_CLAUDE_TIMEOUT_S", "900")),
+        env=dict(os.environ, **invocation["env"]),
+    )
+    Path(trace_ref).write_text(json.dumps({
+        "cmd": redact_cmd(cmd),
+        "profile": invocation["profile"],
+        "model": invocation["model"],
+        "env_keys": sorted(invocation["env"].keys()),
+        "returncode": proc.returncode,
+        "stdout_tail": proc.stdout[-4000:],
+        "stderr_tail": proc.stderr[-4000:],
+    }, indent=2), encoding="utf-8")
+    metrics = claude_output_metrics(proc.stdout + "\n" + proc.stderr, str(invocation["model"]))
+    note = f"claude exit={proc.returncode}: {first_line(proc.stdout + chr(10) + proc.stderr)}"
+    if metrics.get("cost_note"):
+        note += f"; {metrics['cost_note']}"
+    return {
+        "blocked": proc.returncode != 0,
+        "notes": note,
+        "metrics": {"cost_usd": metrics["cost_usd"], "tokens": metrics["tokens"]},
+    }
+
+
+def raw_claude_invocation_for_model(model: str) -> dict[str, Any]:
+    profile_name = MODEL_TO_RAW_CLAUDE_PROFILE.get(model)
+    if not profile_name:
+        return {"blocked": f"no raw claude profile mapped for model {model!r}"}
+    profile = load_harness_profile(profile_name)
+    if not profile:
+        return {"blocked": f"harness profile {profile_name!r} is not configured"}
+    if str(profile.get("backend") or "") != "claude":
+        return {"blocked": f"harness profile {profile_name!r} must use backend 'claude'"}
+    env, missing = expand_profile_env(profile.get("env") or {})
+    if missing:
+        return {"blocked": f"harness profile {profile_name!r} references unset env var(s): {', '.join(missing)}"}
+    return {
+        "profile": profile_name,
+        "model": str(profile.get("model") or model),
+        "env": env,
+    }
+
+
+def load_harness_profile(profile_name: str) -> dict[str, Any]:
+    profile: dict[str, Any] = {}
+    for path in (KITSOKI_ROOT / ".kitsoki.yaml", KITSOKI_ROOT / ".kitsoki.local.yaml"):
+        if not path.exists():
+            continue
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        if not isinstance(data, dict):
+            continue
+        profiles = data.get("harness_profiles") or {}
+        if isinstance(profiles, dict) and isinstance(profiles.get(profile_name), dict):
+            profile.update(profiles[profile_name])
+    if not profile and profile_name == "synthetic-claude":
+        return {
+            "backend": "claude",
+            "model": "hf:zai-org/GLM-5.2",
+            "env": {
+                "ANTHROPIC_BASE_URL": "https://api.synthetic.new/anthropic",
+                "ANTHROPIC_AUTH_TOKEN": "${SYNTHETIC_API_KEY}",
+            },
+        }
+    return profile
+
+
+def expand_profile_env(env_map: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
+    env: dict[str, str] = {}
+    missing: list[str] = []
+    for key, value in env_map.items():
+        text = str(value)
+        expanded = os.path.expandvars(text)
+        if "${" in expanded:
+            missing.append(str(key))
+            continue
+        env[str(key)] = expanded
+    return env, missing
 
 
 def _orchestrator_backend_for(model: str) -> str:
@@ -731,6 +855,58 @@ def parse_tokens(blob: str) -> int:
             except ValueError:
                 return 0
     return 0
+
+
+def claude_output_metrics(blob: str, model: str) -> dict[str, Any]:
+    tokens = parse_tokens(blob)
+    cost_usd: float | None = None
+    for line in blob.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        usage = payload.get("usage") or (payload.get("message") or {}).get("usage")
+        if isinstance(usage, dict):
+            tokens = max(tokens, usage_token_count(usage))
+        for key in ("total_cost_usd", "cost_usd"):
+            value = payload.get(key)
+            if isinstance(value, (int, float)):
+                cost_usd = float(value)
+                break
+    if cost_usd is not None:
+        return {
+            "cost_usd": round(cost_usd, 6),
+            "tokens": tokens,
+            "cost_note": "cost_usd from claude JSON envelope",
+        }
+    cost, exact = blended_cost_usd(model, tokens)
+    note = "blended estimate, not exact" if not exact else "priced from usage"
+    return {"cost_usd": cost, "tokens": tokens, "cost_note": note}
+
+
+def usage_token_count(usage: dict[str, Any]) -> int:
+    total = 0
+    for key in (
+        "input_tokens",
+        "output_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+        "cached_input_tokens",
+    ):
+        value = usage.get(key)
+        if isinstance(value, int):
+            total += value
+    cache_creation = usage.get("cache_creation") or {}
+    if isinstance(cache_creation, dict):
+        for value in cache_creation.values():
+            if isinstance(value, int):
+                total += value
+    return total
 
 
 def safe_name(value: str) -> str:
