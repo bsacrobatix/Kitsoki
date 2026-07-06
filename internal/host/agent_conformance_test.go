@@ -242,6 +242,19 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 		}
 	})
 
+	t.Run("claude/resume_strip", func(t *testing.T) {
+		resumeArgs := append(append([]string(nil), claudeArgs...), "--resume", "uuid-123")
+		inv := claudeBackend{}.TranslateInvocation(resumeArgs, stdin, wd)
+		for _, arg := range inv.Args {
+			if arg == "--system-prompt" || arg == "SYS-PROMPT" || arg == "--exclude-dynamic-system-prompt-sections" {
+				t.Errorf("claude resume invocation must not contain system prompt flags or values; got %v", inv.Args)
+			}
+		}
+		if !hasFlagValue(inv.Args, "--resume", "uuid-123") {
+			t.Errorf("claude resume invocation missing --resume flag/value; got %v", inv.Args)
+		}
+	})
+
 	t.Run("copilot/rewrite", func(t *testing.T) {
 		inv := copilotBackend{}.TranslateInvocation(claudeArgs, stdin, wd)
 		got := strings.Join(inv.Args, " ")
