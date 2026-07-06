@@ -1399,6 +1399,7 @@ def validate_native_gitops_boundaries(issues: list[dict]) -> None:
     """Keep product-journey issue filing/fixing behind story-owned native gitops."""
     prose_paths = [
         DRIVER_AGENT,
+        AUTONOMOUS_DRIVER_PROMPT,
         PRODUCT_JOURNEY_SKILL,
         PRODUCT_JOURNEY_README,
         ROOT / "stories" / "product-journey-qa" / "README.md",
