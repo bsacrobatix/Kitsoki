@@ -47,6 +47,13 @@ The core invariant becomes:
 > committed intentionally, abandoned automatically, or persisted explicitly as a
 > draft.
 
+The first implementation can be opt-in so it is shippable and testable, but the
+accepted end state is not "some stories use the better model." Directly writing
+task scratch state into durable world is the legacy behavior to retire. Once the
+runtime substrate is proven, every story room that models an abandonable task
+must migrate to operation scope, an explicit draft, or a deliberately committed
+world write.
+
 ## Impact
 
 - **Code seams:** `internal/machine` effect application, `internal/orchestrator`
@@ -54,12 +61,15 @@ The core invariant becomes:
   begin/commit/abandon, loader validation in `internal/app`.
 - **Vocabulary:** new operation-scope declaration on states or effects, plus
   commit/discard/draft mechanics described below.
-- **Stories affected:** opt-in at first. `stories/git-ops` should be the first
-  migration because it has visible multi-step operation rooms: `sync_main`,
-  `pull`, `conflict`, `staging`, `commit`, `cleanup`, and checkpoint/restore.
+- **Stories affected:** opt-in at first, then repo-wide migration. `stories/git-ops`
+  should be the first migration because it has visible multi-step operation
+  rooms: `sync_main`, `pull`, `conflict`, `staging`, `commit`, `cleanup`, and
+  checkpoint/restore. The final phase audits and migrates every story with
+  abandonable task state.
 - **Backward compat:** existing stories keep direct world writes until they opt
-  in. The loader should warn, not fail, when an opt-in operation room has an
-  exit path that neither commits nor explicitly persists a draft.
+  in during the substrate phase. After the migration phase, loader/lint warnings
+  should become hard failures for new or touched operation-like rooms that keep
+  task scratch state in durable world.
 - **Docs on ship:** `docs/stories/state-machine.md`,
   `docs/architecture/room-workbench.md`, and tracing docs for operation events.
 
@@ -141,8 +151,19 @@ Loader validation should catch only structural mistakes at first:
 
 ## Backward compatibility / migration
 
-This should be opt-in. Existing world semantics, flow cassettes, and story YAML
-continue to work unchanged.
+The substrate should start opt-in. Existing world semantics, flow cassettes, and
+story YAML continue to work unchanged while the mechanism is introduced and
+validated.
+
+That is a compatibility bridge, not the target architecture. The migration is
+complete only when the legacy pattern is retired:
+
+- abandonable task rooms use operation scope;
+- resumable abandoned work is represented by explicit draft records;
+- durable world writes from task rooms are reserved for committed facts,
+  telemetry, and intentionally global state;
+- loader/lint policy prevents new direct scratch-world writes from entering the
+  repo.
 
 Migration should be mechanical for one class of rooms:
 
@@ -154,7 +175,8 @@ Migration should be mechanical for one class of rooms:
 
 `stories/git-ops/rooms/sync_main.yaml` is the first adoption target. It should
 show that local-ahead/prepared/conflict results do not leak back into the hub
-unless the operator commits or saves a draft.
+unless the operator commits or saves a draft. After that, migrate the remaining
+GitOps operation rooms, then audit the rest of `stories/` for the same pattern.
 
 ## Tasks
 
@@ -189,7 +211,20 @@ unless the operator commits or saves a draft.
 - [ ] 4.1 Update `docs/stories/state-machine.md` with committed world vs.
       operation overlay semantics.
 - [ ] 4.2 Update architecture/tracing docs with operation event contracts.
-- [ ] 4.3 Trim this proposal to remaining work, then delete it when shipped.
+- [ ] 4.3 Add authoring guidance that durable world is for committed facts, not
+      abandonable task scratch state.
+
+### 5. Repo-wide migration and legacy retirement
+
+- [ ] 5.1 Audit `stories/` for abandonable task rooms that write scratch inputs,
+      host results, partial artifacts, or retry state directly to durable world.
+- [ ] 5.2 Migrate every matching room to operation scope, explicit drafts, or
+      intentionally committed durable writes.
+- [ ] 5.3 Add a linter/load warning for operation-like direct scratch writes
+      while migration is in progress.
+- [ ] 5.4 Promote that warning to a hard failure for new or touched rooms after
+      the repo migration is complete.
+- [ ] 5.5 Move shipped guidance into narrative docs and delete this proposal.
 
 ## Verification
 
@@ -219,7 +254,8 @@ operation drafts with an LLM accept/reject gate should use host cassettes.
 ## Non-goals
 
 - Replacing off-path or room conversation lanes.
-- Making every story transactional by default in the first slice.
+- Making every story transactional by default in the first slice. The final
+  phase does retire the legacy scratch-world pattern across the repo.
 - Rolling back filesystem side effects made by host calls. The proposal scopes
   world integrity; filesystem transactions need a separate sandbox/checkpoint
   design.
