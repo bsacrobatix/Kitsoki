@@ -1,5 +1,90 @@
 {
   "bugswarm_glm52_arena_cells": [],
+  "claim_ledger": {
+    "claims": [
+      {
+        "caveat": "No delta or token ratio is published while the comparison is pending.",
+        "evidence": [
+          "required_glm52_matrix",
+          "comparisons"
+        ],
+        "finding": "The claim is not yet answerable from committed evidence.",
+        "id": "overall-token-usage",
+        "missing_evidence": [
+          "Raw-prompt GLM-5.2 arm has no attempted cells."
+        ],
+        "statement": "Overall GLM-5.2 token usage comparison between Kitsoki bugfix and raw prompts.",
+        "status": "pending"
+      },
+      {
+        "caveat": "No delta or token ratio is published while the comparison is pending.",
+        "evidence": [
+          "required_glm52_matrix",
+          "comparisons"
+        ],
+        "finding": "The claim is not yet answerable from committed evidence.",
+        "id": "overall-success-rate",
+        "missing_evidence": [
+          "Raw-prompt GLM-5.2 arm has no attempted cells."
+        ],
+        "statement": "Overall GLM-5.2 success-rate comparison between Kitsoki bugfix and raw prompts.",
+        "status": "pending"
+      },
+      {
+        "caveat": "No delta or token ratio is published while the comparison is pending.",
+        "evidence": [
+          "required_glm52_matrix",
+          "comparisons"
+        ],
+        "finding": "The claim is not yet answerable from committed evidence.",
+        "id": "bugswarm-success-rate",
+        "missing_evidence": [
+          "Kitsoki GLM-5.2 arm has no attempted cells.",
+          "Raw-prompt GLM-5.2 arm has no attempted cells."
+        ],
+        "statement": "BugSwarm GLM-5.2 success-rate comparison between Kitsoki bugfix and raw prompts.",
+        "status": "pending"
+      },
+      {
+        "caveat": "Execute-mode RED/GREEN verification is still required before live GLM-5.2 cells.",
+        "evidence": [
+          "tools/arena/corpus/sources.yaml",
+          "tools/arena/corpus/bugswarm.seed.yaml"
+        ],
+        "finding": "Imported BugSwarm task count: 1.",
+        "id": "bugswarm-reusable-source",
+        "missing_evidence": [],
+        "statement": "BugSwarm is represented as a reusable source family alongside the OSS oracle corpus.",
+        "status": "supported"
+      },
+      {
+        "caveat": "GLM-5.2 headline cells currently cover only the committed bugfix fixture row.",
+        "evidence": [
+          "tools/arena/corpus/cost-bench.manifest.yaml",
+          "tools/arena/corpus/sources.yaml"
+        ],
+        "finding": "20 tasks over 10 public targets; 6 armed bugfix fixture tasks.",
+        "id": "oss-source-mix",
+        "missing_evidence": [],
+        "statement": "The OSS oracle corpus preserves the 10 public target source family separately from hidden bugfix fixtures.",
+        "status": "supported"
+      },
+      {
+        "caveat": "This is not a Kitsoki-vs-raw comparison until the matching raw-prompt arm is attempted.",
+        "evidence": [
+          "tools/bugfix-bakeoff/results/cells/bug9-glm-5.2-kitsoki.json"
+        ],
+        "finding": "1 attempted cell(s), 2890980 total tokens.",
+        "id": "observed-oss-kitsoki-glm52-cell",
+        "missing_evidence": [],
+        "statement": "Committed GLM-5.2 Kitsoki bugfix evidence exists for the OSS oracle headline matrix.",
+        "status": "supported"
+      }
+    ],
+    "pending_count": 3,
+    "status": "partial",
+    "supported_count": 3
+  },
   "comparisons": {
     "bugswarm": {
       "kitsoki": {
