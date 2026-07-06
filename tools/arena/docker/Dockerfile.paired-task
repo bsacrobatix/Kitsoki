@@ -24,7 +24,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && corepack enable \
  && corepack prepare pnpm@11.3.0 --activate \
- && npm install -g @openai/codex \
+ && npm install -g @openai/codex @anthropic-ai/claude-code \
  && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path \
