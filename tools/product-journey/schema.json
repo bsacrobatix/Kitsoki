@@ -10,6 +10,19 @@
     "file_product_issue",
     "score_and_report"
   ],
+  "driver_manifest": {
+    "required": ["id", "label", "app_kind", "capabilities"],
+    "optional": ["launch", "affordances", "evidence_contract", "oracles"],
+    "app_kinds": ["kitsoki-mcp", "web", "cli"],
+    "capability_keys": ["visual.open", "visual.observe", "visual.act", "session.open", "session.status", "session.submit", "session.drive", "session.inspect", "session.trace", "render.tui"],
+    "capability_value": "string tool name or ordered array of string tool names",
+    "launch": {
+      "optional": ["command", "cwd", "ready", "teardown"],
+      "ready_optional": ["http", "timeout_s"]
+    },
+    "oracle_required": ["id", "command"],
+    "oracle_optional": ["expect_exit"]
+  },
   "run_result": {
     "required": ["run_id", "created_at", "mode", "project", "persona", "stages", "scenarios", "artifacts"],
     "artifacts": ["run.json", "journey.md", "metrics.json", "bugs.json", "findings.json", "scenario-outcomes.json", "scenario-outcomes.md", "evidence.json", "media-manifest.json", "scenarios.json", "execution-plan.json", "execution-plan.md", "driver-plan.json", "driver-plan.md", "driver-journal.json", "driver-journal.md", "agent-brief.json", "agent-brief.md", "driver-handoff.json", "driver-handoff.md", "weakness-routes.json", "weakness-routes.md", "prd-design-intake.json", "prd-design-intake.md", "review.json", "deck.slidey.json"]
@@ -27,7 +40,7 @@
   "agent_brief": {
     "required": ["run_id", "project", "persona", "mission", "persona_contract", "operating_rules", "scenario_order", "missing_evidence", "finalize_commands"],
     "persona_lens_required": ["starting_surface", "first_question", "evidence_emphasis", "escalation_trigger", "finding_bias"],
-    "scenario_required": ["id", "label", "task", "primary_story", "mcp_tools", "success_criteria", "evidence", "quality_gate", "live_budget"]
+    "scenario_required": ["id", "label", "task", "primary_story", "mcp_tools", "resolved_mcp_tools", "success_criteria", "evidence", "quality_gate", "live_budget"]
   },
   "execution_plan": {
     "required": ["run_id", "project", "persona", "summary", "steps", "finalize_commands"],
