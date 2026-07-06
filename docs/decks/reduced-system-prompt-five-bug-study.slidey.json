@@ -3,28 +3,7 @@
   "meta": {
     "title": "Reduced System Prompt Five-Bug Study",
     "resolution": { "width": 1920, "height": 1080 },
-    "theme": {
-      "name": "rose-pine-moon",
-      "background": "#101820",
-      "fontFamily": "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica Neue, Arial, sans-serif",
-      "colors": {
-        "base": "#101820",
-        "surface": "#17212b",
-        "overlay": "#203141",
-        "muted": "#6c7d8e",
-        "subtle": "#9fb0c2",
-        "text": "#f4f7fb",
-        "love": "#f7a6b8",
-        "gold": "#f4d35e",
-        "rose": "#f08a5d",
-        "pine": "#7bd389",
-        "foam": "#80ced7",
-        "iris": "#9aa7ff",
-        "highlightLow": "#1a2936",
-        "highlightMuted": "#33495f",
-        "highlightHigh": "#5a7591"
-      }
-    },
+    "theme": "rose-pine-moon",
     "narration": { "voice": "en-AU-NatashaNeural", "rate": "+0%" }
   },
   "scenes": [
