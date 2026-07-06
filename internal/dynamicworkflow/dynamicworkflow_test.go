@@ -160,6 +160,8 @@ func TestServiceCreateResearchTestingApproachesFanout(t *testing.T) {
 		ids = append(ids, item.ID)
 		require.Contains(t, item.Prompt, ".context")
 		require.Contains(t, item.Prompt, "Goal: research")
+		require.Empty(t, item.ImplementationStory, "research item %s must not dispatch an implementation worker", item.ID)
+		require.Empty(t, item.ImplementationPrompt, "research item %s must not dispatch an implementation worker", item.ID)
 		require.NotContains(t, item.Title, "Add Go coverage")
 		require.NotContains(t, item.Prompt, "Add focused deterministic Go tests")
 	}
