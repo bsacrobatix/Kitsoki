@@ -1,121 +1,108 @@
 # BugSwarm + GLM-5.2 bugfix comparison report
 
-Status: interim, evidence-backed where cells exist. No new live LLM runs were
-performed for this report.
+Generated at: `2026-07-06T00:00:00Z`.
 
-## Question
+This report is generated offline from committed evidence. It does not call
+BugSwarm, Docker, or any LLM. Missing cells are reported as `pending`.
 
-Compare the Kitsoki `bugfix` pipeline with raw prompts on GLM-5.2, using token
-usage as the primary cost axis, and extend the success-rate comparison to a
-BugSwarm corpus alongside the existing OSS oracle corpus.
+## Research Question
 
-## Current Evidence
+Compare the Kitsoki `bugfix` pipeline with raw prompts on GLM-5.2,
+using total token usage as the primary cost axis, and prepare the same
+success-rate comparison for a BugSwarm corpus alongside the existing
+OSS oracle corpus.
 
-The only committed GLM-5.2 bugfix cell with real token accounting is the Kitsoki
-pipeline run for `bug9`:
+The current committed evidence does not yet contain the full GLM-5.2
+matrix. This report therefore separates observed results from missing
+cells instead of imputing raw-prompt or BugSwarm numbers.
 
-| corpus | task | treatment | model | verdict | tokens | cost | evidence |
-|---|---:|---|---|---|---:|---:|---|
-| kitsoki hidden-oracle | bug9 | kitsoki | GLM-5.2 | partial | 2,890,980 | $15.57545 | `tools/bugfix-bakeoff/results/cells/bug9-glm-5.2-kitsoki.json` |
+## Method
 
-Important interpretation: the automated hidden oracle failed, but the cell was
-adjudicated `partial` because GLM closed the destructive data-loss path through
-per-session worktree keying while missing the host-layer defense-in-depth the
-oracle asserted. The result is useful evidence about Kitsoki+GLM behavior, but
-it is not a solved cell.
+The headline matrix has one row per `(corpus, treatment)` bucket.
+A cell is counted as attempted only when its quality is `solved`,
+`partial`, or `failed`; `pending` and `blocked` are excluded from the
+model-quality denominator. Token totals are summed only from committed
+cell evidence that records real usage.
 
-There is no committed raw-prompt GLM-5.2 cell with trustworthy token usage yet.
-Therefore a numeric Kitsoki-vs-raw GLM token ratio would be fabricated. The
-reporting contract should display that arm as `pending`, not zero-cost and not a
-failure.
+Inputs:
 
-## Existing OSS Oracle Corpus
+- GLM-5.2 bakeoff cells: `tools/bugfix-bakeoff/results/cells`.
+- Arena supporting rollup: `tools/arena/results/round-1/rollup.json`.
+- OSS oracle corpus: `tools/arena/corpus/cost-bench.manifest.yaml`.
+- Source catalog: `tools/arena/corpus/sources.yaml`.
 
-The current frozen arena cost corpus is
-`tools/arena/corpus/cost-bench.manifest.yaml`:
+Primary metrics:
 
-- 26 tasks total.
-- 12 repositories represented.
-- 20 repo-history tasks across the pre-registered public OSS targets.
-- 6 existing hidden-oracle bugfix fixtures from `query-string` and `kitsoki`.
-- Every committed task records deterministic RED/GREEN proof fields and a
-  training/heldout split.
-
-This corpus remains the default internal source for paired Kitsoki-vs-raw
-comparisons. It is intentionally not replaced by BugSwarm.
-
-## BugSwarm As A Reusable Source
-
-BugSwarm is now represented as a separate arena source in
-`tools/arena/corpus/sources.yaml`. The adapter is
-`tools/arena/scripts/bugswarm_to_arena.py`.
-
-BugSwarm contributes a different external validity axis than our current
-repo-history and hidden-oracle fixtures:
-
-- Unit: one fail/pass CI artifact.
-- Required source fields: `image_tag`, `repo`, `failed_job_id`,
-  `passed_job_id`.
-- Oracle kind: `bugswarm_fail_pass_pair`.
-- RED rule: the failed job script exits non-zero inside the artifact.
-- GREEN rule: the passed job script exits zero inside the same artifact.
-- Isolation: BugSwarm supplies the Docker image containing both versions and CI
-  scripts.
-
-Generated BugSwarm tasks intentionally start as unverified:
-
-```bash
-python3 tools/arena/scripts/bugswarm_to_arena.py \
-  --in .artifacts/bugswarm/artifacts.json \
-  --out .artifacts/bugswarm/arena-source.yaml
-```
-
-The generated manifest is a candidate source list. A task becomes benchmarkable
-only after Docker verification flips `verified_red` and `verified_green` to
-true. This mirrors the existing RED@baseline/GREEN@fix discipline and prevents
-spending model tokens on degenerate artifacts.
-
-## Planned Blend
-
-The combined study should keep two denominators:
-
-| denominator | included tasks | why |
-|---|---:|---|
-| OSS oracle corpus | 26 current tasks | continuity with existing Kitsoki cost-efficiency work |
-| BugSwarm verified subset | N verified imported artifacts | external CI fail/pass corpus; N must be reported after verification |
-
-Report the blended result as a stratified rollup, not a single undifferentiated
-average. BugSwarm and the OSS oracle corpus have different sampling processes,
-different oracle semantics, and different setup costs.
-
-## Metrics
-
-Primary:
-
-- success rate: `solved / (solved + partial + failed)` with `pending` and
-  `blocked` excluded from the model-quality denominator.
+- success rate: `solved / (solved + partial + failed)`.
 - partial rate: reported separately because hidden oracles can be
   implementation-coupled.
-- total tokens: input + output + cache-read + cache-write where available.
-- cache-adjusted USD: secondary, never the primary comparison axis.
+- total tokens: provider-neutral primary cost measure.
+- USD cost: secondary; only shown where committed cell evidence provides
+  it.
 
-Required cells for the GLM-5.2 headline:
+## Corpus Coverage
 
-| corpus | treatment | candidate | status |
-|---|---|---|---|
-| OSS oracle corpus | kitsoki | glm-5.2 | partially populated by the bug9 evidence only |
-| OSS oracle corpus | raw prompt | glm-5.2 | pending |
-| BugSwarm verified subset | kitsoki | glm-5.2 | pending |
-| BugSwarm verified subset | raw prompt | glm-5.2 | pending |
+| corpus | tasks | repositories | verified/imported status |
+|---|---:|---:|---|
+| OSS oracle corpus | 26 | 12 | frozen and locally validated |
+| BugSwarm | 0 | n/a | adapter-ready; verified tasks: 0 |
 
-## Current Conclusion
+The OSS oracle corpus remains the active internal benchmark source. It
+covers the pre-registered public OSS targets plus existing hidden-oracle
+bugfix fixtures. BugSwarm is represented separately in the source
+catalog, so its fail/pass CI artifact sampling process does not get
+collapsed into the OSS oracle denominator.
 
-Current evidence is insufficient for the requested final claim. We can say only:
+BugSwarm source contract:
 
-1. Kitsoki+GLM-5.2 has one committed, real-token bugfix cell: `bug9`, `partial`,
-   2.89M total tokens.
-2. No committed raw-prompt GLM-5.2 cell exists, so the token comparison cannot
-   yet be computed.
-3. BugSwarm is now wired as a reusable source family and can be blended into the
-   arena corpus after explicit artifact selection and no-LLM Docker
-   verification.
+- import explicit exported artifact metadata with
+  `tools/arena/scripts/bugswarm_to_arena.py`.
+- require `image_tag`, `repo`, `failed_job_id`, and `passed_job_id`.
+- treat the failed job as RED and the passed job as GREEN inside the
+  artifact image.
+- keep imported tasks unattempted until Docker verification proves both
+  sides still reproduce.
+
+## GLM-5.2 Headline Matrix
+
+| corpus | treatment | n | attempted | solved | partial | failed | pending | success rate | tokens |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| bugswarm | kitsoki | 1 | 0 | 0 | 0 | 0 | 1 | n/a | n/a |
+| bugswarm | raw-prompt | 1 | 0 | 0 | 0 | 0 | 1 | n/a | n/a |
+| oss-oracle | kitsoki | 1 | 1 | 0 | 1 | 0 | 0 | 0.000 | 2,890,980 |
+| oss-oracle | raw-prompt | 1 | 0 | 0 | 0 | 0 | 1 | n/a | n/a |
+
+## Committed GLM-5.2 Cells
+
+| task | treatment | quality | tokens | cost | evidence |
+|---|---|---|---:|---:|---|
+| bug9 | kitsoki | partial | 2,890,980 | $15.575450 | `tools/bugfix-bakeoff/results/cells/bug9-glm-5.2-kitsoki.json` |
+
+## Evidence Gaps
+
+- No committed raw-prompt GLM-5.2 result exists for the OSS oracle corpus.
+- No BugSwarm artifact source has been imported and RED/GREEN verified yet.
+- No committed GLM-5.2 Kitsoki or raw-prompt result exists for BugSwarm.
+
+## Interpretation
+
+- Committed GLM-5.2 Kitsoki evidence contains 1 attempted OSS oracle cell(s), 2890980 total tokens, and no solved cell yet.
+- The GLM-5.2 raw-prompt arm remains pending; the report must not compute a token ratio from missing data.
+- BugSwarm is adapter-ready in the source catalog, but the committed report has no imported artifact subset yet.
+
+Bottom line: the committed GLM-5.2 evidence is not yet sufficient to
+claim Kitsoki beats or loses to raw prompts. The report is useful now as
+a reproducible evidence ledger and corpus scaffold; the headline
+comparison still requires raw-prompt GLM-5.2 cells and verified
+BugSwarm cells.
+
+## Supporting Codex-Native OSS Round
+
+The existing arena `round-1` results are supporting evidence for the
+Kitsoki-vs-raw-prompt harness and token accounting, but they are not
+GLM-5.2 cells. They should not be used to answer the GLM headline.
+
+| treatment | n | attempted | solved | failed | success rate | tokens |
+|---|---:|---:|---:|---:|---:|---:|
+| kitsoki | 4 | 4 | 2 | 2 | 0.500 | 21,459,517 |
+| raw-prompt | 4 | 4 | 2 | 2 | 0.500 | 537,743 |

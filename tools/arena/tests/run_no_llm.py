@@ -74,6 +74,17 @@ def run_default() -> int:
     checks.check("bugswarm source adapter gate", source_test.returncode, 0)
     if source_test.returncode:
         checks.failures.append((source_test.stdout + source_test.stderr).strip())
+    report_test = subprocess.run(
+        [sys.executable, str(HERE / "test_glm52_bugswarm_report.py")],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    checks.check("glm52 bugswarm report gate", report_test.returncode, 0)
+    if report_test.returncode:
+        checks.failures.append((report_test.stdout + report_test.stderr).strip())
     spec_path = ARENA_ROOT / "specs" / "paired-task-fixture.yaml"
     spec = JobSpec.load(spec_path)
     cells = spec.cells()

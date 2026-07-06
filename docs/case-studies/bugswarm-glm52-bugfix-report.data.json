@@ -1,0 +1,217 @@
+{
+  "corpora": {
+    "bugswarm": {
+      "imported_task_count": 0,
+      "source_catalog": "tools/arena/corpus/sources.yaml",
+      "source_status": "adapter-ready",
+      "verified_task_count": 0
+    },
+    "oss_oracle": {
+      "bugfix_task_count": 6,
+      "repo_count": 12,
+      "repos": [
+        "ansible",
+        "cpython",
+        "grafana",
+        "kitsoki",
+        "kubernetes",
+        "nextjs",
+        "pytorch",
+        "query-string",
+        "rust",
+        "tensorflow",
+        "typescript",
+        "vscode"
+      ],
+      "task_count": 26
+    }
+  },
+  "evidence_gaps": [
+    "No committed raw-prompt GLM-5.2 result exists for the OSS oracle corpus.",
+    "No BugSwarm artifact source has been imported and RED/GREEN verified yet.",
+    "No committed GLM-5.2 Kitsoki or raw-prompt result exists for BugSwarm."
+  ],
+  "generated_at": "2026-07-06T00:00:00Z",
+  "glm52_bugfix_cells": [
+    {
+      "adjudicated": true,
+      "candidate": "glm-5.2",
+      "corpus": "oss-oracle",
+      "cost_usd": 15.57545,
+      "evidence": "tools/bugfix-bakeoff/results/cells/bug9-glm-5.2-kitsoki.json",
+      "model": "hf:zai-org/GLM-5.2",
+      "notes": "oracle TestRepro_ConcurrentSessionsShareCheckout_DestroysWIP: rc=1; cost from native meta.cost_usd",
+      "oracle_status": "fail",
+      "provider": "synthetic.new",
+      "quality": "partial",
+      "source": "bugfix-bakeoff",
+      "task": "bug9",
+      "total_tokens": 2890980,
+      "treatment": "kitsoki"
+    }
+  ],
+  "inputs": {
+    "arena_rollup": "tools/arena/results/round-1/rollup.json",
+    "bakeoff_cells": "tools/bugfix-bakeoff/results/cells",
+    "bugswarm_source": "",
+    "corpus": "tools/arena/corpus/cost-bench.manifest.yaml",
+    "sources": "tools/arena/corpus/sources.yaml"
+  },
+  "interpretation": [
+    "Committed GLM-5.2 Kitsoki evidence contains 1 attempted OSS oracle cell(s), 2890980 total tokens, and no solved cell yet.",
+    "The GLM-5.2 raw-prompt arm remains pending; the report must not compute a token ratio from missing data.",
+    "BugSwarm is adapter-ready in the source catalog, but the committed report has no imported artifact subset yet."
+  ],
+  "kind": "glm52_bugswarm_bugfix_report",
+  "required_glm52_matrix": [
+    {
+      "adjudicated": true,
+      "candidate": "glm-5.2",
+      "corpus": "oss-oracle",
+      "cost_usd": 15.57545,
+      "evidence": "tools/bugfix-bakeoff/results/cells/bug9-glm-5.2-kitsoki.json",
+      "model": "hf:zai-org/GLM-5.2",
+      "notes": "oracle TestRepro_ConcurrentSessionsShareCheckout_DestroysWIP: rc=1; cost from native meta.cost_usd",
+      "oracle_status": "fail",
+      "provider": "synthetic.new",
+      "quality": "partial",
+      "source": "bugfix-bakeoff",
+      "task": "bug9",
+      "total_tokens": 2890980,
+      "treatment": "kitsoki"
+    },
+    {
+      "adjudicated": false,
+      "candidate": "glm-5.2",
+      "corpus": "oss-oracle",
+      "cost_usd": null,
+      "evidence": "",
+      "model": "hf:zai-org/GLM-5.2",
+      "notes": "no committed GLM-5.2 cell",
+      "oracle_status": "",
+      "provider": "synthetic.new",
+      "quality": "pending",
+      "source": "pending",
+      "task": "current-committed-glm52",
+      "total_tokens": null,
+      "treatment": "raw-prompt"
+    },
+    {
+      "adjudicated": false,
+      "candidate": "glm-5.2",
+      "corpus": "bugswarm",
+      "cost_usd": null,
+      "evidence": "",
+      "model": "hf:zai-org/GLM-5.2",
+      "notes": "no verified BugSwarm source imported",
+      "oracle_status": "",
+      "provider": "synthetic.new",
+      "quality": "pending",
+      "source": "pending",
+      "task": "verified-subset",
+      "total_tokens": null,
+      "treatment": "kitsoki"
+    },
+    {
+      "adjudicated": false,
+      "candidate": "glm-5.2",
+      "corpus": "bugswarm",
+      "cost_usd": null,
+      "evidence": "",
+      "model": "hf:zai-org/GLM-5.2",
+      "notes": "no verified BugSwarm source imported",
+      "oracle_status": "",
+      "provider": "synthetic.new",
+      "quality": "pending",
+      "source": "pending",
+      "task": "verified-subset",
+      "total_tokens": null,
+      "treatment": "raw-prompt"
+    }
+  ],
+  "rollups": {
+    "glm52_by_corpus_treatment": {
+      "bugswarm|kitsoki": {
+        "attempted": 0,
+        "avg_tokens": null,
+        "blocked": 0,
+        "failed": 0,
+        "n": 1,
+        "partial": 0,
+        "partial_rate": null,
+        "pending": 1,
+        "solved": 0,
+        "success_rate": null,
+        "total_tokens": null
+      },
+      "bugswarm|raw-prompt": {
+        "attempted": 0,
+        "avg_tokens": null,
+        "blocked": 0,
+        "failed": 0,
+        "n": 1,
+        "partial": 0,
+        "partial_rate": null,
+        "pending": 1,
+        "solved": 0,
+        "success_rate": null,
+        "total_tokens": null
+      },
+      "oss-oracle|kitsoki": {
+        "attempted": 1,
+        "avg_tokens": 2890980.0,
+        "blocked": 0,
+        "failed": 0,
+        "n": 1,
+        "partial": 1,
+        "partial_rate": 1.0,
+        "pending": 0,
+        "solved": 0,
+        "success_rate": 0.0,
+        "total_tokens": 2890980
+      },
+      "oss-oracle|raw-prompt": {
+        "attempted": 0,
+        "avg_tokens": null,
+        "blocked": 0,
+        "failed": 0,
+        "n": 1,
+        "partial": 0,
+        "partial_rate": null,
+        "pending": 1,
+        "solved": 0,
+        "success_rate": null,
+        "total_tokens": null
+      }
+    },
+    "supporting_oss_codex_round1": {
+      "kitsoki": {
+        "attempted": 4,
+        "avg_tokens": 5364879.25,
+        "blocked": 0,
+        "failed": 2,
+        "n": 4,
+        "partial": 0,
+        "partial_rate": 0.0,
+        "pending": 0,
+        "solved": 2,
+        "success_rate": 0.5,
+        "total_tokens": 21459517
+      },
+      "raw-prompt": {
+        "attempted": 4,
+        "avg_tokens": 134435.75,
+        "blocked": 0,
+        "failed": 2,
+        "n": 4,
+        "partial": 0,
+        "partial_rate": 0.0,
+        "pending": 0,
+        "solved": 2,
+        "success_rate": 0.5,
+        "total_tokens": 537743
+      }
+    }
+  },
+  "version": 1
+}
