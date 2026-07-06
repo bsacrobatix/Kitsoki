@@ -159,6 +159,71 @@ func TestDispatchFailureFilesIncident(t *testing.T) {
 	}
 }
 
+func TestDispatchReplayCassetteMissFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	root, err := repoRoot()
+	if err != nil {
+		t.Fatalf("repoRoot: %v", err)
+	}
+	mention := Mention{
+		Item:      host.GitHubInboxItem{Kind: "issue", Number: "105", Title: "@kitsoki bug: replay cassette miss"},
+		Repo:      "o/r",
+		OriginRef: "github:o/r/issue/105",
+		Trigger:   DefaultMentionTrigger,
+	}
+	store := newGHJobStore(t)
+	rec := &recordingComments{commentID: "https://github.com/o/r/issues/105#issuecomment-1"}
+	plan := realDispatchPlans["stories/bugfix"]
+	plan.CassetteRelPath = filepath.Join("stories", "bugfix", "cassettes", "missing-replay.cassette.yaml")
+	d := &Dispatcher{
+		Jobs:          store,
+		Routes:        DefaultLabelStoryMap(),
+		Comments:      &CommentStore{Exec: rec.handler, Repo: "o/r"},
+		WorkerID:      "worker-replay-miss",
+		PublicBaseURL: "https://agent.example",
+		SpawnFn: func(spawnCtx context.Context, route Route, job *jobs.GHJob) (RunResult, error) {
+			return runRealDispatch(spawnCtx, root, route, job, plan)
+		},
+	}
+
+	job, err := d.Dispatch(ctx, mention, []string{"bug"})
+	if err == nil {
+		t.Fatal("Dispatch succeeded despite missing replay cassette")
+	}
+	if !strings.Contains(err.Error(), "missing-replay.cassette.yaml") {
+		t.Fatalf("error should name the missing replay cassette, got: %v", err)
+	}
+	if job.State != jobs.GHFailed {
+		t.Fatalf("State=%q, want failed", job.State)
+	}
+	if !strings.Contains(job.ErrMsg, "missing-replay.cassette.yaml") {
+		t.Fatalf("ErrMsg should name the missing replay cassette, got: %q", job.ErrMsg)
+	}
+	worktree := filepath.Join(root, jobWorktreeRelDir(job.JobID))
+	if _, statErr := os.Stat(worktree); !os.IsNotExist(statErr) {
+		t.Fatalf("replay cassette miss must not materialize a live worktree at %s: %v", worktree, statErr)
+	}
+	rec.mu.Lock()
+	last := rec.bodies[len(rec.bodies)-1]
+	rec.mu.Unlock()
+	if !strings.Contains(last, "Run failed:") || !strings.Contains(last, "missing-replay.cassette.yaml") {
+		t.Fatalf("final comment should surface the replay failure:\n%s", last)
+	}
+	if strings.Contains(last, "Done") {
+		t.Fatalf("replay cassette miss must not render a done comment:\n%s", last)
+	}
+	events, eventsErr := store.Events(ctx, job.JobID)
+	if eventsErr != nil {
+		t.Fatalf("Events: %v", eventsErr)
+	}
+	if !hasEvent(events, jobs.GHFailed) {
+		t.Fatalf("events missing failed transition: %+v", events)
+	}
+	if !hasEvent(events, "harness") {
+		t.Fatalf("events missing replay harness record: %+v", events)
+	}
+}
+
 func TestDispatchInitialAckFailureMarksJobFailed(t *testing.T) {
 	ctx := context.Background()
 	mention := Mention{
