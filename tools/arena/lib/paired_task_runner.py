@@ -51,10 +51,9 @@ MODEL_TO_RAW_CLAUDE_PROFILE = {
 }
 
 RAW_ALLOWED_TOOLS = "Bash,Edit,Write,Read,Glob,Grep,MultiEdit"
-DEFAULT_RAW_CLAUDE_MAX_BUDGET_USD = "0.05"
-RAW_CLAUDE_MAX_BUDGET_USD = {
-    "glm-5.2": DEFAULT_RAW_CLAUDE_MAX_BUDGET_USD,
-    "hf:zai-org/glm-5.2": DEFAULT_RAW_CLAUDE_MAX_BUDGET_USD,
+SUBSCRIPTION_RAW_CLAUDE_MODELS = {
+    "glm-5.2",
+    "hf:zai-org/glm-5.2",
 }
 
 
@@ -466,10 +465,16 @@ def dispatch_single_prompt_claude(args: argparse.Namespace, task: dict[str, Any]
 
 
 def _resolve_raw_claude_max_budget_usd(task_model: str, invocation_model: str) -> str:
+    if _is_subscription_raw_claude_model(task_model) or _is_subscription_raw_claude_model(invocation_model):
+        return ""
     configured = os.environ.get("ARENA_CLAUDE_MAX_BUDGET_USD", "").strip()
     if configured:
         return configured
-    return RAW_CLAUDE_MAX_BUDGET_USD.get(task_model, RAW_CLAUDE_MAX_BUDGET_USD.get(invocation_model, ""))
+    return ""
+
+
+def _is_subscription_raw_claude_model(model: str) -> bool:
+    return model.strip().lower() in SUBSCRIPTION_RAW_CLAUDE_MODELS
 
 
 def raw_claude_invocation_for_model(model: str) -> dict[str, Any]:
