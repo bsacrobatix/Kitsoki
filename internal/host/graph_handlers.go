@@ -133,7 +133,7 @@ func graphLintOp(args map[string]any) (Result, error) {
 			"message":  iss.Message,
 		}
 	}
-	return Result{Data: map[string]any{"issues": out, "clean": len(issues) == 0}}, nil
+	return Result{Data: map[string]any{"issues": out, "issue_count": len(issues), "clean": len(issues) == 0}}, nil
 }
 
 // graphDiffOp: {catalog_path, overlay_path} -> per-node gap classification
