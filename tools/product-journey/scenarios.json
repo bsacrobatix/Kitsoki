@@ -36,6 +36,36 @@
       }
     },
     {
+      "id": "tui-slash-commands",
+      "label": "TUI slash command discovery",
+      "stage": "follow_tutorial",
+      "task": "After reading external Codex and Claude Code slash-command docs, use the Kitsoki TUI the same way: type / at the beginning of the prompt, filter the visible command menu, press Tab to accept the primary suggestion, and execute a command successfully.",
+      "primary_story": "testdata/apps/cloak/app.yaml",
+      "required_mcp": [
+        "session.open",
+        "session.inspect",
+        "render.tui"
+      ],
+      "evidence": [
+        "rendered_tui_frame",
+        "session_trace",
+        "navigation_trace",
+        "checkpoint_rating",
+        "key_interaction_video",
+        "png-sequence"
+      ],
+      "success_criteria": [
+        "Typing / at the beginning of the TUI prompt shows available slash commands without requiring Kitsoki-specific docs.",
+        "Typing letters after / filters the visible command list to likely matches.",
+        "The primary suggestion is visually marked as the Tab completion target.",
+        "Pressing Tab accepts the primary suggestion and Enter executes the completed command."
+      ],
+      "transports": {
+        "allowed": ["tui"],
+        "required": ["tui"]
+      }
+    },
+    {
       "id": "project-onboarding",
       "label": "Project onboarding",
       "stage": "onboard_project",
