@@ -12,6 +12,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/expr"
+	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/render/sourcecolor"
@@ -125,6 +126,7 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 			slog.String("current_state", string(journey.State)),
 		)
 	}
+	ev.Result = normalizeAgentJobSubmission(j, ev)
 
 	// Recover on_complete effects from the job payload. They were stored as a
 	// JSON-encoded []app.Effect under the "__on_complete" key.
@@ -438,6 +440,68 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		o.miner.Notify(context.WithoutCancel(ctx))
 	}
 	return nil
+}
+
+func normalizeAgentJobSubmission(j *jobs.Job, ev jobs.JobEvent) *host.Result {
+	if j == nil || !strings.HasPrefix(j.Kind, "host.agent.") {
+		return ev.Result
+	}
+	result := j.Result
+	if ev.Result != nil {
+		result = ev.Result
+	}
+	if result == nil {
+		result = &host.Result{}
+		j.Result = result
+	}
+	if result.Data == nil {
+		result.Data = map[string]any{}
+	}
+	if submitted, ok := result.Data["submitted"]; ok && submitted != nil {
+		return result
+	}
+	submitted := map[string]any{
+		"status":   "failed",
+		"findings": []any{"Agent job completed without a submitted handoff."},
+		"summary":  "Agent job completed without a submitted handoff.",
+	}
+	for k, v := range agentSubmissionFallbackFields(j.Payload) {
+		submitted[k] = v
+	}
+	result.Data["submitted"] = submitted
+	return result
+}
+
+func agentSubmissionFallbackFields(payload map[string]any) map[string]any {
+	out := map[string]any{}
+	contextMap, _ := payload["context"].(map[string]any)
+	argsMap, _ := contextMap["args"].(map[string]any)
+	item, _ := argsMap["item"].(map[string]any)
+	if item == nil {
+		return out
+	}
+	for _, key := range []string{"model", "profile"} {
+		if value := item[key]; value != nil {
+			out[key] = value
+		}
+	}
+	agent, _ := payload["agent"].(string)
+	if agent == "implementer" {
+		if value := item["implementation_story"]; value != nil {
+			out["story"] = value
+		}
+		if value := item["implementation_trace_path"]; value != nil {
+			out["trace_path"] = value
+		}
+		return out
+	}
+	if value := item["story"]; value != nil {
+		out["story"] = value
+	}
+	if value := item["trace_path"]; value != nil {
+		out["trace_path"] = value
+	}
+	return out
 }
 
 // resolveAndApplyOnCompleteTarget scans the on_complete effect list for the
