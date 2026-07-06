@@ -51,6 +51,11 @@ MODEL_TO_RAW_CLAUDE_PROFILE = {
 }
 
 RAW_ALLOWED_TOOLS = "Bash,Edit,Write,Read,Glob,Grep,MultiEdit"
+DEFAULT_RAW_CLAUDE_MAX_BUDGET_USD = "0.05"
+RAW_CLAUDE_MAX_BUDGET_USD = {
+    "glm-5.2": DEFAULT_RAW_CLAUDE_MAX_BUDGET_USD,
+    "hf:zai-org/glm-5.2": DEFAULT_RAW_CLAUDE_MAX_BUDGET_USD,
+}
 
 
 def blended_cost_usd(model: str, tokens: int) -> tuple[float, bool]:
@@ -416,32 +421,55 @@ def dispatch_single_prompt_claude(args: argparse.Namespace, task: dict[str, Any]
         "--output-format",
         "json",
     ]
-    proc = subprocess.run(
-        cmd,
-        cwd=tree,
-        text=True,
-        capture_output=True,
-        timeout=int(os.environ.get("ARENA_CLAUDE_TIMEOUT_S", "900")),
-        env=dict(os.environ, **invocation["env"]),
-    )
+    max_budget = _resolve_raw_claude_max_budget_usd(args.model, str(invocation["model"]))
+    if max_budget:
+        cmd.extend(["--max-budget-usd", max_budget])
+    timeout = int(os.environ.get("ARENA_CLAUDE_TIMEOUT_S", "900"))
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=tree,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            env=dict(os.environ, **invocation["env"]),
+        )
+        timed_out = False
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        proc = subprocess.CompletedProcess(cmd, 124, stdout=(exc.stdout or ""), stderr=(exc.stderr or ""))
     Path(trace_ref).write_text(json.dumps({
         "cmd": redact_cmd(cmd),
         "profile": invocation["profile"],
         "model": invocation["model"],
         "env_keys": sorted(invocation["env"].keys()),
+        "max_budget_usd": max_budget,
+        "timeout_s": timeout,
         "returncode": proc.returncode,
         "stdout_tail": proc.stdout[-4000:],
         "stderr_tail": proc.stderr[-4000:],
     }, indent=2), encoding="utf-8")
     metrics = claude_output_metrics(proc.stdout + "\n" + proc.stderr, str(invocation["model"]))
     note = f"claude exit={proc.returncode}: {first_line(proc.stdout + chr(10) + proc.stderr)}"
+    if timed_out:
+        note = f"claude timed out at {timeout}s; "
+        raw_line = first_line(proc.stdout + chr(10) + proc.stderr)
+        if raw_line:
+            note += raw_line
     if metrics.get("cost_note"):
         note += f"; {metrics['cost_note']}"
     return {
-        "blocked": proc.returncode != 0,
+        "blocked": proc.returncode != 0 or timed_out,
         "notes": note,
         "metrics": {"cost_usd": metrics["cost_usd"], "tokens": metrics["tokens"]},
     }
+
+
+def _resolve_raw_claude_max_budget_usd(task_model: str, invocation_model: str) -> str:
+    configured = os.environ.get("ARENA_CLAUDE_MAX_BUDGET_USD", "").strip()
+    if configured:
+        return configured
+    return RAW_CLAUDE_MAX_BUDGET_USD.get(task_model, RAW_CLAUDE_MAX_BUDGET_USD.get(invocation_model, ""))
 
 
 def raw_claude_invocation_for_model(model: str) -> dict[str, Any]:

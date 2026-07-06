@@ -328,11 +328,37 @@ with tempfile.TemporaryDirectory() as tmp:
     check("raw claude base url", env["ANTHROPIC_BASE_URL"], "https://api.synthetic.new/anthropic")
     check("raw claude token expanded", env["ANTHROPIC_AUTH_TOKEN"], "test-synthetic-key")
     check("raw claude blocked", raw_result.get("blocked"), False)
+    check("raw claude budget", cmd[cmd.index("--max-budget-usd") + 1], runner_globals["DEFAULT_RAW_CLAUDE_MAX_BUDGET_USD"])
     check("raw claude tokens", raw_result["metrics"]["tokens"], 15)
     check("raw claude cost", raw_result["metrics"]["cost_usd"], 0.0123)
     trace_payload = json.loads(trace.read_text(encoding="utf-8"))
     check("raw claude trace env keys", trace_payload["env_keys"], ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"])
     check("raw claude trace redacts secret", "test-synthetic-key" in trace.read_text(encoding="utf-8"), False)
+    check("raw claude trace budget field", trace_payload["max_budget_usd"], runner_globals["DEFAULT_RAW_CLAUDE_MAX_BUDGET_USD"])
+
+    timeout_call_trace = tmpdir / "raw-claude-timeout.json"
+    timeout_calls: list[dict[str, object]] = []
+
+    def fake_claude_timeout(cmd, *, cwd, text, capture_output, timeout, env):  # noqa: ANN001 - mirrors subprocess.run shape.
+        timeout_calls.append({"cmd": cmd, "timeout": timeout, "env": env})
+        raise subprocess.TimeoutExpired(cmd, timeout, output="", stderr="tool loop budget exceeded")
+
+    try:
+        runner_globals["subprocess"].run = fake_claude_timeout
+        raw_timeout_result = runner_globals["dispatch_single_prompt"](
+            SimpleNamespace(backend="claude", model="glm-5.2", treatment="single-briefed"),
+            {"id": "fixture-task", "archetype": "unit", "ticket": "Fix the fixture."},
+            tmpdir,
+            str(timeout_call_trace),
+        )
+    finally:
+        runner_globals["subprocess"].run = original_run
+
+    check("raw claude timeout is blocked", raw_timeout_result.get("blocked"), True)
+    check("raw claude timeout budget call", timeout_calls[0]["timeout"], 900)
+    trace_payload = json.loads(timeout_call_trace.read_text(encoding="utf-8"))
+    check("raw claude timeout trace timeout", trace_payload["timeout_s"], 900)
+    check("raw claude timeout returncode", trace_payload["returncode"], 124)
 
 if failures:
     print("FAIL: BugSwarm paired-task source")
