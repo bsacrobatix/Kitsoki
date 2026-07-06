@@ -277,18 +277,27 @@ def persona_autofix_smoke() -> dict:
 def autonomous_marathon_smoke() -> dict:
     result = shell([sys.executable, str(AUTONOMOUS_MARATHON_SMOKE)], ROOT)
     output = (result.stdout + result.stderr).strip()
+    summary = {}
+    for line in output.splitlines():
+        if line.startswith("SUMMARY_JSON: "):
+            try:
+                summary = json.loads(line.removeprefix("SUMMARY_JSON: "))
+            except json.JSONDecodeError:
+                summary = {}
     if result.returncode != 0:
         return {
             "status": "failed",
             "summary": "core use-case autonomous product-QA marathon persona sweep failed",
             "exit_code": result.returncode,
             "output": output,
+            **summary,
         }
     return {
         "status": "passed",
         "summary": "core use-case autonomous product-QA marathon persona sweep passed",
         "exit_code": result.returncode,
         "output": output,
+        **summary,
     }
 
 

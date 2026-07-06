@@ -13,7 +13,13 @@ host_handlers:
             status: passed
             summary: core use-case autonomous product-QA marathon persona sweep passed
             exit_code: 0
-            output: "ok: core-maintainer: run targets gears-rust with requested persona\nok: dependency-debugger: persona lens is preserved in driver and brief contracts\nok: docs-minded-contributor: credible issues were filed\nok: ide-first-engineer: gh-agent fixes drained with independent verification\nok: hobbyist-contributor: mechanical stats count found/filed/fixed\nok: sweep filed and fixed every core scenario issue\nPASS"
+            project: gears-rust
+            persona_count: 5
+            scenario_count: 3
+            run_count: 5
+            filed_issue_count: 15
+            gh_agent_done_count: 15
+            output: "ok: core-maintainer: run targets gears-rust with requested persona\nok: dependency-debugger: persona lens is preserved in driver and brief contracts\nok: docs-minded-contributor: credible issues were filed\nok: ide-first-engineer: gh-agent fixes drained with independent verification\nok: hobbyist-contributor: mechanical stats count found/filed/fixed\nok: sweep filed and fixed every core scenario issue\nSUMMARY_JSON: {\"filed_issue_count\": 15, \"gh_agent_done_count\": 15, \"persona_count\": 5, \"project\": \"gears-rust\", \"run_count\": 5, \"scenario_count\": 3}\nPASS"
 
 turns:
   - intent:
@@ -25,9 +31,15 @@ turns:
       autonomous_marathon_smoke_status: passed
       autonomous_marathon_smoke_summary: core use-case autonomous product-QA marathon persona sweep passed
       autonomous_marathon_smoke_exit_code: 0
+      autonomous_marathon_smoke_project: gears-rust
+      autonomous_marathon_smoke_persona_count: 5
+      autonomous_marathon_smoke_scenario_count: 3
+      autonomous_marathon_smoke_run_count: 5
+      autonomous_marathon_smoke_filed_issue_count: 15
+      autonomous_marathon_smoke_done_count: 15
     expect_host_calls:
       - handler: host.run
         args: { call: autonomous_product_journey_marathon_smoke }
-    expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Autonomous marathon smoke[\\s\\S]*passed[\\s\\S]*Status[\\s\\S]*autonomous_marathon_smoke_checked"
+    expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Autonomous marathon smoke[\\s\\S]*passed[\\s\\S]*Marathon smoke coverage[\\s\\S]*gears-rust; personas=5, scenarios=3, runs=5,[\\s\\S]*filed=15, fixed=15[\\s\\S]*Status[\\s\\S]*autonomous_marathon_smoke_checked"
 
 expect_no_errors: true

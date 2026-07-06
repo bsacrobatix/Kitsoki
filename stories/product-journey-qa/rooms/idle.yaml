@@ -1,7 +1,7 @@
 states:
   idle:
     description: "Waiting to create a product-journey QA run bundle."
-    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_status, autonomous_marathon_report_path, autonomous_driver_mode, autonomous_driver_status, autonomous_driver_evidence_count, autonomous_control_status, autonomous_control_summary, autonomous_control_path, autonomous_gate_summary, independent_verify_status, independent_verify_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, validation_status, validation_errors, validation_issue_summary, status]
+    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_smoke_project, autonomous_marathon_smoke_persona_count, autonomous_marathon_smoke_scenario_count, autonomous_marathon_smoke_run_count, autonomous_marathon_smoke_filed_issue_count, autonomous_marathon_smoke_done_count, autonomous_marathon_status, autonomous_marathon_report_path, autonomous_driver_mode, autonomous_driver_status, autonomous_driver_evidence_count, autonomous_control_status, autonomous_control_summary, autonomous_control_path, autonomous_gate_summary, independent_verify_status, independent_verify_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, validation_status, validation_errors, validation_issue_summary, status]
     view:
       - banner:
           text: "PRODUCT JOURNEY QA"
@@ -20,6 +20,7 @@ states:
             Autonomous fix smoke: '{{ world.autonomous_fix_smoke_status|default:"(not checked)" }}'
             Persona autofix smoke: '{{ world.persona_autofix_smoke_status|default:"(not checked)" }}'
             Autonomous marathon smoke: '{{ world.autonomous_marathon_smoke_status|default:"(not checked)" }}'
+            Marathon smoke coverage: '{{ world.autonomous_marathon_smoke_project|default:"(none)" }}; personas={{ world.autonomous_marathon_smoke_persona_count }}, scenarios={{ world.autonomous_marathon_smoke_scenario_count }}, runs={{ world.autonomous_marathon_smoke_run_count }}, filed={{ world.autonomous_marathon_smoke_filed_issue_count }}, fixed={{ world.autonomous_marathon_smoke_done_count }}'
             Autonomous marathon: '{{ world.autonomous_marathon_status|default:"(not started)" }}'
             Autonomous driver: '{{ world.autonomous_driver_mode|default:"pending" }} / {{ world.autonomous_driver_status|default:"(not run)" }}'
             Marathon control: '{{ world.autonomous_control_status|default:"(not armed)" }}: {{ world.autonomous_control_summary|default:"" }}'
@@ -223,6 +224,12 @@ states:
                 autonomous_marathon_smoke_summary: ""
                 autonomous_marathon_smoke_output: ""
                 autonomous_marathon_smoke_exit_code: 0
+                autonomous_marathon_smoke_project: ""
+                autonomous_marathon_smoke_persona_count: 0
+                autonomous_marathon_smoke_scenario_count: 0
+                autonomous_marathon_smoke_run_count: 0
+                autonomous_marathon_smoke_filed_issue_count: 0
+                autonomous_marathon_smoke_done_count: 0
                 status: "autonomous_marathon_smoking"
             - invoke: host.run
               id: autonomous_product_journey_marathon_smoke
@@ -239,6 +246,12 @@ states:
                 autonomous_marathon_smoke_summary: "stdout_json.summary"
                 autonomous_marathon_smoke_exit_code: "stdout_json.exit_code"
                 autonomous_marathon_smoke_output: "stdout_json.output"
+                autonomous_marathon_smoke_project: "stdout_json.project"
+                autonomous_marathon_smoke_persona_count: "stdout_json.persona_count"
+                autonomous_marathon_smoke_scenario_count: "stdout_json.scenario_count"
+                autonomous_marathon_smoke_run_count: "stdout_json.run_count"
+                autonomous_marathon_smoke_filed_issue_count: "stdout_json.filed_issue_count"
+                autonomous_marathon_smoke_done_count: "stdout_json.gh_agent_done_count"
               on_error: idle
             - set:
                 status: "autonomous_marathon_smoke_checked"
