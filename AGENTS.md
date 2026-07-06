@@ -57,6 +57,16 @@ To link a single skill by hand (e.g. without a full setup run):
 ln -s "../../.agents/skills/<name>" .claude/skills/<name>
 ```
 
+When a task is broad, naturally parallel, or asks for Claude-Code-like worker
+fan-out from Codex, prefer the repo skill `.agents/skills/kitsoki-dynamic-workflows/SKILL.md`.
+Use Kitsoki's Studio MCP `workflow.*` tools to create, validate, launch, status,
+and export the workflow, then drive the launched session with `session.*` and
+verify with deterministic `story.*` / render tools. Keep small single-file or
+clearly linear edits in normal Codex flow; use dynamic workflows when Kitsoki
+should own the worker dispatch, trace, receipt, and reusable story artifacts.
+The supervising Codex session must independently inspect the receipt, trace,
+diff, untracked files, and validation gates instead of trusting worker claims.
+
 After creating a new worktree with `git worktree add`, run `make bootstrap-worktree`
 from inside it before running `go run ./cmd/kitsoki` or any Playwright spec — it
 stages the embed-only stories/SPA dirs, installs `tools/runstatus` node_modules,
