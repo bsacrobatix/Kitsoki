@@ -1,7 +1,7 @@
 states:
   idle:
     description: "Waiting to create a product-journey QA run bundle."
-    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_smoke_project, autonomous_marathon_smoke_persona_count, autonomous_marathon_smoke_scenario_count, autonomous_marathon_smoke_run_count, autonomous_marathon_smoke_filed_issue_count, autonomous_marathon_smoke_done_count, autonomous_marathon_smoke_landing_count, autonomous_marathon_smoke_flawless_count, autonomous_marathon_smoke_success_rate, autonomous_marathon_smoke_report_path, autonomous_marathon_smoke_report_markdown_path, marathon_smoke_ledger_validation_status, marathon_smoke_ledger_validation_summary, marathon_smoke_ledger_validation_errors, marathon_smoke_ledger_validation_warnings, marathon_smoke_ledger_validation_path, marathon_smoke_ledger_validation_markdown_path, autonomous_marathon_status, autonomous_marathon_report_path, autonomous_due_status, autonomous_due_summary, autonomous_due_count, autonomous_due_blocked_count, autonomous_due_next_run_dir, autonomous_due_next_story_intent, autonomous_due_advance_status, autonomous_due_advance_summary, autonomous_due_source_run_id, autonomous_due_source_run_dir, autonomous_driver_mode, autonomous_driver_status, autonomous_driver_evidence_count, autonomous_control_status, autonomous_control_summary, autonomous_control_path, autonomous_gate_summary, independent_verify_status, independent_verify_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, validation_status, validation_errors, validation_issue_summary, status]
+    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_smoke_project, autonomous_marathon_smoke_persona_count, autonomous_marathon_smoke_scenario_count, autonomous_marathon_smoke_run_count, autonomous_marathon_smoke_filed_issue_count, autonomous_marathon_smoke_done_count, autonomous_marathon_smoke_landing_count, autonomous_marathon_smoke_flawless_count, autonomous_marathon_smoke_success_rate, autonomous_marathon_smoke_report_path, autonomous_marathon_smoke_report_markdown_path, marathon_smoke_ledger_validation_status, marathon_smoke_ledger_validation_summary, marathon_smoke_ledger_validation_errors, marathon_smoke_ledger_validation_warnings, marathon_smoke_ledger_validation_path, marathon_smoke_ledger_validation_markdown_path, autonomous_marathon_status, autonomous_marathon_report_path, autonomous_due_status, autonomous_due_summary, autonomous_due_count, autonomous_due_blocked_count, autonomous_due_next_run_dir, autonomous_due_next_story_intent, autonomous_due_advance_status, autonomous_due_advance_summary, autonomous_due_source_run_id, autonomous_due_source_run_dir, autonomous_driver_mode, autonomous_driver_live_profile, autonomous_driver_status, autonomous_driver_evidence_count, autonomous_control_status, autonomous_control_summary, autonomous_control_path, autonomous_gate_summary, independent_verify_status, independent_verify_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, validation_status, validation_errors, validation_issue_summary, status]
     view:
       - banner:
           text: "PRODUCT JOURNEY QA"
@@ -30,6 +30,7 @@ states:
             Due advance: '{{ world.autonomous_due_advance_status|default:"(not run)" }}: {{ world.autonomous_due_advance_summary|default:"" }}'
             Due source: '{{ world.autonomous_due_source_run_dir|default:"(none)" }}'
             Autonomous driver: '{{ world.autonomous_driver_mode|default:"pending" }} / {{ world.autonomous_driver_status|default:"(not run)" }}'
+            Driver live profile: '{{ world.autonomous_driver_live_profile|default:"(not set)" }}'
             Marathon control: '{{ world.autonomous_control_status|default:"(not armed)" }}: {{ world.autonomous_control_summary|default:"" }}'
             Control artifact: '{{ world.autonomous_control_path|default:"(not generated)" }}'
             Autonomous gates: '{{ world.autonomous_gate_summary|default:"(not run)" }}'
@@ -547,6 +548,64 @@ states:
                 gh_agent_missing_evidence_summary: "gh_agent_public_base_url is required"
                 gh_agent_missing_verify_summary: "gh_agent_public_base_url is required"
                 status: "autonomous_marathon_invalid"
+        - when: "((slots.autonomous_driver_mode ?? 'pending') == 'record' || (slots.autonomous_driver_mode ?? 'pending') == 'live') && (slots.live_budget_minutes ?? world.live_budget_minutes) <= 0"
+          target: .
+          effects:
+            - set:
+                project: "{{ slots.project ?? world.project }}"
+                persona: "{{ slots.persona ?? world.persona }}"
+                seed: "{{ slots.seed ?? world.seed }}"
+                scenario_scope: "{{ slots.scenarios ?? world.scenario_scope }}"
+                live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
+                autonomous_marathon_status: "autonomous_marathon_invalid"
+                autonomous_marathon_summary: "Record/live autonomous marathon requires live_budget_minutes > 0 before driver dispatch."
+                autonomous_driver_mode: "{{ slots.autonomous_driver_mode ?? 'pending' }}"
+                autonomous_driver_live_profile: "{{ slots.autonomous_driver_live_profile ?? world.autonomous_driver_live_profile }}"
+                autonomous_driver_status: "invalid"
+                autonomous_driver_summary: "live_budget_minutes must be positive before record/live driver dispatch"
+                autonomous_driver_evidence_count: 0
+                autonomous_driver_issue_count: 0
+                autonomous_fix_status: "not_run"
+                autonomous_gate_summary: "driver=fail, live_auth=not_run, filing=not_run, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=fail"
+                independent_verify_status: "not_run"
+                independent_verify_summary: "live_budget_minutes must be positive before record/live driver dispatch"
+                validation_status: "invalid"
+                validation_errors: 1
+                validation_warnings: 0
+                validation_issue_summary: "live-budget-required"
+                review_status: "not_run"
+                review_failed_count: 0
+                review_backlog_summary: "Set a positive live_budget_minutes for record/live persona evidence capture."
+                status: "autonomous_marathon_invalid"
+        - when: "((slots.autonomous_driver_mode ?? 'pending') == 'record' || (slots.autonomous_driver_mode ?? 'pending') == 'live') && (slots.autonomous_driver_live_profile == nil || slots.autonomous_driver_live_profile == '') && (world.autonomous_driver_live_profile == nil || world.autonomous_driver_live_profile == '')"
+          target: .
+          effects:
+            - set:
+                project: "{{ slots.project ?? world.project }}"
+                persona: "{{ slots.persona ?? world.persona }}"
+                seed: "{{ slots.seed ?? world.seed }}"
+                scenario_scope: "{{ slots.scenarios ?? world.scenario_scope }}"
+                live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
+                autonomous_marathon_status: "autonomous_marathon_invalid"
+                autonomous_marathon_summary: "Record/live autonomous marathon requires autonomous_driver_live_profile so replay misses cannot silently fall through to an ambient live backend."
+                autonomous_driver_mode: "{{ slots.autonomous_driver_mode ?? 'pending' }}"
+                autonomous_driver_live_profile: ""
+                autonomous_driver_status: "invalid"
+                autonomous_driver_summary: "autonomous_driver_live_profile is required before record/live driver dispatch"
+                autonomous_driver_evidence_count: 0
+                autonomous_driver_issue_count: 0
+                autonomous_fix_status: "not_run"
+                autonomous_gate_summary: "driver=fail, live_auth=fail, filing=not_run, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=fail"
+                independent_verify_status: "not_run"
+                independent_verify_summary: "autonomous_driver_live_profile is required before record/live driver dispatch"
+                validation_status: "invalid"
+                validation_errors: 1
+                validation_warnings: 0
+                validation_issue_summary: "live-profile-required"
+                review_status: "not_run"
+                review_failed_count: 0
+                review_backlog_summary: "Select an explicit live backend profile before any record/live persona evidence capture."
+                status: "autonomous_marathon_invalid"
         - when: "(slots.autonomous_driver_mode ?? 'pending') != 'replay' && (slots.live_budget_minutes ?? world.live_budget_minutes) > 0 && world.capture_preflight_status != 'passed'"
           target: .
           effects:
@@ -642,6 +701,7 @@ states:
                 seed: "{{ slots.seed ?? world.seed }}"
                 scenario_scope: "{{ slots.scenarios ?? world.scenario_scope }}"
                 live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
+                autonomous_driver_live_profile: "{{ slots.autonomous_driver_live_profile ?? world.autonomous_driver_live_profile }}"
                 ticket_repo: "{{ slots.ticket_repo ?? world.ticket_repo }}"
                 gh_agent_public_base_url: "{{ slots.gh_agent_public_base_url ?? world.gh_agent_public_base_url }}"
                 last_result: {}
@@ -680,6 +740,8 @@ states:
                   - "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
                   - --autonomous-driver-mode
                   - "{{ slots.autonomous_driver_mode ?? 'pending' }}"
+                  - --autonomous-driver-live-profile
+                  - "{{ slots.autonomous_driver_live_profile ?? world.autonomous_driver_live_profile }}"
                   - --autonomous-cadence-hours
                   - "{{ slots.autonomous_cadence_hours ?? 24 }}"
                   - --autonomous-heartbeat-minutes
@@ -726,6 +788,7 @@ states:
                 autonomous_marathon_summary: "stdout_json.autonomous_marathon_summary"
                 autonomous_marathon_report_path: "stdout_json.autonomous_marathon_report_path"
                 autonomous_driver_mode: "stdout_json.autonomous_driver_mode"
+                autonomous_driver_live_profile: "stdout_json.autonomous_driver_live_profile"
                 autonomous_driver_status: "stdout_json.autonomous_driver_status"
                 autonomous_driver_summary: "stdout_json.autonomous_driver_summary"
                 autonomous_driver_evidence_count: "stdout_json.autonomous_driver_evidence_count"

@@ -7,6 +7,7 @@ Inputs:
 - persona: `{{ args.persona }}`
 - scenarios: `{{ args.scenario_scope }}`
 - driver mode: `{{ args.autonomous_driver_mode }}`
+- live profile: `{{ args.live_profile }}`
 - live budget minutes: `{{ args.live_budget_minutes }}`
 - ticket repo: `{{ args.ticket_repo }}`
 - gh-agent public URL: `{{ args.gh_agent_public_base_url }}`
@@ -16,6 +17,16 @@ Inputs:
 Use `.agents/agents/product-journey-qa-driver.md` as the operating contract.
 Open or attach a product-journey story session for `stories/product-journey-qa/app.yaml`,
 then submit `load run_dir={{ args.run_dir }}` before recording evidence.
+
+If driver mode is `replay`, do not open any `harness: "live"` session and do
+not retry a replay miss with a live/backend profile. Record the miss as a
+blocker through the loaded product-journey story.
+
+If driver mode is `record` or `live`, the supplied live profile is the only
+authorization for live work. Open target story sessions with `harness: "live"`
+and `profile: "{{ args.live_profile }}"` from the first `session.new` call. If
+that profile is empty or unavailable, stop and return `blocked` with a clear
+summary; do not infer or use an ambient default backend.
 
 Capture each scenario's proof evidence or record an honest blocker. Record every
 attempt through `driver_event`, attach all evidence refs through `attach`, and

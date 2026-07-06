@@ -185,6 +185,43 @@ def main() -> int:
                   and "4 final gates" in loaded_summary["driver_contract_summary"],
                   failures)
 
+            missing_live_profile = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-missing-live-profile",
+                "bugfix",
+                7,
+                "o/r",
+                "",
+                "stories/bugfix",
+                healthy_url,
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                "live",
+                24,
+                15,
+                45,
+                None,
+            )
+            check("live driver mode refuses missing explicit live profile before dispatch",
+                  missing_live_profile["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and missing_live_profile["validation_issue_summary"] == "live-profile-required"
+                  and missing_live_profile["autonomous_driver_status"] == "invalid"
+                  and missing_live_profile["autonomous_control_status"] == "not_run",
+                  failures)
+
             live_ready = run.autonomous_marathon(
                 catalog,
                 github_targets,
@@ -214,10 +251,12 @@ def main() -> int:
                 15,
                 45,
                 None,
+                autonomous_driver_live_profile="test-live",
             )
             check("live driver mode creates a story-dispatchable bundle",
                   live_ready["autonomous_marathon_status"] == "autonomous_marathon_ready_for_driver"
                   and live_ready["autonomous_driver_mode"] == "live"
+                  and live_ready["autonomous_driver_live_profile"] == "test-live"
                   and live_ready["autonomous_driver_status"] == "ready_for_dispatch"
                   and live_ready["autonomous_control_status"] == "ready_for_driver"
                   and "driver=ready" in live_ready["autonomous_gate_summary"]
@@ -581,6 +620,7 @@ def main() -> int:
                 15,
                 45,
                 None,
+                autonomous_driver_live_profile="test-live",
             )
             failed_driver_dir = Path(failed_driver["run_dir"])
             failed_run_json = run.read_json(failed_driver_dir / "run.json")
@@ -681,6 +721,7 @@ def main() -> int:
                 15,
                 45,
                 None,
+                autonomous_driver_live_profile="test-live",
             )
             missing_blocker_dir = Path(missing_blocker["run_dir"])
             missing_blocker_run_json = run.read_json(missing_blocker_dir / "run.json")
@@ -778,6 +819,7 @@ def main() -> int:
                 15,
                 45,
                 None,
+                autonomous_driver_live_profile="test-live",
             )
             missing_receipt_dir = Path(missing_receipt["run_dir"])
             missing_receipt_finalized = run.autonomous_marathon(
@@ -848,6 +890,7 @@ def main() -> int:
                 15,
                 45,
                 None,
+                autonomous_driver_live_profile="test-live",
             )
             empty_journal_dir = Path(empty_journal["run_dir"])
             run.record_autonomous_driver_dispatch(
@@ -929,6 +972,7 @@ def main() -> int:
                 15,
                 45,
                 None,
+                autonomous_driver_live_profile="test-live",
             )
             missing_issue_dir = Path(missing_issue["run_dir"])
             missing_issue_run_json = run.read_json(missing_issue_dir / "run.json")
@@ -1036,6 +1080,7 @@ def main() -> int:
                 15,
                 45,
                 None,
+                autonomous_driver_live_profile="test-live",
             )
             demo_proof_dir = Path(demo_proof["run_dir"])
             demo_proof_run_json = run.read_json(demo_proof_dir / "run.json")
@@ -1155,6 +1200,7 @@ def main() -> int:
                 15,
                 45,
                 None,
+                autonomous_driver_live_profile="test-live",
             )
             missing_trace_dir = Path(missing_trace["run_dir"])
             missing_trace_run_json = run.read_json(missing_trace_dir / "run.json")
@@ -1262,6 +1308,7 @@ def main() -> int:
                 15,
                 45,
                 None,
+                autonomous_driver_live_profile="test-live",
             )
             captured_blocker_dir = Path(captured_blocker["run_dir"])
             captured_blocker_run_json = run.read_json(captured_blocker_dir / "run.json")

@@ -103,6 +103,8 @@ turns:
             - 6
             - --autonomous-driver-mode
             - pending
+            - --autonomous-driver-live-profile
+            - ""
             - --autonomous-cadence-hours
             - 24
             - --autonomous-heartbeat-minutes

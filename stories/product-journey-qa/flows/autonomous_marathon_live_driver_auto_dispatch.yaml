@@ -41,6 +41,7 @@ host_handlers:
             autonomous_marathon_summary: "Created 1 scenario(s); driver evidence capture is ready for story-owned dispatch."
             autonomous_marathon_report_path: .artifacts/product-journey/run-live-driver/autonomous-marathon-report.md
             autonomous_driver_mode: live
+            autonomous_driver_live_profile: test-live
             autonomous_driver_status: ready_for_dispatch
             autonomous_driver_summary: "Story-owned live driver dispatch is ready."
             autonomous_driver_evidence_count: 0
@@ -86,6 +87,7 @@ host_handlers:
             autonomous_marathon_summary: "driver=pass, filing=pass, gh_agent=pass, independent_verify=pass, review=pass, validation=pass"
             autonomous_marathon_report_path: .artifacts/product-journey/run-live-driver/autonomous-marathon-report.md
             autonomous_driver_mode: live
+            autonomous_driver_live_profile: test-live
             autonomous_driver_status: captured
             autonomous_driver_summary: "Story-owned live driver captured evidence and recorded credible findings."
             autonomous_driver_evidence_count: 5
@@ -177,6 +179,7 @@ host_handlers:
             autonomous_marathon_summary: "Created 1 scenario(s); driver evidence capture is ready for story-owned dispatch."
             autonomous_marathon_report_path: .artifacts/product-journey/run-live-driver/autonomous-marathon-report.md
             autonomous_driver_mode: live
+            autonomous_driver_live_profile: test-live
             autonomous_driver_status: captured
             autonomous_driver_summary: "Captured live persona proof, recorded one credible issue, and ran story-owned gates."
             autonomous_driver_evidence_count: 5
@@ -217,6 +220,7 @@ turns:
         scenarios: bugfix
         live_budget_minutes: 6
         autonomous_driver_mode: live
+        autonomous_driver_live_profile: test-live
         ticket_repo: bsacrobatix/Kitsoki
         gh_agent_public_base_url: https://agent.example
     expect_state: run_created
@@ -224,6 +228,7 @@ turns:
       status: autonomous_marathon_complete
       autonomous_marathon_status: autonomous_marathon_valid
       autonomous_driver_mode: live
+      autonomous_driver_live_profile: test-live
       autonomous_driver_status: captured
       autonomous_driver_evidence_count: 5
       autonomous_driver_issue_count: 1
