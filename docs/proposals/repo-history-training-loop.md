@@ -178,7 +178,20 @@ to `docs/proposals/hermetic-capsules.md`):
   environments, with existing drivers for Claude Code/Codex/OpenHands.
   Keeping the task-case manifest exportable to Harbor's shape (instruction +
   hidden tests + oracle solution, graded on environment end-state) makes
-  mined corpora externally consumable and comparable.
+  mined corpora externally consumable and comparable. Three follow-up facts
+  matter directly to this epic (verified 2026-07-06, v0.17.1): (a) Harbor
+  ships **20+ import adapters** (SWE-bench Verified, SWE-smith, Aider
+  Polyglot, …) that emit plain task directories — via the capsules
+  proposal's `capsule import --harbor`, these are free corpus faucets that
+  seed this epic's case library without building miners; (b) its **ATIF
+  trajectory export** (`harbor traces export --sharegpt --filter success`,
+  pushes to HuggingFace) is a ready-made training-example interchange format
+  the promotion loop can emit into instead of inventing one; (c) **Harbor
+  never calls an LLM itself** — agents are black-box shims — so a
+  cassette-replay kitsoki agent can drive graded runs at zero LLM cost,
+  consistent with the no-LLM testing policy. The full interop design
+  (export/import/agent-shim/executor lanes) lives in the hermetic-capsules
+  proposal §6; this epic consumes it.
 
 Net: this epic's shape (mine → arm → gate → grade deterministically) is
 independently converged-on externally; the differentiators to protect are
