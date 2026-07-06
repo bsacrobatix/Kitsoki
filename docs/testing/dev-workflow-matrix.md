@@ -92,7 +92,7 @@ Every cell carries two proof-class verdicts from `schemas/completion-state.schem
 | **PRD / proposal** | 🔴 gap | 🔴 gap | 🔴 gap | 🔴 gap |
 | **Decompose → implement** | 🔴 gap | 🔴 gap | 🔴 gap | 🔴 gap |
 | **File a bug** | 🔴 gap | 🔴 gap | 🔴 gap | 🔴 gap |
-| **Fix a bug** | 🔴 gap | 🔴 gap | 🔴 gap | 🔴 gap |
+| **Fix a bug** | 🟡 proof-thin | 🔴 gap | 🔴 gap | 🔴 gap |
 
 ### Cell detail
 
@@ -144,8 +144,8 @@ Every cell carries two proof-class verdicts from `schemas/completion-state.schem
 - **File a bug × gh-agent** — 🔴 gap: not yet exercised on gears-rust (WS-E E3: labeled gears-rust issue → honest triage verdict). Canonical doc: docs/workflows/file-a-bug.md
   - mechanical: no standing verdict
   - experience: no standing verdict
-- **Fix a bug × TUI** — 🔴 gap: not yet exercised on gears-rust (needs WS-A A2 external ticket-repo passthrough). Canonical doc: docs/workflows/fix-a-bug.md
-  - mechanical: no standing verdict
+- **Fix a bug × TUI** — 🟡 proof-thin: a real GitHub-issue-sourced gears-rust bug (constructorfabric/gears-rust#4115) triaged read-only through the bugfix `triage` intent (kitsoki session new/submit, live harness) and converted to a committed no-LLM flow+cassette (stories/bugfix/flows/triage_gears_rust.yaml); replays green via `kitsoki test flows`. Proves the A2 external ticket-repo passthrough again on a real GitHub issue (ticket_source_mode=remote, ticket_repo=constructorfabric/gears-rust). Proof is THIN: this is the TRIAGE leg only (read-only, no worktree) — no end-to-end fix/PR has been exercised on gears-rust; the maker/implementer/reviewer/validator rooms remain untouched. Canonical doc: docs/workflows/fix-a-bug.md
+  - mechanical: **solved** (replay, as of 2026-07-06)
   - experience: no standing verdict
 - **Fix a bug × Web** — 🔴 gap: not yet exercised on gears-rust. Canonical doc: docs/workflows/fix-a-bug.md
   - mechanical: no standing verdict
