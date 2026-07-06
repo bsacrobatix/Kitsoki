@@ -19,6 +19,7 @@ import (
 
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
+	"kitsoki/internal/vcsops"
 
 	_ "modernc.org/sqlite"
 )
@@ -624,6 +625,7 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 		return nil, err
 	}
 	mergeMaps(result, drain)
+	mergeMaps(result, gitopsBatchReviewSummary(ctx, runDir, integrationBranch, "main"))
 	if err := gitopsRecordGHAgent(runDir, result); err != nil {
 		return nil, err
 	}
@@ -1638,6 +1640,61 @@ func gitopsDrainFixes(ctx context.Context, dbPath, repo, publicBaseURL, projectR
 	}, nil
 }
 
+// gitopsBatchReviewSummary renders the one human review surface the
+// autonomous pipeline's operating model wants (.context/autonomous-product-
+// journey-pipeline-howto.md's Gap 3): a single deterministic diff of
+// integrationBranch vs baseBranch, written to <run-dir>/batch-review.md,
+// instead of walking every fix's per-job diff individually. A no-op (status
+// "not_applicable") when integrationBranch never landed a real commit this
+// cycle — replay-mode cycles and cycles with zero live fixes both leave the
+// branch unborn, per internal/ghagent/realdispatch.go's landFeatureBranch.
+func gitopsBatchReviewSummary(ctx context.Context, runDir, integrationBranch, baseBranch string) map[string]any {
+	root := gitopsIntegrationRoot()
+	if _, exit, _ := vcsops.RunGit(ctx, root, "rev-parse", "--verify", "--quiet", integrationBranch); exit != 0 {
+		return map[string]any{
+			"batch_review_status":  "not_applicable",
+			"batch_review_summary": fmt.Sprintf("No commits landed on %q this cycle — nothing to review.", integrationBranch),
+		}
+	}
+	commitRange := baseBranch + ".." + integrationBranch
+	count, _, _ := vcsops.RunGit(ctx, root, "rev-list", "--count", commitRange)
+	commitLog, _, _ := vcsops.RunGit(ctx, root, "log", "--format=- %h %s", commitRange)
+	stat, _, _ := vcsops.RunGit(ctx, root, "diff", "--stat", baseBranch+"..."+integrationBranch)
+	diff, _, _ := vcsops.RunGit(ctx, root, "diff", baseBranch+"..."+integrationBranch)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Batch Review — %s vs %s\n\n", integrationBranch, baseBranch)
+	fmt.Fprintf(&b, "%s fix commit(s) landed this cycle.\n\n", strings.TrimSpace(count))
+	fmt.Fprintf(&b, "## Commits\n\n%s\n\n", firstNonBlank(strings.TrimSpace(commitLog), "(none)"))
+	fmt.Fprintf(&b, "## Diffstat\n\n```\n%s\n```\n\n", strings.TrimSpace(stat))
+	fmt.Fprintf(&b, "## Full diff\n\n```diff\n%s\n```\n", strings.TrimSpace(diff))
+	path := filepath.Join(runDir, "batch-review.md")
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		return map[string]any{"batch_review_status": "error", "batch_review_summary": err.Error()}
+	}
+	return map[string]any{
+		"batch_review_status":  "ready",
+		"batch_review_summary": fmt.Sprintf("%s vs %s: %s commit(s) — see batch-review.md", integrationBranch, baseBranch, strings.TrimSpace(count)),
+		"batch_review_path":    path,
+		"batch_review_branch":  integrationBranch,
+		"batch_review_base":    baseBranch,
+		"batch_review_commits": strings.TrimSpace(count),
+	}
+}
+
+// gitopsIntegrationRoot resolves the checkout where a real-dispatch job lands
+// its integration branch: KITSOKI_REPO when set (mirrors internal/ghagent's
+// repoRoot override for onboarded external projects), else the local
+// kitsoki checkout gitopsRepoRoot() already resolves for the python shell-outs.
+func gitopsIntegrationRoot() string {
+	if envRoot := strings.TrimSpace(os.Getenv("KITSOKI_REPO")); envRoot != "" {
+		if _, err := os.Stat(filepath.Join(envRoot, "go.mod")); err == nil {
+			return envRoot
+		}
+	}
+	return gitopsRepoRoot()
+}
+
 func productJourneyJSON(ctx context.Context, args ...string) (map[string]any, error) {
 	all := append([]string{"tools/product-journey/run.py"}, args...)
 	all = append(all, "--json-output")
@@ -1743,6 +1800,11 @@ func writeGitopsAutonomousReport(runDir string, status, review, validation map[s
 		fmt.Sprintf("- Queue: `%s` (enqueued %d, skipped %d)", stringValue(status, "gh_agent_enqueue_status"), intValue(status, "gh_agent_enqueued_count"), intValue(status, "gh_agent_skipped_count")),
 		fmt.Sprintf("- Claims: `%s` (%d claimed)", stringValue(status, "gh_agent_claim_status"), intValue(status, "gh_agent_claim_count")),
 		fmt.Sprintf("- Drain: `%s` (drained %d, done %d, failed %d, active %d)", stringValue(status, "gh_agent_drain_status"), intValue(status, "gh_agent_drained_count"), intValue(status, "gh_agent_done_count"), intValue(status, "gh_agent_failed_count"), intValue(status, "gh_agent_active_count")),
+		"",
+		"## Batch Review",
+		"",
+		fmt.Sprintf("- Status: `%s` - %s", firstNonBlank(stringValue(status, "batch_review_status"), "(not evaluated)"), stringValue(status, "batch_review_summary")),
+		fmt.Sprintf("- Diff: %s", firstNonBlank(stringValue(status, "batch_review_path"), "(none)")),
 		"",
 	)
 	claimsOut := mapSliceValue(status, "gh_agent_claims")
