@@ -79,7 +79,10 @@ It is intentionally no-LLM:
   closed in the story view as `autonomous_marathon_invalid` so the operator can
   review the invalid gate state without reading host errors. Omit the mode, or
   use `pending`, when a live driver should capture evidence before finalization;
-  live pending mode also requires the hosted gh-agent `/healthz` and
+  use `replay` for the no-LLM autonomous proof. Explicit `record` or `live`
+  driver modes fail closed with `driver-dispatch-not-implemented` until the
+  story owns that dispatcher. Live pending mode also requires the hosted
+  gh-agent `/healthz` and
   `/api/ready` checks to pass for the same ticket repo before returning a driver
   handoff.
   The direct `autonomous_fix` gate repeats those hosted gh-agent checks before
