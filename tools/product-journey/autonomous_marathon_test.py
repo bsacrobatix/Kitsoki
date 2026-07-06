@@ -648,6 +648,103 @@ def main() -> int:
                   and not run.autonomous_marathon_watchdog_path(failed_driver_dir).exists(),
                   failures)
 
+            missing_blocker = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-missing-driver-blocker",
+                "bugfix",
+                7,
+                "o/r",
+                "",
+                "stories/bugfix",
+                healthy_url,
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                "live",
+                24,
+                15,
+                45,
+                None,
+            )
+            missing_blocker_dir = Path(missing_blocker["run_dir"])
+            missing_blocker_run_json = run.read_json(missing_blocker_dir / "run.json")
+            missing_blocker_scenario = missing_blocker_run_json["scenarios"][0]["id"]
+            filing_test.attach_bugfix_proof(missing_blocker_dir, missing_blocker_scenario)
+            run.record_finding(
+                missing_blocker_dir,
+                "issue",
+                "Failed live driver must explain blocker",
+                "A failed driver dispatch needs structured blocker evidence before the story can stop cleanly.",
+                missing_blocker_scenario,
+                "high",
+                str(missing_blocker_dir / "test-evidence" / "trace-replay.md"),
+                "open",
+                None,
+            )
+            run.record_autonomous_driver_dispatch(
+                missing_blocker_dir,
+                "live",
+                "failed",
+                "Live driver failed but only returned prose.",
+                0,
+                1,
+                "trace://driver/missing-blocker",
+                "",
+            )
+            missing_blocker_finalized = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                missing_blocker_dir,
+                "vscode",
+                "core-maintainer",
+                "ignored",
+                "",
+                7,
+                "o/r",
+                str(tmp / "gh-agent-missing-driver-blocker.json"),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                str(run.ARTIFACT_ROOT),
+                str(missing_blocker_dir / "autonomous-marathon-stats.json"),
+                0.82,
+                25,
+                "pending",
+                24,
+                15,
+                45,
+                None,
+            )
+            check("failed live driver without structured blocker stops with reviewable blocker error",
+                  missing_blocker_finalized["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and missing_blocker_finalized["autonomous_driver_status"] == "missing-blocker"
+                  and missing_blocker_finalized["autonomous_driver_dispatch_status"] == "missing-blocker"
+                  and missing_blocker_finalized["autonomous_fix_status"] == "not_run"
+                  and missing_blocker_finalized["autonomous_watchdog_status"] == "not_run"
+                  and missing_blocker_finalized["validation_issue_summary"] == "autonomous-driver-dispatch"
+                  and missing_blocker_finalized["stats_status"] == "not_run"
+                  and "structured blocker" in missing_blocker_finalized["autonomous_driver_summary"]
+                  and not run.autonomous_marathon_watchdog_path(missing_blocker_dir).exists(),
+                  failures)
+
             missing_receipt = run.autonomous_marathon(
                 catalog,
                 github_targets,
