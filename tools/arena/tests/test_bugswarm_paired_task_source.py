@@ -233,6 +233,7 @@ with tempfile.TemporaryDirectory() as tmp:
     require("unverified notes include green=false", "green=False" in unverified_payload["notes"])
 
     bugswarm_task = yaml.safe_load(verified_source.read_text(encoding="utf-8"))["tasks"][0]
+    check("default bugswarm source dir", runner_globals["bugswarm_source_dir"](bugswarm_task), "/home/travis/build/failed/square/okio")
     exported_checkout = tmpdir / "exported-checkout"
     exported_checkout.mkdir()
     (exported_checkout / "README.md").write_text("buggy checkout\n", encoding="utf-8")
