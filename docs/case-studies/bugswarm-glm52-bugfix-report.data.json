@@ -105,6 +105,90 @@
       "token_ratio_kitsoki_to_raw": null
     }
   },
+  "completion_audit": {
+    "proven_count": 4,
+    "requirement_count": 8,
+    "requirements": [
+      {
+        "evidence": [
+          "docs/case-studies/bugswarm-glm52-bugfix-report.md",
+          "docs/case-studies/bugswarm-glm52-bugfix-report.data.json"
+        ],
+        "finding": "The report is generated offline from committed inputs.",
+        "id": "report-artifact",
+        "next": "",
+        "requirement": "Produce a generated research report with JSON data and Markdown narrative.",
+        "status": "proven"
+      },
+      {
+        "evidence": [
+          "tools/arena/corpus/cost-bench.manifest.yaml",
+          "tools/arena/corpus/sources.yaml"
+        ],
+        "finding": "The report references the frozen OSS oracle corpus and keeps it separate from BugSwarm.",
+        "id": "oss-source",
+        "next": "",
+        "requirement": "Keep the reusable OSS oracle corpus as a separate source.",
+        "status": "proven"
+      },
+      {
+        "evidence": [
+          "tools/arena/corpus/sources.yaml",
+          "tools/arena/corpus/bugswarm.seed.yaml"
+        ],
+        "finding": "Imported BugSwarm task count: 1.",
+        "id": "bugswarm-source",
+        "next": "",
+        "requirement": "Make BugSwarm a reusable source alongside the OSS oracle corpus.",
+        "status": "proven"
+      },
+      {
+        "evidence": [
+          "tools/arena/scripts/bugswarm_verify_source.py"
+        ],
+        "finding": "Verification mode=none; verified=0/0.",
+        "id": "bugswarm-execute-verification",
+        "next": "Run bugswarm_verify_source.py --execute and apply the verification report.",
+        "requirement": "Prove BugSwarm failed/passed artifact behavior before scheduling live cells.",
+        "status": "missing"
+      },
+      {
+        "evidence": [
+          "tools/bugfix-bakeoff/results/cells/bug9-glm-5.2-kitsoki.json"
+        ],
+        "finding": "1 attempted cell(s), 2890980 total tokens.",
+        "id": "oss-kitsoki-glm52",
+        "next": "",
+        "requirement": "Commit Kitsoki bugfix GLM-5.2 evidence for the OSS oracle corpus.",
+        "status": "proven"
+      },
+      {
+        "evidence": [],
+        "finding": "No attempted cell is committed. Pending task(s): kitsoki-bug9-bugfix-test-repair.",
+        "id": "oss-raw-glm52",
+        "next": "Run the generated gap-plan commands, land the rollup, and regenerate this report.",
+        "requirement": "Commit raw-prompt GLM-5.2 evidence for the OSS oracle corpus.",
+        "status": "missing"
+      },
+      {
+        "evidence": [],
+        "finding": "No attempted cell is committed. Pending task(s): bugswarm-square-okio-140452393.",
+        "id": "bugswarm-kitsoki-glm52",
+        "next": "Run the generated gap-plan commands, land the rollup, and regenerate this report.",
+        "requirement": "Commit Kitsoki bugfix GLM-5.2 evidence for the BugSwarm corpus.",
+        "status": "missing"
+      },
+      {
+        "evidence": [],
+        "finding": "No attempted cell is committed. Pending task(s): bugswarm-square-okio-140452393.",
+        "id": "bugswarm-raw-glm52",
+        "next": "Run the generated gap-plan commands, land the rollup, and regenerate this report.",
+        "requirement": "Commit raw-prompt GLM-5.2 evidence for the BugSwarm corpus.",
+        "status": "missing"
+      }
+    ],
+    "status": "incomplete"
+  },
   "corpora": {
     "bugswarm": {
       "imported_task_count": 1,

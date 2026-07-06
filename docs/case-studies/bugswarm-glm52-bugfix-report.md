@@ -94,6 +94,21 @@ BugSwarm source contract:
 | oss-oracle | pending | 1 | 0 | n/a | n/a | Raw-prompt GLM-5.2 arm has no attempted cells. |
 | overall | pending | 1 | 0 | n/a | n/a | Raw-prompt GLM-5.2 arm has no attempted cells. |
 
+## Completion Audit
+
+Status: `incomplete` (4/8 requirements proven).
+
+| requirement | status | finding | next |
+|---|---|---|---|
+| report-artifact | `proven` | The report is generated offline from committed inputs | done |
+| oss-source | `proven` | The report references the frozen OSS oracle corpus and keeps it separate from BugSwarm | done |
+| bugswarm-source | `proven` | Imported BugSwarm task count: 1 | done |
+| bugswarm-execute-verification | `missing` | Verification mode=none; verified=0/0 | Run bugswarm_verify_source.py --execute and apply the verification report |
+| oss-kitsoki-glm52 | `proven` | 1 attempted cell(s), 2890980 total tokens | done |
+| oss-raw-glm52 | `missing` | No attempted cell is committed. Pending task(s): kitsoki-bug9-bugfix-test-repair | Run the generated gap-plan commands, land the rollup, and regenerate this report |
+| bugswarm-kitsoki-glm52 | `missing` | No attempted cell is committed. Pending task(s): bugswarm-square-okio-140452393 | Run the generated gap-plan commands, land the rollup, and regenerate this report |
+| bugswarm-raw-glm52 | `missing` | No attempted cell is committed. Pending task(s): bugswarm-square-okio-140452393 | Run the generated gap-plan commands, land the rollup, and regenerate this report |
+
 ## Committed GLM-5.2 Cells
 
 | task | treatment | quality | tokens | cost | evidence |
