@@ -10086,6 +10086,10 @@ def driver_replay_review_is_expected_one_scenario(reviewed: dict) -> bool:
     return failed_checks <= {"scenario-attempts", "driver-journal-coverage", "quality-gates", "playback-or-blocker", "playback-evidence-backed"}
 
 
+def driver_replay_readiness_status(review_status: str) -> str:
+    return "ready" if review_status == "ready" else "needs_evidence"
+
+
 def cassette_replay_path(run_id: str, scenario_id: str, evidence_kind: str) -> str:
     return f"cassette://product-journey/{run_id}/{demo_evidence_path(scenario_id, evidence_kind)}"
 
@@ -10109,6 +10113,7 @@ def render_driver_replay_smoke_summary(report: dict) -> str:
         f"- Deck: `{report['run']['deck_path']}`",
         f"- Driver journal: `{report['run']['driver_journal_path']}`",
         f"- Media manifest: `{report['run']['media_manifest_path']}`",
+        f"- Readiness: `{report.get('readiness_status', 'needs_evidence')}`",
         f"- Review: `{review.get('review_status')}` - {review.get('summary')}",
         f"- Validation: `{validation.get('status')}` - {validation.get('validation_issue_summary', '') or 'no issues'}",
         "",
@@ -10157,8 +10162,9 @@ def render_driver_replay_smoke_deck(report: dict) -> dict:
             {
                 "type": "narrative",
                 "eyebrow": "Review",
-                "title": review.get("review_status", "unknown"),
+                "title": f"{report.get('readiness_status', 'needs_evidence')} readiness",
                 "body": "\n".join([
+                    f"Review status: {review.get('review_status', 'unknown')}",
                     review.get("summary", ""),
                     report.get("review_backlog_summary", ""),
                 ]),
@@ -10183,6 +10189,7 @@ def render_driver_replay_sweep_summary(report: dict) -> str:
         f"- Sweep: `{report['sweep_id']}`",
         f"- Persona: `{report['persona']['id']}`",
         f"- Scenarios: {report['summary']['passed']} / {report['summary']['scenarios']} passed",
+        f"- Readiness: `{report['readiness_status']}` ({report['summary']['review_ready']} / {report['summary']['scenarios']} reviews ready)",
         f"- Playback scenarios: {report['summary']['playback_scenarios']} / {report['summary']['scenarios']}",
         f"- Validation errors: {report['summary']['validation_errors']}",
         f"- Sweep dir: `{report['sweep_dir']}`",
@@ -10195,6 +10202,7 @@ def render_driver_replay_sweep_summary(report: dict) -> str:
             f"### {row['scenario']}",
             "",
             f"- Status: `{row['status']}`",
+            f"- Readiness: `{row['readiness_status']}`",
             f"- Review: `{row['review_status']}` - {row['review_summary']}",
             f"- Validation: `{row['validation_status']}`",
             f"- Evidence: {row['attached_evidence_count']}",
@@ -10208,7 +10216,7 @@ def render_driver_replay_sweep_summary(report: dict) -> str:
 
 def render_driver_replay_sweep_deck(report: dict) -> dict:
     rows = [
-        f"{row['scenario']}: {row['status']}, playback {row['playback_items']}, validation {row['validation_status']}"
+        f"{row['scenario']}: {row['status']}, readiness {row['readiness_status']}, playback {row['playback_items']}, validation {row['validation_status']}"
         for row in report["scenarios"]
     ]
     return {
@@ -10222,7 +10230,7 @@ def render_driver_replay_sweep_deck(report: dict) -> dict:
             {
                 "type": "title",
                 "title": "Driver replay sweep",
-                "subtitle": f"{report['summary']['passed']} / {report['summary']['scenarios']} scenarios passed · {report['persona']['label']}",
+                "subtitle": f"{report['summary']['passed']} / {report['summary']['scenarios']} contract-passed · readiness {report['readiness_status']} · {report['persona']['label']}",
                 "narration": "This deck summarizes the deterministic cassette-backed replay sweep across every product journey scenario.",
             },
             {
@@ -10281,6 +10289,7 @@ def build_driver_replay_sweep(
             "attached_evidence_count": len(report["attached_evidence"]),
             "playback_items": media_manifest.get("summary", {}).get("playback_items", 0),
             "review_status": report["review"].get("review_status", ""),
+            "readiness_status": driver_replay_readiness_status(report["review"].get("review_status", "")),
             "review_summary": report["review"].get("summary", ""),
             "validation_status": report["validation"].get("status", ""),
             "validation_errors": report["validation"].get("errors", 0),
@@ -10295,10 +10304,14 @@ def build_driver_replay_sweep(
         or row["validation_errors"]
         or row["playback_items"] < 1
     ]
+    review_ready = sum(1 for row in rows if row["readiness_status"] == "ready")
+    review_needs_evidence = len(rows) - review_ready
     summary = {
         "scenarios": len(rows),
         "passed": len(rows) - len(failed),
         "failed": len(failed),
+        "review_ready": review_ready,
+        "review_needs_evidence": review_needs_evidence,
         "playback_scenarios": sum(1 for row in rows if row["playback_items"] >= 1),
         "validation_errors": sum(row["validation_errors"] for row in rows),
         "validation_warnings": sum(row["validation_warnings"] for row in rows),
@@ -10306,6 +10319,7 @@ def build_driver_replay_sweep(
     }
     report = {
         "status": "passed" if not failed else "failed",
+        "readiness_status": "ready" if review_needs_evidence == 0 else "needs_evidence",
         "sweep_id": sweep_id,
         "created_at": now_utc(),
         "seed": seed,
@@ -10682,9 +10696,11 @@ def build_driver_replay_smoke(
     reviewed = review_run_bundle(run_dir, publish_deck=None)
     validation = validate_run_bundle(run_dir)
     review_is_expected = driver_replay_review_is_expected_one_scenario(reviewed)
+    readiness_status = driver_replay_readiness_status(reviewed.get("review_status", ""))
     status = "passed" if review_is_expected and validation.get("status") == "valid" else "failed"
     report = {
         "status": status,
+        "readiness_status": readiness_status,
         "smoke_id": smoke_id,
         "created_at": now_utc(),
         "seed": seed,
@@ -11933,6 +11949,7 @@ def main() -> None:
             validation = report["validation"]
             print(json.dumps({
                 "status": report["status"],
+                "readiness_status": report["readiness_status"],
                 "smoke_id": report["smoke_id"],
                 "smoke_dir": report["smoke_dir"],
                 "report_path": report["artifacts"]["report"],
@@ -11953,6 +11970,8 @@ def main() -> None:
                 "review_warnings": reviewed.get("warnings", 0),
                 "review_failed": reviewed.get("review_failed_count", reviewed.get("failed", 0)),
                 "review_total": reviewed.get("review_total_count", reviewed.get("total", 0)),
+                "review_ready": 1 if report["readiness_status"] == "ready" else 0,
+                "review_needs_evidence": 0 if report["readiness_status"] == "ready" else 1,
                 "review_backlog_summary": report.get("review_backlog_summary", ""),
                 "validation_status": validation.get("status"),
                 "validation_warnings": validation.get("warnings"),
@@ -11964,6 +11983,7 @@ def main() -> None:
             return
         print(f"Product journey driver replay smoke: {report['smoke_id']}")
         print(f"Status: {report['status']}")
+        print(f"Readiness: {report['readiness_status']}")
         print(f"Persona: {report['persona']['label']}")
         print(f"Artifacts: {report['smoke_dir']}")
         print(f"Summary: {report['artifacts']['summary']}")
@@ -11982,6 +12002,7 @@ def main() -> None:
         if args.json_output:
             print(json.dumps({
                 "status": report["status"],
+                "readiness_status": report["readiness_status"],
                 "sweep_id": report["sweep_id"],
                 "persona": report["persona"]["id"],
                 "persona_label": report["persona"]["label"],
@@ -11992,6 +12013,8 @@ def main() -> None:
                 "scenario_count": report["summary"]["scenarios"],
                 "passed": report["summary"]["passed"],
                 "failed": report["summary"]["failed"],
+                "review_ready": report["summary"]["review_ready"],
+                "review_needs_evidence": report["summary"]["review_needs_evidence"],
                 "playback_scenarios": report["summary"]["playback_scenarios"],
                 "validation_errors": report["summary"]["validation_errors"],
                 "validation_warnings": report["summary"]["validation_warnings"],
@@ -12005,7 +12028,9 @@ def main() -> None:
             return
         print(f"Product journey driver replay sweep: {report['sweep_id']}")
         print(f"Status: {report['status']}")
+        print(f"Readiness: {report['readiness_status']}")
         print(f"Scenarios: {report['summary']['passed']} / {report['summary']['scenarios']} passed")
+        print(f"Reviews ready: {report['summary']['review_ready']} / {report['summary']['scenarios']}")
         print(f"Playback: {report['summary']['playback_scenarios']} / {report['summary']['scenarios']}")
         print(f"Artifacts: {report['sweep_dir']}")
         print(f"Summary: {report['artifacts']['summary']}")

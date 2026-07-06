@@ -101,6 +101,9 @@ world:
   driver_replay_attached_evidence_count: { type: int, default: 0 }
   driver_replay_scenario_count: { type: int, default: 0 }
   driver_replay_playback_scenarios: { type: int, default: 0 }
+  driver_replay_readiness_status: { type: string, default: "" }
+  driver_replay_review_ready_count: { type: int, default: 0 }
+  driver_replay_review_needs_evidence_count: { type: int, default: 0 }
   driver_replay_media_manifest_path: { type: string, default: "" }
   driver_replay_journal_path: { type: string, default: "" }
   driver_replay_handoff_path: { type: string, default: "" }

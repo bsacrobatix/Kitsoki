@@ -137,7 +137,9 @@ to fix before calling that scenario representative.
 Use `--driver-replay-sweep` when you want a single no-LLM gate that every
 scenario can replay with cassette-backed proof evidence, a linked driver
 journal, clean validation, and at least one playback item for the generated
-Slidey deck.
+Slidey deck. In smoke and sweep JSON, `status=passed` means the deterministic
+replay contract passed; `readiness_status=ready|needs_evidence` is the separate
+review-readiness signal to use before autonomous scheduling or landing.
 
 This writes `.artifacts/product-journey/matrices/<matrix-id>/` with
 `matrix.json`, `matrix.md`, and `deck.slidey.json`. The source target list lives
