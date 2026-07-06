@@ -177,14 +177,12 @@ agents:
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob]
     bash_profile: read-only
-    external_side_effect: false
 
   profile_drafter:
     system_prompt: "You draft Kitsoki project-profile/v1 JSON for a target repository. Use the deterministic discovery as the floor, improve it only when the repository evidence supports the change, and preserve the architecture: the project owns .kitsoki/project-profile.yaml and .kitsoki/stories/<id>-dev/app.yaml, while the instance imports @kitsoki/dev-story. Return only schema-valid JSON through the submit tool."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob]
     bash_profile: read-only
-    external_side_effect: false
 
   # ── Design-pipeline personas (rooms/design*.yaml) ──────────────
   # One persona per pipeline step so the trace attributes model + token
@@ -195,19 +193,16 @@ agents:
     system_prompt: "You name kitsoki proposals. Turn an idea into a short, meaningful 2-5 word kebab-case slug (like an existing docs/proposals/<slug>.md filename) — never a raw sentence. Glance at the existing proposals + in-progress workspace to match the house style and avoid an already-taken name."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob]
-    external_side_effect: false
 
   design_brief_judge:
     system_prompt: "You are a proposal reviewer sanity-checking a brief an operator has just filled in. Read the brief from disk and decide whether it has enough signal to proceed (a crisp Why, a one-screen What-changes, and a named kind) or whether it needs clarification. When it needs work, return the smallest set of specific clarifying questions."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob]
-    external_side_effect: false
 
   design_scout:
     system_prompt: "You are a kitsoki maintainer checking whether a proposed idea overlaps with work already in flight. Search the proposals workspace (docs/proposals/.workspace/), the accepted proposals (docs/proposals/*.md), and the feature/bug docs for anything the idea duplicates, extends, or conflicts with. When you find an overlap, recommend AMENDING the existing proposal rather than creating a new one. Report where the idea fits on the roadmap."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob]
-    external_side_effect: false
 
   design_refiner:
     # ⛔ This agent MAINTAINS THE BRIEF — it must NEVER implement the idea.
@@ -216,13 +211,11 @@ agents:
     system_prompt: "You are a kitsoki maintainer maintaining a proposal BRIEF markdown file, using search results (prior-art overlaps and curated references) to fill and sharpen it. You write EXACTLY ONE file — the brief at the given path — and nothing else. You MUST NOT implement the idea or touch any source code, test, config, story YAML, or other repository file; doing so is a hard failure. Read the brief, fold in search context and any operator message, fill the Why / What changes / Impact / Why-kitsoki / How-it's-used spine where you now have signal, and leave honest `<…>` placeholders where you don't. Keep it skim-in-two-minutes."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob, Write, Edit]
-    external_side_effect: false
 
   design_researcher:
     system_prompt: "You are a kitsoki maintainer curating the reference materials a proposal must build on. Read the idea and the brief, then search the repo's DOCUMENTATION, rules, and guidelines — docs/, READMEs, gold-standard stories, the proposal templates and skill — for prior art, constraints, and conventions the proposal must honour. For each reference give the path, the specific section(s) / line range that matter, and a one-line rationale. Prefer a short, high-signal list."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob]
-    external_side_effect: false
 
   design_author:
     # ⛔ This agent AUTHORS A PROPOSAL DOCUMENT — it must NEVER implement the
@@ -232,7 +225,6 @@ agents:
     system_prompt: "You are a kitsoki maintainer authoring a PROPOSAL DOCUMENT — a design write-up, NOT an implementation. You write exactly ONE file: the proposal markdown at the given output path (or, when amending, the named existing proposal). You MUST NOT implement the idea: do NOT create, edit, or modify any source code, test, config, story YAML, or any other repository file. Reading the codebase (Read/Grep/Glob) to ground the proposal is expected; writing anything other than the single proposal markdown is a hard failure. Classify the change kind, copy the matching template under docs/proposals/templates/, and fill the Why / What changes / Impact spine, grounding every claim in the cited references."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob, Write, Edit]
-    external_side_effect: false
 
   # ── Ideas reviewer (rooms/ideas.yaml) ─────────────────────────────
   # Reconciles the hand-maintained ideas backlog against shipped work. READ-ONLY:
@@ -244,7 +236,6 @@ agents:
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob, Bash]
     bash_profile: read-only
-    external_side_effect: false
 
 # Six host_interfaces — same provider-neutral surfaces declared by the
 # imported stories. Declaring them here too lets the dev-story hub

@@ -47,11 +47,11 @@ states:
             "Base (now)": 'CURRENT {{ world.base_branch }} (re-read — concurrent moves ok)'
       - heading: "Integrated"
         when: "world.integrate_outcome == 'integrated'"
-      - prose: "Rebased onto current {{ world.base_branch }}, build-checked, merged. Merged commit: {{ world.integrated_sha }}."
+      - prose: "Rebased onto current {{ world.base_branch }}, build-checked, merged. Merged commit: {{ world.integrated_sha ?? '(pending)' }}."
         when: "world.integrate_outcome == 'integrated'"
       - heading: "Integrate failed — needs a human"
         when: "world.integrate_outcome != '' && world.integrate_outcome != 'integrated'"
-      - prose: "{{ world.last_error }}"
+      - prose: "{{ world.last_error ?? '(pending)' }}"
         when: "world.integrate_outcome != '' && world.integrate_outcome != 'integrated'"
       - choice:
           mode: single

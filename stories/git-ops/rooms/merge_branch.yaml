@@ -59,15 +59,15 @@ states:
         when: "world.last_op_outcome == 'merge_in_progress'"
       - heading: "Target worktree has uncommitted work"
         when: "world.last_op_outcome == 'dirty_target'"
-      - prose: "Refusing to merge through {{ world.main_worktree_path }} while it has uncommitted changes. Commit, checkpoint, or clean that work first; git-ops will not use the shared stash stack for this merge. {{ world.last_op_output }}"
+      - prose: "Refusing to merge through {{ world.main_worktree_path }} while it has uncommitted changes. Commit, checkpoint, or clean that work first; git-ops will not use the shared stash stack for this merge. {{ world.last_op_output ?? '(pending)' }}"
         when: "world.last_op_outcome == 'dirty_target'"
       - heading: "Post-merge build failed"
         when: "world.last_op_outcome == 'post_merge_test_fail'"
-      - prose: "Build failed after merge and the target worktree was reset to its pre-merge commit: {{ world.last_op_output }}"
+      - prose: "Build failed after merge and the target worktree was reset to its pre-merge commit: {{ world.last_op_output ?? '(pending)' }}"
         when: "world.last_op_outcome == 'post_merge_test_fail'"
       - heading: "Merge successful"
         when: "world.last_op_outcome == 'merged'"
-      - prose: "Merge failed: {{ world.last_op_output }}"
+      - prose: "Merge failed: {{ world.last_op_output ?? '(pending)' }}"
         when: "world.last_op_ok == false && world.last_op_outcome != 'merge_in_progress' && world.last_op_outcome != 'post_merge_test_fail'"
       - choice:
           mode: single

@@ -17,7 +17,7 @@ states:
     relevant_world: [fleet_briefs, current_brief, merge_lock_held, has_pending,
                      shipped_count, parked_count, pending_count]
     view:
-      - prose: "Fanning out {{ len(world.fleet_briefs) }} brief(s). One brief integrates at a time (merge-lock); failures park and the rest continue."
+      - prose: "Fanning out {{ world.fleet_briefs|default:''|length }} brief(s). One brief integrates at a time (merge-lock); failures park and the rest continue."
       - kv:
           pairs:
             Shipped: '{{ world.shipped_count }}'
