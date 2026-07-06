@@ -15,8 +15,11 @@ transports" — not a full persona/matrix sweep (that's
 - Driver agent: `.agents/agents/product-journey-qa-driver.md` (transport-pinned
   per leg — the handoff's `transport:` field OVERRIDES the driver's usual
   cheapest-surface heuristic)
-- Judge: a read-only agent following the kitsoki-ui-qa posture — grounded
-  verdicts only, cites concrete frames, never a bare pass
+- Judge: a read-only agent following the [[kitsoki-ui-qa]] posture — grounded
+  verdicts only, cites concrete frames, never a bare pass (its "TUI (terminal)
+  evidence" section documents the `render.tui_png` frame contract this leg
+  uses, plus the `tui-serve` live-bridge escape hatch for scenarios that need
+  more than a headless spec/state render)
 - Report: `<run-dir>/report.md` (folded in Starlark, `scripts/build_report.star`)
   and `<run-dir>/deck.slidey.json` (folded by `run.py --scenario-qa-report`) —
   the ONE per-transport verdict table, in both forms, for every transport the

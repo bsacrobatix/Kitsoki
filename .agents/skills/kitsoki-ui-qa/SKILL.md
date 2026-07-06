@@ -408,6 +408,39 @@ viewport.
   screenshots. Useful as a cheap non-vision pre-check before spending an LLM
   review pass: a `same: true` result across a revision pair means the terminal
   rendering didn't move at all for that scene.
+- **Live/interactive verification: the `tui-serve` bridge.** `render.tui_png`
+  only ever re-renders the studio's own regenerated `Frame` — a headless spec
+  teleport or a live handle's current `View()` — never an actual running pty.
+  If a scenario needs to prove real terminal mechanics render.tui_png can't
+  reach — resize reflow, raw keystroke sequences (arrows, Ctrl-C, paste
+  bursts), scrollback, or that the *actual bytes* a live `kitsoki` process
+  emits (not the studio's regenerated Frame) look right — drive it through
+  `tools/tui-bridge` instead (`kitsoki tui-serve` bridges a real pty over a
+  websocket; see its README for the full protocol):
+  ```bash
+  go run ./cmd/kitsoki tui-serve --addr 127.0.0.1:4700 \
+    -- run myapp.yaml --harness replay --recording rec.yaml   # never a live model — see below
+  cd tools/tui-bridge && pnpm install && pnpm run serve
+  # open http://localhost:4320/player/?ws=ws://127.0.0.1:4700/pty
+  ```
+  Capture evidence the same two ways the rest of this skill already uses: a
+  Playwright `page.screenshot()` of the rendered player page is a normal PNG —
+  feed it into `qa.sh`/`qa-review.sh --frames` exactly like any other frame;
+  `window.__dump()` gives exact-text readback (buffer-API based, no vision
+  needed) when a structural check is all a step requires. Keep the spawned
+  command deterministic and no-LLM (`--harness replay --recording ...`, or
+  `--exec` pointed at a fixture binary) — never a live model, the same
+  discipline `tools/mcp-demo` follows for the cassette-replay path above.
+- **This is pixel/vision QA, not [[rendering-tests]].** `rendering-tests`
+  asserts `View()`'s ANSI-text *structure* (line separation, no horizontal
+  concat) inside a `go test` — fast, no judge, catches layout regressions at
+  the unit level. This skill's frame-based pipeline is for evidence a human or
+  vision reviewer signs off on (does the screen show what the bug/plan
+  claims?). Use both; they check different things.
+- **Checking one scenario across TUI *and* other transports?** Use
+  [[scenario-qa]] rather than hand-driving this — it already wires
+  `render.tui_png` as the `tui` transport leg's evidence tool and produces a
+  single per-transport verdict table.
 
 ## rrweb-embedded slidey composite deck evidence
 
