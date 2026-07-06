@@ -30,7 +30,7 @@ turns:
       validation_errors: 1
       validation_issue_summary: ticket-repo-required
       gh_agent_missing_evidence_summary: "ticket_repo is required"
-    expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_invalid[\\s\\S]*Autonomous driver[\\s\\S]*replay / invalid[\\s\\S]*Autonomous gates[\\s\\S]*filing=fail, gh_agent=fail, independent_verify=fail,[\\s\\S]*review=not_run, validation=fail[\\s\\S]*Independent verify[\\s\\S]*fail: ticket_repo is required[\\s\\S]*Validation[\\s\\S]*invalid[\\s\\S]*Validation issues[\\s\\S]*ticket-repo-required"
+    expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_invalid[\\s\\S]*Autonomous driver[\\s\\S]*replay / invalid[\\s\\S]*Autonomous gates[\\s\\S]*filing=fail[\\s\\S]*gh_agent=fail[\\s\\S]*independent_verify=fail[\\s\\S]*review=not_run[\\s\\S]*validation=fail[\\s\\S]*Independent verify[\\s\\S]*fail: ticket_repo is required[\\s\\S]*Validation[\\s\\S]*invalid[\\s\\S]*Validation issues[\\s\\S]*ticket-repo-required"
     expect_host_calls: []
 
 expect_no_errors: true

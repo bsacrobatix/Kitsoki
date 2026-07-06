@@ -231,6 +231,12 @@ world:
   autonomous_marathon_smoke_success_rate: { type: string, default: "" }
   autonomous_marathon_smoke_report_path: { type: string, default: "" }
   autonomous_marathon_smoke_report_markdown_path: { type: string, default: "" }
+  marathon_smoke_ledger_validation_status: { type: string, default: "" }
+  marathon_smoke_ledger_validation_summary: { type: string, default: "" }
+  marathon_smoke_ledger_validation_errors: { type: int, default: 0 }
+  marathon_smoke_ledger_validation_warnings: { type: int, default: 0 }
+  marathon_smoke_ledger_validation_path: { type: string, default: "" }
+  marathon_smoke_ledger_validation_markdown_path: { type: string, default: "" }
   autonomous_marathon_status: { type: string, default: "" }
   autonomous_marathon_summary: { type: string, default: "" }
   autonomous_marathon_report_path: { type: string, default: "" }
@@ -378,6 +384,12 @@ intents:
     description: "Run a no-LLM core-use-case persona sweep through autonomous fix and derived stats."
     examples: ["autonomous marathon smoke", "prove persona qa marathon", "standing product qa smoke"]
     priority: 89
+  validate_marathon_smoke_ledger:
+    description: "Validate a retained autonomous marathon smoke ledger through the story surface."
+    examples: ["validate marathon smoke ledger", "check retained marathon ledger", "validate last marathon smoke"]
+    priority: 88
+    slots:
+      marathon_smoke_ledger: { type: string, required: false }
   autonomous_marathon:
     description: "Create or finalize a standing persona-QA marathon through autonomous fix, review, validation, weakness routing, and stats."
     examples: ["autonomous marathon", "start autonomous marathon scenarios=core-use-cases", "finalize autonomous marathon ticket_repo=bsacrobatix/Kitsoki"]
@@ -576,7 +588,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, capture_preflight, native_ghagent_smoke, autonomous_fix_smoke, persona_autofix_smoke, autonomous_marathon_smoke, autonomous_marathon, autonomous_marathon_due, autonomous_marathon_advance_due, dispatch_driver, autonomous_watchdog, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, autonomous_fix, stats, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
+  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, capture_preflight, native_ghagent_smoke, autonomous_fix_smoke, persona_autofix_smoke, autonomous_marathon_smoke, validate_marathon_smoke_ledger, autonomous_marathon, autonomous_marathon_due, autonomous_marathon_advance_due, dispatch_driver, autonomous_watchdog, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, autonomous_fix, stats, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
 
 root: idle
 

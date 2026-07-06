@@ -46,9 +46,11 @@ It is intentionally no-LLM:
   contracts, credible issue filing, gh-agent fixes, independent verification,
   integration landing proof, retained JSON/Markdown ledger artifacts,
   human-review artifacts, and mechanically derived found/filed/fixed stats.
-  Re-check a retained ledger with `tools/product-journey/run.py
-  --validate-marathon-smoke-ledger --marathon-smoke-ledger <path>
-  --json-output`.
+  Re-check a retained ledger through the story with
+  `validate_marathon_smoke_ledger`, which defaults to the last smoke ledger, or
+  pass `marathon_smoke_ledger=<path>`. The underlying CLI validator is
+  `tools/product-journey/run.py --validate-marathon-smoke-ledger
+  --marathon-smoke-ledger <path> --json-output`.
 - `rollup` calls `tools/product-journey/run.py --rollup-matrix --json-output`
   to create or refresh the matrix-level Slidey deck from reviewed run bundles.
 - `validate_matrix` calls `tools/product-journey/run.py --validate-matrix
