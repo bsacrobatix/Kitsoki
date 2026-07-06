@@ -146,6 +146,7 @@ type ghAgentServeOptions struct {
 	IncidentRepo      string
 	ProjectRoot       string
 	CommentMode       string
+	IntegrationBranch string
 	UseGitHubApp      bool
 	AppID             int64
 	InstallationID    int64
@@ -543,14 +544,15 @@ func dispatchGHAgentMention(ctx context.Context, store *jobs.GHJobStore, opts gh
 		}
 	}
 	d := &ghagent.Dispatcher{
-		Jobs:          store,
-		Routes:        ghagent.DefaultLabelStoryMap(),
-		Comments:      comments,
-		WorkerID:      opts.Worker,
-		PublicBaseURL: opts.PublicBaseURL,
-		ProjectRoutes: ghagent.ProjectRouteResolver{Root: opts.ProjectRoot},
-		SpawnFn:       ghagent.RunStorySession,
-		IncidentFn:    incidentFn,
+		Jobs:              store,
+		Routes:            ghagent.DefaultLabelStoryMap(),
+		Comments:          comments,
+		WorkerID:          opts.Worker,
+		PublicBaseURL:     opts.PublicBaseURL,
+		ProjectRoutes:     ghagent.ProjectRouteResolver{Root: opts.ProjectRoot},
+		SpawnFn:           ghagent.RunStorySession,
+		IncidentFn:        incidentFn,
+		IntegrationBranch: opts.IntegrationBranch,
 	}
 	return d.Dispatch(ctx, mention, labels)
 }

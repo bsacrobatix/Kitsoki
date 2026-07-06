@@ -10,6 +10,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/host"
+	"kitsoki/internal/vcsops"
 )
 
 // vcs_tools.go — a structured git / worktree surface.
@@ -500,90 +501,20 @@ func (srv *Server) handleVCSIntegrate(ctx context.Context, req *mcpsdk.CallToolR
 	if args.Message == "" {
 		return buildToolError(ErrBadRequest, "vcs.integrate: message is required (the squash commit message)"), nil, nil
 	}
-	onto := args.Onto
-	if onto == "" {
-		onto = "main"
+	result, err := vcsops.Integrate(ctx, args.Dir, args.Branch, args.Onto, args.Message, vcsops.IntegrateOptions{
+		WorktreePath: args.WorktreePath,
+		DeleteBranch: args.DeleteBranch,
+	})
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("vcs.integrate: %v", err)), nil, nil
 	}
-
-	// Guard 1: `dir` must be ON `onto` — we integrate FROM the integration
-	// branch's checkout. We never switch branches under the caller.
-	head, _, herr := gitRun(ctx, args.Dir, "symbolic-ref", "--short", "HEAD")
-	if herr != nil {
-		return buildToolError(ErrBadRequest, fmt.Sprintf("vcs.integrate: read HEAD: %v", herr)), nil, nil
-	}
-	if cur := strings.TrimSpace(head); cur != onto {
-		return nil, integrateRefused(fmt.Sprintf("dir is on %q, not the integration branch %q — check out %q first (this guard is why main survives)", cur, onto, onto)), nil
-	}
-
-	// Guard 2: the integration tree must be clean, so the squash-conflict undo
-	// (reset --hard to the tip) can never discard a caller's unrelated work.
-	st, _, _ := gitRun(ctx, args.Dir, "status", "--porcelain")
-	if strings.TrimSpace(st) != "" {
-		return nil, integrateRefused(fmt.Sprintf("%q has uncommitted changes; commit or stash them before integrating", onto)), nil
-	}
-
-	// Guard 3: `branch` must carry commits beyond its merge-base with onto.
-	cnt, _, _ := gitRun(ctx, args.Dir, "rev-list", "--count", onto+".."+args.Branch)
-	if strings.TrimSpace(cnt) == "0" {
-		return nil, integrateRefused(fmt.Sprintf("%q has no commits beyond %q — nothing to integrate", args.Branch, onto)), nil
-	}
-
-	// The safe land: a real 3-way squash merge against the CURRENT onto tip.
-	// Unlike `reset --soft <onto>` from a stale worktree, this cannot revert work
-	// landed on onto since the branch's base.
-	mout, mexit, merr := gitRun(ctx, args.Dir, "merge", "--squash", args.Branch)
-	if merr != nil {
-		return buildToolError(ErrBadRequest, fmt.Sprintf("vcs.integrate: merge: %v", merr)), nil, nil
-	}
-	if mexit != 0 {
-		// Conflict: collect the unmerged paths, then restore the clean tip. The
-		// clean-tree guard above makes `reset --hard` a safe, total undo.
-		conflicts := unmergedPaths(ctx, args.Dir)
-		_, _, _ = gitRun(ctx, args.Dir, "reset", "--hard", "HEAD")
-		res := VCSIntegrateOK{OK: true, Integrated: false, Conflicts: conflicts}
-		if len(conflicts) == 0 {
-			// Non-conflict non-zero (rare): surface the merge output.
-			return buildToolError(ErrBadRequest, fmt.Sprintf("vcs.integrate: merge --squash failed: %s", strings.TrimSpace(mout))), nil, nil
-		}
-		return nil, res, nil
-	}
-
-	if out, exit, err := gitRun(ctx, args.Dir, "commit", "-m", args.Message); gitErr("vcs.integrate (commit)", out, exit, err) != nil {
-		return gitErr("vcs.integrate (commit)", out, exit, err), nil, nil
-	}
-	commit, _, _ := gitRun(ctx, args.Dir, "rev-parse", "HEAD")
-	res := VCSIntegrateOK{OK: true, Integrated: true, Commit: strings.TrimSpace(commit)}
-
-	// Optional cleanup — only after a successful land.
-	if args.WorktreePath != "" {
-		_, _, _ = gitRun(ctx, args.Dir, "worktree", "remove", "--force", args.WorktreePath)
-	}
-	if args.DeleteBranch {
-		_, _, _ = gitRun(ctx, args.Dir, "branch", "-D", args.Branch)
-	}
-	return nil, res, nil
-}
-
-// integrateRefused builds the structured result whose Refused field names the
-// guard that fired. A refusal is a normal outcome, not a tool error — the caller
-// reads {refused} and fixes the precondition. Returned as the structured content
-// (the handler's second return value), so it rides the same {ok:true} envelope
-// as a successful integrate.
-func integrateRefused(reason string) VCSIntegrateOK {
-	return VCSIntegrateOK{OK: true, Integrated: false, Refused: reason}
-}
-
-// unmergedPaths returns the paths git reports as conflicted (`diff --name-only
-// --diff-filter=U`).
-func unmergedPaths(ctx context.Context, dir string) []string {
-	out, _, _ := gitRun(ctx, dir, "diff", "--name-only", "--diff-filter=U")
-	var paths []string
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if line != "" {
-			paths = append(paths, line)
-		}
-	}
-	return paths
+	return nil, VCSIntegrateOK{
+		OK:         true,
+		Integrated: result.Integrated,
+		Commit:     result.Commit,
+		Conflicts:  result.Conflicts,
+		Refused:    result.Refused,
+	}, nil
 }
 
 // ── git execution + small helpers ─────────────────────────────────────────────

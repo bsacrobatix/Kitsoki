@@ -485,18 +485,19 @@ func gitopsIssueCloseResult(data, commentData map[string]any, issueID string) ma
 
 func gitopsAutonomousFixCmd() *cobra.Command {
 	var (
-		runDir           string
-		ticketRepo       string
-		agentDB          string
-		agentStory       string
-		publicBaseURL    string
-		projectRoot      string
-		incidentRepo     string
-		assetDir         string
-		commentMode      string
-		reportInvalid    bool
-		allowTestBackend bool
-		jsonOut          bool
+		runDir            string
+		ticketRepo        string
+		agentDB           string
+		agentStory        string
+		publicBaseURL     string
+		projectRoot       string
+		incidentRepo      string
+		assetDir          string
+		commentMode       string
+		integrationBranch string
+		reportInvalid     bool
+		allowTestBackend  bool
+		jsonOut           bool
 	)
 	cmd := &cobra.Command{
 		Use:   "autonomous-fix",
@@ -512,16 +513,17 @@ func gitopsAutonomousFixCmd() *cobra.Command {
 				return fmt.Errorf("gitops autonomous-fix: --agent-db is required")
 			}
 			result, err := runGitopsAutonomousFix(cmd.Context(), gitopsAutonomousFixOptions{
-				RunDir:           runDir,
-				TicketRepo:       ticketRepo,
-				AgentDB:          agentDB,
-				AgentStory:       firstNonBlank(agentStory, "stories/bugfix"),
-				PublicBaseURL:    publicBaseURL,
-				ProjectRoot:      projectRoot,
-				IncidentRepo:     incidentRepo,
-				AssetDir:         assetDir,
-				CommentMode:      firstNonBlank(commentMode, "none"),
-				AllowTestBackend: allowTestBackend,
+				RunDir:            runDir,
+				TicketRepo:        ticketRepo,
+				AgentDB:           agentDB,
+				AgentStory:        firstNonBlank(agentStory, "stories/bugfix"),
+				PublicBaseURL:     publicBaseURL,
+				ProjectRoot:       projectRoot,
+				IncidentRepo:      incidentRepo,
+				AssetDir:          assetDir,
+				CommentMode:       firstNonBlank(commentMode, "none"),
+				IntegrationBranch: integrationBranch,
+				AllowTestBackend:  allowTestBackend,
 			})
 			if err != nil {
 				return err
@@ -561,6 +563,7 @@ func gitopsAutonomousFixCmd() *cobra.Command {
 	cmd.Flags().StringVar(&incidentRepo, "incident-repo", "", "owner/repo for agent incidents; defaults to --ticket-repo")
 	cmd.Flags().StringVar(&assetDir, "asset-dir", "", "root directory for agent fix evidence assets")
 	cmd.Flags().StringVar(&commentMode, "comment-mode", "none", "comment mode for drained jobs: none or github")
+	cmd.Flags().StringVar(&integrationBranch, "integration-branch", "", "shared branch verified job fixes squash-land onto (default: integration/qa-<run id>)")
 	cmd.Flags().BoolVar(&reportInvalid, "report-invalid-autonomous-fix", false, "print invalid autonomous-fix results instead of exiting early")
 	cmd.Flags().BoolVar(&allowTestBackend, "allow-test-backend", false, "allow the internal no-LLM autonomous-fix test backend when its env gate is set")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON output")
@@ -568,16 +571,17 @@ func gitopsAutonomousFixCmd() *cobra.Command {
 }
 
 type gitopsAutonomousFixOptions struct {
-	RunDir           string
-	TicketRepo       string
-	AgentDB          string
-	AgentStory       string
-	PublicBaseURL    string
-	ProjectRoot      string
-	IncidentRepo     string
-	AssetDir         string
-	CommentMode      string
-	AllowTestBackend bool
+	RunDir            string
+	TicketRepo        string
+	AgentDB           string
+	AgentStory        string
+	PublicBaseURL     string
+	ProjectRoot       string
+	IncidentRepo      string
+	AssetDir          string
+	CommentMode       string
+	IntegrationBranch string
+	AllowTestBackend  bool
 }
 
 func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions) (map[string]any, error) {
@@ -614,7 +618,8 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 		return nil, err
 	}
 	mergeMaps(result, enqueue)
-	drain, err := gitopsDrainFixes(ctx, opts.AgentDB, opts.TicketRepo, opts.PublicBaseURL, opts.ProjectRoot, opts.IncidentRepo, assetDir, opts.CommentMode)
+	integrationBranch := firstNonBlank(opts.IntegrationBranch, "integration/qa-"+filepath.Base(strings.TrimRight(runDir, "/")))
+	drain, err := gitopsDrainFixes(ctx, opts.AgentDB, opts.TicketRepo, opts.PublicBaseURL, opts.ProjectRoot, opts.IncidentRepo, assetDir, opts.CommentMode, integrationBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -1596,7 +1601,7 @@ func gitopsEnqueueFixes(ctx context.Context, runDir, dbPath, fallbackRepo, story
 	}, nil
 }
 
-func gitopsDrainFixes(ctx context.Context, dbPath, repo, publicBaseURL, projectRoot, incidentRepo, assetDir, commentMode string) (map[string]any, error) {
+func gitopsDrainFixes(ctx context.Context, dbPath, repo, publicBaseURL, projectRoot, incidentRepo, assetDir, commentMode, integrationBranch string) (map[string]any, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("gitops autonomous-fix: open db %q: %w", dbPath, err)
@@ -1608,12 +1613,13 @@ func gitopsDrainFixes(ctx context.Context, dbPath, repo, publicBaseURL, projectR
 	}
 	store.DataDir = ghAgentDrainAssetDir(dbPath, assetDir)
 	opts := ghAgentServeOptions{
-		Repo:          repo,
-		PublicBaseURL: publicBaseURL,
-		Worker:        "gh-agent-1",
-		IncidentRepo:  incidentRepo,
-		ProjectRoot:   projectRoot,
-		CommentMode:   commentMode,
+		Repo:              repo,
+		PublicBaseURL:     publicBaseURL,
+		Worker:            "gh-agent-1",
+		IncidentRepo:      incidentRepo,
+		ProjectRoot:       projectRoot,
+		CommentMode:       commentMode,
+		IntegrationBranch: integrationBranch,
 	}
 	drained, err := drainQueuedGHAgentJobs(ctx, store, opts)
 	if err != nil {
