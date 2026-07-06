@@ -1358,6 +1358,16 @@ def scenario_quality_gate(scenario_id: str) -> dict:
                 "Generated config or smoke output is unavailable for deterministic review.",
             ],
         },
+        "tui-slash-commands": {
+            "minimum_evidence": ["rendered_tui_frame", "session_trace", "navigation_trace", "checkpoint_rating", "key_interaction_video"],
+            "done_when": "A docs-trained persona can discover the slash menu, filter it, Tab-complete the primary suggestion, and execute the completed command in the TUI.",
+            "block_if": [
+                "The TUI frame does not show a slash command menu after typing / at the beginning of the prompt.",
+                "Filtering with letters after / does not narrow the visible command list.",
+                "No primary suggestion is visibly marked as the Tab target.",
+                "Tab completion or Enter execution cannot be captured without live LLM authorization.",
+            ],
+        },
         "bugfix": {
             "minimum_evidence": ["session_trace", "candidate_diff", "oracle_result", "full_suite_result", "key_interaction_video"],
             "done_when": "A concrete bug candidate has a reviewable diff plus deterministic oracle/test output or a classified suite failure.",
@@ -2071,6 +2081,10 @@ def build_assignment_scenario_task(target: dict, persona: dict, scenario: dict) 
         ),
         "project-onboarding": (
             f"Onboard {repo} using Kitsoki's documented project setup path. Confirm the generated project profile names plausible {stack} commands, repo files, and the next story to launch."
+        ),
+        "tui-slash-commands": (
+            "Act as a user who just read the external Codex and Claude Code slash-command docs, not Kitsoki docs. "
+            "In the TUI, type `/` at the beginning of the prompt, confirm a command menu appears, type letters to filter it, press Tab to accept the primary suggestion, then press Enter and verify the completed slash command runs."
         ),
         "bugfix": (
             f"Use the target bug queue for {repo}: {bug_query}. Pick or simulate one concrete bug candidate from that queue, drive the bugfix story, and require deterministic oracle/test evidence before calling the fix credible."

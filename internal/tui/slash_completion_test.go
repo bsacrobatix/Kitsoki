@@ -47,6 +47,41 @@ func TestSlashCompletionTabAcceptsPrimarySuggestion(t *testing.T) {
 	}
 }
 
+func TestSlashCompletionDocsTrainedUserCanDiscoverCompleteAndExecute(t *testing.T) {
+	t.Parallel()
+	orch := testCloakOrchestrator(t)
+	m := NewRootModel(orch, app.SessionID("slash-docs-user"), "../../testdata/apps/cloak/app.yaml", "")
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m = updated.(RootModel)
+	frame := ComposeFrame(&m, 100, 30)
+	if !strings.Contains(frame.Text, "/help") || !strings.Contains(frame.Text, "(Tab)") {
+		t.Fatalf("typing / should show command menu with tab affordance:\n%s", frame.Text)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("he")})
+	m = updated.(RootModel)
+	frame = ComposeFrame(&m, 100, 30)
+	if !strings.Contains(frame.Text, "/help") {
+		t.Fatalf("typing /he should filter to /help:\n%s", frame.Text)
+	}
+	if strings.Contains(frame.Text, "/model") {
+		t.Fatalf("typing /he should filter unrelated commands out:\n%s", frame.Text)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(RootModel)
+	if got := m.prompt.Value(); got != "/help" {
+		t.Fatalf("prompt after tab = %q, want /help", got)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(RootModel)
+	if content := m.transcript.AllContent(); !strings.Contains(content, "commands") || !strings.Contains(content, "/help") {
+		t.Fatalf("enter after tab should execute /help:\n%s", content)
+	}
+}
+
 type fixedSlashSuggester struct {
 	specs []SlashCommandSpec
 }
