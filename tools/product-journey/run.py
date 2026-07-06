@@ -5632,7 +5632,36 @@ def blocked_autonomous_driver_dispatch(run_dir: Path) -> dict:
         if status == "captured":
             heartbeat = latest_driver_heartbeat(run_dir)
             if heartbeat:
-                return {}
+                findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"items": []}
+                evidence = read_json(run_dir / "evidence.json") if (run_dir / "evidence.json").exists() else {"items": []}
+                claimed_evidence = max(0, int(receipt.get("evidence_count", 0) or 0))
+                claimed_issues = max(0, int(receipt.get("issue_count", 0) or 0))
+                actual_evidence = sum(
+                    1 for item in evidence.get("items", [])
+                    if item.get("status") in {"captured", "validated"} and item.get("path")
+                )
+                actual_issues = len(credible_issue_findings(findings))
+                count_gaps = []
+                if claimed_evidence > actual_evidence:
+                    count_gaps.append(f"evidence={actual_evidence}/{claimed_evidence}")
+                if claimed_issues > actual_issues:
+                    count_gaps.append(f"issues={actual_issues}/{claimed_issues}")
+                if not count_gaps:
+                    return {}
+                summary = "autonomous driver dispatch receipt claims artifacts that are not persisted: " + ", ".join(count_gaps)
+                trace = receipt.get("trace", "")
+                receipt_markdown = str(autonomous_driver_dispatch_markdown_path(run_dir))
+                status = "inconsistent-counts"
+                return {
+                    "autonomous_driver_mode": mode,
+                    "autonomous_driver_status": status,
+                    "autonomous_driver_summary": summary,
+                    "autonomous_driver_dispatch_status": receipt.get("status", status),
+                    "autonomous_driver_dispatch_summary": receipt.get("summary", summary),
+                    "autonomous_driver_dispatch_trace": trace,
+                    "autonomous_driver_dispatch_path": str(receipt_path),
+                    "autonomous_driver_dispatch_markdown_path": receipt_markdown,
+                }
             summary = "autonomous driver dispatch captured no driver-journal heartbeat; stop before final gates"
             trace = receipt.get("trace", "")
             receipt_markdown = str(autonomous_driver_dispatch_markdown_path(run_dir))
