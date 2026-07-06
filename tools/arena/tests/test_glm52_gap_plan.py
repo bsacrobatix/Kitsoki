@@ -271,10 +271,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check("planner with supplied raw claude bugswarm spec exits zero", proc.returncode, 0)
     packet = json.loads(packet_json.read_text(encoding="utf-8"))
     actions = {action["corpus"]: action for action in packet["actions"]}
-    check("supplied bugswarm raw claude spec needs runner adapter", actions["bugswarm"]["status"], "needs-runner-adapter")
+    check("supplied bugswarm raw claude spec ready", actions["bugswarm"]["status"], "ready")
     check("supplied bugswarm raw claude spec audit ok", actions["bugswarm"]["spec_audit"]["ok"], True)
-    check("supplied bugswarm raw claude no live command", "--live" in "\n".join(actions["bugswarm"]["commands"]), False)
-    check("supplied bugswarm raw claude names materializer gap", "BugSwarm --live materialization" in "\n".join(actions["bugswarm"]["prerequisites"]), True)
+    check("supplied bugswarm raw claude live command explicit", "--live" in actions["bugswarm"]["commands"][-1], True)
+    check("supplied bugswarm raw claude live command gated", "ARENA_PAIRED_TASK_ENABLE_CODEX=1" in actions["bugswarm"]["commands"][-1], True)
 
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)
@@ -333,10 +333,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check("planner with kitsoki-only bugswarm spec exits zero", proc.returncode, 0)
     packet = json.loads(packet_json.read_text(encoding="utf-8"))
     actions = {action["corpus"]: action for action in packet["actions"]}
-    check("supplied bugswarm kitsoki spec needs runner adapter", actions["bugswarm"]["status"], "needs-runner-adapter")
+    check("supplied bugswarm kitsoki spec ready", actions["bugswarm"]["status"], "ready")
     check("supplied bugswarm kitsoki spec audit ok", actions["bugswarm"]["spec_audit"]["ok"], True)
-    check("supplied bugswarm kitsoki no live command", "--live" in "\n".join(actions["bugswarm"]["commands"]), False)
-    check("supplied bugswarm kitsoki names materializer gap", "BugSwarm --live materialization" in "\n".join(actions["bugswarm"]["prerequisites"]), True)
+    check("supplied bugswarm kitsoki live command explicit", "--live" in actions["bugswarm"]["commands"][-1], True)
+    check("supplied bugswarm kitsoki live command gated", "ARENA_PAIRED_TASK_ENABLE_CODEX=1" in actions["bugswarm"]["commands"][-1], True)
 
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)

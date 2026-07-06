@@ -113,9 +113,11 @@ include the exact `arena.py plan`, no-LLM `arena.py run`, and explicit
 cells. The planner audits supplied specs before emitting paid commands: the
 Kitsoki GLM-5.2 arm is live-ready through paired-task's Kitsoki profile mapping,
 and the raw-prompt GLM-5.2 arm is live-ready only when its variant uses
-`backend: claude` so the runner can use the `synthetic-claude` profile. BugSwarm
-still has an additional runner gap: live artifact materialization/scoring is not
-implemented, so the planner withholds BugSwarm `--live` commands even when the
-variant backends audit cleanly. For future BugSwarm live packets, generate the spec with
+`backend: claude` so the runner can use the `synthetic-claude` profile. For
+BugSwarm live packets, generate the spec with
 `--kitsoki-backend codex --raw-backend claude`; the default generated spec still
 uses `backend: synthetic` to stay no-spend until an operator explicitly opts in.
+At live run time, paired-task copies the failing checkout from the BugSwarm
+artifact image and scores the modified candidate in a fresh artifact container
+with `./run_failed.sh`, so Docker image pulls and long CI jobs remain an
+operator-controlled step.

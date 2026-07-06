@@ -255,10 +255,8 @@ def remove_readonly(func: Any, path: str, _exc_info: Any) -> None:
 def materialize_baseline(task: dict[str, Any], tree: Path) -> None:
     oracle = task.get("oracle") or {}
     if oracle.get("kind") == "bugswarm_fail_pass_pair":
-        raise SystemExit(
-            "BugSwarm live materialization is not implemented in paired_task_runner; "
-            "run the source through bugswarm_verify_source.py and use --arm-only"
-        )
+        materialize_bugswarm_baseline(task, tree)
+        return
     if oracle.get("kind") == "github_content":
         repo = str(oracle["repo"])
         run(["git", "init", "-q", str(tree)], cwd=KITSOKI_ROOT)
@@ -291,6 +289,47 @@ def materialize_baseline(task: dict[str, Any], tree: Path) -> None:
         run(["git", "checkout", "-q", str(meta["baseline_sha"])], cwd=tree)
         return
     raise SystemExit(f"cannot materialize oracle kind {oracle.get('kind')!r}")
+
+
+def materialize_bugswarm_baseline(task: dict[str, Any], tree: Path) -> None:
+    checkout = ((task.get("meta") or {}).get("bugswarm_checkout_path") or "").strip()
+    if checkout:
+        src = Path(checkout)
+        if not src.exists():
+            raise SystemExit(f"BugSwarm checkout path does not exist: {checkout}")
+        shutil.copytree(src, tree, dirs_exist_ok=False)
+        return
+    image = bugswarm_image(task)
+    source_dir = bugswarm_source_dir(task)
+    tree.parent.mkdir(parents=True, exist_ok=True)
+    container = run(["docker", "create", image, "bash", "-lc", "true"], cwd=KITSOKI_ROOT, capture=True).stdout.strip()
+    if not container:
+        raise SystemExit(f"docker create returned no container id for {image}")
+    try:
+        run(["docker", "cp", f"{container}:{source_dir}/.", str(tree)], cwd=KITSOKI_ROOT)
+    finally:
+        subprocess.run(["docker", "rm", "-f", container], cwd=KITSOKI_ROOT, text=True, capture_output=True)
+
+
+def bugswarm_image(task: dict[str, Any]) -> str:
+    oracle = task.get("oracle") or {}
+    image_tag = str(oracle.get("image_tag") or task.get("image_tag") or "")
+    if not image_tag:
+        raise SystemExit(f"BugSwarm task {task.get('id')!r} missing image_tag")
+    meta = task.get("meta") or {}
+    repo = str(meta.get("bugswarm_image_repo") or os.environ.get("ARENA_BUGSWARM_IMAGE_REPO") or "bugswarm/cached-images")
+    return f"{repo}:{image_tag}"
+
+
+def bugswarm_source_dir(task: dict[str, Any]) -> str:
+    meta = task.get("meta") or {}
+    explicit = str(meta.get("bugswarm_source_dir") or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    repo = str(task.get("repo_label") or task.get("repo") or "").strip("/")
+    if "/" not in repo:
+        raise SystemExit(f"BugSwarm task {task.get('id')!r} needs repo_label owner/name or meta.bugswarm_source_dir")
+    return f"/home/travis/build/{repo}"
 
 
 def dispatch_worker(args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> dict[str, Any]:
@@ -780,12 +819,36 @@ def score_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:
             notes = notes or json.dumps(cell.get("outcome", {}), sort_keys=True)
         return {"verdict": verdict, "evidence": container_path(out), "notes": notes}
     if oracle.get("kind") == "bugswarm_fail_pass_pair":
-        return {
-            "verdict": "blocked",
-            "evidence": task_ref(task),
-            "notes": "BugSwarm live scoring requires an artifact-materialization adapter",
-        }
+        return score_bugswarm_tree(task, tree)
     return {"verdict": "blocked", "evidence": "", "notes": f"unknown oracle kind {oracle.get('kind')!r}"}
+
+
+def score_bugswarm_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:
+    image = bugswarm_image(task)
+    source_dir = bugswarm_source_dir(task)
+    proc = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{tree}:{source_dir}",
+            image,
+            "bash",
+            "-lc",
+            "./run_failed.sh",
+        ],
+        cwd=KITSOKI_ROOT,
+        text=True,
+        capture_output=True,
+        timeout=int(os.environ.get("ARENA_BUGSWARM_SCORE_TIMEOUT_S", "7200")),
+    )
+    notes = f"bugswarm run_failed.sh exit={proc.returncode}: {first_line(proc.stdout + chr(10) + proc.stderr)}"
+    return {
+        "verdict": "solved" if proc.returncode == 0 else "failed",
+        "evidence": task_ref(task),
+        "notes": notes,
+    }
 
 
 def task_ref(task: dict[str, Any]) -> str:

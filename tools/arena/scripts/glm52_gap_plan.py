@@ -154,17 +154,6 @@ def corpus_action(
         action["prerequisites"].extend(audit["problems"])
         action["commands"].append(f"python3 tools/arena/arena.py plan --spec {spec}")
         return action
-    if corpus == "bugswarm":
-        action["status"] = "needs-runner-adapter"
-        action["spec"] = spec
-        action["prerequisites"].append(
-            "paired_task_runner still blocks BugSwarm --live materialization; add the artifact materialization/scoring adapter before spending."
-        )
-        action["commands"].extend([
-            f"python3 tools/arena/arena.py plan --spec {spec}",
-            f"python3 tools/arena/arena.py run --spec {spec} --out {out_dir}",
-        ])
-        return action
     action["status"] = "ready"
     action["spec"] = spec
     action["commands"].extend([
