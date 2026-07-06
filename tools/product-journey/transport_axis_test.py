@@ -208,7 +208,7 @@ def _test_emit_run_transport_axis():
             for action in bugfix_leg["driver_actions"]
             if action["id"] == "act_as_persona"
         )
-        _check("bugfix tui leg carries transcript-derived natural utterances", len(bugfix_utterances) == 2)
+        _check("bugfix tui leg carries transcript-derived natural utterances", len(bugfix_utterances) == 3)
         _check("bugfix tui act_as_persona action carries the same utterances", action_utterances == bugfix_utterances)
         _check(
             "bugfix tui natural utterances cite mined transcript sources",

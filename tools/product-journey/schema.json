@@ -82,8 +82,9 @@
   "stage_statuses": ["planned", "ready", "captured", "cached_validated", "validated", "blocked", "error"],
   "scenario": {
     "required": ["id", "label", "stage", "task", "task_prompt", "primary_story", "required_mcp", "evidence", "success_criteria"],
-    "optional": ["natural_utterances", "transports"],
+    "optional": ["natural_utterances", "case_variants", "transports"],
     "natural_utterance_required": ["text", "source", "source_ref"],
+    "case_variant_required": ["id", "utterance", "setup", "success_focus"],
     "core_scenarios_require_natural_utterances": ["project-onboarding", "prd-design", "bugfix"]
   },
   "transports": {
