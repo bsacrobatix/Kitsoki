@@ -5483,6 +5483,7 @@ def render_autonomous_marathon_control(control: dict) -> str:
     watchdog = control.get("watchdog", {})
     budget = control.get("budget", {})
     gh_agent = control.get("gh_agent", {})
+    gitops = control.get("gitops", {}) if isinstance(control.get("gitops", {}), dict) else {}
     lines = [
         "# Autonomous Marathon Control",
         "",
@@ -5495,6 +5496,7 @@ def render_autonomous_marathon_control(control: dict) -> str:
         f"- Human role: {control.get('human_role', '')}",
         f"- Heartbeat: every {watchdog.get('heartbeat_minutes', 0)} minute(s)",
         f"- Watchdog: escalate after {watchdog.get('watchdog_minutes', 0)} minute(s)",
+        f"- Ticket repo: `{gitops.get('ticket_repo', '') or '(not set)'}`",
         f"- Hosted gh-agent: `{gh_agent.get('public_base_url', '') or '(not set)'}`",
         "",
         "## Final Gates",
@@ -5516,6 +5518,10 @@ def autonomous_marathon_control_summary(control: dict) -> str:
         f"heartbeat={watchdog.get('heartbeat_minutes', 0)}m, "
         f"watchdog={watchdog.get('watchdog_minutes', 0)}m"
     )
+
+
+def shell_command(parts: list[str]) -> str:
+    return " ".join(shlex.quote(str(part)) for part in parts)
 
 
 def gh_agent_health_url(public_base_url: str) -> str:
@@ -5710,6 +5716,7 @@ def write_autonomous_marathon_control(
     heartbeat_minutes: int,
     watchdog_minutes: int,
     gh_agent_public_base_url: str = "",
+    ticket_repo: str = "",
 ) -> dict:
     if cadence_hours <= 0:
         raise SystemExit("--autonomous-cadence-hours must be > 0")
@@ -5746,6 +5753,9 @@ def write_autonomous_marathon_control(
         "gh_agent": {
             "public_base_url": gh_agent_public_base_url.strip().rstrip("/"),
         },
+        "gitops": {
+            "ticket_repo": ticket_repo.strip(),
+        },
         "human_role": "review outcomes and set budget; no issue filing, fix dispatch, close-out, or stats glue",
         "final_gates": [
             "autonomous_watchdog",
@@ -5758,6 +5768,220 @@ def write_autonomous_marathon_control(
     write_json(autonomous_marathon_control_path(run_dir), control)
     autonomous_marathon_control_markdown_path(run_dir).write_text(render_autonomous_marathon_control(control), encoding="utf-8")
     return control
+
+
+def autonomous_marathon_cycle_seed(seed: str, checked: datetime.datetime) -> str:
+    base = (seed or "default").strip()
+    suffix = checked.strftime("%Y%m%dT%H%M%SZ")
+    if base.endswith(suffix):
+        return base
+    return f"{base}-cycle-{suffix}"
+
+
+def autonomous_marathon_due_command(run_json: dict, control: dict, checked: datetime.datetime) -> list[str]:
+    cadence = control.get("cadence", {}) if isinstance(control.get("cadence", {}), dict) else {}
+    budget = control.get("budget", {}) if isinstance(control.get("budget", {}), dict) else {}
+    watchdog = control.get("watchdog", {}) if isinstance(control.get("watchdog", {}), dict) else {}
+    gitops = control.get("gitops", {}) if isinstance(control.get("gitops", {}), dict) else {}
+    gh_agent = control.get("gh_agent", {}) if isinstance(control.get("gh_agent", {}), dict) else {}
+    scenarios = control.get("scenario_scope") or [
+        scenario.get("id", "")
+        for scenario in run_json.get("scenarios", [])
+        if isinstance(scenario, dict) and scenario.get("id")
+    ]
+    project = run_json.get("project", {}).get("id", "") if isinstance(run_json.get("project"), dict) else ""
+    persona = run_json.get("persona", {}).get("id", "") if isinstance(run_json.get("persona"), dict) else ""
+    parts = [
+        "python3",
+        "tools/product-journey/run.py",
+        "--autonomous-marathon",
+        "--json-output",
+        "--report-invalid-autonomous-marathon",
+        "--project",
+        project,
+        "--persona",
+        persona,
+        "--seed",
+        autonomous_marathon_cycle_seed(str(run_json.get("seed", "")), checked),
+        "--scenarios",
+        ",".join(str(item) for item in scenarios if str(item).strip()),
+        "--live-budget-minutes",
+        int(budget.get("per_scenario_live_minutes", run_json.get("live_budget_minutes", 0)) or 0),
+        "--autonomous-driver-mode",
+        str(control.get("driver_mode", "") or "pending"),
+        "--autonomous-cadence-hours",
+        int(cadence.get("hours", 24) or 24),
+        "--autonomous-heartbeat-minutes",
+        int(watchdog.get("heartbeat_minutes", 15) or 15),
+        "--autonomous-watchdog-minutes",
+        int(watchdog.get("watchdog_minutes", 45) or 45),
+        "--ticket-repo",
+        str(gitops.get("ticket_repo", "")),
+        "--gh-agent-public-base-url",
+        str(gh_agent.get("public_base_url", "")),
+    ]
+    return [str(part) for part in parts]
+
+
+def autonomous_marathon_due_story_intent(run_json: dict, control: dict, checked: datetime.datetime) -> str:
+    parts = autonomous_marathon_due_command(run_json, control, checked)
+    values = {}
+    index = 0
+    while index < len(parts):
+        part = parts[index]
+        if part.startswith("--") and index + 1 < len(parts) and not parts[index + 1].startswith("--"):
+            values[part[2:].replace("-", "_")] = parts[index + 1]
+            index += 2
+            continue
+        index += 1
+    return (
+        "autonomous_marathon "
+        f"project={values.get('project', '')} "
+        f"persona={values.get('persona', '')} "
+        f"seed={values.get('seed', '')} "
+        f"scenarios={values.get('scenarios', '')} "
+        f"live_budget_minutes={values.get('live_budget_minutes', '')} "
+        f"autonomous_driver_mode={values.get('autonomous_driver_mode', '')} "
+        f"ticket_repo={values.get('ticket_repo', '')} "
+        f"gh_agent_public_base_url={values.get('gh_agent_public_base_url', '')}"
+    ).strip()
+
+
+def autonomous_marathon_due_item(run_dir: Path, control: dict, checked: datetime.datetime) -> dict:
+    run_json = read_json(run_dir / "run.json") if (run_dir / "run.json").exists() else {}
+    cadence = control.get("cadence", {}) if isinstance(control.get("cadence", {}), dict) else {}
+    budget = control.get("budget", {}) if isinstance(control.get("budget", {}), dict) else {}
+    gitops = control.get("gitops", {}) if isinstance(control.get("gitops", {}), dict) else {}
+    gh_agent = control.get("gh_agent", {}) if isinstance(control.get("gh_agent", {}), dict) else {}
+    status = str(control.get("status", ""))
+    driver_mode = str(control.get("driver_mode", ""))
+    next_due_value = str(cadence.get("next_due_at", ""))
+    item = {
+        "run_id": control.get("run_id", run_json.get("run_id", run_dir.name)),
+        "run_dir": str(run_dir),
+        "control_path": str(autonomous_marathon_control_path(run_dir)),
+        "status": status,
+        "driver_mode": driver_mode,
+        "project": run_json.get("project", {}).get("id", "") if isinstance(run_json.get("project"), dict) else "",
+        "persona": run_json.get("persona", {}).get("id", "") if isinstance(run_json.get("persona"), dict) else "",
+        "seed": run_json.get("seed", ""),
+        "scenario_scope": control.get("scenario_scope", []),
+        "live_budget_minutes": int(budget.get("per_scenario_live_minutes", run_json.get("live_budget_minutes", 0)) or 0),
+        "ticket_repo": str(gitops.get("ticket_repo", "")),
+        "gh_agent_public_base_url": str(gh_agent.get("public_base_url", "")),
+        "next_due_at": next_due_value,
+        "minutes_until_due": 0,
+        "minutes_overdue": 0,
+        "blocked_reason": "",
+        "ignored_reason": "",
+        "next_command": "",
+        "next_story_intent": "",
+    }
+    if not run_json:
+        item["blocked_reason"] = "missing run.json"
+        return item
+    if status not in {"armed", "ready_for_driver"}:
+        item["ignored_reason"] = f"control status {status or '(empty)'} is not an active standing marathon"
+        return item
+    if not next_due_value:
+        item["blocked_reason"] = "missing cadence.next_due_at"
+        return item
+    try:
+        next_due = parse_iso_datetime(next_due_value)
+    except SystemExit:
+        item["blocked_reason"] = f"invalid cadence.next_due_at: {next_due_value}"
+        return item
+    delta_minutes = int((next_due - checked).total_seconds() // 60)
+    item["minutes_until_due"] = max(0, delta_minutes)
+    item["minutes_overdue"] = max(0, -delta_minutes)
+    if driver_mode == "pending":
+        item["blocked_reason"] = "pending driver mode still requires operator handoff; use replay, record, or live for unattended cadence"
+        return item
+    if driver_mode in {"record", "live"}:
+        dispatch = read_json(autonomous_driver_dispatch_path(run_dir)) if autonomous_driver_dispatch_path(run_dir).exists() else {}
+        if dispatch.get("status") != "captured":
+            item["blocked_reason"] = "record/live driver has no captured autonomous-driver-dispatch receipt"
+            return item
+    if item["live_budget_minutes"] > 0 or driver_mode == "replay":
+        missing = []
+        if not item["ticket_repo"]:
+            missing.append("ticket_repo")
+        if not item["gh_agent_public_base_url"]:
+            missing.append("gh_agent_public_base_url")
+        if missing:
+            item["blocked_reason"] = "missing gitops config: " + ", ".join(missing)
+            return item
+    if checked < next_due:
+        return item
+    command_parts = autonomous_marathon_due_command(run_json, control, checked)
+    item["next_command"] = shell_command(command_parts)
+    item["next_story_intent"] = autonomous_marathon_due_story_intent(run_json, control, checked)
+    return item
+
+
+def autonomous_marathon_due(root: Path, checked_at: str = "", limit: int = 10) -> dict:
+    checked = parse_iso_datetime(checked_at) if checked_at else parse_iso_datetime(now_utc())
+    controls = sorted(root.rglob("autonomous-marathon-control.json")) if root.exists() else []
+    due: list[dict] = []
+    upcoming: list[dict] = []
+    blocked: list[dict] = []
+    ignored: list[dict] = []
+    for control_path in controls:
+        run_dir = control_path.parent
+        try:
+            control = read_json(control_path)
+        except (OSError, json.JSONDecodeError) as exc:
+            blocked.append({
+                "run_id": run_dir.name,
+                "run_dir": str(run_dir),
+                "control_path": str(control_path),
+                "blocked_reason": f"cannot read control: {exc}",
+            })
+            continue
+        item = autonomous_marathon_due_item(run_dir, control, checked)
+        if item.get("blocked_reason"):
+            blocked.append(item)
+        elif item.get("ignored_reason"):
+            ignored.append(item)
+        elif item.get("next_command"):
+            due.append(item)
+        elif item.get("next_due_at"):
+            upcoming.append(item)
+        else:
+            ignored.append(item)
+    due.sort(key=lambda item: (item.get("minutes_overdue", 0) * -1, item.get("next_due_at", ""), item.get("run_id", "")))
+    upcoming.sort(key=lambda item: (item.get("minutes_until_due", 0), item.get("next_due_at", ""), item.get("run_id", "")))
+    blocked.sort(key=lambda item: (item.get("run_id", ""), item.get("blocked_reason", "")))
+    limited_due = due[:max(0, limit)]
+    limited_upcoming = upcoming[:max(0, limit)]
+    limited_blocked = blocked[:max(0, limit)]
+    next_due = limited_due[0] if limited_due else {}
+    summary = (
+        f"{len(due)} due, {len(upcoming)} upcoming, {len(blocked)} blocked, {len(ignored)} ignored"
+    )
+    if next_due:
+        summary += f"; next {next_due.get('run_id', '')} overdue {next_due.get('minutes_overdue', 0)}m"
+    return {
+        "schema": "kitsoki/product-journey-autonomous-marathon-due/v1",
+        "status": "autonomous_marathon_due_checked",
+        "checked_at": checked.isoformat(timespec="seconds"),
+        "root": str(root),
+        "summary": summary,
+        "due_count": len(due),
+        "upcoming_count": len(upcoming),
+        "blocked_count": len(blocked),
+        "ignored_count": len(ignored),
+        "total_count": len(controls),
+        "due_runs": limited_due,
+        "upcoming_runs": limited_upcoming,
+        "blocked_runs": limited_blocked,
+        "ignored_runs": ignored[:max(0, limit)],
+        "next_due_run_id": next_due.get("run_id", ""),
+        "next_due_run_dir": next_due.get("run_dir", ""),
+        "next_due_command": next_due.get("next_command", ""),
+        "next_due_story_intent": next_due.get("next_story_intent", ""),
+        "next_due_minutes_overdue": next_due.get("minutes_overdue", 0),
+    }
 
 
 def latest_driver_heartbeat(run_dir: Path) -> dict:
@@ -6336,6 +6560,7 @@ def autonomous_marathon(
             autonomous_heartbeat_minutes,
             autonomous_watchdog_minutes,
             gh_agent_public_base_url,
+            ticket_repo,
         )
         if autonomous_driver_mode == "replay":
             if not ticket_repo:
@@ -11620,6 +11845,7 @@ def main() -> None:
     parser.add_argument("--file-findings", action="store_true", help="File the bundle's credible issue findings as GitHub issues via the kitsoki bug orchestration")
     parser.add_argument("--autonomous-fix-loop", action="store_true", help="Internal legacy test backend for kitsoki gitops autonomous-fix")
     parser.add_argument("--autonomous-marathon", action="store_true", help="Create or finalize a standing persona-QA marathon through native autonomous fix, review, validation, and stats")
+    parser.add_argument("--autonomous-marathon-due", action="store_true", help="Scan standing persona-QA marathon control artifacts and report due cadence cycles")
     parser.add_argument("--autonomous-marathon-watchdog", action="store_true", help="Check a standing persona-QA marathon heartbeat against its watchdog control artifact")
     parser.add_argument(
         "--autonomous-driver-mode",
@@ -11631,6 +11857,8 @@ def main() -> None:
     parser.add_argument("--autonomous-heartbeat-minutes", type=int, default=15, help="Heartbeat interval recorded in autonomous marathon control artifacts")
     parser.add_argument("--autonomous-watchdog-minutes", type=int, default=45, help="Watchdog escalation interval recorded in autonomous marathon control artifacts")
     parser.add_argument("--watchdog-now", default="", help="Deterministic ISO timestamp for --autonomous-marathon-watchdog tests")
+    parser.add_argument("--due-now", default="", help="Deterministic ISO timestamp for --autonomous-marathon-due tests")
+    parser.add_argument("--due-limit", type=int, default=10, help="Maximum due/upcoming/blocked marathon rows returned by --autonomous-marathon-due")
     parser.add_argument("--report-invalid-autonomous-fix", action="store_true", help="With internal autonomous-fix backends, print invalid gate JSON and exit 0 so story callers can bind failure evidence")
     parser.add_argument("--report-invalid-autonomous-marathon", action="store_true", help="With --autonomous-marathon, print invalid marathon JSON and exit 0 so story callers can bind failure evidence")
     parser.add_argument("--report-blocked-autonomous-watchdog", action="store_true", help="With --autonomous-marathon-watchdog, print blocked watchdog JSON and exit 0 so story callers can bind failure evidence")
@@ -12232,6 +12460,23 @@ def main() -> None:
         append_log(f"Checked autonomous marathon watchdog for {run_dir.name}: {result['status']}")
         if result["status"] != "autonomous_watchdog_ok" and not args.report_blocked_autonomous_watchdog:
             raise SystemExit(1)
+        return
+
+    if args.autonomous_marathon_due:
+        root = run_dir_from_arg(args.stats_root) if args.stats_root else ARTIFACT_ROOT
+        result = autonomous_marathon_due(root, args.due_now, args.due_limit)
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Checked autonomous marathon due runs under {root}: {result['summary']}")
+            return
+        print(f"Autonomous marathon due: {result['summary']}")
+        print(f"Root: {result['root']}")
+        if result["next_due_command"]:
+            print(f"Next command: {result['next_due_command']}")
+            print(f"Next story intent: {result['next_due_story_intent']}")
+        for item in result["blocked_runs"]:
+            print(f"- blocked {item.get('run_id', '')}: {item.get('blocked_reason', '')}")
+        append_log(f"Checked autonomous marathon due runs under {root}: {result['summary']}")
         return
 
     if args.autonomous_marathon:

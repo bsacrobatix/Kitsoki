@@ -229,6 +229,19 @@ world:
   autonomous_marathon_status: { type: string, default: "" }
   autonomous_marathon_summary: { type: string, default: "" }
   autonomous_marathon_report_path: { type: string, default: "" }
+  autonomous_due_status: { type: string, default: "" }
+  autonomous_due_summary: { type: string, default: "" }
+  autonomous_due_root: { type: string, default: "" }
+  autonomous_due_count: { type: int, default: 0 }
+  autonomous_due_upcoming_count: { type: int, default: 0 }
+  autonomous_due_blocked_count: { type: int, default: 0 }
+  autonomous_due_ignored_count: { type: int, default: 0 }
+  autonomous_due_total_count: { type: int, default: 0 }
+  autonomous_due_next_run_id: { type: string, default: "" }
+  autonomous_due_next_run_dir: { type: string, default: "" }
+  autonomous_due_next_command: { type: string, default: "" }
+  autonomous_due_next_story_intent: { type: string, default: "" }
+  autonomous_due_next_minutes_overdue: { type: int, default: 0 }
   autonomous_driver_mode: { type: string, default: "" }
   autonomous_driver_status: { type: string, default: "" }
   autonomous_driver_summary: { type: string, default: "" }
@@ -382,6 +395,14 @@ intents:
       autonomous_cadence_hours: { type: int, required: false }
       autonomous_heartbeat_minutes: { type: int, required: false }
       autonomous_watchdog_minutes: { type: int, required: false }
+  autonomous_marathon_due:
+    description: "Scan standing persona-QA marathon control artifacts and surface due fresh-cycle runs."
+    examples: ["autonomous marathon due", "check due marathons", "marathon due stats_root=.artifacts/product-journey"]
+    priority: 89
+    slots:
+      stats_root: { type: string, required: false }
+      due_now: { type: string, required: false }
+      due_limit: { type: int, required: false }
   dispatch_driver:
     description: "Dispatch the story-owned record/live product-journey QA driver for a ready autonomous marathon run."
     examples: ["dispatch driver", "run autonomous driver", "capture live persona evidence"]
@@ -530,7 +551,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, capture_preflight, native_ghagent_smoke, autonomous_fix_smoke, persona_autofix_smoke, autonomous_marathon_smoke, autonomous_marathon, dispatch_driver, autonomous_watchdog, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, autonomous_fix, stats, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
+  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, capture_preflight, native_ghagent_smoke, autonomous_fix_smoke, persona_autofix_smoke, autonomous_marathon_smoke, autonomous_marathon, autonomous_marathon_due, dispatch_driver, autonomous_watchdog, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, autonomous_fix, stats, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
 
 root: idle
 
