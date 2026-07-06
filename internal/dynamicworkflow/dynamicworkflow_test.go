@@ -130,10 +130,17 @@ func TestServiceCreatePreservesSyntheticGLMCoverageFanout(t *testing.T) {
 
 	manifest, err := readManifest(receipt.ManifestPath)
 	require.NoError(t, err)
+	manifestBytes, err := os.ReadFile(receipt.ManifestPath)
+	require.NoError(t, err)
+	manifestYAML := string(manifestBytes)
 	require.Equal(t, "synthetic-claude", manifest.Defaults.Profile)
 	require.Equal(t, "hf:zai-org/GLM-5.2", manifest.Defaults.Model)
 	require.Equal(t, "ladder", manifest.Defaults.Harness)
 	require.False(t, manifest.Defaults.RequireTraceModel)
+	require.NotNil(t, manifest.Defaults.RequireGPT55)
+	require.False(t, *manifest.Defaults.RequireGPT55)
+	require.Contains(t, manifestYAML, "require_gpt55: false")
+	require.Contains(t, manifestYAML, "require_trace_model: false")
 	require.NotNil(t, manifest.Defaults.HarnessLadder)
 	require.Equal(t, []HarnessLadderModel{
 		{Backend: "claude", Provider: "synthetic-claude", Model: "hf:zai-org/GLM-5.2"},
@@ -185,10 +192,17 @@ func TestServiceCreateResearchTestingApproachesFanout(t *testing.T) {
 
 	manifest, err := readManifest(receipt.ManifestPath)
 	require.NoError(t, err)
+	manifestBytes, err := os.ReadFile(receipt.ManifestPath)
+	require.NoError(t, err)
+	manifestYAML := string(manifestBytes)
 	require.Equal(t, "synthetic-claude", manifest.Defaults.Profile)
 	require.Equal(t, "hf:zai-org/GLM-5.2", manifest.Defaults.Model)
 	require.Equal(t, "ladder", manifest.Defaults.Harness)
 	require.False(t, manifest.Defaults.RequireTraceModel)
+	require.NotNil(t, manifest.Defaults.RequireGPT55)
+	require.False(t, *manifest.Defaults.RequireGPT55)
+	require.Contains(t, manifestYAML, "require_gpt55: false")
+	require.Contains(t, manifestYAML, "require_trace_model: false")
 	require.NotNil(t, manifest.Defaults.HarnessLadder)
 	require.Equal(t, []HarnessLadderModel{
 		{Backend: "claude", Provider: "synthetic-claude", Model: "hf:zai-org/GLM-5.2"},
