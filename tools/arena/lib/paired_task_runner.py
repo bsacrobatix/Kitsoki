@@ -50,7 +50,7 @@ MODEL_TO_RAW_CLAUDE_PROFILE = {
     "glm-5.2": "synthetic-claude",
 }
 
-RAW_ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep MultiEdit"
+RAW_ALLOWED_TOOLS = "Bash,Edit,Write,Read,Glob,Grep,MultiEdit"
 
 
 def blended_cost_usd(model: str, tokens: int) -> tuple[float, bool]:
