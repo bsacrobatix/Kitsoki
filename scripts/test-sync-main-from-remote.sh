@@ -98,6 +98,21 @@ git -C "$repo" merge-base --is-ancestor main "$clean_branch"
 git -C "$repo" worktree remove .worktrees/clean-sync
 git -C "$repo" branch -D "$clean_branch" >/dev/null
 
+git -C "$repo" reset -q --hard origin/main
+commit_file "$repo" local-only.txt local-only
+ahead_out="$tmp/ahead.out"
+(
+  cd "$repo"
+  scripts/sync-main-from-remote.sh --no-fetch
+) >"$ahead_out"
+assert_contains "$ahead_out" "main already contains origin/main, but local main is ahead by 1 commit."
+assert_contains "$ahead_out" "Run push_main remote=origin"
+if grep -Fq "Integration branch:" "$ahead_out"; then
+  echo "local-ahead sync should not prepare an integration branch" >&2
+  cat "$ahead_out" >&2
+  exit 1
+fi
+
 conflict="$tmp/conflict"
 git clone -q "$bare" "$conflict"
 git -C "$conflict" config user.name "Test User"
