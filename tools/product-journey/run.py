@@ -297,7 +297,13 @@ def persona_autofix_smoke() -> dict:
 
 
 def autonomous_marathon_smoke() -> dict:
-    result = shell([sys.executable, str(AUTONOMOUS_MARATHON_SMOKE)], ROOT)
+    report_dir = ARTIFACT_ROOT / "marathon-smokes" / slug_timestamp()
+    result = shell([
+        sys.executable,
+        str(AUTONOMOUS_MARATHON_SMOKE),
+        "--report-dir",
+        str(report_dir),
+    ], ROOT)
     output = (result.stdout + result.stderr).strip()
     summary = {}
     for line in output.splitlines():
@@ -312,6 +318,8 @@ def autonomous_marathon_smoke() -> dict:
             "summary": "core use-case autonomous product-QA marathon persona sweep failed",
             "exit_code": result.returncode,
             "output": output,
+            "report_path": str(report_dir / "autonomous-marathon-smoke.json"),
+            "report_markdown_path": str(report_dir / "autonomous-marathon-smoke.md"),
             **summary,
         }
     return {
@@ -319,6 +327,8 @@ def autonomous_marathon_smoke() -> dict:
         "summary": "core use-case autonomous product-QA marathon persona sweep passed",
         "exit_code": result.returncode,
         "output": output,
+        "report_path": str(report_dir / "autonomous-marathon-smoke.json"),
+        "report_markdown_path": str(report_dir / "autonomous-marathon-smoke.md"),
         **summary,
     }
 
@@ -12212,6 +12222,10 @@ def main() -> None:
             return
         print(f"Autonomous marathon smoke: {result['status']}")
         print(result["summary"])
+        if result.get("report_path"):
+            print(f"Ledger JSON: {result['report_path']}")
+        if result.get("report_markdown_path"):
+            print(f"Ledger Markdown: {result['report_markdown_path']}")
         if result["output"]:
             print(result["output"])
         append_log(f"Ran autonomous marathon smoke: {result['status']}")
