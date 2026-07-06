@@ -138,6 +138,7 @@ try:
     docker_backend.run(cell=cells[0], host="local", image="image:test", argv=["echo", "ok"], mounts={"/repo": "/workspace/kitsoki"})
     check("docker socket mounted when requested", "-v" in docker_commands[-1] and "/var/run/docker.sock:/var/run/docker.sock" in docker_commands[-1], True)
     check("docker host env forwarded", "DOCKER_HOST=unix:///var/run/docker.sock" in docker_commands[-1], True)
+    check("host repo mirror mounted for nested docker", "/repo:/repo" in docker_commands[-1], True)
 finally:
     if old_sock is None:
         os.environ.pop("ARENA_DOCKER_SOCK_SRC", None)
