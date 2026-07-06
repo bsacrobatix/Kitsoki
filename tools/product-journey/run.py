@@ -10329,6 +10329,29 @@ def scenario_qa_report_summary(name: str, counts: dict) -> str:
     return summary + "."
 
 
+def scenario_qa_natural_prompt_lines(items: list[dict]) -> list[str]:
+    lines = []
+    for item in items:
+        count = int(item.get("natural_utterance_count", 0) or 0)
+        if count <= 0:
+            continue
+        sources = item.get("natural_utterance_sources", [])
+        if not isinstance(sources, list):
+            sources = []
+        source_text = ", ".join(str(source) for source in sources if source)
+        example = str(item.get("natural_utterance_example", "") or "")
+        line = (
+            f"{item.get('transport', '')} / {item.get('scenario', '')}: "
+            f"{count} transcript-derived prompt(s)"
+        )
+        if example:
+            line += f"; example: \"{example}\""
+        if source_text:
+            line += f"; sources: {source_text}"
+        lines.append(line)
+    return lines
+
+
 def parse_scenario_qa_leg_results(raw: str) -> dict:
     """Accepts an inline JSON object (the common case -- a story's `host.run`
     invoke templates world.leg_results, a map, directly into this flag and the
@@ -10359,6 +10382,37 @@ def render_scenario_qa_deck(name: str, run_id: str, items: list[dict], counts: d
         f"- {item.get('verdict_summary', '')}"
         for item in items
     ]
+    natural_prompt_lines = scenario_qa_natural_prompt_lines(items)
+    scenes = [
+        {
+            "type": "title",
+            "title": "Scenario QA",
+            "subtitle": name,
+            "narration": "This deck folds every transport leg's independently-judged verdict into one per-scenario view.",
+        },
+        {
+            "type": "narrative",
+            "eyebrow": "Verdict",
+            "title": scenario_qa_report_summary(name, counts),
+            "body": "\n".join(f"- {row}" for row in rows) or "(no transport legs recorded yet)",
+            "narration": "Each row is one transport leg: an independently-driven and independently-judged capture, never the driver's own self-report.",
+        },
+    ]
+    if natural_prompt_lines:
+        scenes.append({
+            "type": "narrative",
+            "eyebrow": "Natural prompts",
+            "title": "Transcript-derived scenario wording",
+            "body": "\n".join(f"- {line}" for line in natural_prompt_lines),
+            "narration": "Scenario QA preserves the mined human wording that the driver used for natural persona actions.",
+        })
+    scenes.append({
+        "type": "narrative",
+        "eyebrow": "Run",
+        "title": run_id,
+        "body": f"{counts['total']} transport leg(s); {counts['pass']} pass, {counts['fail']} fail, {counts['degraded']} degraded-evidence.",
+        "narration": "vscode legs are always bridge-level proof (the IDE bridge stub/recording path) -- never mistake them for editor-level coverage.",
+    })
     return {
         "meta": {
             "mode": "report",
@@ -10366,28 +10420,7 @@ def render_scenario_qa_deck(name: str, run_id: str, items: list[dict], counts: d
             "phase": "scenario-qa-report",
             "resolution": {"width": 1920, "height": 1080},
         },
-        "scenes": [
-            {
-                "type": "title",
-                "title": "Scenario QA",
-                "subtitle": name,
-                "narration": "This deck folds every transport leg's independently-judged verdict into one per-scenario view.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Verdict",
-                "title": scenario_qa_report_summary(name, counts),
-                "body": "\n".join(f"- {row}" for row in rows) or "(no transport legs recorded yet)",
-                "narration": "Each row is one transport leg: an independently-driven and independently-judged capture, never the driver's own self-report.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Run",
-                "title": run_id,
-                "body": f"{counts['total']} transport leg(s); {counts['pass']} pass, {counts['fail']} fail, {counts['degraded']} degraded-evidence.",
-                "narration": "vscode legs are always bridge-level proof (the IDE bridge stub/recording path) -- never mistake them for editor-level coverage.",
-            },
-        ],
+        "scenes": scenes,
     }
 
 
