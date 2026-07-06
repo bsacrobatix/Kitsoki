@@ -109,6 +109,14 @@ if [ -z "$commits" ]; then
   exit 0
 fi
 
+redundant_commits="$(git cherry main "$branch" | awk '/^- / { print $2 }')"
+if [ -n "$redundant_commits" ]; then
+  echo "error: $branch contains commit patches already represented on current main; inspect before replaying stale work" >&2
+  git log --no-walk --oneline $redundant_commits >&2
+  echo "hint: main may already contain another fix for the same ticket; rebase/trim the branch and rerun validation before landing" >&2
+  exit 1
+fi
+
 cleanup() {
   if [ -e "$worktree" ]; then
     git worktree remove "$worktree" --force >/dev/null 2>&1 || true
