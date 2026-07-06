@@ -5616,6 +5616,40 @@ def record_autonomous_driver_dispatch(
     return receipt
 
 
+def blocked_autonomous_driver_dispatch(run_dir: Path) -> dict:
+    control_path = autonomous_marathon_control_path(run_dir)
+    if not control_path.exists():
+        return {}
+    control = read_json(control_path)
+    mode = control.get("driver_mode", "")
+    if mode not in {"record", "live"}:
+        return {}
+    receipt_path = autonomous_driver_dispatch_path(run_dir)
+    if receipt_path.exists():
+        receipt = read_json(receipt_path)
+        status = receipt.get("status", "")
+        if status == "captured":
+            return {}
+        summary = receipt.get("summary", "") or f"autonomous driver dispatch ended with status={status or 'unknown'}"
+        trace = receipt.get("trace", "")
+        receipt_markdown = str(autonomous_driver_dispatch_markdown_path(run_dir))
+    else:
+        status = "missing"
+        summary = "autonomous driver dispatch receipt is missing; stop before final gates"
+        trace = ""
+        receipt_markdown = ""
+    return {
+        "autonomous_driver_mode": mode,
+        "autonomous_driver_status": status,
+        "autonomous_driver_summary": summary,
+        "autonomous_driver_dispatch_status": status,
+        "autonomous_driver_dispatch_summary": summary,
+        "autonomous_driver_dispatch_trace": trace,
+        "autonomous_driver_dispatch_path": str(receipt_path) if receipt_path.exists() else "",
+        "autonomous_driver_dispatch_markdown_path": receipt_markdown,
+    }
+
+
 def render_autonomous_marathon_report(run_dir: Path, result: dict) -> str:
     lines = [
         "# Autonomous Marathon Report",
@@ -5978,6 +6012,84 @@ def autonomous_marathon(
         return result
 
     update_derived_artifacts(run_dir, publish_deck=None)
+    driver_dispatch_block = blocked_autonomous_driver_dispatch(run_dir)
+    if driver_dispatch_block:
+        summary = driver_dispatch_block.get("autonomous_driver_summary", "")
+        result = {
+            **run_story_summary(run_dir),
+            **driver_dispatch_block,
+            "status": "autonomous_marathon_invalid",
+            "autonomous_marathon_status": "autonomous_marathon_invalid",
+            "autonomous_marathon_summary": f"driver=fail: {summary}",
+            "run_dir": str(run_dir),
+            "deck_path": str(run_dir / "deck.slidey.json"),
+            "execution_plan_path": str(run_dir / "execution-plan.md"),
+            "driver_plan_path": str(run_dir / "driver-plan.md"),
+            "driver_journal_path": str(run_dir / "driver-journal.md"),
+            "agent_brief_path": str(run_dir / "agent-brief.md"),
+            "driver_handoff_path": str(run_dir / "driver-handoff.md"),
+            "media_manifest_path": str(run_dir / "media-manifest.json"),
+            "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
+            "autonomous_fix_status": "not_run",
+            "autonomous_gate_summary": "driver=fail, watchdog=not_run, filing=not_run, gh_agent=not_run, independent_verify=fail, review=not_run, validation=fail",
+            "independent_verify_status": "fail",
+            "independent_verify_summary": summary,
+            "issue_closeout_status": "not_run",
+            "issue_closeout_count": 0,
+            "issue_closeout_summary": "Issue close-out skipped because autonomous driver dispatch did not capture proof.",
+            "autonomous_watchdog_status": "not_run",
+            "autonomous_watchdog_summary": "watchdog skipped because autonomous driver dispatch did not capture proof",
+            "autonomous_watchdog_path": "",
+            "autonomous_watchdog_markdown_path": "",
+            "autonomous_watchdog_age_minutes": 0,
+            "filing_status": "not_run",
+            "filing_summary": "Issue filing skipped because autonomous driver dispatch did not capture proof.",
+            "findings_filed_count": 0,
+            "findings_skipped_count": 0,
+            "findings_failed_count": 0,
+            "findings_unfiled_count": 0,
+            "gh_agent_health_status": "not_run",
+            "gh_agent_readiness_status": "not_run",
+            "gh_agent_enqueue_status": "not_run",
+            "gh_agent_drain_status": "not_run",
+            "gh_agent_drained_count": 0,
+            "gh_agent_done_count": 0,
+            "gh_agent_failed_count": 0,
+            "gh_agent_active_count": 0,
+            "review_status": "not_run",
+            "review_summary": "",
+            "review_passed_count": 0,
+            "review_failed_count": 0,
+            "review_warning_count": 0,
+            "review_total_count": 0,
+            "review_backlog_summary": summary,
+            "validation_status": "invalid",
+            "validation_errors": 1,
+            "validation_warnings": 0,
+            "validation_issue_summary": "autonomous-driver-dispatch",
+            "stats_status": "not_run",
+            "stats_root": "",
+            "stats_output": "",
+            "stats_summary": "",
+            "stats_gate_status": "fail",
+            "stats_gate_summary": "driver dispatch failed before stats",
+            "stats_current_run_scanned": "no",
+            "stats_runs_scanned": 0,
+            "stats_found_count": 0,
+            "stats_filed_count": 0,
+            "stats_fixed_count": 0,
+            "stats_reopened_count": 0,
+            "stats_unknown_state_count": 0,
+            "stats_similar_pair_count": 0,
+        }
+        if autonomous_marathon_control_path(run_dir).exists():
+            control = read_json(autonomous_marathon_control_path(run_dir))
+            result["autonomous_control_path"] = str(autonomous_marathon_control_path(run_dir))
+            result["autonomous_control_markdown_path"] = str(autonomous_marathon_control_markdown_path(run_dir))
+            result["autonomous_control_status"] = control.get("status", "")
+            result["autonomous_control_summary"] = autonomous_marathon_control_summary(control)
+        result["autonomous_marathon_report_path"] = str(write_autonomous_marathon_report(run_dir, result))
+        return result
     watchdog = autonomous_marathon_watchdog(run_dir, watchdog_checked_at)
     if watchdog.get("status") != "autonomous_watchdog_ok":
         base = {
