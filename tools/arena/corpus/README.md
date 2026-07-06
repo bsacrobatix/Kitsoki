@@ -39,6 +39,28 @@ BugSwarm tasks start with `verified_red: false` and `verified_green: false`;
 those flags become true only after an explicit Docker verification proves the
 failed job still fails and the passed job still passes inside the artifact.
 
+Plan verification without pulling images:
+
+```bash
+python3 tools/arena/scripts/bugswarm_verify_source.py \
+  --source .artifacts/bugswarm/arena-source.yaml \
+  --out .artifacts/bugswarm/verification.json \
+  --dry-run
+```
+
+Execute verification only when Docker pulls and long CI jobs are acceptable:
+
+```bash
+python3 tools/arena/scripts/bugswarm_verify_source.py \
+  --source .artifacts/bugswarm/arena-source.yaml \
+  --out .artifacts/bugswarm/verification.json \
+  --execute
+```
+
+The verifier follows BugSwarm's own artifact contract: `run_failed.sh` must
+exit non-zero and `run_passed.sh` must exit zero, each in a fresh container so
+the failed script cannot pollute the passed run.
+
 ## GLM-5.2 + BugSwarm Report
 
 The interim research report is generated, not hand-maintained:
@@ -51,6 +73,7 @@ python3 tools/arena/scripts/glm52_bugswarm_report.py \
 ```
 
 Pass `--bugswarm-source <converted-source.yaml>` after importing artifacts with
-`bugswarm_to_arena.py`. The generator keeps unavailable GLM-5.2 cells as
-`pending`, so missing raw-prompt or BugSwarm results cannot accidentally become
-zero-cost failures.
+`bugswarm_to_arena.py`, and `--bugswarm-verification <verification.json>` after
+planning or executing verification with `bugswarm_verify_source.py`. The
+generator keeps unavailable GLM-5.2 cells as `pending`, so missing raw-prompt or
+BugSwarm results cannot accidentally become zero-cost failures.

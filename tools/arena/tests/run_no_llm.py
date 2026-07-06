@@ -74,6 +74,17 @@ def run_default() -> int:
     checks.check("bugswarm source adapter gate", source_test.returncode, 0)
     if source_test.returncode:
         checks.failures.append((source_test.stdout + source_test.stderr).strip())
+    verify_source_test = subprocess.run(
+        [sys.executable, str(HERE / "test_bugswarm_verify_source.py")],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    checks.check("bugswarm source verifier gate", verify_source_test.returncode, 0)
+    if verify_source_test.returncode:
+        checks.failures.append((verify_source_test.stdout + verify_source_test.stderr).strip())
     report_test = subprocess.run(
         [sys.executable, str(HERE / "test_glm52_bugswarm_report.py")],
         cwd=REPO_ROOT,

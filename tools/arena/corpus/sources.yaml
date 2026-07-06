@@ -27,6 +27,7 @@ sources:
     status: adapter-ready
     owner: external
     adapter: tools/arena/scripts/bugswarm_to_arena.py
+    verifier: tools/arena/scripts/bugswarm_verify_source.py
     upstream:
       website: https://www.bugswarm.org/
       client: https://github.com/BugSwarm/client
@@ -59,4 +60,5 @@ sources:
       - heldout external corpus
     notes:
       - "Adapter generation is offline and no-LLM; live artifact verification requires Docker and must be explicitly invoked."
+      - "Verification runs failed and passed scripts in separate fresh containers: run_failed.sh must exit non-zero, run_passed.sh must exit zero."
       - "BugSwarm fail/pass pairs measure CI failure repair; some artifacts are not suitable APR bugs and must be filtered or reported separately."

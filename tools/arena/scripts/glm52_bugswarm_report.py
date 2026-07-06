@@ -35,6 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json-out", required=True)
     parser.add_argument("--markdown-out", required=True)
     parser.add_argument("--bugswarm-source", default="", help="optional converted BugSwarm YAML source")
+    parser.add_argument("--bugswarm-verification", default="", help="optional bugswarm_verify_source.py JSON report")
     parser.add_argument("--bakeoff-cells", default=str(DEFAULT_BAKEOFF_CELLS))
     parser.add_argument("--arena-rollup", default=str(DEFAULT_ARENA_ROUND1))
     parser.add_argument("--corpus", default=str(DEFAULT_CORPUS))
@@ -48,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
         corpus_path=Path(args.corpus),
         sources_path=Path(args.sources),
         bugswarm_source=Path(args.bugswarm_source) if args.bugswarm_source else None,
+        bugswarm_verification=Path(args.bugswarm_verification) if args.bugswarm_verification else None,
     )
     write_json(Path(args.json_out), report)
     write_text(Path(args.markdown_out), render_markdown(report))
@@ -63,12 +65,14 @@ def build_report(
     corpus_path: Path,
     sources_path: Path,
     bugswarm_source: Path | None = None,
+    bugswarm_verification: Path | None = None,
 ) -> dict[str, Any]:
     corpus = load_yaml(corpus_path)
     sources = load_yaml(sources_path)
     glm_cells = load_glm_bakeoff_cells(bakeoff_cells)
     arena_cells = load_arena_cells(arena_rollup)
     bugswarm_tasks = load_bugswarm_tasks(bugswarm_source)
+    verification = load_verification(bugswarm_verification)
 
     matrix_rows = build_required_matrix(glm_cells, bugswarm_tasks)
     return {
@@ -81,16 +85,17 @@ def build_report(
             "corpus": rel(corpus_path),
             "sources": rel(sources_path),
             "bugswarm_source": rel(bugswarm_source) if bugswarm_source else "",
+            "bugswarm_verification": rel(bugswarm_verification) if bugswarm_verification else "",
         },
-        "corpora": corpus_summary(corpus, sources, bugswarm_tasks),
+        "corpora": corpus_summary(corpus, sources, bugswarm_tasks, verification),
         "glm52_bugfix_cells": glm_cells,
         "required_glm52_matrix": matrix_rows,
         "rollups": {
             "glm52_by_corpus_treatment": rollup_required_matrix(matrix_rows),
             "supporting_oss_codex_round1": rollup_arena_cells(arena_cells),
         },
-        "evidence_gaps": evidence_gaps(matrix_rows, bugswarm_tasks),
-        "interpretation": interpretation(matrix_rows, bugswarm_tasks),
+        "evidence_gaps": evidence_gaps(matrix_rows, bugswarm_tasks, verification),
+        "interpretation": interpretation(matrix_rows, bugswarm_tasks, verification),
     }
 
 
@@ -159,6 +164,13 @@ def load_bugswarm_tasks(path: Path | None) -> list[dict[str, Any]]:
     return out
 
 
+def load_verification(path: Path | None) -> dict[str, Any]:
+    if path is None or not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data if isinstance(data, dict) else {}
+
+
 def build_required_matrix(glm_cells: list[dict[str, Any]], bugswarm_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for treatment in ("kitsoki", "raw-prompt"):
@@ -197,7 +209,12 @@ def pending_row(corpus: str, task: str, treatment: str, reason: str) -> dict[str
     }
 
 
-def corpus_summary(corpus: dict[str, Any], sources: dict[str, Any], bugswarm_tasks: list[dict[str, Any]]) -> dict[str, Any]:
+def corpus_summary(
+    corpus: dict[str, Any],
+    sources: dict[str, Any],
+    bugswarm_tasks: list[dict[str, Any]],
+    verification: dict[str, Any],
+) -> dict[str, Any]:
     tasks = [t for t in corpus.get("tasks", []) if isinstance(t, dict)]
     repos = sorted({str(t.get("repo") or "") for t in tasks if t.get("repo")})
     source_rows = sources.get("sources") if isinstance(sources.get("sources"), list) else []
@@ -213,6 +230,9 @@ def corpus_summary(corpus: dict[str, Any], sources: dict[str, Any], bugswarm_tas
             "source_status": str(bugswarm_source.get("status") or "missing"),
             "imported_task_count": len(bugswarm_tasks),
             "verified_task_count": sum(1 for t in bugswarm_tasks if t["verified_red"] and t["verified_green"]),
+            "verification_report_count": int(verification.get("task_count") or 0),
+            "verification_verified_count": int(verification.get("verified_count") or 0),
+            "verification_mode": str(verification.get("mode") or ""),
             "source_catalog": rel(DEFAULT_SOURCES),
         },
     }
@@ -256,7 +276,7 @@ def rollup_quality(rows: list[dict[str, Any]], *, token_key: str = "total_tokens
     }
 
 
-def evidence_gaps(rows: list[dict[str, Any]], bugswarm_tasks: list[dict[str, Any]]) -> list[str]:
+def evidence_gaps(rows: list[dict[str, Any]], bugswarm_tasks: list[dict[str, Any]], verification: dict[str, Any]) -> list[str]:
     gaps: list[str] = []
     if any(row["corpus"] == "oss-oracle" and row["treatment"] == "raw-prompt" and row["quality"] == "pending" for row in rows):
         gaps.append("No committed raw-prompt GLM-5.2 result exists for the OSS oracle corpus.")
@@ -264,12 +284,14 @@ def evidence_gaps(rows: list[dict[str, Any]], bugswarm_tasks: list[dict[str, Any
         gaps.append("No BugSwarm artifact source has been imported and RED/GREEN verified yet.")
     elif not any(t["verified_red"] and t["verified_green"] for t in bugswarm_tasks):
         gaps.append("BugSwarm artifacts have been imported but none are verified RED/GREEN yet.")
+    if bugswarm_tasks and not verification:
+        gaps.append("No BugSwarm verification report is attached to this generated report.")
     if any(row["corpus"] == "bugswarm" and row["quality"] == "pending" for row in rows):
         gaps.append("No committed GLM-5.2 Kitsoki or raw-prompt result exists for BugSwarm.")
     return gaps
 
 
-def interpretation(rows: list[dict[str, Any]], bugswarm_tasks: list[dict[str, Any]]) -> list[str]:
+def interpretation(rows: list[dict[str, Any]], bugswarm_tasks: list[dict[str, Any]], verification: dict[str, Any]) -> list[str]:
     glm_kitsoki_attempts = [r for r in rows if r["corpus"] == "oss-oracle" and r["treatment"] == "kitsoki" and r["quality"] != "pending"]
     out = []
     if glm_kitsoki_attempts:
@@ -281,6 +303,11 @@ def interpretation(rows: list[dict[str, Any]], bugswarm_tasks: list[dict[str, An
     out.append("The GLM-5.2 raw-prompt arm remains pending; the report must not compute a token ratio from missing data.")
     if bugswarm_tasks:
         out.append(f"BugSwarm is reusable as an imported source with {len(bugswarm_tasks)} task(s) in the supplied source file.")
+        if verification:
+            out.append(
+                f"BugSwarm verification report mode={verification.get('mode')} covers "
+                f"{verification.get('task_count', 0)} task(s), with {verification.get('verified_count', 0)} verified."
+            )
     else:
         out.append("BugSwarm is adapter-ready in the source catalog, but the committed report has no imported artifact subset yet.")
     return out
@@ -325,6 +352,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- Arena supporting rollup: `{inputs['arena_rollup']}`.",
         f"- OSS oracle corpus: `{inputs['corpus']}`.",
         f"- Source catalog: `{inputs['sources']}`.",
+        f"- BugSwarm source: `{inputs['bugswarm_source'] or 'not supplied'}`.",
+        f"- BugSwarm verification report: `{inputs['bugswarm_verification'] or 'not supplied'}`.",
         "",
         "Primary metrics:",
         "",
@@ -340,7 +369,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "| corpus | tasks | repositories | verified/imported status |",
         "|---|---:|---:|---|",
         f"| OSS oracle corpus | {corpora['oss_oracle']['task_count']} | {corpora['oss_oracle']['repo_count']} | frozen and locally validated |",
-        f"| BugSwarm | {corpora['bugswarm']['imported_task_count']} | n/a | {corpora['bugswarm']['source_status']}; verified tasks: {corpora['bugswarm']['verified_task_count']} |",
+        f"| BugSwarm | {corpora['bugswarm']['imported_task_count']} | n/a | {corpora['bugswarm']['source_status']}; converted verified tasks: {corpora['bugswarm']['verified_task_count']}; verification report: {corpora['bugswarm']['verification_verified_count']}/{corpora['bugswarm']['verification_report_count']} ({corpora['bugswarm']['verification_mode'] or 'none'}) |",
         "",
         "The OSS oracle corpus remains the active internal benchmark source. It",
         "covers the pre-registered public OSS targets plus existing hidden-oracle",
@@ -357,6 +386,9 @@ def render_markdown(report: dict[str, Any]) -> str:
         "  artifact image.",
         "- keep imported tasks unattempted until Docker verification proves both",
         "  sides still reproduce.",
+        "- verify with `tools/arena/scripts/bugswarm_verify_source.py`; dry-run",
+        "  mode records the Docker commands, while `--execute` runs each side in",
+        "  separate fresh containers.",
         "",
         "## GLM-5.2 Headline Matrix",
         "",
