@@ -57,11 +57,13 @@ class DockerBackend:
         if context:
             cmd += ["--context", context]
         cmd += ["run", "--rm"]
+        docker_sock = os.environ.get("ARENA_DOCKER_SOCK_SRC")
         for src, dst in mounts.items():
             cmd += ["-v", f"{src}:{dst}"]
             if dst == "/workspace/kitsoki":
                 cmd += ["-e", f"ARENA_HOST_REPO_ROOT={src}"]
-        docker_sock = os.environ.get("ARENA_DOCKER_SOCK_SRC")
+                if docker_sock and src != dst:
+                    cmd += ["-v", f"{src}:{src}"]
         if docker_sock:
             cmd += ["-v", f"{docker_sock}:/var/run/docker.sock"]
             cmd += ["-e", "DOCKER_HOST=unix:///var/run/docker.sock"]
