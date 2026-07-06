@@ -51,6 +51,15 @@ with tempfile.TemporaryDirectory() as tmp:
     check("oss corpus task count", report["corpora"]["oss_oracle"]["task_count"], 26)
     check("bugswarm source status", report["corpora"]["bugswarm"]["source_status"], "adapter-ready")
     check("bugswarm imported count", report["corpora"]["bugswarm"]["imported_task_count"], 1)
+    source_mix = report["source_mix"]
+    components = {component["id"]: component for component in source_mix["oss_oracle"]["components"]}
+    check("source mix public target tasks", components["pre_registered_oss_targets"]["task_count"], 20)
+    check("source mix public target repos", components["pre_registered_oss_targets"]["repo_count"], 10)
+    check("source mix fixture tasks", components["armed_bugfix_fixtures"]["task_count"], 6)
+    check("source mix fixture repos", components["armed_bugfix_fixtures"]["repo_count"], 2)
+    check("source mix public oracle kind", components["pre_registered_oss_targets"]["oracle_kinds"], ["github_content"])
+    check("source mix fixture oracle kind", components["armed_bugfix_fixtures"]["oracle_kinds"], ["external_bakeoff"])
+    check("source mix bugswarm component", source_mix["bugswarm"]["component"], "containerized_fail_pass_ci_artifacts")
     closure = {action["corpus"]: action for action in report["evidence_closure"]["actions"]}
     check("closure oss ready to plan", closure["oss-oracle"]["status"], "ready-to-plan")
     check("closure bugswarm needs execute verification", closure["bugswarm"]["status"], "needs-execute-verification")
@@ -113,6 +122,10 @@ with tempfile.TemporaryDirectory() as tmp:
     md = md_out.read_text(encoding="utf-8")
     check("markdown names pending raw arm", "oss-oracle | raw-prompt" in md, True)
     check("markdown includes overall rollup", "## Overall GLM-5.2 Treatment Rollup" in md, True)
+    check("markdown includes source mix", "## Source Mix" in md, True)
+    check("markdown source mix public target row", "| pre_registered_oss_targets | 20 | 10 | github_content" in md, True)
+    check("markdown source mix fixture row", "| armed_bugfix_fixtures | 6 | 2 | external_bakeoff" in md, True)
+    check("markdown source mix bugswarm row", "BugSwarm containerized_fail_pass_ci_artifacts" in md, True)
     check("markdown includes comparisons", "## Kitsoki vs Raw-Prompt Comparisons" in md, True)
     check("markdown includes completion audit", "## Completion Audit" in md, True)
     check("markdown audit includes execute verification", "bugswarm-execute-verification" in md, True)

@@ -57,6 +57,7 @@ def validate_report(report: dict[str, Any]) -> list[str]:
     rows = [row for row in report.get("required_glm52_matrix", []) if isinstance(row, dict)]
     problems.extend(require_matrix(rows))
     problems.extend(require_rollups(report, rows))
+    problems.extend(require_source_mix(report))
     problems.extend(require_comparisons(report))
     problems.extend(require_closure(report, rows))
     problems.extend(require_completion_audit(report, rows))
@@ -69,7 +70,7 @@ def require_top_level(report: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     if report.get("kind") != "glm52_bugswarm_bugfix_report":
         problems.append(f"unexpected report kind: {report.get('kind')!r}")
-    for key in ("corpora", "rollups", "comparisons", "completion_audit", "study_protocol", "evidence_closure", "references"):
+    for key in ("corpora", "source_mix", "rollups", "comparisons", "completion_audit", "study_protocol", "evidence_closure", "references"):
         if not isinstance(report.get(key), dict):
             problems.append(f"missing mapping: {key}")
     return problems
@@ -142,6 +143,36 @@ def require_comparisons(report: dict[str, Any]) -> list[str]:
                 problems.append(f"comparison {scope} must not publish success delta while pending")
             if comparison.get("token_ratio_kitsoki_to_raw") is not None:
                 problems.append(f"comparison {scope} must not publish token ratio while pending")
+    return problems
+
+
+def require_source_mix(report: dict[str, Any]) -> list[str]:
+    mix = report.get("source_mix") if isinstance(report.get("source_mix"), dict) else {}
+    problems: list[str] = []
+    if not mix:
+        return ["missing source_mix"]
+    oss = mix.get("oss_oracle") if isinstance(mix.get("oss_oracle"), dict) else {}
+    components = oss.get("components") if isinstance(oss.get("components"), list) else []
+    by_id = {component.get("id"): component for component in components if isinstance(component, dict)}
+    public = by_id.get("pre_registered_oss_targets", {})
+    fixtures = by_id.get("armed_bugfix_fixtures", {})
+    if public.get("repo_count") != 10 or public.get("task_count") != 20:
+        problems.append("source mix must preserve the 10 public OSS target / 20 task component")
+    if fixtures.get("task_count") != 6:
+        problems.append("source mix must preserve the 6 armed bugfix fixture component")
+    if "github_content" not in set(public.get("oracle_kinds") or []):
+        problems.append("source mix public OSS component must use github_content oracles")
+    if "external_bakeoff" not in set(fixtures.get("oracle_kinds") or []):
+        problems.append("source mix fixture component must use external_bakeoff oracles")
+    bugswarm = mix.get("bugswarm") if isinstance(mix.get("bugswarm"), dict) else {}
+    if bugswarm.get("component") != "containerized_fail_pass_ci_artifacts":
+        problems.append("source mix must describe BugSwarm as containerized fail/pass CI artifacts")
+    if "execute RED/GREEN" not in str(bugswarm.get("verification_gate") or ""):
+        problems.append("source mix BugSwarm component must keep execute RED/GREEN verification gate")
+    policies = "\n".join(str(item) for item in (mix.get("blend_policy") or []))
+    for required in ("separate source families", "total tokens", "dry-run BugSwarm"):
+        if required not in policies:
+            problems.append(f"source mix blend_policy missing {required!r}")
     return problems
 
 

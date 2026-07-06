@@ -103,6 +103,7 @@ def build_report(
             "oss_arena_rollup": rel(oss_arena_rollup) if oss_arena_rollup else "",
         },
         "corpora": corpus_summary(corpus, sources, bugswarm_tasks, verification),
+        "source_mix": source_mix(corpus, sources, bugswarm_tasks),
         "glm52_bugfix_cells": glm_cells,
         "oss_glm52_arena_cells": oss_arena_cells,
         "bugswarm_glm52_arena_cells": bugswarm_cells,
@@ -349,6 +350,85 @@ def corpus_summary(
             "source_catalog": rel(DEFAULT_SOURCES),
         },
     }
+
+
+def source_mix(corpus: dict[str, Any], sources: dict[str, Any], bugswarm_tasks: list[dict[str, Any]]) -> dict[str, Any]:
+    tasks = [t for t in corpus.get("tasks", []) if isinstance(t, dict)]
+    repo_history = [t for t in tasks if oracle_kind(t) == "github_content"]
+    bugfix_fixtures = [t for t in tasks if oracle_kind(t) == "external_bakeoff"]
+    other = [t for t in tasks if oracle_kind(t) not in {"github_content", "external_bakeoff"}]
+    source_rows = sources.get("sources") if isinstance(sources.get("sources"), list) else []
+    bugswarm_source = next((s for s in source_rows if isinstance(s, dict) and s.get("id") == "bugswarm"), {})
+    return {
+        "oss_oracle": {
+            "status": "frozen",
+            "task_count": len(tasks),
+            "repo_count": len(repo_names(tasks)),
+            "selection_notes": [str(note) for note in corpus.get("selection_notes", [])],
+            "components": [
+                source_component(
+                    "pre_registered_oss_targets",
+                    "Pre-registered public OSS target libraries with GitHub-content RED/GREEN oracles.",
+                    repo_history,
+                ),
+                source_component(
+                    "armed_bugfix_fixtures",
+                    "Existing hidden-oracle bugfix/failing-test fixtures from the bakeoff harness.",
+                    bugfix_fixtures,
+                ),
+                source_component(
+                    "other_oss_oracle_tasks",
+                    "Other OSS-oracle tasks in the frozen manifest.",
+                    other,
+                ),
+            ],
+        },
+        "bugswarm": {
+            "status": str(bugswarm_source.get("status") or "missing"),
+            "task_count": len(bugswarm_tasks),
+            "repo_count": len({task.get("repo") for task in bugswarm_tasks if task.get("repo")}),
+            "component": "containerized_fail_pass_ci_artifacts",
+            "verification_gate": "execute RED/GREEN before live GLM-5.2 cells",
+            "repositories": sorted({str(task.get("repo") or "") for task in bugswarm_tasks if task.get("repo")}),
+        },
+        "blend_policy": [
+            "Keep OSS oracle tasks and BugSwarm artifacts as separate source families in denominators.",
+            "Report overall GLM-5.2 treatment totals only after both Kitsoki and raw-prompt arms have attempted cells.",
+            "Use total tokens as the primary cross-source cost axis; USD remains secondary and evidence-dependent.",
+            "Do not count dry-run BugSwarm verification as RED/GREEN proof.",
+        ],
+    }
+
+
+def source_component(component_id: str, description: str, tasks: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "id": component_id,
+        "description": description,
+        "task_count": len(tasks),
+        "repo_count": len(repo_names(tasks)),
+        "repositories": repo_names(tasks),
+        "oracle_kinds": sorted({oracle_kind(task) for task in tasks if oracle_kind(task)}),
+        "splits": count_by(tasks, "split"),
+        "archetypes": count_by(tasks, "archetype"),
+    }
+
+
+def repo_names(tasks: list[dict[str, Any]]) -> list[str]:
+    return sorted({str(task.get("repo_label") or task.get("repo") or "") for task in tasks if task.get("repo_label") or task.get("repo")})
+
+
+def oracle_kind(task: dict[str, Any]) -> str:
+    oracle = task.get("oracle") if isinstance(task.get("oracle"), dict) else {}
+    return str(oracle.get("kind") or "")
+
+
+def count_by(tasks: list[dict[str, Any]], field: str) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for task in tasks:
+        value = str(task.get(field) or "")
+        if value:
+            counts[value] += 1
+    return dict(sorted(counts.items()))
 
 
 def rollup_required_matrix(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -955,6 +1035,10 @@ def render_markdown(report: dict[str, Any]) -> str:
         "  mode records the Docker commands, while `--execute` runs each side in",
         "  separate fresh containers.",
         "",
+    ])
+    lines.extend(render_source_mix(report))
+    lines.extend([
+        "",
         "## GLM-5.2 Headline Matrix",
         "",
         "| corpus | treatment | n | attempted | solved | partial | failed | pending | success rate | tokens |",
@@ -1088,6 +1172,55 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"{bucket['failed']} | {format_rate(bucket['success_rate'])} | {format_int(bucket['total_tokens'])} |"
             )
     return "\n".join(lines) + "\n"
+
+
+def render_source_mix(report: dict[str, Any]) -> list[str]:
+    mix = report["source_mix"]
+    components = [component for component in mix["oss_oracle"]["components"] if component["task_count"] > 0]
+    lines = [
+        "## Source Mix",
+        "",
+        "The OSS oracle source and BugSwarm are kept as separate source families",
+        "so the report can show blended overall treatment totals without hiding",
+        "which evidence came from deterministic GitHub-content oracles, hidden",
+        "bugfix fixtures, or containerized fail/pass CI artifacts.",
+        "",
+        "| source component | tasks | repos | oracle kinds | split | repositories |",
+        "|---|---:|---:|---|---|---|",
+    ]
+    for component in components:
+        lines.append(
+            "| {id} | {tasks} | {repos} | {oracles} | {splits} | {repositories} |".format(
+                id=component["id"],
+                tasks=component["task_count"],
+                repos=component["repo_count"],
+                oracles=", ".join(component["oracle_kinds"]) or "n/a",
+                splits=format_counts(component["splits"]),
+                repositories=", ".join(component["repositories"]) or "n/a",
+            )
+        )
+    bugswarm = mix["bugswarm"]
+    lines.append(
+        "| BugSwarm {component} | {tasks} | {repos} | fail/pass artifact scripts | verification-gated | {repositories} |".format(
+            component=bugswarm["component"],
+            tasks=bugswarm["task_count"],
+            repos=bugswarm["repo_count"],
+            repositories=", ".join(bugswarm["repositories"]) or "pending verified import",
+        )
+    )
+    lines.extend([
+        "",
+        "Blend policy:",
+        "",
+    ])
+    lines.extend(f"- {policy}" for policy in mix["blend_policy"])
+    return lines
+
+
+def format_counts(counts: dict[str, int]) -> str:
+    if not counts:
+        return "n/a"
+    return ", ".join(f"{key}:{value}" for key, value in sorted(counts.items()))
 
 
 def render_completion_audit(report: dict[str, Any]) -> list[str]:
