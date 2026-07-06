@@ -3,6 +3,7 @@ version: 1
 frozen: true
 selection_rule_committed_at: 7bd95358
 archetypes: tools/arena/corpus/archetypes.yaml
+source_catalog: tools/arena/corpus/sources.yaml
 source_targets: tools/product-journey/github-targets.json
 created_at: "2026-07-04"
 selection_notes:

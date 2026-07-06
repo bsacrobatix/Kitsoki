@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -18,6 +19,7 @@ from typing import Any
 
 HERE = Path(__file__).resolve().parent
 ARENA_ROOT = HERE.parent
+REPO_ROOT = ARENA_ROOT.parent.parent
 sys.path.insert(0, str(ARENA_ROOT))
 
 from arena.executor import CellExecutor, ContainerRun, FakeBackend  # noqa: E402
@@ -61,6 +63,17 @@ def fixture_result(task: str, treatment: str) -> dict:
 
 def run_default() -> int:
     checks = Checks()
+    source_test = subprocess.run(
+        [sys.executable, str(HERE / "test_bugswarm_source.py")],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    checks.check("bugswarm source adapter gate", source_test.returncode, 0)
+    if source_test.returncode:
+        checks.failures.append((source_test.stdout + source_test.stderr).strip())
     spec_path = ARENA_ROOT / "specs" / "paired-task-fixture.yaml"
     spec = JobSpec.load(spec_path)
     cells = spec.cells()
