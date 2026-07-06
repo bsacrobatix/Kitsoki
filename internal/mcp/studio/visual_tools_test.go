@@ -957,7 +957,7 @@ func copyTree(src, dst string) error {
 		if mkErr := os.MkdirAll(filepath.Dir(target), 0o755); mkErr != nil {
 			return mkErr
 		}
-		return os.WriteFile(target, data, info.Mode().Perm())
+		return os.WriteFile(target, data, info.Mode().Perm()|0o200)
 	})
 }
 

@@ -191,10 +191,19 @@ func (srv *Server) handleHostRun(
 // writeHostRunOutput spills a command's full combined output to a sidecar file
 // under hostRunArtifactsDir so truncating the returned stdout never loses it.
 func writeHostRunOutput(stdout string) (string, error) {
-	if err := os.MkdirAll(hostRunArtifactsDir, 0o755); err != nil {
+	path, err := writeHostRunOutputInDir(hostRunArtifactsDir, stdout)
+	if err == nil {
+		return path, nil
+	}
+	fallbackDir := filepath.Join(os.TempDir(), "kitsoki-mcp-host-run")
+	return writeHostRunOutputInDir(fallbackDir, stdout)
+}
+
+func writeHostRunOutputInDir(dir, stdout string) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	f, err := os.CreateTemp(hostRunArtifactsDir, "host-run-*.log")
+	f, err := os.CreateTemp(dir, "host-run-*.log")
 	if err != nil {
 		return "", err
 	}
