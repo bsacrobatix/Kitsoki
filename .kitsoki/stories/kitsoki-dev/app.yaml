@@ -158,10 +158,13 @@ imports:
     # is the comment thread.
     host_bindings:
       # GitHub cutover (github-issues-tracker slice #4): the dogfood loop reads/
-      # writes its tickets as GitHub issues on `ticket_repo`
-      # (constructorfabric/Kitsoki). The rooms thread `repo: {{ world.ticket_repo }}`
-      # into every iface.ticket.* call. Flip back to host.local_files.ticket for a
-      # purely offline run.
+      # writes its tickets as GitHub issues on `ticket_repo`. The rooms thread
+      # `repo: {{ world.ticket_repo }}` into every iface.ticket.* call. The
+      # default is the symbolic `origin`, resolved by host.gh.ticket against
+      # `git remote get-url origin` (bsacrobatix/Kitsoki on a fork clone,
+      # constructorfabric/Kitsoki on a canonical clone) so the dogfood instance
+      # always targets the repo you cloned. Flip the binding back to
+      # host.local_files.ticket for a purely offline run.
       ticket:    host.gh.ticket
       vcs:       host.git
       ci:        host.local
@@ -194,12 +197,14 @@ world:
   repo_root:    { type: string, default: "" }
   ticket_globs: { type: string, default: "issues/bugs/*.md,issues/features/*.md,stories/*/issues/bugs/*.md,stories/*/issues/features/*.md" }
 
-  # ticket_repo — the canonical GitHub repo every host.gh.ticket call pins via
-  # its `repo` arg, so the dogfood loop never silently resolves the operator's
-  # `origin` (a personal fork like bsacrobatix/Kitsoki). The checked-in project
-  # profile (.kitsoki/project-profile.yaml) is the source of truth for this repo;
-  # local dogfood runs can override via .kitsoki.local.yaml root.overrides.world.
-  ticket_repo:  { type: string, default: "constructorfabric/Kitsoki" }
+  # ticket_repo — the GitHub repo every host.gh.ticket call pins via its `repo`
+  # arg. The dogfood default is the symbolic `origin`: host.gh.ticket resolves it
+  # against `git remote get-url origin` (bsacrobatix/Kitsoki on a fork clone,
+  # constructorfabric/Kitsoki on a canonical clone), so the instance targets the
+  # repo you cloned — where you actually file and fix bugs. An operator can still
+  # pin an explicit `owner/repo` here, or override `ticket_repo` per-session via
+  # a `--warp` scenario, without touching this file.
+  ticket_repo:  { type: string, default: "origin" }
   # Default self-hosting destination: land fixes into the local base branch
   # (main here) after the bugfix RED/GREEN gate and shared ship-it tail pass.
   # Operators can still choose open-pr or leave-worktree from the dev-story UI.

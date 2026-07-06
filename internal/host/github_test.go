@@ -121,6 +121,65 @@ func TestGitHubTicket_Search_Happy(t *testing.T) {
 	}
 }
 
+// TestGitHubTicket_Search_NewestFirst proves the search returns issues strict
+// id-DESC (newest bug first). GitHub's Search `sort=created` orders by
+// created_at, which diverges from the issue number on transferred/imported
+// issues — so the handler asks for sort=created (a recency hint) AND re-sorts
+// the fetched page by number. The stub returns a deliberately out-of-order page
+// (mirroring the real bsacrobatix/Kitsoki tail: …1181, 1178, 1180, 1179) and
+// the test asserts the projection is strict highest-number-first.
+func TestGitHubTicket_Search_NewestFirst(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/search/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if got := r.URL.Query().Get("sort"); got != "created" {
+			t.Fatalf("sort = %q, want \"created\" (newest-first hint)", got)
+		}
+		if got := r.URL.Query().Get("order"); got != "desc" {
+			t.Fatalf("order = %q, want \"desc\"", got)
+		}
+		// Out-of-order by number, as GitHub returns for a real repo.
+		writeJSON(w, map[string]any{"items": []map[string]any{
+			{"number": 1181, "title": "a", "state": "open"},
+			{"number": 1178, "title": "b", "state": "open"},
+			{"number": 1180, "title": "c", "state": "open"},
+			{"number": 1179, "title": "d", "state": "open"},
+			{"number": 1202, "title": "e", "state": "open"},
+		}})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+
+	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
+		"op":    "search",
+		"query": "",
+		"repo":  "o/r",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	tickets, _ := res.Data["tickets"].([]map[string]any)
+	got := make([]string, 0, len(tickets))
+	for _, tk := range tickets {
+		got = append(got, tk["id"].(string))
+	}
+	want := []string{"1202", "1181", "1180", "1179", "1178"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v tickets %v, want %v", len(got), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("tickets not newest-first: got %v, want %v", got, want)
+		}
+	}
+}
+
 func TestListGitHubInboxItems_Happy(t *testing.T) {
 	t.Setenv("GH_TOKEN", "test-token")
 	var seenIssues, seenPRs bool
