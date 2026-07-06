@@ -1,5 +1,8 @@
-WORKSPACE_ROOT = "docs/proposals/.workspace"
-PROPOSALS_DIR = "docs/proposals"
+# design_amend_workspace — resolve the workspace for an "amend an existing
+# draft" pick, mirroring design_workspace.star's durable_path threading (see
+# that file's header comment for why the workspace root is an input, not a
+# hardcoded constant).
+DEFAULT_DURABLE_PATH = "docs/proposals"
 MAX_SLUG_WORDS = 6
 
 
@@ -35,6 +38,16 @@ def _rstrip_slash(path):
     return out
 
 
+def _durable_path(ctx):
+    raw = ctx.inputs.get("durable_path", "")
+    cleaned = _rstrip_slash(raw)
+    return cleaned if cleaned != "" else DEFAULT_DURABLE_PATH
+
+
+def _workspace_root(durable_path):
+    return durable_path + "/.workspace"
+
+
 def _basename(path):
     parts = str(path or "").split("/")
     if len(parts) == 0:
@@ -54,41 +67,42 @@ def _is_tmp_path(path):
     return path == "/tmp" or path.startswith("/tmp/")
 
 
-def _workspace(slug):
-    return WORKSPACE_ROOT + "/" + slug
+def _workspace(durable_path, slug):
+    return _workspace_root(durable_path) + "/" + slug
 
 
-def _published(slug):
-    return PROPOSALS_DIR + "/" + slug + ".md"
+def _published(durable_path, slug):
+    return durable_path + "/" + slug + ".md"
 
 
-def _taken(ctx, slug):
-    return ctx.fs.exists(_workspace(slug)) or ctx.fs.exists(_published(slug))
+def _taken(ctx, durable_path, slug):
+    return ctx.fs.exists(_workspace(durable_path, slug)) or ctx.fs.exists(_published(durable_path, slug))
 
 
-def _unique_slug(ctx, base):
-    if not _taken(ctx, base):
+def _unique_slug(ctx, durable_path, base):
+    if not _taken(ctx, durable_path, base):
         return base
     for i in range(2, 1000):
         candidate = base + "-" + str(i)
-        if not _taken(ctx, candidate):
+        if not _taken(ctx, durable_path, candidate):
             return candidate
     fail("too many collisions for slug: " + base)
 
 
 def main(ctx):
+    durable_path = _durable_path(ctx)
     target = ctx.inputs.get("target", "")
     proposed_slug = ctx.inputs.get("proposed_slug", "")
     normalized = _rstrip_slash(target)
 
     if _is_tmp_path(normalized):
         slug = _sanitize(_stem(normalized))
-        return {"slug": slug, "workspace": _workspace(slug)}
+        return {"slug": slug, "workspace": _workspace(durable_path, slug)}
 
     if str(target or "").endswith("/") or (normalized != "" and not normalized.endswith(".md")):
         slug = _sanitize(_basename(normalized))
         return {"slug": slug, "workspace": target}
 
     base = proposed_slug or _stem(normalized)
-    slug = _unique_slug(ctx, _sanitize(base))
-    return {"slug": slug, "workspace": _workspace(slug)}
+    slug = _unique_slug(ctx, durable_path, _sanitize(base))
+    return {"slug": slug, "workspace": _workspace(durable_path, slug)}

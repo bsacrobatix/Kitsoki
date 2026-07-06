@@ -1095,6 +1095,43 @@ Implementation: [`internal/host/artifacts_dir_transport.go`](../../internal/host
 
 ---
 
+## host.fs.writable_dir
+
+Resolves a configured "durable path" world var to itself when it accepts
+writes, or to a caller-supplied fallback directory otherwise. Exists because
+several story-level durable-path defaults (e.g. dev-story's
+`design_durable_path`, default `docs/proposals`) are appropriate for that
+story's own dogfood checkout but are NOT writable in every context the story
+can run in — most notably Kitsoki's own primary checkout, which is
+intentionally read-only (see the repo's `AGENTS.md`). Without this check, a
+room that mints a workspace folder or writes an artifact under the configured
+path hard-fails with a raw `mkdir ...: permission denied` the first time it
+runs somewhere read-only, instead of degrading to a location that is always
+writable.
+
+The intended usage is a ONE-TIME room-level resolve, early, that rebinds the
+story's own "durable path" world var to whatever this returns — so every
+downstream step (workspace minting, artifact writes, publish) sees a writable
+root without each re-deriving it. See `stories/dev-story/rooms/design_search.yaml`'s
+`resolve_durable_path` step for the reference usage.
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `path` | string | yes | The configured directory to check. It need not exist yet — writability is probed against the nearest existing ancestor, since that is what actually governs whether a later `mkdir -p` under it would succeed. |
+| `fallback` | string | yes | The directory to use instead when `path` is not writable. Not itself re-validated — pick one you already know is safe (e.g. `.context/designs`, the repo's conventional local-runtime scratch dir). |
+
+Returns: `{ path, used_fallback }`. `path` is either the input `path`
+(writable) or `fallback` (not); `used_fallback` is `true` when the fallback was
+returned.
+
+Writability is probed with a real create-then-remove of a hidden marker file
+(not a permission-bit inspection), so the answer holds under uid/gid
+mismatches, ACLs, and a read-only bind mount alike.
+
+Implementation: [`internal/host/fs_writable_dir.go`](../../internal/host/fs_writable_dir.go).
+
+---
+
 ## host.workspace_manager.get
 
 Shells out to a `workspace-manager` CLI and parses the JSON output

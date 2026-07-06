@@ -54,7 +54,8 @@ states:
               with:
                 script: scripts/design_workspace.star
                 inputs:
-                  proposed: "{{ world.design_seed_idea != '' ? world.design_seed_idea + ' — ' + slots.message : slots.message }}"
+                  proposed:     "{{ world.design_seed_idea != '' ? world.design_seed_idea + ' — ' + slots.message : slots.message }}"
+                  durable_path: "{{ world.design_durable_path }}"
               bind:
                 design_slug: "slug"
               on_error: design
