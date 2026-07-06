@@ -37,7 +37,17 @@
 # Env:
 #   MCP_DRIVE_MODEL             orchestrator model (default: sonnet)
 #   MCP_DRIVE_BACKEND           claude | codex (default: auto-detect from model)
-#   MCP_DRIVE_TIMEOUT           not enforced here; wrap with your own timeout if needed
+#   MCP_DRIVE_TIMEOUT           hard wall-clock ceiling in seconds for ONE attempt
+#                               (default: 2400 = 40m). A single legitimate
+#                               full_pipeline drive polls session_status ~60s
+#                               apart for many minutes — this is a backstop
+#                               against a genuine hang (e.g. a silently-denied
+#                               MCP tool call deadlocking the orchestrator), not
+#                               a normal-case budget. On expiry the attempt is
+#                               killed (SIGTERM, then SIGKILL after 30s) and
+#                               reported distinctly from a real command failure
+#                               so callers don't confuse "stalled" with "tried
+#                               and failed".
 #   MCP_DRIVE_TOOLS             override the allowlist (default: all kitsoki studio tools)
 #   MCP_DRIVE_MAX_ATTEMPTS      max attempts for retryable transient failures (default: 12)
 #   MCP_DRIVE_BACKOFF_BASE      initial backoff seconds (default: 10)
@@ -50,6 +60,7 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 MCP_CONFIG="$HERE/kitsoki-mcp.json"
 
 MODEL="${MCP_DRIVE_MODEL:-sonnet}"
+TIMEOUT_S="${MCP_DRIVE_TIMEOUT:-2400}"
 MAX_ATTEMPTS="${MCP_DRIVE_MAX_ATTEMPTS:-12}"
 BACKOFF_BASE="${MCP_DRIVE_BACKOFF_BASE:-10}"
 BACKOFF_MAX="${MCP_DRIVE_BACKOFF_MAX:-600}"
@@ -97,15 +108,60 @@ esac
 # the worktree between turns.
 TOOLS="${MCP_DRIVE_TOOLS:-mcp__kitsoki__studio_ping,mcp__kitsoki__story_read,mcp__kitsoki__story_graph,mcp__kitsoki__story_validate,mcp__kitsoki__session_new,mcp__kitsoki__session_attach,mcp__kitsoki__session_drive,mcp__kitsoki__session_submit,mcp__kitsoki__session_continue,mcp__kitsoki__session_answer,mcp__kitsoki__session_status,mcp__kitsoki__session_world,mcp__kitsoki__session_inspect,mcp__kitsoki__session_trace,mcp__kitsoki__session_close,mcp__kitsoki__render_tui,Bash,Read,Glob,Grep}"
 
+# Pure-bash wall-clock ceiling — no dependency on GNU coreutils `timeout`/
+# `gtimeout` (absent by default on macOS, where this also runs). Backgrounds
+# the command and polls `kill -0` once a second from the foreground (a single
+# background job, no sibling watchdog subshell to race against — bash 3.2's
+# `wait` on a killed subshell PID was observed to hang indefinitely on this
+# box, so this deliberately avoids that shape). On expiry: SIGTERM, a short
+# grace period, then SIGKILL, and exit 124 (the GNU `timeout` convention) so
+# callers can tell "the process hung" apart from "the process ran and failed".
+#
+# Deliberately does NOT touch `set -e`/`set +e`: a function that flips
+# errexit back on right before `return <nonzero>` aborts an unprotected
+# caller (`f; rc=$?`) the instant it returns — verified directly, this is
+# not a corner case. Callers must already run this with errexit off for the
+# same reason `run_once` wraps its whole backend dispatch in `set +e` today.
+run_with_soft_timeout() {
+  local timeout_s="$1" out_file="$2" err_file="$3"; shift 3
+  "$@" >"$out_file" 2>"$err_file" &
+  local cmd_pid=$!
+  local waited=0
+  local kill_grace=30
+  while kill -0 "$cmd_pid" 2>/dev/null; do
+    if [[ $waited -ge $timeout_s ]]; then
+      kill -TERM "$cmd_pid" 2>/dev/null
+      local graced=0
+      while [[ $graced -lt $kill_grace ]] && kill -0 "$cmd_pid" 2>/dev/null; do
+        sleep 1
+        graced=$((graced + 1))
+      done
+      kill -KILL "$cmd_pid" 2>/dev/null
+      wait "$cmd_pid" 2>/dev/null
+      return 124
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$cmd_pid"
+  return $?
+}
+
 is_retryable_error() {
   local payload="$1"
   local lower
   lower="$(printf '%s' "$payload" | tr '[:upper:]' '[:lower:]')"
 
-  # Obvious client/config errors should fail fast.
+  # Obvious client/config errors should fail fast. A watchdog kill also fails
+  # fast: a genuine hang/deadlock (e.g. a silently-denied MCP tool call) is
+  # deterministic and will very likely time out again on retry, so blindly
+  # retrying just multiplies MCP_DRIVE_TIMEOUT by MAX_ATTEMPTS into a much
+  # longer silent-looking wait — exactly the failure mode this timeout exists
+  # to prevent.
   case "$lower" in
     *"usage:"*|*"unknown option"*|*"unknown arg"*|*"invalid or missing argument"*|\
-    *"mcp-config not found"*|*"usage error"*|*"command not found"*)
+    *"mcp-config not found"*|*"usage error"*|*"command not found"*|\
+    *"watchdog"*)
       return 1
       ;;
   esac
@@ -184,27 +240,29 @@ run_once() {
     # session_new) — codex's tool_search indexes the MCP server's own name, not
     # the mcp__kitsoki__session_new alias the CLAUDE backend's client presents.
     local codex_tool_search_preamble="TOOL ACCESS (codex): Some tools provided to you — including the kitsoki studio tools (studio.ping, session.new, session.drive, session.status, etc. — note the DOTTED names) — are NOT listed in your default tool set. They are reachable only via the \`tool_search\` tool. BEFORE you conclude that a tool the task asks for is unavailable, you MUST call \`tool_search\` to locate it, then call it. Never emulate such a tool by printing its name or arguments as text — a printed call does nothing."
-    codex exec "${codex_tool_search_preamble}"$'\n\n---\n\n'"$PROMPT" \
+    run_with_soft_timeout "$TIMEOUT_S" "$out_file" "$err_file" \
+      codex exec "${codex_tool_search_preamble}"$'\n\n---\n\n'"$PROMPT" \
       --model "$MODEL" \
       --dangerously-bypass-approvals-and-sandbox \
       --skip-git-repo-check \
       "${codex_mcp_args[@]}" \
-      --json \
-      >"$out_file" 2>"$err_file"
+      --json
     rc=$?
   else
-    claude -p "$PROMPT" \
+    run_with_soft_timeout "$TIMEOUT_S" "$out_file" "$err_file" \
+      claude -p "$PROMPT" \
       --mcp-config "$MCP_CONFIG" \
       --strict-mcp-config \
       --model "$MODEL" \
       --permission-mode acceptEdits \
       --allowedTools "$TOOLS" \
-      --output-format json \
-      >"$out_file" 2>"$err_file"
+      --output-format json
     rc=$?
   fi
 
-  if [[ $rc -ne 0 && ! -s "$out_file" && ! -s "$err_file" ]]; then
+  if [[ $rc -eq 124 ]]; then
+    printf 'drive.sh: WATCHDOG — backend=%s model=%s exceeded MCP_DRIVE_TIMEOUT=%ss with no result; killed. This is a hang/stall, not a model failure.\n' "$BACKEND" "$MODEL" "$TIMEOUT_S" >>"$err_file"
+  elif [[ $rc -ne 0 && ! -s "$out_file" && ! -s "$err_file" ]]; then
     printf 'drive.sh: backend=%s model=%s cmd failed with empty output (exit=%s)\n' "$BACKEND" "$MODEL" "$rc" >>"$err_file"
   fi
   set -e
@@ -218,8 +276,17 @@ while true; do
   out_file="$(mktemp)"
   err_file="$(mktemp)"
 
-  run_once "$out_file" "$err_file"
-  rc=$?
+  # Pre-existing bug, fixed here: `run_once` restores `set -e` right before
+  # its own `return "$rc"`. Calling it as a bare statement under this
+  # script's top-level `set -euo pipefail` meant a nonzero return (ANY real
+  # backend failure) aborted the whole script immediately via errexit —
+  # before the retry/backoff logic below ever ran. Wrapping the call in an
+  # `if` makes it a protected context, so errexit does not fire on it.
+  if run_once "$out_file" "$err_file"; then
+    rc=0
+  else
+    rc=$?
+  fi
 
   if [[ $rc -eq 0 ]]; then
     cat "$out_file"
