@@ -227,8 +227,8 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Receipt, erro
 	if workflowID == "" {
 		return nil, fmt.Errorf("dynamicworkflow: empty workflow id")
 	}
-	draftDir := filepath.Join(s.OutputDir, workflowID)
-	if err := os.MkdirAll(draftDir, 0o755); err != nil {
+	workflowID, draftDir, err := s.reserveDraftDir(workflowID)
+	if err != nil {
 		return nil, fmt.Errorf("dynamicworkflow: create draft dir: %w", err)
 	}
 	appPath := filepath.Join(draftDir, "app")
@@ -311,6 +311,28 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Receipt, erro
 		return nil, err
 	}
 	return receipt, nil
+}
+
+func (s *Service) reserveDraftDir(baseWorkflowID string) (string, string, error) {
+	if err := os.MkdirAll(s.OutputDir, 0o755); err != nil {
+		return "", "", err
+	}
+	for i := 0; i < 1000; i++ {
+		workflowID := baseWorkflowID
+		if i > 0 {
+			workflowID = fmt.Sprintf("%s-%d", baseWorkflowID, i+1)
+		}
+		draftDir := filepath.Join(s.OutputDir, workflowID)
+		err := os.Mkdir(draftDir, 0o755)
+		if err == nil {
+			return workflowID, draftDir, nil
+		}
+		if os.IsExist(err) {
+			continue
+		}
+		return "", "", err
+	}
+	return "", "", fmt.Errorf("exhausted unique ids for %s", baseWorkflowID)
 }
 
 // Launch resolves the draft receipt and ensures it is validated before launch.
