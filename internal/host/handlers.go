@@ -548,6 +548,12 @@ func RegisterBuiltins(r *Registry) {
 	// The sentinel handler returns a configuration-required error; apps that
 	// want a working embedder call NewAgentSearchHandler and re-register.
 	r.Register("host.agent.search", AgentSearchHandler)
+
+	// Kits epic, S5 — host.graph.* (project object graph engine substrate,
+	// see graph_handlers.go). Registered bare so the registry's longest-
+	// prefix fallback resolves every host.graph.<op> call here with <op>
+	// injected into args["op"].
+	r.Register("host.graph", GraphHandler)
 }
 
 // AgentExtractHandler is implemented in agent_extract.go.

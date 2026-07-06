@@ -28,6 +28,71 @@ type Catalog struct {
 	// Warnings collects non-fatal issues surfaced during load, e.g. a type
 	// def using the deprecated `derives_from:` alias instead of `extends:`.
 	Warnings []string
+
+	// LintHints optionally names the domain type/field identifiers the two
+	// soft-coupled catalog-shape lints (lintOrphanFeature, lintInitiativeScope
+	// — S5 de-domaining, .context/kits-implementation-plan.md D4) operate
+	// over. A catalog may declare a top-level `lint_hints:` block; when it
+	// doesn't (every catalog before S5, including kitsoki's own
+	// seed-objects.yaml), DefaultLintHints() supplies the pre-S5 hardcoded
+	// names so behavior is unchanged. This is what makes the two checks
+	// "registry-data-driven instead of hardcoded": a different catalog can
+	// name its own membership/scope type+field vocabulary without touching
+	// Go.
+	LintHints *LintHints
+}
+
+// LintHints is the optional `lint_hints:` catalog-level block.
+type LintHints struct {
+	// OrphanMembership configures lintOrphanFeature: every PUBLIC node whose
+	// type IsA(Type) must have >=1 target on its Edge field. Defaults to
+	// {Type: "feature", Edge: "in_area"}.
+	OrphanMembership MembershipHint `yaml:"orphan_membership"`
+	// ScopeDerivation configures lintInitiativeScope: a ScopeType node's
+	// TargetsEdge must equal the set derived by walking
+	// IncludeEdge -> HopEdge -> MembershipEdge. Defaults to the initiative /
+	// includes / implements / in_area / targets chain.
+	ScopeDerivation ScopeHint `yaml:"scope_derivation"`
+}
+
+// MembershipHint names the (type, edge) pair lintOrphanFeature checks.
+type MembershipHint struct {
+	Type string `yaml:"type"`
+	Edge string `yaml:"edge"`
+}
+
+// ScopeHint names the type/edge chain lintInitiativeScope checks.
+type ScopeHint struct {
+	ScopeType      string `yaml:"scope_type"`
+	IncludeEdge    string `yaml:"include_edge"`
+	HopEdge        string `yaml:"hop_edge"`
+	MembershipEdge string `yaml:"membership_edge"`
+	TargetsEdge    string `yaml:"targets_edge"`
+}
+
+// DefaultLintHints returns the pre-S5 hardcoded names, used whenever a
+// catalog doesn't declare its own `lint_hints:` block.
+func DefaultLintHints() LintHints {
+	return LintHints{
+		OrphanMembership: MembershipHint{Type: "feature", Edge: "in_area"},
+		ScopeDerivation: ScopeHint{
+			ScopeType:      "initiative",
+			IncludeEdge:    "includes",
+			HopEdge:        "implements",
+			MembershipEdge: "in_area",
+			TargetsEdge:    "targets",
+		},
+	}
+}
+
+// Hints returns c.LintHints, or DefaultLintHints() when the catalog declared
+// none. Safe to call on a nil *Catalog only via the zero value contract of
+// its caller — c is expected non-nil here.
+func (c *Catalog) Hints() LintHints {
+	if c.LintHints != nil {
+		return *c.LintHints
+	}
+	return DefaultLintHints()
 }
 
 // SortedNodeIDs returns the catalog's node ids in deterministic order.
@@ -117,10 +182,11 @@ type fileNode struct {
 }
 
 type fileSingleCatalog struct {
-	Schema       string          `yaml:"schema"`
-	Catalog      map[string]any  `yaml:"catalog"`
-	TypeRegistry []fileTypeDef   `yaml:"type_registry"`
-	Nodes        []fileNode      `yaml:"nodes"`
+	Schema       string         `yaml:"schema"`
+	Catalog      map[string]any `yaml:"catalog"`
+	TypeRegistry []fileTypeDef  `yaml:"type_registry"`
+	LintHints    *LintHints     `yaml:"lint_hints"`
+	Nodes        []fileNode     `yaml:"nodes"`
 }
 
 // --- loading ------------------------------------------------------------
@@ -153,7 +219,12 @@ func loadSingleFile(path string) (*Catalog, error) {
 	for i, n := range file.Nodes {
 		sources[i] = nodeSource{node: n, file: path}
 	}
-	return buildCatalog(path, SchemaPin(file.Schema), file.TypeRegistry, sources)
+	cat, err := buildCatalog(path, SchemaPin(file.Schema), file.TypeRegistry, sources)
+	if err != nil {
+		return nil, err
+	}
+	cat.LintHints = file.LintHints
+	return cat, nil
 }
 
 // LoadCatalogWithOverlay loads basePath (single-file or bundle, same as

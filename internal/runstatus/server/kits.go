@@ -5,9 +5,9 @@
 // so the SPA (and a future S3c UI loader) can discover what's installed
 // without guessing method names.
 //
-// Like dispatchObjectGraph and dispatchEditor, this family does not resolve a
-// session from the provider — a kit's declared host_interfaces are a property
-// of the INSTALLED KIT, not of any particular running session.
+// Like dispatchEditor, this family does not resolve a session from the
+// provider — a kit's declared host_interfaces are a property of the
+// INSTALLED KIT, not of any particular running session.
 package server
 
 import (
