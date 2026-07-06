@@ -25,8 +25,10 @@ package host
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -113,11 +115,85 @@ func (s AgentStreamer) Run(ctx context.Context) (ClaudeRun, string, error) {
 	// only when one is installed, so the no-sink case still streams to slog and
 	// captures usage. sessionID is threaded so the subprocess inherits
 	// KITSOKI_SESSION_ID.
-	args := append(s.CLIArgs, "--output-format", "stream-json", "--verbose")
+	args := appendClaudeMCPPermissionSettings(ctx, s.CLIArgs)
+	args = append(args, "--output-format", "stream-json", "--verbose")
 	if s.Sandbox != nil {
 		return s.runWithRuntime(ctx, args)
 	}
 	return runClaudeStreamJSON(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)
+}
+
+// appendClaudeMCPPermissionSettings adds a per-dispatch settings overlay that
+// pre-authorizes the MCP tools Kitsoki explicitly attached and allowlisted.
+// Newer Claude Code builds can still stop a headless `-p` run with
+// "requested permissions to use mcp__... but you haven't granted it yet" even
+// when --allowedTools and --permission-mode bypassPermissions are present. The
+// settings allowlist is the same approval surface "Always allow" writes to
+// .claude/settings.local.json, but scoped to this subprocess invocation.
+func appendClaudeMCPPermissionSettings(ctx context.Context, cliArgs []string) []string {
+	if AgentBackendFromContext(ctx).Name() != "claude" {
+		return append([]string(nil), cliArgs...)
+	}
+	allowed := mcpToolsFromAllowedToolsArgs(cliArgs)
+	if len(allowed) == 0 {
+		return append([]string(nil), cliArgs...)
+	}
+	settings := map[string]any{
+		"permissions": map[string]any{
+			"allow": allowed,
+		},
+	}
+	b, err := json.Marshal(settings)
+	if err != nil {
+		slog.WarnContext(ctx, "agent.stream: marshal MCP permission settings", "err", err)
+		return append([]string(nil), cliArgs...)
+	}
+	out := append([]string(nil), cliArgs...)
+	return append(out, "--settings", string(b))
+}
+
+func mcpToolsFromAllowedToolsArgs(cliArgs []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for i := 0; i < len(cliArgs); i++ {
+		a := cliArgs[i]
+		var raw string
+		switch {
+		case a == "--allowedTools" || a == "--allowed-tools":
+			if i+1 >= len(cliArgs) {
+				continue
+			}
+			raw = cliArgs[i+1]
+			i++
+		case strings.HasPrefix(a, "--allowedTools="):
+			raw = strings.TrimPrefix(a, "--allowedTools=")
+		case strings.HasPrefix(a, "--allowed-tools="):
+			raw = strings.TrimPrefix(a, "--allowed-tools=")
+		default:
+			continue
+		}
+		for _, tool := range splitClaudeToolList(raw) {
+			if strings.HasPrefix(tool, "mcp__") && !seen[tool] {
+				seen[tool] = true
+				out = append(out, tool)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func splitClaudeToolList(raw string) []string {
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\t' || r == ' '
+	})
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if s := strings.TrimSpace(f); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func (s AgentStreamer) runWithRuntime(ctx context.Context, args []string) (ClaudeRun, string, error) {

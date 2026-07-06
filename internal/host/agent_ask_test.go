@@ -616,6 +616,69 @@ func TestAgentStreamer_CLIArgs_PanicsOnPositionalArgInTests(t *testing.T) {
 	_, _, _ = streamer.Run(context.Background())
 }
 
+func TestAgentStreamer_MCPAllowedToolsPreauthorizedViaSettings(t *testing.T) {
+	t.Parallel()
+	var captured []string
+	stub := func(_ context.Context, args []string, _, _ string) (host.ClaudeRun, error) {
+		captured = append([]string(nil), args...)
+		return host.ClaudeRun{Stdout: `{"type":"result","subtype":"success","result":"ok"}`}, nil
+	}
+	ctx := host.WithClaudeRunner(context.Background(), stub)
+
+	_, _, err := host.AgentStreamerRunExport(ctx, "stub://claude", []string{
+		"-p",
+		"--permission-mode", "bypassPermissions",
+		"--allowedTools", "Read,mcp__validator__submit,mcp__kitsoki__session_status",
+	}, "prompt", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	settingsJSON, ok := hostTestFlagValue(captured, "--settings")
+	if !ok {
+		t.Fatalf("--settings not passed for MCP allowlist; args=%v", captured)
+	}
+	var settings struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil {
+		t.Fatalf("settings JSON did not parse: %v\n%s", err, settingsJSON)
+	}
+	got := strings.Join(settings.Permissions.Allow, ",")
+	for _, want := range []string{"mcp__validator__submit", "mcp__kitsoki__session_status"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("settings permissions.allow = %v, missing %s", settings.Permissions.Allow, want)
+		}
+	}
+	if strings.Contains(got, "Read") {
+		t.Fatalf("settings permissions.allow should only preauthorize MCP tools, got %v", settings.Permissions.Allow)
+	}
+}
+
+func TestAgentStreamer_NoSettingsOverlayWithoutMCPAllowedTools(t *testing.T) {
+	t.Parallel()
+	var captured []string
+	stub := func(_ context.Context, args []string, _, _ string) (host.ClaudeRun, error) {
+		captured = append([]string(nil), args...)
+		return host.ClaudeRun{Stdout: `{"type":"result","subtype":"success","result":"ok"}`}, nil
+	}
+	ctx := host.WithClaudeRunner(context.Background(), stub)
+
+	_, _, err := host.AgentStreamerRunExport(ctx, "stub://claude", []string{
+		"-p",
+		"--permission-mode", "default",
+		"--allowedTools", "Read,Grep,Glob",
+	}, "prompt", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := hostTestFlagValue(captured, "--settings"); ok {
+		t.Fatalf("--settings should not be passed without MCP tools; args=%v", captured)
+	}
+}
+
 func hostTestFlagValue(args []string, flag string) (string, bool) {
 	var values []string
 	for i, a := range args {

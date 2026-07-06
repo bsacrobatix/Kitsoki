@@ -106,6 +106,7 @@ func runClaudeOneShot(ctx context.Context, bin string, cliArgs []string, stdin, 
 	if len(sessionID) > 0 {
 		sid = sessionID[0]
 	}
+	cliArgs = appendClaudeMCPPermissionSettings(ctx, cliArgs)
 
 	// Non-claude backends (copilot) expose only one JSON mode — JSONL, one
 	// event per line — so there is no separate buffered-envelope contract to
