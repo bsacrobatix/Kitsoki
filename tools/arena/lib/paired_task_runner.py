@@ -42,6 +42,7 @@ from pricing import price_for  # noqa: E402  (path set above; single price table
 # the kitsoki arm and the single-briefed arm use the IDENTICAL worker model —
 # only the process (kitsoki pipeline vs raw codex exec) differs.
 MODEL_TO_PROFILE = {
+    "glm-5.2": "synthetic-claude",
     "gpt-5.5": "codex-native",
 }
 
