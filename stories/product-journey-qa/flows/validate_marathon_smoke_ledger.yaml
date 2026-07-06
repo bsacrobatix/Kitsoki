@@ -20,6 +20,7 @@ host_handlers:
             ledger_markdown_path: .artifacts/product-journey/marathon-smokes/fixture/autonomous-marathon-smoke.md
             errors: 0
             warnings: 0
+            cycle_count: 1
             persona_count: 5
             scenario_count: 3
             run_count: 5
@@ -41,11 +42,12 @@ turns:
       marathon_smoke_ledger_validation_summary: "valid: 5/5 flawless, filed=15, fixed=15, landed=15"
       marathon_smoke_ledger_validation_errors: 0
       marathon_smoke_ledger_validation_warnings: 0
+      marathon_smoke_ledger_validation_cycle_count: 1
       marathon_smoke_ledger_validation_path: .artifacts/product-journey/marathon-smokes/fixture/autonomous-marathon-smoke.json
       marathon_smoke_ledger_validation_markdown_path: .artifacts/product-journey/marathon-smokes/fixture/autonomous-marathon-smoke.md
     expect_host_calls:
       - handler: host.run
         args: { call: validate_autonomous_marathon_smoke_ledger }
-    expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Marathon smoke ledger[\\s\\S]*autonomous-marathon-smoke.md[\\s\\S]*Marathon ledger validation[\\s\\S]*valid: valid: 5/5 flawless[\\s\\S]*filed=15[\\s\\S]*fixed=15[\\s\\S]*landed=15[\\s\\S]*Marathon ledger validated[\\s\\S]*autonomous-marathon-smoke.json[\\s\\S]*Status[\\s\\S]*marathon_smoke_ledger_validated"
+    expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Marathon smoke ledger[\\s\\S]*autonomous-marathon-smoke.md[\\s\\S]*Marathon ledger validation[\\s\\S]*valid: valid: 5/5 flawless[\\s\\S]*filed=15[\\s\\S]*fixed=15[\\s\\S]*landed=15[\\s\\S]*cycles=1[\\s\\S]*Marathon ledger validated[\\s\\S]*autonomous-marathon-smoke.json[\\s\\S]*Status[\\s\\S]*marathon_smoke_ledger_validated"
 
 expect_no_errors: true

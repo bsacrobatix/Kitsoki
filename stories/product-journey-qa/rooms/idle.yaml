@@ -1,7 +1,7 @@
 states:
   idle:
     description: "Waiting to create a product-journey QA run bundle."
-    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_smoke_project, autonomous_marathon_smoke_persona_count, autonomous_marathon_smoke_scenario_count, autonomous_marathon_smoke_run_count, autonomous_marathon_smoke_filed_issue_count, autonomous_marathon_smoke_done_count, autonomous_marathon_smoke_landing_count, autonomous_marathon_smoke_flawless_count, autonomous_marathon_smoke_success_rate, autonomous_marathon_smoke_report_path, autonomous_marathon_smoke_report_markdown_path, marathon_smoke_ledger_validation_status, marathon_smoke_ledger_validation_summary, marathon_smoke_ledger_validation_errors, marathon_smoke_ledger_validation_warnings, marathon_smoke_ledger_validation_path, marathon_smoke_ledger_validation_markdown_path, autonomous_marathon_status, autonomous_marathon_report_path, autonomous_due_status, autonomous_due_summary, autonomous_due_count, autonomous_due_blocked_count, autonomous_due_next_run_dir, autonomous_due_next_story_intent, autonomous_due_advance_status, autonomous_due_advance_summary, autonomous_due_source_run_id, autonomous_due_source_run_dir, autonomous_driver_mode, autonomous_driver_live_profile, autonomous_driver_status, autonomous_driver_evidence_count, autonomous_control_status, autonomous_control_summary, autonomous_control_path, autonomous_gate_summary, independent_verify_status, independent_verify_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, validation_status, validation_errors, validation_issue_summary, status]
+    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_smoke_project, autonomous_marathon_smoke_cycle_count, autonomous_marathon_smoke_persona_count, autonomous_marathon_smoke_scenario_count, autonomous_marathon_smoke_run_count, autonomous_marathon_smoke_filed_issue_count, autonomous_marathon_smoke_done_count, autonomous_marathon_smoke_landing_count, autonomous_marathon_smoke_flawless_count, autonomous_marathon_smoke_success_rate, autonomous_marathon_smoke_report_path, autonomous_marathon_smoke_report_markdown_path, marathon_smoke_ledger_validation_status, marathon_smoke_ledger_validation_summary, marathon_smoke_ledger_validation_errors, marathon_smoke_ledger_validation_warnings, marathon_smoke_ledger_validation_cycle_count, marathon_smoke_ledger_validation_path, marathon_smoke_ledger_validation_markdown_path, autonomous_marathon_status, autonomous_marathon_report_path, autonomous_due_status, autonomous_due_summary, autonomous_due_count, autonomous_due_blocked_count, autonomous_due_next_run_dir, autonomous_due_next_story_intent, autonomous_due_advance_status, autonomous_due_advance_summary, autonomous_due_source_run_id, autonomous_due_source_run_dir, autonomous_driver_mode, autonomous_driver_live_profile, autonomous_driver_status, autonomous_driver_evidence_count, autonomous_control_status, autonomous_control_summary, autonomous_control_path, autonomous_gate_summary, independent_verify_status, independent_verify_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, validation_status, validation_errors, validation_issue_summary, status]
     view:
       - banner:
           text: "PRODUCT JOURNEY QA"
@@ -20,9 +20,9 @@ states:
             Autonomous fix smoke: '{{ world.autonomous_fix_smoke_status|default:"(not checked)" }}'
             Persona autofix smoke: '{{ world.persona_autofix_smoke_status|default:"(not checked)" }}'
             Autonomous marathon smoke: '{{ world.autonomous_marathon_smoke_status|default:"(not checked)" }}'
-            Marathon smoke coverage: '{{ world.autonomous_marathon_smoke_project|default:"(none)" }}; personas={{ world.autonomous_marathon_smoke_persona_count }}, scenarios={{ world.autonomous_marathon_smoke_scenario_count }}, runs={{ world.autonomous_marathon_smoke_run_count }}, filed={{ world.autonomous_marathon_smoke_filed_issue_count }}, fixed={{ world.autonomous_marathon_smoke_done_count }}, landed={{ world.autonomous_marathon_smoke_landing_count }}, flawless={{ world.autonomous_marathon_smoke_success_rate|default:"(none)" }}'
+            Marathon smoke coverage: '{{ world.autonomous_marathon_smoke_project|default:"(none)" }}; cycles={{ world.autonomous_marathon_smoke_cycle_count|default:0 }}, personas={{ world.autonomous_marathon_smoke_persona_count }}, scenarios={{ world.autonomous_marathon_smoke_scenario_count }}, runs={{ world.autonomous_marathon_smoke_run_count }}, filed={{ world.autonomous_marathon_smoke_filed_issue_count }}, fixed={{ world.autonomous_marathon_smoke_done_count }}, landed={{ world.autonomous_marathon_smoke_landing_count }}, flawless={{ world.autonomous_marathon_smoke_success_rate|default:"(none)" }}'
             Marathon smoke ledger: '{{ world.autonomous_marathon_smoke_report_markdown_path|default:"(none)" }}'
-            Marathon ledger validation: '{{ world.marathon_smoke_ledger_validation_status|default:"(not checked)" }}: {{ world.marathon_smoke_ledger_validation_summary|default:"" }}'
+            Marathon ledger validation: '{{ world.marathon_smoke_ledger_validation_status|default:"(not checked)" }}: {{ world.marathon_smoke_ledger_validation_summary|default:"" }}; cycles={{ world.marathon_smoke_ledger_validation_cycle_count|default:0 }}'
             Marathon ledger validated: '{{ world.marathon_smoke_ledger_validation_path|default:"(none)" }}'
             Autonomous marathon: '{{ world.autonomous_marathon_status|default:"(not started)" }}'
             Marathon due: '{{ world.autonomous_due_status|default:"(not checked)" }}: {{ world.autonomous_due_summary|default:"" }}'
@@ -74,7 +74,7 @@ states:
             - label: "persona_autofix_smoke"
               hint: "prove persona replay findings enter the autonomous gitops issue-to-fix gate"
               intent: persona_autofix_smoke
-            - label: "autonomous_marathon_smoke"
+            - label: "autonomous_marathon_smoke repeats=1"
               hint: "prove every active persona can drive onboarding, PRD/design, and bugfix to autonomous fix and stats"
               intent: autonomous_marathon_smoke
             - label: "validate_marathon_smoke_ledger"
@@ -242,6 +242,7 @@ states:
                 autonomous_marathon_smoke_output: ""
                 autonomous_marathon_smoke_exit_code: 0
                 autonomous_marathon_smoke_project: ""
+                autonomous_marathon_smoke_cycle_count: 0
                 autonomous_marathon_smoke_persona_count: 0
                 autonomous_marathon_smoke_scenario_count: 0
                 autonomous_marathon_smoke_run_count: 0
@@ -260,6 +261,8 @@ states:
                 args:
                   - tools/product-journey/run.py
                   - --autonomous-marathon-smoke
+                  - --autonomous-marathon-smoke-repeats
+                  - "{{ slots.repeats ?? 1 }}"
                   - --json-output
                 cwd: "."
               bind:
@@ -269,6 +272,7 @@ states:
                 autonomous_marathon_smoke_exit_code: "stdout_json.exit_code"
                 autonomous_marathon_smoke_output: "stdout_json.output"
                 autonomous_marathon_smoke_project: "stdout_json.project"
+                autonomous_marathon_smoke_cycle_count: "stdout_json.cycle_count"
                 autonomous_marathon_smoke_persona_count: "stdout_json.persona_count"
                 autonomous_marathon_smoke_scenario_count: "stdout_json.scenario_count"
                 autonomous_marathon_smoke_run_count: "stdout_json.run_count"
@@ -290,6 +294,7 @@ states:
                 marathon_smoke_ledger_validation_summary: ""
                 marathon_smoke_ledger_validation_errors: 0
                 marathon_smoke_ledger_validation_warnings: 0
+                marathon_smoke_ledger_validation_cycle_count: 0
                 marathon_smoke_ledger_validation_path: "{{ slots.marathon_smoke_ledger ?? world.autonomous_marathon_smoke_report_path }}"
                 marathon_smoke_ledger_validation_markdown_path: ""
                 status: "marathon_smoke_ledger_validating"
@@ -311,6 +316,7 @@ states:
                 marathon_smoke_ledger_validation_summary: "stdout_json.summary"
                 marathon_smoke_ledger_validation_errors: "stdout_json.errors"
                 marathon_smoke_ledger_validation_warnings: "stdout_json.warnings"
+                marathon_smoke_ledger_validation_cycle_count: "stdout_json.cycle_count"
                 marathon_smoke_ledger_validation_path: "stdout_json.ledger_path"
                 marathon_smoke_ledger_validation_markdown_path: "stdout_json.ledger_markdown_path"
               on_error: idle

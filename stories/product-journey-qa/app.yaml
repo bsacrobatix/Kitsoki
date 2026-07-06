@@ -221,6 +221,7 @@ world:
   autonomous_marathon_smoke_exit_code: { type: int, default: 0 }
   autonomous_marathon_smoke_output: { type: string, default: "" }
   autonomous_marathon_smoke_project: { type: string, default: "" }
+  autonomous_marathon_smoke_cycle_count: { type: int, default: 0 }
   autonomous_marathon_smoke_persona_count: { type: int, default: 0 }
   autonomous_marathon_smoke_scenario_count: { type: int, default: 0 }
   autonomous_marathon_smoke_run_count: { type: int, default: 0 }
@@ -235,6 +236,7 @@ world:
   marathon_smoke_ledger_validation_summary: { type: string, default: "" }
   marathon_smoke_ledger_validation_errors: { type: int, default: 0 }
   marathon_smoke_ledger_validation_warnings: { type: int, default: 0 }
+  marathon_smoke_ledger_validation_cycle_count: { type: int, default: 0 }
   marathon_smoke_ledger_validation_path: { type: string, default: "" }
   marathon_smoke_ledger_validation_markdown_path: { type: string, default: "" }
   autonomous_marathon_status: { type: string, default: "" }
@@ -383,8 +385,10 @@ intents:
     priority: 89
   autonomous_marathon_smoke:
     description: "Run a no-LLM core-use-case persona sweep through autonomous fix and derived stats."
-    examples: ["autonomous marathon smoke", "prove persona qa marathon", "standing product qa smoke"]
+    examples: ["autonomous marathon smoke", "prove persona qa marathon", "standing product qa smoke", "autonomous marathon smoke repeats=2"]
     priority: 89
+    slots:
+      repeats: { type: int, required: false }
   validate_marathon_smoke_ledger:
     description: "Validate a retained autonomous marathon smoke ledger through the story surface."
     examples: ["validate marathon smoke ledger", "check retained marathon ledger", "validate last marathon smoke"]
