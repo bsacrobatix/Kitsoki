@@ -378,6 +378,89 @@ func TestGitHubFileFindings_RelatesDuplicateOpenIssue(t *testing.T) {
 	}
 }
 
+func TestGitHubFileFindings_RelatesSimilarOpenIssue(t *testing.T) {
+	dir := writeFindingsBundle(t)
+	t.Setenv("GH_TOKEN", "test-token")
+	var issueCreates int
+	var comments []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/search/issues":
+			q := r.URL.Query().Get("q")
+			if strings.Contains(q, "verify") {
+				writeJSON(w, map[string]any{
+					"items": []map[string]any{{
+						"number":   902,
+						"title":    "product-journey dependency-bugfix: verify gate looped forever",
+						"state":    "open",
+						"html_url": "https://github.com/o/r/issues/902",
+					}},
+				})
+				return
+			}
+			writeJSON(w, map[string]any{"items": []map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/o/r/issues/902/comments":
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			comments = append(comments, payload["body"].(string))
+			writeJSON(w, map[string]any{"html_url": "https://github.com/o/r/issues/902#issuecomment-1"})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/releases/tags/kitsoki-artifacts":
+			writeJSON(w, map[string]any{"upload_url": "http://" + r.Host + "/uploads/assets{?name,label}"})
+		case r.Method == http.MethodPost && r.URL.Path == "/uploads/assets":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/o/r/issues":
+			issueCreates++
+			writeJSON(w, map[string]any{
+				"number":   903,
+				"html_url": "https://github.com/o/r/issues/903",
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("findings filing must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
+
+	res, err := host.GitHubFileFindings(context.Background(), host.FindingsFilingInput{
+		RunDir: dir, RepoRoot: dir, Repo: "o/r", FiledBy: "qa",
+	})
+	if err != nil {
+		t.Fatalf("GitHubFileFindings: %v", err)
+	}
+	if res.Related != 1 || res.Filed != 1 || res.Failed != 0 {
+		t.Fatalf("counts filed/related/failed = %d/%d/%d, want 1/1/0", res.Filed, res.Related, res.Failed)
+	}
+	if issueCreates != 1 {
+		t.Fatalf("issue creates = %d, want 1 (similar first finding only comments)", issueCreates)
+	}
+	if len(comments) != 1 || !strings.Contains(comments[0], "attached the new evidence here instead of filing a duplicate") {
+		t.Fatalf("related comment = %v", comments)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "findings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var findings map[string]any
+	if err := json.Unmarshal(data, &findings); err != nil {
+		t.Fatal(err)
+	}
+	first := findings["items"].([]any)[0].(map[string]any)
+	gi := first["github_issue"].(map[string]any)
+	if gi["url"] != "https://github.com/o/r/issues/902" || gi["relation"] != "related" {
+		t.Fatalf("related github_issue = %v", gi)
+	}
+}
+
 func TestGitHubFileFindings_RelatesTraceFingerprint(t *testing.T) {
 	dir := writeFindingsBundle(t)
 	t.Setenv("GH_TOKEN", "test-token")
