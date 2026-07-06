@@ -71,15 +71,26 @@ type ValidationReport struct {
 // ExportReport is the deterministic promotion/export summary written beside a
 // promoted workflow package.
 type ExportReport struct {
-	WorkflowID      string   `json:"workflow_id"`
-	ExportPath      string   `json:"export_path"`
-	Status          string   `json:"status"`
-	Artifacts       []string `json:"artifacts,omitempty"`
-	StarterFlowPath string   `json:"starter_flow_path,omitempty"`
-	StarterCassette string   `json:"starter_cassette_path,omitempty"`
-	Warnings        []string `json:"warnings,omitempty"`
-	Todos           []string `json:"todos,omitempty"`
-	BaseStory       bool     `json:"base_story,omitempty"`
+	WorkflowID        string                  `json:"workflow_id"`
+	ExportPath        string                  `json:"export_path"`
+	Status            string                  `json:"status"`
+	Artifacts         []string                `json:"artifacts,omitempty"`
+	StarterFlowPath   string                  `json:"starter_flow_path,omitempty"`
+	StarterCassette   string                  `json:"starter_cassette_path,omitempty"`
+	StarterFlowReplay *StarterFlowReplayCheck `json:"starter_flow_replay,omitempty"`
+	Warnings          []string                `json:"warnings,omitempty"`
+	Todos             []string                `json:"todos,omitempty"`
+	BaseStory         bool                    `json:"base_story,omitempty"`
+}
+
+// StarterFlowReplayCheck records whether the generated starter flow was
+// replayed successfully during export. It turns "exported" from a copy-only
+// claim into a runtime-checked artifact.
+type StarterFlowReplayCheck struct {
+	OK     bool   `json:"ok"`
+	Passed int    `json:"passed"`
+	Failed int    `json:"failed"`
+	Error  string `json:"error,omitempty"`
 }
 
 // Receipt is the common artifact/trackable shape returned by create/validate/
@@ -453,7 +464,6 @@ expect_no_errors: true
 // Export copies a generated workflow package to targetDir and writes starter
 // flow/cassette artifacts derived from the trace when available.
 func (s *Service) Export(ctx context.Context, workflowID string, req ExportRequest) (*Receipt, error) {
-	_ = ctx
 	s.ensure()
 	draftDir := filepath.Join(s.OutputDir, workflowID)
 	receipt, err := s.ReadReceipt(workflowID)
@@ -580,6 +590,12 @@ Validation: %t
 			if report.StarterCassette == "" {
 				report.Todos = append(report.Todos, "add a host cassette if the trace recorded host calls")
 			}
+			report.StarterFlowReplay = validateStarterFlowReplay(ctx, filepath.Join(targetDir, "app", "app.yaml"), flowPath)
+			if !report.StarterFlowReplay.OK {
+				report.Status = "copied-with-todos"
+				report.Warnings = append(report.Warnings, fmt.Sprintf("starter flow replay failed: %s", report.StarterFlowReplay.Error))
+				report.Todos = append(report.Todos, "fix the generated starter flow before using it as a regression fixture")
+			}
 		}
 	} else {
 		report.Status = "copied-with-todos"
@@ -629,6 +645,25 @@ Validation: %t
 		return nil, err
 	}
 	return receipt, nil
+}
+
+func validateStarterFlowReplay(ctx context.Context, appPath, flowPath string) *StarterFlowReplayCheck {
+	check := &StarterFlowReplayCheck{}
+	statePath := filepath.Join(filepath.Dir(flowPath), "generated.state.json")
+	_ = os.Remove(statePath)
+	defer os.Remove(statePath)
+	report, err := testrunner.RunFlows(ctx, appPath, flowPath, testrunner.FlowOptions{FailFast: true})
+	if err != nil {
+		check.Error = err.Error()
+		return check
+	}
+	check.Passed = report.Passed
+	check.Failed = report.Failed
+	check.OK = report.Failed == 0
+	if !check.OK {
+		check.Error = fmt.Sprintf("%d generated starter flow(s) failed", report.Failed)
+	}
+	return check
 }
 
 // ReadReceipt loads receipt.json for a draft.

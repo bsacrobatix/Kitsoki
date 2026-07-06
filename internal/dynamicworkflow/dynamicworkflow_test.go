@@ -347,6 +347,14 @@ func TestServiceExportGeneratedFlowReplaysSiblingCassette(t *testing.T) {
 	require.NotContains(t, flowYAML, "flows/generated.cassette.yaml")
 	require.Contains(t, flowYAML, "manifest_path: "+exportManifestPath)
 
+	var exportReport ExportReport
+	require.NoError(t, readJSON(filepath.Join(exportDir, "export-report.json"), &exportReport))
+	require.NotNil(t, exportReport.StarterFlowReplay)
+	require.True(t, exportReport.StarterFlowReplay.OK, "starter flow replay should pass: %+v", exportReport.StarterFlowReplay)
+	require.Equal(t, 1, exportReport.StarterFlowReplay.Passed)
+	require.Zero(t, exportReport.StarterFlowReplay.Failed)
+	require.NoFileExists(t, filepath.Join(exportDir, "flows", "generated.state.json"))
+
 	report, err := testrunner.RunFlows(t.Context(), filepath.Join(exportDir, "app", "app.yaml"), flowPath, testrunner.FlowOptions{FailFast: true})
 	require.NoError(t, err)
 	require.Zero(t, report.Failed)
@@ -413,6 +421,14 @@ func TestServiceExportGeneratedFlowSkipsInternalDispatchTransitions(t *testing.T
 	require.Contains(t, flowYAML, "name: next_item")
 	require.NotContains(t, flowYAML, "policy_ok")
 	require.NotContains(t, flowYAML, "__on_complete_target__")
+
+	var exportReport ExportReport
+	require.NoError(t, readJSON(filepath.Join(exportDir, "export-report.json"), &exportReport))
+	require.NotNil(t, exportReport.StarterFlowReplay)
+	require.True(t, exportReport.StarterFlowReplay.OK, "starter flow replay should pass: %+v", exportReport.StarterFlowReplay)
+	require.Equal(t, 1, exportReport.StarterFlowReplay.Passed)
+	require.Zero(t, exportReport.StarterFlowReplay.Failed)
+	require.NoFileExists(t, filepath.Join(exportDir, "flows", "generated.state.json"))
 
 	report, err := testrunner.RunFlows(t.Context(), filepath.Join(exportDir, "app", "app.yaml"), flowPath, testrunner.FlowOptions{FailFast: true})
 	require.NoError(t, err)
