@@ -85,9 +85,11 @@ def main() -> int:
         old_env = {
             "KITSOKI_BIN": os.environ.get("KITSOKI_BIN"),
             "KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE": os.environ.get("KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE"),
+            "KITSOKI_GITOPS_AUTOFIX_ALLOW_TEST_BACKEND": os.environ.get("KITSOKI_GITOPS_AUTOFIX_ALLOW_TEST_BACKEND"),
         }
         os.environ["KITSOKI_BIN"] = f"{sys.executable} {fake}"
         os.environ["KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE"] = "1"
+        os.environ["KITSOKI_GITOPS_AUTOFIX_ALLOW_TEST_BACKEND"] = "1"
         try:
             catalog = run.load_catalog(run.CATALOG)
             github_targets = run.load_github_targets(run.GITHUB_TARGETS)

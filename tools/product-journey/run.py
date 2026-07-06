@@ -5124,6 +5124,8 @@ def gitops_autonomous_fix(
         "--comment-mode",
         gh_agent_comment_mode or "none",
     ])
+    if os.environ.get("KITSOKI_GITOPS_AUTOFIX_ALLOW_TEST_BACKEND") == "1":
+        cmd.append("--allow-test-backend")
     proc = shell(cmd, ROOT)
     if proc.returncode != 0:
         raise SystemExit(

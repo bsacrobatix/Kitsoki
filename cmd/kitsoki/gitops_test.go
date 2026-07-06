@@ -671,6 +671,26 @@ func TestGitopsAutonomousFixChecksHostedAgentReadinessBeforeFiling(t *testing.T)
 	}
 }
 
+func TestGitopsAutonomousFixTestBackendRequiresExplicitOptIn(t *testing.T) {
+	t.Setenv("KITSOKI_GITOPS_AUTOFIX_USE_KITSOKI_BIN_FAKE", "1")
+
+	runDir := t.TempDir()
+	_, err := runGitopsAutonomousFix(context.Background(), gitopsAutonomousFixOptions{
+		RunDir:        runDir,
+		TicketRepo:    "o/r",
+		AgentDB:       filepath.Join(runDir, "gh-agent.sqlite"),
+		AgentStory:    "stories/bugfix",
+		PublicBaseURL: "https://agent.example",
+		CommentMode:   "none",
+	})
+	if err == nil {
+		t.Fatal("expected fake autonomous-fix backend to require explicit opt-in")
+	}
+	if !strings.Contains(err.Error(), "--allow-test-backend") {
+		t.Fatalf("expected --allow-test-backend guidance, got %v", err)
+	}
+}
+
 func TestGitopsAutonomousFixChecksWatchdogBeforeAgentOrGitHub(t *testing.T) {
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("autonomous-fix must not check hosted agent before watchdog passes: %s %s", r.Method, r.URL.String())
