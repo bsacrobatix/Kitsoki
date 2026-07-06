@@ -447,6 +447,51 @@ ticket-specific, so freezing one trajectory would silently give every
 future ticket the same stale answer. The ratchet is real, but it isn't a
 substitute for judgment about what's actually reusable.
 
+#### Transports: CLI vs direct API
+
+`codeact.Run` treats its `Agent` as a black box, so the per-step LLM call has
+two interchangeable backends, selected by `AgentCodeactHandler`:
+
+- **`RealCodeactAgent`** (`internal/host/agent_codeact_real.go`, the default)
+  forks one `claude -p` per step, gating the step on the same mcp-validator
+  `submit` mechanism `host.agent.decide` uses. Selected when the effect's
+  `agent:` resolves to the default (`builtin.claude_cli`) or to no plugin.
+- **`ApiCodeactAgent`** (`internal/host/agent_codeact_api.go`) calls an
+  OpenAI-compatible model API directly — one `{endpoint}/v1/chat/completions`
+  POST per step, the fixed `{action: snippet|done}` discriminated-union schema
+  sent as `response_format: json_schema`. Selected when `agent:` resolves to a
+  `builtin.local_llm` plugin (the opt-in check `reg.IsLocalLLM(pluginName)` in
+  `AgentCodeactHandler`); it generalizes `internal/agent/local_llm.go`'s client
+  rather than forking a CLI.
+
+The direct-API path exists because every step otherwise inherits the
+external-CLI friction this codebase keeps hitting — `tool_search`/MCP-approval
+dance, sandbox-bypass flags, quota inference from stdout — none of it inherent
+to the *model*, all of it the foreign harness layer in between. Config is the
+existing plugin-routing convention `decide` already uses: the `agent:` name is
+declared in both `agents:` (persona) and `agent_plugins:` (transport), sharing
+one key; the `builtin.local_llm` entry adds two knobs for an authenticated
+OpenAI-compatible endpoint:
+
+```yaml
+agents:
+  agent.glm:
+    system_prompt: "You triage bugs by emitting Starlark snippets against ctx..."
+agent_plugins:
+  agent.glm:
+    plugin: builtin.local_llm
+    endpoint: https://open.bigmodel.cn/api/paas/v4
+    api_key_env: GLM_API_KEY   # env-var NAME; secret read at call time, never in YAML
+    model: glm-4.6
+    json_schema: true          # response_format: json_schema for any schema (OpenAI-native),
+                               # independent of the llama.cpp grammar-subset gate `grammar` governs
+```
+
+The done()-payload schema gate, the structured-error feedback, the step
+journal, and the no-LLM cassette/replay are all unchanged — `ApiCodeactAgent`
+is just a different `Agent` impl fed into the same `codeact.Run`, so a recorded
+trajectory replays identically regardless of which transport produced it.
+
 **Steal:**
 
 1. Code as the action for compositional, capability-scoped tasks — CodeAct's

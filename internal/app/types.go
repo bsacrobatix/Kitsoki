@@ -184,6 +184,19 @@ type AgentPluginDecl struct {
 	// local-model sidecar (builtin.local_llm only). Empty fetches/uses the
 	// cached default.
 	ServerBin string `yaml:"server_bin,omitempty"`
+	// APIKeyEnv names an environment variable holding a bearer token sent as
+	// `Authorization: Bearer <key>` on every request (builtin.local_llm only).
+	// The value is the env-var NAME, not the secret; the secret is read at call
+	// time so it never has to be materialized in YAML. Used by authenticated
+	// OpenAI-compatible endpoints (e.g. GLM-5.2). Empty disables auth.
+	APIKeyEnv string `yaml:"api_key_env,omitempty"`
+	// JSONSchema enables the OpenAI-native `response_format: json_schema`
+	// constrained-output path (builtin.local_llm only): when true, the agent
+	// sends json_schema for any schema present regardless of the llama.cpp
+	// grammar-subset gate that the `grammar` knob governs. Use this for
+	// OpenAI-compatible endpoints that honour json_schema natively, including
+	// for schemas outside the GBNF subset (discriminated unions, etc.).
+	JSONSchema bool `yaml:"json_schema,omitempty"`
 }
 
 // ProviderDecl declares one named LLM backend profile (see AppDef.Providers).

@@ -208,37 +208,14 @@ func readCodeactSubmission(outputPath, stdout string) map[string]any {
 // already folded into the system prompt by buildBaseCLIArgs, so this text
 // only needs to carry what changes step to step.
 func (a *RealCodeactAgent) buildStepPrompt(step int, obs map[string]any, errEnv *codeact.ErrorEnvelope) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Goal: %s\n", a.goal)
-	fmt.Fprintf(&b, "Step: %d of %d (budget remaining: %d)\n", step+1, a.budget, a.budget-step)
-
-	if len(a.capabilities) > 0 {
-		b.WriteString("\nCapabilities available in ctx for this call:\n")
-		for _, c := range a.capabilities {
-			desc := codeactCapabilityDescriptions[c]
-			if desc == "" {
-				desc = c
-			}
-			fmt.Fprintf(&b, "- %s\n", desc)
-		}
-	} else {
-		b.WriteString("\nNo ctx capabilities are declared for this call — snippets may only read ctx.world.get and return a result dict.\n")
-	}
-
-	switch {
-	case errEnv != nil:
-		fmt.Fprintf(&b, "\nThe previous step failed:\n%s\n", errEnv.Message)
-	case obs != nil:
-		if obsJSON, err := json.MarshalIndent(obs, "", "  "); err == nil {
-			fmt.Fprintf(&b, "\nThe previous step's observation:\n%s\n", string(obsJSON))
-		}
-	case step == 0:
-		b.WriteString("\nThis is the first step; there is no prior observation.\n")
-	}
-
-	b.WriteString("\nRespond by calling the validator's submit tool with exactly one of:\n" +
+	// The goal/budget/capabilities/observation/error framing is shared with the
+	// direct-API agent (codeactStepContext, agent_codeact_api.go) so the two
+	// paths cannot drift on the per-step context; only the submission
+	// instruction suffix differs (the CLI path tells the model to call the
+	// validator's submit tool, the API path tells it to respond with JSON).
+	return codeactStepContext(a.goal, a.budget, step, a.capabilities, obs, errEnv) +
+		"\nRespond by calling the validator's submit tool with exactly one of:\n" +
 		"  {\"action\": \"snippet\", \"snippet\": \"<Starlark source defining def main(ctx): ...>\"}\n" +
 		"  {\"action\": \"done\", \"payload\": {<final result fields>}}\n" +
-		"Do not call done() until you are confident the goal is satisfied.\n")
-	return b.String()
+		"Do not call done() until you are confident the goal is satisfied.\n"
 }
