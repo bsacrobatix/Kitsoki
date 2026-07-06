@@ -205,7 +205,7 @@ def deck_scene(deck, eyebrow):
     return {}
 
 
-def attach_bugfix_proof(run_dir, scenario_id):
+def attach_bugfix_proof(run_dir, scenario_id, record_driver=True):
     evidence_dir = run_dir / "test-evidence"
     evidence_dir.mkdir(parents=True, exist_ok=True)
     evidence_kinds = [
@@ -232,17 +232,19 @@ def attach_bugfix_proof(run_dir, scenario_id):
             None,
         )
         refs.append(str(artifact))
-    run.record_driver_event(
-        run_dir,
-        scenario_id,
-        "replay",
-        "validated",
-        "Cassette replay produced the bugfix proof artifacts.",
-        "story.driver_event,visual.observe",
-        ",".join(refs),
-        "",
-        None,
-    )
+    if record_driver:
+        run.record_driver_event(
+            run_dir,
+            scenario_id,
+            "replay",
+            "validated",
+            "Cassette replay produced the bugfix proof artifacts.",
+            "story.driver_event,visual.observe",
+            ",".join(refs),
+            "",
+            None,
+        )
+    return refs
 
 
 def attach_closeout(run_dir):
@@ -437,7 +439,7 @@ def main():
         # direct file_findings run is not complete until native gitops closes
         # the fixed issues.
         reviewed = run.review_run_bundle(run_dir, None)
-        _check("review has 31 checks", reviewed["total"] == 31)
+        _check("review has 32 checks", reviewed["total"] == 32)
         _check("direct filing requires issue close-out before final review",
                review_check(reviewed, "issue-closeout")["status"] == "fail"
                and "status=(missing)" in review_check(reviewed, "issue-closeout")["detail"])
@@ -450,7 +452,7 @@ def main():
         # 5. Gates: a new credible finding
         # after filing trips review + validate until re-filed.
         reviewed = run.review_run_bundle(run_dir, None)
-        _check("review has 31 checks after close-out", reviewed["total"] == 31)
+        _check("review has 32 checks after close-out", reviewed["total"] == 32)
         _check("weakness-routing passes when weakness has PRD route",
                review_check(reviewed, "weakness-routing")["status"] == "pass")
         _check("prd-design-intake passes when weakness has PRD intake",
@@ -590,9 +592,46 @@ def main():
         _check("re-filing closes the gate",
                review_check(reviewed, "findings-filed")["status"] == "pass")
 
-        # 6. The legacy Python composite loop owns filing and gh-agent drain,
-        # but native gitops is required for final issue close-out.
+        # 6. Credible issue findings require a story-owned driver receipt
+        # before the autonomous issue-to-fix gate can be trusted.
         stable_scenarios = [scenario for scenario in scenarios if scenario.get("id") == "bugfix"]
+        run_dir_receipt, run_json_receipt = run.build_run_bundle(
+            catalog, run.load_github_targets(run.GITHUB_TARGETS),
+            personas, stable_scenarios, "vscode", "", "driver-receipt-test", "dry-run", None,
+        )
+        scenario_receipt = run_json_receipt["scenarios"][0]["id"]
+        receipt_refs = attach_bugfix_proof(run_dir_receipt, scenario_receipt, record_driver=False)
+        run.record_finding(run_dir_receipt, "issue", "receipt credible", "observed problem",
+                           scenario_receipt, "high", "", "open", None)
+        reviewed_receipt_gap = run.review_run_bundle(run_dir_receipt, None)
+        _check("credible issue review requires driver receipt",
+               review_check(reviewed_receipt_gap, "credible-issue-driver-receipts")["status"] == "fail"
+               and "missing captured-or-validated driver event" in review_check(reviewed_receipt_gap, "credible-issue-driver-receipts")["detail"])
+        validated_receipt_gap = run.validate_run_bundle(run_dir_receipt)
+        _check("validate catches credible issue without driver receipt",
+               any(i["id"] == "credible-issue-driver-receipts" and i["severity"] == "error"
+                   for i in validated_receipt_gap["issues"]))
+        run.record_driver_event(
+            run_dir_receipt,
+            scenario_receipt,
+            "replay",
+            "validated",
+            "Cassette replay produced the credible issue proof artifacts.",
+            "story.driver_event,visual.observe",
+            ",".join(receipt_refs),
+            "",
+            None,
+        )
+        reviewed_receipt_ok = run.review_run_bundle(run_dir_receipt, None)
+        _check("credible issue driver receipt gate passes with proof refs",
+               review_check(reviewed_receipt_ok, "credible-issue-driver-receipts")["status"] == "pass")
+        validated_receipt_ok = run.validate_run_bundle(run_dir_receipt)
+        _check("validate accepts credible issue driver receipt",
+               not any(i["id"] == "credible-issue-driver-receipts" and i["severity"] == "error"
+                       for i in validated_receipt_ok["issues"]))
+
+        # 7. The legacy Python composite loop owns filing and gh-agent drain,
+        # but native gitops is required for final issue close-out.
         run_dir2, run_json2 = run.build_run_bundle(
             catalog, run.load_github_targets(run.GITHUB_TARGETS),
             personas, stable_scenarios, "vscode", "", "autonomous-fix-test", "dry-run", None,
@@ -638,7 +677,7 @@ def main():
                and "https://agent.example/run/job-1/artifacts/triage-verdict.md" in report_text
                and "https://agent.example/run/job-1/artifacts/independent-verify.md" in report_text)
         _check("legacy autonomous loop reviewed close-out gate",
-               result["review_total_count"] == 31 and result["validation_status"] == "invalid")
+               result["review_total_count"] == 32 and result["validation_status"] == "invalid")
 
         run_dir_facade, run_json_facade = run.build_run_bundle(
             catalog, run.load_github_targets(run.GITHUB_TARGETS),
