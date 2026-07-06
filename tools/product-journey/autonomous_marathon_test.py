@@ -441,6 +441,176 @@ def main() -> int:
                   and Path(finalized["prd_design_intake_path"]).exists(),
                   failures)
 
+            failed_driver = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-failed-live-driver",
+                "bugfix",
+                7,
+                "o/r",
+                "",
+                "stories/bugfix",
+                healthy_url,
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                "live",
+                24,
+                15,
+                45,
+                None,
+            )
+            failed_driver_dir = Path(failed_driver["run_dir"])
+            failed_run_json = run.read_json(failed_driver_dir / "run.json")
+            failed_scenario = failed_run_json["scenarios"][0]["id"]
+            filing_test.attach_bugfix_proof(failed_driver_dir, failed_scenario)
+            run.record_finding(
+                failed_driver_dir,
+                "issue",
+                "Failed live driver must not trigger autonomous fixing",
+                "A failed driver dispatch should stop before issue filing even when a credible issue exists.",
+                failed_scenario,
+                "high",
+                str(failed_driver_dir / "test-evidence" / "trace-replay.md"),
+                "open",
+                None,
+            )
+            run.record_autonomous_driver_dispatch(
+                failed_driver_dir,
+                "live",
+                "failed",
+                "Live driver failed before it could capture trustworthy proof.",
+                0,
+                1,
+                str(failed_driver_dir / "failed-driver-trace.jsonl"),
+                "driver session failed",
+            )
+            failed_driver_db = tmp / "gh-agent-failed-driver.json"
+            failed_finalized = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                failed_driver_dir,
+                "vscode",
+                "core-maintainer",
+                "ignored",
+                "",
+                7,
+                "o/r",
+                str(failed_driver_db),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                str(run.ARTIFACT_ROOT),
+                str(failed_driver_dir / "autonomous-marathon-stats.json"),
+                0.82,
+                25,
+                "pending",
+                24,
+                15,
+                45,
+                None,
+            )
+            failed_report_text = Path(failed_finalized["autonomous_marathon_report_path"]).read_text(encoding="utf-8")
+            check("failed live driver stops before autonomous final gates",
+                  failed_finalized["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and failed_finalized["autonomous_driver_status"] == "failed"
+                  and failed_finalized["autonomous_fix_status"] == "not_run"
+                  and failed_finalized["autonomous_watchdog_status"] == "not_run"
+                  and failed_finalized["validation_issue_summary"] == "autonomous-driver-dispatch"
+                  and failed_finalized["stats_status"] == "not_run"
+                  and "driver=fail" in failed_finalized["autonomous_gate_summary"]
+                  and "autonomous-driver-dispatch.md" in failed_report_text
+                  and not failed_driver_db.exists()
+                  and not run.autonomous_marathon_watchdog_path(failed_driver_dir).exists(),
+                  failures)
+
+            missing_receipt = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-missing-driver-receipt",
+                "bugfix",
+                7,
+                "o/r",
+                "",
+                "stories/bugfix",
+                healthy_url,
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                "live",
+                24,
+                15,
+                45,
+                None,
+            )
+            missing_receipt_dir = Path(missing_receipt["run_dir"])
+            missing_receipt_finalized = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                missing_receipt_dir,
+                "vscode",
+                "core-maintainer",
+                "ignored",
+                "",
+                7,
+                "o/r",
+                str(tmp / "gh-agent-missing-driver-receipt.json"),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                str(run.ARTIFACT_ROOT),
+                str(missing_receipt_dir / "autonomous-marathon-stats.json"),
+                0.82,
+                25,
+                "pending",
+                24,
+                15,
+                45,
+                None,
+            )
+            check("missing live driver receipt stops before autonomous final gates",
+                  missing_receipt_finalized["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and missing_receipt_finalized["autonomous_driver_status"] == "missing"
+                  and missing_receipt_finalized["autonomous_fix_status"] == "not_run"
+                  and missing_receipt_finalized["validation_issue_summary"] == "autonomous-driver-dispatch"
+                  and missing_receipt_finalized["stats_status"] == "not_run"
+                  and not run.autonomous_marathon_watchdog_path(missing_receipt_dir).exists(),
+                  failures)
+
             stale = run.autonomous_marathon(
                 catalog,
                 github_targets,
