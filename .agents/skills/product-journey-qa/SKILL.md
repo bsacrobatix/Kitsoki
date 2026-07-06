@@ -187,7 +187,10 @@ Then hand it to the reusable driver:
    create the control/report bundle, auto-queue the story-owned
    `dispatch_driver` intent, run the reusable driver through
    `host.agent.task`, and then queue the native autonomous finalizer instead of
-   relying on operator glue. Live-budgeted pending mode must still provide
+   relying on operator glue. Record/live modes must also provide
+   `autonomous_driver_live_profile=<profile>` so a replay miss cannot silently
+   fall through to an ambient backend; missing profile fails closed in the story
+   view before runner or agent dispatch. Live-budgeted pending mode must still provide
    `ticket_repo` and `gh_agent_public_base_url` up front because those values
    are required for the autonomous file/fix/close-out gates after capture. The
    hosted gh-agent health/readiness checks must pass before the story returns a

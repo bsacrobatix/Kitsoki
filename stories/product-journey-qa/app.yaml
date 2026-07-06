@@ -258,6 +258,7 @@ world:
   autonomous_due_source_run_id: { type: string, default: "" }
   autonomous_due_source_run_dir: { type: string, default: "" }
   autonomous_driver_mode: { type: string, default: "" }
+  autonomous_driver_live_profile: { type: string, default: "" }
   autonomous_driver_status: { type: string, default: "" }
   autonomous_driver_summary: { type: string, default: "" }
   autonomous_driver_evidence_count: { type: int, default: 0 }
@@ -401,6 +402,7 @@ intents:
       scenarios: { type: string, required: false }
       live_budget_minutes: { type: int, required: false }
       autonomous_driver_mode: { type: string, required: false }
+      autonomous_driver_live_profile: { type: string, required: false }
       run_dir: { type: string, required: false }
       ticket_repo: { type: string, required: false }
       gh_agent_db: { type: string, required: false }

@@ -92,8 +92,10 @@ It is intentionally no-LLM:
   driver modes create the same control/report bundle, auto-queue the
   story-owned `dispatch_driver` intent, launch the reusable product-journey QA
   driver through `host.agent.task`, and then queue the native autonomous
-  finalizer. GitHub filing/fixing stays inside the story-owned gitops/gh-agent
-  gates; the driver must not call `gh` directly.
+  finalizer. They require `autonomous_driver_live_profile=<profile>` up front,
+  so replay misses cannot silently fall through to an ambient live backend.
+  GitHub filing/fixing stays inside the story-owned gitops/gh-agent gates; the
+  driver must not call `gh` directly.
   Live pending mode also requires the hosted gh-agent `/healthz` and
   `/api/ready` checks to pass for the same ticket repo before returning a driver
   handoff.

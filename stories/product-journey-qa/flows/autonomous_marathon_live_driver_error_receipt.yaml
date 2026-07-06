@@ -41,6 +41,7 @@ host_handlers:
             autonomous_marathon_summary: "Created 1 scenario(s); driver evidence capture is ready for story-owned dispatch."
             autonomous_marathon_report_path: .artifacts/product-journey/run-live-driver-error/autonomous-marathon-report.md
             autonomous_driver_mode: live
+            autonomous_driver_live_profile: test-live
             autonomous_driver_status: ready_for_dispatch
             autonomous_driver_summary: "Story-owned live driver dispatch is ready."
             autonomous_driver_evidence_count: 0
@@ -81,6 +82,7 @@ host_handlers:
             autonomous_driver_dispatch_trace: ""
             autonomous_marathon_status: autonomous_marathon_ready_for_driver
             autonomous_driver_mode: live
+            autonomous_driver_live_profile: test-live
             autonomous_driver_status: failed
             autonomous_driver_summary: "host.agent.task: driver session abandoned without successful submit"
             autonomous_driver_evidence_count: 0
@@ -105,6 +107,7 @@ host_handlers:
             autonomous_marathon_summary: "driver=fail: host.agent.task: driver session abandoned without successful submit"
             autonomous_marathon_report_path: .artifacts/product-journey/run-live-driver-error/autonomous-marathon-report.md
             autonomous_driver_mode: live
+            autonomous_driver_live_profile: test-live
             autonomous_driver_status: failed
             autonomous_driver_summary: "host.agent.task: driver session abandoned without successful submit"
             autonomous_driver_evidence_count: 0
@@ -172,6 +175,7 @@ turns:
         scenarios: bugfix
         live_budget_minutes: 6
         autonomous_driver_mode: live
+        autonomous_driver_live_profile: test-live
         ticket_repo: bsacrobatix/Kitsoki
         gh_agent_public_base_url: https://agent.example
     expect_state: run_created
@@ -179,6 +183,7 @@ turns:
       status: autonomous_marathon_complete
       autonomous_marathon_status: autonomous_marathon_invalid
       autonomous_driver_mode: live
+      autonomous_driver_live_profile: test-live
       autonomous_driver_status: failed
       autonomous_driver_summary: "host.agent.task: driver session abandoned without successful submit"
       autonomous_driver_evidence_count: 0

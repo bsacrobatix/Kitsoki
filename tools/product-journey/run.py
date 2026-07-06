@@ -4426,8 +4426,10 @@ def run_story_summary(run_dir: Path) -> dict:
     gh_agent_missing_verify = gh_agent_missing_independent_verify(gh_agent)
     missing_run_urls = gh_agent_missing_run_urls(gh_agent)
     control_gh_agent = control.get("gh_agent", {}) if isinstance(control.get("gh_agent", {}), dict) else {}
+    control_driver = control.get("driver", {}) if isinstance(control.get("driver", {}), dict) else {}
     return {
         "gh_agent_public_base_url": control_gh_agent.get("public_base_url", gh_agent.get("public_base_url", "")),
+        "autonomous_driver_live_profile": control_driver.get("live_profile", ""),
         "persona_starting_surface": lens.get("starting_surface", ""),
         "persona_first_question": lens.get("first_question", ""),
         "persona_evidence_emphasis": lens.get("evidence_emphasis", ""),
@@ -5691,6 +5693,7 @@ def render_autonomous_marathon_control(control: dict) -> str:
     cadence = control.get("cadence", {})
     watchdog = control.get("watchdog", {})
     budget = control.get("budget", {})
+    driver = control.get("driver", {}) if isinstance(control.get("driver", {}), dict) else {}
     gh_agent = control.get("gh_agent", {})
     gitops = control.get("gitops", {}) if isinstance(control.get("gitops", {}), dict) else {}
     lines = [
@@ -5699,6 +5702,7 @@ def render_autonomous_marathon_control(control: dict) -> str:
         f"- Run: `{control.get('run_id', '')}`",
         f"- Status: `{control.get('status', '')}`",
         f"- Driver mode: `{control.get('driver_mode', '')}`",
+        f"- Driver live profile: `{driver.get('live_profile', '') or '(not set)'}`",
         f"- Cadence: every {cadence.get('hours', 0)} hour(s)",
         f"- Next due: `{cadence.get('next_due_at', '')}`",
         f"- Per-scenario live budget: {budget.get('per_scenario_live_minutes', 0)} minute(s)",
@@ -5867,6 +5871,7 @@ def invalid_autonomous_marathon_creation(
     gh_agent_health: Optional[dict] = None,
     gh_agent_readiness: Optional[dict] = None,
     autonomous_driver_mode: str = "pending",
+    autonomous_driver_live_profile: str = "",
 ) -> dict:
     result = run_story_summary(created_dir)
     result.update({
@@ -5874,6 +5879,7 @@ def invalid_autonomous_marathon_creation(
         "autonomous_marathon_status": "autonomous_marathon_invalid",
         "autonomous_marathon_summary": summary,
         "autonomous_driver_mode": autonomous_driver_mode or "pending",
+        "autonomous_driver_live_profile": autonomous_driver_live_profile,
         "autonomous_driver_status": "invalid",
         "autonomous_driver_summary": summary,
         "autonomous_driver_evidence_count": 0,
@@ -5926,6 +5932,7 @@ def write_autonomous_marathon_control(
     watchdog_minutes: int,
     gh_agent_public_base_url: str = "",
     ticket_repo: str = "",
+    driver_live_profile: str = "",
 ) -> dict:
     if cadence_hours <= 0:
         raise SystemExit("--autonomous-cadence-hours must be > 0")
@@ -5943,6 +5950,9 @@ def write_autonomous_marathon_control(
         "run_id": run_json.get("run_id", ""),
         "status": "armed" if driver_mode == "replay" else "ready_for_driver",
         "driver_mode": driver_mode,
+        "driver": {
+            "live_profile": driver_live_profile.strip(),
+        },
         "scenario_scope": scenarios,
         "cadence": {
             "hours": cadence_hours,
@@ -5991,6 +6001,7 @@ def autonomous_marathon_due_params(run_json: dict, control: dict, checked: datet
     cadence = control.get("cadence", {}) if isinstance(control.get("cadence", {}), dict) else {}
     budget = control.get("budget", {}) if isinstance(control.get("budget", {}), dict) else {}
     watchdog = control.get("watchdog", {}) if isinstance(control.get("watchdog", {}), dict) else {}
+    driver = control.get("driver", {}) if isinstance(control.get("driver", {}), dict) else {}
     gitops = control.get("gitops", {}) if isinstance(control.get("gitops", {}), dict) else {}
     gh_agent = control.get("gh_agent", {}) if isinstance(control.get("gh_agent", {}), dict) else {}
     scenarios = control.get("scenario_scope") or [
@@ -6007,6 +6018,7 @@ def autonomous_marathon_due_params(run_json: dict, control: dict, checked: datet
         "scenarios": ",".join(str(item) for item in scenarios if str(item).strip()),
         "live_budget_minutes": int(budget.get("per_scenario_live_minutes", run_json.get("live_budget_minutes", 0)) or 0),
         "autonomous_driver_mode": str(control.get("driver_mode", "") or "pending"),
+        "autonomous_driver_live_profile": str(driver.get("live_profile", "") or control.get("driver_live_profile", "")),
         "autonomous_cadence_hours": int(cadence.get("hours", 24) or 24),
         "autonomous_heartbeat_minutes": int(watchdog.get("heartbeat_minutes", 15) or 15),
         "autonomous_watchdog_minutes": int(watchdog.get("watchdog_minutes", 45) or 45),
@@ -6046,6 +6058,11 @@ def autonomous_marathon_due_command(run_json: dict, control: dict, checked: date
         "--gh-agent-public-base-url",
         params["gh_agent_public_base_url"],
     ]
+    if params.get("autonomous_driver_live_profile"):
+        parts.extend([
+            "--autonomous-driver-live-profile",
+            params["autonomous_driver_live_profile"],
+        ])
     return [str(part) for part in parts]
 
 
@@ -6060,23 +6077,29 @@ def autonomous_marathon_due_story_intent(run_json: dict, control: dict, checked:
             index += 2
             continue
         index += 1
-    return (
-        "autonomous_marathon "
-        f"project={values.get('project', '')} "
-        f"persona={values.get('persona', '')} "
-        f"seed={values.get('seed', '')} "
-        f"scenarios={values.get('scenarios', '')} "
-        f"live_budget_minutes={values.get('live_budget_minutes', '')} "
-        f"autonomous_driver_mode={values.get('autonomous_driver_mode', '')} "
-        f"ticket_repo={values.get('ticket_repo', '')} "
-        f"gh_agent_public_base_url={values.get('gh_agent_public_base_url', '')}"
-    ).strip()
+    story_parts = [
+        "autonomous_marathon",
+        f"project={values.get('project', '')}",
+        f"persona={values.get('persona', '')}",
+        f"seed={values.get('seed', '')}",
+        f"scenarios={values.get('scenarios', '')}",
+        f"live_budget_minutes={values.get('live_budget_minutes', '')}",
+        f"autonomous_driver_mode={values.get('autonomous_driver_mode', '')}",
+    ]
+    if values.get("autonomous_driver_live_profile"):
+        story_parts.append(f"autonomous_driver_live_profile={values.get('autonomous_driver_live_profile', '')}")
+    story_parts.extend([
+        f"ticket_repo={values.get('ticket_repo', '')}",
+        f"gh_agent_public_base_url={values.get('gh_agent_public_base_url', '')}",
+    ])
+    return " ".join(story_parts).strip()
 
 
 def autonomous_marathon_due_item(run_dir: Path, control: dict, checked: datetime.datetime) -> dict:
     run_json = read_json(run_dir / "run.json") if (run_dir / "run.json").exists() else {}
     cadence = control.get("cadence", {}) if isinstance(control.get("cadence", {}), dict) else {}
     budget = control.get("budget", {}) if isinstance(control.get("budget", {}), dict) else {}
+    driver = control.get("driver", {}) if isinstance(control.get("driver", {}), dict) else {}
     gitops = control.get("gitops", {}) if isinstance(control.get("gitops", {}), dict) else {}
     gh_agent = control.get("gh_agent", {}) if isinstance(control.get("gh_agent", {}), dict) else {}
     status = str(control.get("status", ""))
@@ -6088,6 +6111,7 @@ def autonomous_marathon_due_item(run_dir: Path, control: dict, checked: datetime
         "control_path": str(autonomous_marathon_control_path(run_dir)),
         "status": status,
         "driver_mode": driver_mode,
+        "autonomous_driver_live_profile": str(driver.get("live_profile", "") or control.get("driver_live_profile", "")),
         "project": run_json.get("project", {}).get("id", "") if isinstance(run_json.get("project"), dict) else "",
         "persona": run_json.get("persona", {}).get("id", "") if isinstance(run_json.get("persona"), dict) else "",
         "seed": run_json.get("seed", ""),
@@ -6122,6 +6146,9 @@ def autonomous_marathon_due_item(run_dir: Path, control: dict, checked: datetime
     item["minutes_overdue"] = max(0, -delta_minutes)
     if driver_mode == "pending":
         item["blocked_reason"] = "pending driver mode still requires operator handoff; use replay, record, or live for unattended cadence"
+        return item
+    if driver_mode in {"record", "live"} and not item["autonomous_driver_live_profile"]:
+        item["blocked_reason"] = "record/live driver mode requires persisted autonomous_driver_live_profile for unattended cadence"
         return item
     if driver_mode in {"record", "live"}:
         dispatch = read_json(autonomous_driver_dispatch_path(run_dir)) if autonomous_driver_dispatch_path(run_dir).exists() else {}
@@ -6298,6 +6325,7 @@ def autonomous_marathon_advance_due(
         params["autonomous_heartbeat_minutes"],
         params["autonomous_watchdog_minutes"],
         publish_deck,
+        autonomous_driver_live_profile=params["autonomous_driver_live_profile"],
     )
     result.update(base)
     result["source_run_id"] = due_scan["next_due_run_id"]
@@ -6627,6 +6655,7 @@ def render_autonomous_marathon_report(run_dir: Path, result: dict) -> str:
         f"- Status: `{result.get('autonomous_marathon_status', result.get('status', ''))}`",
         f"- Summary: {result.get('autonomous_marathon_summary', '')}",
         f"- Autonomous driver: `{result.get('autonomous_driver_mode', 'pending')}` / `{result.get('autonomous_driver_status', 'pending')}`",
+        f"- Driver live profile: `{result.get('autonomous_driver_live_profile', '') or '(not set)'}`",
         f"- Driver proof: {result.get('autonomous_driver_summary', '')}",
         f"- Driver dispatch receipt: `{result.get('autonomous_driver_dispatch_markdown_path', '') or '(not generated)'}`",
         f"- Driver dispatch trace: `{result.get('autonomous_driver_dispatch_trace', '') or '(not reported)'}`",
@@ -6794,6 +6823,7 @@ def autonomous_marathon(
     autonomous_watchdog_minutes: int,
     publish_deck: Optional[Path],
     watchdog_checked_at: str = "",
+    autonomous_driver_live_profile: str = "",
 ) -> dict:
     """Create or finalize a standing persona-QA marathon bundle.
 
@@ -6805,6 +6835,7 @@ def autonomous_marathon(
     stats derive from cached issue state.
     """
     if run_dir is None:
+        autonomous_driver_live_profile = (autonomous_driver_live_profile or "").strip()
         run_scenarios = select_scenarios(scenarios, scenario_filter)
         created_dir, run_json = build_run_bundle(
             catalog,
@@ -6829,6 +6860,31 @@ def autonomous_marathon(
                 ticket_repo,
                 gh_agent_public_base_url,
                 autonomous_driver_mode=autonomous_driver_mode,
+                autonomous_driver_live_profile=autonomous_driver_live_profile,
+            )
+        if autonomous_driver_mode in {"record", "live"} and live_budget_minutes <= 0:
+            return invalid_autonomous_marathon_creation(
+                created_dir,
+                run_json,
+                f"{autonomous_driver_mode} autonomous marathon requires live_budget_minutes > 0 before driver dispatch.",
+                "live-budget-required",
+                "driver=fail, live_auth=not_run, filing=not_run, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=fail",
+                ticket_repo,
+                gh_agent_public_base_url,
+                autonomous_driver_mode=autonomous_driver_mode,
+                autonomous_driver_live_profile=autonomous_driver_live_profile,
+            )
+        if autonomous_driver_mode in {"record", "live"} and not autonomous_driver_live_profile:
+            return invalid_autonomous_marathon_creation(
+                created_dir,
+                run_json,
+                f"{autonomous_driver_mode} autonomous marathon requires autonomous_driver_live_profile so replay misses cannot silently fall through to an ambient live backend.",
+                "live-profile-required",
+                "driver=fail, live_auth=fail, filing=not_run, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=fail",
+                ticket_repo,
+                gh_agent_public_base_url,
+                autonomous_driver_mode=autonomous_driver_mode,
+                autonomous_driver_live_profile=autonomous_driver_live_profile,
             )
         health: Optional[dict] = None
         ready: Optional[dict] = None
@@ -6842,6 +6898,8 @@ def autonomous_marathon(
                     "preflight=pass, filing=fail, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=fail",
                     ticket_repo,
                     gh_agent_public_base_url,
+                    autonomous_driver_mode=autonomous_driver_mode,
+                    autonomous_driver_live_profile=autonomous_driver_live_profile,
                 )
             if not gh_agent_public_base_url:
                 return invalid_autonomous_marathon_creation(
@@ -6852,6 +6910,8 @@ def autonomous_marathon(
                     "preflight=pass, filing=not_run, gh_agent=fail, independent_verify=not_run, review=not_run, validation=fail",
                     ticket_repo,
                     gh_agent_public_base_url,
+                    autonomous_driver_mode=autonomous_driver_mode,
+                    autonomous_driver_live_profile=autonomous_driver_live_profile,
                 )
             health = check_gh_agent_health(gh_agent_public_base_url)
             if health.get("status") != "pass":
@@ -6863,7 +6923,9 @@ def autonomous_marathon(
                     "preflight=pass, filing=not_run, gh_agent=fail, independent_verify=not_run, review=not_run, validation=fail",
                     ticket_repo,
                     gh_agent_public_base_url,
-                    health,
+                    gh_agent_health=health,
+                    autonomous_driver_mode=autonomous_driver_mode,
+                    autonomous_driver_live_profile=autonomous_driver_live_profile,
                 )
             ready = check_gh_agent_readiness(gh_agent_public_base_url, ticket_repo)
             if ready.get("status") != "pass":
@@ -6875,8 +6937,10 @@ def autonomous_marathon(
                     "preflight=pass, filing=not_run, gh_agent=fail, independent_verify=not_run, review=not_run, validation=fail",
                     ticket_repo,
                     gh_agent_public_base_url,
-                    health,
-                    ready,
+                    gh_agent_health=health,
+                    gh_agent_readiness=ready,
+                    autonomous_driver_mode=autonomous_driver_mode,
+                    autonomous_driver_live_profile=autonomous_driver_live_profile,
                 )
         control = write_autonomous_marathon_control(
             created_dir,
@@ -6887,6 +6951,7 @@ def autonomous_marathon(
             autonomous_watchdog_minutes,
             gh_agent_public_base_url,
             ticket_repo,
+            autonomous_driver_live_profile,
         )
         if autonomous_driver_mode == "replay":
             if not ticket_repo:
@@ -6940,6 +7005,7 @@ def autonomous_marathon(
                 + ("ready for story-owned dispatch." if autonomous_driver_mode in {"record", "live"} else "pending.")
             ),
             "autonomous_driver_mode": autonomous_driver_mode,
+            "autonomous_driver_live_profile": autonomous_driver_live_profile,
             "autonomous_driver_status": "ready_for_dispatch" if autonomous_driver_mode in {"record", "live"} else "pending",
             "autonomous_driver_summary": (
                 f"Story-owned {autonomous_driver_mode} driver dispatch is ready."
@@ -12226,6 +12292,7 @@ def main() -> None:
         choices=["pending", "replay", "record", "live"],
         help="With --autonomous-marathon creation, pending emits a driver handoff; replay attaches cassette-backed proof and runs the native final gates; record/live are story-dispatched through host.agent.task",
     )
+    parser.add_argument("--autonomous-driver-live-profile", default="", help="Required explicit live backend profile for record/live autonomous driver dispatch")
     parser.add_argument("--autonomous-cadence-hours", type=int, default=24, help="Cadence recorded in autonomous marathon control artifacts")
     parser.add_argument("--autonomous-heartbeat-minutes", type=int, default=15, help="Heartbeat interval recorded in autonomous marathon control artifacts")
     parser.add_argument("--autonomous-watchdog-minutes", type=int, default=45, help="Watchdog escalation interval recorded in autonomous marathon control artifacts")
@@ -12952,6 +13019,7 @@ def main() -> None:
             args.autonomous_heartbeat_minutes,
             args.autonomous_watchdog_minutes,
             publish_deck,
+            autonomous_driver_live_profile=args.autonomous_driver_live_profile,
         )
         if args.json_output:
             print(json.dumps(result, sort_keys=True))
