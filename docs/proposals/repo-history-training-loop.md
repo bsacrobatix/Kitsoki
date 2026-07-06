@@ -1,11 +1,14 @@
 # Epic: repo history as training material
 
-**Status:** Draft v3. Feasibility-reviewed against the current mining,
+**Status:** Draft v4. Feasibility-reviewed against the current mining,
 bakeoff, agent-eval, and trainable-story substrates. The gears-rust bugfix
-reference path is now implemented as a product smoke; the broader generic
-corpus/task-case/precedent slices remain draft.
+reference path is implemented as a product smoke, and the first generic
+task-case substrate now exists as `history_task.v1` validation plus a
+bugfix-bakeoff adapter. The corpus-label, precedent-selection, autonomous
+runner, and workflow-integration slices remain draft.
 **Kind:**   epic
-**Slices:** 5 generic slices remain draft; 1 shipped bugfix reference path
+**Slices:** 4 generic slices remain draft; 1 task-case substrate started; 1
+shipped bugfix reference path
 
 ## Why
 
@@ -356,7 +359,7 @@ This is the bugfix-bakeoff discipline generalized across lanes.
 |---|---|---|---|---|---|---|
 | 0 | gears-rust bugfix reference path | tooling + story + docs | Product-smoke the repo-history loop on a heavy/private Rust repo using the existing external bakeoff contract | — | Shipped | [`../recipes/repo-history-training-gears-rust.md`](../recipes/repo-history-training-gears-rust.md) |
 | 1 | Corpus and labels | tracing + runtime | Extend the existing mining corpus with repo-history sources, case labels, source refs, and precedent indexes | — | Draft | `repo-history-corpus.md` |
-| 2 | Generic task/oracle manifests | runtime + tooling | Extract the bugfix-bakeoff case/oracle/cell/result contract into a lane-neutral manifest and scorer interface | 1 | Draft; informed by shipped gears-rust reference | `repo-history-task-cases.md` |
+| 2 | Generic task/oracle manifests | runtime + tooling | Extract the bugfix-bakeoff case/oracle/cell/result contract into a lane-neutral manifest and scorer interface | 1 | Started: `internal/taskcase`, `kitsoki history task-cases`, bugfix adapter, and agent-eval pilot | `repo-history-task-cases.md` |
 | 3 | Precedent selection | story + tracing | Let stories request, inject, and trace selected examples/anti-patterns from the corpus | 1 | Draft | `repo-history-precedent-selection.md` |
 | 4 | Gated autonomous runner | runtime + story | Run armed task cases through cheap-to-expensive ladders, resumably, with no-cost verification/reporting and operator-approved live cells | 2, 3 | Draft | `repo-history-runner.md` |
 | 5 | Workflow integrations | story + docs | Wire onboarding, bugfix, spec/design, implementation, docs review, and SDLC stories to the shared precedent/task-case loop | 3, 4 | Draft | `repo-history-workflows.md` |
@@ -447,13 +450,16 @@ the stories, not in the runner.
 - [ ] Add a corpus-label design that extends `internal/mining` and the
       session-mining backend-generalization proposal instead of creating a new
       corpus.
-- [ ] Define the generic task-case manifest and adapter plan from the current
-      bugfix-bakeoff manifest/result contracts.
-- [ ] Prove the generic manifest can represent the existing `query-string`,
+- [x] Define the generic task-case manifest and adapter plan from the current
+      bugfix-bakeoff manifest/result contracts. Shipped as `internal/taskcase`
+      plus `kitsoki history task-cases`.
+- [x] Prove the generic manifest can represent the existing `query-string`,
       `gears-rust`, and `kitsoki` bugfix-bakeoff projects without changing their
-      outcome semantics.
-- [ ] Add one non-bugfix pilot lane, preferably a story-local `agent_eval` or
-      flow-fixture case, to prove the schema is not bugfix-shaped.
+      outcome semantics. Covered by `internal/taskcase` tests and
+      `make history-smoke` adapter validation.
+- [x] Add one non-bugfix pilot lane, preferably a story-local `agent_eval` or
+      flow-fixture case, to prove the schema is not bugfix-shaped. Pilot:
+      `tools/history-training/examples/git-ops-commit-message-agent-eval.yaml`.
 - [ ] Add precedent-selection trace/artifact events to one target story under a
       no-LLM fixture.
 - [ ] Add offline aggregation/report output under `.artifacts/history-training/`

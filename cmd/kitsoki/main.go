@@ -182,6 +182,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(doctorCmd())
 	root.AddCommand(graphCmd())
 	root.AddCommand(pogCmd())
+	root.AddCommand(historyCmd())
 	root.AddCommand(initCmd())
 	tierHelp(root)
 
