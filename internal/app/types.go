@@ -901,6 +901,10 @@ type State struct {
 	// agent (external_side_effect: true). See
 	// docs/proposals/agent-write-mode-opt-in.md.
 	WriteMode string `yaml:"write_mode,omitempty"`
+	// Operation declares that this state owns an operation-local world overlay.
+	// set/increment/bind writes while the operation is active are task-local
+	// until commit_operation or persist_draft intentionally publishes them.
+	Operation *OperationDecl `yaml:"operation,omitempty"`
 	// Initial is the initial child state for compound states; supports expr interpolation.
 	Initial string `yaml:"initial,omitempty"`
 	// States holds nested child states (compound/parallel).
@@ -1071,6 +1075,14 @@ type Effect struct {
 	Set map[string]any `yaml:"set,omitempty"`
 	// Increment maps world-variable names to integer delta values.
 	Increment map[string]int `yaml:"increment,omitempty"`
+	// CommitOperation copies selected values from the current operation overlay
+	// into durable world and closes the operation by default.
+	CommitOperation *CommitOperationEffect `yaml:"commit_operation,omitempty"`
+	// PersistDraft saves selected overlay values under an explicit draft handle
+	// in the engine-owned operation_drafts world key, then closes the operation.
+	PersistDraft *PersistDraftEffect `yaml:"persist_draft,omitempty"`
+	// DiscardOperation explicitly abandons the active operation overlay.
+	DiscardOperation *DiscardOperationEffect `yaml:"discard_operation,omitempty"`
 	// Say appends a narrative message (expr interpolation supported).
 	Say string `yaml:"say,omitempty"`
 	// Invoke calls a host-namespace function.
@@ -1184,6 +1196,29 @@ type Effect struct {
 	// this agent call site. Runtime consumers must treat missing or stale
 	// evidence conservatively; the eval tooling owns validation and freshness.
 	Selection *AgentSelection `yaml:"selection,omitempty"`
+}
+
+// OperationDecl is the state-level operation overlay declaration.
+type OperationDecl struct {
+	Scope string `yaml:"scope,omitempty"`
+}
+
+// CommitOperationEffect is the effect payload for commit_operation.
+type CommitOperationEffect struct {
+	World map[string]any `yaml:"world,omitempty"`
+	Clear *bool          `yaml:"clear,omitempty"`
+}
+
+// PersistDraftEffect is the effect payload for persist_draft.
+type PersistDraftEffect struct {
+	ID    string   `yaml:"id"`
+	Title string   `yaml:"title,omitempty"`
+	World []string `yaml:"world,omitempty"`
+}
+
+// DiscardOperationEffect is the effect payload for discard_operation.
+type DiscardOperationEffect struct {
+	Reason string `yaml:"reason,omitempty"`
 }
 
 // AgentSelection is the story-authored pinning metadata for one agent call

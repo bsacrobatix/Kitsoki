@@ -20,7 +20,7 @@ or open
 | Term | Meaning |
 |---|---|
 | **App** | One YAML manifest plus optional includes. The unit kitsoki loads. |
-| **State** | A node in the graph. Has an optional `view:` template, an `on:` map of intents → transitions, and an `on_enter:` effect list. |
+| **State** | A node in the graph. Has an optional `view:` template, an `on:` map of intents → transitions, an `on_enter:` effect list, and optionally `operation:` for abandonable task-local world. |
 | **Room** | A user-facing name for a state — usually a compound (parent) state grouping a few atomic children. The TUI's location indicator displays the room name. |
 | **Phase** | A repeated room. The same template instantiated multiple times in a pipeline (e.g. `phase_a`, `phase_b`, `phase_c`). |
 | **Compound state** | A state whose `type: compound` and whose `states:` map defines children. Has an `initial:` child. |
@@ -28,8 +28,8 @@ or open
 | **Intent** | A named action the user can take. The atom of free-text translation. |
 | **Slot** | A typed parameter on an intent. |
 | **Transition** | An edge: `{intent, when, target, effects}`. The first guarded edge for an intent that matches wins. |
-| **Effect** | A small declarative mutation: `set`, `increment`, `say`, `invoke`, `emit`. |
-| **World** | The persisted, typed key-value bag. Read by guards and templates; written by effects. |
+| **Effect** | A small declarative mutation: `set`, `increment`, `say`, `invoke`, `emit`, or an operation commit/draft/discard. |
+| **World** | The typed key-value bag. Guards and templates read one overlaid view; operation-local writes become durable only when committed. |
 | **Guard** | The `when:` expression on a transition. Pure, evaluated against `world` and `slots`. |
 | **Off-path** | A global escape hatch that suspends the current state, runs a free-form sub-conversation, and returns. |
 
@@ -443,6 +443,9 @@ effects:
 | `on_complete` | Effects fired when the background job terminates. |
 | `emit` | Broadcast a named event to parallel siblings. |
 | `emit_intent` | Dispatch a synthetic intent against the current state as part of the same turn. Used to auto-advance from `on_enter` (e.g. an LLM judge → `accept` shape). Optional `slots:` map carries values into the dispatched intent. Depth-capped at `machine.EmitIntentMaxDepth` (= 8). Mutually exclusive with `target:` on the same effect. |
+| `commit_operation` | Inside an `operation:` state, copy selected overlaid values into durable world and close the operation. Shape: `{world: {key: "{{ expr }}"}, clear?: bool}`. Empty `world:` commits the whole overlay. |
+| `persist_draft` | Inside an `operation:` state, save selected overlaid values under `world.operation_drafts[id]` and close the operation. Shape: `{id, title?, world?: [keys]}`. |
+| `discard_operation` | Inside an `operation:` state, explicitly abandon the overlay. Exiting an operation state without commit or draft also abandons it. |
 
 Templates inside effects use the same `{{ … }}` syntax as views. Inside
 `with:` and `bind:`, **arguments and results are typed** —
@@ -570,6 +573,53 @@ transition list. This makes templates inside `say:` and downstream
 `with:` predictable — by the time they render, every preceding `set:`
 and `increment:` has already landed.
 
+### Operation-scoped world
+
+Durable world is for committed story facts. A state can mark an
+abandonable task boundary with `operation:`:
+
+```yaml
+states:
+  sync_main:
+    operation:
+      scope: gitops.sync_main
+    on:
+      accept:
+        - target: main_ops
+          effects:
+            - commit_operation:
+                world:
+                  sync_result: "{{ world.sync_result }}"
+      save_draft:
+        - target: main_ops
+          effects:
+            - persist_draft:
+                id: "sync_main:{{ world.sync_result.branch }}"
+                title: "sync_main {{ world.sync_remote }}/{{ world.sync_remote_branch }}"
+                world: [sync_result, sync_remote, sync_remote_branch]
+      back:
+        - target: main_ops
+```
+
+While an operation is active, `set`, `increment`, and host `bind` write to an
+engine-owned overlay. Guards, views, and host `with:` templates still read
+`world.*`; the readable world is the committed base plus the overlay, so story
+authors do not need parallel `operation.foo` references.
+
+The overlay becomes durable only through `commit_operation`. If the operator
+leaves the operation state through `back`, `quit`, an error arc, a guard
+fallback, or any other uncommitted transition, the engine emits an abandon event
+and restores the committed base. Use `persist_draft` only when continuation is a
+product requirement; drafts are explicit records under the reserved
+`world.operation_drafts` key, not invisible scratch residue. `discard_operation`
+exists for explicit abandon buttons, but ordinary exits do not need hand-authored
+cleanup effects.
+
+Load-time validation rejects `commit_operation`, `persist_draft`, and
+`discard_operation` outside an operation state. It also rejects background jobs
+inside operation states until the story declares a policy for completions that
+could outlive the overlay.
+
 Two scopes live alongside `world`:
 
 - **slots** — the typed bag from the intent that triggered this
@@ -577,15 +627,18 @@ Two scopes live alongside `world`:
 - **`$host_error`** — set by the orchestrator when an `on_error:`
   transition fires; readable in the *target* state's first guard.
 
-Two reserved, engine-managed `world` keys carry agent spend so a story can
-budget against cost without any host wiring (both seeded to `0` by
-`WorldFromSchema`, so a guard reads a number even before the first agent call):
+Reserved, engine-managed `world` keys carry runtime metadata:
 
+- **`world.operation_drafts`** — explicit draft handles created by
+  `persist_draft`. The engine owns the top-level map; story views may display or
+  route on the handles when resumable work is part of the product.
 - **`world.turn_cost_usd`** — `total_cost_usd` of the most recent host-dispatch
   batch (reset to `0` on a batch with no agent spend, e.g. `host.run`-only).
 - **`world.session_cost_usd`** — cumulative agent spend across the session.
 
-The orchestrator overwrites these each turn from the agent transport's reported
+The cost keys are seeded to `0` by `WorldFromSchema`, so a guard reads a number
+even before the first agent call. The orchestrator overwrites them each turn
+from the agent transport's reported
 cost (`foldAgentCost`, journaled as `EffectApplied` so replay reconstructs the
 same totals). Cassette episodes carry `cost_usd`, so cost-budget guards are
 deterministic in flow tests. Typical use — stop a loop on goal-met *or*

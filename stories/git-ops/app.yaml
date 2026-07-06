@@ -398,6 +398,11 @@ intents:
     examples: ["accept", "ok", "yes", "lgtm", "continue", "proceed"]
     priority: 85
 
+  save_draft:
+    description: "Persist the current operation overlay as an explicit draft and return to the hub."
+    examples: ["save draft", "continue later", "park this", "draft"]
+    priority: 62
+
   edit_message:
     description: "Replace the agent commit message with a custom one."
     examples: ["edit", "change message", "use this message"]

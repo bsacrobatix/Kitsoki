@@ -71,11 +71,13 @@ var importAliasRE = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 //     derived from the ticket alone, so two concurrent sessions on one ticket
 //     resolve to the SAME checkout and a destructive git op in one clobbers
 //     the other's WIP (bug9glm2). Engine-owned: a story must not `set:` it.
+//   - operation_drafts: map — explicit handles created by persist_draft.
 var ReservedWorldKeys = map[string]struct{}{
 	"last_error":           {},
 	"host_error":           {},
 	WriteModeScopeWorldKey: {},
 	"session_id":           {},
+	"operation_drafts":     {},
 }
 
 // ImportResolver is an injected hook that resolves an `@kitsoki/<name>`

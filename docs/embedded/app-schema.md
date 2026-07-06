@@ -89,6 +89,7 @@ states:
     relevant_slots:  [ <slot-name>, ... ]
     timeout:         <TimeoutDef>                    # optional auto-transition
     agent_off_ramp: <OffRampDef>                    # optional no-match door (see below)
+    operation:       <OperationDef>                  # optional abandonable task-local world overlay
 ```
 
 Rules:
@@ -101,6 +102,29 @@ Rules:
 - `relevant_world` entries must exist in the top-level `world:` schema.
 - Intent names in `on:` must be declared globally (`intents:`), locally
   (`states.X.intents:`), or be the wildcard `"*"`.
+
+### `operation:` — abandonable task-local world
+
+```yaml
+operation:
+  scope: gitops.sync_main   # optional stable operation id; defaults to state path
+```
+
+An operation state opens an engine-owned world overlay. `set:`, `increment:`,
+and host `bind:` write to that overlay while guards, views, and host args keep
+reading ordinary `world.*` as committed base plus overlay. Exiting the operation
+state without `commit_operation` or `persist_draft` abandons the overlay and
+restores durable world.
+
+Rules:
+
+- `scope` must be a stable literal, not a template.
+- `commit_operation`, `persist_draft`, and `discard_operation` are valid only
+  inside an operation state.
+- Background jobs are rejected inside operation states until the story declares
+  an explicit completion policy.
+- Drafts created by `persist_draft` are written under the reserved
+  `world.operation_drafts` map.
 
 ## `view:` — string form vs typed elements
 
@@ -490,6 +514,13 @@ effects:
     with:       { cmd: "git status", cwd: "{{ world.workspace_root }}" }
     bind:       { last_output: stdout, last_code: exit_code }
     on_error:   error_room
+  - commit_operation:
+      world: { last_output: "{{ world.last_output }}" }
+  - persist_draft:
+      id: "task:{{ world.task_id }}"
+      title: "Task {{ world.task_id }}"
+      world: [last_output, task_id]
+  - discard_operation: { reason: cancelled }
   - emit:       lights_dimmed
 ```
 
@@ -509,9 +540,29 @@ Fields (any subset):
 | `emit`        | Broadcast named event to parallel regions                            |
 | `background`  | `true` → dispatch `invoke` as a background job (see §Background jobs) |
 | `on_complete` | Effect list fired when the background job terminates (see §Background jobs) |
+| `commit_operation` | Operation-only: copy selected overlay values into durable world and close the operation |
+| `persist_draft` | Operation-only: save selected overlay values under `world.operation_drafts[id]` and close the operation |
+| `discard_operation` | Operation-only: explicitly abandon the active overlay |
 
 Conventional order within a single effect: `set` → `increment` → `say` →
-`invoke` → `emit`.
+`invoke` → operation close-out → `emit`.
+
+Operation close-out shapes:
+
+```yaml
+commit_operation:
+  world:
+    sync_result: "{{ world.sync_result }}"   # selected durable patch
+  clear: true                                # optional, default true
+
+persist_draft:
+  id: "sync_main:{{ world.sync_result.branch }}"
+  title: "sync_main {{ world.sync_remote }}/{{ world.sync_remote_branch }}" # optional
+  world: [sync_result, sync_remote, sync_remote_branch]                    # optional; default whole overlay
+
+discard_operation:
+  reason: back
+```
 
 ## Background jobs
 

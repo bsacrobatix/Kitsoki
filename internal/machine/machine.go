@@ -2,6 +2,8 @@ package machine
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -764,22 +766,32 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 	if par := parseParallel(string(cur)); par.IsParallel {
 		return m.turnParallel(ctx, par, w, call)
 	}
+	var operationPrelude []store.Event
+	if opID, ok := m.operationForState(string(cur)); ok && (w.Operation == nil || w.Operation.State != string(cur)) {
+		parentWorldHash := worldSnapshotHash(w)
+		w = w.StartOperation(opID, string(cur))
+		operationPrelude = append(operationPrelude, newEvent(store.OperationStarted, map[string]any{
+			"operation_id":      w.Operation.ID,
+			"state":             string(cur),
+			"parent_world_hash": parentWorldHash,
+		}))
+	}
 
 	// 1. Validate first.
 	vr := m.Validate(cur, w, call)
 	if !vr.OK {
+		events := append([]store.Event{}, operationPrelude...)
+		events = append(events, newEvent(store.ValidationFailed, map[string]any{
+			"code":    string(vr.Err.Code),
+			"message": vr.Err.Message,
+			"intent":  call.Intent,
+			"state":   string(cur),
+		}))
 		return TurnResult{
 			NewState:        cur,
 			World:           w,
 			ValidationError: vr.Err,
-			Events: []store.Event{
-				newEvent(store.ValidationFailed, map[string]any{
-					"code":    string(vr.Err.Code),
-					"message": vr.Err.Message,
-					"intent":  call.Intent,
-					"state":   string(cur),
-				}),
-			},
+			Events:          events,
 		}, nil
 	}
 	call = vr.Accepted
@@ -810,18 +822,18 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 			Message:   fmt.Sprintf("no transition matched for intent %q in state %q", call.Intent, cur),
 			GuardHint: hint,
 		}
+		events := append([]store.Event{}, operationPrelude...)
+		events = append(events, newEvent(store.ValidationFailed, map[string]any{
+			"code":       string(intent.ErrGuardFailed),
+			"intent":     call.Intent,
+			"state":      string(cur),
+			"guard_hint": hint,
+		}))
 		return TurnResult{
 			NewState:        cur,
 			World:           w,
 			ValidationError: ve,
-			Events: []store.Event{
-				newEvent(store.ValidationFailed, map[string]any{
-					"code":       string(intent.ErrGuardFailed),
-					"intent":     call.Intent,
-					"state":      string(cur),
-					"guard_hint": hint,
-				}),
-			},
+			Events:          events,
 		}, nil
 	}
 
@@ -843,6 +855,25 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 	resolvedTarget, err := m.resolveInitialAware(targetPath, env)
 	if err != nil {
 		return TurnResult{}, fmt.Errorf("resolve initial for %q: %w", targetPath, err)
+	}
+	isReEntry := resolvedTarget == string(cur) && strings.TrimSpace(rawTarget) != "." && strings.TrimSpace(rawTarget) != ""
+	if opID, ok := m.operationForState(resolvedTarget); ok && (w.Operation == nil || w.Operation.State != resolvedTarget || isReEntry) {
+		if w.Operation != nil {
+			operationPrelude = append(operationPrelude, newEvent(store.OperationAbandoned, map[string]any{
+				"operation_id":    w.Operation.ID,
+				"reason":          "reenter",
+				"discarded_patch": w.OverlayPatch(),
+			}))
+			w = w.DiscardOperation()
+		}
+		parentWorldHash := worldSnapshotHash(w)
+		w = w.StartOperation(opID, resolvedTarget)
+		env.World = w.Vars
+		operationPrelude = append(operationPrelude, newEvent(store.OperationStarted, map[string]any{
+			"operation_id":      w.Operation.ID,
+			"state":             resolvedTarget,
+			"parent_world_hash": parentWorldHash,
+		}))
 	}
 
 	// emit machine.transition before applying effects
@@ -881,7 +912,6 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 	// never re-fired and the artifact text stayed identical. The user
 	// described it as "the refinement came back immediately and didn't
 	// change the artifact text."
-	isReEntry := resolvedTarget == string(cur) && strings.TrimSpace(rawTarget) != "." && strings.TrimSpace(rawTarget) != ""
 	if resolvedTarget != string(cur) || isReEntry {
 		var entered []string
 		if isReEntry {
@@ -938,6 +968,7 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 		"slots": map[string]any(call.Slots),
 	}))
 
+	events = append(events, operationPrelude...)
 	events = append(events, effectEvents...)
 
 	// Emit StateExited for each level of the old path that is not shared.
@@ -978,6 +1009,16 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 			saySB.WriteString(dssb)
 		}
 		events = append(events, devs...)
+	}
+	if newWorld.Operation != nil && newWorld.Operation.State != finalState {
+		op := newWorld.Operation
+		discarded := newWorld.OverlayPatch()
+		newWorld = newWorld.DiscardOperation()
+		events = append(events, newEvent(store.OperationAbandoned, map[string]any{
+			"operation_id":    op.ID,
+			"reason":          "exit",
+			"discarded_patch": discarded,
+		}))
 	}
 
 	// 7. Render view. When the target is parallel-encoded, compose region
@@ -1653,23 +1694,21 @@ func (m *machineImpl) applyEffectsTracedWithOptions(ctx context.Context, effects
 			}
 			for _, k := range keys {
 				before := newWorld.Vars[k]
-				newWorld.Vars[k] = m.coerceSetValue(k, resolvedSet[k])
+				newWorld.Set(k, m.coerceSetValue(k, resolvedSet[k]))
 				m.logger.DebugContext(ctx, trace.EvMachineEffectApplied,
 					slog.String("type", "set"),
 					slog.String("key", k),
 					slog.Any("before", before),
 					slog.Any("after", resolvedSet[k]),
 				)
-				effectEvents = append(effectEvents, newEvent(store.EffectApplied, map[string]any{
-					"set": map[string]any{k: resolvedSet[k]},
-				}))
+				effectEvents = append(effectEvents, newEvent(store.EffectApplied, m.worldUpdatePayload(newWorld, "set", map[string]any{k: resolvedSet[k]})))
 			}
 			env.World = newWorld.Vars // expose this block's commits to the next entry
 
 		case len(eff.Increment) > 0:
 			for k, delta := range eff.Increment {
 				cur := toInt64(newWorld.Vars[k])
-				newWorld.Vars[k] = cur + int64(delta)
+				newWorld.Set(k, cur+int64(delta))
 				env.World = newWorld.Vars
 				m.logger.DebugContext(ctx, trace.EvMachineEffectApplied,
 					slog.String("type", "increment"),
@@ -1677,10 +1716,114 @@ func (m *machineImpl) applyEffectsTracedWithOptions(ctx context.Context, effects
 					slog.Int64("delta", int64(delta)),
 					slog.Int64("after", cur+int64(delta)),
 				)
-				effectEvents = append(effectEvents, newEvent(store.EffectApplied, map[string]any{
-					"increment": map[string]any{k: delta},
-				}))
+				effectEvents = append(effectEvents, newEvent(store.EffectApplied, m.worldUpdatePayload(newWorld, "increment", map[string]any{k: delta})))
 			}
+
+		case eff.CommitOperation != nil:
+			if newWorld.Operation == nil {
+				return world.World{}, nil, saySB, nil, nil, fmt.Errorf("commit_operation outside an active operation")
+			}
+			patch := make(map[string]any)
+			commitKeys := make([]string, 0, len(eff.CommitOperation.World))
+			for k := range eff.CommitOperation.World {
+				commitKeys = append(commitKeys, k)
+			}
+			sort.Strings(commitKeys)
+			if len(commitKeys) == 0 {
+				for k, v := range newWorld.OverlayPatch() {
+					patch[k] = v
+				}
+			} else {
+				for _, k := range commitKeys {
+					resolved, err := resolveEffectValue(eff.CommitOperation.World[k], env, newWorld)
+					if err != nil {
+						return world.World{}, nil, saySB, nil, nil, fmt.Errorf("commit_operation world %q: %w", k, err)
+					}
+					patch[k] = m.coerceSetValue(k, resolved)
+				}
+			}
+			clear := true
+			if eff.CommitOperation.Clear != nil {
+				clear = *eff.CommitOperation.Clear
+			}
+			opID := newWorld.Operation.ID
+			newWorld = newWorld.CommitOperation(patch, clear)
+			env.World = newWorld.Vars
+			effectEvents = append(effectEvents, newEvent(store.OperationCommitted, map[string]any{
+				"operation_id": opID,
+				"world_patch":  patch,
+			}))
+
+		case eff.PersistDraft != nil:
+			if newWorld.Operation == nil {
+				return world.World{}, nil, saySB, nil, nil, fmt.Errorf("persist_draft outside an active operation")
+			}
+			idVal, err := resolveEffectValue(eff.PersistDraft.ID, env, newWorld)
+			if err != nil {
+				return world.World{}, nil, saySB, nil, nil, fmt.Errorf("persist_draft id: %w", err)
+			}
+			draftID := strings.TrimSpace(fmt.Sprint(idVal))
+			if draftID == "" {
+				return world.World{}, nil, saySB, nil, nil, fmt.Errorf("persist_draft id resolved empty")
+			}
+			title := ""
+			if eff.PersistDraft.Title != "" {
+				titleVal, err := resolveEffectValue(eff.PersistDraft.Title, env, newWorld)
+				if err != nil {
+					return world.World{}, nil, saySB, nil, nil, fmt.Errorf("persist_draft title: %w", err)
+				}
+				title = fmt.Sprint(titleVal)
+			}
+			draftWorld := make(map[string]any)
+			if len(eff.PersistDraft.World) == 0 {
+				for k, v := range newWorld.OverlayPatch() {
+					draftWorld[k] = v
+				}
+			} else {
+				for _, k := range eff.PersistDraft.World {
+					if v, ok := newWorld.Vars[k]; ok {
+						draftWorld[k] = v
+					}
+				}
+			}
+			drafts := map[string]any{}
+			if existing, ok := newWorld.DurableVars()["operation_drafts"].(map[string]any); ok {
+				for k, v := range existing {
+					drafts[k] = v
+				}
+			}
+			draft := map[string]any{"id": draftID, "world": draftWorld}
+			if title != "" {
+				draft["title"] = title
+			}
+			drafts[draftID] = draft
+			opID := newWorld.Operation.ID
+			newWorld.SetDurable("operation_drafts", drafts)
+			newWorld = newWorld.DiscardOperation()
+			env.World = newWorld.Vars
+			effectEvents = append(effectEvents, newEvent(store.OperationDraftPersisted, map[string]any{
+				"operation_id": opID,
+				"draft_id":     draftID,
+				"world":        draftWorld,
+			}))
+
+		case eff.DiscardOperation != nil:
+			if newWorld.Operation == nil {
+				return world.World{}, nil, saySB, nil, nil, fmt.Errorf("discard_operation outside an active operation")
+			}
+			op := newWorld.Operation
+			reason := eff.DiscardOperation.Reason
+			if reason == "" {
+				reason = "explicit"
+			}
+			discarded := newWorld.OverlayPatch()
+			newWorld = newWorld.DiscardOperation()
+			env.World = newWorld.Vars
+			effectEvents = append(effectEvents, newEvent(store.OperationAbandoned, map[string]any{
+				"operation_id":    op.ID,
+				"reason":          reason,
+				"discarded_patch": discarded,
+			}))
 
 		case eff.Say != "":
 			text, err := render.Pongo(eff.Say, env)
@@ -2884,11 +3027,37 @@ func commonPrefixLen(a, b []string) int {
 // ─── Utility helpers ─────────────────────────────────────────────────────────
 
 func cloneWorld(w world.World) world.World {
-	nw := world.World{Vars: make(map[string]any, len(w.Vars))}
-	for k, v := range w.Vars {
-		nw.Vars[k] = v
+	return w.Clone()
+}
+
+func worldSnapshotHash(w world.World) string {
+	b, err := json.Marshal(w.DurableVars())
+	if err != nil {
+		return ""
 	}
-	return nw
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+func (m *machineImpl) operationForState(path string) (string, bool) {
+	cs, ok := m.states[path]
+	if !ok || cs.s == nil || cs.s.Operation == nil {
+		return "", false
+	}
+	scope := strings.TrimSpace(cs.s.Operation.Scope)
+	if scope == "" {
+		scope = path
+	}
+	return scope, true
+}
+
+func (m *machineImpl) worldUpdatePayload(w world.World, kind string, value map[string]any) map[string]any {
+	payload := map[string]any{kind: value}
+	if w.Operation != nil {
+		payload["operation_id"] = w.Operation.ID
+		payload["operation_local"] = true
+	}
+	return payload
 }
 
 // hostCallsWillBind reports whether any of the queued host invocations declares

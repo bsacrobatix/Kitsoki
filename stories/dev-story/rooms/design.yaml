@@ -29,8 +29,10 @@ states:
           text:     "INTAKE"
           subtitle: "Describe your idea — search runs next"
           color:    "#10B981"
-      - template: "⚠ **Could not prepare a proposal name.** Send the idea again{{ world.design_idea != '' ? ': **' + world.design_idea + '**' : '' }}."
-        when: "world.last_error != ''"
+      - template: "⚠ **Could not prepare a proposal name.** Send the idea again: **{{ world.design_idea }}**."
+        when: "world.last_error != '' && world.design_idea != ''"
+      - template: "⚠ **Could not prepare a proposal name.** Send the idea again."
+        when: "world.last_error != '' && world.design_idea == ''"
       - prose: 'Seeded from your ideas backlog: **{{ world.design_seed_idea }}** — describe or expand it to start the search.'
         when: "world.design_seed_idea != ''"
       - prose: "Describe the change you want to propose — as rough or specific as you like. One message starts the pipeline: I'll search for prior art and relevant docs before we shape the brief.\n\nOptionally, point me at existing docs first with `see docs/…` — they'll be passed to the search."

@@ -417,6 +417,25 @@ func TestTarballDirectory_WithFiles(t *testing.T) {
 
 // ── git helper functions ──────────────────────────────────────────────────
 
+func taskTestGitInit(dir string) error {
+	c := exec.Command("git", "init")
+	c.Dir = dir
+	return c.Run()
+}
+
+func taskTestGitAdd(dir string, paths ...string) error {
+	args := append([]string{"add"}, paths...)
+	c := exec.Command("git", args...)
+	c.Dir = dir
+	return c.Run()
+}
+
+func taskTestGitCommit(dir, message string) error {
+	c := exec.Command("git", "-c", "user.name=Kitsoki Test", "-c", "user.email=kitsoki-test@example.invalid", "commit", "-m", message)
+	c.Dir = dir
+	return c.Run()
+}
+
 func taskTestGitCheckout(dir, ref string) error {
 	c := exec.Command("git", "checkout", "--detach", ref)
 	c.Dir = dir

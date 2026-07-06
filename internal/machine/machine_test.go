@@ -73,6 +73,81 @@ func TestSimpleLinearTransition(t *testing.T) {
 	require.True(t, found, "TransitionApplied event must be present")
 }
 
+func TestOperationScopeAbandonCommitReplay(t *testing.T) {
+	def := &app.AppDef{
+		App:  app.AppMeta{ID: "op-test"},
+		Root: "hub",
+		World: map[string]app.VarDef{
+			"scratch":   {Type: "string", Default: ""},
+			"committed": {Type: "string", Default: ""},
+		},
+		Intents: map[string]app.Intent{
+			"begin":  {},
+			"back":   {},
+			"accept": {},
+		},
+		States: map[string]*app.State{
+			"hub": {
+				On: map[string][]app.Transition{
+					"begin": {{Target: "op"}},
+				},
+			},
+			"op": {
+				Operation: &app.OperationDecl{Scope: "demo"},
+				OnEnter: []app.Effect{{
+					Set: map[string]any{"scratch": "local"},
+				}},
+				On: map[string][]app.Transition{
+					"back": {{Target: "hub"}},
+					"accept": {{
+						Target: "hub",
+						Effects: []app.Effect{{
+							CommitOperation: &app.CommitOperationEffect{
+								World: map[string]any{"committed": "{{ world.scratch }}"},
+							},
+						}},
+					}},
+				},
+			},
+		},
+	}
+	m := mustNew(t, def)
+	initial := machine.WorldFromSchema(app.WorldSchema(def.World))
+
+	entered, err := m.Turn(context.Background(), "hub", initial, intent.IntentCall{Intent: "begin"})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("op"), entered.NewState)
+	require.Equal(t, "local", entered.World.Vars["scratch"])
+	require.NotNil(t, entered.World.Operation)
+
+	abandoned, err := m.Turn(context.Background(), entered.NewState, entered.World, intent.IntentCall{Intent: "back"})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("hub"), abandoned.NewState)
+	require.Nil(t, abandoned.World.Operation)
+	require.Equal(t, "", abandoned.World.Vars["scratch"], "abandoned overlay must not leak")
+
+	history := append([]store.Event{}, entered.Events...)
+	history = append(history, abandoned.Events...)
+	replayed, err := store.BuildJourney(def, "hub", initial, history)
+	require.NoError(t, err)
+	require.Equal(t, abandoned.NewState, replayed.State)
+	require.Equal(t, abandoned.World.Vars, replayed.World.Vars)
+
+	entered2, err := m.Turn(context.Background(), "hub", initial, intent.IntentCall{Intent: "begin"})
+	require.NoError(t, err)
+	committed, err := m.Turn(context.Background(), entered2.NewState, entered2.World, intent.IntentCall{Intent: "accept"})
+	require.NoError(t, err)
+	require.Nil(t, committed.World.Operation)
+	require.Equal(t, "local", committed.World.Vars["committed"])
+	require.Equal(t, "", committed.World.Vars["scratch"], "uncommitted scratch stays out of durable world")
+
+	history = append([]store.Event{}, entered2.Events...)
+	history = append(history, committed.Events...)
+	replayed, err = store.BuildJourney(def, "hub", initial, history)
+	require.NoError(t, err)
+	require.Equal(t, committed.World.Vars, replayed.World.Vars)
+}
+
 // ─── (b) first-guard-wins with multiple when: branches ───────────────────────
 
 func TestFirstGuardWins(t *testing.T) {
@@ -962,10 +1037,10 @@ func TestMenu_TemplateMapShape(t *testing.T) {
 // import-folding divergence where dev-story's `landing` rendered correctly
 // standalone but collapsed to just "Quick actions" when imported under
 // kitsoki-dev's `core` alias. The view gates its banner/intro/footer on
-// `world.last_error == ''`; standalone the room's own `last_error: {default:
+// `world.last_error == ”`; standalone the room's own `last_error: {default:
 // ""}` made that true, but import folding deliberately drops a child's
 // declaration of a reserved key (it stays bare at every depth), so the folded
-// app never seeded `last_error` and `nil == ''` suppressed every gated
+// app never seeded `last_error` and `nil == ”` suppressed every gated
 // element. WorldFromSchema now seeds the engine-owned string reserved keys to
 // "" regardless of declaration — the same discipline the cost vars already use.
 func TestWorldFromSchema_SeedsReservedStringGlobals(t *testing.T) {
