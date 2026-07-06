@@ -14,6 +14,7 @@ REPO_ROOT = HERE.parent.parent.parent
 SCRIPT = REPO_ROOT / "tools/arena/scripts/glm52_bugswarm_report.py"
 CONVERT = REPO_ROOT / "tools/arena/scripts/bugswarm_to_arena.py"
 VERIFY = REPO_ROOT / "tools/arena/scripts/bugswarm_verify_source.py"
+APPLY = REPO_ROOT / "tools/arena/scripts/bugswarm_apply_verification.py"
 
 failures: list[str] = []
 
@@ -113,6 +114,126 @@ with tempfile.TemporaryDirectory() as tmp:
     check("bugswarm verification mode", report["corpora"]["bugswarm"]["verification_mode"], "dry-run")
     check("bugswarm verification count", report["corpora"]["bugswarm"]["verification_report_count"], 1)
     check("bugswarm dry-run verified count", report["corpora"]["bugswarm"]["verification_verified_count"], 0)
+
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
+    artifacts = out / "artifacts.json"
+    source = out / "bugswarm-source.yaml"
+    verification = out / "bugswarm-verification.json"
+    verified_source = out / "bugswarm-verified.yaml"
+    rollup = out / "bugswarm-rollup.json"
+    json_out = out / "with-bugswarm-rollup.json"
+    md_out = out / "with-bugswarm-rollup.md"
+    artifacts.write_text(json.dumps({
+        "artifacts": [
+            {
+                "image_tag": "square-okio-140452393",
+                "repo": "square/okio",
+                "failed_job_id": "140452393",
+                "passed_job_id": "140452394",
+            }
+        ]
+    }), encoding="utf-8")
+    verification.write_text(json.dumps({
+        "kind": "arena_bugswarm_verification",
+        "version": 1,
+        "mode": "execute",
+        "task_count": 1,
+        "verified_count": 1,
+        "results": [
+            {
+                "task_id": "bugswarm-square-okio-140452393",
+                "image_tag": "square-okio-140452393",
+                "verified_red": True,
+                "verified_green": True,
+                "failed_exit_code": 1,
+                "passed_exit_code": 0,
+            }
+        ],
+    }), encoding="utf-8")
+    subprocess.run([sys.executable, str(CONVERT), "--in", str(artifacts), "--out", str(source)], cwd=REPO_ROOT, check=True)
+    subprocess.run(
+        [
+            sys.executable,
+            str(APPLY),
+            "--source",
+            str(source),
+            "--verification",
+            str(verification),
+            "--out",
+            str(verified_source),
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+    )
+    rollup.write_text(json.dumps({
+        "cells": [
+            {
+                "axis": {"task": "bugswarm-square-okio-140452393"},
+                "cell_id": "bugswarm-verified--kitsoki-glm-5.2--task:bugswarm-square-okio-140452393",
+                "evidence_refs": [str(verified_source) + "#bugswarm-square-okio-140452393"],
+                "health": "model:result",
+                "job_type": "paired-task",
+                "metrics": {"cost_usd": 0.15, "tokens": 1000, "wall_s": 60.0},
+                "notes": "synthetic fixture: oracle solved",
+                "target_id": "bugswarm-verified",
+                "trace_ref": "traces/kitsoki.jsonl",
+                "variant_id": "kitsoki-glm-5.2",
+                "verdict": "solved",
+            },
+            {
+                "axis": {"task": "bugswarm-square-okio-140452393"},
+                "cell_id": "bugswarm-verified--raw-prompt-glm-5.2--task:bugswarm-square-okio-140452393",
+                "evidence_refs": [str(verified_source) + "#bugswarm-square-okio-140452393"],
+                "health": "model:result",
+                "job_type": "paired-task",
+                "metrics": {"cost_usd": 0.03, "tokens": 200, "wall_s": 20.0},
+                "notes": "synthetic fixture: oracle failed",
+                "target_id": "bugswarm-verified",
+                "trace_ref": "traces/raw.jsonl",
+                "variant_id": "raw-prompt-glm-5.2",
+                "verdict": "failed",
+            },
+        ]
+    }), encoding="utf-8")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--generated-at",
+            "2026-07-06T00:00:00Z",
+            "--json-out",
+            str(json_out),
+            "--markdown-out",
+            str(md_out),
+            "--bugswarm-source",
+            str(verified_source),
+            "--bugswarm-verification",
+            str(verification),
+            "--bugswarm-arena-rollup",
+            str(rollup),
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    check("generator with bugswarm rollup exits zero", proc.returncode, 0)
+    report = json.loads(json_out.read_text(encoding="utf-8"))
+    check("bugswarm cell count", len(report["bugswarm_glm52_arena_cells"]), 2)
+    headline = report["rollups"]["glm52_by_corpus_treatment"]
+    check("bugswarm kitsoki attempted", headline["bugswarm|kitsoki"]["attempted"], 1)
+    check("bugswarm kitsoki success", headline["bugswarm|kitsoki"]["success_rate"], 1.0)
+    check("bugswarm kitsoki tokens", headline["bugswarm|kitsoki"]["total_tokens"], 1000)
+    check("bugswarm raw attempted", headline["bugswarm|raw-prompt"]["attempted"], 1)
+    check("bugswarm raw success", headline["bugswarm|raw-prompt"]["success_rate"], 0.0)
+    check("bugswarm raw tokens", headline["bugswarm|raw-prompt"]["total_tokens"], 200)
+    gaps = "\n".join(report["evidence_gaps"])
+    check("bugswarm result gap absent", "Some imported BugSwarm tasks are missing" in gaps, False)
+    md = md_out.read_text(encoding="utf-8")
+    check("markdown includes bugswarm arena section", "Committed BugSwarm GLM-5.2 Arena Cells" in md, True)
+    check("markdown includes bugswarm rollup input", "BugSwarm arena rollup" in md, True)
 
 if failures:
     print("FAIL: glm52 bugswarm report")

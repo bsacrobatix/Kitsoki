@@ -32,6 +32,7 @@ Inputs:
 - Source catalog: `tools/arena/corpus/sources.yaml`.
 - BugSwarm source: `not supplied`.
 - BugSwarm verification report: `not supplied`.
+- BugSwarm arena rollup: `not supplied`.
 
 Primary metrics:
 
@@ -82,6 +83,12 @@ BugSwarm source contract:
 | task | treatment | quality | tokens | cost | evidence |
 |---|---|---|---:|---:|---|
 | bug9 | kitsoki | partial | 2,890,980 | $15.575450 | `tools/bugfix-bakeoff/results/cells/bug9-glm-5.2-kitsoki.json` |
+
+## Committed BugSwarm GLM-5.2 Arena Cells
+
+| task | treatment | quality | tokens | cost | evidence |
+|---|---|---|---:|---:|---|
+| none | none | pending | n/a | n/a | n/a |
 
 ## Evidence Gaps
 

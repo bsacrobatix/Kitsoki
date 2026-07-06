@@ -36,6 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--markdown-out", required=True)
     parser.add_argument("--bugswarm-source", default="", help="optional converted BugSwarm YAML source")
     parser.add_argument("--bugswarm-verification", default="", help="optional bugswarm_verify_source.py JSON report")
+    parser.add_argument("--bugswarm-arena-rollup", default="", help="optional arena rollup with BugSwarm GLM-5.2 cells")
     parser.add_argument("--bakeoff-cells", default=str(DEFAULT_BAKEOFF_CELLS))
     parser.add_argument("--arena-rollup", default=str(DEFAULT_ARENA_ROUND1))
     parser.add_argument("--corpus", default=str(DEFAULT_CORPUS))
@@ -50,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         sources_path=Path(args.sources),
         bugswarm_source=Path(args.bugswarm_source) if args.bugswarm_source else None,
         bugswarm_verification=Path(args.bugswarm_verification) if args.bugswarm_verification else None,
+        bugswarm_arena_rollup=Path(args.bugswarm_arena_rollup) if args.bugswarm_arena_rollup else None,
     )
     write_json(Path(args.json_out), report)
     write_text(Path(args.markdown_out), render_markdown(report))
@@ -66,6 +68,7 @@ def build_report(
     sources_path: Path,
     bugswarm_source: Path | None = None,
     bugswarm_verification: Path | None = None,
+    bugswarm_arena_rollup: Path | None = None,
 ) -> dict[str, Any]:
     corpus = load_yaml(corpus_path)
     sources = load_yaml(sources_path)
@@ -73,8 +76,9 @@ def build_report(
     arena_cells = load_arena_cells(arena_rollup)
     bugswarm_tasks = load_bugswarm_tasks(bugswarm_source)
     verification = load_verification(bugswarm_verification)
+    bugswarm_cells = load_bugswarm_arena_cells(bugswarm_arena_rollup)
 
-    matrix_rows = build_required_matrix(glm_cells, bugswarm_tasks)
+    matrix_rows = build_required_matrix(glm_cells, bugswarm_tasks, bugswarm_cells)
     return {
         "kind": "glm52_bugswarm_bugfix_report",
         "version": 1,
@@ -86,9 +90,11 @@ def build_report(
             "sources": rel(sources_path),
             "bugswarm_source": rel(bugswarm_source) if bugswarm_source else "",
             "bugswarm_verification": rel(bugswarm_verification) if bugswarm_verification else "",
+            "bugswarm_arena_rollup": rel(bugswarm_arena_rollup) if bugswarm_arena_rollup else "",
         },
         "corpora": corpus_summary(corpus, sources, bugswarm_tasks, verification),
         "glm52_bugfix_cells": glm_cells,
+        "bugswarm_glm52_arena_cells": bugswarm_cells,
         "required_glm52_matrix": matrix_rows,
         "rollups": {
             "glm52_by_corpus_treatment": rollup_required_matrix(matrix_rows),
@@ -143,6 +149,38 @@ def load_arena_cells(rollup_path: Path) -> list[dict[str, Any]]:
     return out
 
 
+def load_bugswarm_arena_cells(rollup_path: Path | None) -> list[dict[str, Any]]:
+    if rollup_path is None or not rollup_path.exists():
+        return []
+    data = json.loads(rollup_path.read_text(encoding="utf-8"))
+    out: list[dict[str, Any]] = []
+    for cell in data.get("cells", []):
+        if not isinstance(cell, dict):
+            continue
+        metrics = cell.get("metrics") or {}
+        task = str((cell.get("axis") or {}).get("task") or "")
+        variant = str(cell.get("variant_id") or "")
+        treatment = treatment_from_variant(variant)
+        out.append({
+            "source": "arena-rollup",
+            "corpus": "bugswarm",
+            "task": task,
+            "candidate": "glm-5.2",
+            "treatment": treatment,
+            "model": "hf:zai-org/GLM-5.2",
+            "provider": str(cell.get("job_type") or "paired-task"),
+            "quality": normalize_quality(str(cell.get("verdict") or "pending")),
+            "oracle_status": "",
+            "adjudicated": False,
+            "total_tokens": as_int(metrics.get("tokens")),
+            "cost_usd": as_float(metrics.get("cost_usd")),
+            "evidence": rel(rollup_path),
+            "trace_ref": str(cell.get("trace_ref") or ""),
+            "notes": str(cell.get("notes") or ""),
+        })
+    return [row for row in out if row["task"] and row["treatment"] in {"kitsoki", "raw-prompt"}]
+
+
 def load_bugswarm_tasks(path: Path | None) -> list[dict[str, Any]]:
     if path is None or not path.exists():
         return []
@@ -171,7 +209,11 @@ def load_verification(path: Path | None) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def build_required_matrix(glm_cells: list[dict[str, Any]], bugswarm_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def build_required_matrix(
+    glm_cells: list[dict[str, Any]],
+    bugswarm_tasks: list[dict[str, Any]],
+    bugswarm_cells: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for treatment in ("kitsoki", "raw-prompt"):
         matching = [c for c in glm_cells if c["corpus"] == "oss-oracle" and c["treatment"] == treatment]
@@ -180,10 +222,22 @@ def build_required_matrix(glm_cells: list[dict[str, Any]], bugswarm_tasks: list[
         else:
             rows.append(pending_row("oss-oracle", "current-committed-glm52", treatment, "no committed GLM-5.2 cell"))
 
-    if bugswarm_tasks:
-        for task in bugswarm_tasks:
+    bugswarm_by_key = {
+        (cell["task"], cell["treatment"]): cell
+        for cell in bugswarm_cells
+    }
+    task_ids = [task["id"] for task in bugswarm_tasks]
+    if not task_ids:
+        task_ids = sorted({cell["task"] for cell in bugswarm_cells})
+
+    if task_ids:
+        for task_id in task_ids:
             for treatment in ("kitsoki", "raw-prompt"):
-                rows.append(pending_row("bugswarm", task["id"], treatment, "BugSwarm task imported but no GLM-5.2 result cell"))
+                row = bugswarm_by_key.get((task_id, treatment))
+                if row:
+                    rows.append(row)
+                else:
+                    rows.append(pending_row("bugswarm", task_id, treatment, "BugSwarm task imported but no GLM-5.2 result cell"))
     else:
         for treatment in ("kitsoki", "raw-prompt"):
             rows.append(pending_row("bugswarm", "verified-subset", treatment, "no verified BugSwarm source imported"))
@@ -287,12 +341,17 @@ def evidence_gaps(rows: list[dict[str, Any]], bugswarm_tasks: list[dict[str, Any
     if bugswarm_tasks and not verification:
         gaps.append("No BugSwarm verification report is attached to this generated report.")
     if any(row["corpus"] == "bugswarm" and row["quality"] == "pending" for row in rows):
-        gaps.append("No committed GLM-5.2 Kitsoki or raw-prompt result exists for BugSwarm.")
+        if bugswarm_tasks:
+            gaps.append("Some imported BugSwarm tasks are missing committed GLM-5.2 Kitsoki or raw-prompt result cells.")
+        else:
+            gaps.append("No committed GLM-5.2 Kitsoki or raw-prompt result exists for BugSwarm.")
     return gaps
 
 
 def interpretation(rows: list[dict[str, Any]], bugswarm_tasks: list[dict[str, Any]], verification: dict[str, Any]) -> list[str]:
     glm_kitsoki_attempts = [r for r in rows if r["corpus"] == "oss-oracle" and r["treatment"] == "kitsoki" and r["quality"] != "pending"]
+    raw_prompt_attempts = [r for r in rows if r["treatment"] == "raw-prompt" and r["quality"] not in {"pending", "blocked"}]
+    bugswarm_attempts = [r for r in rows if r["corpus"] == "bugswarm" and r["quality"] not in {"pending", "blocked"}]
     out = []
     if glm_kitsoki_attempts:
         tokens = sum(r["total_tokens"] or 0 for r in glm_kitsoki_attempts)
@@ -300,7 +359,14 @@ def interpretation(rows: list[dict[str, Any]], bugswarm_tasks: list[dict[str, An
             f"Committed GLM-5.2 Kitsoki evidence contains {len(glm_kitsoki_attempts)} attempted OSS oracle cell(s), "
             f"{tokens} total tokens, and no solved cell yet."
         )
-    out.append("The GLM-5.2 raw-prompt arm remains pending; the report must not compute a token ratio from missing data.")
+    if raw_prompt_attempts:
+        tokens = sum(r["total_tokens"] or 0 for r in raw_prompt_attempts)
+        out.append(f"Committed GLM-5.2 raw-prompt evidence contains {len(raw_prompt_attempts)} attempted cell(s) and {tokens} total tokens.")
+    else:
+        out.append("The GLM-5.2 raw-prompt arm remains pending; the report must not compute a token ratio from missing data.")
+    if bugswarm_attempts:
+        tokens = sum(r["total_tokens"] or 0 for r in bugswarm_attempts)
+        out.append(f"Committed BugSwarm GLM-5.2 arena evidence contains {len(bugswarm_attempts)} attempted cell(s) and {tokens} total tokens.")
     if bugswarm_tasks:
         out.append(f"BugSwarm is reusable as an imported source with {len(bugswarm_tasks)} task(s) in the supplied source file.")
         if verification:
@@ -318,6 +384,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     corpora = report["corpora"]
     rollups = report["rollups"]["glm52_by_corpus_treatment"]
     cells = report["glm52_bugfix_cells"]
+    bugswarm_cells = report["bugswarm_glm52_arena_cells"]
     inputs = report["inputs"]
     lines.extend([
         "# BugSwarm + GLM-5.2 bugfix comparison report",
@@ -354,6 +421,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- Source catalog: `{inputs['sources']}`.",
         f"- BugSwarm source: `{inputs['bugswarm_source'] or 'not supplied'}`.",
         f"- BugSwarm verification report: `{inputs['bugswarm_verification'] or 'not supplied'}`.",
+        f"- BugSwarm arena rollup: `{inputs['bugswarm_arena_rollup'] or 'not supplied'}`.",
         "",
         "Primary metrics:",
         "",
@@ -420,6 +488,21 @@ def render_markdown(report: dict[str, Any]) -> str:
     ])
     if cells:
         for cell in cells:
+            lines.append(
+                f"| {cell['task']} | {cell['treatment']} | {cell['quality']} | "
+                f"{format_int(cell['total_tokens'])} | {format_cost(cell['cost_usd'])} | `{cell['evidence']}` |"
+            )
+    else:
+        lines.append("| none | none | pending | n/a | n/a | n/a |")
+    lines.extend([
+        "",
+        "## Committed BugSwarm GLM-5.2 Arena Cells",
+        "",
+        "| task | treatment | quality | tokens | cost | evidence |",
+        "|---|---|---|---:|---:|---|",
+    ])
+    if bugswarm_cells:
+        for cell in bugswarm_cells:
             lines.append(
                 f"| {cell['task']} | {cell['treatment']} | {cell['quality']} | "
                 f"{format_int(cell['total_tokens'])} | {format_cost(cell['cost_usd'])} | `{cell['evidence']}` |"
@@ -499,7 +582,7 @@ def treatment_from_variant(variant: str) -> str:
     lowered = variant.lower()
     if lowered.startswith("kitsoki"):
         return "kitsoki"
-    if lowered.startswith("single"):
+    if lowered.startswith("single") or lowered.startswith("raw-prompt"):
         return "raw-prompt"
     return "unknown"
 
