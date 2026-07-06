@@ -127,19 +127,18 @@ def corpus_action(
         if corpus == "bugswarm" and source:
             spec = ".artifacts/bugswarm/bugswarm-glm52.yaml"
             action["prerequisites"].append(
-                "Generate and inspect the BugSwarm paired-task spec from the verified source."
-            )
-            action["prerequisites"].append(
-                "Do not run --live until the spec uses backend=codex for Kitsoki and backend=claude for the raw-prompt GLM-5.2 arm."
+                "Generate and inspect the BugSwarm paired-task spec from the execute-verified source before running --live."
             )
             action["commands"].append(
-                f"python3 tools/arena/scripts/bugswarm_to_arena_spec.py --source {source} --out {spec}"
+                "python3 tools/arena/scripts/bugswarm_to_arena_spec.py "
+                f"--source {source} --out {spec} --kitsoki-backend codex --raw-backend claude"
             )
             action["commands"].extend([
                 f"python3 tools/arena/arena.py plan --spec {spec}",
                 f"python3 tools/arena/arena.py run --spec {spec} --out {out_dir}",
+                f"ARENA_PAIRED_TASK_ENABLE_CODEX=1 python3 tools/arena/arena.py run --spec {spec} --out {out_dir} --live",
             ])
-            action["status"] = "needs-live-spec"
+            action["status"] = "ready"
             action["spec"] = spec
             return action
         action["prerequisites"].append(
