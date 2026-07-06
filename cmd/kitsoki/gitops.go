@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -432,6 +434,10 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 	}
 	runDir := strings.TrimSpace(opts.RunDir)
 	assetDir := firstNonBlank(opts.AssetDir, filepath.Join(runDir, "gh-agent-assets"))
+	health, readiness, readyOK, readinessIssue, readinessSummary := gitopsAutonomousFixAgentReady(ctx, opts.PublicBaseURL, opts.TicketRepo)
+	if !readyOK {
+		return gitopsAutonomousFixReadinessInvalid(ctx, opts, runDir, health, readiness, readinessIssue, readinessSummary)
+	}
 	filed, err := host.GitHubFileFindings(ctx, host.FindingsFilingInput{
 		RunDir:     runDir,
 		Repo:       opts.TicketRepo,
@@ -528,6 +534,221 @@ func runGitopsAutonomousFix(ctx context.Context, opts gitopsAutonomousFixOptions
 	storySummary, _ = productJourneyJSON(ctx, "--summarize-run", "--run-dir", runDir)
 	mergeMaps(result, storySummary)
 	reportPath, err = writeGitopsAutonomousReport(runDir, result, review, validation)
+	if err != nil {
+		return nil, err
+	}
+	result["autonomous_fix_report_path"] = reportPath
+	return result, nil
+}
+
+func gitopsAutonomousFixAgentReady(ctx context.Context, publicBaseURL, ticketRepo string) (map[string]any, map[string]any, bool, string, string) {
+	health := gitopsCheckGHAgentHealth(ctx, publicBaseURL)
+	if stringValue(health, "status") != "pass" {
+		return health, nil, false, "gh-agent-health", fmt.Sprintf("Hosted gh-agent health check failed before autonomous fix: %s", stringValue(health, "summary"))
+	}
+	readiness := gitopsCheckGHAgentReadiness(ctx, publicBaseURL, ticketRepo)
+	if stringValue(readiness, "status") != "pass" {
+		return health, readiness, false, "gh-agent-readiness", fmt.Sprintf("Hosted gh-agent readiness check failed before autonomous fix: %s", stringValue(readiness, "summary"))
+	}
+	return health, readiness, true, "", ""
+}
+
+func gitopsCheckGHAgentHealth(ctx context.Context, publicBaseURL string) map[string]any {
+	url := gitopsGHAgentEndpoint(publicBaseURL, "/healthz")
+	if url == "" {
+		return map[string]any{
+			"status":  "fail",
+			"summary": "gh_agent_public_base_url is required",
+			"url":     "",
+		}
+	}
+	code, body, err := gitopsHTTPGet(ctx, url, 256)
+	if err != nil {
+		return map[string]any{
+			"status":  "fail",
+			"summary": fmt.Sprintf("%s: %v", url, err),
+			"url":     url,
+		}
+	}
+	if code == http.StatusOK && strings.TrimSpace(body) == "ok" {
+		return map[string]any{
+			"status":      "pass",
+			"summary":     fmt.Sprintf("%s: ok", url),
+			"url":         url,
+			"http_status": code,
+		}
+	}
+	return map[string]any{
+		"status":      "fail",
+		"summary":     fmt.Sprintf("%s: expected HTTP 200 body ok, got HTTP %d body %q", url, code, strings.TrimSpace(body)),
+		"url":         url,
+		"http_status": code,
+	}
+}
+
+func gitopsCheckGHAgentReadiness(ctx context.Context, publicBaseURL, ticketRepo string) map[string]any {
+	url := gitopsGHAgentEndpoint(publicBaseURL, "/api/ready")
+	if url == "" {
+		return map[string]any{
+			"status":  "fail",
+			"summary": "gh_agent_public_base_url is required",
+			"url":     "",
+		}
+	}
+	code, body, err := gitopsHTTPGet(ctx, url, 4096)
+	if err != nil {
+		return map[string]any{
+			"status":  "fail",
+			"summary": fmt.Sprintf("%s: %v", url, err),
+			"url":     url,
+		}
+	}
+	if code != http.StatusOK {
+		return map[string]any{
+			"status":      "fail",
+			"summary":     fmt.Sprintf("%s: expected HTTP 200, got HTTP %d", url, code),
+			"url":         url,
+			"http_status": code,
+		}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		return map[string]any{
+			"status":      "fail",
+			"summary":     fmt.Sprintf("%s: invalid JSON readiness payload (%v)", url, err),
+			"url":         url,
+			"http_status": code,
+		}
+	}
+	expectedRepo := strings.TrimSpace(ticketRepo)
+	actualRepo := strings.TrimSpace(stringValue(payload, "repo"))
+	if stringValue(payload, "status") != "ready" {
+		return map[string]any{
+			"status":      "fail",
+			"summary":     fmt.Sprintf("%s: status=%q", url, stringValue(payload, "status")),
+			"url":         url,
+			"http_status": code,
+		}
+	}
+	if expectedRepo != "" && actualRepo != expectedRepo {
+		return map[string]any{
+			"status":      "fail",
+			"summary":     fmt.Sprintf("%s: repo mismatch, expected %s, got %s", url, expectedRepo, firstNonBlank(actualRepo, "(empty)")),
+			"url":         url,
+			"http_status": code,
+		}
+	}
+	if payload["drain_enabled"] != true {
+		return map[string]any{
+			"status":      "fail",
+			"summary":     fmt.Sprintf("%s: drain loop is not enabled", url),
+			"url":         url,
+			"http_status": code,
+		}
+	}
+	publicBase := strings.TrimRight(strings.TrimSpace(stringValue(payload, "public_base_url")), "/")
+	expectedBase := strings.TrimRight(strings.TrimSpace(publicBaseURL), "/")
+	if publicBase != "" && expectedBase != "" && publicBase != expectedBase {
+		return map[string]any{
+			"status":      "fail",
+			"summary":     fmt.Sprintf("%s: public_base_url mismatch, expected %s, got %s", url, expectedBase, publicBase),
+			"url":         url,
+			"http_status": code,
+		}
+	}
+	worker := firstNonBlank(strings.TrimSpace(stringValue(payload, "worker")), "(unknown worker)")
+	return map[string]any{
+		"status":      "pass",
+		"summary":     fmt.Sprintf("%s: ready for %s as %s", url, firstNonBlank(actualRepo, expectedRepo), worker),
+		"url":         url,
+		"http_status": code,
+		"payload":     payload,
+	}
+}
+
+func gitopsHTTPGet(ctx context.Context, url string, maxBody int64) (int, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	if err != nil {
+		return resp.StatusCode, "", err
+	}
+	return resp.StatusCode, string(body), nil
+}
+
+func gitopsGHAgentEndpoint(publicBaseURL, path string) string {
+	base := strings.TrimRight(strings.TrimSpace(publicBaseURL), "/")
+	if base == "" {
+		return ""
+	}
+	return base + path
+}
+
+func gitopsAutonomousFixReadinessInvalid(ctx context.Context, opts gitopsAutonomousFixOptions, runDir string, health, readiness map[string]any, validationIssue, summary string) (map[string]any, error) {
+	result := map[string]any{
+		"status":                            "autonomous_fix_invalid",
+		"autonomous_fix_status":             "autonomous_fix_invalid",
+		"ticket_repo":                       opts.TicketRepo,
+		"gh_agent_public_base_url":          opts.PublicBaseURL,
+		"gh_agent_health_status":            stringValue(health, "status"),
+		"gh_agent_health_summary":           stringValue(health, "summary"),
+		"gh_agent_readiness_status":         stringValue(readiness, "status"),
+		"gh_agent_readiness_summary":        stringValue(readiness, "summary"),
+		"filing_status":                     "not_run",
+		"filing_summary":                    summary,
+		"findings_filed_count":              0,
+		"findings_skipped_count":            0,
+		"findings_failed_count":             0,
+		"findings_unfiled_count":            0,
+		"filed_issue_summary":               "",
+		"gh_agent_enqueue_status":           "not_run",
+		"gh_agent_enqueued_count":           0,
+		"gh_agent_skipped_count":            0,
+		"gh_agent_claim_status":             "not_run",
+		"gh_agent_claim_count":              0,
+		"gh_agent_drain_status":             "not_run",
+		"gh_agent_drained_count":            0,
+		"gh_agent_done_count":               0,
+		"gh_agent_failed_count":             0,
+		"gh_agent_active_count":             0,
+		"gh_agent_fix_evidence_count":       0,
+		"gh_agent_missing_evidence_count":   0,
+		"gh_agent_triage_evidence_count":    0,
+		"gh_agent_missing_triage_count":     0,
+		"gh_agent_independent_verify_count": 0,
+		"gh_agent_missing_verify_count":     0,
+		"gh_agent_missing_run_url_count":    0,
+		"gh_agent_missing_evidence_summary": summary,
+		"gh_agent_missing_triage_summary":   summary,
+		"gh_agent_missing_verify_summary":   summary,
+		"independent_verify_status":         "fail",
+		"independent_verify_summary":        summary,
+		"issue_closeout_status":             "skipped",
+		"issue_closeout_count":              0,
+		"issue_closeout_summary":            "Issue close-out skipped because hosted gh-agent readiness failed before filing.",
+		"autonomous_gate_summary":           "filing=not_run, gh_agent=fail, independent_verify=fail, review=not_run, validation=fail",
+		"review_status":                     "not_run",
+		"review_summary":                    summary,
+		"review_passed_count":               0,
+		"review_failed_count":               0,
+		"review_warning_count":              0,
+		"review_total_count":                0,
+		"validation_status":                 "invalid",
+		"validation_errors":                 1,
+		"validation_warnings":               0,
+		"validation_issue_summary":          validationIssue,
+	}
+	storySummary, _ := productJourneyJSON(ctx, "--summarize-run", "--run-dir", runDir)
+	mergeMaps(result, storySummary)
+	reportPath, err := writeGitopsAutonomousReport(runDir, result, nil, nil)
 	if err != nil {
 		return nil, err
 	}
