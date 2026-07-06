@@ -11,9 +11,9 @@ host_handlers:
           exit_code: 0
           stdout_json:
             status: passed
-            summary: core use-case autonomous product-QA marathon smoke passed
+            summary: core use-case autonomous product-QA marathon persona sweep passed
             exit_code: 0
-            output: "ok: marathon scoped run covers core use cases\nok: autonomous replay captured every core use case\nok: credible issue was filed\nok: gh-agent fix drained with independent verification\nok: mechanical stats count found/filed/fixed\nPASS"
+            output: "ok: core-maintainer: marathon scoped run covers core use cases\nok: dependency-debugger: autonomous replay captured every core use case\nok: docs-minded-contributor: credible issues were filed\nok: ide-first-engineer: gh-agent fixes drained with independent verification\nok: hobbyist-contributor: mechanical stats count found/filed/fixed\nok: sweep filed and fixed every core scenario issue\nPASS"
 
 turns:
   - intent:
@@ -23,7 +23,7 @@ turns:
     expect_world:
       status: autonomous_marathon_smoke_checked
       autonomous_marathon_smoke_status: passed
-      autonomous_marathon_smoke_summary: core use-case autonomous product-QA marathon smoke passed
+      autonomous_marathon_smoke_summary: core use-case autonomous product-QA marathon persona sweep passed
       autonomous_marathon_smoke_exit_code: 0
     expect_host_calls:
       - handler: host.run

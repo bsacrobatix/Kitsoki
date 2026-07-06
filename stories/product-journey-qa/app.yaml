@@ -344,7 +344,7 @@ intents:
     examples: ["persona autofix smoke", "prove persona qa autofix", "persona issue to fix smoke"]
     priority: 89
   autonomous_marathon_smoke:
-    description: "Run a no-LLM core-use-case persona-QA marathon smoke through autonomous fix and derived stats."
+    description: "Run a no-LLM core-use-case persona sweep through autonomous fix and derived stats."
     examples: ["autonomous marathon smoke", "prove persona qa marathon", "standing product qa smoke"]
     priority: 89
   autonomous_marathon:
