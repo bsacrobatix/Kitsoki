@@ -42,3 +42,9 @@ harness_profiles:
     backend: agy
     model: gemini-3.5-flash
     models: [gemini-3.5-flash, gemini-3.5-pro, gemini-next]
+
+  # Your native Google Antigravity (agy CLI) subscription running the Pro model.
+  agy-pro:
+    backend: agy
+    model: gemini-3.5-pro
+    models: [gemini-3.5-pro, gemini-3.5-flash, gemini-next]
