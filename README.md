@@ -133,8 +133,16 @@ detailed onboarding contract are both in
 
 ### 4. Optional: GitHub auth for bug and PR workflows
 
-To file bugs or PRs directly to GitHub from local Kitsoki runs, set up a
-least-privilege GitHub App token. No public URL is required for local use:
+To file bugs or PRs directly to GitHub from local Kitsoki runs, use GitHub
+CLI's browser/PIN login:
+
+```sh
+kitsoki gh-agent login
+source ~/.config/kitsoki/github.env
+```
+
+For repo-limited permissions, set up a least-privilege GitHub App token. No
+public URL is required for local use:
 
 ```sh
 kitsoki gh-agent setup app --name <app-name> --local-only

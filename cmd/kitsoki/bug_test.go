@@ -273,6 +273,7 @@ func TestBugCreateCmd_GitHubMissingAuthExplainsSetup(t *testing.T) {
 	require.Error(t, err)
 	for _, want := range []string{
 		"GitHub auth is not configured",
+		"kitsoki gh-agent login",
 		"kitsoki gh-agent setup app --name <app-name> --local-only",
 		"kitsoki gh-agent setup attach --repo <owner/repo>",
 		"kitsoki gh-agent token",

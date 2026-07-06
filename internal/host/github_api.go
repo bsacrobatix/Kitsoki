@@ -20,7 +20,8 @@ var githubAPI = githubAPIClient{
 // GitHubAuthSetupHint is the shared user-facing recovery path for every native
 // GitHub write surface (CLI, TUI/web Report bug, MCP tools, and story hosts).
 const GitHubAuthSetupHint = "GitHub auth is not configured (missing GH_TOKEN/GITHUB_TOKEN). " +
-	"Run `kitsoki gh-agent setup app --name <app-name> --local-only`, " +
+	"Run `kitsoki gh-agent login` for the easy GitHub CLI browser/PIN flow; " +
+	"or for repo-limited GitHub App auth run `kitsoki gh-agent setup app --name <app-name> --local-only`, " +
 	"`kitsoki gh-agent setup attach --repo <owner/repo>`, `kitsoki gh-agent token`, " +
 	"then `source ~/.config/kitsoki/github.env`; or set a fine-grained PAT in " +
 	"GH_TOKEN/GITHUB_TOKEN and run `kitsoki gh-agent token --from-env`."

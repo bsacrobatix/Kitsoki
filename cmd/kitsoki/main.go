@@ -832,7 +832,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 	cmd.Flags().StringVar(&warpBasisPath, "warp", "",
 		"path to a warp-basis YAML (state + world overrides); applied as the first action after session create. Same file the TUI's /warp file:<path> loads. See stories/oregon-trail/scenarios/ for examples.")
 	cmd.Flags().StringVar(&ticketRepo, "ticket-repo", "constructorfabric/Kitsoki",
-		"file TUI /bug reports as GitHub issues on this owner/repo with uploaded evidence; requires GitHub auth from `kitsoki gh-agent token` or GH_TOKEN/GITHUB_TOKEN; pass an empty string to write local issues/bugs/*.md files instead")
+		"file TUI /bug reports as GitHub issues on this owner/repo with uploaded evidence; requires GitHub auth from `kitsoki gh-agent login`, `kitsoki gh-agent token`, or GH_TOKEN/GITHUB_TOKEN; pass an empty string to write local issues/bugs/*.md files instead")
 
 	return cmd
 }
