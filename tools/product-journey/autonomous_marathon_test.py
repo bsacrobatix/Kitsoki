@@ -151,7 +151,10 @@ def main() -> int:
                   created["autonomous_marathon_status"] == "autonomous_marathon_ready_for_driver"
                   and run_json["mode"] == "autonomous-marathon"
                   and len(run_json["scenarios"]) == 1
-                  and created["live_budget_minutes"] == 7,
+                  and created["live_budget_minutes"] == 7
+                  and created["gh_agent_health_status"] == "pass"
+                  and created["gh_agent_readiness_status"] == "pass"
+                  and "/api/ready" in created["gh_agent_readiness_summary"],
                   failures)
             check("creation writes standing-loop control metadata",
                   created["autonomous_control_status"] == "ready_for_driver"
@@ -284,7 +287,9 @@ def main() -> int:
             check("live pending marathon refuses gh-agent for another repo before handoff",
                   wrong_repo["autonomous_marathon_status"] == "autonomous_marathon_invalid"
                   and wrong_repo["validation_issue_summary"] == "gh-agent-readiness"
-                  and wrong_repo["gh_agent_health_status"] == "fail"
+                  and wrong_repo["gh_agent_health_status"] == "pass"
+                  and wrong_repo["gh_agent_readiness_status"] == "fail"
+                  and "/api/ready" in wrong_repo["gh_agent_readiness_summary"]
                   and wrong_repo["autonomous_control_status"] == "not_run",
                   failures)
 

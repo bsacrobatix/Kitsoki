@@ -35,6 +35,10 @@ host_handlers:
             autonomous_gate_summary: "filing=not_run, gh_agent=not_run, independent_verify=not_run, review=not_run, validation=not_run"
             independent_verify_status: not_run
             independent_verify_summary: "independent verification not run"
+            gh_agent_health_status: pass
+            gh_agent_health_summary: "https://agent.example/healthz: ok"
+            gh_agent_readiness_status: pass
+            gh_agent_readiness_summary: "https://agent.example/api/ready: ready for bsacrobatix/Kitsoki as test-worker"
             run_id: run-999
             run_dir: .artifacts/product-journey/run-999
             project: vscode
@@ -211,8 +215,10 @@ turns:
       autonomous_marathon_report_path: .artifacts/product-journey/run-999/autonomous-marathon-report.md
       autonomous_control_status: ready_for_driver
       autonomous_control_path: .artifacts/product-journey/run-999/autonomous-marathon-control.json
+      gh_agent_health_status: pass
+      gh_agent_readiness_status: pass
       missing_proof_evidence_count: 3
-    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_ready_for_driver[\\s\\S]*Marathon report[\\s\\S]*autonomous-marathon[\\s\\S]*report.md[\\s\\S]*Marathon control[\\s\\S]*ready_for_driver[\\s\\S]*Control artifact[\\s\\S]*autonomous-marathon-[\\s\\S]*control.json"
+    expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_ready_for_driver[\\s\\S]*Marathon report[\\s\\S]*autonomous-marathon[\\s\\S]*report.md[\\s\\S]*Marathon control[\\s\\S]*ready_for_driver[\\s\\S]*Control artifact[\\s\\S]*autonomous-marathon-[\\s\\S]*control.json[\\s\\S]*GH-agent health[\\s\\S]*pass: https://agent.example/healthz[\\s\\S]*GH-agent readiness[\\s\\S]*pass: https://agent.example/api/ready"
     expect_host_calls:
       - handler: host.run
         args: { call: autonomous_product_journey_marathon }

@@ -5190,6 +5190,7 @@ def invalid_autonomous_marathon_creation(
     ticket_repo: str,
     gh_agent_public_base_url: str,
     gh_agent_health: Optional[dict] = None,
+    gh_agent_readiness: Optional[dict] = None,
 ) -> dict:
     result = run_story_summary(created_dir)
     result.update({
@@ -5218,6 +5219,8 @@ def invalid_autonomous_marathon_creation(
         "gh_agent_public_base_url": gh_agent_public_base_url,
         "gh_agent_health_status": (gh_agent_health or {}).get("status", ""),
         "gh_agent_health_summary": (gh_agent_health or {}).get("summary", ""),
+        "gh_agent_readiness_status": (gh_agent_readiness or {}).get("status", ""),
+        "gh_agent_readiness_summary": (gh_agent_readiness or {}).get("summary", ""),
         "autonomous_fix_status": "not_run",
         "independent_verify_status": "not_run",
         "independent_verify_summary": summary,
@@ -5616,6 +5619,7 @@ def autonomous_marathon(
             [],
         )
         health: Optional[dict] = None
+        ready: Optional[dict] = None
         if autonomous_driver_mode != "replay" and live_budget_minutes > 0:
             if not ticket_repo:
                 return invalid_autonomous_marathon_creation(
@@ -5659,6 +5663,7 @@ def autonomous_marathon(
                     "preflight=pass, filing=not_run, gh_agent=fail, independent_verify=not_run, review=not_run, validation=fail",
                     ticket_repo,
                     gh_agent_public_base_url,
+                    health,
                     ready,
                 )
         control = write_autonomous_marathon_control(
@@ -5747,6 +5752,8 @@ def autonomous_marathon(
             "autonomous_control_summary": autonomous_marathon_control_summary(control),
             "gh_agent_health_status": (health or {}).get("status", ""),
             "gh_agent_health_summary": (health or {}).get("summary", ""),
+            "gh_agent_readiness_status": (ready or {}).get("status", ""),
+            "gh_agent_readiness_summary": (ready or {}).get("summary", ""),
         }
         result.update(run_story_summary(created_dir))
         result["autonomous_marathon_report_path"] = str(write_autonomous_marathon_report(created_dir, result))
