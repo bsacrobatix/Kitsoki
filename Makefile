@@ -811,6 +811,20 @@ mcp-qa:
 		--frames .artifacts/mcp-demo/frames \
 		--blank-min-coverage 0.18
 
+# ── TUI live pty-over-websocket bridge (real keystrokes in, real ANSI render
+# out) — the live counterpart to the mcp-demo cassette replay above. See
+# tools/tui-bridge/README.md.
+TUI_BRIDGE_DIR := tools/tui-bridge
+.PHONY: tui-bridge-deps tui-bridge-test
+
+tui-bridge-deps:
+	cd $(TUI_BRIDGE_DIR) && pnpm install --silent
+
+# No-LLM by construction: the bridge spawns /bin/cat for the test, never
+# kitsoki or an LLM. Exercises the Go server + browser page together.
+tui-bridge-test: tui-bridge-deps
+	cd $(TUI_BRIDGE_DIR) && pnpm exec playwright test
+
 # demos records every recordable feature demo at watch-speed, incrementally:
 # per-demo content stamps (feature YAML + spec + story inputs + binary) skip
 # anything unchanged. demos-force re-records everything. See

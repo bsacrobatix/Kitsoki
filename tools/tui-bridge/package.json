@@ -1,0 +1,20 @@
+{
+  "name": "kitsoki-tui-bridge",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Live pty-over-websocket bridge so Playwright / claude-in-chrome can drive the real running kitsoki TUI (real keystrokes in, real ANSI render out) instead of cassette replay.",
+  "scripts": {
+    "serve": "node player/serve.mjs",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0"
+  }
+}
