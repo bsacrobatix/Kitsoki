@@ -151,16 +151,42 @@ func StarlarkRunHandler(ctx context.Context, args map[string]any) (Result, error
 	// renderer in ctx keep exactly the previous AppDirEnv-based behavior.
 	if !starlarkhost.HasInspector(runCtx) {
 		root, _ := worldSnapshot["workdir"].(string)
-		if root == "" {
+		// "." is dev-story's own bare-relative default for an unbound workdir
+		// (stories/dev-story/app.yaml's `workdir: "{{ world.workdir == '' ?
+		// '.' : world.workdir }}"` projection) — it is not a resolved root, it's
+		// the same "nothing was bound" signal as "", just spelled differently.
+		// A per-session prompt renderer or KITSOKI_APP_DIR, when available, is
+		// always a better root than the literal "." (which resolves against
+		// whatever the CURRENT PROCESS's cwd happens to be — the wrong repo
+		// entirely for a nested/driven session, e.g. prd_publish.star's
+		// docs/prd/ write silently landing nowhere and failing closed). But
+		// when neither is available, "." must still pass through unchanged
+		// rather than fall into the inferRepoRootForScript/cwd chain below:
+		// goal-seeker's own resolution scripts intentionally run with
+		// workdir="." and no renderer/AppDir to mean "resolve against this
+		// process's cwd" (see TestGoalSeekerResolveWorkdir_FromRuntimeBlock),
+		// and inferRepoRootForScript would instead resolve the SCRIPT's own
+		// repo, which can differ from the caller's intended cwd-rooted target.
+		dotSentinel := root == "."
+		if root == "" || dotSentinel {
+			resolved := ""
 			if pr := PromptRendererFromCtx(ctx); pr != nil {
 				if appDir := pr.RootDir(); appDir != "" {
-					root = widenToRepoRoot(appDir)
+					resolved = widenToRepoRoot(appDir)
 				}
 			}
-		}
-		if root == "" {
-			if appDir := os.Getenv(AppDirEnv); appDir != "" {
-				root = widenToRepoRoot(appDir)
+			if resolved == "" {
+				if appDir := os.Getenv(AppDirEnv); appDir != "" {
+					resolved = widenToRepoRoot(appDir)
+				}
+			}
+			switch {
+			case resolved != "":
+				root = resolved
+			case dotSentinel:
+				root = "."
+			default:
+				root = ""
 			}
 		}
 		if root == "" {
