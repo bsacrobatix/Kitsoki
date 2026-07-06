@@ -1025,6 +1025,113 @@ def main() -> int:
                   and not run.autonomous_marathon_watchdog_path(demo_proof_dir).exists(),
                   failures)
 
+            missing_trace = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-missing-driver-trace",
+                "bugfix",
+                7,
+                "o/r",
+                "",
+                "stories/bugfix",
+                healthy_url,
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                "live",
+                24,
+                15,
+                45,
+                None,
+            )
+            missing_trace_dir = Path(missing_trace["run_dir"])
+            missing_trace_run_json = run.read_json(missing_trace_dir / "run.json")
+            missing_trace_scenario = missing_trace_run_json["scenarios"][0]["id"]
+            filing_test.attach_bugfix_proof(missing_trace_dir, missing_trace_scenario)
+            run.record_driver_event(
+                missing_trace_dir,
+                missing_trace_scenario,
+                "live",
+                "captured",
+                "Live driver captured proof but omitted the reviewable driver task trace.",
+                "session.open,session.trace,visual.observe",
+                str(missing_trace_dir / "test-evidence" / "trace-replay.md"),
+                "",
+                None,
+            )
+            run.record_finding(
+                missing_trace_dir,
+                "strength",
+                "Live driver preserved proof before trace recording",
+                "This run intentionally omits the dispatch trace to prove finalization fails closed.",
+                missing_trace_scenario,
+                "low",
+                str(missing_trace_dir / "test-evidence" / "oracle_result.md"),
+                "observed",
+                None,
+            )
+            run.record_autonomous_driver_dispatch(
+                missing_trace_dir,
+                "live",
+                "captured",
+                "Dispatch receipt counts match persisted proof, but no driver trace was reported.",
+                1,
+                0,
+                "",
+                "",
+            )
+            missing_trace_finalized = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                missing_trace_dir,
+                "vscode",
+                "core-maintainer",
+                "ignored",
+                "",
+                7,
+                "o/r",
+                str(tmp / "gh-agent-missing-driver-trace.json"),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                str(run.ARTIFACT_ROOT),
+                str(missing_trace_dir / "autonomous-marathon-stats.json"),
+                0.82,
+                25,
+                "pending",
+                24,
+                15,
+                45,
+                None,
+            )
+            check("captured live driver receipt without reviewable trace stops before final gates",
+                  missing_trace_finalized["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and missing_trace_finalized["autonomous_driver_status"] == "missing-trace"
+                  and missing_trace_finalized["autonomous_driver_dispatch_status"] == "captured"
+                  and missing_trace_finalized["autonomous_fix_status"] == "not_run"
+                  and missing_trace_finalized["validation_issue_summary"] == "autonomous-driver-dispatch"
+                  and missing_trace_finalized["stats_status"] == "not_run"
+                  and "reviewable driver trace" in missing_trace_finalized["autonomous_driver_summary"]
+                  and not run.autonomous_marathon_watchdog_path(missing_trace_dir).exists(),
+                  failures)
+
             stale = run.autonomous_marathon(
                 catalog,
                 github_targets,
