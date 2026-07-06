@@ -24,7 +24,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/harness"
+	"kitsoki/internal/inbox"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
 	"kitsoki/internal/tui"
@@ -75,6 +77,7 @@ func driveCmd() *cobra.Command {
 		scriptPath  string
 		profileName string
 		configPath  string
+		warpBasisPath string
 	)
 
 	cmd := &cobra.Command{
@@ -115,6 +118,7 @@ Examples:
 				scriptPath:  scriptPath,
 				profileName: profileName,
 				configPath:  configPath,
+				warpBasisPath: warpBasisPath,
 			})
 		},
 	}
@@ -128,6 +132,7 @@ Examples:
 	cmd.Flags().StringVar(&scriptPath, "script", "", "optional batch input file (newline-separated; CI smoke)")
 	cmd.Flags().StringVar(&profileName, "profile", "", "harness profile from .kitsoki.yaml/.kitsoki.local.yaml; supplies backend, model, quota, and provider env")
 	cmd.Flags().StringVar(&configPath, "config", webconfig.DefaultConfigFile, "config file used with --profile")
+	cmd.Flags().StringVar(&warpBasisPath, "warp", "", "path to a warp-basis YAML (state + world overrides); applied as the first action after session create. Same file the TUI's /warp file:<path> loads.")
 
 	return cmd
 }
@@ -142,8 +147,9 @@ type driveCmdConfig struct {
 	cols        int
 	rows        int
 	scriptPath  string
-	profileName string
-	configPath  string
+	profileName   string
+	configPath    string
+	warpBasisPath string
 
 	// harnessOverride, when non-nil, replaces buildDriveHarness — the DI seam
 	// tests use to inject a stub live harness (or a failing live harness behind
@@ -200,8 +206,29 @@ func runDrive(cmd *cobra.Command, cfg driveCmdConfig) error {
 	// trace already carries turns (a resumed session): re-running on_enter would
 	// double-apply entry effects.
 	if isFreshTrace(ts.Sink) {
-		if err := ts.Orch.RunInitialOnEnter(ctx, ts.SID); err != nil {
-			return infraError("run initial on_enter: %v", err)
+		if cfg.warpBasisPath != "" {
+			resolved, basis, basisErr := tui.LoadWarpBasis(cfg.warpBasisPath, cfg.appPath)
+			if basisErr != nil {
+				ts.Close()
+				return infraError("--warp %q: %v", cfg.warpBasisPath, basisErr)
+			}
+			if basis.State == "" {
+				ts.Close()
+				return infraError("--warp %s: missing required `state:` field", resolved)
+			}
+			_, warpErr := ts.Orch.Teleport(ctx, ts.SID, inbox.TeleportTarget{
+				State: app.StatePath(basis.State),
+				Slots: basis.World,
+			})
+			if warpErr != nil {
+				ts.Close()
+				return infraError("--warp %s: teleport: %v", resolved, warpErr)
+			}
+		} else {
+			if err := ts.Orch.RunInitialOnEnter(ctx, ts.SID); err != nil {
+				ts.Close()
+				return infraError("run initial on_enter: %v", err)
+			}
 		}
 	}
 
