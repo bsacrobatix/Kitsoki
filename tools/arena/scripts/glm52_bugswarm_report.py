@@ -109,8 +109,10 @@ def build_report(
         "required_glm52_matrix": matrix_rows,
         "rollups": {
             "glm52_by_corpus_treatment": rollup_required_matrix(matrix_rows),
+            "glm52_by_treatment_overall": rollup_by_treatment(matrix_rows),
             "supporting_oss_codex_round1": rollup_arena_cells(arena_cells),
         },
+        "comparisons": build_comparisons(matrix_rows),
         "evidence_gaps": evidence_gaps(matrix_rows, bugswarm_tasks, verification),
         "interpretation": interpretation(matrix_rows, bugswarm_tasks, verification),
         "evidence_closure": evidence_closure(matrix_rows, bugswarm_tasks, verification),
@@ -354,6 +356,53 @@ def rollup_required_matrix(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {key: rollup_quality(rows) for key, rows in sorted(buckets.items())}
 
 
+def rollup_by_treatment(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        buckets.setdefault(str(row["treatment"]), []).append(row)
+    return {key: rollup_quality(rows) for key, rows in sorted(buckets.items())}
+
+
+def build_comparisons(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    corpora = sorted({str(row["corpus"]) for row in rows})
+    comparisons = {
+        corpus: comparison_for_rows([row for row in rows if row["corpus"] == corpus])
+        for corpus in corpora
+    }
+    comparisons["overall"] = comparison_for_rows(rows)
+    return comparisons
+
+
+def comparison_for_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        buckets.setdefault(str(row["treatment"]), []).append(row)
+    kitsoki = rollup_quality(buckets.get("kitsoki", []))
+    raw = rollup_quality(buckets.get("raw-prompt", []))
+    complete = kitsoki["attempted"] > 0 and raw["attempted"] > 0
+    return {
+        "status": "complete" if complete else "pending",
+        "kitsoki": kitsoki,
+        "raw_prompt": raw,
+        "success_rate_delta": round(kitsoki["success_rate"] - raw["success_rate"], 6) if complete else None,
+        "token_ratio_kitsoki_to_raw": (
+            round(kitsoki["total_tokens"] / raw["total_tokens"], 6)
+            if complete and kitsoki["total_tokens"] is not None and raw["total_tokens"]
+            else None
+        ),
+        "notes": [] if complete else comparison_missing_notes(kitsoki, raw),
+    }
+
+
+def comparison_missing_notes(kitsoki: dict[str, Any], raw: dict[str, Any]) -> list[str]:
+    notes: list[str] = []
+    if kitsoki["attempted"] == 0:
+        notes.append("Kitsoki GLM-5.2 arm has no attempted cells.")
+    if raw["attempted"] == 0:
+        notes.append("Raw-prompt GLM-5.2 arm has no attempted cells.")
+    return notes
+
+
 def rollup_arena_cells(cells: list[dict[str, Any]]) -> dict[str, Any]:
     buckets: dict[str, list[dict[str, Any]]] = {}
     for cell in cells:
@@ -504,6 +553,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     lines: list[str] = []
     corpora = report["corpora"]
     rollups = report["rollups"]["glm52_by_corpus_treatment"]
+    overall_rollups = report["rollups"]["glm52_by_treatment_overall"]
     cells = report["glm52_bugfix_cells"]
     oss_arena_cells = report["oss_glm52_arena_cells"]
     bugswarm_cells = report["bugswarm_glm52_arena_cells"]
@@ -602,6 +652,28 @@ def render_markdown(report: dict[str, Any]) -> str:
                 tokens=format_int(bucket["total_tokens"]),
             )
         )
+    lines.extend([
+        "",
+        "## Overall GLM-5.2 Treatment Rollup",
+        "",
+        "| treatment | n | attempted | solved | partial | failed | pending | success rate | tokens |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ])
+    for treatment, bucket in sorted(overall_rollups.items()):
+        lines.append(
+            "| {treatment} | {n} | {attempted} | {solved} | {partial} | {failed} | {pending} | {rate} | {tokens} |".format(
+                treatment=treatment,
+                n=bucket["n"],
+                attempted=bucket["attempted"],
+                solved=bucket["solved"],
+                partial=bucket["partial"],
+                failed=bucket["failed"],
+                pending=bucket["pending"],
+                rate=format_rate(bucket["success_rate"]),
+                tokens=format_int(bucket["total_tokens"]),
+            )
+        )
+    lines.extend(render_comparisons(report))
     lines.extend([
         "",
         "## Committed GLM-5.2 Cells",
@@ -741,6 +813,30 @@ def render_evidence_closure_packet(report: dict[str, Any]) -> list[str]:
     ]
 
 
+def render_comparisons(report: dict[str, Any]) -> list[str]:
+    lines = [
+        "",
+        "## Kitsoki vs Raw-Prompt Comparisons",
+        "",
+        "| scope | status | Kitsoki attempted | raw attempted | success delta | token ratio | notes |",
+        "|---|---|---:|---:|---:|---:|---|",
+    ]
+    for scope, comparison in sorted(report["comparisons"].items()):
+        notes = "; ".join(comparison.get("notes") or []) or "complete"
+        lines.append(
+            "| {scope} | {status} | {kitsoki_attempted} | {raw_attempted} | {delta} | {ratio} | {notes} |".format(
+                scope=scope,
+                status=comparison["status"],
+                kitsoki_attempted=comparison["kitsoki"]["attempted"],
+                raw_attempted=comparison["raw_prompt"]["attempted"],
+                delta=format_signed_rate(comparison["success_rate_delta"]),
+                ratio=format_float(comparison["token_ratio_kitsoki_to_raw"]),
+                notes=notes,
+            )
+        )
+    return lines
+
+
 def load_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -798,6 +894,14 @@ def format_cost(value: Any) -> str:
 
 
 def format_rate(value: Any) -> str:
+    return f"{value:.3f}" if isinstance(value, (int, float)) else "n/a"
+
+
+def format_signed_rate(value: Any) -> str:
+    return f"{value:+.3f}" if isinstance(value, (int, float)) else "n/a"
+
+
+def format_float(value: Any) -> str:
     return f"{value:.3f}" if isinstance(value, (int, float)) else "n/a"
 
 

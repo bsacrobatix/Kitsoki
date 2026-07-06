@@ -71,9 +71,20 @@ with tempfile.TemporaryDirectory() as tmp:
     check("oss kitsoki success rate", headline["oss-oracle|kitsoki"]["success_rate"], 0.0)
     check("oss raw pending", headline["oss-oracle|raw-prompt"]["pending"], 1)
     check("bugswarm raw pending", headline["bugswarm|raw-prompt"]["pending"], 1)
+    overall = report["rollups"]["glm52_by_treatment_overall"]
+    check("overall kitsoki attempted", overall["kitsoki"]["attempted"], 1)
+    check("overall raw attempted pending", overall["raw-prompt"]["attempted"], 0)
+    check("overall raw pending count", overall["raw-prompt"]["pending"], 2)
+    comparisons = report["comparisons"]
+    check("overall comparison pending", comparisons["overall"]["status"], "pending")
+    check("bugswarm comparison pending", comparisons["bugswarm"]["status"], "pending")
+    check("overall comparison no token ratio", comparisons["overall"]["token_ratio_kitsoki_to_raw"], None)
 
     md = md_out.read_text(encoding="utf-8")
     check("markdown names pending raw arm", "oss-oracle | raw-prompt" in md, True)
+    check("markdown includes overall rollup", "## Overall GLM-5.2 Treatment Rollup" in md, True)
+    check("markdown includes comparisons", "## Kitsoki vs Raw-Prompt Comparisons" in md, True)
+    check("markdown marks overall comparison pending", "| overall | pending | 1 | 0 | n/a | n/a | Raw-prompt GLM-5.2 arm has no attempted cells. |" in md, True)
     check("markdown warns no token ratio", "must not compute a token ratio" in md, True)
     check("markdown includes closure packet", "## Evidence Closure Packet" in md, True)
     check("markdown includes gap planner", "glm52_gap_plan.py" in md, True)
@@ -246,11 +257,16 @@ with tempfile.TemporaryDirectory() as tmp:
     check("bugswarm raw attempted", headline["bugswarm|raw-prompt"]["attempted"], 1)
     check("bugswarm raw success", headline["bugswarm|raw-prompt"]["success_rate"], 0.0)
     check("bugswarm raw tokens", headline["bugswarm|raw-prompt"]["total_tokens"], 200)
+    comparisons = report["comparisons"]
+    check("bugswarm comparison complete", comparisons["bugswarm"]["status"], "complete")
+    check("bugswarm comparison success delta", comparisons["bugswarm"]["success_rate_delta"], 1.0)
+    check("bugswarm comparison token ratio", comparisons["bugswarm"]["token_ratio_kitsoki_to_raw"], 5.0)
     gaps = "\n".join(report["evidence_gaps"])
     check("bugswarm result gap absent", "Some imported BugSwarm tasks are missing" in gaps, False)
     md = md_out.read_text(encoding="utf-8")
     check("markdown includes bugswarm arena section", "Committed BugSwarm GLM-5.2 Arena Cells" in md, True)
     check("markdown includes bugswarm rollup input", "BugSwarm arena rollup" in md, True)
+    check("markdown includes complete bugswarm comparison", "| bugswarm | complete | 1 | 1 | +1.000 | 5.000 | complete |" in md, True)
 
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)
@@ -324,6 +340,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("oss kitsoki token total includes both", headline["oss-oracle|kitsoki"]["total_tokens"], 2893980)
     check("oss raw attempted from arena", headline["oss-oracle|raw-prompt"]["attempted"], 1)
     check("oss raw tokens from arena", headline["oss-oracle|raw-prompt"]["total_tokens"], 700)
+    comparisons = report["comparisons"]
+    check("oss comparison complete with rollup", comparisons["oss-oracle"]["status"], "complete")
+    check("oss comparison token ratio", comparisons["oss-oracle"]["token_ratio_kitsoki_to_raw"], 4134.257143)
     md = md_out.read_text(encoding="utf-8")
     check("markdown includes oss arena section", "Committed OSS GLM-5.2 Arena Cells" in md, True)
     check("markdown includes oss rollup input", "OSS arena GLM rollup" in md, True)
