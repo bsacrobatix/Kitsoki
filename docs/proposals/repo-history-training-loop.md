@@ -145,8 +145,7 @@ integration slices below.
 The "convert repo history into graded task cases at scale" idea now has a
 mature external ecosystem. Findings that bear on this epic (the full survey,
 including the substrate-level tools, lives in the hermetic-capsules proposal —
-currently `.context/2026-07-06-hermetic-capsules-proposal.md`, to be promoted
-to `docs/proposals/hermetic-capsules.md`):
+now `docs/proposals/hermetic-capsules.md`):
 
 - **[SWE-smith](https://swesmith.com/blog.html)** — the scaling reference:
   50k tasks from 250+ arbitrary repos in ~295 GB of images, using
