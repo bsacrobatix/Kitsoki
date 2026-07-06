@@ -5636,6 +5636,22 @@ def blocked_autonomous_driver_dispatch(run_dir: Path) -> dict:
         receipt = read_json(receipt_path)
         status = receipt.get("status", "")
         if status == "captured":
+            blockers = receipt.get("blockers", [])
+            if blockers:
+                summary = "autonomous driver dispatch reported captured status with blocker(s); stop before final gates"
+                trace = receipt.get("trace", "")
+                receipt_markdown = str(autonomous_driver_dispatch_markdown_path(run_dir))
+                status = "captured-with-blockers"
+                return {
+                    "autonomous_driver_mode": mode,
+                    "autonomous_driver_status": status,
+                    "autonomous_driver_summary": summary,
+                    "autonomous_driver_dispatch_status": receipt.get("status", status),
+                    "autonomous_driver_dispatch_summary": receipt.get("summary", summary),
+                    "autonomous_driver_dispatch_trace": trace,
+                    "autonomous_driver_dispatch_path": str(receipt_path),
+                    "autonomous_driver_dispatch_markdown_path": receipt_markdown,
+                }
             heartbeat = latest_driver_heartbeat(run_dir)
             if heartbeat:
                 findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"items": []}

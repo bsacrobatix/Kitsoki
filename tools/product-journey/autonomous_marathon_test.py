@@ -1229,6 +1229,113 @@ def main() -> int:
                   and not run.autonomous_marathon_watchdog_path(missing_trace_dir).exists(),
                   failures)
 
+            captured_blocker = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-captured-with-blocker",
+                "bugfix",
+                7,
+                "o/r",
+                "",
+                "stories/bugfix",
+                healthy_url,
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                "live",
+                24,
+                15,
+                45,
+                None,
+            )
+            captured_blocker_dir = Path(captured_blocker["run_dir"])
+            captured_blocker_run_json = run.read_json(captured_blocker_dir / "run.json")
+            captured_blocker_scenario = captured_blocker_run_json["scenarios"][0]["id"]
+            filing_test.attach_bugfix_proof(captured_blocker_dir, captured_blocker_scenario)
+            run.record_driver_event(
+                captured_blocker_dir,
+                captured_blocker_scenario,
+                "live",
+                "captured",
+                "Live driver captured proof but also reported a blocker in the dispatch receipt.",
+                "session.open,session.trace,visual.observe",
+                str(captured_blocker_dir / "test-evidence" / "trace-replay.md"),
+                "",
+                None,
+            )
+            run.record_finding(
+                captured_blocker_dir,
+                "strength",
+                "Captured blocker receipt should not pass",
+                "This run intentionally reports a blocker with captured status to prove finalization fails closed.",
+                captured_blocker_scenario,
+                "low",
+                str(captured_blocker_dir / "test-evidence" / "oracle_result.md"),
+                "observed",
+                None,
+            )
+            run.record_autonomous_driver_dispatch(
+                captured_blocker_dir,
+                "live",
+                "captured",
+                "Dispatch receipt has proof but also reports an unresolved blocker.",
+                1,
+                0,
+                "trace://driver/captured-with-blocker",
+                "operator intervention required",
+            )
+            captured_blocker_finalized = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                captured_blocker_dir,
+                "vscode",
+                "core-maintainer",
+                "ignored",
+                "",
+                7,
+                "o/r",
+                str(tmp / "gh-agent-captured-with-blocker.json"),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                str(run.ARTIFACT_ROOT),
+                str(captured_blocker_dir / "autonomous-marathon-stats.json"),
+                0.82,
+                25,
+                "pending",
+                24,
+                15,
+                45,
+                None,
+            )
+            check("captured live driver receipt with blocker stops before final gates",
+                  captured_blocker_finalized["autonomous_marathon_status"] == "autonomous_marathon_invalid"
+                  and captured_blocker_finalized["autonomous_driver_status"] == "captured-with-blockers"
+                  and captured_blocker_finalized["autonomous_driver_dispatch_status"] == "captured"
+                  and captured_blocker_finalized["autonomous_fix_status"] == "not_run"
+                  and captured_blocker_finalized["validation_issue_summary"] == "autonomous-driver-dispatch"
+                  and captured_blocker_finalized["stats_status"] == "not_run"
+                  and "blocker" in captured_blocker_finalized["autonomous_driver_summary"]
+                  and not run.autonomous_marathon_watchdog_path(captured_blocker_dir).exists(),
+                  failures)
+
             stale = run.autonomous_marathon(
                 catalog,
                 github_targets,
