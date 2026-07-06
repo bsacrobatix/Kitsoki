@@ -390,6 +390,118 @@ func TestGitopsIssueCloseWithoutCommentUsesNativeTicketProvider(t *testing.T) {
 	}
 }
 
+func TestGitopsIssueCloseoutCommandUsesNativeTicketProvider(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	runDir := t.TempDir()
+	findings := map[string]any{
+		"run_id": "run-1",
+		"items": []any{
+			map[string]any{
+				"id":            "finding-1",
+				"kind":          "issue",
+				"title":         "Done room should close tickets",
+				"summary":       "manual close-out should be story-owned",
+				"scenario":      "bugfix",
+				"severity":      "high",
+				"evidence_path": "trace.md",
+				"status":        "blocked",
+				"origin":        "observed",
+				"github_issue": map[string]any{
+					"url":    "https://github.com/o/r/issues/42",
+					"repo":   "o/r",
+					"number": "42",
+				},
+			},
+		},
+		"gh_agent": map[string]any{
+			"drained_jobs": []any{
+				map[string]any{
+					"origin_ref": "github:o/r/issue/42",
+					"job_id":     "job-42",
+					"state":      "done",
+					"run_url":    "https://agent.example/run/job-42",
+					"assets": []any{
+						map[string]any{"name": "fix-report.md", "url": "https://agent.example/run/job-42/assets/fix-report.md"},
+						map[string]any{"name": "independent-verify.md", "url": "https://agent.example/run/job-42/assets/independent-verify.md"},
+					},
+				},
+			},
+		},
+	}
+	if err := gitopsWriteJSONFile(filepath.Join(runDir, "findings.json"), findings); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+
+	var commentBody string
+	var closedState string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/o/r/issues/42/comments":
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode comment: %v", err)
+			}
+			commentBody, _ = payload["body"].(string)
+			writeJSON(w, map[string]any{"html_url": "https://github.com/o/r/issues/42#issuecomment-9"})
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/o/r/issues/42":
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode transition: %v", err)
+			}
+			closedState, _ = payload["state"].(string)
+			writeJSON(w, map[string]any{"state": closedState})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		t.Errorf("gitops issue-closeout must use native GitHub APIs, got exec: %s %s", name, strings.Join(args, " "))
+		return "", "", 1, nil
+	})
+	defer restoreExec()
+
+	cmd := gitopsCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{
+		"issue-closeout",
+		"--run-dir", runDir,
+		"--ticket-repo", "o/r",
+		"--json",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("issue-closeout: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out.String())
+	}
+	if got["issue_closeout_status"] != "closed" || intValue(got, "issue_closeout_count") != 1 {
+		t.Fatalf("closeout output = %+v", got)
+	}
+	if closedState != "closed" {
+		t.Fatalf("closed state = %q, want closed", closedState)
+	}
+	for _, want := range []string{"kitsoki-fixed-in", "job-42", "independent-verify.md", "https://agent.example/run/job-42"} {
+		if !strings.Contains(commentBody, want) {
+			t.Fatalf("comment body missing %q:\n%s", want, commentBody)
+		}
+	}
+
+	updated, err := gitopsReadJSONFile(filepath.Join(runDir, "findings.json"))
+	if err != nil {
+		t.Fatalf("read findings: %v", err)
+	}
+	issue := mapValue(gitopsFindingsItems(updated)[0], "github_issue")
+	if stringValue(issue, "state") != "closed" || stringValue(issue, "closeout_comment_url") == "" {
+		t.Fatalf("issue state not persisted: %+v", issue)
+	}
+}
+
 func TestGitopsIssueStateCacheUsesNativeTicketProvider(t *testing.T) {
 	t.Setenv("GH_TOKEN", "test-token")
 	root := t.TempDir()

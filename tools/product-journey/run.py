@@ -1649,6 +1649,8 @@ def validate_native_gitops_boundaries(issues: list[dict]) -> None:
         "gh issue close",
         "gh issue edit",
         "gh issue reopen",
+        "issue-comment",
+        "issue-transition",
         "issue_create",
         "issue_comment",
         "issue_transition",

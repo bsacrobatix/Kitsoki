@@ -462,6 +462,11 @@ validation gates are green, the same native gitops facade posts a
 GitHub issue, and writes `findings.issue_closeout` plus closed issue state back
 into `findings.json`; follow-up stats can then be derived from the run bundle
 instead of hand-maintained notes.
+If a completed gh-agent drain needs to be replayed without rerunning the whole
+autonomous fix gate, use
+`kitsoki gitops issue-closeout --run-dir <run_dir> --ticket-repo <owner/repo>`;
+it reads the persisted `gh_agent.drained_jobs` from `findings.json` and performs
+the fixed-in comment plus close through the same native ticket provider.
 For older filed issues or cross-run summaries whose current state is not already
 in `findings.json`, run the story intent
 `stats refresh_issue_state=true ticket_repo=<owner/repo>` or the CLI
