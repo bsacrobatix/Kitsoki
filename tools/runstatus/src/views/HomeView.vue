@@ -79,6 +79,23 @@
       </div>
     </section>
 
+    <!-- ── Kits (S5): a generic nav section for any installed kit's       -->
+    <!-- provides.ui entries flagged nav:true (kitLoader.ts) — this view   -->
+    <!-- has no idea which kits, if any, are installed. Empty (and hidden) -->
+    <!-- when none are, the common case today.                            -->
+    <section v-if="kitNavLinks.length > 0" class="home__section">
+      <h2 class="home__subtitle">Kits</h2>
+      <div class="home__cards">
+        <router-link
+          v-for="link in kitNavLinks"
+          :key="link.path"
+          class="home__btn home__btn--ghost"
+          data-testid="kit-nav-link"
+          :to="link.path"
+        >{{ link.title }}</router-link>
+      </div>
+    </section>
+
     <!-- ── Active sessions ─────────────────────────────────────────────── -->
     <section class="home__section">
       <h2 class="home__subtitle">Active sessions</h2>
@@ -190,6 +207,7 @@ import { LiveSource, type StoryHeader } from "../data/live-source.js";
 import { createDataSource } from "../data/source.js";
 import type { SessionHeader } from "../types.js";
 import { useTourStore } from "../stores/tour.js";
+import { kitNavLinks } from "../kits/kitLoader.js";
 
 // The home screen drives the session-agnostic lifecycle RPCs directly against
 // the live server. In a static snapshot artifact (file:// trace-review mode)
