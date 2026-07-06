@@ -278,6 +278,7 @@ world:
   validation_warnings: { type: int, default: 0 }
   validation_issue_summary: { type: string, default: "" }
   last_result:    { type: object, default: {} }
+  last_error:     { type: string, default: "" }
   status:         { type: string, default: "idle" }
 
 intents:

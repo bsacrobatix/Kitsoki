@@ -97,6 +97,8 @@ states:
       - prose: '{{ world.issue_state_summary|default:"Use refresh_issue_state=true on stats to refresh GitHub issue state through native kitsoki gitops." }}'
       - prose: '{{ world.stats_summary|default:"Use stats to derive filed/fixed/reopened/similar issue counts from run bundles and cached issue state." }}'
       - prose: '{{ world.review_backlog_summary|default:"Run review to see actionable review checks." }}'
+      - prose: '⚠ Action failed: {{ world.last_error }}'
+        when: "world.last_error != ''"
       - choice:
           mode: single
           prompt: "Actions"
@@ -188,7 +190,7 @@ states:
                 autonomous_driver_evidence_count: submitted.evidence_count
                 autonomous_driver_issue_count: submitted.issue_count
                 autonomous_driver_dispatch_trace: submitted.trace
-              on_error: run_created
+              on_error: driver_dispatch_failed
             - invoke: host.run
               id: record_autonomous_product_journey_driver_dispatch
               with:
