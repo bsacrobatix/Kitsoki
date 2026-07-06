@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/dynamicworkflow"
@@ -115,4 +116,95 @@ func TestWorkflowCreateResearchGoalWritesResearchManifest(t *testing.T) {
 	require.NotContains(t, manifest, "id: go-coverage")
 	require.NotContains(t, manifest, "Add focused deterministic Go tests")
 	require.True(t, strings.Contains(manifest, ".context/"), "research prompts should name .context outputs")
+}
+
+func TestWorkflowLaunchStartsGeneratedCoverageAndResearchWorkflows(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	cs := connectInProcess(ctx, t, srv)
+
+	cases := []struct {
+		name       string
+		goal       string
+		slug       string
+		wantLoaded string
+		wantFrame  string
+	}{
+		{
+			name:       "coverage",
+			goal:       "fan out glm-5.2 agents with the claude-synthetic harness to get Go, TypeScript/JavaScript, stories, and e2e coverage toward 80%",
+			slug:       "coverage-launch-e2e",
+			wantLoaded: "Loaded 6 item(s).",
+			wantFrame:  "measure-coverage",
+		},
+		{
+			name:       "research",
+			goal:       "research the different testing approaches in the repo with a dynamic workflow; inspect Go tests, TypeScript/JavaScript tests, story flow fixtures, Playwright/e2e tests, coverage gates, cassettes, and no-LLM policies",
+			slug:       "research-launch-e2e",
+			wantLoaded: "Loaded 5 item(s).",
+			wantFrame:  "research-scope",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			created := createWorkflowForTest(t, ctx, cs, tc.goal, tc.slug)
+			launch, err := callTool(ctx, cs, "workflow.launch", map[string]any{
+				"workflow_id": created.WorkflowID,
+			})
+			require.NoError(t, err)
+			require.False(t, launch.IsError, "workflow.launch errored: %s", contentText(launch))
+			var launched dynamicworkflow.Receipt
+			require.NoError(t, json.Unmarshal([]byte(contentText(launch)), &launched))
+			require.NotEmpty(t, launched.SessionHandle)
+
+			start, err := callTool(ctx, cs, "session.submit", map[string]any{
+				"handle": launched.SessionHandle,
+				"intent": "start",
+				"cols":   100,
+				"rows":   30,
+			})
+			require.NoError(t, err)
+			require.False(t, start.IsError, "session.submit start errored: %s", contentText(start))
+			var turn struct {
+				OK      bool `json:"ok"`
+				Outcome struct {
+					State string `json:"state"`
+				} `json:"outcome"`
+				Frame struct {
+					Text string `json:"text"`
+				} `json:"frame"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(contentText(start)), &turn))
+			require.True(t, turn.OK)
+			require.Equal(t, "load", turn.Outcome.State)
+			require.Contains(t, turn.Frame.Text, tc.wantLoaded)
+			require.NotContains(t, turn.Frame.Text, "must be repo-relative or under /tmp")
+
+			next, err := callTool(ctx, cs, "session.submit", map[string]any{
+				"handle": launched.SessionHandle,
+				"intent": "next_item",
+				"cols":   100,
+				"rows":   30,
+			})
+			require.NoError(t, err)
+			require.False(t, next.IsError, "session.submit next_item errored: %s", contentText(next))
+			require.Contains(t, contentText(next), tc.wantFrame)
+			require.NotContains(t, contentText(next), `"state":"needs_human"`)
+		})
+	}
+}
+
+func createWorkflowForTest(t *testing.T, ctx context.Context, cs *mcpsdk.ClientSession, goal, slug string) dynamicworkflow.Receipt {
+	t.Helper()
+	res, err := callTool(ctx, cs, "workflow.create", map[string]any{
+		"goal": goal,
+		"slug": slug,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "workflow.create errored: %s", contentText(res))
+	var receipt dynamicworkflow.Receipt
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &receipt))
+	require.True(t, receipt.Validation.OK)
+	return receipt
 }

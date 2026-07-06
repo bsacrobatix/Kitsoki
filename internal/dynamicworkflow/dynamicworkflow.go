@@ -115,11 +115,28 @@ type Manifest struct {
 
 // ManifestDefaults are copied onto each generated item.
 type ManifestDefaults struct {
-	Harness           string `yaml:"harness"`
-	Profile           string `yaml:"profile"`
-	Model             string `yaml:"model"`
-	TraceRoot         string `yaml:"trace_root"`
-	RequireTraceModel bool   `yaml:"require_trace_model,omitempty"`
+	Harness           string         `yaml:"harness"`
+	Profile           string         `yaml:"profile"`
+	Model             string         `yaml:"model"`
+	TraceRoot         string         `yaml:"trace_root"`
+	RequireGPT55      *bool          `yaml:"require_gpt55,omitempty"`
+	RequireTraceModel bool           `yaml:"require_trace_model,omitempty"`
+	HarnessLadder     *HarnessLadder `yaml:"harness_ladder,omitempty"`
+}
+
+// HarnessLadder is the punch-list policy shape for non-default live model
+// dispatch. It keeps generated GLM/synthetic workflows inside the story's
+// accepted policy instead of bypassing the GPT-5.5 live-work guard.
+type HarnessLadder struct {
+	Models  []HarnessLadderModel `yaml:"models"`
+	Efforts []string             `yaml:"efforts,omitempty"`
+}
+
+// HarnessLadderModel is one selectable worker profile in a ladder manifest.
+type HarnessLadderModel struct {
+	Backend  string `yaml:"backend,omitempty"`
+	Provider string `yaml:"provider,omitempty"`
+	Model    string `yaml:"model"`
 }
 
 // ManifestItem is one row in the generated punch-list manifest.
@@ -128,6 +145,11 @@ type ManifestItem struct {
 	Title                string           `yaml:"title"`
 	Priority             int              `yaml:"priority"`
 	Story                string           `yaml:"story"`
+	Harness              string           `yaml:"harness,omitempty"`
+	Profile              string           `yaml:"profile,omitempty"`
+	Model                string           `yaml:"model,omitempty"`
+	RequireGPT55         *bool            `yaml:"require_gpt55,omitempty"`
+	HarnessLadder        *HarnessLadder   `yaml:"harness_ladder,omitempty"`
 	Mode                 string           `yaml:"mode"`
 	Prompt               string           `yaml:"prompt"`
 	ImplementationStory  string           `yaml:"implementation_story,omitempty"`
@@ -625,8 +647,24 @@ func inferManifestDefaults(goal, traceRoot string) ManifestDefaults {
 		if defaults.Profile == "codex-native" {
 			defaults.Profile = "synthetic-claude"
 		}
+		defaults.Harness = "ladder"
+		defaults.RequireTraceModel = false
+		defaults.HarnessLadder = &HarnessLadder{
+			Models: []HarnessLadderModel{
+				{Backend: ladderBackend(defaults.Profile), Provider: defaults.Profile, Model: defaults.Model},
+				{Backend: "codex", Provider: "codex-native", Model: "gpt-5.5"},
+			},
+			Efforts: []string{"low", "medium", "high", "xhigh", "max"},
+		}
 	}
 	return defaults
+}
+
+func ladderBackend(profile string) string {
+	if strings.Contains(strings.ToLower(profile), "codex") {
+		return "codex"
+	}
+	return "claude"
 }
 
 func isCoverageFanoutGoal(goal string) bool {
@@ -744,6 +782,7 @@ func validateManifest(root string, manifest Manifest, appPath string) []string {
 		if len(item.Verify) == 0 {
 			errs = append(errs, fmt.Sprintf("%s.verify must not be empty", prefix))
 		}
+		errs = append(errs, validatePunchListRuntimePolicy(prefix, manifest.Defaults, item)...)
 		for j, check := range item.Verify {
 			checkPrefix := fmt.Sprintf("%s.verify[%d]", prefix, j)
 			switch check.Kind {
@@ -762,6 +801,78 @@ func validateManifest(root string, manifest Manifest, appPath string) []string {
 	}
 	_ = appPath
 	return errs
+}
+
+func validatePunchListRuntimePolicy(prefix string, defaults ManifestDefaults, item ManifestItem) []string {
+	var errs []string
+	harness := firstNonEmpty(item.Harness, defaults.Harness, "live")
+	profile := firstNonEmpty(item.Profile, defaults.Profile, "codex-native")
+	model := firstNonEmpty(item.Model, defaults.Model, "gpt-5.5")
+	requiresGPT55 := boolDefault(defaults.RequireGPT55, true)
+	if item.RequireGPT55 != nil {
+		requiresGPT55 = *item.RequireGPT55
+	}
+	liveWork := (harness == "live" || harness == "ladder") && (item.ImplementationStory != "" || item.Mode == "drive")
+	if !liveWork {
+		return errs
+	}
+	switch harness {
+	case "live":
+		if requiresGPT55 && profile != "codex-native" {
+			errs = append(errs, fmt.Sprintf("%s: live work must use profile codex-native or harness: ladder", prefix))
+		}
+		if requiresGPT55 && model != "gpt-5.5" {
+			errs = append(errs, fmt.Sprintf("%s: live work must use model gpt-5.5 or harness: ladder", prefix))
+		}
+	case "ladder":
+		ladder := defaults.HarnessLadder
+		if item.HarnessLadder != nil {
+			ladder = item.HarnessLadder
+		}
+		errs = append(errs, validateHarnessLadder(prefix, ladder)...)
+	}
+	return errs
+}
+
+func validateHarnessLadder(prefix string, ladder *HarnessLadder) []string {
+	var errs []string
+	if ladder == nil || len(ladder.Models) == 0 {
+		return append(errs, fmt.Sprintf("%s: harness_ladder.models must be a non-empty list", prefix))
+	}
+	for i, model := range ladder.Models {
+		if strings.TrimSpace(model.Model) == "" {
+			errs = append(errs, fmt.Sprintf("%s: harness_ladder.models[%d].model is required", prefix, i))
+		}
+		switch model.Backend {
+		case "", "claude", "codex", "copilot":
+		default:
+			errs = append(errs, fmt.Sprintf("%s: harness_ladder.models[%d].backend is invalid: %s", prefix, i, model.Backend))
+		}
+	}
+	for _, effort := range ladder.Efforts {
+		switch effort {
+		case "low", "medium", "high", "xhigh", "max":
+		default:
+			errs = append(errs, fmt.Sprintf("%s: harness_ladder.efforts contains invalid value: %s", prefix, effort))
+		}
+	}
+	return errs
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func boolDefault(value *bool, fallback bool) bool {
+	if value == nil {
+		return fallback
+	}
+	return *value
 }
 
 func readManifest(path string) (Manifest, error) {

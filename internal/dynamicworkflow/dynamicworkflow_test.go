@@ -99,6 +99,13 @@ func TestServiceCreatePreservesSyntheticGLMCoverageFanout(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "synthetic-claude", manifest.Defaults.Profile)
 	require.Equal(t, "hf:zai-org/GLM-5.2", manifest.Defaults.Model)
+	require.Equal(t, "ladder", manifest.Defaults.Harness)
+	require.False(t, manifest.Defaults.RequireTraceModel)
+	require.NotNil(t, manifest.Defaults.HarnessLadder)
+	require.Equal(t, []HarnessLadderModel{
+		{Backend: "claude", Provider: "synthetic-claude", Model: "hf:zai-org/GLM-5.2"},
+		{Backend: "codex", Provider: "codex-native", Model: "gpt-5.5"},
+	}, manifest.Defaults.HarnessLadder.Models)
 	require.Equal(t, ".artifacts/dynamic-workflows-test/TestServiceCreatePreservesSyntheticGLMCoverageFanout/dwf_20260706T053000Z_glm-coverage/traces", manifest.Defaults.TraceRoot)
 
 	ids := make([]string, 0, len(manifest.Items))
@@ -163,6 +170,36 @@ func TestServiceCreateResearchTestingApproachesFanout(t *testing.T) {
 		"story-flow-research",
 		"research-synthesis",
 	}, ids)
+}
+
+func TestValidateManifestRejectsRuntimeLiveModelPolicyMismatch(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	require.NoError(t, err)
+	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
+	require.NoError(t, err)
+
+	errs := validateManifest(repoRoot, Manifest{
+		Version: ManifestVersion,
+		Defaults: ManifestDefaults{
+			Harness:   "live",
+			Profile:   "synthetic-claude",
+			Model:     "hf:zai-org/GLM-5.2",
+			TraceRoot: ".artifacts/test/traces",
+		},
+		Items: []ManifestItem{
+			{
+				ID:    "bad-live-model",
+				Title: "Bad live model",
+				Story: "stories/punch-list/app.yaml",
+				Mode:  "drive",
+				Verify: []ManifestVerify{
+					{Kind: "story_validate", Story: "stories/punch-list/app.yaml"},
+				},
+			},
+		},
+	}, filepath.Join(repoRoot, DefaultTemplateStoryDir))
+	require.Contains(t, strings.Join(errs, "\n"), "live work must use profile codex-native or harness: ladder")
+	require.Contains(t, strings.Join(errs, "\n"), "live work must use model gpt-5.5 or harness: ladder")
 }
 
 func TestServiceExportBlocksBaseStoryWithoutApproval(t *testing.T) {
