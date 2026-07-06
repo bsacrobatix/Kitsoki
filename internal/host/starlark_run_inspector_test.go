@@ -128,6 +128,69 @@ func TestStarlarkRunDefaultInspector_AppDirWidensToRepoRoot(t *testing.T) {
 	}
 }
 
+// TestStarlarkRunDefaultInspector_DotWorkdirFallsThrough locks the fix for
+// the prd-design scenario-qa live bug: dev-story projects an unbound
+// world.workdir into its nested instance's workdir as the bare relative
+// string "." (`workdir: "{{ world.workdir == '' ? '.' : world.workdir }}"`),
+// not "". Treating "." as an already-resolved root (as the pre-fix code did)
+// skipped every fallback below and rooted the inspector at
+// NewProductionInspector(".")'s process cwd — the wrong repo entirely for a
+// nested/driven session — so prd_publish.star's docs/prd/ write silently
+// landed nowhere and failed closed.
+//
+// dirA is the per-session prompt renderer's real story root; dirB stands in
+// for the driving process's own cwd. Only dirA holds the marker, so falling
+// through to cwd (as "." being treated as resolved would cause) reports
+// false and fails the test.
+func TestStarlarkRunDefaultInspector_DotWorkdirFallsThrough(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	const marker = "marker.txt"
+	if err := os.WriteFile(filepath.Join(dirA, marker), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	script := filepath.Join(dirA, "check.star")
+	if err := os.WriteFile(script, []byte(
+		"def main(ctx):\n    return {\"found\": ctx.fs.exists(\""+marker+"\")}\n",
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script+".yaml", []byte(
+		"outputs:\n  found: { type: bool }\n",
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dirB); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origCwd) })
+
+	pr, err := render.NewPromptRenderer(render.PromptPath{Story: dirA}, true)
+	if err != nil {
+		t.Fatalf("NewPromptRenderer: %v", err)
+	}
+	ctx := WithWorldSnapshot(context.Background(), map[string]any{"workdir": "."})
+	ctx = WithPromptRenderer(ctx, pr)
+
+	res, err := StarlarkRunHandler(ctx, map[string]any{"script": script})
+	if err != nil {
+		t.Fatalf("StarlarkRunHandler: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected domain error: %s", res.Error)
+	}
+	if got := res.Data["found"]; got != true {
+		t.Fatalf("ctx.fs.exists(%q) = %v, want true (inspector should treat world.workdir=\".\" as unresolved and fall through to the prompt renderer's dir %s, not process cwd=%s)", marker, got, dirA, dirB)
+	}
+}
+
 // TestStarlarkRunDefaultInspector_PromptRendererBeatsContaminatedAppDir locks
 // the fix for the scenario-qa live bug: KITSOKI_APP_DIR is a single
 // process-global env var (session_runtime.go's publishAppDir), so a SECOND
