@@ -967,3 +967,40 @@ func TestGitHubTicket_UnknownOpRejected(t *testing.T) {
 		t.Fatal("expected domain error for unknown op")
 	}
 }
+
+func TestGitHubTicket_ResolveRemoteRepo(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("q")
+		if !strings.Contains(q, "repo:bsacrobatix/Kitsoki") {
+			t.Fatalf("expected query to resolve remote to repo:bsacrobatix/Kitsoki, query was: %q", q)
+		}
+		writeJSON(w, map[string]any{
+			"items": []map[string]any{},
+		})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, dir, name string, args ...string) (string, string, int, error) {
+		if name == "git" && len(args) == 3 && args[0] == "remote" && args[1] == "get-url" && args[2] == "origin" {
+			return "https://github.com/bsacrobatix/Kitsoki.git\n", "", 0, nil
+		}
+		return "", "unknown command", 1, nil
+	})
+	defer restoreExec()
+
+	res, err := host.GitHubTicketHandler(context.Background(), map[string]any{
+		"op":    "search",
+		"query": "test",
+		"repo":  "origin",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected domain error: %s", res.Error)
+	}
+}
+
