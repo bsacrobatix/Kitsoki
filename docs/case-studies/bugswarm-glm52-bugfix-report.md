@@ -31,7 +31,7 @@ Inputs:
 - OSS oracle corpus: `tools/arena/corpus/cost-bench.manifest.yaml`.
 - Source catalog: `tools/arena/corpus/sources.yaml`.
 - OSS arena GLM rollup: `not supplied`.
-- BugSwarm source: `not supplied`.
+- BugSwarm source: `tools/arena/corpus/bugswarm.seed.yaml`.
 - BugSwarm verification report: `not supplied`.
 - BugSwarm arena rollup: `not supplied`.
 
@@ -49,7 +49,7 @@ Primary metrics:
 | corpus | tasks | repositories | verified/imported status |
 |---|---:|---:|---|
 | OSS oracle corpus | 26 | 12 | frozen and locally validated |
-| BugSwarm | 0 | n/a | adapter-ready; converted verified tasks: 0; verification report: 0/0 (none) |
+| BugSwarm | 1 | n/a | adapter-ready; converted verified tasks: 0; verification report: 0/0 (none) |
 
 The OSS oracle corpus remains the active internal benchmark source. It
 covers the pre-registered public OSS targets plus existing hidden-oracle
@@ -100,8 +100,9 @@ BugSwarm source contract:
 ## Evidence Gaps
 
 - No committed raw-prompt GLM-5.2 result exists for the OSS oracle corpus.
-- No BugSwarm artifact source has been imported and RED/GREEN verified yet.
-- No committed GLM-5.2 Kitsoki or raw-prompt result exists for BugSwarm.
+- BugSwarm artifacts have been imported but none are verified RED/GREEN yet.
+- No BugSwarm verification report is attached to this generated report.
+- Some imported BugSwarm tasks are missing committed GLM-5.2 Kitsoki or raw-prompt result cells.
 
 ## Evidence Closure Packet
 
@@ -111,8 +112,8 @@ Generate the offline execution packet for the pending headline cells with:
 python3 tools/arena/scripts/glm52_gap_plan.py \
   --report-json docs/case-studies/bugswarm-glm52-bugfix-report.data.json \
   --json-out .artifacts/arena/glm52-gap-plan.json \
-  --markdown-out .artifacts/arena/glm52-gap-plan.md
-  # pass --bugswarm-source <execute-verified BugSwarm YAML> after importing artifacts
+  --markdown-out .artifacts/arena/glm52-gap-plan.md \
+  --bugswarm-source tools/arena/corpus/bugswarm.seed.yaml
 ```
 
 The packet emits no-spend `arena.py plan` / arming commands and, only
@@ -122,13 +123,13 @@ after a spec passes audit, explicit `ARENA_PAIRED_TASK_ENABLE_CODEX=1
 | corpus | status | pending | next |
 |---|---|---:|---|
 | oss-oracle | `ready-to-plan` | 1 | Run glm52_gap_plan.py; it can generate an OSS paired-task spec from the frozen corpus manifest. |
-| bugswarm | `needs-import` | 2 | Import BugSwarm artifact metadata, execute RED/GREEN verification, then pass --bugswarm-source to glm52_gap_plan.py. |
+| bugswarm | `needs-execute-verification` | 2 | Run bugswarm_verify_source.py --execute and apply the verification report before scheduling live GLM-5.2 cells. |
 
 ## Interpretation
 
 - Committed GLM-5.2 Kitsoki evidence contains 1 attempted OSS oracle cell(s), 2890980 total tokens, and no solved cell yet.
 - The GLM-5.2 raw-prompt arm remains pending; the report must not compute a token ratio from missing data.
-- BugSwarm is adapter-ready in the source catalog, but the committed report has no imported artifact subset yet.
+- BugSwarm is reusable as an imported source with 1 task(s) in the supplied source file.
 
 Bottom line: the committed GLM-5.2 evidence is not yet sufficient to
 claim Kitsoki beats or loses to raw prompts. The report is useful now as

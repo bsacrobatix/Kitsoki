@@ -27,6 +27,7 @@ with tempfile.TemporaryDirectory() as tmp:
     packet_json = out / "packet.json"
     packet_md = out / "packet.md"
     oss_spec = out / "oss-glm52-live.yaml"
+    bugswarm_source = out / "arena-source.verified.yaml"
     oss_spec.write_text(
         "\n".join([
             "job_type: paired-task",
@@ -41,6 +42,23 @@ with tempfile.TemporaryDirectory() as tmp:
             "axes:",
             "  task:",
             "    - query-string-qs1-bugfix-test-repair",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    bugswarm_source.write_text(
+        "\n".join([
+            "kind: arena_bugswarm_source",
+            "version: 1",
+            "source: bugswarm",
+            "tasks:",
+            "  - id: bugswarm-square-okio-140452393",
+            "    image_tag: square-okio-140452393",
+            "    repo_label: square/okio",
+            "    verified_red: true",
+            "    verified_green: true",
+            "    oracle:",
+            "      kind: bugswarm_fail_pass_pair",
             "",
         ]),
         encoding="utf-8",
@@ -87,7 +105,7 @@ with tempfile.TemporaryDirectory() as tmp:
             "--oss-spec",
             str(oss_spec),
             "--bugswarm-source",
-            ".artifacts/bugswarm/arena-source.verified.yaml",
+            str(bugswarm_source),
         ],
         cwd=REPO_ROOT,
         text=True,
@@ -106,6 +124,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("oss command uses supplied spec", str(oss_spec) in "\n".join(actions["oss-oracle"]["commands"]), True)
     check("oss raw prompt live command present", "--live" in "\n".join(actions["oss-oracle"]["commands"]), True)
     check("bugswarm source generates ready live spec", actions["bugswarm"]["status"], "ready")
+    check("bugswarm source audit ok", actions["bugswarm"]["source_audit"]["ok"], True)
     check("bugswarm spec generation command present", "bugswarm_to_arena_spec.py" in actions["bugswarm"]["commands"][0], True)
     check("generated bugswarm spec uses kitsoki backend", "--kitsoki-backend codex" in actions["bugswarm"]["commands"][0], True)
     check("generated bugswarm spec uses raw backend", "--raw-backend claude" in actions["bugswarm"]["commands"][0], True)
@@ -115,6 +134,66 @@ with tempfile.TemporaryDirectory() as tmp:
     md = packet_md.read_text(encoding="utf-8")
     check("markdown names report arg", "--bugswarm-arena-rollup" in md, True)
     check("markdown includes no-llm plan command", "arena.py run --spec" in md, True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp)
+    report = out / "report.json"
+    packet_json = out / "packet.json"
+    packet_md = out / "packet.md"
+    bugswarm_source = out / "arena-source.unverified.yaml"
+    bugswarm_source.write_text(
+        "\n".join([
+            "kind: arena_bugswarm_source",
+            "version: 1",
+            "source: bugswarm",
+            "tasks:",
+            "  - id: bugswarm-square-okio-140452393",
+            "    image_tag: square-okio-140452393",
+            "    repo_label: square/okio",
+            "    verified_red: false",
+            "    verified_green: false",
+            "    oracle:",
+            "      kind: bugswarm_fail_pass_pair",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    report.write_text(json.dumps({
+        "required_glm52_matrix": [
+            {
+                "corpus": "bugswarm",
+                "task": "bugswarm-square-okio-140452393",
+                "treatment": "raw-prompt",
+                "quality": "pending",
+            }
+        ]
+    }), encoding="utf-8")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--report-json",
+            str(report),
+            "--json-out",
+            str(packet_json),
+            "--markdown-out",
+            str(packet_md),
+            "--bugswarm-source",
+            str(bugswarm_source),
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    check("planner with unverified bugswarm source exits zero", proc.returncode, 0)
+    packet = json.loads(packet_json.read_text(encoding="utf-8"))
+    actions = {action["corpus"]: action for action in packet["actions"]}
+    check("unverified bugswarm source needs execute verification", actions["bugswarm"]["status"], "needs-execute-verification")
+    check("unverified bugswarm source audit fails", actions["bugswarm"]["source_audit"]["ok"], False)
+    check("unverified bugswarm source has no live command", "--live" in "\n".join(actions["bugswarm"]["commands"]), False)
+    check("unverified bugswarm source emits verify command", "bugswarm_verify_source.py" in actions["bugswarm"]["commands"][0], True)
 
 with tempfile.TemporaryDirectory() as tmp:
     out = Path(tmp)

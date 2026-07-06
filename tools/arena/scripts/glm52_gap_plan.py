@@ -150,6 +150,26 @@ def corpus_action(
             action["spec"] = spec
             return action
         if corpus == "bugswarm" and source:
+            source_audit = audit_bugswarm_source(source, tasks=tasks)
+            action["source_audit"] = source_audit
+            if not source_audit["ok"]:
+                action["status"] = "needs-execute-verification"
+                action["prerequisites"].extend(source_audit["problems"])
+                verification = ".artifacts/bugswarm/verification.json"
+                verified_source = ".artifacts/bugswarm/arena-source.verified.yaml"
+                action["commands"].extend([
+                    f"python3 tools/arena/scripts/bugswarm_verify_source.py --source {source} --out {verification} --execute",
+                    (
+                        "python3 tools/arena/scripts/bugswarm_apply_verification.py "
+                        f"--source {source} --verification {verification} --out {verified_source}"
+                    ),
+                    (
+                        "python3 tools/arena/scripts/glm52_gap_plan.py "
+                        f"--report-json {report_json} --json-out .artifacts/arena/glm52-gap-plan.json "
+                        f"--markdown-out .artifacts/arena/glm52-gap-plan.md --bugswarm-source {verified_source}"
+                    ),
+                ])
+                return action
             spec = ".artifacts/bugswarm/bugswarm-glm52.yaml"
             action["prerequisites"].append(
                 "Generate and inspect the BugSwarm paired-task spec from the execute-verified source before running --live."
@@ -186,6 +206,60 @@ def corpus_action(
         f"ARENA_PAIRED_TASK_ENABLE_CODEX=1 python3 tools/arena/arena.py run --spec {spec} --out {out_dir} --live",
     ])
     return action
+
+
+def audit_bugswarm_source(source: str, *, tasks: list[str]) -> dict[str, Any]:
+    if yaml is None:
+        return {
+            "ok": False,
+            "problems": ["Cannot inspect BugSwarm source because PyYAML is not installed."],
+        }
+    path = Path(source)
+    if not path.exists():
+        return {
+            "ok": False,
+            "problems": [f"BugSwarm source does not exist: {source}"],
+        }
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001 - report parse failure in the packet.
+        return {
+            "ok": False,
+            "problems": [f"Cannot parse BugSwarm source {source}: {exc}"],
+        }
+    if not isinstance(data, dict):
+        return {"ok": False, "problems": [f"BugSwarm source is not a mapping: {source}"]}
+    if data.get("kind") != "arena_bugswarm_source":
+        return {"ok": False, "problems": [f"BugSwarm source kind must be arena_bugswarm_source, got {data.get('kind')!r}."]}
+    source_tasks = {
+        str(task.get("id") or ""): task
+        for task in data.get("tasks", [])
+        if isinstance(task, dict) and task.get("id")
+    }
+    missing = sorted(set(tasks) - set(source_tasks))
+    problems: list[str] = []
+    if missing:
+        problems.append(f"BugSwarm source is missing pending task(s): {', '.join(missing)}.")
+    unverified = [
+        task_id
+        for task_id in tasks
+        if task_id in source_tasks and not (source_tasks[task_id].get("verified_red") is True and source_tasks[task_id].get("verified_green") is True)
+    ]
+    if unverified:
+        problems.append(
+            "BugSwarm source has pending task(s) without execute RED/GREEN verification: "
+            + ", ".join(sorted(unverified))
+            + "."
+        )
+    return {
+        "ok": not problems,
+        "problems": problems,
+        "verified_tasks": sorted(
+            task_id
+            for task_id, task in source_tasks.items()
+            if task.get("verified_red") is True and task.get("verified_green") is True
+        ),
+    }
 
 
 def audit_spec(spec: str, *, tasks: list[str], treatments: list[str]) -> dict[str, Any]:
