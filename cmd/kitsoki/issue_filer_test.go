@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"kitsoki/internal/host"
@@ -44,6 +47,27 @@ func TestIssueFilerUsesNativeGitHubAPI(t *testing.T) {
 	}
 	if res.URL != "https://github.com/o/r/issues/123" || res.Number != 123 {
 		t.Fatalf("result = %+v", res)
+	}
+}
+
+func TestIssueCreateDocsDescribeNativeFiler(t *testing.T) {
+	docPath := filepath.Join("..", "..", "docs", "architecture", "mcp-studio.md")
+	data, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", docPath, err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "production: native `host.gh.ticket` / GitHub REST API") {
+		t.Fatalf("issue.create docs must describe the native production filer")
+	}
+	for _, stale := range []string{
+		"prod: `gh`",
+		"production: `gh`",
+		"shells to `gh issue create`",
+	} {
+		if strings.Contains(text, stale) {
+			t.Fatalf("issue.create docs still contain stale GitHub CLI wording %q", stale)
+		}
 	}
 }
 

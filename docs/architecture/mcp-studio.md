@@ -417,7 +417,7 @@ server-side. ([`issue_tools.go`](../../internal/mcp/studio/issue_tools.go).)
 
 | Tool | Shape | Wraps |
 |---|---|---|
-| `issue.create` | `{title, body?, labels?, repo?, handle?, include_trace?, trace_limit?, include_inspect?, include_visual_recordings?, assets?} → {url, number, labels[], assets[]}` | render assets → `.artifacts`, bundle a handle's trace/inspect and stopped visual recordings, then the injectable `IssueFiler` (prod: `gh`) |
+| `issue.create` | `{title, body?, labels?, repo?, handle?, include_trace?, trace_limit?, include_inspect?, include_visual_recordings?, assets?} → {url, number, labels[], assets[]}` | render assets → `.artifacts`, bundle a handle's trace/inspect and stopped visual recordings, then the injectable `IssueFiler` (production: native `host.gh.ticket` / GitHub REST API) |
 
 Three things happen server-side so the agent never handles bytes:
 
