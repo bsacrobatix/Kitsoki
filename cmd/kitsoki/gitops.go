@@ -902,14 +902,19 @@ func gitopsAutonomousFixPreflightInvalidBase(opts gitopsAutonomousFixOptions, ru
 }
 
 func gitopsGHAgentGateOK(result map[string]any) bool {
+	enqueued := intValue(result, "gh_agent_enqueued_count")
 	return stringValue(result, "gh_agent_enqueue_status") == "queued" &&
-		intValue(result, "gh_agent_enqueued_count") > 0 &&
+		enqueued > 0 &&
 		stringValue(result, "gh_agent_drain_status") == "drained" &&
 		intValue(result, "gh_agent_failed_count") == 0 &&
 		intValue(result, "gh_agent_active_count") == 0 &&
-		intValue(result, "gh_agent_done_count") >= intValue(result, "gh_agent_enqueued_count") &&
+		intValue(result, "gh_agent_done_count") >= enqueued &&
+		intValue(result, "gh_agent_fix_evidence_count") >= enqueued &&
+		intValue(result, "gh_agent_triage_evidence_count") >= enqueued &&
+		intValue(result, "gh_agent_independent_verify_count") >= enqueued &&
 		intValue(result, "gh_agent_missing_evidence_count") == 0 &&
 		intValue(result, "gh_agent_missing_triage_count") == 0 &&
+		intValue(result, "gh_agent_missing_verify_count") == 0 &&
 		intValue(result, "gh_agent_missing_run_url_count") == 0
 }
 
