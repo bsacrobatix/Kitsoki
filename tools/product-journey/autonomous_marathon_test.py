@@ -441,6 +441,113 @@ def main() -> int:
                   and Path(finalized["prd_design_intake_path"]).exists(),
                   failures)
 
+            no_issue = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                None,
+                "vscode",
+                "core-maintainer",
+                "autonomous-marathon-no-issue",
+                "bugfix",
+                7,
+                "o/r",
+                "",
+                "stories/bugfix",
+                healthy_url,
+                "",
+                "",
+                "",
+                "none",
+                "",
+                "",
+                "",
+                0.82,
+                25,
+                "pending",
+                24,
+                15,
+                45,
+                None,
+            )
+            no_issue_dir = Path(no_issue["run_dir"])
+            no_issue_run_json = run.read_json(no_issue_dir / "run.json")
+            no_issue_scenario = no_issue_run_json["scenarios"][0]["id"]
+            filing_test.attach_bugfix_proof(no_issue_dir, no_issue_scenario)
+            run.record_driver_event(
+                no_issue_dir,
+                no_issue_scenario,
+                "replay",
+                "captured",
+                "Autonomous marathon test replay captured proof without a credible issue.",
+                "session.open,session.trace,render.tui,visual.observe",
+                str(no_issue_dir / "test-evidence" / "trace-replay.md"),
+                "",
+                None,
+            )
+            run.record_finding(
+                no_issue_dir,
+                "strength",
+                "Autonomous marathon can complete without issue filing",
+                "Some persona runs produce reviewable proof and no credible bug to file.",
+                no_issue_scenario,
+                "low",
+                str(no_issue_dir / "test-evidence" / "oracle_result.md"),
+                "observed",
+                None,
+            )
+            run.record_finding(
+                no_issue_dir,
+                "weakness",
+                "No-issue marathon still routes design feedback",
+                "Observed weaknesses should route to PRD/design while issue filing remains not required.",
+                no_issue_scenario,
+                "medium",
+                str(no_issue_dir / "driver-plan.md"),
+                "open",
+                None,
+            )
+            no_issue_finalized = run.autonomous_marathon(
+                catalog,
+                github_targets,
+                personas,
+                scenarios,
+                no_issue_dir,
+                "vscode",
+                "core-maintainer",
+                "ignored",
+                "",
+                7,
+                "o/r",
+                str(tmp / "gh-agent-no-issue.json"),
+                "stories/bugfix",
+                "https://agent.example",
+                "",
+                "",
+                "",
+                "none",
+                "",
+                str(run.ARTIFACT_ROOT),
+                str(no_issue_dir / "autonomous-marathon-stats.json"),
+                0.82,
+                25,
+                "pending",
+                24,
+                15,
+                45,
+                None,
+            )
+            check("no-issue marathon reports final review and validation gates",
+                  no_issue_finalized["autonomous_marathon_status"] == "autonomous_marathon_valid"
+                  and no_issue_finalized["autonomous_fix_status"] == "not_required"
+                  and no_issue_finalized["review_status"] == "ready"
+                  and no_issue_finalized["validation_status"] == "valid"
+                  and no_issue_finalized["autonomous_gate_summary"] == "filing=not_required, gh_agent=not_required, independent_verify=not_required, review=pass, validation=pass"
+                  and no_issue_finalized["stats_gate_status"] == "pass"
+                  and no_issue_finalized["stats_current_run_scanned"] == "yes",
+                  failures)
+
             failed_driver = run.autonomous_marathon(
                 catalog,
                 github_targets,
