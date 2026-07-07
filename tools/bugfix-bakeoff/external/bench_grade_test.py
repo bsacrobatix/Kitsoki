@@ -131,7 +131,7 @@ def test_resolve_repo_dir_accepts_meta_repo_subdir_or_standalone_checkout():
             "project": {
                 "id": "gears-rust",
                 "local_only": True,
-                "repo_envs": ["GEARS_RUST_REPO", "CYBER_REPO"],
+                "repo_envs": ["GEARS_RUST_REPO", "GEARS_RUST_META_REPO"],
                 "repo_subdir": "src/cyberfabric/gears-rust",
             },
             "bugs": [{
@@ -172,7 +172,7 @@ def test_oracle_capsule_catalog_has_the_promoted_ten():
     assert {"query-string/qs1", "gears-rust/bug1", "kitsoki/bug9"} <= ids
     gears = next(item for item in capsules if item["id"] == "gears-rust/bug1")
     assert gears["repo_modes"] == ["single-repo", "meta-repo"]
-    assert gears["repo_envs"][:2] == ["GEARS_RUST_REPO", "CYBER_REPO"]
+    assert gears["repo_envs"][:2] == ["GEARS_RUST_REPO", "GEARS_RUST_META_REPO"]
     assert gears["green_red_green"][1].startswith("RED:")
 
 

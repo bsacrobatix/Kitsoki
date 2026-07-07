@@ -56,7 +56,7 @@ lives inside a meta checkout, also set:
 
 ```yaml
 project:
-  repo_envs: [PROJECT_REPO, CYBER_REPO]
+  repo_envs: [PROJECT_REPO, PROJECT_META_REPO]
   repo_subdir: src/path/to/project
 ```
 

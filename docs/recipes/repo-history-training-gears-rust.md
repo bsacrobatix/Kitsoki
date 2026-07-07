@@ -42,8 +42,8 @@ GEARS_RUST_REPO=/Users/brad/code/gears-rust
 Or start from an initialized cyber-repo meta checkout:
 
 ```sh
-CYBER_REPO=/Users/brad/code/cyber-repo
-git -C "$CYBER_REPO" submodule update --init src/cyberfabric/gears-rust
+GEARS_RUST_META_REPO=/Users/brad/code/cyber-repo
+git -C "$GEARS_RUST_META_REPO" submodule update --init src/cyberfabric/gears-rust
 ```
 
 The manifest declares `repo_subdir: src/cyberfabric/gears-rust`, so every

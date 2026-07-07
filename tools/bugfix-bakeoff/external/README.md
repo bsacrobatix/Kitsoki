@@ -49,10 +49,10 @@ make oracle-capsules
 ```
 
 The current promoted set is 10 capsules: 3 `query-string`, 4 `gears-rust`, and
-3 `kitsoki`. `gears-rust` declares both `GEARS_RUST_REPO` and `CYBER_REPO` plus
-`repo_subdir: src/cyberfabric/gears-rust`, so the same manifest can run against
-a standalone checkout or an initialized `~/code/cyber-repo` meta checkout whose
-submodule history contains the benchmark baseline/fix commits.
+3 `kitsoki`. `gears-rust` declares both `GEARS_RUST_REPO` and
+`GEARS_RUST_META_REPO` plus `repo_subdir: src/cyberfabric/gears-rust`, so the
+same manifest can run against a standalone checkout or an initialized meta
+checkout whose submodule history contains the benchmark baseline/fix commits.
 
 ### Polyglot repos (a JS package not at the repo root)
 
