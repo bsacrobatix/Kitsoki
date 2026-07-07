@@ -31,6 +31,8 @@ states:
           security_notes: security_notes
         once: true
         on_error: failed
+      - set:
+          status: "planned"
     view:
       extends: "base"
       blocks:
@@ -56,6 +58,10 @@ states:
           - heading: "Actions"
           - list:
               items:
+                - label: "plan"
+                  hint: "generate or regenerate the setup plan"
+                - label: "accept"
+                  hint: "mark ready after the validation probes pass"
                 - label: "validated"
                   hint: "mark ready after the validation probes pass"
                 - label: "configure operator_user=<name> ..."
@@ -68,7 +74,76 @@ states:
         footer:
           - prose: "The story prints commands for review. It does not create users, edit sudoers, or run backend CLIs."
     on:
+      accept:
+        - when: "world.setup_summary == ''"
+          target: planned
+          effects:
+            - invoke: host.starlark.run
+              id: plan_run_as_user_setup_accept
+              with:
+                script: scripts/plan_setup.star
+                inputs:
+                  platform: "{{ world.platform }}"
+                  operator_user: "{{ world.operator_user }}"
+                  agent_user: "{{ world.agent_user }}"
+                  group_name: "{{ world.group_name }}"
+                  capsule_root: "{{ world.capsule_root }}"
+                  wrapper_bin: "{{ world.wrapper_bin }}"
+                  protected_root: "{{ world.protected_root }}"
+                  codex_bin: "{{ world.codex_bin }}"
+                  claude_bin: "{{ world.claude_bin }}"
+                  sample_capsule: "{{ world.sample_capsule }}"
+              bind:
+                setup_summary: setup_summary
+                config_snippet: config_snippet
+                account_steps: account_steps
+                group_commands: group_commands
+                wrapper_commands: wrapper_commands
+                sudoers_snippet: sudoers_snippet
+                assignment_commands: assignment_commands
+                validation_commands: validation_commands
+                receipt_markdown: receipt_markdown
+                security_notes: security_notes
+              on_error: failed
+            - set:
+                status: "planned"
+        - target: ready
+          effects:
+            - set:
+                status: "validated"
       validated:
+        - when: "world.setup_summary == ''"
+          target: planned
+          effects:
+            - invoke: host.starlark.run
+              id: plan_run_as_user_setup_validated
+              with:
+                script: scripts/plan_setup.star
+                inputs:
+                  platform: "{{ world.platform }}"
+                  operator_user: "{{ world.operator_user }}"
+                  agent_user: "{{ world.agent_user }}"
+                  group_name: "{{ world.group_name }}"
+                  capsule_root: "{{ world.capsule_root }}"
+                  wrapper_bin: "{{ world.wrapper_bin }}"
+                  protected_root: "{{ world.protected_root }}"
+                  codex_bin: "{{ world.codex_bin }}"
+                  claude_bin: "{{ world.claude_bin }}"
+                  sample_capsule: "{{ world.sample_capsule }}"
+              bind:
+                setup_summary: setup_summary
+                config_snippet: config_snippet
+                account_steps: account_steps
+                group_commands: group_commands
+                wrapper_commands: wrapper_commands
+                sudoers_snippet: sudoers_snippet
+                assignment_commands: assignment_commands
+                validation_commands: validation_commands
+                receipt_markdown: receipt_markdown
+                security_notes: security_notes
+              on_error: failed
+            - set:
+                status: "planned"
         - target: ready
           effects:
             - set:
@@ -183,4 +258,3 @@ states:
       blocks:
         body:
           - prose: "Done."
-

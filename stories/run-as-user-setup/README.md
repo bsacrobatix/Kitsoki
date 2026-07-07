@@ -1,7 +1,9 @@
 # Run-As-User Setup
 
 This no-LLM story guides an operator through macOS local-user delegation for
-coding-agent launches.
+coding-agent launches. It opens on the setup plan screen; use `plan`, `accept`,
+or `ok` to generate the plan if needed, then use `accept` or `ok` after the
+listed validation probes pass.
 
 Run it from the project checkout:
 
@@ -31,4 +33,3 @@ Test it without LLM, sudo, or network:
 ```sh
 kitsoki test flows stories/run-as-user-setup/app.yaml
 ```
-

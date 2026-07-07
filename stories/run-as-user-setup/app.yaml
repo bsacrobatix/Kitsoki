@@ -44,6 +44,10 @@ intents:
     description: "Generate a local run_as_user setup plan from the current values."
     examples: ["plan", "generate setup", "show setup"]
     priority: 90
+  accept:
+    description: "Accept the current setup step and continue."
+    examples: ["accept", "ok", "okay", "continue", "approve", "looks good", "lgtm"]
+    priority: 88
   configure:
     description: "Update setup values, then regenerate the plan."
     examples:
@@ -78,8 +82,7 @@ intents:
     examples: ["look"]
     priority: 10
 
-root: lobby
+root: planned
 
 include:
   - rooms/*.yaml
-
