@@ -542,7 +542,7 @@ states:
             - set:
                 prev_state: "landing"
                 last_error: ""
-                profile_setup_target_path: "{{ slots.target }}"
+                profile_setup_target_path: "{{ slots.target ?? world.repo_root ?? world.workdir ?? '.' }}"
                 profile_setup_status: "discovering"
                 profile_setup_discovery: {}
                 profile_setup_effective_profiles: []
