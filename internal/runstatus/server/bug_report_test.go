@@ -399,6 +399,7 @@ func TestBugReport_GitHubModeUploadsArtifacts(t *testing.T) {
 		"title":              "GitHub evidence is uploaded",
 		"description":        "Captured from the browser.",
 		"screenshot_png_b64": base64.StdEncoding.EncodeToString(pngBytes),
+		"story_path":         "../../../testdata/apps/cloak/app.yaml",
 	})
 	if rerr != nil {
 		t.Fatalf("bugReport error: %+v", rerr)
@@ -442,6 +443,10 @@ func TestBugReport_GitHubModeUploadsArtifacts(t *testing.T) {
 		"uploaded as GitHub release assets",
 		"![Screenshot](https://github.com/o/r/releases/download/kitsoki-artifacts/",
 		"(https://github.com/o/r/releases/download/kitsoki-artifacts/",
+		"engine_version: 0.0.1-scaffold",
+		"engine_checksum_sha256: sha256:",
+		"story_app_id: cloak-of-darkness",
+		"story_checksum_sha256: sha256:",
 	} {
 		if !strings.Contains(*issueBody, want) {
 			t.Fatalf("issue body missing %q: %s", want, *issueBody)

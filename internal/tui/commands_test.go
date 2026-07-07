@@ -92,6 +92,9 @@ func TestBugCommandFilesReportAndArtifacts(t *testing.T) {
 		`target: "story"`,
 		`app_id: "cloak-of-darkness"`,
 		`state_path: "foyer"`,
+		`story_app_id: "cloak-of-darkness"`,
+		`story_app_version: "0.1.0"`,
+		`story_checksum_sha256: "sha256:`,
 		"button does nothing",
 		"./" + id + ".artifacts/transcript.md",
 		"./" + id + ".artifacts/context.json",
@@ -124,6 +127,14 @@ func TestBugCommandFilesReportAndArtifacts(t *testing.T) {
 	if meta["app_id"] != "cloak-of-darkness" || meta["state_path"] != "foyer" || meta["session_id"] != "session-123" || meta["surface"] != "tui" {
 		t.Fatalf("unexpected context metadata: %#v", meta)
 	}
+	runtime, ok := meta["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("context metadata missing runtime: %#v", meta)
+	}
+	story, ok := runtime["story"].(map[string]any)
+	if !ok || story["app_id"] != "cloak-of-darkness" || !strings.HasPrefix(story["checksum_sha256"].(string), "sha256:") {
+		t.Fatalf("unexpected runtime story metadata: %#v", runtime["story"])
+	}
 }
 
 func TestBugCommandGitHubUploadsArtifacts(t *testing.T) {
@@ -152,6 +163,8 @@ func TestBugCommandGitHubUploadsArtifacts(t *testing.T) {
 		"[TUI transcript (scrubbed)](https://github.com/o/r/releases/download/kitsoki-artifacts/",
 		"[TUI session context](https://github.com/o/r/releases/download/kitsoki-artifacts/",
 		"button does nothing",
+		"story_app_id: cloak-of-darkness",
+		"story_checksum_sha256: sha256:",
 	} {
 		if !strings.Contains(*issueBody, want) {
 			t.Fatalf("issue body missing %q: %s", want, *issueBody)

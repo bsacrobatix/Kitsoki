@@ -20,6 +20,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"kitsoki/internal/reportmeta"
 )
 
 // ghArtifactsReleaseTag is the dedicated, idempotent GitHub Release used as the
@@ -49,6 +51,7 @@ type GitHubBugFiling struct {
 	Severity, Component, Target   string
 	TraceRef, KitsokiRev, FiledBy string
 	Evidence                      []EvidenceFile
+	Runtime                       reportmeta.Snapshot
 
 	// UploadArtifacts, when true, uploads each evidence file as a GitHub Release
 	// asset (on the ghArtifactsReleaseTag release) and links the public asset
@@ -73,6 +76,12 @@ type GitHubBugResult struct {
 func GitHubFileBug(ctx context.Context, in GitHubBugFiling) (GitHubBugResult, error) {
 	if strings.TrimSpace(in.Repo) == "" {
 		return GitHubBugResult{}, fmt.Errorf("github bug: repo is required for native GitHub issue filing")
+	}
+	if in.Runtime.Empty() {
+		in.Runtime = reportmeta.Capture("", nil)
+	}
+	if strings.TrimSpace(in.KitsokiRev) == "" {
+		in.KitsokiRev = in.Runtime.Engine.RevisionShort
 	}
 
 	body := in.Body
@@ -99,7 +108,7 @@ func GitHubFileBug(ctx context.Context, in GitHubBugFiling) (GitHubBugResult, er
 		body += section
 	}
 
-	res, err := ghTicketCreate(ctx, map[string]any{
+	args := map[string]any{
 		"repo":        in.Repo,
 		"title":       in.Title,
 		"body":        body,
@@ -109,7 +118,11 @@ func GitHubFileBug(ctx context.Context, in GitHubBugFiling) (GitHubBugResult, er
 		"trace_ref":   in.TraceRef,
 		"kitsoki_rev": in.KitsokiRev,
 		"filed_by":    in.FiledBy,
-	})
+	}
+	for _, f := range in.Runtime.Fields() {
+		args[f.Key] = f.Value
+	}
+	res, err := ghTicketCreate(ctx, args)
 	if err != nil {
 		return GitHubBugResult{}, err
 	}

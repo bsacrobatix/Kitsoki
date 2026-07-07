@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/buildinfo"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
@@ -42,6 +43,7 @@ var version = "0.0.1-scaffold"
 // so tests can construct an isolated root and call Execute() against captured
 // I/O without running the real os.Args/os.Exit dance.
 func newRootCmd() *cobra.Command {
+	buildinfo.Version = version
 	// kitsokiRepoFlag backs the persistent --kitsoki-repo override. It points
 	// `@kitsoki/<name>` imports at a live kitsoki checkout instead of the
 	// embedded story library (see buildImportResolver). Empty → no override;

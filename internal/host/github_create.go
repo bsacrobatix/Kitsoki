@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"kitsoki/internal/reportmeta"
 )
 
 // ghTicketCreate implements ticket.create via the native GitHub REST API.
@@ -177,6 +179,9 @@ func ghAppendMetadata(body string, args map[string]any) string {
 		{"kitsoki_rev", ghStr(args["kitsoki_rev"])},
 		{"filed_by", ghStr(args["filed_by"])},
 		{"legacy_id", ghStr(args["legacy_id"])},
+	}
+	for _, key := range reportmeta.RuntimeFieldKeys {
+		fields = append(fields, kv{key, ghStr(args[key])})
 	}
 	var lines []string
 	for _, f := range fields {

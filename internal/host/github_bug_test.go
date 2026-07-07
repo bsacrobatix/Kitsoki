@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"kitsoki/internal/host"
+	"kitsoki/internal/reportmeta"
 )
 
 // TestGitHubFileBug_UploadSuccess proves the opt-in release-asset path: evidence
@@ -267,6 +268,29 @@ func TestGitHubFileBug_WithEvidence(t *testing.T) {
 		Target:    "kitsoki",
 		TraceRef:  "trace://x",
 		FiledBy:   "brad",
+		Runtime: reportmeta.Snapshot{
+			Engine: reportmeta.Engine{
+				Version:        "1.2.3",
+				Revision:       "abcdef1234567890",
+				RevisionShort:  "abcdef123456",
+				Dirty:          "false",
+				ChecksumSHA256: "sha256:engine",
+			},
+			Story: reportmeta.Story{
+				AppID:          "cloak-of-darkness",
+				Version:        "0.1.0",
+				Entry:          "testdata/apps/cloak/app.yaml",
+				ChecksumSHA256: "sha256:story",
+			},
+			PublicStories: []reportmeta.PublicStory{{
+				Name:           "bug",
+				AppID:          "bug-story",
+				Version:        "0.2.0",
+				Source:         "embedded",
+				Path:           "internal/basestories/stories/bug/app.yaml",
+				ChecksumSHA256: "sha256:public",
+			}},
+		},
 		Evidence: []host.EvidenceFile{
 			{Name: "screenshot.png", Path: ".artifacts/bug-reports/b1/screenshot.png", Image: true, Label: "Screenshot"},
 			{Name: "har.json", Path: ".artifacts/bug-reports/b1/har.json", Label: "HAR (scrubbed)"},
@@ -293,6 +317,14 @@ func TestGitHubFileBug_WithEvidence(t *testing.T) {
 		"HAR (scrubbed): `.artifacts/bug-reports/b1/har.json`",
 		"```kitsoki",
 		"trace_ref: trace://x",
+		"engine_version: 1.2.3",
+		"engine_revision: abcdef1234567890",
+		"engine_checksum_sha256: sha256:engine",
+		"story_app_id: cloak-of-darkness",
+		"story_app_version: 0.1.0",
+		"story_checksum_sha256: sha256:story",
+		`public_stories_json: [{"name":"bug"`,
+		`"checksum_sha256":"sha256:public"`,
 	} {
 		if !strings.Contains(issueBody, want) {
 			t.Errorf("issue body missing %q", want)

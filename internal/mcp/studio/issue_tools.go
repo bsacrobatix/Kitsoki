@@ -36,6 +36,8 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"kitsoki/internal/app"
+	"kitsoki/internal/reportmeta"
 	"kitsoki/internal/tui/blocks"
 	"kitsoki/internal/tui/shot"
 )
@@ -218,7 +220,7 @@ func (srv *Server) handleIssueCreate(
 	assetMD = append(assetMD, visualMD...)
 
 	// 3. Compose the body and file it.
-	body := composeIssueBody(args.Body, contextMD, assetMD)
+	body := reportmeta.AppendFence(composeIssueBody(args.Body, contextMD, assetMD), srv.issueRuntimeSnapshot(args))
 	labels := withAutonomousLabel(args.Labels)
 	res, err := srv.issueFiler(ctx, IssueRequest{
 		Repo:   args.Repo,
@@ -251,6 +253,26 @@ func (srv *Server) handleIssueCreate(
 		Labels: labels,
 		Assets: assetPaths,
 	}, nil
+}
+
+func (srv *Server) issueRuntimeSnapshot(args IssueCreateArgs) reportmeta.Snapshot {
+	var def *app.AppDef
+	var root string
+	if args.Handle != "" {
+		if sh, err := srv.sess.ResolveSession(args.Handle); err == nil && sh.Runtime != nil {
+			def = sh.Runtime.def
+			if def != nil {
+				root = def.BaseDir
+			}
+		}
+	}
+	if def == nil {
+		if wh, ok := srv.sess.Workspace(); ok && wh.Def != nil {
+			def = wh.Def
+			root = wh.Dir
+		}
+	}
+	return reportmeta.Capture(root, def)
 }
 
 // writeIssueFallback persists a composed issue to the artifacts dir when GitHub

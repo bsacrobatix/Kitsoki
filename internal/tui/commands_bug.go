@@ -12,8 +12,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/bugfile"
 	"kitsoki/internal/host"
+	"kitsoki/internal/reportmeta"
 	"kitsoki/internal/runstatus/harscrub"
 	"kitsoki/internal/tui/blocks"
 )
@@ -43,6 +45,7 @@ func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 		msg := m.fileGitHubBug(root, title, body)
 		return m.bugBlock(msg), m, nil
 	}
+	runtime := reportmeta.Capture(root, m.appDefForBug())
 
 	id, relPath, absPath, err := bugfile.Create(bugfile.CreateRequest{
 		Target:    "story",
@@ -54,6 +57,7 @@ func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 		TraceRef:  scrubBugText(m.traceFilePath),
 		TargetDir: root,
 		FiledBy:   os.Getenv("USER"),
+		Runtime:   runtime,
 		Warnf:     func(string, ...any) {},
 	})
 	if err != nil {
@@ -64,7 +68,7 @@ func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
 		return m.bugBlock(fmt.Sprintf("filed %s, but could not create artifacts: %v", relPath, err)), m, nil
 	}
-	if err := m.writeBugArtifacts(artifactsDir); err != nil {
+	if err := m.writeBugArtifacts(artifactsDir, runtime); err != nil {
 		return m.bugBlock(fmt.Sprintf("filed %s, but could not write artifacts: %v", relPath, err)), m, nil
 	}
 	if err := appendTUIArtifactsSection(absPath, id); err != nil {
@@ -75,12 +79,13 @@ func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 }
 
 func (m RootModel) fileGitHubBug(root, title, body string) string {
+	runtime := reportmeta.Capture(root, m.appDefForBug())
 	prefix := "tui-bug-" + time.Now().UTC().Format("20060102T150405.000000000Z")
 	artifactsDir := filepath.Join(root, ".artifacts", "bug-reports", prefix)
 	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
 		return fmt.Sprintf("could not create artifacts: %v", err)
 	}
-	if err := m.writeBugArtifacts(artifactsDir); err != nil {
+	if err := m.writeBugArtifacts(artifactsDir, runtime); err != nil {
 		return fmt.Sprintf("could not write artifacts: %v", err)
 	}
 
@@ -110,6 +115,7 @@ func (m RootModel) fileGitHubBug(root, title, body string) string {
 		KitsokiRev:      gitShortRev(root),
 		FiledBy:         os.Getenv("USER"),
 		Evidence:        evidence,
+		Runtime:         runtime,
 		UploadArtifacts: true,
 	})
 	if err != nil {
@@ -156,6 +162,13 @@ func (m RootModel) appIDForBug() string {
 	return m.orch.AppDef().App.ID
 }
 
+func (m RootModel) appDefForBug() *app.AppDef {
+	if m.orch == nil {
+		return nil
+	}
+	return m.orch.AppDef()
+}
+
 func (m RootModel) resolveBugRoot() (string, error) {
 	if strings.TrimSpace(m.bugRoot) != "" {
 		return m.bugRoot, nil
@@ -187,7 +200,7 @@ func nearestGitRoot(start string) string {
 	}
 }
 
-func (m RootModel) writeBugArtifacts(dir string) error {
+func (m RootModel) writeBugArtifacts(dir string, runtime reportmeta.Snapshot) error {
 	if err := os.WriteFile(filepath.Join(dir, "transcript.md"), []byte(scrubBugText(m.transcript.AllContent())), 0o644); err != nil {
 		return fmt.Errorf("write transcript.md: %w", err)
 	}
@@ -199,6 +212,9 @@ func (m RootModel) writeBugArtifacts(dir string) error {
 		"trace_ref":  filepath.ToSlash(m.traceFilePath),
 		"filed_at":   time.Now().UTC().Format(time.RFC3339),
 		"surface":    "tui",
+	}
+	if !runtime.Empty() {
+		meta["runtime"] = runtime
 	}
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
