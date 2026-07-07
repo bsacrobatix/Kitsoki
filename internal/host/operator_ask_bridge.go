@@ -56,7 +56,8 @@ const operatorAskWaitTimeout = 10 * time.Minute
 const operatorAskSystemClause = "To ask the human operator running this session a question you cannot answer " +
 	"yourself, call the `" + operatorAskToolName + "` tool with a `questions` array (each question has a " +
 	"`header`, the `question` text, and 2–4 `options`, each with a `label` and `description`; set " +
-	"`multiSelect: true` to allow multiple selections). It returns the operator's selected option label(s). " +
+	"`multiSelect: true` to allow multiple selections). It returns the operator's selected option label(s), " +
+	"or a short custom answer when the operator surface offers one for a single-select question. " +
 	"The built-in AskUserQuestion tool is disabled; this is the only way to reach the operator. Use it sparingly " +
 	"— only when you genuinely need a decision or clarification."
 

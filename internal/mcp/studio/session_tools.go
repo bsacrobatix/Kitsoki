@@ -100,7 +100,7 @@ func (srv *Server) registerSessionTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.answer",
-		Description: "Answer a parked operator-ask (the suspend/resume fallback for clients without MCP elicitation). {handle, question_id, answers, async_after_ms?} where answers is keyed by each question's text → a chosen option label (string) or labels ([]string). Resumes the turn; returns {outcome, frame}, {running}, or another awaiting_operator.",
+		Description: "Answer a parked operator-ask (the suspend/resume fallback for clients without MCP elicitation). {handle, question_id, answers, async_after_ms?} where answers is keyed by each question's text → a chosen option label or custom answer (string), or labels ([]string). Resumes the turn; returns {outcome, frame}, {running}, or another awaiting_operator.",
 	}, srv.handleSessionAnswer)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
