@@ -49,7 +49,9 @@ git -C "$CYBER_REPO" submodule update --init src/cyberfabric/gears-rust
 The manifest declares `repo_subdir: src/cyberfabric/gears-rust`, so every
 `--repo-dir /Users/brad/code/cyber-repo` command resolves to the submodule
 checkout. Passing `/Users/brad/code/gears-rust` still works as the standalone
-single-repo form.
+single-repo form. In both forms, the checkout must have the benchmark
+`baseline_sha` and `fix_sha` commits reachable; `bench.py preflight` reports the
+missing commits before any model spend.
 
 For another private repo, use a dedicated manifest under
 `tools/bugfix-bakeoff/external/projects/<name>/` and pass
