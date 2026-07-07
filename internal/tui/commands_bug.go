@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/bugfile"
@@ -30,6 +31,18 @@ import (
 type BugCommand struct{}
 
 func (BugCommand) Name() string { return "/bug" }
+
+type bugCommandDoneMsg struct {
+	body string
+}
+
+func bugCommandCmd(m RootModel, args []string) tea.Cmd {
+	args = append([]string(nil), args...)
+	return func() tea.Msg {
+		body, _, _ := BugCommand{}.Run(m, args)
+		return bugCommandDoneMsg{body: body}
+	}
+}
 
 func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 	desc := strings.TrimSpace(strings.Join(args, " "))
@@ -283,11 +296,15 @@ func privacyFollowUpSuffix(privacy bugprivacy.Result) string {
 	if strings.TrimSpace(privacy.FollowUpPath) == "" {
 		return ""
 	}
-	return "; depersonalized follow-up filed at " + filepath.ToSlash(privacy.FollowUpPath)
+	return ";\ndepersonalized follow-up filed at " + filepath.ToSlash(privacy.FollowUpPath)
 }
 
 func (m RootModel) bugBlock(line string) string {
-	return blocks.New(m.transcript.width, m.currentTheme()).SlashOutput("bug: " + line)
+	width := m.transcript.width
+	if width < 40 {
+		width = 40
+	}
+	return blocks.New(m.transcript.width, m.currentTheme()).SlashOutput(ansi.Wordwrap("bug: "+line, width, " "))
 }
 
 func gitShortRev(dir string) string {

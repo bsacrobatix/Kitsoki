@@ -149,7 +149,9 @@
         Capturing trace + session replay…
       </span>
       <template v-else-if="bugReport.status === 'filed' && bugReport.filed">
-        <span data-testid="bug-toast-path">Filed: {{ filedTarget }}</span>
+        <span class="meta-launcher__toast-message" data-testid="bug-toast-path">
+          Filed: {{ filedTarget }}
+        </span>
         <span
           v-if="privacyStatus"
           class="meta-launcher__toast-detail"
@@ -175,7 +177,12 @@
         </button>
       </template>
       <template v-else-if="bugReport.status === 'error'">
-        <span data-testid="bug-toast-error">Bug report failed: {{ bugReport.error }}</span>
+        <span
+          class="meta-launcher__toast-message"
+          data-testid="bug-toast-error"
+        >
+          Bug report failed: {{ bugReport.error }}
+        </span>
         <button
           class="meta-launcher__toast-link"
           data-testid="bug-toast-dismiss"
@@ -758,10 +765,11 @@ onUnmounted(() => {
   right: 0;
   bottom: 100%;
   margin-bottom: 0.35rem;
-  max-width: 22rem;
+  width: max-content;
+  max-width: min(28rem, calc(100vw - 2rem));
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.4rem;
   background: var(--k-bg-widget, #0d1b2a);
   border: 1px solid var(--k-border, #1e293b);
@@ -770,6 +778,12 @@ onUnmounted(() => {
   font-size: 0.72rem;
   color: var(--k-fg, #e2e8f0);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.meta-launcher__toast-message {
+  min-width: 0;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .meta-launcher__toast-detail {
