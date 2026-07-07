@@ -6,7 +6,7 @@ states:
       extends: "base"
       blocks:
         body:
-          - prose: "Prepare macOS local-user delegation for coding-agent launches. The story does not run sudo or mutate accounts; it generates reviewed commands and validation probes for the operator-owned harness to run outside the agent sandbox."
+          - prose: "Prepare macOS local-user delegation for coding-agent launches. The story can apply the setup with non-interactive sudo, or stop at the exact privilege or CLI-login boundary that needs operator action."
           - heading: "Current values"
           - kv:
               pairs:
@@ -34,6 +34,8 @@ states:
               items:
                 - label: "accept"
                   hint: "generate the setup plan with the current values"
+                - label: "apply"
+                  hint: "run the setup now with non-interactive sudo"
                 - label: "plan"
                   hint: "generate config, wrappers, sudoers, assignment, and validation commands"
                 - label: "configure operator_user=<name> agent_user=<name> capsule_root=<path>"
@@ -56,6 +58,9 @@ states:
                 validation_commands: ""
                 receipt_markdown: ""
                 security_notes: ""
+                apply_ok: false
+                apply_exit_code: -1
+                apply_output: ""
                 last_error: ""
                 status: "planning"
       plan:
@@ -72,8 +77,30 @@ states:
                 validation_commands: ""
                 receipt_markdown: ""
                 security_notes: ""
+                apply_ok: false
+                apply_exit_code: -1
+                apply_output: ""
                 last_error: ""
                 status: "planning"
+      apply:
+        - target: applying
+          effects:
+            - set:
+                setup_summary: ""
+                config_snippet: ""
+                account_steps: ""
+                group_commands: ""
+                wrapper_commands: ""
+                sudoers_snippet: ""
+                assignment_commands: ""
+                validation_commands: ""
+                receipt_markdown: ""
+                security_notes: ""
+                apply_ok: false
+                apply_exit_code: -1
+                apply_output: ""
+                last_error: ""
+                status: "applying"
       configure:
         - target: planned
           effects:
