@@ -128,13 +128,20 @@ function fencedCodeToIndented(content) {
   const lines = content.split("\n");
   const out = [];
   let fenced = false;
+  let preserveFence = false;
   for (const line of lines) {
-    if (/^\s*(```|~~~)/.test(line)) {
+    const fence = line.match(/^\s*(```|~~~)\s*([^\s`]*)/);
+    if (fence) {
+      if (!fenced) {
+        preserveFence = fence[2] === "mermaid";
+      }
+      if (preserveFence) out.push(line);
+      else out.push("");
       fenced = !fenced;
-      out.push("");
+      if (!fenced) preserveFence = false;
       continue;
     }
-    out.push(fenced ? `    ${line}` : line);
+    out.push(fenced && !preserveFence ? `    ${line}` : line);
   }
   return out.join("\n");
 }
@@ -166,6 +173,12 @@ function writeDocsLanding() {
     "- [Proof path](/proof.html) gives the short demo sequence: runtime guardrails, trace replay, operator handoff, and real repo workflows.",
     "- [Concept](/guide/architecture/concept.html) is the architecture thesis behind progressive determinism.",
     "",
+    "## Understand the architecture",
+    "",
+    "- [Architecture](/guide/architecture/) is the organized map of the engine, runtime boundaries, agent surfaces, integrations, and project infrastructure.",
+    "- [System map](/guide/architecture/overview.html) shows the package layers, turn loop, LLM boundary, persistence model, and trust model.",
+    "- [MCP Studio](/guide/architecture/mcp-studio.html) is the external-agent facade for authoring, driving, testing, and inspecting Kitsoki without live LLM spend by default.",
+    "",
     "## Try it locally",
     "",
     "- [Getting started](/guide/getting-started.html) is the shortest path from a downloaded binary to `onboard .` in an existing repo.",
@@ -190,9 +203,9 @@ function writeDocsLanding() {
     "",
     "The sidebar contains the full docs inventory, collapsed by section so this page stays readable. These section starts are the useful broad entries:",
     "",
+    "- [Architecture](/guide/architecture/)",
     "- [Authoring stories](/guide/stories/)",
     "- [Recipes](/guide/recipes/)",
-    "- [Architecture](/guide/architecture/)",
     "- [Testing and replay](/guide/tracing/)",
     "- [User interfaces](/guide/web/)",
     "- [Case studies](/guide/case-studies/)",

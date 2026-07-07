@@ -130,9 +130,18 @@ export default defineConfig({
         md.renderer.rules.fence ??
         ((tokens, idx, opts, _env, self) => self.renderToken(tokens, idx, opts));
       md.renderer.rules.fence = (tokens, idx, opts, env, self) => {
+        const token = tokens[idx];
+        const lang = token.info.trim().split(/\s+/)[0] || "text";
+        if (lang === "mermaid") {
+          const code = md.utils.escapeHtml(token.content);
+          return [
+            '<div class="kmermaid" data-kmermaid>',
+            `<pre class="kmermaid__source"><code>${code}</code></pre>`,
+            '<div class="kmermaid__diagram" role="img" aria-label="Mermaid diagram"></div>',
+            "</div>",
+          ].join("");
+        }
         if (env?.relativePath?.startsWith("guide/")) {
-          const token = tokens[idx];
-          const lang = token.info.trim().split(/\s+/)[0] || "text";
           return `<pre v-pre class="language-${md.utils.escapeHtml(lang)}"><code>${md.utils.escapeHtml(token.content)}</code></pre>`;
         }
         return origFence(tokens, idx, opts, env, self);
