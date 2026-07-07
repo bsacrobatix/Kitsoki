@@ -144,13 +144,12 @@ restore_guard_fallback() {
 }
 
 restore_guard() {
-  if [ -x scripts/protected-main-mode.sh ]; then
-    if scripts/protected-main-mode.sh lock --quiet; then
-      return 0
-    fi
-    echo "warning: protected-main-mode.sh lock failed; falling back to changed-path relock" >&2
-  fi
   restore_guard_fallback
+  if [ -x scripts/protected-main-mode.sh ]; then
+    if ! scripts/protected-main-mode.sh repair-writable-roots --quiet; then
+      echo "warning: protected-main-mode.sh repair-writable-roots failed; scratch roots may need manual chmod repair" >&2
+    fi
+  fi
 }
 
 trap restore_guard EXIT
