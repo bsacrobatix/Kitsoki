@@ -188,8 +188,12 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 	if _, ok := host.ResolveAgentBackendName(backend); !ok && backend != "claude" {
 		return agentLaunchPlan{}, fmt.Errorf("unknown backend %q", backend)
 	}
+	profileName, profile, err = launchProfileForBackend(profileName, profile, backend, opts.Profile, opts.Backend)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
 	providerModel, providerEffort := providerDefaultsForAgent(def, decl.Provider)
-	model := firstLaunchNonEmpty(opts.Model, profile.Model, decl.Model, providerModel)
+	model := launchModelForBackend(backend, firstLaunchNonEmpty(opts.Model, profile.Model, decl.Model, providerModel))
 	effort := firstLaunchNonEmpty(opts.Effort, profile.Effort, decl.Effort, providerEffort)
 	providerEnv := map[string]string{}
 	for k, v := range providerEnvForAgent(def, decl.Provider) {
@@ -299,7 +303,11 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 	if _, ok := host.ResolveAgentBackendName(backend); !ok && backend != "claude" {
 		return agentLaunchPlan{}, fmt.Errorf("unknown backend %q", backend)
 	}
-	model := firstLaunchNonEmpty(opts.Model, profile.Model, agent.Model)
+	profileName, profile, err = launchProfileForBackend(profileName, profile, backend, opts.Profile, opts.Backend)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	model := launchModelForBackend(backend, firstLaunchNonEmpty(opts.Model, profile.Model, agent.Model))
 	effort := firstLaunchNonEmpty(opts.Effort, profile.Effort, agent.Effort)
 	providerEnv := map[string]string{}
 	for k, v := range profile.Env {
@@ -432,7 +440,11 @@ func buildRawInteractiveLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, er
 	if backend != "codex" && backend != "claude" {
 		return agentLaunchPlan{}, fmt.Errorf("--raw interactive launch supports --backend codex or claude, got %q", backend)
 	}
-	model := firstLaunchNonEmpty(opts.Model, profile.Model)
+	profileName, profile, err = launchProfileForBackend(profileName, profile, backend, opts.Profile, opts.Backend)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	model := launchModelForBackend(backend, firstLaunchNonEmpty(opts.Model, profile.Model))
 	effort := firstLaunchNonEmpty(opts.Effort, profile.Effort)
 	providerEnv := map[string]string{}
 	for k, v := range profile.Env {
@@ -499,8 +511,8 @@ func runAgentLaunchPlan(ctx context.Context, cmd *cobra.Command, plan agentLaunc
 
 func buildInteractiveCodexArgs(model, effort, sandboxMode, workingDir string, addDirs []string, mcpServers map[string]any, prompt string) []string {
 	var args []string
-	if strings.TrimSpace(model) != "" {
-		args = append(args, "-m", model)
+	if m := launchModelForBackend("codex", model); strings.TrimSpace(m) != "" {
+		args = append(args, "-m", m)
 	}
 	if strings.TrimSpace(effort) != "" {
 		args = append(args, "-c", "model_reasoning_effort="+launchTOMLString(effort))
@@ -534,8 +546,8 @@ func buildRawInteractiveArgs(backend, model, effort, workingDir string, addDirs 
 
 func buildRawInteractiveCodexArgs(model, effort, workingDir string, addDirs []string) []string {
 	var args []string
-	if strings.TrimSpace(model) != "" {
-		args = append(args, "-m", model)
+	if m := launchModelForBackend("codex", model); strings.TrimSpace(m) != "" {
+		args = append(args, "-m", m)
 	}
 	if strings.TrimSpace(effort) != "" {
 		args = append(args, "-c", "model_reasoning_effort="+launchTOMLString(effort))
@@ -1171,6 +1183,50 @@ func redactEnv(env map[string]string) map[string]string {
 func isSecretEnvKey(k string) bool {
 	upper := strings.ToUpper(k)
 	return strings.Contains(upper, "KEY") || strings.Contains(upper, "TOKEN") || strings.Contains(upper, "SECRET")
+}
+
+func launchProfileForBackend(profileName string, profile orchestrator.HarnessProfile, backend, explicitProfile, explicitBackend string) (string, orchestrator.HarnessProfile, error) {
+	if strings.TrimSpace(profileName) == "" || strings.TrimSpace(explicitBackend) == "" {
+		return profileName, profile, nil
+	}
+	profileBackend := launchProfileBackend(profile)
+	effectiveBackend := launchBackendName(backend)
+	if profileBackend == effectiveBackend {
+		return profileName, profile, nil
+	}
+	if strings.TrimSpace(explicitProfile) != "" {
+		return "", orchestrator.HarnessProfile{}, fmt.Errorf("--profile %q selects backend %q, which conflicts with --backend %q", profileName, profileBackend, effectiveBackend)
+	}
+	return "", orchestrator.HarnessProfile{}, nil
+}
+
+func launchProfileBackend(profile orchestrator.HarnessProfile) string {
+	if strings.TrimSpace(profile.Plugin) != "" {
+		return "plugin:" + strings.TrimSpace(profile.Plugin)
+	}
+	return launchBackendName(profile.Backend)
+}
+
+func launchBackendName(backend string) string {
+	backend = strings.TrimSpace(backend)
+	if backend == "" {
+		return "claude"
+	}
+	return backend
+}
+
+func launchModelForBackend(backend, model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return ""
+	}
+	switch launchBackendName(backend) {
+	case "codex", "copilot", "agy":
+		if host.IsClaudeModelID(model) {
+			return ""
+		}
+	}
+	return model
 }
 
 func writeAgentLaunchPlan(w interface{ Write([]byte) (int, error) }, plan agentLaunchPlan) error {

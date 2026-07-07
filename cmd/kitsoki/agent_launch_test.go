@@ -248,6 +248,110 @@ args = ["mcp", "--stories-dir", "stories"]
 	require.Contains(t, plan.Command[len(plan.Command)-1], "Use ONLY the kitsoki studio MCP.")
 }
 
+func TestAgentLaunchPlan_FreestandingCodexBackendIgnoresMismatchedDefaultProfile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kitsoki.yaml"), []byte(`
+default_profile: claude-native
+harness_profiles:
+  claude-native:
+    backend: claude
+    model: opus
+    effort: high
+`), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".codex", "agents"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".codex", "agents", "kitsoki-mcp-driver.toml"), []byte(`
+name = "kitsoki-mcp-driver"
+developer_instructions = "Use ONLY the kitsoki studio MCP."
+model = "gpt-5.5"
+model_reasoning_effort = "medium"
+`), 0644))
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		AgentName:   "kitsoki-mcp-driver",
+		ConfigPath:  filepath.Join(dir, ".kitsoki.yaml"),
+		Backend:     "codex",
+		Interactive: true,
+		WorkingDir:  ".",
+	})
+	require.NoError(t, err)
+	require.True(t, plan.Interactive)
+	require.Equal(t, "codex", plan.Backend)
+	require.Empty(t, plan.Profile)
+	require.Equal(t, "gpt-5.5", plan.Model)
+	require.Equal(t, "medium", plan.Effort)
+	joined := strings.Join(plan.Command, " ")
+	require.NotContains(t, joined, "opus")
+	require.NotContains(t, joined, "claude-native")
+	require.Contains(t, plan.Command, "-m")
+	require.Contains(t, plan.Command, "gpt-5.5")
+}
+
+func TestAgentLaunchPlan_FreestandingCodexInteractiveDropsClaudeAgentModel(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".codex", "agents"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".codex", "agents", "kitsoki-mcp-driver.toml"), []byte(`
+name = "kitsoki-mcp-driver"
+developer_instructions = "Use ONLY the kitsoki studio MCP."
+model = "opus"
+`), 0644))
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		AgentName:   "kitsoki-mcp-driver",
+		Backend:     "codex",
+		Interactive: true,
+		WorkingDir:  ".",
+	})
+	require.NoError(t, err)
+	require.True(t, plan.Interactive)
+	require.Equal(t, "codex", plan.Backend)
+	require.Empty(t, plan.Model)
+	joined := strings.Join(plan.Command, " ")
+	require.NotContains(t, joined, "opus")
+	require.NotContains(t, plan.Command, "-m")
+}
+
+func TestAgentLaunchPlan_ExplicitProfileBackendConflict(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kitsoki.yaml"), []byte(`
+default_profile: claude-native
+harness_profiles:
+  claude-native:
+    backend: claude
+    model: opus
+`), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".codex", "agents"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".codex", "agents", "kitsoki-mcp-driver.toml"), []byte(`
+name = "kitsoki-mcp-driver"
+developer_instructions = "Use ONLY the kitsoki studio MCP."
+`), 0644))
+
+	_, err = buildAgentLaunchPlan(agentLaunchOptions{
+		AgentName:   "kitsoki-mcp-driver",
+		ConfigPath:  filepath.Join(dir, ".kitsoki.yaml"),
+		Profile:     "claude-native",
+		Backend:     "codex",
+		Interactive: true,
+		WorkingDir:  ".",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `--profile "claude-native" selects backend "claude", which conflicts with --backend "codex"`)
+}
+
 func TestAgentLaunchPlan_RawInteractiveNoAgentPrompt(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
