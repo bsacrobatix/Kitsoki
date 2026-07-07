@@ -19,6 +19,7 @@ const rescanStories = vi.fn<[], Promise<StoryHeader[]>>();
 const newSession = vi.fn<[string], Promise<string>>();
 const listSessions = vi.fn<[], Promise<SessionHeader[]>>();
 const driveOperation = vi.fn<[string], Promise<unknown>>();
+const artifactUrl = vi.fn<[string], string>((handle) => `/artifact/${encodeURIComponent(handle)}`);
 const setupStatus = vi.fn<[], Promise<{
   warnings: Array<{
     id: string;
@@ -38,6 +39,7 @@ vi.mock("../../src/data/live-source.js", () => ({
     newSession,
     listSessions,
     driveOperation,
+    artifactUrl,
     setupStatus,
   })),
 }));
@@ -95,6 +97,7 @@ describe("HomeView", () => {
     newSession.mockReset();
     listSessions.mockReset();
     driveOperation.mockReset();
+    artifactUrl.mockClear();
     setupStatus.mockReset();
     push.mockReset();
     replace.mockReset();
@@ -271,6 +274,34 @@ describe("HomeView", () => {
       "Regression gate was never RED."
     );
     expect(operations[1].text()).toBe("—");
+    wrapper.unmount();
+  });
+
+  it("renders a terminal artifact action on completed operation rows", async () => {
+    markAutoNavDone();
+    listSessions.mockResolvedValue([
+      session({
+        session_id: "sess-completed",
+        terminal: true,
+        operation_run: {
+          operation_id: "bugfix_full",
+          title: "Fix bug",
+          status: "completed",
+          terminal_state: "__exit__direct-ship",
+          terminal_artifact: "artifacts/qa-report.md",
+        },
+      }),
+    ]);
+
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    const artifact = wrapper.find("[data-testid='session-operation-artifact-open']");
+    expect(artifact.exists()).toBe(true);
+    expect(artifact.text()).toBe("Artifact");
+    expect(artifact.attributes("href")).toBe("/artifact/artifacts%2Fqa-report.md");
+    expect(artifact.attributes("target")).toBe("_blank");
+    expect(artifactUrl).toHaveBeenCalledWith("artifacts/qa-report.md");
     wrapper.unmount();
   });
 
