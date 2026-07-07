@@ -95,6 +95,7 @@ const dataSource = {
     skipped: 0,
     items: [],
   }),
+  artifactUrl: vi.fn((handle: string): string => `/artifact/${encodeURIComponent(handle)}`),
 };
 
 vi.mock("../../src/data/source.js", () => ({
@@ -142,6 +143,7 @@ describe("InteractiveView focused chat context", () => {
     showChat.mockReset();
     dataSource.submit.mockClear();
     dataSource.driveOperation.mockClear();
+    dataSource.artifactUrl.mockClear();
     dataSource.listWork.mockClear();
     dataSource.syncGitHubInbox.mockClear();
     showChat.mockResolvedValue({
@@ -316,6 +318,10 @@ describe("InteractiveView focused chat context", () => {
     expect(wrapper.find('[data-testid="operation-run-drive"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="operation-run-status"]').text()).toBe("completed");
     expect(wrapper.find('[data-testid="operation-run-artifact"]').text()).toContain("artifacts/qa-report.md");
+    const openArtifact = wrapper.find('[data-testid="operation-run-artifact-open"]');
+    expect(openArtifact.exists()).toBe(true);
+    expect(openArtifact.attributes("href")).toBe("/artifact/artifacts%2Fqa-report.md");
+    expect(openArtifact.attributes("target")).toBe("_blank");
     wrapper.unmount();
   });
 
