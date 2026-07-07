@@ -32,6 +32,8 @@ states:
           - heading: "Actions"
           - list:
               items:
+                - label: "accept"
+                  hint: "generate the setup plan with the current values"
                 - label: "plan"
                   hint: "generate config, wrappers, sudoers, assignment, and validation commands"
                 - label: "configure operator_user=<name> agent_user=<name> capsule_root=<path>"
@@ -40,6 +42,22 @@ states:
                   hint: "leave the setup story"
                 - label: "look"
     on:
+      accept:
+        - target: planned
+          effects:
+            - set:
+                setup_summary: ""
+                config_snippet: ""
+                account_steps: ""
+                group_commands: ""
+                wrapper_commands: ""
+                sudoers_snippet: ""
+                assignment_commands: ""
+                validation_commands: ""
+                receipt_markdown: ""
+                security_notes: ""
+                last_error: ""
+                status: "planning"
       plan:
         - target: planned
           effects:
@@ -86,4 +104,3 @@ states:
         - target: .
       quit:
         - target: ended
-
