@@ -14,110 +14,19 @@ import (
 )
 
 func TestOperationDemoCorpus(t *testing.T) {
-	cases := []struct {
-		appPath                string
-		capsule                string
-		name                   string
-		sourceFlow             string
-		expectOperationPolicy  string
-		expectOperationStatus  string
-		expectTerminalArtifact string
-		selfProvisionWorkspace bool
-	}{
-		{
-			appPath:    repoStoriesBugfixAppPath(t),
-			capsule:    "clean-repo",
-			name:       "triage_codeact_completed",
-			sourceFlow: repoPath(t, "../../stories/bugfix/flows/codeact_live_proof_triage.yaml"),
-		},
-		{
-			appPath:    repoStoriesBugfixAppPath(t),
-			capsule:    "clean-repo",
-			name:       "direct_ship_completed",
-			sourceFlow: repoPath(t, "../../stories/bugfix/flows/bugfix_ships_direct.yaml"),
-		},
-		{
-			appPath:                repoStoriesBugfixAppPath(t),
-			capsule:                "clean-repo",
-			name:                   "quick_fix_completed",
-			sourceFlow:             repoPath(t, "../../stories/bugfix/flows/happy_quick_fix.yaml"),
-			expectOperationPolicy:  "bugfix_quick",
-			expectOperationStatus:  "completed",
-			expectTerminalArtifact: "done_artifact",
-		},
-		{
-			appPath:    repoStoriesBugfixAppPath(t),
-			capsule:    "clean-repo",
-			name:       "merged_red_waits_for_human",
-			sourceFlow: repoPath(t, "../../stories/bugfix/flows/bugfix_needs_human_on_merged_red.yaml"),
-		},
-		{
-			appPath:                repoStoriesDevStoryAppPath(t),
-			capsule:                "clean-repo",
-			name:                   "dev_story_bugfix_to_pr_completed",
-			sourceFlow:             repoPath(t, "../../stories/dev-story/flows/bugfix_to_pr.yaml"),
-			expectOperationPolicy:  "bf__bugfix_full",
-			expectOperationStatus:  "completed",
-			expectTerminalArtifact: "bf__done_artifact",
-		},
-		{
-			appPath:                repoStoriesDevStoryAppPath(t),
-			capsule:                "dirty-index",
-			name:                   "dev_story_self_provisioned_workdir_handoff_completed",
-			sourceFlow:             repoPath(t, "../../stories/dev-story/flows/bugfix_to_pr_workdir_handoff.yaml"),
-			expectOperationPolicy:  "bf__bugfix_full",
-			expectOperationStatus:  "completed",
-			expectTerminalArtifact: "bf__done_artifact",
-			selfProvisionWorkspace: true,
-		},
-		{
-			appPath:                repoStoriesDevStoryAppPath(t),
-			capsule:                "clean-repo",
-			name:                   "dev_story_fix_tests_completed",
-			sourceFlow:             repoPath(t, "../../stories/dev-story/flows/fix_tests_autonomous.yaml"),
-			expectOperationPolicy:  "tests__fix_tests",
-			expectOperationStatus:  "completed",
-			expectTerminalArtifact: "tests__report_path",
-		},
-		{
-			appPath:                repoKitsokiDevAppPath(t),
-			capsule:                "clean-repo",
-			name:                   "kitsoki_dev_fix_tests_completed",
-			sourceFlow:             repoPath(t, "../../.kitsoki/stories/kitsoki-dev/flows/fix_tests_autonomous.yaml"),
-			expectOperationPolicy:  "core__tests__fix_tests",
-			expectOperationStatus:  "completed",
-			expectTerminalArtifact: "core__tests__report_path",
-		},
-		{
-			appPath:                repoStoriesDemoVideoLoopAppPath(t),
-			capsule:                "clean-repo",
-			name:                   "demo_video_loop_visual_qa_completed",
-			sourceFlow:             repoPath(t, "../../stories/demo-video-loop/flows/happy_path.yaml"),
-			expectOperationPolicy:  "demo_video_qa",
-			expectOperationStatus:  "completed",
-			expectTerminalArtifact: "qa_completion_artifact_handle",
-		},
-		{
-			appPath:                repoStoriesShipItAppPath(t),
-			capsule:                "clean-repo",
-			name:                   "ship_it_existing_worktree_tail_completed",
-			sourceFlow:             repoPath(t, "../../stories/ship-it/flows/integrate_existing_ships.yaml"),
-			expectOperationPolicy:  "ship_it",
-			expectOperationStatus:  "completed",
-			selfProvisionWorkspace: true,
-		},
-		{
-			appPath:               repoStoriesGitOpsAppPath(t),
-			capsule:               "clean-repo",
-			name:                  "gitops_sync_main_accept_completed",
-			sourceFlow:            repoPath(t, "../../stories/git-ops/flows/sync_main_accept_commits_operation.yaml"),
-			expectOperationPolicy: "gitops.sync_main",
-			expectOperationStatus: "completed",
-		},
+	const proofName = "no-LLM operation demo corpus"
+	cases := operationDemoCorpusCases(t)
+
+	t.Logf("%s: %d scenarios", proofName, len(cases))
+	for _, tc := range cases {
+		t.Logf("scenario=%s story=%s capsule=%s gates=%s", tc.name, tc.story, tc.capsule, tc.gates())
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Logf("%s: %s", proofName, tc.reviewNote)
+			t.Logf("story=%s source_flow=%s app=%s capsule=%s gates=%s", tc.story, tc.sourceFlow, tc.appPath, tc.capsule, tc.gates())
+
 			workspace := capsuletest.Open(t, tc.capsule)
 			capsuletest.Verify(t, workspace)
 
@@ -134,6 +43,157 @@ func TestOperationDemoCorpus(t *testing.T) {
 			capsuletest.Verify(t, workspace)
 		})
 	}
+}
+
+type operationDemoCorpusCase struct {
+	appPath                string
+	capsule                string
+	name                   string
+	reviewNote             string
+	sourceFlow             string
+	story                  string
+	expectOperationPolicy  string
+	expectOperationStatus  string
+	expectTerminalArtifact string
+	selfProvisionWorkspace bool
+}
+
+func operationDemoCorpusCases(t *testing.T) []operationDemoCorpusCase {
+	t.Helper()
+	return []operationDemoCorpusCase{
+		{
+			appPath:    repoStoriesBugfixAppPath(t),
+			capsule:    "clean-repo",
+			name:       "triage_codeact_completed",
+			reviewNote: "bugfix triage can complete from the recorded codeact proof without a live agent",
+			sourceFlow: repoPath(t, "../../stories/bugfix/flows/codeact_live_proof_triage.yaml"),
+			story:      "bugfix",
+		},
+		{
+			appPath:    repoStoriesBugfixAppPath(t),
+			capsule:    "clean-repo",
+			name:       "direct_ship_completed",
+			reviewNote: "bugfix can ship a direct fix from the recorded autonomous path",
+			sourceFlow: repoPath(t, "../../stories/bugfix/flows/bugfix_ships_direct.yaml"),
+			story:      "bugfix",
+		},
+		{
+			appPath:                repoStoriesBugfixAppPath(t),
+			capsule:                "clean-repo",
+			name:                   "quick_fix_completed",
+			reviewNote:             "quick bugfix policy reaches the done artifact gate",
+			sourceFlow:             repoPath(t, "../../stories/bugfix/flows/happy_quick_fix.yaml"),
+			story:                  "bugfix",
+			expectOperationPolicy:  "bugfix_quick",
+			expectOperationStatus:  "completed",
+			expectTerminalArtifact: "done_artifact",
+		},
+		{
+			appPath:    repoStoriesBugfixAppPath(t),
+			capsule:    "clean-repo",
+			name:       "merged_red_waits_for_human",
+			reviewNote: "bugfix stops for human review when merged code remains red",
+			sourceFlow: repoPath(t, "../../stories/bugfix/flows/bugfix_needs_human_on_merged_red.yaml"),
+			story:      "bugfix",
+		},
+		{
+			appPath:                repoStoriesDevStoryAppPath(t),
+			capsule:                "clean-repo",
+			name:                   "dev_story_bugfix_to_pr_completed",
+			reviewNote:             "dev-story bugfix import completes through the namespaced bugfix policy",
+			sourceFlow:             repoPath(t, "../../stories/dev-story/flows/bugfix_to_pr.yaml"),
+			story:                  "dev-story",
+			expectOperationPolicy:  "bf__bugfix_full",
+			expectOperationStatus:  "completed",
+			expectTerminalArtifact: "bf__done_artifact",
+		},
+		{
+			appPath:                repoStoriesDevStoryAppPath(t),
+			capsule:                "dirty-index",
+			name:                   "dev_story_self_provisioned_workdir_handoff_completed",
+			reviewNote:             "dev-story can self-provision a dirty-index handoff workspace",
+			sourceFlow:             repoPath(t, "../../stories/dev-story/flows/bugfix_to_pr_workdir_handoff.yaml"),
+			story:                  "dev-story",
+			expectOperationPolicy:  "bf__bugfix_full",
+			expectOperationStatus:  "completed",
+			expectTerminalArtifact: "bf__done_artifact",
+			selfProvisionWorkspace: true,
+		},
+		{
+			appPath:                repoStoriesDevStoryAppPath(t),
+			capsule:                "clean-repo",
+			name:                   "dev_story_fix_tests_completed",
+			reviewNote:             "dev-story fix-tests import completes through its tests policy",
+			sourceFlow:             repoPath(t, "../../stories/dev-story/flows/fix_tests_autonomous.yaml"),
+			story:                  "dev-story",
+			expectOperationPolicy:  "tests__fix_tests",
+			expectOperationStatus:  "completed",
+			expectTerminalArtifact: "tests__report_path",
+		},
+		{
+			appPath:                repoKitsokiDevAppPath(t),
+			capsule:                "clean-repo",
+			name:                   "kitsoki_dev_fix_tests_completed",
+			reviewNote:             "kitsoki-dev fix-tests import completes through the core tests policy",
+			sourceFlow:             repoPath(t, "../../.kitsoki/stories/kitsoki-dev/flows/fix_tests_autonomous.yaml"),
+			story:                  "kitsoki-dev",
+			expectOperationPolicy:  "core__tests__fix_tests",
+			expectOperationStatus:  "completed",
+			expectTerminalArtifact: "core__tests__report_path",
+		},
+		{
+			appPath:                repoStoriesDemoVideoLoopAppPath(t),
+			capsule:                "clean-repo",
+			name:                   "demo_video_loop_visual_qa_completed",
+			reviewNote:             "demo-video-loop completes the visual QA operation and records its completion artifact",
+			sourceFlow:             repoPath(t, "../../stories/demo-video-loop/flows/happy_path.yaml"),
+			story:                  "demo-video-loop",
+			expectOperationPolicy:  "demo_video_qa",
+			expectOperationStatus:  "completed",
+			expectTerminalArtifact: "qa_completion_artifact_handle",
+		},
+		{
+			appPath:                repoStoriesShipItAppPath(t),
+			capsule:                "clean-repo",
+			name:                   "ship_it_existing_worktree_tail_completed",
+			reviewNote:             "ship-it can tail an existing worktree through the ship operation",
+			sourceFlow:             repoPath(t, "../../stories/ship-it/flows/integrate_existing_ships.yaml"),
+			story:                  "ship-it",
+			expectOperationPolicy:  "ship_it",
+			expectOperationStatus:  "completed",
+			selfProvisionWorkspace: true,
+		},
+		{
+			appPath:               repoStoriesGitOpsAppPath(t),
+			capsule:               "clean-repo",
+			name:                  "gitops_sync_main_accept_completed",
+			reviewNote:            "git-ops sync-main accept path completes through the sync operation",
+			sourceFlow:            repoPath(t, "../../stories/git-ops/flows/sync_main_accept_commits_operation.yaml"),
+			story:                 "git-ops",
+			expectOperationPolicy: "gitops.sync_main",
+			expectOperationStatus: "completed",
+		},
+	}
+}
+
+func (tc operationDemoCorpusCase) gates() string {
+	var gates []string
+	if tc.expectOperationPolicy != "" {
+		gates = append(gates, "policy="+tc.expectOperationPolicy)
+	}
+	if tc.expectOperationStatus != "" {
+		gates = append(gates, "status="+tc.expectOperationStatus)
+	}
+	if tc.expectTerminalArtifact != "" {
+		gates = append(gates, "terminal_artifact="+tc.expectTerminalArtifact)
+	}
+	if tc.selfProvisionWorkspace {
+		gates = append(gates, "self_provision_workspace")
+	}
+	if len(gates) == 0 {
+		return "flow_passes"
+	}
+	return strings.Join(gates, ",")
 }
 
 func repoStoriesBugfixAppPath(t *testing.T) string {

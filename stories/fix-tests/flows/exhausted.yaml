@@ -44,4 +44,7 @@ turns:
       report_path:  ".artifacts/fix-tests/report-exhausted.md"
 
 expect_terminal: true
+expect_operation_policy: fix_tests
+expect_operation_status: completed
+expect_terminal_artifact: report_path
 expect_no_errors: true

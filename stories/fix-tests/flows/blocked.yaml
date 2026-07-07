@@ -41,4 +41,6 @@ turns:
       report_path: ".artifacts/fix-tests/report-blocked.md"
 
 expect_terminal: true
+expect_operation_policy: fix_tests
+expect_operation_status: waiting
 expect_no_errors: true
