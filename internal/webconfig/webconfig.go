@@ -91,6 +91,13 @@ type WebConfig struct {
 	// before a coding-agent CLI is forked.
 	AgentLaunchPolicy *host.AgentLaunchPolicy `yaml:"agent_launch_policy,omitempty"`
 
+	// AgentUserDelegation declares the local OS account/wrapper setup used to
+	// run backend CLIs as a delegated user. The first implementation uses it as
+	// a machine-local setup receipt and startup-warning gate; the launch path
+	// still depends on PATH wrappers until first-class run_as_user delegation
+	// lands.
+	AgentUserDelegation *AgentUserDelegationConfig `yaml:"agent_user_delegation,omitempty"`
+
 	// Mining configures the always-on ambient session miner
 	// (docs/proposals/ambient-session-miner.md). Absent or Enabled=false ⇒ the
 	// miner never starts and nothing in any flow/test path spends LLM. Validated
@@ -362,6 +369,18 @@ type HarnessLadderModel struct {
 	Model string `yaml:"model,omitempty"`
 }
 
+// AgentUserDelegationConfig is the local receipt for OS-user delegation of
+// coding-agent backend CLIs. It is intentionally machine-local: shared story
+// config may require a role, but local usernames and wrapper paths belong in
+// .kitsoki.local.yaml.
+type AgentUserDelegationConfig struct {
+	Enabled     bool   `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	RunAsUser   string `yaml:"run_as_user,omitempty" json:"run_as_user,omitempty"`
+	WrapperBin  string `yaml:"wrapper_bin,omitempty" json:"wrapper_bin,omitempty"`
+	CapsuleRoot string `yaml:"capsule_root,omitempty" json:"capsule_root,omitempty"`
+	ReceiptPath string `yaml:"receipt_path,omitempty" json:"receipt_path,omitempty"`
+}
+
 // ToHostLadderConfig converts h into the runtime internal/host.LadderConfig
 // the orchestrator installs on ctx (host.WithHarnessLadder). A nil h yields a
 // disabled LadderConfig{} (Enabled() == false), so callers can convert
@@ -423,6 +442,9 @@ func Load(path string) (WebConfig, error) {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if err := cfg.resolveAgentLaunchPolicy(path); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := cfg.resolveAgentUserDelegation(path); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if err := cfg.resolveRoot(path); err != nil {
@@ -595,6 +617,9 @@ func mergeConfig(base, local WebConfig) WebConfig {
 	}
 	if local.AgentLaunchPolicy != nil {
 		out.AgentLaunchPolicy = local.AgentLaunchPolicy
+	}
+	if local.AgentUserDelegation != nil {
+		out.AgentUserDelegation = local.AgentUserDelegation
 	}
 	if len(local.HarnessProfiles) > 0 {
 		merged := make(map[string]HarnessProfile, len(base.HarnessProfiles)+len(local.HarnessProfiles))
@@ -1081,6 +1106,48 @@ func (cfg *WebConfig) resolveAgentLaunchPolicy(configPath string) error {
 	}
 	normalized := p.Normalized()
 	*p = normalized
+	return nil
+}
+
+func (cfg *WebConfig) resolveAgentUserDelegation(configPath string) error {
+	d := cfg.AgentUserDelegation
+	if d == nil {
+		return nil
+	}
+	d.RunAsUser = strings.TrimSpace(d.RunAsUser)
+	if d.Enabled && d.RunAsUser == "" {
+		return fmt.Errorf("agent_user_delegation.run_as_user is required when enabled is true")
+	}
+	base := filepath.Dir(configPath)
+	if base == "" {
+		base = "."
+	}
+	baseAbs, err := filepath.Abs(base)
+	if err != nil {
+		return fmt.Errorf("agent_user_delegation: resolve config dir: %w", err)
+	}
+	baseAbs = filepath.Clean(baseAbs)
+	if d.WrapperBin != "" {
+		resolved, err := resolvePolicyPaths(baseAbs, []string{d.WrapperBin})
+		if err != nil {
+			return fmt.Errorf("agent_user_delegation.wrapper_bin: %w", err)
+		}
+		d.WrapperBin = resolved[0]
+	}
+	if d.CapsuleRoot != "" {
+		resolved, err := resolvePolicyPaths(baseAbs, []string{d.CapsuleRoot})
+		if err != nil {
+			return fmt.Errorf("agent_user_delegation.capsule_root: %w", err)
+		}
+		d.CapsuleRoot = resolved[0]
+	}
+	if d.ReceiptPath != "" {
+		resolved, err := resolvePolicyPaths(baseAbs, []string{d.ReceiptPath})
+		if err != nil {
+			return fmt.Errorf("agent_user_delegation.receipt_path: %w", err)
+		}
+		d.ReceiptPath = resolved[0]
+	}
 	return nil
 }
 

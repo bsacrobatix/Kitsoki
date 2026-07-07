@@ -6,6 +6,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/host"
+	"kitsoki/internal/webconfig"
 )
 
 // TestFirstRunProviderHint verifies change 0.4: a fresh run with no provider
@@ -93,6 +94,28 @@ func TestBugFilingAuthStartupNotice(t *testing.T) {
 	t.Setenv("GH_TOKEN", "test-token")
 	if got := bugFilingAuthStartupNotice(context.Background(), "o/r"); got != "" {
 		t.Fatalf("configured GitHub auth should not warn, got:\n%s", got)
+	}
+}
+
+func TestRunAsUserStartupNotice(t *testing.T) {
+	got := runAsUserStartupNotice(webconfig.WebConfig{}, "darwin")
+	for _, want := range []string{"run_as_user delegation is not configured", "@kitsoki/run-as-user-setup", "agent_user_delegation"} {
+		if !contains(got, want) {
+			t.Fatalf("notice missing %q; notice was:\n%s", want, got)
+		}
+	}
+
+	configured := webconfig.WebConfig{
+		AgentUserDelegation: &webconfig.AgentUserDelegationConfig{
+			Enabled:   true,
+			RunAsUser: "kitsoki-agent",
+		},
+	}
+	if got := runAsUserStartupNotice(configured, "darwin"); got != "" {
+		t.Fatalf("configured run_as_user should not warn, got:\n%s", got)
+	}
+	if got := runAsUserStartupNotice(webconfig.WebConfig{}, "linux"); got != "" {
+		t.Fatalf("non-darwin should not warn, got:\n%s", got)
 	}
 }
 

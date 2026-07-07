@@ -101,6 +101,41 @@ Raw interactive launch supports `codex` and `claude` backends. Harness profiles
 may still supply backend, model, effort, and environment retargeting; they do
 not supply any app or agent prompt.
 
+## Delegated macOS User Setup
+
+On macOS, `agent_launch_policy:` should be paired with a separate Standard user
+for coding-agent backends. The policy rejects unsafe launch locations, but the
+OS user boundary is what makes the protected checkout unwritable after the
+backend starts.
+
+Run the setup story for a no-LLM, no-sudo planning flow:
+
+```sh
+kitsoki run @kitsoki/run-as-user-setup
+```
+
+The story generates the `.kitsoki.local.yaml` blocks, root-owned backend
+wrappers, sudoers snippet, capsule-assignment commands, and validation probes.
+It does not create accounts or edit privileged files itself.
+
+The local receipt block is:
+
+```yaml
+agent_user_delegation:
+  enabled: true
+  run_as_user: kitsoki-agent
+  wrapper_bin: /Users/Shared/kitsoki/agent-bin
+  capsule_root: /Users/Shared/kitsoki/capsules
+```
+
+This block currently records local setup and suppresses the macOS first-start
+warning. First-class `run_as_user` execution is a future runtime slice; until it
+lands, start Kitsoki with the wrapper directory first in `PATH`:
+
+```sh
+PATH=/Users/Shared/kitsoki/agent-bin:$PATH kitsoki run @kitsoki/dev-story
+```
+
 ## Relationship To Sandboxing
 
 `agent_launch_policy:` is fail-fast placement control. It answers "may this
