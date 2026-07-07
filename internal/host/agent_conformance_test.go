@@ -213,6 +213,39 @@ func TestConformance_ToolEventsClassified(t *testing.T) {
 	})
 }
 
+func TestConformance_ReasoningEventsUseThinkingChannel(t *testing.T) {
+	t.Run("codex/text", func(t *testing.T) {
+		ev := mustUnmarshal(t, `{"type":"item.completed","item":{"type":"reasoning","text":"I will inspect the file first."}}`)
+		ce := codexBackend{}.Classify(ev)
+		if ce.Type != "assistant" {
+			t.Fatalf("codex reasoning type = %q, want assistant", ce.Type)
+		}
+		if ce.Thinking != "I will inspect the file first." {
+			t.Fatalf("codex reasoning Thinking = %q", ce.Thinking)
+		}
+		if ce.Text != "" {
+			t.Fatalf("codex reasoning polluted Text = %q", ce.Text)
+		}
+	})
+	t.Run("codex/summary_array", func(t *testing.T) {
+		ev := mustUnmarshal(t, `{"type":"item.completed","item":{"type":"reasoning","summary":[{"type":"summary_text","text":"First."},{"type":"summary_text","text":"Second."}]}}`)
+		ce := codexBackend{}.Classify(ev)
+		if ce.Thinking != "First.\nSecond." {
+			t.Fatalf("codex reasoning summary Thinking = %q", ce.Thinking)
+		}
+	})
+	t.Run("copilot/reasoning", func(t *testing.T) {
+		ev := mustUnmarshal(t, `{"type":"assistant.reasoning","data":{"content":"I need to run a specific command."}}`)
+		ce := copilotBackend{}.Classify(ev)
+		if ce.Thinking != "I need to run a specific command." {
+			t.Fatalf("copilot reasoning Thinking = %q", ce.Thinking)
+		}
+		if ce.Text != "" {
+			t.Fatalf("copilot reasoning polluted Text = %q", ce.Text)
+		}
+	})
+}
+
 // TestConformance_ArgvTranslation asserts each backend maps a representative
 // claude-shaped invocation onto its own CLI surface.
 func TestConformance_ArgvTranslation(t *testing.T) {

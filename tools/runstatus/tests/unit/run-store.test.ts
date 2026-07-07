@@ -788,6 +788,7 @@ describe("useRunStore — write-side actions", () => {
       onEvent({ type: "tool", tool: "Bash" });
       // A tool frame ends the run: the next thought is its own item.
       onEvent({ type: "delta", text: "After the tool." });
+      onEvent({ type: "tool", tool: "Read" });
       return new Promise<TurnResult>((resolve) => {
         resolveTurn = resolve;
       });
@@ -800,6 +801,7 @@ describe("useRunStore — write-side actions", () => {
       { kind: "thinking", text: "Hello world.\n\nSecond thought." },
       { kind: "tool", tool: "Bash", preview: "" },
       { kind: "thinking", text: "After the tool." },
+      { kind: "tool", tool: "Read", preview: "" },
     ]);
 
     resolveTurn(turnResult({ view: "v" }));
@@ -810,6 +812,31 @@ describe("useRunStore — write-side actions", () => {
       { kind: "thinking", text: "Hello world.\n\nSecond thought." },
       { kind: "tool", tool: "Bash", preview: "" },
       { kind: "thinking", text: "After the tool." },
+      { kind: "tool", tool: "Read", preview: "" },
+    ]);
+  });
+
+  it("drops a trailing final narration delta from the preserved activity feed", async () => {
+    const src = writeSource() as DataSource & { turnStream: unknown };
+    (src as { turnStream: unknown }).turnStream = (
+      _sid: string,
+      _method: string,
+      _params: unknown,
+      onEvent: (ev: { type: string; text?: string; tool?: string; preview?: string }) => void
+    ) => {
+      onEvent({ type: "delta", text: "I will inspect the file first." });
+      onEvent({ type: "tool", tool: "Read", preview: "app.go" });
+      onEvent({ type: "delta", text: "Final answer from the backend." });
+      return Promise.resolve(turnResult({ view: "Room view wins." }));
+    };
+
+    const store = useRunStore();
+    await store.sendText(src, "sess-1", "go");
+
+    expect(store.transcript[1]!.text).toBe("Room view wins.");
+    expect(store.transcript[1]!.stream).toEqual([
+      { kind: "thinking", text: "I will inspect the file first." },
+      { kind: "tool", tool: "Read", preview: "app.go" },
     ]);
   });
 
@@ -827,6 +854,7 @@ describe("useRunStore — write-side actions", () => {
     const store = useRunStore();
     await store.sendText(src, "sess-1", "go");
     expect(store.transcript[1]!.text).toBe("Only narration this turn.");
+    expect(store.transcript[1]!.stream).toBeUndefined();
   });
 
   it("backfills the completed streamed free-text turn so LLM routing chips render when live events are missed", async () => {

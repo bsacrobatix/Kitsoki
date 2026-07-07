@@ -3540,8 +3540,11 @@ func (m RootModel) handleMetaStreamEvent(msg MetaStreamMsg) RootModel {
 	pendingBefore := len(m.transcript.pending)
 	ev := msg.Event
 	switch ev.Type {
-	case "assistant":
-		if ev.Thinking != "" {
+	case "assistant", "assistant.message", "assistant.reasoning", "tool.execution_start":
+		thinkingText := streamThinkingText(ev)
+		deltaText := streamDeltaText(ev)
+		tools := streamActivityTools(ev)
+		if thinkingText != "" {
 			// Extended-thinking prose. Unlike pure narration (which is
 			// deferred below because the FINAL reply also arrives as a
 			// plain assistant text message), thinking is never the reply —
@@ -3549,9 +3552,9 @@ func (m RootModel) handleMetaStreamEvent(msg MetaStreamMsg) RootModel {
 			// carries. Any earlier deferred thought is proven intermediate
 			// by this fresh assistant event, so flush it first.
 			m = m.flushPendingThought()
-			m.transcript.AppendMetaThinking(ev.Thinking)
+			m.transcript.AppendMetaThinking(thinkingText)
 		}
-		if ev.Tool != "" {
+		if len(tools) > 0 {
 			// A thought paired with a tool call is unambiguously
 			// intermediate — a tool round-trip still follows, so it is
 			// never the final answer. Any earlier deferred thought is
@@ -3559,11 +3562,11 @@ func (m RootModel) handleMetaStreamEvent(msg MetaStreamMsg) RootModel {
 			// one in full plus the compact tool breadcrumb. Render the
 			// thought first so it reads above the action it explains.
 			m = m.flushPendingThought()
-			if ev.Text != "" {
+			if deltaText != "" {
 				// Narration / "thinking" prose, in full — the transcript
 				// word-wraps it. Tight (no leading blank line) so
 				// consecutive thoughts read as one paragraph.
-				m.transcript.AppendMetaThinking(ev.Text)
+				m.transcript.AppendMetaThinking(deltaText)
 			}
 			// Tool use: compact one-line args breadcrumb (Preview is
 			// already clipped upstream), separate styling, leading blank
@@ -3571,21 +3574,17 @@ func (m RootModel) handleMetaStreamEvent(msg MetaStreamMsg) RootModel {
 			// assistant event can batch several parallel tool calls, so
 			// render each on its own line (ev.Tools); fall back to the
 			// scalar ev.Tool for events that predate the slice.
-			if len(ev.Tools) > 0 {
-				for _, tc := range ev.Tools {
-					m.transcript.AppendMetaToolUse(tc.Name, tc.Preview)
-				}
-			} else {
-				m.transcript.AppendMetaToolUse(ev.Tool, ev.Preview)
+			for _, tc := range tools {
+				m.transcript.AppendMetaToolUse(tc.Name, tc.Preview)
 			}
-		} else if ev.Text != "" {
+		} else if deltaText != "" {
 			// Pure narration with no tool call. Ambiguous until the next
 			// event: intermediate thought (flush) or final answer (drop
 			// on `result`). A previously deferred thought is now proven
 			// intermediate — this fresh assistant message followed it —
 			// so flush that one, then defer this one in its place.
 			m = m.flushPendingThought()
-			m.metaStreamPending = ev.Text
+			m.metaStreamPending = deltaText
 		}
 	case "system":
 		if ev.Subtype == "api_retry" {
@@ -3615,6 +3614,36 @@ func (m RootModel) handleMetaStreamEvent(msg MetaStreamMsg) RootModel {
 		m.flushStreamPendingDuringLive = true
 	}
 	return m
+}
+
+func streamThinkingText(ev host.StreamEvent) string {
+	if ev.Thinking != "" {
+		return ev.Thinking
+	}
+	if ev.Type == "assistant.reasoning" {
+		return ev.Text
+	}
+	return ""
+}
+
+func streamDeltaText(ev host.StreamEvent) string {
+	if ev.Type == "assistant.reasoning" {
+		return ""
+	}
+	return ev.Text
+}
+
+func streamActivityTools(ev host.StreamEvent) []host.StreamToolUse {
+	switch ev.Type {
+	case "assistant", "tool.execution_start":
+		if len(ev.Tools) > 0 {
+			return ev.Tools
+		}
+		if ev.Tool != "" {
+			return []host.StreamToolUse{{Name: ev.Tool, Preview: ev.Preview}}
+		}
+	}
+	return nil
 }
 
 // flushPendingThought commits any deferred pure-narration message to the

@@ -261,7 +261,7 @@ loop:
 				})
 				continue
 			}
-			if ev.Type == "assistant" {
+			if isStreamActivity(ev) {
 				// One assistant event can carry both a thought and the tool
 				// calls it explains. Emit the thought first, then one
 				// breadcrumb per tool — emitting one-or-the-other drops the
@@ -270,13 +270,13 @@ loop:
 				// gets its own "think" frame type: it is never the reply,
 				// and clients that defer narration (the meta overlay) need
 				// to tell the two apart on the wire.
-				if ev.Thinking != "" {
-					emit(turnStreamFrame{Type: "think", Text: ev.Thinking})
+				if text := streamThinkingText(ev); text != "" {
+					emit(turnStreamFrame{Type: "think", Text: text})
 				}
-				if ev.Text != "" {
-					emit(turnStreamFrame{Type: "delta", Text: ev.Text})
+				if text := streamDeltaText(ev); text != "" {
+					emit(turnStreamFrame{Type: "delta", Text: text})
 				}
-				for _, tc := range toolBreadcrumbs(ev) {
+				for _, tc := range streamActivityTools(ev) {
 					emit(turnStreamFrame{Type: "tool", Tool: tc.Name, Preview: tc.Preview})
 				}
 			}
