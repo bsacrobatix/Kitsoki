@@ -53,6 +53,26 @@ states:
   landing:
     description: "dev-story — the free-form workbench. Describe what you want, or pick a quick action."
     relevant_world: [ticket_id, ticket_title, ticket_type, design_file, last_pr_url, status, inbox_unread, workdir, feature_branch, captured, landing_request, landing_note]
+    prerequisites:
+      - id: project-onboarding
+        title: "Project onboarding"
+        satisfied_when: "world.init_profile_status == 'applied' || world.init_profile_status == 'applied-no-tools'"
+        summary: "This session has not applied the project onboarding profile."
+        help: "Run onboarding to write the project profile, instance story, toolkit, and local readiness script."
+        action:
+          label: "onboard"
+          hint: "discover a project profile, review it, then apply local setup"
+          intent: go_init
+      - id: onboarding-readiness
+        title: "Onboarding readiness"
+        when: "world.init_profile_status == 'applied' || world.init_profile_status == 'applied-no-tools'"
+        satisfied_when: "world.init_readiness_result.status == 'pass'"
+        summary: "The generated readiness checks have not passed in this session."
+        help: "Run readiness after onboarding to verify story load, project tests, and build gates."
+        action:
+          label: "readiness"
+          hint: "run declared post-apply checks and update the profile readiness summary"
+          intent: run_readiness
 
     # Free-text sink (docs/architecture/semantic-routing.md §1.5). Prose
     # the match tiers don't claim — a fresh request — routes
@@ -285,6 +305,10 @@ states:
             - label:  "onboard"
               hint:   "discover a project profile, review it, then apply local setup"
               intent: go_init
+            - label:  "readiness"
+              hint:   "run declared post-apply checks and update the profile readiness summary"
+              intent: run_readiness
+              when:   "world.init_profile_status == 'applied' || world.init_profile_status == 'applied-no-tools'"
             - label:  "inbox"
               hint:   "read notifications ({{ world.inbox_unread }} unread)"
               intent: go_inbox
@@ -496,6 +520,20 @@ states:
                 init_apply_output:   ""
                 init_profile_status: "discovering"
                 init_feedback:       ""
+      run_readiness:
+        - when: "world.init_profile_status == 'applied' || world.init_profile_status == 'applied-no-tools'"
+          target: init_readiness
+          effects:
+            - set:
+                init_readiness_result: {}
+                init_readiness_ok: false
+                init_readiness_output: ""
+                init_profile_status: "checking-readiness"
+                last_error: ""
+        - default: true
+          target: landing
+          effects:
+            - set: { last_error: "Run project onboarding before readiness." }
       go_code_review:
         - target: code_review
           effects:

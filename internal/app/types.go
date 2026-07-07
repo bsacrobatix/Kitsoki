@@ -930,6 +930,10 @@ type State struct {
 	Intents map[string]Intent `yaml:"intents,omitempty"`
 	// Menu is an explicit list of allowed intent names overriding the default.
 	Menu []string `yaml:"menu,omitempty"`
+	// Prerequisites declares deterministic setup/readiness checks for this
+	// room. The runtime evaluates them against the current world every time the
+	// room renders and surfaces unmet checks as a standard warning block.
+	Prerequisites []Prerequisite `yaml:"prerequisites,omitempty"`
 	// DefaultIntent names the free-text sink for this state: when an utterance
 	// matches no intent deterministically or semantically, the engine routes it
 	// straight to this intent with the whole input filling its single required
@@ -1047,6 +1051,42 @@ type State struct {
 	// nested under an import alias (e.g. gitops.conflict when git-ops is imported)
 	// — the gate's reachability walk descends into nested states.
 	InterceptDrive string `yaml:"intercept_drive,omitempty"`
+}
+
+// Prerequisite is a room-local deterministic setup/readiness check. It is
+// intentionally view-like data, not a host call: stories decide which world
+// facts mean "configured", and the engine makes the warning/help affordance
+// consistent across TUI, web, snapshots, and flow evidence.
+type Prerequisite struct {
+	// ID is a stable author-owned identifier, unique within one state.
+	ID string `yaml:"id"`
+	// Title is the short operator-facing name for the missing setup item.
+	Title string `yaml:"title"`
+	// Severity controls warning styling. Empty means "warning".
+	Severity string `yaml:"severity,omitempty"`
+	// When gates whether this prerequisite is relevant in the current room
+	// context. Empty means always relevant.
+	When string `yaml:"when,omitempty"`
+	// SatisfiedWhen is the deterministic check expression. When it evaluates
+	// false, the prerequisite is surfaced as unmet.
+	SatisfiedWhen string `yaml:"satisfied_when"`
+	// Summary is a short reason shown beside the title.
+	Summary string `yaml:"summary,omitempty"`
+	// Help gives the operator concrete remediation guidance.
+	Help string `yaml:"help,omitempty"`
+	// Action optionally points at an existing room intent that helps satisfy
+	// the prerequisite. The runtime may surface it as the recommended action.
+	Action *PrerequisiteAction `yaml:"action,omitempty"`
+}
+
+// PrerequisiteAction describes an existing intent that helps satisfy a
+// prerequisite. It does not create a new transition; the intent must already be
+// declared by the story and reachable in rooms where the action should work.
+type PrerequisiteAction struct {
+	Label  string         `yaml:"label,omitempty"`
+	Hint   string         `yaml:"hint,omitempty"`
+	Intent string         `yaml:"intent,omitempty"`
+	Slots  map[string]any `yaml:"slots,omitempty"`
 }
 
 // Transition is one entry in a state's on[intent] list.

@@ -85,6 +85,7 @@ states:
     on_enter:        [ <Effect>, ... ]               # fires on entry
     intents:         { ... local Intent overrides ... }
     menu:            [ <intent>, ... ]               # override default menu ordering
+    prerequisites:   [ <Prerequisite>, ... ]          # room setup/readiness checks
     relevant_world:  [ <world-key>, ... ]            # pinned in TUI location indicator
     relevant_slots:  [ <slot-name>, ... ]
     timeout:         <TimeoutDef>                    # optional auto-transition
@@ -102,6 +103,40 @@ Rules:
 - `relevant_world` entries must exist in the top-level `world:` schema.
 - Intent names in `on:` must be declared globally (`intents:`), locally
   (`states.X.intents:`), or be the wildcard `"*"`.
+
+### `prerequisites:` — room setup/readiness checks
+
+Use `prerequisites:` when a room is usable but should clearly warn that a
+deterministic setup item is missing. The check is room-centric: it can live on
+any state, including a buried room or an imported child story. Parent
+prerequisites are inherited by nested child states.
+
+```yaml
+states:
+  landing:
+    prerequisites:
+      - id: project-onboarding
+        title: "Project onboarding"
+        severity: warning          # info | warning | warn | error; default warning
+        when: "world.project_id != ''"
+        satisfied_when: "world.onboarding_status == 'applied'"
+        summary: "Project setup has not been applied."
+        help: "Run onboarding to write .kitsoki config and readiness checks."
+        action:
+          label: "onboard"
+          hint: "discover, review, and apply local setup"
+          intent: go_init          # must be a declared intent
+          slots: { target: "{{ world.repo_root }}" }
+```
+
+`when:` and `satisfied_when:` are bare expr-lang boolean expressions. `title`,
+`summary`, `help`, `action.label`, `action.hint`, and action slot values may use
+`{{ ... }}` templates. At render time the engine computes
+`prerequisites.all`, `prerequisites.met`, `prerequisites.unmet`, and
+`prerequisites.has_unmet` for templates, and automatically prepends a warning
+block when any relevant prerequisite is unmet. If the current typed view already
+has a single-choice action widget, prerequisite actions are prepended there as
+recommended setup actions; they do not create new transitions.
 
 ### `operation:` — abandonable task-local world
 

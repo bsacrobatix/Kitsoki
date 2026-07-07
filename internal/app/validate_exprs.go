@@ -50,6 +50,30 @@ func validateStateExprs(file, prefix string, states map[string]*State, addErr fu
 		}
 		statePath := joinPath(prefix, name)
 
+		for i, pr := range s.Prerequisites {
+			loc := fmt.Sprintf("prerequisites[%d]", i)
+			if pr.When != "" {
+				if _, err := expr.CompileBool(pr.When); err != nil {
+					addErr("state %q %s: when %q: %v", statePath, loc, pr.When, err)
+				}
+			}
+			if pr.SatisfiedWhen != "" {
+				if _, err := expr.CompileBool(pr.SatisfiedWhen); err != nil {
+					addErr("state %q %s: satisfied_when %q: %v", statePath, loc, pr.SatisfiedWhen, err)
+				}
+			}
+			validateEffectValue(pr.Title, statePath, loc, "title", addErr)
+			validateEffectValue(pr.Summary, statePath, loc, "summary", addErr)
+			validateEffectValue(pr.Help, statePath, loc, "help", addErr)
+			if pr.Action != nil {
+				validateEffectValue(pr.Action.Label, statePath, loc, "action.label", addErr)
+				validateEffectValue(pr.Action.Hint, statePath, loc, "action.hint", addErr)
+				for _, key := range sortedKeys(pr.Action.Slots) {
+					validateEffectValue(pr.Action.Slots[key], statePath, loc, fmt.Sprintf("action.slots.%s", key), addErr)
+				}
+			}
+		}
+
 		// on_enter effects.
 		for i, eff := range s.OnEnter {
 			validateEffectExprs(eff, statePath, fmt.Sprintf("on_enter[%d]", i), addErr)

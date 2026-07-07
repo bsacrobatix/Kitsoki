@@ -548,10 +548,11 @@ func ToContext(env expr.Env) pongo2.Context {
 			"id":   env.Run.ID,
 			"turn": env.Run.Turn,
 		},
-		"args":  wrapNonScalar(env.Args),
-		"menu":  wrapNonScalar(env.Menu),
-		"item":  wrapNonScalar(env.Item),
-		"state": wrapNonScalar(state),
+		"args":          wrapNonScalar(env.Args),
+		"menu":          wrapNonScalar(env.Menu),
+		"prerequisites": wrapNonScalar(env.Prerequisites),
+		"item":          wrapNonScalar(env.Item),
+		"state":         wrapNonScalar(state),
 	}
 
 	if env.Available != nil {

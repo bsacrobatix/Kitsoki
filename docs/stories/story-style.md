@@ -139,6 +139,23 @@ Conventions:
     when:  "!available('start_journey')"
   ```
 
+  Use room-level `prerequisites:` instead when the missing thing is setup or
+  readiness for the whole room, not just one action. A prerequisite is declared
+  beside the state, evaluates deterministically from `world.*`, and the runtime
+  renders the warning/help block consistently in TUI, web, screenshots, and flow
+  output:
+
+  ```yaml
+  prerequisites:
+    - id: project-onboarding
+      title: "Project onboarding"
+      satisfied_when: "world.init_profile_status == 'applied'"
+      summary: "Local setup has not been applied."
+      action:
+        label: "onboard"
+        intent: go_init
+  ```
+
 - **`look` is always last** and always `target: .`. It needs no hint.
 - Don't number the items. Selection highlight is the renderer's job.
 
