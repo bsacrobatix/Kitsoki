@@ -248,6 +248,44 @@ describe("useRunStore — live event appending", () => {
     store.teardown();
     expect(unsubCalled).toBe(true);
   });
+
+  it("marks terminal when an operation waiting event lands over the live stream", async () => {
+    let capturedCallback: ((e: TraceEvent) => void) | null = null;
+    const liveSource: DataSource = {
+      listSessions: () => Promise.resolve([SNAPSHOT.session]),
+      getSession: () => Promise.resolve({ ...SNAPSHOT.session, terminal: false }),
+      getApp: () => Promise.resolve(SNAPSHOT.app),
+      getMermaid: () => Promise.resolve(SNAPSHOT.mermaid),
+      getTrace: () => Promise.resolve({ events: [], last_turn: 0 }),
+      subscribe: (_sessionId, onEvent) => {
+        capturedCallback = onEvent;
+        return () => undefined;
+      },
+      ...writeStubs,
+    };
+
+    const store = useRunStore();
+    await store.hydrate(liveSource, "sess-1");
+    expect(store.terminal).toBe(false);
+
+    capturedCallback!({
+      time: new Date().toISOString(),
+      level: "info",
+      msg: "operation.waiting",
+      session_id: "sess-1",
+      turn: 5,
+      state_path: "testing",
+      attrs: {
+        operation_id: "bugfix_full",
+        status: "waiting",
+        terminal_state: "__exit__needs-human",
+        stop_reason: "needs-human",
+      },
+    });
+
+    expect(store.terminal).toBe(true);
+    expect(store.currentStatePath).toBe("__exit__needs-human");
+  });
 });
 
 // ---- currentStatePath bug fix ---------------------------------------------
