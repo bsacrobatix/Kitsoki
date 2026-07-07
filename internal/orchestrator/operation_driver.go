@@ -42,7 +42,7 @@ func (o *Orchestrator) DriveOperation(ctx context.Context, sid app.SessionID) (*
 			outcome.StopReason = "operation-" + status
 			return outcome, nil
 		}
-		if mode := operationDriverString(handle, "mode"); mode != "" && mode != "autonomous" {
+		if mode := operationDriverString(handle, "mode"); !operationDriverModeDrivable(mode) {
 			outcome.StopReason = "operation-not-autonomous"
 			return outcome, nil
 		}
@@ -134,6 +134,15 @@ func operationDriverString(handle map[string]any, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(fmt.Sprint(v))
+}
+
+func operationDriverModeDrivable(mode string) bool {
+	switch mode {
+	case "", "autonomous", "supervised":
+		return true
+	default:
+		return false
+	}
 }
 
 func operationDriverIntentBase(name string) string {

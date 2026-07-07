@@ -95,6 +95,66 @@ states:
 	require.Equal(t, "done", handle["terminal_state"])
 }
 
+func TestDriveOperation_SupervisedStopsAtCheckpoint(t *testing.T) {
+	const yamlSrc = `
+app:
+  id: operation-driver-supervised
+  version: 0.1.0
+intents:
+  start: {}
+  accept: {}
+  approve: {}
+  revise: {}
+root: idle
+operations:
+  demo_run:
+    title: Demo run
+    mode: supervised
+    execution_mode: one-shot
+    run_in_background: true
+states:
+  idle:
+    on:
+      start:
+        - target: drafting
+          operation: demo_run
+  drafting:
+    on:
+      accept:
+        - target: review
+  review:
+    on:
+      approve:
+        - target: done
+      revise:
+        - target: drafting
+  done:
+    terminal: true
+`
+	orch, sid := newOperationDriverTestOrchestrator(t, yamlSrc)
+	ctx := context.Background()
+
+	started, err := orch.SubmitDirect(ctx, sid, "start", nil)
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("drafting"), started.NewState)
+
+	drive, err := orch.DriveOperation(ctx, sid)
+	require.NoError(t, err)
+	require.Equal(t, 1, drive.Turns)
+	require.Equal(t, "no-driver-intent", drive.StopReason)
+	require.Equal(t, "accept", drive.LastIntent)
+	require.NotNil(t, drive.Final)
+	require.Equal(t, app.StatePath("review"), drive.Final.NewState)
+	requireOperationDriverProvenance(t, drive.Final.Events)
+
+	journey, err := orch.LoadJourney(sid)
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("review"), journey.State)
+	handle := requireOperationDriverHandle(t, journey)
+	require.Equal(t, "running", handle["status"])
+	require.Equal(t, "supervised", handle["mode"])
+}
+
 func TestDriveOperation_StopsOnWaitingHandle(t *testing.T) {
 	const yamlSrc = `
 app:
