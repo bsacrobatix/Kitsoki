@@ -13,6 +13,7 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/jobs"
+	"kitsoki/internal/journal"
 	"kitsoki/internal/store"
 	"kitsoki/internal/tui/blocks"
 )
@@ -204,7 +205,7 @@ func handleWorkArtifactSlash(m RootModel) (RootModel, string, tea.Cmd) {
 		}
 		return m, r.SlashOutput("(work artifact: current operation has no terminal artifact)"), nil
 	}
-	updated, cmd := m.handleOpenSlash([]string{artifact})
+	updated, cmd := m.handleOpenSlash([]string{operationArtifactOpenPath(m, artifact)})
 	next, ok := updated.(RootModel)
 	if !ok {
 		return m, r.SlashOutput("(work artifact: open command failed)"), cmd
@@ -221,6 +222,35 @@ func operationArtifactForCurrentOperation(m RootModel) string {
 		return ""
 	}
 	return operationRunString(handle, "terminal_artifact")
+}
+
+func operationArtifactOpenPath(m RootModel, artifact string) string {
+	if path := operationArtifactPathFromJournal(m, artifact); path != "" {
+		return path
+	}
+	return artifact
+}
+
+func operationArtifactPathFromJournal(m RootModel, artifact string) string {
+	if m.journalReader == nil || strings.TrimSpace(artifact) == "" {
+		return ""
+	}
+	seq, errFn := m.journalReader.ReplayTyped(m.sid)
+	for entry := range seq {
+		if entry.Kind != journal.KindArtifactEmitted {
+			continue
+		}
+		var ev journal.ArtifactEvent
+		if err := json.Unmarshal(entry.Body, &ev); err != nil {
+			continue
+		}
+		if ev.ID == artifact && strings.TrimSpace(ev.Path) != "" {
+			_ = errFn()
+			return ev.Path
+		}
+	}
+	_ = errFn()
+	return ""
 }
 
 func workRowsForCurrentOperation(m RootModel) []workRow {

@@ -418,6 +418,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			// Re-bind the locals the rest of runCmd's TUI / resume code uses.
 			s := rt.Store
 			jw := rt.Journal
+			jr := rt.JournalRead
 			jobStore := rt.JobStore
 			rawChatStore := rt.ChatStore
 			orch := rt.Orch
@@ -585,6 +586,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 					tui.WithJobStore(jobStore),
 					tui.WithChatStore(rawChatStore),
 					tui.WithJournalWriter(jw),
+					tui.WithJournalReader(jr),
 					tui.WithTraceHistory(func() (store.History, error) { return s.LoadHistory(sid) }),
 					tui.WithBugTicketRepo(ticketRepo),
 					tui.WithBugPrivacyChecker(bugPrivacyCheckerFromConfig(webCfg, appPath)),
@@ -765,6 +767,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				tui.WithJobStore(jobStore),
 				tui.WithChatStore(rawChatStore),
 				tui.WithJournalWriter(jw),
+				tui.WithJournalReader(jr),
 				tui.WithInitialTypedView(initialTypedView, initialTypedEnv, initialTypedRR),
 				tui.WithTraceHistory(func() (store.History, error) { return s.LoadHistory(sid) }),
 				tui.WithBugTicketRepo(ticketRepo),

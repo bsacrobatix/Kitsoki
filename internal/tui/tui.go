@@ -371,6 +371,11 @@ type RootModel struct {
 	// Nil disables journal writes (back-compat default for tests).
 	journalWriter journal.Writer
 
+	// journalReader, when non-nil, lets read-only TUI affordances resolve
+	// typed session facts that are not part of the event history, such as
+	// artifact.emitted handle -> path mappings for /work artifact.
+	journalReader journal.Reader
+
 	// traceRing is an optional in-memory ring buffer.  When non-nil and
 	// traceFileExternal is false, buildMetaTurnContext snapshots it to
 	// traceFilePath on every meta-mode Send so the agent can Read the file
@@ -634,6 +639,13 @@ func WithExternalTraceFile(path string) RootModelOption {
 // backward compatibility for tests and headless callers.
 func WithJournalWriter(jw journal.Writer) RootModelOption {
 	return func(m *RootModel) { m.journalWriter = jw }
+}
+
+// WithJournalReader injects a read-only journal.Reader into the RootModel.
+// When nil, surfaces that can use typed journal entries fall back to their
+// legacy event/world data.
+func WithJournalReader(jr journal.Reader) RootModelOption {
+	return func(m *RootModel) { m.journalReader = jr }
 }
 
 // WithInitialTypedView wires the typed-view payload for the initial

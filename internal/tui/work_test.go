@@ -16,6 +16,7 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/jobs"
+	"kitsoki/internal/journal"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
@@ -319,7 +320,8 @@ func TestWorkSlashListsCurrentOperation(t *testing.T) {
 func TestWorkDriveSlashDrivesCurrentOperation(t *testing.T) {
 	cwd := t.TempDir()
 	t.Chdir(cwd)
-	artifactPath := filepath.Join(cwd, "done_artifact")
+	artifactPath := filepath.Join(cwd, "artifacts", "done.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(artifactPath), 0o755))
 	require.NoError(t, os.WriteFile(artifactPath, []byte("# done\n"), 0o644))
 
 	const yamlSrc = `
@@ -385,6 +387,23 @@ states:
 	orch := orchestrator.New(def, mach, s, nil)
 	sid, err := orch.NewSession(context.Background())
 	require.NoError(t, err)
+	journalStore := journal.NewMemStore()
+	journalWriter := journal.NewMemWriter(journalStore)
+	journalReader := journal.NewMemReader(journalStore)
+	artifactBody, err := json.Marshal(journal.ArtifactEvent{
+		ID:        "done_artifact",
+		Path:      artifactPath,
+		Producer:  "host.artifacts_dir",
+		CreatedAt: time.Now(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, journalWriter.Append(journal.Entry{
+		Session: sid,
+		Turn:    0,
+		Seq:     0,
+		Kind:    journal.KindArtifactEmitted,
+		Body:    artifactBody,
+	}))
 	started, err := orch.SubmitDirect(context.Background(), sid, "start", nil)
 	require.NoError(t, err)
 	require.Equal(t, app.StatePath("reproducing"), started.NewState)
@@ -393,6 +412,7 @@ states:
 	require.NoError(t, err)
 	rm := tuipkg.NewRootModel(orch, sid, "", initialView,
 		tuipkg.WithResumedJourney(started.NewState, orch.CurrentWorld(sid), started.TurnNumber),
+		tuipkg.WithJournalReader(journalReader),
 	)
 	var opened []string
 	tuipkg.SetOpenArtifactForTest(&rm, func(path string) error {
@@ -432,7 +452,7 @@ states:
 	model = runTurnBlocking(t, model, "/work artifact")
 	tx = extractTranscript(t, model)
 	require.Equal(t, []string{artifactPath}, opened)
-	require.Contains(t, tx, "open: opened done_artifact")
+	require.Contains(t, tx, "open: opened "+artifactPath)
 }
 
 func transcriptAfter(t *testing.T, text, marker string) string {
