@@ -57,6 +57,18 @@ kitsoki run --harness live
 Provider/model profiles are covered in
 [harness profiles](architecture/harness-profiles.md).
 
+If the default provider is not usable yet, run the guided local profile setup
+from the same `kitsoki run` session:
+
+```text
+provider
+```
+
+That path checks installed/logged-in backend CLIs and credential env/file
+sources, shows a patch preview, and writes only the gitignored
+`.kitsoki.local.yaml` after you confirm. It records env-var references such as
+`${OPENAI_API_KEY}`, never raw keys.
+
 ## 3. Onboard your repo
 
 Run Kitsoki from the repository you want to onboard:

@@ -63,6 +63,31 @@ effective config:
 A missing local file contributes nothing, so a fresh checkout runs off the
 shared baseline alone.
 
+### Guided first-run setup
+
+The dev-story landing room includes a no-LLM setup path for the local override:
+
+```text
+provider
+```
+
+or:
+
+```text
+setup local harness profile
+```
+
+It runs `profile_setup_discover.py` to inspect the checked-in and local config,
+installed backend binaries/`KITSOKI_AGENT_*_BIN` overrides, and credential
+sources by presence only. The review room shows the effective profiles, backend
+status, common env-var presence, and a redacted `.kitsoki.local.yaml` patch.
+Nothing is written until the operator confirms.
+
+Apply writes only `.kitsoki.local.yaml`. It can set `default_profile` to an
+existing profile, add a codex/OpenAI-compatible profile that references an env
+var such as `${OPENAI_API_KEY}`, or add a `builtin.local_llm` profile. It refuses
+raw key material and refuses to write the local override if git tracks it.
+
 ```yaml
 # .kitsoki.yaml  —  checked in; the baseline that must load for everyone.
 default_profile: claude-native          # the profile new sessions start on

@@ -75,6 +75,10 @@ Commands print **which source** supplied credentials (never the values).
 - **Prefer env/file over flags for secrets** — argv is visible to other local
   processes; the `--client-secret` flag exists for scripting but the env file
   is the convention.
+- **Harness profiles name env vars, not key values.** The dev-story local
+  harness setup asks for names such as `OPENAI_API_KEY` or `SYNTHETIC_API_KEY`
+  and writes `${VAR}` references into `.kitsoki.local.yaml`; it refuses raw
+  key-looking input.
 - **CI**: platform secrets map to the same env names (e.g. GitHub Actions
   `secrets.*` → `env:`); no checked-in credential files, no new names.
 - **Services**: the daemon env file (`/etc/kitsoki/gh-agent.env`) uses the

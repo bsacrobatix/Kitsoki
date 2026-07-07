@@ -691,6 +691,24 @@ world:
   init_profile_validation: { type: object, default: {} }
   init_profile_json:     { type: string, default: "" }
 
+  # ── First-run local harness/profile setup (rooms/profile_setup.yaml) ─────
+  # Deterministic no-LLM setup for a user's gitignored `.kitsoki.local.yaml`.
+  # Discovery reports profile/backend/env presence only; apply writes env
+  # references such as `${OPENAI_API_KEY}` and never stores raw secrets.
+  profile_setup_target_path: { type: string, default: "" }
+  profile_setup_status: { type: string, default: "idle" }
+  profile_setup_discovery: { type: object, default: {} }
+  profile_setup_effective_profiles: { type: list, default: [] }
+  profile_setup_default_profile: { type: string, default: "" }
+  profile_setup_candidate_action: { type: string, default: "" }
+  profile_setup_candidate_profile: { type: object, default: {} }
+  profile_setup_patch_preview: { type: string, default: "" }
+  profile_setup_warnings: { type: list, default: [] }
+  profile_setup_apply_result: { type: object, default: {} }
+  profile_setup_apply_ok: { type: bool, default: false }
+  profile_setup_apply_output: { type: string, default: "" }
+  profile_setup_error: { type: string, default: "" }
+
   # ── Design pipeline (rooms/design*.yaml) ───────────────────────
   # 4-stage pipeline: intake → search → refine → draft+publish.
   # Per-session scratch dir is `design_workspace` — NOT world.workdir
@@ -918,6 +936,13 @@ intents:
     priority: 31
     slots:
       target: { type: string, required: false, description: "Path to the repository to onboard. Empty ⇒ the current checkout." }
+  go_profile_setup:
+    title: "Local Harness Profile Setup"
+    description: "Discover installed/logged-in harness backends and review a local .kitsoki.local.yaml profile patch."
+    examples: ["setup local harness profile", "configure provider profile", "first run provider setup", "local llm profile", "create local harness profile"]
+    priority: 32
+    slots:
+      target: { type: string, required: false, description: "Path to the Kitsoki checkout/config root. Empty ⇒ current checkout." }
   review_story_pack:
     title: "Story Packs"
     description: "Choose the first-run story pack for project onboarding."
@@ -1156,6 +1181,50 @@ intents:
     description: "(internal) onboarding apply completed — show the result."
     examples: []
     priority: 1
+  profile_setup_discovered:
+    description: "(internal) local harness profile discovery completed — show review."
+    examples: []
+    priority: 1
+  use_existing_profile:
+    title: "Use Existing Profile"
+    description: "Make an existing discovered harness profile the local default."
+    examples: []
+    priority: 50
+    slots:
+      profile: { type: string, required: true, description: "Existing profile name to set as default_profile." }
+  configure_openai_profile:
+    title: "Configure OpenAI-Compatible Profile"
+    description: "Create or update a codex/OpenAI-compatible local profile using env-var references only."
+    examples: []
+    priority: 50
+    slots:
+      profile_name: { type: string, required: true, description: "Local profile name, for example codex-native or synthetic-codex." }
+      env_var: { type: string, required: true, description: "Environment variable name containing the API key; never the raw key." }
+      base_url: { type: string, required: false, description: "Optional OpenAI-compatible base URL." }
+      model: { type: string, required: true, description: "Default model id for the profile." }
+      models_endpoint: { type: string, required: false, description: "Optional /models endpoint URL for the model picker." }
+  configure_local_llm_profile:
+    title: "Configure Local LLM Profile"
+    description: "Create or update a builtin.local_llm profile for a local model id."
+    examples: []
+    priority: 50
+    slots:
+      profile_name: { type: string, required: true, description: "Local profile name, for example llama-local." }
+      model: { type: string, required: true, description: "Local model id exposed by the local_llm plugin." }
+  confirm_profile_setup:
+    title: "Apply Local Harness Profile"
+    description: "Write the reviewed patch to .kitsoki.local.yaml."
+    examples: ["apply profile setup", "confirm provider profile"]
+    priority: 50
+  profile_setup_applied:
+    description: "(internal) local harness profile apply completed — show result."
+    examples: []
+    priority: 1
+  skip_profile_setup:
+    title: "Skip Local Harness Profile Setup"
+    description: "Exit local harness profile setup without writing files."
+    examples: ["skip profile setup"]
+    priority: 20
   run_readiness:
     title: "Run Onboarding Readiness"
     description: "Run the generated post-apply readiness verifier and update the project profile with the result."
@@ -1669,6 +1738,7 @@ exports:
     - go_ideas
     - go_model_eval
     - go_init
+    - go_profile_setup
     - go_deploy
     - go_observability
     - go_incident

@@ -73,6 +73,45 @@ For one-off custom scopes, discovery still accepts
 `--stories`/`stories=`/`focus=` and normalizes aliases such as `bugfixing` →
 `bugfix` and `gitops` → `git-ops`; those are recorded as a custom pack.
 
+## Local harness profile setup
+
+The landing room also exposes a deterministic **provider** action:
+
+```text
+provider
+```
+
+or the equivalent free-text escape hatch:
+
+```text
+setup local harness profile
+```
+
+That enters `profile_setup_discover`, which reads `.kitsoki.yaml` plus
+`.kitsoki.local.yaml`, detects backend binaries (`claude`, `codex`, `copilot`,
+`agy`) and their `KITSOKI_AGENT_*_BIN` overrides, and reports only credential
+source/presence for common env vars and local auth files. It does not run a
+model or call a provider.
+
+The graph is:
+
+```mermaid
+flowchart LR
+    landing -->|"provider"| profile_setup_discover
+    profile_setup_discover -->|"on_enter: profile_setup_discover.py"| profile_setup_review
+    profile_setup_review -->|"confirm"| profile_setup_apply
+    profile_setup_apply -->|"on_enter: profile_setup_apply.py"| profile_setup_done
+    profile_setup_apply --> profile_setup_apply_failed
+```
+
+`profile_setup_review` is the write gate. The operator can accept the
+recommended patch, set an existing discovered profile as `default_profile`,
+create a codex/OpenAI-compatible profile by naming an env var such as
+`OPENAI_API_KEY`, or create a `builtin.local_llm` profile by naming the local
+model id. Apply writes only `.kitsoki.local.yaml`, preserves unrelated local
+keys where possible, refuses raw secret values, and refuses to write the local
+override if git tracks it.
+
 ## The apply step — two host calls
 
 `init_apply.on_enter` runs two `host.run` invocations, in order:
@@ -167,11 +206,17 @@ The walk is covered by focused no-LLM flows such as
 [`flows/init_git_metadata.yaml`](../../stories/dev-story/flows/init_git_metadata.yaml),
 [`flows/init_node_pnpm_project.yaml`](../../stories/dev-story/flows/init_node_pnpm_project.yaml),
 [`flows/init_python_project.yaml`](../../stories/dev-story/flows/init_python_project.yaml),
-and [`flows/init_transcript_seed.yaml`](../../stories/dev-story/flows/init_transcript_seed.yaml).
+[`flows/init_transcript_seed.yaml`](../../stories/dev-story/flows/init_transcript_seed.yaml),
+and the profile setup flows
+[`flows/profile_setup_existing_profile.yaml`](../../stories/dev-story/flows/profile_setup_existing_profile.yaml),
+[`flows/profile_setup_openai_env_happy_path.yaml`](../../stories/dev-story/flows/profile_setup_openai_env_happy_path.yaml),
+[`flows/profile_setup_skip_no_credentials.yaml`](../../stories/dev-story/flows/profile_setup_skip_no_credentials.yaml), and
+[`flows/profile_setup_apply_failed.yaml`](../../stories/dev-story/flows/profile_setup_apply_failed.yaml).
 They stub the discovery, apply, and toolkit-install `host.run` calls (by their
-`id`: `discover`, `apply`, `install_tools`) and assert routing, generated paths,
-tool commands, transcript seed handoff, and toolkit-install failure handling —
-all with no real LLM and without touching a real checkout:
+`id`: `discover`, `apply`, `install_tools`, `profile_setup_discover`,
+`profile_setup_apply`) and assert routing, generated paths, tool commands,
+transcript seed handoff, local profile patch gating, and failure handling — all
+with no real LLM and without touching a real checkout:
 
 ```sh
 kitsoki test flows stories/dev-story/app.yaml

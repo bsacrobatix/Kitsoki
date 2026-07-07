@@ -54,6 +54,15 @@ states:
     description: "dev-story — the free-form workbench. Describe what you want, or pick a quick action."
     relevant_world: [ticket_id, ticket_title, ticket_type, design_file, last_pr_url, status, inbox_unread, workdir, feature_branch, captured, landing_request, landing_note]
     prerequisites:
+      - id: local-harness-profile
+        title: "Local harness profile"
+        satisfied_when: "world.profile_setup_status == 'configured' || world.profile_setup_status == 'skipped'"
+        summary: "This session has not checked local harness profile setup."
+        help: "Run local harness profile setup to inspect installed/logged-in backends and optionally write .kitsoki.local.yaml."
+        action:
+          label: "provider"
+          hint: "review installed/logged-in harnesses and local profile patch"
+          intent: go_profile_setup
       - id: project-onboarding
         title: "Project onboarding"
         satisfied_when: "world.init_profile_status == 'applied' || world.init_profile_status == 'applied-no-tools'"
@@ -302,6 +311,9 @@ states:
             - label:  "model eval"
               hint:   "prepare model/harness effectiveness, speed, and cost reports"
               intent: go_model_eval
+            - label:  "provider"
+              hint:   "inspect installed/logged-in harnesses and write .kitsoki.local.yaml"
+              intent: go_profile_setup
             - label:  "onboard"
               hint:   "discover a project profile, review it, then apply local setup"
               intent: go_init
@@ -362,6 +374,29 @@ states:
       # synthesizes an arc for this intent name if one isn't already present,
       # so this hand-authored version is what actually runs.
       landing_capture:
+        # Local harness/profile setup escape hatch. This is intentionally
+        # separate from project onboarding: it only inspects local backend
+        # availability and writes the user's gitignored `.kitsoki.local.yaml`
+        # after a review gate.
+        - when: "hasPrefix(lower(trim(slots.request)), 'setup local harness') || hasPrefix(lower(trim(slots.request)), 'configure provider') || hasPrefix(lower(trim(slots.request)), 'first run provider') || hasPrefix(lower(trim(slots.request)), 'local llm profile')"
+          target: profile_setup_discover
+          effects:
+            - set:
+                profile_setup_target_path: "{{ world.repo_root }}"
+                profile_setup_status: "discovering"
+                profile_setup_discovery: {}
+                profile_setup_effective_profiles: []
+                profile_setup_default_profile: ""
+                profile_setup_candidate_action: ""
+                profile_setup_candidate_profile: {}
+                profile_setup_patch_preview: ""
+                profile_setup_warnings: []
+                profile_setup_apply_result: {}
+                profile_setup_apply_ok: false
+                profile_setup_apply_output: ""
+                profile_setup_error: ""
+                last_error: ""
+                prev_state: "landing"
         # Onboarding command escape hatch. landing's default_intent captures
         # unmatched prose into `landing_capture` before an LLM router runs, so
         # natural utterances like "onboard ~/code/slidey" need a deterministic
@@ -501,6 +536,25 @@ states:
         - target: model_eval
           effects:
             - set: { prev_state: "landing" }
+      go_profile_setup:
+        - target: profile_setup_discover
+          effects:
+            - set:
+                prev_state: "landing"
+                last_error: ""
+                profile_setup_target_path: "{{ slots.target }}"
+                profile_setup_status: "discovering"
+                profile_setup_discovery: {}
+                profile_setup_effective_profiles: []
+                profile_setup_default_profile: ""
+                profile_setup_candidate_action: ""
+                profile_setup_candidate_profile: {}
+                profile_setup_patch_preview: ""
+                profile_setup_warnings: []
+                profile_setup_apply_result: {}
+                profile_setup_apply_ok: false
+                profile_setup_apply_output: ""
+                profile_setup_error: ""
       go_init:
         - target: init_discover
           effects:
