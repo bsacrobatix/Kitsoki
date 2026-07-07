@@ -145,7 +145,7 @@ onboarding:
 	if err != nil {
 		t.Fatalf("story-packs list: %v\n%s", err, out)
 	}
-	for _, want := range []string{"cyber-repo", "core-setup", "enabled_stories: setup, bugfix, pr-refinement, git-ops"} {
+	for _, want := range []string{"cyber-repo", "core-setup", "stories: setup, bugfix, repo-bakeoff, pr-refinement, git-ops", "enabled_stories: setup, bugfix, pr-refinement, git-ops"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("list output missing %q:\n%s", want, out)
 		}

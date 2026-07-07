@@ -5,13 +5,17 @@ description: Use Kitsoki hermetic capsules for deterministic repository/workspac
 
 # Capsules
 
-Capsules are the default way to create reusable git/workspace fixtures in
-Kitsoki. Prefer them over hand-written temp repo setup when the test needs a
-known state rather than testing repo creation itself.
+Capsules are the default way to create reusable git/workspace states in Kitsoki.
+Prefer them over hand-written temp repo setup when the test needs a known state
+rather than testing repo creation itself. Repo-history bug cases are capsules
+too; they currently use the repo-history harness executor instead of
+`internal/capsule` because they need pinned external/private repos and hidden
+oracle overlays.
 
 ## Workflow
 
-1. Check `capsules/<name>/capsule.yaml` before creating a new fixture.
+1. Run `go run ./cmd/kitsoki capsule list` and check
+   `capsules/<name>/capsule.yaml` before creating a new fixture.
 2. In Go tests, open fixtures with:
 
 ```go
@@ -22,7 +26,11 @@ repo := capsuletest.Open(t, "clean-repo")
    `internal/capsule` or the CLI.
 4. Author new reusable fixtures under `capsules/<name>/capsule.yaml` with
    `source.synthetic: true`, `network: none`, and verification probes.
-5. Run or recommend focused validation for changed packages and
+5. For repo-history bugs, add rows under
+   `tools/bugfix-bakeoff/external/projects/<project>/manifest.yaml`, list them
+   with `go run ./cmd/kitsoki capsule list --kind repo-history`, and validate
+   with `make history-smoke`.
+6. Run or recommend focused validation for changed packages and
    `go run ./cmd/kitsoki capsule verify <name>` for new capsules.
 
 ## When not to use a capsule
@@ -37,9 +45,11 @@ Keep bespoke setup when the behavior under test is:
 ## Useful commands
 
 ```sh
+go run ./cmd/kitsoki capsule list
 go run ./cmd/kitsoki capsule open clean-repo
 go run ./cmd/kitsoki capsule verify clean-repo
 go run ./cmd/kitsoki capsule close /tmp/opened-capsule
+make repo-history-capsules
 ```
 
 ## Existing starter capsules

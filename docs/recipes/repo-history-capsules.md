@@ -1,9 +1,16 @@
-# Bugfix Oracle Capsules
+# Repo History Capsules
 
-Bugfix oracle capsules are reusable historical bug cases for the dev-story
-onboarding and repo-bakeoff path. Each capsule is one manifest bug under
-`tools/bugfix-bakeoff/external/projects/<project>/manifest.yaml` plus its hidden
-oracle test. The harness keeps the test separate from the fix:
+Repo-history capsules are reusable historical bug cases for dev-story
+onboarding and the `repo-bakeoff` path. They are capsules in the same Kitsoki
+sense as the synthetic fixtures under `capsules/`: named, reusable repository
+states with deterministic verification. The current executor is the
+repo-history harness, because core `kitsoki capsule open` still only
+materializes local synthetic fixtures.
+
+Each promoted capsule comes from one bug row under
+`tools/bugfix-bakeoff/external/projects/<project>/manifest.yaml` plus its
+hidden oracle test. The harness keeps the oracle separate from the candidate
+fix:
 
 1. GREEN: the target checkout and normal test/dependency setup are usable.
 2. RED: at `baseline_sha`, overlay only the hidden oracle and require failure.
@@ -11,7 +18,7 @@ oracle test. The harness keeps the test separate from the fix:
    from `fix_sha` and require the oracle to pass.
 4. GREEN: score a candidate worktree with the same hidden oracle.
 
-The promoted corpus currently has ten capsules:
+The promoted corpus currently has ten repo-history capsules:
 
 - `query-string`: `qs1`, `qs2`, `qs3` from public GitHub issues/PRs.
 - `gears-rust`: `bug1`, `bug4`, `bug5`, `bug9` from the private Rust reference
@@ -22,9 +29,13 @@ The promoted corpus currently has ten capsules:
 List the catalog:
 
 ```sh
-make oracle-capsules
-python3 tools/bugfix-bakeoff/external/bench.py oracle-capsules
+go run ./cmd/kitsoki capsule list --kind repo-history
+make repo-history-capsules
+python3 tools/bugfix-bakeoff/external/bench.py capsules
 ```
+
+`make oracle-capsules` and `bench.py oracle-capsules` remain compatibility
+aliases, but new docs and scripts should use repo-history capsule names.
 
 Verify a public project:
 
@@ -54,5 +65,5 @@ reachable, preflight fails before any model spend. A standalone gears-rust
 checkout with the benchmark history works through the same manifest.
 
 The onboarding starter pack includes `repo-bakeoff`, so a newly onboarded
-project sees this oracle-capsule workflow alongside bugfix, PR refinement,
-setup, and git operations.
+project sees the repo-history capsule workflow alongside setup, bugfix, PR
+refinement, and git operations.

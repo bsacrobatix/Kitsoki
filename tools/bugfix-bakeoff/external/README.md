@@ -41,11 +41,15 @@ and [`projects/kitsoki`](projects/kitsoki) (**kitsoki's own** go+ts dogfood bugs
 `local_only`, folded in from the retired parent harness; the 3 armed fixtures are
 bug9/bug12/bug14, all proven RED@baseline→GREEN@fix via a throwaway local mirror).
 
-The promoted bug rows are also exposed as **bugfix oracle capsules**:
+The promoted bug rows are exposed as **repo-history capsules** in the shared
+Kitsoki capsule catalog. They currently use this harness as their materializer
+because core `kitsoki capsule open` is still limited to local synthetic
+fixtures:
 
 ```sh
-python3 tools/bugfix-bakeoff/external/bench.py oracle-capsules --markdown
-make oracle-capsules
+go run ./cmd/kitsoki capsule list --kind repo-history
+python3 tools/bugfix-bakeoff/external/bench.py capsules --markdown
+make repo-history-capsules
 ```
 
 The current promoted set is 10 capsules: 3 `query-string`, 4 `gears-rust`, and

@@ -1,9 +1,18 @@
 # Hermetic capsules
 
-Capsules are deterministic, local materializations of git/development states.
-They give tests, story fixtures, and future benchmark runners one shared way to
-say: open this repository state, prove it matches, run against it, then tear it
-down.
+Capsules are deterministic, reusable git/development states. They give tests,
+story fixtures, benchmark runners, and agent workspaces one shared way to say:
+open this repository state, prove it matches, run against it, then tear it down.
+
+There is one capsule concept. Different executors may materialize it while the
+substrate grows:
+
+- **Core fixture capsules** live under `capsules/<name>/capsule.yaml` and are
+  opened by `internal/capsule`, `internal/capsuletest`, and `kitsoki capsule`.
+- **Repo-history capsules** are historical bug capsules consumed by
+  `stories/repo-bakeoff` and `tools/bugfix-bakeoff/external`. They currently use
+  the repo-history harness materializer because they need pinned external or
+  private repositories and hidden oracle overlays.
 
 The shipped v1 is intentionally narrow and local-only:
 
@@ -18,10 +27,12 @@ The shipped v1 is intentionally narrow and local-only:
   `mid-rebase-conflict`, `dirty-index`, `stale-worktree`, and
   `diverged-remote`.
 
-Remote pinned repositories, environment image capture, `seal`, flow-test capsule
-bindings, agent workspace providers, product-journey adoption, and Harbor import
-/export are follow-on slices. v1 does not perform live network fetches and does
-not install tools on the host.
+Remote pinned repositories, hidden-oracle overlays, environment image capture,
+`seal`, flow-test capsule bindings, agent workspace providers, product-journey
+adoption, and Harbor import/export are follow-on slices for the core
+materializer. v1 does not perform live network fetches and does not install tools
+on the host. Until those slices land, repo-history capsules remain first-class
+capsules in the catalog but are executed through the repo-history harness.
 
 ## Capsule spec
 
@@ -59,6 +70,14 @@ manifest and CLI output. Probes are shell commands run inside the workspace with
 `expect: zero` or `expect: nonzero`.
 
 ## CLI
+
+List every capsule known in the current Kitsoki checkout, including
+repo-history capsules whose executor is the external bake-off harness:
+
+```sh
+go run ./cmd/kitsoki capsule list
+go run ./cmd/kitsoki capsule list --kind repo-history
+```
 
 Open a capsule into a temp directory:
 

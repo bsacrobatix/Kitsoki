@@ -12,11 +12,11 @@ The shipped references are:
   full no-cost smoke.
 - `kitsoki`: local self-dogfood bugs folded into the same manifest contract.
 
-Together those projects currently expose ten promoted bugfix oracle capsules.
+Together those projects currently expose ten promoted repo-history capsules.
 List them with:
 
 ```sh
-make oracle-capsules
+make repo-history-capsules
 ```
 
 ## 1. Pick Armable Historical Bugs

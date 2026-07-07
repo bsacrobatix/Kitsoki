@@ -159,11 +159,11 @@ def test_resolve_repo_dir_accepts_meta_repo_subdir_or_standalone_checkout():
         assert "repo_subdir does not exist" in resolved["errors"][0]
 
 
-def test_oracle_capsule_catalog_has_the_promoted_ten():
+def test_repo_history_capsule_catalog_has_the_promoted_ten():
     projects = ["query-string", "gears-rust", "kitsoki"]
     manifests = bench.load_project_manifests(projects)
     capsules = [
-        bench.oracle_capsule_record(m, bug)
+        bench.repo_history_capsule_record(m, bug)
         for m in manifests
         for bug in bench.selected_bugs(m)
     ]
@@ -171,6 +171,9 @@ def test_oracle_capsule_catalog_has_the_promoted_ten():
     assert len(capsules) == 10
     assert {"query-string/qs1", "gears-rust/bug1", "kitsoki/bug9"} <= ids
     gears = next(item for item in capsules if item["id"] == "gears-rust/bug1")
+    assert gears["capsule_ref"] == "repo-history/gears-rust/bug1"
+    assert gears["kind"] == "repo-history"
+    assert gears["materializer"] == "bugfix-bakeoff"
     assert gears["repo_modes"] == ["single-repo", "meta-repo"]
     assert gears["repo_envs"][:2] == ["BUGFIX_BAKEOFF_REPO", "BUGFIX_BAKEOFF_META_REPO"]
     assert gears["green_red_green"][1].startswith("RED:")

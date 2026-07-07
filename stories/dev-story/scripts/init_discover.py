@@ -29,9 +29,9 @@ STARTER_STORY_CATALOG = {
         "expansion": "Add narrower project bug policies through profile customizations or prompt overlays.",
     },
     "repo-bakeoff": {
-        "title": "Bugfix oracle capsules",
+        "title": "Repo-history capsules",
         "source_story": "repo-bakeoff",
-        "summary": "Turn historical bug PRs into hidden-oracle capsules, prove RED/GREEN arming, and render live-cell commands.",
+        "summary": "Turn historical bug fixes into capsule records, prove RED/GREEN arming, and render live-cell commands.",
         "expansion": "Use once the repo has 3-10 isolated historical bugs with regression tests or PR-proven oracles.",
     },
     "pr-refinement": {
@@ -51,7 +51,7 @@ STARTER_STORY_CATALOG = {
 STORY_PACKS = {
     "cyber-repo": {
         "title": "Cyber repo starter",
-        "summary": "Focused first-run set for cyber-repo: setup, bugfixing, oracle capsules, PR refinement, and git operations.",
+        "summary": "Focused first-run set for cyber-repo: setup, bugfixing, repo-history capsules, PR refinement, and git operations.",
         "stories": ["setup", "bugfix", "repo-bakeoff", "pr-refinement", "git-ops"],
     },
     "core-setup": {
@@ -99,6 +99,8 @@ STARTER_STORY_ALIASES = {
     "bug-fix": "bugfix",
     "bugfix-oracles": "repo-bakeoff",
     "oracle-capsules": "repo-bakeoff",
+    "repo-history-capsules": "repo-bakeoff",
+    "capsules": "repo-bakeoff",
     "oracles": "repo-bakeoff",
     "repo-bakeoff": "repo-bakeoff",
     "bakeoff": "repo-bakeoff",
