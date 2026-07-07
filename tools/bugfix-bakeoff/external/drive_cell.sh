@@ -150,19 +150,16 @@ desc="$(printf '%s — %s' "$title" "$(printf '%s' "$ticket" | tr '\n' ' ' | sed
 
 # --- source repo: clone (remote) or the local checkout (local_only) -----------
 if [[ -n "$local_only" ]]; then
-  env_name="$(printf '%s_REPO' "$project" | tr '[:lower:]-' '[:upper:]_')"
-  src="${repo_dir:-${!env_name:-${GEARS_RUST_REPO:-}}}"
-  if [[ -z "$src" && "$project" == "kitsoki" ]]; then
-    src="$REPO_ROOT"
-  fi
-  [[ -n "$src" ]] || {
-    echo "[cell] project '$project' is local_only; pass --repo-dir <checkout> or set $env_name." >&2
-    exit 2
-  }
-  if ! git -C "$src" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "[cell] local repo '$src' is not a git checkout." >&2
+  repo_path_args=(repo-path --project "$project")
+  [[ -n "$repo_dir" ]] && repo_path_args+=(--repo-dir "$repo_dir")
+  repo_path_json="$CACHE/preflight/$cellkey-repo-path.json"; repo_path_err="$repo_path_json.err"; mkdir -p "$(dirname "$repo_path_json")"
+  if ! python3 "$HERE/bench.py" "${repo_path_args[@]}" >"$repo_path_json" 2>"$repo_path_err"; then
+    echo "[cell] project '$project' is local_only; pass --repo-dir <checkout-or-meta-root> or set one of the manifest repo_envs." >&2
+    cat "$repo_path_json" >&2 2>/dev/null || true
+    cat "$repo_path_err" >&2 2>/dev/null || true
     exit 2
   fi
+  src="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("path",""))' "$repo_path_json")"
   # Drive against a worktree of the target checkout; the baseline must be a real
   # commit there. No clone, no install — language toolchains are cached locally;
   # a nested package install can still run at score time via oracle.setup.

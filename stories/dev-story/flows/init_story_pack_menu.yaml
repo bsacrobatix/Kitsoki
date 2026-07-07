@@ -16,8 +16,8 @@ initial_world:
   init_story_packs:
     - id: "cyber-repo"
       title: "Cyber repo starter"
-      summary: "Focused first-run set for cyber-repo: setup, bugfixing, PR refinement, and git operations."
-      stories: [setup, bugfix, pr-refinement, git-ops]
+      summary: "Focused first-run set for cyber-repo: setup, bugfixing, oracle capsules, PR refinement, and git operations."
+      stories: [setup, bugfix, repo-bakeoff, pr-refinement, git-ops]
     - id: "core-setup"
       title: "Core setup"
       summary: "Bring a project under Kitsoki management with setup and guarded git operations only."
@@ -59,6 +59,12 @@ turns:
           status: "enabled"
           summary: "Drive a picked bug through reproduce, fix, test, review, and validation gates."
           expansion: "Add narrower project bug policies through profile customizations or prompt overlays."
+        - id: "repo-bakeoff"
+          title: "Bugfix oracle capsules"
+          source_story: "repo-bakeoff"
+          status: "enabled"
+          summary: "Turn historical bug PRs into hidden-oracle capsules, prove RED/GREEN arming, and render live-cell commands."
+          expansion: "Use once the repo has 3-10 isolated historical bugs with regression tests or PR-proven oracles."
         - id: "pr-refinement"
           title: "PR refinement"
           source_story: "pr-refinement"

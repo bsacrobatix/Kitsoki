@@ -39,6 +39,18 @@ Start from a local checkout of the target repo:
 GEARS_RUST_REPO=/Users/brad/code/gears-rust
 ```
 
+Or start from an initialized cyber-repo meta checkout:
+
+```sh
+CYBER_REPO=/Users/brad/code/cyber-repo
+git -C "$CYBER_REPO" submodule update --init src/cyberfabric/gears-rust
+```
+
+The manifest declares `repo_subdir: src/cyberfabric/gears-rust`, so every
+`--repo-dir /Users/brad/code/cyber-repo` command resolves to the submodule
+checkout. Passing `/Users/brad/code/gears-rust` still works as the standalone
+single-repo form.
+
 For another private repo, use a dedicated manifest under
 `tools/bugfix-bakeoff/external/projects/<name>/` and pass
 `--repo-dir /path/to/repo` to the commands below.
@@ -207,6 +219,15 @@ Before spending on a live model, prove the corpus:
 
 ```sh
 GEARS_RUST_REPO=/Users/brad/code/gears-rust make gears-bakeoff
+```
+
+Equivalent meta-repo form:
+
+```sh
+python3 tools/bugfix-bakeoff/external/bench.py verify \
+  --project gears-rust \
+  --bug bug1,bug4,bug5,bug9 \
+  --repo-dir /Users/brad/code/cyber-repo
 ```
 
 The same proof can run through the drivable `repo-bakeoff` story by seeding:

@@ -108,6 +108,130 @@ def selected_bugs(m, bug_ids=None):
     return out
 
 
+def _as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v) for v in value if str(v).strip()]
+    if isinstance(value, str):
+        return [part.strip() for part in value.replace(",", " ").split() if part.strip()]
+    return [str(value)]
+
+
+def project_repo_envs(proj):
+    """Environment variables accepted as local checkout hints for a project.
+
+    A private/local project can now be driven from either its standalone checkout
+    (for example GEARS_RUST_REPO=/path/to/gears-rust) or a meta checkout such as
+    CYBER_REPO when the manifest also declares project.repo_subdir.
+    """
+    envs = []
+    envs.extend(_as_list(proj.get("repo_envs")))
+    envs.append(f"{proj['id'].upper().replace('-', '_')}_REPO")
+    seen = set()
+    out = []
+    for env in envs:
+        env = env.strip()
+        if env and env not in seen:
+            out.append(env)
+            seen.add(env)
+    return out
+
+
+def is_git_checkout(path):
+    return sh(["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
+              cwd=path if Path(path).exists() else HERE, quiet=True).stdout.strip() == "true"
+
+
+def manifest_commits(m):
+    commits = []
+    for bug in selected_bugs(m):
+        for key in ("baseline_sha", "fix_sha"):
+            value = str(bug.get(key, "") or "").strip()
+            if value:
+                commits.append(value)
+    return commits
+
+
+def has_manifest_commits(repo, m):
+    commits = manifest_commits(m)
+    if not commits:
+        return True
+    for commit in commits:
+        r = sh(["git", "-C", str(repo), "cat-file", "-e", f"{commit}^{{commit}}"],
+               cwd=repo, quiet=True)
+        if r.returncode != 0:
+            return False
+    return True
+
+
+def resolve_repo_dir(m, repo_dir=None):
+    """Resolve the checkout for a manifest.
+
+    Returns a JSON-friendly record. `path` is the git checkout that contains the
+    manifest's baseline/fix commits. When project.repo_subdir is set, callers may
+    pass the meta-repo root; the resolver will use <repo-dir>/<repo_subdir>.
+    """
+    proj = m["project"]
+    errors = []
+    source = ""
+    base = None
+    if repo_dir:
+        base = Path(repo_dir).expanduser()
+        source = "--repo-dir"
+    else:
+        for env in project_repo_envs(proj):
+            value = os.environ.get(env)
+            if value:
+                base = Path(value).expanduser()
+                source = env
+                break
+        if base is None and bool(proj.get("local_only", False)) and str(proj.get("repo", "")) == ".":
+            base = REPO_ROOT
+            source = "repo-root"
+
+    subdir = str(proj.get("repo_subdir", "") or "").strip()
+    path = None
+    if base is not None:
+        if subdir:
+            candidate = base / subdir
+            if candidate.exists() and is_git_checkout(candidate):
+                path = candidate
+            elif candidate.exists():
+                errors.append(f"repo_subdir is not a git checkout: {candidate}")
+            elif base.exists() and is_git_checkout(base):
+                # The caller passed a standalone checkout instead of the meta
+                # repo root. Only accept it when it contains the manifest's
+                # historical commits; otherwise this is probably an
+                # uninitialized meta-repo submodule.
+                if has_manifest_commits(base, m):
+                    path = base
+                else:
+                    errors.append(
+                        f"repo_subdir does not exist under {base}: {subdir}; "
+                        "base checkout does not contain the manifest commits"
+                    )
+            else:
+                errors.append(f"repo_subdir does not exist under {base}: {subdir}")
+        elif base.exists() and is_git_checkout(base):
+            path = base
+        elif base.exists():
+            errors.append(f"repo_dir is not a git checkout: {base}")
+        else:
+            errors.append(f"repo_dir does not exist: {base}")
+
+    return {
+        "ok": path is not None and not errors,
+        "project": proj["id"],
+        "path": str(path) if path is not None else "",
+        "base": str(base) if base is not None else "",
+        "source": source,
+        "repo_subdir": subdir,
+        "repo_envs": project_repo_envs(proj),
+        "errors": errors,
+    }
+
+
 def sh(cmd, cwd, env=None, quiet=False):
     r = subprocess.run(cmd, cwd=cwd, shell=isinstance(cmd, str),
                        env={**os.environ, **(env or {})},
@@ -647,7 +771,12 @@ def build_preflight(m, repo_dir=None, candidate=None, candidates_path=None, bug_
     errors = []
     warnings = []
     local_only = bool(proj.get("local_only", False))
-    repo_path = Path(repo_dir).expanduser() if repo_dir else None
+    repo_info = resolve_repo_dir(m, repo_dir) if (repo_dir or local_only or proj.get("repo_subdir")) else {
+        "ok": False, "path": "", "base": str(Path(repo_dir).expanduser()) if repo_dir else "",
+        "source": "--repo-dir" if repo_dir else "", "repo_subdir": str(proj.get("repo_subdir", "") or ""),
+        "repo_envs": project_repo_envs(proj), "errors": [],
+    }
+    repo_path = Path(repo_info["path"]) if repo_info.get("path") else None
     candidates = split_csv(candidate)
     candidate_infos = []
     bugs = selected_bugs(m, bug_ids)
@@ -691,14 +820,14 @@ def build_preflight(m, repo_dir=None, candidate=None, candidates_path=None, bug_
 
     if local_only:
         if not repo_path:
-            env_name = f"{proj['id'].upper().replace('-', '_')}_REPO"
-            errors.append(f"local_only project needs --repo-dir <checkout> or {env_name}")
-        elif not (repo_path / ".git").exists():
-            errors.append(f"repo_dir is not a git checkout: {repo_path}")
-    elif repo_path and not (repo_path / ".git").exists():
-        errors.append(f"repo_dir is not a git checkout: {repo_path}")
+            env_names = "/".join(project_repo_envs(proj))
+            errors.append(f"local_only project needs --repo-dir <checkout> or one of {env_names}")
+    elif repo_dir and not repo_path and not repo_info.get("errors"):
+        errors.append(f"repo_dir is not a git checkout: {repo_info.get('base', repo_dir)}")
 
-    if repo_path and (repo_path / ".git").exists():
+    errors.extend(repo_info.get("errors", []))
+
+    if repo_path and is_git_checkout(repo_path):
         dirty = git_tracked_dirty(repo_path)
         if dirty is None:
             warnings.append(f"could not inspect git status for {repo_path}")
@@ -728,6 +857,10 @@ def build_preflight(m, repo_dir=None, candidate=None, candidates_path=None, bug_
         "project": proj["id"],
         "local_only": local_only,
         "repo_dir": str(repo_path) if repo_path else "",
+        "repo_base_dir": repo_info.get("base", ""),
+        "repo_dir_source": repo_info.get("source", ""),
+        "repo_subdir": repo_info.get("repo_subdir", ""),
+        "repo_envs": repo_info.get("repo_envs", []),
         "bugs": [b.get("id") for b in bugs],
         "reference_only": [b.get("id") for b in m.get("bugs", []) if b.get("reference_only")],
         "candidates": candidate_infos,
@@ -1567,13 +1700,27 @@ def verify(m, only_bug, repo_dir, completion_state=None):
 
     proj = m["project"]
     bugs = selected_bugs(m, only_bug)
+    repo_info = resolve_repo_dir(m, repo_dir) if (repo_dir or proj.get("local_only") or proj.get("repo_subdir")) else {
+        "path": "", "errors": [],
+    }
+    if proj.get("local_only") and not repo_info.get("path"):
+        sys.stderr.write("\n".join(repo_info.get("errors") or [
+            "local_only project needs --repo-dir or a configured repo env",
+        ]) + "\n")
+        if completion_state:
+            write_completion_state(
+                completion_state, verdict="blocked", health="infra:repo-dir-missing",
+                job_type="bugfix", target_id=proj["id"],
+                notes="local_only project needs a resolvable checkout",
+            )
+        return 1
     tmp = None
-    if repo_dir:
+    if repo_info.get("path"):
         # Never operate directly on a caller's checkout. The GREEN proof checks
         # out the real fix's source paths through git; doing that against the
         # source checkout can dirty its index/worktree. A local mirror is cheap
         # and gives the verifier a private git directory to mutate.
-        src = Path(repo_dir)
+        src = Path(repo_info["path"])
         tmp = Path(tempfile.mkdtemp(prefix="bench-repo-"))
         repo = tmp / f"{proj['id']}-mirror"
         # --no-hardlinks: repo_dir may be a read-only bind mount (e.g. inside the
@@ -1598,7 +1745,7 @@ def verify(m, only_bug, repo_dir, completion_state=None):
     ok = True
     try:
         # fetch all needed commits + install once
-        if not repo_dir:
+        if not repo_info.get("path"):
             for b in bugs:
                 sh(["git", "fetch", "-q", "--depth", "1", "origin", b["baseline_sha"]], cwd=repo)
                 sh(["git", "fetch", "-q", "--depth", "1", "origin", b["fix_sha"]], cwd=repo)
@@ -1671,9 +1818,7 @@ def verify_arena_corpus(m):
                 armed = False
             else:
                 pm = load(project)
-                repo = str(pm.get("project", {}).get("repo", ""))
-                local_only = bool(pm.get("project", {}).get("local_only")) or repo in ("", ".")
-                armed = verify(pm, bug, str(REPO_ROOT) if local_only else None) == 0
+                armed = verify(pm, bug, None) == 0
         else:
             print(f"BAD {task_id}: unknown oracle kind {kind!r}")
             armed = False
@@ -1711,6 +1856,121 @@ def fetch_github_raw(repo, sha, file_path):
             return resp.read().decode("utf-8", errors="replace")
     except Exception:
         return None
+
+
+def load_project_manifests(project_ids=None):
+    ids = split_csv(project_ids)
+    if ids:
+        return [load(project_id) for project_id in ids]
+    manifests = sorted((HERE / "projects").glob("*/manifest.yaml"))
+    return [load(str(path)) for path in manifests]
+
+
+def oracle_capsule_record(m, bug):
+    proj = m["project"]
+    oracle_cfg = {**proj.get("oracle", {}), **bug.get("oracle", {})}
+    local_only = bool(proj.get("local_only", False))
+    repo_subdir = str(proj.get("repo_subdir", "") or "")
+    verify_cmd = f"python3 tools/bugfix-bakeoff/external/bench.py verify --project {proj['id']} --bug {bug['id']}"
+    readiness_cmd = (
+        "python3 tools/bugfix-bakeoff/external/bench.py readiness "
+        f"--project {proj['id']} --bug {bug['id']} --candidate <candidate> --armed"
+    )
+    if local_only:
+        repo_hint = f"${project_repo_envs(proj)[0]}" if project_repo_envs(proj) else "<repo>"
+        verify_cmd += f" --repo-dir {repo_hint}"
+        readiness_cmd += f" --repo-dir {repo_hint}"
+    repo_modes = ["single-repo"]
+    if repo_subdir:
+        repo_modes.append("meta-repo")
+    return {
+        "id": f"{proj['id']}/{bug['id']}",
+        "project": proj["id"],
+        "bug": bug["id"],
+        "title": bug.get("title", bug["id"]),
+        "ticket": bug.get("issue_url") or bug.get("pr_url") or bug.get("ticket_ref") or "",
+        "baseline_sha": bug.get("baseline_sha", ""),
+        "fix_sha": bug.get("fix_sha", ""),
+        "fix_source": bug.get("fix_source", ""),
+        "oracle_test": bug.get("oracle_test", ""),
+        "oracle_target": oracle_cfg.get("target", ""),
+        "oracle_run": oracle_cfg.get("run", ""),
+        "oracle_match": bug.get("oracle_match", ""),
+        "suite_enabled": bool(proj.get("test_cmd") and proj.get("suite", True)),
+        "local_only": local_only,
+        "repo": proj.get("repo", "."),
+        "repo_envs": project_repo_envs(proj),
+        "repo_subdir": repo_subdir,
+        "repo_modes": repo_modes,
+        "verify_command": verify_cmd,
+        "readiness_command": readiness_cmd,
+        "green_red_green": [
+            "GREEN: project checkout and ordinary suite/deps are ready",
+            "RED: overlay hidden oracle at baseline_sha and require failure",
+            "GREEN: overlay the real fix source from fix_sha and require pass",
+            "GREEN: score a candidate worktree with the same hidden oracle",
+        ],
+    }
+
+
+def oracle_capsules(project_ids=None, markdown=False):
+    manifests = load_project_manifests(project_ids)
+    capsules = []
+    projects = {}
+    for m in manifests:
+        proj = m["project"]
+        project_capsules = [
+            oracle_capsule_record(m, bug)
+            for bug in selected_bugs(m)
+        ]
+        capsules.extend(project_capsules)
+        projects[proj["id"]] = {
+            "id": proj["id"],
+            "title": proj.get("title", ""),
+            "local_only": bool(proj.get("local_only", False)),
+            "repo": proj.get("repo", "."),
+            "repo_envs": project_repo_envs(proj),
+            "repo_subdir": str(proj.get("repo_subdir", "") or ""),
+            "capsules": len(project_capsules),
+        }
+    out = {
+        "ok": True,
+        "count": len(capsules),
+        "projects": projects,
+        "capsules": capsules,
+        "commands": {
+            "list": "python3 tools/bugfix-bakeoff/external/bench.py oracle-capsules",
+            "verify_project": "python3 tools/bugfix-bakeoff/external/bench.py verify --project <project> [--repo-dir <checkout-or-meta-root>]",
+            "readiness": "make history-smoke HISTORY_PROJECT=<project> HISTORY_REPO_DIR=<checkout-or-meta-root> HISTORY_BUGS=<ids> HISTORY_CANDIDATES=<candidate>",
+        },
+    }
+    if markdown:
+        lines = [
+            "# Bugfix Oracle Capsules",
+            "",
+            f"Promoted capsules: **{len(capsules)}**",
+            "",
+            "| Capsule | Ticket / PR | Baseline | Real fix | Repo modes |",
+            "|---|---|---|---|---|",
+        ]
+        for c in capsules:
+            ticket = c["ticket"] or "(manifest)"
+            modes = ", ".join(c["repo_modes"])
+            lines.append(
+                f"| `{c['id']}` | {ticket} | `{c['baseline_sha'][:12]}` | "
+                f"`{c['fix_sha'][:12]}` | {modes} |"
+            )
+        lines.extend([
+            "",
+            "Every capsule uses the same GREEN/RED/GREEN discipline: ordinary repo "
+            "setup is ready, the hidden oracle fails at the bug baseline, the "
+            "real maintainer fix passes it, and candidate fixes are scored with "
+            "that same oracle.",
+        ])
+        print("\n".join(lines))
+    else:
+        print(json.dumps(out, indent=2))
+    return 0
 
 
 def summarize(m, results_dir, deck=None, markdown=None, allow_empty=False):
@@ -1995,6 +2255,14 @@ def main():
     mf.add_argument("--traces", default="../../../.artifacts/external-bakeoff/traces",
                     help="traces dir holding <project>-<bug>-<candidate>.jsonl")
     mf.add_argument("--markdown", help="optional Markdown feedback report")
+    oc = sub.add_parser("oracle-capsules")
+    oc.add_argument("--project", action="append",
+                    help="project id to list; repeat or comma-separate; default all promoted projects")
+    oc.add_argument("--markdown", action="store_true",
+                    help="render a Markdown catalog instead of JSON")
+    rp = sub.add_parser("repo-path")
+    rp.add_argument("--project", required=True)
+    rp.add_argument("--repo-dir", help="standalone checkout or meta-repo root")
     lo = sub.add_parser("lint-oracles")  # flag brittle exact-prose oracle assertions
     lo.add_argument("--project", required=True)
     lo.add_argument("--bug", action="append", help="bug id to lint; repeat or comma-separate; default all")
@@ -2022,6 +2290,8 @@ def main():
         sys.exit(0)
     if a.cmd == "mine-failures":
         sys.exit(mine_failures(a.results, a.traces, markdown=a.markdown))
+    if a.cmd == "oracle-capsules":
+        sys.exit(oracle_capsules(project_ids=a.project, markdown=a.markdown))
     if a.cmd == "summarize":
         sys.exit(summarize(load(a.project), a.results, a.deck, a.markdown,
                            allow_empty=a.allow_empty))
@@ -2030,6 +2300,10 @@ def main():
     if not project_ref:
         sys.exit(f"{a.cmd} needs --project or a manifest path")
     m = load(project_ref)
+    if a.cmd == "repo-path":
+        out = resolve_repo_dir(m, a.repo_dir)
+        print(json.dumps(out, indent=2))
+        sys.exit(0 if out["ok"] else 1)
     if a.cmd == "lint-oracles":
         sys.exit(lint_oracles(m, bug_ids=a.bug, strict=a.strict))
     if a.cmd == "preflight":
@@ -2078,6 +2352,7 @@ def main():
             print(json.dumps({
                 "id": p["id"], "repo": p.get("repo", "."), "install": p.get("install", ""),
                 "test_cmd": p.get("test_cmd", ""), "local_only": bool(p.get("local_only", False)),
+                "repo_envs": project_repo_envs(p), "repo_subdir": str(p.get("repo_subdir", "") or ""),
                 "bug": b["id"], "baseline_sha": b["baseline_sha"], "fix_sha": b.get("fix_sha", ""),
                 "title": b.get("title", b["id"]), "ticket": b.get("ticket", b.get("title", b["id"])),
             }))
@@ -2086,6 +2361,8 @@ def main():
                 "id": p["id"], "repo": p.get("repo", "."),
                 "onboard_app": p.get("onboard_app", "@kitsoki/dev-story"),
                 "local_only": bool(p.get("local_only", False)),
+                "repo_envs": project_repo_envs(p),
+                "repo_subdir": str(p.get("repo_subdir", "") or ""),
                 "baselines": [b["baseline_sha"] for b in m["bugs"]],
                 "bugs": [b["id"] for b in m["bugs"]],
             }))
