@@ -212,8 +212,11 @@ states:
                 implementing_cycle: "{{ world.implementing_cycle + 1 }}"
                 cycle:              "{{ world.cycle + 1 }}"
                 # Re-enter implementing for a fresh re-apply: clear its
-                # once: bind so the implementer agent runs again.
-                implement_artifact: {}
+                # once: bind so the implementer agent runs again. Downstream
+                # test/validation artifacts are now stale too.
+                implement_artifact:        {}
+                implement_review_artifact: {}
+                validate_artifact:         {}
 
         # fail — proposal needs a re-draft.
         - when: |
@@ -300,8 +303,11 @@ states:
                 implementing_cycle: "{{ world.implementing_cycle + 1 }}"
                 cycle:              "{{ world.cycle + 1 }}"
                 # Re-enter implementing for a fresh re-apply: clear its
-                # once: bind so the implementer agent runs again.
-                implement_artifact: {}
+                # once: bind so the implementer agent runs again. Downstream
+                # test/validation artifacts are now stale too.
+                implement_artifact:        {}
+                implement_review_artifact: {}
+                validate_artifact:         {}
 
         # fail — proposal needs a re-draft.
         - when: |
@@ -374,7 +380,9 @@ states:
                 implementing_cycle:  0
                 cycle:               0
                 # Clear implementing's once: bind so it re-applies fresh.
-                implement_artifact:  {}
+                implement_artifact:        {}
+                implement_review_artifact: {}
+                validate_artifact:         {}
         - when: "slots.stage == 'testing' || slots.stage == 'test'"
           target: testing
           effects:

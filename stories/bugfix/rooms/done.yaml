@@ -407,7 +407,10 @@ states:
                 implementing_cycle:  0
                 cycle:               0
                 # Clear implementing's once: bind so it re-applies fresh.
-                implement_artifact:  {}
+                implement_artifact:        {}
+                implement_review_artifact: {}
+                validate_artifact:         {}
+                done_artifact:             {}
         - when: "slots.stage == 'testing' || slots.stage == 'test'"
           target: testing
           effects:

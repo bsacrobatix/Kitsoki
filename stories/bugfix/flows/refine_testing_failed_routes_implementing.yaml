@@ -62,6 +62,7 @@ turns:
     expect_state: implementing
     expect_world:
       implementing_cycle: 1
+      implement_review_artifact: {}
 
 expect_terminal: false
 expect_no_errors: true
