@@ -437,15 +437,24 @@ viewport.
   no-LLM (`--harness replay --recording ...`, or `--exec` pointed at a fixture
   binary) — never a live model, the same discipline `tools/mcp-demo` follows
   for the cassette-replay path above.
+  - **Avoid readiness races.** The player retries the websocket until the first
+    successful connection, so it is okay for Playwright to open the page before
+    `tui-serve` is listening. Still wait for both `window.__status() ===
+    "connected"` and the expected visible text in `window.__dump()` before
+    taking the first screenshot; a connected socket can arrive before the app's
+    initial frame is painted.
+  - **Use deterministic scroll helpers.** For scrollback evidence, prefer
+    `window.__scrollLines(n)`, `window.__scrollToTop()`, and
+    `window.__scrollToBottom()` over wheel deltas. Each helper returns the
+    visible viewport text after scrolling, so a capture script can assert the
+    exact screen it is about to screenshot.
   - **claude-in-chrome needs no special wiring** — it's a plain page, so
     `navigate` → `computer` (`left_click` on the terminal to focus it, then
     `type`/`key` for input, `screenshot` for evidence) → `javascript_tool`
     (`window.__dump()`) all work directly; verified end-to-end against a live
     `kitsoki run` session (real keystrokes landed, `Escape` opened its menu).
     See `tools/tui-bridge/README.md`'s "Driving it from claude-in-chrome"
-    section for the exact tool sequence and one timing gotcha (screenshot
-    before the socket's first frame paints comes back blank — wait for
-    `window.__status() === "connected"`).
+    section for the exact tool sequence.
   - Playwright uses the same page (`page.click`, `page.keyboard.type/press`,
     `page.screenshot()`) — see `tools/tui-bridge/tests/live-bridge.e2e.spec.ts`
     for a worked example.

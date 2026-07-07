@@ -101,19 +101,55 @@
     // single served page can point at any running `kitsoki tui-serve`.
     const wsUrl = new URLSearchParams(location.search).get("ws") || "ws://127.0.0.1:4700/pty";
 
+    const reconnectBaseMs = 250;
+    const reconnectMaxMs = 2000;
     let socket;
-    function connect() {
-      setStatus("connecting…");
-      socket = new WebSocket(wsUrl);
-      socket.binaryType = "arraybuffer";
+    let connectedOnce = false;
+    let reconnectTimer = 0;
+    let reconnectAttempts = 0;
 
-      socket.addEventListener("open", () => {
+    function reconnectDelay() {
+      return Math.min(reconnectMaxMs, reconnectBaseMs * Math.pow(2, Math.min(reconnectAttempts, 3)));
+    }
+
+    function scheduleReconnect() {
+      if (connectedOnce) {
+        setStatus("disconnected");
+        return;
+      }
+      if (reconnectTimer) return;
+      const delay = reconnectDelay();
+      reconnectAttempts += 1;
+      setStatus("reconnecting…");
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = 0;
+        connect();
+      }, delay);
+    }
+
+    function connect() {
+      setStatus(reconnectAttempts ? "reconnecting…" : "connecting…");
+      const nextSocket = new WebSocket(wsUrl);
+      socket = nextSocket;
+      nextSocket.binaryType = "arraybuffer";
+
+      nextSocket.addEventListener("open", () => {
+        if (socket !== nextSocket) return;
+        connectedOnce = true;
+        reconnectAttempts = 0;
         setStatus("connected");
         sendResize();
       });
-      socket.addEventListener("close", () => setStatus("disconnected"));
-      socket.addEventListener("error", () => setStatus("error"));
-      socket.addEventListener("message", (ev) => {
+      nextSocket.addEventListener("close", () => {
+        if (socket !== nextSocket) return;
+        socket = null;
+        scheduleReconnect();
+      });
+      nextSocket.addEventListener("error", () => {
+        if (socket !== nextSocket) return;
+        setStatus(connectedOnce ? "error" : "reconnecting…");
+      });
+      nextSocket.addEventListener("message", (ev) => {
         if (typeof ev.data === "string") return; // no server->client text frames today
         term.write(new Uint8Array(ev.data));
       });
@@ -140,7 +176,7 @@
     // covers the full scrollback, which would silently include history that
     // has already scrolled off-screen and doesn't match what a screenshot
     // shows.
-    window.__dump = () => {
+    function dumpVisible() {
       const buf = term.buffer.active;
       const lines = [];
       for (let i = 0; i < term.rows; i++) {
@@ -148,8 +184,14 @@
         lines.push(line ? line.translateToString(true) : "");
       }
       return lines.join("\n");
-    };
+    }
+
+    window.__dump = dumpVisible;
+    window.__scrollLines = (n) => { term.scrollLines(Number(n) || 0); return dumpVisible(); };
+    window.__scrollToTop = () => { term.scrollToTop(); return dumpVisible(); };
+    window.__scrollToBottom = () => { term.scrollToBottom(); return dumpVisible(); };
     window.__status = () => statusEl.textContent;
+    window.__reconnectAttempts = () => reconnectAttempts;
     window.__ready = true;
 
     connect();
