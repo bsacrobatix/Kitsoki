@@ -207,9 +207,9 @@ func operationRunWorkHint(handle map[string]any, status string) string {
 			parts = append(parts, "artifact "+artifact)
 		}
 	default:
-		from := operationRunString(handle, "from")
-		to := operationRunString(handle, "to")
-		if from != "" && to != "" {
+		if phase := operationRunDisplayPhase(handle); phase != "" {
+			parts = append(parts, "phase "+phase)
+		} else if from, to := operationRunString(handle, "from"), operationRunString(handle, "to"); from != "" && to != "" {
 			parts = append(parts, from+" -> "+to)
 		} else if intent := operationRunString(handle, "entry_intent"); intent != "" {
 			parts = append(parts, "intent "+intent)

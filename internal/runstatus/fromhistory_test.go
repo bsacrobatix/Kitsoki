@@ -192,10 +192,19 @@ func TestFromHistory_DerivesOperationRunSummary(t *testing.T) {
 		"stop_detail":    "Regression gate was never RED.",
 	})
 	require.NoError(t, err)
+	runPhase, err := json.Marshal(map[string]any{
+		"operation_id": "bugfix_full",
+		"policy_id":    "bugfix_full",
+		"status":       "running",
+		"phase":        "testing_artifact",
+		"phase_status": "completed",
+	})
+	require.NoError(t, err)
 
 	snap, err := runstatus.FromHistory(store.History{
 		{Turn: 1, Ts: base, Kind: store.OperationRunStarted, StatePath: "idle", Seq: 1, Payload: runStarted},
-		{Turn: 2, Ts: base.Add(time.Second), Kind: store.OperationRunWaiting, StatePath: "testing", Seq: 2, Payload: runWaiting},
+		{Turn: 2, Ts: base.Add(time.Second), Kind: store.OperationRunPhaseCompleted, StatePath: "testing", Seq: 2, Payload: runPhase},
+		{Turn: 3, Ts: base.Add(2 * time.Second), Kind: store.OperationRunWaiting, StatePath: "testing", Seq: 3, Payload: runWaiting},
 	}, def, "sess-op")
 	require.NoError(t, err)
 	require.NotNil(t, snap.Session.OperationRun)
@@ -204,6 +213,7 @@ func TestFromHistory_DerivesOperationRunSummary(t *testing.T) {
 	assert.Equal(t, "waiting", snap.Session.OperationRun.Status)
 	assert.Equal(t, "idle", snap.Session.OperationRun.From)
 	assert.Equal(t, "reproducing", snap.Session.OperationRun.To)
+	assert.Equal(t, "testing_artifact", snap.Session.OperationRun.Phase)
 	assert.Equal(t, "needs-human", snap.Session.OperationRun.StopReason)
 	assert.Equal(t, "Regression gate was never RED.", snap.Session.OperationRun.StopDetail)
 	assert.Equal(t, "__exit__needs-human", snap.Session.OperationRun.TerminalState)

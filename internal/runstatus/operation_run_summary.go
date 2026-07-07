@@ -70,6 +70,7 @@ func mergeOperationRunSummary(prev *OperationRunSummary, raw map[string]any) *Op
 	assignString(&next.From, "from")
 	assignString(&next.To, "to")
 	assignString(&next.EntryIntent, "entry_intent")
+	assignString(&next.Phase, "phase")
 	assignString(&next.TerminalState, "terminal_state")
 	assignString(&next.TerminalArtifact, "terminal_artifact")
 	assignString(&next.StopReason, "stop_reason", "reason")

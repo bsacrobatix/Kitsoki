@@ -74,6 +74,7 @@ type OperationRunSummary struct {
 	From             string `json:"from,omitempty"`
 	To               string `json:"to,omitempty"`
 	EntryIntent      string `json:"entry_intent,omitempty"`
+	Phase            string `json:"phase,omitempty"`
 	TerminalState    string `json:"terminal_state,omitempty"`
 	TerminalArtifact string `json:"terminal_artifact,omitempty"`
 	StopReason       string `json:"stop_reason,omitempty"`

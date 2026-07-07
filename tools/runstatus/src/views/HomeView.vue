@@ -547,8 +547,13 @@ function operationDetail(s: SessionHeader): string {
   if (run.status === "waiting" && run.terminal_state) return `parked at ${run.terminal_state}`;
   if (run.status === "completed" && run.terminal_state) return `terminal ${run.terminal_state}`;
   if (run.terminal_artifact) return `artifact ${run.terminal_artifact}`;
+  if (run.phase) return `phase ${operationPhaseLabel(run.phase)}`;
   if (run.from && run.to) return `${run.from} -> ${run.to}`;
   return run.entry_intent ? `intent ${run.entry_intent}` : "";
+}
+
+function operationPhaseLabel(phase: string): string {
+  return phase.trim().replace(/_artifact$/i, "").replace(/_/g, " ");
 }
 
 function relativePath(abs: string): string {
