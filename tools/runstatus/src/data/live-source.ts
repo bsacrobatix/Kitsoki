@@ -1307,9 +1307,9 @@ export class LiveSource implements DataSource {
 
   /**
    * Answer a forwarded question, unblocking the parked agent turn. answers is
-   * keyed by each question's text; the value is the chosen option label
-   * (single-select) or an array of labels (multiSelect) — the same shape
-   * AskUserQuestion would have returned to the agent.
+   * keyed by each question's text; the value is the chosen option label or a
+   * custom answer (single-select) or an array of labels (multiSelect) — the
+   * same shape AskUserQuestion would have returned to the agent.
    */
   answerQuestion(
     questionId: string,
