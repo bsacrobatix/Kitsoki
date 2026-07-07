@@ -335,5 +335,5 @@ round-trip, run only on explicit request.
   collaborators — round 2; round 1 is owner-only. Mechanism only here;
   enforcement is slice #3 (epic decision #4).
 - **Other forges** (Jira / Linear / GitLab) — GitHub only (epic non-goal).
-- **The public web/trace serving surface** — slice #4; this slice only mints the
-  `gh.job_id` the link will later key on.
+- **The public web/trace serving surface** — the shared artifact-job epic; this
+  slice only mints the `gh.job_id` the link will later key on.
