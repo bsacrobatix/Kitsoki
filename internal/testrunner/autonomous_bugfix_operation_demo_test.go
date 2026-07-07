@@ -70,6 +70,15 @@ func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
 			expectOperationStatus:  "completed",
 			expectTerminalArtifact: "qa_completion_artifact_handle",
 		},
+		{
+			appPath:                repoStoriesShipItAppPath(t),
+			capsule:                "clean-repo",
+			name:                   "ship_it_existing_worktree_tail_completed",
+			sourceFlow:             repoPath(t, "../../stories/ship-it/flows/integrate_existing_ships.yaml"),
+			expectOperationPolicy:  "ship_it",
+			expectOperationStatus:  "completed",
+			selfProvisionWorkspace: true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -100,6 +109,11 @@ func repoStoriesBugfixAppPath(t *testing.T) string {
 func repoStoriesDemoVideoLoopAppPath(t *testing.T) string {
 	t.Helper()
 	return repoPath(t, "../../stories/demo-video-loop/app.yaml")
+}
+
+func repoStoriesShipItAppPath(t *testing.T) string {
+	t.Helper()
+	return repoPath(t, "../../stories/ship-it/app.yaml")
 }
 
 func repoPath(t *testing.T, path string) string {
