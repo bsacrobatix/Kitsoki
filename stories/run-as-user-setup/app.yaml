@@ -1,9 +1,9 @@
 # run-as-user-setup - macOS delegated agent user setup.
 #
-# This story is intentionally no-LLM. It plans and can apply the local config,
-# wrapper, sudoers, capsule-assignment, and validation commands. Privileged
-# operations use non-interactive sudo and fail loudly when the operator has not
-# already crossed the OS privilege boundary.
+# This story is intentionally no-LLM. It applies the local config, wrapper,
+# sudoers, capsule-assignment, and validation commands deterministically.
+# Privileged operations use non-interactive sudo and fail loudly when the
+# operator has not already crossed the OS privilege boundary.
 
 app:
   id: run-as-user-setup
@@ -41,28 +41,32 @@ world:
   apply_ok:            { type: bool, default: false }
   apply_exit_code:     { type: int, default: -1 }
   apply_output:        { type: string, default: "" }
-  status:              { type: string, default: "not planned" }
+  status:              { type: string, default: "ready to apply" }
   last_error:          { type: string, default: "" }
 
 intents:
   plan:
-    description: "Generate a local run_as_user setup plan from the current values."
-    examples: ["plan", "generate setup", "show setup"]
-    priority: 90
+    description: "Show deterministic setup details and generated local receipt."
+    examples: ["details", "show details", "plan", "show setup", "show commands"]
+    priority: 82
   accept:
-    description: "Accept the current setup step and continue."
+    description: "Apply the delegated-user setup with the current values."
     examples: ["accept", "ok", "okay", "continue", "approve", "looks good", "lgtm"]
-    priority: 88
+    priority: 90
   apply:
     description: "Apply the delegated-user setup with non-interactive sudo."
     examples: ["apply", "install", "automate setup", "run setup", "do it"]
+    priority: 88
+  edit:
+    description: "Edit setup values with a structured form."
+    examples: ["edit", "edit values", "configure", "change settings"]
     priority: 86
   configure:
-    description: "Update setup values, then regenerate the plan."
+    description: "Update setup values."
     examples:
       - "configure agent_user=kitsoki-agent"
       - "configure operator_user=Brad.Smith capsule_root=/Users/Shared/kitsoki/capsules"
-    priority: 85
+    priority: 84
     slots:
       platform:       { type: string, required: false }
       operator_user:  { type: string, required: false }
@@ -84,7 +88,7 @@ intents:
     priority: 1
   back:
     description: "Return to the configuration screen."
-    examples: ["back", "edit"]
+    examples: ["back"]
     priority: 40
   quit:
     description: "Leave the setup story."
@@ -95,7 +99,7 @@ intents:
     examples: ["look"]
     priority: 10
 
-root: planned
+root: lobby
 
 include:
   - rooms/*.yaml

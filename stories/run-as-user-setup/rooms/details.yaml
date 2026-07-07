@@ -1,6 +1,6 @@
 states:
-  planned:
-    description: "Review run-as-user setup plan"
+  details:
+    description: "Run-as-user setup details"
     relevant_world: [operator_user, agent_user, group_name, capsule_root, wrapper_bin, protected_root, setup_summary, status]
     on_enter:
       - invoke: host.starlark.run
@@ -32,83 +32,60 @@ states:
         once: true
         on_error: failed
       - set:
-          status: "planned"
+          status: "details ready"
     view:
-      extends: "base"
-      blocks:
-        body:
-          - prose: "{{ world.setup_summary|default:'(pending)' }}"
-          - heading: ".kitsoki.local.yaml"
-          - code: "{{ world.config_snippet|default:'(pending)' }}"
-          - heading: "Account setup"
-          - code: "{{ world.account_steps|default:'(pending)' }}"
-          - heading: "Group and capsule parent"
-          - code: "{{ world.group_commands|default:'(pending)' }}"
-          - heading: "Backend wrappers"
-          - code: "{{ world.wrapper_commands|default:'(pending)' }}"
-          - heading: "sudoers"
-          - code: "{{ world.sudoers_snippet|default:'(pending)' }}"
-          - heading: "Assign one capsule"
-          - code: "{{ world.assignment_commands|default:'(pending)' }}"
-          - heading: "Validation probes"
-          - code: "{{ world.validation_commands|default:'(pending)' }}"
-          - heading: "Security notes"
-          - code: "{{ world.security_notes|default:'(pending)' }}"
-        choices:
-          - heading: "Actions"
-          - list:
-              items:
-                - label: "plan"
-                  hint: "generate or regenerate the setup plan"
-                - label: "apply"
-                  hint: "run the setup now with non-interactive sudo"
-                - label: "accept"
-                  hint: "apply the reviewed setup"
-                - label: "validated"
-                  hint: "mark ready after applying the setup outside this story"
-                - label: "configure operator_user=<name> ..."
-                  hint: "revise any setup value and regenerate"
-                - label: "back"
-                  hint: "return to the setup values"
-                - label: "quit"
-                  hint: "leave"
-                - label: "look"
-        footer:
-          - prose: "The apply path uses non-interactive sudo. If sudo needs a password or an agent CLI needs a login, the story stops with the command output instead of prompting invisibly."
+      - prose: "{{ world.setup_summary|default:'(pending)' }}"
+      - kv:
+          pairs:
+            Status: "{{ world.status }}"
+            Operator user: "{{ world.operator_user|default:'(current user)' }}"
+            Agent user: "{{ world.agent_user }}"
+            Agent group: "{{ world.group_name }}"
+            Capsule root: "{{ world.capsule_root }}"
+            Wrapper bin: "{{ world.wrapper_bin }}"
+            Protected root: "{{ world.protected_root }}"
+      - heading: "Deterministic apply path"
+      - list:
+          items:
+            - label: "account and group"
+              hint: "create or reuse {{ world.agent_user }} and {{ world.group_name }}"
+            - label: "wrappers and sudoers"
+              hint: "install root-owned codex/claude wrappers with narrow NOPASSWD delegation"
+            - label: "capsule assignment"
+              hint: "open {{ world.sample_capsule }} under {{ world.capsule_root }}"
+            - label: "validation"
+              hint: "prove delegated write, protected-root write denial, and wrapper smoke tests"
+      - heading: "Local receipt"
+      - code: "{{ world.receipt_markdown|default:'(pending)' }}"
+      - heading: "Security notes"
+      - code: "{{ world.security_notes|default:'(pending)' }}"
+      - prose: "The apply path uses non-interactive sudo. If sudo needs a password or an agent CLI needs a login, the story stops with command output instead of prompting invisibly."
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "apply"
+              intent: apply
+              hint: "run the setup now"
+            - label: "ok"
+              intent: accept
+              hint: "same as apply"
+            - label: "edit values"
+              intent: edit
+              hint: "change users, paths, or CLI locations"
+            - label: "refresh details"
+              intent: plan
+            - label: "validated"
+              intent: validated
+              hint: "mark ready after applying outside this story"
+            - label: "back"
+              intent: back
+            - label: "quit"
+              intent: quit
+            - label: "look"
+              intent: look
     on:
       accept:
-        - when: "world.setup_summary == ''"
-          target: planned
-          effects:
-            - invoke: host.starlark.run
-              id: plan_run_as_user_setup_accept
-              with:
-                script: scripts/plan_setup.star
-                inputs:
-                  platform: "{{ world.platform }}"
-                  operator_user: "{{ world.operator_user }}"
-                  agent_user: "{{ world.agent_user }}"
-                  group_name: "{{ world.group_name }}"
-                  capsule_root: "{{ world.capsule_root }}"
-                  wrapper_bin: "{{ world.wrapper_bin }}"
-                  protected_root: "{{ world.protected_root }}"
-                  codex_bin: "{{ world.codex_bin }}"
-                  claude_bin: "{{ world.claude_bin }}"
-                  sample_capsule: "{{ world.sample_capsule }}"
-              bind:
-                setup_summary: setup_summary
-                config_snippet: config_snippet
-                account_steps: account_steps
-                group_commands: group_commands
-                wrapper_commands: wrapper_commands
-                sudoers_snippet: sudoers_snippet
-                assignment_commands: assignment_commands
-                validation_commands: validation_commands
-                receipt_markdown: receipt_markdown
-                security_notes: security_notes
-              on_error: failed
-            - set:
-                status: "planned"
         - target: applying
           effects:
             - set:
@@ -126,11 +103,13 @@ states:
                 apply_output: ""
                 last_error: ""
                 status: "applying"
+      edit:
+        - target: configuring
       validated:
-        - when: "world.setup_summary == ''"
-          target: planned
+        - target: ready
           effects:
-            - invoke: host.starlark.run
+            - when: "world.setup_summary == ''"
+              invoke: host.starlark.run
               id: plan_run_as_user_setup_validated
               with:
                 script: scripts/plan_setup.star
@@ -158,13 +137,9 @@ states:
                 security_notes: security_notes
               on_error: failed
             - set:
-                status: "planned"
-        - target: ready
-          effects:
-            - set:
                 status: "validated"
       configure:
-        - target: planned
+        - target: details
           effects:
             - set:
                 platform: "{{ slots.platform ?? world.platform }}"
@@ -191,9 +166,9 @@ states:
                 apply_exit_code: -1
                 apply_output: ""
                 last_error: ""
-                status: "planning"
+                status: "loading details"
       plan:
-        - target: planned
+        - target: details
           effects:
             - set:
                 setup_summary: ""
@@ -210,7 +185,7 @@ states:
                 apply_exit_code: -1
                 apply_output: ""
                 last_error: ""
-                status: "planning"
+                status: "loading details"
       back:
         - target: lobby
       look:
@@ -406,20 +381,20 @@ states:
       - when: "world.apply_exit_code != -1"
         emit_intent: apply_finished
     view:
-      extends: "base"
-      blocks:
-        body:
-          - prose: "Applying the delegated-user setup with non-interactive sudo."
-          - heading: "Output"
-          - code: "{{ world.apply_output|default:'(pending)' }}"
-        choices:
-          - list:
-              items:
-                - label: "look"
-                - label: "back"
-                  hint: "review the plan"
-                - label: "quit"
-                  hint: "leave"
+      - prose: "Applying the delegated-user setup with non-interactive sudo."
+      - heading: "Output"
+      - code: "{{ world.apply_output|default:'(pending)' }}"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "look"
+              intent: look
+            - label: "back"
+              intent: back
+              hint: "return to setup details"
+            - label: "quit"
+              intent: quit
     on:
       apply_finished:
         - when: "world.apply_ok == true"
@@ -433,7 +408,7 @@ states:
                 status: "apply failed"
                 last_error: "run-as-user setup apply failed with exit {{ world.apply_exit_code }}\n{{ world.apply_output }}"
       back:
-        - target: planned
+        - target: details
       look:
         - target: .
       quit:
@@ -443,24 +418,29 @@ states:
     description: "Run-as-user setup apply failed"
     relevant_world: [apply_exit_code, apply_output, last_error]
     view:
-      extends: "base"
-      blocks:
-        body:
-          - prose: "The automated apply step stopped before marking the setup ready."
-          - heading: "Command output"
-          - code: "{{ world.last_error|default:'(none)' }}"
-        choices:
-          - list:
-              items:
-                - label: "apply"
-                  hint: "retry the automated setup"
-                - label: "validated"
-                  hint: "mark ready after resolving the boundary outside the story"
-                - label: "back"
-                  hint: "review the plan"
-                - label: "quit"
-                  hint: "leave"
-                - label: "look"
+      - prose: "The automated apply step stopped before marking the setup ready."
+      - heading: "Command output"
+      - code: "{{ world.last_error|default:'(none)' }}"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "apply"
+              intent: apply
+              hint: "retry the automated setup"
+            - label: "validated"
+              intent: validated
+              hint: "mark ready after resolving the boundary outside the story"
+            - label: "edit values"
+              intent: edit
+              hint: "change users, paths, or CLI locations"
+            - label: "back"
+              intent: back
+              hint: "return to setup details"
+            - label: "quit"
+              intent: quit
+            - label: "look"
+              intent: look
     on:
       apply:
         - target: applying
@@ -476,37 +456,38 @@ states:
           effects:
             - set:
                 status: "validated"
+      edit:
+        - target: configuring
       back:
-        - target: planned
+        - target: details
       look:
         - target: .
       quit:
         - target: ended
 
   failed:
-    description: "Setup plan failed"
+    description: "Setup details failed"
     relevant_world: [last_error]
     view:
-      extends: "base"
-      blocks:
-        body:
-          - prose: "The deterministic setup planner failed."
-          - heading: "Error"
-          - code: "{{ world.last_error|default:'(none)' }}"
-        choices:
-          - list:
-              items:
-                - label: "back"
-                  hint: "return to the setup values"
-                - label: "quit"
-                  hint: "leave"
+      - prose: "The deterministic setup details step failed."
+      - heading: "Error"
+      - code: "{{ world.last_error|default:'(none)' }}"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "back"
+              intent: back
+              hint: "return to setup values"
+            - label: "quit"
+              intent: quit
     on:
       back:
         - target: lobby
           effects:
             - set:
                 last_error: ""
-                status: "not planned"
+                status: "ready to apply"
       quit:
         - target: ended
 
@@ -514,27 +495,27 @@ states:
     description: "Run-as-user setup ready"
     relevant_world: [agent_user, capsule_root, receipt_markdown, apply_output, status]
     view:
-      extends: "base"
-      blocks:
-        body:
-          - prose: "The setup is ready. Keep the receipt with your machine-local notes and make sure Kitsoki is started with the wrapper directory first in PATH until first-class run_as_user launch support lands."
-          - heading: "Receipt"
-          - code: "{{ world.receipt_markdown|default:'(pending)' }}"
-          - heading: "Apply output"
-            when: "world.apply_output != ''"
-          - code: "{{ world.apply_output }}"
-            when: "world.apply_output != ''"
-        choices:
-          - list:
-              items:
-                - label: "back"
-                  hint: "review the plan"
-                - label: "quit"
-                  hint: "leave"
-                - label: "look"
+      - prose: "The setup is ready. Keep the receipt with your machine-local notes and start Kitsoki with the wrapper directory first in PATH until first-class run_as_user launch support lands."
+      - heading: "Receipt"
+      - code: "{{ world.receipt_markdown|default:'(pending)' }}"
+      - heading: "Apply output"
+        when: "world.apply_output != ''"
+      - code: "{{ world.apply_output }}"
+        when: "world.apply_output != ''"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "details"
+              intent: back
+              hint: "return to setup details"
+            - label: "quit"
+              intent: quit
+            - label: "look"
+              intent: look
     on:
       back:
-        - target: planned
+        - target: details
       look:
         - target: .
       quit:
