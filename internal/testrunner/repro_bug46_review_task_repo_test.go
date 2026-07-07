@@ -71,6 +71,12 @@ host_bindings:
   ticket: host.gh.ticket
 
 host_handlers:
+  host.append_to_file:
+    data: { ok: true, message_id: "msg-1" }
+  host.inbox.add:
+    data: { ok: true, id: "ib-1" }
+  host.artifacts_dir:
+    data: { ok: true, path: ".artifacts/bug46-review-task.md", message_id: "artifact-1" }
   host.agent.decide:
     data:
       ok: true
@@ -82,7 +88,7 @@ host_handlers:
 
 turns:
   - intent: { name: start, slots: {} }
-    expect_state: review_task_executing
+    expect_state: review_task_awaiting_reply
     expect_world:
       ticket_title: "Correct Kitsoki feature issue"
 

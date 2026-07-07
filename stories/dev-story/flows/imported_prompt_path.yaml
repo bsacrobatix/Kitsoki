@@ -54,6 +54,8 @@ host_handlers:
     data: { ok: true, message_id: "msg-1" }
   host.inbox.add:
     data: { ok: true, id: "ib-1" }
+  host.artifacts_dir:
+    data: { ok: true, path: ".artifacts/implementation-flow-artifact.md", message_id: "artifact-1" }
   host.git_worktree:
     data: { ok: true, log: "synced", path: "testdata/projects/cake" }
   host.local_files.ticket:
@@ -134,26 +136,18 @@ host_handlers:
 
 turns:
   # landing → impl.idle → (auto-provision + auto-start, impl/rooms/idle.yaml
-  # Step 3) → impl.review_task_executing. impl.idle's on_enter self-provisions
+  # Step 3) → impl.review_task_awaiting_reply. impl.idle's on_enter self-provisions
   # the worktree and auto-fires `start` once a ticket_id is present, so
   # go_implementation lands straight past idle (mirrors the current runtime
   # behaviour of stories/dev-story/flows/cake_feature_walk.yaml, which this
   # fixture is a sibling of).
   - intent: { name: go_implementation, slots: {} }
-    expect_state: impl.review_task_executing
-  - intent: { name: impl__proceed, slots: {} }
     expect_state: impl.review_task_awaiting_reply
   - intent: { name: impl__accept, slots: {} }
-    expect_state: impl.write_code_executing
-  - intent: { name: impl__proceed, slots: {} }
     expect_state: impl.write_code_awaiting_reply
   - intent: { name: impl__accept, slots: {} }
-    expect_state: impl.test_executing
-  - intent: { name: impl__proceed, slots: {} }
     expect_state: impl.test_awaiting_reply
   - intent: { name: impl__accept, slots: {} }
-    expect_state: impl.review_executing
-  - intent: { name: impl__proceed, slots: {} }
     expect_state: impl.review_awaiting_reply
   - intent: { name: impl__accept, slots: {} }
     expect_state: impl.handoff

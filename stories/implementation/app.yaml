@@ -49,6 +49,7 @@ app:
 hosts:
   - host.inbox.add
   - host.agent.decide
+  - host.artifacts_dir
   # host.run — the handoff room's lost-work clean-tree check shells out to
   # `git status --porcelain` before the pr-refinement handoff.
   - host.run
@@ -202,6 +203,11 @@ world:
   code_artifact:          { type: object, default: {} }
   test_artifact:          { type: object, default: {} }
   review_artifact:        { type: object, default: {} }
+  task_summary_artifact_path: { type: string, default: "" }
+  code_artifact_path:         { type: string, default: "" }
+  test_artifact_path:         { type: string, default: "" }
+  review_artifact_path:       { type: string, default: "" }
+  implementation_progress_artifact_path: { type: string, default: "" }
 
   # ── CI scratch (test_executing populates this) ─────────────────────
   ci_log:           { type: string, default: "" }
