@@ -1013,8 +1013,9 @@ vscode-package: web
 # the extension, then force-install the newest VSIX into the local VS Code.
 # Override CODE_CLI when testing another compatible editor CLI.
 CODE_CLI ?= code
-VSCODE_INSTALL_WORKTREE_PREFIX ?= .worktrees/vscode-install-local
+VSCODE_INSTALL_WORKTREE_PREFIX ?= .worktrees/vsi
 KITSOKI_VSCODE_INSTALL_DELEGATED ?=
+KITSOKI_VSCODE_INSTALL_FORCE_DELEGATE ?=
 
 check-vscode-code-cli:
 	@command -v "$(CODE_CLI)" >/dev/null 2>&1 || { \
@@ -1023,24 +1024,26 @@ check-vscode-code-cli:
 
 vscode-install-local: check-deps check-vscode-code-cli
 	+@set -e; \
-	if [ -z "$(KITSOKI_VSCODE_INSTALL_DELEGATED)" ] && { [ ! -w "$(abspath .)" ] || [ ! -w "$(abspath $(RUNSTATUS_DIR))" ] || [ ! -w "$(abspath internal/runstatus/web/assets)" ]; }; then \
+	if [ -z "$(KITSOKI_VSCODE_INSTALL_DELEGATED)" ] && { [ -n "$(KITSOKI_VSCODE_INSTALL_FORCE_DELEGATE)" ] || [ ! -w "$(abspath .)" ] || [ ! -w "$(abspath $(RUNSTATUS_DIR))" ] || [ ! -w "$(abspath internal/runstatus/web/assets)" ]; }; then \
 		if ! git diff --quiet --ignore-submodules -- || ! git diff --cached --quiet --ignore-submodules --; then \
 			echo "error: checkout is read-only and dirty; commit or stash changes before delegating vscode-install-local to a worktree." >&2; \
 			exit 1; \
 		fi; \
-		wt="$(VSCODE_INSTALL_WORKTREE_PREFIX)-$$(date +%Y%m%d%H%M%S)-$$$$"; \
+		wt="$(VSCODE_INSTALL_WORKTREE_PREFIX)-$$(date +%H%M%S)-$$$$"; \
+		build_tmp="$$(mktemp -d /tmp/kitsoki-vscode-install.XXXXXX)"; \
 		mkdir -p "$$(dirname "$$wt")"; \
 		echo "[vscode-install-local] checkout has read-only build paths; using transient worktree $$wt"; \
-		git worktree add --detach "$$wt" HEAD; \
 		cleanup() { \
+			rm -rf "$$build_tmp"; \
 			if [ -d "$$wt" ]; then \
 				git -C "$$wt" clean -ffdx >/dev/null 2>&1 || true; \
 				git worktree remove "$$wt"; \
 			fi; \
 		}; \
 		trap cleanup EXIT INT TERM; \
-		$(MAKE) -C "$$wt" bootstrap-worktree; \
-		$(MAKE) -C "$$wt" KITSOKI_VSCODE_INSTALL_DELEGATED=1 vscode-install-local-in-place; \
+		git worktree add --detach "$$wt" HEAD; \
+		$(MAKE) -C "$$wt" TEMP_DIR="$$build_tmp" bootstrap-worktree; \
+		$(MAKE) -C "$$wt" TEMP_DIR="$$build_tmp" KITSOKI_VSCODE_INSTALL_DELEGATED=1 vscode-install-local-in-place; \
 		cleanup; \
 		trap - EXIT INT TERM; \
 	else \
