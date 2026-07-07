@@ -1,12 +1,13 @@
 package testrunner_test
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	yaml "gopkg.in/yaml.v3"
 
 	"kitsoki/internal/capsuletest"
 	"kitsoki/internal/testrunner"
@@ -14,49 +15,124 @@ import (
 
 func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
 	appPath := repoStoriesBugfixAppPath(t)
-	cassettePath, err := filepath.Abs("../../stories/bugfix/flows/codeact_live_proof_triage.cassette.yaml")
-	require.NoError(t, err)
+	cases := []struct {
+		name       string
+		sourceFlow string
+	}{
+		{
+			name:       "triage_codeact_completed",
+			sourceFlow: repoPath(t, "../../stories/bugfix/flows/codeact_live_proof_triage.yaml"),
+		},
+		{
+			name:       "direct_ship_completed",
+			sourceFlow: repoPath(t, "../../stories/bugfix/flows/bugfix_ships_direct.yaml"),
+		},
+		{
+			name:       "merged_red_waits_for_human",
+			sourceFlow: repoPath(t, "../../stories/bugfix/flows/bugfix_needs_human_on_merged_red.yaml"),
+		},
+	}
 
-	workspace := capsuletest.Open(t, "clean-repo")
-	capsuletest.Verify(t, workspace)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			workspace := capsuletest.Open(t, "clean-repo")
+			capsuletest.Verify(t, workspace)
 
-	flowPath := filepath.Join(t.TempDir(), "capsule_triage_operation.yaml")
-	require.NoError(t, os.WriteFile(flowPath, []byte(fmt.Sprintf(`test_kind: flow
-app: %q
-host_cassette: %q
-initial_state: idle
-initial_world:
-  workdir: %q
-  bugfix_mode: "triage"
-  judge_mode: "llm"
-  ticket_id: "capsule-codeact-live-proof-demo"
-  ticket_title: "Codeact schema handling should remain wired"
-  ticket_body: >
-    Confirm whether host.agent.codeact still honors its schema argument and
-    cite concrete evidence from the current tree. This corpus entry runs
-    against a hermetic clean-repo capsule and replays the recorded no-LLM
-    codeact response.
-turns:
-  - intent: { name: triage, slots: {} }
-
-expect_terminal: true
-expect_operation_policy: bugfix_triage
-expect_operation_status: completed
-expect_terminal_artifact: triage_verdict
-expect_no_errors: true
-`, appPath, cassettePath, workspace)), 0o644))
-
-	report, err := testrunner.RunFlows(t.Context(), appPath, flowPath, testrunner.FlowOptions{})
-	require.NoError(t, err)
-	requireFlowReportPassed(t, report)
-	capsuletest.Verify(t, workspace)
+			flowPath := writeCapsuleBackedFlow(t, tc.sourceFlow, appPath, workspace, tc.name)
+			report, err := testrunner.RunFlows(t.Context(), appPath, flowPath, testrunner.FlowOptions{})
+			require.NoError(t, err)
+			requireFlowReportPassed(t, report)
+			capsuletest.Verify(t, workspace)
+		})
+	}
 }
 
 func repoStoriesBugfixAppPath(t *testing.T) string {
 	t.Helper()
-	abs, err := filepath.Abs("../../stories/bugfix/app.yaml")
+	return repoPath(t, "../../stories/bugfix/app.yaml")
+}
+
+func repoPath(t *testing.T, path string) string {
+	t.Helper()
+	abs, err := filepath.Abs(path)
 	require.NoError(t, err)
 	return abs
+}
+
+func writeCapsuleBackedFlow(t *testing.T, sourceFlow, appPath, workspace, name string) string {
+	t.Helper()
+	raw, err := os.ReadFile(sourceFlow)
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &doc))
+	initialWorld := stringAnyMap(t, doc, "initial_world")
+	slug := strings.ReplaceAll(name, "_", "-")
+	workspaceID := "capsule-" + slug
+	replacements := map[string]string{}
+	for _, key := range []string{"workdir", "worktree_path"} {
+		if old, ok := initialWorld[key].(string); ok && old != "" {
+			replacements[old] = workspace
+		}
+	}
+	if old, ok := initialWorld["workspace_id"].(string); ok && old != "" {
+		replacements[old] = workspaceID
+	}
+	if old, ok := initialWorld["feature_branch"].(string); ok && old != "" {
+		replacements[old] = workspaceID
+	}
+	replaceStringValues(doc, replacements)
+
+	doc["app"] = appPath
+	if cassette, ok := doc["host_cassette"].(string); ok && cassette != "" && !filepath.IsAbs(cassette) {
+		doc["host_cassette"] = filepath.Join(filepath.Dir(sourceFlow), cassette)
+	}
+	initialWorld = stringAnyMap(t, doc, "initial_world")
+	initialWorld["workdir"] = workspace
+	initialWorld["worktree_path"] = workspace
+	initialWorld["workspace_id"] = workspaceID
+	initialWorld["feature_branch"] = workspaceID
+
+	generated, err := yaml.Marshal(doc)
+	require.NoError(t, err)
+	flowPath := filepath.Join(t.TempDir(), slug+".yaml")
+	require.NoError(t, os.WriteFile(flowPath, generated, 0o644))
+	return flowPath
+}
+
+func stringAnyMap(t *testing.T, doc map[string]any, key string) map[string]any {
+	t.Helper()
+	value, ok := doc[key]
+	if !ok || value == nil {
+		out := map[string]any{}
+		doc[key] = out
+		return out
+	}
+	out, ok := value.(map[string]any)
+	require.Truef(t, ok, "%s must be a map, got %T", key, value)
+	return out
+}
+
+func replaceStringValues(value any, replacements map[string]string) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		for k, v := range typed {
+			typed[k] = replaceStringValues(v, replacements)
+		}
+		return typed
+	case []any:
+		for i, v := range typed {
+			typed[i] = replaceStringValues(v, replacements)
+		}
+		return typed
+	case string:
+		if replacement, ok := replacements[typed]; ok {
+			return replacement
+		}
+		return typed
+	default:
+		return typed
+	}
 }
 
 func requireFlowReportPassed(t *testing.T, report *testrunner.FlowReport) {
