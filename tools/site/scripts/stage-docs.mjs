@@ -16,9 +16,10 @@ import { fileURLToPath } from "url";
 import { expandManifest } from "./manifest.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const siteDir = path.resolve(__dirname, "..");
-const repoRoot = path.resolve(siteDir, "../..");
-const srcDir = path.join(siteDir, "src");
+const siteDir = path.resolve(process.env.KITSOKI_SITE_SOURCE_ROOT ?? path.join(__dirname, ".."));
+const repoRoot = path.resolve(process.env.KITSOKI_REPO_ROOT ?? path.join(siteDir, "../.."));
+const runtimeSiteDir = path.resolve(process.env.KITSOKI_SITE_ROOT ?? siteDir);
+const srcDir = path.join(runtimeSiteDir, "src");
 const guideDir = path.join(srcDir, "guide");
 
 const { repoUrl, branch, sections } = expandManifest(siteDir, repoRoot);

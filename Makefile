@@ -750,7 +750,7 @@ features-index:
 	cd $(RUNSTATUS_DIR) && pnpm features:index
 
 media-check: features-index
-	node $(SITE_DIR)/scripts/check-media.mjs --index .artifacts/features/features-index.json
+	$(SITE_ENV) node $(SITE_DIR)/scripts/check-media.mjs --index .artifacts/features/features-index.json
 
 # media-check-promo is the hard presence gate: run AFTER `make site` (which
 # stages src/public/media/ via its prebuild step) so every promo-grid feature
@@ -758,7 +758,7 @@ media-check: features-index
 # have real staged media, not just shape-valid paths. Non-promo features
 # missing media only warn. CI wires this in as a non-continue-on-error step.
 media-check-promo: features-index
-	node $(SITE_DIR)/scripts/check-media.mjs --index .artifacts/features/features-index.json --require-promo-media
+	$(SITE_ENV) node $(SITE_DIR)/scripts/check-media.mjs --index .artifacts/features/features-index.json --require-promo-media
 
 # demo-feature records ONE feature's demo video at watch-speed and renders the
 # GIF + contact sheet. Spec + artifact paths come from the feature catalog.
@@ -939,90 +939,55 @@ render-all:
 SITE_DIR  := tools/site
 SITE_BASE ?= /Kitsoki/
 SITE_ABS  := $(abspath $(SITE_DIR))
-SITE_PARENT_WRITE_DIRS := \
-	$(SITE_ABS) \
-	$(SITE_ABS)/.vitepress \
-	$(SITE_ABS)/src \
-	$(SITE_ABS)/src/decks \
-	$(SITE_ABS)/src/features \
-	$(SITE_ABS)/src/ja/features \
-	$(SITE_ABS)/src/th/features \
-	$(SITE_ABS)/src/public
-SITE_GENERATED_WRITE_DIRS := \
-	$(SITE_ABS)/node_modules \
-	$(SITE_ABS)/.vitepress/gen \
-	$(SITE_ABS)/.vitepress/dist \
-	$(SITE_ABS)/.vitepress/dist-embedded \
-	$(SITE_ABS)/.vitepress/cache \
-	$(SITE_ABS)/src/guide \
-	$(SITE_ABS)/src/public/media \
-	$(SITE_ABS)/src/public/deck-viewers \
-	$(SITE_ABS)/src/public/decks
+SITE_WORKSPACE ?= $(abspath $(TEMP_DIR)/site)
+SITE_ENV := TMPDIR="$(abspath $(TEMP_DIR))" KITSOKI_TEMP_ROOT="$(abspath $(TEMP_DIR))" \
+	KITSOKI_REPO_ROOT="$(CURDIR)" KITSOKI_SITE_SOURCE_ROOT="$(SITE_ABS)" \
+	KITSOKI_SITE_ROOT="$(SITE_WORKSPACE)"
+SITE_VITEPRESS := $(SITE_WORKSPACE)/node_modules/.bin/vitepress
 
-define site_write_guard
-	@set -e; \
-	site_protected=0; relock_parent_paths=""; relock_recursive_paths=""; \
-	unlock_parent() { \
-		p="$$1"; \
-		[ -e "$$p" ] || return 0; \
-		if [ ! -w "$$p" ]; then chmod u+w "$$p" 2>/dev/null || true; relock_parent_paths="$$relock_parent_paths $$p"; site_protected=1; fi; \
-	}; \
-	unlock_recursive() { \
-		p="$$1"; \
-		[ -e "$$p" ] || return 0; \
-		if [ ! -w "$$p" ]; then relock_recursive_paths="$$relock_recursive_paths $$p"; fi; \
-		chmod -R u+w "$$p" 2>/dev/null || true; \
-	}; \
-	restore_site_guard() { \
-		if [ "$$site_protected" = 1 ]; then \
-			for p in $(SITE_GENERATED_WRITE_DIRS); do [ ! -e "$$p" ] || chmod -R a-w "$$p" 2>/dev/null || true; done; \
-		else \
-			for p in $$relock_recursive_paths; do [ ! -e "$$p" ] || chmod -R a-w "$$p" 2>/dev/null || true; done; \
-		fi; \
-		for p in $$relock_parent_paths; do [ ! -e "$$p" ] || chmod a-w "$$p" 2>/dev/null || true; done; \
-	}; \
-	for p in $(SITE_PARENT_WRITE_DIRS); do unlock_parent "$$p"; done; \
-	for p in $(SITE_GENERATED_WRITE_DIRS); do unlock_recursive "$$p"; done; \
-	trap restore_site_guard EXIT INT TERM; \
-	$(1); \
-	restore_site_guard; \
-	trap - EXIT INT TERM
-endef
+.PHONY: site site-data site-deps site-stage site-workspace site-dev site-clean
+site-workspace:
+	$(SITE_ENV) node $(SITE_DIR)/scripts/prepare-workspace.mjs
 
-.PHONY: site site-data site-dev site-clean
+site-deps: site-workspace
+	cd "$(SITE_WORKSPACE)" && pnpm install --frozen-lockfile --silent
+
 # site-data emits the feature-catalog contract (features-index.json + QA files)
-# into the site's gitignored gen/ dir.
-site-data:
+# into the temp VitePress workspace's gen/ dir.
+site-data: site-workspace
 	$(call runstatus_pnpm_install,--silent)
-	$(call site_write_guard,cd $(RUNSTATUS_DIR) && pnpm exec tsx scripts/features/generate.ts --index --out $(CURDIR)/$(SITE_DIR)/.vitepress/gen)
+	mkdir -p "$(SITE_WORKSPACE)/.vitepress/gen"
+	cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) pnpm exec tsx scripts/features/generate.ts --index --out "$(SITE_WORKSPACE)/.vitepress/gen"
 
-site: site-data
-	$(call site_write_guard,cd $(SITE_DIR) && pnpm install --frozen-lockfile --silent && SITE_BASE=$(SITE_BASE) pnpm build)
-	node $(SITE_DIR)/scripts/check-leaks.mjs $(SITE_DIR)/.vitepress/dist
-	@echo "site built -> $(SITE_DIR)/.vitepress/dist"
+site-stage: site-data
+	$(SITE_ENV) node $(SITE_DIR)/scripts/stage-docs.mjs
+	$(SITE_ENV) node $(SITE_DIR)/scripts/stage-media.mjs
 
-# site-dev runs the VitePress HMR dev server (docs iterate instantly; media —
-# videos/posters — reflect whatever `make demos` has recorded so far).
-site-dev: site-data
-	$(call site_write_guard,cd $(SITE_DIR) && pnpm install --frozen-lockfile --silent && pnpm dev)
+site: site-deps site-stage
+	$(SITE_ENV) SITE_BASE=$(SITE_BASE) "$(SITE_VITEPRESS)" build "$(SITE_WORKSPACE)"
+	node $(SITE_DIR)/scripts/check-leaks.mjs "$(SITE_WORKSPACE)/dist"
+	@echo "site built -> $(SITE_WORKSPACE)/dist"
+
+# site-dev prepares the writable .temp/site workspace, then runs the VitePress
+# dev server from there. Rerun after changing source docs/config so source stays
+# read-only and Vite's loader scratch files remain under .temp.
+site-dev: site-deps site-stage
+	$(SITE_ENV) "$(SITE_VITEPRESS)" dev "$(SITE_WORKSPACE)"
 
 # site-embed builds the EMBEDDED variant (base /help/, posters only — no MP4s
 # in the binary) and stages it into internal/helpdocs/assets/ so the next
 # `make build` serves it offline at /help/. ~2-4MB on the binary.
 HELPDOCS_ASSETS := internal/helpdocs/assets
 .PHONY: site-embed
-site-embed: site-data
-	$(call site_write_guard,cd $(SITE_DIR) && pnpm install --frozen-lockfile --silent && SITE_BASE=/help/ SITE_VARIANT=embedded pnpm build)
-	node $(SITE_DIR)/scripts/check-leaks.mjs $(SITE_DIR)/.vitepress/dist-embedded --embedded
+site-embed: site-deps site-stage
+	$(SITE_ENV) SITE_BASE=/help/ SITE_VARIANT=embedded "$(SITE_VITEPRESS)" build "$(SITE_WORKSPACE)"
+	node $(SITE_DIR)/scripts/check-leaks.mjs "$(SITE_WORKSPACE)/dist-embedded" --embedded
 	find $(HELPDOCS_ASSETS) -mindepth 1 ! -name .gitkeep -delete
-	cp -R $(SITE_DIR)/.vitepress/dist-embedded/. $(HELPDOCS_ASSETS)/
+	cp -R "$(SITE_WORKSPACE)/dist-embedded/." $(HELPDOCS_ASSETS)/
 	@echo "help docs staged -> $(HELPDOCS_ASSETS) (next 'make build' embeds them at /help/)"
 
 site-clean:
-	$(call site_write_guard,rm -rf $(SITE_DIR)/.vitepress/gen $(SITE_DIR)/.vitepress/dist \
-		$(SITE_DIR)/.vitepress/dist-embedded $(SITE_DIR)/.vitepress/cache \
-		$(SITE_DIR)/src/guide $(SITE_DIR)/src/public/media $(SITE_DIR)/src/public/decks \
-		$(SITE_DIR)/src/public/deck-viewers)
+	rm -rf "$(SITE_WORKSPACE)"
 	find $(HELPDOCS_ASSETS) -mindepth 1 ! -name .gitkeep -delete 2>/dev/null || true
 
 # vscode-package builds the SPA + extension bundle, then packages an installable

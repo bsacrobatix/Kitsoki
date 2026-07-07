@@ -29,12 +29,13 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const siteDir = path.resolve(__dirname, "..");
-const repoRoot = path.resolve(siteDir, "../..");
-const mediaDir = path.join(siteDir, "src", "public", "media");
-const deckViewersDir = path.join(siteDir, "src", "public", "deck-viewers");
-const legacyDecksDir = path.join(siteDir, "src", "public", "decks");
-const indexPath = path.join(siteDir, ".vitepress", "gen", "features-index.json");
+const siteDir = path.resolve(process.env.KITSOKI_SITE_SOURCE_ROOT ?? path.join(__dirname, ".."));
+const repoRoot = path.resolve(process.env.KITSOKI_REPO_ROOT ?? path.join(siteDir, "../.."));
+const runtimeSiteDir = path.resolve(process.env.KITSOKI_SITE_ROOT ?? siteDir);
+const mediaDir = path.join(runtimeSiteDir, "src", "public", "media");
+const deckViewersDir = path.join(runtimeSiteDir, "src", "public", "deck-viewers");
+const legacyDecksDir = path.join(runtimeSiteDir, "src", "public", "decks");
+const indexPath = path.join(runtimeSiteDir, ".vitepress", "gen", "features-index.json");
 
 const embedded = process.argv.includes("--variant")
   ? process.argv[process.argv.indexOf("--variant") + 1] === "embedded"

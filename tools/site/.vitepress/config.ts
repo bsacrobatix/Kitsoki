@@ -19,6 +19,8 @@ import type { LocaleCode } from "./data/i18n.js";
 import { locales, prefixed } from "./data/i18n.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const sourceSiteDir = path.resolve(process.env.KITSOKI_SITE_SOURCE_ROOT ?? path.resolve(__dirname, ".."));
+const runtimeSiteDir = path.resolve(process.env.KITSOKI_SITE_ROOT ?? sourceSiteDir);
 
 const variant = process.env.SITE_VARIANT === "embedded" ? "embedded" : "full";
 const base = process.env.SITE_BASE ?? "/";
@@ -72,10 +74,17 @@ export default defineConfig({
     ["link", { rel: "icon", type: "image/svg+xml", href: `${base}branding/mesa-sun-simple.svg` }],
   ],
   srcDir: "./src",
-  outDir: path.resolve(__dirname, variant === "embedded" ? "dist-embedded" : "dist"),
+  outDir: path.join(runtimeSiteDir, variant === "embedded" ? "dist-embedded" : "dist"),
+  cacheDir: path.join(runtimeSiteDir, "cache"),
   cleanUrls: false,
   lang: locales.en.lang,
   vite: {
+    cacheDir: path.join(runtimeSiteDir, "vite-cache"),
+    server: {
+      watch: {
+        ignored: ["**/src/public/media/**", "**/src/public/deck-viewers/**"],
+      },
+    },
     optimizeDeps: {
       entries: [
         ".vitepress/**/*.{ts,js,vue}",
