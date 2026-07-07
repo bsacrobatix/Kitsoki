@@ -326,6 +326,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				def      *app.AppDef
 				appPath  string
 				reloader func() (*app.AppDef, error)
+				projectStartupNotice string
 			)
 			if len(args) == 1 {
 				appPath = args[0]
@@ -346,6 +347,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				if err != nil {
 					return fmt.Errorf("synthesize implicit root: %w", err)
 				}
+				projectStartupNotice = projectUpgradeNoticeForRoot(repoRoot)
 				// A synthesized root has no app.yaml to re-read on /reload, so
 				// inject a reloader that re-reads .kitsoki.yaml and
 				// re-synthesizes — a rung-1 overrides edit takes effect on the
@@ -580,6 +582,9 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 					tui.WithTraceHistory(func() (store.History, error) { return s.LoadHistory(sid) }),
 					tui.WithBugTicketRepo(ticketRepo),
 				}, tuiOptions...)
+				if projectStartupNotice != "" {
+					tuiOptions = append(tuiOptions, tui.WithStartupNotice(projectStartupNotice))
+				}
 				if tuiMetaTracePath != "" {
 					tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(tuiMetaTracePath))
 				}
@@ -750,6 +755,9 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				tui.WithInitialTypedView(initialTypedView, initialTypedEnv, initialTypedRR),
 				tui.WithTraceHistory(func() (store.History, error) { return s.LoadHistory(sid) }),
 				tui.WithBugTicketRepo(ticketRepo),
+			}
+			if projectStartupNotice != "" {
+				tuiOptions = append(tuiOptions, tui.WithStartupNotice(projectStartupNotice))
 			}
 			if freshMetaTracePath != "" {
 				tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(freshMetaTracePath))

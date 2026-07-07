@@ -250,6 +250,11 @@ type RootModel struct {
 	initialTypedEnv  expr.Env
 	initialTypedRR   *render.AppRenderer
 
+	// startupNotices are project/runtime notices printed once at TUI startup.
+	// They are intentionally outside the orchestrator transcript model: callers
+	// compute them from local CLI state before the session begins.
+	startupNotices []string
+
 	// clk is the injectable time source used by the inbox polling ticker.
 	// When nil, clock.Real() is used. Tests inject a *clock.Fake so they can
 	// drive ticks deterministically without wall-clock waits.
@@ -637,6 +642,16 @@ func WithInitialTypedView(typed *app.View, env expr.Env, rr *render.AppRenderer)
 	}
 }
 
+// WithStartupNotice appends a one-shot system notice to the TUI scrollback at
+// construction time. Empty notices are ignored.
+func WithStartupNotice(notice string) RootModelOption {
+	return func(m *RootModel) {
+		if strings.TrimSpace(notice) != "" {
+			m.startupNotices = append(m.startupNotices, notice)
+		}
+	}
+}
+
 // WithMetaStreamSink wires a *MetaStreamSink into the RootModel so
 // meta-mode Send calls stream live progress lines into the chat
 // transcript. The sink itself is unbound at construction time; the
@@ -798,6 +813,9 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 		if welcome := buildWelcome(orch, sid, appPath, defaultWidth); welcome != "" {
 			m.transcript.pending = append(m.transcript.pending, welcome)
 		}
+	}
+	for _, notice := range m.startupNotices {
+		m.transcript.AppendSystem(notice)
 	}
 
 	// Show initial view in transcript. When the root state's view is a

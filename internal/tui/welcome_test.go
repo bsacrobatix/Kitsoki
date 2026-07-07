@@ -61,3 +61,15 @@ func TestWelcomeBlockSuppressedOnResume(t *testing.T) {
 	require.NotContains(t, pending, "list commands",
 		"welcome banner must be suppressed on resume")
 }
+
+func TestStartupNoticePrintsAtStartup(t *testing.T) {
+	t.Parallel()
+	orch, sid := setupCloak(t)
+	m := tuipkg.NewRootModel(orch, sid, "", "",
+		tuipkg.WithStartupNotice("(kitsoki: project files may need refresh)"),
+	)
+
+	rm, _ := tuipkg.ExtractRootModel(m)
+	pending := strings.Join(tuipkg.PendingTranscriptForTest(rm), "\n")
+	require.Contains(t, pending, "project files may need refresh")
+}
