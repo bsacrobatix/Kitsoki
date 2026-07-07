@@ -301,6 +301,7 @@ describe("HomeView", () => {
           status: "completed",
           terminal_state: "__exit__direct-ship",
           terminal_artifact: "artifacts/qa-report.md",
+          terminal_artifact_handle: "qa-report#abc123",
         },
       }),
     ]);
@@ -311,9 +312,9 @@ describe("HomeView", () => {
     const artifact = wrapper.find("[data-testid='session-operation-artifact-open']");
     expect(artifact.exists()).toBe(true);
     expect(artifact.text()).toBe("Artifact");
-    expect(artifact.attributes("href")).toBe("/artifact/artifacts%2Fqa-report.md");
+    expect(artifact.attributes("href")).toBe("/artifact/qa-report%23abc123");
     expect(artifact.attributes("target")).toBe("_blank");
-    expect(artifactUrl).toHaveBeenCalledWith("artifacts/qa-report.md");
+    expect(artifactUrl).toHaveBeenCalledWith("qa-report#abc123");
     wrapper.unmount();
   });
 

@@ -269,7 +269,7 @@
                 :href="operationArtifactHref(s)"
                 target="_blank"
                 rel="noopener noreferrer"
-                :title="`Open ${s.operation_run?.terminal_artifact}`"
+                :title="`Open ${operationArtifactLabel(s)}`"
               >Artifact</a>
               <button
                 v-if="canDriveOperation(s)"
@@ -630,8 +630,18 @@ function operationFacts(s: SessionHeader): OperationFact[] {
 }
 
 function operationArtifactHref(s: SessionHeader): string {
-  const artifact = s.operation_run?.terminal_artifact;
+  const artifact = operationArtifactHandle(s);
   return artifact ? source.artifactUrl(artifact) : "";
+}
+
+function operationArtifactHandle(s: SessionHeader): string {
+  const run = s.operation_run;
+  return run?.terminal_artifact_handle || run?.terminal_artifact || "";
+}
+
+function operationArtifactLabel(s: SessionHeader): string {
+  const run = s.operation_run;
+  return run?.terminal_artifact || run?.terminal_artifact_handle || "artifact";
 }
 
 function operationPhaseLabel(phase: string): string {

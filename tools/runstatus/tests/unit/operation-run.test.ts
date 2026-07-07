@@ -76,6 +76,7 @@ describe("deriveOperationRun", () => {
           status: "completed",
           terminal_state: "__exit__shipped",
           terminal_artifact: "bf__done_artifact",
+          terminal_artifact_handle: "done#abc123",
         },
       }),
     ]);
@@ -87,6 +88,7 @@ describe("deriveOperationRun", () => {
       to: "bugfix.reproduce",
       terminalState: "__exit__shipped",
       terminalArtifact: "bf__done_artifact",
+      terminalArtifactHandle: "done#abc123",
     });
   });
 

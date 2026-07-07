@@ -27,6 +27,7 @@ export interface OperationRunSummary {
   phase?: string;
   terminal_state?: string;
   terminal_artifact?: string;
+  terminal_artifact_handle?: string;
   stop_reason?: string;
   stop_detail?: string;
 }

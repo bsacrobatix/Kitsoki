@@ -299,6 +299,7 @@ describe("InteractiveView focused chat context", () => {
               status: "completed",
               terminal_state: "__exit__done",
               terminal_artifact: "artifacts/qa-report.md",
+              terminal_artifact_handle: "qa-report#abc123",
             },
           },
         ],
@@ -327,7 +328,7 @@ describe("InteractiveView focused chat context", () => {
     expect(wrapper.find('[data-testid="operation-run-artifact"]').text()).toContain("artifacts/qa-report.md");
     const openArtifact = wrapper.find('[data-testid="operation-run-artifact-open"]');
     expect(openArtifact.exists()).toBe(true);
-    expect(openArtifact.attributes("href")).toBe("/artifact/artifacts%2Fqa-report.md");
+    expect(openArtifact.attributes("href")).toBe("/artifact/qa-report%23abc123");
     expect(openArtifact.attributes("target")).toBe("_blank");
     wrapper.unmount();
   });

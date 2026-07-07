@@ -667,6 +667,7 @@ describe("useRunStore — write-side actions", () => {
           status: "completed",
           terminal_state: "__exit__done",
           terminal_artifact: "artifacts/qa-report.md",
+          terminal_artifact_handle: "qa-report#abc123",
         },
       },
     ];
@@ -706,6 +707,7 @@ describe("useRunStore — write-side actions", () => {
       phase: "run_regression",
       terminalState: "__exit__done",
       terminalArtifact: "artifacts/qa-report.md",
+      terminalArtifactHandle: "qa-report#abc123",
     });
     expect(store.transcript[0]).toMatchObject({ role: "user", text: "Drive operation" });
     expect(store.transcript[1]).toMatchObject({ role: "agent", text: "Operation complete" });

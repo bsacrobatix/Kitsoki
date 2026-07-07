@@ -96,6 +96,9 @@ func TestOperationRunEvents(t *testing.T) {
 					"go": {{
 						Target:    "done",
 						Operation: "demo_run",
+						Effects: []app.Effect{{
+							Set: map[string]any{"done_artifact": "done#abc123"},
+						}},
 					}},
 				},
 			},
@@ -134,12 +137,15 @@ func TestOperationRunEvents(t *testing.T) {
 	require.Equal(t, "demo_run", completed["policy_id"])
 	require.Equal(t, "done", completed["terminal_state"])
 	require.Equal(t, "done_artifact", completed["terminal_artifact"])
+	require.Equal(t, "done#abc123", completed["terminal_artifact_handle"])
 
 	handle, ok := res.World.Vars[app.OperationRunWorldKey].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "completed", handle["status"])
 	require.Equal(t, "demo_run", handle["policy_id"])
 	require.Equal(t, "done", handle["terminal_state"])
+	require.Equal(t, "done_artifact", handle["terminal_artifact"])
+	require.Equal(t, "done#abc123", handle["terminal_artifact_handle"])
 }
 
 func TestOperationRunWaitsOnStopConditionTerminal(t *testing.T) {

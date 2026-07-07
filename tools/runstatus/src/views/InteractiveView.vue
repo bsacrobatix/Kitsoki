@@ -827,9 +827,12 @@ const operationRunDetail = computed(() => {
   const detail = operationRun.value?.stopDetail;
   return detail ? `needs input: ${detail}` : "";
 });
-const operationRunArtifactHandle = computed(() => operationRun.value?.terminalArtifact ?? "");
+const operationRunArtifactLabel = computed(() => operationRun.value?.terminalArtifact ?? "");
+const operationRunArtifactHandle = computed(
+  () => operationRun.value?.terminalArtifactHandle ?? operationRun.value?.terminalArtifact ?? ""
+);
 const operationRunArtifact = computed(() => {
-  const artifact = operationRunArtifactHandle.value;
+  const artifact = operationRunArtifactLabel.value;
   return artifact ? `artifact ${artifact}` : "";
 });
 const operationRunArtifactHref = computed(() => {
