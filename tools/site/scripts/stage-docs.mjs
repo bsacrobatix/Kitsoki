@@ -45,6 +45,10 @@ function rewriteTarget(target, repoFile, siteFile, map) {
     if (!rel.startsWith(".")) rel = "./" + rel;
     return rel + anchor;
   }
+
+  const localSiteTarget = localSiteTargetForRepoPath(resolved);
+  if (localSiteTarget) return localSiteTarget + anchor;
+
   // Escapes the allowlist — point at GitHub so the reference stays alive.
   if (!fs.existsSync(path.join(repoRoot, resolved))) {
     // Path doesn't exist in the repo either; keep as-is and let the dead-link
@@ -52,6 +56,20 @@ function rewriteTarget(target, repoFile, siteFile, map) {
     return target;
   }
   return `${repoUrl}/blob/${branch}/${resolved}${anchor}`;
+}
+
+function localSiteTargetForRepoPath(repoPath) {
+  const deckSource = repoPath.match(/^docs\/decks\/([^/]+?)(?:\.slidey)?\.json$/);
+  if (deckSource && fs.existsSync(path.join(repoRoot, repoPath))) {
+    return `/decks/${deckSource[1]}.html`;
+  }
+
+  const deckBundle = repoPath.match(/^docs\/decks\/bundled\/([^/]+)\.html$/);
+  if (deckBundle && fs.existsSync(path.join(repoRoot, repoPath))) {
+    return `/decks/${deckBundle[1]}.html`;
+  }
+
+  return "";
 }
 
 function rewriteLinks(content, repoFile, siteFile, map) {

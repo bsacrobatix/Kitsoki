@@ -69,6 +69,13 @@ directory. Gallery thumbnails are rendered from the deck's first title scene and
 theme colors; clicking a card opens a VitePress page at `/decks/<deck-id>.html`
 with the site chrome intact and an embedded Slidey viewer.
 
+Guide docs staged by `tools/site/scripts/stage-docs.mjs` also treat those
+top-level deck files as product-site pages: a markdown link to
+`docs/decks/<deck-id>.slidey.json`, `docs/decks/<deck-id>.json`, or the matching
+`docs/decks/bundled/<deck-id>.html` rewrites to `/decks/<deck-id>.html` instead
+of the generic GitHub fallback. That keeps local `make site-dev` previews useful
+when a deck exists in the checkout but not yet on `origin/main`.
+
 Use this rule:
 
 - A committed deck file may live in `docs/decks/<deck-id>.slidey.json`.

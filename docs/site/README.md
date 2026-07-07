@@ -107,7 +107,10 @@ pure no-LLM post-processing.
   `scripts/stage-docs.mjs`): internal trees (proposals, competitive-analysis,
   skills, …) can never leak; links escaping the allowlist are rewritten to
   GitHub URLs; dead links fail the build; `scripts/check-leaks.mjs` re-checks
-  the dist.
+  the dist. Top-level `docs/decks/*.json` / `*.slidey.json` links are the
+  exception: they rewrite to the local `/decks/<deck-id>.html` product-site
+  page so `make site-dev` previews newly added decks before they exist on
+  GitHub.
 - **Localization** publishes English at `/`, Thai at `/th/`, and Japanese at
   `/ja/`. Static locale pages live under `tools/site/src/<locale>/`; generated
   feature pages read optional JSON overlays from `tools/site/i18n/<locale>/`.
