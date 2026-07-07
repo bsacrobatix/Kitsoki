@@ -127,6 +127,18 @@ exits:
   needs-human:
     requires: [outcome, report_path]
 
+operations:
+  fix_tests:
+    title: "Fix tests"
+    mode: autonomous
+    execution_mode: one-shot
+    run_in_background: true
+    stop_on: [needs-human, gate-failed, host-error, budget-exhausted, policy-denied]
+    pause_on: [operator-ask]
+    terminal_artifact: report_path
+    phase_summary:
+      from: [last_run, fix_artifact, review_artifact, report_path]
+
 root: idle
 
 include:

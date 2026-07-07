@@ -220,6 +220,12 @@ type Machine interface {
 	RunEffectsAndState(ctx context.Context, state app.StatePath, w world.World, effects []app.Effect) (app.StatePath, world.World, []HostInvocation, string, []store.Event, error)
 	RunEffectsAndStateWithOptions(ctx context.Context, state app.StatePath, w world.World, effects []app.Effect, opts RunEffectsOptions) (app.StatePath, world.World, []HostInvocation, string, []store.Event, error)
 
+	// SettleActiveOperationRun applies the operation-run phase/completion checks
+	// that normally run at the end of Turn/DispatchPostBindEmits to a state/world
+	// pair advanced by an external synthetic transition, such as a background
+	// job's on_complete target dispatch.
+	SettleActiveOperationRun(state app.StatePath, w world.World) (world.World, []store.Event)
+
 	// DispatchPostBindEmits re-evaluates the emit_intent: effects on
 	// the entered state's on_enter chain against a post-bind world
 	// snapshot, then dispatches any whose `when:` guard now passes.
@@ -1574,6 +1580,19 @@ func operationRunPhaseSummaryKeys(policy *app.OperationPolicy) []string {
 		out = append(out, phase)
 	}
 	return out
+}
+
+func (m *machineImpl) SettleActiveOperationRun(state app.StatePath, w world.World) (world.World, []store.Event) {
+	var events []store.Event
+	if updatedWorld, operationEvents := m.advanceActiveOperationRunPhaseProgress(string(state), w); len(operationEvents) > 0 {
+		w = updatedWorld
+		events = append(events, operationEvents...)
+	}
+	if updatedWorld, operationEvents := m.completeActiveOperationRun(string(state), w); len(operationEvents) > 0 {
+		w = updatedWorld
+		events = append(events, operationEvents...)
+	}
+	return w, events
 }
 
 func (m *machineImpl) completeActiveOperationRun(terminalState string, w world.World) (world.World, []store.Event) {

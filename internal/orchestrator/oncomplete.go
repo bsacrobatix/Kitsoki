@@ -273,7 +273,7 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		// on_error short-circuits Target — if a host call already redirected
 		// to an error state, we leave the session there.
 		if !onErrorRedirected {
-			targetEvents, targetState, targetErr := o.resolveAndApplyOnCompleteTarget(ctx, sid, onComplete, w, currentState, turnNum)
+			targetEvents, targetState, targetWorld, targetErr := o.resolveAndApplyOnCompleteTarget(ctx, sid, onComplete, w, currentState, turnNum)
 			if targetErr != nil {
 				// Validation should have caught a missing target at load time;
 				// surface a warning rather than crashing the synthetic turn so
@@ -291,9 +291,17 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 					targetEvents[i].Turn = turnNum
 				}
 				turnEvents = append(turnEvents, targetEvents...)
+				w = targetWorld
 				currentState = targetState
 			}
 		}
+	}
+	if settledWorld, operationEvents := o.machine.SettleActiveOperationRun(currentState, w); len(operationEvents) > 0 {
+		for i := range operationEvents {
+			operationEvents[i].Turn = turnNum
+		}
+		turnEvents = append(turnEvents, operationEvents...)
+		w = settledWorld
 	}
 
 	// Emit a JobCompleted event so the event log captures the terminal transition.
@@ -527,7 +535,7 @@ func (o *Orchestrator) resolveAndApplyOnCompleteTarget(
 	w world.World,
 	originState app.StatePath,
 	turnNum app.TurnNumber,
-) ([]store.Event, app.StatePath, error) {
+) ([]store.Event, app.StatePath, world.World, error) {
 	var (
 		firstIdx    = -1
 		firstTarget string
@@ -549,11 +557,11 @@ func (o *Orchestrator) resolveAndApplyOnCompleteTarget(
 		if strings.TrimSpace(eff.When) != "" {
 			prog, cerr := expr.CompileBool(eff.When)
 			if cerr != nil {
-				return nil, originState, fmt.Errorf("on_complete[%d].when %q: compile: %w", i, eff.When, cerr)
+				return nil, originState, w, fmt.Errorf("on_complete[%d].when %q: compile: %w", i, eff.When, cerr)
 			}
 			ok, eerr := expr.EvalBool(prog, env)
 			if eerr != nil {
-				return nil, originState, fmt.Errorf("on_complete[%d].when %q: eval: %w", i, eff.When, eerr)
+				return nil, originState, w, fmt.Errorf("on_complete[%d].when %q: eval: %w", i, eff.When, eerr)
 			}
 			if !ok {
 				continue
@@ -567,7 +575,7 @@ func (o *Orchestrator) resolveAndApplyOnCompleteTarget(
 		extras = append(extras, i)
 	}
 	if firstIdx == -1 {
-		return nil, originState, nil // no Target effect fired
+		return nil, originState, w, nil // no Target effect fired
 	}
 	for _, idx := range extras {
 		o.logger.WarnContext(ctx, trace.EvJobOnCompleteRun,
@@ -587,17 +595,17 @@ func (o *Orchestrator) resolveAndApplyOnCompleteTarget(
 	if strings.Contains(resolved, "{{") {
 		rendered, rerr := expr.RenderValue(resolved, env)
 		if rerr != nil {
-			return nil, originState, fmt.Errorf("on_complete[%d].target render: %w", firstIdx, rerr)
+			return nil, originState, w, fmt.Errorf("on_complete[%d].target render: %w", firstIdx, rerr)
 		}
 		if s, ok := rendered.(string); ok {
 			resolved = resolveOnCompleteTarget(string(originState), strings.TrimSpace(s))
 		} else {
-			return nil, originState, fmt.Errorf("on_complete[%d].target template did not render to string (got %T)", firstIdx, rendered)
+			return nil, originState, w, fmt.Errorf("on_complete[%d].target template did not render to string (got %T)", firstIdx, rendered)
 		}
 	}
 	tgtState := lookupStateByPath(o.def, app.StatePath(resolved))
 	if tgtState == nil {
-		return nil, originState, fmt.Errorf("on_complete[%d].target %q (resolved %q) does not exist", firstIdx, firstTarget, resolved)
+		return nil, originState, w, fmt.Errorf("on_complete[%d].target %q (resolved %q) does not exist", firstIdx, firstTarget, resolved)
 	}
 
 	o.logger.DebugContext(ctx, trace.EvJobOnCompleteRun,
@@ -644,16 +652,17 @@ func (o *Orchestrator) resolveAndApplyOnCompleteTarget(
 	// already routed it onward.  (P1-D from the dev-story-bugfix-unify
 	// Opus review.)
 	if len(tgtState.OnEnter) > 0 {
-		emitState, _, hostCalls, _, enterEvents, runErr := o.machine.RunEffectsAndState(ctx, target, w, tgtState.OnEnter)
+		emitState, targetWorld, hostCalls, _, enterEvents, runErr := o.machine.RunEffectsAndState(ctx, target, w, tgtState.OnEnter)
 		if runErr != nil {
-			return nil, originState, fmt.Errorf("on_complete target on_enter: %w", runErr)
+			return nil, originState, w, fmt.Errorf("on_complete target on_enter: %w", runErr)
 		}
+		w = targetWorld
 		events = append(events, enterEvents...)
 		if emitState != "" && emitState != target {
 			target = emitState
 		}
 		if len(hostCalls) > 0 {
-			hostEvts, _, _, _, hostErr := o.dispatchHostCalls(ctx, sid, hostCalls, w, target)
+			hostEvts, hostWorld, _, _, hostErr := o.dispatchHostCalls(ctx, sid, hostCalls, w, target)
 			if hostErr != nil {
 				o.logger.WarnContext(ctx, trace.EvJobError,
 					slog.String("session_id", string(sid)),
@@ -662,11 +671,12 @@ func (o *Orchestrator) resolveAndApplyOnCompleteTarget(
 				)
 			} else {
 				events = append(events, hostEvts...)
+				w = hostWorld
 			}
 		}
 	}
 
-	return events, target, nil
+	return events, target, w, nil
 }
 
 // resolveOnCompleteTarget mirrors app.resolveTarget so the orchestrator can
