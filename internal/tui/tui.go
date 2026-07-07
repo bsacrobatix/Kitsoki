@@ -1159,14 +1159,7 @@ func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		slog.Debug("tui.resize",
-			slog.Int("width", msg.Width),
-			slog.Int("height", msg.Height),
-		)
-		m.width = msg.Width
-		m.height = msg.Height
-		m = m.resize()
-		return m, nil
+		return m.handleWindowSize(msg)
 
 	case tea.KeyMsg:
 		return m.routeKey(msg)
@@ -1422,10 +1415,7 @@ func (m RootModel) updateSlotFilling(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleSupplementSlots(msg)
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m = m.resize()
-		return m, nil
+		return m.handleWindowSize(msg)
 
 	case tea.KeyMsg:
 		switch msg.Type {
@@ -3273,6 +3263,8 @@ func (m RootModel) updateSessionsPanel(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sessionsPanelChoiceMsg:
 		return m.handleSessionsPanelChoice(msg)
+	case tea.WindowSizeMsg:
+		return m.handleWindowSize(msg)
 	}
 	var cmd tea.Cmd
 	m.sessionsPanel, cmd = m.sessionsPanel.Update(msg)
@@ -3827,6 +3819,8 @@ func (m RootModel) reloadOrchestratorAfterMetaWithFiles(changed []string) (tea.M
 //   - While inFlight (a turn is mid-flight), Enter is ignored.
 func (m RootModel) updateMeta(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		return m.handleWindowSize(msg)
 	case metaSendDoneMsg:
 		return m.handleMetaSendDone(msg)
 	case metaEnterDoneMsg:
@@ -4073,6 +4067,9 @@ func (m RootModel) exitMetaMode() RootModel {
 // updateMenuSystem routes keys to the overlay and reverts to ModeOnPath when
 // the user dismisses it without choosing.
 func (m RootModel) updateMenuSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if msg, ok := msg.(tea.WindowSizeMsg); ok {
+		return m.handleWindowSize(msg)
+	}
 	var cmd tea.Cmd
 	m.menuSystem, cmd = m.menuSystem.Update(msg)
 	if !m.menuSystem.IsActive() && m.mode == ModeMenu {
@@ -4120,10 +4117,7 @@ func (m RootModel) updateDisambiguating(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDisambiguationChoice(msg)
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m = m.resize()
-		return m, nil
+		return m.handleWindowSize(msg)
 
 	case tea.KeyMsg:
 		switch msg.Type {
@@ -4197,13 +4191,12 @@ func (m RootModel) updateDisambiguating(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m RootModel) updateChoosing(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m = m.resize()
+		var cmd tea.Cmd
+		m, cmd = m.handleWindowSize(msg)
 		// Re-render the widget at the new width so the live region
 		// reflows in place.
 		m.transcript.UpdateLive(m.choice.View(m.transcript.wrapWidth()))
-		return m, nil
+		return m, cmd
 
 	case turnOutcomeMsg:
 		// A turn outcome arriving while ModeChoosing means an
@@ -4331,11 +4324,10 @@ func (m RootModel) handleOperatorQuestion(msg operatorQuestionMsg) (tea.Model, t
 func (m RootModel) updateOperatorQuestion(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m = m.resize()
+		var cmd tea.Cmd
+		m, cmd = m.handleWindowSize(msg)
 		m.transcript.UpdateLive(m.operatorQuestion.View(m.transcript.wrapWidth()))
-		return m, nil
+		return m, cmd
 
 	case turnOutcomeMsg:
 		// The turn completed/cancelled while the question was on screen — the
@@ -4540,6 +4532,27 @@ func (m RootModel) updateLocation(out *orchestrator.TurnOutcome) RootModel {
 	loc := orchestrator.ComputeLocation(m.orch.AppDef(), out.NewState, w, out.TurnNumber)
 	m.location, _ = m.location.Update(locationUpdated{loc: loc})
 	return m
+}
+
+func (m RootModel) handleWindowSize(msg tea.WindowSizeMsg) (RootModel, tea.Cmd) {
+	slog.Debug("tui.resize",
+		slog.Int("width", msg.Width),
+		slog.Int("height", msg.Height),
+	)
+	m.width = msg.Width
+	m.height = msg.Height
+	m = m.resize()
+
+	// This TUI intentionally paints in the normal screen so transcript
+	// scrollback remains native. When the terminal shrinks horizontally, rows
+	// rendered at the old width can wrap into extra physical rows before
+	// Bubble Tea's next cursor-up repaint, leaving stale cells interleaved with
+	// the new chrome. Clear the visible screen on resize, then repaint from the
+	// freshly computed model.
+	if flush := (&m).flushPendingWhenStable(); flush != nil {
+		return m, tea.Sequence(tea.ClearScreen, flush)
+	}
+	return m, tea.ClearScreen
 }
 
 func (m RootModel) resize() RootModel {
