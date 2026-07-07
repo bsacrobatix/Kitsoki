@@ -93,6 +93,11 @@ That enters `profile_setup_discover`, which reads `.kitsoki.yaml` plus
 source/presence for common env vars and local auth files. It does not run a
 model or call a provider.
 
+`logged_in=yes` is intentionally conservative: it means discovery found an env
+credential or a credential-looking auth file marker. Configuration/history files
+such as `~/.claude/settings.json` or `~/.claude.json` are reported as
+presence-only evidence and leave the login state `unknown`.
+
 The graph is:
 
 ```mermaid

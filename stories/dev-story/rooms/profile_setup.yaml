@@ -239,7 +239,7 @@ states:
         when: "world.profile_setup_effective_profiles"
       - heading: "Backends"
       - template: |
-          {% for b in world.profile_setup_discovery.backend_sources %}- {{ b.backend }}: installed={{ b.installed }} logged_in={{ b.logged_in }} source={{ b.path_source|default:'(none)' }}
+          {% for b in world.profile_setup_discovery.backend_sources %}- {{ b.backend }}: installed={{ b.installed }} logged_in={{ b.logged_in }} source={{ b.path_source|default:'(none)' }} auth={{ b.auth_summary|default:'none' }}
           {% endfor %}
       - heading: "Credential Env"
       - template: |
