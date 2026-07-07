@@ -36,6 +36,9 @@ python3 tools/bugfix-bakeoff/external/bench.py capsules
 
 `make oracle-capsules` and `bench.py oracle-capsules` remain compatibility
 aliases, but new docs and scripts should use repo-history capsule names.
+The Make target uses the Go capsule catalog and has no Python package
+dependency; use `bench.py capsules` when you need the harness-specific
+baseline/fix columns.
 
 Verify a public project:
 

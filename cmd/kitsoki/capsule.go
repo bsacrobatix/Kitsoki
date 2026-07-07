@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -41,6 +42,7 @@ type capsuleListEntry struct {
 func capsuleListCmd() *cobra.Command {
 	var kind string
 	var jsonOut bool
+	var markdownOut bool
 	cmd := &cobra.Command{
 		Use:          "list",
 		Short:        "List core and repo-history capsules",
@@ -51,6 +53,9 @@ func capsuleListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if jsonOut && markdownOut {
+				return fmt.Errorf("--json and --markdown are mutually exclusive")
+			}
 			if jsonOut {
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
@@ -60,6 +65,10 @@ func capsuleListCmd() *cobra.Command {
 					"count":    len(entries),
 					"capsules": entries,
 				})
+			}
+			if markdownOut {
+				writeCapsuleListMarkdown(cmd.OutOrStdout(), normalizeCapsuleListKind(kind), entries)
+				return nil
 			}
 			out := cmd.OutOrStdout()
 			if len(entries) == 0 {
@@ -80,6 +89,7 @@ func capsuleListCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&kind, "kind", "all", "capsule kind to list: all, core, repo-history")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print catalog JSON")
+	cmd.Flags().BoolVar(&markdownOut, "markdown", false, "print catalog Markdown")
 	return cmd
 }
 
@@ -140,6 +150,22 @@ func collectCapsuleList(kind string) ([]capsuleListEntry, error) {
 		return entries[i].Ref < entries[j].Ref
 	})
 	return entries, nil
+}
+
+func writeCapsuleListMarkdown(w io.Writer, kind string, entries []capsuleListEntry) {
+	title := "Capsules"
+	if kind == "repo-history" {
+		title = "Repo History Capsules"
+	} else if kind == "core" {
+		title = "Core Capsules"
+	}
+	fmt.Fprintf(w, "# %s\n\n", title)
+	fmt.Fprintf(w, "Capsules: **%d**\n\n", len(entries))
+	fmt.Fprintln(w, "| Capsule | Kind | Executor | Path |")
+	fmt.Fprintln(w, "|---|---|---|---|")
+	for _, entry := range entries {
+		fmt.Fprintf(w, "| `%s` | %s | %s | `%s` |\n", entry.Ref, entry.Kind, entry.Executor, entry.Path)
+	}
 }
 
 func normalizeCapsuleListKind(raw string) string {

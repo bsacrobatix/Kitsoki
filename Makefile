@@ -418,7 +418,7 @@ qs-bakeoff: install
 	go test -tags qsbakeoff -run TestExternalBakeoff -count=1 -v ./tools/bugfix-bakeoff/external/
 
 repo-history-capsules:
-	python3 tools/bugfix-bakeoff/external/bench.py capsules --markdown
+	go run ./cmd/kitsoki capsule list --kind repo-history --markdown
 
 oracle-capsules: repo-history-capsules
 
