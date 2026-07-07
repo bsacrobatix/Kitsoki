@@ -12,8 +12,8 @@
 //     under the artifacts dir, and reference them in the body BY RELATIVE PATH.
 //     (Stopgap: paths are not uploaded yet — an HTML comment marks that. The
 //     IssueResult carries the asset list so a later upload pass is localized.)
-//   - context — given a driving handle, bundle the session trace (the same tail
-//     session.trace returns) and the inspect snapshot into the body.
+//   - context — infer the current driving handle when possible, then bundle a
+//     redacted session trace and inspect snapshot into the body by default.
 //   - file — hand {repo, title, body, labels} to the injected IssueFiler seam
 //     (production: Kitsoki's native GitHub filer; tests: a fake).
 //     source-autonomous is always added so an agent-filed issue is identifiable.
@@ -38,6 +38,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/reportmeta"
+	rsserver "kitsoki/internal/runstatus/server"
 	"kitsoki/internal/tui/blocks"
 	"kitsoki/internal/tui/shot"
 )
@@ -97,8 +98,9 @@ func (srv *Server) registerIssueTools() {
 		Name: "issue.create",
 		Description: "File a GitHub issue natively from the studio, bundling evidence the studio produces. " +
 			"{title, body?, labels?, repo?, handle?, include_trace?, trace_limit?, include_inspect?, include_visual_recordings?, assets?}. " +
+			"When handle is omitted, the current live session is inferred when unambiguous; handle-backed reports include scrubbed trace and inspect evidence by default unless explicitly disabled. " +
 			"Renders any requested assets (kind: tui_png|web|tui_text) to the artifacts dir and references them by relative path; " +
-			"optionally bundles a handle's trace/inspect snapshot and stopped visual.record artifact bundles into the body; always adds the source-autonomous label. " +
+			"bundles a handle's redacted trace/inspect snapshot and stopped visual.record artifact bundles into the body; always adds the source-autonomous label. " +
 			"Returns {ok, url, number, labels[], assets[]}.",
 	}, srv.handleIssueCreate)
 }
@@ -131,10 +133,12 @@ type IssueCreateArgs struct {
 
 	// Handle is a driving session whose evidence to bundle (and the default
 	// render target for assets that name neither a handle nor a spec).
-	Handle         string `json:"handle,omitempty"`
-	IncludeTrace   bool   `json:"include_trace,omitempty"`
-	TraceLimit     int    `json:"trace_limit,omitempty"`
-	IncludeInspect bool   `json:"include_inspect,omitempty"`
+	Handle string `json:"handle,omitempty"`
+	// IncludeTrace/IncludeInspect default to true for handle-backed reports.
+	// Pass false explicitly to opt out of the zero-friction session evidence.
+	IncludeTrace   *bool `json:"include_trace,omitempty"`
+	TraceLimit     int   `json:"trace_limit,omitempty"`
+	IncludeInspect *bool `json:"include_inspect,omitempty"`
 	// IncludeVisualRecordings copies stopped visual.record artifact bundles into
 	// this issue's artifact directory and links them in the body.
 	IncludeVisualRecordings []string `json:"include_visual_recordings,omitempty"`
@@ -171,6 +175,11 @@ func (srv *Server) handleIssueCreate(
 	if srv.issueFiler == nil {
 		return buildToolError(ErrIssueUnavailable,
 			"issue.create: no issue filer wired (this studio was started without GitHub filing)"), nil, nil
+	}
+	if args.Handle == "" {
+		if sh, ok := srv.sess.CurrentDrivingSession(); ok {
+			args.Handle = sh.Key
+		}
 	}
 
 	// 1. Render + persist assets, building their markdown references.
@@ -411,7 +420,9 @@ func copyFile(dst, src string) error {
 // runtime reads session.inspect / session.trace use, so the bundled evidence
 // matches those tools exactly.
 func (srv *Server) issueContext(ctx context.Context, args IssueCreateArgs) (string, *mcpsdk.CallToolResult) {
-	if args.Handle == "" || (!args.IncludeTrace && !args.IncludeInspect) {
+	includeTrace := issueBoolDefault(args.IncludeTrace, args.Handle != "")
+	includeInspect := issueBoolDefault(args.IncludeInspect, args.Handle != "")
+	if args.Handle == "" || (!includeTrace && !includeInspect) {
 		return "", nil
 	}
 	rt, rerr := srv.resolveRuntime(args.Handle)
@@ -422,8 +433,9 @@ func (srv *Server) issueContext(ctx context.Context, args IssueCreateArgs) (stri
 	// under the issue's artifacts dir; the body embeds only a compact summary so
 	// the GitHub issue (and the MCP result echoing it) stays readable.
 	sidecarDir := filepath.Join(srv.resolveArtifactsDir(), issueSlug(args.Title))
+	scrubOpts := rsserver.BugScrubOptions()
 	var b strings.Builder
-	if args.IncludeInspect {
+	if includeInspect {
 		if out, err := rt.inspect(ctx, 5, args.Handle); err == nil {
 			fmt.Fprintf(&b, "\n\n## Context — session `%s` @ `%s`\n", args.Handle, out.State)
 			if len(out.AllowedIntents) > 0 {
@@ -431,51 +443,55 @@ func (srv *Server) issueContext(ctx context.Context, args IssueCreateArgs) (stri
 			}
 			// World can be large; write the pretty version to a sidecar and embed a
 			// compact one-liner (with a key count) in the body.
-			if w, err := json.Marshal(out.World); err == nil {
-				if pretty, perr := json.MarshalIndent(out.World, "", "  "); perr == nil {
-					if path, werr := writeIssueSidecar(sidecarDir, "world.json", pretty); werr == nil {
-						fmt.Fprintf(&b, "- world (%d keys, full: [%s](%s)):\n```json\n%s\n```\n",
+			world := rsserver.RedactedTraceValue("world", out.World, scrubOpts)
+			if w, err := json.Marshal(world); err == nil {
+				if pretty, perr := json.MarshalIndent(world, "", "  "); perr == nil {
+					if path, werr := writeIssueSidecar(sidecarDir, "world.redacted.json", pretty); werr == nil {
+						fmt.Fprintf(&b, "- world (%d keys, redacted full: [%s](%s)):\n```json\n%s\n```\n",
 							len(out.World), filepath.Base(path), path, string(w))
 					} else {
-						fmt.Fprintf(&b, "- world (%d keys):\n```json\n%s\n```\n", len(out.World), string(w))
+						fmt.Fprintf(&b, "- world (%d keys, redacted):\n```json\n%s\n```\n", len(out.World), string(w))
 					}
 				}
 			}
 		}
 	}
-	if args.IncludeTrace {
+	if includeTrace {
 		limit := args.TraceLimit
 		if limit <= 0 {
 			limit = defaultTraceLimit
 		}
-		events := rt.history()
+		events, err := rt.Events()
+		if err != nil {
+			events = nil
+		}
 		if len(events) > limit {
 			events = events[len(events)-limit:]
 		}
-		// Full pretty trace → sidecar; body gets a compact one-line-per-event view.
-		var full bytes.Buffer
-		full.WriteByte('[')
-		for i, ev := range events {
-			if i > 0 {
-				full.WriteByte(',')
-			}
-			line, _ := json.MarshalIndent(ev, "", "  ")
-			full.Write(line)
-		}
-		full.WriteByte(']')
+		redacted := rsserver.RedactedTraceJSONL(events, scrubOpts)
 		sidecarRef := ""
-		if path, werr := writeIssueSidecar(sidecarDir, "trace.json", full.Bytes()); werr == nil {
+		if path, werr := writeIssueSidecar(sidecarDir, "trace.redacted.jsonl", redacted); werr == nil {
 			sidecarRef = fmt.Sprintf(" (full: [%s](%s))", filepath.Base(path), path)
 		}
-		fmt.Fprintf(&b, "\n## Trace (last %d events)%s\n```\n", len(events), sidecarRef)
-		for _, ev := range events {
-			line, _ := json.Marshal(ev)
-			b.Write(line)
+		lines := strings.Split(strings.TrimRight(string(redacted), "\n"), "\n")
+		if len(lines) == 1 && lines[0] == "" {
+			lines = nil
+		}
+		fmt.Fprintf(&b, "\n## Trace (last %d events, redacted)%s\n```\n", len(lines), sidecarRef)
+		for _, line := range lines {
+			b.WriteString(line)
 			b.WriteByte('\n')
 		}
 		b.WriteString("```\n")
 	}
 	return b.String(), nil
+}
+
+func issueBoolDefault(v *bool, fallback bool) bool {
+	if v == nil {
+		return fallback
+	}
+	return *v
 }
 
 // writeIssueSidecar writes machine context too bulky for the issue body to a

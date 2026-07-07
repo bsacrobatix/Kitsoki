@@ -44,10 +44,13 @@ Kitsoki story or command that applies the repo's bug-filing conventions.
    `findings.json` so re-runs are idempotent. Use `mode=dry-run` / `--dry-run`
    to preview.
 6. **Other dogfood or debugging findings (no run bundle):** file via the live
-   story/studio path when available. In dogfood-marathon, evidence-free
-   findings may still go through the studio `issue_create` tool; anything with
-   captured evidence should go through a Kitsoki filing path above instead of
-   shelling out to `gh`.
+   story/studio path when available. In the studio MCP, `issue.create` should be
+   the zero-friction path: with one current live session, a call with just
+   `title`/`body` infers the handle and includes redacted trace + inspect
+   evidence by default. Pass `include_trace:false` / `include_inspect:false`
+   only when deliberately filing a text-only issue. Anything with captured web
+   or TUI artifact evidence should still go through the richer web/TUI paths
+   above instead of shelling out to `gh`.
 
 ## Filing Workflows
 
@@ -163,6 +166,23 @@ go run ./cmd/kitsoki bug create \
 This still uses Kitsoki's formatting and metadata path, but it is text-only.
 Never substitute it for the web/TUI artifact paths when evidence exists.
 
+### Studio MCP `issue.create`
+
+Use this when a Kitsoki MCP-driven session has surfaced a bug and there is no
+web/TUI Report Bug surface attached. Prefer the current-session default:
+
+```json
+{"title":"mcp: <short failure>", "body":"<expected / actual / impact>"}
+```
+
+When exactly one current live driving session is open, `issue.create` infers the
+handle, writes scrubbed session evidence under `.artifacts/mcp-issues/<slug>/`,
+embeds a compact redacted trace + inspect snapshot in the issue body, and adds
+runtime metadata. Supply `handle` only when multiple sessions are open. Do not
+paste raw `session.trace` output into the body; let `issue.create` apply the
+shared bug redactor. Use `include_visual_recordings` or explicit `assets` for
+extra MCP-produced screenshots/recordings.
+
 ## Report Shape
 
 Keep the title short and actionable, prefixed by the surface when useful
@@ -194,6 +214,11 @@ Before claiming the bug is filed, verify the artifact path that matters:
   issue body has an `## Artifacts` section with GitHub release asset links or a
   hosted deck comment, plus the fenced `kitsoki` block with engine and story
   runtime metadata.
+- Studio MCP path: confirm `issue.create` returned a GitHub issue URL or
+  `local_path`; for a handle-backed report the body should include redacted
+  `## Context` / `## Trace` sections, link `trace.redacted.jsonl` and
+  `world.redacted.json` sidecars under `.artifacts/mcp-issues/`, and keep the
+  fenced `kitsoki` metadata block.
 - Local path: confirm `issues/bugs/<id>.md` exists and its sibling
   `<id>.artifacts/` contains the expected evidence; the markdown frontmatter
   should include the same engine and story runtime metadata.

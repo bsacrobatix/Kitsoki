@@ -142,12 +142,72 @@ func TestIssueCreate_BundlesEvidenceAndFiles(t *testing.T) {
 	// to sidecar files under the issue's artifacts dir, linked from the body, not
 	// inlined wholesale.
 	slugDir := filepath.Join(dir, "mcp-gap-session-drive-cannot-do-x")
-	assert.FileExists(t, filepath.Join(slugDir, "trace.json"), "full trace sidecar written")
-	assert.FileExists(t, filepath.Join(slugDir, "world.json"), "full world sidecar written")
-	assert.Contains(t, body, "trace.json", "body links the trace sidecar")
-	assert.Contains(t, body, "world.json", "body links the world sidecar")
+	assert.FileExists(t, filepath.Join(slugDir, "trace.redacted.jsonl"), "full redacted trace sidecar written")
+	assert.FileExists(t, filepath.Join(slugDir, "world.redacted.json"), "full redacted world sidecar written")
+	assert.Contains(t, body, "trace.redacted.jsonl", "body links the trace sidecar")
+	assert.Contains(t, body, "world.redacted.json", "body links the world sidecar")
 	// The inlined trace stays compact (one JSON object per line, not indented).
 	assert.NotContains(t, body, "\n    \"", "inlined trace is compact, not pretty-printed")
+}
+
+func TestIssueCreate_DefaultsToCurrentSessionEvidenceAndRedacts(t *testing.T) {
+	ctx := context.Background()
+	srv, filer, dir := newIssueServer(t)
+	cs := connectInProcess(ctx, t, srv)
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("HOME", home)
+	diagnosticText := "email alice@example.com and read " + home + "/secret.txt"
+
+	res, err := callTool(ctx, cs, "session.new", map[string]any{
+		"story_path": cloakApp,
+		"harness":    "replay",
+		"cassette":   cloakCassette,
+		"trace":      t.TempDir() + "/trace.jsonl",
+		"initial_world": map[string]any{
+			"diagnostic": diagnosticText,
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.new errored: %s", contentText(res))
+
+	res, err = callTool(ctx, cs, "issue.create", map[string]any{
+		"title": "MCP default evidence",
+		"body":  "The agent should not have to assemble session evidence.",
+	})
+	require.NoError(t, err)
+	out := issueResult(t, res)
+
+	assert.True(t, out.OK)
+	assert.Empty(t, out.Assets, "default session context is sidecar/body evidence, not rendered assets")
+	body := filer.got.Body
+	assert.Contains(t, body, "## Context — session `s1`", "current session inspect snapshot inferred")
+	assert.Contains(t, body, "## Trace (last", "current session trace inferred")
+	assert.Contains(t, body, "redacted", "evidence is explicitly marked redacted")
+	assert.Contains(t, body, "trace.redacted.jsonl")
+	assert.Contains(t, body, "world.redacted.json")
+	assert.NotContains(t, body, "alice@example.com")
+	assert.NotContains(t, body, home+"/secret.txt")
+
+	slugDir := filepath.Join(dir, "mcp-default-evidence")
+	traceData, err := os.ReadFile(filepath.Join(slugDir, "trace.redacted.jsonl"))
+	require.NoError(t, err)
+	worldData, err := os.ReadFile(filepath.Join(slugDir, "world.redacted.json"))
+	require.NoError(t, err)
+	for _, evidence := range []string{string(traceData), string(worldData)} {
+		assert.NotContains(t, evidence, "alice@example.com")
+		assert.NotContains(t, evidence, home+"/secret.txt")
+	}
+
+	res, err = callTool(ctx, cs, "issue.create", map[string]any{
+		"title":           "MCP text only",
+		"body":            "The caller deliberately disabled session evidence.",
+		"include_trace":   false,
+		"include_inspect": false,
+	})
+	require.NoError(t, err)
+	_ = issueResult(t, res)
+	assert.NotContains(t, filer.got.Body, "## Context")
+	assert.NotContains(t, filer.got.Body, "## Trace")
 }
 
 func TestIssueCreate_BundlesStoppedVisualRecording(t *testing.T) {
