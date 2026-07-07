@@ -1502,17 +1502,22 @@ func (m *machineImpl) completeActiveOperationRun(terminalState string, w world.W
 		return w, nil
 	}
 
+	eventKind := store.OperationRunCompleted
 	payload := operationRunCompletedPayload(policyID, policy, terminalState)
-	completedHandle := cloneMapAny(active)
+	if reason, detail, ok := m.operationRunStopReason(policy, terminalState, w); ok {
+		eventKind = store.OperationRunWaiting
+		payload = operationRunWaitingPayload(policyID, policy, terminalState, reason, detail)
+	}
+	terminalHandle := cloneMapAny(active)
 	for k, v := range payload {
-		completedHandle[k] = v
+		terminalHandle[k] = v
 	}
 
 	next := w.Clone()
-	next.SetDurable(app.OperationRunWorldKey, completedHandle)
+	next.SetDurable(app.OperationRunWorldKey, terminalHandle)
 	return next, []store.Event{
-		newEvent(store.OperationRunCompleted, payload),
-		operationRunWorldUpdateEvent(completedHandle),
+		newEvent(eventKind, payload),
+		operationRunWorldUpdateEvent(terminalHandle),
 	}
 }
 
@@ -1526,6 +1531,114 @@ func operationRunCompletedPayload(policyID string, policy *app.OperationPolicy, 
 		payload["terminal_artifact"] = policy.TerminalArtifact
 	}
 	return payload
+}
+
+func operationRunWaitingPayload(policyID string, policy *app.OperationPolicy, terminalState, reason, detail string) map[string]any {
+	payload := operationRunPolicyPayload(policy, false)
+	payload["operation_id"] = policyID
+	payload["policy_id"] = policyID
+	payload["status"] = "waiting"
+	payload["terminal_state"] = terminalState
+	payload["stop_reason"] = reason
+	if detail != "" {
+		payload["stop_detail"] = detail
+	}
+	return payload
+}
+
+func (m *machineImpl) operationRunStopReason(policy *app.OperationPolicy, terminalState string, w world.World) (reason, detail string, ok bool) {
+	if policy == nil || len(policy.StopOn) == 0 {
+		return "", "", false
+	}
+	stopReasons := make(map[string]string, len(policy.StopOn))
+	for _, configured := range policy.StopOn {
+		norm := normalizeOperationStopReason(configured)
+		if norm == "" {
+			continue
+		}
+		stopReasons[norm] = configured
+	}
+	if len(stopReasons) == 0 {
+		return "", "", false
+	}
+
+	candidates := []string{
+		terminalExitReason(terminalState),
+		worldString(w, "status"),
+	}
+	if worldString(w, "needs_human_reason") != "" {
+		candidates = append(candidates, "needs-human")
+	}
+	for _, candidate := range candidates {
+		norm := normalizeOperationStopReason(candidate)
+		if configured, exists := stopReasons[norm]; exists {
+			detail := operationRunStopDetail(w)
+			if detail == "" {
+				detail = m.operationRunExitDescription(configured, terminalState)
+			}
+			return configured, detail, true
+		}
+	}
+	return "", "", false
+}
+
+func (m *machineImpl) operationRunExitDescription(reason, terminalState string) string {
+	if m == nil || m.appDef == nil || len(m.appDef.Exits) == 0 {
+		return ""
+	}
+	for _, key := range []string{terminalExitReason(terminalState), reason} {
+		if key == "" {
+			continue
+		}
+		if exit := m.appDef.Exits[key]; exit != nil {
+			return strings.TrimSpace(exit.Description)
+		}
+	}
+	return ""
+}
+
+func terminalExitReason(state string) string {
+	state = strings.TrimSpace(state)
+	if state == "" {
+		return ""
+	}
+	state = strings.TrimPrefix(state, "__exit__")
+	if i := strings.LastIndexAny(state, "./"); i >= 0 {
+		state = state[i+1:]
+	}
+	return state
+}
+
+func normalizeOperationStopReason(reason string) string {
+	reason = strings.TrimSpace(strings.ToLower(reason))
+	reason = strings.TrimPrefix(reason, "__exit__")
+	reason = strings.ReplaceAll(reason, "_", "-")
+	return reason
+}
+
+func operationRunStopDetail(w world.World) string {
+	for _, key := range []string{"needs_human_reason", "last_error"} {
+		if value := worldString(w, key); value != "" {
+			return value
+		}
+	}
+	if hostError, ok := w.Vars["host_error"].(map[string]any); ok {
+		if msg, _ := hostError["message"].(string); strings.TrimSpace(msg) != "" {
+			return strings.TrimSpace(msg)
+		}
+	}
+	return ""
+}
+
+func worldString(w world.World, key string) string {
+	v, ok := w.Vars[key]
+	if !ok || v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return strings.TrimSpace(fmt.Sprint(v))
 }
 
 func operationRunPolicyPayload(policy *app.OperationPolicy, includeRunPolicy bool) map[string]any {

@@ -230,6 +230,46 @@ describe("InteractiveView focused chat context", () => {
     wrapper.unmount();
   });
 
+  it("renders waiting operation details from the trace operation handle", async () => {
+    route.query = {};
+    dataSource.getTrace.mockResolvedValueOnce({
+      last_turn: 2,
+      events: [
+        {
+          time: "2026-01-01T00:00:01Z",
+          level: "info",
+          msg: "world.update",
+          session_id: "s1",
+          turn: 2,
+          state_path: "__exit__needs-human",
+          attrs: {
+            set: {
+              operation_run: {
+                operation_id: "bf__capsule_demo",
+                policy_id: "bf__capsule_demo",
+                title: "Capsule bugfix",
+                status: "waiting",
+                terminal_state: "__exit__needs-human",
+                stop_reason: "needs-human",
+                stop_detail: "Regression gate was never RED.",
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    const wrapper = mount(InteractiveView, mountOpts);
+    await flushPromises();
+
+    const banner = wrapper.find('[data-testid="operation-run-banner"]');
+    expect(banner.attributes("data-operation-status")).toBe("waiting");
+    expect(wrapper.find('[data-testid="operation-run-status"]').text()).toBe("waiting for needs-human");
+    expect(wrapper.find('[data-testid="operation-run-detail"]').text()).toContain("Regression gate was never RED.");
+    expect(banner.text()).toContain("parked at __exit__needs-human");
+    wrapper.unmount();
+  });
+
   it("seeds proposal review rows from the proposal query and clears only that key", async () => {
     route.query = {
       inbox: "1",

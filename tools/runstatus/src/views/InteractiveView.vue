@@ -137,6 +137,9 @@
         <span v-if="operationRunRoute" class="iv__operation-route">
           {{ operationRunRoute }}
         </span>
+        <span v-if="operationRunDetail" class="iv__operation-detail" data-testid="operation-run-detail">
+          {{ operationRunDetail }}
+        </span>
         <span v-if="operationRunArtifact" class="iv__operation-artifact" data-testid="operation-run-artifact">
           {{ operationRunArtifact }}
         </span>
@@ -755,17 +758,25 @@ const operationRunStatusLabel = computed(() => {
   const run = operationRun.value;
   if (!run) return "";
   const status = run.status || "running";
+  if (status === "waiting" && run.stopReason) return `waiting for ${run.stopReason}`;
   if (run.runInBackground && status === "running") return "running in background";
   return status.replace(/_/g, " ");
 });
 const operationRunRoute = computed(() => {
   const run = operationRun.value;
   if (!run) return "";
+  if (run.status === "waiting" && run.terminalState) {
+    return `parked at ${run.terminalState}`;
+  }
   if (run.status === "completed" && run.terminalState) {
     return `terminal ${run.terminalState}`;
   }
   if (run.from && run.to) return `${run.from} -> ${run.to}`;
   return run.entryIntent ? `intent ${run.entryIntent}` : "";
+});
+const operationRunDetail = computed(() => {
+  const detail = operationRun.value?.stopDetail;
+  return detail ? `needs input: ${detail}` : "";
 });
 const operationRunArtifact = computed(() => {
   const artifact = operationRun.value?.terminalArtifact;
@@ -1743,6 +1754,7 @@ function onEventSelect(index: number): void {
 
 .iv__operation-title,
 .iv__operation-route,
+.iv__operation-detail,
 .iv__operation-artifact {
   min-width: 4rem;
   max-width: 100%;
@@ -1771,9 +1783,15 @@ function onEventSelect(index: number): void {
 }
 
 .iv__operation-route,
+.iv__operation-detail,
 .iv__operation-artifact {
   color: var(--k-fg-muted, #94a3b8);
   font-size: 0.72rem;
+}
+
+.iv__operation-detail {
+  flex: 1 1 14rem;
+  color: #fde68a;
 }
 
 .iv__operation--completed .iv__operation-dot {

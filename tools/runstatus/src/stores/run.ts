@@ -56,6 +56,8 @@ export interface OperationRunSummary {
   entryIntent?: string;
   terminalState?: string;
   terminalArtifact?: string;
+  stopReason?: string;
+  stopDetail?: string;
   phaseSummaryFrom: string[];
   stopOn: string[];
   pauseOn: string[];
@@ -198,6 +200,15 @@ function normalizeOperationRun(
       readString(raw, "terminal_state") || previous?.terminalState,
     terminalArtifact:
       readString(raw, "terminal_artifact") || previous?.terminalArtifact,
+    stopReason:
+      readString(raw, "stop_reason") ||
+      readString(raw, "reason") ||
+      previous?.stopReason,
+    stopDetail:
+      readString(raw, "stop_detail") ||
+      readString(raw, "detail") ||
+      readString(raw, "message") ||
+      previous?.stopDetail,
     phaseSummaryFrom:
       readStringArray(raw, "phase_summary_from") ??
       previous?.phaseSummaryFrom ??

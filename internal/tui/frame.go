@@ -282,6 +282,13 @@ func operationRunChromeText(vars map[string]any) string {
 	}
 	parts := []string{title, status}
 	switch status {
+	case "waiting":
+		if reason := operationRunString(handle, "stop_reason"); reason != "" {
+			parts = append(parts, "reason "+reason)
+		}
+		if detail := operationRunString(handle, "stop_detail"); detail != "" {
+			parts = append(parts, detail)
+		}
 	case "completed":
 		if terminal := operationRunString(handle, "terminal_state"); terminal != "" {
 			parts = append(parts, "terminal "+terminal)
