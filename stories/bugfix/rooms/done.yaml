@@ -247,6 +247,42 @@ states:
                   verified:
                     - {{ (world.validate_artifact.summary_title ?? '') != '' ? world.validate_artifact.summary_title : "Validation completed" }}
                   -->
+
+                  <!-- kitsoki-bugfix-audit
+                  version: 1
+                  story: bugfix
+                  classification: bugfix
+                  actor: {{ world.audit_actor }}
+                  audit_mode: {{ world.audit_mode }}
+                  session_id: {{ world.session_id }}
+                  trace_ref: {{ world.run_trace_ref != '' ? world.run_trace_ref : world.session_id }}
+                  artifacts_ref: {{ world.run_artifacts_ref != '' ? world.run_artifacts_ref : "(none)" }}
+                  ticket_id: {{ world.ticket_id }}
+                  ticket_repo: {{ world.ticket_repo != '' ? world.ticket_repo : "local" }}
+                  ticket_url: {{ world.ticket_url != '' ? world.ticket_url : "(none)" }}
+                  source_mode: {{ world.ticket_source_mode }}
+                  source_ref: {{ world.ticket_source_ref != '' ? world.ticket_source_ref : "(none)" }}
+                  thread: {{ world.thread }}
+                  bugfix_mode: {{ world.bugfix_mode }}
+                  judge_mode: {{ world.judge_mode }}
+                  bugfix_exit: {{ world.bugfix_exit }}
+                  base_branch: {{ world.base_branch != '' ? world.base_branch : "main" }}
+                  base_commit: {{ world.base_commit != '' ? world.base_commit : "(none)" }}
+                  feature_branch: {{ world.feature_branch != '' ? world.feature_branch : "(none)" }}
+                  workspace_id: {{ world.workspace_id != '' ? world.workspace_id : "(none)" }}
+                  workdir: {{ world.workdir != '' ? world.workdir : "(none)" }}
+                  fixed_in_commit: {{ world.fixed_in_commit != '' ? world.fixed_in_commit : "unknown" }}
+                  shipped_sha: {{ world.shipped_sha != '' ? world.shipped_sha : "(none)" }}
+                  merge_sha: {{ world.merge_sha != '' ? world.merge_sha : "(none)" }}
+                  pr_url: {{ world.pr_url != '' ? world.pr_url : "(none)" }}
+                  repro_checked: {{ world.repro_checked }}
+                  repro_gate_ran: {{ world.repro_gate_ran }}
+                  repro_gate_ok: {{ world.repro_gate_ok }}
+                  regression_gate_checked: {{ world.regression_gate_checked }}
+                  regression_red_pre_fix: {{ world.regression_red_pre_fix }}
+                  unsafe_jumps_made: {{ world.unsafe_jumps_made }}
+                  cycle: {{ world.cycle }}
+                  -->
             - invoke: host.gh.ticket.comment
               when: "world.ticket_repo != ''"
               with:
@@ -269,6 +305,42 @@ states:
                   workdir: {{ world.workdir }}
                   verified:
                     - {{ (world.validate_artifact.summary_title ?? '') != '' ? world.validate_artifact.summary_title : "Validation completed" }}
+                  -->
+
+                  <!-- kitsoki-bugfix-audit
+                  version: 1
+                  story: bugfix
+                  classification: bugfix
+                  actor: {{ world.audit_actor }}
+                  audit_mode: {{ world.audit_mode }}
+                  session_id: {{ world.session_id }}
+                  trace_ref: {{ world.run_trace_ref != '' ? world.run_trace_ref : world.session_id }}
+                  artifacts_ref: {{ world.run_artifacts_ref != '' ? world.run_artifacts_ref : "(none)" }}
+                  ticket_id: {{ world.ticket_id }}
+                  ticket_repo: {{ world.ticket_repo != '' ? world.ticket_repo : "local" }}
+                  ticket_url: {{ world.ticket_url != '' ? world.ticket_url : "(none)" }}
+                  source_mode: {{ world.ticket_source_mode }}
+                  source_ref: {{ world.ticket_source_ref != '' ? world.ticket_source_ref : "(none)" }}
+                  thread: {{ world.thread }}
+                  bugfix_mode: {{ world.bugfix_mode }}
+                  judge_mode: {{ world.judge_mode }}
+                  bugfix_exit: {{ world.bugfix_exit }}
+                  base_branch: {{ world.base_branch != '' ? world.base_branch : "main" }}
+                  base_commit: {{ world.base_commit != '' ? world.base_commit : "(none)" }}
+                  feature_branch: {{ world.feature_branch != '' ? world.feature_branch : "(none)" }}
+                  workspace_id: {{ world.workspace_id != '' ? world.workspace_id : "(none)" }}
+                  workdir: {{ world.workdir != '' ? world.workdir : "(none)" }}
+                  fixed_in_commit: {{ world.fixed_in_commit != '' ? world.fixed_in_commit : "unknown" }}
+                  shipped_sha: {{ world.shipped_sha != '' ? world.shipped_sha : "(none)" }}
+                  merge_sha: {{ world.merge_sha != '' ? world.merge_sha : "(none)" }}
+                  pr_url: {{ world.pr_url != '' ? world.pr_url : "(none)" }}
+                  repro_checked: {{ world.repro_checked }}
+                  repro_gate_ran: {{ world.repro_gate_ran }}
+                  repro_gate_ok: {{ world.repro_gate_ok }}
+                  regression_gate_checked: {{ world.regression_gate_checked }}
+                  regression_red_pre_fix: {{ world.regression_red_pre_fix }}
+                  unsafe_jumps_made: {{ world.unsafe_jumps_made }}
+                  cycle: {{ world.cycle }}
                   -->
             - invoke: iface.ticket.transition
               when: "world.ticket_repo == ''"
@@ -323,6 +395,42 @@ states:
                   verified:
                     - {{ (world.validate_artifact.summary_title ?? '') != '' ? world.validate_artifact.summary_title : "Validation completed" }}
                   -->
+
+                  <!-- kitsoki-bugfix-audit
+                  version: 1
+                  story: bugfix
+                  classification: bugfix
+                  actor: {{ world.audit_actor }}
+                  audit_mode: {{ world.audit_mode }}
+                  session_id: {{ world.session_id }}
+                  trace_ref: {{ world.run_trace_ref != '' ? world.run_trace_ref : world.session_id }}
+                  artifacts_ref: {{ world.run_artifacts_ref != '' ? world.run_artifacts_ref : "(none)" }}
+                  ticket_id: {{ world.ticket_id }}
+                  ticket_repo: {{ world.ticket_repo != '' ? world.ticket_repo : "local" }}
+                  ticket_url: {{ world.ticket_url != '' ? world.ticket_url : "(none)" }}
+                  source_mode: {{ world.ticket_source_mode }}
+                  source_ref: {{ world.ticket_source_ref != '' ? world.ticket_source_ref : "(none)" }}
+                  thread: {{ world.thread }}
+                  bugfix_mode: {{ world.bugfix_mode }}
+                  judge_mode: {{ world.judge_mode }}
+                  bugfix_exit: {{ world.bugfix_exit }}
+                  base_branch: {{ world.base_branch != '' ? world.base_branch : "main" }}
+                  base_commit: {{ world.base_commit != '' ? world.base_commit : "(none)" }}
+                  feature_branch: {{ world.feature_branch != '' ? world.feature_branch : "(none)" }}
+                  workspace_id: {{ world.workspace_id != '' ? world.workspace_id : "(none)" }}
+                  workdir: {{ world.workdir != '' ? world.workdir : "(none)" }}
+                  fixed_in_commit: {{ world.fixed_in_commit != '' ? world.fixed_in_commit : "unknown" }}
+                  shipped_sha: {{ world.shipped_sha != '' ? world.shipped_sha : "(none)" }}
+                  merge_sha: {{ world.merge_sha != '' ? world.merge_sha : "(none)" }}
+                  pr_url: {{ world.pr_url != '' ? world.pr_url : "(none)" }}
+                  repro_checked: {{ world.repro_checked }}
+                  repro_gate_ran: {{ world.repro_gate_ran }}
+                  repro_gate_ok: {{ world.repro_gate_ok }}
+                  regression_gate_checked: {{ world.regression_gate_checked }}
+                  regression_red_pre_fix: {{ world.regression_red_pre_fix }}
+                  unsafe_jumps_made: {{ world.unsafe_jumps_made }}
+                  cycle: {{ world.cycle }}
+                  -->
             - invoke: host.gh.ticket.comment
               when: "world.ticket_repo != ''"
               with:
@@ -345,6 +453,42 @@ states:
                   workdir: {{ world.workdir }}
                   verified:
                     - {{ (world.validate_artifact.summary_title ?? '') != '' ? world.validate_artifact.summary_title : "Validation completed" }}
+                  -->
+
+                  <!-- kitsoki-bugfix-audit
+                  version: 1
+                  story: bugfix
+                  classification: bugfix
+                  actor: {{ world.audit_actor }}
+                  audit_mode: {{ world.audit_mode }}
+                  session_id: {{ world.session_id }}
+                  trace_ref: {{ world.run_trace_ref != '' ? world.run_trace_ref : world.session_id }}
+                  artifacts_ref: {{ world.run_artifacts_ref != '' ? world.run_artifacts_ref : "(none)" }}
+                  ticket_id: {{ world.ticket_id }}
+                  ticket_repo: {{ world.ticket_repo != '' ? world.ticket_repo : "local" }}
+                  ticket_url: {{ world.ticket_url != '' ? world.ticket_url : "(none)" }}
+                  source_mode: {{ world.ticket_source_mode }}
+                  source_ref: {{ world.ticket_source_ref != '' ? world.ticket_source_ref : "(none)" }}
+                  thread: {{ world.thread }}
+                  bugfix_mode: {{ world.bugfix_mode }}
+                  judge_mode: {{ world.judge_mode }}
+                  bugfix_exit: {{ world.bugfix_exit }}
+                  base_branch: {{ world.base_branch != '' ? world.base_branch : "main" }}
+                  base_commit: {{ world.base_commit != '' ? world.base_commit : "(none)" }}
+                  feature_branch: {{ world.feature_branch != '' ? world.feature_branch : "(none)" }}
+                  workspace_id: {{ world.workspace_id != '' ? world.workspace_id : "(none)" }}
+                  workdir: {{ world.workdir != '' ? world.workdir : "(none)" }}
+                  fixed_in_commit: {{ world.fixed_in_commit != '' ? world.fixed_in_commit : "unknown" }}
+                  shipped_sha: {{ world.shipped_sha != '' ? world.shipped_sha : "(none)" }}
+                  merge_sha: {{ world.merge_sha != '' ? world.merge_sha : "(none)" }}
+                  pr_url: {{ world.pr_url != '' ? world.pr_url : "(none)" }}
+                  repro_checked: {{ world.repro_checked }}
+                  repro_gate_ran: {{ world.repro_gate_ran }}
+                  repro_gate_ok: {{ world.repro_gate_ok }}
+                  regression_gate_checked: {{ world.regression_gate_checked }}
+                  regression_red_pre_fix: {{ world.regression_red_pre_fix }}
+                  unsafe_jumps_made: {{ world.unsafe_jumps_made }}
+                  cycle: {{ world.cycle }}
                   -->
             - invoke: iface.ticket.transition
               when: "world.ticket_repo == ''"

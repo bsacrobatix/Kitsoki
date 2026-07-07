@@ -310,6 +310,16 @@ world:
   thread:           { type: string, default: "" }
   allowed_authors:  { type: string, default: "" }   # CSV — list not yet a first-class scalar type
 
+  # ── Audit/reporting ──────────────────────────────────────────────────
+  # Optional caller-provided reporting refs. Local and headless remote drivers
+  # can seed these with a trace path/URL and an artifact bundle/report path/URL;
+  # done.accept publishes them in a parseable kitsoki-bugfix-audit issue block.
+  # Empty refs degrade to the engine-owned session_id in the close-out comment.
+  audit_actor:      { type: string, default: "kitsoki" }
+  audit_mode:       { type: string, default: "autonomous" }
+  run_trace_ref:    { type: string, default: "" }
+  run_artifacts_ref: { type: string, default: "" }
+
   # ── Workspace ─────────────────────────────────────────────────────────
   workspace_id:     { type: string, default: "" }
   workdir:          { type: string, default: "" }

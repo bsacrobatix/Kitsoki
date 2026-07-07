@@ -202,6 +202,10 @@ in `app.yaml`'s `world:` block so the child loads standalone for tests.
 | `ticket_source_ref` | string | Local markdown path, remote issue URL/ref, or free-form complaint label used as the report source. | `""` |
 | `ticket_body` | string | Remote issue body, pre-read local issue body, or free-form operator complaint. If set without `ticket_id`, `idle` synthesizes a complaint id and autostarts. | `""` |
 | `thread` | string | The transport's thread identifier (file path / Jira key / chat ID). | `""` |
+| `audit_actor` | string | Reporting actor written into the close-out `kitsoki-bugfix-audit` receipt. | `kitsoki` |
+| `audit_mode` | string | Reporting mode written into the close-out receipt; headless drivers can override with a run-class such as `headless-remote`. | `autonomous` |
+| `run_trace_ref` | string | Optional trace path, URL, or external run id for reporting. If empty, the receipt falls back to engine `session_id`. | `""` |
+| `run_artifacts_ref` | string | Optional artifact bundle/report path or URL for reporting. | `""` |
 | `workspace_id` | string | `iface.workspace.sync` arg. | `""` |
 | `workdir` | string | Most `iface.{vcs,ci}.*` calls. | `""` |
 | `base_branch` | string | The PR target (`iface.vcs.open_pr.base`); also the worktree cut-point when `base_commit` is empty. | `main` |
