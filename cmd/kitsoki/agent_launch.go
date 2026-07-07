@@ -52,6 +52,7 @@ type agentLaunchPlan struct {
 	Env          map[string]string         `json:"env,omitempty"`
 	Command      []string                  `json:"command"`
 	Stdin        string                    `json:"stdin,omitempty"`
+	RunAsUser    string                    `json:"run_as_user,omitempty"`
 	DryRun       bool                      `json:"dry_run"`
 	Interactive  bool                      `json:"interactive,omitempty"`
 	FutureNotes  []string                  `json:"future_notes,omitempty"`
@@ -209,6 +210,10 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 	if err != nil {
 		return agentLaunchPlan{}, err
 	}
+	bin, runAsUser, err := resolveDelegatedLaunchBin(backend, bin, launchCfg.AgentUserDelegation, opts.Exec)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
 	cliArgs := buildLaunchClaudeArgs(decl, model, effort, opts.PermissionMode, opts.AddDirs)
 	var cleanups []func()
 	if decl.MCP != nil && len(decl.MCP.Servers) > 0 {
@@ -241,6 +246,7 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 		Env:          redactEnv(providerEnv),
 		Command:      command,
 		Stdin:        inv.Stdin,
+		RunAsUser:    runAsUser,
 		providerEnv:  providerEnv,
 		claudeArgs:   cliArgs,
 		cleanups:     cleanups,
@@ -307,7 +313,12 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		providerEnv[k] = v
 	}
 
-	bin, err := resolveLaunchBin(backend, opts.Exec || interactive)
+	requireInstalled := opts.Exec || interactive
+	bin, err := resolveLaunchBin(backend, requireInstalled)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	bin, runAsUser, err := resolveDelegatedLaunchBin(backend, bin, launchCfg.AgentUserDelegation, requireInstalled)
 	if err != nil {
 		return agentLaunchPlan{}, err
 	}
@@ -335,7 +346,7 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 	}
 	if interactive {
 		prompt := composeLaunchPrompt(agent.DeveloperInstructions, task)
-		command := append([]string{bin}, buildInteractiveCodexArgs(model, workingDir, opts.AddDirs, agent.MCPServers, prompt)...)
+		command := append([]string{bin}, buildInteractiveCodexArgs(model, effort, agent.SandboxMode, workingDir, opts.AddDirs, agent.MCPServers, prompt)...)
 		return agentLaunchPlan{
 			AgentFile:    agentPath,
 			Agent:        opts.AgentName,
@@ -347,6 +358,7 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 			Effort:       effort,
 			Env:          redactEnv(providerEnv),
 			Command:      command,
+			RunAsUser:    runAsUser,
 			Interactive:  true,
 			providerEnv:  providerEnv,
 			cleanups:     cleanups,
@@ -374,6 +386,7 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		Env:          redactEnv(providerEnv),
 		Command:      command,
 		Stdin:        inv.Stdin,
+		RunAsUser:    runAsUser,
 		providerEnv:  providerEnv,
 		claudeArgs:   cliArgs,
 		cleanups:     cleanups,
@@ -436,6 +449,10 @@ func buildRawInteractiveLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, er
 	if err != nil {
 		return agentLaunchPlan{}, err
 	}
+	bin, runAsUser, err := resolveDelegatedLaunchBin(backend, bin, launchCfg.AgentUserDelegation, true)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
 	args := buildRawInteractiveArgs(backend, model, effort, workingDir, opts.AddDirs)
 	return agentLaunchPlan{
 		Agent:        "raw",
@@ -447,6 +464,7 @@ func buildRawInteractiveLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, er
 		Effort:       effort,
 		Env:          redactEnv(providerEnv),
 		Command:      append([]string{bin}, args...),
+		RunAsUser:    runAsUser,
 		Interactive:  true,
 		providerEnv:  providerEnv,
 		LaunchPolicy: launchDecision,
@@ -479,10 +497,16 @@ func runAgentLaunchPlan(ctx context.Context, cmd *cobra.Command, plan agentLaunc
 	return err
 }
 
-func buildInteractiveCodexArgs(model, workingDir string, addDirs []string, mcpServers map[string]any, prompt string) []string {
-	args := []string{"--dangerously-bypass-approvals-and-sandbox"}
+func buildInteractiveCodexArgs(model, effort, sandboxMode, workingDir string, addDirs []string, mcpServers map[string]any, prompt string) []string {
+	var args []string
 	if strings.TrimSpace(model) != "" {
 		args = append(args, "-m", model)
+	}
+	if strings.TrimSpace(effort) != "" {
+		args = append(args, "-c", "model_reasoning_effort="+launchTOMLString(effort))
+	}
+	if strings.TrimSpace(sandboxMode) != "" {
+		args = append(args, "--sandbox", sandboxMode)
 	}
 	if strings.TrimSpace(workingDir) != "" {
 		args = append(args, "-C", workingDir)
@@ -587,9 +611,10 @@ func codexConfigArgsForMCPServers(mcpServers map[string]any) []string {
 }
 
 type launchConfig struct {
-	Profiles          map[string]orchestrator.HarnessProfile
-	DefaultProfile    string
-	AgentLaunchPolicy host.AgentLaunchPolicy
+	Profiles            map[string]orchestrator.HarnessProfile
+	DefaultProfile      string
+	AgentLaunchPolicy   host.AgentLaunchPolicy
+	AgentUserDelegation *webconfig.AgentUserDelegationConfig
 }
 
 func loadLaunchConfig(configPath string) (launchConfig, error) {
@@ -602,9 +627,10 @@ func loadLaunchConfig(configPath string) (launchConfig, error) {
 		profiles = map[string]orchestrator.HarnessProfile{}
 	}
 	return launchConfig{
-		Profiles:          profiles,
-		DefaultProfile:    defaultProfile,
-		AgentLaunchPolicy: agentLaunchPolicyFromConfig(cfg),
+		Profiles:            profiles,
+		DefaultProfile:      defaultProfile,
+		AgentLaunchPolicy:   agentLaunchPolicyFromConfig(cfg),
+		AgentUserDelegation: cfg.AgentUserDelegation,
 	}, nil
 }
 
@@ -1077,6 +1103,37 @@ func resolveLaunchBin(backend string, requireInstalled bool) (string, error) {
 		return binName, nil
 	}
 	return path, nil
+}
+
+func resolveDelegatedLaunchBin(backend, fallback string, delegation *webconfig.AgentUserDelegationConfig, requireInstalled bool) (bin, runAsUser string, err error) {
+	if delegation == nil || !delegation.Enabled || strings.TrimSpace(delegation.RunAsUser) == "" {
+		return fallback, "", nil
+	}
+	runAsUser = strings.TrimSpace(delegation.RunAsUser)
+	wrapperBin := strings.TrimSpace(delegation.WrapperBin)
+	if wrapperBin == "" {
+		return "", "", fmt.Errorf("agent_user_delegation.wrapper_bin is required for kitsoki agent launch run_as_user execution")
+	}
+	wrapper := filepath.Join(wrapperBin, launchBackendExecutableName(backend))
+	if requireInstalled {
+		st, statErr := os.Stat(wrapper)
+		if statErr != nil {
+			return "", "", fmt.Errorf("agent_user_delegation wrapper for backend %q not found at %s: %w", backend, wrapper, statErr)
+		}
+		if st.IsDir() || st.Mode().Perm()&0111 == 0 {
+			return "", "", fmt.Errorf("agent_user_delegation wrapper for backend %q is not executable: %s", backend, wrapper)
+		}
+	}
+	return wrapper, runAsUser, nil
+}
+
+func launchBackendExecutableName(backend string) string {
+	switch backend {
+	case "codex", "copilot", "agy":
+		return backend
+	default:
+		return "claude"
+	}
 }
 
 func parseLaunchEnv(entries []string) (map[string]string, error) {

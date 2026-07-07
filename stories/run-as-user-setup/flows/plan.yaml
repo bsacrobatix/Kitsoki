@@ -38,7 +38,7 @@ turns:
       slots: {}
     expect_state: details
     expect_world:
-      setup_summary: "This setup creates or reuses a Standard macOS account named kitsoki-reviewer as the delegated coding-agent user.\nKitsoki still owns the deterministic harness and merge/integration operations.\nThe backend CLIs run through root-owned PATH wrappers as kitsoki-reviewer, so OS permissions can deny writes to /Users/Brad.Smith/code/kitsoki."
+      setup_summary: "This setup creates or reuses a Standard macOS account named kitsoki-reviewer as the delegated coding-agent user.\nKitsoki still owns the deterministic harness and merge/integration operations.\nThe backend CLIs run through root-owned wrappers as kitsoki-reviewer, so OS permissions can deny writes to /Users/Brad.Smith/code/kitsoki."
       status: "details ready"
     expect_host_calls:
       - handler: host.starlark.run

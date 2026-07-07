@@ -92,10 +92,9 @@ type WebConfig struct {
 	AgentLaunchPolicy *host.AgentLaunchPolicy `yaml:"agent_launch_policy,omitempty"`
 
 	// AgentUserDelegation declares the local OS account/wrapper setup used to
-	// run backend CLIs as a delegated user. The first implementation uses it as
-	// a machine-local setup receipt and startup-warning gate; the launch path
-	// still depends on PATH wrappers until first-class run_as_user delegation
-	// lands.
+	// run backend CLIs as a delegated user. kitsoki agent launch consumes the
+	// wrapper path directly; other live agent surfaces still treat the block as
+	// a machine-local setup receipt/startup-warning gate.
 	AgentUserDelegation *AgentUserDelegationConfig `yaml:"agent_user_delegation,omitempty"`
 
 	// Mining configures the always-on ambient session miner
