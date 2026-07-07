@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -403,6 +404,91 @@ func TestTUIPromptWidthHonoursMinimum(t *testing.T) {
 
 	require.Equal(t, 20, tuipkg.GetPromptWidth(rm),
 		"prompt width must clamp to the 20-column inner minimum on narrow terminals")
+}
+
+func TestTUIResizeClearsNormalScreen(t *testing.T) {
+	orch, sid := setupCloak(t)
+
+	for _, tc := range []struct {
+		name string
+		mode tuipkg.Mode
+	}{
+		{"on-path", tuipkg.ModeOnPath},
+		{"off-path", tuipkg.ModeOffPath},
+		{"awaiting-llm", tuipkg.ModeAwaitingLLM},
+		{"slot-filling", tuipkg.ModeSlotFilling},
+		{"disambiguating", tuipkg.ModeDisambiguating},
+		{"menu", tuipkg.ModeMenu},
+		{"meta", tuipkg.ModeMeta},
+		{"meta-sessions", tuipkg.ModeMetaSessions},
+		{"world-view", tuipkg.ModeWorldView},
+		{"choosing", tuipkg.ModeChoosing},
+		{"operator-question", tuipkg.ModeOperatorQuestion},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := buildModel(t, orch, sid)
+			rm, ok := tuipkg.ExtractRootModel(m)
+			require.True(t, ok)
+			tuipkg.ClearTranscriptPendingForTest(&rm)
+			tuipkg.SetModeForTest(&rm, tc.mode)
+			if tc.mode == tuipkg.ModeMenu {
+				tuipkg.OpenMenuSystemForTest(&rm)
+			}
+			if tc.mode == tuipkg.ModeAwaitingLLM {
+				tuipkg.AppendLiveForTest(&rm, strings.Repeat("routing status ", 20))
+			}
+
+			_, cmd := tea.Model(rm).Update(tea.WindowSizeMsg{Width: 72, Height: 20})
+
+			require.Contains(t, commandMessageTypes(cmd), "tea.clearScreenMsg",
+				"resize must clear the visible normal screen so stale wrapped rows cannot corrupt the next paint")
+		})
+	}
+}
+
+func TestTUIResizeClearsBeforePendingTranscriptFlush(t *testing.T) {
+	orch, sid := setupCloak(t)
+	m := buildModel(t, orch, sid)
+
+	_, cmd := m.Update(tea.WindowSizeMsg{Width: 72, Height: 20})
+
+	types := commandMessageTypes(cmd)
+	require.GreaterOrEqual(t, len(types), 2, "resize with startup scrollback should clear and then print pending transcript")
+	require.Equal(t, "tea.clearScreenMsg", types[0],
+		"pending transcript output must be printed after the resize clear, otherwise startup content can be wiped")
+	require.Contains(t, types, "tea.printLineMessage",
+		"resize should preserve pending transcript flushes")
+}
+
+func commandMessageTypes(cmd tea.Cmd) []string {
+	if cmd == nil {
+		return nil
+	}
+	return collectMessageTypes(cmd())
+}
+
+func collectMessageTypes(msg tea.Msg) []string {
+	if msg == nil {
+		return nil
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var out []string
+		for _, cmd := range batch {
+			out = append(out, commandMessageTypes(cmd)...)
+		}
+		return out
+	}
+	if reflect.TypeOf(msg).String() == "tea.sequenceMsg" {
+		v := reflect.ValueOf(msg)
+		out := make([]string, 0, v.Len())
+		for i := 0; i < v.Len(); i++ {
+			if cmd, ok := v.Index(i).Interface().(tea.Cmd); ok {
+				out = append(out, commandMessageTypes(cmd)...)
+			}
+		}
+		return out
+	}
+	return []string{reflect.TypeOf(msg).String()}
 }
 
 func TestTUIQuit(t *testing.T) {
