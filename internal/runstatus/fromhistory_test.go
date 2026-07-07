@@ -184,12 +184,14 @@ func TestFromHistory_DerivesOperationRunSummary(t *testing.T) {
 	})
 	require.NoError(t, err)
 	runWaiting, err := json.Marshal(map[string]any{
-		"operation_id":   "bugfix_full",
-		"policy_id":      "bugfix_full",
-		"status":         "waiting",
-		"terminal_state": "__exit__needs-human",
-		"stop_reason":    "needs-human",
-		"stop_detail":    "Regression gate was never RED.",
+		"operation_id":             "bugfix_full",
+		"policy_id":                "bugfix_full",
+		"status":                   "waiting",
+		"terminal_state":           "__exit__needs-human",
+		"terminal_artifact":        "done_artifact",
+		"terminal_artifact_handle": "done#abc123",
+		"stop_reason":              "needs-human",
+		"stop_detail":              "Regression gate was never RED.",
 	})
 	require.NoError(t, err)
 	runPhase, err := json.Marshal(map[string]any{
@@ -217,6 +219,8 @@ func TestFromHistory_DerivesOperationRunSummary(t *testing.T) {
 	assert.Equal(t, "needs-human", snap.Session.OperationRun.StopReason)
 	assert.Equal(t, "Regression gate was never RED.", snap.Session.OperationRun.StopDetail)
 	assert.Equal(t, "__exit__needs-human", snap.Session.OperationRun.TerminalState)
+	assert.Equal(t, "done_artifact", snap.Session.OperationRun.TerminalArtifact)
+	assert.Equal(t, "done#abc123", snap.Session.OperationRun.TerminalArtifactHandle)
 	assert.True(t, snap.Session.OperationRun.RunInBackground)
 }
 
@@ -253,10 +257,11 @@ func TestSessionHeaderFromTrace_DerivesOperationRunSummary(t *testing.T) {
 			Turn:      2,
 			StatePath: "__exit__direct-ship",
 			Attrs: map[string]any{
-				"operation_id":      "bugfix_full",
-				"status":            "completed",
-				"terminal_state":    "__exit__direct-ship",
-				"terminal_artifact": "done_artifact",
+				"operation_id":             "bugfix_full",
+				"status":                   "completed",
+				"terminal_state":           "__exit__direct-ship",
+				"terminal_artifact":        "done_artifact",
+				"terminal_artifact_handle": "done#abc123",
 			},
 		},
 	}, runstatus.HeaderOverrides{})
@@ -269,6 +274,7 @@ func TestSessionHeaderFromTrace_DerivesOperationRunSummary(t *testing.T) {
 	assert.Equal(t, "reproducing", header.OperationRun.To)
 	assert.Equal(t, "__exit__direct-ship", header.OperationRun.TerminalState)
 	assert.Equal(t, "done_artifact", header.OperationRun.TerminalArtifact)
+	assert.Equal(t, "done#abc123", header.OperationRun.TerminalArtifactHandle)
 }
 
 // TestFromHistory_AgentEventsPassThroughVerbatim confirms that when a History

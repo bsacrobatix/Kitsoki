@@ -50,6 +50,15 @@ func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
 			expectOperationStatus:  "completed",
 			expectTerminalArtifact: "bf__done_artifact",
 		},
+		{
+			appPath:                repoStoriesDemoVideoLoopAppPath(t),
+			capsule:                "clean-repo",
+			name:                   "demo_video_loop_visual_qa_completed",
+			sourceFlow:             repoPath(t, "../../stories/demo-video-loop/flows/happy_path.yaml"),
+			expectOperationPolicy:  "demo_video_qa",
+			expectOperationStatus:  "completed",
+			expectTerminalArtifact: "qa_completion_artifact_handle",
+		},
 	}
 
 	for _, tc := range cases {
@@ -73,6 +82,11 @@ func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
 func repoStoriesBugfixAppPath(t *testing.T) string {
 	t.Helper()
 	return repoPath(t, "../../stories/bugfix/app.yaml")
+}
+
+func repoStoriesDemoVideoLoopAppPath(t *testing.T) string {
+	t.Helper()
+	return repoPath(t, "../../stories/demo-video-loop/app.yaml")
 }
 
 func repoPath(t *testing.T, path string) string {

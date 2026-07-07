@@ -223,6 +223,9 @@ func operationArtifactForCurrentOperation(m RootModel) string {
 	if !ok {
 		return ""
 	}
+	if artifact := operationRunString(handle, "terminal_artifact_handle"); artifact != "" {
+		return artifact
+	}
 	return operationRunString(handle, "terminal_artifact")
 }
 

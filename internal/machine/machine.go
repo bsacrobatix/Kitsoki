@@ -1596,7 +1596,7 @@ func (m *machineImpl) finishActiveOperationRun(terminalState, policyPrefix strin
 	}
 
 	eventKind := store.OperationRunCompleted
-	payload := operationRunCompletedPayload(policyID, policy, terminalState)
+	payload := operationRunCompletedPayload(policyID, policy, terminalState, w)
 	if reason, detail, ok := m.operationRunStopReason(policy, terminalState, w); ok {
 		eventKind = store.OperationRunWaiting
 		payload = operationRunWaitingPayload(policyID, policy, terminalState, reason, detail)
@@ -1702,7 +1702,7 @@ func (m *machineImpl) advanceActiveOperationRunPhaseProgress(state string, w wor
 	return next, events
 }
 
-func operationRunCompletedPayload(policyID string, policy *app.OperationPolicy, terminalState string) map[string]any {
+func operationRunCompletedPayload(policyID string, policy *app.OperationPolicy, terminalState string, w world.World) map[string]any {
 	payload := operationRunPolicyPayload(policy, false)
 	payload["operation_id"] = policyID
 	payload["policy_id"] = policyID
@@ -1710,8 +1710,44 @@ func operationRunCompletedPayload(policyID string, policy *app.OperationPolicy, 
 	payload["terminal_state"] = terminalState
 	if policy.TerminalArtifact != "" {
 		payload["terminal_artifact"] = policy.TerminalArtifact
+		if handle := operationRunTerminalArtifactHandle(w, policy.TerminalArtifact); handle != "" {
+			payload["terminal_artifact_handle"] = handle
+		}
 	}
 	return payload
+}
+
+func operationRunTerminalArtifactHandle(w world.World, artifactKey string) string {
+	artifactKey = strings.TrimSpace(artifactKey)
+	if artifactKey == "" || w.Vars == nil {
+		return ""
+	}
+	value, ok := w.Vars[artifactKey]
+	if !ok {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case map[string]any:
+		if handle := operationRunString(typed, "handle_id"); handle != "" {
+			return handle
+		}
+		if handle := operationRunString(typed, "id"); handle != "" {
+			return handle
+		}
+		if nested, ok := typed["handle"].(map[string]any); ok {
+			return operationRunString(nested, "id")
+		}
+	case map[string]string:
+		if handle := strings.TrimSpace(typed["handle_id"]); handle != "" {
+			return handle
+		}
+		if handle := strings.TrimSpace(typed["id"]); handle != "" {
+			return handle
+		}
+	}
+	return ""
 }
 
 func operationRunWaitingPayload(policyID string, policy *app.OperationPolicy, terminalState, reason, detail string) map[string]any {

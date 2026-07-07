@@ -73,6 +73,7 @@ func mergeOperationRunSummary(prev *OperationRunSummary, raw map[string]any) *Op
 	assignString(&next.Phase, "phase")
 	assignString(&next.TerminalState, "terminal_state")
 	assignString(&next.TerminalArtifact, "terminal_artifact")
+	assignString(&next.TerminalArtifactHandle, "terminal_artifact_handle")
 	assignString(&next.StopReason, "stop_reason", "reason")
 	assignString(&next.StopDetail, "stop_detail", "detail", "message")
 	if value, ok := boolMapValue(raw, "run_in_background"); ok {

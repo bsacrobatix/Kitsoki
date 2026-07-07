@@ -64,21 +64,22 @@ type SessionHeader struct {
 // enough for the Home screen to show attachable autonomous work without fetching
 // the full trace for every row.
 type OperationRunSummary struct {
-	OperationID      string `json:"operation_id,omitempty"`
-	PolicyID         string `json:"policy_id,omitempty"`
-	Title            string `json:"title,omitempty"`
-	Status           string `json:"status,omitempty"`
-	Mode             string `json:"mode,omitempty"`
-	ExecutionMode    string `json:"execution_mode,omitempty"`
-	RunInBackground  bool   `json:"run_in_background,omitempty"`
-	From             string `json:"from,omitempty"`
-	To               string `json:"to,omitempty"`
-	EntryIntent      string `json:"entry_intent,omitempty"`
-	Phase            string `json:"phase,omitempty"`
-	TerminalState    string `json:"terminal_state,omitempty"`
-	TerminalArtifact string `json:"terminal_artifact,omitempty"`
-	StopReason       string `json:"stop_reason,omitempty"`
-	StopDetail       string `json:"stop_detail,omitempty"`
+	OperationID            string `json:"operation_id,omitempty"`
+	PolicyID               string `json:"policy_id,omitempty"`
+	Title                  string `json:"title,omitempty"`
+	Status                 string `json:"status,omitempty"`
+	Mode                   string `json:"mode,omitempty"`
+	ExecutionMode          string `json:"execution_mode,omitempty"`
+	RunInBackground        bool   `json:"run_in_background,omitempty"`
+	From                   string `json:"from,omitempty"`
+	To                     string `json:"to,omitempty"`
+	EntryIntent            string `json:"entry_intent,omitempty"`
+	Phase                  string `json:"phase,omitempty"`
+	TerminalState          string `json:"terminal_state,omitempty"`
+	TerminalArtifact       string `json:"terminal_artifact,omitempty"`
+	TerminalArtifactHandle string `json:"terminal_artifact_handle,omitempty"`
+	StopReason             string `json:"stop_reason,omitempty"`
+	StopDetail             string `json:"stop_detail,omitempty"`
 }
 
 // MermaidSnapshot is the output of (the future) viz.FlowchartWithMap: the
