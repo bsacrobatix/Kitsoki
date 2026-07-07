@@ -62,8 +62,8 @@ type driveHostCall struct {
 }
 
 // driveOperationFrame is additive metadata emitted when --drive-operation asks
-// the operation driver to continue an active autonomous operation after an
-// operator/scripted turn.
+// the operation driver to continue an active autonomous/supervised operation
+// after an operator/scripted turn.
 type driveOperationFrame struct {
 	Turns      int    `json:"turns"`
 	StopReason string `json:"stop_reason,omitempty"`
@@ -146,7 +146,7 @@ Examples:
 	cmd.Flags().StringVar(&profileName, "profile", "", "harness profile from .kitsoki.yaml/.kitsoki.local.yaml; supplies backend, model, quota, and provider env")
 	cmd.Flags().StringVar(&configPath, "config", webconfig.DefaultConfigFile, "config file used with --profile")
 	cmd.Flags().StringVar(&warpBasisPath, "warp", "", "path to a warp-basis YAML (state + world overrides); applied as the first action after session create. Same file the TUI's /warp file:<path> loads.")
-	cmd.Flags().BoolVar(&driveOperation, "drive-operation", false, "after each accepted turn, drive an active autonomous operation until it rests")
+	cmd.Flags().BoolVar(&driveOperation, "drive-operation", false, "after each accepted turn, drive an active autonomous/supervised operation until it rests")
 
 	return cmd
 }
