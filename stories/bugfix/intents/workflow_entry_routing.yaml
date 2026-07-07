@@ -40,6 +40,11 @@ fixtures:
     inputs:
       - "full"
       - "all phases"
+  - id: freeform-complaint
+    intent: { name: work_complaint }
+    inputs:
+      - "fix bug the TUI swallows ESC while an LLM turn is running"
+      - "bug report the run list does not refresh after cleanup"
   - id: triage-only-shortcut
     intent: { name: triage }
     inputs:

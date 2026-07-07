@@ -116,8 +116,10 @@ states:
             ticket_source_ref, or thread when it looks like a local path, or
             issues/bugs/{{ world.ticket_id }}.md; when "remote", use
             ctx.world.get("ticket_body") (with ticket_title/ticket_url/ticket_repo)
-            and do not go hunting through issues/bugs or unrelated local notes —
-            return UNCLEAR if ticket_body is empty. Open the exact files/functions
+            and do not go hunting through issues/bugs or unrelated local notes;
+            when "freeform", use ctx.world.get("ticket_body") as the operator's
+            complaint and do not require a filed issue. Return UNCLEAR if the
+            available report text is too vague to map to code. Open the exact files/functions
             the report cites in the CURRENT tree: has the buggy line/behavior
             changed? Does a proposed fix already appear applied? Search for a
             regression test asserting the fixed behavior — a green regression

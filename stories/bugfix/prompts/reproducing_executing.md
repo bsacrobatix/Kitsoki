@@ -7,6 +7,23 @@ Your job is to produce evidence — a deterministic reproduction (a test, a
 script, a recorded sequence) — that the bug is real, plus the components /
 modules / services implicated.
 
+Ticket source mode: **{{ args.ticket_source_mode }}**
+{% if args.ticket_source_ref %}Ticket source ref: `{{ args.ticket_source_ref }}`{% endif %}
+
+{% if args.ticket_body %}## Bug report
+
+```markdown
+{{ args.ticket_body }}
+```
+
+Use this report as source evidence. In `freeform` mode it may be only an
+operator complaint, not a filed issue. Go as far as code inspection and local
+reproduction allow. If the complaint is too vague, do not fabricate a
+reproducer: set `bug_verified` honestly, explain the missing details in
+`summary_markdown`, and phrase the next needed operator guidance concretely.
+
+{% endif %}
+
 {% block spec_project_context %}{% endblock %}
 
 {% if args.refine_feedback %}## ⚠ Operator refinement directive (cycle {{ args.cycle }})

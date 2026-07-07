@@ -24,6 +24,14 @@ Imported (see Wave 2's `stories/dev-story/app.yaml` or
 `idle` — the operator starts the pipeline by typing `start`. Set on
 import via `entry: idle`.
 
+`idle` also accepts complaint-only starts. A caller may either seed
+`ticket_body` with no `ticket_id`, or dispatch `work_complaint` with a free-form
+bug description. The story synthesizes a session-scoped `complaint-<session>`
+ticket id for thread/worktree naming, marks `ticket_source_mode=freeform`, runs
+pre-flight triage, and proceeds until the available evidence runs out. If the
+complaint is too vague to reproduce, the reproducer/checkpoint holds for
+operator guidance rather than requiring a filed issue up front.
+
 ### Exits
 
 | Name | Description | `requires:` keys | Typical world_out |
@@ -190,6 +198,9 @@ in `app.yaml`'s `world:` block so the child loads standalone for tests.
 | `ticket_id` | string | Every checkpoint's `phase_id:` and post title. | `""` |
 | `ticket_title` | string | Views / artifact prompts. | `""` |
 | `ticket_url` | string | Returned to parent on completion. | `""` |
+| `ticket_source_mode` | string | Tells triage where the report lives. Values: `local` \| `remote` \| `freeform`. | `local` |
+| `ticket_source_ref` | string | Local markdown path, remote issue URL/ref, or free-form complaint label used as the report source. | `""` |
+| `ticket_body` | string | Remote issue body, pre-read local issue body, or free-form operator complaint. If set without `ticket_id`, `idle` synthesizes a complaint id and autostarts. | `""` |
 | `thread` | string | The transport's thread identifier (file path / Jira key / chat ID). | `""` |
 | `workspace_id` | string | `iface.workspace.sync` arg. | `""` |
 | `workdir` | string | Most `iface.{vcs,ci}.*` calls. | `""` |
@@ -220,6 +231,7 @@ in `app.yaml`'s `world:` block so the child loads standalone for tests.
 | Intent | Slots | Description |
 |---|---|---|
 | `start` | — | Begin the pipeline from `idle`. |
+| `work_complaint` | `complaint`, (opt) `ticket_title` | Start from a free-form bug complaint when no filed ticket exists. Seeds `ticket_body`, marks the source `freeform`, synthesizes a complaint id in `idle`, then autostarts. |
 | `proceed` | — | Advance from an `_executing` room into its `_awaiting_reply` checkpoint. |
 | `accept` | (opt) `author`, `feedback` | Accept the current checkpoint artifact; advance to the next room. (In `bugfix_mode=quick`, accept at `testing_awaiting_reply` jumps to `done_executing`, skipping reviewing + validating.) |
 | `refine` | (opt) `feedback` | Re-execute the current room with feedback in `world.refine_feedback`; increments both `<phase>_cycle` and the global `cycle`. When `<phase>_cycle` has hit `<phase>_budget` the refine arc instead routes to `@exit:abandoned` with `abandon_reason=<phase>_cycle_budget_exhausted` (see Cycle budgets below). |
