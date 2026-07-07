@@ -30,10 +30,7 @@ states:
           items:
             - label: "apply"
               intent: apply
-              hint: "run the setup now"
-            - label: "ok"
-              intent: accept
-              hint: "same as apply"
+              hint: "create the account, install wrappers, and run probes"
             - label: "details"
               intent: plan
               hint: "show the generated receipt and deterministic steps"
