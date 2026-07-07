@@ -51,6 +51,23 @@ make feature-qa FEATURE=agent-actions
 make tour-qa
 ```
 
+After a gated visual QA run writes a `verdict.json`, convert it to the shared
+completion-state contract that arena/persona-QA rollups and completed-session
+checks consume:
+
+```bash
+python3 -m tools.persona_qa --kind ui-qa \
+  --input .artifacts/ui-qa/<run>/verdict.json \
+  --out .artifacts/ui-qa/<run>/completion-state.json
+
+python3 -m tools.persona_qa --kind ui-review \
+  --input .artifacts/ui-review/<run>/verdict.json \
+  --out .artifacts/ui-review/<run>/completion-state.json
+```
+
+The adapter is deterministic and does not run vision, browsers, or LLMs; it
+only normalizes an already-produced verdict artifact.
+
 ## Current Product-Site Inventory
 
 The feature catalog currently stages these demo ids when their artifacts exist:
