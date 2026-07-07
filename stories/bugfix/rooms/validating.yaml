@@ -38,24 +38,66 @@ states:
           text:     "VALIDATING"
           subtitle: "Phase 6 / 7  ·  full-environment validation of the fix"
           color:    "#F97316"   # orange — last gate before close-out
+      - banner:
+          text:     "ACTION NEEDED: VALIDATION FAIL SHORT"
+          subtitle: "A minor implementation patch is needed. Continue or refine returns to implementing."
+          color:    "#DC2626"
+        when: "world.validate_artifact.outcome == 'fail_short'"
+      - banner:
+          text:     "ACTION NEEDED: VALIDATION FAILED"
+          subtitle: "The fix strategy appears wrong. Continue or refine returns to proposing."
+          color:    "#DC2626"
+        when: "world.validate_artifact.outcome == 'fail'"
+      - banner:
+          text:     "ACTION NEEDED: VALIDATION INFRA ERROR"
+          subtitle: "The environment failed. Continue retries validation with this diagnostic."
+          color:    "#F59E0B"
+        when: "world.validate_artifact.outcome == 'infra_error'"
+      - banner:
+          text:     "VALIDATION PASSED"
+          subtitle: "Structured artifact reports outcome=pass; continue advances to done."
+          color:    "#16A34A"
+        when: "world.validate_artifact.outcome == 'pass'"
       - prose: "{{ world.ticket_id|default:'(no ticket)' }} · cycle {{ world.cycle }} · {{ world.bugfix_mode }} bugfix · judge {{ world.judge_mode }}"
       - kv:
           pairs:
             Ticket:  "{{ world.ticket_id }} — {{ world.ticket_title }}"
             Summary: '{{ world.validate_artifact.summary_title|default:"(pending)" }}'
             Outcome: '{{ world.validate_artifact.outcome|default:"(pending)" }}'
+            "Continue does": '{% if world.validate_artifact.outcome == "fail_short" %}return to implementing{% elif world.validate_artifact.outcome == "fail" %}return to proposing{% elif world.validate_artifact.outcome == "infra_error" %}retry validation{% else %}post and advance to done{% endif %}'
             # Editor awareness (WS-C C3): honest either way — an attached
             # `/ide` link's diagnostic count, or an explicit "no editor
             # attached" rather than silently omitting the row.
             "Editor diagnostics": '{% if world.ide_diagnostics_result.connected %}{{ world.ide_diagnostics|length }}{% else %}no editor attached{% endif %}'
-      - heading: "Artifact"
+      - heading: "Action needed"
+        when: "world.validate_artifact.outcome == 'fail_short' || world.validate_artifact.outcome == 'fail' || world.validate_artifact.outcome == 'infra_error' || world.validate_artifact.next_action_hint"
+      - prose: "Patch the implementation. The next implementation cycle receives the validation hint below."
+        when: "world.validate_artifact.outcome == 'fail_short'"
+      - prose: "Redraft the fix proposal. The next proposal cycle receives the validation hint below."
+        when: "world.validate_artifact.outcome == 'fail'"
+      - prose: "The validation environment failed. The next validation cycle receives this diagnostic."
+        when: "world.validate_artifact.outcome == 'infra_error'"
+      - heading: "Next action"
+        when: "world.validate_artifact.next_action_hint"
+      - prose: "{{ world.validate_artifact.next_action_hint }}"
+        when: "world.validate_artifact.next_action_hint"
+      - heading: "Evidence"
+        when: "world.validate_artifact.evidence"
+      - kv:
+          pairs:
+            Build: '{{ world.validate_artifact.evidence.build|default:"(not provided)" }}'
+            API:   '{{ world.validate_artifact.evidence.api|default:"(not provided)" }}'
+            UI:    '{{ world.validate_artifact.evidence.ui|default:"(not provided)" }}'
+            Logs:  '{{ world.validate_artifact.evidence.logs|default:"(not provided)" }}'
+        when: "world.validate_artifact.evidence"
+      - heading: "Summary"
       - template: '{{ world.validate_artifact.summary_markdown|default:"(pending — agent has not returned yet)" }}'
       - choice:
           mode: single
           prompt: "Actions"
           items:
-            - label:  "continue"
-              hint:   "post and advance to done"
+            - label:  "{% if world.validate_artifact.outcome == 'fail_short' %}patch fix{% elif world.validate_artifact.outcome == 'fail' %}redraft fix{% elif world.validate_artifact.outcome == 'infra_error' %}infra: retry{% else %}continue{% endif %}"
+              hint:   "{% if world.validate_artifact.outcome == 'fail_short' %}ACTION NEEDED: return to implementing with this validation hint{% elif world.validate_artifact.outcome == 'fail' %}ACTION NEEDED: return to proposing with this validation hint{% elif world.validate_artifact.outcome == 'infra_error' %}ACTION NEEDED: retry validation with this diagnostic{% else %}post and advance to done{% endif %}"
               intent: accept
             - label:  "refine"
               hint:   "re-validate with feedback"

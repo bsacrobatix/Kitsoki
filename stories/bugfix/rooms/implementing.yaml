@@ -23,6 +23,16 @@ states:
           text:     "IMPLEMENTING"
           subtitle: "Phase 3 / 7  ·  apply the proposed fix to the workspace"
           color:    "#8B5CF6"   # violet — doing the work
+      - banner:
+          text:     "ACTION NEEDED: IMPLEMENTER BLOCKED"
+          subtitle: "The artifact says applied=false. Continue stops at needs-human; refine retries with operator guidance."
+          color:    "#DC2626"
+        when: "world.implement_artifact.applied == false"
+      - banner:
+          text:     "FIX APPLIED"
+          subtitle: "Structured artifact reports applied=true; continue advances to testing."
+          color:    "#16A34A"
+        when: "world.implement_artifact.applied == true"
       - prose: "{{ world.ticket_id|default:'(no ticket)' }} · cycle {{ world.cycle }} · {{ world.bugfix_mode }} bugfix · judge {{ world.judge_mode }}"
       - kv:
           pairs:
@@ -32,21 +42,34 @@ states:
             Applied:          '{{ world.implement_artifact.summary_title|default:"(pending — agent has not returned yet)" }}'
             Status:           '{% if world.implement_artifact.applied == false %}blocked{% elif world.implement_artifact.summary_title %}applied{% else %}(pending){% endif %}'
             Files:            '{{ world.implement_artifact.files_changed|join:", "|default:"(none recorded)" }}'
-      - heading: "Artifact"
-      - template: '{{ world.implement_artifact.summary_markdown|default:"(no implementation body — agent pending or failed)" }}'
+            "Continue does":   '{% if world.implement_artifact.applied == false %}stop at needs-human{% elif world.implement_artifact.summary_title %}advance to testing{% else %}wait for implementation artifact{% endif %}'
+      - heading: "Action needed"
+        when: "world.implement_artifact.applied == false || world.implement_artifact.blockers"
+      - prose: "The implementer did not complete the requested edit. Use refine with concrete guidance, or continue to stop the run for human attention."
+        when: "world.implement_artifact.applied == false"
       - heading: "Blockers"
-        when:  "world.implement_artifact.blockers"
+        when: "world.implement_artifact.blockers"
       - code: |
           {% for b in world.implement_artifact.blockers %}- {{ b }}
           {% endfor %}
         when: "world.implement_artifact.blockers"
+      - heading: "Summary"
+      - template: '{{ world.implement_artifact.summary_markdown|default:"(no implementation body — agent pending or failed)" }}'
       - choice:
           mode: single
           prompt: "Actions"
           items:
-            - label:  "continue"
-              hint:   "advance to testing"
+            - label:  "{% if world.implement_artifact.applied == false %}blocked: stop run{% else %}continue{% endif %}"
+              hint:   "{% if world.implement_artifact.applied == false %}ACTION NEEDED: stop at needs-human with the implementation blockers{% else %}advance to testing{% endif %}"
               intent: accept
+            - label:  "refine"
+              hint:   "retry implementation with feedback"
+              intent: refine
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what the implementer should do next"
+                required:    false
             - label:  "restart from reproducing"
               hint:   "bounce back to phase 1 (resets cycle)"
               intent: restart_from
@@ -227,7 +250,30 @@ states:
         say: "Fix applied — {{ world.implement_artifact.summary_title|default:world.propose_fix_artifact.summary_title }}"
     on:
       accept:
+        - when: "world.implement_artifact.applied == false"
+          target: "@exit:needs-human"
+          effects:
+            - set:
+                last_error: "implementation blocked before tests could run: {{ world.implement_artifact.summary_markdown }}"
+                status:     "needs-human"
         - target: testing
+
+      refine:
+        - when: "world.implementing_cycle >= world.implementing_budget"
+          target: "@exit:abandoned"
+          effects:
+            - set:
+                abandon_reason: "implementing_cycle_budget_exhausted_after_implementation_refine"
+                status:         "abandoned"
+        - target: implementing
+          effects:
+            - set:
+                refine_feedback:           "{{ slots.feedback ?? '' }}"
+                implementing_cycle:        "{{ world.implementing_cycle + 1 }}"
+                cycle:                     "{{ world.cycle + 1 }}"
+                implement_artifact:        {}
+                implement_review_artifact: {}
+                validate_artifact:         {}
 
       restart_from:
         - when: "slots.stage == 'reproducing'"
