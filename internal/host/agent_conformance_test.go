@@ -244,6 +244,19 @@ func TestConformance_ReasoningEventsUseThinkingChannel(t *testing.T) {
 			t.Fatalf("copilot reasoning polluted Text = %q", ce.Text)
 		}
 	})
+	t.Run("copilot/message_reasoningText", func(t *testing.T) {
+		ev := mustUnmarshal(t, `{"type":"assistant.message","data":{"content":"","reasoningText":"I need to run a specific command.","toolRequests":[{"name":"bash","arguments":{"command":"echo hi"}}]}}`)
+		ce := copilotBackend{}.Classify(ev)
+		if ce.Thinking != "I need to run a specific command." {
+			t.Fatalf("copilot message reasoningText Thinking = %q", ce.Thinking)
+		}
+		if ce.Text != "" {
+			t.Fatalf("copilot message reasoningText polluted Text = %q", ce.Text)
+		}
+		if ce.Tool != "bash" {
+			t.Fatalf("copilot message reasoningText lost tool = %q", ce.Tool)
+		}
+	})
 }
 
 // TestConformance_ArgvTranslation asserts each backend maps a representative
