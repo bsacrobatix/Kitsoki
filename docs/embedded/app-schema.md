@@ -17,6 +17,7 @@ root:            <string> | <State>              # required — initial state na
 states:          { <name>: <State>, ... }        # optional
 off_path:        <OffPathDef>                    # optional
 hosts:           [ <string>, ... ]               # optional allow-list of host handler names
+operations:      { <name>: <OperationPolicy> }   # optional session-level operation run policies
 proposals:       { <name>: <ProposalKind> }      # optional
 include:         [ <glob>, ... ]                 # optional — merge other YAMLs relative to this file
 imports:         { <alias>: <ImportDef>, ... }   # optional — aliased sub-story composition
@@ -35,6 +36,31 @@ host_interfaces: { <name>: <HostInterfaceDef> }  # optional — named capability
   projected world_in/world_out, named exits, intent re-export, and
   rebindable host_interfaces. Full reference and worked examples in
   [`docs/stories/imports.md`](../stories/imports.md).
+
+## `operations:` — session operation policies
+
+Top-level `operations:` declares named policies for workflow-shaped runs such
+as bugfix triage, direct ship, PR refinement, or protected-branch sync. A
+transition starts a run by naming one of these policies with
+`operation: <policy-id>`.
+
+```yaml
+operations:
+  bugfix_full:
+    title: "Fix bug"
+    mode: autonomous              # interactive | autonomous | supervised
+    execution_mode: one-shot      # optional: one-shot | staged
+    run_in_background: true
+    stop_on: [needs-human, host-error, gate-failed]
+    pause_on: [operator-ask]
+    terminal_artifact: done_artifact
+    phase_summary:
+      from: [triage_artifact, done_artifact]
+```
+
+This is distinct from state-level `operation:` overlays. Operation policies are
+session lifecycle metadata and emit operation lifecycle trace rows; state
+overlays control abandonable task-local world writes.
 
 ## `AppMeta`
 
@@ -519,6 +545,7 @@ Story-style guidance: [`docs/stories/story-style.md`](../stories/story-style.md)
 on:
   go:
     - target:      bar                 # required — dest state path, "." = self
+      operation:   bugfix_full         # optional — top-level operation policy id
       when:        "slots.direction == 'south'"
       effects:     [ <Effect>, ... ]
       guard_hint:  "Head outside first."   # shown when guard fails

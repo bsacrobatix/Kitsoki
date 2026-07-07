@@ -73,6 +73,69 @@ func TestSimpleLinearTransition(t *testing.T) {
 	require.True(t, found, "TransitionApplied event must be present")
 }
 
+func TestOperationRunEvents(t *testing.T) {
+	def := &app.AppDef{
+		App:  app.AppMeta{ID: "operation-run-test"},
+		Root: "start",
+		Operations: map[string]*app.OperationPolicy{
+			"demo_run": {
+				Title:            "Demo run",
+				Mode:             "autonomous",
+				ExecutionMode:    "one-shot",
+				RunInBackground:  true,
+				StopOn:           []string{"needs-human", "host-error"},
+				TerminalArtifact: "done_artifact",
+			},
+		},
+		Intents: map[string]app.Intent{
+			"go": {},
+		},
+		States: map[string]*app.State{
+			"start": {
+				On: map[string][]app.Transition{
+					"go": {{
+						Target:    "done",
+						Operation: "demo_run",
+					}},
+				},
+			},
+			"done": {Terminal: true},
+		},
+	}
+	m := mustNew(t, def)
+
+	res, err := m.Turn(context.Background(), "start", world.New(), intent.IntentCall{Intent: "go"})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("done"), res.NewState)
+
+	var started, completed map[string]any
+	for _, ev := range res.Events {
+		switch ev.Kind {
+		case store.OperationRunStarted:
+			require.NoError(t, json.Unmarshal(ev.Payload, &started))
+		case store.OperationRunCompleted:
+			require.NoError(t, json.Unmarshal(ev.Payload, &completed))
+		}
+	}
+	require.Equal(t, map[string]any{
+		"entry_intent":      "go",
+		"execution_mode":    "one-shot",
+		"from":              "start",
+		"mode":              "autonomous",
+		"operation_id":      "demo_run",
+		"policy_id":         "demo_run",
+		"run_in_background": true,
+		"status":            "running",
+		"stop_on":           []any{"needs-human", "host-error"},
+		"title":             "Demo run",
+		"to":                "done",
+	}, started)
+	require.Equal(t, "completed", completed["status"])
+	require.Equal(t, "demo_run", completed["policy_id"])
+	require.Equal(t, "done", completed["terminal_state"])
+	require.Equal(t, "done_artifact", completed["terminal_artifact"])
+}
+
 func TestOperationScopeAbandonCommitReplay(t *testing.T) {
 	def := &app.AppDef{
 		App:  app.AppMeta{ID: "op-test"},

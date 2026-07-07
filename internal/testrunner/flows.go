@@ -174,6 +174,11 @@ type FlowFixture struct {
 	ExpectEventsCountAtMost  *int           `yaml:"expect_events_count_atmost,omitempty"`
 	ExpectNoErrors           *bool          `yaml:"expect_no_errors,omitempty"`
 	ExpectWorldFinal         map[string]any `yaml:"expect_world_final,omitempty"`
+	ExpectOperationStatus    string         `yaml:"expect_operation_status,omitempty"`
+	ExpectOperationPolicy    string         `yaml:"expect_operation_policy,omitempty"`
+	ExpectOperationPhase     string         `yaml:"expect_operation_phase,omitempty"`
+	ExpectStopReason         string         `yaml:"expect_stop_reason,omitempty"`
+	ExpectTerminalArtifact   string         `yaml:"expect_terminal_artifact,omitempty"`
 
 	// ExpectFiles asserts that, after the flow completes, named files
 	// exist (or don't) and their contents match a regex. The path itself
@@ -1502,6 +1507,7 @@ func runOneFlowLegacy(ctx context.Context, def *app.AppDef, m machine.Machine, f
 	if len(fixture.ExpectFiles) > 0 {
 		sessionFailures = append(sessionFailures, assertExpectFiles(filepath.Dir(filePath), fixture.ExpectFiles)...)
 	}
+	sessionFailures = append(sessionFailures, assertOperationExpectations(allEvents, fixture)...)
 
 	// Compute overall pass.
 	allTurnsPassed := true
@@ -1912,6 +1918,7 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 	if len(fixture.ExpectFiles) > 0 {
 		sessionFailures = append(sessionFailures, assertExpectFiles(filepath.Dir(filePath), fixture.ExpectFiles)...)
 	}
+	sessionFailures = append(sessionFailures, assertOperationExpectations(allEvents, fixture)...)
 
 	// Persist any newly recorded Starlark HTTP exchanges back to the cassette
 	// file (no-op for replay-only runs). Done before the orphan check / cleanup
@@ -2483,6 +2490,99 @@ func (h *noopHarness) Close() error { return nil }
 var _ harness.Harness = (*noopHarness)(nil)
 
 // ─── Assertion helpers ────────────────────────────────────────────────────────
+
+type operationExpectationSnapshot struct {
+	Seen             bool
+	Status           string
+	PolicyID         string
+	Phase            string
+	StopReason       string
+	TerminalArtifact string
+}
+
+func assertOperationExpectations(actual []store.Event, fixture *FlowFixture) []string {
+	if fixture == nil {
+		return nil
+	}
+	if fixture.ExpectOperationStatus == "" &&
+		fixture.ExpectOperationPolicy == "" &&
+		fixture.ExpectOperationPhase == "" &&
+		fixture.ExpectStopReason == "" &&
+		fixture.ExpectTerminalArtifact == "" {
+		return nil
+	}
+
+	snap := operationExpectationSnapshot{}
+	for _, ev := range actual {
+		if !isOperationLifecycleKind(ev.Kind) || ev.Payload == nil {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			continue
+		}
+		snap.Seen = true
+		if policyID, _ := payload["policy_id"].(string); policyID != "" {
+			snap.PolicyID = policyID
+		}
+		if phase, _ := payload["phase"].(string); phase != "" {
+			snap.Phase = phase
+		}
+		if artifact, _ := payload["terminal_artifact"].(string); artifact != "" {
+			snap.TerminalArtifact = artifact
+		}
+		if reason, _ := payload["stop_reason"].(string); reason != "" {
+			snap.StopReason = reason
+		} else if reason, _ := payload["reason"].(string); reason != "" {
+			snap.StopReason = reason
+		}
+		switch ev.Kind {
+		case store.OperationRunStarted:
+			snap.Status = "running"
+		case store.OperationRunWaiting:
+			snap.Status = "waiting"
+		case store.OperationRunCompleted:
+			snap.Status = "completed"
+		case store.OperationRunFailed:
+			snap.Status = "failed"
+		}
+	}
+
+	var failures []string
+	if !snap.Seen {
+		return []string{"operation expectation: no operation lifecycle events were emitted"}
+	}
+	if fixture.ExpectOperationStatus != "" && snap.Status != fixture.ExpectOperationStatus {
+		failures = append(failures, fmt.Sprintf("expect_operation_status: got %q, want %q", snap.Status, fixture.ExpectOperationStatus))
+	}
+	if fixture.ExpectOperationPolicy != "" && snap.PolicyID != fixture.ExpectOperationPolicy {
+		failures = append(failures, fmt.Sprintf("expect_operation_policy: got %q, want %q", snap.PolicyID, fixture.ExpectOperationPolicy))
+	}
+	if fixture.ExpectOperationPhase != "" && snap.Phase != fixture.ExpectOperationPhase {
+		failures = append(failures, fmt.Sprintf("expect_operation_phase: got %q, want %q", snap.Phase, fixture.ExpectOperationPhase))
+	}
+	if fixture.ExpectStopReason != "" && snap.StopReason != fixture.ExpectStopReason {
+		failures = append(failures, fmt.Sprintf("expect_stop_reason: got %q, want %q", snap.StopReason, fixture.ExpectStopReason))
+	}
+	if fixture.ExpectTerminalArtifact != "" && snap.TerminalArtifact != fixture.ExpectTerminalArtifact {
+		failures = append(failures, fmt.Sprintf("expect_terminal_artifact: got %q, want %q", snap.TerminalArtifact, fixture.ExpectTerminalArtifact))
+	}
+	return failures
+}
+
+func isOperationLifecycleKind(kind store.EventKind) bool {
+	switch kind {
+	case store.OperationRunStarted,
+		store.OperationRunPhaseStarted,
+		store.OperationRunPhaseCompleted,
+		store.OperationRunWaiting,
+		store.OperationRunCompleted,
+		store.OperationRunFailed:
+		return true
+	default:
+		return false
+	}
+}
 
 // countHostDispatchedMatching returns the number of HostDispatched
 // events whose namespace equals handler AND whose args partially-match

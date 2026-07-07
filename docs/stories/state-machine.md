@@ -620,6 +620,40 @@ Load-time validation rejects `commit_operation`, `persist_draft`, and
 inside operation states until the story declares a policy for completions that
 could outlive the overlay.
 
+### Session operation policies
+
+State-local `operation:` is about an abandonable world overlay. Top-level
+`operations:` is the separate session-run model for workflow-shaped work that
+should be driven and surfaced as one operation:
+
+```yaml
+operations:
+  bugfix_full:
+    title: "Fix bug"
+    mode: autonomous
+    execution_mode: one-shot
+    run_in_background: true
+    stop_on: [needs-human, host-error, gate-failed]
+    pause_on: [operator-ask]
+    terminal_artifact: done_artifact
+    phase_summary:
+      from: [triage_artifact, done_artifact]
+
+states:
+  idle:
+    on:
+      start:
+        - target: reproducing
+          operation: bugfix_full
+```
+
+When a transition with `operation:` fires, the machine emits an
+`operation.run_started` trace event carrying the selected policy, entry intent,
+and source/target states. If the same turn settles at a terminal state, it also
+emits `operation.completed` with the terminal state and configured terminal
+artifact key. These rows are annotations for operation drivers and UI surfaces;
+they do not mutate world state and do not replace background host jobs.
+
 Two scopes live alongside `world`:
 
 - **slots** — the typed bag from the intent that triggered this

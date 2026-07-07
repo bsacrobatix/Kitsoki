@@ -50,6 +50,23 @@ const (
 	OperationAbandoned EventKind = "operation.abandoned"
 	// OperationDraftPersisted records an explicit draft handle produced from an overlay.
 	OperationDraftPersisted EventKind = "operation.draft_persisted"
+	// OperationRunStarted records the start of a session-level operation run.
+	// Distinct from OperationStarted, which is a state-local world overlay.
+	OperationRunStarted EventKind = "operation.run_started"
+	// OperationRunPhaseStarted records a named phase becoming active inside a
+	// session-level operation run.
+	OperationRunPhaseStarted EventKind = "operation.phase_started"
+	// OperationRunPhaseCompleted records a named phase completing inside a
+	// session-level operation run.
+	OperationRunPhaseCompleted EventKind = "operation.phase_completed"
+	// OperationRunWaiting records an operation stopping for a typed wait reason.
+	OperationRunWaiting EventKind = "operation.waiting"
+	// OperationRunCompleted records successful terminal completion of an
+	// operation run.
+	OperationRunCompleted EventKind = "operation.completed"
+	// OperationRunFailed records a terminal operation error not converted into
+	// a waiting state.
+	OperationRunFailed EventKind = "operation.failed"
 	// MachineSay is appended once per `say:` effect that resolves. Payload
 	// carries {"text": "<narration>"}. Split out of EffectApplied
 	// so a runstatus timeline can render

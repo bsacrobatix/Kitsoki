@@ -1074,6 +1074,7 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	// carry).
 	validateWriteMode(file, def, &errs)
 	validateOperations(file, def, &errs)
+	validateOperationPolicies(file, def, &errs)
 
 	// intercept_drive: multi-turn drive flag (conflict-capable intercept). The
 	// only valid value is "rest"; only meaningful on a top-level room.
@@ -2017,6 +2018,90 @@ func validateOperations(file string, def *AppDef, errs *[]error) {
 		}
 	}
 	walkStates("", def.States, false)
+}
+
+func validateOperationPolicies(file string, def *AppDef, errs *[]error) {
+	addErr := func(msg string) {
+		*errs = append(*errs, &ValidationError{File: file, Message: msg})
+	}
+
+	validModes := map[string]struct{}{
+		"interactive": {},
+		"autonomous":  {},
+		"supervised":  {},
+	}
+	validExecutionModes := map[string]struct{}{
+		"":         {},
+		"one-shot": {},
+		"staged":   {},
+	}
+	validReasons := map[string]struct{}{
+		"needs-human":               {},
+		"uncertain":                 {},
+		"gate-failed":               {},
+		"host-error":                {},
+		"conflict":                  {},
+		"budget-exhausted":          {},
+		"policy-denied":             {},
+		"operator-ask":              {},
+		"protected-branch-approval": {},
+	}
+
+	for _, id := range sortedKeys(def.Operations) {
+		policy := def.Operations[id]
+		loc := fmt.Sprintf("operations.%s", id)
+		if strings.TrimSpace(id) == "" {
+			addErr("operations: policy id must not be empty")
+			continue
+		}
+		if policy == nil {
+			addErr(fmt.Sprintf("%s: policy must not be null", loc))
+			continue
+		}
+		mode := strings.TrimSpace(policy.Mode)
+		if _, ok := validModes[mode]; !ok {
+			addErr(fmt.Sprintf("%s.mode %q is invalid (want interactive, autonomous, or supervised)", loc, policy.Mode))
+		}
+		execMode := strings.TrimSpace(policy.ExecutionMode)
+		if _, ok := validExecutionModes[execMode]; !ok {
+			addErr(fmt.Sprintf("%s.execution_mode %q is invalid (want \"\", one-shot, or staged)", loc, policy.ExecutionMode))
+		}
+		for _, reason := range policy.StopOn {
+			if _, ok := validReasons[strings.TrimSpace(reason)]; !ok {
+				addErr(fmt.Sprintf("%s.stop_on reason %q is invalid", loc, reason))
+			}
+		}
+		for _, reason := range policy.PauseOn {
+			if _, ok := validReasons[strings.TrimSpace(reason)]; !ok {
+				addErr(fmt.Sprintf("%s.pause_on reason %q is invalid", loc, reason))
+			}
+		}
+	}
+
+	var walkStates func(prefix string, states map[string]*State)
+	walkStates = func(prefix string, states map[string]*State) {
+		for name, s := range states {
+			if s == nil {
+				continue
+			}
+			statePath := joinPath(prefix, name)
+			for intentName, transitions := range s.On {
+				for ti, tr := range transitions {
+					opID := strings.TrimSpace(tr.Operation)
+					if opID == "" {
+						continue
+					}
+					if _, ok := def.Operations[opID]; !ok {
+						addErr(fmt.Sprintf("state %q intent %q transitions[%d]: operation %q is not declared in top-level operations", statePath, intentName, ti, tr.Operation))
+					}
+				}
+			}
+			if len(s.States) > 0 {
+				walkStates(statePath, s.States)
+			}
+		}
+	}
+	walkStates("", def.States)
 }
 
 // validateWriteMode enforces the write_mode: room-posture invariants
