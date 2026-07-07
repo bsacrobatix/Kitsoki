@@ -40,7 +40,7 @@ func TestHelpCommandLists(t *testing.T) {
 		"/bug [description]",
 		"/chat show",
 		"/intents",
-		"/work [--all|drive]",
+		"/work [--all|drive|artifact]",
 		"/world",
 		"/meta",
 		"/quit",

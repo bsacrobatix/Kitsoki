@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -316,6 +317,11 @@ func TestWorkSlashListsCurrentOperation(t *testing.T) {
 }
 
 func TestWorkDriveSlashDrivesCurrentOperation(t *testing.T) {
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	artifactPath := filepath.Join(cwd, "done_artifact")
+	require.NoError(t, os.WriteFile(artifactPath, []byte("# done\n"), 0o644))
+
 	const yamlSrc = `
 app:
   id: operation-work-drive-test
@@ -385,9 +391,15 @@ states:
 
 	initialView, err := orch.RenderState(started.NewState, orch.CurrentWorld(sid))
 	require.NoError(t, err)
-	model := tea.Model(tuipkg.NewRootModel(orch, sid, "", initialView,
+	rm := tuipkg.NewRootModel(orch, sid, "", initialView,
 		tuipkg.WithResumedJourney(started.NewState, orch.CurrentWorld(sid), started.TurnNumber),
-	))
+	)
+	var opened []string
+	tuipkg.SetOpenArtifactForTest(&rm, func(path string) error {
+		opened = append(opened, path)
+		return nil
+	})
+	model := tea.Model(rm)
 
 	model = runTurnBlocking(t, model, "/work")
 	tx := extractTranscript(t, model)
@@ -409,6 +421,18 @@ states:
 	require.Equal(t, "completed", handle["status"])
 	require.Equal(t, "done", handle["terminal_state"])
 	require.Equal(t, false, journey.World.Vars["refined"], "driver must not choose refine")
+
+	model = runTurnBlocking(t, model, "/work")
+	tx = extractTranscript(t, model)
+	work = transcriptAfter(t, tx, "active work: 1 item(s)")
+	require.Contains(t, work, "completed")
+	require.Contains(t, work, "artifact done_artifact")
+	require.Contains(t, work, "/work artifact")
+
+	model = runTurnBlocking(t, model, "/work artifact")
+	tx = extractTranscript(t, model)
+	require.Equal(t, []string{artifactPath}, opened)
+	require.Contains(t, tx, "open: opened done_artifact")
 }
 
 func transcriptAfter(t *testing.T, text, marker string) string {
