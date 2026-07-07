@@ -89,4 +89,45 @@ describe("deriveOperationRun", () => {
       terminalArtifact: "bf__done_artifact",
     });
   });
+
+  it("derives a waiting operation with stop reason and detail", () => {
+    const run = deriveOperationRun([
+      traceEvent({
+        msg: "world.update",
+        attrs: {
+          set: {
+            operation_run: {
+              operation_id: "bf__capsule_demo",
+              policy_id: "bf__capsule_demo",
+              title: "Capsule bugfix",
+              status: "running",
+              from: "idle",
+              to: "bugfix.reproduce",
+            },
+          },
+        },
+      }),
+      traceEvent({
+        msg: "operation.waiting",
+        attrs: {
+          operation_id: "bf__capsule_demo",
+          policy_id: "bf__capsule_demo",
+          status: "waiting",
+          terminal_state: "__exit__needs-human",
+          stop_reason: "needs-human",
+          stop_detail: "Regression gate was never RED.",
+        },
+      }),
+    ]);
+
+    expect(run).toMatchObject({
+      title: "Capsule bugfix",
+      status: "waiting",
+      stopReason: "needs-human",
+      stopDetail: "Regression gate was never RED.",
+      terminalState: "__exit__needs-human",
+      from: "idle",
+      to: "bugfix.reproduce",
+    });
+  });
 });

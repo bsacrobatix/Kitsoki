@@ -45,6 +45,25 @@ func TestOperationRunChromeTextCompleted(t *testing.T) {
 	ra.AssertContains("artifact bf__done_artifact")
 }
 
+func TestOperationRunChromeTextWaiting(t *testing.T) {
+	text := operationRunChromeText(map[string]any{
+		app.OperationRunWorldKey: map[string]any{
+			"operation_id":   "bf__capsule_demo",
+			"title":          "Capsule bugfix",
+			"status":         "waiting",
+			"stop_reason":    "needs-human",
+			"stop_detail":    "Regression gate was never RED.",
+			"terminal_state": "__exit__needs-human",
+		},
+	})
+
+	ra := NewRenderingAnalyzer(t, text)
+	ra.AssertContains("Capsule bugfix")
+	ra.AssertContains("waiting")
+	ra.AssertContains("reason needs-human")
+	ra.AssertContains("Regression gate was never RED.")
+}
+
 func TestOperationRunChromeLineTruncatesToWidth(t *testing.T) {
 	line := "operation: " + operationRunChromeText(map[string]any{
 		app.OperationRunWorldKey: map[string]any{

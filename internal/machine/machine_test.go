@@ -142,6 +142,73 @@ func TestOperationRunEvents(t *testing.T) {
 	require.Equal(t, "done", handle["terminal_state"])
 }
 
+func TestOperationRunWaitsOnStopConditionTerminal(t *testing.T) {
+	def := &app.AppDef{
+		App:  app.AppMeta{ID: "operation-run-waiting"},
+		Root: "start",
+		Operations: map[string]*app.OperationPolicy{
+			"demo_run": {
+				Title:           "Demo run",
+				Mode:            "autonomous",
+				ExecutionMode:   "one-shot",
+				RunInBackground: true,
+				StopOn:          []string{"needs-human", "host-error"},
+			},
+		},
+		Intents: map[string]app.Intent{
+			"go": {},
+		},
+		States: map[string]*app.State{
+			"start": {
+				On: map[string][]app.Transition{
+					"go": {{
+						Target:    "needs-human",
+						Operation: "demo_run",
+						Effects: []app.Effect{{
+							Set: map[string]any{
+								"status":             "needs-human",
+								"needs_human_reason": "Regression gate was never RED.",
+							},
+						}},
+					}},
+				},
+			},
+			"needs-human": {Terminal: true},
+		},
+	}
+	m := mustNew(t, def)
+
+	res, err := m.Turn(context.Background(), "start", world.New(), intent.IntentCall{Intent: "go"})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("needs-human"), res.NewState)
+	requireEventKind(t, res.Events, store.OperationRunWaiting)
+	requireNoEventKind(t, res.Events, store.OperationRunCompleted)
+
+	var waiting map[string]any
+	for _, ev := range res.Events {
+		if ev.Kind == store.OperationRunWaiting {
+			require.NoError(t, json.Unmarshal(ev.Payload, &waiting))
+			break
+		}
+	}
+	require.Equal(t, "waiting", waiting["status"])
+	require.Equal(t, "needs-human", waiting["stop_reason"])
+	require.Equal(t, "Regression gate was never RED.", waiting["stop_detail"])
+	require.Equal(t, "needs-human", waiting["terminal_state"])
+
+	handle, ok := res.World.Vars[app.OperationRunWorldKey].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "waiting", handle["status"])
+	require.Equal(t, "needs-human", handle["stop_reason"])
+	require.Equal(t, "Regression gate was never RED.", handle["stop_detail"])
+
+	history := append([]store.Event{}, res.Events...)
+	replayed, err := store.BuildJourney(def, "start", world.New(), history)
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("needs-human"), replayed.State)
+	requireOperationRunStatus(t, replayed.World, "waiting")
+}
+
 func TestOperationRunCompletesOnLaterTerminalTurn(t *testing.T) {
 	def := &app.AppDef{
 		App:  app.AppMeta{ID: "operation-run-later-terminal"},
