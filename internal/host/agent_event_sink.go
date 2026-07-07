@@ -624,6 +624,19 @@ type storeAgentNotice struct {
 // agent.stream so existing timeline surfaces show the notice without a new
 // trace vocabulary.
 func appendAgentNoticeEvent(ctx context.Context, ts time.Time, notice storeAgentNotice) {
+	if sink := StreamSinkFrom(ctx); sink != nil && notice.Text != "" {
+		sink.OnStreamEvent(ctx, StreamEvent{
+			Type:     notice.Type,
+			Subtype:  notice.Subtype,
+			Preview:  onelinePreview(notice.Text, 120),
+			Text:     notice.Text,
+			Backend:  notice.Backend,
+			Provider: notice.Provider,
+			Model:    notice.Model,
+			Effort:   notice.Effort,
+			Error:    notice.Error,
+		})
+	}
 	sink := EventSinkFromAgentCtx(ctx)
 	if sink == nil || notice.Text == "" {
 		return

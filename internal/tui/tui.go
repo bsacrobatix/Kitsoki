@@ -3583,6 +3583,12 @@ func (m RootModel) handleMetaStreamEvent(msg MetaStreamMsg) RootModel {
 			m = m.flushPendingThought()
 			m.transcript.AppendMetaSystemNotice("(retrying claude request…)")
 		}
+	case "ladder_attempt", "ladder_fallback", "ladder_success", "ladder_exhausted", "ladder_stop":
+		// Harness-owned provenance: distinguish provider ladder movement from
+		// raw provider output so operators can see when Kitsoki is trying,
+		// abandoning, or accepting a rung.
+		m = m.flushPendingThought()
+		m.transcript.AppendMetaSystemNotice(ev.Text)
 	case "user":
 		// tool_result: noisy content we don't render, but its arrival
 		// proves any deferred thought preceded more work — flush it.

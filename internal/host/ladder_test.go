@@ -440,7 +440,9 @@ func TestRunLadder_InfraFailureEmitsFallbackNotice(t *testing.T) {
 	t.Parallel()
 	cfg := twoModelConfig(t)
 	sink := &captureSink{}
+	stream := &recordingStreamSink{}
 	ctx := host.WithAgentEventSink(context.Background(), sink)
+	ctx = host.WithStreamSink(ctx, stream)
 	ctx = host.WithAgentCallCtx(ctx, host.AgentCallCtx{
 		SessionID: app.SessionID("sess-ladder"),
 		Turn:      app.TurnNumber(7),
@@ -484,6 +486,25 @@ func TestRunLadder_InfraFailureEmitsFallbackNotice(t *testing.T) {
 	if text, _ := notice["text"].(string); text == "" || !strings.Contains(text, "429 rate limited") {
 		t.Fatalf("notice text should include the visible 429 reason, got %q", text)
 	}
+
+	gotTypes := make([]string, 0, len(stream.events))
+	for _, ev := range stream.events {
+		gotTypes = append(gotTypes, ev.Type)
+	}
+	wantTypes := []string{"ladder_attempt", "ladder_fallback", "ladder_attempt", "ladder_success"}
+	if fmt.Sprint(gotTypes) != fmt.Sprint(wantTypes) {
+		t.Fatalf("live stream ladder events = %v, want %v", gotTypes, wantTypes)
+	}
+	if stream.events[0].Provider != "cheap" || stream.events[0].Backend != "claude" || stream.events[0].Model != "modelA" {
+		t.Fatalf("attempt event should identify the first provider/backend/model, got %+v", stream.events[0])
+	}
+	if !strings.Contains(stream.events[1].Text, "Kitsoki harness: cheap / modelA via claude") ||
+		!strings.Contains(stream.events[1].Text, "429 rate limited") {
+		t.Fatalf("fallback event should carry source and error text, got %q", stream.events[1].Text)
+	}
+	if !strings.Contains(stream.events[2].Text, "strong / modelB via claude") {
+		t.Fatalf("second attempt should name the next rung, got %q", stream.events[2].Text)
+	}
 }
 
 // TestHarnessLadderFromContext_NoLadderIsNoOp verifies the ctx plumbing is a
@@ -503,4 +524,12 @@ func TestHarnessLadderFromContext_NoLadderIsNoOp(t *testing.T) {
 	if _, ok := host.LadderRungFromContext(ctx); ok {
 		t.Fatal("expected no rung installed on a bare context")
 	}
+}
+
+type recordingStreamSink struct {
+	events []host.StreamEvent
+}
+
+func (s *recordingStreamSink) OnStreamEvent(_ context.Context, ev host.StreamEvent) {
+	s.events = append(s.events, ev)
 }
