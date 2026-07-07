@@ -20,6 +20,14 @@
            waiting (dot). Both can show at once — distinct modes, distinct
            states. -->
       <span
+        v-if="bugUnavailable"
+        class="meta-launcher__status meta-launcher__status--warn"
+        data-testid="meta-status-bug-unavailable"
+        :title="bugUnavailableMessage"
+        aria-label="bug filing unavailable"
+        >!</span
+      >
+      <span
         v-if="meta.anyBusy"
         class="meta-launcher__status meta-launcher__status--busy"
         data-testid="meta-status-busy"
@@ -83,16 +91,29 @@
 
       <div class="meta-launcher__divider" role="separator"></div>
 
+      <div
+        v-if="bugUnavailable"
+        class="meta-launcher__warning"
+        data-testid="bug-report-warning"
+        role="status"
+      >
+        <span class="meta-launcher__warning-title">Bug filing unavailable</span>
+        <span class="meta-launcher__warning-body">
+          {{ bugUnavailableMessage }}
+        </span>
+      </div>
+
       <button
         class="meta-launcher__item"
+        :class="{ 'meta-launcher__item--disabled': bugUnavailable }"
         data-testid="meta-report-bug"
-        title="File a bug — attaches a scrubbed network trace + session replay"
-        :disabled="bugReport.status === 'capturing'"
+        :title="bugReportTitle"
+        :disabled="bugReportBlocked"
         @click="reportBug"
       >
         <span class="meta-launcher__item-label">Report bug</span>
         <span class="meta-launcher__item-hint">
-          Review a trace + session replay, then file an issue
+          {{ bugReportHint }}
         </span>
       </button>
     </div>
@@ -110,7 +131,8 @@
         data-testid="bug-point-menu-report"
         type="button"
         role="menuitem"
-        :disabled="bugReport.status === 'capturing'"
+        :disabled="bugReportBlocked"
+        :title="bugReportTitle"
         @click="reportBugFromPointMenu"
       >
         <span class="meta-context-menu__label">Report bug here</span>
@@ -127,11 +149,12 @@
         Capturing trace + session replay…
       </span>
       <template v-else-if="bugReport.status === 'filed' && bugReport.filed">
-        <span data-testid="bug-toast-path">Filed: {{ bugReport.filed.path }}</span>
+        <span data-testid="bug-toast-path">Filed: {{ filedTarget }}</span>
         <button
+          v-if="filedTarget"
           class="meta-launcher__toast-link"
           data-testid="bug-toast-open"
-          title="Open the issue path"
+          title="Open the filed bug"
           @click="openFiled"
         >
           [open]
@@ -167,6 +190,7 @@ import { useMetaStore } from "../../stores/meta.js";
 import { useBugReportStore } from "../../stores/bugReport.js";
 import { useWorkflowStore } from "../../stores/workflow.js";
 import type { BugPlacementContext } from "../../stores/bugReport.js";
+import type { BugStatusResult } from "../../data/live-source.js";
 
 const props = withDefaults(
   defineProps<{
@@ -218,6 +242,7 @@ const pointMenu = ref<{
   menuX: number;
   menuY: number;
 } | null>(null);
+const bugStatus = ref<BugStatusResult | null>(null);
 const placement = computed(() => props.placement);
 const visible = computed(() => {
   if (isSnapshot) return false;
@@ -231,6 +256,40 @@ const sessionId = computed(() => {
   const p = route.params.sessionId;
   return typeof p === "string" ? p : "";
 });
+const bugUnavailable = computed(() => bugStatus.value?.can_file === false);
+const bugUnavailableMessage = computed(
+  () =>
+    bugStatus.value?.warning ??
+    "Report bug cannot file right now. Filing bugs is critical; fix GitHub auth and reload."
+);
+const bugReportBlocked = computed(
+  () => bugReport.status === "capturing" || bugUnavailable.value
+);
+const bugReportTitle = computed(() => {
+  if (bugUnavailable.value) {
+    return `${bugUnavailableMessage.value} ${bugStatus.value?.setup_hint ?? ""}`.trim();
+  }
+  return "File a bug — attaches a scrubbed network trace + session replay";
+});
+const bugReportHint = computed(() =>
+  bugUnavailable.value
+    ? "Fix GitHub auth; filing bugs is critical"
+    : "Review a trace + session replay, then file an issue"
+);
+const filedTarget = computed(
+  () => bugReport.filed?.url || bugReport.filed?.path || ""
+);
+
+async function refreshBugStatus(): Promise<void> {
+  if (isSnapshot) return;
+  try {
+    bugStatus.value = await source.bugStatus();
+  } catch {
+    // Older or mocked servers may not expose status yet. Preserve the existing
+    // report-bug behavior instead of failing the whole Meta launcher.
+    bugStatus.value = null;
+  }
+}
 
 function isEnabled(key: string): boolean {
   return meta.modes.some((m) => m.key === key);
@@ -267,6 +326,7 @@ async function reportBug(): Promise<void> {
   if (bugReport.status === "capturing") return;
   dropdownOpen.value = false;
   pointMenu.value = null;
+  if (blockUnavailableBugReport()) return;
   await bugReport.trigger({
     source,
     defaultTitle: "Bug report",
@@ -279,6 +339,7 @@ async function reportBugAtContext(ctx?: BugPlacementContext): Promise<void> {
   if (!ctx || bugReport.status === "capturing") return;
   pointMenu.value = null;
   dropdownOpen.value = false;
+  if (blockUnavailableBugReport()) return;
   await bugReport.trigger({
     source,
     defaultTitle: "Bug report at clicked location",
@@ -320,6 +381,13 @@ function openWorkflow(): void {
   workflow.openPanel();
 }
 
+function blockUnavailableBugReport(): boolean {
+  if (!bugUnavailable.value) return false;
+  bugReport.error = bugUnavailableMessage.value;
+  bugReport.status = "error";
+  return true;
+}
+
 // The toast is for capture-in-progress and the post-submit result. While the
 // operator reviews (reviewing/submitting) the modal owns the surface.
 const showToast = computed(
@@ -330,9 +398,8 @@ const showToast = computed(
 );
 
 function openFiled(): void {
-  const path = bugReport.filed?.path;
-  if (!path) return;
-  window.open(path, "_blank");
+  if (!filedTarget.value) return;
+  window.open(filedTarget.value, "_blank");
 }
 
 function shouldIgnorePointReport(target: HTMLElement): boolean {
@@ -423,6 +490,7 @@ function onDocClick(e: MouseEvent): void {
   pointMenu.value = null;
 }
 onMounted(() => {
+  void refreshBugStatus();
   document.addEventListener("click", onDocClick);
   document.addEventListener("click", reportBugAt, true);
   document.addEventListener("contextmenu", openPointMenu, true);
@@ -515,6 +583,11 @@ onUnmounted(() => {
   font-size: 0.55rem;
   animation: meta-pulse 1.6s ease-in-out infinite;
 }
+.meta-launcher__status--warn {
+  color: var(--k-warning, #f59e0b);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
 @keyframes meta-spin {
   to {
     transform: rotate(360deg);
@@ -588,7 +661,7 @@ onUnmounted(() => {
 
 .meta-context-menu__item:disabled {
   opacity: 0.55;
-  cursor: progress;
+  cursor: not-allowed;
 }
 
 .meta-context-menu__label {
@@ -638,12 +711,31 @@ onUnmounted(() => {
 }
 .meta-launcher__item:disabled {
   opacity: 0.5;
-  cursor: progress;
+  cursor: not-allowed;
 }
 
 .meta-launcher__divider {
   height: 1px;
   background: var(--k-border, #1e293b);
+}
+
+.meta-launcher__warning {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--k-border-subtle, #16202e);
+  background: color-mix(in srgb, var(--k-warning, #f59e0b) 12%, transparent);
+}
+.meta-launcher__warning-title {
+  color: var(--k-warning, #f59e0b);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.meta-launcher__warning-body {
+  color: var(--k-fg, #cbd5e1);
+  font-size: 0.68rem;
+  line-height: 1.35;
 }
 
 .meta-launcher__toast {

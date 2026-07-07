@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -331,6 +332,45 @@ func TestBugReport_NoScreenshot_SkipsFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(artifactsDir, "har.json")); err != nil {
 		t.Fatalf("har.json should still exist: %v", err)
+	}
+}
+
+func TestBugStatusLocalModeCanFile(t *testing.T) {
+	s := &Server{}
+
+	res, rerr := s.bugStatus(context.Background())
+	if rerr != nil {
+		t.Fatalf("bugStatus error: %+v", rerr)
+	}
+	m := res.(map[string]any)
+	if m["mode"] != "local" || m["can_file"] != true {
+		t.Fatalf("unexpected local status: %#v", m)
+	}
+}
+
+func TestBugStatusGitHubMissingAuthWarns(t *testing.T) {
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("HOME", t.TempDir())
+	restoreGHCLI := host.SetGHCLITokenForTest(func(context.Context) string { return "" })
+	defer restoreGHCLI()
+
+	s := &Server{ticketRepo: "o/r"}
+	res, rerr := s.bugStatus(context.Background())
+	if rerr != nil {
+		t.Fatalf("bugStatus error: %+v", rerr)
+	}
+	m := res.(map[string]any)
+	if m["mode"] != "github" || m["repo"] != "o/r" || m["can_file"] != false {
+		t.Fatalf("unexpected github status: %#v", m)
+	}
+	for _, want := range []string{"Report bug cannot file", "Filing bugs is critical", "kitsoki gh-agent login"} {
+		if !strings.Contains(m["warning"].(string), want) {
+			t.Fatalf("warning missing %q: %#v", want, m)
+		}
+	}
+	if !strings.Contains(m["setup_hint"].(string), "GitHub auth is not configured") {
+		t.Fatalf("setup hint missing auth guidance: %#v", m)
 	}
 }
 

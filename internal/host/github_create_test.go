@@ -170,6 +170,31 @@ func TestGitHubTicket_CreateMissingAuthExplainsSetup(t *testing.T) {
 	}
 }
 
+func TestGitHubWriteAuthStatusReportsMissingAndConfigured(t *testing.T) {
+	unsetEnvForTest(t, "GH_TOKEN")
+	unsetEnvForTest(t, "GITHUB_TOKEN")
+	t.Setenv("HOME", t.TempDir())
+	restoreGHCLI := host.SetGHCLITokenForTest(func(context.Context) string { return "" })
+	defer restoreGHCLI()
+
+	missing := host.GitHubWriteAuthStatus(context.Background())
+	if missing.Configured {
+		t.Fatal("expected missing GitHub auth")
+	}
+	if !strings.Contains(missing.SetupHint, "GitHub auth is not configured") {
+		t.Fatalf("missing setup hint: %#v", missing)
+	}
+
+	t.Setenv("GH_TOKEN", "test-token")
+	configured := host.GitHubWriteAuthStatus(context.Background())
+	if !configured.Configured {
+		t.Fatal("expected configured GitHub auth from GH_TOKEN")
+	}
+	if configured.SetupHint != "" {
+		t.Fatalf("configured status should not carry setup hint: %#v", configured)
+	}
+}
+
 // TestGitHubTicket_Create_LabelPermissionDegrades proves a fork contributor
 // without triage still files the issue (unlabelled) with a warning, rather than
 // failing the create.

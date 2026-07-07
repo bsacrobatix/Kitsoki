@@ -323,9 +323,9 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			// instance with no file on disk. See docs/stories/imports.md
 			// "The blank root that grows".
 			var (
-				def      *app.AppDef
-				appPath  string
-				reloader func() (*app.AppDef, error)
+				def                  *app.AppDef
+				appPath              string
+				reloader             func() (*app.AppDef, error)
 				projectStartupNotice string
 			)
 			if len(args) == 1 {
@@ -419,6 +419,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			orch := rt.Orch
 
 			ctx := context.Background()
+			bugFilingNotice := bugFilingAuthStartupNotice(ctx, ticketRepo)
 
 			// ── Flag validation ────────────────────────────────────────────
 			if continueID != "" && !continueFlag {
@@ -584,6 +585,9 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				}, tuiOptions...)
 				if projectStartupNotice != "" {
 					tuiOptions = append(tuiOptions, tui.WithStartupNotice(projectStartupNotice))
+				}
+				if bugFilingNotice != "" {
+					tuiOptions = append(tuiOptions, tui.WithStartupNotice(bugFilingNotice))
 				}
 				if tuiMetaTracePath != "" {
 					tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(tuiMetaTracePath))
@@ -759,6 +763,9 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			if projectStartupNotice != "" {
 				tuiOptions = append(tuiOptions, tui.WithStartupNotice(projectStartupNotice))
 			}
+			if bugFilingNotice != "" {
+				tuiOptions = append(tuiOptions, tui.WithStartupNotice(bugFilingNotice))
+			}
 			if freshMetaTracePath != "" {
 				tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(freshMetaTracePath))
 			}
@@ -899,6 +906,17 @@ func firstRunProviderHint(hasClaude, hasCred bool) string {
 		"  \u2022 set ANTHROPIC_API_KEY (direct Anthropic SDK), or\n" +
 		"  \u2022 select a harness profile in .kitsoki.local.yaml (see docs/architecture/harness-profiles.md).\n" +
 		"Without one, only --harness replay (needs --recording) and deterministic flow tests will run.\n"
+}
+
+func bugFilingAuthStartupNotice(ctx context.Context, ticketRepo string) string {
+	repo := strings.TrimSpace(ticketRepo)
+	if repo == "" {
+		return ""
+	}
+	if host.GitHubWriteAuthStatus(ctx).Configured {
+		return ""
+	}
+	return fmt.Sprintf("(warning: GitHub bug filing is unavailable for %s because auth is missing. Filing bugs is critical; run `kitsoki gh-agent login` or set GH_TOKEN/GITHUB_TOKEN.)", repo)
 }
 
 // resolveAgentBackend resolves the agent backend selector with precedence
