@@ -180,6 +180,7 @@ imports:
       judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
       ticket_repo:                "{{ world.ticket_repo }}"
       bugfix_destination:         "{{ world.bugfix_destination }}"
+      design_durable_path:        "{{ world.design_durable_path }}"
 
 # Instance-level world. Provider-pointing keys plus judge-mode
 # defaults; the operator can override any of them at session start
@@ -209,6 +210,10 @@ world:
   # (main here) after the bugfix RED/GREEN gate and shared ship-it tail pass.
   # Operators can still choose open-pr or leave-worktree from the dev-story UI.
   bugfix_destination: { type: string, default: "local-merge" }
+
+  # Proposal/idea work must not write under docs/proposals in the protected
+  # primary checkout. Keep scratch + published design docs in local context.
+  design_durable_path: { type: string, default: ".context/designs" }
 
   # Judge polymorphism. Defaults: supervised + 0.8 confidence floor.
   # Flip judge_mode to `llm_then_human` for an unattended run.

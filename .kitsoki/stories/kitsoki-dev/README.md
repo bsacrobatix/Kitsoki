@@ -95,6 +95,7 @@ canned closed-loop tests:
 | Fixture                                  | What it proves                                                                  |
 |------------------------------------------|---------------------------------------------------------------------------------|
 | `flows/dogfood_smoke.yaml`               | the app loads; `iface.ticket.list_mine` resolves; navigation lifts work          |
+| `flows/idea_uses_context_workspace.yaml` | the idea/proposal room writes workspaces under `.context/designs`, not protected `docs/proposals/.workspace` |
 | `flows/pickup_self_bug_supervised.yaml`  | 18-turn supervised walk: ticket pick → bf 8-room → @exit:done → pr → @exit:merged → main |
 | `flows/pickup_story_bug_supervised.yaml` | same walk against `stories/oregon-trail/issues/bugs/<id>.md`; proves multi-glob coverage |
 | `flows/pickup_autonomous_then_bail.yaml` | `llm_then_human` auto-fires 2 checkpoints → operator flips mode → state HOLDS → manual accept resumes |
