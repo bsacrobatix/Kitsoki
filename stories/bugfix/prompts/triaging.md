@@ -27,10 +27,15 @@ The caller must choose exactly one source mode. Do not silently switch modes.
   to reconstruct the report. If `ticket_body` is empty, fall back to
   `ticket_title` and `ticket_url` only; return `UNCLEAR` if those are
   insufficient and say the remote issue body could not be fetched.
+- **freeform** — the bug report is an inline operator complaint, not a filed
+  issue. Use the supplied `ticket_body` below plus `ticket_title`. Do **not**
+  require `issues/bugs/{{ args.ticket_id }}.md` to exist. If the complaint is
+  too vague to map to specific code, return `UNCLEAR` and say what guidance is
+  missing.
 - Any other mode is invalid. Return `UNCLEAR` and cite the invalid mode.
 
-{% if args.ticket_source_mode == "remote" %}
-## Remote ticket body
+{% if args.ticket_source_mode == "remote" || args.ticket_source_mode == "freeform" %}
+## Ticket body
 
 ```markdown
 {{ args.ticket_body }}

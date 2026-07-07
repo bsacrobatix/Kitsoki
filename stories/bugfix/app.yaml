@@ -272,9 +272,9 @@ world:
   ticket_status:    { type: string, default: "" }
   ticket_url:       { type: string, default: "" }
   ticket_repo:      { type: string, default: "" }   # owner/repo for GitHub issue close-out; empty keeps local ticket provider
-  ticket_source_mode: { type: string, default: "local" } # local | remote; triage prompt contract
-  ticket_source_ref:  { type: string, default: "" }      # local path or remote issue URL/ref for triage evidence
-  ticket_body:        { type: string, default: "" }      # remote issue body or pre-read local issue body
+  ticket_source_mode: { type: string, default: "local" } # local | remote | freeform; triage prompt contract
+  ticket_source_ref:  { type: string, default: "" }      # local path, remote issue URL/ref, or free-form complaint label
+  ticket_body:        { type: string, default: "" }      # remote issue body, pre-read local issue body, or free-form complaint
   thread:           { type: string, default: "" }
   allowed_authors:  { type: string, default: "" }   # CSV — list not yet a first-class scalar type
 
@@ -584,6 +584,22 @@ intents:
     slots:
       ticket_id:    { type: string, required: true }
       ticket_title: { type: string, required: false }
+  # Free-form complaint handoff for standalone/headless bugfix starts where no
+  # filed ticket exists yet. The story synthesizes a session-scoped ticket_id in
+  # idle.on_enter, carries the complaint as ticket_body, and lets the existing
+  # pre-flight triage + reproducer go as far as the evidence allows.
+  work_complaint:
+    description: "Start the bug-fix pipeline from a free-form bug complaint when no filed ticket exists yet."
+    synonyms:
+      - "fix bug {complaint}"
+      - "debug bug {complaint}"
+      - "bug report {complaint}"
+      - "user complaint {complaint}"
+      - "work complaint {complaint}"
+    priority: 88
+    slots:
+      complaint:    { type: string, required: true }
+      ticket_title: { type: string, required: false }
   accept:
     description: "Accept the current room's artifact and advance to the next phase. Posts the artifact to the transport as a side-effect."
     examples: ["continue", "proceed", "accept", "next", "deliver", "approve", "lgtm", "ship it", "ok"]
@@ -707,7 +723,7 @@ intents:
 # lifts these into the parent's bare intent table so an operator can
 # drive the imported pipeline without typing the `bf__` prefix.
 exports:
-  intents: [start, accept, refine, restart_from, jump_to, quick_fix, skip_to_pr, full_pipeline, triage, change_ticket, quit, look, escalate_human]
+  intents: [start, work_complaint, accept, refine, restart_from, jump_to, quick_fix, skip_to_pr, full_pipeline, triage, change_ticket, quit, look, escalate_human]
 
 # Named return points. A parent story (dev-story / kitsoki-dev / cyber-devstory)
 # maps each to one of its own states. Standalone load synthesises
