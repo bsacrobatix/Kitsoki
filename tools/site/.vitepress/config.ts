@@ -72,6 +72,19 @@ export default defineConfig({
   outDir: path.resolve(__dirname, variant === "embedded" ? "dist-embedded" : "dist"),
   cleanUrls: false,
   lang: locales.en.lang,
+  vite: {
+    optimizeDeps: {
+      entries: [
+        ".vitepress/**/*.{ts,js,vue}",
+        "src/**/*.{md,ts,js,vue}",
+        "!.vitepress/cache/**",
+        "!.vitepress/dist/**",
+        "!.vitepress/dist-embedded/**",
+        "!.vitepress/gen/**",
+        "!src/public/**",
+      ],
+    },
+  },
 
   // th/ja are registered in the shared i18n data (locales, below) and their
   // page trees + overlays are kept on disk, but the VitePress locale entries

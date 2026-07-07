@@ -938,24 +938,68 @@ render-all:
 # video degrades to a poster + placeholder, never a build failure.
 SITE_DIR  := tools/site
 SITE_BASE ?= /Kitsoki/
+SITE_ABS  := $(abspath $(SITE_DIR))
+SITE_PARENT_WRITE_DIRS := \
+	$(SITE_ABS) \
+	$(SITE_ABS)/.vitepress \
+	$(SITE_ABS)/src \
+	$(SITE_ABS)/src/public
+SITE_GENERATED_WRITE_DIRS := \
+	$(SITE_ABS)/node_modules \
+	$(SITE_ABS)/.vitepress/gen \
+	$(SITE_ABS)/.vitepress/dist \
+	$(SITE_ABS)/.vitepress/dist-embedded \
+	$(SITE_ABS)/.vitepress/cache \
+	$(SITE_ABS)/src/guide \
+	$(SITE_ABS)/src/public/media \
+	$(SITE_ABS)/src/public/decks
+
+define site_write_guard
+	@set -e; \
+	site_protected=0; relock_parent_paths=""; relock_recursive_paths=""; \
+	unlock_parent() { \
+		p="$$1"; \
+		[ -e "$$p" ] || return 0; \
+		if [ ! -w "$$p" ]; then chmod u+w "$$p" 2>/dev/null || true; relock_parent_paths="$$relock_parent_paths $$p"; site_protected=1; fi; \
+	}; \
+	unlock_recursive() { \
+		p="$$1"; \
+		[ -e "$$p" ] || return 0; \
+		if [ ! -w "$$p" ]; then relock_recursive_paths="$$relock_recursive_paths $$p"; fi; \
+		chmod -R u+w "$$p" 2>/dev/null || true; \
+	}; \
+	restore_site_guard() { \
+		if [ "$$site_protected" = 1 ]; then \
+			for p in $(SITE_GENERATED_WRITE_DIRS); do [ ! -e "$$p" ] || chmod -R a-w "$$p" 2>/dev/null || true; done; \
+		else \
+			for p in $$relock_recursive_paths; do [ ! -e "$$p" ] || chmod -R a-w "$$p" 2>/dev/null || true; done; \
+		fi; \
+		for p in $$relock_parent_paths; do [ ! -e "$$p" ] || chmod a-w "$$p" 2>/dev/null || true; done; \
+	}; \
+	for p in $(SITE_PARENT_WRITE_DIRS); do unlock_parent "$$p"; done; \
+	for p in $(SITE_GENERATED_WRITE_DIRS); do unlock_recursive "$$p"; done; \
+	trap restore_site_guard EXIT INT TERM; \
+	$(1); \
+	restore_site_guard; \
+	trap - EXIT INT TERM
+endef
 
 .PHONY: site site-data site-dev site-clean
 # site-data emits the feature-catalog contract (features-index.json + QA files)
 # into the site's gitignored gen/ dir.
 site-data:
 	$(call runstatus_pnpm_install,--silent)
-	cd $(RUNSTATUS_DIR) && pnpm exec tsx scripts/features/generate.ts --index --out $(CURDIR)/$(SITE_DIR)/.vitepress/gen
+	$(call site_write_guard,cd $(RUNSTATUS_DIR) && pnpm exec tsx scripts/features/generate.ts --index --out $(CURDIR)/$(SITE_DIR)/.vitepress/gen)
 
 site: site-data
-	cd $(SITE_DIR) && pnpm install --frozen-lockfile --silent
-	cd $(SITE_DIR) && SITE_BASE=$(SITE_BASE) pnpm build
+	$(call site_write_guard,cd $(SITE_DIR) && pnpm install --frozen-lockfile --silent && SITE_BASE=$(SITE_BASE) pnpm build)
 	node $(SITE_DIR)/scripts/check-leaks.mjs $(SITE_DIR)/.vitepress/dist
 	@echo "site built -> $(SITE_DIR)/.vitepress/dist"
 
 # site-dev runs the VitePress HMR dev server (docs iterate instantly; media —
 # videos/posters — reflect whatever `make demos` has recorded so far).
 site-dev: site-data
-	cd $(SITE_DIR) && pnpm install --frozen-lockfile --silent && pnpm dev
+	$(call site_write_guard,cd $(SITE_DIR) && pnpm install --frozen-lockfile --silent && pnpm dev)
 
 # site-embed builds the EMBEDDED variant (base /help/, posters only — no MP4s
 # in the binary) and stages it into internal/helpdocs/assets/ so the next
@@ -963,17 +1007,16 @@ site-dev: site-data
 HELPDOCS_ASSETS := internal/helpdocs/assets
 .PHONY: site-embed
 site-embed: site-data
-	cd $(SITE_DIR) && pnpm install --frozen-lockfile --silent
-	cd $(SITE_DIR) && SITE_BASE=/help/ SITE_VARIANT=embedded pnpm build
+	$(call site_write_guard,cd $(SITE_DIR) && pnpm install --frozen-lockfile --silent && SITE_BASE=/help/ SITE_VARIANT=embedded pnpm build)
 	node $(SITE_DIR)/scripts/check-leaks.mjs $(SITE_DIR)/.vitepress/dist-embedded --embedded
 	find $(HELPDOCS_ASSETS) -mindepth 1 ! -name .gitkeep -delete
 	cp -R $(SITE_DIR)/.vitepress/dist-embedded/. $(HELPDOCS_ASSETS)/
 	@echo "help docs staged -> $(HELPDOCS_ASSETS) (next 'make build' embeds them at /help/)"
 
 site-clean:
-	rm -rf $(SITE_DIR)/.vitepress/gen $(SITE_DIR)/.vitepress/dist \
+	$(call site_write_guard,rm -rf $(SITE_DIR)/.vitepress/gen $(SITE_DIR)/.vitepress/dist \
 		$(SITE_DIR)/.vitepress/dist-embedded $(SITE_DIR)/.vitepress/cache \
-		$(SITE_DIR)/src/guide $(SITE_DIR)/src/public/media
+		$(SITE_DIR)/src/guide $(SITE_DIR)/src/public/media $(SITE_DIR)/src/public/decks)
 	find $(HELPDOCS_ASSETS) -mindepth 1 ! -name .gitkeep -delete 2>/dev/null || true
 
 # vscode-package builds the SPA + extension bundle, then packages an installable
