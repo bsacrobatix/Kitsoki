@@ -264,6 +264,11 @@
       "required": ["story", "instance"],
       "properties": {
         "story": { "type": "string", "default": "dev-story", "description": "The root kit story the instance imports (dev-story by default; any installed kit that declares a kit.yaml root: block naming it also qualifies -- see D6 root generalization, .context/kits-implementation-plan.md)." },
+        "story_pack": {
+          "type": "string",
+          "description": "Named first-run story pack selected during onboarding. This records the install-like starter group; it is not a runtime fence.",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
         "enabled_stories": {
           "type": "array",
           "description": "Adoption-scope list for teams starting with a focused subset of the dev-story catalog. This records what to emphasize first; it is not a runtime fence.",
@@ -397,6 +402,20 @@
           "type": "string",
           "contentMediaType": "text/markdown",
           "description": "Why this starter story was selected for the repo."
+        },
+        "story_pack": {
+          "type": "string",
+          "description": "Named starter pack chosen in the first-run menu.",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "story_pack_title": {
+          "type": "string",
+          "description": "Human title for the selected starter pack."
+        },
+        "story_pack_summary": {
+          "type": "string",
+          "contentMediaType": "text/markdown",
+          "description": "Short explanation of the selected starter pack."
         },
         "starter_stories": {
           "type": "array",

@@ -43,6 +43,10 @@
       "required": ["story", "instance"],
       "properties": {
         "story": { "const": "dev-story" },
+        "story_pack": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
         "enabled_stories": {
           "type": "array",
           "items": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },

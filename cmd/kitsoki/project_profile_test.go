@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -100,5 +102,85 @@ func TestProjectProfileValidateEnvelopeReturnsZeroForInvalidProfile(t *testing.T
 	}
 	if len(env.Schema) == 0 {
 		t.Fatalf("expected schema errors: %s", out)
+	}
+}
+
+func TestProjectProfileStoryPacksListSetAndAdd(t *testing.T) {
+	repo := t.TempDir()
+	profileDir := filepath.Join(repo, ".kitsoki")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("mkdir profile dir: %v", err)
+	}
+	profilePath := filepath.Join(profileDir, "project-profile.yaml")
+	initial := []byte(`schema: project-profile/v1
+id: cyber-repo
+title: Cyber Repo
+repo: { root: ".", vcs: git }
+stack: { kind: go }
+kitsoki:
+  story: dev-story
+  story_pack: cyber-repo
+  enabled_stories: [setup, bugfix, pr-refinement, git-ops]
+  instance:
+    id: cyber-repo-dev
+    path: .kitsoki/stories/cyber-repo-dev/app.yaml
+    bindings:
+      ticket: host.local_files.ticket
+      vcs: host.git
+      ci: host.local
+      workspace: host.git_worktree
+      transport: host.append_to_file
+onboarding:
+  story_pack: cyber-repo
+  starter_stories:
+    - id: setup
+      status: enabled
+      summary: setup
+`)
+	if err := os.WriteFile(profilePath, initial, 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	out, err := execRoot(t, "project-profile", "story-packs", "--target", repo, "list")
+	if err != nil {
+		t.Fatalf("story-packs list: %v\n%s", err, out)
+	}
+	for _, want := range []string{"cyber-repo", "core-setup", "enabled_stories: setup, bugfix, pr-refinement, git-ops"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("list output missing %q:\n%s", want, out)
+		}
+	}
+
+	out, err = execRoot(t, "project-profile", "story-packs", "--target", repo, "set", "core")
+	if err != nil {
+		t.Fatalf("story-packs set: %v\n%s", err, out)
+	}
+	body, err := os.ReadFile(profilePath)
+	if err != nil {
+		t.Fatalf("read profile after set: %v", err)
+	}
+	text := string(body)
+	for _, want := range []string{"story_pack: core-setup", "- setup", "- git-ops", "story_pack_title: Core setup"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("profile after set missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "- bugfix") {
+		t.Fatalf("set should replace enabled stories, got:\n%s", text)
+	}
+
+	out, err = execRoot(t, "project-profile", "story-packs", "--target", repo, "add", "review-quality")
+	if err != nil {
+		t.Fatalf("story-packs add: %v\n%s", err, out)
+	}
+	body, err = os.ReadFile(profilePath)
+	if err != nil {
+		t.Fatalf("read profile after add: %v", err)
+	}
+	text = string(body)
+	for _, want := range []string{"story_pack: core-setup", "- bugfix", "- fix-tests", "- code-review", "- docs-review", "- pr-refinement"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("profile after add missing %q:\n%s", want, text)
+		}
 	}
 }

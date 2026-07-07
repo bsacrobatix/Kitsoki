@@ -12,7 +12,12 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from init_discover import github_repo_slug, starter_story_entries  # noqa: E402
+from init_discover import (  # noqa: E402
+    github_repo_slug,
+    normalize_story_pack_id,
+    starter_story_entries,
+    story_pack,
+)
 from init_transcripts import mining_recommendation  # noqa: E402
 
 
@@ -100,12 +105,27 @@ def starter_story_focus(data: dict) -> list[dict]:
     return normalize_starter_stories(data.get("starter_stories"))
 
 
+def selected_story_pack(data: dict) -> dict:
+    pack_id = normalize_story_pack_id(str(data.get("story_pack") or "cyber-repo"))
+    known = story_pack(pack_id)
+    if pack_id == "custom" or known["id"] == pack_id:
+        return known
+    story_ids = starter_story_ids(data)
+    for candidate in ["cyber-repo", "core-setup", "planning-delivery", "review-quality", "full-dev-story"]:
+        if story_ids == [str(item) for item in story_pack(candidate).get("stories", [])]:
+            return story_pack(candidate)
+    return story_pack("custom")
+
+
 def expansion_policy(data: dict) -> str:
     ids = ", ".join(starter_story_ids(data))
+    pack = selected_story_pack(data)
     return (
-        f"Start new teams on this focused set: {ids}. Treat it as an adoption scope, "
-        "not a runtime fence: dev-story remains available, and teams expand by adding "
-        "`kitsoki.enabled_stories` entries plus matching readiness checks/flows once a story is proven here."
+        f"Start new teams on the `{pack['id']}` story pack: {ids}. Treat it as an adoption scope, "
+        "not a runtime fence: dev-story remains available. Use "
+        "`kitsoki project-profile story-packs list` to see packs, "
+        "`kitsoki project-profile story-packs set <pack>` to switch the starter scope, or "
+        "`kitsoki project-profile story-packs add <pack>` to expand it after adding readiness checks/flows."
     )
 
 
@@ -114,6 +134,7 @@ def ensure_draft_profile_defaults(profile: dict, data: dict) -> None:
     if not isinstance(kitsoki, dict):
         kitsoki = {}
         profile["kitsoki"] = kitsoki
+    kitsoki.setdefault("story_pack", selected_story_pack(data)["id"])
     kitsoki.setdefault("enabled_stories", starter_story_ids(data))
 
     dev_story_profile = profile.setdefault("dev_story_profile", {})
@@ -527,6 +548,7 @@ def mining_profile_yaml(data: dict) -> str:
 def onboarding_profile(data: dict) -> dict:
     kind = stack_kind(data)
     story_ids = starter_story_ids(data)
+    pack = selected_story_pack(data)
     patterns = [
         {
             "id": "selected-starter",
@@ -537,8 +559,8 @@ def onboarding_profile(data: dict) -> dict:
         {
             "id": "starter-story-focus",
             "source": "operator-or-default-scope",
-            "evidence": "Starter story focus: " + ", ".join(f"`{item}`" for item in story_ids) + ".",
-            "recommendation": "Start team adoption on the focused stories, then expand by editing `kitsoki.enabled_stories` after adding readiness evidence.",
+            "evidence": f"Selected story pack `{pack['id']}`: " + ", ".join(f"`{item}`" for item in story_ids) + ".",
+            "recommendation": "Start team adoption on this pack, then expand with `kitsoki project-profile story-packs add <pack>` after adding readiness evidence.",
         }
     ]
     managers = package_managers(data, kind)
@@ -604,7 +626,7 @@ def onboarding_profile(data: dict) -> dict:
     customizations.append({
         "id": "starter-story-focus",
         "status": "applied",
-        "summary": "Initial project adoption is scoped to `" + "`, `".join(story_ids) + "` unless the team edits the profile.",
+        "summary": f"Initial project adoption is scoped to the `{pack['id']}` pack unless the team expands it.",
         "evidence": ", ".join(story_ids),
     })
     if mining_seed_enabled(data):
@@ -619,6 +641,9 @@ def onboarding_profile(data: dict) -> dict:
         "base_story": "dev-story",
         "base_story_title": "Dev-story project workflow",
         "base_story_reason": "Default starter for normal software repositories. This profile intentionally narrows first adoption to the enabled story list, then lets the team expand from the same dev-story root.",
+        "story_pack": pack["id"],
+        "story_pack_title": pack["title"],
+        "story_pack_summary": pack["summary"],
         "starter_stories": starter_story_focus(data),
         "expansion_policy": expansion_policy(data),
         "repo_patterns": patterns,
@@ -847,6 +872,7 @@ tracker:
 
 kitsoki:
   story: dev-story
+  story_pack: {q(selected_story_pack(data)["id"])}
   enabled_stories:
 {yaml_dump(starter_story_ids(data), 4)}
   instance:
@@ -1055,6 +1081,7 @@ rules:
 
 kitsoki:
   story: dev-story
+  story_pack: {q(selected_story_pack(data)["id"])}
   enabled_stories:
 {yaml_dump(starter_story_ids(data), 4)}
   instance:
@@ -1661,6 +1688,7 @@ def readme(data: dict, profile_path: str) -> str:
     title = data["project_title"]
     story_id = f"{data['project_id']}-dev"
     docs = dev_story_docs_profile(data)
+    pack = selected_story_pack(data)
     starter_lines = "\n".join(
         f"- `{item['id']}` ({item['source_story']}): {item['summary']}"
         for item in starter_story_focus(data)
@@ -1722,15 +1750,20 @@ Project profile: `{Path(profile_path).relative_to(Path(data["target_path"]))}`
 Readiness verifier: `.kitsoki/check-readiness.py`
 Session mining promotion helper: `.kitsoki/promote-session-mining.py`
 
-Starter story focus:
+Starter story pack: `{pack["id"]}` - {pack["title"]}
 
 {starter_lines}
 
 This focus is recorded in `kitsoki.enabled_stories` and
 `onboarding.starter_stories` inside `.kitsoki/project-profile.yaml`. It is an
 adoption scope, not a runtime fence: the shared dev-story root remains
-available, and the team can expand by adding story ids there after adding
-matching readiness checks or project-local flow coverage.
+available. Expand it after adding matching readiness checks or project-local
+flow coverage:
+
+```sh
+kitsoki project-profile story-packs list
+kitsoki project-profile story-packs add <pack>
+```
 
 Generated PRDs publish under `{docs["publish_durable_path"]}` and design drafts
 publish under `{docs["design_durable_path"]}`. Update
@@ -1796,6 +1829,7 @@ def main() -> int:
         "conventions": sys.argv[8],
         "tracker": sys.argv[9] if len(sys.argv) > 9 else "none",
         "starter_stories": starter_story_entries(),
+        "story_pack": "cyber-repo",
     }
     # Validate + enrich the target BEFORE draft-profile defaulting so the
     # detected repo shape (remote → ticket_repo, toolchain files) seeds the
@@ -1823,13 +1857,20 @@ def main() -> int:
         data["mining_recommendation"] = json.loads(sys.argv[11])
     if len(sys.argv) > 12 and sys.argv[12].strip():
         data["starter_stories"] = normalize_starter_stories(json.loads(sys.argv[12]))
+        data["story_pack"] = "custom"
+    if len(sys.argv) > 13 and sys.argv[13].strip():
+        data["story_pack"] = normalize_story_pack_id(sys.argv[13])
     if draft_profile is not None and "mining" not in draft_profile:
         draft_profile["mining"] = data.get("mining_recommendation") or mining_recommendation(Path(data["target_path"]))
     if isinstance(draft_profile, dict):
         kitsoki = draft_profile.get("kitsoki")
+        if isinstance(kitsoki, dict) and isinstance(kitsoki.get("story_pack"), str):
+            data["story_pack"] = normalize_story_pack_id(kitsoki["story_pack"])
         if isinstance(kitsoki, dict) and isinstance(kitsoki.get("enabled_stories"), list):
             data["starter_stories"] = normalize_starter_stories(kitsoki["enabled_stories"])
         onboarding = draft_profile.get("onboarding")
+        if isinstance(onboarding, dict) and isinstance(onboarding.get("story_pack"), str):
+            data["story_pack"] = normalize_story_pack_id(onboarding["story_pack"])
         if isinstance(onboarding, dict) and isinstance(onboarding.get("starter_stories"), list):
             data["starter_stories"] = normalize_starter_stories(onboarding["starter_stories"])
         dev_story_profile = draft_profile.get("dev_story_profile")

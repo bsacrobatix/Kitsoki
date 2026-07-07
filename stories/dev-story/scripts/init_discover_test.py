@@ -58,6 +58,8 @@ check("go dev (none)", prof["dev_command"], "")
 check("non-git vcs", prof["repo_vcs"], "none")
 check("non-git branch", prof["repo_default_branch"], "")
 check("non-git remote", prof["repo_remote"], "")
+check("go story pack", prof["story_pack"], "cyber-repo")
+check("go story pack title", prof["story_pack_title"], "Cyber repo starter")
 
 # 2. Go repo WITH a Makefile → make targets win over the go defaults.
 go_make = _mkrepo({"go.mod": "module acme\ngo 1.22\n", "Makefile": "build:\n\t:\ntest:\n\t:\n"})
@@ -82,12 +84,17 @@ focus = mod.parse_story_focus(f"onboard {other} --stories pr-refinement,bugfixin
 check("story focus explicit", [item["id"] for item in focus], ["pr-refinement", "bugfix", "setup", "git-ops"])
 default_focus = mod.parse_story_focus("")
 check("story focus default", [item["id"] for item in default_focus], ["setup", "bugfix", "pr-refinement", "git-ops"])
+check("story pack default", mod.parse_story_pack(""), "cyber-repo")
+check("story pack alias", mod.parse_story_pack("onboard . --pack core"), "core-setup")
+pack_focus = mod.parse_story_focus("onboard . --pack core")
+check("story pack focus", [item["id"] for item in pack_focus], ["setup", "git-ops"])
 
 # 6. Invalid targets are not treated as generic projects.
 missing = base / "does-not-exist"
 prof = mod.discover(missing)
 check("missing target id", prof["project_id"], "")
 check("missing target error", prof["error"], "target path does not exist")
+check("missing target story pack", prof["story_pack"], "cyber-repo")
 file_target = base / "README.md"
 file_target.write_text("# not a directory\n", encoding="utf-8")
 prof = mod.discover(file_target)
