@@ -78,6 +78,10 @@ check("empty target fallback", fallback, base.resolve())
 # 5. Natural-language onboard request still extracts its path.
 nl = mod.parse_target(f"onboard {other}", "", str(base))
 check("onboard <path>", nl, other.resolve())
+focus = mod.parse_story_focus(f"onboard {other} --stories pr-refinement,bugfixing,setup,gitops")
+check("story focus explicit", [item["id"] for item in focus], ["pr-refinement", "bugfix", "setup", "git-ops"])
+default_focus = mod.parse_story_focus("")
+check("story focus default", [item["id"] for item in default_focus], ["setup", "bugfix", "pr-refinement", "git-ops"])
 
 # 6. Invalid targets are not treated as generic projects.
 missing = base / "does-not-exist"

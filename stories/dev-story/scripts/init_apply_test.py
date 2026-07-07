@@ -95,6 +95,7 @@ def run_apply_with(
     draft: dict | None = None,
     mining: dict | None = None,
     tracker: str = "none",
+    starter: list | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["KITSOKI_BIN"] = str(validator)
@@ -117,6 +118,12 @@ def run_apply_with(
         if draft is None:
             args.append("")
         args.append(json.dumps(mining))
+    if starter is not None:
+        if draft is None:
+            args.append("")
+        if mining is None:
+            args.append("")
+        args.append(json.dumps(starter))
     return subprocess.run(
         args,
         check=False,
@@ -190,9 +197,17 @@ if profile_path.exists():
     check("valid setup gates build", "command: \"go build ./...\"" in profile_text)
     check("valid setup gates tests", "command: \"go test ./...\"" in profile_text)
     check("valid onboarding base story", "base_story: \"dev-story\"" in profile_text)
+    check("valid enabled stories present", "enabled_stories:" in profile_text)
+    check("valid enabled setup", "- \"setup\"" in profile_text)
+    check("valid enabled bugfix", "- \"bugfix\"" in profile_text)
+    check("valid enabled pr-refinement", "- \"pr-refinement\"" in profile_text)
+    check("valid enabled git-ops", "- \"git-ops\"" in profile_text)
+    check("valid onboarding starter stories", "starter_stories:" in profile_text)
+    check("valid onboarding expansion policy", "expansion_policy:" in profile_text)
     check("valid onboarding repo patterns", "repo_patterns:" in profile_text)
     check("valid onboarding customizations", "story_customizations:" in profile_text)
     check("valid onboarding toolchain customization", "id: \"toolchain-gates\"" in profile_text)
+    check("valid starter focus customization", "id: \"starter-story-focus\"" in profile_text)
     check("valid rules files", "rules_files:\n    - \"AGENTS.md\"" in profile_text)
     check("valid repo rules evidence", "id: \"repo-rules\"" in profile_text)
 app_path = repo / ".kitsoki" / "stories" / "acme-dev" / "app.yaml"
@@ -206,6 +221,8 @@ if readme_path.exists():
     readme_text = readme_path.read_text(encoding="utf-8")
     check("valid readme no arg run", "kitsoki run\n```" in readme_text)
     check("valid readme explicit wrapper optional", "Use the materialized wrapper explicitly only after editing it" in readme_text)
+    check("valid readme starter focus", "Starter story focus:" in readme_text)
+    check("valid readme git-ops", "`git-ops`" in readme_text)
     check("valid readme readiness command", "python3 .kitsoki/check-readiness.py --json" in readme_text)
     check("valid readme mining promote command", "python3 .kitsoki/promote-session-mining.py --dry-run" in readme_text)
 readiness_path = repo / ".kitsoki" / "check-readiness.py"
@@ -423,7 +440,30 @@ if profile_path.exists():
     check("draft bugfix build", "build_cmd: \"go build ./...\"" in profile_text)
     check("draft bugfix test", "test_cmd: \"go test ./...\"" in profile_text)
     check("draft onboarding defaults injected", "base_story: \"dev-story\"" in profile_text)
+    check("draft enabled stories injected", "enabled_stories:" in profile_text)
+    check("draft starter stories injected", "starter_stories:" in profile_text)
     check("draft onboarding customizations injected", "story_customizations:" in profile_text)
+
+# 8b. Explicit starter-story focus is preserved and normalized by apply.
+repo = mkrepo()
+proc = run_apply_with(
+    repo,
+    fake_kitsoki(True),
+    "acme",
+    "Acme",
+    "go project",
+    "",
+    "go test ./...",
+    "go build ./...",
+    starter=[{"id": "bugfixing"}, {"id": "gitops"}],
+)
+check("custom starter exit", proc.returncode == 0, proc.stdout + proc.stderr)
+profile_path = repo / ".kitsoki" / "project-profile.yaml"
+if profile_path.exists():
+    profile_text = profile_path.read_text(encoding="utf-8")
+    check("custom starter bugfix", "- \"bugfix\"" in profile_text)
+    check("custom starter gitops", "- \"git-ops\"" in profile_text)
+    check("custom starter omits setup", "- \"setup\"" not in profile_text)
 
 # 9. GitHub tracker ⇒ the external ticket-repo passthrough: the generated
 # instance binds iface.ticket → host.gh.ticket pinned on the slug derived from

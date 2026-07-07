@@ -264,6 +264,12 @@
       "required": ["story", "instance"],
       "properties": {
         "story": { "type": "string", "default": "dev-story", "description": "The root kit story the instance imports (dev-story by default; any installed kit that declares a kit.yaml root: block naming it also qualifies -- see D6 root generalization, .context/kits-implementation-plan.md)." },
+        "enabled_stories": {
+          "type": "array",
+          "description": "Adoption-scope list for teams starting with a focused subset of the dev-story catalog. This records what to emphasize first; it is not a runtime fence.",
+          "items": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "uniqueItems": true
+        },
         "instance": {
           "type": "object",
           "additionalProperties": false,
@@ -391,6 +397,28 @@
           "type": "string",
           "contentMediaType": "text/markdown",
           "description": "Why this starter story was selected for the repo."
+        },
+        "starter_stories": {
+          "type": "array",
+          "description": "Focused story set the team should start with before expanding to more of dev-story.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "status", "summary"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+              "title": { "type": "string" },
+              "source_story": { "type": "string" },
+              "status": { "enum": ["enabled", "available", "deferred"] },
+              "summary": { "type": "string", "contentMediaType": "text/markdown" },
+              "expansion": { "type": "string", "contentMediaType": "text/markdown" }
+            }
+          }
+        },
+        "expansion_policy": {
+          "type": "string",
+          "contentMediaType": "text/markdown",
+          "description": "How to expand from the focused starter story set."
         },
         "repo_patterns": {
           "type": "array",

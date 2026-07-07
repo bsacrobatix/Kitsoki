@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from init_discover import github_repo_slug  # noqa: E402
+from init_discover import github_repo_slug, starter_story_entries  # noqa: E402
 from init_transcripts import mining_recommendation  # noqa: E402
 
 
@@ -76,7 +76,46 @@ def profile_yaml_from_draft(profile: dict) -> str:
     return yaml_dump(profile).rstrip() + "\n"
 
 
+def normalize_starter_stories(value) -> list[dict]:
+    if not isinstance(value, list):
+        return starter_story_entries()
+    ids: list[str] = []
+    for item in value:
+        if isinstance(item, dict):
+            raw = item.get("id") or item.get("source_story") or item.get("story")
+        else:
+            raw = item
+        if raw is None:
+            continue
+        ids.append(str(raw))
+    return starter_story_entries(ids)
+
+
+def starter_story_ids(data: dict) -> list[str]:
+    stories = normalize_starter_stories(data.get("starter_stories"))
+    return [str(item["id"]) for item in stories]
+
+
+def starter_story_focus(data: dict) -> list[dict]:
+    return normalize_starter_stories(data.get("starter_stories"))
+
+
+def expansion_policy(data: dict) -> str:
+    ids = ", ".join(starter_story_ids(data))
+    return (
+        f"Start new teams on this focused set: {ids}. Treat it as an adoption scope, "
+        "not a runtime fence: dev-story remains available, and teams expand by adding "
+        "`kitsoki.enabled_stories` entries plus matching readiness checks/flows once a story is proven here."
+    )
+
+
 def ensure_draft_profile_defaults(profile: dict, data: dict) -> None:
+    kitsoki = profile.setdefault("kitsoki", {})
+    if not isinstance(kitsoki, dict):
+        kitsoki = {}
+        profile["kitsoki"] = kitsoki
+    kitsoki.setdefault("enabled_stories", starter_story_ids(data))
+
     dev_story_profile = profile.setdefault("dev_story_profile", {})
     if not isinstance(dev_story_profile, dict):
         dev_story_profile = {}
@@ -487,12 +526,19 @@ def mining_profile_yaml(data: dict) -> str:
 
 def onboarding_profile(data: dict) -> dict:
     kind = stack_kind(data)
+    story_ids = starter_story_ids(data)
     patterns = [
         {
             "id": "selected-starter",
             "source": "deterministic-init",
             "evidence": f"Selected dev-story for a {data.get('stack') or 'local project'} checkout.",
-            "recommendation": "Start with the shared dev-story workflow and keep project-specific changes in `.kitsoki/project-profile.yaml` or the generated `.kitsoki/stories/<id>-dev/` wrapper.",
+            "recommendation": "Use dev-story as the shared root while keeping project-specific changes in `.kitsoki/project-profile.yaml` or the generated `.kitsoki/stories/<id>-dev/` wrapper.",
+        },
+        {
+            "id": "starter-story-focus",
+            "source": "operator-or-default-scope",
+            "evidence": "Starter story focus: " + ", ".join(f"`{item}`" for item in story_ids) + ".",
+            "recommendation": "Start team adoption on the focused stories, then expand by editing `kitsoki.enabled_stories` after adding readiness evidence.",
         }
     ]
     managers = package_managers(data, kind)
@@ -555,6 +601,12 @@ def onboarding_profile(data: dict) -> dict:
             "summary": f"Tickets bind to GitHub issues on `{data['ticket_repo']}` (iface.ticket → host.gh.ticket, pinned via world.ticket_repo).",
             "evidence": f"remote={data.get('repo_remote', '')}",
         })
+    customizations.append({
+        "id": "starter-story-focus",
+        "status": "applied",
+        "summary": "Initial project adoption is scoped to `" + "`, `".join(story_ids) + "` unless the team edits the profile.",
+        "evidence": ", ".join(story_ids),
+    })
     if mining_seed_enabled(data):
         customizations.append({
             "id": "session-mining-seed",
@@ -566,7 +618,9 @@ def onboarding_profile(data: dict) -> dict:
     return {
         "base_story": "dev-story",
         "base_story_title": "Dev-story project workflow",
-        "base_story_reason": "Default starter for normal software repositories: it supports project workbench, design/PRD, bugfix, git/worktree, and follow-up customization through a project-local wrapper.",
+        "base_story_reason": "Default starter for normal software repositories. This profile intentionally narrows first adoption to the enabled story list, then lets the team expand from the same dev-story root.",
+        "starter_stories": starter_story_focus(data),
+        "expansion_policy": expansion_policy(data),
         "repo_patterns": patterns,
         "story_customizations": customizations,
         "recording_policy": "no-llm-only",
@@ -793,6 +847,8 @@ tracker:
 
 kitsoki:
   story: dev-story
+  enabled_stories:
+{yaml_dump(starter_story_ids(data), 4)}
   instance:
     id: {data["project_id"]}-dev
     path: .kitsoki/stories/{data["project_id"]}-dev/app.yaml
@@ -999,6 +1055,8 @@ rules:
 
 kitsoki:
   story: dev-story
+  enabled_stories:
+{yaml_dump(starter_story_ids(data), 4)}
   instance:
     id: slidey-dev
     path: ".kitsoki/stories/slidey-dev/app.yaml"
@@ -1603,6 +1661,10 @@ def readme(data: dict, profile_path: str) -> str:
     title = data["project_title"]
     story_id = f"{data['project_id']}-dev"
     docs = dev_story_docs_profile(data)
+    starter_lines = "\n".join(
+        f"- `{item['id']}` ({item['source_story']}): {item['summary']}"
+        for item in starter_story_focus(data)
+    )
     commands = []
     if data.get("dev_command"):
         commands.append(("dev", data["dev_command"]))
@@ -1659,6 +1721,16 @@ profile, command defaults, and any project-specific extensions.
 Project profile: `{Path(profile_path).relative_to(Path(data["target_path"]))}`
 Readiness verifier: `.kitsoki/check-readiness.py`
 Session mining promotion helper: `.kitsoki/promote-session-mining.py`
+
+Starter story focus:
+
+{starter_lines}
+
+This focus is recorded in `kitsoki.enabled_stories` and
+`onboarding.starter_stories` inside `.kitsoki/project-profile.yaml`. It is an
+adoption scope, not a runtime fence: the shared dev-story root remains
+available, and the team can expand by adding story ids there after adding
+matching readiness checks or project-local flow coverage.
 
 Generated PRDs publish under `{docs["publish_durable_path"]}` and design drafts
 publish under `{docs["design_durable_path"]}`. Update
@@ -1723,6 +1795,7 @@ def main() -> int:
         "build_command": sys.argv[7],
         "conventions": sys.argv[8],
         "tracker": sys.argv[9] if len(sys.argv) > 9 else "none",
+        "starter_stories": starter_story_entries(),
     }
     # Validate + enrich the target BEFORE draft-profile defaulting so the
     # detected repo shape (remote → ticket_repo, toolchain files) seeds the
@@ -1748,9 +1821,17 @@ def main() -> int:
             data["project_title"] = draft_profile["title"]
     if len(sys.argv) > 11 and sys.argv[11].strip():
         data["mining_recommendation"] = json.loads(sys.argv[11])
+    if len(sys.argv) > 12 and sys.argv[12].strip():
+        data["starter_stories"] = normalize_starter_stories(json.loads(sys.argv[12]))
     if draft_profile is not None and "mining" not in draft_profile:
         draft_profile["mining"] = data.get("mining_recommendation") or mining_recommendation(Path(data["target_path"]))
     if isinstance(draft_profile, dict):
+        kitsoki = draft_profile.get("kitsoki")
+        if isinstance(kitsoki, dict) and isinstance(kitsoki.get("enabled_stories"), list):
+            data["starter_stories"] = normalize_starter_stories(kitsoki["enabled_stories"])
+        onboarding = draft_profile.get("onboarding")
+        if isinstance(onboarding, dict) and isinstance(onboarding.get("starter_stories"), list):
+            data["starter_stories"] = normalize_starter_stories(onboarding["starter_stories"])
         dev_story_profile = draft_profile.get("dev_story_profile")
         docs_profile = dev_story_profile.get("docs") if isinstance(dev_story_profile, dict) else None
         if isinstance(docs_profile, dict):

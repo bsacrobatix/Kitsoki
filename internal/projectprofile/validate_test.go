@@ -26,6 +26,7 @@ testing:
       command: "make build"
 kitsoki:
   story: dev-story
+  enabled_stories: [setup, bugfix, pr-refinement, git-ops]
   instance:
     id: gears-rust-dev
     path: .kitsoki/stories/gears-rust-dev/app.yaml
@@ -43,6 +44,18 @@ onboarding:
   base_story: dev-story
   base_story_title: Dev-story project workflow
   base_story_reason: Default starter for a normal Rust project.
+  starter_stories:
+    - id: setup
+      title: Project setup
+      source_story: dev-story:onboarding
+      status: enabled
+      summary: Onboard the checkout and run readiness checks.
+    - id: bugfix
+      title: Bug fixing
+      source_story: bugfix
+      status: enabled
+      summary: Drive a picked bug through fix and validation.
+  expansion_policy: Add story ids after focused readiness checks pass.
   repo_patterns:
     - id: toolchain
       source: repo-files
