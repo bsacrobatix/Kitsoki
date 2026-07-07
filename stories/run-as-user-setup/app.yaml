@@ -1,8 +1,9 @@
 # run-as-user-setup - macOS delegated agent user setup.
 #
-# This story is intentionally no-LLM and non-privileged. It generates the local
-# config, wrapper, sudoers, capsule-assignment, and validation commands an
-# operator reviews and runs outside the agent sandbox.
+# This story is intentionally no-LLM. It plans and can apply the local config,
+# wrapper, sudoers, capsule-assignment, and validation commands. Privileged
+# operations use non-interactive sudo and fail loudly when the operator has not
+# already crossed the OS privilege boundary.
 
 app:
   id: run-as-user-setup
@@ -13,6 +14,7 @@ app:
 
 hosts:
   - host.starlark.run
+  - host.run
 
 world:
   platform:       { type: string, default: "darwin" }
@@ -36,6 +38,9 @@ world:
   validation_commands: { type: string, default: "" }
   receipt_markdown:    { type: string, default: "" }
   security_notes:      { type: string, default: "" }
+  apply_ok:            { type: bool, default: false }
+  apply_exit_code:     { type: int, default: -1 }
+  apply_output:        { type: string, default: "" }
   status:              { type: string, default: "not planned" }
   last_error:          { type: string, default: "" }
 
@@ -48,6 +53,10 @@ intents:
     description: "Accept the current setup step and continue."
     examples: ["accept", "ok", "okay", "continue", "approve", "looks good", "lgtm"]
     priority: 88
+  apply:
+    description: "Apply the delegated-user setup with non-interactive sudo."
+    examples: ["apply", "install", "automate setup", "run setup", "do it"]
+    priority: 86
   configure:
     description: "Update setup values, then regenerate the plan."
     examples:
@@ -69,6 +78,10 @@ intents:
     description: "Mark the delegated-user setup validated after running the probes."
     examples: ["validated", "probes passed", "done"]
     priority: 80
+  apply_finished:
+    description: "(internal) route after the apply command completes."
+    examples: []
+    priority: 1
   back:
     description: "Return to the configuration screen."
     examples: ["back", "edit"]

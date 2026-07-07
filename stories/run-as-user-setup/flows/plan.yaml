@@ -6,6 +6,13 @@ initial_world:
   operator_user: Brad.Smith
   protected_root: /Users/Brad.Smith/code/kitsoki
 
+host_handlers:
+  host.run:
+    data:
+      ok: true
+      exit_code: 0
+      stdout: "ok: delegated account, wrappers, sudoers, capsule permissions, and write-deny probe passed"
+
 turns:
   - intent:
       name: plan
@@ -36,8 +43,12 @@ turns:
       slots: {}
     expect_state: ready
     expect_world:
-      status: validated
+      status: applied
+      apply_ok: true
     expect_view_matches: "run_as_user setup receipt"
+    expect_host_calls:
+      - handler: host.run
+        args: { call: apply_run_as_user_setup }
 
   - intent:
       name: quit
