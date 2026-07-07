@@ -172,7 +172,9 @@ explicit `harness_ladder:` is declared. The default priority is:
 `synthetic-codex` stays in the profile catalog for manual selection and
 diagnostics, but it is intentionally last in automatic fallback. A 429, quota,
 rate-limit, timeout, 5xx, or provider transport failure is logged, recorded in
-the trace, backed off, and then the next configured profile is tried.
+the trace, and backs off that provider/harness lane. Kitsoki skips any remaining
+effort or model-strength rungs on that lane and tries the next configured
+profile instead.
 
 ## Provider quota control
 

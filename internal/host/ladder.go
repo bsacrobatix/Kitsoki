@@ -7,8 +7,9 @@
 //
 //   - Infra failure (the provider/API is down, rate-limited, quota-exhausted,
 //     5xx, timeout, model_not_found, connection-refused): rotate to the NEXT
-//     MODEL for availability — a different provider is a different quota pool
-//     — and mark the failing model in backoff so subsequent ladder walks (this
+//     PROVIDER/HARNESS for availability — a provider error is not solved by
+//     another effort/model-strength rung on the same lane — and mark the
+//     failing provider/harness in backoff so subsequent ladder walks (this
 //     process or any other sharing the state file) skip it until a cooldown
 //     passes. Reuses the on-disk provider-quota state file (quota_control.go)
 //     rather than inventing a second backoff substrate.
@@ -19,11 +20,12 @@
 //     a stronger model and sweeping effort again from low.
 //
 // So RunLadder walks the model×effort grid model-outer, effort-inner: for
-// each model (skipped if backed off), sweep every effort; a capability
-// failure advances to the next effort (or, once efforts are exhausted, falls
-// through to the next model); an infra failure abandons the remaining efforts
-// for that model outright and moves on. A FailureFatal result (a config/
-// argument error, e.g. a missing schema: arg) stops the walk immediately —
+// each model (skipped if its provider/harness lane is backed off), sweep every
+// effort; a capability failure advances to the next effort (or, once efforts
+// are exhausted, falls through to the next model); an infra failure abandons the
+// remaining effort/model rungs for that provider/harness lane outright and moves
+// on. A FailureFatal result (a config/argument error, e.g. a missing schema:
+// arg) stops the walk immediately —
 // no rung can fix a story authoring mistake.
 //
 // # Wrap point
@@ -76,7 +78,8 @@ const (
 	FailureNone FailureKind = ""
 	// FailureInfra means the provider/transport itself failed to answer
 	// (rate limit, quota, 5xx, timeout, model_not_found, connection error).
-	// The ladder rotates to the next model and backs this one off.
+	// The ladder rotates to the next provider/harness lane and backs the
+	// current one off.
 	FailureInfra FailureKind = "infra"
 	// FailureCapability means the call ran to completion but its result
 	// failed a schema/acceptance/gate check. The ladder escalates effort on
@@ -118,8 +121,8 @@ type LadderConfig struct {
 	// StatePath overrides the on-disk backoff state file (defaults to the
 	// same file quota_control.go uses for provider quota, "" ⇒ that default).
 	StatePath string
-	// Backoff is a Go duration string for how long an infra-failing model is
-	// skipped after one failure ("" ⇒ defaultLadderBackoff).
+	// Backoff is a Go duration string for how long an infra-failing
+	// provider/harness lane is skipped after one failure ("" ⇒ defaultLadderBackoff).
 	Backoff string
 }
 
@@ -580,7 +583,7 @@ outer:
 			if kind == FailureInfra {
 				emitLadderFallbackNotice(ctx, rung, kind, errText)
 				markLadderBackoff(statePath, key, backoff)
-				break // abandon remaining efforts for this model; next model.
+				break // abandon this lane's remaining efforts/models; next lane.
 			}
 			if kind == FailureCapability {
 				emitLadderFallbackNotice(ctx, rung, kind, errText)
@@ -799,7 +802,7 @@ func ladderInt(v any) (int, error) {
 func emitLadderFallbackNotice(ctx context.Context, rung LadderRung, kind FailureKind, errText string) {
 	text := fmt.Sprintf("Kitsoki harness: %s failed (%s); ", formatLadderRung(rung), kind)
 	if kind == FailureInfra {
-		text += "backing it off and moving to the next configured model."
+		text += "backing off this provider/harness and skipping its remaining effort/model ladder."
 	} else {
 		text += "trying the next effort/model rung."
 	}
@@ -1021,17 +1024,20 @@ func looksInfraError(s string) bool {
 
 // ── backoff bookkeeping (shared substrate with quota_control.go) ─────────
 
-// ladderBackoffKey builds the persistent backoff key for a ladder model slot.
-// Distinct namespace ("ladder|") from providerQuotaKey's ActiveProfile-keyed
-// entries so the two features never collide in the shared state file.
+// ladderBackoffKey builds the persistent backoff key for a provider/harness
+// lane. A provider/transport failure (429, quota, broken CLI, 5xx, timeout)
+// is not a signal to try a stronger model on the same lane, so the key
+// deliberately excludes Model. Distinct namespace ("ladder|") from
+// providerQuotaKey's ActiveProfile-keyed entries so the two features never
+// collide in the shared state file.
 func ladderBackoffKey(m LadderModel) string {
-	return "ladder|" + m.Backend + "|" + m.Provider + "|" + m.Model
+	return "ladder|" + m.Backend + "|" + m.Provider
 }
 
-// ladderInBackoff reports whether the named ladder model slot is currently
-// inside an infra-failure backoff window, per the shared on-disk
+// ladderInBackoff reports whether the named ladder provider/harness lane is
+// currently inside an infra-failure backoff window, per the shared on-disk
 // provider-quota state file (quota_control.go). A read failure (e.g. the
-// state file doesn't exist yet) is treated as "not in backoff" — the model is
+// state file doesn't exist yet) is treated as "not in backoff" — the lane is
 // attempted and, if it fails again, marked.
 func ladderInBackoff(statePath, key string) bool {
 	st, err := readQuotaState(statePath)
@@ -1045,10 +1051,10 @@ func ladderInBackoff(statePath, key string) bool {
 	return time.Now().Before(p.BackoffUntil)
 }
 
-// markLadderBackoff records an infra failure against the named ladder model
-// slot, backing it off for dur. Reuses quotaLimiter.withState so the write is
-// file-locked against concurrent writers (other sessions/processes sharing
-// the same state file) exactly like the provider-quota path.
+// markLadderBackoff records an infra failure against the named provider/harness
+// lane, backing it off for dur. Reuses quotaLimiter.withState so the write is
+// file-locked against concurrent writers (other sessions/processes sharing the
+// same state file) exactly like the provider-quota path.
 func markLadderBackoff(statePath, key string, dur time.Duration) {
 	lim := &quotaLimiter{statePath: statePath}
 	now := time.Now()

@@ -48,9 +48,10 @@ type Result struct {
 	Error string
 	// FailureKind optionally classifies a non-empty Error for the harness
 	// ladder's routing decision (see ladder.go): FailureInfra rotates to the
-	// next model and backs the current one off; FailureCapability escalates
-	// effort (same model) before trying a stronger model; FailureFatal (a
-	// config/argument error no rung can fix) stops the ladder immediately.
+	// next provider/harness lane and backs the current lane off;
+	// FailureCapability escalates effort (same model) before trying a stronger
+	// model; FailureFatal (a config/argument error no rung can fix) stops the
+	// ladder immediately.
 	// Zero value (FailureNone) means "unclassified" — a handler that doesn't
 	// populate it is unaffected; the ladder falls back to a best-effort text
 	// heuristic over Error. Only host.agent.decide / host.agent.task populate

@@ -332,10 +332,10 @@ type QuotaControl struct {
 
 // HarnessLadder is the `.kitsoki.yaml` `harness_ladder:` block: an ordered,
 // cheap-first list of {backend, provider, model} slots (Models — the
-// availability axis) crossed with an ordered effort catalog (Efforts — the
-// capability axis, swept low→max on each model before the next one is
-// tried). Mirrors internal/host.LadderConfig field-for-field; ToHostLadderConfig
-// does the (trivial, lossless) conversion. See the package doc on
+// availability/model axis) crossed with an ordered effort catalog (Efforts —
+// the capability axis, swept low→max on each model before the next one is tried).
+// Mirrors internal/host.LadderConfig field-for-field; ToHostLadderConfig does
+// the (trivial, lossless) conversion. See the package doc on
 // internal/host/ladder.go for the full infra-vs-capability routing design.
 type HarnessLadder struct {
 	// Models is the ordered model axis, cheapest first. At least one entry is
@@ -348,9 +348,9 @@ type HarnessLadder struct {
 	// MaxAttempts caps the total dispatch count across the whole model×effort
 	// grid. Zero ⇒ no cap beyond len(Models)*len(Efforts).
 	MaxAttempts int `yaml:"max_attempts,omitempty"`
-	// Backoff is a Go duration string for how long an infra-failing model is
-	// skipped after one failure (e.g. "5m"). Empty ⇒ internal/host's default
-	// (5 minutes).
+	// Backoff is a Go duration string for how long an infra-failing
+	// provider/harness lane is skipped after one failure (e.g. "5m"). Empty ⇒
+	// internal/host's default (5 minutes).
 	Backoff string `yaml:"backoff,omitempty"`
 }
 
