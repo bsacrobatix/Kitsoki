@@ -265,6 +265,71 @@ states:
                 printf '%s/%s' "$left" "$right"
               }
 
+              find_cli() {
+                cli_name=$1
+                resolved_cli=""
+                found=$(command -v "$cli_name" 2>/dev/null || true)
+                if [ -n "$found" ] && [ "${found#/}" != "$found" ] && [ -x "$found" ]; then
+                  resolved_cli=$found
+                  return 0
+                fi
+                for candidate in "/opt/homebrew/bin/$cli_name" "/usr/local/bin/$cli_name"; do
+                  if [ -x "$candidate" ]; then
+                    resolved_cli=$candidate
+                    return 0
+                  fi
+                done
+                if [ -n "${HOME:-}" ] && [ -x "$HOME/.local/bin/$cli_name" ]; then
+                  resolved_cli="$HOME/.local/bin/$cli_name"
+                  return 0
+                fi
+                return 1
+              }
+
+              resolve_cli() {
+                cli_name=$1
+                configured=$2
+                resolved_cli=""
+                if [ -z "$configured" ] || [ "$configured" = "auto" ]; then
+                  if find_cli "$cli_name"; then
+                    return 0
+                  fi
+                  log "CLI_PATH_REQUIRED: unable to find $cli_name executable."
+                  log "Set ${cli_name}_bin to an absolute path in edit values, or launch Kitsoki with $cli_name on PATH."
+                  return 78
+                fi
+
+                case "$configured" in
+                  /*)
+                    if [ -x "$configured" ]; then
+                      resolved_cli=$configured
+                      return 0
+                    fi
+                    case "$configured" in
+                      /opt/homebrew/bin/$cli_name|/usr/local/bin/$cli_name)
+                        if find_cli "$cli_name"; then
+                          log "resolved $cli_name from missing default $configured to $resolved_cli"
+                          return 0
+                        fi
+                        ;;
+                    esac
+                    log "CLI_PATH_REQUIRED: configured $cli_name path is not executable: $configured"
+                    log "Set ${cli_name}_bin to an absolute executable path, or set it to auto and make $cli_name available on PATH."
+                    return 78
+                    ;;
+                  *)
+                    found=$(command -v "$configured" 2>/dev/null || true)
+                    if [ -n "$found" ] && [ "${found#/}" != "$found" ] && [ -x "$found" ]; then
+                      resolved_cli=$found
+                      return 0
+                    fi
+                    log "CLI_PATH_REQUIRED: $cli_name command '$configured' did not resolve to an absolute executable path."
+                    log "Set ${cli_name}_bin to an absolute path in edit values, or use auto."
+                    return 78
+                    ;;
+                esac
+              }
+
               [ "$platform" = "darwin" ] || die "run-as-user apply currently supports darwin only; got $platform"
               [ -n "$agent_user" ] || die "agent_user is required"
               [ -n "$group_name" ] || die "group_name is required"
@@ -287,6 +352,13 @@ states:
               need install
               need visudo
               need kitsoki
+
+              resolve_cli codex "$codex_bin" || exit $?
+              codex_bin=$resolved_cli
+              resolve_cli claude "$claude_bin" || exit $?
+              claude_bin=$resolved_cli
+              log "using codex executable: $codex_bin"
+              log "using claude executable: $claude_bin"
 
               if ! sudo -n true >/dev/null 2>&1; then
                 log "AUTHORIZATION_REQUIRED: sudo is not authenticated for non-interactive apply."
@@ -409,6 +481,12 @@ states:
             - set:
                 status: "authorization required"
                 last_error: "{{ world.apply_output }}"
+        - when: "world.apply_exit_code == 78"
+          target: needs_cli_paths
+          effects:
+            - set:
+                status: "cli path required"
+                last_error: "{{ world.apply_output }}"
         - target: apply_failed
           effects:
             - set:
@@ -444,6 +522,68 @@ states:
             - label: "edit values"
               intent: edit
               hint: "change users, paths, or CLI locations"
+            - label: "back"
+              intent: back
+              hint: "return to setup"
+            - label: "quit"
+              intent: quit
+            - label: "look"
+              intent: look
+    on:
+      accept:
+        - target: applying
+          effects:
+            - set:
+                apply_ok: false
+                apply_exit_code: -1
+                apply_output: ""
+                last_error: ""
+                status: "applying"
+      apply:
+        - target: applying
+          effects:
+            - set:
+                apply_ok: false
+                apply_exit_code: -1
+                apply_output: ""
+                last_error: ""
+                status: "applying"
+      plan:
+        - target: details
+      edit:
+        - target: configuring
+      back:
+        - target: lobby
+      look:
+        - target: .
+      quit:
+        - target: ended
+
+  needs_cli_paths:
+    description: "Run-as-user setup needs backend CLI paths"
+    relevant_world: [codex_bin, claude_bin, apply_output, status]
+    view:
+      - prose: "The deterministic apply step could not resolve the backend CLI executable path before installing wrappers."
+      - kv:
+          pairs:
+            Codex executable: "{{ world.codex_bin }}"
+            Claude executable: "{{ world.claude_bin }}"
+      - heading: "Command output"
+      - code: "{{ world.last_error|default:'(none)' }}"
+      - prose: "Use edit values to set codex_bin or claude_bin to an absolute executable path, or set the field to auto and launch Kitsoki with the CLI on PATH."
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "edit values"
+              intent: edit
+              hint: "set the backend CLI executable paths"
+            - label: "apply"
+              intent: apply
+              hint: "retry after fixing the CLI path"
+            - label: "details"
+              intent: plan
+              hint: "return to setup details"
             - label: "back"
               intent: back
               hint: "return to setup"
