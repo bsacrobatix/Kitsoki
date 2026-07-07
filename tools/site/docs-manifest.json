@@ -4,7 +4,7 @@
   "branch": "main",
   "sections": [
     {
-      "title": "Start here",
+      "title": "Evaluate and install",
       "items": [
         { "from": "docs/evaluate-kitsoki.md", "to": "guide/evaluate-kitsoki.md" },
         { "from": "docs/getting-started.md", "to": "guide/getting-started.md" }

@@ -58,6 +58,9 @@ number, and the mechanism behind it, is in
 
 ## What to watch first
 
+If you want the shortest visual path, use the [Proof path](/proof.html). These
+are the demos it leads with:
+
 1. **Agent action transcripts.** Watch the runtime reject a model submission,
    inject a nudge, and accept the corrected result. That is the control boundary
    a generic coding agent cannot provide by itself.
@@ -186,7 +189,8 @@ stable parts boring, auditable, and cheap.
 
 - **[Concept](architecture/concept.md)** — the architecture behind control
   inversion and progressive determinism.
-- **[Features](/features/)** — the full catalog of recorded feature demos.
+- **[Proof path](/proof.html)** — the curated sequence of recorded demos.
+- **[Demos and features](/features/)** — the full catalog.
 - **[Decision-first trace detail](/features/trace-introspection.html)** —
   a recorded demo of a turn routing with no model call, and every decision
   after it inspectable in the trace.

@@ -32,7 +32,9 @@ function localizedThemeConfig(locale: LocaleCode) {
       alt: "kitsoki mesa sun",
     },
     nav: [
-      { text: info.text.nav.features, link: prefixed(locale, "/features/") },
+      { text: "Evaluate", link: "/guide/evaluate-kitsoki.html" },
+      { text: "Proof", link: "/proof.html" },
+      { text: "Get Started", link: "/guide/getting-started.html" },
       { text: info.text.nav.guide, link: "/guide/" },
       { text: "Download", link: "/download.html" },
     ],
