@@ -165,7 +165,7 @@ func tierHelp(root *cobra.Command) {
 		{"author", "Author & test", []string{"validate", "test", "viz", "workflow", "prompts", "extract"}},
 		{"debug", "Debug & trace", []string{"trace", "replay", "replay-routing", "inspect", "render", "shot", "web-shot", "export-status"}},
 		{"agents", "Agents & bench", []string{"agent", "agent-serve", "agent-bench", "eval", "bug", "issues", "gh-agent", "record", "cassette", "migrate-agent"}},
-		{"mcp", "MCP & integration", []string{"mcp", "mcp-test", "mcp-bash", "mcp-validator", "mcp-operator-ask", "hook", "intercept", "ui"}},
+		{"mcp", "MCP & integration", []string{"mcp", "mcp-test", "mcp-bash", "mcp-codeact", "mcp-validator", "mcp-operator-ask", "hook", "intercept", "ui"}},
 	}
 	byName := map[string]string{}
 	for _, t := range tiers {

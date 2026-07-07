@@ -57,6 +57,23 @@ the same `--mcp-config` shape Claude uses, then translated into Codex
 Claude Code agent with the studio MCP attached, for example
 `claude --agent kitsoki-mcp-driver`.
 
+To give a launched agent code-as-action without giving it Bash/Python/Node,
+attach the standalone CodeAct MCP server instead of shell tools:
+
+```toml
+[mcp_servers.codeact]
+command = "kitsoki"
+args = [
+  "mcp-codeact",
+  "--working-dir", ".",
+  "--capabilities-json", '{"fs":{"read":["**"]},"vcs":"read"}',
+]
+```
+
+The server exposes `codeact_eval`; its startup capabilities are the authority
+ceiling, so the launched agent can supply snippets and data but cannot grant
+itself new filesystem, probe, or network access.
+
 Task-backed freestanding launch uses `codex exec`. Freestanding launch with no
 task uses top-level `codex [OPTIONS] [PROMPT]`, so the terminal opens the Codex
 TUI with the agent instructions as the initial prompt. Interactive Codex launch
