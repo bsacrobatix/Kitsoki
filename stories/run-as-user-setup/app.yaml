@@ -24,8 +24,8 @@ world:
   capsule_root:   { type: string, default: "/Users/Shared/kitsoki/capsules" }
   wrapper_bin:    { type: string, default: "/Users/Shared/kitsoki/agent-bin" }
   protected_root: { type: string, default: "." }
-  codex_bin:      { type: string, default: "/opt/homebrew/bin/codex" }
-  claude_bin:     { type: string, default: "/opt/homebrew/bin/claude" }
+  codex_bin:      { type: string, default: "auto" }
+  claude_bin:     { type: string, default: "auto" }
   sample_capsule: { type: string, default: "room-123-dev" }
 
   setup_summary:       { type: string, default: "" }

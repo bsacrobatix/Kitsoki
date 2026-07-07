@@ -9,6 +9,12 @@ sudo needs a password, the story moves to an authorization screen with the
 `sudo -v` handoff and a retry action instead of dumping a generic command
 failure.
 
+The `codex_bin` and `claude_bin` defaults are `auto`. Apply resolves them from
+the Kitsoki process PATH plus common macOS locations before writing sudoers or
+wrappers. Missing backend CLIs move to a CLI-path screen with edit-and-retry
+actions; the story does not wait until the wrapper smoke test fails with a raw
+`command not found`.
+
 Run it from the project checkout:
 
 ```sh
@@ -28,12 +34,13 @@ It applies:
 
 The apply path uses `host.run` and `sudo -n`. That makes it deterministic and
 safe for headless runs: success means the setup was applied, missing sudo
-credentials become a dedicated authorization-retry state, and other command
-failures remain visible story failures. The automated path applies the account,
-group, wrappers, sudoers, sample capsule, delegated write probe, protected-root
-write-deny probe, and wrapper smoke tests; the launch-policy rejection command
-remains printed for explicit operator review so the story does not accidentally
-start an interactive backend.
+credentials become a dedicated authorization-retry state, missing backend CLI
+paths become a dedicated edit-and-retry state, and other command failures remain
+visible story failures. The automated path applies the account, group, wrappers,
+sudoers, sample capsule, delegated write probe, protected-root write-deny probe,
+and wrapper smoke tests; the launch-policy rejection command remains printed for
+explicit operator review so the story does not accidentally start an interactive
+backend.
 
 The current implementation still relies on PATH wrappers for the actual backend
 switch. The `agent_user_delegation:` config is the local setup receipt and

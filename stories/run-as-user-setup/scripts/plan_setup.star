@@ -20,6 +20,13 @@ def _join(lines):
     return "\n".join(lines)
 
 
+def _cli_ref(v, name):
+    v = _trim(v)
+    if v == "" or v == "auto":
+        return "<resolved-%s-from-PATH>" % name
+    return v
+
+
 def main(ctx):
     platform = _trim(ctx.inputs["platform"]) or "darwin"
     operator_user = _trim(ctx.inputs["operator_user"])
@@ -28,8 +35,10 @@ def main(ctx):
     capsule_root = _trim(ctx.inputs["capsule_root"]) or "/Users/Shared/kitsoki/capsules"
     wrapper_bin = _trim(ctx.inputs["wrapper_bin"]) or "/Users/Shared/kitsoki/agent-bin"
     protected_root = _trim(ctx.inputs["protected_root"]) or "."
-    codex_bin = _trim(ctx.inputs["codex_bin"]) or "/opt/homebrew/bin/codex"
-    claude_bin = _trim(ctx.inputs["claude_bin"]) or "/opt/homebrew/bin/claude"
+    codex_bin = _trim(ctx.inputs["codex_bin"]) or "auto"
+    claude_bin = _trim(ctx.inputs["claude_bin"]) or "auto"
+    codex_ref = _cli_ref(codex_bin, "codex")
+    claude_ref = _cli_ref(claude_bin, "claude")
     sample_capsule = _trim(ctx.inputs["sample_capsule"]) or "room-123-dev"
 
     if platform != "darwin":
@@ -69,8 +78,8 @@ def main(ctx):
         "#    Use System Settings > Users & Groups, or your normal fleet-management path.",
         "# 2. Log into that account once.",
         "# 3. Authenticate subscription-backed CLIs in that account if needed:",
-        "sudo -H -u %s %s --version" % (_shq(agent_user), _shq(codex_bin)),
-        "sudo -H -u %s %s --version" % (_shq(agent_user), _shq(claude_bin)),
+        "sudo -H -u %s %s --version" % (_shq(agent_user), _shq(codex_ref)),
+        "sudo -H -u %s %s --version" % (_shq(agent_user), _shq(claude_ref)),
         "# If auth/status fails because Keychain is unavailable under sudo, use a launchd-backed user agent next.",
     ])
 
@@ -87,19 +96,20 @@ def main(ctx):
         "sudo tee %s >/dev/null <<'SH'" % _shq(_path_join(wrapper_bin, "codex")),
         "#!/bin/sh",
         "umask 0002",
-        "exec /usr/bin/sudo -n -H -u %s %s \"$@\"" % (_shq(agent_user), _shq(codex_bin)),
+        "exec /usr/bin/sudo -n -H -u %s %s \"$@\"" % (_shq(agent_user), _shq(codex_ref)),
         "SH",
         "sudo tee %s >/dev/null <<'SH'" % _shq(_path_join(wrapper_bin, "claude")),
         "#!/bin/sh",
         "umask 0002",
-        "exec /usr/bin/sudo -n -H -u %s %s \"$@\"" % (_shq(agent_user), _shq(claude_bin)),
+        "exec /usr/bin/sudo -n -H -u %s %s \"$@\"" % (_shq(agent_user), _shq(claude_ref)),
         "SH",
         "sudo chmod 0755 %s %s" % (_shq(_path_join(wrapper_bin, "codex")), _shq(_path_join(wrapper_bin, "claude"))),
     ])
 
     sudoers_snippet = _join([
         "# Edit with: sudo visudo -f /private/etc/sudoers.d/kitsoki-agent",
-        "Cmnd_Alias KITSOKI_AGENT_CLIS = %s, %s" % (codex_bin, claude_bin),
+        "# The apply path resolves auto before writing this file.",
+        "Cmnd_Alias KITSOKI_AGENT_CLIS = %s, %s" % (codex_ref, claude_ref),
         "%s ALL=(%s) NOPASSWD: KITSOKI_AGENT_CLIS" % (operator_ref, agent_user),
         "",
         "# Do not grant broad passwordless access to /bin/sh.",
@@ -118,10 +128,11 @@ def main(ctx):
         "PATH=%s:$PATH go run ./cmd/kitsoki agent launch --raw --interactive --backend codex --working-dir %s" % (_shq(wrapper_bin), _shq(protected_root)),
         "# Expected: Kitsoki rejects the protected root before codex starts.",
         "PATH=%s:$PATH command -v codex" % _shq(wrapper_bin),
-        "PATH=%s:$PATH sudo -n -H -u %s %s --version" % (_shq(wrapper_bin), _shq(agent_user), _shq(codex_bin)),
+        "PATH=%s:$PATH sudo -n -H -u %s %s --version" % (_shq(wrapper_bin), _shq(agent_user), _shq(codex_ref)),
     ])
 
     security_notes = _join([
+        "The apply path resolves codex_bin/claude_bin=auto before installing sudoers or wrappers; missing CLIs stop in an edit-and-retry state.",
         "agent_launch_policy proves launch placement only; it does not confine a started process.",
         "run_as_user delegation is critical on macOS because the delegated account should lack write permission to the protected checkout.",
         "The delegated account may still write its own HOME, /tmp, and any group-writable path. Full capsule-only confinement requires the future runtime sandbox slice.",
