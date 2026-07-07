@@ -37,6 +37,15 @@ func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
 			sourceFlow: repoPath(t, "../../stories/bugfix/flows/bugfix_ships_direct.yaml"),
 		},
 		{
+			appPath:                repoStoriesBugfixAppPath(t),
+			capsule:                "clean-repo",
+			name:                   "quick_fix_completed",
+			sourceFlow:             repoPath(t, "../../stories/bugfix/flows/happy_quick_fix.yaml"),
+			expectOperationPolicy:  "bugfix_quick",
+			expectOperationStatus:  "completed",
+			expectTerminalArtifact: "done_artifact",
+		},
+		{
 			appPath:    repoStoriesBugfixAppPath(t),
 			capsule:    "clean-repo",
 			name:       "merged_red_waits_for_human",
