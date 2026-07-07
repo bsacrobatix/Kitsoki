@@ -51,6 +51,9 @@ func TestDriveOperationRPC_CallsThrough(t *testing.T) {
 	if tr.Mode != "transitioned" || tr.State != "__exit__done" {
 		t.Fatalf("drive_operation returned wrong turn result: %+v", tr)
 	}
+	if tr.OperationDrive == nil || tr.OperationDrive.Turns != 1 || tr.OperationDrive.StopReason != "operation-completed" {
+		t.Fatalf("drive_operation did not include operation summary: %+v", tr.OperationDrive)
+	}
 }
 
 func TestDriveOperationRPC_FallsBackToViewWhenNoTurnDriven(t *testing.T) {
@@ -71,6 +74,9 @@ func TestDriveOperationRPC_FallsBackToViewWhenNoTurnDriven(t *testing.T) {
 	tr := out.(turnResult)
 	if tr.Mode != "offpath" || tr.State != "checkpoint" {
 		t.Fatalf("fallback view returned wrong turn result: %+v", tr)
+	}
+	if tr.OperationDrive == nil || tr.OperationDrive.Turns != 1 || tr.OperationDrive.StopReason != "operation-completed" {
+		t.Fatalf("fallback view did not include operation summary: %+v", tr.OperationDrive)
 	}
 }
 

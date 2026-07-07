@@ -715,6 +715,35 @@ describe("useRunStore — write-side actions", () => {
     expect(store.terminal).toBe(true);
   });
 
+  it("driveOperation narrates the operation drive stop reason", async () => {
+    const driveOperation = vi.fn(() =>
+      Promise.resolve(
+        turnResult({
+          state: "review",
+          view: "Review checkpoint",
+          turn_number: 2,
+          operation_drive: {
+            turns: 1,
+            stop_reason: "no-driver-intent",
+            last_intent: "accept",
+          },
+        })
+      )
+    );
+    const src = writeSource({ driveOperation });
+
+    const store = useRunStore();
+    await store.driveOperation(src, "sess-1");
+
+    expect(store.transcript).toHaveLength(3);
+    expect(store.transcript[0]).toMatchObject({ role: "user", text: "Drive operation" });
+    expect(store.transcript[1]).toMatchObject({ role: "agent", text: "Review checkpoint" });
+    expect(store.transcript[2]).toMatchObject({
+      role: "narration",
+      text: "Drove 1 turn via accept; stopped at a checkpoint.",
+    });
+  });
+
   // ---- live turn-stream feed ordering ----
   // The streaming bubble must show thinking and tool calls in ARRIVAL order
   // (a thought stays ABOVE the tools that follow it, 🧠-style like the TUI).

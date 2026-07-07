@@ -945,6 +945,11 @@ type turnResult struct {
 	// matched class/intent, the contextual confidence, and a stable DecisionID
 	// so the web surface can show a "routed to … · contextual" receipt chip.
 	ContextRoute *contextRouteInfo `json:"context_route,omitempty"`
+	// OperationDrive is present only on runstatus.session.drive_operation
+	// responses. It preserves the bounded driver result so web surfaces can tell
+	// the operator whether the drive completed, parked at a checkpoint, or hit a
+	// safety stop without scraping trace events.
+	OperationDrive *operationDriveResult `json:"operation_drive,omitempty"`
 }
 
 // contextRouteInfo is the wire shape of orchestrator.ContextRouteReceipt — the
@@ -959,6 +964,12 @@ type contextRouteInfo struct {
 	TargetChatID string  `json:"target_chat_id,omitempty"`
 	TargetLane   string  `json:"target_lane,omitempty"`
 	DecisionID   string  `json:"decision_id"`
+}
+
+type operationDriveResult struct {
+	Turns      int    `json:"turns"`
+	StopReason string `json:"stop_reason,omitempty"`
+	LastIntent string `json:"last_intent,omitempty"`
 }
 
 // intentInfo is one entry in turnResult.Intents — the per-intent menu metadata
@@ -1033,6 +1044,19 @@ func newTurnResult(out *orchestrator.TurnOutcome, resolver Driver) turnResult {
 			}
 		}
 		tr.DefaultIntent = resolver.DefaultIntent(string(out.NewState))
+	}
+	return tr
+}
+
+func newTurnResultWithOperationDrive(out *orchestrator.TurnOutcome, resolver Driver, drive *orchestrator.OperationDriveOutcome) turnResult {
+	tr := newTurnResult(out, resolver)
+	if drive == nil {
+		return tr
+	}
+	tr.OperationDrive = &operationDriveResult{
+		Turns:      drive.Turns,
+		StopReason: strings.TrimSpace(drive.StopReason),
+		LastIntent: strings.TrimSpace(drive.LastIntent),
 	}
 	return tr
 }

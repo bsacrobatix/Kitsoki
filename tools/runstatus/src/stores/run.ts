@@ -9,6 +9,7 @@ import type {
   View,
   HarnessProfileInfo,
   ContextRouteInfo,
+  OperationDriveSummary,
 } from "../types.js";
 import type { DataSource, ConnectionState } from "../data/source.js";
 import type { LiveSource } from "../data/live-source.js";
@@ -943,7 +944,7 @@ export const useRunStore = defineStore("run", () => {
   }
 
   /**
-   * Drive a running autonomous operation until the orchestrator reaches its
+   * Drive a running autonomous/supervised operation until the orchestrator reaches its
    * next safe checkpoint. Unlike a normal operator turn, one drive can cascade
    * through several internal turns, so backfill from the highest turn we knew
    * before the RPC rather than only the returned terminal turn.
@@ -959,6 +960,7 @@ export const useRunStore = defineStore("run", () => {
       const result = await source.driveOperation(sessionId);
       await backfillTraceSince(source, sessionId, sinceTurn);
       applyTurnResult(result);
+      appendOperationDriveSummary(result.operation_drive);
       return result;
     } finally {
       busy.value = false;
@@ -1057,6 +1059,57 @@ export const useRunStore = defineStore("run", () => {
       return prompts.length > 0 ? prompts.join("\n") : "(more input needed)";
     }
     return "";
+  }
+
+  function appendOperationDriveSummary(summary?: OperationDriveSummary): void {
+    const text = operationDriveSummaryText(summary);
+    if (!text) return;
+    transcript.value.push({ role: "narration", text });
+  }
+
+  function operationDriveSummaryText(summary?: OperationDriveSummary): string {
+    if (!summary) return "";
+    const turns =
+      typeof summary.turns === "number" && Number.isFinite(summary.turns)
+        ? summary.turns
+        : 0;
+    const base = turns === 1 ? "Drove 1 turn" : `Drove ${turns} turns`;
+    const intent = summary.last_intent?.trim()
+      ? ` via ${humanizeIntent(summary.last_intent)}`
+      : "";
+    const stop = operationDriveStopLabel(summary.stop_reason);
+    return stop ? `${base}${intent}; stopped ${stop}.` : `${base}${intent}.`;
+  }
+
+  function operationDriveStopLabel(reason?: string): string {
+    const normalized = (reason || "").trim();
+    switch (normalized) {
+      case "":
+        return "";
+      case "no-driver-intent":
+        return "at a checkpoint";
+      case "clarify":
+        return "for missing input";
+      case "rejected":
+        return "after a rejected turn";
+      case "offpath":
+        return "after an off-path answer";
+      case "cancelled":
+        return "after cancellation";
+      case "max-turns":
+        return "at the safety turn limit";
+      case "terminal":
+        return "at a terminal state";
+      case "no-operation":
+        return "because there is no active operation";
+      case "operation-not-autonomous":
+        return "because this operation needs manual input";
+      default:
+        if (normalized.startsWith("operation-")) {
+          return `because the operation is ${normalized.slice("operation-".length).replace(/_/g, " ")}`;
+        }
+        return `because ${normalized.replace(/_/g, " ")}`;
+    }
   }
 
   /** Build the user transcript text for a submitted intent. */

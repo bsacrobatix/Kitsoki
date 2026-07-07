@@ -1196,13 +1196,13 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 			return nil, serverErr(err)
 		}
 		if drive != nil && drive.Final != nil {
-			return newTurnResult(drive.Final, entry.Driver), nil
+			return newTurnResultWithOperationDrive(drive.Final, entry.Driver, drive), nil
 		}
 		out, err := entry.Driver.View(ctx)
 		if err != nil {
 			return nil, serverErr(err)
 		}
-		return newTurnResult(out, entry.Driver), nil
+		return newTurnResultWithOperationDrive(out, entry.Driver, drive), nil
 
 	case "runstatus.session.patch_world":
 		// Demo/test tooling: inject world key-value overrides without advancing

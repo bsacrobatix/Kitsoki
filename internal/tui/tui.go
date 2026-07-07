@@ -127,6 +127,7 @@ type MenuChanged struct {
 type turnOutcomeMsg struct {
 	outcome *orchestrator.TurnOutcome
 	input   string // the user input that triggered this turn
+	summary string
 	err     error
 }
 
@@ -2028,6 +2029,11 @@ const (
 	pendingDeterministic
 )
 
+type asyncTurnResult struct {
+	outcome *orchestrator.TurnOutcome
+	summary string
+}
+
 // asyncTurn returns a function that runs orch.Turn for the LLM-router path.
 // It is the closure shape that startAsyncTurn understands.
 func asyncTurn(orch *orchestrator.Orchestrator, sid app.SessionID, input string) func(context.Context) (*orchestrator.TurnOutcome, error) {
@@ -2055,19 +2061,85 @@ func asyncSubmitDirectFromInput(orch *orchestrator.Orchestrator, sid app.Session
 	}
 }
 
-func asyncDriveOperation(orch *orchestrator.Orchestrator, sid app.SessionID) func(context.Context) (*orchestrator.TurnOutcome, error) {
-	return func(ctx context.Context) (*orchestrator.TurnOutcome, error) {
+func asyncDriveOperation(orch *orchestrator.Orchestrator, sid app.SessionID) func(context.Context) (asyncTurnResult, error) {
+	return func(ctx context.Context) (asyncTurnResult, error) {
 		if orch == nil {
-			return nil, fmt.Errorf("work drive: no orchestrator attached")
+			return asyncTurnResult{}, fmt.Errorf("work drive: no orchestrator attached")
 		}
 		drive, err := orch.DriveOperation(ctx, sid)
 		if err != nil {
-			return nil, err
+			return asyncTurnResult{}, err
 		}
+		summary := operationDriveOutcomeSummary(drive)
 		if drive != nil && drive.Final != nil {
-			return drive.Final, nil
+			return asyncTurnResult{outcome: drive.Final, summary: summary}, nil
 		}
-		return orch.CurrentView(ctx, sid)
+		out, err := orch.CurrentView(ctx, sid)
+		if err != nil {
+			return asyncTurnResult{}, err
+		}
+		return asyncTurnResult{outcome: out, summary: summary}, nil
+	}
+}
+
+func operationDriveOutcomeSummary(drive *orchestrator.OperationDriveOutcome) string {
+	if drive == nil {
+		return ""
+	}
+	turnWord := "turns"
+	if drive.Turns == 1 {
+		turnWord = "turn"
+	}
+	base := fmt.Sprintf("drove %d %s", drive.Turns, turnWord)
+	if intent := operationDriveIntentLabel(drive.LastIntent); intent != "" {
+		base += " via " + intent
+	}
+	parts := []string{base}
+	if stop := operationDriveStopLabel(drive.StopReason); stop != "" {
+		parts = append(parts, "stopped "+stop)
+	}
+	return "(work drive: " + strings.Join(parts, "; ") + ")"
+}
+
+func operationDriveIntentLabel(intent string) string {
+	intent = strings.TrimSpace(intent)
+	if intent == "" {
+		return ""
+	}
+	if i := strings.LastIndex(intent, "__"); i >= 0 {
+		intent = intent[i+2:]
+	}
+	return strings.ReplaceAll(intent, "_", " ")
+}
+
+func operationDriveStopLabel(reason string) string {
+	reason = strings.TrimSpace(reason)
+	switch reason {
+	case "":
+		return ""
+	case "no-driver-intent":
+		return "at a checkpoint"
+	case "clarify":
+		return "for missing input"
+	case "rejected":
+		return "after a rejected turn"
+	case "offpath":
+		return "after an off-path answer"
+	case "cancelled":
+		return "after cancellation"
+	case "max-turns":
+		return "at the safety turn limit"
+	case "terminal":
+		return "at a terminal state"
+	case "no-operation":
+		return "because there is no active operation"
+	case "operation-not-autonomous":
+		return "because this operation needs manual input"
+	default:
+		if strings.HasPrefix(reason, "operation-") {
+			return "because the operation is " + strings.ReplaceAll(strings.TrimPrefix(reason, "operation-"), "_", " ")
+		}
+		return "because " + strings.ReplaceAll(reason, "_", " ")
 	}
 }
 
@@ -2078,6 +2150,18 @@ func startAsyncTurn(
 	m RootModel,
 	input string,
 	run func(ctx context.Context) (*orchestrator.TurnOutcome, error),
+	kind pendingKind,
+) (RootModel, tea.Cmd) {
+	return startAsyncTurnDetailed(m, input, func(ctx context.Context) (asyncTurnResult, error) {
+		out, err := run(ctx)
+		return asyncTurnResult{outcome: out}, err
+	}, kind)
+}
+
+func startAsyncTurnDetailed(
+	m RootModel,
+	input string,
+	run func(ctx context.Context) (asyncTurnResult, error),
 	kind pendingKind,
 ) (RootModel, tea.Cmd) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -2117,7 +2201,7 @@ func startAsyncTurn(
 	m.metaStreamPending = ""
 
 	cmd := func() tea.Msg {
-		out, err := run(ctx)
+		res, err := run(ctx)
 		if err != nil {
 			// Only treat this as a cancellation when the error itself is a
 			// context cancellation/deadline. Checking ctx.Err() alone is wrong:
@@ -2133,7 +2217,7 @@ func startAsyncTurn(
 			}
 			return turnOutcomeMsg{outcome: nil, input: input, err: err}
 		}
-		return turnOutcomeMsg{outcome: out, input: input, err: nil}
+		return turnOutcomeMsg{outcome: res.outcome, input: input, summary: res.summary, err: nil}
 	}
 	return m, tea.Batch(m.spinner.Tick, cmd)
 }
@@ -2841,6 +2925,10 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 		// User echo already happened; rejection rendering writes only
 		// the engine-side message body.
 		m.renderRejection("", out)
+	}
+
+	if msg.summary != "" {
+		m.transcript.AppendSystem(msg.summary)
 	}
 
 	// Drain the next queued in-room submission via dispatchInput

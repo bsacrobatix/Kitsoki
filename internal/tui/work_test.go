@@ -434,6 +434,7 @@ states:
 	model = runTurnBlocking(t, model, "/work drive")
 	tx = extractTranscript(t, model)
 	require.Contains(t, tx, "Done")
+	require.Contains(t, tx, "(work drive: drove 2 turns via accept; stopped because the operation is completed)")
 
 	journey, err := orch.LoadJourney(sid)
 	require.NoError(t, err)

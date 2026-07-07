@@ -227,7 +227,7 @@ export interface DataSource {
     sessionId: string,
     slots: Record<string, unknown>
   ): Promise<TurnResult>;
-  /** Drive a running autonomous operation until it stops at a safe checkpoint. */
+  /** Drive a running autonomous/supervised operation until it stops at a safe checkpoint. */
   driveOperation(sessionId: string): Promise<TurnResult>;
   /**
    * Read-only off-path question against the default agent. An optional
