@@ -5,16 +5,18 @@
 // observes its structured result, and eventually terminates by emitting
 // done(payload) that must conform to the declared schema. See
 // internal/host/codeact/executor.go for the loop itself and
-// docs/goals/codeact/GOAL.md for the wider design.
+// docs/architecture/starlark.md and docs/architecture/hosts.md#hostagentcodeact
+// for the author-facing contract.
 //
-// Mandatory args:
+// Args:
 //   - agent: (string) — named agent from the agents: block.
 //   - goal:  (string) — the natural-language objective handed to the agent.
 //   - capabilities: mapping — the shared Starlark capability
 //     authority for each emitted snippet. The loader validates the shape and
 //     the runtime exposes/enforces exactly the granted ctx surfaces.
-//   - budget: (int) — max steps before TerminatedBudgetExhausted.
-//   - schema: (string) — path to the JSON schema validating done() payloads,
+//   - budget: (int, optional) — max steps before TerminatedBudgetExhausted;
+//     defaults to 5 when absent or non-positive.
+//   - schema: (string, optional) — path to the JSON schema validating done() payloads,
 //     resolved overlay-first via resolvePromptPathCtx (same convention as
 //     host.agent.task's acceptance.schema). When set, a schema-invalid done()
 //     payload is rejected and fed back to the agent as an ErrorEnvelope

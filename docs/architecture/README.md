@@ -35,6 +35,10 @@ these surfaces.
 - **[`hosts.md`](hosts.md)** — every built-in `host.*` handler with its
   input/output contract. The effect surface authors invoke from YAML.
   Use [`hosts/`](hosts/README.md) as the shorter family index.
+- **[`starlark.md`](starlark.md)** — the full Kitsoki Starlark experience:
+  `host.starlark.run`, CodeAct snippets, the opt-in `ctx` capability sandbox,
+  deterministic stdlib, validation, cassettes, and promotion from exploratory
+  CodeAct to committed scripts.
 - **[`agent-plugin.md`](agent-plugin.md)** — the Agent plugin
   contract: declaring external agents under `agent_plugins:`, the
   `invoke: host.agent.<verb>` + `agent:` effect shape, the

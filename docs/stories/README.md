@@ -86,6 +86,8 @@ way, see [`../architecture/concept.md`](../architecture/concept.md).)
   Worked flagship: `tools/session-mining/examples/git-ops/`.
 - **The `host.*` reference** lives under architecture:
   [`../architecture/hosts.md`](../architecture/hosts.md).
+- **The Starlark experience** for deterministic glue and bounded CodeAct loops:
+  [`../architecture/starlark.md`](../architecture/starlark.md).
 - **The authoritative schema**: `kitsoki docs app-schema` (source at
   [`../embedded/app-schema.md`](../embedded/app-schema.md)). Use it as
   field reference after the conceptual docs, not as the first read.

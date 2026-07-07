@@ -1,7 +1,7 @@
 # Authoring a kitsoki glue script (`host.starlark.run`)
 
 This is the **procedural** companion to the authoritative contract reference at
-[`docs/architecture/hosts.md#hoststarlarkrun`](../../../architecture/hosts.md#hoststarlarkrun).
+[`docs/architecture/hosts.md#hoststarlarkrun`](../../../../docs/architecture/hosts.md#hoststarlarkrun).
 That doc is the source of truth for the field table, sidecar types, the `ctx`
 surface, error mapping, and the HTTP-cassette format — read it for *what* the
 contract is. This file is *how* to write and validate one, and the gotchas that
@@ -11,6 +11,12 @@ bite in practice. It does not repeat the contract; it links to it.
 expr-lang `with:`/guard vocabulary, too small for a bespoke Go handler. Sandbox
 source: `internal/host/starlark/` (design rationale in its `doc.go`); the
 `host.Handler` adapter is `internal/host/starlark_run.go`.
+
+For the broader Starlark experience — including the exact stdlib, CodeAct's
+bounded Starlark loop, capability sandboxing, and promotion from CodeAct to a
+checked-in script — see
+[`docs/architecture/starlark.md`](../../../../docs/architecture/starlark.md). The exact
+stdlib function list is [`stdlib.md`](stdlib.md).
 
 ## The three files
 
@@ -45,7 +51,7 @@ hosts: [host.starlark.run]            # MUST be in the app-level allow-list
 The sidecar — **not** the script — is what the engine enforces. A missing
 `required` input, a forgotten output, an undeclared returned key, or a type
 mismatch is a domain error that fires `on_error:`. The full type list and
-validation rules live in [hosts.md §The sidecar contract](../../../architecture/hosts.md#the-sidecar-contract).
+validation rules live in [hosts.md §The sidecar contract](../../../../docs/architecture/hosts.md#the-sidecar-contract).
 
 > **Wire every `inputs:` value as a `{{ }}` template.** `host.starlark.run` does
 > not expr-evaluate inputs — the machine resolves them first, and only a string
@@ -82,7 +88,8 @@ These are kitsoki-specific traps on top of the general
   iff 2xx) before you reach for the data.
 - **Only `json`, `math`, and decode-only `yaml`** are predeclared. Reaching for
   `time`/`random` (or any other module) is a resolve error — by design, so a
-  recorded run replays byte-for-byte.
+  recorded run replays byte-for-byte. See [`stdlib.md`](stdlib.md) for the
+  exact function signatures.
 - **No `%.2f`.** Starlark's `%` has no precision specifier. Round with `math`
   and assemble strings yourself — see the `fixed()` helper in
   [`stories/weather-report/scripts/weather_report.star`](../../../../stories/weather-report/scripts/weather_report.star).
@@ -129,7 +136,7 @@ These are kitsoki-specific traps on top of the general
    served from the cassette — deterministic, no LLM, no socket. The cassette
    format, record modes (`none|once|new_episodes|all`), matchers, and secret
    redaction are documented in
-   [hosts.md §Record / replay](../../../architecture/hosts.md#record--replay-http-cassettes).
+   [hosts.md §Record / replay](../../../../docs/architecture/hosts.md#record--replay-http-cassettes).
    Recording a first cassette: set `record_mode: once` (or
    `KITSOKI_HTTP_CASSETTE_RECORD=once`), run once against the live API, commit
    the redacted result, then revert to `none`.
@@ -151,3 +158,18 @@ called without leaking payloads or secrets.
 - [`stories/weather-report/`](../../../../stories/weather-report/) — fuller: free-
   text input, geocode + dataset chained GETs, a branch on operator-chosen mode,
   object/list outputs rendered as markdown tables, and an `on_error:` failed room.
+
+## CodeAct uses the same sandbox
+
+`host.agent.codeact` is an agent loop over the same Starlark evaluator: each
+agent step emits a snippet defining `def main(ctx): ...`, Kitsoki runs it with
+the effect's shared `with.capabilities`, and the next step sees either the
+returned dict or a structured Starlark error. The final `done(payload)` is
+validated by the effect's `schema:` when one is present.
+
+Use CodeAct when the deterministic script is not known yet but the agent should
+remain inside the Starlark capability sandbox. Do not add `sandbox:` to a
+CodeAct effect; that knob belongs to `host.agent.task` and write-capable
+`host.agent.converse`. Once a CodeAct trajectory stabilizes, promote the final
+snippet into `host.starlark.run` with a sidecar and prove the promoted flow runs
+with no `host.agent.codeact` dispatch.
