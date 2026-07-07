@@ -36,11 +36,12 @@ host_handlers:
 turns:
   - intent: { name: start }
     advance_clock: "5s"
-    expect_state: done_exhausted
+    expect_state: __exit__exhausted
     expect_world:
       tests_passed: false
       outcome:      "exhausted"
       cycle:        3
       report_path:  ".artifacts/fix-tests/report-exhausted.md"
 
+expect_terminal: true
 expect_no_errors: true

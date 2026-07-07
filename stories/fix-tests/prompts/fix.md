@@ -22,6 +22,14 @@ JSON via the `submit` tool.
   **remained** after it. Focus on them, and do not undo the prior cycle's
   correct changes.
 {% endif %}
+{% if args.review_feedback %}
+- The deterministic command was green, but the review gate rejected the diff.
+  Treat this as the primary failure to fix:
+
+```
+{{ args.review_feedback }}
+```
+{% endif %}
 
 ## Failure output
 

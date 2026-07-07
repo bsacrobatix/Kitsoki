@@ -41,6 +41,17 @@ there:
 > proceed → accept …    # walk the 8-room pipeline
 ```
 
+For repository-wide test repair, use the imported `fix-tests` loop directly:
+
+```
+> fix tests             # core__go_fix_tests; runs make test by default
+```
+
+That loop returns to `core.landing` only after the deterministic command is
+green and the read-only review gate confirms no tests were weakened and no
+functionality was lost. The default command is `make test`; override
+`test_cmd` in a warp/profile when a project needs a different gate.
+
 When the bugfix pipeline reaches `@exit:done`, dev-story hands off
 into `pr-refinement` (a.k.a. `core.pr.open_pr`). The PR is opened via
 `git push` + `gh pr create` (when `gh` is on PATH); ci_monitoring
@@ -95,6 +106,7 @@ canned closed-loop tests:
 | Fixture                                  | What it proves                                                                  |
 |------------------------------------------|---------------------------------------------------------------------------------|
 | `flows/dogfood_smoke.yaml`               | the app loads; `iface.ticket.list_mine` resolves; navigation lifts work          |
+| `flows/fix_tests_autonomous.yaml`        | `core__go_fix_tests` runs make-test green plus review and returns to landing     |
 | `flows/idea_uses_context_workspace.yaml` | the idea/proposal room writes workspaces under `.context/designs`, not protected `docs/proposals/.workspace` |
 | `flows/pickup_self_bug_supervised.yaml`  | 18-turn supervised walk: ticket pick → bf 8-room → @exit:done → pr → @exit:merged → main |
 | `flows/pickup_story_bug_supervised.yaml` | same walk against `stories/oregon-trail/issues/bugs/<id>.md`; proves multi-glob coverage |

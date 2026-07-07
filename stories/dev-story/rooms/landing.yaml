@@ -282,6 +282,9 @@ states:
               hint:   "fan a published proposal out into briefs, review, and fleet"
               intent: go_deliver
               when:   "world.design_file != ''"
+            - label:  "fix tests"
+              hint:   "run the test command, fix failures, and review for no regressions"
+              intent: go_fix_tests
             - label:  "cypilot"
               hint:   "drive the picked epic through the SDLC waterfall"
               intent: go_cypilot
@@ -768,6 +771,15 @@ states:
 
                   Suggestions:
                   - `idea` — draft and publish a proposal, then decompose it
+
+      go_fix_tests:
+        - target: tests
+          effects:
+            - set:
+                test_cmd: "{{ slots.test_cmd ?? world.test_cmd }}"
+                fix_tests_report_path: ""
+                fix_tests_review: {}
+                last_error: ""
 
       go_gitops:
         - target: gitops

@@ -95,7 +95,10 @@ jq -j 'select(.Action=="output") | .Output' "$GO_JSON" >>"$REPORT" 2>/dev/null
 
 # Package-level tallies (Test==null marks a package result, not a single test).
 go_pkgs_total=$(jq -r 'select((.Action=="pass" or .Action=="fail" or .Action=="skip") and (.Test|not)) | .Package' "$GO_JSON" 2>/dev/null | sort -u | wc -l | tr -d ' ')
-mapfile -t GO_FAILED_PKGS < <(jq -r 'select(.Action=="fail" and (.Test|not)) | .Package' "$GO_JSON" 2>/dev/null | sort -u)
+GO_FAILED_PKGS=()
+while IFS= read -r pkg; do
+	[ -n "$pkg" ] && GO_FAILED_PKGS+=("$pkg")
+done < <(jq -r 'select(.Action=="fail" and (.Test|not)) | .Package' "$GO_JSON" 2>/dev/null | sort -u)
 go_failures=${#GO_FAILED_PKGS[@]}
 
 # A non-zero rc with no parsed package failures means go test itself failed to
@@ -120,7 +123,10 @@ cat "$TMP/starlark.out" >>"$REPORT"
 # Suite 3: story flow fixtures
 # ---------------------------------------------------------------------------
 section "story flows"
-mapfile -t STORY_APPS < <(git ls-files | grep -E '^stories/[^/]+/app\.yaml$' | sort)
+STORY_APPS=()
+while IFS= read -r app; do
+	[ -n "$app" ] && STORY_APPS+=("$app")
+done < <(git ls-files | grep -E '^stories/[^/]+/app\.yaml$' | sort)
 
 declare -a FLOW_FAILED_APPS
 flow_apps_total=0

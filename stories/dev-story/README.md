@@ -51,6 +51,14 @@ dev-story
         exits:
           done      → prd_published    # landing room; carries the PRD into design
           abandoned → landing (status: "abandoned")
+
+  └── imports tests (../fix-tests)      # make-test-green loop
+        entry: starting
+        world_in: test_cmd, workdir, max_cycles
+        exits:
+          achieved    → landing (status: "tests-green")
+          exhausted   → landing (status: "tests-exhausted")
+          needs-human → human_review_report
 ```
 
 The bf → pr handoff is one import edge. When bf fires `@exit:done` the
@@ -60,6 +68,13 @@ transitions into `pr` — whose compound OnEnter runs the pr `world_in:`
 setters in parent scope to project those keys into `pr__<key>` (which
 pr's own rooms then reference). The full chain is exercised by
 `flows/bugfix_to_pr.yaml`.
+
+The `tests` import is a self-driving command repair loop. `go_fix_tests` enters
+it from landing through the child's reset entry, runs `test_cmd` (falling back
+to `make test`), loops
+fixer → deterministic command → review until both gates pass, and rejects green
+diffs that weaken tests or lose functionality. It is exercised by
+[`flows/fix_tests_autonomous.yaml`](./flows/fix_tests_autonomous.yaml).
 
 ## PRD → Design walk
 
@@ -478,6 +493,8 @@ rooms; the post-bind guarded emit auto-routes on the agent's verdict).
 | `pickup_to_bugfix.yaml` | landing → ticket_search → pick → dispatch into the bf import (lands in bf.idle with world_in: projections firing). |
 | `github_ticket_drive_routes.yaml` | `iface.ticket` rebound to `host.gh.ticket`: a GitHub-Issue-sourced bug carries a provider-classified `ticket_type` (from its `bug` label), so a row pick (`n=`) lands `ticket_type=bug` and the headline `drive` routes into bf — no silent self-loop. The get also surfaces `source=github` + the lifted `legacy_id`, so the local↔issue identity shows in the ticket view. Regression for the two `host.gh.ticket` provider bugs. |
 | `bugfix_to_pr.yaml` | The full closed-loop walk: landing → bf.idle → walk every bf room to @exit:done → handoff into pr → walk pr to @exit:merged → land back in `landing` with status="merged" and last_pr_url populated. |
+| `fix_tests_autonomous.yaml` | `go_fix_tests` enters the imported make-test-green loop, drains deterministic command + review gates, and projects the report/review back to landing. |
+| `fix_tests_resets_stale_child_world.yaml` | Seeds stale `tests__*` child state before `go_fix_tests`; proves the quick action starts a fresh cycle-0 review instead of inheriting old failure/review state. |
 | `design_to_implementation.yaml` | The publish → implement bridge: design_done → `go_implementation` → impl.idle (on_enter self-provisions the worktree — the fixture seeds NO workspace) → walk the impl pipeline to @exit:done → `landing` with status="merged". |
 | `design_to_decompose_to_impl.yaml` | The publish → decompose bridge, sibling to `design_to_implementation.yaml`: design_done → `go_deliver` → `deliver.configure` → `deliver__start` → decompose (agent mocked) → lint (Starlark) → review (agent mocked, accept) → fleet fan-out over a 2-brief fixture (reuses deliver's own `rich_schema_happy` manifest) → `@exit:done` → `landing` with status="delivered". Also proven live (no LLM) on the web (`tools/runstatus/tests/playwright/deliver-decompose-walk.spec.ts`) and VS Code (`tools/vscode-kitsoki/tests/vscode-deliver-decompose-walk.e2e.spec.ts`) surfaces — see [`docs/stories/deliver.md`](../../docs/stories/deliver.md). |
 | `deliver_router_picks_arc.yaml` | decompose-vs-direct is an OPERATOR CHOICE, never a size heuristic: four sub-fixtures prove the SAME published proposal routes to `impl` on `go_implementation` and to `deliver` on `go_deliver`, from both `design_done` and `landing`, plus the `landing` guard when no proposal is published yet. |
