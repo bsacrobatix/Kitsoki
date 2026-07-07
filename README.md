@@ -33,6 +33,8 @@ workflows — see [`docs/architecture/concept.md`](docs/architecture/concept.md)
 For a reader-specific path through the docs, start at
 [`docs/README.md`](docs/README.md).
 
+Product site: [bsacrobatix.github.io/Kitsoki](https://bsacrobatix.github.io/Kitsoki/).
+
 **Free-text in, deterministic transitions out.**
 
 ```sh
