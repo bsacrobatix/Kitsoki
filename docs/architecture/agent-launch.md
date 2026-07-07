@@ -59,15 +59,15 @@ Claude Code agent with the studio MCP attached, for example
 
 Task-backed freestanding launch uses `codex exec`. Freestanding launch with no
 task uses top-level `codex [OPTIONS] [PROMPT]`, so the terminal opens the Codex
-TUI with the agent instructions as the initial prompt. Its TOML `sandbox_mode`
-is forwarded to Codex, so the checked-in `kitsoki-mcp-driver` opens with
-`--sandbox read-only` while the studio MCP remains attached. Pass
-`--interactive` only when you want to force the interactive path despite other
-launch inputs.
+TUI with the agent instructions as the initial prompt. Interactive Codex launch
+uses `--dangerously-bypass-approvals-and-sandbox`, so the agent TOML
+`sandbox_mode` is not forwarded on this path. Pass `--interactive` only when you
+want to force the interactive path despite other launch inputs.
 
 Raw interactive launch also uses the backend's top-level interactive CLI, but
-passes no app/agent prompt at all. It is intended for native logged-in host CLI
-sessions, especially macOS subscription workflows.
+passes no app/agent prompt at all. For Codex it also uses
+`--dangerously-bypass-approvals-and-sandbox`. It is intended for native logged-in
+host CLI sessions, especially macOS subscription workflows.
 
 By default it is a no-provider dry run. It prints a JSON launch plan with:
 
