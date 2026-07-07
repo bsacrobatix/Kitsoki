@@ -68,11 +68,45 @@ states:
           cmd: bash
           args:
             - "-lc"
-            - 'python3 "$KITSOKI_APP_DIR/scripts/profile_setup_discover.py" "$@"'
-            - "profile_setup_discover"
+            - |
+              set -eu
+              script_name="$0"
+              find_profile_setup_script() {
+                name="$1"
+                for root in \
+                  "${KITSOKI_APP_DIR:-}" \
+                  "${KITSOKI_REPO:+$KITSOKI_REPO/stories/dev-story}" \
+                  "$PWD/stories/dev-story" \
+                  "$PWD/internal/basestories/stories/dev-story"
+                do
+                  [ -n "$root" ] || continue
+                  candidate="$root/scripts/$name"
+                  if [ -f "$candidate" ]; then
+                    printf '%s\n' "$candidate"
+                    return 0
+                  fi
+                done
+                cache_root="${XDG_CACHE_HOME:-${HOME:-}/.cache}/kitsoki/stories"
+                if [ -d "$cache_root" ]; then
+                  for candidate in "$cache_root"/*/dev-story/scripts/"$name"; do
+                    if [ -f "$candidate" ]; then
+                      printf '%s\n' "$candidate"
+                      return 0
+                    fi
+                  done
+                fi
+                return 1
+              }
+              script="$(find_profile_setup_script "$script_name")" || {
+                printf '{"schema":"kitsoki-profile-setup-script/v1","status":"error","error":"profile setup helper not found: %s"}\n' "$script_name"
+                exit 1
+              }
+              exec python3 "$script" "$@"
+            - "profile_setup_discover.py"
             - "{{ world.profile_setup_target_path }}"
             - "{{ world.workdir }}"
             - "{{ world.repo_root }}"
+          fail_on_error: true
         bind:
           profile_setup_discovery: "stdout_json"
           profile_setup_target_path: "stdout_json.target_path"
@@ -417,8 +451,41 @@ states:
           cmd: bash
           args:
             - "-lc"
-            - 'python3 "$KITSOKI_APP_DIR/scripts/profile_setup_apply.py" "$@"'
-            - "profile_setup_apply"
+            - |
+              set -eu
+              script_name="$0"
+              find_profile_setup_script() {
+                name="$1"
+                for root in \
+                  "${KITSOKI_APP_DIR:-}" \
+                  "${KITSOKI_REPO:+$KITSOKI_REPO/stories/dev-story}" \
+                  "$PWD/stories/dev-story" \
+                  "$PWD/internal/basestories/stories/dev-story"
+                do
+                  [ -n "$root" ] || continue
+                  candidate="$root/scripts/$name"
+                  if [ -f "$candidate" ]; then
+                    printf '%s\n' "$candidate"
+                    return 0
+                  fi
+                done
+                cache_root="${XDG_CACHE_HOME:-${HOME:-}/.cache}/kitsoki/stories"
+                if [ -d "$cache_root" ]; then
+                  for candidate in "$cache_root"/*/dev-story/scripts/"$name"; do
+                    if [ -f "$candidate" ]; then
+                      printf '%s\n' "$candidate"
+                      return 0
+                    fi
+                  done
+                fi
+                return 1
+              }
+              script="$(find_profile_setup_script "$script_name")" || {
+                printf '{"schema":"kitsoki-profile-setup-script/v1","status":"error","error":"profile setup helper not found: %s"}\n' "$script_name"
+                exit 1
+              }
+              exec python3 "$script" "$@"
+            - "profile_setup_apply.py"
             - "{{ world.profile_setup_target_path }}"
             - "{{ world.profile_setup_candidate_profile }}"
             - "{{ world.workdir }}"
