@@ -100,7 +100,7 @@ canned closed-loop tests:
 | `flows/pickup_story_bug_supervised.yaml` | same walk against `stories/oregon-trail/issues/bugs/<id>.md`; proves multi-glob coverage |
 | `flows/pickup_autonomous_then_bail.yaml` | `llm_then_human` auto-fires 2 checkpoints → operator flips mode → state HOLDS → manual accept resumes |
 
-All four use stubbed `host_handlers:` — no real LLM, git, or file
+These fixtures use stubbed `host_handlers:` — no real LLM, git, or file
 I/O. The on-disk smoke is documented below under "Manual
 walkthrough".
 
