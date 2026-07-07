@@ -20,13 +20,16 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/bugprivacy"
 	studio "kitsoki/internal/mcp/studio"
+	"kitsoki/internal/store"
 )
 
 // recordingFiler is a fake studio.IssueFiler: it records the request and returns
@@ -211,6 +214,99 @@ func TestIssueCreate_DefaultsToCurrentSessionEvidenceAndRedacts(t *testing.T) {
 	assert.NotContains(t, filer.got.Body, "## Trace")
 }
 
+func TestIssueCreate_BundlesExplicitTracePathWithoutCurrentHandle(t *testing.T) {
+	ctx := context.Background()
+	srv, filer, dir := newIssueServer(t)
+	cs := connectInProcess(ctx, t, srv)
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("HOME", home)
+
+	// Keep a current MCP session open to prove trace_path suppresses the old
+	// "current session" inference. This is a different session than the TUI
+	// trace we want to report.
+	res, err := callTool(ctx, cs, "session.new", map[string]any{
+		"story_path": cloakApp,
+		"harness":    "replay",
+		"cassette":   cloakCassette,
+		"trace":      filepath.Join(t.TempDir(), "mcp-current.jsonl"),
+		"initial_world": map[string]any{
+			"diagnostic": "current-session-only",
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.new errored: %s", contentText(res))
+
+	tracePath := writeIssueTrace(t, filepath.Join(home, ".kitsoki", "sessions", "kitsoki-dev", "abc123-tui.jsonl"), map[string]any{
+		"ticket_id":           "TUI-7",
+		"diagnostic":          "email alice@example.com and read " + home + "/secret.txt",
+		"last_error":          "operator could not file a bug from the TUI",
+		"session_cost_usd":    0.25,
+		"kitsoki_dev__status": "needs-human",
+	})
+
+	res, err = callTool(ctx, cs, "issue.create", map[string]any{
+		"title":       "TUI trace report",
+		"body":        "The bug happened in a TUI session, not this MCP session.",
+		"trace_path":  tracePath,
+		"trace_limit": 10,
+	})
+	require.NoError(t, err)
+	out := issueResult(t, res)
+	assert.True(t, out.OK)
+
+	body := filer.got.Body
+	assert.Contains(t, body, "## Context - trace", "trace context bundled")
+	assert.Contains(t, body, "abc123-tui.jsonl", "source trace named")
+	assert.Contains(t, body, "## Trace", "trace tail bundled")
+	assert.Contains(t, body, "reconstructed world", "world reconstructed from world.update events")
+	assert.NotContains(t, body, "## Context — session", "current MCP handle must not be inferred when trace_path is supplied")
+	assert.NotContains(t, body, "current-session-only")
+	assert.NotContains(t, body, "alice@example.com")
+	assert.NotContains(t, body, home+"/secret.txt")
+
+	slugDir := filepath.Join(dir, "tui-trace-report")
+	traceData, err := os.ReadFile(filepath.Join(slugDir, "trace.redacted.jsonl"))
+	require.NoError(t, err)
+	worldData, err := os.ReadFile(filepath.Join(slugDir, "world.redacted.json"))
+	require.NoError(t, err)
+	for _, evidence := range []string{body, string(traceData), string(worldData)} {
+		assert.NotContains(t, evidence, "alice@example.com")
+		assert.NotContains(t, evidence, home+"/secret.txt")
+	}
+	assert.Contains(t, string(traceData), "world.update")
+}
+
+func TestIssueCreate_TraceRefResolvesRepoLocalTraceByAppAndTicket(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	t.Chdir(root)
+	t.Setenv("HOME", filepath.Join(t.TempDir(), "home"))
+	srv, filer, _ := newIssueServer(t)
+	cs := connectInProcess(ctx, t, srv)
+
+	tracePath := writeIssueTrace(t, filepath.Join(root, ".kitsoki", "sessions", "20260707T120000Z-kitsoki-dev-xyz987.jsonl"), map[string]any{
+		"ticket_id":          "BUG-123",
+		"diagnostic":         "repo-local TUI trace",
+		"needs_human_reason": "TUI bug surface was unavailable",
+	})
+
+	res, err := callTool(ctx, cs, "issue.create", map[string]any{
+		"title":        "TUI trace by ref",
+		"body":         "Resolved from the repo-local .kitsoki/sessions trace cache.",
+		"trace_ref":    "xyz987",
+		"trace_app":    "kitsoki-dev",
+		"trace_ticket": "BUG-123",
+	})
+	require.NoError(t, err)
+	_ = issueResult(t, res)
+
+	body := filer.got.Body
+	assert.Contains(t, body, filepath.Base(tracePath))
+	assert.Contains(t, body, "## Context - trace")
+	assert.Contains(t, body, "## Trace")
+	assert.Contains(t, body, "story_app_id: kitsoki-dev", "trace_app is preserved in runtime metadata when no live app def is available")
+}
+
 func TestIssueCreate_BundlesStoppedVisualRecording(t *testing.T) {
 	ctx := context.Background()
 	srv, filer, dir := newIssueServer(t)
@@ -376,4 +472,63 @@ func TestIssueCreate_PrivacyFailureBlocksFiler(t *testing.T) {
 	require.NoError(t, rerr)
 	assert.NotContains(t, string(body), "private business report")
 	assert.Contains(t, string(body), "confidential_business_data")
+}
+
+func writeIssueTrace(t *testing.T, path string, world map[string]any) string {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, f.Close()) }()
+	_, err = f.WriteString(`{"kind":"session.header","schema_version":1}` + "\n")
+	require.NoError(t, err)
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	events := []store.Event{
+		{
+			Turn:      app.TurnNumber(1),
+			Ts:        now,
+			Kind:      store.TurnStarted,
+			StatePath: app.StatePath("idle"),
+			Payload:   issueTracePayload(t, map[string]any{"input": "start"}),
+		},
+		{
+			Turn:      app.TurnNumber(1),
+			Ts:        now.Add(time.Second),
+			Kind:      store.EffectApplied,
+			StatePath: app.StatePath("idle"),
+			Payload:   issueTracePayload(t, map[string]any{"set": world}),
+		},
+		{
+			Turn:      app.TurnNumber(1),
+			Ts:        now.Add(2 * time.Second),
+			Kind:      store.AgentCalled,
+			StatePath: app.StatePath("idle"),
+			CallID:    "call-1",
+			Payload: issueTracePayload(t, map[string]any{
+				"verb":   "debug",
+				"prompt": "diagnose " + filepath.Join(os.Getenv("HOME"), "secret.txt") + " for alice@example.com",
+			}),
+		},
+		{
+			Turn:      app.TurnNumber(1),
+			Ts:        now.Add(3 * time.Second),
+			Kind:      store.TransitionApplied,
+			StatePath: app.StatePath("needs_human"),
+			Payload:   issueTracePayload(t, map[string]any{"from": "idle", "to": "needs_human"}),
+		},
+	}
+	for _, ev := range events {
+		line, mErr := store.MarshalEventLine(ev)
+		require.NoError(t, mErr)
+		_, err = f.Write(append(line, '\n'))
+		require.NoError(t, err)
+	}
+	return path
+}
+
+func issueTracePayload(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(v)
+	require.NoError(t, err)
+	return b
 }

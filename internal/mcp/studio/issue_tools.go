@@ -98,10 +98,10 @@ func (srv *Server) registerIssueTools() {
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name: "issue.create",
 		Description: "File a GitHub issue natively from the studio, bundling evidence the studio produces. " +
-			"{title, body?, labels?, repo?, handle?, include_trace?, trace_limit?, include_inspect?, include_visual_recordings?, assets?}. " +
-			"When handle is omitted, the current live session is inferred when unambiguous; handle-backed reports include scrubbed trace and inspect evidence by default unless explicitly disabled. " +
+			"{title, body?, labels?, repo?, handle?, trace_ref?, trace_path?, trace_app?, trace_ticket?, include_trace?, trace_limit?, include_inspect?, include_visual_recordings?, assets?}. " +
+			"When handle is omitted, the current live session is inferred when unambiguous unless a trace source is supplied; handle- and trace-backed reports include scrubbed trace and context evidence by default unless explicitly disabled. " +
 			"Renders any requested assets (kind: tui_png|web|tui_text) to the artifacts dir and references them by relative path; " +
-			"bundles a handle's redacted trace/inspect snapshot and stopped visual.record artifact bundles into the body; always adds the source-autonomous label. " +
+			"bundles a handle's redacted trace/inspect snapshot, a resolved on-disk trace, and stopped visual.record artifact bundles into the body; always adds the source-autonomous label. " +
 			"Returns {ok, url, number, labels[], assets[]}.",
 	}, srv.handleIssueCreate)
 }
@@ -135,8 +135,20 @@ type IssueCreateArgs struct {
 	// Handle is a driving session whose evidence to bundle (and the default
 	// render target for assets that name neither a handle nor a spec).
 	Handle string `json:"handle,omitempty"`
-	// IncludeTrace/IncludeInspect default to true for handle-backed reports.
-	// Pass false explicitly to opt out of the zero-friction session evidence.
+	// TraceRef resolves an on-disk trace to bundle. It accepts an explicit JSONL
+	// path or the same kind of filename substring operators pass to `kitsoki
+	// trace` after debugging a non-MCP TUI/session run.
+	TraceRef string `json:"trace_ref,omitempty"`
+	// TracePath is an explicit-path alias for TraceRef, kept separate so callers
+	// can be unambiguous when they already found the JSONL file.
+	TracePath string `json:"trace_path,omitempty"`
+	// TraceApp restricts trace lookup to an app id. With no TraceRef/TracePath it
+	// selects the newest matching trace.
+	TraceApp string `json:"trace_app,omitempty"`
+	// TraceTicket restricts trace lookup to traces whose world ticket_id matches.
+	TraceTicket string `json:"trace_ticket,omitempty"`
+	// IncludeTrace/IncludeInspect default to true for handle- and trace-backed
+	// reports. Pass false explicitly to opt out of zero-friction evidence.
 	IncludeTrace   *bool `json:"include_trace,omitempty"`
 	TraceLimit     int   `json:"trace_limit,omitempty"`
 	IncludeInspect *bool `json:"include_inspect,omitempty"`
@@ -178,7 +190,10 @@ func (srv *Server) handleIssueCreate(
 		return buildToolError(ErrIssueUnavailable,
 			"issue.create: no issue filer wired (this studio was started without GitHub filing)"), nil, nil
 	}
-	if args.Handle == "" {
+	if traceErr := validateIssueTraceArgs(args); traceErr != nil {
+		return buildToolError(ErrBadRequest, "issue.create: "+traceErr.Error()), nil, nil
+	}
+	if args.Handle == "" && !issueHasTraceSource(args) {
 		if sh, ok := srv.sess.CurrentDrivingSession(); ok {
 			args.Handle = sh.Key
 		}
@@ -306,7 +321,11 @@ func (srv *Server) issueRuntimeSnapshot(args IssueCreateArgs) reportmeta.Snapsho
 			root = wh.Dir
 		}
 	}
-	return reportmeta.Capture(root, def)
+	snap := reportmeta.Capture(root, def)
+	if def == nil && strings.TrimSpace(args.TraceApp) != "" {
+		snap.Story.AppID = strings.TrimSpace(args.TraceApp)
+	}
+	return snap
 }
 
 // writeIssueFallback persists a composed issue to the artifacts dir when GitHub
@@ -445,69 +464,80 @@ func copyFile(dst, src string) error {
 // runtime reads session.inspect / session.trace use, so the bundled evidence
 // matches those tools exactly.
 func (srv *Server) issueContext(ctx context.Context, args IssueCreateArgs) (string, *mcpsdk.CallToolResult) {
-	includeTrace := issueBoolDefault(args.IncludeTrace, args.Handle != "")
-	includeInspect := issueBoolDefault(args.IncludeInspect, args.Handle != "")
-	if args.Handle == "" || (!includeTrace && !includeInspect) {
+	hasTraceSource := issueHasTraceSource(args)
+	includeTrace := issueBoolDefault(args.IncludeTrace, args.Handle != "" || hasTraceSource)
+	includeInspect := issueBoolDefault(args.IncludeInspect, args.Handle != "" || hasTraceSource)
+	if args.Handle == "" && !hasTraceSource {
 		return "", nil
 	}
-	rt, rerr := srv.resolveRuntime(args.Handle)
-	if rerr != nil {
-		return "", rerr
-	}
+
 	// Bulky machine context (full world, full trace) is written to a sidecar file
 	// under the issue's artifacts dir; the body embeds only a compact summary so
 	// the GitHub issue (and the MCP result echoing it) stays readable.
 	sidecarDir := filepath.Join(srv.resolveArtifactsDir(), issueSlug(args.Title))
 	scrubOpts := rsserver.BugScrubOptions()
 	var b strings.Builder
-	if includeInspect {
-		if out, err := rt.inspect(ctx, 5, args.Handle); err == nil {
-			fmt.Fprintf(&b, "\n\n## Context — session `%s` @ `%s`\n", args.Handle, out.State)
-			if len(out.AllowedIntents) > 0 {
-				fmt.Fprintf(&b, "- allowed intents: %s\n", strings.Join(out.AllowedIntents, ", "))
-			}
-			// World can be large; write the pretty version to a sidecar and embed a
-			// compact one-liner (with a key count) in the body.
-			world := rsserver.RedactedTraceValue("world", out.World, scrubOpts)
-			if w, err := json.Marshal(world); err == nil {
-				if pretty, perr := json.MarshalIndent(world, "", "  "); perr == nil {
-					if path, werr := writeIssueSidecar(sidecarDir, "world.redacted.json", pretty); werr == nil {
-						fmt.Fprintf(&b, "- world (%d keys, redacted full: [%s](%s)):\n```json\n%s\n```\n",
-							len(out.World), filepath.Base(path), path, string(w))
-					} else {
-						fmt.Fprintf(&b, "- world (%d keys, redacted):\n```json\n%s\n```\n", len(out.World), string(w))
+	if args.Handle != "" && (includeTrace || includeInspect) {
+		rt, rerr := srv.resolveRuntime(args.Handle)
+		if rerr != nil {
+			return "", rerr
+		}
+		if includeInspect {
+			if out, err := rt.inspect(ctx, 5, args.Handle); err == nil {
+				fmt.Fprintf(&b, "\n\n## Context — session `%s` @ `%s`\n", args.Handle, out.State)
+				if len(out.AllowedIntents) > 0 {
+					fmt.Fprintf(&b, "- allowed intents: %s\n", strings.Join(out.AllowedIntents, ", "))
+				}
+				// World can be large; write the pretty version to a sidecar and embed a
+				// compact one-liner (with a key count) in the body.
+				world := rsserver.RedactedTraceValue("world", out.World, scrubOpts)
+				if w, err := json.Marshal(world); err == nil {
+					if pretty, perr := json.MarshalIndent(world, "", "  "); perr == nil {
+						if path, werr := writeIssueSidecar(sidecarDir, "world.redacted.json", pretty); werr == nil {
+							fmt.Fprintf(&b, "- world (%d keys, redacted full: [%s](%s)):\n```json\n%s\n```\n",
+								len(out.World), filepath.Base(path), path, string(w))
+						} else {
+							fmt.Fprintf(&b, "- world (%d keys, redacted):\n```json\n%s\n```\n", len(out.World), string(w))
+						}
 					}
 				}
 			}
 		}
+		if includeTrace {
+			limit := args.TraceLimit
+			if limit <= 0 {
+				limit = defaultTraceLimit
+			}
+			events, err := rt.Events()
+			if err != nil {
+				events = nil
+			}
+			if len(events) > limit {
+				events = events[len(events)-limit:]
+			}
+			redacted := rsserver.RedactedTraceJSONL(events, scrubOpts)
+			sidecarRef := ""
+			if path, werr := writeIssueSidecar(sidecarDir, "trace.redacted.jsonl", redacted); werr == nil {
+				sidecarRef = fmt.Sprintf(" (full: [%s](%s))", filepath.Base(path), path)
+			}
+			lines := strings.Split(strings.TrimRight(string(redacted), "\n"), "\n")
+			if len(lines) == 1 && lines[0] == "" {
+				lines = nil
+			}
+			fmt.Fprintf(&b, "\n## Trace (last %d events, redacted)%s\n```\n", len(lines), sidecarRef)
+			for _, line := range lines {
+				b.WriteString(line)
+				b.WriteByte('\n')
+			}
+			b.WriteString("```\n")
+		}
 	}
-	if includeTrace {
-		limit := args.TraceLimit
-		if limit <= 0 {
-			limit = defaultTraceLimit
+	if hasTraceSource {
+		contextMD, rerr := srv.issueOnDiskTraceContext(args, sidecarDir, includeTrace, includeInspect, args.Handle != "")
+		if rerr != nil {
+			return "", rerr
 		}
-		events, err := rt.Events()
-		if err != nil {
-			events = nil
-		}
-		if len(events) > limit {
-			events = events[len(events)-limit:]
-		}
-		redacted := rsserver.RedactedTraceJSONL(events, scrubOpts)
-		sidecarRef := ""
-		if path, werr := writeIssueSidecar(sidecarDir, "trace.redacted.jsonl", redacted); werr == nil {
-			sidecarRef = fmt.Sprintf(" (full: [%s](%s))", filepath.Base(path), path)
-		}
-		lines := strings.Split(strings.TrimRight(string(redacted), "\n"), "\n")
-		if len(lines) == 1 && lines[0] == "" {
-			lines = nil
-		}
-		fmt.Fprintf(&b, "\n## Trace (last %d events, redacted)%s\n```\n", len(lines), sidecarRef)
-		for _, line := range lines {
-			b.WriteString(line)
-			b.WriteByte('\n')
-		}
-		b.WriteString("```\n")
+		b.WriteString(contextMD)
 	}
 	return b.String(), nil
 }

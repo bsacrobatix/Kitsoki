@@ -353,11 +353,13 @@ If something required to **develop, test, run, introspect, trace, or debug** a
 story is impossible through the kitsoki MCP — a missing tool, a tool that can't
 express what you need, a field you can't read, a turn you can't drive — that is a
 gap in the studio surface and it must be filed, not worked around. File it with
-`issue.create` (`{title, body, labels?, handle?, include_trace?, include_inspect?,
-assets?}`), which does the bundling for you server-side: it renders any assets
-you name, saves them, and references them in the body; it pulls a handle's trace
-and inspect snapshot into the body; and it files the GitHub issue. It **always**
-adds the `source-autonomous` label — you don't manage labels for that.
+`issue.create` (`{title, body, labels?, handle?, trace_ref?, trace_path?,
+trace_app?, trace_ticket?, include_trace?, include_inspect?, assets?}`), which
+does the bundling for you server-side: it renders any assets you name, saves
+them, and references them in the body; it pulls a handle's trace and inspect
+snapshot or a resolved on-disk trace into the body; and it files the GitHub
+issue. It **always** adds the `source-autonomous` label — you don't manage labels
+for that.
 
 - **Title**: `[MCP gap] <tool family> cannot <X>`.
 - **Labels**: pass `["bug"]` (a tool misbehaves) or `["enhancement"]` (a
@@ -370,6 +372,12 @@ adds the `source-autonomous` label — you don't manage labels for that.
   handle or a `{story_path, state, world}` spec); the tool saves it under
   `.artifacts` and references it by relative path. (Asset *upload* isn't wired
   yet — the path is a stopgap reference; the body is marked accordingly.)
+- **Evidence from another surface**: when the bug happened in a TUI/session run
+  outside the current MCP process, use `trace_path` for the JSONL file you found
+  with `kitsoki trace`, or `trace_ref` plus optional `trace_app` /
+  `trace_ticket` to let the server resolve the newest matching trace. Do not
+  paste raw trace output into the body; `issue.create` writes redacted trace and
+  reconstructed-world sidecars for you.
 
 Your prose `body` must still be **complete enough to act on without you** — the
 bundled trace/inspect is the evidence, but you supply the narrative:
