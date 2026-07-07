@@ -1,5 +1,17 @@
 BINARY    := kitsoki
 PKG       := ./cmd/kitsoki
+KITSOKI_CALLER_PATH := $(PATH)
+export KITSOKI_CALLER_PATH
+# `make setup` can install required tools into standard locations that the
+# current shell has not picked up yet (for example a fresh Homebrew install on
+# Apple Silicon, or the official Go tarball on Linux). Append those locations so
+# `make install` works immediately after setup without overriding a toolchain
+# the caller already put on PATH.
+KITSOKI_PATH_FALLBACKS ?= /opt/homebrew/bin /usr/local/go/bin /usr/local/bin
+KITSOKI_PATH_APPEND := $(shell for d in $(KITSOKI_PATH_FALLBACKS); do [ -d "$$d" ] && printf '%s%s' "$${sep:-}" "$$d"; sep=:; done)
+ifneq ($(strip $(KITSOKI_PATH_APPEND)),)
+export PATH := $(KITSOKI_CALLER_PATH):$(KITSOKI_PATH_APPEND)
+endif
 # Default install dir: pick a location that's actually on PATH on both Linux and
 # macOS, instead of the per-OS ~/bin / ~/.local/bin guess (neither is reliably on
 # PATH, which left the binary unfindable). Resolution order:
@@ -151,7 +163,7 @@ install: check-deps web embed-stories embed-skills
 		exit 1; \
 	fi; \
 	rm -f "$$log"
-	@case ":$$PATH:" in \
+	@case ":$$KITSOKI_CALLER_PATH:" in \
 		*":$(INSTALLDIR):"*) ;; \
 		*) echo "warning: $(INSTALLDIR) is not on your PATH — '$(BINARY)' won't be found." >&2; \
 		   echo "         add it (e.g. 'export PATH=\"$(INSTALLDIR):\$$PATH\"' in your shell profile)" >&2; \
