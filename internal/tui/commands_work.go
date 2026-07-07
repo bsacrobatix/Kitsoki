@@ -26,8 +26,13 @@ import (
 // chat drives, backgrounded Claude PTYs, and proposal-review work without
 // leaving the current flow.
 func handleWorkSlash(m RootModel, args []string) (RootModel, string, tea.Cmd) {
-	if len(args) > 0 && args[0] == "drive" {
-		return handleWorkDriveSlash(m)
+	if len(args) > 0 {
+		switch args[0] {
+		case "drive":
+			return handleWorkDriveSlash(m)
+		case "artifact", "open":
+			return handleWorkArtifactSlash(m)
+		}
 	}
 	next, block := renderWorkBlock(m, args)
 	return next, block, nil
@@ -190,6 +195,34 @@ func handleWorkDriveSlash(m RootModel) (RootModel, string, tea.Cmd) {
 	return next, r.SlashOutput("(work: driving operation)"), cmd
 }
 
+func handleWorkArtifactSlash(m RootModel) (RootModel, string, tea.Cmd) {
+	r := blocks.New(m.transcript.width, m.currentTheme())
+	artifact := operationArtifactForCurrentOperation(m)
+	if artifact == "" {
+		if m.orch == nil {
+			return m, r.SlashOutput("(work artifact: no live session attached)"), nil
+		}
+		return m, r.SlashOutput("(work artifact: current operation has no terminal artifact)"), nil
+	}
+	updated, cmd := m.handleOpenSlash([]string{artifact})
+	next, ok := updated.(RootModel)
+	if !ok {
+		return m, r.SlashOutput("(work artifact: open command failed)"), cmd
+	}
+	return next, "", cmd
+}
+
+func operationArtifactForCurrentOperation(m RootModel) string {
+	if m.orch == nil {
+		return ""
+	}
+	handle, ok := operationRunHandle(m.orch.CurrentWorld(m.sid).Vars[app.OperationRunWorldKey])
+	if !ok {
+		return ""
+	}
+	return operationRunString(handle, "terminal_artifact")
+}
+
 func workRowsForCurrentOperation(m RootModel) []workRow {
 	if m.orch == nil {
 		return nil
@@ -241,6 +274,7 @@ func operationRunWorkHint(handle map[string]any, status string) string {
 		}
 		if artifact := operationRunString(handle, "terminal_artifact"); artifact != "" {
 			parts = append(parts, "artifact "+artifact)
+			parts = append(parts, "/work artifact")
 		}
 	case "running":
 		parts = appendOperationProgressHint(parts, handle)
