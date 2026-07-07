@@ -61,9 +61,15 @@ documented in
 
 ## TUI
 
-The primary surface. From dev-story, with `judge_mode=human` (the standalone
-default) so each room's proposal pauses for an explicit `bf__accept` instead
-of auto-cascading under `judge_mode=llm`, and a live agent backend
+The primary surface. From dev-story, choose oversight before launch with
+`oversight_gated`, `oversight_llm_review`, or `oversight_no_gate`. The default
+gated posture maps to `judge_mode=human`, so each room's proposal pauses for an
+explicit `bf__accept` instead of auto-cascading under LLM review. Use
+`oversight_llm_review` when the LLM should decide checkpoints with human
+fallback, and `oversight_no_gate` when the operation driver should accept
+checkpoints without LLM review.
+
+With a live agent backend
 configured (or a recorded cassette/flow — see
 [`../getting-started.md`](../getting-started.md) for the agent-backend
 prerequisite; the "Verify" commands below run the same walk mocked, no

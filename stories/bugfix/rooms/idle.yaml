@@ -29,12 +29,13 @@ states:
     # prose status line + the kv body; the standalone-only border
     # chrome is dropped.
     view:
-      - prose: "{{ world.ticket_id|default:'(no ticket)' }} · cycle {{ world.cycle }} · {{ world.bugfix_mode }} bugfix · judge {{ world.judge_mode }}"
+      - prose: "{{ world.ticket_id|default:'(no ticket)' }} · cycle {{ world.cycle }} · {{ world.bugfix_mode }} bugfix · oversight {{ world.oversight_mode|default:'gated' }} · judge {{ world.judge_mode }}"
       - kv:
           pairs:
             Ticket:    '{{ world.ticket_id|default:"(none)" }} {{ world.ticket_title }}'
             Workspace: '{{ world.workspace_id|default:"(none)" }}'
             Mode:      "{{ world.bugfix_mode }} bugfix"
+            Oversight: "{{ world.oversight_mode|default:'gated' }}"
             Judge:     "{{ world.judge_mode }}"
       - choice:
           mode: single
@@ -52,6 +53,18 @@ states:
             - label:  "skip_to_pr"
               hint:   "jump straight to validating (fix in hand)"
               intent: skip_to_pr
+            - label:  "gated"
+              hint:   "human checkpoint decisions"
+              intent: oversight_gated
+              when:   "world.oversight_mode != 'gated'"
+            - label:  "LLM review"
+              hint:   "LLM checkpoint decisions, human fallback"
+              intent: oversight_llm_review
+              when:   "world.oversight_mode != 'llm-review'"
+            - label:  "no gate"
+              hint:   "operation driver accepts checkpoints"
+              intent: oversight_no_gate
+              when:   "world.oversight_mode != 'no-gate'"
             - label:  "change_ticket"
               hint:   "exit to parent's ticket picker"
               intent: change_ticket
@@ -61,7 +74,7 @@ states:
             - label:  "look"
               hint:   "re-render"
               intent: look
-    relevant_world: [ticket_id, ticket_title, bugfix_mode, judge_mode, workspace_id, reproduction_artifact]
+    relevant_world: [ticket_id, ticket_title, bugfix_mode, oversight_mode, judge_mode, workspace_id, reproduction_artifact]
     # Auto-start when entered fresh with a ticket loaded. The
     # operator who lands here from dev-story's `go_bugfix` / `drive`
     # / `tickets → pick → bugfix` chain has ALREADY chosen to start;
@@ -221,6 +234,27 @@ states:
       start:
         - when: "world.ticket_id == ''"
           target: "@exit:pick_ticket"
+        - when: "world.oversight_mode == 'llm-review'"
+          target: reproducing
+          operation: bugfix_full_llm_review
+          effects:
+            - set:
+                oversight_mode: "llm-review"
+                judge_mode: "{{ world.judge_mode != 'human' ? world.judge_mode : 'llm_then_human' }}"
+        - when: "world.oversight_mode == 'no-gate'"
+          target: reproducing
+          operation: bugfix_full_no_gate
+          effects:
+            - set:
+                oversight_mode: "no-gate"
+                judge_mode: "human"
+        - when: "world.oversight_mode == 'gated'"
+          target: reproducing
+          operation: bugfix_full
+          effects:
+            - set:
+                oversight_mode: "gated"
+                judge_mode: "human"
         - target: reproducing
           operation: bugfix_full
       # NL ticket-id handoff — see the work_ticket intent doc in ../app.yaml.
@@ -251,6 +285,30 @@ states:
       full_pipeline:
         - when: "world.ticket_id == ''"
           target: "@exit:pick_ticket"
+        - when: "world.oversight_mode == 'llm-review'"
+          target: reproducing
+          operation: bugfix_full_llm_review
+          effects:
+            - set:
+                bugfix_mode: "full"
+                oversight_mode: "llm-review"
+                judge_mode: "{{ world.judge_mode != 'human' ? world.judge_mode : 'llm_then_human' }}"
+        - when: "world.oversight_mode == 'no-gate'"
+          target: reproducing
+          operation: bugfix_full_no_gate
+          effects:
+            - set:
+                bugfix_mode: "full"
+                oversight_mode: "no-gate"
+                judge_mode: "human"
+        - when: "world.oversight_mode == 'gated'"
+          target: reproducing
+          operation: bugfix_full
+          effects:
+            - set:
+                bugfix_mode: "full"
+                oversight_mode: "gated"
+                judge_mode: "human"
         - target: reproducing
           operation: bugfix_full
           effects:
@@ -263,6 +321,30 @@ states:
       quick_fix:
         - when: "world.ticket_id == ''"
           target: "@exit:pick_ticket"
+        - when: "world.oversight_mode == 'llm-review'"
+          target: reproducing
+          operation: bugfix_quick_llm_review
+          effects:
+            - set:
+                bugfix_mode: "quick"
+                oversight_mode: "llm-review"
+                judge_mode: "{{ world.judge_mode != 'human' ? world.judge_mode : 'llm_then_human' }}"
+        - when: "world.oversight_mode == 'no-gate'"
+          target: reproducing
+          operation: bugfix_quick_no_gate
+          effects:
+            - set:
+                bugfix_mode: "quick"
+                oversight_mode: "no-gate"
+                judge_mode: "human"
+        - when: "world.oversight_mode == 'gated'"
+          target: reproducing
+          operation: bugfix_quick
+          effects:
+            - set:
+                bugfix_mode: "quick"
+                oversight_mode: "gated"
+                judge_mode: "human"
         - target: reproducing
           operation: bugfix_quick
           effects:
@@ -274,6 +356,30 @@ states:
       triage:
         - when: "world.ticket_id == ''"
           target: "@exit:pick_ticket"
+        - when: "world.oversight_mode == 'llm-review'"
+          target: triaging
+          operation: bugfix_triage_llm_review
+          effects:
+            - set:
+                bugfix_mode: "triage"
+                oversight_mode: "llm-review"
+                judge_mode: "{{ world.judge_mode != 'human' ? world.judge_mode : 'llm_then_human' }}"
+        - when: "world.oversight_mode == 'no-gate'"
+          target: triaging
+          operation: bugfix_triage_no_gate
+          effects:
+            - set:
+                bugfix_mode: "triage"
+                oversight_mode: "no-gate"
+                judge_mode: "human"
+        - when: "world.oversight_mode == 'gated'"
+          target: triaging
+          operation: bugfix_triage
+          effects:
+            - set:
+                bugfix_mode: "triage"
+                oversight_mode: "gated"
+                judge_mode: "human"
         - target: triaging
           operation: bugfix_triage
           effects:
@@ -286,6 +392,27 @@ states:
       preflight_triage:
         - when: "world.ticket_id == ''"
           target: "@exit:pick_ticket"
+        - when: "world.oversight_mode == 'llm-review'"
+          target: triaging
+          operation: bugfix_full_llm_review
+          effects:
+            - set:
+                oversight_mode: "llm-review"
+                judge_mode: "{{ world.judge_mode != 'human' ? world.judge_mode : 'llm_then_human' }}"
+        - when: "world.oversight_mode == 'no-gate'"
+          target: triaging
+          operation: bugfix_full_no_gate
+          effects:
+            - set:
+                oversight_mode: "no-gate"
+                judge_mode: "human"
+        - when: "world.oversight_mode == 'gated'"
+          target: triaging
+          operation: bugfix_full
+          effects:
+            - set:
+                oversight_mode: "gated"
+                judge_mode: "human"
         - target: triaging
           operation: bugfix_full
       # Skip directly into validating; reproducing/proposing/
@@ -301,6 +428,24 @@ states:
                 bugfix_mode:        "full"
                 restart_from_stage: "validate"
                 unsafe_jumps_made:  "{{ world.unsafe_jumps_made + 1 }}"
+      oversight_gated:
+        - target: .
+          effects:
+            - set:
+                oversight_mode: "gated"
+                judge_mode: "human"
+      oversight_llm_review:
+        - target: .
+          effects:
+            - set:
+                oversight_mode: "llm-review"
+                judge_mode: "llm_then_human"
+      oversight_no_gate:
+        - target: .
+          effects:
+            - set:
+                oversight_mode: "no-gate"
+                judge_mode: "human"
       # Bail back to the parent's ticket picker without abandoning. The
       # parent (dev-story) maps @exit:pick_ticket to its ticket_search
       # room; from there the operator picks an id and `go_bugfix` re-

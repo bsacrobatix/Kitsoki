@@ -152,7 +152,26 @@ agents:
 
 operations:
   bugfix_full:
-    title: "Fix bug"
+    title: "Fix bug (gated)"
+    mode: interactive
+    execution_mode: staged
+    stop_on: [needs-human, uncertain, gate-failed, host-error, conflict, budget-exhausted, policy-denied]
+    pause_on: [operator-ask, protected-branch-approval]
+    terminal_artifact: done_artifact
+    phase_summary:
+      from: [reproduction_artifact, proposal_artifact, implement_artifact, testing_artifact, review_artifact, validation_artifact, done_artifact]
+  bugfix_full_llm_review:
+    title: "Fix bug (LLM review)"
+    mode: autonomous
+    execution_mode: one-shot
+    run_in_background: true
+    stop_on: [needs-human, uncertain, gate-failed, host-error, conflict, budget-exhausted, policy-denied]
+    pause_on: [operator-ask, protected-branch-approval]
+    terminal_artifact: done_artifact
+    phase_summary:
+      from: [reproduction_artifact, proposal_artifact, implement_artifact, testing_artifact, review_artifact, validation_artifact, done_artifact]
+  bugfix_full_no_gate:
+    title: "Fix bug (no gate)"
     mode: autonomous
     execution_mode: one-shot
     run_in_background: true
@@ -162,7 +181,26 @@ operations:
     phase_summary:
       from: [reproduction_artifact, proposal_artifact, implement_artifact, testing_artifact, review_artifact, validation_artifact, done_artifact]
   bugfix_quick:
-    title: "Quick bug fix"
+    title: "Quick bug fix (gated)"
+    mode: interactive
+    execution_mode: staged
+    stop_on: [needs-human, uncertain, gate-failed, host-error, conflict, budget-exhausted, policy-denied]
+    pause_on: [operator-ask]
+    terminal_artifact: done_artifact
+    phase_summary:
+      from: [reproduction_artifact, proposal_artifact, implement_artifact, testing_artifact, done_artifact]
+  bugfix_quick_llm_review:
+    title: "Quick bug fix (LLM review)"
+    mode: autonomous
+    execution_mode: one-shot
+    run_in_background: true
+    stop_on: [needs-human, uncertain, gate-failed, host-error, conflict, budget-exhausted, policy-denied]
+    pause_on: [operator-ask]
+    terminal_artifact: done_artifact
+    phase_summary:
+      from: [reproduction_artifact, proposal_artifact, implement_artifact, testing_artifact, done_artifact]
+  bugfix_quick_no_gate:
+    title: "Quick bug fix (no gate)"
     mode: autonomous
     execution_mode: one-shot
     run_in_background: true
@@ -172,7 +210,26 @@ operations:
     phase_summary:
       from: [reproduction_artifact, proposal_artifact, implement_artifact, testing_artifact, done_artifact]
   bugfix_triage:
-    title: "Triage bug"
+    title: "Triage bug (gated)"
+    mode: interactive
+    execution_mode: staged
+    stop_on: [needs-human, uncertain, gate-failed, host-error, budget-exhausted, policy-denied]
+    pause_on: [operator-ask]
+    terminal_artifact: triage_verdict
+    phase_summary:
+      from: [triage_verdict]
+  bugfix_triage_llm_review:
+    title: "Triage bug (LLM review)"
+    mode: autonomous
+    execution_mode: one-shot
+    run_in_background: true
+    stop_on: [needs-human, uncertain, gate-failed, host-error, budget-exhausted, policy-denied]
+    pause_on: [operator-ask]
+    terminal_artifact: triage_verdict
+    phase_summary:
+      from: [triage_verdict]
+  bugfix_triage_no_gate:
+    title: "Triage bug (no gate)"
     mode: autonomous
     execution_mode: one-shot
     run_in_background: true
@@ -470,6 +527,10 @@ world:
   # .capsules/workspaces/bf-*. Autostart's other steps (thread derivation, start) run
   # normally — unlike bf_autostart_attempted, this only affects identity.
   workspace_prepared:     { type: bool, default: false }
+  # User-facing oversight policy. judge_mode remains the compatibility switch
+  # consumed by existing checkpoint rooms; oversight_mode selects operation
+  # posture at launch.
+  oversight_mode:   { type: string, default: "" }                # "" = infer from judge_mode; gated | llm-review | no-gate
   judge_mode:       { type: string, default: "human" }           # human | llm | llm_then_human
   judge_confidence_threshold: { type: float, default: 0.8 }
 
@@ -687,6 +748,18 @@ intents:
     description: "Default — walk all phases. Set bugfix_mode=full and start from reproducing."
     examples: [full_pipeline, "full", "all phases"]
     priority: 75
+  oversight_gated:
+    description: "Use human checkpoints for bugfix phases."
+    examples: ["use gated oversight", "human gated mode", "make this gated"]
+    priority: 74
+  oversight_llm_review:
+    description: "Use LLM checkpoint review and fall back to human review when uncertain."
+    examples: ["use llm review", "llm review mode", "let the llm review gates"]
+    priority: 74
+  oversight_no_gate:
+    description: "Use autonomous operation driving without LLM checkpoint review."
+    examples: ["use no gate mode", "no-gate mode", "run without review gates"]
+    priority: 74
   # Triage-only: a read-only verdict on whether the bug still exists in the
   # current tree (no worktree, no fix). Cheap pre-flight before committing the
   # full maker pipeline to a ticket. Terminal: @exit:triaged carrying the verdict.
@@ -762,7 +835,7 @@ intents:
 # lifts these into the parent's bare intent table so an operator can
 # drive the imported pipeline without typing the `bf__` prefix.
 exports:
-  intents: [start, work_complaint, accept, refine, restart_from, jump_to, quick_fix, skip_to_pr, full_pipeline, triage, change_ticket, quit, look, escalate_human]
+  intents: [start, work_complaint, accept, refine, restart_from, jump_to, quick_fix, skip_to_pr, full_pipeline, oversight_gated, oversight_llm_review, oversight_no_gate, triage, change_ticket, quit, look, escalate_human]
 
 # Named return points. A parent story (dev-story / kitsoki-dev / cyber-devstory)
 # maps each to one of its own states. Standalone load synthesises
