@@ -22,6 +22,7 @@ func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
 		expectOperationPolicy  string
 		expectOperationStatus  string
 		expectTerminalArtifact string
+		selfProvisionWorkspace bool
 	}{
 		{
 			appPath:    repoStoriesBugfixAppPath(t),
@@ -51,6 +52,16 @@ func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
 			expectTerminalArtifact: "bf__done_artifact",
 		},
 		{
+			appPath:                repoStoriesDevStoryAppPath(t),
+			capsule:                "dirty-index",
+			name:                   "dev_story_self_provisioned_workdir_handoff_completed",
+			sourceFlow:             repoPath(t, "../../stories/dev-story/flows/bugfix_to_pr_workdir_handoff.yaml"),
+			expectOperationPolicy:  "bf__bugfix_full",
+			expectOperationStatus:  "completed",
+			expectTerminalArtifact: "bf__done_artifact",
+			selfProvisionWorkspace: true,
+		},
+		{
 			appPath:                repoStoriesDemoVideoLoopAppPath(t),
 			capsule:                "clean-repo",
 			name:                   "demo_video_loop_visual_qa_completed",
@@ -70,6 +81,8 @@ func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
 				policy:           tc.expectOperationPolicy,
 				status:           tc.expectOperationStatus,
 				terminalArtifact: tc.expectTerminalArtifact,
+			}, flowOptions{
+				selfProvisionWorkspace: tc.selfProvisionWorkspace,
 			})
 			report, err := testrunner.RunFlows(t.Context(), tc.appPath, flowPath, testrunner.FlowOptions{})
 			require.NoError(t, err)
@@ -102,7 +115,11 @@ type operationExpectations struct {
 	terminalArtifact string
 }
 
-func writeCapsuleBackedFlow(t *testing.T, sourceFlow, appPath, workspace, name string, expectations operationExpectations) string {
+type flowOptions struct {
+	selfProvisionWorkspace bool
+}
+
+func writeCapsuleBackedFlow(t *testing.T, sourceFlow, appPath, workspace, name string, expectations operationExpectations, opts flowOptions) string {
 	t.Helper()
 	raw, err := os.ReadFile(sourceFlow)
 	require.NoError(t, err)
@@ -140,14 +157,16 @@ func writeCapsuleBackedFlow(t *testing.T, sourceFlow, appPath, workspace, name s
 		doc["expect_terminal_artifact"] = expectations.terminalArtifact
 	}
 	initialWorld = stringAnyMap(t, doc, "initial_world")
-	initialWorld["workdir"] = workspace
-	initialWorld["worktree_path"] = workspace
-	initialWorld["workspace_id"] = workspaceID
-	initialWorld["feature_branch"] = workspaceID
-	// capsuletest.Open has already prepared an isolated checkout. Imported
-	// bugfix runs should trust that absolute path instead of re-deriving a
-	// repo-relative .worktrees checkout.
-	initialWorld["workspace_prepared"] = true
+	if !opts.selfProvisionWorkspace {
+		initialWorld["workdir"] = workspace
+		initialWorld["worktree_path"] = workspace
+		initialWorld["workspace_id"] = workspaceID
+		initialWorld["feature_branch"] = workspaceID
+		// capsuletest.Open has already prepared an isolated checkout. Imported
+		// bugfix runs should trust that absolute path instead of re-deriving a
+		// repo-relative .worktrees checkout.
+		initialWorld["workspace_prepared"] = true
+	}
 
 	generated, err := yaml.Marshal(doc)
 	require.NoError(t, err)
