@@ -143,17 +143,31 @@
         <span v-if="operationRunArtifact" class="iv__operation-artifact" data-testid="operation-run-artifact">
           {{ operationRunArtifact }}
         </span>
-        <button
-          v-if="canDriveOperation"
-          type="button"
-          class="iv__operation-action"
-          data-testid="operation-run-drive"
-          :disabled="pending || store.busy || drivingOperation"
-          :title="drivingOperation ? 'Driving operation' : 'Drive operation to the next checkpoint'"
-          @click="onDriveOperation"
+        <span
+          v-if="operationRunArtifactHref || canDriveOperation"
+          class="iv__operation-actions"
         >
-          {{ drivingOperation ? 'Driving' : 'Drive' }}
-        </button>
+          <a
+            v-if="operationRunArtifactHref"
+            class="iv__operation-action"
+            data-testid="operation-run-artifact-open"
+            :href="operationRunArtifactHref"
+            target="_blank"
+            rel="noopener noreferrer"
+            :title="`Open ${operationRunArtifactHandle}`"
+          >Open</a>
+          <button
+            v-if="canDriveOperation"
+            type="button"
+            class="iv__operation-action"
+            data-testid="operation-run-drive"
+            :disabled="pending || store.busy || drivingOperation"
+            :title="drivingOperation ? 'Driving operation' : 'Drive operation to the next checkpoint'"
+            @click="onDriveOperation"
+          >
+            {{ drivingOperation ? 'Driving' : 'Drive' }}
+          </button>
+        </span>
       </div>
 
       <!-- Main row: chat (left) | trace (right).
@@ -798,9 +812,15 @@ const operationRunDetail = computed(() => {
   const detail = operationRun.value?.stopDetail;
   return detail ? `needs input: ${detail}` : "";
 });
+const operationRunArtifactHandle = computed(() => operationRun.value?.terminalArtifact ?? "");
 const operationRunArtifact = computed(() => {
-  const artifact = operationRun.value?.terminalArtifact;
+  const artifact = operationRunArtifactHandle.value;
   return artifact ? `artifact ${artifact}` : "";
+});
+const operationRunArtifactHref = computed(() => {
+  const artifact = operationRunArtifactHandle.value;
+  if (!artifact || !source) return "";
+  return source.artifactUrl(artifact);
 });
 const chatColumnStyle = computed(() => {
   if (embed.value || traceCollapsed.value) return {};
@@ -1815,17 +1835,27 @@ function onEventSelect(index: number): void {
   white-space: nowrap;
 }
 
-.iv__operation-action {
+.iv__operation-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.iv__operation-action {
   border: 1px solid #0e7490;
   border-radius: 0.375rem;
   background: #082f49;
   color: #bae6fd;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font: inherit;
   font-size: 0.72rem;
   font-weight: 700;
   line-height: 1.2;
   padding: 0.16rem 0.55rem;
+  text-decoration: none;
   white-space: nowrap;
   cursor: pointer;
 }
