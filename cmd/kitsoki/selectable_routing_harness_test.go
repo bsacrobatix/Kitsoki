@@ -90,6 +90,29 @@ func TestSelectableRoutingHarnessUsesCurrentProfileSelection(t *testing.T) {
 	}
 }
 
+func TestSelectableRoutingHarnessDefaultProfileBackendUsesCLIHarness(t *testing.T) {
+	clearDefaultHarnessProviders(t)
+	t.Setenv(host.CodexBinEnv, "/tmp/kitsoki-test-codex")
+
+	profiles := map[string]orchestrator.HarnessProfile{
+		"codex-native": {
+			Name:    "codex-native",
+			Backend: "codex",
+			Model:   "gpt-5.5",
+		},
+	}
+	h := newSelectableRoutingHarness("", "", "", "", "", &app.AppDef{}, profiles, "codex-native", nil)
+
+	selected, err := h.selectedHarness()
+	if err != nil {
+		t.Fatalf("selectedHarness for default codex profile: %v", err)
+	}
+	if selected == nil {
+		t.Fatal("selectedHarness returned nil harness")
+	}
+	_ = selected.Close()
+}
+
 func TestSelectableRoutingHarnessCachesBySelectionAndReloadsCachedHarnesses(t *testing.T) {
 	t.Parallel()
 	var current orchestrator.ProfileSelection

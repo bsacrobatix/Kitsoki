@@ -127,7 +127,7 @@ CI on your branch on demand without CI firing on every push.
 ## 4. Run kitsoki locally
 
 ```sh
-# Default: claude CLI harness if found, else live SDK if API key, else replay
+# Default: --agent backend, else claude CLI, else live SDK credentials; replay is explicit
 ./kitsoki run testdata/apps/cloak/app.yaml
 
 # Force the deterministic replay path (no LLM at all)
