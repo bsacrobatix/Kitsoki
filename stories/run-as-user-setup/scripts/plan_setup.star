@@ -53,7 +53,7 @@ def main(ctx):
     setup_summary = _join([
         "This setup creates or reuses a Standard macOS account named %s as the delegated coding-agent user." % agent_user,
         "Kitsoki still owns the deterministic harness and merge/integration operations.",
-        "The backend CLIs run through root-owned PATH wrappers as %s, so OS permissions can deny writes to %s." % (agent_user, protected_root),
+        "The backend CLIs run through root-owned wrappers as %s, so OS permissions can deny writes to %s." % (agent_user, protected_root),
     ])
 
     config_snippet = _join([
@@ -125,10 +125,10 @@ def main(ctx):
     validation_commands = _join([
         "sudo -n -H -u %s touch %s" % (_shq(agent_user), _shq(_path_join(sample_path, ".agent-write-ok"))),
         "sudo -n -H -u %s touch %s && echo FAIL || echo 'ok: protected checkout denied'" % (_shq(agent_user), _shq(_path_join(protected_root, ".agent-should-fail"))),
-        "PATH=%s:$PATH go run ./cmd/kitsoki agent launch --raw --interactive --backend codex --working-dir %s" % (_shq(wrapper_bin), _shq(protected_root)),
+        "go run ./cmd/kitsoki agent launch --raw --interactive --backend codex --working-dir %s" % _shq(protected_root),
         "# Expected: Kitsoki rejects the protected root before codex starts.",
-        "PATH=%s:$PATH command -v codex" % _shq(wrapper_bin),
-        "PATH=%s:$PATH sudo -n -H -u %s %s --version" % (_shq(wrapper_bin), _shq(agent_user), _shq(codex_ref)),
+        "%s --version" % _shq(_path_join(wrapper_bin, "codex")),
+        "sudo -n -H -u %s %s --version" % (_shq(agent_user), _shq(codex_ref)),
     ])
 
     security_notes = _join([

@@ -129,11 +129,15 @@ agent_user_delegation:
 ```
 
 This block currently records local setup and suppresses the macOS first-start
-warning. Without it, `kitsoki run` prints a TUI startup notice and `kitsoki web`
-shows a home-screen setup warning with an action that opens
-`@kitsoki/run-as-user-setup`. First-class `run_as_user` execution is a future
-runtime slice; until it lands, start Kitsoki with the wrapper directory first in
-`PATH`:
+warning. `kitsoki agent launch` consumes `wrapper_bin` directly: with the block
+above, it executes `wrapper_bin/codex`, `wrapper_bin/claude`, and so on, and
+records `run_as_user` in the dry-run plan. Without the block, `kitsoki run`
+prints a TUI startup notice and `kitsoki web` shows a home-screen setup warning
+with an action that opens `@kitsoki/run-as-user-setup`.
+
+Other live agent surfaces still rely on the backend CLI resolving through the
+operator environment, so start those surfaces with the wrapper directory first
+in `PATH`:
 
 ```sh
 PATH=/Users/Shared/kitsoki/agent-bin:$PATH kitsoki run @kitsoki/dev-story

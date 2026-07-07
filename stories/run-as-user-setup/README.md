@@ -42,10 +42,11 @@ and wrapper smoke tests; the launch-policy rejection command remains printed for
 explicit operator review so the story does not accidentally start an interactive
 backend.
 
-The current implementation still relies on PATH wrappers for the actual backend
-switch. The `agent_user_delegation:` config is the local setup receipt and
-startup-warning gate; first-class `run_as_user` launch support is a future
-runtime slice.
+`kitsoki agent launch` consumes the configured `wrapper_bin` directly, records
+`run_as_user` in the launch plan, and no longer needs the wrapper directory
+prepended to `PATH`. The broader `kitsoki run` / `kitsoki web` live agent paths
+still rely on backend CLIs resolving from the operator environment, so keep
+using the wrapper directory on `PATH` for those surfaces.
 
 Test it without LLM, sudo, or network:
 

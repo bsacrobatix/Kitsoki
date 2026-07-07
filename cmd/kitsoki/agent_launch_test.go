@@ -175,6 +175,8 @@ func TestAgentLaunchPlan_FreestandingCodexAgentInteractive(t *testing.T) {
 name = "kitsoki-mcp-driver"
 developer_instructions = "Use ONLY the kitsoki studio MCP."
 model = "gpt-5.5"
+model_reasoning_effort = "medium"
+sandbox_mode = "read-only"
 
 [mcp_servers.kitsoki]
 command = "kitsoki"
@@ -188,14 +190,61 @@ args = ["mcp", "--stories-dir", "stories"]
 	require.True(t, plan.Interactive)
 	require.Equal(t, "codex", plan.Backend)
 	require.Equal(t, "/bin/codex-test", plan.Binary)
+	require.Empty(t, plan.RunAsUser)
 	require.Empty(t, plan.Stdin)
 	require.NotContains(t, plan.Command, "exec", "interactive launch must use top-level codex, not codex exec")
-	require.Contains(t, plan.Command, "--dangerously-bypass-approvals-and-sandbox")
+	require.NotContains(t, plan.Command, "--dangerously-bypass-approvals-and-sandbox")
 	require.Contains(t, plan.Command, "-m")
 	require.Contains(t, plan.Command, "gpt-5.5")
+	require.Contains(t, plan.Command, "--sandbox")
+	require.Contains(t, plan.Command, "read-only")
+	require.Contains(t, plan.Command, "model_reasoning_effort=\"medium\"")
 	joined := strings.Join(plan.Command, " ")
 	require.Contains(t, joined, "mcp_servers.kitsoki.command=\"kitsoki\"")
 	require.Contains(t, joined, "mcp_servers.kitsoki.args=[\"mcp\",\"--stories-dir\",\"stories\"]")
+	require.Contains(t, plan.Command[len(plan.Command)-1], "Use ONLY the kitsoki studio MCP.")
+}
+
+func TestAgentLaunchPlan_FreestandingCodexAgentInteractiveUsesRunAsUserWrapper(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".codex", "agents"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "agent-bin"), 0755))
+	wrapper := filepath.Join(dir, "agent-bin", "codex")
+	require.NoError(t, os.WriteFile(wrapper, []byte("#!/bin/sh\nexec /usr/bin/sudo -n -H -u kitsoki-agent /bin/codex \"$@\"\n"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kitsoki.yaml"), []byte("story_dirs: []\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kitsoki.local.yaml"), []byte(`
+agent_user_delegation:
+  enabled: true
+  run_as_user: kitsoki-agent
+  wrapper_bin: ./agent-bin
+`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".codex", "agents", "kitsoki-mcp-driver.toml"), []byte(`
+name = "kitsoki-mcp-driver"
+developer_instructions = "Use ONLY the kitsoki studio MCP."
+model = "gpt-5.5"
+sandbox_mode = "read-only"
+
+[mcp_servers.kitsoki]
+command = "kitsoki"
+args = ["mcp", "--stories-dir", "stories"]
+`), 0644))
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		ConfigPath: filepath.Join(dir, ".kitsoki.yaml"),
+		AgentName:  "kitsoki-mcp-driver",
+	})
+	require.NoError(t, err)
+	require.True(t, plan.Interactive)
+	require.Equal(t, "kitsoki-agent", plan.RunAsUser)
+	require.Equal(t, wrapper, plan.Binary)
+	require.Equal(t, wrapper, plan.Command[0])
+	require.Contains(t, plan.Command, "--sandbox")
+	require.Contains(t, plan.Command, "read-only")
 	require.Contains(t, plan.Command[len(plan.Command)-1], "Use ONLY the kitsoki studio MCP.")
 }
 
