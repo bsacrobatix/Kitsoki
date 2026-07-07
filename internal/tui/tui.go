@@ -824,10 +824,6 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 			m.transcript.pending = append(m.transcript.pending, welcome)
 		}
 	}
-	for _, notice := range m.startupNotices {
-		m.transcript.AppendSystem(notice)
-	}
-
 	// Show initial view in transcript. When the root state's view is a
 	// typed element-array, prefer AppendSystemTyped so the elements
 	// dispatcher renders fresh at viewport width — feeding the
@@ -863,6 +859,7 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 			}
 		}
 		m.transcript.AppendSystemTyped(initialView, typedForBody, m.initialTypedEnv, m.initialTypedRR)
+		appendStartupNotices(&m)
 		if m.mode == ModeChoosing {
 			m.transcript.AppendLive(m.choice.View(m.transcript.wrapWidth()))
 		}
@@ -873,6 +870,9 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 			"has_ansi", strings.Contains(initialView, "\x1b["),
 		)
 		m.transcript.AppendSystem(initialView)
+		appendStartupNotices(&m)
+	} else {
+		appendStartupNotices(&m)
 	}
 
 	// Populate initial menu.
@@ -901,6 +901,12 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 	}
 
 	return m
+}
+
+func appendStartupNotices(m *RootModel) {
+	for _, notice := range m.startupNotices {
+		m.transcript.AppendSystem(notice)
+	}
 }
 
 // metaMenuEntries enumerates every declared meta mode (sorted by name)

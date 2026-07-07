@@ -119,6 +119,35 @@ func TestRunAsUserStartupNotice(t *testing.T) {
 	}
 }
 
+func TestSetupWarningsFromConfigIncludesRunAsUserStory(t *testing.T) {
+	warnings := setupWarningsFromConfig(webconfig.WebConfig{}, "darwin")
+	if len(warnings) != 1 {
+		t.Fatalf("expected one setup warning, got %#v", warnings)
+	}
+	got := warnings[0]
+	if got.ID != "run-as-user" || got.StoryID != "run-as-user-setup" || got.StoryRef != "@kitsoki/run-as-user-setup" {
+		t.Fatalf("unexpected warning identity: %#v", got)
+	}
+	for _, want := range []string{"run_as_user delegation is not configured", "agent_user_delegation", "kitsoki run @kitsoki/run-as-user-setup"} {
+		if !contains(got.Title+" "+got.Body+" "+got.ActionCommand, want) {
+			t.Fatalf("setup warning missing %q: %#v", want, got)
+		}
+	}
+
+	configured := webconfig.WebConfig{
+		AgentUserDelegation: &webconfig.AgentUserDelegationConfig{
+			Enabled:   true,
+			RunAsUser: "kitsoki-agent",
+		},
+	}
+	if got := setupWarningsFromConfig(configured, "darwin"); len(got) != 0 {
+		t.Fatalf("configured run_as_user should suppress setup warning, got %#v", got)
+	}
+	if got := setupWarningsFromConfig(webconfig.WebConfig{}, "linux"); len(got) != 0 {
+		t.Fatalf("non-darwin should suppress setup warning, got %#v", got)
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

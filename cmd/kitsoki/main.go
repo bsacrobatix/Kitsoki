@@ -931,13 +931,11 @@ func bugFilingAuthStartupNotice(ctx context.Context, ticketRepo string) string {
 }
 
 func runAsUserStartupNotice(cfg webconfig.WebConfig, goos string) string {
-	if goos != "darwin" {
+	warning := runAsUserSetupWarning(cfg, goos)
+	if warning == nil {
 		return ""
 	}
-	if cfg.AgentUserDelegation != nil && cfg.AgentUserDelegation.Enabled && strings.TrimSpace(cfg.AgentUserDelegation.RunAsUser) != "" {
-		return ""
-	}
-	return "(warning: agent run_as_user delegation is not configured. Launch policy is not a sandbox; before letting agents write, run `kitsoki run @kitsoki/run-as-user-setup` and put the generated `agent_user_delegation:` block in `.kitsoki.local.yaml`.)"
+	return fmt.Sprintf("(warning: %s. %s Command: `%s`.)", warning.Title, warning.Body, warning.ActionCommand)
 }
 
 // resolveAgentBackend resolves the agent backend selector with precedence

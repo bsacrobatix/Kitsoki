@@ -18,6 +18,17 @@ const listStories = vi.fn<[], Promise<StoryHeader[]>>();
 const rescanStories = vi.fn<[], Promise<StoryHeader[]>>();
 const newSession = vi.fn<[string], Promise<string>>();
 const listSessions = vi.fn<[], Promise<SessionHeader[]>>();
+const setupStatus = vi.fn<[], Promise<{
+  warnings: Array<{
+    id: string;
+    title: string;
+    body: string;
+    action_label?: string;
+    action_command?: string;
+    story_id?: string;
+    story_ref?: string;
+  }>;
+}>>();
 
 vi.mock("../../src/data/live-source.js", () => ({
   LiveSource: vi.fn().mockImplementation(() => ({
@@ -25,6 +36,7 @@ vi.mock("../../src/data/live-source.js", () => ({
     rescanStories,
     newSession,
     listSessions,
+    setupStatus,
   })),
 }));
 
@@ -80,6 +92,7 @@ describe("HomeView", () => {
     rescanStories.mockReset();
     newSession.mockReset();
     listSessions.mockReset();
+    setupStatus.mockReset();
     push.mockReset();
     replace.mockReset();
     tourStart.mockReset();
@@ -91,6 +104,7 @@ describe("HomeView", () => {
     // Default: no auto-navigation (zero sessions).
     listStories.mockResolvedValue([]);
     listSessions.mockResolvedValue([]);
+    setupStatus.mockResolvedValue({ warnings: [] });
   });
 
   it("renders a story card per discovered story", async () => {
@@ -107,6 +121,45 @@ describe("HomeView", () => {
       "Alpha",
       "Beta",
     ]);
+    wrapper.unmount();
+  });
+
+  it("renders setup warnings and opens the referenced setup story", async () => {
+    listStories.mockResolvedValue([
+      story({
+        path: "/repo/stories/run-as-user-setup/app.yaml",
+        app_id: "run-as-user-setup",
+        title: "run_as_user setup",
+      }),
+    ]);
+    setupStatus.mockResolvedValue({
+      warnings: [
+        {
+          id: "run-as-user",
+          title: "Agent run_as_user delegation is not configured",
+          body: "Launch policy is not a sandbox.",
+          action_label: "Open setup story",
+          action_command: "kitsoki run @kitsoki/run-as-user-setup",
+          story_id: "run-as-user-setup",
+          story_ref: "@kitsoki/run-as-user-setup",
+        },
+      ],
+    });
+    newSession.mockResolvedValue("setup-session");
+
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='setup-warning-title']").text()).toContain("run_as_user");
+    expect(wrapper.find("[data-testid='setup-warning-command']").text()).toContain(
+      "kitsoki run @kitsoki/run-as-user-setup"
+    );
+
+    await wrapper.find("[data-testid='setup-warning-action']").trigger("click");
+    await flushPromises();
+
+    expect(newSession).toHaveBeenCalledWith("/repo/stories/run-as-user-setup/app.yaml");
+    expect(push).toHaveBeenCalledWith("/s/setup-session/chat");
     wrapper.unmount();
   });
 

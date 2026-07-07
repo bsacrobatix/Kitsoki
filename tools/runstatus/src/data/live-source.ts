@@ -979,6 +979,11 @@ export class LiveSource implements DataSource {
     return this.client.post<StoryHeader[]>("runstatus.stories.rescan", {});
   }
 
+  /** Read session-independent setup warnings for the home screen. */
+  setupStatus(): Promise<SetupStatusResult> {
+    return this.client.post<SetupStatusResult>("runstatus.setup.status", {});
+  }
+
   // ── Story editor (per-story static reads; no session) ─────────────────────
 
   // Project object graph catalogs (W5.0's runstatus.objectgraph.load/diff)
@@ -1436,6 +1441,21 @@ export interface BugStatusResult {
   github_auth_configured?: boolean;
   warning?: string;
   setup_hint?: string;
+}
+
+/** Result of runstatus.setup.status. */
+export interface SetupStatusResult {
+  warnings: SetupWarning[];
+}
+
+export interface SetupWarning {
+  id: string;
+  title: string;
+  body: string;
+  action_label?: string;
+  action_command?: string;
+  story_id?: string;
+  story_ref?: string;
 }
 
 /** Result of runstatus.bug.report. */

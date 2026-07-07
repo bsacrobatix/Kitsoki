@@ -1,5 +1,40 @@
 <template>
   <div class="home" data-testid="home-view">
+    <!-- ── Setup warnings ───────────────────────────────────────────────── -->
+    <section
+      v-if="setupWarnings.length > 0"
+      class="home__setup"
+      data-testid="setup-warnings"
+      aria-label="Setup warnings"
+    >
+      <div
+        v-for="warning in setupWarnings"
+        :key="warning.id"
+        class="home__setup-warning"
+        data-testid="setup-warning"
+      >
+        <div class="home__setup-copy">
+          <h2 class="home__setup-title" data-testid="setup-warning-title">{{ warning.title }}</h2>
+          <p class="home__setup-body" data-testid="setup-warning-body">{{ warning.body }}</p>
+          <code
+            v-if="warning.action_command"
+            class="home__setup-command"
+            data-testid="setup-warning-command"
+          >{{ warning.action_command }}</code>
+        </div>
+        <button
+          v-if="setupWarningStory(warning)"
+          class="home__btn home__btn--warning"
+          type="button"
+          data-testid="setup-warning-action"
+          :disabled="startingPath === setupWarningStory(warning)?.path"
+          @click="onSetupWarningAction(warning)"
+        >
+          {{ startingPath === setupWarningStory(warning)?.path ? "Starting…" : (warning.action_label || "Open setup story") }}
+        </button>
+      </div>
+    </section>
+
     <!-- ── Stories ─────────────────────────────────────────────────────── -->
     <section class="home__section">
       <div class="home__section-head">
@@ -203,7 +238,7 @@ import { useRouter } from "vue-router";
 // full rationale (persisted in sessionStorage; also marked spent by the session
 // views so a tab that opens straight into a session can still reach "/").
 import { autoNavDone, markAutoNavDone } from "../lib/auto-nav.js";
-import { LiveSource, type StoryHeader } from "../data/live-source.js";
+import { LiveSource, type SetupWarning, type StoryHeader } from "../data/live-source.js";
 import { createDataSource } from "../data/source.js";
 import type { SessionHeader } from "../types.js";
 import { useTourStore } from "../stores/tour.js";
@@ -236,6 +271,7 @@ const stories = ref<StoryHeader[]>([]);
 const storiesLoading = ref(true);
 const storiesError = ref<string | null>(null);
 const rescanning = ref(false);
+const setupWarnings = ref<SetupWarning[]>([]);
 
 const sessions = ref<SessionHeader[]>([]);
 const sessionsError = ref<string | null>(null);
@@ -325,7 +361,7 @@ onMounted(async () => {
     return;
   }
 
-  await Promise.all([loadStories(), loadSessions()]);
+  await Promise.all([loadStories(), loadSessions(), loadSetupWarnings()]);
   storiesLoading.value = false;
 
   // Auto-navigate when there is exactly one live session and no others. A
@@ -368,6 +404,15 @@ async function loadSessions(): Promise<void> {
   }
 }
 
+async function loadSetupWarnings(): Promise<void> {
+  try {
+    const status = await source.setupStatus();
+    setupWarnings.value = status.warnings ?? [];
+  } catch {
+    setupWarnings.value = [];
+  }
+}
+
 async function onRescan(): Promise<void> {
   rescanning.value = true;
   try {
@@ -398,6 +443,12 @@ async function onNewSession(story: StoryHeader): Promise<void> {
   }
 }
 
+async function onSetupWarningAction(warning: SetupWarning): Promise<void> {
+  const story = setupWarningStory(warning);
+  if (!story) return;
+  await onNewSession(story);
+}
+
 // Getting-started CTA on the stories-empty branch: replay the onboarding tour
 // so a first-time developer has a next step instead of a dead end. Resolved
 // lazily (not at setup) so the store is only required when the empty state is
@@ -409,6 +460,19 @@ function onTakeTour(): void {
 
 function storyTitle(story: StoryHeader): string {
   return story.title || story.app_id || relativePath(story.path);
+}
+
+function setupWarningStory(warning: SetupWarning): StoryHeader | undefined {
+  const storyID = warning.story_id || storyIDFromRef(warning.story_ref);
+  if (!storyID) return undefined;
+  return stories.value.find((st) =>
+    st.app_id === storyID || st.path.includes(`/stories/${storyID}/`)
+  );
+}
+
+function storyIDFromRef(ref?: string): string {
+  if (!ref) return "";
+  return ref.replace(/^@kitsoki\//, "").trim();
 }
 
 function sessionStoryTitle(s: SessionHeader): string {
@@ -456,6 +520,51 @@ function errMsg(e: unknown): string {
   padding: 1.5rem;
   max-width: 900px;
   margin: 0 auto;
+}
+
+.home__setup {
+  margin-bottom: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.home__setup-warning {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid color-mix(in srgb, var(--k-warning, #f59e0b) 55%, var(--k-border, #1e293b));
+  background: color-mix(in srgb, var(--k-warning, #f59e0b) 10%, var(--k-bg-widget, #111827));
+  border-radius: 0.5rem;
+  padding: 1rem;
+}
+
+.home__setup-copy {
+  min-width: 0;
+}
+
+.home__setup-title {
+  color: var(--k-fg, #e2e8f0);
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.home__setup-body {
+  color: var(--k-fg-muted, #cbd5e1);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  margin-bottom: 0.55rem;
+}
+
+.home__setup-command {
+  display: inline-block;
+  max-width: 100%;
+  color: var(--k-fg-code, #7dd3fc);
+  font-size: 0.76rem;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .home__section {
@@ -606,6 +715,26 @@ function errMsg(e: unknown): string {
 
 .home__btn--ghost:hover:not(:disabled) {
   background: var(--k-bg-hover, #1e293b);
+}
+
+.home__btn--warning {
+  flex: 0 0 auto;
+  background: var(--k-warning, #f59e0b);
+  color: #111827;
+}
+
+.home__btn--warning:hover:not(:disabled) {
+  background: #fbbf24;
+}
+
+@media (max-width: 640px) {
+  .home__setup-warning {
+    flex-direction: column;
+  }
+
+  .home__btn--warning {
+    width: 100%;
+  }
 }
 
 /* ── Session filter chips ─────────────────────────────────────────────────── */

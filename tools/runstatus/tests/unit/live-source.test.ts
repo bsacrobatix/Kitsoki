@@ -360,6 +360,29 @@ describe("LiveSource", () => {
     expect(body.method).toBe("runstatus.stories.rescan");
   });
 
+  it("setupStatus calls runstatus.setup.status", async () => {
+    fetchMock.mockResolvedValueOnce(
+      rpcOk({
+        warnings: [
+          {
+            id: "run-as-user",
+            title: "Agent run_as_user delegation is not configured",
+            body: "Run the setup story.",
+            action_command: "kitsoki run @kitsoki/run-as-user-setup",
+            story_id: "run-as-user-setup",
+          },
+        ],
+      })
+    );
+    const src = new LiveSource("/");
+    const status = await src.setupStatus();
+    expect(status.warnings[0]!.id).toBe("run-as-user");
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as { method: string };
+    expect(body.method).toBe("runstatus.setup.status");
+  });
+
   it("newSession calls runstatus.session.new with story_path and returns the id", async () => {
     fetchMock.mockResolvedValueOnce(rpcOk({ session_id: "sess-new" }));
     const src = new LiveSource("/");
