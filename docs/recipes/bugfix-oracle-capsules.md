@@ -49,7 +49,9 @@ python3 tools/bugfix-bakeoff/external/bench.py verify \
 
 In the meta-repo form, the manifest resolves
 `~/code/cyber-repo/src/cyberfabric/gears-rust`. If that submodule is not
-initialized, preflight fails before any model spend.
+initialized, or if the checkout does not have the benchmark baseline/fix commits
+reachable, preflight fails before any model spend. A standalone gears-rust
+checkout with the benchmark history works through the same manifest.
 
 The onboarding story’s `cyber-repo` starter pack includes `repo-bakeoff`, so a
 newly onboarded project sees this oracle-capsule workflow alongside bugfix, PR
