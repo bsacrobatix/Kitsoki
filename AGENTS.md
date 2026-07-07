@@ -13,6 +13,9 @@ advanced, rebase the branch in its worktree onto local `main`, rerun focused
 validation, and then run the helper again. Do not manually chmod the primary
 checkout except to repair the guard itself.
 
+After the branch has been merged, remove its checkout with `git worktree remove
+<path>` once it is clean; do not leave merged worktrees behind.
+
 Prefer GitHub PRs for review and landing, but do not burn CI on every
 work-in-progress agent branch. The CI workflow is configured so `pull_request`
 runs target `main`; GitHub branch filters on `pull_request` match the PR base
