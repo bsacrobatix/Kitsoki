@@ -53,3 +53,20 @@ func TestCapsuleListRepoHistoryJSON(t *testing.T) {
 	}
 	t.Fatalf("missing repo-history/gears-rust/bug1 in %+v", payload.Capsules)
 }
+
+func TestCapsuleListRepoHistoryMarkdown(t *testing.T) {
+	out, err := execRoot(t, "capsule", "list", "--kind", "repo-history", "--markdown")
+	if err != nil {
+		t.Fatalf("capsule list --markdown: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"# Repo History Capsules",
+		"Capsules: **10**",
+		"`repo-history/query-string/qs1`",
+		"bugfix-bakeoff",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("capsule markdown missing %q:\n%s", want, out)
+		}
+	}
+}
