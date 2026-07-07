@@ -125,8 +125,10 @@ These are kitsoki-specific traps on top of the general
 ## Tracing
 
 Each `ctx.http` call rides the `harness.returned` trace event as a body-free
-`{method, url, status}` summary under the reserved `__http_exchanges` key (added
-automatically; never declare an output by that name). Full bodies live only in
+`{method, url, status}` summary under the reserved `__http_exchanges` key. Each
+`ctx.fs` / `ctx.probe` call likewise rides as `{op, target, status}` under the
+reserved `__inspections` key. Both keys are added automatically; never declare
+outputs by those names. Full HTTP bodies and file/probe payloads live only in
 cassettes — never the trace. So a recorded session shows exactly what the script
 called without leaking payloads or secrets.
 

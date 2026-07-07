@@ -131,10 +131,11 @@ Returns: the script's `main(ctx)` **must return a dict**; each key/value becomes
 a named output. The output dict is validated against the sidecar's `outputs:`
 block (see below), then handed to the effect's `bind:` exactly like any other
 handler's `Result.Data`. Bind only the keys you name — nothing reaches world
-unasked-for. One reserved key, `__http_exchanges`, is added automatically: a
-body-free list of `{method, url, status}` for the HTTP calls the script made,
-so they ride the `harness.returned` trace event. Authors **must not** declare an
-output named `__http_exchanges`.
+unasked-for. Two reserved trace-summary keys are added automatically when the
+script uses those capabilities: `__http_exchanges`, a body-free list of
+`{method, url, status}` for HTTP calls, and `__inspections`, a body-free list of
+`{op, target, status}` for `ctx.fs` / `ctx.probe` calls. Authors **must not**
+declare outputs with those names.
 
 Number conversion back to Go: an integer becomes `int64` (or `float64` when out
 of `int64` range); a float becomes `float64`. The sidecar's `int` and `number`
@@ -276,7 +277,7 @@ flowchart TD
     http["ctx.http.*<br/>HTTPClient recording / replay"]
     fs["ctx.fs / ctx.probe<br/>rooted allow-list / replay"]
     validateOut{"Validate returned dict<br/>declared outputs + types"}
-    result["Result.Data<br/>outputs + __http_exchanges"]
+    result["Result.Data<br/>outputs + trace summaries"]
     bind["effect bind"]
     domain["DomainError<br/>Result.Error -> on_error"]
 

@@ -202,6 +202,28 @@ func TestSidecar_Outputs_Undeclared(t *testing.T) {
 	}
 }
 
+func TestSidecar_RejectsReturnedReservedOutputKeys(t *testing.T) {
+	for _, key := range []string{starlarkhost.ExchangesOutputKey, starlarkhost.InspectionsOutputKey} {
+		t.Run(key, func(t *testing.T) {
+			_, err := runWith(t,
+				"outputs: {}\n",
+				"def main(ctx):\n    return {"+quoteForStar(key)+": []}\n",
+				nil,
+			)
+			if err == nil {
+				t.Fatal("expected error for returned reserved output")
+			}
+			msg, ok := starlarkhost.AsDomainError(err)
+			if !ok {
+				t.Fatalf("expected DomainError, got %T: %v", err, err)
+			}
+			if !strings.Contains(msg, key) || !strings.Contains(msg, "reserved output") {
+				t.Fatalf("error %q should reject reserved output %q", msg, key)
+			}
+		})
+	}
+}
+
 // TestSidecar_GoodContract_Passes confirms a script honouring its declared
 // contract runs clean and returns the typed outputs.
 func TestSidecar_GoodContract_Passes(t *testing.T) {
@@ -218,17 +240,25 @@ func TestSidecar_GoodContract_Passes(t *testing.T) {
 	}
 }
 
-// TestSidecar_RejectsReservedOutputKey confirms the engine enforces (not just
-// documents) the reservation of the __http_exchanges output name: declaring it
+func quoteForStar(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+}
+
+// TestSidecar_RejectsReservedOutputKeys confirms the engine enforces (not just
+// documents) the reservation of the trace-summary output names: declaring either
 // in a sidecar fails the parse with an actionable message, so an author cannot
-// shadow the HTTP-exchange summaries the adapter injects under that key.
-func TestSidecar_RejectsReservedOutputKey(t *testing.T) {
-	src := "outputs:\n  " + starlarkhost.ExchangesOutputKey + ": { type: list }\n"
-	_, err := starlarkhost.ParseSidecar([]byte(src))
-	if err == nil {
-		t.Fatal("ParseSidecar(reserved output) = nil, want error")
-	}
-	if !strings.Contains(err.Error(), starlarkhost.ExchangesOutputKey) || !strings.Contains(err.Error(), "reserved") {
-		t.Fatalf("error %q should name the reserved key and say it is reserved", err)
+// shadow the summaries the adapter injects under those keys.
+func TestSidecar_RejectsReservedOutputKeys(t *testing.T) {
+	for _, key := range []string{starlarkhost.ExchangesOutputKey, starlarkhost.InspectionsOutputKey} {
+		t.Run(key, func(t *testing.T) {
+			src := "outputs:\n  " + key + ": { type: list }\n"
+			_, err := starlarkhost.ParseSidecar([]byte(src))
+			if err == nil {
+				t.Fatal("ParseSidecar(reserved output) = nil, want error")
+			}
+			if !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), "reserved") {
+				t.Fatalf("error %q should name the reserved key and say it is reserved", err)
+			}
+		})
 	}
 }
