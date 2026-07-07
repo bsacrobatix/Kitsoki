@@ -56,7 +56,8 @@ these surfaces.
   a concrete Claude/Codex task-agent launch plan, with dry-run by default.
 - **[`agent-launch-policy.md`](agent-launch-policy.md)** — the
   `agent_launch_policy:` preflight guard for keeping external coding-agent
-  launches out of protected checkouts/branches and inside opened capsules.
+  launches out of protected checkouts/branches and inside opened capsules,
+  plus the macOS `run_as_user` setup story.
 - **[`mcp-studio.md`](mcp-studio.md)** — the `kitsoki mcp` studio server
   an external coding agent attaches to: the handle model and the
   `story.*` / `session.*` / `render.*` tool surface that let it author a

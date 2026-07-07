@@ -1,0 +1,186 @@
+states:
+  planned:
+    description: "Review run-as-user setup plan"
+    relevant_world: [operator_user, agent_user, group_name, capsule_root, wrapper_bin, protected_root, setup_summary, status]
+    on_enter:
+      - invoke: host.starlark.run
+        id: plan_run_as_user_setup
+        with:
+          script: scripts/plan_setup.star
+          inputs:
+            platform: "{{ world.platform }}"
+            operator_user: "{{ world.operator_user }}"
+            agent_user: "{{ world.agent_user }}"
+            group_name: "{{ world.group_name }}"
+            capsule_root: "{{ world.capsule_root }}"
+            wrapper_bin: "{{ world.wrapper_bin }}"
+            protected_root: "{{ world.protected_root }}"
+            codex_bin: "{{ world.codex_bin }}"
+            claude_bin: "{{ world.claude_bin }}"
+            sample_capsule: "{{ world.sample_capsule }}"
+        bind:
+          setup_summary: setup_summary
+          config_snippet: config_snippet
+          account_steps: account_steps
+          group_commands: group_commands
+          wrapper_commands: wrapper_commands
+          sudoers_snippet: sudoers_snippet
+          assignment_commands: assignment_commands
+          validation_commands: validation_commands
+          receipt_markdown: receipt_markdown
+          security_notes: security_notes
+        once: true
+        on_error: failed
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "{{ world.setup_summary|default:'(pending)' }}"
+          - heading: ".kitsoki.local.yaml"
+          - code: "{{ world.config_snippet|default:'(pending)' }}"
+          - heading: "Account setup"
+          - code: "{{ world.account_steps|default:'(pending)' }}"
+          - heading: "Group and capsule parent"
+          - code: "{{ world.group_commands|default:'(pending)' }}"
+          - heading: "Backend wrappers"
+          - code: "{{ world.wrapper_commands|default:'(pending)' }}"
+          - heading: "sudoers"
+          - code: "{{ world.sudoers_snippet|default:'(pending)' }}"
+          - heading: "Assign one capsule"
+          - code: "{{ world.assignment_commands|default:'(pending)' }}"
+          - heading: "Validation probes"
+          - code: "{{ world.validation_commands|default:'(pending)' }}"
+          - heading: "Security notes"
+          - code: "{{ world.security_notes|default:'(pending)' }}"
+        choices:
+          - heading: "Actions"
+          - list:
+              items:
+                - label: "validated"
+                  hint: "mark ready after the validation probes pass"
+                - label: "configure operator_user=<name> ..."
+                  hint: "revise any setup value and regenerate"
+                - label: "back"
+                  hint: "return to the setup values"
+                - label: "quit"
+                  hint: "leave"
+                - label: "look"
+        footer:
+          - prose: "The story prints commands for review. It does not create users, edit sudoers, or run backend CLIs."
+    on:
+      validated:
+        - target: ready
+          effects:
+            - set:
+                status: "validated"
+      configure:
+        - target: planned
+          effects:
+            - set:
+                platform: "{{ slots.platform ?? world.platform }}"
+                operator_user: "{{ slots.operator_user ?? world.operator_user }}"
+                agent_user: "{{ slots.agent_user ?? world.agent_user }}"
+                group_name: "{{ slots.group_name ?? world.group_name }}"
+                capsule_root: "{{ slots.capsule_root ?? world.capsule_root }}"
+                wrapper_bin: "{{ slots.wrapper_bin ?? world.wrapper_bin }}"
+                protected_root: "{{ slots.protected_root ?? world.protected_root }}"
+                codex_bin: "{{ slots.codex_bin ?? world.codex_bin }}"
+                claude_bin: "{{ slots.claude_bin ?? world.claude_bin }}"
+                sample_capsule: "{{ slots.sample_capsule ?? world.sample_capsule }}"
+                setup_summary: ""
+                config_snippet: ""
+                account_steps: ""
+                group_commands: ""
+                wrapper_commands: ""
+                sudoers_snippet: ""
+                assignment_commands: ""
+                validation_commands: ""
+                receipt_markdown: ""
+                security_notes: ""
+                last_error: ""
+                status: "planning"
+      plan:
+        - target: planned
+          effects:
+            - set:
+                setup_summary: ""
+                config_snippet: ""
+                account_steps: ""
+                group_commands: ""
+                wrapper_commands: ""
+                sudoers_snippet: ""
+                assignment_commands: ""
+                validation_commands: ""
+                receipt_markdown: ""
+                security_notes: ""
+                last_error: ""
+                status: "planning"
+      back:
+        - target: lobby
+      look:
+        - target: .
+      quit:
+        - target: ended
+
+  failed:
+    description: "Setup plan failed"
+    relevant_world: [last_error]
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "The deterministic setup planner failed."
+          - heading: "Error"
+          - code: "{{ world.last_error|default:'(none)' }}"
+        choices:
+          - list:
+              items:
+                - label: "back"
+                  hint: "return to the setup values"
+                - label: "quit"
+                  hint: "leave"
+    on:
+      back:
+        - target: lobby
+          effects:
+            - set:
+                last_error: ""
+                status: "not planned"
+      quit:
+        - target: ended
+
+  ready:
+    description: "Run-as-user setup ready"
+    relevant_world: [agent_user, capsule_root, receipt_markdown]
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "The setup is marked validated. Keep the receipt with your machine-local notes and make sure Kitsoki is started with the wrapper directory first in PATH until first-class run_as_user launch support lands."
+          - heading: "Receipt"
+          - code: "{{ world.receipt_markdown|default:'(pending)' }}"
+        choices:
+          - list:
+              items:
+                - label: "back"
+                  hint: "review the plan"
+                - label: "quit"
+                  hint: "leave"
+                - label: "look"
+    on:
+      back:
+        - target: planned
+      look:
+        - target: .
+      quit:
+        - target: ended
+
+  ended:
+    terminal: true
+    description: "Closed"
+    view:
+      extends: "base"
+      blocks:
+        body:
+          - prose: "Done."
+

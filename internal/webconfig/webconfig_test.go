@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -264,6 +265,95 @@ agent_launch_policy:
 	wantProtected := filepath.Join(dir, "local-protected")
 	if len(cfg.AgentLaunchPolicy.ProtectedRoots) != 1 || cfg.AgentLaunchPolicy.ProtectedRoots[0] != wantProtected {
 		t.Fatalf("protected_roots=%v, want [%s]", cfg.AgentLaunchPolicy.ProtectedRoots, wantProtected)
+	}
+}
+
+func TestLoad_AgentUserDelegationResolvesPaths(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DefaultConfigFile)
+	if err := os.WriteFile(path, []byte(`
+agent_user_delegation:
+  enabled: true
+  run_as_user: kitsoki-agent
+  wrapper_bin: ./agent-bin
+  capsule_root: ./capsules
+  receipt_path: ./.artifacts/run-as-user/receipt.json
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.AgentUserDelegation == nil || !cfg.AgentUserDelegation.Enabled {
+		t.Fatalf("expected enabled user delegation, got %#v", cfg.AgentUserDelegation)
+	}
+	if cfg.AgentUserDelegation.RunAsUser != "kitsoki-agent" {
+		t.Fatalf("run_as_user=%q", cfg.AgentUserDelegation.RunAsUser)
+	}
+	if got, want := cfg.AgentUserDelegation.WrapperBin, filepath.Join(dir, "agent-bin"); got != want {
+		t.Fatalf("wrapper_bin=%q, want %q", got, want)
+	}
+	if got, want := cfg.AgentUserDelegation.CapsuleRoot, filepath.Join(dir, "capsules"); got != want {
+		t.Fatalf("capsule_root=%q, want %q", got, want)
+	}
+	if got, want := cfg.AgentUserDelegation.ReceiptPath, filepath.Join(dir, ".artifacts", "run-as-user", "receipt.json"); got != want {
+		t.Fatalf("receipt_path=%q, want %q", got, want)
+	}
+}
+
+func TestLoad_AgentUserDelegationRequiresUserWhenEnabled(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DefaultConfigFile)
+	if err := os.WriteFile(path, []byte(`
+agent_user_delegation:
+  enabled: true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected load error")
+	}
+	if !strings.Contains(err.Error(), "agent_user_delegation.run_as_user") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoad_AgentUserDelegationLocalOverrideWinsWhole(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, DefaultConfigFile)
+	local := LocalConfigPath(base)
+	if err := os.WriteFile(base, []byte(`
+agent_user_delegation:
+  enabled: true
+  run_as_user: base-agent
+  wrapper_bin: ./base-bin
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(local, []byte(`
+agent_user_delegation:
+  enabled: true
+  run_as_user: local-agent
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(base)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.AgentUserDelegation == nil {
+		t.Fatal("expected user delegation config")
+	}
+	if cfg.AgentUserDelegation.RunAsUser != "local-agent" {
+		t.Fatalf("run_as_user=%q", cfg.AgentUserDelegation.RunAsUser)
+	}
+	if cfg.AgentUserDelegation.WrapperBin != "" {
+		t.Fatalf("local block must replace base wrapper_bin, got %q", cfg.AgentUserDelegation.WrapperBin)
 	}
 }
 

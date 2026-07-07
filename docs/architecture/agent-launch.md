@@ -115,4 +115,6 @@ a command plan. The same guard applies to raw interactive sessions.
 
 Launch policy is a preflight guard, not a kernel/filesystem sandbox. Use it to
 keep agents out of the protected checkout and inside opened capsules; use
-`with.sandbox` on hosted calls when a story also needs runtime supervision.
+`kitsoki run @kitsoki/run-as-user-setup` on macOS to generate the delegated
+local-user wrapper setup; use `with.sandbox` on hosted calls when a story also
+needs runtime supervision.

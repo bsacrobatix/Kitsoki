@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 
@@ -423,6 +424,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 
 			ctx := context.Background()
 			bugFilingNotice := bugFilingAuthStartupNotice(ctx, ticketRepo)
+			runAsUserNotice := runAsUserStartupNotice(webCfg, runtime.GOOS)
 
 			// ── Flag validation ────────────────────────────────────────────
 			if continueID != "" && !continueFlag {
@@ -592,6 +594,9 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				}
 				if bugFilingNotice != "" {
 					tuiOptions = append(tuiOptions, tui.WithStartupNotice(bugFilingNotice))
+				}
+				if runAsUserNotice != "" {
+					tuiOptions = append(tuiOptions, tui.WithStartupNotice(runAsUserNotice))
 				}
 				if tuiMetaTracePath != "" {
 					tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(tuiMetaTracePath))
@@ -771,6 +776,9 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			if bugFilingNotice != "" {
 				tuiOptions = append(tuiOptions, tui.WithStartupNotice(bugFilingNotice))
 			}
+			if runAsUserNotice != "" {
+				tuiOptions = append(tuiOptions, tui.WithStartupNotice(runAsUserNotice))
+			}
 			if freshMetaTracePath != "" {
 				tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(freshMetaTracePath))
 			}
@@ -920,6 +928,16 @@ func bugFilingAuthStartupNotice(ctx context.Context, ticketRepo string) string {
 		return ""
 	}
 	return fmt.Sprintf("(warning: GitHub bug filing is unavailable for %s because auth is missing. Filing bugs is critical; run `kitsoki gh-agent login` or set GH_TOKEN/GITHUB_TOKEN.)", repo)
+}
+
+func runAsUserStartupNotice(cfg webconfig.WebConfig, goos string) string {
+	if goos != "darwin" {
+		return ""
+	}
+	if cfg.AgentUserDelegation != nil && cfg.AgentUserDelegation.Enabled && strings.TrimSpace(cfg.AgentUserDelegation.RunAsUser) != "" {
+		return ""
+	}
+	return "(warning: agent run_as_user delegation is not configured. Launch policy is not a sandbox; before letting agents write, run `kitsoki run @kitsoki/run-as-user-setup` and put the generated `agent_user_delegation:` block in `.kitsoki.local.yaml`.)"
 }
 
 // resolveAgentBackend resolves the agent backend selector with precedence
