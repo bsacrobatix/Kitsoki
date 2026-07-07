@@ -156,6 +156,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(chatCmd())
 	root.AddCommand(mcpValidatorCmd())
 	root.AddCommand(mcpBashCmd())
+	root.AddCommand(mcpCodeactCmd())
 	root.AddCommand(mcpOperatorAskCmd())
 	root.AddCommand(bugCmd())
 	root.AddCommand(issuesCmd())
