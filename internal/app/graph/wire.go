@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/storyauthoring"
 )
 
 const SchemaV1 = "kitsoki.graph/v1"
@@ -156,6 +157,9 @@ func roomTransitionEdges(fromRoom string, st *app.State, roomSet map[string]bool
 			return
 		}
 		for intent, transitions := range s.On {
+			if storyauthoring.IsFrameworkTransition(path, intent) {
+				continue
+			}
 			for i, tr := range transitions {
 				target := resolveGraphTarget(path, tr.Target)
 				if target == "" || strings.Contains(target, "{{") {

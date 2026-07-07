@@ -34,6 +34,7 @@ import (
 	"kitsoki/internal/render"
 	"kitsoki/internal/semroute"
 	"kitsoki/internal/store"
+	"kitsoki/internal/storyauthoring"
 	"kitsoki/internal/trace"
 	"kitsoki/internal/transport"
 	"kitsoki/internal/turncache"
@@ -1613,12 +1614,8 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 	// pre-existing timeout on the state we just exited.
 	o.armTimeoutForState(sid, journey.State, result.NewState)
 
-	// Compute updated allowed intents in the new state.
-	newAllowed := o.machine.AllowedIntents(result.NewState, result.World)
-	newAllowedNames := make([]string, len(newAllowed))
-	for i, ai := range newAllowed {
-		newAllowedNames[i] = ai.Name
-	}
+	// Compute updated visible allowed intents in the new state.
+	newAllowedNames := allowedNamesFromMachine(o.machine, result.NewState, result.World)
 
 	mode := ModeTransitioned
 
@@ -2063,10 +2060,7 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 		if appendErr := o.appendEventsAndJournal(sid, failureEvents, sdFailJEntries); appendErr != nil {
 			return nil, fmt.Errorf("orchestrator: SubmitDirect: append failure events: %w", appendErr)
 		}
-		allowedNames := make([]string, 0)
-		for _, ai := range o.machine.AllowedIntents(journey.State, journey.World) {
-			allowedNames = append(allowedNames, ai.Name)
-		}
+		allowedNames := allowedNamesFromMachine(o.machine, journey.State, journey.World)
 		return &TurnOutcome{
 			Mode:           ModeRejected,
 			NewState:       journey.State,
@@ -2169,11 +2163,7 @@ func (o *Orchestrator) submitDirect(ctx context.Context, sid app.SessionID, inte
 	// (Re-)arm any Timeout: declared on the new state.
 	o.armTimeoutForState(sid, journey.State, result.NewState)
 
-	newAllowed := o.machine.AllowedIntents(result.NewState, result.World)
-	newAllowedNames := make([]string, len(newAllowed))
-	for i, ai := range newAllowed {
-		newAllowedNames[i] = ai.Name
-	}
+	newAllowedNames := allowedNamesFromMachine(o.machine, result.NewState, result.World)
 
 	mode := ModeTransitioned
 	newStateDef := lookupStateByPath(o.def, result.NewState)
@@ -2468,12 +2458,15 @@ func effectsFromEvents(events []store.Event) []EffectSummary {
 	return out
 }
 
-// allowedNamesFromMachine collects intent names allowed in (state, world).
+// allowedNamesFromMachine collects visible intent names allowed in (state, world).
 func allowedNamesFromMachine(m machine.Machine, state app.StatePath, w world.World) []string {
 	allowed := m.AllowedIntents(state, w)
-	out := make([]string, len(allowed))
-	for i, ai := range allowed {
-		out[i] = ai.Name
+	out := make([]string, 0, len(allowed))
+	for _, ai := range allowed {
+		if ai.Hidden || storyauthoring.HideIntentFromMenu(string(state), ai.Name) {
+			continue
+		}
+		out = append(out, ai.Name)
 	}
 	return out
 }
@@ -2566,12 +2559,7 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 		}
 
 		// Other validation error.
-		allowedNames := make([]string, 0)
-		if ai := o.machine.AllowedIntents(journey.State, journey.World); len(ai) > 0 {
-			for _, a := range ai {
-				allowedNames = append(allowedNames, a.Name)
-			}
-		}
+		allowedNames := allowedNamesFromMachine(o.machine, journey.State, journey.World)
 		// Agent off-ramp: routed through the same helper so the rejection
 		// sites can't drift (Task 1.3). This is the slot-continuation path —
 		// it carries no fresh free-text utterance, so maybeOffRamp's empty-input
@@ -2675,11 +2663,7 @@ func (o *Orchestrator) ContinueTurn(ctx context.Context, sid app.SessionID, supp
 	delete(o.pending, sid)
 	o.mu.Unlock()
 
-	newAllowed := o.machine.AllowedIntents(result.NewState, result.World)
-	newAllowedNames := make([]string, len(newAllowed))
-	for i, ai := range newAllowed {
-		newAllowedNames[i] = ai.Name
-	}
+	newAllowedNames := allowedNamesFromMachine(o.machine, result.NewState, result.World)
 
 	mode := ModeTransitioned
 	newStateDef := lookupStateByPath(o.def, result.NewState)
@@ -2890,11 +2874,7 @@ func (o *Orchestrator) CurrentView(_ context.Context, sid app.SessionID) (*TurnO
 		return nil, fmt.Errorf("current view: load journey: %w", err)
 	}
 
-	allowed := o.machine.AllowedIntents(j.State, j.World)
-	allowedNames := make([]string, 0, len(allowed))
-	for _, ai := range allowed {
-		allowedNames = append(allowedNames, ai.Name)
-	}
+	allowedNames := allowedNamesFromMachine(o.machine, j.State, j.World)
 
 	out := &TurnOutcome{
 		Mode:           ModeTransitioned,

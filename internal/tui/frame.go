@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"kitsoki/internal/storyauthoring"
 	"kitsoki/internal/tui/blocks"
 )
 
@@ -119,6 +120,9 @@ func composeFrameMeta(m RootModel) FrameMeta {
 	}
 	w := m.orch.CurrentWorld(m.sid)
 	for _, ai := range m.orch.AllowedIntents(m.currentState, w) {
+		if ai.Hidden || storyauthoring.HideIntentFromMenu(string(m.currentState), ai.Name) {
+			continue
+		}
 		meta.AllowedIntents = append(meta.AllowedIntents, ai.Name)
 	}
 	meta.WorldDigest = w.Vars

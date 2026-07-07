@@ -1279,7 +1279,7 @@ func turnResponse(out *orchestrator.TurnOutcome, frame tui.Frame, turnErr error)
 	if out != nil {
 		tr.Mode = out.Mode.String()
 		tr.State = string(out.NewState)
-		tr.AllowedIntents = out.AllowedIntents
+		tr.AllowedIntents = visibleAllowedIntentStrings(string(out.NewState), out.AllowedIntents)
 		tr.PendingIntent = out.PendingIntent
 		tr.ErrorCode = string(out.ErrorCode)
 		tr.ErrorMessage = out.ErrorMessage
@@ -1406,7 +1406,7 @@ func (rt *sessionRuntime) status(ctx context.Context, handle string) (SessionSta
 		result := SessionStatusResult{
 			OK:             true,
 			State:          state,
-			AllowedIntents: append([]string(nil), snap.allowedIntents...),
+			AllowedIntents: visibleAllowedIntentStrings(state, snap.allowedIntents),
 			Running:        running,
 		}
 		addStatusWorldKeys(&result, snap.world)
@@ -1418,10 +1418,7 @@ func (rt *sessionRuntime) status(ctx context.Context, handle string) (SessionSta
 		return SessionStatusResult{}, fmt.Errorf("session.status: load journey: %w", err)
 	}
 	allowed := rt.orch.AllowedIntents(j.State, j.World)
-	allowedNames := make([]string, 0, len(allowed))
-	for _, ai := range allowed {
-		allowedNames = append(allowedNames, ai.Name)
-	}
+	allowedNames := visibleAllowedIntentNames(string(j.State), allowed)
 	result := SessionStatusResult{
 		OK:             true,
 		State:          string(j.State),
@@ -1510,7 +1507,7 @@ func (rt *sessionRuntime) inspect(ctx context.Context, lastTurns int, handle str
 			OK:                true,
 			State:             state,
 			World:             snap.world,
-			AllowedIntents:    append([]string(nil), snap.allowedIntents...),
+			AllowedIntents:    visibleAllowedIntentStrings(state, snap.allowedIntents),
 			LastView:          snap.lastView,
 			Async:             asyncSummaryOrNil(summarizeAsync(jobs, notifications, unreadNotifications, pendingDrives, backgroundedChats, operatorQuestions, nil, running)),
 			Running:           running,
@@ -1529,10 +1526,7 @@ func (rt *sessionRuntime) inspect(ctx context.Context, lastTurns int, handle str
 		return InspectResult{}, fmt.Errorf("session.inspect: load journey: %w", err)
 	}
 	allowed := rt.orch.AllowedIntents(j.State, j.World)
-	allowedNames := make([]string, 0, len(allowed))
-	for _, ai := range allowed {
-		allowedNames = append(allowedNames, ai.Name)
-	}
+	allowedNames := visibleAllowedIntentNames(string(j.State), allowed)
 	view, verr := rt.orch.RenderState(j.State, j.World)
 	if verr != nil {
 		view = fmt.Sprintf("<render error: %v>", verr)

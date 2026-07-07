@@ -23,6 +23,7 @@ import (
 	"kitsoki/internal/render"
 	"kitsoki/internal/render/elements"
 	"kitsoki/internal/store"
+	"kitsoki/internal/storyauthoring"
 	"kitsoki/internal/trace"
 	"kitsoki/internal/world"
 )
@@ -2205,6 +2206,12 @@ func (m *machineImpl) isDecisionGate(ctx context.Context, state string, w world.
 	}
 	env := expr.Env{Slots: map[string]any{}, World: w.Vars, Event: map[string]any{}}
 	for _, name := range m.allowedIntentNames(app.StatePath(state)) {
+		if name == storyauthoring.EnterIntent {
+			continue
+		}
+		if intentDef, ok := m.lookupIntent(app.StatePath(state), name); ok && intentDef.Hidden {
+			continue
+		}
 		if _, isEmit := emitTargets[name]; isEmit {
 			continue // auto-advance outcome, not an operator choice
 		}
@@ -2273,6 +2280,13 @@ func (m *machineImpl) DecisionCandidates(cur app.StatePath, w world.World) []All
 	env := expr.Env{Slots: map[string]any{}, World: w.Vars, Event: map[string]any{}}
 	var out []AllowedIntent
 	for _, name := range m.allowedIntentNames(cur) {
+		if name == storyauthoring.EnterIntent {
+			continue
+		}
+		intentDef, _ := m.lookupIntent(cur, name)
+		if intentDef.Hidden {
+			continue
+		}
 		tr, path, _, err := m.findTransitionTraced(ctx, string(cur), name, env)
 		if err != nil || tr == nil {
 			continue
@@ -2289,7 +2303,6 @@ func (m *machineImpl) DecisionCandidates(cur app.StatePath, w world.World) []All
 		if resolveTarget(path, raw) == string(cur) {
 			continue
 		}
-		intentDef, _ := m.lookupIntent(cur, name)
 		out = append(out, AllowedIntent{
 			Name:        name,
 			Title:       intentDef.Title,

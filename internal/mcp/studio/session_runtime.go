@@ -619,10 +619,7 @@ func (rt *sessionRuntime) driveSnapshot() (driveSnapshot, error) {
 		return driveSnapshot{}, fmt.Errorf("session.drive: load pre-drive snapshot: %w", err)
 	}
 	allowed := rt.orch.AllowedIntents(j.State, j.World)
-	allowedNames := make([]string, 0, len(allowed))
-	for _, ai := range allowed {
-		allowedNames = append(allowedNames, ai.Name)
-	}
+	allowedNames := visibleAllowedIntentNames(string(j.State), allowed)
 	view, verr := rt.orch.RenderState(j.State, j.World)
 	if verr != nil {
 		view = fmt.Sprintf("<render error: %v>", verr)
@@ -779,10 +776,7 @@ func (rt *sessionRuntime) refreshFromJourneyLocked() {
 		return
 	}
 	allowed := rt.orch.AllowedIntents(j.State, j.World)
-	allowedNames := make([]string, 0, len(allowed))
-	for _, ai := range allowed {
-		allowedNames = append(allowedNames, ai.Name)
-	}
+	allowedNames := visibleAllowedIntentNames(string(j.State), allowed)
 	view, err := rt.orch.RenderState(j.State, j.World)
 	if err != nil {
 		return
