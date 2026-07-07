@@ -128,6 +128,7 @@ cd ~/code/my-project
 kitsoki run
 #   > onboard .                 # or: onboard ~/code/my-project
 #   > continue                  # review the discovered profile
+#   > story packs               # optional: choose a first-run pack
 #   > continue (confirm)        # apply: writes config + instance + toolkit + MCP
 ```
 
@@ -135,15 +136,19 @@ With no app path, `kitsoki run` starts the embedded dev-story root for the
 current project; `kitsoki run @kitsoki/dev-story` names it explicitly.
 Discovery infers the project id, title, stack, and dev/test/build commands.
 
-To start a team on a focused subset before expanding the catalog, include the
-starter stories in the onboarding request:
+To start a team on a focused subset before expanding the catalog, choose a
+starter pack from the onboarding review. The default pack for the current
+cyber-repo rollout is `cyber-repo`: `setup`, `bugfix`, `pr-refinement`, and
+`git-ops`.
+
+You can preselect that same pack in the onboarding request:
 
 ```text
-onboard ~/code/my-project --stories pr-refinement,bugfixing,setup,git-ops
+onboard ~/code/cyber-repo --pack cyber-repo
 ```
 
-If you omit the flag, onboarding uses that same default focused set:
-`setup`, `bugfix`, `pr-refinement`, and `git-ops`.
+For one-off custom scopes, `--stories` still works, but the menu and the normal
+post-onboarding command use named packs.
 
 Two caveats:
 
@@ -178,7 +183,7 @@ runtime or hidden in a cache — it travels with every clone and collaborator:
 | Path | What | Why |
 |---|---|---|
 | `.kitsoki.yaml` | `story_dirs`, `project_profile`, `root.import: dev-story`, and a disabled `mining:` scope when associated transcripts are found | so `kitsoki run` starts the profile-driven implicit root, `kitsoki web` discovers editable project stories, and transcript mining is ready for explicit opt-in |
-| `.kitsoki/project-profile.yaml` | declarative profile (stack, commands, conventions, selected starter story, focused enabled-story set, repo evidence, onboarding baseline) | the discovered description of your project and the source for the implicit dev-story root |
+| `.kitsoki/project-profile.yaml` | declarative profile (stack, commands, conventions, selected starter pack, focused enabled-story set, repo evidence, onboarding baseline) | the discovered description of your project and the source for the implicit dev-story root |
 | `.kitsoki/check-readiness.py` | explicit verifier for the profile's `setup_plan.verifications` | so a human runs build/test/story-load checks after apply — onboarding never surprises the repo |
 | `.kitsoki/promote-session-mining.py` | deterministic promotion helper for emitted session-mining recipes | so reviewed mining output can become pending profile customizations |
 | `.kitsoki/stories/<id>-dev/app.yaml` (+ README) | a materialized dev-story **instance** that imports `@kitsoki/dev-story` | an editable snapshot for web discovery and project-local story extensions |
@@ -236,11 +241,17 @@ host-interface bindings, PRD/design placement, and ticket policy all come from
 that single profile. The materialized instance is still checked in so teams can
 extend it deliberately, but the profile is the reusable convention source.
 
-**Starter story focus.** The profile records the initial scope in
-`kitsoki.enabled_stories` and `onboarding.starter_stories`. This is an adoption
-scope, not a runtime fence: dev-story remains available. Expand deliberately by
-adding story ids there and pairing each new story with project readiness checks
-or local flow coverage.
+**Story packs.** The profile records the selected pack in `kitsoki.story_pack`
+and the enabled adoption scope in `kitsoki.enabled_stories` plus
+`onboarding.starter_stories`. This is not a runtime fence: dev-story remains
+available. Expand deliberately with:
+
+```sh
+kitsoki project-profile story-packs list
+kitsoki project-profile story-packs add <pack>
+```
+
+Pair each added story with project readiness checks or local flow coverage.
 
 **Ticket source.** When discovery classifies the tracker as GitHub (the
 `origin` remote parses to a `github.com` `owner/repo` slug), the generated
@@ -277,7 +288,7 @@ python3 .kitsoki/promote-session-mining.py --accept-pending --json
 python3 .kitsoki/promote-session-mining.py --refine-pending "feedback" --json
 ```
 
-The profile's `onboarding` block records why the starter story was selected,
+The profile's `onboarding` block records why the starter pack was selected,
 which repo patterns discovery used, and which customizations were applied or
 queued — mining proposes there first; an operator accepts. For reusable
 onboarding tests, keep `onboarding.baseline_commit` pinned to the commit before

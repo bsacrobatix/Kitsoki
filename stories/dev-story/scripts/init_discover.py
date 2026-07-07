@@ -15,8 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from init_transcripts import transcript_evidence, transcript_slug  # noqa: E402
 
 
-DEFAULT_STARTER_STORY_IDS = ["setup", "bugfix", "pr-refinement", "git-ops"]
-
 STARTER_STORY_CATALOG = {
     "setup": {
         "title": "Project setup",
@@ -44,6 +42,51 @@ STARTER_STORY_CATALOG = {
     },
 }
 
+STORY_PACKS = {
+    "cyber-repo": {
+        "title": "Cyber repo starter",
+        "summary": "Focused first-run set for cyber-repo: setup, bugfixing, PR refinement, and git operations.",
+        "stories": ["setup", "bugfix", "pr-refinement", "git-ops"],
+    },
+    "core-setup": {
+        "title": "Core setup",
+        "summary": "Bring a project under Kitsoki management with setup and guarded git operations only.",
+        "stories": ["setup", "git-ops"],
+    },
+    "planning-delivery": {
+        "title": "Planning and delivery",
+        "summary": "Add PRD/design and implementation loops on top of setup and git operations.",
+        "stories": ["setup", "git-ops", "prd", "implementation", "pr-refinement"],
+    },
+    "review-quality": {
+        "title": "Review and quality",
+        "summary": "Emphasize bug fixing, test repair, code review, docs review, and git operations.",
+        "stories": ["setup", "git-ops", "bugfix", "fix-tests", "code-review", "docs-review", "pr-refinement"],
+    },
+    "full-dev-story": {
+        "title": "Full dev-story",
+        "summary": "Expose the full day-level dev-story catalog after the team is ready for broader adoption.",
+        "stories": [
+            "setup",
+            "git-ops",
+            "bugfix",
+            "fix-tests",
+            "pr-refinement",
+            "prd",
+            "implementation",
+            "deliver",
+            "code-review",
+            "docs-review",
+            "deploy",
+            "observability",
+            "incident",
+        ],
+    },
+}
+
+DEFAULT_STORY_PACK_ID = "cyber-repo"
+DEFAULT_STARTER_STORY_IDS = STORY_PACKS[DEFAULT_STORY_PACK_ID]["stories"]
+
 STARTER_STORY_ALIASES = {
     "bugfixing": "bugfix",
     "bug-fixing": "bugfix",
@@ -63,6 +106,34 @@ STARTER_STORY_ALIASES = {
     "setup": "setup",
 }
 
+STORY_PACK_ALIASES = {
+    "cyber": "cyber-repo",
+    "cyberrepo": "cyber-repo",
+    "cyber-repo": "cyber-repo",
+    "cyber_repo": "cyber-repo",
+    "focused": "cyber-repo",
+    "focused-engineering": "cyber-repo",
+    "targeted": "cyber-repo",
+    "targeted-engineering": "cyber-repo",
+    "core": "core-setup",
+    "setup": "core-setup",
+    "minimal": "core-setup",
+    "essentials": "core-setup",
+    "planning": "planning-delivery",
+    "delivery": "planning-delivery",
+    "planning-delivery": "planning-delivery",
+    "prd": "planning-delivery",
+    "quality": "review-quality",
+    "review": "review-quality",
+    "review-quality": "review-quality",
+    "full": "full-dev-story",
+    "all": "full-dev-story",
+    "full-dev": "full-dev-story",
+    "full-dev-story": "full-dev-story",
+}
+
+PACK_OPTION_KEYS = {"--pack", "--story-pack", "--starter-pack"}
+PACK_ASSIGNMENT_KEYS = {"pack", "story_pack", "story-pack", "starter_pack", "starter-pack"}
 STORY_OPTION_KEYS = {"--stories", "--starter-stories", "--story-focus", "--focus"}
 STORY_ASSIGNMENT_KEYS = {"stories", "starter_stories", "starter-stories", "story_focus", "story-focus", "focus"}
 
@@ -84,6 +155,43 @@ def normalize_story_id(value: str) -> str:
     text = value.strip().strip("'\"`").lower().replace("_", "-")
     text = re.sub(r"[^a-z0-9-]+", "-", text).strip("-")
     return STARTER_STORY_ALIASES.get(text, text)
+
+
+def normalize_story_pack_id(value: str) -> str:
+    text = value.strip().strip("'\"`").lower().replace("_", "-")
+    text = re.sub(r"[^a-z0-9-]+", "-", text).strip("-")
+    if text == "custom":
+        return "custom"
+    return STORY_PACK_ALIASES.get(text, text)
+
+
+def story_pack(pack_id: str | None) -> dict:
+    normalized = normalize_story_pack_id(pack_id or DEFAULT_STORY_PACK_ID)
+    if normalized == "custom":
+        return {
+            "id": "custom",
+            "title": "Custom story set",
+            "summary": "Operator-specified story list.",
+            "stories": [],
+        }
+    base = STORY_PACKS.get(normalized) or STORY_PACKS[DEFAULT_STORY_PACK_ID]
+    return {"id": normalized if normalized in STORY_PACKS else DEFAULT_STORY_PACK_ID, **base}
+
+
+def story_pack_catalog() -> list[dict]:
+    return [story_pack(pack_id) for pack_id in STORY_PACKS]
+
+
+def story_pack_ids(pack_id: str | None) -> list[str]:
+    return [str(item) for item in story_pack(pack_id).get("stories", [])]
+
+
+def story_pack_title(pack_id: str | None) -> str:
+    return str(story_pack(pack_id).get("title") or story_pack(DEFAULT_STORY_PACK_ID)["title"])
+
+
+def story_pack_summary(pack_id: str | None) -> str:
+    return str(story_pack(pack_id).get("summary") or story_pack(DEFAULT_STORY_PACK_ID)["summary"])
 
 
 def starter_story_entry(story_id: str) -> dict:
@@ -114,6 +222,10 @@ def starter_story_entries(story_ids: list[str] | None = None) -> list[dict]:
     return out
 
 
+def starter_story_entries_for_pack(pack_id: str | None) -> list[dict]:
+    return starter_story_entries(story_pack_ids(pack_id))
+
+
 def story_ids_from_text(value: str) -> list[str]:
     text = re.sub(r"\band\b", ",", value, flags=re.IGNORECASE)
     text = text.replace("+", ",")
@@ -124,10 +236,40 @@ def story_ids_from_text(value: str) -> list[str]:
     return [normalize_story_id(item) for item in raw if normalize_story_id(item)]
 
 
-def parse_story_focus(request: str) -> list[dict]:
+def parse_story_pack(request: str, target: Path | None = None) -> str:
     text = (request or "").strip()
     if not text:
-        return starter_story_entries()
+        return DEFAULT_STORY_PACK_ID
+    try:
+        parts = shlex.split(text)
+    except ValueError:
+        parts = text.split()
+    index = 0
+    while index < len(parts):
+        token = parts[index]
+        lower = token.lower()
+        if lower in PACK_OPTION_KEYS and index + 1 < len(parts):
+            return normalize_story_pack_id(parts[index + 1])
+        if "=" in token:
+            key, value = token.split("=", 1)
+            key = key.lower().lstrip("-").replace("-", "_")
+            if key in {item.replace("-", "_") for item in PACK_ASSIGNMENT_KEYS}:
+                return normalize_story_pack_id(value)
+        index += 1
+    match = re.search(
+        r"(?:story[-_ ]pack|starter[-_ ]pack|pack)\s*[:=]\s*([a-zA-Z0-9_.-]+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return normalize_story_pack_id(match.group(1))
+    return DEFAULT_STORY_PACK_ID
+
+
+def parse_story_focus_ids(request: str) -> list[str]:
+    text = (request or "").strip()
+    if not text:
+        return []
     try:
         parts = shlex.split(text)
     except ValueError:
@@ -159,14 +301,25 @@ def parse_story_focus(request: str) -> list[dict]:
         )
         if match:
             collected.extend(story_ids_from_text(match.group(1)))
-    return starter_story_entries(collected)
+    return collected
+
+
+def parse_story_focus(request: str, pack_id: str | None = None) -> list[dict]:
+    collected = parse_story_focus_ids(request)
+    if collected:
+        return starter_story_entries(collected)
+    return starter_story_entries_for_pack(pack_id or parse_story_pack(request))
 
 
 def is_story_focus_assignment(token: str) -> bool:
     if "=" not in token:
         return False
     key = token.split("=", 1)[0].lower().lstrip("-").replace("-", "_")
-    return key in {item.replace("-", "_") for item in STORY_ASSIGNMENT_KEYS}
+    return key in {item.replace("-", "_") for item in STORY_ASSIGNMENT_KEYS | PACK_ASSIGNMENT_KEYS}
+
+
+def is_onboarding_option(token: str) -> bool:
+    return token.lower() in STORY_OPTION_KEYS | PACK_OPTION_KEYS
 
 
 def parse_target(request: str, workdir: str, repo_root: str) -> Path:
@@ -196,7 +349,7 @@ def parse_target(request: str, workdir: str, repo_root: str) -> Path:
                     if skip_next:
                         skip_next = False
                         continue
-                    if lower in STORY_OPTION_KEYS:
+                    if is_onboarding_option(lower):
                         skip_next = True
                         continue
                     if lower.startswith("--") or is_story_focus_assignment(item):
@@ -351,8 +504,14 @@ def git_info(path: Path) -> dict:
     return {"vcs": "git", "default_branch": default_branch or "main", "remote": remote}
 
 
-def invalid_discovery(path: Path, error: str, starter_stories: list[dict] | None = None) -> dict:
+def invalid_discovery(
+    path: Path,
+    error: str,
+    starter_stories: list[dict] | None = None,
+    pack_id: str | None = None,
+) -> dict:
     transcripts = transcript_evidence(path)
+    pack = story_pack(pack_id)
     return {
         "target_path": str(path),
         "project_id": "",
@@ -369,6 +528,10 @@ def invalid_discovery(path: Path, error: str, starter_stories: list[dict] | None
         "tracker": "none",
         "ticket_repo": "",
         "starter_stories": starter_stories or starter_story_entries(),
+        "story_pack": pack["id"],
+        "story_pack_title": pack["title"],
+        "story_pack_summary": pack["summary"],
+        "story_packs": story_pack_catalog(),
         "transcript_slug": transcripts["slug"],
         "transcript_count": transcripts["count"],
         "transcript_sources": transcripts["sources"],
@@ -377,12 +540,13 @@ def invalid_discovery(path: Path, error: str, starter_stories: list[dict] | None
     }
 
 
-def discover(path: Path, starter_stories: list[dict] | None = None) -> dict:
-    starter_stories = starter_stories or starter_story_entries()
+def discover(path: Path, starter_stories: list[dict] | None = None, pack_id: str | None = None) -> dict:
+    pack = story_pack(pack_id)
+    starter_stories = starter_stories or starter_story_entries_for_pack(pack["id"])
     if not path.exists():
-        return invalid_discovery(path, "target path does not exist", starter_stories)
+        return invalid_discovery(path, "target path does not exist", starter_stories, pack["id"])
     if not path.is_dir():
-        return invalid_discovery(path, "target path is not a directory", starter_stories)
+        return invalid_discovery(path, "target path is not a directory", starter_stories, pack["id"])
 
     package = read_package(path)
     package_name = package.get("name") if isinstance(package.get("name"), str) else ""
@@ -502,6 +666,10 @@ def discover(path: Path, starter_stories: list[dict] | None = None) -> dict:
         "tracker": "github" if ticket_repo else "none",
         "ticket_repo": ticket_repo,
         "starter_stories": starter_stories,
+        "story_pack": pack["id"],
+        "story_pack_title": pack["title"],
+        "story_pack_summary": pack["summary"],
+        "story_packs": story_pack_catalog(),
         "transcript_slug": transcripts["slug"],
         "transcript_count": transcripts["count"],
         "transcript_sources": transcripts["sources"],
@@ -513,7 +681,11 @@ def main() -> int:
     request = sys.argv[1] if len(sys.argv) > 1 else ""
     workdir = sys.argv[2] if len(sys.argv) > 2 else ""
     repo_root = sys.argv[3] if len(sys.argv) > 3 else ""
-    print(json.dumps(discover(parse_target(request, workdir, repo_root), parse_story_focus(request)), sort_keys=True))
+    target = parse_target(request, workdir, repo_root)
+    explicit_ids = parse_story_focus_ids(request)
+    pack_id = "custom" if explicit_ids else parse_story_pack(request, target)
+    starter_stories = starter_story_entries(explicit_ids) if explicit_ids else starter_story_entries_for_pack(pack_id)
+    print(json.dumps(discover(target, starter_stories, pack_id), sort_keys=True))
     return 0
 
 

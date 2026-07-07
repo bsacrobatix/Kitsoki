@@ -21,6 +21,7 @@ func projectProfileCmd() *cobra.Command {
 		Short: "Inspect and validate Kitsoki project profiles",
 	}
 	cmd.AddCommand(projectProfileValidateCmd())
+	cmd.AddCommand(projectProfileStoryPacksCmd())
 	return cmd
 }
 

@@ -662,6 +662,10 @@ world:
   init_repo_remote:      { type: string, default: "" }
   init_conventions:      { type: string, default: "hybrid" }
   init_tracker:          { type: string, default: "none" }
+  init_story_pack:       { type: string, default: "cyber-repo" }
+  init_story_pack_title: { type: string, default: "Cyber repo starter" }
+  init_story_pack_summary: { type: string, default: "" }
+  init_story_packs:      { type: list, default: [] }
   init_starter_stories:  { type: list, default: [] }
   init_transcript_count: { type: int, default: 0 }
   init_transcript_sources: { type: list, default: [] }
@@ -914,6 +918,18 @@ intents:
     priority: 31
     slots:
       target: { type: string, required: false, description: "Path to the repository to onboard. Empty ⇒ the current checkout." }
+  review_story_pack:
+    title: "Story Packs"
+    description: "Choose the first-run story pack for project onboarding."
+    examples: ["story packs", "choose story pack", "starter pack", "change pack"]
+    priority: 31
+  select_story_pack:
+    title: "Select Story Pack"
+    description: "Select one named onboarding story pack."
+    examples: ["select cyber repo", "use core setup", "full dev-story pack"]
+    priority: 31
+    slots:
+      pack: { type: string, required: true, description: "Story pack id." }
   go_deploy:
     title: "Deploy"
     description: "Open the deploy room."

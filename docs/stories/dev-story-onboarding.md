@@ -57,16 +57,21 @@ Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
   path out of the request (`onboard ~/code/foo` → `/abs/.../foo`), falling back
   to `repo_root` / `workdir` / cwd.
 
-The request can also carry an adoption scope:
+The request can also preselect a named first-run story pack:
 
 ```text
-onboard ~/code/my-project --stories pr-refinement,bugfixing,setup,git-ops
+onboard ~/code/cyber-repo --pack cyber-repo
 ```
 
-Discovery normalizes aliases such as `bugfixing` → `bugfix` and `gitops` →
-`git-ops`. Without an explicit `--stories`/`stories=`/`focus=` value, onboarding
-defaults to the same focused set: `setup`, `bugfix`, `pr-refinement`, and
-`git-ops`.
+Discovery emits the pack catalog and the selected pack into
+`init_story_packs`, `init_story_pack`, and `init_starter_stories`. The review
+room exposes a `story packs` menu before writes happen; selecting a pack updates
+the starter set in memory. The current cyber-repo rollout pack is
+`cyber-repo`: `setup`, `bugfix`, `pr-refinement`, and `git-ops`.
+
+For one-off custom scopes, discovery still accepts
+`--stories`/`stories=`/`focus=` and normalizes aliases such as `bugfixing` →
+`bugfix` and `gitops` → `git-ops`; those are recorded as a custom pack.
 
 ## The apply step — two host calls
 
@@ -80,12 +85,14 @@ defaults to the same focused set: `setup`, `bugfix`, `pr-refinement`, and
    runtime block to `.gitignore`. Binds
    `init_apply_result` (the JSON report); a failure routes to
    `init_apply_failed`. The generated profile's `onboarding` block records the
-   selected starter story, deterministic repo evidence, and initial
+   selected starter pack, deterministic repo evidence, and initial
    project-local customizations so later session mining can propose changes
-   without patching the shared story. It also records the focused starter set in
-   `kitsoki.enabled_stories` and `onboarding.starter_stories`; those fields are
-   an adoption scope, not a runtime fence. Teams expand by adding story ids and
-   matching readiness checks/flows after a story is proven in that repo.
+   without patching the shared story. It records the chosen pack in
+   `kitsoki.story_pack` / `onboarding.story_pack` and the focused starter set in
+   `kitsoki.enabled_stories` / `onboarding.starter_stories`; those fields are an
+   adoption scope, not a runtime fence. Teams expand later with
+   `kitsoki project-profile story-packs add <pack>` after adding matching
+   readiness checks/flows.
 
 2. **`kitsoki project-tools install --target <path>`** — installs the agent
    toolkit (skills + subagents) and registers the studio MCP, producing the

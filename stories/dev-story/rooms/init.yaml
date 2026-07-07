@@ -25,6 +25,10 @@ states:
       - init_repo_vcs
       - init_repo_default_branch
       - init_repo_remote
+      - init_story_pack
+      - init_story_pack_title
+      - init_story_pack_summary
+      - init_story_packs
       - init_starter_stories
       - workdir
       - repo_root
@@ -96,6 +100,10 @@ states:
           init_repo_remote:   "stdout_json.repo_remote"
           init_conventions:   "stdout_json.conventions"
           init_tracker:       "stdout_json.tracker"
+          init_story_pack:    "stdout_json.story_pack"
+          init_story_pack_title: "stdout_json.story_pack_title"
+          init_story_pack_summary: "stdout_json.story_pack_summary"
+          init_story_packs:   "stdout_json.story_packs"
           init_starter_stories: "stdout_json.starter_stories"
           init_transcript_count:      "stdout_json.transcript_count"
           init_transcript_sources:    "stdout_json.transcript_sources"
@@ -179,6 +187,10 @@ states:
                 init_repo_vcs: "none"
                 init_repo_default_branch: ""
                 init_repo_remote: ""
+                init_story_pack: "cyber-repo"
+                init_story_pack_title: "Cyber repo starter"
+                init_story_pack_summary: ""
+                init_story_packs: []
                 init_starter_stories: []
                 init_transcript_count: 0
                 init_transcript_sources: []
@@ -213,6 +225,10 @@ states:
       - init_repo_remote
       - init_conventions
       - init_tracker
+      - init_story_pack
+      - init_story_pack_title
+      - init_story_pack_summary
+      - init_story_packs
       - init_starter_stories
       - init_transcript_count
       - init_mining_recommendation
@@ -259,6 +275,11 @@ states:
             Mode:        "{{ world.init_profile_mode }}"
       - heading: "Starter Stories"
         when: "len(world.init_starter_stories) > 0"
+      - kv:
+          pairs:
+            Pack: "{{ world.init_story_pack_title|default:'Cyber repo starter' }} ({{ world.init_story_pack|default:'cyber-repo' }})"
+            Normal command: "kitsoki project-profile story-packs add <pack>"
+        when: "len(world.init_starter_stories) > 0"
       - code: |
           {% for story in world.init_starter_stories %}- {{ story.id }} ({{ story.source_story }}): {{ story.summary }}
           {% endfor %}
@@ -300,6 +321,9 @@ states:
             - label:  "LLM draft"
               hint:   "draft a richer project profile, then validate schema + semantics"
               intent: draft_profile
+            - label:  "story packs"
+              hint:   "choose the starter pack for first-run adoption"
+              intent: review_story_pack
             - label:  "revise"
               hint:   "record feedback for the next profile draft"
               intent: revise_init
@@ -342,6 +366,11 @@ states:
                 init_customization_action: "promote"
                 init_customization_feedback: ""
                 last_error: ""
+      review_story_pack:
+        - target: init_story_pack
+          effects:
+            - set:
+                last_error: ""
       revise_init:
         - target: .
           effects:
@@ -379,6 +408,10 @@ states:
                 init_repo_vcs: "none"
                 init_repo_default_branch: ""
                 init_repo_remote: ""
+                init_story_pack: "cyber-repo"
+                init_story_pack_title: "Cyber repo starter"
+                init_story_pack_summary: ""
+                init_story_packs: []
                 init_starter_stories: []
                 init_profile_mode: "deterministic"
                 init_profile_draft: {}
@@ -395,6 +428,164 @@ states:
             - set:
                 last_error: "project onboarding closed"
                 prev_state: "init"
+      look:
+        - target: .
+
+  init_story_pack:
+    description: "Choose the named starter story pack before onboarding writes the project profile."
+    relevant_world:
+      - init_target_path
+      - init_project_title
+      - init_story_pack
+      - init_story_pack_title
+      - init_story_pack_summary
+      - init_story_packs
+      - init_starter_stories
+      - init_profile_status
+    view:
+      - banner:
+          text:     "PROJECT ONBOARDING"
+          subtitle: "choose story pack"
+          color:    "#14B8A6"
+      - kv:
+          pairs:
+            Target:   "{{ world.init_target_path|default:world.repo_root|default:world.workdir|default:'.' }}"
+            Project:  "{{ world.init_project_title|default:'(not yet inferred)' }}"
+            Selected: "{{ world.init_story_pack_title|default:'Cyber repo starter' }} ({{ world.init_story_pack|default:'cyber-repo' }})"
+      - code: |
+          {% for pack in world.init_story_packs %}- {{ pack.id }}: {{ pack.title }} - {{ pack.summary }}
+            stories: {{ pack.stories }}
+          {% endfor %}
+        when: "len(world.init_story_packs) > 0"
+      - choice:
+          mode: single
+          prompt: "Story packs"
+          items:
+            - label:  "cyber repo"
+              hint:   "setup, bugfixing, PR refinement, git ops"
+              intent: select_story_pack
+              slots:  { pack: "cyber-repo" }
+            - label:  "core setup"
+              hint:   "setup and git ops"
+              intent: select_story_pack
+              slots:  { pack: "core-setup" }
+            - label:  "planning delivery"
+              hint:   "PRD/design, implementation, PRs"
+              intent: select_story_pack
+              slots:  { pack: "planning-delivery" }
+            - label:  "review quality"
+              hint:   "bugs, tests, code/docs review, PRs"
+              intent: select_story_pack
+              slots:  { pack: "review-quality" }
+            - label:  "full dev-story"
+              hint:   "all day-level workflows"
+              intent: select_story_pack
+              slots:  { pack: "full-dev-story" }
+            - label:  "back"
+              hint:   "return to profile review"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    on:
+      select_story_pack:
+        - when: "slots.pack == 'cyber-repo'"
+          target: init
+          effects:
+            - set:
+                init_story_pack: "cyber-repo"
+                init_story_pack_title: "Cyber repo starter"
+                init_story_pack_summary: "Focused first-run set for cyber-repo: setup, bugfixing, PR refinement, and git operations."
+                init_starter_stories:
+                  - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
+                  - { id: "bugfix", title: "Bug fixing", source_story: "bugfix", status: "enabled", summary: "Drive a picked bug through reproduce, fix, test, review, and validation gates.", expansion: "Add narrower project bug policies through profile customizations or prompt overlays." }
+                  - { id: "pr-refinement", title: "PR refinement", source_story: "pr-refinement", status: "enabled", summary: "Open or attach to a PR, monitor CI/review feedback, respond, and merge when accepted.", expansion: "Add provider-specific PR policy after the base loop is proven on real pull requests." }
+                  - { id: "git-ops", title: "Git operations", source_story: "git-ops", status: "enabled", summary: "Use the guarded git command hub for status, worktrees, commits, rebases, sync, and integration.", expansion: "Extend with project branch and remote-sync policy once the team's git flow is stable." }
+                init_profile_status: "draft"
+                last_error: ""
+            - say: "Selected the cyber-repo starter pack."
+        - when: "slots.pack == 'core-setup'"
+          target: init
+          effects:
+            - set:
+                init_story_pack: "core-setup"
+                init_story_pack_title: "Core setup"
+                init_story_pack_summary: "Bring a project under Kitsoki management with setup and guarded git operations only."
+                init_starter_stories:
+                  - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
+                  - { id: "git-ops", title: "Git operations", source_story: "git-ops", status: "enabled", summary: "Use the guarded git command hub for status, worktrees, commits, rebases, sync, and integration.", expansion: "Extend with project branch and remote-sync policy once the team's git flow is stable." }
+                init_profile_status: "draft"
+                last_error: ""
+            - say: "Selected the core setup pack."
+        - when: "slots.pack == 'planning-delivery'"
+          target: init
+          effects:
+            - set:
+                init_story_pack: "planning-delivery"
+                init_story_pack_title: "Planning and delivery"
+                init_story_pack_summary: "Add PRD/design and implementation loops on top of setup and git operations."
+                init_starter_stories:
+                  - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
+                  - { id: "git-ops", title: "Git operations", source_story: "git-ops", status: "enabled", summary: "Use the guarded git command hub for status, worktrees, commits, rebases, sync, and integration.", expansion: "Extend with project branch and remote-sync policy once the team's git flow is stable." }
+                  - { id: "prd", title: "Prd", source_story: "prd", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
+                  - { id: "implementation", title: "Implementation", source_story: "implementation", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
+                  - { id: "pr-refinement", title: "PR refinement", source_story: "pr-refinement", status: "enabled", summary: "Open or attach to a PR, monitor CI/review feedback, respond, and merge when accepted.", expansion: "Add provider-specific PR policy after the base loop is proven on real pull requests." }
+                init_profile_status: "draft"
+                last_error: ""
+            - say: "Selected the planning and delivery pack."
+        - when: "slots.pack == 'review-quality'"
+          target: init
+          effects:
+            - set:
+                init_story_pack: "review-quality"
+                init_story_pack_title: "Review and quality"
+                init_story_pack_summary: "Emphasize bug fixing, test repair, code review, docs review, and git operations."
+                init_starter_stories:
+                  - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
+                  - { id: "git-ops", title: "Git operations", source_story: "git-ops", status: "enabled", summary: "Use the guarded git command hub for status, worktrees, commits, rebases, sync, and integration.", expansion: "Extend with project branch and remote-sync policy once the team's git flow is stable." }
+                  - { id: "bugfix", title: "Bug fixing", source_story: "bugfix", status: "enabled", summary: "Drive a picked bug through reproduce, fix, test, review, and validation gates.", expansion: "Add narrower project bug policies through profile customizations or prompt overlays." }
+                  - { id: "fix-tests", title: "Fix Tests", source_story: "fix-tests", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
+                  - { id: "code-review", title: "Code Review", source_story: "code-review", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
+                  - { id: "docs-review", title: "Docs Review", source_story: "docs-review", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
+                  - { id: "pr-refinement", title: "PR refinement", source_story: "pr-refinement", status: "enabled", summary: "Open or attach to a PR, monitor CI/review feedback, respond, and merge when accepted.", expansion: "Add provider-specific PR policy after the base loop is proven on real pull requests." }
+                init_profile_status: "draft"
+                last_error: ""
+            - say: "Selected the review and quality pack."
+        - when: "slots.pack == 'full-dev-story'"
+          target: init
+          effects:
+            - set:
+                init_story_pack: "full-dev-story"
+                init_story_pack_title: "Full dev-story"
+                init_story_pack_summary: "Expose the full day-level dev-story catalog after the team is ready for broader adoption."
+                init_starter_stories:
+                  - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
+                  - { id: "git-ops", title: "Git operations", source_story: "git-ops", status: "enabled", summary: "Use the guarded git command hub for status, worktrees, commits, rebases, sync, and integration.", expansion: "Extend with project branch and remote-sync policy once the team's git flow is stable." }
+                  - { id: "bugfix", title: "Bug fixing", source_story: "bugfix", status: "enabled", summary: "Drive a picked bug through reproduce, fix, test, review, and validation gates.", expansion: "Add narrower project bug policies through profile customizations or prompt overlays." }
+                  - { id: "fix-tests", title: "Fix Tests", source_story: "fix-tests", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
+                  - { id: "pr-refinement", title: "PR refinement", source_story: "pr-refinement", status: "enabled", summary: "Open or attach to a PR, monitor CI/review feedback, respond, and merge when accepted.", expansion: "Add provider-specific PR policy after the base loop is proven on real pull requests." }
+                  - { id: "prd", title: "Prd", source_story: "prd", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
+                  - { id: "implementation", title: "Implementation", source_story: "implementation", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
+                  - { id: "deliver", title: "Deliver", source_story: "deliver", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
+                  - { id: "code-review", title: "Code Review", source_story: "code-review", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
+                  - { id: "docs-review", title: "Docs Review", source_story: "docs-review", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
+                  - { id: "deploy", title: "Deploy", source_story: "deploy", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
+                  - { id: "observability", title: "Observability", source_story: "observability", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
+                  - { id: "incident", title: "Incident", source_story: "incident", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
+                init_profile_status: "draft"
+                last_error: ""
+            - say: "Selected the full dev-story pack."
+        - default: true
+          target: .
+          effects:
+            - set:
+                last_error: "Unknown story pack."
+      quit:
+        - target: init
+          effects:
+            - set:
+                init_profile_status: "draft"
+                last_error: ""
       look:
         - target: .
 
@@ -676,6 +867,7 @@ states:
             - "{{ world.init_profile_json }}"
             - "{{ world.init_mining_recommendation }}"
             - "{{ world.init_starter_stories }}"
+            - "{{ world.init_story_pack }}"
           fail_on_error: true
         bind:
           init_apply_ok: "ok"
