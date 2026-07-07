@@ -131,7 +131,7 @@ guard_paths="$(
   done | sort -u
 )"
 
-restore_guard() {
+restore_guard_fallback() {
   printf '%s\n' "$files" | while IFS= read -r f; do
     [ -e "$f" ] && chmod a-w "$f" || true
   done
@@ -141,6 +141,16 @@ restore_guard() {
   printf '%s\n' "$guard_paths" | while IFS= read -r p; do
     [ -n "$p" ] && [ -e "$p" ] && chmod a-w "$p" 2>/dev/null || true
   done
+}
+
+restore_guard() {
+  if [ -x scripts/protected-main-mode.sh ]; then
+    if scripts/protected-main-mode.sh lock --quiet; then
+      return 0
+    fi
+    echo "warning: protected-main-mode.sh lock failed; falling back to changed-path relock" >&2
+  fi
+  restore_guard_fallback
 }
 
 trap restore_guard EXIT
