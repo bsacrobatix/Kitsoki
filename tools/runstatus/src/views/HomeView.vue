@@ -595,8 +595,13 @@ function canDriveOperation(s: SessionHeader): boolean {
   if (!run) return false;
   return (
     !s.terminal &&
-    (run.status === "" || run.status === undefined || run.status === "running")
+    (run.status === "" || run.status === undefined || run.status === "running") &&
+    operationModeCanDrive(run.mode)
   );
+}
+
+function operationModeCanDrive(mode?: string): boolean {
+  return !mode || mode === "autonomous" || mode === "supervised";
 }
 
 function operationDetail(s: SessionHeader): string {

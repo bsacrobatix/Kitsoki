@@ -821,8 +821,11 @@ const operationRunRoute = computed(() => {
 const canDriveOperation = computed(() => {
   const run = operationRun.value;
   if (!run || store.terminal || !sourceCanDriveOperation.value) return false;
-  return (run.status || "running") === "running";
+  return (run.status || "running") === "running" && operationModeCanDrive(run.mode);
 });
+function operationModeCanDrive(mode?: string): boolean {
+  return !mode || mode === "autonomous" || mode === "supervised";
+}
 const operationRunDetail = computed(() => {
   const detail = operationRun.value?.stopDetail;
   return detail ? `needs input: ${detail}` : "";

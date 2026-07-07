@@ -274,6 +274,7 @@ describe("InteractiveView focused chat context", () => {
                   policy_id: "bf__capsule_demo",
                   title: "Capsule bugfix",
                   status: "running",
+                  mode: "supervised",
                   phase: "run_regression",
                   run_in_background: true,
                 },
@@ -330,6 +331,42 @@ describe("InteractiveView focused chat context", () => {
     expect(openArtifact.exists()).toBe(true);
     expect(openArtifact.attributes("href")).toBe("/artifact/qa-report%23abc123");
     expect(openArtifact.attributes("target")).toBe("_blank");
+    wrapper.unmount();
+  });
+
+  it("does not render Drive for interactive running operations", async () => {
+    route.query = {};
+    dataSource.getTrace.mockResolvedValueOnce({
+      last_turn: 1,
+      events: [
+        {
+          time: "2026-01-01T00:00:01Z",
+          level: "info",
+          msg: "world.update",
+          session_id: "s1",
+          turn: 1,
+          state_path: "review",
+          attrs: {
+            set: {
+              operation_run: {
+                operation_id: "guided_review",
+                policy_id: "guided_review",
+                title: "Guided review",
+                status: "running",
+                mode: "interactive",
+                run_in_background: true,
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    const wrapper = mount(InteractiveView, mountOpts);
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="operation-run-status"]').text()).toBe("running in background");
+    expect(wrapper.find('[data-testid="operation-run-drive"]').exists()).toBe(false);
     wrapper.unmount();
   });
 
