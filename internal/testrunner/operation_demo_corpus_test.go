@@ -13,7 +13,7 @@ import (
 	"kitsoki/internal/testrunner"
 )
 
-func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
+func TestOperationDemoCorpus(t *testing.T) {
 	cases := []struct {
 		appPath                string
 		capsule                string
@@ -78,6 +78,15 @@ func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
 			expectOperationPolicy:  "tests__fix_tests",
 			expectOperationStatus:  "completed",
 			expectTerminalArtifact: "tests__report_path",
+		},
+		{
+			appPath:                repoKitsokiDevAppPath(t),
+			capsule:                "clean-repo",
+			name:                   "kitsoki_dev_fix_tests_completed",
+			sourceFlow:             repoPath(t, "../../.kitsoki/stories/kitsoki-dev/flows/fix_tests_autonomous.yaml"),
+			expectOperationPolicy:  "core__tests__fix_tests",
+			expectOperationStatus:  "completed",
+			expectTerminalArtifact: "core__tests__report_path",
 		},
 		{
 			appPath:                repoStoriesDemoVideoLoopAppPath(t),
@@ -145,6 +154,11 @@ func repoStoriesShipItAppPath(t *testing.T) string {
 func repoStoriesGitOpsAppPath(t *testing.T) string {
 	t.Helper()
 	return repoPath(t, "../../stories/git-ops/app.yaml")
+}
+
+func repoKitsokiDevAppPath(t *testing.T) string {
+	t.Helper()
+	return repoPath(t, "../../.kitsoki/stories/kitsoki-dev/app.yaml")
 }
 
 func repoPath(t *testing.T, path string) string {
