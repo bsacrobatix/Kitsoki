@@ -500,20 +500,50 @@ function isMarkdownPath(value: string): boolean {
 
 /** A literal hex accent (#rgb / #rrggbb / #rrggbbaa) authored on the banner. */
 const HEX_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const bannerSource = computed<string>(() => el.value.Source ?? "");
+const bannerSubtitle = computed<string>(() => el.value.Subtitle ?? "");
+const bannerText = computed<string>(() =>
+  `${bannerSource.value} ${bannerSubtitle.value} ${el.value.Marker ?? ""}`
+);
+const isWarningBanner = computed<boolean>(() => {
+  const c = (el.value.Color ?? "").toLowerCase();
+  if (c === "warn" || c === "warning" || c === "amber") return true;
+  return /\b(warn|warning|stale|changed|removed)\b/i.test(bannerText.value);
+});
+const isErrorBanner = computed<boolean>(() => {
+  const c = (el.value.Color ?? "").toLowerCase();
+  if (c === "error" || c === "danger" || c === "red") return true;
+  return /\b(error|failed|failure)\b/i.test(bannerText.value);
+});
 const bannerHex = computed<string>(() => {
+  // Warning/error semantics win over authored phase colour: a warning that was
+  // coloured blue must still read as a warning in the browser.
+  if (isWarningBanner.value || isErrorBanner.value) return "";
   const c = (el.value.Color ?? "").trim();
   return HEX_RE.test(c) ? c : "";
 });
+const bannerMarkerText = computed<string>(() => {
+  if (el.value.Marker) return el.value.Marker;
+  if (isWarningBanner.value) return "⚠";
+  if (isErrorBanner.value) return "!";
+  return "";
+});
+const bannerSourceLines = computed<string[]>(() =>
+  bannerSource.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+);
+const bannerSubtitleLines = computed<string[]>(() =>
+  bannerSubtitle.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+);
 
 /** Banner color → CSS modifier class. Named tokens map to a semantic box; a
  * literal hex accent is honoured inline (see bannerStyle) so the web conveys
  * the same per-phase colour the TUI's coloured rule does — the hex is authored
  * in the trace, so rendering it is faithful, not a UI override. */
 const bannerClass = computed(() => {
-  if (bannerHex.value) return "banner--accent";
   const c = (el.value.Color ?? "").toLowerCase();
-  if (c === "error" || c === "danger" || c === "red") return "banner--error";
-  if (c === "warn" || c === "warning" || c === "amber") return "banner--warn";
+  if (isErrorBanner.value) return "banner--error";
+  if (isWarningBanner.value) return "banner--warn";
+  if (bannerHex.value) return "banner--accent";
   if (c === "success" || c === "ok" || c === "green") return "banner--success";
   if (c === "info" || c === "blue") return "banner--info";
   return "banner--neutral";
@@ -583,10 +613,20 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
     :style="bannerStyle"
     role="note"
   >
-    <span v-if="el.Marker" class="ve-banner-marker">{{ el.Marker }}</span>
+    <span v-if="bannerMarkerText" class="ve-banner-marker">{{ bannerMarkerText }}</span>
     <div class="ve-banner-body">
-      <div class="ve-banner-text">{{ el.Source }}</div>
-      <div v-if="el.Subtitle" class="ve-banner-subtitle">{{ el.Subtitle }}</div>
+      <div v-if="bannerSourceLines.length > 1" class="ve-banner-lines">
+        <div v-for="(line, i) in bannerSourceLines" :key="i" class="ve-banner-line">
+          {{ line }}
+        </div>
+      </div>
+      <div v-else class="ve-banner-text">{{ el.Source }}</div>
+      <div v-if="bannerSubtitleLines.length > 1" class="ve-banner-subtitle ve-banner-lines">
+        <div v-for="(line, i) in bannerSubtitleLines" :key="i" class="ve-banner-line">
+          {{ line }}
+        </div>
+      </div>
+      <div v-else-if="el.Subtitle" class="ve-banner-subtitle">{{ el.Subtitle }}</div>
     </div>
   </div>
 
@@ -937,16 +977,44 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
   padding: 0.85em 1.1em;
   border-radius: 8px;
   border: 1px solid;
+  border-left-width: 4px;
   font-size: 15px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 .ve-banner-marker {
-  font-size: 1.1em;
-  line-height: 1.4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 1.7em;
+  height: 1.7em;
+  border-radius: 999px;
+  font-size: 0.95em;
+  font-weight: 800;
+  line-height: 1;
+  background: color-mix(in srgb, currentColor 14%, transparent);
 }
 
 .ve-banner-text {
   font-weight: 500;
+}
+
+.ve-banner-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+}
+
+.ve-banner-line {
+  padding: 0.35em 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  font-weight: 500;
+}
+
+.ve-banner-line:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .ve-banner-subtitle {
@@ -983,15 +1051,17 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
 }
 
 .banner--warn {
-  background: var(--k-paper-bg, #fff8eb);
-  border-color: var(--k-warning, #f5dca0);
-  color: var(--k-warning, #92590a);
+  background: #fff7ed;
+  border-color: #fb923c;
+  color: #9a3412;
+  box-shadow: 0 1px 2px rgba(154, 52, 18, 0.16);
 }
 
 .banner--error {
-  background: var(--k-paper-bg, #fef2f2);
-  border-color: var(--k-error, #f5c2c2);
-  color: var(--k-error, #b42318);
+  background: #fef2f2;
+  border-color: #f87171;
+  color: #991b1b;
+  box-shadow: 0 1px 2px rgba(153, 27, 27, 0.16);
 }
 
 /* ── Media element ─────────────────────────────────────────────────────── */

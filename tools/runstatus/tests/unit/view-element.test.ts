@@ -183,6 +183,25 @@ describe("ViewElement", () => {
     w.unmount();
   });
 
+  it("renders semantic warnings as orange warning callouts even when authored blue", () => {
+    const w = render({
+      Kind: "banner",
+      Source: "Session warning\nReload the story to apply changes",
+      Subtitle: "The current session may be stale",
+      Color: "blue",
+    });
+    const b = w.find(".ve-banner");
+    expect(b.exists()).toBe(true);
+    expect(b.classes()).toContain("banner--warn");
+    expect(b.classes()).not.toContain("banner--info");
+    expect(b.find(".ve-banner-marker").text()).toBe("⚠");
+    expect(b.findAll(".ve-banner-line").map((line) => line.text())).toEqual([
+      "Session warning",
+      "Reload the story to apply changes",
+    ]);
+    w.unmount();
+  });
+
   it("honours a literal hex banner colour as an inline accent (TUI parity)", () => {
     // The bugfix / design pipeline banners carry per-phase hex accents
     // (#06B6D4 cyan, #3B82F6 blue, #8B5CF6 violet, …). The web must convey the
