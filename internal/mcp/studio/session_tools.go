@@ -9,7 +9,7 @@ package studio
 //   - session.drive   — free text → orch.Turn (the ONE interpretive seam).
 //   - session.submit  — a chosen intent + slots → orch.SubmitDirect.
 //   - session.continue— missing slots for a pending clarify → orch.ContinueTurn.
-//   - session.drive_operation — autonomously advance an active operation handle.
+//   - session.drive_operation — drive an active operation handle.
 //   - session.teleport— inbox notification -> orch.Teleport, marking it read.
 //   - session.inspect — state / world / allowed_intents / last_view / jobs / inbox / last_turns.
 //   - session.command — run a safe TUI slash command and return its frame.
@@ -96,7 +96,7 @@ func (srv *Server) registerSessionTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.drive_operation",
-		Description: "Drive the active autonomous operation handle without routing free text. {handle, cols?, rows?, async_after_ms?}. Returns {operation_drive, outcome, frame} when settled, or {running}; when running is returned, poll session.status until running disappears. Stops at terminal/waiting handles, non-autonomous policies, clarification/rejection, or when no safe driver intent exists.",
+		Description: "Drive the active autonomous/supervised operation handle without routing free text. {handle, cols?, rows?, async_after_ms?}. Returns {operation_drive, outcome, frame} when settled, or {running}; when running is returned, poll session.status until running disappears. Stops at terminal/waiting handles, manual-only policies, clarification/rejection, or when no safe driver intent exists.",
 	}, srv.handleSessionDriveOperation)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{

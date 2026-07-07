@@ -779,10 +779,10 @@ text to one of the current state's allowed intents using each intent's
 examples and slot schema. Use this for free-form replies (Jira/Bitbucket
 comment bodies).
 
---drive-operation asks the command to continue any active autonomous
+--drive-operation asks the command to continue any active autonomous/supervised
 operation handle after the inbound turn, using the same safe driver as
 ` + "`kitsoki drive --drive-operation`" + ` and stopping at terminal/waiting
-handles, clarification/rejection, non-autonomous policies, or no safe next
+handles, clarification/rejection, manual-only policies, or no safe next
 intent.
 
 The session writer lock is held for the duration of one turn. If
@@ -1119,7 +1119,7 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 	cmd.Flags().StringVar(&recordingPath, "recording", "", "recording YAML for --harness replay")
 	cmd.Flags().StringVar(&tracePath, "trace", "",
 		"JSONL trace file for event writes; default: ~/.kitsoki/sessions/<app>/<sha8>-<slug>.jsonl (derived from --key)")
-	cmd.Flags().BoolVar(&driveOperation, "drive-operation", false, "after the inbound turn, drive an active autonomous operation until it rests")
+	cmd.Flags().BoolVar(&driveOperation, "drive-operation", false, "after the inbound turn, drive an active autonomous/supervised operation until it rests")
 	_ = cmd.MarkFlagRequired("app")
 	return cmd
 }
