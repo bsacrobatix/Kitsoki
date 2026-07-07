@@ -79,6 +79,14 @@ func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
 			expectOperationStatus:  "completed",
 			selfProvisionWorkspace: true,
 		},
+		{
+			appPath:               repoStoriesGitOpsAppPath(t),
+			capsule:               "clean-repo",
+			name:                  "gitops_sync_main_accept_completed",
+			sourceFlow:            repoPath(t, "../../stories/git-ops/flows/sync_main_accept_commits_operation.yaml"),
+			expectOperationPolicy: "gitops.sync_main",
+			expectOperationStatus: "completed",
+		},
 	}
 
 	for _, tc := range cases {
@@ -116,6 +124,11 @@ func repoStoriesShipItAppPath(t *testing.T) string {
 	return repoPath(t, "../../stories/ship-it/app.yaml")
 }
 
+func repoStoriesGitOpsAppPath(t *testing.T) string {
+	t.Helper()
+	return repoPath(t, "../../stories/git-ops/app.yaml")
+}
+
 func repoPath(t *testing.T, path string) string {
 	t.Helper()
 	abs, err := filepath.Abs(path)
@@ -144,7 +157,7 @@ func writeCapsuleBackedFlow(t *testing.T, sourceFlow, appPath, workspace, name s
 	slug := strings.ReplaceAll(name, "_", "-")
 	workspaceID := "capsule-" + slug
 	replacements := map[string]string{}
-	for _, key := range []string{"workdir", "worktree_path"} {
+	for _, key := range []string{"workdir", "worktree_path", "working_dir", "main_worktree_path"} {
 		if old, ok := initialWorld[key].(string); ok && old != "" {
 			replacements[old] = workspace
 		}
@@ -174,6 +187,8 @@ func writeCapsuleBackedFlow(t *testing.T, sourceFlow, appPath, workspace, name s
 	if !opts.selfProvisionWorkspace {
 		initialWorld["workdir"] = workspace
 		initialWorld["worktree_path"] = workspace
+		initialWorld["working_dir"] = workspace
+		initialWorld["main_worktree_path"] = workspace
 		initialWorld["workspace_id"] = workspaceID
 		initialWorld["feature_branch"] = workspaceID
 		// capsuletest.Open has already prepared an isolated checkout. Imported
