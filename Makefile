@@ -386,7 +386,7 @@ onboard-smoke: install
 	go test -tags onboardsmoke -run TestOnboardPinnedRepo -count=1 -v ./tools/onboard-smoke/
 
 # onboard-sisters is the local, deterministic sister-project replay. It clones
-# ../gears-rust and ../slidey (or KITSOKI_GEARS_RUST_REPO / KITSOKI_SLIDEY_REPO)
+# ../gears-rust and ../slidey (or KITSOKI_ONBOARD_RUST_REPO / KITSOKI_SLIDEY_REPO)
 # into temp dirs at their saved pre-init commits, runs the real dev-story init
 # apply script, and proves the generated .kitsoki/stories instance loads. No
 # network, no install, no LLM.
@@ -423,9 +423,9 @@ oracle-capsules:
 # gears-bakeoff arms the gears-rust corpus (projects/gears-rust): prove each
 # captured fixture's hidden oracle is RED at its baseline and GREEN after the real
 # fix's source, against a LOCAL checkout (gears-rust is heavy + private, never
-# network-cloned). DETERMINISTIC, no LLM. Point GEARS_RUST_REPO at a local
-# checkout; needs git + cargo + python3. Skips cleanly when GEARS_RUST_REPO unset.
-#   GEARS_RUST_REPO=~/code/gears-rust make gears-bakeoff
+# network-cloned). DETERMINISTIC, no LLM. Point BUGFIX_BAKEOFF_REPO at a local
+# checkout; needs git + cargo + python3. Skips cleanly when BUGFIX_BAKEOFF_REPO unset.
+#   BUGFIX_BAKEOFF_REPO=/path/to/checkout make gears-bakeoff
 gears-bakeoff:
 	go test -tags gearsbakeoff -run TestGearsBakeoff -count=1 -v ./tools/bugfix-bakeoff/external/
 
@@ -526,12 +526,12 @@ history-pending-smoke:
 # gears-history-smoke is the reference private/heavy repo wrapper around the
 # generic history-smoke target. Override the bug/candidate matrix to match the
 # live cell you intend to run.
-#   GEARS_RUST_REPO=~/code/gears-rust make gears-history-smoke
+#   BUGFIX_BAKEOFF_REPO=/path/to/checkout make gears-history-smoke
 GEARS_HISTORY_BUGS ?= bug1
 GEARS_HISTORY_CANDIDATES ?= opus-4.8
 gears-history-smoke:
-	@test -n "$(GEARS_RUST_REPO)" || (echo "GEARS_RUST_REPO must point at a local gears-rust checkout"; exit 1)
-	$(MAKE) history-smoke HISTORY_PROJECT=gears-rust HISTORY_REPO_DIR="$(GEARS_RUST_REPO)" HISTORY_BUGS="$(GEARS_HISTORY_BUGS)" HISTORY_CANDIDATES="$(GEARS_HISTORY_CANDIDATES)"
+	@test -n "$(BUGFIX_BAKEOFF_REPO)" || (echo "BUGFIX_BAKEOFF_REPO must point at the local project checkout"; exit 1)
+	$(MAKE) history-smoke HISTORY_PROJECT=gears-rust HISTORY_REPO_DIR="$(BUGFIX_BAKEOFF_REPO)" HISTORY_BUGS="$(GEARS_HISTORY_BUGS)" HISTORY_CANDIDATES="$(GEARS_HISTORY_CANDIDATES)"
 
 # gears-history-full-smoke is the no-cost full-corpus proof for the armable
 # gears-rust fixtures. It verifies all four RED/GREEN oracles, renders the full
@@ -539,9 +539,9 @@ gears-history-smoke:
 # deterministic pending report/deck generation, and runs the repo-bakeoff flow
 # checks.
 gears-history-full-smoke:
-	@test -n "$(GEARS_RUST_REPO)" || (echo "GEARS_RUST_REPO must point at a local gears-rust checkout"; exit 1)
-	$(MAKE) history-smoke HISTORY_PROJECT=gears-rust HISTORY_REPO_DIR="$(GEARS_RUST_REPO)" HISTORY_BUGS="bug1,bug4,bug5,bug9" HISTORY_CANDIDATES="$(GEARS_HISTORY_CANDIDATES)" HISTORY_PREPARE_ALL_CELLS=1
-	$(MAKE) history-pending-smoke HISTORY_PROJECT=gears-rust HISTORY_REPO_DIR="$(GEARS_RUST_REPO)" HISTORY_BUGS="bug1,bug4,bug5,bug9" HISTORY_CANDIDATES="$(GEARS_HISTORY_CANDIDATES)" HISTORY_PENDING_REASON="provider/profile blocked before model attempt"
+	@test -n "$(BUGFIX_BAKEOFF_REPO)" || (echo "BUGFIX_BAKEOFF_REPO must point at the local project checkout"; exit 1)
+	$(MAKE) history-smoke HISTORY_PROJECT=gears-rust HISTORY_REPO_DIR="$(BUGFIX_BAKEOFF_REPO)" HISTORY_BUGS="bug1,bug4,bug5,bug9" HISTORY_CANDIDATES="$(GEARS_HISTORY_CANDIDATES)" HISTORY_PREPARE_ALL_CELLS=1
+	$(MAKE) history-pending-smoke HISTORY_PROJECT=gears-rust HISTORY_REPO_DIR="$(BUGFIX_BAKEOFF_REPO)" HISTORY_BUGS="bug1,bug4,bug5,bug9" HISTORY_CANDIDATES="$(GEARS_HISTORY_CANDIDATES)" HISTORY_PENDING_REASON="provider/profile blocked before model attempt"
 
 # cost-report builds the per-story cost-savings report (the reusable form of
 # docs/case-studies/git-ops-cost.md): the deterministic story cost (agent spend

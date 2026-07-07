@@ -12134,14 +12134,14 @@ def run_project_check(project):
     if (
         project.get("run_mode") == "external-benchmark"
         and project.get("status") == "validated"
-        and not os.environ.get("GEARS_RUST_RECHECK")
+        and not os.environ.get("BUGFIX_BAKEOFF_RECHECK")
     ):
         return {
             "status": "validated",
-            "notes": f"{project['id']}: cached validation; set GEARS_RUST_RECHECK=1 to rerun the heavy external benchmark",
+            "notes": f"{project['id']}: cached validation; set BUGFIX_BAKEOFF_RECHECK=1 to rerun the heavy external benchmark",
             "meta": _meta_value(project),
             "next": [
-                "Set GEARS_RUST_RECHECK=1 to rerun the heavy external-benchmark verifier.",
+                "Set BUGFIX_BAKEOFF_RECHECK=1 to rerun the heavy external-benchmark verifier.",
             ],
         }
 

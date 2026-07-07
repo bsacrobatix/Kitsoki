@@ -122,12 +122,14 @@ def project_repo_envs(proj):
     """Environment variables accepted as local checkout hints for a project.
 
     A private/local project can now be driven from either its standalone checkout
-    (for example GEARS_RUST_REPO=/path/to/gears-rust) or a meta checkout env
-    when the manifest also declares project.repo_subdir.
+    (BUGFIX_BAKEOFF_REPO=/path/to/checkout) or a meta checkout env
+    (BUGFIX_BAKEOFF_META_REPO=/path/to/meta) when the manifest also declares
+    project.repo_subdir.
     """
-    envs = []
-    envs.extend(_as_list(proj.get("repo_envs")))
-    envs.append(f"{proj['id'].upper().replace('-', '_')}_REPO")
+    envs = _as_list(proj.get("repo_envs"))
+    if not envs:
+        envs.extend(["BUGFIX_BAKEOFF_REPO", "BUGFIX_BAKEOFF_META_REPO"])
+        envs.append(f"{proj['id'].upper().replace('-', '_')}_REPO")
     seen = set()
     out = []
     for env in envs:

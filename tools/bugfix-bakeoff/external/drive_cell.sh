@@ -139,8 +139,8 @@ cellkey="$project-$bug-$cand"
 
 # --- fail fast (before any clone/spend) ---------------------------------------
 # local_only projects drive against an explicit local checkout. kitsoki-self can
-# default to this repository; external/private repos such as gears-rust must use
-# --repo-dir or <PROJECT>_REPO / GEARS_RUST_REPO.
+# default to this repository; external/private repos must use --repo-dir or one
+# of the manifest's generic repo_envs.
 local_only=""
 [[ "$(jget local_only)" == "True" || "$(jget local_only)" == "true" ]] && local_only=1
 
