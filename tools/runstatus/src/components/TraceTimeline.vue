@@ -230,6 +230,7 @@
                         v-for="stream in row.agent.streamEvents"
                         :key="`${stream.time}:${stream.attrs.call_id}:${stream.attrs.type}:${stream.attrs.preview ?? ''}`"
                         class="trace-timeline__agent-stream-row"
+                        :class="{ 'trace-timeline__agent-stream-row--warning': isWarningStream(stream) }"
                         data-testid="trace-agent-stream-row"
                       >
                         <span class="trace-timeline__agent-stream-kind">{{ agentStreamLabel(stream) }}</span>
@@ -339,6 +340,7 @@ function agentVerb(e: TraceEvent): string {
 }
 
 function agentStreamLabel(e: TraceEvent): string {
+  if (isWarningStream(e)) return "agent.warning";
   if (typeof e.attrs.tool === "string" && e.attrs.tool) return `agent.tool ${e.attrs.tool}`;
   if (typeof e.attrs.thinking === "string" && e.attrs.thinking) return "agent.thinking";
   if (typeof e.attrs.text === "string" && e.attrs.text) return "agent.delta";
@@ -350,6 +352,13 @@ function agentStreamText(e: TraceEvent): string {
   if (typeof e.attrs.thinking === "string" && e.attrs.thinking) return e.attrs.thinking;
   if (typeof e.attrs.text === "string" && e.attrs.text) return e.attrs.text;
   return "";
+}
+
+function isWarningStream(e: TraceEvent): boolean {
+  const severity = typeof e.attrs.severity === "string" ? e.attrs.severity : "";
+  if (severity === "warn" || severity === "warning") return true;
+  const type = typeof e.attrs.type === "string" ? e.attrs.type : "";
+  return type === "ladder_fallback" || type === "ladder_session_pinned" || type === "ladder_stop" || type === "ladder_exhausted";
 }
 
 // Virtualisation is only worth the complexity for very large traces.  The
@@ -1864,10 +1873,21 @@ watch(
   padding: 0.14rem 0;
 }
 
+.trace-timeline__agent-stream-row--warning {
+  border-left: 2px solid var(--k-warning, #fbbf24);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--k-warning, #fbbf24) 10%, transparent);
+  padding: 0.18rem 0.35rem;
+}
+
 .trace-timeline__agent-stream-kind {
   color: #93c5fd;
   font-family: ui-monospace, monospace;
   white-space: nowrap;
+}
+
+.trace-timeline__agent-stream-row--warning .trace-timeline__agent-stream-kind {
+  color: var(--k-warning, #fbbf24);
 }
 
 .trace-timeline__agent-stream-text {

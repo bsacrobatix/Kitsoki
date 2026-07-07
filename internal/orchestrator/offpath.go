@@ -227,6 +227,7 @@ func (o *Orchestrator) askOffPathVoiced(ctx context.Context, sid app.SessionID, 
 	ctx = host.WithAgentBackendNamed(ctx, backendName)
 	ctx = host.WithActiveProfile(ctx, activeProfile)
 	ctx = host.WithHarnessLadder(ctx, o.harnessLadder)
+	ctx = host.WithLadderSessionState(ctx, o.ladderSession)
 	if o.agentLaunchPolicy.Enabled {
 		ctx = host.WithAgentLaunchPolicy(ctx, o.agentLaunchPolicy)
 	}
