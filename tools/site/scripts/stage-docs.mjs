@@ -140,29 +140,47 @@ function writeDocsLanding() {
     "",
     "# Kitsoki docs",
     "",
-    "Start with the evaluation path if you are deciding whether Kitsoki is worth the structure. Kitsoki's core claim is control inversion: the workflow is an auditable state machine, and the LLM is a bounded callee at named, traceable decision points.",
+    "Use this page as a reading path, not as a sitemap. If you are new, answer the evaluator questions in order; if you already know what you need, use the collapsed sidebar or search for the full allowlisted docs inventory.",
     "",
-    "## Evaluate the claim",
+    "## Decide if Kitsoki fits",
     "",
-    "- [Evaluate Kitsoki](/guide/evaluate-kitsoki.html): the skeptical-developer case for why this is not just a chat agent, a structured-output wrapper, or a workflow engine with prompts attached.",
-    "- [Concept](/guide/architecture/concept.html): the architecture thesis behind control inversion and progressive determinism.",
-    "- [Proof demos](/features/): videos generated from deterministic feature fixtures, including runtime guardrails, trace introspection, operator handoff, and replayed real runs.",
-    "- [Bug-fix case study](/guide/case-studies/bug-fix.html): the shape of an end-to-end repo workflow: reproduce, patch, test, review, validate.",
-    "- [Bugfix bake-off](/guide/case-studies/bugfix-bakeoff.html): early evidence for the claim that structure can matter more than another unbounded prompt.",
+    "- [Evaluate Kitsoki](/guide/evaluate-kitsoki.html) explains the control-inversion claim and compares it with coding agents, orchestration frameworks, durable workflow engines, and scripts.",
+    "- [Proof path](/proof.html) gives the short demo sequence: runtime guardrails, trace replay, operator handoff, and real repo workflows.",
+    "- [Concept](/guide/architecture/concept.html) is the architecture thesis behind progressive determinism.",
     "",
-    "## Why the docs matter",
+    "## Try it locally",
     "",
-    "A Kitsoki story is not hidden in a prompt. The docs below cover the public pieces of that story model: how to author rooms and intents, how host calls and traces work, how replay removes live LLM spend from testing, and how the same story drives web, TUI, MCP, demos, and fixtures.",
+    "- [Getting started](/guide/getting-started.html) is the shortest path from a downloaded binary to `onboard .` in an existing repo.",
+    "- [Download Kitsoki](/download.html) lists release artifacts and checksums.",
+    "- [GitHub App setup](/guide/architecture/github-app-setup.html) covers tighter repo-scoped GitHub auth when the local `gh` path is not enough.",
+    "",
+    "## Build or change a story",
+    "",
+    "- [Stories](/guide/stories/) introduces rooms, intents, guards, transitions, and effects.",
+    "- [Authoring Guide](/guide/stories/authoring.html) is the practical story-writing guide.",
+    "- [Recipe: add an intent](/guide/recipes/add-an-intent.html) is the smallest useful edit path.",
+    "- [Recipe: deterministic flow test](/guide/recipes/flow-test-with-cassette.html) shows how to cover a story without live LLM spend.",
+    "",
+    "## Test, replay, and debug",
+    "",
+    "- [Testing](/guide/tracing/testing.html) explains flow fixtures and host cassettes.",
+    "- [Kitsoki JSONL Trace Format](/guide/tracing/trace-format.html) documents the audit trail.",
+    "- [Run-status web UI](/guide/tracing/run-status-ui.html) covers trace inspection and replay surfaces.",
+    "- [MCP studio](/guide/architecture/mcp-studio.html) lets external agents author, drive, test, and inspect Kitsoki through one facade.",
+    "",
+    "## Browse by area",
+    "",
+    "The sidebar contains the full docs inventory, collapsed by section so this page stays readable. These section starts are the useful broad entries:",
+    "",
+    "- [Authoring stories](/guide/stories/)",
+    "- [Recipes](/guide/recipes/)",
+    "- [Architecture](/guide/architecture/)",
+    "- [Testing and replay](/guide/tracing/)",
+    "- [User interfaces](/guide/web/)",
+    "- [Case studies](/guide/case-studies/)",
+    "- [Reference](/guide/embedded/app-schema.html)",
     "",
   ];
-
-  for (const section of sections) {
-    lines.push(`## ${section.title}`, "");
-    for (const entry of section.entries) {
-      lines.push(`- [${firstHeading(entry.from)}](${siteHref(entry.to)})`);
-    }
-    lines.push("");
-  }
 
   fs.writeFileSync(path.join(guideDir, "index.md"), lines.join("\n"));
 }

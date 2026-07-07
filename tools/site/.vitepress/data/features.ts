@@ -186,13 +186,13 @@ const KIND_TITLES: Record<LocaleCode, Record<string, string>> = {
 /** Sidebar for /features/: grouped by kind, promo order first then title. */
 export function featuresSidebar(locale: LocaleCode = "en") {
   const feats = loadFeatures(locale);
-  const groups: Array<{ text: string; items: Array<{ text: string; link: string }> }> = [];
+  const groups: Array<{ text: string; collapsed: boolean; items: Array<{ text: string; link: string }> }> = [];
   for (const kind of ["feature", "product-tour", "story-demo"] as const) {
     const items = feats
       .filter((f) => f.kind === kind)
       .sort((a, b) => (a.promo?.order ?? 999) - (b.promo?.order ?? 999) || a.title.localeCompare(b.title))
       .map((f) => ({ text: f.title, link: prefixed(locale, `/features/${f.id}`) }));
-    if (items.length > 0) groups.push({ text: KIND_TITLES[locale][kind], items });
+    if (items.length > 0) groups.push({ text: KIND_TITLES[locale][kind], collapsed: true, items });
   }
   const allFeatures = locale === "th" ? "ฟีเจอร์ทั้งหมด" : locale === "ja" ? "すべての機能" : "All features";
   return [{ text: allFeatures, link: prefixed(locale, "/features/") }, ...groups];
@@ -205,7 +205,7 @@ export function guideSidebar() {
     { text: "Docs", link: "/guide/" },
     ...sections.map((s) => ({
       text: s.title,
-      collapsed: false,
+      collapsed: s.title !== "Evaluate and install",
       items: s.entries.map((e) => ({
         text: firstHeading(path.join(repoRoot, e.from)) ?? path.basename(e.from, ".md"),
         link: "/" + e.to.replace(/\.md$/, "").replace(/\/index$/, "/"),

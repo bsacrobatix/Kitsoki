@@ -110,8 +110,18 @@
   margin: 1rem 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   gap: 1rem;
+}
+.vp-doc .ksteps {
+  list-style: none;
+  padding-left: 0;
+}
+.vp-doc .ksteps > li {
+  padding-left: 0;
+}
+.vp-doc .ksteps > li::marker {
+  content: "";
 }
 .ksteps__card {
   border: 1px solid var(--vp-c-divider);
@@ -185,19 +195,39 @@
 .kgrid__card--highlight {
   border-color: var(--vp-c-brand-2);
 }
-.kgrid__poster {
+.kgrid__card--text {
+  padding-top: 1.15rem;
+}
+.kgrid__media {
   width: 100%;
+  aspect-ratio: 16 / 9;
   border-radius: 6px;
   border: 1px solid var(--vp-c-divider);
   margin-bottom: 0.75rem;
+  overflow: hidden;
+  background: var(--vp-c-bg);
 }
-.kgrid__poster--empty {
-  aspect-ratio: 16 / 9;
+.kgrid__poster {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.kgrid__badges {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 2rem;
-  color: var(--vp-c-text-3);
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+}
+.kgrid__badges span {
+  font-size: 0.68rem;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--vp-c-text-2);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 999px;
+  padding: 0.26rem 0.45rem;
   background: var(--vp-c-bg);
 }
 .kgrid__title {
@@ -218,6 +248,40 @@
 .kdemo__summary {
   font-size: 1.05rem;
   color: var(--vp-c-text-1);
+}
+.kdemo__brief {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1.25rem 0;
+}
+.kdemo__brief div {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+  padding: 0.85rem;
+}
+.kdemo__brief strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.72rem;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--vp-c-text-2);
+}
+.kdemo__brief p {
+  margin: 0;
+  color: var(--vp-c-text-1);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+.kdemo__walkthrough {
+  margin-top: 1rem;
+}
+.kdemo__walkthrough > summary {
+  cursor: pointer;
+  color: var(--vp-c-brand-1);
+  font-weight: 600;
 }
 .kdemo__links {
   display: flex;
@@ -240,4 +304,52 @@
   font-size: 1.15rem;
   color: var(--vp-c-text-2);
   margin-top: -0.5rem;
+}
+
+/* ── Product-site navigation blocks ─────────────────────────────────────── */
+.kpath-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0 2rem;
+}
+.kpath {
+  display: block;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  padding: 1rem;
+  background: var(--vp-c-bg-soft);
+  text-decoration: none !important;
+}
+.kpath:hover {
+  border-color: var(--vp-c-brand-1);
+}
+.kpath strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--vp-c-text-1);
+}
+.kpath span {
+  display: block;
+  color: var(--vp-c-text-2);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+/* VitePress docs pages carry generated tables and long shell examples. Keep
+   them scrollable within the content column instead of widening the viewport. */
+.vp-doc pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.vp-doc table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@media (max-width: 720px) {
+  .kdemo__brief {
+    grid-template-columns: 1fr;
+  }
 }
