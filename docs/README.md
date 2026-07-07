@@ -12,7 +12,7 @@ For the elevator pitch and user quickstart, see the top-level
 | Deciding whether Kitsoki is worth it | [`evaluate-kitsoki.md`](evaluate-kitsoki.md) -> [`architecture/concept.md`](architecture/concept.md) -> [`case-studies/bug-fix.md`](case-studies/bug-fix.md) -> [`case-studies/bugfix-bakeoff.md`](case-studies/bugfix-bakeoff.md) |
 | Using Kitsoki in your own project | [`getting-started.md`](getting-started.md) -> [`workflows/`](workflows/README.md) |
 | Writing a story | [`stories/architecture.md`](stories/architecture.md) -> [`recipes/`](recipes/README.md) -> [`stories/authoring.md`](stories/authoring.md) -> [`embedded/app-schema.md`](embedded/app-schema.md) |
-| Contributing to Kitsoki | [`contributor-setup.md`](contributor-setup.md) -> [`../CONTRIBUTING.md`](../CONTRIBUTING.md) -> [`architecture/developer-guide.md`](architecture/developer-guide.md) |
+| Contributing to Kitsoki | [`contributor-setup.md`](contributor-setup.md) (developer environment setup, including Playwright/Chromium visual QA deps) -> [`../CONTRIBUTING.md`](../CONTRIBUTING.md) -> [`architecture/developer-guide.md`](architecture/developer-guide.md) |
 | Debugging a session | [`tracing/README.md`](tracing/README.md) -> [`tracing/testing.md`](tracing/testing.md) -> [`tracing/trace-format.md`](tracing/trace-format.md) |
 | Working on UI | [`web/README.md`](web/README.md) or [`tui/README.md`](tui/README.md) -> [`tui/rendering-tests.md`](tui/rendering-tests.md) |
 
@@ -95,7 +95,8 @@ live in the sections above.
   fix a bug), one per surface (TUI/web/VS Code/gh-agent) where the steps
   actually differ.
 - [`contributor-setup.md`](contributor-setup.md) — build Kitsoki from source and
-  set up this checkout for development.
+  set up this checkout for development, including browser dependencies for
+  runstatus and TUI visual QA.
 - [`case-studies/`](case-studies/README.md) — worked examples of
   progressive determinism applied to real workflows. Start with
   [`case-studies/bug-fix.md`](case-studies/bug-fix.md): how a
