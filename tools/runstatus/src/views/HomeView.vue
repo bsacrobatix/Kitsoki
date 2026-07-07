@@ -188,6 +188,7 @@
               State
               <span class="home__sort-indicator">{{ sortIndicator('state') }}</span>
             </th>
+            <th>Operation</th>
             <th
               class="home__th--sortable"
               data-testid="session-sort-activity"
@@ -215,6 +216,34 @@
             </td>
             <td><code data-testid="session-id">{{ truncateId(s.session_id) }}</code></td>
             <td><code data-testid="session-state">{{ s.current_state }}</code></td>
+            <td
+              class="home__row-operation"
+              data-testid="session-operation"
+              :data-operation-status="s.operation_run?.status || ''"
+            >
+              <div v-if="s.operation_run" class="home__operation">
+                <div class="home__operation-line">
+                  <span class="home__operation-title" data-testid="session-operation-title">
+                    {{ operationTitle(s) }}
+                  </span>
+                  <span
+                    class="home__operation-status"
+                    :class="operationStatusClass(s)"
+                    data-testid="session-operation-status"
+                  >
+                    {{ operationStatusLabel(s) }}
+                  </span>
+                </div>
+                <div
+                  v-if="operationDetail(s)"
+                  class="home__operation-detail"
+                  data-testid="session-operation-detail"
+                >
+                  {{ operationDetail(s) }}
+                </div>
+              </div>
+              <span v-else class="home__row-muted">—</span>
+            </td>
             <td class="home__row-activity" data-testid="session-activity">{{ formatDate(s.started_at) }}</td>
             <td class="home__row-turns" data-testid="session-turns">{{ s.turn != null ? s.turn : '—' }}</td>
             <td class="home__row-duration" data-testid="session-duration">—</td>
@@ -489,6 +518,37 @@ function sessionStoryPath(s: SessionHeader): string {
     st.active_sessions.includes(s.session_id)
   );
   return story ? relativePath(story.path) : "";
+}
+
+function operationTitle(s: SessionHeader): string {
+  const run = s.operation_run;
+  if (!run) return "";
+  return run.title || run.operation_id || run.policy_id || "operation";
+}
+
+function operationStatusLabel(s: SessionHeader): string {
+  const run = s.operation_run;
+  if (!run) return "";
+  const status = run.status || "running";
+  if (status === "waiting" && run.stop_reason) return `waiting for ${run.stop_reason}`;
+  if (status === "running" && run.run_in_background) return "running in background";
+  return status.replace(/_/g, " ");
+}
+
+function operationStatusClass(s: SessionHeader): string {
+  const status = s.operation_run?.status || "running";
+  return `home__operation-status--${status.replace(/[^a-z0-9_-]/gi, "-")}`;
+}
+
+function operationDetail(s: SessionHeader): string {
+  const run = s.operation_run;
+  if (!run) return "";
+  if (run.stop_detail) return run.stop_detail;
+  if (run.status === "waiting" && run.terminal_state) return `parked at ${run.terminal_state}`;
+  if (run.status === "completed" && run.terminal_state) return `terminal ${run.terminal_state}`;
+  if (run.terminal_artifact) return `artifact ${run.terminal_artifact}`;
+  if (run.from && run.to) return `${run.from} -> ${run.to}`;
+  return run.entry_intent ? `intent ${run.entry_intent}` : "";
 }
 
 function relativePath(abs: string): string {
@@ -851,6 +911,74 @@ function errMsg(e: unknown): string {
   color: var(--k-fg-muted, #64748b);
   font-family: ui-monospace, monospace;
   font-size: 0.8rem;
+}
+
+.home__row-operation {
+  min-width: 13rem;
+  max-width: 22rem;
+}
+
+.home__operation {
+  min-width: 0;
+}
+
+.home__operation-line {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.home__operation-title {
+  min-width: 0;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--k-fg, #e2e8f0);
+  font-weight: 600;
+}
+
+.home__operation-status {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 0.08rem 0.42rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.home__operation-status--running {
+  color: #7dd3fc;
+  border: 1px solid color-mix(in srgb, #38bdf8 42%, transparent);
+  background: rgba(14, 165, 233, 0.12);
+}
+
+.home__operation-status--waiting {
+  color: #facc15;
+  border: 1px solid color-mix(in srgb, #facc15 42%, transparent);
+  background: rgba(250, 204, 21, 0.1);
+}
+
+.home__operation-status--completed {
+  color: #86efac;
+  border: 1px solid color-mix(in srgb, #22c55e 42%, transparent);
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.home__operation-detail {
+  margin-top: 0.2rem;
+  max-width: 100%;
+  color: var(--k-fg-muted, #94a3b8);
+  font-size: 0.73rem;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home__row-muted {
+  color: var(--k-fg-muted, #64748b);
 }
 
 .home__row-actions {
