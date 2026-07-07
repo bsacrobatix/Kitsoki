@@ -143,6 +143,17 @@
         <span v-if="operationRunArtifact" class="iv__operation-artifact" data-testid="operation-run-artifact">
           {{ operationRunArtifact }}
         </span>
+        <button
+          v-if="canDriveOperation"
+          type="button"
+          class="iv__operation-action"
+          data-testid="operation-run-drive"
+          :disabled="pending || store.busy || drivingOperation"
+          :title="drivingOperation ? 'Driving operation' : 'Drive operation to the next checkpoint'"
+          @click="onDriveOperation"
+        >
+          {{ drivingOperation ? 'Driving' : 'Drive' }}
+        </button>
       </div>
 
       <!-- Main row: chat (left) | trace (right).
@@ -613,6 +624,7 @@ import { useRunStore, type TranscriptEntry } from "../stores/run.js";
 import { useInboxStore } from "../stores/inbox.js";
 import { createDataSource } from "../data/source.js";
 import type { DataSource } from "../data/source.js";
+import { SnapshotSource } from "../data/snapshot-source.js";
 import { LiveSource, TurnCancelledError } from "../data/live-source.js";
 import type { ChatMessageItem, ChatShowResult } from "../data/live-source.js";
 import { markAutoNavDone } from "../lib/auto-nav.js";
@@ -709,7 +721,9 @@ const pending = ref(false);
 // True between clicking Stop and the turn actually aborting — keeps the button
 // from firing a second cancel and gives the operator immediate feedback.
 const cancelling = ref(false);
+const drivingOperation = ref(false);
 const error = ref<string | null>(null);
+const sourceCanDriveOperation = ref(false);
 const traceCollapsed = ref(false);
 const traceWidthPercent = ref(TRACE_WIDTH_DEFAULT);
 const diagramHeightPercent = ref(DIAGRAM_HEIGHT_DEFAULT);
@@ -771,8 +785,14 @@ const operationRunRoute = computed(() => {
   if (run.status === "completed" && run.terminalState) {
     return `terminal ${run.terminalState}`;
   }
+  if (run.phase) return `phase ${operationPhaseLabel(run.phase)}`;
   if (run.from && run.to) return `${run.from} -> ${run.to}`;
   return run.entryIntent ? `intent ${run.entryIntent}` : "";
+});
+const canDriveOperation = computed(() => {
+  const run = operationRun.value;
+  if (!run || store.terminal || !sourceCanDriveOperation.value) return false;
+  return (run.status || "running") === "running";
 });
 const operationRunDetail = computed(() => {
   const detail = operationRun.value?.stopDetail;
@@ -943,6 +963,10 @@ const focusedChatScope = computed(() => {
   if (!chat) return "";
   return chat.display_scope_key || chat.scope_key || "";
 });
+
+function operationPhaseLabel(phase: string): string {
+  return phase.trim().replace(/_artifact$/i, "").replace(/_/g, " ");
+}
 
 function canListWork(candidate: DataSource | null): candidate is DataSource & Pick<LiveSource, "listWork"> {
   return typeof (candidate as Partial<Pick<LiveSource, "listWork">> | null)?.listWork === "function";
@@ -1202,6 +1226,7 @@ function onFreshnessError(msg: string): void {
 
 async function loadSession(sessionId: string): Promise<void> {
   if (!source) source = createDataSource();
+  sourceCanDriveOperation.value = !(source instanceof SnapshotSource);
   // hydrate resets prior session state, loads session/app/mermaid/trace, and
   // opens the live subscription; loadInitialView seeds currentView + the
   // opening agent transcript entry.
@@ -1511,6 +1536,14 @@ function onRewind(decisionId: string): void {
   void runTurn(() => store.rewindRoute(source!, props.sessionId, decisionId));
 }
 
+function onDriveOperation(): void {
+  if (!source || !canDriveOperation.value) return;
+  drivingOperation.value = true;
+  void runTurn(() => store.driveOperation(source!, props.sessionId)).finally(() => {
+    drivingOperation.value = false;
+  });
+}
+
 // Routing-feedback thumbs up/down (WS-C C4): fire-and-forget, no in-flight
 // guard needed since it never advances the turn.
 function onFeedback(entry: TranscriptEntry, verdict: "up" | "down"): void {
@@ -1780,6 +1813,30 @@ function onEventSelect(index: number): void {
   font-weight: 700;
   padding: 0.08rem 0.45rem;
   white-space: nowrap;
+}
+
+.iv__operation-action {
+  margin-left: auto;
+  border: 1px solid #0e7490;
+  border-radius: 0.375rem;
+  background: #082f49;
+  color: #bae6fd;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 0.16rem 0.55rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.iv__operation-action:hover:not(:disabled) {
+  background: #0c4a6e;
+}
+
+.iv__operation-action:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .iv__operation-route,

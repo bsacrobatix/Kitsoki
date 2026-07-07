@@ -48,6 +48,7 @@ export interface OperationRunSummary {
   policyId: string;
   operationId: string;
   title: string;
+  phase?: string;
   mode?: string;
   executionMode?: string;
   runInBackground?: boolean;
@@ -188,6 +189,7 @@ function normalizeOperationRun(
       policyId ||
       operationId ||
       "Operation",
+    phase: readString(raw, "phase") || previous?.phase,
     mode: readString(raw, "mode") || previous?.mode,
     executionMode:
       readString(raw, "execution_mode") || previous?.executionMode,
@@ -581,14 +583,22 @@ export const useRunStore = defineStore("run", () => {
     return JSON.stringify([e.turn, e.msg, e.state_path ?? "", e.attrs ?? {}]);
   }
 
-  async function backfillTurnTrace(
+  function maxKnownTurn(): number {
+    let max = currentView.value?.turn_number ?? 0;
+    for (const e of events.value) {
+      if (typeof e.turn === "number") max = Math.max(max, e.turn);
+    }
+    return max;
+  }
+
+  async function backfillTraceSince(
     source: DataSource,
     sessionId: string,
-    turn: number
+    sinceTurn: number
   ): Promise<void> {
     try {
       const { events: fresh } = await source.getTrace(sessionId, {
-        since_turn: turn,
+        since_turn: sinceTurn,
       });
       if (!fresh.length) return;
 
@@ -605,6 +615,14 @@ export const useRunStore = defineStore("run", () => {
       // The transcript and final view are still usable if trace reconciliation
       // fails; the live subscription/reconnect path can fill in later.
     }
+  }
+
+  async function backfillTurnTrace(
+    source: DataSource,
+    sessionId: string,
+    turn: number
+  ): Promise<void> {
+    await backfillTraceSince(source, sessionId, turn);
   }
 
   /** Stop the live subscription. */
@@ -921,6 +939,29 @@ export const useRunStore = defineStore("run", () => {
   }
 
   /**
+   * Drive a running autonomous operation until the orchestrator reaches its
+   * next safe checkpoint. Unlike a normal operator turn, one drive can cascade
+   * through several internal turns, so backfill from the highest turn we knew
+   * before the RPC rather than only the returned terminal turn.
+   */
+  async function driveOperation(
+    source: DataSource,
+    sessionId: string
+  ): Promise<TurnResult> {
+    transcript.value.push({ role: "user", text: "Drive operation" });
+    busy.value = true;
+    const sinceTurn = maxKnownTurn() + 1;
+    try {
+      const result = await source.driveOperation(sessionId);
+      await backfillTraceSince(source, sessionId, sinceTurn);
+      applyTurnResult(result);
+      return result;
+    } finally {
+      busy.value = false;
+    }
+  }
+
+  /**
    * Rewind one contextual-routing (CRR) decision: reverse the route identified
    * by decisionId and re-dispatch the original utterance (optionally under a new
    * class). Pushes a small "rewound …" user marker, then applies the
@@ -1123,6 +1164,7 @@ export const useRunStore = defineStore("run", () => {
     loadInitialView,
     submitIntent,
     sendText,
+    driveOperation,
     rewindRoute,
     sendRoutingFeedback,
     applyTurnResult,

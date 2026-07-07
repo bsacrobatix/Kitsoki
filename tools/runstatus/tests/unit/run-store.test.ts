@@ -22,6 +22,8 @@ const writeStubs = {
     Promise.reject(new Error("not stubbed")) as Promise<TurnResult>,
   continueTurn: () =>
     Promise.reject(new Error("not stubbed")) as Promise<TurnResult>,
+  driveOperation: () =>
+    Promise.reject(new Error("not stubbed")) as Promise<TurnResult>,
   offpath: () =>
     Promise.reject(new Error("not stubbed")) as Promise<{ answer: string }>,
 };
@@ -632,6 +634,83 @@ describe("useRunStore — write-side actions", () => {
     expect(capturedInput).toBe("build me a thing");
     expect(store.transcript[0]).toMatchObject({ role: "user", text: "build me a thing" });
     expect(store.transcript[1]).toMatchObject({ role: "agent", text: "Got it." });
+  });
+
+  it("driveOperation backfills all driven turns and applies the returned view", async () => {
+    const drivenEvents: TraceEvent[] = [
+      {
+        time: "2026-01-01T00:00:04Z",
+        level: "info",
+        msg: "operation.run_started",
+        session_id: "sess-1",
+        turn: 4,
+        state_path: "root/review",
+        attrs: {
+          operation_id: "bf__capsule_demo",
+          policy_id: "bf__capsule_demo",
+          title: "Capsule bugfix",
+          status: "running",
+          phase: "run_regression",
+        },
+      },
+      {
+        time: "2026-01-01T00:00:05Z",
+        level: "info",
+        msg: "operation.completed",
+        session_id: "sess-1",
+        turn: 5,
+        state_path: "__exit__done",
+        attrs: {
+          operation_id: "bf__capsule_demo",
+          policy_id: "bf__capsule_demo",
+          title: "Capsule bugfix",
+          status: "completed",
+          terminal_state: "__exit__done",
+          terminal_artifact: "artifacts/qa-report.md",
+        },
+      },
+    ];
+    const getTrace = vi.fn(
+      (_sid: string, cursor?: { since_turn?: number }) =>
+        Promise.resolve(
+          cursor?.since_turn === undefined
+            ? { events: SNAPSHOT.events, last_turn: 3 }
+            : {
+                events: drivenEvents.filter((event) => event.turn >= (cursor.since_turn ?? 0)),
+                last_turn: 5,
+              }
+        )
+    );
+    const driveOperation = vi.fn(() =>
+      Promise.resolve(
+        turnResult({
+          mode: "completed",
+          state: "__exit__done",
+          view: "Operation complete",
+          turn_number: 5,
+        })
+      )
+    );
+    const src = writeSource({ getTrace, driveOperation });
+
+    const store = useRunStore();
+    await store.hydrate(src, "sess-1");
+    await store.driveOperation(src, "sess-1");
+
+    expect(driveOperation).toHaveBeenCalledWith("sess-1");
+    expect(getTrace).toHaveBeenLastCalledWith("sess-1", { since_turn: 4 });
+    expect(store.events.some((event) => event.msg === "operation.run_started")).toBe(true);
+    expect(store.events.some((event) => event.msg === "operation.completed")).toBe(true);
+    expect(store.operationRun).toMatchObject({
+      status: "completed",
+      phase: "run_regression",
+      terminalState: "__exit__done",
+      terminalArtifact: "artifacts/qa-report.md",
+    });
+    expect(store.transcript[0]).toMatchObject({ role: "user", text: "Drive operation" });
+    expect(store.transcript[1]).toMatchObject({ role: "agent", text: "Operation complete" });
+    expect(store.currentStatePath).toBe("__exit__done");
+    expect(store.terminal).toBe(true);
   });
 
   // ---- live turn-stream feed ordering ----
