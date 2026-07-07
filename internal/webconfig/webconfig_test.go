@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
-	"strings"
 	"testing"
 )
 
@@ -303,7 +302,7 @@ agent_user_delegation:
 	}
 }
 
-func TestLoad_AgentUserDelegationRequiresUserWhenEnabled(t *testing.T) {
+func TestLoad_AgentUserDelegationAllowsEnabledWithoutUserWhileDisabled(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, DefaultConfigFile)
 	if err := os.WriteFile(path, []byte(`
@@ -313,12 +312,15 @@ agent_user_delegation:
 		t.Fatal(err)
 	}
 
-	_, err := Load(path)
-	if err == nil {
-		t.Fatal("expected load error")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("disabled run_as_user should keep config loadable: %v", err)
 	}
-	if !strings.Contains(err.Error(), "agent_user_delegation.run_as_user") {
-		t.Fatalf("unexpected error: %v", err)
+	if cfg.AgentUserDelegation == nil || !cfg.AgentUserDelegation.Enabled {
+		t.Fatalf("expected enabled user delegation block to load, got %#v", cfg.AgentUserDelegation)
+	}
+	if cfg.AgentUserDelegation.RunAsUser != "" {
+		t.Fatalf("run_as_user=%q, want empty", cfg.AgentUserDelegation.RunAsUser)
 	}
 }
 

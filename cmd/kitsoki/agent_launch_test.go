@@ -205,7 +205,7 @@ args = ["mcp", "--stories-dir", "stories"]
 	require.Contains(t, plan.Command[len(plan.Command)-1], "Use ONLY the kitsoki studio MCP.")
 }
 
-func TestAgentLaunchPlan_FreestandingCodexAgentInteractiveUsesRunAsUserWrapper(t *testing.T) {
+func TestAgentLaunchPlan_FreestandingCodexAgentInteractiveIgnoresRunAsUserWhileDisabled(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
 	oldwd, err := os.Getwd()
@@ -240,9 +240,10 @@ args = ["mcp", "--stories-dir", "stories"]
 	})
 	require.NoError(t, err)
 	require.True(t, plan.Interactive)
-	require.Equal(t, "kitsoki-agent", plan.RunAsUser)
-	require.Equal(t, wrapper, plan.Binary)
-	require.Equal(t, wrapper, plan.Command[0])
+	require.Empty(t, plan.RunAsUser)
+	require.Equal(t, "/bin/codex-test", plan.Binary)
+	require.Equal(t, "/bin/codex-test", plan.Command[0])
+	require.NotEqual(t, wrapper, plan.Binary)
 	require.Contains(t, plan.Command, "--sandbox")
 	require.Contains(t, plan.Command, "read-only")
 	require.Contains(t, plan.Command[len(plan.Command)-1], "Use ONLY the kitsoki studio MCP.")

@@ -103,6 +103,12 @@ not supply any app or agent prompt.
 
 ## Delegated macOS User Setup
 
+`run_as_user` delegation is currently disabled at runtime. The setup story and
+config shape remain documented here for later re-enablement, but Kitsoki now
+parses existing `agent_user_delegation:` blocks without using the wrappers,
+without recording `run_as_user` in launch plans, and without surfacing the
+macOS setup warning.
+
 On macOS, `agent_launch_policy:` should be paired with a separate Standard user
 for coding-agent backends. The policy rejects unsafe launch locations, but the
 OS user boundary is what makes the protected checkout unwritable after the
@@ -133,18 +139,13 @@ agent_user_delegation:
   capsule_root: /Users/Shared/kitsoki/capsules
 ```
 
-This block is a local receipt for the OS-user delegation setup. It suppresses
-the macOS first-start warning only when it is enabled and includes both
-`run_as_user` and `wrapper_bin`. `kitsoki agent launch` consumes `wrapper_bin`
-directly: with the block above, it executes `wrapper_bin/codex`,
-`wrapper_bin/claude`, and so on, and records `run_as_user` in the dry-run plan.
-Without a complete block, `kitsoki run` prints a TUI startup notice and
-`kitsoki web` shows a home-screen setup warning with an action that opens
-`@kitsoki/run-as-user-setup`.
+This block is a local receipt for the OS-user delegation setup. While runtime
+delegation is disabled, it is only parsed and path-resolved; it does not affect
+launch binaries, launch plans, TUI startup notices, or web setup warnings.
 
-Other live agent surfaces still rely on the backend CLI resolving through the
-operator environment, so start those surfaces with the wrapper directory first
-in `PATH`:
+When runtime delegation is re-enabled, live agent surfaces that do not consume
+`agent_user_delegation.wrapper_bin` directly will still need the wrapper
+directory first in `PATH`:
 
 ```sh
 PATH=/Users/Shared/kitsoki/agent-bin:$PATH kitsoki run @kitsoki/dev-story

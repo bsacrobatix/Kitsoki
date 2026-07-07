@@ -28,11 +28,10 @@ attachment, omit the task; no task file is required:
 kitsoki agent launch --agent kitsoki-mcp-driver --backend codex
 ```
 
-When `.kitsoki.local.yaml` declares an enabled and complete
-`agent_user_delegation:` block, `kitsoki agent launch` automatically uses the
-configured `wrapper_bin/<backend>` executable and records `run_as_user` in the
-launch plan. Operators no longer need to prepend the wrapper directory to
-`PATH` for this command:
+`run_as_user` delegation is currently disabled at runtime. Kitsoki still parses
+existing `.kitsoki.local.yaml` `agent_user_delegation:` blocks so local config
+files keep loading, but `kitsoki agent launch` ignores `wrapper_bin`, launches
+the normal backend binary, and omits `run_as_user` from the launch plan:
 
 ```yaml
 agent_user_delegation:
@@ -41,9 +40,9 @@ agent_user_delegation:
   wrapper_bin: /Users/Shared/kitsoki/agent-bin
 ```
 
-`wrapper_bin` is required for delegation. If it is missing, Kitsoki keeps the
-macOS setup warning visible because the backend CLI cannot be launched as the
-delegated account.
+The setup story and receipt shape remain in the tree for a future re-enable,
+but missing or incomplete delegation config does not produce a macOS setup
+warning while runtime delegation is disabled.
 
 To open a normal interactive backend session without an app, agent file, MCP
 wrapper, or Kitsoki replacement prompt, use raw interactive launch:
@@ -138,8 +137,7 @@ protected roots, protected branches, and non-capsule workspaces before emitting
 a command plan. The same guard applies to raw interactive sessions.
 
 Launch policy is a preflight guard, not a kernel/filesystem sandbox. Use it to
-keep agents out of the protected checkout and inside opened capsules. On macOS,
-use `kitsoki run @kitsoki/run-as-user-setup` to apply the delegated local-user
-wrapper setup, then keep write-capable backend CLIs running as that delegated
-user. Use `with.sandbox` on hosted calls when a story also needs runtime
-supervision.
+keep agents out of the protected checkout and inside opened capsules. The
+macOS `run_as_user` wrapper path is temporarily disabled, so write-capable
+backend CLIs currently run as the invoking user. Use `with.sandbox` on hosted
+calls when a story also needs runtime supervision.
