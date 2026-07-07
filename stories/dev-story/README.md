@@ -522,7 +522,10 @@ These are a sample; the full suite passes under `kitsoki test flows stories/dev-
 ## Manual TUI walkthrough
 
 The same chain `bugfix_to_pr.yaml` exercises is replayable by hand.
-With `judge_mode=human` and the standalone defaults:
+Choose the oversight posture before launch with `oversight_gated`,
+`oversight_llm_review`, or `oversight_no_gate`. Gated is the human-checkpoint
+default (`judge_mode=human`); LLM review sets `judge_mode=llm_then_human`; no
+gate keeps LLM judges off and leaves the operation policy drivable.
 
 ```
 $ kitsoki run stories/dev-story/app.yaml

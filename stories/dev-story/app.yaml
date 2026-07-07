@@ -482,6 +482,10 @@ world:
   cleanup_status:      { type: string, default: "" }
 
   # ── Pipeline control (shared with bf / pr imports) ────────────────
+  # User-facing oversight policy for imported work loops. judge_mode remains
+  # the compatibility switch consumed by existing child stories; empty
+  # oversight_mode preserves callers that set judge_mode directly.
+  oversight_mode:             { type: string, default: "" } # "" = infer from judge_mode; gated | llm-review | no-gate
   judge_mode:                  { type: string, default: "human" }
   judge_confidence_threshold:  { type: float,  default: 0.8 }
   bugfix_mode:                 { type: string, default: "full" }
@@ -1389,6 +1393,21 @@ intents:
     description: "Run the bugfix pipeline and merge the fix into the local base branch."
     examples: ["fix this and merge locally", "merge to main after fixing", "bugfix to local main"]
     priority: 56
+  oversight_gated:
+    title: "Oversight: Gated"
+    description: "Use human checkpoints for imported work loops."
+    examples: ["use gated oversight", "human gated mode", "make this gated"]
+    priority: 54
+  oversight_llm_review:
+    title: "Oversight: LLM Review"
+    description: "Use LLM checkpoint review and fall back to human review when uncertain."
+    examples: ["use llm review", "llm review mode", "let the llm review gates"]
+    priority: 54
+  oversight_no_gate:
+    title: "Oversight: No Gate"
+    description: "Use autonomous operation driving without LLM checkpoint review."
+    examples: ["use no gate mode", "no-gate mode", "run without review gates"]
+    priority: 54
   go_pr_refinement:
     title: "PR Refinement"
     description: "Hand off to the pr-refinement sub-story for an open PR."
@@ -1845,6 +1864,7 @@ imports:
       #   open-pr        -> bf done -> pr-refinement
       #   leave-worktree -> bf done -> landing, preserving workdir
       bugfix_exit:     "{% if world.bugfix_destination == 'local-merge' %}direct-ship{% else %}open-PR{% endif %}"
+      oversight_mode:  "{{ world.oversight_mode }}"
       judge_mode:      "{{ world.judge_mode }}"
       judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
       # Pass through bf's auto_triage pre-flight switch (default true — a

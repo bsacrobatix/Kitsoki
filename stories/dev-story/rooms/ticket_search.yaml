@@ -14,7 +14,7 @@ states:
 
   ticket_search:
     description: "Browse tickets — pick one, then `continue` into the bugfix pipeline."
-    relevant_world: [ticket_query, ticket_results, ticket_id, ticket_title]
+    relevant_world: [ticket_query, ticket_results, ticket_id, ticket_title, oversight_mode]
     # Proactive fetch on entry — the operator should land here and SEE
     # the queue, not be prompted to type a search query first. The
     # empty `ticket_query` default returns the full list; the optional
@@ -94,6 +94,7 @@ states:
             # Title-first to match the row format above; ID trails in
             # parentheses so a quick glance lands on the human label.
             Picked: '{% if world.ticket_id %}{{ world.ticket_title|default:"(no title)" }}  ({{ world.ticket_id }}){% else %}(none — pick one below){% endif %}'
+            Oversight: "{{ world.oversight_mode|default:'gated' }}"
       # Source / identity line (P5) — only rendered for a GitHub-Issue-backed
       # ticket (ticket_source=github), surfacing the original local-bug-file
       # id so the local↔issue mapping is visible instead of eyeball-matched.
@@ -142,6 +143,18 @@ states:
             - label:  "✗ drive — pick a ticket first"
               intent: drive
               when:   "world.ticket_id == ''"
+            - label:  "gated"
+              intent: oversight_gated
+              hint:   "human checkpoint decisions"
+              when:   "world.oversight_mode != 'gated'"
+            - label:  "LLM review"
+              intent: oversight_llm_review
+              hint:   "LLM checkpoint decisions, human fallback"
+              when:   "world.oversight_mode != 'llm-review'"
+            - label:  "no gate"
+              intent: oversight_no_gate
+              hint:   "operation driver accepts checkpoints"
+              when:   "world.oversight_mode != 'no-gate'"
             - label:  "go_bugfix"
               intent: go_bugfix
               hint:   "force the bugfix pipeline regardless of ticket type"
@@ -321,6 +334,24 @@ states:
         - default: true
           target: ticket_search
           guard_hint: "Pick a ticket first."
+      oversight_gated:
+        - target: .
+          effects:
+            - set:
+                oversight_mode: "gated"
+                judge_mode: "human"
+      oversight_llm_review:
+        - target: .
+          effects:
+            - set:
+                oversight_mode: "llm-review"
+                judge_mode: "llm_then_human"
+      oversight_no_gate:
+        - target: .
+          effects:
+            - set:
+                oversight_mode: "no-gate"
+                judge_mode: "human"
       go_back:
         - target: "{{ world.prev_state }}"
       go_main:
