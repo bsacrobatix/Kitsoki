@@ -1172,6 +1172,8 @@ func rewriteChildStateTransitionsAtDepth(s *State, alias string, imp *ImportDef,
 			// Capture world_out projection BEFORE rewriting the target.
 			if strings.HasPrefix(origTarget, "@exit:") {
 				name := strings.TrimPrefix(origTarget, "@exit:")
+				tr.OperationExit = name
+				tr.OperationExitPolicyPrefix = alias + "__"
 				if imp.Exits != nil {
 					if ex, ok := imp.Exits[name]; ok && ex != nil && len(ex.Set) > 0 {
 						tr.Effects = append(tr.Effects, Effect{Set: ex.Set})

@@ -15,10 +15,13 @@ import (
 
 func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
 	cases := []struct {
-		appPath    string
-		capsule    string
-		name       string
-		sourceFlow string
+		appPath                string
+		capsule                string
+		name                   string
+		sourceFlow             string
+		expectOperationPolicy  string
+		expectOperationStatus  string
+		expectTerminalArtifact string
 	}{
 		{
 			appPath:    repoStoriesBugfixAppPath(t),
@@ -39,10 +42,13 @@ func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
 			sourceFlow: repoPath(t, "../../stories/bugfix/flows/bugfix_needs_human_on_merged_red.yaml"),
 		},
 		{
-			appPath:    repoStoriesDevStoryAppPath(t),
-			capsule:    "clean-repo",
-			name:       "dev_story_bugfix_to_pr_completed",
-			sourceFlow: repoPath(t, "../../stories/dev-story/flows/bugfix_to_pr.yaml"),
+			appPath:                repoStoriesDevStoryAppPath(t),
+			capsule:                "clean-repo",
+			name:                   "dev_story_bugfix_to_pr_completed",
+			sourceFlow:             repoPath(t, "../../stories/dev-story/flows/bugfix_to_pr.yaml"),
+			expectOperationPolicy:  "bf__bugfix_full",
+			expectOperationStatus:  "completed",
+			expectTerminalArtifact: "bf__done_artifact",
 		},
 	}
 
@@ -51,7 +57,11 @@ func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
 			workspace := capsuletest.Open(t, tc.capsule)
 			capsuletest.Verify(t, workspace)
 
-			flowPath := writeCapsuleBackedFlow(t, tc.sourceFlow, tc.appPath, workspace, tc.name)
+			flowPath := writeCapsuleBackedFlow(t, tc.sourceFlow, tc.appPath, workspace, tc.name, operationExpectations{
+				policy:           tc.expectOperationPolicy,
+				status:           tc.expectOperationStatus,
+				terminalArtifact: tc.expectTerminalArtifact,
+			})
 			report, err := testrunner.RunFlows(t.Context(), tc.appPath, flowPath, testrunner.FlowOptions{})
 			require.NoError(t, err)
 			requireFlowReportPassed(t, report)
@@ -72,7 +82,13 @@ func repoPath(t *testing.T, path string) string {
 	return abs
 }
 
-func writeCapsuleBackedFlow(t *testing.T, sourceFlow, appPath, workspace, name string) string {
+type operationExpectations struct {
+	policy           string
+	status           string
+	terminalArtifact string
+}
+
+func writeCapsuleBackedFlow(t *testing.T, sourceFlow, appPath, workspace, name string, expectations operationExpectations) string {
 	t.Helper()
 	raw, err := os.ReadFile(sourceFlow)
 	require.NoError(t, err)
@@ -99,6 +115,15 @@ func writeCapsuleBackedFlow(t *testing.T, sourceFlow, appPath, workspace, name s
 	doc["app"] = appPath
 	if cassette, ok := doc["host_cassette"].(string); ok && cassette != "" && !filepath.IsAbs(cassette) {
 		doc["host_cassette"] = filepath.Join(filepath.Dir(sourceFlow), cassette)
+	}
+	if expectations.policy != "" {
+		doc["expect_operation_policy"] = expectations.policy
+	}
+	if expectations.status != "" {
+		doc["expect_operation_status"] = expectations.status
+	}
+	if expectations.terminalArtifact != "" {
+		doc["expect_terminal_artifact"] = expectations.terminalArtifact
 	}
 	initialWorld = stringAnyMap(t, doc, "initial_world")
 	initialWorld["workdir"] = workspace

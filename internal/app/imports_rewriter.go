@@ -260,6 +260,9 @@ func (rw *childRewriter) rewriteTransition(tr *Transition) {
 	tr.GuardHint = rw.rewriteExpr(tr.GuardHint)
 	tr.View = rw.rewriteView(tr.View)
 	tr.Operation = rw.rewriteOperationRef(tr.Operation)
+	if tr.OperationExitPolicyPrefix != "" {
+		tr.OperationExitPolicyPrefix = rw.alias + "__" + tr.OperationExitPolicyPrefix
+	}
 	for i := range tr.Effects {
 		rw.rewriteEffect(&tr.Effects[i])
 	}
