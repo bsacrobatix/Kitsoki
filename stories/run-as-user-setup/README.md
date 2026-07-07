@@ -1,10 +1,12 @@
 # Run-As-User Setup
 
 This no-LLM story applies macOS local-user delegation for coding-agent launches.
-It opens on the setup plan screen; use `apply` to run the setup with
-non-interactive sudo, or `accept`/`ok` after reviewing the plan to do the same.
-If sudo needs a password or an agent CLI needs interactive login, the story stops
-with the command output instead of hanging on an invisible prompt.
+It opens on a small setup control screen. Use `apply`, `accept`, or `ok` to run
+the deterministic setup with non-interactive sudo. Use `details` only when you
+want the generated receipt and setup summary, and use `edit values` when a
+default user, path, or CLI location is wrong. If sudo needs a password or an
+agent CLI needs interactive login, the story stops with command output instead
+of hanging on an invisible prompt.
 
 Run it from the project checkout:
 
@@ -12,7 +14,7 @@ Run it from the project checkout:
 kitsoki run @kitsoki/run-as-user-setup
 ```
 
-It plans and can apply:
+It applies:
 
 - a `.kitsoki.local.yaml` `agent_user_delegation:` receipt block;
 - the matching `agent_launch_policy:` block;

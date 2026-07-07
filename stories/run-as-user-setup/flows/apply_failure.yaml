@@ -1,7 +1,7 @@
 test_kind: flow
 app: ../app.yaml
 use_orchestrator: true
-initial_state: planned
+initial_state: details
 initial_world:
   operator_user: Brad.Smith
   protected_root: /Users/Brad.Smith/code/kitsoki

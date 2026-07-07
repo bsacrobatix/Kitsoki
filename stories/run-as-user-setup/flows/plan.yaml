@@ -15,14 +15,10 @@ host_handlers:
 
 turns:
   - intent:
-      name: plan
+      name: edit
       slots: {}
-    expect_state: planned
-    expect_world:
-      setup_summary: "This plan sets up a Standard macOS account named kitsoki-agent as the delegated coding-agent user.\nKitsoki still owns the deterministic harness and merge/integration operations.\nThe backend CLIs run through root-owned PATH wrappers as kitsoki-agent, so OS permissions can deny writes to /Users/Brad.Smith/code/kitsoki."
-    expect_host_calls:
-      - handler: host.starlark.run
-    expect_view_matches: "agent_user_delegation"
+    expect_state: configuring
+    expect_view_matches: "Setup values"
 
   - intent:
       name: configure
@@ -30,13 +26,23 @@ turns:
         agent_user: kitsoki-reviewer
         group_name: kitsoki_room_review
         sample_capsule: room-456-review
-    expect_state: planned
+    expect_state: lobby
     expect_world:
       agent_user: kitsoki-reviewer
       group_name: kitsoki_room_review
+      status: "ready to apply"
+    expect_view_matches: "kitsoki-reviewer"
+
+  - intent:
+      name: plan
+      slots: {}
+    expect_state: details
+    expect_world:
+      setup_summary: "This setup creates or reuses a Standard macOS account named kitsoki-reviewer as the delegated coding-agent user.\nKitsoki still owns the deterministic harness and merge/integration operations.\nThe backend CLIs run through root-owned PATH wrappers as kitsoki-reviewer, so OS permissions can deny writes to /Users/Brad.Smith/code/kitsoki."
+      status: "details ready"
     expect_host_calls:
       - handler: host.starlark.run
-    expect_view_matches: "kitsoki-reviewer"
+    expect_view_matches: "Deterministic apply path"
 
   - intent:
       name: accept

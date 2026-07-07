@@ -33,7 +33,7 @@ def main(ctx):
     sample_capsule = _trim(ctx.inputs["sample_capsule"]) or "room-123-dev"
 
     if platform != "darwin":
-        fail("run-as-user setup currently plans the macOS local-user path; got platform %q" % platform)
+        fail("run-as-user setup currently supports the macOS local-user path; got platform %q" % platform)
 
     operator_ref = operator_user
     if operator_ref == "":
@@ -42,7 +42,7 @@ def main(ctx):
     sample_path = _path_join(capsule_root, sample_capsule)
 
     setup_summary = _join([
-        "This plan sets up a Standard macOS account named %s as the delegated coding-agent user." % agent_user,
+        "This setup creates or reuses a Standard macOS account named %s as the delegated coding-agent user." % agent_user,
         "Kitsoki still owns the deterministic harness and merge/integration operations.",
         "The backend CLIs run through root-owned PATH wrappers as %s, so OS permissions can deny writes to %s." % (agent_user, protected_root),
     ])
@@ -153,4 +153,3 @@ def main(ctx):
         "receipt_markdown": receipt_markdown,
         "security_notes": security_notes,
     }
-
