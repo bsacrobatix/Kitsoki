@@ -122,8 +122,8 @@ def project_repo_envs(proj):
     """Environment variables accepted as local checkout hints for a project.
 
     A private/local project can now be driven from either its standalone checkout
-    (for example GEARS_RUST_REPO=/path/to/gears-rust) or a meta checkout such as
-    CYBER_REPO when the manifest also declares project.repo_subdir.
+    (for example GEARS_RUST_REPO=/path/to/gears-rust) or a meta checkout env
+    when the manifest also declares project.repo_subdir.
     """
     envs = []
     envs.extend(_as_list(proj.get("repo_envs")))

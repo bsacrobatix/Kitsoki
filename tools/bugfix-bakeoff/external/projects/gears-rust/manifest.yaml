@@ -23,7 +23,7 @@ project:
   id: gears-rust
   repo: https://github.com/bsacrobatix/gears-rust.git   # private fork; arm via --repo-dir (local)
   local_only: true             # heavy + private: NOT cloned by the qsbakeoff loop; armed via the gearsbakeoff test against a local mirror
-  repo_envs: [GEARS_RUST_REPO, CYBER_REPO]
+  repo_envs: [GEARS_RUST_REPO, GEARS_RUST_META_REPO]
   repo_subdir: src/cyberfabric/gears-rust  # when --repo-dir /path/to/cyber-repo is passed, resolve the submodule checkout here
   title: "gears-rust — Constructor 'gears' declarative service platform (Rust monorepo)"
   language: rust
