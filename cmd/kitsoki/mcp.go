@@ -195,16 +195,19 @@ docs land):
 				})
 			}
 
-			// Seed operator-declared harness profiles (synthetic, codex, …) from
-			// the project webconfig so a session.new(profile:…) can route a live
-			// session's agent dispatch through a named backend — the studio twin of
-			// `kitsoki turn --profile`. Best-effort: a missing/invalid config leaves
-			// the session on the legacy default-backend path rather than aborting
-			// boot (a story.* / replay session needs no profiles).
-			if webCfg, cfgErr := webconfig.Load(webconfig.DefaultConfigFile); cfgErr == nil {
-				if profiles, defaultProfile := harnessProfilesFromConfig(webCfg); len(profiles) > 0 {
-					sess.SetHarnessProfiles(profiles, defaultProfile)
-				}
+			// Seed operator-declared harness profiles and launch policy from the
+			// project webconfig. A missing config contributes nothing; a present
+			// but invalid config is an operator error, and for launch policy must
+			// not silently drop a guard.
+			webCfg, cfgErr := webconfig.Load(webconfig.DefaultConfigFile)
+			if cfgErr != nil {
+				return fmt.Errorf("mcp: load %s: %w", webconfig.DefaultConfigFile, cfgErr)
+			}
+			if profiles, defaultProfile := harnessProfilesFromConfig(webCfg); len(profiles) > 0 {
+				sess.SetHarnessProfiles(profiles, defaultProfile)
+			}
+			if policy := agentLaunchPolicyFromConfig(webCfg); policy.Enabled {
+				sess.SetAgentLaunchPolicy(policy)
 			}
 
 			// Optionally bind an initial authoring workspace. Loading is

@@ -107,6 +107,12 @@ type Orchestrator struct {
 	// on today's single-attempt behavior — set via WithHarnessLadderConfig.
 	harnessLadder host.LadderConfig
 
+	// agentLaunchPolicy is the deterministic preflight guard applied before
+	// external coding-agent CLIs are forked by host.agent.*. It rejects protected
+	// roots/branches and, when configured, requires an opened capsule workspace.
+	// Zero value is disabled.
+	agentLaunchPolicy host.AgentLaunchPolicy
+
 	// modelCache memoises the always-on model ids fetched from a profile's
 	// ModelsEndpoint (keyed by profile name), guarded by its own mutex so a fetch
 	// never blocks the dispatch-hot selMu.
@@ -524,6 +530,12 @@ func WithPromptOverlay(dir string) Option {
 // default; an unrecognized name degrades safely to claude.
 func WithAgentBackendName(name string) Option {
 	return func(o *Orchestrator) { o.agentBackendName = name }
+}
+
+// WithAgentLaunchPolicy installs the pre-launch guard for host.agent.* calls.
+// Disabled/zero policies are safe no-ops.
+func WithAgentLaunchPolicy(policy host.AgentLaunchPolicy) Option {
+	return func(o *Orchestrator) { o.agentLaunchPolicy = policy.Normalized() }
 }
 
 // WithLogger sets the logger used for structured tracing.

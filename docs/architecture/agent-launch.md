@@ -28,6 +28,13 @@ attachment, omit the task; no task file is required:
 kitsoki agent launch --agent kitsoki-mcp-driver --backend codex
 ```
 
+To open a normal interactive backend session without an app, agent file, MCP
+wrapper, or Kitsoki replacement prompt, use raw interactive launch:
+
+```sh
+kitsoki agent launch --raw --interactive --backend codex --working-dir /tmp/kitsoki-capsules/clean-repo
+```
+
 For freestanding Codex agents, `[mcp_servers.*]` blocks are materialized into
 the same `--mcp-config` shape Claude uses, then translated into Codex
 `-c mcp_servers...` overrides. This is the Codex analogue of launching a
@@ -39,6 +46,10 @@ task uses top-level `codex [OPTIONS] [PROMPT]`, so the terminal opens the Codex
 TUI with the agent instructions as the initial prompt. Pass `--interactive` only
 when you want to force the interactive path despite other launch inputs.
 
+Raw interactive launch also uses the backend's top-level interactive CLI, but
+passes no app/agent prompt at all. It is intended for native logged-in host CLI
+sessions, especially macOS subscription workflows.
+
 By default it is a no-provider dry run. It prints a JSON launch plan with:
 
 - the selected backend and binary,
@@ -48,6 +59,7 @@ By default it is a no-provider dry run. It prints a JSON launch plan with:
 - the resolved tool surface,
 - redacted provider environment keys,
 - the stdin prompt that will be sent to the backend.
+- the `launch_policy` decision when `agent_launch_policy:` is enabled.
 
 Pass `--exec` to actually run the selected CLI:
 
@@ -96,6 +108,11 @@ Read-only agents (`external_side_effect: false`) launch with Claude's enforcing
 `default` permission mode and a hard deny-list for mutation tools. All launches
 deny headless escape tools such as `AskUserQuestion`, `Agent`, and `Task`.
 
-OS sandbox policy is not applied by this command yet. Until that lands, only run
-`--exec` in a trusted working tree. The launch plan is the intended extension
-point for future sandbox policy, extension overlays, and HTTP/network rules.
+When `.kitsoki.yaml` / `.kitsoki.local.yaml` enables
+[`agent_launch_policy:`](./agent-launch-policy.md), launch planning rejects
+protected roots, protected branches, and non-capsule workspaces before emitting
+a command plan. The same guard applies to raw interactive sessions.
+
+Launch policy is a preflight guard, not a kernel/filesystem sandbox. Use it to
+keep agents out of the protected checkout and inside opened capsules; use
+`with.sandbox` on hosted calls when a story also needs runtime supervision.

@@ -54,6 +54,9 @@ these surfaces.
 - **[`agent-launch.md`](agent-launch.md)** — the `kitsoki agent launch`
   resolver that turns a story `agents:` entry plus a harness profile into
   a concrete Claude/Codex task-agent launch plan, with dry-run by default.
+- **[`agent-launch-policy.md`](agent-launch-policy.md)** — the
+  `agent_launch_policy:` preflight guard for keeping external coding-agent
+  launches out of protected checkouts/branches and inside opened capsules.
 - **[`mcp-studio.md`](mcp-studio.md)** — the `kitsoki mcp` studio server
   an external coding agent attaches to: the handle model and the
   `story.*` / `session.*` / `render.*` tool surface that let it author a

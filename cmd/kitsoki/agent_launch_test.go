@@ -199,6 +199,70 @@ args = ["mcp", "--stories-dir", "stories"]
 	require.Contains(t, plan.Command[len(plan.Command)-1], "Use ONLY the kitsoki studio MCP.")
 }
 
+func TestAgentLaunchPlan_RawInteractiveNoAgentPrompt(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	t.Setenv("RAW_OPENAI_API_KEY", "secret-token")
+	cfgPath := filepath.Join(dir, ".kitsoki.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+default_profile: desktop
+harness_profiles:
+  desktop:
+    backend: codex
+    model: gpt-5.5
+    effort: medium
+    env:
+      OPENAI_API_KEY: ${RAW_OPENAI_API_KEY}
+`), 0644))
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		ConfigPath:     cfgPath,
+		RawInteractive: true,
+		WorkingDir:     dir,
+		AddDirs:        []string{filepath.Join(dir, "extra")},
+	})
+	require.NoError(t, err)
+	require.True(t, plan.Interactive)
+	require.Equal(t, "raw", plan.Agent)
+	require.Empty(t, plan.App)
+	require.Empty(t, plan.AgentFile)
+	require.Equal(t, "desktop", plan.Profile)
+	require.Equal(t, "codex", plan.Backend)
+	require.Equal(t, "/bin/codex-test", plan.Binary)
+	require.Empty(t, plan.Stdin)
+	require.Equal(t, "<redacted>", plan.Env["OPENAI_API_KEY"])
+	require.Contains(t, plan.Command, "-m")
+	require.Contains(t, plan.Command, "gpt-5.5")
+	require.Contains(t, plan.Command, "-C")
+	require.Contains(t, plan.Command, dir)
+	require.Contains(t, plan.Command, "--add-dir")
+	require.Contains(t, plan.Command, filepath.Join(dir, "extra"))
+	joined := strings.Join(plan.Command, " ")
+	require.NotContains(t, joined, "--dangerously-bypass-approvals-and-sandbox")
+	require.NotContains(t, joined, "developer_instructions")
+	require.NotContains(t, joined, "Use ONLY")
+}
+
+func TestAgentLaunchPlan_LaunchPolicyDeniesRawInteractive(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".kitsoki.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+agent_launch_policy:
+  enabled: true
+  require_capsule: true
+  protected_branches: [release]
+`), 0644))
+
+	_, err := buildAgentLaunchPlan(agentLaunchOptions{
+		ConfigPath:     cfgPath,
+		RawInteractive: true,
+		WorkingDir:     dir,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "agent launch policy denied")
+	require.Contains(t, err.Error(), "inside protected root")
+}
+
 func flagValue(t *testing.T, args []string, flag string) string {
 	t.Helper()
 	for i, arg := range args {

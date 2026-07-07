@@ -151,6 +151,10 @@ type runtimeConfig struct {
 	// unless they explicitly install a ladder.
 	HarnessLadder host.LadderConfig
 
+	// AgentLaunchPolicy is the machine-local preflight guard for external
+	// host.agent.* launches. Zero value means disabled.
+	AgentLaunchPolicy host.AgentLaunchPolicy
+
 	// WantRoomEnterSink allocates a TUI room-enter sink and wires it into the
 	// orchestrator. `kitsoki run` sets this; `kitsoki web` does not.
 	RoomEnterSink orchestrator.RoomEnterSink
@@ -215,7 +219,8 @@ type runtimeBase struct {
 	DefaultProfile  string
 	// HarnessLadder mirrors runtimeConfig.HarnessLadder, inherited by every
 	// session the registry spins up.
-	HarnessLadder host.LadderConfig
+	HarnessLadder     host.LadderConfig
+	AgentLaunchPolicy host.AgentLaunchPolicy
 
 	// Mining is the resolved .kitsoki.yaml `mining:` block, inherited by every
 	// session. Default-zero (no block / enabled:false) ⇒ no miner — every flow
@@ -281,6 +286,7 @@ func (b runtimeBase) config(storyPath string, def *app.AppDef) runtimeConfig {
 		HarnessProfiles:   b.HarnessProfiles,
 		DefaultProfile:    b.DefaultProfile,
 		HarnessLadder:     b.HarnessLadder,
+		AgentLaunchPolicy: b.AgentLaunchPolicy,
 		Flow:              b.Flow,
 		FlowFilePath:      b.FlowFilePath,
 		HostCassette:      b.HostCassette,
@@ -545,6 +551,9 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 	}
 	if harnessLadder.Enabled() {
 		runOpts = append(runOpts, orchestrator.WithHarnessLadderConfig(harnessLadder))
+	}
+	if cfg.AgentLaunchPolicy.Enabled {
+		runOpts = append(runOpts, orchestrator.WithAgentLaunchPolicy(cfg.AgentLaunchPolicy))
 	}
 	if d := def.Decider; d != nil {
 		runOpts = append(runOpts, orchestrator.WithDecider(orchestrator.DeciderConfig{

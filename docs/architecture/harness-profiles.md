@@ -53,6 +53,9 @@ effective config:
   profiles are added, and a profile declared in both is replaced **whole** by
   the local one (restate every field you want — you never restate the *other*
   profiles).
+- `agent_launch_policy` — replaced **whole** by the local file. Keep machine
+  paths such as protected checkout roots and allowed capsule directories in
+  `.kitsoki.local.yaml`.
 
 A missing local file contributes nothing, so a fresh checkout runs off the
 shared baseline alone.
@@ -124,6 +127,32 @@ harness_profiles:
 **Secrets** never live in the file: `env` values use `${VAR}` interpolation
 against the process environment. With no `harness_profiles:` block the static
 flag/env path is preserved byte-for-byte.
+
+### Agent launch policy
+
+`agent_launch_policy:` is the local preflight guard for external coding-agent
+launches. It is separate from harness profiles: profiles select a backend/model;
+launch policy decides whether that backend may start in a working directory.
+
+Example local policy:
+
+```yaml
+# .kitsoki.local.yaml
+agent_launch_policy:
+  enabled: true
+  require_capsule: true
+  protected_roots: [.]
+  allowed_roots:
+    - ./.worktrees/capsules
+    - /tmp/kitsoki-capsules
+  protected_branches: [main, master, trunk, "integration/*", "staging/*"]
+```
+
+When enabled, `kitsoki run`, `kitsoki web`, `kitsoki mcp`, and
+`kitsoki agent launch` all reject launches in protected roots/branches and can
+require an opened [capsule](./capsules.md). See
+[`agent-launch-policy.md`](./agent-launch-policy.md) for the exact semantics and
+trace fields.
 
 Live TUI and web sessions also install an automatic fallback ladder when no
 explicit `harness_ladder:` is declared. The default priority is:

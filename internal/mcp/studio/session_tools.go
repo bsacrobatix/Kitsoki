@@ -1200,7 +1200,7 @@ func (srv *Server) specFrame(ctx context.Context, storyPath, state string, world
 	}
 	// No harness, no profiles, no seed: a spec render is a pure re-render and
 	// never calls orch.Turn or dispatches an agent.
-	rt, err := newSessionRuntime(ctx, storyPath, tracePath, nil, nil, "", nil, "", false, srv.importResolver, nil, nil)
+	rt, err := newSessionRuntime(ctx, storyPath, tracePath, nil, nil, "", nil, "", false, srv.importResolver, nil, nil, host.AgentLaunchPolicy{})
 	if err != nil {
 		return tui.Frame{}, err
 	}
