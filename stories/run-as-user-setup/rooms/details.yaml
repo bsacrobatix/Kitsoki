@@ -474,7 +474,7 @@ states:
           target: ready
           effects:
             - set:
-                status: "applied"
+                status: "applied successfully"
         - when: "world.apply_exit_code == 77"
           target: needs_authorization
           effects:
@@ -700,12 +700,38 @@ states:
 
   ready:
     description: "Run-as-user setup ready"
-    relevant_world: [agent_user, capsule_root, receipt_markdown, apply_output, status]
+    relevant_world: [agent_user, group_name, capsule_root, wrapper_bin, protected_root, receipt_markdown, apply_output, status]
     view:
-      - prose: "The setup is ready. Keep the receipt with your machine-local notes and start Kitsoki with the wrapper directory first in PATH until first-class run_as_user launch support lands."
+      - heading: "Setup complete"
+      - prose: "Run-as-user delegation is installed and the validation probes passed."
+        when: "world.apply_ok == true"
+      - prose: "Run-as-user delegation is marked ready. Keep the receipt with your machine-local notes."
+        when: "world.apply_ok == false"
+      - kv:
+          pairs:
+            Status: "{{ world.status }}"
+            Agent user: "{{ world.agent_user }}"
+            Agent group: "{{ world.group_name }}"
+            Capsule root: "{{ world.capsule_root }}"
+            Wrapper bin: "{{ world.wrapper_bin }}"
+            Protected root: "{{ world.protected_root }}"
+      - heading: "Installed and verified"
+      - list:
+          items:
+            - label: "delegated account"
+              hint: "{{ world.agent_user }} exists and belongs to {{ world.group_name }}"
+            - label: "PATH wrappers"
+              hint: "{{ world.wrapper_bin }}/codex and {{ world.wrapper_bin }}/claude invoke the backend CLIs as {{ world.agent_user }}"
+            - label: "capsule permissions"
+              hint: "{{ world.sample_capsule }} is writable by the delegated account under {{ world.capsule_root }}"
+            - label: "protected checkout probe"
+              hint: "{{ world.protected_root }} rejected a delegated-user write"
+      - heading: "Use wrappers"
+      - prose: "Start Kitsoki from a shell with the wrapper directory first in PATH when you want coding agents to run as the delegated account."
+      - code: "export PATH=\"{{ world.wrapper_bin }}:$PATH\"\ncommand -v codex\ncommand -v claude"
       - heading: "Receipt"
       - code: "{{ world.receipt_markdown|default:'(pending)' }}"
-      - heading: "Apply output"
+      - heading: "Command transcript"
         when: "world.apply_output != ''"
       - code: "{{ world.apply_output }}"
         when: "world.apply_output != ''"

@@ -49,9 +49,9 @@ turns:
       slots: {}
     expect_state: ready
     expect_world:
-      status: applied
+      status: applied successfully
       apply_ok: true
-    expect_view_matches: "run_as_user setup receipt"
+    expect_view_matches: "Setup complete[\\s\\S]*Installed and verified[\\s\\S]*run_as_user setup receipt"
     expect_host_calls:
       - handler: host.run
         args: { call: apply_run_as_user_setup }
