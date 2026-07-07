@@ -11,8 +11,9 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const siteDir = path.resolve(__dirname, "../..");
-export const repoRoot = path.resolve(siteDir, "../..");
+export const sourceSiteDir = path.resolve(process.env.KITSOKI_SITE_SOURCE_ROOT ?? path.resolve(__dirname, "../.."));
+export const siteDir = path.resolve(process.env.KITSOKI_SITE_ROOT ?? sourceSiteDir);
+export const repoRoot = path.resolve(process.env.KITSOKI_REPO_ROOT ?? path.resolve(sourceSiteDir, "../.."));
 const decksRoot = path.join(repoRoot, "docs", "decks");
 const bundledRoot = path.join(decksRoot, "bundled");
 const publicViewerRoot = path.join(siteDir, "src", "public", "deck-viewers");

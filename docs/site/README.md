@@ -103,6 +103,10 @@ pure no-LLM post-processing.
   title-slide gallery cards, and each deck page keeps the VitePress site chrome
   while embedding the committed self-contained viewer from
   `docs/decks/bundled/<deck-id>.html`.
+- **Runtime workspace** is `.temp/site`. `tools/site` is source only; `make
+  site` / `make site-dev` prepare `.temp/site`, stage generated guide docs and
+  media there, and run VitePress from that writable root so Vite loader scratch
+  files never land beside source files.
 - **Guide docs** are an **allowlist copy** of `docs/` (`docs-manifest.json` +
   `scripts/stage-docs.mjs`): internal trees (proposals, competitive-analysis,
   skills, …) can never leak; links escaping the allowlist are rewritten to
@@ -125,7 +129,8 @@ pure no-LLM post-processing.
   verifies feature demo paths, staged `public/media/<feature>/` shape, and
   Slidey deck/gallery embeds without recording videos or invoking an LLM.
 
-Targets: `make site` (build, base `/Kitsoki/`), `make site-dev` (HMR),
+Targets: `make site` (build, base `/Kitsoki/`, output `.temp/site/dist`),
+`make site-dev` (prepare and serve `.temp/site`; rerun after source changes),
 `make site-full` (demos + site), `make site-clean`.
 
 ## Publishing

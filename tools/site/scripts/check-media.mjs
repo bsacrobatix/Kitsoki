@@ -26,7 +26,8 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const siteDir = path.resolve(__dirname, "..");
-const repoRoot = path.resolve(siteDir, "../..");
+const repoRoot = path.resolve(process.env.KITSOKI_REPO_ROOT ?? path.join(siteDir, "../.."));
+const runtimeSiteDir = path.resolve(process.env.KITSOKI_SITE_ROOT ?? siteDir);
 
 function argValue(name, fallback) {
   const i = process.argv.indexOf(name);
@@ -37,11 +38,11 @@ const indexPath = path.resolve(
   repoRoot,
   argValue("--index", path.join(siteDir, ".vitepress", "gen", "features-index.json")),
 );
-const mediaDir = path.resolve(repoRoot, argValue("--media", path.join(siteDir, "src", "public", "media")));
+const mediaDir = path.resolve(repoRoot, argValue("--media", path.join(runtimeSiteDir, "src", "public", "media")));
 const decksDir = path.resolve(repoRoot, argValue("--decks", path.join(repoRoot, "docs", "decks")));
 const deckViewersDir = path.resolve(
   repoRoot,
-  argValue("--deck-viewers", path.join(siteDir, "src", "public", "deck-viewers")),
+  argValue("--deck-viewers", path.join(runtimeSiteDir, "src", "public", "deck-viewers")),
 );
 
 const requirePromoMedia = process.argv.includes("--require-promo-media");

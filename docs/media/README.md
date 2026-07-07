@@ -7,12 +7,12 @@ Kitsoki has two long-lived media families:
 - **Slidey decks with embedded clips**: Slidey JSON decks that may embed rrweb
   captures as replayable video scenes.
 
-Generated media belongs in `.artifacts/` or in gitignored staging directories.
-Committed media should be a source artifact: a catalog entry, a recording spec,
-an rrweb clip intentionally embedded by a deck, a small static image that a
-deck/site needs to render, or a self-contained Slidey HTML bundle under
-`docs/decks/bundled/` that the static product site serves without running the
-Slidey CLI.
+Generated media belongs in `.artifacts/` or the `.temp/site` VitePress
+workspace. Committed media should be a source artifact: a catalog entry, a
+recording spec, an rrweb clip intentionally embedded by a deck, a small static
+image that a deck/site needs to render, or a self-contained Slidey HTML bundle
+under `docs/decks/bundled/` that the static product site serves without running
+the Slidey CLI.
 
 ## Product Demo Videos
 
@@ -30,9 +30,9 @@ Generated outputs:
 - `.artifacts/<demo>/` contains the canonical `<videoBase>.mp4`, the
   `<videoBase>.mp4.chapters.json` sidecar, and numbered `NN-<stepId>.png`
   screenshots.
-- `tools/site/src/public/media/<feature>/` is staged from `.artifacts/` by the
-  site build. It is not the source of truth.
-- `tools/site/.vitepress/dist/media/<feature>/` is built site output.
+- `.temp/site/src/public/media/<feature>/` is staged from `.artifacts/` by
+  `make site` / `make site-dev`. It is not the source of truth.
+- `.temp/site/dist/media/<feature>/` is built site output.
 
 Commands:
 
@@ -92,7 +92,7 @@ Use this rule:
   `stories/<story>/baked/`, not in `docs/decks/`.
 
 `tools/site/scripts/stage-media.mjs` stages committed bundles to
-`tools/site/src/public/deck-viewers/` for the full site build. The embedded
+`.temp/site/src/public/deck-viewers/` for the full site build. The embedded
 binary help variant skips them like it skips MP4s.
 
 ### Deck embeds on the product site (`demo.embed`)
@@ -107,8 +107,9 @@ embedded deck clip instead of a video:
   the scene index from the deck (never authored by hand) and emits
   `demo.embed.{deckHtml,sceneIndex}` into the features index.
 - The committed `docs/decks/bundled/<deck-id>.html` is staged verbatim to
-  `tools/site/src/public/deck-viewers/` (shared — several features can embed different
-  scenes of one deck) and the page renders it in an iframe at `?scene=N`.
+  `.temp/site/src/public/deck-viewers/` (shared — several features can embed
+  different scenes of one deck) and the page renders it in an iframe at
+  `?scene=N`.
 - `make features-check` validates the binding (deck exists, rrweb scene
   resolves, bundled html present); `make media-check` re-checks the index side.
   The embedded (binary `/help/`) variant excludes deck bundles like it excludes

@@ -111,8 +111,9 @@ internal/oracle/server/cache/*
 !internal/oracle/server/cache/.gitkeep
 bin/
 
-# Promo site / help docs (tools/site) — staged docs/media and build outputs are
-# derived (from docs/, features/, and .artifacts/ recordings); never committed.
+# Promo site / help docs — Make targets stage and build under .temp/site. These
+# legacy in-tree outputs are ignored so older local checkouts do not become
+# noisy, but new tooling must not write generated site output under tools/site.
 tools/site/node_modules/
 tools/site/.vitepress/gen/
 tools/site/.vitepress/dist/

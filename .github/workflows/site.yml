@@ -149,7 +149,7 @@ jobs:
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: tools/site/.vitepress/dist
+          path: .temp/site/dist
 
   deploy:
     needs: build
