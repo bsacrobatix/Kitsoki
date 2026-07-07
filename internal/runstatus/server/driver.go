@@ -104,6 +104,14 @@ type Driver interface {
 	RecordRoutingFeedback(ctx context.Context, statePath, intent, phrase, tier string, verdict orchestrator.RoutingFeedbackVerdict) error
 }
 
+// OperationDriver is an optional live-session extension for driving an
+// operation handle until it reaches a terminal/waiting checkpoint or there is no
+// safe autonomous next action. Kept off the core Driver interface so read-only
+// and white-box test drivers do not need to implement operation machinery.
+type OperationDriver interface {
+	DriveOperation(ctx context.Context) (*orchestrator.OperationDriveOutcome, error)
+}
+
 // WorkLister is an optional read-only extension for Drivers that can expose the
 // session's current async work queue. The web server type-asserts it for the
 // runstatus.work.list RPC; read-only or test drivers without a JobStore can
@@ -286,6 +294,10 @@ func (d OrchestratorDriver) SubmitDirect(ctx context.Context, intent string, slo
 
 func (d OrchestratorDriver) ContinueTurn(ctx context.Context, slots map[string]any) (*orchestrator.TurnOutcome, error) {
 	return d.Orch.ContinueTurn(ctx, d.SID, slots)
+}
+
+func (d OrchestratorDriver) DriveOperation(ctx context.Context) (*orchestrator.OperationDriveOutcome, error) {
+	return d.Orch.DriveOperation(ctx, d.SID)
 }
 
 func (d OrchestratorDriver) AskOffPath(ctx context.Context, input string) (string, error) {

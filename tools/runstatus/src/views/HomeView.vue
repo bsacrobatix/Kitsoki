@@ -248,6 +248,16 @@
             <td class="home__row-turns" data-testid="session-turns">{{ s.turn != null ? s.turn : '—' }}</td>
             <td class="home__row-duration" data-testid="session-duration">—</td>
             <td class="home__row-actions">
+              <button
+                v-if="canDriveOperation(s)"
+                class="home__link home__link--button"
+                type="button"
+                data-testid="session-drive-operation"
+                :disabled="drivingSession === s.session_id"
+                @click="onDriveOperation(s)"
+              >
+                {{ drivingSession === s.session_id ? "Driving" : "Drive" }}
+              </button>
               <router-link
                 class="home__link"
                 data-testid="session-open"
@@ -310,6 +320,7 @@ const sessionsError = ref<string | null>(null);
 const startingPath = ref<string | null>(null);
 const startError = ref<string | null>(null);
 const startErrorPath = ref<string | null>(null);
+const drivingSession = ref<string | null>(null);
 
 // ── Session table: filter + sort ─────────────────────────────────────────────
 type SessionFilterMode = "all" | "active" | "terminal";
@@ -480,6 +491,20 @@ async function onSetupWarningAction(warning: SetupWarning): Promise<void> {
   await onNewSession(story);
 }
 
+async function onDriveOperation(s: SessionHeader): Promise<void> {
+  if (!canDriveOperation(s) || drivingSession.value !== null) return;
+  drivingSession.value = s.session_id;
+  sessionsError.value = null;
+  try {
+    await source.driveOperation(s.session_id);
+    await loadSessions();
+  } catch (e) {
+    sessionsError.value = errMsg(e);
+  } finally {
+    drivingSession.value = null;
+  }
+}
+
 // Getting-started CTA on the stories-empty branch: replay the onboarding tour
 // so a first-time developer has a next step instead of a dead end. Resolved
 // lazily (not at setup) so the store is only required when the empty state is
@@ -538,6 +563,15 @@ function operationStatusLabel(s: SessionHeader): string {
 function operationStatusClass(s: SessionHeader): string {
   const status = s.operation_run?.status || "running";
   return `home__operation-status--${status.replace(/[^a-z0-9_-]/gi, "-")}`;
+}
+
+function canDriveOperation(s: SessionHeader): boolean {
+  const run = s.operation_run;
+  if (!run) return false;
+  return (
+    !s.terminal &&
+    (run.status === "" || run.status === undefined || run.status === "running")
+  );
 }
 
 function operationDetail(s: SessionHeader): string {
@@ -987,7 +1021,10 @@ function errMsg(e: unknown): string {
 }
 
 .home__row-actions {
-  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
   white-space: nowrap;
 }
 
@@ -996,6 +1033,20 @@ function errMsg(e: unknown): string {
   text-decoration: none;
   font-size: 0.8rem;
   font-weight: 600;
+}
+
+.home__link--button {
+  appearance: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+
+.home__link--button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .home__link:hover {

@@ -18,6 +18,7 @@ const listStories = vi.fn<[], Promise<StoryHeader[]>>();
 const rescanStories = vi.fn<[], Promise<StoryHeader[]>>();
 const newSession = vi.fn<[string], Promise<string>>();
 const listSessions = vi.fn<[], Promise<SessionHeader[]>>();
+const driveOperation = vi.fn<[string], Promise<unknown>>();
 const setupStatus = vi.fn<[], Promise<{
   warnings: Array<{
     id: string;
@@ -36,6 +37,7 @@ vi.mock("../../src/data/live-source.js", () => ({
     rescanStories,
     newSession,
     listSessions,
+    driveOperation,
     setupStatus,
   })),
 }));
@@ -92,6 +94,7 @@ describe("HomeView", () => {
     rescanStories.mockReset();
     newSession.mockReset();
     listSessions.mockReset();
+    driveOperation.mockReset();
     setupStatus.mockReset();
     push.mockReset();
     replace.mockReset();
@@ -268,6 +271,66 @@ describe("HomeView", () => {
       "Regression gate was never RED."
     );
     expect(operations[1].text()).toBe("—");
+    wrapper.unmount();
+  });
+
+  it("drives a running operation from the session row and refreshes sessions", async () => {
+    markAutoNavDone();
+    const running = session({
+      session_id: "sess-running",
+      operation_run: {
+        operation_id: "bugfix_full",
+        title: "Fix bug",
+        status: "running",
+        run_in_background: true,
+      },
+    });
+    const completed = session({
+      session_id: "sess-running",
+      terminal: true,
+      operation_run: {
+        operation_id: "bugfix_full",
+        title: "Fix bug",
+        status: "completed",
+        terminal_state: "__exit__direct-ship",
+      },
+    });
+    listSessions.mockResolvedValueOnce([running]).mockResolvedValueOnce([completed]);
+    driveOperation.mockResolvedValue({
+      mode: "transitioned",
+      state: "__exit__direct-ship",
+      turn_number: 4,
+    });
+
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    await wrapper.find("[data-testid='session-drive-operation']").trigger("click");
+    await flushPromises();
+
+    expect(driveOperation).toHaveBeenCalledWith("sess-running");
+    expect(listSessions).toHaveBeenCalledTimes(2);
+    expect(wrapper.find("[data-testid='session-operation-status']").text()).toBe("completed");
+    expect(wrapper.find("[data-testid='session-drive-operation']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("does not show Drive for waiting operations", async () => {
+    markAutoNavDone();
+    listSessions.mockResolvedValue([
+      session({
+        session_id: "sess-waiting",
+        operation_run: {
+          operation_id: "bugfix_full",
+          title: "Fix bug",
+          status: "waiting",
+        },
+      }),
+    ]);
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='session-drive-operation']").exists()).toBe(false);
     wrapper.unmount();
   });
 
