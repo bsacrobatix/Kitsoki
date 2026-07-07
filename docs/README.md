@@ -11,7 +11,7 @@ For the elevator pitch and user quickstart, see the top-level
 |---|---|
 | Deciding whether Kitsoki is worth it | [`evaluate-kitsoki.md`](evaluate-kitsoki.md) -> [`architecture/concept.md`](architecture/concept.md) -> [`case-studies/bug-fix.md`](case-studies/bug-fix.md) -> [`case-studies/bugfix-bakeoff.md`](case-studies/bugfix-bakeoff.md) |
 | Using Kitsoki in your own project | [`getting-started.md`](getting-started.md) -> [`workflows/`](workflows/README.md) |
-| Writing a story | [`stories/architecture.md`](stories/architecture.md) -> [`recipes/`](recipes/README.md) -> [`stories/authoring.md`](stories/authoring.md) -> [`embedded/app-schema.md`](embedded/app-schema.md) |
+| Writing a story | [`stories/architecture.md`](stories/architecture.md) -> [`stories/authoring.md`](stories/authoring.md) -> [`tracing/testing.md`](tracing/testing.md) -> [`recipes/`](recipes/README.md) -> [`embedded/app-schema.md`](embedded/app-schema.md) |
 | Contributing to Kitsoki | [`contributor-setup.md`](contributor-setup.md) (developer environment setup, including Playwright/Chromium visual QA deps) -> [`../CONTRIBUTING.md`](../CONTRIBUTING.md) -> [`architecture/developer-guide.md`](architecture/developer-guide.md) |
 | Debugging a session | [`tracing/README.md`](tracing/README.md) -> [`tracing/testing.md`](tracing/testing.md) -> [`tracing/trace-format.md`](tracing/trace-format.md) |
 | Working on UI | [`web/README.md`](web/README.md) or [`tui/README.md`](tui/README.md) -> [`tui/rendering-tests.md`](tui/rendering-tests.md) |
@@ -50,13 +50,6 @@ from it. This section covers the trace format, the two test modes,
 host cassettes, the `kitsoki turn` probe, and how to replay and debug
 a session. *Audience: anyone testing, debugging, or developing a story.*
 
-### 🖥 [`tui/`](tui/README.md) — the terminal UI
-
-The single-pane chat TUI: the block rendering pipeline, typed
-view-elements + pongo2, the `/command` surface, engine-event observers,
-and how to write TUI rendering regression tests. *Audience: contributors
-working on the UI; authors wanting to understand how their views render.*
-
 ### 🧑‍🍳 [`recipes/`](recipes/README.md) — copy-paste patterns
 
 Short, task-oriented recipes for common authoring patterns: add an
@@ -65,8 +58,14 @@ form, write a flow test, run a background job. Each links back to the
 reference docs. *Audience: authors who know what they want to do and
 want the shortest correct path.*
 
-This is usually the best second stop for story authors after
-[`stories/architecture.md`](stories/architecture.md).
+Use recipes after the authoring model and test/replay loop are clear.
+
+### 🖥 [`tui/`](tui/README.md) — the terminal UI
+
+The single-pane chat TUI: the block rendering pipeline, typed
+view-elements + pongo2, the `/command` surface, engine-event observers,
+and how to write TUI rendering regression tests. *Audience: contributors
+working on the UI; authors wanting to understand how their views render.*
 
 ---
 

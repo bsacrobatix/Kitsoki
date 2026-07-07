@@ -86,16 +86,16 @@
       ]
     },
     {
-      "title": "Recipes",
-      "items": [
-        { "from": "docs/recipes/*.md", "to": "guide/recipes/" }
-      ]
-    },
-    {
       "title": "Testing and replay",
       "items": [
         { "from": "docs/tracing/*.md", "to": "guide/tracing/" },
         { "from": "docs/testing/*.md", "to": "guide/testing/" }
+      ]
+    },
+    {
+      "title": "Recipes",
+      "items": [
+        { "from": "docs/recipes/*.md", "to": "guide/recipes/" }
       ]
     },
     {
