@@ -45,6 +45,7 @@ host_handlers:
 
   host.append_to_file: { data: { ok: true, message_id: "msg-1" } }
   host.inbox.add:       { data: { ok: true, id: "ib-1" } }
+  host.artifacts_dir:   { data: { ok: true, path: ".artifacts/implementation-flow-artifact.md", message_id: "artifact-1" } }
 
   # handoff room's lost-work clean-tree check.
   host.run:
@@ -111,38 +112,26 @@ host_handlers:
 turns:
   # No structured initial_world at all — ticket_id starts empty. The NL
   # extraction intent seeds it and forces idle.on_enter to re-run for real,
-  # landing straight in review_task_executing with no explicit `start`.
+  # landing at the task-summary checkpoint with no explicit `start`.
   - intent:
       name: work_ticket
       slots:
         ticket_id:    "TKT-NL-900"
         ticket_title: "Add a health endpoint"
-    expect_state: review_task_executing
+    expect_state: review_task_awaiting_reply
     expect_not_state: idle
     expect_world:
       ticket_id:                 "TKT-NL-900"
       impl_provision_attempted:  true
       thread:                    "issues/tasks/TKT-NL-900.md"
 
-  - intent: { name: proceed, slots: {} }
-    expect_state: review_task_awaiting_reply
-
   - intent: { name: accept, slots: {} }
-    expect_state: write_code_executing
-
-  - intent: { name: proceed, slots: {} }
     expect_state: write_code_awaiting_reply
 
   - intent: { name: accept, slots: {} }
-    expect_state: test_executing
-
-  - intent: { name: proceed, slots: {} }
     expect_state: test_awaiting_reply
 
   - intent: { name: accept, slots: {} }
-    expect_state: review_executing
-
-  - intent: { name: proceed, slots: {} }
     expect_state: review_awaiting_reply
 
   - intent: { name: accept, slots: {} }

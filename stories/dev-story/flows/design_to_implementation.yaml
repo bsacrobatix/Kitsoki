@@ -49,6 +49,8 @@ host_handlers:
     data: { ok: true, message_id: "msg-1" }
   host.inbox.add:
     data: { ok: true, id: "ib-1" }
+  host.artifacts_dir:
+    data: { ok: true, path: ".artifacts/implementation-flow-artifact.md", message_id: "artifact-1" }
   host.git:
     data:
       ok:       true
@@ -104,14 +106,14 @@ host_handlers:
 
 turns:
   # The done room's `implement` action → go_implementation →
-  # impl.review_task_executing. impl.idle auto-starts when a ticket is already
+  # impl.review_task_awaiting_reply. impl.idle auto-starts when a ticket is already
   # projected, so workspace provisioning and ticket fetch happen in one turn.
   # world_in: projects the proposal's ticket keys into impl__<key>, then
   # impl.idle.on_enter derives the workspace identity from the ticket and
   # creates the worktree — so impl__workdir / impl__workspace_id /
   # impl__feature_branch are PROVISIONED here, not seeded.
   - intent: { name: go_implementation, slots: {} }
-    expect_state: impl.review_task_executing
+    expect_state: impl.review_task_awaiting_reply
     expect_world:
       impl__ticket_id:      "F-2026-06-11T120000Z-per-session-working-folder"
       impl__ticket_url:     "docs/proposals/per-session-working-folder.md"
@@ -120,19 +122,11 @@ turns:
       impl__workdir:        ".worktrees/impl-F-2026-06-11T120000Z-per-session-working-folder-flowsess"
       impl__impl_provision_attempted: true
 
-  - intent: { name: impl__proceed, slots: {} }
-    expect_state: impl.review_task_awaiting_reply
   - intent: { name: impl__accept, slots: {} }
-    expect_state: impl.write_code_executing
-  - intent: { name: impl__proceed, slots: {} }
     expect_state: impl.write_code_awaiting_reply
   - intent: { name: impl__accept, slots: {} }
-    expect_state: impl.test_executing
-  - intent: { name: impl__proceed, slots: {} }
     expect_state: impl.test_awaiting_reply
   - intent: { name: impl__accept, slots: {} }
-    expect_state: impl.review_executing
-  - intent: { name: impl__proceed, slots: {} }
     expect_state: impl.review_awaiting_reply
   - intent: { name: impl__accept, slots: {} }
     expect_state: impl.handoff
