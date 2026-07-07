@@ -89,7 +89,7 @@ func slashCommandCatalogue(m RootModel) []SlashCommandSpec {
 		{Name: "/model", Usage: "/model [<id|n>]", Description: "list or switch model"},
 		{Name: "/effort", Usage: "/effort [<level|n>]", Description: "list or switch reasoning effort"},
 		{Name: "/inbox", Usage: "/inbox [<n>]", Description: "show notifications"},
-		{Name: "/work", Usage: "/work [--all|drive|artifact]", Description: "show active async work, drive an operation, or open its artifact"},
+		{Name: "/work", Usage: "/work [--all|drive|artifact|summary]", Description: "show active async work, drive an operation, open its artifact, or show its summary"},
 		{Name: "/workflow", Usage: "/workflow <cmd>", Description: "create, validate, run, status, or export workflows"},
 		{Name: "/sessions", Usage: "/sessions attach <n>", Description: "attach or inspect meta sessions"},
 		{Name: "/trace", Description: "show the last turn routing trace"},

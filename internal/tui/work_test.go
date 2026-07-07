@@ -315,6 +315,7 @@ func TestWorkSlashListsCurrentOperation(t *testing.T) {
 	require.Contains(t, work, "Fix bug")
 	require.Contains(t, work, "reason needs-human")
 	require.Contains(t, work, "Regression gate was never RED.")
+	require.Contains(t, work, "/work summary")
 }
 
 func TestWorkDriveSlashDrivesCurrentOperation(t *testing.T) {
@@ -428,6 +429,7 @@ states:
 	require.Contains(t, work, "running")
 	require.Contains(t, work, "Demo run")
 	require.Contains(t, work, "/work drive")
+	require.Contains(t, work, "/work summary")
 
 	model = runTurnBlocking(t, model, "/work drive")
 	tx = extractTranscript(t, model)
@@ -448,6 +450,18 @@ states:
 	require.Contains(t, work, "completed")
 	require.Contains(t, work, "artifact done_artifact")
 	require.Contains(t, work, "/work artifact")
+	require.Contains(t, work, "/work summary")
+
+	model = runTurnBlocking(t, model, "/work summary")
+	tx = extractTranscript(t, model)
+	summary := transcriptAfter(t, tx, "operation summary")
+	require.Contains(t, summary, "title: Demo run")
+	require.Contains(t, summary, "status: completed")
+	require.Contains(t, summary, "mode: autonomous")
+	require.Contains(t, summary, "execution: one-shot")
+	require.Contains(t, summary, "terminal: done")
+	require.Contains(t, summary, "artifact: done_artifact")
+	require.Contains(t, summary, "actions: /work artifact")
 
 	model = runTurnBlocking(t, model, "/work artifact")
 	tx = extractTranscript(t, model)

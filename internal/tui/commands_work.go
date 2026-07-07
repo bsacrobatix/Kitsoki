@@ -33,6 +33,8 @@ func handleWorkSlash(m RootModel, args []string) (RootModel, string, tea.Cmd) {
 			return handleWorkDriveSlash(m)
 		case "artifact", "open":
 			return handleWorkArtifactSlash(m)
+		case "summary":
+			return handleWorkSummarySlash(m)
 		}
 	}
 	next, block := renderWorkBlock(m, args)
@@ -253,6 +255,62 @@ func operationArtifactPathFromJournal(m RootModel, artifact string) string {
 	return ""
 }
 
+func handleWorkSummarySlash(m RootModel) (RootModel, string, tea.Cmd) {
+	r := blocks.New(m.transcript.width, m.currentTheme())
+	if m.orch == nil {
+		return m, r.SlashOutput("(work summary: no live session attached)"), nil
+	}
+	handle, ok := operationRunHandle(m.orch.CurrentWorld(m.sid).Vars[app.OperationRunWorldKey])
+	if !ok {
+		return m, r.SlashOutput("(work summary: no operation in this session)"), nil
+	}
+	return m, operationRunSummaryBlock(r, handle), nil
+}
+
+func operationRunSummaryBlock(r *blocks.Renderer, handle map[string]any) string {
+	status := operationRunString(handle, "status")
+	if status == "" {
+		status = "running"
+	}
+	lines := []string{
+		"  operation summary",
+		"  title: " + operationRunTitle(handle),
+		"  status: " + status,
+	}
+	add := func(label, value string) {
+		if value != "" {
+			lines = append(lines, "  "+label+": "+value)
+		}
+	}
+	add("operation", operationRunString(handle, "operation_id"))
+	add("policy", operationRunString(handle, "policy_id"))
+	add("mode", operationRunString(handle, "mode"))
+	add("execution", operationRunString(handle, "execution_mode"))
+	if phase := operationRunDisplayPhase(handle); phase != "" {
+		add("phase", phase)
+	}
+	if from, to := operationRunString(handle, "from"), operationRunString(handle, "to"); from != "" && to != "" {
+		add("route", from+" -> "+to)
+	}
+	add("intent", operationRunString(handle, "entry_intent"))
+	add("terminal", operationRunString(handle, "terminal_state"))
+	add("artifact", operationRunString(handle, "terminal_artifact"))
+	add("stop reason", operationRunString(handle, "stop_reason"))
+	add("stop detail", operationRunString(handle, "stop_detail"))
+
+	var actions []string
+	if status == "running" {
+		actions = append(actions, "/work drive")
+	}
+	if operationRunString(handle, "terminal_artifact") != "" {
+		actions = append(actions, "/work artifact")
+	}
+	if len(actions) > 0 {
+		add("actions", strings.Join(actions, ", "))
+	}
+	return r.SlashOutput(strings.Join(lines, "\n"))
+}
+
 func workRowsForCurrentOperation(m RootModel) []workRow {
 	if m.orch == nil {
 		return nil
@@ -298,6 +356,7 @@ func operationRunWorkHint(handle map[string]any, status string) string {
 		if detail := operationRunString(handle, "stop_detail"); detail != "" {
 			parts = append(parts, detail)
 		}
+		parts = append(parts, "/work summary")
 	case "completed":
 		if terminal := operationRunString(handle, "terminal_state"); terminal != "" {
 			parts = append(parts, "terminal "+terminal)
@@ -306,11 +365,13 @@ func operationRunWorkHint(handle map[string]any, status string) string {
 			parts = append(parts, "artifact "+artifact)
 			parts = append(parts, "/work artifact")
 		}
+		parts = append(parts, "/work summary")
 	case "running":
 		parts = appendOperationProgressHint(parts, handle)
-		parts = append(parts, "/work drive")
+		parts = append(parts, "/work drive", "/work summary")
 	default:
 		parts = appendOperationProgressHint(parts, handle)
+		parts = append(parts, "/work summary")
 	}
 	if len(parts) == 0 {
 		return "current session"
