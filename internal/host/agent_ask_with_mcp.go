@@ -28,6 +28,7 @@ import (
 
 	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/render/sourcecolor"
+	"kitsoki/internal/storyauthoring"
 	"kitsoki/internal/sysprompt"
 )
 
@@ -190,7 +191,10 @@ func parseValidatorOptions(args map[string]any) (validatorOptions, string) {
 // will write each successful submit's payload to that file (atomic, last-call wins)
 // so the parent can recover the canonical JSON.
 func buildValidatorMCPServer(ctx context.Context, schemaPath, outputPath string, opts validatorOptions) (map[string]any, error) {
-	resolved := resolvePromptPathCtx(ctx, schemaPath)
+	resolved, err := resolveValidatorSchemaPath(ctx, schemaPath)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := os.Stat(resolved); err != nil {
 		return nil, fmt.Errorf("schema %q not found: %w", resolved, err)
 	}
@@ -227,6 +231,13 @@ func buildValidatorMCPServer(ctx context.Context, schemaPath, outputPath string,
 		"command": bin,
 		"args":    cliArgs,
 	}, nil
+}
+
+func resolveValidatorSchemaPath(ctx context.Context, schemaPath string) (string, error) {
+	if resolved, ok, err := storyauthoring.ResolveSchemaPath(schemaPath); ok || err != nil {
+		return resolved, err
+	}
+	return resolvePromptPathCtx(ctx, schemaPath), nil
 }
 
 // AgentAskWithMCPHandler is no longer a registered verb (Phase 9 unregistered

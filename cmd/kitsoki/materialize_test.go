@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/storyauthoring"
 )
 
 // repoRoot resolves the kitsoki worktree root so @kitsoki/dev-story resolves and
@@ -52,10 +53,22 @@ func normalize(def *app.AppDef) {
 	def.LoadedManifests = nil
 	def.ImportWrappers = nil
 	def.App = app.AppMeta{}
+	normalizeStoryAuthoringPaths(def)
 	// Hosts is the allow-list — semantically a set. The import fold unions
 	// handler names via map iteration, so its slice order is nondeterministic;
 	// sort before comparing so the round-trip asserts set-equality, not order.
 	sort.Strings(def.Hosts)
+}
+
+func normalizeStoryAuthoringPaths(def *app.AppDef) {
+	if def == nil || def.States == nil {
+		return
+	}
+	s := def.States[storyauthoring.RoomState]
+	if s == nil || len(s.OnEnter) == 0 || s.OnEnter[0].With == nil {
+		return
+	}
+	s.OnEnter[0].With["working_dir"] = "<story-dir>"
 }
 
 func TestMaterializeRoundTrip(t *testing.T) {

@@ -213,6 +213,8 @@ func runLoadPipeline(merged *AppDef, path, baseDir string, ifaceOverrides map[st
 		return nil, errors.Join(ifaceErrs...)
 	}
 
+	injectBuiltinStoryAuthoringRoom(merged, path, baseDir)
+
 	// Rewrite any remaining @exit:<name> targets in the top-level app. For
 	// the root manifest these are terminal sentinels — the app is loaded
 	// standalone, so an exit means "stop here." We synthesise a terminal
@@ -952,6 +954,8 @@ func loadAndValidate(b []byte, file string) (*AppDef, []error) {
 	if captureErrs := expandOffRampCaptures(&def, file); len(captureErrs) > 0 {
 		return nil, captureErrs
 	}
+
+	injectBuiltinStoryAuthoringRoom(&def, file, "")
 
 	// LoadBytes skips parseAndMerge/runLoadPipeline, so inject builtin
 	// meta_modes here before validation. Same rationale as the Load() path.
@@ -2208,11 +2212,12 @@ func roomDispatchedAgents(s *State) []string {
 }
 
 // validateAgentRef checks that, when a host.agent.* effect declares
-// `with: { agent: <name> }`, the name resolves to an entry in
-// AppDef.Agents. Effects that omit `agent:` (or whose Invoke is not a
-// host.agent.* handler) are silently ignored — agent: is host-handler-
-// specific metadata, not a global field. Templated values (containing
-// "{{") are skipped because they cannot be resolved statically.
+// `with: { agent: <name> }`, the name resolves to an entry in AppDef.Agents.
+// Task-style handlers may also name builtin agents because they run through
+// the same registry meta modes use. Effects that omit `agent:` (or whose
+// Invoke is not a host.agent.* handler) are silently ignored — agent: is
+// host-handler-specific metadata, not a global field. Templated values
+// (containing "{{") are skipped because they cannot be resolved statically.
 func validateAgentRef(file, location string, eff Effect, declaredAgents map[string]struct{}, errs *[]error) {
 	if eff.With == nil {
 		return
@@ -2239,11 +2244,27 @@ func validateAgentRef(file, location string, eff Effect, declaredAgents map[stri
 		return
 	}
 	if _, found := declaredAgents[name]; !found {
+		if hostAgentInvokeAllowsBuiltin(eff.Invoke) && isBuiltinAgentName(name) {
+			return
+		}
 		*errs = append(*errs, &ValidationError{
 			File:    file,
-			Message: fmt.Sprintf("%s: with.agent %q is not declared in agents", location, name),
+			Message: fmt.Sprintf("%s: with.agent %q is not declared in agents or builtin agents", location, name),
 		})
 	}
+}
+
+func hostAgentInvokeAllowsBuiltin(invoke string) bool {
+	return invoke == "host.agent.task" || invoke == "host.agent.converse"
+}
+
+func isBuiltinAgentName(name string) bool {
+	for _, builtin := range agents.BuiltinNames() {
+		if name == builtin {
+			return true
+		}
+	}
+	return false
 }
 
 // agentMutationTools is the set of tools that are forbidden for

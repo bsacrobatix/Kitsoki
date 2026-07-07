@@ -13,6 +13,7 @@ import (
 
 	"kitsoki/internal/app"
 	starlarkhost "kitsoki/internal/host/starlark"
+	"kitsoki/internal/storyauthoring"
 )
 
 // FlowCoverageOptions configures static flow fixture coverage analysis.
@@ -378,6 +379,9 @@ func collectFlowBranches(def *app.AppDef) []FlowBranchCoverage {
 	var out []FlowBranchCoverage
 	walkStates("", def.States, func(path string, st *app.State) {
 		for intentName, transitions := range st.On {
+			if isBuiltinStoryAuthoringCoverageSite(path, intentName) {
+				continue
+			}
 			for idx, tr := range transitions {
 				target := normalizeTarget(path, tr.Target)
 				id := branchID(path, intentName, idx)
@@ -399,8 +403,13 @@ func collectFlowBranches(def *app.AppDef) []FlowBranchCoverage {
 func collectFlowEffects(def *app.AppDef) []FlowEffectCoverage {
 	var out []FlowEffectCoverage
 	walkStates("", def.States, func(path string, st *app.State) {
-		out = append(out, collectEffectSites(path, "on_enter", "", 0, st.OnEnter, "on_enter")...)
+		if path != storyauthoring.RoomState {
+			out = append(out, collectEffectSites(path, "on_enter", "", 0, st.OnEnter, "on_enter")...)
+		}
 		for intentName, transitions := range st.On {
+			if isBuiltinStoryAuthoringCoverageSite(path, intentName) {
+				continue
+			}
 			for branchIdx, tr := range transitions {
 				origin := fmt.Sprintf("%s#%s[%d]", path, intentName, branchIdx)
 				out = append(out, collectEffectSites(path, "transition", intentName, branchIdx, tr.Effects, origin)...)
@@ -408,6 +417,10 @@ func collectFlowEffects(def *app.AppDef) []FlowEffectCoverage {
 		}
 	})
 	return out
+}
+
+func isBuiltinStoryAuthoringCoverageSite(state, intentName string) bool {
+	return storyauthoring.IsFrameworkTransition(state, intentName)
 }
 
 func collectEffectSites(state, originKind, intent string, branchIdx int, effects []app.Effect, origin string) []FlowEffectCoverage {

@@ -385,11 +385,7 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 	// All work below happens AFTER unlock — observers may re-enter the
 	// orchestrator.
 	if postJourney, jerr := o.loadJourney(sid); jerr == nil {
-		newAllowed := o.machine.AllowedIntents(postJourney.State, postJourney.World)
-		allowedNames := make([]string, len(newAllowed))
-		for i, ai := range newAllowed {
-			allowedNames[i] = ai.Name
-		}
+		allowedNames := allowedNamesFromMachine(o.machine, postJourney.State, postJourney.World)
 		view, rerr := o.machine.RenderState(postJourney.State, postJourney.World)
 		if rerr != nil {
 			// Non-fatal: still surface the outcome with whatever view we have.

@@ -174,7 +174,36 @@ agents:
     tools: [host.authoring.propose, host.authoring.apply]
 ```
 
-### 3.1 Other builtins
+### 3.1 Explicit story-authoring room
+
+Every loaded story also gets an explicit on-path `story_authoring`
+room unless it already declares one. The loader injects the room, the
+global `author_story` intent, and entry arcs from every non-terminal
+state. This gives operators a typed on-path command for quick story
+changes without needing to enter the `/meta story edit` overlay. The
+entry intent is hidden from default action menus so it does not change
+ordinary story branch choices or staged-gate behavior.
+
+The injected entry arc records the caller in
+`world.story_authoring_return_state`, stores the optional
+`author_story.proposal` slot in `world.story_authoring_request`, and
+targets `story_authoring`. Inside the room, free text routes through
+`story_authoring_capture`, which dispatches the built-in
+`story-author` via `host.agent.task` and binds the accepted submit
+payload to `world.story_authoring_note`. `return_to_story` returns to
+the saved state path; `clear_story_authoring` clears the current
+proposal and result.
+
+The room runs with `write_mode: read_only`, so the story author can
+draft edits while mutating tools still go through the normal operator
+write-mode grant. The task acceptance schema is a built-in schema
+reference; stories do not need to carry a generated schema file just
+to use the default room. Declaration wins: if a story declares
+`story_authoring`, `author_story`, or any of the supporting names
+itself, the loader preserves that authored definition and only fills
+missing pieces around it.
+
+### 3.2 Other builtins
 
 Three more agents ship pre-registered alongside `story-author`:
 

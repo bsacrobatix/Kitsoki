@@ -10,6 +10,7 @@ import (
 	goyaml "github.com/goccy/go-yaml"
 
 	"kitsoki/internal/kit"
+	"kitsoki/internal/storyauthoring"
 )
 
 // syntheticKitDir resolves the in-tree synthetic-kit fixture used to exercise
@@ -183,5 +184,24 @@ func normalizeKitDef(def *AppDef) {
 	def.LoadedManifests = nil
 	def.ImportWrappers = nil
 	def.App = AppMeta{}
+	normalizeStoryAuthoringPaths(def)
 	sort.Strings(def.Hosts)
+}
+
+func normalizeStoryAuthoringPaths(def *AppDef) {
+	if def == nil || def.States == nil {
+		return
+	}
+	s := def.States[storyauthoring.RoomState]
+	if s == nil || len(s.OnEnter) == 0 || s.OnEnter[0].With == nil {
+		return
+	}
+	s.OnEnter[0].With["working_dir"] = "<story-dir>"
+	ctx, _ := s.OnEnter[0].With["context"].(map[string]any)
+	args, _ := ctx["args"].(map[string]any)
+	if args == nil {
+		return
+	}
+	args["story_dir"] = "<story-dir>"
+	args["app_file"] = "<app-file>"
 }
