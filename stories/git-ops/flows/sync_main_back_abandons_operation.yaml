@@ -68,4 +68,6 @@ turns:
       sync_auto_resolve: false
       sync_result: {}
 
+expect_operation_policy: gitops.sync_main
+expect_operation_status: failed
 expect_no_errors: true

@@ -66,4 +66,6 @@ turns:
               output:   "Integration branch: sync/main-origin-main-20260704T010203Z\nIntegration worktree: /repo/.worktrees/sync-main-origin-main-20260704T010203Z"
               ok:       true
 
+expect_operation_policy: gitops.sync_main
+expect_operation_status: completed
 expect_no_errors: true

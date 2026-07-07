@@ -658,6 +658,14 @@ lifted and referenced under the import alias (`bf__bugfix_full`, for example).
 These rows and the replayable handle are for operation drivers and UI surfaces;
 they do not replace background host jobs.
 
+When a session operation enters a state-local `operation:` overlay with the same
+id, the overlay close-out also stops the session handle: `commit_operation` and
+`persist_draft` complete it at the settled target state, while abandoning the
+overlay marks it failed with the abandon reason. This lets command-room flows
+such as protected-main sync have both operation-local scratch/drafts and a
+visible session-level progress handle without leaving stale running rows after
+the operator accepts, saves, or backs out.
+
 Two scopes live alongside `world`:
 
 - **slots** — the typed bag from the intent that triggered this

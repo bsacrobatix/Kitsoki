@@ -157,6 +157,7 @@ states:
         - target: pull
       sync_main:
         - target: sync_main
+          operation: gitops.sync_main
           effects:
             - set:
                 sync_remote:        "{{ slots.remote ?? 'origin' }}"

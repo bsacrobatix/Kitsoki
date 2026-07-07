@@ -67,6 +67,12 @@ turn. Imported child policies are lifted under the import alias
 (`<alias>__<policy-id>`), and child transition `operation:` refs are rewritten
 to match. State overlays control abandonable task-local world writes.
 
+If a run enters a state-level `operation:` overlay with the same id as the
+active session policy, `commit_operation` and `persist_draft` also complete the
+session run at the settled target state. Leaving that overlay without committing
+or drafting marks the matching session run failed, so UI surfaces do not keep a
+stale running handle for an abandoned command-room operation.
+
 ## `AppMeta`
 
 ```yaml

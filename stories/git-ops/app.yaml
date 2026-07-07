@@ -69,6 +69,17 @@ agents:
     tools: [Read, Grep, Glob, Bash]
     bash_profile: read-only
 
+operations:
+  gitops.sync_main:
+    title: "Sync protected main"
+    mode: supervised
+    execution_mode: one-shot
+    run_in_background: true
+    stop_on: [host-error, policy-denied]
+    pause_on: [operator-ask, protected-branch-approval]
+    phase_summary:
+      from: [sync_result]
+
 world:
   integration_branch:       { type: string, default: "main" }
   current_branch:           { type: string, default: "" }
