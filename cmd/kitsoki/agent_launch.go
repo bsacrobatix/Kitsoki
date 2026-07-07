@@ -1118,7 +1118,7 @@ func resolveLaunchBin(backend string, requireInstalled bool) (string, error) {
 }
 
 func resolveDelegatedLaunchBin(backend, fallback string, delegation *webconfig.AgentUserDelegationConfig, requireInstalled bool) (bin, runAsUser string, err error) {
-	if delegation == nil || !delegation.Enabled || strings.TrimSpace(delegation.RunAsUser) == "" {
+	if !webconfig.AgentUserDelegationRuntimeEnabled || delegation == nil || !delegation.Enabled || strings.TrimSpace(delegation.RunAsUser) == "" {
 		return fallback, "", nil
 	}
 	runAsUser = strings.TrimSpace(delegation.RunAsUser)

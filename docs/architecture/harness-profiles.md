@@ -57,9 +57,9 @@ effective config:
   paths such as protected checkout roots and allowed capsule directories in
   `.kitsoki.local.yaml`.
 - `agent_user_delegation` — replaced **whole** by the local file. It records
-  the local macOS `run_as_user` wrapper setup; an enabled block with
-  `run_as_user` and `wrapper_bin` suppresses the startup warning. It does not
-  select a backend/model.
+  the local macOS `run_as_user` wrapper setup, but runtime delegation is
+  currently disabled: the block is parsed for compatibility, does not affect
+  launch binaries or warnings, and does not select a backend/model.
 
 A missing local file contributes nothing, so a fresh checkout runs off the
 shared baseline alone.
@@ -183,11 +183,9 @@ require an opened [capsule](./capsules.md). See
 [`agent-launch-policy.md`](./agent-launch-policy.md) for the exact semantics and
 trace fields.
 
-On macOS, use `kitsoki run @kitsoki/run-as-user-setup` to apply the matching
-`agent_user_delegation:` receipt block plus backend wrappers, sudoers entry, and
-ACL probes. Launch policy alone is not a filesystem sandbox: it blocks unsafe
-start locations before launch, while `run_as_user` makes the backend process
-run as the delegated local account after launch.
+The macOS `run_as_user` wrapper path is currently disabled. Launch policy alone
+is not a filesystem sandbox: it blocks unsafe start locations before launch,
+but backend processes currently run as the invoking user after launch.
 
 Live TUI and web sessions also install an automatic fallback ladder when no
 explicit `harness_ladder:` is declared. The default priority is:

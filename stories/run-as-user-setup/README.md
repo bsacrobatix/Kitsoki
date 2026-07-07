@@ -1,5 +1,9 @@
 # Run-As-User Setup
 
+Runtime status: `run_as_user` delegation is currently disabled. This story is
+kept for future re-enablement, but Kitsoki now ignores generated wrappers and
+does not show the macOS setup warning while the runtime gate is off.
+
 This no-LLM story applies macOS local-user delegation for coding-agent launches.
 It opens on a small setup control screen. Use `apply` to run the deterministic
 setup with non-interactive sudo; typed `accept` or `ok` input takes the same
@@ -47,16 +51,12 @@ and wrapper smoke tests; the launch-policy rejection command remains printed for
 explicit operator review so the story does not accidentally start an interactive
 backend.
 
-`kitsoki agent launch` consumes the configured `wrapper_bin` directly, records
-`run_as_user` in the launch plan, and no longer needs the wrapper directory
-prepended to `PATH`. The broader `kitsoki run` / `kitsoki web` live agent paths
-still rely on backend CLIs resolving from the operator environment, so keep
-using the wrapper directory on `PATH` for those surfaces.
-
-The macOS setup warning remains visible until `.kitsoki.local.yaml` contains an
-enabled `agent_user_delegation:` block with both `run_as_user` and
-`wrapper_bin`. A `run_as_user` value without wrappers is incomplete because
-Kitsoki cannot delegate the backend CLI launch.
+While runtime delegation is disabled, `kitsoki agent launch` ignores
+`wrapper_bin`, omits `run_as_user` from the launch plan, and uses the normal
+backend binary. The broader `kitsoki run` / `kitsoki web` live agent paths also
+run backend CLIs as the invoking user. Missing or incomplete
+`agent_user_delegation:` config does not show a macOS setup warning while the
+runtime gate is off.
 
 Test it without LLM, sudo, or network:
 

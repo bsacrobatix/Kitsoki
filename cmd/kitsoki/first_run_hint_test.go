@@ -98,11 +98,8 @@ func TestBugFilingAuthStartupNotice(t *testing.T) {
 }
 
 func TestRunAsUserStartupNotice(t *testing.T) {
-	got := runAsUserStartupNotice(webconfig.WebConfig{}, "darwin")
-	for _, want := range []string{"macOS agent delegation is not configured", "@kitsoki/run-as-user-setup", "agent_user_delegation", "filesystem sandbox"} {
-		if !contains(got, want) {
-			t.Fatalf("notice missing %q; notice was:\n%s", want, got)
-		}
+	if got := runAsUserStartupNotice(webconfig.WebConfig{}, "darwin"); got != "" {
+		t.Fatalf("disabled run_as_user should not warn, got:\n%s", got)
 	}
 
 	incomplete := webconfig.WebConfig{
@@ -111,8 +108,8 @@ func TestRunAsUserStartupNotice(t *testing.T) {
 			RunAsUser: "kitsoki-agent",
 		},
 	}
-	if got := runAsUserStartupNotice(incomplete, "darwin"); !contains(got, "missing wrapper_bin") {
-		t.Fatalf("incomplete run_as_user should warn about wrapper_bin, got:\n%s", got)
+	if got := runAsUserStartupNotice(incomplete, "darwin"); got != "" {
+		t.Fatalf("disabled run_as_user should not warn for incomplete config, got:\n%s", got)
 	}
 
 	configured := webconfig.WebConfig{
@@ -123,26 +120,17 @@ func TestRunAsUserStartupNotice(t *testing.T) {
 		},
 	}
 	if got := runAsUserStartupNotice(configured, "darwin"); got != "" {
-		t.Fatalf("configured run_as_user delegation should not warn, got:\n%s", got)
+		t.Fatalf("disabled run_as_user should not warn for configured delegation, got:\n%s", got)
 	}
 	if got := runAsUserStartupNotice(webconfig.WebConfig{}, "linux"); got != "" {
 		t.Fatalf("non-darwin should not warn, got:\n%s", got)
 	}
 }
 
-func TestSetupWarningsFromConfigIncludesRunAsUserStory(t *testing.T) {
+func TestSetupWarningsFromConfigSuppressesRunAsUserWhileDisabled(t *testing.T) {
 	warnings := setupWarningsFromConfig(webconfig.WebConfig{}, "darwin")
-	if len(warnings) != 1 {
-		t.Fatalf("expected one setup warning, got %#v", warnings)
-	}
-	got := warnings[0]
-	if got.ID != "run-as-user" || got.StoryID != "run-as-user-setup" || got.StoryRef != "@kitsoki/run-as-user-setup" {
-		t.Fatalf("unexpected warning identity: %#v", got)
-	}
-	for _, want := range []string{"macOS agent delegation is not configured", "agent_user_delegation", "filesystem sandbox", "kitsoki run @kitsoki/run-as-user-setup"} {
-		if !contains(got.Title+" "+got.Body+" "+got.ActionCommand, want) {
-			t.Fatalf("setup warning missing %q: %#v", want, got)
-		}
+	if len(warnings) != 0 {
+		t.Fatalf("disabled run_as_user should not create setup warnings, got %#v", warnings)
 	}
 
 	incomplete := webconfig.WebConfig{
@@ -151,8 +139,8 @@ func TestSetupWarningsFromConfigIncludesRunAsUserStory(t *testing.T) {
 			RunAsUser: "kitsoki-agent",
 		},
 	}
-	if got := setupWarningsFromConfig(incomplete, "darwin"); len(got) != 1 || !contains(got[0].Body, "missing wrapper_bin") {
-		t.Fatalf("incomplete run_as_user should warn about wrapper_bin, got %#v", got)
+	if got := setupWarningsFromConfig(incomplete, "darwin"); len(got) != 0 {
+		t.Fatalf("disabled run_as_user should suppress incomplete setup warning, got %#v", got)
 	}
 
 	configured := webconfig.WebConfig{
@@ -163,7 +151,7 @@ func TestSetupWarningsFromConfigIncludesRunAsUserStory(t *testing.T) {
 		},
 	}
 	if got := setupWarningsFromConfig(configured, "darwin"); len(got) != 0 {
-		t.Fatalf("configured run_as_user delegation should suppress setup warning, got %#v", got)
+		t.Fatalf("disabled run_as_user should not create configured setup warning, got %#v", got)
 	}
 	if got := setupWarningsFromConfig(webconfig.WebConfig{}, "linux"); len(got) != 0 {
 		t.Fatalf("non-darwin should suppress setup warning, got %#v", got)

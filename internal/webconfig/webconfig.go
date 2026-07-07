@@ -91,10 +91,9 @@ type WebConfig struct {
 	// before a coding-agent CLI is forked.
 	AgentLaunchPolicy *host.AgentLaunchPolicy `yaml:"agent_launch_policy,omitempty"`
 
-	// AgentUserDelegation declares the local OS account/wrapper setup used to
-	// run backend CLIs as a delegated user. kitsoki agent launch consumes the
-	// wrapper path directly; other live agent surfaces still treat the block as
-	// a machine-local setup receipt/startup-warning gate.
+	// AgentUserDelegation declares the local OS account/wrapper setup for
+	// delegated backend CLIs. Runtime delegation is currently gated off, so
+	// Kitsoki only parses this as a machine-local setup receipt.
 	AgentUserDelegation *AgentUserDelegationConfig `yaml:"agent_user_delegation,omitempty"`
 
 	// Mining configures the always-on ambient session miner
@@ -367,6 +366,11 @@ type HarnessLadderModel struct {
 	// Model is the --model value for this rung. Required.
 	Model string `yaml:"model,omitempty"`
 }
+
+// AgentUserDelegationRuntimeEnabled gates OS-user delegation of agent backends.
+// Keep config parsing active while runtime delegation is disabled so existing
+// .kitsoki.local.yaml files keep loading.
+const AgentUserDelegationRuntimeEnabled = false
 
 // AgentUserDelegationConfig is the local receipt for OS-user delegation of
 // coding-agent backend CLIs. It is intentionally machine-local: shared story
@@ -1120,7 +1124,7 @@ func (cfg *WebConfig) resolveAgentUserDelegation(configPath string) error {
 		return nil
 	}
 	d.RunAsUser = strings.TrimSpace(d.RunAsUser)
-	if d.Enabled && d.RunAsUser == "" {
+	if AgentUserDelegationRuntimeEnabled && d.Enabled && d.RunAsUser == "" {
 		return fmt.Errorf("agent_user_delegation.run_as_user is required when enabled is true")
 	}
 	base := filepath.Dir(configPath)

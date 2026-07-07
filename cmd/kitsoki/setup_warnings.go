@@ -17,6 +17,9 @@ func setupWarningsFromConfig(cfg webconfig.WebConfig, goos string) []server.Setu
 }
 
 func runAsUserSetupWarning(cfg webconfig.WebConfig, goos string) *server.SetupWarning {
+	if !webconfig.AgentUserDelegationRuntimeEnabled {
+		return nil
+	}
 	if goos != "darwin" {
 		return nil
 	}
