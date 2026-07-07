@@ -22,6 +22,7 @@ It installs or verifies:
 | Go >= 1.25 | Compiles the binary. |
 | Node >= 20 | Builds the runstatus SPA that gets embedded. |
 | pnpm >= 11 | SPA package manager, via corepack. |
+| Chromium for Playwright | Browser payload for runstatus and TUI visual QA. |
 | git, bash, curl | Required runtime and development tools. |
 | jq, ffmpeg, gh | Optional tools used by demo, release, and GitHub-integration targets. |
 | python3 >= 3.9 | Runtime: the agent toolkit shells out to Python — the goal-seeker/punch-list scripts and the decomposition/docs lints under `tools/*.py`. |
