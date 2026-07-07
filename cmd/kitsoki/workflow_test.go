@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"kitsoki/internal/dynamicworkflow"
 )
 
 func TestWorkflow_CreateValidateExport(t *testing.T) {
@@ -49,6 +52,47 @@ func TestWorkflow_CreateValidateExport(t *testing.T) {
 	require.FileExists(t, filepath.Join(exportDir, "export-report.json"))
 	require.FileExists(t, filepath.Join(exportDir, "flows", "generated.yaml"))
 	require.FileExists(t, filepath.Join(draftDir, "events.jsonl"))
+}
+
+func TestWorkflow_CreateFromStructuredBrief(t *testing.T) {
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+	briefPath := filepath.Join(t.TempDir(), "brief.yaml")
+	require.NoError(t, os.WriteFile(briefPath, []byte(`goal: fix dynamic workflow audit problems
+slug: cli-structured-dwf
+items:
+  - id: tui-proof
+    title: TUI operation handle proof
+    owner_scope: internal/tui
+    gate: go test ./internal/tui -run 'Test.*Operation|Test.*Work' -count=1
+  - id: corpus-report
+    title: Demo corpus runner/report clarity
+    owner_scope: internal/testrunner/operation_demo_corpus_test.go
+    gate: go test ./internal/testrunner -run TestOperationDemoCorpus -count=1
+`), 0o644))
+
+	stdout, err := runKitsoki(t,
+		"workflow", "create",
+		"--root", repoRoot,
+		"--brief", briefPath,
+		"--json",
+	)
+	require.NoError(t, err)
+	var receipt dynamicworkflow.Receipt
+	require.NoError(t, json.Unmarshal([]byte(stdout), &receipt))
+	t.Cleanup(func() { _ = os.RemoveAll(receipt.DraftDir) })
+	require.Equal(t, "cli-structured-dwf", receipt.Slug)
+	require.Equal(t, "codex-native", receipt.ModelPolicy.Profile)
+	require.Equal(t, "gpt-5.5", receipt.ModelPolicy.Model)
+
+	manifestBytes, err := os.ReadFile(receipt.ManifestPath)
+	require.NoError(t, err)
+	manifest := string(manifestBytes)
+	require.Contains(t, manifest, "id: tui-proof")
+	require.Contains(t, manifest, "owner_scope: internal/tui")
+	require.Contains(t, manifest, "gate_command:")
+	require.NotContains(t, manifest, "id: scope")
+	require.NotContains(t, manifest, "id: implement")
 }
 
 func writeMinimalWorkflowTrace(t *testing.T, tracePath, exportDir string) {

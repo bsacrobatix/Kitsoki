@@ -43,16 +43,43 @@ type Service struct {
 
 // GenerateRequest captures the operator request being turned into a workflow.
 type GenerateRequest struct {
-	Goal   string
-	Slug   string
-	Story  string
-	Prompt string
+	Goal     string
+	Slug     string
+	Story    string
+	Prompt   string
+	Defaults *ManifestDefaults
+	Items    []CreateItem
 }
 
 // CreateRequest is the input to Create.
 type CreateRequest struct {
-	Goal string
-	Slug string
+	Goal     string            `json:"goal" yaml:"goal"`
+	Slug     string            `json:"slug,omitempty" yaml:"slug,omitempty"`
+	Defaults *ManifestDefaults `json:"defaults,omitempty" yaml:"defaults,omitempty"`
+	Items    []CreateItem      `json:"items,omitempty" yaml:"items,omitempty"`
+}
+
+// CreateItem is an operator-provided decomposition row. It is intentionally
+// close to a punch-list item, while keeping common brief fields like gate and
+// owner_scope short enough to write by hand.
+type CreateItem struct {
+	ID                   string           `json:"id" yaml:"id"`
+	Title                string           `json:"title,omitempty" yaml:"title,omitempty"`
+	Priority             int              `json:"priority,omitempty" yaml:"priority,omitempty"`
+	OwnerScope           string           `json:"owner_scope,omitempty" yaml:"owner_scope,omitempty"`
+	Gate                 string           `json:"gate,omitempty" yaml:"gate,omitempty"`
+	Story                string           `json:"story,omitempty" yaml:"story,omitempty"`
+	Harness              string           `json:"harness,omitempty" yaml:"harness,omitempty"`
+	Profile              string           `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Model                string           `json:"model,omitempty" yaml:"model,omitempty"`
+	RequireGPT55         *bool            `json:"require_gpt55,omitempty" yaml:"require_gpt55,omitempty"`
+	HarnessLadder        *HarnessLadder   `json:"harness_ladder,omitempty" yaml:"harness_ladder,omitempty"`
+	Mode                 string           `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Prompt               string           `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	ImplementationStory  string           `json:"implementation_story,omitempty" yaml:"implementation_story,omitempty"`
+	ImplementationPrompt string           `json:"implementation_prompt,omitempty" yaml:"implementation_prompt,omitempty"`
+	GateCommand          string           `json:"gate_command,omitempty" yaml:"gate_command,omitempty"`
+	Verify               []ManifestVerify `json:"verify,omitempty" yaml:"verify,omitempty"`
 }
 
 // ExportRequest controls the promotion/export destination.
@@ -117,6 +144,7 @@ type Receipt struct {
 	Goal             string           `json:"goal"`
 	Slug             string           `json:"slug"`
 	CreatedAt        time.Time        `json:"created_at"`
+	ModelPolicy      ModelPolicy      `json:"model_policy"`
 	DraftDir         string           `json:"draft_dir"`
 	TemplateStoryDir string           `json:"template_story_dir"`
 	AppPath          string           `json:"app_path"`
@@ -136,64 +164,75 @@ type Receipt struct {
 	URL              string           `json:"url,omitempty"`
 }
 
+// ModelPolicy is the effective dispatch policy surfaced on the receipt so a
+// reviewer does not need to open manifest.yaml to audit the worker model.
+type ModelPolicy struct {
+	Harness           string `json:"harness"`
+	Profile           string `json:"profile"`
+	Model             string `json:"model"`
+	RequireTraceModel bool   `json:"require_trace_model"`
+	RequireGPT55      bool   `json:"require_gpt55"`
+}
+
 // Manifest is the punch-list manifest emitted for the workflow.
 type Manifest struct {
-	Version  string           `yaml:"version"`
-	Defaults ManifestDefaults `yaml:"defaults"`
-	Items    []ManifestItem   `yaml:"items"`
+	Version  string           `json:"version" yaml:"version"`
+	Defaults ManifestDefaults `json:"defaults" yaml:"defaults"`
+	Items    []ManifestItem   `json:"items" yaml:"items"`
 }
 
 // ManifestDefaults are copied onto each generated item.
 type ManifestDefaults struct {
-	Harness           string         `yaml:"harness"`
-	Profile           string         `yaml:"profile"`
-	Model             string         `yaml:"model"`
-	TraceRoot         string         `yaml:"trace_root"`
-	RequireGPT55      *bool          `yaml:"require_gpt55,omitempty"`
-	RequireTraceModel bool           `yaml:"require_trace_model"`
-	HarnessLadder     *HarnessLadder `yaml:"harness_ladder,omitempty"`
+	Harness           string         `json:"harness,omitempty" yaml:"harness"`
+	Profile           string         `json:"profile,omitempty" yaml:"profile"`
+	Model             string         `json:"model,omitempty" yaml:"model"`
+	TraceRoot         string         `json:"trace_root,omitempty" yaml:"trace_root"`
+	RequireGPT55      *bool          `json:"require_gpt55,omitempty" yaml:"require_gpt55,omitempty"`
+	RequireTraceModel bool           `json:"require_trace_model" yaml:"require_trace_model"`
+	HarnessLadder     *HarnessLadder `json:"harness_ladder,omitempty" yaml:"harness_ladder,omitempty"`
 }
 
 // HarnessLadder is the punch-list policy shape for non-default live model
 // dispatch. It keeps generated GLM/synthetic workflows inside the story's
 // accepted policy instead of bypassing the GPT-5.5 live-work guard.
 type HarnessLadder struct {
-	Models  []HarnessLadderModel `yaml:"models"`
-	Efforts []string             `yaml:"efforts,omitempty"`
+	Models  []HarnessLadderModel `json:"models" yaml:"models"`
+	Efforts []string             `json:"efforts,omitempty" yaml:"efforts,omitempty"`
 }
 
 // HarnessLadderModel is one selectable worker profile in a ladder manifest.
 type HarnessLadderModel struct {
-	Backend  string `yaml:"backend,omitempty"`
-	Provider string `yaml:"provider,omitempty"`
-	Model    string `yaml:"model"`
+	Backend  string `json:"backend,omitempty" yaml:"backend,omitempty"`
+	Provider string `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Model    string `json:"model" yaml:"model"`
 }
 
 // ManifestItem is one row in the generated punch-list manifest.
 type ManifestItem struct {
-	ID                   string           `yaml:"id"`
-	Title                string           `yaml:"title"`
-	Priority             int              `yaml:"priority"`
-	Story                string           `yaml:"story"`
-	Harness              string           `yaml:"harness,omitempty"`
-	Profile              string           `yaml:"profile,omitempty"`
-	Model                string           `yaml:"model,omitempty"`
-	RequireGPT55         *bool            `yaml:"require_gpt55,omitempty"`
-	HarnessLadder        *HarnessLadder   `yaml:"harness_ladder,omitempty"`
-	Mode                 string           `yaml:"mode"`
-	Prompt               string           `yaml:"prompt"`
-	ImplementationStory  string           `yaml:"implementation_story,omitempty"`
-	ImplementationPrompt string           `yaml:"implementation_prompt,omitempty"`
-	GateCommand          string           `yaml:"gate_command,omitempty"`
-	Verify               []ManifestVerify `yaml:"verify"`
+	ID                   string           `json:"id" yaml:"id"`
+	Title                string           `json:"title" yaml:"title"`
+	Priority             int              `json:"priority" yaml:"priority"`
+	OwnerScope           string           `json:"owner_scope,omitempty" yaml:"owner_scope,omitempty"`
+	Story                string           `json:"story" yaml:"story"`
+	Harness              string           `json:"harness,omitempty" yaml:"harness,omitempty"`
+	Profile              string           `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Model                string           `json:"model,omitempty" yaml:"model,omitempty"`
+	RequireGPT55         *bool            `json:"require_gpt55,omitempty" yaml:"require_gpt55,omitempty"`
+	HarnessLadder        *HarnessLadder   `json:"harness_ladder,omitempty" yaml:"harness_ladder,omitempty"`
+	Mode                 string           `json:"mode" yaml:"mode"`
+	Prompt               string           `json:"prompt" yaml:"prompt"`
+	ImplementationStory  string           `json:"implementation_story,omitempty" yaml:"implementation_story,omitempty"`
+	ImplementationPrompt string           `json:"implementation_prompt,omitempty" yaml:"implementation_prompt,omitempty"`
+	GateCommand          string           `json:"gate_command,omitempty" yaml:"gate_command,omitempty"`
+	Verify               []ManifestVerify `json:"verify,omitempty" yaml:"verify"`
 }
 
 // ManifestVerify is one deterministic check in the manifest.
 type ManifestVerify struct {
-	Kind  string `yaml:"kind"`
-	Story string `yaml:"story,omitempty"`
-	Cmd   string `yaml:"cmd,omitempty"`
-	Flows string `yaml:"flows,omitempty"`
+	Kind  string `json:"kind" yaml:"kind"`
+	Story string `json:"story,omitempty" yaml:"story,omitempty"`
+	Cmd   string `json:"cmd,omitempty" yaml:"cmd,omitempty"`
+	Flows string `json:"flows,omitempty" yaml:"flows,omitempty"`
 }
 
 type manifestStep struct {
@@ -252,7 +291,7 @@ func (s *Service) ensure() {
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*Receipt, error) {
 	_ = ctx
 	s.ensure()
-	genReq := GenerateRequest{Goal: req.Goal, Slug: req.Slug, Story: s.TemplateStoryDir, Prompt: req.Goal}
+	genReq := GenerateRequest{Goal: req.Goal, Slug: req.Slug, Story: s.TemplateStoryDir, Prompt: req.Goal, Defaults: req.Defaults, Items: req.Items}
 	workflowID := s.GenerateWorkflowID(genReq)
 	if workflowID == "" {
 		return nil, fmt.Errorf("dynamicworkflow: empty workflow id")
@@ -291,6 +330,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Receipt, erro
 		Goal:             req.Goal,
 		Slug:             workflowSlug(req.Slug, req.Goal),
 		CreatedAt:        s.Now().UTC(),
+		ModelPolicy:      modelPolicyFromDefaults(manifest.Defaults),
 		DraftDir:         draftDir,
 		TemplateStoryDir: s.TemplateStoryDir,
 		AppPath:          appPath,
@@ -319,6 +359,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Receipt, erro
 		"app_path":        appPath,
 		"manifest_path":   manifestPath,
 		"manifest_hash":   mustHashFile(manifestPath),
+		"model_policy":    receipt.ModelPolicy,
 		"launch_basis":    launchBasisPath,
 		"trace_path":      receipt.TracePath,
 		"validation_path": validationPath,
@@ -723,7 +764,26 @@ func (s *Service) ReadReceipt(workflowID string) (*Receipt, error) {
 	if err := readJSON(path, &receipt); err != nil {
 		return nil, err
 	}
+	if receipt.ModelPolicy == (ModelPolicy{}) && receipt.ManifestPath != "" {
+		if manifest, err := readManifest(receipt.ManifestPath); err == nil {
+			receipt.ModelPolicy = modelPolicyFromDefaults(manifest.Defaults)
+		}
+	}
 	return &receipt, nil
+}
+
+// ReadCreateRequest reads a YAML or JSON workflow brief. It is shared by the
+// CLI and tests; Studio MCP callers can pass the same shape as JSON args.
+func ReadCreateRequest(path string) (CreateRequest, error) {
+	var req CreateRequest
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return req, err
+	}
+	if err := goyaml.Unmarshal(b, &req); err != nil {
+		return req, err
+	}
+	return req, nil
 }
 
 func (s *Service) buildManifest(req GenerateRequest, workflowID, appPath, manifestPath string) Manifest {
@@ -734,40 +794,51 @@ func (s *Service) buildManifest(req GenerateRequest, workflowID, appPath, manife
 	goalSentence := truncateWords(goal, 12)
 	fullGoal := truncateWords(goal, 80)
 	defaults := inferManifestDefaults(goal, filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(filepath.Dir(manifestPath), "traces"))))
+	if req.Defaults != nil {
+		defaults = mergeManifestDefaults(defaults, *req.Defaults)
+	}
 	var steps []manifestStep
 	researchOnly := false
+	appYAML := filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml")))
+	if len(req.Items) > 0 {
+		return Manifest{
+			Version:  ManifestVersion,
+			Defaults: defaults,
+			Items:    s.buildStructuredItems(req.Items, fullGoal, appYAML),
+		}
+	}
 	if isResearchGoal(goal) {
 		researchOnly = true
 		defaults = syntheticGLMLadderDefaults(defaults)
-		steps = researchFanoutSteps(fullGoal, filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml"))))
+		steps = researchFanoutSteps(fullGoal, appYAML)
 	} else if isCoverageFanoutGoal(goal) {
-		steps = coverageFanoutSteps(fullGoal, filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml"))))
+		steps = coverageFanoutSteps(fullGoal, appYAML)
 	} else {
 		steps = []manifestStep{
 			{
 				id:     "scope",
 				title:  "Scope the task",
 				prompt: fmt.Sprintf("Read the goal carefully and identify the parts that need implementation for %s.", goalSentence),
-				verify: []ManifestVerify{{Kind: "story_validate", Story: filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml")))}},
+				verify: []ManifestVerify{{Kind: "story_validate", Story: appYAML}},
 			},
 			{
 				id:     "implement",
 				title:  "Implement the core slice",
 				prompt: fmt.Sprintf("Make the smallest coherent implementation for %s and keep the result reviewable.", goalSentence),
-				verify: []ManifestVerify{{Kind: "story_validate", Story: filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml")))}},
+				verify: []ManifestVerify{{Kind: "story_validate", Story: appYAML}},
 			},
 			{
 				id:     "wire",
 				title:  "Wire the surfaces",
 				prompt: fmt.Sprintf("Thread the result through the MCP, CLI, and runstatus-facing surfaces for %s.", goalSentence),
-				verify: []ManifestVerify{{Kind: "story_validate", Story: filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml")))}},
+				verify: []ManifestVerify{{Kind: "story_validate", Story: appYAML}},
 			},
 			{
 				id:     "test",
 				title:  "Test and document it",
 				prompt: fmt.Sprintf("Add deterministic checks, docs, and dogfood evidence for %s.", goalSentence),
 				verify: []ManifestVerify{
-					{Kind: "story_validate", Story: filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml")))},
+					{Kind: "story_validate", Story: appYAML},
 					{Kind: "command", Cmd: "go test ./..."},
 				},
 			},
@@ -775,7 +846,7 @@ func (s *Service) buildManifest(req GenerateRequest, workflowID, appPath, manife
 	}
 	items := make([]ManifestItem, 0, len(steps))
 	for i, step := range steps {
-		implementationStory := filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml")))
+		implementationStory := appYAML
 		implementationPrompt := step.prompt
 		if researchOnly {
 			implementationStory = ""
@@ -785,7 +856,7 @@ func (s *Service) buildManifest(req GenerateRequest, workflowID, appPath, manife
 			ID:                   step.id,
 			Title:                step.title,
 			Priority:             i + 1,
-			Story:                filepath.ToSlash(runtimePath(s.RootDir, filepath.Join(appPath, "app.yaml"))),
+			Story:                appYAML,
 			Mode:                 "drive",
 			Prompt:               step.prompt,
 			ImplementationStory:  implementationStory,
@@ -798,6 +869,118 @@ func (s *Service) buildManifest(req GenerateRequest, workflowID, appPath, manife
 		Version:  ManifestVersion,
 		Defaults: defaults,
 		Items:    items,
+	}
+}
+
+func (s *Service) buildStructuredItems(items []CreateItem, goal, appYAML string) []ManifestItem {
+	out := make([]ManifestItem, 0, len(items))
+	for i, item := range items {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			id = fmt.Sprintf("item-%d", i+1)
+		}
+		title := strings.TrimSpace(item.Title)
+		if title == "" {
+			title = id
+		}
+		mode := strings.TrimSpace(item.Mode)
+		if mode == "" {
+			mode = "drive"
+		}
+		story := strings.TrimSpace(item.Story)
+		if story == "" {
+			story = appYAML
+		}
+		gateCommand := strings.TrimSpace(firstNonEmpty(item.GateCommand, item.Gate))
+		verify := append([]ManifestVerify(nil), item.Verify...)
+		if len(verify) == 0 && gateCommand == "" {
+			verify = []ManifestVerify{{Kind: "story_validate", Story: appYAML}}
+		}
+		prompt := strings.TrimSpace(item.Prompt)
+		if prompt == "" {
+			prompt = structuredItemPrompt(goal, title, item.OwnerScope, gateCommand)
+		}
+		implementationStory := strings.TrimSpace(item.ImplementationStory)
+		if implementationStory == "" {
+			implementationStory = appYAML
+		}
+		implementationPrompt := strings.TrimSpace(item.ImplementationPrompt)
+		if implementationPrompt == "" {
+			implementationPrompt = prompt
+		}
+		priority := item.Priority
+		if priority == 0 {
+			priority = i + 1
+		}
+		out = append(out, ManifestItem{
+			ID:                   id,
+			Title:                title,
+			Priority:             priority,
+			OwnerScope:           strings.TrimSpace(item.OwnerScope),
+			Story:                story,
+			Harness:              strings.TrimSpace(item.Harness),
+			Profile:              strings.TrimSpace(item.Profile),
+			Model:                strings.TrimSpace(item.Model),
+			RequireGPT55:         item.RequireGPT55,
+			HarnessLadder:        item.HarnessLadder,
+			Mode:                 mode,
+			Prompt:               prompt,
+			ImplementationStory:  implementationStory,
+			ImplementationPrompt: implementationPrompt,
+			GateCommand:          gateCommand,
+			Verify:               verify,
+		})
+	}
+	return out
+}
+
+func structuredItemPrompt(goal, title, ownerScope, gate string) string {
+	lines := []string{
+		fmt.Sprintf("Complete the structured workflow item %q.", title),
+		"Goal: " + goal,
+	}
+	if strings.TrimSpace(ownerScope) != "" {
+		lines = append(lines, "Owner scope: "+strings.TrimSpace(ownerScope))
+	}
+	if strings.TrimSpace(gate) != "" {
+		lines = append(lines, "Deterministic gate: "+strings.TrimSpace(gate))
+	}
+	lines = append(lines, "Keep edits inside the assigned scope where practical, record changed files and risks, and do not run live LLMs from tests.")
+	return strings.Join(lines, "\n")
+}
+
+func mergeManifestDefaults(base, override ManifestDefaults) ManifestDefaults {
+	if override.Harness != "" {
+		base.Harness = override.Harness
+	}
+	if override.Profile != "" {
+		base.Profile = override.Profile
+	}
+	if override.Model != "" {
+		base.Model = override.Model
+	}
+	if override.TraceRoot != "" {
+		base.TraceRoot = override.TraceRoot
+	}
+	if override.RequireGPT55 != nil {
+		base.RequireGPT55 = override.RequireGPT55
+	}
+	if override.RequireTraceModel {
+		base.RequireTraceModel = true
+	}
+	if override.HarnessLadder != nil {
+		base.HarnessLadder = override.HarnessLadder
+	}
+	return base
+}
+
+func modelPolicyFromDefaults(defaults ManifestDefaults) ModelPolicy {
+	return ModelPolicy{
+		Harness:           firstNonEmpty(defaults.Harness, "live"),
+		Profile:           firstNonEmpty(defaults.Profile, "codex-native"),
+		Model:             firstNonEmpty(defaults.Model, "gpt-5.5"),
+		RequireTraceModel: defaults.RequireTraceModel,
+		RequireGPT55:      boolDefault(defaults.RequireGPT55, true),
 	}
 }
 
@@ -977,8 +1160,8 @@ func validateManifest(root string, manifest Manifest, appPath string) []string {
 		if item.ImplementationStory != "" && !pathExists(root, item.ImplementationStory) {
 			errs = append(errs, fmt.Sprintf("%s.implementation_story path does not exist: %s", prefix, item.ImplementationStory))
 		}
-		if len(item.Verify) == 0 {
-			errs = append(errs, fmt.Sprintf("%s.verify must not be empty", prefix))
+		if len(item.Verify) == 0 && strings.TrimSpace(item.GateCommand) == "" {
+			errs = append(errs, fmt.Sprintf("%s.verify or gate_command must not be empty", prefix))
 		}
 		errs = append(errs, validatePunchListRuntimePolicy(prefix, manifest.Defaults, item)...)
 		for j, check := range item.Verify {
