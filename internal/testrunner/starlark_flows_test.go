@@ -2,6 +2,7 @@ package testrunner_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -74,4 +75,64 @@ func TestStarlarkLoad_MissingSidecar(t *testing.T) {
 		"load error should mention the missing sidecar, got: %s", msg)
 	require.Contains(t, msg, "orphan.star.yaml",
 		"load error should name the expected sidecar path, got: %s", msg)
+}
+
+// TestStarlarkFlow_HostStubCannotHideMissingCapability proves flow mocks do not
+// bypass the opt-in capability contract. The fixture stubs the whole
+// host.starlark.run handler, so without load-time validation the mock response
+// would satisfy the flow and the script would never touch the filesystem. The
+// correct behavior is an early RunFlows load error because the static script uses
+// ctx.fs.read without granting fs.read.
+func TestStarlarkFlow_HostStubCannotHideMissingCapability(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "scripts"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "scripts", "read.star"), []byte(`def main(ctx):
+    return {"body": ctx.fs.read("README.md")}
+`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "scripts", "read.star.yaml"), []byte(`outputs:
+  body: { type: string }
+`), 0o644))
+
+	appYAML := `
+app:
+  id: starlark-mock-capability-test
+  version: 0.1.0
+hosts:
+  - host.starlark.run
+world:
+  body: { type: string, default: "" }
+root: idle
+intents:
+  go: {}
+states:
+  idle:
+    on:
+      go:
+        - target: done
+          effects:
+            - invoke: host.starlark.run
+              with:
+                script: scripts/read.star
+              bind:
+                body: body
+  done:
+    terminal: true
+`
+	flowYAML := `
+test_kind: flow
+initial_state: idle
+host_handlers:
+  host.starlark.run:
+    data: { body: "stubbed without reading fs" }
+turns:
+  - intent: { name: go }
+    expect_state: done
+    expect_world:
+      body: "stubbed without reading fs"
+`
+	appPath, flowPath := writeFixture(t, dir, appYAML, flowYAML)
+	_, err := testrunner.RunFlows(t.Context(), appPath, flowPath, testrunner.FlowOptions{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "load app")
+	require.Contains(t, err.Error(), "with.capabilities.fs.read is empty")
 }
