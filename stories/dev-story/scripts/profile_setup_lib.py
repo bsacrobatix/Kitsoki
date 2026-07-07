@@ -52,6 +52,8 @@ COMMON_ENV = [
 SAFE_ENV_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 CREDENTIAL_KEY_RE = re.compile(r"(token|api[_-]?key|secret|credential)", re.IGNORECASE)
+CLAUDE_AUTH_STATUS_COMMAND = "claude auth status --json"
+AUTH_PROBE_TIMEOUT_SECONDS = 3
 
 
 def json_out(data: dict[str, Any]) -> str:
@@ -243,7 +245,42 @@ def file_has_credential_marker(path: Path) -> bool:
     return _json_has_credential_marker(data)
 
 
-def auth_summary(auth_sources: list[dict[str, Any]]) -> str:
+def claude_auth_status_probe(path: str) -> dict[str, Any]:
+    if not path:
+        return {}
+    probe: dict[str, Any] = {"command": CLAUDE_AUTH_STATUS_COMMAND}
+    try:
+        proc = subprocess.run(
+            [path, "auth", "status", "--json"],
+            check=False,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=AUTH_PROBE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return {**probe, "status": "timeout"}
+    except OSError as exc:
+        return {**probe, "status": "error", "error": exc.__class__.__name__}
+
+    try:
+        data = json.loads((proc.stdout or "").strip())
+    except json.JSONDecodeError:
+        return {**probe, "status": "unsupported", "exit_code": proc.returncode}
+    if not isinstance(data, dict) or not isinstance(data.get("loggedIn"), bool):
+        return {**probe, "status": "unsupported", "exit_code": proc.returncode}
+    return {
+        **probe,
+        "status": "ok",
+        "exit_code": proc.returncode,
+        "logged_in": bool(data["loggedIn"]),
+        "auth_method": str(data.get("authMethod") or ""),
+        "api_provider": str(data.get("apiProvider") or ""),
+    }
+
+
+def auth_summary(auth_sources: list[dict[str, Any]], auth_probe: dict[str, Any] | None = None) -> str:
     parts: list[str] = []
     for source in auth_sources:
         kind = source.get("type")
@@ -254,6 +291,8 @@ def auth_summary(auth_sources: list[dict[str, Any]]) -> str:
             parts.append(f"file:{name}")
         else:
             parts.append(f"file-present:{name}")
+    if auth_probe and auth_probe.get("status") == "ok":
+        parts.append("probe:logged-in" if auth_probe.get("logged_in") else "probe:not-logged-in")
     return ", ".join(parts)
 
 
@@ -273,9 +312,18 @@ def binary_status(name: str, spec: dict[str, Any]) -> dict[str, Any]:
                 "credential": file_has_credential_marker(path_obj),
             })
     installed = bool(path)
-    has_credential = any(bool(source.get("credential")) for source in auth_sources)
-    logged_in = "yes" if has_credential else ("unknown" if installed else "no")
-    return {
+    has_env_credential = any(source.get("type") == "env" and source.get("credential") for source in auth_sources)
+    has_file_credential = any(source.get("type") == "file" and source.get("credential") for source in auth_sources)
+    auth_probe = claude_auth_status_probe(path) if name == "claude" and installed and not has_env_credential else {}
+    if has_env_credential:
+        logged_in = "yes"
+    elif auth_probe.get("status") == "ok":
+        logged_in = "yes" if auth_probe.get("logged_in") else "no"
+    elif has_file_credential:
+        logged_in = "yes"
+    else:
+        logged_in = "unknown" if installed else "no"
+    result = {
         "backend": name,
         "binary": spec["binary"],
         "override_env": spec["override_env"],
@@ -283,9 +331,12 @@ def binary_status(name: str, spec: dict[str, Any]) -> dict[str, Any]:
         "path_source": "env" if override else ("PATH" if path else ""),
         "path": path,
         "auth_sources": auth_sources,
-        "auth_summary": auth_summary(auth_sources) or "none",
+        "auth_summary": auth_summary(auth_sources, auth_probe) or "none",
         "logged_in": logged_in,
     }
+    if auth_probe:
+        result["auth_probe"] = auth_probe
+    return result
 
 
 def backend_sources() -> list[dict[str, Any]]:
@@ -303,6 +354,8 @@ def _backend_ready(profile: dict[str, Any], statuses: dict[str, dict[str, Any]])
     status = statuses.get(backend, {})
     if status.get("installed") and status.get("logged_in") == "yes":
         return "env-present" if profile.get("env_refs") else "installed"
+    if status.get("installed") and status.get("logged_in") == "no":
+        return "installed-auth-missing"
     if status.get("installed") and status.get("logged_in") == "unknown":
         return "installed-auth-unknown"
     return "missing"
@@ -445,7 +498,10 @@ def discover(root: Path) -> dict[str, Any]:
     statuses_list = backend_sources()
     statuses = {str(item["backend"]): item for item in statuses_list}
     for status in statuses_list:
-        if status.get("installed") and status.get("logged_in") == "unknown" and status.get("auth_sources"):
+        probe = status.get("auth_probe") if isinstance(status.get("auth_probe"), dict) else {}
+        if probe.get("status") == "ok" and status.get("logged_in") == "no":
+            warnings.append(f"{status['backend']} auth probe reports not logged in")
+        elif status.get("installed") and status.get("logged_in") == "unknown" and status.get("auth_sources"):
             warnings.append(
                 f"{status['backend']} has config/auth files but no credential marker; login status is unknown"
             )
