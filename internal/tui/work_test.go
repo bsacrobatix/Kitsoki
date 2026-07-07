@@ -315,6 +315,102 @@ func TestWorkSlashListsCurrentOperation(t *testing.T) {
 	require.Contains(t, work, "Regression gate was never RED.")
 }
 
+func TestWorkDriveSlashDrivesCurrentOperation(t *testing.T) {
+	const yamlSrc = `
+app:
+  id: operation-work-drive-test
+  version: 0.1.0
+world:
+  refined: { type: bool, default: false }
+intents:
+  start: {}
+  accept: {}
+  refine: {}
+  quit: {}
+root: idle
+operations:
+  demo_run:
+    title: Demo run
+    mode: autonomous
+    execution_mode: one-shot
+    run_in_background: true
+    terminal_artifact: done_artifact
+states:
+  idle:
+    view: Idle
+    on:
+      start:
+        - target: reproducing
+          operation: demo_run
+  reproducing:
+    view: Reproducing
+    on:
+      accept:
+        - target: proposing
+      refine:
+        - target: reproducing
+      quit:
+        - target: needs-human
+  proposing:
+    view: Proposing
+    on:
+      accept:
+        - target: done
+          effects:
+            - set:
+                done_artifact: { summary_title: Done }
+      quit:
+        - target: needs-human
+  needs-human:
+    terminal: true
+    view: Needs human
+  done:
+    terminal: true
+    view: Done
+`
+	def, err := app.LoadBytes([]byte(yamlSrc))
+	require.NoError(t, err)
+	mach, err := machine.New(def)
+	require.NoError(t, err)
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	orch := orchestrator.New(def, mach, s, nil)
+	sid, err := orch.NewSession(context.Background())
+	require.NoError(t, err)
+	started, err := orch.SubmitDirect(context.Background(), sid, "start", nil)
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("reproducing"), started.NewState)
+
+	initialView, err := orch.RenderState(started.NewState, orch.CurrentWorld(sid))
+	require.NoError(t, err)
+	model := tea.Model(tuipkg.NewRootModel(orch, sid, "", initialView,
+		tuipkg.WithResumedJourney(started.NewState, orch.CurrentWorld(sid), started.TurnNumber),
+	))
+
+	model = runTurnBlocking(t, model, "/work")
+	tx := extractTranscript(t, model)
+	work := transcriptAfter(t, tx, "active work: 1 item(s)")
+	require.Contains(t, work, "operation")
+	require.Contains(t, work, "running")
+	require.Contains(t, work, "Demo run")
+	require.Contains(t, work, "/work drive")
+
+	model = runTurnBlocking(t, model, "/work drive")
+	tx = extractTranscript(t, model)
+	require.Contains(t, tx, "Done")
+
+	journey, err := orch.LoadJourney(sid)
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("done"), journey.State)
+	handle, ok := journey.World.Vars[app.OperationRunWorldKey].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "completed", handle["status"])
+	require.Equal(t, "done", handle["terminal_state"])
+	require.Equal(t, false, journey.World.Vars["refined"], "driver must not choose refine")
+}
+
 func transcriptAfter(t *testing.T, text, marker string) string {
 	t.Helper()
 	idx := strings.LastIndex(text, marker)
