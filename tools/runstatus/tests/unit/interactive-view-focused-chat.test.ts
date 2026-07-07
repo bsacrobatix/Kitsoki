@@ -224,6 +224,8 @@ describe("InteractiveView focused chat context", () => {
                 policy_id: "bf__capsule_demo",
                 title: "Capsule bugfix",
                 status: "running",
+                mode: "autonomous",
+                execution_mode: "one-shot",
                 phase: "reproduce_bug",
                 from: "idle",
                 to: "bugfix.reproduce",
@@ -243,6 +245,11 @@ describe("InteractiveView focused chat context", () => {
     expect(wrapper.find('[data-testid="operation-run-title"]').text()).toBe("Capsule bugfix");
     expect(wrapper.find('[data-testid="operation-run-status"]').text()).toBe("running in background");
     expect(banner.text()).toContain("phase reproduce bug");
+    const summary = wrapper.find('[data-testid="operation-run-summary"]');
+    expect(summary.text()).toContain("mode autonomous");
+    expect(summary.text()).toContain("execution one-shot");
+    expect(summary.text()).toContain("phase reproduce bug");
+    expect(summary.text()).toContain("route idle -> bugfix.reproduce");
     expect(wrapper.find('[data-testid="operation-run-drive"]').exists()).toBe(true);
     wrapper.unmount();
   });
