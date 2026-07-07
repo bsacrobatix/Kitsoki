@@ -7,6 +7,7 @@
  *   - feature demos derive their source paths from the feature catalog index;
  *   - staged site media uses only the generated public/media/<feature>/ shape;
  *   - Slidey decks reference rrweb clips from a deck-local asset folder;
+ *   - every top-level Slidey deck has a committed bundled viewer for /decks/;
  *   - a rrweb-native story-demo's `demo.embed` points at a committed, bundled
  *     Slidey deck html under docs/decks/bundled/ with a valid scene index.
  *
@@ -38,6 +39,10 @@ const indexPath = path.resolve(
 );
 const mediaDir = path.resolve(repoRoot, argValue("--media", path.join(siteDir, "src", "public", "media")));
 const decksDir = path.resolve(repoRoot, argValue("--decks", path.join(repoRoot, "docs", "decks")));
+const deckViewersDir = path.resolve(
+  repoRoot,
+  argValue("--deck-viewers", path.join(siteDir, "src", "public", "deck-viewers")),
+);
 
 const requirePromoMedia = process.argv.includes("--require-promo-media");
 
@@ -104,7 +109,7 @@ function checkFeatureDemos() {
     // pre-bundled deck html is COMMITTED source (docs/decks/bundled/, unlike
     // an mp4 that's a live recording), so a missing one is a broken reference,
     // not "not yet recorded" — it's checked here, not warned about in
-    // stage-media. It's staged into the shared src/public/decks/ tree, not
+    // stage-media. It's staged into the shared src/public/deck-viewers/ tree, not
     // media/<id>/, so it's exempt from idsWithMedia / checkStagedMedia below.
     if (f.demo.embed) {
       const deckHtml = path.resolve(repoRoot, f.demo.embed.deckHtml);
@@ -263,11 +268,19 @@ function collectStrings(v, out = []) {
 
 function checkSlideyDeckEmbeds() {
   if (!fs.existsSync(decksDir)) return;
+  const deckIds = new Set();
   for (const name of fs.readdirSync(decksDir).filter((n) => n.endsWith(".json") || n.endsWith(".slidey.json")).sort()) {
     const deckPath = path.join(decksDir, name);
     const deck = readJson(deckPath, "deck");
     if (!deck) continue;
     const deckId = name.replace(/\.slidey\.json$/, "").replace(/\.json$/, "");
+    deckIds.add(deckId);
+    const bundlePath = path.join(decksDir, "bundled", `${deckId}.html`);
+    if (!fs.existsSync(bundlePath)) {
+      problems.push(`${rel(deckPath)}: missing bundled product-site viewer ${rel(bundlePath)} (run: slidey bundle ${rel(deckPath)} ${rel(bundlePath)})`);
+    } else if (fs.statSync(bundlePath).size === 0) {
+      problems.push(`${rel(deckPath)}: bundled product-site viewer is empty: ${rel(bundlePath)}`);
+    }
     const allowedAssetDir = path.join(decksDir, "assets", deckId);
     for (const s of collectStrings(deck).filter((v) => v.endsWith(".rrweb.json"))) {
       const clip = path.resolve(path.dirname(deckPath), s);
@@ -278,6 +291,30 @@ function checkSlideyDeckEmbeds() {
         problems.push(
           `${rel(deckPath)}: rrweb clip ${s} must live under ${rel(allowedAssetDir)} (deck-local assets)`,
         );
+      }
+    }
+  }
+
+  const bundledDir = path.join(decksDir, "bundled");
+  if (fs.existsSync(bundledDir)) {
+    for (const name of fs.readdirSync(bundledDir).filter((n) => n.endsWith(".html")).sort()) {
+      const id = name.replace(/\.html$/, "");
+      if (!deckIds.has(id)) {
+        problems.push(`${rel(path.join(bundledDir, name))}: bundled viewer has no top-level deck source`);
+      }
+    }
+  }
+
+  if (fs.existsSync(deckViewersDir)) {
+    for (const name of fs.readdirSync(deckViewersDir).filter((n) => n.endsWith(".html")).sort()) {
+      const id = name.replace(/\.html$/, "");
+      if (!deckIds.has(id)) {
+        problems.push(`${rel(path.join(deckViewersDir, name))}: staged deck viewer has no top-level deck source`);
+      }
+    }
+    for (const id of deckIds) {
+      if (!fs.existsSync(path.join(deckViewersDir, `${id}.html`))) {
+        problems.push(`${rel(deckViewersDir)}: missing staged deck viewer ${id}.html (run make site/stage-media)`);
       }
     }
   }
@@ -293,4 +330,4 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
-console.log(`media: OK — feature demos, staged site media, and Slidey rrweb deck embeds are organized`);
+console.log(`media: OK — feature demos, staged site media, Slidey deck viewers, and rrweb deck embeds are organized`);

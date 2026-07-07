@@ -955,6 +955,7 @@ SITE_GENERATED_WRITE_DIRS := \
 	$(SITE_ABS)/.vitepress/cache \
 	$(SITE_ABS)/src/guide \
 	$(SITE_ABS)/src/public/media \
+	$(SITE_ABS)/src/public/deck-viewers \
 	$(SITE_ABS)/src/public/decks
 
 define site_write_guard
@@ -1019,7 +1020,8 @@ site-embed: site-data
 site-clean:
 	$(call site_write_guard,rm -rf $(SITE_DIR)/.vitepress/gen $(SITE_DIR)/.vitepress/dist \
 		$(SITE_DIR)/.vitepress/dist-embedded $(SITE_DIR)/.vitepress/cache \
-		$(SITE_DIR)/src/guide $(SITE_DIR)/src/public/media $(SITE_DIR)/src/public/decks)
+		$(SITE_DIR)/src/guide $(SITE_DIR)/src/public/media $(SITE_DIR)/src/public/decks \
+		$(SITE_DIR)/src/public/deck-viewers)
 	find $(HELPDOCS_ASSETS) -mindepth 1 ! -name .gitkeep -delete 2>/dev/null || true
 
 # vscode-package builds the SPA + extension bundle, then packages an installable

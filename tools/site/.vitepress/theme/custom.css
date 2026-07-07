@@ -336,6 +336,149 @@
   line-height: 1.45;
 }
 
+/* -- Slidey Deck Gallery --------------------------------------------------- */
+.kdeck-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+  gap: 1.25rem;
+  margin: 2rem 0;
+}
+.kdeck-card {
+  display: block;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  padding: 1rem;
+  background: var(--vp-c-bg-soft);
+  text-decoration: none !important;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.kdeck-card:hover {
+  border-color: var(--vp-c-brand-1);
+  transform: translateY(-2px);
+}
+.kdeck-card__slide {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--kdeck-accent2) 55%, transparent);
+  border-radius: 6px;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--kdeck-surface) 90%, transparent), transparent),
+    var(--kdeck-bg);
+  color: var(--kdeck-text);
+}
+.kdeck-card__eyebrow {
+  font-size: 0.68rem;
+  line-height: 1.2;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--kdeck-accent);
+  overflow-wrap: anywhere;
+}
+.kdeck-card__rule {
+  width: 4rem;
+  height: 0.18rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--kdeck-accent), var(--kdeck-accent2));
+}
+.kdeck-card__title {
+  max-width: 100%;
+  color: var(--kdeck-text);
+  font-size: 1.35rem;
+  font-weight: 750;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.kdeck-card__subtitle {
+  max-width: 100%;
+  color: var(--kdeck-subtle);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.kdeck-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+}
+.kdeck-card__meta span {
+  font-size: 0.68rem;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--vp-c-text-2);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 999px;
+  padding: 0.26rem 0.45rem;
+  background: var(--vp-c-bg);
+}
+.kdeck-card h3 {
+  margin: 0 0 0.25rem;
+  padding: 0;
+  border: 0;
+  color: var(--vp-c-text-1);
+  font-size: 1rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.kdeck-card p {
+  margin: 0;
+  color: var(--vp-c-text-2);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+.kdeck-viewer {
+  width: min(1180px, calc(100vw - 2rem));
+  margin: 1.5rem 0 0 50%;
+  transform: translateX(-50%);
+}
+.kdeck-viewer__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  color: var(--vp-c-text-2);
+  font-size: 0.82rem;
+}
+.kdeck-viewer__bar a,
+.kdeck-viewer__bar span {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  background: var(--vp-c-bg-soft);
+  overflow-wrap: anywhere;
+}
+.kdeck-viewer__frame {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+}
+.kdeck-viewer__missing {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  padding: 1rem;
+  background: var(--vp-c-bg-soft);
+}
+.kdeck-viewer__missing p {
+  margin-bottom: 0;
+  color: var(--vp-c-text-2);
+}
+
 /* VitePress docs pages carry generated tables and long shell examples. Keep
    them scrollable within the content column instead of widening the viewport. */
 .vp-doc pre {

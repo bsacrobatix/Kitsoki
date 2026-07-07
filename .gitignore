@@ -120,6 +120,7 @@ tools/site/.vitepress/dist-embedded/
 tools/site/.vitepress/cache/
 tools/site/src/guide/
 tools/site/src/public/media/
+tools/site/src/public/deck-viewers/
 tools/site/src/public/decks/
 
 # Embedded help-docs staging (make site-embed); only the .gitkeep placeholder
@@ -141,8 +142,8 @@ internal/baseskills/assets/*
 !internal/baseskills/assets/.gitkeep
 internal/baseskills/.embed-stamp
 
-# Slidey decks: commit only the .json spec — the .html is a deterministic
-# render (VS Code extension / `slidey bundle`), no value in checking it in.
+# Slidey decks: ordinary ad-hoc HTML renders stay local. Product-site viewers
+# are the explicit exception and live under docs/decks/bundled/.
 *.slidey.html
 docs/decks/*.html
 

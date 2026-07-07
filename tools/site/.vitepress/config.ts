@@ -14,6 +14,7 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { defineConfig } from "vitepress";
 import { loadFeatures, featuresSidebar, guideSidebar } from "./data/features.js";
+import { loadDecks } from "./data/decks.js";
 import type { LocaleCode } from "./data/i18n.js";
 import { locales, prefixed } from "./data/i18n.js";
 
@@ -34,6 +35,7 @@ function localizedThemeConfig(locale: LocaleCode) {
     nav: [
       { text: "Evaluate", link: "/guide/evaluate-kitsoki.html" },
       { text: "Proof", link: "/proof.html" },
+      { text: "Decks", link: "/decks/index.html" },
       { text: "Get Started", link: "/guide/getting-started.html" },
       { text: info.text.nav.guide, link: "/guide/" },
       { text: "Download", link: "/download.html" },
@@ -57,6 +59,7 @@ function localizedThemeConfig(locale: LocaleCode) {
       promo: f.promo,
       media: f.media,
     })),
+    decks: loadDecks(),
   };
 }
 

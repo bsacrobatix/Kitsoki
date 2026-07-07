@@ -14,7 +14,7 @@
  *
  * A rrweb-native story-demo (`demo.embed` in features/*.yaml) has no mp4 at
  * all — its committed, pre-bundled Slidey deck html (docs/decks/bundled/) is
- * copied verbatim into the shared src/public/decks/<file>.html tree instead
+ * copied verbatim into the shared src/public/deck-viewers/<file>.html tree instead
  * (several features can point at the same bundled deck, each at its own
  * `?scene=` index — see .vitepress/data/features.ts). Unlike mp4s this asset
  * IS committed source, so a missing one is a broken reference, not "not yet
@@ -32,7 +32,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const siteDir = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(siteDir, "../..");
 const mediaDir = path.join(siteDir, "src", "public", "media");
-const decksDir = path.join(siteDir, "src", "public", "decks");
+const deckViewersDir = path.join(siteDir, "src", "public", "deck-viewers");
+const legacyDecksDir = path.join(siteDir, "src", "public", "decks");
 const indexPath = path.join(siteDir, ".vitepress", "gen", "features-index.json");
 
 const embedded = process.argv.includes("--variant")
@@ -60,19 +61,31 @@ function copyStagedFile(src, dest) {
 }
 
 fs.rmSync(mediaDir, { recursive: true, force: true });
-fs.rmSync(decksDir, { recursive: true, force: true });
+fs.rmSync(deckViewersDir, { recursive: true, force: true });
+fs.rmSync(legacyDecksDir, { recursive: true, force: true });
+
+function stageDeckViewers() {
+  if (embedded) return 0;
+  const bundledDir = path.join(repoRoot, "docs", "decks", "bundled");
+  if (!fs.existsSync(bundledDir)) return 0;
+  const bundles = fs.readdirSync(bundledDir).filter((name) => name.endsWith(".html")).sort();
+  if (bundles.length === 0) return 0;
+  fs.mkdirSync(deckViewersDir, { recursive: true });
+  for (const name of bundles) copyStagedFile(path.join(bundledDir, name), path.join(deckViewersDir, name));
+  return bundles.length;
+}
 
 let videos = 0;
 let embeds = 0;
+const deckViewers = stageDeckViewers();
 const missing = [];
-const stagedDecks = new Set();
 for (const f of index.features) {
   if (!f.demo) continue;
   if (f.demo.external) continue;
 
   // demo.embed: a rrweb-native story-demo ships a pre-bundled, committed,
   // self-contained Slidey deck html (docs/decks/bundled/) instead of an mp4.
-  // Staged once, shared, under src/public/decks/ — several features can point
+  // Staged once, shared, under src/public/deck-viewers/ — several features can point
   // at the same bundled deck at different `?scene=` indices. Excluded from the
   // embedded (binary /help/) variant, same as mp4s — it's a ~17MB asset and
   // the binary build stays posters-only; the embedded build's placeholder
@@ -80,13 +93,7 @@ for (const f of index.features) {
   if (f.demo.embed) {
     if (embedded) continue;
     const src = path.join(repoRoot, f.demo.embed.deckHtml);
-    const dest = path.join(decksDir, path.basename(f.demo.embed.deckHtml));
     if (fs.existsSync(src)) {
-      fs.mkdirSync(decksDir, { recursive: true });
-      if (!stagedDecks.has(dest)) {
-        copyStagedFile(src, dest);
-        stagedDecks.add(dest);
-      }
       embeds++;
     } else {
       missing.push(`${f.id}: ${f.demo.embed.deckHtml} (bundle it once: slidey bundle <deck> ${f.demo.embed.deckHtml})`);
@@ -132,6 +139,6 @@ for (const f of index.features) {
 }
 
 console.log(
-  `stage-media: staged ${videos} video(s), ${embeds} embed(s)${embedded ? " [embedded: posters only]" : ""} -> ${path.relative(repoRoot, mediaDir)}`,
+  `stage-media: staged ${videos} video(s), ${embeds} feature deck embed(s), ${deckViewers} deck viewer(s)${embedded ? " [embedded: posters only]" : ""} -> ${path.relative(repoRoot, mediaDir)}`,
 );
 for (const m of missing) console.warn(`stage-media: missing ${m}`);

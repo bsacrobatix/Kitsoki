@@ -98,6 +98,11 @@ pure no-LLM post-processing.
 - **Feature pages** are dynamic routes (`src/features/[id].md` +
   `[id].paths.ts`) over the generated `features-index.json`: chaptered video,
   step cards (click → seek), narrative markdown, doc links.
+- **Slidey deck pages** are dynamic routes (`src/decks/[id].md` +
+  `[id].paths.ts`) over top-level `docs/decks/*.json` files: `/decks/` renders
+  title-slide gallery cards, and each deck page keeps the VitePress site chrome
+  while embedding the committed self-contained viewer from
+  `docs/decks/bundled/<deck-id>.html`.
 - **Guide docs** are an **allowlist copy** of `docs/` (`docs-manifest.json` +
   `scripts/stage-docs.mjs`): internal trees (proposals, competitive-analysis,
   skills, …) can never leak; links escaping the allowlist are rewritten to
@@ -115,7 +120,7 @@ pure no-LLM post-processing.
   [`docs/media/README.md`](../media/README.md) and checked by `make media-check`
   (also part of `make test` when Node/pnpm dependencies are installed). It
   verifies feature demo paths, staged `public/media/<feature>/` shape, and
-  Slidey rrweb deck embeds without recording videos or invoking an LLM.
+  Slidey deck/gallery embeds without recording videos or invoking an LLM.
 
 Targets: `make site` (build, base `/Kitsoki/`), `make site-dev` (HMR),
 `make site-full` (demos + site), `make site-clean`.
