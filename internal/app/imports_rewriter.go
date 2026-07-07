@@ -28,6 +28,9 @@
 //   - Effect.Invoke — host names are global, no rewrite needed. But
 //     `with: { agent: <name> }` references are rewritten when <name>
 //     is one of the child's agents.
+//   - Transition.Operation — session operation policy refs are rewritten to
+//     <alias>__<operation>, and the matching top-level policy is lifted under
+//     the same name during foldChild.
 package app
 
 import (
@@ -45,6 +48,7 @@ type childRewriter struct {
 	childWorldKey         map[string]struct{}
 	childIntent           map[string]struct{}
 	childAgent            map[string]struct{}
+	childOperation        map[string]struct{}
 	childIface            map[string]struct{}
 	parentExportedIntents map[string]struct{}
 }
@@ -255,9 +259,53 @@ func (rw *childRewriter) rewriteTransition(tr *Transition) {
 	tr.When = rw.rewriteExpr(tr.When)
 	tr.GuardHint = rw.rewriteExpr(tr.GuardHint)
 	tr.View = rw.rewriteView(tr.View)
+	tr.Operation = rw.rewriteOperationRef(tr.Operation)
 	for i := range tr.Effects {
 		rw.rewriteEffect(&tr.Effects[i])
 	}
+}
+
+func (rw *childRewriter) rewriteOperationRef(name string) string {
+	if name == "" {
+		return name
+	}
+	if _, ok := rw.childOperation[name]; ok {
+		return rw.alias + "__" + name
+	}
+	return name
+}
+
+func (rw *childRewriter) rewriteOperationPolicy(policy *OperationPolicy) *OperationPolicy {
+	if policy == nil {
+		return nil
+	}
+	clone := *policy
+	if len(policy.StopOn) > 0 {
+		clone.StopOn = append([]string(nil), policy.StopOn...)
+	}
+	if len(policy.PauseOn) > 0 {
+		clone.PauseOn = append([]string(nil), policy.PauseOn...)
+	}
+	if clone.TerminalArtifact != "" {
+		clone.TerminalArtifact = rw.rewriteWorldKeyRef(clone.TerminalArtifact)
+	}
+	if len(policy.PhaseSummary.From) > 0 {
+		clone.PhaseSummary.From = make([]string, len(policy.PhaseSummary.From))
+		for i, key := range policy.PhaseSummary.From {
+			clone.PhaseSummary.From[i] = rw.rewriteWorldKeyRef(key)
+		}
+	}
+	return &clone
+}
+
+func (rw *childRewriter) rewriteWorldKeyRef(key string) string {
+	if key == "" {
+		return key
+	}
+	if _, ok := rw.childWorldKey[key]; ok {
+		return rw.alias + "__" + key
+	}
+	return key
 }
 
 // rewriteEffect rewrites every expression / identifier reference inside

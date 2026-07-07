@@ -59,8 +59,13 @@ operations:
 ```
 
 This is distinct from state-level `operation:` overlays. Operation policies are
-session lifecycle metadata and emit operation lifecycle trace rows; state
-overlays control abandonable task-local world writes.
+session lifecycle metadata. When a transition starts a policy, the runtime
+emits operation lifecycle trace rows and writes the engine-owned
+`world.operation_run` handle with `status: running`; the handle is updated to
+`status: completed` when the run reaches a terminal state, even on a later
+turn. Imported child policies are lifted under the import alias
+(`<alias>__<policy-id>`), and child transition `operation:` refs are rewritten
+to match. State overlays control abandonable task-local world writes.
 
 ## `AppMeta`
 
@@ -545,7 +550,7 @@ Story-style guidance: [`docs/stories/story-style.md`](../stories/story-style.md)
 on:
   go:
     - target:      bar                 # required — dest state path, "." = self
-      operation:   bugfix_full         # optional — top-level operation policy id
+      operation:   bugfix_full         # optional — top-level/folded operation policy id
       when:        "slots.direction == 'south'"
       effects:     [ <Effect>, ... ]
       guard_hint:  "Head outside first."   # shown when guard fails

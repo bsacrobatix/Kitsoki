@@ -134,6 +134,94 @@ func TestOperationRunEvents(t *testing.T) {
 	require.Equal(t, "demo_run", completed["policy_id"])
 	require.Equal(t, "done", completed["terminal_state"])
 	require.Equal(t, "done_artifact", completed["terminal_artifact"])
+
+	handle, ok := res.World.Vars[app.OperationRunWorldKey].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "completed", handle["status"])
+	require.Equal(t, "demo_run", handle["policy_id"])
+	require.Equal(t, "done", handle["terminal_state"])
+}
+
+func TestOperationRunCompletesOnLaterTerminalTurn(t *testing.T) {
+	def := &app.AppDef{
+		App:  app.AppMeta{ID: "operation-run-later-terminal"},
+		Root: "start",
+		Operations: map[string]*app.OperationPolicy{
+			"demo_run": {
+				Title:            "Demo run",
+				Mode:             "autonomous",
+				ExecutionMode:    "one-shot",
+				RunInBackground:  true,
+				TerminalArtifact: "done_artifact",
+			},
+		},
+		Intents: map[string]app.Intent{
+			"go":   {},
+			"done": {},
+		},
+		States: map[string]*app.State{
+			"start": {
+				On: map[string][]app.Transition{
+					"go": {{
+						Target:    "working",
+						Operation: "demo_run",
+					}},
+				},
+			},
+			"working": {
+				On: map[string][]app.Transition{
+					"done": {{Target: "done"}},
+				},
+			},
+			"done": {Terminal: true},
+		},
+	}
+	m := mustNew(t, def)
+
+	started, err := m.Turn(context.Background(), "start", world.New(), intent.IntentCall{Intent: "go"})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("working"), started.NewState)
+	requireOperationRunStatus(t, started.World, "running")
+	requireEventKind(t, started.Events, store.OperationRunStarted)
+	requireNoEventKind(t, started.Events, store.OperationRunCompleted)
+
+	completed, err := m.Turn(context.Background(), "working", started.World, intent.IntentCall{Intent: "done"})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("done"), completed.NewState)
+	requireOperationRunStatus(t, completed.World, "completed")
+	requireEventKind(t, completed.Events, store.OperationRunCompleted)
+	requireNoEventKind(t, completed.Events, store.OperationRunStarted)
+
+	history := append([]store.Event{}, started.Events...)
+	history = append(history, completed.Events...)
+	replayed, err := store.BuildJourney(def, "start", world.New(), history)
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("done"), replayed.State)
+	requireOperationRunStatus(t, replayed.World, "completed")
+}
+
+func requireOperationRunStatus(t *testing.T, w world.World, status string) {
+	t.Helper()
+	handle, ok := w.Vars[app.OperationRunWorldKey].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, status, handle["status"])
+}
+
+func requireEventKind(t *testing.T, events []store.Event, kind store.EventKind) {
+	t.Helper()
+	for _, ev := range events {
+		if ev.Kind == kind {
+			return
+		}
+	}
+	require.Failf(t, "missing event kind", "expected %s", kind)
+}
+
+func requireNoEventKind(t *testing.T, events []store.Event, kind store.EventKind) {
+	t.Helper()
+	for _, ev := range events {
+		require.NotEqual(t, kind, ev.Kind)
+	}
 }
 
 func TestOperationScopeAbandonCommitReplay(t *testing.T) {

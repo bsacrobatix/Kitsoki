@@ -238,6 +238,7 @@ states:
         - when: "world.ticket_id == ''"
           target: "@exit:pick_ticket"
         - target: reproducing
+          operation: bugfix_full
       # NL ticket-id handoff — see the work_ticket intent doc in ../app.yaml.
       # Re-targets idle EXPLICITLY (not `.`) so on_enter re-fires with
       # ticket_id now set, falling into the same autostart chain above
@@ -267,6 +268,7 @@ states:
         - when: "world.ticket_id == ''"
           target: "@exit:pick_ticket"
         - target: reproducing
+          operation: bugfix_full
           effects:
             - set:
                 bugfix_mode: "full"
@@ -278,6 +280,7 @@ states:
         - when: "world.ticket_id == ''"
           target: "@exit:pick_ticket"
         - target: reproducing
+          operation: bugfix_quick
           effects:
             - set:
                 bugfix_mode: "quick"
@@ -288,6 +291,7 @@ states:
         - when: "world.ticket_id == ''"
           target: "@exit:pick_ticket"
         - target: triaging
+          operation: bugfix_triage
           effects:
             - set:
                 bugfix_mode: "triage"
@@ -299,6 +303,7 @@ states:
         - when: "world.ticket_id == ''"
           target: "@exit:pick_ticket"
         - target: triaging
+          operation: bugfix_full
       # Skip directly into validating; reproducing/proposing/
       # implementing/testing/reviewing don't run. restart_from_stage gets
       # the value "validate" for audit. Use when the operator already

@@ -71,12 +71,15 @@ var importAliasRE = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 //     derived from the ticket alone, so two concurrent sessions on one ticket
 //     resolve to the SAME checkout and a destructive git op in one clobbers
 //     the other's WIP (bug9glm2). Engine-owned: a story must not `set:` it.
+//   - operation_run: map — the active/completed session-level operation handle.
+//     Engine-owned: a story must not `set:` it.
 //   - operation_drafts: map — explicit handles created by persist_draft.
 var ReservedWorldKeys = map[string]struct{}{
 	"last_error":           {},
 	"host_error":           {},
 	WriteModeScopeWorldKey: {},
 	"session_id":           {},
+	OperationRunWorldKey:   {},
 	"operation_drafts":     {},
 }
 
@@ -112,6 +115,13 @@ type ImportResolver func(name, importerDir string, override bool) (string, error
 // sets/clears it on grant and at the turn/session boundary. A story may not
 // `set:` it (load-time invariant). See docs/proposals/agent-write-mode-opt-in.md.
 const WriteModeScopeWorldKey = "write_mode_scope"
+
+// OperationRunWorldKey is the engine-reserved world variable holding the
+// current session-level operation run handle. Transitions start it via their
+// `operation:` policy reference; the runtime updates it to running/completed so
+// replay, UI, and harness assertions can observe progress without special
+// side-channels. A story may not `set:` it.
+const OperationRunWorldKey = "operation_run"
 
 // WriteMode posture values for State.WriteMode (validated at load time).
 const (
@@ -554,6 +564,10 @@ func foldChild(parent *AppDef, alias string, imp *ImportDef, child *AppDef, file
 	for k := range child.Agents {
 		childAgent[k] = struct{}{}
 	}
+	childOperation := make(map[string]struct{}, len(child.Operations))
+	for k := range child.Operations {
+		childOperation[k] = struct{}{}
+	}
 	childIface := make(map[string]struct{}, len(child.HostInterfaces))
 	for k := range child.HostInterfaces {
 		childIface[k] = struct{}{}
@@ -563,6 +577,7 @@ func foldChild(parent *AppDef, alias string, imp *ImportDef, child *AppDef, file
 		childWorldKey:         childWorld,
 		childIntent:           childIntent,
 		childAgent:            childAgent,
+		childOperation:        childOperation,
 		childIface:            childIface,
 		parentExportedIntents: importParentExports(imp),
 	}
@@ -717,6 +732,21 @@ func foldChild(parent *AppDef, alias string, imp *ImportDef, child *AppDef, file
 		intent := child.Intents[ck]
 		rw.rewriteIntent(&intent)
 		parent.Intents[newKey] = intent
+	}
+
+	// 8a. Fold session-level operation policies under prefixed names. The
+	// rewriter updated transition `operation:` refs to the same names, and
+	// rewrites policy artifact/world-key references to the folded world.
+	if parent.Operations == nil {
+		parent.Operations = make(map[string]*OperationPolicy)
+	}
+	for _, ck := range sortedKeys(child.Operations) {
+		newKey := alias + "__" + ck
+		if _, exists := parent.Operations[newKey]; exists {
+			errs = append(errs, &ValidationError{File: file, Message: fmt.Sprintf("imports.%s: operation %q collides", alias, newKey)})
+			continue
+		}
+		parent.Operations[newKey] = rw.rewriteOperationPolicy(child.Operations[ck])
 	}
 
 	// 9. Host allow-list composition.

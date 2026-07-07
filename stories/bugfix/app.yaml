@@ -150,6 +150,38 @@ agents:
     model: claude-sonnet-4-6
     tools: []
 
+operations:
+  bugfix_full:
+    title: "Fix bug"
+    mode: autonomous
+    execution_mode: one-shot
+    run_in_background: true
+    stop_on: [needs-human, uncertain, gate-failed, host-error, conflict, budget-exhausted, policy-denied]
+    pause_on: [operator-ask, protected-branch-approval]
+    terminal_artifact: done_artifact
+    phase_summary:
+      from: [reproduction_artifact, proposal_artifact, implement_artifact, testing_artifact, review_artifact, validation_artifact, done_artifact]
+  bugfix_quick:
+    title: "Quick bug fix"
+    mode: autonomous
+    execution_mode: one-shot
+    run_in_background: true
+    stop_on: [needs-human, uncertain, gate-failed, host-error, conflict, budget-exhausted, policy-denied]
+    pause_on: [operator-ask]
+    terminal_artifact: done_artifact
+    phase_summary:
+      from: [reproduction_artifact, proposal_artifact, implement_artifact, testing_artifact, done_artifact]
+  bugfix_triage:
+    title: "Triage bug"
+    mode: autonomous
+    execution_mode: one-shot
+    run_in_background: true
+    stop_on: [needs-human, uncertain, gate-failed, host-error, budget-exhausted, policy-denied]
+    pause_on: [operator-ask]
+    terminal_artifact: triage_verdict
+    phase_summary:
+      from: [triage_verdict]
+
 # Six host_interfaces — the provider-neutral surfaces every parent story
 # binds to a concrete handler at import time. Operation names + I/O shapes
 # are fixed by the contract; only the `default:` may be rebound.
