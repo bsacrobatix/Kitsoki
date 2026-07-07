@@ -108,15 +108,20 @@ for coding-agent backends. The policy rejects unsafe launch locations, but the
 OS user boundary is what makes the protected checkout unwritable after the
 backend starts.
 
-Run the setup story for a no-LLM, no-sudo planning flow:
+Run the setup story for the guided no-LLM setup flow:
 
 ```sh
 kitsoki run @kitsoki/run-as-user-setup
 ```
 
-The story generates the `.kitsoki.local.yaml` blocks, root-owned backend
-wrappers, sudoers snippet, capsule-assignment commands, and validation probes.
-It does not create accounts or edit privileged files itself.
+The story can show the generated `.kitsoki.local.yaml` blocks, root-owned
+backend wrappers, sudoers snippet, capsule-assignment commands, and validation
+probes before applying anything. When the operator chooses `apply`, it uses
+non-interactive `sudo -n` to create or reuse the local account/group, install
+the wrappers and sudoers file, set up the sample capsule permissions, and run
+the delegated write/write-deny probes. If macOS needs a password, the story
+stops in an authorization screen and asks the operator to run `sudo -v`, then
+retry.
 
 The local receipt block is:
 
@@ -128,12 +133,14 @@ agent_user_delegation:
   capsule_root: /Users/Shared/kitsoki/capsules
 ```
 
-This block currently records local setup and suppresses the macOS first-start
-warning. `kitsoki agent launch` consumes `wrapper_bin` directly: with the block
-above, it executes `wrapper_bin/codex`, `wrapper_bin/claude`, and so on, and
-records `run_as_user` in the dry-run plan. Without the block, `kitsoki run`
-prints a TUI startup notice and `kitsoki web` shows a home-screen setup warning
-with an action that opens `@kitsoki/run-as-user-setup`.
+This block is a local receipt for the OS-user delegation setup. It suppresses
+the macOS first-start warning only when it is enabled and includes both
+`run_as_user` and `wrapper_bin`. `kitsoki agent launch` consumes `wrapper_bin`
+directly: with the block above, it executes `wrapper_bin/codex`,
+`wrapper_bin/claude`, and so on, and records `run_as_user` in the dry-run plan.
+Without a complete block, `kitsoki run` prints a TUI startup notice and
+`kitsoki web` shows a home-screen setup warning with an action that opens
+`@kitsoki/run-as-user-setup`.
 
 Other live agent surfaces still rely on the backend CLI resolving through the
 operator environment, so start those surfaces with the wrapper directory first

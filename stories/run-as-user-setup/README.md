@@ -9,6 +9,11 @@ sudo needs a password, the story moves to an authorization screen with the
 `sudo -v` handoff and a retry action instead of dumping a generic command
 failure.
 
+This setup is not a replacement for launch policy or sandboxing. Launch policy
+decides whether an agent may start in a working directory; the delegated macOS
+user is the separate OS account that should lack write permission to protected
+operator checkouts after the backend starts.
+
 The `codex_bin` and `claude_bin` defaults are `auto`. Apply resolves them from
 the Kitsoki process PATH plus common macOS locations before writing sudoers or
 wrappers. Missing backend CLIs move to a CLI-path screen with edit-and-retry
@@ -47,6 +52,11 @@ backend.
 prepended to `PATH`. The broader `kitsoki run` / `kitsoki web` live agent paths
 still rely on backend CLIs resolving from the operator environment, so keep
 using the wrapper directory on `PATH` for those surfaces.
+
+The macOS setup warning remains visible until `.kitsoki.local.yaml` contains an
+enabled `agent_user_delegation:` block with both `run_as_user` and
+`wrapper_bin`. A `run_as_user` value without wrappers is incomplete because
+Kitsoki cannot delegate the backend CLI launch.
 
 Test it without LLM, sudo, or network:
 

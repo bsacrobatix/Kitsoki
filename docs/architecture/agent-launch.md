@@ -28,11 +28,11 @@ attachment, omit the task; no task file is required:
 kitsoki agent launch --agent kitsoki-mcp-driver --backend codex
 ```
 
-When `.kitsoki.local.yaml` declares an enabled `agent_user_delegation:` block,
-`kitsoki agent launch` automatically uses the configured
-`wrapper_bin/<backend>` executable and records `run_as_user` in the launch plan.
-Operators no longer need to prepend the wrapper directory to `PATH` for this
-command:
+When `.kitsoki.local.yaml` declares an enabled and complete
+`agent_user_delegation:` block, `kitsoki agent launch` automatically uses the
+configured `wrapper_bin/<backend>` executable and records `run_as_user` in the
+launch plan. Operators no longer need to prepend the wrapper directory to
+`PATH` for this command:
 
 ```yaml
 agent_user_delegation:
@@ -40,6 +40,10 @@ agent_user_delegation:
   run_as_user: kitsoki-agent
   wrapper_bin: /Users/Shared/kitsoki/agent-bin
 ```
+
+`wrapper_bin` is required for delegation. If it is missing, Kitsoki keeps the
+macOS setup warning visible because the backend CLI cannot be launched as the
+delegated account.
 
 To open a normal interactive backend session without an app, agent file, MCP
 wrapper, or Kitsoki replacement prompt, use raw interactive launch:
@@ -134,7 +138,8 @@ protected roots, protected branches, and non-capsule workspaces before emitting
 a command plan. The same guard applies to raw interactive sessions.
 
 Launch policy is a preflight guard, not a kernel/filesystem sandbox. Use it to
-keep agents out of the protected checkout and inside opened capsules; use
-`kitsoki run @kitsoki/run-as-user-setup` on macOS to generate the delegated
-local-user wrapper setup; use `with.sandbox` on hosted calls when a story also
-needs runtime supervision.
+keep agents out of the protected checkout and inside opened capsules. On macOS,
+use `kitsoki run @kitsoki/run-as-user-setup` to apply the delegated local-user
+wrapper setup, then keep write-capable backend CLIs running as that delegated
+user. Use `with.sandbox` on hosted calls when a story also needs runtime
+supervision.
