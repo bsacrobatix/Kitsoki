@@ -22,8 +22,8 @@ var projectProfileStoryPacks = []projectProfileStoryPack{
 	{
 		ID:      "cyber-repo",
 		Title:   "Cyber repo starter",
-		Summary: "Focused first-run set for cyber-repo: setup, bugfixing, PR refinement, and git operations.",
-		Stories: []string{"setup", "bugfix", "pr-refinement", "git-ops"},
+		Summary: "Focused first-run set for cyber-repo: setup, bugfixing, repo-history capsules, PR refinement, and git operations.",
+		Stories: []string{"setup", "bugfix", "repo-bakeoff", "pr-refinement", "git-ops"},
 	},
 	{
 		ID:      "core-setup",

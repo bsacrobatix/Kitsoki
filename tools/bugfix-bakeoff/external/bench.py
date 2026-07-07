@@ -1868,11 +1868,12 @@ def load_project_manifests(project_ids=None):
     return [load(str(path)) for path in manifests]
 
 
-def oracle_capsule_record(m, bug):
+def repo_history_capsule_record(m, bug):
     proj = m["project"]
     oracle_cfg = {**proj.get("oracle", {}), **bug.get("oracle", {})}
     local_only = bool(proj.get("local_only", False))
     repo_subdir = str(proj.get("repo_subdir", "") or "")
+    capsule_ref = f"repo-history/{proj['id']}/{bug['id']}"
     verify_cmd = f"python3 tools/bugfix-bakeoff/external/bench.py verify --project {proj['id']} --bug {bug['id']}"
     readiness_cmd = (
         "python3 tools/bugfix-bakeoff/external/bench.py readiness "
@@ -1887,6 +1888,9 @@ def oracle_capsule_record(m, bug):
         repo_modes.append("meta-repo")
     return {
         "id": f"{proj['id']}/{bug['id']}",
+        "capsule_ref": capsule_ref,
+        "kind": "repo-history",
+        "materializer": "bugfix-bakeoff",
         "project": proj["id"],
         "bug": bug["id"],
         "title": bug.get("title", bug["id"]),
@@ -1904,6 +1908,7 @@ def oracle_capsule_record(m, bug):
         "repo_envs": project_repo_envs(proj),
         "repo_subdir": repo_subdir,
         "repo_modes": repo_modes,
+        "source_manifest": str(Path(m.get("_dir", "")) / "manifest.yaml") if m.get("_dir") else "",
         "verify_command": verify_cmd,
         "readiness_command": readiness_cmd,
         "green_red_green": [
@@ -1915,14 +1920,14 @@ def oracle_capsule_record(m, bug):
     }
 
 
-def oracle_capsules(project_ids=None, markdown=False):
+def repo_history_capsules(project_ids=None, markdown=False):
     manifests = load_project_manifests(project_ids)
     capsules = []
     projects = {}
     for m in manifests:
         proj = m["project"]
         project_capsules = [
-            oracle_capsule_record(m, bug)
+            repo_history_capsule_record(m, bug)
             for bug in selected_bugs(m)
         ]
         capsules.extend(project_capsules)
@@ -1941,38 +1946,49 @@ def oracle_capsules(project_ids=None, markdown=False):
         "projects": projects,
         "capsules": capsules,
         "commands": {
-            "list": "python3 tools/bugfix-bakeoff/external/bench.py oracle-capsules",
+            "list": "python3 tools/bugfix-bakeoff/external/bench.py capsules",
             "verify_project": "python3 tools/bugfix-bakeoff/external/bench.py verify --project <project> [--repo-dir <checkout-or-meta-root>]",
             "readiness": "make history-smoke HISTORY_PROJECT=<project> HISTORY_REPO_DIR=<checkout-or-meta-root> HISTORY_BUGS=<ids> HISTORY_CANDIDATES=<candidate>",
         },
     }
     if markdown:
         lines = [
-            "# Bugfix Oracle Capsules",
+            "# Repo History Capsules",
             "",
             f"Promoted capsules: **{len(capsules)}**",
             "",
-            "| Capsule | Ticket / PR | Baseline | Real fix | Repo modes |",
-            "|---|---|---|---|---|",
+            "| Capsule | Ticket / PR | Baseline | Real fix | Executor | Repo modes |",
+            "|---|---|---|---|---|---|",
         ]
         for c in capsules:
             ticket = c["ticket"] or "(manifest)"
             modes = ", ".join(c["repo_modes"])
             lines.append(
-                f"| `{c['id']}` | {ticket} | `{c['baseline_sha'][:12]}` | "
-                f"`{c['fix_sha'][:12]}` | {modes} |"
+                f"| `{c['capsule_ref']}` | {ticket} | `{c['baseline_sha'][:12]}` | "
+                f"`{c['fix_sha'][:12]}` | {c['materializer']} | {modes} |"
             )
         lines.extend([
             "",
-            "Every capsule uses the same GREEN/RED/GREEN discipline: ordinary repo "
-            "setup is ready, the hidden oracle fails at the bug baseline, the "
-            "real maintainer fix passes it, and candidate fixes are scored with "
-            "that same oracle.",
+            "These are capsules in the shared Kitsoki sense: named, reusable, "
+            "deterministically verified repository states. They currently use "
+            "the repo-history harness materializer because core `kitsoki capsule "
+            "open` is still limited to local synthetic fixtures.",
+            "",
+            "Every repo-history capsule uses the same GREEN/RED/GREEN discipline: "
+            "ordinary repo setup is ready, the hidden oracle fails at the bug "
+            "baseline, the real maintainer fix passes it, and candidate fixes are "
+            "scored with that same oracle.",
         ])
         print("\n".join(lines))
     else:
         print(json.dumps(out, indent=2))
     return 0
+
+
+# Compatibility for older harness callers. New code should use
+# repo_history_capsule_record/repo_history_capsules and the `capsules` command.
+oracle_capsule_record = repo_history_capsule_record
+oracle_capsules = repo_history_capsules
 
 
 def summarize(m, results_dir, deck=None, markdown=None, allow_empty=False):
@@ -2257,9 +2273,14 @@ def main():
     mf.add_argument("--traces", default="../../../.artifacts/external-bakeoff/traces",
                     help="traces dir holding <project>-<bug>-<candidate>.jsonl")
     mf.add_argument("--markdown", help="optional Markdown feedback report")
+    cap = sub.add_parser("capsules")
+    cap.add_argument("--project", action="append",
+                     help="project id to list; repeat or comma-separate; default all promoted projects")
+    cap.add_argument("--markdown", action="store_true",
+                     help="render a Markdown catalog instead of JSON")
     oc = sub.add_parser("oracle-capsules")
     oc.add_argument("--project", action="append",
-                    help="project id to list; repeat or comma-separate; default all promoted projects")
+                    help="deprecated alias for capsules; repeat or comma-separate project ids")
     oc.add_argument("--markdown", action="store_true",
                     help="render a Markdown catalog instead of JSON")
     rp = sub.add_parser("repo-path")
@@ -2292,8 +2313,8 @@ def main():
         sys.exit(0)
     if a.cmd == "mine-failures":
         sys.exit(mine_failures(a.results, a.traces, markdown=a.markdown))
-    if a.cmd == "oracle-capsules":
-        sys.exit(oracle_capsules(project_ids=a.project, markdown=a.markdown))
+    if a.cmd in {"capsules", "oracle-capsules"}:
+        sys.exit(repo_history_capsules(project_ids=a.project, markdown=a.markdown))
     if a.cmd == "summarize":
         sys.exit(summarize(load(a.project), a.results, a.deck, a.markdown,
                            allow_empty=a.allow_empty))

@@ -67,7 +67,8 @@ Discovery emits the pack catalog and the selected pack into
 `init_story_packs`, `init_story_pack`, and `init_starter_stories`. The review
 room exposes a `story packs` menu before writes happen; selecting a pack updates
 the starter set in memory. The current cyber-repo rollout pack is
-`cyber-repo`: `setup`, `bugfix`, `pr-refinement`, and `git-ops`.
+`cyber-repo`: `setup`, `bugfix`, `repo-bakeoff` (repo-history capsules),
+`pr-refinement`, and `git-ops`.
 
 For one-off custom scopes, discovery still accepts
 `--stories`/`stories=`/`focus=` and normalizes aliases such as `bugfixing` →

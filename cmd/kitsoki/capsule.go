@@ -3,7 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 
+	goyaml "github.com/goccy/go-yaml"
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/capsule"
@@ -14,9 +19,67 @@ func capsuleCmd() *cobra.Command {
 		Use:   "capsule",
 		Short: "Open, verify, and close hermetic development capsules",
 	}
+	cmd.AddCommand(capsuleListCmd())
 	cmd.AddCommand(capsuleOpenCmd())
 	cmd.AddCommand(capsuleVerifyCmd())
 	cmd.AddCommand(capsuleCloseCmd())
+	return cmd
+}
+
+type capsuleListEntry struct {
+	Ref       string `json:"ref"`
+	Kind      string `json:"kind"`
+	Title     string `json:"title,omitempty"`
+	Path      string `json:"path"`
+	Executor  string `json:"executor"`
+	Project   string `json:"project,omitempty"`
+	Bug       string `json:"bug,omitempty"`
+	Scenario  string `json:"scenario,omitempty"`
+	LocalOnly bool   `json:"local_only,omitempty"`
+}
+
+func capsuleListCmd() *cobra.Command {
+	var kind string
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:          "list",
+		Short:        "List core and repo-history capsules",
+		SilenceUsage: true,
+		Args:         cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			entries, err := collectCapsuleList(kind)
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(map[string]any{
+					"ok":       true,
+					"kind":     normalizeCapsuleListKind(kind),
+					"count":    len(entries),
+					"capsules": entries,
+				})
+			}
+			out := cmd.OutOrStdout()
+			if len(entries) == 0 {
+				fmt.Fprintln(out, "capsules: none")
+				return nil
+			}
+			fmt.Fprintln(out, "capsules:")
+			for _, entry := range entries {
+				fmt.Fprintf(out, "  %s [%s]\n", entry.Ref, entry.Kind)
+				if entry.Title != "" {
+					fmt.Fprintf(out, "    %s\n", entry.Title)
+				}
+				fmt.Fprintf(out, "    path: %s\n", entry.Path)
+				fmt.Fprintf(out, "    executor: %s\n", entry.Executor)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&kind, "kind", "all", "capsule kind to list: all, core, repo-history")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print catalog JSON")
 	return cmd
 }
 
@@ -47,6 +110,173 @@ func capsuleOpenCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dest, "dest", "", "destination directory (default: temp directory)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print manifest JSON")
 	return cmd
+}
+
+func collectCapsuleList(kind string) ([]capsuleListEntry, error) {
+	normalized := normalizeCapsuleListKind(kind)
+	if normalized == "" {
+		return nil, fmt.Errorf("unknown capsule kind %q; use all, core, or repo-history", kind)
+	}
+	root := capsuleListRepoRoot()
+	var entries []capsuleListEntry
+	if normalized == "all" || normalized == "core" {
+		core, err := collectCoreCapsules(root)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, core...)
+	}
+	if normalized == "all" || normalized == "repo-history" {
+		history, err := collectRepoHistoryCapsules(root)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, history...)
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Kind != entries[j].Kind {
+			return entries[i].Kind < entries[j].Kind
+		}
+		return entries[i].Ref < entries[j].Ref
+	})
+	return entries, nil
+}
+
+func normalizeCapsuleListKind(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "all":
+		return "all"
+	case "core", "fixture", "fixtures", "synthetic":
+		return "core"
+	case "repo-history", "repo_history", "history", "bugfix", "bugfix-history":
+		return "repo-history"
+	default:
+		return ""
+	}
+}
+
+func collectCoreCapsules(root string) ([]capsuleListEntry, error) {
+	paths, err := filepath.Glob(filepath.Join(root, "capsules", "*", "capsule.yaml"))
+	if err != nil {
+		return nil, err
+	}
+	var entries []capsuleListEntry
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read capsule spec %s: %w", path, err)
+		}
+		var spec struct {
+			Name     string `yaml:"name"`
+			Scenario struct {
+				Kind string `yaml:"kind"`
+			} `yaml:"scenario"`
+		}
+		if err := goyaml.Unmarshal(raw, &spec); err != nil {
+			return nil, fmt.Errorf("parse capsule spec %s: %w", path, err)
+		}
+		name := strings.TrimSpace(spec.Name)
+		if name == "" {
+			name = filepath.Base(filepath.Dir(path))
+		}
+		entries = append(entries, capsuleListEntry{
+			Ref:      name,
+			Kind:     "core",
+			Path:     relCapsulePath(root, path),
+			Executor: "internal/capsule",
+			Scenario: strings.TrimSpace(spec.Scenario.Kind),
+		})
+	}
+	return entries, nil
+}
+
+func collectRepoHistoryCapsules(root string) ([]capsuleListEntry, error) {
+	paths, err := filepath.Glob(filepath.Join(root, "tools", "bugfix-bakeoff", "external", "projects", "*", "manifest.yaml"))
+	if err != nil {
+		return nil, err
+	}
+	var entries []capsuleListEntry
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read repo-history manifest %s: %w", path, err)
+		}
+		var manifest struct {
+			Project struct {
+				ID        string `yaml:"id"`
+				Title     string `yaml:"title"`
+				LocalOnly bool   `yaml:"local_only"`
+			} `yaml:"project"`
+			Bugs []struct {
+				ID    string `yaml:"id"`
+				Title string `yaml:"title"`
+			} `yaml:"bugs"`
+		}
+		if err := goyaml.Unmarshal(raw, &manifest); err != nil {
+			return nil, fmt.Errorf("parse repo-history manifest %s: %w", path, err)
+		}
+		project := strings.TrimSpace(manifest.Project.ID)
+		if project == "" {
+			project = filepath.Base(filepath.Dir(path))
+		}
+		for _, bug := range manifest.Bugs {
+			bugID := strings.TrimSpace(bug.ID)
+			if bugID == "" {
+				continue
+			}
+			title := strings.TrimSpace(bug.Title)
+			if title == "" {
+				title = strings.TrimSpace(manifest.Project.Title)
+			}
+			entries = append(entries, capsuleListEntry{
+				Ref:       "repo-history/" + project + "/" + bugID,
+				Kind:      "repo-history",
+				Title:     title,
+				Path:      relCapsulePath(root, path),
+				Executor:  "bugfix-bakeoff",
+				Project:   project,
+				Bug:       bugID,
+				LocalOnly: manifest.Project.LocalOnly,
+			})
+		}
+	}
+	return entries, nil
+}
+
+func capsuleListRepoRoot() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	for cur := wd; ; {
+		if raw, err := os.ReadFile(filepath.Join(cur, "go.mod")); err == nil && goModModuleIsKitsoki(raw) {
+			return cur
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		cur = parent
+	}
+	return wd
+}
+
+func goModModuleIsKitsoki(raw []byte) bool {
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(line, "module "); ok {
+			return strings.TrimSpace(rest) == "kitsoki"
+		}
+	}
+	return false
+}
+
+func relCapsulePath(root, path string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return path
+	}
+	return filepath.ToSlash(rel)
 }
 
 func capsuleVerifyCmd() *cobra.Command {
