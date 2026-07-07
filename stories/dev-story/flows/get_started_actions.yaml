@@ -24,6 +24,22 @@ initial_world:
 host_handlers:
   host.local_files.ticket:
     data: { tickets: [] }
+  host.run:
+    by_call:
+      run_initial:
+        data: { exit_code: 0, ok: true, stdout: "ok\n" }
+        delay: "10ms"
+  host.agent.decide:
+    by_call:
+      review-0:
+        data:
+          submitted:
+            pass: true
+            reason: "No diff to review and the command is green."
+            functionality_preserved: true
+            tests_not_weakened: true
+            findings: []
+            fixes: []
   host.append_to_file:
     data: { ok: true, message_id: "msg-0" }
   host.inbox.add:
@@ -48,6 +64,12 @@ turns:
     expect_state: landing
   - intent: { name: go_implementation, slots: {} }
     expect_state: landing
+  - intent: { name: go_fix_tests, slots: {} }
+    advance_clock: "1s"
+    expect_state: landing
+    expect_world:
+      status: "tests-green"
+      fix_tests_report_path: ".artifacts/fix-tests/report-clean.md"
   - intent: { name: go_cypilot, slots: {} }
     expect_state: landing
   - intent: { name: go_pr_refinement, slots: {} }

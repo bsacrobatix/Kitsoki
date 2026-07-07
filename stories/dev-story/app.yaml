@@ -797,6 +797,15 @@ world:
   human_review_issue_comment_id: { type: string, default: "" }
   human_review_pr_comment_ok:    { type: bool,   default: false }
 
+  # ── Test-fix loop (imported `tests`, stories/fix-tests/) ─────────
+  # Self-driving command-green loop for project test suites. The child runs the
+  # deterministic command (`test_cmd`, falling back to make test), uses a maker
+  # agent only when the command is red or review rejects the diff, then requires
+  # an adversarial read-only review that no functionality was lost and no tests
+  # were weakened.
+  fix_tests_report_path: { type: string, default: "" }
+  fix_tests_review:     { type: object, default: {} }
+
   # ── Carry-fields for the bf → pr handoff projection ───────────────
   # bf's @exit:done writes done_artifact via `set:` (per the
   # `requires: [done_artifact]` enforcement). The dev-story `bf` import
@@ -1403,6 +1412,16 @@ intents:
     description: "Hand off to the deliver sub-story: decompose a published proposal into briefs, review them, and fan ship-it over every brief. The decompose-vs-direct alternative to go_implementation for epic-sized work."
     examples: ["decompose", "decompose the epic", "deliver the proposal", "break this into briefs"]
     priority: 55
+  go_fix_tests:
+    title: "Fix Tests"
+    description: "Run the configured test command, autonomously fix failures, rerun the deterministic gate, and require a no-regression/no-weakened-tests review before accepting green."
+    examples: ["fix tests", "make test pass", "make test green", "get make test to pass", "repair failing tests"]
+    priority: 54
+    slots:
+      test_cmd:
+        type: string
+        required: false
+        description: "Optional command override; defaults to the project test command or make test."
   go_code_review_story:
     title: "Review PR"
     description: "Hand off to the code-review sub-story (teammate PR review)."
@@ -1747,6 +1766,7 @@ exports:
     - go_pr_refinement
     - go_implementation
     - go_deliver
+    - go_fix_tests
     - go_code_review_story
 
 # exits: dev-story is a perpetual workbench by design (every sub-import's
@@ -2055,6 +2075,45 @@ imports:
         set:
           status:     "needs-human"
           last_error: "{{ world.deliver__last_error }}"
+
+  # fix-tests — autonomous make-test-green loop with deterministic command gate
+  # plus adversarial no-regression/no-weakened-tests review. Reached from
+  # landing via go_fix_tests; entering at starting makes the quick action
+  # one-shot while still resetting child retry/review state before each run.
+  tests:
+    source: ../fix-tests
+    entry: starting
+
+    world_in:
+      test_cmd:   "{{ world.test_cmd != '' ? world.test_cmd : 'make test' }}"
+      workdir:    "{{ world.workdir != '' ? world.workdir : '.' }}"
+      max_cycles: 3
+
+    intents:
+      import: []
+
+    exits:
+      achieved:
+        to: landing
+        set:
+          status:                "tests-green"
+          fix_tests_report_path: "{{ world.tests__report_path != '' ? world.tests__report_path : '.artifacts/fix-tests/report-' + world.tests__outcome + '.md' }}"
+          fix_tests_review:      "{{ world.tests__review_artifact }}"
+          last_error:            ""
+      exhausted:
+        to: landing
+        set:
+          status:                "tests-exhausted"
+          fix_tests_report_path: "{{ world.tests__report_path != '' ? world.tests__report_path : '.artifacts/fix-tests/report-' + world.tests__outcome + '.md' }}"
+          fix_tests_review:      "{{ world.tests__review_artifact }}"
+          last_error:            "Test-fix loop exhausted: {{ world.tests__report_path != '' ? world.tests__report_path : '.artifacts/fix-tests/report-' + world.tests__outcome + '.md' }}"
+      needs-human:
+        to: human_review_report
+        set:
+          status:                "needs-human"
+          fix_tests_report_path: "{{ world.tests__report_path != '' ? world.tests__report_path : '.artifacts/fix-tests/report-' + world.tests__outcome + '.md' }}"
+          fix_tests_review:      "{{ world.tests__review_artifact }}"
+          human_review_reason:   "Test-fix loop needs human attention: {{ world.tests__report_path != '' ? world.tests__report_path : '.artifacts/fix-tests/report-' + world.tests__outcome + '.md' }}"
 
   # Wave 4 — cypilot SDLC waterfall for epic-track tickets. Routed
   # from main when the picked ticket's type is "epic". cypilot is

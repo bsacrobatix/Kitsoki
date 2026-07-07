@@ -70,7 +70,7 @@ def _latest_log(ctx):
     return matches[len(matches) - 1]
 
 
-def _render(ctx, outcome, cycle, max_cycles, artifact, tests_passed):
+def _render(ctx, outcome, cycle, max_cycles, artifact, review, tests_passed):
     lines = []
     lines.append("# fix-tests report\n\n")
     lines.append("**" + _headline(outcome) + "**\n\n")
@@ -106,7 +106,23 @@ def _render(ctx, outcome, cycle, max_cycles, artifact, tests_passed):
         lines.append("## What the fixer did\n\n")
         lines.append("No fixer artifact was recorded; the fixer or a test run errored before producing one. See the full test log above.\n\n")
 
-    if outcome == "exhausted" or outcome == "blocked":
+    if review:
+        lines.append("## Review gate\n\n")
+        status = "pass" if _bool(review.get("pass", False)) else "fail"
+        lines.append("| | |\n|---|---|\n")
+        lines.append("| Verdict | `" + status + "` |\n")
+        lines.append("| Functionality preserved | " + ("yes" if _bool(review.get("functionality_preserved", False)) else "no") + " |\n")
+        lines.append("| Tests not weakened | " + ("yes" if _bool(review.get("tests_not_weakened", False)) else "no") + " |\n")
+        reason = _str(review.get("reason", "")).strip()
+        if reason:
+            lines.append("| Reason | " + _escape_cell(reason) + " |\n")
+        lines.append("\n### Findings\n\n")
+        lines.append(_bullets(review.get("findings", [])))
+        lines.append("\n### Requested fixes\n\n")
+        lines.append(_bullets(review.get("fixes", [])))
+        lines.append("\n")
+
+    if outcome == "exhausted" or outcome == "blocked" or outcome == "review_failed":
         lines.append("---\n\nRe-run `make fix-tests` after resolving the above.\n")
 
     return "".join(lines)
@@ -117,8 +133,9 @@ def main(ctx):
     cycle = ctx.inputs.get("cycle", 0)
     max_cycles = ctx.inputs.get("max_cycles", 0)
     artifact = _artifact(ctx.inputs.get("fix_artifact", {}))
+    review = _artifact(ctx.inputs.get("review_artifact", {}))
     tests_passed = _bool(ctx.inputs.get("tests_passed", False))
 
     path = ".artifacts/fix-tests/report-" + outcome + ".md"
-    written = ctx.fs.write(path, _render(ctx, outcome, cycle, max_cycles, artifact, tests_passed))
+    written = ctx.fs.write(path, _render(ctx, outcome, cycle, max_cycles, artifact, review, tests_passed))
     return {"report_path": written}

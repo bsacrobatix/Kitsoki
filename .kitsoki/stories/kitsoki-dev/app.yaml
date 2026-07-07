@@ -181,6 +181,7 @@ imports:
       ticket_repo:                "{{ world.ticket_repo }}"
       bugfix_destination:         "{{ world.bugfix_destination }}"
       design_durable_path:        "{{ world.design_durable_path }}"
+      test_cmd:                   "{{ world.test_cmd }}"
 
 # Instance-level world. Provider-pointing keys plus judge-mode
 # defaults; the operator can override any of them at session start
@@ -210,6 +211,12 @@ world:
   # (main here) after the bugfix RED/GREEN gate and shared ship-it tail pass.
   # Operators can still choose open-pr or leave-worktree from the dev-story UI.
   bugfix_destination: { type: string, default: "local-merge" }
+
+  # The dogfood test-fix loop uses the same project-level command an operator
+  # would run locally. dev-story's imported fix-tests loop falls back to
+  # `make test` when this is empty; keeping it explicit here documents the
+  # self-instance contract.
+  test_cmd: { type: string, default: "make test" }
 
   # Proposal/idea work must not write under docs/proposals in the protected
   # primary checkout. Keep scratch + published design docs in local context.
