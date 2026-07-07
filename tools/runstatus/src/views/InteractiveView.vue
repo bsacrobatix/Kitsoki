@@ -168,6 +168,20 @@
             {{ drivingOperation ? 'Driving' : 'Drive' }}
           </button>
         </span>
+        <span
+          v-if="operationRunFacts.length > 0"
+          class="iv__operation-facts"
+          data-testid="operation-run-summary"
+        >
+          <span
+            v-for="fact in operationRunFacts"
+            :key="fact.label"
+            class="iv__operation-fact"
+          >
+            <span class="iv__operation-fact-label">{{ fact.label }}</span>
+            {{ fact.value }}
+          </span>
+        </span>
       </div>
 
       <!-- Main row: chat (left) | trace (right).
@@ -777,6 +791,7 @@ function toggleTracePet() {
 
 const appId = computed(() => store.appDef?.id ?? store.appDef?.name ?? "kitsoki");
 const operationRun = computed(() => store.operationRun);
+type OperationFact = { label: string; value: string };
 const operationRunClass = computed(() => ({
   "iv__operation--completed": operationRun.value?.status === "completed",
   "iv__operation--failed": operationRun.value?.status === "failed",
@@ -821,6 +836,23 @@ const operationRunArtifactHref = computed(() => {
   const artifact = operationRunArtifactHandle.value;
   if (!artifact || !source) return "";
   return source.artifactUrl(artifact);
+});
+const operationRunFacts = computed<OperationFact[]>(() => {
+  const run = operationRun.value;
+  if (!run) return [];
+  const facts: OperationFact[] = [];
+  const add = (label: string, value?: string) => {
+    if (value && value.trim()) facts.push({ label, value });
+  };
+  add("mode", run.mode);
+  add("execution", run.executionMode);
+  if (run.phase) add("phase", operationPhaseLabel(run.phase));
+  if (run.from && run.to) add("route", `${run.from} -> ${run.to}`);
+  add("intent", run.entryIntent);
+  add("terminal", run.terminalState);
+  add("artifact", run.terminalArtifact);
+  add("stop", run.stopReason);
+  return facts;
 });
 const chatColumnStyle = computed(() => {
   if (embed.value || traceCollapsed.value) return {};
@@ -1879,6 +1911,37 @@ function onEventSelect(index: number): void {
 .iv__operation-detail {
   flex: 1 1 14rem;
   color: #fde68a;
+}
+
+.iv__operation-facts {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  min-width: 0;
+  padding-left: 1.55rem;
+}
+
+.iv__operation-fact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.2rem;
+  max-width: 100%;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 0.06rem 0.34rem;
+  color: var(--k-fg-muted, #94a3b8);
+  font-size: 0.68rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.iv__operation-fact-label {
+  color: var(--k-fg-subtle, #64748b);
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .iv__operation--completed .iv__operation-dot {

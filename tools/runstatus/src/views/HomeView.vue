@@ -241,6 +241,20 @@
                 >
                   {{ operationDetail(s) }}
                 </div>
+                <div
+                  v-if="operationFacts(s).length > 0"
+                  class="home__operation-summary"
+                  data-testid="session-operation-summary"
+                >
+                  <span
+                    v-for="fact in operationFacts(s)"
+                    :key="fact.label"
+                    class="home__operation-fact"
+                  >
+                    <span class="home__operation-fact-label">{{ fact.label }}</span>
+                    {{ fact.value }}
+                  </span>
+                </div>
               </div>
               <span v-else class="home__row-muted">—</span>
             </td>
@@ -328,6 +342,8 @@ const sessionsError = ref<string | null>(null);
 
 const startingPath = ref<string | null>(null);
 const startError = ref<string | null>(null);
+
+type OperationFact = { label: string; value: string };
 const startErrorPath = ref<string | null>(null);
 const drivingSession = ref<string | null>(null);
 
@@ -593,6 +609,24 @@ function operationDetail(s: SessionHeader): string {
   if (run.phase) return `phase ${operationPhaseLabel(run.phase)}`;
   if (run.from && run.to) return `${run.from} -> ${run.to}`;
   return run.entry_intent ? `intent ${run.entry_intent}` : "";
+}
+
+function operationFacts(s: SessionHeader): OperationFact[] {
+  const run = s.operation_run;
+  if (!run) return [];
+  const facts: OperationFact[] = [];
+  const add = (label: string, value?: string) => {
+    if (value && value.trim()) facts.push({ label, value });
+  };
+  add("mode", run.mode);
+  add("execution", run.execution_mode);
+  if (run.phase) add("phase", operationPhaseLabel(run.phase));
+  if (run.from && run.to) add("route", `${run.from} -> ${run.to}`);
+  add("intent", run.entry_intent);
+  add("terminal", run.terminal_state);
+  add("artifact", run.terminal_artifact);
+  add("stop", run.stop_reason);
+  return facts;
 }
 
 function operationArtifactHref(s: SessionHeader): string {
@@ -1028,6 +1062,36 @@ function errMsg(e: unknown): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.home__operation-summary {
+  margin-top: 0.32rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.24rem;
+  min-width: 0;
+}
+
+.home__operation-fact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.2rem;
+  max-width: 100%;
+  border: 1px solid var(--k-border-subtle, #334155);
+  border-radius: 4px;
+  padding: 0.06rem 0.3rem;
+  color: var(--k-fg-muted, #94a3b8);
+  font-size: 0.68rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.home__operation-fact-label {
+  color: var(--k-fg-subtle, #64748b);
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .home__row-muted {

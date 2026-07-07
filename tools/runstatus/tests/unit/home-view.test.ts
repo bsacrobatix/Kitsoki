@@ -253,6 +253,11 @@ describe("HomeView", () => {
           operation_id: "bugfix_full",
           title: "Fix bug",
           status: "waiting",
+          mode: "autonomous",
+          execution_mode: "one-shot",
+          phase: "run_regression",
+          from: "idle",
+          to: "bugfix.reproduce",
           stop_reason: "needs-human",
           stop_detail: "Regression gate was never RED.",
           terminal_state: "__exit__needs-human",
@@ -273,6 +278,13 @@ describe("HomeView", () => {
     expect(operations[0].find("[data-testid='session-operation-detail']").text()).toContain(
       "Regression gate was never RED."
     );
+    const summary = operations[0].find("[data-testid='session-operation-summary']");
+    expect(summary.text()).toContain("mode autonomous");
+    expect(summary.text()).toContain("execution one-shot");
+    expect(summary.text()).toContain("phase run regression");
+    expect(summary.text()).toContain("route idle -> bugfix.reproduce");
+    expect(summary.text()).toContain("terminal __exit__needs-human");
+    expect(summary.text()).toContain("stop needs-human");
     expect(operations[1].text()).toBe("—");
     wrapper.unmount();
   });
