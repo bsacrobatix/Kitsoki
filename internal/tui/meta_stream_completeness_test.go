@@ -1,12 +1,16 @@
 package tui_test
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/host"
 	tuipkg "kitsoki/internal/tui"
+	"kitsoki/internal/tui/shot"
 )
 
 // TestMetaStream_FullThoughtReachesScrollback drives real MetaStreamMsg
@@ -169,6 +173,76 @@ func TestMetaStream_OnPathNoActivityIsSilent(t *testing.T) {
 		"a turn with no intermediate thought must not render a thinking line")
 	require.NotContains(t, visible, finalAnswer,
 		"the terminal answer is the room's to present, never an activity line")
+}
+
+func TestMetaStream_LadderNoticesReachTranscript(t *testing.T) {
+	forceTrueColor(t)
+	orch, sid := setupCloak(t)
+	m := buildModel(t, orch, sid)
+	rm, ok := tuipkg.ExtractRootModel(m)
+	require.True(t, ok)
+	rm = resizeForTest(rm, 120, 24)
+	tuipkg.SetModeForTest(&rm, tuipkg.ModeAwaitingLLM)
+	tuipkg.ClearTranscriptPendingForTest(&rm)
+
+	feed := func(ev host.StreamEvent) {
+		next, _ := rm.Update(tuipkg.MetaStreamMsg{Event: ev})
+		rm, ok = tuipkg.ExtractRootModel(next)
+		require.True(t, ok)
+	}
+
+	feed(host.StreamEvent{
+		Type:     "ladder_attempt",
+		Text:     "Kitsoki harness: trying claude-native / opus via claude (effort low).",
+		Backend:  "claude",
+		Provider: "claude-native",
+		Model:    "opus",
+		Effort:   "low",
+	})
+	feed(host.StreamEvent{
+		Type:     "ladder_fallback",
+		Subtype:  "infra",
+		Text:     "Kitsoki harness: claude-native / opus via claude (effort low) failed (infra); backing it off and moving to the next configured model. Error: Claude Code needs login",
+		Backend:  "claude",
+		Provider: "claude-native",
+		Model:    "opus",
+		Effort:   "low",
+		Error:    "Claude Code needs login",
+	})
+	feed(host.StreamEvent{
+		Type:     "ladder_attempt",
+		Text:     "Kitsoki harness: trying codex-native / gpt-5.5 via codex (effort low).",
+		Backend:  "codex",
+		Provider: "codex-native",
+		Model:    "gpt-5.5",
+		Effort:   "low",
+	})
+
+	visible := stripStyles(tuipkg.GetTranscriptContent(rm))
+	require.Contains(t, visible, "Kitsoki harness: trying claude-native / opus via claude",
+		"the first provider attempt must be visible before raw provider output")
+	require.Contains(t, visible, "Claude Code needs login",
+		"the fallback notice must include the failed provider's visible error")
+	require.Contains(t, visible, "Kitsoki harness: trying codex-native / gpt-5.5 via codex",
+		"the next provider attempt must be visible so the user sees the ladder movement")
+
+	if dir := os.Getenv("KITSOKI_TUI_LADDER_ARTIFACT_DIR"); dir != "" {
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		frame := tuipkg.ComposeFrame(&rm, 120, 24)
+		frameJSON, err := json.MarshalIndent(frame, "", "  ")
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "frame.json"), frameJSON, 0o644))
+
+		screenANSI := tuipkg.GetTranscriptContent(rm) + "\n" + rm.View()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "screen.ansi"), []byte(screenANSI), 0o644))
+
+		pngFile, err := os.Create(filepath.Join(dir, "00-ladder-fallback.png"))
+		require.NoError(t, err)
+		err = shot.RenderPNG(pngFile, screenANSI, shot.Options{Cols: 120, Rows: 24})
+		closeErr := pngFile.Close()
+		require.NoError(t, err)
+		require.NoError(t, closeErr)
+	}
 }
 
 func TestMetaStream_OnPathFlushesWhileLiveLineActive(t *testing.T) {

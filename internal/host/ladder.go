@@ -420,6 +420,7 @@ outer:
 				EscalatedBy: escalatedBy,
 			}
 			attemptCtx := WithLadderRung(ctx, rung)
+			emitLadderAttemptNotice(attemptCtx, rung)
 			res, err := once(attemptCtx, args)
 			attempts++
 			prevModelIdx = mi
@@ -432,6 +433,7 @@ outer:
 				winner := rung
 				summary.Winner = &winner
 				summary.EscalatedBy = escalatedBy
+				emitLadderSuccessNotice(ctx, rung)
 				return res, nil, summary
 			}
 			if isContextDone(err) {
@@ -445,6 +447,7 @@ outer:
 				// A config/argument error: no rung can fix it. Return the
 				// ORIGINAL error untouched (not wrapped in an "exhausted"
 				// message) so the story sees the real problem immediately.
+				emitLadderStopNotice(ctx, rung, kind, errText)
 				return res, err, summary
 			}
 			if kind == FailureInfra {
@@ -452,9 +455,11 @@ outer:
 				markLadderBackoff(statePath, key, backoff)
 				break // abandon remaining efforts for this model; next model.
 			}
-			// FailureCapability: fall through to the next effort (or, once
-			// efforts are exhausted, the outer loop naturally advances to
-			// the next model).
+			if kind == FailureCapability {
+				emitLadderFallbackNotice(ctx, rung, kind, errText)
+			}
+			// FailureCapability: fall through to the next effort (or, once efforts
+			// are exhausted, the outer loop naturally advances to the next model).
 		}
 	}
 
@@ -474,6 +479,7 @@ outer:
 		res.Error = fmt.Sprintf("host: harness ladder exhausted after %d attempt(s) across %d model(s); last error: %s",
 			len(summary.Attempts), len(cfg.Models), res.Error)
 	}
+	emitLadderExhaustedNotice(ctx, summary, res.Error)
 	res.FailureKind = FailureNone // terminal: nothing further the ladder can do
 	return res, nil, summary
 }
@@ -642,8 +648,12 @@ func ladderInt(v any) (int, error) {
 }
 
 func emitLadderFallbackNotice(ctx context.Context, rung LadderRung, kind FailureKind, errText string) {
-	text := fmt.Sprintf("Provider fallback: %s/%s (%s) hit %s; backing it off and trying the next configured profile.",
-		rung.Provider, rung.Model, rung.Backend, kind)
+	text := fmt.Sprintf("Kitsoki harness: %s failed (%s); ", formatLadderRung(rung), kind)
+	if kind == FailureInfra {
+		text += "backing it off and moving to the next configured model."
+	} else {
+		text += "trying the next effort/model rung."
+	}
 	if errText != "" {
 		text += " Error: " + errText
 	}
@@ -665,6 +675,113 @@ func emitLadderFallbackNotice(ctx context.Context, rung LadderRung, kind Failure
 		Effort:   rung.Effort,
 		Error:    errText,
 	})
+}
+
+func emitLadderAttemptNotice(ctx context.Context, rung LadderRung) {
+	text := "Kitsoki harness: trying " + formatLadderRung(rung) + "."
+	slog.InfoContext(ctx, "agent.ladder.attempt",
+		"backend", rung.Backend,
+		"provider", rung.Provider,
+		"model", rung.Model,
+		"effort", rung.Effort,
+		"escalated_by", rung.EscalatedBy,
+	)
+	appendAgentNoticeEvent(ctx, time.Now(), storeAgentNotice{
+		Type:     "ladder_attempt",
+		Text:     text,
+		Backend:  rung.Backend,
+		Provider: rung.Provider,
+		Model:    rung.Model,
+		Effort:   rung.Effort,
+	})
+}
+
+func emitLadderSuccessNotice(ctx context.Context, rung LadderRung) {
+	text := "Kitsoki harness: " + formatLadderRung(rung) + " succeeded."
+	slog.InfoContext(ctx, "agent.ladder.success",
+		"backend", rung.Backend,
+		"provider", rung.Provider,
+		"model", rung.Model,
+		"effort", rung.Effort,
+		"escalated_by", rung.EscalatedBy,
+	)
+	appendAgentNoticeEvent(ctx, time.Now(), storeAgentNotice{
+		Type:     "ladder_success",
+		Text:     text,
+		Backend:  rung.Backend,
+		Provider: rung.Provider,
+		Model:    rung.Model,
+		Effort:   rung.Effort,
+	})
+}
+
+func emitLadderStopNotice(ctx context.Context, rung LadderRung, kind FailureKind, errText string) {
+	text := fmt.Sprintf("Kitsoki harness: stopped after %s failed (%s).", formatLadderRung(rung), kind)
+	if errText != "" {
+		text += " Error: " + errText
+	}
+	slog.WarnContext(ctx, "agent.ladder.stop",
+		"backend", rung.Backend,
+		"provider", rung.Provider,
+		"model", rung.Model,
+		"effort", rung.Effort,
+		"failure_kind", string(kind),
+		"error", errText,
+	)
+	appendAgentNoticeEvent(ctx, time.Now(), storeAgentNotice{
+		Type:     "ladder_stop",
+		Subtype:  string(kind),
+		Text:     text,
+		Backend:  rung.Backend,
+		Provider: rung.Provider,
+		Model:    rung.Model,
+		Effort:   rung.Effort,
+		Error:    errText,
+	})
+}
+
+func emitLadderExhaustedNotice(ctx context.Context, summary LadderSummary, errText string) {
+	notice := storeAgentNotice{
+		Type: "ladder_exhausted",
+		Text: fmt.Sprintf("Kitsoki harness: ladder exhausted after %d attempt(s).", len(summary.Attempts)),
+	}
+	if len(summary.Attempts) > 0 {
+		last := summary.Attempts[len(summary.Attempts)-1]
+		notice.Subtype = string(last.Failure)
+		notice.Backend = last.Rung.Backend
+		notice.Provider = last.Rung.Provider
+		notice.Model = last.Rung.Model
+		notice.Effort = last.Rung.Effort
+		notice.Error = errText
+	}
+	if errText != "" {
+		notice.Text += " Last error: " + errText
+	}
+	slog.WarnContext(ctx, "agent.ladder.exhausted",
+		"attempts", len(summary.Attempts),
+		"error", errText,
+	)
+	appendAgentNoticeEvent(ctx, time.Now(), notice)
+}
+
+func formatLadderRung(rung LadderRung) string {
+	provider := strings.TrimSpace(rung.Provider)
+	if provider == "" {
+		provider = "ambient"
+	}
+	model := strings.TrimSpace(rung.Model)
+	if model == "" {
+		model = "default model"
+	}
+	backend := strings.TrimSpace(rung.Backend)
+	if backend == "" {
+		backend = "claude"
+	}
+	label := provider + " / " + model + " via " + backend
+	if strings.TrimSpace(rung.Effort) != "" {
+		label += " (effort " + rung.Effort + ")"
+	}
+	return label
 }
 
 // ── failure classification ──────────────────────────────────────────────
