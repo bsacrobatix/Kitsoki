@@ -71,6 +71,15 @@ func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
 			selfProvisionWorkspace: true,
 		},
 		{
+			appPath:                repoStoriesDevStoryAppPath(t),
+			capsule:                "clean-repo",
+			name:                   "dev_story_fix_tests_completed",
+			sourceFlow:             repoPath(t, "../../stories/dev-story/flows/fix_tests_autonomous.yaml"),
+			expectOperationPolicy:  "tests__fix_tests",
+			expectOperationStatus:  "completed",
+			expectTerminalArtifact: "tests__report_path",
+		},
+		{
 			appPath:                repoStoriesDemoVideoLoopAppPath(t),
 			capsule:                "clean-repo",
 			name:                   "demo_video_loop_visual_qa_completed",

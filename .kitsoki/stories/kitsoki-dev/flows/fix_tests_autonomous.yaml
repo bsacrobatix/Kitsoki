@@ -35,3 +35,6 @@ turns:
       core__tests__test_cmd: "make test"
 
 expect_no_errors: true
+expect_operation_policy: core__tests__fix_tests
+expect_operation_status: completed
+expect_terminal_artifact: core__tests__report_path

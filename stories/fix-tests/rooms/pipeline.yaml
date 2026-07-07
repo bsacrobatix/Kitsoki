@@ -56,6 +56,7 @@ states:
     on:
       start:
         - target: running_executing
+          operation: fix_tests
       look:
         - target: .
 

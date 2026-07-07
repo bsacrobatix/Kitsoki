@@ -1580,6 +1580,11 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 			turnErr error
 			call    intent.IntentCall
 		)
+		preTurnHistory, histErr := rig.st.LoadHistory(rig.sid)
+		if histErr != nil {
+			return nil, fmt.Errorf("turn %d: pre-turn history: %w", i+1, histErr)
+		}
+		preTurnEventCount := len(preTurnHistory)
 
 		// Pre-turn job snapshot for expect_jobs diffing. We capture the set
 		// of every job ID currently in the store along with its status; a
@@ -1658,8 +1663,6 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 			return nil, fmt.Errorf("turn %d: RunIntent: %w", i+1, turnErr)
 		}
 
-		allEvents = append(allEvents, outcome.Events...)
-
 		// AdvanceClock: move the fake clock forward, then wait for scheduler + listener.
 		if turn.AdvanceClock != "" {
 			// app.ParseDuration accepts Go-std durations plus Nd (days), so
@@ -1677,6 +1680,16 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 				cancel()
 			}
 		}
+
+		postTurnHistory, histErr := rig.st.LoadHistory(rig.sid)
+		if histErr != nil {
+			return nil, fmt.Errorf("turn %d: post-turn history: %w", i+1, histErr)
+		}
+		turnEvents := []store.Event{}
+		if preTurnEventCount <= len(postTurnHistory) {
+			turnEvents = append(turnEvents, postTurnHistory[preTurnEventCount:]...)
+		}
+		allEvents = append(allEvents, turnEvents...)
 
 		tr := TurnResult{TurnIndex: i}
 
@@ -1718,7 +1731,7 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 				}
 			}
 			tr.NewState = currentState
-			tr.Events = outcome.Events
+			tr.Events = turnEvents
 			tr.Passed = len(tr.Failures) == 0
 			if outcome.Mode == orchestrator.ModeRejected {
 				hasError = true
@@ -1752,7 +1765,7 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 		if outcome.View != "" {
 			tr.View = outcome.View
 		}
-		tr.Events = outcome.Events
+		tr.Events = turnEvents
 
 		// expect_state.
 		if turn.ExpectState != "" && string(currentState) != turn.ExpectState {

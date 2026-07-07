@@ -58,6 +58,15 @@ func TestOnCompleteTarget_HappyPath(t *testing.T) {
 		App:   app.AppMeta{ID: "target-happy"},
 		Root:  "init",
 		Hosts: []string{"host.test.echo"},
+		Operations: map[string]*app.OperationPolicy{
+			"demo_run": {
+				Title:            "Demo run",
+				Mode:             "autonomous",
+				ExecutionMode:    "one-shot",
+				RunInBackground:  true,
+				TerminalArtifact: "x",
+			},
+		},
 		World: map[string]app.VarDef{
 			"x":           {Type: "string", Default: ""},
 			"last_job_id": {Type: "string", Default: ""},
@@ -69,7 +78,7 @@ func TestOnCompleteTarget_HappyPath(t *testing.T) {
 			"init": {
 				View: app.LegacyView("init"),
 				On: map[string][]app.Transition{
-					"enter": {{Target: "executing"}},
+					"enter": {{Target: "executing", Operation: "demo_run"}},
 				},
 			},
 			"executing": {
@@ -144,6 +153,13 @@ func TestOnCompleteTarget_HappyPath(t *testing.T) {
 		"on_complete: target should have advanced session out of executing")
 	require.Equal(t, "applied-and-entered", finalJourney.World.Vars["x"],
 		"on_complete set: should apply, then target on_enter should overwrite")
+	handle, ok := finalJourney.World.Vars[app.OperationRunWorldKey].(map[string]any)
+	require.True(t, ok, "operation run handle should be present")
+	require.Equal(t, "completed", handle["status"])
+	require.Equal(t, "demo_run", handle["policy_id"])
+	require.Equal(t, "done", handle["terminal_state"])
+	require.Equal(t, "x", handle["terminal_artifact"])
+	require.Equal(t, "applied-and-entered", handle["terminal_artifact_handle"])
 
 	// Observer must have fired with NewState=done.
 	require.NotNil(t, obs.last(), "observer must be notified of background turn")
