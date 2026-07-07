@@ -969,8 +969,9 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 		"slots": map[string]any(call.Slots),
 	}))
 	operationRunID := strings.TrimSpace(winningTr.tr.Operation)
-	if ev, ok := m.operationRunStartedEvent(operationRunID, string(cur), resolvedTarget, call.Intent, false); ok {
-		events = append(events, ev)
+	if updatedWorld, operationEvents := m.startOperationRun(operationRunID, string(cur), resolvedTarget, call.Intent, false, newWorld); len(operationEvents) > 0 {
+		newWorld = updatedWorld
+		events = append(events, operationEvents...)
 	}
 
 	events = append(events, operationPrelude...)
@@ -1015,8 +1016,9 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 		}
 		events = append(events, devs...)
 	}
-	if ev, ok := m.operationRunCompletedEvent(operationRunID, finalState); ok {
-		events = append(events, ev)
+	if updatedWorld, operationEvents := m.completeActiveOperationRun(finalState, newWorld); len(operationEvents) > 0 {
+		newWorld = updatedWorld
+		events = append(events, operationEvents...)
 	}
 	if newWorld.Operation != nil && newWorld.Operation.State != finalState {
 		op := newWorld.Operation
@@ -1403,8 +1405,9 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 			"synthetic": true,
 		}))
 		operationRunID := strings.TrimSpace(winningTr.tr.Operation)
-		if ev, ok := m.operationRunStartedEvent(operationRunID, state, resolvedTarget, dispatchName, true); ok {
-			events = append(events, ev)
+		if updatedWorld, operationEvents := m.startOperationRun(operationRunID, state, resolvedTarget, dispatchName, true, newWorld); len(operationEvents) > 0 {
+			newWorld = updatedWorld
+			events = append(events, operationEvents...)
 		}
 		events = append(events, ev2...)
 		for _, p := range stateExitPathsAware(state, resolvedTarget) {
@@ -1438,23 +1441,34 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 			}
 			events = append(events, subEvs...)
 		}
-		if ev, ok := m.operationRunCompletedEvent(operationRunID, state); ok {
-			events = append(events, ev)
+		if updatedWorld, operationEvents := m.completeActiveOperationRun(state, newWorld); len(operationEvents) > 0 {
+			newWorld = updatedWorld
+			events = append(events, operationEvents...)
 		}
 	}
 
 	return state, newWorld, hostCalls, saySB.String(), events, nil
 }
 
-func (m *machineImpl) operationRunStartedEvent(policyID, from, to, intentName string, synthetic bool) (store.Event, bool) {
+func (m *machineImpl) startOperationRun(policyID, from, to, intentName string, synthetic bool, w world.World) (world.World, []store.Event) {
 	policyID = strings.TrimSpace(policyID)
 	if policyID == "" || m.appDef == nil {
-		return store.Event{}, false
+		return w, nil
 	}
 	policy, ok := m.appDef.Operations[policyID]
 	if !ok || policy == nil {
-		return store.Event{}, false
+		return w, nil
 	}
+	payload := operationRunRunningPayload(policyID, policy, from, to, intentName, synthetic)
+	next := w.Clone()
+	next.SetDurable(app.OperationRunWorldKey, cloneMapAny(payload))
+	return next, []store.Event{
+		newEvent(store.OperationRunStarted, payload),
+		operationRunWorldUpdateEvent(payload),
+	}
+}
+
+func operationRunRunningPayload(policyID string, policy *app.OperationPolicy, from, to, intentName string, synthetic bool) map[string]any {
 	payload := operationRunPolicyPayload(policy, true)
 	payload["operation_id"] = policyID
 	payload["policy_id"] = policyID
@@ -1465,18 +1479,44 @@ func (m *machineImpl) operationRunStartedEvent(policyID, from, to, intentName st
 	if synthetic {
 		payload["synthetic"] = true
 	}
-	return newEvent(store.OperationRunStarted, payload), true
+	return payload
 }
 
-func (m *machineImpl) operationRunCompletedEvent(policyID, terminalState string) (store.Event, bool) {
-	policyID = strings.TrimSpace(policyID)
-	if policyID == "" || m.appDef == nil || !m.isTerminalState(terminalState) {
-		return store.Event{}, false
+func (m *machineImpl) completeActiveOperationRun(terminalState string, w world.World) (world.World, []store.Event) {
+	if m.appDef == nil || !m.isTerminalState(terminalState) {
+		return w, nil
+	}
+	active, ok := operationRunHandle(w.Vars[app.OperationRunWorldKey])
+	if !ok || strings.TrimSpace(operationRunString(active, "status")) != "running" {
+		return w, nil
+	}
+	policyID := strings.TrimSpace(operationRunString(active, "policy_id"))
+	if policyID == "" {
+		policyID = strings.TrimSpace(operationRunString(active, "operation_id"))
+	}
+	if policyID == "" {
+		return w, nil
 	}
 	policy, ok := m.appDef.Operations[policyID]
 	if !ok || policy == nil {
-		return store.Event{}, false
+		return w, nil
 	}
+
+	payload := operationRunCompletedPayload(policyID, policy, terminalState)
+	completedHandle := cloneMapAny(active)
+	for k, v := range payload {
+		completedHandle[k] = v
+	}
+
+	next := w.Clone()
+	next.SetDurable(app.OperationRunWorldKey, completedHandle)
+	return next, []store.Event{
+		newEvent(store.OperationRunCompleted, payload),
+		operationRunWorldUpdateEvent(completedHandle),
+	}
+}
+
+func operationRunCompletedPayload(policyID string, policy *app.OperationPolicy, terminalState string) map[string]any {
 	payload := operationRunPolicyPayload(policy, false)
 	payload["operation_id"] = policyID
 	payload["policy_id"] = policyID
@@ -1485,7 +1525,7 @@ func (m *machineImpl) operationRunCompletedEvent(policyID, terminalState string)
 	if policy.TerminalArtifact != "" {
 		payload["terminal_artifact"] = policy.TerminalArtifact
 	}
-	return newEvent(store.OperationRunCompleted, payload), true
+	return payload
 }
 
 func operationRunPolicyPayload(policy *app.OperationPolicy, includeRunPolicy bool) map[string]any {
@@ -1517,6 +1557,65 @@ func operationRunPolicyPayload(policy *app.OperationPolicy, includeRunPolicy boo
 		}
 	}
 	return payload
+}
+
+func operationRunWorldUpdateEvent(handle map[string]any) store.Event {
+	return newEvent(store.EffectApplied, map[string]any{
+		"set": map[string]any{
+			app.OperationRunWorldKey: cloneMapAny(handle),
+		},
+	})
+}
+
+func operationRunHandle(v any) (map[string]any, bool) {
+	handle, ok := v.(map[string]any)
+	if !ok || len(handle) == 0 {
+		return nil, false
+	}
+	return handle, true
+}
+
+func operationRunString(handle map[string]any, key string) string {
+	v, ok := handle[key]
+	if !ok || v == nil {
+		return ""
+	}
+	switch s := v.(type) {
+	case string:
+		return s
+	default:
+		return fmt.Sprint(s)
+	}
+}
+
+func cloneMapAny(src map[string]any) map[string]any {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]any, len(src))
+	for k, v := range src {
+		dst[k] = cloneAny(v)
+	}
+	return dst
+}
+
+func cloneAny(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		return cloneMapAny(x)
+	case []string:
+		out := make([]string, len(x))
+		copy(out, x)
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, item := range x {
+			out[i] = cloneAny(item)
+		}
+		return out
+	default:
+		return x
+	}
 }
 
 func (m *machineImpl) isTerminalState(statePath string) bool {

@@ -2118,7 +2118,7 @@ func validateOperationPolicies(file string, def *AppDef, errs *[]error) {
 //     write-capable agent (an effect's agent declaring external_side_effect: true):
 //     the static and runtime postures must agree at the read-only floor;
 //   - on every state, rejects any effect that `set:`s the engine-reserved
-//     write_mode_scope world key (a story must not be able to self-grant write mode).
+//     engine-owned world keys that stories must not forge.
 func validateWriteMode(file string, def *AppDef, errs *[]error) {
 	addErr := func(msg string) {
 		*errs = append(*errs, &ValidationError{File: file, Message: msg})
@@ -2132,15 +2132,15 @@ func validateWriteMode(file string, def *AppDef, errs *[]error) {
 			}
 			statePath := joinPath(prefix, name)
 
-			// The reserved-key `set:` guard applies to EVERY state regardless of
-			// its own write_mode (any room could try to forge a grant).
+			// The engine-reserved `set:` guard applies to EVERY state regardless
+			// of its own write_mode (any room could try to forge runtime state).
 			for _, eff := range s.OnEnter {
-				checkReservedScopeSet(file, fmt.Sprintf("state %q on_enter", statePath), eff, errs)
+				checkEngineReservedSet(file, fmt.Sprintf("state %q on_enter", statePath), eff, errs)
 			}
 			for _, intentName := range sortedKeys(s.On) {
 				for _, tr := range s.On[intentName] {
 					for _, eff := range tr.Effects {
-						checkReservedScopeSet(file, fmt.Sprintf("state %q intent %q", statePath, intentName), eff, errs)
+						checkEngineReservedSet(file, fmt.Sprintf("state %q intent %q", statePath, intentName), eff, errs)
 					}
 				}
 			}
@@ -2217,11 +2217,9 @@ func validateInterceptDrive(file string, def *AppDef, errs *[]error) {
 	walk("", def.States)
 }
 
-// checkReservedScopeSet rejects an effect that `set:`s the engine-reserved
-// write_mode_scope world key. The runtime owns that key (the write-mode gate sets
-// and clears it on grant / turn / session boundary); a story `set:`-ing it would
-// be a self-granted write mode, defeating the gate. location prefixes the error.
-func checkReservedScopeSet(file, location string, eff Effect, errs *[]error) {
+// checkEngineReservedSet rejects effects that `set:` engine-owned world keys.
+// location prefixes the error.
+func checkEngineReservedSet(file, location string, eff Effect, errs *[]error) {
 	if eff.Set == nil {
 		return
 	}
@@ -2230,6 +2228,13 @@ func checkReservedScopeSet(file, location string, eff Effect, errs *[]error) {
 			File: file,
 			Message: fmt.Sprintf("%s: set: %q is engine-reserved — a story may not self-grant write mode by writing the scope key; "+
 				"it is set only by the write-mode gate on an operator grant", location, WriteModeScopeWorldKey),
+		})
+	}
+	if _, ok := eff.Set[OperationRunWorldKey]; ok {
+		*errs = append(*errs, &ValidationError{
+			File: file,
+			Message: fmt.Sprintf("%s: set: %q is engine-reserved — start or update operation runs with transition operation policies instead",
+				location, OperationRunWorldKey),
 		})
 	}
 }

@@ -319,6 +319,61 @@ func TestImports_Cycle(t *testing.T) {
 	require.Contains(t, err.Error(), "cycle detected")
 }
 
+func TestImports_FoldsOperationPolicies(t *testing.T) {
+	root := t.TempDir()
+	childDir := mkdirT(t, root, "child")
+	mustWrite(t, childDir, "app.yaml", `app: { id: child, version: 0.1.0 }
+world:
+  done_artifact: { type: map, default: {} }
+intents:
+  go: {}
+operations:
+  demo_run:
+    title: "Demo run"
+    mode: autonomous
+    execution_mode: one-shot
+    run_in_background: true
+    terminal_artifact: done_artifact
+    phase_summary:
+      from: [done_artifact]
+root: idle
+states:
+  idle:
+    on:
+      go:
+        - target: done
+          operation: demo_run
+  done:
+    terminal: true
+`)
+
+	parentDir := mkdirT(t, root, "parent")
+	mustWrite(t, parentDir, "app.yaml", `app: { id: parent, version: 0.1.0 }
+world: {}
+intents:
+  run: {}
+imports:
+  bf:
+    source: ../child
+    entry: idle
+root: start
+states:
+  start:
+    on:
+      run:
+        - target: bf
+`)
+
+	def, err := Load(filepath.Join(parentDir, "app.yaml"))
+	require.NoError(t, err)
+	require.Contains(t, def.Operations, "bf__demo_run")
+	require.Equal(t, "bf__done_artifact", def.Operations["bf__demo_run"].TerminalArtifact)
+	require.Equal(t, []string{"bf__done_artifact"}, def.Operations["bf__demo_run"].PhaseSummary.From)
+
+	idle := def.States["bf"].States["idle"]
+	require.Equal(t, "bf__demo_run", idle.On["bf__go"][0].Operation)
+}
+
 // TestImports_MultiLayerIfaceComposition exercises multi-layer iface composition:
 // a grandparent rebinds a grandchild's host_interface by spelling
 // the alias-prefixed name (`<middle-alias>__<iface>`). The grandchild

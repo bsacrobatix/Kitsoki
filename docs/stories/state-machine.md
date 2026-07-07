@@ -649,10 +649,14 @@ states:
 
 When a transition with `operation:` fires, the machine emits an
 `operation.run_started` trace event carrying the selected policy, entry intent,
-and source/target states. If the same turn settles at a terminal state, it also
-emits `operation.completed` with the terminal state and configured terminal
-artifact key. These rows are annotations for operation drivers and UI surfaces;
-they do not mutate world state and do not replace background host jobs.
+and source/target states, and writes the engine-owned `world.operation_run`
+handle with `status: running`. When the run later reaches any terminal state,
+including on a later user turn, the machine emits `operation.completed` with
+the terminal state and configured terminal artifact key, then updates
+`world.operation_run` to `status: completed`. Imported child policies are
+lifted and referenced under the import alias (`bf__bugfix_full`, for example).
+These rows and the replayable handle are for operation drivers and UI surfaces;
+they do not replace background host jobs.
 
 Two scopes live alongside `world`:
 

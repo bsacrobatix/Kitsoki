@@ -40,3 +40,9 @@ turns:
     # since judge_mode != human) — the trace's second recorded transition was this
     # same internal auto-fire, not a distinct user turn, so it's dropped here
     # rather than replayed as a second (now invalid, already-terminal) intent.
+
+expect_terminal: true
+expect_operation_policy: bugfix_triage
+expect_operation_status: completed
+expect_terminal_artifact: triage_verdict
+expect_no_errors: true
