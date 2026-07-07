@@ -267,6 +267,74 @@ func TestOperationRunCompletesOnLaterTerminalTurn(t *testing.T) {
 	requireOperationRunStatus(t, replayed.World, "completed")
 }
 
+func TestOperationRunCompletesOnImportedExitToNonTerminalParent(t *testing.T) {
+	def := &app.AppDef{
+		App:  app.AppMeta{ID: "operation-run-import-exit"},
+		Root: "start",
+		Operations: map[string]*app.OperationPolicy{
+			"child__demo_run": {
+				Title:            "Demo run",
+				Mode:             "autonomous",
+				ExecutionMode:    "one-shot",
+				RunInBackground:  true,
+				TerminalArtifact: "child__done_artifact",
+			},
+		},
+		Intents: map[string]app.Intent{
+			"go":     {},
+			"finish": {},
+		},
+		States: map[string]*app.State{
+			"start": {
+				On: map[string][]app.Transition{
+					"go": {{
+						Target:    "child/working",
+						Operation: "child__demo_run",
+					}},
+				},
+			},
+			"child": {
+				Type:    "compound",
+				Initial: "working",
+				States: map[string]*app.State{
+					"working": {
+						On: map[string][]app.Transition{
+							"finish": {{
+								Target:                    "parent",
+								OperationExit:             "done",
+								OperationExitPolicyPrefix: "child__",
+								Effects: []app.Effect{{
+									Set: map[string]any{
+										"child__done_artifact": map[string]any{"summary_title": "done"},
+									},
+								}},
+							}},
+						},
+					},
+				},
+			},
+			"parent": {},
+		},
+	}
+	m := mustNew(t, def)
+
+	started, err := m.Turn(context.Background(), "start", world.New(), intent.IntentCall{Intent: "go"})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("child.working"), started.NewState)
+	requireOperationRunStatus(t, started.World, "running")
+
+	completed, err := m.Turn(context.Background(), "child.working", started.World, intent.IntentCall{Intent: "finish"})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("parent"), completed.NewState)
+	requireOperationRunStatus(t, completed.World, "completed")
+	requireEventKind(t, completed.Events, store.OperationRunCompleted)
+	requireNoEventKind(t, completed.Events, store.OperationRunStarted)
+	payloads := eventPayloads(t, completed.Events, store.OperationRunCompleted)
+	require.Len(t, payloads, 1)
+	require.Equal(t, "__exit__done", payloads[0]["terminal_state"])
+	require.Equal(t, "child__done_artifact", payloads[0]["terminal_artifact"])
+}
+
 func TestOperationRunPhaseProgressFromSummaryKeys(t *testing.T) {
 	def := &app.AppDef{
 		App:  app.AppMeta{ID: "operation-run-phase-progress"},

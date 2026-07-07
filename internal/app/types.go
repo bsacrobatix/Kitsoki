@@ -1124,6 +1124,15 @@ type Transition struct {
 	// app-level operation policy. This is separate from state.operation, which
 	// controls task-local world overlays.
 	Operation string `yaml:"operation,omitempty"`
+	// OperationExit is internal loader metadata set when an imported child's
+	// @exit:<name> transition is rewritten to a parent state. It lets the
+	// runtime complete a matching imported operation even though the parent
+	// target is usually not a terminal state. Not author-facing YAML.
+	OperationExit string `yaml:"-"`
+	// OperationExitPolicyPrefix is the active operation ID prefix that must
+	// match before OperationExit completes a run. It is re-prefixed through
+	// nested imports alongside Operation refs.
+	OperationExitPolicyPrefix string `yaml:"-"`
 	// When is the guard expression (expr-lang). Empty = always true.
 	When string `yaml:"when,omitempty"`
 	// Default marks this as the catch-all branch when no prior guard matched.

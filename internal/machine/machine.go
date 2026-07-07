@@ -837,6 +837,8 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 			Events:          events,
 		}, nil
 	}
+	operationExitReason := strings.TrimSpace(winningTr.tr.OperationExit)
+	operationExitPolicyPrefix := strings.TrimSpace(winningTr.tr.OperationExitPolicyPrefix)
 
 	// 4. Resolve the target state path.
 	// Target may be a template expression like "{{ world.prev_state }}"; evaluate it first.
@@ -1017,6 +1019,10 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 		events = append(events, devs...)
 	}
 	if updatedWorld, operationEvents := m.advanceActiveOperationRunPhaseProgress(finalState, newWorld); len(operationEvents) > 0 {
+		newWorld = updatedWorld
+		events = append(events, operationEvents...)
+	}
+	if updatedWorld, operationEvents := m.completeActiveOperationRunForExit(operationExitReason, operationExitPolicyPrefix, newWorld); len(operationEvents) > 0 {
 		newWorld = updatedWorld
 		events = append(events, operationEvents...)
 	}
@@ -1290,6 +1296,8 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 		if winningTr == nil {
 			return "", world.World{}, nil, "", nil, fmt.Errorf("emit_intent %q at %q: no transition arm matched (intent has no on: handler, or all guards failed)", emit.Name, state)
 		}
+		operationExitReason := strings.TrimSpace(winningTr.tr.OperationExit)
+		operationExitPolicyPrefix := strings.TrimSpace(winningTr.tr.OperationExitPolicyPrefix)
 
 		// Resolve target.
 		rawTarget := winningTr.tr.Target
@@ -1449,6 +1457,10 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 			newWorld = updatedWorld
 			events = append(events, operationEvents...)
 		}
+		if updatedWorld, operationEvents := m.completeActiveOperationRunForExit(operationExitReason, operationExitPolicyPrefix, newWorld); len(operationEvents) > 0 {
+			newWorld = updatedWorld
+			events = append(events, operationEvents...)
+		}
 		if updatedWorld, operationEvents := m.completeActiveOperationRun(state, newWorld); len(operationEvents) > 0 {
 			newWorld = updatedWorld
 			events = append(events, operationEvents...)
@@ -1547,6 +1559,23 @@ func (m *machineImpl) completeActiveOperationRun(terminalState string, w world.W
 	if m.appDef == nil || !m.isTerminalState(terminalState) {
 		return w, nil
 	}
+	return m.finishActiveOperationRun(terminalState, "", w)
+}
+
+func (m *machineImpl) completeActiveOperationRunForExit(exitReason, policyPrefix string, w world.World) (world.World, []store.Event) {
+	exitReason = strings.TrimSpace(exitReason)
+	policyPrefix = strings.TrimSpace(policyPrefix)
+	if m.appDef == nil || exitReason == "" || policyPrefix == "" {
+		return w, nil
+	}
+	terminalState := exitReason
+	if !strings.HasPrefix(terminalState, "__exit__") {
+		terminalState = "__exit__" + terminalState
+	}
+	return m.finishActiveOperationRun(terminalState, policyPrefix, w)
+}
+
+func (m *machineImpl) finishActiveOperationRun(terminalState, policyPrefix string, w world.World) (world.World, []store.Event) {
 	active, ok := operationRunHandle(w.Vars[app.OperationRunWorldKey])
 	if !ok || strings.TrimSpace(operationRunString(active, "status")) != "running" {
 		return w, nil
@@ -1556,6 +1585,9 @@ func (m *machineImpl) completeActiveOperationRun(terminalState string, w world.W
 		policyID = strings.TrimSpace(operationRunString(active, "operation_id"))
 	}
 	if policyID == "" {
+		return w, nil
+	}
+	if policyPrefix != "" && !strings.HasPrefix(policyID, policyPrefix) {
 		return w, nil
 	}
 	policy, ok := m.appDef.Operations[policyID]
