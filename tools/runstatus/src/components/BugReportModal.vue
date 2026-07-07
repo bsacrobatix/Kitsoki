@@ -378,7 +378,7 @@ function onCancel(): void {
             :disabled="store.status === 'submitting'"
             @click="onSubmit"
           >
-            {{ store.status === "submitting" ? "Filing…" : "File bug" }}
+            {{ store.status === "submitting" ? "Checking privacy…" : "File bug" }}
           </button>
         </footer>
       </div>

@@ -219,6 +219,29 @@ describe("MetaButton — Report bug", () => {
     expect(open.attributes("title")).toBe("Open the filed bug");
   });
 
+  it("shows privacy feedback in the filed toast", async () => {
+    const store = useBugReportStore();
+    vi.spyOn(store, "trigger").mockResolvedValue();
+    store.filed = {
+      id: "2026-06-12T130405Z-foyer-button-does-nothing",
+      path: "issues/bugs/2026-06-12T130405Z-foyer-button-does-nothing.md",
+      privacy: {
+        status: "passed_with_substitutions",
+        message: "deterministic substitutions applied",
+        follow_up_path:
+          "issues/bugs/2026-06-12T130405Z-privacy-strip-sensitive-bug-report-data-high-entropy.md",
+      },
+    };
+    store.status = "filed";
+
+    const wrapper = mount(MetaButton);
+    await flushPromises();
+
+    const privacy = wrapper.get('[data-testid="bug-toast-privacy"]').text();
+    expect(privacy).toContain("deterministic substitutions applied");
+    expect(privacy).toContain("privacy-strip-sensitive-bug-report-data");
+  });
+
   it("opens the filed bug path when the filed toast open action is clicked", async () => {
     const store = useBugReportStore();
     vi.spyOn(store, "trigger").mockResolvedValue();

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/ghagent/bugdeck"
 	"kitsoki/internal/host"
 	"kitsoki/internal/runstatus"
@@ -332,6 +333,78 @@ func TestBugReport_NoScreenshot_SkipsFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(artifactsDir, "har.json")); err != nil {
 		t.Fatalf("har.json should still exist: %v", err)
+	}
+}
+
+func TestBugReport_PrivacySubstitutesHighEntropyAndFilesFollowUp(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{recorder: bugTestRecorder(), bugRoot: root}
+	secret := "mF9xQ2rT8vLp0AqZ7nByC4dEuGhJkM3sW6yI"
+
+	res, rerr := s.bugReport(map[string]any{
+		"title": "opaque token leak",
+		"body":  "response contained " + secret,
+	})
+	if rerr != nil {
+		t.Fatalf("bugReport error: %+v", rerr)
+	}
+	id := res.(map[string]any)["id"].(string)
+	md, err := os.ReadFile(filepath.Join(root, "issues", "bugs", id+".md"))
+	if err != nil {
+		t.Fatalf("read filed bug: %v", err)
+	}
+	if strings.Contains(string(md), secret) {
+		t.Fatalf("filed bug leaked high-entropy value: %s", md)
+	}
+	if !strings.Contains(string(md), "[REDACTED]") {
+		t.Fatalf("filed bug should contain deterministic replacement: %s", md)
+	}
+	privacy := res.(map[string]any)["privacy"].(bugprivacy.Result)
+	if privacy.FollowUpPath == "" {
+		t.Fatalf("expected follow-up path in privacy result: %#v", privacy)
+	}
+	followUp, err := os.ReadFile(filepath.Join(root, privacy.FollowUpPath))
+	if err != nil {
+		t.Fatalf("read follow-up: %v", err)
+	}
+	if strings.Contains(string(followUp), secret) || !strings.Contains(string(followUp), "high_entropy") {
+		t.Fatalf("follow-up should be depersonalized and categorized: %s", followUp)
+	}
+}
+
+func TestBugReport_PrivacyAgentFailureBlocksOriginalAndFilesFollowUp(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{
+		recorder: bugTestRecorder(),
+		bugRoot:  root,
+		bugPrivacyChecker: bugprivacy.CheckFunc(func(context.Context, bugprivacy.Report, []bugprivacy.Finding) (bugprivacy.Decision, error) {
+			return bugprivacy.Decision{Pass: false, Categories: []string{"customer_data"}, Reason: "contains customer data"}, nil
+		}),
+	}
+
+	_, rerr := s.bugReport(map[string]any{
+		"title": "customer report",
+		"body":  "body intentionally bland for test",
+	})
+	if rerr == nil {
+		t.Fatal("expected privacy failure")
+	}
+	if !strings.Contains(rerr.Message, "privacy check failed") || !strings.Contains(rerr.Message, "depersonalized follow-up") {
+		t.Fatalf("unexpected error: %#v", rerr)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "issues", "bugs"))
+	if err != nil {
+		t.Fatalf("read bugs dir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected only the follow-up bug, got %d entries", len(entries))
+	}
+	data, err := os.ReadFile(filepath.Join(root, "issues", "bugs", entries[0].Name()))
+	if err != nil {
+		t.Fatalf("read follow-up: %v", err)
+	}
+	if strings.Contains(string(data), "customer report") || !strings.Contains(string(data), "customer_data") {
+		t.Fatalf("follow-up should omit original title and include category: %s", data)
 	}
 }
 

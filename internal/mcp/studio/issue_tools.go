@@ -37,6 +37,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/reportmeta"
 	rsserver "kitsoki/internal/runstatus/server"
 	"kitsoki/internal/tui/blocks"
@@ -155,13 +156,14 @@ type IssueCreateArgs struct {
 // human can recover it — so the agent's self-improvement loop never silently
 // drops a gap. The caller checks LocalPath to know it went to disk, not GitHub.
 type IssueCreateResult struct {
-	OK          bool     `json:"ok"`
-	URL         string   `json:"url"`
-	Number      int      `json:"number"`
-	Labels      []string `json:"labels"`                 // the final labels applied (source-autonomous first)
-	Assets      []string `json:"assets"`                 // relative paths of the rendered assets written
-	LocalPath   string   `json:"local_path,omitempty"`   // set when filing fell back to an artifacts-dir file
-	FilingError string   `json:"filing_error,omitempty"` // the GitHub filing error that triggered the fallback
+	OK          bool               `json:"ok"`
+	URL         string             `json:"url"`
+	Number      int                `json:"number"`
+	Labels      []string           `json:"labels"`                 // the final labels applied (source-autonomous first)
+	Assets      []string           `json:"assets"`                 // relative paths of the rendered assets written
+	LocalPath   string             `json:"local_path,omitempty"`   // set when filing fell back to an artifacts-dir file
+	FilingError string             `json:"filing_error,omitempty"` // the GitHub filing error that triggered the fallback
+	Privacy     *bugprivacy.Result `json:"privacy,omitempty"`
 }
 
 func (srv *Server) handleIssueCreate(
@@ -231,6 +233,27 @@ func (srv *Server) handleIssueCreate(
 	// 3. Compose the body and file it.
 	body := reportmeta.AppendFence(composeIssueBody(args.Body, contextMD, assetMD), srv.issueRuntimeSnapshot(args))
 	labels := withAutonomousLabel(args.Labels)
+	privacyFollowUpRoot := filepath.Join(srv.resolveArtifactsDir(), "privacy-followups")
+	safeReport, privacy, perr := bugprivacy.Check(ctx, srv.bugPrivacyChecker, bugprivacy.Report{
+		Surface:       "mcp",
+		Target:        "kitsoki",
+		Title:         args.Title,
+		Body:          body,
+		Component:     "studio-mcp",
+		ArtifactNames: assetPaths,
+	}, rsserver.BugScrubOptions(), privacyFollowUpRoot, "")
+	if perr != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("issue.create: privacy check: %v", perr)), nil, nil
+	}
+	if privacy.Blocked() {
+		msg := privacy.Message
+		if privacy.FollowUpPath != "" {
+			msg += "; depersonalized follow-up filed at " + privacy.FollowUpPath
+		}
+		return buildToolError(ErrBadRequest, "issue.create: "+msg), nil, nil
+	}
+	args.Title = safeReport.Title
+	body = safeReport.Body
 	res, err := srv.issueFiler(ctx, IssueRequest{
 		Repo:   args.Repo,
 		Title:  args.Title,
@@ -252,15 +275,17 @@ func (srv *Server) handleIssueCreate(
 			Assets:      assetPaths,
 			LocalPath:   localPath,
 			FilingError: err.Error(),
+			Privacy:     &privacy,
 		}, nil
 	}
 
 	return nil, IssueCreateResult{
-		OK:     true,
-		URL:    res.URL,
-		Number: res.Number,
-		Labels: labels,
-		Assets: assetPaths,
+		OK:      true,
+		URL:     res.URL,
+		Number:  res.Number,
+		Labels:  labels,
+		Assets:  assetPaths,
+		Privacy: &privacy,
 	}, nil
 }
 

@@ -150,6 +150,13 @@
       </span>
       <template v-else-if="bugReport.status === 'filed' && bugReport.filed">
         <span data-testid="bug-toast-path">Filed: {{ filedTarget }}</span>
+        <span
+          v-if="privacyStatus"
+          class="meta-launcher__toast-detail"
+          data-testid="bug-toast-privacy"
+        >
+          Privacy: {{ privacyStatus }}
+        </span>
         <button
           v-if="filedTarget"
           class="meta-launcher__toast-link"
@@ -279,6 +286,14 @@ const bugReportHint = computed(() =>
 const filedTarget = computed(
   () => bugReport.filed?.url || bugReport.filed?.path || ""
 );
+const privacyStatus = computed(() => {
+  const privacy = bugReport.filed?.privacy;
+  if (!privacy) return "";
+  const message = privacy.message || privacy.status;
+  return privacy.follow_up_path
+    ? `${message}; follow-up ${privacy.follow_up_path}`
+    : message;
+});
 
 async function refreshBugStatus(): Promise<void> {
   if (isSnapshot) return;
@@ -745,6 +760,7 @@ onUnmounted(() => {
   margin-bottom: 0.35rem;
   max-width: 22rem;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
   background: var(--k-bg-widget, #0d1b2a);
@@ -754,6 +770,11 @@ onUnmounted(() => {
   font-size: 0.72rem;
   color: var(--k-fg, #e2e8f0);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.meta-launcher__toast-detail {
+  color: var(--k-fg-muted, #94a3b8);
+  overflow-wrap: anywhere;
 }
 
 .meta-launcher--topbar .meta-launcher__toast {

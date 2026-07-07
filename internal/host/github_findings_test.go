@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/host"
 )
 
@@ -120,6 +121,35 @@ func writeFindingsBundle(t *testing.T) string {
 		},
 	})
 	return dir
+}
+
+func mutateFindingSummary(t *testing.T, dir, id, summary string) {
+	t.Helper()
+	path := filepath.Join(dir, "findings.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	items, _ := doc["items"].([]any)
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if ok && item["id"] == id {
+			item["summary"] = summary
+			updated, err := json.MarshalIndent(doc, "", "  ")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, append(updated, '\n'), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+	}
+	t.Fatalf("finding %q not found", id)
 }
 
 // githubFindingsAPI stubs the native GitHub API: releases succeed, each issue
@@ -676,6 +706,83 @@ func TestGitHubFileFindings_DryRun(t *testing.T) {
 	}
 	if string(before) != string(after) {
 		t.Error("dry-run must not modify findings.json")
+	}
+}
+
+func TestGitHubFileFindings_DryRunPrivacySubstitutesHighEntropy(t *testing.T) {
+	dir := writeFindingsBundle(t)
+	secret := "mF9xQ2rT8vLp0AqZ7nByC4dEuGhJkM3sW6yI"
+	mutateFindingSummary(t, dir, "finding-1", "Leaked opaque token "+secret)
+
+	res, err := host.GitHubFileFindings(context.Background(), host.FindingsFilingInput{
+		RunDir: dir, RepoRoot: dir, Repo: "o/r", DryRun: true,
+	})
+	if err != nil {
+		t.Fatalf("GitHubFileFindings dry-run: %v", err)
+	}
+	var first *host.FindingFilingOutcome
+	for i := range res.Outcomes {
+		if res.Outcomes[i].FindingID == "finding-1" {
+			first = &res.Outcomes[i]
+			break
+		}
+	}
+	if first == nil || first.Status != "dry-run" {
+		t.Fatalf("missing dry-run finding-1 outcome: %#v", res.Outcomes)
+	}
+	if strings.Contains(first.Body, secret) || !strings.Contains(first.Body, "[REDACTED]") {
+		t.Fatalf("dry-run body should preview high-entropy substitution: %s", first.Body)
+	}
+	if first.Privacy == nil || len(first.Privacy.Findings) == 0 {
+		t.Fatalf("expected privacy findings in dry-run outcome: %#v", first)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "privacy-followups")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run must not write privacy follow-ups, stat err=%v", err)
+	}
+}
+
+func TestGitHubFileFindings_PrivacyFailureBlocksFinding(t *testing.T) {
+	dir := writeFindingsBundle(t)
+	checker := bugprivacy.CheckFunc(func(context.Context, bugprivacy.Report, []bugprivacy.Finding) (bugprivacy.Decision, error) {
+		return bugprivacy.Decision{Pass: false, Categories: []string{"customer_data"}, Reason: "contains customer data"}, nil
+	})
+
+	res, err := host.GitHubFileFindings(context.Background(), host.FindingsFilingInput{
+		RunDir: dir, RepoRoot: dir, Repo: "o/r", PrivacyChecker: checker,
+	})
+	if err != nil {
+		t.Fatalf("GitHubFileFindings: %v", err)
+	}
+	if res.Filed != 0 || res.Failed != 2 || res.Excluded != 3 {
+		t.Fatalf("filed/failed/excluded = %d/%d/%d, want 0/2/3", res.Filed, res.Failed, res.Excluded)
+	}
+	for _, out := range res.Outcomes {
+		if out.Status == "excluded" {
+			continue
+		}
+		if out.Status != "failed" || out.Privacy == nil || !out.Privacy.Blocked() {
+			t.Fatalf("non-excluded outcome should be privacy-failed: %#v", out)
+		}
+		if strings.Contains(out.Title, "verify gate") || strings.Contains(out.Title, "onboarding config") {
+			t.Fatalf("privacy-failed outcome title should be depersonalized: %#v", out)
+		}
+	}
+	followUpDir := filepath.Join(dir, "privacy-followups", "issues", "bugs")
+	entries, err := os.ReadDir(followUpDir)
+	if err != nil {
+		t.Fatalf("read follow-up dir: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least one depersonalized follow-up")
+	}
+	for _, entry := range entries {
+		data, err := os.ReadFile(filepath.Join(followUpDir, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "verify gate loops forever") || !strings.Contains(string(data), "customer_data") {
+			t.Fatalf("follow-up should omit original finding details and include category: %s", data)
+		}
 	}
 }
 

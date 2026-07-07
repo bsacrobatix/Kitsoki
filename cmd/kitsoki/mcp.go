@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
 	"kitsoki/internal/kitrepo"
@@ -195,6 +196,7 @@ docs land):
 				})
 			}
 
+			var studioBugPrivacyChecker bugprivacy.Checker
 			// Seed operator-declared harness profiles and launch policy from the
 			// project webconfig. A missing config contributes nothing; a present
 			// but invalid config is an operator error, and for launch policy must
@@ -209,6 +211,7 @@ docs land):
 			if policy := agentLaunchPolicyFromConfig(webCfg); policy.Enabled {
 				sess.SetAgentLaunchPolicy(policy)
 			}
+			studioBugPrivacyChecker = bugPrivacyCheckerFromConfig(webCfg, "")
 
 			// Optionally bind an initial authoring workspace. Loading is
 			// best-effort: a load/validation error is cached on the handle (so a
@@ -232,6 +235,9 @@ docs land):
 			srvOpts := []studio.ServerOption{
 				studio.WithIssueFiler(ghIssueFiler),
 				studio.WithImportResolver(studioImportResolver(storiesDir)),
+			}
+			if studioBugPrivacyChecker != nil {
+				srvOpts = append(srvOpts, studio.WithBugPrivacyChecker(studioBugPrivacyChecker))
 			}
 			if readOnly {
 				srvOpts = append(srvOpts, studio.ReadOnly())

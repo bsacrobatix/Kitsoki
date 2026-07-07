@@ -1448,6 +1448,14 @@ export interface BugReportResult {
   url?: string;
   /** True when the report was filed as a GitHub issue. */
   github?: boolean;
+  /** Privacy gate outcome returned by the server. */
+  privacy?: BugPrivacyResult;
+}
+
+export interface BugPrivacyResult {
+  status: string;
+  message?: string;
+  follow_up_path?: string;
 }
 
 // Re-export for components that import AnnotationEntry from this module.

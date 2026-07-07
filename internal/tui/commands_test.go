@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
@@ -172,6 +174,38 @@ func TestBugCommandGitHubUploadsArtifacts(t *testing.T) {
 	}
 	if strings.Contains(*issueBody, "not uploaded to GitHub") {
 		t.Fatalf("upload path must not use local-only disclaimer: %s", *issueBody)
+	}
+}
+
+func TestBugCommandPrivacyFailureBlocksOriginal(t *testing.T) {
+	root := t.TempDir()
+	orch := testCloakOrchestrator(t)
+	checker := bugprivacy.CheckFunc(func(context.Context, bugprivacy.Report, []bugprivacy.Finding) (bugprivacy.Decision, error) {
+		return bugprivacy.Decision{Pass: false, Categories: []string{"email"}, Reason: "contains email"}, nil
+	})
+	m := NewRootModel(orch, app.SessionID("session-123"), "../../testdata/apps/cloak/app.yaml", "", WithBugRoot(root), WithBugPrivacyChecker(checker))
+	m.currentState = "foyer"
+
+	body, _, cmd := BugCommand{}.Run(m, []string{"private", "contact"})
+	if cmd != nil {
+		t.Fatal("bug command should be synchronous")
+	}
+	if !strings.Contains(body, "privacy check failed") || !strings.Contains(body, "depersonalized follow-up") {
+		t.Fatalf("unexpected command body: %s", body)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "issues", "bugs"))
+	if err != nil {
+		t.Fatalf("read follow-up dir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected only follow-up bug, got %d", len(entries))
+	}
+	data, err := os.ReadFile(filepath.Join(root, "issues", "bugs", entries[0].Name()))
+	if err != nil {
+		t.Fatalf("read follow-up: %v", err)
+	}
+	if strings.Contains(string(data), "private contact") || !strings.Contains(string(data), "email") {
+		t.Fatalf("follow-up should be depersonalized: %s", data)
 	}
 }
 

@@ -28,6 +28,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"kitsoki/internal/bugprivacy"
+	"kitsoki/internal/runstatus/harscrub"
 )
 
 // FindingsFilingInput is the input to GitHubFileFindings.
@@ -43,22 +46,34 @@ type FindingsFilingInput struct {
 	KitsokiRev string // short HEAD sha recorded in the kitsoki metadata block
 	FiledBy    string // filed_by recorded in the kitsoki metadata block
 
+	// PrivacyChecker optionally runs the provider-backed privacy gate before a
+	// finding is searched/filed. Nil keeps deterministic scrubbing only.
+	PrivacyChecker bugprivacy.Checker
+	// PrivacyFollowUpRoot controls where depersonalized follow-up bugs are
+	// written. Empty defaults to <run-dir>/privacy-followups. DryRun never writes
+	// follow-ups and never calls PrivacyChecker.
+	PrivacyFollowUpRoot string
+	// ScrubOptions overrides the deterministic scrubber defaults. Empty fields
+	// are filled with the standard HOME + built-in secret patterns.
+	ScrubOptions harscrub.ScrubOptions
+
 	now func() time.Time // test seam; nil = time.Now
 }
 
 // FindingFilingOutcome is the per-finding result row.
 type FindingFilingOutcome struct {
-	FindingID   string   `json:"finding_id"`
-	Title       string   `json:"title"`
-	Scenario    string   `json:"scenario,omitempty"`
-	Status      string   `json:"status"` // filed | skipped | failed | dry-run | excluded
-	IssueURL    string   `json:"issue_url,omitempty"`
-	IssueNumber string   `json:"issue_number,omitempty"`
-	CommentURL  string   `json:"comment_url,omitempty"`
-	Error       string   `json:"error,omitempty"`
-	Reason      string   `json:"reason,omitempty"`
-	Evidence    []string `json:"evidence,omitempty"`
-	Body        string   `json:"body,omitempty"` // rendered body (dry-run only)
+	FindingID   string             `json:"finding_id"`
+	Title       string             `json:"title"`
+	Scenario    string             `json:"scenario,omitempty"`
+	Status      string             `json:"status"` // filed | skipped | failed | dry-run | excluded
+	IssueURL    string             `json:"issue_url,omitempty"`
+	IssueNumber string             `json:"issue_number,omitempty"`
+	CommentURL  string             `json:"comment_url,omitempty"`
+	Error       string             `json:"error,omitempty"`
+	Reason      string             `json:"reason,omitempty"`
+	Evidence    []string           `json:"evidence,omitempty"`
+	Body        string             `json:"body,omitempty"` // rendered body (dry-run only)
+	Privacy     *bugprivacy.Result `json:"privacy,omitempty"`
 }
 
 // FindingsFilingResult is what GitHubFileFindings returns. Per-finding failures
@@ -152,6 +167,32 @@ func GitHubFileFindings(ctx context.Context, in FindingsFilingInput) (FindingsFi
 			out.Evidence = append(out.Evidence, f.Path)
 		}
 		out.Evidence = append(out.Evidence, refs...)
+		traceRef := fmt.Sprintf("product-journey://%s/%s", str(runJSON["run_id"]), str(item["id"]))
+		safeTitle, safeBody, privacy, blocked, perr := checkFindingPrivacy(ctx, in, runDir, title, body, traceRef, out.Evidence)
+		if perr != nil {
+			out.Title = "privacy-check-error finding"
+			out.Status = "failed"
+			out.Error = perr.Error()
+			out.Privacy = &privacy
+			res.Failed++
+			res.Outcomes = append(res.Outcomes, out)
+			continue
+		}
+		title = safeTitle
+		body = safeBody
+		out.Privacy = &privacy
+		if blocked {
+			out.Title = "privacy-blocked finding"
+			out.Status = "failed"
+			out.Error = privacy.Message
+			if privacy.FollowUpPath != "" {
+				out.Error += "; depersonalized follow-up filed at " + privacy.FollowUpPath
+			}
+			res.Failed++
+			res.Outcomes = append(res.Outcomes, out)
+			continue
+		}
+		out.Title = title
 
 		if in.DryRun {
 			out.Status = "dry-run"
@@ -160,7 +201,6 @@ func GitHubFileFindings(ctx context.Context, in FindingsFilingInput) (FindingsFi
 			continue
 		}
 
-		traceRef := fmt.Sprintf("product-journey://%s/%s", str(runJSON["run_id"]), str(item["id"]))
 		related, err := findRelatedFindingIssue(ctx, in.Repo, title, traceRef)
 		if err != nil {
 			out.Status = "failed"
@@ -254,6 +294,47 @@ func GitHubFileFindings(ctx context.Context, in FindingsFilingInput) (FindingsFi
 		_ = changed // findings.json is always rewritten to stamp the filing block
 	}
 	return res, nil
+}
+
+func checkFindingPrivacy(ctx context.Context, in FindingsFilingInput, runDir, title, body, traceRef string, evidence []string) (string, string, bugprivacy.Result, bool, error) {
+	report := bugprivacy.Report{
+		Surface:       "product-journey",
+		Target:        "kitsoki",
+		Title:         title,
+		Body:          body,
+		Component:     "product-journey",
+		TraceRef:      traceRef,
+		ArtifactNames: append([]string(nil), evidence...),
+	}
+	opts := findingPrivacyScrubOptions(in.ScrubOptions)
+	if in.DryRun {
+		safe, findings := bugprivacy.Sanitize(report, opts)
+		privacy := bugprivacy.Result{
+			Status:   "dry_run",
+			Message:  "privacy dry-run; deterministic substitutions previewed",
+			Findings: findings,
+		}
+		if len(findings) == 0 {
+			privacy.Message = "privacy dry-run; no deterministic substitutions"
+		}
+		return safe.Title, safe.Body, privacy, false, nil
+	}
+	followUpRoot := strings.TrimSpace(in.PrivacyFollowUpRoot)
+	if followUpRoot == "" {
+		followUpRoot = filepath.Join(runDir, "privacy-followups")
+	}
+	safe, privacy, err := bugprivacy.Check(ctx, in.PrivacyChecker, report, opts, followUpRoot, in.FiledBy)
+	return safe.Title, safe.Body, privacy, privacy.Blocked(), err
+}
+
+func findingPrivacyScrubOptions(opts harscrub.ScrubOptions) harscrub.ScrubOptions {
+	if opts.Home == "" {
+		opts.Home = os.Getenv("HOME")
+	}
+	if opts.SecretPatterns == nil {
+		opts.SecretPatterns = harscrub.DefaultSecretPatterns()
+	}
+	return opts
 }
 
 func findingEvidenceAssetRecords(assets map[string]string) []map[string]any {

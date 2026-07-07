@@ -14,6 +14,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/bugfile"
+	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/host"
 	"kitsoki/internal/reportmeta"
 	"kitsoki/internal/runstatus/harscrub"
@@ -41,9 +42,34 @@ func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 		return m.bugBlock(fmt.Sprintf("could not resolve target root: %v", err)), m, nil
 	}
 
+	safeReport, privacy, perr := bugprivacy.Check(context.Background(), m.bugPrivacyChecker, bugprivacy.Report{
+		Surface:    "tui",
+		Target:     "kitsoki",
+		Title:      title,
+		Body:       body,
+		ReproSteps: nil,
+		Component:  "tui",
+		TraceRef:   scrubBugText(m.traceFilePath),
+		ArtifactNames: []string{
+			"transcript.md",
+			"context.json",
+		},
+	}, harscrub.ScrubOptions{
+		Home:           os.Getenv("HOME"),
+		SecretPatterns: harscrub.DefaultSecretPatterns(),
+	}, root, os.Getenv("USER"))
+	if perr != nil {
+		return m.bugBlock(fmt.Sprintf("privacy check failed: %v", perr)), m, nil
+	}
+	if privacy.Blocked() {
+		return m.bugBlock(privacy.Message + privacyFollowUpSuffix(privacy)), m, nil
+	}
+	title = safeReport.Title
+	body = safeReport.Body
+
 	if strings.TrimSpace(m.bugTicketRepo) != "" {
 		msg := m.fileGitHubBug(root, title, body)
-		return m.bugBlock(msg), m, nil
+		return m.bugBlock(msg + " (" + privacyCommandStatus(privacy) + ")"), m, nil
 	}
 	runtime := reportmeta.Capture(root, m.appDefForBug())
 
@@ -75,7 +101,7 @@ func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 		return m.bugBlock(fmt.Sprintf("filed %s, but could not append artifact links: %v", relPath, err)), m, nil
 	}
 
-	return m.bugBlock(fmt.Sprintf("filed %s", filepath.ToSlash(relPath))), m, nil
+	return m.bugBlock(fmt.Sprintf("filed %s (%s)", filepath.ToSlash(relPath), privacyCommandStatus(privacy))), m, nil
 }
 
 func (m RootModel) fileGitHubBug(root, title, body string) string {
@@ -243,6 +269,21 @@ func scrubBugText(s string) string {
 		Home:           os.Getenv("HOME"),
 		SecretPatterns: harscrub.DefaultSecretPatterns(),
 	})
+}
+
+func privacyCommandStatus(privacy bugprivacy.Result) string {
+	msg := strings.TrimSpace(privacy.Message)
+	if msg == "" {
+		msg = "privacy check passed"
+	}
+	return "privacy check started; " + msg + privacyFollowUpSuffix(privacy)
+}
+
+func privacyFollowUpSuffix(privacy bugprivacy.Result) string {
+	if strings.TrimSpace(privacy.FollowUpPath) == "" {
+		return ""
+	}
+	return "; depersonalized follow-up filed at " + filepath.ToSlash(privacy.FollowUpPath)
 }
 
 func (m RootModel) bugBlock(line string) string {

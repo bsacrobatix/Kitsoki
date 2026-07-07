@@ -585,6 +585,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 					tui.WithJournalWriter(jw),
 					tui.WithTraceHistory(func() (store.History, error) { return s.LoadHistory(sid) }),
 					tui.WithBugTicketRepo(ticketRepo),
+					tui.WithBugPrivacyChecker(bugPrivacyCheckerFromConfig(webCfg, appPath)),
 				}, tuiOptions...)
 				if projectStartupNotice != "" {
 					tuiOptions = append(tuiOptions, tui.WithStartupNotice(projectStartupNotice))
@@ -762,6 +763,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				tui.WithInitialTypedView(initialTypedView, initialTypedEnv, initialTypedRR),
 				tui.WithTraceHistory(func() (store.History, error) { return s.LoadHistory(sid) }),
 				tui.WithBugTicketRepo(ticketRepo),
+				tui.WithBugPrivacyChecker(bugPrivacyCheckerFromConfig(webCfg, appPath)),
 			}
 			if projectStartupNotice != "" {
 				tuiOptions = append(tuiOptions, tui.WithStartupNotice(projectStartupNotice))

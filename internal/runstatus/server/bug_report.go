@@ -33,6 +33,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/bugfile"
+	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/ghagent/bugdeck"
 	"kitsoki/internal/host"
 	"kitsoki/internal/reportmeta"
@@ -101,9 +102,16 @@ func (s *Server) bugStatus(ctx context.Context) (any, *rpcError) {
 	}, nil
 }
 
-// bugReport handles runstatus.bug.report. See the file comment for the
-// request/result contract.
+// bugReport handles runstatus.bug.report for tests and legacy in-package
+// callers. The HTTP/RPC dispatcher uses bugReportContext so provider-backed
+// privacy checks receive the live request context.
 func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
+	return s.bugReportContext(context.Background(), params)
+}
+
+// bugReportContext handles runstatus.bug.report. See the file comment for the
+// request/result contract.
+func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (any, *rpcError) {
 	title := strings.TrimSpace(stringParam(params, "title"))
 	if title == "" {
 		title = "web: bug report " + time.Now().UTC().Format("2006-01-02T15:04:05Z")
@@ -160,11 +168,42 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 
 	png := decodeScreenshot(stringParam(params, "screenshot_png_b64"))
 
+	report := bugprivacy.Report{
+		Surface:    "web",
+		Target:     nonEmpty(stringParam(params, "target"), "kitsoki"),
+		Title:      title,
+		Body:       body,
+		ReproSteps: repro,
+		Component:  nonEmpty(stringParam(params, "component"), "web"),
+		TraceRef:   traceRef,
+		ArtifactNames: bugArtifactNames(map[string][]byte{
+			"screenshot.png":       png,
+			"har.json":             harJSON,
+			"rrweb.json":           rrwebJSON,
+			"console.json":         consoleJSON,
+			"trace.redacted.jsonl": traceJSON,
+		}),
+	}
+	safeReport, privacy, perr := bugprivacy.Check(ctx, s.bugPrivacyChecker, report, scrubOpts, root, stringParam(params, "filed_by"))
+	if perr != nil {
+		return nil, serverErr(fmt.Errorf("bug privacy check: %w", perr))
+	}
+	if privacy.Blocked() {
+		return nil, serverErr(fmt.Errorf("%s%s", privacy.Message, privacyFollowUpSuffix(privacy)))
+	}
+	title = safeReport.Title
+	body = safeReport.Body
+	repro = safeReport.ReproSteps
+	traceRef = safeReport.TraceRef
+	params = cloneParams(params)
+	params["target"] = safeReport.Target
+	params["component"] = safeReport.Component
+
 	// GitHub mode (kitsoki web --ticket-repo): file a real GitHub issue and save
 	// evidence under .artifacts for developer-local review, instead of writing a
 	// local issues/bugs/<id>.md file.
 	if s.ticketRepo != "" {
-		return s.fileBugToGitHub(params, title, body, severity, traceRef, repro, harJSON, png, rrwebJSON, consoleJSON, traceJSON, runtime)
+		return s.fileBugToGitHub(params, title, body, severity, traceRef, repro, harJSON, png, rrwebJSON, consoleJSON, traceJSON, runtime, privacy)
 	}
 
 	id, relPath, absPath, err := bugfile.Create(bugfile.CreateRequest{
@@ -226,7 +265,7 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 		return nil, serverErr(fmt.Errorf("append artifacts section: %w", appendErr))
 	}
 
-	return map[string]any{"id": id, "path": relPath}, nil
+	return map[string]any{"id": id, "path": relPath, "privacy": privacy}, nil
 }
 
 // fileBugToGitHub files the bug as a real GitHub issue on s.ticketRepo: it
@@ -234,7 +273,7 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 // those paths to host.GitHubFileBug with UploadArtifacts set so the evidence is
 // uploaded as release assets and linked by public URL in the issue, and returns
 // the issue url. No local issues/bugs/*.md file is written in this mode.
-func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, traceRef string, repro []string, harJSON, png, rrwebJSON, consoleJSON, traceJSON []byte, runtime reportmeta.Snapshot) (any, *rpcError) {
+func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, traceRef string, repro []string, harJSON, png, rrwebJSON, consoleJSON, traceJSON []byte, runtime reportmeta.Snapshot, privacy bugprivacy.Result) (any, *rpcError) {
 	prefix := "bug-" + time.Now().UTC().Format("20060102T150405.000000000Z")
 	artifactsRoot, displayRoot, err := s.githubBugArtifactsRoot()
 	if err != nil {
@@ -318,7 +357,7 @@ func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, t
 	// deposit failure must not fail the (already-filed) bug report.
 	s.depositAgentEvidence(res.Number, rrwebJSON, harJSON)
 
-	return map[string]any{"id": res.Number, "url": res.URL, "github": true}, nil
+	return map[string]any{"id": res.Number, "url": res.URL, "github": true, "privacy": privacy}, nil
 }
 
 func (s *Server) bugRuntimeSnapshot(root string, params map[string]any) reportmeta.Snapshot {
@@ -583,6 +622,31 @@ func nonEmpty(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+func privacyFollowUpSuffix(privacy bugprivacy.Result) string {
+	if strings.TrimSpace(privacy.FollowUpPath) == "" {
+		return ""
+	}
+	return "; depersonalized follow-up filed at " + privacy.FollowUpPath
+}
+
+func bugArtifactNames(files map[string][]byte) []string {
+	out := make([]string, 0, len(files))
+	for name, data := range files {
+		if len(data) > 0 {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func cloneParams(params map[string]any) map[string]any {
+	out := make(map[string]any, len(params))
+	for k, v := range params {
+		out[k] = v
+	}
+	return out
 }
 
 // stringSliceParam reads a []string param from a JSON array of strings.
