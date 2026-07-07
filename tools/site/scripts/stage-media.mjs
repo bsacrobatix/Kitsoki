@@ -45,12 +45,27 @@ if (!fs.existsSync(indexPath)) {
 }
 const index = JSON.parse(fs.readFileSync(indexPath, "utf8"));
 
+function makeWritableIfExists(file) {
+  try {
+    const mode = fs.statSync(file).mode;
+    fs.chmodSync(file, mode | 0o200);
+  } catch (err) {
+    if (err?.code !== "ENOENT") throw err;
+  }
+}
+
+function copyStagedFile(src, dest) {
+  makeWritableIfExists(dest);
+  fs.copyFileSync(src, dest);
+}
+
 fs.rmSync(mediaDir, { recursive: true, force: true });
 fs.rmSync(decksDir, { recursive: true, force: true });
 
 let videos = 0;
 let embeds = 0;
 const missing = [];
+const stagedDecks = new Set();
 for (const f of index.features) {
   if (!f.demo) continue;
   if (f.demo.external) continue;
@@ -68,7 +83,10 @@ for (const f of index.features) {
     const dest = path.join(decksDir, path.basename(f.demo.embed.deckHtml));
     if (fs.existsSync(src)) {
       fs.mkdirSync(decksDir, { recursive: true });
-      fs.copyFileSync(src, dest);
+      if (!stagedDecks.has(dest)) {
+        copyStagedFile(src, dest);
+        stagedDecks.add(dest);
+      }
       embeds++;
     } else {
       missing.push(`${f.id}: ${f.demo.embed.deckHtml} (bundle it once: slidey bundle <deck> ${f.demo.embed.deckHtml})`);
@@ -88,7 +106,7 @@ for (const f of index.features) {
 
   if (posterShot) {
     fs.mkdirSync(out, { recursive: true });
-    fs.copyFileSync(path.join(srcDir, posterShot), path.join(out, "poster.png"));
+    copyStagedFile(path.join(srcDir, posterShot), path.join(out, "poster.png"));
   }
 
   if (embedded) {
@@ -98,16 +116,16 @@ for (const f of index.features) {
 
   if (shots.length > 0) {
     fs.mkdirSync(path.join(out, "steps"), { recursive: true });
-    for (const n of shots) fs.copyFileSync(path.join(srcDir, n), path.join(out, "steps", n));
+    for (const n of shots) copyStagedFile(path.join(srcDir, n), path.join(out, "steps", n));
   }
 
   const video = path.join(repoRoot, f.demo.video);
   if (fs.existsSync(video)) {
     fs.mkdirSync(out, { recursive: true });
-    fs.copyFileSync(video, path.join(out, "demo.mp4"));
+    copyStagedFile(video, path.join(out, "demo.mp4"));
     videos++;
     const chapters = path.join(repoRoot, f.demo.chapters);
-    if (fs.existsSync(chapters)) fs.copyFileSync(chapters, path.join(out, "chapters.json"));
+    if (fs.existsSync(chapters)) copyStagedFile(chapters, path.join(out, "chapters.json"));
   } else {
     missing.push(`${f.id}: ${f.demo.video} (record with: make demo-feature FEATURE=${f.id})`);
   }
