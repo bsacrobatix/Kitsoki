@@ -257,9 +257,9 @@ host_interfaces:
         output: { state: string, checks: list }
     default: host.local
 
-  # 2.4 workspace — per-task working tree (git worktree by default).
+  # 2.4 workspace — per-task isolated workspace (scripted clone capsule by default).
   workspace:
-    description: "Working-copy manager. Local: git worktree."
+    description: "Working-copy manager. Local: scripted clone-backed capsule workspace."
     operations:
       list:
         input:  {}
@@ -268,12 +268,9 @@ host_interfaces:
         input:  { id: string }
         output: { id: string, path: string, branch: string, dirty: bool }
       create:
-        # `id` is the workspace identity (pins the on-disk .worktrees/<id>
-        # dir basename); `name` is the branch; `base` is the branch to
-        # root from. Matches host.git_worktree's worktreeCreate, which
-        # reads id/name/base — bf.idle passes `id:` from world.workspace_id.
-        # The earlier `ticket_id` label was stale: no caller passed it and
-        # the handler never read it.
+        # `id` is the workspace identity; `name` is the branch; `base` is the
+        # branch/commit to root from. The default host delegates creation to
+        # scripts/dev-workspace.sh and returns the authoritative path.
         input:  { id: string, name: string, base: string }
         output: { ok: bool, path: string }
       sync:
@@ -324,17 +321,17 @@ world:
   workspace_id:     { type: string, default: "" }
   workdir:          { type: string, default: "" }
   # base_branch defaults to "main" so bf.idle's auto-create has a
-  # sane root for `git worktree add -b <feature_branch> <path> <base>`.
+  # sane root for the workspace provider's create operation.
   # Parent stories that work off a different long-lived branch
   # (release/* etc.) override via world_in or by setting the key
   # explicitly before transitioning into bf.
   base_branch:      { type: string, default: "main" }
-  # base_commit pins the worktree CUT-POINT to a specific committish (any
-  # branch/tag/SHA `git worktree add` accepts). When empty the worktree is cut
-  # from base_branch. Distinct from base_branch on purpose: base_branch is also
-  # the PR target, whereas base_commit is "reproduce/fix AGAINST this exact
-  # commit" — e.g. a bug's pre-fix baseline SHA in a bake-off cell. Set it (not
-  # base_branch) when driving against a detached baseline.
+  # base_commit pins the workspace CUT-POINT to a specific committish. When
+  # empty the workspace is cut from base_branch. Distinct from base_branch on
+  # purpose: base_branch is also the PR target, whereas base_commit is
+  # "reproduce/fix AGAINST this exact commit" — e.g. a bug's pre-fix baseline
+  # SHA in a bake-off cell. Set it (not base_branch) when driving against a
+  # detached baseline.
   base_commit:      { type: string, default: "" }
   feature_branch:   { type: string, default: "" }
 
@@ -470,7 +467,7 @@ world:
   # feature_branch / workdir instead of clearing them for re-derivation.
   # Auditable and default-off: a headless caller must SAY it prepared the
   # checkout; silently seeded identities still get re-derived into
-  # .worktrees/bf-*. Autostart's other steps (thread derivation, start) run
+  # .capsules/workspaces/bf-*. Autostart's other steps (thread derivation, start) run
   # normally — unlike bf_autostart_attempted, this only affects identity.
   workspace_prepared:     { type: bool, default: false }
   judge_mode:       { type: string, default: "human" }           # human | llm | llm_then_human

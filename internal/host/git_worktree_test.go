@@ -2,6 +2,7 @@ package host_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,36 @@ HEAD bbbbbbbb
 branch refs/heads/feature/x
 
 `
+
+func devWorkspaceScriptForTest(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Clean(filepath.Join(wd, "..", "..", "scripts", "dev-workspace.sh"))
+}
+
+func devWorkspaceCreatePrefix(t *testing.T) string {
+	t.Helper()
+	return devWorkspaceScriptForTest(t) + " create"
+}
+
+func devWorkspaceCreateJSON(t *testing.T, id, path, branch, root string, reused bool) string {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{
+		"ok":     true,
+		"id":     id,
+		"path":   path,
+		"branch": branch,
+		"root":   root,
+		"reused": reused,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
 
 func TestGitWorktree_RegisteredAsBuiltin(t *testing.T) {
 	r := host.NewRegistry()
@@ -123,7 +154,8 @@ func TestGitWorktree_Get_NotFound(t *testing.T) {
 
 func TestGitWorktree_Create_Happy(t *testing.T) {
 	fr := newFakeRunner()
-	fr.responses["git worktree add -b feature/x"] = fakeResp{}
+	path := "/repo/.capsules/workspaces/feature-x"
+	fr.responses[devWorkspaceCreatePrefix(t)] = fakeResp{stdout: devWorkspaceCreateJSON(t, "feature-x", path, "feature/x", "/repo/.capsules/workspaces", false)}
 	restore := host.SetExecRunnerForTest(fr.run)
 	defer restore()
 
@@ -139,16 +171,16 @@ func TestGitWorktree_Create_Happy(t *testing.T) {
 	if res.Error != "" {
 		t.Fatalf("domain: %s", res.Error)
 	}
-	path, _ := res.Data["path"].(string)
-	if !strings.Contains(path, "/repo/.worktrees/feature-x") {
-		t.Fatalf("path: %s", path)
+	gotPath, _ := res.Data["path"].(string)
+	if !strings.Contains(gotPath, "/repo/.capsules/workspaces/feature-x") {
+		t.Fatalf("path: %s", gotPath)
 	}
 }
 
 func TestGitWorktree_Create_EmptyRepoAnchorsAtGitTopLevel(t *testing.T) {
 	fr := newFakeRunner()
 	fr.responses["git rev-parse --show-toplevel"] = fakeResp{stdout: "/repo\n"}
-	fr.responses["git worktree add -b feature/x /repo/.worktrees/feature-x main"] = fakeResp{}
+	fr.responses[devWorkspaceCreatePrefix(t)] = fakeResp{stdout: devWorkspaceCreateJSON(t, "feature-x", "/repo/.capsules/workspaces/feature-x", "feature/x", "/repo/.capsules/workspaces", false)}
 	restore := host.SetExecRunnerForTest(fr.run)
 	defer restore()
 
@@ -163,23 +195,23 @@ func TestGitWorktree_Create_EmptyRepoAnchorsAtGitTopLevel(t *testing.T) {
 	if res.Error != "" {
 		t.Fatalf("domain: %s", res.Error)
 	}
-	if res.Data["path"] != "/repo/.worktrees/feature-x" {
+	if res.Data["path"] != "/repo/.capsules/workspaces/feature-x" {
 		t.Fatalf("path: %v", res.Data["path"])
 	}
-	var sawRevParse, sawAdd bool
+	var sawRevParse, sawCreate bool
 	for _, c := range fr.calls {
 		if c == "git rev-parse --show-toplevel" {
 			sawRevParse = true
 		}
-		if c == "git worktree add -b feature/x /repo/.worktrees/feature-x main" {
-			sawAdd = true
+		if strings.HasPrefix(c, devWorkspaceCreatePrefix(t)) {
+			sawCreate = true
 		}
 	}
 	if !sawRevParse {
 		t.Fatalf("expected git toplevel probe, got %v", fr.calls)
 	}
-	if !sawAdd {
-		t.Fatalf("expected worktree add anchored under git toplevel, got %v", fr.calls)
+	if !sawCreate {
+		t.Fatalf("expected scripted workspace create anchored under git toplevel, got %v", fr.calls)
 	}
 }
 
@@ -217,7 +249,7 @@ func TestGitWorktree_Create_EmptyRepoResolveFailure(t *testing.T) {
 // made — the silent-bounce-to-idle that surfaced in dogfood.
 func TestGitWorktree_Create_IDOverridesDir(t *testing.T) {
 	fr := newFakeRunner()
-	fr.responses["git worktree add -b fix/T1"] = fakeResp{}
+	fr.responses[devWorkspaceCreatePrefix(t)] = fakeResp{stdout: devWorkspaceCreateJSON(t, "bf-T1", "/repo/.capsules/workspaces/bf-T1", "fix/T1", "/repo/.capsules/workspaces", false)}
 	restore := host.SetExecRunnerForTest(fr.run)
 	defer restore()
 
@@ -235,22 +267,21 @@ func TestGitWorktree_Create_IDOverridesDir(t *testing.T) {
 		t.Fatalf("domain: %s", res.Error)
 	}
 	path, _ := res.Data["path"].(string)
-	if path != "/repo/.worktrees/bf-T1" {
-		t.Fatalf("path: %s (want /repo/.worktrees/bf-T1)", path)
+	if path != "/repo/.capsules/workspaces/bf-T1" {
+		t.Fatalf("path: %s (want /repo/.capsules/workspaces/bf-T1)", path)
 	}
-	// Confirm the git invocation used the id-derived path, not the
-	// name-derived one.
-	var sawAdd bool
+	// Confirm the script invocation used the id, not the name-derived one.
+	var sawCreate bool
 	for _, c := range fr.calls {
-		if strings.Contains(c, "git worktree add -b fix/T1 /repo/.worktrees/bf-T1 main") {
-			sawAdd = true
+		if strings.HasPrefix(c, devWorkspaceCreatePrefix(t)) && strings.Contains(c, "--id bf-T1") {
+			sawCreate = true
 		}
-		if strings.Contains(c, "/repo/.worktrees/fix-T1") {
+		if strings.Contains(c, "fix-T1") {
 			t.Fatalf("call used name-derived dir, not id: %s", c)
 		}
 	}
-	if !sawAdd {
-		t.Fatalf("expected `git worktree add -b fix/T1 /repo/.worktrees/bf-T1 main`, got %v", fr.calls)
+	if !sawCreate {
+		t.Fatalf("expected scripted create with --id bf-T1, got %v", fr.calls)
 	}
 }
 
@@ -261,11 +292,7 @@ func TestGitWorktree_Create_IDOverridesDir(t *testing.T) {
 // permanently-failing create that `on_error: idle` silently swallows.
 func TestGitWorktree_Create_ReattachStaleBranch(t *testing.T) {
 	fr := newFakeRunner()
-	fr.responses["git worktree add -b fix/T2 /repo/.worktrees/bf-T2 main"] = fakeResp{
-		stderr: "fatal: a branch named 'fix/T2' already exists",
-		code:   128,
-	}
-	fr.responses["git worktree add /repo/.worktrees/bf-T2 fix/T2"] = fakeResp{}
+	fr.responses[devWorkspaceCreatePrefix(t)] = fakeResp{stdout: devWorkspaceCreateJSON(t, "bf-T2", "/repo/.capsules/workspaces/bf-T2", "fix/T2", "/repo/.capsules/workspaces", true)}
 	restore := host.SetExecRunnerForTest(fr.run)
 	defer restore()
 
@@ -285,7 +312,7 @@ func TestGitWorktree_Create_ReattachStaleBranch(t *testing.T) {
 	if res.Data["reused"] != true {
 		t.Fatalf("expected reused=true, got %#v", res.Data)
 	}
-	if res.Data["path"] != "/repo/.worktrees/bf-T2" {
+	if res.Data["path"] != "/repo/.capsules/workspaces/bf-T2" {
 		t.Fatalf("path: %v", res.Data["path"])
 	}
 }
@@ -295,10 +322,8 @@ func TestGitWorktree_Create_ReattachStaleBranch(t *testing.T) {
 // (post-restart, post-restart_from) without re-running create against
 // a workspace that's already on disk.
 func TestGitWorktree_Create_IdempotentExistingWorktree(t *testing.T) {
-	porcelain := "worktree /repo\nHEAD aaaa\nbranch refs/heads/main\n\n" +
-		"worktree /repo/.worktrees/bf-T3\nHEAD bbbb\nbranch refs/heads/fix/T3\n\n"
 	fr := newFakeRunner()
-	fr.responses["git worktree list --porcelain"] = fakeResp{stdout: porcelain}
+	fr.responses[devWorkspaceCreatePrefix(t)] = fakeResp{stdout: devWorkspaceCreateJSON(t, "bf-T3", "/repo/.capsules/workspaces/bf-T3", "fix/T3", "/repo/.capsules/workspaces", true)}
 	restore := host.SetExecRunnerForTest(fr.run)
 	defer restore()
 
@@ -315,11 +340,11 @@ func TestGitWorktree_Create_IdempotentExistingWorktree(t *testing.T) {
 	if res.Error != "" {
 		t.Fatalf("domain: %s", res.Error)
 	}
-	if res.Data["path"] != "/repo/.worktrees/bf-T3" {
+	if res.Data["path"] != "/repo/.capsules/workspaces/bf-T3" {
 		t.Fatalf("path: %v", res.Data["path"])
 	}
-	// No `worktree add` should have been issued — we found the
-	// existing one and short-circuited.
+	// No raw `git worktree add` should have been issued; the script owns
+	// idempotency.
 	for _, c := range fr.calls {
 		if strings.Contains(c, "worktree add") {
 			t.Fatalf("unexpected `worktree add`: %s", c)
@@ -330,10 +355,8 @@ func TestGitWorktree_Create_IdempotentExistingWorktree(t *testing.T) {
 // Same dir, wrong branch: report rather than silently overwrite. The
 // operator likely has a parallel session or a misconfigured workspace.
 func TestGitWorktree_Create_PathHeldByOtherBranch(t *testing.T) {
-	porcelain := "worktree /repo\nHEAD aaaa\nbranch refs/heads/main\n\n" +
-		"worktree /repo/.worktrees/bf-T4\nHEAD bbbb\nbranch refs/heads/other-branch\n\n"
 	fr := newFakeRunner()
-	fr.responses["git worktree list --porcelain"] = fakeResp{stdout: porcelain}
+	fr.responses[devWorkspaceCreatePrefix(t)] = fakeResp{stderr: "error: create: /repo/.capsules/workspaces/bf-T4 already holds branch other-branch (wanted fix/T4)", code: 1}
 	restore := host.SetExecRunnerForTest(fr.run)
 	defer restore()
 
@@ -668,16 +691,8 @@ func TestGitWorktree_CloneCreate_CreatesIsolatedCloneWithSentinel(t *testing.T) 
 	root := t.TempDir()
 	path := filepath.Join(root, "case-1")
 	fr := newFakeRunner()
-	fr.responses["git clone /repo "+path] = fakeResp{}
-	fr.responses[path+"|git checkout -b fix/case-1 main"] = fakeResp{}
-	restore := host.SetExecRunnerForTest(func(ctx context.Context, dir, name string, args ...string) (string, string, int, error) {
-		if name == "git" && len(args) == 3 && args[0] == "clone" {
-			if err := os.MkdirAll(args[2], 0o755); err != nil {
-				return "", "", 1, err
-			}
-		}
-		return fr.run(ctx, dir, name, args...)
-	})
+	fr.responses[devWorkspaceCreatePrefix(t)] = fakeResp{stdout: devWorkspaceCreateJSON(t, "case-1", path, "fix/case-1", root, false)}
+	restore := host.SetExecRunnerForTest(fr.run)
 	defer restore()
 
 	res, err := host.GitWorktreeHandler(context.Background(), map[string]any{
@@ -698,27 +713,17 @@ func TestGitWorktree_CloneCreate_CreatesIsolatedCloneWithSentinel(t *testing.T) 
 	if res.Data["path"] != path {
 		t.Fatalf("path: %v", res.Data["path"])
 	}
-	b, err := os.ReadFile(filepath.Join(path, ".kitsoki-clone"))
-	if err != nil {
-		t.Fatalf("sentinel: %v", err)
-	}
-	if !strings.Contains(string(b), `"session_id": "S1"`) {
-		t.Fatalf("sentinel missing session id: %s", string(b))
-	}
-	for _, want := range []string{
-		"git clone /repo " + path,
-		"git checkout -b fix/case-1 main",
-	} {
-		var saw bool
-		for _, call := range fr.calls {
-			if call == want {
-				saw = true
+	for _, call := range fr.calls {
+		if strings.HasPrefix(call, devWorkspaceCreatePrefix(t)) {
+			if !strings.Contains(call, "--id case-1") ||
+				!strings.Contains(call, "--branch fix/case-1") ||
+				!strings.Contains(call, "--session-id S1") {
+				t.Fatalf("script call missing expected args: %s", call)
 			}
-		}
-		if !saw {
-			t.Fatalf("missing call %q in %v", want, fr.calls)
+			return
 		}
 	}
+	t.Fatalf("missing dev-workspace create call in %v", fr.calls)
 }
 
 func TestGitWorktree_CloneCleanupScan_RecommendsOnlyOwnedOldCleanClones(t *testing.T) {

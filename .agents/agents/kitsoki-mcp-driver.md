@@ -16,10 +16,11 @@ develop / test / troubleshoot loop, not just authoring and driving:
 - **drive & see** — `session.*` to drive, `render.*` / `visual.*` to see.
 - **debug** — `story.turn` dry-runs ONE transition (no session, no LLM) and
   surfaces the host-call error an `on_error:` arc swallows; `trace.read` reads
-  any trace **off disk** (a `kitsoki web` journal, a background run, a worktree)
+  any trace **off disk** (a `kitsoki web` journal, a background run, a workspace)
   without a live handle; `session.trace` reads an open handle's.
 - **gate & integrate** — `host.run` re-confirms a tip is GREEN; `vcs.*` /
-  `worktree.*` do git (and `vcs.integrate` lands a fix *safely*); `gh.*` reads
+  `host.git_worktree.*` create/list managed workspaces (legacy MCP tool names
+  still use `worktree.*`); `vcs.integrate` lands a fix *safely*; `gh.*` reads
   issues/PRs and comments; `trace.to_flow` converts a live trace into a no-LLM
   flow fixture.
 
@@ -115,8 +116,8 @@ Why did it bounce?:         session.status {last_error} → session.trace {kinds
 Dry-run one transition:     story.turn {dir, state, intent, slots?, world?}  → host_calls[] (no session, no LLM)
 Find a thing in a story:    story.list {dir, glob?}  /  story.search {dir, pattern}   (NOT host Grep)
 Read a kitsoki web trace:   trace.read {session_id|app|path}        (off disk; NOT a handle)
-Confirm a tip is GREEN:     host.run {dir: <worktree>, cmd: "go test ./..."}
-Find one worktree:          host.run {dir: repo, cmd: "git worktree list --porcelain | grep -A2 '<needle>'"}
+Confirm a tip is GREEN:     host.run {dir: <workspace>, cmd: "go test ./..."}
+Find one workspace:         host.git_worktree.get via iface/session world, or scripts/dev-workspace.sh status <id>
 Land a fix safely:          vcs.commit → vcs.integrate {dir, branch, onto:"main", message}   (NEVER reset --soft)
 Author edit:                story.read → story.write (read its .validation) → story.test
 Abandon a session:          session.close BEFORE reopening on the same trace
@@ -127,11 +128,11 @@ Abandon a session:          session.close BEFORE reopening on the same trace
 Use the bounded/read-specific tool first. Two recurring waste patterns are
 expensive enough to call out explicitly:
 
-- Do not call `worktree.list` just to find one bugfix worktree or owner marker.
-  It returns the full structured worktree inventory and can overflow on a busy
-  repo. Use `story.search` for story files, or a targeted `host.run` query such
-  as `git worktree list --porcelain | grep -A2 'bf-TKT-123'` when the question is
-  about Git state.
+- Do not call `worktree.list` just to find one bugfix workspace or owner marker.
+  It returns the full structured workspace inventory and can overflow on a busy
+  repo. Use `story.search` for story files, `session.world {key:"workdir"}`, or
+  the scripted status path (`scripts/dev-workspace.sh status <id>`) when the
+  question is about workspace state.
 - Do not spin on bare `session.status` polls when a live turn is still running
   and the previous status showed no progress. Sleep outside the session first,
   then poll once and compare freshness: `host.run {cmd:"sleep 10"}` →
@@ -199,7 +200,7 @@ Everything else is a deterministic direct path or a read.
   bricks any rerun on that path (`trace file is locked by another writer`).
   ALWAYS `session.close` a session you are abandoning before opening a
   replacement on the same `trace`.
-  - **Known gap:** `session.close` does NOT release the worktree **owner marker**
+  - **Known gap:** `session.close` does NOT release the workspace **owner marker**
     (`.kitsoki-owner`) — only the trace flock (issue
     `2026-06-25T074726Z-session-close-leaks-worktree-owner`). So after closing a
     session that minted `bf-<ticket>`, a later `session.new` on the same
@@ -265,9 +266,10 @@ text, go `live` (or `record:` it).
 
 ### Driving `stories/bugfix` (and friends) against a specific baseline
 
-The bugfix/implementation pipelines cut their OWN isolated worktree
-(`.worktrees/bf-<ticket_id>`) and ignore any `workdir` you seed. The worktree is
-cut from `world.base_commit` if set, else `world.base_branch` (default `main`).
+The bugfix/implementation pipelines cut their OWN isolated clone-backed capsule
+workspace (`.capsules/workspaces/bf-<ticket_id>-<session_id>`) and ignore any
+unprepared `workdir` you seed. The workspace is cut from `world.base_commit` if
+set, else `world.base_branch` (default `main`).
 So when the task is "reproduce/fix this bug at its pre-fix baseline" (e.g. a
 bake-off cell):
 
@@ -314,7 +316,7 @@ live handle. Full reference: [`mcp-studio.md`](../../docs/architecture/mcp-studi
   effects DO run (that's how a failing `host.run` surfaces), so it's a write tool.
 - `trace.read {path | session_id | app, kinds?, errors_only?, …}` — reads a trace
   **off disk** (a `kitsoki web` journal under `~/.kitsoki/sessions`, a
-  background-run trace, a worktree's trace) with a lock-free read that never
+  background-run trace, a workspace trace) with a lock-free read that never
   collides with a live writer. Use `errors_only:true` to jump straight to the
   swallowed `harness.error`/`machine.error`/`agent.call.error`. (For an *open*
   handle, use `session.trace`.)
@@ -326,12 +328,12 @@ The whole fix lifecycle stays in the MCP — full reference in
 
 - `host.run {dir, cmd}` — re-confirm a committed tip is GREEN independently of any
   room (`go test ./...`, the story's `gate_command`). A non-zero exit is data.
-- `worktree.create` / `vcs.commit` / `vcs.integrate` — cut a worktree, commit,
-  and **land it safely**. `vcs.integrate {dir, branch, onto:"main", message}` runs
-  a guarded squash merge *from the main checkout* (refuses unless `dir` is on
-  `onto`, `onto` is clean, and `branch` has commits beyond its base). **Never**
-  hand-roll the `reset --soft main` ritual — that is the pattern that destroyed
-  main; `vcs.integrate` is its safe replacement.
+- `host.git_worktree.create` / `vcs.commit` / `vcs.integrate` — create the
+  managed capsule workspace, commit, and **land it safely**. Outside MCP-driven
+  stories, use `scripts/dev-workspace.sh create|commit|merge|teardown` rather
+  than hand-running git workspace commands. **Never** hand-roll the
+  `reset --soft main` ritual — that is the pattern that destroyed main;
+  `vcs.integrate` is its safe replacement.
 - `gh.issues` / `gh.pr_view` / `gh.comment` — read issues, read a PR's body +
   files + diff (e.g. a filed bug's own regression test), and comment.
 - `trace.to_flow {trace, app, out}` — convert a live trace into a no-LLM flow

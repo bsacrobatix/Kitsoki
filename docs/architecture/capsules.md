@@ -23,6 +23,10 @@ The shipped v1 is intentionally narrow and local-only:
 - `internal/capsuletest.Open(t, name)` opens capsules under `t.TempDir()` and
   registers cleanup for Go tests.
 - `kitsoki capsule open|verify|close` exposes the same behavior from the CLI.
+- `scripts/dev-workspace.sh` opens clone-backed development workspaces under
+  `.capsules/workspaces/`, writes the same capsule sentinel/manifest plus a
+  `.kitsoki-clone` manifest, and owns bootstrap, commit, merge, and teardown for
+  ad-hoc Codex/Claude work and the default dev-story workspace provider.
 - Starter capsules cover `clean-repo`, `rebase-conflict-ready`,
   `mid-rebase-conflict`, `dirty-index`, `stale-worktree`, and
   `diverged-remote`.

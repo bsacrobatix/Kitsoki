@@ -129,7 +129,7 @@ host_interfaces:
     default: host.local
 
   workspace:
-    description: "Working-copy manager. Local: git worktree."
+    description: "Working-copy manager. Local: scripted clone-backed capsule workspace."
     operations:
       list:
         input:  {}
@@ -138,12 +138,9 @@ host_interfaces:
         input:  { id: string }
         output: { id: string, path: string, branch: string, dirty: bool }
       create:
-        # `id` is the workspace identity (pins the on-disk .worktrees/<id>
-        # dir basename); `name` is the branch; `base` is the branch to
-        # root from. Matches host.git_worktree's worktreeCreate, which
-        # reads id/name/base — every caller (bf.idle, impl.idle) passes
-        # `id:` from world.workspace_id. The earlier `ticket_id` label
-        # was stale: no caller passed it and the handler never read it.
+        # `id` is the workspace identity; `name` is the branch; `base` is the
+        # branch/commit to root from. The default host delegates creation to
+        # scripts/dev-workspace.sh and returns the authoritative path.
         input:  { id: string, name: string, base: string }
         output: { ok: bool, path: string }
       sync:

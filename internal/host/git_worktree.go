@@ -1,12 +1,11 @@
-// Package host — host.git_worktree — git-worktree-backed workspace provider.
+// Package host - host.git_worktree - script-backed workspace provider.
 //
 // Implements the `workspace` host_interface (see docs/architecture/hosts.md).  A
-// single prefix-fallback handler dispatches the four workspace ops via
-// the `op` arg.  Operations shell out to `git worktree`.
+// single prefix-fallback handler dispatches workspace ops via the `op` arg.
 //
-// Convention: workspace ID == the worktree's directory basename; the
-// worktrees live under `<repo>/.worktrees/<id>` (matching the
-// kitsoki-dev dogfood path).
+// The default create path delegates clone/bootstrap/merge/teardown mechanics to
+// scripts/dev-workspace.sh. Legacy linked-worktree list/get/cleanup remains so
+// older checkouts can still be inspected and removed.
 package host
 
 import (
@@ -16,17 +15,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
 )
 
-// ownerSentinelFile is the basename of the per-worktree sentinel that records
-// which kitsoki session created a worktree. worktreeCreate writes it on a
-// successful `git worktree add` and reads it in the idempotency short-circuit
-// to refuse handing one session's live tree to a different session — the
-// host-side safety net for the destructive shared-checkout bug
-// (2026-06-03T121409Z-concurrent-dogfood-sessions-share-checkout-destructive-git).
+// ownerSentinelFile is the legacy basename of the per-worktree sentinel.
+// New managed clone capsules record the session in .kitsoki-clone and
+// capsule-manifest.json instead, but old cleanup/tests may still encounter this.
 const ownerSentinelFile = ".kitsoki-owner"
 
 const cloneSentinelFile = ".kitsoki-clone"
@@ -117,6 +114,9 @@ func worktreeList(ctx context.Context, repo string) (Result, error) {
 	for _, wt := range wts {
 		out = append(out, worktreeSummary(wt))
 	}
+	if resolvedRepo, repoErr := resolveWorktreeRepo(ctx, repo); repoErr == "" {
+		out = append(out, cloneWorkspaceSummaries(ctx, resolvedRepo, "")...)
+	}
 	return Result{Data: map[string]any{"workspaces": out}}, nil
 }
 
@@ -124,6 +124,11 @@ func worktreeGet(ctx context.Context, repo string, args map[string]any) (Result,
 	id, _ := args["id"].(string)
 	if strings.TrimSpace(id) == "" {
 		return Result{Error: "workspace.get: id argument is required"}, nil
+	}
+	if resolvedRepo, repoErr := resolveWorktreeRepo(ctx, repo); repoErr == "" {
+		if path, meta, ok := findCloneWorkspace(resolvedRepo, "", id); ok {
+			return Result{Data: cloneWorkspaceSummary(ctx, path, id, meta)}, nil
+		}
 	}
 	stdout, _, _, err := cliExec(ctx, repo, "git", "worktree", "list", "--porcelain")
 	if err != nil {
@@ -167,83 +172,13 @@ func worktreeCreate(ctx context.Context, repo string, args map[string]any) (Resu
 	if strings.TrimSpace(id) == "" {
 		id = strings.ReplaceAll(name, "/", "-")
 	}
-	// session_id is the calling session's identity (projected into the
-	// story as world.session_id). It is optional — callers that omit it
-	// leave no ownership sentinel and keep the legacy shareable behaviour —
-	// but when present it lets the idempotency short-circuit refuse to hand
-	// one session's live tree to a DIFFERENT session.
 	sessionID := strings.TrimSpace(worktreeStringArg(args, "session_id"))
-	path := filepath.Join(resolvedRepo, ".worktrees", id)
-
-	// Idempotency: if a worktree is already registered at our path
-	// with our target branch, treat as success. This keeps re-entry
-	// to bf.idle (e.g. after a process restart that lost
-	// bf_autostart_attempted=true) from failing on a workspace that
-	// already exists from a prior run.
-	//
-	// Safety net: before returning that existing tree as "ok", consult the
-	// `.kitsoki-owner` sentinel. If it names a DIFFERENT session than the
-	// caller, REFUSE — handing session B session A's live working tree is
-	// the destructive shared-checkout bug
-	// (2026-06-03T121409Z-concurrent-dogfood-sessions-share-checkout-destructive-git):
-	// a routine `git checkout -- <file>` in one session silently and
-	// unrecoverably reverts the other's uncommitted WIP. An absent sentinel
-	// (legacy worktree, or a caller that omitted session_id) or a matching
-	// one still short-circuits to success, preserving legitimate same-session
-	// re-entry after a restart.
-	if existing, ok := findWorktreeByPath(ctx, resolvedRepo, path); ok {
-		if existing.Branch == name {
-			if owner := readOwnerSentinel(path); owner != "" && sessionID != "" && owner != sessionID {
-				return Result{Error: fmt.Sprintf("workspace.create: %q is already checked out by session %q; refusing to share — concurrent sessions on the same ticket must use distinct worktrees", id, owner)}, nil
-			}
-			return Result{Data: map[string]any{"ok": true, "path": path}}, nil
-		}
-		return Result{Error: fmt.Sprintf("workspace.create: %q already exists at %s but holds branch %q (wanted %q)", id, path, existing.Branch, name)}, nil
+	root := cloneRoot(resolvedRepo, worktreeStringArg(args, "root"))
+	data, errMsg := devWorkspaceCreate(ctx, resolvedRepo, root, id, name, base, sessionID)
+	if errMsg != "" {
+		return Result{Error: "workspace.create: " + errMsg}, nil
 	}
-
-	// Try the new-branch path first. The common case is a fresh
-	// ticket where neither the branch nor the dir exists.
-	gitArgs := []string{"worktree", "add", "-b", name, path}
-	if base != "" {
-		gitArgs = append(gitArgs, base)
-	}
-	_, stderr, code, err := cliExec(ctx, resolvedRepo, "git", gitArgs...)
-	if err != nil {
-		return Result{Error: fmt.Sprintf("workspace.create: exec: %v", err)}, nil
-	}
-	if code == 0 {
-		writeOwnerSentinel(path, sessionID)
-		return Result{Data: map[string]any{"ok": true, "path": path}}, nil
-	}
-
-	// Branch-already-exists recovery. Happens when a previous run
-	// created the branch but the worktree dir was later removed
-	// without `git branch -d`. Without this, the operator hits a
-	// permanently-failing create that on_error: idle silently swallows
-	// and has to clean up by hand. Re-attach the existing branch
-	// to a fresh worktree at our path instead.
-	if branchExistsError(stderr, name) {
-		retryArgs := []string{"worktree", "add", path, name}
-		_, retryStderr, retryCode, retryErr := cliExec(ctx, resolvedRepo, "git", retryArgs...)
-		if retryErr != nil {
-			return Result{Error: fmt.Sprintf("workspace.create: exec (reattach): %v", retryErr)}, nil
-		}
-		if retryCode == 0 {
-			writeOwnerSentinel(path, sessionID)
-			return Result{Data: map[string]any{
-				"ok":     true,
-				"path":   path,
-				"reused": true,
-				"branch": name,
-			}}, nil
-		}
-		// Reattach can fail when the branch is checked out at *another*
-		// worktree (a parallel session, an unrelated dir). Report the
-		// underlying git message so the operator can locate the holder.
-		return Result{Error: fmt.Sprintf("workspace.create: branch %q exists but reattach failed: %s", name, strings.TrimSpace(retryStderr))}, nil
-	}
-
-	return Result{Error: fmt.Sprintf("workspace.create: %s", strings.TrimSpace(stderr))}, nil
+	return Result{Data: data}, nil
 }
 
 // resolveWorktreeRepo returns the absolute git toplevel used to anchor
@@ -332,6 +267,11 @@ func worktreeSync(ctx context.Context, repo string, args map[string]any) (Result
 	if strings.TrimSpace(id) == "" {
 		return Result{Error: "workspace.sync: id argument is required"}, nil
 	}
+	if resolvedRepo, repoErr := resolveWorktreeRepo(ctx, repo); repoErr == "" {
+		if path, _, ok := findCloneWorkspace(resolvedRepo, "", id); ok {
+			return syncGitWorkspace(ctx, path, "workspace.sync")
+		}
+	}
 	// Find the path for the named workspace.
 	stdout, _, _, err := cliExec(ctx, repo, "git", "worktree", "list", "--porcelain")
 	if err != nil {
@@ -348,6 +288,10 @@ func worktreeSync(ctx context.Context, repo string, args map[string]any) (Result
 	if target == nil {
 		return Result{Error: fmt.Sprintf("workspace.sync: %q not found", id)}, nil
 	}
+	return syncGitWorkspace(ctx, target.Path, "workspace.sync")
+}
+
+func syncGitWorkspace(ctx context.Context, path, prefix string) (Result, error) {
 	// No-op if the branch has no upstream tracking. A fresh
 	// `fix/<ticket>` feature branch typically has no remote yet —
 	// `git pull --ff-only` would fail with `There is no tracking
@@ -356,7 +300,7 @@ func worktreeSync(ctx context.Context, repo string, args map[string]any) (Result
 	// would have no signal as to why. Detect via
 	// `git rev-parse --abbrev-ref @{u}` (non-zero exit when no
 	// upstream is set) and skip the pull in that case.
-	if _, _, upstreamCode, upstreamErr := cliExec(ctx, target.Path, "git", "rev-parse", "--abbrev-ref", "@{u}"); upstreamErr != nil || upstreamCode != 0 {
+	if _, _, upstreamCode, upstreamErr := cliExec(ctx, path, "git", "rev-parse", "--abbrev-ref", "@{u}"); upstreamErr != nil || upstreamCode != 0 {
 		return Result{Data: map[string]any{
 			"ok":             true,
 			"log":            "",
@@ -365,12 +309,12 @@ func worktreeSync(ctx context.Context, repo string, args map[string]any) (Result
 	}
 	// Pull --ff-only from the upstream — non-destructive, returns
 	// error if the branch has diverged.
-	pullOut, stderr, code, err := cliExec(ctx, target.Path, "git", "pull", "--ff-only")
+	pullOut, stderr, code, err := cliExec(ctx, path, "git", "pull", "--ff-only")
 	if err != nil {
-		return Result{Error: fmt.Sprintf("workspace.sync: exec: %v", err)}, nil
+		return Result{Error: fmt.Sprintf("%s: exec: %v", prefix, err)}, nil
 	}
 	if code != 0 {
-		return Result{Error: fmt.Sprintf("workspace.sync: %s", strings.TrimSpace(stderr))}, nil
+		return Result{Error: fmt.Sprintf("%s: %s", prefix, strings.TrimSpace(stderr))}, nil
 	}
 	return Result{Data: map[string]any{
 		"ok":  true,
@@ -537,53 +481,149 @@ func cloneCreate(ctx context.Context, repo string, args map[string]any) (Result,
 		return Result{Error: "workspace.clone_create: " + repoErr}, nil
 	}
 	root := cloneRoot(source, worktreeStringArg(args, "root"))
-	path := filepath.Join(root, id)
-	if _, err := os.Stat(path); err == nil {
-		return Result{Error: fmt.Sprintf("workspace.clone_create: clone %q already exists at %s", id, path)}, nil
-	} else if err != nil && !os.IsNotExist(err) {
-		return Result{Error: fmt.Sprintf("workspace.clone_create: stat %s: %v", path, err)}, nil
-	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		return Result{Error: fmt.Sprintf("workspace.clone_create: mkdir %s: %v", root, err)}, nil
-	}
-	_, stderr, code, err := cliExec(ctx, source, "git", "clone", source, path)
-	if err != nil {
-		return Result{Error: fmt.Sprintf("workspace.clone_create: exec: %v", err)}, nil
-	}
-	if code != 0 {
-		return Result{Error: fmt.Sprintf("workspace.clone_create: %s", strings.TrimSpace(stderr))}, nil
-	}
-
 	base := strings.TrimSpace(worktreeStringArg(args, "base"))
 	name := strings.TrimSpace(worktreeStringArg(args, "name"))
-	if name != "" {
-		checkoutArgs := []string{"checkout", "-b", name}
-		if base != "" {
-			checkoutArgs = append(checkoutArgs, base)
+	sessionID := strings.TrimSpace(worktreeStringArg(args, "session_id"))
+	data, errMsg := devWorkspaceCreate(ctx, source, root, id, name, base, sessionID)
+	if errMsg != "" {
+		return Result{Error: "workspace.clone_create: " + errMsg}, nil
+	}
+	return Result{Data: data}, nil
+}
+
+func devWorkspaceCreate(ctx context.Context, source, root, id, branch, base, sessionID string) (map[string]any, string) {
+	script, scriptErr := devWorkspaceScript(source)
+	if scriptErr != "" {
+		return nil, scriptErr
+	}
+	cmdArgs := []string{
+		"create",
+		"--repo", source,
+		"--root", root,
+		"--id", id,
+		"--json",
+		"--no-bootstrap",
+	}
+	if strings.TrimSpace(branch) != "" {
+		cmdArgs = append(cmdArgs, "--branch", branch)
+	}
+	if strings.TrimSpace(base) != "" {
+		cmdArgs = append(cmdArgs, "--base", base)
+	}
+	if strings.TrimSpace(sessionID) != "" {
+		cmdArgs = append(cmdArgs, "--session-id", sessionID)
+	}
+	stdout, stderr, code, err := cliExec(ctx, source, script, cmdArgs...)
+	if err != nil {
+		return nil, fmt.Sprintf("exec: %v", err)
+	}
+	if code != 0 {
+		msg := strings.TrimSpace(stderr)
+		if msg == "" {
+			msg = strings.TrimSpace(stdout)
 		}
-		if _, checkoutStderr, checkoutCode, checkoutErr := cliExec(ctx, path, "git", checkoutArgs...); checkoutErr != nil {
-			return Result{Error: fmt.Sprintf("workspace.clone_create: checkout: %v", checkoutErr)}, nil
-		} else if checkoutCode != 0 {
-			return Result{Error: fmt.Sprintf("workspace.clone_create: checkout: %s", strings.TrimSpace(checkoutStderr))}, nil
+		if msg == "" {
+			msg = fmt.Sprintf("script exited with code %d", code)
 		}
-	} else if base != "" {
-		if _, checkoutStderr, checkoutCode, checkoutErr := cliExec(ctx, path, "git", "checkout", base); checkoutErr != nil {
-			return Result{Error: fmt.Sprintf("workspace.clone_create: checkout: %v", checkoutErr)}, nil
-		} else if checkoutCode != 0 {
-			return Result{Error: fmt.Sprintf("workspace.clone_create: checkout: %s", strings.TrimSpace(checkoutStderr))}, nil
+		return nil, msg
+	}
+	var data map[string]any
+	if err := json.Unmarshal([]byte(stdout), &data); err != nil {
+		return nil, fmt.Sprintf("parse script JSON: %v", err)
+	}
+	if _, ok := data["ok"].(bool); !ok {
+		data["ok"] = true
+	}
+	return data, ""
+}
+
+func devWorkspaceScript(source string) (string, string) {
+	if env := strings.TrimSpace(os.Getenv("KITSOKI_DEV_WORKSPACE_SCRIPT")); env != "" {
+		return env, ""
+	}
+	var candidates []string
+	if strings.TrimSpace(source) != "" {
+		candidates = append(candidates, filepath.Join(source, "scripts", "dev-workspace.sh"))
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(cwd, "scripts", "dev-workspace.sh"))
+	}
+	if _, file, _, ok := runtime.Caller(0); ok {
+		dir := filepath.Dir(file)
+		for {
+			candidates = append(candidates, filepath.Join(dir, "scripts", "dev-workspace.sh"))
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
 		}
 	}
-	if err := writeCloneSentinel(path, map[string]any{
-		"id":         id,
-		"source":     source,
-		"branch":     name,
-		"base":       base,
-		"session_id": strings.TrimSpace(worktreeStringArg(args, "session_id")),
-		"created_at": time.Now().UTC().Format(time.RFC3339),
-	}); err != nil {
-		return Result{Error: fmt.Sprintf("workspace.clone_create: write sentinel: %v", err)}, nil
+	for _, candidate := range candidates {
+		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+			abs, _ := filepath.Abs(candidate)
+			return abs, ""
+		}
 	}
-	return Result{Data: map[string]any{"ok": true, "id": id, "path": path, "branch": name, "root": root}}, nil
+	return "", "scripts/dev-workspace.sh not found (set KITSOKI_DEV_WORKSPACE_SCRIPT)"
+}
+
+func cloneWorkspaceSummaries(ctx context.Context, repo, rootOverride string) []map[string]any {
+	var out []map[string]any
+	seen := map[string]bool{}
+	for _, root := range cloneSearchRoots(repo, rootOverride) {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			id := entry.Name()
+			if seen[id] {
+				continue
+			}
+			path := filepath.Join(root, id)
+			meta, ok := readCloneSentinel(path)
+			if !ok {
+				continue
+			}
+			out = append(out, cloneWorkspaceSummary(ctx, path, id, meta))
+			seen[id] = true
+		}
+	}
+	return out
+}
+
+func findCloneWorkspace(repo, rootOverride, id string) (string, map[string]any, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", nil, false
+	}
+	for _, root := range cloneSearchRoots(repo, rootOverride) {
+		path := filepath.Join(root, id)
+		meta, ok := readCloneSentinel(path)
+		if ok {
+			return path, meta, true
+		}
+	}
+	return "", nil, false
+}
+
+func cloneWorkspaceSummary(ctx context.Context, path, id string, meta map[string]any) map[string]any {
+	branchOut, _, branchCode, branchErr := cliExec(ctx, path, "git", "branch", "--show-current")
+	branch := strings.TrimSpace(branchOut)
+	if branchErr != nil || branchCode != 0 || branch == "" {
+		branch = strings.TrimSpace(fmt.Sprint(meta["branch"]))
+	}
+	return map[string]any{
+		"id":     id,
+		"kind":   "clone",
+		"path":   path,
+		"branch": branch,
+		"dirty":  worktreeDirty(ctx, path),
+	}
 }
 
 func cloneCleanupScan(ctx context.Context, repo string, args map[string]any) (Result, error) {
@@ -858,7 +898,19 @@ func cloneRoot(repo, override string) string {
 		}
 		return filepath.Join(repo, override)
 	}
-	return filepath.Join(repo, ".worktrees", "clones")
+	return filepath.Join(repo, ".capsules", "workspaces")
+}
+
+func cloneSearchRoots(repo, override string) []string {
+	root := cloneRoot(repo, override)
+	if strings.TrimSpace(override) != "" {
+		return []string{root}
+	}
+	legacy := filepath.Join(repo, ".worktrees", "clones")
+	if legacy == root {
+		return []string{root}
+	}
+	return []string{root, legacy}
 }
 
 func writeCloneSentinel(path string, meta map[string]any) error {

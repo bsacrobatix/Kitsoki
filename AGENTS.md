@@ -1,20 +1,22 @@
-make your worktrees in the project root folder .worktrees
-
-The primary checkout is protected as read-mostly. Do implementation work in a
-branch worktree under `.worktrees`, commit it there, then land it onto local
-`main` from the primary checkout with:
+Do implementation work in managed clone-backed capsule workspaces, not git
+worktrees. The primary checkout is protected as read-mostly; agents should not
+run raw `git worktree`, `git clone`, rebase, merge, or teardown commands for
+normal development. Delegate the lifecycle to:
 
 ```
-scripts/merge-to-main.sh <branch>
+scripts/dev-workspace.sh create --id <id> --branch <branch> --base main --bootstrap
+scripts/dev-workspace.sh status <id>
+scripts/dev-workspace.sh commit <id> --message "<message>"
+scripts/dev-workspace.sh merge <id> --gate "<focused validation>" --teardown
 ```
 
-That helper only accepts fast-forward merges. If it refuses because `main`
-advanced, rebase the branch in its worktree onto local `main`, rerun focused
-validation, and then run the helper again. Do not manually chmod the primary
-checkout except to repair the guard itself.
-
-After the branch has been merged, remove its checkout with `git worktree remove
-<path>` once it is clean; do not leave merged worktrees behind.
+The script creates workspaces under `.capsules/workspaces`, writes the Kitsoki
+capsule/clone sentinels, runs the bootstrap target when requested, imports the
+finished branch into local `main` through `scripts/merge-to-main.sh`, and
+removes the workspace on `--teardown`. If `main` advanced, the script rebases
+the workspace onto current local `main`; rerun focused validation before
+retrying a failed/conflicted merge. Do not manually chmod the primary checkout
+except to repair the guard itself.
 
 Prefer GitHub PRs for review and landing, but do not burn CI on every
 work-in-progress agent branch. The CI workflow is configured so `pull_request`
@@ -26,15 +28,14 @@ it is ready for the required CI gate and GitHub merge.
 
 When local `main` must be reconciled with `origin/main` or `upstream/main`, do
 not run `git pull` in the protected primary checkout. From the primary checkout,
-run:
+run the scripted sync helper:
 
 ```
 scripts/sync-main-from-remote.sh --remote origin
 ```
 
-or `--remote upstream`. The sync helper fetches, creates an integration worktree
-under `.worktrees`, and attempts the remote merge there. If conflicts occur,
-prefer:
+or `--remote upstream`. The sync helper owns its internal git operations. If
+conflicts occur, prefer:
 
 ```
 scripts/sync-main-from-remote.sh --remote origin --auto-resolve
@@ -43,10 +44,9 @@ scripts/sync-main-from-remote.sh --remote origin --auto-resolve
 with `KITSOKI_SYNC_RESOLVE_CMD` set to the LLM/agent command that resolves and
 stages conflicts, and `KITSOKI_SYNC_REVIEW_CMD` set to a separate read/check
 agent command that verifies no local or remote work was dropped. For manual
-resolution, resolve conflicts inside that integration worktree, rerun the helper
-with `--continue <branch>` and `KITSOKI_SYNC_REVIEW_CMD` set, validate there,
-and only then land the integration branch with `scripts/merge-to-main.sh
-<branch>`.
+resolution, resolve conflicts inside the helper-created integration workspace,
+rerun the helper with `--continue <branch>` and `KITSOKI_SYNC_REVIEW_CMD` set,
+validate there, and only then let the helper land the integration branch.
 
 Project skills live in the Codex-standard `.agents/skills/<name>/SKILL.md` location. Claude Code does not auto-discover that directory, so `make setup` links every `.agents/skills/*/SKILL.md` into `.claude/skills/` (relative symlinks; `.claude/` is gitignored). After adding a new skill, re-run:
 
@@ -70,11 +70,12 @@ should own the worker dispatch, trace, receipt, and reusable story artifacts.
 The supervising Codex session must independently inspect the receipt, trace,
 diff, untracked files, and validation gates instead of trusting worker claims.
 
-After creating a new worktree with `git worktree add`, run `make bootstrap-worktree`
-from inside it before running `go run ./cmd/kitsoki` or any Playwright spec — it
+After creating a new managed workspace, run `make bootstrap-workspace` from
+inside it before running `go run ./cmd/kitsoki` or any Playwright spec. Passing
+`--bootstrap` to `scripts/dev-workspace.sh create` does this automatically; it
 stages the embed-only stories/SPA dirs, installs `tools/runstatus` node_modules,
 and warms the Go build cache, all of which are otherwise empty/cold in a fresh
-worktree.
+clone.
 
 When we do an implementation based on a proposal, the goal is to complete the proposal implementation and move the content to proper narrative docs and delete the proposal - don't leave unfinished work unless specifically instructed, and if so, update the proposal to summarize the completed aspect and focus on the remaining work.
 

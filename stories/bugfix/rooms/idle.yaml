@@ -85,8 +85,8 @@ states:
       # of looping or auto-firing a second pipeline kickoff.
       #
       # The pre-2026-05-18 09:20 version (no flag) made the dogfood
-      # walkthrough loop forever when `git worktree add` failed
-      # against a stale `.worktrees/<id>/` dir from a previous
+      # walkthrough loop forever when workspace creation failed
+      # against a stale managed workspace from a previous
       # aborted run: idle → workspace.create fails → on_error: idle
       # → idle.on_enter re-runs → start emit re-fires → repeat.
       # The engine cap in enterRedirectState backstops this now,
@@ -96,7 +96,7 @@ states:
       # Step -1: free-form complaint intake. A standalone/headless caller can
       # start with just `ticket_body` (or the `work_complaint` intent below)
       # instead of a filed issue. Synthesize the ticket identity the rest of the
-      # pipeline needs for thread/worktree names, mark the source as free-form,
+      # pipeline needs for thread/workspace names, mark the source as free-form,
       # then let the usual autostart chain go as far as the available evidence
       # allows. If the complaint is too vague, later triage/repro gates hold or
       # route to needs-human with the specific missing guidance.
@@ -130,10 +130,10 @@ states:
       # safely seed ticket metadata, but it must not be able to steer maker rooms
       # onto "." or another non-isolated checkout via a seeded workdir. Triage is
       # the explicit read-only exception below. A workdir already under the
-      # repo-relative .worktrees/ isolation (flow fixtures, prepared handoffs)
-      # is legitimate and keeps its seeded identity; anything else is cleared so
-      # the mutating run re-derives a .worktrees/bf-* checkout.
-      - when: "world.ticket_id != '' && world.bugfix_mode != 'triage' && !world.bf_autostart_attempted && !world.workspace_prepared && world.workdir != '' && !hasPrefix(world.workdir, '.worktrees/')"
+      # repo-relative managed isolation roots (new .capsules/workspaces/ or
+      # legacy .worktrees/) is legitimate and keeps its seeded identity; anything
+      # else is cleared so the mutating run re-derives an isolated checkout.
+      - when: "world.ticket_id != '' && world.bugfix_mode != 'triage' && !world.bf_autostart_attempted && !world.workspace_prepared && world.workdir != '' && !hasPrefix(world.workdir, '.capsules/workspaces/') && !hasPrefix(world.workdir, '.worktrees/')"
         set:
           workspace_id: ""
           feature_branch: ""
@@ -141,23 +141,13 @@ states:
 
       # Step 1: derive workspace identity from ticket_id. Skipped in triage
       # mode — triage is read-only against the current tree, so it needs no
-      # worktree (and creating one would be wasted side-effect).
+      # isolated workspace (and creating one would be wasted side-effect).
       #
-      # The worktree dir is ticket-scoped (`.worktrees/bf-<ticket>`), but the
-      # calling session's identity (world.session_id, projected from the
-      # orchestrator's per-session SessionID) is threaded into workspace.create
-      # below so the host-side `.kitsoki-owner` safety net can refuse to hand
-      # one session's live tree to a DIFFERENT session — the destructive
-      # shared-tree bug
-      # (2026-06-03T121409Z-concurrent-dogfood-sessions-share-checkout-destructive-git)
-      # where a `git checkout -- <file>` in one session silently reverted
-      # another session's unrecoverable uncommitted WIP. Two concurrent sessions
-      # racing the same ticket now FAIL LOUDLY (on_error: idle) instead of
-      # silently sharing a checkout; the second session is refused, never handed
-      # the first's tree. (Keeping the dir ticket-scoped preserves the stable
-      # on-disk path contract the dogfood-smoke suite and gitops cleanup rely on;
-      # per-session DISTINCT dirs for same-ticket concurrency is a possible
-      # future enhancement, not needed to close the destructive bug.)
+      # The workspace id and branch include world.session_id, so concurrent
+      # sessions on the same ticket get distinct clone-backed capsule workspaces
+      # under .capsules/workspaces/. The host response is bound back into
+      # world.workdir below, so the script remains the source of truth for the
+      # actual path.
       - when: "world.ticket_id != '' && world.workspace_id == '' && !world.bf_autostart_attempted && world.bugfix_mode != 'triage'"
         set:
           # Append world.session_id so two concurrent sessions on the SAME
@@ -167,19 +157,11 @@ states:
           # ReservedWorldKeys / loadJourney) and bare at every import depth.
           workspace_id:   "bf-{{ world.ticket_id }}-{{ world.session_id }}"
           feature_branch: "fix/{{ world.ticket_id }}-{{ world.session_id }}"
-          workdir:        ".worktrees/bf-{{ world.ticket_id }}-{{ world.session_id }}"
+          workdir:        ".capsules/workspaces/bf-{{ world.ticket_id }}-{{ world.session_id }}"
 
-      # Step 2: create the worktree on disk. `id:` pins the on-disk
-      # dir basename to `world.workspace_id` so the later
-      # `iface.workspace.sync` lookup (keyed on workspace_id) matches
-      # the directory worktreeCreate actually made. Without it,
-      # worktreeCreate would derive its dir from the branch name
-      # (`fix/<ticket>` → `fix-<ticket>`) while world.workspace_id is
-      # `bf-<ticket>`, so sync would silently fail and bounce the
-      # operator back to idle.
-      # `base:` is the committish the worktree is CUT FROM (passed straight to
-      # `git worktree add <dir> <base>`, which accepts a branch, tag, OR commit
-      # SHA). Prefer an explicit `base_commit` (pin the tree to a specific commit
+      # Step 2: create the clone-backed capsule workspace on disk. `id:` pins
+      # the workspace identity; `base:` is the committish the workspace is cut
+      # from. Prefer an explicit `base_commit` (pin the tree to a specific commit
       # — e.g. a bug's pre-fix baseline in a bake-off) and fall back to
       # `base_branch` (which doubles as the PR target and defaults to "main").
       # Keep these distinct: the cut-point and the PR base are not the same thing.
@@ -190,9 +172,11 @@ states:
           name:       "{{ world.feature_branch }}"
           base:       "{{ world.base_commit != '' ? world.base_commit : world.base_branch }}"
           session_id: "{{ world.session_id }}"
+        bind:
+          workdir: path
         on_error: idle
 
-      # Step 2t (triage mode): no worktree — pin workdir to the current
+      # Step 2t (triage mode): no isolated workspace — pin workdir to the current
       # checkout so the read-only triager runs against the live tree.
       - when: "world.ticket_id != '' && world.bugfix_mode == 'triage' && world.workdir == '' && !world.bf_autostart_attempted"
         set:
@@ -204,7 +188,7 @@ states:
       # Triage mode autostarts into the triaging room instead of reproducing.
       #
       # Pipeline modes run a PRE-FLIGHT triage first (world.auto_triage,
-      # default on): one read-only triager call against the worktree just cut
+      # default on): one read-only triager call against the workspace just cut
       # above answers "does this bug still exist?" BEFORE the reproducer /
       # judge / maker budget is spent. ALREADY-FIXED short-circuits to
       # @exit:triaged; any other verdict continues into reproducing (the
@@ -285,7 +269,7 @@ states:
             - set:
                 bugfix_mode: "quick"
       # Triage-only. Read-only verdict on whether the bug still exists; no
-      # worktree, no fix. Pins bugfix_mode=triage (the idle autostart guard and
+      # workspace, no fix. Pins bugfix_mode=triage (the idle autostart guard and
       # the triaging room read it) and enters the triaging room.
       triage:
         - when: "world.ticket_id == ''"

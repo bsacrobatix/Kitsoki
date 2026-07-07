@@ -309,7 +309,7 @@ host_interfaces:
     default: host.local
 
   workspace:
-    description: "Working-copy manager. Local: git worktree."
+    description: "Working-copy manager. Local: scripted clone-backed capsule workspace."
     operations:
       list:
         input:  {}
@@ -318,12 +318,9 @@ host_interfaces:
         input:  { id: string }
         output: { id: string, path: string, branch: string, dirty: bool }
       create:
-        # `id` is the workspace identity (pins the on-disk .worktrees/<id>
-        # dir basename); `name` is the branch; `base` is the branch to
-        # root from. Matches host.git_worktree's worktreeCreate, which
-        # reads id/name/base — every caller (bf.idle, impl.idle) passes
-        # `id:` from world.workspace_id. The earlier `ticket_id` label
-        # was stale: no caller passed it and the handler never read it.
+        # `id` is the workspace identity; `name` is the branch; `base` is the
+        # branch/commit to root from. The default host delegates creation to
+        # scripts/dev-workspace.sh and returns the authoritative path.
         input:  { id: string, name: string, base: string }
         output: { ok: bool, path: string }
       sync:
@@ -491,11 +488,11 @@ world:
   # Pass-through for bf's Step-0w isolation guard (stories/bugfix/rooms/idle.yaml):
   # true declares "this workspace identity is deliberately prepared — keep it"
   # (flow fixtures walking a demo project, prepared handoffs). Default false so
-  # live runs always re-derive an isolated .worktrees/bf-* checkout.
+  # live runs always re-derive an isolated .capsules/workspaces/bf-* workspace.
   workspace_prepared:          { type: bool, default: false }
   # bugfix_destination selects the post-fix landing:
   #   open-pr        — hand the finished fix to pr-refinement and open a PR
-  #   leave-worktree — stop after the validated bugfix, preserving the worktree
+  #   leave-worktree — stop after the validated bugfix, preserving the workspace
   #   local-merge    — use bugfix's direct-ship tail to merge into base_branch
   bugfix_destination:          { type: string, default: "open-pr" }
   # Pass-through for bf's auto_triage pre-flight (see the bf world_in below):
@@ -1383,9 +1380,9 @@ intents:
     examples: ["fix this and open a pr", "bugfix to pr", "open a pull request after fixing"]
     priority: 56
   bugfix_leave_worktree:
-    title: "Fix Bug and Leave Worktree"
-    description: "Run the bugfix pipeline and leave the completed local worktree for manual review."
-    examples: ["fix this and leave a worktree", "bugfix local worktree", "leave the worktree after fixing"]
+    title: "Fix Bug and Leave Workspace"
+    description: "Run the bugfix pipeline and leave the completed local workspace for manual review."
+    examples: ["fix this and leave a workspace", "bugfix local workspace", "leave the workspace after fixing", "fix this and leave a worktree"]
     priority: 56
   bugfix_merge_local:
     title: "Fix Bug and Merge Locally"
@@ -1590,8 +1587,8 @@ intents:
 
   cleanup_workspaces:
     title: "Cleanup Workspaces"
-    description: "Scan for merged worktrees and branches that are safe to delete."
-    examples: ["cleanup worktrees", "clean up workspaces", "delete merged branches", "prune dead worktrees"]
+    description: "Scan for merged legacy worktrees, managed workspaces, and branches that are safe to delete."
+    examples: ["cleanup workspaces", "cleanup worktrees", "delete merged branches", "prune dead worktrees"]
     synonyms: ["scan cleanup using {base} as the base branch", "scan_cleanup {base}"]
     priority: 72
     slots:
@@ -1599,7 +1596,7 @@ intents:
 
   cleanup_workspaces_main:
     title: "Cleanup Workspaces From Main"
-    description: "Scan for merged worktrees and branches that are safe to delete using main as the base branch."
+    description: "Scan for merged legacy worktrees, managed workspaces, and branches that are safe to delete using main as the base branch."
     examples: ["scan cleanup", "scan_cleanup", "scan cleanup using main as the base branch", "scan_cleanup main", "clean up merged worktrees"]
     synonyms: ["clean up merged worktrees"]
     priority: 73
@@ -1700,7 +1697,7 @@ intents:
     examples: []
     priority: 1
   bugfix_done_leave_worktree:
-    description: "(internal) completed bugfix should preserve the local worktree."
+    description: "(internal) completed bugfix should preserve the local workspace."
     examples: []
     priority: 1
 

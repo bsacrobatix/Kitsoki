@@ -59,7 +59,7 @@ carrier handler when the op name is dispatched from `with:` args.
 | [`host.agent.converse`](#hostagentconverse) | Free-form conversational Claude session with permission_mode control. |
 | [`host.transport.post`](#hosttransportpost) | Post a message to a registered transport (TUI / Jira / Bitbucket). |
 | [`host.workspace_manager.get`](#hostworkspace_managerget) | Load a structured workspace context (repos, issue, PRs). |
-| [`host.git_worktree`](#hostgit_worktree-workspace-interface) | `workspace` provider: per-session `.worktrees/<id>` create/list/get/sync/cleanup. |
+| [`host.git_worktree`](#hostgit_worktree-workspace-interface) | `workspace` provider: script-backed `.capsules/workspaces/<id>` create/get/sync plus legacy worktree cleanup. |
 | [`host.jobs.answer_clarification`](#hostjobsanswer_clarification) | Resume a paused background job with the user's answer. |
 | [`host.chat.resolve`](#hostchatresolve) | Get-or-create a persistent chat thread for a `(app, room, scope_key)`. |
 | [`host.chat.list`](#hostchatlist) | List chat threads matching `(app, room, scope_key)`. |
@@ -1300,54 +1300,51 @@ Returns the parsed object as `Result.Data`. Bind individual fields
 
 ## host.git_worktree (`workspace` interface)
 
-Git-worktree-backed `workspace` provider
+Script-backed `workspace` provider
 ([`internal/host/git_worktree.go`](../../internal/host/git_worktree.go)). A
 single prefix-fallback handler dispatches `list` / `get` / `create` / `sync` /
 `cleanup_scan` / `cleanup_apply` / `clone_create` /
-`clone_cleanup_scan` / `clone_cleanup_apply` via the `op` arg. Linked
-worktrees live under `<repo>/.worktrees/<id>` where the id == the worktree dir
-basename. Isolated clones live under `<repo>/.worktrees/clones/<id>` by
-default.
+`clone_cleanup_scan` / `clone_cleanup_apply` via the `op` arg. The default
+`create` path delegates to
+[`scripts/dev-workspace.sh`](../../scripts/dev-workspace.sh), which materializes
+clone-backed capsule workspaces under `<repo>/.capsules/workspaces/<id>`, writes
+the capsule/clone sentinels, and keeps git plumbing out of agents. Legacy linked
+worktree list/cleanup remains for old local checkouts.
 
 `create` args:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `name` | string | yes | The new feature branch. |
-| `id` | string | no | On-disk dir basename. Defaults to the slashes-flattened `name` (`fix/foo` → `fix-foo`). Authors that bind `workspace_id` from world state pass it here so `sync` (which keys on the id) finds the dir. |
-| `base` | string | no | Branch the new worktree is rooted at. |
-| `session_id` | string | no | Owning kitsoki session. When set, a successful `git worktree add` writes a `.kitsoki-owner` sentinel into the worktree. |
+| `id` | string | no | Workspace id / on-disk clone dir basename. Defaults to the slashes-flattened `name` (`fix/foo` -> `fix-foo`). Authors that bind `workspace_id` from world state pass it here so `sync` (which keys on the id) finds the workspace. |
+| `base` | string | no | Branch or commit the workspace is rooted at. |
+| `session_id` | string | no | Owning kitsoki session. Recorded in `.kitsoki-clone`, `capsule-manifest.json`, and the compatibility `.kitsoki-owner` marker. |
 
 ### Per-session isolation (no shared checkouts)
 
 Two concurrent sessions on the same ticket must never share one on-disk
-worktree: a routine `git checkout -- <file>` in one session silently and
-unrecoverably reverts the other's uncommitted WIP. The host-side
-`.kitsoki-owner` sentinel prevents it:
+workspace: a routine checkout/revert in one session silently and unrecoverably
+reverts the other's uncommitted WIP. The script-owned workspace metadata
+prevents it:
 
 - The orchestrator projects its per-session SessionID into the story world as
   `world.session_id` (an ephemeral, replay-safe seed recomputed each
   `loadJourney`, alongside `world.ide.connected`).
   [`stories/bugfix`](../../stories/bugfix/rooms/idle.yaml) threads it into
-  `workspace.create` (the worktree dir itself stays ticket-scoped,
-  `bf-<ticket>`, preserving the stable on-disk path contract).
-- `create` consults the `.kitsoki-owner` sentinel before its idempotency
-  short-circuit returns an existing tree. A matching or absent sentinel still
+  `workspace.create`; the story also includes the session id in the workspace id
+  so same-ticket sessions get distinct paths.
+- `create` consults the script-written session metadata before its idempotency
+  short-circuit returns an existing tree. A matching or absent session still
   short-circuits to `{ok:true}` (so legitimate same-session re-entry after a
-  restart works); a sentinel naming a *different* session fails loudly:
+  restart works); metadata naming a *different* session fails loudly:
   `workspace.create: <id> is already checked out by session <owner>; refusing
   to share …`. So a second session racing the same ticket is refused rather
   than handed the first's live tree — even if a caller forgets the session
   dimension in the id.
 
-(Keying the worktree dir per-session so distinct same-ticket sessions get
-*distinct* dirs — coexistence rather than refusal — is a possible future
-enhancement; it is not needed to close the destructive bug, which the sentinel
-already does.)
-
 Regression: [`concurrent_checkout_repro_test.go`](../../internal/host/concurrent_checkout_repro_test.go).
 
-### Worktree cleanup
+### Legacy worktree cleanup
 
 `cleanup_scan` returns reviewable candidates for two independent cleanup
 classes:
@@ -1368,27 +1365,29 @@ classes:
 tree owner-writable, and removes only that cache directory; it does not delete
 the branch or containing worktree.
 
-### Isolated clones for high-concurrency agents
+### Managed clone capsules
 
 Linked worktrees isolate files and indexes, but they still share refs, stash,
-reflogs, hooks/config, the worktree registry, and Git lock files. Use normal
-linked worktrees for human-supervised feature work. Use `clone_create` for
-high-concurrency or autonomous runs that may stash, rebase, fetch/prune, delete
-branches, or otherwise touch shared Git state.
+reflogs, hooks/config, the worktree registry, and Git lock files. The default
+workspace path now uses managed clone capsules for both human-supervised and
+autonomous runs. `create` and `clone_create` both delegate to
+`scripts/dev-workspace.sh create`; `clone_create` remains as an explicit op name
+for callers that already use it.
 
 `clone_create` args:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `id` | string | yes | On-disk clone dir basename under the clone root. Must be a single path segment. |
-| `name` | string | no | Local branch to create in the clone. When set, the handler runs `git checkout -b <name> [base]` inside the clone. |
+| `name` | string | no | Local branch to create in the clone. |
 | `base` | string | no | Branch or commit to check out, or the start point for `name`. |
-| `root` | string | no | Clone root. Defaults to `<repo>/.worktrees/clones`. Relative paths are resolved under `repo`. |
+| `root` | string | no | Clone root. Defaults to `<repo>/.capsules/workspaces`. Relative paths are resolved under `repo`. |
 | `session_id` | string | no | Recorded in the clone sentinel for operator forensics. |
 
-Each managed clone gets a `.kitsoki-clone` sentinel with its id, source repo,
+Each managed clone gets a `.kitsoki-clone` sentinel plus a capsule-compatible
+`.kitsoki-capsule` / `capsule-manifest.json`, with its id, source repo,
 branch/base, session id, and creation time. Cleanup only considers directories
-with that sentinel.
+with the clone sentinel.
 
 `clone_cleanup_scan` returns candidates from the clone root. A clone is
 recommended only when it is Kitsoki-owned, clean (`git status --porcelain` is
