@@ -750,18 +750,19 @@ func sessionCreateCmd() *cobra.Command {
 
 func sessionContinueCmd() *cobra.Command {
 	var (
-		appPath       string
-		dbPath        string
-		key           string
-		idFlag        string
-		intentName    string
-		slotsFlag     string
-		rawText       string
-		harnessType   string
-		claudeModel   string
-		recordingPath string
-		tracePath     string // --trace override; "" = use default JSONL path when key is known
-		execModeFlag  string
+		appPath        string
+		dbPath         string
+		key            string
+		idFlag         string
+		intentName     string
+		slotsFlag      string
+		rawText        string
+		harnessType    string
+		claudeModel    string
+		recordingPath  string
+		tracePath      string // --trace override; "" = use default JSONL path when key is known
+		execModeFlag   string
+		driveOperation bool
 	)
 	cmd := &cobra.Command{
 		Use:   "continue",
@@ -777,6 +778,12 @@ orchestrator has already mapped the inbound event to a known intent.
 text to one of the current state's allowed intents using each intent's
 examples and slot schema. Use this for free-form replies (Jira/Bitbucket
 comment bodies).
+
+--drive-operation asks the command to continue any active autonomous
+operation handle after the inbound turn, using the same safe driver as
+` + "`kitsoki drive --drive-operation`" + ` and stopping at terminal/waiting
+handles, clarification/rejection, non-autonomous policies, or no safe next
+intent.
 
 The session writer lock is held for the duration of one turn. If
 another process holds it, this command exits 75 (EX_TEMPFAIL).`,
@@ -992,6 +999,7 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 			}
 
 			var outcome *orchestrator.TurnOutcome
+			var operationDrive *driveOperationFrame
 			lockErr := s.WithWriterLock(ctx, sid, func() error {
 				var inner error
 				if intentName != "" {
@@ -1009,6 +1017,22 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 						turnOpts = append(turnOpts, orchestrator.WithSupplementSlots(slotVals))
 					}
 					outcome, inner = orch.Turn(ctx, sid, rawText, turnOpts...)
+				}
+				if driveOperation && shouldDriveOperationAfterTurn(outcome, inner) {
+					drive, driveErr := orch.DriveOperation(ctx, sid)
+					if drive != nil {
+						operationDrive = &driveOperationFrame{
+							Turns:      drive.Turns,
+							StopReason: drive.StopReason,
+							LastIntent: drive.LastIntent,
+						}
+						if drive.Final != nil {
+							outcome = drive.Final
+						}
+					}
+					if driveErr != nil {
+						inner = driveErr
+					}
 				}
 				return inner
 			})
@@ -1079,7 +1103,7 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 				}
 			}
 
-			return writeJSON(cmd.OutOrStdout(), turnOutcomeView(sid, outcome))
+			return writeJSON(cmd.OutOrStdout(), turnOutcomeView(sid, outcome, operationDrive))
 		},
 	}
 	cmd.Flags().StringVar(&appPath, "app", "", "path to app.yaml (required)")
@@ -1095,6 +1119,7 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 	cmd.Flags().StringVar(&recordingPath, "recording", "", "recording YAML for --harness replay")
 	cmd.Flags().StringVar(&tracePath, "trace", "",
 		"JSONL trace file for event writes; default: ~/.kitsoki/sessions/<app>/<sha8>-<slug>.jsonl (derived from --key)")
+	cmd.Flags().BoolVar(&driveOperation, "drive-operation", false, "after the inbound turn, drive an active autonomous operation until it rests")
 	_ = cmd.MarkFlagRequired("app")
 	return cmd
 }
@@ -1554,9 +1579,13 @@ func loadBitbucketToken() string {
 
 // turnOutcomeView projects a TurnOutcome into a stable JSON shape suitable
 // for orchestrators to ingest.
-func turnOutcomeView(sid app.SessionID, o *orchestrator.TurnOutcome) map[string]any {
+func turnOutcomeView(sid app.SessionID, o *orchestrator.TurnOutcome, operationDrive *driveOperationFrame) map[string]any {
 	if o == nil {
-		return map[string]any{"session_id": string(sid)}
+		out := map[string]any{"session_id": string(sid)}
+		if operationDrive != nil {
+			out["operation_drive"] = operationDrive
+		}
+		return out
 	}
 	out := map[string]any{
 		"session_id":      string(sid),
@@ -1577,6 +1606,9 @@ func turnOutcomeView(sid app.SessionID, o *orchestrator.TurnOutcome) map[string]
 		if o.GuardHint != "" {
 			out["guard_hint"] = o.GuardHint
 		}
+	}
+	if operationDrive != nil {
+		out["operation_drive"] = operationDrive
 	}
 	return out
 }
