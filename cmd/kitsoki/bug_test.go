@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/host"
+	"kitsoki/internal/reportmeta"
 )
 
 // TestBugSlug covers the freeform-title → filesystem-slug mapping.
@@ -67,6 +68,29 @@ func TestRenderBugMarkdown_FullStoryPayload(t *testing.T) {
 		Severity:   "med",
 		Status:     "open",
 		TraceRef:   "traces/2026-05-13T103200Z-cloak.jsonl",
+		Runtime: reportmeta.Snapshot{
+			Engine: reportmeta.Engine{
+				Version:        "1.2.3",
+				Revision:       "abcdef1234567890",
+				RevisionShort:  "abcdef123456",
+				Dirty:          "false",
+				ChecksumSHA256: "sha256:engine",
+			},
+			Story: reportmeta.Story{
+				AppID:          "cloak-of-darkness",
+				Version:        "0.1.0",
+				Entry:          "testdata/apps/cloak/app.yaml",
+				ChecksumSHA256: "sha256:story",
+			},
+			PublicStories: []reportmeta.PublicStory{{
+				Name:           "bug",
+				AppID:          "bug-story",
+				Version:        "0.2.0",
+				Source:         "embedded",
+				Path:           "internal/basestories/stories/bug/app.yaml",
+				ChecksumSHA256: "sha256:public",
+			}},
+		},
 	})
 
 	// Identity section.
@@ -91,6 +115,17 @@ func TestRenderBugMarkdown_FullStoryPayload(t *testing.T) {
 	require.Contains(t, got, "# --- evidence ---")
 	require.Contains(t, got, `trace_ref: "traces/2026-05-13T103200Z-cloak.jsonl"`)
 	require.Contains(t, got, "related: []")
+	// Runtime section.
+	require.Contains(t, got, "# --- runtime ---")
+	require.Contains(t, got, `engine_version: "1.2.3"`)
+	require.Contains(t, got, `engine_revision: "abcdef1234567890"`)
+	require.Contains(t, got, `engine_checksum_sha256: "sha256:engine"`)
+	require.Contains(t, got, `story_app_id: "cloak-of-darkness"`)
+	require.Contains(t, got, `story_app_version: "0.1.0"`)
+	require.Contains(t, got, `story_checksum_sha256: "sha256:story"`)
+	require.Contains(t, got, "public_stories_json:")
+	require.Contains(t, got, `\"name\":\"bug\"`)
+	require.Contains(t, got, `\"checksum_sha256\":\"sha256:public\"`)
 	// Body.
 	require.Contains(t, got, "# TUI hangs on Esc")
 	require.Contains(t, got, "Expected the Esc menu to open.")
@@ -209,6 +244,8 @@ func TestBugCreateCmd_WritesMarkdownFile(t *testing.T) {
 	require.Contains(t, body, `target: "story"`)
 	require.Contains(t, body, `app_id: "cloak"`)
 	require.Contains(t, body, `state_path: "main.foyer"`)
+	require.Contains(t, body, `engine_version: "0.0.1-scaffold"`)
+	require.Contains(t, body, `engine_checksum_sha256: "sha256:`)
 	require.Contains(t, body, `severity: "med"`)
 	require.Contains(t, body, `status: "open"`)
 	require.Contains(t, body, "labels: []")

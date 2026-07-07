@@ -20,6 +20,8 @@ import (
 	"time"
 	"unicode"
 
+	"kitsoki/internal/reportmeta"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -50,6 +52,10 @@ type CreateRequest struct {
 	// FiledBy records who filed the bug (frontmatter filed_by). Empty is
 	// allowed; the CLI passes $USER.
 	FiledBy string
+
+	// Runtime records the kitsoki engine/story versions active at filing time.
+	// When empty, Create captures engine metadata from the resolved target root.
+	Runtime reportmeta.Snapshot
 
 	// Now injects the filed-at clock for deterministic tests. Zero value
 	// means "use time.Now().UTC()".
@@ -136,6 +142,10 @@ func Create(req CreateRequest) (id string, relPath string, absPath string, err e
 		Severity:   req.Severity,
 		Status:     "open",
 		TraceRef:   req.TraceRef,
+		Runtime:    req.Runtime,
+	}
+	if rec.Runtime.Empty() {
+		rec.Runtime = reportmeta.Capture(root, nil)
 	}
 
 	// Pull the short git SHA at filing time for kitsoki-target bugs.
@@ -234,6 +244,7 @@ type Record struct {
 
 	// evidence
 	TraceRef string // optional, both
+	Runtime  reportmeta.Snapshot
 
 	// body
 	Body       string
@@ -318,6 +329,16 @@ func RenderMarkdown(r Record) string {
 		if r.KitsokiRev != "" {
 			sb.WriteString("kitsoki_rev: ")
 			sb.WriteString(YAMLQuoteLine(r.KitsokiRev))
+			sb.WriteString("\n")
+		}
+	}
+
+	if fields := r.Runtime.Fields(); len(fields) > 0 {
+		sb.WriteString("\n# --- runtime -------------------------------------------------\n")
+		for _, f := range fields {
+			sb.WriteString(f.Key)
+			sb.WriteString(": ")
+			sb.WriteString(YAMLQuoteLine(f.Value))
 			sb.WriteString("\n")
 		}
 	}

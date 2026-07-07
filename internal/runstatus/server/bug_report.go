@@ -31,9 +31,11 @@ import (
 	"strings"
 	"time"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/bugfile"
 	"kitsoki/internal/ghagent/bugdeck"
 	"kitsoki/internal/host"
+	"kitsoki/internal/reportmeta"
 	"kitsoki/internal/runstatus/harscrub"
 )
 
@@ -122,6 +124,7 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 	repro := stringSliceParam(params, "repro_steps")
 
 	root := s.resolveBugRoot(params)
+	runtime := s.bugRuntimeSnapshot(root, params)
 	scrubOpts := scrubOptions()
 
 	// HAR source: if a capture_id from a prior runstatus.bug.preview is supplied
@@ -160,7 +163,7 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 	// evidence under .artifacts for developer-local review, instead of writing a
 	// local issues/bugs/<id>.md file.
 	if s.ticketRepo != "" {
-		return s.fileBugToGitHub(params, title, body, severity, traceRef, repro, harJSON, png, rrwebJSON, consoleJSON, traceJSON)
+		return s.fileBugToGitHub(params, title, body, severity, traceRef, repro, harJSON, png, rrwebJSON, consoleJSON, traceJSON, runtime)
 	}
 
 	id, relPath, absPath, err := bugfile.Create(bugfile.CreateRequest{
@@ -172,6 +175,7 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 		TraceRef:   traceRef,
 		TargetDir:  root,
 		FiledBy:    stringParam(params, "filed_by"),
+		Runtime:    runtime,
 		Warnf:      func(string, ...any) {}, // web caller: drop warnings
 	})
 	if err != nil {
@@ -229,7 +233,7 @@ func (s *Server) bugReport(params map[string]any) (any, *rpcError) {
 // those paths to host.GitHubFileBug with UploadArtifacts set so the evidence is
 // uploaded as release assets and linked by public URL in the issue, and returns
 // the issue url. No local issues/bugs/*.md file is written in this mode.
-func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, traceRef string, repro []string, harJSON, png, rrwebJSON, consoleJSON, traceJSON []byte) (any, *rpcError) {
+func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, traceRef string, repro []string, harJSON, png, rrwebJSON, consoleJSON, traceJSON []byte, runtime reportmeta.Snapshot) (any, *rpcError) {
 	prefix := "bug-" + time.Now().UTC().Format("20060102T150405.000000000Z")
 	artifactsRoot, displayRoot, err := s.githubBugArtifactsRoot()
 	if err != nil {
@@ -296,6 +300,7 @@ func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, t
 		KitsokiRev: gitShortRev(s.bugRoot),
 		FiledBy:    stringParam(params, "filed_by"),
 		Evidence:   ev,
+		Runtime:    runtime,
 		// We are already online and gh-authed to file the issue itself, so upload
 		// the scrubbed evidence as release assets and link the public URLs —
 		// otherwise the issue body would point at developer-local paths nobody
@@ -313,6 +318,29 @@ func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, t
 	s.depositAgentEvidence(res.Number, rrwebJSON, harJSON)
 
 	return map[string]any{"id": res.Number, "url": res.URL, "github": true}, nil
+}
+
+func (s *Server) bugRuntimeSnapshot(root string, params map[string]any) reportmeta.Snapshot {
+	var def *app.AppDef
+	storyPath := strings.TrimSpace(stringParam(params, "story_path"))
+	if storyPath != "" {
+		var storyDir string
+		if ep, ok := s.editorProvider(); ok {
+			if _, dir, ok := ep.EditorApp(storyPath); ok {
+				storyDir = dir
+			}
+		}
+		for _, candidate := range []string{storyPath, filepath.Join(storyDir, "app.yaml")} {
+			if strings.TrimSpace(candidate) == "" {
+				continue
+			}
+			if loaded, err := app.Load(candidate); err == nil {
+				def = loaded
+				break
+			}
+		}
+	}
+	return reportmeta.Capture(root, def)
 }
 
 // depositAgentEvidence writes the scrubbed rrweb + HAR into the configured agent

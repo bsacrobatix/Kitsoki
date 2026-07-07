@@ -179,15 +179,24 @@ fenced `kitsoki` metadata block, issue labels, release asset URLs, or local
 artifact layout unless you are repairing a failed filing and have inspected the
 generated body.
 
+Every supported filing path must preserve runtime version metadata. GitHub
+issues carry it in the fenced `kitsoki` metadata block; local markdown carries
+it in frontmatter. Keep these fields when repairing or migrating reports:
+`engine_version`, `engine_revision`, `engine_revision_short`, `engine_dirty`,
+`engine_checksum_sha256`, `story_app_id`, `story_app_version`, `story_entry`,
+`story_checksum_sha256`, and `public_stories_json`.
+
 ## Validation
 
 Before claiming the bug is filed, verify the artifact path that matters:
 
 - Web/TUI GitHub path: confirm the command returned a GitHub issue URL and the
   issue body has an `## Artifacts` section with GitHub release asset links or a
-  hosted deck comment.
+  hosted deck comment, plus the fenced `kitsoki` block with engine and story
+  runtime metadata.
 - Local path: confirm `issues/bugs/<id>.md` exists and its sibling
-  `<id>.artifacts/` contains the expected evidence.
+  `<id>.artifacts/` contains the expected evidence; the markdown frontmatter
+  should include the same engine and story runtime metadata.
 - Hosted deck path: confirm `kitsoki gh-agent deck` printed the public deck URL
   and, when `--comment` was used, the issue has the comment.
 

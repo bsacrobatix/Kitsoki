@@ -127,6 +127,11 @@ func TestIssueCreate_BundlesEvidenceAndFiles(t *testing.T) {
 	assert.Contains(t, body, "## Trace", "trace bundled")
 	assert.Contains(t, body, "## Assets", "assets section present")
 	assert.Contains(t, body, "stopgap", "upload-pending stopgap noted")
+	assert.Contains(t, body, "```kitsoki", "runtime metadata block present")
+	assert.Contains(t, body, "engine_version: 0.0.1-scaffold")
+	assert.Contains(t, body, "engine_checksum_sha256: sha256:")
+	assert.Contains(t, body, "story_app_id: cloak-of-darkness")
+	assert.Contains(t, body, "story_checksum_sha256: sha256:")
 	for _, p := range out.Assets {
 		assert.Contains(t, body, p, "each asset referenced by its path")
 	}
