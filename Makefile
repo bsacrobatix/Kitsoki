@@ -95,7 +95,7 @@ BASESKILLS_STAMP  := internal/baseskills/.embed-stamp
 
 .PHONY: all setup setup-visual-qa-deps bootstrap-worktree build build-lean install uninstall test test-full test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff repo-history-capsules oracle-capsules history-smoke history-pending-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
-	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local
+	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local vscode-install-local-in-place check-vscode-code-cli
 
 all: build
 
@@ -1013,10 +1013,41 @@ vscode-package: web
 # the extension, then force-install the newest VSIX into the local VS Code.
 # Override CODE_CLI when testing another compatible editor CLI.
 CODE_CLI ?= code
-vscode-install-local: check-deps
-	@command -v $(CODE_CLI) >/dev/null 2>&1 || { \
+VSCODE_INSTALL_WORKTREE_PREFIX ?= .worktrees/vscode-install-local
+KITSOKI_VSCODE_INSTALL_DELEGATED ?=
+
+check-vscode-code-cli:
+	@command -v "$(CODE_CLI)" >/dev/null 2>&1 || { \
 		echo "error: $(CODE_CLI) not found — install the VS Code shell command or run CODE_CLI=/path/to/code make vscode-install-local." >&2; \
 		exit 1; }
+
+vscode-install-local: check-deps check-vscode-code-cli
+	+@set -e; \
+	if [ -z "$(KITSOKI_VSCODE_INSTALL_DELEGATED)" ] && { [ ! -w "$(abspath .)" ] || [ ! -w "$(abspath $(RUNSTATUS_DIR))" ] || [ ! -w "$(abspath internal/runstatus/web/assets)" ]; }; then \
+		if ! git diff --quiet --ignore-submodules -- || ! git diff --cached --quiet --ignore-submodules --; then \
+			echo "error: checkout is read-only and dirty; commit or stash changes before delegating vscode-install-local to a worktree." >&2; \
+			exit 1; \
+		fi; \
+		wt="$(VSCODE_INSTALL_WORKTREE_PREFIX)-$$(date +%Y%m%d%H%M%S)-$$$$"; \
+		mkdir -p "$$(dirname "$$wt")"; \
+		echo "[vscode-install-local] checkout has read-only build paths; using transient worktree $$wt"; \
+		git worktree add --detach "$$wt" HEAD; \
+		cleanup() { \
+			if [ -d "$$wt" ]; then \
+				git -C "$$wt" clean -ffdx >/dev/null 2>&1 || true; \
+				git worktree remove "$$wt"; \
+			fi; \
+		}; \
+		trap cleanup EXIT INT TERM; \
+		$(MAKE) -C "$$wt" bootstrap-worktree; \
+		$(MAKE) -C "$$wt" KITSOKI_VSCODE_INSTALL_DELEGATED=1 vscode-install-local-in-place; \
+		cleanup; \
+		trap - EXIT INT TERM; \
+	else \
+		$(MAKE) --no-print-directory vscode-install-local-in-place; \
+	fi
+
+vscode-install-local-in-place: check-deps check-vscode-code-cli
 	@rm -f $(VSCODE_DIR)/*.vsix
 	$(MAKE) web-clean
 	$(MAKE) install
@@ -1026,7 +1057,7 @@ vscode-install-local: check-deps
 		echo "error: vscode-package did not produce a .vsix" >&2; \
 		exit 1; \
 	fi; \
-	$(CODE_CLI) --install-extension "$$vsix" --force; \
+	"$(CODE_CLI)" --install-extension "$$vsix" --force; \
 	echo "[vscode-install-local] installed $$vsix"
 
 # vscode-e2e-fast is the deterministic, no-LLM end-to-end GATE for the VS Code
