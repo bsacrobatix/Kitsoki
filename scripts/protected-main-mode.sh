@@ -10,6 +10,7 @@
 #   scripts/protected-main-mode.sh status
 #   scripts/protected-main-mode.sh lock [--quiet] [--force]
 #   scripts/protected-main-mode.sh unlock [--quiet] [--force]
+#   scripts/protected-main-mode.sh repair-writable-roots [--quiet] [--force]
 #
 # By default, lock/unlock refuse to mutate a linked worktree. Use --force only
 # for repair or tests where the current checkout is intentionally the target.
@@ -20,12 +21,13 @@ DEFAULT_TOP_WRITABLE_ROOTS=".worktrees"
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/protected-main-mode.sh <status|lock|unlock> [--quiet] [--force]
+usage: scripts/protected-main-mode.sh <status|lock|unlock|repair-writable-roots> [--quiet] [--force]
 
 Commands:
-  status   Report root/source/scratch writability.
-  lock     Make tracked source paths read-only and keep scratch roots writable.
-  unlock   Make tracked source paths writable for maintenance.
+  status                  Report root/source/scratch writability.
+  lock                    Make tracked source paths read-only and keep scratch roots writable.
+  unlock                  Make tracked source paths writable for maintenance.
+  repair-writable-roots   Restore writable-root exceptions without changing source mode.
 
 Environment:
   KITSOKI_PROTECTED_MAIN_WRITABLE_ROOTS
@@ -48,7 +50,7 @@ die() {
 
 mode="${1:-status}"
 case "$mode" in
-  status|lock|unlock) shift || true ;;
+  status|lock|unlock|repair-writable-roots) shift || true ;;
   -h|--help) usage; exit 0 ;;
   *) usage; exit 1 ;;
 esac
@@ -160,20 +162,57 @@ tracked_dirs() {
   } | sort -u
 }
 
+chmod_nul() {
+  local mode="$1"
+  xargs -0 chmod "$mode" 2>/dev/null || true
+}
+
+tracked_writable_root_files() {
+  # Writable roots are validated as simple relative paths, so intentional word
+  # splitting is fine here and lets git restrict the scan to the small exception
+  # set instead of the whole repository.
+  # shellcheck disable=SC2086
+  git ls-files -z -- $writable_roots
+}
+
+make_tracked_writable_root_files() {
+  local file
+  tracked_writable_root_files | while IFS= read -r -d '' file; do
+    [ -e "$file" ] && printf '%s\0' "$file"
+  done | chmod_nul u+rw
+}
+
+make_tracked_writable_root_dirs() {
+  local file dir
+  tracked_writable_root_files | while IFS= read -r -d '' file; do
+    case "$file" in
+      */*) dir="${file%/*}" ;;
+      *) continue ;;
+    esac
+    while [ -n "$dir" ] && [ "$dir" != "." ] && [ "$dir" != "/" ]; do
+      [ -e "$dir" ] && printf '%s\0' "$dir"
+      case "$dir" in
+        */*) dir="${dir%/*}" ;;
+        *) break ;;
+      esac
+    done
+  done | chmod_nul u+rwx
+}
+
 make_writable_roots() {
   local root
   for root in $writable_roots; do
     root="$(normalize_path "$root")"
     mkdir -p "$root"
     chmod u+rwx "$root" 2>/dev/null || true
-    find "$root" -type d -exec chmod u+rwx {} + 2>/dev/null || true
-    find "$root" -type f -exec chmod u+rw {} + 2>/dev/null || true
   done
   for root in $top_writable_roots; do
     root="$(normalize_path "$root")"
     mkdir -p "$root"
     chmod u+rwx "$root" 2>/dev/null || true
   done
+  make_tracked_writable_root_dirs
+  make_tracked_writable_root_files
 }
 
 lock_checkout() {
@@ -183,15 +222,13 @@ lock_checkout() {
   chmod u+rwx . 2>/dev/null || true
   make_writable_roots
 
-  git ls-files -z | while IFS= read -r -d '' file; do
-    [ -e "$file" ] && chmod a-w "$file" 2>/dev/null || true
-  done
+  git ls-files -z | chmod_nul a-w
 
   tracked_dirs | while IFS= read -r dir; do
     [ "$dir" = "." ] && continue
     is_writable_exception_path "$dir" && continue
-    [ -e "$dir" ] && chmod a-w "$dir" 2>/dev/null || true
-  done
+    [ -e "$dir" ] && printf '%s\0' "$dir"
+  done | chmod_nul a-w
 
   chmod a-w . 2>/dev/null || true
   make_writable_roots
@@ -208,15 +245,28 @@ unlock_checkout() {
   chmod u+rwx . 2>/dev/null || true
 
   tracked_dirs | while IFS= read -r dir; do
-    [ -e "$dir" ] && chmod u+rwx "$dir" 2>/dev/null || true
-  done
-  git ls-files -z | while IFS= read -r -d '' file; do
-    [ -e "$file" ] && chmod u+rw "$file" 2>/dev/null || true
-  done
+    [ -e "$dir" ] && printf '%s\0' "$dir"
+  done | chmod_nul u+rwx
+  git ls-files -z | chmod_nul u+rw
   make_writable_roots
 
   if [ "$quiet" -ne 1 ]; then
     echo "protected-main mode: unlocked tracked source paths"
+  fi
+}
+
+repair_writable_roots() {
+  local root_was_writable
+
+  validate_roots
+  root_was_writable=0
+  [ -w . ] && root_was_writable=1
+  chmod u+rwx . 2>/dev/null || true
+  make_writable_roots
+  [ "$root_was_writable" -eq 1 ] || chmod a-w . 2>/dev/null || true
+
+  if [ "$quiet" -ne 1 ]; then
+    echo "protected-main mode: writable roots repaired"
   fi
 }
 
@@ -284,4 +334,5 @@ case "$mode" in
   status) status_checkout ;;
   lock) lock_checkout ;;
   unlock) unlock_checkout ;;
+  repair-writable-roots) repair_writable_roots ;;
 esac
