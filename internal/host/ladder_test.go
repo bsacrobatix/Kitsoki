@@ -50,10 +50,10 @@ func fatalResult(msg string) host.Result {
 }
 
 // TestRunLadder_InfraFailureFallsOverAndBacksOff verifies: an infra failure on
-// rung 0 abandons the REST of that model's effort sweep (only one attempt
-// against modelA, not three) and falls over to the next model, which
-// succeeds. The failing model is marked in backoff (verified by the next
-// test, which shares the same state file).
+// rung 0 abandons the REST of that provider/harness lane's effort sweep (only
+// one attempt against modelA, not three) and falls over to the next lane, which
+// succeeds. The failing lane is marked in backoff (verified by later tests that
+// share the same state file).
 func TestRunLadder_InfraFailureFallsOverAndBacksOff(t *testing.T) {
 	t.Parallel()
 	cfg := twoModelConfig(t)
@@ -95,10 +95,63 @@ func TestRunLadder_InfraFailureFallsOverAndBacksOff(t *testing.T) {
 	}
 }
 
-// TestRunLadder_BackoffSkipsProvider verifies that a model marked in backoff
-// by one RunLadder call is SKIPPED entirely by a subsequent call sharing the
-// same on-disk state file — even though the skipped model would otherwise
-// have succeeded this time.
+// TestRunLadder_InfraFailureSkipsSameProviderModelLadder verifies that an
+// infra failure backs off the whole provider/harness lane, not just the exact
+// model slot. A 429/quota/transport failure should jump to a different
+// provider or harness instead of trying stronger models on the same broken
+// lane.
+func TestRunLadder_InfraFailureSkipsSameProviderModelLadder(t *testing.T) {
+	t.Parallel()
+	cfg := host.LadderConfig{
+		Models: []host.LadderModel{
+			{Backend: "claude", Provider: "claude-native", Model: "opus"},
+			{Backend: "claude", Provider: "claude-native", Model: "sonnet"},
+			{Backend: "codex", Provider: "codex-native", Model: "gpt-5.5"},
+		},
+		Efforts:   []string{"low", "high"},
+		StatePath: filepath.Join(t.TempDir(), "ladder-state.json"),
+	}
+
+	var seen []string
+	once := func(ctx context.Context, _ map[string]any) (host.Result, error) {
+		rung, _ := host.LadderRungFromContext(ctx)
+		seen = append(seen, rung.Provider+"/"+rung.Model+"/"+rung.Effort)
+		if rung.Provider == "claude-native" && rung.Model == "opus" {
+			return infraResult("429 rate limited"), nil
+		}
+		return host.Result{}, nil
+	}
+
+	res, err, summary := host.RunLadder(context.Background(), cfg, nil, once)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.Error != "" || summary.Winner == nil || summary.Winner.Provider != "codex-native" {
+		t.Fatalf("expected fallback success on codex-native, res=%+v summary=%+v", res, summary)
+	}
+	wantSeen := []string{"claude-native/opus/low", "codex-native/gpt-5.5/low"}
+	if fmt.Sprint(seen) != fmt.Sprint(wantSeen) {
+		t.Fatalf("infra fallback should skip same-provider model/effort ladder;\n got  %v\n want %v", seen, wantSeen)
+	}
+
+	var secondSeen []string
+	second := func(ctx context.Context, _ map[string]any) (host.Result, error) {
+		rung, _ := host.LadderRungFromContext(ctx)
+		secondSeen = append(secondSeen, rung.Provider+"/"+rung.Model)
+		return host.Result{}, nil
+	}
+	if _, err, summary := host.RunLadder(context.Background(), cfg, nil, second); err != nil || summary.Winner == nil {
+		t.Fatalf("second ladder call failed: err=%v summary=%+v", err, summary)
+	}
+	if fmt.Sprint(secondSeen) != fmt.Sprint([]string{"codex-native/gpt-5.5"}) {
+		t.Fatalf("provider/harness backoff should skip all claude-native models, got %v", secondSeen)
+	}
+}
+
+// TestRunLadder_BackoffSkipsProvider verifies that a provider/harness lane
+// marked in backoff by one RunLadder call is SKIPPED entirely by a subsequent
+// call sharing the same on-disk state file — even though the skipped first
+// model would otherwise have succeeded this time.
 func TestRunLadder_BackoffSkipsProvider(t *testing.T) {
 	t.Parallel()
 	cfg := twoModelConfig(t)
@@ -487,8 +540,10 @@ func TestRunLadder_InfraFailureEmitsFallbackNotice(t *testing.T) {
 	if notice["severity"] != "warn" {
 		t.Fatalf("fallback notice should use warning severity, got %+v", notice)
 	}
-	if text, _ := notice["text"].(string); text == "" || !strings.Contains(text, "429 rate limited") {
-		t.Fatalf("notice text should include the visible 429 reason, got %q", text)
+	if text, _ := notice["text"].(string); text == "" ||
+		!strings.Contains(text, "429 rate limited") ||
+		!strings.Contains(text, "skipping its remaining effort/model ladder") {
+		t.Fatalf("notice text should explain the visible 429 reason and lane skip, got %q", text)
 	}
 
 	gotTypes := make([]string, 0, len(stream.events))
@@ -503,7 +558,8 @@ func TestRunLadder_InfraFailureEmitsFallbackNotice(t *testing.T) {
 		t.Fatalf("attempt event should identify the first provider/backend/model, got %+v", stream.events[0])
 	}
 	if !strings.Contains(stream.events[1].Text, "Kitsoki harness: cheap / modelA via claude") ||
-		!strings.Contains(stream.events[1].Text, "429 rate limited") {
+		!strings.Contains(stream.events[1].Text, "429 rate limited") ||
+		!strings.Contains(stream.events[1].Text, "skipping its remaining effort/model ladder") {
 		t.Fatalf("fallback event should carry source and error text, got %q", stream.events[1].Text)
 	}
 	if !strings.Contains(stream.events[2].Text, "strong / modelB via claude") {

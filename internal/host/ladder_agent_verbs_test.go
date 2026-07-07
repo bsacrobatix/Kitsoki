@@ -30,19 +30,20 @@ func modelFlag(args []string) string {
 	return ""
 }
 
-// TestAgentDecide_Ladder_InfraFallsOverToNextModel drives AgentDecideHandler
-// with a 2-model ladder where the first model's backend is "down" (an infra
-// ClaudeRun.Infra failure). No harness_ladder: story wiring is involved —
-// installing the LadderConfig on ctx (as an operator config would) is
-// entirely sufficient for the SAME handler to fall over automatically.
-func TestAgentDecide_Ladder_InfraFallsOverToNextModel(t *testing.T) {
+// TestAgentDecide_Ladder_InfraFallsOverToNextProvider drives
+// AgentDecideHandler with a 2-provider ladder where the first provider's
+// backend is "down" (an infra ClaudeRun.Infra failure). No harness_ladder:
+// story wiring is involved — installing the LadderConfig on ctx (as an
+// operator config would) is entirely sufficient for the SAME handler to fall
+// over automatically.
+func TestAgentDecide_Ladder_InfraFallsOverToNextProvider(t *testing.T) {
 	t.Parallel()
 	schemaPath := makeSchemaFile(t)
 
 	cfg := host.LadderConfig{
 		Models: []host.LadderModel{
-			{Backend: "claude", Model: "flaky-model"},
-			{Backend: "claude", Model: "good-model"},
+			{Backend: "claude", Provider: "flaky-provider", Model: "flaky-model"},
+			{Backend: "claude", Provider: "good-provider", Model: "good-model"},
 		},
 		Efforts:   []string{""},
 		StatePath: filepath.Join(t.TempDir(), "ladder-state.json"),
