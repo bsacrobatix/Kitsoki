@@ -50,6 +50,8 @@ type driveFrame struct {
 	Exit string `json:"exit"`
 	// HostCalls summarises the host.* invocations this turn made (empty when none).
 	HostCalls []driveHostCall `json:"host_calls,omitempty"`
+	// OperationDrive summarises the optional --drive-operation autonomous drive.
+	OperationDrive *driveOperationFrame `json:"operation_drive,omitempty"`
 }
 
 // driveHostCall is a compact summary of one host.* invocation observed in the
@@ -57,6 +59,15 @@ type driveFrame struct {
 type driveHostCall struct {
 	Namespace string `json:"namespace"`
 	State     string `json:"state,omitempty"`
+}
+
+// driveOperationFrame is additive metadata emitted when --drive-operation asks
+// the operation driver to continue an active autonomous operation after an
+// operator/scripted turn.
+type driveOperationFrame struct {
+	Turns      int    `json:"turns"`
+	StopReason string `json:"stop_reason,omitempty"`
+	LastIntent string `json:"last_intent,omitempty"`
 }
 
 const (
@@ -68,16 +79,17 @@ const (
 
 func driveCmd() *cobra.Command {
 	var (
-		tracePath   string
-		harnessType string
-		cassette    string
-		recordMode  string
-		cols        int
-		rows        int
-		scriptPath  string
-		profileName string
-		configPath  string
-		warpBasisPath string
+		tracePath      string
+		harnessType    string
+		cassette       string
+		recordMode     string
+		cols           int
+		rows           int
+		scriptPath     string
+		profileName    string
+		configPath     string
+		warpBasisPath  string
+		driveOperation bool
 	)
 
 	cmd := &cobra.Command{
@@ -108,17 +120,18 @@ Examples:
 				appPath = args[0]
 			}
 			return runDrive(cmd, driveCmdConfig{
-				appPath:     appPath,
-				tracePath:   tracePath,
-				harnessType: harnessType,
-				cassette:    cassette,
-				recordMode:  recordMode,
-				cols:        cols,
-				rows:        rows,
-				scriptPath:  scriptPath,
-				profileName: profileName,
-				configPath:  configPath,
-				warpBasisPath: warpBasisPath,
+				appPath:        appPath,
+				tracePath:      tracePath,
+				harnessType:    harnessType,
+				cassette:       cassette,
+				recordMode:     recordMode,
+				cols:           cols,
+				rows:           rows,
+				scriptPath:     scriptPath,
+				profileName:    profileName,
+				configPath:     configPath,
+				warpBasisPath:  warpBasisPath,
+				driveOperation: driveOperation,
 			})
 		},
 	}
@@ -133,23 +146,25 @@ Examples:
 	cmd.Flags().StringVar(&profileName, "profile", "", "harness profile from .kitsoki.yaml/.kitsoki.local.yaml; supplies backend, model, quota, and provider env")
 	cmd.Flags().StringVar(&configPath, "config", webconfig.DefaultConfigFile, "config file used with --profile")
 	cmd.Flags().StringVar(&warpBasisPath, "warp", "", "path to a warp-basis YAML (state + world overrides); applied as the first action after session create. Same file the TUI's /warp file:<path> loads.")
+	cmd.Flags().BoolVar(&driveOperation, "drive-operation", false, "after each accepted turn, drive an active autonomous operation until it rests")
 
 	return cmd
 }
 
 // driveCmdConfig carries the parsed flags for runDrive.
 type driveCmdConfig struct {
-	appPath     string
-	tracePath   string
-	harnessType string
-	cassette    string
-	recordMode  string
-	cols        int
-	rows        int
-	scriptPath  string
-	profileName   string
-	configPath    string
-	warpBasisPath string
+	appPath        string
+	tracePath      string
+	harnessType    string
+	cassette       string
+	recordMode     string
+	cols           int
+	rows           int
+	scriptPath     string
+	profileName    string
+	configPath     string
+	warpBasisPath  string
+	driveOperation bool
 
 	// harnessOverride, when non-nil, replaces buildDriveHarness — the DI seam
 	// tests use to inject a stub live harness (or a failing live harness behind
@@ -266,18 +281,40 @@ func runDrive(cmd *cobra.Command, cfg driveCmdConfig) error {
 
 		histBefore := len(ts.Sink.History())
 		outcome, turnErr := ts.Orch.Turn(ctx, ts.SID, line)
+		model = model.ApplyTurnOutcome(outcome, line, turnErr)
+		finalOutcome := outcome
+		finalErr := turnErr
+		var opFrame *driveOperationFrame
+
+		if cfg.driveOperation && shouldDriveOperationAfterTurn(outcome, turnErr) {
+			drive, driveErr := ts.Orch.DriveOperation(ctx, ts.SID)
+			if drive != nil {
+				opFrame = &driveOperationFrame{
+					Turns:      drive.Turns,
+					StopReason: drive.StopReason,
+					LastIntent: drive.LastIntent,
+				}
+				if drive.Final != nil {
+					model = model.ApplyTurnOutcome(drive.Final, "Drive operation", driveErr)
+					finalOutcome = drive.Final
+				}
+			}
+			if driveErr != nil {
+				finalErr = driveErr
+			}
+		}
+
 		histAfter := ts.Sink.History()
 		newEvents := histAfter[histBefore:]
-
-		model = model.ApplyTurnOutcome(outcome, line, turnErr)
 		frame := tui.ComposeFrame(&model, cfg.cols, cfg.rows)
 
 		df := driveFrame{
-			Frame:        frame,
-			RoutedIntent: routedIntentFromEvents(newEvents),
-			Confidence:   driveConfidence(h),
-			Exit:         driveExit(outcome, turnErr),
-			HostCalls:    hostCallsFromEvents(newEvents),
+			Frame:          frame,
+			RoutedIntent:   routedIntentFromEvents(newEvents),
+			Confidence:     driveConfidence(h),
+			Exit:           driveExit(finalOutcome, finalErr),
+			HostCalls:      hostCallsFromEvents(newEvents),
+			OperationDrive: opFrame,
 		}
 		if encErr := enc.Encode(df); encErr != nil {
 			return fmt.Errorf("encode frame: %w", encErr)
@@ -285,7 +322,7 @@ func runDrive(cmd *cobra.Command, cfg driveCmdConfig) error {
 
 		// Stop driving once the story reaches a terminal state — there is no
 		// further turn to take.
-		if outcome != nil && outcome.Mode == orchestrator.ModeCompleted {
+		if finalOutcome != nil && finalOutcome.Mode == orchestrator.ModeCompleted {
 			break
 		}
 	}
@@ -294,6 +331,13 @@ func runDrive(cmd *cobra.Command, cfg driveCmdConfig) error {
 	}
 
 	return nil
+}
+
+func shouldDriveOperationAfterTurn(out *orchestrator.TurnOutcome, err error) bool {
+	if err != nil || out == nil {
+		return false
+	}
+	return out.Mode == orchestrator.ModeTransitioned
 }
 
 // buildDriveHarness constructs the routing harness for drive: a LiveHarness or
