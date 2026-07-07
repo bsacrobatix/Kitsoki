@@ -1,12 +1,13 @@
 # Run-As-User Setup
 
 This no-LLM story applies macOS local-user delegation for coding-agent launches.
-It opens on a small setup control screen. Use `apply`, `accept`, or `ok` to run
-the deterministic setup with non-interactive sudo. Use `details` only when you
-want the generated receipt and setup summary, and use `edit values` when a
-default user, path, or CLI location is wrong. If sudo needs a password or an
-agent CLI needs interactive login, the story stops with command output instead
-of hanging on an invisible prompt.
+It opens on a small setup control screen. Use `apply` to run the deterministic
+setup with non-interactive sudo; typed `accept` or `ok` input takes the same
+path. Use `details` only when you want the generated receipt and setup summary,
+and use `edit values` when a default user, path, or CLI location is wrong. If
+sudo needs a password, the story moves to an authorization screen with the
+`sudo -v` handoff and a retry action instead of dumping a generic command
+failure.
 
 Run it from the project checkout:
 
@@ -26,12 +27,13 @@ It applies:
   and launch-policy rejection.
 
 The apply path uses `host.run` and `sudo -n`. That makes it deterministic and
-safe for headless runs: success means the setup was applied, while missing sudo
-credentials or missing CLI authentication become visible story failures. The
-automated path applies the account, group, wrappers, sudoers, sample capsule,
-delegated write probe, protected-root write-deny probe, and wrapper smoke tests;
-the launch-policy rejection command remains printed for explicit operator review
-so the story does not accidentally start an interactive backend.
+safe for headless runs: success means the setup was applied, missing sudo
+credentials become a dedicated authorization-retry state, and other command
+failures remain visible story failures. The automated path applies the account,
+group, wrappers, sudoers, sample capsule, delegated write probe, protected-root
+write-deny probe, and wrapper smoke tests; the launch-policy rejection command
+remains printed for explicit operator review so the story does not accidentally
+start an interactive backend.
 
 The current implementation still relies on PATH wrappers for the actual backend
 switch. The `agent_user_delegation:` config is the local setup receipt and

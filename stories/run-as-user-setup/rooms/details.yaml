@@ -66,10 +66,7 @@ states:
           items:
             - label: "apply"
               intent: apply
-              hint: "run the setup now"
-            - label: "ok"
-              intent: accept
-              hint: "same as apply"
+              hint: "create the account, install wrappers, and run probes"
             - label: "edit values"
               intent: edit
               hint: "change users, paths, or CLI locations"
@@ -291,7 +288,11 @@ states:
               need visudo
               need kitsoki
 
-              sudo -n true >/dev/null 2>&1 || die "non-interactive sudo is not available. Run 'sudo -v' in the terminal that launched Kitsoki, then retry apply."
+              if ! sudo -n true >/dev/null 2>&1; then
+                log "AUTHORIZATION_REQUIRED: sudo is not authenticated for non-interactive apply."
+                log "Run 'sudo -v' in the terminal that launched Kitsoki, then retry apply."
+                exit 77
+              fi
 
               if ! id -u "$agent_user" >/dev/null 2>&1; then
                 log "creating non-admin delegated account $agent_user"
@@ -402,6 +403,12 @@ states:
           effects:
             - set:
                 status: "applied"
+        - when: "world.apply_exit_code == 77"
+          target: needs_authorization
+          effects:
+            - set:
+                status: "authorization required"
+                last_error: "{{ world.apply_output }}"
         - target: apply_failed
           effects:
             - set:
@@ -409,6 +416,66 @@ states:
                 last_error: "run-as-user setup apply failed with exit {{ world.apply_exit_code }}\n{{ world.apply_output }}"
       back:
         - target: details
+      look:
+        - target: .
+      quit:
+        - target: ended
+
+  needs_authorization:
+    description: "Run-as-user setup needs sudo authorization"
+    relevant_world: [apply_output, status]
+    view:
+      - prose: "The deterministic apply step is ready, but macOS has not authorized sudo for this Kitsoki process."
+      - heading: "Authorize"
+      - code: "sudo -v"
+      - prose: "Run that command in the terminal that launched Kitsoki, then retry apply. The story will not collect or proxy your password."
+      - heading: "Command output"
+      - code: "{{ world.apply_output|default:'(none)' }}"
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "apply"
+              intent: apply
+              hint: "retry after sudo authorization"
+            - label: "details"
+              intent: plan
+              hint: "return to setup details"
+            - label: "edit values"
+              intent: edit
+              hint: "change users, paths, or CLI locations"
+            - label: "back"
+              intent: back
+              hint: "return to setup"
+            - label: "quit"
+              intent: quit
+            - label: "look"
+              intent: look
+    on:
+      accept:
+        - target: applying
+          effects:
+            - set:
+                apply_ok: false
+                apply_exit_code: -1
+                apply_output: ""
+                last_error: ""
+                status: "applying"
+      apply:
+        - target: applying
+          effects:
+            - set:
+                apply_ok: false
+                apply_exit_code: -1
+                apply_output: ""
+                last_error: ""
+                status: "applying"
+      plan:
+        - target: details
+      edit:
+        - target: configuring
+      back:
+        - target: lobby
       look:
         - target: .
       quit:
