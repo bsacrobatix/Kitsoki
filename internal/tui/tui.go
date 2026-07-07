@@ -302,6 +302,9 @@ type RootModel struct {
 	// bugPrivacyChecker, when set, runs the provider-backed /bug privacy gate
 	// before local or GitHub filing. Nil keeps deterministic scrubbing only.
 	bugPrivacyChecker bugprivacy.Checker
+	// bugPrivacyCheckerResolver optionally builds a checker from the current
+	// harness selection right before /bug files.
+	bugPrivacyCheckerResolver BugPrivacyCheckerResolver
 
 	// lastCtrlC is the time the most recent Ctrl+C was pressed, used to
 	// detect a double-tap quit. Zero means no recent press (or the window
@@ -567,6 +570,17 @@ func WithBugTicketRepo(repo string) RootModelOption {
 // WithBugPrivacyChecker enables the provider-backed /bug privacy gate.
 func WithBugPrivacyChecker(checker bugprivacy.Checker) RootModelOption {
 	return func(m *RootModel) { m.bugPrivacyChecker = checker }
+}
+
+// BugPrivacyCheckerResolver builds the provider-backed /bug privacy gate for
+// the current harness profile selection.
+type BugPrivacyCheckerResolver func(orchestrator.ProfileSelection) bugprivacy.Checker
+
+// WithBugPrivacyCheckerResolver enables selection-aware provider-backed /bug
+// privacy checks. A nil resolver or nil returned checker falls back to
+// WithBugPrivacyChecker, then deterministic scrubbing only.
+func WithBugPrivacyCheckerResolver(resolver BugPrivacyCheckerResolver) RootModelOption {
+	return func(m *RootModel) { m.bugPrivacyCheckerResolver = resolver }
 }
 
 // WithSlashSuggester injects the ranking/filtering implementation used by the

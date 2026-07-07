@@ -17,6 +17,7 @@ import (
 	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/ghagent/bugdeck"
 	"kitsoki/internal/host"
+	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/harrec"
 	"kitsoki/internal/runstatus/harscrub"
@@ -405,6 +406,33 @@ func TestBugReport_PrivacyAgentFailureBlocksOriginalAndFilesFollowUp(t *testing.
 	}
 	if strings.Contains(string(data), "customer report") || !strings.Contains(string(data), "customer_data") {
 		t.Fatalf("follow-up should omit original title and include category: %s", data)
+	}
+}
+
+func TestBugReport_PrivacyResolverReceivesHarnessSelectionFromTraceRef(t *testing.T) {
+	root := t.TempDir()
+	want := orchestrator.ProfileSelection{Profile: "codex-native", Model: "gpt-5.5", Effort: "low"}
+	drv := &harnessDriver{sel: want}
+	s := newHarnessServer(drv)
+	s.bugRoot = root
+
+	var got orchestrator.ProfileSelection
+	s.bugPrivacyCheckerResolver = func(ctx BugPrivacyContext) bugprivacy.Checker {
+		got = ctx.Selection
+		return bugprivacy.CheckFunc(func(context.Context, bugprivacy.Report, []bugprivacy.Finding) (bugprivacy.Decision, error) {
+			return bugprivacy.Decision{Pass: true, Reason: "safe"}, nil
+		})
+	}
+
+	if _, rerr := s.bugReport(map[string]any{
+		"title":     "selection-aware privacy",
+		"body":      "plain report",
+		"trace_ref": "sess-1",
+	}); rerr != nil {
+		t.Fatalf("bugReport returned error: %+v", rerr)
+	}
+	if got != want {
+		t.Fatalf("resolver selection = %+v, want %+v", got, want)
 	}
 }
 

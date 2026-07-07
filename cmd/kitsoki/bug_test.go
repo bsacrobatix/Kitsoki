@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/host"
+	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/reportmeta"
 	"kitsoki/internal/webconfig"
 )
@@ -297,7 +298,7 @@ func TestBugCreateCmd_PrivacySubstitutesHighEntropy(t *testing.T) {
 	require.Contains(t, followUp, "high_entropy")
 }
 
-func TestBugPrivacyCheckerFromConfigRequiresHarnessLadder(t *testing.T) {
+func TestBugPrivacyCheckerFromConfigUsesExplicitHarnessLadderOnly(t *testing.T) {
 	require.Nil(t, bugPrivacyCheckerFromConfig(webconfig.WebConfig{}, t.TempDir()))
 
 	checker := bugPrivacyCheckerFromConfig(webconfig.WebConfig{
@@ -310,6 +311,81 @@ func TestBugPrivacyCheckerFromConfigRequiresHarnessLadder(t *testing.T) {
 		},
 	}, t.TempDir())
 	require.NotNil(t, checker)
+}
+
+func TestBugPrivacyCheckerFromRuntimeConfigUsesDefaultProfile(t *testing.T) {
+	checker := bugPrivacyCheckerFromRuntimeConfig(webconfig.WebConfig{
+		DefaultProfile: "codex-native",
+		HarnessProfiles: map[string]webconfig.HarnessProfile{
+			"codex-native": {
+				Backend: "codex",
+				Model:   "gpt-5.5",
+				Effort:  "high",
+			},
+		},
+	}, t.TempDir(), bugPrivacyRuntimeConfig{})
+
+	got, ok := checker.(host.BugPrivacyAgentChecker)
+	require.True(t, ok)
+	require.Equal(t, []host.LadderModel{{
+		Backend:  "codex",
+		Provider: "codex-native",
+		Model:    "gpt-5.5",
+	}}, got.Ladder.Models)
+	require.Equal(t, []string{"high"}, got.Ladder.Efforts)
+	require.Equal(t, 1, got.Ladder.MaxAttempts)
+}
+
+func TestBugPrivacyCheckerResolverUsesCurrentSelection(t *testing.T) {
+	resolver := bugPrivacyCheckerResolverFromConfig(webconfig.WebConfig{
+		DefaultProfile: "claude-native",
+		HarnessProfiles: map[string]webconfig.HarnessProfile{
+			"claude-native": {Backend: "claude", Model: "opus"},
+			"codex-native":  {Backend: "codex", Model: "gpt-5.5", Effort: "medium"},
+		},
+	}, t.TempDir(), bugPrivacyRuntimeConfig{})
+
+	checker := resolver(orchestrator.ProfileSelection{
+		Profile: "codex-native",
+		Model:   "gpt-5.5-mini",
+		Effort:  "low",
+	})
+	got, ok := checker.(host.BugPrivacyAgentChecker)
+	require.True(t, ok)
+	require.Equal(t, []host.LadderModel{{
+		Backend:  "codex",
+		Provider: "codex-native",
+		Model:    "gpt-5.5-mini",
+	}}, got.Ladder.Models)
+	require.Equal(t, []string{"low"}, got.Ladder.Efforts)
+}
+
+func TestBugPrivacyCheckerFromRuntimeConfigUsesActiveBackend(t *testing.T) {
+	checker := bugPrivacyCheckerFromRuntimeConfig(webconfig.WebConfig{}, t.TempDir(), bugPrivacyRuntimeConfig{
+		AgentBackend: "codex",
+		ClaudeModel:  "gpt-5.5",
+	})
+
+	got, ok := checker.(host.BugPrivacyAgentChecker)
+	require.True(t, ok)
+	require.Equal(t, []host.LadderModel{{
+		Backend: "codex",
+		Model:   "gpt-5.5",
+	}}, got.Ladder.Models)
+	require.Equal(t, 1, got.Ladder.MaxAttempts)
+}
+
+func TestBugPrivacyCheckerFromRuntimeConfigUsesDefaultLiveLadder(t *testing.T) {
+	require.Nil(t, bugPrivacyCheckerFromRuntimeConfig(webconfig.WebConfig{}, t.TempDir(), bugPrivacyRuntimeConfig{}))
+
+	checker := bugPrivacyCheckerFromRuntimeConfig(webconfig.WebConfig{}, t.TempDir(), bugPrivacyRuntimeConfig{
+		UseDefaultLiveLadder: true,
+	})
+	got, ok := checker.(host.BugPrivacyAgentChecker)
+	require.True(t, ok)
+	require.Equal(t, []host.LadderModel{host.DefaultLadderConfig().Models[0]}, got.Ladder.Models)
+	require.Equal(t, []string{host.DefaultLadderConfig().Efforts[0]}, got.Ladder.Efforts)
+	require.Equal(t, 1, got.Ladder.MaxAttempts)
 }
 
 // TestBugCreateCmd_TargetRequired asserts that --target must be set

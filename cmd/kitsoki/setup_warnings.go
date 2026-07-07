@@ -16,6 +16,41 @@ func setupWarningsFromConfig(cfg webconfig.WebConfig, goos string) []server.Setu
 	return nil
 }
 
+func setupWarningsFromRuntimeConfig(cfg webconfig.WebConfig, goos string, runtime bugPrivacyRuntimeConfig, requireBugPrivacyChecker bool) []server.SetupWarning {
+	var warnings []server.SetupWarning
+	if w := runAsUserSetupWarning(cfg, goos); w != nil {
+		warnings = append(warnings, *w)
+	}
+	if requireBugPrivacyChecker {
+		if w := bugPrivacySetupWarning(cfg, runtime); w != nil {
+			warnings = append(warnings, *w)
+		}
+	}
+	return warnings
+}
+
+func bugPrivacySetupWarning(cfg webconfig.WebConfig, runtime bugPrivacyRuntimeConfig) *server.SetupWarning {
+	if bugPrivacyCheckerFromRuntimeConfig(cfg, "", runtime) != nil {
+		return nil
+	}
+	return &server.SetupWarning{
+		ID:            "bug-privacy-checker",
+		Title:         "Bug report privacy checker is not configured",
+		Body:          "GitHub bug filing will still use deterministic scrubbing, but the provider-backed privacy review is disabled because no live harness profile, harness ladder, or active agent backend is available.",
+		ActionCommand: "Configure default_profile + harness_profiles in .kitsoki.local.yaml, add harness_ladder, or run kitsoki with --agent/--claude-model.",
+	}
+}
+
+func bugPrivacyStartupNotice(cfg webconfig.WebConfig, runtime bugPrivacyRuntimeConfig, ticketRepo string) string {
+	if strings.TrimSpace(ticketRepo) == "" {
+		return ""
+	}
+	if bugPrivacySetupWarning(cfg, runtime) == nil {
+		return ""
+	}
+	return "(warning: GitHub bug filing privacy agent check is unavailable; deterministic scrubbing still runs. Configure default_profile + harness_profiles in .kitsoki.local.yaml, add harness_ladder, or run kitsoki with --agent/--claude-model.)"
+}
+
 func runAsUserSetupWarning(cfg webconfig.WebConfig, goos string) *server.SetupWarning {
 	if !webconfig.AgentUserDelegationRuntimeEnabled {
 		return nil

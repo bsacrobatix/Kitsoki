@@ -246,6 +246,11 @@ authentication.`,
 			}
 			dirs := webconfig.Resolve(storyDirs, cfg)
 			harnessProfiles, defaultProfile := harnessProfilesFromConfig(cfg)
+			bugPrivacyRuntime := bugPrivacyRuntimeConfig{
+				AgentBackend:         resolveAgentBackend(agentBackend),
+				ClaudeModel:          claudeModel,
+				UseDefaultLiveLadder: fixture == nil,
+			}
 
 			// ── Operator identity ────────────────────────────────────────────
 			// An explicit --actor wins; otherwise fall back to the configured
@@ -308,14 +313,16 @@ authentication.`,
 				return fmt.Errorf("load installed kits from %q: %w", kitsDir, err)
 			}
 			bugRoot := resolveWebBugRoot(dirs)
+			bugPrivacyResolver := bugPrivacyCheckerResolverFromConfig(cfg, bugRoot, bugPrivacyRuntime)
 			srv := server.NewMulti(registry,
 				server.WithDefaultActor(actor),
 				server.WithBugRoot(bugRoot),
 				server.WithWorkflowRoot(bugRoot),
 				server.WithTicketRepo(ticketRepo),
 				server.WithAgentEvidenceDir(agentEvidenceDir),
-				server.WithBugPrivacyChecker(bugPrivacyCheckerFromConfig(cfg, bugRoot)),
-				server.WithSetupWarnings(setupWarningsFromConfig(cfg, runtime.GOOS)),
+				server.WithBugPrivacyChecker(bugPrivacyResolver(orchestrator.ProfileSelection{})),
+				server.WithBugPrivacyCheckerResolver(bugPrivacyServerResolver(bugPrivacyResolver)),
+				server.WithSetupWarnings(setupWarningsFromRuntimeConfig(cfg, runtime.GOOS, bugPrivacyRuntime, ticketRepo != "")),
 				server.WithKits(kits),
 			)
 			// Attach the cross-session notification relay sink so each new
