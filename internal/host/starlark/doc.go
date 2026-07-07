@@ -91,7 +91,8 @@
 //   - No mutable world; no side effects beyond HTTP and explicit fs/probe.
 //   - No general ctx.run shell: ctx.probe is a fixed read-only allow-list, not
 //     arbitrary command execution; ctx.fs has no delete/chmod/rename.
-//   - No nondeterministic stdlib (time, random) — only json and math are enabled.
+//   - No nondeterministic stdlib (time, random) — only json, math, and
+//     decode-only yaml are enabled.
 //   - This package never imports internal/host; the host.Handler adapter lives
 //     in package host (internal/host/starlark_run.go) to avoid an import cycle.
 package starlark

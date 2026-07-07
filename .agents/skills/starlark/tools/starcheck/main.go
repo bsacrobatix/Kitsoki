@@ -10,7 +10,7 @@
 //   - references to a builtin a given capability *level* does not grant — by
 //     restricting the predeclared name set with -predeclared. This is the same
 //     "determinism enforced by injection" check an embedder runs at load time:
-//     a function that may only see {json, math} will fail to resolve if it
+//     a function that may only see {json, math, yaml} will fail to resolve if it
 //     mentions `http`.
 //
 // It never evaluates the module, so resolving cleanly does not prove the code

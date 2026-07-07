@@ -224,7 +224,124 @@ states:
                 ```
 ```
 
-### 5.4 LLM-backed effect
+### 5.4 Deterministic Starlark glue
+
+For ad hoc procedural logic, prefer `host.starlark.run` before shell. It gives
+you a real language with a typed sidecar, a narrow capability sandbox,
+deterministic replay, and flow-test coverage that executes the real script.
+
+Use it for:
+
+- shaping JSON/YAML into world fields;
+- branching on structured HTTP responses;
+- inspecting a small part of the working tree;
+- writing bounded review artifacts;
+- replacing dense Pongo or inline shell data munging.
+
+```yaml
+hosts:
+  - host.starlark.run
+
+states:
+  enriching:
+    on_enter:
+      - invoke: host.starlark.run
+        id: derive_widget
+        with:
+          script: scripts/derive_widget.star
+          capabilities:
+            http:
+              methods: [GET]
+              cassette_required: true
+          inputs:
+            widget_id: "{{ world.widget_id }}"
+        bind:
+          widget_name: name
+        on_error: enrich_failed
+        once: true
+```
+
+The script must define `def main(ctx): ...` and return a dict. The same-path
+sidecar, not the script comments, declares the enforced contract:
+
+```yaml
+# scripts/derive_widget.star.yaml
+inputs:
+  widget_id: { type: string, required: true }
+outputs:
+  name: { type: string }
+```
+
+The default Starlark surface is intentionally tiny: `ctx.inputs`, read-only
+`ctx.world.get(key)`, and deterministic `json`, `math`, and decode-only `yaml`.
+External surfaces are opt-in with `with.capabilities`: grant `http`, `fs`,
+`vcs`/`probe`/`github`, or exact `host.verbs` only when the script needs them.
+Ungranting is real enforcement: an ungranted `ctx.fs` or `ctx.http` attribute is
+absent before any filesystem/network adapter can run.
+
+Flow fixtures should run the real script. If the script uses HTTP, add
+`starlark_http_cassette:` so the test replays the network boundary without a
+socket. If it uses `ctx.fs` or `ctx.probe`, use the inspection replay support
+(`starlark_inspect_cassette:`) instead of replacing the whole handler with a
+canned result. A whole-handler stub proves only the room wiring, not the script
+logic. Add at least one negative capability check for any new capability family:
+the test should still fail when a harmless mock/replay adapter is present but
+the script tries an ungranted `ctx` surface.
+
+Full reference: [`../architecture/starlark.md`](../architecture/starlark.md)
+and [`../architecture/hosts.md#hoststarlarkrun`](../architecture/hosts.md#hoststarlarkrun).
+
+### 5.5 Bounded CodeAct loops
+
+Use `host.agent.codeact` when the step is still exploratory, but the agent
+should act only by emitting Starlark snippets over an explicit capability map.
+This is narrower than `host.agent.task`: no open tool loop, no `sandbox:` block,
+and no shell unless a granted Starlark host/probe surface provides a specific
+read-only operation.
+
+```yaml
+hosts:
+  - host.agent.codeact
+
+agents:
+  triager:
+    system_prompt: "Inspect with scoped Starlark snippets and submit a verdict."
+
+states:
+  triaging:
+    on_enter:
+      - invoke: host.agent.codeact
+        once: true
+        with:
+          agent: triager
+          goal: "Triage {{ world.ticket_id }} and return a verdict with evidence."
+          budget: 6
+          capabilities:
+            world: read
+            vcs: read
+          schema: schemas/triage_verdict.json
+        bind:
+          triage: payload
+          codeact_steps: steps
+        on_error: triage_failed
+```
+
+The runtime runs each emitted snippet through the same Starlark evaluator as
+`host.starlark.run`. If the agent tries `ctx.fs` without an `fs` grant, the step
+fails early and the error is fed back to the next step; it does not fall through
+to a mock or touch the live filesystem. That is the point of CodeAct: exploratory
+agent reasoning with deterministic, reviewable actions.
+
+Flow tests usually replay or stub the whole `host.agent.codeact` result with a
+`host_cassette`, because the live loop would spend LLM tokens. Once the loop
+stabilizes into deterministic logic, promote the final snippet to
+`host.starlark.run` with a sidecar and prove the promoted flow has no
+`host.agent.codeact` dispatch.
+
+Full reference: [`../architecture/starlark.md`](../architecture/starlark.md)
+and [`../architecture/hosts.md#hostagentcodeact`](../architecture/hosts.md#hostagentcodeact).
+
+### 5.6 LLM-backed effect
 
 `host.agent.ask` runs `claude -p` against a prompt template file with
 templated `{{ args.X }}` placeholders; bind `stdout` back into world.
@@ -242,7 +359,7 @@ conventions, domain rubric, house tone); see
 [`prompts.md`](prompts.md) for the search path, the `spec_` convention,
 `--prompt-overlay`, and `kitsoki prompts spec`.
 
-### 5.5 Operator clarification gates
+### 5.7 Operator clarification gates
 
 When a story needs fresh human input mid-flow, prefer the **story-visible
 operator-aware path** whenever the runtime provides one. The ask belongs in the
@@ -284,7 +401,7 @@ Do not:
   modal is an acceleration path; the room remains the durable fallback and review
   surface.
 
-### 5.6 Background job
+### 5.8 Background job
 
 ```yaml
 hosts:
@@ -311,7 +428,7 @@ When the job finishes, the orchestrator fires the `on_complete:`
 effects in a synthetic turn and posts an inbox notification. Full
 lifecycle in [`background-jobs/`](background-jobs/README.md).
 
-### 5.7 Posting to a transport
+### 5.9 Posting to a transport
 
 ```yaml
 hosts:
@@ -330,7 +447,7 @@ effects:
 The transport handles markup conversion (Markdown → Jira wiki for
 Jira, etc.). See [`transports.md`](../architecture/transports.md) for the registry.
 
-### 5.8 Template interpolation: how complex values render
+### 5.10 Template interpolation: how complex values render
 
 `{{ ... }}` expressions inside YAML strings are evaluated by the
 `expr-lang` engine against `world` and `slots`. How the result is

@@ -286,6 +286,10 @@ or replacing fragile inline shell/Pongo logic.
 Reach for the alternatives only when their capability is specifically needed:
 
 - Use `set`/`increment`/guards when the work is a trivial world update.
+- Use `host.agent.codeact` when the code is not known yet and an agent should
+  explore, but every action must still be a bounded Starlark snippet over an
+  explicit `with.capabilities` grant. CodeAct is narrower than
+  `host.agent.task`: no open Claude Code tool loop and no `with.sandbox:`.
 - Use `host.run` only for real local commands or repo/tool execution. Do not use
   shell as the general scripting language for string munging, JSON shaping, or
   HTTP glue; it is harder to sandbox, trace, and cassette.
@@ -330,6 +334,10 @@ in trace events under `__http_exchanges`; bodies stay in the cassette. For the
 full contract and pitfalls, use the `starlark` skill and
 `.agents/skills/starlark/reference/kitsoki.md`.
 
+For the full Starlark experience — deterministic glue scripts, CodeAct snippets,
+stdlib, `ctx` capabilities, sandbox layering, and promotion from CodeAct to a
+checked-in script — see `docs/architecture/starlark.md`.
+
 The built-in handlers (full reference in `docs/architecture/hosts.md`):
 
 | Handler | Use for |
@@ -339,6 +347,7 @@ The built-in handlers (full reference in `docs/architecture/hosts.md`):
 | `host.oracle.extract` | Tiered resolver: synonyms → slot_template → llm. Returns typed JSON + `resolved_by`. |
 | `host.oracle.decide` | Typed LLM verdict; schema required; `submit` auto-attached; read-only tools. The canonical pattern for "Claude produces a structured artifact." |
 | `host.oracle.ask` | Read-only one-shot prose call; schema optional. |
+| `host.agent.codeact` | Bounded agent loop that emits capability-scoped Starlark snippets, then `done(payload)`. Use before `task` when Starlark capabilities are enough. |
 | `host.oracle.task` | Agentic write call with acceptance loop (schema required). |
 | `host.oracle.converse` | Conversational, optionally chat-aware via `chat_id`. |
 | `host.transport.post` | Post a message to a registered transport (tui / jira / bitbucket). |
@@ -351,7 +360,9 @@ toolbox/effect: toolbox/effect says what tools the model may request; sandbox
 selects the subprocess runtime boundary and records `agent.runtime.start/end`
 events. Current OSS strength is `supervised` (process/env/timeout/diff capture);
 it records filesystem/network policy as degraded unless a stronger backend is
-available.
+available. Do **not** put `sandbox:` on `host.agent.codeact`: the loader rejects
+it because CodeAct's sandbox is the bounded Starlark loop plus
+`with.capabilities`, not an external-agent subprocess filesystem policy.
 
 ### Operator questions and MCP-aware asking
 

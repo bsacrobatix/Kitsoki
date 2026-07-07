@@ -17,6 +17,11 @@ For the effect-level shape (`invoke:`, `with:`, `bind:`, `on_error:`,
 For named-capability composition (`host_interfaces:` declared on a
 sub-story, rebound by importers) see [`imports.md`](../stories/imports.md) §11.
 
+For the Starlark-specific authoring experience shared by
+`host.starlark.run` and `host.agent.codeact` — stdlib, `ctx` capability
+grants, sandboxing, validation, cassettes, and promotion — see
+[`starlark.md`](starlark.md).
+
 For invoking agent handlers directly from scripts, CI jobs, or
 validator subprocesses — without a running state machine — see
 [`docs/architecture/agent-cli.md`](agent-cli.md). That document covers
@@ -49,6 +54,7 @@ carrier handler when the op name is dispatched from `with:` args.
 | [`host.agent.extract`](#hostagentextract) | Tiered resolver: synonyms → slot_template → llm. Returns typed JSON + `resolved_by`. |
 | [`host.agent.ask`](#hostagentask) | Read-only inspection call: read tools + Bash under a profile; no mutation. Returns prose + optional typed JSON. |
 | [`host.agent.decide`](#hostagentdecide) | Typed LLM verdict (schema required; submit auto-attached; read-only tools optional). |
+| [`host.agent.codeact`](#hostagentcodeact) | Bounded agent loop that emits capability-scoped Starlark snippets, then `done(payload)`. |
 | [`host.agent.task`](#hostagenttask) | Agentic verb with full tool surface, acceptance loop, and replay artifacts (Mode A/B/C). |
 | [`host.agent.converse`](#hostagentconverse) | Free-form conversational Claude session with permission_mode control. |
 | [`host.transport.post`](#hosttransportpost) | Post a message to a registered transport (TUI / Jira / Bitbucket). |
@@ -120,7 +126,9 @@ recorded run replays byte-for-byte.
 
 The authoritative source is `internal/host/starlark/` (the sandbox) and
 `internal/host/starlark_run.go` (the `host.Handler` adapter); see
-`internal/host/starlark/doc.go` for the design rationale.
+`internal/host/starlark/doc.go` for the design rationale. For a narrative
+authoring guide that also covers CodeAct and sandbox layering, see
+[`starlark.md`](starlark.md).
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
@@ -217,6 +225,8 @@ Example grants:
 
 ```yaml
 capabilities:
+  stdlib: [json, math, yaml]       # default; can be narrowed
+  world: read                      # default; use none/false to hide ctx.world
   http:
     methods: [GET]
     hosts: ["api.github.com"]      # optional; omitted means any host
@@ -454,13 +464,14 @@ is present in the tree.)
 
 ## Agent verb summary
 
-Five verbs ordered by blast radius. Pick the narrowest one that fits.
+Six verbs ordered by blast radius. Pick the narrowest one that fits.
 
 | Verb | Blast radius | Schema required | Mutation | Transcript |
 |---|---|---|---|---|
 | `host.agent.extract` | Deterministic-first | yes | no | no |
 | `host.agent.decide` | LLM-only verdict | yes | no | no |
 | `host.agent.ask` | LLM inspection | optional | no | no |
+| `host.agent.codeact` | Bounded Starlark loop | optional | only granted `ctx` surfaces | step journal |
 | `host.agent.task` | Agentic write | yes (acceptance) | yes | journal |
 | `host.agent.converse` | Open conversation | no | optional | ChatStore |
 
@@ -469,14 +480,113 @@ Five verbs ordered by blast radius. Pick the narrowest one that fits.
 1. Can a synonym list or slot template answer the input? → `extract`.
 2. Does the call require a typed structured verdict with no file mutations? → `decide`.
 3. Do you just need prose or an optional typed annotation from a read-only agent? → `ask`.
-4. Does the agent need to edit files, run commands, or loop until a `submit()` is accepted? → `task`.
-5. Is this a multi-turn conversation the user drives? → `converse`.
+4. Should an agent explore, but only by emitting scoped Starlark snippets over
+   declared capabilities? → `codeact`.
+5. Does the agent need to edit files, run commands, or loop until a `submit()` is accepted? → `task`.
+6. Is this a multi-turn conversation the user drives? → `converse`.
 
-All five verbs share the same streaming path (`AgentStreamer.Run`), the same
-agent-declaration lookup, and the same `KITSOKI_SESSION_ID` propagation. The
+The agent verbs share named-agent lookup and `KITSOKI_SESSION_ID` propagation;
+the CLI-backed paths run through `AgentStreamer.Run` while plugin/direct-API
+paths preserve the same handler result contracts. The
 persona table pattern — one named agent per role, declared in `agents:` — is
 documented with worked examples in `stories/bugfix/AGENT-BRIEF.md` and
 `stories/bugfix/README.md`.
+
+## host.agent.codeact
+
+Bounded "code-act" agent loop. Instead of giving the model an open Claude Code
+toolbox, Kitsoki asks the named agent for one Starlark snippet per step, runs
+that snippet through the same capability-scoped evaluator as
+`host.starlark.run`, and feeds either the returned dict or a structured error
+back to the next step. The loop ends when the agent emits `done(payload)` that
+passes `schema:` validation, or when the step budget is exhausted.
+
+Use CodeAct when a task is still exploratory but the available actions should be
+strictly `ctx.world`, `ctx.http`, `ctx.fs`, `ctx.probe`, or `ctx.host.call`
+surfaces you explicitly grant. Promote stable CodeAct trajectories to
+`host.starlark.run` once the transform is known.
+
+### Arguments
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `agent` | string | yes | Named agent from the top-level `agents:` block. Supplies system prompt, provider/model, and launch policy context. |
+| `goal` | string | yes | Natural-language objective for the loop. This is the stable instruction every step sees with the remaining budget and prior observation/error. |
+| `capabilities` | object | no | Shared Starlark capability authority for every emitted snippet. Same schema as `host.starlark.run`. Absent means pure stdlib plus read-only `ctx.world`; external surfaces are absent. Unknown keys fail app load. |
+| `budget` | int | no | Maximum snippet/done attempts. Default: `5` when absent or non-positive. |
+| `schema` | string | no | JSON Schema path for the final `done(payload)`. Invalid payloads are rejected and fed back as the next step's error instead of terminating. |
+| `working_dir` | string | no | Working directory for the agent subprocess and the production inspector root fallback. Agent `DefaultCwd` is used when omitted. |
+
+`sandbox:` is deliberately invalid on CodeAct. `sandbox:` is the external-agent
+runtime policy for `task`/write-capable `converse`; CodeAct's boundary is the
+Starlark capability sandbox described here and in [`starlark.md`](starlark.md).
+The loader rejects a `sandbox:` block on `host.agent.codeact` so a copied
+task-shaped effect cannot silently run under the wrong assumptions.
+
+### Return values
+
+| Field | Type | Notes |
+|---|---|---|
+| `terminated` | string | `"done"` or `"budget_exhausted"`. |
+| `payload` | object | The schema-valid final payload when `terminated == "done"`; empty on budget exhaustion. |
+| `steps` | list | Per-step journal entries containing the emitted snippet, observation, and optional error message. |
+
+### Capability enforcement
+
+CodeAct snippets run as anonymous Starlark files named `<codeact-snippet>`.
+They use the same `def main(ctx): ...` entry point as `host.starlark.run`, but
+there is no sidecar because the snippet is generated per step. Snippets should
+read session state through `ctx.world.get(key)` and whatever external `ctx`
+surfaces the effect grants; the final `done(payload)` schema is the typed output
+contract for the whole loop.
+
+Capability enforcement is not prompt-only:
+
+- `ctx.http`, `ctx.fs`, `ctx.probe`, and `ctx.host` are not present unless
+  `with.capabilities` grants them.
+- HTTP methods/hosts, fs read/write patterns, probe names, and host verbs are
+  checked by runtime policy wrappers before the production adapter is called.
+- `http.cassette_required: true` requires an injected Starlark HTTP client; a
+  live production recording client is not installed behind the author's back.
+- A snippet failure becomes a structured CodeAct error envelope and the next
+  agent step receives it for self-correction.
+
+### Example
+
+```yaml
+hosts:
+  - host.agent.codeact
+
+agents:
+  triager:
+    system_prompt: "Use scoped Starlark snippets to inspect and submit a verdict."
+
+states:
+  triaging:
+    on_enter:
+      - invoke: host.agent.codeact
+        once: true
+        with:
+          agent: triager
+          budget: 6
+          capabilities:
+            world: read
+            vcs: read
+          schema: schemas/triage_verdict.json
+          goal: >-
+            Triage {{ world.ticket_id }} against the current tree. Do not fix
+            anything. Return whether the bug is still live with code evidence.
+        bind:
+          triage: payload
+          codeact_steps: steps
+        on_error: triage_failed
+```
+
+Flow fixtures can stub or replay the whole `host.agent.codeact` result through
+`host_cassette` for zero-LLM coverage. If the loop produces a deterministic
+transform that should become part of the story, promote it to a checked-in
+`scripts/*.star` + sidecar and replace the effect with `host.starlark.run`; the
+promoted flow should no longer dispatch `host.agent.codeact`.
 
 ### Cache-usage visibility and the pre-dispatch budget gate
 

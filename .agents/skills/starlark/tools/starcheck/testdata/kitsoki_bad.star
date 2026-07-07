@@ -4,5 +4,5 @@
 # `starcheck -kitsoki testdata/kitsoki_bad.star` flags both.
 
 def derive(ctx):                      # wrong entry-point name (engine calls main)
-    now = time.now()                  # error: undefined: time (not in {json, math})
+    now = time.now()                  # error: undefined: time (not in {json, math, yaml})
     return {"stamp": now}
