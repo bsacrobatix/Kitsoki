@@ -480,6 +480,7 @@ export const useRunStore = defineStore("run", () => {
       (e: TraceEvent) => {
         events.value.push(e);
         applyStatePath(e);
+        applyOperationTerminal(e);
         maybeRefreshViewOnBackgroundCompletion(source, sessionId, e);
       },
       (state) => {
@@ -507,6 +508,16 @@ export const useRunStore = defineStore("run", () => {
     if (!_seenStateEntered && e.state_path) {
       currentStatePath.value = e.state_path;
     }
+  }
+
+  function applyOperationTerminal(e: TraceEvent): void {
+    const run = operationRunFromWorldUpdate(e) ?? operationRunFromLifecycleEvent(e);
+    if (!run) return;
+    const status = readString(run, "status");
+    if (!["waiting", "completed", "failed"].includes(status)) return;
+    const terminalState = readString(run, "terminal_state");
+    if (terminalState) currentStatePath.value = terminalState;
+    terminal.value = true;
   }
 
   /**
@@ -588,6 +599,7 @@ export const useRunStore = defineStore("run", () => {
         seen.add(key);
         events.value.push(e);
         applyStatePath(e);
+        applyOperationTerminal(e);
       }
     } catch {
       // The transcript and final view are still usable if trace reconciliation
