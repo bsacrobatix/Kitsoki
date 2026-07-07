@@ -38,7 +38,7 @@ func (HelpCommand) Run(m RootModel, _ []string) (string, RootModel, tea.Cmd) {
 			{"/effort [<level|n>]", "list/switch the active profile's reasoning effort (where the model supports it)"},
 			{"/inbox [<n>]", "list recent notifications; <n> opens one"},
 			{"/inbox sync-github [repo]", "refresh assigned GitHub issues and requested PR reviews"},
-			{"/work [--all|drive|artifact]", "list active async work, drive the current operation, or open its artifact"},
+			{"/work [--all|drive|artifact|summary]", "list active async work, drive the current operation, open its artifact, or show its summary"},
 			{"/workflow <cmd>", "create, validate, run, status, or export a workflow draft"},
 			{"/sessions attach <n> --dry-run", "show the cached chat target without attaching"},
 			{"/trace", "print the last turn's routing trace"},
