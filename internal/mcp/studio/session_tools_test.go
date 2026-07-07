@@ -210,6 +210,51 @@ func TestSessionSubmit_ReturnsRunningWhenTurnExceedsBoundedWait(t *testing.T) {
 	assert.Equal(t, "slow-submit-done", worldValue.Value)
 }
 
+func TestSessionDriveOperation_DrivesAutonomousOperation(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	cs := connectInProcess(ctx, t, srv)
+	appPath := writeOperationDriveStory(t)
+
+	res, err := callTool(ctx, cs, "session.new", map[string]any{
+		"story_path": appPath,
+		"harness":    "replay",
+		"trace":      t.TempDir() + "/trace.jsonl",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "session.new: %s", contentText(res))
+	var ok studio.SessionOpenOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &ok))
+
+	res, err = callTool(ctx, cs, "session.submit", map[string]any{
+		"handle": ok.Handle,
+		"intent": "begin",
+		"cols":   100,
+		"rows":   30,
+	})
+	require.NoError(t, err)
+	started := driveResult(t, res)
+	require.True(t, started.OK)
+	require.Equal(t, "work", started.Outcome.State)
+
+	res, err = callTool(ctx, cs, "session.drive_operation", map[string]any{
+		"handle": ok.Handle,
+		"cols":   100,
+		"rows":   30,
+	})
+	require.NoError(t, err)
+	driven := driveResult(t, res)
+	require.True(t, driven.OK)
+	require.NotNil(t, driven.OperationDrive)
+	assert.Equal(t, 1, driven.OperationDrive.Turns)
+	assert.Equal(t, "operation-completed", driven.OperationDrive.StopReason)
+	assert.Equal(t, "accept", driven.OperationDrive.LastIntent)
+	assert.Equal(t, "done", driven.Outcome.State)
+	assert.Equal(t, "done", driven.Frame.Metadata.State)
+	assert.Contains(t, driven.Frame.Text, "operation: Demo Run")
+	assert.Contains(t, driven.Frame.Text, "completed")
+}
+
 // ─── 2.2 no-live-fallthrough ─────────────────────────────────────────────────
 
 // TestSessionDrive_NoLiveFallthrough is the teeth. A replay session driven with
@@ -961,6 +1006,61 @@ states:
           cmd: "sleep 0.12; printf slow-submit-done"
         bind:
           result: stdout
+`
+	require.NoError(t, os.WriteFile(appPath, []byte(body), 0o644))
+	return appPath
+}
+
+func writeOperationDriveStory(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	appPath := dir + "/app.yaml"
+	const body = `app:
+  id: studio-operation-drive-test
+  version: 0.1.0
+  title: "Studio Operation Drive Test"
+
+operations:
+  demo_run:
+    title: "Demo Run"
+    mode: autonomous
+    execution_mode: one-shot
+    run_in_background: true
+    terminal_artifact: done_artifact
+
+world:
+  done_artifact: { type: any, default: null }
+
+intents:
+  begin:
+    title: "Begin"
+  accept:
+    title: "Accept"
+
+root: idle
+
+states:
+  idle:
+    view: "Idle."
+    on:
+      begin:
+        - target: work
+          operation: demo_run
+
+  work:
+    view: "Working."
+    on:
+      accept:
+        - target: done
+
+  done:
+    terminal: true
+    view: "Done."
+    on_enter:
+      - set:
+          done_artifact:
+            summary_title: "Done"
+            summary_markdown: "Operation finished."
 `
 	require.NoError(t, os.WriteFile(appPath, []byte(body), 0o644))
 	return appPath

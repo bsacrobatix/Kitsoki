@@ -120,6 +120,7 @@ func TestStudioToolsListed(t *testing.T) {
 	assert.True(t, names["studio.handles"], "studio.handles registered (dotted name accepted)")
 	assert.True(t, names["studio.work"], "studio.work registered (dotted name accepted)")
 	assert.True(t, names["session.command"], "session.command registered (dotted name accepted)")
+	assert.True(t, names["session.drive_operation"], "session.drive_operation registered (dotted name accepted)")
 	assert.True(t, names["inbox.sync_github"], "inbox.sync_github registered (dotted name accepted)")
 	assert.True(t, names["story.write"], "story.write registered on a read-write server")
 }
@@ -142,6 +143,7 @@ func TestReadOnlyOmitsStoryWrite(t *testing.T) {
 	assert.True(t, names["story.read"], "story.read stays available in read-only mode")
 	assert.True(t, names["story.validate"], "story.validate stays available in read-only mode")
 	assert.True(t, names["session.drive"], "replay session driving stays available in read-only mode")
+	assert.True(t, names["session.drive_operation"], "operation driving stays available in read-only mode")
 }
 
 // ─── 2.2 handle lifecycle ────────────────────────────────────────────────────

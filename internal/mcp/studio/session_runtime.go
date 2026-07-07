@@ -549,6 +549,20 @@ func (rt *sessionRuntime) continueSuspendable(ctx context.Context, slots map[str
 }
 
 func (rt *sessionRuntime) turnSuspendable(ctx context.Context, input string, cols, rows int, wait time.Duration, run func(context.Context) (*orchestrator.TurnOutcome, tui.Frame)) (res turnResult, pq *pendingQuestion, turnDone bool, running *runningDrive, err error) {
+	return rt.turnSuspendableResult(ctx, input, cols, rows, wait, func(turnCtx context.Context) turnResult {
+		out, frame := run(turnCtx)
+		return turnResult{outcome: out, frame: frame, err: rt.lastTurnErr}
+	})
+}
+
+func (rt *sessionRuntime) driveOperationSuspendable(ctx context.Context, cols, rows int, wait time.Duration) (res turnResult, pq *pendingQuestion, turnDone bool, running *runningDrive, err error) {
+	return rt.turnSuspendableResult(ctx, "operation", cols, rows, wait, func(turnCtx context.Context) turnResult {
+		drive, out, frame := rt.driveOperation(turnCtx, cols, rows)
+		return turnResult{outcome: out, frame: frame, err: rt.lastTurnErr, operationDrive: drive}
+	})
+}
+
+func (rt *sessionRuntime) turnSuspendableResult(ctx context.Context, input string, cols, rows int, wait time.Duration, run func(context.Context) turnResult) (res turnResult, pq *pendingQuestion, turnDone bool, running *runningDrive, err error) {
 	rt.mu.Lock()
 	if rt.inFlight != nil {
 		rt.mu.Unlock()
@@ -575,8 +589,7 @@ func (rt *sessionRuntime) turnSuspendable(ctx context.Context, input string, col
 	turnCtx := host.WithOperatorPrompter(turnBase, prompter)
 	turnCtx = host.WithKitsokiSessionID(turnCtx, string(rt.sid))
 	go func() {
-		out, frame := run(turnCtx)
-		broker.finish(turnResult{outcome: out, frame: frame, err: rt.lastTurnErr})
+		broker.finish(run(turnCtx))
 		rt.clearInFlightIf(broker)
 	}()
 
@@ -678,6 +691,39 @@ func (rt *sessionRuntime) submit(ctx context.Context, intent string, slots map[s
 		rt.modelTurn = out.TurnNumber
 	}
 	return out, tui.ComposeFrame(&rt.model, cols, rows)
+}
+
+// driveOperation advances the active operation handle through the same
+// OperationDriver seam used by the web/runstatus surface, then recomposes the
+// current frame for MCP clients. When the driver finds no safe turn to submit,
+// it returns a read-only view so callers still get the current screen.
+func (rt *sessionRuntime) driveOperation(ctx context.Context, cols, rows int) (*orchestrator.OperationDriveOutcome, *orchestrator.TurnOutcome, tui.Frame) {
+	var drive *orchestrator.OperationDriveOutcome
+	var out *orchestrator.TurnOutcome
+	var err error
+	driver, ok := rt.driver.(rsserver.OperationDriver)
+	if !ok {
+		err = fmt.Errorf("session.drive_operation: operation driving unavailable")
+	} else {
+		drive, err = driver.DriveOperation(ctx)
+		if err == nil {
+			if drive != nil && drive.Final != nil {
+				out = drive.Final
+			} else {
+				out, err = rt.driver.View(ctx)
+			}
+		}
+	}
+	rt.lastTurnErr = err
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if out != nil {
+		rt.model = rt.model.ApplyTurnOutcome(out, "(operation drive)", err)
+		rt.modelTurn = out.TurnNumber
+	} else {
+		rt.refreshFromJourneyLocked()
+	}
+	return drive, out, tui.ComposeFrame(&rt.model, cols, rows)
 }
 
 // cont supplies missing slots for a pending clarification (ContinueTurn) and
