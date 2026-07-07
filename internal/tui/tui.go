@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/clock"
 	"kitsoki/internal/expr"
@@ -297,6 +298,10 @@ type RootModel struct {
 	// evidence through host.GitHubFileBug. Empty preserves local issues/bugs/.
 	bugTicketRepo string
 
+	// bugPrivacyChecker, when set, runs the provider-backed /bug privacy gate
+	// before local or GitHub filing. Nil keeps deterministic scrubbing only.
+	bugPrivacyChecker bugprivacy.Checker
+
 	// lastCtrlC is the time the most recent Ctrl+C was pressed, used to
 	// detect a double-tap quit. Zero means no recent press (or the window
 	// has expired).
@@ -551,6 +556,11 @@ func WithBugRoot(root string) RootModelOption {
 // TUI evidence as GitHub release assets. Empty keeps the local-file path.
 func WithBugTicketRepo(repo string) RootModelOption {
 	return func(m *RootModel) { m.bugTicketRepo = strings.TrimSpace(repo) }
+}
+
+// WithBugPrivacyChecker enables the provider-backed /bug privacy gate.
+func WithBugPrivacyChecker(checker bugprivacy.Checker) RootModelOption {
+	return func(m *RootModel) { m.bugPrivacyChecker = checker }
 }
 
 // WithSlashSuggester injects the ranking/filtering implementation used by the

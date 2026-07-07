@@ -30,7 +30,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/bugfile"
+	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/host"
+	"kitsoki/internal/runstatus/harscrub"
+	"kitsoki/internal/webconfig"
 )
 
 // Back-compat local aliases over the extracted internal/bugfile core.
@@ -110,15 +113,26 @@ walk completes; per-finding failures are reported in the JSON (failed count +
 outcome rows), not as an exit code.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
+			var privacyChecker bugprivacy.Checker
+			if !dryRun {
+				if cfg, cfgErr := webconfig.Load(webconfig.DefaultConfigFile); cfgErr == nil {
+					privacyChecker = bugPrivacyCheckerFromConfig(cfg, runDir)
+				}
+				fmt.Fprintln(cmd.ErrOrStderr(), "bug privacy check: starting")
+			}
 			res, err := host.GitHubFileFindings(context.Background(), host.FindingsFilingInput{
-				RunDir:     runDir,
-				Repo:       repo,
-				DryRun:     dryRun,
-				KitsokiRev: gitShortRevCWD(),
-				FiledBy:    os.Getenv("USER"),
+				RunDir:         runDir,
+				Repo:           repo,
+				DryRun:         dryRun,
+				KitsokiRev:     gitShortRevCWD(),
+				FiledBy:        os.Getenv("USER"),
+				PrivacyChecker: privacyChecker,
 			})
 			if err != nil {
 				return fmt.Errorf("file findings (%s): %w", repo, err)
+			}
+			if !dryRun {
+				fmt.Fprintf(cmd.ErrOrStderr(), "bug privacy check: completed for findings; filed=%d related=%d failed=%d\n", res.Filed, res.Related, res.Failed)
 			}
 			data, err := json.MarshalIndent(res, "", "  ")
 			if err != nil {
@@ -184,15 +198,46 @@ resolved target-root. Exit 1 on error.`,
 			if clockNowSec > 0 {
 				now = time.Unix(clockNowSec, 0).UTC()
 			}
+			normTarget, err := normaliseTarget(target)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(title) == "" {
+				return fmt.Errorf("--title is required")
+			}
+			if strings.TrimSpace(body) == "" {
+				return fmt.Errorf("--body is required")
+			}
+			fmt.Fprintln(cmd.ErrOrStderr(), "bug privacy check: starting")
+			safeReport, privacy, perr := bugprivacy.Check(context.Background(), nil, bugprivacy.Report{
+				Surface:    "cli",
+				Target:     normTarget,
+				Title:      title,
+				Body:       body,
+				ReproSteps: reproSteps,
+				Component:  component,
+				TraceRef:   traceRef,
+			}, harscrub.ScrubOptions{
+				Home:           os.Getenv("HOME"),
+				SecretPatterns: harscrub.DefaultSecretPatterns(),
+			}, bugPrivacyFollowUpRoot(targetDir), os.Getenv("USER"))
+			if perr != nil {
+				return fmt.Errorf("bug privacy check: %w", perr)
+			}
+			if privacy.Blocked() {
+				return fmt.Errorf("%s%s", privacy.Message, cliPrivacyFollowUpSuffix(privacy))
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "bug privacy check: %s%s\n", privacy.Message, cliPrivacyFollowUpSuffix(privacy))
+			title = safeReport.Title
+			body = safeReport.Body
+			reproSteps = safeReport.ReproSteps
+			component = safeReport.Component
+			traceRef = safeReport.TraceRef
 
 			// GitHub mode (--github owner/repo): file a real GitHub issue via the
 			// same host.GitHubFileBug path the web Report-bug RPC uses (text-only —
 			// the CLI captures no screenshot/HAR/rrweb), and print the issue URL.
 			if strings.TrimSpace(githubRepo) != "" {
-				normTarget, err := normaliseTarget(target)
-				if err != nil {
-					return err
-				}
 				ghBody := body
 				if len(reproSteps) > 0 {
 					var sb strings.Builder
@@ -221,7 +266,7 @@ resolved target-root. Exit 1 on error.`,
 			}
 
 			req := BugCreateRequest{
-				Target:     target,
+				Target:     normTarget,
 				Title:      title,
 				Body:       body,
 				ReproSteps: reproSteps,
@@ -261,6 +306,23 @@ resolved target-root. Exit 1 on error.`,
 		"Unix-seconds override for the filed-at timestamp (tests only; 0 = use real clock)")
 	_ = cmd.Flags().MarkHidden("clock-now")
 	return cmd
+}
+
+func bugPrivacyFollowUpRoot(targetDir string) string {
+	if strings.TrimSpace(targetDir) != "" {
+		return targetDir
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return "."
+}
+
+func cliPrivacyFollowUpSuffix(privacy bugprivacy.Result) string {
+	if strings.TrimSpace(privacy.FollowUpPath) == "" {
+		return ""
+	}
+	return "; depersonalized follow-up filed at " + filepath.ToSlash(privacy.FollowUpPath)
 }
 
 // bugListCmd implements `kitsoki bug list`.

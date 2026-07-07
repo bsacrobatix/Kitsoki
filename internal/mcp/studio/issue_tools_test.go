@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"kitsoki/internal/bugprivacy"
 	studio "kitsoki/internal/mcp/studio"
 )
 
@@ -342,4 +343,37 @@ func TestIssueCreate_FallbackToArtifactsOnFilingError(t *testing.T) {
 	assert.Contains(t, string(body), "MCP gap: no standalone gate-runner", "title preserved")
 	assert.Contains(t, string(body), "go test against a worktree", "body preserved")
 	assert.Contains(t, string(body), "Unfiled", "marked for human recovery")
+}
+
+func TestIssueCreate_PrivacyFailureBlocksFiler(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	t.Chdir(root)
+	filer := &recordingFiler{}
+	checker := bugprivacy.CheckFunc(func(context.Context, bugprivacy.Report, []bugprivacy.Finding) (bugprivacy.Decision, error) {
+		return bugprivacy.Decision{Pass: false, Categories: []string{"confidential_business_data"}, Reason: "contains confidential business data"}, nil
+	})
+	srv := studio.NewServer(studio.NewStudioSession(replayBuilder()),
+		studio.WithIssueFiler(filer.file),
+		studio.WithArtifactsDir(filepath.Join(root, ".artifacts")),
+		studio.WithBugPrivacyChecker(checker),
+	)
+	cs := connectInProcess(ctx, t, srv)
+
+	res, err := callTool(ctx, cs, "issue.create", map[string]any{
+		"title": "private business report",
+		"body":  "do not file this",
+	})
+	require.NoError(t, err)
+	require.True(t, res.IsError, "privacy failure should be a tool error")
+	assert.Empty(t, filer.got.Title, "filer must not be called")
+
+	followUpDir := filepath.Join(root, ".artifacts", "privacy-followups", "issues", "bugs")
+	entries, rerr := os.ReadDir(followUpDir)
+	require.NoError(t, rerr)
+	require.Len(t, entries, 1)
+	body, rerr := os.ReadFile(filepath.Join(followUpDir, entries[0].Name()))
+	require.NoError(t, rerr)
+	assert.NotContains(t, string(body), "private business report")
+	assert.Contains(t, string(body), "confidential_business_data")
 }

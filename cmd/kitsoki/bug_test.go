@@ -13,6 +13,7 @@ import (
 
 	"kitsoki/internal/host"
 	"kitsoki/internal/reportmeta"
+	"kitsoki/internal/webconfig"
 )
 
 // TestBugSlug covers the freeform-title → filesystem-slug mapping.
@@ -253,6 +254,62 @@ func TestBugCreateCmd_WritesMarkdownFile(t *testing.T) {
 	require.Contains(t, body, "Pressing Esc froze the TUI.")
 	require.Contains(t, body, "1. Run cloak")
 	require.Contains(t, body, "2. Press Esc")
+}
+
+func TestBugCreateCmd_PrivacySubstitutesHighEntropy(t *testing.T) {
+	tmp := t.TempDir()
+	secret := "mF9xQ2rT8vLp0AqZ7nByC4dEuGhJkM3sW6yI"
+	root := newRootCmd()
+	root.SetArgs([]string{
+		"bug", "create",
+		"--target", "story",
+		"--title", "Opaque token leak",
+		"--body", "Saw token " + secret,
+		"--target-dir", tmp,
+		"--clock-now", "1747130000",
+	})
+	var out, errBuf bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errBuf)
+
+	require.NoError(t, root.Execute())
+	require.Contains(t, errBuf.String(), "bug privacy check: starting")
+	require.Contains(t, errBuf.String(), "deterministic substitutions")
+
+	relPath := strings.TrimSpace(out.String())
+	data, err := os.ReadFile(filepath.Join(tmp, relPath))
+	require.NoError(t, err)
+	require.NotContains(t, string(data), secret)
+	require.Contains(t, string(data), "[REDACTED]")
+
+	entries, err := os.ReadDir(filepath.Join(tmp, "issues", "bugs"))
+	require.NoError(t, err)
+	require.Len(t, entries, 2, "original bug plus depersonalized follow-up")
+	var followUp string
+	for _, entry := range entries {
+		if entry.Name() != filepath.Base(relPath) {
+			body, readErr := os.ReadFile(filepath.Join(tmp, "issues", "bugs", entry.Name()))
+			require.NoError(t, readErr)
+			followUp = string(body)
+		}
+	}
+	require.NotContains(t, followUp, secret)
+	require.Contains(t, followUp, "high_entropy")
+}
+
+func TestBugPrivacyCheckerFromConfigRequiresHarnessLadder(t *testing.T) {
+	require.Nil(t, bugPrivacyCheckerFromConfig(webconfig.WebConfig{}, t.TempDir()))
+
+	checker := bugPrivacyCheckerFromConfig(webconfig.WebConfig{
+		HarnessLadder: &webconfig.HarnessLadder{
+			Models: []webconfig.HarnessLadderModel{{
+				Backend:  "codex",
+				Provider: "codex-native",
+				Model:    "gpt-5.5",
+			}},
+		},
+	}, t.TempDir())
+	require.NotNil(t, checker)
 }
 
 // TestBugCreateCmd_TargetRequired asserts that --target must be set
@@ -586,9 +643,9 @@ func TestBugShowCmd_HappyPath(t *testing.T) {
 		"--target-dir", tmp,
 		"--clock-now", "1747130000",
 	})
-	var createOut bytes.Buffer
+	var createOut, createErr bytes.Buffer
 	createRoot.SetOut(&createOut)
-	createRoot.SetErr(&createOut)
+	createRoot.SetErr(&createErr)
 	require.NoError(t, createRoot.Execute())
 
 	relPath := strings.TrimSpace(createOut.String())

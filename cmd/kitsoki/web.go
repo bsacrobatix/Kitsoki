@@ -306,12 +306,14 @@ authentication.`,
 			if err != nil {
 				return fmt.Errorf("load installed kits from %q: %w", kitsDir, err)
 			}
+			bugRoot := resolveWebBugRoot(dirs)
 			srv := server.NewMulti(registry,
 				server.WithDefaultActor(actor),
-				server.WithBugRoot(resolveWebBugRoot(dirs)),
-				server.WithWorkflowRoot(resolveWebBugRoot(dirs)),
+				server.WithBugRoot(bugRoot),
+				server.WithWorkflowRoot(bugRoot),
 				server.WithTicketRepo(ticketRepo),
 				server.WithAgentEvidenceDir(agentEvidenceDir),
+				server.WithBugPrivacyChecker(bugPrivacyCheckerFromConfig(cfg, bugRoot)),
 				server.WithKits(kits),
 			)
 			// Attach the cross-session notification relay sink so each new

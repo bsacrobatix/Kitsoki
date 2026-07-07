@@ -89,6 +89,7 @@ import (
 	"time"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/dynamicworkflow"
 	"kitsoki/internal/helpdocs"
 	"kitsoki/internal/host"
@@ -226,6 +227,12 @@ type Server struct {
 	// at the same directory (co-located, or a shared volume).
 	agentEvidenceDir string
 
+	// bugPrivacyChecker, when set, runs the provider-backed bug report privacy
+	// gate after deterministic scrubbing and before any local/GitHub filing.
+	// Nil keeps deterministic scrubbing only; tests and replay surfaces stay
+	// no-LLM unless the caller explicitly injects a checker.
+	bugPrivacyChecker bugprivacy.Checker
+
 	// workflowRoot is the repo root dynamic workflow drafts should use for
 	// their scratch package and promotion/export defaults. Empty means the
 	// workflow RPC family stays disabled on this surface.
@@ -287,14 +294,15 @@ type Option func(*serverConfig)
 // serverConfig collects the options before the Server is built. The single-entry
 // constructors fold driver into the adapter; NewMulti ignores it.
 type serverConfig struct {
-	poll             time.Duration
-	driver           Driver
-	defaultActor     string
-	bugRoot          string
-	ticketRepo       string
-	agentEvidenceDir string
-	workflowRoot     string
-	kits             *kitendpoint.Dispatcher
+	poll              time.Duration
+	driver            Driver
+	defaultActor      string
+	bugRoot           string
+	ticketRepo        string
+	agentEvidenceDir  string
+	bugPrivacyChecker bugprivacy.Checker
+	workflowRoot      string
+	kits              *kitendpoint.Dispatcher
 }
 
 // WithBugRoot sets the repo root under which runstatus.bug.report writes
@@ -323,6 +331,13 @@ func WithTicketRepo(repo string) Option {
 // `--evidence-dir`. Empty (the default) skips the deposit.
 func WithAgentEvidenceDir(dir string) Option {
 	return func(c *serverConfig) { c.agentEvidenceDir = strings.TrimSpace(dir) }
+}
+
+// WithBugPrivacyChecker enables the provider-backed bug report privacy gate.
+// The checker is injected by live command surfaces that have harness/provider
+// configuration available; tests may inject a fake checker.
+func WithBugPrivacyChecker(checker bugprivacy.Checker) Option {
+	return func(c *serverConfig) { c.bugPrivacyChecker = checker }
 }
 
 // WithWorkflowRoot sets the repo root dynamic workflow RPCs use for draft
@@ -413,23 +428,24 @@ func newConfig(opts []Option) serverConfig {
 
 func newServer(provider SessionProvider, cfg serverConfig) *Server {
 	return &Server{
-		provider:         provider,
-		poll:             cfg.poll,
-		defaultActor:     cfg.defaultActor,
-		subs:             make(map[string]*subscription),
-		notifs:           newNotifBuffer(),
-		questions:        newQuestionBuffer(),
-		qreg:             newQuestionRegistry(),
-		current:          newCurrentBuffer(),
-		points:           newPointHandoff(),
-		recorder:         harrec.New(bugRecorderCapacity),
-		bugRoot:          cfg.bugRoot,
-		ticketRepo:       cfg.ticketRepo,
-		agentEvidenceDir: cfg.agentEvidenceDir,
-		workflowRoot:     cfg.workflowRoot,
-		captureStore:     make(map[string]*capSnap),
-		activeTurns:      make(map[string]*activeTurn),
-		kits:             cfg.kits,
+		provider:          provider,
+		poll:              cfg.poll,
+		defaultActor:      cfg.defaultActor,
+		subs:              make(map[string]*subscription),
+		notifs:            newNotifBuffer(),
+		questions:         newQuestionBuffer(),
+		qreg:              newQuestionRegistry(),
+		current:           newCurrentBuffer(),
+		points:            newPointHandoff(),
+		recorder:          harrec.New(bugRecorderCapacity),
+		bugRoot:           cfg.bugRoot,
+		ticketRepo:        cfg.ticketRepo,
+		agentEvidenceDir:  cfg.agentEvidenceDir,
+		bugPrivacyChecker: cfg.bugPrivacyChecker,
+		workflowRoot:      cfg.workflowRoot,
+		captureStore:      make(map[string]*capSnap),
+		activeTurns:       make(map[string]*activeTurn),
+		kits:              cfg.kits,
 	}
 }
 
@@ -1731,7 +1747,7 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		return s.bugStatus(ctx)
 
 	case "runstatus.bug.report":
-		return s.bugReport(params)
+		return s.bugReportContext(ctx, params)
 
 	default:
 		// ── Story editor (per-story, no session) ─────────────────────────────

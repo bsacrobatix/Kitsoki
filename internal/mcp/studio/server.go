@@ -41,6 +41,7 @@ import (
 	"sync"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/bugprivacy"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -93,6 +94,9 @@ type Server struct {
 	// artifactsDir is where issue.create writes rendered assets. Empty →
 	// defaultIssueArtifactsDir. See WithArtifactsDir.
 	artifactsDir string
+	// bugPrivacyChecker gates issue.create before the IssueFiler is called. Nil
+	// keeps deterministic scrubbing only.
+	bugPrivacyChecker bugprivacy.Checker
 	// importResolver is the loader/test resolver used for @kitsoki/<name>
 	// imports. It is the MCP twin of the CLI's buildImportResolver seam.
 	importResolver app.ImportResolver
@@ -110,6 +114,11 @@ func ReadOnly() ServerOption { return func(s *Server) { s.readOnly = true } }
 // into story.* and session.* tools. Nil keeps the loader's legacy behaviour.
 func WithImportResolver(resolver app.ImportResolver) ServerOption {
 	return func(s *Server) { s.importResolver = resolver }
+}
+
+// WithBugPrivacyChecker enables the provider-backed issue.create privacy gate.
+func WithBugPrivacyChecker(checker bugprivacy.Checker) ServerOption {
+	return func(s *Server) { s.bugPrivacyChecker = checker }
 }
 
 // NewServer constructs a studio Server over the given StudioSession and registers
