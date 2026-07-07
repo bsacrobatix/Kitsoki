@@ -213,6 +213,9 @@ func (o *Orchestrator) SetSelection(profile, model, effort string) error {
 		return fmt.Errorf("effort %q is not in profile %q's effort catalog", effort, profile)
 	}
 	o.selection = ProfileSelection{Profile: profile, Model: model, Effort: effort}
+	if o.ladderSession != nil {
+		o.ladderSession.Reset()
+	}
 	return nil
 }
 

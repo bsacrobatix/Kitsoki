@@ -443,6 +443,7 @@ func TestRunLadder_InfraFailureEmitsFallbackNotice(t *testing.T) {
 	stream := &recordingStreamSink{}
 	ctx := host.WithAgentEventSink(context.Background(), sink)
 	ctx = host.WithStreamSink(ctx, stream)
+	ctx = host.WithLadderSessionState(ctx, host.NewLadderSessionState())
 	ctx = host.WithAgentCallCtx(ctx, host.AgentCallCtx{
 		SessionID: app.SessionID("sess-ladder"),
 		Turn:      app.TurnNumber(7),
@@ -483,6 +484,9 @@ func TestRunLadder_InfraFailureEmitsFallbackNotice(t *testing.T) {
 	if notice["subtype"] != string(host.FailureInfra) || notice["model"] != "modelA" {
 		t.Fatalf("unexpected fallback notice payload: %+v", notice)
 	}
+	if notice["severity"] != "warn" {
+		t.Fatalf("fallback notice should use warning severity, got %+v", notice)
+	}
 	if text, _ := notice["text"].(string); text == "" || !strings.Contains(text, "429 rate limited") {
 		t.Fatalf("notice text should include the visible 429 reason, got %q", text)
 	}
@@ -491,7 +495,7 @@ func TestRunLadder_InfraFailureEmitsFallbackNotice(t *testing.T) {
 	for _, ev := range stream.events {
 		gotTypes = append(gotTypes, ev.Type)
 	}
-	wantTypes := []string{"ladder_attempt", "ladder_fallback", "ladder_attempt", "ladder_success"}
+	wantTypes := []string{"ladder_attempt", "ladder_fallback", "ladder_attempt", "ladder_session_pinned", "ladder_success"}
 	if fmt.Sprint(gotTypes) != fmt.Sprint(wantTypes) {
 		t.Fatalf("live stream ladder events = %v, want %v", gotTypes, wantTypes)
 	}
@@ -504,6 +508,59 @@ func TestRunLadder_InfraFailureEmitsFallbackNotice(t *testing.T) {
 	}
 	if !strings.Contains(stream.events[2].Text, "strong / modelB via claude") {
 		t.Fatalf("second attempt should name the next rung, got %q", stream.events[2].Text)
+	}
+	if stream.events[3].Severity != "warn" ||
+		!strings.Contains(stream.events[3].Text, "until you change /provider, /model, or /effort") {
+		t.Fatalf("session-pinned notice should warn and explain reset commands, got %+v", stream.events[3])
+	}
+}
+
+func TestRunLadder_SessionFallbackSticksUntilReset(t *testing.T) {
+	t.Parallel()
+	cfg := twoModelConfig(t)
+	sessionState := host.NewLadderSessionState()
+	ctx := host.WithLadderSessionState(context.Background(), sessionState)
+
+	first := func(ctx context.Context, _ map[string]any) (host.Result, error) {
+		rung, _ := host.LadderRungFromContext(ctx)
+		if rung.Model == "modelA" {
+			return infraResult("429 rate limited"), nil
+		}
+		return host.Result{}, nil
+	}
+	if _, err, summary := host.RunLadder(ctx, cfg, nil, first); err != nil || summary.Winner == nil || summary.Winner.Model != "modelB" {
+		t.Fatalf("setup fallback did not pin modelB: err=%v summary=%+v", err, summary)
+	}
+
+	// Fresh state path: modelA is not in backoff for this call. If the sticky
+	// session fallback is not honored, modelA would be attempted and succeed.
+	cfgFreshBackoff := cfg
+	cfgFreshBackoff.StatePath = filepath.Join(t.TempDir(), "fresh-ladder-state.json")
+	var secondAttempts []string
+	second := func(ctx context.Context, _ map[string]any) (host.Result, error) {
+		rung, _ := host.LadderRungFromContext(ctx)
+		secondAttempts = append(secondAttempts, rung.Model)
+		return host.Result{}, nil
+	}
+	if _, err, summary := host.RunLadder(ctx, cfgFreshBackoff, nil, second); err != nil || summary.Winner == nil {
+		t.Fatalf("sticky fallback call failed: err=%v summary=%+v", err, summary)
+	}
+	if fmt.Sprint(secondAttempts) != fmt.Sprint([]string{"modelB"}) {
+		t.Fatalf("sticky fallback should start at modelB without retrying modelA, got %v", secondAttempts)
+	}
+
+	sessionState.Reset()
+	var afterResetAttempts []string
+	afterReset := func(ctx context.Context, _ map[string]any) (host.Result, error) {
+		rung, _ := host.LadderRungFromContext(ctx)
+		afterResetAttempts = append(afterResetAttempts, rung.Model)
+		return host.Result{}, nil
+	}
+	if _, err, summary := host.RunLadder(ctx, cfgFreshBackoff, nil, afterReset); err != nil || summary.Winner == nil {
+		t.Fatalf("post-reset ladder call failed: err=%v summary=%+v", err, summary)
+	}
+	if fmt.Sprint(afterResetAttempts) != fmt.Sprint([]string{"modelA"}) {
+		t.Fatalf("reset should allow the ladder to start at modelA again, got %v", afterResetAttempts)
 	}
 }
 

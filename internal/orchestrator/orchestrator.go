@@ -106,6 +106,10 @@ type Orchestrator struct {
 	// default and leaves every host.agent.decide / host.agent.task dispatch
 	// on today's single-attempt behavior — set via WithHarnessLadderConfig.
 	harnessLadder host.LadderConfig
+	// ladderSession carries the session-local sticky fallback rung. A successful
+	// ladder fallback pins later host.agent.* calls to that rung until the
+	// operator changes the profile/model/effort selection.
+	ladderSession *host.LadderSessionState
 
 	// agentLaunchPolicy is the deterministic preflight guard applied before
 	// external coding-agent CLIs are forked by host.agent.*. It rejects protected
@@ -409,6 +413,7 @@ func New(def *app.AppDef, m machine.Machine, s store.Store, h harness.Harness, o
 		pending:         make(map[app.SessionID]*pendingClarify),
 		cancelListeners: make(map[app.SessionID]context.CancelFunc),
 		sessionLocks:    make(map[app.SessionID]*sync.Mutex),
+		ladderSession:   host.NewLadderSessionState(),
 		clk:             clock.Real(),
 	}
 	for _, opt := range opts {

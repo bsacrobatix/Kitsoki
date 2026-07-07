@@ -572,6 +572,9 @@ func appendAgentStreamEvent(ctx context.Context, ts time.Time, callID string, ev
 		"type":    ev.Type,
 		"subtype": ev.Subtype,
 	}
+	if ev.Severity != "" {
+		payload["severity"] = ev.Severity
+	}
 	if ev.Tool != "" {
 		payload["tool"] = ev.Tool
 	}
@@ -611,6 +614,7 @@ func appendAgentStreamEvent(ctx context.Context, ts time.Time, callID string, ev
 type storeAgentNotice struct {
 	Type     string `json:"type"`
 	Subtype  string `json:"subtype,omitempty"`
+	Severity string `json:"severity,omitempty"`
 	Text     string `json:"text"`
 	Backend  string `json:"backend,omitempty"`
 	Provider string `json:"provider,omitempty"`
@@ -628,6 +632,7 @@ func appendAgentNoticeEvent(ctx context.Context, ts time.Time, notice storeAgent
 		sink.OnStreamEvent(ctx, StreamEvent{
 			Type:     notice.Type,
 			Subtype:  notice.Subtype,
+			Severity: notice.Severity,
 			Preview:  onelinePreview(notice.Text, 120),
 			Text:     notice.Text,
 			Backend:  notice.Backend,

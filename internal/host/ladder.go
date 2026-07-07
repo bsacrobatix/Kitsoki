@@ -62,6 +62,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -263,6 +264,110 @@ func ExpandLadder(cfg LadderConfig) []LadderRung {
 
 // ── context plumbing ─────────────────────────────────────────────────────
 
+// LadderSessionState carries the session-local ladder fallback pin. Once a
+// ladder walk succeeds on a fallback rung, later host.agent.* calls in the same
+// session start at that rung instead of probing earlier providers again. The
+// orchestrator resets it when the operator changes provider/model/effort.
+type LadderSessionState struct {
+	mu     sync.RWMutex
+	sticky *ladderStickyRung
+}
+
+type ladderStickyRung struct {
+	modelsKey string
+	rung      LadderRung
+}
+
+// NewLadderSessionState returns an empty session-local ladder state holder.
+func NewLadderSessionState() *LadderSessionState {
+	return &LadderSessionState{}
+}
+
+// Reset clears any session-pinned fallback rung.
+func (s *LadderSessionState) Reset() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sticky = nil
+}
+
+func (s *LadderSessionState) stickyRung(cfg LadderConfig) (LadderRung, bool) {
+	if s == nil {
+		return LadderRung{}, false
+	}
+	modelsKey := ladderModelsKey(cfg)
+	s.mu.RLock()
+	sticky := s.sticky
+	s.mu.RUnlock()
+	if sticky == nil || sticky.modelsKey != modelsKey {
+		return LadderRung{}, false
+	}
+	rung := sticky.rung
+	if rung.ModelIndex < 0 || rung.ModelIndex >= len(cfg.Models) {
+		return LadderRung{}, false
+	}
+	model := cfg.Models[rung.ModelIndex]
+	if model.Backend != rung.Backend || model.Provider != rung.Provider || model.Model != rung.Model {
+		return LadderRung{}, false
+	}
+	efforts := cfg.efforts()
+	effortIndex := -1
+	for i, effort := range efforts {
+		if effort == rung.Effort {
+			effortIndex = i
+			break
+		}
+	}
+	if effortIndex == -1 {
+		return LadderRung{}, false
+	}
+	rung.EffortIndex = effortIndex
+	rung.EscalatedBy = ""
+	return rung, true
+}
+
+func (s *LadderSessionState) pinRung(cfg LadderConfig, rung LadderRung) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sticky = &ladderStickyRung{modelsKey: ladderModelsKey(cfg), rung: rung}
+}
+
+func ladderModelsKey(cfg LadderConfig) string {
+	var b strings.Builder
+	for _, model := range cfg.Models {
+		b.WriteString(model.Backend)
+		b.WriteByte('\x00')
+		b.WriteString(model.Provider)
+		b.WriteByte('\x00')
+		b.WriteString(model.Model)
+		b.WriteByte('\x00')
+	}
+	return b.String()
+}
+
+// ladderSessionCtxKey carries optional session-scoped sticky fallback state.
+type ladderSessionCtxKey struct{}
+
+// WithLadderSessionState installs session-local sticky fallback state.
+func WithLadderSessionState(ctx context.Context, state *LadderSessionState) context.Context {
+	if state == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, ladderSessionCtxKey{}, state)
+}
+
+// LadderSessionStateFromContext returns the state installed by
+// WithLadderSessionState, when present.
+func LadderSessionStateFromContext(ctx context.Context) (*LadderSessionState, bool) {
+	state, ok := ctx.Value(ladderSessionCtxKey{}).(*LadderSessionState)
+	return state, ok
+}
+
 // harnessLadderCtxKey carries the active LadderConfig, when one is installed.
 type harnessLadderCtxKey struct{}
 
@@ -394,14 +499,32 @@ func RunLadder(ctx context.Context, cfg LadderConfig, args map[string]any, once 
 	backoff := cfg.backoffDuration()
 	prevModelIdx := -1
 	attempts := 0
+	startModelIdx := 0
+	startEffortIdx := 0
+	var stickyRung LadderRung
+	hasSticky := false
+	if sessionState, ok := LadderSessionStateFromContext(ctx); ok {
+		if sticky, ok := sessionState.stickyRung(cfg); ok {
+			stickyRung = sticky
+			hasSticky = true
+			startModelIdx = sticky.ModelIndex
+			startEffortIdx = sticky.EffortIndex
+		}
+	}
 
 outer:
-	for mi, m := range cfg.Models {
+	for mi := startModelIdx; mi < len(cfg.Models); mi++ {
+		m := cfg.Models[mi]
 		key := ladderBackoffKey(m)
 		if ladderInBackoff(statePath, key) {
 			continue
 		}
-		for ei, eff := range efforts {
+		effortStart := 0
+		if hasSticky && mi == startModelIdx {
+			effortStart = startEffortIdx
+		}
+		for ei := effortStart; ei < len(efforts); ei++ {
+			eff := efforts[ei]
 			if cfg.MaxAttempts > 0 && attempts >= cfg.MaxAttempts {
 				break outer
 			}
@@ -433,6 +556,10 @@ outer:
 				winner := rung
 				summary.Winner = &winner
 				summary.EscalatedBy = escalatedBy
+				if sessionState, ok := LadderSessionStateFromContext(ctx); ok && shouldPinLadderWinner(summary, stickyRung, hasSticky) {
+					sessionState.pinRung(cfg, rung)
+					emitLadderSessionPinnedNotice(ctx, rung)
+				}
 				emitLadderSuccessNotice(ctx, rung)
 				return res, nil, summary
 			}
@@ -482,6 +609,28 @@ outer:
 	emitLadderExhaustedNotice(ctx, summary, res.Error)
 	res.FailureKind = FailureNone // terminal: nothing further the ladder can do
 	return res, nil, summary
+}
+
+func shouldPinLadderWinner(summary LadderSummary, sticky LadderRung, hasSticky bool) bool {
+	if summary.Winner == nil {
+		return false
+	}
+	winner := *summary.Winner
+	if hasSticky && sameLadderRung(winner, sticky) {
+		return false
+	}
+	if len(summary.Attempts) > 1 {
+		return true
+	}
+	return winner.ModelIndex > 0 || winner.EffortIndex > 0
+}
+
+func sameLadderRung(a, b LadderRung) bool {
+	return a.ModelIndex == b.ModelIndex &&
+		a.Backend == b.Backend &&
+		a.Provider == b.Provider &&
+		a.Model == b.Model &&
+		a.Effort == b.Effort
 }
 
 // runAgentVerbWithLadder is the single wrap point shared by
@@ -668,12 +817,33 @@ func emitLadderFallbackNotice(ctx context.Context, rung LadderRung, kind Failure
 	appendAgentNoticeEvent(ctx, time.Now(), storeAgentNotice{
 		Type:     "ladder_fallback",
 		Subtype:  string(kind),
+		Severity: "warn",
 		Text:     text,
 		Backend:  rung.Backend,
 		Provider: rung.Provider,
 		Model:    rung.Model,
 		Effort:   rung.Effort,
 		Error:    errText,
+	})
+}
+
+func emitLadderSessionPinnedNotice(ctx context.Context, rung LadderRung) {
+	text := "Kitsoki harness: session fallback is now " + formatLadderRung(rung) + ". " +
+		"Kitsoki will keep using this fallback for this session until you change /provider, /model, or /effort."
+	slog.WarnContext(ctx, "agent.ladder.session_pinned",
+		"backend", rung.Backend,
+		"provider", rung.Provider,
+		"model", rung.Model,
+		"effort", rung.Effort,
+	)
+	appendAgentNoticeEvent(ctx, time.Now(), storeAgentNotice{
+		Type:     "ladder_session_pinned",
+		Severity: "warn",
+		Text:     text,
+		Backend:  rung.Backend,
+		Provider: rung.Provider,
+		Model:    rung.Model,
+		Effort:   rung.Effort,
 	})
 }
 
@@ -731,6 +901,7 @@ func emitLadderStopNotice(ctx context.Context, rung LadderRung, kind FailureKind
 	appendAgentNoticeEvent(ctx, time.Now(), storeAgentNotice{
 		Type:     "ladder_stop",
 		Subtype:  string(kind),
+		Severity: "warn",
 		Text:     text,
 		Backend:  rung.Backend,
 		Provider: rung.Provider,
@@ -742,8 +913,9 @@ func emitLadderStopNotice(ctx context.Context, rung LadderRung, kind FailureKind
 
 func emitLadderExhaustedNotice(ctx context.Context, summary LadderSummary, errText string) {
 	notice := storeAgentNotice{
-		Type: "ladder_exhausted",
-		Text: fmt.Sprintf("Kitsoki harness: ladder exhausted after %d attempt(s).", len(summary.Attempts)),
+		Type:     "ladder_exhausted",
+		Severity: "warn",
+		Text:     fmt.Sprintf("Kitsoki harness: ladder exhausted after %d attempt(s).", len(summary.Attempts)),
 	}
 	if len(summary.Attempts) > 0 {
 		last := summary.Attempts[len(summary.Attempts)-1]

@@ -169,6 +169,7 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	ctx = host.WithAgentBackendNamed(ctx, backendName)
 	ctx = host.WithActiveProfile(ctx, activeProfile)
 	ctx = host.WithHarnessLadder(ctx, o.harnessLadder)
+	ctx = host.WithLadderSessionState(ctx, o.ladderSession)
 	if o.agentLaunchPolicy.Enabled {
 		ctx = host.WithAgentLaunchPolicy(ctx, o.agentLaunchPolicy)
 	}
@@ -857,6 +858,7 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	ctx = host.WithAgentBackendNamed(ctx, backendName)
 	ctx = host.WithActiveProfile(ctx, activeProfile)
 	ctx = host.WithHarnessLadder(ctx, o.harnessLadder)
+	ctx = host.WithLadderSessionState(ctx, o.ladderSession)
 	if o.agentLaunchPolicy.Enabled {
 		ctx = host.WithAgentLaunchPolicy(ctx, o.agentLaunchPolicy)
 	}

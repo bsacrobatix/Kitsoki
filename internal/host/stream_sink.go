@@ -87,10 +87,12 @@ type StreamEvent struct {
 	Confidence float64
 
 	// Harness-ladder provenance frames are emitted by the host ladder itself.
-	// Type is one of ladder_attempt, ladder_fallback, ladder_success,
-	// ladder_exhausted, or ladder_stop. Text is the human-facing notice; these
-	// fields let consumers label which provider/backend/model the notice refers
-	// to without parsing that prose.
+	// Type is one of ladder_attempt, ladder_fallback, ladder_session_pinned,
+	// ladder_success, ladder_exhausted, or ladder_stop. Text is the human-facing
+	// notice; these fields let consumers label which provider/backend/model the
+	// notice refers to without parsing that prose. Severity is optional
+	// ("warn", "info", etc.) for surfaces that provide a warning affordance.
+	Severity string
 	Backend  string
 	Provider string
 	Model    string
