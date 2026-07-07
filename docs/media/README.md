@@ -9,8 +9,10 @@ Kitsoki has two long-lived media families:
 
 Generated media belongs in `.artifacts/` or in gitignored staging directories.
 Committed media should be a source artifact: a catalog entry, a recording spec,
-an rrweb clip intentionally embedded by a deck, or a small static image that a
-deck/site needs to render.
+an rrweb clip intentionally embedded by a deck, a small static image that a
+deck/site needs to render, or a self-contained Slidey HTML bundle under
+`docs/decks/bundled/` that the static product site serves without running the
+Slidey CLI.
 
 ## Product Demo Videos
 
@@ -59,13 +61,15 @@ The feature catalog currently stages these demo ids when their artifacts exist:
 `complete-product-tour` is stitched from section clips instead of recorded by a
 single spec.
 
-## Slidey Deck Clips
+## Slidey Deck Gallery and Clips
 
-The current checked-in Slidey decks live under `docs/decks/`. That directory is
-useful for existing examples, but it should not become a dumping ground for every
-generated deck and every intermediate clip.
+The current checked-in Slidey decks live under `docs/decks/`. The product site
+publishes a generated `/decks/` gallery from every top-level JSON deck in that
+directory. Gallery thumbnails are rendered from the deck's first title scene and
+theme colors; clicking a card opens a VitePress page at `/decks/<deck-id>.html`
+with the site chrome intact and an embedded Slidey viewer.
 
-Until a dedicated deck catalog exists, use this rule:
+Use this rule:
 
 - A committed deck file may live in `docs/decks/<deck-id>.slidey.json`.
 - Any committed rrweb clip it references must live under
@@ -73,11 +77,16 @@ Until a dedicated deck catalog exists, use this rule:
 - Generated deck renders, MP4s, HTML bundles, screenshots, and throwaway clips
   belong under `.artifacts/<deck-id>/` — with ONE exception:
   `docs/decks/bundled/<deck-id>.html`, the committed self-contained bundle
-  (`slidey bundle <deck> <html>`) that a feature's `demo.embed` serves as its
-  site demo (below). It is committed because the Pages build cannot run the
-  slidey CLI; re-bundle it whenever the source deck or its clips change.
+  (`slidey bundle <deck> <html>`) that the product-site deck gallery and
+  feature `demo.embed` pages serve. It is committed because the Pages build does
+  not depend on a local Slidey checkout; re-bundle it whenever the source deck
+  or its clips change.
 - Decks produced by stories for runtime use belong with the story, such as
   `stories/<story>/baked/`, not in `docs/decks/`.
+
+`tools/site/scripts/stage-media.mjs` stages committed bundles to
+`tools/site/src/public/deck-viewers/` for the full site build. The embedded
+binary help variant skips them like it skips MP4s.
 
 ### Deck embeds on the product site (`demo.embed`)
 
@@ -91,7 +100,7 @@ embedded deck clip instead of a video:
   the scene index from the deck (never authored by hand) and emits
   `demo.embed.{deckHtml,sceneIndex}` into the features index.
 - The committed `docs/decks/bundled/<deck-id>.html` is staged verbatim to
-  `tools/site/src/public/decks/` (shared — several features can embed different
+  `tools/site/src/public/deck-viewers/` (shared — several features can embed different
   scenes of one deck) and the page renders it in an iframe at `?scene=N`.
 - `make features-check` validates the binding (deck exists, rrweb scene
   resolves, bundled html present); `make media-check` re-checks the index side.
@@ -114,7 +123,7 @@ Current committed rrweb deck clips:
 - `docs/decks/assets/dev-story-hybrid/feature-refine.rrweb.json`
 - `docs/decks/assets/dev-story-hybrid/open-pr.rrweb.json`
 
-The long-term shape should mirror feature demos: a small catalog entry per deck
-that names the source story/flow, render command, QA scenarios, and published
-artifact paths. Until then, `make media-check` enforces the deck-local rrweb
-layout so new deck clips do not sprawl across `docs/decks/`.
+`make media-check` enforces the deck-local rrweb layout, the existence of each
+top-level deck's committed bundled viewer, and the staged viewer directory when
+it exists. A future deck metadata file can add source story/flow, render command,
+and QA scenarios; the current catalog is inferred from the top-level deck JSON.

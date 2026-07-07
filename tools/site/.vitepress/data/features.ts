@@ -31,7 +31,7 @@ export interface FeatureMedia {
   videoAvailable: boolean;
   /** A rrweb-native story-demo: an embedded Slidey deck clip (see
    *  demo.embed in features/*.yaml), opened at its scene via `?scene=N`.
-   *  Null unless the bundled deck html is staged under src/public/decks/. */
+   *  Null unless the bundled deck html is staged under src/public/deck-viewers/. */
   embedUrl: string | null;
 }
 
@@ -121,9 +121,9 @@ export function loadFeatures(locale: LocaleCode = "en"): SiteFeature[] {
     const stepsDir = path.join(staged, "steps");
     const shots = fs.existsSync(stepsDir) ? fs.readdirSync(stepsDir) : [];
 
-    // demo.embed: staged once, shared, under src/public/decks/ (not per-feature
+    // demo.embed: staged once, shared, under src/public/deck-viewers/ (not per-feature
     // media/<id>/ — several features can point at the same bundled deck).
-    const embedRel = f.demo?.embed ? path.join("decks", path.basename(f.demo.embed.deckHtml)) : null;
+    const embedRel = f.demo?.embed ? path.join("deck-viewers", path.basename(f.demo.embed.deckHtml)) : null;
     const hasEmbed = !!embedRel && fs.existsSync(path.join(siteDir, "src", "public", embedRel));
 
     const steps: SiteFeatureStep[] = (f.tour?.steps ?? []).map((s: Record<string, string>) => {

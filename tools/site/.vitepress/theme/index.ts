@@ -11,6 +11,8 @@ import TourStepCards from "./components/TourStepCards.vue";
 import FeatureDemo from "./components/FeatureDemo.vue";
 import FeatureGrid from "./components/FeatureGrid.vue";
 import HeroDemo from "./components/HeroDemo.vue";
+import DeckGallery from "./components/DeckGallery.vue";
+import DeckViewer from "./components/DeckViewer.vue";
 import "./custom.css";
 
 export default {
@@ -21,5 +23,7 @@ export default {
     app.component("FeatureDemo", FeatureDemo);
     app.component("FeatureGrid", FeatureGrid);
     app.component("HeroDemo", HeroDemo);
+    app.component("DeckGallery", DeckGallery);
+    app.component("DeckViewer", DeckViewer);
   },
 } satisfies Theme;
