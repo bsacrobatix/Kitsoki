@@ -56,13 +56,13 @@ lives inside a meta checkout, also set:
 
 ```yaml
 project:
-  repo_envs: [PROJECT_REPO, PROJECT_META_REPO]
+  repo_envs: [BUGFIX_BAKEOFF_REPO, BUGFIX_BAKEOFF_META_REPO]
   repo_subdir: src/path/to/project
 ```
 
-Then the same manifest works with either `PROJECT_REPO=/path/to/project` or
-`HISTORY_REPO_DIR=~/code/cyber-repo`; the harness resolves the subproject before
-checking historical commits.
+Then the same manifest works with either `BUGFIX_BAKEOFF_REPO=/path/to/project`
+or `HISTORY_REPO_DIR=/path/to/meta-checkout`; the harness resolves the subproject
+before checking historical commits.
 
 ## 3. Prove Setup Without Spending
 

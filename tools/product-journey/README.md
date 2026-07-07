@@ -654,7 +654,7 @@ the local-only verification command. If you have a local checkout, it also
 emits the exact environment-required command for validation:
 
 ```sh
-GEARS_RUST_REPO=~/code/gears-rust make gears-bakeoff
+BUGFIX_BAKEOFF_REPO=/path/to/checkout make gears-bakeoff
 ```
 
 `postgresql` and `kubernetes` use local oracle scripts in

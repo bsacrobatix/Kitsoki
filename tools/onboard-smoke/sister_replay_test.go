@@ -43,7 +43,7 @@ func TestOnboardSisterProjects_FromBaseline(t *testing.T) {
 	cases := []sisterCase{
 		{
 			name:              "gears-rust",
-			sourceEnv:         "KITSOKI_GEARS_RUST_REPO",
+			sourceEnv:         "KITSOKI_ONBOARD_RUST_REPO",
 			sourceDefault:     filepath.Join(filepath.Dir(kitsokiRoot), "gears-rust"),
 			baselineCommit:    "d8513b0c4e7f12c0e451fde5253eafa0cc38d6a5",
 			deterministicFlow: "stories/dev-story/flows/init_rust_project.yaml",

@@ -49,10 +49,10 @@ make oracle-capsules
 ```
 
 The current promoted set is 10 capsules: 3 `query-string`, 4 `gears-rust`, and
-3 `kitsoki`. `gears-rust` declares both `GEARS_RUST_REPO` and
-`GEARS_RUST_META_REPO` plus `repo_subdir: src/cyberfabric/gears-rust`, so the
-same manifest can run against a standalone checkout or an initialized meta
-checkout whose submodule history contains the benchmark baseline/fix commits.
+3 `kitsoki`. Local-only manifests can declare `BUGFIX_BAKEOFF_REPO` and
+`BUGFIX_BAKEOFF_META_REPO` plus `repo_subdir`, so the same manifest can run
+against a standalone checkout or an initialized meta checkout whose submodule
+history contains the benchmark baseline/fix commits.
 
 ### Polyglot repos (a JS package not at the repo root)
 
@@ -98,7 +98,7 @@ cost/tokens from the trace) + `model`/`effort`/`provider`, so it feeds
   dirties your working tree) and shares a `CARGO_TARGET_DIR`:
 
   ```sh
-  GEARS_RUST_REPO=~/code/gears-rust make gears-bakeoff
+  BUGFIX_BAKEOFF_REPO=/path/to/checkout make gears-bakeoff
   ```
 
   The cost-bearing one-cell path uses the same local checkout explicitly:
@@ -145,7 +145,7 @@ cd tools/bugfix-bakeoff/external
 ./provision_repos.sh --project query-string --project gears-rust
 
 # For private/local-only projects, point to a local checkout:
-GEARS_RUST_REPO=/path/to/gears-rust ./provision_repos.sh --project gears-rust
+BUGFIX_BAKEOFF_REPO=/path/to/checkout ./provision_repos.sh --project gears-rust
 
 # Run a no-cost check in the repo runtime image.
 ./run_repo_docker.sh \
@@ -285,7 +285,7 @@ rerun the listed `--no-drive` command before trusting that handoff.
 For the full gears-rust reference corpus, run:
 
 ```sh
-GEARS_RUST_REPO=~/code/gears-rust make gears-history-full-smoke
+BUGFIX_BAKEOFF_REPO=/path/to/checkout make gears-history-full-smoke
 ```
 
 That uses the same generic smoke over the four armable fixtures
@@ -441,9 +441,10 @@ Pending cells are included in reports as `pending`, counted separately from
 never ran; once a model produced a candidate worktree, grade it with `score`.
 
 For private or heavy `local_only` projects, pass `--repo-dir <checkout>` or set
-`<PROJECT>_REPO` (for example `GEARS_RUST_REPO`). The harness creates disposable
-per-cell worktrees under `.artifacts/external-bakeoff/cells/` and leaves the
-source checkout untouched.
+`BUGFIX_BAKEOFF_REPO`. For a meta checkout, set `BUGFIX_BAKEOFF_META_REPO` and
+declare `project.repo_subdir`. The harness creates disposable per-cell worktrees
+under `.artifacts/external-bakeoff/cells/` and leaves the source checkout
+untouched.
 
 Before any arm/drive step, run the free preflight. It reports all setup blockers
 as JSON: manifest/oracle files, local checkout presence, baseline/fix commits,

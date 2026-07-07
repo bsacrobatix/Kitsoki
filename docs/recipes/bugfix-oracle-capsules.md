@@ -15,8 +15,8 @@ The promoted corpus currently has ten capsules:
 
 - `query-string`: `qs1`, `qs2`, `qs3` from public GitHub issues/PRs.
 - `gears-rust`: `bug1`, `bug4`, `bug5`, `bug9` from the private Rust reference
-  repo. These can run from a standalone checkout or from a cyber-repo meta
-  checkout with the submodule initialized.
+  repo. These can run from a standalone checkout or from a meta checkout with
+  the submodule initialized.
 - `kitsoki`: `bug9`, `bug12`, `bug14` from Kitsoki dogfood bugs.
 
 List the catalog:
@@ -35,24 +35,24 @@ python3 tools/bugfix-bakeoff/external/bench.py verify --project query-string
 Verify gears-rust as a standalone checkout:
 
 ```sh
-GEARS_RUST_REPO=~/code/gears-rust make gears-bakeoff
+BUGFIX_BAKEOFF_REPO=/path/to/checkout make gears-bakeoff
 ```
 
-Verify gears-rust through cyber-repo meta checkout:
+Verify gears-rust through a meta checkout:
 
 ```sh
 python3 tools/bugfix-bakeoff/external/bench.py verify \
   --project gears-rust \
   --bug bug1,bug4,bug5,bug9 \
-  --repo-dir ~/code/cyber-repo
+  --repo-dir /path/to/meta-checkout
 ```
 
 In the meta-repo form, the manifest resolves
-`~/code/cyber-repo/src/cyberfabric/gears-rust`. If that submodule is not
+`/path/to/meta-checkout/src/cyberfabric/gears-rust`. If that submodule is not
 initialized, or if the checkout does not have the benchmark baseline/fix commits
 reachable, preflight fails before any model spend. A standalone gears-rust
 checkout with the benchmark history works through the same manifest.
 
-The onboarding story’s `cyber-repo` starter pack includes `repo-bakeoff`, so a
-newly onboarded project sees this oracle-capsule workflow alongside bugfix, PR
-refinement, setup, and git operations.
+The onboarding starter pack includes `repo-bakeoff`, so a newly onboarded
+project sees this oracle-capsule workflow alongside bugfix, PR refinement,
+setup, and git operations.
