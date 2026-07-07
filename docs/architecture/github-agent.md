@@ -165,8 +165,9 @@ create --github`, TUI `/bug`, web Report bug, and MCP issue-filing paths.
 A minimal run list/detail surface is served at `/runs` and `/run/<job-id>`
 (plain HTML + `/api/runs` JSON) reading `jobs.GHJobStore` directly — enough
 to link a run from the issue comment today. This is **not** the persistent,
-multi-run, artifact-indexed service or the operator-drive viewer scoped by
-[`trace-artifact-service.md`](../proposals/trace-artifact-service.md) and
+multi-run, artifact-indexed service scoped by the shared
+[`artifact-driven-stories.md`](../proposals/artifact-driven-stories.md) epic or
+the operator-drive viewer scoped by
 [`gh-web-operator-viewer.md`](../proposals/gh-web-operator-viewer.md) — those
 remain unbuilt.
 

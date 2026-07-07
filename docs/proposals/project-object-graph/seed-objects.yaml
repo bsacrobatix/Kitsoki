@@ -39,6 +39,9 @@ catalog:
       - id: source-kitsoki-github-agent-proposal
         kind: proposal
         path: docs/proposals/kitsoki-github-agent.md
+      - id: source-artifact-driven-stories-proposal
+        kind: proposal
+        path: docs/proposals/artifact-driven-stories.md
       - id: source-generic-feedback-sdk-slidey-reports-proposal
         kind: proposal
         path: docs/proposals/generic-feedback-sdk-slidey-reports.md
@@ -7341,10 +7344,28 @@ nodes:
     visibility: internal
     proposal_kind: epic
     path: docs/proposals/kitsoki-github-agent.md
-    status_line: Draft v1. No slices implemented yet.
-    index_blurb: '`@kitsoki` in a GitHub issue or PR dispatches a kitsoki run, observable + driveable through a public trace/artifact web service, with kitsoki reporting progress back to the thread. Six slices: GitHub ingress + comment substrate ([`gh-event-ingress.md`](gh-event-ingress.md), runtime), job dispatch ([`gh-job-dispatch.md`](gh-job-dispatch.md), runtime), the PR-autopilot story ([`pr-autopilot-story.md`](pr-autopilot-story.md), story), a persistent trace+artifact service ([`trace-artifact-service.md`](trace-artifact-service.md), tracing), the web viewer + operator-drive surface ([`gh-web-operator-viewer.md`](gh-web-operator-viewer.md), tui), and the tour-driven demo + slidey composite ([`kitsoki-github-demo.md`](kitsoki-github-demo.md)). Round-1 decisions: poll ingest, Postgres state + filesystem artifacts, Postgres job locking, owner-only driving, GitHub-native auth (App token + OAuth). Nothing implemented yet.'
+    status_line: Draft v2. GitHub now consumes the shared artifact-job substrate; 2/5 GitHub-owned slices shipped.
+    index_blurb: '`@kitsoki` in a GitHub issue or PR dispatches a kitsoki run, observable + driveable through the shared persistent artifact-job service, with kitsoki reporting progress back to the thread. Five GitHub-owned slices: GitHub ingress + comment substrate ([`gh-event-ingress.md`](gh-event-ingress.md), runtime), job dispatch ([`gh-job-dispatch.md`](gh-job-dispatch.md), runtime), the PR-autopilot story ([`pr-autopilot-story.md`](pr-autopilot-story.md), story), the web viewer + operator-drive surface ([`gh-web-operator-viewer.md`](gh-web-operator-viewer.md), tui), and the tour-driven demo + slidey composite ([`kitsoki-github-demo.md`](kitsoki-github-demo.md)). The durable run/artifact substrate moved to [`artifact-driven-stories.md`](artifact-driven-stories.md). Round-1 decisions: poll ingest, Postgres dispatch state + filesystem artifacts, Postgres job locking, owner-only driving, GitHub-native auth (App token + OAuth).'
     sources:
       - source-kitsoki-github-agent-proposal
+    edges:
+      owned_by: []
+      proposes: []
+      creates_requirements: []
+      creates_use_cases: []
+      decomposes_to: []
+
+  - schema: graph/proposal/v0
+    id: proposal-artifact-driven-stories
+    title: Persistent artifact jobs
+    status: draft
+    visibility: internal
+    proposal_kind: epic
+    path: docs/proposals/artifact-driven-stories.md
+    status_line: Draft v2. Consolidates artifact-driven story lifecycle and trace/artifact service into one implementation epic.
+    index_blurb: 'Persistent artifact jobs: durable run identity, local/hosted trace and artifact indexing, resumable workspaces, share/publish/archive lifecycle, dev-story adoption, and a TUI/web console for resume/share/artifact browsing. Six slices: artifact-job registry ([`artifact-job-registry.md`](artifact-job-registry.md), runtime), trace + artifact service ([`trace-artifact-service.md`](trace-artifact-service.md), tracing), workspace instances ([`artifact-instances.md`](artifact-instances.md), runtime), publish lifecycle ([`artifact-publish-lifecycle.md`](artifact-publish-lifecycle.md), runtime), dev-story adoption ([`dev-story-artifact-jobs.md`](dev-story-artifact-jobs.md), story), and artifact job console ([`artifact-instance-console.md`](artifact-instance-console.md), tui). Nothing in the unified shape is implemented yet.'
+    sources:
+      - source-artifact-driven-stories-proposal
     edges:
       owned_by: []
       proposes: []

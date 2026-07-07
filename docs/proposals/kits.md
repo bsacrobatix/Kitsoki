@@ -126,7 +126,7 @@ certifies it rather than re-inventing it.
 | Onboarding installer (`internal/baseskills/install.go:41-79`; `internal/projectprofile/schema.json`; `docs/project-onboarding.md`) | the standardized-onboarding aspect + a versioned specialization schema (`project-profile/v1`) to generalize | shipped |
 | [`artifact-format.md`](artifact-format.md) | the pinned-schema registry `kit/v1` and kit data schemas validate against | draft |
 | [`lifecycle-taxonomy.md`](lifecycle-taxonomy.md) | sibling on versioned schemas, `composed_of` DAGs, coverage lint — share the schema-pin convention and lint machinery, don't fork them | draft |
-| [`artifact-driven-stories.md`](artifact-driven-stories.md) | terminology neighbor ("instance" = per-run artifact workspace); reuse its get-or-create identity + disposition patterns for registry state | draft |
+| [`artifact-driven-stories.md`](artifact-driven-stories.md) | terminology neighbor ("artifact job" = durable run plus shareable artifacts; "instance" = per-run artifact workspace); reuse its get-or-create identity + disposition patterns for registry state | draft |
 
 Distinct from: [`roadmap-portfolio-work.md`](roadmap-portfolio-work.md)
 (classifies *work items*, not story bundles) and
@@ -267,7 +267,7 @@ through re-extension alone).
   and prompt overlay semantics are not redefined here.
 - **No automated rewriting of downstream kits.** Rev-absorption is
   guided re-extension, not codemods over YAML you don't own.
-- **Not artifact instances.** Per-run output workspaces stay in
+- **Not artifact jobs.** Per-run output workspaces and durable run artifacts stay in
   [`artifact-driven-stories.md`](artifact-driven-stories.md); kits
   version *definitions*, not run outputs.
 - **No runtime marketplace/discovery UI.** A `kitsoki kit list` CLI is

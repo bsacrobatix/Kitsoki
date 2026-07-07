@@ -3,6 +3,8 @@
 **Status:** Draft v1. Nothing implemented yet.
 **Kind:**   runtime
 **Epic:**   ../artifact-driven-stories.md
+**Depends on:** [`artifact-job-registry.md`](artifact-job-registry.md) for the
+durable job identity this workspace attaches to.
 
 ## Why
 
@@ -38,10 +40,11 @@ re-joined, and re-run. One sentence: *an artifact-driven story phase persists it
 output to a keyed workspace the moment it's produced, and the workspace is a
 resumable, get-or-create instance — not a fresh scratch dir each run.*
 
-This slice owns the **front half** of the lifecycle: declare → instance →
-persist → discover → re-join → back-step/update-mode. Promotion and disposition
-(share/publish/archive/GC) are [slice 2](artifact-publish-lifecycle.md); the
-operator surface is [slice 3](artifact-instance-console.md).
+This slice owns the **workspace front half** of the lifecycle: declare →
+instance → persist → discover → re-join → back-step/update-mode. Promotion and
+disposition (share/publish/archive/GC) are
+[`artifact-publish-lifecycle.md`](artifact-publish-lifecycle.md); the operator
+surface is [`artifact-instance-console.md`](artifact-instance-console.md).
 
 ## Impact
 
@@ -104,7 +107,7 @@ update-mode re-run, carrying `{instance_id, key, from_phase, to_phase, reason}`.
 Artifact *writes* already emit `journal.ArtifactEvent` / `KindArtifactEmitted`
 (`internal/journal/`) — reuse that, don't duplicate it. If `instance.lifecycle`
 needs a new `EventKind`, that's a small tracing concern; note it for the consumer
-([slice 3](artifact-instance-console.md) and runstatus) but it adds no
+([artifact-instance-console.md](artifact-instance-console.md) and runstatus) but it adds no
 interpretive decision to the moat.
 
 ## Engine seams & invariants
@@ -174,10 +177,12 @@ are mocked, per CLAUDE.md — no real LLM).
 
 ## Non-goals
 
-- **No promotion/publish/archive here.** Draft → shared → published → disposition
-  is [slice 2](artifact-publish-lifecycle.md).
+- **No promotion/publish/archive here.** Draft → shared → published →
+  disposition is [`artifact-publish-lifecycle.md`](artifact-publish-lifecycle.md).
 - **No operator surface here.** The re-join picker and instance manager are
-  [slice 3](artifact-instance-console.md); this slice only exposes the host calls
-  they drive.
+  [`artifact-instance-console.md`](artifact-instance-console.md); this slice only
+  exposes the host calls they drive.
+- **No durable run URL/index here.** The artifact job registry and trace service
+  own session attachment, run URLs, and by-handle artifact serving.
 - **No new artifact file format.** Writes stay on `host.artifacts_dir` /
   [artifact-format](artifact-format.md).
