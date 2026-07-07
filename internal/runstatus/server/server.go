@@ -1727,6 +1727,9 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 	case "runstatus.bug.preview":
 		return s.bugPreview(params)
 
+	case "runstatus.bug.status":
+		return s.bugStatus(ctx)
+
 	case "runstatus.bug.report":
 		return s.bugReport(params)
 

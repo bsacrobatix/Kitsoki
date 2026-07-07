@@ -68,6 +68,36 @@ func (s *Server) bugPreview(_ map[string]any) (any, *rpcError) {
 	}, nil
 }
 
+// bugStatus handles runstatus.bug.status. It is intentionally a local preflight:
+// GitHub mode checks only whether a credential is configured, not whether that
+// credential has repo-specific issue permissions.
+func (s *Server) bugStatus(ctx context.Context) (any, *rpcError) {
+	repo := strings.TrimSpace(s.ticketRepo)
+	if repo == "" {
+		return map[string]any{
+			"mode":     "local",
+			"can_file": true,
+		}, nil
+	}
+	auth := host.GitHubWriteAuthStatus(ctx)
+	if auth.Configured {
+		return map[string]any{
+			"mode":                   "github",
+			"repo":                   repo,
+			"can_file":               true,
+			"github_auth_configured": true,
+		}, nil
+	}
+	return map[string]any{
+		"mode":                   "github",
+		"repo":                   repo,
+		"can_file":               false,
+		"github_auth_configured": false,
+		"warning":                fmt.Sprintf("Report bug cannot file to GitHub repo %s because GitHub auth is missing. Filing bugs is critical; run `kitsoki gh-agent login` or set GH_TOKEN/GITHUB_TOKEN.", repo),
+		"setup_hint":             auth.SetupHint,
+	}, nil
+}
+
 // bugReport handles runstatus.bug.report. See the file comment for the
 // request/result contract.
 func (s *Server) bugReport(params map[string]any) (any, *rpcError) {

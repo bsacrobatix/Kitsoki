@@ -1336,6 +1336,15 @@ export class LiveSource implements DataSource {
   }
 
   /**
+   * Read whether the current server can file bug reports. In GitHub mode this
+   * is a local credential preflight; it does not probe repo-specific
+   * permissions.
+   */
+  bugStatus(): Promise<BugStatusResult> {
+    return this.client.post<BugStatusResult>("runstatus.bug.status", {});
+  }
+
+  /**
    * Take a scrubbed preview snapshot to review before filing. Returns the
    * held capture_id (pass back to reportBug), the scrubbed HAR, and ring-buffer
    * depth/capacity. The held capture is consumed by the matching reportBug.
@@ -1419,12 +1428,26 @@ export interface BugPreviewResult {
   capacity: number;
 }
 
+/** Result of runstatus.bug.status. */
+export interface BugStatusResult {
+  mode: "github" | "local";
+  repo?: string;
+  can_file: boolean;
+  github_auth_configured?: boolean;
+  warning?: string;
+  setup_hint?: string;
+}
+
 /** Result of runstatus.bug.report. */
 export interface BugReportResult {
   /** bare filename without .md, e.g. "2026-06-12T130405Z-foo". */
   id: string;
   /** repo-relative path, e.g. "issues/bugs/<id>.md". */
-  path: string;
+  path?: string;
+  /** GitHub issue URL when the server is in GitHub filing mode. */
+  url?: string;
+  /** True when the report was filed as a GitHub issue. */
+  github?: boolean;
 }
 
 // Re-export for components that import AnnotationEntry from this module.

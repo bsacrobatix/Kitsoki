@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"kitsoki/internal/host"
+)
 
 // TestFirstRunProviderHint verifies change 0.4: a fresh run with no provider
 // gets an actionable message (not a silent replay fallback), and a run with a
@@ -20,6 +25,29 @@ func TestFirstRunProviderHint(t *testing.T) {
 	}
 	if got := firstRunProviderHint(false, true); got != "" {
 		t.Errorf("expected no hint when a credential is present, got:\n%s", got)
+	}
+}
+
+func TestBugFilingAuthStartupNotice(t *testing.T) {
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("HOME", t.TempDir())
+	restoreGHCLI := host.SetGHCLITokenForTest(func(context.Context) string { return "" })
+	defer restoreGHCLI()
+
+	got := bugFilingAuthStartupNotice(context.Background(), "o/r")
+	for _, want := range []string{"GitHub bug filing is unavailable", "o/r", "Filing bugs is critical", "kitsoki gh-agent login"} {
+		if !contains(got, want) {
+			t.Fatalf("notice missing %q; notice was:\n%s", want, got)
+		}
+	}
+
+	if got := bugFilingAuthStartupNotice(context.Background(), ""); got != "" {
+		t.Fatalf("local bug filing should not warn, got:\n%s", got)
+	}
+	t.Setenv("GH_TOKEN", "test-token")
+	if got := bugFilingAuthStartupNotice(context.Background(), "o/r"); got != "" {
+		t.Fatalf("configured GitHub auth should not warn, got:\n%s", got)
 	}
 }
 

@@ -29,6 +29,26 @@ const GitHubAuthSetupHint = "GitHub auth is not configured (missing GH_TOKEN/GIT
 	"then `source ~/.config/kitsoki/github.env`; or set a fine-grained PAT in " +
 	"GH_TOKEN/GITHUB_TOKEN and run `kitsoki gh-agent token --from-env`."
 
+// GitHubAuthStatus reports whether kitsoki has any configured credential for
+// GitHub write APIs. It intentionally does not validate repository permissions:
+// callers use it as a fast, local preflight to catch the guaranteed-fail case
+// before a bug filing path reaches GitHub.
+type GitHubAuthStatus struct {
+	Configured bool
+	SetupHint  string
+}
+
+// GitHubWriteAuthStatus is the shared preflight for UI surfaces that depend on
+// GitHub writes. It checks the same credential chain githubAPIRequest uses:
+// execution env, ambient secrets, process env, ~/.kitsoki/secrets.yaml, then
+// the GitHub CLI token fallback.
+func GitHubWriteAuthStatus(ctx context.Context) GitHubAuthStatus {
+	if strings.TrimSpace(githubToken(ctx)) != "" {
+		return GitHubAuthStatus{Configured: true}
+	}
+	return GitHubAuthStatus{Configured: false, SetupHint: GitHubAuthSetupHint}
+}
+
 type githubAPIClient struct {
 	baseURL string
 	client  *http.Client
