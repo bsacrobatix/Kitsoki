@@ -188,6 +188,9 @@ states:
               id: mint_workspace
               with:
                 script: scripts/prd_slug.star
+                capabilities:
+                  fs:
+                    read: ["**"]
                 inputs:
                   idea: "{{ world.idea }}"
                   durable_path: "{{ world.publish_durable_path }}"
@@ -217,6 +220,9 @@ states:
               id: mint_workspace
               with:
                 script: scripts/prd_slug.star
+                capabilities:
+                  fs:
+                    read: ["**"]
                 inputs:
                   idea: "{{ world.idea }}"
                   durable_path: "{{ world.publish_durable_path }}"
@@ -238,6 +244,9 @@ states:
               id: mint_workspace
               with:
                 script: scripts/prd_slug.star
+                capabilities:
+                  fs:
+                    read: ["**"]
                 inputs:
                   idea: "{{ world.idea }}"
                   durable_path: "{{ world.publish_durable_path }}"

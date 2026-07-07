@@ -18,7 +18,7 @@ app:
 # fixture's header comment for the full trace. The actual RED gate for this
 # slice is internal/app/loader_codeact_test.go's capability/sandbox
 # validation tests, which this app.yaml is deliberately compatible with
-# (capabilities: ["world"] only, no sandbox: block).
+# (`world: read` only, no sandbox: block).
 hosts:
   - host.agent.codeact
 
@@ -50,7 +50,8 @@ states:
               with:
                 agent: coder
                 goal: "sum the two numbers in world and return the total"
-                capabilities: ["world"]
+                capabilities:
+                  world: read
                 budget: 3
                 schema: schemas/codeact_out.json
               bind:

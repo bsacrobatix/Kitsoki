@@ -19,6 +19,9 @@ states:
         id: gs_resolve
         with:
           script: scripts/gs_resolve.star
+          capabilities:
+            fs:
+              read: ["**"]
           inputs:
             goal_dir:           "{{ world.goal_dir }}"
             workdir:            "{{ world.workdir }}"
@@ -33,6 +36,10 @@ states:
         id: gs_init
         with:
           script: scripts/gs_init.star
+          capabilities:
+            fs:
+              read: ["**"]
+              write: ["**"]
           inputs:
             work_dir: "{{ world.work_dir }}"
             goal_dir: "{{ world.goal_dir }}"
@@ -74,6 +81,9 @@ states:
         id: gs_lint
         with:
           script: scripts/gs_lint.star
+          capabilities:
+            fs:
+              read: ["**"]
           inputs:
             goal_dir: "{{ world.goal_dir }}"
         bind:

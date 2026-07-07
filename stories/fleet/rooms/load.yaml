@@ -30,6 +30,9 @@ states:
         once: true
         with:
           script: scripts/fleet_load.star
+          capabilities:
+            fs:
+              read: ["**"]
           inputs:
             decomposition_path: "{{ world.decomposition_path }}"
             fleet_state_path: "{{ world.fleet_state_path }}"

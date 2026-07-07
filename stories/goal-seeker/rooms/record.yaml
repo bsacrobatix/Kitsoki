@@ -11,6 +11,10 @@ states:
         id: gs_append
         with:
           script: scripts/gs_append.star
+          capabilities:
+            fs:
+              read: ["**"]
+              write: ["**"]
           inputs:
             work_dir:  "{{ world.work_dir }}"
             change_id: "{{ world.next_change_id }}"

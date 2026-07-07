@@ -20,6 +20,9 @@ states:
         id: "punch_policy-{{ world.current_item_id }}"
         with:
           script: scripts/punch_policy.star
+          capabilities:
+            fs:
+              read: ["**"]
           inputs:
             state_path: "{{ world.state_path }}"
             item_id:    "{{ world.current_item_id }}"

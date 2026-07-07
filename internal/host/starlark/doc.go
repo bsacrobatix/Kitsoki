@@ -25,21 +25,22 @@
 //
 // # The ctx surface (deliberately narrow)
 //
-// The single argument to main is a struct with exactly six attributes. No
-// environment, no clock, no randomness — and only a NARROW filesystem
+// The single argument to main is a struct with inputs, read-only world by
+// default, and only the external attributes granted by the run's CapabilitySpec.
+// No environment, no clock, no randomness — and only a NARROW opt-in filesystem
 // + allow-listed-probe + allow-listed-host surface, never a shell — so a
 // recorded run replays byte-for-byte:
 //
 //	ctx.inputs.<name>            typed inputs resolved from the effect's with.inputs
 //	ctx.world.get("key")         read-only snapshot of world; None when absent
-//	ctx.http.get(url, headers={})            -> response
-//	ctx.http.post(url, body=..., headers={}) -> response
-//	ctx.fs.read(path)            read-only, repo-rooted, size-capped -> string
-//	ctx.fs.exists(path)          -> bool
-//	ctx.fs.glob(pattern)         -> [path] (sorted, repo-relative)
-//	ctx.fs.write(path, content)  write one repo-rooted, size-capped file -> path
-//	ctx.probe(name, args=[])     run an ALLOW-LISTED read-only probe -> {exit, out}
-//	ctx.host.call(name, args={}) invoke an ALLOW-LISTED engine host verb -> dict (S3d)
+//	ctx.http.get(url, headers={})            -> response (with http grant)
+//	ctx.http.post(url, body=..., headers={}) -> response (with http grant)
+//	ctx.fs.read(path)            read-only, repo-rooted, size-capped -> string (with fs.read grant)
+//	ctx.fs.exists(path)          -> bool (with fs.read grant)
+//	ctx.fs.glob(pattern)         -> [path] (sorted, repo-relative; with fs.read grant)
+//	ctx.fs.write(path, content)  write one repo-rooted, size-capped file -> path (with fs.write grant)
+//	ctx.probe(name, args=[])     run an ALLOW-LISTED read-only probe -> {exit, out} (with probe/vcs/github grant)
+//	ctx.host.call(name, args={}) invoke an ALLOW-LISTED engine host verb -> dict (with host.verbs grant)
 //
 // An http response exposes .status (int), .headers (dict), .text() (string),
 // and .json() (parsed value). body on post may be a dict (JSON-encoded with an
@@ -59,27 +60,25 @@
 // it produces is named, typed, and visible to bind:.
 //
 // ctx.host.call is the narrow, allow-listed boundary onto the ENGINE's own
-// host.Registry (S3d — see HostCaller/WithHost in host_proxy.go): a kit
-// endpoint script that binds an interface op straight to a starlark script
-// (S3a) can compose engine host verbs — e.g. host.graph.load then project —
-// rather than reimplementing that logic itself via ctx.fs/ctx.http. The
-// allow-list (package host's AllowedStarlarkHostVerbs) is fixed and tiny by
-// design: a name not on it is rejected before the underlying Invoke is ever
-// called, and no caller injected at all (HasHost false) fails the same way
-// an un-injected HTTPClient/Inspector does — loudly, not silently.
+// host.Registry (see HostCaller/WithHost in host_proxy.go). The built-in verb
+// vocabulary is fixed and tiny, and each run grants a subset through
+// CapabilitySpec.Host.Verbs: a name not granted is rejected before the
+// underlying Invoke is ever called.
 //
 // # I/O boundary and record/replay
 //
 // All network access goes through the HTTPClient interface (see http.go), and
 // all filesystem/probe access through the Inspector interface (see inspect.go).
-// In production the orchestrator injects a recording client backed by net/http
-// and a working-dir-rooted inspector; in flow tests the testrunner injects a
-// replay client backed by a cassette and a ReplayInspector backed by an inspect
-// cassette, so no real network/process call is made and the run is
-// deterministic. Each is supplied via WithHTTP / WithInspector on the context;
-// HTTPFromContext / InspectorFromContext resolve them (both defaulting to a
-// refuse-all implementation, so a script that does I/O without an injected
-// client fails loudly rather than escaping the sandbox).
+// In production the host adapter injects a recording client backed by net/http
+// only when http is granted and http.cassette_required is not set, and a
+// working-dir-rooted inspector only when fs or probe-like capabilities are
+// granted. In flow tests the testrunner injects a replay client backed by a
+// cassette and a ReplayInspector backed by an inspect cassette, so no real
+// network/process call is made and the run is deterministic. Each is supplied
+// via WithHTTP / WithInspector on the context; HTTPFromContext /
+// InspectorFromContext resolve them (both defaulting to a refuse-all
+// implementation, so a script that does I/O without an injected client fails
+// loudly rather than escaping the sandbox).
 //
 // Each exchange is recorded as a summary {method, url, status}. The summaries
 // — never full request/response bodies — are surfaced for the trace under the

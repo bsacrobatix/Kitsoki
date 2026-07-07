@@ -59,6 +59,9 @@ states:
         id: detect_prior_decomposition
         with:
           script: scripts/detect_prior_decomposition.star
+          capabilities:
+            fs:
+              read: ["**"]
           inputs:
             decomposition_path: "{{ world.decomposition_path }}"
         bind:

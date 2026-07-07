@@ -134,7 +134,7 @@ func TestApiCodeactAgent_StepPromptCarriesGoalAndCapabilities(t *testing.T) {
 	for _, want := range []string{
 		"triage the reported bug",
 		"world — read-only access to ctx.world.get(key)",
-		"vcs — version-control operations",
+		"vcs — read-only version-control probes",
 		"Respond with a single JSON object",
 	} {
 		if !strings.Contains(p, want) {

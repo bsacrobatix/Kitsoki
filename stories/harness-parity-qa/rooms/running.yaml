@@ -84,6 +84,9 @@ states:
         once: true
         with:
           script: scripts/parity_report.star
+          capabilities:
+            fs:
+              write: ["**"]
           inputs:
             surfaces: "{{ world.surfaces }}"
             output_root: "{{ world.output_root }}"

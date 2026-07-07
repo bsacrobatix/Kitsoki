@@ -10,10 +10,9 @@
 // Mandatory args:
 //   - agent: (string) — named agent from the agents: block.
 //   - goal:  (string) — the natural-language objective handed to the agent.
-//   - capabilities: ([]string) — the ctx proxy allow-list for this call;
-//     validated at load time against the sanctioned v1 set (see
-//     internal/app/loader.go's codeactCapabilityAllowlist). Not yet enforced
-//     at runtime by this handler — see TODO below.
+//   - capabilities: mapping — the shared Starlark capability
+//     authority for each emitted snippet. The loader validates the shape and
+//     the runtime exposes/enforces exactly the granted ctx surfaces.
 //   - budget: (int) — max steps before TerminatedBudgetExhausted.
 //   - schema: (string) — path to the JSON schema validating done() payloads,
 //     resolved overlay-first via resolvePromptPathCtx (same convention as
@@ -35,10 +34,7 @@
 // addendum (goal, remaining budget, granted capability names, and the last
 // observation or structured error), and reads back a discriminated-union
 // {"action":"snippet"|"done",...} verdict through the same mcp-validator
-// submit mechanism host.agent.decide uses. Runtime enforcement of the
-// with.capabilities allowlist against the actual ctx proxies exposed to a
-// snippet is follow-up work (see docs/goals/codeact/decomposition.yaml, later
-// slices) — v1 only tells the model the granted names.
+// submit mechanism host.agent.decide uses.
 package host
 
 import (
@@ -51,6 +47,7 @@ import (
 	kitsokimcp "kitsoki/internal/mcp"
 
 	"kitsoki/internal/host/codeact"
+	starlarkhost "kitsoki/internal/host/starlark"
 )
 
 // defaultCodeactBudget is used when with.budget is absent or non-positive.
@@ -94,19 +91,17 @@ func AgentCodeactHandler(ctx context.Context, args map[string]any) (Result, erro
 		}
 	}
 
-	var capabilities []string
-	switch v := args["capabilities"].(type) {
-	case []any:
-		for _, c := range v {
-			if s, ok := c.(string); ok && strings.TrimSpace(s) != "" {
-				capabilities = append(capabilities, s)
-			}
-		}
-	case []string:
-		capabilities = v
+	capabilities, capErr := starlarkhost.ParseCapabilities(args["capabilities"])
+	if capErr != nil {
+		return Result{Error: fmt.Sprintf("host.agent.codeact: capabilities: %v", capErr), FailureKind: FailureFatal}, nil
 	}
+	capabilityLabels := capabilities.CapabilityLabels()
 
 	worldArg, _ := args["world"].(map[string]any)
+	runCtx, capCtxErr := codeactCapabilityContext(ctx, args, worldArg, capabilities)
+	if capCtxErr != nil {
+		return Result{Error: fmt.Sprintf("host.agent.codeact: %v", capCtxErr), FailureKind: FailureFatal}, nil
+	}
 
 	var schemaFn func(payload map[string]any) error
 	if schemaPath, _ := args["schema"].(string); strings.TrimSpace(schemaPath) != "" {
@@ -131,16 +126,51 @@ func AgentCodeactHandler(ctx context.Context, args map[string]any) (Result, erro
 			if perr != nil {
 				return Result{Error: fmt.Sprintf("host.agent.codeact: resolve api plugin %q: %v", pluginName, perr), FailureKind: FailureInfra}, nil
 			}
-			return runCodeactLoop(ctx, worldArg, schemaFn, newApiCodeactAgent(ctx, plug, args, goal, budget, capabilities), budget)
+			return runCodeactLoop(runCtx, worldArg, schemaFn, newApiCodeactAgent(ctx, plug, args, goal, budget, capabilityLabels), budget, capabilities)
 		}
 	}
 
-	agentImpl, cleanup, err := newRealCodeactAgent(ctx, args, goal, budget, capabilities)
+	agentImpl, cleanup, err := newRealCodeactAgent(ctx, args, goal, budget, capabilityLabels)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("host.agent.codeact: %v", err), FailureKind: FailureInfra}, nil
 	}
 	defer cleanup()
-	return runCodeactLoop(ctx, worldArg, schemaFn, agentImpl, budget)
+	return runCodeactLoop(runCtx, worldArg, schemaFn, agentImpl, budget, capabilities)
+}
+
+func codeactCapabilityContext(ctx context.Context, args map[string]any, worldArg map[string]any, capabilities starlarkhost.CapabilitySpec) (context.Context, error) {
+	runCtx := ctx
+	if capabilities.RequiresInjectedHTTP() && !starlarkhost.HasHTTPClient(runCtx) {
+		return nil, fmt.Errorf("capabilities.http.cassette_required requires an injected Starlark HTTP client")
+	}
+	if capabilities.NeedsHTTP() && !starlarkhost.HasHTTPClient(runCtx) {
+		runCtx = starlarkhost.WithHTTP(runCtx, starlarkhost.NewRecordingClient())
+	}
+	if capabilities.NeedsInspector() && !starlarkhost.HasInspector(runCtx) {
+		root, _ := args["working_dir"].(string)
+		if root == "" {
+			root, _ = worldArg["workdir"].(string)
+		}
+		if root == "" || root == "." {
+			if pr := PromptRendererFromCtx(ctx); pr != nil {
+				if appDir := pr.RootDir(); appDir != "" {
+					root = widenToRepoRoot(appDir)
+				}
+			}
+		}
+		if root == "" {
+			if appDir := os.Getenv(AppDirEnv); appDir != "" {
+				root = widenToRepoRoot(appDir)
+			}
+		}
+		if root == "" {
+			if cwd, err := os.Getwd(); err == nil {
+				root = cwd
+			}
+		}
+		runCtx = starlarkhost.WithInspector(runCtx, starlarkhost.NewProductionInspector(root))
+	}
+	return runCtx, nil
 }
 
 // runCodeactLoop runs codeact.Run over impl and shapes the Result identically
@@ -148,12 +178,13 @@ func AgentCodeactHandler(ctx context.Context, args map[string]any) (Result, erro
 // terminated (done|budget_exhausted), the schema-valid done() payload, and a
 // per-step journal of snippet + observation (+ error). Keeping the shaping in
 // one place guarantees the two backends produce the same Result.Data shape.
-func runCodeactLoop(ctx context.Context, worldArg map[string]any, schemaFn func(map[string]any) error, impl codeact.Agent, budget int) (Result, error) {
+func runCodeactLoop(ctx context.Context, worldArg map[string]any, schemaFn func(map[string]any) error, impl codeact.Agent, budget int, capabilities starlarkhost.CapabilitySpec) (Result, error) {
 	res, err := codeact.Run(ctx, codeact.Params{
-		Budget: budget,
-		World:  worldArg,
-		Agent:  impl,
-		Schema: schemaFn,
+		Budget:       budget,
+		World:        worldArg,
+		Agent:        impl,
+		Schema:       schemaFn,
+		Capabilities: capabilities,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("host.agent.codeact: %w", err)

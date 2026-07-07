@@ -14,6 +14,10 @@ states:
         id: gs_manifest
         with:
           script: scripts/gs_manifest.star
+          capabilities:
+            fs:
+              read: ["**"]
+              write: ["**"]
           inputs:
             goal_dir: "{{ world.goal_dir }}"
             work_dir: "{{ world.work_dir }}"
@@ -117,6 +121,10 @@ states:
         id: gs_append
         with:
           script: scripts/gs_append.star
+          capabilities:
+            fs:
+              read: ["**"]
+              write: ["**"]
           inputs:
             work_dir:    "{{ world.work_dir }}"
             change_id:   "{{ world.next_change_id }}"
@@ -189,6 +197,10 @@ states:
         id: gs_append
         with:
           script: scripts/gs_append.star
+          capabilities:
+            fs:
+              read: ["**"]
+              write: ["**"]
           inputs:
             work_dir:    "{{ world.work_dir }}"
             change_id:   "{{ world.next_change_id }}"

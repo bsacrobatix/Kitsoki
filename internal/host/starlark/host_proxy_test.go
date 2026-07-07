@@ -37,14 +37,22 @@ outputs:
 	return sc
 }
 
+func hostCaps(verbs ...string) starlarkhost.CapabilitySpec {
+	return starlarkhost.CapabilitySpec{
+		World: true,
+		Host:  starlarkhost.HostCapability{Verbs: verbs},
+	}
+}
+
 func TestCtxHost_AllowedVerbInvokes(t *testing.T) {
 	fake := &fakeHostCaller{}
 	ctx := starlarkhost.WithHost(context.Background(), fake, []string{"host.graph.load"})
 
 	res, err := starlarkhost.Run(ctx, starlarkhost.Params{
-		Script:  "graph_glue.star",
-		Source:  []byte(hostScript),
-		Sidecar: mustSidecar(t),
+		Script:       "graph_glue.star",
+		Source:       []byte(hostScript),
+		Sidecar:      mustSidecar(t),
+		Capabilities: hostCaps("host.graph.load"),
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -63,9 +71,10 @@ func TestCtxHost_DisallowedVerbErrors(t *testing.T) {
 	ctx := starlarkhost.WithHost(context.Background(), fake, []string{"host.workspace_manager.get"})
 
 	_, err := starlarkhost.Run(ctx, starlarkhost.Params{
-		Script:  "graph_glue.star",
-		Source:  []byte(hostScript),
-		Sidecar: mustSidecar(t),
+		Script:       "graph_glue.star",
+		Source:       []byte(hostScript),
+		Sidecar:      mustSidecar(t),
+		Capabilities: hostCaps("host.graph.load"),
 	})
 	if err == nil {
 		t.Fatal("expected an error calling a non-allow-listed verb, got nil")
@@ -85,9 +94,10 @@ func TestCtxHost_DisallowedVerbErrors(t *testing.T) {
 func TestCtxHost_NoCallerConfiguredErrors(t *testing.T) {
 	// No WithHost injection at all — the sandbox's deny-by-default posture.
 	_, err := starlarkhost.Run(context.Background(), starlarkhost.Params{
-		Script:  "graph_glue.star",
-		Source:  []byte(hostScript),
-		Sidecar: mustSidecar(t),
+		Script:       "graph_glue.star",
+		Source:       []byte(hostScript),
+		Sidecar:      mustSidecar(t),
+		Capabilities: hostCaps("host.graph.load"),
 	})
 	if err == nil {
 		t.Fatal("expected an error with no host caller configured, got nil")

@@ -24,9 +24,10 @@ func TestHarnessParityReportScript(t *testing.T) {
 	work := t.TempDir()
 	ctx := starlarkhost.WithInspector(context.Background(), starlarkhost.NewProductionInspector(work))
 	res, err := starlarkhost.Run(ctx, starlarkhost.Params{
-		Script:  "parity_report.star",
-		Source:  src,
-		Sidecar: sidecar,
+		Script:       "parity_report.star",
+		Source:       src,
+		Sidecar:      sidecar,
+		Capabilities: inspectCaps(),
 		Inputs: map[string]any{
 			"surfaces":      "tui,web,vscode",
 			"output_root":   ".artifacts/harness-parity-qa",

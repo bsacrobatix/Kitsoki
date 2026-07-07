@@ -12,6 +12,10 @@ states:
         id: gs_ledger
         with:
           script: scripts/gs_ledger.star
+          capabilities:
+            fs:
+              read: ["**"]
+              write: ["**"]
           inputs:
             goal_dir: "{{ world.goal_dir }}"
             work_dir: "{{ world.work_dir }}"
@@ -25,6 +29,10 @@ states:
         id: report_deck
         with:
           script: scripts/report_deck.star
+          capabilities:
+            fs:
+              read: ["**"]
+              write: ["**"]
           inputs:
             goal_slug: "{{ world.goal_slug }}"
             goal_dir: "{{ world.goal_dir }}"

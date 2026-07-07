@@ -25,10 +25,11 @@ func runInspect(t *testing.T, in starlarkhost.Inspector, src string) map[string]
 		ctx = starlarkhost.WithInspector(ctx, in)
 	}
 	res, err := starlarkhost.Run(ctx, starlarkhost.Params{
-		Script: "<test>",
-		Source: []byte(src),
-		World:  map[string]any{},
-		Inputs: map[string]any{},
+		Script:       "<test>",
+		Source:       []byte(src),
+		World:        map[string]any{},
+		Inputs:       map[string]any{},
+		Capabilities: inspectCaps(),
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -45,10 +46,44 @@ func runErr(t *testing.T, in starlarkhost.Inspector, src string) string {
 		ctx = starlarkhost.WithInspector(ctx, in)
 	}
 	_, err := starlarkhost.Run(ctx, starlarkhost.Params{
-		Script: "<test>",
-		Source: []byte(src),
-		World:  map[string]any{},
-		Inputs: map[string]any{},
+		Script:       "<test>",
+		Source:       []byte(src),
+		World:        map[string]any{},
+		Inputs:       map[string]any{},
+		Capabilities: inspectCaps(),
+	})
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if msg, ok := starlarkhost.AsDomainError(err); ok {
+		return msg
+	}
+	return err.Error()
+}
+
+func inspectCaps() starlarkhost.CapabilitySpec {
+	return starlarkhost.CapabilitySpec{
+		World: true,
+		FS: starlarkhost.FSCapability{
+			ReadPatterns:  []string{"**"},
+			WritePatterns: []string{"**"},
+		},
+		Probe: starlarkhost.ProbeCapability{Names: []string{"git.status", "git.ls_files", "gh.issue.list", "rm.rf"}},
+	}
+}
+
+func runInspectErrWithCaps(t *testing.T, in starlarkhost.Inspector, src string, caps starlarkhost.CapabilitySpec) string {
+	t.Helper()
+	ctx := context.Background()
+	if in != nil {
+		ctx = starlarkhost.WithInspector(ctx, in)
+	}
+	_, err := starlarkhost.Run(ctx, starlarkhost.Params{
+		Script:       "<test>",
+		Source:       []byte(src),
+		World:        map[string]any{},
+		Inputs:       map[string]any{},
+		Capabilities: caps,
 	})
 	if err == nil {
 		t.Fatal("expected an error, got nil")
@@ -118,6 +153,24 @@ def main(ctx):
 	}
 	if got, err := os.ReadFile(filepath.Join(root, ".artifacts", "demo", "report.md")); err != nil || string(got) != "hello\n" {
 		t.Fatalf("file on disk = %q, %v", string(got), err)
+	}
+}
+
+func TestCapabilityPolicy_DeniesUnmatchedFSWrite(t *testing.T) {
+	root := t.TempDir()
+	in := starlarkhost.NewProductionInspector(root)
+	msg := runInspectErrWithCaps(t, in, `
+def main(ctx):
+    return {"path": ctx.fs.write("docs/out.md", "nope")}
+`, starlarkhost.CapabilitySpec{
+		World: true,
+		FS: starlarkhost.FSCapability{
+			ReadPatterns:  []string{"**"},
+			WritePatterns: []string{".artifacts/**"},
+		},
+	})
+	if !strings.Contains(msg, "not granted") {
+		t.Fatalf("expected path grant error, got %q", msg)
 	}
 }
 
@@ -211,6 +264,27 @@ def main(ctx):
 	// Exit is an int64 after conversion; just assert it is present and an integer.
 	if _, ok := out["exit"].(int64); !ok {
 		t.Errorf("probe exit: got %T %v", out["exit"], out["exit"])
+	}
+}
+
+func TestCapabilityPolicy_DeniesUnmatchedProbe(t *testing.T) {
+	in := starlarkhost.NewReplayInspector(&starlarkhost.InspectCassette{
+		Kind: "inspect_cassette",
+		Interactions: []starlarkhost.InspectInteraction{
+			{Op: "probe", Target: "gh.issue.list", Exit: 0, Out: "[]"},
+		},
+	})
+	msg := runInspectErrWithCaps(t, in, `
+def main(ctx):
+    return {"out": ctx.probe("gh.issue.list", ["owner/repo"])["out"]}
+`, starlarkhost.CapabilitySpec{
+		World: true,
+		Probe: starlarkhost.ProbeCapability{
+			Names: []string{"git.status"},
+		},
+	})
+	if !strings.Contains(msg, "probe") || !strings.Contains(msg, "not granted") {
+		t.Fatalf("expected probe grant error, got %q", msg)
 	}
 }
 
@@ -362,10 +436,11 @@ func TestReplayInspector_Summaries(t *testing.T) {
 	in := starlarkhost.NewReplayInspector(cas)
 	ctx := starlarkhost.WithInspector(context.Background(), in)
 	res, err := starlarkhost.Run(ctx, starlarkhost.Params{
-		Script: "<test>",
-		Source: []byte("def main(ctx):\n    return {\"e\": ctx.probe(\"git.status\")[\"exit\"]}\n"),
-		World:  map[string]any{},
-		Inputs: map[string]any{},
+		Script:       "<test>",
+		Source:       []byte("def main(ctx):\n    return {\"e\": ctx.probe(\"git.status\")[\"exit\"]}\n"),
+		World:        map[string]any{},
+		Inputs:       map[string]any{},
+		Capabilities: inspectCaps(),
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)

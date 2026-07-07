@@ -20,6 +20,10 @@ states:
         id: "punch_board-{{ world.processed_count }}-{{ world._record_status }}"
         with:
           script: scripts/punch_board.star
+          capabilities:
+            fs:
+              read: ["**"]
+              write: ["**"]
           inputs:
             state_path:  "{{ world.state_path ?? '' }}"
             mark_id:     "{{ world.current_item_id ?? '' }}"

@@ -65,6 +65,9 @@ states:
         id: uniquify
         with:
           script: scripts/design_workspace.star
+          capabilities:
+            fs:
+              read: ["**"]
           inputs:
             proposed:     "{{ world.design_slug }}"
             durable_path: "{{ world.design_durable_path }}"

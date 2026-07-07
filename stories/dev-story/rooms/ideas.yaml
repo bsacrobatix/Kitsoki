@@ -125,6 +125,10 @@ states:
               id: reconcile
               with:
                 script: scripts/ideas_reconcile.star
+                capabilities:
+                  fs:
+                    read: ["**"]
+                    write: ["**"]
                 inputs:
                   ideas_path:  "{{ world.ideas_path }}"
                   review_path: "{{ world.ideas_review_path }}"

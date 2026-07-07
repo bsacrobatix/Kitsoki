@@ -96,6 +96,10 @@ func StarlarkRunHandler(ctx context.Context, args map[string]any) (Result, error
 	}
 
 	inputs := toStringMap(args["inputs"])
+	capabilities, capErr := starlarkhost.ParseCapabilities(args["capabilities"])
+	if capErr != nil {
+		return Result{Error: fmt.Sprintf("host.starlark.run: capabilities: %v", capErr)}, nil
+	}
 
 	// ctx.world is the live world snapshot the orchestrator injected, with any
 	// explicit with.world object overlaid on top (override wins per key). A
@@ -112,16 +116,21 @@ func StarlarkRunHandler(ctx context.Context, args map[string]any) (Result, error
 		worldSnapshot = merged
 	}
 
-	// Inject the production recording HTTP client unless a caller already
-	// installed one (the testrunner installs a replay client for flow fixtures).
+	// Inject the production recording HTTP client only when metadata grants
+	// ctx.http, unless a caller already installed one (the testrunner installs a
+	// replay client for flow fixtures).
 	runCtx := ctx
-	if !starlarkhost.HasHTTPClient(ctx) {
+	if capabilities.RequiresInjectedHTTP() && !starlarkhost.HasHTTPClient(runCtx) {
+		return Result{Error: "host.starlark.run: capabilities.http.cassette_required requires an injected Starlark HTTP client"}, nil
+	}
+	if capabilities.NeedsHTTP() && !starlarkhost.HasHTTPClient(ctx) {
 		runCtx = starlarkhost.WithHTTP(ctx, starlarkhost.NewRecordingClient())
 	}
 
-	// Inject a production inspector rooted at the run's working dir unless a
-	// caller already installed one (the testrunner installs a replay inspector
-	// for flow fixtures). Mirrors the HTTP default-injection block above; the
+	// Inject a production inspector rooted at the run's working dir only when
+	// metadata grants ctx.fs or ctx.probe, unless a caller already installed one
+	// (the testrunner installs a replay inspector for flow fixtures). Mirrors
+	// the HTTP default-injection block above; the
 	// safe deny-all default is applied by InspectorFromContext when nothing is
 	// injected. Root at world.workdir when present, else the per-session
 	// prompt renderer's story root (WithPromptRenderer, orchestrator-injected
@@ -149,7 +158,7 @@ func StarlarkRunHandler(ctx context.Context, args map[string]any) (Result, error
 	// inspector root session-scoped instead of shared mutable global state.
 	// CLI one-shots, direct unit-test callers, and any other caller with no
 	// renderer in ctx keep exactly the previous AppDirEnv-based behavior.
-	if !starlarkhost.HasInspector(runCtx) {
+	if capabilities.NeedsInspector() && !starlarkhost.HasInspector(runCtx) {
 		root, _ := worldSnapshot["workdir"].(string)
 		// "." is dev-story's own bare-relative default for an unbound workdir
 		// (stories/dev-story/app.yaml's `workdir: "{{ world.workdir == '' ?
@@ -200,11 +209,12 @@ func StarlarkRunHandler(ctx context.Context, args map[string]any) (Result, error
 	}
 
 	res, runErr := starlarkhost.Run(runCtx, starlarkhost.Params{
-		Script:  scriptPath,
-		Source:  src,
-		Sidecar: sidecar,
-		Inputs:  inputs,
-		World:   worldSnapshot,
+		Script:       scriptPath,
+		Source:       src,
+		Sidecar:      sidecar,
+		Inputs:       inputs,
+		World:        worldSnapshot,
+		Capabilities: capabilities,
 	})
 	if runErr != nil {
 		if msg, isDomain := starlarkhost.AsDomainError(runErr); isDomain {
@@ -257,14 +267,7 @@ func StarlarkRunHandler(ctx context.Context, args map[string]any) (Result, error
 // object-graph kit's engine verbs); listing those names now means a kit
 // script written against ctx.host.call for them keeps working unmodified
 // once S5 lands, without S3d depending on that slice.
-var AllowedStarlarkHostVerbs = []string{
-	"host.workspace_manager.get",
-	"host.graph.load",
-	"host.graph.lint",
-	"host.graph.diff",
-	"host.graph.project",
-	"host.graph.query",
-}
+var AllowedStarlarkHostVerbs = starlarkhost.BuiltinHostVerbVocabulary
 
 // NewStarlarkRunHandler returns a host.starlark.run Handler bound to reg,
 // enabling ctx.host.call inside the running script to invoke back into reg
@@ -280,8 +283,8 @@ var AllowedStarlarkHostVerbs = []string{
 // HTTPClient/Inspector.
 func NewStarlarkRunHandler(reg *Registry) Handler {
 	return func(ctx context.Context, args map[string]any) (Result, error) {
-		if !starlarkhost.HasHost(ctx) {
-			ctx = starlarkhost.WithHost(ctx, registryHostCaller{reg: reg}, AllowedStarlarkHostVerbs)
+		if cap, err := starlarkhost.ParseCapabilities(args["capabilities"]); err == nil && cap.AllowsHost() && !starlarkhost.HasHost(ctx) {
+			ctx = starlarkhost.WithHost(ctx, registryHostCaller{reg: reg}, cap.Host.Verbs)
 		}
 		return StarlarkRunHandler(ctx, args)
 	}

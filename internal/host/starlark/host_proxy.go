@@ -46,6 +46,26 @@ func WithHost(ctx context.Context, caller HostCaller, allow []string) context.Co
 	return context.WithValue(ctx, hostCallerKey{}, hostBinding{caller: caller, allow: set})
 }
 
+// RestrictHost narrows an injected HostCaller to the verbs granted by this run's
+// capability metadata. It never broadens an existing allow-list.
+func RestrictHost(ctx context.Context, allow []string) context.Context {
+	b, ok := ctx.Value(hostCallerKey{}).(hostBinding)
+	if !ok {
+		return ctx
+	}
+	granted := make(map[string]struct{}, len(allow))
+	for _, name := range allow {
+		granted[name] = struct{}{}
+	}
+	narrowed := make(map[string]struct{}, len(granted))
+	for name := range granted {
+		if _, ok := b.allow[name]; ok {
+			narrowed[name] = struct{}{}
+		}
+	}
+	return context.WithValue(ctx, hostCallerKey{}, hostBinding{caller: b.caller, allow: narrowed})
+}
+
 // HasHost reports whether a HostCaller has already been injected into ctx —
 // the same "don't clobber an existing injection" check StarlarkRunHandler
 // uses for HTTP/Inspector, so a testrunner-installed fake host caller isn't

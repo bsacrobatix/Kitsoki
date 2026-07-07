@@ -48,9 +48,13 @@ const codeactStepSchemaJSON = `{
 // map (should not happen; the loader validates against the same allowlist)
 // fall back to the bare name.
 var codeactCapabilityDescriptions = map[string]string{
-	"world": "world — read-only access to ctx.world.get(key) for the current world state.",
-	"vcs":   "vcs — version-control operations (status/diff/commit) scoped to this session's worktree.",
-	"http":  "http — outbound HTTP requests via ctx.http, subject to any configured allowlist/cassette.",
+	"world":         "world — read-only access to ctx.world.get(key) for the current world state.",
+	"vcs":           "vcs — read-only version-control probes through ctx.probe(\"git.status\") and ctx.probe(\"git.ls_files\", [pathspec]).",
+	"http":          "http — outbound HTTP requests via ctx.http, subject to configured method/host policy and cassettes.",
+	"fs.read":       "fs.read — read-only filesystem inspection through ctx.fs.read/exists/glob within granted path patterns.",
+	"fs.write":      "fs.write — small filesystem writes through ctx.fs.write within granted path patterns.",
+	"github.issues": "github.issues — GitHub issue reads through ctx.probe(\"gh.issue.list\", [owner_repo]) with token/cassette policy.",
+	"host":          "host — exact engine host verbs through ctx.host.call(name, args).",
 }
 
 // RealCodeactAgent is the production codeact.Agent: it holds everything
