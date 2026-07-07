@@ -130,6 +130,9 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 	if sandboxErr != "" {
 		return Result{Error: "host.agent.task: " + sandboxErr, FailureKind: FailureFatal}, nil
 	}
+	if _, policyErr := RequireAgentLaunchAllowed(ctx, "task", agentName, workingDir); policyErr != "" {
+		return Result{Error: "host.agent.task: " + policyErr, FailureKind: FailureFatal}, nil
+	}
 
 	// Deterministic seed backstop: when this task's context.args carry a target
 	// story + a seed world (e.g. the punch-list maker's item.{story, world_in}),

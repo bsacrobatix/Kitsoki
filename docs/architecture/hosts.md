@@ -847,6 +847,12 @@ effect class when the effect-taxonomy slice lands.
 
 ### `sandbox:` Runtime Policy
 
+Before any external coding-agent launch, an optional global
+[`agent_launch_policy:`](./agent-launch-policy.md) preflight may reject the
+resolved `working_dir` when it is in a protected checkout/branch or outside an
+opened capsule. That guard answers "may this agent start here?" and applies even
+when a call does not declare `sandbox:`.
+
 `host.agent.task` and write-capable `host.agent.converse` can opt into the agent
 runtime layer with `with.sandbox`. The current OSS backend is `supervised`: it
 does process-group launch/kill, timeout/cancel cleanup, a temporary HOME/XDG

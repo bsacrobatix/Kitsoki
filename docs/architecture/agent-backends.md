@@ -82,9 +82,11 @@ Claude-only flags (`--setting-sources`, `--effort`,
 > backend CLI through the agent runtime. In other words, the Codex CLI sandbox is
 > bypassed so MCP tools are callable; Kitsoki still owns whether a hosted agent
 > may mutate the target workspace. **Select `--agent codex` only in a trusted /
-> externally-sandboxed environment unless the story also declares an appropriate
-> Kitsoki `sandbox:` policy**, since the bypass flag disables Codex's own sandbox
-> and approval gate for the whole run.
+> externally-sandboxed environment, or with
+> [`agent_launch_policy:`](./agent-launch-policy.md) confining launches to opened
+> capsules and an appropriate Kitsoki `sandbox:` policy where runtime supervision
+> is needed**, since the bypass flag disables Codex's own sandbox and approval
+> gate for the whole run.
 
 ### Session resume & usage
 

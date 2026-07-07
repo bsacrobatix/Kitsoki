@@ -30,6 +30,18 @@
 #     world:
 #       ticket_repo: bsacrobatix/Kitsoki
 
+# Optional local guard for external coding-agent launches. Keep this machine-
+# specific: protected roots and capsule locations differ per operator.
+#
+# agent_launch_policy:
+#   enabled: true
+#   require_capsule: true
+#   protected_roots: [.]
+#   allowed_roots:
+#     - ./.worktrees/capsules
+#     - /tmp/kitsoki-capsules
+#   protected_branches: [main, master, trunk, "integration/*", "staging/*"]
+
 harness_profiles:
   # codex with its own config/auth (no retarget). codex has a model selector;
   # reasoning effort for codex is not wired (it ignores --effort), so no efforts.

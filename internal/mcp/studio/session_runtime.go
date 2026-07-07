@@ -172,7 +172,7 @@ func (rt *sessionRuntime) Close() {
 // backend (synthetic, codex, …) instead of the static default — the same
 // remap `kitsoki turn --profile` applies. An empty map leaves the session on the
 // legacy default-backend path (selectedProfile is then ignored).
-func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string, initialWorld map[string]any, hostCassette string, failClosedAgentReplay bool, resolver app.ImportResolver, chatStore *chats.Store, configureHosts HostRegistryConfigurer) (*sessionRuntime, error) {
+func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string, initialWorld map[string]any, hostCassette string, failClosedAgentReplay bool, resolver app.ImportResolver, chatStore *chats.Store, configureHosts HostRegistryConfigurer, agentLaunchPolicy host.AgentLaunchPolicy) (*sessionRuntime, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -324,6 +324,9 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 	// of WithHarnessProfiles), so replay/flow sessions are unaffected.
 	if len(profiles) > 0 {
 		orchOpts = append(orchOpts, orchestrator.WithHarnessProfiles(profiles, selectedProfile))
+	}
+	if agentLaunchPolicy.Enabled {
+		orchOpts = append(orchOpts, orchestrator.WithAgentLaunchPolicy(agentLaunchPolicy))
 	}
 	orch := orchestrator.New(def, m, s, h, orchOpts...)
 	rt.orch = orch

@@ -35,25 +35,27 @@ type agentLaunchOptions struct {
 	Env            []string
 	Exec           bool
 	Interactive    bool
+	RawInteractive bool
 }
 
 type agentLaunchPlan struct {
-	App         string            `json:"app,omitempty"`
-	AgentFile   string            `json:"agent_file,omitempty"`
-	Agent       string            `json:"agent"`
-	Profile     string            `json:"profile,omitempty"`
-	Backend     string            `json:"backend"`
-	Binary      string            `json:"binary"`
-	WorkingDir  string            `json:"working_dir"`
-	Model       string            `json:"model,omitempty"`
-	Effort      string            `json:"effort,omitempty"`
-	Tools       []string          `json:"tools,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
-	Command     []string          `json:"command"`
-	Stdin       string            `json:"stdin,omitempty"`
-	DryRun      bool              `json:"dry_run"`
-	Interactive bool              `json:"interactive,omitempty"`
-	FutureNotes []string          `json:"future_notes,omitempty"`
+	App          string                    `json:"app,omitempty"`
+	AgentFile    string                    `json:"agent_file,omitempty"`
+	Agent        string                    `json:"agent,omitempty"`
+	Profile      string                    `json:"profile,omitempty"`
+	Backend      string                    `json:"backend"`
+	Binary       string                    `json:"binary"`
+	WorkingDir   string                    `json:"working_dir"`
+	Model        string                    `json:"model,omitempty"`
+	Effort       string                    `json:"effort,omitempty"`
+	Tools        []string                  `json:"tools,omitempty"`
+	Env          map[string]string         `json:"env,omitempty"`
+	Command      []string                  `json:"command"`
+	Stdin        string                    `json:"stdin,omitempty"`
+	DryRun       bool                      `json:"dry_run"`
+	Interactive  bool                      `json:"interactive,omitempty"`
+	FutureNotes  []string                  `json:"future_notes,omitempty"`
+	LaunchPolicy *host.AgentLaunchDecision `json:"launch_policy,omitempty"`
 
 	providerEnv map[string]string
 	claudeArgs  []string
@@ -73,7 +75,7 @@ type standaloneCodexAgent struct {
 func agentLaunchCmd() *cobra.Command {
 	var opts agentLaunchOptions
 	cmd := &cobra.Command{
-		Use:   "launch --agent <name> [--app <app.yaml>] [--task <text>|--task-file <path>]",
+		Use:   "launch [--agent <name>|--raw --interactive] [--app <app.yaml>] [--task <text>|--task-file <path>]",
 		Short: "Launch a Claude/Codex CLI from an agent definition",
 		Long: `Resolve an agent definition plus an optional harness profile and turn it
 into a concrete Claude/Codex task-agent launch.
@@ -83,6 +85,9 @@ When --app is omitted, the agent is resolved as a freestanding Codex agent from
 .codex/agents/<name>.toml (or --agent-file). Freestanding Codex agents may
 declare [mcp_servers.*] blocks; launch attaches them exactly like a Claude
 --mcp-config, then the Codex backend translates them to codex -c overrides.
+
+Use --raw --interactive to start a normal interactive backend CLI in a working
+directory with no app, no agent file, and no Kitsoki replacement system prompt.
 
 By default this prints a redacted JSON launch plan for task-backed launches.
 Freestanding Codex launch with no task opens Codex interactively.`,
@@ -123,14 +128,21 @@ Freestanding Codex launch with no task opens Codex interactively.`,
 	cmd.Flags().StringArrayVar(&opts.Env, "env", nil, "extra environment override KEY=VALUE; values are redacted from dry-run output")
 	cmd.Flags().BoolVar(&opts.Exec, "exec", false, "actually run the external CLI; default is a no-provider dry run")
 	cmd.Flags().BoolVar(&opts.Interactive, "interactive", false, "force an interactive Codex session instead of one-shot codex exec; implied when freestanding launch has no task")
+	cmd.Flags().BoolVar(&opts.RawInteractive, "raw", false, "with --interactive, launch the normal backend CLI without app/agent prompt synthesis")
 
-	_ = cmd.MarkFlagRequired("agent")
 	return cmd
 }
 
 func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 	if strings.TrimSpace(opts.Task) != "" && strings.TrimSpace(opts.TaskFile) != "" {
 		return agentLaunchPlan{}, fmt.Errorf("use only one of --task or --task-file")
+	}
+	if opts.RawInteractive {
+		opts.Interactive = true
+		return buildRawInteractiveLaunchPlan(opts)
+	}
+	if strings.TrimSpace(opts.AgentName) == "" {
+		return agentLaunchPlan{}, fmt.Errorf("--agent is required unless --raw --interactive is set")
 	}
 	if opts.Interactive && strings.TrimSpace(opts.AppPath) != "" {
 		return agentLaunchPlan{}, fmt.Errorf("--interactive is only supported for freestanding Codex agents; omit --app")
@@ -146,10 +158,12 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 	if !ok || decl == nil {
 		return agentLaunchPlan{}, fmt.Errorf("app %s has no agent %q", opts.AppPath, opts.AgentName)
 	}
-	profiles, defaultProfile, err := loadLaunchProfiles(opts.ConfigPath)
+	launchCfg, err := loadLaunchConfig(opts.ConfigPath)
 	if err != nil {
 		return agentLaunchPlan{}, err
 	}
+	profiles := launchCfg.Profiles
+	defaultProfile := launchCfg.DefaultProfile
 	profileName := firstLaunchNonEmpty(opts.Profile, defaultProfile)
 	profile, hasProfile := profiles[profileName]
 	if profileName != "" && !hasProfile {
@@ -162,6 +176,10 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 	}
 	appDir := filepath.Dir(opts.AppPath)
 	workingDir, err := resolveLaunchWorkingDir(firstLaunchNonEmpty(opts.WorkingDir, decl.Cwd, "."), appDir)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	launchDecision, err := checkLaunchPolicy(launchCfg.AgentLaunchPolicy, "agent.launch", opts.AgentName, workingDir)
 	if err != nil {
 		return agentLaunchPlan{}, err
 	}
@@ -211,23 +229,24 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 	}
 	command := append([]string{bin}, inv.Args...)
 	return agentLaunchPlan{
-		App:         opts.AppPath,
-		Agent:       opts.AgentName,
-		Profile:     profileName,
-		Backend:     backend,
-		Binary:      bin,
-		WorkingDir:  workingDir,
-		Model:       model,
-		Effort:      effort,
-		Tools:       append([]string(nil), decl.Tools...),
-		Env:         redactEnv(providerEnv),
-		Command:     command,
-		Stdin:       inv.Stdin,
-		providerEnv: providerEnv,
-		claudeArgs:  cliArgs,
-		cleanups:    cleanups,
+		App:          opts.AppPath,
+		Agent:        opts.AgentName,
+		Profile:      profileName,
+		Backend:      backend,
+		Binary:       bin,
+		WorkingDir:   workingDir,
+		Model:        model,
+		Effort:       effort,
+		Tools:        append([]string(nil), decl.Tools...),
+		Env:          redactEnv(providerEnv),
+		Command:      command,
+		Stdin:        inv.Stdin,
+		providerEnv:  providerEnv,
+		claudeArgs:   cliArgs,
+		cleanups:     cleanups,
+		LaunchPolicy: launchDecision,
 		FutureNotes: []string{
-			"OS sandbox policy is not applied by this command yet; pass --exec only in a trusted working tree.",
+			"Launch policy is a preflight guard, not a kernel/filesystem sandbox; backend sandboxing remains provider-specific.",
 			"Extension overlays and HTTP rules should be modeled as future agent/profile fields and resolved into this launch plan.",
 		},
 	}, nil
@@ -246,10 +265,12 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		return agentLaunchPlan{}, fmt.Errorf("agent file %s declares name %q, not %q", agentPath, agent.Name, opts.AgentName)
 	}
 
-	profiles, defaultProfile, err := loadLaunchProfiles(opts.ConfigPath)
+	launchCfg, err := loadLaunchConfig(opts.ConfigPath)
 	if err != nil {
 		return agentLaunchPlan{}, err
 	}
+	profiles := launchCfg.Profiles
+	defaultProfile := launchCfg.DefaultProfile
 	profileName := firstLaunchNonEmpty(opts.Profile, defaultProfile)
 	profile, hasProfile := profiles[profileName]
 	if profileName != "" && !hasProfile {
@@ -261,6 +282,10 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 	}
 	interactive := opts.Interactive || strings.TrimSpace(task) == ""
 	workingDir, err := resolveStandaloneLaunchWorkingDir(opts.WorkingDir)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	launchDecision, err := checkLaunchPolicy(launchCfg.AgentLaunchPolicy, "agent.launch", opts.AgentName, workingDir)
 	if err != nil {
 		return agentLaunchPlan{}, err
 	}
@@ -312,19 +337,20 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		prompt := composeLaunchPrompt(agent.DeveloperInstructions, task)
 		command := append([]string{bin}, buildInteractiveCodexArgs(model, workingDir, opts.AddDirs, agent.MCPServers, prompt)...)
 		return agentLaunchPlan{
-			AgentFile:   agentPath,
-			Agent:       opts.AgentName,
-			Profile:     profileName,
-			Backend:     backend,
-			Binary:      bin,
-			WorkingDir:  workingDir,
-			Model:       model,
-			Effort:      effort,
-			Env:         redactEnv(providerEnv),
-			Command:     command,
-			Interactive: true,
-			providerEnv: providerEnv,
-			cleanups:    cleanups,
+			AgentFile:    agentPath,
+			Agent:        opts.AgentName,
+			Profile:      profileName,
+			Backend:      backend,
+			Binary:       bin,
+			WorkingDir:   workingDir,
+			Model:        model,
+			Effort:       effort,
+			Env:          redactEnv(providerEnv),
+			Command:      command,
+			Interactive:  true,
+			providerEnv:  providerEnv,
+			cleanups:     cleanups,
+			LaunchPolicy: launchDecision,
 			FutureNotes: []string{
 				"Interactive Codex launch uses top-level `codex`, not `codex exec`, so it opens the TUI with the freestanding agent instructions as the initial prompt.",
 				"Codex has no hard --agent-style per-tool allowlist in this launch path; the MCP-only posture comes from the freestanding agent instructions plus the attached MCP server set.",
@@ -337,24 +363,93 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 	}
 	command := append([]string{bin}, inv.Args...)
 	return agentLaunchPlan{
-		AgentFile:   agentPath,
-		Agent:       opts.AgentName,
-		Profile:     profileName,
-		Backend:     backend,
-		Binary:      bin,
-		WorkingDir:  workingDir,
-		Model:       model,
-		Effort:      effort,
-		Env:         redactEnv(providerEnv),
-		Command:     command,
-		Stdin:       inv.Stdin,
-		providerEnv: providerEnv,
-		claudeArgs:  cliArgs,
-		cleanups:    cleanups,
+		AgentFile:    agentPath,
+		Agent:        opts.AgentName,
+		Profile:      profileName,
+		Backend:      backend,
+		Binary:       bin,
+		WorkingDir:   workingDir,
+		Model:        model,
+		Effort:       effort,
+		Env:          redactEnv(providerEnv),
+		Command:      command,
+		Stdin:        inv.Stdin,
+		providerEnv:  providerEnv,
+		claudeArgs:   cliArgs,
+		cleanups:     cleanups,
+		LaunchPolicy: launchDecision,
 		FutureNotes: []string{
 			"Codex has no hard --agent-style per-tool allowlist in this launch path; the MCP-only posture comes from the freestanding agent instructions plus the attached MCP server set.",
 			"Codex exec currently requires --dangerously-bypass-approvals-and-sandbox for MCP calls to run non-interactively.",
 		},
+	}, nil
+}
+
+func buildRawInteractiveLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
+	if !opts.Interactive {
+		return agentLaunchPlan{}, fmt.Errorf("--raw requires --interactive")
+	}
+	if strings.TrimSpace(opts.AppPath) != "" || strings.TrimSpace(opts.AgentName) != "" || strings.TrimSpace(opts.AgentFile) != "" {
+		return agentLaunchPlan{}, fmt.Errorf("--raw interactive launch does not use --app, --agent, or --agent-file")
+	}
+	if strings.TrimSpace(opts.Task) != "" || strings.TrimSpace(opts.TaskFile) != "" {
+		return agentLaunchPlan{}, fmt.Errorf("--raw interactive launch does not accept --task or --task-file")
+	}
+	launchCfg, err := loadLaunchConfig(opts.ConfigPath)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	profileName := firstLaunchNonEmpty(opts.Profile, launchCfg.DefaultProfile)
+	profile, hasProfile := launchCfg.Profiles[profileName]
+	if profileName != "" && !hasProfile {
+		return agentLaunchPlan{}, fmt.Errorf("unknown harness profile %q", profileName)
+	}
+	workingDir, err := resolveStandaloneLaunchWorkingDir(opts.WorkingDir)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	launchDecision, err := checkLaunchPolicy(launchCfg.AgentLaunchPolicy, "agent.launch.raw_interactive", "raw", workingDir)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	backend := firstLaunchNonEmpty(opts.Backend, profile.Backend, "codex")
+	if _, ok := host.ResolveAgentBackendName(backend); !ok && backend != "claude" {
+		return agentLaunchPlan{}, fmt.Errorf("unknown backend %q", backend)
+	}
+	if backend != "codex" && backend != "claude" {
+		return agentLaunchPlan{}, fmt.Errorf("--raw interactive launch supports --backend codex or claude, got %q", backend)
+	}
+	model := firstLaunchNonEmpty(opts.Model, profile.Model)
+	effort := firstLaunchNonEmpty(opts.Effort, profile.Effort)
+	providerEnv := map[string]string{}
+	for k, v := range profile.Env {
+		providerEnv[k] = v
+	}
+	extraEnv, err := parseLaunchEnv(opts.Env)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	for k, v := range extraEnv {
+		providerEnv[k] = v
+	}
+	bin, err := resolveLaunchBin(backend, true)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	args := buildRawInteractiveArgs(backend, model, effort, workingDir, opts.AddDirs)
+	return agentLaunchPlan{
+		Agent:        "raw",
+		Profile:      profileName,
+		Backend:      backend,
+		Binary:       bin,
+		WorkingDir:   workingDir,
+		Model:        model,
+		Effort:       effort,
+		Env:          redactEnv(providerEnv),
+		Command:      append([]string{bin}, args...),
+		Interactive:  true,
+		providerEnv:  providerEnv,
+		LaunchPolicy: launchDecision,
 	}, nil
 }
 
@@ -404,6 +499,50 @@ func buildInteractiveCodexArgs(model, workingDir string, addDirs []string, mcpSe
 	return args
 }
 
+func buildRawInteractiveArgs(backend, model, effort, workingDir string, addDirs []string) []string {
+	switch backend {
+	case "claude":
+		return buildRawInteractiveClaudeArgs(model, effort, addDirs)
+	default:
+		return buildRawInteractiveCodexArgs(model, effort, workingDir, addDirs)
+	}
+}
+
+func buildRawInteractiveCodexArgs(model, effort, workingDir string, addDirs []string) []string {
+	var args []string
+	if strings.TrimSpace(model) != "" {
+		args = append(args, "-m", model)
+	}
+	if strings.TrimSpace(effort) != "" {
+		args = append(args, "-c", "model_reasoning_effort="+launchTOMLString(effort))
+	}
+	if strings.TrimSpace(workingDir) != "" {
+		args = append(args, "-C", workingDir)
+	}
+	for _, dir := range addDirs {
+		if strings.TrimSpace(dir) != "" {
+			args = append(args, "--add-dir", dir)
+		}
+	}
+	return args
+}
+
+func buildRawInteractiveClaudeArgs(model, effort string, addDirs []string) []string {
+	var args []string
+	if strings.TrimSpace(model) != "" {
+		args = append(args, "--model", model)
+	}
+	if strings.TrimSpace(effort) != "" {
+		args = append(args, "--effort", effort)
+	}
+	for _, dir := range addDirs {
+		if strings.TrimSpace(dir) != "" {
+			args = append(args, "--add-dir", dir)
+		}
+	}
+	return args
+}
+
 func composeLaunchPrompt(systemPrompt, task string) string {
 	systemPrompt = strings.TrimSpace(systemPrompt)
 	task = strings.TrimSpace(task)
@@ -447,16 +586,35 @@ func codexConfigArgsForMCPServers(mcpServers map[string]any) []string {
 	return out
 }
 
-func loadLaunchProfiles(configPath string) (map[string]orchestrator.HarnessProfile, string, error) {
+type launchConfig struct {
+	Profiles          map[string]orchestrator.HarnessProfile
+	DefaultProfile    string
+	AgentLaunchPolicy host.AgentLaunchPolicy
+}
+
+func loadLaunchConfig(configPath string) (launchConfig, error) {
 	cfg, err := webconfig.Load(configPath)
 	if err != nil {
-		return nil, "", err
+		return launchConfig{}, err
 	}
 	profiles, defaultProfile := harnessProfilesFromConfig(cfg)
 	if profiles == nil {
 		profiles = map[string]orchestrator.HarnessProfile{}
 	}
-	return profiles, defaultProfile, nil
+	return launchConfig{
+		Profiles:          profiles,
+		DefaultProfile:    defaultProfile,
+		AgentLaunchPolicy: agentLaunchPolicyFromConfig(cfg),
+	}, nil
+}
+
+func checkLaunchPolicy(policy host.AgentLaunchPolicy, verb, agentName, workingDir string) (*host.AgentLaunchDecision, error) {
+	policy = policy.Normalized()
+	if !policy.Enabled {
+		return nil, nil
+	}
+	decision, err := policy.Check(context.Background(), verb, agentName, workingDir)
+	return &decision, err
 }
 
 func readLaunchTask(opts agentLaunchOptions) (string, error) {

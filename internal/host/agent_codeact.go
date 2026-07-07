@@ -63,13 +63,19 @@ func AgentCodeactHandler(ctx context.Context, args map[string]any) (Result, erro
 	if agentName == "" {
 		return Result{Error: "host.agent.codeact: agent: argument is required — declare a named agent in the agents: block", FailureKind: FailureFatal}, nil
 	}
-	if _, agentOK := resolveAgent(ctx, args); !agentOK {
+	agent, agentOK := resolveAgent(ctx, args)
+	if !agentOK {
 		return Result{Error: fmt.Sprintf("host.agent.codeact: unknown agent %q — check the agents: block in app.yaml", agentName), FailureKind: FailureFatal}, nil
 	}
 
 	goal, _ := args["goal"].(string)
 	if strings.TrimSpace(goal) == "" {
 		return Result{Error: "host.agent.codeact: goal: argument is required", FailureKind: FailureFatal}, nil
+	}
+	workingDir, _ := args["working_dir"].(string)
+	workingDir = appendDefaultCwd(workingDir, agent)
+	if _, policyErr := RequireAgentLaunchAllowed(ctx, "codeact", agentName, workingDir); policyErr != "" {
+		return Result{Error: "host.agent.codeact: " + policyErr, FailureKind: FailureFatal}, nil
 	}
 
 	budget := defaultCodeactBudget

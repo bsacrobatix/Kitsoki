@@ -97,6 +97,18 @@ func AgentConverseHandler(ctx context.Context, args map[string]any) (Result, err
 	// selection. A no-op when no surface attached a bundle. See visual_ambient.go.
 	question = appendVisualAmbient(ctx, question)
 
+	sandbox, sandboxErr := parseAgentSandbox(args)
+	if sandboxErr != "" {
+		return Result{Error: "host.agent.converse: " + sandboxErr}, nil
+	}
+	policyWorkingDir, _ := args["working_dir"].(string)
+	if agent, ok := resolveAgent(ctx, args); ok {
+		policyWorkingDir = appendDefaultCwd(policyWorkingDir, agent)
+	}
+	if _, policyErr := RequireAgentLaunchAllowed(ctx, "converse", agentNameFromArgs(args), policyWorkingDir); policyErr != "" {
+		return Result{Error: "host.agent.converse: " + policyErr}, nil
+	}
+
 	// B-7: If an agent plugin registry is wired in context, route through
 	// host.Dispatch. For converse the prompt is the question.
 	withArgs, _ := args["with"].(map[string]any)
@@ -126,11 +138,6 @@ func AgentConverseHandler(ctx context.Context, args map[string]any) (Result, err
 	}
 
 	chatID, _ := args["chat_id"].(string)
-
-	sandbox, sandboxErr := parseAgentSandbox(args)
-	if sandboxErr != "" {
-		return Result{Error: "host.agent.converse: " + sandboxErr}, nil
-	}
 
 	if chatID != "" {
 		cs := ChatStoreFromContext(ctx)

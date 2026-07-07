@@ -164,11 +164,12 @@ type StudioSession struct {
 	// the loaded webconfig); defaultProfile is the selection a session starts on
 	// when session.new omits an explicit profile. Empty map ⇒ legacy
 	// default-backend path (the WithHarnessProfiles no-op contract).
-	harnessProfiles map[string]orchestrator.HarnessProfile
-	defaultProfile  string
-	chatStore       *chats.Store
-	configureHosts  HostRegistryConfigurer
-	currentSID      string
+	harnessProfiles   map[string]orchestrator.HarnessProfile
+	defaultProfile    string
+	agentLaunchPolicy host.AgentLaunchPolicy
+	chatStore         *chats.Store
+	configureHosts    HostRegistryConfigurer
+	currentSID        string
 }
 
 // SetHarnessProfiles seeds the operator-declared harness profiles new driving
@@ -180,6 +181,14 @@ func (ss *StudioSession) SetHarnessProfiles(profiles map[string]orchestrator.Har
 	defer ss.mu.Unlock()
 	ss.harnessProfiles = profiles
 	ss.defaultProfile = defaultProfile
+}
+
+// SetAgentLaunchPolicy seeds the machine-local pre-launch guard new driving
+// sessions inherit for host.agent.* calls. Disabled policies are safe no-ops.
+func (ss *StudioSession) SetAgentLaunchPolicy(policy host.AgentLaunchPolicy) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	ss.agentLaunchPolicy = policy.Normalized()
 }
 
 // SetChatStore seeds the concrete chat store used by driving sessions for
@@ -450,7 +459,7 @@ func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSe
 	// newSessionRuntime takes ownership of h: on a returned error h is already
 	// closed; on success rt.Close tears it down.
 	failClosedAgentReplay := mode == HarnessReplay
-	rt, err := newSessionRuntime(ctx, p.StoryPath, p.TracePath, h, harnessProfiles, selectedProfile, p.InitialWorld, p.HostCassette, failClosedAgentReplay, p.ImportResolver, chatStore, configureHosts)
+	rt, err := newSessionRuntime(ctx, p.StoryPath, p.TracePath, h, harnessProfiles, selectedProfile, p.InitialWorld, p.HostCassette, failClosedAgentReplay, p.ImportResolver, chatStore, configureHosts, ss.agentLaunchPolicy)
 	if err != nil {
 		// h was already closed inside newSessionRuntime on error.
 		ss.removeOpeningSession(key, sh)

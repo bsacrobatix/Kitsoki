@@ -84,6 +84,13 @@ type WebConfig struct {
 	// confidence bar. Nil ⇒ no binding (the hook command must then receive
 	// --app/--room on the command line). See docs/architecture/prompt-intercept.md.
 	Intercept *InterceptConfig `yaml:"intercept,omitempty"`
+
+	// AgentLaunchPolicy is a machine-local preflight gate for external
+	// host.agent.* and `kitsoki agent launch` subprocesses. It can reject
+	// protected checkout roots/branches and require opened Kitsoki capsules
+	// before a coding-agent CLI is forked.
+	AgentLaunchPolicy *host.AgentLaunchPolicy `yaml:"agent_launch_policy,omitempty"`
+
 	// Mining configures the always-on ambient session miner
 	// (docs/proposals/ambient-session-miner.md). Absent or Enabled=false ⇒ the
 	// miner never starts and nothing in any flow/test path spends LLM. Validated
@@ -415,6 +422,9 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveIntercept(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := cfg.resolveAgentLaunchPolicy(path); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := cfg.resolveRoot(path); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -582,6 +592,9 @@ func mergeConfig(base, local WebConfig) WebConfig {
 	// rule above) rather than field-merging into the base binding.
 	if local.Intercept != nil {
 		out.Intercept = local.Intercept
+	}
+	if local.AgentLaunchPolicy != nil {
+		out.AgentLaunchPolicy = local.AgentLaunchPolicy
 	}
 	if len(local.HarnessProfiles) > 0 {
 		merged := make(map[string]HarnessProfile, len(base.HarnessProfiles)+len(local.HarnessProfiles))
@@ -1034,6 +1047,60 @@ func (cfg *WebConfig) resolveIntercept() error {
 		return fmt.Errorf("intercept.confidence_bar %g is invalid (want a value in (0, 1])", ic.ConfidenceBar)
 	}
 	return nil
+}
+
+func (cfg *WebConfig) resolveAgentLaunchPolicy(configPath string) error {
+	p := cfg.AgentLaunchPolicy
+	if p == nil || !p.Enabled {
+		return nil
+	}
+	base := filepath.Dir(configPath)
+	if base == "" {
+		base = "."
+	}
+	baseAbs, err := filepath.Abs(base)
+	if err != nil {
+		return fmt.Errorf("agent_launch_policy: resolve config dir: %w", err)
+	}
+	baseAbs = filepath.Clean(baseAbs)
+	if len(p.ProtectedRoots) == 0 {
+		p.ProtectedRoots = []string{baseAbs}
+	} else {
+		roots, err := resolvePolicyPaths(baseAbs, p.ProtectedRoots)
+		if err != nil {
+			return fmt.Errorf("agent_launch_policy.protected_roots: %w", err)
+		}
+		p.ProtectedRoots = roots
+	}
+	if len(p.AllowedRoots) > 0 {
+		roots, err := resolvePolicyPaths(baseAbs, p.AllowedRoots)
+		if err != nil {
+			return fmt.Errorf("agent_launch_policy.allowed_roots: %w", err)
+		}
+		p.AllowedRoots = roots
+	}
+	normalized := p.Normalized()
+	*p = normalized
+	return nil
+}
+
+func resolvePolicyPaths(base string, paths []string) ([]string, error) {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return nil, fmt.Errorf("entries must be non-empty")
+		}
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(base, p)
+		}
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, filepath.Clean(abs))
+	}
+	return out, nil
 }
 
 func contains(ss []string, s string) bool {
