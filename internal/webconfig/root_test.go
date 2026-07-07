@@ -208,6 +208,46 @@ dev_story_profile:
 	}
 }
 
+func TestLoadRoot_LocalRootOverrideWinsOverProjectProfile(t *testing.T) {
+	root := writableRepoRoot(t)
+	dir, err := os.MkdirTemp(root, "wc-profile-local-override-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	if err := os.MkdirAll(filepath.Join(dir, ".kitsoki"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ".kitsoki.yaml")
+	if err := os.WriteFile(path, []byte("story_dirs: [./stories]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	local := `root:
+  overrides:
+    world:
+      ticket_repo: bsacrobatix/Kitsoki
+`
+	if err := os.WriteFile(filepath.Join(dir, ".kitsoki.local.yaml"), []byte(local), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	profile := `schema: project-profile/v1
+dev_story_profile:
+  docs:
+    ticket_repo: constructorfabric/Kitsoki
+`
+	if err := os.WriteFile(filepath.Join(dir, ".kitsoki", "project-profile.yaml"), []byte(profile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load profile root with local override: %v", err)
+	}
+	spec := cfg.Root.RootSpec()
+	if spec.World["ticket_repo"] != "bsacrobatix/Kitsoki" {
+		t.Fatalf("local root override should win over profile ticket_repo: %+v", spec.World)
+	}
+}
+
 func TestLoadRoot_FailFast(t *testing.T) {
 	root := writableRepoRoot(t)
 

@@ -593,6 +593,9 @@ func samePath(a, b string) bool {
 // mergeConfig deep-merges a local override onto a base config, local-wins:
 //   - story_dirs and default_profile are scalars/lists — a non-empty local value
 //     replaces the base value; an absent local value leaves the base untouched.
+//   - root overrides merge with the same profile-vs-explicit precedence used by
+//     project profiles, so local root.overrides can retarget one world key
+//     without restating the whole implicit dev-story root.
 //   - harness_profiles merge BY PROFILE NAME: profiles only in base survive,
 //     profiles in local are added, and a profile present in both is replaced
 //     WHOLE by the local one. (Field-level merging within a profile is
@@ -608,6 +611,9 @@ func mergeConfig(base, local WebConfig) WebConfig {
 	}
 	if local.ProjectProfile != "" {
 		out.ProjectProfile = local.ProjectProfile
+	}
+	if local.Root != nil {
+		out.Root = mergeRootConfig(base.Root, local.Root)
 	}
 	// The intercept binding is a single coherent block, so the local file
 	// replaces it whole (matching the per-profile "restate, don't field-merge"
