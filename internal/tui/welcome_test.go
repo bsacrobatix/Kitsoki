@@ -72,6 +72,7 @@ func TestStartupNoticePrintsAtStartup(t *testing.T) {
 	rm, _ := tuipkg.ExtractRootModel(m)
 	pending := strings.Join(tuipkg.PendingTranscriptForTest(rm), "\n")
 	require.Contains(t, pending, "project files may need refresh")
+	require.Contains(t, pending, "!")
 }
 
 func TestStartupNoticePrintsAfterInitialView(t *testing.T) {

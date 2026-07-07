@@ -12,7 +12,9 @@
         :key="warning.id"
         class="home__setup-warning"
         data-testid="setup-warning"
+        role="alert"
       >
+        <div class="home__setup-mark" aria-hidden="true" data-testid="setup-warning-mark">!</div>
         <div class="home__setup-copy">
           <h2 class="home__setup-title" data-testid="setup-warning-title">{{ warning.title }}</h2>
           <p class="home__setup-body" data-testid="setup-warning-body">{{ warning.body }}</p>
@@ -530,14 +532,29 @@ function errMsg(e: unknown): string {
 }
 
 .home__setup-warning {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: flex-start;
-  justify-content: space-between;
   gap: 1rem;
-  border: 1px solid color-mix(in srgb, var(--k-warning, #f59e0b) 55%, var(--k-border, #1e293b));
-  background: color-mix(in srgb, var(--k-warning, #f59e0b) 10%, var(--k-bg-widget, #111827));
+  border: 1px solid color-mix(in srgb, #f97316 72%, #ef4444);
+  background: color-mix(in srgb, #f97316 22%, var(--k-bg-widget, #111827));
   border-radius: 0.5rem;
   padding: 1rem;
+  box-shadow: inset 4px 0 0 color-mix(in srgb, #f97316 70%, #ef4444);
+}
+
+.home__setup-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, #f97316 76%, #ef4444);
+  color: #111827;
+  font-size: 0.95rem;
+  font-weight: 900;
+  line-height: 1;
 }
 
 .home__setup-copy {
@@ -545,7 +562,7 @@ function errMsg(e: unknown): string {
 }
 
 .home__setup-title {
-  color: var(--k-fg, #e2e8f0);
+  color: #fdba74;
   font-size: 0.95rem;
   font-weight: 700;
   margin-bottom: 0.35rem;
@@ -561,7 +578,7 @@ function errMsg(e: unknown): string {
 .home__setup-command {
   display: inline-block;
   max-width: 100%;
-  color: var(--k-fg-code, #7dd3fc);
+  color: #fed7aa;
   font-size: 0.76rem;
   white-space: normal;
   word-break: break-word;
@@ -719,20 +736,21 @@ function errMsg(e: unknown): string {
 
 .home__btn--warning {
   flex: 0 0 auto;
-  background: var(--k-warning, #f59e0b);
+  background: #f97316;
   color: #111827;
 }
 
 .home__btn--warning:hover:not(:disabled) {
-  background: #fbbf24;
+  background: #fb923c;
 }
 
 @media (max-width: 640px) {
   .home__setup-warning {
-    flex-direction: column;
+    grid-template-columns: auto minmax(0, 1fr);
   }
 
   .home__btn--warning {
+    grid-column: 1 / -1;
     width: 100%;
   }
 }

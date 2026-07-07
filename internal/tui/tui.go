@@ -905,7 +905,7 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 
 func appendStartupNotices(m *RootModel) {
 	for _, notice := range m.startupNotices {
-		m.transcript.AppendSystem(notice)
+		m.transcript.AppendStartupNotice(notice)
 	}
 }
 

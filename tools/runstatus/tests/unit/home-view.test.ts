@@ -151,6 +151,7 @@ describe("HomeView", () => {
     await flushPromises();
 
     expect(wrapper.find("[data-testid='setup-warning-title']").text()).toContain("run_as_user");
+    expect(wrapper.find("[data-testid='setup-warning-mark']").text()).toBe("!");
     expect(wrapper.find("[data-testid='setup-warning-command']").text()).toContain(
       "kitsoki run @kitsoki/run-as-user-setup"
     );
