@@ -73,6 +73,8 @@ type standaloneCodexAgent struct {
 	MCPServers            map[string]any
 }
 
+const codexBypassApprovalsAndSandboxFlag = "--dangerously-bypass-approvals-and-sandbox"
+
 func agentLaunchCmd() *cobra.Command {
 	var opts agentLaunchOptions
 	cmd := &cobra.Command{
@@ -354,7 +356,7 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 	}
 	if interactive {
 		prompt := composeLaunchPrompt(agent.DeveloperInstructions, task)
-		command := append([]string{bin}, buildInteractiveCodexArgs(model, effort, agent.SandboxMode, workingDir, opts.AddDirs, agent.MCPServers, prompt)...)
+		command := append([]string{bin}, buildInteractiveCodexArgs(model, effort, workingDir, opts.AddDirs, agent.MCPServers, prompt)...)
 		return agentLaunchPlan{
 			AgentFile:    agentPath,
 			Agent:        opts.AgentName,
@@ -509,7 +511,7 @@ func runAgentLaunchPlan(ctx context.Context, cmd *cobra.Command, plan agentLaunc
 	return err
 }
 
-func buildInteractiveCodexArgs(model, effort, sandboxMode, workingDir string, addDirs []string, mcpServers map[string]any, prompt string) []string {
+func buildInteractiveCodexArgs(model, effort, workingDir string, addDirs []string, mcpServers map[string]any, prompt string) []string {
 	var args []string
 	if m := launchModelForBackend("codex", model); strings.TrimSpace(m) != "" {
 		args = append(args, "-m", m)
@@ -517,9 +519,7 @@ func buildInteractiveCodexArgs(model, effort, sandboxMode, workingDir string, ad
 	if strings.TrimSpace(effort) != "" {
 		args = append(args, "-c", "model_reasoning_effort="+launchTOMLString(effort))
 	}
-	if strings.TrimSpace(sandboxMode) != "" {
-		args = append(args, "--sandbox", sandboxMode)
-	}
+	args = append(args, codexBypassApprovalsAndSandboxFlag)
 	if strings.TrimSpace(workingDir) != "" {
 		args = append(args, "-C", workingDir)
 	}
@@ -552,6 +552,7 @@ func buildRawInteractiveCodexArgs(model, effort, workingDir string, addDirs []st
 	if strings.TrimSpace(effort) != "" {
 		args = append(args, "-c", "model_reasoning_effort="+launchTOMLString(effort))
 	}
+	args = append(args, codexBypassApprovalsAndSandboxFlag)
 	if strings.TrimSpace(workingDir) != "" {
 		args = append(args, "-C", workingDir)
 	}
