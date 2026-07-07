@@ -9,6 +9,7 @@ package studio
 //   - session.drive   — free text → orch.Turn (the ONE interpretive seam).
 //   - session.submit  — a chosen intent + slots → orch.SubmitDirect.
 //   - session.continue— missing slots for a pending clarify → orch.ContinueTurn.
+//   - session.drive_operation — autonomously advance an active operation handle.
 //   - session.teleport— inbox notification -> orch.Teleport, marking it read.
 //   - session.inspect — state / world / allowed_intents / last_view / jobs / inbox / last_turns.
 //   - session.command — run a safe TUI slash command and return its frame.
@@ -92,6 +93,11 @@ func (srv *Server) registerSessionTools() {
 		Name:        "session.submit",
 		Description: "Submit a chosen intent (a menu pick) directly, with no routing. {handle, intent, slots?, cols?, rows?, async_after_ms?}. Returns {outcome, frame}, {awaiting_operator}, or {running}; when running is returned, poll session.status until running disappears. The frame does NOT carry world — read it with session.world (one value or the key list) or session.inspect (full snapshot).",
 	}, srv.handleSessionSubmit)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.drive_operation",
+		Description: "Drive the active autonomous operation handle without routing free text. {handle, cols?, rows?, async_after_ms?}. Returns {operation_drive, outcome, frame} when settled, or {running}; when running is returned, poll session.status until running disappears. Stops at terminal/waiting handles, non-autonomous policies, clarification/rejection, or when no safe driver intent exists.",
+	}, srv.handleSessionDriveOperation)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.continue",
@@ -219,6 +225,14 @@ type SessionSubmitArgs struct {
 	AsyncAfterMS int            `json:"async_after_ms,omitempty"`
 }
 
+// SessionDriveOperationArgs is the input to session.drive_operation.
+type SessionDriveOperationArgs struct {
+	Handle       string `json:"handle"`
+	Cols         int    `json:"cols,omitempty"`
+	Rows         int    `json:"rows,omitempty"`
+	AsyncAfterMS int    `json:"async_after_ms,omitempty"`
+}
+
 // SessionContinueArgs is the input to session.continue.
 type SessionContinueArgs struct {
 	Handle       string         `json:"handle"`
@@ -292,6 +306,9 @@ type TurnResponse struct {
 	OK      bool        `json:"ok"`
 	Outcome TurnResult  `json:"outcome"`
 	Frame   FrameResult `json:"frame"`
+	// OperationDrive is present only for session.drive_operation and summarizes
+	// the autonomous driver loop that produced Outcome/Frame.
+	OperationDrive *OperationDriveResult `json:"operation_drive,omitempty"`
 	// AwaitingOperator is non-nil when the turn paused on an operator-ask (the
 	// fallback path). Outcome/Frame are zero in that case — the turn has not
 	// settled yet.
@@ -300,6 +317,13 @@ type TurnResponse struct {
 	// Poll session.status/session.inspect or the trace; the session model is
 	// folded as soon as the background turn settles.
 	Running *RunningDrive `json:"running,omitempty"`
+}
+
+// OperationDriveResult is the wire summary for one explicit operation drive.
+type OperationDriveResult struct {
+	Turns      int    `json:"turns"`
+	StopReason string `json:"stop_reason,omitempty"`
+	LastIntent string `json:"last_intent,omitempty"`
 }
 
 // AwaitingOperator is the suspend/resume status carried on a session.drive /
@@ -541,6 +565,9 @@ func (srv *Server) handleSessionAnswer(
 		return nil, awaitingResponse(pq), nil
 	}
 	progress.Done(ctx, args.Handle, turnOutcomeState(res.outcome))
+	if res.operationDrive != nil {
+		return nil, operationDriveResponse(res), nil
+	}
 	return nil, turnResponse(res.outcome, res.frame, res.err), nil
 }
 
@@ -607,6 +634,38 @@ func (srv *Server) handleSessionSubmit(
 	}
 	progress.Done(ctx, args.Handle, turnOutcomeState(res.outcome))
 	return nil, turnResponse(res.outcome, res.frame, res.err), nil
+}
+
+func (srv *Server) handleSessionDriveOperation(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args SessionDriveOperationArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	progress := newMCPProgress(req, "session.drive_operation")
+	progress.Start(ctx, args.Handle)
+	if progress != nil {
+		ctx = host.WithStreamSink(ctx, progress)
+	}
+	rt, rerr := srv.resolveRuntime(args.Handle)
+	if rerr != nil {
+		return rerr, nil, nil
+	}
+	cols, rows := geometry(args.Cols, args.Rows)
+	wait := driveAsyncAfter(args.AsyncAfterMS)
+	res, pq, turnDone, running, err := rt.driveOperationSuspendable(ctx, cols, rows, wait)
+	if err != nil {
+		progress.Error(ctx, args.Handle, err)
+		return buildToolError(ErrBadRequest, fmt.Sprintf("session.drive_operation: %v", err)), nil, nil
+	}
+	if running != nil {
+		return nil, runningResponse(args.Handle, "operation", running), nil
+	}
+	if !turnDone {
+		progress.AwaitingOperator(ctx, args.Handle)
+		return nil, awaitingResponse(pq), nil
+	}
+	progress.Done(ctx, args.Handle, turnOutcomeState(res.outcome))
+	return nil, operationDriveResponse(res), nil
 }
 
 func (srv *Server) handleSessionContinue(
@@ -1301,6 +1360,18 @@ func turnResponse(out *orchestrator.TurnOutcome, frame tui.Frame, turnErr error)
 		}
 	}
 	return TurnResponse{OK: turnErr == nil, Outcome: tr, Frame: frameResult(frame)}
+}
+
+func operationDriveResponse(res turnResult) TurnResponse {
+	out := turnResponse(res.outcome, res.frame, res.err)
+	if res.operationDrive != nil {
+		out.OperationDrive = &OperationDriveResult{
+			Turns:      res.operationDrive.Turns,
+			StopReason: res.operationDrive.StopReason,
+			LastIntent: res.operationDrive.LastIntent,
+		}
+	}
+	return out
 }
 
 // frameResult projects a tui.Frame onto the wire shape. The frame NEVER carries
