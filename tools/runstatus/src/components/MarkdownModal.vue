@@ -190,6 +190,10 @@ function onBackdropClick(e: MouseEvent) {
 .mm-md :deep(.md-hr) { margin: 1.2em 0; border: none; border-top: 1px solid var(--k-paper-border, #e5e7eb); }
 .mm-md :deep(.md-pre) { margin: 0 0 0.85em; padding: 0.9em 1.1em; background: var(--k-bg-deep, #1b1f27); color: var(--k-fg, #e6e9ef); border-radius: 8px; overflow-x: auto; font-size: 13.5px; line-height: 1.5; }
 .mm-md :deep(.md-pre code) { background: none; padding: 0; color: inherit; font-size: inherit; }
+.mm-md :deep(.md-table) { width: 100%; border-collapse: collapse; margin: 0 0 0.85em; font-size: 14px; line-height: 1.45; }
+.mm-md :deep(.md-table th),
+.mm-md :deep(.md-table td) { border: 1px solid var(--k-paper-border, #d1d5db); padding: 0.4em 0.6em; vertical-align: top; }
+.mm-md :deep(.md-table th) { background: var(--k-bg-widget, #f6f7f9); color: var(--k-paper-fg, #11151c); font-weight: 650; }
 .mm-md :deep(code) { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; background: var(--k-bg-input, #f0f1f4); border-radius: 4px; padding: 0.08em 0.35em; font-size: 0.9em; color: #b3306b; }
 .mm-md :deep(strong) { font-weight: 700; }
 .mm-md :deep(em) { font-style: italic; }

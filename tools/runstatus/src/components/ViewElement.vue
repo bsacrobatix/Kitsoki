@@ -6,6 +6,7 @@ import type { ViewElement } from "../types.js";
 import { createDataSource } from "../data/source.js";
 import type { AnnotationAnchor, MediaKind } from "../lib/annotationAnchor.js";
 import { serializeAnchor } from "../lib/annotationAnchor.js";
+import { renderMarkdownDocument } from "../lib/markdown.js";
 import MarkdownModal from "./MarkdownModal.vue";
 import ArtifactAnnotator from "./ArtifactAnnotator.vue";
 import { useRunStore } from "../stores/run.js";
@@ -490,6 +491,9 @@ function segments(para: string): Seg[] {
 
 const items = computed(() => el.value.Items ?? []);
 const pairs = computed(() => el.value.Pairs ?? []);
+const renderedTemplateMarkdown = computed(() =>
+  renderMarkdownDocument(el.value.Source ?? "")
+);
 
 /** Path currently open in the markdown modal (null = closed). */
 const openedPath = ref<string | null>(null);
@@ -564,8 +568,8 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
 </script>
 
 <template>
-  <!-- prose / template: paragraphs with minimal inline-code rendering. -->
-  <template v-if="el.Kind === 'prose' || el.Kind === 'template'">
+  <!-- prose: paragraphs with minimal inline-code rendering. -->
+  <template v-if="el.Kind === 'prose'">
     <p v-for="(para, pi) in paragraphs" :key="pi" class="ve-prose">
       <template v-for="(seg, si) in segments(para)" :key="si">
         <code v-if="seg.kind === 'code'" class="ve-inline-code">{{ seg.text }}</code>
@@ -574,6 +578,13 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
       </template>
     </p>
   </template>
+
+  <div
+    v-else-if="el.Kind === 'template'"
+    class="ve-markdown"
+    data-testid="view-template-markdown"
+    v-html="renderedTemplateMarkdown"
+  ></div>
 
   <h3 v-else-if="el.Kind === 'heading'" class="ve-heading">{{ el.Source }}</h3>
 
@@ -854,6 +865,7 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
 <style scoped>
 :host,
 .ve-prose,
+.ve-markdown,
 .ve-heading,
 .ve-list,
 .ve-kv,
@@ -873,6 +885,36 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
 .ve-prose:last-child {
   margin-bottom: 0;
 }
+
+.ve-markdown {
+  margin: 0 0 0.85em;
+  font-size: 15px;
+}
+
+.ve-markdown :deep(.md-h1) { font-size: 1.45em; font-weight: 700; margin: 0 0 0.55em; color: var(--k-paper-fg, #11151c); }
+.ve-markdown :deep(.md-h2) { font-size: 1.2em; font-weight: 650; margin: 1em 0 0.45em; color: var(--k-paper-fg, #11151c); border-bottom: 1px solid var(--k-paper-border, #e5e7eb); padding-bottom: 0.2em; }
+.ve-markdown :deep(.md-h3) { font-size: 1.05em; font-weight: 650; margin: 0.85em 0 0.35em; color: var(--k-paper-fg, #11151c); }
+.ve-markdown :deep(.md-h4),
+.ve-markdown :deep(.md-h5),
+.ve-markdown :deep(.md-h6) { font-size: 1em; font-weight: 650; margin: 0.75em 0 0.3em; color: var(--k-paper-fg, #1f2430); }
+.ve-markdown :deep(.md-p) { margin: 0 0 0.75em; line-height: 1.6; color: var(--k-paper-fg, #1f2430); }
+.ve-markdown :deep(.md-ul),
+.ve-markdown :deep(.md-ol) { margin: 0 0 0.75em; padding-left: 1.45em; line-height: 1.6; color: var(--k-paper-fg, #1f2430); }
+.ve-markdown :deep(.md-ul li),
+.ve-markdown :deep(.md-ol li) { margin: 0.25em 0; }
+.ve-markdown :deep(.md-blockquote) { margin: 0 0 0.75em; padding: 0.45em 0.85em; border-left: 4px solid var(--k-paper-border, #d1d5db); background: var(--k-bg-widget, #f9fafb); color: var(--k-fg-muted, #4a5160); }
+.ve-markdown :deep(.md-hr) { margin: 1em 0; border: none; border-top: 1px solid var(--k-paper-border, #e5e7eb); }
+.ve-markdown :deep(.md-pre) { margin: 0 0 0.75em; padding: 0.75em 0.9em; background: var(--k-bg-deep, #1b1f27); color: var(--k-fg, #e6e9ef); border-radius: 6px; overflow-x: auto; white-space: pre; font-size: 13px; line-height: 1.5; }
+.ve-markdown :deep(.md-pre code) { background: none; padding: 0; color: inherit; font-size: inherit; }
+.ve-markdown :deep(.md-table) { width: 100%; border-collapse: collapse; margin: 0 0 0.85em; font-size: 14px; line-height: 1.45; }
+.ve-markdown :deep(.md-table th),
+.ve-markdown :deep(.md-table td) { border: 1px solid var(--k-paper-border, #d1d5db); padding: 0.35em 0.55em; vertical-align: top; }
+.ve-markdown :deep(.md-table th) { background: var(--k-bg-widget, #f6f7f9); color: var(--k-paper-fg, #11151c); font-weight: 650; }
+.ve-markdown :deep(code) { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; background: var(--k-bg-input, #f0f1f4); border-radius: 4px; padding: 0.08em 0.35em; font-size: 0.9em; color: var(--k-fg-code, #b3306b); }
+.ve-markdown :deep(strong) { font-weight: 700; }
+.ve-markdown :deep(em) { font-style: italic; }
+.ve-markdown :deep(a) { color: var(--k-fg-accent, #1d4ed8); text-decoration: underline; }
+.ve-markdown :deep(a:hover) { color: #1e40af; }
 
 .ve-inline-code,
 .ve-code code {

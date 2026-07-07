@@ -33,7 +33,7 @@ states:
             Status:           '{% if world.implement_artifact.applied == false %}blocked{% elif world.implement_artifact.summary_title %}applied{% else %}(pending){% endif %}'
             Files:            '{{ world.implement_artifact.files_changed|join:", "|default:"(none recorded)" }}'
       - heading: "Artifact"
-      - code: '{{ world.implement_artifact.summary_markdown|default:"(no implementation body — agent pending or failed)" }}'
+      - template: '{{ world.implement_artifact.summary_markdown|default:"(no implementation body — agent pending or failed)" }}'
       - heading: "Blockers"
         when:  "world.implement_artifact.blockers"
       - code: |

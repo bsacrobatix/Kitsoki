@@ -20,7 +20,7 @@ states:
             Summary: '{{ world.implement_review_artifact.summary_title|default:"(pending)" }}'
             Status:  '{{ world.implement_review_artifact.status|default:"(pending)" }}'
       - heading: "Artifact"
-      - code: '{{ world.implement_review_artifact.summary_markdown|default:"(pending — agent has not returned yet)" }}'
+      - template: '{{ world.implement_review_artifact.summary_markdown|default:"(pending — agent has not returned yet)" }}'
       - choice:
           mode: single
           prompt: "Actions"

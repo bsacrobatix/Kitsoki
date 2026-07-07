@@ -49,7 +49,7 @@ states:
             # attached" rather than silently omitting the row.
             "Editor diagnostics": '{% if world.ide_diagnostics_result.connected %}{{ world.ide_diagnostics|length }}{% else %}no editor attached{% endif %}'
       - heading: "Artifact"
-      - code: '{{ world.validate_artifact.summary_markdown|default:"(pending — agent has not returned yet)" }}'
+      - template: '{{ world.validate_artifact.summary_markdown|default:"(pending — agent has not returned yet)" }}'
       - choice:
           mode: single
           prompt: "Actions"
