@@ -17,7 +17,7 @@
 set -euo pipefail
 
 DEFAULT_WRITABLE_ROOTS=".context .artifacts .temp .claude .kitsoki"
-DEFAULT_TOP_WRITABLE_ROOTS=".worktrees"
+DEFAULT_TOP_WRITABLE_ROOTS=".capsules .worktrees"
 
 usage() {
   cat >&2 <<'EOF'
@@ -39,7 +39,7 @@ Environment:
 
   KITSOKI_PROTECTED_MAIN_TOP_WRITABLE_ROOTS
       Space-separated top-level writable roots that should not be recursed into.
-      Defaults to: .worktrees
+      Defaults to: .capsules .worktrees
 EOF
 }
 

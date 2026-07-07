@@ -93,7 +93,7 @@ BASESTORIES_STAMP := internal/basestories/.embed-stamp
 BASESKILLS_DIR    := internal/baseskills/assets
 BASESKILLS_STAMP  := internal/baseskills/.embed-stamp
 
-.PHONY: all setup setup-visual-qa-deps bootstrap-worktree build build-lean install uninstall test test-full test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff repo-history-capsules oracle-capsules history-smoke history-pending-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
+.PHONY: all setup setup-visual-qa-deps bootstrap-workspace bootstrap-worktree build build-lean install uninstall test test-full test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff repo-history-capsules oracle-capsules history-smoke history-pending-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
 	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local vscode-install-local-in-place check-vscode-code-cli
 
@@ -285,18 +285,21 @@ $(EMBED_INDEX): $(SPA_SOURCES)
 web-clean:
 	rm -f $(EMBED_INDEX)
 
-# bootstrap-worktree is the one-shot setup for a FRESH `git worktree add`
-# checkout: stories/ and the runstatus SPA start as empty .gitkeep placeholders
+# bootstrap-workspace is the one-shot setup for a FRESH clone/capsule checkout:
+# stories/ and the runstatus SPA start as empty .gitkeep placeholders
 # (embed-only dirs, staged by embed-stories/web but gitignored once staged),
 # tools/runstatus/node_modules is gitignored, and the first `go run` in a new
-# worktree compiles cold (slow enough to blow past short test timeouts). Run
-# this once from inside a new worktree, before `go run ./cmd/kitsoki` or any
+# workspace compiles cold (slow enough to blow past short test timeouts). Run
+# this once from inside a new dev workspace before `go run ./cmd/kitsoki` or any
 # Playwright spec.
-bootstrap-worktree: embed-stories web
+bootstrap-workspace: embed-stories web
 	$(call runstatus_pnpm_install,--silent)
-	@echo "bootstrap-worktree: warming shared Go build cache at $(KITSOKI_GOCACHE) (first compile is slow)…"
+	@echo "bootstrap-workspace: warming shared Go build cache at $(KITSOKI_GOCACHE) (first compile is slow)…"
 	@GOCACHE="$(KITSOKI_GOCACHE)" go run $(PKG) --help >/dev/null
-	@echo "worktree bootstrapped — go run/Playwright specs should work now"
+	@echo "workspace bootstrapped — go run/Playwright specs should work now"
+
+# Backward-compatible alias for old local habits and scripts.
+bootstrap-worktree: bootstrap-workspace
 
 # web-dev starts the kitsoki Go backend and the Vite HMR dev server in
 # parallel so edits to tools/runstatus/src/** are reflected instantly without

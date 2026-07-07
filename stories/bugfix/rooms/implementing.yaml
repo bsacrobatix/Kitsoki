@@ -70,10 +70,9 @@ states:
       # — process restart, manual `rm -rf`, a prior aborted create —
       # would fail at sync below with `on_error: idle` and silently
       # bounce. iface.workspace.create is idempotent (returns ok when
-      # the worktree is already registered at our path with our
-      # branch; reattaches an orphaned branch when the dir was
-      # deleted), so calling it here costs nothing in the happy case
-      # and rescues the bounce case.
+      # the managed workspace already exists at our path with our branch), so
+      # calling it here costs nothing in the happy case and rescues the bounce
+      # case.
       # Idempotent re-create: same cut-point precedence as the idle autostart
       # (explicit base_commit, else base_branch) so a bounce-recovery rebuild
       # lands on the same baseline the reproducer used.
@@ -83,6 +82,8 @@ states:
           id:   "{{ world.workspace_id }}"
           name: "{{ world.feature_branch }}"
           base: "{{ world.base_commit != '' ? world.base_commit : world.base_branch }}"
+        bind:
+          workdir: path
         on_error: idle
       # The iface.workspace.sync + iface.vcs.commit are the workspace-
       # side write seams (instance bindings: host.git_worktree / host.git

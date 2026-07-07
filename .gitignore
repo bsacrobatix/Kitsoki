@@ -37,7 +37,10 @@ __pycache__/
 # Claude Code local state
 .claude/
 
-# Git worktrees (local checkouts of feature branches)
+# Managed local development workspaces.
+.capsules/
+
+# Legacy Git worktrees (local checkouts of feature branches)
 .worktrees/
 
 # Per-developer harness-profile overrides, deep-merged on top of the
