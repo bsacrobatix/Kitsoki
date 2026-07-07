@@ -79,6 +79,56 @@ func TestMetaStream_FullThoughtReachesScrollback(t *testing.T) {
 	require.Contains(t, visible, "prompt.md", "tool breadcrumb args must show")
 }
 
+func TestMetaStream_BackendNeutralAssistantMessageReachesScrollback(t *testing.T) {
+	forceTrueColor(t)
+	orch, sid := setupCloak(t)
+	m := buildModel(t, orch, sid)
+	rm, ok := tuipkg.ExtractRootModel(m)
+	require.True(t, ok)
+	rm = resizeForTest(rm, 100, 24)
+	tuipkg.SetModeForTest(&rm, tuipkg.ModeAwaitingLLM)
+	tuipkg.ClearTranscriptPendingForTest(&rm)
+
+	const intro = "I will run the command and report its output."
+	const reason = "The command output confirms the probe path works."
+	const finalAnswer = "It printed hi."
+
+	feed := func(ev host.StreamEvent) {
+		next, _ := rm.Update(tuipkg.MetaStreamMsg{Event: ev})
+		rm, ok = tuipkg.ExtractRootModel(next)
+		require.True(t, ok)
+	}
+
+	feed(host.StreamEvent{Type: "assistant.message", Text: intro})
+	feed(host.StreamEvent{Type: "tool.execution_start", Tool: "shell", Preview: "/bin/zsh -lc 'echo hi'", Tools: []host.StreamToolUse{{Name: "shell", Preview: "/bin/zsh -lc 'echo hi'"}}})
+	feed(host.StreamEvent{Type: "assistant.reasoning", Thinking: reason})
+	feed(host.StreamEvent{Type: "assistant.message", Text: finalAnswer})
+	feed(host.StreamEvent{Type: "result", IsResult: true})
+
+	visible := stripStyles(tuipkg.GetTranscriptContent(rm))
+	require.Contains(t, visible, intro,
+		"codex-style assistant.message narration before a tool must render as thinking")
+	require.Contains(t, visible, "shell",
+		"backend tool-start events must render as tool breadcrumbs")
+	require.Contains(t, visible, reason,
+		"backend reasoning events must render immediately as thinking")
+	require.NotContains(t, visible, finalAnswer,
+		"the terminal assistant.message is the room reply and must not duplicate as thinking")
+
+	if dir := os.Getenv("KITSOKI_TUI_ACTIVITY_ARTIFACT_DIR"); dir != "" {
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		screenANSI := tuipkg.GetTranscriptContent(rm) + "\n" + rm.View()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "backend-neutral-activity.ansi"), []byte(screenANSI), 0o644))
+
+		pngFile, err := os.Create(filepath.Join(dir, "backend-neutral-activity.png"))
+		require.NoError(t, err)
+		err = shot.RenderPNG(pngFile, screenANSI, shot.Options{Cols: 100, Rows: 24})
+		closeErr := pngFile.Close()
+		require.NoError(t, err)
+		require.NoError(t, closeErr)
+	}
+}
+
 // TestMetaStream_FinalAnswerNotShownAsThinking pins that the model's
 // FINAL response — the last text-only assistant message before the
 // terminal `result` event — is NOT echoed into the transcript as

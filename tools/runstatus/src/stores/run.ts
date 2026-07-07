@@ -596,6 +596,17 @@ export const useRunStore = defineStore("run", () => {
     onRouting?: (routing: RoutingInfo, turn?: number) => void
   ): Promise<{ result: TurnResult; streamedText: string; stream: StreamItem[] }> {
     pendingStream.value = [];
+    let pendingNarration = "";
+    const flushNarration = (): void => {
+      if (!pendingNarration.trim()) {
+        pendingNarration = "";
+        return;
+      }
+      const next = pendingStream.value.slice();
+      appendThought(next, pendingNarration.trimEnd());
+      pendingStream.value = next;
+      pendingNarration = "";
+    };
     let traceRefreshInFlight = false;
     const refreshTrace = () => {
       if (traceRefreshInFlight) return;
@@ -609,17 +620,25 @@ export const useRunStore = defineStore("run", () => {
     try {
       const result = await live.turnStream(sessionId, method, params, (ev) => {
         refreshTrace();
-        // In the MAIN chat the reply is the room view carried by the final
-        // result, so extended-thinking ("think") and narration ("delta")
-        // frames are the same thing to this feed: intermediate reasoning.
-        // (The meta overlay treats them differently — its reply IS the
-        // narration — see stores/meta.ts.) appendThought merges consecutive
-        // thoughts; reassigning the array keeps the ref reactive.
-        if ((ev.type === "delta" || ev.type === "think") && ev.text) {
+        // Extended thinking is never the reply, so it renders immediately.
+        // Plain narration is ambiguous: it may be an intermediate thought, or
+        // it may be the final answer that the done frame/result will present.
+        // Hold each narration delta until later activity proves it
+        // intermediate, mirroring the TUI and meta overlay deferral.
+        if (ev.type === "think" && ev.text) {
+          flushNarration();
           const next = pendingStream.value.slice();
           appendThought(next, ev.text);
           pendingStream.value = next;
+        } else if (ev.type === "delta" && ev.text) {
+          if (pendingNarration && !/\s$/.test(pendingNarration)) {
+            flushNarration();
+            pendingNarration = ev.text;
+          } else {
+            pendingNarration += ev.text;
+          }
         } else if (ev.type === "tool" && ev.tool) {
+          flushNarration();
           const next = pendingStream.value.slice();
           appendTool(next, ev.tool, ev.preview ?? "");
           pendingStream.value = next;
@@ -641,10 +660,12 @@ export const useRunStore = defineStore("run", () => {
       const streamedText = stream
         .flatMap((it) => (it.kind === "thinking" ? [it.text] : []))
         .join("\n\n");
+      const fallbackText = pendingNarration.trim() || streamedText;
       await backfillTurnTrace(live, sessionId, result.turn_number ?? 0);
-      return { result, streamedText, stream };
+      return { result, streamedText: fallbackText, stream };
     } finally {
       globalThis.clearInterval(traceRefreshTimer);
+      pendingNarration = "";
       pendingStream.value = [];
     }
   }
