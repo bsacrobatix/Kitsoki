@@ -25,19 +25,20 @@ import (
 // leaving the current flow.
 func renderWorkBlock(m RootModel, args []string) (RootModel, string) {
 	r := blocks.New(m.transcript.width, m.currentTheme())
+	operationRows := workRowsForCurrentOperation(m)
 	proposalRows := workRowsForProposals(m.mineState())
 	traceProposalRows, traceErr := workRowsForTraceMiningProposals(m.traceHistory, workRowIDs(proposalRows))
 	if traceErr != nil {
 		traceProposalRows = nil
 	}
 	proposalRows = append(proposalRows, traceProposalRows...)
-	if m.jobStore == nil && m.chatStore == nil && m.traceHistory == nil && len(proposalRows) == 0 {
+	if m.jobStore == nil && m.chatStore == nil && m.traceHistory == nil && len(proposalRows) == 0 && len(operationRows) == 0 {
 		return m, r.SlashOutput("(work: no job or chat store wired - pass --db for async work tracking)")
 	}
 	allSessions := workAllSessions(args)
 
 	ctx := context.Background()
-	var rows []workRow
+	rows := append([]workRow{}, operationRows...)
 	var errs []string
 	if traceErr != nil {
 		errs = append(errs, "trace proposals: "+traceErr.Error())
@@ -151,6 +152,73 @@ func workAllSessions(args []string) bool {
 		}
 	}
 	return false
+}
+
+func workRowsForCurrentOperation(m RootModel) []workRow {
+	if m.orch == nil {
+		return nil
+	}
+	handle, ok := operationRunHandle(m.orch.CurrentWorld(m.sid).Vars[app.OperationRunWorldKey])
+	if !ok {
+		return nil
+	}
+	status := operationRunString(handle, "status")
+	if status == "" {
+		status = "running"
+	}
+	id := operationRunString(handle, "operation_id")
+	if id == "" {
+		id = operationRunString(handle, "policy_id")
+	}
+	return []workRow{{
+		Kind:     "operation",
+		Status:   status,
+		Title:    operationRunTitle(handle),
+		Hint:     operationRunWorkHint(handle, status),
+		Priority: workOperationPriority(status),
+		ID:       id,
+	}}
+}
+
+func operationRunTitle(handle map[string]any) string {
+	for _, key := range []string{"title", "policy_id", "operation_id"} {
+		if value := operationRunString(handle, key); value != "" {
+			return value
+		}
+	}
+	return "operation"
+}
+
+func operationRunWorkHint(handle map[string]any, status string) string {
+	var parts []string
+	switch status {
+	case "waiting":
+		if reason := operationRunString(handle, "stop_reason"); reason != "" {
+			parts = append(parts, "reason "+reason)
+		}
+		if detail := operationRunString(handle, "stop_detail"); detail != "" {
+			parts = append(parts, detail)
+		}
+	case "completed":
+		if terminal := operationRunString(handle, "terminal_state"); terminal != "" {
+			parts = append(parts, "terminal "+terminal)
+		}
+		if artifact := operationRunString(handle, "terminal_artifact"); artifact != "" {
+			parts = append(parts, "artifact "+artifact)
+		}
+	default:
+		from := operationRunString(handle, "from")
+		to := operationRunString(handle, "to")
+		if from != "" && to != "" {
+			parts = append(parts, from+" -> "+to)
+		} else if intent := operationRunString(handle, "entry_intent"); intent != "" {
+			parts = append(parts, "intent "+intent)
+		}
+	}
+	if len(parts) == 0 {
+		return "current session"
+	}
+	return strings.Join(parts, "; ")
 }
 
 type workRow struct {
@@ -647,6 +715,21 @@ func workDrivePriority(status chats.DriveStatus) int {
 		return 68
 	default:
 		return 65
+	}
+}
+
+func workOperationPriority(status string) int {
+	switch status {
+	case "waiting":
+		return 98
+	case "failed":
+		return 94
+	case "running":
+		return 72
+	case "completed":
+		return 55
+	default:
+		return 60
 	}
 }
 
