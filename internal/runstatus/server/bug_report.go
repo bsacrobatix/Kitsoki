@@ -39,17 +39,18 @@ import (
 	"kitsoki/internal/runstatus/harscrub"
 )
 
-// scrubOptions is the single production redaction config for web-filed bug
+// BugScrubOptions is the single production redaction config for filed bug
 // evidence: $HOME path substitution plus the built-in credential patterns. Used
-// for the HAR (preview + report) and every client-supplied free-text payload
-// (rrweb, console, errors) so nothing reaches the committed artifacts on a
-// $HOME-only pass.
-func scrubOptions() harscrub.ScrubOptions {
+// for HAR/rrweb/console/error evidence on the web path and for MCP-filed session
+// evidence so nothing reaches committed artifacts on a $HOME-only pass.
+func BugScrubOptions() harscrub.ScrubOptions {
 	return harscrub.ScrubOptions{
 		Home:           os.Getenv("HOME"),
 		SecretPatterns: harscrub.DefaultSecretPatterns(),
 	}
 }
+
+func scrubOptions() harscrub.ScrubOptions { return BugScrubOptions() }
 
 // bugPreview handles runstatus.bug.preview. It snapshots + scrubs the server's
 // HAR ring buffer right now, HOLDS that exact scrubbed snapshot under a fresh

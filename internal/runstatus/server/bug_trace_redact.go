@@ -79,10 +79,14 @@ func (s *Server) decodeTraceEvidence(params map[string]any, opts harscrub.ScrubO
 	if err != nil || len(snap.Events) == 0 {
 		return nil
 	}
-	return redactedTraceJSONL(snap.Events, opts)
+	return RedactedTraceJSONL(snap.Events, opts)
 }
 
-func redactedTraceJSONL(events []runstatus.TraceEvent, opts harscrub.ScrubOptions) []byte {
+// RedactedTraceJSONL renders trace events as JSONL with user free text aliased
+// and credential/home-path patterns scrubbed. It is shared by web-filed bug
+// reports and MCP issue filing so every bug path applies the same trace privacy
+// rules.
+func RedactedTraceJSONL(events []runstatus.TraceEvent, opts harscrub.ScrubOptions) []byte {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
@@ -94,6 +98,13 @@ func redactedTraceJSONL(events []runstatus.TraceEvent, opts harscrub.ScrubOption
 		}
 	}
 	return buf.Bytes()
+}
+
+// RedactedTraceValue applies the trace redaction rules to a structured value.
+// It is useful for sibling evidence such as a session world snapshot, where
+// arbitrary string fields should not be published verbatim.
+func RedactedTraceValue(key string, v any, opts harscrub.ScrubOptions) any {
+	return newTraceRedactor(opts).redactTraceValue(key, v)
 }
 
 type traceRedactor struct {

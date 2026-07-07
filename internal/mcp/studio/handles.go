@@ -597,6 +597,35 @@ func (ss *StudioSession) DrivingSessions() []*SessionHandle {
 	return out
 }
 
+// CurrentDrivingSession returns the most recently opened live driving handle.
+// If that marker is empty or stale, a single open driving session is treated as
+// the current session. Multiple open sessions with no current marker are
+// intentionally ambiguous.
+func (ss *StudioSession) CurrentDrivingSession() (*SessionHandle, bool) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	if ss.currentSID != "" {
+		if sh, ok := ss.sessionByIDLocked(ss.currentSID); ok && sh.Runtime != nil {
+			return sh, true
+		}
+	}
+	var only *SessionHandle
+	for _, sh := range ss.sessions {
+		if sh.Runtime == nil {
+			continue
+		}
+		if only != nil {
+			return nil, false
+		}
+		only = sh
+	}
+	if only != nil {
+		return only, true
+	}
+	return nil, false
+}
+
 // sortSessionKeys orders handle keys so auto-assigned "s<N>" keys sort
 // numerically (s2 before s10) and caller-supplied keys sort lexically after.
 // Stable, deterministic output for tests and human reading.
