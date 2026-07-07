@@ -118,6 +118,30 @@
         {{ reloadWarning }}
       </div>
 
+      <div
+        v-if="operationRun"
+        class="iv__operation"
+        :class="operationRunClass"
+        data-testid="operation-run-banner"
+        role="status"
+        :data-operation-status="operationRun.status"
+      >
+        <span class="iv__operation-dot" aria-hidden="true"></span>
+        <span class="iv__operation-label">Operation</span>
+        <strong class="iv__operation-title" data-testid="operation-run-title">
+          {{ operationRun.title }}
+        </strong>
+        <span class="iv__operation-status" data-testid="operation-run-status">
+          {{ operationRunStatusLabel }}
+        </span>
+        <span v-if="operationRunRoute" class="iv__operation-route">
+          {{ operationRunRoute }}
+        </span>
+        <span v-if="operationRunArtifact" class="iv__operation-artifact" data-testid="operation-run-artifact">
+          {{ operationRunArtifact }}
+        </span>
+      </div>
+
       <!-- Main row: chat (left) | trace (right).
            Browser: chat | resizable/collapsible diagram+timeline trace column.
            Embed (VS Code): chat ONLY — trace + graph live in their own dockable
@@ -721,6 +745,32 @@ function toggleTracePet() {
 }
 
 const appId = computed(() => store.appDef?.id ?? store.appDef?.name ?? "kitsoki");
+const operationRun = computed(() => store.operationRun);
+const operationRunClass = computed(() => ({
+  "iv__operation--completed": operationRun.value?.status === "completed",
+  "iv__operation--failed": operationRun.value?.status === "failed",
+  "iv__operation--waiting": operationRun.value?.status === "waiting",
+}));
+const operationRunStatusLabel = computed(() => {
+  const run = operationRun.value;
+  if (!run) return "";
+  const status = run.status || "running";
+  if (run.runInBackground && status === "running") return "running in background";
+  return status.replace(/_/g, " ");
+});
+const operationRunRoute = computed(() => {
+  const run = operationRun.value;
+  if (!run) return "";
+  if (run.status === "completed" && run.terminalState) {
+    return `terminal ${run.terminalState}`;
+  }
+  if (run.from && run.to) return `${run.from} -> ${run.to}`;
+  return run.entryIntent ? `intent ${run.entryIntent}` : "";
+});
+const operationRunArtifact = computed(() => {
+  const artifact = operationRun.value?.terminalArtifact;
+  return artifact ? `artifact ${artifact}` : "";
+});
 const chatColumnStyle = computed(() => {
   if (embed.value || traceCollapsed.value) return {};
   return { flex: `1 1 ${100 - traceWidthPercent.value}%` };
@@ -1658,6 +1708,105 @@ function onEventSelect(index: number): void {
   50% {
     opacity: 1;
   }
+}
+
+.iv__operation {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.34rem 1rem;
+  font-size: 0.78rem;
+  background: #0f172a;
+  border-bottom: 1px solid #334155;
+  color: var(--k-fg, #e2e8f0);
+  min-width: 0;
+}
+
+.iv__operation-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.16);
+}
+
+.iv__operation-label {
+  color: var(--k-fg-muted, #94a3b8);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.iv__operation-title,
+.iv__operation-route,
+.iv__operation-artifact {
+  min-width: 4rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iv__operation-title {
+  flex: 0 1 auto;
+}
+
+.iv__operation-route {
+  flex: 1 1 10rem;
+}
+
+.iv__operation-status {
+  border: 1px solid #0e7490;
+  border-radius: 999px;
+  color: #bae6fd;
+  background: #082f49;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.08rem 0.45rem;
+  white-space: nowrap;
+}
+
+.iv__operation-route,
+.iv__operation-artifact {
+  color: var(--k-fg-muted, #94a3b8);
+  font-size: 0.72rem;
+}
+
+.iv__operation--completed .iv__operation-dot {
+  background: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.16);
+}
+
+.iv__operation--completed .iv__operation-status {
+  border-color: #15803d;
+  background: #052e16;
+  color: #bbf7d0;
+}
+
+.iv__operation--failed .iv__operation-dot {
+  background: #f87171;
+  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.16);
+}
+
+.iv__operation--failed .iv__operation-status {
+  border-color: #991b1b;
+  background: #450a0a;
+  color: #fecaca;
+}
+
+.iv__operation--waiting .iv__operation-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.16);
+}
+
+.iv__operation--waiting .iv__operation-status {
+  border-color: #b45309;
+  background: #451a03;
+  color: #fde68a;
 }
 
 .iv__main {

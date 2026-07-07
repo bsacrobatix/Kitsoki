@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/storyauthoring"
 	"kitsoki/internal/tui/blocks"
 )
@@ -212,6 +214,9 @@ func composeChromeParts(m RootModel, width int, promptLine, bannerLine string) [
 	if bannerLine != "" {
 		parts = append(parts, bannerLine)
 	}
+	if operationLine := operationRunChromeLine(m, width); operationLine != "" {
+		parts = append(parts, operationLine)
+	}
 	parts = append(parts, r.Divider())
 	parts = append(parts, promptLine)
 	if completion := m.slashCompletionView(width); completion != "" {
@@ -234,6 +239,98 @@ func composeChromeParts(m RootModel, width int, promptLine, bannerLine string) [
 		Render(hint))
 	parts = append(parts, r.StatusRow(footerFrameworkLine(m), modeLabel(m.mode)))
 	return parts
+}
+
+func operationRunChromeLine(m RootModel, width int) string {
+	if m.orch == nil {
+		return ""
+	}
+	text := operationRunChromeText(m.orch.CurrentWorld(m.sid).Vars)
+	if text == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().
+		Foreground(colorMuted).
+		Render(truncateFrameCell("operation: "+text, width))
+}
+
+func operationRunChromeText(vars map[string]any) string {
+	if len(vars) == 0 {
+		return ""
+	}
+	handle, ok := operationRunHandle(vars[app.OperationRunWorldKey])
+	if !ok {
+		return ""
+	}
+
+	operationID := operationRunString(handle, "operation_id")
+	policyID := operationRunString(handle, "policy_id")
+	title := operationRunString(handle, "title")
+	if title == "" {
+		title = policyID
+	}
+	if title == "" {
+		title = operationID
+	}
+	if title == "" {
+		title = "operation"
+	}
+
+	status := operationRunString(handle, "status")
+	if status == "" {
+		status = "running"
+	}
+	parts := []string{title, status}
+	switch status {
+	case "completed":
+		if terminal := operationRunString(handle, "terminal_state"); terminal != "" {
+			parts = append(parts, "terminal "+terminal)
+		}
+		if artifact := operationRunString(handle, "terminal_artifact"); artifact != "" {
+			parts = append(parts, "artifact "+artifact)
+		}
+	default:
+		from := operationRunString(handle, "from")
+		to := operationRunString(handle, "to")
+		if from != "" && to != "" {
+			parts = append(parts, from+" -> "+to)
+		} else if intent := operationRunString(handle, "entry_intent"); intent != "" {
+			parts = append(parts, "intent "+intent)
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+func operationRunHandle(v any) (map[string]any, bool) {
+	handle, ok := v.(map[string]any)
+	if !ok || len(handle) == 0 {
+		return nil, false
+	}
+	return handle, true
+}
+
+func operationRunString(handle map[string]any, key string) string {
+	v, ok := handle[key]
+	if !ok || v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprint(v)
+}
+
+func truncateFrameCell(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if ansi.StringWidth(s) <= width {
+		return s
+	}
+	if width == 1 {
+		return ansi.Cut(s, 0, 1)
+	}
+	return ansi.Cut(s, 0, width-1) + "…"
 }
 
 // joinChromeParts assembles the final chrome string from the part list.

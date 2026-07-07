@@ -162,6 +162,8 @@ describe("InteractiveView focused chat context", () => {
       ],
     });
     replace.mockReset();
+    dataSource.getTrace.mockReset();
+    dataSource.getTrace.mockResolvedValue({ events: [], last_turn: 0 });
     route.query = { chat: "chat-1" };
     sessionStorage.clear();
   });
@@ -185,6 +187,46 @@ describe("InteractiveView focused chat context", () => {
 
     await wrapper.find('[data-testid="focused-chat-close"]').trigger("click");
     expect(replace).toHaveBeenCalledWith({ path: "/s/s1/chat", query: {} });
+    wrapper.unmount();
+  });
+
+  it("renders an operation banner from the trace operation handle", async () => {
+    route.query = {};
+    dataSource.getTrace.mockResolvedValueOnce({
+      last_turn: 1,
+      events: [
+        {
+          time: "2026-01-01T00:00:01Z",
+          level: "info",
+          msg: "world.update",
+          session_id: "s1",
+          turn: 1,
+          state_path: "idle",
+          attrs: {
+            set: {
+              operation_run: {
+                operation_id: "bf__capsule_demo",
+                policy_id: "bf__capsule_demo",
+                title: "Capsule bugfix",
+                status: "running",
+                from: "idle",
+                to: "bugfix.reproduce",
+                run_in_background: true,
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    const wrapper = mount(InteractiveView, mountOpts);
+    await flushPromises();
+
+    const banner = wrapper.find('[data-testid="operation-run-banner"]');
+    expect(banner.exists()).toBe(true);
+    expect(wrapper.find('[data-testid="operation-run-title"]').text()).toBe("Capsule bugfix");
+    expect(wrapper.find('[data-testid="operation-run-status"]').text()).toBe("running in background");
+    expect(banner.text()).toContain("idle -> bugfix.reproduce");
     wrapper.unmount();
   });
 

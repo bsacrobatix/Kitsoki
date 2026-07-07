@@ -43,6 +43,24 @@ export interface RoutingInfo {
   statePath?: string;
 }
 
+export interface OperationRunSummary {
+  status: string;
+  policyId: string;
+  operationId: string;
+  title: string;
+  mode?: string;
+  executionMode?: string;
+  runInBackground?: boolean;
+  from?: string;
+  to?: string;
+  entryIntent?: string;
+  terminalState?: string;
+  terminalArtifact?: string;
+  phaseSummaryFrom: string[];
+  stopOn: string[];
+  pauseOn: string[];
+}
+
 /** One entry of the conversational transcript shown beside the trace. */
 export interface TranscriptEntry {
   /**
@@ -104,6 +122,115 @@ export interface TranscriptEntry {
 // StreamItem (the ordered feed shape) moved to lib/activity.ts so the meta
 // store shares it; re-exported here for existing importers.
 export type { StreamItem } from "../lib/activity.js";
+
+const OPERATION_LIFECYCLE_STATUS: Record<string, string> = {
+  "operation.run_started": "running",
+  "operation.waiting": "waiting",
+  "operation.completed": "completed",
+  "operation.failed": "failed",
+};
+
+export function deriveOperationRun(
+  traceEvents: TraceEvent[]
+): OperationRunSummary | null {
+  let current: OperationRunSummary | null = null;
+  for (const event of traceEvents) {
+    const handle =
+      operationRunFromWorldUpdate(event) ?? operationRunFromLifecycleEvent(event);
+    if (!handle) continue;
+    const next = normalizeOperationRun(handle, current);
+    if (next) current = next;
+  }
+  return current;
+}
+
+function operationRunFromWorldUpdate(
+  event: TraceEvent
+): Record<string, unknown> | null {
+  if (event.msg !== "world.update") return null;
+  const set = asRecord(event.attrs.set);
+  return asRecord(set?.operation_run);
+}
+
+function operationRunFromLifecycleEvent(
+  event: TraceEvent
+): Record<string, unknown> | null {
+  const status = OPERATION_LIFECYCLE_STATUS[event.msg];
+  if (!status) return null;
+  const attrs = asRecord(event.attrs);
+  if (!attrs) return null;
+  return {
+    ...attrs,
+    status: readString(attrs, "status") || status,
+  };
+}
+
+function normalizeOperationRun(
+  raw: Record<string, unknown>,
+  previous: OperationRunSummary | null
+): OperationRunSummary | null {
+  const operationId =
+    readString(raw, "operation_id") || previous?.operationId || "";
+  const policyId =
+    readString(raw, "policy_id") || previous?.policyId || operationId;
+  const status = readString(raw, "status") || previous?.status || "";
+  if (!operationId && !policyId && !status) return null;
+
+  return {
+    status,
+    policyId,
+    operationId: operationId || policyId,
+    title:
+      readString(raw, "title") ||
+      previous?.title ||
+      policyId ||
+      operationId ||
+      "Operation",
+    mode: readString(raw, "mode") || previous?.mode,
+    executionMode:
+      readString(raw, "execution_mode") || previous?.executionMode,
+    runInBackground:
+      readBool(raw, "run_in_background") ?? previous?.runInBackground,
+    from: readString(raw, "from") || previous?.from,
+    to: readString(raw, "to") || previous?.to,
+    entryIntent: readString(raw, "entry_intent") || previous?.entryIntent,
+    terminalState:
+      readString(raw, "terminal_state") || previous?.terminalState,
+    terminalArtifact:
+      readString(raw, "terminal_artifact") || previous?.terminalArtifact,
+    phaseSummaryFrom:
+      readStringArray(raw, "phase_summary_from") ??
+      previous?.phaseSummaryFrom ??
+      [],
+    stopOn: readStringArray(raw, "stop_on") ?? previous?.stopOn ?? [],
+    pauseOn: readStringArray(raw, "pause_on") ?? previous?.pauseOn ?? [],
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value != null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readString(source: Record<string, unknown>, key: string): string {
+  const value = source[key];
+  return typeof value === "string" ? value : "";
+}
+
+function readBool(source: Record<string, unknown>, key: string): boolean | undefined {
+  const value = source[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function readStringArray(
+  source: Record<string, unknown>,
+  key: string
+): string[] | undefined {
+  const value = source[key];
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((item): item is string => typeof item === "string");
+}
 
 export const useRunStore = defineStore("run", () => {
   // ---- state ----
@@ -191,6 +318,9 @@ export const useRunStore = defineStore("run", () => {
     }
     return { promptTokens, responseTokens, costUsd, calls, present };
   });
+  const operationRun = computed<OperationRunSummary | null>(() =>
+    deriveOperationRun(events.value)
+  );
 
   // readTurnRouting recovers the routing provenance for a turn from the event
   // log: routed_by / match_type / confidence off the turn.start event, and the
@@ -944,6 +1074,7 @@ export const useRunStore = defineStore("run", () => {
     highlightedStatePaths,
     highlightTick,
     usageTotals,
+    operationRun,
     transcript,
     chatEntries,
     currentView,
