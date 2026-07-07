@@ -12,6 +12,22 @@ from profile_setup_lib import apply_candidate, discover
 
 
 class ProfileSetupTest(unittest.TestCase):
+    def patch_env(self, updates: dict[str, str | None]):
+        old = {key: os.environ.get(key) for key in updates}
+        for key, value in updates.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        return old
+
+    def restore_env(self, old: dict[str, str | None]) -> None:
+        for key, value in old.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
     def test_discover_merges_profiles_and_redacts_env_refs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -136,6 +152,41 @@ harness_profiles:
                     os.environ["KITSOKI_PROFILE_TEST_MISSING_KEY"] = old
             profile = next(profile for profile in report["profiles"] if profile["name"] == "openai-codex")
             self.assertEqual(profile["readiness"], "env-missing")
+
+    def test_claude_config_files_are_not_reported_as_logged_in(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            root.mkdir()
+            home = Path(tmp) / "home"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_text('{"theme":"dark"}\n', encoding="utf-8")
+            (home / ".claude.json").write_text('{"userID":"user-123","projects":{}}\n', encoding="utf-8")
+            (root / ".kitsoki.yaml").write_text(
+                """default_profile: claude-native
+harness_profiles:
+  claude-native:
+    backend: claude
+    model: opus
+""",
+                encoding="utf-8",
+            )
+            old = self.patch_env({
+                "HOME": str(home),
+                "KITSOKI_AGENT_CLAUDE_BIN": "/bin/echo",
+                "ANTHROPIC_API_KEY": None,
+                "ANTHROPIC_AUTH_TOKEN": None,
+            })
+            try:
+                report = discover(root)
+            finally:
+                self.restore_env(old)
+            claude = next(source for source in report["backend_sources"] if source["backend"] == "claude")
+            self.assertEqual(claude["logged_in"], "unknown")
+            self.assertEqual(claude["auth_summary"], "file-present:~/.claude/settings.json, file-present:~/.claude.json")
+            self.assertTrue(all(not source["credential"] for source in claude["auth_sources"]))
+            profile = next(profile for profile in report["profiles"] if profile["name"] == "claude-native")
+            self.assertEqual(profile["readiness"], "installed-auth-unknown")
+            self.assertEqual(report["candidate_action"], "")
 
     def test_apply_rejects_raw_secret_instead_of_env_var_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

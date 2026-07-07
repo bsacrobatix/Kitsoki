@@ -51,6 +51,7 @@ COMMON_ENV = [
 
 SAFE_ENV_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+CREDENTIAL_KEY_RE = re.compile(r"(token|api[_-]?key|secret|credential)", re.IGNORECASE)
 
 
 def json_out(data: dict[str, Any]) -> str:
@@ -222,19 +223,58 @@ def env_sources() -> list[dict[str, Any]]:
     return [{"name": name, "present": bool(os.environ.get(name)), "source": "process-env" if os.environ.get(name) else ""} for name in COMMON_ENV]
 
 
+def _json_has_credential_marker(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if CREDENTIAL_KEY_RE.search(str(key)) and item not in ("", None, [], {}):
+                return True
+            if _json_has_credential_marker(item):
+                return True
+    elif isinstance(value, list):
+        return any(_json_has_credential_marker(item) for item in value)
+    return False
+
+
+def file_has_credential_marker(path: Path) -> bool:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    return _json_has_credential_marker(data)
+
+
+def auth_summary(auth_sources: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for source in auth_sources:
+        kind = source.get("type")
+        name = str(source.get("name") or "")
+        if kind == "env":
+            parts.append(f"env:{name}")
+        elif source.get("credential"):
+            parts.append(f"file:{name}")
+        else:
+            parts.append(f"file-present:{name}")
+    return ", ".join(parts)
+
+
 def binary_status(name: str, spec: dict[str, Any]) -> dict[str, Any]:
     override = str(os.environ.get(spec["override_env"]) or "")
     path = override or shutil.which(spec["binary"]) or ""
-    auth_sources: list[dict[str, str]] = []
+    auth_sources: list[dict[str, Any]] = []
     for env_name in spec.get("auth_envs", []):
         if os.environ.get(env_name):
-            auth_sources.append({"type": "env", "name": env_name})
+            auth_sources.append({"type": "env", "name": env_name, "credential": True})
     for raw_path in spec.get("auth_files", []):
         path_obj = Path(os.path.expanduser(raw_path))
         if path_obj.exists():
-            auth_sources.append({"type": "file", "name": raw_path})
+            auth_sources.append({
+                "type": "file",
+                "name": raw_path,
+                "credential": file_has_credential_marker(path_obj),
+            })
     installed = bool(path)
-    logged_in = "yes" if auth_sources else ("unknown" if installed else "no")
+    has_credential = any(bool(source.get("credential")) for source in auth_sources)
+    logged_in = "yes" if has_credential else ("unknown" if installed else "no")
     return {
         "backend": name,
         "binary": spec["binary"],
@@ -243,6 +283,7 @@ def binary_status(name: str, spec: dict[str, Any]) -> dict[str, Any]:
         "path_source": "env" if override else ("PATH" if path else ""),
         "path": path,
         "auth_sources": auth_sources,
+        "auth_summary": auth_summary(auth_sources) or "none",
         "logged_in": logged_in,
     }
 
@@ -260,8 +301,10 @@ def _backend_ready(profile: dict[str, Any], statuses: dict[str, dict[str, Any]])
             return "env-missing"
     backend = str(profile.get("backend") or "claude")
     status = statuses.get(backend, {})
-    if status.get("installed") and status.get("logged_in") in {"yes", "unknown"}:
+    if status.get("installed") and status.get("logged_in") == "yes":
         return "env-present" if profile.get("env_refs") else "installed"
+    if status.get("installed") and status.get("logged_in") == "unknown":
+        return "installed-auth-unknown"
     return "missing"
 
 
@@ -377,7 +420,7 @@ def recommended_candidate(profiles: list[dict[str, Any]], default_profile: str, 
             "base_url": os.environ.get("OPENAI_BASE_URL", ""),
         }
     claude = statuses.get("claude", {})
-    if claude.get("installed") or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+    if claude.get("installed") and claude.get("logged_in") == "yes":
         return {
             "action": "upsert_backend",
             "name": "claude-native",
@@ -401,6 +444,11 @@ def discover(root: Path) -> dict[str, Any]:
     effective = merge_configs(base, local)
     statuses_list = backend_sources()
     statuses = {str(item["backend"]): item for item in statuses_list}
+    for status in statuses_list:
+        if status.get("installed") and status.get("logged_in") == "unknown" and status.get("auth_sources"):
+            warnings.append(
+                f"{status['backend']} has config/auth files but no credential marker; login status is unknown"
+            )
     profiles = profile_list(effective, base, local, statuses)
     candidate = recommended_candidate(profiles, str(effective.get("default_profile") or ""), statuses)
     try:
