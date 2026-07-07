@@ -13,7 +13,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -253,9 +252,10 @@ types free text; an LLM harness maps it to one of the app's intents; the
 state machine applies the transition; the view is re-rendered.
 
 Harness auto-selection (when --harness is omitted):
-  1. 'claude' binary on PATH       → claude harness (no API key needed)
-  2. Anthropic credential found    → live harness (direct SDK)
-  3. otherwise                     → replay (requires --recording)
+  1. non-Claude --agent backend    → CLI harness for that backend
+  2. 'claude' binary on PATH       → claude harness (no API key needed)
+  3. Anthropic credential found    → live harness (direct SDK)
+  4. otherwise                     → setup error; replay requires --recording
 
 A live credential is resolved from (first hit wins): ANTHROPIC_API_KEY,
 ANTHROPIC_AUTH_TOKEN, ~/.claude/settings.json (env block), or ~/.claude.json
@@ -822,7 +822,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 	}
 
 	cmd.Flags().StringVar(&harnessType, "harness", "",
-		"harness type: claude|live|replay|recording (default: claude if `claude` binary on PATH, else live if an Anthropic credential is found, else replay)")
+		"harness type: claude|live|replay|recording (default: selected from --agent, then claude on PATH, then Anthropic credential)")
 	cmd.Flags().StringVar(&claudeModel, "claude-model", "",
 		fmt.Sprintf("model passed to claude -p --model (default: %s); use 'opus' for higher quality at higher cost", harness.DefaultClaudeModel))
 	cmd.Flags().StringVar(&agentBackend, "agent", "",
@@ -864,48 +864,46 @@ func setHarnessLogger(h harness.Harness, l *slog.Logger) {
 // autoSelectHarness returns the harness type to use when --harness is not explicitly set.
 //
 // Precedence:
-//  1. `claude` binary on PATH    → use ClaudeCLIHarness (no API key needed).
-//  2. Anthropic credential found → use LiveHarness (direct SDK). See
+//  1. non-Claude agent backend   → use the CLI routing harness for that backend.
+//  2. `claude` binary on PATH    → use ClaudeCLIHarness (no API key needed).
+//  3. Anthropic credential found → use LiveHarness (direct SDK). See
 //     resolveAnthropicCredential for the credential chain.
-//  3. Otherwise                  → use "replay" (requires --recording) or error.
-func autoSelectHarness() string {
+//  4. Otherwise                  → error; replay requires an explicit recording.
+func autoSelectHarness(agentBackend string) (string, error) {
+	agentBackend = strings.TrimSpace(agentBackend)
+	if agentBackend != "" && agentBackend != "claude" {
+		return "claude", nil
+	}
 	claude := false
 	if _, err := exec.LookPath("claude"); err == nil {
 		claude = true
 	}
 	cred := hasAnthropicCredential()
-	if hint := firstRunProviderHint(claude, cred); hint != "" {
-		firstRunHintOnce.Do(func() { fmt.Fprint(os.Stderr, hint) })
-	}
 	if claude {
-		return "claude"
+		return "claude", nil
 	}
 	if cred {
-		return "live"
+		return "live", nil
 	}
-	// Fall back to replay; the caller will error if --recording is not set.
-	return "replay"
+	return "", errors.New(strings.TrimSpace(firstRunProviderHint(false, false)))
 }
-
-// firstRunHintOnce ensures the no-provider first-run hint is printed at most
-// once per process, no matter how many times autoSelectHarness runs.
-var firstRunHintOnce sync.Once
 
 // firstRunProviderHint returns an actionable message when NO agent provider is
 // configured (no `claude` binary on PATH and no Anthropic credential), so a
-// fresh `kitsoki` run does not silently fall back to the replay harness and
-// then fail cryptically on a missing --recording. Returns "" when a provider
-// exists. Change 0.4 (G1: "no silent replay fallback on first run").
+// fresh `kitsoki` run does not silently fall back to the replay harness. Returns
+// "" when a provider exists. Change 0.4 (G1: "no silent replay fallback on
+// first run").
 func firstRunProviderHint(hasClaude, hasCred bool) string {
 	if hasClaude || hasCred {
 		return ""
 	}
-	return "kitsoki: no agent provider found — falling back to the no-LLM replay harness.\n" +
+	return "kitsoki: no agent provider found for the default harness.\n" +
 		"To run kitsoki live, configure one of:\n" +
-		"  \u2022 install the `claude` CLI (Claude Code) so it is on your PATH, or\n" +
-		"  \u2022 set ANTHROPIC_API_KEY (direct Anthropic SDK), or\n" +
-		"  \u2022 select a harness profile in .kitsoki.local.yaml (see docs/architecture/harness-profiles.md).\n" +
-		"Without one, only --harness replay (needs --recording) and deterministic flow tests will run.\n"
+		"  - install the `claude` CLI (Claude Code) so it is on your PATH, or\n" +
+		"  - set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN (direct Anthropic SDK), or\n" +
+		"  - select another agent backend, such as `--agent codex` or KITSOKI_AGENT=codex, or\n" +
+		"  - select a harness profile in .kitsoki.local.yaml (see docs/architecture/harness-profiles.md).\n" +
+		"To run deterministic replay instead, pass --harness replay --recording <recording.yaml>.\n"
 }
 
 func bugFilingAuthStartupNotice(ctx context.Context, ticketRepo string) string {
@@ -930,7 +928,8 @@ func resolveAgentBackend(flag string) string {
 }
 
 // buildHarness constructs the appropriate harness based on the harness type flag.
-// If harnessType is empty, autoSelectHarness() is called to pick one.
+// If harnessType is empty, autoSelectHarness() is called to pick one from the
+// selected agent backend and available credentials.
 // claudeModel is the model name for the ClaudeCLIHarness; pass "" to use the default.
 func buildHarness(harnessType, claudeModel, agentBackend, recordingPath, recordPath string, def *app.AppDef) (harness.Harness, error) {
 	return buildHarnessWithActiveProfile(harnessType, claudeModel, agentBackend, recordingPath, recordPath, def, host.ActiveProfile{})
@@ -941,7 +940,11 @@ func buildHarnessWithActiveProfile(harnessType, claudeModel, agentBackend, recor
 		claudeModel = activeProfile.Provider.Model
 	}
 	if harnessType == "" {
-		harnessType = autoSelectHarness()
+		var err error
+		harnessType, err = autoSelectHarness(agentBackend)
+		if err != nil {
+			return nil, err
+		}
 	}
 	withProfile := func(ctx context.Context) context.Context {
 		return host.WithActiveProfile(ctx, activeProfile)

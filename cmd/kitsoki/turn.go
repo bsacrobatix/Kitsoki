@@ -216,8 +216,12 @@ Examples:
 			defer func() { _ = s.Close() }()
 
 			resolvedHarnessType := harnessType
-			if resolvedHarnessType == "" {
-				resolvedHarnessType = autoSelectHarness()
+			if resolvedHarnessType == "" && intentName == "" {
+				var selectErr error
+				resolvedHarnessType, selectErr = autoSelectHarness("")
+				if selectErr != nil {
+					return selectErr
+				}
 			}
 
 			h, err := buildTurnHarness(resolvedHarnessType, recordingPath, def, intentName != "")
@@ -414,7 +418,11 @@ func buildTurnHarness(harnessType, recordingPath string, def *app.AppDef, direct
 		return &noRunHarness{}, nil
 	}
 	if harnessType == "" {
-		harnessType = autoSelectHarness()
+		var err error
+		harnessType, err = autoSelectHarness("")
+		if err != nil {
+			return nil, err
+		}
 	}
 	switch harnessType {
 	case "replay":

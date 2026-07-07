@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/host"
 )
 
@@ -14,7 +15,7 @@ func TestFirstRunProviderHint(t *testing.T) {
 	if got := firstRunProviderHint(false, false); got == "" {
 		t.Fatal("expected an actionable hint when no provider is configured, got empty")
 	} else {
-		for _, want := range []string{"no agent provider found", "ANTHROPIC_API_KEY", "claude", "harness profile", "replay"} {
+		for _, want := range []string{"no agent provider found", "ANTHROPIC_API_KEY", "claude", "--agent codex", "harness profile", "replay"} {
 			if !contains(got, want) {
 				t.Errorf("hint missing %q; hint was:\n%s", want, got)
 			}
@@ -26,6 +27,50 @@ func TestFirstRunProviderHint(t *testing.T) {
 	if got := firstRunProviderHint(false, true); got != "" {
 		t.Errorf("expected no hint when a credential is present, got:\n%s", got)
 	}
+}
+
+func TestAutoSelectHarnessUsesConfiguredAgentBackend(t *testing.T) {
+	clearDefaultHarnessProviders(t)
+
+	got, err := autoSelectHarness("codex")
+	if err != nil {
+		t.Fatalf("autoSelectHarness(codex): %v", err)
+	}
+	if got != "claude" {
+		t.Fatalf("autoSelectHarness(codex) = %q, want claude CLI harness", got)
+	}
+}
+
+func TestAutoSelectHarnessNoProviderErrorsInsteadOfReplay(t *testing.T) {
+	clearDefaultHarnessProviders(t)
+
+	got, err := autoSelectHarness("")
+	if err == nil {
+		t.Fatalf("autoSelectHarness with no provider = %q, want error", got)
+	}
+	msg := err.Error()
+	for _, want := range []string{"no agent provider found", "--agent codex", "--harness replay --recording"} {
+		if !contains(msg, want) {
+			t.Fatalf("error missing %q; error was:\n%s", want, msg)
+		}
+	}
+	if contains(msg, "--recording is required") {
+		t.Fatalf("auto selection leaked replay-harness validation instead of provider setup guidance:\n%s", msg)
+	}
+}
+
+func TestBuildHarnessDefaultCodexBackendDoesNotSelectReplay(t *testing.T) {
+	clearDefaultHarnessProviders(t)
+	t.Setenv(host.CodexBinEnv, "/tmp/kitsoki-test-codex")
+
+	h, err := buildHarness("", "", "codex", "", "", &app.AppDef{})
+	if err != nil {
+		t.Fatalf("buildHarness default codex backend: %v", err)
+	}
+	if h == nil {
+		t.Fatal("buildHarness default codex backend returned nil harness")
+	}
+	_ = h.Close()
 }
 
 func TestBugFilingAuthStartupNotice(t *testing.T) {
@@ -58,4 +103,12 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func clearDefaultHarnessProviders(t *testing.T) {
+	t.Helper()
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
 }
