@@ -48,10 +48,18 @@ func TestServiceCreateValidateExport(t *testing.T) {
 	require.FileExists(t, filepath.Join(receipt.AppPath, "app.yaml"))
 	require.NotEmpty(t, receipt.StatePath)
 	require.Contains(t, receipt.LaunchCommand, "kitsoki run")
+	require.Equal(t, ModelPolicy{
+		Harness:           "live",
+		Profile:           "codex-native",
+		Model:             "gpt-5.5",
+		RequireTraceModel: true,
+		RequireGPT55:      true,
+	}, receipt.ModelPolicy)
 	events, err := os.ReadFile(receipt.EventsPath)
 	require.NoError(t, err)
 	require.Contains(t, string(events), "dynamic.workflow.generated")
 	require.Contains(t, string(events), "dynamic.workflow.validated")
+	require.Contains(t, string(events), `"model_policy"`)
 
 	loaded, err := svc.ReadReceipt(receipt.WorkflowID)
 	require.NoError(t, err)
@@ -86,6 +94,70 @@ func TestServiceCreateValidateExport(t *testing.T) {
 	world := launch["world"].(map[string]any)
 	require.Equal(t, filepath.ToSlash(runtimePath(repoRoot, filepath.Join(exportDir, "manifest.yaml"))), world["manifest_path"])
 	require.Equal(t, filepath.ToSlash(runtimePath(repoRoot, filepath.Join(exportDir, "punch-list.state.json"))), world["state_path"])
+}
+
+func TestServiceCreatePreservesStructuredDecomposition(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	require.NoError(t, err)
+	repoRoot, err = filepath.Abs(filepath.Join(repoRoot, "..", ".."))
+	require.NoError(t, err)
+
+	outDir := dynamicWorkflowTestDir(t, repoRoot)
+	svc := NewService(repoRoot)
+	svc.OutputDir = outDir
+	svc.TemplateStoryDir = filepath.Join(repoRoot, DefaultTemplateStoryDir)
+	svc.Now = func() time.Time { return time.Date(2026, 7, 8, 9, 0, 0, 0, time.UTC) }
+
+	receipt, err := svc.Create(context.Background(), CreateRequest{
+		Goal: "fix dynamic workflow audit problems",
+		Slug: "structured-dwf",
+		Items: []CreateItem{
+			{
+				ID:         "tui-proof",
+				Title:      "TUI operation handle proof",
+				OwnerScope: "internal/tui",
+				Gate:       "go test ./internal/tui -run 'Test.*Operation|Test.*Work' -count=1",
+			},
+			{
+				ID:         "corpus-report",
+				Title:      "Demo corpus runner/report clarity",
+				OwnerScope: "internal/testrunner/operation_demo_corpus_test.go",
+				Gate:       "go test ./internal/testrunner -run TestOperationDemoCorpus -count=1",
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, receipt.Validation.OK, "receipt should validate: %v", receipt.Validation.Errors)
+	require.Equal(t, ModelPolicy{
+		Harness:           "live",
+		Profile:           "codex-native",
+		Model:             "gpt-5.5",
+		RequireTraceModel: true,
+		RequireGPT55:      true,
+	}, receipt.ModelPolicy)
+
+	manifest, err := readManifest(receipt.ManifestPath)
+	require.NoError(t, err)
+	require.Len(t, manifest.Items, 2)
+	require.Equal(t, "tui-proof", manifest.Items[0].ID)
+	require.Equal(t, "TUI operation handle proof", manifest.Items[0].Title)
+	require.Equal(t, "internal/tui", manifest.Items[0].OwnerScope)
+	require.Equal(t, "go test ./internal/tui -run 'Test.*Operation|Test.*Work' -count=1", manifest.Items[0].GateCommand)
+	require.Empty(t, manifest.Items[0].Verify)
+	require.Contains(t, manifest.Items[0].Prompt, "Owner scope: internal/tui")
+	require.Contains(t, manifest.Items[0].Prompt, "Deterministic gate: go test ./internal/tui")
+	require.Equal(t, filepath.ToSlash(runtimePath(repoRoot, filepath.Join(receipt.AppPath, "app.yaml"))), manifest.Items[0].ImplementationStory)
+	require.Equal(t, "corpus-report", manifest.Items[1].ID)
+
+	manifestBytes, err := os.ReadFile(receipt.ManifestPath)
+	require.NoError(t, err)
+	manifestYAML := string(manifestBytes)
+	require.Contains(t, manifestYAML, "owner_scope: internal/tui")
+	require.Contains(t, manifestYAML, "gate_command: go test ./internal/tui")
+
+	loaded, err := svc.ReadReceipt(receipt.WorkflowID)
+	require.NoError(t, err)
+	require.Equal(t, receipt.ModelPolicy, loaded.ModelPolicy)
 }
 
 func TestServiceCreateAvoidsSameSecondSlugCollisions(t *testing.T) {

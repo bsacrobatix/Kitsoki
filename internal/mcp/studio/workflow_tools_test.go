@@ -123,6 +123,47 @@ func TestWorkflowCreateResearchGoalWritesResearchManifest(t *testing.T) {
 	require.True(t, strings.Contains(manifest, ".context/"), "research prompts should name .context outputs")
 }
 
+func TestWorkflowCreateAcceptsStructuredItems(t *testing.T) {
+	ctx := context.Background()
+	srv, _ := newReplayServer(t)
+	cs := connectInProcess(ctx, t, srv)
+
+	res, err := callTool(ctx, cs, "workflow.create", map[string]any{
+		"goal": "fix dynamic workflow audit problems",
+		"slug": "mcp-structured-items",
+		"items": []map[string]any{
+			{
+				"id":          "tui-proof",
+				"title":       "TUI operation handle proof",
+				"owner_scope": "internal/tui",
+				"gate":        "go test ./internal/tui -run 'Test.*Operation|Test.*Work' -count=1",
+			},
+			{
+				"id":          "corpus-report",
+				"title":       "Demo corpus runner/report clarity",
+				"owner_scope": "internal/testrunner/operation_demo_corpus_test.go",
+				"gate":        "go test ./internal/testrunner -run TestOperationDemoCorpus -count=1",
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "workflow.create errored: %s", contentText(res))
+	var receipt dynamicworkflow.Receipt
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &receipt))
+	require.True(t, receipt.Validation.OK)
+	require.Equal(t, "codex-native", receipt.ModelPolicy.Profile)
+	require.Equal(t, "gpt-5.5", receipt.ModelPolicy.Model)
+
+	manifestBytes, err := os.ReadFile(receipt.ManifestPath)
+	require.NoError(t, err)
+	manifest := string(manifestBytes)
+	require.Contains(t, manifest, "id: tui-proof")
+	require.Contains(t, manifest, "owner_scope: internal/tui")
+	require.Contains(t, manifest, "gate_command:")
+	require.NotContains(t, manifest, "id: scope")
+	require.NotContains(t, manifest, "id: implement")
+}
+
 func TestWorkflowExportPreservesResearchDriveOnlyManifest(t *testing.T) {
 	ctx := context.Background()
 	srv, _ := newReplayServer(t)

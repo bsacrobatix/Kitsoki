@@ -155,12 +155,9 @@ func RunFlowCoverage(ctx context.Context, appPath string, opts FlowCoverageOptio
 	if err != nil {
 		return nil, fmt.Errorf("load app %q: %w", appPath, err)
 	}
-	files, err := filepath.Glob(opts.FlowsGlob)
+	files, err := ExpandGlobList(opts.FlowsGlob)
 	if err != nil {
-		return nil, fmt.Errorf("glob %q: %w", opts.FlowsGlob, err)
-	}
-	if len(files) == 0 {
-		return nil, fmt.Errorf("no flow fixtures matched %q", opts.FlowsGlob)
+		return nil, err
 	}
 	sort.Strings(files)
 

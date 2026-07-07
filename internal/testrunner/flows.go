@@ -1031,7 +1031,8 @@ func shouldUseOrchestrator(fixture *FlowFixture) bool {
 
 // ─── RunFlows runs all flow fixtures matching the glob ───────────────────────
 
-// RunFlows loads the app, finds all flow fixtures matching the glob, and runs them.
+// RunFlows loads the app, finds all flow fixtures matching the glob or comma
+// separated glob list, and runs them.
 // Returns a FlowReport and non-nil error only for fatal startup errors.
 func RunFlows(ctx context.Context, appPath, glob string, opts FlowOptions) (*FlowReport, error) {
 	// Publish KITSOKI_APP_DIR BEFORE loading so the app yaml's loader-
@@ -1054,12 +1055,9 @@ func RunFlows(ctx context.Context, appPath, glob string, opts FlowOptions) (*Flo
 	}
 
 	// Find fixture files.
-	files, err := filepath.Glob(glob)
+	files, err := ExpandGlobList(glob)
 	if err != nil {
-		return nil, fmt.Errorf("glob %q: %w", glob, err)
-	}
-	if len(files) == 0 {
-		return nil, fmt.Errorf("no flow fixtures matched %q", glob)
+		return nil, err
 	}
 
 	report := &FlowReport{}
@@ -1092,6 +1090,45 @@ func RunFlows(ctx context.Context, appPath, glob string, opts FlowOptions) (*Flo
 	}
 
 	return report, nil
+}
+
+// ExpandGlobList expands one glob or a comma-separated list of globs/files.
+// It preserves caller order while de-duplicating repeated matches.
+func ExpandGlobList(patterns string) ([]string, error) {
+	seen := map[string]bool{}
+	var files []string
+	for _, pattern := range splitGlobList(patterns) {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("glob %q: %w", pattern, err)
+		}
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("no flow fixtures matched %q", pattern)
+		}
+		sort.Strings(matches)
+		for _, match := range matches {
+			if seen[match] {
+				continue
+			}
+			seen[match] = true
+			files = append(files, match)
+		}
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no flow fixtures matched %q", patterns)
+	}
+	return files, nil
+}
+
+func splitGlobList(patterns string) []string {
+	var out []string
+	for _, part := range strings.Split(patterns, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 // runFlowFile parses and runs one flow fixture file (which may contain multiple

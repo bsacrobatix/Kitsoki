@@ -92,6 +92,21 @@ func TestFlowsWinningPath(t *testing.T) {
 	require.True(t, r.Passed, "winning path should pass")
 }
 
+func TestFlowsCommaSeparatedFixtureList(t *testing.T) {
+	ctx := context.Background()
+	patterns := strings.Join([]string{
+		"../../testdata/apps/cloak/flows/winning.yaml",
+		"../../testdata/apps/cloak/flows/losing.yaml",
+	}, ",")
+	report, err := testrunner.RunFlows(ctx, cloakAppPath, patterns, testrunner.FlowOptions{})
+	require.NoError(t, err)
+	require.Len(t, report.Results, 2)
+	require.Equal(t, 2, report.Passed)
+	require.Equal(t, 0, report.Failed)
+	require.Equal(t, "winning.yaml", filepath.Base(report.Results[0].File))
+	require.Equal(t, "losing.yaml", filepath.Base(report.Results[1].File))
+}
+
 // TestFlowsLosingPath runs the losing-path fixture.
 func TestFlowsLosingPath(t *testing.T) {
 	ctx := context.Background()

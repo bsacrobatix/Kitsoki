@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -14,7 +15,7 @@ import (
 
 func testFlowCoverageCmd() *cobra.Command {
 	var (
-		flowsGlob                  string
+		flowsGlobs                 []string
 		jsonOut                    string
 		minBranchCoverage          float64
 		requireAllBranches         bool
@@ -44,6 +45,7 @@ branch target.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appPath := args[0]
+			flowsGlob := strings.Join(flowsGlobs, ",")
 			if flowsGlob == "" {
 				flowsGlob = defaultFlowsGlob(appPath)
 			}
@@ -75,7 +77,7 @@ branch target.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&flowsGlob, "flows", "", "glob for flow fixture files (default: <app-dir>/flows/*.yaml)")
+	cmd.Flags().StringArrayVar(&flowsGlobs, "flows", nil, "glob for flow fixture files; may be repeated or comma-separated (default: <app-dir>/flows/*.yaml)")
 	cmd.Flags().StringVar(&jsonOut, "json", "", "write JSON report to this file")
 	cmd.Flags().Float64Var(&minBranchCoverage, "min-branch", 0, "minimum authored branch coverage percentage required to pass")
 	cmd.Flags().BoolVar(&requireAllBranches, "require-all-branches", false, "fail when any authored transition branch is uncovered")
