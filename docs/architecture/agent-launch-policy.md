@@ -129,8 +129,11 @@ agent_user_delegation:
 ```
 
 This block currently records local setup and suppresses the macOS first-start
-warning. First-class `run_as_user` execution is a future runtime slice; until it
-lands, start Kitsoki with the wrapper directory first in `PATH`:
+warning. Without it, `kitsoki run` prints a TUI startup notice and `kitsoki web`
+shows a home-screen setup warning with an action that opens
+`@kitsoki/run-as-user-setup`. First-class `run_as_user` execution is a future
+runtime slice; until it lands, start Kitsoki with the wrapper directory first in
+`PATH`:
 
 ```sh
 PATH=/Users/Shared/kitsoki/agent-bin:$PATH kitsoki run @kitsoki/dev-story

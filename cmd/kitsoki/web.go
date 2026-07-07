@@ -32,6 +32,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -314,6 +315,7 @@ authentication.`,
 				server.WithTicketRepo(ticketRepo),
 				server.WithAgentEvidenceDir(agentEvidenceDir),
 				server.WithBugPrivacyChecker(bugPrivacyCheckerFromConfig(cfg, bugRoot)),
+				server.WithSetupWarnings(setupWarningsFromConfig(cfg, runtime.GOOS)),
 				server.WithKits(kits),
 			)
 			// Attach the cross-session notification relay sink so each new

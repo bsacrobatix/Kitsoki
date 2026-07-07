@@ -28,6 +28,7 @@
 //
 //	runstatus.stories.list       {}                                  → []StoryHeader
 //	runstatus.stories.rescan     {}                                  → []StoryHeader
+//	runstatus.setup.status       {}                                  → {warnings}
 //	runstatus.kits.list          {}                                  → []KitHeader (S3b/c)
 //	kit.<kit>.<iface>.<op>       {...}                                → kit endpoint result (S3b fallback)
 //	runstatus.session.new        {story_path}                        → {session_id}
@@ -263,6 +264,10 @@ type Server struct {
 	// `kit.<kit>.<iface>.<op>` fallback and `runstatus.kits.list` report
 	// codeMethodMissing / an empty list rather than panicking.
 	kits *kitendpoint.Dispatcher
+
+	// setupWarnings are session-independent first-start setup warnings the web
+	// home screen renders before an operator starts a story.
+	setupWarnings []SetupWarning
 }
 
 // activeTurn is one in-flight streamed turn's cancel handle. Stored by pointer
@@ -303,6 +308,7 @@ type serverConfig struct {
 	bugPrivacyChecker bugprivacy.Checker
 	workflowRoot      string
 	kits              *kitendpoint.Dispatcher
+	setupWarnings     []SetupWarning
 }
 
 // WithBugRoot sets the repo root under which runstatus.bug.report writes
@@ -355,6 +361,13 @@ func WithWorkflowRoot(dir string) Option {
 // have no kits installed.
 func WithKits(d *kitendpoint.Dispatcher) Option {
 	return func(c *serverConfig) { c.kits = d }
+}
+
+// WithSetupWarnings sets first-start setup warnings for the web home screen.
+// Warnings are advisory and read-only; callers should compute them from local
+// config and never include secrets.
+func WithSetupWarnings(warnings []SetupWarning) Option {
+	return func(c *serverConfig) { c.setupWarnings = cleanSetupWarnings(warnings) }
 }
 
 // WithPollInterval overrides the SSE trace-poll interval.
@@ -446,6 +459,7 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 		captureStore:      make(map[string]*capSnap),
 		activeTurns:       make(map[string]*activeTurn),
 		kits:              cfg.kits,
+		setupWarnings:     append([]SetupWarning(nil), cfg.setupWarnings...),
 	}
 }
 
@@ -832,6 +846,9 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 
 	case "runstatus.kits.list":
 		return s.listInstalledKits(), nil
+
+	case "runstatus.setup.status":
+		return s.setupStatus(), nil
 
 	case "runstatus.stories.list":
 		return s.provider.ListStories(), nil

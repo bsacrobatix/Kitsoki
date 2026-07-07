@@ -73,3 +73,19 @@ func TestStartupNoticePrintsAtStartup(t *testing.T) {
 	pending := strings.Join(tuipkg.PendingTranscriptForTest(rm), "\n")
 	require.Contains(t, pending, "project files may need refresh")
 }
+
+func TestStartupNoticePrintsAfterInitialView(t *testing.T) {
+	t.Parallel()
+	orch, sid := setupCloak(t)
+	m := tuipkg.NewRootModel(orch, sid, "", "opening room body",
+		tuipkg.WithStartupNotice("(kitsoki: run setup story)"),
+	)
+
+	rm, _ := tuipkg.ExtractRootModel(m)
+	pending := strings.Join(tuipkg.PendingTranscriptForTest(rm), "\n")
+	bodyIdx := strings.Index(pending, "opening room body")
+	noticeIdx := strings.Index(pending, "run setup story")
+	require.NotEqual(t, -1, bodyIdx, "pending transcript missing initial view:\n%s", pending)
+	require.NotEqual(t, -1, noticeIdx, "pending transcript missing startup notice:\n%s", pending)
+	require.Greater(t, noticeIdx, bodyIdx, "startup notice should remain visible after the initial room body:\n%s", pending)
+}
