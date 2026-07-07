@@ -49,6 +49,18 @@ const dataSource = {
         turn_number: 1,
       }),
   ),
+  driveOperation: vi.fn(
+    (): Promise<TurnResult> =>
+      Promise.resolve({
+        mode: "completed",
+        state: "__exit__done",
+        view: "Done",
+        typed_view: { Source: "", Elements: [] },
+        allowed_intents: [],
+        intents: [],
+        turn_number: 2,
+      }),
+  ),
   listWork: vi.fn().mockResolvedValue({
     summary: {
       items: 1,
@@ -129,6 +141,7 @@ describe("InteractiveView focused chat context", () => {
     setActivePinia(createPinia());
     showChat.mockReset();
     dataSource.submit.mockClear();
+    dataSource.driveOperation.mockClear();
     dataSource.listWork.mockClear();
     dataSource.syncGitHubInbox.mockClear();
     showChat.mockResolvedValue({
@@ -209,6 +222,7 @@ describe("InteractiveView focused chat context", () => {
                 policy_id: "bf__capsule_demo",
                 title: "Capsule bugfix",
                 status: "running",
+                phase: "reproduce_bug",
                 from: "idle",
                 to: "bugfix.reproduce",
                 run_in_background: true,
@@ -226,7 +240,82 @@ describe("InteractiveView focused chat context", () => {
     expect(banner.exists()).toBe(true);
     expect(wrapper.find('[data-testid="operation-run-title"]').text()).toBe("Capsule bugfix");
     expect(wrapper.find('[data-testid="operation-run-status"]').text()).toBe("running in background");
-    expect(banner.text()).toContain("idle -> bugfix.reproduce");
+    expect(banner.text()).toContain("phase reproduce bug");
+    expect(wrapper.find('[data-testid="operation-run-drive"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("drives a running operation from the in-session banner", async () => {
+    route.query = {};
+    dataSource.getTrace
+      .mockResolvedValueOnce({
+        last_turn: 1,
+        events: [
+          {
+            time: "2026-01-01T00:00:01Z",
+            level: "info",
+            msg: "world.update",
+            session_id: "s1",
+            turn: 1,
+            state_path: "idle",
+            attrs: {
+              set: {
+                operation_run: {
+                  operation_id: "bf__capsule_demo",
+                  policy_id: "bf__capsule_demo",
+                  title: "Capsule bugfix",
+                  status: "running",
+                  phase: "run_regression",
+                  run_in_background: true,
+                },
+              },
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        last_turn: 3,
+        events: [
+          {
+            time: "2026-01-01T00:00:03Z",
+            level: "info",
+            msg: "operation.completed",
+            session_id: "s1",
+            turn: 3,
+            state_path: "__exit__done",
+            attrs: {
+              operation_id: "bf__capsule_demo",
+              policy_id: "bf__capsule_demo",
+              title: "Capsule bugfix",
+              status: "completed",
+              terminal_state: "__exit__done",
+              terminal_artifact: "artifacts/qa-report.md",
+            },
+          },
+        ],
+      });
+    dataSource.driveOperation.mockResolvedValueOnce({
+      mode: "completed",
+      state: "__exit__done",
+      view: "Done",
+      typed_view: { Source: "", Elements: [] },
+      allowed_intents: [],
+      intents: [],
+      turn_number: 3,
+    });
+
+    const wrapper = mount(InteractiveView, mountOpts);
+    await flushPromises();
+
+    await wrapper.find('[data-testid="operation-run-drive"]').trigger("click");
+    await flushPromises();
+
+    expect(dataSource.driveOperation).toHaveBeenCalledWith("s1");
+    expect(dataSource.getTrace).toHaveBeenLastCalledWith("s1", { since_turn: 2 });
+    expect(wrapper.find('[data-testid="current-state"]').text()).toBe("__exit__done");
+    expect(wrapper.find('[data-testid="operation-run-drive"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="operation-run-status"]').text()).toBe("completed");
+    expect(wrapper.find('[data-testid="operation-run-artifact"]').text()).toContain("artifacts/qa-report.md");
     wrapper.unmount();
   });
 
@@ -267,6 +356,7 @@ describe("InteractiveView focused chat context", () => {
     expect(wrapper.find('[data-testid="operation-run-status"]').text()).toBe("waiting for needs-human");
     expect(wrapper.find('[data-testid="operation-run-detail"]').text()).toContain("Regression gate was never RED.");
     expect(banner.text()).toContain("parked at __exit__needs-human");
+    expect(wrapper.find('[data-testid="operation-run-drive"]').exists()).toBe(false);
     wrapper.unmount();
   });
 
