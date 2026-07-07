@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"kitsoki/internal/app"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/jobs"
@@ -23,6 +25,14 @@ import (
 // see unread notifications, active background jobs, queued/dispatching/failed
 // chat drives, backgrounded Claude PTYs, and proposal-review work without
 // leaving the current flow.
+func handleWorkSlash(m RootModel, args []string) (RootModel, string, tea.Cmd) {
+	if len(args) > 0 && args[0] == "drive" {
+		return handleWorkDriveSlash(m)
+	}
+	next, block := renderWorkBlock(m, args)
+	return next, block, nil
+}
+
 func renderWorkBlock(m RootModel, args []string) (RootModel, string) {
 	r := blocks.New(m.transcript.width, m.currentTheme())
 	operationRows := workRowsForCurrentOperation(m)
@@ -154,6 +164,32 @@ func workAllSessions(args []string) bool {
 	return false
 }
 
+func handleWorkDriveSlash(m RootModel) (RootModel, string, tea.Cmd) {
+	r := blocks.New(m.transcript.width, m.currentTheme())
+	if m.mode == ModeAwaitingLLM {
+		return m, r.SlashOutput("(work drive: another turn is already in flight)"), nil
+	}
+	if m.orch == nil {
+		return m, r.SlashOutput("(work drive: no live session attached)"), nil
+	}
+	handle, ok := operationRunHandle(m.orch.CurrentWorld(m.sid).Vars[app.OperationRunWorldKey])
+	if !ok {
+		return m, r.SlashOutput("(work drive: no running operation in this session)"), nil
+	}
+	status := operationRunString(handle, "status")
+	if status == "" {
+		status = "running"
+	}
+	if status != "running" {
+		return m, r.SlashOutput(fmt.Sprintf("(work drive: operation is %s)", status)), nil
+	}
+	if mode := operationRunString(handle, "mode"); mode != "" && mode != "autonomous" {
+		return m, r.SlashOutput(fmt.Sprintf("(work drive: operation mode %s needs an operator checkpoint)", mode)), nil
+	}
+	next, cmd := startAsyncTurn(m, "/work drive", asyncDriveOperation(m.orch, m.sid), pendingDeterministic)
+	return next, r.SlashOutput("(work: driving operation)"), cmd
+}
+
 func workRowsForCurrentOperation(m RootModel) []workRow {
 	if m.orch == nil {
 		return nil
@@ -206,19 +242,29 @@ func operationRunWorkHint(handle map[string]any, status string) string {
 		if artifact := operationRunString(handle, "terminal_artifact"); artifact != "" {
 			parts = append(parts, "artifact "+artifact)
 		}
+	case "running":
+		parts = appendOperationProgressHint(parts, handle)
+		parts = append(parts, "/work drive")
 	default:
-		if phase := operationRunDisplayPhase(handle); phase != "" {
-			parts = append(parts, "phase "+phase)
-		} else if from, to := operationRunString(handle, "from"), operationRunString(handle, "to"); from != "" && to != "" {
-			parts = append(parts, from+" -> "+to)
-		} else if intent := operationRunString(handle, "entry_intent"); intent != "" {
-			parts = append(parts, "intent "+intent)
-		}
+		parts = appendOperationProgressHint(parts, handle)
 	}
 	if len(parts) == 0 {
 		return "current session"
 	}
 	return strings.Join(parts, "; ")
+}
+
+func appendOperationProgressHint(parts []string, handle map[string]any) []string {
+	if phase := operationRunDisplayPhase(handle); phase != "" {
+		return append(parts, "phase "+phase)
+	}
+	if from, to := operationRunString(handle, "from"), operationRunString(handle, "to"); from != "" && to != "" {
+		return append(parts, from+" -> "+to)
+	}
+	if intent := operationRunString(handle, "entry_intent"); intent != "" {
+		return append(parts, "intent "+intent)
+	}
+	return parts
 }
 
 type workRow struct {

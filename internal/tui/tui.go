@@ -2043,6 +2043,22 @@ func asyncSubmitDirectFromInput(orch *orchestrator.Orchestrator, sid app.Session
 	}
 }
 
+func asyncDriveOperation(orch *orchestrator.Orchestrator, sid app.SessionID) func(context.Context) (*orchestrator.TurnOutcome, error) {
+	return func(ctx context.Context) (*orchestrator.TurnOutcome, error) {
+		if orch == nil {
+			return nil, fmt.Errorf("work drive: no orchestrator attached")
+		}
+		drive, err := orch.DriveOperation(ctx, sid)
+		if err != nil {
+			return nil, err
+		}
+		if drive != nil && drive.Final != nil {
+			return drive.Final, nil
+		}
+		return orch.CurrentView(ctx, sid)
+	}
+}
+
 // startAsyncTurn puts the model into ModeAwaitingLLM and returns a tea.Cmd that
 // runs the supplied turn function asynchronously. The caller must replace its
 // own model with the returned model before returning from Update.
@@ -2293,9 +2309,12 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	case "/work":
 		var block string
-		m, block = renderWorkBlock(m, parts[1:])
-		m.transcript.AppendBlock(block)
-		return m, nil
+		var cmd tea.Cmd
+		m, block, cmd = handleWorkSlash(m, parts[1:])
+		if block != "" {
+			m.transcript.AppendBlock(block)
+		}
+		return m, cmd
 
 	case "/meta":
 		return m.handleMetaSlash(parts[1:])
