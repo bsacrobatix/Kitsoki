@@ -943,6 +943,7 @@ SITE_PARENT_WRITE_DIRS := \
 	$(SITE_ABS) \
 	$(SITE_ABS)/.vitepress \
 	$(SITE_ABS)/src \
+	$(SITE_ABS)/src/decks \
 	$(SITE_ABS)/src/features \
 	$(SITE_ABS)/src/ja/features \
 	$(SITE_ABS)/src/th/features \
