@@ -19,8 +19,11 @@ interactive/live-model or agent-in-the-loop terminal testing.
   xterm.js scaffolding. Instead of replaying a cassette via `window.__feed`,
   it opens a real `WebSocket` to the bridge: incoming bytes go straight to
   `term.write()`, and `term.onData` sends real keystroke bytes back over the
-  socket. `window.__dump()` returns the exact current screen text via xterm's
-  buffer API — no OCR or vision needed for test assertions.
+  socket. If the page opens before the bridge starts listening, it retries the
+  websocket until the first successful connection, so Playwright captures do not
+  need a separate TCP wait loop. `window.__dump()` returns the exact current
+  screen text via xterm's buffer API — no OCR or vision needed for test
+  assertions.
 - **Static server** — `player/serve.mjs`, same dependency-free `node:http`
   static server pattern as `tools/mcp-demo/player/serve.mjs`.
 
@@ -84,7 +87,11 @@ keystrokes typed via `computer` landed in a live `kitsoki run` session and
 One gotcha worth knowing: take the first screenshot only *after* the initial
 frame has painted (a screenshot fired immediately on page load, before the
 first pty output arrives over the socket, can be blank) — poll `window.__status()
-=== "connected"` first, or just screenshot again if the first one looks empty.
+=== "connected"` and then poll `window.__dump()` for the text you need, or just
+screenshot again if the first one looks empty. For scrollback evidence, prefer
+the deterministic helpers over mouse wheel deltas: `window.__scrollLines(n)`,
+`window.__scrollToTop()`, and `window.__scrollToBottom()` all return the visible
+viewport text after scrolling.
 
 ## Tests
 
