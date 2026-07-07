@@ -20,6 +20,8 @@ Hard requirements:
 - `schema` must be `project-profile/v1`.
 - `id` must stay the discovered project id.
 - `kitsoki.story` must be `dev-story`.
+- Preserve `kitsoki.enabled_stories` from discovery when present; if absent,
+  default to `["setup", "bugfix", "pr-refinement", "git-ops"]`.
 - `kitsoki.instance.id` must be `<id>-dev`.
 - `kitsoki.instance.path` must be `.kitsoki/stories/<id>-dev/app.yaml`.
 - `kitsoki.instance.bindings` must include `ticket`, `vcs`, `ci`, `workspace`, and `transport`.
@@ -38,6 +40,9 @@ Hard requirements:
 - Include `onboarding.base_story`, `onboarding.base_story_title`, and
   `onboarding.base_story_reason`; default to `dev-story` as the starter story
   unless the repo evidence strongly says another embedded starter is better.
+- Include `onboarding.starter_stories` and `onboarding.expansion_policy` so a
+  team can begin with setup, bugfix, PR refinement, and git-ops before expanding
+  deliberately.
 - Include concise `onboarding.repo_patterns` evidence and
   `onboarding.story_customizations` entries so future session mining can evolve
   the project-local profile instead of patching the shared story.

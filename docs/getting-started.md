@@ -135,6 +135,16 @@ With no app path, `kitsoki run` starts the embedded dev-story root for the
 current project; `kitsoki run @kitsoki/dev-story` names it explicitly.
 Discovery infers the project id, title, stack, and dev/test/build commands.
 
+To start a team on a focused subset before expanding the catalog, include the
+starter stories in the onboarding request:
+
+```text
+onboard ~/code/my-project --stories pr-refinement,bugfixing,setup,git-ops
+```
+
+If you omit the flag, onboarding uses that same default focused set:
+`setup`, `bugfix`, `pr-refinement`, and `git-ops`.
+
 Two caveats:
 
 - The interactive run needs an agent backend (§2) for the discovery
@@ -168,7 +178,7 @@ runtime or hidden in a cache — it travels with every clone and collaborator:
 | Path | What | Why |
 |---|---|---|
 | `.kitsoki.yaml` | `story_dirs`, `project_profile`, `root.import: dev-story`, and a disabled `mining:` scope when associated transcripts are found | so `kitsoki run` starts the profile-driven implicit root, `kitsoki web` discovers editable project stories, and transcript mining is ready for explicit opt-in |
-| `.kitsoki/project-profile.yaml` | declarative profile (stack, commands, conventions, selected starter story, repo evidence, onboarding baseline) | the discovered description of your project and the source for the implicit dev-story root |
+| `.kitsoki/project-profile.yaml` | declarative profile (stack, commands, conventions, selected starter story, focused enabled-story set, repo evidence, onboarding baseline) | the discovered description of your project and the source for the implicit dev-story root |
 | `.kitsoki/check-readiness.py` | explicit verifier for the profile's `setup_plan.verifications` | so a human runs build/test/story-load checks after apply — onboarding never surprises the repo |
 | `.kitsoki/promote-session-mining.py` | deterministic promotion helper for emitted session-mining recipes | so reviewed mining output can become pending profile customizations |
 | `.kitsoki/stories/<id>-dev/app.yaml` (+ README) | a materialized dev-story **instance** that imports `@kitsoki/dev-story` | an editable snapshot for web discovery and project-local story extensions |
@@ -225,6 +235,12 @@ The implicit root reads `.kitsoki/project-profile.yaml`: command gates,
 host-interface bindings, PRD/design placement, and ticket policy all come from
 that single profile. The materialized instance is still checked in so teams can
 extend it deliberately, but the profile is the reusable convention source.
+
+**Starter story focus.** The profile records the initial scope in
+`kitsoki.enabled_stories` and `onboarding.starter_stories`. This is an adoption
+scope, not a runtime fence: dev-story remains available. Expand deliberately by
+adding story ids there and pairing each new story with project readiness checks
+or local flow coverage.
 
 **Ticket source.** When discovery classifies the tracker as GitHub (the
 `origin` remote parses to a `github.com` `owner/repo` slug), the generated

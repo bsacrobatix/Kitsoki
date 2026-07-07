@@ -57,6 +57,17 @@ Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
   path out of the request (`onboard ~/code/foo` → `/abs/.../foo`), falling back
   to `repo_root` / `workdir` / cwd.
 
+The request can also carry an adoption scope:
+
+```text
+onboard ~/code/my-project --stories pr-refinement,bugfixing,setup,git-ops
+```
+
+Discovery normalizes aliases such as `bugfixing` → `bugfix` and `gitops` →
+`git-ops`. Without an explicit `--stories`/`stories=`/`focus=` value, onboarding
+defaults to the same focused set: `setup`, `bugfix`, `pr-refinement`, and
+`git-ops`.
+
 ## The apply step — two host calls
 
 `init_apply.on_enter` runs two `host.run` invocations, in order:
@@ -71,7 +82,10 @@ Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
    `init_apply_failed`. The generated profile's `onboarding` block records the
    selected starter story, deterministic repo evidence, and initial
    project-local customizations so later session mining can propose changes
-   without patching the shared story.
+   without patching the shared story. It also records the focused starter set in
+   `kitsoki.enabled_stories` and `onboarding.starter_stories`; those fields are
+   an adoption scope, not a runtime fence. Teams expand by adding story ids and
+   matching readiness checks/flows after a story is proven in that repo.
 
 2. **`kitsoki project-tools install --target <path>`** — installs the agent
    toolkit (skills + subagents) and registers the studio MCP, producing the

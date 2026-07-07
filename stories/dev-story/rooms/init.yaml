@@ -25,6 +25,7 @@ states:
       - init_repo_vcs
       - init_repo_default_branch
       - init_repo_remote
+      - init_starter_stories
       - workdir
       - repo_root
     view:
@@ -95,6 +96,7 @@ states:
           init_repo_remote:   "stdout_json.repo_remote"
           init_conventions:   "stdout_json.conventions"
           init_tracker:       "stdout_json.tracker"
+          init_starter_stories: "stdout_json.starter_stories"
           init_transcript_count:      "stdout_json.transcript_count"
           init_transcript_sources:    "stdout_json.transcript_sources"
           init_mining_recommendation: "stdout_json.mining_recommendation"
@@ -177,6 +179,7 @@ states:
                 init_repo_vcs: "none"
                 init_repo_default_branch: ""
                 init_repo_remote: ""
+                init_starter_stories: []
                 init_transcript_count: 0
                 init_transcript_sources: []
                 init_mining_recommendation: {}
@@ -210,6 +213,7 @@ states:
       - init_repo_remote
       - init_conventions
       - init_tracker
+      - init_starter_stories
       - init_transcript_count
       - init_mining_recommendation
       - init_profile_status
@@ -253,6 +257,12 @@ states:
             Transcripts: "{{ world.init_transcript_count|default:0 }}"
             Writes:      ".kitsoki.yaml, .kitsoki/project-profile.yaml, .kitsoki/stories/{{ world.init_project_id }}-dev/app.yaml"
             Mode:        "{{ world.init_profile_mode }}"
+      - heading: "Starter Stories"
+        when: "len(world.init_starter_stories) > 0"
+      - code: |
+          {% for story in world.init_starter_stories %}- {{ story.id }} ({{ story.source_story }}): {{ story.summary }}
+          {% endfor %}
+        when: "len(world.init_starter_stories) > 0"
       - heading: "Session Mining"
         when: "world.init_transcript_count > 0"
       - prose: "{{ world.init_mining_recommendation.note }}"
@@ -369,6 +379,7 @@ states:
                 init_repo_vcs: "none"
                 init_repo_default_branch: ""
                 init_repo_remote: ""
+                init_starter_stories: []
                 init_profile_mode: "deterministic"
                 init_profile_draft: {}
                 init_profile_validation: {}
@@ -664,6 +675,7 @@ states:
             - "{{ world.init_tracker }}"
             - "{{ world.init_profile_json }}"
             - "{{ world.init_mining_recommendation }}"
+            - "{{ world.init_starter_stories }}"
           fail_on_error: true
         bind:
           init_apply_ok: "ok"

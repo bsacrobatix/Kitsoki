@@ -15,6 +15,58 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from init_transcripts import transcript_evidence, transcript_slug  # noqa: E402
 
 
+DEFAULT_STARTER_STORY_IDS = ["setup", "bugfix", "pr-refinement", "git-ops"]
+
+STARTER_STORY_CATALOG = {
+    "setup": {
+        "title": "Project setup",
+        "source_story": "dev-story:onboarding",
+        "summary": "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks.",
+        "expansion": "Keep this enabled as the team's bootstrap and refresh path.",
+    },
+    "bugfix": {
+        "title": "Bug fixing",
+        "source_story": "bugfix",
+        "summary": "Drive a picked bug through reproduce, fix, test, review, and validation gates.",
+        "expansion": "Add narrower project bug policies through profile customizations or prompt overlays.",
+    },
+    "pr-refinement": {
+        "title": "PR refinement",
+        "source_story": "pr-refinement",
+        "summary": "Open or attach to a PR, monitor CI/review feedback, respond, and merge when accepted.",
+        "expansion": "Add provider-specific PR policy after the base loop is proven on real pull requests.",
+    },
+    "git-ops": {
+        "title": "Git operations",
+        "source_story": "git-ops",
+        "summary": "Use the guarded git command hub for status, worktrees, commits, rebases, sync, and integration.",
+        "expansion": "Extend with project branch and remote-sync policy once the team's git flow is stable.",
+    },
+}
+
+STARTER_STORY_ALIASES = {
+    "bugfixing": "bugfix",
+    "bug-fixing": "bugfix",
+    "bug-fix": "bugfix",
+    "bugs": "bugfix",
+    "pr": "pr-refinement",
+    "prs": "pr-refinement",
+    "pull-request": "pr-refinement",
+    "pull-requests": "pr-refinement",
+    "pr-refine": "pr-refinement",
+    "pr-refinement": "pr-refinement",
+    "gitops": "git-ops",
+    "git": "git-ops",
+    "git-ops": "git-ops",
+    "onboarding": "setup",
+    "init": "setup",
+    "setup": "setup",
+}
+
+STORY_OPTION_KEYS = {"--stories", "--starter-stories", "--story-focus", "--focus"}
+STORY_ASSIGNMENT_KEYS = {"stories", "starter_stories", "starter-stories", "story_focus", "story-focus", "focus"}
+
+
 def slug(value: str) -> str:
     value = value.strip().lower()
     value = re.sub(r"^@[^/]+/", "", value)
@@ -26,6 +78,95 @@ def title_from_slug(value: str) -> str:
     if value == "slidey":
         return "Slidey"
     return " ".join(part.capitalize() for part in value.replace("_", "-").split("-") if part)
+
+
+def normalize_story_id(value: str) -> str:
+    text = value.strip().strip("'\"`").lower().replace("_", "-")
+    text = re.sub(r"[^a-z0-9-]+", "-", text).strip("-")
+    return STARTER_STORY_ALIASES.get(text, text)
+
+
+def starter_story_entry(story_id: str) -> dict:
+    story_id = normalize_story_id(story_id)
+    base = STARTER_STORY_CATALOG.get(story_id)
+    if base is None:
+        base = {
+            "title": title_from_slug(story_id),
+            "source_story": story_id,
+            "summary": "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.",
+            "expansion": "Promote this story after adding project readiness evidence.",
+        }
+    return {"id": story_id, "status": "enabled", **base}
+
+
+def starter_story_entries(story_ids: list[str] | None = None) -> list[dict]:
+    ids = story_ids or DEFAULT_STARTER_STORY_IDS
+    out: list[dict] = []
+    seen: set[str] = set()
+    for raw in ids:
+        story_id = normalize_story_id(raw)
+        if not story_id or story_id == "all" or story_id in seen:
+            continue
+        seen.add(story_id)
+        out.append(starter_story_entry(story_id))
+    if not out:
+        return starter_story_entries(DEFAULT_STARTER_STORY_IDS)
+    return out
+
+
+def story_ids_from_text(value: str) -> list[str]:
+    text = re.sub(r"\band\b", ",", value, flags=re.IGNORECASE)
+    text = text.replace("+", ",")
+    if any(sep in text for sep in [",", ";"]):
+        raw = re.split(r"[,;]+", text)
+    else:
+        raw = text.split()
+    return [normalize_story_id(item) for item in raw if normalize_story_id(item)]
+
+
+def parse_story_focus(request: str) -> list[dict]:
+    text = (request or "").strip()
+    if not text:
+        return starter_story_entries()
+    try:
+        parts = shlex.split(text)
+    except ValueError:
+        parts = text.split()
+    collected: list[str] = []
+    index = 0
+    while index < len(parts):
+        token = parts[index]
+        lower = token.lower()
+        if lower in STORY_OPTION_KEYS:
+            values: list[str] = []
+            index += 1
+            while index < len(parts) and not parts[index].startswith("--"):
+                values.append(parts[index])
+                index += 1
+            collected.extend(story_ids_from_text(" ".join(values)))
+            continue
+        if "=" in token:
+            key, value = token.split("=", 1)
+            key = key.lower().lstrip("-").replace("-", "_")
+            if key in {item.replace("-", "_") for item in STORY_ASSIGNMENT_KEYS}:
+                collected.extend(story_ids_from_text(value))
+        index += 1
+    if not collected:
+        match = re.search(
+            r"(?:starter[-_ ]stories|story[-_ ]focus|stories|focus)\s*[:=]\s*(.+)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            collected.extend(story_ids_from_text(match.group(1)))
+    return starter_story_entries(collected)
+
+
+def is_story_focus_assignment(token: str) -> bool:
+    if "=" not in token:
+        return False
+    key = token.split("=", 1)[0].lower().lstrip("-").replace("-", "_")
+    return key in {item.replace("-", "_") for item in STORY_ASSIGNMENT_KEYS}
 
 
 def parse_target(request: str, workdir: str, repo_root: str) -> Path:
@@ -49,8 +190,19 @@ def parse_target(request: str, workdir: str, repo_root: str) -> Path:
                 rest = parts[len(prefix) :]
                 if rest and rest[0].lower() in {"this", "repo", "project"}:
                     rest = rest[1:]
-                if rest:
-                    target = rest[0]
+                skip_next = False
+                for item in rest:
+                    lower = item.lower()
+                    if skip_next:
+                        skip_next = False
+                        continue
+                    if lower in STORY_OPTION_KEYS:
+                        skip_next = True
+                        continue
+                    if lower.startswith("--") or is_story_focus_assignment(item):
+                        continue
+                    target = item
+                    break
                 break
         if not target and len(parts) == 1:
             target = parts[0]
@@ -199,7 +351,7 @@ def git_info(path: Path) -> dict:
     return {"vcs": "git", "default_branch": default_branch or "main", "remote": remote}
 
 
-def invalid_discovery(path: Path, error: str) -> dict:
+def invalid_discovery(path: Path, error: str, starter_stories: list[dict] | None = None) -> dict:
     transcripts = transcript_evidence(path)
     return {
         "target_path": str(path),
@@ -216,6 +368,7 @@ def invalid_discovery(path: Path, error: str) -> dict:
         "conventions": "local defaults",
         "tracker": "none",
         "ticket_repo": "",
+        "starter_stories": starter_stories or starter_story_entries(),
         "transcript_slug": transcripts["slug"],
         "transcript_count": transcripts["count"],
         "transcript_sources": transcripts["sources"],
@@ -224,11 +377,12 @@ def invalid_discovery(path: Path, error: str) -> dict:
     }
 
 
-def discover(path: Path) -> dict:
+def discover(path: Path, starter_stories: list[dict] | None = None) -> dict:
+    starter_stories = starter_stories or starter_story_entries()
     if not path.exists():
-        return invalid_discovery(path, "target path does not exist")
+        return invalid_discovery(path, "target path does not exist", starter_stories)
     if not path.is_dir():
-        return invalid_discovery(path, "target path is not a directory")
+        return invalid_discovery(path, "target path is not a directory", starter_stories)
 
     package = read_package(path)
     package_name = package.get("name") if isinstance(package.get("name"), str) else ""
@@ -347,6 +501,7 @@ def discover(path: Path) -> dict:
         "conventions": "hybrid" if project_id == "slidey" or (path / "AGENTS.md").exists() or (path / "CLAUDE.md").exists() else "local defaults",
         "tracker": "github" if ticket_repo else "none",
         "ticket_repo": ticket_repo,
+        "starter_stories": starter_stories,
         "transcript_slug": transcripts["slug"],
         "transcript_count": transcripts["count"],
         "transcript_sources": transcripts["sources"],
@@ -358,7 +513,7 @@ def main() -> int:
     request = sys.argv[1] if len(sys.argv) > 1 else ""
     workdir = sys.argv[2] if len(sys.argv) > 2 else ""
     repo_root = sys.argv[3] if len(sys.argv) > 3 else ""
-    print(json.dumps(discover(parse_target(request, workdir, repo_root)), sort_keys=True))
+    print(json.dumps(discover(parse_target(request, workdir, repo_root), parse_story_focus(request)), sort_keys=True))
     return 0
 
 
