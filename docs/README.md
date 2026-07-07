@@ -16,9 +16,9 @@ For the elevator pitch and user quickstart, see the top-level
 | Debugging a session | [`tracing/README.md`](tracing/README.md) -> [`tracing/testing.md`](tracing/testing.md) -> [`tracing/trace-format.md`](tracing/trace-format.md) |
 | Working on UI | [`web/README.md`](web/README.md) or [`tui/README.md`](tui/README.md) -> [`tui/rendering-tests.md`](tui/rendering-tests.md) |
 
-The tree is organised into four reference sections plus a recipes area. Each
-section has its own `README.md` index. The proposal tree is design history and
-work in progress, not the product manual.
+The tree is organised by task and area. Each section has its own `README.md`
+index. The proposal tree is design history and work in progress, not the
+product manual.
 
 ---
 

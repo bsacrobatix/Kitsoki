@@ -336,6 +336,41 @@
   line-height: 1.45;
 }
 
+/* ── Mermaid diagrams in staged guide docs ──────────────────────────────── */
+.kmermaid {
+  margin: 1.5rem 0;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+  overflow-x: auto;
+}
+.kmermaid__diagram {
+  min-width: min-content;
+  padding: 1rem;
+}
+.kmermaid__diagram svg {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+.kmermaid__source {
+  margin: 0 !important;
+  border-radius: 0;
+}
+.kmermaid[data-rendered="true"] .kmermaid__source {
+  display: none;
+}
+.kmermaid[data-error="true"] {
+  border-color: var(--vp-c-danger-1);
+}
+.kmermaid[data-error="true"] .kmermaid__diagram {
+  color: var(--vp-c-danger-1);
+  font-size: 0.86rem;
+  white-space: pre-wrap;
+}
+
 /* -- Slidey Deck Gallery --------------------------------------------------- */
 .kdeck-grid {
   display: grid;

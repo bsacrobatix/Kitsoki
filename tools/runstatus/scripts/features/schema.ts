@@ -321,10 +321,18 @@ function siteDocAllowlist(repoRoot: string): ((rel: string) => boolean) | null {
   if (!fs.existsSync(mp)) return null;
   let froms: string[];
   try {
+    type ManifestItem = { from?: string };
+    type ManifestGroup = { items?: ManifestItem[] };
+    type ManifestSection = { items?: ManifestItem[]; groups?: ManifestGroup[] };
+    const collect = (items: ManifestItem[] | undefined): string[] =>
+      (items ?? []).map((it) => it.from).filter(Boolean) as string[];
     const m = JSON.parse(fs.readFileSync(mp, "utf8")) as {
-      sections?: Array<{ items?: Array<{ from?: string }> }>;
+      sections?: ManifestSection[];
     };
-    froms = (m.sections ?? []).flatMap((s) => (s.items ?? []).map((it) => it.from).filter(Boolean) as string[]);
+    froms = (m.sections ?? []).flatMap((s) => [
+      ...collect(s.items),
+      ...(s.groups ?? []).flatMap((g) => collect(g.items)),
+    ]);
   } catch {
     return null;
   }

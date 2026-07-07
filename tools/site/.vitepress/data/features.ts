@@ -201,15 +201,29 @@ export function featuresSidebar(locale: LocaleCode = "en") {
 /** Sidebar for /guide/: the docs-manifest sections, titled by first heading. */
 export function guideSidebar() {
   const { sections } = expandManifest(siteDir, repoRoot);
+  const itemFor = (e: { from: string; to: string; title?: string }) => ({
+    text: e.title ?? firstHeading(path.join(repoRoot, e.from)) ?? path.basename(e.from, ".md"),
+    link: "/" + e.to.replace(/\.md$/, "").replace(/\/index$/, "/"),
+  });
+
   return [
     { text: "Docs", link: "/guide/" },
     ...sections.map((s) => ({
       text: s.title,
-      collapsed: s.title !== "Evaluate and install",
-      items: s.entries.map((e) => ({
-        text: firstHeading(path.join(repoRoot, e.from)) ?? path.basename(e.from, ".md"),
-        link: "/" + e.to.replace(/\.md$/, "").replace(/\/index$/, "/"),
-      })),
+      collapsed: !["Evaluate and install", "Architecture"].includes(s.title),
+      items:
+        s.groups?.length > 0
+          ? [
+              ...s.entries
+                .filter((e) => !s.groups.some((g) => g.entries.some((ge) => ge.from === e.from)))
+                .map(itemFor),
+              ...s.groups.map((g) => ({
+                text: g.title,
+                collapsed: g.collapsed ?? true,
+                items: g.entries.map(itemFor),
+              })),
+            ]
+          : s.entries.map(itemFor),
     })),
   ];
 }
