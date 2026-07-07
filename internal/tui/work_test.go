@@ -340,7 +340,7 @@ root: idle
 operations:
   demo_run:
     title: Demo run
-    mode: autonomous
+    mode: supervised
     execution_mode: one-shot
     run_in_background: true
     terminal_artifact: done_artifact
@@ -457,7 +457,7 @@ states:
 	summary := transcriptAfter(t, tx, "operation summary")
 	require.Contains(t, summary, "title: Demo run")
 	require.Contains(t, summary, "status: completed")
-	require.Contains(t, summary, "mode: autonomous")
+	require.Contains(t, summary, "mode: supervised")
 	require.Contains(t, summary, "execution: one-shot")
 	require.Contains(t, summary, "terminal: done")
 	require.Contains(t, summary, "artifact: done_artifact")

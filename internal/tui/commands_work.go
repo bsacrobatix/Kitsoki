@@ -191,7 +191,7 @@ func handleWorkDriveSlash(m RootModel) (RootModel, string, tea.Cmd) {
 	if status != "running" {
 		return m, r.SlashOutput(fmt.Sprintf("(work drive: operation is %s)", status)), nil
 	}
-	if mode := operationRunString(handle, "mode"); mode != "" && mode != "autonomous" {
+	if mode := operationRunString(handle, "mode"); !operationRunModeCanDrive(mode) {
 		return m, r.SlashOutput(fmt.Sprintf("(work drive: operation mode %s needs an operator checkpoint)", mode)), nil
 	}
 	next, cmd := startAsyncTurn(m, "/work drive", asyncDriveOperation(m.orch, m.sid), pendingDeterministic)
@@ -302,7 +302,7 @@ func operationRunSummaryBlock(r *blocks.Renderer, handle map[string]any) string 
 	add("stop detail", operationRunString(handle, "stop_detail"))
 
 	var actions []string
-	if status == "running" {
+	if status == "running" && operationRunModeCanDrive(operationRunString(handle, "mode")) {
 		actions = append(actions, "/work drive")
 	}
 	if operationRunString(handle, "terminal_artifact") != "" {
@@ -371,7 +371,10 @@ func operationRunWorkHint(handle map[string]any, status string) string {
 		parts = append(parts, "/work summary")
 	case "running":
 		parts = appendOperationProgressHint(parts, handle)
-		parts = append(parts, "/work drive", "/work summary")
+		if operationRunModeCanDrive(operationRunString(handle, "mode")) {
+			parts = append(parts, "/work drive")
+		}
+		parts = append(parts, "/work summary")
 	default:
 		parts = appendOperationProgressHint(parts, handle)
 		parts = append(parts, "/work summary")
@@ -380,6 +383,11 @@ func operationRunWorkHint(handle map[string]any, status string) string {
 		return "current session"
 	}
 	return strings.Join(parts, "; ")
+}
+
+func operationRunModeCanDrive(mode string) bool {
+	mode = strings.TrimSpace(mode)
+	return mode == "" || mode == "autonomous" || mode == "supervised"
 }
 
 func appendOperationProgressHint(parts []string, handle map[string]any) []string {

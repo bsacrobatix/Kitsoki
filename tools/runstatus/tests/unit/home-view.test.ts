@@ -326,6 +326,7 @@ describe("HomeView", () => {
         operation_id: "bugfix_full",
         title: "Fix bug",
         status: "running",
+        mode: "supervised",
         run_in_background: true,
       },
     });
@@ -374,6 +375,28 @@ describe("HomeView", () => {
     const wrapper = mount(HomeView, mountOpts);
     await flushPromises();
 
+    expect(wrapper.find("[data-testid='session-drive-operation']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("does not show Drive for interactive running operations", async () => {
+    markAutoNavDone();
+    listSessions.mockResolvedValue([
+      session({
+        session_id: "sess-interactive",
+        operation_run: {
+          operation_id: "guided_review",
+          title: "Guided review",
+          status: "running",
+          mode: "interactive",
+          run_in_background: true,
+        },
+      }),
+    ]);
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='session-operation-status']").text()).toBe("running in background");
     expect(wrapper.find("[data-testid='session-drive-operation']").exists()).toBe(false);
     wrapper.unmount();
   });
