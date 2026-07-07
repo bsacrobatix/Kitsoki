@@ -9,7 +9,16 @@ states:
 
   configure:
     description: "Capture the brief and the deterministic gate; start the loop."
-    relevant_world: [brief, gate_command, base_branch, workspace_id]
+    relevant_world: [brief, gate_command, base_branch, workspace_id, auto_start]
+    on_enter:
+      # Parent stories that already classified the work can seed brief +
+      # gate_command and set auto_start. Clear the flag before the synthetic
+      # ship intent dispatches so reload/re-entry never starts a second run.
+      - when: "world.auto_start && world.brief != '' && world.gate_command != ''"
+        emit_intent: ship
+      - when: "world.auto_start && world.brief != '' && world.gate_command != ''"
+        set:
+          auto_start: false
     view:
       - prose: "Deliver one scoped brief. It will be implemented in an isolated worktree, gated, integrated to main, re-verified on the merged commit, then cleaned up."
       - kv:

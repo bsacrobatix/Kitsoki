@@ -44,6 +44,7 @@ world:
   main_worktree_path: { type: string, default: "." } # where integrate/verify/cleanup run
   workspace_id:     { type: string, default: "ship-it" }   # .worktrees/<id>
   workspace_branch: { type: string, default: "ship-it/run" } # branch the worktree holds
+  auto_start:       { type: bool, default: false }    # parent imports can seed brief+gate and launch without a second operator turn
   worktree_path:    { type: string, default: "" }    # bound back from cherny's exit
   build_check_disabled: { type: bool, default: false }
 
