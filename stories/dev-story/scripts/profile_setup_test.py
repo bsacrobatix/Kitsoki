@@ -28,6 +28,11 @@ class ProfileSetupTest(unittest.TestCase):
             else:
                 os.environ[key] = value
 
+    def write_executable(self, path: Path, text: str) -> Path:
+        path.write_text(text, encoding="utf-8")
+        path.chmod(0o755)
+        return path
+
     def test_discover_merges_profiles_and_redacts_env_refs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -175,6 +180,8 @@ harness_profiles:
                 "KITSOKI_AGENT_CLAUDE_BIN": "/bin/echo",
                 "ANTHROPIC_API_KEY": None,
                 "ANTHROPIC_AUTH_TOKEN": None,
+                "OPENAI_API_KEY": None,
+                "SYNTHETIC_API_KEY": None,
             })
             try:
                 report = discover(root)
@@ -183,10 +190,105 @@ harness_profiles:
             claude = next(source for source in report["backend_sources"] if source["backend"] == "claude")
             self.assertEqual(claude["logged_in"], "unknown")
             self.assertEqual(claude["auth_summary"], "file-present:~/.claude/settings.json, file-present:~/.claude.json")
+            self.assertEqual(claude["auth_probe"]["status"], "unsupported")
             self.assertTrue(all(not source["credential"] for source in claude["auth_sources"]))
             profile = next(profile for profile in report["profiles"] if profile["name"] == "claude-native")
             self.assertEqual(profile["readiness"], "installed-auth-unknown")
             self.assertEqual(report["candidate_action"], "")
+
+    def test_claude_auth_status_reports_logged_out(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            root.mkdir()
+            home = Path(tmp) / "home"
+            home.mkdir()
+            fake_claude = self.write_executable(
+                Path(tmp) / "claude",
+                """#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "status" ] && [ "$3" = "--json" ]; then
+  printf '%s\n' '{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}'
+  exit 1
+fi
+exit 2
+""",
+            )
+            (root / ".kitsoki.yaml").write_text(
+                """default_profile: claude-native
+harness_profiles:
+  claude-native:
+    backend: claude
+    model: opus
+""",
+                encoding="utf-8",
+            )
+            old = self.patch_env({
+                "HOME": str(home),
+                "KITSOKI_AGENT_CLAUDE_BIN": str(fake_claude),
+                "ANTHROPIC_API_KEY": None,
+                "ANTHROPIC_AUTH_TOKEN": None,
+                "OPENAI_API_KEY": None,
+                "SYNTHETIC_API_KEY": None,
+            })
+            try:
+                report = discover(root)
+            finally:
+                self.restore_env(old)
+            claude = next(source for source in report["backend_sources"] if source["backend"] == "claude")
+            self.assertEqual(claude["logged_in"], "no")
+            self.assertEqual(claude["auth_summary"], "probe:not-logged-in")
+            self.assertEqual(claude["auth_probe"]["status"], "ok")
+            self.assertIs(claude["auth_probe"]["logged_in"], False)
+            self.assertEqual(claude["auth_probe"]["exit_code"], 1)
+            profile = next(profile for profile in report["profiles"] if profile["name"] == "claude-native")
+            self.assertEqual(profile["readiness"], "installed-auth-missing")
+            self.assertEqual(report["candidate_action"], "")
+            self.assertIn("claude auth probe reports not logged in", report["warnings"])
+
+    def test_claude_auth_status_reports_logged_in(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            root.mkdir()
+            home = Path(tmp) / "home"
+            home.mkdir()
+            fake_claude = self.write_executable(
+                Path(tmp) / "claude",
+                """#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "status" ] && [ "$3" = "--json" ]; then
+  printf '%s\n' '{"loggedIn":true,"authMethod":"subscription","apiProvider":"firstParty"}'
+  exit 0
+fi
+exit 2
+""",
+            )
+            (root / ".kitsoki.yaml").write_text(
+                """default_profile: claude-native
+harness_profiles:
+  claude-native:
+    backend: claude
+    model: opus
+""",
+                encoding="utf-8",
+            )
+            old = self.patch_env({
+                "HOME": str(home),
+                "KITSOKI_AGENT_CLAUDE_BIN": str(fake_claude),
+                "ANTHROPIC_API_KEY": None,
+                "ANTHROPIC_AUTH_TOKEN": None,
+                "OPENAI_API_KEY": None,
+                "SYNTHETIC_API_KEY": None,
+            })
+            try:
+                report = discover(root)
+            finally:
+                self.restore_env(old)
+            claude = next(source for source in report["backend_sources"] if source["backend"] == "claude")
+            self.assertEqual(claude["logged_in"], "yes")
+            self.assertEqual(claude["auth_summary"], "probe:logged-in")
+            self.assertEqual(claude["auth_probe"]["status"], "ok")
+            self.assertIs(claude["auth_probe"]["logged_in"], True)
+            self.assertEqual(claude["auth_probe"]["auth_method"], "subscription")
+            profile = next(profile for profile in report["profiles"] if profile["name"] == "claude-native")
+            self.assertEqual(profile["readiness"], "installed")
 
     def test_apply_rejects_raw_secret_instead_of_env_var_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

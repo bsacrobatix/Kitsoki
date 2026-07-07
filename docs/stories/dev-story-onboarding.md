@@ -90,14 +90,19 @@ setup local harness profile
 
 That enters `profile_setup_discover`, which reads `.kitsoki.yaml` plus
 `.kitsoki.local.yaml`, detects backend binaries (`claude`, `codex`, `copilot`,
-`agy`) and their `KITSOKI_AGENT_*_BIN` overrides, and reports only credential
-source/presence for common env vars and local auth files. It does not run a
-model or call a provider.
+`agy`) and their `KITSOKI_AGENT_*_BIN` overrides, and reports credential
+source/presence for common env vars and local auth files. For Claude Code it
+also runs the safe auth probe `claude auth status --json` when the CLI is
+installed. That command does not send a model prompt or spend tokens; discovery
+parses its JSON even when the command exits non-zero for a logged-out account.
 
 `logged_in=yes` is intentionally conservative: it means discovery found an env
-credential or a credential-looking auth file marker. Configuration/history files
-such as `~/.claude/settings.json` or `~/.claude.json` are reported as
-presence-only evidence and leave the login state `unknown`.
+credential, a positive Claude auth-status probe, or a credential-looking auth
+file marker when no active probe is available. `logged_in=no` for Claude means
+the CLI explicitly reported `loggedIn:false`. Configuration/history files such
+as `~/.claude/settings.json` or `~/.claude.json` are reported as presence-only
+evidence and leave the login state `unknown` when the active probe is
+unavailable.
 
 The graph is:
 

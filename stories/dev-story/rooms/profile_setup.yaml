@@ -4,9 +4,9 @@
 #   landing -> profile_setup_discover -> profile_setup_review
 #   profile_setup_review -> profile_setup_apply -> profile_setup_done
 #
-# Discovery reports only source/presence for credentials. Apply writes only the
-# gitignored `.kitsoki.local.yaml`, after the operator confirms the reviewed
-# patch preview.
+# Discovery reports credential source/presence and safe CLI auth-status probes.
+# Apply writes only the gitignored `.kitsoki.local.yaml`, after the operator
+# confirms the reviewed patch preview.
 
 states:
 
@@ -30,7 +30,7 @@ states:
           pairs:
             Target: "{{ world.profile_setup_target_path|default:world.repo_root|default:world.workdir|default:'.' }}"
             Status: "{{ world.profile_setup_status }}"
-      - prose: "Inspecting checked-in and local Kitsoki config, backend binaries, and credential sources. No provider calls run."
+      - prose: "Inspecting checked-in and local Kitsoki config, backend binaries, credential sources, and safe auth-status probes. No model calls run."
       - prose: "{{ world.profile_setup_discovery.error|default:'' }}"
         when: "(world.profile_setup_discovery.error ?? '') != ''"
       - kv:
