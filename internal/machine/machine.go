@@ -1026,6 +1026,14 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 		newWorld = updatedWorld
 		events = append(events, operationEvents...)
 	}
+	if updatedWorld, operationEvents := m.completeActiveOperationRunForOperationClose(effectEvents, finalState, newWorld); len(operationEvents) > 0 {
+		newWorld = updatedWorld
+		events = append(events, operationEvents...)
+	}
+	if updatedWorld, operationEvents := m.failActiveOperationRunForOperationAbandon(effectEvents, finalState, newWorld); len(operationEvents) > 0 {
+		newWorld = updatedWorld
+		events = append(events, operationEvents...)
+	}
 	if updatedWorld, operationEvents := m.completeActiveOperationRun(finalState, newWorld); len(operationEvents) > 0 {
 		newWorld = updatedWorld
 		events = append(events, operationEvents...)
@@ -1034,11 +1042,16 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 		op := newWorld.Operation
 		discarded := newWorld.OverlayPatch()
 		newWorld = newWorld.DiscardOperation()
-		events = append(events, newEvent(store.OperationAbandoned, map[string]any{
+		abandoned := newEvent(store.OperationAbandoned, map[string]any{
 			"operation_id":    op.ID,
 			"reason":          "exit",
 			"discarded_patch": discarded,
-		}))
+		})
+		events = append(events, abandoned)
+		if updatedWorld, operationEvents := m.failActiveOperationRunForOperationAbandon([]store.Event{abandoned}, finalState, newWorld); len(operationEvents) > 0 {
+			newWorld = updatedWorld
+			events = append(events, operationEvents...)
+		}
 	}
 
 	// 7. Render view. When the target is parallel-encoded, compose region
@@ -1461,6 +1474,14 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 			newWorld = updatedWorld
 			events = append(events, operationEvents...)
 		}
+		if updatedWorld, operationEvents := m.completeActiveOperationRunForOperationClose(ev2, state, newWorld); len(operationEvents) > 0 {
+			newWorld = updatedWorld
+			events = append(events, operationEvents...)
+		}
+		if updatedWorld, operationEvents := m.failActiveOperationRunForOperationAbandon(ev2, state, newWorld); len(operationEvents) > 0 {
+			newWorld = updatedWorld
+			events = append(events, operationEvents...)
+		}
 		if updatedWorld, operationEvents := m.completeActiveOperationRun(state, newWorld); len(operationEvents) > 0 {
 			newWorld = updatedWorld
 			events = append(events, operationEvents...)
@@ -1573,6 +1594,98 @@ func (m *machineImpl) completeActiveOperationRunForExit(exitReason, policyPrefix
 		terminalState = "__exit__" + terminalState
 	}
 	return m.finishActiveOperationRun(terminalState, policyPrefix, w)
+}
+
+func (m *machineImpl) completeActiveOperationRunForOperationClose(events []store.Event, state string, w world.World) (world.World, []store.Event) {
+	closedOperationID := operationRunClosedOperationID(events)
+	if m.appDef == nil || closedOperationID == "" {
+		return w, nil
+	}
+	active, ok := operationRunHandle(w.Vars[app.OperationRunWorldKey])
+	if !ok || strings.TrimSpace(operationRunString(active, "status")) != "running" {
+		return w, nil
+	}
+	policyID := strings.TrimSpace(operationRunString(active, "policy_id"))
+	if policyID == "" {
+		policyID = strings.TrimSpace(operationRunString(active, "operation_id"))
+	}
+	if policyID == "" || policyID != closedOperationID {
+		return w, nil
+	}
+	return m.finishActiveOperationRun(state, "", w)
+}
+
+func (m *machineImpl) failActiveOperationRunForOperationAbandon(events []store.Event, state string, w world.World) (world.World, []store.Event) {
+	operationID, reason := operationRunAbandonedOperation(events)
+	if m.appDef == nil || operationID == "" {
+		return w, nil
+	}
+	active, ok := operationRunHandle(w.Vars[app.OperationRunWorldKey])
+	if !ok || strings.TrimSpace(operationRunString(active, "status")) != "running" {
+		return w, nil
+	}
+	policyID := strings.TrimSpace(operationRunString(active, "policy_id"))
+	if policyID == "" {
+		policyID = strings.TrimSpace(operationRunString(active, "operation_id"))
+	}
+	if policyID == "" || policyID != operationID {
+		return w, nil
+	}
+	policy, ok := m.appDef.Operations[policyID]
+	if !ok || policy == nil {
+		return w, nil
+	}
+	if reason == "" {
+		reason = "abandoned"
+	}
+	payload := operationRunFailedPayload(policyID, policy, state, reason)
+	terminalHandle := cloneMapAny(active)
+	for k, v := range payload {
+		terminalHandle[k] = v
+	}
+	next := w.Clone()
+	next.SetDurable(app.OperationRunWorldKey, terminalHandle)
+	return next, []store.Event{
+		newEvent(store.OperationRunFailed, payload),
+		operationRunWorldUpdateEvent(terminalHandle),
+	}
+}
+
+func operationRunClosedOperationID(events []store.Event) string {
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if ev.Kind != store.OperationCommitted && ev.Kind != store.OperationDraftPersisted {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			continue
+		}
+		if id, _ := payload["operation_id"].(string); strings.TrimSpace(id) != "" {
+			return strings.TrimSpace(id)
+		}
+	}
+	return ""
+}
+
+func operationRunAbandonedOperation(events []store.Event) (operationID, reason string) {
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if ev.Kind != store.OperationAbandoned {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			continue
+		}
+		id, _ := payload["operation_id"].(string)
+		if strings.TrimSpace(id) == "" {
+			continue
+		}
+		reason, _ := payload["reason"].(string)
+		return strings.TrimSpace(id), strings.TrimSpace(reason)
+	}
+	return "", ""
 }
 
 func (m *machineImpl) finishActiveOperationRun(terminalState, policyPrefix string, w world.World) (world.World, []store.Event) {
@@ -1759,6 +1872,18 @@ func operationRunWaitingPayload(policyID string, policy *app.OperationPolicy, te
 	payload["stop_reason"] = reason
 	if detail != "" {
 		payload["stop_detail"] = detail
+	}
+	return payload
+}
+
+func operationRunFailedPayload(policyID string, policy *app.OperationPolicy, terminalState, reason string) map[string]any {
+	payload := operationRunPolicyPayload(policy, false)
+	payload["operation_id"] = policyID
+	payload["policy_id"] = policyID
+	payload["status"] = "failed"
+	payload["terminal_state"] = terminalState
+	if strings.TrimSpace(reason) != "" {
+		payload["reason"] = strings.TrimSpace(reason)
 	}
 	return payload
 }

@@ -565,6 +565,165 @@ func TestOperationScopeAbandonCommitReplay(t *testing.T) {
 	require.Equal(t, committed.World.Vars, replayed.World.Vars)
 }
 
+func TestOperationRunCompletesOnMatchingOperationCommit(t *testing.T) {
+	def := &app.AppDef{
+		App:  app.AppMeta{ID: "op-run-commit-test"},
+		Root: "hub",
+		World: map[string]app.VarDef{
+			"scratch":   {Type: "string", Default: ""},
+			"committed": {Type: "string", Default: ""},
+		},
+		Operations: map[string]*app.OperationPolicy{
+			"demo": {
+				Title:           "Demo operation",
+				Mode:            "supervised",
+				ExecutionMode:   "one-shot",
+				RunInBackground: true,
+			},
+		},
+		Intents: map[string]app.Intent{
+			"begin":  {},
+			"back":   {},
+			"accept": {},
+		},
+		States: map[string]*app.State{
+			"hub": {
+				On: map[string][]app.Transition{
+					"begin": {{
+						Target:    "op",
+						Operation: "demo",
+					}},
+				},
+			},
+			"op": {
+				Operation: &app.OperationDecl{Scope: "demo"},
+				OnEnter: []app.Effect{{
+					Set: map[string]any{"scratch": "local"},
+				}},
+				On: map[string][]app.Transition{
+					"back": {{Target: "hub"}},
+					"accept": {{
+						Target: "hub",
+						Effects: []app.Effect{{
+							CommitOperation: &app.CommitOperationEffect{
+								World: map[string]any{"committed": "{{ world.scratch }}"},
+							},
+						}},
+					}},
+				},
+			},
+		},
+	}
+	m := mustNew(t, def)
+	initial := machine.WorldFromSchema(app.WorldSchema(def.World))
+
+	started, err := m.Turn(context.Background(), "hub", initial, intent.IntentCall{Intent: "begin"})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("op"), started.NewState)
+	requireOperationRunStatus(t, started.World, "running")
+
+	abandoned, err := m.Turn(context.Background(), started.NewState, started.World, intent.IntentCall{Intent: "back"})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("hub"), abandoned.NewState)
+	require.Nil(t, abandoned.World.Operation)
+	require.Equal(t, "", abandoned.World.Vars["scratch"], "abandoned overlay must not leak")
+	requireOperationRunStatus(t, abandoned.World, "failed")
+	requireEventKind(t, abandoned.Events, store.OperationAbandoned)
+	requireEventKind(t, abandoned.Events, store.OperationRunFailed)
+	failedPayloads := eventPayloads(t, abandoned.Events, store.OperationRunFailed)
+	require.Len(t, failedPayloads, 1)
+	require.Equal(t, "demo", failedPayloads[0]["policy_id"])
+	require.Equal(t, "hub", failedPayloads[0]["terminal_state"])
+	require.Equal(t, "exit", failedPayloads[0]["reason"])
+
+	history := append([]store.Event{}, started.Events...)
+	history = append(history, abandoned.Events...)
+	replayed, err := store.BuildJourney(def, "hub", initial, history)
+	require.NoError(t, err)
+	require.Equal(t, abandoned.NewState, replayed.State)
+	require.Equal(t, abandoned.World.Vars, replayed.World.Vars)
+
+	started, err = m.Turn(context.Background(), "hub", initial, intent.IntentCall{Intent: "begin"})
+	require.NoError(t, err)
+	requireOperationRunStatus(t, started.World, "running")
+
+	completed, err := m.Turn(context.Background(), started.NewState, started.World, intent.IntentCall{Intent: "accept"})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("hub"), completed.NewState)
+	require.Nil(t, completed.World.Operation)
+	require.Equal(t, "local", completed.World.Vars["committed"])
+	requireOperationRunStatus(t, completed.World, "completed")
+	requireEventKind(t, completed.Events, store.OperationCommitted)
+	requireEventKind(t, completed.Events, store.OperationRunCompleted)
+	payloads := eventPayloads(t, completed.Events, store.OperationRunCompleted)
+	require.Len(t, payloads, 1)
+	require.Equal(t, "demo", payloads[0]["policy_id"])
+	require.Equal(t, "hub", payloads[0]["terminal_state"])
+
+	history = append([]store.Event{}, started.Events...)
+	history = append(history, completed.Events...)
+	replayed, err = store.BuildJourney(def, "hub", initial, history)
+	require.NoError(t, err)
+	require.Equal(t, completed.NewState, replayed.State)
+	require.Equal(t, completed.World.Vars, replayed.World.Vars)
+}
+
+func TestOperationRunIgnoresMismatchedOperationCommit(t *testing.T) {
+	def := &app.AppDef{
+		App:   app.AppMeta{ID: "op-run-mismatch-test"},
+		Root:  "hub",
+		World: map[string]app.VarDef{},
+		Operations: map[string]*app.OperationPolicy{
+			"demo": {
+				Title:           "Demo operation",
+				Mode:            "supervised",
+				ExecutionMode:   "one-shot",
+				RunInBackground: true,
+			},
+		},
+		Intents: map[string]app.Intent{
+			"begin":  {},
+			"accept": {},
+		},
+		States: map[string]*app.State{
+			"hub": {
+				On: map[string][]app.Transition{
+					"begin": {{
+						Target:    "op",
+						Operation: "demo",
+					}},
+				},
+			},
+			"op": {
+				Operation: &app.OperationDecl{Scope: "other"},
+				On: map[string][]app.Transition{
+					"accept": {{
+						Target: "hub",
+						Effects: []app.Effect{{
+							CommitOperation: &app.CommitOperationEffect{},
+						}},
+					}},
+				},
+			},
+		},
+	}
+	m := mustNew(t, def)
+	initial := machine.WorldFromSchema(app.WorldSchema(def.World))
+
+	started, err := m.Turn(context.Background(), "hub", initial, intent.IntentCall{Intent: "begin"})
+	require.NoError(t, err)
+	requireOperationRunStatus(t, started.World, "running")
+
+	completedOverlay, err := m.Turn(context.Background(), started.NewState, started.World, intent.IntentCall{Intent: "accept"})
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("hub"), completedOverlay.NewState)
+	require.Nil(t, completedOverlay.World.Operation)
+	requireOperationRunStatus(t, completedOverlay.World, "running")
+	requireEventKind(t, completedOverlay.Events, store.OperationCommitted)
+	requireNoEventKind(t, completedOverlay.Events, store.OperationRunCompleted)
+	requireNoEventKind(t, completedOverlay.Events, store.OperationRunFailed)
+}
+
 // ─── (b) first-guard-wins with multiple when: branches ───────────────────────
 
 func TestFirstGuardWins(t *testing.T) {
