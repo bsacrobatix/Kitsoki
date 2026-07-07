@@ -1186,6 +1186,12 @@ func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case minePassDoneMsg:
 		return m.handleMinePassDone(msg)
 
+	case bugCommandDoneMsg:
+		if msg.body != "" {
+			m.transcript.AppendBlock(msg.body)
+		}
+		return m, nil
+
 	case spatialPointMsg:
 		return m.handleSpatialPoint(msg)
 
@@ -2140,11 +2146,8 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		return next, cmd
 
 	case "/bug":
-		body, next, cmd := BugCommand{}.Run(m, parts[1:])
-		if body != "" {
-			next.transcript.AppendBlock(body)
-		}
-		return next, cmd
+		m.transcript.AppendBlock(m.bugBlock("privacy check starting..."))
+		return m, bugCommandCmd(m, parts[1:])
 
 	case "/route":
 		body, next, cmd := RouteCommand{}.Run(m, parts[1:])

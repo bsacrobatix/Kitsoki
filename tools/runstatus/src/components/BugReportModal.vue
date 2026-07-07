@@ -15,7 +15,9 @@ import type { HarEntry } from "../data/live-source.js";
 
 const store = useBugReportStore();
 
-const open = computed(() => store.status === "reviewing");
+const open = computed(
+  () => store.status === "reviewing" || store.status === "submitting"
+);
 
 const harEntries = computed<HarEntry[]>(
   () => store.har?.log?.entries ?? []
@@ -367,6 +369,7 @@ function onCancel(): void {
             type="button"
             class="br-cancel"
             data-testid="bug-modal-cancel"
+            :disabled="store.status === 'submitting'"
             @click="onCancel"
           >
             Cancel
@@ -380,6 +383,14 @@ function onCancel(): void {
           >
             {{ store.status === "submitting" ? "Checking privacy…" : "File bug" }}
           </button>
+          <span
+            v-if="store.status === 'submitting'"
+            class="br-submit-status"
+            data-testid="bug-modal-submit-status"
+            role="status"
+          >
+            Checking privacy before filing…
+          </span>
         </footer>
       </div>
     </div>
@@ -615,6 +626,10 @@ function onCancel(): void {
 .br-cancel:hover {
   border-color: #475569;
 }
+.br-cancel:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
 .br-submit {
   background: var(--k-button-bg, #2563eb);
   border: none;
@@ -631,6 +646,10 @@ function onCancel(): void {
 }
 .br-submit:disabled {
   opacity: 0.5;
-  cursor: not-allowed;
+  cursor: wait;
+}
+.br-submit-status {
+  color: var(--k-fg-muted, #94a3b8);
+  font-size: 0.72rem;
 }
 </style>

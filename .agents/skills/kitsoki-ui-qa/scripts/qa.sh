@@ -8,7 +8,7 @@
 # 0 = pass, 1 = a blocking scenario failed, 2 = pipeline error.
 #
 # Usage: qa.sh <video> --feature <file> --scenarios <file>
-#          [--frames <dir>] [--out <dir>] [--model M]
+#          [--frames <dir>] [--out <dir>] [--model M] [--reviewer auto|codex|claude|agy|ORDER]
 #          [--max-frames N] [--scene TH] [--blank-min-coverage F]
 #          [--no-adversary] [--strict] [--blank-strict] [--edge-strict]
 #
@@ -38,7 +38,7 @@ demo_scripts="$here/../../kitsoki-ui-demo/scripts"   # reuse the recorder's cont
 video="${1:?usage: qa.sh <video> --feature <f> --scenarios <f> [opts]}"
 shift || true
 
-feature="" scenarios="" frames="" outdir="" model="" max=48 chapters="" pacing_min="" scene="" blank_min_cov=""
+feature="" scenarios="" frames="" outdir="" model="" reviewer="" max=48 chapters="" pacing_min="" scene="" blank_min_cov=""
 rrweb="" rrweb_min_dwell=""
 adv_flag="" strict_flag="" blank_strict_flag="" edge_strict_flag="" pacing_strict_flag="" rrweb_strict_flag="" scroll_strict_flag=""
 while [ $# -gt 0 ]; do
@@ -48,6 +48,7 @@ while [ $# -gt 0 ]; do
     --frames)      frames="$2"; shift 2 ;;
     --out)         outdir="$2"; shift 2 ;;
     --model)       model="$2"; shift 2 ;;
+    --reviewer)    reviewer="$2"; shift 2 ;;
     --max-frames)  max="$2"; shift 2 ;;
     --chapters)    chapters="$2"; shift 2 ;;
     --pacing-min)  pacing_min="$2"; shift 2 ;;
@@ -158,6 +159,7 @@ verdict="$outdir/verdict.json"
 review_args=( --frames "$frames_dir" --feature "$feature" \
               --scenarios "$scenarios" --out "$verdict" )
 [ -n "$model" ]    && review_args+=( --model "$model" )
+[ -n "$reviewer" ] && review_args+=( --reviewer "$reviewer" )
 [ -n "$adv_flag" ] && review_args+=( "$adv_flag" )
 "$here/qa-review.sh" "${review_args[@]}"
 
@@ -171,5 +173,12 @@ report_args=( "$verdict" --out "$outdir/qa-report.md" $strict_flag \
 "$here/report.sh" "${report_args[@]}"
 rc=$?
 echo
-echo "QA artifacts in $outdir/ : verdict.json, qa-report.md, contact-sheet.png, frames/"
+artifacts="verdict.json, qa-report.md"
+[ -f "$outdir/contact-sheet.png" ] && artifacts="$artifacts, contact-sheet.png"
+if [ "$frames_dir" = "$outdir/frames" ]; then
+  artifacts="$artifacts, frames/"
+else
+  artifacts="$artifacts, frames: $frames_dir"
+fi
+echo "QA artifacts in $outdir/ : $artifacts"
 exit $rc

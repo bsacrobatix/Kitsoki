@@ -1,6 +1,6 @@
 ---
 name: kitsoki-ui-qa
-description: Validate UI evidence (a screenshot for simple cases, a video for complex flows) against the bug or plan being verified plus usage scenarios — the inverse of kitsoki-ui-demo. Picks the evidence form by complexity, extracts deterministic frames, has a read-only `claude` vision agent judge each scenario against cited frames AND whether the evidence is complete for the stated bug/plan, adversarially re-checks every pass, and emits a gated qa-report.md + verdict.json. Use when asked to QA / review / validate / sign off on a demo, walkthrough, screenshot, or bug-fix proof, or to gate one in CI.
+description: Validate UI evidence (a screenshot for simple cases, a video for complex flows) against the bug or plan being verified plus usage scenarios — the inverse of kitsoki-ui-demo. Picks the evidence form by complexity, extracts deterministic frames, has the first available local vision reviewer (Codex, Claude, or agy) judge each scenario against cited frames AND whether the evidence is complete for the stated bug/plan, adversarially re-checks every pass, and emits a gated qa-report.md + verdict.json. Use when asked to QA / review / validate / sign off on a demo, walkthrough, screenshot, or bug-fix proof, or to gate one in CI.
 ---
 
 # Kitsoki UI demo QA
@@ -60,10 +60,12 @@ changed behaviour will be flagged `unsupported` by the review above.
 
 > This is an **LLM-driven review tool by design** (it needs vision). It is *not*
 > a no-LLM flow test and must never be wired into the automated test suite
-> (CLAUDE.md, [[feedback_no_llm_tests]]). It uses the local `claude` CLI, so —
-> like the engine's oracle — there's no API key and no per-call cost
-> ([[project_oracle_uses_claude_cli]]). The two deterministic stages
-> (`extract-frames.sh`, `report.sh`) are testable on their own without any LLM.
+> (CLAUDE.md, [[feedback_no_llm_tests]]). It uses the first available local
+> agent CLI from `codex`, `claude`, and `agy` (`--reviewer auto` by default).
+> An explicit `--reviewer claude` / `codex` / `agy` is treated as a preference
+> and still falls back to the others if that harness is unavailable or fails.
+> The deterministic stages (`extract-frames.sh`, `report.sh`) are testable on
+> their own without any LLM.
 
 ## Why it's reliable (read this first)
 
@@ -77,7 +79,7 @@ pipeline removes that failure mode structurally, not by hoping the model behaves
 2. **Grounded verdicts.** Every `pass` MUST cite a frame filename and quote what
    is **literally visible**. A claim with no citable frame is `unsupported`
    (never silently `pass`); a frame that contradicts it is `fail`.
-3. **Adversarial re-check (interpretive ÷ deterministic).** A second `claude`
+3. **Adversarial re-check (interpretive ÷ deterministic).** A second vision
    pass plays skeptic: it re-reads each `pass` step's cited frame and emits only a
    small **list of downgrades** (which step, to `fail`/`unsupported`, and what the
    frame really shows). `qa-review.sh` then **applies them deterministically** — it
@@ -246,8 +248,11 @@ pipeline removes that failure mode structurally, not by hoping the model behaves
 
 ## Prerequisites
 
-`ffmpeg`, `jq`, and the `claude` CLI on PATH (all already present in this repo's
-dev env). No `make build` needed — this consumes an existing video/frames.
+`ffmpeg`, `jq`, and at least one local reviewer CLI on PATH: `codex`, `claude`,
+or `agy`. No `make build` needed — this consumes an existing video/frames.
+`--reviewer auto` chooses the first compatible available harness; per-backend
+model overrides are `KITSOKI_UI_QA_CODEX_MODEL`,
+`KITSOKI_UI_QA_CLAUDE_MODEL`, and `KITSOKI_UI_QA_AGY_MODEL`.
 
 ## The loop
 
@@ -496,18 +501,22 @@ video — the gate is unchanged — but mind these composite-specific points:
 
 | Script | Does | LLM? |
 |---|---|---|
-| `qa.sh <video> --feature F --scenarios S [--frames D] [--out D] [--model M] [--max-frames N] [--scene TH] [--blank-min-coverage F] [--chapters F] [--pacing-min N] [--rrweb CLIP\|DIR] [--rrweb-min-dwell N] [--no-adversary] [--strict] [--blank-strict] [--pacing-strict] [--rrweb-strict] [--scroll-strict]` | One-shot wrapper; exit code is the gate. `--scene` / `--blank-min-coverage` pass through to extract-frames / blank-scan (tune for full-editor videos — see above); `--rrweb` runs BOTH the embedded-tour pacing scan AND the scroll-followability scan on the clip(s) | via review |
+| `qa.sh <video> --feature F --scenarios S [--frames D] [--out D] [--model M] [--reviewer auto\|codex\|claude\|agy\|ORDER] [--max-frames N] [--scene TH] [--blank-min-coverage F] [--chapters F] [--pacing-min N] [--rrweb CLIP\|DIR] [--rrweb-min-dwell N] [--no-adversary] [--strict] [--blank-strict] [--pacing-strict] [--rrweb-strict] [--scroll-strict]` | One-shot wrapper; exit code is the gate. `--scene` / `--blank-min-coverage` pass through to extract-frames / blank-scan (tune for full-editor videos — see above); `--rrweb` runs BOTH the embedded-tour pacing scan AND the scroll-followability scan on the clip(s) | via review |
 | `extract-frames.sh <video> <out-dir> [--scene TH] [--interval S] [--dedup MS] [--max N] [--width W]` | Deterministic scene-change + periodic-floor frames + `frames.json` | no |
 | `blank-scan.sh <frames-dir\|image> [--out scan.json] [--grid WxH] [--quant N] [--min-coverage F] [--empty-coverage F] [--fail-on-find]` | Deterministic monochrome-region detector → `blank-scan.json` (flags any large flat block of one colour, or a near-empty frame) | no |
 | `pacing-scan.sh <chapters.json> [--out scan.json] [--min-ms N] [--min-total-ms N] [--fail-on-find]` | Deterministic chapter-duration detector → `pacing-scan.json` (flags narrated moments that flash by below the readable-window floor) | no |
 | `rrweb-pacing-scan.mjs <clip.rrweb.json\|dir> [--out scan.json] [--min-dwell N] [--coalesce N] [--sig-min-adds N] [--sig-min-text N] [--tail-window N] [--fail-on-find]` | Deterministic embedded-rrweb timeline scan → `rrweb-pacing-scan.json` (flags content reveals crammed below the readable dwell — the rushed-last-messages defect a frame sampler / chapter scan can't see) | no |
 | `rrweb-scroll-scan.mjs <clip.rrweb.json\|dir> [--out scan.json] [--scroll-id N] [--snap-span N] [--snap-min-dy N] [--ease-min-events N] [--ease-min-ms N] [--min-snaps N] [--fail-on-find]` | Deterministic embedded-rrweb scroll-stream scan → `rrweb-scroll-scan.json` (flags a snap-to-bottom conversation capture where the transcript jumps past each message instead of easing through it — the "can't see the user inputs / it's jumpy" defect the time-only pacing scan and the frame sampler are blind to) | no |
 | `placeholder-scan.sh <frames-dir\|image\|video> [--out scan.json] [--pattern RE] [--min-fraction F] [--min-run N] [--fail-on-find]` | Deterministic OCR stuck-placeholder detector → flags a placeholder (default `\bloading\b`) that persists across a long unbroken run / large fraction of frames — a "Loading…" that never resolves. Skips (advisory) if `tesseract` is absent | no (OCR) |
-| `qa-review.sh --frames D --feature F --scenarios S --out V [--model M] [--no-adversary]` | Read-only vision agent → evidence-cited `verdict.json` + adversarial re-check | **yes** |
+| `qa-review.sh --frames D --feature F --scenarios S --out V [--model M] [--reviewer auto\|codex\|claude\|agy\|ORDER] [--no-adversary]` | Read-only vision reviewer → evidence-cited `verdict.json` + adversarial re-check | **yes** |
 | `report.sh <verdict.json> [--out report.md] [--strict] [--blank-scan scan.json] [--blank-strict] [--pacing-scan scan.json] [--pacing-strict] [--rrweb-scan scan.json] [--rrweb-strict] [--scroll-scan scan.json] [--scroll-strict]` | `verdict.json` (+ optional scans) → `qa-report.md`; recomputes the gate exit code | no |
 
-Defaults: review model `claude-opus-4-8` (override `--model claude-sonnet-4-6`
-for faster/cheaper); `--max-frames 48`; `--strict` makes every scenario blocking.
+Defaults: reviewer `auto` (`codex claude agy`, adjusted when the model name
+clearly targets Claude or Gemini), using each CLI's configured default model.
+Override the generic model with `KITSOKI_UI_QA_MODEL` / `--model`, or use
+per-backend overrides (`KITSOKI_UI_QA_CODEX_MODEL`,
+`KITSOKI_UI_QA_CLAUDE_MODEL`, `KITSOKI_UI_QA_AGY_MODEL`). `--max-frames 48`;
+`--strict` makes every scenario blocking.
 `qa.sh` always runs `blank-scan.sh` over the frames, and `pacing-scan.sh` over the
 chapter sidecar when one is present beside the MP4 (auto-detected, or `--chapters`);
 both scans' flags are **advisory** (surfaced in the report, never block) unless you
@@ -532,7 +541,9 @@ pass `--blank-strict` / `--pacing-strict`. The LLM `visual_issues` and
 - The recorder this inverts: [[kitsoki-ui-demo]] (`.agents/skills/kitsoki-ui-demo/`)
   — its `NN-<scene>.png` output is the ideal `--frames` input here, and its
   `contact-sheet.sh` is reused for the storyboard.
-- Oracle = local `claude` CLI: `internal/host/oracle_runner.go`.
+- Vision reviewer = first available local CLI from `codex`, `claude`, and `agy`.
+  Use `--reviewer claude,codex` or similar to prefer an order without making one
+  missing harness fatal.
 - TUI frame capture: `render.tui_png` (studio MCP, `internal/mcp/studio/session_tools.go`)
   — one PNG per call, handle or headless spec. Pixel regression across a
   revision pair: `visual.tui_git_diff` (`internal/mcp/studio/visual_tools.go`),

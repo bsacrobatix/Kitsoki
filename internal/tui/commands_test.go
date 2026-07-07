@@ -190,7 +190,9 @@ func TestBugCommandPrivacyFailureBlocksOriginal(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("bug command should be synchronous")
 	}
-	if !strings.Contains(body, "privacy check failed") || !strings.Contains(body, "depersonalized follow-up") {
+	compactBody := strings.Join(strings.Fields(body), " ")
+	compactBody = strings.ReplaceAll(compactBody, "follow- up", "follow-up")
+	if !strings.Contains(compactBody, "privacy check failed") || !strings.Contains(compactBody, "depersonalized follow-up") {
 		t.Fatalf("unexpected command body: %s", body)
 	}
 	entries, err := os.ReadDir(filepath.Join(root, "issues", "bugs"))
@@ -260,8 +262,19 @@ func TestBugCommandDispatcherAppendsBlock(t *testing.T) {
 	m := NewRootModel(orch, app.SessionID("session-123"), "../../testdata/apps/cloak/app.yaml", "", WithBugRoot(root), WithBugTicketRepo(""))
 
 	next, cmd := m.RunSlashCommand("/bug surprising state")
-	if cmd != nil {
-		t.Fatal("bug slash command should be synchronous")
+	if cmd == nil {
+		t.Fatal("bug slash command should return an async command")
+	}
+	if !strings.Contains(next.transcript.AllContent(), "bug: privacy check starting") {
+		t.Fatalf("transcript missing bug start feedback:\n%s", next.transcript.AllContent())
+	}
+	if strings.Contains(next.transcript.AllContent(), "bug: filed issues/bugs/") {
+		t.Fatalf("bug result should not appear before async command completes:\n%s", next.transcript.AllContent())
+	}
+	updated, _ := next.Update(cmd())
+	next, ok := updated.(RootModel)
+	if !ok {
+		t.Fatalf("updated model = %T, want RootModel", updated)
 	}
 	if !strings.Contains(next.transcript.AllContent(), "bug: filed issues/bugs/") {
 		t.Fatalf("transcript missing bug result:\n%s", next.transcript.AllContent())
