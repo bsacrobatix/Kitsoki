@@ -44,7 +44,7 @@ states:
       - heading: "Evidence"
       - code: '{{ world.triage_verdict.evidence|default:"(pending — triager has not returned yet)" }}'
       - heading: "Summary"
-      - code: '{{ world.triage_verdict.summary_markdown|default:"(pending)" }}'
+      - template: '{{ world.triage_verdict.summary_markdown|default:"(pending)" }}'
       - choice:
           mode: single
           prompt: "Actions"

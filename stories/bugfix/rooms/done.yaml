@@ -24,7 +24,7 @@ states:
             Ticket:  "{{ world.ticket_id }} — {{ world.ticket_title }}"
             Summary: '{{ world.done_artifact.summary_title|default:"(pending)" }}'
       - heading: "Artifact"
-      - code: '{{ world.done_artifact.summary_markdown|default:"(pending — agent has not returned yet)" }}'
+      - template: '{{ world.done_artifact.summary_markdown|default:"(pending — agent has not returned yet)" }}'
       - choice:
           mode: single
           prompt: "Actions"

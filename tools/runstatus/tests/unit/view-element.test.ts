@@ -117,6 +117,26 @@ describe("ViewElement", () => {
     w.unmount();
   });
 
+  it("renders template elements as markdown documents", () => {
+    const w = render({
+      Kind: "template",
+      Source:
+        "## Fix summary\n\n- Updated **config** handling for `APP_FLAG`.\n\n| Check | Result |\n|---|---|\n| unit | pass |",
+    });
+    const md = w.find('[data-testid="view-template-markdown"]');
+    expect(md.exists()).toBe(true);
+    expect(md.find("h2.md-h2").text()).toBe("Fix summary");
+    expect(md.find("ul.md-ul li").text()).toContain("Updated config handling");
+    expect(md.find("strong").text()).toBe("config");
+    expect(md.find("code").text()).toBe("APP_FLAG");
+    const table = md.find("table.md-table");
+    expect(table.exists()).toBe(true);
+    expect(table.findAll("th").map((th) => th.text())).toEqual(["Check", "Result"]);
+    expect(table.findAll("td").map((td) => td.text())).toEqual(["unit", "pass"]);
+    expect(md.html()).not.toContain("## Fix summary");
+    w.unmount();
+  });
+
   it("renders heading as <h3>", () => {
     const w = render({ Kind: "heading", Source: "Section Title" });
     const h = w.find("h3.ve-heading");
@@ -233,9 +253,9 @@ describe("ViewElement", () => {
     w.unmount();
   });
 
-  it("renders template kind as prose paragraphs", () => {
+  it("renders simple template kind content through the markdown path", () => {
     const w = render({ Kind: "template", Source: "resolved text" });
-    const ps = w.findAll("p.ve-prose");
+    const ps = w.findAll(".ve-markdown p.md-p");
     expect(ps.length).toBe(1);
     expect(ps[0].text()).toBe("resolved text");
     w.unmount();
