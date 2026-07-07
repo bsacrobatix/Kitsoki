@@ -35,20 +35,66 @@ states:
           text:     "TESTING"
           subtitle: "Phase 4 / 7  ·  run + review tests against the applied fix"
           color:    "#F59E0B"   # amber — caution
+      - banner:
+          text:     "ACTION NEEDED: TESTING FAILED"
+          subtitle: "The testing artifact reports failed. Continue or refine returns to implementing; this does not advance."
+          color:    "#DC2626"
+        when: "world.implement_review_artifact.status == 'failed'"
+      - banner:
+          text:     "ACTION NEEDED: TESTING BLOCKED"
+          subtitle: "The testing artifact reports blocked. Continue or refine returns to implementing with this diagnostic."
+          color:    "#F59E0B"
+        when: "world.implement_review_artifact.status == 'blocked'"
+      - banner:
+          text:     "TESTING PASSED"
+          subtitle: "Structured artifact reports status=passed; continue advances the pipeline."
+          color:    "#16A34A"
+        when: "world.implement_review_artifact.status == 'passed'"
       - prose: "{{ world.ticket_id|default:'(no ticket)' }} · cycle {{ world.cycle }} · {{ world.bugfix_mode }} bugfix · judge {{ world.judge_mode }}"
       - kv:
           pairs:
             Ticket:  "{{ world.ticket_id }} — {{ world.ticket_title }}"
             Summary: '{{ world.implement_review_artifact.summary_title|default:"(pending)" }}'
             Status:  '{{ world.implement_review_artifact.status|default:"(pending)" }}'
-      - heading: "Artifact"
+            "Continue does": '{% if world.implement_review_artifact.status == "failed" or world.implement_review_artifact.status == "blocked" %}return to implementing{% elif world.bugfix_mode == "quick" %}post and advance to done{% else %}post and advance to reviewing{% endif %}'
+      - heading: "Action needed"
+        when: "world.implement_review_artifact.status == 'failed' || world.implement_review_artifact.status == 'blocked' || world.implement_review_artifact.blockers"
+      - prose: "The fix is not ready to advance. The next implementation cycle receives this artifact as refinement feedback."
+        when: "world.implement_review_artifact.status == 'failed'"
+      - prose: "The test reviewer could not make a reliable pass/fail decision. The next implementation cycle receives this diagnostic as refinement feedback."
+        when: "world.implement_review_artifact.status == 'blocked'"
+      - heading: "Blockers"
+        when: "world.implement_review_artifact.blockers"
+      - code: |
+          {% for b in world.implement_review_artifact.blockers %}- {{ b.severity|default:"blocker" }}{% if b.file %} · {{ b.file }}{% endif %}{% if b.description %}: {{ b.description }}{% else %}: {{ b }}{% endif %}
+          {% endfor %}
+        when: "world.implement_review_artifact.blockers"
+      - heading: "Tests run"
+        when: "world.implement_review_artifact.tests_run"
+      - kv:
+          pairs:
+            Passed:  '{{ world.implement_review_artifact.tests_run.passed|default:"0" }}'
+            Failed:  '{{ world.implement_review_artifact.tests_run.failed|default:"0" }}'
+            Skipped: '{{ world.implement_review_artifact.tests_run.skipped|default:"0" }}'
+        when: "world.implement_review_artifact.tests_run"
+      - heading: "Test log"
+        when: "world.implement_review_artifact.tests_run.log"
+      - code: '{{ world.implement_review_artifact.tests_run.log }}'
+        when: "world.implement_review_artifact.tests_run.log"
+      - heading: "Tests added"
+        when: "world.implement_review_artifact.tests_added"
+      - code: |
+          {% for t in world.implement_review_artifact.tests_added %}- {{ t }}
+          {% endfor %}
+        when: "world.implement_review_artifact.tests_added"
+      - heading: "Summary"
       - template: '{{ world.implement_review_artifact.summary_markdown|default:"(pending — agent has not returned yet)" }}'
       - choice:
           mode: single
           prompt: "Actions"
           items:
-            - label:  "continue"
-              hint:   "post and advance to reviewing (or done in quick mode)"
+            - label:  "{% if world.implement_review_artifact.status == 'failed' %}failed: fix code{% elif world.implement_review_artifact.status == 'blocked' %}blocked: fix tests{% else %}continue{% endif %}"
+              hint:   "{% if world.implement_review_artifact.status == 'failed' or world.implement_review_artifact.status == 'blocked' %}ACTION NEEDED: return to implementing with this diagnostic{% elif world.bugfix_mode == 'quick' %}post and advance to done{% else %}post and advance to reviewing{% endif %}"
               intent: accept
             - label:  "refine"
               hint:   "re-run tests with feedback"
