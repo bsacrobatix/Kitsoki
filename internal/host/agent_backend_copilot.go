@@ -209,6 +209,13 @@ func isClaudeModelID(m string) bool {
 	return false
 }
 
+// IsClaudeModelID is the exported form of isClaudeModelID for CLI planning
+// surfaces that build backend-specific argv directly instead of going through
+// TranslateInvocation.
+func IsClaudeModelID(m string) bool {
+	return isClaudeModelID(m)
+}
+
 func (copilotBackend) Classify(ev map[string]any) classifiedEvent {
 	return classifyCopilotEvent(ev)
 }

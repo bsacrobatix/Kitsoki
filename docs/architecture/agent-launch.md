@@ -99,7 +99,11 @@ For story-backed launch, the command composes three existing layers:
 
 Profile model and effort override story-local defaults so a Codex or
 synthetic.new profile does not inherit a Claude-only model id from the room
-agent. Extra env values are merged last and are redacted in dry-run output.
+agent. When `--backend` explicitly selects a different backend than the
+implicit default profile, that default profile's model, effort, and env are not
+applied; pass an explicit matching `--profile` when you want profile settings.
+An explicit `--profile` whose backend conflicts with `--backend` is rejected.
+Extra env values are merged last and are redacted in dry-run output.
 
 For freestanding launch, `.codex/agents/<name>.toml` supplies developer
 instructions, model, effort, and MCP servers. The harness profile, when
