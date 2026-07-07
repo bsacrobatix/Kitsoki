@@ -194,7 +194,7 @@ func handleWorkDriveSlash(m RootModel) (RootModel, string, tea.Cmd) {
 	if mode := operationRunString(handle, "mode"); !operationRunModeCanDrive(mode) {
 		return m, r.SlashOutput(fmt.Sprintf("(work drive: operation mode %s needs an operator checkpoint)", mode)), nil
 	}
-	next, cmd := startAsyncTurn(m, "/work drive", asyncDriveOperation(m.orch, m.sid), pendingDeterministic)
+	next, cmd := startAsyncTurnDetailed(m, "/work drive", asyncDriveOperation(m.orch, m.sid), pendingDeterministic)
 	return next, r.SlashOutput("(work: driving operation)"), cmd
 }
 

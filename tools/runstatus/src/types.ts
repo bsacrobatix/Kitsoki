@@ -32,6 +32,12 @@ export interface OperationRunSummary {
   stop_detail?: string;
 }
 
+export interface OperationDriveSummary {
+  turns?: number;
+  stop_reason?: string;
+  last_intent?: string;
+}
+
 export interface MermaidSnapshot {
   source: string;
   node_map: Record<string, NodeRef>;
@@ -342,6 +348,8 @@ export interface TurnResult {
    * ContextRouteReceipt and docs/architecture/semantic-routing.md §7.
    */
   context_route?: ContextRouteInfo;
+  /** Present on runstatus.session.drive_operation responses. */
+  operation_drive?: OperationDriveSummary;
 }
 
 /**
