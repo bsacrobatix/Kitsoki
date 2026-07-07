@@ -267,11 +267,136 @@ func TestOperationRunCompletesOnLaterTerminalTurn(t *testing.T) {
 	requireOperationRunStatus(t, replayed.World, "completed")
 }
 
+func TestOperationRunPhaseProgressFromSummaryKeys(t *testing.T) {
+	def := &app.AppDef{
+		App:  app.AppMeta{ID: "operation-run-phase-progress"},
+		Root: "start",
+		Operations: map[string]*app.OperationPolicy{
+			"demo_run": {
+				Title:           "Demo run",
+				Mode:            "autonomous",
+				ExecutionMode:   "one-shot",
+				RunInBackground: true,
+				PhaseSummary: app.OperationPhaseSummary{
+					From: []string{"draft_artifact", "review_artifact"},
+				},
+			},
+		},
+		Intents: map[string]app.Intent{
+			"go":   {},
+			"next": {},
+			"done": {},
+		},
+		States: map[string]*app.State{
+			"start": {
+				On: map[string][]app.Transition{
+					"go": {{
+						Target:    "drafting",
+						Operation: "demo_run",
+					}},
+				},
+			},
+			"drafting": {
+				On: map[string][]app.Transition{
+					"next": {{
+						Target: "reviewing",
+						Effects: []app.Effect{{
+							Set: map[string]any{
+								"draft_artifact": map[string]any{"summary_title": "draft ready"},
+							},
+						}},
+					}},
+				},
+			},
+			"reviewing": {
+				On: map[string][]app.Transition{
+					"done": {{
+						Target: "done",
+						Effects: []app.Effect{{
+							Set: map[string]any{
+								"review_artifact": "approved",
+							},
+						}},
+					}},
+				},
+			},
+			"done": {Terminal: true},
+		},
+	}
+	m := mustNew(t, def)
+
+	started, err := m.Turn(context.Background(), "start", world.New(), intent.IntentCall{Intent: "go"})
+	require.NoError(t, err)
+	startedPhases := eventPayloads(t, started.Events, store.OperationRunPhaseStarted)
+	require.Len(t, startedPhases, 1)
+	require.Equal(t, "draft_artifact", startedPhases[0]["phase"])
+	require.Equal(t, "running", startedPhases[0]["phase_status"])
+	require.EqualValues(t, 0, startedPhases[0]["phase_index"])
+	requireOperationRunPhase(t, started.World, "draft_artifact", "running")
+
+	progressed, err := m.Turn(context.Background(), "drafting", started.World, intent.IntentCall{Intent: "next"})
+	require.NoError(t, err)
+	completedPhases := eventPayloads(t, progressed.Events, store.OperationRunPhaseCompleted)
+	require.Len(t, completedPhases, 1)
+	require.Equal(t, "draft_artifact", completedPhases[0]["phase"])
+	require.Equal(t, "completed", completedPhases[0]["phase_status"])
+	nextPhases := eventPayloads(t, progressed.Events, store.OperationRunPhaseStarted)
+	require.Len(t, nextPhases, 1)
+	require.Equal(t, "review_artifact", nextPhases[0]["phase"])
+	requireOperationRunPhase(t, progressed.World, "review_artifact", "running")
+	handle := requireOperationRunHandle(t, progressed.World)
+	require.Equal(t, []string{"draft_artifact"}, handle["completed_phases"])
+
+	completed, err := m.Turn(context.Background(), "reviewing", progressed.World, intent.IntentCall{Intent: "done"})
+	require.NoError(t, err)
+	completedPhases = eventPayloads(t, completed.Events, store.OperationRunPhaseCompleted)
+	require.Len(t, completedPhases, 1)
+	require.Equal(t, "review_artifact", completedPhases[0]["phase"])
+	requireOperationRunPhase(t, completed.World, "review_artifact", "completed")
+	requireOperationRunStatus(t, completed.World, "completed")
+
+	history := append([]store.Event{}, started.Events...)
+	history = append(history, progressed.Events...)
+	history = append(history, completed.Events...)
+	replayed, err := store.BuildJourney(def, "start", world.New(), history)
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("done"), replayed.State)
+	requireOperationRunStatus(t, replayed.World, "completed")
+	requireOperationRunPhase(t, replayed.World, "review_artifact", "completed")
+}
+
 func requireOperationRunStatus(t *testing.T, w world.World, status string) {
+	t.Helper()
+	handle := requireOperationRunHandle(t, w)
+	require.Equal(t, status, handle["status"])
+}
+
+func requireOperationRunPhase(t *testing.T, w world.World, phase, phaseStatus string) {
+	t.Helper()
+	handle := requireOperationRunHandle(t, w)
+	require.Equal(t, phase, handle["phase"])
+	require.Equal(t, phaseStatus, handle["phase_status"])
+}
+
+func requireOperationRunHandle(t *testing.T, w world.World) map[string]any {
 	t.Helper()
 	handle, ok := w.Vars[app.OperationRunWorldKey].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, status, handle["status"])
+	return handle
+}
+
+func eventPayloads(t *testing.T, events []store.Event, kind store.EventKind) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, ev := range events {
+		if ev.Kind != kind {
+			continue
+		}
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(ev.Payload, &payload))
+		out = append(out, payload)
+	}
+	return out
 }
 
 func requireEventKind(t *testing.T, events []store.Event, kind store.EventKind) {

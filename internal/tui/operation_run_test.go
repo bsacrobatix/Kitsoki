@@ -27,6 +27,25 @@ func TestOperationRunChromeTextRunning(t *testing.T) {
 	ra.AssertContains("idle -> bugfix.reproduce")
 }
 
+func TestOperationRunChromeTextRunningShowsPhase(t *testing.T) {
+	text := operationRunChromeText(map[string]any{
+		app.OperationRunWorldKey: map[string]any{
+			"operation_id": "bf__capsule_demo",
+			"title":        "Capsule bugfix",
+			"status":       "running",
+			"phase":        "testing_artifact",
+			"from":         "idle",
+			"to":           "bugfix.reproduce",
+		},
+	})
+
+	ra := NewRenderingAnalyzer(t, text)
+	ra.AssertContains("Capsule bugfix")
+	ra.AssertContains("running")
+	ra.AssertContains("phase testing")
+	ra.AssertNotContains("idle -> bugfix.reproduce")
+}
+
 func TestOperationRunChromeTextCompleted(t *testing.T) {
 	text := operationRunChromeText(map[string]any{
 		app.OperationRunWorldKey: map[string]any{

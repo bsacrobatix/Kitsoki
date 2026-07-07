@@ -1016,6 +1016,10 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 		}
 		events = append(events, devs...)
 	}
+	if updatedWorld, operationEvents := m.advanceActiveOperationRunPhaseProgress(finalState, newWorld); len(operationEvents) > 0 {
+		newWorld = updatedWorld
+		events = append(events, operationEvents...)
+	}
 	if updatedWorld, operationEvents := m.completeActiveOperationRun(finalState, newWorld); len(operationEvents) > 0 {
 		newWorld = updatedWorld
 		events = append(events, operationEvents...)
@@ -1441,6 +1445,10 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 			}
 			events = append(events, subEvs...)
 		}
+		if updatedWorld, operationEvents := m.advanceActiveOperationRunPhaseProgress(state, newWorld); len(operationEvents) > 0 {
+			newWorld = updatedWorld
+			events = append(events, operationEvents...)
+		}
 		if updatedWorld, operationEvents := m.completeActiveOperationRun(state, newWorld); len(operationEvents) > 0 {
 			newWorld = updatedWorld
 			events = append(events, operationEvents...)
@@ -1460,12 +1468,17 @@ func (m *machineImpl) startOperationRun(policyID, from, to, intentName string, s
 		return w, nil
 	}
 	payload := operationRunRunningPayload(policyID, policy, from, to, intentName, synthetic)
+	events := []store.Event{newEvent(store.OperationRunStarted, payload)}
+	if phasePayload, ok := operationRunPhasePayload(policyID, policy, 0, "running"); ok {
+		for k, v := range phasePayload {
+			payload[k] = v
+		}
+		events = append(events, newEvent(store.OperationRunPhaseStarted, phasePayload))
+	}
 	next := w.Clone()
 	next.SetDurable(app.OperationRunWorldKey, cloneMapAny(payload))
-	return next, []store.Event{
-		newEvent(store.OperationRunStarted, payload),
-		operationRunWorldUpdateEvent(payload),
-	}
+	events = append(events, operationRunWorldUpdateEvent(payload))
+	return next, events
 }
 
 func operationRunRunningPayload(policyID string, policy *app.OperationPolicy, from, to, intentName string, synthetic bool) map[string]any {
@@ -1480,6 +1493,54 @@ func operationRunRunningPayload(policyID string, policy *app.OperationPolicy, fr
 		payload["synthetic"] = true
 	}
 	return payload
+}
+
+func operationRunPhasePayload(policyID string, policy *app.OperationPolicy, phaseIndex int, phaseStatus string) (map[string]any, bool) {
+	phases := operationRunPhaseSummaryKeys(policy)
+	if phaseIndex < 0 || phaseIndex >= len(phases) {
+		return nil, false
+	}
+	phase := phases[phaseIndex]
+	if phase == "" {
+		return nil, false
+	}
+	return map[string]any{
+		"operation_id": policyID,
+		"policy_id":    policyID,
+		"status":       "running",
+		"phase":        phase,
+		"phase_index":  phaseIndex,
+		"phase_status": phaseStatus,
+		"artifact_key": phase,
+	}, true
+}
+
+func applyOperationRunPhasePayload(handle map[string]any, payload map[string]any) {
+	for _, key := range []string{"phase", "phase_index", "phase_status", "artifact_key"} {
+		if value, ok := payload[key]; ok {
+			handle[key] = value
+		}
+	}
+}
+
+func operationRunPhaseSummaryKeys(policy *app.OperationPolicy) []string {
+	if policy == nil || len(policy.PhaseSummary.From) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(policy.PhaseSummary.From))
+	seen := map[string]struct{}{}
+	for _, raw := range policy.PhaseSummary.From {
+		phase := strings.TrimSpace(raw)
+		if phase == "" {
+			continue
+		}
+		if _, ok := seen[phase]; ok {
+			continue
+		}
+		seen[phase] = struct{}{}
+		out = append(out, phase)
+	}
+	return out
 }
 
 func (m *machineImpl) completeActiveOperationRun(terminalState string, w world.World) (world.World, []store.Event) {
@@ -1519,6 +1580,94 @@ func (m *machineImpl) completeActiveOperationRun(terminalState string, w world.W
 		newEvent(eventKind, payload),
 		operationRunWorldUpdateEvent(terminalHandle),
 	}
+}
+
+func (m *machineImpl) advanceActiveOperationRunPhaseProgress(state string, w world.World) (world.World, []store.Event) {
+	if m.appDef == nil {
+		return w, nil
+	}
+	active, ok := operationRunHandle(w.Vars[app.OperationRunWorldKey])
+	if !ok || strings.TrimSpace(operationRunString(active, "status")) != "running" {
+		return w, nil
+	}
+	policyID := strings.TrimSpace(operationRunString(active, "policy_id"))
+	if policyID == "" {
+		policyID = strings.TrimSpace(operationRunString(active, "operation_id"))
+	}
+	if policyID == "" {
+		return w, nil
+	}
+	policy, ok := m.appDef.Operations[policyID]
+	if !ok || policy == nil {
+		return w, nil
+	}
+	phases := operationRunPhaseSummaryKeys(policy)
+	if len(phases) == 0 {
+		return w, nil
+	}
+
+	completed := operationRunStringSlice(active, "completed_phases")
+	completedSet := make(map[string]struct{}, len(completed))
+	for _, phase := range completed {
+		completedSet[phase] = struct{}{}
+	}
+	currentPhase := operationRunString(active, "phase")
+	handle := cloneMapAny(active)
+	var events []store.Event
+	changed := false
+	lastCompletedIndex := -1
+
+	for idx, phase := range phases {
+		if _, done := completedSet[phase]; done {
+			continue
+		}
+		if !operationRunWorldValuePresent(w, phase) {
+			continue
+		}
+		if currentPhase != phase {
+			if payload, ok := operationRunPhasePayload(policyID, policy, idx, "running"); ok {
+				events = append(events, newEvent(store.OperationRunPhaseStarted, payload))
+				applyOperationRunPhasePayload(handle, payload)
+				currentPhase = phase
+				changed = true
+			}
+		}
+		if payload, ok := operationRunPhasePayload(policyID, policy, idx, "completed"); ok {
+			events = append(events, newEvent(store.OperationRunPhaseCompleted, payload))
+			applyOperationRunPhasePayload(handle, payload)
+			completed = append(completed, phase)
+			completedSet[phase] = struct{}{}
+			currentPhase = phase
+			lastCompletedIndex = idx
+			changed = true
+		}
+	}
+
+	if changed && !m.isTerminalState(state) {
+		for idx := lastCompletedIndex + 1; idx < len(phases); idx++ {
+			phase := phases[idx]
+			if _, done := completedSet[phase]; done {
+				continue
+			}
+			if currentPhase == phase {
+				break
+			}
+			if payload, ok := operationRunPhasePayload(policyID, policy, idx, "running"); ok {
+				events = append(events, newEvent(store.OperationRunPhaseStarted, payload))
+				applyOperationRunPhasePayload(handle, payload)
+				changed = true
+			}
+			break
+		}
+	}
+	if !changed {
+		return w, nil
+	}
+	handle["completed_phases"] = append([]string(nil), completed...)
+	next := w.Clone()
+	next.SetDurable(app.OperationRunWorldKey, handle)
+	events = append(events, operationRunWorldUpdateEvent(handle))
+	return next, events
 }
 
 func operationRunCompletedPayload(policyID string, policy *app.OperationPolicy, terminalState string) map[string]any {
@@ -1698,6 +1847,61 @@ func operationRunString(handle map[string]any, key string) string {
 		return s
 	default:
 		return fmt.Sprint(s)
+	}
+}
+
+func operationRunStringSlice(handle map[string]any, key string) []string {
+	v, ok := handle[key]
+	if !ok || v == nil {
+		return nil
+	}
+	switch typed := v.(type) {
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, raw := range typed {
+			if value := strings.TrimSpace(raw); value != "" {
+				out = append(out, value)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, raw := range typed {
+			if value := strings.TrimSpace(fmt.Sprint(raw)); value != "" {
+				out = append(out, value)
+			}
+		}
+		return out
+	case string:
+		if value := strings.TrimSpace(typed); value != "" {
+			return []string{value}
+		}
+	}
+	return nil
+}
+
+func operationRunWorldValuePresent(w world.World, key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	v, ok := w.Vars[key]
+	if !ok || v == nil {
+		return false
+	}
+	switch typed := v.(type) {
+	case string:
+		return strings.TrimSpace(typed) != ""
+	case []any:
+		return len(typed) > 0
+	case []string:
+		return len(typed) > 0
+	case map[string]any:
+		return len(typed) > 0
+	case map[any]any:
+		return len(typed) > 0
+	default:
+		return true
 	}
 }
 
