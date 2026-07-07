@@ -15,6 +15,8 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/jobs"
+	"kitsoki/internal/machine"
+	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
 	tuipkg "kitsoki/internal/tui"
 )
@@ -250,6 +252,67 @@ func TestWorkSlashListsActiveAsyncWork(t *testing.T) {
 	require.Contains(t, tx, "scope")
 	require.Contains(t, tx, "please review the proposal")
 	require.Contains(t, tx, "queued review context is ready")
+}
+
+func TestWorkSlashListsCurrentOperation(t *testing.T) {
+	def := &app.AppDef{
+		App:  app.AppMeta{ID: "operation-work-test"},
+		Root: "idle",
+		Operations: map[string]*app.OperationPolicy{
+			"bugfix_full": {
+				Title:           "Fix bug",
+				Mode:            "autonomous",
+				ExecutionMode:   "one-shot",
+				RunInBackground: true,
+				StopOn:          []string{"needs-human"},
+			},
+		},
+		Intents: map[string]app.Intent{
+			"go": {Description: "Run the operation."},
+		},
+		States: map[string]*app.State{
+			"idle": {
+				On: map[string][]app.Transition{
+					"go": {{
+						Target:    "needs-human",
+						Operation: "bugfix_full",
+						Effects: []app.Effect{{
+							Set: map[string]any{
+								"status":             "needs-human",
+								"needs_human_reason": "Regression gate was never RED.",
+							},
+						}},
+					}},
+				},
+			},
+			"needs-human": {Terminal: true},
+		},
+	}
+	mach, err := machine.New(def)
+	require.NoError(t, err)
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	orch := orchestrator.New(def, mach, s, nil)
+	sid, err := orch.NewSession(context.Background())
+	require.NoError(t, err)
+	out, err := orch.SubmitDirect(context.Background(), sid, "go", nil)
+	require.NoError(t, err)
+
+	initialView, err := orch.RenderState(out.NewState, orch.CurrentWorld(sid))
+	require.NoError(t, err)
+	model := tea.Model(tuipkg.NewRootModel(orch, sid, "", initialView,
+		tuipkg.WithResumedJourney(out.NewState, orch.CurrentWorld(sid), out.TurnNumber),
+	))
+
+	model = runTurnBlocking(t, model, "/work")
+	tx := extractTranscript(t, model)
+	work := transcriptAfter(t, tx, "active work: 1 item(s)")
+	require.Contains(t, work, "operation")
+	require.Contains(t, work, "waiting")
+	require.Contains(t, work, "Fix bug")
+	require.Contains(t, work, "reason needs-human")
+	require.Contains(t, work, "Regression gate was never RED.")
 }
 
 func transcriptAfter(t *testing.T, text, marker string) string {
