@@ -17,6 +17,7 @@ import (
 	"kitsoki/internal/bugfile"
 	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/host"
+	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/reportmeta"
 	"kitsoki/internal/runstatus/harscrub"
 	"kitsoki/internal/tui/blocks"
@@ -55,7 +56,8 @@ func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 		return m.bugBlock(fmt.Sprintf("could not resolve target root: %v", err)), m, nil
 	}
 
-	safeReport, privacy, perr := bugprivacy.Check(context.Background(), m.bugPrivacyChecker, bugprivacy.Report{
+	checker := m.bugPrivacyCheckerForCommand()
+	safeReport, privacy, perr := bugprivacy.Check(context.Background(), checker, bugprivacy.Report{
 		Surface:    "tui",
 		Target:     "kitsoki",
 		Title:      title,
@@ -115,6 +117,20 @@ func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 	}
 
 	return m.bugBlock(fmt.Sprintf("filed %s (%s)", filepath.ToSlash(relPath), privacyCommandStatus(privacy))), m, nil
+}
+
+func (m RootModel) bugPrivacyCheckerForCommand() bugprivacy.Checker {
+	if m.bugPrivacyCheckerResolver == nil {
+		return m.bugPrivacyChecker
+	}
+	selection := orchestrator.ProfileSelection{}
+	if m.orch != nil {
+		selection = m.orch.Selection()
+	}
+	if checker := m.bugPrivacyCheckerResolver(selection); checker != nil {
+		return checker
+	}
+	return m.bugPrivacyChecker
 }
 
 func (m RootModel) fileGitHubBug(root, title, body string) string {

@@ -36,6 +36,7 @@ import (
 	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/ghagent/bugdeck"
 	"kitsoki/internal/host"
+	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/reportmeta"
 	"kitsoki/internal/runstatus/harscrub"
 )
@@ -184,7 +185,7 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 			"trace.redacted.jsonl": traceJSON,
 		}),
 	}
-	safeReport, privacy, perr := bugprivacy.Check(ctx, s.bugPrivacyChecker, report, scrubOpts, root, stringParam(params, "filed_by"))
+	safeReport, privacy, perr := bugprivacy.Check(ctx, s.bugPrivacyCheckerForReport(params), report, scrubOpts, root, stringParam(params, "filed_by"))
 	if perr != nil {
 		return nil, serverErr(fmt.Errorf("bug privacy check: %w", perr))
 	}
@@ -629,6 +630,39 @@ func privacyFollowUpSuffix(privacy bugprivacy.Result) string {
 		return ""
 	}
 	return "; depersonalized follow-up filed at " + privacy.FollowUpPath
+}
+
+func (s *Server) bugPrivacyCheckerForReport(params map[string]any) bugprivacy.Checker {
+	if s.bugPrivacyCheckerResolver == nil {
+		return s.bugPrivacyChecker
+	}
+	checker := s.bugPrivacyCheckerResolver(BugPrivacyContext{
+		Params:    cloneParams(params),
+		Selection: s.bugPrivacySelectionForReport(params),
+	})
+	if checker != nil {
+		return checker
+	}
+	return s.bugPrivacyChecker
+}
+
+func (s *Server) bugPrivacySelectionForReport(params map[string]any) orchestrator.ProfileSelection {
+	sessionID := strings.TrimSpace(stringParam(params, "session_id"))
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(stringParam(params, "trace_ref"))
+	}
+	if sessionID == "" {
+		return orchestrator.ProfileSelection{}
+	}
+	entry, rerr := s.resolve(map[string]any{"session_id": sessionID})
+	if rerr != nil {
+		return orchestrator.ProfileSelection{}
+	}
+	hc, ok := entry.Driver.(HarnessController)
+	if !ok {
+		return orchestrator.ProfileSelection{}
+	}
+	return hc.HarnessSelection()
 }
 
 func bugArtifactNames(files map[string][]byte) []string {

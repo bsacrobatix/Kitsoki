@@ -234,6 +234,9 @@ type Server struct {
 	// Nil keeps deterministic scrubbing only; tests and replay surfaces stay
 	// no-LLM unless the caller explicitly injects a checker.
 	bugPrivacyChecker bugprivacy.Checker
+	// bugPrivacyCheckerResolver optionally builds a checker per bug report,
+	// using request/session context such as the current harness selection.
+	bugPrivacyCheckerResolver BugPrivacyCheckerResolver
 
 	// workflowRoot is the repo root dynamic workflow drafts should use for
 	// their scratch package and promotion/export defaults. Empty means the
@@ -300,16 +303,17 @@ type Option func(*serverConfig)
 // serverConfig collects the options before the Server is built. The single-entry
 // constructors fold driver into the adapter; NewMulti ignores it.
 type serverConfig struct {
-	poll              time.Duration
-	driver            Driver
-	defaultActor      string
-	bugRoot           string
-	ticketRepo        string
-	agentEvidenceDir  string
-	bugPrivacyChecker bugprivacy.Checker
-	workflowRoot      string
-	kits              *kitendpoint.Dispatcher
-	setupWarnings     []SetupWarning
+	poll                      time.Duration
+	driver                    Driver
+	defaultActor              string
+	bugRoot                   string
+	ticketRepo                string
+	agentEvidenceDir          string
+	bugPrivacyChecker         bugprivacy.Checker
+	bugPrivacyCheckerResolver BugPrivacyCheckerResolver
+	workflowRoot              string
+	kits                      *kitendpoint.Dispatcher
+	setupWarnings             []SetupWarning
 }
 
 // WithBugRoot sets the repo root under which runstatus.bug.report writes
@@ -345,6 +349,25 @@ func WithAgentEvidenceDir(dir string) Option {
 // configuration available; tests may inject a fake checker.
 func WithBugPrivacyChecker(checker bugprivacy.Checker) Option {
 	return func(c *serverConfig) { c.bugPrivacyChecker = checker }
+}
+
+// BugPrivacyContext is the non-secret report context supplied to
+// BugPrivacyCheckerResolver.
+type BugPrivacyContext struct {
+	Params    map[string]any
+	Selection orchestrator.ProfileSelection
+}
+
+// BugPrivacyCheckerResolver builds the provider-backed bug report privacy gate
+// for one report. It can use the current session's harness selection when the
+// report identifies a live session.
+type BugPrivacyCheckerResolver func(BugPrivacyContext) bugprivacy.Checker
+
+// WithBugPrivacyCheckerResolver enables session-aware provider-backed privacy
+// checks. A nil resolver or nil returned checker falls back to
+// WithBugPrivacyChecker, then deterministic scrubbing only.
+func WithBugPrivacyCheckerResolver(resolver BugPrivacyCheckerResolver) Option {
+	return func(c *serverConfig) { c.bugPrivacyCheckerResolver = resolver }
 }
 
 // WithWorkflowRoot sets the repo root dynamic workflow RPCs use for draft
@@ -442,25 +465,26 @@ func newConfig(opts []Option) serverConfig {
 
 func newServer(provider SessionProvider, cfg serverConfig) *Server {
 	return &Server{
-		provider:          provider,
-		poll:              cfg.poll,
-		defaultActor:      cfg.defaultActor,
-		subs:              make(map[string]*subscription),
-		notifs:            newNotifBuffer(),
-		questions:         newQuestionBuffer(),
-		qreg:              newQuestionRegistry(),
-		current:           newCurrentBuffer(),
-		points:            newPointHandoff(),
-		recorder:          harrec.New(bugRecorderCapacity),
-		bugRoot:           cfg.bugRoot,
-		ticketRepo:        cfg.ticketRepo,
-		agentEvidenceDir:  cfg.agentEvidenceDir,
-		bugPrivacyChecker: cfg.bugPrivacyChecker,
-		workflowRoot:      cfg.workflowRoot,
-		captureStore:      make(map[string]*capSnap),
-		activeTurns:       make(map[string]*activeTurn),
-		kits:              cfg.kits,
-		setupWarnings:     append([]SetupWarning(nil), cfg.setupWarnings...),
+		provider:                  provider,
+		poll:                      cfg.poll,
+		defaultActor:              cfg.defaultActor,
+		subs:                      make(map[string]*subscription),
+		notifs:                    newNotifBuffer(),
+		questions:                 newQuestionBuffer(),
+		qreg:                      newQuestionRegistry(),
+		current:                   newCurrentBuffer(),
+		points:                    newPointHandoff(),
+		recorder:                  harrec.New(bugRecorderCapacity),
+		bugRoot:                   cfg.bugRoot,
+		ticketRepo:                cfg.ticketRepo,
+		agentEvidenceDir:          cfg.agentEvidenceDir,
+		bugPrivacyChecker:         cfg.bugPrivacyChecker,
+		bugPrivacyCheckerResolver: cfg.bugPrivacyCheckerResolver,
+		workflowRoot:              cfg.workflowRoot,
+		captureStore:              make(map[string]*capSnap),
+		activeTurns:               make(map[string]*activeTurn),
+		kits:                      cfg.kits,
+		setupWarnings:             append([]SetupWarning(nil), cfg.setupWarnings...),
 	}
 }
 

@@ -319,6 +319,11 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				return err
 			}
 			harnessProfiles, defaultProfile := harnessProfilesFromConfig(webCfg)
+			bugPrivacyRuntime := bugPrivacyRuntimeConfig{
+				AgentBackend:         resolveAgentBackend(agentBackend),
+				ClaudeModel:          claudeModel,
+				UseDefaultLiveLadder: strings.TrimSpace(harnessType) != "replay",
+			}
 
 			// Resolve the app definition. With a path arg, load it from disk
 			// (the historical rung-2 path). With NO arg, synthesize the implicit
@@ -425,6 +430,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 
 			ctx := context.Background()
 			bugFilingNotice := bugFilingAuthStartupNotice(ctx, ticketRepo)
+			bugPrivacyNotice := bugPrivacyStartupNotice(webCfg, bugPrivacyRuntime, ticketRepo)
 			runAsUserNotice := runAsUserStartupNotice(webCfg, runtime.GOOS)
 
 			// ── Flag validation ────────────────────────────────────────────
@@ -582,6 +588,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				if len(bundle.TranscriptEntries) == 0 {
 					effectiveInitialView = initialView
 				}
+				bugPrivacyResolver := bugPrivacyCheckerResolverFromConfig(webCfg, appPath, bugPrivacyRuntime)
 				tuiOptions = append([]tui.RootModelOption{
 					tui.WithJobStore(jobStore),
 					tui.WithChatStore(rawChatStore),
@@ -589,7 +596,8 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 					tui.WithJournalReader(jr),
 					tui.WithTraceHistory(func() (store.History, error) { return s.LoadHistory(sid) }),
 					tui.WithBugTicketRepo(ticketRepo),
-					tui.WithBugPrivacyChecker(bugPrivacyCheckerFromConfig(webCfg, appPath)),
+					tui.WithBugPrivacyChecker(bugPrivacyResolver(orchestrator.ProfileSelection{})),
+					tui.WithBugPrivacyCheckerResolver(bugPrivacyResolver),
 				}, tuiOptions...)
 				if projectStartupNotice != "" {
 					tuiOptions = append(tuiOptions, tui.WithStartupNotice(projectStartupNotice))
@@ -599,6 +607,9 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				}
 				if runAsUserNotice != "" {
 					tuiOptions = append(tuiOptions, tui.WithStartupNotice(runAsUserNotice))
+				}
+				if bugPrivacyNotice != "" {
+					tuiOptions = append(tuiOptions, tui.WithStartupNotice(bugPrivacyNotice))
 				}
 				if tuiMetaTracePath != "" {
 					tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(tuiMetaTracePath))
@@ -763,6 +774,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			// transcript viewport. Copying text then requires Option
 			// (macOS) or Shift (Linux) held during selection to bypass
 			// mouse capture.
+			bugPrivacyResolver := bugPrivacyCheckerResolverFromConfig(webCfg, appPath, bugPrivacyRuntime)
 			tuiOptions = []tui.RootModelOption{
 				tui.WithJobStore(jobStore),
 				tui.WithChatStore(rawChatStore),
@@ -771,7 +783,8 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				tui.WithInitialTypedView(initialTypedView, initialTypedEnv, initialTypedRR),
 				tui.WithTraceHistory(func() (store.History, error) { return s.LoadHistory(sid) }),
 				tui.WithBugTicketRepo(ticketRepo),
-				tui.WithBugPrivacyChecker(bugPrivacyCheckerFromConfig(webCfg, appPath)),
+				tui.WithBugPrivacyChecker(bugPrivacyResolver(orchestrator.ProfileSelection{})),
+				tui.WithBugPrivacyCheckerResolver(bugPrivacyResolver),
 			}
 			if projectStartupNotice != "" {
 				tuiOptions = append(tuiOptions, tui.WithStartupNotice(projectStartupNotice))
@@ -781,6 +794,9 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			}
 			if runAsUserNotice != "" {
 				tuiOptions = append(tuiOptions, tui.WithStartupNotice(runAsUserNotice))
+			}
+			if bugPrivacyNotice != "" {
+				tuiOptions = append(tuiOptions, tui.WithStartupNotice(bugPrivacyNotice))
 			}
 			if freshMetaTracePath != "" {
 				tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(freshMetaTracePath))

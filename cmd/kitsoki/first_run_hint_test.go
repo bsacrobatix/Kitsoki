@@ -158,6 +158,40 @@ func TestSetupWarningsFromConfigSuppressesRunAsUserWhileDisabled(t *testing.T) {
 	}
 }
 
+func TestSetupWarningsFromRuntimeConfigWarnsWhenBugPrivacyRequired(t *testing.T) {
+	warnings := setupWarningsFromRuntimeConfig(webconfig.WebConfig{}, "linux", bugPrivacyRuntimeConfig{}, true)
+	if len(warnings) != 1 {
+		t.Fatalf("expected one bug privacy setup warning, got %#v", warnings)
+	}
+	if warnings[0].ID != "bug-privacy-checker" {
+		t.Fatalf("warning ID = %q", warnings[0].ID)
+	}
+	if !contains(warnings[0].Body, "deterministic scrubbing") || !contains(warnings[0].ActionCommand, "harness_profiles") {
+		t.Fatalf("warning is not actionable enough: %#v", warnings[0])
+	}
+}
+
+func TestSetupWarningsFromRuntimeConfigSuppressesBugPrivacyWhenCheckerAvailable(t *testing.T) {
+	withActiveBackend := setupWarningsFromRuntimeConfig(webconfig.WebConfig{}, "linux", bugPrivacyRuntimeConfig{
+		AgentBackend: "codex",
+	}, true)
+	if len(withActiveBackend) != 0 {
+		t.Fatalf("active backend should suppress bug privacy warning, got %#v", withActiveBackend)
+	}
+
+	withDefaultLive := setupWarningsFromRuntimeConfig(webconfig.WebConfig{}, "linux", bugPrivacyRuntimeConfig{
+		UseDefaultLiveLadder: true,
+	}, true)
+	if len(withDefaultLive) != 0 {
+		t.Fatalf("live default ladder should suppress bug privacy warning, got %#v", withDefaultLive)
+	}
+
+	notRequired := setupWarningsFromRuntimeConfig(webconfig.WebConfig{}, "linux", bugPrivacyRuntimeConfig{}, false)
+	if len(notRequired) != 0 {
+		t.Fatalf("non-GitHub bug filing should not warn about privacy checker, got %#v", notRequired)
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {
