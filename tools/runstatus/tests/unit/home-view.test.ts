@@ -239,6 +239,38 @@ describe("HomeView", () => {
     wrapper.unmount();
   });
 
+  it("renders operation run status and detail on session rows", async () => {
+    listSessions.mockResolvedValue([
+      session({
+        session_id: "sess-waiting",
+        operation_run: {
+          operation_id: "bugfix_full",
+          title: "Fix bug",
+          status: "waiting",
+          stop_reason: "needs-human",
+          stop_detail: "Regression gate was never RED.",
+          terminal_state: "__exit__needs-human",
+        },
+      }),
+      session({ session_id: "sess-plain" }),
+    ]);
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    const operations = wrapper.findAll("[data-testid='session-operation']");
+    expect(operations).toHaveLength(2);
+    expect(operations[0].attributes("data-operation-status")).toBe("waiting");
+    expect(operations[0].find("[data-testid='session-operation-title']").text()).toBe("Fix bug");
+    expect(operations[0].find("[data-testid='session-operation-status']").text()).toBe(
+      "waiting for needs-human"
+    );
+    expect(operations[0].find("[data-testid='session-operation-detail']").text()).toContain(
+      "Regression gate was never RED."
+    );
+    expect(operations[1].text()).toBe("—");
+    wrapper.unmount();
+  });
+
   it("auto-navigates to the drive surface for a single live session", async () => {
     listSessions.mockResolvedValue([session({ session_id: "only-one" })]);
     const wrapper = mount(HomeView, mountOpts);

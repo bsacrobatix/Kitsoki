@@ -10,6 +10,24 @@ export interface SessionHeader {
   turn: number;
   started_at: string; // ISO 8601
   terminal: boolean;
+  operation_run?: OperationRunSummary;
+}
+
+export interface OperationRunSummary {
+  operation_id?: string;
+  policy_id?: string;
+  title?: string;
+  status?: string;
+  mode?: string;
+  execution_mode?: string;
+  run_in_background?: boolean;
+  from?: string;
+  to?: string;
+  entry_intent?: string;
+  terminal_state?: string;
+  terminal_artifact?: string;
+  stop_reason?: string;
+  stop_detail?: string;
 }
 
 export interface MermaidSnapshot {
