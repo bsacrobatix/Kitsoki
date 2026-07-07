@@ -29,8 +29,9 @@ func TestFleetLoadBriefKeyMapping(t *testing.T) {
 
 	ctx := starlarkhost.WithInspector(context.Background(), starlarkhost.NewProductionInspector(tmp))
 	res, err := starlarkhost.Run(ctx, starlarkhost.Params{
-		Script: "fleet_load.star",
-		Source: src,
+		Script:       "fleet_load.star",
+		Source:       src,
+		Capabilities: inspectCaps(),
 		Inputs: map[string]any{
 			"decomposition_path": manifest,
 			"fleet_state_path":   "",

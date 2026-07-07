@@ -126,6 +126,7 @@ The authoritative source is `internal/host/starlark/` (the sandbox) and
 |---|---|---|---|
 | `script` | string | yes | Path to the `.star` file, relative to the app root. The loader resolves it against the manifest dir, rejects `../` escapes, and requires both the `.star` and its `.star.yaml` sidecar to exist at load time. By dispatch the path is absolute. Templated (`{{…}}`) paths skip the load-time check and are validated at runtime. |
 | `inputs` | object | no | The named inputs exposed to the script as `ctx.inputs["name"]`. Type-validated against the sidecar's `inputs:` block before evaluation. Values are templated like any other `with:` arg — **wrap every value in `{{ }}`** (a *sole* `{{ expr }}` preserves the typed value, so a declared `int` stays an `int`). A **bare** `world.foo` is NOT evaluated — it reaches the script as the literal string `"world.foo"`, silently breaking resolution (the general rule: [state-machine.md §7.1](../stories/state-machine.md#71-expressions-vs-templates--which-syntax-goes-where)). The loader rejects bare-expression inputs at load (see below). |
+| `capabilities` | object | no | The capability grants for this run. Defaults expose only pure helpers plus `ctx.inputs` and read-only `ctx.world`; `ctx.http`, `ctx.fs`, `ctx.probe`, and `ctx.host` are absent unless granted here. The loader rejects unknown capability keys and obvious static script/grant mismatches. |
 
 Returns: the script's `main(ctx)` **must return a dict**; each key/value becomes
 a named output. The output dict is validated against the sidecar's `outputs:`
@@ -179,22 +180,23 @@ domain error (see below).
 
 ### The `ctx` surface (deliberately narrow)
 
-`main` takes one argument, `ctx`, a struct with **exactly five** attributes and
-nothing else. The narrowness *is* the sandbox: any unknown attribute (e.g.
-`ctx.env`) fails at eval with a clear Starlark "has no `.X` field" traceback,
-surfaced as a domain error. There is no static AST analyzer — the fixed `ctx` is
-the enforcement.
+`main` takes one argument, `ctx`, a struct with `inputs`, read-only `world` by
+default, and only the external attributes granted by `with.capabilities`. The
+narrowness *is* the sandbox: an ungranted attribute (for example `ctx.http`
+without an `http` grant, or `ctx.env` always) fails at eval with a clear
+Starlark "has no `.X` field" traceback, surfaced as a domain error.
 
 ```
 ctx.inputs["name"]                          # dict of the resolved, type-checked inputs
 ctx.world.get("key")                        # read-only world snapshot; None when absent
-ctx.http.get(url, headers={})               # -> response
-ctx.http.post(url, body=..., headers={})    # -> response
-ctx.fs.read(path)                           # -> string (repo-relative, read-only, 1 MiB cap)
-ctx.fs.exists(path)                         # -> bool
-ctx.fs.glob(pattern)                        # -> [path] (sorted, repo-relative)
-ctx.fs.write(path, content)                 # -> path (repo-relative, replaces one file, 1 MiB cap)
-ctx.probe(name, args=[])                    # -> {exit: int, out: string} (allow-listed only)
+ctx.http.get(url, headers={})               # -> response (only with http grant)
+ctx.http.post(url, body=..., headers={})    # -> response (only with http grant)
+ctx.fs.read(path)                           # -> string (only with fs.read grant)
+ctx.fs.exists(path)                         # -> bool (only with fs.read grant)
+ctx.fs.glob(pattern)                        # -> [path] (only with fs.read grant)
+ctx.fs.write(path, content)                 # -> path (only with fs.write grant)
+ctx.probe(name, args=[])                    # -> {exit: int, out: string} (only with probe/vcs/github grant)
+ctx.host.call(name, args={})                # -> dict (only with exact host.verbs grant)
 ```
 
 - `ctx.inputs` is a **dict**, accessed by key (not attribute).
@@ -210,6 +212,35 @@ ctx.probe(name, args=[])                    # -> {exit: int, out: string} (allow
   (string method) and `.json()` (parses the body to a Starlark value; a parse
   error is a Starlark error). A response is truthy iff its status is in
   `200..299`. A non-2xx status is **not** an error — branch on it in-script.
+
+Example grants:
+
+```yaml
+capabilities:
+  http:
+    methods: [GET]
+    hosts: ["api.github.com"]      # optional; omitted means any host
+    cassette_required: true        # require an injected HTTP cassette/replay client
+  fs:
+    read: ["docs/**", ".artifacts/**"]
+    write: [".artifacts/reports/**"]
+    max_bytes: 1048576
+  vcs: read                        # grants git.status and git.ls_files probes
+  github:
+    issues: read                   # grants gh.issue.list
+  host:
+    verbs: ["host.graph.load"]
+```
+
+`http`, `fs`, `probe`, `github`, and `host` are opt-in: the matching `ctx`
+attribute is absent unless the effect grants it. The production adapter only
+installs the live HTTP client when `http` is granted and
+`http.cassette_required` is not set, and only installs the working-dir-rooted
+inspector when `fs`/`probe`/`github` capabilities are granted. If
+`http.cassette_required: true`, a flow/test/runtime must already have injected a
+Starlark HTTP client, normally through `starlark_http_cassette:`. The runtime
+then enforces HTTP methods/hosts, fs read/write path patterns, probe names, and
+host verbs.
 
 #### Filesystem/probe boundary: `ctx.fs` and `ctx.probe`
 
@@ -242,11 +273,12 @@ All filesystem/probe calls funnel through one `Inspector` interface (`internal/h
 `WithInspector`/`InspectorFromContext` (mirroring `WithHTTP`); the default is a
 **deny-all** inspector so a script that touches the disk without an injected
 inspector fails loud. In production the adapter installs a working-dir-rooted
-inspector; a flow fixture injects a **`ReplayInspector`** backed by an inspect
-cassette, so the *real* script runs with its fs/probe served from disk — no real
-process, fully deterministic, no LLM and no cost. Each call records a body-free
-`{op, target, status}` summary for the trace (full payloads stay in cassettes),
-exactly as HTTP exchanges do.
+inspector only when `capabilities` grants `fs`, `vcs`, or `github`; a flow
+fixture injects a **`ReplayInspector`** backed by an inspect cassette, so the
+*real* script runs with its fs/probe served from disk — no real process, fully
+deterministic, no LLM and no cost. Each call records a body-free `{op, target,
+status}` summary for the trace (full payloads stay in cassettes), exactly as
+HTTP exchanges do.
 
 The worked example is the dev-story ad-hoc plan's verify gate
 ([`stories/dev-story/verify/issues_migrated.star`](../../stories/dev-story/verify/issues_migrated.star));
@@ -294,9 +326,9 @@ flowchart TD
 ### Record / replay (HTTP cassettes)
 
 All network access funnels through one `HTTPClient` interface — the sandbox's
-only I/O boundary. In production the adapter injects a recording client (real
-`net/http`, 30s timeout) that records a body-free `{method, url, status}`
-summary per call. In a flow fixture the testrunner injects a **replay client**
+only I/O boundary. In production the adapter injects a recording client only
+when `capabilities.http` is granted (real `net/http`, 30s timeout) and policy
+checks methods/hosts before dispatch. In a flow fixture the testrunner injects a **replay client**
 backed by an HTTP cassette, so the *real* script runs with its network served
 from disk — no socket, fully deterministic, no LLM and no cost.
 

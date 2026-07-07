@@ -314,6 +314,9 @@ states:
             - invoke: host.starlark.run
               with:
                 script: scripts/enrich.star
+                capabilities:
+                  http:
+                    methods: [GET]
               bind:
                 name: name
   done:

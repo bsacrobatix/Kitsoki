@@ -32,9 +32,10 @@ func TestPunchReportScript(t *testing.T) {
 
 	ctx := starlarkhost.WithInspector(context.Background(), starlarkhost.NewReplayInspector(&cas))
 	res, err := starlarkhost.Run(ctx, starlarkhost.Params{
-		Script:  "punch_report.star",
-		Source:  src,
-		Sidecar: sidecar,
+		Script:       "punch_report.star",
+		Source:       src,
+		Sidecar:      sidecar,
+		Capabilities: inspectCaps(),
 		Inputs: map[string]any{
 			"state_path": ".artifacts/punch-list/report-fixture.state.json",
 		},
@@ -74,9 +75,10 @@ func TestPunchPolicyScript(t *testing.T) {
 
 	ctx := starlarkhost.WithInspector(context.Background(), starlarkhost.NewReplayInspector(&cas))
 	res, err := starlarkhost.Run(ctx, starlarkhost.Params{
-		Script:  "punch_policy.star",
-		Source:  src,
-		Sidecar: sidecar,
+		Script:       "punch_policy.star",
+		Source:       src,
+		Sidecar:      sidecar,
+		Capabilities: inspectCaps(),
 		Inputs: map[string]any{
 			"state_path": ".artifacts/punch-list/policy-fixture.state.json",
 			"item_id":    "policy-demo",
@@ -118,9 +120,10 @@ func TestPunchBoardScript(t *testing.T) {
 
 	ctx := starlarkhost.WithInspector(context.Background(), starlarkhost.NewReplayInspector(&cas))
 	res, err := starlarkhost.Run(ctx, starlarkhost.Params{
-		Script:  "punch_board.star",
-		Source:  src,
-		Sidecar: sidecar,
+		Script:       "punch_board.star",
+		Source:       src,
+		Sidecar:      sidecar,
+		Capabilities: inspectCaps(),
 		Inputs: map[string]any{
 			"state_path":  ".artifacts/punch-list/board-fixture.state.json",
 			"mark_id":     "first",
@@ -190,9 +193,10 @@ func TestPunchLoadScript(t *testing.T) {
 
 	ctx := starlarkhost.WithInspector(context.Background(), starlarkhost.NewProductionInspector(work))
 	res, err := starlarkhost.Run(ctx, starlarkhost.Params{
-		Script:  "punch_load.star",
-		Source:  src,
-		Sidecar: sidecar,
+		Script:       "punch_load.star",
+		Source:       src,
+		Sidecar:      sidecar,
+		Capabilities: inspectCaps(),
 		Inputs: map[string]any{
 			"manifest_path": "two items",
 			"state_path":    ".artifacts/punch-list/load-fixture.state.json",

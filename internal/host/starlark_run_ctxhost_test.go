@@ -36,7 +36,10 @@ func TestNewStarlarkRunHandler_CtxHostInvokesAllowedVerb(t *testing.T) {
 	})
 	handler := NewStarlarkRunHandler(reg)
 
-	res, err := handler(context.Background(), map[string]any{"script": script})
+	res, err := handler(context.Background(), map[string]any{
+		"script":       script,
+		"capabilities": starlarkTestHostCapabilities("host.workspace_manager.get"),
+	})
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
@@ -78,7 +81,10 @@ func TestNewStarlarkRunHandler_CtxHostRejectsUnlistedVerb(t *testing.T) {
 	})
 	handler := NewStarlarkRunHandler(reg)
 
-	res, err := handler(context.Background(), map[string]any{"script": script})
+	res, err := handler(context.Background(), map[string]any{
+		"script":       script,
+		"capabilities": starlarkTestHostCapabilities("host.workspace_manager.get"),
+	})
 	if err != nil {
 		t.Fatalf("handler returned an infra error: %v", err)
 	}

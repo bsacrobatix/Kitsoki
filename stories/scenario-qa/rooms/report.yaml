@@ -52,6 +52,9 @@ states:
         id: build_report
         with:
           script: scripts/build_report.star
+          capabilities:
+            fs:
+              write: ["**"]
           inputs:
             run_id: "{{ world.run_id }}"
             run_dir: "{{ world.run_dir_rel }}"

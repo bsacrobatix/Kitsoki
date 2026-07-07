@@ -2,10 +2,8 @@
 // choosing from a fixed tool menu, the agent emits a Starlark snippet (the
 // same main(ctx) contract as host.starlark.run) each step, observes its
 // result, and eventually emits done(payload) to finish. This is the s1
-// executor core — it reuses internal/host/starlark's Run for evaluation and
-// does not yet implement capability-scoped ctx proxies or cassette recording
-// (see .context design notes for the fuller s2/s3 plan); it is written so
-// those can be layered on without reshaping World/observation threading.
+// executor core — it reuses internal/host/starlark's Run for evaluation, so
+// each snippet sees the same capability-scoped ctx surface as host.starlark.run.
 package codeact
 
 import (
@@ -98,6 +96,9 @@ type Params struct {
 	// World is the read-only world snapshot exposed to every snippet via
 	// ctx.world.get, exactly as in host.starlark.run.
 	World map[string]any
+	// Capabilities is the shared Starlark capability authority for every
+	// snippet this run executes.
+	Capabilities kstarlark.CapabilitySpec
 	// Agent is the LLM stand-in driving the loop.
 	Agent Agent
 	// Schema validates a candidate done() payload. A non-nil error rejects
@@ -150,7 +151,7 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 			return res, nil
 		}
 
-		out, runErr := runSnippet(ctx, emission.Snippet, p.World)
+		out, runErr := runSnippet(ctx, emission.Snippet, p.World, p.Capabilities)
 		if runErr != nil {
 			envelope := &ErrorEnvelope{
 				Message: runErr.Error(),
@@ -188,11 +189,12 @@ func validateSchema(schema func(map[string]any) error, payload map[string]any) e
 // host.starlark.run evaluator, converting a *starlark.DomainError into the
 // plain error runSnippet returns (Run wraps it into an ErrorEnvelope). A
 // non-domain error is a genuine infra failure and is returned as-is.
-func runSnippet(ctx context.Context, snippet string, world map[string]any) (map[string]any, error) {
+func runSnippet(ctx context.Context, snippet string, world map[string]any, capabilities kstarlark.CapabilitySpec) (map[string]any, error) {
 	result, err := kstarlark.Run(ctx, kstarlark.Params{
-		Script: scriptLabel,
-		Source: []byte(snippet),
-		World:  world,
+		Script:       scriptLabel,
+		Source:       []byte(snippet),
+		World:        world,
+		Capabilities: capabilities,
 	})
 	if err != nil {
 		if msg, ok := kstarlark.AsDomainError(err); ok {

@@ -38,6 +38,9 @@ states:
         once: true
         with:
           script: scripts/resolve_scene.star
+          capabilities:
+            fs:
+              read: ["**"]
           # inputs to host.starlark.run are NOT expr-evaluated by the host — the
           # machine resolves each value first, and ONLY strings wrapping the whole
           # value in `{{ }}` are evaluated (a sole `{{ expr }}` preserves the typed

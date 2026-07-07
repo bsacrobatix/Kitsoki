@@ -45,6 +45,9 @@ states:
               id: resolve_deck
               with:
                 script: scripts/resolve_deck.star
+                capabilities:
+                  fs:
+                    read: ["**"]
                 inputs:
                   spec_path: "{{ slots.feedback }}"
                   decks_dir: "{{ world.decks_dir }}"
@@ -94,6 +97,9 @@ states:
               id: resolve_deck
               with:
                 script: scripts/resolve_deck.star
+                capabilities:
+                  fs:
+                    read: ["**"]
                 inputs:
                   spec_path: "{{ slots.spec_path }}"
                   summary:   "{{ slots.summary ?? '' }}"

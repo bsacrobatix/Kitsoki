@@ -2380,30 +2380,12 @@ func checkAgentEffect(file, loc string, eff Effect, agents map[string]*AgentDecl
 
 	switch shortVerb {
 	case "codeact":
-		// M6d: with.capabilities must be a list drawn from the sanctioned
-		// v1 builtin capability allowlist.
-		rawCaps, present := eff.With["capabilities"]
-		if present {
-			var capList []any
-			switch v := rawCaps.(type) {
-			case []any:
-				capList = v
-			case []string:
-				for _, s := range v {
-					capList = append(capList, s)
-				}
-			}
-			for _, c := range capList {
-				capStr, _ := c.(string)
-				if capStr == "" || strings.Contains(capStr, "{{") {
-					continue
-				}
-				if !codeactCapabilityAllowlist[capStr] {
-					addErr(fmt.Sprintf(
-						"%s: with.capabilities entry %q is not a recognized capability — sanctioned host.agent.codeact capabilities are: world, vcs, http",
-						loc, capStr,
-					))
-				}
+		// with.capabilities uses the shared structured Starlark capability
+		// schema, and runtime enforcement comes from the normalized spec rather
+		// than a prompt-only allow-list.
+		if rawCaps, present := eff.With["capabilities"]; present {
+			if _, err := starlarkhost.ParseCapabilities(rawCaps); err != nil {
+				addErr(fmt.Sprintf("%s: with.capabilities is invalid for host.agent.codeact: %v", loc, err))
 			}
 		}
 	case "ask", "decide", "extract":
@@ -2463,15 +2445,6 @@ func checkAgentEffect(file, loc string, eff Effect, agents map[string]*AgentDecl
 			}
 		}
 	}
-}
-
-// codeactCapabilityAllowlist is the sanctioned v1 set of host.agent.codeact
-// with.capabilities entries. See docs/goals/codeact/GOAL.md and
-// internal/host/codeact/executor.go for the engine these proxy.
-var codeactCapabilityAllowlist = map[string]bool{
-	"world": true,
-	"vcs":   true,
-	"http":  true,
 }
 
 func validateSandboxBlock(loc string, raw any) string {
@@ -2666,6 +2639,11 @@ func validateStarlarkEffects(file string, def *AppDef, errs *[]error) {
 			addErr(fmt.Sprintf("%s: host.starlark.run script %q not found (resolved to %q)", loc, rawScript, resolved))
 			return
 		}
+		source, sourceErr := os.ReadFile(resolved)
+		if sourceErr != nil {
+			addErr(fmt.Sprintf("%s: host.starlark.run script %q could not be read (resolved to %q): %v", loc, rawScript, resolved, sourceErr))
+			return
+		}
 
 		// The sidecar is mandatory: it is authoritative over the script's
 		// inputs/outputs. A missing or malformed sidecar is a load error.
@@ -2680,6 +2658,12 @@ func validateStarlarkEffects(file string, def *AppDef, errs *[]error) {
 			addErr(fmt.Sprintf("%s: host.starlark.run sidecar %q is malformed: %v", loc, sidecarPath, parseErr))
 			return
 		}
+		capabilities, capErr := starlarkhost.ParseCapabilities(eff.With["capabilities"])
+		if capErr != nil {
+			addErr(fmt.Sprintf("%s: host.starlark.run capabilities are invalid: %v", loc, capErr))
+			return
+		}
+		validateStarlarkScriptCapabilityUse(loc, string(source), capabilities, addErr)
 
 		// Statically vet the wired `inputs:` against how the machine actually
 		// resolves them. host.starlark.run does NOT expr-evaluate inputs — the
@@ -2718,6 +2702,49 @@ func validateStarlarkEffects(file string, def *AppDef, errs *[]error) {
 			}
 		}
 	})
+}
+
+func validateStarlarkScriptCapabilityUse(loc, source string, cap starlarkhost.CapabilitySpec, addErr func(string)) {
+	scan := stripStarlarkLineComments(source)
+	if strings.Contains(scan, "ctx.http") && !cap.NeedsHTTP() {
+		addErr(fmt.Sprintf("%s: script uses ctx.http but with.capabilities does not grant http", loc))
+	}
+	if strings.Contains(scan, "ctx.fs.write") && len(cap.FS.WritePatterns) == 0 {
+		addErr(fmt.Sprintf("%s: script uses ctx.fs.write but with.capabilities.fs.write is empty", loc))
+	}
+	if (strings.Contains(scan, "ctx.fs.read") || strings.Contains(scan, "ctx.fs.exists") || strings.Contains(scan, "ctx.fs.glob")) && len(cap.FS.ReadPatterns) == 0 {
+		addErr(fmt.Sprintf("%s: script uses ctx.fs read/exists/glob but with.capabilities.fs.read is empty", loc))
+	}
+	if strings.Contains(scan, "ctx.probe") && !cap.AllowsProbe() {
+		addErr(fmt.Sprintf("%s: script uses ctx.probe but with.capabilities does not grant probe/vcs/github", loc))
+	}
+	if strings.Contains(scan, "gh.issue.list") && !containsString(cap.Probe.Names, "gh.issue.list") {
+		addErr(fmt.Sprintf("%s: script uses gh.issue.list but with.capabilities.github.issues is not read", loc))
+	}
+	if strings.Contains(scan, "ctx.host") && !cap.AllowsHost() {
+		addErr(fmt.Sprintf("%s: script uses ctx.host but with.capabilities.host.verbs is empty", loc))
+	}
+}
+
+func stripStarlarkLineComments(source string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(source, "\n") {
+		if idx := strings.Index(line, "#"); idx >= 0 {
+			line = line[:idx]
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func containsString(list []string, want string) bool {
+	for _, item := range list {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func pathWithinAnyStoryRoot(path string, def *AppDef) bool {

@@ -31,6 +31,9 @@ hosts: [host.starlark.run]            # MUST be in the app-level allow-list
   id: derive_widget
   with:
     script: scripts/derive.star       # relative to the app root; resolved at load time
+    capabilities:
+      http:
+        methods: [GET]
     inputs:
       widget_id: "{{ world.selected }}"   # MUST be {{ }}-templated — a bare `world.selected` is passed as a literal string
   bind:
@@ -61,6 +64,14 @@ These are kitsoki-specific traps on top of the general
 
 - **`ctx.inputs` is a dict**, keyed (`ctx.inputs["x"]`), not an attribute
   (`ctx.inputs.x`). `ctx.world` and `ctx.http` are method objects, not dicts.
+- **Capabilities are opt-in.** `ctx.inputs` and read-only `ctx.world` are
+  available by default. `ctx.http`, `ctx.fs`, `ctx.probe`, and `ctx.host` are
+  absent unless the effect's `with.capabilities` grants them. Use `http.methods`
+  for HTTP, `fs.read` / `fs.write` path lists for filesystem access,
+  `vcs: read` for local git probes, `github.issues: read` for
+  `gh.issue.list`, and `host.verbs` for exact `ctx.host.call` verbs. Add
+  `http.cassette_required: true` when a script must only run with an injected
+  HTTP cassette/replay client.
 - **Outputs flow through the return dict.** There is no `ctx.world.set`. If a
   value isn't in the returned dict, the effect's `bind:` can't see it. For small
   generated files, write through `ctx.fs.write(path, content)` and return the
@@ -93,9 +104,10 @@ These are kitsoki-specific traps on top of the general
 
 2. **Load-time — does the app accept it?**
    The loader's `validateStarlarkEffects` checks the script path resolves inside
-   the app root and that the `.star.yaml` sidecar exists and parses. Any
-   `kitsoki` command that loads the app surfaces these; the cheapest is the next
-   step.
+   the app root, that the `.star.yaml` sidecar exists and parses, and that
+   static `ctx.http`/`ctx.fs`/`ctx.probe`/`ctx.host` usage has matching
+   `with.capabilities`. Any `kitsoki` command that loads the app surfaces these;
+   the cheapest is the next step.
 
 3. **Behavioural, no network/no cost — does it produce the right outputs?**
    Write a flow fixture with an HTTP cassette and run the **real** script:

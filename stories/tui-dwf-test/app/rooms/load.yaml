@@ -23,6 +23,10 @@ states:
         once: true
         with:
           script: scripts/punch_load.star
+          capabilities:
+            fs:
+              read: ["**"]
+              write: ["**"]
           inputs:
             manifest_path: "{{ world.manifest_path }}"
             state_path: "{{ world.state_path }}"

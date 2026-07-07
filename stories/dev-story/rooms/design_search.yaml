@@ -209,6 +209,9 @@ states:
               id: amend_workspace
               with:
                 script: scripts/design_amend_workspace.star
+                capabilities:
+                  fs:
+                    read: ["**"]
                 inputs:
                   target:        "{{ slots.target }}"
                   proposed_slug: "{{ world.design_slug }}"

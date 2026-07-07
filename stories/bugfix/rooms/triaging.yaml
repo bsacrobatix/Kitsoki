@@ -94,14 +94,16 @@ states:
       #    re-running the agent; refine clears the bind to re-arm. Triage is a
       #    bounded read-only code-act loop (inspect tree + git history, then
       #    emit a schema-gated verdict) rather than the open-ended
-      #    host.agent.task acceptance loop — capabilities is deliberately
-      #    [world, vcs] (no http: triage never needs outbound network).
+      #    host.agent.task acceptance loop — capabilities deliberately grant
+      #    world + read-only VCS only (no http: triage never needs outbound network).
       - invoke: host.agent.codeact
         once: true
         with:
           agent: triager
           budget: 6
-          capabilities: [world, vcs]
+          capabilities:
+            world: read
+            vcs: read
           schema: schemas/triage_verdict.json
           goal: >-
             You are triaging bug {{ world.ticket_id }} — {{ world.ticket_title }}

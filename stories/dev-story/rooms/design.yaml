@@ -55,6 +55,9 @@ states:
               id: name_slug
               with:
                 script: scripts/design_workspace.star
+                capabilities:
+                  fs:
+                    read: ["**"]
                 inputs:
                   proposed:     "{{ world.design_seed_idea != '' ? world.design_seed_idea + ' — ' + slots.message : slots.message }}"
                   durable_path: "{{ world.design_durable_path }}"

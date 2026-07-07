@@ -74,7 +74,8 @@ func TestGoalSeekerResolveWorkdir_FromRuntimeBlock(t *testing.T) {
 	res, err := StarlarkRunHandler(
 		WithWorldSnapshot(context.Background(), map[string]any{"workdir": "."}),
 		map[string]any{
-			"script": resolveScript,
+			"script":       resolveScript,
+			"capabilities": starlarkTestFSCapabilities(),
 			"inputs": map[string]any{
 				"goal_dir":           goalDir,
 				"workdir":            ".",
@@ -151,7 +152,8 @@ func TestGoalSeekerResolveWorkdir_RuntimeWorktreeBeatsDirect(t *testing.T) {
 	res, err := StarlarkRunHandler(
 		WithWorldSnapshot(context.Background(), map[string]any{"workdir": "."}),
 		map[string]any{
-			"script": resolveScript,
+			"script":       resolveScript,
+			"capabilities": starlarkTestFSCapabilities(),
 			"inputs": map[string]any{
 				"goal_dir":           goalDir,
 				"workdir":            ".",
@@ -189,7 +191,8 @@ func TestGoalSeekerResolveWorkdir_SeedWins(t *testing.T) {
 	res, err := StarlarkRunHandler(
 		WithWorldSnapshot(context.Background(), map[string]any{}),
 		map[string]any{
-			"script": resolveScript,
+			"script":       resolveScript,
+			"capabilities": starlarkTestFSCapabilities(),
 			"inputs": map[string]any{
 				"goal_dir":           "docs/goals/gu",
 				"workdir":            "/abs/seeded/worktree",
@@ -221,8 +224,9 @@ func runGSLint(t *testing.T, lintScript, workdir, goalDir string) string {
 	res, err := StarlarkRunHandler(
 		WithWorldSnapshot(context.Background(), map[string]any{"workdir": workdir}),
 		map[string]any{
-			"script": lintScript,
-			"inputs": map[string]any{"goal_dir": goalDir},
+			"script":       lintScript,
+			"capabilities": starlarkTestFSCapabilities(),
+			"inputs":       map[string]any{"goal_dir": goalDir},
 		},
 	)
 	if err != nil {

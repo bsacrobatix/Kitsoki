@@ -23,6 +23,13 @@ type fakeCall struct {
 	body    []byte
 }
 
+func httpCaps() starlarkhost.CapabilitySpec {
+	return starlarkhost.CapabilitySpec{
+		World: true,
+		HTTP:  starlarkhost.HTTPCapability{Enabled: true},
+	}
+}
+
 func (f *fakeHTTP) Do(_ context.Context, method, url string, headers map[string]string, body []byte) (*starlarkhost.HTTPResponse, error) {
 	f.calls = append(f.calls, fakeCall{method: method, url: url, headers: headers, body: body})
 	if r, ok := f.responses[method+" "+url]; ok {
@@ -83,7 +90,7 @@ def main(ctx):
     body = resp.json()
     return {"status": resp.status, "name": body["name"], "qty": body["qty"]}
 `
-	res, err := starlarkhost.Run(ctx, starlarkhost.Params{Script: "get.star", Source: []byte(script)})
+	res, err := starlarkhost.Run(ctx, starlarkhost.Params{Script: "get.star", Source: []byte(script), Capabilities: httpCaps()})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -131,7 +138,7 @@ def main(ctx):
     resp = ctx.http.post("https://api.example.com/widgets", body={"name": "bolt"})
     return {"status": resp.status, "text": resp.text()}
 `
-	res, err := starlarkhost.Run(ctx, starlarkhost.Params{Script: "post.star", Source: []byte(script)})
+	res, err := starlarkhost.Run(ctx, starlarkhost.Params{Script: "post.star", Source: []byte(script), Capabilities: httpCaps()})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -171,7 +178,7 @@ def main(ctx):
     ok = True if resp else False
     return {"status": resp.status, "ok": ok}
 `
-	res, err := starlarkhost.Run(ctx, starlarkhost.Params{Script: "miss.star", Source: []byte(script)})
+	res, err := starlarkhost.Run(ctx, starlarkhost.Params{Script: "miss.star", Source: []byte(script), Capabilities: httpCaps()})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -183,8 +190,27 @@ def main(ctx):
 	}
 }
 
-// TestRun_NoHTTPClient_Denied confirms that with no client injected, ctx.http
-// fails loudly (deny-all) as a DomainError rather than silently reaching the
+func TestRun_HTTPWithoutCapability_HasNoCtxAttr(t *testing.T) {
+	script := `
+def main(ctx):
+    resp = ctx.http.get("https://api.example.com/x")
+    return {"status": resp.status}
+`
+	_, err := starlarkhost.Run(context.Background(), starlarkhost.Params{Script: "denied.star", Source: []byte(script)})
+	if err == nil {
+		t.Fatal("expected error from absent ctx.http")
+	}
+	msg, ok := starlarkhost.AsDomainError(err)
+	if !ok {
+		t.Fatalf("expected DomainError, got %T: %v", err, err)
+	}
+	if !strings.Contains(msg, ".http") {
+		t.Fatalf("error %q should mention missing ctx.http", msg)
+	}
+}
+
+// TestRun_NoHTTPClient_Denied confirms that when http is granted but no client
+// is injected, the capability fails loudly rather than silently reaching the
 // network.
 func TestRun_NoHTTPClient_Denied(t *testing.T) {
 	script := `
@@ -192,7 +218,7 @@ def main(ctx):
     resp = ctx.http.get("https://api.example.com/x")
     return {"status": resp.status}
 `
-	_, err := starlarkhost.Run(context.Background(), starlarkhost.Params{Script: "denied.star", Source: []byte(script)})
+	_, err := starlarkhost.Run(context.Background(), starlarkhost.Params{Script: "denied.star", Source: []byte(script), Capabilities: httpCaps()})
 	if err == nil {
 		t.Fatal("expected error from deny-all HTTP client")
 	}

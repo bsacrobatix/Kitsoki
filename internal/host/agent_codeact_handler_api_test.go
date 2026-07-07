@@ -99,7 +99,7 @@ func TestAgentCodeactHandler_APIPathDrivesRunToDone(t *testing.T) {
 		"agent":        "agent.glm",
 		"goal":         "produce a trivial result",
 		"budget":       5,
-		"capabilities": []any{"world"},
+		"capabilities": map[string]any{"world": "read"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -133,7 +133,7 @@ func TestAgentCodeactHandler_APIPathSendsAPIKey(t *testing.T) {
 		"agent":        "agent.glm",
 		"goal":         "produce a result",
 		"budget":       5,
-		"capabilities": []any{"world"},
+		"capabilities": map[string]any{"world": "read"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -169,7 +169,7 @@ func TestAgentCodeactHandler_FallsBackToCLIWhenNoPluginNamed(t *testing.T) {
 		"agent":        "coder",
 		"goal":         "produce a trivial result",
 		"budget":       5,
-		"capabilities": []any{"world"},
+		"capabilities": map[string]any{"world": "read"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)

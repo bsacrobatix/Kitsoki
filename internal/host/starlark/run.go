@@ -54,6 +54,10 @@ type Params struct {
 	Inputs map[string]any
 	// World is the read-only world snapshot exposed via ctx.world.get.
 	World map[string]any
+	// Capabilities is the normalized authority for this run. The zero value is
+	// interpreted as DefaultCapabilities: pure helpers plus ctx.inputs/world and
+	// no external I/O.
+	Capabilities CapabilitySpec
 }
 
 // Result is the output of Run. Outputs is the validated return dict of main();
@@ -101,6 +105,9 @@ func AsDomainError(err error) (string, bool) {
 // The HTTPClient is resolved from ictx (WithHTTP). When none is injected, any
 // ctx.http call fails — the sandbox never reaches the network by default.
 func Run(ictx context.Context, p Params) (*Result, error) {
+	cap := normalizeRunCapabilities(p.Capabilities)
+	ictx = ApplyCapabilityPolicy(ictx, cap)
+
 	// 0. Normalize exotic numeric kinds to the canonical JSON-ish shapes
 	//    (int64/float64) before validation and conversion. Effect templating
 	//    and expression evaluation can hand over uint64/int32/... values (e.g.
@@ -131,10 +138,15 @@ func Run(ictx context.Context, p Params) (*Result, error) {
 		thread.SetLocal("kitsoki_flow_file", coverage.flowFile)
 	}
 
-	predeclared := starlark.StringDict{
-		"json": starlarkjson.Module,
-		"math": math.Module,
-		"yaml": yamlModule,
+	predeclared := starlark.StringDict{}
+	if cap.Stdlib["json"] {
+		predeclared["json"] = starlarkjson.Module
+	}
+	if cap.Stdlib["math"] {
+		predeclared["math"] = math.Module
+	}
+	if cap.Stdlib["yaml"] {
+		predeclared["yaml"] = yamlModule
 	}
 
 	src := p.Source
@@ -165,7 +177,7 @@ func Run(ictx context.Context, p Params) (*Result, error) {
 	}
 
 	// 4. Build ctx and call main(ctx).
-	ctxVal, err := buildCtx(ictx, p.Inputs, p.World)
+	ctxVal, err := buildCtx(ictx, p.Inputs, p.World, cap)
 	if err != nil {
 		// A ctx-construction failure is an input-conversion problem — domain.
 		return nil, &DomainError{msg: fmt.Sprintf("starlark: build ctx: %v", err)}
@@ -204,6 +216,17 @@ func Run(ictx context.Context, p Params) (*Result, error) {
 	}, nil
 }
 
+func normalizeRunCapabilities(cap CapabilitySpec) CapabilitySpec {
+	if cap.Stdlib != nil || cap.World || cap.NeedsHTTP() || cap.NeedsInspector() || cap.AllowsHost() {
+		if cap.Stdlib == nil {
+			cap.Stdlib = DefaultCapabilities().Stdlib
+		}
+		sortSpec(&cap)
+		return cap
+	}
+	return DefaultCapabilities()
+}
+
 // scriptLabel returns a human label for the script in error messages.
 func scriptLabel(p Params) string {
 	if p.Script != "" {
@@ -223,6 +246,23 @@ func exchangesFromContext(ictx context.Context) []HTTPExchange {
 		return c.Exchanges()
 	case *RecordReplayClient:
 		return c.Exchanges()
+	case capabilityHTTPClient:
+		return exchangesFromClient(c.base)
+	default:
+		return nil
+	}
+}
+
+func exchangesFromClient(c HTTPClient) []HTTPExchange {
+	switch x := c.(type) {
+	case *RecordingClient:
+		return x.Exchanges
+	case *ReplayClient:
+		return x.Exchanges()
+	case *RecordReplayClient:
+		return x.Exchanges()
+	case capabilityHTTPClient:
+		return exchangesFromClient(x.base)
 	default:
 		return nil
 	}
@@ -238,6 +278,21 @@ func inspectionsFromContext(ictx context.Context) []InspectExchange {
 		return in.Inspections()
 	case *ReplayInspector:
 		return in.Inspections()
+	case capabilityInspector:
+		return inspectionsFromInspector(in.base)
+	default:
+		return nil
+	}
+}
+
+func inspectionsFromInspector(in Inspector) []InspectExchange {
+	switch x := in.(type) {
+	case *productionInspector:
+		return x.Inspections()
+	case *ReplayInspector:
+		return x.Inspections()
+	case capabilityInspector:
+		return inspectionsFromInspector(x.base)
 	default:
 		return nil
 	}

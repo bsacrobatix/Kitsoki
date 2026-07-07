@@ -186,6 +186,10 @@ states:
         id: write_report
         with:
           script: scripts/write_report.star
+          capabilities:
+            fs:
+              read: ["**"]
+              write: ["**"]
           inputs:
             outcome: "{{ world.outcome }}"
             cycle: "{{ world.cycle }}"
@@ -228,6 +232,10 @@ states:
         id: write_report
         with:
           script: scripts/write_report.star
+          capabilities:
+            fs:
+              read: ["**"]
+              write: ["**"]
           inputs:
             outcome: "{{ world.outcome }}"
             cycle: "{{ world.cycle }}"
@@ -271,6 +279,10 @@ states:
         id: write_report
         with:
           script: scripts/write_report.star
+          capabilities:
+            fs:
+              read: ["**"]
+              write: ["**"]
           inputs:
             outcome: blocked
             cycle: "{{ world.cycle }}"

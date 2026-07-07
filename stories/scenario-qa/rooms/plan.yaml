@@ -98,6 +98,9 @@ states:
         id: plan_legs
         with:
           script: scripts/plan_legs.star
+          capabilities:
+            fs:
+              read: ["**"]
           inputs:
             mode: "{{ world.mode }}"
             run_id: "{{ world.run_id }}"

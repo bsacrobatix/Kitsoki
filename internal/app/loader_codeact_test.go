@@ -1,6 +1,6 @@
 // RED gate for goal docs/goals/codeact/GOAL.md G2 ("Verb wiring") and
 // decomposition.yaml's s2-verb-wiring slice: story authors declare a
-// `host.agent.codeact` invoke with a `with.capabilities: [...]` allowlist,
+// `host.agent.codeact` invoke with a structured `with.capabilities` grant,
 // validated at LOAD time against a registered builtin capability set, and
 // task/converse-only knobs (e.g. `sandbox:`) must be rejected on codeact.
 //
@@ -56,12 +56,22 @@ states:
 // not pinned — only that both substrings appear together in one message,
 // analogous to `with.agent %q is not declared in agents`.
 func TestLoad_CodeactUnknownCapability_Rejected(t *testing.T) {
-	yaml := codeactBaseYAML(`          capabilities: ["not_a_real_capability"]
+	yaml := codeactBaseYAML(`          capabilities:
+            not_a_real_capability: true
 `)
 	_, err := LoadBytes([]byte(yaml))
 	require.Error(t, err, "an unknown with.capabilities entry must fail load, not silently no-op at runtime")
 	require.Contains(t, err.Error(), "capability")
 	require.Contains(t, err.Error(), "not_a_real_capability")
+}
+
+func TestLoad_CodeactListCapabilities_Rejected(t *testing.T) {
+	yaml := codeactBaseYAML(`          capabilities: ["world", "vcs"]
+`)
+	_, err := LoadBytes([]byte(yaml))
+	require.Error(t, err, "top-level capability lists are not part of the opt-in schema")
+	require.Contains(t, err.Error(), "capabilities")
+	require.Contains(t, err.Error(), "mapping")
 }
 
 // TestLoad_CodeactRejectsSandboxKnob asserts that a sandbox: block — valid
@@ -79,7 +89,8 @@ func TestLoad_CodeactUnknownCapability_Rejected(t *testing.T) {
 // -only knob`), so an author who copy-pastes a task-shaped with: block onto
 // a codeact effect gets pointed at the right fix.
 func TestLoad_CodeactRejectsSandboxKnob(t *testing.T) {
-	yaml := codeactBaseYAML(`          capabilities: ["world"]
+	yaml := codeactBaseYAML(`          capabilities:
+            world: read
           sandbox:
             min_strength: supervised
             rw: [".artifacts/goal"]
@@ -91,15 +102,10 @@ func TestLoad_CodeactRejectsSandboxKnob(t *testing.T) {
 }
 
 // TestLoad_CodeactValidCapabilities_Accepted is the positive control: a
-// codeact effect whose with.capabilities only lists the sanctioned v1
-// builtin set and carries no sandbox: block should load cleanly once s2
-// lands. The v1 set here (world, vcs, http) is this test's own assumption —
-// no .context/codeact-design-decisions.md exists in this worktree yet (the
-// s0 design-spike slice that was meant to pin it hasn't landed/isn't
-// present), so pick the three proxies GOAL.md's engine description implies
-// (ctx.world.get already exists per internal/host/codeact/executor.go's doc
-// comment; vcs/http are the obvious next agent-facing proxies) and leave a
-// TODO for the implementer to reconcile against whatever s0 actually pins.
+// codeact effect whose with.capabilities grants the sanctioned v1 builtin set
+// and carries no sandbox: block should load cleanly. The v1 set here is world,
+// vcs, and http: ctx.world.get already exists per internal/host/codeact's
+// executor doc comment, and vcs/http are the next agent-facing proxies.
 //
 // Investigated: does this currently pass vacuously? Yes — checkAgentEffect
 // only special-cases shortVerb == "task"/"converse"/"ask"/"decide"/"extract"
@@ -109,11 +115,15 @@ func TestLoad_CodeactRejectsSandboxKnob(t *testing.T) {
 // GREEN, not RED — but it is not testing nothing: it pins (a) that the
 // loader must keep accepting this exact shape once validation lands, and
 // (b) via the AppDef assertions below, that the effect actually parsed with
-// invoke == "host.agent.codeact" and rendered by rendered capability list,
+// invoke == "host.agent.codeact" and preserved the structured capability grant,
 // which is the concrete surface the implementer must not regress when they
 // add the capability allow-list check for the unknown-capability case above.
 func TestLoad_CodeactValidCapabilities_Accepted(t *testing.T) {
-	yaml := codeactBaseYAML(`          capabilities: ["world", "vcs", "http"]
+	yaml := codeactBaseYAML(`          capabilities:
+            world: read
+            vcs: read
+            http:
+              methods: [GET]
 `)
 	def, err := LoadBytes([]byte(yaml))
 	require.NoError(t, err, "a codeact effect using only the sanctioned v1 capability set must load cleanly")
@@ -125,7 +135,11 @@ func TestLoad_CodeactValidCapabilities_Accepted(t *testing.T) {
 
 	eff := start.OnEnter[0]
 	require.Equal(t, "host.agent.codeact", eff.Invoke)
-	caps, ok := eff.With["capabilities"].([]any)
-	require.True(t, ok, "with.capabilities must round-trip as a list")
-	require.ElementsMatch(t, []any{"world", "vcs", "http"}, caps)
+	caps, ok := eff.With["capabilities"].(map[string]any)
+	require.True(t, ok, "with.capabilities must round-trip as a mapping")
+	require.Equal(t, "read", caps["world"])
+	require.Equal(t, "read", caps["vcs"])
+	httpCaps, ok := caps["http"].(map[string]any)
+	require.True(t, ok, "http grant must round-trip as a mapping")
+	require.ElementsMatch(t, []any{"GET"}, httpCaps["methods"])
 }

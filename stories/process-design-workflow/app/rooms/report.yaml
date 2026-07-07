@@ -20,6 +20,10 @@ states:
         once: true
         with:
           script: scripts/punch_report.star
+          capabilities:
+            fs:
+              read: ["**"]
+              write: ["**"]
           inputs:
             state_path: "{{ world.state_path }}"
         bind:

@@ -78,7 +78,7 @@ func TestAgentCodeactHandler_RealAgentDrivesRunToDone(t *testing.T) {
 		"agent":        "coder",
 		"goal":         "produce a trivial result",
 		"budget":       5,
-		"capabilities": []any{"world"},
+		"capabilities": map[string]any{"world": "read"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -152,7 +152,7 @@ func TestAgentCodeactHandler_SchemaRejectsThenAccepts(t *testing.T) {
 		"agent":        "triager",
 		"goal":         "assess whether the bug still exists",
 		"budget":       5,
-		"capabilities": []any{"world"},
+		"capabilities": map[string]any{"world": "read"},
 		"schema":       schemaPath,
 	})
 	if err != nil {

@@ -9,6 +9,14 @@ import (
 	"kitsoki/internal/render"
 )
 
+func fsReadCapabilities() map[string]any {
+	return map[string]any{
+		"fs": map[string]any{
+			"read": []any{"**"},
+		},
+	}
+}
+
 // TestStarlarkRunDefaultInspector_PrefersAppDir locks the resolution order for
 // the default production inspector's root: world.workdir, then KITSOKI_APP_DIR
 // (AppDirEnv, agent_ask.go), then the process cwd. Without the AppDirEnv step,
@@ -60,7 +68,7 @@ func TestStarlarkRunDefaultInspector_PrefersAppDir(t *testing.T) {
 	// No world.workdir supplied and no inspector pre-injected: the adapter must
 	// fall through to KITSOKI_APP_DIR before the process cwd.
 	ctx := WithWorldSnapshot(context.Background(), map[string]any{})
-	res, err := StarlarkRunHandler(ctx, map[string]any{"script": script})
+	res, err := StarlarkRunHandler(ctx, map[string]any{"script": script, "capabilities": fsReadCapabilities()})
 	if err != nil {
 		t.Fatalf("StarlarkRunHandler: %v", err)
 	}
@@ -116,7 +124,7 @@ func TestStarlarkRunDefaultInspector_AppDirWidensToRepoRoot(t *testing.T) {
 	t.Setenv(AppDirEnv, appDir)
 
 	ctx := WithWorldSnapshot(context.Background(), map[string]any{})
-	res, err := StarlarkRunHandler(ctx, map[string]any{"script": script})
+	res, err := StarlarkRunHandler(ctx, map[string]any{"script": script, "capabilities": fsReadCapabilities()})
 	if err != nil {
 		t.Fatalf("StarlarkRunHandler: %v", err)
 	}
@@ -131,7 +139,7 @@ func TestStarlarkRunDefaultInspector_AppDirWidensToRepoRoot(t *testing.T) {
 // TestStarlarkRunDefaultInspector_DotWorkdirFallsThrough locks the fix for
 // the prd-design scenario-qa live bug: dev-story projects an unbound
 // world.workdir into its nested instance's workdir as the bare relative
-// string "." (`workdir: "{{ world.workdir == '' ? '.' : world.workdir }}"`),
+// string "." (`workdir: "{{ world.workdir == ” ? '.' : world.workdir }}"`),
 // not "". Treating "." as an already-resolved root (as the pre-fix code did)
 // skipped every fallback below and rooted the inspector at
 // NewProductionInspector(".")'s process cwd — the wrong repo entirely for a
@@ -179,7 +187,7 @@ func TestStarlarkRunDefaultInspector_DotWorkdirFallsThrough(t *testing.T) {
 	ctx := WithWorldSnapshot(context.Background(), map[string]any{"workdir": "."})
 	ctx = WithPromptRenderer(ctx, pr)
 
-	res, err := StarlarkRunHandler(ctx, map[string]any{"script": script})
+	res, err := StarlarkRunHandler(ctx, map[string]any{"script": script, "capabilities": fsReadCapabilities()})
 	if err != nil {
 		t.Fatalf("StarlarkRunHandler: %v", err)
 	}
@@ -239,7 +247,7 @@ func TestStarlarkRunDefaultInspector_PromptRendererBeatsContaminatedAppDir(t *te
 	ctx := WithWorldSnapshot(context.Background(), map[string]any{})
 	ctx = WithPromptRenderer(ctx, pr)
 
-	res, err := StarlarkRunHandler(ctx, map[string]any{"script": script})
+	res, err := StarlarkRunHandler(ctx, map[string]any{"script": script, "capabilities": fsReadCapabilities()})
 	if err != nil {
 		t.Fatalf("StarlarkRunHandler: %v", err)
 	}

@@ -255,6 +255,10 @@ states:
               id: publish
               with:
                 script: scripts/prd_publish.star
+                capabilities:
+                  fs:
+                    read: ["**"]
+                    write: ["**"]
                 inputs:
                   workspace: "{{ world.prd_workspace }}"
                   slug: "{{ world.prd_slug }}"
