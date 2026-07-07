@@ -102,6 +102,80 @@ def test_preflight_candidate_profile_and_local_repo_checks():
         assert "DEMO_REPO" in text
 
 
+def test_resolve_repo_dir_accepts_meta_repo_subdir_or_standalone_checkout():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        meta = root / "cyber-repo"
+        sub = meta / "src" / "cyberfabric" / "gears-rust"
+        sub.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(sub)], check=True)
+        (sub / "case.txt").write_text("baseline\n")
+        subprocess.run(["git", "-C", str(sub), "add", "case.txt"], check=True)
+        subprocess.run([
+            "git", "-C", str(sub),
+            "-c", "user.name=Test",
+            "-c", "user.email=test@example.com",
+            "commit", "-q", "-m", "baseline",
+        ], check=True)
+        baseline = subprocess.check_output(["git", "-C", str(sub), "rev-parse", "HEAD"], text=True).strip()
+        (sub / "case.txt").write_text("fix\n")
+        subprocess.run(["git", "-C", str(sub), "add", "case.txt"], check=True)
+        subprocess.run([
+            "git", "-C", str(sub),
+            "-c", "user.name=Test",
+            "-c", "user.email=test@example.com",
+            "commit", "-q", "-m", "fix",
+        ], check=True)
+        fix = subprocess.check_output(["git", "-C", str(sub), "rev-parse", "HEAD"], text=True).strip()
+        manifest = {
+            "project": {
+                "id": "gears-rust",
+                "local_only": True,
+                "repo_envs": ["GEARS_RUST_REPO", "CYBER_REPO"],
+                "repo_subdir": "src/cyberfabric/gears-rust",
+            },
+            "bugs": [{
+                "id": "bug1",
+                "baseline_sha": baseline,
+                "fix_sha": fix,
+            }],
+            "_dir": root,
+        }
+        resolved = bench.resolve_repo_dir(manifest, str(meta))
+        assert resolved["ok"] is True
+        assert resolved["path"] == str(sub)
+        assert resolved["repo_subdir"] == "src/cyberfabric/gears-rust"
+
+        standalone = root / "gears-rust"
+        subprocess.run(["git", "clone", "-q", str(sub), str(standalone)], check=True)
+        resolved = bench.resolve_repo_dir(manifest, str(standalone))
+        assert resolved["ok"] is True
+        assert resolved["path"] == str(standalone)
+
+        missing_submodule = root / "missing-submodule"
+        subprocess.run(["git", "init", "-q", str(missing_submodule)], check=True)
+        resolved = bench.resolve_repo_dir(manifest, str(missing_submodule))
+        assert resolved["ok"] is False
+        assert "repo_subdir does not exist" in resolved["errors"][0]
+
+
+def test_oracle_capsule_catalog_has_the_promoted_ten():
+    projects = ["query-string", "gears-rust", "kitsoki"]
+    manifests = bench.load_project_manifests(projects)
+    capsules = [
+        bench.oracle_capsule_record(m, bug)
+        for m in manifests
+        for bug in bench.selected_bugs(m)
+    ]
+    ids = {item["id"] for item in capsules}
+    assert len(capsules) == 10
+    assert {"query-string/qs1", "gears-rust/bug1", "kitsoki/bug9"} <= ids
+    gears = next(item for item in capsules if item["id"] == "gears-rust/bug1")
+    assert gears["repo_modes"] == ["single-repo", "meta-repo"]
+    assert gears["repo_envs"][:2] == ["GEARS_RUST_REPO", "CYBER_REPO"]
+    assert gears["green_red_green"][1].startswith("RED:")
+
+
 def test_preflight_scopes_to_selected_bugs():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)

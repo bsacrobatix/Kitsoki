@@ -93,7 +93,7 @@ BASESTORIES_STAMP := internal/basestories/.embed-stamp
 BASESKILLS_DIR    := internal/baseskills/assets
 BASESKILLS_STAMP  := internal/baseskills/.embed-stamp
 
-.PHONY: all setup setup-visual-qa-deps bootstrap-worktree build build-lean install uninstall test test-full test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff history-smoke history-pending-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
+.PHONY: all setup setup-visual-qa-deps bootstrap-worktree build build-lean install uninstall test test-full test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff oracle-capsules history-smoke history-pending-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
 	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local
 
@@ -416,6 +416,9 @@ qs-bakeoff: install
 	python3 tools/bugfix-bakeoff/external/bench_grade_test.py
 	python3 tools/bugfix-bakeoff/external/bench.py lint-oracles --project kitsoki --strict
 	go test -tags qsbakeoff -run TestExternalBakeoff -count=1 -v ./tools/bugfix-bakeoff/external/
+
+oracle-capsules:
+	python3 tools/bugfix-bakeoff/external/bench.py oracle-capsules --markdown
 
 # gears-bakeoff arms the gears-rust corpus (projects/gears-rust): prove each
 # captured fixture's hidden oracle is RED at its baseline and GREEN after the real

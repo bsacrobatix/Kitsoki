@@ -202,6 +202,7 @@ if profile_path.exists():
     check("valid enabled stories present", "enabled_stories:" in profile_text)
     check("valid enabled setup", "- \"setup\"" in profile_text)
     check("valid enabled bugfix", "- \"bugfix\"" in profile_text)
+    check("valid enabled repo-bakeoff", "- \"repo-bakeoff\"" in profile_text)
     check("valid enabled pr-refinement", "- \"pr-refinement\"" in profile_text)
     check("valid enabled git-ops", "- \"git-ops\"" in profile_text)
     check("valid onboarding starter stories", "starter_stories:" in profile_text)

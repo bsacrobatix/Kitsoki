@@ -41,6 +41,18 @@ and [`projects/kitsoki`](projects/kitsoki) (**kitsoki's own** go+ts dogfood bugs
 `local_only`, folded in from the retired parent harness; the 3 armed fixtures are
 bug9/bug12/bug14, all proven RED@baseline→GREEN@fix via a throwaway local mirror).
 
+The promoted bug rows are also exposed as **bugfix oracle capsules**:
+
+```sh
+python3 tools/bugfix-bakeoff/external/bench.py oracle-capsules --markdown
+make oracle-capsules
+```
+
+The current promoted set is 10 capsules: 3 `query-string`, 4 `gears-rust`, and
+3 `kitsoki`. `gears-rust` declares both `GEARS_RUST_REPO` and `CYBER_REPO` plus
+`repo_subdir: src/cyberfabric/gears-rust`, so the same manifest can run against
+a standalone checkout or an initialized `~/code/cyber-repo` meta checkout.
+
 ### Polyglot repos (a JS package not at the repo root)
 
 `bench.py` runs one project-level `install` and links a root `node_modules`. For a

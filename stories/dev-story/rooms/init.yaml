@@ -462,7 +462,7 @@ states:
           prompt: "Story packs"
           items:
             - label:  "cyber repo"
-              hint:   "setup, bugfixing, PR refinement, git ops"
+              hint:   "setup, bugfixing, oracle capsules, PRs, git ops"
               intent: select_story_pack
               slots:  { pack: "cyber-repo" }
             - label:  "core setup"
@@ -495,10 +495,11 @@ states:
             - set:
                 init_story_pack: "cyber-repo"
                 init_story_pack_title: "Cyber repo starter"
-                init_story_pack_summary: "Focused first-run set for cyber-repo: setup, bugfixing, PR refinement, and git operations."
+                init_story_pack_summary: "Focused first-run set for cyber-repo: setup, bugfixing, oracle capsules, PR refinement, and git operations."
                 init_starter_stories:
                   - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
                   - { id: "bugfix", title: "Bug fixing", source_story: "bugfix", status: "enabled", summary: "Drive a picked bug through reproduce, fix, test, review, and validation gates.", expansion: "Add narrower project bug policies through profile customizations or prompt overlays." }
+                  - { id: "repo-bakeoff", title: "Bugfix oracle capsules", source_story: "repo-bakeoff", status: "enabled", summary: "Turn historical bug PRs into hidden-oracle capsules, prove RED/GREEN arming, and render live-cell commands.", expansion: "Use once the repo has 3-10 isolated historical bugs with regression tests or PR-proven oracles." }
                   - { id: "pr-refinement", title: "PR refinement", source_story: "pr-refinement", status: "enabled", summary: "Open or attach to a PR, monitor CI/review feedback, respond, and merge when accepted.", expansion: "Add provider-specific PR policy after the base loop is proven on real pull requests." }
                   - { id: "git-ops", title: "Git operations", source_story: "git-ops", status: "enabled", summary: "Use the guarded git command hub for status, worktrees, commits, rebases, sync, and integration.", expansion: "Extend with project branch and remote-sync policy once the team's git flow is stable." }
                 init_profile_status: "draft"
