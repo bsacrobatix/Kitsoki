@@ -14,32 +14,45 @@ import (
 )
 
 func TestAutonomousBugfixOperationDemoCorpus(t *testing.T) {
-	appPath := repoStoriesBugfixAppPath(t)
 	cases := []struct {
+		appPath    string
+		capsule    string
 		name       string
 		sourceFlow string
 	}{
 		{
+			appPath:    repoStoriesBugfixAppPath(t),
+			capsule:    "clean-repo",
 			name:       "triage_codeact_completed",
 			sourceFlow: repoPath(t, "../../stories/bugfix/flows/codeact_live_proof_triage.yaml"),
 		},
 		{
+			appPath:    repoStoriesBugfixAppPath(t),
+			capsule:    "clean-repo",
 			name:       "direct_ship_completed",
 			sourceFlow: repoPath(t, "../../stories/bugfix/flows/bugfix_ships_direct.yaml"),
 		},
 		{
+			appPath:    repoStoriesBugfixAppPath(t),
+			capsule:    "clean-repo",
 			name:       "merged_red_waits_for_human",
 			sourceFlow: repoPath(t, "../../stories/bugfix/flows/bugfix_needs_human_on_merged_red.yaml"),
+		},
+		{
+			appPath:    repoStoriesDevStoryAppPath(t),
+			capsule:    "clean-repo",
+			name:       "dev_story_bugfix_to_pr_completed",
+			sourceFlow: repoPath(t, "../../stories/dev-story/flows/bugfix_to_pr.yaml"),
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			workspace := capsuletest.Open(t, "clean-repo")
+			workspace := capsuletest.Open(t, tc.capsule)
 			capsuletest.Verify(t, workspace)
 
-			flowPath := writeCapsuleBackedFlow(t, tc.sourceFlow, appPath, workspace, tc.name)
-			report, err := testrunner.RunFlows(t.Context(), appPath, flowPath, testrunner.FlowOptions{})
+			flowPath := writeCapsuleBackedFlow(t, tc.sourceFlow, tc.appPath, workspace, tc.name)
+			report, err := testrunner.RunFlows(t.Context(), tc.appPath, flowPath, testrunner.FlowOptions{})
 			require.NoError(t, err)
 			requireFlowReportPassed(t, report)
 			capsuletest.Verify(t, workspace)
@@ -92,6 +105,10 @@ func writeCapsuleBackedFlow(t *testing.T, sourceFlow, appPath, workspace, name s
 	initialWorld["worktree_path"] = workspace
 	initialWorld["workspace_id"] = workspaceID
 	initialWorld["feature_branch"] = workspaceID
+	// capsuletest.Open has already prepared an isolated checkout. Imported
+	// bugfix runs should trust that absolute path instead of re-deriving a
+	// repo-relative .worktrees checkout.
+	initialWorld["workspace_prepared"] = true
 
 	generated, err := yaml.Marshal(doc)
 	require.NoError(t, err)
