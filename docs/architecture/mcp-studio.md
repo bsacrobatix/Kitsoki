@@ -416,12 +416,13 @@ surface itself* can't do something needed to develop, test, run, introspect,
 trace, or debug a story, that gap must be **filed**. `issue.create` is the
 evidence-bundling path for that (distinct from `gh.*`, which is for everyday
 issue/PR reads + comments): because the studio already produces the evidence, it
-renders assets, folds in a handle's trace/inspect, and files the issue — all
-server-side. ([`issue_tools.go`](../../internal/mcp/studio/issue_tools.go).)
+renders assets, folds in a handle's trace/inspect or an on-disk TUI/session
+trace, and files the issue — all server-side.
+([`issue_tools.go`](../../internal/mcp/studio/issue_tools.go).)
 
 | Tool | Shape | Wraps |
 |---|---|---|
-| `issue.create` | `{title, body?, labels?, repo?, handle?, include_trace?, trace_limit?, include_inspect?, include_visual_recordings?, assets?} → {url, number, labels[], assets[]}` | render assets → `.artifacts`, bundle a handle's trace/inspect and stopped visual recordings, then the injectable `IssueFiler` (production: native `host.gh.ticket` / GitHub REST API) |
+| `issue.create` | `{title, body?, labels?, repo?, handle?, trace_ref?, trace_path?, trace_app?, trace_ticket?, include_trace?, trace_limit?, include_inspect?, include_visual_recordings?, assets?} → {url, number, labels[], assets[]}` | render assets → `.artifacts`, bundle a handle's trace/inspect or resolved on-disk trace and stopped visual recordings, then the injectable `IssueFiler` (production: native `host.gh.ticket` / GitHub REST API) |
 
 Three things happen server-side so the agent never handles bytes:
 
@@ -435,6 +436,13 @@ Three things happen server-side so the agent never handles bytes:
 - **context** — with a `handle` and `include_trace` / `include_inspect`, the
   session's trace tail (the same `session.trace` returns) and inspect snapshot
   are folded into the body, so a gap report is reproducible by construction.
+  For bugs found in a different surface such as a TUI session, pass
+  `trace_path` for the JSONL file, or pass `trace_ref` plus optional
+  `trace_app` / `trace_ticket` to resolve the newest matching trace under
+  `.kitsoki/sessions` or `~/.kitsoki/sessions`. Trace-backed reports reconstruct
+  the latest world from `world.update` events and write redacted
+  `trace.redacted.jsonl` / `world.redacted.json` sidecars under
+  `.artifacts/mcp-issues/<slug>/`.
 - **visual recordings** — `include_visual_recordings:["rec1", ...]` copies each
   stopped `visual.record` bundle into the issue artifact directory and links its
   `timeline.json`, `capture.semantic.json`, and optional `session.rrweb.json`.

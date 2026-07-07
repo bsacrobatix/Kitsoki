@@ -47,10 +47,15 @@ Kitsoki story or command that applies the repo's bug-filing conventions.
    story/studio path when available. In the studio MCP, `issue.create` should be
    the zero-friction path: with one current live session, a call with just
    `title`/`body` infers the handle and includes redacted trace + inspect
-   evidence by default. Pass `include_trace:false` / `include_inspect:false`
-   only when deliberately filing a text-only issue. Anything with captured web
-   or TUI artifact evidence should still go through the richer web/TUI paths
-   above instead of shelling out to `gh`.
+   evidence by default. When the bug happened in another TUI/session run, find
+   the JSONL with `kitsoki trace` / `kitsoki trace status`, then call
+   `issue.create` with `trace_path` or with `trace_ref` plus optional
+   `trace_app` / `trace_ticket`; the tool resolves the trace, reconstructs the
+   latest world from `world.update`, and writes redacted trace/world sidecars.
+   Pass `include_trace:false` / `include_inspect:false` only when deliberately
+   filing a text-only issue. Anything with captured web or TUI artifact evidence
+   should still go through the richer web/TUI paths above instead of shelling
+   out to `gh`.
 
 ## Filing Workflows
 
@@ -182,6 +187,19 @@ runtime metadata. Supply `handle` only when multiple sessions are open. Do not
 paste raw `session.trace` output into the body; let `issue.create` apply the
 shared bug redactor. Use `include_visual_recordings` or explicit `assets` for
 extra MCP-produced screenshots/recordings.
+
+For a bug that happened in a TUI/session run outside the current MCP process,
+first locate the trace with `kitsoki trace --turns ...` or `kitsoki trace status
+...`, then file with a trace source:
+
+```json
+{"title":"tui: <short failure>", "body":"<expected / actual / impact>", "trace_ref":"<filename substring>", "trace_app":"kitsoki-dev"}
+```
+
+Use `trace_path` when you already have the exact JSONL path. Add
+`trace_ticket` when debugging found the relevant ticket id and you want the
+server to pick the newest matching trace. Trace-backed reports include redacted
+`trace.redacted.jsonl` and `world.redacted.json` sidecars by default.
 
 ## Report Shape
 
