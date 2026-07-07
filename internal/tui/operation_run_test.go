@@ -83,7 +83,7 @@ func TestOperationRunChromeTextWaiting(t *testing.T) {
 	ra.AssertContains("Regression gate was never RED.")
 }
 
-func TestOperationRunChromeLineTruncatesToWidth(t *testing.T) {
+func TestOperationRunChromeLineWidthBehavior(t *testing.T) {
 	line := "operation: " + operationRunChromeText(map[string]any{
 		app.OperationRunWorldKey: map[string]any{
 			"title":  "A very long autonomous capsule bugfix operation",
@@ -93,8 +93,29 @@ func TestOperationRunChromeLineTruncatesToWidth(t *testing.T) {
 		},
 	})
 
-	truncated := truncateFrameCell(line, 34)
+	tests := []struct {
+		name         string
+		width        int
+		wantContains string
+	}{
+		{
+			name:         "normal width keeps operation context",
+			width:        132,
+			wantContains: "core.bugfix.reproduce -> core.bugfix.implement",
+		},
+		{
+			name:         "narrow width preserves operation label",
+			width:        34,
+			wantContains: "operation:",
+		},
+	}
 
-	require.LessOrEqual(t, ansi.StringWidth(truncated), 34)
-	require.Contains(t, truncated, "operation:")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			truncated := truncateFrameCell(line, tt.width)
+
+			require.LessOrEqual(t, ansi.StringWidth(truncated), tt.width)
+			require.Contains(t, truncated, tt.wantContains)
+		})
+	}
 }
