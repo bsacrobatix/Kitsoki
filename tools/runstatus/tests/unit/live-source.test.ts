@@ -325,6 +325,20 @@ describe("LiveSource", () => {
     expect(body.params.slots).toEqual({ n: 2, text: "two" });
   });
 
+  it("driveOperation calls runstatus.session.drive_operation", async () => {
+    fetchMock.mockResolvedValueOnce(
+      rpcOk({ mode: "transitioned", state: "__exit__done", turn_number: 4 })
+    );
+    const src = new LiveSource("/");
+    const result = await src.driveOperation("s1");
+    expect(result.state).toBe("__exit__done");
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as { method: string; params: { session_id: string } };
+    expect(body.method).toBe("runstatus.session.drive_operation");
+    expect(body.params.session_id).toBe("s1");
+  });
+
   it("offpath calls runstatus.session.offpath and returns the answer", async () => {
     fetchMock.mockResolvedValueOnce(rpcOk({ answer: "42" }));
     const src = new LiveSource("/");

@@ -46,6 +46,7 @@
 //	runstatus.session.turn       {session_id, input}                 → turnResult
 //	runstatus.session.submit     {session_id, intent, slots?}        → turnResult
 //	runstatus.session.continue   {session_id, slots?}               → turnResult
+//	runstatus.session.drive_operation {session_id}                   → turnResult
 //	runstatus.session.offpath    {session_id, input}                 → {answer}
 //	runstatus.session.subscribe  {session_id}                        → {subscription_id}
 //	runstatus.session.unsubscribe {subscription_id}                  → {ok: true}
@@ -1173,6 +1174,31 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		slots = s.injectAuthor(ctx, params, slots)
 		ctx = s.withOperatorPrompter(ctx, params)
 		out, err := entry.Driver.ContinueTurn(ctx, slots)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return newTurnResult(out, entry.Driver), nil
+
+	case "runstatus.session.drive_operation":
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		driver, ok := entry.Driver.(OperationDriver)
+		if !ok {
+			return nil, &rpcError{Code: codeServerError, Message: "session.drive_operation: operation driving unavailable"}
+		}
+		drive, err := driver.DriveOperation(ctx)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		if drive != nil && drive.Final != nil {
+			return newTurnResult(drive.Final, entry.Driver), nil
+		}
+		out, err := entry.Driver.View(ctx)
 		if err != nil {
 			return nil, serverErr(err)
 		}

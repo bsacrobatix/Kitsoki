@@ -528,6 +528,12 @@ export class LiveSource implements DataSource {
     });
   }
 
+  driveOperation(sessionId: string): Promise<TurnResult> {
+    return this.client.post<TurnResult>("runstatus.session.drive_operation", {
+      session_id: sessionId,
+    });
+  }
+
   offpath(
     sessionId: string,
     input: string,
