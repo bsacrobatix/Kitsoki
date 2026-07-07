@@ -257,6 +257,18 @@ func (r *renderer) room(path string, st *app.State, isRoot bool) {
 		r.ln("**Menu**: " + backtickList(st.Menu))
 		r.ln("")
 	}
+	if len(st.Prerequisites) > 0 {
+		r.ln("**Prerequisites**:")
+		r.ln("")
+		for _, pr := range st.Prerequisites {
+			suffix := ""
+			if pr.SatisfiedWhen != "" {
+				suffix = " — `" + pr.SatisfiedWhen + "`"
+			}
+			r.ln(fmt.Sprintf("- `%s`: %s%s", pr.ID, mdEscape(pr.Title), suffix))
+		}
+		r.ln("")
+	}
 	if src := st.View.SourceString(); src != "" {
 		r.ln("**View**:")
 		r.ln("")

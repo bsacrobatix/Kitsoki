@@ -77,6 +77,14 @@ func (rw *childRewriter) rewriteState(name string, s *State) {
 		s.RelevantWorld = out
 	}
 
+	// Prerequisites: predicates and user-facing strings may reference child
+	// world keys; action intents are intent refs.
+	if len(s.Prerequisites) > 0 {
+		for i := range s.Prerequisites {
+			rw.rewritePrerequisite(&s.Prerequisites[i])
+		}
+	}
+
 	// On: rewrite intent-name keys and the transition list.
 	//
 	// Each renamed key (e.g. `accept` → `bf__accept`) is also recorded
@@ -215,6 +223,26 @@ func (rw *childRewriter) rewriteState(name string, s *State) {
 	// Recurse into nested states (compound/parallel).
 	for childName, c := range s.States {
 		rw.rewriteState(childName, c)
+	}
+}
+
+func (rw *childRewriter) rewritePrerequisite(pr *Prerequisite) {
+	if rw == nil || pr == nil {
+		return
+	}
+	pr.Title = rw.rewriteExpr(pr.Title)
+	pr.When = rw.rewriteExpr(pr.When)
+	pr.SatisfiedWhen = rw.rewriteExpr(pr.SatisfiedWhen)
+	pr.Summary = rw.rewriteExpr(pr.Summary)
+	pr.Help = rw.rewriteExpr(pr.Help)
+	if pr.Action == nil {
+		return
+	}
+	pr.Action.Label = rw.rewriteExpr(pr.Action.Label)
+	pr.Action.Hint = rw.rewriteExpr(pr.Action.Hint)
+	pr.Action.Intent = rw.rewriteIntentRef(pr.Action.Intent)
+	if len(pr.Action.Slots) > 0 {
+		pr.Action.Slots = rw.rewriteAny(pr.Action.Slots).(map[string]any)
 	}
 }
 

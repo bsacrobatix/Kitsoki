@@ -2318,13 +2318,7 @@ func (m *machineImpl) RenderState(cur app.StatePath, w world.World) (string, err
 // and legacy string/extends/template_file shapes return typed=nil and
 // the existing string-rendering path is used.
 func (m *machineImpl) RenderStateTyped(cur app.StatePath, w world.World) (string, *app.View, expr.Env, *render.AppRenderer, error) {
-	env := expr.Env{
-		Slots: map[string]any{},
-		World: w.Vars,
-		Menu:  MenuToTemplateMap(m.Menu(cur, w)),
-		State: stateMetaFor(m, cur),
-	}
-	expr.PopulateMenuHelpers(&env)
+	env := m.renderEnvForState(cur, w, expr.Env{})
 	if par := parseParallel(string(cur)); par.IsParallel {
 		// Parallel composition: parent view (if any) + each leaf view.
 		// Each leaf renders with its own State metadata so the per-region
@@ -2358,11 +2352,15 @@ func (m *machineImpl) RenderStateTyped(cur app.StatePath, w world.World) (string
 			}
 			sb.WriteString(v)
 		}
-		return sb.String(), nil, env, nil, nil
+		rr := m.rendererFor(string(cur))
+		text, typed, err := m.withPrerequisiteNotice(string(cur), nil, sb.String(), env, rr)
+		return text, typed, env, rr, err
 	}
 	cs, ok := m.states[string(cur)]
 	if !ok || cs.s == nil || cs.s.View.IsEmpty() {
-		return "", nil, env, nil, nil
+		rr := m.rendererFor(string(cur))
+		text, typed, err := m.withPrerequisiteNotice(string(cur), nil, "", env, rr)
+		return text, typed, env, rr, err
 	}
 	text, err := m.renderViewBody(cs.s.View, env, string(cur))
 	if err != nil {
@@ -2373,6 +2371,10 @@ func (m *machineImpl) RenderStateTyped(cur app.StatePath, w world.World) (string
 	if typedViewIsElementArray(cs.s.View) {
 		v := cs.s.View
 		typed = &v
+	}
+	text, typed, err = m.withPrerequisiteNotice(string(cur), typed, text, env, rr)
+	if err != nil {
+		return "", nil, env, nil, err
 	}
 	return text, typed, env, rr, nil
 }
@@ -2704,15 +2706,7 @@ func (m *machineImpl) renderViewWithTyped(tr app.Transition, targetPath string, 
 	// intents with reasons. The menu is computed against the resolved
 	// target path and the post-effect world so the on-screen menu reflects
 	// the state the user is about to see.
-	renderEnv := expr.Env{
-		Slots: env.Slots,
-		World: w.Vars,
-		Event: env.Event,
-		Run:   env.Run,
-		Menu:  MenuToTemplateMap(m.Menu(app.StatePath(targetPath), w)),
-		State: stateMetaFor(m, app.StatePath(targetPath)),
-	}
-	expr.PopulateMenuHelpers(&renderEnv)
+	renderEnv := m.renderEnvForState(app.StatePath(targetPath), w, env)
 
 	var (
 		viewText string
@@ -2747,6 +2741,11 @@ func (m *machineImpl) renderViewWithTyped(tr app.Transition, targetPath string, 
 	}
 
 	rr := m.rendererFor(targetPath)
+	var err error
+	viewText, typed, err = m.withPrerequisiteNotice(targetPath, typed, viewText, renderEnv, rr)
+	if err != nil {
+		return "", nil, renderEnv, nil, fmt.Errorf("render prerequisites for %q: %w", targetPath, err)
+	}
 
 	if sayText != "" && viewText != "" {
 		return sayText + "\n\n" + viewText, typed, renderEnv, rr, nil

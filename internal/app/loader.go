@@ -1525,6 +1525,42 @@ func validateStates(
 			}
 		}
 
+		// Validate room prerequisites. Expressions are compiled again by
+		// validateExprs for full expression diagnostics; this pass handles the
+		// structural contract and intent cross-reference.
+		seenPrereqIDs := map[string]struct{}{}
+		for i, pr := range s.Prerequisites {
+			loc := fmt.Sprintf("state %q prerequisites[%d]", statePath, i)
+			if strings.TrimSpace(pr.ID) == "" {
+				addErr(fmt.Sprintf("%s: id is required", loc))
+			} else {
+				if _, exists := seenPrereqIDs[pr.ID]; exists {
+					addErr(fmt.Sprintf("%s: duplicate id %q", loc, pr.ID))
+				}
+				seenPrereqIDs[pr.ID] = struct{}{}
+			}
+			if strings.TrimSpace(pr.Title) == "" {
+				addErr(fmt.Sprintf("%s: title is required", loc))
+			}
+			switch pr.Severity {
+			case "", "info", "warning", "warn", "error":
+				// ok
+			default:
+				addErr(fmt.Sprintf("%s: severity %q is not one of info, warning, warn, error", loc, pr.Severity))
+			}
+			if strings.TrimSpace(pr.SatisfiedWhen) == "" {
+				addErr(fmt.Sprintf("%s: satisfied_when is required", loc))
+			}
+			if pr.Action != nil && strings.TrimSpace(pr.Action.Intent) != "" {
+				intentName := pr.Action.Intent
+				_, inScope := inScopeIntents[intentName]
+				_, inGlobal := globalIntentDefs[intentName]
+				if !inScope && !inGlobal {
+					addErr(fmt.Sprintf("%s: action.intent %q is not a declared intent", loc, intentName))
+				}
+			}
+		}
+
 		// Validate default_intent (the free-text sink): it must be reachable
 		// from this state (have an on: arc) and declare exactly one required
 		// string slot, since the engine fills that slot with the whole
