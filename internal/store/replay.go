@@ -165,6 +165,11 @@ func BuildJourney(def *app.AppDef, initialState app.StatePath, initialWorld worl
 		case OperationAbandoned:
 			js.World = js.World.DiscardOperation()
 
+		case OperationRunStarted, OperationRunPhaseStarted, OperationRunPhaseCompleted, OperationRunWaiting, OperationRunCompleted, OperationRunFailed:
+			// Session-level operation-run lifecycle annotations. They describe
+			// how a surface/driver should present the workflow, but they do not
+			// mutate state or world.
+
 		case MachineSay:
 			// Operator narration: annotation only — say does not mutate
 			// world or state. No-op on replay.

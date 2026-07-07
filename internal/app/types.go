@@ -288,6 +288,11 @@ type AppDef struct {
 	// one-shot (or decider:llm) decision gates without per-room judge
 	// wiring. Optional; nil disables it.
 	Decider *DeciderSpec `yaml:"decider,omitempty"`
+	// Operations declares session-level operation policies. These are distinct
+	// from state-local operation overlays: an operation policy describes how a
+	// workflow run should be driven and surfaced, while state.operation controls
+	// abandonable task-local world writes.
+	Operations map[string]*OperationPolicy `yaml:"operations,omitempty"`
 	// Agents declares named per-context agents (see docs/stories/meta-mode.md).
 	// Generalises OffPathDef.Persona / OffPathDef.Agent into a top-level
 	// primitive any host.agent.* call site can reference by name. Bound
@@ -877,6 +882,28 @@ type DeciderSpec struct {
 	Threshold float64 `yaml:"threshold,omitempty"`
 }
 
+// OperationPolicy is an app-level session operation policy. It is intentionally
+// declarative metadata in this slice: transitions opt into a policy and the
+// runtime emits operation.run_* events. Higher-level drivers and UI surfaces can
+// then consume one stable lifecycle vocabulary without abusing background host
+// jobs or state-local operation overlays.
+type OperationPolicy struct {
+	Title            string                `yaml:"title,omitempty"`
+	Mode             string                `yaml:"mode,omitempty"`           // interactive | autonomous | supervised
+	ExecutionMode    string                `yaml:"execution_mode,omitempty"` // one-shot | staged
+	RunInBackground  bool                  `yaml:"run_in_background,omitempty"`
+	StopOn           []string              `yaml:"stop_on,omitempty"`
+	PauseOn          []string              `yaml:"pause_on,omitempty"`
+	TerminalArtifact string                `yaml:"terminal_artifact,omitempty"`
+	PhaseSummary     OperationPhaseSummary `yaml:"phase_summary,omitempty"`
+}
+
+// OperationPhaseSummary declares which world/artifact keys should contribute
+// to the eventual operator summary for an operation run.
+type OperationPhaseSummary struct {
+	From []string `yaml:"from,omitempty"`
+}
+
 type State struct {
 	// Type is "atomic" (default), "compound", or "parallel".
 	Type string `yaml:"type,omitempty"`
@@ -1093,6 +1120,10 @@ type PrerequisiteAction struct {
 type Transition struct {
 	// Target is the destination state path. "." means self.
 	Target string `yaml:"target"`
+	// Operation starts a session-level operation run using the named
+	// app-level operation policy. This is separate from state.operation, which
+	// controls task-local world overlays.
+	Operation string `yaml:"operation,omitempty"`
 	// When is the guard expression (expr-lang). Empty = always true.
 	When string `yaml:"when,omitempty"`
 	// Default marks this as the catch-all branch when no prior guard matched.

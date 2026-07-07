@@ -968,6 +968,10 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 		// style anaphora on slotted intents like propose_purchase.
 		"slots": map[string]any(call.Slots),
 	}))
+	operationRunID := strings.TrimSpace(winningTr.tr.Operation)
+	if ev, ok := m.operationRunStartedEvent(operationRunID, string(cur), resolvedTarget, call.Intent, false); ok {
+		events = append(events, ev)
+	}
 
 	events = append(events, operationPrelude...)
 	events = append(events, effectEvents...)
@@ -1010,6 +1014,9 @@ func (m *machineImpl) Turn(ctx context.Context, cur app.StatePath, w world.World
 			saySB.WriteString(dssb)
 		}
 		events = append(events, devs...)
+	}
+	if ev, ok := m.operationRunCompletedEvent(operationRunID, finalState); ok {
+		events = append(events, ev)
 	}
 	if newWorld.Operation != nil && newWorld.Operation.State != finalState {
 		op := newWorld.Operation
@@ -1395,6 +1402,10 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 			"slots":     map[string]any(slotBag),
 			"synthetic": true,
 		}))
+		operationRunID := strings.TrimSpace(winningTr.tr.Operation)
+		if ev, ok := m.operationRunStartedEvent(operationRunID, state, resolvedTarget, dispatchName, true); ok {
+			events = append(events, ev)
+		}
 		events = append(events, ev2...)
 		for _, p := range stateExitPathsAware(state, resolvedTarget) {
 			events = append(events, newEvent(store.StateExited, map[string]any{"state": p}))
@@ -1427,9 +1438,90 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 			}
 			events = append(events, subEvs...)
 		}
+		if ev, ok := m.operationRunCompletedEvent(operationRunID, state); ok {
+			events = append(events, ev)
+		}
 	}
 
 	return state, newWorld, hostCalls, saySB.String(), events, nil
+}
+
+func (m *machineImpl) operationRunStartedEvent(policyID, from, to, intentName string, synthetic bool) (store.Event, bool) {
+	policyID = strings.TrimSpace(policyID)
+	if policyID == "" || m.appDef == nil {
+		return store.Event{}, false
+	}
+	policy, ok := m.appDef.Operations[policyID]
+	if !ok || policy == nil {
+		return store.Event{}, false
+	}
+	payload := operationRunPolicyPayload(policy, true)
+	payload["operation_id"] = policyID
+	payload["policy_id"] = policyID
+	payload["status"] = "running"
+	payload["from"] = from
+	payload["to"] = to
+	payload["entry_intent"] = intentName
+	if synthetic {
+		payload["synthetic"] = true
+	}
+	return newEvent(store.OperationRunStarted, payload), true
+}
+
+func (m *machineImpl) operationRunCompletedEvent(policyID, terminalState string) (store.Event, bool) {
+	policyID = strings.TrimSpace(policyID)
+	if policyID == "" || m.appDef == nil || !m.isTerminalState(terminalState) {
+		return store.Event{}, false
+	}
+	policy, ok := m.appDef.Operations[policyID]
+	if !ok || policy == nil {
+		return store.Event{}, false
+	}
+	payload := operationRunPolicyPayload(policy, false)
+	payload["operation_id"] = policyID
+	payload["policy_id"] = policyID
+	payload["status"] = "completed"
+	payload["terminal_state"] = terminalState
+	if policy.TerminalArtifact != "" {
+		payload["terminal_artifact"] = policy.TerminalArtifact
+	}
+	return newEvent(store.OperationRunCompleted, payload), true
+}
+
+func operationRunPolicyPayload(policy *app.OperationPolicy, includeRunPolicy bool) map[string]any {
+	payload := map[string]any{}
+	if policy == nil {
+		return payload
+	}
+	if policy.Title != "" {
+		payload["title"] = policy.Title
+	}
+	if policy.Mode != "" {
+		payload["mode"] = policy.Mode
+	}
+	if policy.ExecutionMode != "" {
+		payload["execution_mode"] = policy.ExecutionMode
+	}
+	if policy.RunInBackground {
+		payload["run_in_background"] = true
+	}
+	if includeRunPolicy {
+		if len(policy.StopOn) > 0 {
+			payload["stop_on"] = append([]string(nil), policy.StopOn...)
+		}
+		if len(policy.PauseOn) > 0 {
+			payload["pause_on"] = append([]string(nil), policy.PauseOn...)
+		}
+		if len(policy.PhaseSummary.From) > 0 {
+			payload["phase_summary_from"] = append([]string(nil), policy.PhaseSummary.From...)
+		}
+	}
+	return payload
+}
+
+func (m *machineImpl) isTerminalState(statePath string) bool {
+	cs, ok := m.states[statePath]
+	return ok && cs.s != nil && cs.s.Terminal
 }
 
 // resolveEmittedIntentName resolves a bare intent name emitted by an
