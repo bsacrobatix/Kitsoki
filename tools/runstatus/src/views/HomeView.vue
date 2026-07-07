@@ -248,6 +248,15 @@
             <td class="home__row-turns" data-testid="session-turns">{{ s.turn != null ? s.turn : '—' }}</td>
             <td class="home__row-duration" data-testid="session-duration">—</td>
             <td class="home__row-actions">
+              <a
+                v-if="operationArtifactHref(s)"
+                class="home__link"
+                data-testid="session-operation-artifact-open"
+                :href="operationArtifactHref(s)"
+                target="_blank"
+                rel="noopener noreferrer"
+                :title="`Open ${s.operation_run?.terminal_artifact}`"
+              >Artifact</a>
               <button
                 v-if="canDriveOperation(s)"
                 class="home__link home__link--button"
@@ -584,6 +593,11 @@ function operationDetail(s: SessionHeader): string {
   if (run.phase) return `phase ${operationPhaseLabel(run.phase)}`;
   if (run.from && run.to) return `${run.from} -> ${run.to}`;
   return run.entry_intent ? `intent ${run.entry_intent}` : "";
+}
+
+function operationArtifactHref(s: SessionHeader): string {
+  const artifact = s.operation_run?.terminal_artifact;
+  return artifact ? source.artifactUrl(artifact) : "";
 }
 
 function operationPhaseLabel(phase: string): string {
