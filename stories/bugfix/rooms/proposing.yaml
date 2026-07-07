@@ -164,6 +164,11 @@ states:
                 last_reply_author: "{{ slots.author ?? 'human' }}"
                 refine_feedback:   ""
                 cycle:             0
+                # A fresh proposal invalidates all implementation/test evidence
+                # from an earlier pass; re-enter implementing/test with clean
+                # once: binds so both agents actually re-run.
+                implement_artifact:        {}
+                implement_review_artifact: {}
 
       # (internal) active escalation → quit to a human with the question.
       escalate_human:

@@ -1812,6 +1812,8 @@ func TestDogfoodSmoke_TestingFailedRoutesToImplementing(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1), worldInt64(journey.World.Vars, "core__bf__implementing_cycle"),
 		"implementing_cycle must increment when testing-failed re-routes")
+	require.Empty(t, journey.World.Vars["core__bf__implement_review_artifact"],
+		"testing.accept on status=failed must clear the stale testing artifact before re-entering implementing")
 }
 
 // TestDogfoodSmoke_AgentAlwaysReceivesWorkingDir locks in the second

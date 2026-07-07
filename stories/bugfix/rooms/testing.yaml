@@ -275,8 +275,12 @@ states:
                 implementing_cycle: "{{ world.implementing_cycle + 1 }}"
                 cycle:              "{{ world.cycle + 1 }}"
                 # Re-enter implementing for a fresh re-apply: clear its
-                # once: bind so the implementer agent runs again.
-                implement_artifact: {}
+                # once: bind so the implementer agent runs again. Also clear
+                # the failed/blocked testing artifact; otherwise testing's
+                # once: bind skips the reviewer on the next pass and keeps
+                # routing on stale evidence.
+                implement_artifact:        {}
+                implement_review_artifact: {}
 
         # ── direct-ship (slice 4) — passed AND bugfix_exit=direct-ship ──────
         # The RED→GREEN regression gate's RED half is enforced HERE — but ONLY
@@ -404,8 +408,12 @@ states:
                 implementing_cycle: "{{ world.implementing_cycle + 1 }}"
                 cycle:              "{{ world.cycle + 1 }}"
                 # Re-enter implementing for a fresh re-apply: clear its
-                # once: bind so the implementer agent runs again.
-                implement_artifact: {}
+                # once: bind so the implementer agent runs again. Also clear
+                # the failed/blocked testing artifact; otherwise testing's
+                # once: bind skips the reviewer on the next pass and keeps
+                # routing on stale evidence.
+                implement_artifact:        {}
+                implement_review_artifact: {}
 
         # passed (or legacy/missing status) — the implementation itself
         # is fine; the review/tests need another pass (e.g. more
@@ -455,7 +463,8 @@ states:
                 implementing_cycle:  0
                 cycle:               0
                 # Clear implementing's once: bind so it re-applies fresh.
-                implement_artifact:  {}
+                implement_artifact:        {}
+                implement_review_artifact: {}
         - target: proposing
           effects:
             - set:

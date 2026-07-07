@@ -51,7 +51,7 @@ var traceErrorKinds = map[store.EventKind]bool{
 func (srv *Server) registerTraceTools() {
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "trace.read",
-		Description: "Read a session trace OFF DISK — the on-disk counterpart to session.trace (which needs an open, idle handle). Resolves the trace by {path} (an explicit *.jsonl), or the newest match for {session_id} (a basename substring) / {app} (a ~/.kitsoki/sessions/<app> subdir), under {root?} (default ~/.kitsoki/sessions). Parses the JSONL lock-free (never collides with a live writer). Filters: {since?, until?} (turn range), {kinds?} ([]event-kind), {limit?} (keep last N), {truncate_payload?} (cap each payload; default 500, 0 disables), {errors_only?} (only harness.error|machine.error|agent.call.error, untruncated). Returns {ok, source_path, events[], last_turn, summary:{by_kind, errors[]}}. Read-only.",
+		Description: "Read a session trace OFF DISK — the on-disk counterpart to session.trace (which needs an open, idle handle). Resolves the trace by {path} (an explicit *.jsonl), or the newest match for {session_id} (a basename substring) / {app} (a ~/.kitsoki/sessions/<app> subdir) / {ticket_id} (world ticket_id), under {root?} (default ~/.kitsoki/sessions). Parses the JSONL lock-free (never collides with a live writer). Filters: {since?, until?} (turn range), {kinds?} ([]event-kind), {limit?} (keep last N), {truncate_payload?} (cap each payload; default 500, 0 disables), {errors_only?} (only harness.error|machine.error|agent.call.error, untruncated). Returns {ok, source_path, events[], last_turn, summary:{by_kind, errors[]}}. Read-only.",
 	}, srv.handleTraceRead)
 
 	if !srv.readOnly {
@@ -72,6 +72,8 @@ type TraceReadArgs struct {
 	SessionID string `json:"session_id,omitempty"`
 	// App restricts resolution to the <root>/<app> subdir (e.g. "kitsoki-dev").
 	App string `json:"app,omitempty"`
+	// TicketID restricts resolution to traces whose world ticket_id matches.
+	TicketID string `json:"ticket_id,omitempty"`
 	// Root overrides the search root (default ~/.kitsoki/sessions).
 	Root string `json:"root,omitempty"`
 	// Since/Until filter by turn number (inclusive).
@@ -118,7 +120,7 @@ func (srv *Server) handleTraceRead(
 	req *mcpsdk.CallToolRequest,
 	args TraceReadArgs,
 ) (*mcpsdk.CallToolResult, any, error) {
-	path, err := resolveTracePathArg(args.Root, args.Path, args.SessionID, args.App)
+	path, err := resolveTracePathArg(args.Root, args.Path, args.SessionID, args.App, args.TicketID)
 	if err != nil {
 		return buildToolError(ErrBadRequest, fmt.Sprintf("trace.read: %v", err)), nil, nil
 	}
@@ -334,9 +336,10 @@ func readTraceFile(path string) (store.History, error) {
 
 // resolveTracePathArg resolves a trace file from an explicit path, or the newest
 // *.jsonl whose basename contains sessionID, under root (default
-// ~/.kitsoki/sessions) optionally narrowed to the <root>/<app> subdir. This
-// mirrors resolveTraceArg in cmd/kitsoki/trace.go.
-func resolveTracePathArg(root, path, sessionID, app string) (string, error) {
+// ~/.kitsoki/sessions) optionally narrowed to the <root>/<app> subdir and/or
+// traces whose world ticket_id matches ticketID. This mirrors resolveTraceArg in
+// cmd/kitsoki/trace.go.
+func resolveTracePathArg(root, path, sessionID, app, ticketID string) (string, error) {
 	if path != "" {
 		if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
 			return path, nil
@@ -366,6 +369,12 @@ func resolveTracePathArg(root, path, sessionID, app string) (string, error) {
 		if sessionID != "" && !strings.Contains(filepath.Base(p), sessionID) {
 			return nil
 		}
+		if ticketID != "" {
+			ok, e := tracePathMatchesTicket(p, ticketID)
+			if e != nil || !ok {
+				return nil
+			}
+		}
 		if info, e := d.Info(); e == nil {
 			cands = append(cands, cand{p, info.ModTime().UnixNano()})
 		}
@@ -376,8 +385,44 @@ func resolveTracePathArg(root, path, sessionID, app string) (string, error) {
 		if sessionID != "" {
 			hint += fmt.Sprintf(" matching %q", sessionID)
 		}
+		if ticketID != "" {
+			hint += fmt.Sprintf(" with ticket_id %q", ticketID)
+		}
 		return "", fmt.Errorf("%s (pass an explicit path, or run a session first)", hint)
 	}
 	sort.Slice(cands, func(i, j int) bool { return cands[i].mod > cands[j].mod })
 	return cands[0].path, nil
+}
+
+func tracePathMatchesTicket(path, ticketID string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	want := strings.TrimSpace(ticketID)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var ev store.Event
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			continue
+		}
+		if ev.Kind != store.EffectApplied {
+			continue
+		}
+		var p struct {
+			Set map[string]any `json:"set"`
+		}
+		if json.Unmarshal(ev.Payload, &p) != nil {
+			continue
+		}
+		for k, v := range p.Set {
+			if (k == "ticket_id" || strings.HasSuffix(k, "__ticket_id")) && strings.TrimSpace(fmt.Sprint(v)) == want {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }

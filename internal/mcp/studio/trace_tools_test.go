@@ -122,6 +122,17 @@ func TestTraceRead_FiltersAndSummarizes(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &byID))
 	assert.Equal(t, path, byID.SourcePath)
 
+	// ticket_id resolution scans qualified imported world keys, so a root app
+	// trace can still be found by the bugfix ticket it imported.
+	ticketPath := filepath.Join(dir, "root-app-session.jsonl")
+	require.NoError(t, os.WriteFile(ticketPath, []byte(`{"turn":2,"kind":"world.update","payload":{"set":{"root__bf__ticket_id":"64"}}}`+"\n"), 0o644))
+	var byTicket readOut
+	res, err = callTool(ctx, cs, "trace.read", map[string]any{"ticket_id": "64", "root": dir})
+	require.NoError(t, err)
+	require.False(t, res.IsError, contentText(res))
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &byTicket))
+	assert.Equal(t, ticketPath, byTicket.SourcePath)
+
 	// A miss is a structured error, not a panic.
 	res, err = callTool(ctx, cs, "trace.read", map[string]any{"session_id": "no-such-trace", "root": dir})
 	require.NoError(t, err)
