@@ -77,8 +77,8 @@ func (sc *Sidecar) Validate() error {
 		}
 	}
 	for name, f := range sc.Outputs {
-		if name == ExchangesOutputKey {
-			return fmt.Errorf("output %q is reserved by host.starlark.run for HTTP exchange summaries; choose another name", name)
+		if reason, ok := reservedOutputReason(name); ok {
+			return fmt.Errorf("output %q is reserved by host.starlark.run for %s; choose another name", name, reason)
 		}
 		if !knownType(f.Type) {
 			return fmt.Errorf("output %q: unknown type %q (want string|int|number|bool|object|list|any)", name, f.Type)
@@ -137,8 +137,8 @@ func (sc *Sidecar) validateInputs(inputs map[string]any) error {
 // sidecar promises.
 func (sc *Sidecar) validateOutputs(outputs map[string]any) error {
 	for name := range outputs {
-		if name == ExchangesOutputKey {
-			return &DomainError{msg: fmt.Sprintf("script returned reserved output %q (used for HTTP exchange summaries)", name)}
+		if reason, ok := reservedOutputReason(name); ok {
+			return &DomainError{msg: fmt.Sprintf("script returned reserved output %q (used for %s)", name, reason)}
 		}
 		if _, ok := sc.Outputs[name]; !ok && len(sc.Outputs) > 0 {
 			return &DomainError{msg: fmt.Sprintf("script returned undeclared output %q", name)}
@@ -166,6 +166,17 @@ func ValueMatchesType(v any, t string) bool { return valueMatchesType(v, t) }
 
 // NormType renders a sidecar field type for diagnostics, mapping "" to "any".
 func NormType(t string) string { return normType(t) }
+
+func reservedOutputReason(name string) (string, bool) {
+	switch name {
+	case ExchangesOutputKey:
+		return "HTTP exchange summaries", true
+	case InspectionsOutputKey:
+		return "fs/probe inspection summaries", true
+	default:
+		return "", false
+	}
+}
 
 // valueMatchesType reports whether the Go value (already converted from
 // Starlark) conforms to the declared type. The empty/any type always matches.
