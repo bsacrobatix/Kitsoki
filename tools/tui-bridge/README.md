@@ -46,6 +46,10 @@ looking at (and can type into) the real onboarding TUI. Click into the
 terminal first; xterm only captures keystrokes once its hidden input has
 focus.
 
+On a fresh checkout, `make setup` installs the bridge's pnpm dependencies and
+the Chromium browser revision Playwright expects. If you only need to refresh
+this bridge, run `make tui-bridge-deps`.
+
 To drive a specific app/harness instead of the bare onboarding TUI, pass the
 command after `--` (it's spawned as `<current kitsoki binary> <args...>`):
 
@@ -91,7 +95,7 @@ first pty output arrives over the socket, can be blank) — poll `window.__statu
   boots the real Go bridge server (spawning `/bin/cat`) and the static player,
   then drives the page with real keyboard input and asserts the round-tripped
   screen contents via `window.__dump()`. Run with `pnpm install && pnpm test`
-  (first run also needs `npx playwright install chromium`).
+  or, from the repo root, `make tui-bridge-test`.
 
 Neither test path spawns a real kitsoki session or an LLM — per repo policy,
 that only happens when explicitly requested (point `-- run ...` or `--exec`

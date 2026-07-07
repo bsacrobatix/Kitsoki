@@ -93,19 +93,28 @@ BASESTORIES_STAMP := internal/basestories/.embed-stamp
 BASESKILLS_DIR    := internal/baseskills/assets
 BASESKILLS_STAMP  := internal/baseskills/.embed-stamp
 
-.PHONY: all setup bootstrap-worktree build build-lean install uninstall test test-full test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff history-smoke history-pending-smoke gears-history-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
+.PHONY: all setup setup-visual-qa-deps bootstrap-worktree build build-lean install uninstall test test-full test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff history-smoke history-pending-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
 	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local
 
 all: build
 
 # setup installs every build/runtime dependency `make install` needs (Go, Node,
-# pnpm, git, plus optional jq/ffmpeg/gh) on a fresh machine. Covers macOS
+# pnpm, git, plus optional jq/ffmpeg/gh), links the local agent toolkit, and
+# prepares browser-driven visual QA surfaces on a fresh machine. Covers macOS
 # (Homebrew), RockyLinux/RHEL (dnf) and Debian/Ubuntu (apt). Idempotent — skips
 # anything already present at a sufficient version. Run this once, then
-# `make install`.
+# `make install` or visual QA targets should work without first-run bootstrap.
 setup:
 	@./scripts/setup.sh
+	@$(MAKE) --no-print-directory setup-visual-qa-deps
+
+# setup-visual-qa-deps makes the browser-driven QA surfaces ready on a fresh
+# checkout. pnpm installs the package-local CLIs; playwright install downloads
+# the browser revision those CLIs expect, avoiding a later first-run failure in
+# TUI/web visual QA.
+setup-visual-qa-deps: runstatus-playwright-deps tui-bridge-deps
+	@echo "visual QA deps ready — runstatus and tui-bridge can launch Chromium"
 
 # check-deps verifies the build toolchain is present before build/install do
 # real work, so a fresh machine gets a clear "run make setup" hint instead of a
@@ -243,6 +252,10 @@ web: $(EMBED_INDEX)
 .PHONY: runstatus-deps
 runstatus-deps:
 	$(call runstatus_pnpm_install,)
+
+.PHONY: runstatus-playwright-deps
+runstatus-playwright-deps: runstatus-deps
+	cd $(RUNSTATUS_DIR) && pnpm exec playwright install chromium
 
 $(EMBED_INDEX): $(SPA_SOURCES)
 	@command -v pnpm >/dev/null 2>&1 || { \
@@ -835,7 +848,8 @@ TUI_BRIDGE_DIR := tools/tui-bridge
 .PHONY: tui-bridge-deps tui-bridge-test
 
 tui-bridge-deps:
-	cd $(TUI_BRIDGE_DIR) && pnpm install --silent
+	cd $(TUI_BRIDGE_DIR) && pnpm install --frozen-lockfile --silent
+	cd $(TUI_BRIDGE_DIR) && pnpm exec playwright install chromium
 
 # No-LLM by construction: the bridge spawns /bin/cat for the test, never
 # kitsoki or an LLM. Exercises the Go server + browser page together.
