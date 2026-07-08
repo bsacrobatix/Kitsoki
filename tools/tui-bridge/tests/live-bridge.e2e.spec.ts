@@ -79,6 +79,41 @@ test("resize control frame reaches the pty before subsequent input", async ({ pa
     .toContain("still-alive-after-resize");
 });
 
+test("player preserves ANSI color and bold attributes from the pty", async ({ page }) => {
+  test.setTimeout(90_000);
+  const port = await freePort();
+  const addr = `127.0.0.1:${port}`;
+  const script = "printf '\\033[1;31mBOLDRED\\033[0m plain \\033[38;2;20;200;120mTRUECOLOR\\033[0m\\n'; sleep 30";
+  const bridge = startBridge(addr, ["--exec", "/bin/sh", "--", "-lc", script]);
+
+  try {
+    await page.goto(`/player/?ws=ws://${addr}/pty`);
+    await page.waitForFunction(() => (window as any).__ready === true);
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__status()), { timeout: 60_000 })
+      .toBe("connected");
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__dump()), { timeout: 10_000 })
+      .toContain("TRUECOLOR");
+
+    const boldRed = await page.evaluate(
+      () => (window as any).__textAttrs("BOLDRED") as Array<{ bold: boolean; fgColorMode: number }>,
+    );
+    expect(boldRed).toHaveLength("BOLDRED".length);
+    expect(boldRed.every((cell) => cell.bold)).toBe(true);
+    expect(boldRed.some((cell) => cell.fgColorMode !== 0)).toBe(true);
+
+    const trueColor = await page.evaluate(
+      () => (window as any).__textAttrs("TRUECOLOR") as Array<{ bold: boolean; fgColorMode: number; fgColor: number }>,
+    );
+    expect(trueColor).toHaveLength("TRUECOLOR".length);
+    expect(trueColor.every((cell) => !cell.bold)).toBe(true);
+    expect(trueColor.some((cell) => cell.fgColorMode !== 0 && cell.fgColor !== 0)).toBe(true);
+  } finally {
+    stopBridge(bridge);
+  }
+});
+
 test("player reconnects when bridge starts after the page", async ({ page }) => {
   test.setTimeout(90_000);
   const port = await freePort();
