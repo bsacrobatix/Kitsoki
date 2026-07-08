@@ -17,10 +17,10 @@ initial_state: core.landing
 initial_world: {}
 
 host_handlers:
-  # Ticket iface — kitsoki-dev binds iface.ticket to host.gh.ticket. The
-  # provider fails outright (e.g. `gh` not authenticated / API error).
-  host.gh.ticket:
-    error: "host.gh.ticket: gh api: HTTP 401 Bad credentials"
+  # Ticket iface — kitsoki-dev binds iface.ticket to host.local_github.ticket.
+  # The composite provider fails outright (e.g. GitHub auth + local scan failed).
+  host.local_github.ticket:
+    error: "host.local_github.ticket: github: gh api: HTTP 401 Bad credentials"
   host.append_to_file:
     data: { ok: true, message_id: "msg-1" }
 
@@ -30,7 +30,7 @@ turns:
   - intent: { name: core__go_ticket_search, slots: {} }
     expect_state: core.ticket_search
     expect_world:
-      last_error: "host.gh.ticket: gh api: HTTP 401 Bad credentials"
+      last_error: "host.local_github.ticket: github: gh api: HTTP 401 Bad credentials"
     expect_view_matches: "Action failed"
 
 expect_terminal: false

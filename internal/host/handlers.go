@@ -484,6 +484,7 @@ func RegisterBuiltins(r *Registry) {
 	// host.<name>.<op> call to the longest registered prefix).  See
 	// docs/architecture/hosts.md.
 	r.Register("host.local_files.ticket", LocalFilesTicketHandler)
+	r.Register("host.local_github.ticket", LocalGitHubTicketHandler)
 	r.Register("host.git", GitVCSHandler)
 	r.Register("host.local", LocalCIHandler)
 	r.Register("host.git_worktree", GitWorktreeHandler)

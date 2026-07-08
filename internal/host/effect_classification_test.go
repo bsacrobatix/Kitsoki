@@ -73,6 +73,8 @@ func TestClassifyDispatchedCall_PerOpVerbs(t *testing.T) {
 		{"host.git", "pr_comment", effect.External},
 		{"host.gh.ticket", "search", effect.Read},
 		{"host.gh.ticket", "create", effect.External},
+		{"host.local_github.ticket", "search", effect.Read},
+		{"host.local_github.ticket", "transition", effect.External},
 		{"host.local", "remote_status", effect.Read},
 		{"host.local", "run_tests", effect.Write},
 	}

@@ -3,7 +3,8 @@
 The dogfood instance described in the
 [bug-fix case study](../../../docs/case-studies/bug-fix.md).
 This is the PoC milestone (★): **kitsoki working on kitsoki through
-its own UI**, with the bug file as both ticket and conversation log.
+its own UI**. Local artifact bug files stay the default developer loop, and
+GitHub Issues appear beside them for user-submitted issues and coordination.
 
 The whole app is ~25 lines of YAML that imports `stories/dev-story/`
 under the alias `core` and binds five `host_interfaces:` to concrete
@@ -11,15 +12,15 @@ providers:
 
 | iface       | binding                  | what it does                                                     |
 |-------------|--------------------------|------------------------------------------------------------------|
-| `ticket`    | `host.local_files.ticket`| reads `issues/bugs/*.md` (+ feature files); transitions status   |
+| `ticket`    | `host.local_github.ticket`| shows local artifact tickets plus GitHub issues; routes selected close-out by source |
 | `vcs`       | `host.git`               | local git CLI — branch, commit, diff, push, open_pr, merge       |
 | `ci`        | `host.local`             | `go test ./...` and friends                                      |
 | `workspace` | `host.git_worktree`      | `.worktrees/<task>` per ticket                                   |
 | `transport` | `host.append_to_file`    | appends `## Comment <iso> by <author>` blocks INTO the bug file  |
 
-The bug file IS the conversation log — every checkpoint artifact
-(post, judge verdict, operator reply) gets appended. Nothing is lost
-when the session ends.
+For local artifact tickets, the bug file IS the conversation log — every
+checkpoint artifact (post, judge verdict, operator reply) gets appended.
+GitHub-sourced tickets carry their issue URL/thread instead.
 
 ---
 
@@ -144,10 +145,10 @@ what "devstory oversees kitsoki AND its stories" means in practice
 `<root>/issues/bugs/*.md`** — the multi-glob isn't yet honoured at
 the handler level (a future enhancement, see "Runtime gaps" below).
 For the supervised flow walks in `flows/`, the stubbed
-`host.local_files.ticket` returns a canned list; for the manual
-walkthrough below, the operator runs from the kitsoki repo root so
-the handler's `<root>` resolves to `pwd` and finds
-`issues/bugs/*.md`.
+`host.local_github.ticket` returns canned local and GitHub rows; for the manual
+walkthrough below, the operator runs from the kitsoki repo root so the local
+side resolves `.artifacts/issues/*.md`, while the GitHub side resolves the
+symbolic `ticket_github_repo: origin`.
 
 ---
 
@@ -180,8 +181,8 @@ The first command writes a markdown file under `$KITSOKI_REPO/issues/bugs/`
 with the frontmatter schema documented in
 [`docs/stories/bugs.md`](../../../docs/stories/bugs.md) (and mirrored in
 [`../../../issues/README.md`](../../../issues/README.md)). The second command
-boots the dogfood instance, which scans the same directory via
-`host.local_files.ticket` and picks the file up as a ticket.
+boots the dogfood instance, whose composite ticket provider shows that local
+artifact under the Local section and GitHub issues under the GitHub section.
 
 Two pre-seeded examples ship in `issues/bugs/` for the Phase 3
 acceptance smoke (one "view-render-before-bind", one
@@ -204,9 +205,10 @@ ticket-search room. Then:
 ```
 
 This dispatches `iface.ticket.search` against
-`host.local_files.ticket` with `query: "tui view render"`. The
-handler scans `issues/bugs/*.md`, matches title + body substring,
-and binds the result list into `world.ticket_results`. You see:
+`host.local_github.ticket` with `query: "tui view render"`. The local side
+matches artifact files by title + body substring; the GitHub side searches the
+configured repo. The combined list is bound into `world.ticket_results`. You see
+separate Local and GitHub sections:
 
 ```
 Results:
@@ -373,7 +375,7 @@ A fourth latent issue we surfaced while building this phase:
 
 A fifth concession the flow fixtures take:
 
-5. **Flow fixtures can't register the REAL `host.local_files.ticket`
+5. **Flow fixtures can't register the REAL `host.local_github.ticket`
    against a temp git repo.** `testrunner/flows.go`'s `HostHandlers`
    map only registers STUB handlers via a closure over the
    `HostStub.Data` blob. There's no path to register a real

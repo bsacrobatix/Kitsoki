@@ -32,12 +32,15 @@ states:
           # repo is honoured by host.gh.ticket (the GitHub binding: kitsoki-dev
           # + onboarded external repos); ignored by host.local_files.ticket.
           # "" ⇒ gh's local-remote default.
-          repo: "{{ world.ticket_repo }}"
+          repo: "{{ world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo }}"
           # root is honoured by host.local_files.ticket (tickets under an
           # external checkout root); ignored by host.gh.ticket. "" ⇒ cwd.
           root: "{{ world.repo_root }}"
         bind:
           ticket_results: tickets
+          ticket_provider_errors: provider_errors
+          ticket_local_count: local_count
+          ticket_github_count: github_count
         on_error: ticket_search
     # Flattened view (no extends/blocks) — `choice:` cannot live
     # inside a `blocks:` map (see docs/stories/choice-widget.md §3.1).
@@ -77,10 +80,20 @@ states:
       # `priority`, and no host emits it on this branch.
       - heading: 'Tickets{% if world.ticket_query %} (filter: {{ world.ticket_query }}){% endif %}'
       - code: |
-          {% if world.ticket_results|default:""|length == 0 %}(none — file one in .artifacts/issues/bugs/)
-          {% else %} #     St  Sev  Filed       Title
-          {% for t in world.ticket_results|default:"" %}{% if t.status %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
-          {% endif %}{% endfor %}{% endif %}
+          {% if world.ticket_provider_errors|default:""|length > 0 %}Warnings
+          {% for err in world.ticket_provider_errors|default:"" %}- {{ err }}
+          {% endfor %}
+          {% endif %}{% if world.ticket_results|default:""|length == 0 %}(none — file one in .artifacts/issues/bugs/)
+          {% else %}Local
+           #     St  Sev  Filed       Title
+          {% for t in world.ticket_results|default:"" %}{% if t.status %}{% if t.source|default:"local" != "github" %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
+          {% endif %}{% endif %}{% endfor %}{% if world.ticket_local_count|default:999 == 0 %}(none — file one in .artifacts/issues/bugs/)
+          {% endif %}{% if world.ticket_github_repo != "" or world.ticket_repo != "" or world.ticket_github_count|default:999 < 999 %}
+          GitHub
+           #     St  Sev  Filed       Title
+          {% for t in world.ticket_results|default:"" %}{% if t.status %}{% if t.source == "github" %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
+          {% endif %}{% endif %}{% endfor %}{% if world.ticket_github_count|default:999 == 0 %}(none — check GitHub auth/repo)
+          {% endif %}{% endif %}{% endif %}
       # Readiness banner — two sibling elements with mutually-exclusive
       # `when:` guards. The ready case is a `heading:` (style-guide §1
       # emerald "go"); the not-ready case is plain prose (no false green).
@@ -243,7 +256,8 @@ states:
             - invoke: iface.ticket.get
               with:
                 id: "{{ slots.id ?? world.ticket_results[int(slots.n) - 1].id }}"
-                repo: "{{ world.ticket_repo }}"
+                source: "{{ slots.n != nil ? world.ticket_results[int(slots.n) - 1].source : '' }}"
+                repo: "{{ world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo }}"
                 root: "{{ world.repo_root }}"
               bind:
                 ticket_title: title
@@ -266,7 +280,8 @@ states:
                 thread: url
               on_error: idle
             - set:
-                ticket_source_mode: "{{ world.ticket_source == 'github' || world.ticket_repo != '' ? 'remote' : 'local' }}"
+                ticket_source_mode: "{{ world.ticket_source == 'github' ? 'remote' : 'local' }}"
+                ticket_repo: "{{ world.ticket_source == 'github' ? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) : '' }}"
                 ticket_source_ref:  "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
                 thread: "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
       # Hand off to the bugfix sub-story for the picked ticket.
@@ -380,10 +395,20 @@ states:
             "Searching for": "{{ world.ticket_query }}"
       - heading: "Results"
       - code: |
-          {% if world.ticket_results|default:""|length == 0 %}(empty)
-          {% else %} #     St  Sev  Filed       Title
-          {% for t in world.ticket_results|default:"" %}{% if t.status %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
-          {% endif %}{% endfor %}{% endif %}
+          {% if world.ticket_provider_errors|default:""|length > 0 %}Warnings
+          {% for err in world.ticket_provider_errors|default:"" %}- {{ err }}
+          {% endfor %}
+          {% endif %}{% if world.ticket_results|default:""|length == 0 %}(empty)
+          {% else %}Local
+           #     St  Sev  Filed       Title
+          {% for t in world.ticket_results|default:"" %}{% if t.status %}{% if t.source|default:"local" != "github" %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
+          {% endif %}{% endif %}{% endfor %}{% if world.ticket_local_count|default:999 == 0 %}(none)
+          {% endif %}{% if world.ticket_github_repo != "" or world.ticket_repo != "" or world.ticket_github_count|default:999 < 999 %}
+          GitHub
+           #     St  Sev  Filed       Title
+          {% for t in world.ticket_results|default:"" %}{% if t.status %}{% if t.source == "github" %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
+          {% endif %}{% endif %}{% endfor %}{% if world.ticket_github_count|default:999 == 0 %}(none)
+          {% endif %}{% endif %}{% endif %}
       - choice:
           mode: single
           prompt: "Actions"
@@ -417,12 +442,15 @@ states:
           # repo is honoured by host.gh.ticket (the GitHub binding: kitsoki-dev
           # + onboarded external repos); ignored by host.local_files.ticket.
           # "" ⇒ gh's local-remote default.
-          repo: "{{ world.ticket_repo }}"
+          repo: "{{ world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo }}"
           # root is honoured by host.local_files.ticket (tickets under an
           # external checkout root); ignored by host.gh.ticket. "" ⇒ cwd.
           root: "{{ world.repo_root }}"
         bind:
           ticket_results: tickets
+          ticket_provider_errors: provider_errors
+          ticket_local_count: local_count
+          ticket_github_count: github_count
         on_error: ticket_search
     on:
       pick_ticket:
@@ -448,7 +476,8 @@ states:
             - invoke: iface.ticket.get
               with:
                 id: "{{ slots.id ?? world.ticket_results[int(slots.n) - 1].id }}"
-                repo: "{{ world.ticket_repo }}"
+                source: "{{ slots.n != nil ? world.ticket_results[int(slots.n) - 1].source : '' }}"
+                repo: "{{ world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo }}"
                 root: "{{ world.repo_root }}"
               bind:
                 ticket_title: title
@@ -461,7 +490,8 @@ states:
                 thread: url
               on_error: ticket_searching
             - set:
-                ticket_source_mode: "{{ world.ticket_source == 'github' || world.ticket_repo != '' ? 'remote' : 'local' }}"
+                ticket_source_mode: "{{ world.ticket_source == 'github' ? 'remote' : 'local' }}"
+                ticket_repo: "{{ world.ticket_source == 'github' ? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) : '' }}"
                 ticket_source_ref:  "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
                 thread: "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
       search_tickets:

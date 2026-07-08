@@ -14,7 +14,8 @@ package effect
 // loader's (internal/app) concern.
 //
 // A handful of verbs — host.git, host.gh.ticket, host.local,
-// host.local_files.ticket, host.cypilot_artifacts — are prefix-fallback
+// host.local_files.ticket, host.local_github.ticket, host.cypilot_artifacts —
+// are prefix-fallback
 // handlers that dispatch several operations via an `op` argument, and one
 // verb spans multiple effect tiers (e.g. "git log" reads; "git push" is
 // external). Those classify PER-OP via the entry's Ops map; ClassifyVerb
@@ -141,6 +142,22 @@ var builtinVerbTable = map[string]verbEffect{
 			"comment":    {class: Write, deterministic: true},
 			"transition": {class: Write, deterministic: true},
 			"list_mine":  {class: Read, deterministic: true},
+		},
+	},
+
+	// host.local_github.ticket — dogfood composite provider. Reads combine
+	// local files with GitHub Issues; mutations may target GitHub when the
+	// selected ticket is remote, so classify mutating ops as External.
+	"host.local_github.ticket": {
+		class: External, deterministic: false,
+		ops: map[string]opEffect{
+			"create":       {class: External, deterministic: false},
+			"search":       {class: Read, deterministic: false},
+			"get":          {class: Read, deterministic: false},
+			"comment":      {class: External, deterministic: false},
+			"comment_edit": {class: External, deterministic: false},
+			"transition":   {class: External, deterministic: false},
+			"list_mine":    {class: Read, deterministic: false},
 		},
 	},
 

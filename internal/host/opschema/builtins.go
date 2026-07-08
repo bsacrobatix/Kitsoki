@@ -46,6 +46,31 @@ func Builtins() *Registry {
 		Output: fields("tickets", "list"),
 	})
 
+	// ticket -> host.local_github.ticket
+	r.Register("host.local_github.ticket", "search", Op{
+		Input:  fields("query", "string", "limit", "int"),
+		Output: fields("tickets", "list"),
+	})
+	r.Register("host.local_github.ticket", "get", Op{
+		Input: fields("id", "string"),
+		Output: fields(
+			"id", "string", "title", "string", "body", "string", "status", "string",
+			"priority", "string", "assignee", "string", "url", "string", "comments", "list",
+		),
+	})
+	r.Register("host.local_github.ticket", "comment", Op{
+		Input:  fields("id", "string", "body", "string", "thread", "string"),
+		Output: fields("ok", "bool", "comment_id", "string"),
+	})
+	r.Register("host.local_github.ticket", "transition", Op{
+		Input:  fields("id", "string", "to", "string"),
+		Output: fields("ok", "bool"),
+	})
+	r.Register("host.local_github.ticket", "list_mine", Op{
+		Input:  fields("filter", "string"),
+		Output: fields("tickets", "list"),
+	})
+
 	// vcs -> host.git
 	r.Register("host.git", "branch", Op{
 		Input:  fields("workdir", "string", "name", "string", "base", "string"),
