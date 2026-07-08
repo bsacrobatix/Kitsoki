@@ -358,6 +358,19 @@ developer_instructions = "Use the available code action surface."
 func TestAgentLaunchPlan_FreestandingCodexAgentAttachesMCP(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	codexHome := filepath.Join(dir, "codex-home")
+	require.NoError(t, os.MkdirAll(codexHome, 0755))
+	t.Setenv("CODEX_HOME", codexHome)
+	require.NoError(t, os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte(`
+[mcp_servers.kitsoki]
+command = "/old/kitsoki"
+
+[mcp_servers.slidey]
+command = "/bin/slidey"
+
+[mcp_servers.codex_app]
+command = "/bin/codex-app"
+`), 0644))
 	oldwd, err := os.Getwd()
 	require.NoError(t, err)
 	require.NoError(t, os.Chdir(dir))
@@ -407,6 +420,9 @@ args = ["mcp", "--stories-dir", "stories"]
 	joined := strings.Join(plan.Command, " ")
 	require.Contains(t, joined, "mcp_servers.kitsoki.command=\"kitsoki\"")
 	require.Contains(t, joined, "mcp_servers.kitsoki.args=[\"mcp\",\"--stories-dir\",\"stories\"]")
+	require.Contains(t, joined, "mcp_servers.kitsoki.enabled=true")
+	require.Contains(t, joined, "mcp_servers.slidey.enabled=false")
+	require.Contains(t, joined, "mcp_servers.codex_app.enabled=false")
 	require.Contains(t, plan.Command, "--dangerously-bypass-approvals-and-sandbox")
 	require.Contains(t, plan.Command, "--disable="+launchCodexShellToolFeature)
 	require.Contains(t, strings.Join(plan.FutureNotes, " "), "--disable shell_tool")
@@ -415,6 +431,13 @@ args = ["mcp", "--stories-dir", "stories"]
 func TestAgentLaunchPlan_FreestandingCodexAgentInteractive(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	codexHome := filepath.Join(dir, "codex-home")
+	require.NoError(t, os.MkdirAll(codexHome, 0755))
+	t.Setenv("CODEX_HOME", codexHome)
+	require.NoError(t, os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte(`
+[mcp_servers.slidey]
+command = "/bin/slidey"
+`), 0644))
 	oldwd, err := os.Getwd()
 	require.NoError(t, err)
 	require.NoError(t, os.Chdir(dir))
@@ -452,6 +475,8 @@ args = ["mcp", "--stories-dir", "stories"]
 	joined := strings.Join(plan.Command, " ")
 	require.Contains(t, joined, "mcp_servers.kitsoki.command=\"kitsoki\"")
 	require.Contains(t, joined, "mcp_servers.kitsoki.args=[\"mcp\",\"--stories-dir\",\"stories\"]")
+	require.Contains(t, joined, "mcp_servers.kitsoki.enabled=true")
+	require.Contains(t, joined, "mcp_servers.slidey.enabled=false")
 	require.Contains(t, plan.Command[len(plan.Command)-1], "Use ONLY the kitsoki studio MCP.")
 	require.Contains(t, strings.Join(plan.FutureNotes, " "), "--disable shell_tool")
 }

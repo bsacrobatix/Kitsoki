@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/codexcli"
 	"kitsoki/internal/host"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/webconfig"
@@ -723,7 +724,7 @@ func codexConfigArgsForMCPServers(mcpServers map[string]any) []string {
 	}
 	sort.Strings(names)
 
-	var out []string
+	out := codexcli.MCPServerScopeArgs(names)
 	for _, name := range names {
 		server, ok := mcpServers[name].(map[string]any)
 		if !ok {

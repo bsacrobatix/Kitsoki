@@ -359,6 +359,18 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 	})
 
 	t.Run("codex/rewrite", func(t *testing.T) {
+		codexHome := t.TempDir()
+		t.Setenv("CODEX_HOME", codexHome)
+		mustWrite(t, filepath.Join(codexHome, "config.toml"), `
+[mcp_servers.kitsoki-validator]
+command = "/old/kitsoki"
+
+[mcp_servers.slidey]
+command = "/bin/slidey"
+
+[mcp_servers.codex_app]
+command = "/bin/codex-app"
+`)
 		// Write a real --mcp-config file so the TOML override conversion runs.
 		cfgPath := filepath.Join(t.TempDir(), "cfg.json")
 		mustWrite(t, cfgPath, `{"mcpServers":{"kitsoki-validator":{"command":"/bin/kitsoki","args":["mcp-validator","--schema","/tmp/s.json"]}}}`)
@@ -443,6 +455,9 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 		// MCP config converted to `-c mcp_servers.*` overrides.
 		mustContain(t, got, `mcp_servers.kitsoki-validator.command="/bin/kitsoki"`)
 		mustContain(t, got, `mcp_servers.kitsoki-validator.args=["mcp-validator","--schema","/tmp/s.json"]`)
+		mustContain(t, got, `mcp_servers.kitsoki-validator.enabled=true`)
+		mustContain(t, got, `mcp_servers.slidey.enabled=false`)
+		mustContain(t, got, `mcp_servers.codex_app.enabled=false`)
 
 		// A claude model id is dropped (some-model is not claude-shaped → kept as -m).
 		if !hasFlagValue(inv.Args, "-m", "some-model") {
