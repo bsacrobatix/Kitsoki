@@ -994,48 +994,48 @@
     },
     {
       "type": "diagram-svg",
-      "title": "Prompts are not enough",
+      "title": "Prompts need a process",
       "panels": [
         {
           "label": "",
-          "viewBox": "0 0 1420 650",
+          "viewBox": "0 0 1500 780",
           "nodes": [
             {
               "id": "prompt",
               "label": "Prompt-only",
-              "sub": "better wording + examples",
+              "sub": "better wording",
               "lines": [
-                "nudges the model"
+                "nudges behavior"
               ],
               "x": 80,
-              "y": 80,
-              "w": 500,
-              "h": 170,
+              "y": 110,
+              "w": 430,
+              "h": 160,
               "style": "primary"
             },
             {
               "id": "agent",
-              "label": "Agent behavior",
-              "sub": "still probabilistic",
+              "label": "Hidden decisions",
+              "sub": "still inside the model",
               "lines": [
-                "hidden decisions"
+                "hard to inspect"
               ],
               "x": 80,
-              "y": 390,
-              "w": 500,
-              "h": 170
+              "y": 440,
+              "w": 430,
+              "h": 160
             },
             {
-              "id": "story",
+              "id": "workflow",
               "label": "Workflow",
               "sub": "typed phases",
               "lines": [
                 "owned state"
               ],
-              "x": 840,
+              "x": 720,
               "y": 40,
               "w": 500,
-              "h": 150,
+              "h": 145,
               "style": "primary"
             },
             {
@@ -1045,22 +1045,35 @@
               "lines": [
                 "tests + review"
               ],
-              "x": 840,
-              "y": 250,
+              "x": 720,
+              "y": 230,
               "w": 500,
-              "h": 150
+              "h": 145
             },
             {
-              "id": "feedback",
-              "label": "Artifacts",
-              "sub": "attached evidence",
+              "id": "trace",
+              "label": "Trace",
+              "sub": "decision record",
               "lines": [
-                "trace + failure reason"
+                "input + output"
               ],
-              "x": 840,
-              "y": 460,
+              "x": 720,
+              "y": 420,
               "w": 500,
-              "h": 150,
+              "h": 145,
+              "style": "secondary"
+            },
+            {
+              "id": "diff",
+              "label": "Story diff",
+              "sub": "learned behavior",
+              "lines": [
+                "YAML + tests"
+              ],
+              "x": 720,
+              "y": 610,
+              "w": 500,
+              "h": 145,
               "style": "secondary"
             }
           ],
@@ -1070,178 +1083,31 @@
               "to": "agent"
             },
             {
-              "from": "story",
+              "from": "workflow",
               "to": "gate"
             },
             {
               "from": "gate",
-              "to": "feedback"
+              "to": "trace"
             },
-            {
-              "from": "feedback",
-              "to": "story",
-              "style": "back",
-              "bus": 1360,
-              "lift": -22,
-              "land": 22
-            }
-          ]
-        }
-      ],
-      "caption": "Prompts can improve the agent. Structured workflows improve the system around the agent.",
-      "hold": 210,
-      "narration": "Prompts can improve agent behavior, but behavior is hard to control with prompts alone. Structured workflows give us phases, gates, traces, and tests."
-    },
-    {
-      "type": "diagram-svg",
-      "title": "Every decision becomes training data",
-      "panels": [
-        {
-          "label": "",
-          "viewBox": "0 0 1320 620",
-          "nodes": [
-            {
-              "id": "operator",
-              "label": "Operator",
-              "sub": "human · LLM · script",
-              "lines": [
-                "typed decision"
-              ],
-              "x": 80,
-              "y": 220,
-              "w": 330,
-              "h": 170,
-              "style": "primary"
-            },
-            {
-              "id": "record",
-              "label": "Record",
-              "sub": "input + output",
-              "lines": [
-                "operator attached"
-              ],
-              "x": 495,
-              "y": 220,
-              "w": 330,
-              "h": 170
-            },
-            {
-              "id": "dataset",
-              "label": "Dataset",
-              "sub": "labeled by design",
-              "lines": [
-                "ready to review"
-              ],
-              "x": 910,
-              "y": 220,
-              "w": 330,
-              "h": 170,
-              "style": "secondary"
-            }
-          ],
-          "edges": [
-            {
-              "from": "operator",
-              "to": "record"
-            },
-            {
-              "from": "record",
-              "to": "dataset"
-            }
-          ]
-        }
-      ],
-      "caption": "Because every decision is recorded with its operator, input, and output, a running story creates its own supervised dataset.",
-      "hold": 210,
-      "narration": "Every Kitsoki decision is recorded with the operator, input, and output. That means a running story produces labeled training data as a side effect."
-    },
-    {
-      "type": "diagram-svg",
-      "title": "Train the story like a model",
-      "panels": [
-        {
-          "label": "",
-          "viewBox": "0 0 1320 700",
-          "nodes": [
-            {
-              "id": "trace",
-              "label": "Trace",
-              "sub": "real usage",
-              "lines": [
-                "misses + repeats"
-              ],
-              "x": 95,
-              "y": 70,
-              "w": 320,
-              "h": 160,
-              "style": "primary"
-            },
-            {
-              "id": "promote",
-              "label": "Promote",
-              "sub": "story diff",
-              "lines": [
-                "YAML + tests"
-              ],
-              "x": 500,
-              "y": 70,
-              "w": 320,
-              "h": 160
-            },
-            {
-              "id": "replay",
-              "label": "Replay",
-              "sub": "zero-cost",
-              "lines": [
-                "sharper behavior"
-              ],
-              "x": 905,
-              "y": 70,
-              "w": 320,
-              "h": 160,
-              "style": "secondary"
-            },
-            {
-              "id": "effect",
-              "label": "Less LLM",
-              "sub": "more determinism",
-              "lines": [
-                "improvement you can read"
-              ],
-              "x": 350,
-              "y": 420,
-              "w": 620,
-              "h": 170,
-              "style": "secondary"
-            }
-          ],
-          "edges": [
             {
               "from": "trace",
-              "to": "promote"
+              "to": "diff"
             },
             {
-              "from": "promote",
-              "to": "replay"
-            },
-            {
-              "from": "replay",
-              "to": "effect"
-            },
-            {
-              "from": "effect",
-              "to": "trace",
+              "from": "diff",
+              "to": "workflow",
               "style": "back",
-              "bus": 60,
+              "bus": 1290,
               "lift": -20,
               "land": 20
             }
           ]
         }
       ],
-      "caption": "The learned behavior lives in git as YAML, tests, and knowledge, not in opaque model weights.",
+      "caption": "A prompt can nudge a model. An explicit workflow captures decisions, grades them, and turns repeated judgment into story changes.",
       "hold": 210,
-      "narration": "Training a Kitsoki story means reading the trace, promoting repeated decisions into story structure, replaying the result, and keeping the learned behavior in git."
+      "narration": "Prompts can nudge model behavior, but they do not make the system observable. Kitsoki puts the process outside the model: phases, gates, traces, and story diffs."
     },
     {
       "type": "narrative",
@@ -4119,7 +3985,7 @@
     },
     {
       "type": "diagram-svg",
-      "title": "Stories train like models",
+      "title": "Operational training loop",
       "panels": [
         {
           "label": "",
@@ -4188,9 +4054,9 @@
           ]
         }
       ],
-      "caption": "The training example is not a prompt snippet. It is the whole loop: trace, oracle, outcome, story diff, and replayable proof.",
+      "caption": "The reusable training example is the whole loop: trace, oracle, outcome, story diff, and replayable proof.",
       "hold": 240,
-      "narration": "Stories train like models, but the training example is operational: trace, oracle, outcome, story diff, and replayable proof.",
+      "narration": "Kitsoki training is operational. The reusable example is trace, oracle, outcome, story diff, and replayable proof.",
       "instant": true
     },
     {
