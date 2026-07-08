@@ -47,3 +47,4 @@ then commit the small setup it writes.
   coding agents, graph orchestrators, durable workflow engines, and scripts.
 - [Getting started](/guide/getting-started.html) for the first local run.
 - [Demos and features](/features/) for the full catalog.
+- [Extension library](/library/) for the build-time package and story index.
