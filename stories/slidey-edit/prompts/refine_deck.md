@@ -15,7 +15,14 @@ dispatched task is intentionally self-contained.
 
 ## Deck
 
-{{ args.deck.spec_path }} — {{ args.deck.summary }}
+Repository path: `{{ args.deck.spec_path }}`
+Workspace-relative path: `{{ args.deck.workspace_spec_path|default:args.deck.spec_path }}`
+
+{{ args.deck.summary }}
+
+You are running from the workspace directory. Read and write the
+workspace-relative path above, not the repository path joined onto the workspace
+again.
 
 ## The slide you are editing (edit ONLY this one)
 
@@ -28,7 +35,8 @@ If `args.scene_index` is `-1` the slide could not be identified — do NOT guess
 slide; make no change and report `edited: []` with a summary saying you need the
 operator to point at a slide.
 
-This slide's CURRENT content (edit it in place at the spec path above):
+This slide's CURRENT content (edit it in place at the workspace-relative path
+above):
 
 ```json
 {{ args.scene_json|default:"{}" }}

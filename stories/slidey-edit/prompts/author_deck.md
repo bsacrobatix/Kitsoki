@@ -12,12 +12,18 @@ dispatched task is intentionally self-contained.
 
 ## Existing deck to edit
 
-{{ args.source_deck.spec_path|default:"(none — create a new deck)" }} — {{ args.source_deck.summary|default:"(no summary)" }}
+Repository path: `{{ args.source_deck.spec_path|default:"(none — create a new deck)" }}`
+Workspace-relative path: `{{ args.source_deck.workspace_spec_path|default:args.source_deck.spec_path|default:"(none — create a new deck)" }}`
+
+{{ args.source_deck.summary|default:"(no summary)" }}
 
 {% if args.deck.spec_path %}
 ## Current draft cache
 
-{{ args.deck.spec_path }} — {{ args.deck.summary|default:"(no summary)" }}
+Repository path: `{{ args.deck.spec_path }}`
+Workspace-relative path: `{{ args.deck.workspace_spec_path|default:args.deck.spec_path }}`
+
+{{ args.deck.summary|default:"(no summary)" }}
 {% endif %}
 
 {% if args.draft_feedback %}
@@ -28,9 +34,11 @@ dispatched task is intentionally self-contained.
 
 ## What to produce
 
-If an existing deck path is supplied, read that spec first and edit it in place
-or write a revised sibling spec under the workspace, preserving its existing
-intent unless the operator direction says otherwise.
+If an existing deck path is supplied, read the workspace-relative path first and
+edit it in place or write a revised sibling spec under the workspace, preserving
+its existing intent unless the operator direction says otherwise. You are
+running from the workspace directory, so do not prepend the workspace to the
+workspace-relative path.
 
 Write a tight slidey deck JSON spec with this shape:
 

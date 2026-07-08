@@ -48,6 +48,8 @@ agents:
 
 world:
   # ── session / config ───────────────────────────────────────────────────────
+  session_id:       { type: string, default: "" }
+  web_base_url:     { type: string, default: "http://127.0.0.1:7777" }
   workspace:        { type: string, default: "stories/slidey-edit/baked" }
   # The project keeps all deck specs in one folder. A bare deck name on
   # edit_existing (e.g. "kitsoki-pitch") resolves to <decks_dir>/<name>.json.

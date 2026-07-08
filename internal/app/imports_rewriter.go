@@ -738,6 +738,7 @@ func (rw *childRewriter) rewriteViewElement(el ViewElement) ViewElement {
 		out.MediaPath = rw.rewriteExpr(el.MediaPath)
 		out.AnnotateIntent = rw.rewriteIntentRef(el.AnnotateIntent)
 		out.AnnotateFeedbackSlot = el.AnnotateFeedbackSlot
+		out.AnnotateURL = rw.rewriteExpr(el.AnnotateURL)
 	}
 	return out
 }
