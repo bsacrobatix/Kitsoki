@@ -685,7 +685,7 @@
     },
     {
       "type": "narrative",
-      "eyebrow": "Prologue: Autonomous bug fixing",
+      "eyebrow": "Origin: Autonomous bug fixing",
       "body": "It started with a simple question: can an agent fix a bug end to end? Can we get to 80/20 Autonomy?",
       "lede": "It sounded simple and self-contained - so we chased autonomous bug fixing as the headline capability: take a report, reproduce, fix, verify, ship — no human in the loop.",
       "hold": 180,
@@ -693,7 +693,7 @@
     },
     {
       "type": "narrative",
-      "eyebrow": "what i learNED",
+      "eyebrow": "What I learned",
       "body": "The fix is the easy part! Everything upstream decides whether it can happen at all.",
       "lede": "Success rate is a lagging indicator downstream of well-defined visual and behavioral expectations, good testing harnesses, good documentation, the ability to capture the regression, and the quality of the bug report itself.",
       "hold": 210,
@@ -744,7 +744,7 @@
     },
     {
       "type": "narrative",
-      "eyebrow": "Prologue: Push the pain forward",
+      "eyebrow": "Upstream shift",
       "body": "Improving bug fixing in a vacuum isn't beneficial.",
       "lede": "It became clear that the overall SDLC quality is what drives bug fix efficiently - without good quality prompts, tools, and especially inputs - there's little to no chance to achieve 80% autonomous operation.",
       "hold": 210,
@@ -772,7 +772,7 @@
     },
     {
       "type": "narrative",
-      "eyebrow": "The prologue",
+      "eyebrow": "Systems lens",
       "body": "Processes are a complex adaptive system.",
       "lede": "People, agents, tools, artifacts, failures, and feedback loops keep perturbing each other.",
       "hold": 180,
