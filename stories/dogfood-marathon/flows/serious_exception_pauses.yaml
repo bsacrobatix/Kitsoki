@@ -26,6 +26,7 @@ host_handlers:
           run_dir: ".artifacts/dogfood-marathon/dogfood-marathon"
           journal_path: ".artifacts/dogfood-marathon/dogfood-marathon/journal.json"
           journal_markdown_path: ".artifacts/dogfood-marathon/dogfood-marathon/journal.md"
+          last_result: {}
           loaded_journal: false
           journal_status: "loaded"
           journal_summary: "loaded"
@@ -52,6 +53,7 @@ host_handlers:
           results:
             items:
               - { case_id: "case-blocked", title: "Blocked case", exit: "needs-human", verify_status: "partial", trace: ".artifacts/dogfood-marathon/dogfood-marathon/traces/case-blocked.jsonl" }
+          last_result: { case_id: "case-blocked", title: "Blocked case", source_url: ".artifacts/issues/bugs/case-blocked.md", exit: "needs-human", verify_status: "partial", tokens: 12000, tokens_display: "12000", wall_s: 90, wall_s_display: "90", trace: ".artifacts/dogfood-marathon/dogfood-marathon/traces/case-blocked.jsonl" }
           findings: { items: [] }
           exceptions:
             items:

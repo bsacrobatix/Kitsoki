@@ -10,7 +10,7 @@ states:
 
   recording:
     description: "Verifying and recording the current case's outcome."
-    relevant_world: [current_case, triage_verdict, drive_result, verify_result, results, exceptions, record_status]
+    relevant_world: [current_case, triage_verdict, drive_result, verify_result, results, last_result, exceptions, record_status]
     view:
       - heading: "Dogfood marathon · recording"
       - kv:
@@ -46,6 +46,7 @@ states:
             exception_policy: "{{ world.exception_policy }}"
         bind:
           results:           results
+          last_result:       last_result
           findings:          findings
           exceptions:        exceptions
           exception_pending: exception_pending

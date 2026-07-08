@@ -257,6 +257,29 @@ def _resume(ctx, journal_path):
         return None
     return _dict(json.decode(ctx.fs.read(journal_path)))
 
+def _display_number(v):
+    s = _str(v).strip()
+    if s == "":
+        return "0"
+    if s.endswith(".000000"):
+        return s[:-7]
+    if s.endswith(".0"):
+        return s[:-2]
+    return s
+
+def _last_result(results):
+    items = _items(_dict(results).get("items", []))
+    if len(items) == 0:
+        return {}
+    result = dict(_dict(items[-1]))
+    if _str(result.get("cost_display", "")).strip() == "":
+        result["cost_display"] = _display_number(result.get("cost_usd", 0))
+    if _str(result.get("tokens_display", "")).strip() == "":
+        result["tokens_display"] = _display_number(result.get("tokens", 0))
+    if _str(result.get("wall_s_display", "")).strip() == "":
+        result["wall_s_display"] = _display_number(result.get("wall_s", 0))
+    return result
+
 def _summary(stage, items, case_index, cases_processed):
     return stage + ": " + str(cases_processed) + " processed, " + str(len(items)) + " loaded, next index " + str(case_index)
 
@@ -283,6 +306,7 @@ def main(ctx):
                 "journal_path": journal_path,
                 "journal_markdown_path": journal_markdown_path,
                 "results": results,
+                "last_result": _last_result(results),
                 "findings": findings,
                 "exceptions": exceptions,
                 "case_index": case_index,
@@ -316,6 +340,7 @@ def main(ctx):
         "journal_path": journal_path,
         "journal_markdown_path": journal_markdown_path,
         "results": results,
+        "last_result": _last_result(results),
         "findings": findings,
         "exceptions": exceptions,
         "case_index": case_index,

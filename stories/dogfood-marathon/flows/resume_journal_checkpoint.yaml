@@ -22,6 +22,7 @@ host_handlers:
           journal_path: ".artifacts/dogfood-marathon/resume-demo/journal.json"
           journal_markdown_path: ".artifacts/dogfood-marathon/resume-demo/journal.md"
           results: { items: [ { case_id: "case-1", exit: "shipped", verify_status: "solved" } ] }
+          last_result: { case_id: "case-1", title: "Recorded case", source_url: "https://example.test/case-1", exit: "shipped", verify_status: "solved", tokens: 1000, tokens_display: "1000", wall_s: 12, wall_s_display: "12", trace: ".artifacts/dogfood-marathon/resume-demo/traces/case-1.jsonl" }
           findings: { items: [] }
           exceptions: { items: [] }
           case_index: 1

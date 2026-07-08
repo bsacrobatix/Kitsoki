@@ -7,6 +7,7 @@ inputs:
 
 outputs:
   results:           { type: object }
+  last_result:       { type: object }
   findings:          { type: object }
   exceptions:        { type: object }
   exception_pending: { type: string }

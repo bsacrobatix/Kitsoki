@@ -14,6 +14,7 @@ outputs:
   journal_path:          { type: string }
   journal_markdown_path: { type: string }
   results:               { type: object }
+  last_result:           { type: object }
   findings:              { type: object }
   exceptions:            { type: object }
   case_index:            { type: int }
