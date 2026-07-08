@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/bugprivacy"
@@ -136,6 +137,96 @@ func TestBugCommandFilesReportAndArtifacts(t *testing.T) {
 	story, ok := runtime["story"].(map[string]any)
 	if !ok || story["app_id"] != "cloak-of-darkness" || !strings.HasPrefix(story["checksum_sha256"].(string), "sha256:") {
 		t.Fatalf("unexpected runtime story metadata: %#v", runtime["story"])
+	}
+}
+
+func TestBugCommandAddsDepersonalizedTraceArtifact(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	t.Setenv("HOME", home)
+	diagnosticText := "email alice@example.com and read " + home + "/secret.txt"
+	turnStart, err := json.Marshal(map[string]any{"input": diagnosticText})
+	if err != nil {
+		t.Fatalf("marshal turn payload: %v", err)
+	}
+	worldUpdate, err := json.Marshal(map[string]any{
+		"set": map[string]any{"diagnostic": diagnosticText},
+	})
+	if err != nil {
+		t.Fatalf("marshal trace payload: %v", err)
+	}
+	hist := store.History{
+		{
+			Turn:      1,
+			Seq:       0,
+			Ts:        time.Date(2026, 7, 8, 10, 0, 0, 0, time.UTC),
+			Kind:      store.TurnStarted,
+			StatePath: "foyer",
+			Payload:   turnStart,
+		},
+		{
+			Turn:      1,
+			Seq:       1,
+			Ts:        time.Date(2026, 7, 8, 10, 0, 1, 0, time.UTC),
+			Kind:      store.EffectApplied,
+			StatePath: "foyer",
+			Payload:   worldUpdate,
+		},
+	}
+
+	orch := testCloakOrchestrator(t)
+	m := NewRootModel(orch, app.SessionID("session-123"), "../../testdata/apps/cloak/app.yaml", "",
+		WithBugRoot(root),
+		WithBugTicketRepo(""),
+		WithTraceHistory(func() (store.History, error) { return hist, nil }),
+	)
+	m.currentState = "foyer"
+
+	body, _, cmd := BugCommand{}.Run(m, []string{"trace", "has", "private", "text"})
+	if cmd != nil {
+		t.Fatal("bug command should be synchronous")
+	}
+	if !strings.Contains(body, "filed issues/bugs/") {
+		t.Fatalf("unexpected command body: %s", body)
+	}
+
+	bugsDir := filepath.Join(root, "issues", "bugs")
+	entries, err := os.ReadDir(bugsDir)
+	if err != nil {
+		t.Fatalf("read bugs dir: %v", err)
+	}
+	var mdEntries []os.DirEntry
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
+			mdEntries = append(mdEntries, entry)
+		}
+	}
+	if len(mdEntries) != 1 {
+		t.Fatalf("bug files = %d, want 1", len(mdEntries))
+	}
+	id := strings.TrimSuffix(mdEntries[0].Name(), ".md")
+	md, err := os.ReadFile(filepath.Join(bugsDir, mdEntries[0].Name()))
+	if err != nil {
+		t.Fatalf("read bug md: %v", err)
+	}
+	if !strings.Contains(string(md), "./"+id+".artifacts/trace.redacted.jsonl") {
+		t.Fatalf("bug markdown missing depersonalized trace link:\n%s", md)
+	}
+
+	traceData, err := os.ReadFile(filepath.Join(bugsDir, id+".artifacts", "trace.redacted.jsonl"))
+	if err != nil {
+		t.Fatalf("read depersonalized trace: %v", err)
+	}
+	trace := string(traceData)
+	for _, leaked := range []string{"alice@example.com", home + "/secret.txt"} {
+		if strings.Contains(trace, leaked) {
+			t.Fatalf("trace leaked %q:\n%s", leaked, trace)
+		}
+	}
+	for _, want := range []string{`"msg":"turn.start"`, `"msg":"world.update"`, "[TEXT#"} {
+		if !strings.Contains(trace, want) {
+			t.Fatalf("trace missing %q:\n%s", want, trace)
+		}
 	}
 }
 

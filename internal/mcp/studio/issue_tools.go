@@ -38,8 +38,8 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/bugprivacy"
+	"kitsoki/internal/bugreport"
 	"kitsoki/internal/reportmeta"
-	rsserver "kitsoki/internal/runstatus/server"
 	"kitsoki/internal/tui/blocks"
 	"kitsoki/internal/tui/shot"
 )
@@ -256,7 +256,7 @@ func (srv *Server) handleIssueCreate(
 		Body:          body,
 		Component:     "studio-mcp",
 		ArtifactNames: assetPaths,
-	}, rsserver.BugScrubOptions(), privacyFollowUpRoot, "")
+	}, bugreport.ScrubOptions(), privacyFollowUpRoot, "")
 	if perr != nil {
 		return buildToolError(ErrBadRequest, fmt.Sprintf("issue.create: privacy check: %v", perr)), nil, nil
 	}
@@ -475,7 +475,7 @@ func (srv *Server) issueContext(ctx context.Context, args IssueCreateArgs) (stri
 	// under the issue's artifacts dir; the body embeds only a compact summary so
 	// the GitHub issue (and the MCP result echoing it) stays readable.
 	sidecarDir := filepath.Join(srv.resolveArtifactsDir(), issueSlug(args.Title))
-	scrubOpts := rsserver.BugScrubOptions()
+	scrubOpts := bugreport.ScrubOptions()
 	var b strings.Builder
 	if args.Handle != "" && (includeTrace || includeInspect) {
 		rt, rerr := srv.resolveRuntime(args.Handle)
@@ -490,7 +490,7 @@ func (srv *Server) issueContext(ctx context.Context, args IssueCreateArgs) (stri
 				}
 				// World can be large; write the pretty version to a sidecar and embed a
 				// compact one-liner (with a key count) in the body.
-				world := rsserver.RedactedTraceValue("world", out.World, scrubOpts)
+				world := bugreport.DepersonalizedTraceValue("world", out.World, scrubOpts)
 				if w, err := json.Marshal(world); err == nil {
 					if pretty, perr := json.MarshalIndent(world, "", "  "); perr == nil {
 						if path, werr := writeIssueSidecar(sidecarDir, "world.redacted.json", pretty); werr == nil {
@@ -515,7 +515,7 @@ func (srv *Server) issueContext(ctx context.Context, args IssueCreateArgs) (stri
 			if len(events) > limit {
 				events = events[len(events)-limit:]
 			}
-			redacted := rsserver.RedactedTraceJSONL(events, scrubOpts)
+			redacted := bugreport.DepersonalizedTraceJSONL(events, scrubOpts)
 			sidecarRef := ""
 			if path, werr := writeIssueSidecar(sidecarDir, "trace.redacted.jsonl", redacted); werr == nil {
 				sidecarRef = fmt.Sprintf(" (full: [%s](%s))", filepath.Base(path), path)
