@@ -527,6 +527,15 @@ func (r *SessionRegistry) Close() {
 // structured error on an invalid story (app.Load / build / session errors) so
 // the UI can surface it before navigating — no session is registered on failure.
 func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (string, error) {
+	return r.newSession(ctx, storyPath, nil)
+}
+
+// NewSessionSeeded implements [server.SeededSessionProvider].
+func (r *SessionRegistry) NewSessionSeeded(ctx context.Context, storyPath string, initialWorld map[string]any) (string, error) {
+	return r.newSession(ctx, storyPath, initialWorld)
+}
+
+func (r *SessionRegistry) newSession(ctx context.Context, storyPath string, initialWorld map[string]any) (string, error) {
 	loaded, err := r.loadStory(storyPath)
 	if err != nil {
 		return "", err
@@ -578,6 +587,9 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 		// Live-harness replay posture: no flow fixture, but a seed-only fixture
 		// may still teleport the session onto a mid-graph start state + world.
 		seedFixture = r.base.SeedFixture
+	}
+	if len(initialWorld) > 0 {
+		seedFixture = mergeSeedFixture(seedFixture, initialWorld)
 	}
 	initialState, err := seedFlowInitialState(orch, rt.Store, sid, seedFixture)
 	if err != nil {
@@ -673,6 +685,26 @@ func (r *SessionRegistry) NewSession(ctx context.Context, storyPath string) (str
 	ok = true
 	sinkOK = true
 	return id, nil
+}
+
+func mergeSeedFixture(base *testrunner.FlowFixture, initialWorld map[string]any) *testrunner.FlowFixture {
+	out := &testrunner.FlowFixture{}
+	if base != nil {
+		out.InitialState = base.InitialState
+		if len(base.InitialWorld) > 0 {
+			out.InitialWorld = make(map[string]any, len(base.InitialWorld)+len(initialWorld))
+			for k, v := range base.InitialWorld {
+				out.InitialWorld[k] = v
+			}
+		}
+	}
+	if out.InitialWorld == nil {
+		out.InitialWorld = make(map[string]any, len(initialWorld))
+	}
+	for k, v := range initialWorld {
+		out.InitialWorld[k] = v
+	}
+	return out
 }
 
 // AttachExternal implements [server.ExternalAttachProvider]: it binds a live web
@@ -1299,6 +1331,7 @@ var (
 	_ server.SessionProvider        = (*SessionRegistry)(nil)
 	_ server.MetaSelfProvider       = (*SessionRegistry)(nil)
 	_ server.EditorProvider         = (*SessionRegistry)(nil)
+	_ server.SeededSessionProvider  = (*SessionRegistry)(nil)
 	_ server.ExternalAttachProvider = (*SessionRegistry)(nil)
 	_ server.CurrentSessionProvider = (*SessionRegistry)(nil)
 )

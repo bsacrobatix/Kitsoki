@@ -351,7 +351,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import type { IntentInfo, View, ChoiceItem, ChoiceField } from "../types.js";
 import { humanizeIntent } from "../lib/intent.js";
 
@@ -391,6 +391,7 @@ const props = defineProps<{
    */
   defaultIntent?: string;
   pending?: boolean;
+  initialRawDraft?: string;
 }>();
 
 const emit = defineEmits<{
@@ -781,6 +782,42 @@ const compact = ref(false);
 const expanded = ref(false);
 const manualCollapsed = ref(false);
 let ro: ResizeObserver | null = null;
+
+function focusRawDraftInput(): void {
+  const schedule = globalThis.requestAnimationFrame ?? ((fn: FrameRequestCallback) => setTimeout(fn, 0));
+  void nextTick(() => schedule(() => {
+    const el = rootEl.value?.querySelector<HTMLTextAreaElement | HTMLInputElement>(
+      '[data-testid="text-floor-input"], [data-testid="composer-input"]'
+    );
+    el?.focus();
+    if (el) {
+      const end = el.value.length;
+      el.setSelectionRange(end, end);
+    }
+  }));
+}
+
+function applyInitialRawDraft(value?: string): void {
+  if (!value || rawDraft.value) return;
+  rawDraft.value = value;
+  focusRawDraftInput();
+}
+
+watch(
+  () => props.initialRawDraft,
+  (value) => applyInitialRawDraft(value),
+  { immediate: true },
+);
+
+watch(
+  () => [showTextFloor.value, isSemanticRoom.value, textIntents.value.length],
+  () => {
+    if (props.initialRawDraft && rawDraft.value === props.initialRawDraft) {
+      focusRawDraftInput();
+    }
+  },
+  { flush: "post" }
+);
 
 function applyHeight(h: number): void {
   // Test mounts and transient hidden hosts can report 0px. Treat that as

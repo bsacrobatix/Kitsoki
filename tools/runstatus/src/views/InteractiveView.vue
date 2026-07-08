@@ -400,6 +400,7 @@
             :typed-view="store.currentView?.typed_view"
             :default-intent="store.currentView?.default_intent"
             :pending="pending"
+            :initial-raw-draft="initialRawDraft"
             @send="onSend"
             @intent="onIntent"
           />
@@ -737,6 +738,7 @@ const proposals = useProposalsStore();
 // chat is shown ALONE (trace + graph have their own dockable windows). The
 // standalone browser app keeps its full layout (chat | diagram + timeline).
 const embed = computed(() => isEmbedded() || route?.query?.embed === "1");
+const initialRawDraft = ref(queryString(route?.query?.draft));
 
 // One DataSource for the lifetime of the view (subscribe + write RPCs).
 let source: DataSource | null = null;
@@ -1400,6 +1402,18 @@ async function maybeSeedProposalsFromQuery(): Promise<void> {
   await router.replace({ path: route.path, query: q });
 }
 
+async function maybeClearDraftFromQuery(): Promise<void> {
+  if (!route || !router || route.query.draft == null) return;
+  const q = { ...route.query };
+  delete q.draft;
+  await router.replace({ path: route.path, query: q });
+}
+
+function queryString(value: unknown): string {
+  if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : "";
+  return typeof value === "string" ? value : "";
+}
+
 async function clearFocusedChat(): Promise<void> {
   focusedChatSeq += 1;
   focusedChat.value = null;
@@ -1419,7 +1433,7 @@ onMounted(() => {
   // user back in when they click "← Stories" with one live session.
   markAutoNavDone();
   window.addEventListener("kitsoki:pin-media", onPinMedia);
-  void loadSession(props.sessionId);
+  void loadSession(props.sessionId).then(() => maybeClearDraftFromQuery());
 
   // Demo / tour test hook: submit an explicit intent through THIS view's own
   // store path (the same code path InputBar's @intent uses), so the chat +

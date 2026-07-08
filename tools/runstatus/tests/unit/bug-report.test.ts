@@ -201,6 +201,7 @@ describe("MetaButton — Report bug", () => {
   it("shows the filed toast with the path after a successful submit", async () => {
     const store = useBugReportStore();
     vi.spyOn(store, "trigger").mockResolvedValue();
+    store.title = "Foyer button does nothing";
     // Simulate the post-submit filed state the modal would produce.
     store.filed = {
       id: "2026-06-12T130405Z-foyer-button-does-nothing",
@@ -217,6 +218,16 @@ describe("MetaButton — Report bug", () => {
     const open = wrapper.get('[data-testid="bug-toast-open"]');
     expect(open.exists()).toBe(true);
     expect(open.attributes("title")).toBe("Open the filed bug");
+    const fix = wrapper.get('[data-testid="bug-toast-bugfix"]');
+    expect(fix.attributes("target")).toBe("_blank");
+    const href = fix.attributes("href") ?? "";
+    expect(href).toContain("#/start/bugfix?");
+    const params = new URLSearchParams(href.split("?")[1] ?? "");
+    expect(params.get("id")).toBe("2026-06-12T130405Z-foyer-button-does-nothing");
+    expect(params.get("path")).toBe(
+      "issues/bugs/2026-06-12T130405Z-foyer-button-does-nothing.md"
+    );
+    expect(params.get("title")).toBe("Foyer button does nothing");
   });
 
   it("shows privacy feedback in the filed toast", async () => {
