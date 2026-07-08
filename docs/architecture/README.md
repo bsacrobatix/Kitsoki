@@ -85,6 +85,8 @@ If you are testing or debugging one, use [`../tracing/`](../tracing/README.md).
   precedence.
 - [`embeddings.md`](embeddings.md) — embedding index/store/sidecar and
   `host.agent.search`.
+- [`extension-docs.md`](extension-docs.md) — source-owned docs sidecars and the
+  deterministic extension library index.
 - [`capsules.md`](capsules.md) — hermetic repository fixtures for tests and
   agent validation.
 - [`decomposition-graph.md`](decomposition-graph.md) and
