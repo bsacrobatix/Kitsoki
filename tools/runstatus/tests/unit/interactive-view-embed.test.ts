@@ -283,7 +283,7 @@ describe("InteractiveView — embed (VS Code) layout", () => {
     expect(style).toContain(
       "grid-template-columns: minmax(18rem, 42%) 0.55rem minmax(20rem, 1fr);",
     );
-    expect(style).not.toContain("grid-template-rows");
+    expect(style).toContain("grid-template-rows: minmax(0, 1fr);");
     expect(style).not.toContain("minmax(12rem");
 
     wrapper.unmount();
