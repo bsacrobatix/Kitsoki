@@ -1,7 +1,6 @@
 package studio
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -13,9 +12,8 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"kitsoki/internal/app"
+	"kitsoki/internal/bugreport"
 	"kitsoki/internal/runstatus"
-	rsserver "kitsoki/internal/runstatus/server"
 	"kitsoki/internal/store"
 )
 
@@ -31,19 +29,6 @@ type issueTraceEvidence struct {
 	LastError   string
 	LastEvent   time.Time
 	SessionCost float64
-}
-
-type issueTraceRecord struct {
-	Turn       app.TurnNumber  `json:"turn"`
-	Seq        int             `json:"seq"`
-	Ts         time.Time       `json:"ts"`
-	Kind       store.EventKind `json:"kind"`
-	StatePath  app.StatePath   `json:"state_path,omitempty"`
-	ParentTurn app.TurnNumber  `json:"parent_turn,omitempty"`
-	CallID     string          `json:"call_id,omitempty"`
-	EpisodeID  string          `json:"episode_id,omitempty"`
-	MatchIdx   int             `json:"match_idx,omitempty"`
-	Payload    json.RawMessage `json:"payload"`
 }
 
 func issueHasTraceSource(args IssueCreateArgs) bool {
@@ -85,7 +70,7 @@ func (srv *Server) issueOnDiskTraceContext(args IssueCreateArgs, sidecarDir stri
 		worldSidecar = "source-world.redacted.json"
 	}
 
-	scrubOpts := rsserver.BugScrubOptions()
+	scrubOpts := bugreport.ScrubOptions()
 	var b strings.Builder
 	if includeInspect {
 		displayPath := issueTraceDisplayPath(path)
@@ -104,15 +89,15 @@ func (srv *Server) issueOnDiskTraceContext(args IssueCreateArgs, sidecarDir stri
 			fmt.Fprintf(&b, "- turn: %d\n", evidence.Turn)
 		}
 		if evidence.Status != "" {
-			fmt.Fprintf(&b, "- status: `%v`\n", rsserver.RedactedTraceValue("status", evidence.Status, scrubOpts))
+			fmt.Fprintf(&b, "- status: `%v`\n", bugreport.DepersonalizedTraceValue("status", evidence.Status, scrubOpts))
 		}
 		if evidence.LastError != "" {
-			fmt.Fprintf(&b, "- last error: `%v`\n", rsserver.RedactedTraceValue("last_error", evidence.LastError, scrubOpts))
+			fmt.Fprintf(&b, "- last error: `%v`\n", bugreport.DepersonalizedTraceValue("last_error", evidence.LastError, scrubOpts))
 		}
 		if evidence.SessionCost > 0 {
 			fmt.Fprintf(&b, "- session cost: %.4f\n", evidence.SessionCost)
 		}
-		world := rsserver.RedactedTraceValue("world", evidence.World, scrubOpts)
+		world := bugreport.DepersonalizedTraceValue("world", evidence.World, scrubOpts)
 		if w, err := json.Marshal(world); err == nil {
 			if pretty, perr := json.MarshalIndent(world, "", "  "); perr == nil {
 				if path, werr := writeIssueSidecar(sidecarDir, worldSidecar, pretty); werr == nil {
@@ -134,7 +119,7 @@ func (srv *Server) issueOnDiskTraceContext(args IssueCreateArgs, sidecarDir stri
 		if len(events) > limit {
 			events = events[len(events)-limit:]
 		}
-		redacted := rsserver.RedactedTraceJSONL(events, scrubOpts)
+		redacted := bugreport.DepersonalizedTraceJSONL(events, scrubOpts)
 		sidecarRef := ""
 		if path, werr := writeIssueSidecar(sidecarDir, traceSidecar, redacted); werr == nil {
 			sidecarRef = fmt.Sprintf(" (full: [%s](%s))", filepath.Base(path), path)
@@ -282,103 +267,21 @@ func issueTraceFileMatchesTicket(path, ticketID string) bool {
 }
 
 func readIssueTraceEvidence(path string) (issueTraceEvidence, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return issueTraceEvidence{}, err
-	}
-	defer func() { _ = f.Close() }()
-
 	evidence := issueTraceEvidence{
 		Path:     path,
 		SourceID: strings.TrimSuffix(filepath.Base(path), ".jsonl"),
 		AppID:    issueTraceAppFromPath(path),
 		World:    map[string]any{},
 	}
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 1<<20), 64<<20)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var probe struct {
-			Kind string `json:"kind"`
-		}
-		if json.Unmarshal([]byte(line), &probe) == nil && probe.Kind == "session.header" {
-			continue
-		}
-		if ev, ok := decodeIssueStoreEvent([]byte(line)); ok {
-			te := runstatus.ToTraceEvent(ev)
-			if te.SessionID == "" {
-				te.SessionID = evidence.SourceID
-			}
-			evidence.Events = append(evidence.Events, te)
-			evidence.foldStoreEvent(ev)
-			continue
-		}
-		var te runstatus.TraceEvent
-		if err := json.Unmarshal([]byte(line), &te); err != nil {
-			continue
-		}
-		if te.SessionID == "" {
-			te.SessionID = evidence.SourceID
-		}
+	events, err := bugreport.ReadTraceEvents(path, evidence.SourceID)
+	if err != nil {
+		return issueTraceEvidence{}, err
+	}
+	for _, te := range events {
 		evidence.Events = append(evidence.Events, te)
 		evidence.foldTraceEvent(te)
 	}
-	if err := scanner.Err(); err != nil {
-		return issueTraceEvidence{}, err
-	}
 	return evidence, nil
-}
-
-func decodeIssueStoreEvent(line []byte) (store.Event, bool) {
-	var rec issueTraceRecord
-	if err := json.Unmarshal(line, &rec); err != nil || rec.Kind == "" || rec.Kind == "session.header" {
-		return store.Event{}, false
-	}
-	payload := rec.Payload
-	if payload == nil {
-		payload = json.RawMessage(`{}`)
-	}
-	return store.Event{
-		Turn:       rec.Turn,
-		Seq:        rec.Seq,
-		Ts:         rec.Ts,
-		Kind:       rec.Kind,
-		StatePath:  rec.StatePath,
-		Payload:    payload,
-		ParentTurn: rec.ParentTurn,
-		CallID:     rec.CallID,
-		EpisodeID:  rec.EpisodeID,
-		MatchIdx:   rec.MatchIdx,
-	}, true
-}
-
-func (e *issueTraceEvidence) foldStoreEvent(ev store.Event) {
-	if int(ev.Turn) > e.Turn {
-		e.Turn = int(ev.Turn)
-	}
-	if !ev.Ts.IsZero() && ev.Ts.After(e.LastEvent) {
-		e.LastEvent = ev.Ts
-	}
-	if ev.StatePath != "" {
-		e.State = string(ev.StatePath)
-	}
-	switch ev.Kind {
-	case store.TransitionApplied:
-		var p struct {
-			To string `json:"to"`
-		}
-		if json.Unmarshal(ev.Payload, &p) == nil && p.To != "" {
-			e.State = p.To
-		}
-	case store.EffectApplied:
-		var p map[string]any
-		if json.Unmarshal(ev.Payload, &p) == nil {
-			e.foldWorldPayload(p)
-		}
-	}
 }
 
 func (e *issueTraceEvidence) foldTraceEvent(ev runstatus.TraceEvent) {

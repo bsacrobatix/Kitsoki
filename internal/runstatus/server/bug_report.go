@@ -34,25 +34,13 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/bugfile"
 	"kitsoki/internal/bugprivacy"
+	"kitsoki/internal/bugreport"
 	"kitsoki/internal/ghagent/bugdeck"
 	"kitsoki/internal/host"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/reportmeta"
 	"kitsoki/internal/runstatus/harscrub"
 )
-
-// BugScrubOptions is the single production redaction config for filed bug
-// evidence: $HOME path substitution plus the built-in credential patterns. Used
-// for HAR/rrweb/console/error evidence on the web path and for MCP-filed session
-// evidence so nothing reaches committed artifacts on a $HOME-only pass.
-func BugScrubOptions() harscrub.ScrubOptions {
-	return harscrub.ScrubOptions{
-		Home:           os.Getenv("HOME"),
-		SecretPatterns: harscrub.DefaultSecretPatterns(),
-	}
-}
-
-func scrubOptions() harscrub.ScrubOptions { return BugScrubOptions() }
 
 // bugPreview handles runstatus.bug.preview. It snapshots + scrubs the server's
 // HAR ring buffer right now, HOLDS that exact scrubbed snapshot under a fresh
@@ -62,7 +50,7 @@ func scrubOptions() harscrub.ScrubOptions { return BugScrubOptions() }
 func (s *Server) bugPreview(_ map[string]any) (any, *rpcError) {
 	har := s.recorder.Snapshot()
 	depth, capacity := s.recorder.Depth()
-	harscrub.Scrub(har, scrubOptions())
+	harscrub.Scrub(har, bugreport.ScrubOptions())
 
 	id := s.putCapture(har)
 	return map[string]any{
@@ -135,7 +123,7 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 
 	root := s.resolveBugRoot(params)
 	runtime := s.bugRuntimeSnapshot(root, params)
-	scrubOpts := scrubOptions()
+	scrubOpts := bugreport.ScrubOptions()
 
 	// HAR source: if a capture_id from a prior runstatus.bug.preview is supplied
 	// and still held, file that EXACT already-scrubbed snapshot (do not re-scrub
@@ -169,28 +157,30 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 
 	png := decodeScreenshot(stringParam(params, "screenshot_png_b64"))
 
+	artifacts := []bugreport.Artifact{
+		{Name: "screenshot.png", Data: png, Image: true, Label: "Screenshot"},
+		{Name: "har.json", Data: harJSON, Label: "HAR capture (scrubbed)"},
+		{Name: "rrweb.json", Data: rrwebJSON, Label: "Session replay (rrweb)"},
+		{Name: "console.json", Data: consoleJSON, Label: "Console log"},
+		{Name: "trace.redacted.jsonl", Data: traceJSON, Label: "Depersonalized session trace (redacted)"},
+	}
+
 	report := bugprivacy.Report{
-		Surface:    "web",
-		Target:     nonEmpty(stringParam(params, "target"), "kitsoki"),
-		Title:      title,
-		Body:       body,
-		ReproSteps: repro,
-		Component:  nonEmpty(stringParam(params, "component"), "web"),
-		TraceRef:   traceRef,
-		ArtifactNames: bugArtifactNames(map[string][]byte{
-			"screenshot.png":       png,
-			"har.json":             harJSON,
-			"rrweb.json":           rrwebJSON,
-			"console.json":         consoleJSON,
-			"trace.redacted.jsonl": traceJSON,
-		}),
+		Surface:       "web",
+		Target:        nonEmpty(stringParam(params, "target"), "kitsoki"),
+		Title:         title,
+		Body:          body,
+		ReproSteps:    repro,
+		Component:     nonEmpty(stringParam(params, "component"), "web"),
+		TraceRef:      traceRef,
+		ArtifactNames: bugreport.ArtifactNames(artifacts),
 	}
 	safeReport, privacy, perr := bugprivacy.Check(ctx, s.bugPrivacyCheckerForReport(params), report, scrubOpts, root, stringParam(params, "filed_by"))
 	if perr != nil {
 		return nil, serverErr(fmt.Errorf("bug privacy check: %w", perr))
 	}
 	if privacy.Blocked() {
-		return nil, serverErr(fmt.Errorf("%s%s", privacy.Message, privacyFollowUpSuffix(privacy)))
+		return nil, serverErr(fmt.Errorf("%s%s", privacy.Message, bugreport.PrivacyFollowUpSuffix(privacy)))
 	}
 	title = safeReport.Title
 	body = safeReport.Body
@@ -204,7 +194,7 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 	// evidence under .artifacts for developer-local review, instead of writing a
 	// local issues/bugs/<id>.md file.
 	if s.ticketRepo != "" {
-		return s.fileBugToGitHub(params, title, body, severity, traceRef, repro, harJSON, png, rrwebJSON, consoleJSON, traceJSON, runtime, privacy)
+		return s.fileBugToGitHub(params, title, body, severity, traceRef, repro, artifacts, runtime, privacy)
 	}
 
 	id, relPath, absPath, err := bugfile.Create(bugfile.CreateRequest{
@@ -225,42 +215,17 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 
 	// Artifacts dir is a sibling of the .md: issues/bugs/<id>.artifacts/.
 	artifactsDir := strings.TrimSuffix(absPath, ".md") + ".artifacts"
-	wroteScreenshot := false
-	if mkErr := os.MkdirAll(artifactsDir, 0o755); mkErr == nil {
-		if wErr := os.WriteFile(filepath.Join(artifactsDir, "har.json"), harJSON, 0o644); wErr != nil {
-			return nil, serverErr(fmt.Errorf("write har.json: %w", wErr))
-		}
-		if png != nil {
-			if wErr := os.WriteFile(filepath.Join(artifactsDir, "screenshot.png"), png, 0o644); wErr == nil {
-				wroteScreenshot = true
-			}
-		}
-		if len(rrwebJSON) > 0 {
-			if wErr := os.WriteFile(filepath.Join(artifactsDir, "rrweb.json"), rrwebJSON, 0o644); wErr != nil {
-				return nil, serverErr(fmt.Errorf("write rrweb.json: %w", wErr))
-			}
-		}
-		if len(consoleJSON) > 0 {
-			if wErr := os.WriteFile(filepath.Join(artifactsDir, "console.json"), consoleJSON, 0o644); wErr != nil {
-				return nil, serverErr(fmt.Errorf("write console.json: %w", wErr))
-			}
-		}
-		if len(traceJSON) > 0 {
-			if wErr := os.WriteFile(filepath.Join(artifactsDir, "trace.redacted.jsonl"), traceJSON, 0o644); wErr != nil {
-				return nil, serverErr(fmt.Errorf("write trace.redacted.jsonl: %w", wErr))
-			}
-		}
-	} else {
-		return nil, serverErr(fmt.Errorf("mkdir artifacts: %w", mkErr))
+	if err := bugreport.WriteArtifacts(artifactsDir, artifacts); err != nil {
+		return nil, serverErr(err)
 	}
 
 	// Append an Artifacts section linking the sidecar files relatively, plus the
 	// recorder horizon so a reader knows how much history the HAR covers.
 	arts := artifactLinks{
-		hasScreenshot: wroteScreenshot,
-		hasRRWeb:      len(rrwebJSON) > 0,
-		hasConsole:    len(consoleJSON) > 0,
-		hasTrace:      len(traceJSON) > 0,
+		hasScreenshot: bugreport.HasArtifact(artifacts, "screenshot.png"),
+		hasRRWeb:      bugreport.HasArtifact(artifacts, "rrweb.json"),
+		hasConsole:    bugreport.HasArtifact(artifacts, "console.json"),
+		hasTrace:      bugreport.HasArtifact(artifacts, "trace.redacted.jsonl"),
 	}
 	if appendErr := appendArtifactsSection(absPath, id, arts, depth, capacity); appendErr != nil {
 		return nil, serverErr(fmt.Errorf("append artifacts section: %w", appendErr))
@@ -274,7 +239,7 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 // those paths to host.GitHubFileBug with UploadArtifacts set so the evidence is
 // uploaded as release assets and linked by public URL in the issue, and returns
 // the issue url. No local issues/bugs/*.md file is written in this mode.
-func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, traceRef string, repro []string, harJSON, png, rrwebJSON, consoleJSON, traceJSON []byte, runtime reportmeta.Snapshot, privacy bugprivacy.Result) (any, *rpcError) {
+func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, traceRef string, repro []string, artifacts []bugreport.Artifact, runtime reportmeta.Snapshot, privacy bugprivacy.Result) (any, *rpcError) {
 	prefix := "bug-" + time.Now().UTC().Format("20060102T150405.000000000Z")
 	artifactsRoot, displayRoot, err := s.githubBugArtifactsRoot()
 	if err != nil {
@@ -285,40 +250,10 @@ func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, t
 		return nil, serverErr(fmt.Errorf("github bug: mkdir artifacts: %w", err))
 	}
 
-	var ev []host.EvidenceFile
-	add := func(base string, data []byte, image bool, label string) error {
-		if len(data) == 0 {
-			return nil
-		}
-		p := filepath.Join(artifactsDir, base)
-		if err := os.WriteFile(p, data, 0o644); err != nil {
-			return err
-		}
-		ev = append(ev, host.EvidenceFile{
-			Name:       base,
-			Path:       filepath.ToSlash(filepath.Join(displayRoot, prefix, base)), // display-only reference
-			SourcePath: p,                                                          // real file to upload
-			Image:      image,
-			Label:      label,
-		})
-		return nil
+	if err := bugreport.WriteArtifacts(artifactsDir, artifacts); err != nil {
+		return nil, serverErr(fmt.Errorf("github bug: %w", err))
 	}
-	for _, artifact := range []struct {
-		base  string
-		data  []byte
-		image bool
-		label string
-	}{
-		{base: "screenshot.png", data: png, image: true, label: "Screenshot"},
-		{base: "har.json", data: harJSON, label: "HAR capture (scrubbed)"},
-		{base: "rrweb.json", data: rrwebJSON, label: "Session replay (rrweb)"},
-		{base: "console.json", data: consoleJSON, label: "Console log"},
-		{base: "trace.redacted.jsonl", data: traceJSON, label: "Session trace (redacted)"},
-	} {
-		if err := add(artifact.base, artifact.data, artifact.image, artifact.label); err != nil {
-			return nil, serverErr(fmt.Errorf("github bug: write artifact %s: %w", artifact.base, err))
-		}
-	}
+	ev := bugreport.EvidenceFiles(artifactsDir, filepath.ToSlash(filepath.Join(displayRoot, prefix)), artifacts)
 
 	full := body
 	if len(repro) > 0 {
@@ -338,7 +273,7 @@ func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, t
 		Component:  nonEmpty(stringParam(params, "component"), "web"),
 		Target:     nonEmpty(stringParam(params, "target"), "kitsoki"),
 		TraceRef:   traceRef,
-		KitsokiRev: gitShortRev(s.bugRoot),
+		KitsokiRev: bugreport.GitShortRev(s.bugRoot),
 		FiledBy:    stringParam(params, "filed_by"),
 		Evidence:   ev,
 		Runtime:    runtime,
@@ -356,7 +291,7 @@ func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, t
 	// same DeckID the agent's issues.opened webhook will look up — so it produces
 	// the hosted no-LLM deck without re-downloading anything. Best-effort: a
 	// deposit failure must not fail the (already-filed) bug report.
-	s.depositAgentEvidence(res.Number, rrwebJSON, harJSON)
+	s.depositAgentEvidence(res.Number, artifactData(artifacts, "rrweb.json"), artifactData(artifacts, "har.json"))
 
 	return map[string]any{"id": res.Number, "url": res.URL, "github": true, "privacy": privacy}, nil
 }
@@ -400,6 +335,15 @@ func (s *Server) depositAgentEvidence(issueNumber string, rrwebJSON, harJSON []b
 	_ = store.Save(bugdeck.DeckID(s.ticketRepo, issueNumber), rrwebJSON, harJSON)
 }
 
+func artifactData(artifacts []bugreport.Artifact, name string) []byte {
+	for _, artifact := range artifacts {
+		if artifact.Name == name {
+			return artifact.Data
+		}
+	}
+	return nil
+}
+
 func (s *Server) githubBugArtifactsRoot() (absRoot, displayRoot string, err error) {
 	root := s.bugRoot
 	if strings.TrimSpace(root) == "" {
@@ -410,19 +354,6 @@ func (s *Server) githubBugArtifactsRoot() (absRoot, displayRoot string, err erro
 	}
 	absRoot = filepath.Join(root, ".artifacts", "bug-reports")
 	return absRoot, filepath.ToSlash(filepath.Join(".artifacts", "bug-reports")), nil
-}
-
-// gitShortRev returns the short HEAD sha of the repo containing dir (best-effort;
-// "" when dir is empty / not a repo / git is unavailable).
-func gitShortRev(dir string) string {
-	if strings.TrimSpace(dir) == "" {
-		return ""
-	}
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "--short", "HEAD").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
 }
 
 // resolveBugRoot picks the repo root for a web-filed bug. Precedence: explicit
@@ -504,7 +435,7 @@ func appendArtifactsSection(absPath, id string, arts artifactLinks, depth, capac
 		fmt.Fprintf(&sb, "- Console log: ./%s.artifacts/console.json\n", id)
 	}
 	if arts.hasTrace {
-		fmt.Fprintf(&sb, "- Session trace (redacted): ./%s.artifacts/trace.redacted.jsonl\n", id)
+		fmt.Fprintf(&sb, "- Depersonalized session trace (redacted): ./%s.artifacts/trace.redacted.jsonl\n", id)
 	}
 	fmt.Fprintf(&sb, "\nThe HAR retains the %d most-recent /rpc exchange(s) (ring-buffer capacity %d).\n", depth, capacity)
 
@@ -625,13 +556,6 @@ func nonEmpty(s, fallback string) string {
 	return s
 }
 
-func privacyFollowUpSuffix(privacy bugprivacy.Result) string {
-	if strings.TrimSpace(privacy.FollowUpPath) == "" {
-		return ""
-	}
-	return "; depersonalized follow-up filed at " + privacy.FollowUpPath
-}
-
 func (s *Server) bugPrivacyCheckerForReport(params map[string]any) bugprivacy.Checker {
 	if s.bugPrivacyCheckerResolver == nil {
 		return s.bugPrivacyChecker
@@ -663,16 +587,6 @@ func (s *Server) bugPrivacySelectionForReport(params map[string]any) orchestrato
 		return orchestrator.ProfileSelection{}
 	}
 	return hc.HarnessSelection()
-}
-
-func bugArtifactNames(files map[string][]byte) []string {
-	out := make([]string, 0, len(files))
-	for name, data := range files {
-		if len(data) > 0 {
-			out = append(out, name)
-		}
-	}
-	return out
 }
 
 func cloneParams(params map[string]any) map[string]any {
