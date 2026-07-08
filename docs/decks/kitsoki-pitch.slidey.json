@@ -2896,6 +2896,39 @@
       "narration": "The actual onboarding story is linear: start, discover without writing, review the profile, set up the local Kitsoki instance, then run final checks before real work starts."
     },
     {
+      "type": "kitsoki-tui",
+      "title": "kitsoki run",
+      "appTitle": "kitsoki · project onboarding",
+      "subtitle": "v1.2.0 · local setup story",
+      "hints": [
+        "onboard .    prepare this repo",
+        "/help        list commands",
+        "/world       inspect current state",
+        "/quit        exit"
+      ],
+      "status": "session sess_42... · story onboarding · state intro",
+      "choicePrompt": "Start Kitsoki onboarding?",
+      "menuItems": [
+        {
+          "label": "Start onboarding",
+          "hint": "discover project, then ask before writes"
+        },
+        {
+          "label": "Review setup plan",
+          "hint": "read-only preview"
+        },
+        {
+          "label": "Skip for now",
+          "hint": "stay in idle"
+        }
+      ],
+      "selectedIndex": 0,
+      "footer": "[↑/↓ move • Enter pick • Tab chat • Esc cancel]",
+      "caption": "The TUI first-run moment stays small: one highlighted menu choice, visible keyboard navigation, then the same reviewed onboarding workflow runs.",
+      "hold": 230,
+      "narration": "The first screen is intentionally simple: arrow-key selection, Enter to start, then Kitsoki runs the same reviewed onboarding story."
+    },
+    {
       "type": "evidence",
       "title": "What onboarding does today",
       "items": [
