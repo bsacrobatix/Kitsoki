@@ -70,6 +70,14 @@ func issueResult(t *testing.T, res *mcpsdk.CallToolResult) studio.IssueCreateRes
 	return out
 }
 
+func issueSidecarDir(t *testing.T, root, slug string) string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(root, slug+"*", "trace.redacted.jsonl"))
+	require.NoError(t, err)
+	require.NotEmpty(t, matches, "trace sidecar for %q not found under %s", slug, root)
+	return filepath.Dir(matches[0])
+}
+
 // TestIssueCreate_BundlesEvidenceAndFiles is the main path: render three asset
 // kinds, bundle a handle's trace + inspect, and file via the fake — asserting
 // the assets hit disk, the body carries the evidence, and the filer saw the
@@ -147,7 +155,7 @@ func TestIssueCreate_BundlesEvidenceAndFiles(t *testing.T) {
 	// Token-diet: bulky machine context (full world + full pretty trace) is spilled
 	// to sidecar files under the issue's artifacts dir, linked from the body, not
 	// inlined wholesale.
-	slugDir := filepath.Join(dir, "mcp-gap-session-drive-cannot-do-x")
+	slugDir := filepath.Dir(out.Assets[0])
 	assert.FileExists(t, filepath.Join(slugDir, "trace.redacted.jsonl"), "full redacted trace sidecar written")
 	assert.FileExists(t, filepath.Join(slugDir, "world.redacted.json"), "full redacted world sidecar written")
 	assert.Contains(t, body, "trace.redacted.jsonl", "body links the trace sidecar")
@@ -194,7 +202,7 @@ func TestIssueCreate_DefaultsToCurrentSessionEvidenceAndRedacts(t *testing.T) {
 	assert.NotContains(t, body, "alice@example.com")
 	assert.NotContains(t, body, home+"/secret.txt")
 
-	slugDir := filepath.Join(dir, "mcp-default-evidence")
+	slugDir := issueSidecarDir(t, dir, "mcp-default-evidence")
 	traceData, err := os.ReadFile(filepath.Join(slugDir, "trace.redacted.jsonl"))
 	require.NoError(t, err)
 	worldData, err := os.ReadFile(filepath.Join(slugDir, "world.redacted.json"))
@@ -214,6 +222,31 @@ func TestIssueCreate_DefaultsToCurrentSessionEvidenceAndRedacts(t *testing.T) {
 	_ = issueResult(t, res)
 	assert.NotContains(t, filer.got.Body, "## Context")
 	assert.NotContains(t, filer.got.Body, "## Trace")
+}
+
+func TestIssueCreate_DuplicateTitlesUseDistinctArtifactDirs(t *testing.T) {
+	ctx := context.Background()
+	srv, _, dir := newIssueServer(t)
+	cs := connectInProcess(ctx, t, srv)
+	handle := openCloak(ctx, t, cs)
+
+	for i := 0; i < 2; i++ {
+		res, err := callTool(ctx, cs, "issue.create", map[string]any{
+			"title":           "Repeated MCP evidence",
+			"body":            "same title should not overwrite sidecars",
+			"handle":          handle,
+			"include_trace":   true,
+			"include_inspect": true,
+		})
+		require.NoError(t, err)
+		out := issueResult(t, res)
+		require.True(t, out.OK)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(dir, "repeated-mcp-evidence*", "trace.redacted.jsonl"))
+	require.NoError(t, err)
+	require.Len(t, matches, 2)
+	assert.NotEqual(t, filepath.Dir(matches[0]), filepath.Dir(matches[1]), "same-title reports need isolated evidence dirs")
 }
 
 func TestIssueCreate_BundlesExplicitTracePathWithoutCurrentHandle(t *testing.T) {
@@ -266,7 +299,7 @@ func TestIssueCreate_BundlesExplicitTracePathWithoutCurrentHandle(t *testing.T) 
 	assert.NotContains(t, body, "alice@example.com")
 	assert.NotContains(t, body, home+"/secret.txt")
 
-	slugDir := filepath.Join(dir, "tui-trace-report")
+	slugDir := issueSidecarDir(t, dir, "tui-trace-report")
 	traceData, err := os.ReadFile(filepath.Join(slugDir, "trace.redacted.jsonl"))
 	require.NoError(t, err)
 	worldData, err := os.ReadFile(filepath.Join(slugDir, "world.redacted.json"))
@@ -385,8 +418,9 @@ func TestIssueCreate_LocalArtifactSinkWritesTicket(t *testing.T) {
 	cs := connectInProcess(ctx, t, srv)
 
 	res, err := callTool(ctx, cs, "issue.create", map[string]any{
-		"title": "Local artifact capture",
-		"body":  "Captured locally without filing a GitHub issue.",
+		"title":  "Local artifact capture",
+		"body":   "Captured locally without filing a GitHub issue.",
+		"labels": []string{"mcp"},
 	})
 	require.NoError(t, err)
 	out := issueResult(t, res)
@@ -397,12 +431,14 @@ func TestIssueCreate_LocalArtifactSinkWritesTicket(t *testing.T) {
 	require.NotEmpty(t, out.LocalPath)
 	assert.Contains(t, out.LocalPath, filepath.Join(dir, "issues", "bugs"))
 	assert.FileExists(t, out.LocalPath)
+	assert.Equal(t, []string{"source-autonomous", "mcp"}, out.Labels)
 
 	body, rerr := os.ReadFile(out.LocalPath)
 	require.NoError(t, rerr)
 	assert.Contains(t, string(body), "Local artifact capture")
 	assert.Contains(t, string(body), "Captured locally without filing a GitHub issue.")
 	assert.Contains(t, string(body), "studio-mcp")
+	assert.Contains(t, string(body), "labels:\n  - \"source-autonomous\"\n  - \"mcp\"")
 }
 
 // TestIssueCreate_NoFilerUnavailable proves a studio started without a filer

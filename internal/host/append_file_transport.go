@@ -41,9 +41,12 @@ import (
 //     of the comment body.
 //   - phase_id  (string): forwarded to the heading for traceability
 //     (`## Comment <ts> by <author> (phase=<id>)`).
-//   - workdir   (string): root for relative local thread paths. Bugfix runs pass
-//     their per-run worktree here so checkpoint comments do not write into the
-//     driving process's checkout.
+//   - workdir   (string): root for relative committed-ticket thread paths.
+//     Bugfix runs pass their per-run workspace here so `issues/bugs/...`
+//     checkpoint mirrors do not write into the driving process's checkout.
+//     Local artifact tickets under `.artifacts/issues/...` intentionally stay
+//     rooted in the driving process's artifacts directory because that file is
+//     the durable local ticket.
 //
 // Returns Result.Data with:
 //   - ok         (bool):   true on successful append.
@@ -151,6 +154,9 @@ func appendFileThreadPath(thread, workdir string) string {
 	thread = strings.TrimSpace(thread)
 	if isAppendFileLocalPath(thread) {
 		if !filepath.IsAbs(thread) {
+			if isAppendFileArtifactThread(thread) {
+				return thread
+			}
 			if workdir = strings.TrimSpace(workdir); workdir != "" {
 				// Only root the thread in the workdir when the workdir actually
 				// exists. Appending must never RESURRECT a removed worktree as a
@@ -201,6 +207,20 @@ func isAppendFileBugThread(thread string) bool {
 	clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(thread)))
 	for _, prefix := range []string{
 		"issues/bugs/",
+		".artifacts/issues/bugs/",
+		".artifacts/issues/features/",
+		".artifacts/issues/epics/",
+	} {
+		if strings.HasPrefix(clean, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAppendFileArtifactThread(thread string) bool {
+	clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(thread)))
+	for _, prefix := range []string{
 		".artifacts/issues/bugs/",
 		".artifacts/issues/features/",
 		".artifacts/issues/epics/",

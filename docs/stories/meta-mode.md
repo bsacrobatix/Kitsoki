@@ -665,10 +665,10 @@ What ships with kitsoki today (formerly under "Limitations"):
   `${KITSOKI_REPO}` and keys its chat against a synthetic `app_id`
   so the conversation is the same row across every running app;
   `story.bug` uses the `story-bug-reporter` agent which files
-  reports via `kitsoki bug create --target story` under the running
-  app's `issues/bugs/` directory (and `kitsoki.bug` does the same
-  against `${KITSOKI_REPO}/issues/bugs/`). Apps override any builtin
-  by declaring a `meta_modes.<group.verb>` with the same key.
+  reports via `kitsoki bug create --target story` under the selected
+  local sink (`issues/bugs/` or `.artifacts/issues/bugs/`); `kitsoki.bug`
+  does the same for the engine target. Apps override any builtin by declaring
+  a `meta_modes.<group.verb>` with the same key.
 - **The foyer "meta sessions" panel** is available from the
   Esc-menu's "Meta sessions" entry. It lists every active meta
   chat the controller can see — including cross-app `kitsoki.*` chats

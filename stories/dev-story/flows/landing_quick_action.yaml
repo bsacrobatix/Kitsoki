@@ -42,6 +42,7 @@ host_handlers:
           id: "TKT-001"
           title: "Esc hangs the TUI"
           type: "bug"
+          url: "TKT-001"
   host.append_to_file:
     data: { ok: true, message_id: "msg-1" }
   host.git:

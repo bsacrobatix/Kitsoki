@@ -422,14 +422,14 @@ trace, and files the issue — all server-side.
 
 | Tool | Shape | Wraps |
 |---|---|---|
-| `issue.create` | `{title, body?, labels?, repo?, handle?, trace_ref?, trace_path?, trace_app?, trace_ticket?, include_trace?, trace_limit?, include_inspect?, include_visual_recordings?, assets?} → {url, number, labels[], assets[]}` | render assets → `.artifacts`, bundle a handle's trace/inspect or resolved on-disk trace and stopped visual recordings, then the injectable `IssueFiler` (production: native `host.gh.ticket` / GitHub REST API) |
+| `issue.create` | `{title, body?, labels?, repo?, sink?, repo_root?, handle?, trace_ref?, trace_path?, trace_app?, trace_ticket?, include_trace?, trace_limit?, include_inspect?, include_visual_recordings?, assets?} → {ok, url?, number?, local_path?, filing_error?, labels[], assets[]}` | render assets → `.artifacts`, bundle a handle's trace/inspect or resolved on-disk trace and stopped visual recordings, then write a local artifact ticket by default or call the injectable `IssueFiler` when `sink:"github"` |
 
 Three things happen server-side so the agent never handles bytes:
 
 - **assets** — each `assets[]` entry (`kind: tui_png | web | tui_text`, targeting
   a handle or a `{story_path, state, world}` spec) is rendered through the same
   `composeRenderFrame` / `shot.RenderPNG` / `webShot` seams `render.*` use,
-  written under the artifacts dir (`.artifacts/mcp-issues/<slug>/`), and
+  written under the artifacts dir (`.artifacts/mcp-issues/<slug-or-slug-N>/`), and
   referenced in the body **by relative path**. Asset *upload* isn't wired yet —
   the path is a stopgap reference, flagged with an HTML comment; `IssueResult`
   already carries the asset list so the upgrade is localized to the filer.
@@ -441,8 +441,10 @@ Three things happen server-side so the agent never handles bytes:
   `trace_app` / `trace_ticket` to resolve the newest matching trace under
   `.kitsoki/sessions` or `~/.kitsoki/sessions`. Trace-backed reports reconstruct
   the latest world from `world.update` events and write redacted
-  `trace.redacted.jsonl` / `world.redacted.json` sidecars under
-  `.artifacts/mcp-issues/<slug>/`.
+  `trace.redacted.jsonl` / `world.redacted.json` sidecars under the same
+  `.artifacts/mcp-issues/<slug-or-slug-N>/` directory. The numeric suffix is
+  added only when an earlier report with the same title already has sidecars, so
+  repeated titles do not overwrite prior evidence.
 - **visual recordings** — `include_visual_recordings:["rec1", ...]` copies each
   stopped `visual.record` bundle into the issue artifact directory and links its
   `timeline.json`, `capture.semantic.json`, and optional `session.rrweb.json`.
@@ -453,8 +455,9 @@ Three things happen server-side so the agent never handles bytes:
   ticket under `.artifacts/issues/bugs`. Passing `sink: "github"` sends the
   composed `{repo, root, title, body, labels}` to the injected
   [`IssueFiler`](../../internal/mcp/studio/issue_tools.go) seam. The
-  `source-autonomous` label is always applied (first) so agent-filed issues are
-  filterable. Production (`cmd/kitsoki`) files GitHub requests through the
+  `source-autonomous` label is always applied first and is persisted in local
+  artifact ticket frontmatter, so agent-filed issues are filterable. Production
+  (`cmd/kitsoki`) files GitHub requests through the
   native `host.gh.ticket` / GitHub REST API provider and infers `repo` from
   `root`/`workdir` when the caller omits it; a test injects a fake that records
   the request and returns a canned URL — no network, no LLM. With no filer
