@@ -8,10 +8,12 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 // Vite HMR dev server can serve the Vue app while the real JSON-RPC surface
 // runs in the Go process. Set KITSOKI_API to override the default address.
 const apiBase = process.env.KITSOKI_API ?? "http://127.0.0.1:7777";
-const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+const runstatusRoot = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(runstatusRoot, "../..");
 const tempRoot = process.env.KITSOKI_TEMP_ROOT ?? path.join(repoRoot, ".temp");
 
 export default defineConfig({
+  root: runstatusRoot,
   // Webview-relative asset resolution: under a VS Code webview the SPA is loaded
   // via asWebviewUri (not from a server root), so emitted asset URLs must be
   // relative ("./") rather than absolute ("/"). The single-file build inlines
@@ -22,7 +24,7 @@ export default defineConfig({
   server: {
     middlewareMode: false,
     fs: {
-      allow: ['fixtures', '.'],
+      allow: [runstatusRoot],
     },
     host: "127.0.0.1",
     port: parseInt(process.env.VITE_PORT ?? "5173"),
