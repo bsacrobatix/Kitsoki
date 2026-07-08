@@ -128,16 +128,13 @@ args = ["mcp", "--stories-dir", "stories"]
 
 The crucial difference from Claude: **Codex has no `codex --agent <name>` flag to
 run the *whole top-level* session as a role** — Codex roles are spawned as child
-tasks by a parent (general-purpose) session. So `.codex/agents/*.toml` gives you
-the constrained *child* driver (the analog of Claude's subagent dispatch), not
-the whole-session mode `claude --agent` provides. To constrain a whole Codex
-session you assemble it from a `--profile` (model + MCP + `sandbox_mode`) plus a
-brief/`AGENTS.md` for persona — and the tool restriction is softer (sandbox, not
-a hard per-tool allowlist), so instruct the driver to call only `mcp__kitsoki__...`
-tools. For headless runs, `tools/mcp-drive/drive.sh --model gpt-5.5 …` (codex
-backend) handles the MCP overrides for you. The supervising Codex session can
-still verify the result afterward with normal tools, but the delegated driver
-should not use shell, filesystem, git, or GitHub tools for the core workflow.
+tasks by a parent session. For whole-session Codex driving, use
+`kitsoki agent launch --agent kitsoki-mcp-driver --backend codex` or the
+headless `tools/mcp-drive/drive.sh --model gpt-5.5 …` wrapper. Both attach the
+studio MCP and pass Codex `--disable=shell_tool`, so the driver cannot use a
+shell while still calling `mcp__kitsoki__...` tools. The supervising session can
+verify the result afterward with normal tools, but the delegated driver should
+not use shell, filesystem, git, or GitHub tools for the core workflow.
 
 ### Drive The Story
 

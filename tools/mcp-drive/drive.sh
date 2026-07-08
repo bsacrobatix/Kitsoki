@@ -48,7 +48,7 @@
 #                               reported distinctly from a real command failure
 #                               so callers don't confuse "stalled" with "tried
 #                               and failed".
-#   MCP_DRIVE_TOOLS             override the allowlist (default: all kitsoki studio tools)
+#   MCP_DRIVE_TOOLS             override the allowlist (default: kitsoki studio MCP tools only)
 #   MCP_DRIVE_MAX_ATTEMPTS      max attempts for retryable transient failures (default: 12)
 #   MCP_DRIVE_BACKOFF_BASE      initial backoff seconds (default: 10)
 #   MCP_DRIVE_BACKOFF_MAX       max backoff cap seconds (default: 600 = 10m)
@@ -103,10 +103,10 @@ case "$BACKEND" in
     echo "drive.sh: unknown MCP_DRIVE_BACKEND '$BACKEND' (want claude|codex)" >&2; exit 2 ;;
 esac
 
-# The full kitsoki studio surface. The orchestrator needs session.* driving
-# tools + story.*/render.* introspection; Bash/Read let it stage tickets + verify
-# the worktree between turns.
-TOOLS="${MCP_DRIVE_TOOLS:-mcp__kitsoki__studio_ping,mcp__kitsoki__story_read,mcp__kitsoki__story_graph,mcp__kitsoki__story_validate,mcp__kitsoki__session_new,mcp__kitsoki__session_attach,mcp__kitsoki__session_drive,mcp__kitsoki__session_submit,mcp__kitsoki__session_continue,mcp__kitsoki__session_answer,mcp__kitsoki__session_status,mcp__kitsoki__session_world,mcp__kitsoki__session_inspect,mcp__kitsoki__session_trace,mcp__kitsoki__session_close,mcp__kitsoki__render_tui,Bash,Read,Glob,Grep}"
+# The kitsoki studio surface. The orchestrator drives, reads, gates, and
+# integrates through MCP tools only; direct host Bash/Read/Grep/Glob are
+# deliberately absent.
+TOOLS="${MCP_DRIVE_TOOLS:-mcp__kitsoki__studio_ping,mcp__kitsoki__studio_handles,mcp__kitsoki__studio_work,mcp__kitsoki__story_read,mcp__kitsoki__story_write,mcp__kitsoki__story_validate,mcp__kitsoki__story_graph,mcp__kitsoki__story_test,mcp__kitsoki__story_list,mcp__kitsoki__story_search,mcp__kitsoki__story_turn,mcp__kitsoki__session_new,mcp__kitsoki__session_attach,mcp__kitsoki__session_drive,mcp__kitsoki__session_submit,mcp__kitsoki__session_continue,mcp__kitsoki__session_answer,mcp__kitsoki__session_status,mcp__kitsoki__session_world,mcp__kitsoki__session_inspect,mcp__kitsoki__session_trace,mcp__kitsoki__session_close,mcp__kitsoki__render_tui,mcp__kitsoki__render_tui_png,mcp__kitsoki__render_web,mcp__kitsoki__visual_open,mcp__kitsoki__visual_observe,mcp__kitsoki__visual_snapshot,mcp__kitsoki__visual_act,mcp__kitsoki__visual_diff,mcp__kitsoki__visual_git_diff,mcp__kitsoki__visual_record,mcp__kitsoki__host_run,mcp__kitsoki__trace_read,mcp__kitsoki__trace_to_flow,mcp__kitsoki__vcs_status,mcp__kitsoki__vcs_diff,mcp__kitsoki__vcs_log,mcp__kitsoki__vcs_commit,mcp__kitsoki__vcs_integrate,mcp__kitsoki__worktree_list,mcp__kitsoki__worktree_create,mcp__kitsoki__worktree_remove,mcp__kitsoki__gh_issues,mcp__kitsoki__gh_pr_view,mcp__kitsoki__gh_comment,mcp__kitsoki__issue_create}"
 
 # Pure-bash wall-clock ceiling — no dependency on GNU coreutils `timeout`/
 # `gtimeout` (absent by default on macOS, where this also runs). Backgrounds
@@ -188,9 +188,9 @@ run_once() {
   if [[ "$BACKEND" == "codex" ]]; then
     # Headless codex on ChatGPT subscription auth. The studio MCP is attached via
     # -c overrides (codex has no --mcp-config flag); --dangerously-bypass… is the
-    # acceptEdits equivalent for unattended runs — the orchestrator only clicks
-    # studio tools, and the kitsoki MCP it spawns forks the worker harness, so the
-    # process needs full access. --skip-git-repo-check: the cwd may be a worktree.
+    # acceptEdits equivalent for unattended MCP calls — the orchestrator only
+    # clicks studio tools, and shell_tool is disabled below. --skip-git-repo-check:
+    # the cwd may be a worktree.
     #
     # Env propagation: codex does NOT forward the parent environment to MCP
     # subprocesses, so a worker that needs env (IS_SANDBOX so claude accepts
@@ -244,6 +244,7 @@ run_once() {
       codex exec "${codex_tool_search_preamble}"$'\n\n---\n\n'"$PROMPT" \
       --model "$MODEL" \
       --dangerously-bypass-approvals-and-sandbox \
+      --disable=shell_tool \
       --skip-git-repo-check \
       "${codex_mcp_args[@]}" \
       --json

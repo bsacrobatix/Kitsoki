@@ -123,8 +123,14 @@ Claude Code can adopt the checked-in driver agent:
 claude --agent kitsoki-mcp-driver
 ```
 
-Codex can use the mirrored `.codex/agents/kitsoki-mcp-driver.toml` subagent, or
-the headless wrapper:
+Codex can launch the mirrored `.codex/agents/kitsoki-mcp-driver.toml` driver
+through Kitsoki, which attaches the studio MCP and disables Codex shell access:
+
+```sh
+kitsoki agent launch --agent kitsoki-mcp-driver --backend codex
+```
+
+For headless delegation, use the wrapper:
 
 ```sh
 tools/mcp-drive/drive.sh

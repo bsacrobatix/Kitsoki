@@ -162,7 +162,14 @@ driver:
 claude --agent kitsoki-mcp-driver
 ```
 
-Codex users can follow the
+Codex users can launch the same driver through Kitsoki, with the studio MCP
+attached and shell access disabled:
+
+```sh
+kitsoki agent launch --agent kitsoki-mcp-driver --backend codex
+```
+
+The full runbook is the
 [Studio MCP dogfood recipe](recipes/studio-mcp-dogfood.md#run-a-pure-kitsoki-driver).
 
 ## Read next
