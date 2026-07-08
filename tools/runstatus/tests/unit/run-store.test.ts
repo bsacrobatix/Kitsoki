@@ -230,6 +230,63 @@ describe("useRunStore — live event appending", () => {
     expect(store.currentStatePath).toBe("root/done");
   });
 
+  it("ignores replayed live events that are already present from hydration", async () => {
+    let capturedCallback: ((e: TraceEvent) => void) | null = null;
+    const initial = SNAPSHOT.events[0]!;
+
+    const liveSource: DataSource = {
+      listSessions: () => Promise.resolve([SNAPSHOT.session]),
+      getSession: () => Promise.resolve(SNAPSHOT.session),
+      getApp: () => Promise.resolve(SNAPSHOT.app),
+      getMermaid: () => Promise.resolve(SNAPSHOT.mermaid),
+      getTrace: () => Promise.resolve({ events: [initial], last_turn: 1 }),
+      subscribe: (_sessionId, onEvent) => {
+        capturedCallback = onEvent;
+        return () => undefined;
+      },
+      ...writeStubs,
+    };
+
+    const store = useRunStore();
+    await store.hydrate(liveSource, "sess-1");
+
+    capturedCallback!({ ...initial, attrs: { ...initial.attrs } });
+
+    expect(store.events).toHaveLength(1);
+  });
+
+  it("keeps distinct events that share a turn", async () => {
+    let capturedCallback: ((e: TraceEvent) => void) | null = null;
+    const initial = SNAPSHOT.events[0]!;
+    const sameTurnDifferentEvent: TraceEvent = {
+      ...initial,
+      time: "2026-01-01T00:00:01.500Z",
+      msg: "machine.intent_accepted",
+      attrs: { intent: "continue" },
+    };
+
+    const liveSource: DataSource = {
+      listSessions: () => Promise.resolve([SNAPSHOT.session]),
+      getSession: () => Promise.resolve(SNAPSHOT.session),
+      getApp: () => Promise.resolve(SNAPSHOT.app),
+      getMermaid: () => Promise.resolve(SNAPSHOT.mermaid),
+      getTrace: () => Promise.resolve({ events: [initial], last_turn: 1 }),
+      subscribe: (_sessionId, onEvent) => {
+        capturedCallback = onEvent;
+        return () => undefined;
+      },
+      ...writeStubs,
+    };
+
+    const store = useRunStore();
+    await store.hydrate(liveSource, "sess-1");
+
+    capturedCallback!(sameTurnDifferentEvent);
+
+    expect(store.events).toHaveLength(2);
+    expect(store.events[1]!.msg).toBe("machine.intent_accepted");
+  });
+
   it("teardown calls the unsubscribe function", async () => {
     let unsubCalled = false;
     const src: DataSource = {
