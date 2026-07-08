@@ -261,9 +261,9 @@
           'iv__main--trace-collapsed': traceCollapsed,
           'iv__main--workbench': workbenchEnabled && !embed,
           'iv__main--workbench-vertical': workbenchEnabled && !embed && workbenchOrientation === 'vertical',
-          'iv__main--workbench-horizontal': workbenchEnabled && !embed && workbenchOrientation === 'horizontal',
-          'iv__main--devtools-bottom': workbenchEnabled && !embed && devtoolsDock === 'bottom',
-          'iv__main--devtools-floating': workbenchEnabled && !embed && devtoolsDock === 'floating',
+          'iv__main--workbench-horizontal': workbenchDevtoolsVisible && workbenchOrientation === 'horizontal',
+          'iv__main--devtools-bottom': workbenchDevtoolsVisible && devtoolsDock === 'bottom',
+          'iv__main--devtools-floating': workbenchDevtoolsVisible && devtoolsDock === 'floating',
         }"
         :style="workbenchMainStyle"
       >
@@ -508,7 +508,7 @@
         <!-- Embed (VS Code): nothing beside the chat — Trace and Graph open as
              their own dockable windows via "Kitsoki: Open Trace" / "Open Graph". -->
         <button
-          v-if="workbenchEnabled && !embed && !traceCollapsed && devtoolsDock === 'right' && workbenchOrientation === 'vertical'"
+          v-if="workbenchDevtoolsVisible && devtoolsDock === 'right' && workbenchOrientation === 'vertical'"
           type="button"
           class="iv__resize-handle iv__resize-handle--column iv__resize-handle--workbench-devtools"
           data-testid="devtools-workbench-resizer"
@@ -522,7 +522,7 @@
           @keydown="onWorkbenchDevtoolsWidthResizeKeydown"
         ></button>
         <button
-          v-if="workbenchEnabled && !embed && !traceCollapsed && (devtoolsDock === 'bottom' || workbenchOrientation === 'horizontal')"
+          v-if="workbenchDevtoolsVisible && (devtoolsDock === 'bottom' || workbenchOrientation === 'horizontal')"
           type="button"
           class="iv__resize-handle iv__resize-handle--row iv__resize-handle--workbench-devtools-row"
           data-testid="devtools-workbench-row-resizer"
@@ -536,7 +536,7 @@
           @keydown="onWorkbenchDevtoolsHeightResizeKeydown"
         ></button>
         <section
-          v-if="workbenchEnabled && !embed && !traceCollapsed && devtoolsDock !== 'floating'"
+          v-if="workbenchDevtoolsVisible && devtoolsDock !== 'floating'"
           class="iv__devtools"
           aria-label="Devtools"
           data-testid="media-devtools-pane"
@@ -588,7 +588,7 @@
         </section>
       </div>
       <section
-        v-if="workbenchEnabled && !embed && !traceCollapsed && devtoolsDock === 'floating'"
+        v-if="workbenchDevtoolsVisible && devtoolsDock === 'floating'"
         class="iv__floating-devtools"
         aria-label="Floating devtools"
         data-testid="floating-devtools-pane"
@@ -770,6 +770,9 @@ const workbenchDevtoolsWidthPercent = ref(
 const workbenchDevtoolsHeightPercent = ref(
   clamp(savedWorkbenchPrefs.devtoolsHeightPercent ?? WORKBENCH_DEVTOOLS_HEIGHT_DEFAULT, WORKBENCH_DEVTOOLS_HEIGHT_MIN, WORKBENCH_DEVTOOLS_HEIGHT_MAX),
 );
+const workbenchDevtoolsVisible = computed(
+  () => workbenchEnabled.value && !embed.value && !traceCollapsed.value,
+);
 
 // Opt-in decorative trace-column pet (off by default). Persisted in localStorage
 // so the choice sticks across reloads. See TracePet.vue.
@@ -877,7 +880,7 @@ const workbenchMainStyle = computed((): Record<string, string> => {
   if (!workbenchEnabled.value || embed.value) return {};
   const mediaTrack = `minmax(18rem, ${workbenchMediaWidthPercent.value}%)`;
   const chatTrack = "minmax(20rem, 1fr)";
-  if (devtoolsDock.value === "floating") {
+  if (!workbenchDevtoolsVisible.value || devtoolsDock.value === "floating") {
     return { gridTemplateColumns: `${mediaTrack} 0.55rem ${chatTrack}` };
   }
   if (devtoolsDock.value === "bottom" || workbenchOrientation.value === "horizontal") {

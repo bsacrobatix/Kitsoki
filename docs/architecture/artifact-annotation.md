@@ -15,6 +15,23 @@ contracts**, so kitsoki never learns a producer's internals:
   interactive producer that owns its own surface (the **slidey deck** — the
   reference example).
 
+## Operator workflow
+
+In a live browser session, annotation is reached from the media artifact itself:
+
+1. Click `Pin` on the artifact to keep it mounted beside the chat in the
+   [session media workbench](../web/session-media-workbench.md).
+2. Click `Annotate` on the pinned artifact.
+3. Point at the rendered artifact, then type the instruction for that spot.
+4. Click `Send` for a read-only anchored note, or `Send & refine` when the story
+   provided an `AnnotateIntent`.
+
+Pinning is not required for the anchor contract, but it is the ergonomic path for
+long-lived review: the artifact stays stable while chat, streaming replies,
+trace/graph devtools, and follow-up turns continue beside it. For plain video
+review, the media element also links to `/review`, where an operator can flag a
+time range and ask the older spatial oracle about the selected frame.
+
 ## The anchor union
 
 Every pick — a drawn box, a video time-range, a resolved DOM node, a slidey scene
