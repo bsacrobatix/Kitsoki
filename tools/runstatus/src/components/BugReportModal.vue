@@ -40,6 +40,10 @@ function statusOf(e: HarEntry): string {
   return s === undefined ? "—" : String(s);
 }
 
+function labelOf(e: HarEntry): string {
+  return e.comment || e.request?.url || "";
+}
+
 // --- replay (rrweb Replayer, lazy) ---
 //
 // We drive rrweb's own Replayer directly rather than the `rrweb-player` Svelte
@@ -211,7 +215,7 @@ function onCancel(): void {
         <header class="br-header">
           <span class="br-glyph">🐞</span>
           <span class="br-title">Review bug report</span>
-          <span class="br-depth">{{ harEntries.length }} RPC exchange(s)</span>
+          <span class="br-depth">{{ harEntries.length }} network exchange(s)</span>
         </header>
 
         <div class="br-body">
@@ -259,7 +263,7 @@ function onCancel(): void {
                 data-testid="bug-modal-har-row"
               >
                 <span class="br-method">{{ e.request?.method ?? "?" }}</span>
-                <span class="br-url">{{ e.request?.url ?? "" }}</span>
+                <span class="br-url">{{ labelOf(e) }}</span>
                 <span class="br-status">{{ statusOf(e) }}</span>
               </li>
               <li v-if="harEntries.length === 0" class="br-muted">

@@ -231,8 +231,84 @@ func TestBugReport_CaptureIDPath_WithEvidence(t *testing.T) {
 	}
 
 	// capture_id consumed: a second report with it falls back to fresh snapshot.
-	if _, ok := s.takeCapture(capID); ok {
+	if _, _, ok := s.takeCapture(capID); ok {
 		t.Fatalf("capture should be consumed by report")
+	}
+}
+
+func TestBugReport_CaptureIDPath_UsesBrowserHAR(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{recorder: bugTestRecorder(), bugRoot: root}
+	s.recorder.Record(
+		"POST", "/rpc",
+		map[string]string{"Content-Type": "application/json"},
+		[]byte(`{"jsonrpc":"2.0","method":"runstatus.sessions.list","params":{}}`),
+		200, map[string]string{"Content-Type": "application/json"},
+		[]byte(`{"jsonrpc":"2.0","result":[]}`),
+		time.Now().UTC(), 1.0,
+	)
+
+	browserHAR := `{
+	  "log": {
+	    "version": "1.2",
+	    "creator": {"name": "kitsoki-browser", "version": "1"},
+	    "entries": [{
+	      "startedDateTime": "2026-07-08T00:00:00Z",
+	      "time": 12,
+	      "comment": "json-rpc runstatus.session.turn",
+	      "request": {
+	        "method": "GET",
+	        "url": "https://example.test/api/items?token=super-secret-token",
+	        "headers": [{"name":"Authorization","value":"Bearer super-secret-token"}],
+	        "queryString": [{"name":"token","value":"super-secret-token"}]
+	      },
+	      "response": {
+	        "status": 503,
+	        "headers": [{"name":"Content-Type","value":"application/json"}],
+	        "content": {"size": 15, "mimeType": "application/json", "text": "{\"error\":\"bad\"}"}
+	      }
+	    }]
+	  }
+	}`
+	prev, rerr := s.bugPreview(map[string]any{"har_json": browserHAR})
+	if rerr != nil {
+		t.Fatalf("bugPreview error: %+v", rerr)
+	}
+
+	res, rerr := s.bugReport(map[string]any{
+		"title":       "Browser HAR flow",
+		"description": "Operator saw a browser request fail.",
+		"capture_id":  prev.(map[string]any)["capture_id"].(string),
+	})
+	if rerr != nil {
+		t.Fatalf("bugReport error: %+v", rerr)
+	}
+	id := res.(map[string]any)["id"].(string)
+
+	md, err := os.ReadFile(filepath.Join(root, ".artifacts", "issues", "bugs", id+".md"))
+	if err != nil {
+		t.Fatalf("read md: %v", err)
+	}
+	if !strings.Contains(string(md), "browser-observed network capture") {
+		t.Fatalf("md does not describe browser HAR source: %s", md)
+	}
+
+	harData, err := os.ReadFile(filepath.Join(root, ".artifacts", "issues", "bugs", id+".artifacts", "har.json"))
+	if err != nil {
+		t.Fatalf("read har.json: %v", err)
+	}
+	har := string(harData)
+	if !strings.Contains(har, "https://example.test/api/items") {
+		t.Fatalf("har.json missing browser URL: %s", har)
+	}
+	if strings.Contains(har, "\"url\": \"/rpc\"") {
+		t.Fatalf("har.json fell back to server /rpc recorder: %s", har)
+	}
+	if strings.Contains(har, "super-secret-token") {
+		t.Fatalf("har.json leaks token: %s", har)
+	}
+	if !strings.Contains(har, "[REDACTED]") {
+		t.Fatalf("har.json missing redaction: %s", har)
 	}
 }
 

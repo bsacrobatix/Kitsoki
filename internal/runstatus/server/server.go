@@ -107,8 +107,8 @@ import (
 )
 
 // bugRecorderCapacity is the number of most-recent /rpc request/response pairs
-// the HAR ring buffer retains for a bug report. Sized to comfortably cover the
-// interactions leading up to a "report a bug" click without unbounded growth.
+// retained for direct-call fallback bug reports. Browser reports prefer the
+// client-observed HAR submitted during runstatus.bug.preview.
 const bugRecorderCapacity = 256
 
 // defaultPollInterval is how often the SSE stream re-reads the trace for newly
@@ -203,9 +203,9 @@ type Server struct {
 	// POSTs its visual bundle. Always non-nil.
 	points *pointHandoff
 
-	// recorder is the HAR ring buffer capturing the last N /rpc request/response
-	// pairs. runstatus.bug.report snapshots + scrubs it into the bug's artifacts.
-	// Always non-nil.
+	// recorder is the fallback HAR ring buffer capturing the last N /rpc
+	// request/response pairs when no browser-observed HAR is supplied. Always
+	// non-nil.
 	recorder *harrec.Recorder
 
 	// bugRoot is the repo root under which runstatus.bug.report writes
