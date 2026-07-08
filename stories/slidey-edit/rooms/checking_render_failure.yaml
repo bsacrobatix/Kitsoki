@@ -35,7 +35,7 @@ states:
             - label: "look"
     on:
       troubleshoot:
-        - when: "hasPrefix(lower(world.last_error), 'host.slidey.render: validation exec:') || hasPrefix(lower(world.last_error), 'host.slidey.render: render exec:') || len(split(lower(world.last_error), 'slidey not found')) > 1 || len(split(lower(world.last_error), 'node_modules/')) > 1 || len(split(lower(world.last_error), 'referenceerror:')) > 1 || len(split(lower(world.last_error), 'require is not defined')) > 1 || len(split(lower(world.last_error), 'cannot find module')) > 1 || len(split(lower(world.last_error), 'error [err_require_esm]')) > 1 || len(split(lower(world.last_error), 'node.js v')) > 1"
+        - when: "hasPrefix(lower(world.last_error), 'host.slidey.render: validation exec:') || hasPrefix(lower(world.last_error), 'host.slidey.render: render exec:') || len(split(lower(world.last_error), 'slidey not found')) > 1 || len(split(lower(world.last_error), 'node_modules/')) > 1 || len(split(lower(world.last_error), 'referenceerror:')) > 1 || len(split(lower(world.last_error), 'require is not defined')) > 1 || len(split(lower(world.last_error), 'cannot find module')) > 1 || len(split(lower(world.last_error), 'error [err_require_esm]')) > 1 || len(split(lower(world.last_error), 'node.js v')) > 1 || (len(split(lower(world.last_error), 'enoent')) > 1 && len(split(lower(world.last_error), '.slidey.html')) > 1) || (len(split(lower(world.last_error), 'no such file or directory')) > 1 && len(split(lower(world.last_error), 'build-single.mjs')) > 1)"
           target: .
           effects:
             - set:
