@@ -13,7 +13,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/app"
-	"kitsoki/internal/codexcli"
 	"kitsoki/internal/host"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/webconfig"
@@ -86,6 +85,7 @@ const (
 	launchCodeactMCPToolName             = "mcp__kitsoki-codeact__codeact_eval"
 	launchCodeactDefaultCapabilitiesJSON = `{"fs":true,"vcs":"read"}`
 	launchCodexShellToolFeature          = "shell_tool"
+	launchCodexAppsFeature               = "apps"
 	launchStudioMCPDriverAgentName       = "kitsoki-mcp-driver"
 )
 
@@ -452,13 +452,14 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		planTools = append([]string(nil), decl.Tools...)
 	}
 	disableCodexShell := shouldDisableStandaloneCodexShell(opts.Mode, backend, opts.AgentName, agent)
-	cliArgs := buildLaunchClaudeArgs(decl, model, effort, permissionMode, opts.AddDirs)
-	cliArgs = appendCodexShellToolDisableArg(cliArgs, backend, disableCodexShell)
 	var cleanups []func()
 	mcpServers := agent.MCPServers
 	if opts.Mode == launchModeCodeact {
 		mcpServers = decl.MCP.Servers
 	}
+	disableCodexApps := shouldDisableCodexAppsForMCPServers(backend, mcpServers)
+	cliArgs := buildLaunchClaudeArgs(decl, model, effort, permissionMode, opts.AddDirs)
+	cliArgs = appendCodexShellToolDisableArg(cliArgs, backend, disableCodexShell)
 	if len(mcpServers) > 0 {
 		mcpConfigPath, cleanup, cfgErr := writeLaunchMCPConfigTempfile(mcpServers, "kitsoki-agent-launch-mcp")
 		if cfgErr != nil {
@@ -474,6 +475,7 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 	if interactive {
 		prompt := composeLaunchPrompt(decl.SystemPrompt, task)
 		extraArgs := appendCodexShellToolDisableArg(nil, backend, disableCodexShell)
+		extraArgs = appendCodexAppsDisableArg(extraArgs, backend, disableCodexApps)
 		command := append([]string{bin}, buildInteractiveCodexArgs(model, effort, workingDir, opts.AddDirs, mcpServers, extraArgs, prompt)...)
 		futureNotes := []string{
 			"Interactive Codex launch uses top-level `codex`, not `codex exec`, so it opens the TUI with the freestanding agent instructions as the initial prompt.",
@@ -648,7 +650,7 @@ func buildInteractiveCodexArgs(model, effort, workingDir string, addDirs []strin
 			args = append(args, "--add-dir", dir)
 		}
 	}
-	args = append(args, codexConfigArgsForMCPServers(mcpServers)...)
+	args = append(args, codexConfigArgsForMCPServers(mcpServers, workingDir)...)
 	args = append(args, extraArgs...)
 	if strings.TrimSpace(prompt) != "" {
 		args = append(args, prompt)
@@ -714,34 +716,32 @@ func composeLaunchPrompt(systemPrompt, task string) string {
 	}
 }
 
-func codexConfigArgsForMCPServers(mcpServers map[string]any) []string {
+func codexConfigArgsForMCPServers(mcpServers map[string]any, workingDir string) []string {
 	if len(mcpServers) == 0 {
 		return nil
 	}
-	names := make([]string, 0, len(mcpServers))
+	servers := make(map[string]host.CodexMCPServerConfig, len(mcpServers))
 	for name := range mcpServers {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	out := codexcli.MCPServerScopeArgs(names)
-	for _, name := range names {
 		server, ok := mcpServers[name].(map[string]any)
 		if !ok {
 			continue
 		}
-		base := "mcp_servers." + name + "."
+		cfg := host.CodexMCPServerConfig{}
 		if command, _ := server["command"].(string); strings.TrimSpace(command) != "" {
-			out = append(out, "-c", base+"command="+launchTOMLString(command))
+			cfg.Command = command
 		}
 		if args, ok := stringSliceFromAny(server["args"]); ok && len(args) > 0 {
-			out = append(out, "-c", base+"args="+launchTOMLStringArray(args))
+			cfg.Args = args
 		}
 		if env, ok := stringMapFromAny(server["env"]); ok && len(env) > 0 {
-			out = append(out, "-c", base+"env="+launchTOMLStringTable(env))
+			cfg.Env = env
 		}
+		if cwd, _ := server["cwd"].(string); strings.TrimSpace(cwd) != "" {
+			cfg.CWD = cwd
+		}
+		servers[name] = cfg
 	}
-	return out
+	return host.CodexMCPConfigArgsForServers(servers, workingDir)
 }
 
 type launchConfig struct {
@@ -888,6 +888,8 @@ func parseStandaloneCodexAgentTOML(src string) (standaloneCodexAgent, error) {
 				server["command"] = parseLaunchTOMLString(val)
 			case "args":
 				server["args"] = parseLaunchTOMLStringArray(val)
+			case "cwd":
+				server["cwd"] = parseLaunchTOMLString(val)
 			default:
 				return standaloneCodexAgent{}, fmt.Errorf("line %d: unsupported mcp server key %q", i+1, key)
 			}
@@ -1158,17 +1160,25 @@ func appendCodeactBackendArgs(args []string, mode, backend string) []string {
 	return appendCodexShellToolDisableArg(args, backend, mode == launchModeCodeact)
 }
 
-func appendCodexShellToolDisableArg(args []string, backend string, disable bool) []string {
-	if !disable || launchBackendName(backend) != "codex" {
+func appendCodexFeatureDisableArg(args []string, backend, feature string, disable bool) []string {
+	if !disable || launchBackendName(backend) != "codex" || strings.TrimSpace(feature) == "" {
 		return args
 	}
-	flag := "--disable=" + launchCodexShellToolFeature
+	flag := "--disable=" + feature
 	for _, arg := range args {
 		if arg == flag {
 			return args
 		}
 	}
 	return append(args, flag)
+}
+
+func appendCodexShellToolDisableArg(args []string, backend string, disable bool) []string {
+	return appendCodexFeatureDisableArg(args, backend, launchCodexShellToolFeature, disable)
+}
+
+func appendCodexAppsDisableArg(args []string, backend string, disable bool) []string {
+	return appendCodexFeatureDisableArg(args, backend, launchCodexAppsFeature, disable)
 }
 
 func shouldDisableStandaloneCodexShell(mode, backend, requestedName string, agent standaloneCodexAgent) bool {
@@ -1179,6 +1189,10 @@ func shouldDisableStandaloneCodexShell(mode, backend, requestedName string, agen
 		return true
 	}
 	return requestedName == launchStudioMCPDriverAgentName || agent.Name == launchStudioMCPDriverAgentName
+}
+
+func shouldDisableCodexAppsForMCPServers(backend string, mcpServers map[string]any) bool {
+	return launchBackendName(backend) == "codex" && len(mcpServers) > 0
 }
 
 func launchFutureNotes(mode string) []string {

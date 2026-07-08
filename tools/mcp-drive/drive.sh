@@ -189,8 +189,9 @@ run_once() {
     # Headless codex on ChatGPT subscription auth. The studio MCP is attached via
     # -c overrides (codex has no --mcp-config flag); --dangerously-bypass… is the
     # acceptEdits equivalent for unattended MCP calls — the orchestrator only
-    # clicks studio tools, and shell_tool is disabled below. --skip-git-repo-check:
-    # the cwd may be a worktree.
+    # clicks studio tools, shell_tool is disabled below, and app connectors are
+    # disabled so this scoped MCP launch does not inherit unrelated capabilities.
+    # --skip-git-repo-check: the cwd may be a worktree.
     #
     # Env propagation: codex does NOT forward the parent environment to MCP
     # subprocesses, so a worker that needs env (IS_SANDBOX so claude accepts
@@ -245,6 +246,7 @@ run_once() {
       --model "$MODEL" \
       --dangerously-bypass-approvals-and-sandbox \
       --disable=shell_tool \
+      --disable=apps \
       --skip-git-repo-check \
       "${codex_mcp_args[@]}" \
       --json
