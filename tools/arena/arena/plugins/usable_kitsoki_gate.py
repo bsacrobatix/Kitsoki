@@ -462,6 +462,8 @@ def _rollup_from_records(result: CellResult, records: list[Any], results_path: s
         for i, record in enumerate(records):
             for err in validator.iter_errors(record):
                 schema_errors.append(f"record[{i}]: {err.message}")
+    else:
+        schema_errors.extend(_fallback_record_schema_errors(records))
 
     if schema_errors:
         result.verdict = "blocked"
@@ -531,6 +533,43 @@ def _rollup_from_records(result: CellResult, records: list[Any], results_path: s
         f"silent_bounce={silent_bounce_count}, misroute_adjacent={misroute_adjacent_count}"
     )
     return result
+
+
+def _fallback_record_schema_errors(records: list[Any]) -> list[str]:
+    """Small required-field/type gate for minimal environments without jsonschema."""
+    required = {
+        "schema_version": str,
+        "scenario_id": str,
+        "persona": str,
+        "surface": str,
+        "source_completed": bool,
+        "candidate_completed": bool,
+        "silent_bounce": bool,
+        "misroute_adjacent": bool,
+        "evidence_refs": list,
+    }
+    errors: list[str] = []
+    for i, record in enumerate(records):
+        if not isinstance(record, dict):
+            errors.append(f"record[{i}]: expected object")
+            continue
+        for key, typ in required.items():
+            if key not in record:
+                errors.append(f"record[{i}]: {key!r} is a required property")
+                continue
+            if not isinstance(record[key], typ):
+                errors.append(f"record[{i}]: {key!r} has wrong type")
+        if record.get("schema_version") != "1.0.0":
+            errors.append(f"record[{i}]: schema_version must be '1.0.0'")
+        if record.get("surface") not in {"web", "tui", "mcp"}:
+            errors.append(f"record[{i}]: surface must be web, tui, or mcp")
+        refs = record.get("evidence_refs")
+        if isinstance(refs, list):
+            if len(refs) == 0:
+                errors.append(f"record[{i}]: evidence_refs must be non-empty")
+            elif not all(isinstance(ref, str) for ref in refs):
+                errors.append(f"record[{i}]: evidence_refs items must be strings")
+    return errors
 
 
 def _extract_results_path(stdout: str) -> str | None:

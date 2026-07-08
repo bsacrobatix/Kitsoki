@@ -29,6 +29,9 @@ host_handlers:
       run_initial:
         data: { exit_code: 0, ok: true, stdout: "ok\n" }
         delay: "10ms"
+      full_verify_run:
+        data: { exit_code: 0, ok: true, stdout: "ok\tfull suite\n" }
+        delay: "10ms"
   host.agent.decide:
     by_call:
       review-0:

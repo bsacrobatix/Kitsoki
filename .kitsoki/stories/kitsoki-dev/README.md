@@ -47,10 +47,14 @@ For repository-wide test repair, use the imported `fix-tests` loop directly:
 > fix tests             # core__go_fix_tests; runs make test by default
 ```
 
-That loop returns to `core.landing` only after the deterministic command is
-green and the read-only review gate confirms no tests were weakened and no
-functionality was lost. The default command is `make test`; override
-`test_cmd` in a warp/profile when a project needs a different gate.
+That loop uses a bounded quick gate for repair cycles, then returns to
+`core.landing` only after the full deterministic command is green and the
+read-only review gate confirms no tests were weakened and no functionality was
+lost. The full command is `make test`; the quick self-instance command is
+`go test -short -count=1 ./cmd/kitsoki ./internal/mcp/studio ./internal/host ./internal/app`
+with a 180 second timeout. `-count=1` keeps the quick gate from passing on stale
+Go test cache. Override `test_cmd`, `quick_test_cmd`, or the timeout fields in a
+warp/profile when a project needs a different gate.
 
 When the bugfix pipeline reaches `@exit:done`, dev-story hands off
 into `pr-refinement` (a.k.a. `core.pr.open_pr`). The PR is opened via
@@ -106,7 +110,7 @@ canned closed-loop tests:
 | Fixture                                  | What it proves                                                                  |
 |------------------------------------------|---------------------------------------------------------------------------------|
 | `flows/dogfood_smoke.yaml`               | the app loads; `iface.ticket.list_mine` resolves; navigation lifts work          |
-| `flows/fix_tests_autonomous.yaml`        | `core__go_fix_tests` runs make-test green plus review and returns to landing     |
+| `flows/fix_tests_autonomous.yaml`        | `core__go_fix_tests` runs quick/full make-test gates plus review and returns to landing |
 | `flows/idea_uses_context_workspace.yaml` | the idea/proposal room writes workspaces under `.context/designs`, not protected `docs/proposals/.workspace` |
 | `flows/pickup_self_bug_supervised.yaml`  | 18-turn supervised walk: ticket pick → bf 8-room → @exit:done → pr → @exit:merged → main |
 | `flows/pickup_story_bug_supervised.yaml` | same walk against `stories/oregon-trail/issues/bugs/<id>.md`; proves multi-glob coverage |

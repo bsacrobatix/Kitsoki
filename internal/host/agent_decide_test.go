@@ -24,8 +24,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"kitsoki/internal/host"
+	"kitsoki/internal/host/agentruntime"
 	"kitsoki/internal/store"
 )
 
@@ -349,6 +351,78 @@ func TestAgentDecide_StreamsToSink(t *testing.T) {
 	// Sink receives events; the stub doesn't produce JSONL so eventsReceived
 	// may be empty — the important part is no error path was taken.
 	_ = eventsReceived
+}
+
+func TestAgentDecide_SandboxPassedToRuntime(t *testing.T) {
+	t.Setenv(host.AgentBinEnv, "/bin/true")
+	schemaPath := makeSchemaFile(t)
+	workingDir := t.TempDir()
+	resultText := "Verdict:\n\n```json\n{\"verdict\":\"yes\"}\n```"
+	streamLine, err := json.Marshal(map[string]any{
+		"type":       "result",
+		"subtype":    "success",
+		"result":     resultText,
+		"session_id": "sess-decide-runtime",
+	})
+	if err != nil {
+		t.Fatalf("marshal stream line: %v", err)
+	}
+	fake := &agentruntime.Fake{
+		Backend:  "fake-fs",
+		Strength: agentruntime.StrengthFSConfined,
+		LaunchResult: agentruntime.Result{
+			Stdout: string(streamLine) + "\n",
+		},
+	}
+	sink := &memSink{}
+	ctx := host.WithAgentRuntimeRegistry(agentCtxForTest(sink), agentruntime.NewRegistry(fake))
+
+	res, err := host.AgentDecideHandler(ctx, map[string]any{
+		"prompt":      "Decide whether the reviewed diff is acceptable.",
+		"schema":      schemaPath,
+		"working_dir": workingDir,
+		"sandbox": map[string]any{
+			"min_strength": "fs_confined",
+			"repo":         "read_only",
+			"network":      "model_only",
+			"resources": map[string]any{
+				"timeout": "2m",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("expected no handler error; got %q", res.Error)
+	}
+	submitted, _ := res.Data["submitted"].(map[string]any)
+	if submitted["verdict"] != "yes" {
+		t.Fatalf("submitted verdict = %#v, want yes", submitted)
+	}
+	if len(fake.Seen) != 1 {
+		t.Fatalf("runtime launches = %d, want 1", len(fake.Seen))
+	}
+	seen := fake.Seen[0]
+	if seen.Resources.Timeout != 2*time.Minute {
+		t.Fatalf("runtime timeout = %v, want 2m", seen.Resources.Timeout)
+	}
+	if seen.Repo != agentruntime.RepoReadOnly {
+		t.Fatalf("runtime repo policy = %q, want read_only", seen.Repo)
+	}
+	if seen.Network != agentruntime.NetworkModelOnly {
+		t.Fatalf("runtime network policy = %q, want model_only", seen.Network)
+	}
+	if seen.Min != agentruntime.StrengthFSConfined {
+		t.Fatalf("runtime min strength = %q, want fs_confined", seen.Min)
+	}
+	if seen.Dir != workingDir {
+		t.Fatalf("runtime working dir = %q, want %q", seen.Dir, workingDir)
+	}
+	if !hasRuntimeEvent(sink.events, "agent.runtime.start", "fs_confined", 0) ||
+		!hasRuntimeEvent(sink.events, "agent.runtime.end", "fs_confined", 0) {
+		t.Fatalf("expected runtime start/end events, got %#v", sink.events)
+	}
 }
 
 // collectingSink collects StreamEvents for test assertions.

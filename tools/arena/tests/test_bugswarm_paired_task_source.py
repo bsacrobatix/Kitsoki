@@ -380,7 +380,9 @@ with tempfile.TemporaryDirectory() as tmp:
         timeout_calls.append({"cmd": cmd, "timeout": timeout, "env": env})
         raise subprocess.TimeoutExpired(cmd, timeout, output="", stderr="tool loop budget exceeded")
 
+    old_key = os.environ.get("SYNTHETIC_API_KEY")
     try:
+        os.environ["SYNTHETIC_API_KEY"] = "test-synthetic-key"
         runner_globals["subprocess"].run = fake_claude_timeout
         raw_timeout_result = runner_globals["dispatch_single_prompt"](
             SimpleNamespace(backend="claude", model="glm-5.2", treatment="single-briefed"),
@@ -390,6 +392,10 @@ with tempfile.TemporaryDirectory() as tmp:
         )
     finally:
         runner_globals["subprocess"].run = original_run
+        if old_key is None:
+            os.environ.pop("SYNTHETIC_API_KEY", None)
+        else:
+            os.environ["SYNTHETIC_API_KEY"] = old_key
 
     check("raw claude timeout is blocked", raw_timeout_result.get("blocked"), True)
     check("raw claude timeout budget call", timeout_calls[0]["timeout"], 900)

@@ -2511,7 +2511,7 @@ func checkAgentEffect(file, loc string, eff Effect, agents map[string]*AgentDecl
 	addErr := func(msg string) {
 		*errs = append(*errs, &ValidationError{File: file, Message: msg})
 	}
-	if shortVerb == "task" || shortVerb == "converse" {
+	if shortVerb == "task" || shortVerb == "converse" || shortVerb == "decide" {
 		if msg := validateSandboxBlock(loc, eff.With["sandbox"]); msg != "" {
 			addErr(msg)
 		}
@@ -2519,7 +2519,7 @@ func checkAgentEffect(file, loc string, eff Effect, agents map[string]*AgentDecl
 	if shortVerb == "codeact" {
 		if eff.With["sandbox"] != nil {
 			addErr(fmt.Sprintf(
-				"%s: sandbox: is not valid for host.agent.codeact — sandbox is a task/converse-only knob; codeact uses its own bounded-Starlark-loop sandboxing (internal/host/codeact)",
+				"%s: sandbox: is not valid for host.agent.codeact — sandbox is an external-agent subprocess knob; codeact uses its own bounded-Starlark-loop sandboxing (internal/host/codeact)",
 				loc,
 			))
 		}

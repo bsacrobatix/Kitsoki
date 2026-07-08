@@ -7,14 +7,17 @@ app:
 
 # A self-driving, operator-facing maintenance pipeline:
 #
-#   idle --start--> starting --> running --(red)--> fixing --> verifying --(red, retry)--> fixing
-#                                |                                |
-#                             (green)                          (green)
-#                                v                                v
-#                            reviewing <---------------------- reviewing
-#                                | pass                           | pass
-#                                v                                v
-#                            done_clean <------------------- done_clean
+#   idle --start--> starting --> running quick --(red)--> fixing --> verifying quick --(red, retry)--> fixing
+#                                      |                                      |
+#                                   (green)                                (green)
+#                                      v                                      v
+#                               full verify <--------------------------- full verify
+#                                      | green full gate
+#                                      v
+#                                  reviewing
+#                                      | pass
+#                                      v
+#                                  done_clean
 #                      |
 #                    fail, budget left
 #                      v
@@ -64,13 +67,19 @@ agents:
 world:
   # Configuration (defaults wired for this repo; overridable via the
   # `start` intent's slots).
-  test_cmd:       { type: string, default: "make test" }
-  workdir:        { type: string, default: "." }
-  max_cycles:     { type: int,    default: 3 }
+  # test_cmd is the authoritative full acceptance gate. quick_test_cmd is the
+  # bounded repair-loop gate; when empty it falls back to test_cmd.
+  test_cmd:                    { type: string, default: "make test" }
+  quick_test_cmd:              { type: string, default: "" }
+  quick_test_timeout_seconds:  { type: int,    default: 180 }
+  full_test_timeout_seconds:   { type: int,    default: 1200 }
+  workdir:                     { type: string, default: "." }
+  max_cycles:                  { type: int,    default: 3 }
 
   # Run state.
   cycle:          { type: int,    default: 0 }
   tests_passed:   { type: bool,   default: false }
+  effective_quick_test_cmd: { type: string, default: "" }
 
   # Background-job bookkeeping. last_job_id is bound from each background
   # invoke; last_job_result is engine-injected into the world only inside an
@@ -105,6 +114,9 @@ intents:
     priority: 90
     slots:
       test_cmd:   { type: string, required: false }
+      quick_test_cmd: { type: string, required: false }
+      quick_test_timeout_seconds: { type: int, required: false }
+      full_test_timeout_seconds: { type: int, required: false }
       max_cycles: { type: int,    required: false }
   look:
     description: "Re-render the current room."

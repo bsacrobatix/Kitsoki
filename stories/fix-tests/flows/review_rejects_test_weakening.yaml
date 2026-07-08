@@ -17,6 +17,9 @@ host_handlers:
       verify_run:
         data: { exit_code: 0, ok: true, stdout: "ok\n" }
         delay: "10ms"
+      full_verify_run:
+        data: { exit_code: 0, ok: true, stdout: "ok\tfull suite\n" }
+        delay: "10ms"
   host.agent.task:
     by_call:
       fix:

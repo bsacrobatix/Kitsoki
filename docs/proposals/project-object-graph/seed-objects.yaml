@@ -225,6 +225,9 @@ catalog:
       - id: source-web-inbox-feature
         kind: feature_catalog
         path: features/web-inbox.yaml
+      - id: source-operation-handles-feature
+        kind: feature_catalog
+        path: features/operation-handles.yaml
       - id: source-kitsoki-trace-pattern-matching-proposal
         kind: proposal
         path: docs/proposals/kitsoki-trace-pattern-matching.md
@@ -778,7 +781,7 @@ nodes:
     content_fields:
       title: Operator questions, forwarded
       tagline: Agent questions become blocking operator modals — never silent defaults.
-      summary: "When a dispatched agent agent asks a question, kitsoki parks the turn and forwards it to the operator: the web UI raises a hard modal with the agent's question and options (single- or multi-select), and the answer flows back to unblock the agent. No headless auto-resolution, no silent landmines."
+      summary: "When a dispatched agent agent asks a question, kitsoki parks the turn and forwards it to the operator: the web UI raises a hard modal with the agent's question, listed choices, and a custom-answer path for single-select prompts, and the answer flows back to unblock the agent. No headless auto-resolution, no silent landmines."
     promo:
       order: 40
     docs:
@@ -830,7 +833,7 @@ nodes:
           route: interactive
           target: operator-question-modal
           title: The agent has a question
-          body: The agent forwarded an AskUserQuestion. kitsoki surfaces it as a hard, blocking modal — no dismiss, no backdrop close — because a real agent goroutine is parked on the answer. The header names the question; below it are the agent's own options, verbatim.
+          body: The agent forwarded an AskUserQuestion. kitsoki surfaces it as a hard, blocking modal — no dismiss, no backdrop close — because a real agent goroutine is parked on the answer. The header names the question; below it are the agent's own options plus a custom-answer escape hatch for single-select prompts.
           placement: left
           kind: explain
           advance: next
@@ -840,27 +843,37 @@ nodes:
           route: interactive
           target: oq-option-0-0
           title: The agent's options
-          body: "Each option is exactly what the agent offered — its label and an optional description. This is a single-select question: the operator picks one path forward for the blocked agent."
+          body: "Each option is exactly what the agent offered — its label and an optional description. This is a single-select question: the operator can pick a listed path or use Custom answer when none of the choices quite fit."
           placement: right
           kind: explain
           advance: next
           waitForTarget: oq-option-0-0
           dwellMs: 5000
-        - id: oa-pick
+        - id: oa-custom-pick
           route: interactive
-          target: oq-option-0-0
-          title: Pick a path
-          body: Selecting an option arms the answer. The Send button stays disabled until every question has a selection — kitsoki never forwards a half-answer back to a parked agent.
+          target: oq-option-0-custom
+          title: Use a custom answer
+          body: When the listed choices are close but not right, Custom answer opens a small input inside the same modal. The agent is still blocked; the operator gets to send the precise instruction instead of forcing a bad option.
           placement: right
           kind: action
           advance: click-target
-          waitForTarget: oq-option-0-0
+          waitForTarget: oq-option-0-custom
           dwellMs: 4500
+        - id: oa-custom-type
+          route: interactive
+          target: oq-custom-answer-0
+          title: Type the missing instruction
+          body: "The custom field is gated just like the listed choices: Send answer stays disabled while it is empty, then enables once the operator types a concrete instruction. The answer still returns as a single string keyed by the original question."
+          placement: right
+          kind: explain
+          advance: next
+          waitForTarget: oq-custom-answer-0
+          dwellMs: 5000
         - id: oa-send
           route: interactive
           target: oq-submit
           title: Send the answer
-          body: Send answer echoes the operator's choice back to the backend keyed by the question_id, which unblocks the exact parked agent goroutine — and the modal dismisses. The agent resumes with the operator's decision.
+          body: Send answer echoes the operator's custom instruction back to the backend keyed by the question_id, which unblocks the exact parked agent goroutine — and the modal dismisses. The agent resumes with the operator's decision.
           placement: top
           kind: action
           advance: click-target
@@ -880,7 +893,7 @@ nodes:
           route: interactive
           target: oq-option-0-0
           title: Pick several
-          body: Toggle as many options as apply — the marks switch from radios to checkboxes. Multi-select answers travel back as a list, single-select as a single label.
+          body: Toggle as many options as apply — the marks switch from radios to checkboxes. Multi-select answers travel back as a list; single-select answers travel back as one string, whether it came from a listed label or custom text.
           placement: right
           kind: action
           advance: click-target
@@ -899,7 +912,7 @@ nodes:
         - id: oa-done
           route: interactive
           title: That's operator-ask forwarding
-          body: "You've seen the full round-trip: a dispatched agent forwards a question, kitsoki parks the agent turn and surfaces a blocking modal, the operator picks (single- or multi-select), and Send answer echoes the choice back to unblock the exact parked goroutine. The headless default would have let the agent guess on an empty answer — here a human decides the fork instead, and the runtime never moves until they do."
+          body: "You've seen the full round-trip: a dispatched agent forwards a question, kitsoki parks the agent turn and surfaces a blocking modal, the operator answers with a listed choice, custom text, or a multi-select list, and Send answer echoes that decision back to unblock the exact parked goroutine. The headless default would have let the agent guess on an empty answer — here a human decides the fork instead, and the runtime never moves until they do."
           placement: center
           kind: explain
           advance: next
@@ -930,6 +943,156 @@ nodes:
     edges:
       implements:
         - feature-operator-ask
+
+  - schema: graph/evidence/v0
+    id: evidence-operation-handles-tour
+    title: Operation handles deterministic video tour and flow fixture
+    status: current
+    visibility: public
+    evidence_kind: deterministic_demo
+    producers:
+      - tests/playwright/operation-handles-video.spec.ts
+    artifacts:
+      - artifactDir: operation-handles
+        videoBase: operation-handles-demo
+        posterStep: oh-running
+      - story: stories/operation-demo
+        flow: stories/operation-demo/flows/background_operation.yaml
+    sources:
+      - source-operation-handles-feature
+    edges:
+      demonstrates:
+        - feature-operation-handles
+      verifies: []
+
+  - schema: graph/feature/v0
+    id: feature-operation-handles
+    title: Operation handles
+    status: shipped
+    visibility: public
+    summary: Long-running work gets a visible handle, drive control, and artifact.
+    sources:
+      - source-operation-handles-feature
+    edges:
+      in_area:
+        - area-observability
+      requirements: []
+      use_cases: []
+      evidence:
+        - evidence-operation-handles-tour
+      proposed_by: []
+      implemented_by: []
+
+  - schema: graph/site-page/v0
+    id: sitepage-feature-operation-handles
+    title: Operation handles
+    status: shipped
+    visibility: public
+    content_fields:
+      title: Operation handles
+      tagline: Long-running work gets a visible handle, drive control, and artifact.
+      summary: "Autonomous and supervised background operations surface as first-class handles in the session UI: while work runs the banner shows status, mode, phase facts, and a Drive action; when it lands the same handle shows the terminal artifact. This demo uses a tiny no-LLM story so the running and completed states are deterministic."
+    promo:
+      order: 42
+    tour:
+      export: OPERATION_HANDLES_TOUR_STEPS
+      steps:
+        - id: oh-intro-home
+          route: home
+          title: Start at the story library
+          body: Every run begins here, in the story library. This tiny story exists only to show the operation handle lifecycle with no LLM and no external services.
+          placement: center
+          kind: explain
+          advance: next
+          waitForTarget: home-view
+          dwellMs: 4500
+        - id: oh-intro-story
+          route: home
+          target: story-card
+          title: The operation demo story
+          body: The story starts one background host call under an autonomous operation policy. The flow fixture delays that call so the UI can hold on the live handle before it completes.
+          placement: right
+          kind: explain
+          advance: next
+          waitForTarget: story-card
+          dwellMs: 4500
+        - id: oh-intro-start
+          route: home
+          target: new-session-btn
+          title: Spin up a run
+          body: Click New session to create an independently traced run and open the interactive session surface where the operation handle appears.
+          placement: right
+          kind: action
+          advance: route-match
+          advanceRoute: interactive
+          waitForTarget: new-session-btn
+          dwellMs: 3000
+        - id: oh-session
+          route: interactive
+          target: chat-section
+          title: The operator keeps the session
+          body: The normal session view stays usable. Starting the operation does not replace the conversation with a waiting screen; the handle lives above the transcript.
+          placement: left
+          kind: explain
+          advance: next
+          waitForTarget: chat-section
+          dwellMs: 4000
+        - id: oh-start
+          route: interactive
+          target: intent-btn-start
+          title: Start background work
+          body: Click start. The transition creates an operation run, then launches the delayed host call in the background.
+          placement: top
+          kind: action
+          advance: click-target
+          waitForTarget: intent-btn-start
+          dwellMs: 2500
+        - id: oh-running
+          route: interactive
+          target: operation-run-banner
+          title: A live operation handle
+          body: The banner is the progress handle. It names the operation, shows that it is running in the background, and includes compact facts such as mode, execution, phase, and route.
+          placement: bottom
+          kind: explain
+          advance: next
+          waitForTarget: operation-run-banner
+          dwellMs: 2500
+        - id: oh-drive
+          route: interactive
+          target: operation-run-drive
+          title: Drive when the policy allows it
+          body: Autonomous and supervised operations expose Drive. The button uses the same operation driver as CLI, TUI, runstatus RPC, and Studio MCP, so every surface advances the same handle contract.
+          placement: bottom
+          kind: explain
+          advance: next
+          waitForTarget: operation-run-drive
+          dwellMs: 2200
+        - id: oh-completed
+          route: interactive
+          target: chat-section
+          title: The handle lands with an artifact
+          body: When the background job completes, the same banner becomes the terminal handle. The status changes to completed and the report path is exposed as an artifact action.
+          placement: left
+          kind: explain
+          advance: next
+          dwellMs: 5000
+        - id: oh-done
+          route: interactive
+          title: That is operation handles
+          body: The operation had a visible running handle, a policy-gated Drive affordance, and a completed artifact link, all from a deterministic no-LLM background job.
+          placement: center
+          kind: explain
+          advance: next
+          dwellMs: 4500
+    sources:
+      - source-operation-handles-feature
+    edges:
+      presents:
+        - feature-operation-handles
+      has_media:
+        - evidence-operation-handles-tour
+      governed_by: []
+      changed_by: []
 
   - schema: graph/feature/v0
     id: feature-agent-actions
