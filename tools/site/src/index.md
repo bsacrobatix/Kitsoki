@@ -41,6 +41,10 @@ hero:
     <strong>How do I author and test stories?</strong>
     <span>Use the docs by task: story authoring, replay without live LLM spend, debugging, and architecture.</span>
   </a>
+  <a class="kpath" href="library/">
+    <strong>What extensions and stories ship today?</strong>
+    <span>Browse the build-time library generated from package sidecars, story manifests, and deterministic flow metadata.</span>
+  </a>
 </div>
 
 ## What changes

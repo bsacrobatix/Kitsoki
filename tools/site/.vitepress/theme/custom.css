@@ -531,3 +531,196 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* -- Extension Library ----------------------------------------------------- */
+.klib-hero,
+.klib-detail {
+  margin: 1rem 0 2rem;
+}
+.klib-eyebrow {
+  margin: 0 0 0.45rem;
+  color: var(--vp-c-brand-1);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.klib-hero h1,
+.klib-detail h1 {
+  margin: 0 0 0.8rem;
+  font-size: 2.25rem;
+  line-height: 1.1;
+  letter-spacing: 0;
+}
+.klib-hero p,
+.klib-lede {
+  max-width: 780px;
+  color: var(--vp-c-text-2);
+  font-size: 1.02rem;
+  line-height: 1.65;
+}
+.klib-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0 0;
+}
+.klib-stats span,
+.klib-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 999px;
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-2);
+  font-size: 0.78rem;
+  line-height: 1.2;
+  padding: 0.32rem 0.6rem;
+}
+.klib-stats strong {
+  color: var(--vp-c-text-1);
+  margin-right: 0.25rem;
+}
+.klib-section {
+  margin: 2rem 0;
+}
+.klib-section h2 {
+  margin-bottom: 1rem;
+}
+.klib-grid,
+.klib-docs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+  gap: 1rem;
+}
+.klib-card,
+.klib-doc,
+.klib-row,
+.klib-columns > div {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+}
+.klib-card {
+  display: block;
+  padding: 1rem;
+  text-decoration: none !important;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.klib-card:hover,
+.klib-row:hover {
+  border-color: var(--vp-c-brand-1);
+  transform: translateY(-1px);
+}
+.klib-card h3,
+.klib-doc h3 {
+  margin: 0.75rem 0 0.35rem;
+  padding: 0;
+  border: 0;
+  color: var(--vp-c-text-1);
+  font-size: 1rem;
+  line-height: 1.3;
+}
+.klib-card p,
+.klib-doc p {
+  margin: 0;
+  color: var(--vp-c-text-2);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.klib-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 1rem 0 0;
+}
+.klib-meta div {
+  min-width: 0;
+}
+.klib-meta dt {
+  color: var(--vp-c-text-3);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+.klib-meta dd {
+  margin: 0.1rem 0 0;
+  color: var(--vp-c-text-1);
+  font-weight: 700;
+}
+.klib-story-list {
+  display: grid;
+  gap: 0.55rem;
+}
+.klib-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  color: var(--vp-c-text-2);
+  text-decoration: none !important;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.klib-row strong,
+.klib-row small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.klib-row strong {
+  color: var(--vp-c-text-1);
+}
+.klib-row small {
+  margin-top: 0.15rem;
+  color: var(--vp-c-text-3);
+  font-size: 0.76rem;
+}
+.klib-row > span:last-child {
+  flex: none;
+  color: var(--vp-c-text-3);
+  font-size: 0.82rem;
+  text-align: right;
+}
+.klib-doc {
+  padding: 1rem;
+}
+.klib-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+  gap: 1rem;
+}
+.klib-columns > div {
+  padding: 1rem;
+}
+.klib-columns h3 {
+  margin: 0 0 0.6rem;
+  padding: 0;
+  border: 0;
+  font-size: 0.95rem;
+}
+.klib-compact {
+  max-height: 24rem;
+  overflow: auto;
+}
+.klib-columns ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+.klib-columns li {
+  margin: 0.2rem 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 720px) {
+  .klib-hero h1,
+  .klib-detail h1 {
+    font-size: 1.85rem;
+  }
+  .klib-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .klib-row > span:last-child {
+    text-align: left;
+  }
+}

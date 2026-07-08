@@ -15,6 +15,9 @@ import FeatureGrid from "./components/FeatureGrid.vue";
 import HeroDemo from "./components/HeroDemo.vue";
 import DeckGallery from "./components/DeckGallery.vue";
 import DeckViewer from "./components/DeckViewer.vue";
+import ExtensionLibrary from "./components/ExtensionLibrary.vue";
+import ExtensionPackage from "./components/ExtensionPackage.vue";
+import ExtensionStory from "./components/ExtensionStory.vue";
 import { renderMermaidDiagrams, watchMermaidTheme } from "./mermaid";
 import "./custom.css";
 
@@ -52,5 +55,8 @@ export default {
     app.component("HeroDemo", HeroDemo);
     app.component("DeckGallery", DeckGallery);
     app.component("DeckViewer", DeckViewer);
+    app.component("ExtensionLibrary", ExtensionLibrary);
+    app.component("ExtensionPackage", ExtensionPackage);
+    app.component("ExtensionStory", ExtensionStory);
   },
 } satisfies Theme;

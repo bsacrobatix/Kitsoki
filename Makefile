@@ -983,6 +983,7 @@ site-data: site-workspace
 site-stage: site-data
 	$(SITE_ENV) node $(SITE_DIR)/scripts/stage-docs.mjs
 	$(SITE_ENV) node $(SITE_DIR)/scripts/stage-media.mjs
+	$(SITE_ENV) node $(SITE_DIR)/scripts/stage-extensions.mjs
 
 site: site-deps site-stage
 	$(SITE_ENV) SITE_BASE=$(SITE_BASE) "$(SITE_VITEPRESS)" build "$(SITE_WORKSPACE)"
