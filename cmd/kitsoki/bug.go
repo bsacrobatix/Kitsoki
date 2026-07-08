@@ -53,6 +53,12 @@ var (
 	parseFrontmatter  = bugfile.ParseFrontmatter
 )
 
+const (
+	bugSinkLocalProject  = "local-project"
+	bugSinkLocalArtifact = "local-artifact"
+	bugSinkGitHub        = "github"
+)
+
 // bugCmd is the top-level `bug` subcommand.
 func bugCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -164,6 +170,7 @@ func bugCreateCmd() *cobra.Command {
 		traceRef    string
 		targetDir   string
 		githubRepo  string
+		sink        string
 		clockNowSec int64
 	)
 	cmd := &cobra.Command{
@@ -172,9 +179,14 @@ func bugCreateCmd() *cobra.Command {
 		Long: `Append a bug report to <target-root>/issues/bugs/.
 
 Target resolution:
-  --target story    writes under <--target-dir | $PWD>/issues/bugs/
-  --target kitsoki  writes under <--target-dir | $KITSOKI_REPO>/issues/bugs/
-                    (errors if neither flag nor env is set)
+  --sink local-project:
+    --target story    writes under <--target-dir | $PWD>/issues/bugs/
+    --target kitsoki  writes under <--target-dir | $KITSOKI_REPO>/issues/bugs/
+                      (errors if neither flag nor env is set)
+  --sink local-artifact:
+    writes the same markdown format under <resolved-target-root>/.artifacts/issues/bugs/
+  --sink github:
+    files on --github <owner/repo>
 
 Required:
   --target      story|kitsoki (no default — pick the surface that surprised you)
@@ -189,6 +201,7 @@ Optional:
   --severity    free-form severity tag; agent prompts use low|med|high
   --trace-ref   relative path to a trace file or a session id
   --target-dir  override the resolved target-root (escape hatch)
+  --sink        local-project|local-artifact|github
 
 Output: prints the path to the created file, relative to the
 resolved target-root. Exit 1 on error.`,
@@ -207,6 +220,10 @@ resolved target-root. Exit 1 on error.`,
 			}
 			if strings.TrimSpace(body) == "" {
 				return fmt.Errorf("--body is required")
+			}
+			sinkMode, err := resolveBugCreateSink(sink, githubRepo)
+			if err != nil {
+				return err
 			}
 			fmt.Fprintln(cmd.ErrOrStderr(), "bug privacy check: starting")
 			safeReport, privacy, perr := bugprivacy.Check(context.Background(), nil, bugprivacy.Report{
@@ -237,7 +254,7 @@ resolved target-root. Exit 1 on error.`,
 			// GitHub mode (--github owner/repo): file a real GitHub issue via the
 			// same host.GitHubFileBug path the web Report-bug RPC uses (text-only —
 			// the CLI captures no screenshot/HAR/rrweb), and print the issue URL.
-			if strings.TrimSpace(githubRepo) != "" {
+			if sinkMode == bugSinkGitHub {
 				ghBody := body
 				if len(reproSteps) > 0 {
 					var sb strings.Builder
@@ -265,6 +282,10 @@ resolved target-root. Exit 1 on error.`,
 				return nil
 			}
 
+			localRoot, displayPrefix, err := resolveBugLocalRoot(normTarget, targetDir, sinkMode)
+			if err != nil {
+				return err
+			}
 			req := BugCreateRequest{
 				Target:     normTarget,
 				Title:      title,
@@ -275,7 +296,7 @@ resolved target-root. Exit 1 on error.`,
 				Component:  component,
 				Severity:   severity,
 				TraceRef:   traceRef,
-				TargetDir:  targetDir,
+				TargetDir:  localRoot,
 				FiledBy:    os.Getenv("USER"),
 				Now:        now,
 				Warnf: func(format string, args ...any) {
@@ -286,7 +307,7 @@ resolved target-root. Exit 1 on error.`,
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), rel)
+			fmt.Fprintln(cmd.OutOrStdout(), displayBugPath(displayPrefix, rel))
 			return nil
 		},
 	}
@@ -302,10 +323,70 @@ resolved target-root. Exit 1 on error.`,
 	cmd.Flags().StringVar(&traceRef, "trace-ref", "", "path to a trace file or a session id")
 	cmd.Flags().StringVar(&targetDir, "target-dir", "", "override the resolved target-root (escape hatch)")
 	cmd.Flags().StringVar(&githubRepo, "github", "", "file a GitHub issue on this owner/repo instead of a local markdown file (requires GitHub auth; run `kitsoki gh-agent login`, set up a GitHub App token, or provide GH_TOKEN/GITHUB_TOKEN)")
+	cmd.Flags().StringVar(&sink, "sink", "", "filing sink: local-project (default), local-artifact, or github")
 	cmd.Flags().Int64Var(&clockNowSec, "clock-now", 0,
 		"Unix-seconds override for the filed-at timestamp (tests only; 0 = use real clock)")
 	_ = cmd.Flags().MarkHidden("clock-now")
 	return cmd
+}
+
+func normaliseBugSink(sink string) (string, error) {
+	switch strings.TrimSpace(sink) {
+	case "", bugSinkLocalProject, "local", "project":
+		return bugSinkLocalProject, nil
+	case bugSinkLocalArtifact, "artifact", "artifacts":
+		return bugSinkLocalArtifact, nil
+	case bugSinkGitHub:
+		return bugSinkGitHub, nil
+	default:
+		return "", fmt.Errorf("--sink must be local-project, local-artifact, or github (got %q)", sink)
+	}
+}
+
+func resolveBugCreateSink(sink, githubRepo string) (string, error) {
+	if strings.TrimSpace(sink) == "" && strings.TrimSpace(githubRepo) != "" {
+		return bugSinkGitHub, nil
+	}
+	mode, err := normaliseBugSink(sink)
+	if err != nil {
+		return "", err
+	}
+	if mode == bugSinkGitHub && strings.TrimSpace(githubRepo) == "" {
+		return "", fmt.Errorf("--sink github requires --github <owner/repo>")
+	}
+	if mode != bugSinkGitHub && strings.TrimSpace(githubRepo) != "" {
+		return "", fmt.Errorf("--github can only be used with --sink github")
+	}
+	return mode, nil
+}
+
+func resolveBugLocalSink(sink string) (string, error) {
+	mode, err := normaliseBugSink(sink)
+	if err != nil {
+		return "", err
+	}
+	if mode == bugSinkGitHub {
+		return "", fmt.Errorf("--sink github is not supported for local bug inspection")
+	}
+	return mode, nil
+}
+
+func resolveBugLocalRoot(target, targetDir, sink string) (root, displayPrefix string, err error) {
+	base, err := resolveTargetRoot(target, targetDir)
+	if err != nil {
+		return "", "", err
+	}
+	if sink == bugSinkLocalArtifact {
+		return filepath.Join(base, ".artifacts"), ".artifacts", nil
+	}
+	return base, "", nil
+}
+
+func displayBugPath(prefix, rel string) string {
+	if strings.TrimSpace(prefix) == "" {
+		return rel
+	}
+	return filepath.Join(prefix, rel)
 }
 
 func bugPrivacyFollowUpRoot(targetDir string) string {
@@ -330,6 +411,7 @@ func bugListCmd() *cobra.Command {
 	var (
 		target    string
 		targetDir string
+		sink      string
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -347,7 +429,11 @@ prints nothing and exits 0.`,
 			if err != nil {
 				return err
 			}
-			root, err := resolveTargetRoot(normTarget, targetDir)
+			sinkMode, err := resolveBugLocalSink(sink)
+			if err != nil {
+				return err
+			}
+			root, _, err := resolveBugLocalRoot(normTarget, targetDir, sinkMode)
 			if err != nil {
 				return err
 			}
@@ -399,6 +485,7 @@ prints nothing and exits 0.`,
 	}
 	cmd.Flags().StringVar(&target, "target", "", "bug target: story|kitsoki (required)")
 	cmd.Flags().StringVar(&targetDir, "target-dir", "", "override the resolved target-root (escape hatch)")
+	cmd.Flags().StringVar(&sink, "sink", "", "local inspection sink: local-project (default) or local-artifact")
 	return cmd
 }
 
@@ -407,6 +494,7 @@ func bugShowCmd() *cobra.Command {
 	var (
 		target    string
 		targetDir string
+		sink      string
 	)
 	cmd := &cobra.Command{
 		Use:   "show <id>",
@@ -424,7 +512,11 @@ with that id exists.`,
 			if err != nil {
 				return err
 			}
-			root, err := resolveTargetRoot(normTarget, targetDir)
+			sinkMode, err := resolveBugLocalSink(sink)
+			if err != nil {
+				return err
+			}
+			root, _, err := resolveBugLocalRoot(normTarget, targetDir, sinkMode)
 			if err != nil {
 				return err
 			}
@@ -443,6 +535,7 @@ with that id exists.`,
 	}
 	cmd.Flags().StringVar(&target, "target", "", "bug target: story|kitsoki (required)")
 	cmd.Flags().StringVar(&targetDir, "target-dir", "", "override the resolved target-root (escape hatch)")
+	cmd.Flags().StringVar(&sink, "sink", "", "local inspection sink: local-project (default) or local-artifact")
 	return cmd
 }
 

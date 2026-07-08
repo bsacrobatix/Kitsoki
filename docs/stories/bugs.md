@@ -58,6 +58,7 @@ symmetric on both sides.
 kitsoki bug create --target story|kitsoki \
   --title "one-line summary" \
   --body  "expected vs actual vs why it matters" \
+  [--sink local-project|local-artifact|github] \
   [--repro "step 1" --repro "step 2" ...] \
   [--state-path main.foyer]      # story-target only
   [--app-id    cloak]            # story-target only
@@ -66,8 +67,8 @@ kitsoki bug create --target story|kitsoki \
   [--trace-ref traces/2026-…jsonl] \
   [--target-dir <path>]          # escape hatch (overrides resolution)
 
-kitsoki bug list --target story|kitsoki [--target-dir <path>]
-kitsoki bug show <id>           --target story|kitsoki [--target-dir <path>]
+kitsoki bug list --target story|kitsoki [--sink local-project|local-artifact] [--target-dir <path>]
+kitsoki bug show <id>           --target story|kitsoki [--sink local-project|local-artifact] [--target-dir <path>]
 ```
 
 `--target` is **required** on every subcommand — the CLI never guesses
@@ -80,6 +81,14 @@ Target-root resolution:
   Bugs land at `<root>/issues/bugs/`.
 - `--target kitsoki`: root is `--target-dir` if set, else
   `$KITSOKI_REPO`. Errors when neither is set.
+- `--sink local-project` (default): use the target root above directly.
+- `--sink local-artifact`: write/read the same ticket format under
+  `<root>/.artifacts/issues/bugs/`. This is the preferred Kitsoki developer
+  loop for high-churn local findings and evidence that should not become
+  committed project tickets or GitHub issues.
+- `--sink github`: create a GitHub issue; `--github <owner/repo>` is required.
+  The local `list` / `show` commands inspect only `local-project` and
+  `local-artifact`.
 
 `--component` is a free-form string. The bug-reporter prompts suggest
 the canonical kitsoki package names (`tui`, `host`, `transport`,
