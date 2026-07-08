@@ -77,6 +77,8 @@ test("records a kitsoki xterm terminal demo", async ({ browser }) => {
         }
       }
 
+      await page.evaluate(() => document.getElementById("demo-caption")?.classList.remove("show"));
+      await dwell(page, 550);
       await shot(page, beat.id);
       await dwell(page, beat.holdMs ?? 4000);
       chapters.close();

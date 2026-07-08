@@ -43,6 +43,10 @@ function shell(line: string): string {
   return `${a.gray("$")} ${line}\n`;
 }
 
+function operatorInput(text: string): string {
+  return `${a.cyan("You")} ${a.gray("compose")} ${text}\n`;
+}
+
 function tuiHeading(title: string): string {
   return `${a.gray("┌─")} ${a.bold("kitsoki")} ${a.gray("────────────────────────────────────────────────────────────")}\n` +
     `${a.gray("│")}  ${a.cyan("dogfood-marathon")} ${a.gray("·")} ${a.bold(title)}\n` +
@@ -82,14 +86,15 @@ export const cast: Termcast = {
     {
       id: "start",
       label: "Start durable marathon",
-      caption: "Start a durable dogfood-marathon over GitHub and local bug sources",
-      sub: "profile=codex-native · model=gpt-5.5 · run_id=bug15",
+      caption: "Launch kitsoki cleanly, then ask the TUI to run the marathon",
+      sub: "one continuous operator session · no launch arguments",
       holdMs: 4200,
       chunks: [
-        { kind: "out", data: shell("go run ./cmd/kitsoki tui --story dogfood-marathon") },
+        { kind: "out", data: shell("kitsoki tui") },
         { kind: "out", data: tuiHeading("idle") },
-        { kind: "type", data: "start backlog_sources=github:constructorfabric/Kitsoki,github:bsacrobatix/Kitsoki,local:.artifacts/issues/bugs run_id=bug15 profile=codex-native model=gpt-5.5" },
-        { kind: "out", data: "\n\n" },
+        { kind: "out", data: `${a.bold("Ready.")} What should kitsoki work on?\n\n` },
+        { kind: "type", data: "Run a dogfood marathon over constructorfabric/Kitsoki, bsacrobatix/Kitsoki, and my local bug reports. Use the codex-native GPT-5.5 profile, limit it to 15 bugs, keep a durable journal, and only stop for serious questions." },
+        { kind: "out", data: `\n\n${operatorInput("Run a dogfood marathon over constructorfabric/Kitsoki, bsacrobatix/Kitsoki, and my local bug reports.")}\n` },
       ],
     },
     {
@@ -100,21 +105,19 @@ export const cast: Termcast = {
       holdMs: 6200,
       chunks: [
         { kind: "out", data: tuiHeading("intake") + captionPad },
-        { kind: "out", data: `${a.bold("Journal")}  .artifacts/dogfood-marathon/bug15/journal.json\n${a.bold("Limit")}    15\n${a.bold("Loaded")}   ${a.green("15 bugs")}\n\n` },
+        { kind: "out", data: `${a.bold("Story")}    dogfood-marathon\n${a.bold("Model")}    codex-native · GPT-5.5\n${a.bold("Journal")}  .artifacts/dogfood-marathon/bug15/journal.json\n${a.bold("Limit")}    15\n${a.bold("Loaded")}   ${a.green("15 bugs")}\n\n` },
         { kind: "out", data: bugRows() },
       ],
     },
     {
       id: "resume",
       label: "Resume-safe checkpoint",
-      caption: "Progress is durable: resume reloads the journal and continues from the saved index",
-      sub: "no lost work after restart",
+      caption: "The same TUI session shows the restart-safe journal without a second invocation",
+      sub: "progress is recorded after intake and every bug",
       holdMs: 4400,
       chunks: [
         { kind: "out", data: tuiHeading("processing") + captionPad },
-        { kind: "out", data: `${a.bold("Checkpoint")} intake ${a.gray("→")} journal written\n${a.bold("Resume test")} ${a.green("loaded_journal=true")}  case_index=0  processed=0\n\n` },
-        { kind: "type", data: "resume journal_path=.artifacts/dogfood-marathon/bug15/journal.json" },
-        { kind: "out", data: `\n${a.green("resumed")} .artifacts/dogfood-marathon/bug15/journal.json\n\n` },
+        { kind: "out", data: `${a.bold("Checkpoint")} intake ${a.gray("→")} journal written\n${a.bold("Journal")}    .artifacts/dogfood-marathon/bug15/journal.json\n${a.bold("Restart safe")} ${a.green("yes")}  next bug: 1 of 15  processed: 0\n${a.bold("Next")} continue autonomously unless a serious question is raised\n\n` },
       ],
     },
     {
@@ -139,8 +142,8 @@ export const cast: Termcast = {
         { kind: "out", data: tuiHeading("exception review") + captionPad },
         { kind: "out", data: `${a.yellow("LOCAL#063431")}  bugfix live run blocked: codex profile dispatches unauthenticated Claude Code agent\n` },
         { kind: "out", data: `${a.bold("Question")} codex-native requested, but the dispatch path attempted unauthenticated Claude Code.\n${a.bold("Journal")}  .artifacts/dogfood-marathon/bug15/journal.md\n\n` },
-        { kind: "type", data: "ack_exception" },
-        { kind: "out", data: `\n${a.green("acknowledged")} exception recorded; continuing from case_index=15\n\n` },
+        { kind: "type", data: "Record that as an operator checkpoint and continue the marathon report." },
+        { kind: "out", data: `\n\n${operatorInput("Record that as an operator checkpoint and continue the marathon report.")}${a.green("acknowledged")} exception recorded; continuing from the saved checkpoint at bug 15\n\n` },
       ],
     },
     {
