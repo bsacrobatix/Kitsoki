@@ -255,6 +255,7 @@ export const useRunStore = defineStore("run", () => {
   const appDef = ref<AppDef | null>(null);
   const mermaid = ref<MermaidSnapshot | null>(null);
   const events = ref<TraceEvent[]>([]);
+  const eventKeys = new Set<string>();
   const currentStatePath = ref<string>("");
   const selectedEventIndex = ref<number | null>(null);
   const terminal = ref<boolean>(false);
@@ -475,7 +476,7 @@ export const useRunStore = defineStore("run", () => {
       mermaid.value = mer;
       currentStatePath.value = session.current_state;
       terminal.value = session.terminal;
-      events.value = traceResult.events.slice();
+      replaceTraceEvents(traceResult.events);
       await loadHarness(source, sessionId);
     } finally {
       loading.value = false;
@@ -485,7 +486,7 @@ export const useRunStore = defineStore("run", () => {
     _unsubscribe = source.subscribe(
       sessionId,
       (e: TraceEvent) => {
-        events.value.push(e);
+        if (!appendTraceEvent(e)) return;
         applyStatePath(e);
         applyOperationTerminal(e);
         maybeRefreshViewOnBackgroundCompletion(source, sessionId, e);
@@ -585,7 +586,30 @@ export const useRunStore = defineStore("run", () => {
   }
 
   function traceEventKey(e: TraceEvent): string {
-    return JSON.stringify([e.turn, e.msg, e.state_path ?? "", e.attrs ?? {}]);
+    return JSON.stringify([
+      e.time,
+      e.level,
+      e.msg,
+      e.session_id,
+      e.turn,
+      e.state_path ?? "",
+      e.parent_turn ?? 0,
+      e.attrs ?? {},
+    ]);
+  }
+
+  function replaceTraceEvents(next: TraceEvent[]): void {
+    events.value = next.slice();
+    eventKeys.clear();
+    for (const e of events.value) eventKeys.add(traceEventKey(e));
+  }
+
+  function appendTraceEvent(e: TraceEvent): boolean {
+    const key = traceEventKey(e);
+    if (eventKeys.has(key)) return false;
+    eventKeys.add(key);
+    events.value.push(e);
+    return true;
   }
 
   function maxKnownTurn(): number {
@@ -607,12 +631,8 @@ export const useRunStore = defineStore("run", () => {
       });
       if (!fresh.length) return;
 
-      const seen = new Set(events.value.map(traceEventKey));
       for (const e of fresh) {
-        const key = traceEventKey(e);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        events.value.push(e);
+        if (!appendTraceEvent(e)) continue;
         applyStatePath(e);
         applyOperationTerminal(e);
       }
@@ -650,6 +670,7 @@ export const useRunStore = defineStore("run", () => {
     transcript.value = [];
     currentView.value = null;
     events.value = [];
+    eventKeys.clear();
     currentStatePath.value = "";
     terminal.value = false;
     connectionState.value = "connected";

@@ -976,35 +976,29 @@ interface PhaseSection {
 }
 
 const groupedPhases = computed<PhaseSection[]>(() => {
-  // Group by PHASE (not adjacency) so each phase header appears EXACTLY ONCE,
-  // even when a phase's work spans non-adjacent turns. A bugfix checkpoint
-  // spans two turns — entering a phase happens in turn N, accepting out of it
-  // in turn N+1 — and a phase can be revisited (proposing → testing →
-  // proposing), so a strict by-phase grouping is what keeps the right column
-  // parallel to the left (StateDiagram also shows each phase once).
-  //
-  // Section order follows the first turn group that resolves to each phase.
-  // Within a section, turn groups stay in their groupedTurns order (ascending
-  // turn, then event index), so the timeline reads chronologically within a
-  // phase.
-  const byPhase = new Map<string, PhaseSection>();
+  // Coalesce only ADJACENT groups with the same phase. A phase can be revisited
+  // later in a run (proposing -> testing -> proposing); grouping every same
+  // phase into one section makes that revisit render before intervening phases.
+  // The trace pane is an audit surface, so section order must follow event
+  // order even when that means the same phase label appears again later.
   const sections: PhaseSection[] = [];
   for (const group of groupedTurns.value) {
     const phase = phaseForStatePath(group.statePath);
     const key = phase ?? "—";
-    let section = byPhase.get(key);
-    if (!section) {
-      section = {
-        phaseKey: `phase:${phase ?? ""}:${sections.length}`,
-        phase,
-        turnGroups: [],
-        totalEvents: 0,
-      };
-      byPhase.set(key, section);
-      sections.push(section);
+    let section = sections[sections.length - 1];
+    if (section && section.phase === phase) {
+      section.turnGroups.push(group);
+      section.totalEvents += group.events.length;
+      continue;
     }
-    section.turnGroups.push(group);
-    section.totalEvents += group.events.length;
+
+    section = {
+      phaseKey: `phase:${key}:${sections.length}`,
+      phase,
+      turnGroups: [group],
+      totalEvents: group.events.length,
+    };
+    sections.push(section);
   }
   return sections;
 });
