@@ -21,10 +21,13 @@ the other:
   [`../tui/web-ui.md#meta-menu--report-bug`](../tui/web-ui.md#meta-menu--report-bug)
   for exactly what's captured and anonymized.
 
-Both land the same on-disk shape:
+Both local sinks land the same markdown shape:
 `issues/bugs/<id>.md` (+ a sibling `<id>.artifacts/` folder for evidence) —
 see [`../stories/bugs.md` §2–3](../stories/bugs.md) for the full layout and
-frontmatter contract.
+frontmatter contract. For high-churn Kitsoki developer iteration, prefer the
+artifact sink: `--sink local-artifact` writes that same tree under
+`.artifacts/issues/bugs/`, so findings and evidence are durable locally but are
+not committed or filed to GitHub.
 
 GitHub filing is optional and uses the same local auth setup across every
 surface. The easiest local setup requires GitHub CLI (`gh`) and uses its
@@ -72,6 +75,16 @@ kitsoki bug create --target story \
   --title "one-line summary" --body "expected vs actual vs why it matters"
 kitsoki bug list  --target story
 kitsoki bug show  <id> --target story
+```
+
+For local Kitsoki dogfood and iterative stabilization, keep the ticket out of
+the committed project tree:
+
+```
+kitsoki bug create --target story --sink local-artifact \
+  --title "one-line summary" --body "expected vs actual vs why it matters"
+kitsoki bug list  --target story --sink local-artifact
+kitsoki bug show  <id> --target story --sink local-artifact
 ```
 
 See [`../stories/bugs.md` §1](../stories/bugs.md#1-filing-a-bug) for the

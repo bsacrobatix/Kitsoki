@@ -257,6 +257,84 @@ func TestBugCreateCmd_WritesMarkdownFile(t *testing.T) {
 	require.Contains(t, body, "2. Press Esc")
 }
 
+func TestBugCreateCmd_LocalArtifactSinkWritesArtifactTicketRoot(t *testing.T) {
+	tmp := t.TempDir()
+	root := newRootCmd()
+	root.SetArgs([]string{
+		"bug", "create",
+		"--target", "story",
+		"--sink", "local-artifact",
+		"--title", "Report bug modal loops",
+		"--body", "Submitting a local report loops back to the review modal.",
+		"--severity", "P2",
+		"--target-dir", tmp,
+		"--clock-now", "1747130000",
+	})
+	var out, errBuf bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errBuf)
+
+	require.NoError(t, root.Execute())
+
+	relPath := strings.TrimSpace(out.String())
+	wantRel := filepath.Join(".artifacts", "issues", "bugs", "2025-05-13T095320Z-report-bug-modal-loops.md")
+	require.Equal(t, wantRel, relPath)
+
+	artifactRoot := filepath.Join(tmp, ".artifacts")
+	abs := filepath.Join(tmp, relPath)
+	contents, err := os.ReadFile(abs)
+	require.NoError(t, err)
+	require.Contains(t, string(contents), `title: "Report bug modal loops"`)
+
+	get, err := host.LocalFilesTicketHandler(context.Background(), map[string]any{
+		"op":   "get",
+		"root": artifactRoot,
+		"id":   "2025-05-13T095320Z-report-bug-modal-loops",
+	})
+	require.NoError(t, err)
+	require.Empty(t, get.Error)
+	require.Equal(t, "Report bug modal loops", get.Data["title"])
+	require.Equal(t, "P2", get.Data["severity"])
+
+	comment, err := host.LocalFilesTicketHandler(context.Background(), map[string]any{
+		"op":     "comment",
+		"root":   artifactRoot,
+		"id":     "2025-05-13T095320Z-report-bug-modal-loops",
+		"body":   "Confirmed while stabilizing locally.",
+		"author": "developer",
+	})
+	require.NoError(t, err)
+	require.Empty(t, comment.Error)
+
+	updated, err := os.ReadFile(abs)
+	require.NoError(t, err)
+	require.Contains(t, string(updated), "Confirmed while stabilizing locally.")
+
+	listRoot := newRootCmd()
+	listRoot.SetArgs([]string{
+		"bug", "list",
+		"--target", "story",
+		"--sink", "local-artifact",
+		"--target-dir", tmp,
+	})
+	var listOut bytes.Buffer
+	listRoot.SetOut(&listOut)
+	require.NoError(t, listRoot.Execute())
+	require.Contains(t, listOut.String(), "2025-05-13T095320Z-report-bug-modal-loops\tP2\topen\tReport bug modal loops")
+
+	showRoot := newRootCmd()
+	showRoot.SetArgs([]string{
+		"bug", "show", "2025-05-13T095320Z-report-bug-modal-loops",
+		"--target", "story",
+		"--sink", "local-artifact",
+		"--target-dir", tmp,
+	})
+	var showOut bytes.Buffer
+	showRoot.SetOut(&showOut)
+	require.NoError(t, showRoot.Execute())
+	require.Contains(t, showOut.String(), "Confirmed while stabilizing locally.")
+}
+
 func TestBugCreateCmd_PrivacySubstitutesHighEntropy(t *testing.T) {
 	tmp := t.TempDir()
 	secret := "mF9xQ2rT8vLp0AqZ7nByC4dEuGhJkM3sW6yI"
