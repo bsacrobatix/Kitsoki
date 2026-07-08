@@ -75,7 +75,7 @@ function deckRows(): string {
 
 export const cast: Termcast = {
   agent: "dogfood-marathon-tui",
-  title: "kitsoki tui — dogfood marathon bug15",
+  title: "kitsoki — dogfood marathon bug15",
   curtainTitle: "Kitsoki TUI  ·  dogfood marathon bug15",
   footer: "kitsoki · TUI tour · dogfood-marathon over 15 real bug references",
   badge: "TUI",
@@ -90,7 +90,7 @@ export const cast: Termcast = {
       sub: "one continuous operator session · no launch arguments",
       holdMs: 4200,
       chunks: [
-        { kind: "out", data: shell("kitsoki tui") },
+        { kind: "out", data: shell("kitsoki") },
         { kind: "out", data: tuiHeading("idle") },
         { kind: "out", data: `${a.bold("Ready.")} What should kitsoki work on?\n\n` },
         { kind: "type", data: "Run a dogfood marathon over constructorfabric/Kitsoki, bsacrobatix/Kitsoki, and my local bug reports. Use the codex-native GPT-5.5 profile, limit it to 15 bugs, keep a durable journal, and only stop for serious questions." },
