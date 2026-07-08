@@ -2,13 +2,13 @@
 # merge-to-main.sh <branch> - fast-forward <branch> into protected local main.
 #
 # The primary checkout keeps tracked source read-only so agents do implementation
-# work in .worktrees/* and only write the primary checkout during intentional
-# landings. This helper is that landing path: it lifts write permissions on the
-# exact files and directories changed by the fast-forward, runs the merge, then
-# restores the read-only guard.
+# work in managed clone-backed capsule workspaces and only write the primary
+# checkout during intentional landings. This helper is that landing path: it
+# lifts write permissions on the exact files and directories changed by the
+# fast-forward, runs the merge, then restores the read-only guard.
 #
 # It refuses non-fast-forward merges. Rebase or rebuild the branch in its
-# worktree first when main has advanced.
+# managed workspace first when main has advanced.
 #
 # Run from the primary checkout, while on main:
 #   scripts/merge-to-main.sh <branch>
@@ -94,7 +94,7 @@ if [ -z "$goal_dir" ] && [ -n "$change_id" ]; then
 fi
 
 if [ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ]; then
-  echo "error: run this in the primary checkout, not a linked worktree" >&2
+  echo "error: run this in the primary checkout, not a linked worktree or secondary checkout" >&2
   exit 1
 fi
 if [ "$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)" != "main" ]; then
@@ -106,7 +106,7 @@ if ! git rev-parse --verify --quiet "$branch" >/dev/null; then
   exit 1
 fi
 if ! git merge-base --is-ancestor HEAD "$branch"; then
-  echo "error: $branch is not a fast-forward of main; rebase it onto main in its worktree first" >&2
+  echo "error: $branch is not a fast-forward of main; rebase it onto main in its managed workspace first" >&2
   exit 1
 fi
 if [ -n "$(git status --porcelain)" ]; then

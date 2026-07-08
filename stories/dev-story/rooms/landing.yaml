@@ -280,8 +280,8 @@ states:
               hint:   "fix the picked bug, then open a pull request"
               intent: bugfix_open_pr
               when:   "world.ticket_id != ''"
-            - label:  "bugfix → worktree"
-              hint:   "fix the picked bug and leave the worktree for review"
+            - label:  "bugfix → workspace"
+              hint:   "fix the picked bug and leave the workspace for review"
               intent: bugfix_leave_worktree
               when:   "world.ticket_id != ''"
             - label:  "bugfix → local merge"
@@ -302,7 +302,7 @@ states:
               hint:   "drive the picked epic through the SDLC waterfall"
               intent: go_cypilot
             - label:  "git"
-              hint:   "status, sync, rebase, commit, merge, worktrees"
+              hint:   "status, sync, rebase, commit, merge, workspaces"
               intent: go_gitops
             - label:  "pr"
               hint:   "hand an open PR to pr-refinement"

@@ -1309,7 +1309,8 @@ single prefix-fallback handler dispatches `list` / `get` / `create` / `sync` /
 [`scripts/dev-workspace.sh`](../../scripts/dev-workspace.sh), which materializes
 clone-backed capsule workspaces under `<repo>/.capsules/workspaces/<id>`, writes
 the capsule/clone sentinels, and keeps git plumbing out of agents. Legacy linked
-worktree list/cleanup remains for old local checkouts.
+worktree list/cleanup remains for old local checkouts. The operator-facing
+lifecycle runbook is [`../dev-workspaces.md`](../dev-workspaces.md).
 
 `create` args:
 
