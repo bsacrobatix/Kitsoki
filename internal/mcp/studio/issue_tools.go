@@ -58,9 +58,11 @@ const defaultTraceLimit = 50
 const autonomousLabel = "source-autonomous"
 
 // IssueRequest is what the IssueFiler seam receives: the composed issue, ready
-// to file. Repo empty means "let the filer resolve it" (gh uses the cwd remote).
+// to file. Repo empty means "let the filer resolve it"; Root gives the filer a
+// checkout to inspect for that inference.
 type IssueRequest struct {
 	Repo   string
+	Root   string
 	Title  string
 	Body   string
 	Labels []string
@@ -131,6 +133,10 @@ type IssueCreateArgs struct {
 	Body   string   `json:"body,omitempty"`
 	Labels []string `json:"labels,omitempty"`
 	Repo   string   `json:"repo,omitempty"`
+	// RepoRoot is an optional checkout path used only to infer Repo from a git
+	// remote when Repo is omitted. When empty, issue.create infers it from the
+	// active handle or bound workspace.
+	RepoRoot string `json:"repo_root,omitempty"`
 
 	// Handle is a driving session whose evidence to bundle (and the default
 	// render target for assets that name neither a handle nor a spec).
@@ -164,9 +170,8 @@ type IssueCreateArgs struct {
 // When the wired filer fails (auth, network, a label/triage wall the
 // unlabelled-retry couldn't clear, …) the issue is NOT lost: the composed
 // markdown is written to the artifacts dir and LocalPath + FilingError are set
-// instead of URL/Number. OK stays true — the finding was captured somewhere a
-// human can recover it — so the agent's self-improvement loop never silently
-// drops a gap. The caller checks LocalPath to know it went to disk, not GitHub.
+// instead of URL/Number. OK is false because no remote issue was created; the
+// caller can still recover the markdown from LocalPath.
 type IssueCreateResult struct {
 	OK          bool               `json:"ok"`
 	URL         string             `json:"url"`
@@ -271,6 +276,7 @@ func (srv *Server) handleIssueCreate(
 	body = safeReport.Body
 	res, err := srv.issueFiler(ctx, IssueRequest{
 		Repo:   args.Repo,
+		Root:   srv.issueRepoRoot(args),
 		Title:  args.Title,
 		Body:   body,
 		Labels: labels,
@@ -285,7 +291,7 @@ func (srv *Server) handleIssueCreate(
 			return buildToolError(ErrBadRequest, fmt.Sprintf("issue.create: file issue: %v (and fallback write failed: %v)", err, werr)), nil, nil
 		}
 		return nil, IssueCreateResult{
-			OK:          true,
+			OK:          false,
 			Labels:      labels,
 			Assets:      assetPaths,
 			LocalPath:   localPath,
@@ -302,6 +308,27 @@ func (srv *Server) handleIssueCreate(
 		Assets:  assetPaths,
 		Privacy: &privacy,
 	}, nil
+}
+
+func (srv *Server) issueRepoRoot(args IssueCreateArgs) string {
+	if root := strings.TrimSpace(args.RepoRoot); root != "" {
+		return root
+	}
+	if args.Handle != "" {
+		if sh, err := srv.sess.ResolveSession(args.Handle); err == nil && sh.Runtime != nil && sh.Runtime.def != nil {
+			if root := strings.TrimSpace(sh.Runtime.def.BaseDir); root != "" {
+				return root
+			}
+		}
+	}
+	if wh, ok := srv.sess.Workspace(); ok {
+		if wh.Def != nil && strings.TrimSpace(wh.Def.BaseDir) != "" {
+			return wh.Def.BaseDir
+		}
+		dir, _ := splitWorkspacePath(wh.Dir)
+		return dir
+	}
+	return ""
 }
 
 func (srv *Server) issueRuntimeSnapshot(args IssueCreateArgs) reportmeta.Snapshot {

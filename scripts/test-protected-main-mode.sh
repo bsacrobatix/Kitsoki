@@ -129,6 +129,8 @@ mkdir -p "$merge_repo/scripts"
 cp "$script" "$merge_repo/scripts/protected-main-mode.sh"
 cp "$script_dir/merge-to-main.sh" "$merge_repo/scripts/merge-to-main.sh"
 chmod +x "$merge_repo/scripts/"*.sh
+git -C "$merge_repo" add scripts/protected-main-mode.sh scripts/merge-to-main.sh
+git -C "$merge_repo" commit -q -m "add scripts"
 
 commit_file "$merge_repo" src/app.txt source
 commit_file "$merge_repo" .context/note.md context
@@ -159,5 +161,51 @@ assert_readonly "$merge_repo/src/app.txt"
 assert_writable "$merge_repo/.context"
 assert_writable "$merge_repo/.context/note.md"
 touch "$merge_repo/.context/post-merge-note.md"
+
+race_repo="$tmp/race-repo"
+git_init "$race_repo"
+mkdir -p "$race_repo/scripts" "$race_repo/src"
+cp "$script" "$race_repo/scripts/protected-main-mode.sh"
+cp "$script_dir/merge-to-main.sh" "$race_repo/scripts/merge-to-main.sh"
+chmod +x "$race_repo/scripts/"*.sh
+git -C "$race_repo" add scripts/protected-main-mode.sh scripts/merge-to-main.sh
+git -C "$race_repo" commit -q -m "add scripts"
+commit_file "$race_repo" src/app.txt base
+git -C "$race_repo" branch -M main
+git -C "$race_repo" checkout -q -b feature
+printf '%s\n' feature > "$race_repo/src/app.txt"
+git -C "$race_repo" add src/app.txt
+git -C "$race_repo" commit -q -m "feature update"
+git -C "$race_repo" checkout -q main
+
+shim="$tmp/git-shim"
+mkdir -p "$shim"
+real_git="$(command -v git)"
+cat >"$shim/git" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "merge" ] && [ "${2:-}" = "--ff-only" ]; then
+  printf '%s\n' feature > src/app.txt
+  "$REAL_GIT" add src/app.txt
+  echo "fatal: update_ref failed for ref 'HEAD': cannot lock ref 'HEAD': is at race but expected base" >&2
+  exit 128
+fi
+exec "$REAL_GIT" "$@"
+SH
+chmod +x "$shim/git"
+
+set +e
+(
+  cd "$race_repo"
+  REAL_GIT="$real_git" PATH="$shim:$PATH" scripts/merge-to-main.sh feature
+) >"$tmp/race.out" 2>&1
+race_status=$?
+set -e
+[ "$race_status" -ne 0 ] || { echo "race simulation should fail" >&2; exit 1; }
+assert_contains "$tmp/race.out" "reset primary checkout index/worktree to HEAD"
+[ -z "$(git -C "$race_repo" status --short)" ] ||
+  { git -C "$race_repo" status --short >&2; exit 1; }
+[ "$(cat "$race_repo/src/app.txt")" = "base" ] ||
+  { echo "race failure left feature content in primary checkout" >&2; exit 1; }
 
 echo "merge-to-main protected-mode integration tests passed"

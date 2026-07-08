@@ -18,6 +18,7 @@ func ghIssueFiler(ctx context.Context, req studio.IssueRequest) (studio.IssueRes
 	args := map[string]any{
 		"op":     "create",
 		"repo":   req.Repo,
+		"root":   req.Root,
 		"title":  req.Title,
 		"body":   req.Body,
 		"labels": req.Labels,

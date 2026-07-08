@@ -70,6 +70,30 @@ func TestVCS_StatusDiffLogCommit(t *testing.T) {
 	assert.False(t, st.Clean)
 	require.NotEmpty(t, st.Files)
 
+	var diff struct {
+		Diff      string   `json:"diff"`
+		Warnings  []string `json:"warnings"`
+		Untracked []string `json:"untracked"`
+	}
+	res, err = callTool(ctx, cs, "vcs.diff", map[string]any{"dir": dir, "stat": true})
+	require.NoError(t, err)
+	decodeOK(t, res, &diff)
+	require.NotEmpty(t, diff.Warnings)
+	assert.Contains(t, diff.Warnings[0], "untracked")
+	assert.Contains(t, diff.Untracked, "b.txt")
+	assert.NotContains(t, diff.Diff, "b.txt", "default git diff output still omits untracked files")
+
+	diff = struct {
+		Diff      string   `json:"diff"`
+		Warnings  []string `json:"warnings"`
+		Untracked []string `json:"untracked"`
+	}{}
+	res, err = callTool(ctx, cs, "vcs.diff", map[string]any{"dir": dir, "stat": true, "include_untracked": true})
+	require.NoError(t, err)
+	decodeOK(t, res, &diff)
+	assert.Empty(t, diff.Warnings)
+	assert.Contains(t, diff.Diff, "b.txt", "include_untracked should surface newly written files in --stat")
+
 	// Commit it via vcs.commit.
 	var commit struct {
 		OK     bool   `json:"ok"`
@@ -168,6 +192,45 @@ func TestVCS_IntegratePreservesMainWork(t *testing.T) {
 	for _, w := range wl.Worktrees {
 		assert.NotEqual(t, wt.Path, w.Path, "integrated worktree should be removed")
 	}
+}
+
+func TestVCS_IntegrateUsesRepoMergeHelper(t *testing.T) {
+	ctx := context.Background()
+	dir := initRepo(t)
+	cs := newStudioNoWorkspace(ctx, t)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "scripts"), 0o755))
+	helper := filepath.Join(dir, "scripts", "merge-to-main.sh")
+	require.NoError(t, os.WriteFile(helper, []byte(`#!/usr/bin/env bash
+set -euo pipefail
+printf called > .git/helper-called
+git merge --ff-only "$1"
+`), 0o755))
+
+	var wt struct {
+		Path string `json:"path"`
+	}
+	res, err := callTool(ctx, cs, "worktree.create", map[string]any{"dir": dir, "branch": "feat/helper", "base": "main"})
+	require.NoError(t, err)
+	decodeOK(t, res, &wt)
+	require.NoError(t, os.WriteFile(filepath.Join(wt.Path, "helper.txt"), []byte("via helper\n"), 0o644))
+	res, err = callTool(ctx, cs, "vcs.commit", map[string]any{"dir": wt.Path, "message": "helper work"})
+	require.NoError(t, err)
+	require.False(t, res.IsError, contentText(res))
+
+	var integ struct {
+		Integrated bool   `json:"integrated"`
+		Commit     string `json:"commit"`
+		Refused    string `json:"refused"`
+	}
+	res, err = callTool(ctx, cs, "vcs.integrate", map[string]any{
+		"dir": dir, "branch": "feat/helper", "onto": "main", "message": "ignored by helper",
+	})
+	require.NoError(t, err)
+	decodeOK(t, res, &integ)
+	require.True(t, integ.Integrated, "helper should fast-forward main; refused=%s", integ.Refused)
+	assert.NotEmpty(t, integ.Commit)
+	assert.FileExists(t, filepath.Join(dir, ".git", "helper-called"), "repo merge helper should be invoked")
+	assert.FileExists(t, filepath.Join(dir, "helper.txt"))
 }
 
 func TestVCS_IntegrateRefusesGuards(t *testing.T) {

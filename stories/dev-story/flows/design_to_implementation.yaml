@@ -26,7 +26,7 @@ app: ../app.yaml
 initial_state: design_done
 initial_world:
   # Pin the engine-seeded session identity so the per-session-working-folder
-  # feature's worktree id (`impl-{ticket}-{session_id}`) is DETERMINISTIC in
+  # feature's workspace id (`impl-{ticket}-{session_id}`) is DETERMINISTIC in
   # flow mode and `expect_world` can assert it. seedSessionID only fills
   # session_id when absent, so this explicit value is preserved (it is the
   # documented deterministic-id seam; orchestrator.seedSessionID).
@@ -110,7 +110,7 @@ turns:
   # projected, so workspace provisioning and ticket fetch happen in one turn.
   # world_in: projects the proposal's ticket keys into impl__<key>, then
   # impl.idle.on_enter derives the workspace identity from the ticket and
-  # creates the worktree — so impl__workdir / impl__workspace_id /
+  # creates the managed capsule workspace — so impl__workdir / impl__workspace_id /
   # impl__feature_branch are PROVISIONED here, not seeded.
   - intent: { name: go_implementation, slots: {} }
     expect_state: impl.review_task_awaiting_reply
@@ -119,7 +119,7 @@ turns:
       impl__ticket_url:     "docs/proposals/per-session-working-folder.md"
       impl__workspace_id:   "impl-F-2026-06-11T120000Z-per-session-working-folder-flowsess"
       impl__feature_branch: "feature/F-2026-06-11T120000Z-per-session-working-folder-flowsess"
-      impl__workdir:        ".worktrees/impl-F-2026-06-11T120000Z-per-session-working-folder-flowsess"
+      impl__workdir:        ".capsules/workspaces/impl-F-2026-06-11T120000Z-per-session-working-folder-flowsess"
       impl__impl_provision_attempted: true
 
   - intent: { name: impl__accept, slots: {} }

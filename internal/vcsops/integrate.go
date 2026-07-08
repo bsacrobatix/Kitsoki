@@ -19,6 +19,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"kitsoki/internal/host"
@@ -61,6 +63,10 @@ func Integrate(ctx context.Context, dir, branch, onto, message string, opts Inte
 	}
 	if strings.TrimSpace(onto) == "" {
 		onto = "main"
+	}
+
+	if helper := mergeToMainHelper(dir, onto); helper != "" {
+		return integrateViaMergeHelper(ctx, dir, helper, branch, opts), nil
 	}
 
 	// Guard 1: dir must be ON onto.
@@ -115,6 +121,36 @@ func Integrate(ctx context.Context, dir, branch, onto, message string, opts Inte
 	return res, nil
 }
 
+func mergeToMainHelper(dir, onto string) string {
+	if onto != "main" {
+		return ""
+	}
+	helper := filepath.Join(dir, "scripts", "merge-to-main.sh")
+	if st, err := os.Stat(helper); err == nil && !st.IsDir() {
+		return "scripts/merge-to-main.sh"
+	}
+	return ""
+}
+
+func integrateViaMergeHelper(ctx context.Context, dir, helper, branch string, opts IntegrateOptions) Result {
+	out, exit, err := runCommand(ctx, dir, "bash", helper, branch)
+	if err != nil {
+		return Result{Integrated: false, Refused: fmt.Sprintf("repo guard helper %s failed to start: %v", helper, err)}
+	}
+	if exit != 0 {
+		return Result{Integrated: false, Refused: fmt.Sprintf("repo guard helper %s refused integration: %s", helper, strings.TrimSpace(out))}
+	}
+	commit, _, _ := RunGit(ctx, dir, "rev-parse", "HEAD")
+	res := Result{Integrated: true, Commit: strings.TrimSpace(commit)}
+	if opts.WorktreePath != "" {
+		_, _, _ = RunGit(ctx, dir, "worktree", "remove", "--force", opts.WorktreePath)
+	}
+	if opts.DeleteBranch {
+		_, _, _ = RunGit(ctx, dir, "branch", "-D", branch)
+	}
+	return res
+}
+
 func unmergedPaths(ctx context.Context, dir string) []string {
 	out, _, _ := RunGit(ctx, dir, "diff", "--name-only", "--diff-filter=U")
 	var paths []string
@@ -130,11 +166,15 @@ func unmergedPaths(ctx context.Context, dir string) []string {
 // returns combined stdout, the exit code, and an infra error (exec could not
 // start). A non-zero exit is data, not err.
 func RunGit(ctx context.Context, dir string, args ...string) (stdout string, exit int, err error) {
+	return runCommand(ctx, dir, "git", args...)
+}
+
+func runCommand(ctx context.Context, dir, cmd string, args ...string) (stdout string, exit int, err error) {
 	anyArgs := make([]any, len(args))
 	for i, a := range args {
 		anyArgs[i] = a
 	}
-	res, err := host.RunHandler(ctx, map[string]any{"cmd": "git", "args": anyArgs, "cwd": dir})
+	res, err := host.RunHandler(ctx, map[string]any{"cmd": cmd, "args": anyArgs, "cwd": dir})
 	if err != nil {
 		return "", -1, err
 	}
