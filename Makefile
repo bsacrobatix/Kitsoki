@@ -329,8 +329,9 @@ WEB_LOG_DIR  := .artifacts/logs
 WEB_LOG_KEEP := 10
 STAGING_BRANCH  ?= staging/local
 STAGING_CAPSULE ?= .capsules/staging/local
+STAGING_REFRESH_GATE ?= git diff --check
 
-.PHONY: ensure-staging-capsule test-staging web-dev-staging install-staging site-dev-staging
+.PHONY: ensure-staging-capsule refresh-staging staging-ready test-staging web-dev-staging install-staging site-dev-staging
 ensure-staging-capsule:
 	@test -f "$(STAGING_CAPSULE)/.kitsoki-capsule" -o -f "$(STAGING_CAPSULE)/.kitsoki-clone" || { \
 		echo "error: staging capsule not found at $(STAGING_CAPSULE)" >&2; \
@@ -342,17 +343,34 @@ ensure-staging-capsule:
 		git -C "$(STAGING_CAPSULE)" status --short --branch >&2; \
 		exit 1; \
 	}
+	@test "$$(git rev-parse "$(STAGING_BRANCH)")" = "$$(git -C "$(STAGING_CAPSULE)" rev-parse HEAD)" || { \
+		echo "error: $(STAGING_CAPSULE) is stale for $(STAGING_BRANCH)" >&2; \
+		echo "       run: make refresh-staging" >&2; \
+		echo "       branch:  $$(git rev-parse --short "$(STAGING_BRANCH)")" >&2; \
+		echo "       capsule: $$(git -C "$(STAGING_CAPSULE)" rev-parse --short HEAD)" >&2; \
+		exit 1; \
+	}
 
-test-staging: ensure-staging-capsule
+refresh-staging:
+	@if [ -n "$(strip $(STAGING_REFRESH_GATE))" ]; then \
+		scripts/refresh-staging-local.sh --staging-branch "$(STAGING_BRANCH)" --staging-capsule "$(STAGING_CAPSULE)" --gate "$(STAGING_REFRESH_GATE)"; \
+	else \
+		scripts/refresh-staging-local.sh --staging-branch "$(STAGING_BRANCH)" --staging-capsule "$(STAGING_CAPSULE)"; \
+	fi
+
+staging-ready: refresh-staging
+	@$(MAKE) --no-print-directory ensure-staging-capsule STAGING_BRANCH="$(STAGING_BRANCH)" STAGING_CAPSULE="$(STAGING_CAPSULE)"
+
+test-staging: staging-ready
 	$(MAKE) -C "$(STAGING_CAPSULE)" test
 
-web-dev-staging: ensure-staging-capsule
+web-dev-staging: staging-ready
 	$(MAKE) -C "$(STAGING_CAPSULE)" web-dev
 
-install-staging: ensure-staging-capsule
+install-staging: staging-ready
 	$(MAKE) -C "$(STAGING_CAPSULE)" install
 
-site-dev-staging: ensure-staging-capsule
+site-dev-staging: staging-ready
 	$(MAKE) -C "$(STAGING_CAPSULE)" site-dev
 
 web-dev:

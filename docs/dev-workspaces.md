@@ -154,7 +154,6 @@ scripts/dev-workspace.sh create --root .capsules/staging --id local --branch sta
 For day-to-day staging operations from the primary checkout:
 
 ```sh
-scripts/refresh-staging-local.sh
 make test-staging
 make web-dev-staging
 make site-dev-staging
@@ -166,9 +165,11 @@ make install-staging
 remote-sync steps, and stops; complete that sync and rerun the refresh. Once
 local `main` is current, the helper refreshes `.capsules/staging/local` from
 local `staging/local`, rebases it onto local `main`, and imports the refreshed
-`staging/local` ref back into the primary checkout. The Make targets run the
-corresponding command inside `.capsules/staging/local` and verify that the
-directory is a managed capsule on `staging/local`.
+`staging/local` ref back into the primary checkout. The Make targets call this
+refresh helper first, then verify that `.capsules/staging/local` is a managed
+capsule at the current `staging/local` head before running the corresponding
+command inside it. To refresh without running a staging command, use
+`make refresh-staging`.
 
 If a workspace merge rebase conflicts, resolve it inside that managed workspace,
 rerun the focused validation, then rerun `merge`. If a staging refresh rebase

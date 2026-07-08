@@ -16,6 +16,7 @@ DEFAULT_STAGING_BRANCH="staging/local"
 DEFAULT_STAGING_CAPSULE=".capsules/staging/local"
 CAPSULE_SENTINEL=".kitsoki-capsule"
 CLONE_SENTINEL=".kitsoki-clone"
+LOCAL_CONFIG=".kitsoki.local.yaml"
 
 base="$DEFAULT_BASE"
 remote="$DEFAULT_REMOTE"
@@ -74,6 +75,14 @@ ensure_managed_capsule() {
   if [ ! -f "$dir/$CAPSULE_SENTINEL" ] && [ ! -f "$dir/$CLONE_SENTINEL" ]; then
     die "staging capsule is not managed: $dir (missing $CAPSULE_SENTINEL or $CLONE_SENTINEL)"
   fi
+}
+
+copy_local_config() {
+  local src="$repo_root/$LOCAL_CONFIG"
+  local dst="$staging_capsule/$LOCAL_CONFIG"
+  [ -f "$src" ] || return 0
+  cp -p "$src" "$dst"
+  echo "refresh-staging-local: copied $LOCAL_CONFIG into staging capsule" >&2
 }
 
 while [ "$#" -gt 0 ]; do
@@ -213,6 +222,8 @@ git -C "$staging_capsule" rebase "source/$staging_branch"
 
 echo "refresh-staging-local: rebasing staging capsule onto source/$base" >&2
 git -C "$staging_capsule" rebase "source/$base"
+
+copy_local_config
 
 if [ -n "$gate" ]; then
   echo "refresh-staging-local: running gate in $staging_capsule: $gate" >&2
