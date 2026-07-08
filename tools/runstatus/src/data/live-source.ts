@@ -1062,11 +1062,16 @@ export class LiveSource implements DataSource {
    * session id; the server fails fast with a structured error on an invalid
    * story so the UI can surface it before navigating.
    */
-  newSession(storyPath: string): Promise<string> {
+  newSession(
+    storyPath: string,
+    opts: { initialWorld?: Record<string, unknown> } = {}
+  ): Promise<string> {
+    const params: Record<string, unknown> = { story_path: storyPath };
+    if (opts.initialWorld && Object.keys(opts.initialWorld).length > 0) {
+      params.initial_world = opts.initialWorld;
+    }
     return this.client
-      .post<{ session_id: string }>("runstatus.session.new", {
-        story_path: storyPath,
-      })
+      .post<{ session_id: string }>("runstatus.session.new", params)
       .then((r) => r.session_id);
   }
 

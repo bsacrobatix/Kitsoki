@@ -4,6 +4,7 @@ import RunView from "./views/RunView.vue";
 import InteractiveView from "./views/InteractiveView.vue";
 import EditorPage from "./views/EditorPage.vue";
 import ReviewPage from "./views/ReviewPage.vue";
+import StartBugfixView from "./views/StartBugfixView.vue";
 import { installKitRoutes } from "./kits/kitLoader.js";
 
 const router = createRouter({
@@ -14,6 +15,7 @@ const router = createRouter({
     // single-session SessionList is subsumed by HomeView's active-sessions
     // section.)
     { path: "/", component: HomeView },
+    { path: "/start/bugfix", component: StartBugfixView },
     { path: "/s/:sessionId", component: RunView, props: true },
     // The chat route also honours an optional `?notif=<id>` query param (a
     // shareable inbox deep-link): InteractiveView teleports to that

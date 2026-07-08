@@ -409,6 +409,30 @@ describe("LiveSource", () => {
     expect(body.params.story_path).toBe("/abs/story/app.yaml");
   });
 
+  it("newSession forwards initialWorld when supplied", async () => {
+    fetchMock.mockResolvedValueOnce(rpcOk({ session_id: "sess-seeded" }));
+    const src = new LiveSource("/");
+    const id = await src.newSession("/abs/story/app.yaml", {
+      initialWorld: {
+        ticket_source_ref: ".artifacts/issues/bugs/B-123.md",
+        oversight_mode: "no-gate",
+      },
+    });
+    expect(id).toBe("sess-seeded");
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+    ) as {
+      method: string;
+      params: { story_path: string; initial_world: Record<string, unknown> };
+    };
+    expect(body.method).toBe("runstatus.session.new");
+    expect(body.params.story_path).toBe("/abs/story/app.yaml");
+    expect(body.params.initial_world).toEqual({
+      ticket_source_ref: ".artifacts/issues/bugs/B-123.md",
+      oversight_mode: "no-gate",
+    });
+  });
+
   it("getTranscript calls runstatus.session.transcript and maps schema_version", async () => {
     fetchMock.mockResolvedValueOnce(
       rpcOk({

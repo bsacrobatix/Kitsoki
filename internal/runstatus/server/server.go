@@ -31,7 +31,7 @@
 //	runstatus.setup.status       {}                                  → {warnings}
 //	runstatus.kits.list          {}                                  → []KitHeader (S3b/c)
 //	kit.<kit>.<iface>.<op>       {...}                                → kit endpoint result (S3b fallback)
-//	runstatus.session.new        {story_path}                        → {session_id}
+//	runstatus.session.new        {story_path, initial_world?}        → {session_id}
 //	runstatus.session.reload     {session_id}                        → {ok, prev_state_exists}
 //	runstatus.session.staleness  {session_id}                        → {stale, diff}
 //	runstatus.sessions.list      {}                                  → []SessionHeader
@@ -890,7 +890,18 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if storyPath == "" {
 			return nil, &rpcError{Code: codeServerError, Message: "session.new: missing 'story_path'"}
 		}
-		sid, err := s.provider.NewSession(ctx, storyPath)
+		initialWorld, hasInitialWorld := params["initial_world"].(map[string]any)
+		var sid string
+		var err error
+		if hasInitialWorld && len(initialWorld) > 0 {
+			seeded, ok := s.provider.(SeededSessionProvider)
+			if !ok {
+				return nil, readOnlyErr(method)
+			}
+			sid, err = seeded.NewSessionSeeded(ctx, storyPath, initialWorld)
+		} else {
+			sid, err = s.provider.NewSession(ctx, storyPath)
+		}
 		if err != nil {
 			// An invalid story is surfaced as a structured error so the UI can
 			// show it before navigating (decided lean).

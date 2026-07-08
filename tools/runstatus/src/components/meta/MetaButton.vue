@@ -168,6 +168,17 @@
         >
           [open]
         </button>
+        <a
+          v-if="bugfixHref"
+          class="meta-launcher__toast-link"
+          data-testid="bug-toast-bugfix"
+          :href="bugfixHref"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open a new autonomous bugfix session for this bug"
+        >
+          [fix]
+        </a>
         <button
           class="meta-launcher__toast-link"
           data-testid="bug-toast-dismiss"
@@ -293,6 +304,18 @@ const bugReportHint = computed(() =>
 const filedTarget = computed(
   () => bugReport.filed?.url || bugReport.filed?.path || ""
 );
+const bugfixHref = computed(() => {
+  const filed = bugReport.filed;
+  if (!filed) return "";
+  const source = filed.url || filed.path || "";
+  if (!source) return "";
+  const query = new URLSearchParams();
+  query.set("id", filed.id);
+  if (filed.path) query.set("path", filed.path);
+  if (filed.url) query.set("url", filed.url);
+  query.set("title", bugReport.title || filed.id);
+  return `#/start/bugfix?${query.toString()}`;
+});
 const privacyStatus = computed(() => {
   const privacy = bugReport.filed?.privacy;
   if (!privacy) return "";
