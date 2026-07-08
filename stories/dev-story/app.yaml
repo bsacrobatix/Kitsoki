@@ -433,6 +433,9 @@ world:
   # ── Ticket search / pickup ────────────────────────────────────────
   ticket_query:        { type: string, default: "" }
   ticket_results:      { type: string, default: "" }
+  ticket_provider_errors: { type: list, default: [] }
+  ticket_local_count:  { type: int,    default: 999 }
+  ticket_github_count: { type: int,    default: 999 }
   ticket_id:           { type: string, default: "" }
   ticket_title:        { type: string, default: "" }
   ticket_url:          { type: string, default: "" }
@@ -783,7 +786,8 @@ world:
   design_workspace_root_resolved: { type: string, default: "" }               # runtime bind: non-empty once resolve_durable_path has run (once: gate; see design_search.yaml)
   design_doc_filename:   { type: string, default: "" }                        # fixed DESIGN filename for an external target (e.g. "DESIGN"); "" ⇒ slug-named
   design_ticket_dir:     { type: string, default: "issues/features" }         # where the linking feature ticket is minted; "" ⇒ skip (external target)
-  ticket_repo:           { type: string, default: "" }                        # owner/repo for GitHub-issue tickets; non-empty ⇒ feature publish mints a GitHub issue instead of a local file (slice #3). kitsoki-dev defaults this to the symbolic `origin` (host.gh.ticket resolves it against `git remote get-url origin`).
+  ticket_repo:           { type: string, default: "" }                        # selected GitHub issue repo for the active ticket; empty keeps local ticket close-out local.
+  ticket_github_repo:    { type: string, default: "" }                        # optional owner/repo or remote name used by combined ticket search for the GitHub section; falls back to ticket_repo for GitHub-only instances.
 
   # ── Ideas reviewer (rooms/ideas.yaml) ─────────────────────────────
   # The backlog reconciler: reads world.ideas_path, the commit history, and the

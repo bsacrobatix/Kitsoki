@@ -2174,9 +2174,11 @@ tour recorder mirrors the JSON shape in
 ## host.gh.ticket — GitHub Issues-backed tracker
 
 The `ticket` host_interface backed by the native GitHub REST API. It mirrors the
-file-backed `host.local_files.ticket` surface so the dogfood app
-(`.kitsoki/stories/kitsoki-dev`) rebinds `iface.ticket → host.gh.ticket` without
-touching room YAML. Auth uses `GH_TOKEN` / `GITHUB_TOKEN`, including tokens
+file-backed `host.local_files.ticket` surface so dev-story instances can rebind
+`iface.ticket → host.gh.ticket` without touching room YAML. The dogfood
+`kitsoki-dev` instance uses `host.local_github.ticket` instead, which calls local
+artifact tickets and this GitHub provider as two sections of one selector. Auth
+uses `GH_TOKEN` / `GITHUB_TOKEN`, including tokens
 minted by the GitHub App path for headless runs. Every op degrades cleanly (a
 `Result.Error`, not a crash) when auth or transport fails, so rooms route the
 `on_error:` arc. Tests inject a fake HTTP API; no real GitHub or local `gh`
@@ -2194,13 +2196,14 @@ binary is required. Implementation:
 | `transition` | `PATCH /repos/{owner}/{repo}/issues/{number}` | `{ok}` |
 | `list_mine` | `GET /search/issues` with `assignee:` (newest-first) | `{tickets: […]}` |
 
-**Repo pin.** Every call takes a `repo` arg (`owner/repo`). The dogfood instance
-(`.kitsoki/stories/kitsoki-dev/app.yaml`) defaults `ticket_repo` to the symbolic
-`origin`, which `host.gh.ticket` resolves against `git remote get-url origin` —
-so the queue targets the repo you cloned (a fork like `bsacrobatix/Kitsoki`, or
-the canonical `constructorfabric/Kitsoki`) rather than a hardcoded slug. The
-slug is data, not a Go constant: pin an explicit `owner/repo`, or override the
-world key per-session, to retarget a fork-of-a-fork or downstream project.
+**Repo pin.** Every call takes a `repo` arg (`owner/repo`). Direct GitHub-backed
+instances use `ticket_repo`; the dogfood composite selector uses
+`ticket_github_repo`, defaulting to symbolic `origin`, which `host.gh.ticket`
+resolves against `git remote get-url origin`. The queue targets the repo you
+cloned (a fork like `bsacrobatix/Kitsoki`, or the canonical
+`constructorfabric/Kitsoki`) rather than a hardcoded slug. The slug is data, not
+a Go constant: pin an explicit `owner/repo`, or override the world key
+per-session, to retarget a fork-of-a-fork or downstream project.
 
 **External repo binding (onboarding passthrough).** Project onboarding
 (`stories/dev-story/scripts/init_discover.py` + `init_apply.py`) closes the

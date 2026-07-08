@@ -55,7 +55,7 @@ host_handlers:
     data: { ok: true, sha: "abc123", diff: "", url: "https://example/pr/auto", pr_id: "auto", state: "success", checks: "", comments: "" }
   host.local:
     data: { ok: true, log: "PASS: 12 tests", passed: 12, failed: 0, state: "success" }
-  host.gh.ticket:
+  host.local_github.ticket:
     data: { ok: true, tickets: "" }
   # Confident verdict at every checkpoint. The `intent: "accept"`
   # field is the BARE name a real LLM produces; the dispatcher's

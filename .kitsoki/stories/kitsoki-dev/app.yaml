@@ -1,8 +1,9 @@
 # kitsoki-dev — the dogfood instance.
 #
 # The dogfood default: kitsoki works on kitsoki through its own UI, with local
-# artifact bug files as both tickets and conversation logs. GitHub Issues remain
-# available for autonomous/public intake by overriding the ticket binding/repo.
+# artifact bug files as both tickets and conversation logs. GitHub Issues are
+# shown beside those local artifacts for user-submitted issues and coordination
+# work, without making local developer picks close/comment on GitHub.
 #
 # Composition is one import edge: dev-story (general-purpose hub) is
 # imported under alias `core` with concrete host bindings to the
@@ -88,6 +89,7 @@ hosts:
   # Iface-backed handlers — rebound via host_bindings below. Listed
   # here so `hosts: declared` is satisfied.
   - host.local_files.ticket
+  - host.local_github.ticket
   - host.gh.ticket
   - host.gh.ticket.get
   - host.gh.ticket.comment
@@ -160,10 +162,10 @@ imports:
     # iface.transport.post carries the file path), so the local file
     # is the comment thread.
     host_bindings:
-      # Local iteration default: read/write `.artifacts/issues/*` through the
-      # local-files provider. Autonomous GitHub intake can still run by rebinding
-      # ticket to host.gh.ticket and setting ticket_repo to an owner/repo.
-      ticket:    host.local_files.ticket
+      # Local iteration default: search local artifact tickets and GitHub
+      # Issues side by side. Picked local artifacts keep local close-out; picked
+      # GitHub issues carry ticket_repo into the child stories.
+      ticket:    host.local_github.ticket
       vcs:       host.git
       ci:        host.local
       workspace: host.git_worktree
@@ -178,6 +180,7 @@ imports:
       judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
       repo_root:                  "{{ world.repo_root }}"
       ticket_repo:                "{{ world.ticket_repo }}"
+      ticket_github_repo:         "{{ world.ticket_github_repo }}"
       bugfix_destination:         "{{ world.bugfix_destination }}"
       design_durable_path:        "{{ world.design_durable_path }}"
       test_cmd:                   "{{ world.test_cmd }}"
@@ -201,9 +204,11 @@ world:
   repo_root:    { type: string, default: ".artifacts" }
   ticket_globs: { type: string, default: "issues/bugs/*.md,issues/features/*.md,stories/*/issues/bugs/*.md,stories/*/issues/features/*.md" }
 
-  # ticket_repo is intentionally empty for local artifact iteration. Set it to
-  # `origin` or an explicit owner/repo only for a GitHub-backed intake run.
+  # ticket_repo is intentionally empty for local artifact iteration. It is set
+  # after picking a GitHub row, so downstream close-out knows the selected
+  # ticket is remote. ticket_github_repo feeds the selector's GitHub section.
   ticket_repo:  { type: string, default: "" }
+  ticket_github_repo: { type: string, default: "origin" }
   # Default self-hosting destination: land fixes into the local base branch
   # (main here) after the bugfix RED/GREEN gate and shared ship-it tail pass.
   # Operators can still choose open-pr or leave-worktree from the dev-story UI.
