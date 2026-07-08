@@ -22,8 +22,8 @@ approval_mode = "approve"
 
 [mcp_servers.frontend-mockup]
 command = "node"
-args = ["/Users/brad/code/Kitsoki/tools/frontend-mockup-mcp/server.mjs"]
+args = ["tools/frontend-mockup-mcp/server.mjs"]
 
 [mcp_servers.frontend-mockup.env]
-KITSOKI_REPO = "/Users/brad/code/Kitsoki"
+KITSOKI_REPO = "."
 KITSOKI_AGENT_CMD = "kitsoki"
