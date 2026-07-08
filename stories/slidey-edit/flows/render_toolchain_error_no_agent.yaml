@@ -1,7 +1,8 @@
 # render_toolchain_error_no_agent — a real user entered "edit kitsoki-pitch",
 # the existing deck resolved correctly, but the local slidey toolchain failed
 # under Node 26 (`require is not defined` inside yargs). That is not a deck
-# defect, so the story must surface the error without dispatching fix_render.
+# defect, so the story must stop in a visible troubleshooting checkpoint and
+# must not dispatch fix_render.
 
 test_kind: flow
 app: ../app.yaml
@@ -34,7 +35,7 @@ turns:
       name: start
       slots:
         feedback: "edit kitsoki-pitch"
-    expect_state: reviewing
+    expect_state: checking_render_failure
     expect_world:
       deck:
         spec_path: "docs/decks/kitsoki-pitch.slidey.json"
@@ -44,12 +45,23 @@ turns:
       deck_handle: ""
       render_retries: 0
       render_error_repairable: false
-      render_error_kind: toolchain
+      render_error_kind: ""
     expect_host_calls:
       - handler: host.starlark.run
         args: { call: "resolve_deck" }
       - handler: host.slidey.render
         args: { call: "render_deck" }
+    expect_no_host_calls: [host.agent.task]
+
+  - intent:
+      name: troubleshoot
+      slots: {}
+    expect_state: checking_render_failure
+    expect_world:
+      deck_handle: ""
+      render_retries: 0
+      render_error_repairable: false
+      render_error_kind: toolchain
     expect_no_host_calls: [host.agent.task]
 
 expect_terminal: false
