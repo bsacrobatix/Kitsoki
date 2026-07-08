@@ -1,6 +1,6 @@
 [mcp_servers.slidey]
-command = "node"
-args = ["/Users/brad/code/slidey/src/mcp.js", "--root", "/Users/brad/code/Kitsoki"]
+command = "/Users/Brad.Smith/.local/bin/slidey-mcp"
+args = ["--root", "/Users/Brad.Smith/code/kitsoki"]
 
 [mcp_servers.slidey.tools.slidey_scene_summary]
 approval_mode = "approve"
