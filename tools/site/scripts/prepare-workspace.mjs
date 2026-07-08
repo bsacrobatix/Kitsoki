@@ -4,8 +4,9 @@
  *
  * tools/site is source. VitePress/Vite 5 writes temporary timestamp modules
  * beside config and dynamic-route files, and the site pipeline stages generated
- * docs/media before serving. Keep all of that churn in KITSOKI_SITE_ROOT while
- * symlinking source files so local edits still feed the dev server.
+ * docs/media before serving. Keep all of that churn in KITSOKI_SITE_ROOT and
+ * copy source-controlled site files there so VitePress never resolves the
+ * runtime project through a protected checkout or a stale symlink realpath.
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -22,12 +23,6 @@ function rel(from, to) {
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
-}
-
-function symlinkSource(src, dest) {
-  ensureDir(path.dirname(dest));
-  const target = path.relative(path.dirname(dest), src);
-  fs.symlinkSync(target, dest);
 }
 
 function copySource(src, dest) {
@@ -51,12 +46,21 @@ function mirrorSourceTree(src, dest, skip) {
 }
 
 ensureDir(workspace);
-for (const name of [".vitepress", "src", "scripts", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"]) {
+for (const name of [
+  ".vitepress",
+  "src",
+  "scripts",
+  "cache",
+  "vite-cache",
+  "package.json",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+]) {
   fs.rmSync(path.join(workspace, name), { recursive: true, force: true });
 }
 
 for (const name of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"]) {
-  symlinkSource(path.join(sourceSiteDir, name), path.join(workspace, name));
+  copySource(path.join(sourceSiteDir, name), path.join(workspace, name));
 }
 
 const vitepressDir = path.join(workspace, ".vitepress");
