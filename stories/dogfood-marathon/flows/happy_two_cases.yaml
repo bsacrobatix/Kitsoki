@@ -43,6 +43,23 @@ host_handlers:
             items:
               - { id: "case-1", title: "First case", baseline: "abc123^", repro_command: "go test ./pkg/a" }
               - { id: "case-2", title: "Second case", baseline: "def456^", repro_command: "" }
+          run_id: "dogfood-marathon"
+          run_dir: ".artifacts/dogfood-marathon/dogfood-marathon"
+          journal_path: ".artifacts/dogfood-marathon/dogfood-marathon/journal.json"
+          journal_markdown_path: ".artifacts/dogfood-marathon/dogfood-marathon/journal.md"
+          loaded_journal: false
+          journal_status: "loaded"
+          journal_summary: "loaded"
+          last_checkpoint: "intake"
+      persist_journal:
+        data:
+          run_id: "dogfood-marathon"
+          run_dir: ".artifacts/dogfood-marathon/dogfood-marathon"
+          journal_path: ".artifacts/dogfood-marathon/dogfood-marathon/journal.json"
+          journal_markdown_path: ".artifacts/dogfood-marathon/dogfood-marathon/journal.md"
+          journal_status: "written"
+          journal_summary: "checkpoint written"
+          last_checkpoint: "recorded"
       pick_case:
         data:
           current_case:    { id: "case-x", title: "A case", baseline: "abc^", repro_command: "" }
@@ -51,6 +68,10 @@ host_handlers:
         data:
           results:  { items: [ { case_id: "case-x", exit: "shipped", verify_status: "solved" } ] }
           findings: { items: [] }
+          exceptions: { items: [] }
+          exception_pending: ""
+          exception_summary: ""
+          record_status: "recorded"
       aggregate_run:
         data:
           rollup:
@@ -67,6 +88,7 @@ host_handlers:
           deck_spec:
             spec_path: "stories/dogfood-marathon/baked/report.deck.json"
             summary: "Dogfood marathon report — 2 cases, 2 solved."
+            case_decks: []
 
   host.agent.task:
     by_call:
@@ -130,6 +152,7 @@ turns:
       deck_spec:
         spec_path: "stories/dogfood-marathon/baked/report.deck.json"
         summary: "Dogfood marathon report — 2 cases, 2 solved."
+        case_decks: []
 
 expect_terminal: false
 expect_no_errors: true

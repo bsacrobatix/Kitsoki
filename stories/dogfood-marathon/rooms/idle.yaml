@@ -5,24 +5,31 @@ states:
 
   idle:
     description: "Dogfood marathon. Pick the inner pipeline + backlog, then process every case and report the run."
-    relevant_world: [inner_pipeline, backlog_source, baseline_policy, profile, backlog_limit]
+    relevant_world: [inner_pipeline, backlog_sources, baseline_policy, profile, model, backlog_limit, run_id, journal_path]
     view:
       - heading: "Dogfood marathon"
       - prose: "Drive a backlog of cases through an inner kitsoki pipeline (bugfix / delivery-tail / ship-it), independently verify every deliverable, capture friction as findings, and bake the run into a slidey report. This wraps the dogfood-marathon skill — improve the pipeline WITHOUT overfitting to the cases."
       - kv:
           pairs:
             Inner pipeline:  '{{ world.inner_pipeline }}'
-            Backlog source:  '{{ world.backlog_source }}'
+            Backlog sources: '{{ world.backlog_sources }}'
             Baseline policy: '{{ world.baseline_policy }}'
             Maker profile:   '{{ world.profile }}'
+            Model:           '{{ world.model }}'
             Backlog limit:   '{{ world.backlog_limit }}'
+            Run id:          '{{ world.run_id }}'
+            Journal:         '{{ world.journal_path|default:"(derived at intake)" }}'
       - heading: "Actions"
       - list:
           items:
             - label: "start"
-              hint:  "load the backlog and start processing"
-            - label: "start backlog_source=… inner_pipeline=…"
-              hint:  "override the source / inner pipeline"
+              hint:  "create a fresh durable journal and start processing"
+            - label: "start backlog_sources=… run_id=… profile=codex-native model=gpt-5.5"
+              hint:  "override sources / run id / maker profile"
+            - label: "resume"
+              hint:  "load the durable journal and continue from the next case"
+            - label: "resume journal_path=…"
+              hint:  "resume a specific journal file"
             - label: "quit"
               hint:  "abandon"
             - label: "look"
@@ -31,13 +38,43 @@ states:
         - target: intake
           effects:
             - set:
-                backlog_source: "{{ slots.backlog_source ?? world.backlog_source }}"
-                inner_pipeline: "{{ slots.inner_pipeline ?? world.inner_pipeline }}"
+                backlog_source:  "{{ slots.backlog_source ?? world.backlog_source }}"
+                backlog_sources: "{{ slots.backlog_sources ?? slots.backlog_source ?? world.backlog_sources }}"
+                inner_pipeline:  "{{ slots.inner_pipeline ?? world.inner_pipeline }}"
+                backlog_limit:   "{{ slots.backlog_limit ?? world.backlog_limit }}"
+                run_id:          "{{ slots.run_id ?? world.run_id }}"
+                journal_path:    "{{ slots.journal_path ?? world.journal_path }}"
+                profile:         "{{ slots.profile ?? world.profile }}"
+                model:           "{{ slots.model ?? world.model }}"
+                resume_from_journal: false
                 # fresh run — reset the loop counters
                 case_index: 0
                 cases_processed: 0
                 results: { items: [] }
                 findings: { items: [] }
+                exceptions: { items: [] }
+                record_status: ""
+                exception_pending: ""
+                exception_summary: ""
+                loaded_journal: false
+                journal_status: ""
+                journal_summary: ""
+                last_checkpoint: "start"
+      resume:
+        - target: intake
+          effects:
+            - set:
+                backlog_sources: "{{ slots.backlog_sources ?? world.backlog_sources }}"
+                backlog_limit:   "{{ slots.backlog_limit ?? world.backlog_limit }}"
+                run_id:          "{{ slots.run_id ?? world.run_id }}"
+                journal_path:    "{{ slots.journal_path ?? world.journal_path }}"
+                profile:         "{{ slots.profile ?? world.profile }}"
+                model:           "{{ slots.model ?? world.model }}"
+                resume_from_journal: true
+                record_status: ""
+                exception_pending: ""
+                exception_summary: ""
+                last_checkpoint: "resume"
       quit:
         - target: "@exit:abandoned"
           effects:

@@ -899,12 +899,14 @@ mcp-demo-live: mcp-demo-deps
 # Vision QA on the recorded demo (kitsoki-ui-qa). GATED: drives the local `claude`
 # CLI for the grounded review — never run automatically (CLAUDE.md LLM policy).
 MCP_QA_VIDEO ?= .artifacts/mcp-demo/$(AGENT).mp4
+MCP_QA_FEATURE ?= .agents/skills/kitsoki-ui-qa/templates/mcp-feature.md
+MCP_QA_SCENARIOS ?= .agents/skills/kitsoki-ui-qa/templates/mcp-scenarios.yaml
 mcp-qa:
 	@rm -rf .artifacts/mcp-demo/frames && mkdir -p .artifacts/mcp-demo/frames
 	@cp .artifacts/mcp-demo/0*-*.png .artifacts/mcp-demo/frames/ 2>/dev/null || true
 	.agents/skills/kitsoki-ui-qa/scripts/qa.sh $(MCP_QA_VIDEO) \
-		--feature .agents/skills/kitsoki-ui-qa/templates/mcp-feature.md \
-		--scenarios .agents/skills/kitsoki-ui-qa/templates/mcp-scenarios.yaml \
+		--feature $(MCP_QA_FEATURE) \
+		--scenarios $(MCP_QA_SCENARIOS) \
 		--frames .artifacts/mcp-demo/frames \
 		--blank-min-coverage 0.18
 

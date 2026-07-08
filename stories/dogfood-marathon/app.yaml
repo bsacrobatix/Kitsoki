@@ -76,7 +76,7 @@ hosts:
 agents:
   triager:
     system_prompt: "You are a marathon triage analyst. For the given case, inspect the current tree and emit a standardized read-only verdict (ALREADY-FIXED | STILL-LIVE | PARTIAL | UNCLEAR) citing concrete code evidence — never prose alone. This mirrors the inner bugfix story's triage-only mode; you do not fix anything."
-    model: claude-sonnet-4-6
+    model: gpt-5.5
     tools: [Read, Grep, Glob, Bash]
     bash_profile: read-only
     external_side_effect: false
@@ -87,7 +87,7 @@ agents:
     # This persona is the attachment point; the verifying room runs the operator's
     # OWN oracle on the result and gates on that, not on this agent's return.
     system_prompt: "You drive an inner kitsoki pipeline (bugfix / delivery-tail / ship-it) over one case to its terminal exit, then report the deliverable and the trace path. You do NOT self-grade — an independent verify oracle decides solved/partial/failed on the produced worktree. Surface the exit, the worktree/branch, and the trace for cost/token accounting."
-    model: claude-sonnet-4-6
+    model: gpt-5.5
     tools: [Read, Grep, Glob, Bash, Edit, Write]
     external_side_effect: true
 
@@ -96,13 +96,25 @@ world:
   # ── Run config ─────────────────────────────────────────────────────────────
   # The inner pipeline being dogfooded (the wrapped story) + how cases are sourced.
   inner_pipeline:   { type: string, default: "bugfix" }           # bugfix | delivery-tail | ship-it
-  backlog_source:   { type: string, default: "issues/bugs" }      # dir / glob the backlog loads from
-  backlog_limit:    { type: int,    default: 10 }                 # cap how many cases to load
+  backlog_source:   { type: string, default: "local:issues/bugs" } # legacy single source
+  backlog_sources:  { type: string, default: "local:issues/bugs" } # comma-separated local:/github: sources
+  backlog_limit:    { type: int,    default: 15 }                 # cap how many cases to load
+  run_id:           { type: string, default: "dogfood-marathon" }
+  run_dir:          { type: string, default: "" }                 # .artifacts/dogfood-marathon/<run_id>
+  journal_path:     { type: string, default: "" }                 # durable JSON checkpoint
+  journal_markdown_path: { type: string, default: "" }            # human-readable checkpoint
+  journal_status:   { type: string, default: "" }
+  journal_summary:  { type: string, default: "" }
+  loaded_journal:   { type: bool,   default: false }
+  resume_from_journal: { type: bool, default: false }
+  last_checkpoint:  { type: string, default: "" }
   # baseline_policy — how each case's baseline (the buggy state the inner pipeline
   # reproduces against) is pinned. fix-parent = <fix>^ for a merged-fix case;
   # current-main = a live ticket filed against main. (SKILL.md gotcha #11.)
   baseline_policy:  { type: string, default: "fix-parent" }       # fix-parent | current-main
-  profile:          { type: string, default: "claude-native" }    # the maker model (profile supersedes agent-def)
+  profile:          { type: string, default: "codex-native" }     # maker profile; local config maps this to gpt-5.5
+  model:            { type: string, default: "gpt-5.5" }
+  exception_policy: { type: string, default: "ask-serious" }      # ask-serious | journal-only
   # drop_already_fixed — skip cases whose triage verdict is ALREADY-FIXED (a
   # degenerate baseline: a test/lint layered on an already-merged behavioural fix
   # → baseline GREEN → nothing to reproduce). SKILL.md step 2 / gotcha #2.
@@ -122,6 +134,10 @@ world:
   triage_verdict:   { type: object, default: {} }                # this case's triage verdict (read-only)
   drive_result:     { type: object, default: {} }                # inner-pipeline drive output {exit,worktree,branch,trace,cost_usd,tokens,wall_s}
   verify_result:    { type: object, default: {} }                # INDEPENDENT oracle outcome {status:solved|partial|failed,how}
+  record_status:    { type: string, default: "" }                # set by record_case after post-bind settle
+  exception_pending: { type: string, default: "" }               # scalar pause signal from record_case.star
+  exception_summary: { type: string, default: "" }
+  exception_answer:  { type: string, default: "" }
 
   # ── Accumulated marathon data (the deck's source of truth) ─────────────────
   # results.items — one record per processed case (the recording room appends via
@@ -134,6 +150,10 @@ world:
   # findings.items — friction captured across the run (the skill turns the
   # consequential ones into filed tickets; this list feeds the deck's findings slide).
   findings:         { type: object, default: { items: [] } }
+  # exceptions.items — serious questions / blockers raised to the operator.
+  # Non-serious friction stays in findings; serious exception entries pause the
+  # story at exception_review when exception_policy=ask-serious.
+  exceptions:       { type: object, default: { items: [] } }
 
   # ── Report render outputs ──────────────────────────────────────────────────
   deck_spec:        { type: object, default: {} }                # {spec_path,summary} — the built deck JSON
@@ -148,11 +168,28 @@ world:
 intents:
   start:
     description: "Begin the marathon: load the backlog and start processing cases."
-    examples: ["start", "begin", "run the marathon", "process the backlog"]
+    examples: ["start", "begin", "run the marathon", "process the backlog", "start backlog_sources=github:constructorfabric/Kitsoki,github:bsacrobatix/Kitsoki,local:.artifacts/issues/bugs run_id=bug15 profile=codex-native"]
     priority: 90
     slots:
-      backlog_source: { type: string, required: false }
-      inner_pipeline: { type: string, required: false }
+      backlog_source:  { type: string, required: false }
+      backlog_sources: { type: string, required: false }
+      inner_pipeline:  { type: string, required: false }
+      backlog_limit:   { type: int, required: false }
+      run_id:          { type: string, required: false }
+      journal_path:    { type: string, required: false }
+      profile:         { type: string, required: false }
+      model:           { type: string, required: false }
+  resume:
+    description: "Resume a durable marathon journal and continue at the next unprocessed case."
+    examples: ["resume", "resume run_id=bug15", "resume journal_path=.artifacts/dogfood-marathon/bug15/journal.json"]
+    priority: 88
+    slots:
+      run_id:          { type: string, required: false }
+      journal_path:    { type: string, required: false }
+      backlog_sources: { type: string, required: false }
+      backlog_limit:   { type: int, required: false }
+      profile:         { type: string, required: false }
+      model:           { type: string, required: false }
   # ── per-case loop drivers (mostly internal emit_intent; a few operator-typable) ──
   enter_processing:
     description: "(internal) the backlog is loaded; enter the per-case dispatcher."
@@ -168,6 +205,12 @@ intents:
     priority: 1
   record_done:
     description: "(internal) the current case's result is appended; re-enter the dispatcher for the next case."
+    priority: 1
+  record_persist:
+    description: "(internal) the current case is recorded; write the durable checkpoint."
+    priority: 1
+  exception_raised:
+    description: "(internal) a serious case exception is queued for operator review."
     priority: 1
   next_case:
     description: "Advance to and process the next case in the backlog (or roll up the run when the backlog is drained)."
@@ -190,6 +233,16 @@ intents:
   rendered:
     description: "(internal) the report rendered → show the gallery."
     priority: 1
+  ack_exception:
+    description: "Acknowledge the serious exception and continue the marathon."
+    examples: ["ack_exception", "continue anyway"]
+    priority: 70
+  answer_exception:
+    description: "Record operator guidance for the serious exception, then continue."
+    examples: ["answer_exception answer=use the existing repro only", "answer with guidance"]
+    priority: 75
+    slots:
+      answer: { type: string, required: false }
   # ── shared ─────────────────────────────────────────────────────────────────
   quit:
     description: "Abandon the marathon."

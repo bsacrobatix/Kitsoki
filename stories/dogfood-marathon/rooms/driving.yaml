@@ -18,7 +18,7 @@ states:
 
   driving:
     description: "Driving the inner pipeline live over the current case (tracked)."
-    relevant_world: [current_case, inner_pipeline, profile, drive_result]
+    relevant_world: [current_case, inner_pipeline, profile, model, run_dir, journal_path, drive_result]
     view:
       - heading: "Dogfood marathon · driving"
       - kv:
@@ -26,8 +26,10 @@ states:
             Case:     '{{ world.current_case.id }}'
             Pipeline: '{{ world.inner_pipeline }}'
             Profile:  '{{ world.profile }}'
+            Model:    '{{ world.model }}'
             Exit:     '{{ world.drive_result.exit|default:"(driving…)" }}'
             Trace:    '{{ world.drive_result.trace|default:"—" }}'
+            Run dir:  '{{ world.run_dir|default:"(derived)" }}'
       - prose: "Driving the inner pipeline to its terminal exit. The exit, worktree/branch, and trace are captured for the independent verify and cost/token accounting — the maker's self-report is NOT the grade."
     on_enter:
       - invoke: host.agent.task
@@ -45,7 +47,11 @@ states:
               case_json:       "{{ world.current_case_json }}"
               inner_pipeline:  "{{ world.inner_pipeline }}"
               profile:         "{{ world.profile }}"
+              model:           "{{ world.model }}"
               baseline_policy: "{{ world.baseline_policy }}"
+              run_id:          "{{ world.run_id }}"
+              run_dir:         "{{ world.run_dir }}"
+              journal_path:    "{{ world.journal_path }}"
         bind:
           drive_result: submitted
         on_error: verifying   # a dead/failed driver can still have landed edits — verify anyway

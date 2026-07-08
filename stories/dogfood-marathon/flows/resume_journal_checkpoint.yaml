@@ -1,0 +1,55 @@
+# resume_journal_checkpoint — resume loads a durable journal and returns to the
+# processing checkpoint at the saved index.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  run_id: "resume-demo"
+  journal_path: ".artifacts/dogfood-marathon/resume-demo/journal.json"
+
+host_handlers:
+  host.starlark.run:
+    by_call:
+      load_backlog:
+        data:
+          backlog:
+            items:
+              - { id: "case-1", title: "Recorded case" }
+              - { id: "case-2", title: "Next case" }
+          run_id: "resume-demo"
+          run_dir: ".artifacts/dogfood-marathon/resume-demo"
+          journal_path: ".artifacts/dogfood-marathon/resume-demo/journal.json"
+          journal_markdown_path: ".artifacts/dogfood-marathon/resume-demo/journal.md"
+          results: { items: [ { case_id: "case-1", exit: "shipped", verify_status: "solved" } ] }
+          findings: { items: [] }
+          exceptions: { items: [] }
+          case_index: 1
+          cases_processed: 1
+          loaded_journal: true
+          journal_status: "resumed"
+          journal_summary: "resumed"
+          last_checkpoint: "recorded"
+      persist_journal:
+        data:
+          run_id: "resume-demo"
+          run_dir: ".artifacts/dogfood-marathon/resume-demo"
+          journal_path: ".artifacts/dogfood-marathon/resume-demo/journal.json"
+          journal_markdown_path: ".artifacts/dogfood-marathon/resume-demo/journal.md"
+          journal_status: "written"
+          journal_summary: "checkpoint written"
+          last_checkpoint: "intake"
+
+turns:
+  - intent: { name: resume, slots: {} }
+    expect_state: processing
+    expect_world:
+      loaded_journal: true
+      case_index: 1
+      cases_processed: 1
+      results:
+        items:
+          - { case_id: "case-1", exit: "shipped", verify_status: "solved" }
+
+expect_terminal: false
+expect_no_errors: true

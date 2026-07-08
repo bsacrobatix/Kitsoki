@@ -1,0 +1,100 @@
+# serious_exception_pauses — a driver can raise a serious question without using
+# AskUserQuestion. The story records the result, writes the journal, pauses in
+# exception_review, then continues after explicit operator acknowledgement.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  inner_pipeline: "bugfix"
+  backlog_sources: "local:.artifacts/issues/bugs"
+  case_budget: 25
+  drop_already_fixed: true
+  backlog:
+    items:
+      - { id: "case-blocked", title: "Blocked case", baseline: "abc123^", repro_command: "go test ./pkg/a", source_kind: "local", source_path: ".artifacts/issues/bugs/case-blocked.md" }
+
+host_handlers:
+  host.starlark.run:
+    by_call:
+      load_backlog:
+        data:
+          backlog:
+            items:
+              - { id: "case-blocked", title: "Blocked case", baseline: "abc123^", repro_command: "go test ./pkg/a", source_kind: "local", source_path: ".artifacts/issues/bugs/case-blocked.md" }
+          run_id: "dogfood-marathon"
+          run_dir: ".artifacts/dogfood-marathon/dogfood-marathon"
+          journal_path: ".artifacts/dogfood-marathon/dogfood-marathon/journal.json"
+          journal_markdown_path: ".artifacts/dogfood-marathon/dogfood-marathon/journal.md"
+          loaded_journal: false
+          journal_status: "loaded"
+          journal_summary: "loaded"
+          last_checkpoint: "intake"
+      persist_journal:
+        data:
+          run_id: "dogfood-marathon"
+          run_dir: ".artifacts/dogfood-marathon/dogfood-marathon"
+          journal_path: ".artifacts/dogfood-marathon/dogfood-marathon/journal.json"
+          journal_markdown_path: ".artifacts/dogfood-marathon/dogfood-marathon/journal.md"
+          journal_status: "written"
+          journal_summary: "checkpoint written"
+          last_checkpoint: "recorded"
+      pick_case:
+        data:
+          current_case:    { id: "case-blocked", title: "Blocked case", baseline: "abc123^", repro_command: "go test ./pkg/a" }
+          current_case_id: "case-blocked"
+          current_case_json: "{\"id\":\"case-blocked\",\"title\":\"Blocked case\"}"
+      verify_case:
+        data:
+          verify_result: { status: "partial", how: "operator review required: choose a reproduction baseline" }
+      record_case:
+        data:
+          results:
+            items:
+              - { case_id: "case-blocked", title: "Blocked case", exit: "needs-human", verify_status: "partial", trace: ".artifacts/dogfood-marathon/dogfood-marathon/traces/case-blocked.jsonl" }
+          findings: { items: [] }
+          exceptions:
+            items:
+              - { case_id: "case-blocked", severity: "serious", summary: "choose a reproduction baseline", status: "open" }
+          exception_pending: "case-blocked"
+          exception_summary: "choose a reproduction baseline"
+          record_status: "recorded"
+
+  host.agent.task:
+    by_call:
+      triage_case:
+        data:
+          ok: true
+          submitted: { verdict: "STILL-LIVE", evidence: "pkg/a/foo.go:42", note: "bug reproduces at baseline" }
+      drive_case:
+        data:
+          ok: true
+          submitted:
+            exit: "needs-human"
+            worktree: ".worktrees/case-blocked"
+            branch: "fix/case-blocked"
+            deliverable_present: false
+            requires_operator: true
+            operator_question: "choose a reproduction baseline"
+            exception_severity: "serious"
+            trace: ".artifacts/dogfood-marathon/dogfood-marathon/traces/case-blocked.jsonl"
+            cost_usd: 1.25
+            tokens: 12000
+            wall_s: 90
+            findings: []
+
+turns:
+  - intent: { name: start, slots: {} }
+    expect_state: exception_review
+    expect_world:
+      exception_pending: "case-blocked"
+      cases_processed: 0
+
+  - intent: { name: ack_exception, slots: {} }
+    expect_state: processing
+    expect_world:
+      exception_pending: ""
+      cases_processed: 1
+
+expect_terminal: false
+expect_no_errors: true
