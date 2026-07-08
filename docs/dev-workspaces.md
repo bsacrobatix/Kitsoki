@@ -148,18 +148,27 @@ scripts/dev-workspace.sh create --root .capsules/staging --id local --branch sta
 For day-to-day staging operations from the primary checkout:
 
 ```sh
+scripts/refresh-staging-local.sh
 make test-staging
 make web-dev-staging
 make site-dev-staging
 make install-staging
 ```
 
-These targets run the corresponding Make target inside `.capsules/staging/local`
-and verify that the directory is a managed capsule on `staging/local`.
+`refresh-staging-local.sh` checks the selected remote main first. If local
+`main` is stale, it delegates to `sync-main-from-remote.sh`, prints the required
+remote-sync steps, and stops; complete that sync and rerun the refresh. Once
+local `main` is current, the helper refreshes `.capsules/staging/local` from
+local `staging/local`, rebases it onto local `main`, and imports the refreshed
+`staging/local` ref back into the primary checkout. The Make targets run the
+corresponding command inside `.capsules/staging/local` and verify that the
+directory is a managed capsule on `staging/local`.
 
-If the rebase conflicts, resolve the conflict inside the managed workspace,
-rerun the focused validation, then rerun `merge`. Do not resolve by editing the
-primary checkout.
+If a workspace merge rebase conflicts, resolve it inside that managed workspace,
+rerun the focused validation, then rerun `merge`. If a staging refresh rebase
+conflicts, resolve it inside `.capsules/staging/local`, rerun the needed staging
+validation, then rerun `refresh-staging-local.sh`. Do not resolve either path by
+editing the primary checkout.
 
 ### `close` / `teardown`
 
@@ -216,6 +225,7 @@ The lifecycle script has a focused shell regression test:
 
 ```sh
 scripts/test-dev-workspace.sh
+scripts/test-refresh-staging-local.sh
 ```
 
 Host integration is covered by:

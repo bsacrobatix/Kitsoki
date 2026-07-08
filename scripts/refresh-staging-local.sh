@@ -1,0 +1,226 @@
+#!/usr/bin/env bash
+# refresh-staging-local.sh - keep local staging current with main.
+#
+# Run from the protected primary checkout while on main. The helper first makes
+# sure local main already contains the selected remote main, delegating remote
+# reconciliation to sync-main-from-remote.sh when it does not. It then refreshes
+# the managed staging capsule from the primary staging branch, rebases staging
+# onto local main, and imports the refreshed staging ref back into the primary
+# checkout.
+set -euo pipefail
+
+DEFAULT_BASE="main"
+DEFAULT_REMOTE="origin"
+DEFAULT_REMOTE_BRANCH="main"
+DEFAULT_STAGING_BRANCH="staging/local"
+DEFAULT_STAGING_CAPSULE=".capsules/staging/local"
+CAPSULE_SENTINEL=".kitsoki-capsule"
+CLONE_SENTINEL=".kitsoki-clone"
+
+base="$DEFAULT_BASE"
+remote="$DEFAULT_REMOTE"
+remote_branch="$DEFAULT_REMOTE_BRANCH"
+staging_branch="$DEFAULT_STAGING_BRANCH"
+staging_capsule="$DEFAULT_STAGING_CAPSULE"
+skip_remote=0
+no_fetch=0
+gate=""
+
+usage() {
+  cat >&2 <<EOF
+usage:
+  scripts/refresh-staging-local.sh [--remote origin] [--remote-branch main] [--base main]
+                                   [--staging-branch staging/local]
+                                   [--staging-capsule .capsules/staging/local]
+                                   [--gate CMD] [--skip-remote] [--no-fetch]
+
+Refreshes the managed local staging capsule from local staging, rebases it onto
+local main, and updates the primary staging ref from the capsule.
+
+If local main does not contain <remote>/<remote-branch>, this helper runs
+scripts/sync-main-from-remote.sh to prepare that reconciliation, stops, and asks
+you to complete the printed sync steps before rerunning.
+
+--skip-remote intentionally skips the remote freshness check.
+--no-fetch checks existing remote-tracking refs without fetching first.
+--gate runs CMD inside the staging capsule after the rebase and before import.
+EOF
+}
+
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+abs_path() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+print(os.path.abspath(sys.argv[1]))
+PY
+}
+
+source_dirty() {
+  local dir="$1"
+  git -C "$dir" status --porcelain --untracked-files=all |
+    grep -Ev '^[?][?] (\.kitsoki-capsule|\.kitsoki-clone|capsule-manifest.json|\.kitsoki-dev-workspace.json|\.kitsoki-owner)$' ||
+    true
+}
+
+ensure_managed_capsule() {
+  local dir="$1"
+  [ -d "$dir/.git" ] || die "staging capsule is not a git checkout: $dir"
+  if [ ! -f "$dir/$CAPSULE_SENTINEL" ] && [ ! -f "$dir/$CLONE_SENTINEL" ]; then
+    die "staging capsule is not managed: $dir (missing $CAPSULE_SENTINEL or $CLONE_SENTINEL)"
+  fi
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --base)
+      base="${2:?--base requires a value}"
+      shift 2
+      ;;
+    --remote)
+      remote="${2:?--remote requires a value}"
+      shift 2
+      ;;
+    --remote-branch)
+      remote_branch="${2:?--remote-branch requires a value}"
+      shift 2
+      ;;
+    --staging-branch)
+      staging_branch="${2:?--staging-branch requires a value}"
+      shift 2
+      ;;
+    --staging-capsule|--source-dir)
+      staging_capsule="${2:?$1 requires a value}"
+      shift 2
+      ;;
+    --gate)
+      gate="${2:?--gate requires a value}"
+      shift 2
+      ;;
+    --skip-remote)
+      skip_remote=1
+      shift
+      ;;
+    --no-fetch)
+      no_fetch=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      die "unknown argument: $1"
+      ;;
+  esac
+done
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+if [ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ]; then
+  die "run this in the primary checkout, not a linked worktree or secondary checkout"
+fi
+current_branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+if [ "$current_branch" != "$base" ]; then
+  die "primary checkout is on '$current_branch', expected '$base'"
+fi
+git check-ref-format --branch "$base" >/dev/null || die "invalid base branch: $base"
+git check-ref-format --branch "$staging_branch" >/dev/null || die "invalid staging branch: $staging_branch"
+if [ "$staging_branch" = "$base" ]; then
+  die "staging branch and base branch are both $base"
+fi
+if [ "$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)" = "$staging_branch" ]; then
+  die "primary checkout is on $staging_branch; switch to $base before refreshing staging"
+fi
+
+if [ "$skip_remote" -eq 0 ]; then
+  if git remote get-url "$remote" >/dev/null 2>&1; then
+    remote_ref="refs/remotes/$remote/$remote_branch"
+    if [ "$no_fetch" -eq 0 ]; then
+      git fetch "$remote" "$remote_branch:$remote_ref"
+    fi
+    git rev-parse --verify --quiet "$remote_ref" >/dev/null ||
+      die "remote ref not found: $remote_ref"
+    if git merge-base --is-ancestor "$remote_ref" "$base"; then
+      ahead="$(git rev-list --count "$remote_ref..$base")"
+      if [ "$ahead" -gt 0 ]; then
+        if [ "$ahead" -eq 1 ]; then
+          commit_word=commit
+        else
+          commit_word=commits
+        fi
+        echo "$base already contains $remote/$remote_branch, but local $base is ahead by $ahead $commit_word."
+      else
+        echo "$base already contains $remote/$remote_branch"
+      fi
+    else
+      echo "refresh-staging-local: local $base does not contain $remote/$remote_branch; preparing remote sync first." >&2
+      sync_args=(--remote "$remote" --remote-branch "$remote_branch" --base "$base")
+      if [ "$no_fetch" -eq 1 ]; then
+        sync_args+=(--no-fetch)
+      fi
+      scripts/sync-main-from-remote.sh "${sync_args[@]}"
+      cat >&2 <<EOF
+
+refresh-staging-local: complete the remote-main sync steps above, then rerun:
+  scripts/refresh-staging-local.sh --remote "$remote" --remote-branch "$remote_branch" --base "$base" --staging-branch "$staging_branch" --staging-capsule "$staging_capsule"
+EOF
+      exit 2
+    fi
+  else
+    echo "warning: remote '$remote' is not configured; skipping remote freshness check" >&2
+  fi
+fi
+
+if [ "${staging_capsule#/}" = "$staging_capsule" ]; then
+  staging_capsule="$repo_root/$staging_capsule"
+fi
+staging_capsule="$(abs_path "$staging_capsule")"
+ensure_managed_capsule "$staging_capsule"
+
+source_branch="$(git -C "$staging_capsule" branch --show-current)"
+if [ "$source_branch" != "$staging_branch" ]; then
+  die "staging capsule $staging_capsule is on $source_branch, expected $staging_branch"
+fi
+dirty="$(source_dirty "$staging_capsule")"
+if [ -n "$dirty" ]; then
+  echo "error: staging capsule has uncommitted changes: $staging_capsule" >&2
+  printf '%s\n' "$dirty" >&2
+  exit 1
+fi
+git -C "$staging_capsule" remote get-url source >/dev/null 2>&1 ||
+  die "staging capsule has no 'source' remote: $staging_capsule"
+
+git -C "$repo_root" rev-parse --verify --quiet "refs/heads/$base" >/dev/null ||
+  die "base branch not found: $base"
+git -C "$repo_root" rev-parse --verify --quiet "refs/heads/$staging_branch" >/dev/null ||
+  die "staging branch not found: $staging_branch"
+
+echo "refresh-staging-local: fetching local $staging_branch and $base into staging capsule" >&2
+git -C "$staging_capsule" fetch source \
+  "refs/heads/$staging_branch:refs/remotes/source/$staging_branch" \
+  "refs/heads/$base:refs/remotes/source/$base"
+
+echo "refresh-staging-local: rebasing staging capsule onto source/$staging_branch" >&2
+git -C "$staging_capsule" rebase "source/$staging_branch"
+
+echo "refresh-staging-local: rebasing staging capsule onto source/$base" >&2
+git -C "$staging_capsule" rebase "source/$base"
+
+if [ -n "$gate" ]; then
+  echo "refresh-staging-local: running gate in $staging_capsule: $gate" >&2
+  (cd "$staging_capsule" && sh -c "$gate")
+fi
+
+git fetch "$staging_capsule" "+$staging_branch:refs/heads/$staging_branch"
+
+printf '%s -> %s\n' "$staging_branch" "$(git rev-parse --short "$staging_branch")"
+printf 'staging capsule: %s\n' "$staging_capsule"
+printf 'base: %s (%s)\n' "$base" "$(git rev-parse --short "$base")"
