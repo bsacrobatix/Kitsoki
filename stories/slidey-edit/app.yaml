@@ -164,13 +164,14 @@ intents:
     description: "Re-render the current deck without editing it."
     examples: ["rerender", "render again"]
     priority: 60
+  troubleshoot:
+    description: "Classify the render failure; run the repair agent only when the error is deck-shaped."
+    examples: ["troubleshoot", "diagnose render failure", "repair render"]
+    priority: 62
 
   # ── internal (emit_intent only — never user-routed) ──────────────────────────
   render_retry:
     description: "Internal: re-render after an auto-repair pass (counts against the retry budget)."
-    priority: 1
-  render_error_classified:
-    description: "Internal: render failure classified as deck-repairable or external."
     priority: 1
   render_giveup:
     description: "Internal: render auto-fix budget exhausted — return to review with the error."
