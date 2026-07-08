@@ -50,10 +50,18 @@ checkout on branch `staging/local` (`scripts/dev-workspace.sh create --root
 .capsules/staging --id local --branch staging/local --base staging/local
 --target main --bootstrap`); run staging commands with `make test-staging`,
 `make web-dev-staging`, `make site-dev-staging`, and `make install-staging`.
-To promote, run `scripts/merge-to-main.sh` from the primary checkout. It rebases
-the staging capsule onto local `main`, runs `make test` there by default, then
-fast-forwards protected `main`. Skipping that gate requires explicit `--force`;
-use it only when an equivalent gate has already run.
+Before staging validation or final promotion, run
+`scripts/refresh-staging-local.sh` from the primary checkout. It checks
+`origin/main` first and stops with the required `sync-main-from-remote` steps if
+local `main` is stale, then refreshes `.capsules/staging/local` from local
+`staging/local`, rebases it onto local `main`, and imports the refreshed
+`staging/local` ref back into the primary checkout. Use `--remote upstream` when
+that is the authoritative remote; use `--skip-remote` only when remote freshness
+is intentionally irrelevant. To promote, run `scripts/merge-to-main.sh` from the
+primary checkout. It rebases the staging capsule onto local `main`, runs
+`make test` there by default, then fast-forwards protected `main`. Skipping that
+gate requires explicit `--force`; use it only when an equivalent gate has
+already run.
 
 Prefer GitHub PRs for review and landing, but do not burn CI on every
 work-in-progress agent branch. The CI workflow is configured so `pull_request`
