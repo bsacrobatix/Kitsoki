@@ -84,7 +84,7 @@ func decodeDriveFrames(t *testing.T, raw string) []driveFrame {
 const cloakAppPath = "../../testdata/apps/cloak/app.yaml"
 const cloakCassettePath = "../../testdata/apps/cloak/recording.yaml"
 
-func TestDrive_DriveOperationFlagRunsAutonomousOperation(t *testing.T) {
+func TestDrive_AutoRunsBackgroundOperation(t *testing.T) {
 	dir := t.TempDir()
 	appPath := filepath.Join(dir, "app.yaml")
 	tracePath := filepath.Join(dir, "trace.jsonl")
@@ -138,11 +138,10 @@ states:
 
 	cmd, out := newDriveCmd(t, "start\n")
 	err := runDrive(cmd, driveCmdConfig{
-		appPath:        appPath,
-		tracePath:      tracePath,
-		cols:           80,
-		rows:           24,
-		driveOperation: true,
+		appPath:   appPath,
+		tracePath: tracePath,
+		cols:      80,
+		rows:      24,
 		harnessOverride: &scriptLive{reply: map[string]string{
 			"start": "start",
 		}},

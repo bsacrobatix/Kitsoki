@@ -112,6 +112,14 @@ type OperationDriver interface {
 	DriveOperation(ctx context.Context) (*orchestrator.OperationDriveOutcome, error)
 }
 
+// BackgroundOperationDriver is the automatic twin of OperationDriver. It only
+// advances a running operation when the active handle declares
+// run_in_background:true; explicit DriveOperation remains available for
+// operator-requested foreground/supervised drives.
+type BackgroundOperationDriver interface {
+	DriveBackgroundOperation(ctx context.Context) (*orchestrator.OperationDriveOutcome, error)
+}
+
 // WorkLister is an optional read-only extension for Drivers that can expose the
 // session's current async work queue. The web server type-asserts it for the
 // runstatus.work.list RPC; read-only or test drivers without a JobStore can
@@ -298,6 +306,10 @@ func (d OrchestratorDriver) ContinueTurn(ctx context.Context, slots map[string]a
 
 func (d OrchestratorDriver) DriveOperation(ctx context.Context) (*orchestrator.OperationDriveOutcome, error) {
 	return d.Orch.DriveOperation(ctx, d.SID)
+}
+
+func (d OrchestratorDriver) DriveBackgroundOperation(ctx context.Context) (*orchestrator.OperationDriveOutcome, error) {
+	return d.Orch.DriveBackgroundOperation(ctx, d.SID)
 }
 
 func (d OrchestratorDriver) AskOffPath(ctx context.Context, input string) (string, error) {

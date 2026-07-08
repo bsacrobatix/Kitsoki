@@ -495,6 +495,14 @@ func (srv *Server) handleSessionDrive(
 		prompter := newStudioOperatorPrompter(&elicitTransport{ss: ss})
 		out, frame := rt.driveElicit(ctx, args.Input, cols, rows, prompter)
 		progress.Done(ctx, args.Handle, turnOutcomeState(out))
+		if rt.lastOperationDrive != nil {
+			return nil, operationDriveResponse(turnResult{
+				outcome:        out,
+				frame:          frame,
+				err:            rt.lastTurnErr,
+				operationDrive: rt.lastOperationDrive,
+			}), nil
+		}
 		return nil, turnResponse(out, frame, rt.lastTurnErr), nil
 	}
 
@@ -512,6 +520,9 @@ func (srv *Server) handleSessionDrive(
 		return nil, awaitingResponse(pq), nil
 	}
 	progress.Done(ctx, args.Handle, turnOutcomeState(res.outcome))
+	if res.operationDrive != nil {
+		return nil, operationDriveResponse(res), nil
+	}
 	return nil, turnResponse(res.outcome, res.frame, res.err), nil
 }
 
@@ -633,6 +644,9 @@ func (srv *Server) handleSessionSubmit(
 		return nil, awaitingResponse(pq), nil
 	}
 	progress.Done(ctx, args.Handle, turnOutcomeState(res.outcome))
+	if res.operationDrive != nil {
+		return nil, operationDriveResponse(res), nil
+	}
 	return nil, turnResponse(res.outcome, res.frame, res.err), nil
 }
 
@@ -697,6 +711,9 @@ func (srv *Server) handleSessionContinue(
 		return nil, awaitingResponse(pq), nil
 	}
 	progress.Done(ctx, args.Handle, turnOutcomeState(res.outcome))
+	if res.operationDrive != nil {
+		return nil, operationDriveResponse(res), nil
+	}
 	return nil, turnResponse(res.outcome, res.frame, res.err), nil
 }
 

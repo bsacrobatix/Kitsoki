@@ -656,7 +656,14 @@ the terminal state and configured terminal artifact key, then updates
 `world.operation_run` to `status: completed`. Imported child policies are
 lifted and referenced under the import alias (`bf__bugfix_full`, for example).
 These rows and the replayable handle are for operation drivers and UI surfaces;
-they do not replace background host jobs.
+they do not replace background host jobs. When `run_in_background: true` is set,
+normal live write surfaces (`session.drive`, web turn/submit/continue,
+`kitsoki drive`, and `kitsoki session continue`) automatically invoke the safe
+operation driver after the accepted turn. The driver advances only through
+slot-complete, non-destructive menu actions and stops at terminal/waiting
+handles, clarification/rejection, manual-only policies, or no safe next intent.
+Without `run_in_background`, the operator can still explicitly invoke the
+operation driver from the surface's drive-operation command/tool.
 
 When a session operation enters a state-local `operation:` overlay with the same
 id, the overlay close-out also stops the session handle: `commit_operation` and

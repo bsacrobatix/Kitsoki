@@ -116,7 +116,7 @@ func TestSession_ContinueDirectIntent(t *testing.T) {
 	assert.Equal(t, "cloakroom", shown["state"])
 }
 
-func TestSession_ContinueDriveOperation(t *testing.T) {
+func TestSession_ContinueAutoDrivesBackgroundOperation(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "sessions.db")
 	appPath := writeSessionOperationDriveApp(t)
@@ -133,7 +133,6 @@ func TestSession_ContinueDriveOperation(t *testing.T) {
 		"--db", dbPath,
 		"--key", "jira:OP-1",
 		"--intent", "begin",
-		"--drive-operation",
 	)
 	require.NoError(t, err)
 	var outcome map[string]any

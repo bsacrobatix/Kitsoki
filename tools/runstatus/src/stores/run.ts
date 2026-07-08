@@ -868,6 +868,7 @@ export const useRunStore = defineStore("run", () => {
       ...(opts?.annotation ? { annotation: opts.annotation } : {}),
     });
     busy.value = true;
+    const sinceTurn = maxKnownTurn() + 1;
     try {
       let result: TurnResult;
       let capturedStream = "";
@@ -886,10 +887,13 @@ export const useRunStore = defineStore("run", () => {
           ? await source.submit(sessionId, intent, slots, opts.anchor)
           : await source.submit(sessionId, intent, slots);
       }
-      if (typeof result.turn_number === "number") {
+      if (result.operation_drive) {
+        await backfillTraceSince(source, sessionId, sinceTurn);
+      } else if (typeof result.turn_number === "number") {
         await backfillTurnTrace(source, sessionId, result.turn_number);
       }
       applyTurnResult(result, capturedStream, capturedItems);
+      appendOperationDriveSummary(result.operation_drive);
       return result;
     } finally {
       busy.value = false;
@@ -908,6 +912,7 @@ export const useRunStore = defineStore("run", () => {
   ): Promise<TurnResult> {
     const userEntry: TranscriptEntry = { role: "user", text };
     transcript.value.push(userEntry);
+    const sinceTurn = maxKnownTurn() + 1;
     let result: TurnResult;
     let capturedStream = "";
     let capturedItems: StreamItem[] | undefined;
@@ -936,10 +941,15 @@ export const useRunStore = defineStore("run", () => {
     // provenance from the event log (chatEntries) once the turn.start +
     // transition events land — reactively, surviving the SSE settle lag.
     if (typeof result.turn_number === "number") {
-      userEntry.turn = result.turn_number;
-      await backfillTurnTrace(source, sessionId, result.turn_number);
+      userEntry.turn = result.operation_drive ? sinceTurn : result.turn_number;
+      if (result.operation_drive) {
+        await backfillTraceSince(source, sessionId, sinceTurn);
+      } else {
+        await backfillTurnTrace(source, sessionId, result.turn_number);
+      }
     }
     applyTurnResult(result, capturedStream, capturedItems);
+    appendOperationDriveSummary(result.operation_drive);
     return result;
   }
 

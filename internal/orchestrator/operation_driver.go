@@ -85,6 +85,31 @@ func (o *Orchestrator) DriveOperation(ctx context.Context, sid app.SessionID) (*
 	return outcome, nil
 }
 
+// DriveBackgroundOperation drives the active operation only when the running
+// handle explicitly opted into background execution. Callers use this after a
+// normal operator turn so foreground/manual operations remain operator-driven.
+func (o *Orchestrator) DriveBackgroundOperation(ctx context.Context, sid app.SessionID) (*OperationDriveOutcome, error) {
+	if o == nil {
+		return nil, fmt.Errorf("orchestrator: DriveBackgroundOperation: nil orchestrator")
+	}
+	journey, err := o.loadJourney(sid)
+	if err != nil {
+		return nil, fmt.Errorf("orchestrator: DriveBackgroundOperation: load journey: %w", err)
+	}
+	handle, ok := operationDriverRunHandle(journey.World)
+	if !ok {
+		return nil, nil
+	}
+	status := operationDriverString(handle, "status")
+	if status == "" {
+		status = "running"
+	}
+	if status != "running" || !operationDriverBool(handle, "run_in_background") {
+		return nil, nil
+	}
+	return o.DriveOperation(ctx, sid)
+}
+
 func (o *Orchestrator) nextOperationDriverIntent(state app.StatePath, w world.World) (string, map[string]any, string, bool) {
 	if o == nil || o.machine == nil {
 		return "", nil, "", false
@@ -134,6 +159,21 @@ func operationDriverString(handle map[string]any, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(fmt.Sprint(v))
+}
+
+func operationDriverBool(handle map[string]any, key string) bool {
+	v, ok := handle[key]
+	if !ok || v == nil {
+		return false
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return strings.EqualFold(strings.TrimSpace(t), "true")
+	default:
+		return strings.EqualFold(strings.TrimSpace(fmt.Sprint(t)), "true")
+	}
 }
 
 func operationDriverModeDrivable(mode string) bool {

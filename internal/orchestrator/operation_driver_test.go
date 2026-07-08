@@ -209,6 +209,52 @@ states:
 	require.Equal(t, "Regression gate stayed red.", handle["stop_detail"])
 }
 
+func TestDriveBackgroundOperation_RequiresRunInBackground(t *testing.T) {
+	const yamlSrc = `
+app:
+  id: operation-driver-foreground
+  version: 0.1.0
+intents:
+  start: {}
+  accept: {}
+root: idle
+operations:
+  demo_run:
+    title: Demo run
+    mode: autonomous
+    execution_mode: one-shot
+states:
+  idle:
+    on:
+      start:
+        - target: work
+          operation: demo_run
+  work:
+    on:
+      accept:
+        - target: done
+  done:
+    terminal: true
+`
+	orch, sid := newOperationDriverTestOrchestrator(t, yamlSrc)
+	ctx := context.Background()
+
+	started, err := orch.SubmitDirect(ctx, sid, "start", nil)
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("work"), started.NewState)
+
+	drive, err := orch.DriveBackgroundOperation(ctx, sid)
+	require.NoError(t, err)
+	require.Nil(t, drive)
+
+	journey, err := orch.LoadJourney(sid)
+	require.NoError(t, err)
+	require.Equal(t, app.StatePath("work"), journey.State)
+	handle := requireOperationDriverHandle(t, journey)
+	require.Equal(t, "running", handle["status"])
+	require.NotEqual(t, true, handle["run_in_background"])
+}
+
 func newOperationDriverTestOrchestrator(t *testing.T, yamlSrc string) (*orchestrator.Orchestrator, app.SessionID) {
 	t.Helper()
 	def, err := app.LoadBytes([]byte(yamlSrc))

@@ -210,7 +210,7 @@ func TestSessionSubmit_ReturnsRunningWhenTurnExceedsBoundedWait(t *testing.T) {
 	assert.Equal(t, "slow-submit-done", worldValue.Value)
 }
 
-func TestSessionDriveOperation_DrivesAutonomousOperation(t *testing.T) {
+func TestSessionSubmit_AutoDrivesBackgroundOperation(t *testing.T) {
 	ctx := context.Background()
 	srv, _ := newReplayServer(t)
 	cs := connectInProcess(ctx, t, srv)
@@ -229,16 +229,6 @@ func TestSessionDriveOperation_DrivesAutonomousOperation(t *testing.T) {
 	res, err = callTool(ctx, cs, "session.submit", map[string]any{
 		"handle": ok.Handle,
 		"intent": "begin",
-		"cols":   100,
-		"rows":   30,
-	})
-	require.NoError(t, err)
-	started := driveResult(t, res)
-	require.True(t, started.OK)
-	require.Equal(t, "work", started.Outcome.State)
-
-	res, err = callTool(ctx, cs, "session.drive_operation", map[string]any{
-		"handle": ok.Handle,
 		"cols":   100,
 		"rows":   30,
 	})
