@@ -7,12 +7,13 @@
 # a drawn region, or a point — and that anchor flows verbatim into a refine pass
 # that edits the EXACT scene the anchor points at.
 #
-# Rooms:  idle → drafting → rendering → reviewing → refining → done
-#   idle       deterministic: choose create-new or an existing deck spec to edit
-#   drafting   interpretive:  ONE host.agent.task authors/edits the deck JSON (mocked)
-#   rendering  deterministic: host.slidey.render → static HTML deck + .semantic.json sidecar; bind the media handle
-#   reviewing  deterministic: media(deck) inline + invite an anchored annotation
-#   refining   interpretive:  ONE host.agent.task consumes {{ args.visual.anchor }} + the operator
+# Rooms:  idle → loading_existing | drafting → rendering → reviewing → refining → done
+#   idle             deterministic: choose create-new or an existing deck spec to edit
+#   loading_existing deterministic: resolve a deck name/path before rendering it
+#   drafting         interpretive:  ONE host.agent.task authors/edits the deck JSON (mocked)
+#   rendering        deterministic: host.slidey.render → static HTML deck + .semantic.json sidecar; bind the media handle
+#   reviewing        deterministic: media(deck) inline + invite an anchored annotation
+#   refining         interpretive:  ONE host.agent.task consumes {{ args.visual.anchor }} + the operator
 #                             instruction, edits the spec, re-renders, shows before/after
 #   done       gallery of the final deck + the anchors that were addressed
 #
@@ -61,6 +62,8 @@ world:
   deck:             { type: object, default: { spec_path: "stories/slidey-edit/baked/deck.json", summary: "Spatial-annotation explainer deck (3 scenes)." } }
   source_deck:      { type: object, default: {} }   # existing deck passed into drafting; deck remains the draft output/cache
   draft_feedback:   { type: string, default: "" }
+  pending_deck_spec_path: { type: string, default: "" }
+  pending_deck_summary:   { type: string, default: "" }
 
   # ── render outputs ──────────────────────────────────────────────────────────
   deck_handle:      { type: string, default: "" }   # rendered HTML deck artifact handle
