@@ -880,17 +880,22 @@ const workbenchMainStyle = computed((): Record<string, string> => {
   if (!workbenchEnabled.value || embed.value) return {};
   const mediaTrack = `minmax(18rem, ${workbenchMediaWidthPercent.value}%)`;
   const chatTrack = "minmax(20rem, 1fr)";
+  const mainRow = "minmax(0, 1fr)";
   if (!workbenchDevtoolsVisible.value || devtoolsDock.value === "floating") {
-    return { gridTemplateColumns: `${mediaTrack} 0.55rem ${chatTrack}` };
+    return {
+      gridTemplateColumns: `${mediaTrack} 0.55rem ${chatTrack}`,
+      gridTemplateRows: mainRow,
+    };
   }
   if (devtoolsDock.value === "bottom" || workbenchOrientation.value === "horizontal") {
     return {
       gridTemplateColumns: `${mediaTrack} 0.55rem ${chatTrack}`,
-      gridTemplateRows: `minmax(0, 1fr) 0.55rem minmax(12rem, ${workbenchDevtoolsHeightPercent.value}%)`,
+      gridTemplateRows: `${mainRow} 0.55rem minmax(12rem, ${workbenchDevtoolsHeightPercent.value}%)`,
     };
   }
   return {
     gridTemplateColumns: `${mediaTrack} 0.55rem ${chatTrack} 0.55rem minmax(16rem, ${workbenchDevtoolsWidthPercent.value}%)`,
+    gridTemplateRows: mainRow,
   };
 });
 
