@@ -5,8 +5,8 @@
       "args": ["mcp", "--stories-dir", "stories"]
     },
     "slidey": {
-      "command": "node",
-      "args": ["../slidey/src/mcp.js", "--root", "."]
+      "command": "/Users/Brad.Smith/.local/bin/slidey-mcp",
+      "args": ["--root", "/Users/Brad.Smith/code/kitsoki"]
     },
     "stagehand": {
       "command": "node",
