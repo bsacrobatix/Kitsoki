@@ -14,6 +14,7 @@ import (
 
 func TestAgentLaunchPlan_UsesStoryAgentAndHarnessProfile(t *testing.T) {
 	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
 	t.Setenv("SYNTHETIC_API_KEY", "secret-token")
 	appPath := filepath.Join(dir, "app.yaml")
@@ -174,6 +175,7 @@ states:
 
 func TestAgentLaunchPlan_CodeactModeUsesCodexWithShellToolDisabled(t *testing.T) {
 	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
 	t.Setenv(host.AgentBinEnv, "/bin/claude-test")
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
 	oldwd, err := os.Getwd()
@@ -217,6 +219,7 @@ args = ["server.js"]
 	require.NotContains(t, joined, "mcp_servers.existing")
 	require.Contains(t, plan.Command, codexBypassApprovalsAndSandboxFlag)
 	require.Contains(t, plan.Command, "--disable="+launchCodexShellToolFeature)
+	require.Contains(t, plan.Command, "--disable="+launchCodexAppsFeature)
 	require.Contains(t, joined, "mcp_servers.kitsoki-codeact.command=\"kitsoki\"")
 	require.Contains(t, joined, "mcp-codeact")
 	require.Contains(t, joined, "gpt-5.5")
@@ -225,6 +228,7 @@ args = ["server.js"]
 
 func TestAgentLaunchPlan_CodeactModeDefaultsToCodexOverImplicitClaudeProfile(t *testing.T) {
 	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
 	t.Setenv(host.AgentBinEnv, "/bin/claude-test")
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
 	oldwd, err := os.Getwd()
@@ -261,12 +265,14 @@ model = "gpt-5.5"
 	require.Equal(t, "gpt-5.5", plan.Model)
 	joined := strings.Join(plan.Command, " ")
 	require.Contains(t, plan.Command, "--disable="+launchCodexShellToolFeature)
+	require.Contains(t, plan.Command, "--disable="+launchCodexAppsFeature)
 	require.NotContains(t, joined, "opus")
 	require.NotContains(t, joined, "claude-native")
 }
 
 func TestAgentLaunchPlan_CodeactModeRejectsBackendWithoutHardToolRemoval(t *testing.T) {
 	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
 	oldwd, err := os.Getwd()
 	require.NoError(t, err)
@@ -290,6 +296,7 @@ developer_instructions = "Use the available code action surface."
 
 func TestAgentLaunchPlan_CodeactModeFreestandingInteractiveUsesCodexWithoutShellTool(t *testing.T) {
 	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
 	oldwd, err := os.Getwd()
 	require.NoError(t, err)
@@ -321,6 +328,7 @@ args = ["server.js"]
 	require.NotContains(t, plan.Command, "exec", "interactive CodeAct must use top-level codex, not codex exec")
 	require.Contains(t, plan.Command, codexBypassApprovalsAndSandboxFlag)
 	require.Contains(t, plan.Command, "--disable="+launchCodexShellToolFeature)
+	require.Contains(t, plan.Command, "--disable="+launchCodexAppsFeature)
 	joined := strings.Join(plan.Command, " ")
 	require.NotContains(t, joined, "mcp_servers.existing")
 	require.Contains(t, joined, "mcp_servers.kitsoki-codeact.command=\"kitsoki\"")
@@ -357,6 +365,7 @@ developer_instructions = "Use the available code action surface."
 
 func TestAgentLaunchPlan_FreestandingCodexAgentAttachesMCP(t *testing.T) {
 	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
 	codexHome := filepath.Join(dir, "codex-home")
 	require.NoError(t, os.MkdirAll(codexHome, 0755))
@@ -421,15 +430,75 @@ args = ["mcp", "--stories-dir", "stories"]
 	require.Contains(t, joined, "mcp_servers.kitsoki.command=\"kitsoki\"")
 	require.Contains(t, joined, "mcp_servers.kitsoki.args=[\"mcp\",\"--stories-dir\",\"stories\"]")
 	require.Contains(t, joined, "mcp_servers.kitsoki.enabled=true")
-	require.Contains(t, joined, "mcp_servers.slidey.enabled=false")
-	require.Contains(t, joined, "mcp_servers.codex_app.enabled=false")
+	require.Contains(t, joined, "mcp_servers.slidey={")
+	require.Contains(t, joined, "mcp_servers.codex_app={")
+	require.Contains(t, joined, "enabled=false")
 	require.Contains(t, plan.Command, "--dangerously-bypass-approvals-and-sandbox")
 	require.Contains(t, plan.Command, "--disable="+launchCodexShellToolFeature)
+	require.Contains(t, plan.Command, "--disable="+launchCodexAppsFeature)
 	require.Contains(t, strings.Join(plan.FutureNotes, " "), "--disable shell_tool")
+}
+
+func TestAgentLaunchPlan_FreestandingCodexAgentDisablesInheritedMCPServers(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	t.Setenv("HOME", home)
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte(`
+[mcp_servers.extra-alpha]
+command = "/tmp/extra-alpha-mcp"
+args = ["--root", "/tmp/old-root"]
+cwd = "/tmp/old-root"
+startup_timeout_sec = 120
+`), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".codex", "agents"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".codex", "config.toml"), []byte(`
+[mcp_servers.extra-beta]
+command = "node"
+args = ["server.mjs"]
+
+[mcp_servers.extra-beta.env]
+KITSOKI_REPO = "/tmp/old-root"
+KITSOKI_AGENT_CMD = "kitsoki"
+`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".codex", "agents", "kitsoki-mcp-driver.toml"), []byte(`
+name = "kitsoki-mcp-driver"
+developer_instructions = "Use ONLY the kitsoki studio MCP."
+model = "gpt-5.5"
+
+[mcp_servers.kitsoki]
+command = "kitsoki"
+args = ["mcp", "--stories-dir", "stories"]
+`), 0644))
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		AgentName: "kitsoki-mcp-driver",
+		Task:      "Call studio.ping.",
+	})
+	require.NoError(t, err)
+	for _, cleanup := range plan.cleanups {
+		t.Cleanup(cleanup)
+	}
+	joined := strings.Join(plan.Command, " ")
+	require.Contains(t, joined, "mcp_servers.extra-alpha={")
+	require.Contains(t, joined, `command="/tmp/extra-alpha-mcp"`)
+	require.Contains(t, joined, `enabled=false`)
+	require.Contains(t, joined, "mcp_servers.extra-beta={")
+	require.Contains(t, joined, `env={"KITSOKI_AGENT_CMD"="kitsoki","KITSOKI_REPO"="/tmp/old-root"}`)
+	require.Contains(t, joined, "mcp_servers.kitsoki.enabled=true")
+	require.Contains(t, joined, "mcp_servers.kitsoki.command=\"kitsoki\"")
+	require.Contains(t, joined, "mcp_servers.kitsoki.cwd="+launchTOMLString(plan.WorkingDir))
+	require.NotContains(t, joined, "mcp_servers.extra-alpha.enabled=true")
 }
 
 func TestAgentLaunchPlan_FreestandingCodexAgentInteractive(t *testing.T) {
 	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
 	codexHome := filepath.Join(dir, "codex-home")
 	require.NoError(t, os.MkdirAll(codexHome, 0755))
@@ -467,6 +536,7 @@ args = ["mcp", "--stories-dir", "stories"]
 	require.NotContains(t, plan.Command, "exec", "interactive launch must use top-level codex, not codex exec")
 	require.Contains(t, plan.Command, codexBypassApprovalsAndSandboxFlag)
 	require.Contains(t, plan.Command, "--disable="+launchCodexShellToolFeature)
+	require.Contains(t, plan.Command, "--disable="+launchCodexAppsFeature)
 	require.Contains(t, plan.Command, "-m")
 	require.Contains(t, plan.Command, "gpt-5.5")
 	require.NotContains(t, plan.Command, "--sandbox")
@@ -476,13 +546,54 @@ args = ["mcp", "--stories-dir", "stories"]
 	require.Contains(t, joined, "mcp_servers.kitsoki.command=\"kitsoki\"")
 	require.Contains(t, joined, "mcp_servers.kitsoki.args=[\"mcp\",\"--stories-dir\",\"stories\"]")
 	require.Contains(t, joined, "mcp_servers.kitsoki.enabled=true")
-	require.Contains(t, joined, "mcp_servers.slidey.enabled=false")
+	require.Contains(t, joined, "mcp_servers.slidey={")
+	require.Contains(t, joined, "enabled=false")
 	require.Contains(t, plan.Command[len(plan.Command)-1], "Use ONLY the kitsoki studio MCP.")
 	require.Contains(t, strings.Join(plan.FutureNotes, " "), "--disable shell_tool")
 }
 
+func TestAgentLaunchPlan_FreestandingCodexAgentInteractiveDisablesInheritedMCPServers(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	t.Setenv("HOME", home)
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte(`
+[mcp_servers.extra-alpha]
+command = "/tmp/extra-alpha-mcp"
+args = ["--root", "/tmp/old-root"]
+`), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".codex", "agents"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".codex", "agents", "kitsoki-mcp-driver.toml"), []byte(`
+name = "kitsoki-mcp-driver"
+developer_instructions = "Use ONLY the kitsoki studio MCP."
+model = "gpt-5.5"
+
+[mcp_servers.kitsoki]
+command = "kitsoki"
+args = ["mcp", "--stories-dir", "stories"]
+`), 0644))
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		AgentName: "kitsoki-mcp-driver",
+	})
+	require.NoError(t, err)
+	require.True(t, plan.Interactive)
+	joined := strings.Join(plan.Command, " ")
+	require.Contains(t, joined, "mcp_servers.extra-alpha={")
+	require.Contains(t, joined, `enabled=false`)
+	require.Contains(t, joined, "mcp_servers.kitsoki.enabled=true")
+	require.Contains(t, joined, "mcp_servers.kitsoki.cwd="+launchTOMLString(plan.WorkingDir))
+	require.Contains(t, plan.Command, "--disable="+launchCodexAppsFeature)
+}
+
 func TestAgentLaunchPlan_FreestandingCodexAgentInteractiveIgnoresRunAsUserWhileDisabled(t *testing.T) {
 	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
 	oldwd, err := os.Getwd()
 	require.NoError(t, err)
@@ -522,6 +633,7 @@ args = ["mcp", "--stories-dir", "stories"]
 	require.NotEqual(t, wrapper, plan.Binary)
 	require.Contains(t, plan.Command, codexBypassApprovalsAndSandboxFlag)
 	require.Contains(t, plan.Command, "--disable="+launchCodexShellToolFeature)
+	require.Contains(t, plan.Command, "--disable="+launchCodexAppsFeature)
 	require.NotContains(t, plan.Command, "--sandbox")
 	require.NotContains(t, plan.Command, "read-only")
 	require.Contains(t, plan.Command[len(plan.Command)-1], "Use ONLY the kitsoki studio MCP.")
@@ -529,6 +641,7 @@ args = ["mcp", "--stories-dir", "stories"]
 
 func TestAgentLaunchPlan_FreestandingCodexBackendIgnoresMismatchedDefaultProfile(t *testing.T) {
 	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
 	oldwd, err := os.Getwd()
 	require.NoError(t, err)
@@ -569,10 +682,12 @@ model_reasoning_effort = "medium"
 	require.Contains(t, plan.Command, "-m")
 	require.Contains(t, plan.Command, "gpt-5.5")
 	require.Contains(t, plan.Command, "--disable="+launchCodexShellToolFeature)
+	require.NotContains(t, plan.Command, "--disable="+launchCodexAppsFeature)
 }
 
 func TestAgentLaunchPlan_FreestandingCodexInteractiveDropsClaudeAgentModel(t *testing.T) {
 	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
 	oldwd, err := os.Getwd()
 	require.NoError(t, err)
@@ -599,10 +714,12 @@ model = "opus"
 	require.NotContains(t, joined, "opus")
 	require.NotContains(t, plan.Command, "-m")
 	require.Contains(t, plan.Command, "--disable="+launchCodexShellToolFeature)
+	require.NotContains(t, plan.Command, "--disable="+launchCodexAppsFeature)
 }
 
 func TestAgentLaunchPlan_ExplicitProfileBackendConflict(t *testing.T) {
 	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
 	oldwd, err := os.Getwd()
 	require.NoError(t, err)
@@ -635,6 +752,7 @@ developer_instructions = "Use ONLY the kitsoki studio MCP."
 
 func TestAgentLaunchPlan_RawInteractiveNoAgentPrompt(t *testing.T) {
 	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
 	t.Setenv("RAW_OPENAI_API_KEY", "secret-token")
 	cfgPath := filepath.Join(dir, ".kitsoki.yaml")
@@ -674,6 +792,7 @@ harness_profiles:
 	joined := strings.Join(plan.Command, " ")
 	require.Contains(t, joined, codexBypassApprovalsAndSandboxFlag)
 	require.NotContains(t, joined, "--disable="+launchCodexShellToolFeature)
+	require.NotContains(t, joined, "--disable="+launchCodexAppsFeature)
 	require.NotContains(t, joined, "developer_instructions")
 	require.NotContains(t, joined, "Use ONLY")
 }
@@ -750,4 +869,11 @@ func mapKeys[V any](m map[string]V) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+func isolateLaunchCodexHome(t *testing.T, dir string) {
+	t.Helper()
+	home := filepath.Join(dir, "home")
+	require.NoError(t, os.MkdirAll(home, 0755))
+	t.Setenv("HOME", home)
 }

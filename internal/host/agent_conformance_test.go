@@ -361,6 +361,7 @@ func TestConformance_ArgvTranslation(t *testing.T) {
 	t.Run("codex/rewrite", func(t *testing.T) {
 		codexHome := t.TempDir()
 		t.Setenv("CODEX_HOME", codexHome)
+		t.Setenv("HOME", t.TempDir())
 		mustWrite(t, filepath.Join(codexHome, "config.toml"), `
 [mcp_servers.kitsoki-validator]
 command = "/old/kitsoki"
@@ -421,6 +422,9 @@ command = "/bin/codex-app"
 		if noMCP.Stdin != "body" {
 			t.Errorf("codex no-MCP stdin = %q, want bare body", noMCP.Stdin)
 		}
+		if strings.Contains(strings.Join(noMCP.Args, " "), "--disable=apps") {
+			t.Errorf("codex no-MCP invocation must not disable app connectors; args=%v", noMCP.Args)
+		}
 		noMCPFile := codexModelInstructionsFile(t, noMCP.Args)
 		rawNoMCP, err := os.ReadFile(noMCPFile)
 		if err != nil {
@@ -456,8 +460,13 @@ command = "/bin/codex-app"
 		mustContain(t, got, `mcp_servers.kitsoki-validator.command="/bin/kitsoki"`)
 		mustContain(t, got, `mcp_servers.kitsoki-validator.args=["mcp-validator","--schema","/tmp/s.json"]`)
 		mustContain(t, got, `mcp_servers.kitsoki-validator.enabled=true`)
-		mustContain(t, got, `mcp_servers.slidey.enabled=false`)
-		mustContain(t, got, `mcp_servers.codex_app.enabled=false`)
+		mustContain(t, got, `mcp_servers.slidey={`)
+		mustContain(t, got, `mcp_servers.codex_app={`)
+		mustContain(t, got, `enabled=false`)
+		// A Kitsoki-supplied MCP config is a scoped tool surface; Codex app
+		// connectors are a separate inherited capability category and must not
+		// be added to that surface implicitly.
+		mustContain(t, got, "--disable=apps")
 
 		// A claude model id is dropped (some-model is not claude-shaped → kept as -m).
 		if !hasFlagValue(inv.Args, "-m", "some-model") {
@@ -507,7 +516,7 @@ command = "/bin/codex-app"
 			"--model", "gpt-5", "--mcp-config", cfgPath, "--add-dir", "/x",
 		}, "p", wd)
 		resumeJoined := strings.Join(resumeFull.Args, " ")
-		for _, banned := range []string{"--dangerously-bypass-approvals-and-sandbox", "-m", "mcp_servers.", "--add-dir", "-C"} {
+		for _, banned := range []string{"--dangerously-bypass-approvals-and-sandbox", "--disable=apps", "-m", "mcp_servers.", "--add-dir", "-C"} {
 			if strings.Contains(resumeJoined, banned) {
 				t.Errorf("codex exec resume must not carry %q (resume rejects it); args=%v", banned, resumeFull.Args)
 			}

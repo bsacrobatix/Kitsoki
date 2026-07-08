@@ -49,8 +49,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"kitsoki/internal/codexcli"
 )
 
 // CodexBinEnv overrides the `codex` binary path (tests / non-PATH installs).
@@ -232,7 +230,13 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 			args = append(args, "-C", cd)
 		}
 		// Convert each MCP server in the --mcp-config file into codex `-c` overrides.
-		args = append(args, codexMCPConfigArgs(mcpConfig)...)
+		args = append(args, codexMCPConfigArgs(mcpConfig, workingDir)...)
+		if strings.TrimSpace(mcpConfig) != "" {
+			// A Kitsoki --mcp-config is a scoped tool surface. Codex app
+			// connectors are inherited through a separate feature, so disable
+			// that category while keeping the declared MCP servers active.
+			out = appendCodexDisableFeatureArg(out, codexAppsFeature)
+		}
 		if sp := strings.TrimSpace(systemPrompt); sp != "" {
 			if path, fileCleanup, err := WritePromptTempFile(sp); err == nil {
 				cleanup = fileCleanup
@@ -305,6 +309,18 @@ const codexMCPToolSearchPreamble = "TOOL ACCESS (codex): Some tools provided to 
 	"emulate such a tool by printing its name or its arguments as text — a " +
 	"printed call does nothing."
 
+const codexAppsFeature = "apps"
+
+func appendCodexDisableFeatureArg(args []string, feature string) []string {
+	flag := "--disable=" + feature
+	for _, arg := range args {
+		if arg == flag {
+			return args
+		}
+	}
+	return append(args, flag)
+}
+
 // codexMCPConfigArgs reads a claude-shaped --mcp-config JSON file
 // ({"mcpServers":{name:{command,args,env}}}) and emits codex `-c` TOML config
 // overrides registering each server: mcp_servers.<name>.command/args/env, while
@@ -313,7 +329,7 @@ const codexMCPToolSearchPreamble = "TOOL ACCESS (codex): Some tools provided to 
 // submit tool, and unrelated user/global MCP servers must not leak into the
 // launch. Defensive: a missing/malformed file or server is skipped rather than
 // fatal (the caller still gets a usable invocation).
-func codexMCPConfigArgs(path string) []string {
+func codexMCPConfigArgs(path, workingDir string) []string {
 	if strings.TrimSpace(path) == "" {
 		return nil
 	}
@@ -326,22 +342,68 @@ func codexMCPConfigArgs(path string) []string {
 			Command string            `json:"command"`
 			Args    []string          `json:"args"`
 			Env     map[string]string `json:"env"`
+			CWD     string            `json:"cwd"`
 		} `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return nil
 	}
+	servers := make(map[string]CodexMCPServerConfig, len(cfg.MCPServers))
+	for name, s := range cfg.MCPServers {
+		servers[name] = CodexMCPServerConfig{
+			Command: s.Command,
+			Args:    s.Args,
+			Env:     s.Env,
+			CWD:     s.CWD,
+		}
+	}
+	return CodexMCPConfigArgsForServers(servers, workingDir)
+}
+
+// CodexMCPServerConfig is the subset of Codex MCP server configuration Kitsoki
+// emits through CLI -c overrides.
+type CodexMCPServerConfig struct {
+	Command string
+	Args    []string
+	Env     map[string]string
+	CWD     string
+}
+
+// CodexMCPConfigArgsForServers emits Codex -c overrides for a scoped MCP set.
+//
+// Codex merges -c mcp_servers.* values with user/project config instead of
+// replacing the whole mcp_servers table. Therefore a launch that should expose
+// only a declared server must also disable inherited servers that are absent
+// from the declaration; otherwise unrelated project or user servers can block
+// startup/tool-list construction.
+func CodexMCPConfigArgsForServers(mcpServers map[string]CodexMCPServerConfig, workingDir string) []string {
 	// Stable order for deterministic argv (tests + reproducible transcripts).
-	names := make([]string, 0, len(cfg.MCPServers))
-	for name := range cfg.MCPServers {
+	names := make([]string, 0, len(mcpServers))
+	for name := range mcpServers {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
-	out := codexcli.MCPServerScopeArgs(names)
+	selected := make(map[string]bool, len(names))
 	for _, name := range names {
-		s := cfg.MCPServers[name]
+		selected[name] = true
+	}
+	var out []string
+	inherited := codexInheritedMCPServerConfigs(workingDir)
+	inheritedNames := make([]string, 0, len(inherited))
+	for name := range inherited {
+		if !selected[name] {
+			inheritedNames = append(inheritedNames, name)
+		}
+	}
+	sort.Strings(inheritedNames)
+	for _, name := range inheritedNames {
+		out = append(out, "-c", "mcp_servers."+name+"="+inherited[name].disabledInlineTable())
+	}
+	for _, name := range names {
+		s := mcpServers[name]
 		base := "mcp_servers." + name + "."
+		out = append(out, "-c", base+"enabled=true")
 		if s.Command != "" {
 			out = append(out, "-c", base+"command="+tomlString(s.Command))
 		}
@@ -351,8 +413,218 @@ func codexMCPConfigArgs(path string) []string {
 		if len(s.Env) > 0 {
 			out = append(out, "-c", base+"env="+tomlStringTable(s.Env))
 		}
+		cwd := firstCodexMCPString(s.CWD, workingDir)
+		if strings.TrimSpace(cwd) != "" {
+			out = append(out, "-c", base+"cwd="+tomlString(cwd))
+		}
 	}
 	return out
+}
+
+func firstCodexMCPString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+type codexInheritedMCPServerConfig struct {
+	Fields map[string]string
+	Env    map[string]string
+}
+
+func (cfg codexInheritedMCPServerConfig) disabledInlineTable() string {
+	var keys []string
+	for key := range cfg.Fields {
+		if key == "enabled" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys)+2)
+	for _, key := range keys {
+		parts = append(parts, key+"="+cfg.Fields[key])
+	}
+	if len(cfg.Env) > 0 {
+		envKeys := make([]string, 0, len(cfg.Env))
+		for key := range cfg.Env {
+			envKeys = append(envKeys, key)
+		}
+		sort.Strings(envKeys)
+		envParts := make([]string, 0, len(envKeys))
+		for _, key := range envKeys {
+			envParts = append(envParts, tomlString(key)+"="+cfg.Env[key])
+		}
+		parts = append(parts, "env={"+strings.Join(envParts, ",")+"}")
+	}
+	parts = append(parts, "enabled=false")
+	return "{" + strings.Join(parts, ",") + "}"
+}
+
+func codexInheritedMCPServerConfigs(workingDir string) map[string]codexInheritedMCPServerConfig {
+	merged := map[string]codexInheritedMCPServerConfig{}
+	for _, configPath := range codexConfigPaths(workingDir) {
+		for name, cfg := range parseCodexMCPServerConfigFile(configPath) {
+			existing := merged[name]
+			if existing.Fields == nil {
+				existing.Fields = map[string]string{}
+			}
+			for key, val := range cfg.Fields {
+				existing.Fields[key] = val
+			}
+			if len(cfg.Env) > 0 {
+				if existing.Env == nil {
+					existing.Env = map[string]string{}
+				}
+				for key, val := range cfg.Env {
+					existing.Env[key] = val
+				}
+			}
+			merged[name] = existing
+		}
+	}
+	return merged
+}
+
+func codexConfigPaths(workingDir string) []string {
+	var paths []string
+	if dir := strings.TrimSpace(os.Getenv("CODEX_HOME")); dir != "" {
+		if p := filepath.Join(dir, "config.toml"); codexConfigFileExists(p) {
+			paths = append(paths, p)
+		}
+	} else if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		if p := filepath.Join(home, ".codex", "config.toml"); codexConfigFileExists(p) {
+			paths = append(paths, p)
+		}
+	}
+	if strings.TrimSpace(workingDir) == "" {
+		return paths
+	}
+	abs := workingDir
+	if !filepath.IsAbs(abs) {
+		if resolved, err := filepath.Abs(abs); err == nil {
+			abs = resolved
+		}
+	}
+	var projectPaths []string
+	for dir := filepath.Clean(abs); ; dir = filepath.Dir(dir) {
+		if p := filepath.Join(dir, ".codex", "config.toml"); codexConfigFileExists(p) {
+			projectPaths = append(projectPaths, p)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+	}
+	for i := len(projectPaths) - 1; i >= 0; i-- {
+		paths = append(paths, projectPaths[i])
+	}
+	return paths
+}
+
+func codexConfigFileExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir()
+}
+
+func parseCodexMCPServerConfigFile(path string) map[string]codexInheritedMCPServerConfig {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	out := map[string]codexInheritedMCPServerConfig{}
+	currentServer := ""
+	currentEnvServer := ""
+	for _, rawLine := range strings.Split(string(raw), "\n") {
+		line := strings.TrimSpace(stripCodexConfigTOMLComment(rawLine))
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			section := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "["), "]"))
+			currentServer = ""
+			currentEnvServer = ""
+			if !strings.HasPrefix(section, "mcp_servers.") {
+				continue
+			}
+			rest := strings.TrimPrefix(section, "mcp_servers.")
+			name, sub, hasSub := strings.Cut(rest, ".")
+			if strings.TrimSpace(name) == "" {
+				continue
+			}
+			if hasSub {
+				if sub == "env" {
+					currentEnvServer = name
+					cfg := out[name]
+					if cfg.Fields == nil {
+						cfg.Fields = map[string]string{}
+					}
+					if cfg.Env == nil {
+						cfg.Env = map[string]string{}
+					}
+					out[name] = cfg
+				}
+				continue
+			}
+			currentServer = name
+			cfg := out[name]
+			if cfg.Fields == nil {
+				cfg.Fields = map[string]string{}
+			}
+			out[name] = cfg
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		val = strings.TrimSpace(val)
+		if currentServer != "" {
+			cfg := out[currentServer]
+			if cfg.Fields == nil {
+				cfg.Fields = map[string]string{}
+			}
+			cfg.Fields[key] = val
+			out[currentServer] = cfg
+			continue
+		}
+		if currentEnvServer != "" {
+			cfg := out[currentEnvServer]
+			if cfg.Env == nil {
+				cfg.Env = map[string]string{}
+			}
+			cfg.Env[key] = val
+			out[currentEnvServer] = cfg
+		}
+	}
+	return out
+}
+
+func stripCodexConfigTOMLComment(line string) string {
+	inString := false
+	escaped := false
+	for i, r := range line {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' && inString {
+			escaped = true
+			continue
+		}
+		if r == '"' {
+			inString = !inString
+			continue
+		}
+		if r == '#' && !inString {
+			return line[:i]
+		}
+	}
+	return line
 }
 
 // tomlString encodes a Go string as a TOML basic string (double-quoted, with
