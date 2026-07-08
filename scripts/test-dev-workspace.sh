@@ -65,7 +65,15 @@ source_repo="$tmp/source"
 mkdir -p "$source_repo"
 git -C "$source_repo" init --quiet --initial-branch=main
 write_merge_helper "$source_repo"
+printf '.kitsoki.local.yaml\n' >"$source_repo/.gitignore"
+cat >"$source_repo/Makefile" <<'MK'
+bootstrap-workspace:
+	@true
+
+bootstrap-worktree: bootstrap-workspace
+MK
 printf 'one\n' >"$source_repo/README.md"
+printf 'harness_profiles:\n  local:\n    backend: codex\n' >"$source_repo/.kitsoki.local.yaml"
 gitc "$source_repo" add -A
 gitc "$source_repo" commit --quiet -m initial
 
@@ -77,6 +85,12 @@ workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <
 [ -f "$workspace/capsule-manifest.json" ] || fail "missing capsule manifest"
 [ -f "$workspace/.kitsoki-clone" ] || fail "missing clone sentinel"
 [ "$(git -C "$workspace" branch --show-current)" = "agent/case-1" ] || fail "workspace branch mismatch"
+
+"$dev_workspace" create --repo "$source_repo" --root "$root" --id local-config --branch agent/local-config --base main --bootstrap >/dev/null
+local_config_workspace="$root/local-config"
+[ -f "$local_config_workspace/.kitsoki.local.yaml" ] || fail "bootstrap did not copy .kitsoki.local.yaml"
+cmp "$source_repo/.kitsoki.local.yaml" "$local_config_workspace/.kitsoki.local.yaml" >/dev/null || fail "bootstrap copied the wrong .kitsoki.local.yaml content"
+"$dev_workspace" close --repo "$source_repo" --root "$root" "$local_config_workspace" >/dev/null
 
 printf 'local scratch\n' >"$source_repo/untracked-primary.txt"
 printf 'two\n' >"$workspace/feature.txt"
