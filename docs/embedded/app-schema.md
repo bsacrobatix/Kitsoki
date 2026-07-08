@@ -251,7 +251,7 @@ view:
 | `code:`     | `<string>`                                                | Layout-preserved content (tables, ASCII art, includes).  |
 | `template:` | `<string>` (pongo2 body)                                  | Raw pongo escape hatch.                                  |
 | `choice:`   | `{ mode, prompt, items / fields, ... }` (see below)       | Interactive picker / multi-select / mad-lib form.        |
-| `media:`    | `{ handle, caption?, kind? }` (see below)                 | Display a recorded media artifact; TUI pointer / web inline. |
+| `media:`    | `{ handle, caption?, kind?, annotate_url? }` (see below)  | Display a recorded media artifact; TUI pointer / web inline. |
 
 Every element accepts an optional element-level `when:` guard (expr-lang)
 evaluated against `world.*` / `slots.*`. Items in a `list:` accept their
@@ -271,13 +271,15 @@ view:
       handle:  "{{ world.walkthrough_handle }}"   # required — artifact id from host.artifacts_dir
       caption: "Walkthrough recording"             # optional one-line label
       kind:    video                               # optional hint: video/image/pdf/html/slideshow
+      annotate_url: "{{ world.review_url }}"        # optional TUI/web handoff URL
 ```
 
-| Field     | Required | Notes                                                                                        |
-|-----------|----------|----------------------------------------------------------------------------------------------|
-| `handle`  | yes      | Artifact id/handle bound into world by `host.artifacts_dir` (`bind: { my_handle: handle }`). May be a pongo2 template. |
-| `caption` | no       | One-line label shown beneath the artifact. Defaults to `handle` when absent.                 |
-| `kind`    | no       | Selects the pointer icon in the TUI and the embed strategy in the web UI. Values: `video`, `image`, `pdf`, `html`, `slideshow`. Unknown/absent kinds use a generic attachment icon. |
+| Field          | Required | Notes                                                                                        |
+|----------------|----------|----------------------------------------------------------------------------------------------|
+| `handle`       | yes      | Artifact id/handle bound into world by `host.artifacts_dir` (`bind: { my_handle: handle }`). May be a pongo2 template. |
+| `caption`      | no       | One-line label shown beneath the artifact. Defaults to `handle` when absent.                 |
+| `kind`         | no       | Selects the pointer icon in the TUI and the embed strategy in the web UI. Values: `video`, `image`, `pdf`, `html`, `slideshow`. Unknown/absent kinds use a generic attachment icon. |
+| `annotate_url` | no       | URL to open the annotation surface for transports that cannot host it inline. May be a pongo2 template. |
 
 The optional element-level `when:` guard (expr-lang) suppresses the element
 when false, e.g. `when: "world.walkthrough_handle != ''"`.

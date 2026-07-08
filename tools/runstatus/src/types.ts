@@ -232,6 +232,8 @@ export interface ViewElement {
   /** Slot the composed instruction is written to on AnnotateIntent (default
    *  "feedback"). */
   AnnotateFeedbackSlot?: string;
+  /** Optional URL for transports that hand annotation off to the web surface. */
+  AnnotateURL?: string;
   Items?: ListItem[] | null;
   Pairs?: KVPair[] | null;
   Marker?: string;
