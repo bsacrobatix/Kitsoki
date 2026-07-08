@@ -12,7 +12,7 @@ states:
 
   aggregating:
     description: "Rolling up all case results (deterministic)."
-    relevant_world: [results, rollup, findings]
+    relevant_world: [results, rollup, findings, exceptions, journal_path]
     view:
       - heading: "Dogfood marathon · aggregating"
       - kv:
@@ -20,6 +20,8 @@ states:
             Cases:    '{{ world.results.items|length }}'
             Solved:   '{{ world.rollup.counts.solved|default:"…" }}'
             Findings: '{{ world.findings.items|length }}'
+            Exceptions: '{{ world.exceptions.items|length }}'
+            Journal:  '{{ world.journal_path|default:"(pending)" }}'
       - prose: "Folding every case's outcome / cost / tokens / time into the run rollup: counts, totals, what worked, what didn't, and the honest headline."
     on_enter:
       - invoke: host.starlark.run
@@ -28,11 +30,37 @@ states:
         with:
           script: scripts/aggregate_run.star
           inputs:
-            results:  "{{ world.results }}"
-            findings: "{{ world.findings }}"
+            results:    "{{ world.results }}"
+            findings:   "{{ world.findings }}"
+            exceptions: "{{ world.exceptions }}"
         bind:
           rollup: rollup
         on_error: reporting   # a roll-up error still proceeds — the deck shows what it has
+      - invoke: host.starlark.run
+        id: persist_journal
+        with:
+          script: scripts/persist_journal.star
+          capabilities:
+            fs:
+              write: [".artifacts/dogfood-marathon/**"]
+          inputs:
+            stage:                 "aggregated"
+            run_id:                "{{ world.run_id }}"
+            run_dir:               "{{ world.run_dir }}"
+            journal_path:          "{{ world.journal_path }}"
+            journal_markdown_path: "{{ world.journal_markdown_path }}"
+            backlog:               "{{ world.backlog }}"
+            results:               "{{ world.results }}"
+            findings:              "{{ world.findings }}"
+            exceptions:            "{{ world.exceptions }}"
+            rollup:                "{{ world.rollup }}"
+            case_index:            "{{ world.case_index }}"
+            cases_processed:       "{{ world.cases_processed }}"
+        bind:
+          journal_status:        journal_status
+          journal_summary:       journal_summary
+          last_checkpoint:       last_checkpoint
+        on_error: reporting
       - emit_intent: aggregated
     on:
       aggregated:

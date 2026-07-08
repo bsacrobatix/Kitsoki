@@ -9,13 +9,14 @@ states:
 
   reporting:
     description: "Building the slidey report deck spec from the run data (deterministic)."
-    relevant_world: [results, rollup, deck_spec]
+    relevant_world: [results, rollup, findings, exceptions, deck_spec, run_dir, journal_path]
     view:
       - heading: "Dogfood marathon · reporting"
       - kv:
           pairs:
             Cases: '{{ world.results.items|length }}'
             Spec:  '{{ world.deck_spec.spec_path|default:"(building…)" }}'
+            Run dir: '{{ world.run_dir|default:"(derived)" }}'
       - prose: "Composing the marathon-report deck: outcomes · effectiveness · time · cost · what-was-fixed · what-worked · what-didn't. The spec is rendered next."
     on_enter:
       - invoke: host.starlark.run
@@ -23,13 +24,45 @@ states:
         once: true
         with:
           script: scripts/build_deck.star
+          capabilities:
+            fs:
+              write: [".artifacts/dogfood-marathon/**", "stories/dogfood-marathon/baked/**"]
           inputs:
-            results:  "{{ world.results }}"
-            rollup:   "{{ world.rollup }}"
-            findings: "{{ world.findings }}"
-            out_path: "stories/dogfood-marathon/baked/report.deck.json"
+            results:    "{{ world.results }}"
+            rollup:     "{{ world.rollup }}"
+            findings:   "{{ world.findings }}"
+            exceptions: "{{ world.exceptions }}"
+            run_id:     "{{ world.run_id }}"
+            run_dir:    "{{ world.run_dir }}"
+            out_path:   "{{ world.run_dir }}/decks/aggregate.slidey.json"
         bind:
           deck_spec: deck_spec
+        on_error: reporting
+      - invoke: host.starlark.run
+        id: persist_journal
+        with:
+          script: scripts/persist_journal.star
+          capabilities:
+            fs:
+              write: [".artifacts/dogfood-marathon/**"]
+          inputs:
+            stage:                 "reported"
+            run_id:                "{{ world.run_id }}"
+            run_dir:               "{{ world.run_dir }}"
+            journal_path:          "{{ world.journal_path }}"
+            journal_markdown_path: "{{ world.journal_markdown_path }}"
+            backlog:               "{{ world.backlog }}"
+            results:               "{{ world.results }}"
+            findings:              "{{ world.findings }}"
+            exceptions:            "{{ world.exceptions }}"
+            rollup:                "{{ world.rollup }}"
+            deck_spec:             "{{ world.deck_spec }}"
+            case_index:            "{{ world.case_index }}"
+            cases_processed:       "{{ world.cases_processed }}"
+        bind:
+          journal_status:        journal_status
+          journal_summary:       journal_summary
+          last_checkpoint:       last_checkpoint
         on_error: reporting
       - when: "world.deck_spec.spec_path != ''"
         emit_intent: reported

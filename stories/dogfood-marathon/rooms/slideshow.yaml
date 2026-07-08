@@ -8,13 +8,15 @@ states:
 
   slideshow:
     description: "Rendering the marathon report to a static-HTML slidey deck (deterministic)."
-    relevant_world: [deck_spec, deck_path, report_handle]
+    relevant_world: [deck_spec, deck_path, report_handle, journal_path]
     view:
       - heading: "Dogfood marathon · slideshow"
       - kv:
           pairs:
             Spec:   '{{ world.deck_spec.spec_path }}'
             Report: '{{ world.report_handle|default:"(rendering…)" }}'
+            Per-bug decks: '{{ world.deck_spec.case_decks|length|default:"0" }}'
+            Journal: '{{ world.journal_path|default:"(pending)" }}'
       - prose: "Rendering the report deck to a self-contained static HTML deck, then publishing it as a media handle for the gallery."
     on_enter:
       - invoke: host.slidey.render

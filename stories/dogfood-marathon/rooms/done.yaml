@@ -4,7 +4,7 @@ states:
 
   done:
     description: "The marathon finished — the slidey report is rendered."
-    relevant_world: [report_handle, deck_spec, rollup, results, findings]
+    relevant_world: [report_handle, deck_spec, rollup, results, findings, exceptions, journal_path]
     view:
       - heading: "Dogfood marathon · done"
       - kv:
@@ -12,7 +12,10 @@ states:
             Cases:    '{{ world.results.items|length }}'
             Solved:   '{{ world.rollup.counts.solved|default:"—" }}'
             Findings: '{{ world.findings.items|length }}'
+            Exceptions: '{{ world.exceptions.items|length }}'
             Headline: '{{ world.rollup.headline|default:"—" }}'
+            Journal:  '{{ world.journal_path|default:"(pending)" }}'
+            Per-bug decks: '{{ world.deck_spec.case_decks|length|default:"0" }}'
       - heading: "Marathon report"
       - media:
           handle:  "{{ world.report_handle }}"
@@ -20,6 +23,10 @@ states:
           caption: "{{ world.deck_spec.summary }}"
         when: "world.report_handle != ''"
       - prose: "The report decks the run: outcomes, effectiveness, cost (tokens primary), time, what was fixed, what worked, what didn't. Findings feed the no-overfit hardening — improve the pipeline for the general class, never for one case."
+      - code: |
+          {% for deck in world.deck_spec.case_decks %}- {{ deck.case_id }}: {{ deck.path }}
+          {% endfor %}
+        when: "world.deck_spec.case_decks"
       - heading: "Actions"
       - list:
           items:

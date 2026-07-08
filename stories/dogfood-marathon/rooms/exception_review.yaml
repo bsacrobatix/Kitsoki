@@ -1,0 +1,117 @@
+# exception_review — visible operator checkpoint for serious questions.
+#
+# This is intentionally a normal story room instead of AskUserQuestion. It works
+# in TUI/web operator surfaces, leaves a durable journal, and degrades cleanly in
+# headless flows.
+
+states:
+
+  exception_review:
+    description: "A serious exception needs operator review before continuing."
+    relevant_world: [current_case, exception_pending, exception_summary, exception_answer, exceptions, journal_path, last_error]
+    view:
+      - heading: "Dogfood marathon · exception review"
+      - kv:
+          pairs:
+            Case:       '{{ world.exception_pending|default:world.current_case.id }}'
+            Title:      '{{ world.current_case.title|default:"—" }}'
+            Summary:    '{{ world.exception_summary|default:world.last_error|default:"—" }}'
+            Exceptions: '{{ world.exceptions.items|length }}'
+            Journal:    '{{ world.journal_path|default:"(pending)" }}'
+      - prose: "A serious blocker or question was recorded. Answer with guidance, or acknowledge it and continue if the journal has enough information."
+      - heading: "Actions"
+      - list:
+          items:
+            - label: "answer_exception answer=…"
+              hint:  "record guidance and continue"
+            - label: "ack_exception"
+              hint:  "acknowledge the exception and continue"
+            - label: "look"
+            - label: "quit"
+    on:
+      answer_exception:
+        - target: processing
+          effects:
+            - set:
+                exception_answer:  "{{ slots.answer ?? '' }}"
+                case_index:        "{{ world.case_index + 1 }}"
+                cases_processed:   "{{ world.cases_processed + 1 }}"
+                current_case:      {}
+                current_case_id:   ""
+                current_case_json: "{}"
+                triage_verdict:    {}
+                drive_result:      {}
+                verify_result:     {}
+                record_status:     ""
+                exception_pending: ""
+                exception_summary: ""
+            - invoke: host.starlark.run
+              id: persist_journal
+              with:
+                script: scripts/persist_journal.star
+                capabilities:
+                  fs:
+                    write: [".artifacts/dogfood-marathon/**"]
+                inputs:
+                  stage:                 "exception_answered"
+                  run_id:                "{{ world.run_id }}"
+                  run_dir:               "{{ world.run_dir }}"
+                  journal_path:          "{{ world.journal_path }}"
+                  journal_markdown_path: "{{ world.journal_markdown_path }}"
+                  backlog:               "{{ world.backlog }}"
+                  results:               "{{ world.results }}"
+                  findings:              "{{ world.findings }}"
+                  exceptions:            "{{ world.exceptions }}"
+                  current_case:          "{{ world.current_case }}"
+                  case_index:            "{{ world.case_index }}"
+                  cases_processed:       "{{ world.cases_processed }}"
+              bind:
+                journal_status:        journal_status
+                journal_summary:       journal_summary
+                last_checkpoint:       last_checkpoint
+      ack_exception:
+        - target: processing
+          effects:
+            - set:
+                exception_answer:  "acknowledged"
+                case_index:        "{{ world.case_index + 1 }}"
+                cases_processed:   "{{ world.cases_processed + 1 }}"
+                current_case:      {}
+                current_case_id:   ""
+                current_case_json: "{}"
+                triage_verdict:    {}
+                drive_result:      {}
+                verify_result:     {}
+                record_status:     ""
+                exception_pending: ""
+                exception_summary: ""
+            - invoke: host.starlark.run
+              id: persist_journal
+              with:
+                script: scripts/persist_journal.star
+                capabilities:
+                  fs:
+                    write: [".artifacts/dogfood-marathon/**"]
+                inputs:
+                  stage:                 "exception_acknowledged"
+                  run_id:                "{{ world.run_id }}"
+                  run_dir:               "{{ world.run_dir }}"
+                  journal_path:          "{{ world.journal_path }}"
+                  journal_markdown_path: "{{ world.journal_markdown_path }}"
+                  backlog:               "{{ world.backlog }}"
+                  results:               "{{ world.results }}"
+                  findings:              "{{ world.findings }}"
+                  exceptions:            "{{ world.exceptions }}"
+                  current_case:          "{{ world.current_case }}"
+                  case_index:            "{{ world.case_index }}"
+                  cases_processed:       "{{ world.cases_processed }}"
+              bind:
+                journal_status:        journal_status
+                journal_summary:       journal_summary
+                last_checkpoint:       last_checkpoint
+      quit:
+        - target: "@exit:abandoned"
+          effects:
+            - set: { abandon_reason: "abandoned_at_exception_review" }
+      look:
+        - target: .

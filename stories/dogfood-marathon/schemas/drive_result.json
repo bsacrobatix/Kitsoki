@@ -14,6 +14,11 @@
     "cost_usd":            { "type": "number", "description": "Summed trace cost (USD)." },
     "tokens":              { "type": "number", "description": "Total tokens (primary axis)." },
     "wall_s":              { "type": "number", "description": "Wall-clock seconds." },
+    "summary":             { "type": "string", "description": "Short factual summary of what happened." },
+    "fix_ref":             { "type": "string", "description": "Branch/commit/PR ref when available." },
+    "requires_operator":   { "type": "boolean", "description": "True when a serious operator decision is needed." },
+    "operator_question":   { "type": "string", "description": "Serious question to surface through the story operator channel." },
+    "exception_severity":  { "type": "string", "description": "Severity of the operator exception (serious, critical, high, etc.)." },
     "findings":            { "type": "array", "items": { "type": "object" }, "description": "Friction captured during the drive." }
   },
   "additionalProperties": true
