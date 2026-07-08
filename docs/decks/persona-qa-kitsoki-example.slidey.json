@@ -12,19 +12,60 @@
   "scenes": [
     {
       "eyebrow": "Persona QA",
-      "hold": 2600,
       "narration": "This deck was generated deterministically from an existing Persona QA run bundle and its recorded media manifest.",
       "subtitle": "Kitsoki - Software architect - persona-qa-kitsoki-product-review",
       "title": "Kitsoki Persona QA Example",
       "type": "title"
     },
     {
-      "body": "Description: Designs delivery systems and frequently presents technical decisions to engineers and leadership.\nSurface preference: web-first review with terminal verification\nRisk focus: evidence traceability, workflow legibility, operational handoff\nStarting surface: Open the product surface first, then inspect the generated artifacts.\nFirst question: Can I explain the delivery loop to another architect without rerunning the system?\nEvidence emphasis: Recorded UI playback, scenario outcomes, review gates, and reproducible commands.\nEscalation trigger: A claim without playback or a workflow step that cannot be traced to source artifacts.\nFinding bias: Prefer findings that improve reviewability and presentation readiness.",
-      "eyebrow": "Persona lens",
-      "hold": 6200,
-      "lede": "Software architect",
+      "caption": "Software architect",
+      "cards": [
+        {
+          "label": "Surface",
+          "lines": [
+            "Open the product surface first, then inspect the generated artifacts."
+          ],
+          "style": "secondary",
+          "sub": "web-first review with terminal verification"
+        },
+        {
+          "label": "First question",
+          "lines": [
+            "Can I explain the delivery loop to another architect without rerunning the system?"
+          ],
+          "style": "primary",
+          "sub": ""
+        },
+        {
+          "label": "Evidence",
+          "lines": [
+            "Recorded UI playback, scenario outcomes, review gates, and reproducible commands."
+          ],
+          "style": "primary",
+          "sub": ""
+        },
+        {
+          "label": "Risk focus",
+          "lines": [
+            "A claim without playback or a workflow step that cannot be traced to source artifacts."
+          ],
+          "style": "secondary",
+          "sub": "evidence traceability, workflow legibility, +1"
+        },
+        {
+          "label": "Finding bias",
+          "lines": [
+            "Prefer findings that improve reviewability and presentation readiness."
+          ],
+          "style": "secondary",
+          "sub": ""
+        }
+      ],
+      "columns": 3,
       "narration": "The deck keeps the persona lens visible so reviewers judge the scenario evidence from the intended point of view.",
-      "type": "narrative"
+      "title": "Persona lens",
+      "type": "cards",
+      "variant": "grid"
     },
     {
       "caption": "Rows are sorted by scenario id for deterministic output.",
@@ -35,7 +76,6 @@
         "Evidence",
         "Playback"
       ],
-      "hold": 7600,
       "narration": "The scenario table ties each natural-use task to its outcome, evidence coverage, and playback count.",
       "rows": [
         {
@@ -62,12 +102,37 @@
       "variant": "scorecard"
     },
     {
-      "body": "Status: ready\nSummary: Kitsoki can produce a presentation-ready journey deck when scenarios, review gates, and recorded playback are kept together.\nScenarios: 2\nEvidence present: 5/5\nProof evidence: 2\npass: architect-readiness - The generated deck explains the workflow in reviewable chunks.\npass: playback-evidence - Each scenario has a playback-capable media manifest item.\npass: regeneration - Repeated persona-qa deck generation is byte-stable.\npass: scenario-source - The deck source is a committed run bundle fixture.",
-      "eyebrow": "Review gate",
-      "hold": 6600,
-      "lede": "ready",
+      "caption": "Bundle readiness, evidence coverage, and the highest-signal checks.",
+      "items": [
+        {
+          "detail": "Kitsoki can produce a presentation-ready journey deck when scenarios, review gates, and recorded playback are kept together.",
+          "label": "ready",
+          "status": "done"
+        },
+        {
+          "detail": "2 scenarios, evidence 5/5, proof 2",
+          "label": "Evidence coverage",
+          "status": "done"
+        },
+        {
+          "detail": "The generated deck explains the workflow in reviewable chunks.",
+          "label": "architect-readiness",
+          "status": "done"
+        },
+        {
+          "detail": "Each scenario has a playback-capable media manifest item.",
+          "label": "playback-evidence",
+          "status": "done"
+        },
+        {
+          "detail": "Repeated persona-qa deck generation is byte-stable.",
+          "label": "regeneration",
+          "status": "done"
+        }
+      ],
       "narration": "The review scene summarizes bundle readiness without rerunning capture or model work.",
-      "type": "narrative"
+      "title": "Review gate",
+      "type": "objectives"
     },
     {
       "caption": "explain-delivery-loop: validated\nverify-ui-evidence: validated",
@@ -113,7 +178,6 @@
           "sub": "0"
         }
       ],
-      "hold": 7400,
       "narration": "Findings are grouped by type so a technical reviewer can separate strengths from product risks.",
       "title": "Persona judgement",
       "type": "cards",
@@ -121,7 +185,6 @@
     },
     {
       "caption": "Playback items: 2\nVideos: 2\nImages: 0\nScenarios: explain-delivery-loop, verify-ui-evidence",
-      "hold": 8200,
       "items": [
         {
           "detail": "Recorded rrweb clip used as reviewable Kitsoki UI playback evidence.",
@@ -143,12 +206,40 @@
       "type": "evidence"
     },
     {
-      "body": "explain-delivery-loop: rrweb-replay / kitsoki web\nverify-ui-evidence: rrweb-replay / kitsoki web\nevent kitsoki-001: Opened Kitsoki UI playback and attached the delivery-loop clip.\nevent kitsoki-002: Compared the verification clip against the review gate.",
-      "eyebrow": "Driver contract",
-      "hold": 6800,
-      "lede": "How the run was captured",
+      "caption": "Harness choices and journal events behind the playback evidence.",
+      "items": [
+        {
+          "detail": "rrweb-replay / kitsoki web",
+          "label": "explain-delivery-loop",
+          "ref": "driver-plan.json",
+          "refType": "artifact",
+          "status": "validated"
+        },
+        {
+          "detail": "rrweb-replay / kitsoki web",
+          "label": "verify-ui-evidence",
+          "ref": "driver-plan.json",
+          "refType": "artifact",
+          "status": "validated"
+        },
+        {
+          "detail": "Opened Kitsoki UI playback and attached the delivery-loop clip.",
+          "label": "kitsoki-001",
+          "ref": "driver-journal.json",
+          "refType": "log",
+          "status": "done"
+        },
+        {
+          "detail": "Compared the verification clip against the review gate.",
+          "label": "kitsoki-002",
+          "ref": "driver-journal.json",
+          "refType": "log",
+          "status": "done"
+        }
+      ],
       "narration": "The driver scene records the capture harness and journal trail behind the visible playback evidence.",
-      "type": "narrative"
+      "title": "Driver contract",
+      "type": "evidence"
     },
     {
       "caption": "Recorded rrweb clip used as reviewable Kitsoki UI playback evidence.",
@@ -171,12 +262,33 @@
       "type": "video"
     },
     {
-      "body": "Run bundle: tools/persona_qa/examples/runs/kitsoki-product-review\nPlayback scenes: 2\nRegenerate: kitsoki persona-qa deck --run-dir <run-dir> --out <deck.slidey.json>\nPublish: commit the deck JSON; bundle it for the product-site gallery when it lives under docs/decks/.",
-      "eyebrow": "Next",
-      "hold": 5800,
-      "lede": "Regenerate from source artifacts",
+      "caption": "Generated decks are derived from run artifacts; change the source bundle or generator, then regenerate.",
+      "items": [
+        {
+          "detail": "Playback scenes: 2",
+          "label": "Run bundle",
+          "ref": "tools/persona_qa/examples/runs/kitsoki-product-review",
+          "refType": "path",
+          "status": "done"
+        },
+        {
+          "detail": "Rebuild the deck from the run bundle.",
+          "label": "Regenerate",
+          "ref": "kitsoki persona-qa deck --run-dir <run-dir> --out <deck.slidey.json>",
+          "refType": "command",
+          "status": "done"
+        },
+        {
+          "detail": "Commit the deck JSON and bundle the product-site viewer under docs/decks/bundled/.",
+          "label": "Publish",
+          "ref": "slidey bundle <deck.slidey.json> docs/decks/bundled/<deck>.html",
+          "refType": "command",
+          "status": "next"
+        }
+      ],
       "narration": "The deck is a derived artifact. The durable source is the run bundle plus the recorded media manifest.",
-      "type": "narrative"
+      "title": "Regenerate from source artifacts",
+      "type": "evidence"
     }
   ]
 }

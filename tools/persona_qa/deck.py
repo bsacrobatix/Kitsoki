@@ -51,7 +51,6 @@ def build_deck(
             "title": deck_title,
             "subtitle": f"{project_label} - {persona_label} - {run_id}",
             "narration": "This deck was generated deterministically from an existing Persona QA run bundle and its recorded media manifest.",
-            "hold": 2600,
         },
         _persona_scene(persona),
         _scenario_table_scene(scenarios, outcomes, media_manifest),
@@ -127,6 +126,35 @@ def _first_text(value: Any, fallback: str = "") -> str:
     return str(value)
 
 
+def _short(value: Any, *, limit: int = 150) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "..."
+
+
+def _short_sentence(value: Any, *, limit: int = 120) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    for marker in [". ", "; ", ": "]:
+        head = text.split(marker, 1)[0]
+        if head and len(head) <= limit:
+            suffix = "." if marker == ". " else ""
+            return head.rstrip() + suffix
+    return _short(text, limit=limit)
+
+
+def _short_terms(value: Any, *, limit: int = 56, max_items: int = 2) -> str:
+    terms = [str(item).strip() for item in _as_list(value) if str(item).strip()]
+    if not terms:
+        return ""
+    shown = ", ".join(terms[:max_items])
+    if len(terms) > max_items:
+        shown = f"{shown}, +{len(terms) - max_items}"
+    return _short(shown, limit=limit)
+
+
 def _lines(items: list[str], fallback: str, *, limit: int = 12) -> str:
     cleaned = [item.strip() for item in items if item and item.strip()]
     if not cleaned:
@@ -136,27 +164,40 @@ def _lines(items: list[str], fallback: str, *, limit: int = 12) -> str:
 
 def _persona_scene(persona: dict[str, Any]) -> dict[str, Any]:
     lens = _as_dict(persona.get("persona_lens"))
-    risk_focus = ", ".join(str(item) for item in _as_list(persona.get("risk_focus")))
-    body = _lines(
-        [
-            f"Description: {persona.get('description', '')}",
-            f"Surface preference: {persona.get('surface_preference', '')}",
-            f"Risk focus: {risk_focus}",
-            f"Starting surface: {lens.get('starting_surface', '')}",
-            f"First question: {lens.get('first_question', '')}",
-            f"Evidence emphasis: {lens.get('evidence_emphasis', '')}",
-            f"Escalation trigger: {lens.get('escalation_trigger', '')}",
-            f"Finding bias: {lens.get('finding_bias', '')}",
-        ],
-        "No persona lens was recorded.",
-    )
+    cards = [
+        ("Surface", persona.get("surface_preference", ""), lens.get("starting_surface", "")),
+        ("First question", "", lens.get("first_question", "")),
+        ("Evidence", "", lens.get("evidence_emphasis", "")),
+        ("Risk focus", _short_terms(persona.get("risk_focus")), lens.get("escalation_trigger", "")),
+        ("Finding bias", "", lens.get("finding_bias", "")),
+    ]
+    rendered_cards = [
+        {
+            "label": label,
+            "sub": _short(sub, limit=56),
+            "lines": [_short(detail, limit=120)] if detail else [],
+            "style": "primary" if label in {"First question", "Evidence"} else "secondary",
+        }
+        for label, sub, detail in cards
+        if sub or detail
+    ][:5]
+    if not rendered_cards:
+        rendered_cards = [
+            {
+                "label": "Persona",
+                "sub": _short(_label(persona, "Persona"), limit=56),
+                "lines": [_short(persona.get("description", "No persona lens was recorded."), limit=120)],
+                "style": "primary",
+            }
+        ]
     return {
-        "type": "narrative",
-        "eyebrow": "Persona lens",
-        "lede": _label(persona, "Persona"),
-        "body": body,
+        "type": "cards",
+        "variant": "grid",
+        "title": "Persona lens",
+        "columns": 3,
+        "cards": rendered_cards,
+        "caption": _label(persona, "Persona"),
         "narration": "The deck keeps the persona lens visible so reviewers judge the scenario evidence from the intended point of view.",
-        "hold": 6200,
     }
 
 
@@ -198,7 +239,6 @@ def _scenario_table_scene(scenarios: list[dict[str, Any]], outcomes: dict[str, A
         "rows": rows[:10],
         "caption": "Rows are sorted by scenario id for deterministic output.",
         "narration": "The scenario table ties each natural-use task to its outcome, evidence coverage, and playback count.",
-        "hold": 7600,
     }
 
 
@@ -207,28 +247,38 @@ def _review_scene(review: dict[str, Any], metrics: dict[str, Any]) -> dict[str, 
         [item for item in _as_list(review.get("checks")) if isinstance(item, dict)],
         key=lambda item: (str(item.get("status", "")), str(item.get("id", ""))),
     )
-    check_lines = [
-        f"{item.get('status', 'unknown')}: {item.get('id', 'check')} - {item.get('summary', '')}"
-        for item in checks[:8]
+    ready_status = "done" if str(review.get("status", "")).startswith("ready") else "pending"
+    metric_detail = (
+        f"{metrics.get('scenario_count', '?')} scenarios, "
+        f"evidence {metrics.get('present_evidence_count', '?')}/{metrics.get('required_evidence_count', '?')}, "
+        f"proof {metrics.get('proof_evidence_count', '?')}"
+    )
+    items = [
+        {
+            "label": str(review.get("status") or "not reviewed"),
+            "status": ready_status,
+            "detail": _short_sentence(review.get("summary") or "No review summary was recorded.", limit=126),
+        },
+        {
+            "label": "Evidence coverage",
+            "status": "done" if metrics.get("missing_evidence_count", 0) in {0, ""} else "issue",
+            "detail": metric_detail,
+        },
     ]
-    body = _lines(
-        [
-            f"Status: {review.get('status', 'not_reviewed')}",
-            f"Summary: {review.get('summary', '')}",
-            f"Scenarios: {metrics.get('scenario_count', '')}",
-            f"Evidence present: {metrics.get('present_evidence_count', '')}/{metrics.get('required_evidence_count', '')}",
-            f"Proof evidence: {metrics.get('proof_evidence_count', '')}",
-            *check_lines,
-        ],
-        "No review gate artifact was recorded.",
+    items.extend(
+        {
+            "label": str(item.get("id", "check")),
+            "status": _objective_status(str(item.get("status", "pending"))),
+            "detail": _short_sentence(item.get("summary", ""), limit=118),
+        }
+        for item in checks[:3]
     )
     return {
-        "type": "narrative",
-        "eyebrow": "Review gate",
-        "lede": str(review.get("status") or "not_reviewed"),
-        "body": body,
+        "type": "objectives",
+        "title": "Review gate",
+        "items": items[:5],
+        "caption": "Bundle readiness, evidence coverage, and the highest-signal checks.",
         "narration": "The review scene summarizes bundle readiness without rerunning capture or model work.",
-        "hold": 6600,
     }
 
 
@@ -275,18 +325,21 @@ def _findings_scene(findings: dict[str, Any], outcomes: dict[str, Any]) -> dict[
         "cards": cards[:6],
         "caption": _lines(outcome_lines, "No scenario outcome matrix was recorded.", limit=6),
         "narration": "Findings are grouped by type so a technical reviewer can separate strengths from product risks.",
-        "hold": 7400,
     }
 
 
 def _media_manifest_scene(playback_items: list[dict[str, Any]], media_manifest: dict[str, Any]) -> dict[str, Any]:
     summary = _as_dict(media_manifest.get("summary"))
+    scenarios = sorted({str(item.get("scenario", "")) for item in playback_items if item.get("scenario")})
+    scenario_summary = ", ".join(scenarios[:3])
+    if len(scenarios) > 3:
+        scenario_summary = f"{scenario_summary}, +{len(scenarios) - 3}"
     caption = _lines(
         [
             f"Playback items: {summary.get('playback_items', len(playback_items))}",
             f"Videos: {summary.get('video', sum(1 for item in playback_items if item.get('media_kind') == 'video'))}",
             f"Images: {summary.get('image', sum(1 for item in playback_items if item.get('media_kind') == 'image'))}",
-            "Scenarios: " + ", ".join(sorted({str(item.get("scenario", "")) for item in playback_items if item.get("scenario")})),
+            f"Scenarios: {scenario_summary}" if scenario_summary else "",
         ],
         "No playback media has been attached yet.",
     )
@@ -297,11 +350,11 @@ def _media_manifest_scene(playback_items: list[dict[str, Any]], media_manifest: 
             {
                 "label": str(item.get("scenario", "media")),
                 "status": _slidey_status(str(item.get("status", "validated"))),
-                "detail": str(item.get("notes") or item.get("path", "")),
+                "detail": _short(item.get("notes") or item.get("path", ""), limit=120),
                 "refType": "artifact",
                 "ref": str(item.get("path", "")),
             }
-            for item in playback_items[:6]
+            for item in playback_items[:4]
         ]
         or [
             {
@@ -314,7 +367,6 @@ def _media_manifest_scene(playback_items: list[dict[str, Any]], media_manifest: 
         ],
         "caption": caption,
         "narration": "The media scene carries structured playback references so Slidey can render the recorded journey clips.",
-        "hold": 8200,
     }
 
 
@@ -323,26 +375,36 @@ def _driver_scene(driver_plan: dict[str, Any], driver_journal: dict[str, Any]) -
     events = [item for item in _as_list(driver_journal.get("items")) if isinstance(item, dict)]
     if not scenarios and not events:
         return None
-    body = _lines(
-        [
-            *[
-                f"{item.get('scenario', '')}: {item.get('harness', '')} / {item.get('visual_surface', '')}"
-                for item in scenarios[:6]
-            ],
-            *[
-                f"event {item.get('event_id', item.get('id', 'driver'))}: {item.get('summary', item.get('action', ''))}"
-                for item in events[:6]
-            ],
-        ],
-        "No driver plan or journal event was recorded.",
+    items = [
+        {
+            "label": str(item.get("scenario", "scenario")),
+            "status": "validated",
+            "detail": _short(f"{item.get('harness', '')} / {item.get('visual_surface', '')}", limit=150),
+            "refType": "artifact",
+            "ref": "driver-plan.json",
+        }
+        for item in scenarios[:2]
+    ]
+    items.extend(
+        {
+            "label": str(item.get("event_id", item.get("id", "driver event"))),
+            "status": "done",
+            "detail": _short(item.get("summary", item.get("action", "")), limit=140),
+            "refType": "log",
+            "ref": "driver-journal.json",
+        }
+        for item in events[: max(0, 4 - len(items))]
     )
+    total = len(scenarios) + len(events)
+    caption = "Harness choices and journal events behind the playback evidence."
+    if total > len(items):
+        caption = f"Showing {len(items)} of {total} driver records; full details remain in driver-plan.json and driver-journal.json."
     return {
-        "type": "narrative",
-        "eyebrow": "Driver contract",
-        "lede": "How the run was captured",
-        "body": body,
+        "type": "evidence",
+        "title": "Driver contract",
+        "items": items[:4],
+        "caption": caption,
         "narration": "The driver scene records the capture harness and journal trail behind the visible playback evidence.",
-        "hold": 6800,
     }
 
 
@@ -415,26 +477,47 @@ def _slidey_status(status: str) -> str:
         return status
     if status in {"captured", "fixed", "pass"}:
         return "validated"
+    if status in {"warn", "warning", "fail", "failed", "error"}:
+        return "issue"
     if status in {"missing", "planned", "not_started"}:
         return "pending"
     return "done"
 
 
+def _objective_status(status: str) -> str:
+    normalized = _slidey_status(status)
+    if normalized in {"validated", "implemented"}:
+        return "done"
+    return normalized
+
+
 def _next_scene(run_dir: str, playback_scenes: list[dict[str, Any]]) -> dict[str, Any]:
-    body = _lines(
-        [
-            f"Run bundle: {run_dir}",
-            f"Playback scenes: {len(playback_scenes)}",
-            "Regenerate: kitsoki persona-qa deck --run-dir <run-dir> --out <deck.slidey.json>",
-            "Publish: commit the deck JSON; bundle it for the product-site gallery when it lives under docs/decks/.",
-        ],
-        "Regenerate this deck from the run bundle instead of editing generated scenes by hand.",
-    )
     return {
-        "type": "narrative",
-        "eyebrow": "Next",
-        "lede": "Regenerate from source artifacts",
-        "body": body,
+        "type": "evidence",
+        "title": "Regenerate from source artifacts",
+        "items": [
+            {
+                "label": "Run bundle",
+                "status": "done",
+                "detail": f"Playback scenes: {len(playback_scenes)}",
+                "refType": "path",
+                "ref": run_dir,
+            },
+            {
+                "label": "Regenerate",
+                "status": "done",
+                "detail": "Rebuild the deck from the run bundle.",
+                "refType": "command",
+                "ref": "kitsoki persona-qa deck --run-dir <run-dir> --out <deck.slidey.json>",
+            },
+            {
+                "label": "Publish",
+                "status": "next",
+                "detail": "Commit the deck JSON and bundle the product-site viewer under docs/decks/bundled/.",
+                "refType": "command",
+                "ref": "slidey bundle <deck.slidey.json> docs/decks/bundled/<deck>.html",
+            },
+        ],
+        "caption": "Generated decks are derived from run artifacts; change the source bundle or generator, then regenerate.",
         "narration": "The deck is a derived artifact. The durable source is the run bundle plus the recorded media manifest.",
-        "hold": 5800,
     }

@@ -14,8 +14,7 @@
       "eyebrow": "Kitsoki product QA",
       "title": "Persona QA Kit",
       "subtitle": "Portable persona/scenario journeys with no-LLM replay, review gates, and completion-state scoring",
-      "narration": "Persona QA Kit turns the internal product-journey harness into a project-owned kit with stable commands and contracts.",
-      "hold": 2200
+      "narration": "Persona QA Kit turns the internal product-journey harness into a project-owned kit with stable commands and contracts."
     },
     {
       "type": "objectives",
@@ -37,8 +36,7 @@
           "detail": "review and complete produce durable artifacts and shared completion-state JSON for CI and arena."
         }
       ],
-      "caption": "The public surface is a kit plus commands; the legacy runner is now an implementation backend.",
-      "hold": 2400
+      "caption": "The public surface is a kit plus commands; the legacy runner is now an implementation backend."
     },
     {
       "type": "evidence",
@@ -66,8 +64,7 @@
           "ref": "docs/persona-qa.md"
         }
       ],
-      "caption": "The kit exposes machine-checkable contracts and keeps older artifacts backward compatible.",
-      "hold": 2500
+      "caption": "The kit exposes machine-checkable contracts and keeps older artifacts backward compatible."
     },
     {
       "type": "objectives",
@@ -89,8 +86,7 @@
           "detail": "stories/scenario-qa calls the public emit-run command and keeps per-leg judgement independent."
         }
       ],
-      "caption": "Automated gates stay deterministic; live capture remains an explicit operator-controlled workflow.",
-      "hold": 2500
+      "caption": "Automated gates stay deterministic; live capture remains an explicit operator-controlled workflow."
     }
   ]
 }

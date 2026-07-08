@@ -12,19 +12,60 @@
   "scenes": [
     {
       "eyebrow": "Persona QA",
-      "hold": 2600,
       "narration": "This deck was generated deterministically from an existing Persona QA run bundle and its recorded media manifest.",
       "subtitle": "Slidey - Software architect presenting frequently - persona-qa-slidey-architect-review",
       "title": "Slidey Architect Review",
       "type": "title"
     },
     {
-      "body": "Description: Owns architecture reviews, design proposals, and recurring technical briefings.\nSurface preference: deck-as-code authoring with quick local preview\nRisk focus: reproducible visuals, diagram fidelity, asset lifecycle, presentation maintenance\nStarting surface: Open the generated deck and inspect the JSON source before rendering video.\nFirst question: Can I turn an architecture decision into a polished, rerunnable presentation without hand-editing pixels?\nEvidence emphasis: Validated Slidey JSON, playback clips, layout checks, and a bundle suitable for sharing.\nEscalation trigger: Any visual that cannot be reproduced, diffed, bundled, or reviewed before a meeting.\nFinding bias: Prefer findings that improve repeatable technical communication over one-off polish.",
-      "eyebrow": "Persona lens",
-      "hold": 6200,
-      "lede": "Software architect presenting frequently",
+      "caption": "Software architect presenting frequently",
+      "cards": [
+        {
+          "label": "Surface",
+          "lines": [
+            "Open the generated deck and inspect the JSON source before rendering video."
+          ],
+          "style": "secondary",
+          "sub": "deck-as-code authoring with quick local preview"
+        },
+        {
+          "label": "First question",
+          "lines": [
+            "Can I turn an architecture decision into a polished, rerunnable presentation without hand-editing pixels?"
+          ],
+          "style": "primary",
+          "sub": ""
+        },
+        {
+          "label": "Evidence",
+          "lines": [
+            "Validated Slidey JSON, playback clips, layout checks, and a bundle suitable for sharing."
+          ],
+          "style": "primary",
+          "sub": ""
+        },
+        {
+          "label": "Risk focus",
+          "lines": [
+            "Any visual that cannot be reproduced, diffed, bundled, or reviewed before a meeting."
+          ],
+          "style": "secondary",
+          "sub": "reproducible visuals, diagram fidelity, +2"
+        },
+        {
+          "label": "Finding bias",
+          "lines": [
+            "Prefer findings that improve repeatable technical communication over one-off polish."
+          ],
+          "style": "secondary",
+          "sub": ""
+        }
+      ],
+      "columns": 3,
       "narration": "The deck keeps the persona lens visible so reviewers judge the scenario evidence from the intended point of view.",
-      "type": "narrative"
+      "title": "Persona lens",
+      "type": "cards",
+      "variant": "grid"
     },
     {
       "caption": "Rows are sorted by scenario id for deterministic output.",
@@ -35,7 +76,6 @@
         "Evidence",
         "Playback"
       ],
-      "hold": 7600,
       "narration": "The scenario table ties each natural-use task to its outcome, evidence coverage, and playback count.",
       "rows": [
         {
@@ -71,12 +111,37 @@
       "variant": "scorecard"
     },
     {
-      "body": "Status: ready_with_risks\nSummary: For a software architect who presents often, Slidey is strong when the talk must be reproducible, visual, and evidence-backed. The main operational risk is asset and bundle discipline: recorded clips, generated HTML, and source JSON need a tight regeneration habit.\nScenarios: 3\nEvidence present: 7/7\nProof evidence: 3\npass: deck-as-code - Slidey JSON is reviewable and diffable enough for architecture decks.\npass: layout-gates - Slidey exposes validation and audit commands that catch common rendering failures before a final video render.\npass: playback-embedding - Recorded rrweb clips can become standalone deck scenes.\npass: visual-vocabulary - Scene types cover diagrams, tables, evidence, and playback without bespoke slide tooling.\nwarn: asset-lifecycle - Published decks need an explicit convention for deck-local assets and bundled HTML.",
-      "eyebrow": "Review gate",
-      "hold": 6600,
-      "lede": "ready_with_risks",
+      "caption": "Bundle readiness, evidence coverage, and the highest-signal checks.",
+      "items": [
+        {
+          "detail": "For a software architect who presents often, Slidey is strong when the talk must be reproducible, visual, and evidence-backed.",
+          "label": "ready_with_risks",
+          "status": "done"
+        },
+        {
+          "detail": "3 scenarios, evidence 7/7, proof 3",
+          "label": "Evidence coverage",
+          "status": "done"
+        },
+        {
+          "detail": "Slidey JSON is reviewable and diffable enough for architecture decks.",
+          "label": "deck-as-code",
+          "status": "done"
+        },
+        {
+          "detail": "Slidey exposes validation and audit commands that catch common rendering failures before a final video render.",
+          "label": "layout-gates",
+          "status": "done"
+        },
+        {
+          "detail": "Recorded rrweb clips can become standalone deck scenes.",
+          "label": "playback-embedding",
+          "status": "done"
+        }
+      ],
       "narration": "The review scene summarizes bundle readiness without rerunning capture or model work.",
-      "type": "narrative"
+      "title": "Review gate",
+      "type": "objectives"
     },
     {
       "caption": "compose-architecture-deck: validated\nreuse-recorded-demo: validated\nmaintain-deck-as-code: validated",
@@ -122,7 +187,6 @@
           "sub": "0"
         }
       ],
-      "hold": 7400,
       "narration": "Findings are grouped by type so a technical reviewer can separate strengths from product risks.",
       "title": "Persona judgement",
       "type": "cards",
@@ -130,7 +194,6 @@
     },
     {
       "caption": "Playback items: 3\nVideos: 3\nImages: 0\nScenarios: compose-architecture-deck, maintain-deck-as-code, reuse-recorded-demo",
-      "hold": 8200,
       "items": [
         {
           "detail": "Recorded rrweb clip of the architect-design flow used as the primary authoring example.",
@@ -159,12 +222,40 @@
       "type": "evidence"
     },
     {
-      "body": "compose-architecture-deck: slidey-preview / Slidey viewer\nreuse-recorded-demo: rrweb-replay / Slidey video scene\nmaintain-deck-as-code: slidey-validate / Slidey CLI\nevent slidey-001: Opened the architect-design playback and verified it could anchor a technical presentation.\nevent slidey-002: Confirmed the playback clip is referenced as deck-local evidence.\nevent slidey-003: Reviewed the deck-as-code workflow against repeat presentation needs.",
-      "eyebrow": "Driver contract",
-      "hold": 6800,
-      "lede": "How the run was captured",
+      "caption": "Showing 4 of 6 driver records; full details remain in driver-plan.json and driver-journal.json.",
+      "items": [
+        {
+          "detail": "slidey-preview / Slidey viewer",
+          "label": "compose-architecture-deck",
+          "ref": "driver-plan.json",
+          "refType": "artifact",
+          "status": "validated"
+        },
+        {
+          "detail": "rrweb-replay / Slidey video scene",
+          "label": "reuse-recorded-demo",
+          "ref": "driver-plan.json",
+          "refType": "artifact",
+          "status": "validated"
+        },
+        {
+          "detail": "Opened the architect-design playback and verified it could anchor a technical presentation.",
+          "label": "slidey-001",
+          "ref": "driver-journal.json",
+          "refType": "log",
+          "status": "done"
+        },
+        {
+          "detail": "Confirmed the playback clip is referenced as deck-local evidence.",
+          "label": "slidey-002",
+          "ref": "driver-journal.json",
+          "refType": "log",
+          "status": "done"
+        }
+      ],
       "narration": "The driver scene records the capture harness and journal trail behind the visible playback evidence.",
-      "type": "narrative"
+      "title": "Driver contract",
+      "type": "evidence"
     },
     {
       "caption": "Recorded rrweb clip of the architect-design flow used as the primary authoring example.",
@@ -197,12 +288,33 @@
       "type": "video"
     },
     {
-      "body": "Run bundle: tools/persona_qa/examples/runs/slidey-architect-review\nPlayback scenes: 3\nRegenerate: kitsoki persona-qa deck --run-dir <run-dir> --out <deck.slidey.json>\nPublish: commit the deck JSON; bundle it for the product-site gallery when it lives under docs/decks/.",
-      "eyebrow": "Next",
-      "hold": 5800,
-      "lede": "Regenerate from source artifacts",
+      "caption": "Generated decks are derived from run artifacts; change the source bundle or generator, then regenerate.",
+      "items": [
+        {
+          "detail": "Playback scenes: 3",
+          "label": "Run bundle",
+          "ref": "tools/persona_qa/examples/runs/slidey-architect-review",
+          "refType": "path",
+          "status": "done"
+        },
+        {
+          "detail": "Rebuild the deck from the run bundle.",
+          "label": "Regenerate",
+          "ref": "kitsoki persona-qa deck --run-dir <run-dir> --out <deck.slidey.json>",
+          "refType": "command",
+          "status": "done"
+        },
+        {
+          "detail": "Commit the deck JSON and bundle the product-site viewer under docs/decks/bundled/.",
+          "label": "Publish",
+          "ref": "slidey bundle <deck.slidey.json> docs/decks/bundled/<deck>.html",
+          "refType": "command",
+          "status": "next"
+        }
+      ],
       "narration": "The deck is a derived artifact. The durable source is the run bundle plus the recorded media manifest.",
-      "type": "narrative"
+      "title": "Regenerate from source artifacts",
+      "type": "evidence"
     }
   ]
 }
