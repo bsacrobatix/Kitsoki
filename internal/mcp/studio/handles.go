@@ -428,6 +428,18 @@ func (ss *StudioSession) OpenDrivingSession(ctx context.Context, p OpenDrivingSe
 	// Resolve the session's profile selection: an explicit per-session profile
 	// wins, else the boot-time default. Both are no-ops when no profiles are
 	// declared (the map is empty).
+	if p.Profile != "" && len(harnessProfiles) > 0 {
+		if _, ok := harnessProfiles[p.Profile]; !ok {
+			ss.removeOpeningSession(key, sh)
+			if h != nil {
+				_ = h.Close()
+			}
+			return nil, &openError{
+				Code: ErrBadRequest,
+				Msg:  fmt.Sprintf("unknown harness profile %q", p.Profile),
+			}
+		}
+	}
 	//
 	// A live session with no explicit profile is the silent-synthetic landmine:
 	// the boot-time default may be a synthetic/emulated backend, and the caller
