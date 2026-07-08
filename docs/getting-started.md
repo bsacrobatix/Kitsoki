@@ -55,7 +55,7 @@ kitsoki run --harness live
 ```
 
 Provider/model profiles are covered in
-[harness profiles](architecture/harness-profiles.md).
+[harness profiles](guide/agents/harness-profiles.md).
 
 If the default provider is not usable yet, run the guided local profile setup
 from the same `kitsoki run` session:
@@ -117,7 +117,7 @@ source ~/.config/kitsoki/github.env
 ```
 
 Hosted `@kitsoki` agents and webhook setup are covered in
-[GitHub App setup](architecture/github-app-setup.md).
+[GitHub App setup](guide/integrations/github-app-setup.md).
 
 ## 5. What onboarding writes
 

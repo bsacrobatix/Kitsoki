@@ -15,7 +15,7 @@ that must honour a narrow `ask / return` contract.
 > **Plugins vs providers.** This doc covers *which component answers* an agent
 > call. To keep the built-in claude component but point it at a different
 > Anthropic-compatible backend (model + env) per invocation, see
-> [`agent-providers.md`](./agent-providers.md) — that mechanism is orthogonal
+> [`agent-providers.md`](../guide/agents/providers.md) — that mechanism is orthogonal
 > and composes with the verbs below.
 
 ---

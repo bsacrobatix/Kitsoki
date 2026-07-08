@@ -168,7 +168,7 @@ func (c LadderConfig) efforts() []string {
 // operators, but normal automatic fallback should prefer synthetic through the
 // claude backend before trying the codex retarget path. The
 // Provider names match the harness_profiles convention used by
-// .kitsoki.yaml / .kitsoki.local.yaml (see docs/architecture/harness-profiles.md)
+// .kitsoki.yaml / .kitsoki.local.yaml (see docs/guide/agents/harness-profiles.md)
 // so a deployment that declares those profiles (folded into the providers map
 // an operator exposes to host.agent.* — see docs/architecture/harness-ladder.md)
 // gets matching env/credentials for free; a deployment that does not still

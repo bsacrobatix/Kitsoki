@@ -6,7 +6,7 @@ package end to end: ingress, the honesty contract, per-job worktree
 isolation, live-or-replay harness selection, and the drain loop that keeps
 queued jobs moving. For standing up the GitHub App itself (manifest,
 local-only OAuth/token setup, webhook URL, systemd service, live proof flow), see
-[`github-app-setup.md`](github-app-setup.md).
+[`github-app-setup.md`](../guide/integrations/github-app-setup.md).
 
 Package: [`internal/ghagent`](../../internal/ghagent/doc.go). Serve command:
 [`cmd/kitsoki/gh_agent_serve.go`](../../cmd/kitsoki/gh_agent_serve.go).
@@ -149,7 +149,7 @@ independent of `--poll-interval`, so a webhook-only deployment still drains.
 over `internal/inbox/github.go` for environments without webhook
 reachability. Both authenticate via an installation token minted from an
 App JWT (`internal/ghagent/githubapp.AppTokenSource`) — see
-[`github-app-setup.md`](github-app-setup.md) for the manifest/setup flow.
+[`github-app-setup.md`](../guide/integrations/github-app-setup.md) for the manifest/setup flow.
 Every dispatched job gets exactly one rolling status comment, edited in
 place (never a flood of new comments) as the run progresses.
 

@@ -21,7 +21,7 @@
 // run with ZERO network. VerifyWebhookSignature is shipped now for the
 // round-2 webhook ingress.
 //
-// See docs/architecture/github-app-setup.md for the operator runbook and
+// See docs/guide/integrations/github-app-setup.md for the operator runbook and
 // docs/proposals/kitsoki-github-agent.md (shared decision #1) for the auth
 // decision and permissions floor.
 package githubapp

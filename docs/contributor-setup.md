@@ -151,6 +151,6 @@ current managed and endpoint modes.
 | Doc | What |
 |---|---|
 | [architecture/overview.md](architecture/overview.md) | Runtime layers, packages, data flow, persistence. |
-| [architecture/developer-guide.md](architecture/developer-guide.md) | Contributor-oriented implementation guide. |
+| [guide/development/developer-guide.md](guide/development/developer-guide.md) | Contributor-oriented implementation guide. |
 | [stories/authoring.md](stories/authoring.md) | Authoring vocabulary and story structure. |
 | [tracing/testing.md](tracing/testing.md) | Flow tests, traces, replay, and debugging. |

@@ -375,7 +375,7 @@ test-full:
 #          it's the SAME suite CI runs.
 #   pr-ci  CI gate    — pushes the branch, triggers the CI workflow on it, waits
 #          for it to go green (Linux — exactly the PR check), then opens the PR.
-# See scripts/open-pr.sh and docs/architecture/developer-guide.md (§3.3).
+# See scripts/open-pr.sh and docs/guide/development/developer-guide.md (§3.3).
 .PHONY: pr pr-ci
 ARGS ?=
 pr:

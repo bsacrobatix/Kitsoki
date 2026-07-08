@@ -26,7 +26,7 @@ say the same in several places:
   best-effort `HTTP_PROXY` trick; raw TCP is not blocked
   ([`docs/stories/authoring.md`](../stories/authoring.md#bash-profiles)).
 - The Codex backend bypasses Codex's own sandbox so MCP submit tools work
-  ([`docs/architecture/agent-backends.md`](../architecture/agent-backends.md));
+  ([`docs/guide/agents/backends.md`](../guide/agents/backends.md));
   therefore Kitsoki must own the process boundary.
 
 The product requirement is also sharper than "run Docker." Default local users
@@ -82,7 +82,7 @@ degraded run must never look like a confined run in the trace.
 - **Backward compat:** opt-in. A `sandbox:` task with no acceptable backend
   either fails closed or degrades loudly depending on `degrade`.
 - **Docs on ship:** `docs/architecture/hosts.md`,
-  `docs/architecture/agent-backends.md`,
+  `docs/guide/agents/backends.md`,
   `docs/stories/state-machine.md`, `docs/stories/authoring.md`, and the
   `kitsoki-story-authoring` skill.
 

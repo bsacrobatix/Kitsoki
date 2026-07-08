@@ -1,6 +1,6 @@
 // Package app — provider declaration loader.
 //
-// See docs/architecture/agent-providers.md for the declaration format.
+// See docs/guide/agents/providers.md for the declaration format.
 //
 // resolveProviders is called after parseAndMerge / resolveImports to:
 //  1. Validate every ProviderDecl in def.Providers (non-empty name; a provider

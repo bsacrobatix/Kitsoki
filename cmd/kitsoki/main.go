@@ -935,7 +935,7 @@ func firstRunProviderHint(hasClaude, hasCred bool) string {
 		"  - install the `claude` CLI (Claude Code) so it is on your PATH, or\n" +
 		"  - set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN (direct Anthropic SDK), or\n" +
 		"  - select another agent backend, such as `--agent codex` or KITSOKI_AGENT=codex, or\n" +
-		"  - select a harness profile in .kitsoki.local.yaml (see docs/architecture/harness-profiles.md).\n" +
+		"  - select a harness profile in .kitsoki.local.yaml (see docs/guide/agents/harness-profiles.md).\n" +
 		"To run deterministic replay instead, pass --harness replay --recording <recording.yaml>.\n"
 }
 

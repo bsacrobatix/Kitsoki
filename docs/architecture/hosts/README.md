@@ -26,6 +26,6 @@ For the Starlark-specific authoring model shared by `host.starlark.run` and
 ## Extending Hosts
 
 To add a built-in handler, start with
-[`../developer-guide.md` §5.2](../developer-guide.md#52-adding-a-new-built-in-host-handler).
+[`../../guide/development/developer-guide.md` §5.2](../../guide/development/developer-guide.md#52-adding-a-new-built-in-host-handler).
 For story-level host interfaces that can be rebound by importers, see
 [`../../stories/imports.md`](../../stories/imports.md).

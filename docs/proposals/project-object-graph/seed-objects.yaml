@@ -7507,7 +7507,7 @@ nodes:
     proposal_kind: epic
     path: docs/proposals/ai-collaboration-proposal.md
     status_line: v1 trimmed. The original draft proposed five surfaces;
-    index_blurb: one remaining AI-collaborator surface (per-state `loading_view`). Three v1 surfaces shipped (`docs/architecture/developer-guide.md` §6); the scripted `kitsoki drive` (§1) is superseded by the [`story-qa-agent`](story-qa-agent.md) epic, which makes it interactive.
+    index_blurb: one remaining AI-collaborator surface (per-state `loading_view`). Three v1 surfaces shipped (`docs/guide/development/developer-guide.md` §6); the scripted `kitsoki drive` (§1) is superseded by the [`story-qa-agent`](story-qa-agent.md) epic, which makes it interactive.
     sources:
       - source-ai-collaboration-proposal-proposal
     edges:
