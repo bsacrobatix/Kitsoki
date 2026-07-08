@@ -104,6 +104,7 @@ printf 'three\n' >"$second_workspace/feature2.txt"
 
 main_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id case-main --branch agent/case-main --base main --target main --json)"
 main_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$main_json")"
+[ "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["target"])' <"$main_workspace/.kitsoki-dev-workspace.json")" = "main" ] || fail "create --target main was not recorded in workspace manifest"
 printf 'main landing\n' >"$main_workspace/main-feature.txt"
 "$dev_workspace" commit --repo "$source_repo" --root "$root" "$main_workspace" --message 'add main feature' >/dev/null
 "$dev_workspace" merge --repo "$source_repo" --root "$root" "$main_workspace" --target main --gate true --teardown >/dev/null
