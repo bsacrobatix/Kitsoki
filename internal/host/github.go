@@ -639,19 +639,21 @@ func splitIssueCommentID(commentID string) (repo, id string) {
 func resolveTicketRepo(ctx context.Context, repo string, args map[string]any) string {
 	repo = strings.TrimSpace(repo)
 	if repo == "" {
+		if dir := ticketRepoLookupDir(args); dir != "" {
+			stdout, _, code, err := cliExec(ctx, dir, "git", "remote", "get-url", "origin")
+			if err == nil && code == 0 {
+				if resolved := githubRepoFromRemote(stdout); resolved != "" {
+					return resolved
+				}
+			}
+		}
 		return ""
 	}
 	if strings.Contains(repo, "/") {
 		return repo
 	}
-	var dir string
-	if v, _ := args["root"].(string); v != "" {
-		dir = v
-	} else if v, _ := args["workdir"].(string); v != "" {
-		dir = v
-	} else if v := os.Getenv("KITSOKI_TICKETS_ROOT"); v != "" {
-		dir = v
-	} else {
+	dir := ticketRepoLookupDir(args)
+	if dir == "" {
 		var err error
 		dir, err = os.Getwd()
 		if err != nil {
@@ -667,3 +669,15 @@ func resolveTicketRepo(ctx context.Context, repo string, args map[string]any) st
 	return repo
 }
 
+func ticketRepoLookupDir(args map[string]any) string {
+	if v, _ := args["root"].(string); strings.TrimSpace(v) != "" {
+		return strings.TrimSpace(v)
+	}
+	if v, _ := args["workdir"].(string); strings.TrimSpace(v) != "" {
+		return strings.TrimSpace(v)
+	}
+	if v := strings.TrimSpace(os.Getenv("KITSOKI_TICKETS_ROOT")); v != "" {
+		return v
+	}
+	return ""
+}

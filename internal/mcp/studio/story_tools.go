@@ -45,7 +45,7 @@ func (srv *Server) registerStoryTools() {
 	if !srv.readOnly {
 		mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 			Name:        "story.write",
-			Description: "Write a workspace-scoped file then auto-validate the story. {path, content}; returns {written, validation} where validation is the same {ok, errors[]} as story.validate. Writes are confined to the workspace dir (path escape rejected).",
+			Description: "Write a workspace-scoped file, auto-validating when the workspace contains app.yaml. {path, content, validate?}; validate defaults to auto (true for story packages, false for plain workspaces). Returns {written, validated, validation?}. Writes are confined to the workspace dir (path escape rejected).",
 		}, srv.handleStoryWrite)
 	}
 
@@ -85,17 +85,19 @@ type StoryReadOK struct {
 
 // StoryWriteArgs is the input to story.write.
 type StoryWriteArgs struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
-	Dir     string `json:"dir,omitempty"`
+	Path     string `json:"path"`
+	Content  string `json:"content"`
+	Dir      string `json:"dir,omitempty"`
+	Validate *bool  `json:"validate,omitempty"`
 }
 
 // StoryWriteOK is the story.write success result: the write landed and the
-// story was re-validated in the same round-trip.
+// story was re-validated in the same round-trip when Validated is true.
 type StoryWriteOK struct {
-	OK         bool            `json:"ok"`         // always true on this branch (the write succeeded)
-	Written    string          `json:"written"`    // the workspace-relative path written
-	Validation StoryValidateOK `json:"validation"` // the post-write validation (same shape as story.validate)
+	OK         bool             `json:"ok"`                   // always true on this branch (the write succeeded)
+	Written    string           `json:"written"`              // the workspace-relative path written
+	Validated  bool             `json:"validated"`            // true when app.Load was run after the write
+	Validation *StoryValidateOK `json:"validation,omitempty"` // the post-write validation (same shape as story.validate)
 }
 
 // StoryValidateArgs is the input to story.validate.
@@ -252,12 +254,13 @@ func (srv *Server) handleStoryWrite(
 	if err := os.WriteFile(abs, []byte(args.Content), 0o644); err != nil {
 		return buildToolError(ErrBadRequest, fmt.Sprintf("write %s: %v", args.Path, err)), nil, nil
 	}
-	// Auto-validate so a malformed edit is caught now, not on the next session.
-	return nil, StoryWriteOK{
-		OK:         true,
-		Written:    args.Path,
-		Validation: validateStory(appPath, srv.importResolver),
-	}, nil
+	out := StoryWriteOK{OK: true, Written: args.Path}
+	if shouldValidateStoryWrite(appPath, args.Validate) {
+		validation := validateStory(appPath, srv.importResolver)
+		out.Validated = true
+		out.Validation = &validation
+	}
+	return nil, out, nil
 }
 
 // handleStoryValidate loads and validates the story, returning the structured
@@ -371,6 +374,16 @@ func splitWorkspacePath(base string) (storyDir, appPath string) {
 		return filepath.Dir(base), base
 	}
 	return base, filepath.Join(base, "app.yaml")
+}
+
+func shouldValidateStoryWrite(appPath string, explicit *bool) bool {
+	if explicit != nil {
+		return *explicit
+	}
+	if st, err := os.Stat(appPath); err == nil && !st.IsDir() {
+		return true
+	}
+	return false
 }
 
 // safeJoin resolves rel under root and confines it there: an absolute rel, or

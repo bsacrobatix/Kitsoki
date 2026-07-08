@@ -467,6 +467,8 @@ states:
 	callStory(ctx, t, cs, "story.write", map[string]any{"path": "app.yaml", "content": badYAML}, &wrote)
 	assert.True(t, wrote.OK, "the write itself succeeded")
 	assert.Equal(t, "app.yaml", wrote.Written)
+	assert.True(t, wrote.Validated, "story package writes should auto-validate")
+	require.NotNil(t, wrote.Validation, "validation result returned for story package writes")
 	assert.False(t, wrote.Validation.OK, "the written story is invalid")
 	require.NotEmpty(t, wrote.Validation.Errors, "validation errors returned in the write round-trip")
 	joined := ""
@@ -474,6 +476,38 @@ states:
 		joined += e.Message + "\n"
 	}
 	assert.Contains(t, joined, "undeclared_intent")
+}
+
+func TestStoryWriteSkipsValidationForPlainWorkspace(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	cs := newStudioWithWorkspace(ctx, t, dir)
+
+	var wrote studio.StoryWriteOK
+	callStory(ctx, t, cs, "story.write", map[string]any{
+		"path":    filepath.Join(".context", "note.md"),
+		"content": "# Note\n\nPlain workspace file.\n",
+	}, &wrote)
+	assert.True(t, wrote.OK)
+	assert.Equal(t, filepath.Join(".context", "note.md"), wrote.Written)
+	assert.False(t, wrote.Validated, "plain workspace writes should not try to load <workspace>/app.yaml")
+	assert.Nil(t, wrote.Validation)
+	assert.FileExists(t, filepath.Join(dir, ".context", "note.md"))
+
+	forceValidate := true
+	res, err := callTool(ctx, cs, "story.write", map[string]any{
+		"path":     filepath.Join(".context", "force.md"),
+		"content":  "# Force\n",
+		"validate": forceValidate,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "forced validation returns structured validation data, not a tool error: %s", contentText(res))
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &wrote))
+	assert.True(t, wrote.Validated)
+	require.NotNil(t, wrote.Validation)
+	assert.False(t, wrote.Validation.OK)
+	require.NotEmpty(t, wrote.Validation.Errors)
+	assert.Contains(t, wrote.Validation.Errors[0].Message, "app.yaml")
 }
 
 // ─── no-workspace guard ───────────────────────────────────────────────────────

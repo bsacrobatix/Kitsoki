@@ -50,6 +50,43 @@ func TestIssueFilerUsesNativeGitHubAPI(t *testing.T) {
 	}
 }
 
+func TestIssueFilerInfersRepoFromRoot(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	root := t.TempDir()
+	var sawIssueCreate bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/repos/o/r/issues" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		sawIssueCreate = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number":77,"html_url":"https://github.com/o/r/issues/77"}`))
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+	restoreExec := host.SetExecRunnerForTest(func(ctx context.Context, d, name string, args ...string) (string, string, int, error) {
+		if d != root || name != "git" || strings.Join(args, " ") != "remote get-url origin" {
+			t.Fatalf("unexpected repo inference command: dir=%q cmd=%s args=%v", d, name, args)
+		}
+		return "https://github.com/o/r.git\n", "", 0, nil
+	})
+	defer restoreExec()
+
+	res, err := ghIssueFiler(context.Background(), studio.IssueRequest{
+		Root: root, Title: "native issue", Body: "body",
+	})
+	if err != nil {
+		t.Fatalf("ghIssueFiler: %v", err)
+	}
+	if !sawIssueCreate {
+		t.Fatal("expected native issue create request")
+	}
+	if res.URL != "https://github.com/o/r/issues/77" || res.Number != 77 {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
 func TestIssueCreateDocsDescribeNativeFiler(t *testing.T) {
 	docPath := filepath.Join("..", "..", "docs", "architecture", "mcp-studio.md")
 	data, err := os.ReadFile(docPath)

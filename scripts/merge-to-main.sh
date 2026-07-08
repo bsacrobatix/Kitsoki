@@ -109,6 +109,11 @@ if ! git merge-base --is-ancestor HEAD "$branch"; then
   echo "error: $branch is not a fast-forward of main; rebase it onto main in its worktree first" >&2
   exit 1
 fi
+if [ -n "$(git status --porcelain)" ]; then
+  echo "error: primary checkout has uncommitted changes; refusing to merge" >&2
+  git status --short >&2
+  exit 1
+fi
 
 files="$(git diff --name-only HEAD "$branch")"
 if [ -z "$files" ]; then
@@ -161,7 +166,25 @@ printf '%s\n' "$files" | while IFS= read -r f; do
   [ -e "$f" ] && chmod u+w "$f" || true
 done
 
-git merge --ff-only "$branch"
+merge_out=""
+set +e
+merge_out="$(git merge --ff-only "$branch" 2>&1)"
+merge_status=$?
+set -e
+if [ -n "$merge_out" ]; then
+  printf '%s\n' "$merge_out"
+fi
+if [ "$merge_status" -ne 0 ]; then
+  current_head="$(git rev-parse --verify HEAD 2>/dev/null || true)"
+  if [ -n "$current_head" ]; then
+    git reset --hard "$current_head" >/dev/null 2>&1 || true
+    echo "error: merge failed; reset primary checkout index/worktree to HEAD $current_head" >&2
+  else
+    git reset --hard >/dev/null 2>&1 || true
+    echo "error: merge failed; attempted to reset primary checkout index/worktree" >&2
+  fi
+  exit "$merge_status"
+fi
 
 restore_guard
 trap - EXIT

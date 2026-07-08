@@ -409,7 +409,8 @@ func TestIssueCreate_TitleRequired(t *testing.T) {
 // TestIssueCreate_FallbackToArtifactsOnFilingError proves the finding is never
 // lost: when the wired filer fails (the dogfood loop's worst case — a label/auth
 // wall on GitHub), issue.create writes the composed issue to the artifacts dir
-// and returns OK with LocalPath + FilingError set, rather than a hard error.
+// and returns ok:false with LocalPath + FilingError set, rather than a hard
+// tool error that would hide the recoverable markdown path.
 func TestIssueCreate_FallbackToArtifactsOnFilingError(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -428,8 +429,8 @@ func TestIssueCreate_FallbackToArtifactsOnFilingError(t *testing.T) {
 		"body":  "The studio cannot run go test against a worktree outside a session.",
 	})
 	require.NoError(t, err)
-	out := issueResult(t, res) // must NOT be a tool error — fallback keeps it OK
-	assert.True(t, out.OK)
+	out := issueResult(t, res) // must NOT be a tool error — fallback keeps the markdown recoverable
+	assert.False(t, out.OK, "remote filing did not happen")
 	assert.Empty(t, out.URL, "no GitHub URL when filing failed")
 	assert.Contains(t, out.FilingError, "403", "surfaces why GitHub filing failed")
 	require.NotEmpty(t, out.LocalPath, "fallback file path must be returned")
@@ -439,6 +440,31 @@ func TestIssueCreate_FallbackToArtifactsOnFilingError(t *testing.T) {
 	assert.Contains(t, string(body), "MCP gap: no standalone gate-runner", "title preserved")
 	assert.Contains(t, string(body), "go test against a worktree", "body preserved")
 	assert.Contains(t, string(body), "Unfiled", "marked for human recovery")
+}
+
+func TestIssueCreatePassesWorkspaceRootForRepoInference(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	var got studio.IssueRequest
+	filer := func(_ context.Context, req studio.IssueRequest) (studio.IssueResult, error) {
+		got = req
+		return studio.IssueResult{URL: "https://github.com/o/r/issues/7", Number: 7}, nil
+	}
+	sess := studio.NewStudioSession(replayBuilder())
+	_, err := sess.OpenWorkspace(studio.OpenWorkspaceParams{Dir: root})
+	require.NoError(t, err)
+	srv := studio.NewServer(sess, studio.WithIssueFiler(filer), studio.WithArtifactsDir(t.TempDir()))
+	cs := connectInProcess(ctx, t, srv)
+
+	res, err := callTool(ctx, cs, "issue.create", map[string]any{
+		"title": "infer repo from workspace",
+		"body":  "repo omitted on purpose",
+	})
+	require.NoError(t, err)
+	out := issueResult(t, res)
+	assert.True(t, out.OK)
+	assert.Equal(t, root, got.Root, "issue.create should give the filer a workspace root for repo inference")
+	assert.Empty(t, got.Repo)
 }
 
 func TestIssueCreate_PrivacyFailureBlocksFiler(t *testing.T) {

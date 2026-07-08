@@ -48,7 +48,7 @@ func (srv *Server) registerVCSTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "vcs.diff",
-		Description: "Read a git diff, textual. {dir (required), from? (a rev), to? (a rev), paths? ([]path to limit), stat? (--stat summary), name_only? (just file names)} → {ok, diff, truncated?, output_path?}. With no from/to, the working-tree diff; with from only, from..working; with both, from..to. Read-only.",
+		Description: "Read a git diff, textual. {dir (required), from? (a rev), to? (a rev), paths? ([]path to limit), stat? (--stat summary), name_only? (just file names), include_untracked?} → {ok, diff, truncated?, output_path?, warnings?, untracked?}. With no from/to, the working-tree diff; with from only, from..working; with both, from..to. Untracked files are omitted unless include_untracked is true; omitted untracked files produce a warning. Read-only.",
 	}, srv.handleVCSDiff)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
@@ -180,20 +180,23 @@ func parseCount(part, prefix string) (int, bool) {
 
 // VCSDiffArgs is the input to vcs.diff.
 type VCSDiffArgs struct {
-	Dir      string   `json:"dir"`
-	From     string   `json:"from,omitempty"`
-	To       string   `json:"to,omitempty"`
-	Paths    []string `json:"paths,omitempty"`
-	Stat     bool     `json:"stat,omitempty"`
-	NameOnly bool     `json:"name_only,omitempty"`
+	Dir              string   `json:"dir"`
+	From             string   `json:"from,omitempty"`
+	To               string   `json:"to,omitempty"`
+	Paths            []string `json:"paths,omitempty"`
+	Stat             bool     `json:"stat,omitempty"`
+	NameOnly         bool     `json:"name_only,omitempty"`
+	IncludeUntracked bool     `json:"include_untracked,omitempty"`
 }
 
 // VCSDiffOK is the vcs.diff result.
 type VCSDiffOK struct {
-	OK         bool   `json:"ok"`
-	Diff       string `json:"diff"`
-	Truncated  bool   `json:"truncated,omitempty"`
-	OutputPath string `json:"output_path,omitempty"`
+	OK         bool     `json:"ok"`
+	Diff       string   `json:"diff"`
+	Truncated  bool     `json:"truncated,omitempty"`
+	OutputPath string   `json:"output_path,omitempty"`
+	Warnings   []string `json:"warnings,omitempty"`
+	Untracked  []string `json:"untracked,omitempty"`
 }
 
 func (srv *Server) handleVCSDiff(ctx context.Context, req *mcpsdk.CallToolRequest, args VCSDiffArgs) (*mcpsdk.CallToolResult, any, error) {
@@ -221,7 +224,27 @@ func (srv *Server) handleVCSDiff(ctx context.Context, req *mcpsdk.CallToolReques
 	if rerr := gitErr("vcs.diff", out, exit, err); rerr != nil {
 		return rerr, nil, nil
 	}
+	untracked, uerr := workingTreeUntracked(ctx, args)
+	if uerr != nil {
+		return uerr, nil, nil
+	}
+	var warnings []string
+	if len(untracked) > 0 {
+		if args.IncludeUntracked {
+			var aerr *mcpsdk.CallToolResult
+			out, aerr = appendUntrackedDiff(ctx, args, out, untracked)
+			if aerr != nil {
+				return aerr, nil, nil
+			}
+		} else {
+			warnings = append(warnings, fmt.Sprintf("%d untracked file(s) omitted by git diff; pass include_untracked:true to include them", len(untracked)))
+		}
+	}
 	res := VCSDiffOK{OK: true, Diff: out}
+	if len(warnings) > 0 {
+		res.Warnings = warnings
+		res.Untracked = untracked
+	}
 	if len(out) > vcsDiffTruncate {
 		res.Truncated = true
 		if path, werr := writeHostRunOutput(out); werr == nil {
@@ -230,6 +253,87 @@ func (srv *Server) handleVCSDiff(ctx context.Context, req *mcpsdk.CallToolReques
 		res.Diff = out[:vcsDiffTruncate] + "\n… diff truncated (full: " + res.OutputPath + ") …\n"
 	}
 	return nil, res, nil
+}
+
+func workingTreeUntracked(ctx context.Context, args VCSDiffArgs) ([]string, *mcpsdk.CallToolResult) {
+	if args.To != "" {
+		return nil, nil
+	}
+	out, exit, err := gitRun(ctx, args.Dir, "ls-files", "--others", "--exclude-standard")
+	if rerr := gitErr("vcs.diff (untracked)", out, exit, err); rerr != nil {
+		return nil, rerr
+	}
+	var files []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !pathFilterAllows(args.Paths, line) {
+			continue
+		}
+		files = append(files, line)
+	}
+	return files, nil
+}
+
+func appendUntrackedDiff(ctx context.Context, args VCSDiffArgs, out string, untracked []string) (string, *mcpsdk.CallToolResult) {
+	if len(untracked) == 0 {
+		return out, nil
+	}
+	if args.NameOnly {
+		var b strings.Builder
+		b.WriteString(strings.TrimRight(out, "\n"))
+		for _, p := range untracked {
+			if b.Len() > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(p)
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		return b.String(), nil
+	}
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(out, "\n"))
+	for _, p := range untracked {
+		diffArgs := []string{"diff", "--no-index"}
+		if args.Stat {
+			diffArgs = append(diffArgs, "--stat")
+		}
+		diffArgs = append(diffArgs, "--", "/dev/null", p)
+		uout, exit, err := gitRun(ctx, args.Dir, diffArgs...)
+		if err != nil {
+			return "", buildToolError(ErrBadRequest, fmt.Sprintf("vcs.diff (untracked): %v", err))
+		}
+		// git diff --no-index exits 1 when it found differences.
+		if exit != 0 && exit != 1 {
+			return "", buildToolError(ErrBadRequest, fmt.Sprintf("vcs.diff (untracked): git exited %d: %s", exit, strings.TrimSpace(uout)))
+		}
+		if strings.TrimSpace(uout) == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(strings.TrimRight(uout, "\n"))
+	}
+	if b.Len() > 0 {
+		b.WriteByte('\n')
+	}
+	return b.String(), nil
+}
+
+func pathFilterAllows(filters []string, path string) bool {
+	if len(filters) == 0 {
+		return true
+	}
+	cleanPath := filepath.Clean(path)
+	for _, filter := range filters {
+		cleanFilter := filepath.Clean(filter)
+		if cleanPath == cleanFilter || strings.HasPrefix(cleanPath, cleanFilter+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // ── vcs.log ───────────────────────────────────────────────────────────────────

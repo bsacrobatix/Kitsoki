@@ -149,7 +149,7 @@ uses, so the MCP surface can never disagree with them.
 | Tool | Shape | Wraps |
 |---|---|---|
 | `story.read` | `{path} → {content}` | workspace-scoped file read |
-| `story.write` | `{path, content} → {written, validation}` | write, then **auto-validate** in one round-trip; path-escape rejected |
+| `story.write` | `{path, content, validate?} → {written, validated, validation?}` | write, then auto-validate when the workspace contains `app.yaml` (override with `validate`); path-escape rejected |
 | `story.validate` | `{dir?} → {ok, errors[]}` | `app.Load` → `[]ValidationError{File, Line, Column, Message}` — the full load-time invariant set |
 | `story.graph` | `{dir?, graph?, room?, agents?} → {graph \| rooms[] \| detail \| agents[]}` | `graph=true` returns renderer-neutral `kitsoki.graph/v1` nodes/edges; legacy modes still wrap `graph.RoomList` / `Detail` / `AgentContracts` |
 | `story.test` | `{dir?, flows?} → {report}` | `testrunner.RunFlows` (no LLM; honours `--recording`/`--host-cassette`) |
@@ -449,14 +449,18 @@ Three things happen server-side so the agent never handles bytes:
   This is the no-raw-browser-state path for filing a visual failure: semantic
   state/action history plus the masked rrweb replay, without dumping DOMs into
   the issue body.
-- **file** — the composed `{repo, title, body, labels}` goes to the injected
+- **file** — the composed `{repo, root, title, body, labels}` goes to the injected
   [`IssueFiler`](../../internal/mcp/studio/issue_tools.go) seam. The
   `source-autonomous` label is always applied (first) so agent-filed issues are
   filterable. Production (`cmd/kitsoki`) files through the native GitHub issue
-  provider; a test injects a fake that records the request and returns a canned
-  URL — no network, no LLM. With no filer wired the tool returns a structured
-  `ISSUE_UNAVAILABLE`. `issue.create` is allowed in `--read-only` mode (it
-  mutates `.artifacts` + GitHub, not the story tree).
+  provider and infers `repo` from `root`/`workdir` when the caller omits it; a
+  test injects a fake that records the request and returns a canned URL — no
+  network, no LLM. With no filer wired the tool returns a structured
+  `ISSUE_UNAVAILABLE`. If remote filing fails after the issue markdown is
+  composed, the tool writes an `.artifacts/mcp-issues/unfiled/*.md` recovery file
+  and returns `ok:false` with `local_path` and `filing_error`. `issue.create` is
+  allowed in `--read-only` mode (it mutates `.artifacts` + GitHub, not the story
+  tree).
 
 ### `host.*` — the standalone gate-runner
 
@@ -499,13 +503,13 @@ which cannot revert work landed on `onto` since the branch's base.
 | Tool | Shape | Notes |
 |---|---|---|
 | `vcs.status` | `{dir} → {branch, upstream?, ahead, behind, clean, files[{xy, path}]}` | porcelain v1, structured. Read-only |
-| `vcs.diff` | `{dir, from?, to?, paths?, stat?, name_only?} → {diff, truncated?, output_path?}` | textual; full diff spills to a sidecar. Read-only |
+| `vcs.diff` | `{dir, from?, to?, paths?, stat?, name_only?, include_untracked?} → {diff, truncated?, output_path?, warnings?, untracked?}` | textual; full diff spills to a sidecar. Untracked files are omitted by default with a warning; pass `include_untracked:true` to include them. Read-only |
 | `vcs.log` | `{dir, n?, paths?} → {commits[{hash, subject}]}` | Read-only |
 | `worktree.list` | `{dir} → {worktrees[{path, head, branch?, detached?}]}` | Read-only |
 | `worktree.create` | `{dir, branch, base?, path?} → {path, branch, base}` | `git worktree add -b`; lands under `.worktrees/` by convention |
 | `worktree.remove` | `{dir, path, force?} → {removed}` | `git worktree remove` |
 | `vcs.commit` | `{dir, message, paths?} → {commit, nothing_to_commit?}` | stage (`-A` or paths) + commit |
-| `vcs.integrate` | `{dir, branch, onto?, message, worktree_path?, delete_branch?} → {integrated, commit?, conflicts[]?, refused?}` | **guarded** squash-land: refuses unless `dir` is on `onto`, `onto`'s tree is clean, and `branch` has commits beyond its merge-base; conflicts restore the clean tip |
+| `vcs.integrate` | `{dir, branch, onto?, message, worktree_path?, delete_branch?} → {integrated, commit?, conflicts[]?, refused?}` | **guarded** land: repositories with `scripts/merge-to-main.sh` and `onto:"main"` use that repo guard helper; otherwise this is a guarded squash-land that refuses unless `dir` is on `onto`, `onto`'s tree is clean, and `branch` has commits beyond its merge-base; conflicts restore the clean tip |
 
 The read tools stay available on a `--read-only` server; the mutating ones
 (`worktree.create/remove`, `vcs.commit`, `vcs.integrate`) are dropped there.
