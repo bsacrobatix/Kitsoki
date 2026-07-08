@@ -26,6 +26,7 @@ import (
 //   - gs_lint then passes rooted at the RESOLVED workdir but FAILS rooted at "."
 //     — i.e. the seed genuinely was required before, and is not anymore.
 func TestGoalSeekerResolveWorkdir_FromRuntimeBlock(t *testing.T) {
+	t.Setenv(AppDirEnv, "")
 	resolveScript, lintScript := goalSeekerScriptPaths(t)
 
 	// Build a fake main checkout whose ONLY copy of the goal lives in a sibling
@@ -119,6 +120,7 @@ func TestGoalSeekerResolveWorkdir_FromRuntimeBlock(t *testing.T) {
 // goal-seeker should still drive the goal's own worktree, not whatever checkout
 // happened to launch the process.
 func TestGoalSeekerResolveWorkdir_RuntimeWorktreeBeatsDirect(t *testing.T) {
+	t.Setenv(AppDirEnv, "")
 	resolveScript, _ := goalSeekerScriptPaths(t)
 
 	root := t.TempDir()

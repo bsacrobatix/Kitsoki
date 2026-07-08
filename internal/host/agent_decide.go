@@ -103,6 +103,10 @@ func agentDecideHandlerOnce(ctx context.Context, args map[string]any) (Result, e
 	if args == nil {
 		args = map[string]any{}
 	}
+	sandbox, sandboxErr := parseAgentSandbox(args)
+	if sandboxErr != "" {
+		return Result{Error: "host.agent.decide: " + sandboxErr, FailureKind: FailureFatal}, nil
+	}
 
 	// schema: is mandatory for decide.
 	schemaArg, _ := args["schema"].(string)
@@ -130,11 +134,13 @@ func agentDecideHandlerOnce(ctx context.Context, args map[string]any) (Result, e
 			pluginSchemaJSON = json.RawMessage(`"` + strings.TrimSpace(schemaArg) + `"`)
 		}
 	}
-	if pluginRes, handled, pluginErr := TryDispatchVerb(ctx, "decide", rendered, "", agentNameFromArgs(args), "", withArgs, pluginSchemaJSON); handled {
-		if pluginErr != nil {
-			return Result{Error: pluginErr.Error()}, nil
+	if sandbox == nil {
+		if pluginRes, handled, pluginErr := TryDispatchVerb(ctx, "decide", rendered, "", agentNameFromArgs(args), "", withArgs, pluginSchemaJSON); handled {
+			if pluginErr != nil {
+				return Result{Error: pluginErr.Error()}, nil
+			}
+			return pluginRes, nil
 		}
-		return pluginRes, nil
 	}
 
 	// Resolve agent and validate tools.
@@ -335,6 +341,7 @@ func agentDecideHandlerOnce(ctx context.Context, args map[string]any) (Result, e
 		MaxOuterIterations:   decideMaxOuterIterations,
 		ValidatorMaxRetries:  effectiveMaxRetries,
 		SandboxValidatorOpts: sandboxOpts,
+		Sandbox:              sandbox,
 	})
 	durationMS := time.Since(callStart).Milliseconds()
 	emitDecideJournal(ctx, callID, callStart, durationMS, agentNameFromArgs(args), agent.Model,
@@ -547,6 +554,9 @@ type decideLoopParams struct {
 	// submission rather than delegating to mcp-validator's unsandboxed path.
 	// C1 fix: this ensures decide.validator always executes under the sandbox.
 	SandboxValidatorOpts *validatorOptions
+	// Sandbox, when non-nil, runs every decide subprocess iteration through the
+	// agent runtime, including resource limits such as timeout.
+	Sandbox *AgentSandboxSpec
 }
 
 // runDecideWithValidatorRetryLoop runs the decide call with the validator retry
@@ -627,6 +637,7 @@ func runDecideWithValidatorRetryLoop(ctx context.Context, p decideLoopParams) Re
 				CLIArgs:    iterArgs,
 				Stdin:      stdin,
 				WorkingDir: p.WorkingDir,
+				Sandbox:    p.Sandbox,
 			}.Run(ctx)
 			if streamSID != "" {
 				sessionID = streamSID
@@ -667,6 +678,7 @@ func runDecideWithValidatorRetryLoop(ctx context.Context, p decideLoopParams) Re
 				CLIArgs:    iterArgs,
 				Stdin:      stdin,
 				WorkingDir: p.WorkingDir,
+				Sandbox:    p.Sandbox,
 			}.Run(ctx)
 			if streamSID != "" {
 				sessionID = streamSID

@@ -46,8 +46,8 @@ states:
           cwd: "{{ world.worktree_path }}"
           fail_on_error: false
         bind:
-          qa_ok:        stdout_json.qa_ok
-          qa_exit_code: stdout_json.qa_exit_code
+          qa_ok:        ok
+          qa_exit_code: exit_code
           qa_completion_state_path: stdout_json.qa_completion_state_path
       # 2. Read the report so a loop-back maker turn gets concrete feedback. This is
       #    UNGUARDED on purpose: an on_enter invoke's `when:` is evaluated against the
@@ -59,7 +59,6 @@ states:
       #    cmd is fail-safe (the `|| echo` fallback) so a missing report never bounces.
       - invoke: host.run
         id: "read-qa-report"
-        once: true
         with:
           cmd: "cat .artifacts/ui-qa/*/qa-report.md 2>/dev/null || echo '(qa-report.md not found)'"
           cwd: "{{ world.worktree_path }}"

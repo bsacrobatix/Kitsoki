@@ -1,5 +1,5 @@
-# clean — the suite passes on the first (background) run; nothing to fix.
-# idle --start--> starting --> running_executing; green --> review --> done_clean.
+# clean — the quick gate and full gate both pass on the first run; nothing to fix.
+# idle --start--> starting --> running_executing; green --> full_verifying_executing; green --> review --> done_clean.
 test_kind: flow
 app: ../app.yaml
 initial_state: idle
@@ -12,6 +12,9 @@ host_handlers:
     by_call:
       run_initial:
         data: { exit_code: 0, ok: true, stdout: "ok\tall packages\n" }
+        delay: "20ms"
+      full_verify_run:
+        data: { exit_code: 0, ok: true, stdout: "ok\tfull suite\n" }
         delay: "20ms"
   host.agent.decide:
     by_call:

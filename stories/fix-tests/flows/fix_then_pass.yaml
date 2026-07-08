@@ -1,7 +1,7 @@
-# fix_then_pass — first run red, one fix cycle, re-run green.
+# fix_then_pass — first quick run red, one fix cycle, quick/full gates green.
 # running_executing (exit 1) -> fixing_executing (needs_decision=false)
-# -> verifying_executing (exit 0) -> done_clean. All background jobs;
-# one advance_clock drains the whole chain.
+# -> verifying_executing (exit 0) -> full_verifying_executing (exit 0)
+# -> done_clean. All background jobs; one advance_clock drains the whole chain.
 test_kind: flow
 app: ../app.yaml
 initial_state: idle
@@ -17,6 +17,9 @@ host_handlers:
         delay: "20ms"
       verify_run:
         data: { exit_code: 0, ok: true, stdout: "ok\n" }
+        delay: "20ms"
+      full_verify_run:
+        data: { exit_code: 0, ok: true, stdout: "ok\tfull suite\n" }
         delay: "20ms"
   host.agent.task:
     by_call:

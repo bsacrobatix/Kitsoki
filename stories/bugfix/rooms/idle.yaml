@@ -121,11 +121,12 @@ states:
           ticket_source_ref:  "{{ world.ticket_source_ref != '' ? world.ticket_source_ref : 'inline complaint' }}"
           escalate_low_value: true
 
-      # Step 0a: prefer an explicit source reference as the reporting thread.
-      # Local artifact tickets arrive as `.artifacts/issues/bugs/<id>.md`; GitHub
-      # tickets arrive as issue URLs. Keeping that reference avoids creating a
-      # second committed `issues/bugs/` thread for local developer iterations.
-      - when: "world.ticket_id != '' && world.thread == '' && world.ticket_source_ref != '' && !world.bf_autostart_attempted"
+      # Step 0a: prefer an explicit source reference as the reporting thread
+      # when it names a durable ticket surface. Local artifact tickets arrive as
+      # `.artifacts/issues/bugs/<id>.md`; GitHub tickets arrive as issue URLs.
+      # Free-form complaints use labels such as "operator complaint", so they
+      # must fall through to Step 0b's self-bootstrapping bug-file path.
+      - when: "world.ticket_id != '' && world.thread == '' && world.ticket_source_ref != '' && world.ticket_source_mode != 'freeform' && !world.bf_autostart_attempted"
         set:
           thread: "{{ world.ticket_source_ref }}"
 

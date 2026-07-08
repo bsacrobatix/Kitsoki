@@ -1,6 +1,6 @@
 # fix_tests_autonomous — dev-story landing quick action enters the imported
-# fix-tests loop, drains the deterministic command gate + review gate, and
-# returns to landing with the report/review projected.
+# fix-tests loop, drains the quick gate, full deterministic command gate, and
+# review gate, then returns to landing with the report/review projected.
 test_kind: flow
 app: ../app.yaml
 initial_state: landing
@@ -13,6 +13,9 @@ host_handlers:
     by_call:
       run_initial:
         data: { exit_code: 0, ok: true, stdout: "ok\n" }
+        delay: "10ms"
+      full_verify_run:
+        data: { exit_code: 0, ok: true, stdout: "ok\tfull suite\n" }
         delay: "10ms"
   host.agent.decide:
     by_call:

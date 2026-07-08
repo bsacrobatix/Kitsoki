@@ -354,6 +354,9 @@ imports:
       # default gates; non-Go projects should set these from their profile.
       build_cmd:                  "{{{{ world.build_cmd }}}}"
       test_cmd:                   "{{{{ world.test_cmd }}}}"
+      quick_test_cmd:             "{{{{ world.quick_test_cmd }}}}"
+      quick_test_timeout_seconds: "{{{{ world.quick_test_timeout_seconds }}}}"
+      full_test_timeout_seconds:  "{{{{ world.full_test_timeout_seconds }}}}"
 
 world:
   workdir:                    {{ type: string, default: "." }}
@@ -372,6 +375,9 @@ world:
   design_ticket_dir:          {{ type: string, default: {q(docs["design_ticket_dir"])} }}
   build_cmd:                  {{ type: string, default: {q(data.get("build_command", ""))} }}
   test_cmd:                   {{ type: string, default: {q(data.get("test_command", ""))} }}
+  quick_test_cmd:             {{ type: string, default: "" }}
+  quick_test_timeout_seconds: {{ type: int,    default: 180 }}
+  full_test_timeout_seconds:  {{ type: int,    default: 1200 }}
 
 root: core
 """

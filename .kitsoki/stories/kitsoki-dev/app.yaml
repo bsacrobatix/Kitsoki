@@ -181,6 +181,9 @@ imports:
       bugfix_destination:         "{{ world.bugfix_destination }}"
       design_durable_path:        "{{ world.design_durable_path }}"
       test_cmd:                   "{{ world.test_cmd }}"
+      quick_test_cmd:             "{{ world.quick_test_cmd }}"
+      quick_test_timeout_seconds: "{{ world.quick_test_timeout_seconds }}"
+      full_test_timeout_seconds:  "{{ world.full_test_timeout_seconds }}"
 
 # Instance-level world. Provider-pointing keys plus judge-mode
 # defaults; the operator can override any of them at session start
@@ -211,6 +214,9 @@ world:
   # `make test` when this is empty; keeping it explicit here documents the
   # self-instance contract.
   test_cmd: { type: string, default: "make test" }
+  quick_test_cmd: { type: string, default: "go test -short -count=1 ./cmd/kitsoki ./internal/mcp/studio ./internal/host ./internal/app" }
+  quick_test_timeout_seconds: { type: int, default: 180 }
+  full_test_timeout_seconds: { type: int, default: 1200 }
 
   # Proposal/idea work must not write under docs/proposals in the protected
   # primary checkout. Keep scratch + published design docs in local context.

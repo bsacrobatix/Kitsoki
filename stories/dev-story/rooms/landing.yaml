@@ -810,7 +810,10 @@ states:
         - target: tests
           effects:
             - set:
-                test_cmd: "{{ slots.test_cmd ?? world.test_cmd }}"
+                test_cmd:                   "{{ slots.test_cmd ?? world.test_cmd }}"
+                quick_test_cmd:             "{{ slots.quick_test_cmd ?? world.quick_test_cmd }}"
+                quick_test_timeout_seconds: "{{ slots.quick_test_timeout_seconds ?? world.quick_test_timeout_seconds }}"
+                full_test_timeout_seconds:  "{{ slots.full_test_timeout_seconds ?? world.full_test_timeout_seconds }}"
                 fix_tests_report_path: ""
                 fix_tests_review: {}
                 last_error: ""

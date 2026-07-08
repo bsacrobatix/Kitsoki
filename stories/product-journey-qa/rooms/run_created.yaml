@@ -89,6 +89,7 @@ states:
       - prose: '{{ world.next_driver_blocker_command|default:"No next proof blocker command is queued." }}'
       - prose: '{{ world.filing_summary|default:"Use autonomous_fix ticket_repo=owner/repo gh_agent_public_base_url=<url> for the full issue-to-fix loop; file_findings is only for preview/debug filing." }}'
       - prose: '{{ world.filed_issue_summary|default:"" }}'
+      - prose: 'Use file_findings ticket_repo=owner/repo mode=dry-run for preview/debug filing; real filing/fixing goes through autonomous_fix.'
       - prose: '{{ world.gh_agent_fix_evidence_summary|default:"GH-agent fix evidence assets appear here after autonomous_fix." }}'
       - prose: '{{ world.gh_agent_triage_evidence_summary|default:"GH-agent triage preflight assets appear here after autonomous_fix." }}'
       - prose: '{{ world.gh_agent_independent_verify_summary|default:"GH-agent independent verification assets appear here after autonomous_fix." }}'

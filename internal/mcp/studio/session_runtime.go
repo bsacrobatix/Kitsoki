@@ -271,12 +271,6 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 	if registerExtraHostCaps != nil {
 		registerExtraHostCaps(hostReg)
 	}
-	if configureHosts != nil {
-		if err := configureHosts(hostReg); err != nil {
-			rt.Close()
-			return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: configure host registry: %v", err)}
-		}
-	}
 	cassetteHandlers := map[string]bool{}
 	if hostCassette != "" {
 		seen, err := applyStudioHostCassette(hostReg, hostCassette, tapSink{EventSink: sink, tap: rt.tap}, failClosedAgentReplay)
@@ -288,6 +282,12 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 	}
 	if failClosedAgentReplay {
 		installReplayAgentMissHandlers(hostReg, cassetteHandlers)
+	}
+	if configureHosts != nil {
+		if err := configureHosts(hostReg); err != nil {
+			rt.Close()
+			return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: configure host registry: %v", err)}
+		}
 	}
 	if err := hostReg.ValidateAllowList(def.Hosts); err != nil {
 		rt.Close()

@@ -520,6 +520,9 @@ world:
   # (world.build_cmd / world.test_cmd, consumed by validating.yaml / testing.yaml).
   build_cmd:                   { type: string, default: "" }
   test_cmd:                    { type: string, default: "" }
+  quick_test_cmd:              { type: string, default: "" }
+  quick_test_timeout_seconds:  { type: int,    default: 180 }
+  full_test_timeout_seconds:   { type: int,    default: 1200 }
 
   # ── Standup / agent / code-review scratch ────────────────────────
   standup_summary:     { type: string, default: "" }
@@ -803,10 +806,10 @@ world:
 
   # ── Test-fix loop (imported `tests`, stories/fix-tests/) ─────────
   # Self-driving command-green loop for project test suites. The child runs the
-  # deterministic command (`test_cmd`, falling back to make test), uses a maker
-  # agent only when the command is red or review rejects the diff, then requires
-  # an adversarial read-only review that no functionality was lost and no tests
-  # were weakened.
+  # bounded quick gate (`quick_test_cmd`, falling back to `test_cmd`) during
+  # repair cycles, then proves the full deterministic command (`test_cmd`,
+  # falling back to make test) before the adversarial read-only review verifies
+  # that no functionality was lost and no tests were weakened.
   fix_tests_report_path: { type: string, default: "" }
   fix_tests_review:     { type: object, default: {} }
 
@@ -1441,6 +1444,18 @@ intents:
         type: string
         required: false
         description: "Optional command override; defaults to the project test command or make test."
+      quick_test_cmd:
+        type: string
+        required: false
+        description: "Optional quick repair-loop command; defaults to the project quick gate or the full test command."
+      quick_test_timeout_seconds:
+        type: int
+        required: false
+        description: "Optional timeout for the quick repair-loop command."
+      full_test_timeout_seconds:
+        type: int
+        required: false
+        description: "Optional timeout for the full acceptance command."
   go_code_review_story:
     title: "Review PR"
     description: "Hand off to the code-review sub-story (teammate PR review)."
@@ -2107,9 +2122,12 @@ imports:
     entry: starting
 
     world_in:
-      test_cmd:   "{{ world.test_cmd != '' ? world.test_cmd : 'make test' }}"
-      workdir:    "{{ world.workdir != '' ? world.workdir : '.' }}"
-      max_cycles: 3
+      test_cmd:                   "{{ world.test_cmd != '' ? world.test_cmd : 'make test' }}"
+      quick_test_cmd:             "{{ world.quick_test_cmd }}"
+      quick_test_timeout_seconds: "{{ world.quick_test_timeout_seconds }}"
+      full_test_timeout_seconds:  "{{ world.full_test_timeout_seconds }}"
+      workdir:                    "{{ world.workdir != '' ? world.workdir : '.' }}"
+      max_cycles:                 3
 
     intents:
       import: []

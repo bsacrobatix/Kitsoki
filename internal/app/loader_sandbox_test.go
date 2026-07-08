@@ -45,6 +45,41 @@ agents:
 	require.NoError(t, err)
 }
 
+func TestSandboxBlockLoadsOnAgentDecide(t *testing.T) {
+	yaml := `app:
+  id: sandbox-decide-ok
+  version: 0.1.0
+hosts:
+  - host.agent.decide
+intents:
+  go: { title: Go }
+root: work
+states:
+  work:
+    on:
+      go:
+        - target: work
+          effects:
+            - invoke: host.agent.decide
+              with:
+                agent: reviewer
+                prompt: prompts/review.md
+                schema: schemas/review.json
+                sandbox:
+                  min_strength: supervised
+                  repo: read_only
+                  network: model_only
+                  resources: { timeout: "2s" }
+agents:
+  reviewer:
+    system_prompt: "review things"
+    tools: [Read, Grep, Glob, Bash]
+    bash_profile: read-only
+`
+	_, err := LoadBytes([]byte(yaml))
+	require.NoError(t, err)
+}
+
 func TestSandboxBlockRejectsUnknownStrength(t *testing.T) {
 	yaml := strings.Replace(sandboxBaseYAML(), "min_strength: supervised", "min_strength: wishful", 1)
 	_, err := LoadBytes([]byte(yaml))

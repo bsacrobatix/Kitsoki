@@ -24,6 +24,14 @@
 #
 # Used by `make test`; direct runs still skip Node-backed lanes when their
 # dependencies are absent unless KITSOKI_REQUIRE_VITEST=1 is set.
+#
+# Timeout knobs (seconds, all overridable): KITSOKI_TEST_GO_TIMEOUT_SECONDS=300,
+# KITSOKI_TEST_BUILD_TIMEOUT_SECONDS=120, KITSOKI_TEST_STARLARK_TIMEOUT_SECONDS=120,
+# KITSOKI_TEST_FLOW_TIMEOUT_SECONDS=360 per story app,
+# KITSOKI_TEST_VITEST_TIMEOUT_SECONDS=240, KITSOKI_TEST_FEATURES_TIMEOUT_SECONDS=120,
+# KITSOKI_TEST_MEDIA_TIMEOUT_SECONDS=120, and KITSOKI_TEST_PYTHON_TIMEOUT_SECONDS=300
+# per file. Set KITSOKI_TEST_DISABLE_TIMEOUTS=1 only when intentionally
+# diagnosing a hang.
 
 set -uo pipefail
 
@@ -56,6 +64,31 @@ fi
 
 # section appends a banner to the full report file.
 section() { printf '\n========== %s ==========\n' "$1" >>"$REPORT"; }
+
+RUN_WITH_TIMEOUT=()
+if command -v python3 >/dev/null 2>&1 && [ "${KITSOKI_TEST_DISABLE_TIMEOUTS:-0}" != "1" ]; then
+	RUN_WITH_TIMEOUT=(python3 "$ROOT/scripts/with-timeout.py")
+fi
+
+run_timed() {
+	local timeout_s="$1"
+	local label="$2"
+	shift 2
+	if [ "${#RUN_WITH_TIMEOUT[@]}" -gt 0 ]; then
+		"${RUN_WITH_TIMEOUT[@]}" --timeout "$timeout_s" --label "$label" -- "$@"
+	else
+		"$@"
+	fi
+}
+
+GO_TIMEOUT_SECONDS=${KITSOKI_TEST_GO_TIMEOUT_SECONDS:-300}
+BUILD_TIMEOUT_SECONDS=${KITSOKI_TEST_BUILD_TIMEOUT_SECONDS:-120}
+STARLARK_TIMEOUT_SECONDS=${KITSOKI_TEST_STARLARK_TIMEOUT_SECONDS:-120}
+FLOW_TIMEOUT_SECONDS=${KITSOKI_TEST_FLOW_TIMEOUT_SECONDS:-360}
+VITEST_TIMEOUT_SECONDS=${KITSOKI_TEST_VITEST_TIMEOUT_SECONDS:-240}
+FEATURES_TIMEOUT_SECONDS=${KITSOKI_TEST_FEATURES_TIMEOUT_SECONDS:-120}
+MEDIA_TIMEOUT_SECONDS=${KITSOKI_TEST_MEDIA_TIMEOUT_SECONDS:-120}
+PYTHON_TIMEOUT_SECONDS=${KITSOKI_TEST_PYTHON_TIMEOUT_SECONDS:-300}
 
 go_failures=0
 starlark_failures=0
@@ -100,7 +133,7 @@ collect_vitest() {
 # binary via KITSOKI_TEST_KITSOKI_BINARY instead of linking their own copies.
 FLOW_BINARY="$TMP/kitsoki-flows"
 flow_built=1
-if ! go build -o "$FLOW_BINARY" ./cmd/kitsoki >"$TMP/build.log" 2>&1; then
+if ! run_timed "$BUILD_TIMEOUT_SECONDS" "build flow runner" go build -o "$FLOW_BINARY" ./cmd/kitsoki >"$TMP/build.log" 2>&1; then
 	flow_built=0
 	flow_failures=1
 fi
@@ -113,7 +146,7 @@ fi
 if command -v pnpm >/dev/null 2>&1 && [ -d tools/runstatus/node_modules ]; then
 	(
 		cd tools/runstatus || exit 2
-		pnpm test
+		run_timed "$VITEST_TIMEOUT_SECONDS" "runstatus vitest" pnpm test
 	) >"$VITEST_OUT" 2>&1 &
 	vitest_pid=$!
 else
@@ -141,9 +174,10 @@ section "$GO_TEST_LABEL"
 # ordinary go-test flags like "-short -run TestName".
 # shellcheck disable=SC2086
 if [ "$flow_built" -eq 1 ]; then
-	KITSOKI_TEST_KITSOKI_BINARY="$FLOW_BINARY" go test -json $GO_TEST_FLAGS ./... >"$GO_JSON" 2>"$TMP/go.stderr"
+	export KITSOKI_TEST_KITSOKI_BINARY="$FLOW_BINARY"
+	run_timed "$GO_TIMEOUT_SECONDS" "$GO_TEST_LABEL" go test -json $GO_TEST_FLAGS ./... >"$GO_JSON" 2>"$TMP/go.stderr"
 else
-	go test -json $GO_TEST_FLAGS ./... >"$GO_JSON" 2>"$TMP/go.stderr"
+	run_timed "$GO_TIMEOUT_SECONDS" "$GO_TEST_LABEL" go test -json $GO_TEST_FLAGS ./... >"$GO_JSON" 2>"$TMP/go.stderr"
 fi
 go_rc=$?
 
@@ -172,7 +206,7 @@ fi
 # missing main(ctx), undefined names, and ungranted builtins without executing
 # scripts or touching network/LLM/cost-bearing paths.
 section "starlark validation"
-make --no-print-directory starcheck-kitsoki >"$TMP/starlark.out" 2>&1
+run_timed "$STARLARK_TIMEOUT_SECONDS" "starlark validation" make --no-print-directory starcheck-kitsoki >"$TMP/starlark.out" 2>&1
 starlark_rc=$?
 cat "$TMP/starlark.out" >>"$REPORT"
 [ "$starlark_rc" -ne 0 ] && starlark_failures=1
@@ -223,14 +257,20 @@ if [ "$flow_built" -eq 1 ]; then
 			set -uo pipefail
 			tmp="$1"
 			bin="$2"
-			app="$3"
+			timeout_s="$3"
+			timeout_bin="$4"
+			app="$5"
 			slug="$(printf "%s" "$app" | tr "/" "-")"
 			fj="$tmp/flow-$slug.json"
 			fout="$tmp/flow-$slug.out"
 			frc="$tmp/flow-$slug.rc"
-			"$bin" test flows "$app" --json "$fj" >"$fout" 2>&1
+			if [ -n "$timeout_bin" ]; then
+				python3 "$timeout_bin" --timeout "$timeout_s" --label "story flows $app" -- "$bin" test flows "$app" --json "$fj" >"$fout" 2>&1
+			else
+				"$bin" test flows "$app" --json "$fj" >"$fout" 2>&1
+			fi
 			printf "%d\n" "$?" >"$frc"
-		' _ "$TMP" "$FLOW_BINARY" <"$FLOW_APPS_LIST"
+		' _ "$TMP" "$FLOW_BINARY" "$FLOW_TIMEOUT_SECONDS" "${RUN_WITH_TIMEOUT[1]:-}" <"$FLOW_APPS_LIST"
 	fi
 
 	while IFS= read -r app; do
@@ -263,7 +303,7 @@ collect_vitest
 # ---------------------------------------------------------------------------
 section "feature catalog"
 if command -v pnpm >/dev/null 2>&1 && [ -d tools/runstatus/node_modules ]; then
-	pnpm --dir tools/runstatus --silent features:check >"$TMP/features.out" 2>&1
+	run_timed "$FEATURES_TIMEOUT_SECONDS" "feature catalog" pnpm --dir tools/runstatus --silent features:check >"$TMP/features.out" 2>&1
 	features_rc=$?
 	cat "$TMP/features.out" >>"$REPORT"
 	[ "$features_rc" -ne 0 ] && features_failures=1
@@ -279,8 +319,8 @@ section "demo media contract"
 if command -v node >/dev/null 2>&1 && command -v pnpm >/dev/null 2>&1 && [ -d tools/runstatus/node_modules ]; then
 	MEDIA_INDEX="$TMP/features-media"
 	mkdir -p "$MEDIA_INDEX"
-	if pnpm --dir tools/runstatus --silent exec tsx scripts/features/generate.ts --index --out "$MEDIA_INDEX" >"$TMP/media-index.out" 2>&1; then
-		node tools/site/scripts/check-media.mjs --index "$MEDIA_INDEX/features-index.json" >"$TMP/media.out" 2>&1
+	if run_timed "$MEDIA_TIMEOUT_SECONDS" "demo media index" pnpm --dir tools/runstatus --silent exec tsx scripts/features/generate.ts --index --out "$MEDIA_INDEX" >"$TMP/media-index.out" 2>&1; then
+		run_timed "$MEDIA_TIMEOUT_SECONDS" "demo media contract" node tools/site/scripts/check-media.mjs --index "$MEDIA_INDEX/features-index.json" >"$TMP/media.out" 2>&1
 		media_rc=$?
 		cat "$TMP/media-index.out" "$TMP/media.out" >>"$REPORT"
 		[ "$media_rc" -ne 0 ] && media_failures=1
@@ -308,7 +348,7 @@ if command -v python3 >/dev/null 2>&1; then
 	for t in "${MINING_TESTS[@]}"; do
 		mining_total=$((mining_total + 1))
 		mout="$TMP/mining-$(basename "$t").out"
-		python3 "$t" >"$mout" 2>&1
+		run_timed "$PYTHON_TIMEOUT_SECONDS" "python tool test $t" python3 "$t" >"$mout" 2>&1
 		rc=$?
 		{ printf -- '-- %s (exit %d)\n' "$t" "$rc"; cat "$mout"; } >>"$REPORT"
 		if [ "$rc" -ne 0 ]; then
