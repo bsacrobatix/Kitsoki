@@ -2,17 +2,19 @@
 #
 # run-tests.sh — concise runner for the full kitsoki test suite.
 #
-# Runs six suites and NEVER bails early — every failure across all is
+# Runs seven suites and NEVER bails early — every failure across all is
 # collected before we exit:
 #   1. go test $KITSOKI_GO_TEST_FLAGS ./...
 #   2. Starlark static validation     (host.starlark.run parse + resolve)
 #   3. story flow fixtures            (deterministic, no-LLM `kitsoki test flows`
 #                                      for each tracked stories/*/app.yaml)
-#   4. feature catalog                (features/*.yaml schema + generated tour
+#   4. runstatus Vitest               (web UI unit/component tests; started in
+#                                      parallel with the Go/story lanes)
+#   5. feature catalog                (features/*.yaml schema + generated tour
 #                                      manifests freshness; skipped with a
 #                                      warning when pnpm/node_modules absent)
-#   5. demo media contract            (no-LLM product-site/deck media layout)
-#   6. session-mining no-LLM invariants
+#   6. demo media contract            (no-LLM product-site/deck media layout)
+#   7. session-mining no-LLM invariants
 #
 # Output contract:
 #   - success → one terse line per suite, plus the report path.
@@ -20,7 +22,8 @@
 #   - ALWAYS  → a complete report written to .artifacts/test-reports/, with only
 #               the most recent $KEEP reports retained (older ones rotated out).
 #
-# Used by `make test`. Run directly for the same behaviour.
+# Used by `make test`; direct runs still skip Node-backed lanes when their
+# dependencies are absent unless KITSOKI_REQUIRE_VITEST=1 is set.
 
 set -uo pipefail
 
@@ -35,7 +38,15 @@ TS="$(date +%Y%m%d-%H%M%S)"
 REPORT="$REPORT_DIR/test-$TS.log"
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP" ./.kitsoki-flows' EXIT
+vitest_pid=""
+cleanup() {
+	if [ -n "${vitest_pid:-}" ]; then
+		kill "$vitest_pid" 2>/dev/null || true
+		wait "$vitest_pid" 2>/dev/null || true
+	fi
+	rm -rf "$TMP" ./.kitsoki-flows
+}
+trap cleanup EXIT
 
 if [ -t 1 ]; then
 	RED=$'\e[31m'; GREEN=$'\e[32m'; YELLOW=$'\e[33m'; BOLD=$'\e[1m'; DIM=$'\e[2m'; RST=$'\e[0m'
@@ -49,6 +60,11 @@ section() { printf '\n========== %s ==========\n' "$1" >>"$REPORT"; }
 go_failures=0
 starlark_failures=0
 flow_failures=0
+vitest_failures=0
+vitest_skipped=0
+vitest_rc=0
+vitest_collected=0
+vitest_required=${KITSOKI_REQUIRE_VITEST:-0}
 features_failures=0
 features_skipped=0
 media_failures=0
@@ -57,6 +73,27 @@ mining_failures=0
 mining_skipped=0
 mining_total=0
 declare -a MINING_FAILED
+VITEST_OUT="$TMP/vitest.out"
+
+collect_vitest() {
+	if [ "$vitest_collected" -eq 1 ]; then
+		return
+	fi
+	vitest_collected=1
+	section "runstatus vitest"
+	if [ -n "$vitest_pid" ]; then
+		if wait "$vitest_pid"; then
+			vitest_rc=0
+		else
+			vitest_rc=$?
+		fi
+		vitest_pid=""
+		cat "$VITEST_OUT" >>"$REPORT"
+		[ "$vitest_rc" -ne 0 ] && vitest_failures=1
+	else
+		cat "$VITEST_OUT" >>"$REPORT"
+	fi
+}
 
 # Build the plain kitsoki binary once for all suites that need a command-line
 # executable. The flow suite uses it directly, and Go tests can opt into the same
@@ -66,6 +103,27 @@ flow_built=1
 if ! go build -o "$FLOW_BINARY" ./cmd/kitsoki >"$TMP/build.log" 2>&1; then
 	flow_built=0
 	flow_failures=1
+fi
+
+# Start the web UI unit suite early so its wall time overlaps with the Go and
+# story lanes. The Make targets install deps first and set KITSOKI_REQUIRE_VITEST
+# so this lane is mandatory for `make test` / `make test-full`; direct script
+# runs keep the existing "skip optional Node-backed checks when deps are absent"
+# behavior.
+if command -v pnpm >/dev/null 2>&1 && [ -d tools/runstatus/node_modules ]; then
+	(
+		cd tools/runstatus || exit 2
+		pnpm test
+	) >"$VITEST_OUT" 2>&1 &
+	vitest_pid=$!
+else
+	if [ "$vitest_required" = "1" ]; then
+		vitest_failures=1
+		echo "FAILED: pnpm or tools/runstatus/node_modules missing; run 'make setup' or 'make vitest-check' first" >"$VITEST_OUT"
+	else
+		vitest_skipped=1
+		echo "skipped: pnpm or tools/runstatus/node_modules missing (run 'make setup' + 'make web')" >"$VITEST_OUT"
+	fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -198,8 +256,10 @@ if [ "$flow_built" -eq 1 ]; then
 	done <"$FLOW_APPS_LIST"
 fi
 
+collect_vitest
+
 # ---------------------------------------------------------------------------
-# Suite 3: feature catalog (features/*.yaml ↔ generated tour manifests)
+# Suite 5: feature catalog (features/*.yaml ↔ generated tour manifests)
 # ---------------------------------------------------------------------------
 section "feature catalog"
 if command -v pnpm >/dev/null 2>&1 && [ -d tools/runstatus/node_modules ]; then
@@ -213,7 +273,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Suite 4: demo media contract (source/staged product-site media + deck embeds)
+# Suite 6: demo media contract (source/staged product-site media + deck embeds)
 # ---------------------------------------------------------------------------
 section "demo media contract"
 if command -v node >/dev/null 2>&1 && command -v pnpm >/dev/null 2>&1 && [ -d tools/runstatus/node_modules ]; then
@@ -234,7 +294,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Suite 5: session-mining no-LLM invariants (stdlib python, committed fixtures)
+# Suite 7: session-mining no-LLM invariants (stdlib python, committed fixtures)
 # ---------------------------------------------------------------------------
 # The intent pipeline, outcome capture, git-ops coverage, and the real-cost
 # stack are all pure-python and run against frozen agent JSON — NEVER a live
@@ -270,12 +330,17 @@ ls -1t "$REPORT_DIR"/test-*.log 2>/dev/null | tail -n +$((KEEP + 1)) | while rea
 # ---------------------------------------------------------------------------
 # Console summary
 # ---------------------------------------------------------------------------
-total_failures=$((go_failures + starlark_failures + flow_failures + features_failures + media_failures + mining_failures))
+total_failures=$((go_failures + starlark_failures + flow_failures + vitest_failures + features_failures + media_failures + mining_failures))
 
 if [ "$total_failures" -eq 0 ]; then
 	printf '%s✓%s %s   %s%d packages%s\n' "$GREEN" "$RST" "$GO_TEST_LABEL" "$DIM" "$go_pkgs_total" "$RST"
 	printf '%s✓%s starlark check\n' "$GREEN" "$RST"
 	printf '%s✓%s story flows     %s%d stories%s\n' "$GREEN" "$RST" "$DIM" "$flow_apps_total" "$RST"
+	if [ "$vitest_skipped" -eq 1 ]; then
+		printf '%s-%s runstatus vitest %sskipped (pnpm/node_modules missing)%s\n' "$YELLOW" "$RST" "$DIM" "$RST"
+	else
+		printf '%s✓%s runstatus vitest\n' "$GREEN" "$RST"
+	fi
 	if [ "$features_skipped" -eq 1 ]; then
 		printf '%s-%s feature catalog %sskipped (pnpm/node_modules missing)%s\n' "$YELLOW" "$RST" "$DIM" "$RST"
 	else
@@ -354,6 +419,12 @@ if [ "$flow_failures" -gt 0 ]; then
 			fi
 		done
 	fi
+fi
+
+# --- Runstatus Vitest failures ---------------------------------------------
+if [ "$vitest_failures" -gt 0 ]; then
+	printf '\n%s✗ runstatus vitest%s — web UI unit/component tests failed:\n' "$BOLD$RED" "$RST"
+	sed 's/^/  /' "$VITEST_OUT"
 fi
 
 # --- Feature catalog failures -------------------------------------------------

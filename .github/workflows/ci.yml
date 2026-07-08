@@ -30,18 +30,29 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: tools/runstatus/pnpm-lock.yaml
+
       # ffmpeg backs the video-frame / chapter handlers (internal/video,
       # internal/host video tests, runstatus video RPC). jq is preinstalled on
-      # ubuntu-latest; Go comes from setup-go above; the committed
-      # internal/runstatus/web/assets/.gitkeep satisfies the //go:embed pattern
-      # so no pnpm/SPA build is needed just to test.
+      # ubuntu-latest; Go comes from setup-go above. Node/pnpm are present so
+      # make test-full can run the same runstatus Vitest and feature/media
+      # checks as local make test without building the SPA.
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
       # `make test-full` runs exhaustive `go test ./...` plus the deterministic
-      # story flow suites (no LLM, no cost). KITSOKI_CASSETTE_STRICT hard-errors any flow
-      # that tries to record/re-record a cassette instead of replaying one, so
-      # a missing fixture fails CI loudly instead of silently recording (and
+      # story flow suites, runstatus Vitest, feature/media checks, and Python
+      # invariants (no LLM, no cost). KITSOKI_CASSETTE_STRICT hard-errors any
+      # flow that tries to record/re-record a cassette instead of replaying one,
+      # so a missing fixture fails CI loudly instead of silently recording (and
       # potentially calling a live LLM) in an environment with no credentials.
       - name: Run tests
         env:
@@ -73,11 +84,6 @@ jobs:
       # recording. No LLM, no browser; fast and deterministic.
       - name: Feature catalog checks
         run: make features-check
-
-      # runstatus (web UI) component/unit tests — previously a 59-file suite
-      # that only ran via manual `pnpm test`, wired to no CI job.
-      - name: Vitest (runstatus)
-        run: make vitest-check
 
       # Fast dead-link/docs/site-contract guard. It does not record demos or call
       # any LLM; missing media degrades to posters/placeholders.
