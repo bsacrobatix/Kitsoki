@@ -58,6 +58,9 @@ states:
             - set:
                 draft_feedback: ""   # the verb-laden text was a deck selector, not edit direction
                 render_retries: 0
+                render_error_repairable: false
+                render_error_kind: ""
+                render_error_summary: ""
         # An existing deck is already loaded (operator ran edit_existing / an
         # "edit <deck>" instruction earlier). Plain `start` should render that
         # existing spec directly so review/feedback can begin — NOT re-author it
@@ -72,6 +75,9 @@ states:
                   summary:   "{{ world.source_deck.summary }}"
                 draft_feedback: ""
                 render_retries: 0   # fresh render — reset the auto-fix budget
+                render_error_repairable: false
+                render_error_kind: ""
+                render_error_summary: ""
         - target: drafting
           effects:
             - set:
@@ -81,6 +87,9 @@ states:
                 deck: {}
                 source_deck: {}
                 render_retries: 0   # fresh deck — reset the auto-fix budget
+                render_error_repairable: false
+                render_error_kind: ""
+                render_error_summary: ""
       edit_existing:
         # An existing deck renders IN PLACE and goes straight to review — no
         # authoring agent. The deck already exists and works in the web viewer;
@@ -111,6 +120,9 @@ states:
             - set:
                 draft_feedback: "{{ slots.feedback ?? '' }}"
                 render_retries: 0   # fresh deck — reset the auto-fix budget
+                render_error_repairable: false
+                render_error_kind: ""
+                render_error_summary: ""
       quit:
         - target: "@exit:abandoned"
           effects:

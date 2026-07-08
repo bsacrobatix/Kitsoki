@@ -145,6 +145,9 @@ states:
                 deck_path:       ""
                 semantic_path:   ""
                 render_retries:  0   # fresh deck — reset the auto-fix budget
+                render_error_repairable: false
+                render_error_kind: ""
+                render_error_summary: ""
                 # Clear the once: bind + the consumed annotation + scene targeting
                 # so the NEXT refine re-resolves the slide freshly.
                 refine_result:   {}
