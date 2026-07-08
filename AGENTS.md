@@ -4,19 +4,19 @@ run raw `git worktree`, `git clone`, rebase, merge, or teardown commands for
 normal development. Delegate the lifecycle to:
 
 ```
-scripts/dev-workspace.sh create --id <id> --branch <branch> --base main --bootstrap
+scripts/dev-workspace.sh create --id <id> --branch <branch> --base main --target staging/local --bootstrap
 scripts/dev-workspace.sh status <id>
 scripts/dev-workspace.sh commit <id> --message "<message>"
-scripts/dev-workspace.sh merge <id> --gate "<focused validation>" --teardown
+scripts/dev-workspace.sh merge <id> --target staging/local --gate "<focused validation>" --teardown
 ```
 
 The script creates workspaces under `.capsules/workspaces`, writes the Kitsoki
-capsule/clone sentinels, runs the bootstrap target when requested, imports the
-finished branch into local `main` through `scripts/merge-to-main.sh`, and
-removes the workspace on `--teardown`. If `main` advanced, the script rebases
-the workspace onto current local `main`; rerun focused validation before
-retrying a failed/conflicted merge. Do not manually chmod the primary checkout
-except to repair the guard itself.
+capsule/clone sentinels, runs the bootstrap target when requested, imports
+completed local work into the local stabilization branch (`staging/local` by
+default), and removes the workspace on `--teardown`. If the target branch
+advanced, the script rebases the workspace onto the current target; rerun
+focused validation before retrying a failed/conflicted merge. Do not manually
+chmod the primary checkout except to repair the guard itself.
 
 See `docs/dev-workspaces.md` for the full lifecycle contract, metadata files,
 failure modes, recovery rules, and validation commands.
@@ -30,15 +30,18 @@ handoff boundary, such as a non-technical user report, an autonomous GitHub
 agent job, or a remote collaboration flow where the agent is expected to fix the
 issue and open a PR.
 
-Keep the primary checkout's `main` clean and green. It is acceptable for tests
-to fail temporarily inside a managed workspace while implementation is in
-progress. When the task is complete, stabilize in that workspace, run focused
-validation, commit only your work, and merge through
-`scripts/dev-workspace.sh merge <id> --gate "<focused validation>" --teardown`.
+Keep the primary checkout's `main` clean, green, and reserved for remote sync or
+explicit final promotion. It is acceptable for tests to fail temporarily inside
+a managed workspace while implementation is in progress. When the task is
+complete, stabilize in that workspace, run focused validation, commit only your
+work, and merge to `staging/local` through
+`scripts/dev-workspace.sh merge <id> --target staging/local --gate "<focused validation>" --teardown`.
 Do not stop at a workspace commit for completed implementation work unless the
-user explicitly asks you not to merge. Open or retarget a GitHub PR only after
-the local branch is stabilized; WIP/draft PRs that are not ready for main CI
-should use a non-main base prefix such as `agent/*`, `integration/*`, or
+user explicitly asks you not to merge. Do not land local iterative work directly
+to `main`; use `--target main` only when the user explicitly asks for final
+local promotion after the stabilization gate. Open or retarget a GitHub PR only
+after the local branch is stabilized; WIP/draft PRs that are not ready for main
+CI should use a non-main base prefix such as `agent/*`, `integration/*`, or
 `staging/*`.
 
 Prefer GitHub PRs for review and landing, but do not burn CI on every
