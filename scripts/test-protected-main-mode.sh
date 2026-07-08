@@ -162,6 +162,45 @@ assert_writable "$merge_repo/.context"
 assert_writable "$merge_repo/.context/note.md"
 touch "$merge_repo/.context/post-merge-note.md"
 
+dirty_repo="$tmp/dirty-repo"
+git_init "$dirty_repo"
+mkdir -p "$dirty_repo/scripts"
+cp "$script_dir/merge-to-main.sh" "$dirty_repo/scripts/merge-to-main.sh"
+chmod +x "$dirty_repo/scripts/merge-to-main.sh"
+git -C "$dirty_repo" add scripts/merge-to-main.sh
+git -C "$dirty_repo" commit -q -m "add merge helper"
+commit_file "$dirty_repo" keep.txt keep
+git -C "$dirty_repo" branch -M main
+
+git -C "$dirty_repo" checkout -q -b feature
+commit_file "$dirty_repo" feature.txt feature
+git -C "$dirty_repo" checkout -q main
+printf '%s\n' local >"$dirty_repo/keep.txt"
+(
+  cd "$dirty_repo"
+  scripts/merge-to-main.sh feature >"$tmp/dirty-unrelated.out"
+)
+assert_contains "$tmp/dirty-unrelated.out" "main ->"
+[ "$(cat "$dirty_repo/feature.txt")" = "feature" ] ||
+  { echo "dirty-unrelated merge skipped feature file" >&2; exit 1; }
+[ "$(cat "$dirty_repo/keep.txt")" = "local" ] ||
+  { echo "dirty-unrelated merge clobbered local dirty file" >&2; exit 1; }
+
+chmod -R u+w "$dirty_repo"
+git -C "$dirty_repo" checkout -q -b overlap
+commit_file "$dirty_repo" conflict.txt branch
+git -C "$dirty_repo" checkout -q main
+printf '%s\n' local >"$dirty_repo/conflict.txt"
+set +e
+(
+  cd "$dirty_repo"
+  scripts/merge-to-main.sh overlap
+) >"$tmp/dirty-overlap.out" 2>&1
+dirty_overlap_status=$?
+set -e
+[ "$dirty_overlap_status" -ne 0 ] || { echo "dirty-overlap merge should fail" >&2; exit 1; }
+assert_contains "$tmp/dirty-overlap.out" "conflict.txt"
+
 race_repo="$tmp/race-repo"
 git_init "$race_repo"
 mkdir -p "$race_repo/scripts" "$race_repo/src"

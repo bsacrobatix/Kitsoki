@@ -58,6 +58,27 @@ printf 'two\n' >"$workspace/feature.txt"
 [ ! -e "$workspace" ] || fail "merge --teardown left workspace behind"
 [ "$(cat "$source_repo/feature.txt")" = "two" ] || fail "merge did not fast-forward source repo"
 
+unrelated_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id unrelated-dirty --branch agent/unrelated-dirty --base main --json)"
+unrelated_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$unrelated_json")"
+printf 'branch\n' >"$unrelated_workspace/branch-only.txt"
+"$dev_workspace" commit --repo "$source_repo" --root "$root" "$unrelated_workspace" --message 'add branch-only file' >/dev/null
+printf 'local\n' >"$source_repo/local-only.txt"
+"$dev_workspace" merge --repo "$source_repo" --root "$root" "$unrelated_workspace" --teardown >/dev/null
+[ ! -e "$unrelated_workspace" ] || fail "merge with unrelated dirty primary left workspace behind"
+[ "$(cat "$source_repo/branch-only.txt")" = "branch" ] || fail "merge skipped branch-only file"
+[ "$(cat "$source_repo/local-only.txt")" = "local" ] || fail "merge clobbered unrelated dirty primary file"
+
+overlap_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id overlapping-dirty --branch agent/overlapping-dirty --base main --json)"
+overlap_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$overlap_json")"
+printf 'branch\n' >"$overlap_workspace/conflict.txt"
+"$dev_workspace" commit --repo "$source_repo" --root "$root" "$overlap_workspace" --message 'add conflict file' >/dev/null
+printf 'local\n' >"$source_repo/conflict.txt"
+if "$dev_workspace" merge --repo "$source_repo" --root "$root" "$overlap_workspace" --teardown >/tmp/kitsoki-dev-workspace-overlap.log 2>&1; then
+  fail "merge succeeded despite overlapping dirty primary file"
+fi
+grep -Fq "conflict.txt" /tmp/kitsoki-dev-workspace-overlap.log || fail "overlap failure did not name conflicting file"
+"$dev_workspace" close --repo "$source_repo" --root "$root" --force "$overlap_workspace" >/dev/null
+
 dirty_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id dirty --branch agent/dirty --base main --json)"
 dirty_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$dirty_json")"
 printf 'dirty\n' >"$dirty_workspace/untracked.txt"

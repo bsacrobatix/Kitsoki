@@ -109,17 +109,72 @@ if ! git merge-base --is-ancestor HEAD "$branch"; then
   echo "error: $branch is not a fast-forward of main; rebase it onto main in its managed workspace first" >&2
   exit 1
 fi
-if [ -n "$(git status --porcelain)" ]; then
-  echo "error: primary checkout has uncommitted changes; refusing to merge" >&2
-  git status --short >&2
-  exit 1
-fi
 
 files="$(git diff --name-only HEAD "$branch")"
 if [ -z "$files" ]; then
   echo "nothing to merge; main already contains $branch"
   exit 0
 fi
+
+changed_files_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-merge-files.XXXXXX")"
+printf '%s\n' "$files" >"$changed_files_file"
+set +e
+dirty_overlap="$(python3 - "$PWD" "$changed_files_file" <<'PY'
+import subprocess
+import sys
+
+repo, changed_files_file = sys.argv[1:]
+with open(changed_files_file, encoding="utf-8") as f:
+    changed = [line.rstrip("\n") for line in f if line.rstrip("\n")]
+if not changed:
+    sys.exit(0)
+
+status = subprocess.run(
+    ["git", "-C", repo, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    stdout=subprocess.PIPE,
+    check=False,
+)
+if status.returncode != 0:
+    sys.exit(status.returncode)
+
+dirty = set()
+parts = status.stdout.split(b"\0")
+i = 0
+while i < len(parts):
+    entry = parts[i]
+    i += 1
+    if not entry:
+        continue
+    code = entry[:2].decode("ascii", "replace")
+    path = entry[3:].decode("utf-8", "surrogateescape")
+    if path:
+        dirty.add(path)
+    if ("R" in code or "C" in code) and i < len(parts) and parts[i]:
+        dirty.add(parts[i].decode("utf-8", "surrogateescape"))
+        i += 1
+
+def overlaps(a, b):
+    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+
+conflicts = sorted({d for d in dirty for c in changed if overlaps(d, c)})
+for path in conflicts:
+    print(path)
+sys.exit(1 if conflicts else 0)
+PY
+)"
+dirty_status=$?
+set -e
+rm -f "$changed_files_file"
+if [ "$dirty_status" -ne 0 ]; then
+  if [ -z "$dirty_overlap" ]; then
+    echo "error: failed to inspect primary checkout dirty paths" >&2
+    exit "$dirty_status"
+  fi
+  echo "error: primary checkout has uncommitted changes in files this branch would update; refusing to merge" >&2
+  printf '%s\n' "$dirty_overlap" >&2
+  exit 1
+fi
+
 dirs="$(printf '%s\n' "$files" | xargs -n1 dirname | sort -u)"
 guard_paths="$(
   printf '%s\n' "$files" | while IFS= read -r f; do
