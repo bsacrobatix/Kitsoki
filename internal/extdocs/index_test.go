@@ -112,6 +112,15 @@ components:
 	if len(idx.Docs) != 2 {
 		t.Fatalf("docs len = %d, want 2: %#v", len(idx.Docs), idx.Docs)
 	}
+	assertComponent(t, idx.Components, "story", "story:@example/demo/demo")
+	assertComponent(t, idx.Components, "host-interface", "story:@example/demo/demo#host_interfaces.reporter")
+	assertComponent(t, idx.Components, "agent-profile", "story:@example/demo/demo#agents.reviewer")
+	assertComponent(t, idx.Components, "provider-profile", "story:@example/demo/demo#providers.cheap")
+	assertComponent(t, idx.Components, "toolbox", "story:@example/demo/demo#toolboxes.read_only")
+	assertComponent(t, idx.Components, "agent-plugin", "story:@example/demo/demo#agent_plugins.agent.local")
+	assertComponent(t, idx.Components, "prompt", "story:@example/demo/demo#prompts/review.md")
+	assertComponent(t, idx.Components, "schema", "story:@example/demo/demo#schemas/out.json")
+	assertComponent(t, idx.Components, "starlark-script", "story:@example/demo/demo#scripts/enrich.star")
 }
 
 func TestBuildIndex_DiscoversStandaloneStory(t *testing.T) {
@@ -138,4 +147,14 @@ func assertContains(t *testing.T, got []string, want string) {
 		}
 	}
 	t.Fatalf("%q not found in %#v", want, got)
+}
+
+func assertComponent(t *testing.T, got []Component, kind, id string) {
+	t.Helper()
+	for _, c := range got {
+		if c.Kind == kind && c.ID == id {
+			return
+		}
+	}
+	t.Fatalf("component %s:%s not found in %#v", kind, id, got)
 }

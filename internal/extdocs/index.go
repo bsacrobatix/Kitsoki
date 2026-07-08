@@ -94,6 +94,7 @@ func BuildIndex(opts IndexOptions) (*Index, error) {
 	if err := discoverStandaloneStories(idx, abs, kitOwners); err != nil {
 		return nil, err
 	}
+	addGeneratedHookComponents(idx, abs)
 	sortIndex(idx)
 	return idx, nil
 }
@@ -190,7 +191,7 @@ func storyInventory(idx *Index, root, storyDir, storyID, packageID string) (Stor
 	if err != nil {
 		return Story{}, err
 	}
-	return Story{
+	story := Story{
 		ID:             storyID,
 		PackageID:      packageID,
 		Title:          firstNonEmpty(def.App.Title, def.App.ID),
@@ -212,7 +213,9 @@ func storyInventory(idx *Index, root, storyDir, storyID, packageID string) (Stor
 		Scripts:        append(globRel(storyDir, "scripts", "*.star"), globRel(storyDir, "scripts", "*.star.yaml")...),
 		Flows:          globRel(storyDir, "flows", "*.yaml"),
 		Docs:           docIDs,
-	}, nil
+	}
+	addGeneratedStoryComponents(idx, story, def)
+	return story, nil
 }
 
 func addManifestDocs(idx *Index, dir, owner string) ([]string, error) {
@@ -246,7 +249,24 @@ func addManifestDocsForIndex(idx *Index, dir, owner string) ([]string, error) {
 	for _, c := range m.Components {
 		componentID := c.Kind + ":" + c.ID
 		if idx != nil {
-			idx.Components = append(idx.Components, Component{Kind: c.Kind, ID: c.ID})
+			node := c
+			node.Owner = owner
+			if node.Title == "" {
+				node.Title = firstNonEmpty(firstDocTitle(c.Docs), c.ID)
+			}
+			if node.Summary == "" && len(c.Docs) > 0 {
+				node.Summary = "Source-owned component docs from " + ManifestFileName + "."
+			}
+			if node.Path == "" {
+				node.Path = firstDocPath(c.Docs)
+			}
+			if node.GeneratedFrom == "" {
+				node.GeneratedFrom = firstDocGeneratedFrom(c.Docs)
+			}
+			if node.Publish == "" {
+				node.Publish = firstNonEmpty(firstDocPublish(c.Docs), "true")
+			}
+			addComponent(idx, node)
 		}
 		for _, d := range c.Docs {
 			id := componentID + ":" + d.ID
@@ -257,6 +277,392 @@ func addManifestDocsForIndex(idx *Index, dir, owner string) ([]string, error) {
 		}
 	}
 	return ids, nil
+}
+
+func addGeneratedStoryComponents(idx *Index, story Story, def *app.AppDef) {
+	if idx == nil {
+		return
+	}
+	appPath := filepath.ToSlash(filepath.Join(story.Path, "app.yaml"))
+	addComponent(idx, Component{
+		Kind:          "story",
+		ID:            story.ID,
+		Owner:         firstNonEmpty(story.PackageID, story.ID),
+		Title:         firstNonEmpty(story.Title, story.ID) + " story contract",
+		Summary:       fmt.Sprintf("%d states, %d intents, %d world keys, and %d no-LLM flow fixture(s).", len(story.States), len(story.Intents), len(story.WorldKeys), len(story.Flows)),
+		Path:          story.Path,
+		GeneratedFrom: appPath,
+		Publish:       "full",
+		Tags:          []string{"story", "contract"},
+		Facts: facts(
+			"states", fmt.Sprint(len(story.States)),
+			"intents", fmt.Sprint(len(story.Intents)),
+			"flows", fmt.Sprint(len(story.Flows)),
+			"package", story.PackageID,
+		),
+	})
+
+	for _, name := range story.HostInterfaces {
+		iface := def.HostInterfaces[name]
+		summary := "Host interface declared by this story."
+		if iface != nil && strings.TrimSpace(iface.Description) != "" {
+			summary = strings.TrimSpace(iface.Description)
+		}
+		addComponent(idx, Component{
+			Kind:          "host-interface",
+			ID:            storyComponentID(story.ID, "host_interfaces", name),
+			Owner:         story.ID,
+			Title:         name + " host interface",
+			Summary:       summary,
+			Path:          story.Path,
+			GeneratedFrom: appPath + "#host_interfaces." + name,
+			Publish:       "full",
+			Tags:          []string{"host", "interface"},
+			Uses:          []string{story.ID},
+			Facts: facts(
+				"default", hostInterfaceDefault(iface),
+				"operations", strings.Join(hostInterfaceOps(iface), ", "),
+			),
+		})
+	}
+
+	for _, name := range story.Agents {
+		decl := def.Agents[name]
+		addComponent(idx, Component{
+			Kind:          "agent-profile",
+			ID:            storyComponentID(story.ID, "agents", name),
+			Owner:         story.ID,
+			Title:         "agents." + name,
+			Summary:       "Agent persona and runtime posture. Prompt bodies are summarized by policy and are not emitted in this index.",
+			Path:          story.Path,
+			GeneratedFrom: appPath + "#agents." + name,
+			Publish:       "summary",
+			Tags:          []string{"agent", "profile", "redacted"},
+			Uses:          []string{story.ID},
+			Facts:         agentFacts(decl),
+		})
+	}
+
+	for _, name := range story.Providers {
+		decl := def.Providers[name]
+		addComponent(idx, Component{
+			Kind:          "provider-profile",
+			ID:            storyComponentID(story.ID, "providers", name),
+			Owner:         story.ID,
+			Title:         "providers." + name,
+			Summary:       "Provider backend defaults and environment key names. Environment values are intentionally omitted.",
+			Path:          story.Path,
+			GeneratedFrom: appPath + "#providers." + name,
+			Publish:       "summary",
+			Tags:          []string{"provider", "profile", "redacted"},
+			Uses:          []string{story.ID},
+			Facts:         providerFacts(decl),
+		})
+	}
+
+	for _, name := range story.Toolboxes {
+		decl := def.Toolboxes[name]
+		addComponent(idx, Component{
+			Kind:          "toolbox",
+			ID:            storyComponentID(story.ID, "toolboxes", name),
+			Owner:         story.ID,
+			Title:         "toolboxes." + name,
+			Summary:       "Reusable agent tool surface declared by the story.",
+			Path:          story.Path,
+			GeneratedFrom: appPath + "#toolboxes." + name,
+			Publish:       "summary",
+			Tags:          []string{"agent", "toolbox"},
+			Uses:          []string{story.ID},
+			Facts:         toolboxFacts(decl),
+		})
+	}
+
+	for _, name := range story.AgentPlugins {
+		decl := def.AgentPlugins[name]
+		addComponent(idx, Component{
+			Kind:          "agent-plugin",
+			ID:            storyComponentID(story.ID, "agent_plugins", name),
+			Owner:         story.ID,
+			Title:         "agent_plugins." + name,
+			Summary:       "Agent plugin transport and redacted connection surface. Env and header values are intentionally omitted.",
+			Path:          story.Path,
+			GeneratedFrom: appPath + "#agent_plugins." + name,
+			Publish:       "summary",
+			Tags:          []string{"agent", "plugin", "redacted"},
+			Uses:          []string{story.ID},
+			Facts:         agentPluginFacts(decl),
+		})
+	}
+
+	for _, name := range story.Imports {
+		addComponent(idx, Component{
+			Kind:          "story-import",
+			ID:            storyComponentID(story.ID, "imports", name),
+			Owner:         story.ID,
+			Title:         "imports." + name,
+			Summary:       "Imported child story contract and host-binding surface.",
+			Path:          story.Path,
+			GeneratedFrom: appPath + "#imports." + name,
+			Publish:       "full",
+			Tags:          []string{"story", "import"},
+			Uses:          []string{story.ID},
+		})
+	}
+
+	for _, script := range story.Scripts {
+		addComponent(idx, Component{
+			Kind:          "starlark-script",
+			ID:            storyAssetComponentID(story.ID, script),
+			Owner:         story.ID,
+			Title:         filepath.Base(script),
+			Summary:       "Starlark script or sidecar file indexed from the story. The page links the file identity without executing it.",
+			Path:          filepath.ToSlash(filepath.Join(story.Path, script)),
+			GeneratedFrom: filepath.ToSlash(filepath.Join(story.Path, script)),
+			Publish:       "true",
+			Tags:          []string{"starlark", "script"},
+			Uses:          []string{story.ID},
+			Facts: facts(
+				"file", script,
+				"story", story.ID,
+			),
+		})
+	}
+
+	for _, schema := range story.Schemas {
+		addComponent(idx, Component{
+			Kind:          "schema",
+			ID:            storyAssetComponentID(story.ID, schema),
+			Owner:         story.ID,
+			Title:         filepath.Base(schema),
+			Summary:       "JSON schema fixture or acceptance contract indexed from the story.",
+			Path:          filepath.ToSlash(filepath.Join(story.Path, schema)),
+			GeneratedFrom: filepath.ToSlash(filepath.Join(story.Path, schema)),
+			Publish:       "true",
+			Tags:          []string{"schema", "contract"},
+			Uses:          []string{story.ID},
+			Facts: facts(
+				"file", schema,
+				"story", story.ID,
+			),
+		})
+	}
+
+	for _, prompt := range story.Prompts {
+		addComponent(idx, Component{
+			Kind:          "prompt",
+			ID:            storyAssetComponentID(story.ID, prompt),
+			Owner:         story.ID,
+			Title:         filepath.Base(prompt),
+			Summary:       "Prompt identity and usage surface. Raw prompt text is hidden unless a docs sidecar explicitly opts in.",
+			Path:          filepath.ToSlash(filepath.Join(story.Path, prompt)),
+			GeneratedFrom: filepath.ToSlash(filepath.Join(story.Path, prompt)),
+			Publish:       "summary",
+			Tags:          []string{"prompt", "redacted"},
+			Uses:          []string{story.ID},
+			Facts: facts(
+				"file", prompt,
+				"policy", "summary only",
+			),
+		})
+	}
+}
+
+func addGeneratedHookComponents(idx *Index, root string) {
+	if idx == nil {
+		return
+	}
+	source := filepath.Join(root, "cmd", "kitsoki", "hook.go")
+	if _, err := os.Stat(source); err != nil {
+		return
+	}
+	addComponent(idx, Component{
+		Kind:          "hook",
+		ID:            "hook.claude.UserPromptSubmit",
+		Owner:         "kitsoki",
+		Title:         "Claude UserPromptSubmit hook",
+		Summary:       "Prompt-submit hook installed for Claude Code. The hook fails open, blocks only clean no-LLM intercepts, and documents no-hook behavior for Codex and Copilot.",
+		Path:          "cmd/kitsoki/hook.go",
+		GeneratedFrom: "cmd/kitsoki/hook.go#mergeClaudeHook",
+		Publish:       "summary",
+		Tags:          []string{"hook", "agent", "claude", "redacted"},
+		Uses:          []string{"kitsoki hook install --agent claude", "kitsoki hook run --agent claude"},
+		Facts: facts(
+			"event", "UserPromptSubmit",
+			"command", "kitsoki hook run --agent claude",
+			"timeout", "1200s",
+			"Claude Code", "supported",
+			"Codex", "no pre-model hook",
+			"Copilot", "no blocking prompt hook",
+			"failure policy", "fail open",
+		),
+	})
+}
+
+func addComponent(idx *Index, c Component) {
+	if c.Publish == "" {
+		c.Publish = "true"
+	}
+	if c.Title == "" {
+		c.Title = c.ID
+	}
+	idx.Components = append(idx.Components, c)
+}
+
+func storyComponentID(storyID, section, name string) string {
+	return storyID + "#" + section + "." + name
+}
+
+func storyAssetComponentID(storyID, path string) string {
+	return storyID + "#" + filepath.ToSlash(path)
+}
+
+func facts(pairs ...string) []ComponentFact {
+	var out []ComponentFact
+	for i := 0; i+1 < len(pairs); i += 2 {
+		label := strings.TrimSpace(pairs[i])
+		value := strings.TrimSpace(pairs[i+1])
+		if label == "" || value == "" {
+			continue
+		}
+		out = append(out, ComponentFact{Label: label, Value: value})
+	}
+	return out
+}
+
+func agentFacts(decl *app.AgentDecl) []ComponentFact {
+	if decl == nil {
+		return nil
+	}
+	prompt := "inline or resolved prompt summarized"
+	if decl.SystemPrompt == "" {
+		prompt = "not declared"
+	}
+	return facts(
+		"effect", string(decl.Effect),
+		"provider", decl.Provider,
+		"harness", decl.Harness,
+		"model", decl.Model,
+		"effort", decl.Effort,
+		"toolbox", decl.Toolbox,
+		"tools", strings.Join(decl.Tools, ", "),
+		"tools added", strings.Join(decl.ToolsAdd, ", "),
+		"tools removed", strings.Join(decl.ToolsRemove, ", "),
+		"mcp tools", strings.Join(agentMCPTools(decl), ", "),
+		"permissions", agentPermissionMode(decl),
+		"prompt", prompt,
+	)
+}
+
+func providerFacts(decl *app.ProviderDecl) []ComponentFact {
+	if decl == nil {
+		return nil
+	}
+	envKeys := mapKeys(decl.Env)
+	return facts(
+		"backend", decl.Backend,
+		"model", decl.Model,
+		"effort", decl.Effort,
+		"env keys", strings.Join(envKeys, ", "),
+		"env values", "hidden",
+	)
+}
+
+func toolboxFacts(decl *app.ToolboxDecl) []ComponentFact {
+	if decl == nil {
+		return nil
+	}
+	return facts(
+		"effect", string(decl.Effect),
+		"tools", strings.Join(decl.Tools, ", "),
+	)
+}
+
+func agentPluginFacts(decl *app.AgentPluginDecl) []ComponentFact {
+	if decl == nil {
+		return nil
+	}
+	endpoint := ""
+	if decl.Endpoint != "" {
+		endpoint = "configured"
+	}
+	command := ""
+	if decl.Command != "" {
+		command = "configured"
+	}
+	return facts(
+		"plugin", decl.Plugin,
+		"command", command,
+		"endpoint", endpoint,
+		"tool", decl.Tool,
+		"model", decl.Model,
+		"env keys", strings.Join(mapKeys(decl.Env), ", "),
+		"header keys", strings.Join(mapKeys(decl.Headers), ", "),
+		"api key env", decl.APIKeyEnv,
+	)
+}
+
+func hostInterfaceDefault(iface *app.HostInterfaceDef) string {
+	if iface == nil {
+		return ""
+	}
+	return iface.Default
+}
+
+func hostInterfaceOps(iface *app.HostInterfaceDef) []string {
+	if iface == nil {
+		return nil
+	}
+	return mapKeys(iface.Operations)
+}
+
+func agentMCPTools(decl *app.AgentDecl) []string {
+	if decl == nil || decl.MCP == nil {
+		return nil
+	}
+	return decl.MCP.Tools
+}
+
+func agentPermissionMode(decl *app.AgentDecl) string {
+	if decl == nil || decl.Permissions == nil {
+		return ""
+	}
+	return decl.Permissions.Mode
+}
+
+func firstDocTitle(docs []DocEntry) string {
+	for _, d := range docs {
+		if strings.TrimSpace(d.Title) != "" {
+			return d.Title
+		}
+	}
+	return ""
+}
+
+func firstDocPath(docs []DocEntry) string {
+	for _, d := range docs {
+		if strings.TrimSpace(d.Path) != "" {
+			return d.Path
+		}
+	}
+	return ""
+}
+
+func firstDocGeneratedFrom(docs []DocEntry) string {
+	for _, d := range docs {
+		if strings.TrimSpace(d.GeneratedFrom) != "" {
+			return d.GeneratedFrom
+		}
+	}
+	return ""
+}
+
+func firstDocPublish(docs []DocEntry) string {
+	for _, d := range docs {
+		if strings.TrimSpace(d.Publish) != "" {
+			return d.Publish
+		}
+	}
+	return ""
 }
 
 func docNode(id, owner string, d DocEntry) DocNode {

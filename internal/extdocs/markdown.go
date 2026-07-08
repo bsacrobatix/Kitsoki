@@ -19,7 +19,7 @@ func Markdown(idx *Index) string {
 	fmt.Fprintln(&b, "# Kitsoki Extension Library Index")
 	fmt.Fprintln(&b)
 	fmt.Fprintf(&b, "Root: `%s`\n\n", idx.Root)
-	fmt.Fprintf(&b, "Packages: %d  Stories: %d  Docs: %d\n\n", len(idx.Packages), len(idx.Stories), len(idx.Docs))
+	fmt.Fprintf(&b, "Packages: %d  Stories: %d  Components: %d  Docs: %d\n\n", len(idx.Packages), len(idx.Stories), len(idx.Components), len(idx.Docs))
 	if len(idx.Packages) > 0 {
 		fmt.Fprintln(&b, "## Packages")
 		fmt.Fprintln(&b)
@@ -49,6 +49,27 @@ func Markdown(idx *Index) string {
 			}
 			if len(s.Agents) > 0 {
 				fmt.Fprintf(&b, "  Agents: %s\n", strings.Join(s.Agents, ", "))
+			}
+		}
+		fmt.Fprintln(&b)
+	}
+	if len(idx.Components) > 0 {
+		fmt.Fprintln(&b, "## Generated Components")
+		fmt.Fprintln(&b)
+		for _, c := range idx.Components {
+			fmt.Fprintf(&b, "- `%s:%s`", c.Kind, c.ID)
+			if c.Title != "" {
+				fmt.Fprintf(&b, " - %s", c.Title)
+			}
+			if c.Publish != "" {
+				fmt.Fprintf(&b, " (publish: %s)", c.Publish)
+			}
+			fmt.Fprintln(&b)
+			if c.Summary != "" {
+				fmt.Fprintf(&b, "  %s\n", c.Summary)
+			}
+			if c.GeneratedFrom != "" {
+				fmt.Fprintf(&b, "  Generated from: `%s`\n", c.GeneratedFrom)
 			}
 		}
 		fmt.Fprintln(&b)

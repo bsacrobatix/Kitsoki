@@ -44,9 +44,23 @@ type Extension struct {
 }
 
 type Component struct {
-	Kind string     `json:"kind" yaml:"kind"`
-	ID   string     `json:"id" yaml:"id"`
-	Docs []DocEntry `json:"docs,omitempty" yaml:"docs,omitempty"`
+	Kind          string          `json:"kind" yaml:"kind"`
+	ID            string          `json:"id" yaml:"id"`
+	Owner         string          `json:"owner,omitempty" yaml:"owner,omitempty"`
+	Title         string          `json:"title,omitempty" yaml:"title,omitempty"`
+	Summary       string          `json:"summary,omitempty" yaml:"summary,omitempty"`
+	Path          string          `json:"path,omitempty" yaml:"path,omitempty"`
+	GeneratedFrom string          `json:"generated_from,omitempty" yaml:"generated_from,omitempty"`
+	Publish       string          `json:"publish,omitempty" yaml:"publish,omitempty"`
+	Tags          []string        `json:"tags,omitempty" yaml:"tags,omitempty"`
+	Uses          []string        `json:"uses,omitempty" yaml:"uses,omitempty"`
+	Facts         []ComponentFact `json:"facts,omitempty" yaml:"facts,omitempty"`
+	Docs          []DocEntry      `json:"docs,omitempty" yaml:"docs,omitempty"`
+}
+
+type ComponentFact struct {
+	Label string `json:"label" yaml:"label"`
+	Value string `json:"value" yaml:"value"`
 }
 
 type DocEntry struct {

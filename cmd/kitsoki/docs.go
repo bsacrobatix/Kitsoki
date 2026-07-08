@@ -99,7 +99,7 @@ site/library UI; Markdown output is a human review report.`,
 				}
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "indexed %d package(s), %d story/stories, %d doc node(s)\n", len(idx.Packages), len(idx.Stories), len(idx.Docs))
+			fmt.Fprintf(out, "indexed %d package(s), %d story/stories, %d component(s), %d doc node(s)\n", len(idx.Packages), len(idx.Stories), len(idx.Components), len(idx.Docs))
 			if jsonOut != "" {
 				fmt.Fprintf(out, "json: %s\n", jsonOut)
 			}
