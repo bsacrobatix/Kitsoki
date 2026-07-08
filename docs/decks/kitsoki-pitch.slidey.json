@@ -2784,177 +2784,283 @@
     {
       "type": "narrative",
       "eyebrow": "Phase 1: Onboarding",
-      "body": "Use it the way a customer would.",
-      "lede": "Start by onboarding each target repo through Kitsoki MCP. Then prove readiness, collect artifacts, and only start work after the gate is clear.",
+      "body": "Start with Kitsoki project onboarding.",
+      "lede": "Kitsoki first profiles the repo, asks the operator to review the discovered setup, writes a local project instance, installs the toolkit, and leaves readiness checks explicit before any expensive work begins.",
       "hold": 220,
-      "narration": "Customer-facing usage starts with onboarding: compare readiness gates across repo targets, collect reusable artifacts, then continue only when the workflow is ready."
+      "narration": "Customer-facing usage starts with Kitsoki project onboarding. The flow discovers the repo, reviews the profile, applies local setup files, installs the toolkit, and then makes readiness an explicit gate."
     },
     {
-      "type": "mcp-drive",
-      "title": "Onboard target repos through MCP",
-      "agent": "kitsoki-mcp-drive",
-      "story": "stories/dev-story/app.yaml",
-      "prompt": "use kitsoki-mcp-drive to onboard gears-rust, then run the same onboarding contract for slidey, postgresql, and kubernetes readiness checks before we spend on live work",
-      "calls": [
+      "type": "diagram-svg",
+      "title": "Kitsoki project onboarding",
+      "panels": [
         {
-          "tool": "studio.work",
-          "args": "{ include_quiet: false, limit: 20 }",
-          "result": "finds active repos, stories, and handoffs"
-        },
-        {
-          "tool": "session.new",
-          "args": "{ story_path: \"stories/dev-story/app.yaml\", harness: \"live\", trace: \"gears-rust-real.trace.jsonl\" }",
-          "result": "handle=onboard-breadth"
-        },
-        {
-          "tool": "session.drive",
-          "args": "\"onboard gears-rust, then profile slidey + postgresql + kubernetes for harness readiness\"",
-          "result": "deterministic discovery + LLM profile draft"
-        },
-        {
-          "tool": "session.status",
-          "args": "{ handle: \"onboard-breadth\" }",
-          "result": "state + last_error without dumping world"
+          "label": "",
+          "viewBox": "0 0 1500 760",
+          "nodes": [
+            {
+              "id": "start",
+              "label": "onboard <repo>",
+              "sub": "Kitsoki story",
+              "lines": [
+                "TUI today",
+                "CLI route"
+              ],
+              "x": 60,
+              "y": 300,
+              "w": 300,
+              "h": 145,
+              "style": "secondary"
+            },
+            {
+              "id": "discover",
+              "label": "Read-only discovery",
+              "sub": "no writes",
+              "lines": [
+                "stack",
+                "commands",
+                "repo metadata"
+              ],
+              "x": 430,
+              "y": 70,
+              "w": 360,
+              "h": 155,
+              "style": "primary"
+            },
+            {
+              "id": "review",
+              "label": "Operator review",
+              "sub": "write gate",
+              "lines": [
+                "profile",
+                "story pack",
+                "feedback"
+              ],
+              "x": 430,
+              "y": 305,
+              "w": 360,
+              "h": 155
+            },
+            {
+              "id": "apply",
+              "label": "Apply profile",
+              "sub": "local files",
+              "lines": [
+                ".kitsoki.yaml",
+                "project-profile",
+                "thin story"
+              ],
+              "x": 430,
+              "y": 540,
+              "w": 360,
+              "h": 155
+            },
+            {
+              "id": "toolkit",
+              "label": "Install toolkit",
+              "sub": "local integration",
+              "lines": [
+                "skills",
+                "subagents",
+                "editor wiring"
+              ],
+              "x": 870,
+              "y": 190,
+              "w": 360,
+              "h": 155
+            },
+            {
+              "id": "readiness",
+              "label": "Readiness check",
+              "sub": "explicit action",
+              "lines": [
+                "story load",
+                "build/test",
+                "report"
+              ],
+              "x": 870,
+              "y": 450,
+              "w": 360,
+              "h": 155,
+              "style": "primary"
+            },
+            {
+              "id": "work",
+              "label": "First work run",
+              "sub": "after the gate",
+              "lines": [
+                "bugfix",
+                "PRD/design",
+                "git ops"
+              ],
+              "x": 1270,
+              "y": 320,
+              "w": 210,
+              "h": 155,
+              "style": "secondary"
+            }
+          ],
+          "edges": [
+            {
+              "from": "start",
+              "to": "discover"
+            },
+            {
+              "from": "discover",
+              "to": "review"
+            },
+            {
+              "from": "review",
+              "to": "apply",
+              "gate": "approved"
+            },
+            {
+              "from": "apply",
+              "to": "toolkit"
+            },
+            {
+              "from": "toolkit",
+              "to": "readiness"
+            },
+            {
+              "from": "readiness",
+              "to": "work",
+              "gate": "ready / follow-up"
+            }
+          ]
         }
       ],
-      "outcome": {
-        "status": "readiness surfaced",
-        "ref": "docs/case-studies/onboarding-cross-repo.md",
-        "lines": [
-          "inferred rust stack, make dev/test/build, and repo identity from a live gears-rust run",
-          "discovered slidey coverage via replay suites and the same MCP onboarding contract",
-          "captured postgresql and kubernetes readiness checks with local-heavy oracle profiles",
-          "found a stale-binary validator bug and fixed KITSOKI_BIN support"
-        ]
-      },
-      "caption": "Onboarding is a readiness workflow with evidence, not a one-off prompt.",
-      "hold": 245,
+      "caption": "Onboarding is a Kitsoki story: deterministic discovery, human write gate, local setup, and an explicit readiness action.",
+      "hold": 240,
       "instant": true,
-      "narration": "Onboarding itself is driven through MCP. It produces a status, artifacts, a trace, and concrete next steps before expensive work starts."
+      "narration": "The actual onboarding story is concrete. It starts with read-only discovery, moves through an operator write gate, applies a local project profile and thin story instance, installs the local toolkit, and leaves readiness as an explicit check."
     },
     {
       "type": "evidence",
-      "title": "Onboarding breadth and outcomes",
+      "title": "What onboarding does today",
       "items": [
         {
-          "label": "gears-rust",
-          "status": "validated",
-          "detail": "Live onboarding inferred Rust stack plus make dev/test/build, and produced a stable artifact path for reuse.",
-          "refType": "artifact",
-          "ref": "onboarding-cross-repo case study"
-        },
-        {
-          "label": "slidey",
-          "status": "validated",
-          "detail": "slidey dry-run harness smoke was verified across slidey-dev, slidey-edit, and slidey-bugfix in the 2026-06-26 dogfood pass.",
+          "label": "Read-only discovery",
+          "status": "implemented",
+          "detail": "Infers stack, dev/test/build commands, VCS metadata, tracker identity, starter story pack, and transcript evidence before writes.",
           "refType": "doc",
-          "ref": ".context/slidey-pitch-dogfood-pass-2026-06-26.md"
+          "ref": "docs/stories/dev-story-onboarding.md"
         },
         {
-          "label": "postgresql",
-          "status": "validated",
-          "detail": "ready-heavy-check harness completed with deterministic local oracle context from real ALTER DOMAIN VALIDATE CONSTRAINT fix.",
-          "refType": "doc",
-          "ref": ".context/story-qa-run.md"
-        },
-        {
-          "label": "kubernetes",
-          "status": "validated",
-          "detail": "ready-heavy-check harness completed with deterministic local oracle context from real nil-memory guard fix behavior.",
-          "refType": "doc",
-          "ref": ".context/story-qa-run.md"
-        },
-        {
-          "label": "Live continuation",
-          "status": "next",
-          "detail": "rerun the draft with approved repo-data sharing or a local/private model provider",
-          "refType": "test",
-          "ref": "operator approval required"
-        }
-      ],
-      "caption": "Readiness is now measured across multiple targets, not just one codebase.",
-      "hold": 230,
-      "instant": true,
-      "narration": "The onboarding status is now repo-specific: what is proven in live traces and what remains gated for sensitive continuation."
-    },
-    {
-      "type": "evidence",
-      "title": "Onboarding outcomes and artifacts",
-      "items": [
-        {
-          "label": "Replay path",
-          "status": "validated",
-          "detail": "discovery and validator fix are now captured as a replayable onboarding artifact in the dev-story trace set",
+          "label": "Review gate",
+          "status": "implemented",
+          "detail": "The operator reviews the profile, commands, starter stories, and feedback; accepting the profile is the first write.",
           "refType": "path",
-          "ref": "stories/dev-story/flows/"
+          "ref": "stories/dev-story/rooms/init.yaml"
         },
         {
-          "label": "Private-provider path",
-          "status": "next",
-          "detail": "rerun profile drafting against a local/private model for sensitive repo data",
+          "label": "Local apply",
+          "status": "implemented",
+          "detail": "Writes .kitsoki.yaml, .kitsoki/project-profile.yaml, a thin project story, readiness script, .gitignore runtime block, and toolkit wiring.",
+          "refType": "path",
+          "ref": "stories/dev-story/scripts/init_apply.py"
+        },
+        {
+          "label": "Replay proof",
+          "status": "validated",
+          "detail": "A live gears-rust onboarding was converted into a no-LLM flow and cassette, so the discovery/apply path replays through kitsoki test flows.",
+          "refType": "path",
+          "ref": "stories/dev-story/flows/onboard_gears_rust.yaml"
+        },
+        {
+          "label": "On-demand readiness",
+          "status": "implemented",
+          "detail": "The generated readiness checker runs only when asked and records pass/fail details without hiding target-project failures.",
           "refType": "doc",
-          "ref": "harness profile"
+          "ref": "docs/stories/dev-story-onboarding.md"
+        }
+      ],
+      "caption": "The shipped path is a supervised local setup story, not a vague repo-readiness prompt.",
+      "hold": 240,
+      "instant": true,
+      "narration": "Today onboarding is a supervised local setup story. Discovery is deterministic, review gates writes, apply creates the local Kitsoki instance, and readiness can be run as a separate operator action."
+    },
+    {
+      "type": "evidence",
+      "title": "What we plan to add",
+      "items": [
+        {
+          "label": "Web first-run path",
+          "status": "issue",
+          "detail": "No web onboarding entry exists yet; the web UI still assumes a project has already been configured.",
+          "refType": "doc",
+          "ref": "docs/testing/dev-workflow-matrix.md"
         },
         {
-          "label": "Readiness gate",
+          "label": "VS Code first-run path",
+          "status": "issue",
+          "detail": "The extension can drive existing stories, but new-repo onboarding still needs a first-run path instead of assuming setup is done.",
+          "refType": "doc",
+          "ref": "docs/testing/dev-workflow-matrix.md"
+        },
+        {
+          "label": "GitHub handoff",
           "status": "next",
-          "detail": "block live marathons until repo profile, test command profile, worktree policy, and oracle plan are explicit per target",
+          "detail": "Treat App install and repository onboarding as separate moments, then document the handoff from a GitHub-triggered user to local Kitsoki setup.",
+          "refType": "doc",
+          "ref": "docs/testing/dev-workflow-matrix.md"
+        },
+        {
+          "label": "Private profile drafting",
+          "status": "next",
+          "detail": "Keep deterministic discovery free, then offer local or private-model profile enrichment for sensitive repo details.",
+          "refType": "doc",
+          "ref": "docs/stories/dev-story-onboarding.md"
+        },
+        {
+          "label": "Stronger readiness contract",
+          "status": "next",
+          "detail": "Make repo profile, command plan, workspace policy, story route, and oracle plan explicit before high-cost live work starts.",
           "refType": "doc",
           "ref": "dev-story onboarding"
-        },
-        {
-          "label": "Cheaper MCP reads",
-          "status": "next",
-          "detail": "teach drivers to prefer session.status and session.world before expensive or heavy inspection in each target profile",
-          "refType": "doc",
-          "ref": "driver efficiency finding"
         }
       ],
-      "caption": "The onboarding output is split into validated artifacts and next readiness steps across repos and harness profiles.",
-      "hold": 225,
-      "instant": true
+      "caption": "The roadmap is about making the same Kitsoki onboarding story available from every first-run surface and tightening the readiness gate.",
+      "hold": 240,
+      "instant": true,
+      "narration": "The gaps are concrete. Bring the same onboarding story to web and VS Code, document the GitHub handoff, add private profile enrichment, and make readiness strong enough to gate expensive live work."
     },
     {
-      "type": "mcp-drive",
-      "title": "Use it from Claude Code (onboarding)",
-      "agent": "kitsoki-mcp-drive",
-      "story": "workspace story router",
-      "prompt": "use kitsoki-mcp-drive to onboard the repo, show readiness, then drive the next task through the right Kitsoki story",
-      "calls": [
+      "type": "evidence",
+      "title": "After onboarding: governed work",
+      "items": [
         {
-          "tool": "studio.work",
-          "args": "{ include_quiet: false, limit: 20 }",
-          "result": "shows active repos, sessions, stories, and follow-ups"
+          "label": "Story route",
+          "status": "done",
+          "detail": "The local project instance can route into enabled Kitsoki stories such as bugfix, PRD/design, implementation, git operations, and PR refinement.",
+          "refType": "path",
+          "ref": ".kitsoki/stories/<project>-dev/app.yaml"
         },
         {
-          "tool": "session.new",
-          "args": "{ story_path: \"stories/kitsoki-dev/app.yaml\", harness: \"live\" }",
-          "result": "opens the governed operator workflow"
+          "label": "Trace first",
+          "status": "done",
+          "detail": "Each run keeps structured events, host calls, choices, costs, and artifacts attached to the work instead of losing them in chat history.",
+          "refType": "doc",
+          "ref": "story state + trace"
         },
         {
-          "tool": "session.drive",
-          "args": "\"plan, fix, commit, and file workflow gaps\"",
-          "result": "routes natural language into story phases"
+          "label": "Failure feedback",
+          "status": "done",
+          "detail": "Bad runs become evidence for story changes, new replay fixtures, or clearer readiness checks.",
+          "refType": "artifact",
+          "ref": "trace -> fixture -> story diff"
         },
         {
-          "tool": "session.trace",
-          "args": "{ handle: \"work-1\", limit: 80 }",
-          "result": "keeps proof for review and training"
+          "label": "Surface coverage",
+          "status": "progress",
+          "detail": "TUI onboarding is proven for gears-rust; web, VS Code, and GitHub handoffs are tracked as explicit surface-matrix gaps.",
+          "refType": "doc",
+          "ref": "docs/testing/dev-workflow-matrix.md"
         }
       ],
-      "outcome": {
-        "status": "same surface, many jobs",
-        "ref": "story state + trace",
-        "lines": [
-          "the operator prompt stays natural",
-          "the runtime chooses phases, gates, tools, and artifacts",
-          "failures become traceable follow-up work instead of lost context"
-        ]
-      },
-      "caption": "After onboarding, the same MCP surface drives the day-to-day work.",
-      "hold": 230,
+      "caption": "Onboarding sets up the local Kitsoki instance; daily work then runs as stories with traces, gates, and follow-up artifacts.",
+      "hold": 235,
       "instant": true,
-      "narration": "After onboarding, the same MCP surface drives planning, bugfix, git operations, and story improvement."
+      "narration": "Once onboarding is done, the repo has a local Kitsoki instance. Daily work still runs through stories, traces, gates, and follow-up artifacts, with surface coverage tracked honestly."
     },
     {
       "type": "narrative",
@@ -4174,7 +4280,7 @@
       "type": "narrative",
       "eyebrow": "Close the loop",
       "body": "The demo becomes an operating system for improvement.",
-      "lede": "A customer can onboard a repo, run governed tasks through MCP, score real outcomes against hidden oracles, and watch misses turn into story/runtime changes. That is the thing prompts alone do not give them.",
+      "lede": "A customer can onboard a repo with Kitsoki, run governed tasks through the right surface, score real outcomes against hidden oracles, and watch misses turn into story/runtime changes. That is the thing prompts alone do not give them.",
       "hold": 230,
       "narration": "The demo becomes an operating system for improvement: onboard, drive, score, learn, and rerun."
     },
