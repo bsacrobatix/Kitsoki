@@ -16,6 +16,12 @@ def _items(v):
         return v
     return []
 
+def _get(obj, key, default):
+    v = obj.get(key)
+    if v == None:
+        return default
+    return v
+
 def _int(v, default):
     if v == None or v == "":
         return default
@@ -51,19 +57,19 @@ def _safe_run_id(raw):
     return out
 
 def _run_dir(ctx, run_id):
-    supplied = _str(ctx.inputs.get("run_dir", "")).strip()
+    supplied = _str(_get(ctx.inputs, "run_dir", "")).strip()
     if supplied != "":
         return supplied
     return ".artifacts/dogfood-marathon/" + run_id
 
 def _journal_path(ctx, run_dir):
-    supplied = _str(ctx.inputs.get("journal_path", "")).strip()
+    supplied = _str(_get(ctx.inputs, "journal_path", "")).strip()
     if supplied != "":
         return supplied
     return run_dir + "/journal.json"
 
 def _markdown_path(ctx, journal_path, run_dir):
-    supplied = _str(ctx.inputs.get("journal_markdown_path", "")).strip()
+    supplied = _str(_get(ctx.inputs, "journal_markdown_path", "")).strip()
     if supplied != "":
         return supplied
     if journal_path.endswith(".json"):
@@ -123,21 +129,21 @@ def _markdown(journal):
     return "".join(lines)
 
 def main(ctx):
-    run_id = _safe_run_id(ctx.inputs.get("run_id", ctx.world.get("run_id", "dogfood-marathon")))
+    run_id = _safe_run_id(_get(ctx.inputs, "run_id", _get(ctx.world, "run_id", "dogfood-marathon")))
     run_dir = _run_dir(ctx, run_id)
     journal_path = _journal_path(ctx, run_dir)
     journal_markdown_path = _markdown_path(ctx, journal_path, run_dir)
-    stage = _str(ctx.inputs.get("stage", "checkpoint")).strip() or "checkpoint"
+    stage = _str(_get(ctx.inputs, "stage", "checkpoint")).strip() or "checkpoint"
 
-    backlog = _dict(ctx.inputs.get("backlog", ctx.world.get("backlog", {"items": []}))) or {"items": []}
-    results = _dict(ctx.inputs.get("results", ctx.world.get("results", {"items": []}))) or {"items": []}
-    findings = _dict(ctx.inputs.get("findings", ctx.world.get("findings", {"items": []}))) or {"items": []}
-    exceptions = _dict(ctx.inputs.get("exceptions", ctx.world.get("exceptions", {"items": []}))) or {"items": []}
-    rollup = _dict(ctx.inputs.get("rollup", ctx.world.get("rollup", {})))
-    deck_spec = _dict(ctx.inputs.get("deck_spec", ctx.world.get("deck_spec", {})))
-    current_case = _dict(ctx.inputs.get("current_case", ctx.world.get("current_case", {})))
-    case_index = _int(ctx.inputs.get("case_index", ctx.world.get("case_index", 0)), 0)
-    cases_processed = _int(ctx.inputs.get("cases_processed", ctx.world.get("cases_processed", 0)), 0)
+    backlog = _dict(_get(ctx.inputs, "backlog", _get(ctx.world, "backlog", {"items": []}))) or {"items": []}
+    results = _dict(_get(ctx.inputs, "results", _get(ctx.world, "results", {"items": []}))) or {"items": []}
+    findings = _dict(_get(ctx.inputs, "findings", _get(ctx.world, "findings", {"items": []}))) or {"items": []}
+    exceptions = _dict(_get(ctx.inputs, "exceptions", _get(ctx.world, "exceptions", {"items": []}))) or {"items": []}
+    rollup = _dict(_get(ctx.inputs, "rollup", _get(ctx.world, "rollup", {})))
+    deck_spec = _dict(_get(ctx.inputs, "deck_spec", _get(ctx.world, "deck_spec", {})))
+    current_case = _dict(_get(ctx.inputs, "current_case", _get(ctx.world, "current_case", {})))
+    case_index = _int(_get(ctx.inputs, "case_index", _get(ctx.world, "case_index", 0)), 0)
+    cases_processed = _int(_get(ctx.inputs, "cases_processed", _get(ctx.world, "cases_processed", 0)), 0)
 
     journal = {
         "schema": "dogfood-marathon.journal.v1",

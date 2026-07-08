@@ -239,6 +239,7 @@ func runCmd() *cobra.Command {
 		agentBackend  string
 		recordingPath string
 		recordPath    string
+		hostCassette  string
 		dbPath        string
 		continueFlag  bool
 		continueID    string
@@ -270,6 +271,7 @@ Examples:
   kitsoki run testdata/apps/cloak/app.yaml
   kitsoki run myapp.yaml --harness claude --claude-model opus
   kitsoki run myapp.yaml --harness replay --recording recording.yaml
+  kitsoki run myapp.yaml --harness replay --recording recording.yaml --host-cassette host.cassette.yaml
   kitsoki run myapp.yaml --harness recording --record /tmp/rec.jsonl
 
 Session traces are written automatically to the nearest .kitsoki/sessions/
@@ -412,6 +414,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				AgentLaunchPolicy: agentLaunchPolicyFromConfig(webCfg),
 				RecordingPath:     recordingPath,
 				RecordPath:        recordPath,
+				HostCassette:      hostCassette,
 				PromptOverlay:     promptOverlay,
 				RoomEnterSink:     roomEnterSink,
 				Reloader:          reloader,
@@ -865,6 +868,8 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 		"path to recording YAML file (required for --harness replay)")
 	cmd.Flags().StringVar(&recordPath, "record", "",
 		"path to output JSONL recording (for --harness recording)")
+	cmd.Flags().StringVar(&hostCassette, "host-cassette", "",
+		"host cassette backing host.* calls (deterministic, no LLM); combinable with --harness replay")
 	cmd.Flags().StringVar(&dbPath, "db", "",
 		"path to SQLite session database (default: $XDG_DATA_HOME/kitsoki/sessions.db)")
 

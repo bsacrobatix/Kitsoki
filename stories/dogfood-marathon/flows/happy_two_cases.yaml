@@ -64,6 +64,7 @@ host_handlers:
         data:
           current_case:    { id: "case-x", title: "A case", baseline: "abc^", repro_command: "" }
           current_case_id: "case-x"
+          current_case_json: "{\"id\":\"case-x\",\"title\":\"A case\",\"baseline\":\"abc^\",\"repro_command\":\"\"}"
       record_case:
         data:
           results:  { items: [ { case_id: "case-x", exit: "shipped", verify_status: "solved" } ] }
@@ -127,11 +128,14 @@ host_handlers:
           path: "stories/dogfood-marathon/baked/report.deck.json"
 
 turns:
-  # `start` loads the (seeded) backlog and auto-advances the FIRST case through
-  # triage → drive → verify → record, pausing at the processing checkpoint.
-  # (One case per turn keeps each turn's internal emit chain under the engine's
-  # emit-depth cap — a whole backlog can't auto-run in a single turn.)
+  # `start` loads the (seeded) backlog and pauses at the processing checkpoint.
   - intent: { name: start, slots: {} }
+    expect_state: processing
+    expect_world:
+      cases_processed: 0
+
+  # `next_case` processes the FIRST case, then pauses again at the checkpoint.
+  - intent: { name: next_case, slots: {} }
     expect_state: processing
     expect_world:
       cases_processed: 1

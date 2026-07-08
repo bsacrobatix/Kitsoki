@@ -1,10 +1,15 @@
-# recording — append the current case result. A post-bind sentinel routes to
-# checkpoint_recorded, where the journal is written from committed world state.
+# recording — independently verify, append the current case result, and persist.
+#
+# The verify and journal writes intentionally happen in this room. Keeping them
+# in separate auto-emitted states made one bug exceed the orchestrator's
+# post-bind settlement cap (pick → triage → drive → verify → record →
+# checkpoint). This room still performs the independent verify before recording;
+# it just avoids extra state hops for deterministic bookkeeping.
 
 states:
 
   recording:
-    description: "Recording the current case's outcome."
+    description: "Verifying and recording the current case's outcome."
     relevant_world: [current_case, triage_verdict, drive_result, verify_result, results, exceptions, record_status]
     view:
       - heading: "Dogfood marathon · recording"
@@ -19,6 +24,16 @@ states:
             Status:     '{{ world.record_status|default:"(recording…)" }}'
       - prose: "Appending the case outcome before the durable checkpoint is written."
     on_enter:
+      - invoke: host.starlark.run
+        id: verify_case
+        with:
+          script: scripts/verify_case.star
+          inputs:
+            case:         "{{ world.current_case }}"
+            drive_result: "{{ world.drive_result }}"
+        bind:
+          verify_result: verify_result
+        on_error: exception_review
       - invoke: host.starlark.run
         id: record_case
         with:
@@ -37,12 +52,57 @@ states:
           exception_summary: exception_summary
           record_status:     record_status
         on_error: exception_review
-      - emit_intent: record_persist
-        when: "world.record_status == 'recorded'"
+      - invoke: host.starlark.run
+        id: persist_journal
+        with:
+          script: scripts/persist_journal.star
+          capabilities:
+            fs:
+              write: [".artifacts/dogfood-marathon/**"]
+          inputs:
+            stage:                 "recorded"
+            run_id:                "{{ world.run_id }}"
+            run_dir:               "{{ world.run_dir }}"
+            journal_path:          "{{ world.journal_path }}"
+            journal_markdown_path: "{{ world.journal_markdown_path }}"
+            backlog:               "{{ world.backlog }}"
+            results:               "{{ world.results }}"
+            findings:              "{{ world.findings }}"
+            exceptions:            "{{ world.exceptions }}"
+            current_case:          "{{ world.current_case }}"
+            case_index:            "{{ world.case_index }}"
+            cases_processed:       "{{ world.cases_processed }}"
+        bind:
+          run_id:                run_id
+          run_dir:               run_dir
+          journal_path:          journal_path
+          journal_markdown_path: journal_markdown_path
+          journal_status:        journal_status
+          journal_summary:       journal_summary
+          last_checkpoint:       last_checkpoint
+        on_error: exception_review
+      - emit_intent: exception_raised
+        when: "world.last_checkpoint == 'recorded' && world.record_status == 'recorded' && world.exception_pending != '' && world.exception_policy == 'ask-serious'"
+      - emit_intent: record_done
+        when: "world.last_checkpoint == 'recorded' && world.record_status == 'recorded' && (world.exception_pending == '' || world.exception_policy != 'ask-serious')"
     on:
-      record_persist:
-        - target: checkpoint_recorded
+      exception_raised:
+        - target: exception_review
+      record_done:
+        - target: processing
           effects:
-            - set: { last_checkpoint: "recording" }
+            - set:
+                case_index:        "{{ world.case_index + 1 }}"
+                cases_processed:   "{{ world.cases_processed + 1 }}"
+                current_case:      {}
+                current_case_id:   ""
+                current_case_json: "{}"
+                triage_verdict:    {}
+                drive_result:      {}
+                verify_result:     {}
+                record_status:     ""
+                exception_pending: ""
+                exception_summary: ""
+                exception_answer:  ""
       look:
         - target: .

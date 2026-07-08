@@ -16,6 +16,12 @@ def _items(v):
         return v
     return []
 
+def _get(obj, key, default):
+    v = obj.get(key)
+    if v == None:
+        return default
+    return v
+
 def _bool(v):
     if v == True:
         return True
@@ -56,7 +62,7 @@ def main(ctx):
     triage = _dict(ctx.inputs.get("triage_verdict"))
     drive = _dict(ctx.inputs.get("drive_result"))
     verify = _dict(ctx.inputs.get("verify_result"))
-    exception_policy = _str(ctx.inputs.get("exception_policy", ctx.world.get("exception_policy", "ask-serious"))).strip() or "ask-serious"
+    exception_policy = _str(_get(ctx.inputs, "exception_policy", _get(ctx.world, "exception_policy", "ask-serious"))).strip() or "ask-serious"
 
     results = _dict(ctx.world.get("results")) or {"items": []}
     result_items = list(_items(results.get("items", [])))

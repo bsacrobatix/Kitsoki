@@ -7,11 +7,9 @@
 import fs from "fs";
 import { type Termcast } from "./types.js";
 import { cast as claudeCode } from "./claude-code.cast.js";
-import { cast as dogfoodMarathonTui } from "./dogfood-marathon-tui.cast.js";
 
 export const CASTS: Record<string, Termcast> = {
   "claude-code": claudeCode,
-  "dogfood-marathon-tui": dogfoodMarathonTui,
   // "codex": codex,      // ← add when the codex cast is authored/captured
   // "copilot": copilot,  // ← add when the copilot cast is authored/captured
 };

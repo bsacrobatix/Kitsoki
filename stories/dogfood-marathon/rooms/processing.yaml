@@ -13,9 +13,9 @@
 #     if case_index >= |backlog|  OR  cases_processed >= case_budget:
 #         → aggregating                         (the loop guard, committed world)
 #     else:
-#         pick current_case = backlog.items[case_index]; → triaging
+#         → picking_case (pick current_case = backlog.items[case_index]) → triaging
 #
-# Each per-case room (triaging → driving → verifying → recording) auto-emits the
+# Each per-case room (picking_case → triaging → driving → recording) auto-emits the
 # next internal intent; recording's `record_done` increments case_index +
 # cases_processed and returns to THIS checkpoint. The budget cap guarantees the
 # loop terminates even if case_index plumbing ever regressed.
@@ -47,36 +47,21 @@ states:
               hint:  "re-render the tally"
             - label: "quit"
               hint:  "abandon the marathon"
-    on_enter:
-      # Auto-advance the FIRST case on arrival from intake (case_index 0, nothing
-      # recorded yet) so the marathon flows straight in; subsequent cases are
-      # operator-paced via `next_case`. Guarded on committed world (no fresh bind).
-      - when: "world.cases_processed == 0 && world.case_index == 0 && len(world.results.items) == 0 && len(world.backlog.items) > 0"
-        emit_intent: next_case
     on:
       next_case:
         # Loop guard on COMMITTED world: drained (index past the backlog) OR
         # budget hit → aggregate.
         - when: "world.case_index >= len(world.backlog.items) || world.cases_processed >= world.case_budget"
           target: aggregating
-        # Otherwise pick the case at case_index (starlark — the template
-        # mini-language can't index a list by a variable) and enter triage.
-        - target: triaging
+        # Otherwise select the case in a dedicated room. Transition-effect host
+        # calls do not publish their binds before the target state's on_enter,
+        # so the picked case must settle before triaging reads current_case_json.
+        - target: picking_case
           effects:
-            - invoke: host.starlark.run
-              id: pick_case
-              with:
-                script: scripts/pick_case.star
-                inputs:
-                  backlog:         "{{ world.backlog }}"
-                  case_index:      "{{ world.case_index }}"
-                  cases_processed: "{{ world.cases_processed }}"
-                  case_budget:     "{{ world.case_budget }}"
-              bind:
-                current_case:      current_case
-                current_case_id:   current_case_id
-                current_case_json: current_case_json
             - set:
+                current_case:      {}
+                current_case_id:   ""
+                current_case_json: "{}"
                 triage_verdict: {}
                 drive_result:   {}
                 verify_result:  {}
