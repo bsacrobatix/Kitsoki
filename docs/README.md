@@ -15,6 +15,7 @@ For the elevator pitch and user quickstart, see the top-level
 | Contributing to Kitsoki | [`contributor-setup.md`](contributor-setup.md) (developer environment setup, including Playwright/Chromium visual QA deps) -> [`../CONTRIBUTING.md`](../CONTRIBUTING.md) -> [`architecture/developer-guide.md`](architecture/developer-guide.md) |
 | Debugging a session | [`tracing/README.md`](tracing/README.md) -> [`tracing/testing.md`](tracing/testing.md) -> [`tracing/trace-format.md`](tracing/trace-format.md) |
 | Working on UI | [`web/README.md`](web/README.md) or [`tui/README.md`](tui/README.md) -> [`tui/rendering-tests.md`](tui/rendering-tests.md) |
+| Managing local development workspaces | [`dev-workspaces.md`](dev-workspaces.md) -> [`architecture/hosts.md#hostgit_worktree-workspace-interface`](architecture/hosts.md#hostgit_worktree-workspace-interface) -> [`architecture/capsules.md`](architecture/capsules.md) |
 
 The tree is organised by task and area. Each section has its own `README.md`
 index. The proposal tree is design history and work in progress, not the
@@ -96,6 +97,9 @@ live in the sections above.
 - [`contributor-setup.md`](contributor-setup.md) — build Kitsoki from source and
   set up this checkout for development, including browser dependencies for
   runstatus and TUI visual QA.
+- [`dev-workspaces.md`](dev-workspaces.md) — create, bootstrap, commit, land,
+  and remove managed clone-backed capsule workspaces for Codex/Claude and
+  dev-story runs.
 - [`case-studies/`](case-studies/README.md) — worked examples of
   progressive determinism applied to real workflows. Start with
   [`case-studies/bug-fix.md`](case-studies/bug-fix.md): how a

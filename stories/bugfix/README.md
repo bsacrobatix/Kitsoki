@@ -27,7 +27,7 @@ import via `entry: idle`.
 `idle` also accepts complaint-only starts. A caller may either seed
 `ticket_body` with no `ticket_id`, or dispatch `work_complaint` with a free-form
 bug description. The story synthesizes a session-scoped `complaint-<session>`
-ticket id for thread/worktree naming, marks `ticket_source_mode=freeform`, runs
+ticket id for thread/workspace naming, marks `ticket_source_mode=freeform`, runs
 pre-flight triage, and proceeds until the available evidence runs out. If the
 complaint is too vague to reproduce, the reproducer/checkpoint holds for
 operator guidance rather than requiring a filed issue up front.
@@ -38,9 +38,9 @@ operator guidance rather than requiring a filed issue up front.
 |---|---|---|---|
 | `done` | open-PR exit: pipeline succeeded; hand off to pr-refinement. | `done_artifact` | Parent stories project `done_artifact` into their own `pr_id` / `pr_url` after pr-refinement runs. |
 | `abandoned` | User or LLM bailed (`quit`). | (none) | Parent stories usually route to a `main` / inbox state. |
-| `shipped` | direct-ship exit: the fix integrated to local main, the regression gate re-verified GREEN on the merged commit, worktree cleaned up. | `shipped_sha` | The self-hosting loop (no PR). |
+| `shipped` | direct-ship exit: the fix integrated to local main, the regression gate re-verified GREEN on the merged commit, workspace cleaned up. | `shipped_sha` | The self-hosting loop (no PR). |
 | `needs-human` | direct-ship exit: an integrate/verify/cleanup failure, or a regression gate that was never RED pre-fix / isn't GREEN on merged main. | `last_error` | Carries the real error; never a swallowed false success. |
-| `not-reproducible` | the ticket's `repro_command` passed (GREEN) on the unchanged worktree — the bug does not currently reproduce. | `last_error` | Carries the gate output; a human confirms wontfix / cannot-reproduce or supplies a sharper repro. |
+| `not-reproducible` | the ticket's `repro_command` passed (GREEN) on the unchanged workspace — the bug does not currently reproduce. | `last_error` | Carries the gate output; a human confirms wontfix / cannot-reproduce or supplies a sharper repro. |
 | `merged` | opt-in CI-watch/merge tail exit (`bugfix_exit: open-PR-merge`, WS-C C3): the imported pr-refinement compound opened the PR, watched CI, and merged it. | `pr_url` | Carries `pr_url` + `merge_sha`; a standalone `kitsoki run` reaches a real MERGED terminal with no parent hub. |
 | `triaged` | a standardized read-only verdict was produced without attempting a fix — triage-only mode, or a full/quick autostart whose auto-triage pre-flight verdicted `ALREADY-FIXED` (see [Mode shortcuts](#mode-shortcuts)). | `triage_verdict` | Parent decides: close as fixed (`suggested_action` / `fixed_in_ref`), or re-drive with `auto_triage: false`. |
 
@@ -61,10 +61,11 @@ The pipeline ends one of two ways, chosen by the **`bugfix_exit`** world key:
   (rebase onto CURRENT main + build-check + merge), its independent `verify`
   (re-run the gate on the MERGED commit), and its no-swallowed `cleanup` are
   reused verbatim. bugfix's maker rooms (`reproducing → … → testing`) feed the
-  tail at `integrate` exactly as cherny-loop's `@exit:achieved` feeds ship-it —
-  the same `worktree_path` / `workspace_branch` handoff seam. Exits `@exit:shipped`
-  on a green merged-commit re-verify, `@exit:needs-human` (with `last_error`) on
-  any failure.
+  tail at `integrate` exactly as cherny-loop's `@exit:achieved` feeds ship-it.
+  The handoff uses the legacy field names `worktree_path` / `workspace_branch`,
+  but `worktree_path` now carries the managed workspace path. Exits
+  `@exit:shipped` on a green merged-commit re-verify, `@exit:needs-human` (with
+  `last_error`) on any failure.
 - **`open-PR`**: today's behaviour — walk `reviewing → validating → done` and
   hand the close-out artifact to pr-refinement. Parent stories that want the PR
   tail (`dev-story`, `gears-bugfix`) pin `bugfix_exit: open-PR` via `world_in`.
@@ -101,9 +102,9 @@ re-pulls fresh diagnostics on re-entry. See
 The bugfix-specific discipline ship-it does **not** cover: the regression test
 must **FAIL before the fix and PASS after**. The `testing` room runs the
 configured `gate_command` on the **pre-fix snapshot** (`HEAD~1` of the feature
-branch, materialised in a throwaway detached worktree — never mutating the maker
-worktree) and records `regression_red_pre_fix`. The shared `verify` room re-runs
-the **identical** gate on the **merged commit** and records GREEN. A fix whose
+branch, materialised in a temporary detached Git worktree — never mutating the
+maker workspace) and records `regression_red_pre_fix`. The shared `verify` room
+re-runs the **identical** gate on the **merged commit** and records GREEN. A fix whose
 regression test was **never RED pre-fix** (a *characterization* test, not a
 regression test), or **isn't GREEN on merged main**, routes to
 `@exit:needs-human` — never `@exit:shipped`. Same gate, two evaluation sites:
@@ -119,7 +120,7 @@ parent projects it into **`world.gate_command`** (`dev-story`'s
 import's `world_in` carries it across).
 
 The **`reproducing`** room then runs that command **RED-first** on the unchanged
-(pre-fix) worktree *before* the LLM reproducer — structurally the
+(pre-fix) workspace *before* the LLM reproducer — structurally the
 [`cherny-loop` baseline](../cherny-loop/rooms/baseline.yaml) applied to the
 ticket-driven pipeline (`reuse`, don't reinvent):
 
@@ -208,8 +209,8 @@ in `app.yaml`'s `world:` block so the child loads standalone for tests.
 | `run_artifacts_ref` | string | Optional artifact bundle/report path or URL for reporting. | `""` |
 | `workspace_id` | string | `iface.workspace.sync` arg. | `""` |
 | `workdir` | string | Most `iface.{vcs,ci}.*` calls. | `""` |
-| `base_branch` | string | The PR target (`iface.vcs.open_pr.base`); also the worktree cut-point when `base_commit` is empty. | `main` |
-| `base_commit` | string | Pins the worktree CUT-POINT to a specific committish (branch/tag/**SHA** — anything `git worktree add` accepts). Takes precedence over `base_branch` for the cut. Set this (not `base_branch`) to reproduce/fix against a detached baseline, e.g. a bug's pre-fix SHA in a bake-off cell. | `""` |
+| `base_branch` | string | The PR target (`iface.vcs.open_pr.base`); also the workspace cut-point when `base_commit` is empty. | `main` |
+| `base_commit` | string | Pins the workspace cut-point to a specific committish (branch/tag/SHA) accepted by the workspace provider. Takes precedence over `base_branch` for the cut. Set this (not `base_branch`) to reproduce/fix against a detached baseline, e.g. a bug's pre-fix SHA in a bake-off cell. | `""` |
 | `feature_branch` | string | `iface.vcs.branch.name`. | `""` |
 | `gate_command` | string | The ticket's `repro_command` (repro RED-gate in `reproducing`; re-used as the regression gate in `testing` + the shared `verify`). Empty ⇒ the `reproducing` room synthesises it from the reproducer's authored test on `accept` (see "The synthesised gate"). | `""` |
 | `bugfix_mode` | string | `full` (walk every room) \| `quick` (Wave 2 shortcut). | `full` |
@@ -426,7 +427,7 @@ The `bugfix_mode` world key gates collapse paths:
 |---|---|
 | `full` (default) | Walks every room in order. |
 | `quick` | At `testing_awaiting_reply.accept`, jump to `done_executing` (skipping reviewing + validating). Set via the `quick_fix` intent at idle or the first checkpoint. |
-| `triage` | Triage-only: the read-only `triaging` room emits a standardized verdict (`ALREADY-FIXED` \| `STILL-LIVE` \| `PARTIAL` \| `UNCLEAR`, `schemas/triage_verdict.json`) on whether the bug still exists — no worktree, no fix. Terminal: `@exit:triaged` carrying `world.triage_verdict`. Set via the `triage` intent at idle. |
+| `triage` | Triage-only: the read-only `triaging` room emits a standardized verdict (`ALREADY-FIXED` \| `STILL-LIVE` \| `PARTIAL` \| `UNCLEAR`, `schemas/triage_verdict.json`) on whether the bug still exists — no isolated workspace, no fix. Terminal: `@exit:triaged` carrying `world.triage_verdict`. Set via the `triage` intent at idle. |
 
 Entry intents:
 
@@ -441,7 +442,7 @@ Entry intents:
 
 A fresh full/quick **autostart** (idle entered with a ticket seeded — the
 headless / marathon / parent-hub path) does not go straight to `reproducing`:
-after the worktree is cut, idle's autostart chain emits the internal
+after the workspace is cut, idle's autostart chain emits the internal
 `preflight_triage` intent, and the same read-only `triaging` room produces a
 verdict against the exact tree the fix would be applied to — **before** any
 reproducer/judge/maker budget is spent. Routing on accept (auto-fired in any

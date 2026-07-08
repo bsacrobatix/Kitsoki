@@ -15,6 +15,7 @@ If you are testing or debugging one, use [`../tracing/`](../tracing/README.md).
 | Change runtime behavior | [`overview.md`](overview.md) -> [`hosts.md`](hosts.md) -> [`semantic-routing.md`](semantic-routing.md) |
 | Work on external agents | [`mcp-studio.md`](mcp-studio.md) -> [`agent-plugin.md`](agent-plugin.md) -> [`agent-launch-policy.md`](agent-launch-policy.md) |
 | Contribute safely | [`developer-guide.md`](developer-guide.md) -> [`../tracing/testing.md`](../tracing/testing.md) |
+| Manage local dev isolation | [`../dev-workspaces.md`](../dev-workspaces.md) -> [`hosts.md#hostgit_worktree-workspace-interface`](hosts.md#hostgit_worktree-workspace-interface) -> [`capsules.md`](capsules.md) |
 
 ## Start here
 
@@ -78,6 +79,8 @@ If you are testing or debugging one, use [`../tracing/`](../tracing/README.md).
 
 - [`developer-guide.md`](developer-guide.md) — repository map, local commands,
   tests, PR gates, and extension points.
+- [`../dev-workspaces.md`](../dev-workspaces.md) — deterministic clone-backed
+  capsule workspace lifecycle for local agent/operator development.
 - [`credentials.md`](credentials.md) — credential storage, env naming, and
   precedence.
 - [`embeddings.md`](embeddings.md) — embedding index/store/sidecar and

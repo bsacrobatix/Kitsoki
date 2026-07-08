@@ -713,7 +713,7 @@ world:
   # ── Design pipeline (rooms/design*.yaml) ───────────────────────
   # 4-stage pipeline: intake → search → refine → draft+publish.
   # Per-session scratch dir is `design_workspace` — NOT world.workdir
-  # (that is the bf/pr worktree). See docs/proposals/process-design.md §4.
+  # (that is the bf/pr managed workspace). See docs/proposals/process-design.md §4.
   design_slug:           { type: string, default: "" }   # meaningful slug; seeds the workspace dir + final filename
   design_workspace:      { type: string, default: "" }   # docs/proposals/.workspace/<slug> — gitignored scratch
   design_idea:           { type: string, default: "" }   # raw idea text from intake
@@ -827,7 +827,7 @@ world:
   # The autonomous maker→QA loop that PRODUCES (or refreshes) a tour-driven
   # demo video for a feature and gates it with the kitsoki-ui-qa vision
   # review. Reached from landing via `make_demo`. The loop operates on the
-  # hub's existing worktree (world.workdir → child worktree_path) and diffs
+  # hub's existing workspace (world.workdir -> child worktree_path) and diffs
   # against world.base_branch (→ child base_ref); these keys are reused, not
   # re-declared. The keys below are NEW — the loop's input contract that has
   # no dev-story analogue yet (see stories/demo-video-loop/README.md §input
@@ -868,7 +868,7 @@ intents:
     priority: 20
   go_gitops:
     title: "Git commands"
-    description: "Open the git command hub — status, rebase, commit, merge, worktrees."
+    description: "Open the git command hub — status, rebase, commit, merge, workspaces."
     examples: [git, "git ops", "git commands", "version control", "git status", "repo status"]
     synonyms: ["local main vs origin", "main vs origin", "what's the status of local main vs origin", "what's the state of our local main vs origin", "what is the state of our local main vs origin"]
     priority: 20
@@ -1887,7 +1887,7 @@ imports:
     # Exit projections. bf's @exit:done writes done_artifact via the
     # `set:` block on done_awaiting_reply.on.accept. The parent chooses the
     # destination: open-pr enters `pr`; leave-worktree lands back at the
-    # workbench with the local worktree preserved.
+    # workbench with the local workspace preserved.
     exits:
       done:
         to: bugfix_done_router
@@ -1895,13 +1895,13 @@ imports:
           pr_title: "{{ world.bf__done_artifact.summary_title }}"
           pr_body:  "{{ world.bf__done_artifact.summary_markdown }}"
           status:   "fixed"
-          # Lift the bugfix child's self-provisioned worktree into the parent's
-          # bare keys. bf.idle.on_enter provisions the worktree into CHILD scope
+          # Lift the bugfix child's self-provisioned workspace into the parent's
+          # bare keys. bf.idle.on_enter provisions the workspace into CHILD scope
           # (bf__workspace_id / bf__feature_branch / bf__workdir) when the
           # operator doesn't pre-seed one; without this projection the parent's
           # world.workdir / world.feature_branch / world.workspace_id stay "",
           # and imports.pr.world_in (which reads them in parent scope) would open
-          # the PR child against no worktree and no branch (bug 51).
+          # the PR child against no workspace and no branch (bug 51).
           workdir:        "{{ world.bf__workdir }}"
           feature_branch: "{{ world.bf__feature_branch }}"
           workspace_id:   "{{ world.bf__workspace_id }}"
@@ -1924,7 +1924,7 @@ imports:
           last_error: "{{ world.bf__last_error }}"
           human_review_reason: "{{ world.bf__last_error }}"
       # bf's repro RED-gate GREEN branch (bugfix-repro-gate slice): the bug's
-      # repro_command passed on the unchanged worktree, so it does not currently
+      # repro_command passed on the unchanged workspace, so it does not currently
       # reproduce. Land back at the workbench carrying the gate output; a human
       # decides wontfix / cannot-reproduce or supplies a sharper repro.
       not-reproducible:
@@ -2227,7 +2227,7 @@ imports:
       # Project the hub's workdir, falling back to "." (the cwd — prd's own
       # standalone default) when the hub leaves it empty (its default). The bare
       # hub default is "" because the bf/impl pipelines branch on workdir==''
-      # (impl provisions a worktree only when empty); the imported prd instead
+      # (impl provisions a workspace only when empty); the imported prd instead
       # composes filesystem paths as "{{workdir}}/{{prd_workspace}}", so an empty
       # workdir yields "/.artifacts/<slug>" — an mkdir at the filesystem root.
       # Flow tests masked this by seeding workdir via initial_world; a real or
@@ -2285,8 +2285,8 @@ imports:
     source: ../demo-video-loop
     entry: generating
 
-    # Project the hub's worktree + base + the demo input keys into the
-    # loop's private world. worktree_path ← workdir (the hub's working copy;
+    # Project the hub's workspace + base + the demo input keys into the
+    # loop's private world. worktree_path <- workdir (the hub's workspace;
     # the same key the bf/impl pipelines use); base_ref ← base_branch (the
     # parent/base to diff against). The remaining keys are the demo input
     # contract added to the hub's world: block above.

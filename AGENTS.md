@@ -18,6 +18,9 @@ the workspace onto current local `main`; rerun focused validation before
 retrying a failed/conflicted merge. Do not manually chmod the primary checkout
 except to repair the guard itself.
 
+See `docs/dev-workspaces.md` for the full lifecycle contract, metadata files,
+failure modes, recovery rules, and validation commands.
+
 Prefer GitHub PRs for review and landing, but do not burn CI on every
 work-in-progress agent branch. The CI workflow is configured so `pull_request`
 runs target `main`; GitHub branch filters on `pull_request` match the PR base
