@@ -239,7 +239,7 @@ func newGHAgentSetupAttachCmd() *cobra.Command {
 				return fmt.Errorf("gh-agent setup attach: --repo owner/name is required (or use --list)")
 			}
 			// Credential-store precedence: flags > env > env file > default
-			// profile (docs/architecture/credentials.md).
+			// profile (docs/guide/development/credentials.md).
 			cc, err := githubapp.ResolveAppClient(clientID, clientSecret, installationID, envFile)
 			if err != nil {
 				return err

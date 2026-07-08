@@ -711,7 +711,7 @@ tier. Add it to your synonyms file to shrink the LLM dependency.
 | In-TUI `/warp` | Slash command equivalent. `/warp <state> world.X=Y` for inline; `/warp file:<path>` to load a basis. |
 | `kitsoki docs apply-proposal` | LLM-facing guide for "implement this prose proposal against `app.yaml`". |
 | `kitsoki extract suggest-synonym <session-id> <call-id>` | Propose a synonym entry from a recorded LLM-tier `host.agent.extract` call. |
-| In-TUI `Edit mode` | Hot-reload editing — see [`developer-guide.md` §8](../architecture/developer-guide.md#8-hot-reload-edit-mode). |
+| In-TUI `Edit mode` | Hot-reload editing — see [`developer-guide.md` §8](../guide/development/developer-guide.md#8-hot-reload-edit-mode). |
 
 `kitsoki render` is one-way: the Markdown never feeds back into the
 engine. Re-run after every change to keep `APP.md` in sync.

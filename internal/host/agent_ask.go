@@ -1,7 +1,7 @@
 // Package host — host.agent.ask: read-only inspection handler.
 //
 // host.agent.ask is the "read-only inspection" rung of the agent verb ladder
-// (see docs/architecture/agent-cli.md). The LLM may use read tools (Read, Grep, Glob,
+// (see docs/guide/agents/cli.md). The LLM may use read tools (Read, Grep, Glob,
 // WebFetch, WebSearch, Bash under a profile, read-only MCP servers) but cannot
 // mutate anything. Returns prose output; when a schema: is supplied the LLM also
 // calls a submit MCP tool and the handler returns typed JSON alongside stdout.

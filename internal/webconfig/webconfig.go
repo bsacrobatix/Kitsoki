@@ -61,7 +61,7 @@ type WebConfig struct {
 	// HarnessProfiles declares named harness profiles — operator-selectable
 	// bundles of {backend, env, model} that a live session can switch between
 	// via the TUI's /provider /model commands or the web header picker. Keyed
-	// by profile name. See docs/architecture/harness-profiles.md.
+	// by profile name. See docs/guide/agents/harness-profiles.md.
 	HarnessProfiles map[string]HarnessProfile `yaml:"harness_profiles,omitempty"`
 	// DefaultProfile names the profile new sessions start on. Empty ⇒ the
 	// flag-derived static default (today's --agent/--model path). Must name a

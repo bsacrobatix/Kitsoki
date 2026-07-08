@@ -13,8 +13,8 @@ routing, guards, templates, or host calls cannot answer the question directly.
 | `host.agent.converse` | Free-form conversational sessions with permission controls. | [`../hosts.md#hostagentconverse`](../hosts.md#hostagentconverse) |
 
 For declaring alternate agent transports and providers, see
-[`../agent-plugin.md`](../agent-plugin.md), [`../agent-providers.md`](../agent-providers.md),
-and [`../agent-backends.md`](../agent-backends.md).
+[`../agent-plugin.md`](../agent-plugin.md), [`../../guide/agents/providers.md`](../../guide/agents/providers.md),
+and [`../../guide/agents/backends.md`](../../guide/agents/backends.md).
 
 For the shared Starlark sandbox used by `host.agent.codeact`, see
 [`../starlark.md`](../starlark.md).

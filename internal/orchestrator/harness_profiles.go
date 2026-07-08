@@ -24,7 +24,7 @@ func WithHarnessLadderConfig(cfg host.LadderConfig) Option {
 // harness profile (webconfig.HarnessProfile, ${VAR} already expanded). It is a
 // named bundle of the agent-selection axes a live session can switch between:
 // which backend CLI is forked, which model it defaults to, and the env retarget
-// (e.g. synthetic.new). See docs/architecture/harness-profiles.md.
+// (e.g. synthetic.new). See docs/guide/agents/harness-profiles.md.
 type HarnessProfile struct {
 	// Name is the profile key from .kitsoki.yaml (the headline operators pick by).
 	Name string

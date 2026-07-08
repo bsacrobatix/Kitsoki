@@ -510,7 +510,7 @@ The conceptual model above is realised by a small set of Go packages
 under `internal/`. This section is for someone working on kitsoki
 itself; if you're an application author or a user, you can stop
 here and head to [`authoring.md`](../stories/authoring.md) or
-[`developer-guide.md`](developer-guide.md).
+[`developer-guide.md`](../guide/development/developer-guide.md).
 
 ### 11.1 Layered view
 
@@ -906,7 +906,7 @@ runs `kitsoki turn` or other kitsoki subcommands as tools.
 - **Authoring an app** → [`authoring.md`](../stories/authoring.md) and
   `kitsoki docs app-schema`.
 - **State machine vocabulary** → [`state-machine.md`](../stories/state-machine.md).
-- **Building or contributing** → [`developer-guide.md`](developer-guide.md).
+- **Building or contributing** → [`developer-guide.md`](../guide/development/developer-guide.md).
 - **Testing** → [`testing.md`](../tracing/testing.md).
 - **Background jobs** → [`background-jobs/`](../stories/background-jobs/README.md).
 - **Hosts and transports** → [`hosts.md`](hosts.md), [`transports.md`](transports.md).

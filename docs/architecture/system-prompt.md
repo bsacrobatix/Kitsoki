@@ -111,7 +111,7 @@ Layer 3 (the agent persona) is unchanged: keep authoring
   `sysprompt.Compose` with `Verb: Route`.
 
 All claude-shaped invocations fork through one runner
-(`host.RunClaudeOneShotForHarness`; see [agent-cli](agent-cli.md)), so the
+(`host.RunClaudeOneShotForHarness`; see [agent CLI](../guide/agents/cli.md)), so the
 composed prompt is applied consistently. Claude receives it through
 `--system-prompt`; Codex receives the same rendered bytes through
 `model_instructions_file`.

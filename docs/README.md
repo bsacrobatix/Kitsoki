@@ -12,10 +12,10 @@ For the elevator pitch and user quickstart, see the top-level
 | Deciding whether Kitsoki is worth it | [`evaluate-kitsoki.md`](evaluate-kitsoki.md) -> [`architecture/concept.md`](architecture/concept.md) -> [`case-studies/bug-fix.md`](case-studies/bug-fix.md) -> [`case-studies/bugfix-bakeoff.md`](case-studies/bugfix-bakeoff.md) |
 | Using Kitsoki in your own project | [`getting-started.md`](getting-started.md) -> [`workflows/`](workflows/README.md) |
 | Writing a story | [`stories/architecture.md`](stories/architecture.md) -> [`stories/authoring.md`](stories/authoring.md) -> [`tracing/testing.md`](tracing/testing.md) -> [`recipes/`](recipes/README.md) -> [`embedded/app-schema.md`](embedded/app-schema.md) |
-| Contributing to Kitsoki | [`contributor-setup.md`](contributor-setup.md) (developer environment setup, including Playwright/Chromium visual QA deps) -> [`../CONTRIBUTING.md`](../CONTRIBUTING.md) -> [`architecture/developer-guide.md`](architecture/developer-guide.md) |
+| Contributing to Kitsoki | [`contributor-setup.md`](contributor-setup.md) (developer environment setup, including Playwright/Chromium visual QA deps) -> [`../CONTRIBUTING.md`](../CONTRIBUTING.md) -> [`guide/development/developer-guide.md`](guide/development/developer-guide.md) |
 | Debugging a session | [`tracing/README.md`](tracing/README.md) -> [`tracing/testing.md`](tracing/testing.md) -> [`tracing/trace-format.md`](tracing/trace-format.md) |
 | Working on UI | [`web/README.md`](web/README.md) or [`tui/README.md`](tui/README.md) -> [`tui/rendering-tests.md`](tui/rendering-tests.md) |
-| Managing local development workspaces | [`dev-workspaces.md`](dev-workspaces.md) -> [`architecture/hosts.md#hostgit_worktree-workspace-interface`](architecture/hosts.md#hostgit_worktree-workspace-interface) -> [`architecture/capsules.md`](architecture/capsules.md) |
+| Managing local development workspaces | [`dev-workspaces.md`](dev-workspaces.md) -> [`architecture/hosts.md#hostgit_worktree-workspace-interface`](architecture/hosts.md#hostgit_worktree-workspace-interface) -> [`guide/development/capsules.md`](guide/development/capsules.md) |
 
 The tree is organised by task and area. Each section has its own `README.md`
 index. The proposal tree is design history and work in progress, not the
@@ -25,18 +25,29 @@ product manual.
 
 ## Sections
 
-### 🏛 [`architecture/`](architecture/README.md) — the engine and its boundaries
+### [`architecture/`](architecture/README.md) — the engine and its boundaries
 
 How kitsoki works under the hood: control inversion, progressive
-determinism, the package map and turn loop, persistence, and the
-external-world boundaries (hosts, agent plugins, transports, the
-routing stack). Also the contributor guide. *Audience: architects and
-people changing the kitsoki codebase.*
+determinism, the package map and turn loop, persistence, and the runtime
+contracts where Kitsoki reaches the outside world (hosts, transports, agent
+plugins, routing, prompts, MCP Studio). *Audience: architects and people
+changing the platform model.*
 
 Start with [`architecture/concept.md`](architecture/concept.md) for the thesis,
 then [`architecture/overview.md`](architecture/overview.md) for the system map.
 
-### 📖 [`stories/`](stories/README.md) — the authoring model
+### [`guide/`](guide/README.md) — operational and contributor guides
+
+How to use the platform surfaces: launch agents, configure harness profiles,
+set local launch policy, use `kitsoki agent`, set up GitHub App credentials,
+manage capsules, and follow the repository contribution workflow. *Audience:
+operators, contributors, and anyone following a concrete task.*
+
+Start with [`guide/agents/launch.md`](guide/agents/launch.md) for agent launch
+and [`guide/development/developer-guide.md`](guide/development/developer-guide.md)
+for source work.
+
+### [`stories/`](stories/README.md) — the authoring model
 
 How to write a story: the `app.yaml` state-machine vocabulary (rooms,
 phases, states, intents, slots, world, guards, transitions, effects),
@@ -44,14 +55,14 @@ the authoring loop, composition via imports, the visual/narrative
 style guide, the choice widget, sidebar meta-mode agents, background
 jobs, and bug filing. *Audience: story authors.*
 
-### 🔬 [`tracing/`](tracing/README.md) — trace, test, debug, replay
+### [`tracing/`](tracing/README.md) — trace, test, debug, replay
 
 The session trace is the authoritative state; everything else derives
 from it. This section covers the trace format, the two test modes,
 host cassettes, the `kitsoki turn` probe, and how to replay and debug
 a session. *Audience: anyone testing, debugging, or developing a story.*
 
-### 🧑‍🍳 [`recipes/`](recipes/README.md) — copy-paste patterns
+### [`recipes/`](recipes/README.md) — copy-paste patterns
 
 Short, task-oriented recipes for common authoring patterns: add an
 intent, gate a destructive effect, branch on a host call, collect a
@@ -61,7 +72,7 @@ want the shortest correct path.*
 
 Use recipes after the authoring model and test/replay loop are clear.
 
-### 🖥 [`tui/`](tui/README.md) — the terminal UI
+### [`tui/`](tui/README.md) — the terminal UI
 
 The single-pane chat TUI: the block rendering pipeline, typed
 view-elements + pongo2, the `/command` surface, engine-event observers,
@@ -97,6 +108,9 @@ live in the sections above.
 - [`contributor-setup.md`](contributor-setup.md) — build Kitsoki from source and
   set up this checkout for development, including browser dependencies for
   runstatus and TUI visual QA.
+- [`guide/`](guide/README.md) — task-oriented reference for agent launch,
+  harness profiles, local development, capsules, credentials, and integration
+  setup.
 - [`dev-workspaces.md`](dev-workspaces.md) — create, bootstrap, commit, land,
   and remove managed clone-backed capsule workspaces for Codex/Claude and
   dev-story runs.

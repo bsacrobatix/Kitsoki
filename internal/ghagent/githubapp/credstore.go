@@ -1,4 +1,4 @@
-// The local credential-store convention (docs/architecture/credentials.md):
+// The local credential-store convention (docs/guide/development/credentials.md):
 // a fixed on-disk layout under one root so every kitsoki command — and every
 // script wrapping one — resolves GitHub App credentials the same way instead
 // of being handed them ad hoc.

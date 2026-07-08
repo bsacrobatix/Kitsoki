@@ -94,7 +94,7 @@ type Orchestrator struct {
 	// static agentBackendName. Seeded by WithHarnessProfiles from .kitsoki.yaml;
 	// empty leaves the legacy static path untouched. selection is read on every
 	// dispatch (resolveSelection) and written from a surface goroutine
-	// (SetSelection) — guarded by selMu. See docs/architecture/harness-profiles.md.
+	// (SetSelection) — guarded by selMu. See docs/guide/agents/harness-profiles.md.
 	harnessProfiles map[string]HarnessProfile
 	defaultProfile  string
 	selection       ProfileSelection

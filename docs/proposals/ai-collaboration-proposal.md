@@ -8,10 +8,10 @@ three have shipped and are now documented in normal docs:
   [`docs/architecture/overview.md` §11.5](../architecture/overview.md) and the
   emit sites in `internal/orchestrator/orchestrator.go`.
 - **`kitsoki turn`** — stateless one-shot turn execution. See
-  [`docs/architecture/developer-guide.md` §6](../architecture/developer-guide.md) and
+  [`docs/guide/development/developer-guide.md` §6](../guide/development/developer-guide.md) and
   `cmd/kitsoki/turn.go`.
 - **`kitsoki inspect --session-id <id>`** — read-only session
-  snapshot. See [`docs/architecture/developer-guide.md` §6](../architecture/developer-guide.md)
+  snapshot. See [`docs/guide/development/developer-guide.md` §6](../guide/development/developer-guide.md)
   and `cmd/kitsoki/inspect.go`.
 
 One surface below remains in design: `loading_view` per-state YAML

@@ -56,7 +56,7 @@ flowchart LR
 ```
 
 The server core records **nothing new**: each driving handle writes through the
-same JSONL event sink as [`kitsoki turn --trace`](developer-guide.md#61-the-trace-is-your-transcript),
+same JSONL event sink as [`kitsoki turn --trace`](../guide/development/developer-guide.md#61-the-trace-is-your-transcript),
 so routed intents, `agent.call.*`, and transitions land in that session's
 trace and replay unchanged. The studio session itself is ephemeral process
 state; its handles point at durable traces. Handle resolution is **fail-fast** —

@@ -9,7 +9,7 @@
 // slots arrive as arguments; the server resolves the session, validates via the
 // Machine, applies the transition, persists events, and returns TransitionOK or
 // a structured error envelope (see the MCP validator in
-// docs/architecture/developer-guide.md).
+// docs/guide/development/developer-guide.md).
 //
 // # Session identity
 //
@@ -73,7 +73,7 @@ type TransitionOK struct {
 }
 
 // TransitionError is the structured error payload returned when a transition is
-// rejected; see the MCP validator in docs/architecture/developer-guide.md.
+// rejected; see the MCP validator in docs/guide/development/developer-guide.md.
 type TransitionError struct {
 	OK    bool                    `json:"ok"` // always false on this branch
 	Error *intent.ValidationError `json:"error"`

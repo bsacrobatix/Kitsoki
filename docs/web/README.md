@@ -62,7 +62,7 @@ loader is `internal/webconfig`.
 1. **`--stories-dir <dir>` flags** (repeatable) — ad-hoc override, no config edit.
 2. **`story_dirs` in `.kitsoki.yaml`** in the working directory (a sibling,
    gitignored `.kitsoki.local.yaml` is deep-merged on top, local wins — see
-   [harness profiles](../architecture/harness-profiles.md#shared-file-and-local-override)).
+   [harness profiles](../guide/agents/harness-profiles.md#shared-file-and-local-override)).
 3. **`./stories`** — the default when neither is given, so the common single-repo
    case needs no configuration.
 
@@ -148,7 +148,7 @@ this session. Switching fires `runstatus.session.set_selection` and takes effect
 on the next turn; the model dropdown appears only for a profile that declares a
 model catalog. Each agent row in the trace is then **stamped with the profile
 and model it ran on**, so the trace provenance matches what was picked. See
-[Harness Profiles](../architecture/harness-profiles.md) for the full mechanism
+[Harness Profiles](../guide/agents/harness-profiles.md) for the full mechanism
 (it is the same selection the TUI's `/provider` / `/model` drive).
 
 The Drive header also carries a **proposals badge** (`ProposalsBadge.vue`, a

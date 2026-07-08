@@ -194,6 +194,7 @@ promo landing + help docs with recorded feature demos, generated from the
 |---|---|
 | Use Kitsoki in your project | [`docs/getting-started.md`](docs/getting-started.md), then [`docs/workflows/`](docs/workflows/README.md) |
 | Understand the architecture | [`docs/architecture/concept.md`](docs/architecture/concept.md), then [`docs/architecture/overview.md`](docs/architecture/overview.md) |
+| Follow operational guides | [`docs/guide/`](docs/guide/README.md), especially [`docs/guide/agents/`](docs/guide/agents/README.md) |
 | Write a story | [`docs/stories/architecture.md`](docs/stories/architecture.md), then [`docs/recipes/`](docs/recipes/README.md) |
 | Look up story fields | `kitsoki docs app-schema` or [`docs/embedded/app-schema.md`](docs/embedded/app-schema.md) |
 | Debug or test a story | [`docs/tracing/README.md`](docs/tracing/README.md) and [`docs/tracing/testing.md`](docs/tracing/testing.md) |
@@ -235,7 +236,7 @@ kitsoki/
 transient markdown (proposals, summaries) in `.context/` and any
 generated artifact for review in `.artifacts/`, so neither clutters the
 tracked tree. See the
-[developer guide](docs/architecture/developer-guide.md#7-coding-conventions).
+[developer guide](docs/guide/development/developer-guide.md#7-coding-conventions).
 
 ## Name and mark
 
@@ -259,7 +260,7 @@ under 10 seconds.
 Recent frontier work:
 
 - **Agent plugin and launch system** (`docs/architecture/agent-plugin.md`,
-  `docs/architecture/agent-cli.md`, `docs/architecture/agent-launch.md`) —
+  `docs/guide/agents/cli.md`, `docs/guide/agents/launch.md`) —
   pluggable agent transports declared under `agent_plugins:`, dispatched through
   `host.agent.<verb>` effects with schema validation, subprocess /
   MCP-over-HTTP transports, and a `kitsoki agent launch` dry-run resolver that

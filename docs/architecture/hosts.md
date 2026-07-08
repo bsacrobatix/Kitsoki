@@ -8,7 +8,7 @@ an `Error` envelope.
 This document is the user-facing reference for every built-in. The
 authoritative source is `internal/host/`. To extend the registry with
 your own handler, see
-[`developer-guide.md` §5.2](developer-guide.md#52-adding-a-new-built-in-host-handler).
+[`developer-guide.md` §5.2](../guide/development/developer-guide.md#52-adding-a-new-built-in-host-handler).
 For a shorter family index, see [`hosts/`](hosts/README.md).
 
 For the effect-level shape (`invoke:`, `with:`, `bind:`, `on_error:`,
@@ -24,7 +24,7 @@ grants, sandboxing, validation, cassettes, and promotion — see
 
 For invoking agent handlers directly from scripts, CI jobs, or
 validator subprocesses — without a running state machine — see
-[`docs/architecture/agent-cli.md`](agent-cli.md). That document covers
+[`docs/guide/agents/cli.md`](../guide/agents/cli.md). That document covers
 `kitsoki agent <verb>`, `kitsoki agent-serve` (unix-socket daemon),
 the JSON-RPC method shapes, and `KITSOKI_SESSION_ID` trace continuity.
 
@@ -990,7 +990,7 @@ effect class when the effect-taxonomy slice lands.
 ### `sandbox:` Runtime Policy
 
 Before any external coding-agent launch, an optional global
-[`agent_launch_policy:`](./agent-launch-policy.md) preflight may reject the
+[`agent_launch_policy:`](../guide/agents/launch-policy.md) preflight may reject the
 resolved `working_dir` when it is in a protected checkout/branch or outside an
 opened capsule. That guard answers "may this agent start here?" and applies even
 when a call does not declare `sandbox:`.
@@ -1978,7 +1978,7 @@ All agent call sites in this codebase were migrated from `host.agent.ask_with_mc
 and `host.agent.talk` to the five-verb schema above during agent-split Phases 6–9
 (see git log for the `agent-split` commit series). The `kitsoki migrate-agent`
 codemod (`cmd/kitsoki/migrate_agent.go`) automated the bulk of the migration;
-the classification rules it applies are documented in [`agent-cli.md`](agent-cli.md).
+the classification rules it applies are documented in [`agent-cli.md`](../guide/agents/cli.md).
 
 One Go-level entry point survives the migration: `host.AgentAskWithMCPHandler`
 in `internal/host/agent_ask_with_mcp.go` is called from `internal/metamode/adapter.go`
@@ -2296,7 +2296,7 @@ archive ([`issues/DEPRECATED.md`](../../issues/DEPRECATED.md)). Implementation:
 
 ## Adding your own host
 
-See [`developer-guide.md` §5.2](developer-guide.md#52-adding-a-new-built-in-host-handler).
+See [`developer-guide.md` §5.2](../guide/development/developer-guide.md#52-adding-a-new-built-in-host-handler).
 The contract is small: implement `host.Handler` (a function with
 signature `func(ctx context.Context, args map[string]any) (Result, error)`),
 document the `with:` and bind-able result keys, and register it in
