@@ -50,7 +50,8 @@ type driveFrame struct {
 	Exit string `json:"exit"`
 	// HostCalls summarises the host.* invocations this turn made (empty when none).
 	HostCalls []driveHostCall `json:"host_calls,omitempty"`
-	// OperationDrive summarises the optional --drive-operation autonomous drive.
+	// OperationDrive summarises an automatic background operation drive, or an
+	// explicit --drive-operation drive.
 	OperationDrive *driveOperationFrame `json:"operation_drive,omitempty"`
 }
 
@@ -61,9 +62,9 @@ type driveHostCall struct {
 	State     string `json:"state,omitempty"`
 }
 
-// driveOperationFrame is additive metadata emitted when --drive-operation asks
-// the operation driver to continue an active autonomous/supervised operation
-// after an operator/scripted turn.
+// driveOperationFrame is additive metadata emitted when a background operation
+// auto-runs after an operator/scripted turn, or when --drive-operation asks the
+// operation driver to continue an active autonomous/supervised operation.
 type driveOperationFrame struct {
 	Turns      int    `json:"turns"`
 	StopReason string `json:"stop_reason,omitempty"`
@@ -100,7 +101,9 @@ func driveCmd() *cobra.Command {
 		Long: `Run the real orchestrator turn loop against a persistent JSONL trace,
 reading one free-text line per turn (stdin or --script) and routing it through
 the live or replay harness. Each turn emits one JSON object on stdout: the
-slice-1 Frame plus { routed_intent, confidence, exit, host_calls }.
+slice-1 Frame plus { routed_intent, confidence, exit, host_calls }. Background
+operation handles auto-drive after accepted turns; --drive-operation force-drives
+any active autonomous/supervised operation handle.
 
 VCR record modes (over the routing cassette):
   none  replay on hit; ERROR on miss (pure deterministic, no live calls)
@@ -146,7 +149,7 @@ Examples:
 	cmd.Flags().StringVar(&profileName, "profile", "", "harness profile from .kitsoki.yaml/.kitsoki.local.yaml; supplies backend, model, quota, and provider env")
 	cmd.Flags().StringVar(&configPath, "config", webconfig.DefaultConfigFile, "config file used with --profile")
 	cmd.Flags().StringVar(&warpBasisPath, "warp", "", "path to a warp-basis YAML (state + world overrides); applied as the first action after session create. Same file the TUI's /warp file:<path> loads.")
-	cmd.Flags().BoolVar(&driveOperation, "drive-operation", false, "after each accepted turn, drive an active autonomous/supervised operation until it rests")
+	cmd.Flags().BoolVar(&driveOperation, "drive-operation", false, "after each accepted turn, force-drive any active autonomous/supervised operation until it rests")
 
 	return cmd
 }
@@ -286,8 +289,14 @@ func runDrive(cmd *cobra.Command, cfg driveCmdConfig) error {
 		finalErr := turnErr
 		var opFrame *driveOperationFrame
 
-		if cfg.driveOperation && shouldDriveOperationAfterTurn(outcome, turnErr) {
-			drive, driveErr := ts.Orch.DriveOperation(ctx, ts.SID)
+		if shouldDriveOperationAfterTurn(outcome, turnErr) {
+			var drive *orchestrator.OperationDriveOutcome
+			var driveErr error
+			if cfg.driveOperation {
+				drive, driveErr = ts.Orch.DriveOperation(ctx, ts.SID)
+			} else {
+				drive, driveErr = ts.Orch.DriveBackgroundOperation(ctx, ts.SID)
+			}
 			if drive != nil {
 				opFrame = &driveOperationFrame{
 					Turns:      drive.Turns,

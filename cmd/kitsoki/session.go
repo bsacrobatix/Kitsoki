@@ -779,11 +779,12 @@ text to one of the current state's allowed intents using each intent's
 examples and slot schema. Use this for free-form replies (Jira/Bitbucket
 comment bodies).
 
---drive-operation asks the command to continue any active autonomous/supervised
-operation handle after the inbound turn, using the same safe driver as
-` + "`kitsoki drive --drive-operation`" + ` and stopping at terminal/waiting
-handles, clarification/rejection, manual-only policies, or no safe next
-intent.
+After each accepted inbound turn, background operation handles
+(` + "`run_in_background: true`" + `) continue automatically using the same safe
+driver as ` + "`kitsoki drive`" + ` and stop at terminal/waiting handles,
+clarification/rejection, manual-only policies, or no safe next intent.
+--drive-operation forces the same driver for any active autonomous/supervised
+operation handle, even when it is not marked background.
 
 The session writer lock is held for the duration of one turn. If
 another process holds it, this command exits 75 (EX_TEMPFAIL).`,
@@ -1018,8 +1019,14 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 					}
 					outcome, inner = orch.Turn(ctx, sid, rawText, turnOpts...)
 				}
-				if driveOperation && shouldDriveOperationAfterTurn(outcome, inner) {
-					drive, driveErr := orch.DriveOperation(ctx, sid)
+				if shouldDriveOperationAfterTurn(outcome, inner) {
+					var drive *orchestrator.OperationDriveOutcome
+					var driveErr error
+					if driveOperation {
+						drive, driveErr = orch.DriveOperation(ctx, sid)
+					} else {
+						drive, driveErr = orch.DriveBackgroundOperation(ctx, sid)
+					}
 					if drive != nil {
 						operationDrive = &driveOperationFrame{
 							Turns:      drive.Turns,
@@ -1119,7 +1126,7 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 	cmd.Flags().StringVar(&recordingPath, "recording", "", "recording YAML for --harness replay")
 	cmd.Flags().StringVar(&tracePath, "trace", "",
 		"JSONL trace file for event writes; default: ~/.kitsoki/sessions/<app>/<sha8>-<slug>.jsonl (derived from --key)")
-	cmd.Flags().BoolVar(&driveOperation, "drive-operation", false, "after the inbound turn, drive an active autonomous/supervised operation until it rests")
+	cmd.Flags().BoolVar(&driveOperation, "drive-operation", false, "after the inbound turn, force-drive any active autonomous/supervised operation until it rests")
 	_ = cmd.MarkFlagRequired("app")
 	return cmd
 }

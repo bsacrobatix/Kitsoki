@@ -1153,7 +1153,11 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if err != nil {
 			return nil, serverErr(err)
 		}
-		return newTurnResult(out, entry.Driver), nil
+		drive, out, err := driveBackgroundOperationAfterTurn(ctx, entry.Driver, out)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return newTurnResultWithOperationDrive(out, entry.Driver, drive), nil
 
 	case "runstatus.session.submit":
 		entry, rerr := s.resolve(params)
@@ -1184,7 +1188,11 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if err != nil {
 			return nil, serverErr(err)
 		}
-		return newTurnResult(out, entry.Driver), nil
+		drive, out, err := driveBackgroundOperationAfterTurn(ctx, entry.Driver, out)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return newTurnResultWithOperationDrive(out, entry.Driver, drive), nil
 
 	case "runstatus.session.continue":
 		entry, rerr := s.resolve(params)
@@ -1201,7 +1209,11 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if err != nil {
 			return nil, serverErr(err)
 		}
-		return newTurnResult(out, entry.Driver), nil
+		drive, out, err := driveBackgroundOperationAfterTurn(ctx, entry.Driver, out)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return newTurnResultWithOperationDrive(out, entry.Driver, drive), nil
 
 	case "runstatus.session.drive_operation":
 		entry, rerr := s.resolve(params)
@@ -1942,6 +1954,31 @@ func appendWorkflowValidationEvent(receipt *dynamicworkflow.Receipt) error {
 		"errors":          receipt.Validation.Errors,
 		"warnings":        receipt.Validation.Warnings,
 	})
+}
+
+func driveBackgroundOperationAfterTurn(ctx context.Context, driver Driver, out *orchestrator.TurnOutcome) (*orchestrator.OperationDriveOutcome, *orchestrator.TurnOutcome, error) {
+	if driver == nil || out == nil || out.Mode != orchestrator.ModeTransitioned {
+		return nil, out, nil
+	}
+	bg, ok := driver.(BackgroundOperationDriver)
+	if !ok {
+		return nil, out, nil
+	}
+	drive, err := bg.DriveBackgroundOperation(ctx)
+	if err != nil {
+		return nil, out, err
+	}
+	if drive == nil {
+		return nil, out, nil
+	}
+	if drive.Final != nil {
+		return drive, drive.Final, nil
+	}
+	current, err := driver.View(ctx)
+	if err != nil {
+		return drive, out, err
+	}
+	return drive, current, nil
 }
 
 func readOnlyErr(method string) *rpcError {

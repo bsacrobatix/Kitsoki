@@ -11,10 +11,20 @@ import (
 
 type operationDriveDriver struct {
 	captureDriver
-	called bool
-	final  *orchestrator.TurnOutcome
-	view   *orchestrator.TurnOutcome
-	err    error
+	called           bool
+	backgroundCalled bool
+	turn             *orchestrator.TurnOutcome
+	final            *orchestrator.TurnOutcome
+	backgroundFinal  *orchestrator.TurnOutcome
+	view             *orchestrator.TurnOutcome
+	err              error
+}
+
+func (d *operationDriveDriver) Turn(ctx context.Context, input string) (*orchestrator.TurnOutcome, error) {
+	if d.turn != nil {
+		return d.turn, nil
+	}
+	return d.captureDriver.Turn(ctx, input)
 }
 
 func (d *operationDriveDriver) DriveOperation(context.Context) (*orchestrator.OperationDriveOutcome, error) {
@@ -23,6 +33,14 @@ func (d *operationDriveDriver) DriveOperation(context.Context) (*orchestrator.Op
 		return nil, d.err
 	}
 	return &orchestrator.OperationDriveOutcome{Turns: 1, Final: d.final, StopReason: "operation-completed"}, nil
+}
+
+func (d *operationDriveDriver) DriveBackgroundOperation(context.Context) (*orchestrator.OperationDriveOutcome, error) {
+	d.backgroundCalled = true
+	if d.err != nil {
+		return nil, d.err
+	}
+	return &orchestrator.OperationDriveOutcome{Turns: 2, Final: d.backgroundFinal, StopReason: "operation-completed", LastIntent: "accept"}, nil
 }
 
 func (d *operationDriveDriver) View(ctx context.Context) (*orchestrator.TurnOutcome, error) {
@@ -53,6 +71,37 @@ func TestDriveOperationRPC_CallsThrough(t *testing.T) {
 	}
 	if tr.OperationDrive == nil || tr.OperationDrive.Turns != 1 || tr.OperationDrive.StopReason != "operation-completed" {
 		t.Fatalf("drive_operation did not include operation summary: %+v", tr.OperationDrive)
+	}
+}
+
+func TestTurnRPC_AutoDrivesBackgroundOperation(t *testing.T) {
+	drv := &operationDriveDriver{
+		turn: &orchestrator.TurnOutcome{
+			Mode:     orchestrator.ModeTransitioned,
+			NewState: app.StatePath("work"),
+		},
+		backgroundFinal: &orchestrator.TurnOutcome{
+			Mode:     orchestrator.ModeCompleted,
+			NewState: app.StatePath("__exit__done"),
+		},
+	}
+	s := New("", &app.AppDef{}, WithDriver(drv))
+	out, rerr := s.dispatch(context.Background(), "runstatus.session.turn", map[string]any{"session_id": "x", "input": "start"})
+	if rerr != nil {
+		t.Fatalf("turn error: %+v", rerr)
+	}
+	if !drv.backgroundCalled {
+		t.Fatalf("driver DriveBackgroundOperation was not called")
+	}
+	if drv.called {
+		t.Fatalf("turn RPC must not use explicit DriveOperation")
+	}
+	tr := out.(turnResult)
+	if tr.Mode != "completed" || tr.State != "__exit__done" {
+		t.Fatalf("turn returned wrong auto-driven result: %+v", tr)
+	}
+	if tr.OperationDrive == nil || tr.OperationDrive.Turns != 2 || tr.OperationDrive.LastIntent != "accept" {
+		t.Fatalf("turn did not include background operation summary: %+v", tr.OperationDrive)
 	}
 }
 

@@ -145,6 +145,7 @@ world:
   gate_command:      { type: string, default: "" }    # script-mode shell command
   gate_plan_reason:  { type: string, default: "" }    # why the planner chose this gate
   gate_prompt_focus: { type: string, default: "" }    # extra reviewer rubric for agent/hybrid gates
+  baseline_green_policy: { type: string, default: "hold" } # hold | needs-human
   anchor_files:      { type: string, default: "" }    # fixed context handed to the maker each turn (ralph reset)
   iteration_budget:  { type: int,    default: 8 }
   cost_budget_usd:   { type: number, default: 0 }     # 0 = disabled
@@ -289,6 +290,10 @@ intents:
     priority: 1
     slots:
       feedback: { type: string, required: false }
+  baseline_green_needs_human:
+    description: "(internal) autonomous importer requires a human decision for an already-green baseline."
+    examples: []
+    priority: 1
   slot_a_finished:
     description: "(internal) worker A done."
     examples: []

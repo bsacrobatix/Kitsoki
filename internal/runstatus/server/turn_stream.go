@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"kitsoki/internal/host"
+	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/world"
 )
 
@@ -188,21 +189,27 @@ func (s *Server) handleTurnStream(w http.ResponseWriter, r *http.Request) {
 		case "turn":
 			out, e := entry.Driver.Turn(ctx, body.Input)
 			if e == nil {
-				r := newTurnResult(out, entry.Driver)
+				var drive *orchestrator.OperationDriveOutcome
+				drive, out, e = driveBackgroundOperationAfterTurn(ctx, entry.Driver, out)
+				r := newTurnResultWithOperationDrive(out, entry.Driver, drive)
 				tr = &r
 			}
 			err = e
 		case "submit":
 			out, e := entry.Driver.SubmitDirect(ctx, body.Intent, body.Slots)
 			if e == nil {
-				r := newTurnResult(out, entry.Driver)
+				var drive *orchestrator.OperationDriveOutcome
+				drive, out, e = driveBackgroundOperationAfterTurn(ctx, entry.Driver, out)
+				r := newTurnResultWithOperationDrive(out, entry.Driver, drive)
 				tr = &r
 			}
 			err = e
 		case "continue":
 			out, e := entry.Driver.ContinueTurn(ctx, body.Slots)
 			if e == nil {
-				r := newTurnResult(out, entry.Driver)
+				var drive *orchestrator.OperationDriveOutcome
+				drive, out, e = driveBackgroundOperationAfterTurn(ctx, entry.Driver, out)
+				r := newTurnResultWithOperationDrive(out, entry.Driver, drive)
 				tr = &r
 			}
 			err = e

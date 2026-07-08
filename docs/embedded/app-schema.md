@@ -65,7 +65,10 @@ emits operation lifecycle trace rows and writes the engine-owned
 `status: completed` when the run reaches a terminal state, even on a later
 turn. Imported child policies are lifted under the import alias
 (`<alias>__<policy-id>`), and child transition `operation:` refs are rewritten
-to match. State overlays control abandonable task-local world writes.
+to match. When `run_in_background: true` is set, normal live write surfaces
+automatically invoke the safe operation driver after an accepted turn; foreground
+operations still require an explicit drive-operation command/tool. State
+overlays control abandonable task-local world writes.
 
 If a run enters a state-level `operation:` overlay with the same id as the
 active session policy, `commit_operation` and `persist_draft` also complete the

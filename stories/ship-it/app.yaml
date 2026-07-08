@@ -116,6 +116,7 @@ imports:
       goal_text:        "{{ world.brief }}"
       gate_command:     "{{ world.gate_command }}"
       gate_mode:        "script"
+      baseline_green_policy: "needs-human"
       workspace_id:     "{{ world.workspace_id }}"
       workspace_branch: "{{ world.workspace_branch }}"
       workspace_base:   "{{ world.base_branch }}"
@@ -130,12 +131,12 @@ imports:
       exhausted:
         to: "@exit:needs-human"
         set:
-          last_error: "maker exhausted ({{ world.terminal_reason }}): {{ world.last_gate_failure }}"
+          last_error: "maker exhausted ({{ world.maker__terminal_reason }}): {{ world.maker__last_gate_failure }}"
           status:     "needs-human"
       abandoned:
         to: "@exit:needs-human"
         set:
-          last_error: "maker abandoned ({{ world.terminal_reason }}): {{ world.last_gate_failure }}"
+          last_error: "maker abandoned ({{ world.maker__terminal_reason }}): {{ world.maker__last_gate_failure }}"
           status:     "needs-human"
 
   # The delivery tail — the shared neutral integrate → verify → cleanup → report

@@ -11,9 +11,11 @@ operation-backed implementation story:
   gate, then use the imported `ship__ship_it` operation.
 
 There are no manual accept/approve/continue gates in this parent story. The
-classifier may stop at `needs_human` only when it returns necessary clarification
-questions, and downstream child operations may still stop on their declared
-safety conditions such as host errors, conflicts, failed gates, or operator-ask.
+selected child operation declares `run_in_background: true`, so normal live
+surfaces auto-drive it after launch. The classifier may stop at `needs_human`
+only when it returns necessary clarification questions, and downstream child
+operations may still stop on declared safety conditions such as host errors,
+conflicts, weak/already-green gates, failed gates, or operator-ask.
 
 Run standalone:
 

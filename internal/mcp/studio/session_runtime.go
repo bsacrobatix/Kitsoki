@@ -115,6 +115,9 @@ type sessionRuntime struct {
 	// outcome.error / mode="error" alongside the frame — a replay miss is a
 	// turn-level failure the agent should see, not a transport error.
 	lastTurnErr error
+	// lastOperationDrive is populated when a normal drive/submit/continue
+	// automatically follows a run_in_background operation.
+	lastOperationDrive *orchestrator.OperationDriveOutcome
 
 	// inFlight is the suspend broker for a drive that has not settled yet: either
 	// parked on operator-ask (session.answer fallback) or still running after
@@ -473,14 +476,48 @@ func newComposerModel(orch *orchestrator.Orchestrator, sid app.SessionID, jobSto
 // alongside the structured failure.
 func (rt *sessionRuntime) drive(ctx context.Context, input string, cols, rows int) (*orchestrator.TurnOutcome, tui.Frame) {
 	out, err := rt.driver.Turn(ctx, input)
-	rt.lastTurnErr = err
+	drive, finalOut, finalErr := rt.driveBackgroundOperationAfterTurn(ctx, out, err)
+	rt.lastTurnErr = finalErr
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	rt.model = rt.model.ApplyTurnOutcome(out, input, err)
 	if out != nil {
 		rt.modelTurn = out.TurnNumber
 	}
+	if drive != nil && drive.Final != nil {
+		rt.model = rt.model.ApplyTurnOutcome(drive.Final, "(background operation)", finalErr)
+		rt.modelTurn = drive.Final.TurnNumber
+	}
+	rt.lastOperationDrive = drive
+	if finalOut != nil {
+		out = finalOut
+	}
 	return out, tui.ComposeFrame(&rt.model, cols, rows)
+}
+
+func (rt *sessionRuntime) driveBackgroundOperationAfterTurn(ctx context.Context, out *orchestrator.TurnOutcome, err error) (*orchestrator.OperationDriveOutcome, *orchestrator.TurnOutcome, error) {
+	if err != nil || out == nil || out.Mode != orchestrator.ModeTransitioned {
+		return nil, out, err
+	}
+	driver, ok := rt.driver.(rsserver.BackgroundOperationDriver)
+	if !ok {
+		return nil, out, nil
+	}
+	drive, err := driver.DriveBackgroundOperation(ctx)
+	if err != nil {
+		return nil, out, err
+	}
+	if drive == nil {
+		return nil, out, nil
+	}
+	if drive.Final != nil {
+		return drive, drive.Final, nil
+	}
+	current, err := rt.driver.View(ctx)
+	if err != nil {
+		return drive, out, err
+	}
+	return drive, current, nil
 }
 
 // slash routes a TUI slash command through the same RootModel dispatcher the
@@ -551,7 +588,7 @@ func (rt *sessionRuntime) continueSuspendable(ctx context.Context, slots map[str
 func (rt *sessionRuntime) turnSuspendable(ctx context.Context, input string, cols, rows int, wait time.Duration, run func(context.Context) (*orchestrator.TurnOutcome, tui.Frame)) (res turnResult, pq *pendingQuestion, turnDone bool, running *runningDrive, err error) {
 	return rt.turnSuspendableResult(ctx, input, cols, rows, wait, func(turnCtx context.Context) turnResult {
 		out, frame := run(turnCtx)
-		return turnResult{outcome: out, frame: frame, err: rt.lastTurnErr}
+		return turnResult{outcome: out, frame: frame, err: rt.lastTurnErr, operationDrive: rt.lastOperationDrive}
 	})
 }
 
@@ -683,12 +720,21 @@ func (rt *sessionRuntime) resumeSuspendable(ctx context.Context, questionID stri
 // Frame.
 func (rt *sessionRuntime) submit(ctx context.Context, intent string, slots map[string]any, cols, rows int) (*orchestrator.TurnOutcome, tui.Frame) {
 	out, err := rt.driver.SubmitDirect(ctx, intent, slots)
-	rt.lastTurnErr = err
+	drive, finalOut, finalErr := rt.driveBackgroundOperationAfterTurn(ctx, out, err)
+	rt.lastTurnErr = finalErr
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	rt.model = rt.model.ApplyTurnOutcome(out, "", err)
 	if out != nil {
 		rt.modelTurn = out.TurnNumber
+	}
+	if drive != nil && drive.Final != nil {
+		rt.model = rt.model.ApplyTurnOutcome(drive.Final, "(background operation)", finalErr)
+		rt.modelTurn = drive.Final.TurnNumber
+	}
+	rt.lastOperationDrive = drive
+	if finalOut != nil {
+		out = finalOut
 	}
 	return out, tui.ComposeFrame(&rt.model, cols, rows)
 }
@@ -723,6 +769,7 @@ func (rt *sessionRuntime) driveOperation(ctx context.Context, cols, rows int) (*
 	} else {
 		rt.refreshFromJourneyLocked()
 	}
+	rt.lastOperationDrive = drive
 	return drive, out, tui.ComposeFrame(&rt.model, cols, rows)
 }
 
@@ -730,12 +777,21 @@ func (rt *sessionRuntime) driveOperation(ctx context.Context, cols, rows int) (*
 // returns the outcome plus the recomposed Frame.
 func (rt *sessionRuntime) cont(ctx context.Context, slots map[string]any, cols, rows int) (*orchestrator.TurnOutcome, tui.Frame) {
 	out, err := rt.driver.ContinueTurn(ctx, slots)
-	rt.lastTurnErr = err
+	drive, finalOut, finalErr := rt.driveBackgroundOperationAfterTurn(ctx, out, err)
+	rt.lastTurnErr = finalErr
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	rt.model = rt.model.ApplyTurnOutcome(out, "", err)
 	if out != nil {
 		rt.modelTurn = out.TurnNumber
+	}
+	if drive != nil && drive.Final != nil {
+		rt.model = rt.model.ApplyTurnOutcome(drive.Final, "(background operation)", finalErr)
+		rt.modelTurn = drive.Final.TurnNumber
+	}
+	rt.lastOperationDrive = drive
+	if finalOut != nil {
+		out = finalOut
 	}
 	return out, tui.ComposeFrame(&rt.model, cols, rows)
 }
