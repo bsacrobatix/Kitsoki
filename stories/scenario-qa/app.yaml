@@ -7,9 +7,10 @@
 # per-transport verdict table -- report.md (Starlark) and deck.slidey.json
 # (run.py --scenario-qa-report) -- with VS Code legs labeled "bridge-level".
 #
-# This story is a THIN wrapper: tools/product-journey/run.py owns scenario /
-# persona / transport resolution (schema.json's transports contract, §S1),
-# and .agents/agents/product-journey-qa-driver.md owns the actual MCP-driven
+# This story is a THIN wrapper over the public Persona QA Kit surface:
+# tools/persona_qa/kit.py emit-run owns scenario/persona/transport resolution
+# (schema.json's transports contract, §S1), and
+# .agents/agents/product-journey-qa-driver.md owns the actual MCP-driven
 # capture. The rooms here only sequence the loop and journal what happened —
 # mirrors stories/product-journey-qa (host.run → run.py) crossed with
 # stories/dogfood-marathon (host.agent.task per unit of work, INDEPENDENT
@@ -26,7 +27,7 @@
 #
 #   idle       operator surface: "check" a scenario (catalog id or a free-text
 #              description) on one or more transports.
-#   plan       host.run → run.py --emit-run --transport <...> builds the run
+#   plan       host.run → persona-qa emit-run --transport <...> builds the run
 #              bundle (project/persona resolution, evidence dirs).
 #   resolve    scripts/plan_legs.star reads the bundle back into scenario x
 #              transport legs; for a free-text ad-hoc scenario, it first
@@ -58,7 +59,7 @@ app:
   license: "CC0"
 
 # Host allow-list.
-#   host.run          — shell to tools/product-journey/run.py: --emit-run to
+#   host.run          — shell to tools/persona_qa/kit.py emit-run to
 #                        build the scenario/persona/transport run bundle
 #                        (project + persona resolution, evidence dirs,
 #                        driver-plan.json), then --scenario-qa-report to fold

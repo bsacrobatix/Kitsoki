@@ -1,12 +1,13 @@
 """persona-qa job-type plugin — product-journey personas/scenarios as arena cells.
 
 A persona-qa cell grades one (target repo, persona, scenario) triple. The
-non-live path drives `tools/product-journey/run.py --driver-replay-smoke`, the
-existing deterministic no-LLM path: it builds a real run bundle (cassette-backed
-evidence, review.json, driver journal) and reports the run bundle's directory
-in its `--json-output` payload's `run_dir` field. The live path (gated behind
-`--live`, cost-bearing) instead emits a fresh run bundle and dispatches the
-`product-journey-qa-driver` agent headlessly against it before reviewing it.
+non-live path drives `tools/persona_qa/kit.py replay-smoke`, the public
+persona-QA CLI facade over the deterministic cassette-backed smoke. It builds a
+real run bundle (cassette-backed evidence, review.json, driver journal) and
+reports the run bundle's directory in its `--json-output` payload's `run_dir`
+field. The live path (gated behind `--live`, cost-bearing) instead emits a fresh
+run bundle through the same CLI and dispatches the `product-journey-qa-driver`
+agent headlessly against it before reviewing it.
 
 Scoring never regexes stdout for a verdict. It only reads the `run_dir` pointer
 out of the container's structured JSON output, then hands that directory to
@@ -42,7 +43,7 @@ from . import base  # noqa: E402
 # Path *inside the container* where the kitsoki checkout is mounted (mirrors
 # bugfix.py's KITSOKI_MNT convention).
 KITSOKI_MNT = "/workspace/kitsoki"
-RUNNER = f"{KITSOKI_MNT}/tools/product-journey/run.py"
+PERSONA_QA = f"{KITSOKI_MNT}/tools/persona_qa/kit.py"
 
 # Infra signals — a harness crash before any JSON was printed, not a model
 # verdict. Kept ONLY as the fallback for a missing run_dir pointer.
@@ -71,13 +72,13 @@ class PersonaQAPlugin:
     def drive_command(self, cell: Cell, *, live: bool) -> list[str]:
         target, persona, scenario, seed = self._coords(cell)
         if not live:
-            # No-LLM path: the existing deterministic driver-replay smoke.
+            # No-LLM path: the public Persona QA CLI's deterministic replay smoke.
             # Prints a JSON payload (incl. `run_dir`) that `score()` reads back.
             return [
-                "python3", RUNNER, "--driver-replay-smoke",
+                "python3", PERSONA_QA, "replay-smoke",
                 "--project", target,
-                "--smoke-persona", persona,
-                "--smoke-scenario", scenario,
+                "--persona", persona,
+                "--scenario", scenario,
                 "--seed", seed,
                 "--json-output",
             ]
@@ -92,8 +93,9 @@ class PersonaQAPlugin:
             "bash", "-lc",
             (
                 f"set -euo pipefail; "
-                f"run_json=$(python3 {RUNNER} --emit-run --project {shlex.quote(target)} "
-                f"--persona {shlex.quote(persona)} --seed {shlex.quote(seed)} --json-output); "
+                f"run_json=$(python3 {PERSONA_QA} emit-run --project {shlex.quote(target)} "
+                f"--persona {shlex.quote(persona)} --scenario {shlex.quote(scenario)} "
+                f"--seed {shlex.quote(seed)} --json-output); "
                 f"echo \"$run_json\"; "
                 f"run_dir=$(python3 -c 'import json,sys; "
                 f"print(json.loads(sys.argv[1])[\"run_dir\"])' \"$run_json\"); "
@@ -101,7 +103,7 @@ class PersonaQAPlugin:
                 f"\"Drive the product-journey run bundle at $run_dir per its "
                 f"agent-brief.md and execution-plan.md, capturing evidence through "
                 f"the studio MCP, then leave it ready for --review-run.\"; "
-                f"python3 {RUNNER} --review-run --run-dir \"$run_dir\" --json-output"
+                f"python3 {PERSONA_QA} review --run-dir \"$run_dir\" --json-output"
             ),
         ]
 

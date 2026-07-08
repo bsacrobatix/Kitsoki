@@ -16,8 +16,8 @@ def _d(v):
 
 
 def _lacks_evidence(drive):
-    # Mirrors judge_leg.md's own instruction verbatim (docs/proposals/
-    # e2e-persona-qa-review.md G7: never let a leg's evidence be
+    # Mirrors judge_leg.md's own instruction verbatim (docs/persona-qa.md:
+    # never let a leg's evidence be
     # "false-complete"): the judge is TOLD its verdict must be
     # "degraded-evidence" whenever the driver reported "blocked" /
     # "degraded-evidence", or produced no evidence_refs. That is only a
@@ -63,7 +63,7 @@ def _evidence_level(leg):
     # authoritative source) so a leg missing the contract dict (e.g. an older
     # recording) still gets labeled. vscode is always "bridge-level" -- the IDE
     # bridge stub/recording path, never a genuine editor (see
-    # docs/proposals/e2e-persona-qa-review.md G7) -- never mistake it for
+    # docs/persona-qa.md) -- never mistake it for
     # editor-level coverage in the report.
     contract = _d(leg.get("transport_evidence_contract"))
     if contract.get("level", "") != "":

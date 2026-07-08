@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Runner-level test for --scenario-qa-report (S4 of
-docs/proposals/e2e-persona-qa-review.md, "all-transports fan-out + one
-report").
+"""Runner-level test for --scenario-qa-report (docs/persona-qa.md,
+"all-transports fan-out + one report").
 
 stories/scenario-qa owns report.md itself (folded in Starlark,
 scripts/build_report.star) and dispatches the driver/judge agents per

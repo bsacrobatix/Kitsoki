@@ -1,0 +1,96 @@
+{
+  "_comment": "Showcase deck for the productized Persona QA Kit surface.",
+  "meta": {
+    "title": "Persona QA Kit",
+    "resolution": {
+      "width": 1920,
+      "height": 1080
+    },
+    "theme": "rose-pine-moon"
+  },
+  "scenes": [
+    {
+      "type": "title",
+      "eyebrow": "Kitsoki product QA",
+      "title": "Persona QA Kit",
+      "subtitle": "Portable persona/scenario journeys with no-LLM replay, review gates, and completion-state scoring",
+      "narration": "Persona QA Kit turns the internal product-journey harness into a project-owned kit with stable commands and contracts.",
+      "hold": 2200
+    },
+    {
+      "type": "objectives",
+      "title": "Product Surface",
+      "items": [
+        {
+          "label": "Initialize",
+          "status": "done",
+          "detail": "kitsoki persona-qa init creates persona-qa.yaml, modular catalogs, drivers, fixtures, oracles, and schemas."
+        },
+        {
+          "label": "Run",
+          "status": "done",
+          "detail": "emit-run creates a scoped bundle from a project config instead of Kitsoki checkout paths."
+        },
+        {
+          "label": "Review",
+          "status": "done",
+          "detail": "review and complete produce durable artifacts and shared completion-state JSON for CI and arena."
+        }
+      ],
+      "caption": "The public surface is a kit plus commands; the legacy runner is now an implementation backend.",
+      "hold": 2400
+    },
+    {
+      "type": "evidence",
+      "title": "Contracts",
+      "items": [
+        {
+          "label": "Schemas",
+          "status": "done",
+          "detail": "Versioned JSON Schemas define config, persona, scenario, driver, run, leg result, and review shapes.",
+          "refType": "path",
+          "ref": "schemas/persona-qa/v1"
+        },
+        {
+          "label": "Completion state",
+          "status": "done",
+          "detail": "complete emits schemas/completion-state.schema.json so consumers avoid stdout verdict scraping.",
+          "refType": "path",
+          "ref": "schemas/completion-state.schema.json"
+        },
+        {
+          "label": "Transport axis",
+          "status": "done",
+          "detail": "TUI, web, and VS Code bridge legs carry explicit evidence contracts and proof levels.",
+          "refType": "doc",
+          "ref": "docs/persona-qa.md"
+        }
+      ],
+      "caption": "The kit exposes machine-checkable contracts and keeps older artifacts backward compatible.",
+      "hold": 2500
+    },
+    {
+      "type": "objectives",
+      "title": "No-LLM Gate",
+      "items": [
+        {
+          "label": "Validate",
+          "status": "done",
+          "detail": "persona-qa validate checks project config, catalogs, drivers, and copied public schemas."
+        },
+        {
+          "label": "Replay",
+          "status": "done",
+          "detail": "drive --mode replay proves artifact wiring without spend; replay-smoke keeps cassette-backed arena cells."
+        },
+        {
+          "label": "Story UI",
+          "status": "done",
+          "detail": "stories/scenario-qa calls the public emit-run command and keeps per-leg judgement independent."
+        }
+      ],
+      "caption": "Automated gates stay deterministic; live capture remains an explicit operator-controlled workflow.",
+      "hold": 2500
+    }
+  ]
+}

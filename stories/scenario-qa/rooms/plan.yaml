@@ -1,4 +1,4 @@
-# plan — build the run bundle (host.run → run.py --emit-run --transport ...)
+# plan — build the run bundle (host.run → persona-qa emit-run --transport ...)
 # then resolve it into scenario x transport legs (scripts/plan_legs.star).
 #
 # Catalog mode passes the requested scenario id straight through; run.py's own
@@ -69,8 +69,8 @@ states:
         with:
           cmd: python3
           args:
-            - tools/product-journey/run.py
-            - --emit-run
+            - tools/persona_qa/kit.py
+            - emit-run
             - --project
             - "{{ world.target != '' ? world.target : 'gears-rust' }}"
             - --persona
