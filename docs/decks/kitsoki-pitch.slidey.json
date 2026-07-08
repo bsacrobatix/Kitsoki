@@ -2795,108 +2795,79 @@
       "panels": [
         {
           "label": "",
-          "viewBox": "0 0 1500 760",
+          "viewBox": "0 0 1720 560",
           "nodes": [
             {
               "id": "start",
-              "label": "onboard <repo>",
-              "sub": "Kitsoki story",
+              "label": "Start",
+              "sub": "onboard repo",
               "lines": [
                 "TUI today",
                 "CLI route"
               ],
               "x": 60,
-              "y": 300,
-              "w": 300,
-              "h": 145,
+              "y": 190,
+              "w": 240,
+              "h": 180,
               "style": "secondary"
             },
             {
               "id": "discover",
-              "label": "Read-only discovery",
-              "sub": "no writes",
+              "label": "Discover",
+              "sub": "read-only",
               "lines": [
                 "stack",
                 "commands",
-                "repo metadata"
+                "repo facts"
               ],
-              "x": 430,
-              "y": 70,
-              "w": 360,
-              "h": 155,
+              "x": 400,
+              "y": 190,
+              "w": 240,
+              "h": 180,
               "style": "primary"
             },
             {
               "id": "review",
-              "label": "Operator review",
-              "sub": "write gate",
+              "label": "Review",
+              "sub": "operator gate",
               "lines": [
                 "profile",
                 "story pack",
                 "feedback"
               ],
-              "x": 430,
-              "y": 305,
-              "w": 360,
-              "h": 155
+              "x": 740,
+              "y": 190,
+              "w": 240,
+              "h": 180
             },
             {
-              "id": "apply",
-              "label": "Apply profile",
-              "sub": "local files",
+              "id": "setup",
+              "label": "Setup",
+              "sub": "local Kitsoki",
               "lines": [
-                ".kitsoki.yaml",
-                "project-profile",
+                "files",
+                "toolkit",
                 "thin story"
               ],
-              "x": 430,
-              "y": 540,
-              "w": 360,
-              "h": 155
-            },
-            {
-              "id": "toolkit",
-              "label": "Install toolkit",
-              "sub": "local integration",
-              "lines": [
-                "skills",
-                "subagents",
-                "editor wiring"
-              ],
-              "x": 870,
+              "x": 1080,
               "y": 190,
-              "w": 360,
-              "h": 155
+              "w": 240,
+              "h": 180
             },
             {
-              "id": "readiness",
-              "label": "Readiness check",
-              "sub": "explicit action",
+              "id": "check",
+              "label": "Check",
+              "sub": "readiness",
               "lines": [
                 "story load",
                 "build/test",
                 "report"
               ],
-              "x": 870,
-              "y": 450,
-              "w": 360,
-              "h": 155,
+              "x": 1420,
+              "y": 190,
+              "w": 240,
+              "h": 180,
               "style": "primary"
-            },
-            {
-              "id": "work",
-              "label": "First work run",
-              "sub": "after the gate",
-              "lines": [
-                "bugfix",
-                "PRD/design",
-                "git ops"
-              ],
-              "x": 1270,
-              "y": 320,
-              "w": 210,
-              "h": 155,
-              "style": "secondary"
             }
           ],
           "edges": [
@@ -2910,29 +2881,19 @@
             },
             {
               "from": "review",
-              "to": "apply",
-              "gate": "approved"
+              "to": "setup"
             },
             {
-              "from": "apply",
-              "to": "toolkit"
-            },
-            {
-              "from": "toolkit",
-              "to": "readiness"
-            },
-            {
-              "from": "readiness",
-              "to": "work",
-              "gate": "ready / follow-up"
+              "from": "setup",
+              "to": "check"
             }
           ]
         }
       ],
-      "caption": "Onboarding is a Kitsoki story: deterministic discovery, human write gate, local setup, and an explicit readiness action.",
+      "caption": "The story is linear: discover without writing, review before writing, set up the local Kitsoki instance, then run readiness before real work.",
       "hold": 240,
       "instant": true,
-      "narration": "The actual onboarding story is concrete. It starts with read-only discovery, moves through an operator write gate, applies a local project profile and thin story instance, installs the local toolkit, and leaves readiness as an explicit check."
+      "narration": "The actual onboarding story is linear: start, discover without writing, review the profile, set up the local Kitsoki instance, then run readiness before real work starts."
     },
     {
       "type": "evidence",
