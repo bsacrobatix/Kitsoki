@@ -43,6 +43,7 @@ type CreateRequest struct {
 
 	// classification / evidence
 	Severity string
+	Labels   []string
 	TraceRef string
 
 	// TargetDir overrides the resolved target-root (escape hatch); when
@@ -140,6 +141,7 @@ func Create(req CreateRequest) (id string, relPath string, absPath string, err e
 		StatePath:  statePath,
 		Component:  component,
 		Severity:   req.Severity,
+		Labels:     cleanLabels(req.Labels),
 		Status:     "open",
 		TraceRef:   req.TraceRef,
 		Runtime:    req.Runtime,
@@ -239,8 +241,9 @@ type Record struct {
 	KitsokiRev string // kitsoki-only, short SHA at write time
 
 	// classification
-	Severity string // optional
-	Status   string // "open" default; for now always "open" on create
+	Severity string   // optional
+	Labels   []string // optional
+	Status   string   // "open" default; for now always "open" on create
 
 	// evidence
 	TraceRef string // optional, both
@@ -356,7 +359,16 @@ func RenderMarkdown(r Record) string {
 	sb.WriteString("status: ")
 	sb.WriteString(YAMLQuoteLine(status))
 	sb.WriteString("\n")
-	sb.WriteString("labels: []\n")
+	if len(r.Labels) == 0 {
+		sb.WriteString("labels: []\n")
+	} else {
+		sb.WriteString("labels:\n")
+		for _, label := range r.Labels {
+			sb.WriteString("  - ")
+			sb.WriteString(YAMLQuoteLine(label))
+			sb.WriteString("\n")
+		}
+	}
 
 	sb.WriteString("\n# --- evidence ------------------------------------------------\n")
 	if r.TraceRef != "" {
@@ -379,6 +391,26 @@ func RenderMarkdown(r Record) string {
 		}
 	}
 	return sb.String()
+}
+
+func cleanLabels(labels []string) []string {
+	if len(labels) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(labels))
+	seen := map[string]struct{}{}
+	for _, label := range labels {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			continue
+		}
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		out = append(out, label)
+	}
+	return out
 }
 
 // YAMLQuoteLine returns s wrapped in double quotes with inner quotes and

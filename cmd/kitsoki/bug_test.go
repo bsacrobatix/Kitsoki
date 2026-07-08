@@ -194,6 +194,24 @@ func TestRenderBugMarkdown_MinimalPayload(t *testing.T) {
 	require.Contains(t, got, "related: []")
 }
 
+func TestRenderBugMarkdown_Labels(t *testing.T) {
+	ts := time.Date(2026, 5, 13, 10, 32, 5, 0, time.UTC)
+	got := renderBugMarkdown(bugRecord{
+		ID:      "2026-05-13T103205Z-labelled",
+		Title:   "labelled",
+		Body:    "body",
+		Target:  "kitsoki",
+		FiledAt: ts,
+		Status:  "open",
+		Labels:  []string{"source-autonomous", "mcp"},
+	})
+
+	require.Contains(t, got, "labels:\n")
+	require.Contains(t, got, `  - "source-autonomous"`)
+	require.Contains(t, got, `  - "mcp"`)
+	require.NotContains(t, got, "labels: []")
+}
+
 // TestYAMLQuoteLine escapes embedded quotes and newlines so the
 // front-matter line stays parseable.
 func TestYAMLQuoteLine(t *testing.T) {

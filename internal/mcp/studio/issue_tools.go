@@ -123,7 +123,7 @@ func (srv *Server) registerIssueTools() {
 			"When handle is omitted, the current live session is inferred when unambiguous unless a trace source is supplied; handle- and trace-backed reports include scrubbed trace and context evidence by default unless explicitly disabled. " +
 			"Renders any requested assets (kind: tui_png|web|tui_text) to the artifacts dir and references them by relative path; " +
 			"bundles a handle's redacted trace/inspect snapshot, a resolved on-disk trace, and stopped visual.record artifact bundles into the body; always adds the source-autonomous label. " +
-			"Returns {ok, url?, number?, local_path?, labels[], assets[]}.",
+			"Returns {ok, url?, number?, local_path?, filing_error?, labels[], assets[]}.",
 	}, srv.handleIssueCreate)
 }
 
@@ -226,7 +226,7 @@ func (srv *Server) handleIssueCreate(
 	}
 
 	// 1. Render + persist assets, building their markdown references.
-	dir := filepath.Join(srv.resolveArtifactsDir(), issueSlug(args.Title))
+	dir := srv.issueArtifactDir(args.Title)
 	var assetPaths, assetMD []string
 	for i, a := range args.Assets {
 		if a.Handle == "" && a.StoryPath == "" {
@@ -260,7 +260,7 @@ func (srv *Server) handleIssueCreate(
 	}
 
 	// 2. Bundle the handle's evidence (trace / inspect) into the body.
-	contextMD, rerr := srv.issueContext(ctx, args)
+	contextMD, rerr := srv.issueContext(ctx, args, dir)
 	if rerr != nil {
 		return rerr, nil, nil
 	}
@@ -296,7 +296,7 @@ func (srv *Server) handleIssueCreate(
 	args.Title = safeReport.Title
 	body = safeReport.Body
 	if sink == IssueSinkLocalArtifact {
-		localPath, werr := srv.writeLocalArtifactIssue(args.Title, body)
+		localPath, werr := srv.writeLocalArtifactIssue(args.Title, body, labels)
 		if werr != nil {
 			return buildToolError(ErrBadRequest, fmt.Sprintf("issue.create: write local artifact issue: %v", werr)), nil, nil
 		}
@@ -436,13 +436,14 @@ func (srv *Server) writeIssueFallback(title, body string, labels []string, filin
 	return path, nil
 }
 
-func (srv *Server) writeLocalArtifactIssue(title, body string) (string, error) {
+func (srv *Server) writeLocalArtifactIssue(title, body string, labels []string) (string, error) {
 	root := srv.issueTicketRoot()
 	_, rel, _, err := bugfile.Create(bugfile.CreateRequest{
 		Target:    "kitsoki",
 		Title:     title,
 		Body:      body,
 		Component: "studio-mcp",
+		Labels:    labels,
 		TargetDir: root,
 		FiledBy:   "kitsoki-mcp",
 		Warnf:     func(string, ...any) {},
@@ -451,6 +452,21 @@ func (srv *Server) writeLocalArtifactIssue(title, body string) (string, error) {
 		return "", err
 	}
 	return filepath.ToSlash(filepath.Join(root, rel)), nil
+}
+
+func (srv *Server) issueArtifactDir(title string) string {
+	root := srv.resolveArtifactsDir()
+	base := issueSlug(title)
+	dir := filepath.Join(root, base)
+	if _, err := os.Stat(dir); err != nil {
+		return dir
+	}
+	for i := 2; ; i++ {
+		candidate := filepath.Join(root, fmt.Sprintf("%s-%d", base, i))
+		if _, err := os.Stat(candidate); err != nil {
+			return candidate
+		}
+	}
 }
 
 func (srv *Server) issueTicketRoot() string {
@@ -568,7 +584,7 @@ func copyFile(dst, src string) error {
 // markdown block. Returns "" when no handle / nothing requested. Reuses the same
 // runtime reads session.inspect / session.trace use, so the bundled evidence
 // matches those tools exactly.
-func (srv *Server) issueContext(ctx context.Context, args IssueCreateArgs) (string, *mcpsdk.CallToolResult) {
+func (srv *Server) issueContext(ctx context.Context, args IssueCreateArgs, sidecarDir string) (string, *mcpsdk.CallToolResult) {
 	hasTraceSource := issueHasTraceSource(args)
 	includeTrace := issueBoolDefault(args.IncludeTrace, args.Handle != "" || hasTraceSource)
 	includeInspect := issueBoolDefault(args.IncludeInspect, args.Handle != "" || hasTraceSource)
@@ -579,7 +595,6 @@ func (srv *Server) issueContext(ctx context.Context, args IssueCreateArgs) (stri
 	// Bulky machine context (full world, full trace) is written to a sidecar file
 	// under the issue's artifacts dir; the body embeds only a compact summary so
 	// the GitHub issue (and the MCP result echoing it) stays readable.
-	sidecarDir := filepath.Join(srv.resolveArtifactsDir(), issueSlug(args.Title))
 	scrubOpts := bugreport.ScrubOptions()
 	var b strings.Builder
 	if args.Handle != "" && (includeTrace || includeInspect) {

@@ -7,9 +7,10 @@
 // thin type aliases below preserve the historical local names used by
 // the bug command and its tests.
 //
-// Each report is written as a single markdown file under
-// <target-root>/issues/bugs/<UTC-timestamp>-<slug>.md so the pile is
-// grep-friendly and survives without any database.
+// Each local report is written as a single markdown file under
+// <target-root>/issues/bugs/<UTC-timestamp>-<slug>.md or, for the
+// local-artifact sink, <target-root>/.artifacts/issues/bugs/<id>.md so the pile
+// is grep-friendly and survives without any database.
 //
 // `<target-root>` resolves to:
 //   - the current working directory (or --target-dir) for `--target story`
@@ -64,18 +65,20 @@ func bugCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bug",
 		Short: "File and inspect local bug reports",
-		Long: `Local-filesystem bug-tracking primitives.
+		Long: `Bug-tracking primitives.
 
-Bugs are stored as markdown files under <target-root>/issues/bugs/,
-one file per report, named "<UTC timestamp>-<slug>.md". The
-<target-root> is the running app's directory for story bugs
-(--target story) and $KITSOKI_REPO for engine bugs (--target kitsoki).
+Local bugs are stored as markdown files under <target-root>/issues/bugs/
+or <target-root>/.artifacts/issues/bugs/, one file per report, named
+"<UTC timestamp>-<slug>.md". The <target-root> is the running app's directory
+for story bugs (--target story) and $KITSOKI_REPO for engine bugs
+(--target kitsoki).
 
 The agent (/meta story bug or /meta kitsoki bug) calls this
 subcommand to record what the user described; humans grep or edit
 the files directly.
 
-No external service, no schema beyond the markdown template.`,
+GitHub filing is available through --sink github / --github. Local sinks have
+no external service and no schema beyond the markdown template.`,
 	}
 	cmd.AddCommand(bugCreateCmd())
 	cmd.AddCommand(bugListCmd())
@@ -176,7 +179,7 @@ func bugCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "File a new bug report (writes a markdown file)",
-		Long: `Append a bug report to <target-root>/issues/bugs/.
+		Long: `Append a bug report to a local bug sink or file it remotely.
 
 Target resolution:
   --sink local-project:
@@ -433,13 +436,13 @@ func bugListCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List bugs filed under <target-root>/issues/bugs/",
+		Short: "List bugs filed under the selected local sink",
 		Long: `Print one line per filed bug, sorted newest first.
 
 Columns (tab-separated): id, severity, status, title. Missing
 severity renders as "?"; missing status defaults to "open".
 
-A missing issues/bugs/ directory is not an error — the command
+A missing issues/bugs/ directory in the selected sink is not an error — the command
 prints nothing and exits 0.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
@@ -517,7 +520,7 @@ func bugShowCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id>",
 		Short: "Print a single bug file verbatim",
-		Long: `Read <target-root>/issues/bugs/<id>.md and write it to stdout.
+		Long: `Read <id>.md from the selected local sink and write it to stdout.
 
 <id> is the filename without ".md" (the same id printed by
 "kitsoki bug list"). Exit 1 with a clear message if no file

@@ -262,6 +262,8 @@ states:
                 # the local artifact path or the remote issue URL.
                 ticket_source:    source
                 ticket_legacy_id: legacy_id
+                ticket_source_ref: url
+                thread: url
               on_error: idle
             - set:
                 ticket_source_mode: "{{ world.ticket_source == 'github' || world.ticket_repo != '' ? 'remote' : 'local' }}"
@@ -443,6 +445,25 @@ states:
                 thread:       "{{ slots.id ?? (world.ticket_results[int(slots.n) - 1].url != '' ? world.ticket_results[int(slots.n) - 1].url : world.ticket_results[int(slots.n) - 1].id) }}"
                 ticket_source_mode: "{{ world.ticket_repo != '' ? 'remote' : 'local' }}"
                 ticket_source_ref:  "{{ slots.id ?? (world.ticket_results[int(slots.n) - 1].url != '' ? world.ticket_results[int(slots.n) - 1].url : world.ticket_results[int(slots.n) - 1].id) }}"
+            - invoke: iface.ticket.get
+              with:
+                id: "{{ slots.id ?? world.ticket_results[int(slots.n) - 1].id }}"
+                repo: "{{ world.ticket_repo }}"
+                root: "{{ world.repo_root }}"
+              bind:
+                ticket_title: title
+                ticket_url:   url
+                ticket_type:  type
+                gate_command: repro_command
+                ticket_source:    source
+                ticket_legacy_id: legacy_id
+                ticket_source_ref: url
+                thread: url
+              on_error: ticket_searching
+            - set:
+                ticket_source_mode: "{{ world.ticket_source == 'github' || world.ticket_repo != '' ? 'remote' : 'local' }}"
+                ticket_source_ref:  "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
+                thread: "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
       search_tickets:
         - target: ticket_searching
           effects:

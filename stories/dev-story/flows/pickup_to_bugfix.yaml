@@ -24,14 +24,24 @@ initial_world:
 
 host_handlers:
   host.local_files.ticket:
-    data:
-      ok: true
-      tickets:
-        - id:       "TKT-100"
-          title:    "foo"
-          type:     "bug"
-          status:   "open"
-          priority: "P2"
+    by_op:
+      search:
+        data:
+          ok: true
+          tickets:
+            - id:       "TKT-100"
+              title:    "foo"
+              type:     "bug"
+              status:   "open"
+              priority: "P2"
+              url:      "TKT-100"
+      get:
+        data:
+          ok: true
+          id:    "TKT-100"
+          title: "foo"
+          type:  "bug"
+          url:   "TKT-100"
   # bugfix's executing rooms call host.agent.task / decide / ask + iface
   # handlers; we provide bare stubs even though pickup_to_bugfix only
   # walks INTO bf and stops at idle.

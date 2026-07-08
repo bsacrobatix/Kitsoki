@@ -151,11 +151,11 @@ func TestAppendFileTransport_RelativeBugThreadUsesWorkdir(t *testing.T) {
 	}
 }
 
-func TestAppendFileTransport_RelativeArtifactBugThreadUsesWorkdir(t *testing.T) {
+func TestAppendFileTransport_RelativeArtifactBugThreadUsesArtifactRoot(t *testing.T) {
 	t.Chdir(t.TempDir())
 	workdir := t.TempDir()
 	thread := ".artifacts/issues/bugs/BUG-50.md"
-	target := filepath.Join(workdir, thread)
+	target := filepath.Join(".artifacts", "issues", "bugs", "BUG-50.md")
 
 	res, err := host.AppendFileTransportHandler(context.Background(), map[string]any{
 		"thread":  thread,
@@ -168,15 +168,15 @@ func TestAppendFileTransport_RelativeArtifactBugThreadUsesWorkdir(t *testing.T) 
 	if res.Error != "" {
 		t.Fatalf("domain: %s", res.Error)
 	}
-	if _, err := os.Stat(filepath.Join(".artifacts", "issues", "bugs", "BUG-50.md")); !os.IsNotExist(err) {
-		t.Fatalf("relative artifact thread should not create a process-cwd file, stat err=%v", err)
+	if _, err := os.Stat(filepath.Join(workdir, thread)); !os.IsNotExist(err) {
+		t.Fatalf("relative artifact thread should not write into workdir, stat err=%v", err)
 	}
 	raw, err := os.ReadFile(target)
 	if err != nil {
-		t.Fatalf("workdir artifact thread not written: %v", err)
+		t.Fatalf("artifact thread not written: %v", err)
 	}
 	if !strings.Contains(string(raw), "Comment for the local artifact ticket.") {
-		t.Fatalf("workdir artifact thread missing body: %s", raw)
+		t.Fatalf("artifact thread missing body: %s", raw)
 	}
 }
 

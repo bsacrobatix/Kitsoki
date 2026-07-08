@@ -29,14 +29,24 @@ initial_world:
 
 host_handlers:
   host.local_files.ticket:
-    data:
-      ok: true
-      tickets:
-        - id:       "TKT-200"
-          title:    "bar"
-          type:     "bug"
-          status:   "open"
-          priority: "P2"
+    by_op:
+      search:
+        data:
+          ok: true
+          tickets:
+            - id:       "TKT-200"
+              title:    "bar"
+              type:     "bug"
+              status:   "open"
+              priority: "P2"
+              url:      "TKT-200"
+      get:
+        data:
+          ok: true
+          id:    "TKT-200"
+          title: "bar"
+          type:  "bug"
+          url:   "TKT-200"
   host.append_to_file:
     data: { ok: true, message_id: "msg-1" }
   host.inbox.add:
