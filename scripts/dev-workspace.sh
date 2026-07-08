@@ -256,6 +256,54 @@ workspace_dirty() {
   [ -n "$(git -C "$path" status --porcelain)" ]
 }
 
+primary_dirty_overlaps_file_list() {
+  local repo="$1"
+  local files_path="$2"
+  python3 - "$repo" "$files_path" <<'PY'
+import subprocess
+import sys
+
+repo, files_path = sys.argv[1:]
+with open(files_path, encoding="utf-8") as f:
+    changed = [line.rstrip("\n") for line in f if line.rstrip("\n")]
+if not changed:
+    sys.exit(0)
+
+status = subprocess.run(
+    ["git", "-C", repo, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    stdout=subprocess.PIPE,
+    check=False,
+)
+if status.returncode != 0:
+    sys.exit(status.returncode)
+
+dirty = set()
+parts = status.stdout.split(b"\0")
+i = 0
+while i < len(parts):
+    entry = parts[i]
+    i += 1
+    if not entry:
+        continue
+    code = entry[:2].decode("ascii", "replace")
+    path = entry[3:].decode("utf-8", "surrogateescape")
+    if path:
+        dirty.add(path)
+    if ("R" in code or "C" in code) and i < len(parts) and parts[i]:
+        dirty.add(parts[i].decode("utf-8", "surrogateescape"))
+        i += 1
+
+def overlaps(a, b):
+    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+
+conflicts = sorted({d for d in dirty for c in changed if overlaps(d, c)})
+if conflicts:
+    for path in conflicts:
+        print(path)
+    sys.exit(1)
+PY
+}
+
 cmd_create() {
   local repo="."
   local root=""
@@ -487,9 +535,6 @@ cmd_merge() {
   path="$(workspace_path "$repo" "$root" "$ref")"
   ensure_managed_workspace "$path"
   [ "$(git -C "$repo" branch --show-current)" = "$target" ] || die "merge: repo must be on $target"
-  if [ -n "$(git -C "$repo" status --porcelain)" ]; then
-    die "merge: primary checkout has uncommitted changes"
-  fi
   if workspace_dirty "$path"; then
     die "merge: workspace has uncommitted changes"
   fi
@@ -500,6 +545,24 @@ cmd_merge() {
   git -C "$path" rebase "source/$target"
   if [ -n "$gate" ]; then
     (cd "$path" && sh -c "$gate")
+  fi
+
+  local changed_files_file
+  changed_files_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-dev-workspace-files.XXXXXX")"
+  git -C "$path" diff --name-only "source/$target" HEAD >"$changed_files_file"
+  local dirty_overlap
+  set +e
+  dirty_overlap="$(primary_dirty_overlaps_file_list "$repo" "$changed_files_file")"
+  local dirty_status=$?
+  set -e
+  rm -f "$changed_files_file"
+  if [ "$dirty_status" -ne 0 ]; then
+    if [ -z "$dirty_overlap" ]; then
+      die "merge: failed to inspect primary checkout dirty paths"
+    fi
+    echo "error: primary checkout has uncommitted changes in files this workspace would update:" >&2
+    printf '%s\n' "$dirty_overlap" >&2
+    exit 1
   fi
 
   local id safe landing_branch

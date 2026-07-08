@@ -109,12 +109,13 @@ slice, not the mechanics of the workspace.
 scripts/dev-workspace.sh merge <workspace-or-id> --gate "<focused validation>" --teardown
 ```
 
-`merge` requires the primary checkout to be on the target branch, clean, and
-locally available. It refuses dirty workspaces, fetches the current target into
-the workspace, rebases the workspace branch onto it, runs the optional gate
-inside the workspace, imports the branch into the primary checkout as a
-temporary `capsule/<id>-land` branch, and lands it through
-`scripts/merge-to-main.sh`.
+`merge` requires the primary checkout to be on the target branch and locally
+available. It refuses dirty workspaces and refuses primary-checkout dirt only
+when that dirt overlaps files the workspace branch will update. Unrelated dirty
+primary files are preserved. The command fetches the current target into the
+workspace, rebases the workspace branch onto it, runs the optional gate inside
+the workspace, imports the branch into the primary checkout as a temporary
+`capsule/<id>-land` branch, and lands it through `scripts/merge-to-main.sh`.
 
 If the rebase conflicts, resolve the conflict inside the managed workspace,
 rerun the focused validation, then rerun `merge`. Do not resolve by editing the
@@ -154,8 +155,11 @@ not a direction to create a Git linked worktree.
   existing path when branch and owner metadata match.
 - **Existing workspace, different session:** `create` refuses reuse. Pick a
   distinct id or close the old session/workspace deliberately.
-- **Primary checkout is dirty:** `merge` refuses to land. Preserve or commit the
-  primary changes separately before retrying.
+- **Primary checkout has overlapping dirt:** `merge` refuses to land when a
+  dirty primary path overlaps a file the workspace branch would update. Preserve
+  or commit that primary change separately before retrying. Dirty primary files
+  outside the workspace branch's changed paths are left alone and do not block
+  landing.
 - **Workspace is dirty:** `merge` refuses to land. Commit or discard the
   workspace changes first.
 - **Target advanced:** `merge` rebases the workspace onto the current local
