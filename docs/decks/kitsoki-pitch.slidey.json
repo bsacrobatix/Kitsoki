@@ -2901,7 +2901,6 @@
       "appTitle": "kitsoki · project onboarding",
       "subtitle": "v1.2.0 · local setup story",
       "hints": [
-        "onboard .    prepare this repo",
         "/help        list commands",
         "/world       inspect current state",
         "/quit        exit"
