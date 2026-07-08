@@ -25,7 +25,7 @@ gitc() {
 write_merge_helper() {
   local repo="$1"
   mkdir -p "$repo/scripts"
-  cat >"$repo/scripts/merge-to-main.sh" <<'SH'
+cat >"$repo/scripts/merge-to-main.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 branch="${1:?branch required}"
@@ -52,11 +52,32 @@ workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <
 [ -f "$workspace/.kitsoki-clone" ] || fail "missing clone sentinel"
 [ "$(git -C "$workspace" branch --show-current)" = "agent/case-1" ] || fail "workspace branch mismatch"
 
+printf 'local scratch\n' >"$source_repo/untracked-primary.txt"
 printf 'two\n' >"$workspace/feature.txt"
 "$dev_workspace" commit --repo "$source_repo" --root "$root" "$workspace" --message 'add feature' >/dev/null
 "$dev_workspace" merge --repo "$source_repo" --root "$root" "$workspace" --teardown >/dev/null
 [ ! -e "$workspace" ] || fail "merge --teardown left workspace behind"
-[ "$(cat "$source_repo/feature.txt")" = "two" ] || fail "merge did not fast-forward source repo"
+[ ! -e "$source_repo/feature.txt" ] || fail "default merge should not modify primary main working tree"
+[ "$(git -C "$source_repo" show staging/local:feature.txt)" = "two" ] || fail "merge did not fast-forward staging/local"
+[ "$(git -C "$source_repo" branch --show-current)" = "main" ] || fail "default merge moved primary checkout off main"
+rm "$source_repo/untracked-primary.txt"
+
+second_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id case-2 --branch agent/case-2 --base main --json)"
+second_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$second_json")"
+printf 'three\n' >"$second_workspace/feature2.txt"
+"$dev_workspace" commit --repo "$source_repo" --root "$root" "$second_workspace" --message 'add second feature' >/dev/null
+"$dev_workspace" merge --repo "$source_repo" --root "$root" "$second_workspace" --teardown >/dev/null
+[ ! -e "$second_workspace" ] || fail "second merge --teardown left workspace behind"
+[ "$(git -C "$source_repo" show staging/local:feature.txt)" = "two" ] || fail "second merge dropped existing staging/local content"
+[ "$(git -C "$source_repo" show staging/local:feature2.txt)" = "three" ] || fail "second merge did not advance existing staging/local"
+
+main_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id case-main --branch agent/case-main --base main --target main --json)"
+main_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$main_json")"
+printf 'main landing\n' >"$main_workspace/main-feature.txt"
+"$dev_workspace" commit --repo "$source_repo" --root "$root" "$main_workspace" --message 'add main feature' >/dev/null
+"$dev_workspace" merge --repo "$source_repo" --root "$root" "$main_workspace" --target main --teardown >/dev/null
+[ ! -e "$main_workspace" ] || fail "merge --target main --teardown left workspace behind"
+[ "$(cat "$source_repo/main-feature.txt")" = "main landing" ] || fail "explicit main merge did not update primary checkout"
 
 unrelated_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id unrelated-dirty --branch agent/unrelated-dirty --base main --json)"
 unrelated_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$unrelated_json")"

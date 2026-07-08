@@ -11,6 +11,7 @@ CAPSULE_SENTINEL=".kitsoki-capsule"
 CAPSULE_MANIFEST="capsule-manifest.json"
 CLONE_SENTINEL=".kitsoki-clone"
 DEV_MANIFEST=".kitsoki-dev-workspace.json"
+DEFAULT_TARGET="staging/local"
 
 usage() {
   cat >&2 <<'EOF'
@@ -28,7 +29,7 @@ Defaults:
   ROOT   <repo>/.capsules/workspaces
   BASE   main
   BRANCH agent/<id>
-  TARGET main
+  TARGET staging/local
 EOF
 }
 
@@ -98,6 +99,26 @@ PY
     return
   fi
   basename "$path"
+}
+
+manifest_value() {
+  local path="$1"
+  local key="$2"
+  local fallback="$3"
+  python3 - "$path/$DEV_MANIFEST" "$key" "$fallback" <<'PY'
+import json
+import sys
+
+manifest, key, fallback = sys.argv[1:]
+try:
+    with open(manifest, encoding="utf-8") as f:
+        value = json.load(f).get(key, "")
+except FileNotFoundError:
+    value = ""
+if value is None:
+    value = ""
+print(str(value) if str(value).strip() else fallback)
+PY
 }
 
 ensure_managed_workspace() {
@@ -233,7 +254,7 @@ out = {
     "path": path,
     "branch": data.get("branch", ""),
     "base": data.get("base", ""),
-    "target": data.get("target", "main"),
+    "target": data.get("target", "staging/local"),
     "root": data.get("root", os.path.dirname(path)),
     "reused": reused == "true",
 }
@@ -310,7 +331,7 @@ cmd_create() {
   local id=""
   local branch=""
   local base="main"
-  local target="main"
+  local target="$DEFAULT_TARGET"
   local session_id=""
   local bootstrap=0
   local json=0
@@ -509,7 +530,7 @@ cmd_merge() {
   local root=""
   local ref=""
   local branch=""
-  local target="main"
+  local target=""
   local gate=""
   local teardown=0
   while [ "$#" -gt 0 ]; do
@@ -534,15 +555,35 @@ cmd_merge() {
   local path
   path="$(workspace_path "$repo" "$root" "$ref")"
   ensure_managed_workspace "$path"
-  [ "$(git -C "$repo" branch --show-current)" = "$target" ] || die "merge: repo must be on $target"
+  if [ -z "$target" ]; then
+    target="$(manifest_value "$path" target "$DEFAULT_TARGET")"
+  fi
+  [ -n "$target" ] || die "merge: target branch is empty"
+  git -C "$repo" check-ref-format --branch "$target" >/dev/null || die "merge: invalid target branch: $target"
+  local current_branch
+  current_branch="$(git -C "$repo" branch --show-current)"
+  if [ "$target" = "main" ]; then
+    [ "$current_branch" = "main" ] || die "merge: repo must be on main for --target main"
+    if [ -n "$(git -C "$repo" status --porcelain)" ]; then
+      die "merge: primary checkout has uncommitted changes"
+    fi
+  elif [ "$current_branch" = "$target" ]; then
+    die "merge: target $target is checked out in the primary checkout; switch the primary checkout back to main before updating the local stabilization branch"
+  fi
   if workspace_dirty "$path"; then
     die "merge: workspace has uncommitted changes"
   fi
   [ -n "$branch" ] || branch="$(git -C "$path" branch --show-current)"
   [ -n "$branch" ] && [ "$branch" != "HEAD" ] || die "merge: workspace must be on a branch or --branch must be provided"
 
-  git -C "$path" fetch source "$target"
-  git -C "$path" rebase "source/$target"
+  local target_base
+  if git -C "$repo" rev-parse --verify --quiet "refs/heads/$target" >/dev/null; then
+    target_base="$target"
+  else
+    target_base="main"
+  fi
+  git -C "$path" fetch source "refs/heads/$target_base:refs/remotes/source/$target_base"
+  git -C "$path" rebase "source/$target_base"
   if [ -n "$gate" ]; then
     (cd "$path" && sh -c "$gate")
   fi
@@ -570,14 +611,29 @@ cmd_merge() {
   safe="$(safe_ref_fragment "$id")"
   landing_branch="capsule/${safe}-land"
   if git -C "$repo" rev-parse --verify --quiet "$landing_branch" >/dev/null; then
-    if git -C "$repo" merge-base --is-ancestor "$landing_branch" "$target"; then
+    if git -C "$repo" merge-base --is-ancestor "$landing_branch" "$target_base"; then
       git -C "$repo" branch -D "$landing_branch" >/dev/null
     else
       die "merge: landing branch already exists and is not merged: $landing_branch"
     fi
   fi
   git -C "$repo" fetch "$path" "$branch:refs/heads/$landing_branch"
-  (cd "$repo" && scripts/merge-to-main.sh "$landing_branch")
+  if [ "$target" = "main" ]; then
+    (cd "$repo" && scripts/merge-to-main.sh "$landing_branch")
+  else
+    if ! git -C "$repo" merge-base --is-ancestor "$target_base" "$landing_branch"; then
+      die "merge: $landing_branch is not a fast-forward of $target_base"
+    fi
+    local old_target new_target
+    old_target="$(git -C "$repo" rev-parse --verify "refs/heads/$target" 2>/dev/null || true)"
+    new_target="$(git -C "$repo" rev-parse --verify "$landing_branch")"
+    if [ -n "$old_target" ]; then
+      git -C "$repo" update-ref -m "dev-workspace merge $branch into $target" "refs/heads/$target" "$new_target" "$old_target"
+    else
+      git -C "$repo" update-ref -m "dev-workspace create $target from $branch" "refs/heads/$target" "$new_target"
+    fi
+    echo "$target -> $(git -C "$repo" rev-parse --short "$target")"
+  fi
   git -C "$repo" branch -D "$landing_branch" >/dev/null
 
   if [ "$teardown" = "1" ]; then
