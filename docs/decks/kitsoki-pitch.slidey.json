@@ -2916,7 +2916,7 @@
         {
           "label": "Local apply",
           "status": "implemented",
-          "detail": "Writes .kitsoki.yaml, .kitsoki/project-profile.yaml, a thin project story, readiness script, .gitignore runtime block, and toolkit wiring.",
+          "detail": "Writes .kitsoki.yaml, .kitsoki/project-profile.yaml, a thin project story, explicit final-check script, .gitignore runtime block, and toolkit wiring.",
           "refType": "path",
           "ref": "stories/dev-story/scripts/init_apply.py"
         },
@@ -2928,7 +2928,7 @@
           "ref": "stories/dev-story/flows/onboard_gears_rust.yaml"
         }
       ],
-      "caption": "The shipped path is a supervised local setup story, not a vague repo-readiness prompt.",
+      "caption": "The shipped path is a supervised local setup story, not a vague setup prompt.",
       "hold": 240,
       "instant": true,
       "narration": "Today onboarding is a supervised local setup story. Discovery is deterministic, review gates writes, apply creates the local Kitsoki instance, and replay fixtures prove the discovery and apply path."
@@ -3013,208 +3013,300 @@
       "type": "narrative",
       "eyebrow": "Phase 2: Validation",
       "body": "Close the loop before shipping.",
-      "lede": "After onboarding, validate plan quality and fixes through replayable PRD/proposal checks, bugfix cells, and hard-case stress coverage.",
+      "lede": "After onboarding, the repo enters the real dev-story: operators drive work from Kitsoki's TUI, web UI, GitHub, or editor surfaces, while arena and the bakeoff harness score outcomes against replayable evidence.",
       "hold": 200,
-      "narration": "Validation first means we challenge proposals and fixes against evidence, not assumptions."
+      "narration": "Validation now starts after onboarding: drive the work from Kitsoki surfaces, then score proposals, bug fixes, and journey evidence through arena and the bakeoff harness."
     },
     {
-      "type": "mcp-drive",
-      "title": "Back-test PRD and proposal writing",
-      "agent": "kitsoki-mcp-drive",
-      "story": "stories/kitsoki-dev/app.yaml",
-      "prompt": "use kitsoki-mcp-drive agent to propose and implement the spatial oracle feature I described in the markdown",
-      "calls": [
+      "type": "evidence",
+      "title": "Driven from Kitsoki surfaces",
+      "items": [
         {
-          "tool": "session.new",
-          "args": "{ story_path: \"stories/kitsoki-dev/app.yaml\", harness: \"live\", profile: \"codex\" }",
-          "result": "handle=plan-spatial-oracle"
+          "label": "TUI today",
+          "status": "implemented",
+          "detail": "Project onboarding and daily story work can run directly in the terminal operator surface.",
+          "refType": "path",
+          "ref": "cmd/kitsoki/tui_bridge.go"
         },
         {
-          "tool": "session.drive",
-          "args": "\"propose and implement the spatial oracle feature...\"",
-          "result": "routes to planning / proposal workflow"
+          "label": "Web UI sessions",
+          "status": "implemented",
+          "detail": "The runstatus web UI can serve the story catalog, live sessions, traces, and replay evidence.",
+          "refType": "path",
+          "ref": "cmd/kitsoki/web.go"
         },
         {
-          "tool": "session.status",
-          "args": "{ handle: \"plan-spatial-oracle\" }",
-          "result": "reads state and allowed intents cheaply"
+          "label": "GitHub starts",
+          "status": "progress",
+          "detail": "Issue, PR, or repo-originated work should enter the same Kitsoki project setup and story routes instead of a separate handoff path.",
+          "refType": "doc",
+          "ref": "docs/testing/dev-workflow-matrix.md"
         },
         {
-          "tool": "session.trace",
-          "args": "{ handle: \"plan-spatial-oracle\", kinds: [\"host.call\", \"machine.transition\"] }",
-          "result": "captures the decision trail"
+          "label": "VS Code surface",
+          "status": "next",
+          "detail": "The editor path should embed the same first-run and session experience rather than inventing a separate workflow.",
+          "refType": "doc",
+          "ref": "docs/testing/dev-workflow-matrix.md"
         }
       ],
-      "outcome": {
-        "status": "proposal ready",
-        "ref": ".context/spatial-oracle-plan.md",
-        "lines": [
-          "scope is explicit before writes",
-          "approval gate separates design from implementation",
-          "trace records why the plan exists"
-        ]
-      },
+      "caption": "The customer path is Kitsoki itself: terminal, browser, issue thread, and editor surfaces all lead into the same stories.",
       "hold": 230,
       "instant": true
     },
     {
-      "type": "mcp-drive",
-      "title": "Bugfix through MCP",
-      "agent": "kitsoki-mcp-drive",
-      "story": "stories/bugfix/app.yaml",
-      "prompt": "fix the flaky screenshot diff bug from the issue, prove the regression red first, then ship the smallest safe change",
-      "calls": [
+      "type": "evidence",
+      "title": "The real post-onboarding story",
+      "items": [
         {
-          "tool": "session.new",
-          "args": "{ story_path: \"stories/bugfix/app.yaml\", harness: \"live\" }",
-          "result": "handle=bugfix-128"
+          "label": "Workbench root",
+          "status": "implemented",
+          "detail": "dev-story's landing room is the free-form workbench for everyday engineering work, not a demo-only script.",
+          "refType": "path",
+          "ref": "stories/dev-story/README.md"
         },
         {
-          "tool": "session.drive",
-          "args": "\"fix the flaky screenshot diff bug...\"",
-          "result": "triage -> reproduce -> plan"
+          "label": "Bugfix route",
+          "status": "implemented",
+          "detail": "Bug work routes into reproduce, plan, implement, test, review, and PR refinement with explicit gates.",
+          "refType": "path",
+          "ref": "stories/dev-story/flows/bugfix_to_pr.yaml"
         },
         {
-          "tool": "render.tui_png",
-          "args": "{ handle: \"bugfix-128\", cols: 120, rows: 38 }",
-          "result": "visual proof for operator review"
+          "label": "PRD to design",
+          "status": "implemented",
+          "detail": "The same hub carries idea and PRD work into design, publish, decomposition, or implementation.",
+          "refType": "path",
+          "ref": "stories/dev-story/flows/prd_to_design.yaml"
         },
         {
-          "tool": "session.status",
-          "args": "{ handle: \"bugfix-128\" }",
-          "result": "state=testing · gate running"
+          "label": "Repair loops",
+          "status": "implemented",
+          "detail": "Fix-tests, git operations, docs, deploy, incident, and observability rooms keep follow-on work governed.",
+          "refType": "path",
+          "ref": "stories/dev-story/README.md"
         }
       ],
-      "outcome": {
-        "status": "fix gated",
-        "ref": "trace: bugfix-128.jsonl",
-        "lines": [
-          "reproduction before code",
-          "tests run as deterministic gates",
-          "review sees a working diff instead of an agent claim"
-        ]
-      },
+      "caption": "Onboarding is the setup step. dev-story is the day-level product path that follows it.",
       "hold": 230,
       "instant": true
     },
     {
-      "type": "mcp-drive",
-      "title": "Git operations through MCP",
-      "agent": "kitsoki-mcp-drive",
-      "story": "stories/git-ops/app.yaml",
-      "prompt": "merge the finished work back to main, handle conflicts if needed, commit only my changes, and leave unrelated dirt alone",
-      "calls": [
+      "type": "diagram-svg",
+      "title": "Validation after onboarding",
+      "panels": [
         {
-          "tool": "session.new",
-          "args": "{ story_path: \"stories/git-ops/app.yaml\", key: \"ship-spatial-oracle\" }",
-          "result": "handle=git-ship-1"
-        },
-        {
-          "tool": "studio.work",
-          "args": "{ include_quiet: false, limit: 20 }",
-          "result": "finds active handoff / conflict work"
-        },
-        {
-          "tool": "session.drive",
-          "args": "\"merge the finished work back to main...\"",
-          "result": "routes to conflict-aware git ops"
-        },
-        {
-          "tool": "session.trace",
-          "args": "{ handle: \"git-ship-1\", limit: 60 }",
-          "result": "records every handoff decision"
+          "label": "",
+          "viewBox": "0 0 1540 560",
+          "nodes": [
+            {
+              "id": "onboard",
+              "label": "onboard",
+              "sub": "project profile",
+              "lines": [
+                "commands",
+                "story pack"
+              ],
+              "x": 70,
+              "y": 190,
+              "w": 240,
+              "h": 170,
+              "style": "secondary"
+            },
+            {
+              "id": "surface",
+              "label": "surface",
+              "sub": "TUI / web / GitHub",
+              "lines": [
+                "operator drives",
+                "same story routes"
+              ],
+              "x": 390,
+              "y": 190,
+              "w": 300,
+              "h": 170,
+              "style": "primary"
+            },
+            {
+              "id": "devstory",
+              "label": "dev-story",
+              "sub": "day-level hub",
+              "lines": [
+                "bugfix",
+                "PRD / design"
+              ],
+              "x": 770,
+              "y": 190,
+              "w": 280,
+              "h": 170
+            },
+            {
+              "id": "arena",
+              "label": "arena",
+              "sub": "compare jobs",
+              "lines": [
+                "bugfix cells",
+                "persona checks"
+              ],
+              "x": 1130,
+              "y": 80,
+              "w": 330,
+              "h": 150,
+              "style": "primary"
+            },
+            {
+              "id": "report",
+              "label": "report",
+              "sub": "score + learn",
+              "lines": [
+                "hidden oracle",
+                "story hardening"
+              ],
+              "x": 1130,
+              "y": 340,
+              "w": 330,
+              "h": 150
+            }
+          ],
+          "edges": [
+            {
+              "from": "onboard",
+              "to": "surface"
+            },
+            {
+              "from": "surface",
+              "to": "devstory"
+            },
+            {
+              "from": "devstory",
+              "to": "arena",
+              "label": "batch / compare"
+            },
+            {
+              "from": "devstory",
+              "to": "report",
+              "label": "trace / score"
+            },
+            {
+              "from": "arena",
+              "to": "report"
+            }
+          ]
         }
       ],
-      "outcome": {
-        "status": "handoff preserved",
-        "ref": "commit + trace",
-        "lines": [
-          "worktree policy stays explicit",
-          "dirty unrelated files are not reverted",
-          "operator can reacquire any blocked step"
-        ]
-      },
+      "caption": "After onboarding, Kitsoki can run a real bugfix bakeoff through arena: product-driven work becomes scoreable cells and reports.",
+      "hold": 240,
+      "narration": "The validation path is now explicit: onboard the repo, drive work through the product surface, route through dev-story, then score cells and reports through arena.",
+      "instant": true
+    },
+    {
+      "type": "evidence",
+      "title": "Arena is the validation substrate",
+      "items": [
+        {
+          "label": "JobSpec cells",
+          "status": "implemented",
+          "detail": "Targets, variants, axes, placement, and check suites enumerate repeatable comparison jobs.",
+          "refType": "path",
+          "ref": "tools/arena/arena/model.py"
+        },
+        {
+          "label": "Bugfix plugin",
+          "status": "implemented",
+          "detail": "Bugfix cells reuse the proven bakeoff harness and read a completion-state verdict instead of parsing logs.",
+          "refType": "path",
+          "ref": "tools/arena/arena/plugins/bugfix.py"
+        },
+        {
+          "label": "Persona checks",
+          "status": "implemented",
+          "detail": "Journey and UX verdict adapters fold product-surface QA into the same rollup contract.",
+          "refType": "path",
+          "ref": "tools/arena/arena/checks.py"
+        },
+        {
+          "label": "Local / VM placement",
+          "status": "progress",
+          "detail": "Cells run in containers with local and remote Docker-host placement; VM pools and live polish remain.",
+          "refType": "doc",
+          "ref": "docs/proposals/arena-comparison-runner.md"
+        }
+      ],
+      "caption": "Arena turns validation into a product pipeline: plan cells, run containers, collect completion-state, and roll up evidence.",
       "hold": 230,
       "instant": true
     },
     {
-      "type": "mcp-drive",
-      "title": "Self-improvement loop",
-      "agent": "kitsoki-mcp-drive",
-      "story": "studio issue.create",
-      "prompt": "this story stalled after the operator chose an on-disk ticket; file a GitHub issue with the trace and a screenshot so we can fix the workflow",
-      "calls": [
+      "type": "evidence",
+      "title": "Bugfix bakeoff after onboarding",
+      "items": [
         {
-          "tool": "session.trace",
-          "args": "{ handle: \"bugfix-room\", limit: 80 }",
-          "result": "captures the stale transition and host calls"
+          "label": "Repo manifest",
+          "status": "implemented",
+          "detail": "A new project is added by manifest: repo, install, test command, real bug baselines, and hidden oracles.",
+          "refType": "path",
+          "ref": "tools/bugfix-bakeoff/external/projects"
         },
         {
-          "tool": "render.tui_png",
-          "args": "{ handle: \"bugfix-room\", cols: 120, rows: 36 }",
-          "result": "writes visual evidence under a review artifact path"
+          "label": "No-cost arming",
+          "status": "implemented",
+          "detail": "The harness proves RED at baseline and GREEN at the real fix before any live model work is run.",
+          "refType": "command",
+          "ref": "bench.py verify"
         },
         {
-          "tool": "issue.create",
-          "args": "{ repo: \"constructorfabric/Kitsoki\", include_trace: true, assets: [...] }",
-          "result": "GitHub issue + source-autonomous label"
+          "label": "Live cells",
+          "status": "pending",
+          "detail": "Paid cells are explicit operator actions, then score against the same hidden oracle and completion-state contract.",
+          "refType": "command",
+          "ref": "drive_cell.sh --score"
         },
         {
-          "tool": "studio.work",
-          "args": "{ include_quiet: false }",
-          "result": "new issue appears as follow-up work"
+          "label": "Cheapest pass",
+          "status": "implemented",
+          "detail": "Candidate ladders can stop each bug at the first model and effort level that reaches solved.",
+          "refType": "command",
+          "ref": "external/escalate.sh"
         }
       ],
-      "outcome": {
-        "status": "gap captured",
-        "ref": "GitHub #new",
-        "lines": [
-          "the agent cannot silently drop MCP gaps",
-          "evidence is bundled at filing time",
-          "the bug becomes input to the next story improvement run"
-        ]
-      },
+      "caption": "This is the immediate validation story after onboarding: arm the repo, run bugfix cells, and score real fixes honestly.",
       "hold": 240,
       "instant": true
     },
     {
-      "type": "mcp-drive",
-      "title": "Story improvement harness",
-      "agent": "kitsoki-mcp-drive",
-      "story": "stories/slidey-bugfix/app.yaml",
-      "prompt": "run the story improvement harness over failed traces, promote the fixed behavior into replay tests, and show the story diff that makes the next run better",
-      "calls": [
+      "type": "evidence",
+      "title": "Misses feed the product",
+      "items": [
         {
-          "tool": "session.new",
-          "args": "{ story_path: \"stories/slidey-bugfix/app.yaml\", harness: \"replay\" }",
-          "result": "handle=story-train-1"
+          "label": "Trace",
+          "status": "validated",
+          "detail": "Every run carries structured events, host calls, cost, choices, and artifacts for later review.",
+          "refType": "doc",
+          "ref": "docs/architecture/tracing.md"
         },
         {
-          "tool": "session.drive",
-          "args": "\"improve this story from failed traces\"",
-          "result": "collects failures and candidate story diff"
+          "label": "Fixture",
+          "status": "validated",
+          "detail": "Useful failures become no-LLM flows, cassettes, or hidden-oracle cases before the story is changed.",
+          "refType": "artifact",
+          "ref": "trace -> flow -> cassette"
         },
         {
-          "tool": "story.validate",
-          "args": "{ dir: \"stories/slidey-bugfix\" }",
-          "result": "schema and transition invariants pass"
+          "label": "Story diff",
+          "status": "validated",
+          "detail": "Prompt, gate, route, and runtime changes are reviewed as code, then replayed against the captured failure.",
+          "refType": "path",
+          "ref": "stories/*/flows"
         },
         {
-          "tool": "story.test",
-          "args": "{ dir: \"stories/slidey-bugfix\" }",
-          "result": "flow fixtures replay without LLM spend"
+          "label": "Rollup",
+          "status": "validated",
+          "detail": "Arena and bakeoff reports preserve failed, partial, blocked, and pending cells instead of turning them into marketing green.",
+          "refType": "path",
+          "ref": "tools/arena/results"
         }
       ],
-      "outcome": {
-        "status": "story retrained",
-        "ref": "flows + prompt diff",
-        "lines": [
-          "failed runs become fixtures",
-          "prompt and gate changes are tested like code",
-          "the next marathon starts from a stronger workflow"
-        ]
-      },
-      "caption": "The harness trains stories with traces, gates, and replayable proof, not isolated prompt snippets.",
+      "caption": "The learning loop is trace, fixture, story diff, and rollup. That is the training data, not another prompt rewrite.",
       "hold": 240,
       "instant": true
     },
@@ -3380,7 +3472,7 @@
       "type": "narrative",
       "eyebrow": "No-cost first",
       "body": "Spend only after the case is armed.",
-      "lede": "The free path verifies fixtures, preflights candidates, prepares worktrees, renders exact drive commands, and validates the repo-bakeoff story flow. Live LLM cells are the explicit gated step, not the default test path.",
+      "lede": "The free path plans arena cells, verifies fixtures, preflights candidates, prepares isolated work areas, and validates the repo-bakeoff flow. Live LLM cells are the explicit gated step, not the default test path.",
       "hold": 210,
       "narration": "The important process change is no-cost first. Verify and prepare everything before spending on a live cell."
     },
@@ -3964,7 +4056,7 @@
           "cells": [
             "QA owner",
             "Are claims reproducible before handoff?",
-            "mcp-drive logs + suite replays",
+            "TUI/web traces + suite replays",
             "In progress: some heuristics are still manual"
           ]
         },
@@ -4131,16 +4223,16 @@
           "ref": "tools/bugfix-bakeoff/external/results/summary.json"
         },
         {
-          "label": "hard-case stress",
+          "label": "arena substrate",
           "status": "validated",
-          "detail": "multi-file cases passed, H1 exposed near-side assertion risk, H4 exposed a stalled-call watchdog gap",
+          "detail": "JobSpec cells, bugfix/persona plugins, completion-state, local or VM placement, and check-type rollups are now in the tree",
           "refType": "doc",
-          "ref": ".context/gears-hard-cases-report.md"
+          "ref": "tools/arena/README.md"
         },
         {
           "label": "methodology",
           "status": "validated",
-          "detail": "RED baseline, hidden oracle, hermetic worktree, explicit trace, score before story hardening",
+          "detail": "RED baseline, hidden oracle, isolated cell, explicit trace or completion-state, score before story hardening",
           "refType": "doc",
           "ref": "tools/bugfix-bakeoff/external/README.md"
         }
@@ -4154,18 +4246,18 @@
       "title": "What becomes possible",
       "items": [
         {
-          "label": "Repo readiness",
+          "label": "Project profile",
           "status": "validated",
-          "detail": "onboarding becomes a gate: profile, commands, worktree policy, story route, oracle plan",
+          "detail": "onboarding gives each repo a reviewed profile, command map, story pack, route policy, and validation plan",
           "refType": "doc",
           "ref": "dev-story onboarding"
         },
         {
           "label": "Model ladders",
           "status": "validated",
-          "detail": "run cheap-to-expensive candidates and stop once a hidden oracle reaches solved",
+          "detail": "run cheap-to-expensive candidates through bakeoff or arena specs and stop once a hidden oracle reaches solved",
           "refType": "command",
-          "ref": "external/escalate.sh"
+          "ref": "external/escalate.sh / arena.py"
         },
         {
           "label": "Story training",
@@ -4177,7 +4269,7 @@
         {
           "label": "Customer proof",
           "status": "validated",
-          "detail": "the same harness can answer: should I trust Kitsoki on my repo, with my tests, at this cost?",
+          "detail": "drive Kitsoki from the product surface, then answer: did it fix my repo, with my tests, at this cost?",
           "refType": "artifact",
           "ref": "deterministic Slidey report"
         }
@@ -4507,35 +4599,28 @@
         {
           "label": "Goal-seeker loop",
           "status": "validated",
-          "detail": "the stabilization plan is driven by a kitsoki STORY (not an out-of-engine script): evaluate -> dispatch -> integrate -> evaluate, flow-tested with no LLM, including adversarial false-done and self-reported-green rejection",
+          "detail": "the stabilization loop is a kitsoki story: evaluate, dispatch, integrate, re-evaluate, and reject self-reported green.",
           "refType": "path",
           "ref": "features/goal-seeker.yaml"
         },
         {
           "label": "Stranger install",
           "status": "validated",
-          "detail": "a downloaded release binary run inside a foreign repo profiles the project, installs the toolkit, and registers the MCP server with no source checkout",
+          "detail": "a downloaded release binary run inside a foreign repo profiles the project, installs the toolkit, and writes local Kitsoki project wiring with no source checkout",
           "refType": "path",
           "ref": "features/stranger-install.yaml"
         },
         {
-          "label": "Truthful first screen",
+          "label": "Truthful first run",
           "status": "validated",
-          "detail": "the get-started screen only advertises actions that resolve to a real intent; a flow fixture pins it",
+          "detail": "get-started only advertises real actions, and missing providers produce a clear setup message instead of silent replay fallback.",
           "refType": "path",
           "ref": "features/get-started-actions.yaml"
         },
         {
-          "label": "Actionable no-provider message",
-          "status": "validated",
-          "detail": "a first run with no claude CLI and no API key reports what's missing instead of silently falling back to replay",
-          "refType": "path",
-          "ref": "features/first-run-message.yaml"
-        },
-        {
           "label": "kitsoki doctor",
           "status": "validated",
-          "detail": "one command reports provider, toolkit, and MCP readiness instead of leaving a broken setup to surface mid-session",
+          "detail": "one command reports provider, toolkit, and story-load checks instead of leaving a broken setup to surface mid-session",
           "refType": "path",
           "ref": "features/kitsoki-doctor.yaml"
         }
@@ -4563,11 +4648,11 @@
           "ref": "agent-contract-eval.md"
         },
         {
-          "label": "Mockup video loop",
+          "label": "Arena comparison runner",
           "status": "validated",
-          "detail": "video frame seam, review panel, and mockup-video story shipped into narrative docs",
+          "detail": "JobSpec, bugfix/persona plugins, container executor, completion-state rollup, no-LLM default, and local/VM placement are shipped; pool/live polish remain",
           "refType": "doc",
-          "ref": "docs/stories/mockup-video.md"
+          "ref": "tools/arena/README.md"
         },
         {
           "label": "Runstatus foundation",
@@ -4577,7 +4662,7 @@
           "ref": "runstatus-proposal.md"
         }
       ],
-      "caption": "The roadmap is not starting from zero: several proposal-era substrates have already moved into shipped behavior and now support the next product bets.",
+      "caption": "These shipped substrates now support the next product bets.",
       "hold": 240,
       "instant": true
     },
@@ -4586,25 +4671,25 @@
       "title": "Coming soon: in progress",
       "items": [
         {
-          "label": "Project onboarding",
+          "label": "Onboarding surfaces",
           "status": "progress",
-          "detail": "go_init can discover and apply a profile, but mining, synthesis, schema validation, readiness, and flow-load fragility remain",
+          "detail": "TUI onboarding is proven; web, VS Code, and GitHub-originated first-run paths still need the same project setup flow.",
           "refType": "doc",
-          "ref": "project-init.md"
+          "ref": "docs/testing/dev-workflow-matrix.md"
         },
         {
-          "label": "Session mining corpus",
+          "label": "Proactive repo analysis",
           "status": "progress",
-          "detail": "canonical corpus, JSONL adapters, and kitsoki trace-pattern substrate exist; source registry, driver, CLI, and reports remain",
+          "detail": "Expand onboarding to identify git patterns, existing issue and PR templates, CI/release habits, and SDLC flow before live work.",
           "refType": "doc",
-          "ref": "session-mining-backend-generalization.md"
+          "ref": "stories/dev-story/scripts/init_discover.py"
         },
         {
-          "label": "Model task promotion",
+          "label": "Arena live product path",
           "status": "progress",
-          "detail": "offline evals are shipped; strict cassette conformance, live matrix runs, runtime pin selection, and TUI/web dashboards remain",
+          "detail": "The no-LLM arena path is real; VM pools, completion-state polling, and one front door for older bakeoff commands remain.",
           "refType": "doc",
-          "ref": "agent-contract-eval.md"
+          "ref": "docs/proposals/arena-comparison-runner.md"
         },
         {
           "label": "GitHub + bug reports",
