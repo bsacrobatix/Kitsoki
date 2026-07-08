@@ -316,16 +316,19 @@ hosts:
   - host.agent.ask
   - host.agent.decide
   - host.agent.task
+  - host.agent.codeact
   - host.agent.search
   - host.agent.converse
   - host.chat.resolve
+  - host.chat.transcript
   - host.artifacts_dir
+  - host.fs.writable_dir
+  - host.ide.get_diagnostics
   - host.ide.open_file
   - host.ide.open_diff
   - host.diff.open
   - host.run
   - host.starlark.run
-  - host.fs.writable_dir
 
 imports:
   core:
