@@ -51,6 +51,16 @@ RUNSTATUS_LOCKFILE := $(RUNSTATUS_DIR)/pnpm-lock.yaml
 RUNSTATUS_MODULES  := $(RUNSTATUS_DIR)/node_modules/.modules.yaml
 RUNSTATUS_DIST     := $(TEMP_DIR)/runstatus/dist
 RUNSTATUS_ABS      := $(abspath $(RUNSTATUS_DIR))
+VSCODE_INSTALL_ROOT          := $(TEMP_DIR)/vi
+VSCODE_INSTALL_TMP           := $(TEMP_DIR)/t
+VSCODE_RUNSTATUS_DIR         := $(VSCODE_INSTALL_ROOT)/tools/runstatus
+VSCODE_RUNSTATUS_DIST        := $(VSCODE_INSTALL_ROOT)/runstatus/dist
+VSCODE_RUNSTATUS_TEMP_ENV    := TMPDIR="$(abspath $(VSCODE_INSTALL_TMP))" KITSOKI_TEMP_ROOT="$(abspath $(VSCODE_INSTALL_ROOT))"
+VSCODE_PACKAGE_DIR           := $(VSCODE_INSTALL_ROOT)/tools/vscode-kitsoki
+VSCODE_VSIX_DIR              := $(VSCODE_INSTALL_ROOT)/vsix
+VSCODE_EMBED_ROOT            := $(VSCODE_INSTALL_ROOT)/embed
+VSCODE_GO_OVERLAY            := $(VSCODE_INSTALL_ROOT)/go-overlay.json
+VSCODE_LOCAL_VSIX            := $(VSCODE_VSIX_DIR)/kitsoki-local.vsix
 
 define runstatus_pnpm_install
 	@set -e; \
@@ -95,7 +105,8 @@ BASESKILLS_STAMP  := internal/baseskills/.embed-stamp
 
 .PHONY: all setup setup-visual-qa-deps bootstrap-workspace bootstrap-worktree build build-lean install uninstall test test-full test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff repo-history-capsules oracle-capsules history-smoke history-pending-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
-	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local vscode-install-local-in-place check-vscode-code-cli
+	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local vscode-install-local-in-place \
+	vscode-stage-runstatus-temp vscode-runstatus-spa-temp vscode-stage-package-temp vscode-package-temp vscode-stage-embed-overlay-temp vscode-install-binary-temp check-vscode-code-cli
 
 all: build
 
@@ -1016,55 +1027,117 @@ vscode-package: web
 # the extension, then force-install the newest VSIX into the local VS Code.
 # Override CODE_CLI when testing another compatible editor CLI.
 CODE_CLI ?= code
-VSCODE_INSTALL_WORKTREE_PREFIX ?= .worktrees/vsi
-KITSOKI_VSCODE_INSTALL_DELEGATED ?=
-KITSOKI_VSCODE_INSTALL_FORCE_DELEGATE ?=
 
 check-vscode-code-cli:
 	@command -v "$(CODE_CLI)" >/dev/null 2>&1 || { \
 		echo "error: $(CODE_CLI) not found — install the VS Code shell command or run CODE_CLI=/path/to/code make vscode-install-local." >&2; \
 		exit 1; }
 
-vscode-install-local: check-deps check-vscode-code-cli
-	+@set -e; \
-	if [ -z "$(KITSOKI_VSCODE_INSTALL_DELEGATED)" ] && { [ -n "$(KITSOKI_VSCODE_INSTALL_FORCE_DELEGATE)" ] || [ ! -w "$(abspath .)" ] || [ ! -w "$(abspath $(RUNSTATUS_DIR))" ] || [ ! -w "$(abspath internal/runstatus/web/assets)" ]; }; then \
-		if ! git diff --quiet --ignore-submodules -- || ! git diff --cached --quiet --ignore-submodules --; then \
-			echo "error: checkout is read-only and dirty; commit or stash changes before delegating vscode-install-local to a worktree." >&2; \
-			exit 1; \
-		fi; \
-		wt="$(VSCODE_INSTALL_WORKTREE_PREFIX)-$$(date +%H%M%S)-$$$$"; \
-		build_tmp="$$(mktemp -d /tmp/kitsoki-vscode-install.XXXXXX)"; \
-		mkdir -p "$$(dirname "$$wt")"; \
-		echo "[vscode-install-local] checkout has read-only build paths; using transient worktree $$wt"; \
-		cleanup() { \
-			rm -rf "$$build_tmp"; \
-			if [ -d "$$wt" ]; then \
-				git -C "$$wt" clean -ffdx >/dev/null 2>&1 || true; \
-				git worktree remove "$$wt"; \
-			fi; \
-		}; \
-		trap cleanup EXIT INT TERM; \
-		git worktree add --detach "$$wt" HEAD; \
-		$(MAKE) -C "$$wt" TEMP_DIR="$$build_tmp" bootstrap-worktree; \
-		$(MAKE) -C "$$wt" TEMP_DIR="$$build_tmp" KITSOKI_VSCODE_INSTALL_DELEGATED=1 vscode-install-local-in-place; \
-		cleanup; \
-		trap - EXIT INT TERM; \
-	else \
-		$(MAKE) --no-print-directory vscode-install-local-in-place; \
-	fi
+vscode-stage-runstatus-temp:
+	@rm -rf "$(VSCODE_RUNSTATUS_DIR)" "$(VSCODE_INSTALL_ROOT)/features" "$(VSCODE_INSTALL_ROOT)/docs" "$(VSCODE_INSTALL_ROOT)/stories" "$(VSCODE_INSTALL_ROOT)/testdata"
+	@mkdir -p "$(VSCODE_RUNSTATUS_DIR)" "$(VSCODE_INSTALL_ROOT)" "$(VSCODE_INSTALL_TMP)"
+	@ln -s "$(abspath features)" "$(VSCODE_INSTALL_ROOT)/features"
+	@ln -s "$(abspath docs)" "$(VSCODE_INSTALL_ROOT)/docs"
+	@ln -s "$(abspath stories)" "$(VSCODE_INSTALL_ROOT)/stories"
+	@ln -s "$(abspath testdata)" "$(VSCODE_INSTALL_ROOT)/testdata"
+	@cp "$(RUNSTATUS_DIR)/package.json" "$(VSCODE_RUNSTATUS_DIR)/package.json"
+	@cp "$(RUNSTATUS_DIR)/pnpm-lock.yaml" "$(VSCODE_RUNSTATUS_DIR)/pnpm-lock.yaml"
+	@cp "$(RUNSTATUS_DIR)/pnpm-workspace.yaml" "$(VSCODE_RUNSTATUS_DIR)/pnpm-workspace.yaml"
+	@cp "$(RUNSTATUS_DIR)/vite.config.ts" "$(VSCODE_RUNSTATUS_DIR)/vite.config.ts"
+	@cp "$(RUNSTATUS_DIR)/tsconfig.json" "$(VSCODE_RUNSTATUS_DIR)/tsconfig.json"
+	@cp "$(RUNSTATUS_DIR)/tsconfig.app.json" "$(VSCODE_RUNSTATUS_DIR)/tsconfig.app.json"
+	@cp "$(RUNSTATUS_DIR)/tsconfig.node.json" "$(VSCODE_RUNSTATUS_DIR)/tsconfig.node.json"
+	@cp "$(RUNSTATUS_DIR)/vitest.config.ts" "$(VSCODE_RUNSTATUS_DIR)/vitest.config.ts"
+	@cp "$(RUNSTATUS_DIR)/index.html" "$(VSCODE_RUNSTATUS_DIR)/index.html"
+	@cp "$(RUNSTATUS_DIR)/snap.ts" "$(VSCODE_RUNSTATUS_DIR)/snap.ts"
+	@cp -R "$(RUNSTATUS_DIR)/src" "$(VSCODE_RUNSTATUS_DIR)/src"
+	@cp -R "$(RUNSTATUS_DIR)/scripts" "$(VSCODE_RUNSTATUS_DIR)/scripts"
+	@cp -R "$(RUNSTATUS_DIR)/tests" "$(VSCODE_RUNSTATUS_DIR)/tests"
+	@cp -R "$(RUNSTATUS_DIR)/public" "$(VSCODE_RUNSTATUS_DIR)/public"
+	@cp -R "$(RUNSTATUS_DIR)/fixtures" "$(VSCODE_RUNSTATUS_DIR)/fixtures"
 
-vscode-install-local-in-place: check-deps check-vscode-code-cli
-	@rm -f $(VSCODE_DIR)/*.vsix
-	$(MAKE) web-clean
-	$(MAKE) install
-	$(MAKE) vscode-package
-	@vsix="$$(ls -t $(VSCODE_DIR)/*.vsix | head -1)"; \
-	if [ -z "$$vsix" ]; then \
+vscode-runstatus-spa-temp: check-deps
+	@command -v pnpm >/dev/null 2>&1 || { \
+		echo "error: pnpm not found — needed to build the runstatus SPA." >&2; \
+		echo "       run 'make setup' to install Node + pnpm." >&2; \
+		exit 1; }
+	$(MAKE) --no-print-directory vscode-stage-runstatus-temp
+	cd $(VSCODE_RUNSTATUS_DIR) && $(VSCODE_RUNSTATUS_TEMP_ENV) pnpm install --frozen-lockfile --silent
+	cd $(VSCODE_RUNSTATUS_DIR) && $(VSCODE_RUNSTATUS_TEMP_ENV) ./node_modules/.bin/tsx scripts/features/generate.ts --check && $(VSCODE_RUNSTATUS_TEMP_ENV) ./node_modules/.bin/tsx scripts/features/lint-demos.ts
+	cd $(VSCODE_RUNSTATUS_DIR) && $(VSCODE_RUNSTATUS_TEMP_ENV) ./node_modules/.bin/vite --configLoader runner build
+	@echo "[vscode-install-local] staged runstatus SPA -> $(VSCODE_RUNSTATUS_DIST)/index.html"
+
+vscode-stage-package-temp:
+	@rm -rf "$(VSCODE_PACKAGE_DIR)" "$(VSCODE_VSIX_DIR)"
+	@mkdir -p "$(VSCODE_PACKAGE_DIR)/media" "$(VSCODE_VSIX_DIR)"
+	@cp "$(VSCODE_DIR)/.vscodeignore" "$(VSCODE_PACKAGE_DIR)/.vscodeignore"
+	@cp "$(VSCODE_DIR)/LICENSE" "$(VSCODE_PACKAGE_DIR)/LICENSE"
+	@cp "$(VSCODE_DIR)/README.md" "$(VSCODE_PACKAGE_DIR)/README.md"
+	@cp "$(VSCODE_DIR)/esbuild.mjs" "$(VSCODE_PACKAGE_DIR)/esbuild.mjs"
+	@cp "$(VSCODE_DIR)/package.json" "$(VSCODE_PACKAGE_DIR)/package.json"
+	@cp "$(VSCODE_DIR)/pnpm-lock.yaml" "$(VSCODE_PACKAGE_DIR)/pnpm-lock.yaml"
+	@cp "$(VSCODE_DIR)/pnpm-workspace.yaml" "$(VSCODE_PACKAGE_DIR)/pnpm-workspace.yaml"
+	@cp "$(VSCODE_DIR)/tsconfig.json" "$(VSCODE_PACKAGE_DIR)/tsconfig.json"
+	@cp -R "$(VSCODE_DIR)/src" "$(VSCODE_PACKAGE_DIR)/src"
+	@cp "$(VSCODE_DIR)/media/icon.svg" "$(VSCODE_PACKAGE_DIR)/media/icon.svg"
+	@cp "$(VSCODE_DIR)/media/icon-128.png" "$(VSCODE_PACKAGE_DIR)/media/icon-128.png"
+	@cp "$(VSCODE_DIR)/media/logo.svg" "$(VSCODE_PACKAGE_DIR)/media/logo.svg"
+
+vscode-package-temp: check-deps
+	@if [ ! -f "$(VSCODE_RUNSTATUS_DIST)/index.html" ]; then $(MAKE) --no-print-directory vscode-runstatus-spa-temp; fi
+	$(MAKE) --no-print-directory vscode-stage-package-temp
+	cd $(VSCODE_PACKAGE_DIR) && pnpm install --frozen-lockfile --silent
+	cd $(VSCODE_PACKAGE_DIR) && KITSOKI_RUNSTATUS_SPA="$(abspath $(VSCODE_RUNSTATUS_DIST)/index.html)" pnpm build
+	cd $(VSCODE_PACKAGE_DIR) && pnpm dlx @vscode/vsce@^3 package --no-dependencies --out "$(abspath $(VSCODE_LOCAL_VSIX))"
+	@echo "[vscode-package] $(VSCODE_LOCAL_VSIX)"
+
+vscode-stage-embed-overlay-temp:
+	@if [ ! -f "$(VSCODE_RUNSTATUS_DIST)/index.html" ]; then $(MAKE) --no-print-directory vscode-runstatus-spa-temp; fi
+	@rm -rf "$(VSCODE_EMBED_ROOT)" "$(VSCODE_GO_OVERLAY)"
+	@mkdir -p "$(VSCODE_EMBED_ROOT)/internal/runstatus/web/assets" "$(VSCODE_EMBED_ROOT)/internal/basestories/stories" "$(VSCODE_EMBED_ROOT)/internal/baseskills/assets/skills" "$(VSCODE_EMBED_ROOT)/internal/baseskills/assets/agents"
+	@cp "$(VSCODE_RUNSTATUS_DIST)/index.html" "$(VSCODE_EMBED_ROOT)/internal/runstatus/web/assets/index.html"
+	@cp -R stories/. "$(VSCODE_EMBED_ROOT)/internal/basestories/stories"/
+	@cp -R .agents/skills/. "$(VSCODE_EMBED_ROOT)/internal/baseskills/assets/skills"/
+	@cp -R .agents/agents/. "$(VSCODE_EMBED_ROOT)/internal/baseskills/assets/agents"/
+	@touch "$(VSCODE_EMBED_ROOT)/internal/basestories/stories/.gitkeep" "$(VSCODE_EMBED_ROOT)/internal/baseskills/assets/.gitkeep"
+	@node -e 'const fs=require("node:fs"),path=require("node:path"); const root=path.resolve(process.argv[1]); const out=path.resolve(process.argv[2]); const repo=path.resolve(process.argv[3]); const replace={}; function walk(dir){ for (const ent of fs.readdirSync(dir,{withFileTypes:true})) { const p=path.join(dir,ent.name); if (ent.isDirectory()) walk(p); else replace[path.join(repo,path.relative(root,p))]=p; } } walk(root); fs.writeFileSync(out, JSON.stringify({Replace:replace}, null, 2)+"\n");' "$(VSCODE_EMBED_ROOT)" "$(VSCODE_GO_OVERLAY)" "$(abspath .)"
+	@echo "[vscode-install-local] staged Go embed overlay -> $(VSCODE_GO_OVERLAY)"
+
+vscode-install-binary-temp: check-deps
+	@if [ ! -f "$(VSCODE_RUNSTATUS_DIST)/index.html" ]; then $(MAKE) --no-print-directory vscode-runstatus-spa-temp; fi
+	$(MAKE) --no-print-directory vscode-stage-embed-overlay-temp
+	@mkdir -p $(INSTALLDIR)
+	GOBIN=$(INSTALLDIR) go install -overlay="$(abspath $(VSCODE_GO_OVERLAY))" $(PKG)
+	@echo "installed $(BINARY) -> $(INSTALLDIR)/$(BINARY)"
+	@echo "smoke-checking installed $(BINARY) can load git-ops stories"
+	@log="$$(mktemp)"; \
+	if ! "$(INSTALLDIR)/$(BINARY)" validate stories/git-ops/app.yaml >"$$log" 2>&1; then \
+		cat "$$log" >&2; \
+		rm -f "$$log"; \
+		exit 1; \
+	fi; \
+	rm -f "$$log"
+	@case ":$$KITSOKI_CALLER_PATH:" in \
+		*":$(INSTALLDIR):"*) ;; \
+		*) echo "warning: $(INSTALLDIR) is not on your PATH — '$(BINARY)' won't be found." >&2; \
+		   echo "         add it (e.g. 'export PATH=\"$(INSTALLDIR):\$$PATH\"' in your shell profile)" >&2; \
+		   echo "         or reinstall with 'make install INSTALLDIR=<dir-on-path>'." >&2;; \
+	esac
+
+vscode-install-local: check-deps check-vscode-code-cli
+	@rm -rf "$(VSCODE_INSTALL_ROOT)" "$(VSCODE_INSTALL_TMP)"
+	$(MAKE) --no-print-directory vscode-runstatus-spa-temp
+	$(MAKE) --no-print-directory vscode-install-binary-temp
+	$(MAKE) --no-print-directory vscode-package-temp
+	@vsix="$(VSCODE_LOCAL_VSIX)"; \
+	if [ ! -f "$$vsix" ]; then \
 		echo "error: vscode-package did not produce a .vsix" >&2; \
 		exit 1; \
 	fi; \
 	"$(CODE_CLI)" --install-extension "$$vsix" --force; \
 	echo "[vscode-install-local] installed $$vsix"
+
+vscode-install-local-in-place: vscode-install-local
 
 # vscode-e2e-fast is the deterministic, no-LLM end-to-end GATE for the VS Code
 # extension: it launches real VS Code 1.96.4, opens the Kitsoki view, asserts the
