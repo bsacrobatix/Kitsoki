@@ -100,6 +100,23 @@ with tempfile.TemporaryDirectory(prefix="persona-qa-deck-") as td:
         check(f"{case['run_id']} contains review text", case["expected"] in text_a)
         deck = json.loads(text_a)
         check_eq(f"{case['run_id']} meta mode", deck["meta"]["mode"], "pitch")
+        scene_types = [scene.get("type") for scene in deck["scenes"]]
+        check(f"{case['run_id']} uses card/objective/evidence layouts", "objectives" in scene_types and "evidence" in scene_types)
+        for scene in deck["scenes"]:
+            check(f"{case['run_id']} does not use long frame holds", int(scene.get("hold", 0)) <= 180, scene)
+            if scene.get("type") == "narrative":
+                body = str(scene.get("body", ""))
+                check(f"{case['run_id']} narrative scene is not a wall of text", len(body) <= 360 and body.count("\n") <= 4, scene)
+            if scene.get("type") == "evidence":
+                check(f"{case['run_id']} evidence scene fits the layout", len(scene.get("items", [])) <= 4, scene)
+            if scene.get("type") == "objectives":
+                check(f"{case['run_id']} objectives scene fits the layout", len(scene.get("items", [])) <= 5, scene)
+            if scene.get("type") == "cards":
+                check(f"{case['run_id']} card grid stays scan-friendly", len(scene.get("cards", [])) <= 6, scene)
+                for card in scene.get("cards", []):
+                    check(f"{case['run_id']} card subcopy is short", len(str(card.get("sub", ""))) <= 72, card)
+                    for line in card.get("lines", []):
+                        check(f"{case['run_id']} card line is short", len(str(line)) <= 140, card)
         playback = [
             scene
             for scene in deck["scenes"]
