@@ -2785,9 +2785,9 @@
       "type": "narrative",
       "eyebrow": "Phase 1: Onboarding",
       "body": "Start with Kitsoki project onboarding.",
-      "lede": "Kitsoki first profiles the repo, asks the operator to review the discovered setup, writes a local project instance, installs the toolkit, and leaves readiness checks explicit before any expensive work begins.",
+      "lede": "Kitsoki first profiles the repo, asks the operator to review the discovered setup, writes a local project instance, installs the toolkit, and leaves final checks explicit before any expensive work begins.",
       "hold": 220,
-      "narration": "Customer-facing usage starts with Kitsoki project onboarding. The flow discovers the repo, reviews the profile, applies local setup files, installs the toolkit, and then makes readiness an explicit gate."
+      "narration": "Customer-facing usage starts with Kitsoki project onboarding. The flow discovers the repo, reviews the profile, applies local setup files, installs the toolkit, and then runs explicit checks before live work starts."
     },
     {
       "type": "diagram-svg",
@@ -2857,7 +2857,7 @@
             {
               "id": "check",
               "label": "Check",
-              "sub": "readiness",
+              "sub": "final checks",
               "lines": [
                 "story load",
                 "build/test",
@@ -2890,10 +2890,10 @@
           ]
         }
       ],
-      "caption": "The story is linear: discover without writing, review before writing, set up the local Kitsoki instance, then run readiness before real work.",
+      "caption": "The story is linear: discover without writing, review before writing, set up the local Kitsoki instance, then run final checks before real work.",
       "hold": 240,
       "instant": true,
-      "narration": "The actual onboarding story is linear: start, discover without writing, review the profile, set up the local Kitsoki instance, then run readiness before real work starts."
+      "narration": "The actual onboarding story is linear: start, discover without writing, review the profile, set up the local Kitsoki instance, then run final checks before real work starts."
     },
     {
       "type": "evidence",
@@ -2926,64 +2926,50 @@
           "detail": "A live gears-rust onboarding was converted into a no-LLM flow and cassette, so the discovery/apply path replays through kitsoki test flows.",
           "refType": "path",
           "ref": "stories/dev-story/flows/onboard_gears_rust.yaml"
-        },
-        {
-          "label": "On-demand readiness",
-          "status": "implemented",
-          "detail": "The generated readiness checker runs only when asked and records pass/fail details without hiding target-project failures.",
-          "refType": "doc",
-          "ref": "docs/stories/dev-story-onboarding.md"
         }
       ],
       "caption": "The shipped path is a supervised local setup story, not a vague repo-readiness prompt.",
       "hold": 240,
       "instant": true,
-      "narration": "Today onboarding is a supervised local setup story. Discovery is deterministic, review gates writes, apply creates the local Kitsoki instance, and readiness can be run as a separate operator action."
+      "narration": "Today onboarding is a supervised local setup story. Discovery is deterministic, review gates writes, apply creates the local Kitsoki instance, and replay fixtures prove the discovery and apply path."
     },
     {
       "type": "evidence",
       "title": "What we plan to add",
       "items": [
         {
-          "label": "Web first-run path",
+          "label": "Web + VS Code first-run",
           "status": "issue",
-          "detail": "No web onboarding entry exists yet; the web UI still assumes a project has already been configured.",
+          "detail": "Both surfaces can run existing stories, but new-repo onboarding still needs a first-run path instead of assuming setup is done.",
           "refType": "doc",
           "ref": "docs/testing/dev-workflow-matrix.md"
         },
         {
-          "label": "VS Code first-run path",
-          "status": "issue",
-          "detail": "The extension can drive existing stories, but new-repo onboarding still needs a first-run path instead of assuming setup is done.",
-          "refType": "doc",
-          "ref": "docs/testing/dev-workflow-matrix.md"
-        },
-        {
-          "label": "GitHub handoff",
+          "label": "GitHub start path",
           "status": "next",
-          "detail": "Treat App install and repository onboarding as separate moments, then document the handoff from a GitHub-triggered user to local Kitsoki setup.",
+          "detail": "When work starts from a GitHub issue, pull request, or repo, guide the user into the same Kitsoki project setup path.",
           "refType": "doc",
           "ref": "docs/testing/dev-workflow-matrix.md"
         },
         {
-          "label": "Private profile drafting",
+          "label": "Richer project profile",
           "status": "next",
-          "detail": "Keep deterministic discovery free, then offer local or private-model profile enrichment for sensitive repo details.",
+          "detail": "Expand the profile with repo-specific conventions, owners, package boundaries, and working agreements after deterministic discovery.",
           "refType": "doc",
           "ref": "docs/stories/dev-story-onboarding.md"
         },
         {
-          "label": "Stronger readiness contract",
+          "label": "Proactive repo analysis",
           "status": "next",
-          "detail": "Make repo profile, command plan, workspace policy, story route, and oracle plan explicit before high-cost live work starts.",
+          "detail": "Identify git patterns, existing issue and PR templates, CI/release habits, and SDLC flow before choosing story routes or starting live work.",
           "refType": "doc",
           "ref": "dev-story onboarding"
         }
       ],
-      "caption": "The roadmap is about making the same Kitsoki onboarding story available from every first-run surface and tightening the readiness gate.",
+      "caption": "Next: bring onboarding to every first-run surface and add deeper upfront project analysis.",
       "hold": 240,
       "instant": true,
-      "narration": "The gaps are concrete. Bring the same onboarding story to web and VS Code, document the GitHub handoff, add private profile enrichment, and make readiness strong enough to gate expensive live work."
+      "narration": "The gaps are concrete. Bring the same onboarding story to web and VS Code, make GitHub-originated starts lead into the same setup path, enrich the profile from repo conventions, and proactively analyze git patterns, templates, CI, release habits, and SDLC flow."
     },
     {
       "type": "evidence",
@@ -3006,19 +2992,19 @@
         {
           "label": "Failure feedback",
           "status": "done",
-          "detail": "Bad runs become evidence for story changes, new replay fixtures, or clearer readiness checks.",
+          "detail": "Bad runs become evidence for story changes, new replay fixtures, or clearer onboarding checks.",
           "refType": "artifact",
           "ref": "trace -> fixture -> story diff"
         },
         {
           "label": "Surface coverage",
           "status": "progress",
-          "detail": "TUI onboarding is proven for gears-rust; web, VS Code, and GitHub handoffs are tracked as explicit surface-matrix gaps.",
+          "detail": "TUI onboarding is proven for gears-rust; web, VS Code, and GitHub-originated first-run paths are tracked as explicit surface-matrix gaps.",
           "refType": "doc",
           "ref": "docs/testing/dev-workflow-matrix.md"
         }
       ],
-      "caption": "Onboarding sets up the local Kitsoki instance; daily work then runs as stories with traces, gates, and follow-up artifacts.",
+      "caption": "Daily work runs as governed Kitsoki stories.",
       "hold": 235,
       "instant": true,
       "narration": "Once onboarding is done, the repo has a local Kitsoki instance. Daily work still runs through stories, traces, gates, and follow-up artifacts, with surface coverage tracked honestly."
