@@ -45,7 +45,7 @@
     },
     {
       "type": "narrative",
-      "eyebrow": "El Nombre Es",
+      "eyebrow": "About the name",
       "body": "Kitsoki (kit-soh-kee) is a Hopi word for a contemporary settlement — a collection of houses, ceremonial chambers, and public plazas arranged into one living whole.",
       "lede": "The metaphor fits a conversational workflow engine that hosts many surfaces — TUI, daemon, web, GitHub — as connected rooms under one architecture. The name is a small acknowledgment of the serious pre-Columbian astronomy and architecture the Chacoan ancestors of today’s Pueblo peoples encoded into the built landscape.",
       "hold": 180,
@@ -810,92 +810,6 @@
       "lede": "The agent, artifact, and environment keep shaping each other over time, so the runtime and framework provide the structure to preserve continuity.",
       "hold": 180,
       "narration": "Kitsoki preserves the loop so work can be inspected, replayed, tested, and improved."
-    },
-    {
-      "type": "diagram-svg",
-      "title": "Three roots, one runtime",
-      "panels": [
-        {
-          "label": "",
-          "viewBox": "0 0 940 920",
-          "nodes": [
-            {
-              "id": "boundary",
-              "label": "Boundary",
-              "sub": "Bertalanffy",
-              "lines": [
-                "open system",
-                "state in / artifacts out"
-              ],
-              "x": 100,
-              "y": 30,
-              "w": 600,
-              "h": 120,
-              "style": "primary"
-            },
-            {
-              "id": "flow",
-              "label": "Flow",
-              "sub": "Bejan",
-              "lines": [
-                "attention, evidence, decisions",
-                "move through the loop"
-              ],
-              "x": 100,
-              "y": 240,
-              "w": 600,
-              "h": 120
-            },
-            {
-              "id": "cognition",
-              "label": "Cognition",
-              "sub": "Maturana + Varela",
-              "lines": [
-                "agent + artifact + world",
-                "coupled over time"
-              ],
-              "x": 100,
-              "y": 450,
-              "w": 600,
-              "h": 120
-            },
-            {
-              "id": "kitsoki",
-              "label": "Kitsoki",
-              "sub": "the runtime",
-              "lines": [
-                "workflow engine",
-                "makes the loop executable"
-              ],
-              "x": 100,
-              "y": 660,
-              "w": 600,
-              "h": 120,
-              "style": "secondary"
-            }
-          ],
-          "edges": [
-            {
-              "from": "boundary",
-              "to": "flow",
-              "label": "organizes"
-            },
-            {
-              "from": "flow",
-              "to": "cognition",
-              "label": "routes"
-            },
-            {
-              "from": "cognition",
-              "to": "kitsoki",
-              "label": "enacts"
-            }
-          ]
-        }
-      ],
-      "caption": "Kitsoki makes the three roots executable: open systems define the boundary, constructal law improves flow, and cognition preserves the loop.",
-      "hold": 210,
-      "narration": "Kitsoki makes the three roots executable: open systems define the boundary, constructal law improves flow, and cognition preserves the loop."
     },
     {
       "type": "diagram-svg",
