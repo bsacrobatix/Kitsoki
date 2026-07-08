@@ -45,6 +45,20 @@ function stubSource() {
 
 const deps = {
   snapshotEvents: () => [{ type: 2 }, { type: 3 }],
+  snapshotHar: () => ({
+    log: {
+      version: "1.2",
+      creator: { name: "test-browser", version: "1" },
+      entries: [
+        {
+          startedDateTime: "2026-07-08T00:00:00Z",
+          time: 4,
+          request: { method: "GET", url: "https://app.test/real-api" },
+          response: { status: 503 },
+        },
+      ],
+    },
+  }),
   recentConsole: () => [{ level: "warn", ts: 1, text: "heads up" }],
   gatherErrorInfo: () => ({
     errors: [{ message: "boom" }],
@@ -101,6 +115,9 @@ describe("BugReportModal", () => {
     expect(rows.length).toBe(2);
     expect(rows[0].textContent).toContain("POST");
     expect(rows[0].textContent).toContain("/rpc");
+    expect(source.bugPreview).toHaveBeenCalledWith({
+      har_json: JSON.stringify(deps.snapshotHar()),
+    });
 
     expect(document.querySelector('[data-testid="bug-modal-har-raw"]')).toBeNull();
     (

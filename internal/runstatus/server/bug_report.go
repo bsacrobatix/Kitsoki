@@ -2,8 +2,8 @@
 //
 // A web operator who hits a surprising state clicks "Report a bug". The SPA
 // posts a title (+ optional body/severity/repro and a base64 screenshot) to
-// /rpc. This handler snapshots the server's HAR ring buffer (the last N /rpc
-// request/response pairs recorded at the choke point in handleRPC) and scrubs it
+// /rpc. This handler files the browser-observed HAR supplied during preview, or
+// falls back to the server's HAR ring buffer for direct callers, then scrubs it
 // with the LLM-free harscrub anonymizer. Local developer filing writes
 // <root>/.artifacts/issues/bugs/<id>.md plus a sibling <id>.artifacts/ dir;
 // GitHub filing creates the issue, saves a local .artifacts/ copy of the
@@ -16,8 +16,8 @@
 //	story_path's directory    git toplevel of the selected story, when given
 //	process cwd               last resort
 //
-// No LLM, no network. The HAR comes from the server's own recorder — never the
-// client — so a malicious client cannot inject fabricated traffic.
+// No LLM, no network. Client HAR payloads are accepted only as raw evidence for
+// an operator-submitted report; the server parses and scrubs them before filing.
 package server
 
 import (
@@ -42,23 +42,45 @@ import (
 	"kitsoki/internal/runstatus/harscrub"
 )
 
-// bugPreview handles runstatus.bug.preview. It snapshots + scrubs the server's
-// HAR ring buffer right now, HOLDS that exact scrubbed snapshot under a fresh
-// capture id, and returns it for the review modal to render. The confirming
+// bugPreview handles runstatus.bug.preview. It parses + scrubs the browser HAR
+// supplied by the SPA, or snapshots the server recorder as a direct-call
+// fallback, HOLDS that exact scrubbed snapshot under a fresh capture id, and
+// returns it for the review modal to render. The confirming
 // runstatus.bug.report replays the same capture id so the filed HAR is
 // identical to what was reviewed. No LLM, no network.
-func (s *Server) bugPreview(_ map[string]any) (any, *rpcError) {
-	har := s.recorder.Snapshot()
-	depth, capacity := s.recorder.Depth()
-	harscrub.Scrub(har, bugreport.ScrubOptions())
+func (s *Server) bugPreview(params map[string]any) (any, *rpcError) {
+	har, source, err := s.previewHAR(params, bugreport.ScrubOptions())
+	if err != nil {
+		return nil, serverErr(err)
+	}
+	depth := len(har.Log.Entries)
+	capacity := depth
+	if source == "server-rpc-recorder" {
+		depth, capacity = s.recorder.Depth()
+	}
 
-	id := s.putCapture(har)
+	id := s.putCapture(har, source)
 	return map[string]any{
 		"capture_id": id,
 		"har":        har,
 		"depth":      depth,
 		"capacity":   capacity,
+		"har_source": source,
 	}, nil
+}
+
+func (s *Server) previewHAR(params map[string]any, scrubOpts harscrub.ScrubOptions) (*harscrub.Har, string, error) {
+	if raw := strings.TrimSpace(stringParam(params, "har_json")); raw != "" {
+		har, err := harscrub.ParseHar([]byte(raw))
+		if err != nil {
+			return nil, "", fmt.Errorf("parse browser har: %w", err)
+		}
+		harscrub.Scrub(har, scrubOpts)
+		return har, "browser-fetch", nil
+	}
+	har := s.recorder.Snapshot()
+	harscrub.Scrub(har, scrubOpts)
+	return har, "server-rpc-recorder", nil
 }
 
 // bugStatus handles runstatus.bug.status. It is intentionally a local preflight:
@@ -132,9 +154,11 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 	// — it was scrubbed at preview time). Otherwise fall back to a fresh
 	// snapshot + scrub so direct callers keep working.
 	var har *harscrub.Har
+	harSource := "server-rpc-recorder"
 	if capID := strings.TrimSpace(stringParam(params, "capture_id")); capID != "" {
-		if held, ok := s.takeCapture(capID); ok {
+		if held, source, ok := s.takeCapture(capID); ok {
 			har = held
+			harSource = source
 		}
 	}
 	if har == nil {
@@ -142,6 +166,10 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 		harscrub.Scrub(har, scrubOpts)
 	}
 	depth, capacity := s.recorder.Depth()
+	if harSource == "browser-fetch" {
+		depth = len(har.Log.Entries)
+		capacity = depth
+	}
 	harJSON, err := harscrub.Marshal(har)
 	if err != nil {
 		return nil, serverErr(fmt.Errorf("marshal scrubbed har: %w", err))
@@ -237,7 +265,7 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 		hasConsole:    bugreport.HasArtifact(artifacts, "console.json"),
 		hasTrace:      bugreport.HasArtifact(artifacts, "trace.redacted.jsonl"),
 	}
-	if appendErr := appendArtifactsSection(absPath, id, arts, depth, capacity); appendErr != nil {
+	if appendErr := appendArtifactsSection(absPath, id, arts, depth, capacity, harSource); appendErr != nil {
 		return nil, serverErr(fmt.Errorf("append artifacts section: %w", appendErr))
 	}
 
@@ -463,7 +491,7 @@ type artifactLinks struct {
 
 // appendArtifactsSection appends a "## Artifacts" block to the bug markdown,
 // linking the sidecar files relatively and noting the HAR recorder horizon.
-func appendArtifactsSection(absPath, id string, arts artifactLinks, depth, capacity int) error {
+func appendArtifactsSection(absPath, id string, arts artifactLinks, depth, capacity int, harSource string) error {
 	var sb strings.Builder
 	sb.WriteString("\n## Artifacts\n\n")
 	if arts.hasScreenshot {
@@ -479,7 +507,11 @@ func appendArtifactsSection(absPath, id string, arts artifactLinks, depth, capac
 	if arts.hasTrace {
 		fmt.Fprintf(&sb, "- Depersonalized session trace (redacted): ./%s.artifacts/trace.redacted.jsonl\n", id)
 	}
-	fmt.Fprintf(&sb, "\nThe HAR retains the %d most-recent /rpc exchange(s) (ring-buffer capacity %d).\n", depth, capacity)
+	if harSource == "browser-fetch" {
+		fmt.Fprintf(&sb, "\nThe HAR is the browser-observed network capture reviewed before filing (%d exchange(s)).\n", depth)
+	} else {
+		fmt.Fprintf(&sb, "\nThe HAR falls back to the %d most-recent server-recorded /rpc exchange(s) (ring-buffer capacity %d).\n", depth, capacity)
+	}
 
 	f, err := os.OpenFile(absPath, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {

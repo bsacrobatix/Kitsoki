@@ -43,6 +43,7 @@ type Creator struct {
 type Entry struct {
 	StartedDateTime string   `json:"startedDateTime"`
 	Time            float64  `json:"time"`
+	Comment         string   `json:"comment,omitempty"`
 	Request         Request  `json:"request"`
 	Response        Response `json:"response"`
 }
@@ -223,6 +224,7 @@ func scrubEntry(e *Entry, opts ScrubOptions) {
 	// Apply free-text redactions (home + secret patterns) across all strings.
 	apply := func(s string) string { return ScrubString(s, opts) }
 
+	e.Comment = apply(e.Comment)
 	e.Request.URL = apply(e.Request.URL)
 	for j := range e.Request.Headers {
 		e.Request.Headers[j].Value = apply(e.Request.Headers[j].Value)

@@ -1322,10 +1322,9 @@ export class LiveSource implements DataSource {
   }
 
   /**
-   * File a bug report. The server attaches a scrubbed HAR of the last /rpc
-   * exchanges (recorded server-side) and, if provided, a screenshot. All params
-   * are optional — the backend defaults title/body. Returns the new issue id and
-   * its filed path under .artifacts/issues/bugs/.
+   * File a bug report. The server attaches the held, scrubbed HAR from
+   * bugPreview when a capture_id is supplied; direct callers fall back to the
+   * server recorder. All params are optional — the backend defaults title/body.
    */
   reportBug(params: BugReportParams): Promise<BugReportResult> {
     return this.client.post<BugReportResult>("runstatus.bug.report", {
@@ -1356,18 +1355,26 @@ export class LiveSource implements DataSource {
   }
 
   /**
-   * Take a scrubbed preview snapshot to review before filing. Returns the
-   * held capture_id (pass back to reportBug), the scrubbed HAR, and ring-buffer
-   * depth/capacity. The held capture is consumed by the matching reportBug.
+   * Take a scrubbed preview snapshot to review before filing. The browser sends
+   * its observed HAR when available; the server parses, scrubs, holds, and
+   * returns that exact capture for review.
    */
-  bugPreview(): Promise<BugPreviewResult> {
-    return this.client.post<BugPreviewResult>("runstatus.bug.preview", {});
+  bugPreview(params: BugPreviewParams = {}): Promise<BugPreviewResult> {
+    return this.client.post<BugPreviewResult>("runstatus.bug.preview", {
+      har_json: params.har_json,
+    });
   }
 
   /** The last failed RPC (for bug-report error context), or null. */
   lastRpcError(): LastRpcError | null {
     return this.client.getLastError();
   }
+}
+
+/** Request shape for runstatus.bug.preview. */
+export interface BugPreviewParams {
+  /** JSON.stringify(HAR 1.2) from the browser-observed network recorder. */
+  har_json?: string;
 }
 
 /** Request shape for runstatus.bug.report — all fields optional. */
@@ -1404,6 +1411,7 @@ export interface HarHeader {
 export interface HarEntry {
   startedDateTime?: string;
   time?: number;
+  comment?: string;
   request?: {
     method?: string;
     url?: string;
@@ -1433,7 +1441,7 @@ export interface BugPreviewResult {
   capture_id: string;
   /** scrubbed HAR 1.2 document. */
   har: Har;
-  /** # of /rpc exchanges retained. */
+  /** # of network exchanges retained. */
   depth: number;
   /** ring-buffer capacity. */
   capacity: number;
