@@ -47,6 +47,7 @@ host_handlers:
           run_dir: ".artifacts/dogfood-marathon/dogfood-marathon"
           journal_path: ".artifacts/dogfood-marathon/dogfood-marathon/journal.json"
           journal_markdown_path: ".artifacts/dogfood-marathon/dogfood-marathon/journal.md"
+          last_result: {}
           loaded_journal: false
           journal_status: "loaded"
           journal_summary: "loaded"
@@ -68,6 +69,7 @@ host_handlers:
       record_case:
         data:
           results:  { items: [ { case_id: "case-x", exit: "shipped", verify_status: "solved" } ] }
+          last_result: { case_id: "case-x", title: "A case", source_url: "https://example.test/case-x", exit: "shipped", verify_status: "solved", tokens: 3500000, tokens_display: "3500000", wall_s: 1056, wall_s_display: "1056", trace: "/tmp/dogfood/case-x.jsonl" }
           findings: { items: [] }
           exceptions: { items: [] }
           exception_pending: ""

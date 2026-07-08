@@ -53,6 +53,7 @@ states:
                 results: { items: [] }
                 findings: { items: [] }
                 exceptions: { items: [] }
+                last_result: {}
                 record_status: ""
                 exception_pending: ""
                 exception_summary: ""

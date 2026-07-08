@@ -24,7 +24,7 @@ states:
 
   processing:
     description: "Per-case checkpoint — advance to the next case or drain to the report."
-    relevant_world: [backlog, case_index, case_budget, cases_processed, current_case, results, exceptions, journal_path, journal_status]
+    relevant_world: [backlog, case_index, case_budget, cases_processed, current_case, results, last_result, exceptions, journal_path, journal_status]
     view:
       - heading: "Dogfood marathon · processing"
       - kv:
@@ -37,6 +37,19 @@ states:
             Budget:    '{{ world.case_budget }}'
             Journal:   '{{ world.journal_path|default:"(pending)" }}'
             Checkpoint: '{{ world.journal_status|default:"—" }}'
+      - heading: "Last case"
+        when: "world.last_result.case_id"
+      - kv:
+          pairs:
+            Case:   '{{ world.last_result.case_id|default:"—" }}'
+            Title:  '{{ world.last_result.title|default:"—" }}'
+            Source: '{{ world.last_result.source_url|default:"—" }}'
+            Exit:   '{{ world.last_result.exit|default:"—" }}'
+            Verify: '{{ world.last_result.verify_status|default:"—" }}'
+            Tokens: '{{ world.last_result.tokens_display|default:"0" }}'
+            Time:   '{{ world.last_result.wall_s_display|default:"0" }}s'
+            Trace:  '{{ world.last_result.trace|default:"—" }}'
+        when: "world.last_result.case_id"
       - prose: "Walking the backlog one case at a time: triage → drive the inner pipeline → independently verify → record. `next_case` to process the next case (or roll up the run when the backlog is drained)."
       - heading: "Actions"
       - list:

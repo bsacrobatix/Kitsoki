@@ -134,6 +134,7 @@ world:
   drive_result:     { type: object, default: {} }                # inner-pipeline drive output {exit,worktree,branch,trace,cost_usd,tokens,wall_s}
   verify_result:    { type: object, default: {} }                # INDEPENDENT oracle outcome {status:solved|partial|failed,how}
   record_status:    { type: string, default: "" }                # set by record_case after post-bind settle
+  last_result:      { type: object, default: {} }                # latest recorded case, shown at the processing checkpoint
   exception_pending: { type: string, default: "" }               # scalar pause signal from record_case.star
   exception_summary: { type: string, default: "" }
   exception_answer:  { type: string, default: "" }

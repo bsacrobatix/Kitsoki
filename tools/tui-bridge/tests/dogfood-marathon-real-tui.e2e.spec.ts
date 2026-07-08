@@ -20,6 +20,13 @@ const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
 const DB_PATH = path.join(ARTIFACT_DIR, "sessions.db");
 const RECORDING = "tools/tui-bridge/fixtures/dogfood-marathon-recording.yaml";
 const HOST_CASSETTE = "tools/tui-bridge/fixtures/dogfood-marathon.host.cassette.yaml";
+const TYPE_DELAY_MS = PACE === 0 ? 0 : 45;
+const COMMAND_HOLD_MS = 900;
+const START_HOLD_MS = 2_500;
+const CASE_HOLD_MS = 3_200;
+const EXCEPTION_HOLD_MS = 4_000;
+const REPORT_HOLD_MS = 5_000;
+const READABLE_CHAPTER_MIN_MS = 3_000;
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -89,9 +96,18 @@ async function waitForScreenPattern(page: Page, pattern: RegExp, timeout = 30_00
   await expect.poll(() => bottom(page), { timeout }).toMatch(pattern);
 }
 
-async function typeLine(page: Page, text: string): Promise<void> {
+async function typeLine(
+  page: Page,
+  text: string,
+  shot?: (page: Page, label: string) => Promise<string>,
+  shotLabel?: string,
+): Promise<void> {
   await page.click("#term");
-  await page.keyboard.type(text, { delay: PACE === 0 ? 0 : 12 });
+  await page.keyboard.type(text, { delay: TYPE_DELAY_MS });
+  await dwell(page, COMMAND_HOLD_MS);
+  if (shot && shotLabel) {
+    await shot(page, shotLabel);
+  }
   await page.keyboard.press("Enter");
 }
 
@@ -108,6 +124,7 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
   const context = await browser.newContext(cameraContext({ recordVideoDir: VIDEO_DIR }));
   const page = await context.newPage();
   let videoPath: string | null = null;
+  let chapterPacingFailures: string[] = [];
   try {
     await page.goto(`/player/?ws=ws://${addr}/pty`);
     await page.waitForFunction(() => (window as any).__ready === true);
@@ -118,45 +135,46 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
     await shot(page, "connected-idle");
 
     chapters.open("start", "Start 15-bug dogfood marathon", RECORDING);
-    await typeLine(page, "start the 15 bug marathon");
-    await waitForScreenPattern(page, /Processed:\s+0/);
+    await typeLine(page, "start the 15 bug marathon", shot, "typed-start");
+    await waitForScreenPattern(page, /Recorded:\s+0/);
     await shot(page, "backlog-loaded");
-    await dwell(page, 700);
+    await dwell(page, START_HOLD_MS);
 
     for (let i = 1; i <= 15; i += 1) {
       chapters.open(`bug-${String(i).padStart(2, "0")}`, `Process bug ${i}`, RECORDING);
-      await typeLine(page, `continue bug ${i}`);
+      await typeLine(page, `continue bug ${i}`, shot, `typed-bug-${String(i).padStart(2, "0")}`);
       if (i === 5) {
         await waitForScreen(page, "exception review");
         await shot(page, "exception-review");
-        await dwell(page, 950);
+        await dwell(page, EXCEPTION_HOLD_MS);
         chapters.open("operator-exception", "Operator acknowledges serious question", RECORDING);
-        await typeLine(page, "acknowledge and continue");
+        await typeLine(page, "acknowledge and continue", shot, "typed-exception-ack");
       }
-      await waitForScreenPattern(page, new RegExp(`Processed:\\s+${i}`));
-      if (i === 5) {
-        await shot(page, "exception-acknowledged");
-      }
-      if (i === 10 || i === 15) {
-        await shot(page, `processed-${String(i).padStart(2, "0")}`);
-      }
-      await dwell(page, 950);
+      await waitForScreenPattern(page, new RegExp(`Recorded:\\s+${i}`));
+      await shot(page, i === 5 ? "exception-acknowledged" : `processed-${String(i).padStart(2, "0")}`);
+      await dwell(page, CASE_HOLD_MS);
     }
 
     chapters.open("report", "Aggregate and render slidey decks", RECORDING);
-    await typeLine(page, "finish the report");
+    await typeLine(page, "finish the report", shot, "typed-report");
     await waitForScreen(page, "15 case(s)", 60_000);
     await waitForScreen(page, "15 per-bug deck(s)", 60_000);
     const finalScreen = await bottom(page);
     expect(finalScreen).toContain("15");
     await shot(page, "done-report");
-    await dwell(page, 1_200);
+    await dwell(page, REPORT_HOLD_MS);
   } finally {
-    chapters.close();
+    const chapterList = chapters.list();
     const video = page.video();
     await context.close();
     videoPath = await saveVideoAsMp4(video, ARTIFACT_DIR, "dogfood-marathon-real-tui");
-    writeChapters(videoPath, chapters.list());
+    writeChapters(videoPath, chapterList);
+    if (PACE !== 0) {
+      chapterPacingFailures = chapterList
+        .filter((chapter) => chapter.end_ms - chapter.start_ms < READABLE_CHAPTER_MIN_MS)
+        .map((chapter) => `${chapter.id}=${chapter.end_ms - chapter.start_ms}ms`);
+    }
     stopBridge(bridge);
   }
+  expect(chapterPacingFailures).toEqual([]);
 });

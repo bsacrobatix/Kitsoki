@@ -30,6 +30,16 @@ def _bool(v):
         return s == "true" or s == "1" or s == "yes"
     return False
 
+def _display_number(v):
+    s = _str(v).strip()
+    if s == "":
+        return "0"
+    if s.endswith(".000000"):
+        return s[:-7]
+    if s.endswith(".0"):
+        return s[:-2]
+    return s
+
 def _severity(drive, verify):
     explicit = _str(drive.get("exception_severity", "")).strip().lower()
     if explicit != "":
@@ -90,8 +100,11 @@ def main(ctx):
         "verify_status": verify.get("status", ""),
         "verify_how": verify.get("how", ""),
         "cost_usd": drive.get("cost_usd", 0),
+        "cost_display": _display_number(drive.get("cost_usd", 0)),
         "tokens": drive.get("tokens", 0),
+        "tokens_display": _display_number(drive.get("tokens", 0)),
         "wall_s": drive.get("wall_s", 0),
+        "wall_s_display": _display_number(drive.get("wall_s", 0)),
         "trace": drive.get("trace", ""),
         "summary": drive.get("summary", verify.get("how", "")),
         "operator_question": drive.get("operator_question", ""),
@@ -125,6 +138,7 @@ def main(ctx):
 
     return {
         "results": {"items": result_items},
+        "last_result": record,
         "findings": {"items": finding_items},
         "exceptions": {"items": exception_items},
         "exception_pending": pending,

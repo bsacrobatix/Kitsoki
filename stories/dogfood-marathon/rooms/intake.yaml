@@ -47,6 +47,7 @@ states:
           journal_path:          journal_path
           journal_markdown_path: journal_markdown_path
           results:               results
+          last_result:           last_result
           findings:              findings
           exceptions:            exceptions
           case_index:            case_index
