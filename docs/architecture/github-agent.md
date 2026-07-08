@@ -2,7 +2,7 @@
 
 This is the authoritative write-up of how a GitHub `@kitsoki` mention
 becomes a real, honestly-reported kitsoki run. It covers the `ghagent`
-package end to end: ingress, the honesty contract, per-job worktree
+package end to end: ingress, the honesty contract, per-job managed workspace
 isolation, live-or-replay harness selection, and the drain loop that keeps
 queued jobs moving. For standing up the GitHub App itself (manifest,
 local-only OAuth/token setup, webhook URL, systemd service, live proof flow), see
@@ -23,7 +23,7 @@ Dispatcher.claim ──▶ idempotent job row (jobs.GHJobStore, Postgres/SQLite)
 router.go: label → story (bug/feature → stories/bugfix|dev-story; PR → stub)
         │
         ├── route has a realDispatchPlan (stories/bugfix only) ──▶ REAL DISPATCH
-        │       • per-job worktree: .worktrees/gh-job-<id>
+        │       • per-job managed workspace: .capsules/workspaces/gh-job-<id>
         │       • harness: replay (default) or live (explicit opt-in only)
         │       • drives the actual story through testrunner, real turns
         │
@@ -60,16 +60,18 @@ pipeline not yet enabled for this route."**
 Today: `stories/bugfix` issue routes report real work; `stories/dev-story`
 issue routes and every PR route are honestly stubbed.
 
-## Real dispatch: per-job worktree
+## Real dispatch: per-job managed workspace
 
 Real dispatch (`internal/ghagent/realdispatch.go`) drives the actual
 `stories/bugfix` machine — no beat-fixture `host.agent.*` stub map — inside
-an isolated worktree at `.worktrees/gh-job-<id>` (per AGENTS.md's worktree
-convention). Rather than inventing a new world key, the worktree identity is
-threaded through the vocabulary `stories/bugfix/rooms/idle.yaml` already
-declares and its Step-0w autostart guard already recognizes:
+an isolated managed clone workspace at `.capsules/workspaces/gh-job-<id>`,
+created through `scripts/dev-workspace.sh` via the normal
+`host.git_worktree` binding. Rather than inventing a new world key, the
+workspace identity is threaded through the vocabulary
+`stories/bugfix/rooms/idle.yaml` already declares and its Step-0w autostart
+guard already recognizes:
 
-- `world.workdir` — set to the `.worktrees/`-prefixed job path
+- `world.workdir` — set to the `.capsules/workspaces/`-prefixed job path
 - `world.workspace_id`, `world.feature_branch`
 - `world.workspace_prepared: true` — the flag that tells Step-0w's guard
   this is a deliberately-supplied identity, not stale seed data to clear
@@ -79,9 +81,10 @@ Starlark-inspector root, which otherwise falls back to the process-global
 `KITSOKI_APP_DIR` when `world.workdir` is unset — every real-dispatch job
 always seeds `workdir`, so it never needs that fallback.
 
-`cleanupJobWorktree` deletes the worktree on success. On failure it is kept
-for a bounded retention window (`PruneStaleFailedWorktrees`, 7 days) for
-post-mortem, mirroring dogfood-marathon practice.
+`cleanupJobWorktree` delegates successful cleanup to
+`scripts/dev-workspace.sh close`. On failure the managed workspace is kept for a
+bounded retention window (`PruneStaleFailedWorktrees`, 7 days) for post-mortem,
+mirroring dogfood-marathon practice.
 
 Only `stories/bugfix` has a registered `realDispatchPlan` today, because
 it's the only story with a recorded, arg-matched host cassette that walks
@@ -177,7 +180,7 @@ remain unbuilt.
 |---|---|
 | Webhook + poll ingress, HMAC verify, installation-token auth | **Real** |
 | Idempotent job claim, rolling status comment | **Real** |
-| Issue routes → `stories/bugfix` real pipeline, per-job worktree, replay-default harness | **Real** |
+| Issue routes → `stories/bugfix` real pipeline, per-job managed workspace, replay-default harness | **Real** |
 | Drain on its own ticker (webhook-only deployments) | **Real** |
 | Issue routes → `stories/dev-story` | Honest stub (no recorded cassette yet) |
 | PR routes (autopilot) | Honest stub — no `stories/pr-autopilot/` exists |

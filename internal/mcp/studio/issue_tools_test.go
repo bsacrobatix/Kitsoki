@@ -9,7 +9,8 @@ package studio_test
 //   - a handle's trace + inspect snapshot are bundled into the body
 //   - source-autonomous is always applied (first), alongside caller labels
 //   - the composed {repo, title, body, labels} reaches the filer verbatim
-//   - no filer wired → structured ErrIssueUnavailable
+//   - local artifact filing works without a GitHub filer
+//   - sink=github with no filer wired → structured ErrIssueUnavailable
 
 import (
 	"bytes"
@@ -52,6 +53,7 @@ func newIssueServer(t *testing.T) (*studio.Server, *recordingFiler, string) {
 	sess := studio.NewStudioSession(replayBuilder())
 	srv := studio.NewServer(sess,
 		studio.WithIssueFiler(filer.file),
+		studio.WithIssueSink(studio.IssueSinkGitHub),
 		studio.WithArtifactsDir(dir),
 	)
 	srv.SetWebShot(func(ctx context.Context, spec studio.WebRenderSpec) ([]byte, error) {
@@ -374,8 +376,37 @@ func TestIssueCreate_AddsAutonomousLabelByDefault(t *testing.T) {
 	assert.Empty(t, out.Assets, "no assets requested → none written")
 }
 
+func TestIssueCreate_LocalArtifactSinkWritesTicket(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	srv := studio.NewServer(studio.NewStudioSession(replayBuilder()),
+		studio.WithArtifactsDir(dir),
+	)
+	cs := connectInProcess(ctx, t, srv)
+
+	res, err := callTool(ctx, cs, "issue.create", map[string]any{
+		"title": "Local artifact capture",
+		"body":  "Captured locally without filing a GitHub issue.",
+	})
+	require.NoError(t, err)
+	out := issueResult(t, res)
+
+	assert.True(t, out.OK)
+	assert.Empty(t, out.URL)
+	assert.Zero(t, out.Number)
+	require.NotEmpty(t, out.LocalPath)
+	assert.Contains(t, out.LocalPath, filepath.Join(dir, "issues", "bugs"))
+	assert.FileExists(t, out.LocalPath)
+
+	body, rerr := os.ReadFile(out.LocalPath)
+	require.NoError(t, rerr)
+	assert.Contains(t, string(body), "Local artifact capture")
+	assert.Contains(t, string(body), "Captured locally without filing a GitHub issue.")
+	assert.Contains(t, string(body), "studio-mcp")
+}
+
 // TestIssueCreate_NoFilerUnavailable proves a studio started without a filer
-// rejects issue.create with the structured ErrIssueUnavailable rather than
+// rejects sink=github with the structured ErrIssueUnavailable rather than
 // panicking or silently no-op'ing.
 func TestIssueCreate_NoFilerUnavailable(t *testing.T) {
 	ctx := context.Background()
@@ -383,7 +414,7 @@ func TestIssueCreate_NoFilerUnavailable(t *testing.T) {
 	srv := studio.NewServer(sess) // no WithIssueFiler
 	cs := connectInProcess(ctx, t, srv)
 
-	res, err := callTool(ctx, cs, "issue.create", map[string]any{"title": "x"})
+	res, err := callTool(ctx, cs, "issue.create", map[string]any{"title": "x", "sink": "github"})
 	require.NoError(t, err)
 	require.True(t, res.IsError)
 	var te studio.ToolError
@@ -420,6 +451,7 @@ func TestIssueCreate_FallbackToArtifactsOnFilingError(t *testing.T) {
 	}
 	srv := studio.NewServer(sess,
 		studio.WithIssueFiler(failing),
+		studio.WithIssueSink(studio.IssueSinkGitHub),
 		studio.WithArtifactsDir(dir),
 	)
 	cs := connectInProcess(ctx, t, srv)
@@ -453,7 +485,11 @@ func TestIssueCreatePassesWorkspaceRootForRepoInference(t *testing.T) {
 	sess := studio.NewStudioSession(replayBuilder())
 	_, err := sess.OpenWorkspace(studio.OpenWorkspaceParams{Dir: root})
 	require.NoError(t, err)
-	srv := studio.NewServer(sess, studio.WithIssueFiler(filer), studio.WithArtifactsDir(t.TempDir()))
+	srv := studio.NewServer(sess,
+		studio.WithIssueFiler(filer),
+		studio.WithIssueSink(studio.IssueSinkGitHub),
+		studio.WithArtifactsDir(t.TempDir()),
+	)
 	cs := connectInProcess(ctx, t, srv)
 
 	res, err := callTool(ctx, cs, "issue.create", map[string]any{
@@ -477,6 +513,7 @@ func TestIssueCreate_PrivacyFailureBlocksFiler(t *testing.T) {
 	})
 	srv := studio.NewServer(studio.NewStudioSession(replayBuilder()),
 		studio.WithIssueFiler(filer.file),
+		studio.WithIssueSink(studio.IssueSinkGitHub),
 		studio.WithArtifactsDir(filepath.Join(root, ".artifacts")),
 		studio.WithBugPrivacyChecker(checker),
 	)

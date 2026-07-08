@@ -24,8 +24,8 @@ import (
 
 // BugCommand implements `/bug [description]` for the TUI.
 //
-// With no ticket repo configured it preserves the historical local
-// issues/bugs/ behavior. With a ticket repo configured it files through
+// With no ticket repo configured it writes a local artifact ticket under
+// .artifacts/issues/bugs/. With a ticket repo configured it files through
 // host.GitHubFileBug with UploadArtifacts=true, so the TUI transcript and
 // context evidence follow the same uploaded-evidence path as web bug reports.
 type BugCommand struct{}
@@ -54,6 +54,13 @@ func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 	if err != nil {
 		return m.bugBlock(fmt.Sprintf("could not resolve target root: %v", err)), m, nil
 	}
+	localRoot, localDisplayPrefix := tuiLocalBugFilingRoot(root)
+	privacyRoot := root
+	privacyDisplayPrefix := ""
+	if strings.TrimSpace(m.bugTicketRepo) == "" {
+		privacyRoot = localRoot
+		privacyDisplayPrefix = localDisplayPrefix
+	}
 
 	checker := m.bugPrivacyCheckerForCommand()
 	traceJSON := m.depersonalizedBugTraceJSON()
@@ -67,10 +74,11 @@ func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 		Component:     "tui",
 		TraceRef:      bugreport.ScrubText(m.traceFilePath),
 		ArtifactNames: bugreport.ArtifactNames(artifacts),
-	}, bugreport.ScrubOptions(), root, os.Getenv("USER"))
+	}, bugreport.ScrubOptions(), privacyRoot, os.Getenv("USER"))
 	if perr != nil {
 		return m.bugBlock(fmt.Sprintf("privacy check failed: %v", perr)), m, nil
 	}
+	privacy = prefixTUIPrivacyFollowUp(privacy, privacyDisplayPrefix)
 	if privacy.Blocked() {
 		return m.bugBlock(privacy.Message + bugreport.PrivacyFollowUpSuffix(privacy)), m, nil
 	}
@@ -91,7 +99,7 @@ func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 		StatePath: string(m.currentState),
 		Severity:  "med",
 		TraceRef:  bugreport.ScrubText(m.traceFilePath),
-		TargetDir: root,
+		TargetDir: localRoot,
 		FiledBy:   os.Getenv("USER"),
 		Runtime:   runtime,
 		Warnf:     func(string, ...any) {},
@@ -102,14 +110,15 @@ func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 
 	artifactsDir := strings.TrimSuffix(absPath, ".md") + ".artifacts"
 	artifacts = m.bugArtifacts(runtime, traceJSON)
+	displayPath := tuiDisplayBugPath(localDisplayPrefix, relPath)
 	if err := bugreport.WriteArtifacts(artifactsDir, artifacts); err != nil {
-		return m.bugBlock(fmt.Sprintf("filed %s, but could not write artifacts: %v", relPath, err)), m, nil
+		return m.bugBlock(fmt.Sprintf("filed %s, but could not write artifacts: %v", displayPath, err)), m, nil
 	}
 	if err := appendTUIArtifactsSection(absPath, id, bugreport.HasArtifact(artifacts, "trace.redacted.jsonl")); err != nil {
-		return m.bugBlock(fmt.Sprintf("filed %s, but could not append artifact links: %v", relPath, err)), m, nil
+		return m.bugBlock(fmt.Sprintf("filed %s, but could not append artifact links: %v", displayPath, err)), m, nil
 	}
 
-	return m.bugBlock(fmt.Sprintf("filed %s (%s)", filepath.ToSlash(relPath), bugreport.PrivacyCommandStatus(privacy))), m, nil
+	return m.bugBlock(fmt.Sprintf("filed %s (%s)", filepath.ToSlash(displayPath), bugreport.PrivacyCommandStatus(privacy))), m, nil
 }
 
 func (m RootModel) bugPrivacyCheckerForCommand() bugprivacy.Checker {
@@ -295,6 +304,32 @@ func appendTUIArtifactsSection(absPath, id string, hasTrace bool) error {
 	defer f.Close()
 	_, err = f.WriteString(sb.String())
 	return err
+}
+
+func tuiLocalBugFilingRoot(root string) (absRoot, displayPrefix string) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		root = "."
+	}
+	if filepath.Base(filepath.Clean(root)) == ".artifacts" {
+		return root, ""
+	}
+	return filepath.Join(root, ".artifacts"), ".artifacts"
+}
+
+func tuiDisplayBugPath(prefix, rel string) string {
+	if strings.TrimSpace(prefix) == "" {
+		return rel
+	}
+	return filepath.Join(prefix, rel)
+}
+
+func prefixTUIPrivacyFollowUp(privacy bugprivacy.Result, prefix string) bugprivacy.Result {
+	if strings.TrimSpace(prefix) == "" || strings.TrimSpace(privacy.FollowUpPath) == "" {
+		return privacy
+	}
+	privacy.FollowUpPath = tuiDisplayBugPath(prefix, privacy.FollowUpPath)
+	return privacy
 }
 
 func (m RootModel) bugBlock(line string) string {

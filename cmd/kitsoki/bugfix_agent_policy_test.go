@@ -65,8 +65,8 @@ func TestMCPDriverGuardsAgainstMechanicalBugfixWaste(t *testing.T) {
 
 	wantPhrases := []string{
 		"Token-budget guardrails",
-		"Do not call `worktree.list` just to find one bugfix worktree or owner marker.",
-		"git worktree list --porcelain | grep -A2",
+		"Do not call `worktree.list` just to find one bugfix workspace or owner marker.",
+		"scripts/dev-workspace.sh status <id>",
 		"Do not spin on bare `session.status` polls",
 		"host.run {cmd:\"sleep 10\"}",
 		"session.trace {since:<previous_last_turn>",

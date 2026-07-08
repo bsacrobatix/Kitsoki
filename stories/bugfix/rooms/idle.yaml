@@ -121,7 +121,15 @@ states:
           ticket_source_ref:  "{{ world.ticket_source_ref != '' ? world.ticket_source_ref : 'inline complaint' }}"
           escalate_low_value: true
 
-      # Step 0: derive a default reporting thread from ticket_id when the caller
+      # Step 0a: prefer an explicit source reference as the reporting thread.
+      # Local artifact tickets arrive as `.artifacts/issues/bugs/<id>.md`; GitHub
+      # tickets arrive as issue URLs. Keeping that reference avoids creating a
+      # second committed `issues/bugs/` thread for local developer iterations.
+      - when: "world.ticket_id != '' && world.thread == '' && world.ticket_source_ref != '' && !world.bf_autostart_attempted"
+        set:
+          thread: "{{ world.ticket_source_ref }}"
+
+      # Step 0b: derive a default reporting thread from ticket_id when the caller
       # didn't supply one — e.g. a headless drive (goal-seeker/punch-list, a bench
       # cell, `kitsoki turn`) that hands over only a ticket_id + item text, no
       # operator-chosen thread path. Every checkpoint's `iface.transport.post` (and

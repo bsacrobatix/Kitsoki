@@ -4,10 +4,10 @@
 // posts a title (+ optional body/severity/repro and a base64 screenshot) to
 // /rpc. This handler snapshots the server's HAR ring buffer (the last N /rpc
 // request/response pairs recorded at the choke point in handleRPC) and scrubs it
-// with the LLM-free harscrub anonymizer. Local filing writes
-// <root>/issues/bugs/<id>.md plus a sibling <id>.artifacts/ dir; GitHub filing
-// creates the issue, saves a local .artifacts/ copy of the evidence, and uploads
-// scrubbed evidence as release assets for review.
+// with the LLM-free harscrub anonymizer. Local developer filing writes
+// <root>/.artifacts/issues/bugs/<id>.md plus a sibling <id>.artifacts/ dir;
+// GitHub filing creates the issue, saves a local .artifacts/ copy of the
+// evidence, and uploads scrubbed evidence as release assets for review.
 //
 // Root resolution (least-surprising, deterministic):
 //
@@ -68,7 +68,8 @@ func (s *Server) bugStatus(ctx context.Context) (any, *rpcError) {
 	repo := strings.TrimSpace(s.ticketRepo)
 	if repo == "" {
 		return map[string]any{
-			"mode":     "local",
+			"mode":     "local-artifact",
+			"path":     filepath.ToSlash(filepath.Join(".artifacts", "issues", "bugs")),
 			"can_file": true,
 		}, nil
 	}
@@ -122,6 +123,7 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 	repro := stringSliceParam(params, "repro_steps")
 
 	root := s.resolveBugRoot(params)
+	localRoot, localDisplayPrefix := localBugFilingRoot(root)
 	runtime := s.bugRuntimeSnapshot(root, params)
 	scrubOpts := bugreport.ScrubOptions()
 
@@ -175,10 +177,17 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 		TraceRef:      traceRef,
 		ArtifactNames: bugreport.ArtifactNames(artifacts),
 	}
-	safeReport, privacy, perr := bugprivacy.Check(ctx, s.bugPrivacyCheckerForReport(params), report, scrubOpts, root, stringParam(params, "filed_by"))
+	privacyRoot := root
+	privacyDisplayPrefix := ""
+	if strings.TrimSpace(s.ticketRepo) == "" {
+		privacyRoot = localRoot
+		privacyDisplayPrefix = localDisplayPrefix
+	}
+	safeReport, privacy, perr := bugprivacy.Check(ctx, s.bugPrivacyCheckerForReport(params), report, scrubOpts, privacyRoot, stringParam(params, "filed_by"))
 	if perr != nil {
 		return nil, serverErr(fmt.Errorf("bug privacy check: %w", perr))
 	}
+	privacy = prefixServerPrivacyFollowUp(privacy, privacyDisplayPrefix)
 	if privacy.Blocked() {
 		return nil, serverErr(fmt.Errorf("%s%s", privacy.Message, bugreport.PrivacyFollowUpSuffix(privacy)))
 	}
@@ -192,7 +201,7 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 
 	// GitHub mode (kitsoki web --ticket-repo): file a real GitHub issue and save
 	// evidence under .artifacts for developer-local review, instead of writing a
-	// local issues/bugs/<id>.md file.
+	// local .artifacts/issues/bugs/<id>.md file.
 	if s.ticketRepo != "" {
 		return s.fileBugToGitHub(params, title, body, severity, traceRef, repro, artifacts, runtime, privacy)
 	}
@@ -204,7 +213,7 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 		ReproSteps: repro,
 		Severity:   severity,
 		TraceRef:   traceRef,
-		TargetDir:  root,
+		TargetDir:  localRoot,
 		FiledBy:    stringParam(params, "filed_by"),
 		Runtime:    runtime,
 		Warnf:      func(string, ...any) {}, // web caller: drop warnings
@@ -213,7 +222,8 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 		return nil, serverErr(err)
 	}
 
-	// Artifacts dir is a sibling of the .md: issues/bugs/<id>.artifacts/.
+	// Artifacts dir is a sibling of the .md:
+	// .artifacts/issues/bugs/<id>.artifacts/.
 	artifactsDir := strings.TrimSuffix(absPath, ".md") + ".artifacts"
 	if err := bugreport.WriteArtifacts(artifactsDir, artifacts); err != nil {
 		return nil, serverErr(err)
@@ -231,14 +241,20 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 		return nil, serverErr(fmt.Errorf("append artifacts section: %w", appendErr))
 	}
 
-	return map[string]any{"id": id, "path": relPath, "privacy": privacy}, nil
+	return map[string]any{
+		"id":      id,
+		"path":    filepath.ToSlash(serverDisplayBugPath(localDisplayPrefix, relPath)),
+		"sink":    "local-artifact",
+		"privacy": privacy,
+	}, nil
 }
 
 // fileBugToGitHub files the bug as a real GitHub issue on s.ticketRepo: it
 // writes the (already-scrubbed) evidence to .artifacts as a local copy, hands
 // those paths to host.GitHubFileBug with UploadArtifacts set so the evidence is
 // uploaded as release assets and linked by public URL in the issue, and returns
-// the issue url. No local issues/bugs/*.md file is written in this mode.
+// the issue url. No local .artifacts/issues/bugs/*.md ticket is written in this
+// mode.
 func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, traceRef string, repro []string, artifacts []bugreport.Artifact, runtime reportmeta.Snapshot, privacy bugprivacy.Result) (any, *rpcError) {
 	prefix := "bug-" + time.Now().UTC().Format("20060102T150405.000000000Z")
 	artifactsRoot, displayRoot, err := s.githubBugArtifactsRoot()
@@ -354,6 +370,32 @@ func (s *Server) githubBugArtifactsRoot() (absRoot, displayRoot string, err erro
 	}
 	absRoot = filepath.Join(root, ".artifacts", "bug-reports")
 	return absRoot, filepath.ToSlash(filepath.Join(".artifacts", "bug-reports")), nil
+}
+
+func localBugFilingRoot(root string) (absRoot, displayPrefix string) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		root = "."
+	}
+	if filepath.Base(filepath.Clean(root)) == ".artifacts" {
+		return root, ""
+	}
+	return filepath.Join(root, ".artifacts"), ".artifacts"
+}
+
+func serverDisplayBugPath(prefix, rel string) string {
+	if strings.TrimSpace(prefix) == "" {
+		return rel
+	}
+	return filepath.Join(prefix, rel)
+}
+
+func prefixServerPrivacyFollowUp(privacy bugprivacy.Result, prefix string) bugprivacy.Result {
+	if strings.TrimSpace(prefix) == "" || strings.TrimSpace(privacy.FollowUpPath) == "" {
+		return privacy
+	}
+	privacy.FollowUpPath = serverDisplayBugPath(prefix, privacy.FollowUpPath)
+	return privacy
 }
 
 // resolveBugRoot picks the repo root for a web-filed bug. Precedence: explicit

@@ -86,11 +86,15 @@ type Server struct {
 	// mutation), and the render tools stay available. Used by the meta-mode
 	// Q&A surface (`/meta story ask`), which must not edit the story.
 	readOnly bool
-	// issueFiler is the injectable issue.create seam: it files a composed
-	// {repo, title, body, labels} GitHub issue. Nil → issue.create returns
-	// ErrIssueUnavailable. Production (cmd/kitsoki) routes through Kitsoki's
-	// native GitHub issue filing; tests inject fakes. See WithIssueFiler.
+	// issueFiler is the injectable issue.create GitHub seam: it files a composed
+	// {repo, title, body, labels} GitHub issue when issueSink resolves to
+	// "github". Nil only makes the github sink unavailable; local-artifact stays
+	// usable. Production (cmd/kitsoki) routes through Kitsoki's native GitHub
+	// issue filing; tests inject fakes. See WithIssueFiler.
 	issueFiler IssueFiler
+	// issueSink is the default filing destination for issue.create. Empty means
+	// local-artifact, so local dogfood does not burn GitHub issues.
+	issueSink string
 	// artifactsDir is where issue.create writes rendered assets. Empty →
 	// defaultIssueArtifactsDir. See WithArtifactsDir.
 	artifactsDir string
@@ -181,7 +185,8 @@ func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 	// inbox.* — external intake into the per-session inbox.
 	srv.registerInboxTools()
 
-	// issue.* — file a GitHub issue with studio-produced evidence bundled in.
+	// issue.* — file a local artifact ticket or GitHub issue with studio-produced
+	// evidence bundled in.
 	srv.registerIssueTools()
 
 	// host.* — the standalone gate-runner: run a command against a worktree
@@ -365,8 +370,8 @@ const (
 	ErrBadRequest = "BAD_REQUEST"
 	// ErrHarness — the session's harness could not be constructed.
 	ErrHarness = "HARNESS"
-	// ErrIssueUnavailable — issue.create was called on a studio with no issue
-	// filer wired (started without GitHub filing).
+	// ErrIssueUnavailable — issue.create was called with sink=github on a studio
+	// with no issue filer wired (started without GitHub filing).
 	ErrIssueUnavailable = "ISSUE_UNAVAILABLE"
 )
 

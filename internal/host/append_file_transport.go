@@ -199,7 +199,17 @@ func isAppendFileLocalPath(thread string) bool {
 
 func isAppendFileBugThread(thread string) bool {
 	clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(thread)))
-	return strings.HasPrefix(clean, "issues/bugs/")
+	for _, prefix := range []string{
+		"issues/bugs/",
+		".artifacts/issues/bugs/",
+		".artifacts/issues/features/",
+		".artifacts/issues/epics/",
+	} {
+		if strings.HasPrefix(clean, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func sanitizeAppendThreadName(thread string) string {

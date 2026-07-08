@@ -58,18 +58,19 @@ What is captured, anonymized, and (on Submit) written:
   strips `Authorization` / `Cookie` / `Set-Cookie` headers and known
   session-token query params, redacts absolute paths under `$HOME`, and
   redacts configured secret-shaped values.
-- **File** — on Submit, writes a flat `issues/bugs/<id>.md` (same format and
+- **File** — on Submit, writes a flat `.artifacts/issues/bugs/<id>.md` (same format and
   frontmatter as `kitsoki bug create`, with the operator description plus
   `## Error state` and `## Console (recent)` sections) plus a sibling
-  `issues/bugs/<id>.artifacts/` holding `screenshot.png`, `har.json`,
+  `.artifacts/issues/bugs/<id>.artifacts/` holding `screenshot.png`, `har.json`,
   `rrweb.json`, and `console.json`, linked from the ticket's `## Artifacts`
-  section. The ticket and its artifacts are committed to the repo, same as
-  hand-filed seeds.
+  section. The ticket and its artifacts are durable local review artifacts, not
+  committed work-in-progress tickets.
 
-The on-disk format, the artifacts-folder convention, and the proof that a
-sibling `.artifacts/` folder does not disturb the `issues/bugs/*.md` ticket
-reader are documented once in [`issues/README.md`](../../issues/README.md) and
-[`../stories/bugs.md`](../stories/bugs.md).
+The on-disk format and the artifacts-folder convention are documented once in
+[`issues/README.md`](../../issues/README.md) and
+[`../stories/bugs.md`](../stories/bugs.md). Start `kitsoki web --ticket-repo
+<owner/repo>` when the report should become a GitHub Issue for autonomous
+agent intake.
 
 The item is **hidden in snapshot / artifact (read-only) mode**, exactly like
 the rest of the Meta button — there is no running session or live transport to

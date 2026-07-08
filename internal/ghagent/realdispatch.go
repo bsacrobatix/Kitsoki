@@ -1,7 +1,7 @@
 // realdispatch.go — task 2 of docs/proposals/gh-agent-honest-issues.md.
 //
 // Real pipeline dispatch drives the ACTUAL stories/bugfix machine end-to-end
-// (no beat-fixture host.agent.* stub map) in a per-job worktree, through a
+// (no beat-fixture host.agent.* stub map) in a per-job managed clone workspace, through a
 // live-or-replay harness selected the same way `kitsoki turn`/`web` select
 // harnesses — except the default is always "replay" here (see
 // resolveHarnessMode in dispatch.go): an unattended dispatcher must never go
@@ -135,11 +135,10 @@ func jobWorktreeSlug(jobID string) string {
 	return slug
 }
 
-// jobWorktreeRelDir is the per-job worktree path relative to the target
-// checkout root: .worktrees/gh-job-<id>, per AGENTS.md ("make your worktrees
-// in the project root folder .worktrees").
+// jobWorktreeRelDir is the per-job managed workspace path relative to the target
+// checkout root. The name is retained for RunResult/API compatibility.
 func jobWorktreeRelDir(jobID string) string {
-	return filepath.Join(".worktrees", "gh-job-"+jobWorktreeSlug(jobID))
+	return filepath.Join(".capsules", "workspaces", jobWorkspaceID(jobID))
 }
 
 func jobWorkspaceID(jobID string) string {
@@ -161,7 +160,7 @@ func jobReplayCommitSHA(jobID string) string {
 
 // runRealDispatch drives route.Story's REAL machine end-to-end via plan's
 // recorded cassette (replay mode) or the real handlers (live mode), in a
-// per-job worktree identity seeded through stories/bugfix's own sanctioned
+// per-job workspace identity seeded through stories/bugfix's own sanctioned
 // workspace_prepared/autostart path (rooms/idle.yaml Step-0w) — never via an
 // un-declared world key.
 func runRealDispatch(ctx context.Context, root string, route Route, job *jobs.GHJob, plan realDispatchPlan) (RunResult, error) {
@@ -202,9 +201,9 @@ func runRealDispatch(ctx context.Context, root string, route Route, job *jobs.GH
 		}
 	}
 	// Per-job workspace identity, seeded through the sanctioned
-	// workspace_prepared/.worktrees-prefix exemption
+	// workspace_prepared/.capsules/workspaces-prefix exemption
 	// (stories/bugfix/rooms/idle.yaml Step-0w) instead of an un-declared
-	// world key: a repo-relative .worktrees/ workdir plus
+	// world key: a repo-relative .capsules/workspaces/ workdir plus
 	// workspace_prepared: true both independently satisfy that guard.
 	initialWorld["workspace_id"] = jobWorkspaceID(job.JobID)
 	initialWorld["feature_branch"] = jobFeatureBranch(job.JobID)
@@ -237,7 +236,7 @@ func runRealDispatch(ctx context.Context, root string, route Route, job *jobs.GH
 	// whenever HostBindings is set (see flows.go), so plan.HostBindings still
 	// applies here to bind the real ifaces — but with no cassette to hit
 	// first, every call reaches the real handler: a real agent subprocess
-	// per agents: block, real git worktree/commit ops, real test runs. This
+	// per agents: block, real git workspace/commit ops, real test runs. This
 	// is genuinely operator-invoked-only; resolveHarnessMode never picks it
 	// by default.
 	if mode == HarnessLive {
@@ -255,7 +254,7 @@ func runRealDispatch(ctx context.Context, root string, route Route, job *jobs.GH
 
 	// Land the job's real commits onto a shared integration branch BEFORE
 	// cleanup, while jobFeatureBranch(job.JobID) still exists — cleanup below
-	// deletes it. A worktree only ever materializes on disk in live mode (see
+	// deletes it. A workspace only ever materializes on disk in live mode (see
 	// cleanupJobWorktree's doc); replay mode leaves worktreeAbs absent (the
 	// cassette served every workspace host call), so there is nothing real to
 	// land and the job keeps its synthetic-but-labeled identity below.
@@ -271,7 +270,7 @@ func runRealDispatch(ctx context.Context, root string, route Route, job *jobs.GH
 		}
 	}
 
-	// Cleanup policy (proposal open-question 2 lean): delete the worktree on
+	// Cleanup policy (proposal open-question 2 lean): delete the workspace on
 	// success, keep it (bounded retention window) on failure for post-mortem.
 	// A no-op in replay mode, where nothing was ever checked out on disk —
 	// the cassette served every workspace host call.
@@ -307,7 +306,7 @@ func runRealDispatch(ctx context.Context, root string, route Route, job *jobs.GH
 		}
 	}
 
-	summary := fmt.Sprintf("Ran `%s` end-to-end via the %s harness (%d turn(s)); worktree `%s`.", route.Story, mode, turns, worktreeRel)
+	summary := fmt.Sprintf("Ran `%s` end-to-end via the %s harness (%d turn(s)); workspace `%s`.", route.Story, mode, turns, worktreeRel)
 	if lastSummary != "" {
 		summary += "\n\n" + lastSummary
 	}
@@ -322,7 +321,7 @@ func runRealDispatch(ctx context.Context, root string, route Route, job *jobs.GH
 - Final state: "done"
 - Flow turns: %d
 - Host returns observed: %d
-- Worktree: %q
+- Workspace: %q
 - Result: passed
 
 The gh-agent dispatcher first ran the bugfix story's triage-only preflight, then ran the bugfix story from a fresh job context through its verification and done gates before marking this job done.
@@ -637,22 +636,24 @@ func writeFlowFixture(fixture *testrunner.FlowFixture) (string, func(), error) {
 
 func boolPtr(b bool) *bool { return &b }
 
-// ─── Per-job worktree cleanup (task 2.1) ──────────────────────────────────
+// ─── Per-job workspace cleanup (task 2.1) ─────────────────────────────────
 //
-// The per-job worktree is CREATED by the story itself: rooms/idle.yaml's
+// The per-job workspace is CREATED by the story itself: rooms/idle.yaml's
 // Step 2 invokes iface.workspace.create (bound to host.git_worktree) once
 // world.workdir/feature_branch/workspace_id are seeded — the sanctioned
 // checkout path, not a bespoke one here. In replay mode the recorded
 // cassette intercepts that call (no real git side effect); in live mode the
-// real handler runs `git worktree add`. This file only owns the CLEANUP side
-// of the lifecycle: delete on success, keep (bounded retention) on failure.
+// real handler delegates to scripts/dev-workspace.sh. This file only owns the
+// CLEANUP side of the lifecycle: delete on success, keep (bounded retention) on
+// failure.
 
 // landFeatureBranch squash-merges the job's feature branch onto a shared
 // integration branch via vcsops.Integrate, so a live fix's real commits
 // survive as a real git object on a reviewable branch instead of only the
-// fix.patch asset. It runs the merge from a dedicated integration worktree
-// (never the caller's checkout) so root — typically the protected primary
-// checkout — is never mutated directly; see AGENTS.md's read-mostly rule.
+// fix.patch asset. It runs the merge from a dedicated integration managed
+// workspace (never the caller's checkout) so root — typically the protected
+// primary checkout — is never mutated directly; see AGENTS.md's read-mostly
+// rule.
 // Returns the real squash-commit SHA on success. A refused/conflicted
 // integrate is returned as an error: a fix with no real landing must not be
 // reported as done (fail closed, no fabricated success).
@@ -665,6 +666,13 @@ func landFeatureBranch(ctx context.Context, root string, route Route, job *jobs.
 	if err != nil {
 		return "", err
 	}
+	jobDir := filepath.Join(root, jobWorktreeRelDir(job.JobID))
+	if _, err := os.Stat(jobDir); err != nil {
+		return "", fmt.Errorf("job workspace %s: %w", jobDir, err)
+	}
+	if out, exit, err := vcsops.RunGit(ctx, integrationDir, "fetch", jobDir, jobFeatureBranch(job.JobID)+":refs/heads/"+jobFeatureBranch(job.JobID)); err != nil || exit != 0 {
+		return "", fmt.Errorf("ghagent: fetch job branch %s from %s: %w: %s", jobFeatureBranch(job.JobID), jobDir, err, strings.TrimSpace(out))
+	}
 	message := fmt.Sprintf("Land %s fix for %s (job %s)", route.Story, job.OriginRef, job.JobID)
 	result, err := vcsops.Integrate(ctx, integrationDir, jobFeatureBranch(job.JobID), integrationBranch, message, vcsops.IntegrateOptions{})
 	if err != nil {
@@ -676,40 +684,44 @@ func landFeatureBranch(ctx context.Context, root string, route Route, job *jobs.
 		}
 		return "", errors.New(result.Refused)
 	}
+	if out, exit, err := vcsops.RunGit(ctx, root, "fetch", integrationDir, integrationBranch+":refs/heads/"+integrationBranch); err != nil || exit != 0 {
+		return "", fmt.Errorf("ghagent: import integration branch %s from %s: %w: %s", integrationBranch, integrationDir, err, strings.TrimSpace(out))
+	}
 	return result.Commit, nil
 }
 
-// ensureIntegrationWorktree returns the path of a worktree checked out on
-// branch, one per integration branch (reused across every job in a marathon
-// cycle that shares the branch name), creating the branch from base the
-// first time it's needed.
+// ensureIntegrationWorktree returns the path of a managed clone workspace
+// checked out on branch, one per integration branch (reused across every job in
+// a marathon cycle that shares the branch name), creating the branch from base
+// the first time it's needed. The name is retained for minimal API churn.
 func ensureIntegrationWorktree(ctx context.Context, root, branch, base string) (string, error) {
-	abs := filepath.Join(root, ".worktrees", "integration-"+jobWorktreeSlug(branch))
-	if _, err := os.Stat(abs); err == nil {
-		return abs, nil // already checked out by an earlier job in this cycle
+	id := "integration-" + jobWorktreeSlug(branch)
+	abs := filepath.Join(root, ".capsules", "workspaces", id)
+	if err := runDevWorkspace(ctx, root, "create", "--repo", root, "--id", id, "--branch", branch, "--base", base, "--no-bootstrap", "--json"); err != nil {
+		return "", err
 	}
 	if _, exit, _ := vcsops.RunGit(ctx, root, "rev-parse", "--verify", "--quiet", branch); exit == 0 {
-		if out, exit, err := vcsops.RunGit(ctx, root, "worktree", "add", abs, branch); err != nil || exit != 0 {
-			return "", fmt.Errorf("ghagent: worktree add %s %s: %w: %s", abs, branch, err, strings.TrimSpace(out))
+		if out, exit, err := vcsops.RunGit(ctx, abs, "fetch", root, branch); err != nil || exit != 0 {
+			return "", fmt.Errorf("ghagent: sync integration workspace %s from %s: %w: %s", abs, branch, err, strings.TrimSpace(out))
 		}
-		return abs, nil
-	}
-	if out, exit, err := vcsops.RunGit(ctx, root, "worktree", "add", "-b", branch, abs, base); err != nil || exit != 0 {
-		return "", fmt.Errorf("ghagent: worktree add -b %s %s %s: %w: %s", branch, abs, base, err, strings.TrimSpace(out))
+		if out, exit, err := vcsops.RunGit(ctx, abs, "reset", "--hard", "FETCH_HEAD"); err != nil || exit != 0 {
+			return "", fmt.Errorf("ghagent: reset integration workspace %s to %s: %w: %s", abs, branch, err, strings.TrimSpace(out))
+		}
 	}
 	return abs, nil
 }
 
 // jobWorktreeRetention is the bounded retention window (proposal
-// open-question 2) for kept failed-job worktrees, mirroring dogfood-marathon
+// open-question 2) for kept failed-job workspaces, mirroring dogfood-marathon
 // practice. Enforced by PruneStaleFailedWorktrees, not automatically on a
 // timer by this package (task 3's drain/maintenance loop is the natural home
 // for scheduling that sweep).
 const jobWorktreeRetention = 7 * 24 * time.Hour
 
-// cleanupJobWorktree removes the per-job worktree + its branch when the run
-// succeeded. On failure it leaves the worktree in place for post-mortem. A
-// no-op when the path was never materialized on disk (replay mode).
+// cleanupJobWorktree removes the per-job managed workspace when the run
+// succeeded. On failure it leaves the workspace in place for post-mortem. A
+// no-op when the path was never materialized on disk (replay mode). Name is
+// retained for RunResult/API compatibility.
 func cleanupJobWorktree(ctx context.Context, root, worktreeAbs, jobID string, succeeded bool) error {
 	if _, err := os.Stat(worktreeAbs); err != nil {
 		return nil // nothing checked out (replay mode served the workspace calls)
@@ -717,24 +729,16 @@ func cleanupJobWorktree(ctx context.Context, root, worktreeAbs, jobID string, su
 	if !succeeded {
 		return nil // keep for post-mortem, subject to jobWorktreeRetention
 	}
-	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", worktreeAbs)
-	cmd.Dir = root
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("ghagent: git worktree remove %s: %w: %s", worktreeAbs, err, strings.TrimSpace(string(out)))
-	}
-	branchCmd := exec.CommandContext(ctx, "git", "branch", "-D", jobFeatureBranch(jobID))
-	branchCmd.Dir = root
-	_, _ = branchCmd.CombinedOutput() // best-effort; a stray branch is harmless
-	return nil
+	return runDevWorkspace(ctx, root, "close", "--repo", root, "--force", jobWorkspaceID(jobID))
 }
 
-// PruneStaleFailedWorktrees removes gh-job-* worktrees under
-// <root>/.worktrees whose directory mtime is older than
+// PruneStaleFailedWorktrees removes gh-job-* managed workspaces under
+// <root>/.capsules/workspaces whose directory mtime is older than
 // jobWorktreeRetention. Exported so an operator CLI or a maintenance ticker
 // (a natural companion to task 3's drain loop) can call it directly; safe to
 // call frequently — a no-op absent stale entries.
 func PruneStaleFailedWorktrees(ctx context.Context, root string) error {
-	dir := filepath.Join(root, ".worktrees")
+	dir := filepath.Join(root, ".capsules", "workspaces")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -751,10 +755,47 @@ func PruneStaleFailedWorktrees(ctx context.Context, root string) error {
 		if ierr != nil || info.ModTime().After(cutoff) {
 			continue
 		}
-		path := filepath.Join(dir, e.Name())
-		cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", path)
-		cmd.Dir = root
-		_, _ = cmd.CombinedOutput()
+		_ = runDevWorkspace(ctx, root, "close", "--repo", root, "--force", e.Name())
 	}
 	return nil
+}
+
+func runDevWorkspace(ctx context.Context, root string, args ...string) error {
+	script, err := devWorkspaceScript(root)
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, script, args...)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ghagent: dev-workspace %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func devWorkspaceScript(root string) (string, error) {
+	for _, candidate := range devWorkspaceScriptCandidates(root) {
+		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("ghagent: scripts/dev-workspace.sh not found from %s", root)
+}
+
+func devWorkspaceScriptCandidates(root string) []string {
+	var out []string
+	if strings.TrimSpace(root) != "" {
+		out = append(out, filepath.Join(root, "scripts", "dev-workspace.sh"))
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		for dir := cwd; ; dir = filepath.Dir(dir) {
+			out = append(out, filepath.Join(dir, "scripts", "dev-workspace.sh"))
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+		}
+	}
+	return out
 }

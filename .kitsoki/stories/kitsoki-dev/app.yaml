@@ -1,7 +1,8 @@
 # kitsoki-dev — the dogfood instance.
 #
-# The dogfood PoC milestone (★): kitsoki working on kitsoki through its own UI,
-# with the bug file as both ticket and conversation log.
+# The dogfood default: kitsoki works on kitsoki through its own UI, with local
+# artifact bug files as both tickets and conversation logs. GitHub Issues remain
+# available for autonomous/public intake by overriding the ticket binding/repo.
 #
 # Composition is one import edge: dev-story (general-purpose hub) is
 # imported under alias `core` with concrete host bindings to the
@@ -22,7 +23,9 @@
 #
 # # ticket_globs — multi-glob coverage
 #
-# The local-files ticket provider scans `<repo_root>/issues/bugs/*.md`
+# The local-files ticket provider scans `<repo_root>/issues/bugs/*.md`. This
+# instance sets `repo_root` to `.artifacts`, so local developer iterations read
+# `.artifacts/issues/bugs/*.md` and do not create committed ticket files.
 # for files matching the bug frontmatter schema (docs/stories/bugs.md).
 # The `ticket_globs:` world key documents the FULL set of paths a
 # future multi-glob provider scan will cover:
@@ -50,7 +53,7 @@
 app:
   id: kitsoki-dev
   version: 0.1.0
-  title: "kitsoki-dev — work on kitsoki itself (and its stories) with GitHub issues"
+  title: "kitsoki-dev — work on kitsoki itself with local artifact tickets"
   author: "Kitsoki"
   license: "CC0"
 
@@ -157,15 +160,10 @@ imports:
     # iface.transport.post carries the file path), so the local file
     # is the comment thread.
     host_bindings:
-      # GitHub cutover (github-issues-tracker slice #4): the dogfood loop reads/
-      # writes its tickets as GitHub issues on `ticket_repo`. The rooms thread
-      # `repo: {{ world.ticket_repo }}` into every iface.ticket.* call. The
-      # default is the symbolic `origin`, resolved by host.gh.ticket against
-      # `git remote get-url origin` (bsacrobatix/Kitsoki on a fork clone,
-      # constructorfabric/Kitsoki on a canonical clone) so the dogfood instance
-      # always targets the repo you cloned. Flip the binding back to
-      # host.local_files.ticket for a purely offline run.
-      ticket:    host.gh.ticket
+      # Local iteration default: read/write `.artifacts/issues/*` through the
+      # local-files provider. Autonomous GitHub intake can still run by rebinding
+      # ticket to host.gh.ticket and setting ticket_repo to an owner/repo.
+      ticket:    host.local_files.ticket
       vcs:       host.git
       ci:        host.local
       workspace: host.git_worktree
@@ -178,6 +176,7 @@ imports:
     world_in:
       judge_mode:                 "{{ world.judge_mode }}"
       judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
+      repo_root:                  "{{ world.repo_root }}"
       ticket_repo:                "{{ world.ticket_repo }}"
       bugfix_destination:         "{{ world.bugfix_destination }}"
       design_durable_path:        "{{ world.design_durable_path }}"
@@ -196,17 +195,12 @@ imports:
 world:
   # Provider-pointing keys. repo_root reaches iface.ticket.* via the
   # dev-story rooms' `root:` passthrough; ticket_globs is still unwired.
-  repo_root:    { type: string, default: "" }
+  repo_root:    { type: string, default: ".artifacts" }
   ticket_globs: { type: string, default: "issues/bugs/*.md,issues/features/*.md,stories/*/issues/bugs/*.md,stories/*/issues/features/*.md" }
 
-  # ticket_repo — the GitHub repo every host.gh.ticket call pins via its `repo`
-  # arg. The dogfood default is the symbolic `origin`: host.gh.ticket resolves it
-  # against `git remote get-url origin` (bsacrobatix/Kitsoki on a fork clone,
-  # constructorfabric/Kitsoki on a canonical clone), so the instance targets the
-  # repo you cloned — where you actually file and fix bugs. An operator can still
-  # pin an explicit `owner/repo` here, or override `ticket_repo` per-session via
-  # a `--warp` scenario, without touching this file.
-  ticket_repo:  { type: string, default: "origin" }
+  # ticket_repo is intentionally empty for local artifact iteration. Set it to
+  # `origin` or an explicit owner/repo only for a GitHub-backed intake run.
+  ticket_repo:  { type: string, default: "" }
   # Default self-hosting destination: land fixes into the local base branch
   # (main here) after the bugfix RED/GREEN gate and shared ship-it tail pass.
   # Operators can still choose open-pr or leave-worktree from the dev-story UI.
