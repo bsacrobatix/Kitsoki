@@ -21,14 +21,14 @@ qa:
     - id: tour-starts
       required: true
       steps:
-        - A spotlight overlay is visible with a darkened backdrop
+        - A tour popover is visible while the page behind it remains undimmed and readable
         - A popover with a title and description is shown
         - A Next or action button is present in the popover
       title: Tour overlay appears and opens on the home screen
     - id: home-landmarks
       required: true
       steps:
-        - A story card or card list is highlighted with a cutout in the backdrop
+        - A story card or card list is highlighted with a visible ring and no page dimming
         - The popover describes the story catalogue
         - The New Session button is spotlighted in at least one step
       title: Home screen landmarks are spotlighted

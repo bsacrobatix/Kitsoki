@@ -33,8 +33,8 @@ function isSnapshot(): boolean {
 
 /**
  * Under browser automation (Playwright/Selenium) the tour must never auto-pop:
- * its spotlight backdrop would intercept the clicks the other UI specs make.
- * The tour-video spec opts in explicitly via window.__startTour / start(true).
+ * its popover can still intercept the clicks other UI specs make. The
+ * tour-video spec opts in explicitly via window.__startTour / start(true).
  */
 function isAutomated(): boolean {
   return typeof navigator !== "undefined" && navigator.webdriver === true;

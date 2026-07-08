@@ -609,8 +609,10 @@ What makes it the template:
   lives inside a drawer/pane, the spec opens that pane (e.g. `openDrawerForCall`,
   `openTaskDetail`) and `dwell(page, SETTLE_MS)` so the spotlight lands on a
   composed frame, not a half-rendered flicker.
-- **The single backdrop only blanks the page for anchorless (`center`) steps;**
-  targeted steps leave a click-through hole over the real control.
+- **No tour step dims the page.** The live overlay uses a popover plus a
+  highlight ring only; anchorless steps show just the popover. Do not add
+  backdrop strips, page-wide opacity, blur, or box-shadow masks to make a
+  spotlight hole — those obscure the video content we are trying to show.
 
 **Author + record** (the four commands — MP4 is the deliverable):
 
@@ -1110,8 +1112,8 @@ It mirrors this skill's patterns, adapted to VS Code:
 - **Watch-speed staging tips proven here:** widen the Kitsoki sidebar (drag the
   vertical sash) AFTER the lobby submit so the report renders legibly without
   tripping the side-by-side breakpoint; clear the narration overlay
-  (`__tourSkip`) before any SPA interaction or editor beat (its backdrop
-  intercepts clicks); keep the leading `>` when filling the Command Palette
+  (`__tourSkip`) before any SPA interaction or editor beat (its popover can
+  cover controls); keep the leading `>` when filling the Command Palette
   (replacing it searches files, not commands); suppress VS Code chrome noise in
   the throwaway workspace settings (`git.enabled:false`,
   `editor.minimap.enabled:false`) so frames stay clean.

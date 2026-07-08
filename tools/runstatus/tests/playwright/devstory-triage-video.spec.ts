@@ -124,7 +124,7 @@ async function driveButton(page: Page, intent: string, expectStateName: string):
 /**
  * Drive a slotted (text-slot) intent through the legacy composer: an optional
  * composer-select (present only when >1 text intent), a composer-input textarea,
- * and the composer form. DOM-level so the tour overlay backdrop never intercepts.
+ * and the composer form. DOM-level so the tour popover never intercepts.
  */
 async function driveComposer(
   page: Page,
