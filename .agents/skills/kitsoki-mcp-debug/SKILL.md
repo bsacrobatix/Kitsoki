@@ -15,7 +15,7 @@ requiring Claude/Codex to reload its MCP tool list.
 Run from the repo root:
 
 ```sh
-GOCACHE=$PWD/.cache/go-build go run ./cmd/kitsoki mcp-test --stories-dir ./stories --timeout 20s
+GOCACHE="${KITSOKI_GOCACHE:-/private/tmp/kitsoki-gocache}" go run ./cmd/kitsoki mcp-test --stories-dir ./stories --timeout 20s
 ```
 
 Expected behavior:
@@ -26,8 +26,10 @@ Expected behavior:
   `session.new`, and render tools
 - `tool_runs` contains successful `studio.ping` and `studio.handles` calls
 
-Use a repo-local `GOCACHE` in sandboxed environments. Remove `.cache/` before
-committing unless it is already ignored.
+Use a writable temp/shared `GOCACHE` in sandboxed or protected checkouts. Do
+not point Go's build cache at `$PWD/.cache/go-build` from the protected primary
+checkout; that directory may be read-only and will fail before the MCP server
+starts.
 
 When the question is "why is an attached client slow or flaky?", separate Go
 build/link latency from MCP server startup before changing server code:
@@ -61,7 +63,7 @@ executable are visible there.
 Use `--tool` and a JSON object in `--tool-args`:
 
 ```sh
-GOCACHE=$PWD/.cache/go-build go run ./cmd/kitsoki mcp-test \
+GOCACHE="${KITSOKI_GOCACHE:-/private/tmp/kitsoki-gocache}" go run ./cmd/kitsoki mcp-test \
   --stories-dir ./stories \
   --tool story.validate \
   --tool-args '{"dir":"stories/bugfix"}'
@@ -71,10 +73,10 @@ Other useful calls:
 
 ```sh
 # read-only server shape, useful for meta-mode/Q&A surface checks
-GOCACHE=$PWD/.cache/go-build go run ./cmd/kitsoki mcp-test --read-only
+GOCACHE="${KITSOKI_GOCACHE:-/private/tmp/kitsoki-gocache}" go run ./cmd/kitsoki mcp-test --read-only
 
 # workspace-bound authoring tools
-GOCACHE=$PWD/.cache/go-build go run ./cmd/kitsoki mcp-test \
+GOCACHE="${KITSOKI_GOCACHE:-/private/tmp/kitsoki-gocache}" go run ./cmd/kitsoki mcp-test \
   --workspace stories/bugfix \
   --tool story.graph \
   --tool-args '{}'
@@ -143,13 +145,13 @@ The default smoke is no-LLM:
 For changes in the CLI wrapper:
 
 ```sh
-GOCACHE=$PWD/.cache/go-build go test ./cmd/kitsoki -run 'TestMCP|TestRunStudioMCPTest|TestCLI_TopLevelHelp'
+GOCACHE="${KITSOKI_GOCACHE:-/private/tmp/kitsoki-gocache}" go test ./cmd/kitsoki -run 'TestMCP|TestRunStudioMCPTest|TestCLI_TopLevelHelp'
 ```
 
 For studio server/tool behavior:
 
 ```sh
-GOCACHE=$PWD/.cache/go-build go test ./internal/mcp/studio
+GOCACHE="${KITSOKI_GOCACHE:-/private/tmp/kitsoki-gocache}" go test ./internal/mcp/studio
 ```
 
 If `go test ./cmd/kitsoki` fails on sandboxed runs with `~/.kitsoki` writes or
