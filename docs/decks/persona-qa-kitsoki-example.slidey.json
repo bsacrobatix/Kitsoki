@@ -82,18 +82,18 @@
           "cells": [
             "explain-delivery-loop",
             "technical_presentation",
-            "validated",
-            "3/3",
-            "1"
+            "needs_evidence",
+            "2/3",
+            "0"
           ]
         },
         {
           "cells": [
             "verify-ui-evidence",
             "evidence_review",
-            "validated",
-            "2/2",
-            "1"
+            "needs_evidence",
+            "1/2",
+            "0"
           ]
         }
       ],
@@ -105,23 +105,23 @@
       "caption": "Bundle readiness, evidence coverage, and the highest-signal checks.",
       "items": [
         {
-          "detail": "Kitsoki can produce a presentation-ready journey deck when scenarios, review gates, and recorded playback are kept together.",
-          "label": "ready",
-          "status": "done"
+          "detail": "Kitsoki can produce a presentation-ready journey deck only after real playback captures are attached",
+          "label": "needs_evidence",
+          "status": "pending"
         },
         {
-          "detail": "2 scenarios, evidence 5/5, proof 2",
+          "detail": "2 scenarios, evidence 3/5, proof 0",
           "label": "Evidence coverage",
-          "status": "done"
+          "status": "issue"
+        },
+        {
+          "detail": "The previous rrweb placeholders were removed; both scenarios still need proof-grade playback capture.",
+          "label": "playback-evidence",
+          "status": "issue"
         },
         {
           "detail": "The generated deck explains the workflow in reviewable chunks.",
           "label": "architect-readiness",
-          "status": "done"
-        },
-        {
-          "detail": "Each scenario has a playback-capable media manifest item.",
-          "label": "playback-evidence",
           "status": "done"
         },
         {
@@ -135,7 +135,7 @@
       "type": "objectives"
     },
     {
-      "caption": "explain-delivery-loop: validated\nverify-ui-evidence: validated",
+      "caption": "explain-delivery-loop: needs_evidence\nverify-ui-evidence: needs_evidence",
       "cards": [
         {
           "label": "strength",
@@ -184,21 +184,21 @@
       "variant": "grid"
     },
     {
-      "caption": "Playback items: 2\nVideos: 2\nImages: 0\nScenarios: explain-delivery-loop, verify-ui-evidence",
+      "caption": "Verified playback: 0\nBlocked/unverified: 2\nVideos: 0\nImages: 0\nScenarios: explain-delivery-loop, verify-ui-evidence",
       "items": [
         {
-          "detail": "Recorded rrweb clip used as reviewable Kitsoki UI playback evidence.",
+          "detail": "No proof-grade Kitsoki UI capture is attached. The earlier placeholder rrweb clip was removed instead of being presente...",
           "label": "explain-delivery-loop",
-          "ref": "assets/persona-qa-kitsoki-example/agent-actions-before.rrweb.json",
-          "refType": "artifact",
-          "status": "validated"
+          "ref": "media-manifest.json",
+          "refType": "path",
+          "status": "blocked"
         },
         {
-          "detail": "Recorded rrweb clip showing the verified UI state after the issue is addressed.",
+          "detail": "No proof-grade verification capture is attached. The deck must show this as missing evidence, not as playback.",
           "label": "verify-ui-evidence",
-          "ref": "assets/persona-qa-kitsoki-example/agent-actions-after.rrweb.json",
-          "refType": "artifact",
-          "status": "validated"
+          "ref": "media-manifest.json",
+          "refType": "path",
+          "status": "blocked"
         }
       ],
       "narration": "The media scene carries structured playback references so Slidey can render the recorded journey clips.",
@@ -242,30 +242,10 @@
       "type": "evidence"
     },
     {
-      "caption": "Recorded rrweb clip used as reviewable Kitsoki UI playback evidence.",
-      "chapters": "auto",
-      "eyebrow": "Playback evidence",
-      "mode": "embedded",
-      "narration": "Recorded playback evidence for explain-delivery-loop / key_interaction_video.",
-      "rrweb": "assets/persona-qa-kitsoki-example/agent-actions-before.rrweb.json",
-      "title": "explain-delivery-loop / key_interaction_video",
-      "type": "video"
-    },
-    {
-      "caption": "Recorded rrweb clip showing the verified UI state after the issue is addressed.",
-      "chapters": "auto",
-      "eyebrow": "Playback evidence",
-      "mode": "embedded",
-      "narration": "Recorded playback evidence for verify-ui-evidence / key_interaction_video.",
-      "rrweb": "assets/persona-qa-kitsoki-example/agent-actions-after.rrweb.json",
-      "title": "verify-ui-evidence / key_interaction_video",
-      "type": "video"
-    },
-    {
       "caption": "Generated decks are derived from run artifacts; change the source bundle or generator, then regenerate.",
       "items": [
         {
-          "detail": "Playback scenes: 2",
+          "detail": "Playback scenes: 0",
           "label": "Run bundle",
           "ref": "tools/persona_qa/examples/runs/kitsoki-product-review",
           "refType": "path",

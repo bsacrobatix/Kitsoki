@@ -29,8 +29,8 @@
     },
     {
       "scenario": "maintain-deck-as-code",
-      "outcome": "validated",
-      "present_evidence_count": 2,
+      "outcome": "needs_evidence",
+      "present_evidence_count": 1,
       "required_evidence_count": 2,
       "finding_counts": {
         "strength": 1,
@@ -42,9 +42,9 @@
     }
   ],
   "summary": {
-    "validated": 3,
+    "validated": 2,
     "captured": 0,
-    "planned": 0,
+    "planned": 1,
     "blocked": 0
   }
 }

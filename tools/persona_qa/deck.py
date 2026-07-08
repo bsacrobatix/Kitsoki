@@ -8,6 +8,16 @@ from typing import Any
 
 
 DECK_RESOLUTION = {"width": 1920, "height": 1080}
+REPO_ROOT = Path(__file__).resolve().parents[2]
+PROOF_SOURCES = {"local", "retained", "external", "cassette"}
+LOCAL_PROOF_SOURCES = {"local", "cassette"}
+NON_PROOF_SOURCES = {"demo", "fake", "placeholder", "synthetic"}
+NON_PROOF_WORDS = ("demo placeholder", "deterministic placeholder", "fake", "placeholder", "synthetic", "stub")
+MIN_RRWEB_EVENTS = 20
+
+
+class PlaybackEvidenceError(ValueError):
+    """Raised when a manifest claims playback proof without proof provenance."""
 
 
 def build_deck(
@@ -41,7 +51,8 @@ def build_deck(
     persona_label = _label(persona, "Persona")
     deck_title = title or f"{project_label} Persona QA"
     scenarios = [_as_dict(item) for item in run.get("scenarios", [])]
-    playback_items = _playback_items(media_manifest)
+    playback_candidates = _playback_candidates(media_manifest)
+    playback_items, blocked_playback_items = _classify_playback_items(playback_candidates, run_dir)
     playback_scenes = _playback_scenes(playback_items, max_playback_scenes=max_playback_scenes)
 
     scenes: list[dict[str, Any]] = [
@@ -53,10 +64,10 @@ def build_deck(
             "narration": "This deck was generated deterministically from an existing Persona QA run bundle and its recorded media manifest.",
         },
         _persona_scene(persona),
-        _scenario_table_scene(scenarios, outcomes, media_manifest),
+        _scenario_table_scene(scenarios, outcomes, playback_items),
         _review_scene(review, metrics),
         _findings_scene(findings, outcomes),
-        _media_manifest_scene(playback_items, media_manifest),
+        _media_manifest_scene(playback_items, blocked_playback_items),
     ]
 
     driver_scene = _driver_scene(driver_plan, driver_journal)
@@ -201,14 +212,14 @@ def _persona_scene(persona: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _scenario_table_scene(scenarios: list[dict[str, Any]], outcomes: dict[str, Any], media_manifest: dict[str, Any]) -> dict[str, Any]:
+def _scenario_table_scene(scenarios: list[dict[str, Any]], outcomes: dict[str, Any], playback_items: list[dict[str, Any]]) -> dict[str, Any]:
     outcomes_by_id = {
         str(item.get("scenario", "")): _as_dict(item)
         for item in _as_list(outcomes.get("items"))
         if isinstance(item, dict)
     }
     playback_by_scenario: dict[str, int] = {}
-    for item in _playback_items(media_manifest):
+    for item in playback_items:
         scenario = str(item.get("scenario", ""))
         playback_by_scenario[scenario] = playback_by_scenario.get(scenario, 0) + 1
     rows = []
@@ -328,39 +339,52 @@ def _findings_scene(findings: dict[str, Any], outcomes: dict[str, Any]) -> dict[
     }
 
 
-def _media_manifest_scene(playback_items: list[dict[str, Any]], media_manifest: dict[str, Any]) -> dict[str, Any]:
-    summary = _as_dict(media_manifest.get("summary"))
-    scenarios = sorted({str(item.get("scenario", "")) for item in playback_items if item.get("scenario")})
+def _media_manifest_scene(playback_items: list[dict[str, Any]], blocked_items: list[dict[str, Any]]) -> dict[str, Any]:
+    all_items = playback_items + blocked_items
+    scenarios = sorted({str(item.get("scenario", "")) for item in all_items if item.get("scenario")})
     scenario_summary = ", ".join(scenarios[:3])
     if len(scenarios) > 3:
         scenario_summary = f"{scenario_summary}, +{len(scenarios) - 3}"
     caption = _lines(
         [
-            f"Playback items: {summary.get('playback_items', len(playback_items))}",
-            f"Videos: {summary.get('video', sum(1 for item in playback_items if item.get('media_kind') == 'video'))}",
-            f"Images: {summary.get('image', sum(1 for item in playback_items if item.get('media_kind') == 'image'))}",
+            f"Verified playback: {len(playback_items)}",
+            f"Blocked/unverified: {len(blocked_items)}",
+            f"Videos: {sum(1 for item in playback_items if item.get('media_kind') == 'video')}",
+            f"Images: {sum(1 for item in playback_items if item.get('media_kind') == 'image')}",
             f"Scenarios: {scenario_summary}" if scenario_summary else "",
         ],
-        "No playback media has been attached yet.",
+        "No proof-grade playback media has been attached yet.",
+    )
+    items = [
+        {
+            "label": str(item.get("scenario", "media")),
+            "status": _slidey_status(str(item.get("status", "validated"))),
+            "detail": _short(item.get("notes") or item.get("path", ""), limit=120),
+            "refType": "artifact",
+            "ref": str(item.get("path", "")),
+        }
+        for item in playback_items[:4]
+    ]
+    remaining = max(0, 4 - len(items))
+    items.extend(
+        {
+            "label": str(item.get("scenario", "media")),
+            "status": "blocked",
+            "detail": _short(item.get("notes") or item.get("proof_reason") or "Playback candidate is not proof-grade.", limit=120),
+            "refType": "path",
+            "ref": str(item.get("path") or "media-manifest.json"),
+        }
+        for item in blocked_items[:remaining]
     )
     return {
         "type": "evidence",
         "title": "Playback manifest",
-        "items": [
-            {
-                "label": str(item.get("scenario", "media")),
-                "status": _slidey_status(str(item.get("status", "validated"))),
-                "detail": _short(item.get("notes") or item.get("path", ""), limit=120),
-                "refType": "artifact",
-                "ref": str(item.get("path", "")),
-            }
-            for item in playback_items[:4]
-        ]
+        "items": items
         or [
             {
                 "label": "playback",
                 "status": "blocked",
-                "detail": "No video, rrweb, or image playback item is present in media-manifest.json.",
+                "detail": "No proof-grade video, rrweb, or image playback item is present in media-manifest.json.",
                 "refType": "path",
                 "ref": "media-manifest.json",
             }
@@ -408,16 +432,15 @@ def _driver_scene(driver_plan: dict[str, Any], driver_journal: dict[str, Any]) -
     }
 
 
-def _playback_items(media_manifest: dict[str, Any]) -> list[dict[str, Any]]:
+def _playback_candidates(media_manifest: dict[str, Any]) -> list[dict[str, Any]]:
     items = []
     for item in _as_list(media_manifest.get("items")):
         if not isinstance(item, dict):
             continue
         path = str(item.get("path", ""))
-        if not path:
-            continue
         media_kind = str(item.get("media_kind", ""))
-        if item.get("playback") or media_kind in {"video", "image"} or path.endswith(".rrweb.json"):
+        evidence_kind = str(item.get("evidence_kind", ""))
+        if item.get("playback") or media_kind in {"video", "image"} or path.endswith(".rrweb.json") or "video" in evidence_kind:
             items.append(item)
     return sorted(
         items,
@@ -427,6 +450,110 @@ def _playback_items(media_manifest: dict[str, Any]) -> list[dict[str, Any]]:
             str(item.get("path", "")),
         ),
     )
+
+
+def _classify_playback_items(playback_items: list[dict[str, Any]], run_dir: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    verified: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
+    invalid_claims: list[str] = []
+    for item in playback_items:
+        ok, reason = _playback_trust(item, run_dir)
+        if ok:
+            verified.append({**item, "proof_status": "verified"})
+            continue
+        blocked_item = {**item, "proof_status": "blocked", "proof_reason": reason}
+        blocked.append(blocked_item)
+        if _claims_proof_playback(item):
+            invalid_claims.append(
+                f"{item.get('scenario', 'media')}/{item.get('evidence_kind', 'playback')}: {reason}"
+            )
+    if invalid_claims:
+        raise PlaybackEvidenceError(
+            "media-manifest.json claims playback evidence that is not proof-grade: "
+            + "; ".join(invalid_claims)
+        )
+    return verified, blocked
+
+
+def _claims_proof_playback(item: dict[str, Any]) -> bool:
+    if str(item.get("status", "")) not in {"captured", "validated"}:
+        return False
+    if not str(item.get("path", "")):
+        return False
+    return not _explicitly_non_proof(item)
+
+
+def _explicitly_non_proof(item: dict[str, Any]) -> bool:
+    source = str(item.get("source", "")).strip().lower()
+    provenance = _as_dict(item.get("capture_provenance") or item.get("provenance"))
+    kind = str(provenance.get("kind", "")).strip().lower()
+    combined = " ".join(str(item.get(key, "")) for key in ("path", "notes", "summary")).lower()
+    return (
+        item.get("proof") is False
+        or source in NON_PROOF_SOURCES
+        or kind in NON_PROOF_SOURCES
+        or any(word in combined for word in NON_PROOF_WORDS)
+    )
+
+
+def _playback_trust(item: dict[str, Any], run_dir: Path) -> tuple[bool, str]:
+    if str(item.get("status", "")) not in {"captured", "validated"}:
+        return False, f"status is {item.get('status', 'missing')}"
+    path = str(item.get("path", "")).strip()
+    if not path:
+        return False, "missing playback path"
+    if _explicitly_non_proof(item):
+        return False, "declared non-proof/demo playback"
+    source = str(item.get("source", "")).strip().lower()
+    if source not in PROOF_SOURCES:
+        return False, f"source {source or 'missing'} is not proof-grade"
+    provenance = _as_dict(item.get("capture_provenance") or item.get("provenance"))
+    if not provenance:
+        return False, "missing capture_provenance"
+    if source in LOCAL_PROOF_SOURCES:
+        resolved = _resolve_artifact_path(path, run_dir)
+        if resolved is None:
+            return False, "local playback path does not resolve"
+        if path.endswith(".rrweb.json"):
+            return _rrweb_is_proof_shaped(resolved)
+    return True, "verified"
+
+
+def _resolve_artifact_path(value: str, run_dir: Path) -> Path | None:
+    path = Path(value)
+    if path.is_absolute():
+        return path if path.exists() else None
+    candidates = [
+        run_dir / path,
+        REPO_ROOT / path,
+        REPO_ROOT / "docs" / "decks" / path,
+        Path.cwd() / path,
+        Path.cwd() / "docs" / "decks" / path,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _rrweb_is_proof_shaped(path: Path) -> tuple[bool, str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"rrweb clip cannot be read: {exc}"
+    events = data if isinstance(data, list) else _as_list(_as_dict(data).get("events"))
+    if len(events) < MIN_RRWEB_EVENTS:
+        return False, f"rrweb clip has only {len(events)} events"
+    first_href = ""
+    for event in events:
+        if isinstance(event, dict) and event.get("type") == 4:
+            first_href = str(_as_dict(event.get("data")).get("href", ""))
+            break
+    if not first_href or first_href == "about:blank":
+        return False, "rrweb clip starts at about:blank"
+    if not any(isinstance(event, dict) and event.get("type") == 2 for event in events):
+        return False, "rrweb clip is missing a full snapshot event"
+    return True, "verified rrweb capture"
 
 
 def _playback_scenes(playback_items: list[dict[str, Any]], *, max_playback_scenes: int) -> list[dict[str, Any]]:

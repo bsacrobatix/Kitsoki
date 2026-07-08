@@ -1,9 +1,11 @@
 {
   "run_id": "persona-qa-slidey-architect-review",
-  "status": "ready_with_risks",
-  "summary": "For a software architect who presents often, Slidey is strong when the talk must be reproducible, visual, and evidence-backed. The main operational risk is asset and bundle discipline: recorded clips, generated HTML, and source JSON need a tight regeneration habit.",
+  "status": "needs_evidence",
+  "summary": "For a software architect who presents often, Slidey is strong for reproducible, visual, evidence-backed talks, but this example is not complete until the deck-maintenance scenario has proof-grade playback.",
   "summary_counts": {
-    "passed": 4,
+    "passed": 3,
+    "warned": 1,
+    "failed": 1,
     "total": 5
   },
   "checks": [
@@ -19,8 +21,8 @@
     },
     {
       "id": "playback-embedding",
-      "status": "pass",
-      "summary": "Recorded rrweb clips can become standalone deck scenes."
+      "status": "warn",
+      "summary": "Two recorded rrweb clips can become standalone deck scenes; one placeholder clip was blocked."
     },
     {
       "id": "layout-gates",
@@ -29,8 +31,8 @@
     },
     {
       "id": "asset-lifecycle",
-      "status": "warn",
-      "summary": "Published decks need an explicit convention for deck-local assets and bundled HTML."
+      "status": "fail",
+      "summary": "Published decks need proof-grade capture provenance for every playback scene, not just deck-local paths."
     }
   ]
 }

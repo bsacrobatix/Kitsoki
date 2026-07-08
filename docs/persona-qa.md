@@ -42,7 +42,9 @@ kitsoki persona-qa complete --config persona-qa.yaml --run-dir .artifacts/person
 
 `drive --mode replay` is deterministic and cost-free. It proves artifact wiring
 and review mechanics; proof-grade claims still need local, cassette, retained,
-or external evidence that resolves through the review gate.
+or external evidence that resolves through the review gate. Demo, placeholder,
+synthetic, or unproven local media must be recorded as missing/blocking
+evidence, not as proof.
 
 ## Deterministic Slidey Decks
 
@@ -60,9 +62,13 @@ already-produced bundle artifacts:
 - `driver-journal.json`
 
 The command writes stable JSON: the same input artifacts and flags produce the
-same deck bytes. Playback scenes are derived from `media-manifest.json`; video
-or rrweb files stay in the artifact/deck-local asset locations that the
-manifest names.
+same deck bytes. Playback scenes are derived from `media-manifest.json`, but
+only proof-grade playback items become standalone video scenes. Local rrweb
+clips must have capture provenance, resolve on disk, and pass a structural
+placeholder check; demo or placeholder items remain visible as blocked evidence
+rows instead of becoming videos. If a manifest claims captured or validated
+local playback that is not proof-grade, the deck command exits `2` and does not
+write a replacement deck.
 
 Example regeneration commands:
 
@@ -81,12 +87,15 @@ python3 tools/persona_qa/kit.py deck \
 Committed examples:
 
 - [persona-qa-kitsoki-example.slidey.json](decks/persona-qa-kitsoki-example.slidey.json)
-  shows a Kitsoki run with two recorded rrweb playback scenes.
+  shows a Kitsoki run with missing playback surfaced as blocked evidence rather
+  than fake videos.
 - [persona-qa-slidey-architect-review.slidey.json](decks/persona-qa-slidey-architect-review.slidey.json)
   reviews Slidey from the lens of a software architect who makes technical
   presentations frequently. The review calls out Slidey's strengths for
   reproducible deck-as-code, technical visual vocabulary, and playback evidence,
-  plus the asset/bundling discipline needed for repeated presentation work.
+  plus the asset/bundling discipline needed for repeated presentation work. Two
+  playback scenes are proof-grade reused rrweb captures; the incomplete
+  deck-maintenance clip is shown as missing evidence.
 
 When a generated deck is committed under `docs/decks/`, keep any referenced
 rrweb clips under `docs/decks/assets/<deck-id>/` and bundle the viewer for the

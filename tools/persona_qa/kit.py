@@ -21,11 +21,11 @@ if __package__ in {None, ""}:  # Support `python tools/persona_qa/kit.py ...`.
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from tools.persona_qa import config as qa_config  # type: ignore
     from tools.persona_qa.completion import load_product_journey_run  # type: ignore
-    from tools.persona_qa.deck import build_deck, write_deck  # type: ignore
+    from tools.persona_qa.deck import PlaybackEvidenceError, build_deck, write_deck  # type: ignore
 else:
     from . import config as qa_config
     from .completion import load_product_journey_run
-    from .deck import build_deck, write_deck
+    from .deck import PlaybackEvidenceError, build_deck, write_deck
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -222,12 +222,19 @@ def cmd_deck(args: argparse.Namespace) -> int:
     cfg = qa_config.load_config(args.config or None, repo_root=REPO_ROOT)
     run_dir = resolve_run_dir(cfg, args.run_dir)
     out = resolve_run_dir(cfg, args.out) if args.out else run_dir / "deck.slidey.json"
-    deck = build_deck(
-        run_dir,
-        title=args.title,
-        max_playback_scenes=max(args.max_playback_scenes, 0),
-        source_ref=args.run_dir,
-    )
+    try:
+        deck = build_deck(
+            run_dir,
+            title=args.title,
+            max_playback_scenes=max(args.max_playback_scenes, 0),
+            source_ref=args.run_dir,
+        )
+    except PlaybackEvidenceError as exc:
+        if args.json_output:
+            print(json.dumps({"status": "blocked", "reason": str(exc), "run_dir": str(run_dir)}, sort_keys=True))
+        else:
+            print(str(exc), file=sys.stderr)
+        return 2
     write_deck(deck, out)
     run_id = ""
     run_json = run_dir / "run.json"

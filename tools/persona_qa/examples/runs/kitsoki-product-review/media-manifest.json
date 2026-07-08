@@ -5,27 +5,29 @@
       "scenario": "explain-delivery-loop",
       "evidence_kind": "key_interaction_video",
       "media_kind": "video",
-      "path": "assets/persona-qa-kitsoki-example/agent-actions-before.rrweb.json",
-      "status": "captured",
-      "source": "local",
-      "notes": "Recorded rrweb clip used as reviewable Kitsoki UI playback evidence.",
-      "playback": true
+      "path": "",
+      "status": "blocked",
+      "source": "demo",
+      "proof": false,
+      "notes": "No proof-grade Kitsoki UI capture is attached. The earlier placeholder rrweb clip was removed instead of being presented as evidence.",
+      "playback": false
     },
     {
       "scenario": "verify-ui-evidence",
       "evidence_kind": "key_interaction_video",
       "media_kind": "video",
-      "path": "assets/persona-qa-kitsoki-example/agent-actions-after.rrweb.json",
-      "status": "validated",
-      "source": "local",
-      "notes": "Recorded rrweb clip showing the verified UI state after the issue is addressed.",
-      "playback": true
+      "path": "",
+      "status": "blocked",
+      "source": "demo",
+      "proof": false,
+      "notes": "No proof-grade verification capture is attached. The deck must show this as missing evidence, not as playback.",
+      "playback": false
     }
   ],
   "summary": {
     "total": 2,
-    "playback_items": 2,
-    "video": 2,
+    "playback_items": 0,
+    "video": 0,
     "image": 0,
     "trace": 0,
     "document": 0,
