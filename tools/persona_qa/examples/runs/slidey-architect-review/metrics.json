@@ -1,0 +1,21 @@
+{
+  "run_id": "persona-qa-slidey-architect-review",
+  "stage_count": 1,
+  "scenario_count": 3,
+  "validated_stage_count": 1,
+  "captured_stage_count": 0,
+  "planned_stage_count": 0,
+  "required_evidence_count": 7,
+  "present_evidence_count": 7,
+  "missing_evidence_count": 0,
+  "proof_evidence_count": 3,
+  "demo_evidence_count": 0,
+  "findings_count": 8,
+  "strength_count": 4,
+  "weakness_count": 3,
+  "issue_count": 0,
+  "fix_count": 1,
+  "blocked_count": 0,
+  "driver_event_count": 3,
+  "review_status": "ready_with_risks"
+}

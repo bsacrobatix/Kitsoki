@@ -147,6 +147,13 @@ Current committed rrweb deck clips:
 - `docs/decks/assets/dev-story-hybrid/slidey-bugfix.rrweb.json`
 - `docs/decks/assets/dev-story-hybrid/feature-refine.rrweb.json`
 - `docs/decks/assets/dev-story-hybrid/open-pr.rrweb.json`
+- `docs/decks/persona-qa-kitsoki-example.slidey.json`
+- `docs/decks/assets/persona-qa-kitsoki-example/agent-actions-before.rrweb.json`
+- `docs/decks/assets/persona-qa-kitsoki-example/agent-actions-after.rrweb.json`
+- `docs/decks/persona-qa-slidey-architect-review.slidey.json`
+- `docs/decks/assets/persona-qa-slidey-architect-review/architect-design.rrweb.json`
+- `docs/decks/assets/persona-qa-slidey-architect-review/slidey-bugfix.rrweb.json`
+- `docs/decks/assets/persona-qa-slidey-architect-review/slidey-after.rrweb.json`
 
 `make media-check` enforces the deck-local rrweb layout, the existence of each
 top-level deck's committed bundled viewer, and the staged viewer directory when

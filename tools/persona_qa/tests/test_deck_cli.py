@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""Deterministic tests for Persona QA Slidey deck generation.
+
+Run directly:
+  python3 tools/persona_qa/tests/test_deck_cli.py
+
+The test reads committed example run bundles and never records media, opens a
+browser, or calls a model.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import io
+import json
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT))
+
+from tools.persona_qa import kit  # noqa: E402
+
+failures: list[str] = []
+
+
+def check(label: str, cond: bool, detail: object = "") -> None:
+    if not cond:
+        failures.append(f"{label}: expected true{f' ({detail})' if detail else ''}")
+
+
+def check_eq(label: str, got: object, want: object) -> None:
+    if got != want:
+        failures.append(f"{label}: got {got!r}, want {want!r}")
+
+
+def run_cli(argv: list[str]) -> tuple[int, str, str]:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        code = kit.main(argv)
+    return code, stdout.getvalue(), stderr.getvalue()
+
+
+def generate_deck(run_dir: str, out: Path, title: str) -> dict:
+    code, stdout, stderr = run_cli([
+        "deck",
+        "--run-dir",
+        run_dir,
+        "--out",
+        str(out),
+        "--title",
+        title,
+        "--json-output",
+    ])
+    check_eq(f"{run_dir} deck exit", code, 0)
+    if stderr:
+        failures.append(f"unexpected stderr for {run_dir}: {stderr}")
+    payload = json.loads(stdout)
+    check_eq(f"{run_dir} status", payload["status"], "deck_built")
+    check("deck was written", out.is_file(), out)
+    return payload
+
+
+EXAMPLES = [
+    {
+        "run_dir": "tools/persona_qa/examples/runs/kitsoki-product-review",
+        "title": "Kitsoki Persona QA Example",
+        "golden": "docs/decks/persona-qa-kitsoki-example.slidey.json",
+        "run_id": "persona-qa-kitsoki-product-review",
+        "playback": 2,
+        "expected": "Kitsoki can produce a presentation-ready journey deck",
+    },
+    {
+        "run_dir": "tools/persona_qa/examples/runs/slidey-architect-review",
+        "title": "Slidey Architect Review",
+        "golden": "docs/decks/persona-qa-slidey-architect-review.slidey.json",
+        "run_id": "persona-qa-slidey-architect-review",
+        "playback": 3,
+        "expected": "For a software architect who presents often, Slidey is strong",
+    },
+]
+
+
+with tempfile.TemporaryDirectory(prefix="persona-qa-deck-") as td:
+    temp = Path(td)
+    for case in EXAMPLES:
+        out_a = temp / (Path(case["golden"]).stem + ".a.slidey.json")
+        out_b = temp / (Path(case["golden"]).stem + ".b.slidey.json")
+        payload_a = generate_deck(case["run_dir"], out_a, case["title"])
+        payload_b = generate_deck(case["run_dir"], out_b, case["title"])
+        text_a = out_a.read_text(encoding="utf-8")
+        text_b = out_b.read_text(encoding="utf-8")
+        golden = (ROOT / case["golden"]).read_text(encoding="utf-8")
+        check_eq(f"{case['run_id']} reports run id", payload_a["run_id"], case["run_id"])
+        check_eq(f"{case['run_id']} repeat output is byte-stable", text_a, text_b)
+        check_eq(f"{case['run_id']} generated output matches golden", text_a, golden)
+        check(f"{case['run_id']} has no workspace absolute path", "/Users/" not in text_a)
+        check(f"{case['run_id']} contains review text", case["expected"] in text_a)
+        deck = json.loads(text_a)
+        check_eq(f"{case['run_id']} meta mode", deck["meta"]["mode"], "pitch")
+        playback = [
+            scene
+            for scene in deck["scenes"]
+            if isinstance(scene, dict) and scene.get("eyebrow") == "Playback evidence"
+        ]
+        check_eq(f"{case['run_id']} playback scene count", len(playback), case["playback"])
+        for scene in playback:
+            check(f"{case['run_id']} playback scene uses rrweb", str(scene.get("rrweb", "")).endswith(".rrweb.json"), scene)
+
+    mp4_run = temp / "mp4-run"
+    mp4_run.mkdir()
+    (mp4_run / "run.json").write_text(
+        json.dumps(
+            {
+                "run_id": "mp4-run",
+                "project": {"id": "demo", "label": "Demo"},
+                "persona": {"id": "architect", "label": "Architect"},
+                "scenarios": [{"id": "demo-video", "label": "Demo video", "stage": "review"}],
+                "stages": [{"id": "review", "status": "captured", "scenarios": ["demo-video"]}],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (mp4_run / "media-manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "mp4-run",
+                "items": [
+                    {
+                        "scenario": "demo-video",
+                        "evidence_kind": "key_interaction_video",
+                        "media_kind": "video",
+                        "path": "media/walkthrough.mp4",
+                        "status": "captured",
+                        "source": "local",
+                        "notes": "Recorded MP4 playback.",
+                        "playback": True,
+                    }
+                ],
+                "summary": {"total": 1, "playback_items": 1, "video": 1, "image": 0},
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    mp4_out = temp / "mp4.slidey.json"
+    generate_deck(str(mp4_run), mp4_out, "MP4 Probe")
+    mp4_deck = json.loads(mp4_out.read_text(encoding="utf-8"))
+    mp4_scene = next(scene for scene in mp4_deck["scenes"] if scene.get("eyebrow") == "Playback evidence")
+    check_eq("mp4 playback uses Slidey src field", mp4_scene.get("src"), "media/walkthrough.mp4")
+    check("mp4 playback does not use legacy video field", "video" not in mp4_scene, mp4_scene)
+
+if failures:
+    print("FAIL: persona-qa deck CLI")
+    for failure in failures:
+        print(f"  - {failure}")
+    sys.exit(1)
+print("PASS: persona-qa deck CLI")
