@@ -21,6 +21,26 @@ except to repair the guard itself.
 See `docs/dev-workspaces.md` for the full lifecycle contract, metadata files,
 failure modes, recovery rules, and validation commands.
 
+Local developer bug loops should stay local by default. File iterative,
+developer-found, or dogfood bugs as local artifact tickets under
+`.artifacts/issues/bugs` with their evidence sidecars under `.artifacts`; do not
+create GitHub issues for those local stabilization iterations unless the user
+explicitly asks. Use the GitHub issue sink only when the issue itself is the
+handoff boundary, such as a non-technical user report, an autonomous GitHub
+agent job, or a remote collaboration flow where the agent is expected to fix the
+issue and open a PR.
+
+Keep the primary checkout's `main` clean and green. It is acceptable for tests
+to fail temporarily inside a managed workspace while implementation is in
+progress. When the task is complete, stabilize in that workspace, run focused
+validation, commit only your work, and merge through
+`scripts/dev-workspace.sh merge <id> --gate "<focused validation>" --teardown`.
+Do not stop at a workspace commit for completed implementation work unless the
+user explicitly asks you not to merge. Open or retarget a GitHub PR only after
+the local branch is stabilized; WIP/draft PRs that are not ready for main CI
+should use a non-main base prefix such as `agent/*`, `integration/*`, or
+`staging/*`.
+
 Prefer GitHub PRs for review and landing, but do not burn CI on every
 work-in-progress agent branch. The CI workflow is configured so `pull_request`
 runs target `main`; GitHub branch filters on `pull_request` match the PR base
