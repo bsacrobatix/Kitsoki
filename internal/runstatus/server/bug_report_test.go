@@ -101,7 +101,7 @@ func TestBugReport_WritesBugAndScrubbedHAR(t *testing.T) {
 	if id == "" || relPath == "" {
 		t.Fatalf("missing id/path in result: %+v", m)
 	}
-	if relPath != filepath.Join("issues", "bugs", id+".md") {
+	if relPath != filepath.Join(".artifacts", "issues", "bugs", id+".md") {
 		t.Fatalf("unexpected rel path %q for id %q", relPath, id)
 	}
 
@@ -126,7 +126,7 @@ func TestBugReport_WritesBugAndScrubbedHAR(t *testing.T) {
 	}
 
 	// <id>.artifacts/har.json exists and is scrubbed.
-	artifactsDir := filepath.Join(root, "issues", "bugs", id+".artifacts")
+	artifactsDir := filepath.Join(root, ".artifacts", "issues", "bugs", id+".artifacts")
 	harData, err := os.ReadFile(filepath.Join(artifactsDir, "har.json"))
 	if err != nil {
 		t.Fatalf("read har.json: %v", err)
@@ -197,7 +197,7 @@ func TestBugReport_CaptureIDPath_WithEvidence(t *testing.T) {
 	}
 	id := res.(map[string]any)["id"].(string)
 
-	md, err := os.ReadFile(filepath.Join(root, "issues", "bugs", id+".md"))
+	md, err := os.ReadFile(filepath.Join(root, ".artifacts", "issues", "bugs", id+".md"))
 	if err != nil {
 		t.Fatalf("read md: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestBugReport_CaptureIDPath_WithEvidence(t *testing.T) {
 		t.Fatalf("md missing Console section: %s", mds)
 	}
 
-	artifactsDir := filepath.Join(root, "issues", "bugs", id+".artifacts")
+	artifactsDir := filepath.Join(root, ".artifacts", "issues", "bugs", id+".artifacts")
 	for _, f := range []string{"har.json", "rrweb.json", "console.json"} {
 		if _, err := os.Stat(filepath.Join(artifactsDir, f)); err != nil {
 			t.Fatalf("expected artifact %s: %v", f, err)
@@ -279,7 +279,7 @@ func TestBugReport_WritesRedactedTraceArtifact(t *testing.T) {
 	}
 	id := res.(map[string]any)["id"].(string)
 
-	traceData, err := os.ReadFile(filepath.Join(root, "issues", "bugs", id+".artifacts", "trace.redacted.jsonl"))
+	traceData, err := os.ReadFile(filepath.Join(root, ".artifacts", "issues", "bugs", id+".artifacts", "trace.redacted.jsonl"))
 	if err != nil {
 		t.Fatalf("read trace.redacted.jsonl: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestBugReport_WritesRedactedTraceArtifact(t *testing.T) {
 		t.Fatalf("same sensitive text should reuse alias, input=%q description=%q trace=%s", inputAlias, descAlias, trace)
 	}
 
-	md, err := os.ReadFile(filepath.Join(root, "issues", "bugs", id+".md"))
+	md, err := os.ReadFile(filepath.Join(root, ".artifacts", "issues", "bugs", id+".md"))
 	if err != nil {
 		t.Fatalf("read bug md: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestBugReport_NoScreenshot_SkipsFile(t *testing.T) {
 		t.Fatalf("bugReport error: %+v", rerr)
 	}
 	id := res.(map[string]any)["id"].(string)
-	artifactsDir := filepath.Join(root, "issues", "bugs", id+".artifacts")
+	artifactsDir := filepath.Join(root, ".artifacts", "issues", "bugs", id+".artifacts")
 	if _, err := os.Stat(filepath.Join(artifactsDir, "screenshot.png")); !os.IsNotExist(err) {
 		t.Fatalf("expected no screenshot.png, got err=%v", err)
 	}
@@ -350,7 +350,7 @@ func TestBugReport_PrivacySubstitutesHighEntropyAndFilesFollowUp(t *testing.T) {
 		t.Fatalf("bugReport error: %+v", rerr)
 	}
 	id := res.(map[string]any)["id"].(string)
-	md, err := os.ReadFile(filepath.Join(root, "issues", "bugs", id+".md"))
+	md, err := os.ReadFile(filepath.Join(root, ".artifacts", "issues", "bugs", id+".md"))
 	if err != nil {
 		t.Fatalf("read filed bug: %v", err)
 	}
@@ -393,14 +393,14 @@ func TestBugReport_PrivacyAgentFailureBlocksOriginalAndFilesFollowUp(t *testing.
 	if !strings.Contains(rerr.Message, "privacy check failed") || !strings.Contains(rerr.Message, "depersonalized follow-up") {
 		t.Fatalf("unexpected error: %#v", rerr)
 	}
-	entries, err := os.ReadDir(filepath.Join(root, "issues", "bugs"))
+	entries, err := os.ReadDir(filepath.Join(root, ".artifacts", "issues", "bugs"))
 	if err != nil {
 		t.Fatalf("read bugs dir: %v", err)
 	}
 	if len(entries) != 1 {
 		t.Fatalf("expected only the follow-up bug, got %d entries", len(entries))
 	}
-	data, err := os.ReadFile(filepath.Join(root, "issues", "bugs", entries[0].Name()))
+	data, err := os.ReadFile(filepath.Join(root, ".artifacts", "issues", "bugs", entries[0].Name()))
 	if err != nil {
 		t.Fatalf("read follow-up: %v", err)
 	}
@@ -444,7 +444,7 @@ func TestBugStatusLocalModeCanFile(t *testing.T) {
 		t.Fatalf("bugStatus error: %+v", rerr)
 	}
 	m := res.(map[string]any)
-	if m["mode"] != "local" || m["can_file"] != true {
+	if m["mode"] != "local-artifact" || m["can_file"] != true || m["path"] != filepath.Join(".artifacts", "issues", "bugs") {
 		t.Fatalf("unexpected local status: %#v", m)
 	}
 }

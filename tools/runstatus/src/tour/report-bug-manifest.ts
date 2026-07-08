@@ -14,8 +14,9 @@
  * of the exact DOM the operator saw. The operator inspects that replay, the
  * scrubbed HAR (summary + expandable raw JSON), and console/error state, edits
  * the prefilled title + optional description, then clicks "File bug" (or
- * Cancel). Only on "File bug" does the server write issues/bugs/<id>.md plus a
- * sibling <id>.artifacts/ folder, surfacing the filed path in a result toast.
+ * Cancel). Only on "File bug" does the server write
+ * .artifacts/issues/bugs/<id>.md plus a sibling <id>.artifacts/ folder,
+ * surfacing the filed path in a result toast.
  *
  * SINGLE SOURCE OF TRUTH: the same array drives both
  *   1. the live tour overlay (started via window.__startTourWithSteps), and
@@ -204,7 +205,7 @@ export const REPORT_BUG_TOUR_STEPS: readonly TourStep[] = [
     target: "bug-toast-path",
     waitForTarget: "bug-toast-path",
     title: "Filed, with a path",
-    body: "Done. The toast shows the filed path — issues/bugs/<id>.md — backed by a sibling <id>.artifacts/ folder holding the scrubbed HAR and the session replay. A reviewed, reproducible, secret-free bug report.",
+    body: "Done. The toast shows the filed path — .artifacts/issues/bugs/<id>.md — backed by a sibling <id>.artifacts/ folder holding the scrubbed HAR and the session replay. A reviewed, reproducible, secret-free local artifact bug report.",
     placement: "left",
     kind: "explain",
     advance: "next",

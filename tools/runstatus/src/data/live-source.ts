@@ -1325,7 +1325,7 @@ export class LiveSource implements DataSource {
    * File a bug report. The server attaches a scrubbed HAR of the last /rpc
    * exchanges (recorded server-side) and, if provided, a screenshot. All params
    * are optional — the backend defaults title/body. Returns the new issue id and
-   * its repo-relative path under issues/bugs/.
+   * its filed path under .artifacts/issues/bugs/.
    */
   reportBug(params: BugReportParams): Promise<BugReportResult> {
     return this.client.post<BugReportResult>("runstatus.bug.report", {
@@ -1468,7 +1468,7 @@ export interface SetupWarning {
 export interface BugReportResult {
   /** bare filename without .md, e.g. "2026-06-12T130405Z-foo". */
   id: string;
-  /** repo-relative path, e.g. "issues/bugs/<id>.md". */
+  /** filed path, e.g. ".artifacts/issues/bugs/<id>.md". */
   path?: string;
   /** GitHub issue URL when the server is in GitHub filing mode. */
   url?: string;

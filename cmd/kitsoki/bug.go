@@ -225,6 +225,19 @@ resolved target-root. Exit 1 on error.`,
 			if err != nil {
 				return err
 			}
+			var localRoot, displayPrefix string
+			privacyRoot := bugPrivacyFollowUpRoot(targetDir)
+			privacyDisplayPrefix := ""
+			if sinkMode != bugSinkGitHub {
+				localRoot, displayPrefix, err = resolveBugLocalRoot(normTarget, targetDir, sinkMode)
+				if err != nil {
+					return err
+				}
+				if sinkMode == bugSinkLocalArtifact {
+					privacyRoot = localRoot
+					privacyDisplayPrefix = displayPrefix
+				}
+			}
 			fmt.Fprintln(cmd.ErrOrStderr(), "bug privacy check: starting")
 			safeReport, privacy, perr := bugprivacy.Check(context.Background(), nil, bugprivacy.Report{
 				Surface:    "cli",
@@ -237,10 +250,11 @@ resolved target-root. Exit 1 on error.`,
 			}, harscrub.ScrubOptions{
 				Home:           os.Getenv("HOME"),
 				SecretPatterns: harscrub.DefaultSecretPatterns(),
-			}, bugPrivacyFollowUpRoot(targetDir), os.Getenv("USER"))
+			}, privacyRoot, os.Getenv("USER"))
 			if perr != nil {
 				return fmt.Errorf("bug privacy check: %w", perr)
 			}
+			privacy = prefixBugPrivacyFollowUp(privacy, privacyDisplayPrefix)
 			if privacy.Blocked() {
 				return fmt.Errorf("%s%s", privacy.Message, cliPrivacyFollowUpSuffix(privacy))
 			}
@@ -282,10 +296,6 @@ resolved target-root. Exit 1 on error.`,
 				return nil
 			}
 
-			localRoot, displayPrefix, err := resolveBugLocalRoot(normTarget, targetDir, sinkMode)
-			if err != nil {
-				return err
-			}
 			req := BugCreateRequest{
 				Target:     normTarget,
 				Title:      title,
@@ -387,6 +397,14 @@ func displayBugPath(prefix, rel string) string {
 		return rel
 	}
 	return filepath.Join(prefix, rel)
+}
+
+func prefixBugPrivacyFollowUp(privacy bugprivacy.Result, prefix string) bugprivacy.Result {
+	if strings.TrimSpace(prefix) == "" || strings.TrimSpace(privacy.FollowUpPath) == "" {
+		return privacy
+	}
+	privacy.FollowUpPath = displayBugPath(prefix, privacy.FollowUpPath)
+	return privacy
 }
 
 func bugPrivacyFollowUpRoot(targetDir string) string {

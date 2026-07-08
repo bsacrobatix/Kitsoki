@@ -449,17 +449,20 @@ Three things happen server-side so the agent never handles bytes:
   This is the no-raw-browser-state path for filing a visual failure: semantic
   state/action history plus the masked rrweb replay, without dumping DOMs into
   the issue body.
-- **file** — the composed `{repo, root, title, body, labels}` goes to the injected
+- **file** — by default the composed report is written as a local artifact
+  ticket under `.artifacts/issues/bugs`. Passing `sink: "github"` sends the
+  composed `{repo, root, title, body, labels}` to the injected
   [`IssueFiler`](../../internal/mcp/studio/issue_tools.go) seam. The
   `source-autonomous` label is always applied (first) so agent-filed issues are
-  filterable. Production (`cmd/kitsoki`) files through the native GitHub issue
-  provider and infers `repo` from `root`/`workdir` when the caller omits it; a
-  test injects a fake that records the request and returns a canned URL — no
-  network, no LLM. With no filer wired the tool returns a structured
-  `ISSUE_UNAVAILABLE`. If remote filing fails after the issue markdown is
-  composed, the tool writes an `.artifacts/mcp-issues/unfiled/*.md` recovery file
-  and returns `ok:false` with `local_path` and `filing_error`. `issue.create` is
-  allowed in `--read-only` mode (it mutates `.artifacts` + GitHub, not the story
+  filterable. Production (`cmd/kitsoki`) files GitHub requests through the
+  native `host.gh.ticket` / GitHub REST API provider and infers `repo` from
+  `root`/`workdir` when the caller omits it; a test injects a fake that records
+  the request and returns a canned URL — no network, no LLM. With no filer
+  wired, only the GitHub sink returns a structured `ISSUE_UNAVAILABLE`. If
+  remote filing fails after the issue markdown is composed, the tool writes an
+  `.artifacts/mcp-issues/unfiled/*.md` recovery file and returns `ok:false` with
+  `local_path` and `filing_error`. `issue.create` is allowed in `--read-only`
+  mode (it mutates `.artifacts` and, only when requested, GitHub; not the story
   tree).
 
 ### `host.*` — the standalone gate-runner

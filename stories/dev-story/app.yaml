@@ -455,10 +455,13 @@ world:
   # operator otherwise has to eyeball-match by title). Both are bound from
   # iface.ticket.get at pick time; host.gh.ticket emits `source: github`
   # on every row and lifts `legacy_id` out of the ```kitsoki metadata block
-  # (see internal/host/github.go). The local-files provider leaves them ""
-  # (its id IS the local id), so the identity line only shows for GitHub.
+  # (see internal/host/github.go). The local-files provider sets source=local
+  # and url/path to the ticket file, so artifact-backed local issues keep their
+  # .artifacts/issues/bugs/... thread across the bugfix import boundary.
   ticket_source:       { type: string, default: "" }
   ticket_legacy_id:    { type: string, default: "" }
+  ticket_source_mode:  { type: string, default: "local" } # local | remote | freeform
+  ticket_source_ref:   { type: string, default: "" }      # local path, GitHub URL, or inline complaint marker
   # The main room calls iface.ticket.list_mine on enter and stashes
   # the result here so the view can render a "tickets in your queue"
   # block without the operator having to type `tickets`.
@@ -1846,6 +1849,8 @@ imports:
       ticket_url:      "{{ world.ticket_url }}"
       ticket_repo:     "{{ world.ticket_repo }}"
       thread:          "{{ world.thread }}"
+      ticket_source_mode: "{{ world.ticket_source_mode }}"
+      ticket_source_ref:  "{{ world.ticket_source_ref }}"
       workspace_id:    "{{ world.workspace_id }}"
       workdir:         "{{ world.workdir }}"
       base_branch:     "{{ world.base_branch }}"

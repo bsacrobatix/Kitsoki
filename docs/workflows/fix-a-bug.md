@@ -17,12 +17,12 @@ it per surface.
   verdict on whether the bug still reproduces in the current tree —
   **ALREADY-FIXED** / **STILL-LIVE** / **PARTIAL** / **UNCLEAR**, with
   concrete code evidence (file:line / function / regression test), and no
-  worktree, no fix attempt. See
+  managed workspace, no fix attempt. See
   [`stories/bugfix/rooms/triaging.yaml`](../../stories/bugfix/rooms/triaging.yaml).
 
 Full and quick autostarts also run that triage as a built-in **pre-flight**
 (`world.auto_triage`, default `true`): before any reproducer/judge/maker
-budget is spent, the triager assesses the freshly-cut worktree, and an
+budget is spent, the triager assesses the freshly-cut managed workspace, and an
 **ALREADY-FIXED** verdict short-circuits to `@exit:triaged` — no fix run on
 a bug that no longer exists. Any other verdict continues into `reproducing`
 with the verdict posted as a checkpoint. Callers driving a known-live bug
@@ -53,7 +53,8 @@ run selects it via `initial_world: {bugfix_exit: open-PR}` (or
 ## Prerequisite
 
 Your repo must be onboarded (see [`../getting-started.md`](../getting-started.md))
-so a ticket source (local `issues/bugs/` or a bound `host.gh.ticket`
+so a ticket source (local `.artifacts/issues/bugs/`, committed
+`issues/bugs/`, or a bound `host.gh.ticket`
 GitHub repo) exists. The `repro_command`/`gate_command` convention itself
 (a ticket's frontmatter `repro_command` seeds `world.gate_command`) is
 documented in
@@ -99,7 +100,7 @@ kitsoki run
 
 For a triage-only read: after `go_bugfix` lands you at `bf.idle`, type
 `bf__triage` instead of `bf__start` — lands directly at a read-only verdict,
-no worktree created. See
+no workspace created. See
 [`stories/dev-story/README.md#manual-tui-walkthrough`](../../stories/dev-story/README.md#manual-tui-walkthrough)
 for the full walkthrough this is drawn from, including the feature-ticket
 (`drive` → `impl`) branch.
@@ -146,11 +147,11 @@ exists yet).
 ## gh-agent
 
 **Partially supported.** A `bug`-labeled issue mention routes to a **real**
-dispatch of `stories/bugfix` — not a stub — inside a per-job worktree
-(`.worktrees/gh-job-<id>`), replaying by default
+dispatch of `stories/bugfix` — not a stub — inside a per-job managed clone
+workspace (`.capsules/workspaces/gh-job-<id>`), replaying by default
 (`KITSOKI_GHAGENT_HARNESS=live` for an explicit live opt-in). This is the
 one story with a registered `realDispatchPlan` today. See
-[`../architecture/github-agent.md#real-dispatch-per-job-worktree`](../architecture/github-agent.md#real-dispatch-per-job-worktree)
+[`../architecture/github-agent.md#real-dispatch-per-job-managed-workspace`](../architecture/github-agent.md#real-dispatch-per-job-managed-workspace)
 for the full mechanics and its honesty contract (a run may only report
 "Done" once real `host.*` calls actually executed).
 

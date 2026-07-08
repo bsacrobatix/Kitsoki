@@ -1377,7 +1377,7 @@ func TestRunStorySession_RealDispatch_BugfixReplay(t *testing.T) {
 	if result.Worktree == "" {
 		t.Errorf("Worktree is empty, want the per-job worktree path this run seeded")
 	}
-	wantWorktreeSuffix := filepath.Join(".worktrees", "gh-job-job-real-1")
+	wantWorktreeSuffix := filepath.Join(".capsules", "workspaces", "gh-job-job-real-1")
 	if !strings.HasSuffix(result.Worktree, wantWorktreeSuffix) {
 		t.Errorf("Worktree = %q, want suffix %q", result.Worktree, wantWorktreeSuffix)
 	}
@@ -1390,8 +1390,8 @@ func TestRunStorySession_RealDispatch_BugfixReplay(t *testing.T) {
 	if strings.TrimSpace(result.Summary) == "" {
 		t.Fatal("Summary is empty — real dispatch should carry a real completion summary")
 	}
-	if !strings.Contains(result.Summary, "worktree `.worktrees/gh-job-job-real-1`") {
-		t.Errorf("Summary missing the worktree it ran in:\n%s", result.Summary)
+	if !strings.Contains(result.Summary, "workspace `.capsules/workspaces/gh-job-job-real-1`") {
+		t.Errorf("Summary missing the workspace it ran in:\n%s", result.Summary)
 	}
 	var sawTriageVerdict, sawIndependentVerify bool
 	for _, asset := range result.Assets {

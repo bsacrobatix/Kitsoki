@@ -1,5 +1,6 @@
-// issue_tools.go — the issue.* family: file a GitHub issue natively from the
-// studio, bundling the evidence the studio already produces.
+// issue_tools.go — the issue.* family: file a local artifact issue or GitHub
+// issue natively from the studio, bundling the evidence the studio already
+// produces.
 //
 // The kitsoki-mcp-driver agent develops/tests kitsoki through this MCP with no
 // shell and no write tools. When the MCP surface itself can't do something the
@@ -14,14 +15,16 @@
 //     IssueResult carries the asset list so a later upload pass is localized.)
 //   - context — infer the current driving handle when possible, then bundle a
 //     redacted session trace and inspect snapshot into the body by default.
-//   - file — hand {repo, title, body, labels} to the injected IssueFiler seam
-//     (production: Kitsoki's native GitHub filer; tests: a fake).
+//   - file — by default write the report as a local artifact ticket under
+//     .artifacts/issues/bugs; when requested, hand {repo, root, title, body, labels}
+//     to the injected IssueFiler seam (production: Kitsoki's native GitHub
+//     filer; tests: a fake).
 //     source-autonomous is always added so an agent-filed issue is identifiable.
 //
 // The filing seam is injected (WithIssueFiler) so tests never touch the network
 // or an LLM, mirroring the webShot / HarnessBuilder seams. issue.create is
-// allowed in --read-only mode: it mutates the artifacts dir and GitHub, not the
-// story tree.
+// allowed in --read-only mode: it mutates the artifacts dir and, only for the
+// github sink, GitHub; it never edits the story tree.
 package studio
 
 import (
@@ -37,6 +40,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/bugfile"
 	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/bugreport"
 	"kitsoki/internal/reportmeta"
@@ -57,6 +61,14 @@ const defaultTraceLimit = 50
 // always applies it (first), so agent-originated reports are filterable.
 const autonomousLabel = "source-autonomous"
 
+const (
+	// IssueSinkLocalArtifact writes issue.create reports under
+	// .artifacts/issues/bugs (or the configured artifacts root in tests).
+	IssueSinkLocalArtifact = "local-artifact"
+	// IssueSinkGitHub files issue.create reports through the injected IssueFiler.
+	IssueSinkGitHub = "github"
+)
+
 // IssueRequest is what the IssueFiler seam receives: the composed issue, ready
 // to file. Repo empty means "let the filer resolve it"; Root gives the filer a
 // checkout to inspect for that inference.
@@ -75,17 +87,24 @@ type IssueResult struct {
 	Number int
 }
 
-// IssueFiler is the injectable issue-creation seam. Production (cmd/kitsoki)
-// routes through Kitsoki's native GitHub issue filing; tests inject fakes that
-// record the request and return canned results with no network or LLM. Nil →
-// issue.create returns ErrIssueUnavailable.
+// IssueFiler is the injectable GitHub issue-creation seam. Production
+// (cmd/kitsoki) routes through Kitsoki's native GitHub issue filing; tests
+// inject fakes that record the request and return canned results with no
+// network or LLM. Nil → issue.create returns ErrIssueUnavailable when the
+// requested sink is github.
 type IssueFiler func(ctx context.Context, req IssueRequest) (IssueResult, error)
 
-// WithIssueFiler injects the issue-creation seam. Without it, issue.create is
-// still registered but returns ErrIssueUnavailable (assets render, but filing is
-// the point of the tool).
+// WithIssueFiler injects the GitHub issue-creation seam. Without it,
+// issue.create can still write local artifact tickets, but sink=github returns
+// ErrIssueUnavailable.
 func WithIssueFiler(f IssueFiler) ServerOption {
 	return func(s *Server) { s.issueFiler = f }
+}
+
+// WithIssueSink sets the default issue.create sink. Empty keeps the production
+// default: local-artifact.
+func WithIssueSink(sink string) ServerOption {
+	return func(s *Server) { s.issueSink = sink }
 }
 
 // WithArtifactsDir overrides where issue.create writes rendered assets (default
@@ -99,12 +118,12 @@ func WithArtifactsDir(dir string) ServerOption {
 func (srv *Server) registerIssueTools() {
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name: "issue.create",
-		Description: "File a GitHub issue natively from the studio, bundling evidence the studio produces. " +
-			"{title, body?, labels?, repo?, handle?, trace_ref?, trace_path?, trace_app?, trace_ticket?, include_trace?, trace_limit?, include_inspect?, include_visual_recordings?, assets?}. " +
+		Description: "File an issue natively from the studio, bundling evidence the studio produces. Defaults to a local artifact ticket under .artifacts/issues/bugs; pass sink=github to file through the native GitHub provider. " +
+			"{title, body?, labels?, repo?, sink?, repo_root?, handle?, trace_ref?, trace_path?, trace_app?, trace_ticket?, include_trace?, trace_limit?, include_inspect?, include_visual_recordings?, assets?}. " +
 			"When handle is omitted, the current live session is inferred when unambiguous unless a trace source is supplied; handle- and trace-backed reports include scrubbed trace and context evidence by default unless explicitly disabled. " +
 			"Renders any requested assets (kind: tui_png|web|tui_text) to the artifacts dir and references them by relative path; " +
 			"bundles a handle's redacted trace/inspect snapshot, a resolved on-disk trace, and stopped visual.record artifact bundles into the body; always adds the source-autonomous label. " +
-			"Returns {ok, url, number, labels[], assets[]}.",
+			"Returns {ok, url?, number?, local_path?, labels[], assets[]}.",
 	}, srv.handleIssueCreate)
 }
 
@@ -133,6 +152,7 @@ type IssueCreateArgs struct {
 	Body   string   `json:"body,omitempty"`
 	Labels []string `json:"labels,omitempty"`
 	Repo   string   `json:"repo,omitempty"`
+	Sink   string   `json:"sink,omitempty"`
 	// RepoRoot is an optional checkout path used only to infer Repo from a git
 	// remote when Repo is omitted. When empty, issue.create infers it from the
 	// active handle or bound workspace.
@@ -167,18 +187,19 @@ type IssueCreateArgs struct {
 
 // IssueCreateResult is the issue.create success payload.
 //
-// When the wired filer fails (auth, network, a label/triage wall the
-// unlabelled-retry couldn't clear, …) the issue is NOT lost: the composed
-// markdown is written to the artifacts dir and LocalPath + FilingError are set
-// instead of URL/Number. OK is false because no remote issue was created; the
-// caller can still recover the markdown from LocalPath.
+// LocalPath is set for the local-artifact sink. When the github sink's wired
+// filer fails (auth, network, a label/triage wall the unlabelled-retry couldn't
+// clear, …), the issue is NOT lost: the composed markdown is written to the
+// artifacts dir and LocalPath + FilingError are set instead of URL/Number. OK is
+// false because no remote issue was created; the caller can still recover the
+// markdown from LocalPath.
 type IssueCreateResult struct {
 	OK          bool               `json:"ok"`
 	URL         string             `json:"url"`
 	Number      int                `json:"number"`
 	Labels      []string           `json:"labels"`                 // the final labels applied (source-autonomous first)
 	Assets      []string           `json:"assets"`                 // relative paths of the rendered assets written
-	LocalPath   string             `json:"local_path,omitempty"`   // set when filing fell back to an artifacts-dir file
+	LocalPath   string             `json:"local_path,omitempty"`   // set for local-artifact and github fallback files
 	FilingError string             `json:"filing_error,omitempty"` // the GitHub filing error that triggered the fallback
 	Privacy     *bugprivacy.Result `json:"privacy,omitempty"`
 }
@@ -191,9 +212,9 @@ func (srv *Server) handleIssueCreate(
 	if strings.TrimSpace(args.Title) == "" {
 		return buildToolError(ErrBadRequest, "issue.create: title is required"), nil, nil
 	}
-	if srv.issueFiler == nil {
-		return buildToolError(ErrIssueUnavailable,
-			"issue.create: no issue filer wired (this studio was started without GitHub filing)"), nil, nil
+	sink, sinkErr := srv.resolveIssueSink(args.Sink)
+	if sinkErr != nil {
+		return buildToolError(ErrBadRequest, "issue.create: "+sinkErr.Error()), nil, nil
 	}
 	if traceErr := validateIssueTraceArgs(args); traceErr != nil {
 		return buildToolError(ErrBadRequest, "issue.create: "+traceErr.Error()), nil, nil
@@ -274,6 +295,23 @@ func (srv *Server) handleIssueCreate(
 	}
 	args.Title = safeReport.Title
 	body = safeReport.Body
+	if sink == IssueSinkLocalArtifact {
+		localPath, werr := srv.writeLocalArtifactIssue(args.Title, body)
+		if werr != nil {
+			return buildToolError(ErrBadRequest, fmt.Sprintf("issue.create: write local artifact issue: %v", werr)), nil, nil
+		}
+		return nil, IssueCreateResult{
+			OK:        true,
+			Labels:    labels,
+			Assets:    assetPaths,
+			LocalPath: localPath,
+			Privacy:   &privacy,
+		}, nil
+	}
+	if srv.issueFiler == nil {
+		return buildToolError(ErrIssueUnavailable,
+			"issue.create: no issue filer wired (this studio was started without GitHub filing)"), nil, nil
+	}
 	res, err := srv.issueFiler(ctx, IssueRequest{
 		Repo:   args.Repo,
 		Root:   srv.issueRepoRoot(args),
@@ -331,6 +369,21 @@ func (srv *Server) issueRepoRoot(args IssueCreateArgs) string {
 	return ""
 }
 
+func (srv *Server) resolveIssueSink(requested string) (string, error) {
+	sink := strings.TrimSpace(requested)
+	if sink == "" {
+		sink = strings.TrimSpace(srv.issueSink)
+	}
+	switch sink {
+	case "", IssueSinkLocalArtifact, "local", "artifact", "artifacts":
+		return IssueSinkLocalArtifact, nil
+	case IssueSinkGitHub:
+		return IssueSinkGitHub, nil
+	default:
+		return "", fmt.Errorf("sink must be local-artifact or github (got %q)", requested)
+	}
+}
+
 func (srv *Server) issueRuntimeSnapshot(args IssueCreateArgs) reportmeta.Snapshot {
 	var def *app.AppDef
 	var root string
@@ -381,6 +434,31 @@ func (srv *Server) writeIssueFallback(title, body string, labels []string, filin
 		return "", fmt.Errorf("write %q: %w", path, err)
 	}
 	return path, nil
+}
+
+func (srv *Server) writeLocalArtifactIssue(title, body string) (string, error) {
+	root := srv.issueTicketRoot()
+	_, rel, _, err := bugfile.Create(bugfile.CreateRequest{
+		Target:    "kitsoki",
+		Title:     title,
+		Body:      body,
+		Component: "studio-mcp",
+		TargetDir: root,
+		FiledBy:   "kitsoki-mcp",
+		Warnf:     func(string, ...any) {},
+	})
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(filepath.Join(root, rel)), nil
+}
+
+func (srv *Server) issueTicketRoot() string {
+	dir := filepath.Clean(srv.resolveArtifactsDir())
+	if filepath.Base(dir) == "mcp-issues" {
+		return filepath.Dir(dir)
+	}
+	return dir
 }
 
 // renderAsset renders one asset spec to bytes + file extension, reusing the

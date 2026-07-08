@@ -64,14 +64,14 @@ func TestBugCommandFilesReportAndArtifacts(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("bug command should be synchronous")
 	}
-	if !strings.Contains(body, "filed issues/bugs/") {
+	if !strings.Contains(body, "filed .artifacts/issues/bugs/") {
 		t.Fatalf("unexpected command body: %s", body)
 	}
 	if next.transcript.EntryCount() != m.transcript.EntryCount() {
 		t.Fatal("bug command should not mutate transcript until dispatcher appends the returned block")
 	}
 
-	bugsDir := filepath.Join(root, "issues", "bugs")
+	bugsDir := filepath.Join(root, ".artifacts", "issues", "bugs")
 	entries, err := os.ReadDir(bugsDir)
 	if err != nil {
 		t.Fatalf("read bugs dir: %v", err)
@@ -186,11 +186,11 @@ func TestBugCommandAddsDepersonalizedTraceArtifact(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("bug command should be synchronous")
 	}
-	if !strings.Contains(body, "filed issues/bugs/") {
+	if !strings.Contains(body, "filed .artifacts/issues/bugs/") {
 		t.Fatalf("unexpected command body: %s", body)
 	}
 
-	bugsDir := filepath.Join(root, "issues", "bugs")
+	bugsDir := filepath.Join(root, ".artifacts", "issues", "bugs")
 	entries, err := os.ReadDir(bugsDir)
 	if err != nil {
 		t.Fatalf("read bugs dir: %v", err)
@@ -286,14 +286,14 @@ func TestBugCommandPrivacyFailureBlocksOriginal(t *testing.T) {
 	if !strings.Contains(compactBody, "privacy check failed") || !strings.Contains(compactBody, "depersonalized follow-up") {
 		t.Fatalf("unexpected command body: %s", body)
 	}
-	entries, err := os.ReadDir(filepath.Join(root, "issues", "bugs"))
+	entries, err := os.ReadDir(filepath.Join(root, ".artifacts", "issues", "bugs"))
 	if err != nil {
 		t.Fatalf("read follow-up dir: %v", err)
 	}
 	if len(entries) != 1 {
 		t.Fatalf("expected only follow-up bug, got %d", len(entries))
 	}
-	data, err := os.ReadFile(filepath.Join(root, "issues", "bugs", entries[0].Name()))
+	data, err := os.ReadFile(filepath.Join(root, ".artifacts", "issues", "bugs", entries[0].Name()))
 	if err != nil {
 		t.Fatalf("read follow-up: %v", err)
 	}
@@ -359,7 +359,7 @@ func TestBugCommandDispatcherAppendsBlock(t *testing.T) {
 	if !strings.Contains(next.transcript.AllContent(), "bug: privacy check starting") {
 		t.Fatalf("transcript missing bug start feedback:\n%s", next.transcript.AllContent())
 	}
-	if strings.Contains(next.transcript.AllContent(), "bug: filed issues/bugs/") {
+	if strings.Contains(next.transcript.AllContent(), "bug: filed .artifacts/issues/bugs/") {
 		t.Fatalf("bug result should not appear before async command completes:\n%s", next.transcript.AllContent())
 	}
 	updated, _ := next.Update(cmd())
@@ -367,7 +367,7 @@ func TestBugCommandDispatcherAppendsBlock(t *testing.T) {
 	if !ok {
 		t.Fatalf("updated model = %T, want RootModel", updated)
 	}
-	if !strings.Contains(next.transcript.AllContent(), "bug: filed issues/bugs/") {
+	if !strings.Contains(next.transcript.AllContent(), "bug: filed .artifacts/issues/bugs/") {
 		t.Fatalf("transcript missing bug result:\n%s", next.transcript.AllContent())
 	}
 }

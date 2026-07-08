@@ -209,7 +209,7 @@ type Server struct {
 	recorder *harrec.Recorder
 
 	// bugRoot is the repo root under which runstatus.bug.report writes
-	// issues/bugs/<id>.md (+ sibling <id>.artifacts/). Empty => resolved per
+	// .artifacts/issues/bugs/<id>.md (+ sibling <id>.artifacts/). Empty => resolved per
 	// request (story_path's repo dir, else cwd). Set via WithBugRoot by
 	// `kitsoki web`.
 	bugRoot string
@@ -217,7 +217,7 @@ type Server struct {
 	// ticketRepo, when set (WithTicketRepo / `kitsoki web --ticket-repo`), routes
 	// runstatus.bug.report to a GitHub issue on that owner/repo (via
 	// host.GitHubFileBug — evidence saved under .artifacts for developer-local
-	// review) INSTEAD of a local issues/bugs/<id>.md file.
+	// review) INSTEAD of a local .artifacts/issues/bugs/<id>.md file.
 	ticketRepo string
 
 	// agentEvidenceDir, when set (WithAgentEvidenceDir / `kitsoki web
@@ -317,7 +317,7 @@ type serverConfig struct {
 }
 
 // WithBugRoot sets the repo root under which runstatus.bug.report writes
-// issues/bugs/<id>.md and the sibling <id>.artifacts/ dir. `kitsoki web` wires
+// .artifacts/issues/bugs/<id>.md and the sibling <id>.artifacts/ dir. `kitsoki web` wires
 // this to its primary stories repo root so web-filed bugs land in the same
 // repo the CLI `kitsoki bug` command targets. Empty (the default) means the
 // handler resolves a root per request: the story_path's directory when given,
@@ -328,8 +328,8 @@ func WithBugRoot(dir string) Option {
 
 // WithTicketRepo routes runstatus.bug.report to a GitHub issue on the given
 // owner/repo with evidence saved under .artifacts for developer-local review,
-// instead of a local issues/bugs/<id>.md file. Wired by `kitsoki web
-// --ticket-repo`. Empty (the default) keeps the local-file behaviour.
+// instead of a local .artifacts/issues/bugs/<id>.md file. Wired by `kitsoki web
+// --ticket-repo`. Empty (the default) keeps the local-artifact behaviour.
 func WithTicketRepo(repo string) Option {
 	return func(c *serverConfig) { c.ticketRepo = strings.TrimSpace(repo) }
 }

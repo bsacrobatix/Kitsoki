@@ -114,6 +114,7 @@ func mcpCmd() *cobra.Command {
 		harnessType string
 		workspace   string
 		flowPath    string
+		issueSink   string
 		readOnly    bool
 	)
 	cmd := &cobra.Command{
@@ -131,8 +132,9 @@ opt a session into a real LLM.
 Tools: the studio.ping liveness probe and studio.handles lister (server core);
 the deterministic story.read/write/validate/graph/test authoring tools; and the
 session.new/attach/drive/submit/continue/inspect/trace driving tools,
-render.tui/tui_png/web, and issue.create (file a GitHub issue via the native
-ticket provider, bundling rendered assets + a handle's trace/inspect). Driving defaults to harness:replay (no LLM); render.tui
+render.tui/tui_png/web, and issue.create (file a local artifact ticket by
+default, or a GitHub issue via the native ticket provider when requested,
+bundling rendered assets + a handle's trace/inspect). Driving defaults to harness:replay (no LLM); render.tui
 and render.tui_png return the terminal Frame / PNG, while render.web screenshots
 the current browser view for a live handle when the local web-shot helper and
 Playwright dependencies are available.
@@ -229,11 +231,12 @@ docs land):
 			}
 
 			// Wire issue.create to file via host.gh.ticket.create and write
-			// rendered assets under the default artifacts dir. The studio
-			// package stays exec/network-free; production GitHub I/O remains
-			// behind this injected filer seam.
+			// rendered assets under the default artifacts dir. The default sink is
+			// local-artifact so local dogfood does not burn GitHub issues; GitHub
+			// I/O remains available through the injected filer seam.
 			srvOpts := []studio.ServerOption{
 				studio.WithIssueFiler(ghIssueFiler),
+				studio.WithIssueSink(issueSink),
 				studio.WithImportResolver(studioImportResolver(storiesDir)),
 			}
 			if studioBugPrivacyChecker != nil {
@@ -264,6 +267,8 @@ docs land):
 		"optional initial authoring workspace (a story dir or app.yaml) bound as the workspace handle on boot")
 	cmd.Flags().StringVar(&flowPath, "flow", "",
 		"deterministic flow fixture whose host_handlers stub host.* calls for every driving session (no LLM)")
+	cmd.Flags().StringVar(&issueSink, "issue-sink", studio.IssueSinkLocalArtifact,
+		"default issue.create sink: local-artifact writes .artifacts/issues/bugs; github files through the native GitHub issue provider")
 	cmd.Flags().BoolVar(&readOnly, "read-only", false,
 		"omit the story-mutating tool (story.write); read + replay-driving tools stay available (the meta-mode Q&A surface)")
 	return cmd

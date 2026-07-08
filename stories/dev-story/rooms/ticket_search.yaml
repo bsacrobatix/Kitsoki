@@ -77,7 +77,7 @@ states:
       # `priority`, and no host emits it on this branch.
       - heading: 'Tickets{% if world.ticket_query %} (filter: {{ world.ticket_query }}){% endif %}'
       - code: |
-          {% if world.ticket_results|default:""|length == 0 %}(none — file one in issues/bugs/)
+          {% if world.ticket_results|default:""|length == 0 %}(none — file one in .artifacts/issues/bugs/)
           {% else %} #     St  Sev  Filed       Title
           {% for t in world.ticket_results|default:"" %}{% if t.status %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
           {% endif %}{% endfor %}{% endif %}
@@ -102,6 +102,10 @@ states:
           pairs:
             Source: 'GitHub issue #{{ world.ticket_id }}{% if world.ticket_legacy_id %}  (filed locally as {{ world.ticket_legacy_id }}){% endif %}'
         when: "world.ticket_source == 'github'"
+      - kv:
+          pairs:
+            Source: 'Local artifact {{ world.ticket_source_ref }}'
+        when: "world.ticket_id != '' && world.ticket_source != 'github' && world.ticket_source_ref != ''"
       - choice:
           mode: single
           prompt: "Actions"
@@ -253,12 +257,15 @@ states:
                 # Source / identity (P5). host.gh.ticket emits source=github
                 # and lifts legacy_id (the original issues/bugs/<iso>.md id)
                 # out of the ```kitsoki metadata block; the local-files
-                # provider leaves both unset. Bound here so the view can show
-                # the local↔issue mapping instead of a title eyeball-match.
+                # provider emits source=local plus url/path pointing at the
+                # ticket file. Bound here so the view and child imports keep
+                # the local artifact path or the remote issue URL.
                 ticket_source:    source
                 ticket_legacy_id: legacy_id
               on_error: idle
             - set:
+                ticket_source_mode: "{{ world.ticket_source == 'github' || world.ticket_repo != '' ? 'remote' : 'local' }}"
+                ticket_source_ref:  "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
                 thread: "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
       # Hand off to the bugfix sub-story for the picked ticket.
       # bf.idle's on_enter auto-emits `start` when entered with a
@@ -434,6 +441,8 @@ states:
                 ticket_title: "(picked from search)"
                 ticket_type:  "{{ slots.type ?? world.ticket_type }}"
                 thread:       "{{ slots.id ?? (world.ticket_results[int(slots.n) - 1].url != '' ? world.ticket_results[int(slots.n) - 1].url : world.ticket_results[int(slots.n) - 1].id) }}"
+                ticket_source_mode: "{{ world.ticket_repo != '' ? 'remote' : 'local' }}"
+                ticket_source_ref:  "{{ slots.id ?? (world.ticket_results[int(slots.n) - 1].url != '' ? world.ticket_results[int(slots.n) - 1].url : world.ticket_results[int(slots.n) - 1].id) }}"
       search_tickets:
         - target: ticket_searching
           effects:

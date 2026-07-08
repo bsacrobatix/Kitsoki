@@ -376,6 +376,36 @@ func TestBugCreateCmd_PrivacySubstitutesHighEntropy(t *testing.T) {
 	require.Contains(t, followUp, "high_entropy")
 }
 
+func TestBugCreateCmd_LocalArtifactPrivacyFollowUpUsesArtifactRoot(t *testing.T) {
+	tmp := t.TempDir()
+	secret := "mF9xQ2rT8vLp0AqZ7nByC4dEuGhJkM3sW6yI"
+	root := newRootCmd()
+	root.SetArgs([]string{
+		"bug", "create",
+		"--target", "story",
+		"--sink", "local-artifact",
+		"--title", "Opaque local artifact token leak",
+		"--body", "Saw token " + secret,
+		"--target-dir", tmp,
+		"--clock-now", "1747130000",
+	})
+	var out, errBuf bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errBuf)
+
+	require.NoError(t, root.Execute())
+	relPath := strings.TrimSpace(out.String())
+	require.True(t, strings.HasPrefix(filepath.ToSlash(relPath), ".artifacts/issues/bugs/"), relPath)
+	require.Contains(t, errBuf.String(), "depersonalized follow-up filed at "+filepath.ToSlash(filepath.Join(".artifacts", "issues", "bugs")))
+
+	entries, err := os.ReadDir(filepath.Join(tmp, ".artifacts", "issues", "bugs"))
+	require.NoError(t, err)
+	require.Len(t, entries, 2, "original bug plus depersonalized follow-up")
+	if _, err := os.Stat(filepath.Join(tmp, "issues", "bugs")); !os.IsNotExist(err) {
+		t.Fatalf("local-artifact privacy follow-up should not create committed issues/bugs, stat err=%v", err)
+	}
+}
+
 func TestBugPrivacyCheckerFromConfigUsesExplicitHarnessLadderOnly(t *testing.T) {
 	require.Nil(t, bugPrivacyCheckerFromConfig(webconfig.WebConfig{}, t.TempDir()))
 

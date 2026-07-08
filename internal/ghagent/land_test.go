@@ -29,18 +29,31 @@ func gitExec(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
+func createJobWorkspaceForTest(t *testing.T, ctx context.Context, root string, job *jobs.GHJob) string {
+	t.Helper()
+	require.NoError(t, runDevWorkspace(ctx, root,
+		"create",
+		"--repo", root,
+		"--id", jobWorkspaceID(job.JobID),
+		"--branch", jobFeatureBranch(job.JobID),
+		"--base", "main",
+		"--no-bootstrap",
+		"--json",
+	))
+	return filepath.Join(root, ".capsules", "workspaces", jobWorkspaceID(job.JobID))
+}
+
 func TestLandFeatureBranch_RealCommitOnSharedIntegrationBranch(t *testing.T) {
 	ctx := context.Background()
 	root := capsuletest.Open(t, "clean-repo")
 
-	// Simulate what runRealDispatch's per-job worktree left behind: a feature
-	// branch with a real commit beyond main.
+	// Simulate what runRealDispatch's per-job managed workspace left behind: a
+	// feature branch with a real commit beyond main.
 	job1 := &jobs.GHJob{JobID: "job-one", OriginRef: "github:acme/widgets/issue/1"}
-	gitExec(t, root, "checkout", "-b", jobFeatureBranch(job1.JobID))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "fix-one.txt"), []byte("fix one\n"), 0o644))
-	gitExec(t, root, "add", "-A")
-	gitExec(t, root, "commit", "-q", "-m", "fix one")
-	gitExec(t, root, "checkout", "main")
+	job1Workspace := createJobWorkspaceForTest(t, ctx, root, job1)
+	require.NoError(t, os.WriteFile(filepath.Join(job1Workspace, "fix-one.txt"), []byte("fix one\n"), 0o644))
+	gitExec(t, job1Workspace, "add", "-A")
+	gitExec(t, job1Workspace, "commit", "-q", "-m", "fix one")
 
 	route := Route{World: map[string]any{}}
 	commit1, err := landFeatureBranch(ctx, root, route, job1, "integration/qa-marathon1")
@@ -49,13 +62,12 @@ func TestLandFeatureBranch_RealCommitOnSharedIntegrationBranch(t *testing.T) {
 	assert.NotEqual(t, jobReplayCommitSHA(job1.JobID), commit1, "must be a real squash commit, not the synthetic placeholder")
 
 	// A second job in the same marathon cycle lands onto the SAME shared
-	// integration branch (the reused per-cycle worktree, not a per-job one).
+	// integration branch (the reused per-cycle workspace, not a per-job one).
 	job2 := &jobs.GHJob{JobID: "job-two", OriginRef: "github:acme/widgets/issue/2"}
-	gitExec(t, root, "checkout", "-b", jobFeatureBranch(job2.JobID))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "fix-two.txt"), []byte("fix two\n"), 0o644))
-	gitExec(t, root, "add", "-A")
-	gitExec(t, root, "commit", "-q", "-m", "fix two")
-	gitExec(t, root, "checkout", "main")
+	job2Workspace := createJobWorkspaceForTest(t, ctx, root, job2)
+	require.NoError(t, os.WriteFile(filepath.Join(job2Workspace, "fix-two.txt"), []byte("fix two\n"), 0o644))
+	gitExec(t, job2Workspace, "add", "-A")
+	gitExec(t, job2Workspace, "commit", "-q", "-m", "fix two")
 
 	commit2, err := landFeatureBranch(ctx, root, route, job2, "integration/qa-marathon1")
 	require.NoError(t, err)
@@ -67,19 +79,19 @@ func TestLandFeatureBranch_RealCommitOnSharedIntegrationBranch(t *testing.T) {
 	assert.Contains(t, log, commit1)
 	assert.Contains(t, log, commit2)
 
-	integrationWorktree := filepath.Join(root, ".worktrees", "integration-integration-qa-marathon1")
-	assert.FileExists(t, filepath.Join(integrationWorktree, "fix-one.txt"))
-	assert.FileExists(t, filepath.Join(integrationWorktree, "fix-two.txt"))
+	integrationWorkspace := filepath.Join(root, ".capsules", "workspaces", "integration-integration-qa-marathon1")
+	assert.FileExists(t, filepath.Join(integrationWorkspace, "fix-one.txt"))
+	assert.FileExists(t, filepath.Join(integrationWorkspace, "fix-two.txt"))
 }
 
 func TestLandFeatureBranch_FailsClosedWithNoRealCommits(t *testing.T) {
 	ctx := context.Background()
 	root := capsuletest.Open(t, "clean-repo")
 
-	// A feature branch that never diverged from main (no real fix landed) —
-	// landFeatureBranch must refuse rather than fabricate a success.
+	// A feature branch workspace that never diverged from main (no real fix
+	// landed) — landFeatureBranch must refuse rather than fabricate a success.
 	job := &jobs.GHJob{JobID: "job-empty", OriginRef: "github:acme/widgets/issue/3"}
-	gitExec(t, root, "branch", jobFeatureBranch(job.JobID))
+	_ = createJobWorkspaceForTest(t, ctx, root, job)
 
 	route := Route{World: map[string]any{}}
 	_, err := landFeatureBranch(ctx, root, route, job, "integration/qa-marathon2")
