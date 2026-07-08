@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/coder/websocket"
 	"github.com/creack/pty"
@@ -31,7 +32,9 @@ type Options struct {
 	// Dir is the working directory for the spawned process. Empty means
 	// inherit the bridge server's own cwd.
 	Dir string
-	// Env is appended to os.Environ() for the spawned process.
+	// Env overrides the spawned process environment after bridge terminal
+	// capability defaults are applied, so callers can explicitly exercise a
+	// degraded terminal when needed.
 	Env []string
 }
 
@@ -76,7 +79,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	cmd := exec.Command(s.opts.Command[0], s.opts.Command[1:]...)
 	cmd.Dir = s.opts.Dir
-	cmd.Env = append(os.Environ(), s.opts.Env...)
+	cmd.Env = terminalEnv(os.Environ(), s.opts.Env)
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
@@ -139,4 +142,47 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cancel()
 	<-done
 	_ = conn.Close(websocket.StatusNormalClosure, "")
+}
+
+func terminalEnv(base, overrides []string) []string {
+	env := make([]string, 0, len(base)+len(overrides)+4)
+	index := make(map[string]int, len(base)+len(overrides)+4)
+	set := func(kv string) {
+		key, _, ok := strings.Cut(kv, "=")
+		if !ok || key == "" {
+			return
+		}
+		if i, ok := index[key]; ok {
+			env[i] = kv
+			return
+		}
+		index[key] = len(env)
+		env = append(env, kv)
+	}
+
+	for _, kv := range base {
+		key, _, ok := strings.Cut(kv, "=")
+		if !ok || key == "" || key == "NO_COLOR" {
+			continue
+		}
+		set(kv)
+	}
+
+	// The bridge endpoint is always an xterm.js terminal, regardless of the
+	// parent process's own stdout/stderr environment. A headless recorder often
+	// runs with TERM=dumb or NO_COLOR=1; inheriting that makes the child TUI emit
+	// plain text even though the browser can render ANSI correctly.
+	for _, kv := range []string{
+		"TERM=xterm-256color",
+		"COLORTERM=truecolor",
+		"FORCE_COLOR=1",
+		"CLICOLOR_FORCE=1",
+	} {
+		set(kv)
+	}
+
+	for _, kv := range overrides {
+		set(kv)
+	}
+	return env
 }

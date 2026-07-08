@@ -81,3 +81,69 @@ func TestServer_Resize(t *testing.T) {
 	}
 	waitForOutput(t, conn, "40 120", 5*time.Second)
 }
+
+func TestServer_DefaultTerminalEnvEnablesANSIFidelity(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("COLORTERM", "")
+	t.Setenv("FORCE_COLOR", "0")
+	t.Setenv("CLICOLOR_FORCE", "0")
+
+	script := strings.Join([]string{
+		`printf 'TERM=%s\n' "$TERM"`,
+		`printf 'COLORTERM=%s\n' "$COLORTERM"`,
+		`printf 'FORCE_COLOR=%s\n' "$FORCE_COLOR"`,
+		`printf 'CLICOLOR_FORCE=%s\n' "$CLICOLOR_FORCE"`,
+		`printf 'NO_COLOR=%s\n' "${NO_COLOR-unset}"`,
+		`printf '\033[1;31mstyle-probe\033[0m\n'`,
+	}, "; ")
+	srv := New(Options{Command: []string{"/bin/sh", "-c", script}})
+	ts := httptest.NewServer(http.HandlerFunc(srv.ServeHTTP))
+	defer ts.Close()
+
+	conn := dialTest(t, ts)
+	out := waitForOutput(t, conn, "style-probe", 5*time.Second)
+	for _, want := range []string{
+		"TERM=xterm-256color",
+		"COLORTERM=truecolor",
+		"FORCE_COLOR=1",
+		"CLICOLOR_FORCE=1",
+		"NO_COLOR=unset",
+		"\x1b[1;31mstyle-probe\x1b[0m",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestServer_ExplicitEnvOverridesTerminalDefaults(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	t.Setenv("NO_COLOR", "1")
+
+	script := strings.Join([]string{
+		`printf 'TERM=%s\n' "$TERM"`,
+		`printf 'COLORTERM=%s\n' "$COLORTERM"`,
+		`printf 'FORCE_COLOR=%s\n' "$FORCE_COLOR"`,
+		`printf 'NO_COLOR=%s\n' "${NO_COLOR-unset}"`,
+	}, "; ")
+	srv := New(Options{
+		Command: []string{"/bin/sh", "-c", script},
+		Env:     []string{"TERM=ansi", "COLORTERM=8bit", "FORCE_COLOR=0", "NO_COLOR=1"},
+	})
+	ts := httptest.NewServer(http.HandlerFunc(srv.ServeHTTP))
+	defer ts.Close()
+
+	conn := dialTest(t, ts)
+	out := waitForOutput(t, conn, "NO_COLOR=1", 5*time.Second)
+	for _, want := range []string{
+		"TERM=ansi",
+		"COLORTERM=8bit",
+		"FORCE_COLOR=0",
+		"NO_COLOR=1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}

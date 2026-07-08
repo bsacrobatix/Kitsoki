@@ -15,6 +15,11 @@ interactive/live-model or agent-in-the-loop terminal testing.
   (`github.com/coder/websocket`, already vendored for the VS Code IDE bridge)
   at `/pty`. One connection == one spawned process == one pty; a new
   connection always gets a fresh process.
+  The spawned process is given the terminal profile the browser actually
+  provides (`TERM=xterm-256color`, `COLORTERM=truecolor`, forced color) and
+  does not inherit a parent `NO_COLOR`; otherwise headless Playwright/CI
+  environments can make the child TUI emit plain text even though xterm.js can
+  render the real ANSI stream.
 - **Browser page** — `player/index.html`, forked from `tools/mcp-demo`'s
   xterm.js scaffolding. Instead of replaying a cassette via `window.__feed`,
   it opens a real `WebSocket` to the bridge: incoming bytes go straight to
@@ -23,7 +28,8 @@ interactive/live-model or agent-in-the-loop terminal testing.
   websocket until the first successful connection, so Playwright captures do not
   need a separate TCP wait loop. `window.__dump()` returns the exact current
   screen text via xterm's buffer API — no OCR or vision needed for test
-  assertions.
+  assertions. `window.__textAttrs("text")` returns xterm buffer attributes for
+  matching visible text, so tests can prove color/bold fidelity without OCR.
 - **Static server** — `player/serve.mjs`, same dependency-free `node:http`
   static server pattern as `tools/mcp-demo/player/serve.mjs`.
 

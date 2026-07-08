@@ -134,6 +134,9 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
         await typeLine(page, "acknowledge and continue");
       }
       await waitForScreenPattern(page, new RegExp(`Processed:\\s+${i}`));
+      if (i === 5) {
+        await shot(page, "exception-acknowledged");
+      }
       if (i === 10 || i === 15) {
         await shot(page, `processed-${String(i).padStart(2, "0")}`);
       }
