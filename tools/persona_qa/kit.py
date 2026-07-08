@@ -21,9 +21,11 @@ if __package__ in {None, ""}:  # Support `python tools/persona_qa/kit.py ...`.
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from tools.persona_qa import config as qa_config  # type: ignore
     from tools.persona_qa.completion import load_product_journey_run  # type: ignore
+    from tools.persona_qa.deck import build_deck, write_deck  # type: ignore
 else:
     from . import config as qa_config
     from .completion import load_product_journey_run
+    from .deck import build_deck, write_deck
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -32,7 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="persona-qa",
-        description="Initialize, validate, run, review, and complete Persona QA Kit bundles.",
+        description="Initialize, validate, run, review, deck, and complete Persona QA Kit bundles.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -77,6 +79,20 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--run-dir", required=True, help="run bundle directory")
     review.add_argument("--json-output", action="store_true", help="print a machine-readable result")
     review.set_defaults(func=cmd_review)
+
+    deck = sub.add_parser("deck", help="Generate a deterministic Slidey deck from an existing run bundle")
+    deck.add_argument("--config", default="", help="optional kit config path; used for relative path resolution")
+    deck.add_argument("--run-dir", required=True, help="run bundle directory")
+    deck.add_argument("--out", default="", help="deck output path; default is <run-dir>/deck.slidey.json")
+    deck.add_argument("--title", default="", help="override the generated deck title")
+    deck.add_argument(
+        "--max-playback-scenes",
+        type=int,
+        default=6,
+        help="maximum standalone playback scenes to include",
+    )
+    deck.add_argument("--json-output", action="store_true", help="print a machine-readable result")
+    deck.set_defaults(func=cmd_deck)
 
     complete = sub.add_parser("complete", help="Emit the shared completion-state JSON for a run")
     complete.add_argument("--config", default="persona-qa.yaml", help="kit config path; used for path resolution")
@@ -202,6 +218,42 @@ def cmd_review(args: argparse.Namespace) -> int:
     return run_runner(cfg, runner_args)
 
 
+def cmd_deck(args: argparse.Namespace) -> int:
+    cfg = qa_config.load_config(args.config or None, repo_root=REPO_ROOT)
+    run_dir = resolve_run_dir(cfg, args.run_dir)
+    out = resolve_run_dir(cfg, args.out) if args.out else run_dir / "deck.slidey.json"
+    deck = build_deck(
+        run_dir,
+        title=args.title,
+        max_playback_scenes=max(args.max_playback_scenes, 0),
+        source_ref=args.run_dir,
+    )
+    write_deck(deck, out)
+    run_id = ""
+    run_json = run_dir / "run.json"
+    if run_json.exists():
+        run_id = str(json.loads(run_json.read_text(encoding="utf-8")).get("run_id", ""))
+    result = {
+        "status": "deck_built",
+        "run_id": run_id,
+        "run_dir": str(run_dir),
+        "deck_path": str(out),
+        "scene_count": len(deck.get("scenes", [])),
+        "playback_scene_count": sum(
+            1
+            for scene in deck.get("scenes", [])
+            if isinstance(scene, dict) and scene.get("eyebrow") == "Playback evidence"
+        ),
+    }
+    if args.json_output:
+        print(json.dumps(result, sort_keys=True))
+    else:
+        print(f"Deck: {out}")
+        print(f"Scenes: {result['scene_count']}")
+        print(f"Playback scenes: {result['playback_scene_count']}")
+    return 0
+
+
 def cmd_complete(args: argparse.Namespace) -> int:
     cfg = qa_config.load_config(args.config, repo_root=REPO_ROOT)
     run_dir = resolve_run_dir(cfg, args.run_dir)
@@ -258,6 +310,7 @@ def init_kit(root: Path, *, force: bool = False) -> dict[str, object]:
             "```sh\n"
             "kitsoki persona-qa validate --config persona-qa.yaml\n"
             "kitsoki persona-qa emit-run --config persona-qa.yaml --project local-app --persona core-maintainer --scenario project-onboarding --transport all\n"
+            "kitsoki persona-qa deck --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id> --out docs/decks/persona-qa-latest.slidey.json\n"
             "```\n"
         ),
         force,

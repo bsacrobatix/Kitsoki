@@ -36,12 +36,66 @@ kitsoki persona-qa validate --config persona-qa.yaml
 kitsoki persona-qa emit-run --config persona-qa.yaml --project local-app --persona core-maintainer --scenario project-onboarding --transport all
 kitsoki persona-qa drive --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id> --mode replay
 kitsoki persona-qa review --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id>
+kitsoki persona-qa deck --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id> --out docs/decks/persona-qa-latest.slidey.json
 kitsoki persona-qa complete --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id>
 ```
 
 `drive --mode replay` is deterministic and cost-free. It proves artifact wiring
 and review mechanics; proof-grade claims still need local, cassette, retained,
 or external evidence that resolves through the review gate.
+
+## Deterministic Slidey Decks
+
+`kitsoki persona-qa deck` turns an existing run bundle into a Slidey JSON deck
+without recording media, opening browsers, or calling an LLM. It reads the
+already-produced bundle artifacts:
+
+- `run.json`
+- `media-manifest.json`
+- `scenario-outcomes.json`
+- `review.json`
+- `findings.json`
+- `metrics.json`
+- `driver-plan.json`
+- `driver-journal.json`
+
+The command writes stable JSON: the same input artifacts and flags produce the
+same deck bytes. Playback scenes are derived from `media-manifest.json`; video
+or rrweb files stay in the artifact/deck-local asset locations that the
+manifest names.
+
+Example regeneration commands:
+
+```sh
+python3 tools/persona_qa/kit.py deck \
+  --run-dir tools/persona_qa/examples/runs/kitsoki-product-review \
+  --out docs/decks/persona-qa-kitsoki-example.slidey.json \
+  --title "Kitsoki Persona QA Example"
+
+python3 tools/persona_qa/kit.py deck \
+  --run-dir tools/persona_qa/examples/runs/slidey-architect-review \
+  --out docs/decks/persona-qa-slidey-architect-review.slidey.json \
+  --title "Slidey Architect Review"
+```
+
+Committed examples:
+
+- [persona-qa-kitsoki-example.slidey.json](decks/persona-qa-kitsoki-example.slidey.json)
+  shows a Kitsoki run with two recorded rrweb playback scenes.
+- [persona-qa-slidey-architect-review.slidey.json](decks/persona-qa-slidey-architect-review.slidey.json)
+  reviews Slidey from the lens of a software architect who makes technical
+  presentations frequently. The review calls out Slidey's strengths for
+  reproducible deck-as-code, technical visual vocabulary, and playback evidence,
+  plus the asset/bundling discipline needed for repeated presentation work.
+
+When a generated deck is committed under `docs/decks/`, keep any referenced
+rrweb clips under `docs/decks/assets/<deck-id>/` and bundle the viewer for the
+product-site deck gallery:
+
+```sh
+slidey bundle docs/decks/persona-qa-slidey-architect-review.slidey.json \
+  docs/decks/bundled/persona-qa-slidey-architect-review.html
+```
 
 ## Public Contracts
 
@@ -89,6 +143,7 @@ Automated checks should use:
 ```sh
 kitsoki persona-qa validate --config persona-qa.yaml
 python3 tools/persona_qa/tests/test_kit_cli.py
+python3 tools/persona_qa/tests/test_deck_cli.py
 python3 tools/product-journey/transport_axis_test.py
 python3 tools/product-journey/scenario_qa_report_test.py
 ```

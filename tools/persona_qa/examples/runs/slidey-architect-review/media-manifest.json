@@ -1,0 +1,44 @@
+{
+  "run_id": "persona-qa-slidey-architect-review",
+  "items": [
+    {
+      "scenario": "compose-architecture-deck",
+      "evidence_kind": "key_interaction_video",
+      "media_kind": "video",
+      "path": "assets/persona-qa-slidey-architect-review/architect-design.rrweb.json",
+      "status": "validated",
+      "source": "local",
+      "notes": "Recorded rrweb clip of the architect-design flow used as the primary authoring example.",
+      "playback": true
+    },
+    {
+      "scenario": "reuse-recorded-demo",
+      "evidence_kind": "key_interaction_video",
+      "media_kind": "video",
+      "path": "assets/persona-qa-slidey-architect-review/slidey-bugfix.rrweb.json",
+      "status": "validated",
+      "source": "local",
+      "notes": "Recorded rrweb clip showing a Slidey-oriented workflow embedded as playback evidence.",
+      "playback": true
+    },
+    {
+      "scenario": "maintain-deck-as-code",
+      "evidence_kind": "key_interaction_video",
+      "media_kind": "video",
+      "path": "assets/persona-qa-slidey-architect-review/slidey-after.rrweb.json",
+      "status": "captured",
+      "source": "local",
+      "notes": "Small recorded clip used to verify deck-local asset packaging.",
+      "playback": true
+    }
+  ],
+  "summary": {
+    "total": 3,
+    "playback_items": 3,
+    "video": 3,
+    "image": 0,
+    "trace": 0,
+    "document": 0,
+    "artifact": 0
+  }
+}

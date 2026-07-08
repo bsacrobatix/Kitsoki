@@ -1,0 +1,34 @@
+{
+  "run_id": "persona-qa-kitsoki-product-review",
+  "items": [
+    {
+      "scenario": "explain-delivery-loop",
+      "evidence_kind": "key_interaction_video",
+      "media_kind": "video",
+      "path": "assets/persona-qa-kitsoki-example/agent-actions-before.rrweb.json",
+      "status": "captured",
+      "source": "local",
+      "notes": "Recorded rrweb clip used as reviewable Kitsoki UI playback evidence.",
+      "playback": true
+    },
+    {
+      "scenario": "verify-ui-evidence",
+      "evidence_kind": "key_interaction_video",
+      "media_kind": "video",
+      "path": "assets/persona-qa-kitsoki-example/agent-actions-after.rrweb.json",
+      "status": "validated",
+      "source": "local",
+      "notes": "Recorded rrweb clip showing the verified UI state after the issue is addressed.",
+      "playback": true
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "playback_items": 2,
+    "video": 2,
+    "image": 0,
+    "trace": 0,
+    "document": 0,
+    "artifact": 0
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "run_id": "persona-qa-kitsoki-product-review",
+  "status": "ready",
+  "summary": "Kitsoki can produce a presentation-ready journey deck when scenarios, review gates, and recorded playback are kept together.",
+  "summary_counts": {
+    "passed": 4,
+    "total": 4
+  },
+  "checks": [
+    {
+      "id": "scenario-source",
+      "status": "pass",
+      "summary": "The deck source is a committed run bundle fixture."
+    },
+    {
+      "id": "playback-evidence",
+      "status": "pass",
+      "summary": "Each scenario has a playback-capable media manifest item."
+    },
+    {
+      "id": "architect-readiness",
+      "status": "pass",
+      "summary": "The generated deck explains the workflow in reviewable chunks."
+    },
+    {
+      "id": "regeneration",
+      "status": "pass",
+      "summary": "Repeated persona-qa deck generation is byte-stable."
+    }
+  ]
+}

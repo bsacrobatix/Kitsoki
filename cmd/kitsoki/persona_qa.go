@@ -14,8 +14,8 @@ import (
 
 func personaQACmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:                "persona-qa <init|validate|emit-run|drive|review|complete> [flags]",
-		Short:              "Initialize, run, review, and score Persona QA Kit bundles",
+		Use:                "persona-qa <init|validate|emit-run|drive|review|deck|complete> [flags]",
+		Short:              "Initialize, run, review, deck, and score Persona QA Kit bundles",
 		DisableFlagParsing: true,
 		SilenceUsage:       true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -39,6 +39,7 @@ func printPersonaQAHelp(cmd *cobra.Command) {
 	fmt.Fprintln(out, "  kitsoki persona-qa emit-run --config persona-qa.yaml --project local-app --persona core-maintainer --scenario project-onboarding --transport all")
 	fmt.Fprintln(out, "  kitsoki persona-qa drive --config persona-qa.yaml --run-dir <run-dir> --mode replay")
 	fmt.Fprintln(out, "  kitsoki persona-qa review --config persona-qa.yaml --run-dir <run-dir>")
+	fmt.Fprintln(out, "  kitsoki persona-qa deck --config persona-qa.yaml --run-dir <run-dir> --out docs/decks/persona-qa-latest.slidey.json")
 	fmt.Fprintln(out, "  kitsoki persona-qa complete --config persona-qa.yaml --run-dir <run-dir>")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Commands are no-LLM by default. Live capture stays behind explicit story/operator surfaces.")

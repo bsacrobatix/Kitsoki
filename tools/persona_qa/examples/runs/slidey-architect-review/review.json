@@ -1,0 +1,36 @@
+{
+  "run_id": "persona-qa-slidey-architect-review",
+  "status": "ready_with_risks",
+  "summary": "For a software architect who presents often, Slidey is strong when the talk must be reproducible, visual, and evidence-backed. The main operational risk is asset and bundle discipline: recorded clips, generated HTML, and source JSON need a tight regeneration habit.",
+  "summary_counts": {
+    "passed": 4,
+    "total": 5
+  },
+  "checks": [
+    {
+      "id": "deck-as-code",
+      "status": "pass",
+      "summary": "Slidey JSON is reviewable and diffable enough for architecture decks."
+    },
+    {
+      "id": "visual-vocabulary",
+      "status": "pass",
+      "summary": "Scene types cover diagrams, tables, evidence, and playback without bespoke slide tooling."
+    },
+    {
+      "id": "playback-embedding",
+      "status": "pass",
+      "summary": "Recorded rrweb clips can become standalone deck scenes."
+    },
+    {
+      "id": "layout-gates",
+      "status": "pass",
+      "summary": "Slidey exposes validation and audit commands that catch common rendering failures before a final video render."
+    },
+    {
+      "id": "asset-lifecycle",
+      "status": "warn",
+      "summary": "Published decks need an explicit convention for deck-local assets and bundled HTML."
+    }
+  ]
+}
