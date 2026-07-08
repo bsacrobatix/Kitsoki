@@ -84,6 +84,7 @@ const (
 	launchCodeactMCPServerName           = "kitsoki-codeact"
 	launchCodeactMCPToolName             = "mcp__kitsoki-codeact__codeact_eval"
 	launchCodeactDefaultCapabilitiesJSON = `{"fs":true,"vcs":"read"}`
+	launchCodexShellToolFeature          = "shell_tool"
 )
 
 func agentLaunchCmd() *cobra.Command {
@@ -104,8 +105,9 @@ Use --raw --interactive to start a normal interactive backend CLI in a working
 directory with no app, no agent file, and no Kitsoki replacement system prompt.
 
 Use --mode codeact for a task-backed agent whose only code-action surface is
-the kitsoki-codeact MCP server. CodeAct mode forces a Claude backend because
-Codex launch translation cannot hard-remove Bash today.
+the kitsoki-codeact MCP server. CodeAct mode removes shell access through the
+selected backend's hard controls: Claude allowed/disallowed tools or Codex
+--disable shell_tool.
 
 By default this prints a redacted JSON launch plan for task-backed launches.
 Freestanding Codex launch with no task opens Codex interactively.`,
@@ -222,16 +224,16 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 		if err := validateCodeactLaunchOptions(opts); err != nil {
 			return agentLaunchPlan{}, err
 		}
-		if strings.TrimSpace(opts.Backend) == "" {
-			backend = "claude"
-			profileBackendOverride = "claude"
+		if shouldDefaultCodeactToCodex(opts, profile, providerBackend) {
+			backend = "codex"
+			profileBackendOverride = "codex"
 		}
 	}
 	if _, ok := host.ResolveAgentBackendName(backend); !ok && backend != "claude" {
 		return agentLaunchPlan{}, fmt.Errorf("unknown backend %q", backend)
 	}
-	if opts.Mode == launchModeCodeact && launchBackendName(backend) != "claude" {
-		return agentLaunchPlan{}, fmt.Errorf("--mode codeact requires backend %q because backend %q cannot hard-remove Bash", "claude", backend)
+	if opts.Mode == launchModeCodeact && !codeactBackendSupportsHardNoShell(backend) {
+		return agentLaunchPlan{}, fmt.Errorf("--mode codeact requires backend claude or codex because backend %q cannot hard-remove shell access", backend)
 	}
 	profileName, profile, err = launchProfileForBackend(profileName, profile, backend, opts.Profile, profileBackendOverride)
 	if err != nil {
@@ -244,7 +246,7 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 	modelInput := firstLaunchNonEmpty(opts.Model, profile.Model, decl.Model, providerModel)
 	if opts.Mode == launchModeCodeact {
 		var modelErr error
-		modelInput, modelErr = codeactClaudeLaunchModel(modelInput, opts.Model)
+		modelInput, modelErr = codeactLaunchModel(backend, modelInput, opts.Model)
 		if modelErr != nil {
 			return agentLaunchPlan{}, modelErr
 		}
@@ -292,6 +294,7 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 		planTools = append([]string(nil), launchDecl.Tools...)
 	}
 	cliArgs := buildLaunchClaudeArgs(&launchDecl, model, effort, permissionMode, opts.AddDirs)
+	cliArgs = appendCodeactBackendArgs(cliArgs, opts.Mode, backend)
 	var cleanups []func()
 	if launchDecl.MCP != nil && len(launchDecl.MCP.Servers) > 0 {
 		mcpConfigPath, cleanup, cfgErr := writeLaunchMCPConfigTempfile(launchDecl.MCP.Servers, "kitsoki-agent-launch-mcp")
@@ -379,16 +382,16 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		if err := validateCodeactLaunchOptions(opts); err != nil {
 			return agentLaunchPlan{}, err
 		}
-		if strings.TrimSpace(opts.Backend) == "" {
-			backend = "claude"
-			profileBackendOverride = "claude"
+		if shouldDefaultCodeactToCodex(opts, profile, "") {
+			backend = "codex"
+			profileBackendOverride = "codex"
 		}
 	}
 	if _, ok := host.ResolveAgentBackendName(backend); !ok && backend != "claude" {
 		return agentLaunchPlan{}, fmt.Errorf("unknown backend %q", backend)
 	}
-	if opts.Mode == launchModeCodeact && launchBackendName(backend) != "claude" {
-		return agentLaunchPlan{}, fmt.Errorf("--mode codeact requires backend %q because backend %q cannot hard-remove Bash", "claude", backend)
+	if opts.Mode == launchModeCodeact && !codeactBackendSupportsHardNoShell(backend) {
+		return agentLaunchPlan{}, fmt.Errorf("--mode codeact requires backend claude or codex because backend %q cannot hard-remove shell access", backend)
 	}
 	profileName, profile, err = launchProfileForBackend(profileName, profile, backend, opts.Profile, profileBackendOverride)
 	if err != nil {
@@ -397,7 +400,7 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 	modelInput := firstLaunchNonEmpty(opts.Model, profile.Model, agent.Model)
 	if opts.Mode == launchModeCodeact {
 		var modelErr error
-		modelInput, modelErr = codeactClaudeLaunchModel(modelInput, opts.Model)
+		modelInput, modelErr = codeactLaunchModel(backend, modelInput, opts.Model)
 		if modelErr != nil {
 			return agentLaunchPlan{}, modelErr
 		}
@@ -450,6 +453,7 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		planTools = append([]string(nil), decl.Tools...)
 	}
 	cliArgs := buildLaunchClaudeArgs(decl, model, effort, permissionMode, opts.AddDirs)
+	cliArgs = appendCodeactBackendArgs(cliArgs, opts.Mode, backend)
 	var cleanups []func()
 	mcpServers := agent.MCPServers
 	if opts.Mode == launchModeCodeact {
@@ -1113,7 +1117,29 @@ func validateCodeactLaunchOptions(opts agentLaunchOptions) error {
 	return err
 }
 
-func codeactClaudeLaunchModel(model, explicitModel string) (string, error) {
+func shouldDefaultCodeactToCodex(opts agentLaunchOptions, profile orchestrator.HarnessProfile, providerBackend string) bool {
+	if strings.TrimSpace(opts.Backend) != "" || strings.TrimSpace(opts.Profile) != "" {
+		return false
+	}
+	if launchBackendName(providerBackend) == "codex" {
+		return true
+	}
+	return launchProfileBackend(profile) != "codex"
+}
+
+func codeactBackendSupportsHardNoShell(backend string) bool {
+	switch launchBackendName(backend) {
+	case "claude", "codex":
+		return true
+	default:
+		return false
+	}
+}
+
+func codeactLaunchModel(backend, model, explicitModel string) (string, error) {
+	if launchBackendName(backend) != "claude" {
+		return model, nil
+	}
 	model = strings.TrimSpace(model)
 	if model == "" || host.IsClaudeModelID(model) {
 		return model, nil
@@ -1124,10 +1150,17 @@ func codeactClaudeLaunchModel(model, explicitModel string) (string, error) {
 	return "", nil
 }
 
+func appendCodeactBackendArgs(args []string, mode, backend string) []string {
+	if mode != launchModeCodeact || launchBackendName(backend) != "codex" {
+		return args
+	}
+	return append(args, "--disable="+launchCodexShellToolFeature)
+}
+
 func launchFutureNotes(mode string) []string {
 	if mode == launchModeCodeact {
 		return []string{
-			"CodeAct mode attaches only the kitsoki-codeact MCP server and permits only mcp__kitsoki-codeact__codeact_eval; Bash and direct editor tools are hard-denied.",
+			"CodeAct mode attaches only the kitsoki-codeact MCP server. Claude permits only mcp__kitsoki-codeact__codeact_eval; Codex runs with --disable shell_tool.",
 			"CodeAct capabilities are enforced by mcp-codeact startup args rooted at the launch working directory; launch policy is still a preflight guard, not a kernel/filesystem sandbox.",
 		}
 	}
@@ -1187,7 +1220,7 @@ func codeactLaunchCapabilitiesArg(opts agentLaunchOptions) (flag, value string, 
 func appendCodeactLaunchSystemPrompt(systemPrompt string) string {
 	const codeactPrompt = `Kitsoki CodeAct mode:
 - You have no Bash, Python, Node, shell, or direct editor tools.
-- Inspect and edit files only through mcp__kitsoki-codeact__codeact_eval by submitting Starlark snippets.
+- Inspect and edit files only through the kitsoki-codeact MCP server's codeact_eval tool by submitting Starlark snippets. In Claude this tool is named mcp__kitsoki-codeact__codeact_eval; in Codex, use tool_search if the MCP tool is not visible yet.
 - Use ctx.fs for file reads/writes and ctx.probe only for granted read-only probes.`
 	systemPrompt = strings.TrimSpace(systemPrompt)
 	if systemPrompt == "" {

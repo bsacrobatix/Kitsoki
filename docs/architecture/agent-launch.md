@@ -64,12 +64,14 @@ use CodeAct launch mode:
 kitsoki agent launch --agent codeact-worker --mode codeact --task-file .context/task.md
 ```
 
-CodeAct mode attaches only the standalone `kitsoki mcp-codeact` server and
-allows only `mcp__kitsoki-codeact__codeact_eval`. The launch is forced onto the
-Claude backend because Codex launch translation currently drops hard tool
-allowlists and runs MCP calls through its bypass flag. If an explicit
-`--backend` or `--profile` selects a backend that cannot hard-remove Bash,
-planning fails instead of relying on prompt instructions.
+CodeAct mode attaches only the standalone `kitsoki mcp-codeact` server. On
+Claude, launch permits only `mcp__kitsoki-codeact__codeact_eval` and hard-denies
+`Bash` plus direct editor tools. On Codex, launch passes `--disable shell_tool`
+so the shell tool is not present, while keeping the CodeAct MCP server attached.
+Without an explicit `--backend` or `--profile`, CodeAct mode defaults to Codex
+and drops an implicit non-Codex default profile. If an explicit `--backend` or
+`--profile` selects a backend that cannot hard-remove shell access, planning
+fails instead of relying on prompt instructions.
 
 The default CodeAct capability ceiling is working-directory-rooted filesystem
 read/write through `ctx.fs` plus read-only git probes through `ctx.probe`; it is
