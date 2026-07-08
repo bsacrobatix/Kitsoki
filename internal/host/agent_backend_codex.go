@@ -17,7 +17,8 @@
 //     sandboxed environment;
 //   - MCP config is not a file flag: the --mcp-config JSON is read and each
 //     server is converted to codex `-c mcp_servers.<name>.{command,args,env}`
-//     TOML config overrides;
+//     TOML config overrides; inherited MCP servers outside the explicit config
+//     are disabled with `mcp_servers.<name>.enabled=false`;
 //   - codex has no CLI system-prompt flag, so the composed kitsoki system prompt
 //     is materialized to a tempfile and installed with
 //     `-c model_instructions_file="..."`, replacing Codex's built-in base
@@ -48,6 +49,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"kitsoki/internal/codexcli"
 )
 
 // CodexBinEnv overrides the `codex` binary path (tests / non-PATH installs).
@@ -304,10 +307,12 @@ const codexMCPToolSearchPreamble = "TOOL ACCESS (codex): Some tools provided to 
 
 // codexMCPConfigArgs reads a claude-shaped --mcp-config JSON file
 // ({"mcpServers":{name:{command,args,env}}}) and emits codex `-c` TOML config
-// overrides registering each server: mcp_servers.<name>.command/args/env. This
-// is the crux of parity — the validator server must be registered so codex can
-// call its submit tool. Defensive: a missing/malformed file or server is
-// skipped rather than fatal (the caller still gets a usable invocation).
+// overrides registering each server: mcp_servers.<name>.command/args/env, while
+// disabling inherited servers that are not in the explicit config. This is the
+// crux of parity — the validator server must be registered so codex can call its
+// submit tool, and unrelated user/global MCP servers must not leak into the
+// launch. Defensive: a missing/malformed file or server is skipped rather than
+// fatal (the caller still gets a usable invocation).
 func codexMCPConfigArgs(path string) []string {
 	if strings.TrimSpace(path) == "" {
 		return nil
@@ -333,7 +338,7 @@ func codexMCPConfigArgs(path string) []string {
 	}
 	sort.Strings(names)
 
-	var out []string
+	out := codexcli.MCPServerScopeArgs(names)
 	for _, name := range names {
 		s := cfg.MCPServers[name]
 		base := "mcp_servers." + name + "."
