@@ -85,6 +85,7 @@ const (
 	launchCodeactMCPToolName             = "mcp__kitsoki-codeact__codeact_eval"
 	launchCodeactDefaultCapabilitiesJSON = `{"fs":true,"vcs":"read"}`
 	launchCodexShellToolFeature          = "shell_tool"
+	launchStudioMCPDriverAgentName       = "kitsoki-mcp-driver"
 )
 
 func agentLaunchCmd() *cobra.Command {
@@ -149,7 +150,7 @@ Freestanding Codex launch with no task opens Codex interactively.`,
 	cmd.Flags().StringVar(&opts.CodeactCapabilitiesFile, "codeact-capabilities-file", "", "file containing the CodeAct mode Starlark capability ceiling")
 	cmd.Flags().StringArrayVar(&opts.AddDirs, "add-dir", nil, "additional directory made available to the launched agent")
 	cmd.Flags().StringArrayVar(&opts.Env, "env", nil, "extra environment override KEY=VALUE; values are redacted from dry-run output")
-	cmd.Flags().BoolVar(&opts.Exec, "exec", false, "actually run the external CLI; default is a no-provider dry run")
+	cmd.Flags().BoolVar(&opts.Exec, "exec", false, "actually run a task-backed external CLI; task-backed default is a no-provider dry run")
 	cmd.Flags().BoolVar(&opts.Interactive, "interactive", false, "force an interactive Codex session instead of one-shot codex exec; implied when freestanding launch has no task")
 	cmd.Flags().BoolVar(&opts.RawInteractive, "raw", false, "with --interactive, launch the normal backend CLI without app/agent prompt synthesis")
 
@@ -365,9 +366,6 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		return agentLaunchPlan{}, err
 	}
 	interactive := opts.Interactive || strings.TrimSpace(task) == ""
-	if opts.Mode == launchModeCodeact && interactive {
-		return agentLaunchPlan{}, fmt.Errorf("--mode codeact requires --task or --task-file; interactive launch cannot prove Bash is absent")
-	}
 	workingDir, err := resolveStandaloneLaunchWorkingDir(opts.WorkingDir)
 	if err != nil {
 		return agentLaunchPlan{}, err
@@ -452,8 +450,9 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		permissionMode = "denyAll"
 		planTools = append([]string(nil), decl.Tools...)
 	}
+	disableCodexShell := shouldDisableStandaloneCodexShell(opts.Mode, backend, opts.AgentName, agent)
 	cliArgs := buildLaunchClaudeArgs(decl, model, effort, permissionMode, opts.AddDirs)
-	cliArgs = appendCodeactBackendArgs(cliArgs, opts.Mode, backend)
+	cliArgs = appendCodexShellToolDisableArg(cliArgs, backend, disableCodexShell)
 	var cleanups []func()
 	mcpServers := agent.MCPServers
 	if opts.Mode == launchModeCodeact {
@@ -472,8 +471,13 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		planCtx = host.WithAgentProviderEnv(planCtx, providerEnv)
 	}
 	if interactive {
-		prompt := composeLaunchPrompt(agent.DeveloperInstructions, task)
-		command := append([]string{bin}, buildInteractiveCodexArgs(model, effort, workingDir, opts.AddDirs, agent.MCPServers, prompt)...)
+		prompt := composeLaunchPrompt(decl.SystemPrompt, task)
+		extraArgs := appendCodexShellToolDisableArg(nil, backend, disableCodexShell)
+		command := append([]string{bin}, buildInteractiveCodexArgs(model, effort, workingDir, opts.AddDirs, mcpServers, extraArgs, prompt)...)
+		futureNotes := []string{
+			"Interactive Codex launch uses top-level `codex`, not `codex exec`, so it opens the TUI with the freestanding agent instructions as the initial prompt.",
+		}
+		futureNotes = append(futureNotes, standaloneLaunchFutureNotes(opts.Mode, disableCodexShell)...)
 		return agentLaunchPlan{
 			AgentFile:    agentPath,
 			Agent:        opts.AgentName,
@@ -484,6 +488,7 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 			WorkingDir:   workingDir,
 			Model:        model,
 			Effort:       effort,
+			Tools:        planTools,
 			Env:          redactEnv(providerEnv),
 			Command:      command,
 			RunAsUser:    runAsUser,
@@ -491,10 +496,7 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 			providerEnv:  providerEnv,
 			cleanups:     cleanups,
 			LaunchPolicy: launchDecision,
-			FutureNotes: []string{
-				"Interactive Codex launch uses top-level `codex`, not `codex exec`, so it opens the TUI with the freestanding agent instructions as the initial prompt.",
-				"Codex has no hard --agent-style per-tool allowlist in this launch path; the MCP-only posture comes from the freestanding agent instructions plus the attached MCP server set.",
-			},
+			FutureNotes:  futureNotes,
 		}, nil
 	}
 	inv := host.TranslateAgentInvocationForBackend(planCtx, backend, cliArgs, task, workingDir)
@@ -521,7 +523,7 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		claudeArgs:   cliArgs,
 		cleanups:     cleanups,
 		LaunchPolicy: launchDecision,
-		FutureNotes:  standaloneLaunchFutureNotes(opts.Mode),
+		FutureNotes:  standaloneLaunchFutureNotes(opts.Mode, disableCodexShell),
 	}, nil
 }
 
@@ -628,7 +630,7 @@ func runAgentLaunchPlan(ctx context.Context, cmd *cobra.Command, plan agentLaunc
 	return err
 }
 
-func buildInteractiveCodexArgs(model, effort, workingDir string, addDirs []string, mcpServers map[string]any, prompt string) []string {
+func buildInteractiveCodexArgs(model, effort, workingDir string, addDirs []string, mcpServers map[string]any, extraArgs []string, prompt string) []string {
 	var args []string
 	if m := launchModelForBackend("codex", model); strings.TrimSpace(m) != "" {
 		args = append(args, "-m", m)
@@ -646,6 +648,7 @@ func buildInteractiveCodexArgs(model, effort, workingDir string, addDirs []strin
 		}
 	}
 	args = append(args, codexConfigArgsForMCPServers(mcpServers)...)
+	args = append(args, extraArgs...)
 	if strings.TrimSpace(prompt) != "" {
 		args = append(args, prompt)
 	}
@@ -1151,10 +1154,30 @@ func codeactLaunchModel(backend, model, explicitModel string) (string, error) {
 }
 
 func appendCodeactBackendArgs(args []string, mode, backend string) []string {
-	if mode != launchModeCodeact || launchBackendName(backend) != "codex" {
+	return appendCodexShellToolDisableArg(args, backend, mode == launchModeCodeact)
+}
+
+func appendCodexShellToolDisableArg(args []string, backend string, disable bool) []string {
+	if !disable || launchBackendName(backend) != "codex" {
 		return args
 	}
-	return append(args, "--disable="+launchCodexShellToolFeature)
+	flag := "--disable=" + launchCodexShellToolFeature
+	for _, arg := range args {
+		if arg == flag {
+			return args
+		}
+	}
+	return append(args, flag)
+}
+
+func shouldDisableStandaloneCodexShell(mode, backend, requestedName string, agent standaloneCodexAgent) bool {
+	if launchBackendName(backend) != "codex" {
+		return false
+	}
+	if mode == launchModeCodeact {
+		return true
+	}
+	return requestedName == launchStudioMCPDriverAgentName || agent.Name == launchStudioMCPDriverAgentName
 }
 
 func launchFutureNotes(mode string) []string {
@@ -1170,9 +1193,15 @@ func launchFutureNotes(mode string) []string {
 	}
 }
 
-func standaloneLaunchFutureNotes(mode string) []string {
+func standaloneLaunchFutureNotes(mode string, codexShellDisabled bool) []string {
 	if mode == launchModeCodeact {
 		return launchFutureNotes(mode)
+	}
+	if codexShellDisabled {
+		return []string{
+			"Codex runs with --disable shell_tool for this freestanding agent; the shell is absent while MCP servers remain attached.",
+			"Codex exec currently requires --dangerously-bypass-approvals-and-sandbox for MCP calls to run non-interactively.",
+		}
 	}
 	return []string{
 		"Codex has no hard --agent-style per-tool allowlist in this launch path; the MCP-only posture comes from the freestanding agent instructions plus the attached MCP server set.",
@@ -1220,8 +1249,25 @@ func codeactLaunchCapabilitiesArg(opts agentLaunchOptions) (flag, value string, 
 func appendCodeactLaunchSystemPrompt(systemPrompt string) string {
 	const codeactPrompt = `Kitsoki CodeAct mode:
 - You have no Bash, Python, Node, shell, or direct editor tools.
-- Inspect and edit files only through the kitsoki-codeact MCP server's codeact_eval tool by submitting Starlark snippets. In Claude this tool is named mcp__kitsoki-codeact__codeact_eval; in Codex, use tool_search if the MCP tool is not visible yet.
-- Use ctx.fs for file reads/writes and ctx.probe only for granted read-only probes.`
+- Inspect and edit files only through the kitsoki-codeact MCP server's codeact_eval tool. In Claude this tool is named mcp__kitsoki-codeact__codeact_eval; in Codex, use tool_search if the MCP tool is not visible yet.
+- Every codeact_eval call takes {"snippet": "...", "inputs": {...}, "world": {...}}. The snippet is Starlark, must define def main(ctx):, and must return a dict. The returned dict appears as outputs.
+- Start with small inspection snippets. Prefer ctx.probe("git.status") for current git state and ctx.probe("git.ls_files", ["<pathspec>"]) to list tracked files. Use ctx.fs.read(path), ctx.fs.exists(path), and ctx.fs.glob(pattern) for targeted filesystem inspection.
+- Make edits with read-modify-write snippets. Check that the expected text exists before writing; call fail("reason") instead of silently writing a guessed change.
+- Typical edit snippet:
+  def main(ctx):
+      path = ctx.inputs["path"]
+      old = ctx.fs.read(path)
+      new = old.replace(ctx.inputs["old"], ctx.inputs["new"])
+      if new == old:
+          fail("expected text not found: " + path)
+      written = ctx.fs.write(path, new)
+      return {"written": written}
+- Typical status snippet:
+  def main(ctx):
+      status = ctx.probe("git.status")
+      return {"status": status["out"], "exit": status["exit"]}
+- Starlark is not Python: no imports, no classes, no exceptions, no while loops, no recursion, and strings are not iterable. Use split("\n") for lines and plain dict/list values.
+- Do not try to run tests, package managers, git commands, or shell commands. With the default launch capabilities, ctx.probe is read-only git inspection and ctx.fs is the only write surface.`
 	systemPrompt = strings.TrimSpace(systemPrompt)
 	if systemPrompt == "" {
 		return codeactPrompt

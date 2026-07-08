@@ -13,7 +13,7 @@ If you are testing or debugging one, use [`../tracing/`](../tracing/README.md).
 | Understand the thesis | [`concept.md`](concept.md) -> [`overview.md`](overview.md) |
 | Evaluate the design against other systems | [`concept.md`](concept.md) -> [`prior-art.md`](prior-art.md) |
 | Change runtime behavior | [`overview.md`](overview.md) -> [`hosts.md`](hosts.md) -> [`semantic-routing.md`](semantic-routing.md) |
-| Work on external agents | [`mcp-studio.md`](mcp-studio.md) -> [`agent-plugin.md`](agent-plugin.md) -> [`agent-launch-policy.md`](agent-launch-policy.md) |
+| Work on external agents | [`mcp-studio.md`](mcp-studio.md) -> [`agent-plugin.md`](agent-plugin.md) -> [`agent-launch.md`](agent-launch.md) -> [`agent-launch-policy.md`](agent-launch-policy.md) |
 | Contribute safely | [`developer-guide.md`](developer-guide.md) -> [`../tracing/testing.md`](../tracing/testing.md) |
 | Manage local dev isolation | [`../dev-workspaces.md`](../dev-workspaces.md) -> [`hosts.md#hostgit_worktree-workspace-interface`](hosts.md#hostgit_worktree-workspace-interface) -> [`capsules.md`](capsules.md) |
 
