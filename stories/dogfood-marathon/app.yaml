@@ -14,7 +14,7 @@
 #
 # # Honesty posture (stories/AGENTS.md + the skill's honesty controls)
 #
-# The drive / triage / verify rooms are THIN ORCHESTRATION STUBS that delegate to
+# The drive / triage / verify steps are THIN ORCHESTRATION STUBS that delegate to
 # the live kitsoki-mcp-driver agent + the operator's own oracle when this story is
 # driven for real (harness: live). They NEVER fabricate an outcome: a case's
 # outcome is whatever the inner pipeline produced AND what the independent verify
@@ -31,17 +31,16 @@
 #   intake       deterministic: load the backlog of cases (host.starlark.run loads tickets/bugs)
 #   processing   the per-case DISPATCHER — a sub-state that re-enters until the
 #                backlog is drained (case_index >= |backlog|) OR the case budget is
-#                hit. Per case it walks: triaging → driving → verifying → recording,
+#                hit. Per case it walks: picking_case → triaging → driving → recording,
 #                then `next_case` re-enters processing. (study stories/bugfix's
 #                regression-gate loop + stories/slidey-edit's cycle/budget refine
 #                loop — same guarded-emit / budget-cap shape.)
 #     triaging   cheap read-only verdict (ALREADY-FIXED|STILL-LIVE|PARTIAL|UNCLEAR);
 #                ALREADY-FIXED cases are dropped (degenerate baseline) — recorded skipped
 #     driving    drive the inner pipeline LIVE on the case (tracked: trace/cost/time)
-#     verifying  INDEPENDENT oracle check on the produced deliverable (gate on this,
-#                not the maker's return)
-#     recording  append the per-case result (outcome/exit/verify/cost/tokens/time/findings)
-#                to world.results, then emit next_case
+#     recording  INDEPENDENT oracle check, append the per-case result
+#                (outcome/exit/verify/cost/tokens/time/findings), persist the
+#                journal, then emit next_case
 #   aggregating  roll up every result → world.rollup (counts, totals, what-worked / what-didn't)
 #   reporting    build the slidey deck SPEC from results+rollup (host.starlark.run → deck.json)
 #   slideshow    host.slidey.render the deck spec → a baked static-HTML slidey report; bind the handle
@@ -84,7 +83,7 @@ agents:
     # Thin delegator: a real marathon drives the inner pipeline LIVE through the
     # kitsoki-mcp-driver agent (session_new harness:live, explicit trace:, base=
     # baseline SHA, scoped test_cmd, fresh per-case worktree — SKILL.md gotchas).
-    # This persona is the attachment point; the verifying room runs the operator's
+    # This persona is the attachment point; the recording room runs the operator's
     # OWN oracle on the result and gates on that, not on this agent's return.
     system_prompt: "You drive an inner kitsoki pipeline (bugfix / delivery-tail / ship-it) over one case to its terminal exit, then report the deliverable and the trace path. You do NOT self-grade — an independent verify oracle decides solved/partial/failed on the produced worktree. Surface the exit, the worktree/branch, and the trace for cost/token accounting."
     model: gpt-5.5
@@ -197,17 +196,14 @@ intents:
   triage_done:
     description: "(internal) the triage verdict for the current case is recorded; route to drive or skip."
     priority: 1
-  drive_done:
-    description: "(internal) the inner-pipeline drive for the current case finished; route to verify."
+  case_picked:
+    description: "(internal) the next backlog case has been selected; route to triage."
     priority: 1
-  verify_done:
-    description: "(internal) the independent verify for the current case finished; route to record."
+  drive_done:
+    description: "(internal) the inner-pipeline drive for the current case finished; route to recording."
     priority: 1
   record_done:
     description: "(internal) the current case's result is appended; re-enter the dispatcher for the next case."
-    priority: 1
-  record_persist:
-    description: "(internal) the current case is recorded; write the durable checkpoint."
     priority: 1
   exception_raised:
     description: "(internal) a serious case exception is queued for operator review."

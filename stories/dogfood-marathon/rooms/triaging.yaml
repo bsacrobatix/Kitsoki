@@ -42,7 +42,7 @@ states:
       # Drop degenerate (already-fixed) cases when configured.
       - when: "world.drop_already_fixed && world.triage_verdict.verdict == 'ALREADY-FIXED'"
         emit_intent: skip_case
-      - when: "!(world.drop_already_fixed && world.triage_verdict.verdict == 'ALREADY-FIXED')"
+      - when: "(world.triage_verdict.verdict ?? '') != '' && !(world.drop_already_fixed && world.triage_verdict.verdict == 'ALREADY-FIXED')"
         emit_intent: triage_done
     on:
       triage_done:

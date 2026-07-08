@@ -24,6 +24,12 @@ def _items(v):
         return v
     return []
 
+def _get(obj, key, default):
+    v = obj.get(key)
+    if v == None:
+        return default
+    return v
+
 def _int(v, default):
     if v == None or v == "":
         return default
@@ -56,28 +62,28 @@ def _safe_slug(raw, fallback):
     return out
 
 def _run_id(ctx):
-    supplied = _str(ctx.inputs.get("run_id", "")).strip()
+    supplied = _str(_get(ctx.inputs, "run_id", "")).strip()
     if supplied != "":
         return _safe_slug(supplied, "dogfood-marathon")
-    world_run = _str(ctx.world.get("run_id", "")).strip()
+    world_run = _str(_get(ctx.world, "run_id", "")).strip()
     if world_run != "":
         return _safe_slug(world_run, "dogfood-marathon")
     return "dogfood-marathon"
 
 def _run_dir(ctx, run_id):
-    supplied = _str(ctx.inputs.get("run_dir", "")).strip()
+    supplied = _str(_get(ctx.inputs, "run_dir", "")).strip()
     if supplied != "":
         return supplied
-    world_dir = _str(ctx.world.get("run_dir", "")).strip()
+    world_dir = _str(_get(ctx.world, "run_dir", "")).strip()
     if world_dir != "":
         return world_dir
     return ".artifacts/dogfood-marathon/" + run_id
 
 def _journal_path(ctx, run_dir):
-    supplied = _str(ctx.inputs.get("journal_path", "")).strip()
+    supplied = _str(_get(ctx.inputs, "journal_path", "")).strip()
     if supplied != "":
         return supplied
-    world_path = _str(ctx.world.get("journal_path", "")).strip()
+    world_path = _str(_get(ctx.world, "journal_path", "")).strip()
     if world_path != "":
         return world_path
     return run_dir + "/journal.json"
@@ -163,14 +169,18 @@ def _local_case(ctx, path, baseline_policy):
     case_id = _field(body, "id")
     if case_id == "":
         case_id = stem
+    source_kind = _field(body, "source_kind")
+    if source_kind == "":
+        source_kind = "local"
     return {
         "id": case_id,
         "title": title,
         "baseline": _field(body, "baseline"),
         "baseline_policy": baseline_policy,
         "repro_command": _field(body, "repro_command"),
-        "source_kind": "local",
+        "source_kind": source_kind,
         "source_path": path,
+        "source_repo": _field(body, "source_repo"),
         "source_url": _field(body, "source_url"),
         "body_excerpt": _snippet(body),
     }
@@ -255,7 +265,7 @@ def main(ctx):
     run_dir = _run_dir(ctx, run_id)
     journal_path = _journal_path(ctx, run_dir)
     journal_markdown_path = _markdown_path(journal_path, run_dir)
-    resume = _bool(ctx.inputs.get("resume", False)) or _bool(ctx.world.get("resume_from_journal", False))
+    resume = _bool(_get(ctx.inputs, "resume", False)) or _bool(_get(ctx.world, "resume_from_journal", False))
 
     if resume:
         journal = _resume(ctx, journal_path)
@@ -288,10 +298,16 @@ def main(ctx):
         items = _items(seeded.get("items", []))
         backlog = {"items": items}
     else:
-        source = _str(ctx.inputs.get("source", "")).strip()
-        limit = _int(ctx.inputs.get("limit", 15), 15)
-        baseline_policy = _str(ctx.inputs.get("baseline_policy", "fix-parent")).strip() or "fix-parent"
+        source = _str(_get(ctx.inputs, "source", "")).strip()
+        limit = _int(_get(ctx.inputs, "limit", 15), 15)
+        baseline_policy = _str(_get(ctx.inputs, "baseline_policy", "fix-parent")).strip() or "fix-parent"
         backlog = {"items": _load_sources(ctx, source, limit, baseline_policy)}
+
+    case_index = _int(_get(ctx.world, "case_index", 0), 0)
+    cases_processed = _int(_get(ctx.world, "cases_processed", 0), 0)
+    results = _dict(_get(ctx.world, "results", {"items": []})) or {"items": []}
+    findings = _dict(_get(ctx.world, "findings", {"items": []})) or {"items": []}
+    exceptions = _dict(_get(ctx.world, "exceptions", {"items": []})) or {"items": []}
 
     return {
         "backlog": backlog,
@@ -299,8 +315,13 @@ def main(ctx):
         "run_dir": run_dir,
         "journal_path": journal_path,
         "journal_markdown_path": journal_markdown_path,
+        "results": results,
+        "findings": findings,
+        "exceptions": exceptions,
+        "case_index": case_index,
+        "cases_processed": cases_processed,
         "loaded_journal": False,
         "journal_status": "loaded",
-        "journal_summary": _summary("loaded", _items(backlog.get("items", [])), _int(ctx.world.get("case_index", 0), 0), _int(ctx.world.get("cases_processed", 0), 0)),
+        "journal_summary": _summary("loaded", _items(backlog.get("items", [])), case_index, cases_processed),
         "last_checkpoint": "intake",
     }

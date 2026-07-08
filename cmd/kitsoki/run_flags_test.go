@@ -15,3 +15,10 @@ func TestRunFlags_NoImplicitResumeEntryPoint(t *testing.T) {
 	assert.NotNil(t, cmd.Flags().Lookup("continue"),
 		"explicit resume through --continue remains supported")
 }
+
+func TestRunFlags_HostCassetteRegistered(t *testing.T) {
+	cmd := runCmd()
+
+	assert.NotNil(t, cmd.Flags().Lookup("host-cassette"),
+		"run should support deterministic host replay for real TUI demos")
+}

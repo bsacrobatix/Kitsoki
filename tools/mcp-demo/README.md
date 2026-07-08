@@ -11,6 +11,10 @@ terminal** replaying a committed **termcast** cassette, through the *same* share
 pipeline — camera (1600×900), `ChapterRecorder` sidecar, 25s duration floor, and
 the `kitsoki-ui-qa` gates (blank / pacing / placeholder + the vision review).
 
+This is not the real Kitsoki TUI. For browser-driven evidence of a live TUI
+process, use `tools/tui-bridge`, which connects xterm.js to a real PTY spawned by
+`kitsoki tui-serve`.
+
 ## No-LLM by construction
 
 The replay plays a static cassette in a terminal and **never spawns a model or the
@@ -27,8 +31,6 @@ capture at all.
 casts/                      termcast cassettes (the agent's session, agent-agnostic)
   types.ts                  the termcast format + ANSI helpers
   claude-code.cast.ts       synthetic Claude-Code session (no-LLM default + QA fixture)
-  dogfood-marathon-tui.cast.ts
-                            synthetic TUI dogfood-marathon replay over 15 real bug refs
   index.ts                  registry + resolveCast() (MCP_DEMO_AGENT / MCP_DEMO_CAST_JSON)
 player/
   index.html                xterm.js terminal "window" on a branded studio backdrop
@@ -54,8 +56,6 @@ pnpm install                                  # first time
 pnpm run lint:no-llm                           # camera · chapters · replays-cast · no-spawn
 pnpm run validate                              # WEB_CHAT_PACE=0 — fast assert (throwaway .fast.mp4)
 pnpm run record                                # watch-speed → .artifacts/mcp-demo/claude-code.mp4 (+ .chapters.json)
-pnpm run validate:dogfood-tui                  # fast xterm TUI dogfood-marathon replay
-pnpm run record:dogfood-tui                    # watch-speed → .artifacts/mcp-demo/dogfood-marathon-tui.mp4
 ```
 
 QA the recorded video (the `kitsoki-ui-qa` skill — vision review via the local

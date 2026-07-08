@@ -64,6 +64,24 @@ go run ./cmd/kitsoki tui-serve --addr 127.0.0.1:4700 -- run myapp.yaml --harness
 passed through as-is) — this is what the test suite uses to drive `/bin/cat`
 deterministically, with no kitsoki or LLM involved.
 
+## Dogfood marathon demo
+
+The dogfood marathon recording lives on this real TUI bridge, not under
+`tools/mcp-demo`'s synthetic termcast replay:
+
+```bash
+cd tools/tui-bridge
+pnpm run validate:dogfood
+pnpm run record:dogfood
+```
+
+The browser connects to a real `kitsoki` TUI process and sends real xterm
+keystrokes through the PTY bridge. The story's free-text routing and
+LLM-bearing host outcomes are replayed from `tools/tui-bridge/fixtures/`, so the
+recording is deterministic and does not spend LLM tokens. The fixture preserves
+real issue titles/URLs for the 15-case demo, but it is not evidence that a paid
+GPT-5.5 marathon fixed those bugs.
+
 ## Driving it from claude-in-chrome
 
 No special wiring needed — it's a plain page, so the standard
@@ -103,6 +121,10 @@ viewport text after scrolling.
   then drives the page with real keyboard input and asserts the round-tripped
   screen contents via `window.__dump()`. Run with `pnpm install && pnpm test`
   or, from the repo root, `make tui-bridge-test`.
+- `tools/tui-bridge/tests/dogfood-marathon-real-tui.e2e.spec.ts` — launches a
+  real dogfood-marathon TUI under `--harness replay --host-cassette`, drives one
+  continuous xterm session, and writes MP4, chapters, screenshots, and bridge
+  logs under `.artifacts/tui-bridge/dogfood-marathon-real-tui/`.
 
 Neither test path spawns a real kitsoki session or an LLM — per repo policy,
 that only happens when explicitly requested (point `-- run ...` or `--exec`

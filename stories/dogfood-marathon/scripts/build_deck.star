@@ -16,6 +16,12 @@ def _items(v):
         return v
     return []
 
+def _get(obj, key, default):
+    v = obj.get(key)
+    if v == None:
+        return default
+    return v
+
 def _safe_slug(raw, fallback):
     text = _str(raw).strip().lower()
     if text == "":
@@ -35,17 +41,17 @@ def _safe_slug(raw, fallback):
     return out
 
 def _run_id(ctx):
-    supplied = _str(ctx.inputs.get("run_id", ctx.world.get("run_id", ""))).strip()
+    supplied = _str(_get(ctx.inputs, "run_id", _get(ctx.world, "run_id", ""))).strip()
     return _safe_slug(supplied, "dogfood-marathon")
 
 def _run_dir(ctx, run_id):
-    supplied = _str(ctx.inputs.get("run_dir", ctx.world.get("run_dir", ""))).strip()
+    supplied = _str(_get(ctx.inputs, "run_dir", _get(ctx.world, "run_dir", ""))).strip()
     if supplied != "":
         return supplied
     return ".artifacts/dogfood-marathon/" + run_id
 
 def _out_path(ctx, run_dir):
-    supplied = _str(ctx.inputs.get("out_path", "")).strip()
+    supplied = _str(_get(ctx.inputs, "out_path", "")).strip()
     if supplied != "":
         return supplied
     return run_dir + "/decks/aggregate.slidey.json"

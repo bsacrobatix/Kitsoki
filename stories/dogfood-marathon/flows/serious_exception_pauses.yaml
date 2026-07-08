@@ -85,6 +85,11 @@ host_handlers:
 
 turns:
   - intent: { name: start, slots: {} }
+    expect_state: processing
+    expect_world:
+      cases_processed: 0
+
+  - intent: { name: next_case, slots: {} }
     expect_state: exception_review
     expect_world:
       exception_pending: "case-blocked"

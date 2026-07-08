@@ -6,7 +6,9 @@
   "description": "Live pty-over-websocket bridge so Playwright / claude-in-chrome can drive the real running kitsoki TUI (real keystrokes in, real ANSI render out) instead of cassette replay.",
   "scripts": {
     "serve": "node player/serve.mjs",
-    "test": "playwright test"
+    "test": "playwright test",
+    "validate:dogfood": "WEB_CHAT_PACE=0 playwright test tests/dogfood-marathon-real-tui.e2e.spec.ts",
+    "record:dogfood": "playwright test tests/dogfood-marathon-real-tui.e2e.spec.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

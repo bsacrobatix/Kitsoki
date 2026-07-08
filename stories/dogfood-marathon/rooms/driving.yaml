@@ -11,7 +11,7 @@
 # cost/token accounting. Under flow/no-LLM tests it is stubbed by id.
 #
 # CRITICAL HONESTY CONTROL: the drive result is NOT the grade. The driver does not
-# self-grade — the verifying room runs the operator's OWN oracle on the produced
+# self-grade — the recording room runs the operator's OWN oracle on the produced
 # worktree and gates on that (SKILL.md: "never trust the maker's self-report").
 
 states:
@@ -54,11 +54,11 @@ states:
               journal_path:    "{{ world.journal_path }}"
         bind:
           drive_result: submitted
-        on_error: verifying   # a dead/failed driver can still have landed edits — verify anyway
-      - when: "world.drive_result.exit != ''"
+        on_error: recording   # a dead/failed driver can still have landed edits — verify anyway
+      - when: "(world.drive_result.exit ?? '') != ''"
         emit_intent: drive_done
     on:
       drive_done:
-        - target: verifying
+        - target: recording
       look:
         - target: .
