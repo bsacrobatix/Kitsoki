@@ -51,5 +51,6 @@ turns:
     expect_world:
       deck_handle: ""
       render_retries: 2
+      render_error_kind: deck_validation
 
 expect_terminal: false

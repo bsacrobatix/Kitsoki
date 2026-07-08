@@ -69,13 +69,18 @@ world:
   semantic_path:    { type: string, default: "" }
 
   # ── render auto-fix loop ────────────────────────────────────────────────────
-  # On a render failure the deck spec is auto-repaired and re-rendered, up to
-  # render_retry_budget attempts, before falling through to reviewing with the
-  # error surfaced. render_retries resets on any fresh attempt (start / rerender
-  # / refine). render_fix_result is the once: cache for the repair pass.
+  # On a deck-shaped render failure the deck spec is auto-repaired and
+  # re-rendered, up to render_retry_budget attempts, before falling through to
+  # reviewing with the error surfaced. Toolchain/runtime failures are classified
+  # first and skip the repair agent. render_retries resets on any fresh attempt
+  # (start / rerender / refine). render_fix_result is the once: cache for the
+  # repair pass.
   render_retries:      { type: int,    default: 0 }
   render_retry_budget: { type: int,    default: 2 }
   render_fix_result:   { type: object, default: {} }
+  render_error_repairable: { type: bool,   default: false }
+  render_error_kind:       { type: string, default: "" }
+  render_error_summary:    { type: string, default: "" }
 
   # ── annotation → refine loop ────────────────────────────────────────────────
   # annotation is the operator's location-tied feedback bundle. anchor mirrors
@@ -163,6 +168,9 @@ intents:
   # ── internal (emit_intent only — never user-routed) ──────────────────────────
   render_retry:
     description: "Internal: re-render after an auto-repair pass (counts against the retry budget)."
+    priority: 1
+  render_error_classified:
+    description: "Internal: render failure classified as deck-repairable or external."
     priority: 1
   render_giveup:
     description: "Internal: render auto-fix budget exhausted — return to review with the error."

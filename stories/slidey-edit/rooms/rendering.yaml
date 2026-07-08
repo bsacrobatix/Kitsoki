@@ -33,9 +33,10 @@ states:
         bind:
           deck_path:     path
           semantic_path: semantic_path
-        # A render failure auto-repairs the deck spec and retries (bounded by
-        # render_retry_budget) before falling through to reviewing.
-        on_error: fixing_render
+        # A render failure is classified before any repair agent is dispatched.
+        # Deck-shaped failures auto-repair and retry; toolchain/runtime failures
+        # fall through to reviewing with the original error.
+        on_error: checking_render_failure
 
       # Emit the rendered HTML deck → deck_handle. The artifact is a self-contained
       # HTML file (text/html), declared kind `slideshow`: a multi-scene deck whose
