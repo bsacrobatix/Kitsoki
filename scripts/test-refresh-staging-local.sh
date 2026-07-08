@@ -53,7 +53,13 @@ copy_scripts() {
 local_repo="$tmp/local-refresh"
 git_init "$local_repo"
 copy_scripts "$local_repo"
+printf '.kitsoki.local.yaml\n' >"$local_repo/.gitignore"
+cat >"$local_repo/Makefile" <<'MK'
+test:
+	@true
+MK
 printf 'base\n' >"$local_repo/README.md"
+printf 'default_profile: codex-native\nharness_profiles:\n  codex-native:\n    backend: codex\n' >"$local_repo/.kitsoki.local.yaml"
 git -C "$local_repo" add -A
 git -C "$local_repo" commit -q -m initial
 git -C "$local_repo" branch staging/local
@@ -75,6 +81,7 @@ local_out="$tmp/local-refresh.out"
   scripts/refresh-staging-local.sh --skip-remote --gate "git diff --check"
 ) >"$local_out" 2>&1
 assert_contains "$local_out" "staging/local ->"
+assert_contains "$local_out" "copied .kitsoki.local.yaml into staging capsule"
 git -C "$local_repo" merge-base --is-ancestor main staging/local ||
   fail "refreshed staging/local is not based on local main"
 [ "$(git -C "$local_repo" show staging/local:main.txt)" = "main-update" ] ||
@@ -83,6 +90,17 @@ git -C "$local_repo" merge-base --is-ancestor main staging/local ||
   fail "refreshed staging/local dropped staged work"
 [ "$(git -C "$local_repo" rev-parse staging/local)" = "$(git -C "$local_repo/.capsules/staging/local" rev-parse HEAD)" ] ||
   fail "primary staging/local and staging capsule HEAD differ"
+cmp "$local_repo/.kitsoki.local.yaml" "$local_repo/.capsules/staging/local/.kitsoki.local.yaml" >/dev/null ||
+  fail "refresh did not copy .kitsoki.local.yaml into staging capsule"
+
+make_out="$tmp/make-staging.out"
+(
+  cd "$script_dir/.."
+  make -n test-staging STAGING_CAPSULE="$local_repo/.capsules/staging/local" STAGING_REFRESH_GATE=true
+) >"$make_out" 2>&1
+assert_contains "$make_out" "scripts/refresh-staging-local.sh --staging-branch"
+assert_contains "$make_out" " --gate \"true\""
+assert_contains "$make_out" "$local_repo/.capsules/staging/local\" test"
 
 bare="$tmp/origin.git"
 seed="$tmp/seed"
