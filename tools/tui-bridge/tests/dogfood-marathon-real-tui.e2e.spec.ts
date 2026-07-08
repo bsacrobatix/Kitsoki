@@ -129,6 +129,7 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
       if (i === 5) {
         await waitForScreen(page, "exception review");
         await shot(page, "exception-review");
+        await dwell(page, 950);
         chapters.open("operator-exception", "Operator acknowledges serious question", RECORDING);
         await typeLine(page, "acknowledge and continue");
       }
@@ -136,7 +137,7 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
       if (i === 10 || i === 15) {
         await shot(page, `processed-${String(i).padStart(2, "0")}`);
       }
-      await dwell(page, 350);
+      await dwell(page, 950);
     }
 
     chapters.open("report", "Aggregate and render slidey decks", RECORDING);
