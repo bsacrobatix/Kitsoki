@@ -330,7 +330,7 @@ WEB_LOG_KEEP := 10
 STAGING_BRANCH  ?= staging/local
 STAGING_CAPSULE ?= .capsules/staging/local
 
-.PHONY: ensure-staging-capsule test-staging web-dev-staging install-staging
+.PHONY: ensure-staging-capsule test-staging web-dev-staging install-staging site-dev-staging
 ensure-staging-capsule:
 	@test -f "$(STAGING_CAPSULE)/.kitsoki-capsule" -o -f "$(STAGING_CAPSULE)/.kitsoki-clone" || { \
 		echo "error: staging capsule not found at $(STAGING_CAPSULE)" >&2; \
@@ -351,6 +351,9 @@ web-dev-staging: ensure-staging-capsule
 
 install-staging: ensure-staging-capsule
 	$(MAKE) -C "$(STAGING_CAPSULE)" install
+
+site-dev-staging: ensure-staging-capsule
+	$(MAKE) -C "$(STAGING_CAPSULE)" site-dev
 
 web-dev:
 	@command -v pnpm >/dev/null 2>&1 || { echo "error: pnpm not found" >&2; exit 1; }

@@ -150,6 +150,7 @@ For day-to-day staging operations from the primary checkout:
 ```sh
 make test-staging
 make web-dev-staging
+make site-dev-staging
 make install-staging
 ```
 

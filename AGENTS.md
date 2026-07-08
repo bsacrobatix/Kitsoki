@@ -49,11 +49,11 @@ not an ad hoc branch merge. Keep `.capsules/staging/local` as a managed capsule
 checkout on branch `staging/local` (`scripts/dev-workspace.sh create --root
 .capsules/staging --id local --branch staging/local --base staging/local
 --target main --bootstrap`); run staging commands with `make test-staging`,
-`make web-dev-staging`, and `make install-staging`. To promote, run
-`scripts/merge-to-main.sh` from the primary checkout. It rebases the staging
-capsule onto local `main`, runs `make test` there by default, then fast-forwards
-protected `main`. Skipping that gate requires explicit `--force`; use it only
-when an equivalent gate has already run.
+`make web-dev-staging`, `make site-dev-staging`, and `make install-staging`.
+To promote, run `scripts/merge-to-main.sh` from the primary checkout. It rebases
+the staging capsule onto local `main`, runs `make test` there by default, then
+fast-forwards protected `main`. Skipping that gate requires explicit `--force`;
+use it only when an equivalent gate has already run.
 
 Prefer GitHub PRs for review and landing, but do not burn CI on every
 work-in-progress agent branch. The CI workflow is configured so `pull_request`
