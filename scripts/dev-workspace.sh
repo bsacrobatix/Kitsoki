@@ -16,7 +16,7 @@ DEFAULT_TARGET="staging/local"
 usage() {
   cat >&2 <<'EOF'
 usage:
-  scripts/dev-workspace.sh create --id ID [--branch BRANCH] [--base BASE] [--repo REPO] [--root ROOT] [--session-id SID] [--bootstrap] [--json]
+  scripts/dev-workspace.sh create --id ID [--branch BRANCH] [--base BASE] [--target TARGET] [--repo REPO] [--root ROOT] [--session-id SID] [--bootstrap] [--json]
   scripts/dev-workspace.sh bootstrap <workspace>
   scripts/dev-workspace.sh status <workspace|id> [--repo REPO] [--root ROOT] [--json]
   scripts/dev-workspace.sh commit <workspace|id> --message MESSAGE [--repo REPO] [--root ROOT] [--json]
