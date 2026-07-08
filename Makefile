@@ -327,6 +327,31 @@ bootstrap-worktree: bootstrap-workspace
 WEB_ARGS     ?=
 WEB_LOG_DIR  := .artifacts/logs
 WEB_LOG_KEEP := 10
+STAGING_BRANCH  ?= staging/local
+STAGING_CAPSULE ?= .capsules/staging/local
+
+.PHONY: ensure-staging-capsule test-staging web-dev-staging install-staging
+ensure-staging-capsule:
+	@test -f "$(STAGING_CAPSULE)/.kitsoki-capsule" -o -f "$(STAGING_CAPSULE)/.kitsoki-clone" || { \
+		echo "error: staging capsule not found at $(STAGING_CAPSULE)" >&2; \
+		echo "       create it with: scripts/dev-workspace.sh create --root .capsules/staging --id local --branch $(STAGING_BRANCH) --base $(STAGING_BRANCH) --target main --bootstrap" >&2; \
+		exit 1; \
+	}
+	@test "$$(git -C "$(STAGING_CAPSULE)" branch --show-current)" = "$(STAGING_BRANCH)" || { \
+		echo "error: $(STAGING_CAPSULE) is not on $(STAGING_BRANCH)" >&2; \
+		git -C "$(STAGING_CAPSULE)" status --short --branch >&2; \
+		exit 1; \
+	}
+
+test-staging: ensure-staging-capsule
+	$(MAKE) -C "$(STAGING_CAPSULE)" test
+
+web-dev-staging: ensure-staging-capsule
+	$(MAKE) -C "$(STAGING_CAPSULE)" web-dev
+
+install-staging: ensure-staging-capsule
+	$(MAKE) -C "$(STAGING_CAPSULE)" install
+
 web-dev:
 	@command -v pnpm >/dev/null 2>&1 || { echo "error: pnpm not found" >&2; exit 1; }
 	@mkdir -p $(WEB_LOG_DIR)

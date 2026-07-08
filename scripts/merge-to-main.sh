@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# merge-to-main.sh <branch> - fast-forward <branch> into protected local main.
+# merge-to-main.sh [branch] - gate and fast-forward a staged branch into
+# protected local main.
 #
 # The primary checkout keeps tracked source read-only so agents do implementation
 # work in managed clone-backed capsule workspaces and only write the primary
@@ -7,11 +8,16 @@
 # lifts write permissions on the exact files and directories changed by the
 # fast-forward, runs the merge, then restores the read-only guard.
 #
-# It refuses non-fast-forward merges. Rebase or rebuild the branch in its
-# managed workspace first when main has advanced.
+# By default it promotes the managed staging capsule at .capsules/staging/local
+# on branch staging/local. It rebases that capsule onto local main, runs
+# `make test`, imports the staged branch into the primary checkout, and then
+# fast-forwards main. Passing --force is required to skip the gate.
 #
 # Run from the primary checkout, while on main:
-#   scripts/merge-to-main.sh <branch>
+#   scripts/merge-to-main.sh
+#   scripts/merge-to-main.sh --gate "make test-full"
+#   scripts/merge-to-main.sh --force
+#   scripts/merge-to-main.sh <branch> --source-dir <managed-capsule>
 #
 # Optional /goal (goal-seeker) ledger integration: when a change being landed is
 # part of a tracked goal, pass --goal-dir and --change-id (both required
@@ -43,11 +49,57 @@
 # the merge itself already succeeded and is the important, hard-to-reverse part.
 set -euo pipefail
 
+CAPSULE_SENTINEL=".kitsoki-capsule"
+CLONE_SENTINEL=".kitsoki-clone"
+DEFAULT_BRANCH="staging/local"
+DEFAULT_SOURCE_DIR=".capsules/staging/local"
+DEFAULT_GATE="make test"
+
 branch=""
+source_dir=""
+gate="$DEFAULT_GATE"
+force=0
+import_branch=""
 goal_dir=""
 change_id=""
 goal_work=""
 goal_script=""
+
+usage() {
+  cat >&2 <<EOF
+usage:
+  scripts/merge-to-main.sh [branch] [--source-dir DIR] [--gate CMD] [--force]
+  scripts/merge-to-main.sh [branch] --goal-dir DIR --change-id ID [--goal-work DIR] [--goal-script PATH]
+
+Defaults:
+  branch      $DEFAULT_BRANCH
+  source-dir  $DEFAULT_SOURCE_DIR for $DEFAULT_BRANCH
+  gate        $DEFAULT_GATE
+
+--force skips the gate. Use it only when an equivalent gate already ran.
+EOF
+}
+
+abs_path() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+print(os.path.abspath(sys.argv[1]))
+PY
+}
+
+safe_ref_fragment() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-'
+}
+
+ensure_managed_source_dir() {
+  local dir="$1"
+  [ -d "$dir/.git" ] || { echo "error: source dir is not a git checkout: $dir" >&2; exit 1; }
+  if [ ! -f "$dir/$CAPSULE_SENTINEL" ] && [ ! -f "$dir/$CLONE_SENTINEL" ]; then
+    echo "error: source dir is not a managed capsule: $dir (missing $CAPSULE_SENTINEL or $CLONE_SENTINEL)" >&2
+    exit 1
+  fi
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -67,8 +119,25 @@ while [ $# -gt 0 ]; do
       goal_script="${2:?--goal-script requires a value}"
       shift 2
       ;;
+    --source-dir|--staging|--staging-capsule)
+      source_dir="${2:?$1 requires a value}"
+      shift 2
+      ;;
+    --gate)
+      gate="${2:?--gate requires a value}"
+      shift 2
+      ;;
+    --force)
+      force=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
     -*)
       echo "error: unknown flag: $1" >&2
+      usage
       exit 1
       ;;
     *)
@@ -82,7 +151,16 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-branch="${branch:?usage: scripts/merge-to-main.sh <branch> [--goal-dir <dir> --change-id <id> [--goal-work <dir>] [--goal-script <path>]]}"
+if [ -z "$branch" ]; then
+  branch="$DEFAULT_BRANCH"
+fi
+if [ -z "$source_dir" ] && [ "$branch" = "$DEFAULT_BRANCH" ]; then
+  source_dir="$DEFAULT_SOURCE_DIR"
+fi
+if [ "$force" = "1" ] && [ "$gate" != "$DEFAULT_GATE" ]; then
+  echo "error: --force skips the gate; do not also pass --gate" >&2
+  exit 1
+fi
 
 if [ -n "$goal_dir" ] && [ -z "$change_id" ]; then
   echo "error: --goal-dir requires --change-id" >&2
@@ -101,18 +179,72 @@ if [ "$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)" != "main" ];
   echo "error: the primary checkout is not on main" >&2
   exit 1
 fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+if [ -n "$source_dir" ]; then
+  if [ "${source_dir#/}" = "$source_dir" ]; then
+    source_dir="$repo_root/$source_dir"
+  fi
+  source_dir="$(abs_path "$source_dir")"
+  ensure_managed_source_dir "$source_dir"
+  source_branch="$(git -C "$source_dir" branch --show-current)"
+  if [ "$source_branch" != "$branch" ]; then
+    echo "error: source dir $source_dir is on $source_branch, expected $branch" >&2
+    exit 1
+  fi
+  source_dirty="$(git -C "$source_dir" status --porcelain --untracked-files=all | grep -Ev '^[?][?] (\.kitsoki-capsule|\.kitsoki-clone|capsule-manifest.json|\.kitsoki-dev-workspace.json|\.kitsoki-owner)$' || true)"
+  if [ -n "$source_dirty" ]; then
+    echo "error: source dir has uncommitted changes: $source_dir" >&2
+    printf '%s\n' "$source_dirty" >&2
+    exit 1
+  fi
+  if git -C "$source_dir" remote get-url source >/dev/null 2>&1; then
+    git -C "$source_dir" fetch source main
+    git -C "$source_dir" rebase source/main
+  else
+    echo "warning: source dir has no 'source' remote; skipping rebase onto local main before gate" >&2
+  fi
+  if [ "$force" = "1" ]; then
+    echo "warning: --force supplied; skipping gate: $DEFAULT_GATE" >&2
+  else
+    [ -n "$gate" ] || { echo "error: gate is empty; pass --force to skip the gate" >&2; exit 1; }
+    echo "merge-to-main: running gate in $source_dir: $gate" >&2
+    (cd "$source_dir" && sh -c "$gate")
+  fi
+
+  import_branch="capsule/promote-$(safe_ref_fragment "$branch")"
+  if git rev-parse --verify --quiet "$import_branch" >/dev/null; then
+    git branch -D "$import_branch" >/dev/null
+  fi
+  git fetch "$source_dir" "$branch:refs/heads/$import_branch"
+  if [ "$branch" = "$DEFAULT_BRANCH" ]; then
+    git fetch "$source_dir" "+$branch:refs/heads/$branch"
+  fi
+  branch="$import_branch"
+elif [ "$force" != "1" ]; then
+  echo "error: --source-dir is required to run the default gate for $branch; pass --force only if an equivalent gate already ran" >&2
+  exit 1
+else
+  echo "warning: --force supplied; promoting $branch without a source-dir gate" >&2
+fi
+
 if ! git rev-parse --verify --quiet "$branch" >/dev/null; then
   echo "error: no such branch: $branch" >&2
   exit 1
 fi
 if ! git merge-base --is-ancestor HEAD "$branch"; then
-  echo "error: $branch is not a fast-forward of main; rebase it onto main in its managed workspace first" >&2
+  echo "error: $branch is not a fast-forward of main; rebase it onto main in its managed capsule first" >&2
   exit 1
 fi
 
 files="$(git diff --name-only HEAD "$branch")"
 if [ -z "$files" ]; then
   echo "nothing to merge; main already contains $branch"
+  if [ -n "$import_branch" ] && git rev-parse --verify --quiet "$import_branch" >/dev/null; then
+    git branch -D "$import_branch" >/dev/null
+  fi
   exit 0
 fi
 
@@ -243,6 +375,10 @@ fi
 
 restore_guard
 trap - EXIT
+
+if [ -n "$import_branch" ] && git rev-parse --verify --quiet "$import_branch" >/dev/null; then
+  git branch -D "$import_branch" >/dev/null
+fi
 
 if [ -n "$goal_dir" ] && [ -n "$change_id" ]; then
   resolved_goal_script="$goal_script"

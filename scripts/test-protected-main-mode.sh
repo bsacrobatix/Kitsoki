@@ -151,7 +151,7 @@ git -C "$merge_repo" checkout -q main
 (
   cd "$merge_repo"
   scripts/protected-main-mode.sh lock --quiet
-  scripts/merge-to-main.sh feature >"$tmp/merge.out"
+  scripts/merge-to-main.sh feature --force >"$tmp/merge.out"
 )
 assert_contains "$tmp/merge.out" "read-only guard restored"
 
@@ -178,7 +178,7 @@ git -C "$dirty_repo" checkout -q main
 printf '%s\n' local >"$dirty_repo/keep.txt"
 (
   cd "$dirty_repo"
-  scripts/merge-to-main.sh feature >"$tmp/dirty-unrelated.out"
+  scripts/merge-to-main.sh feature --force >"$tmp/dirty-unrelated.out"
 )
 assert_contains "$tmp/dirty-unrelated.out" "main ->"
 [ "$(cat "$dirty_repo/feature.txt")" = "feature" ] ||
@@ -194,12 +194,45 @@ printf '%s\n' local >"$dirty_repo/conflict.txt"
 set +e
 (
   cd "$dirty_repo"
-  scripts/merge-to-main.sh overlap
+  scripts/merge-to-main.sh overlap --force
 ) >"$tmp/dirty-overlap.out" 2>&1
 dirty_overlap_status=$?
 set -e
 [ "$dirty_overlap_status" -ne 0 ] || { echo "dirty-overlap merge should fail" >&2; exit 1; }
 assert_contains "$tmp/dirty-overlap.out" "conflict.txt"
+
+staging_repo="$tmp/staging-repo"
+git_init "$staging_repo"
+mkdir -p "$staging_repo/scripts"
+cp "$script_dir/merge-to-main.sh" "$staging_repo/scripts/merge-to-main.sh"
+chmod +x "$staging_repo/scripts/merge-to-main.sh"
+{
+  printf 'test:\n'
+  printf "\t@printf 'gate\\\\n' > %s\n" "$tmp/staging-gate-ran"
+} >"$staging_repo/Makefile"
+git -C "$staging_repo" add scripts/merge-to-main.sh Makefile
+git -C "$staging_repo" commit -q -m "add merge helper"
+commit_file "$staging_repo" base.txt base
+git -C "$staging_repo" branch -M main
+mkdir -p "$staging_repo/.capsules/staging"
+git -C "$staging_repo" clone --no-local "$staging_repo" "$staging_repo/.capsules/staging/local" >/dev/null
+git -C "$staging_repo/.capsules/staging/local" remote rename origin source
+git -C "$staging_repo/.capsules/staging/local" config user.name "Test User"
+git -C "$staging_repo/.capsules/staging/local" config user.email "test@example.invalid"
+touch "$staging_repo/.capsules/staging/local/.kitsoki-capsule"
+git -C "$staging_repo/.capsules/staging/local" switch -q -c staging/local main
+printf '%s\n' staged >"$staging_repo/.capsules/staging/local/staged.txt"
+git -C "$staging_repo/.capsules/staging/local" add staged.txt
+git -C "$staging_repo/.capsules/staging/local" commit -q -m "staged change"
+(
+  cd "$staging_repo"
+  scripts/merge-to-main.sh >"$tmp/staging.out"
+)
+assert_contains "$tmp/staging.out" "main ->"
+[ "$(cat "$tmp/staging-gate-ran")" = "gate" ] ||
+  { echo "default staging gate did not run" >&2; exit 1; }
+[ "$(cat "$staging_repo/staged.txt")" = "staged" ] ||
+  { echo "staging promotion did not update main" >&2; exit 1; }
 
 race_repo="$tmp/race-repo"
 git_init "$race_repo"
@@ -236,7 +269,7 @@ chmod +x "$shim/git"
 set +e
 (
   cd "$race_repo"
-  REAL_GIT="$real_git" PATH="$shim:$PATH" scripts/merge-to-main.sh feature
+  REAL_GIT="$real_git" PATH="$shim:$PATH" scripts/merge-to-main.sh feature --force
 ) >"$tmp/race.out" 2>&1
 race_status=$?
 set -e
