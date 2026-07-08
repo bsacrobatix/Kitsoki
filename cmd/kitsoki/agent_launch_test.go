@@ -134,6 +134,7 @@ states:
 		AppPath:    appPath,
 		ConfigPath: filepath.Join(dir, ".kitsoki.yaml"),
 		AgentName:  "maker",
+		Backend:    "claude",
 		Mode:       "codeact",
 		Task:       "implement it without shell",
 	})
@@ -166,7 +167,7 @@ states:
 	}, server.Args)
 }
 
-func TestAgentLaunchPlan_CodeactModeForcesClaudeWhenDefaultProfileIsCodex(t *testing.T) {
+func TestAgentLaunchPlan_CodeactModeUsesCodexWithShellToolDisabled(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(host.AgentBinEnv, "/bin/claude-test")
 	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
@@ -202,18 +203,61 @@ args = ["server.js"]
 	for _, cleanup := range plan.cleanups {
 		t.Cleanup(cleanup)
 	}
-	require.Equal(t, "claude", plan.Backend)
-	require.Equal(t, "/bin/claude-test", plan.Binary)
-	require.Empty(t, plan.Profile)
-	require.Empty(t, plan.Model)
+	require.Equal(t, "codex", plan.Backend)
+	require.Equal(t, "/bin/codex-test", plan.Binary)
+	require.Equal(t, "codex-default", plan.Profile)
+	require.Equal(t, "gpt-5.5", plan.Model)
 	require.Equal(t, []string{launchCodeactMCPToolName}, plan.Tools)
 	joined := strings.Join(plan.Command, " ")
 	require.NotContains(t, joined, "mcp_servers.existing")
-	require.NotContains(t, joined, "gpt-5.5")
-	require.NotContains(t, strings.Join(plan.FutureNotes, " "), "Codex exec")
-	servers := readLaunchMCPServers(t, plan.Command)
-	require.ElementsMatch(t, []string{launchCodeactMCPServerName}, mapKeys(servers))
-	require.NotContains(t, joined, codexBypassApprovalsAndSandboxFlag)
+	require.Contains(t, plan.Command, codexBypassApprovalsAndSandboxFlag)
+	require.Contains(t, plan.Command, "--disable="+launchCodexShellToolFeature)
+	require.Contains(t, joined, "mcp_servers.kitsoki-codeact.command=\"kitsoki\"")
+	require.Contains(t, joined, "mcp-codeact")
+	require.Contains(t, joined, "gpt-5.5")
+	require.Contains(t, strings.Join(plan.FutureNotes, " "), "--disable shell_tool")
+}
+
+func TestAgentLaunchPlan_CodeactModeDefaultsToCodexOverImplicitClaudeProfile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(host.AgentBinEnv, "/bin/claude-test")
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kitsoki.yaml"), []byte(`
+default_profile: claude-native
+harness_profiles:
+  claude-native:
+    backend: claude
+    model: opus
+`), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".codex", "agents"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".codex", "agents", "codeact-worker.toml"), []byte(`
+name = "codeact-worker"
+developer_instructions = "Use the available code action surface."
+model = "gpt-5.5"
+`), 0644))
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		AgentName:  "codeact-worker",
+		ConfigPath: filepath.Join(dir, ".kitsoki.yaml"),
+		Mode:       "codeact",
+		Task:       "edit files",
+	})
+	require.NoError(t, err)
+	for _, cleanup := range plan.cleanups {
+		t.Cleanup(cleanup)
+	}
+	require.Equal(t, "codex", plan.Backend)
+	require.Equal(t, "/bin/codex-test", plan.Binary)
+	require.Empty(t, plan.Profile)
+	require.Equal(t, "gpt-5.5", plan.Model)
+	joined := strings.Join(plan.Command, " ")
+	require.Contains(t, plan.Command, "--disable="+launchCodexShellToolFeature)
+	require.NotContains(t, joined, "opus")
+	require.NotContains(t, joined, "claude-native")
 }
 
 func TestAgentLaunchPlan_CodeactModeRejectsBackendWithoutHardToolRemoval(t *testing.T) {
@@ -231,12 +275,12 @@ developer_instructions = "Use the available code action surface."
 
 	_, err = buildAgentLaunchPlan(agentLaunchOptions{
 		AgentName: "codeact-worker",
-		Backend:   "codex",
+		Backend:   "copilot",
 		Mode:      "codeact",
 		Task:      "edit files",
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "cannot hard-remove Bash")
+	require.Contains(t, err.Error(), "cannot hard-remove shell access")
 }
 
 func TestAgentLaunchPlan_CodeactModeRequiresTaskForFreestandingAgent(t *testing.T) {
