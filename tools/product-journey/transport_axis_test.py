@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Runner-level test for the --transport axis and the persona lens catalog.
 
-Covers S1 of docs/proposals/e2e-persona-qa-review.md ("transport as data"):
+Covers docs/persona-qa.md's "transport as data" contract:
   - select_transports() validation (dup/unknown ids, "all" expansion)
   - resolve_scenario_transports()/scenario_transport_legs() for scenarios that
     declare `transports` vs scenarios that don't (mined scenarios, which get

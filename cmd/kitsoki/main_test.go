@@ -148,6 +148,18 @@ func TestCLI_UnknownSubcommandFails(t *testing.T) {
 	}
 }
 
+func TestCLI_PersonaQAHelp(t *testing.T) {
+	out, err := execRoot(t, "persona-qa", "--help")
+	if err != nil {
+		t.Fatalf("persona-qa --help: %v\n%s", err, out)
+	}
+	for _, want := range []string{"Persona QA Kit", "emit-run", "complete"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("persona-qa help missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestCLI_NoArgsDelegatesToRun(t *testing.T) {
 	oldWd, err := os.Getwd()
 	if err != nil {

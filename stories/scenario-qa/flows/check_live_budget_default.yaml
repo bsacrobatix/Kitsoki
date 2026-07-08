@@ -1,5 +1,5 @@
 # check_live_budget_default — a `check` with no `live_budget_minutes` slot
-# must still render `--live-budget-minutes 20` (run.py's own default) on the
+# must still render `--live-budget-minutes 20` on the
 # emit_scenario_qa_run invoke, not omit the flag or send 0. Sibling to
 # check_live_budget_override.yaml, which covers the override path; kept in
 # its own fresh session because world.live_budget_minutes persists across
@@ -53,8 +53,8 @@ turns:
           call: emit_scenario_qa_run
           cmd: python3
           args:
-            - tools/product-journey/run.py
-            - --emit-run
+            - tools/persona_qa/kit.py
+            - emit-run
             - --project
             - gears-rust
             - --persona

@@ -7,7 +7,25 @@ journey** experiment:
 - keep checks deterministic by default,
 - and emit evidence artifacts (log + deck) as execution progresses.
 
-## How to run
+## Productized Persona QA Kit
+
+Use the public kit commands for project-facing work:
+
+```sh
+kitsoki persona-qa init --root .
+kitsoki persona-qa validate --config persona-qa.yaml
+kitsoki persona-qa emit-run --config persona-qa.yaml --project local-app --persona core-maintainer --scenario project-onboarding --transport all
+kitsoki persona-qa drive --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id> --mode replay
+kitsoki persona-qa review --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id>
+kitsoki persona-qa complete --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id>
+```
+
+`tools/product-journey/run.py` remains the compatibility runner and story
+backend. It also accepts `--config persona-qa.yaml` so its catalog, driver, and
+artifact paths can come from an external kit instead of this checkout's
+directory layout. See `docs/persona-qa.md` for the supported product contract.
+
+## How to run the compatibility runner
 
 The harness is intentionally small and opinionated for the first milestone:
 

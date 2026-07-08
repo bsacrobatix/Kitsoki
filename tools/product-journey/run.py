@@ -26,6 +26,12 @@ from typing import Optional
 
 
 ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = ROOT
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from tools.persona_qa.config import load_collection as load_persona_qa_collection  # noqa: E402
+from tools.persona_qa.config import load_config as load_persona_qa_config  # noqa: E402
+
 CATALOG = ROOT / "tools" / "product-journey" / "catalog.json"
 PERSONAS = ROOT / "tools" / "product-journey" / "personas.json"
 SCENARIOS = ROOT / "tools" / "product-journey" / "scenarios.json"
@@ -86,7 +92,7 @@ CANONICAL_DRIVER_CAPABILITIES = [
 # the leg's evidence, the evidence kind that names it, and how strong the
 # proof is. vscode is always bridge-level -- the IDE bridge stub/recording
 # path, never a genuine editor -- so a driver/report never mistakes it for
-# editor-level coverage (see docs/proposals/e2e-persona-qa-review.md G7).
+# editor-level coverage (see docs/persona-qa.md).
 TRANSPORT_EVIDENCE_CONTRACTS = {
     "tui": {
         "primary_tool": "render.tui_png",
@@ -126,11 +132,11 @@ def load_catalog(path: Path):
 
 
 def load_personas(path: Path):
-    return json.loads(path.read_text())["personas"]
+    return load_persona_qa_collection(path, "personas")
 
 
 def load_scenarios(path: Path):
-    return json.loads(path.read_text())["scenarios"]
+    return load_persona_qa_collection(path, "scenarios")
 
 
 def is_active_persona(persona: dict) -> bool:
@@ -201,6 +207,39 @@ def select_transports(transport_filter: str) -> list[str]:
 
 def load_github_targets(path: Path):
     return json.loads(path.read_text())
+
+
+def apply_persona_qa_config(config_path: str):
+    """Apply an optional productized persona-QA project config.
+
+    The runner remains the mature implementation point, but these globals are
+    now data-owned by persona-qa.yaml instead of assumed from the Kitsoki repo
+    layout. Paths not relevant to the public kit surface intentionally stay
+    rooted at ROOT so existing smoke tests and story contract checks are not
+    reinterpreted as external-project requirements.
+    """
+
+    global PROJECT_ROOT
+    global CATALOG, PERSONAS, SCENARIOS, GITHUB_TARGETS, DRIVERS_DIR
+    global DEFAULT_DRIVER_ID, LOG, ARTIFACT_ROOT, MATRIX_ROOT, TARGET_PROOF_ROOT
+    global DOGFOOD_ROOT, PREFLIGHT_ROOT, DEFAULT_DECK
+
+    config = load_persona_qa_config(config_path or None, repo_root=ROOT)
+    PROJECT_ROOT = config.project_root
+    CATALOG = config.path("catalogs", "catalog")
+    PERSONAS = config.path("catalogs", "personas")
+    SCENARIOS = config.path("catalogs", "scenarios")
+    GITHUB_TARGETS = config.path("catalogs", "github_targets")
+    DRIVERS_DIR = config.path("drivers", "dir")
+    DEFAULT_DRIVER_ID = config.default_driver
+    LOG = config.path("artifacts", "run_log")
+    ARTIFACT_ROOT = config.path("artifacts", "root")
+    MATRIX_ROOT = ARTIFACT_ROOT / "matrices"
+    TARGET_PROOF_ROOT = ARTIFACT_ROOT / "target-proofs"
+    DOGFOOD_ROOT = ARTIFACT_ROOT / "dogfood"
+    PREFLIGHT_ROOT = ARTIFACT_ROOT / "preflights"
+    DEFAULT_DECK = config.path("deck", "publish")
+    return config
 
 
 def append_log(message: str):
@@ -349,7 +388,7 @@ def autonomous_marathon_smoke(repeats: int = 1) -> dict:
 def marathon_smoke_ledger_path(value: str) -> Path:
     path = Path(value)
     if not path.is_absolute():
-        path = ROOT / path
+        path = PROJECT_ROOT / path
     return path
 
 
@@ -799,7 +838,7 @@ def load_target_proof(path: str) -> dict:
         return {}
     proof_path = Path(path)
     if not proof_path.is_absolute():
-        proof_path = ROOT / proof_path
+        proof_path = PROJECT_ROOT / proof_path
     if proof_path.is_dir():
         proof_path = proof_path / "target-proof.json"
     return read_json(proof_path)
@@ -1348,9 +1387,9 @@ def capture_preflight(
     add_check("studio-ping", studio_ok, studio_summary)
     stdout = "\n".join(part for part in [stdout, studio_stdout] if part)
     stderr = "\n".join(part for part in [stderr, studio_stderr] if part)
-    quota_path = Path(quota_state) if quota_state else ROOT / ".artifacts" / "quota" / "provider-state.json"
+    quota_path = Path(quota_state) if quota_state else PROJECT_ROOT / ".artifacts" / "quota" / "provider-state.json"
     if not quota_path.is_absolute():
-        quota_path = ROOT / quota_path
+        quota_path = PROJECT_ROOT / quota_path
     quota_ok, quota_summary = quota_preflight_check(quota_path)
     add_check("quota-window", quota_ok, quota_summary)
     status = "passed" if all(check["status"] == "passed" for check in checks) else "failed"
@@ -1619,10 +1658,12 @@ def normalized_context(text: str, start: int, end: int, radius: int = 120) -> st
 
 
 def display_path(path: Path) -> str:
-    try:
-        return path.relative_to(ROOT).as_posix()
-    except ValueError:
-        return path.as_posix()
+    for base in [PROJECT_ROOT, ROOT]:
+        try:
+            return path.relative_to(base).as_posix()
+        except ValueError:
+            continue
+    return path.as_posix()
 
 
 def raw_github_reference_is_prohibition(context: str) -> bool:
@@ -2700,7 +2741,11 @@ def is_playback_evidence(item: dict, run_dir: Optional[Path] = None) -> bool:
         return candidate.is_file()
     if run_dir is None:
         return False
-    return (run_dir / candidate).is_file() or (ROOT / candidate).is_file()
+    return (
+        (run_dir / candidate).is_file()
+        or (PROJECT_ROOT / candidate).is_file()
+        or (ROOT / candidate).is_file()
+    )
 
 
 def scenario_playback_kind(scenario: dict) -> Optional[str]:
@@ -3059,7 +3104,7 @@ def build_execution_plan(run_json: dict, evidence: dict, transports: Optional[li
     for item in evidence.get("items", []):
         evidence_by_scenario.setdefault(item["scenario"], []).append(item)
 
-    run_dir_arg = f".artifacts/product-journey/{run_json['run_id']}"
+    run_dir_arg = run_dir_cli_arg(run_json["run_id"])
     steps = []
     order = 0
     scenarios_with_legs = 0
@@ -3279,7 +3324,7 @@ def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict, tran
         (step["scenario"], step.get("transport")): step
         for step in execution_plan.get("steps", [])
     }
-    run_dir_arg = f".artifacts/product-journey/{run_json['run_id']}"
+    run_dir_arg = run_dir_cli_arg(run_json["run_id"])
     scenarios = []
     for scenario in run_json["scenarios"]:
         scenario_id = scenario["id"]
@@ -3606,7 +3651,7 @@ def proof_gap_rows(run_json: dict, evidence: dict) -> list[dict]:
         if is_proof_evidence(item)
     }
     rows = []
-    run_dir_arg = f".artifacts/product-journey/{run_json.get('run_id', '<run-id>')}"
+    run_dir_arg = run_dir_cli_arg(run_json.get("run_id", "<run-id>"))
     for scenario in run_json.get("scenarios", []):
         scenario_id = scenario.get("id", "")
         minimum = scenario_quality_gate(scenario.get("id", "")).get("minimum_evidence", [])
@@ -3656,7 +3701,7 @@ def proof_gap_rows(run_json: dict, evidence: dict) -> list[dict]:
 
 
 def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: dict) -> dict:
-    run_dir_arg = f".artifacts/product-journey/{run_json['run_id']}"
+    run_dir_arg = run_dir_cli_arg(run_json["run_id"])
     missing_evidence = [
         {"scenario": item.get("scenario", ""), "kind": item.get("kind", ""), "hint": evidence_capture_hint(item.get("kind", ""))}
         for item in evidence.get("items", [])
@@ -3875,7 +3920,7 @@ def driver_manifest_path(path_or_id: str) -> Path:
     value = (path_or_id or DEFAULT_DRIVER_ID).strip()
     candidate = Path(value)
     if candidate.is_absolute() or candidate.parent != Path("."):
-        return candidate if candidate.is_absolute() else ROOT / candidate
+        return candidate if candidate.is_absolute() else PROJECT_ROOT / candidate
     if candidate.suffix:
         return DRIVERS_DIR / candidate
     return DRIVERS_DIR / f"{candidate.name}.json"
@@ -3894,7 +3939,7 @@ def normalize_capability_tools(value: object) -> list[str]:
     raise SystemExit("Driver manifest capability values must be non-empty strings or string arrays")
 
 
-def load_driver_manifest(path_or_id: str = DEFAULT_DRIVER_ID) -> dict:
+def load_driver_manifest(path_or_id: str = "") -> dict:
     path = driver_manifest_path(path_or_id)
     if not path.is_file():
         raise SystemExit(f"Driver manifest not found: {path}")
@@ -3973,7 +4018,7 @@ def validate_driver_manifest(manifest: dict) -> dict:
             continue
         executable = Path(parts[0])
         if executable.parent != Path("."):
-            candidate = executable if executable.is_absolute() else ROOT / executable
+            candidate = executable if executable.is_absolute() else PROJECT_ROOT / executable
             if not candidate.exists():
                 issues.append({"severity": "error", "id": "driver-oracle-exists", "detail": f"{oracle.get('id')}: {parts[0]} not found"})
             elif not os.access(candidate, os.X_OK):
@@ -3989,8 +4034,18 @@ def validate_driver_manifest(manifest: dict) -> dict:
 def run_dir_from_arg(value: str) -> Path:
     path = Path(value)
     if not path.is_absolute():
-        path = ROOT / path
+        path = PROJECT_ROOT / path
     return path
+
+
+def run_dir_cli_arg(run_id: str) -> str:
+    path = ARTIFACT_ROOT / run_id
+    for base in [PROJECT_ROOT, ROOT]:
+        try:
+            return path.relative_to(base).as_posix()
+        except ValueError:
+            continue
+    return str(path)
 
 
 def is_external_artifact_ref(path: str) -> bool:
@@ -4050,6 +4105,7 @@ def artifact_ref_exists(run_dir: Path, path: str) -> bool:
         return (
             (run_dir / candidate).exists()
             or (run_dir / "cassettes" / candidate).exists()
+            or (PROJECT_ROOT / candidate).exists()
             or (ROOT / candidate).exists()
         )
     if is_external_artifact_ref(value):
@@ -4059,7 +4115,7 @@ def artifact_ref_exists(run_dir: Path, path: str) -> bool:
     candidate = Path(value)
     if candidate.is_absolute():
         return candidate.exists()
-    return (run_dir / candidate).exists() or (ROOT / candidate).exists()
+    return (run_dir / candidate).exists() or (PROJECT_ROOT / candidate).exists() or (ROOT / candidate).exists()
 
 
 def missing_local_artifact_refs(run_dir: Path, items: list[dict]) -> list[str]:
@@ -11190,8 +11246,8 @@ def scenario_qa_leg_items(leg_results: Optional[dict]) -> list[dict]:
 def scenario_qa_leg_level(item: dict) -> str:
     """The evidence level for one recorded leg -- 'bridge-level' for vscode
     (the IDE bridge stub/recording path, never a genuine editor -- see
-    TRANSPORT_EVIDENCE_CONTRACTS and docs/proposals/e2e-persona-qa-review.md
-    G7), 'frame-level' for tui/web. Prefers the leg's own recorded
+    TRANSPORT_EVIDENCE_CONTRACTS and docs/persona-qa.md), 'frame-level' for
+    tui/web. Prefers the leg's own recorded
     `evidence_level`/`transport_evidence_contract` (present once
     scripts/record_leg_result.star has run for real); falls back to the
     transport-id lookup so a leg_results row that only carries a bare
@@ -11263,7 +11319,7 @@ def parse_scenario_qa_leg_results(raw: str) -> dict:
     if raw.startswith("@"):
         path = Path(raw[1:])
         if not path.is_absolute():
-            path = ROOT / path
+            path = PROJECT_ROOT / path
         text = path.read_text(encoding="utf-8")
     try:
         parsed = json.loads(text)
@@ -12380,6 +12436,7 @@ def prune_runs(keep: int, dry_run: bool) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", default="", help="persona-qa.yaml project config for portable kit paths")
     parser.add_argument("--project", default="gears-rust", help="Project id from catalog or github-targets")
     parser.add_argument(
         "--mode",
@@ -12394,7 +12451,7 @@ def main() -> None:
     parser.add_argument("--live-budget-minutes", type=int, default=20, help="Per-scenario live/model budget written into emitted run contracts")
     parser.add_argument("--run-log", action="store_true", help="Force a timestamped run log entry")
     parser.add_argument("--emit-run", action="store_true", help="Write a no-LLM run artifact bundle and Slidey deck")
-    parser.add_argument("--driver", default=DEFAULT_DRIVER_ID, help="Driver manifest id or path for --emit-run/--emit-matrix")
+    parser.add_argument("--driver", default="", help="Driver manifest id or path for --emit-run/--emit-matrix")
     parser.add_argument("--driver-smoke", default="", help="Validate a driver manifest id/path without launching the target")
     parser.add_argument("--scenarios", default="", help="Comma-separated scenario ids to include with --emit-run")
     parser.add_argument(
@@ -12569,6 +12626,7 @@ def main() -> None:
     parser.add_argument("--apply", action="store_true", help="With --prune-runs, actually delete (default is dry-run)")
     args = parser.parse_args()
 
+    apply_persona_qa_config(args.config)
     catalog = load_catalog(CATALOG)
     all_personas = load_personas(PERSONAS)
     all_scenarios = load_scenarios(SCENARIOS)
