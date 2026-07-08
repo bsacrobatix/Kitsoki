@@ -11,6 +11,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised on older Python runtimes only.
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ModuleNotFoundError:  # pragma: no cover
+        tomllib = None  # type: ignore[assignment]
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from init_transcripts import transcript_evidence, transcript_slug  # noqa: E402
 
@@ -463,6 +471,155 @@ def make_targets(path: Path) -> set[str]:
     return targets
 
 
+def parse_simple_project_toml(text: str) -> dict:
+    """Parse the small subset of project.toml needed when tomllib is absent."""
+    doc: dict = {}
+    repos: list[dict] = []
+    current: dict | None = doc
+    current_repo: dict | None = None
+    in_multiline = False
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if in_multiline:
+            if '"""' in stripped or "'''" in stripped:
+                in_multiline = False
+            continue
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped == "[[repos]]":
+            current_repo = {}
+            repos.append(current_repo)
+            current = current_repo
+            continue
+        if stripped == "[repos.local_run]" and current_repo is not None:
+            local_run: dict = {}
+            current_repo["local_run"] = local_run
+            current = local_run
+            continue
+        if stripped.startswith("["):
+            current = None
+            continue
+        if "=" not in stripped or current is None:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if value.startswith('"""') or value.startswith("'''"):
+            if not (len(value) > 3 and (value.endswith('"""') or value.endswith("'''"))):
+                in_multiline = True
+            current[key] = value.strip('"').strip("'")
+            continue
+        if value.startswith('"') and value.endswith('"'):
+            current[key] = value[1:-1]
+        elif value.startswith("'") and value.endswith("'"):
+            current[key] = value[1:-1]
+        else:
+            current[key] = value
+    if repos:
+        doc["repos"] = repos
+    return doc
+
+
+def load_toml(path: Path) -> dict:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    if tomllib is None:
+        return parse_simple_project_toml(text)
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return parse_simple_project_toml(text)
+
+
+def normalized_rel(path: str) -> str:
+    return path.strip().strip("/").replace("\\", "/")
+
+
+def project_metadata_for_target(path: Path) -> dict:
+    """Find cyber-repo style projects/<id>/project.toml metadata for a target."""
+    for root in [path, *path.parents]:
+        projects_dir = root / "projects"
+        if not projects_dir.is_dir():
+            continue
+        try:
+            target_rel = normalized_rel(path.relative_to(root).as_posix())
+        except ValueError:
+            continue
+        for project_file in sorted(projects_dir.glob("*/project.toml")):
+            doc = load_toml(project_file)
+            repos = doc.get("repos") if isinstance(doc, dict) else None
+            if not isinstance(repos, list):
+                continue
+            for repo in repos:
+                if not isinstance(repo, dict):
+                    continue
+                submodule = repo.get("submodule")
+                if isinstance(submodule, str) and normalized_rel(submodule) == target_rel:
+                    return {
+                        "root": str(root),
+                        "path": str(project_file),
+                        "project_id": project_file.parent.name,
+                        "doc": doc,
+                        "repo": repo,
+                    }
+    return {}
+
+
+def text_field(value) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def apply_project_metadata(
+    metadata: dict,
+    project_id: str,
+    stack: str,
+    dev_command: str,
+    test_command: str,
+    build_command: str,
+) -> tuple[str, str, str, str, str, str]:
+    if not metadata:
+        return project_id, title_from_slug(project_id), stack, dev_command, test_command, build_command
+
+    doc = metadata.get("doc") if isinstance(metadata.get("doc"), dict) else {}
+    repo = metadata.get("repo") if isinstance(metadata.get("repo"), dict) else {}
+    local_run = repo.get("local_run") if isinstance(repo.get("local_run"), dict) else {}
+
+    meta_id = slug(text_field(metadata.get("project_id")) or project_id)
+    title = text_field(doc.get("title")) or title_from_slug(meta_id)
+    description = " ".join(
+        item
+        for item in [
+            text_field(doc.get("description")),
+            text_field(repo.get("description")),
+        ]
+        if item
+    ).lower()
+
+    if stack == "local project":
+        if re.search(r"\bgo\b|golang", description):
+            stack = "go project"
+        elif re.search(r"\bnode\b|typescript|javascript|vite|react|vue", description):
+            stack = "node project"
+        elif re.search(r"\bpython\b", description):
+            stack = "python project"
+        elif re.search(r"\brust\b", description):
+            stack = "rust project"
+
+    meta_test = text_field(repo.get("test_command"))
+    meta_build = text_field(local_run.get("build"))
+    meta_dev = text_field(local_run.get("start"))
+    return (
+        meta_id,
+        title,
+        stack,
+        meta_dev or dev_command,
+        meta_test or test_command,
+        meta_build or build_command,
+    )
+
+
 def git_output(path: Path, *args: str) -> str:
     try:
         proc = subprocess.run(
@@ -568,6 +725,7 @@ def discover(path: Path, starter_stories: list[dict] | None = None, pack_id: str
     project_id = slug(package_name or pyproject_name or path.name)
     node_manager = node_package_manager(path, package) if package else ""
     targets = make_targets(path)
+    project_metadata = project_metadata_for_target(path)
     deps = {}
     for key in ("dependencies", "devDependencies"):
         value = package.get(key)
@@ -654,6 +812,15 @@ def discover(path: Path, starter_stories: list[dict] | None = None, pack_id: str
         elif "flask" in py_text:
             dev_command = "flask run"
 
+    project_id, project_title, stack, dev_command, test_command, build_command = apply_project_metadata(
+        project_metadata,
+        project_id,
+        stack,
+        dev_command,
+        test_command,
+        build_command,
+    )
+
     transcripts = transcript_evidence(path)
     repo = git_info(path)
     # External ticket-repo passthrough: a github.com origin is the repo's
@@ -666,7 +833,7 @@ def discover(path: Path, starter_stories: list[dict] | None = None, pack_id: str
     return {
         "target_path": str(path),
         "project_id": project_id,
-        "project_title": title_from_slug(project_id),
+        "project_title": project_title,
         "stack": stack,
         "dev_command": dev_command,
         "test_command": test_command,
@@ -675,7 +842,7 @@ def discover(path: Path, starter_stories: list[dict] | None = None, pack_id: str
         "repo_vcs": repo["vcs"],
         "repo_default_branch": repo["default_branch"],
         "repo_remote": repo["remote"],
-        "conventions": "hybrid" if project_id == "slidey" or (path / "AGENTS.md").exists() or (path / "CLAUDE.md").exists() else "local defaults",
+        "conventions": "project" if project_metadata else ("hybrid" if project_id == "slidey" or (path / "AGENTS.md").exists() or (path / "CLAUDE.md").exists() else "local defaults"),
         "tracker": "github" if ticket_repo else "none",
         "ticket_repo": ticket_repo,
         "starter_stories": starter_stories,
