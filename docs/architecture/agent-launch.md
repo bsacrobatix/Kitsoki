@@ -57,22 +57,39 @@ the same `--mcp-config` shape Claude uses, then translated into Codex
 Claude Code agent with the studio MCP attached, for example
 `claude --agent kitsoki-mcp-driver`.
 
-To give a launched agent code-as-action without giving it Bash/Python/Node,
-attach the standalone CodeAct MCP server instead of shell tools:
+To give a launched task agent code-as-action without giving it Bash/Python/Node,
+use CodeAct launch mode:
 
-```toml
-[mcp_servers.codeact]
-command = "kitsoki"
-args = [
-  "mcp-codeact",
-  "--working-dir", ".",
-  "--capabilities-json", '{"fs":{"read":["**"]},"vcs":"read"}',
-]
+```sh
+kitsoki agent launch --agent codeact-worker --mode codeact --task-file .context/task.md
 ```
 
-The server exposes `codeact_eval`; its startup capabilities are the authority
-ceiling, so the launched agent can supply snippets and data but cannot grant
-itself new filesystem, probe, or network access.
+CodeAct mode attaches only the standalone `kitsoki mcp-codeact` server and
+allows only `mcp__kitsoki-codeact__codeact_eval`. The launch is forced onto the
+Claude backend because Codex launch translation currently drops hard tool
+allowlists and runs MCP calls through its bypass flag. If an explicit
+`--backend` or `--profile` selects a backend that cannot hard-remove Bash,
+planning fails instead of relying on prompt instructions.
+
+The default CodeAct capability ceiling is working-directory-rooted filesystem
+read/write through `ctx.fs` plus read-only git probes through `ctx.probe`; it is
+passed to `mcp-codeact` as `{"fs":true,"vcs":"read"}`. Override it with
+`--codeact-capabilities-json` or `--codeact-capabilities-file`. The server
+startup capabilities are the authority ceiling, so the launched agent can
+supply snippets and data but cannot grant itself new filesystem, probe, host, or
+network access.
+
+CodeAct mode is task-backed only. Freestanding launch without `--task` opens an
+interactive backend session, and raw interactive launch intentionally has no
+agent wrapper, so both are rejected under `--mode codeact`.
+
+For clients outside `kitsoki agent launch`, attach the same server manually:
+
+```toml
+[mcp_servers.kitsoki-codeact]
+command = "kitsoki"
+args = ["mcp-codeact", "--working-dir", ".", "--capabilities-json", '{"fs":true,"vcs":"read"}']
+```
 
 Task-backed freestanding launch uses `codex exec`. Freestanding launch with no
 task uses top-level `codex [OPTIONS] [PROMPT]`, so the terminal opens the Codex

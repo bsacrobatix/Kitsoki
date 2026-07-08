@@ -19,23 +19,26 @@ import (
 )
 
 type agentLaunchOptions struct {
-	AppPath        string
-	AgentFile      string
-	ConfigPath     string
-	AgentName      string
-	Profile        string
-	Backend        string
-	Model          string
-	Effort         string
-	WorkingDir     string
-	Task           string
-	TaskFile       string
-	PermissionMode string
-	AddDirs        []string
-	Env            []string
-	Exec           bool
-	Interactive    bool
-	RawInteractive bool
+	AppPath                 string
+	AgentFile               string
+	ConfigPath              string
+	AgentName               string
+	Profile                 string
+	Backend                 string
+	Mode                    string
+	Model                   string
+	Effort                  string
+	WorkingDir              string
+	Task                    string
+	TaskFile                string
+	PermissionMode          string
+	CodeactCapabilitiesJSON string
+	CodeactCapabilitiesFile string
+	AddDirs                 []string
+	Env                     []string
+	Exec                    bool
+	Interactive             bool
+	RawInteractive          bool
 }
 
 type agentLaunchPlan struct {
@@ -44,6 +47,7 @@ type agentLaunchPlan struct {
 	Agent        string                    `json:"agent,omitempty"`
 	Profile      string                    `json:"profile,omitempty"`
 	Backend      string                    `json:"backend"`
+	Mode         string                    `json:"mode,omitempty"`
 	Binary       string                    `json:"binary"`
 	WorkingDir   string                    `json:"working_dir"`
 	Model        string                    `json:"model,omitempty"`
@@ -73,7 +77,14 @@ type standaloneCodexAgent struct {
 	MCPServers            map[string]any
 }
 
-const codexBypassApprovalsAndSandboxFlag = "--dangerously-bypass-approvals-and-sandbox"
+const (
+	codexBypassApprovalsAndSandboxFlag = "--dangerously-bypass-approvals-and-sandbox"
+
+	launchModeCodeact                    = "codeact"
+	launchCodeactMCPServerName           = "kitsoki-codeact"
+	launchCodeactMCPToolName             = "mcp__kitsoki-codeact__codeact_eval"
+	launchCodeactDefaultCapabilitiesJSON = `{"fs":true,"vcs":"read"}`
+)
 
 func agentLaunchCmd() *cobra.Command {
 	var opts agentLaunchOptions
@@ -91,6 +102,10 @@ declare [mcp_servers.*] blocks; launch attaches them exactly like a Claude
 
 Use --raw --interactive to start a normal interactive backend CLI in a working
 directory with no app, no agent file, and no Kitsoki replacement system prompt.
+
+Use --mode codeact for a task-backed agent whose only code-action surface is
+the kitsoki-codeact MCP server. CodeAct mode forces a Claude backend because
+Codex launch translation cannot hard-remove Bash today.
 
 By default this prints a redacted JSON launch plan for task-backed launches.
 Freestanding Codex launch with no task opens Codex interactively.`,
@@ -121,12 +136,15 @@ Freestanding Codex launch with no task opens Codex interactively.`,
 	cmd.Flags().StringVar(&opts.AgentName, "agent", "", "agent name to launch")
 	cmd.Flags().StringVar(&opts.Profile, "profile", "", "harness profile name; defaults to config default_profile when set")
 	cmd.Flags().StringVar(&opts.Backend, "backend", "", "override backend: claude|codex|copilot")
+	cmd.Flags().StringVar(&opts.Mode, "mode", "", "launch mode: normal|codeact")
 	cmd.Flags().StringVar(&opts.Model, "model", "", "override model for this task")
 	cmd.Flags().StringVar(&opts.Effort, "effort", "", "override reasoning effort for this task")
 	cmd.Flags().StringVar(&opts.WorkingDir, "working-dir", "", "override agent cwd; story mode defaults to agent cwd then app directory; freestanding mode defaults to the current directory")
 	cmd.Flags().StringVar(&opts.Task, "task", "", "task instructions")
 	cmd.Flags().StringVar(&opts.TaskFile, "task-file", "", "file containing task instructions")
 	cmd.Flags().StringVar(&opts.PermissionMode, "permission-mode", "", "permission mode: ask|bypassPermissions|denyAll")
+	cmd.Flags().StringVar(&opts.CodeactCapabilitiesJSON, "codeact-capabilities-json", "", "CodeAct mode Starlark capability ceiling as JSON; defaults to working-directory read/write plus read-only git probes")
+	cmd.Flags().StringVar(&opts.CodeactCapabilitiesFile, "codeact-capabilities-file", "", "file containing the CodeAct mode Starlark capability ceiling")
 	cmd.Flags().StringArrayVar(&opts.AddDirs, "add-dir", nil, "additional directory made available to the launched agent")
 	cmd.Flags().StringArrayVar(&opts.Env, "env", nil, "extra environment override KEY=VALUE; values are redacted from dry-run output")
 	cmd.Flags().BoolVar(&opts.Exec, "exec", false, "actually run the external CLI; default is a no-provider dry run")
@@ -137,10 +155,21 @@ Freestanding Codex launch with no task opens Codex interactively.`,
 }
 
 func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
+	mode, err := normalizeAgentLaunchMode(opts.Mode)
+	if err != nil {
+		return agentLaunchPlan{}, err
+	}
+	opts.Mode = mode
+	if opts.Mode != launchModeCodeact && (strings.TrimSpace(opts.CodeactCapabilitiesJSON) != "" || strings.TrimSpace(opts.CodeactCapabilitiesFile) != "") {
+		return agentLaunchPlan{}, fmt.Errorf("--codeact-capabilities-json/--codeact-capabilities-file require --mode codeact")
+	}
 	if strings.TrimSpace(opts.Task) != "" && strings.TrimSpace(opts.TaskFile) != "" {
 		return agentLaunchPlan{}, fmt.Errorf("use only one of --task or --task-file")
 	}
 	if opts.RawInteractive {
+		if opts.Mode == launchModeCodeact {
+			return agentLaunchPlan{}, fmt.Errorf("--mode codeact does not support --raw interactive launch because it cannot prove Bash is absent")
+		}
 		opts.Interactive = true
 		return buildRawInteractiveLaunchPlan(opts)
 	}
@@ -186,16 +215,41 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 	if err != nil {
 		return agentLaunchPlan{}, err
 	}
-	backend := firstLaunchNonEmpty(opts.Backend, profile.Backend, backendForAgentProvider(def, decl.Provider), "claude")
+	providerBackend := backendForAgentProvider(def, decl.Provider)
+	backend := firstLaunchNonEmpty(opts.Backend, profile.Backend, providerBackend, "claude")
+	profileBackendOverride := opts.Backend
+	if opts.Mode == launchModeCodeact {
+		if err := validateCodeactLaunchOptions(opts); err != nil {
+			return agentLaunchPlan{}, err
+		}
+		if strings.TrimSpace(opts.Backend) == "" {
+			backend = "claude"
+			profileBackendOverride = "claude"
+		}
+	}
 	if _, ok := host.ResolveAgentBackendName(backend); !ok && backend != "claude" {
 		return agentLaunchPlan{}, fmt.Errorf("unknown backend %q", backend)
 	}
-	profileName, profile, err = launchProfileForBackend(profileName, profile, backend, opts.Profile, opts.Backend)
+	if opts.Mode == launchModeCodeact && launchBackendName(backend) != "claude" {
+		return agentLaunchPlan{}, fmt.Errorf("--mode codeact requires backend %q because backend %q cannot hard-remove Bash", "claude", backend)
+	}
+	profileName, profile, err = launchProfileForBackend(profileName, profile, backend, opts.Profile, profileBackendOverride)
 	if err != nil {
 		return agentLaunchPlan{}, err
 	}
 	providerModel, providerEffort := providerDefaultsForAgent(def, decl.Provider)
-	model := launchModelForBackend(backend, firstLaunchNonEmpty(opts.Model, profile.Model, decl.Model, providerModel))
+	if opts.Mode == launchModeCodeact && providerBackend != "" && launchBackendName(providerBackend) != launchBackendName(backend) {
+		providerModel, providerEffort = "", ""
+	}
+	modelInput := firstLaunchNonEmpty(opts.Model, profile.Model, decl.Model, providerModel)
+	if opts.Mode == launchModeCodeact {
+		var modelErr error
+		modelInput, modelErr = codeactClaudeLaunchModel(modelInput, opts.Model)
+		if modelErr != nil {
+			return agentLaunchPlan{}, modelErr
+		}
+	}
+	model := launchModelForBackend(backend, modelInput)
 	effort := firstLaunchNonEmpty(opts.Effort, profile.Effort, decl.Effort, providerEffort)
 	providerEnv := map[string]string{}
 	for k, v := range providerEnvForAgent(def, decl.Provider) {
@@ -220,10 +274,27 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 	if err != nil {
 		return agentLaunchPlan{}, err
 	}
-	cliArgs := buildLaunchClaudeArgs(decl, model, effort, opts.PermissionMode, opts.AddDirs)
+	launchDecl := *decl
+	permissionMode := opts.PermissionMode
+	planTools := append([]string(nil), launchDecl.Tools...)
+	if opts.Mode == launchModeCodeact {
+		server, cfgErr := buildLaunchCodeactMCPServer(opts, workingDir)
+		if cfgErr != nil {
+			return agentLaunchPlan{}, cfgErr
+		}
+		launchDecl.SystemPrompt = appendCodeactLaunchSystemPrompt(launchDecl.SystemPrompt)
+		launchDecl.Tools = []string{launchCodeactMCPToolName}
+		launchDecl.MCP = &app.AgentMCPDecl{
+			Servers: map[string]any{launchCodeactMCPServerName: server},
+			Tools:   []string{launchCodeactMCPToolName},
+		}
+		permissionMode = "denyAll"
+		planTools = append([]string(nil), launchDecl.Tools...)
+	}
+	cliArgs := buildLaunchClaudeArgs(&launchDecl, model, effort, permissionMode, opts.AddDirs)
 	var cleanups []func()
-	if decl.MCP != nil && len(decl.MCP.Servers) > 0 {
-		mcpConfigPath, cleanup, cfgErr := writeLaunchMCPConfigTempfile(decl.MCP.Servers, "kitsoki-agent-launch-mcp")
+	if launchDecl.MCP != nil && len(launchDecl.MCP.Servers) > 0 {
+		mcpConfigPath, cleanup, cfgErr := writeLaunchMCPConfigTempfile(launchDecl.MCP.Servers, "kitsoki-agent-launch-mcp")
 		if cfgErr != nil {
 			return agentLaunchPlan{}, cfgErr
 		}
@@ -244,11 +315,12 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 		Agent:        opts.AgentName,
 		Profile:      profileName,
 		Backend:      backend,
+		Mode:         opts.Mode,
 		Binary:       bin,
 		WorkingDir:   workingDir,
 		Model:        model,
 		Effort:       effort,
-		Tools:        append([]string(nil), decl.Tools...),
+		Tools:        planTools,
 		Env:          redactEnv(providerEnv),
 		Command:      command,
 		Stdin:        inv.Stdin,
@@ -257,10 +329,7 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 		claudeArgs:   cliArgs,
 		cleanups:     cleanups,
 		LaunchPolicy: launchDecision,
-		FutureNotes: []string{
-			"Launch policy is a preflight guard, not a kernel/filesystem sandbox; backend sandboxing remains provider-specific.",
-			"Extension overlays and HTTP rules should be modeled as future agent/profile fields and resolved into this launch plan.",
-		},
+		FutureNotes:  launchFutureNotes(opts.Mode),
 	}, nil
 }
 
@@ -293,6 +362,9 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		return agentLaunchPlan{}, err
 	}
 	interactive := opts.Interactive || strings.TrimSpace(task) == ""
+	if opts.Mode == launchModeCodeact && interactive {
+		return agentLaunchPlan{}, fmt.Errorf("--mode codeact requires --task or --task-file; interactive launch cannot prove Bash is absent")
+	}
 	workingDir, err := resolveStandaloneLaunchWorkingDir(opts.WorkingDir)
 	if err != nil {
 		return agentLaunchPlan{}, err
@@ -302,14 +374,35 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		return agentLaunchPlan{}, err
 	}
 	backend := firstLaunchNonEmpty(opts.Backend, profile.Backend, "codex")
+	profileBackendOverride := opts.Backend
+	if opts.Mode == launchModeCodeact {
+		if err := validateCodeactLaunchOptions(opts); err != nil {
+			return agentLaunchPlan{}, err
+		}
+		if strings.TrimSpace(opts.Backend) == "" {
+			backend = "claude"
+			profileBackendOverride = "claude"
+		}
+	}
 	if _, ok := host.ResolveAgentBackendName(backend); !ok && backend != "claude" {
 		return agentLaunchPlan{}, fmt.Errorf("unknown backend %q", backend)
 	}
-	profileName, profile, err = launchProfileForBackend(profileName, profile, backend, opts.Profile, opts.Backend)
+	if opts.Mode == launchModeCodeact && launchBackendName(backend) != "claude" {
+		return agentLaunchPlan{}, fmt.Errorf("--mode codeact requires backend %q because backend %q cannot hard-remove Bash", "claude", backend)
+	}
+	profileName, profile, err = launchProfileForBackend(profileName, profile, backend, opts.Profile, profileBackendOverride)
 	if err != nil {
 		return agentLaunchPlan{}, err
 	}
-	model := launchModelForBackend(backend, firstLaunchNonEmpty(opts.Model, profile.Model, agent.Model))
+	modelInput := firstLaunchNonEmpty(opts.Model, profile.Model, agent.Model)
+	if opts.Mode == launchModeCodeact {
+		var modelErr error
+		modelInput, modelErr = codeactClaudeLaunchModel(modelInput, opts.Model)
+		if modelErr != nil {
+			return agentLaunchPlan{}, modelErr
+		}
+	}
+	model := launchModelForBackend(backend, modelInput)
 	effort := firstLaunchNonEmpty(opts.Effort, profile.Effort, agent.Effort)
 	providerEnv := map[string]string{}
 	for k, v := range profile.Env {
@@ -340,10 +433,30 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		Model:        model,
 		Effort:       effort,
 	}
-	cliArgs := buildLaunchClaudeArgs(decl, model, effort, opts.PermissionMode, opts.AddDirs)
+	permissionMode := opts.PermissionMode
+	planTools := append([]string(nil), decl.Tools...)
+	if opts.Mode == launchModeCodeact {
+		server, cfgErr := buildLaunchCodeactMCPServer(opts, workingDir)
+		if cfgErr != nil {
+			return agentLaunchPlan{}, cfgErr
+		}
+		decl.SystemPrompt = appendCodeactLaunchSystemPrompt(decl.SystemPrompt)
+		decl.Tools = []string{launchCodeactMCPToolName}
+		decl.MCP = &app.AgentMCPDecl{
+			Servers: map[string]any{launchCodeactMCPServerName: server},
+			Tools:   []string{launchCodeactMCPToolName},
+		}
+		permissionMode = "denyAll"
+		planTools = append([]string(nil), decl.Tools...)
+	}
+	cliArgs := buildLaunchClaudeArgs(decl, model, effort, permissionMode, opts.AddDirs)
 	var cleanups []func()
-	if len(agent.MCPServers) > 0 {
-		mcpConfigPath, cleanup, cfgErr := writeLaunchMCPConfigTempfile(agent.MCPServers, "kitsoki-agent-launch-mcp")
+	mcpServers := agent.MCPServers
+	if opts.Mode == launchModeCodeact {
+		mcpServers = decl.MCP.Servers
+	}
+	if len(mcpServers) > 0 {
+		mcpConfigPath, cleanup, cfgErr := writeLaunchMCPConfigTempfile(mcpServers, "kitsoki-agent-launch-mcp")
 		if cfgErr != nil {
 			return agentLaunchPlan{}, cfgErr
 		}
@@ -362,6 +475,7 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 			Agent:        opts.AgentName,
 			Profile:      profileName,
 			Backend:      backend,
+			Mode:         opts.Mode,
 			Binary:       bin,
 			WorkingDir:   workingDir,
 			Model:        model,
@@ -389,10 +503,12 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		Agent:        opts.AgentName,
 		Profile:      profileName,
 		Backend:      backend,
+		Mode:         opts.Mode,
 		Binary:       bin,
 		WorkingDir:   workingDir,
 		Model:        model,
 		Effort:       effort,
+		Tools:        planTools,
 		Env:          redactEnv(providerEnv),
 		Command:      command,
 		Stdin:        inv.Stdin,
@@ -401,10 +517,7 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		claudeArgs:   cliArgs,
 		cleanups:     cleanups,
 		LaunchPolicy: launchDecision,
-		FutureNotes: []string{
-			"Codex has no hard --agent-style per-tool allowlist in this launch path; the MCP-only posture comes from the freestanding agent instructions plus the attached MCP server set.",
-			"Codex exec currently requires --dangerously-bypass-approvals-and-sandbox for MCP calls to run non-interactively.",
-		},
+		FutureNotes:  standaloneLaunchFutureNotes(opts.Mode),
 	}, nil
 }
 
@@ -976,6 +1089,111 @@ func writeLaunchMCPConfigTempfile(mcpServers map[string]any, prefix string) (str
 	_ = f.Close()
 	path := f.Name()
 	return path, func() { _ = os.Remove(path) }, nil
+}
+
+func normalizeAgentLaunchMode(mode string) (string, error) {
+	switch strings.TrimSpace(mode) {
+	case "", "normal", "default":
+		return "", nil
+	case launchModeCodeact:
+		return launchModeCodeact, nil
+	default:
+		return "", fmt.Errorf("unknown --mode %q; supported modes are normal and codeact", mode)
+	}
+}
+
+func validateCodeactLaunchOptions(opts agentLaunchOptions) error {
+	switch strings.TrimSpace(opts.PermissionMode) {
+	case "", "denyAll":
+		// CodeAct mode owns the permission posture so Claude's allowlist binds.
+	default:
+		return fmt.Errorf("--mode codeact requires --permission-mode denyAll or no --permission-mode; got %q", opts.PermissionMode)
+	}
+	_, _, err := codeactLaunchCapabilitiesArg(opts)
+	return err
+}
+
+func codeactClaudeLaunchModel(model, explicitModel string) (string, error) {
+	model = strings.TrimSpace(model)
+	if model == "" || host.IsClaudeModelID(model) {
+		return model, nil
+	}
+	if strings.TrimSpace(explicitModel) != "" {
+		return "", fmt.Errorf("--mode codeact uses backend claude; --model %q is not a Claude model id", model)
+	}
+	return "", nil
+}
+
+func launchFutureNotes(mode string) []string {
+	if mode == launchModeCodeact {
+		return []string{
+			"CodeAct mode attaches only the kitsoki-codeact MCP server and permits only mcp__kitsoki-codeact__codeact_eval; Bash and direct editor tools are hard-denied.",
+			"CodeAct capabilities are enforced by mcp-codeact startup args rooted at the launch working directory; launch policy is still a preflight guard, not a kernel/filesystem sandbox.",
+		}
+	}
+	return []string{
+		"Launch policy is a preflight guard, not a kernel/filesystem sandbox; backend sandboxing remains provider-specific.",
+		"Extension overlays and HTTP rules should be modeled as future agent/profile fields and resolved into this launch plan.",
+	}
+}
+
+func standaloneLaunchFutureNotes(mode string) []string {
+	if mode == launchModeCodeact {
+		return launchFutureNotes(mode)
+	}
+	return []string{
+		"Codex has no hard --agent-style per-tool allowlist in this launch path; the MCP-only posture comes from the freestanding agent instructions plus the attached MCP server set.",
+		"Codex exec currently requires --dangerously-bypass-approvals-and-sandbox for MCP calls to run non-interactively.",
+	}
+}
+
+func buildLaunchCodeactMCPServer(opts agentLaunchOptions, workingDir string) (map[string]any, error) {
+	capFlag, capValue, err := codeactLaunchCapabilitiesArg(opts)
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"mcp-codeact", "--working-dir", workingDir, capFlag, capValue}
+	return map[string]any{
+		"command": "kitsoki",
+		"args":    args,
+	}, nil
+}
+
+func codeactLaunchCapabilitiesArg(opts agentLaunchOptions) (flag, value string, err error) {
+	inline := strings.TrimSpace(opts.CodeactCapabilitiesJSON)
+	path := strings.TrimSpace(opts.CodeactCapabilitiesFile)
+	if inline != "" && path != "" {
+		return "", "", fmt.Errorf("use only one of --codeact-capabilities-json or --codeact-capabilities-file")
+	}
+	if path != "" {
+		abs, absErr := filepath.Abs(path)
+		if absErr != nil {
+			return "", "", fmt.Errorf("resolve --codeact-capabilities-file: %w", absErr)
+		}
+		if _, parseErr := parseCodeactCapabilities("", abs); parseErr != nil {
+			return "", "", parseErr
+		}
+		return "--capabilities-file", abs, nil
+	}
+	if inline == "" {
+		inline = launchCodeactDefaultCapabilitiesJSON
+	}
+	if _, parseErr := parseCodeactCapabilities(inline, ""); parseErr != nil {
+		return "", "", parseErr
+	}
+	return "--capabilities-json", inline, nil
+}
+
+func appendCodeactLaunchSystemPrompt(systemPrompt string) string {
+	const codeactPrompt = `Kitsoki CodeAct mode:
+- You have no Bash, Python, Node, shell, or direct editor tools.
+- Inspect and edit files only through mcp__kitsoki-codeact__codeact_eval by submitting Starlark snippets.
+- Use ctx.fs for file reads/writes and ctx.probe only for granted read-only probes.`
+	systemPrompt = strings.TrimSpace(systemPrompt)
+	if systemPrompt == "" {
+		return codeactPrompt
+	}
+	return systemPrompt + "\n\n" + codeactPrompt
 }
 
 func backendForAgentProvider(def *app.AppDef, provider string) string {

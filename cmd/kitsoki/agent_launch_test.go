@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,6 +107,156 @@ states:
 	require.Contains(t, denied, "AskUserQuestion")
 	require.Contains(t, denied, "Bash")
 	require.Contains(t, denied, "Write")
+}
+
+func TestAgentLaunchPlan_CodeactModeStoryAgentOnlyAllowsCodeactTool(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(host.AgentBinEnv, "/bin/claude-test")
+	appPath := filepath.Join(dir, "app.yaml")
+	require.NoError(t, os.WriteFile(appPath, []byte(`
+app: { id: launch-test, version: 0.1.0, title: Launch Test }
+hosts: [host.agent.task]
+agents:
+  maker:
+    system_prompt: "You are the maker."
+    model: claude-sonnet-4-6
+    tools: [Read, Write]
+    cwd: work
+world: {}
+intents: {}
+root: idle
+states:
+  idle: { view: "idle" }
+`), 0644))
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "work"), 0755))
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		AppPath:    appPath,
+		ConfigPath: filepath.Join(dir, ".kitsoki.yaml"),
+		AgentName:  "maker",
+		Mode:       "codeact",
+		Task:       "implement it without shell",
+	})
+	require.NoError(t, err)
+	for _, cleanup := range plan.cleanups {
+		t.Cleanup(cleanup)
+	}
+	require.Equal(t, "claude", plan.Backend)
+	require.Equal(t, "codeact", plan.Mode)
+	require.Equal(t, []string{launchCodeactMCPToolName}, plan.Tools)
+	require.Contains(t, flagValue(t, plan.Command, "--allowedTools"), launchCodeactMCPToolName)
+	require.NotContains(t, flagValue(t, plan.Command, "--allowedTools"), "Bash")
+	require.NotContains(t, flagValue(t, plan.Command, "--allowedTools"), "Write")
+	denied := flagValue(t, plan.Command, "--disallowedTools")
+	require.Contains(t, denied, "Bash")
+	require.Contains(t, denied, "Write")
+	require.Contains(t, denied, "Edit")
+	require.Contains(t, plan.Command, "--permission-mode")
+	require.Contains(t, plan.Command, "default")
+	require.Contains(t, flagValue(t, plan.Command, "--system-prompt"), "You have no Bash")
+
+	servers := readLaunchMCPServers(t, plan.Command)
+	require.ElementsMatch(t, []string{launchCodeactMCPServerName}, mapKeys(servers))
+	server := servers[launchCodeactMCPServerName]
+	require.Equal(t, "kitsoki", server.Command)
+	require.Equal(t, []string{
+		"mcp-codeact",
+		"--working-dir", filepath.Join(dir, "work"),
+		"--capabilities-json", launchCodeactDefaultCapabilitiesJSON,
+	}, server.Args)
+}
+
+func TestAgentLaunchPlan_CodeactModeForcesClaudeWhenDefaultProfileIsCodex(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(host.AgentBinEnv, "/bin/claude-test")
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kitsoki.yaml"), []byte(`
+default_profile: codex-default
+harness_profiles:
+  codex-default:
+    backend: codex
+    model: gpt-5.5
+`), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".codex", "agents"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".codex", "agents", "codeact-worker.toml"), []byte(`
+name = "codeact-worker"
+developer_instructions = "Use the available code action surface."
+model = "gpt-5.5"
+
+[mcp_servers.existing]
+command = "node"
+args = ["server.js"]
+`), 0644))
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		AgentName:  "codeact-worker",
+		ConfigPath: filepath.Join(dir, ".kitsoki.yaml"),
+		Mode:       "codeact",
+		Task:       "edit files",
+	})
+	require.NoError(t, err)
+	for _, cleanup := range plan.cleanups {
+		t.Cleanup(cleanup)
+	}
+	require.Equal(t, "claude", plan.Backend)
+	require.Equal(t, "/bin/claude-test", plan.Binary)
+	require.Empty(t, plan.Profile)
+	require.Empty(t, plan.Model)
+	require.Equal(t, []string{launchCodeactMCPToolName}, plan.Tools)
+	joined := strings.Join(plan.Command, " ")
+	require.NotContains(t, joined, "mcp_servers.existing")
+	require.NotContains(t, joined, "gpt-5.5")
+	require.NotContains(t, strings.Join(plan.FutureNotes, " "), "Codex exec")
+	servers := readLaunchMCPServers(t, plan.Command)
+	require.ElementsMatch(t, []string{launchCodeactMCPServerName}, mapKeys(servers))
+	require.NotContains(t, joined, codexBypassApprovalsAndSandboxFlag)
+}
+
+func TestAgentLaunchPlan_CodeactModeRejectsBackendWithoutHardToolRemoval(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".codex", "agents"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".codex", "agents", "codeact-worker.toml"), []byte(`
+name = "codeact-worker"
+developer_instructions = "Use the available code action surface."
+`), 0644))
+
+	_, err = buildAgentLaunchPlan(agentLaunchOptions{
+		AgentName: "codeact-worker",
+		Backend:   "codex",
+		Mode:      "codeact",
+		Task:      "edit files",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot hard-remove Bash")
+}
+
+func TestAgentLaunchPlan_CodeactModeRequiresTaskForFreestandingAgent(t *testing.T) {
+	dir := t.TempDir()
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".codex", "agents"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".codex", "agents", "codeact-worker.toml"), []byte(`
+name = "codeact-worker"
+developer_instructions = "Use the available code action surface."
+`), 0644))
+
+	_, err = buildAgentLaunchPlan(agentLaunchOptions{
+		AgentName: "codeact-worker",
+		Mode:      "codeact",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requires --task or --task-file")
 }
 
 func TestAgentLaunchPlan_FreestandingCodexAgentAttachesMCP(t *testing.T) {
@@ -445,4 +596,29 @@ func readCodexModelInstructionsFile(t *testing.T, args []string) string {
 	raw, err := os.ReadFile(path)
 	require.NoError(t, err)
 	return string(raw)
+}
+
+type launchMCPServer struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+}
+
+func readLaunchMCPServers(t *testing.T, args []string) map[string]launchMCPServer {
+	t.Helper()
+	path := flagValue(t, args, "--mcp-config")
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var cfg struct {
+		MCPServers map[string]launchMCPServer `json:"mcpServers"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &cfg))
+	return cfg.MCPServers
+}
+
+func mapKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
