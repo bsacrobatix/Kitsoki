@@ -238,4 +238,54 @@ describe("InteractiveView — embed (VS Code) layout", () => {
     wrapper.unmount();
     openSpy.mockRestore();
   });
+
+  it("removes the devtools grid track when trace is hidden in the media workbench", async () => {
+    setEmbeddedOverride(false);
+    const wrapper = mount(InteractiveView, mountOpts);
+    await flushPromises();
+
+    const store = useRunStore();
+    store.transcript.push({
+      role: "agent",
+      text: "Rendered deck",
+      typedView: {
+        Source: "",
+        Elements: [
+          {
+            Kind: "media",
+            MediaHandle: "deck.html",
+            MediaKind: "slideshow",
+            MediaCaption: "Pinned deck",
+          },
+        ],
+      },
+    });
+    await nextTick();
+
+    await wrapper.find('[data-testid="media-workbench-toggle"]').trigger("click");
+    await wrapper.find('[data-testid="workbench-orient-horizontal"]').trigger("click");
+    await wrapper.find('[data-testid="devtools-dock-bottom"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="media-devtools-pane"]').exists()).toBe(true);
+    expect(wrapper.find(".iv__main--workbench-horizontal").exists()).toBe(true);
+    expect(wrapper.find(".iv__main--devtools-bottom").exists()).toBe(true);
+
+    await wrapper.find('[data-testid="trace-column-toggle"]').trigger("click");
+    await flushPromises();
+
+    const main = wrapper.find(".iv__main");
+    const style = main.attributes("style") ?? "";
+    expect(wrapper.find('[data-testid="media-devtools-pane"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="devtools-workbench-row-resizer"]').exists()).toBe(false);
+    expect(main.classes()).not.toContain("iv__main--workbench-horizontal");
+    expect(main.classes()).not.toContain("iv__main--devtools-bottom");
+    expect(style).toContain(
+      "grid-template-columns: minmax(18rem, 42%) 0.55rem minmax(20rem, 1fr);",
+    );
+    expect(style).not.toContain("grid-template-rows");
+    expect(style).not.toContain("minmax(12rem");
+
+    wrapper.unmount();
+  });
 });

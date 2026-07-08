@@ -14,6 +14,16 @@ focused window — see [`spatial-handoff.md`](spatial-handoff.md). The recorded
 trace shape is in
 [`docs/tracing/trace-format.md`](../tracing/trace-format.md#inputvisual--the-spatial-attachment).
 
+In normal live-session use, the most discoverable entry point is the media
+artifact itself: click `Pin` to put the artifact in the
+[session media workbench](../web/session-media-workbench.md), then click
+`Annotate` in the pinned pane. That flow uses the same spatial substrate, but
+normalises the pick into the newer
+[annotation anchor](../architecture/artifact-annotation.md) union so a story can
+route it to read-only discussion or to a `Send & refine` turn. Use `/review`
+when you specifically need to flag a video time range and ask the read-only
+oracle about that flagged frame.
+
 ## Mental model
 
 A **magnifying glass over a frame**: click anywhere and it tells you *"that's
