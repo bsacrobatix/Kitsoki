@@ -3,8 +3,8 @@
   "items": [
     {
       "scenario": "explain-delivery-loop",
-      "outcome": "validated",
-      "present_evidence_count": 3,
+      "outcome": "needs_evidence",
+      "present_evidence_count": 2,
       "required_evidence_count": 3,
       "finding_counts": {
         "strength": 1,
@@ -16,8 +16,8 @@
     },
     {
       "scenario": "verify-ui-evidence",
-      "outcome": "validated",
-      "present_evidence_count": 2,
+      "outcome": "needs_evidence",
+      "present_evidence_count": 1,
       "required_evidence_count": 2,
       "finding_counts": {
         "strength": 1,
@@ -29,9 +29,9 @@
     }
   ],
   "summary": {
-    "validated": 2,
+    "validated": 0,
     "captured": 0,
-    "planned": 0,
+    "planned": 2,
     "blocked": 0
   }
 }

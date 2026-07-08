@@ -98,6 +98,11 @@ Use this rule:
 - A committed deck file may live in `docs/decks/<deck-id>.slidey.json`.
 - Any committed rrweb clip it references must live under
   `docs/decks/assets/<deck-id>/`.
+- Persona-QA decks may only turn media-manifest entries into standalone
+  `Playback evidence` scenes when the entry has proof-grade source metadata and
+  capture provenance. Demo, synthetic, placeholder, or unproven local rrweb
+  clips must be recorded as blocked/missing evidence instead of committed as
+  proof.
 - Generated deck renders, MP4s, HTML bundles, screenshots, and throwaway clips
   belong under `.artifacts/<deck-id>/` — with ONE exception:
   `docs/decks/bundled/<deck-id>.html`, the committed self-contained bundle
@@ -148,12 +153,9 @@ Current committed rrweb deck clips:
 - `docs/decks/assets/dev-story-hybrid/feature-refine.rrweb.json`
 - `docs/decks/assets/dev-story-hybrid/open-pr.rrweb.json`
 - `docs/decks/persona-qa-kitsoki-example.slidey.json`
-- `docs/decks/assets/persona-qa-kitsoki-example/agent-actions-before.rrweb.json`
-- `docs/decks/assets/persona-qa-kitsoki-example/agent-actions-after.rrweb.json`
 - `docs/decks/persona-qa-slidey-architect-review.slidey.json`
 - `docs/decks/assets/persona-qa-slidey-architect-review/architect-design.rrweb.json`
 - `docs/decks/assets/persona-qa-slidey-architect-review/slidey-bugfix.rrweb.json`
-- `docs/decks/assets/persona-qa-slidey-architect-review/slidey-after.rrweb.json`
 
 `make media-check` enforces the deck-local rrweb layout, the existence of each
 top-level deck's committed bundled viewer, and the staged viewer directory when

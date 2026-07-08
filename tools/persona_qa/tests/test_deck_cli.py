@@ -69,16 +69,16 @@ EXAMPLES = [
         "title": "Kitsoki Persona QA Example",
         "golden": "docs/decks/persona-qa-kitsoki-example.slidey.json",
         "run_id": "persona-qa-kitsoki-product-review",
-        "playback": 2,
-        "expected": "Kitsoki can produce a presentation-ready journey deck",
+        "playback": 0,
+        "expected": "real playback captures are attached",
     },
     {
         "run_dir": "tools/persona_qa/examples/runs/slidey-architect-review",
         "title": "Slidey Architect Review",
         "golden": "docs/decks/persona-qa-slidey-architect-review.slidey.json",
         "run_id": "persona-qa-slidey-architect-review",
-        "playback": 3,
-        "expected": "For a software architect who presents often, Slidey is strong",
+        "playback": 2,
+        "expected": "Published decks need proof-grade capture provenance",
     },
 ]
 
@@ -125,6 +125,18 @@ with tempfile.TemporaryDirectory(prefix="persona-qa-deck-") as td:
         check_eq(f"{case['run_id']} playback scene count", len(playback), case["playback"])
         for scene in playback:
             check(f"{case['run_id']} playback scene uses rrweb", str(scene.get("rrweb", "")).endswith(".rrweb.json"), scene)
+            rrweb = ROOT / "docs" / "decks" / str(scene.get("rrweb", ""))
+            check(f"{case['run_id']} rrweb playback resolves", rrweb.is_file(), rrweb)
+            if rrweb.is_file():
+                events = json.loads(rrweb.read_text(encoding="utf-8"))
+                if isinstance(events, dict):
+                    events = events.get("events", [])
+                first_href = ""
+                for event in events:
+                    if isinstance(event, dict) and event.get("type") == 4:
+                        first_href = str(event.get("data", {}).get("href", ""))
+                        break
+                check(f"{case['run_id']} rrweb playback is not a placeholder", len(events) >= 20 and first_href != "about:blank", scene)
 
     mp4_run = temp / "mp4-run"
     mp4_run.mkdir()
@@ -153,6 +165,7 @@ with tempfile.TemporaryDirectory(prefix="persona-qa-deck-") as td:
                         "path": "media/walkthrough.mp4",
                         "status": "captured",
                         "source": "local",
+                        "capture_provenance": {"kind": "mp4-capture", "tool": "fixture"},
                         "notes": "Recorded MP4 playback.",
                         "playback": True,
                     }
@@ -163,12 +176,73 @@ with tempfile.TemporaryDirectory(prefix="persona-qa-deck-") as td:
         ),
         encoding="utf-8",
     )
+    (mp4_run / "media").mkdir()
+    (mp4_run / "media" / "walkthrough.mp4").write_bytes(b"fixture mp4 placeholder for path resolution\n")
     mp4_out = temp / "mp4.slidey.json"
     generate_deck(str(mp4_run), mp4_out, "MP4 Probe")
     mp4_deck = json.loads(mp4_out.read_text(encoding="utf-8"))
     mp4_scene = next(scene for scene in mp4_deck["scenes"] if scene.get("eyebrow") == "Playback evidence")
     check_eq("mp4 playback uses Slidey src field", mp4_scene.get("src"), "media/walkthrough.mp4")
     check("mp4 playback does not use legacy video field", "video" not in mp4_scene, mp4_scene)
+
+    bad_run = temp / "bad-run"
+    bad_run.mkdir()
+    (bad_run / "media").mkdir()
+    bad_events = [
+        {"type": 4, "data": {"href": "about:blank", "width": 1280, "height": 800}, "timestamp": 1},
+        {"type": 2, "data": {"node": {"type": 0, "childNodes": []}}, "timestamp": 2},
+    ]
+    (bad_run / "media" / "blank.rrweb.json").write_text(json.dumps(bad_events), encoding="utf-8")
+    (bad_run / "run.json").write_text(
+        json.dumps(
+            {
+                "run_id": "bad-run",
+                "project": {"id": "demo", "label": "Demo"},
+                "persona": {"id": "architect", "label": "Architect"},
+                "scenarios": [{"id": "blank-video", "label": "Blank video", "stage": "review"}],
+                "stages": [{"id": "review", "status": "captured", "scenarios": ["blank-video"]}],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (bad_run / "media-manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "bad-run",
+                "items": [
+                    {
+                        "scenario": "blank-video",
+                        "evidence_kind": "key_interaction_video",
+                        "media_kind": "video",
+                        "path": "media/blank.rrweb.json",
+                        "status": "captured",
+                        "source": "local",
+                        "notes": "This incorrectly claims local playback evidence.",
+                        "playback": True,
+                    }
+                ],
+                "summary": {"total": 1, "playback_items": 1, "video": 1, "image": 0},
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    bad_out = temp / "bad.slidey.json"
+    code, stdout, stderr = run_cli([
+        "deck",
+        "--run-dir",
+        str(bad_run),
+        "--out",
+        str(bad_out),
+        "--title",
+        "Bad Probe",
+        "--json-output",
+    ])
+    check_eq("unproven local playback is blocked", code, 2)
+    check_eq("unproven playback status", json.loads(stdout)["status"], "blocked")
+    check("unproven playback reports proof-grade reason", "not proof-grade" in stdout or "missing capture_provenance" in stdout, stdout)
+    check("unproven deck is not written", not bad_out.exists(), bad_out)
 
 if failures:
     print("FAIL: persona-qa deck CLI")

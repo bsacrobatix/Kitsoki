@@ -44,8 +44,8 @@
         "The resulting artifact can be bundled and shared.",
         "The recorded authoring flow is replayable."
       ],
-      "status": "validated",
-      "evidence_status": "validated"
+      "status": "needs_evidence",
+      "evidence_status": "missing_playback"
     },
     {
       "id": "reuse-recorded-demo",
@@ -64,7 +64,7 @@
         "The deck contains a standalone playback scene.",
         "The media path is deck-local and bundle-friendly."
       ],
-      "status": "validated",
+      "status": "needs_evidence",
       "evidence_status": "validated"
     },
     {

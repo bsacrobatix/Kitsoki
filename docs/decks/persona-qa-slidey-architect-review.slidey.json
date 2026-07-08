@@ -91,9 +91,9 @@
           "cells": [
             "maintain-deck-as-code",
             "maintenance",
-            "validated",
-            "2/2",
-            "1"
+            "needs_evidence",
+            "1/2",
+            "0"
           ]
         },
         {
@@ -114,14 +114,19 @@
       "caption": "Bundle readiness, evidence coverage, and the highest-signal checks.",
       "items": [
         {
-          "detail": "For a software architect who presents often, Slidey is strong when the talk must be reproducible, visual, and evidence-backed.",
-          "label": "ready_with_risks",
-          "status": "done"
+          "detail": "For a software architect who presents often, Slidey is strong for reproducible, visual, evidence-backed talks, but this examp...",
+          "label": "needs_evidence",
+          "status": "pending"
         },
         {
-          "detail": "3 scenarios, evidence 7/7, proof 3",
+          "detail": "3 scenarios, evidence 6/7, proof 2",
           "label": "Evidence coverage",
-          "status": "done"
+          "status": "issue"
+        },
+        {
+          "detail": "Published decks need proof-grade capture provenance for every playback scene, not just deck-local paths.",
+          "label": "asset-lifecycle",
+          "status": "issue"
         },
         {
           "detail": "Slidey JSON is reviewable and diffable enough for architecture decks.",
@@ -132,11 +137,6 @@
           "detail": "Slidey exposes validation and audit commands that catch common rendering failures before a final video render.",
           "label": "layout-gates",
           "status": "done"
-        },
-        {
-          "detail": "Recorded rrweb clips can become standalone deck scenes.",
-          "label": "playback-embedding",
-          "status": "done"
         }
       ],
       "narration": "The review scene summarizes bundle readiness without rerunning capture or model work.",
@@ -144,7 +144,7 @@
       "type": "objectives"
     },
     {
-      "caption": "compose-architecture-deck: validated\nreuse-recorded-demo: validated\nmaintain-deck-as-code: validated",
+      "caption": "compose-architecture-deck: validated\nreuse-recorded-demo: validated\nmaintain-deck-as-code: needs_evidence",
       "cards": [
         {
           "label": "strength",
@@ -193,7 +193,7 @@
       "variant": "grid"
     },
     {
-      "caption": "Playback items: 3\nVideos: 3\nImages: 0\nScenarios: compose-architecture-deck, maintain-deck-as-code, reuse-recorded-demo",
+      "caption": "Verified playback: 2\nBlocked/unverified: 1\nVideos: 2\nImages: 0\nScenarios: compose-architecture-deck, maintain-deck-as-code, reuse-recorded-demo",
       "items": [
         {
           "detail": "Recorded rrweb clip of the architect-design flow used as the primary authoring example.",
@@ -203,18 +203,18 @@
           "status": "validated"
         },
         {
-          "detail": "Small recorded clip used to verify deck-local asset packaging.",
-          "label": "maintain-deck-as-code",
-          "ref": "assets/persona-qa-slidey-architect-review/slidey-after.rrweb.json",
-          "refType": "artifact",
-          "status": "validated"
-        },
-        {
           "detail": "Recorded rrweb clip showing a Slidey-oriented workflow embedded as playback evidence.",
           "label": "reuse-recorded-demo",
           "ref": "assets/persona-qa-slidey-architect-review/slidey-bugfix.rrweb.json",
           "refType": "artifact",
           "status": "validated"
+        },
+        {
+          "detail": "No proof-grade deck-maintenance capture is attached. The earlier tiny placeholder rrweb clip is intentionally not playb...",
+          "label": "maintain-deck-as-code",
+          "ref": "media-manifest.json",
+          "refType": "path",
+          "status": "blocked"
         }
       ],
       "narration": "The media scene carries structured playback references so Slidey can render the recorded journey clips.",
@@ -268,16 +268,6 @@
       "type": "video"
     },
     {
-      "caption": "Small recorded clip used to verify deck-local asset packaging.",
-      "chapters": "auto",
-      "eyebrow": "Playback evidence",
-      "mode": "embedded",
-      "narration": "Recorded playback evidence for maintain-deck-as-code / key_interaction_video.",
-      "rrweb": "assets/persona-qa-slidey-architect-review/slidey-after.rrweb.json",
-      "title": "maintain-deck-as-code / key_interaction_video",
-      "type": "video"
-    },
-    {
       "caption": "Recorded rrweb clip showing a Slidey-oriented workflow embedded as playback evidence.",
       "chapters": "auto",
       "eyebrow": "Playback evidence",
@@ -291,7 +281,7 @@
       "caption": "Generated decks are derived from run artifacts; change the source bundle or generator, then regenerate.",
       "items": [
         {
-          "detail": "Playback scenes: 3",
+          "detail": "Playback scenes: 2",
           "label": "Run bundle",
           "ref": "tools/persona_qa/examples/runs/slidey-architect-review",
           "refType": "path",

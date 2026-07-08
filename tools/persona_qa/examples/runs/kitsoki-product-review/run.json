@@ -43,8 +43,8 @@
         "The deck links scenario evidence to playback.",
         "The next engineering action is visible."
       ],
-      "status": "validated",
-      "evidence_status": "validated"
+      "status": "needs_evidence",
+      "evidence_status": "missing_playback"
     },
     {
       "id": "verify-ui-evidence",
@@ -63,14 +63,14 @@
         "The playback is linked from the deck.",
         "Review gates distinguish proof from placeholder evidence."
       ],
-      "status": "validated",
-      "evidence_status": "validated"
+      "status": "needs_evidence",
+      "evidence_status": "missing_playback"
     }
   ],
   "stages": [
     {
       "id": "technical_presentation",
-      "status": "validated",
+      "status": "needs_evidence",
       "scenarios": [
         "explain-delivery-loop",
         "verify-ui-evidence"
