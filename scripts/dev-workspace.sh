@@ -564,9 +564,6 @@ cmd_merge() {
   current_branch="$(git -C "$repo" branch --show-current)"
   if [ "$target" = "main" ]; then
     [ "$current_branch" = "main" ] || die "merge: repo must be on main for --target main"
-    if [ -n "$(git -C "$repo" status --porcelain)" ]; then
-      die "merge: primary checkout has uncommitted changes"
-    fi
   elif [ "$current_branch" = "$target" ]; then
     die "merge: target $target is checked out in the primary checkout; switch the primary checkout back to main before updating the local stabilization branch"
   fi
@@ -588,22 +585,24 @@ cmd_merge() {
     (cd "$path" && sh -c "$gate")
   fi
 
-  local changed_files_file
-  changed_files_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-dev-workspace-files.XXXXXX")"
-  git -C "$path" diff --name-only "source/$target" HEAD >"$changed_files_file"
-  local dirty_overlap
-  set +e
-  dirty_overlap="$(primary_dirty_overlaps_file_list "$repo" "$changed_files_file")"
-  local dirty_status=$?
-  set -e
-  rm -f "$changed_files_file"
-  if [ "$dirty_status" -ne 0 ]; then
-    if [ -z "$dirty_overlap" ]; then
-      die "merge: failed to inspect primary checkout dirty paths"
+  if [ "$target" = "main" ]; then
+    local changed_files_file
+    changed_files_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-dev-workspace-files.XXXXXX")"
+    git -C "$path" diff --name-only "source/$target_base" HEAD >"$changed_files_file"
+    local dirty_overlap
+    set +e
+    dirty_overlap="$(primary_dirty_overlaps_file_list "$repo" "$changed_files_file")"
+    local dirty_status=$?
+    set -e
+    rm -f "$changed_files_file"
+    if [ "$dirty_status" -ne 0 ]; then
+      if [ -z "$dirty_overlap" ]; then
+        die "merge: failed to inspect primary checkout dirty paths"
+      fi
+      echo "error: primary checkout has uncommitted changes in files this workspace would update:" >&2
+      printf '%s\n' "$dirty_overlap" >&2
+      exit 1
     fi
-    echo "error: primary checkout has uncommitted changes in files this workspace would update:" >&2
-    printf '%s\n' "$dirty_overlap" >&2
-    exit 1
   fi
 
   local id safe landing_branch
