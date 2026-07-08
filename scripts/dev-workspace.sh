@@ -12,6 +12,7 @@ CAPSULE_MANIFEST="capsule-manifest.json"
 CLONE_SENTINEL=".kitsoki-clone"
 DEV_MANIFEST=".kitsoki-dev-workspace.json"
 DEFAULT_TARGET="staging/local"
+LOCAL_CONFIG=".kitsoki.local.yaml"
 
 usage() {
   cat >&2 <<'EOF'
@@ -264,12 +265,28 @@ PY
 
 bootstrap_workspace() {
   local path="$1"
+  local source_repo="${2:-}"
   [ -d "$path" ] || die "workspace does not exist: $path"
+  copy_local_config "$path" "$source_repo"
   if make -C "$path" -n bootstrap-workspace >/dev/null 2>&1; then
     make -C "$path" bootstrap-workspace
   else
     make -C "$path" bootstrap-worktree
   fi
+}
+
+copy_local_config() {
+  local path="$1"
+  local source_repo="${2:-}"
+  if [ -z "$source_repo" ]; then
+    source_repo="$(manifest_value "$path" source "")"
+  fi
+  [ -n "$source_repo" ] || return 0
+  local src="$source_repo/$LOCAL_CONFIG"
+  local dst="$path/$LOCAL_CONFIG"
+  [ -f "$src" ] || return 0
+  [ "$src" != "$dst" ] || return 0
+  cp -p "$src" "$dst"
 }
 
 workspace_dirty() {
@@ -378,7 +395,7 @@ cmd_create() {
       die "create: \"$id\" is already checked out by session \"$existing_session\"; refusing to share"
     fi
     if [ "$bootstrap" = "1" ]; then
-      bootstrap_workspace "$path"
+      bootstrap_workspace "$path" "$repo"
     fi
     if [ "$json" = "1" ]; then
       emit_workspace_json "$path" true
@@ -413,7 +430,7 @@ cmd_create() {
   write_manifests "$path" "$id" "$repo" "$root" "$branch" "$base" "$target" "$session_id" "$source_commit" "$head" "$script_path"
 
   if [ "$bootstrap" = "1" ]; then
-    bootstrap_workspace "$path"
+    bootstrap_workspace "$path" "$repo"
   fi
 
   if [ "$json" = "1" ]; then

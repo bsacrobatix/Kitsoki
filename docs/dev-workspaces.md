@@ -85,6 +85,12 @@ dependencies, and warms the Go build cache. `create --bootstrap` is the normal
 path when a workspace will run `go run ./cmd/kitsoki`, Playwright specs, or web
 UI tooling. Pure documentation edits usually do not need it.
 
+If the source checkout has a gitignored `.kitsoki.local.yaml`, bootstrap copies
+it into the managed clone before running the Make target. This keeps local
+harness/provider profiles available in clone-backed workspaces, including the
+long-lived `.capsules/staging/local` staging capsule, without committing the
+machine-specific config.
+
 ### `status`
 
 ```sh
