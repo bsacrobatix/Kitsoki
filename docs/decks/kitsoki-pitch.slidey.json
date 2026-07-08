@@ -3087,6 +3087,38 @@
       "instant": true
     },
     {
+      "type": "kitsoki-tui",
+      "title": "kitsoki run",
+      "appTitle": "kitsoki · validation",
+      "subtitle": "repo-bakeoff · gears-rust fixtures",
+      "hints": [
+        "/help        list commands",
+        "/world       inspect current state",
+        "/quit        exit"
+      ],
+      "status": "session sess_73... · story repo-bakeoff · state configure",
+      "choicePrompt": "Actions",
+      "menuItems": [
+        {
+          "label": "accept",
+          "hint": "preflight + verify RED/GREEN fixtures"
+        },
+        {
+          "label": "look",
+          "hint": "review matrix and prepared handoffs"
+        },
+        {
+          "label": "quit",
+          "hint": "abandon validation"
+        }
+      ],
+      "selectedIndex": 0,
+      "footer": "[↑/↓ move • Enter pick • Tab chat • Esc cancel]",
+      "caption": "The validation TUI uses the real repo-bakeoff fixture loop: preflight, verify RED/GREEN oracles, prepare handoffs, then score completion and feed misses back into the story.",
+      "hold": 230,
+      "narration": "The validation screen is still a Kitsoki menu. The selected action checks real fixtures first: preflight the repo, verify hidden oracles, prepare handoffs, then score results and improve the story from evidence."
+    },
+    {
       "type": "evidence",
       "title": "The real post-onboarding story",
       "items": [
