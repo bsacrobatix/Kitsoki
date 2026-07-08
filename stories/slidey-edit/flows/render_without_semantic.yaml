@@ -27,6 +27,15 @@ host_handlers:
 
   host.starlark.run:
     by_call:
+      resolve_deck:
+        data:
+          source_deck:
+            spec_path: "docs/decks/kitsoki-pitch.slidey.json"
+            summary: "Existing slidey deck"
+          deck:
+            spec_path: "docs/decks/kitsoki-pitch.slidey.json"
+            summary: "Existing slidey deck"
+          workspace: "docs/decks"
       seed_annotation:
         data:
           annotation:
@@ -53,6 +62,9 @@ turns:
       semantic_path: ""
       semantic_handle: ""
       last_error: ""
+    expect_host_calls:
+      - handler: host.slidey.render
+        args: { call: "render_deck", spec_path: "docs/decks/kitsoki-pitch.slidey.json" }
 
 expect_terminal: false
 expect_no_errors: true
