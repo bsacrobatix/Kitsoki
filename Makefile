@@ -346,21 +346,23 @@ web-dev-logs:
 	  echo "tailing $$latest" >&2; \
 	  tail -f "$$latest"
 
-# test runs the short Go unit tests, the Mode-2 deterministic story flow suites, the
-# feature catalog, AND the session-mining no-LLM invariants (== mining-test) —
-# all without an LLM or cost. The flow suites guard the shipped stories under
-# stories/ and the mining suites guard tools/session-mining/, neither of which
-# `go test ./...` touches. scripts/run-tests.sh collects every failure across
-# all suites (never bails early), prints a terse summary on success / full
-# detail on failure, and always writes a rotated full report to
-# .artifacts/test-reports/.
+# test runs the short Go unit tests, the Mode-2 deterministic story flow suites,
+# the runstatus Vitest suite, the feature catalog, AND the session-mining no-LLM
+# invariants (== mining-test) — all without an LLM or cost. The flow suites guard
+# the shipped stories under stories/, the web suite guards tools/runstatus/, and
+# the mining suites guard tools/session-mining/, none of which `go test ./...`
+# covers by itself. scripts/run-tests.sh collects every failure across all suites
+# (never bails early), prints a terse summary on success / full detail on
+# failure, and always writes a rotated full report to .artifacts/test-reports/.
 test:
-	@KITSOKI_GO_TEST_FLAGS="$${KITSOKI_GO_TEST_FLAGS:--short}" ./scripts/run-tests.sh
+	$(call runstatus_pnpm_install,--silent)
+	@KITSOKI_REQUIRE_VITEST=1 KITSOKI_GO_TEST_FLAGS="$${KITSOKI_GO_TEST_FLAGS:--short}" ./scripts/run-tests.sh
 
 # test-full preserves the exhaustive Go lane for CI/release gates and local
 # validation of integration/property tests skipped by -short.
 test-full:
-	@./scripts/run-tests.sh
+	$(call runstatus_pnpm_install,--silent)
+	@KITSOKI_REQUIRE_VITEST=1 ./scripts/run-tests.sh
 
 # pr / pr-ci gate PR creation on a green test run, then open the PR with `gh`.
 # Push half-finished branches freely; this is the checkpoint that runs only when
@@ -693,10 +695,10 @@ features-check:
 	$(call runstatus_pnpm_install,--silent)
 	cd $(RUNSTATUS_DIR) && pnpm features:check
 
-# vitest-check runs the runstatus (web UI) component/unit test suite. Split out
-# from `make test` (which stays Go-only + no-LLM deterministic story/tool
-# suites) because it needs pnpm/node_modules; wired into CI's `site` job,
-# which already installs them for features-check/site.
+# vitest-check runs the runstatus (web UI) component/unit test suite by itself.
+# The same suite is part of `make test` / `make test-full`; keep this target for
+# the fast frontend loop and for checking the pnpm dependency install in
+# isolation.
 vitest-check:
 	$(call runstatus_pnpm_install,--silent)
 	cd $(RUNSTATUS_DIR) && pnpm test
