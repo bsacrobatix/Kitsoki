@@ -10,14 +10,17 @@ Two distinct filing mechanisms exist, and every surface below uses one or
 the other:
 
 - **Agentic meta-mode filing** — `/meta story bug` or `/meta kitsoki bug`
-  drops you into a conversation with a bug-reporter agent that asks what
-  you expected vs. what happened and runs `kitsoki bug create` for you. See
+  drops you into a conversation with a bug-reporter agent that helps formulate
+  what was expected vs. what happened and runs `kitsoki bug create` for you. See
   [`../stories/meta-mode.md`](../stories/meta-mode.md) §3.2 for the agent/mode
   details.
 - **Deterministic evidence capture** — the web/VS Code **Report bug** modal
-  captures a screenshot, an rrweb session replay, a scrubbed HAR, and
-  console/error state automatically, and shows you a **review-before-file**
-  modal — nothing is written until you click Submit. See
+  captures an rrweb session replay, a scrubbed HAR, console/error state, and
+  session trace evidence automatically, then generates an
+  `Evidence-derived triage` section with likely repro steps, observed actual
+  behavior, and an explicit expected-behavior fallback when the evidence cannot
+  prove it. It shows you a **review-before-file** modal — nothing is written
+  until you click Submit. See
   [`../tui/web-ui.md#meta-menu--report-bug`](../tui/web-ui.md#meta-menu--report-bug)
   for exactly what's captured and anonymized.
 
@@ -98,9 +101,12 @@ To file straight to **GitHub Issues** instead of a local file, pass
 ## Web
 
 The Meta dropdown (bottom-right) has a **Report bug** item — click it to
-open the review modal (screenshot + rrweb replay + HAR + console/error
-state, anonymized), add an optional description, and **Submit** to file or
-**Cancel** to discard. Nothing is written until Submit. Run with
+open the review modal (rrweb replay + HAR + console/error state + trace
+evidence, anonymized), add an optional short description, and **Submit** to file
+or **Cancel** to discard. Nothing is written until Submit. On submit, the server
+adds deterministic `Evidence-derived triage` to the filed report, so reporters
+do not have to hand-author expected/actual/repro fields for evidence-backed
+bugs. Run with
 `kitsoki web --ticket-repo <owner/repo>` to file to GitHub Issues instead of
 a local file. See
 [`../tui/web-ui.md#meta-menu--report-bug`](../tui/web-ui.md#meta-menu--report-bug)

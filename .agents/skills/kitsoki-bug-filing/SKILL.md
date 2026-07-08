@@ -204,13 +204,26 @@ server to pick the newest matching trace. Trace-backed reports include redacted
 ## Report Shape
 
 Keep the title short and actionable, prefixed by the surface when useful
-(`web:`, `tui:`, `mcp:`, `story:`). The body should include:
+(`web:`, `tui:`, `mcp:`, `story:`).
+
+For evidence-backed reports, do not require the reporter to hand-author
+expected/actual/repro fields. A tiny note plus artifacts is valuable. The filing
+path should preserve the raw note, attach the evidence, and add a deterministic
+`## Evidence-derived triage` section when possible:
+
+- Capture summary from HAR, rrweb, console/error state, and redacted trace.
+- Evidence-derived likely repro steps, labeled as inferred.
+- Evidence-derived actual behavior from failures/errors/transitions.
+- Expected behavior only when the reporter explicitly supplied it; otherwise an
+  explicit "not deterministically captured" note.
+
+For text-only reports with no artifacts, the body should include:
 
 - What the operator expected.
 - What actually happened.
 - A minimal reproduction path or the story/session entrypoint.
 - Why it matters.
-- Links to captured artifacts, traces, decks, or local `.artifacts` paths.
+- Any available links to traces, decks, or local `.artifacts` paths.
 
 Let Kitsoki write the metadata/frontmatter where possible. Do not hand-copy the
 fenced `kitsoki` metadata block, issue labels, release asset URLs, or local

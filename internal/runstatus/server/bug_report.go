@@ -182,9 +182,6 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 	errInfo := decodeErrorInfo(stringParam(params, "error_info"), scrubOpts)
 	traceJSON := s.decodeTraceEvidence(params, scrubOpts)
 
-	// Enrich the prose body with the captured error + console state.
-	body = body + errorStateSection(errInfo) + consoleSection(consoleEntries)
-
 	png := decodeScreenshot(stringParam(params, "screenshot_png_b64"))
 
 	artifacts := []bugreport.Artifact{
@@ -194,6 +191,23 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 		{Name: "console.json", Data: consoleJSON, Label: "Console log"},
 		{Name: "trace.redacted.jsonl", Data: traceJSON, Label: "Depersonalized session trace (redacted)"},
 	}
+
+	// Enrich the prose body with deterministic evidence-derived triage, then
+	// keep the detailed raw error/console sections for readers who want the
+	// underlying evidence. This runs before the privacy gate so generated text is
+	// scrubbed by the same path as operator prose.
+	body = body + bugreport.EvidenceTriageMarkdown(bugreport.EvidenceTriageInput{
+		OperatorBody: body,
+		HAR:          har,
+		HARSource:    harSource,
+		HARDepth:     depth,
+		HARCapacity:  capacity,
+		RRWebJSON:    rrwebJSON,
+		ConsoleJSON:  consoleJSON,
+		TraceJSONL:   traceJSON,
+		ErrorCount:   len(errInfo.Errors),
+		LastRPC:      bugReportLastRPCInfo(errInfo),
+	}) + errorStateSection(errInfo) + consoleSection(consoleEntries)
 
 	report := bugprivacy.Report{
 		Surface:       "web",
@@ -602,6 +616,23 @@ func errorStateSection(es errorState) string {
 			nonEmpty(method, "(unknown)"), es.LastRPC["code"], msg)
 	}
 	return sb.String()
+}
+
+func bugReportLastRPCInfo(es errorState) bugreport.LastRPCInfo {
+	if es.LastRPC == nil {
+		return bugreport.LastRPCInfo{}
+	}
+	method, _ := es.LastRPC["method"].(string)
+	msg, _ := es.LastRPC["message"].(string)
+	var code string
+	if raw, ok := es.LastRPC["code"]; ok && raw != nil {
+		code = fmt.Sprint(raw)
+	}
+	return bugreport.LastRPCInfo{
+		Method:  method,
+		Code:    code,
+		Message: msg,
+	}
 }
 
 // consoleSection renders the "## Console (recent)" body block listing the last

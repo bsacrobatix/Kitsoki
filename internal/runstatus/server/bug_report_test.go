@@ -214,6 +214,18 @@ func TestBugReport_CaptureIDPath_WithEvidence(t *testing.T) {
 	if !strings.Contains(mds, "## Console (recent)") {
 		t.Fatalf("md missing Console section: %s", mds)
 	}
+	for _, want := range []string{
+		"## Evidence-derived triage",
+		"Generated deterministically from captured evidence",
+		"rrweb: 1 event(s)",
+		"Console/error state: 2 console entries",
+		"last RPC: `runstatus.session.get` code=-32000 message=\"nope\"",
+		"Not deterministically captured in the evidence",
+	} {
+		if !strings.Contains(mds, want) {
+			t.Fatalf("md missing evidence triage %q: %s", want, mds)
+		}
+	}
 
 	artifactsDir := filepath.Join(root, ".artifacts", "issues", "bugs", id+".artifacts")
 	for _, f := range []string{"har.json", "rrweb.json", "console.json"} {
@@ -392,6 +404,15 @@ func TestBugReport_WritesRedactedTraceArtifact(t *testing.T) {
 	}
 	if !strings.Contains(string(md), "./"+id+".artifacts/trace.redacted.jsonl") {
 		t.Fatalf("bug md missing redacted trace artifact link: %s", md)
+	}
+	for _, want := range []string{
+		"## Evidence-derived triage",
+		"Trace: 2 event(s) across 1 turn(s); states: `main.idle`; intents: `report_bug`",
+		"In state `main.idle`, submit intent `report_bug`; observed transition `main.idle` -> `main.done`.",
+	} {
+		if !strings.Contains(string(md), want) {
+			t.Fatalf("bug md missing trace-derived triage %q: %s", want, md)
+		}
 	}
 }
 
@@ -617,6 +638,7 @@ func TestBugReport_GitHubModeUploadsArtifacts(t *testing.T) {
 	// The issue body links the public release-asset URLs, not local paths.
 	for _, want := range []string{
 		"## Artifacts",
+		"## Evidence-derived triage",
 		"uploaded as GitHub release assets",
 		"![Screenshot](https://github.com/o/r/releases/download/kitsoki-artifacts/",
 		"(https://github.com/o/r/releases/download/kitsoki-artifacts/",
