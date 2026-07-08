@@ -82,7 +82,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Fast path: branch is already a fast-forward of main.
 if git merge-base --is-ancestor HEAD "$branch"; then
-  "$script_dir/merge-to-main.sh" "$branch"
+  "$script_dir/merge-to-main.sh" "$branch" --force
   echo "path: direct fast-forward"
   echo "main -> $(git rev-parse --short HEAD)"
   exit 0
@@ -154,7 +154,7 @@ if [ -n "$gate" ]; then
 fi
 
 cd "$repo_root"
-"$script_dir/merge-to-main.sh" "$land_branch"
+"$script_dir/merge-to-main.sh" "$land_branch" --force
 
 cleanup
 

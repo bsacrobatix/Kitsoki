@@ -125,6 +125,37 @@ Explicit `--target main` refuses primary-checkout dirt only when that dirt
 overlaps files the workspace branch will update; unrelated dirty primary files
 are preserved.
 
+### `merge-to-main`
+
+```sh
+scripts/merge-to-main.sh
+```
+
+Final local promotion is staging-capsule first. The default source is the
+managed capsule checkout at `.capsules/staging/local` on branch `staging/local`.
+The helper refuses unmanaged source directories, refuses dirty staging state,
+rebases staging onto local `main`, runs `make test` in the staging capsule, then
+fast-forwards protected local `main`. Pass `--gate "<cmd>"` to use a different
+gate. Pass `--force` only when an equivalent gate has already run and you
+intentionally want to skip the default `make test`.
+
+Create the long-lived staging capsule with:
+
+```sh
+scripts/dev-workspace.sh create --root .capsules/staging --id local --branch staging/local --base staging/local --target main --bootstrap
+```
+
+For day-to-day staging operations from the primary checkout:
+
+```sh
+make test-staging
+make web-dev-staging
+make install-staging
+```
+
+These targets run the corresponding Make target inside `.capsules/staging/local`
+and verify that the directory is a managed capsule on `staging/local`.
+
 If the rebase conflicts, resolve the conflict inside the managed workspace,
 rerun the focused validation, then rerun `merge`. Do not resolve by editing the
 primary checkout.

@@ -395,10 +395,16 @@ cmd_create() {
   source_commit="$(git -C "$repo" rev-parse "${base:-HEAD}")"
   git -C "$repo" clone --no-local --origin source "$repo" "$path"
   write_git_excludes "$path"
+  local base_ref="$base"
+  if [ -n "$base" ] && ! git -C "$path" rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+    if git -C "$path" rev-parse --verify --quiet "source/$base^{commit}" >/dev/null; then
+      base_ref="source/$base"
+    fi
+  fi
   if [ -n "$branch" ]; then
-    git -C "$path" switch -q -c "$branch" "$base"
+    git -C "$path" switch -q -c "$branch" "$base_ref"
   elif [ -n "$base" ]; then
-    git -C "$path" switch -q --detach "$base"
+    git -C "$path" switch -q --detach "$base_ref"
   fi
   git -C "$path" config user.name "Kitsoki Agent"
   git -C "$path" config user.email "agent@kitsoki.dev"
@@ -618,7 +624,12 @@ cmd_merge() {
   fi
   git -C "$repo" fetch "$path" "$branch:refs/heads/$landing_branch"
   if [ "$target" = "main" ]; then
-    (cd "$repo" && scripts/merge-to-main.sh "$landing_branch")
+    local -a merge_args
+    merge_args=("$branch" "--source-dir" "$path")
+    if [ -n "$gate" ]; then
+      merge_args+=("--gate" "$gate")
+    fi
+    (cd "$repo" && scripts/merge-to-main.sh "${merge_args[@]}")
   else
     if ! git -C "$repo" merge-base --is-ancestor "$target_base" "$landing_branch"; then
       die "merge: $landing_branch is not a fast-forward of $target_base"

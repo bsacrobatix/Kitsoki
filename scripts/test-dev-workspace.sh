@@ -29,7 +29,33 @@ cat >"$repo/scripts/merge-to-main.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 branch="${1:?branch required}"
+source_dir=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --source-dir)
+      source_dir="${2:?--source-dir requires a value}"
+      shift 2
+      ;;
+    --gate)
+      shift 2
+      ;;
+    --force)
+      shift
+      ;;
+    *)
+      if [ "$1" = "$branch" ]; then
+        shift
+      else
+        shift
+      fi
+      ;;
+  esac
+done
 [ "$(git branch --show-current)" = "main" ] || { echo "not on main" >&2; exit 1; }
+if [ -n "$source_dir" ]; then
+  git fetch "$source_dir" "$branch:refs/heads/capsule/test-main-land" >/dev/null
+  branch="capsule/test-main-land"
+fi
 git merge --ff-only "$branch"
 SH
   chmod +x "$repo/scripts/merge-to-main.sh"
@@ -62,6 +88,11 @@ printf 'two\n' >"$workspace/feature.txt"
 [ "$(git -C "$source_repo" branch --show-current)" = "main" ] || fail "default merge moved primary checkout off main"
 rm "$source_repo/untracked-primary.txt"
 
+from_staging_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id from-staging --branch agent/from-staging --base staging/local --json)"
+from_staging_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$from_staging_json")"
+[ "$(cat "$from_staging_workspace/feature.txt")" = "two" ] || fail "create --base staging/local did not start from staging branch"
+"$dev_workspace" close --repo "$source_repo" --root "$root" "$from_staging_workspace" >/dev/null
+
 second_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id case-2 --branch agent/case-2 --base main --json)"
 second_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$second_json")"
 printf 'three\n' >"$second_workspace/feature2.txt"
@@ -75,7 +106,7 @@ main_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id c
 main_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$main_json")"
 printf 'main landing\n' >"$main_workspace/main-feature.txt"
 "$dev_workspace" commit --repo "$source_repo" --root "$root" "$main_workspace" --message 'add main feature' >/dev/null
-"$dev_workspace" merge --repo "$source_repo" --root "$root" "$main_workspace" --target main --teardown >/dev/null
+"$dev_workspace" merge --repo "$source_repo" --root "$root" "$main_workspace" --target main --gate true --teardown >/dev/null
 [ ! -e "$main_workspace" ] || fail "merge --target main --teardown left workspace behind"
 [ "$(cat "$source_repo/main-feature.txt")" = "main landing" ] || fail "explicit main merge did not update primary checkout"
 
@@ -86,15 +117,15 @@ printf 'branch\n' >"$unrelated_workspace/branch-only.txt"
 printf 'local\n' >"$source_repo/local-only.txt"
 "$dev_workspace" merge --repo "$source_repo" --root "$root" "$unrelated_workspace" --teardown >/dev/null
 [ ! -e "$unrelated_workspace" ] || fail "merge with unrelated dirty primary left workspace behind"
-[ "$(cat "$source_repo/branch-only.txt")" = "branch" ] || fail "merge skipped branch-only file"
+[ "$(git -C "$source_repo" show staging/local:branch-only.txt)" = "branch" ] || fail "merge skipped branch-only file"
 [ "$(cat "$source_repo/local-only.txt")" = "local" ] || fail "merge clobbered unrelated dirty primary file"
 
-overlap_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id overlapping-dirty --branch agent/overlapping-dirty --base main --json)"
+overlap_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id overlapping-dirty --branch agent/overlapping-dirty --base main --target main --json)"
 overlap_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$overlap_json")"
 printf 'branch\n' >"$overlap_workspace/conflict.txt"
 "$dev_workspace" commit --repo "$source_repo" --root "$root" "$overlap_workspace" --message 'add conflict file' >/dev/null
 printf 'local\n' >"$source_repo/conflict.txt"
-if "$dev_workspace" merge --repo "$source_repo" --root "$root" "$overlap_workspace" --teardown >/tmp/kitsoki-dev-workspace-overlap.log 2>&1; then
+if "$dev_workspace" merge --repo "$source_repo" --root "$root" "$overlap_workspace" --target main --gate true --teardown >/tmp/kitsoki-dev-workspace-overlap.log 2>&1; then
   fail "merge succeeded despite overlapping dirty primary file"
 fi
 grep -Fq "conflict.txt" /tmp/kitsoki-dev-workspace-overlap.log || fail "overlap failure did not name conflicting file"
