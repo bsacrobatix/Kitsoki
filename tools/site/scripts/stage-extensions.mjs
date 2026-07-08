@@ -39,6 +39,7 @@ const index = JSON.parse(fs.readFileSync(outFile, "utf8"));
 if (index.schema !== "kitsoki.extensions-index/v1") fail(`unexpected schema ${index.schema}`);
 if (!Array.isArray(index.packages)) fail("packages must be an array");
 if (!Array.isArray(index.stories)) fail("stories must be an array");
+if (!Array.isArray(index.components)) fail("components must be an array");
 if (!Array.isArray(index.docs)) fail("docs must be an array");
 for (const pkg of index.packages) {
   if (!pkg.id || !pkg.title || !pkg.path) fail(`package missing id/title/path: ${JSON.stringify(pkg)}`);
@@ -46,10 +47,18 @@ for (const pkg of index.packages) {
 for (const story of index.stories) {
   if (!story.id || !story.title || !story.path) fail(`story missing id/title/path: ${JSON.stringify(story)}`);
 }
+for (const component of index.components) {
+  if (!component.id || !component.kind || !component.title) {
+    fail(`component missing id/kind/title: ${JSON.stringify(component)}`);
+  }
+  if (component.publish && !["true", "false", "summary", "full"].includes(String(component.publish))) {
+    fail(`component ${component.kind}:${component.id} has unsupported publish value ${component.publish}`);
+  }
+}
 for (const doc of index.docs) {
   if (!doc.id || !doc.owner || !doc.title) fail(`doc missing id/owner/title: ${JSON.stringify(doc)}`);
   if (!["true", "false", "summary", "full"].includes(String(doc.publish))) {
     fail(`doc ${doc.id} has unsupported publish value ${doc.publish}`);
   }
 }
-console.log(`stage-extensions: ${index.packages.length} package(s), ${index.stories.length} story/stories, ${index.docs.length} doc node(s) -> ${path.relative(repoRoot, outFile)}`);
+console.log(`stage-extensions: ${index.packages.length} package(s), ${index.stories.length} story/stories, ${index.components.length} component(s), ${index.docs.length} doc node(s) -> ${path.relative(repoRoot, outFile)}`);

@@ -9,6 +9,8 @@ import { repoRoot, siteDir } from "./features.js";
 
 const genIndex = path.join(siteDir, ".vitepress", "gen", "extensions-index.json");
 
+export type ExtensionPublish = "true" | "false" | "summary" | "full";
+
 export interface ExtensionDoc {
   id: string;
   owner: string;
@@ -16,7 +18,8 @@ export interface ExtensionDoc {
   path?: string;
   generated_from?: string;
   kind?: string;
-  publish: "true" | "false" | "summary" | "full";
+  publish: ExtensionPublish;
+  tags: string[];
 }
 
 export interface ExtensionPackage {
@@ -33,6 +36,7 @@ export interface ExtensionPackage {
   docs: string[];
   publishedDocs: ExtensionDoc[];
   stories: ExtensionStory[];
+  components: ExtensionComponent[];
 }
 
 export interface ExtensionStory {
@@ -47,19 +51,51 @@ export interface ExtensionStory {
   intents: string[];
   states: string[];
   agents: string[];
+  toolboxes: string[];
+  providers: string[];
   agent_plugins: string[];
   host_interfaces: string[];
   exports: string[];
   exits: string[];
+  imports: string[];
+  prompts: string[];
+  schemas: string[];
+  scripts: string[];
   flows: string[];
+  docs: string[];
+  publishedDocs: ExtensionDoc[];
+  components: ExtensionComponent[];
+}
+
+export interface ExtensionFact {
+  label: string;
+  value: string;
 }
 
 export interface ExtensionComponent {
   id: string;
+  slug: string;
+  componentKey: string;
   owner: string;
+  ownerStorySlug?: string | null;
+  ownerPackageSlug?: string | null;
   kind: string;
+  title: string;
+  summary: string;
   path?: string;
   generated_from?: string;
+  publish: ExtensionPublish;
+  tags: string[];
+  uses: string[];
+  facts: ExtensionFact[];
+  publishedDocs: ExtensionDoc[];
+}
+
+export interface ExtensionComponentGroup {
+  kind: string;
+  title: string;
+  count: number;
+  components: ExtensionComponent[];
 }
 
 export interface ExtensionLibraryIndex {
@@ -75,13 +111,21 @@ export interface ExtensionLibrary {
   stories: ExtensionStory[];
   standaloneStories: ExtensionStory[];
   components: ExtensionComponent[];
+  componentGroups: ExtensionComponentGroup[];
   docs: ExtensionDoc[];
   stats: {
     packages: number;
     stories: number;
+    components: number;
     publishedDocs: number;
     hostInterfaces: number;
     agents: number;
+    providers: number;
+    toolboxes: number;
+    hooks: number;
+    prompts: number;
+    schemas: number;
+    scripts: number;
     flows: number;
   };
 }
@@ -101,6 +145,22 @@ function asArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }
 
+function asPublish(value: unknown): ExtensionPublish {
+  const raw = String(value || "true");
+  if (raw === "false" || raw === "summary" || raw === "full") return raw;
+  return "true";
+}
+
+function asFacts(value: unknown): ExtensionFact[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((fact: any) => ({
+      label: String(fact?.label || "").trim(),
+      value: String(fact?.value || "").trim(),
+    }))
+    .filter((fact) => fact.label && fact.value);
+}
+
 function assertIndex(index: ExtensionLibraryIndex) {
   if (index.schema !== "kitsoki.extensions-index/v1") {
     throw new Error(`unexpected extension index schema: ${index.schema}`);
@@ -114,6 +174,52 @@ function published(doc: ExtensionDoc): boolean {
   return doc.publish !== "false";
 }
 
+function publishedComponent(component: ExtensionComponent): boolean {
+  return component.publish !== "false";
+}
+
+function uniqueSlug(base: string, seen: Map<string, number>): string {
+  const prior = seen.get(base) ?? 0;
+  seen.set(base, prior + 1);
+  return prior === 0 ? base : `${base}-${prior + 1}`;
+}
+
+function componentGroupTitle(kind: string): string {
+  switch (kind) {
+    case "agent-plugin":
+      return "Agent plugins";
+    case "agent-profile":
+      return "Agent profiles";
+    case "host-interface":
+      return "Host interfaces";
+    case "hook":
+      return "Hooks";
+    case "prompt":
+      return "Prompts";
+    case "provider-profile":
+      return "Provider profiles";
+    case "schema":
+      return "Schemas";
+    case "script":
+    case "starlark-script":
+      return "Starlark scripts";
+    case "story":
+      return "Story contracts";
+    case "story-import":
+      return "Story imports";
+    case "toolbox":
+      return "Toolboxes";
+    case "ui":
+      return "UI entries";
+    default:
+      return kind.replace(/[-_]+/g, " ");
+  }
+}
+
+function countKind(components: ExtensionComponent[], kind: string): number {
+  return components.filter((component) => component.kind === kind).length;
+}
+
 export function loadExtensionLibrary(): ExtensionLibrary {
   if (cache) return cache;
   if (!fs.existsSync(genIndex)) {
@@ -124,30 +230,57 @@ export function loadExtensionLibrary(): ExtensionLibrary {
   const raw = JSON.parse(fs.readFileSync(genIndex, "utf8")) as ExtensionLibraryIndex;
   assertIndex(raw);
 
-  const docs = raw.docs.filter(published).sort((a, b) => a.title.localeCompare(b.title));
+  const docs: ExtensionDoc[] = raw.docs
+    .map((doc: any) => ({
+      id: String(doc.id),
+      owner: String(doc.owner || ""),
+      title: String(doc.title || doc.id),
+      path: doc.path ? String(doc.path) : undefined,
+      generated_from: doc.generated_from ? String(doc.generated_from) : undefined,
+      kind: doc.kind ? String(doc.kind) : undefined,
+      publish: asPublish(doc.publish),
+      tags: asArray(doc.tags),
+    }))
+    .filter(published)
+    .sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
   const docsByID = new Map(docs.map((doc) => [doc.id, doc]));
   const packageSlugs = new Map(raw.packages.map((pkg) => [pkg.id, extensionSlug(pkg.id)]));
 
   const stories: ExtensionStory[] = raw.stories
-    .map((story: any) => ({
-      id: String(story.id),
-      slug: extensionSlug(String(story.id)),
-      package_id: story.package_id ? String(story.package_id) : undefined,
-      packageSlug: story.package_id ? packageSlugs.get(String(story.package_id)) ?? null : null,
-      title: String(story.title || story.id),
-      version: story.version ? String(story.version) : undefined,
-      path: String(story.path || ""),
-      world_keys: asArray(story.world_keys),
-      intents: asArray(story.intents),
-      states: asArray(story.states),
-      agents: asArray(story.agents),
-      agent_plugins: asArray(story.agent_plugins),
-      host_interfaces: asArray(story.host_interfaces),
-      exports: asArray(story.exports),
-      exits: asArray(story.exits),
-      flows: asArray(story.flows),
-    }))
+    .map((story: any) => {
+      const docIDs = asArray(story.docs);
+      return {
+        id: String(story.id),
+        slug: extensionSlug(String(story.id)),
+        package_id: story.package_id ? String(story.package_id) : undefined,
+        packageSlug: story.package_id ? packageSlugs.get(String(story.package_id)) ?? null : null,
+        title: String(story.title || story.id),
+        version: story.version ? String(story.version) : undefined,
+        path: String(story.path || ""),
+        world_keys: asArray(story.world_keys),
+        intents: asArray(story.intents),
+        states: asArray(story.states),
+        agents: asArray(story.agents),
+        toolboxes: asArray(story.toolboxes),
+        providers: asArray(story.providers),
+        agent_plugins: asArray(story.agent_plugins),
+        host_interfaces: asArray(story.host_interfaces),
+        exports: asArray(story.exports),
+        exits: asArray(story.exits),
+        imports: asArray(story.imports),
+        prompts: asArray(story.prompts),
+        schemas: asArray(story.schemas),
+        scripts: asArray(story.scripts),
+        flows: asArray(story.flows),
+        docs: docIDs,
+        publishedDocs: docIDs.map((id) => docsByID.get(id)).filter((doc): doc is ExtensionDoc => !!doc),
+        components: [],
+      };
+    })
     .sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+
+  const storiesByID = new Map(stories.map((story) => [story.id, story]));
+  const storySlugs = new Map(stories.map((story) => [story.id, story.slug]));
 
   const storiesByPackage = new Map<string, ExtensionStory[]>();
   for (const story of stories) {
@@ -174,17 +307,89 @@ export function loadExtensionLibrary(): ExtensionLibrary {
         docs: docIDs,
         publishedDocs: docIDs.map((id) => docsByID.get(id)).filter((doc): doc is ExtensionDoc => !!doc),
         stories: storiesByPackage.get(String(pkg.id)) ?? [],
+        components: [],
       };
     })
     .sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
 
+  const packageSlugByID = new Map(packages.map((pkg) => [pkg.id, pkg.slug]));
+  const componentSlugSeen = new Map<string, number>();
+  const components: ExtensionComponent[] = (raw.components ?? [])
+    .map((component: any) => {
+      const kind = String(component.kind || "component");
+      const id = String(component.id || "");
+      const owner = String(component.owner || "");
+      const componentKey = `${kind}:${id}`;
+      const publishedDocs = docs.filter((doc) => doc.owner === componentKey);
+      return {
+        id,
+        slug: uniqueSlug(extensionSlug(componentKey), componentSlugSeen),
+        componentKey,
+        owner,
+        ownerStorySlug: storySlugs.get(owner) ?? null,
+        ownerPackageSlug: packageSlugByID.get(owner) ?? null,
+        kind,
+        title: String(component.title || id),
+        summary: String(component.summary || "").trim(),
+        path: component.path ? String(component.path) : undefined,
+        generated_from: component.generated_from ? String(component.generated_from) : undefined,
+        publish: asPublish(component.publish),
+        tags: asArray(component.tags),
+        uses: asArray(component.uses),
+        facts: asFacts(component.facts),
+        publishedDocs,
+      };
+    })
+    .filter(publishedComponent)
+    .sort((a, b) => a.kind.localeCompare(b.kind) || a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+
+  const componentsByPackage = new Map<string, ExtensionComponent[]>();
+  for (const component of components) {
+    if (component.ownerPackageSlug) {
+      const bucket = componentsByPackage.get(component.owner) ?? [];
+      bucket.push(component);
+      componentsByPackage.set(component.owner, bucket);
+    }
+    const ownerStory = storiesByID.get(component.owner);
+    if (ownerStory) {
+      ownerStory.components.push(component);
+    }
+    for (const use of component.uses) {
+      if (use === component.owner) continue;
+      const story = storiesByID.get(use);
+      if (story) story.components.push(component);
+    }
+  }
+  for (const pkg of packages) {
+    pkg.components = componentsByPackage.get(pkg.id) ?? [];
+  }
+
+  const grouped = new Map<string, ExtensionComponent[]>();
+  for (const component of components) {
+    const bucket = grouped.get(component.kind) ?? [];
+    bucket.push(component);
+    grouped.set(component.kind, bucket);
+  }
+  const componentGroups = Array.from(grouped.entries())
+    .map(([kind, groupComponents]) => ({
+      kind,
+      title: componentGroupTitle(kind),
+      count: groupComponents.length,
+      components: groupComponents,
+    }))
+    .sort((a, b) => a.title.localeCompare(b.title));
+
   const hostInterfaces = new Set<string>();
   const agents = new Set<string>();
+  const providers = new Set<string>();
+  const toolboxes = new Set<string>();
   let flows = 0;
   for (const story of stories) {
     story.host_interfaces.forEach((x) => hostInterfaces.add(x));
     story.agents.forEach((x) => agents.add(x));
     story.agent_plugins.forEach((x) => agents.add(x));
+    story.providers.forEach((x) => providers.add(x));
+    story.toolboxes.forEach((x) => toolboxes.add(x));
     flows += story.flows.length;
   }
 
@@ -192,14 +397,22 @@ export function loadExtensionLibrary(): ExtensionLibrary {
     packages,
     stories,
     standaloneStories: stories.filter((story) => !story.package_id),
-    components: raw.components ?? [],
+    components,
+    componentGroups,
     docs,
     stats: {
       packages: packages.length,
       stories: stories.length,
+      components: components.length,
       publishedDocs: docs.length,
       hostInterfaces: hostInterfaces.size,
       agents: agents.size,
+      providers: providers.size,
+      toolboxes: toolboxes.size,
+      hooks: countKind(components, "hook"),
+      prompts: countKind(components, "prompt"),
+      schemas: countKind(components, "schema"),
+      scripts: countKind(components, "script") + countKind(components, "starlark-script"),
       flows,
     },
   };
@@ -214,6 +427,11 @@ export function librarySidebar() {
       text: "Packages",
       collapsed: false,
       items: library.packages.map((pkg) => ({ text: pkg.title, link: `/library/packages/${pkg.slug}` })),
+    },
+    {
+      text: "Generated components",
+      collapsed: true,
+      items: library.componentGroups.map((group) => ({ text: `${group.title} (${group.count})`, link: "/library/#generated-components" })),
     },
     {
       text: "Standalone stories",

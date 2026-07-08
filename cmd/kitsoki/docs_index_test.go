@@ -31,7 +31,7 @@ states:
 	if err != nil {
 		t.Fatalf("docs index: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "indexed 0 package(s), 1 story/stories") {
+	if !strings.Contains(out, "indexed 0 package(s), 1 story/stories, 2 component(s)") {
 		t.Fatalf("unexpected output:\n%s", out)
 	}
 	jsonBody, err := os.ReadFile(jsonOut)

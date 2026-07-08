@@ -18,6 +18,7 @@ import DeckViewer from "./components/DeckViewer.vue";
 import ExtensionLibrary from "./components/ExtensionLibrary.vue";
 import ExtensionPackage from "./components/ExtensionPackage.vue";
 import ExtensionStory from "./components/ExtensionStory.vue";
+import ExtensionComponent from "./components/ExtensionComponent.vue";
 import { renderMermaidDiagrams, watchMermaidTheme } from "./mermaid";
 import "./custom.css";
 
@@ -58,5 +59,6 @@ export default {
     app.component("ExtensionLibrary", ExtensionLibrary);
     app.component("ExtensionPackage", ExtensionPackage);
     app.component("ExtensionStory", ExtensionStory);
+    app.component("ExtensionComponent", ExtensionComponent);
   },
 } satisfies Theme;
