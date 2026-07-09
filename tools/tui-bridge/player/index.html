@@ -45,12 +45,32 @@
     .term-dot.r { background: #ff5f57; } .term-dot.y { background: #febc2e; } .term-dot.g { background: #28c840; }
     .term-title {
       margin-left: 8px; color: #94a3b8; font-size: 13px; font-weight: 600;
-      letter-spacing: .01em;
+      letter-spacing: .01em; min-width: 0; flex: 1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .term-badges {
+      margin-left: auto; display: flex; align-items: center; gap: 8px;
+      min-width: 0;
     }
     .term-badge {
-      margin-left: auto; color: #fbbf24; font-size: 11px; font-weight: 700;
+      color: #fbbf24; font-size: 11px; font-weight: 700;
       border: 1px solid #3b3320; background: #221c0a; border-radius: 6px;
       padding: 3px 8px; text-transform: uppercase; letter-spacing: .06em;
+      white-space: nowrap;
+    }
+    .term-badge[hidden] { display: none; }
+    .term-badge--mode {
+      color: #93c5fd; border-color: #1e3a5f; background: #0c1a2f;
+    }
+    .term-badge--warp {
+      color: #111827; border-color: #f59e0b; background: #fbbf24;
+      box-shadow: 0 0 0 1px rgba(251,191,36,.18), 0 0 24px rgba(251,191,36,.28);
+    }
+    .term-badge__chevrons {
+      display: inline-block; margin-right: 6px; letter-spacing: -.02em;
+    }
+    .term-badge__detail {
+      margin-left: 8px; color: #713f12; font-weight: 800; letter-spacing: .04em;
     }
     .term-body { position: absolute; inset: 38px 0 0 0; padding: 10px 12px 12px; }
     #term { height: 100%; }
@@ -67,7 +87,14 @@
       <div class="term-titlebar">
         <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
         <span class="term-title" id="winTitle">kitsoki</span>
-        <span class="term-badge">LIVE</span>
+        <span class="term-badges">
+          <span class="term-badge term-badge--warp" id="warpBadge" hidden>
+            <span class="term-badge__chevrons" aria-hidden="true">»»</span>
+            <span id="warpLabel">FAST FORWARD</span>
+            <span class="term-badge__detail" id="warpDetail">cassette replay</span>
+          </span>
+          <span class="term-badge term-badge--mode" id="modeBadge">REAL TUI</span>
+        </span>
       </div>
       <div class="term-body"><div id="term"></div></div>
     </div>
@@ -96,7 +123,24 @@
     fitAddon.fit();
 
     const statusEl = document.getElementById("status");
+    const warpBadge = document.getElementById("warpBadge");
+    const warpLabel = document.getElementById("warpLabel");
+    const warpDetail = document.getElementById("warpDetail");
     const setStatus = (s) => { statusEl.textContent = s; };
+
+    function setWarpOverlay(state) {
+      const next = state && typeof state === "object" ? state : {};
+      const visible = Boolean(next.visible);
+      if (next.label) warpLabel.textContent = String(next.label);
+      if (next.detail) warpDetail.textContent = String(next.detail);
+      warpBadge.hidden = !visible;
+      document.body.classList.toggle("warp-active", visible);
+      return {
+        visible,
+        label: warpLabel.textContent,
+        detail: warpDetail.textContent,
+      };
+    }
 
     // The bridge address: ?ws=ws://host:port/pty overrides the default, so a
     // single served page can point at any running `kitsoki tui-serve`.
@@ -245,6 +289,12 @@
     window.__scrollToBottom = () => { term.scrollToBottom(); return dumpVisible(); };
     window.__status = () => statusEl.textContent;
     window.__reconnectAttempts = () => reconnectAttempts;
+    window.__setWarpOverlay = setWarpOverlay;
+    window.__warpOverlayState = () => ({
+      visible: !warpBadge.hidden,
+      label: warpLabel.textContent,
+      detail: warpDetail.textContent,
+    });
     window.__ready = true;
 
     connect();
